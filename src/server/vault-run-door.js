@@ -147,6 +147,7 @@ const HAS_PROC_FD = (() => { try { return fs.existsSync('/proc/' + process.pid +
 const VB = require('../vault-blocked.js');
 const SS = require('../secret-shapes.js');
 const HC = require('../hidden-chars.js');
+const SR = require('../store-read.js');   // PURE (B-f276): what ONE read of a store answers — B-a14b: the grant ends read at the start
 const DOOR = require('../mount-door.js');   // B-afc4: a blocked storage path is answered by name, never read (a cwd, a tool, a template)
 const PI = require('../proc-identity.js');   // a run folder's hub: its identity, never a bare pid (the boot sweep)
 const VUG = require('../vault-use-grant.js');   // lane vault-use-grants: PURE — a standing approval's verdict and the card's words
@@ -372,6 +373,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   lowerImpl = lowerRun,   // B-7f18: the run's child set `by` below the hub (a suite's seam)
   timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
   useGrants = null, useFacts = () => null, groupNameOf = null,   // the chain's cure (B): a group id → its belted name (tasks.lineageNameOf)
+  writer = null,   // B-a14b: the grant ends' store writer (THE store writer when none is handed in)
   entryMax = 256,   // B-be21: the run list's bound (a suite seam — the product keeps 256)
   notice = () => 0,   // r7: server.js serverNotice (key, text, {level, i18n}) → how many open clients got it — the 1-hour window's per-use toast
   policyJudge = null, policyOn = () => false,   // lane vault-use-grants (R4): (parts, {policy, memo}) → the decision engine's judge answer; the switch vault.policyJudge   // lane vault-use-grants: the vault-use writer (src/server/vault-use-grants.js) + a caller's admission facts ({conversationKeys, groupIds, groupsUnreadable})
@@ -409,25 +411,63 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  once-grant's run ('used'), its 8 hours ('time'), a restart (the vault locks at each start: 'restart') — through the
    *  store's noteFact (the first end stands). The card, the tray and the window read it through foryou-actions grantLifeOf. */
   const endTimers = new Map();   // pair → the timer that ends the grant at its `until`
-  /** B-a14b: THE GRANTS THAT ENDED, per conversation × entry — memory only, ≤ ENDED_MAX, read back for ENDED_MS: the run after
-   *  an end says the end (grant_expired, VR.endedWhy), `uses` lists them («ended», how to ask again); a new grant of the pair or
-   *  the owner's switch-off (its own words: entry_not_runnable) drops the record. A restart forgets them (the vault locks then). */
+  /** B-a14b: THE GRANTS THAT ENDED, per conversation × entry — ≤ ENDED_MAX, read back for ENDED_MS: the run after an end says the
+   *  end (grant_expired, VR.endedWhy), `uses` lists them («ended», how to ask again); a new grant of the pair or the owner's
+   *  switch-off (its own words: entry_not_runnable) drops the record. 主开发 r542: a RESTART KEEPS THEM — data/vault-grant-ends.json
+   *  (no value: a conversation, an entry id, when, how, the purpose's words), written through THE store writer (0600, paced) and read
+   *  once at the start through THE STORE READ: bytes that do not parse are set aside (dated, never written over) and it starts
+   *  empty; a READ that fails is held until the next start — nothing is written over it (the ends stay in memory, said once). */
   const ENDED_MS = 24 * 3600e3, ENDED_MAX = 200, ENDS_SAID = new Set(['time', 'used', 'lock']);
   const endedGrants = new Map();
+  const ENDS_FILE = path.join(dataDir, 'vault-grant-ends.json');
+  const ENDS_VALID = (d) => !!d && typeof d === 'object' && Array.isArray(d.ends);
+  let endsHeld = false, endsAside = null;   // endsAside: a set-aside rename in flight — the saves wait for it
+  {
+    let read;
+    try { read = { text: readBounded(ENDS_FILE, STORE_MAX).toString('utf8') }; } catch (e) { read = { error: e }; }
+    let a = SR.storeAnswer(read, { valid: ENDS_VALID });
+    if (a.state === 'corrupt') {
+      const to = `vault-grant-ends.json.corrupt-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${crypto.randomBytes(3).toString('hex')}`;
+      endsAside = fs.promises.rename(ENDS_FILE, path.join(dataDir, to)).then(() => { log(`data/vault-grant-ends.json did not parse — set aside as data/${to} (its bytes kept); the ends start empty`); }, (e) => { if (e && e.code === 'ENOENT') return; endsHeld = true; log(`data/vault-grant-ends.json did not parse and could NOT be set aside (${(e && e.code) || e}) — held: never written over`); }).finally(() => { endsAside = null; });   // ENOENT: gone meanwhile — nothing to keep
+      a = SR.afterSetAside(a, to);
+    }
+    if (a.state === 'unreadable') { endsHeld = true; log(`data/vault-grant-ends.json could not be read (${a.why}) — held until the next start: the ends stay in memory, nothing is written over it`); }
+    if (a.state === 'data') {
+      const t0 = now();
+      for (const e of a.value.ends) {
+        if (!e || typeof e !== 'object' || typeof e.conv !== 'string' || typeof e.id !== 'string' || !ENDS_SAID.has(e.endedBy) || !(t0 - Number(e.endedAt) <= ENDED_MS)) continue;
+        if (e.conv.length > 200 || e.id.length > 400) continue;   // a record kept WHOLE or not at all — ONE string for its key and its fields (wl932b4e8): a cut would put two pairs under one key
+        const conv = e.conv, id = e.id;
+        endedGrants.set(`${conv}\n${id}`, { conv, id, endedAt: Number(e.endedAt), endedBy: e.endedBy, once: !!e.once, purpose: SS.redactSecrets(String(e.purpose || '')).text.slice(0, 400), grantAt: Number(e.grantAt) || 0 });   // the pair's key, as pairOf spells it; the purpose through the request's own belt FIRST, then cut (a value across the cut is whole for the belt)
+      }
+      while (endedGrants.size > ENDED_MAX) endedGrants.delete(endedGrants.keys().next().value);
+    }
+  }
+  /** the ends → their file, paced (the writer reads them when the write is due); held ⇒ nothing is written */
+  function endsSave() {
+    if (endsHeld) return;
+    if (endsAside) { endsAside.then(() => endsSave(), () => { }); return; }
+    try {
+      const w = writer || require('../store-writer.js').storeWriter();
+      w.dirty(ENDS_FILE, { name: 'vault-grant-ends.write', produce: () => JSON.stringify({ v: 1, ends: [...endedGrants.values()].filter((e) => now() - e.endedAt <= ENDED_MS) }), mode: 0o600 });
+    } catch (e) { log(`the grant ends could not be handed to the writer (${e.message})`); }
+  }
   const offAt = new Map();   // entry id → when the owner last switched it OFF (≤ ENDED_MAX): an end of a grant given BEFORE that OFF is not the news
   function noteEnded(g, endedBy, endedAt) {
     if (!g || !g.conv || !Array.isArray(g.entries) || !g.entries.length || !ENDS_SAID.has(endedBy)) return;
     for (const id of g.entries) {
+      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;   // the owner switched it OFF after this approval: the OFF is the news (its own words), never an end said after a restart
       const p = pairOf(g.conv, id);
       endedGrants.delete(p);
       endedGrants.set(p, { conv: g.conv, id, endedAt: Number(endedAt) || now(), endedBy, once: !!g.once, purpose: g.purpose || '', grantAt: Number(g.at) || 0 });
     }
     while (endedGrants.size > ENDED_MAX) endedGrants.delete(endedGrants.keys().next().value);   // the oldest end goes first
+    endsSave();
   }
   function endedOf(scope, id) {
     const e = endedGrants.get(pairOf(scope, id));
     if (!e) return null;
-    if (now() - e.endedAt > ENDED_MS) { endedGrants.delete(pairOf(scope, id)); return null; }
+    if (now() - e.endedAt > ENDED_MS) { endedGrants.delete(pairOf(scope, id)); endsSave(); return null; }
     return e;
   }
   function grantEnded(g, endedBy, t = now()) {
@@ -435,14 +475,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // firing later (it stays armed) must not write «its 8 hours ran out» over «revoked» / «used»
     if (g && g.endedBy) return;
     if (g && typeof g === 'object') g.endedBy = endedBy;
-    noteEnded(g, endedBy, endedBy === 'time' ? g && g.until : Math.min(t, Number(g && g.until) || t));
+    const endAt = endedBy === 'time' ? g && g.until : endedBy === 'used' && g && g.spentAt ? g.spentAt : Math.min(t, Number(g && g.until) || t);   // «used» at the run that spent it (B-a14b)
+    noteEnded(g, endedBy, endAt);
     if (!g || !g.todoId || !userTodos || typeof userTodos.noteFact !== 'function') return;
-    try { userTodos.noteFact(g.todoId, { endedAt: endedBy === 'time' ? g.until : Math.min(t, Number(g.until) || t), endedBy }); } catch { }
+    try { userTodos.noteFact(g.todoId, { endedAt: endAt, endedBy }); } catch { }
   }
   function armGrantEnd(pair, g, onEnd = () => { if (grants.get(pair) === g) grants.delete(pair); }) {
     const old = endTimers.get(pair);
     if (old) { try { timers.clear(old); } catch { } }
-    const h = timers.set(() => { endTimers.delete(pair); onEnd(); grantEnded(g, 'time'); }, Math.max(0, Number(g.until) - now()));   // ≤ 8 hours (a 30-day «always» is read by its `until` — no timer that long)
+    const h = timers.set(() => { endTimers.delete(pair); onEnd(); grantEnded(g, g && g.spent ? 'used' : 'time'); }, Math.max(0, Number(g.until) - now()));   // B-a14b: a once-grant a run SPENT and still runs on: its end is «used», never «ran out»   // ≤ 8 hours (a 30-day «always» is read by its `until` — no timer that long)
     try { h && h.unref && h.unref(); } catch { }
     endTimers.set(pair, h);
   }
@@ -814,7 +855,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
-    if (!on) { for (const [p, e] of endedGrants) if (e.id === key) endedGrants.delete(p); offAt.delete(key); offAt.set(key, now()); while (offAt.size > ENDED_MAX) offAt.delete(offAt.keys().next().value); }   // B-a14b: the owner's OFF is its own news (entry_not_runnable) — and an end of a grant given before it never speaks over it
+    if (!on) { for (const [p, e] of endedGrants) if (e.id === key && endedGrants.delete(p)) endsSave(); offAt.delete(key); offAt.set(key, now()); while (offAt.size > ENDED_MAX) offAt.delete(offAt.keys().next().value); }   // B-a14b: the owner's OFF is its own news (entry_not_runnable) — and an end of a grant given before it never speaks over it
     if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
     if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) { shortAlways.delete(p); grantEnded(x, 'revoked'); } for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) { grants.delete(p); grantEnded(x, 'revoked'); } }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation; r6: each grant's record says «revoked»)
     const r = save({ runnable, suspended, always, opened, touched });
@@ -1292,7 +1333,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     for (const [k, p] of [...hostPasses]) if (p && p.id === key) { hostPasses.delete(k); dropped++; }
     for (const [pair, lp] of [...lateOnce]) if (lp && (lp.entries || []).includes(key)) { lateOnce.delete(pair); dropped++; }
     for (const lq of [...lateAsks.values()]) if ((lq.entries || []).includes(key)) { removeLate(lq, 'ask-over', 'vault'); dropped++; }
-    for (const [p, e] of [...endedGrants]) if (e && e.id === key) endedGrants.delete(p);
+    let gone = 0; for (const [p, e] of [...endedGrants]) if (e && e.id === key && endedGrants.delete(p)) gone++;
+    if (gone) endsSave();
     return { ok: true, dropped };
   }
   /** The owner answers a LATE card (src/routes/vault.js, people only). `once` writes a one-run pass the next identical run consumes (no reauth — «allow once» never needed it, and a late card offers no «always»); `deny` settles it; a locked vault is vault_locked as today. */
@@ -1755,7 +1797,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
       if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
       audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}), changes: auditChangesOf(so.changes) });   // r4 (D): what the write added, replaced and ended — the write's own result, never the card's guess
-      endedGrants.delete(q.quietPair);   // B-a14b: a standing approval of the pair — the old end is no longer the news; r13 should: keyed as the record is, the SCOPE × the entry (q.quietPair = pairOf(scope, id)) — q.conv is the conversation's own id, which a fork's scope is not
+      if (endedGrants.delete(q.quietPair)) endsSave();   // B-a14b: a standing approval of the pair — the old end is no longer the news; r13 should: keyed as the record is, the SCOPE × the entry (q.quietPair = pairOf(scope, id)) — q.conv is the conversation's own id, which a fork's scope is not
       settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor: 'standing', until: null });
       return { ok: true, outcome: 'granted', grantedFor: 'standing', grant: so.grants[0] || null };
     }
@@ -1764,7 +1806,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (prev) grantEnded(prev, 'replaced', t);
     const g = { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose, todoId: q.todoId || null };
     grants.set(q.pair, g);
-    endedGrants.delete(q.pair);   // B-a14b: a new approval of the pair — the old end is no longer the news
+    if (endedGrants.delete(q.pair)) endsSave();   // B-a14b: a new approval of the pair — the old end is no longer the news
     armGrantEnd(q.pair, g);
     audit('vault-grant', { ...said, answer: a, until });
     // r4: the item says which of its verbs. r6 (主开发: «an answer never carries a value an old reader cannot name»): the
@@ -1810,6 +1852,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const t = now(), mine = [];
     for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); grantEnded(g, 'time'); continue; } if (g.conv === scope) mine.push(g); }
     const dOn = load(), onNowOf = (id) => !!(dOn && !dOn.refused && dOn.runnable.has(id));   // B-a14b: switched ON now
+    // B-a14b (主开发 r542): USABLE NOW BY THIS CONVERSATION — the entry ON and, when a PRESS opened it, THIS conversation's member
+    // resumed (memberUsable: the list's and the judge's one fact); a member the press did not resume is paused — its end is the news
+    const heldHere = new Map();
+    if (useGrants && caller.conversationId) { try { const uf = useFacts(caller) || {}; for (const h of useGrants.heldBy({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])].filter(Boolean).map(String))] }) || []) if (h && h.id) heldHere.set(h.id, h.grant); } catch { } }
+    const usableHere = (id) => onNowOf(id) && !(pressOpened(dOn, id) && heldHere.has(id) && !memberUsable(dOn, id, heldHere.get(id)));
     const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
     const wordsOfId = (id) => { const r = VI.parseRef(id), row = r && rowOf(r); if (!row) return {}; const ew = wordsOfRow(row); return { name: ew.name, ...(ew.note ? { note: ew.note } : {}) }; };   // lane vault-entry-description
     return {
@@ -1820,7 +1867,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       standing: standingOf(caller),   // lane vault-standing-request: the STANDING grants this conversation holds — «standing · <scope> · since <when>»
       // B-a14b: the approvals of this conversation that ENDED in the last 24 h — newest first — so an agent never reads a gone
       // approval as a bug: how it ended, when, and the request that asks again
-      ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !onNowOf(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry switched ON — or held by a standing grant, which needs the switch — is usable: never «ask again»)
+      ended: [...endedGrants.values()].filter((e) => e.conv === scope && t - e.endedAt <= ENDED_MS && !mine.some((g) => g.entries.includes(e.id)) && !usableHere(e.id) && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)).sort((a, b) => b.endedAt - a.endedAt)   // (an entry THIS conversation can use now — ON, and its member resumed where a press opened it — is never «ask again»; B-a14b)
         .map((e) => ({ entry: refOfId(e.id), ...wordsOfId(e.id), endedBy: e.endedBy, endedAt: new Date(e.endedAt).toISOString(), once: e.once, purpose: e.purpose })),
       uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],
     };
@@ -2277,12 +2324,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (grants.get(a.pair) !== a.g || !(a.g.until > now())) { note('use_not_granted', head); return named('use_not_granted'); }
         if (a.g.once) spent.push(a);
       }
-      for (const a of spent) grants.delete(a.pair);
+      for (const a of spent) { grants.delete(a.pair); a.g.spent = true; a.g.spentAt = now(); }
       // L3 (int331) + round 14: a once-grant is spent only when a child RAN — restore it when nothing ran (entry_unknown / too-short
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
       const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed']);
-      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned && lockGen === lg0 && vaultState() === 'unlocked') { for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); giveBackLate(); } else if (!burned) for (const a of spent) grantEnded(a.g, 'used'); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
+      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; }   // nothing ran: not spent. Across a lock it is not given back (below): it was out of `grants` when onLocked ended the live ones and cleared every end timer — so it ENDS here «lock», as each grant the lock ended (its For-you record and `uses` say so)
+      if (burned && lockGen === lg0 && vaultState() === 'unlocked') { for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); giveBackLate(); } else for (const a of spent) grantEnded(a.g, burned ? 'lock' : 'used'); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
       if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" })); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
       const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName });

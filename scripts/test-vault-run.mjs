@@ -1136,15 +1136,220 @@ console.log('⑩ THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — desig
     ok(fe.offList === 0 && fe.offRun === 'entry_not_runnable', 'the owner switched the entry OFF, then the grant\'s 8-hour timer fired ⇒ no «ended» record (the OFF stands: entry_not_runnable, never «the entry was not switched off»)', fe);
     ok(fe.ranOnce && fe.usedBy === 'used', 'a once-grant spent by its run, then its timer fired ⇒ the end stays «its one run was used»', fe);
     const SRCf = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8'), g0 = '    if (g && g.endedBy) return;\n';
-    const mf = SRCf.split(g0).length === 2 ? M.load('src/server/vault-run-door.js', SRCf.replace(g0, ''), 'firstend') : null;
+    const mf = SRCf.split(g0).length === 2 ? M.load('src/server/vault-run-door.js', anchored(SRCf.replace(g0, ''), "grantEnded(g, g && g.spent ? 'used' : 'time')", "grantEnded(g, 'time')", 'test-vault-run B-a14b: the first shape — no guard, the timer says time'), 'firstend') : null;   // B-a14b: a spent once-grant's timer says «used» by itself now — the batch's first shape is BOTH (no guard, the timer's «time»)
     const fr = mf ? await firstEnd(mf) : null;
     ok(!!(mf && fr && fr.usedBy === 'time'), 'RED control: no first-end guard (the batch\'s first shape) ⇒ the timer writes «its 8 hours ran out» over the spent run', fr);
     // the OFF half takes BOTH guards away: the first-end guard AND the list's «an OFF after the approval is the owner's news» —
     // either alone keeps the OFF from reading as «ran out» (the restack's tb run showed the one-guard mutant listing nothing there)
     const f0 = " && !(dOn && dOn.suspended && dOn.suspended.has(e.id) && (offAt.get(e.id) || 0) >= e.grantAt)";
-    const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', SRCf.replace(g0, '').replace(f0, ''), 'firstend-off') : null;
+    const mf2 = SRCf.split(g0).length === 2 && SRCf.split(f0).length === 2 ? M.load('src/server/vault-run-door.js', anchored(SRCf.replace(g0, '').replace(f0, ''), "      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;", '', 'test-vault-run B-a14b: no OFF skip at the record'), 'firstend-off') : null;   // B-a14b: the OFF after the approval is skipped at the RECORD too now — the third guard taken away with the two
     const fr2 = mf2 ? await firstEnd(mf2) : null;
     ok(!!(mf2 && fr2 && fr2.offList === 1), 'RED control: no first-end guard AND no «an OFF after the approval» filter ⇒ the timer\'s «its 8 hours ran out» is listed over the owner\'s OFF', fr2);
+    // B-a14b (主开发 r542) 1: a ONCE-grant a run SPENT and still runs on when its 8 hours end ⇒ its end is «used» (the run took it),
+    // never «its 8 hours ran out» — the timer fired WHILE the run ran (a run held open: the printer's `sleep`, ended by its caller
+    // going away). RED: the timer that says «time» for a spent once-grant (the release)
+    const SRCa = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+    const longRun = async (mod) => {
+      const wl = await world(), heldL = [];
+      wl.door = wl.mk(mod, { timers: { set: (fn, ms) => { heldL.push({ fn, ms }); return heldL.length; }, clear: () => { } } });
+      const ql = wl.door.request({ caller: c8, entry: M1, purpose: 'one long upload' });
+      wl.door.answerRequest(ql.askId, { answer: 'once', reauthed: true, person: true });
+      const ac = new AbortController(), pidF = path.join(wl.work, 'long.pid');
+      const pr = wl.door.run({ caller: c8, args: ['--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'sleep', pidF], cwd: wl.work, signal: ac.signal });
+      const c0 = await waitCard(wl); if (c0) wl.door.answer(c0.action.askId, { answer: 'once' });   // the run's new shape draws its card (as runAnswered answers it)
+      for (let k = 0; k < 1000 && !fs.existsSync(pidF); k++) await sleep(10);   // the child RAN (its pid written) — the run is in flight (bound 10 s: a loaded box)
+      const running = fs.existsSync(pidF);
+      for (const h of heldL.filter((x) => x.ms > 3600e3)) h.fn();   // its 8 hours end now, while the run that spent it runs on
+      const mid = (wl.door.usesFor(c8).ended[0] || {}).endedBy || null;
+      ac.abort(); const rr = await pr;
+      return { running, mid, after: (wl.door.usesFor(c8).ended[0] || {}).endedBy || null, code: rr.code };
+    };
+    const lr = await longRun(DOOR);
+    ok(lr.running && lr.mid === 'used' && lr.after === 'used', `B-a14b: a once-grant SPENT by a run that outlives its 8 hours ends «used» (the timer fired mid-run), never «ran out» — ${JSON.stringify(lr)}`, lr);
+    const mlr = M.load('src/server/vault-run-door.js', anchored(SRCa, "grantEnded(g, g && g.spent ? 'used' : 'time')", "grantEnded(g, 'time')", 'test-vault-run B-a14b: the timer says time'), 'a14b-time');
+    const lrr = await longRun(mlr);
+    ok(lrr.running && lrr.mid === 'time', `RED control: the timer that says «time» for a spent once-grant ⇒ «its 8 hours ran out» over the run that used it — ${JSON.stringify(lrr)}`, lrr);
+    // B-a14b 3: A RESTART KEEPS THE ENDS — an end written (data/vault-grant-ends.json, through the store writer: its own durable()
+    // is the wait), then a NEW door over the same data (a restart) lists it; bytes that do not parse are set aside, never written
+    // over. REDs: the ends kept in memory only (the release); a corrupt file read as empty and written over
+    const SW = R('src/store-writer.js').storeWriter();
+    const restartLeg = async (mod) => {
+      const wr = await world(), heldR = [];
+      wr.door = wr.mk(mod, { timers: { set: (fn, ms) => { heldR.push({ fn, ms }); return heldR.length; }, clear: () => { } } });
+      const qr = wr.door.request({ caller: c8, entry: M1, purpose: 'nightly backup' });
+      wr.door.answerRequest(qr.askId, { answer: '8h', reauthed: true, person: true });
+      for (const h of heldR.filter((x) => x.ms > 3600e3)) h.fn();   // its 8 hours end
+      const before = wr.door.usesFor(c8).ended.length;
+      const landed = await SW.durable(path.join(wr.dataDir, 'vault-grant-ends.json'));
+      wr.door = wr.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART: a new door over the same data
+      const e0 = wr.door.usesFor(c8).ended[0] || null;
+      return { before, landed, file: fs.existsSync(path.join(wr.dataDir, 'vault-grant-ends.json')), afterRestart: e0 ? { endedBy: e0.endedBy, purpose: e0.purpose, entry: e0.entry } : null };
+    };
+    const rs = await restartLeg(DOOR);
+    ok(rs.before === 1 && rs.landed && rs.file && rs.afterRestart && rs.afterRestart.endedBy === 'time' && rs.afterRestart.purpose === 'nightly backup' && rs.afterRestart.entry === M1,
+      `B-a14b: A RESTART KEEPS THE ENDS — the end written through the store writer, a new door over the same data lists it (how, its purpose) — ${JSON.stringify(rs)}`, rs);
+    const mrs = M.load('src/server/vault-run-door.js', anchored(SRCa, 'w.dirty(ENDS_FILE, {', 'void (ENDS_FILE, {', 'test-vault-run B-a14b: ends in memory only'), 'a14b-memory');
+    const rsr = await restartLeg(mrs);
+    ok(rsr.before === 1 && !rsr.afterRestart, `RED control: the ends kept in memory only (the release) ⇒ a restart forgets the end — ${JSON.stringify(rsr)}`, rsr);
+    const corruptLeg = async (mod) => {
+      const wc = await world(), f = path.join(wc.dataDir, 'vault-grant-ends.json'), bytes = '{ "ends": [ not json';
+      fs.writeFileSync(f, bytes, { mode: 0o600 });
+      const heldC = [];
+      wc.door = wc.mk(mod, { timers: { set: (fn, ms) => { heldC.push({ fn, ms }); return heldC.length; }, clear: () => { } } });
+      const asideOf = () => fs.readdirSync(wc.dataDir).filter((n) => n.startsWith('vault-grant-ends.json.corrupt-'));
+      const fileNow = () => { try { return JSON.parse(fs.readFileSync(f, 'utf8')).ends.length; } catch { return null; } };
+      const qc = wc.door.request({ caller: c8, entry: M1, purpose: 'after the corrupt file' });
+      wc.door.answerRequest(qc.askId, { answer: '8h', reauthed: true, person: true });
+      for (const h of heldC.filter((x) => x.ms > 3600e3)) h.fn();
+      for (let k = 0; k < 1000 && fileNow() === null; k++) await sleep(10);   // the next end handed to the writer (after the set-aside's rename) and landed — what both roads come to
+      await SW.durable(f);
+      const a = asideOf();
+      return { asides: a.length, keptBytes: a.length === 1 && fs.readFileSync(path.join(wc.dataDir, a[0]), 'utf8') === bytes, fileNow: fileNow() };
+    };
+    const cr = await corruptLeg(DOOR);
+    ok(cr.asides === 1 && cr.keptBytes && cr.fileNow === 1, `B-a14b: bytes that do not parse are set aside under a dated name (kept), the ends start empty and the next end is written fresh — ${JSON.stringify(cr)}`, cr);
+    const mcr = M.load('src/server/vault-run-door.js', anchored(SRCa, "    if (a.state === 'corrupt') {\n      const to = `vault-grant-ends.json.corrupt-", "    if (false) {\n      const to = `vault-grant-ends.json.corrupt-", 'test-vault-run B-a14b: corrupt read as empty'), 'a14b-corrupt');
+    const crr = await corruptLeg(mcr);
+    ok(crr.asides === 0 && crr.fileNow === 1, `RED control: a corrupt ends file read as empty ⇒ its bytes written over by the next end (nothing set aside) — ${JSON.stringify(crr)}`, crr);
+    // the fold's read: a PLANTED ends file — a record is kept WHOLE or not at all (a conversation past its bound is not loaded: cut,
+    // it would sit under another conversation's key and show that conversation its words), and the purpose passes the request's
+    // own belt BEFORE its cut (a value written into a purpose by hand never comes back from the file). REDs: the cut; no belt
+    const TOKP = ['gh', 'p_zyxwvutsrqponmlkjihgfedcba9876543210'].join('');   // a token shape built at runtime (the secret scan)
+    const plantLeg = async (mod) => {
+      const wp = await world(), t0 = Date.now(), S = 'w'.repeat(200), cS = { ...c8, scope: S };
+      const rec = (conv, purpose, endedBy) => ({ conv, id: 'mounts:m1#secretKey', endedAt: t0 - 60e3, endedBy, once: true, purpose, grantAt: t0 - 120e3 });
+      fs.writeFileSync(path.join(wp.dataDir, 'vault-grant-ends.json'), JSON.stringify({ v: 1, ends: [rec(S, 'this conversation words', 'time'), rec(S + 'x', 'another conversation words', 'used'), rec(c8.scope, 'paste ' + TOKP + ' here', 'time')] }), { mode: 0o600 });
+      wp.door = wp.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // the start reads the planted file
+      const mine8 = wp.door.usesFor(c8).ended[0] || {};
+      return { listedS: wp.door.usesFor(cS).ended.map((e) => `${e.endedBy}:${e.purpose}`), valueBack: String(mine8.purpose || '').includes(TOKP), head8: String(mine8.purpose || '').slice(0, 6) };   // the value itself never printed
+    };
+    const pl = await plantLeg(DOOR);
+    ok(pl.listedS.join('|') === 'time:this conversation words' && !pl.valueBack && pl.head8 === 'paste ', `the fold read: a planted ends file — a record past its bound not loaded (this conversation sees its own words only), a value in a purpose comes back belted — ${JSON.stringify(pl)}`, pl);
+    const mpl = M.load('src/server/vault-run-door.js', anchored(SRCa, "        if (e.conv.length > 200 || e.id.length > 400) continue;", "        e.conv = e.conv.slice(0, 200); e.id = e.id.slice(0, 400);", 'test-vault-run the fold read: the cut'), 'a14b-plant-cut');
+    const plr = await plantLeg(mpl);
+    ok(plr.listedS.join('|') === 'used:another conversation words', `RED control: the record cut to its bound ⇒ another conversation's end sits under this one's key and says its words here — ${JSON.stringify(plr)}`, plr);
+    const mpl2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "purpose: SS.redactSecrets(String(e.purpose || '')).text.slice(0, 400),", "purpose: String(e.purpose || '').slice(0, 400),", 'test-vault-run the fold read: no belt'), 'a14b-plant-belt');
+    const plr2 = await plantLeg(mpl2);
+    ok(plr2.valueBack, `RED control: the loaded purpose without the belt ⇒ the value written into it comes back — ${JSON.stringify(plr2)}`, plr2);
+    // …a store whose READ fails (no permission: mode 000) is HELD until the next start: the ends stay in memory, nothing is written
+    // over it (src/store-read.js). RED: a held read that lets the writer write (the file replaced). Root reads a mode-000 file: said, not judged
+    const heldLeg = async (mod) => {
+      const wh = await world(), f = path.join(wh.dataDir, 'vault-grant-ends.json'), bytes = '{"v":1,"ends":[]}';
+      fs.writeFileSync(f, bytes, { mode: 0o600 }); fs.chmodSync(f, 0o000);
+      const heldH = [];
+      wh.door = wh.mk(mod, { timers: { set: (fn, ms) => { heldH.push({ fn, ms }); return heldH.length; }, clear: () => { } } });
+      const qh = wh.door.request({ caller: c8, entry: M1, purpose: 'past a held store' });
+      wh.door.answerRequest(qh.askId, { answer: '8h', reauthed: true, person: true });
+      for (const h of heldH.filter((x) => x.ms > 3600e3)) h.fn();
+      await SW.durable(f);
+      const st = fs.statSync(f);
+      const out = { listed: wh.door.usesFor(c8).ended.length, modeKept: (st.mode & 0o777) === 0, sizeKept: st.size === bytes.length };
+      fs.chmodSync(f, 0o600);
+      return out;
+    };
+    if (process.getuid && process.getuid() === 0) console.log('  · B-a14b held store: not judged — root reads a mode-000 file');
+    else {
+      const hl = await heldLeg(DOOR);
+      ok(hl.listed === 1 && hl.modeKept && hl.sizeKept, `B-a14b: an ends store whose read fails is HELD — the end said from memory, the file never written over — ${JSON.stringify(hl)}`, hl);
+      const mhl = M.load('src/server/vault-run-door.js', anchored(SRCa, "    if (a.state === 'unreadable') { endsHeld = true;", "    if (a.state === 'unreadable') { endsHeld = false;", 'test-vault-run B-a14b: a held read written over'), 'a14b-held');
+      const hlr = await heldLeg(mhl);
+      ok(!hlr.modeKept, `RED control: a held read that lets the writer write ⇒ the unreadable file replaced — ${JSON.stringify(hlr)}`, hlr);
+    }
+    // wl932b4e8 (主开发 r750) 3a: «used» is DATED AT THE SPEND — on the door's own clock the run takes the grant a minute after the
+    // approval, and the 8-hour timer (held by the leg, fired by hand an hour after the spend) ends it: the end's instant is the
+    // spend's, never the approval's or the timer's. REDs: the end dated at the timer; dated at the approval (the fold's read)
+    let heldPid = 0;
+    const runHeld = async (wl, beforeRun = () => { }) => {
+      const ql = wl.door.request({ caller: c8, entry: M1, purpose: 'one long upload' });
+      wl.door.answerRequest(ql.askId, { answer: 'once', reauthed: true, person: true });
+      beforeRun();   // (the dated leg moves the door's clock here: the approval's instant is not the spend's)
+      const ac = new AbortController(), pidF = path.join(wl.work, `held-${++heldPid}.pid`);
+      const pr = wl.door.run({ caller: c8, args: ['--env', 'T=vault://mounts/m1/secretKey', '--', NODE, PRINTER, 'sleep', pidF], cwd: wl.work, signal: ac.signal });
+      const c0 = await waitCard(wl); if (c0) wl.door.answer(c0.action.askId, { answer: 'once' });
+      for (let k = 0; k < 1000 && !fs.existsSync(pidF); k++) await sleep(10);   // the child RAN — the grant is spent
+      return { ac, pr, running: fs.existsSync(pidF) };
+    };
+    const datedLeg = async (mod) => {
+      const wd = await world(), heldD = [], clk = { t: Date.now() };
+      wd.door = wd.mk(mod, { now: () => clk.t, timers: { set: (fn, ms) => { heldD.push({ fn, ms }); return heldD.length; }, clear: () => { } } });
+      const approvedAt = clk.t; let spentAt = null;
+      const h = await runHeld(wd, () => { clk.t += 60e3; spentAt = clk.t; });   // a minute after the approval the run takes it
+      clk.t += 3600e3;   // an hour after the spend on the door's clock: the leg fires the 8-hour timer it holds
+      for (const x of heldD.filter((y) => y.ms > 3600e3)) x.fn();
+      const e = wd.door.usesFor(c8).ended[0] || {};
+      h.ac.abort(); await h.pr;
+      return { running: h.running, endedBy: e.endedBy || null, endedAt: e.endedAt ? Date.parse(e.endedAt) : null, approvedAt, spentAt, timerAt: clk.t };
+    };
+    const dl = await datedLeg(DOOR);
+    ok(dl.running && dl.endedBy === 'used' && dl.endedAt === dl.spentAt && dl.endedAt > dl.approvedAt && dl.endedAt < dl.timerAt, `wl932b4e8: «used» is DATED AT THE SPEND (the run's instant — after the approval's, before the timer's) — ${JSON.stringify(dl)}`, dl);
+    const mdl = M.load('src/server/vault-run-door.js', anchored(SRCa, "endedBy === 'used' && g && g.spentAt ? g.spentAt : ", '', 'test-vault-run wl932b4e8: «used» dated at the timer'), 'a14b-dated');
+    const dlr = await datedLeg(mdl);
+    ok(dlr.running && dlr.endedBy === 'used' && dlr.endedAt === dlr.timerAt, `RED control: «used» dated at the timer ⇒ the end says the run used it an hour after it did — ${JSON.stringify(dlr)}`, dlr);
+    const mdl2 = M.load('src/server/vault-run-door.js', anchored(SRCa, "endedBy === 'used' && g && g.spentAt ? g.spentAt : ", "endedBy === 'used' && g && g.spentAt ? g.at : ", 'test-vault-run the fold read: «used» dated at the approval'), 'a14b-dated-at');
+    const dlr2 = await datedLeg(mdl2);
+    ok(dlr2.running && dlr2.endedBy === 'used' && dlr2.endedAt === dlr2.approvedAt && dlr2.endedAt !== dlr2.spentAt, `RED control: «used» dated at the approval ⇒ the end says a minute before the run took it — ${JSON.stringify(dlr2)}`, dlr2);
+    // 3b: a BURNED run (nothing ran — its run directory cannot be made: the world's run root unwritable for that one run ⇒
+    // spawn_failed, after the spend) clears the mark — the once-grant given back carries no «spent» (judged on the grant itself; the
+    // timer's end said as a fact). RED: the mark kept — its timer would say «used» for a run that never ran. Root writes anywhere: said, not judged
+    const burnedLeg = async (mod) => {
+      const wb2 = await world(), heldB2 = [];
+      wb2.door = wb2.mk(mod, { timers: { set: (fn, ms) => { heldB2.push({ fn, ms }); return heldB2.length; }, clear: () => { } } });
+      const qb2 = wb2.door.request({ caller: c8, entry: M1, purpose: 'a run that burns' });
+      wb2.door.answerRequest(qb2.askId, { answer: 'once', reauthed: true, person: true });
+      fs.chmodSync(wb2.runRoot, 0o500);
+      let code = null;
+      try { code = (await runAnswered(wb2, ENV('env'), { caller: c8 })).r.code; } finally { fs.chmodSync(wb2.runRoot, 0o700); }
+      const back = [...wb2.door._grants.values()].filter((g) => g.conv === c8.scope && g.once);   // the once-grant the burned run gave back
+      const mark = back.map((g) => ({ spent: g.spent === true, spentAt: g.spentAt != null }));
+      for (const x of heldB2.filter((y) => y.ms > 3600e3)) x.fn();
+      return { code, givenBack: back.length === 1, mark, endedBy: (wb2.door.usesFor(c8).ended[0] || {}).endedBy || null };   // endedBy: a fact said, the mark is what is judged
+    };
+    if (process.getuid && process.getuid() === 0) console.log('  · wl932b4e8 burned run: not judged — root makes the run directory anyway');
+    else {
+      const bl = await burnedLeg(DOOR);
+      ok(bl.code === 'spawn_failed' && bl.givenBack && bl.mark.length === 1 && !bl.mark[0].spent && !bl.mark[0].spentAt, `wl932b4e8: a BURNED run clears the mark — the once-grant given back carries no «spent» (its 8 hours would end «time») — ${JSON.stringify(bl)}`, bl);
+      const mbl = M.load('src/server/vault-run-door.js', anchored(SRCa, 'if (burned) for (const a of spent) { a.g.spent = false; delete a.g.spentAt; }', 'if (false) { }', 'test-vault-run wl932b4e8: the mark kept'), 'a14b-burned');
+      const blr = await burnedLeg(mbl);
+      ok(blr.givenBack && blr.mark.length === 1 && blr.mark[0].spent && blr.mark[0].spentAt, `RED control: the mark kept on a burned run ⇒ the given-back grant still says «spent» (its timer would say «used» for a run that never ran) — ${JSON.stringify(blr)}`, blr);
+    }
+    // the fold's read: a BURNED run the vault's LOCK crosses (the lock lands after the spend, inside the run — at its run root's
+    // reading — and the run directory cannot be made ⇒ spawn_failed): the grant is not given back (never across a lock) and it ENDS
+    // «lock», as each grant the lock ended: its For-you record and `uses` say so. RED: no end at all (the record kept «allowed once»)
+    const burnedLock = async (mod) => {
+      const wk = await world(); let armed = false, atLock = null;
+      wk.door = wk.mk(mod, { runRoot: () => { if (!armed) return wk.runRoot; armed = false; atLock = { spent: ![...wk.door._grants.values()].some((g) => g.conv === c8.scope && g.once) }; wk.door.onLocked('test'); return path.join(wk.dir, 'run-never-made'); } });
+      const qk = wk.door.request({ caller: c8, entry: M1, purpose: 'a run the lock crosses' });
+      wk.door.answerRequest(qk.askId, { answer: 'once', reauthed: true, person: true });
+      const g = [...wk.door._grants.values()].find((x) => x.conv === c8.scope && x.once), todoId = g ? g.todoId : null;
+      armed = true;
+      const r = (await runAnswered(wk, ENV('env'), { caller: c8 })).r;
+      const it = todoId ? wk.userTodos.get(todoId) : null;
+      return { code: r.code, todo: !!todoId, lockAfterSpend: !!(atLock && atLock.spent), givenBack: [...wk.door._grants.values()].some((x) => x.conv === c8.scope && x.once), recordEnd: (it && it.resolvedFact && it.resolvedFact.endedBy) || null, listed: wk.door.usesFor(c8).ended.map((e) => e.endedBy) };
+    };
+    const bk = await burnedLock(DOOR);
+    ok(bk.code === 'spawn_failed' && bk.todo && bk.lockAfterSpend && !bk.givenBack && bk.recordEnd === 'lock' && bk.listed.includes('lock'), `the fold read: a burned run the lock crosses ENDS «lock» — not given back; its For-you record and \`uses\` say the lock — ${JSON.stringify(bk)}`, bk);
+    const mbk = M.load('src/server/vault-run-door.js', anchored(SRCa, "else for (const a of spent) grantEnded(a.g, burned ? 'lock' : 'used');", "else if (!burned) for (const a of spent) grantEnded(a.g, 'used');", 'test-vault-run the fold read: no end across a lock'), 'a14b-burned-lock');   // stale-pins: kept — a mutant that rebuilds the release's line on purpose
+    const bkr = await burnedLock(mbk);
+    ok(bkr.code === 'spawn_failed' && bkr.todo && bkr.lockAfterSpend && !bkr.givenBack && bkr.recordEnd === null, `RED control: no end for a burned run across a lock ⇒ its For-you record keeps «allowed once» with no end — ${JSON.stringify(bkr)}`, bkr);
+    // 4: THE SCENE THE RECORD-TIME OFF SKIP EXISTS FOR — a once-grant a run spent, the owner's OFF while it runs (a second after the
+    // approval on the door's clock), the run ends («used»), then a NEW door over the same data (a restart: the OFF's time is memory):
+    // the end is not said. RED: the skip taken away — the end recorded, said after the restart over the owner's OFF
+    const offRestart = async (mod) => {
+      const wo2 = await world(), heldO2 = [], clk = { t: Date.now() };
+      wo2.door = wo2.mk(mod, { now: () => clk.t, timers: { set: (fn, ms) => { heldO2.push({ fn, ms }); return heldO2.length; }, clear: () => { } } });
+      const h = await runHeld(wo2);
+      clk.t += 1000;
+      wo2.door.setRunnable({ id: 'mounts:m1#secretKey', on: false });   // the owner's OFF, AFTER the approval, while the run runs
+      h.ac.abort(); await h.pr;   // the run ends: the spent grant's end is «used»
+      await SW.durable(path.join(wo2.dataDir, 'vault-grant-ends.json'));
+      wo2.door = wo2.mk(mod, { timers: { set: () => 0, clear: () => { } } });   // THE RESTART
+      return { running: h.running, afterRestart: wo2.door.usesFor(c8).ended.map((e) => e.endedBy) };
+    };
+    const orr = await offRestart(DOOR);
+    ok(orr.running && orr.afterRestart.length === 0, `wl932b4e8: an end after the owner's OFF of an approval given before it is never recorded — a restart says nothing over the OFF — ${JSON.stringify(orr)}`, orr);
+    const mor = M.load('src/server/vault-run-door.js', anchored(SRCa, "      if (offAt.has(id) && (offAt.get(id) || 0) >= (Number(g.at) || 0)) continue;", '', 'test-vault-run wl932b4e8: no record-time OFF skip'), 'a14b-offskip');
+    const orrR = await offRestart(mor);
+    ok(orrR.running && orrR.afterRestart.join() === 'used', `RED control: no record-time OFF skip ⇒ after a restart the end is said over the owner's OFF (its time forgotten) — ${JSON.stringify(orrR)}`, orrR);
     // r13 should (the readers of batch 52): an approval the user gave while the entry was ALREADY switched OFF — its end is said
     // as itself (the OFF came before it: not the news) AND the switch as it is: «the entry itself is switched off (it already was
     // when they approved)», never «the entry was not switched off» (the door's `off` on the ended fact)

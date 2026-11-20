@@ -252,7 +252,7 @@ const ROWS = [
   ["src/server/usage-probe-log.js","*",3,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/user-input.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/vault-engine.js","*",26,"durable","—","NOT idempotent: money / authority / a credential","the vault (sealed entries, the DEK wrap) — must be on disk before the answer"],
-  ["src/server/vault-run-door.js","*",22,"durable","—","NOT idempotent: money / authority / a credential","the vault's run door (a use receipt) — must be on disk before the answer"],
+  ["src/server/vault-run-door.js","*",23,"durable","—","NOT idempotent: money / authority / a credential","the vault's run door (a use receipt) — must be on disk before the answer; +1 B-a14b (bl-vault, 2026-11-20): the grant ends' set-aside of bytes that did not parse — fs.promises.rename, off the loop, once at the door's start (its saves go through the store writer)"],
   ["src/server/vault-totp.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","the vault's TOTP seeds — must be on disk before the answer"],
   ["src/server/vault-use-grants.js","*",4,"durable","—","NOT idempotent: money / authority / a credential","the vault's use grants (authority) — must be on disk before the answer"],
   ["src/server/voice-teach-engine.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
@@ -972,6 +972,7 @@ const STORE_READS = [
   // lane lg-store-writes (主开发 2026-11-20 03:10Z): the desktop app records and the device alerts' ledger — a failed read or torn bytes HOLD (never started empty)
   { file: 'src/server/device-alerts.js', store: 'device-alerts.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: LEDGER_VALID \}\);\n    if \(a\.state === 'data'\) seen = a\.value\.seen;/ },
   { file: 'src/desktop-serve.js', store: 'desktop-apps.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: STORE_VALID \}\);\n    if \(a\.state === 'data'\) \{ store = \{ apps: a\.value\.apps \}; return; \}/ },
+  { file: 'src/server/vault-run-door.js', store: 'vault-grant-ends.json', state: 'answer', mark: /let a = SR\.storeAnswer\(read, \{ valid: ENDS_VALID \}\);/ },   // bl-vault B-a14b (主开发 r542): the grants that ended, kept across a restart — bytes that do not parse set aside (it starts empty), a failed read HELD (never written over)
   { file: 'src/server/job-secrets-door.js', store: 'job-secrets.leftover.json', state: 'answer', mark: /let a = SR\.storeAnswer\(read, \{ valid: REC_VALID \}\);/ },   // bl-vault B-ef1b (主开发 r333): the record of the copies a move made or left — bytes that do not parse set aside (the move refuses by name until a person looked), a failed read HELD (the move refuses, read again at the next press)
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'answer', mark: /this\._notifsAnswer\(SR\.storeAnswer\(read, \{ valid: NOTIFS_SHAPE \}\)\);/ },   // remainder of B-f276 (bl-jobs, 2.369.411): held — the waiting notices never written over
 ];
@@ -984,7 +985,7 @@ const treeTexts = () => new Map(censusFiles(REPO).map((f) => [f, fs.readFileSync
 /** the files whose CODE holds a set-aside name (a string or template piece with `.corrupt-` — never a comment) */
 const SET_ASIDE = /\.(corrupt|unreadable)-/, SET_ASIDE_G = /\.(corrupt|unreadable)-/g;   // the two names the tree sets bytes aside under
 // the set-aside names per file, EXACT — a second store with a set-aside in a file that already has a row is red by its count
-const SITES = { 'src/jobs.js': 3, 'src/app-serve.js': 1, 'src/channel-store.js': 1, 'src/hosts.js': 1, 'src/job-logs-sweep-worker.js': 1, 'src/job-logs-sweep.js': 1, 'src/machine-mounts.js': 1, 'src/server/browser-kept.js': 1, 'src/server/conversation-deliver.js': 1, 'src/server/integration-store.js': 1, 'src/server/job-secrets-door.js': 2, 'src/server/queued-wakes.js': 1, 'src/server/usage-pool-engine.js': 1, 'src/server/writes-lost.js': 1, 'src/user-todos.js': 1 };
+const SITES = { 'src/jobs.js': 3, 'src/app-serve.js': 1, 'src/channel-store.js': 1, 'src/hosts.js': 1, 'src/job-logs-sweep-worker.js': 1, 'src/job-logs-sweep.js': 1, 'src/machine-mounts.js': 1, 'src/server/browser-kept.js': 1, 'src/server/conversation-deliver.js': 1, 'src/server/integration-store.js': 1, 'src/server/job-secrets-door.js': 2, 'src/server/queued-wakes.js': 1, 'src/server/usage-pool-engine.js': 1, 'src/server/vault-run-door.js': 1, 'src/server/writes-lost.js': 1, 'src/user-todos.js': 1 };
 const tokenHit = new Map();   // a text's verdict, once (the controls re-run the census over copies that differ in ONE file)
 function setAsideFiles(texts) {
   const out = [];

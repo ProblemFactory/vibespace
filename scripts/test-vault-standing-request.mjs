@@ -1138,13 +1138,49 @@ console.log('㉞ r13 should (the readers of batch 52 — B-a14b × the standing 
   await leg('㉞ the standing answer drops the end by its key', async () => {
     const r = await standingLeg(DOOR);
     ok(r.g8 && r.ended && r.standing && !r.endAfter, '㉞ a caller whose scope is not its conversation\'s id: its 8 hours ran out (the end kept under the scope), then the owner allows it standing ⇒ the old end is gone', r);
-    const plant = '      endedGrants.delete(q.quietPair);';
+    const plant = '      if (endedGrants.delete(q.quietPair)) endsSave();';   // B-a14b: the delete also writes the ends (when one went)
     const n = DSRC.split(plant).length - 1;
     ok(n === 1, '㉞ the RED control\'s plant is where it claims: the standing answer\'s delete by q.quietPair, once', n);
-    const mq = MC.load('src/server/vault-run-door.js', anchored(DSRC, plant, '      endedGrants.delete(pairOf(q.conv, q.id));', 'test-vault-standing-request ㉞ r13-quiet'), 'r13-quiet');   // stale-pins: kept — a RED control: the batch's delete by the conversation's id restored on purpose
+    const mq = MC.load('src/server/vault-run-door.js', anchored(DSRC, plant, '      if (endedGrants.delete(pairOf(q.conv, q.id))) endsSave();', 'test-vault-standing-request ㉞ r13-quiet'), 'r13-quiet');   // stale-pins: kept — a RED control: the batch's delete by the conversation's id restored on purpose
     const rq = mq ? await standingLeg(mq) : null;
     ok(!!(mq && rq && rq.standing && rq.endAfter), '㉞ RED control: the delete by the conversation\'s id (the batch\'s shape) ⇒ the old end outlives the standing answer', rq);
   });
+}
+
+console.log('㉟ B-a14b (主开发 r542): AN END STAYS SAID WHILE THIS CONVERSATION CANNOT USE THE ENTRY — a press opened it and did not resume its member');
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC = mutantCopies('vsr-a14b', REPO), DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
+  // A holds a standing member (its own Allow opened the entry); the owner switches the entry OFF; A's 8 hours end (the timer held by
+  // hand, fired); B's standing Allow opens the entry again — a PRESS that resumes B's member only. A cannot use the entry now (its
+  // member is paused: the list says it), so `uses` must keep A's end. The release hid it: the entry is ON (onNowOf) whoever's it is
+  const pausedEnd = async (doorMod, { resumeA = false } = {}) => {
+    const held = []; let clk = Date.now();   // the door's OWN clock orders the OFF and the approval (r14's rule — never a real wait, never a same-millisecond tie)
+    const w = await world({ doorMod, now: () => clk, timers: { set: (fn, ms) => { held.push({ fn, ms }); return held.length; }, clear: () => { } } });
+    const A = w.caller(), B = w.caller('cid-second', 'Second');
+    const sa = await w.door.request({ caller: A, entry: w.e.ref, purpose: 'the transcriber', standing: true, command: 'python3 transcribe.py', cwd: w.work });
+    const ya = sa && w.door.answerRequest(sa.askId, { answer: 'standing', reauthed: true });
+    w.door.setRunnable({ id: w.e.id, on: false });
+    clk += 1000;   // A's 8-hour approval comes a second AFTER the owner's OFF
+    const q8 = await w.door.request({ caller: A, entry: w.e.ref, purpose: 'one long night', cwd: w.work });
+    const g8 = q8 && w.door.answerRequest(q8.askId, { answer: '8h', reauthed: true, person: true });
+    for (const h of held.filter((x) => x.ms > 3600e3)) h.fn();
+    const sb = await w.door.request({ caller: B, entry: w.e.ref, purpose: 'the second transcriber', standing: true, command: 'python3 transcribe.py', cwd: w.work });
+    const yb = sb && w.door.answerRequest(sb.askId, { answer: 'standing', reauthed: true });
+    const ra = resumeA ? w.door.resumeGrant({ id: w.e.id, principal: `conversation:${A.conversationId}`, reauthed: true }) : null;   // the owner resumes A's member (its ↻)
+    const la = (w.door.runnableFor(A).entries || []).find((x) => x.ref === w.e.ref) || null;
+    const lb = (w.door.runnableFor(B).entries || []).find((x) => x.ref === w.e.ref) || null;
+    const u = w.door.usesFor(A);
+    return { setup: { a: !!(ya && ya.ok), eight: !!(g8 && g8.ok), b: !!(yb && yb.ok), ...(resumeA ? { resumed: !!(ra && ra.ok) } : {}) }, pausedForA: !!(la && la.paused), usableForB: !!(lb && !lb.paused), endedA: (u.ended || []).map((e) => e.endedBy) };
+  };
+  const pe = await pausedEnd(DOOR);
+  ok(pe.setup.a && pe.setup.eight && pe.setup.b && pe.pausedForA && pe.usableForB && pe.endedA.join() === 'time',
+    `㉟ B's press opened the entry and did not resume A's member (A's row paused, B's usable) ⇒ A's ended 8 hours are STILL said in \`uses\` — ${JSON.stringify(pe)}`, pe);
+  const pr = await pausedEnd(DOOR, { resumeA: true });
+  ok(pr.setup.resumed && !pr.pausedForA && pr.endedA.length === 0, `㉟ …and once A's member is RESUMED (A can use the entry again) the end is no longer said — ${JSON.stringify(pr)}`, pr);
+  const mo = MC.load('src/server/vault-run-door.js', anchored(DSRC, '!usableHere(e.id)', '!onNowOf(e.id)', 'test-vault-standing-request ㉟ the switch alone'), 'a14b-on');
+  const per = await pausedEnd(mo);
+  ok(per.pausedForA && per.endedA.length === 0, `㉟ RED control: the end hidden by the entry's switch alone (the release) ⇒ A reads no end while it cannot use the entry — ${JSON.stringify(per)}`, per);
 }
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
