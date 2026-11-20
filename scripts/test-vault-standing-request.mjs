@@ -1048,9 +1048,17 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
   // member for this conversation covers another host); E2 (this world's entry) closed but OPEN to it by an 8-hour grant (the
   // request card), its member already at the host bound; a run naming both to a host neither member covers ⇒ the card, answered
   // «Always»: the press switches E2 ON (the bound turns F0 off), then E2's member write is REFUSED ⇒ the whole press is put back
-  const pressLeg = async (doorMod, { hold = false } = {}) => {   // r13 «also»: hold ⇒ E2's member far under its host bound (the press HOLDS)
+  const pressLeg = async (doorMod, { hold = false, failRestore = false } = {}) => {   // r13 «also»: hold ⇒ E2's member far under its host bound (the press HOLDS)
     let clock = Date.now();
     const w = await world({ entryMax: 3, now: () => clock, doorMod });
+    // B-be21 (主开发 r191): THE FAULT IN THE WINDOW — once the press's member write is REFUSED, the switches store's mark cannot be
+    // made (its save fails: the vault's macOf answers nothing for that store only), so the restore of the switches FAILS
+    let faultArmed = false;
+    if (failRestore) {
+      const realAdd = w.useGrants.addMember.bind(w.useGrants), realMac = w.vault.macOf.bind(w.vault);
+      w.useGrants.addMember = (...a) => { const r = realAdd(...a); if (r && !r.ok) faultArmed = true; return r; };
+      w.vault.macOf = (label, body) => (faultArmed && label === 'vault-run-store-v1' ? null : realMac(label, body));
+    }
     const F = [mk(w, 'F0'), mk(w, 'F1')];
     for (const id of F) { clock += 10; w.door.setRunnable({ id, on: true, reauthed: true }); }
     const nm1 = 'secret:' + crypto.randomBytes(5).toString('hex'); if (!w.vault.secretPut(nm1, VALUE, { prov: 'owner', label: 'E1', kind: 'api-key', hosts: [] }).ok) throw new Error('secretPut E1');
@@ -1067,7 +1075,7 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
     const disk = storeOf(w);
     const notice = (w.userTodos.snapshot().open || []).find((i) => i.origin === 'vault' && /switched off/.test(i.text || ''));
     const noticeAll = notice ? `${notice.text || ''} ${notice.detail || ''}` : null, noticeN = (w.userTodos.snapshot().open || []).filter((i) => i.origin === 'vault' && /switched off/.test(i.text || '')).length;
-    return { asked: !!ra.card, refused: !!(ra.a && !ra.a.ok), code: ra.a && ra.a.code, F0on: disk.runnable.includes(F[0]), Eon: disk.runnable.includes(w.e.id), stamp0, stamp1: (disk.touched || {})[F[0]], notice: notice ? notice.detail : null, noticeAll, noticeN, F0: F[0] };
+    return { asked: !!ra.card, refused: !!(ra.a && !ra.a.ok), code: ra.a && ra.a.code, F0on: disk.runnable.includes(F[0]), Eon: disk.runnable.includes(w.e.id), stamp0, stamp1: (disk.touched || {})[F[0]], notice: notice ? notice.detail : null, noticeAll, noticeN, F0: F[0], faultArmed };
   };
   // r13 «also» (the readers of batch 52: no leg for it) — a press that HOLDS at the cap: the run list's oldest switch goes OFF,
   // and since B-be21 the owner hears of it ONLY from the press's own notice (the switch itself is quiet then)
@@ -1090,6 +1098,17 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
     const ms = mutant(', opened: prior.opened, touched: prior.touched });', ', opened: prior.opened });', 'nostamps');   // stale-pins: kept — a RED control: the pre-B-be21 restore (no stamps) restored on purpose
     const rs = ms ? await pressLeg(ms) : null;
     ok(!!(ms && rs && rs.F0on && rs.stamp1 !== rs.stamp0), '㉝b RED control: the restore without the stamps (the r12 shape) ⇒ F0 is back ON with its place in the order lost', rs && { stamp0: rs.stamp0, stamp1: rs.stamp1 });
+  });
+  // B-be21 (主开发 r191): the refused press whose SWITCHES cannot be put back (their save fails — the fault placed in the window): F0
+  // stays OFF on disk, and the owner is told — ONE For-you notice names what the cap turned off. RED: that branch without its notice
+  await leg('㉝d a refused press whose switches cannot be put back still tells the owner what the cap turned off', async () => {
+    const p = await pressLeg(DOOR, { failRestore: true });
+    ok(p.faultArmed && p.asked && p.refused && p.code === 'restore_failed' && !p.F0on && p.noticeN === 1 && !!p.noticeAll && p.noticeAll.includes(p.F0), `㉝d the «Always» press is REFUSED and the switches' restore FAILS (their save made to fail) ⇒ the press answers restore_failed, F0 stays OFF, and ONE For-you notice names it — ${JSON.stringify({ faultArmed: p.faultArmed, asked: p.asked, refused: p.refused, code: p.code, F0on: p.F0on, noticeN: p.noticeN, namesF0: !!(p.noticeAll && p.noticeAll.includes(p.F0)) })}`, p);
+    const plant = "      if (!sw || !sw.ok) { const dd = load(); const off = evicted.filter((k) => !(dd && dd.runnable.has(k))); if (off.length) noteEvicted(off); }";
+    ok(DSRC.split(plant).length === 2, '㉝d the RED control\'s plant is where it claims: the failed restore\'s notice, once', DSRC.split(plant).length - 1);
+    const mq = mutant(plant, '      if (!sw || !sw.ok) { }', 'restorequiet');
+    const rq = mq ? await pressLeg(mq, { failRestore: true }) : null;
+    ok(!!(mq && rq && rq.faultArmed && rq.refused && !rq.F0on && rq.noticeN === 0), `㉝d RED control: that branch without its notice ⇒ F0 stays OFF and nobody is told — ${JSON.stringify(rq && { faultArmed: rq.faultArmed, refused: rq.refused, code: rq.code, F0on: rq.F0on, noticeN: rq.noticeN })}`, rq);
   });
 }
 
