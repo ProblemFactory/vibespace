@@ -50,9 +50,39 @@ console.log('§1 the tree under a root, by the parent chain — what the group w
   const seen = new Set(group.map((m) => m.pid));
   ok(tree.every((m) => !seen.has(m.pid)), 'CONTROL (the release\'s walk: the group and the environ mark) — finds NONE of the three', group.map((m) => m.pid));
   const r = await PI.endTree(tree, { graceMs: 2000 });
-  ok(r.ended.sort().join() === 'sleep,sleep,timeout' && !r.left.length && !r.stale && tree.every((m) => PI.aliveIdentity(m) === false), 'endTree: each member ended through its identity — nothing of it left', r);
-  ok(/^ended 3 processes it started \((sleep ×2, timeout|timeout, sleep ×2)\)$/.test(PI.treeLine(r, { cut: tree.cut })), 'treeLine: ONE line — the count and the names', PI.treeLine(r, { cut: tree.cut }));
+  // r306 (主开发 16:45Z; the hosted red of run 44774335413 at load 6, PLACED as the leg's): the timeout program FORWARDS its SIGTERM to
+  // its child — on a loaded runner the child ended by itself before endTree's own act on it: «stale» (no longer ours at the act),
+  // never counted as ended by us. THE LAW: every member gone, nothing left, ended + stale = the members, the line counts exactly
+  // what WE ended (the stale path itself is pinned below, its race PLACED)
+  const line = PI.treeLine(r, { cut: tree.cut });
+  ok(!r.left.length && r.ended.length + r.stale === tree.length && r.ended.length >= 2 && tree.every((m) => PI.aliveIdentity(m) === false), 'endTree: each member ended through its identity — nothing of it left; one that ended by itself first is stale, never «ended»', r);
+  ok(line.startsWith(`ended ${r.ended.length} process${r.ended.length === 1 ? '' : 'es'} it started (`) && r.ended.every((n) => line.includes(n)) && !line.includes('could not end'), 'treeLine: ONE line — the count of what WE ended and the names', { line, ended: r.ended, stale: r.stale });
   await until(() => P.exitCode !== null || P.signalCode !== null, 3000);
+}
+{
+  // THE STALE PATH, ITS RACE PLACED (r306): the timeout program and its child; endTree signals timeout FIRST, and the injected kill
+  // waits there for what happens — timeout forwards the SIGTERM, its child ends — before endTree reaches the child: stale 1, the
+  // child never counted as ended by us, the line «ended 1 process it started (timeout)»
+  const race = async (PIm, tag) => {
+    const P2 = started('timeout 303 sleep 303 & wait');
+    let t2 = [];
+    await until(() => { t2 = PI.treeOf([P2.pid], { since: PI.identityOf(P2.pid).starttime }); return names(t2) === 'sleep,timeout'; });
+    mine.push(...t2);
+    const to = t2.find((m) => m.comm === 'timeout'), ch = t2.find((m) => m.comm === 'sleep');
+    let stalled = null;
+    const kill = (pid, sig) => { process.kill(pid, sig); if (pid === to.pid) { const t0 = Date.now(); while (PI.aliveIdentity(ch) === true && Date.now() - t0 < 3000) spawnSync('sleep', ['0.01']); stalled = PI.aliveIdentity(ch) !== true; } };   // a wait for what happened (the child's end), bounded
+    const r2 = await PIm.endTree([to, ch], { graceMs: 2000 }, { kill });
+    await until(() => P2.exitCode !== null || P2.signalCode !== null, 3000);
+    return { tag, stalled, r2, line2: PIm.treeLine(r2, {}) };
+  };
+  const rr = await race(PI, 'real');
+  ok(rr.stalled === true && JSON.stringify(rr.r2.ended) === '["timeout"]' && rr.r2.stale === 1 && !rr.r2.left.length && rr.line2 === 'ended 1 process it started (timeout)',
+    'endTree, the race placed: the child its timeout ended before our act is stale — never counted as ended by us; the line says the ONE we ended', rr);
+  const MJ1 = mutantCopies('stop-tree-r306', ROOT), PIS1 = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8');
+  const STALE = "else if (r.why === 'not-ours') refused.push(m); else stale++; }";
+  const rx = await race(MJ1.load('src/proc-identity.js', anchored(PIS1, STALE, "else if (r.why === 'not-ours') refused.push(m); else sent.push(m); }", 'r306-stale-as-ended'), 'r306-stale-as-ended'), 'mut');
+  ok(rx.stalled === true && rx.r2.ended.includes('sleep') && /^ended 2 processes/.test(rx.line2), 'CONTROL (a stale member counted as ended, in a copy): the line says «ended 2» — one of them ended by its parent before our act — RED', rx);
+  for (const c of copiesCensus(MJ1.files, MJ1.dir, ROOT, { minCopies: 0, label: 'r306 ' })) ok(c.pass, c.name + (c.pass ? '' : ' — ' + c.detail));
 }
 
 console.log('§2 what does not end in its grace ends by force; a refused signal is said');
