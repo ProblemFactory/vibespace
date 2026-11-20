@@ -220,8 +220,8 @@ const PINS = {
   '--cwd': [['svc', 'cmd.cwd', CWD]], '--until': [['svc', 'untilOutput', 'READY']], '--timeout': [['svc', 'timeoutMs', 6 * 3600e3]],
   '--stdin-open': [['svc', 'stdinOpen', true]],
   '--memory': [['svc', 'memoryMb', '8G']],   // the seam with jobs-memory-bound: the CLI sends the flag's own string
-  '--vault': [['task', 'vault', ['TOK=vault://agent:conv-census/tok']]],
-  '--may-read': [['task', 'mayRead', 'siblings']],   // B-3992: the jobs the new job may READ beside itself — the CLI's own string, the engine resolves it (test-job-may-read)   // lane vault-job-road: the REFERENCES as typed (repeatable — a list); the engine judges them
+  '--vault': [['task', 'vault', ['TOK=vault://agent:conv-census/tok']]],   // lane vault-job-road: the REFERENCES as typed (repeatable — a list); the engine judges them
+  '--may-read': [['task', 'mayRead', 'siblings']],   // B-3992: the jobs the new job may READ beside itself — the CLI's own string, the engine resolves it (test-job-may-read)
   // every shape that tells the user (a plain task, a scheduled run, notify-cron) — top-level; a scheduled run ALSO carries
   // the compatibility copy in its task (an engine ≤ 2.369.360 reads only that); a service refuses the flag (leg (1))
   '--notify-user': [['task', 'notifyUser', true], ['every', 'notifyUser', true], ['every', 'action.task.notifyUser', true], ['nc', 'notifyUser', true]],

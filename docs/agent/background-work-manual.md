@@ -435,12 +435,19 @@ vibespace-job run "./report.sh" --name report --may-read siblings               
 
 - **Read only.** The job may list them, `poll` / `show` them and read their `logs`; stopping, starting,
   restarting or removing them (and every other verb on them) stays yours — refused by name inside the job.
+- **What a grant shows — exactly this:** a granted job's id, name and state, its command line and its folder,
+  its last run (when, exit, cause, last line), its log, and the reasons in its notify log. Nothing else of it:
+  not its `--context` brief, its note or its progress, not a person's answers to its questions (`answers` reads
+  only the job's OWN), not its subscribers, its vault names or its own grant.
+- **A scheduled job brings its runs.** A schedule's output is on its run (`<name> run`, listed beside it):
+  given the schedule, the job lists, polls and reads the logs of its runs too.
 - **Only this conversation's jobs, never another conversation's.** The names are resolved against this
   conversation's own jobs at create (a word that names none is refused, nothing created); `siblings` is
   judged at every read: the jobs this conversation owns then, those created later included.
 - **Written at create, for good.** The grant is part of the job's record (`show` prints `may read: …`); to
   change it, remove the job and create it again. A scheduled job's runs read what the schedule was given. A
-  notify cron runs no command and takes no `--may-read`.
+  notify cron runs no command and takes no `--may-read`, nor does a job with no owner conversation (one the
+  person made from the panel: it has no other jobs to read).
 - **Without it nothing changes:** the job reads only itself. A poll of any other job answers, by name,
   «this job may read only itself — give it the other jobs at create» and the command to type.
 

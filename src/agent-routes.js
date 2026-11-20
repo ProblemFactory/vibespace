@@ -1786,6 +1786,8 @@ const NOT_VISIBLE = (ref) => `no job "${ref}" visible to this session — vibesp
 /** B-3992: the `mine` a job answer carries — for a job token's read of a job its grant gives, `mine: null` + `readByGrant: true`
  *  (its own conversation's job: neither the reader's own nor «another conversation's» — the CLI says which) */
 const grantMark = (a, j, mine) => (a.selfJob && j !== a.selfJob ? { mine: null, readByGrant: true } : { mine });
+/** round wd7fcv507 MUST 3: a job its grant reads is answered with WHAT A GRANT SHOWS (jobModel.grantedJobView) — never the rest */
+const tokenView = (a, j, view) => (a.selfJob && j !== a.selfJob ? jobModel.grantedJobView(view) : view);
 function findVisibleIn(all, caller, ref) {
   const vis = caller ? jobModel.visibleJobs(all, caller) : [];
   return vis.find((j) => j.id === ref) || vis.find((j) => j.name === ref) || null;
@@ -2889,19 +2891,21 @@ app.get('/api/agent/jobs', (req, res) => {
   // `vibespace-job list --archived`) — same snapshot shape + archived:true
   if (req.query.archived) {
     const arch = a.selfJob ? jobModel.jobsReadableBy(a.jm.archivedList(), a.selfJob).slice(1) : jobModel.visibleJobs(a.jm.archivedList(), a.caller);   // B-3992: a job token's archived = what its grant reads
-    return res.json({ success: true, archived: true, jobs: arch.map((r) => { const mine = a.selfJob ? false : jobModel.isOwner(r, a.caller); return jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(r, { author: mine }), { mine }), ...grantMark(a, r, mine), mySubscription: null }); }) });   // verify r5 F1 (lane peer-census): another lineage's record through the belt
+    return res.json({ success: true, archived: true, jobs: arch.map((r) => { const mine = a.selfJob ? false : jobModel.isOwner(r, a.caller); return jobWhen({ ...tokenView(a, r, jobModel.agentJobView(a.jm.snapshotArchived(r, { author: mine }), { mine })), ...grantMark(a, r, mine), mySubscription: null }); }) });   // verify r5 F1 (lane peer-census): another lineage's record through the belt
   }
   // B-3992: a job token lists ITSELF and the jobs its grant reads (jobModel.jobsReadableBy — the job's own verdict); none: itself, as before
   let list = a.selfJob ? jobModel.jobsReadableBy([...a.jm.jobs.values()], a.selfJob) : jobModel.visibleJobs([...a.jm.jobs.values()], a.caller);
   // ?mine=1 → owned by this conversation · ?subscribed=1 → this conversation subscribed
   if (!a.selfJob && req.query.mine) list = list.filter((j) => jobModel.isOwner(j, a.caller));
   if (!a.selfJob && req.query.subscribed) list = list.filter((j) => (j.subscribers || []).some((s) => s.conversationId === a.caller.conversationId));
+  if (a.selfJob && req.query.mine) list = [a.selfJob];   // round item 9: inside a job, «mine» is the job itself — never its grant's rows
+  if (a.selfJob && req.query.subscribed) list = [];      // …and a job subscribes to nothing
   res.json({
     success: true,
     jobs: list.map((j) => {
       const mine = a.selfJob ? j === a.selfJob : jobModel.isOwner(j, a.caller);
       return jobWhen({
-        ...jobModel.agentJobView(a.jm.snapshot(j, { author: mine }), { mine }),   // lane job-notify-user r3: `author` — a notify cron's --text whole for the lineage that wrote it · verify r5 F1 (lane peer-census): a job of ANOTHER lineage (view opened / subscribed) is another session's words — through the belt; the owner lineage reads its own raw
+        ...tokenView(a, j, jobModel.agentJobView(a.jm.snapshot(j, { author: mine }), { mine })),   // lane job-notify-user r3: `author` — a notify cron's --text whole for the lineage that wrote it · verify r5 F1 (lane peer-census): a job of ANOTHER lineage (view opened / subscribed) is another session's words — through the belt; the owner lineage reads its own raw
         ...grantMark(a, j, mine),
         mySubscription: a.selfJob ? null : (j.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
       });
@@ -2912,6 +2916,8 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   const ref = req.params.ref;
   const job = a.selfJob ? (!ref ? a.selfJob : jobModel.jobReadableRef([...a.jm.jobs.values()], a.selfJob, ref)) : findVisible(a.jm, a.caller, ref);   // B-3992: itself, or a job its grant reads
+  const tokenVerb = req.query.answers ? 'answers' : 'poll';   // round wd7fcv507 MUST 3: answers are a read of ITSELF only — judged for a found job too
+  if (a.selfJob && job) { const v = jobModel.jobTokenVerdict(a.selfJob, job, tokenVerb, ref); if (!v.ok) return res.status(v.status).json({ error: v.error, code: v.code }); }
   if (!job) {
     // 2.343.4: boot-collapse tombstone — redirect ONLY when the caller could see
     // the survivor anyway (no-existence-oracle: an invisible family stays a plain 404)
@@ -2921,8 +2927,9 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
     // archived id still answer, the SAME shape, with archived:true — an agent
     // holding an old id never gets a 404 because of housekeeping
     const arc = a.selfJob ? jobModel.jobReadableRef(a.jm.archivedList(), a.selfJob, ref) : findVisibleIn(a.jm.archivedList(), a.caller, ref);   // B-3992: a granted job's archive answers its reader too
-    if (arc) { const mine = a.selfJob ? false : jobModel.isOwner(arc, a.caller); return res.json({ success: true, job: jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(arc, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine }), ...grantMark(a, arc, mine), mySubscription: null }) }); }   // verify r5 F1: through the belt
-    if (a.selfJob) { const v = jobModel.jobTokenVerdict(a.selfJob, null, req.query.answers ? 'answers' : 'poll', ref); return res.status(v.status).json({ error: v.error, code: v.code }); }   // B-3992: inside a job, by name — the recipe, never «visible to this session»
+    if (arc && a.selfJob) { const v = jobModel.jobTokenVerdict(a.selfJob, arc, tokenVerb, ref); if (!v.ok) return res.status(v.status).json({ error: v.error, code: v.code }); }
+    if (arc) { const mine = a.selfJob ? false : jobModel.isOwner(arc, a.caller); return res.json({ success: true, job: jobWhen({ ...tokenView(a, arc, jobModel.agentJobView(a.jm.snapshotArchived(arc, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine })), ...grantMark(a, arc, mine), mySubscription: null }) }); }   // verify r5 F1: through the belt
+    if (a.selfJob) { const v = jobModel.jobTokenVerdict(a.selfJob, null, tokenVerb, ref); return res.status(v.status).json({ error: v.error, code: v.code }); }   // B-3992: inside a job, by name — the recipe, never «visible to this session»
     return res.status(404).json({ error: NOT_VISIBLE(ref) });
   }
   const wait = Math.min(Number(req.query.wait) || 0, 600) * 1000;
@@ -2938,7 +2945,7 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
     success: true,
     machine: os.hostname(),   // B-70f9: a job runs on the hub's machine — the show names it
     job: jobWhen({
-      ...jobModel.agentJobView(a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine }),   // lane job-notify-user r3: `author` (a notify cron's --text whole for its lineage) · verify r5 F1 (lane peer-census): another lineage's context / command / last line / LOG TAIL through the belt; `progress` (any viewer writes it) for everyone
+      ...tokenView(a, job, jobModel.agentJobView(a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine })),   // lane job-notify-user r3: `author` (a notify cron's --text whole for its lineage) · verify r5 F1 (lane peer-census): another lineage's context / command / last line / LOG TAIL through the belt; `progress` (any viewer writes it) for everyone
       ...grantMark(a, job, mine),
       mySubscription: a.selfJob ? null : (job.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
     }),
@@ -2947,10 +2954,12 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
 app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;
   const { ref, act } = req.params;
-  const job = a.selfJob ? jobModel.jobReadableRef([...a.jm.jobs.values()], a.selfJob, ref) : findVisible(a.jm, a.caller, ref);
+  // round item 8: a job token's granted ARCHIVED job is found too — so a control verb on it says «archived, read only», never «none of them»
+  const job = a.selfJob ? jobModel.jobReadableRef([...a.jm.jobs.values()], a.selfJob, ref) || jobModel.jobReadableRef(a.jm.archivedList(), a.selfJob, ref) : findVisible(a.jm, a.caller, ref);
   // B-3992: A JOB TOKEN IS JUDGED PER VERB BY THE JOB'S OWN VERDICT — progress / ask / withdraw / announce on itself; a job its grant
-  // reads is READ ONLY (stop, start, restart, rm … refused by name); any other ref: the recipe, the same words whether it exists or not
-  if (a.selfJob) { const v = jobModel.jobTokenVerdict(a.selfJob, job, act, ref); if (!v.ok) return res.status(v.status).json({ error: v.error, code: v.code }); }
+  // reads is READ ONLY (stop, start, restart, rm … refused by name); any other ref: the recipe, the same words whether it exists or not.
+  // `write`: every act here is an act — a read verb's name POSTed on itself meets the self words of before (round item 9)
+  if (a.selfJob) { const v = jobModel.jobTokenVerdict(a.selfJob, job, act, ref, { write: true }); if (!v.ok) return res.status(v.status).json({ error: v.error, code: v.code }); }
   if (!job) {
     // an ARCHIVED record answers `rm` (control-holders; gone for good) and
     // nothing else — every other verb names the archive instead of a 404

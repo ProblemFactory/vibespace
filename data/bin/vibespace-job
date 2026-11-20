@@ -169,7 +169,7 @@ function printJob(j, tailLines) {
   if (j.logTail) console.log(`log tail:\n${j.logTail.split('\n').map((l) => '  ' + l).join('\n')}`);
   else if (j.logWithheld) console.log("log tail: (withheld — this job's content was cleared at the user's request)");
   if (j.archived) console.log(`(archived ${j.archivedAt ? atWords(j, 'archivedAt') : ''} — ${j.archivedWhy || 'terminal'}; the record and its log are kept, rm deletes them for good)`);
-  if (j.state === 'done' || j.state === 'failed') console.log(`next: vibespace-job logs ${j.id} --tail 200 · vibespace-job rm ${j.id}`);
+  if (j.state === 'done' || j.state === 'failed') console.log(j.readByGrant ? `next: vibespace-job logs ${j.id} --tail 200 (read only: its own conversation removes it)` : `next: vibespace-job logs ${j.id} --tail 200 · vibespace-job rm ${j.id}`);   // B-3992: a granted job is never this job's to rm
 }
 
 const USAGE = `vibespace-job — background work that OUTLIVES this conversation (services · long tasks · cron)
@@ -367,6 +367,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const j = r.job;
       console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : j.mine === false ? NOT_MINE : j.readByGrant ? READ_BY_GRANT : ''}${j.archived ? '  (ARCHIVED ' + (j.archivedWhy || '') + ')' : ''}`);
       if (r.machine) console.log(`machine: ${r.machine} (a job runs on the hub's machine)`);   // B-70f9
+      // B-3992 round wd7fcv507: a job its --may-read grant reads is answered with what a grant shows — its command line and folder,
+      // its last run (poll / logs print its last line and log); nothing else of it reaches this job
+      if (j.readByGrant) {
+        if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}`);
+        if (j.run) console.log(`last run: ${atWords(j, 'runStartedAt', j.run.startedAt)} exit=${j.run.exit ?? '—'} ${j.run.cause || ''} (${j.runsCount} run(s))`);
+        break;
+      }
       if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}${j.cmd.envKeys.length ? ' env:[' + j.cmd.envKeys.join(',') + ']' : ''}${j.envFrom.length ? ' envFrom:[' + j.envFrom.join(',') + ']' : ''}`);
       if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + atWords(j, 'nextFireAt') : ''}`);
       // lane job-notify-user r3: a notify cron's reminder (the snapshot kept none)

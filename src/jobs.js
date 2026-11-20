@@ -3997,7 +3997,7 @@ class JobManager {
     // B-3992: `--may-read <job>,<job>` / `--may-read siblings` — THE GRANT, written on the record now: resolved against the jobs the
     // new job's OWNER record owns (the same predicate every read judges by, M.jobMayRead), never another conversation's; a notify
     // cron runs no command and is refused. A scheduled job keeps it on the cron; each fire hands it to the run (below)
-    const mr = M.mayReadVerdict(spec.mayRead, [...this.jobs.values()].filter((j) => M.isOwner(j, M.ownerAsCaller({ owner: spec.owner }))), { runsCommand: !(spec.kind === 'cron' && !task) });
+    const mr = M.mayReadVerdict(spec.mayRead, [...this.jobs.values()].filter((j) => M.isOwner(j, M.ownerAsCaller({ owner: spec.owner }))), { runsCommand: !(spec.kind === 'cron' && !task), owner: spec.owner || null });   // round item 6: no owner conversation ⇒ refused
     if (!mr.ok) return { error: mr.error, code: 'may-read' };
     const visNames = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.name));
     const { name, renamed } = M.resolveName(spec.name, visNames, { mask: (t) => this._nameWords(t, { typed: true }) });   // r7: the belt on the WHOLE name, then the cut — r9: THE NAME RULE once, as typed

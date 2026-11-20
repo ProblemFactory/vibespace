@@ -6591,6 +6591,7 @@ await section(async () => {
       'src/lib/': { fns: null, why: 'the browser holds only the SERVED view (GET /api/hosts — publicExit, built from the rows), never a stored record' },
       'src/design-viewer-entry.js': { fns: null, why: 'not a machine: the presenter\'s exit button' },
       'src/jobs.js': { fns: null, why: 'not a machine: a job run\'s exit code' },
+      'src/job-model.js': { fns: ['function grantedJobView('], why: 'not a machine: a job run\'s exit code — the last run a job token reads by its --may-read grant (B-3992)' },
       'src/server/jobs-wiring.js': { fns: null, why: 'not a machine: a job run\'s exit code' },
       'src/server/vault-run-door.js': { fns: null, why: 'not a machine: a command\'s exit code' },
       'src/agentd/agentd.js': { fns: null, why: 'not a machine: the CLI\'s own exit code' },
