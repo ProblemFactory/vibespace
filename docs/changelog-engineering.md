@@ -538,6 +538,17 @@ This file is the engineers' record of every release: the lanes, the verification
 - ALSO CURED (the round's smalls): a read that failed is read again at the next rebuild (a leg — a null is never kept as «nothing found»); test-agy-store ⑪ awaits the registry's fold INSIDE its zero-read window; the kb line said «500 a turn» (the first cut's count) — it is paced by time.
 - LEFT, said: the live card lands at the chat's tail when its read has (a rebuild places it at its end record); a live fold landing after a rebuild's merge can re-apply a helper's first op (a count only); the hook's sync folder reads per end record (the release's); the rows reducer past its cap — the row's next member.
 
+### bl-msg B-64c1 — the attended tally has a reader (主开发 r590 / r599)
+- THE GAP: the spend guard keeps, for a day, the turns a person pressed that the ceiling neither refused nor counted, by reason (`snapshot().attended`, src/spend-authorizer.js producerCounts). Only test-spend-paths read it.
+- THE READ: GET /api/telemetry/summary gains `attended` ONLY on the Diagnostics report's own query (`drift=1`), a read of the guard's snapshot. Not one line of the guard's verdict changes. The route stands behind src/auth.js's cookie gate (the owner's page; agents' doors are /api/agent/* only).
+- THE SECTION: src/lib/attended-tally-words.js (PURE, the cli-registration-words pattern) — «Turns a person pressed (not counted)», «{n} in the last 24 hours» / «None …», a row per reason in words (the nine attended reasons), «Other ({reason})» for one the page does not know, and why. COUNTS ONLY: no conversation and no message (a diagnostics report is copied and sent). It sits after the events tables in src/lib/setup-flows.js. zh / ja in the dictionaries.
+- PINS: test-spend-paths §B-64c1:
+  - five presses through the REAL guard, tallied and worded (no conversation id, no identity name in the report);
+  - an empty tally, an older server, an unknown reason;
+  - every word in zh and ja;
+  - a CENSUS: every attended reason of the authorizer has its words, with a RED control of a planted reason;
+  - the route, gate and placement pins.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)

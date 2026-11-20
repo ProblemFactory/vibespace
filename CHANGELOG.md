@@ -9,6 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Every «Who can use it» now says whether a Task Group includes its child groups, and each picked group can be set to «this group only».
 - An agent can now let a Background Work job it starts read the other jobs of its conversation, read only; by default a job reads only itself.
 - When a tab that is not this conversation's is in front of its browser window, the live view now marks it «In front of this window» and moves or closes nothing.
+- The Diagnostics report now shows the turns a person pressed in the last 24 hours, which the spending ceiling does not count, by how they were started.
 
 ### Fixed
 - A message you held behind a running turn, or a turn that just started or ended, no longer goes missing from the chat if VibeSpace restarts right then.
