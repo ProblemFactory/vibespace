@@ -898,7 +898,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  stash; `cardText` = the message that woke it, for that card). → {parked, id, merged?, live?} */
   function parkEndedWake(cid, { producer, spendReason, kind = 'notification', fromName = null, cardText = null, sender = null, reason = '', meta = null } = {}) {
     if (!cid || !producer || !spendReason) return { parked: false, why: 'no conversation, producer or reason' };
-    if (peerReachable(cid) || localSessionFor(cid)) return { parked: false, live: true };
+    if (hostsHeld() && !localSessionFor(cid)) return { parked: false, live: true, held: true };   // B-95fc U1: a held list is «unknown» — nothing parked
+    if (liveForWake(cid)) return { parked: false, live: true };   // B-95fc U1: a remote conversation its machine said ended is not «live»
     const same = (retry[cid] || []).find(isEnded);
     if (same) {
       if (sender && !same.senders.includes(sender)) same.senders.push(sender);
@@ -932,7 +933,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && !x.waitsReadopt);   // a wake that waits for the re-adoption runs at its settle (readoptSettled)
     const waiting = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && x.waitsReadopt);   // …unless it runs again first (a person resumed it): then that is its answer too
     if (!ends.length && !waiting.length) return;
-    if (peerReachable(cid) || localSessionFor(cid)) { for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
+    if (hostsHeld() && !localSessionFor(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3; writeRetrySoon(); scheduleRetry(); return; }   // B-95fc U1: a held list ENDS NOTHING (bl-jobs: never «running» with nobody to carry it) — asked again after the read
+    if (liveForWake(cid)) { for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
     if (!ends.length) return;
     if (!endedHook) return;   // the line is not wired yet (the boot): registerEndedWake schedules the attempt again
     const [e, ...twins] = ends;
@@ -1522,6 +1524,29 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return null;
   }
 
+  // B-95fc U1 — A REMOTE CONVERSATION THAT ENDED, as its machine said (peer-state live:false): the park's «live» reads it, never
+  // ownerHostOf's optimistic «reachable» alone. In memory, cid → {at, hostId}; an answer is good for REMOTE_ENDED_MS, a post that lands
+  // there clears it. An OLDER agent (no peer-state in its hello) is never asked: its conversation keeps today's road (stashed, no wake)
+  // and the person reads why (the ended answer «agent_older» — the row's «not resumed: its device agent is older: update it»)
+  const REMOTE_ENDED_MS = 10 * 60e3;
+  const remoteEnded = new Map();
+  const isRemoteEnded = (cid) => { const e = remoteEnded.get(cid); if (!e) return false; if (clock.now() - e.at < REMOTE_ENDED_MS) return true; remoteEnded.delete(cid); return false; };
+  const saidOlder = new Set();
+  async function remoteStateOf(dm, cid, hid) {
+    if (!dm || typeof dm.peerState !== 'function') return null;
+    let st;
+    try { st = await dm.peerState(cid); } catch (e) { return undefined; }   // the link dropped or the op failed: unknown (today's road)
+    if (st === null) {   // an older agent: never asked — said once per machine, and the person reads why
+      if (!saidOlder.has(hid)) { saidOlder.add(hid); if (saidOlder.size > 200) saidOlder.delete(saidOlder.values().next().value); log(`[deliver] ${hid}: its device agent is older — it cannot say whether a conversation ended there; the words wait for its next turn (update the agent)`); }
+      if (!endedAnswers.has(cid)) endedAnswers.set(cid, { outcome: 'refused', code: 'agent_older', why: 'its device agent is older: update it — the words wait for its next turn', until: null, at: clock.now() });
+    }
+    return st;
+  }
+  /** a HELD machines list (hosts.json not read): who owns a remote conversation is unknown — nothing is parked, nothing is ended */
+  const hostsHeld = () => { try { const h = getHosts?.(); return !!(h && typeof h.held === 'function' && h.held()); } catch { return false; } };
+  /** the park's «live» for an owed wake: a session here, or a machine that may carry it — unless that machine said it ended there */
+  const liveForWake = (cid) => !!localSessionFor(cid) || (peerReachable(cid) && !isRemoteEnded(cid));
+
   // rung 2 helper: which registered machine owns this conversation? null =
   // local/unknown (the local rung already ran by the time this is asked).
   function ownerHostOf(cid) {
@@ -1963,8 +1988,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           undo2 = armTurn();
           // lane device-act-audit: the sender when the caller names it (vibespace-msg: agent:<cid>), else the delivery's own reason
           const r = await dm.peerPost({ cid, text, by: require('../device-acts.js').validBy(opts.by) ? opts.by : require('../device-acts.js').bySystem(spendReason) });
+          if (r && r.ok) remoteEnded.delete(cid);   // B-95fc U1: it runs there again
           if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid }; }
           undo2();
+          // B-95fc U1: THE MACHINE ANSWERS FOR ITS OWN INBOX — asked only of an agent that advertises peer-state (an older one never: an
+          // unknown op hangs; its road stays as today, said once); the miss is «not running» ONLY on its reply that the conversation
+          // runs nowhere there — never a machine that could not be reached, never a CLI still starting
+          const there = r && /no live inbox/.test(String(r.reason || '')) ? await remoteStateOf(dm, cid, hid) : undefined;
+          if (there && there.live === false) { remoteEnded.set(cid, { at: clock.now(), hostId: hid }); return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true }; }
           return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'remote daemon could not reach the inbox' };
         } catch (e) {
           if (undo2) undo2();

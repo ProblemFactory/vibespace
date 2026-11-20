@@ -14614,6 +14614,7 @@ export default {
   "the hand-over did not land": "移交没有送达",
   "its agent did not open its inbox in time — the words wait for its next turn": "它的代理没有及时打开收件箱——内容等它的下一轮",
   "its agent takes no message mid-session — the words wait for its next turn": "它的代理在会话中途不接收消息——内容等它的下一轮",
+  "its device agent is older: update it — the words wait for its next turn": "它所在机器上的设备代理版本较旧：请更新它——内容等它的下一轮",
   "it ended again before its agent opened its inbox": "它在代理打开收件箱之前又结束了",
   "Resumed {when} to deliver: {what} — its agent did not open its inbox within {seconds} s, so the message waits for its next turn: send anything to start it, or end and resume it": "{when} 为送达以下内容而恢复：{what}——它的代理没有在 {seconds} 秒内打开收件箱，所以这条消息等它的下一轮：随便发点什么就能开始那一轮，或者结束后再恢复它",
   "Resumed {when} to deliver: {what} — its agent takes no message mid-session, so the message waits for its next turn: send anything to start it": "{when} 为送达以下内容而恢复：{what}——它的代理在会话中途不接收消息，所以这条消息等它的下一轮：随便发点什么就能开始那一轮",

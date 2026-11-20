@@ -590,7 +590,7 @@ class DeviceManager {
             const prevControl = mux.onControl;
             mux.onControl = (m, bytes) => {
               if (m.op === 'line-refused') { this._lineRefused(m); return; }   // lane lg-remote-hardening (D8): a push the agent refused by name
-              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'left-behind-result' /* B-69a7 */ || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
+              if (m.op === 'fs-result' || m.op === 'discovery-result' || m.op === 'discovery-watching' || m.op === 'usage-events-watching' || m.op === 'session-events-watching' || m.op === 'cmd-result' || m.op === 'probe-result' || m.op === 'secret-result' || m.op === 'quota-result' || m.op === 'sysinfo-result' || m.op === 'desktop-apps-list-result' || m.op === 'design-fs-result' || m.op === 'dial-status-result' || m.op === 'proc-list-result' || m.op === 'left-behind-result' /* B-69a7 */ || m.op === 'opencode-serve-result' || m.op === 'browser-serve-result' || m.op === 'desktop-serve-result' || m.op === 'window-track-result' || m.op === 'window-untrack-result' || m.op === 'window-pin-result' || m.op === 'display-facts-result' || m.op === 'remoteapp-facts-result' || m.op === 'stream-offer-result' || m.op === 'stream-answer-result' || m.op === 'stream-stop-result' || m.op === 'stream-stats-result' || m.op === 'input-events-result' || m.op === 'stream-facts-result' || m.op === 'stream-windows-result' || m.op === 'settings-open-result' || m.op === 'desktop-grab-result' || m.op === 'desktop-input-result' || m.op === 'stream-mic-result' || m.op === 'stream-audio-result' || m.op === 'peer-post-result' || m.op === 'peer-state-result' || m.op === 'pool-orders-ok' || m.op === 'tcp-open' || m.op === 'listen-open' || m.op === 'serve-folder-result' || m.op === 'serve-socks-result' || m.op === 'op-refused') {
                 const r = pending.get(m.id); if (r) { pending.delete(m.id); r(m, bytes); }
                 if (m.op === 'tcp-open' && !m.error) return; // channel stays live
                 return;
@@ -1733,6 +1733,16 @@ class DeviceManager {
     if (r.error) throw new Error(r.error);
     const { id, op, ...rest } = r;
     return rest;
+  }
+
+  /** B-95fc U1: is a conversation running on THIS device, and its inbox open — the device's own registry (the shared lookupPeer).
+   *  Asked ONLY of an agent whose hello advertises `peer-state` (an unknown op hangs): → {live, inbox} | null (an older agent). */
+  async peerState(cid) {
+    const info = this.helloInfo();
+    if (!info || !Array.isArray(info.capabilities) || !info.capabilities.includes('peer-state')) return null;
+    const r = await this._request({ op: 'peer-state', cid, timeoutMs: 6000 });
+    if (r.error) throw new Error(r.error);
+    return { live: r.live === true, inbox: r.inbox === true };
   }
 
   async quotaRefresh({ subDir = null, humanGated = false, lawFirst = null } = {}) {

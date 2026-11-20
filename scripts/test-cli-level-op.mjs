@@ -70,5 +70,18 @@ ok(!!lv && Number.isFinite(lv.maxStepMs) && lv.maxStepMs < 50, `…THE DAEMON'S 
 const again = (await dm.probeCli(null, { level: true, version: '2.1.399' })).facts.claude.level;
 ok(again && again.state === 'read' && again.declared === true, '…asked again: answered from its memory (no second scan)', again);
 
+// B-95fc U1 — THE MACHINE ANSWERS FOR ITS OWN INBOX (peer-state), on the same real agent: a registry record whose pid lives (this
+// suite's own) and whose socket is not served yet is a CLI still starting — live, no inbox; a conversation with no record is not running
+{
+  ok(Array.isArray(conn.info.capabilities) && conn.info.capabilities.includes('peer-state'), 'B-95fc U1: the agent advertises «peer-state» in its hello (a hub asks only an agent that has it)', conn.info.capabilities);
+  const reg = path.join(home, '.claude', 'sessions'); fs.mkdirSync(reg, { recursive: true });
+  const stat = fs.readFileSync('/proc/self/stat', 'utf8'), procStart = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+  const START = 'dddddddd-0000-4000-8000-000000000001', NONE = 'dddddddd-0000-4000-8000-000000000002';
+  fs.writeFileSync(path.join(reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: START, messagingSocketPath: path.join(home, 'not-served.sock'), procStart, startedAt: Date.now() }));
+  const s1 = await dm.peerState(START), s2 = await dm.peerState(NONE);
+  ok(!!s1 && s1.live === true && s1.inbox === false, '…a CLI still starting there (its record, its pid alive, its socket not served): live, no inbox', s1);
+  ok(!!s2 && s2.live === false && s2.inbox === false, '…a conversation with no record there: not running (the hub may owe it a wake)', s2);
+}
+
 try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { }
 report();

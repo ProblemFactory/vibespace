@@ -102,7 +102,7 @@ function lookupPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
   try { entries = fs.readdirSync(dir); } catch { return { peer: null, candidates: 0, stale: 0, why: 'candidates: 0, stale: 0 (no registry)' }; }
   const pr = probe || liveProbe();
   const counts = { 'pid-gone': 0, 'pid-reused': 0, 'socket-absent': 0 };
-  let candidates = 0, stale = 0, best = null;
+  let candidates = 0, stale = 0, starting = 0, best = null;   // starting (B-95fc U1): its pid lives, its socket is not served yet — a CLI still starting
   const startedOf = (r) => Number(r.startedAt) || 0;
   for (const f of entries) {
     if (!/^\d+\.json$/.test(f)) continue;
@@ -111,12 +111,12 @@ function lookupPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
     if (!rec || rec.sessionId !== backendSessionId) continue;
     candidates++;
     const v = registryIdentityOk(rec, pr);
-    if (!v.ok) { stale++; for (const k of v.reasons) counts[k]++; continue; }
+    if (!v.ok) { stale++; for (const k of v.reasons) counts[k]++; if (v.reasons.length === 1 && v.reasons[0] === 'socket-absent') starting++; continue; }
     if (!best || startedOf(rec) > startedOf(best.rec)) best = { rec, identity: v.identity };
   }
   const parts = Object.keys(counts).filter((k) => counts[k]).map((k) => `${k}: ${counts[k]}`);
   const why = `candidates: ${candidates}, stale: ${stale}${parts.length ? ` (${parts.join(', ')})` : ''}`;
-  if (!best) return { peer: null, candidates, stale, why };
+  if (!best) return { peer: null, candidates, stale, starting, why };
   const rec = best.rec;
   // auth key file: <pid>.<hash>.key beside the record (0600, same user)
   let key = null;
@@ -124,7 +124,7 @@ function lookupPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
     const kf = entries.find((e) => e.startsWith(rec.pid + '.') && e.endsWith('.key'));
     if (kf) key = fs.readFileSync(path.join(dir, kf), 'utf-8').trim();
   } catch { }
-  return { peer: { pid: rec.pid, socketPath: rec.messagingSocketPath, key, name: rec.name || null, version: rec.version || null, identity: best.identity, why }, candidates, stale, why };
+  return { peer: { pid: rec.pid, socketPath: rec.messagingSocketPath, key, name: rec.name || null, version: rec.version || null, identity: best.identity, why }, candidates, stale, starting, why };
 }
 // The record owning a backend session id → {pid, socketPath, key, name, version, identity, why} or null (lookupPeer's peer).
 function findPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {

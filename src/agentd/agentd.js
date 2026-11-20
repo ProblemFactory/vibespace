@@ -1974,7 +1974,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2439,6 +2439,16 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
             mux.control({ op: 'desktop-apps-list-result', id: msg.id, result: await IA.listInstalled({ platform: process.platform, home: process.env.HOME || process.env.USERPROFILE || require('os').homedir(), budgetMs: msg.budgetMs, env: spawnEnv() }) });
           } catch (e) { mux.control({ op: 'desktop-apps-list-result', id: msg.id, error: String(e.message || e) }); }
         })();
+        return;
+      }
+      if (msg.op === 'peer-state') {
+        // B-95fc U1: IS THAT CONVERSATION RUNNING HERE, AND IS ITS INBOX OPEN — this machine answers for its own inbox, by the SAME
+        // shared lookup the hub's local rung reads (src/peer-messaging.js lookupPeer): a record that passes ⇒ live with its inbox; a
+        // record whose pid lives but whose socket is not served yet ⇒ live, a CLI still starting; none ⇒ not running here
+        try {
+          const look = require('./../peer-messaging.js').lookupPeer(String(msg.cid || ''));
+          mux.control({ op: 'peer-state-result', id: msg.id, live: !!look.peer || look.starting > 0, inbox: !!look.peer });
+        } catch (e) { mux.control({ op: 'peer-state-result', id: msg.id, error: String((e && e.message) || e) }); }
         return;
       }
       if (msg.op === 'peer-post') {

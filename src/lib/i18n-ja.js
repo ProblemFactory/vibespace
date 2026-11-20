@@ -14613,6 +14613,7 @@ export default {
   "the hand-over did not land": "引き渡しが届きませんでした",
   "its agent did not open its inbox in time — the words wait for its next turn": "エージェントが時間内に受信箱を開きませんでした — 内容は次のターンを待ちます",
   "its agent takes no message mid-session — the words wait for its next turn": "エージェントはセッションの途中でメッセージを受け取りません — 内容は次のターンを待ちます",
+  "its device agent is older: update it — the words wait for its next turn": "そのマシンのデバイスエージェントが古いため更新してください — 内容は次のターンを待ちます",
   "it ended again before its agent opened its inbox": "エージェントが受信箱を開く前に再び終了しました",
   "Resumed {when} to deliver: {what} — its agent did not open its inbox within {seconds} s, so the message waits for its next turn: send anything to start it, or end and resume it": "{when} に次を届けるため再開：{what} — エージェントが {seconds} 秒以内に受信箱を開かなかったため、メッセージは次のターンを待っています：何か送るとそのターンが始まります。または終了してから再開してください",
   "Resumed {when} to deliver: {what} — its agent takes no message mid-session, so the message waits for its next turn: send anything to start it": "{when} に次を届けるため再開：{what} — エージェントはセッションの途中でメッセージを受け取らないため、メッセージは次のターンを待っています：何か送るとそのターンが始まります",
