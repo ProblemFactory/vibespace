@@ -65,6 +65,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A Background Work job that fails while its conversation is not running now shows in For you by name, once per job, with its count.
 - When a helper agent or a workflow's agents finish, VibeSpace no longer pauses while it reads the files they wrote.
 - A helper agent that worked for a long time now has its early files in Artifacts too.
+- On a phone, the Agents dialog's account list heading starts at the list's left edge instead of sitting off to the side.
 
 ## 2.369.413 — 2026-11-20
 
