@@ -204,11 +204,11 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
     const factsOf = (r) => { const e = r.listing.dirs['~/work/investor-relations']; return !!(e && e.fileCount != null) && !(r.probesLate || []).includes('~/work/investor-relations'); };
     const PFMs = require('../src/path-field-model.js');
     const scene = async (D2, slowMs, budgetMs, steps) => {
-      let clock = Date.now(), sends = 0; const t0 = Date.now(), out = {};
-      const d = D2.create({ home: HOME, repoDir: REPO, now: () => clock, call: async (op, p) => { if (op === 'dirSlice' && (p.probes || []).includes(SLOWG)) { sends++; await sleep(slowMs); } return (await runOp(op, p)).result; } });
+      let off = 0, sends = 0; const t0 = Date.now(), out = {};   // the slice's clock runs WITH real time (a call's own duration is measured) and jumps at each step
+      const d = D2.create({ home: HOME, repoDir: REPO, now: () => Date.now() + off, call: async (op, p) => { if (op === 'dirSlice' && (p.probes || []).includes(SLOWG)) { sends++; await sleep(slowMs); } return (await runOp(op, p)).result; } });
       for (const [name, at, realWait] of steps) {
         if (realWait) await sleep(Math.max(0, realWait - (Date.now() - t0)));
-        clock = t0 + at;
+        off = (t0 + at) - Date.now();
         const before = sends; const r = await d.slice({ ...SL, budgetMs });
         out[name] = { facts: factsOf(r), late: (r.probesLate || []).includes('~/work/investor-relations'), asked: PFMs.askedOf(['~/work/investor-relations'], r).length, sends: sends - before };
       }
@@ -225,7 +225,7 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
     const M2 = mutantCopies('dir-complete-slow-413', REPO), src0 = read('src/server/dir-slice.js');
     const CSTEPS = [['at0', 0, 0], ['at05', 170, 170], ['at1', 400, 400], ['at3', 2500, 450]];
     const NOJOIN = M2.load('src/server/dir-slice.js', anchored(src0, "        if (m) { if (!joins.has(m.pw)) joins.set(m.pw, []); joins.get(m.pw).push(p); continue; }   // still out: JOINED, never sent again\n", '', 'a call still out sent again'), 'nojoin');
-    const NOLAND = M2.load('src/server/dir-slice.js', anchored(src0, "        if (l) { fromLanded.push(l.fact); if (t1 - l.at >= LANDED_FRESH_MS && !m) refresh.push(p); continue; }", '', 'the kept facts never used'), 'noland');
+    const NOLAND = M2.load('src/server/dir-slice.js', anchored(src0, "        if (l && (t1 - l.at < LANDED_FRESH_MS || l.late)) { fromLanded.push(l.fact); if (t1 - l.at >= LANDED_FRESH_MS && !m) refresh.push(p); continue; }", '', 'the kept facts never used'), 'noland');
     const EXPIRE = M2.load('src/server/dir-slice.js', anchored(src0, '      for (const [lp, l] of landed) if (t1 - l.at >= PROBE_LATE_MS) landed.delete(lp);', '      for (const [lp, l] of landed) if (t1 - l.at >= LANDED_FRESH_MS) landed.delete(lp);', 'kept facts dropped after 2 s'), 'expire');
     const cj = await scene(NOJOIN, 300, 150, CSTEPS), cl = await scene(NOLAND, 300, 150, CSTEPS), ce = await scene(EXPIRE, 300, 150, CSTEPS);
     ok('③b RED CONTROLS (a shorter clock): without the JOIN the ask while the call is out has nothing; without the KEPT facts the ask after it landed has nothing; with the facts dropped after 2 s (the round\'s must) the ask 2.5 s later has nothing', !cj.at05.facts && !cl.at1.facts && !ce.at3.facts, { nojoin: cj.at05, noland: cl.at1, expire: ce.at3 });
@@ -236,14 +236,21 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
     const SLOWG = path.join(HOME, 'work', 'investor-relations');
     const twoAsks = async (D2) => { let sends = 0; const d = D2.create({ home: HOME, repoDir: REPO, call: async (op, p) => { if (op === 'dirSlice' && (p.probes || []).includes(SLOWG)) { sends++; await sleep(300); } return (await runOp(op, p)).result; } }); const q = { text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations'], budgetMs: 150 }; await Promise.all([d.slice(q), sleep(40).then(() => d.slice(q))]); return sends; };
     const M3 = mutantCopies('dir-complete-slow-413-b', REPO), src1 = read('src/server/dir-slice.js');
-    const ATLATE = M3.load('src/server/dir-slice.js', anchored(src1, '        for (const p of ps) lateProbes.set(p, { at, pw, budget: Math.max(50, budgetMs), late: false });\n', '', 'marked only when late'), 'atlate');
+    const ATLATE = M3.load('src/server/dir-slice.js', anchored(src1, '        for (const p of ps) lateProbes.set(p, { at, pw, budget: Math.max(50, budgetMs), late: false });\n', '', 'never marked'), 'atlate');
     const one = await twoAsks(DS), two = await twoAsks(ATLATE);
-    ok(`③b two asks inside the first budget: ${one} call for the slow path (the second joins the call SENT) — CONTROL marked only when it went late: ${two}`, one === 1 && two === 2, { one, two });
+    ok(`③b two asks inside the first budget: ${one} call for the slow path (the second joins the call SENT) — CONTROL never marked: ${two}`, one === 1 && two === 2, { one, two });
     const leaves = async (D2) => { const d = D2.create({ home: HOME, repoDir: REPO, call: async (op, p) => { const r = (await runOp(op, p)).result; if (op === 'dirSlice' && (p.probes || []).includes(SLOWG)) r.probes = r.probes.filter((f) => f.path !== SLOWG); return r; } }); return d.slice({ text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations'], budgetMs: 450 }); };
     const lo = await leaves(DS);
     const ANSW = M3.load('src/server/dir-slice.js', anchored(src1, '        else { const got2 = new Map(pg.filter(Boolean).map((f) => [f.path, f])); for (const p of ps) { if (got2.has(p)) pr.push(got2.get(p)); else late.add(p); } }', '        else { for (const f of pg) if (f && ps.includes(f.path)) pr.push(f); }', 'a probe left out read as answered'), 'answ');
     const loC = await leaves(ANSW);
     ok('③b a probe the ANSWER leaves out is named late (the field marks it nothing — no 新建 for a folder nobody stated) — CONTROL: read as answered', (lo.probesLate || []).includes('~/work/investor-relations') && !(loC.probesLate || []).includes('~/work/investor-relations'), { real: lo.probesLate, control: loC.probesLate });
+    // (the follow-up, 04:14Z) A FAST PATH IS NEVER SERVED STALE: a probe that answers inside its budget is asked afresh past 2 s, as it always
+    // was — a folder made in a terminal between two asks is seen; only a path whose last call went LATE is served its kept fact. CONTROL:
+    // every kept fact served for the whole window (the folder stays «not there» for up to 30 s)
+    const fresh = async (D2) => { const NEWP = path.join(HOME, 'work', 'made-later-' + Math.random().toString(36).slice(2, 7)); let clock = Date.now(); const d = D2.create({ home: HOME, repoDir: REPO, now: () => clock, call: async (op, p) => (await runOp(op, p)).result }); const q = { text: '~/work/payments', bases: ['~'], probe: [PC.toTilde(HOME, NEWP)], budgetMs: 450 }; await d.slice(q); fs.mkdirSync(NEWP); clock += 2500; const r = await d.slice(q); const e = r.listing.dirs[PC.toTilde(HOME, NEWP)]; return !!(e && e.fileCount != null); };
+    const STALE2 = M3.load('src/server/dir-slice.js', anchored(src1, '        if (l && (t1 - l.at < LANDED_FRESH_MS || l.late)) {', '        if (l) {', 'every kept fact served'), 'stale2');
+    const fr = await fresh(DS), frC = await fresh(STALE2);
+    ok('③b a FAST path is never served stale: a folder made between two asks 2.5 s apart is seen (asked afresh) — CONTROL serving every kept fact: still «not there»', fr && !frC, { fresh: fr, control: frC });
   }
 
   // a probe call that FAILS at once (the worker ended under it): late for this reply only — the listing answers, nothing is marked

@@ -159,7 +159,9 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
       for (const p of probes) {
         const m = lateProbes.get(p);
         const l = landed.get(p);
-        if (l) { fromLanded.push(l.fact); if (t1 - l.at >= LANDED_FRESH_MS && !m) refresh.push(p); continue; }   // a kept fact: USED (and refreshed behind when older than 2 s)
+        // a kept fact: USED while fresh (< 2 s); past that ONLY for a path whose last call went LATE (slow storage), refreshed behind — a
+        // path that answers inside its budget is asked afresh, as it always was (a fast path is never served stale)
+        if (l && (t1 - l.at < LANDED_FRESH_MS || l.late)) { fromLanded.push(l.fact); if (t1 - l.at >= LANDED_FRESH_MS && !m) refresh.push(p); continue; }
         if (m) { if (!joins.has(m.pw)) joins.set(m.pw, []); joins.get(m.pw).push(p); continue; }   // still out: JOINED, never sent again
         if (underLate(p)) { late.add(p); continue; }
         askNow.push(p);
@@ -170,9 +172,19 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
       // its mark for the window)
       const send = (ps) => {
         const at = now();
-        const pw = call('dirSlice', { dirs: [], probes: ps }).then((r) => (r && r.probes) || [], () => null);   // a call that fails is late, never the listing's end
+        // a call that fails is late, never the listing's end; only the pool's OWN deadline (`safeFsTimeout`) is a hang — any other failure,
+        // whenever it comes (a worker that died under another op's deadline), is no hang: its mark goes
+        const pw = call('dirSlice', { dirs: [], probes: ps }).then((r) => (r && r.probes) || [], (e) => ({ failed: true, deadline: !!(e && e.safeFsTimeout) }));
         for (const p of ps) lateProbes.set(p, { at, pw, budget: Math.max(50, budgetMs), late: false });
-        pw.then((r) => { const fast = now() - at < Math.max(50, budgetMs); for (const p of ps) { const m = lateProbes.get(p); if (m && m.pw === pw && (r || fast)) lateProbes.delete(p); } if (!r) return; const t2 = now(); for (const f of r) if (f && ps.includes(f.path) && !f.err) landed.set(f.path, { at: t2, fact: f }); if (landed.size > 2000) for (const k of [...landed.keys()].slice(0, 500)) landed.delete(k); });
+        pw.then((r) => {
+          const ok = Array.isArray(r), t2 = now(), late = t2 - at >= Math.max(50, budgetMs);
+          for (const p of ps) { const m = lateProbes.get(p); if (m && m.pw === pw && !(r && r.deadline)) lateProbes.delete(p); }   // (the pool's deadline: a hung path keeps its mark for the window)
+          if (!ok) return;
+          // a landing writes its fact only when no NEWER fact for that path has landed since this call was SENT; it remembers whether the
+          // call went late (only such a path is served a kept fact past 2 s)
+          for (const f of r) if (f && ps.includes(f.path) && !f.err) { const cur = landed.get(f.path); if (!cur || cur.sentAt <= at) landed.set(f.path, { at: t2, sentAt: at, late, fact: f }); }
+          if (landed.size > 2000) for (const k of [...landed.keys()].slice(0, 500)) landed.delete(k);
+        });
         return pw;
       };
       if (refresh.length) send(refresh);   // not waited for: this reply answers with the kept facts
@@ -182,7 +194,7 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
       const outs = await Promise.all(races.map((x) => Promise.race([x.pw, deadline])));
       outs.forEach((pg, i) => {
         const { ps } = races[i];
-        if (pg === null) for (const p of ps) late.add(p);   // the call FAILED: late for this reply only
+        if (pg && !Array.isArray(pg) && pg.failed) for (const p of ps) late.add(p);   // the call FAILED: late for this reply only
         else if (pg === 'late') { for (const p of ps) { late.add(p); const m = lateProbes.get(p); if (m) m.late = true; } }
         else { const got2 = new Map(pg.filter(Boolean).map((f) => [f.path, f])); for (const p of ps) { if (got2.has(p)) pr.push(got2.get(p)); else late.add(p); } }   // a probe the answer left out is late, never «answered»
       });
