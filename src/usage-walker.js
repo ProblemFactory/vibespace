@@ -60,6 +60,51 @@ const DOOR = require('./mount-door.js'); // B-afc4: the blocked-path door — as
 // spellings over the same table, so a one-sided edit fails there.
 const { isFixtureProjectDir, isFixtureSid } = require('./fixture-guard.js');
 const _saidBlocked = new Set();   // B-afc4: blocked project folders already said
+// ── B-5278 (lane lg-remote-hardening; the coordinator's r442) ──
+// (L1) THE RUN's BOUND, opt-in (`maxOutBytes` / `maxMs`): the shipped scanner's own B-6ded law, here too. A walk that has
+// read something stops after a WHOLE line once its output or its time is spent: the file it stopped in keeps that line's
+// cursor (a compressed rollout read part-way is marked `zpart`), the files after it keep theirs, and the answer says
+// `more` — so a backlog of any size lands over several walks, where one whole-history walk passed its child's buffer or
+// its deadline and failed every time. No bound given (the hub's own in-process walk) = none, as before.
+// (L3) ONE EVENT's strings are bounded by what a vendor writes: an id (rid / mid) over ID_MAX bytes is no vendor id — the
+// event is DROPPED AND COUNTED (`oversize`, said to the hub), never cut (a cut id could collide in the dedup); a model /
+// tier / effort over NAME_MAX bytes, or a path over PATH_MAX, reads as unknown (null). An event is then ~10 KB at most.
+const ID_MAX = 256, NAME_MAX = 128, PATH_MAX = 4096;
+const overB = (v, max) => typeof v === 'string' && Buffer.byteLength(v, 'utf8') > max;
+const badS = (v, max) => v !== undefined && v !== null && (typeof v !== 'string' || Buffer.byteLength(v, 'utf8') > max);   // no string, or over
+function boundedEvent(ev) {
+  if (badS(ev.rid, ID_MAX) || badS(ev.mid, ID_MAX)) return null;   // an id that is no string is no vendor id either
+  for (const k of ['model', 'tier']) if (badS(ev[k], NAME_MAX)) ev[k] = null;
+  if (badS(ev.effort, NAME_MAX)) ev.effort = undefined;
+  if (badS(ev.cwd, PATH_MAX)) ev.cwd = null;
+  if (badS(ev.wcwd, PATH_MAX)) ev.wcwd = undefined;
+  return ev;
+}
+// the key a cursor keeps of an id (its lastRid, a pending mid): the id itself, or — one over its bound, dropped — its first
+// ID_MAX + 1 characters, still over: the map the hub keeps never holds an unbounded id
+const idKey = (v) => (typeof v === 'string' && Buffer.byteLength(v, 'utf8') <= ID_MAX ? v : String(v).slice(0, ID_MAX + 1));
+// (L2) THE CURSOR MAP = THE FILES ON DISK, by the hub's own proof (src/usage-history.js L0, the cursor writer's): an
+// entry is dropped only when its OWN folder was listed this walk, no longer holds its file, and still holds the file of
+// another entry (a live one). An EMPTY listing (exactly what an unmounted mount point answers), a folder that could not be
+// read, a blocked one, one gone with its files: nothing dropped — unknown is never read as empty (a live cursor dropped
+// re-walks its transcript and appends every request again). Entries were never dropped: the map grew with every file
+// ever walked (the hub hands it down on one control line). OPT-IN (`prune`): the device's walk child asks it (the map it
+// hands the hub, its push cursor); the hub's own in-process walk keeps its cursor writer's own hourly L0 sweep.
+const keysUnder = (cursors, root) => {
+  const by = new Map(), pre = root + path.sep;
+  for (const k of Object.keys(cursors)) {
+    if (!k.startsWith(pre)) continue;
+    const top = k.slice(pre.length).split(path.sep)[0];
+    if (!by.has(top)) by.set(top, []);
+    by.get(top).push(k);
+  }
+  return by;
+};
+function goneKeys(keys, listed) {   // a folder holding a LISTED entry was listed: its other entries, not listed, are gone
+  const live = new Set();
+  for (const k of keys) if (listed.has(k)) live.add(path.dirname(k));
+  return keys.filter((k) => !listed.has(k) && live.has(path.dirname(k)));
+}
 
 // A UUIDv7's millisecond stamp (its first 48 bits); null for any other id
 // shape. Codex mints thread AND turn ids as v7, so "minted after the fork" is
@@ -196,7 +241,8 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
   // onEvent hook (parsed objects instead of NDJSON strings) are what let
   // UsageHistory.scan() delete its own copy of this walk. Defaults keep the
   // daemon/scan-op call shape byte-identical.
-  projectsDir = null, codexSessionsDir = null, cursors: injectedCursors = null, onEvent = null } = {}, meter) {
+  projectsDir = null, codexSessionsDir = null, cursors: injectedCursors = null, onEvent = null,
+  maxOutBytes = Infinity, maxMs = Infinity, now = Date.now, prune = false } = {}, meter) {
   const PROJECTS = projectsDir || path.join(home, '.claude', 'projects');
   // a directory read or a stat: counted, a yield every opsBudget — and after a yield the folder's mount is asked again (a
   // mount that stopped answering meanwhile is never read: the walk leaves that folder, said once) → true = leave it
@@ -216,7 +262,13 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
   if (!cursors) { try { cursors = JSON.parse(fs.readFileSync(cursorFile, 'utf-8')) || {}; } catch { cursors = {}; } }
   const out = [];
   let filesTouched = 0;
-  const emit = onEvent ? ((ev) => onEvent(ev)) : ((ev) => out.push(JSON.stringify(ev)));
+  // B-5278 (L1 / L3): the run's bound and the event's bound (see the module's head)
+  const T0 = now(), bounded = Number(maxOutBytes) > 0 && Number(maxOutBytes) < Infinity || Number(maxMs) > 0 && Number(maxMs) < Infinity;
+  const run = { out: 0, readAny: false, full: false, oversize: 0, pruned: 0 };
+  const spent = () => run.full || (run.full = bounded && run.readAny && (run.out >= Number(maxOutBytes) || now() - T0 >= Number(maxMs)));
+  const put = onEvent ? ((ev) => { if (bounded) run.out += Buffer.byteLength(JSON.stringify(ev), 'utf8') + 1; onEvent(ev); })
+    : ((ev) => { const line = JSON.stringify(ev); run.out += Buffer.byteLength(line, 'utf8') + 1; out.push(line); });
+  const emit = (ev) => { if (!boundedEvent(ev)) { run.oversize++; return; } put(ev); };
 
   const projectCwdFor = makeProjectCwdReader();
 
@@ -228,8 +280,8 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     const u = msg.usage; if (!u || typeof u !== 'object') return;
     const rid = r.requestId || msg.id || r.uuid;
     if (!rid) return;
-    if (rid === cur.lastRid) return; // contiguous duplicate of the same request
-    cur.lastRid = rid;
+    if (idKey(rid) === cur.lastRid) return; // contiguous duplicate of the same request
+    cur.lastRid = idKey(rid); // B-5278 (L3): bounded in the cursor
     const cc = u.cache_creation || {};
     const own = r.cwd || null;
     const par = (info && info.pcwd) || null;  // null for a top-level transcript
@@ -279,6 +331,8 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
           onLine(line);
           // the budget point: only here, after a WHOLE line is in the cursor
           if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; }
+          run.readAny = true;
+          if (spent()) return; // B-5278 (L1) the run's bound: stop after this WHOLE line (its cursor is that line's)
         }
         rest = data.subarray(lineStart);
       }
@@ -288,7 +342,9 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
 
   let projDirs = [];
   if (!DOOR.blocked(PROJECTS)) { try { projDirs = fs.readdirSync(PROJECTS); } catch { } }
+  const projKeys = keysUnder(cursors, PROJECTS);   // B-5278 (L2): this map's entries, by their project folder
   for (const pd of projDirs) {
+    if (spent()) break; // B-5278 (L1) the run's bound: the folders after it keep their cursors
     if (isFixtureProjectDir(pd)) continue; // a suite's throwaway cwd — never usage
     const pdAbs = path.join(PROJECTS, pd);
     // B-afc4: a project folder under a BLOCKED mount (a symlinked transcript dir) is skipped this pass, said once
@@ -324,9 +380,11 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     }
     if (left) continue;
     mains.sort(); // the sibling fallback must pick the SAME file in both spellings
+    let whole = true;   // B-5278 (L2): every listed file of this folder was reached this walk
     for (const { fp, sid, origin, wf, agent } of files) {
+      if (spent()) { whole = false; break; } // B-5278 (L1) the run's bound: the files after it keep their cursors
       if (isFixtureSid(sid)) continue; // synthetic conversation id — no request ever happened
-      if (yield* op(pdAbs)) break;
+      if (yield* op(pdAbs)) { whole = false; break; }
       let st; try { st = fs.statSync(fp); } catch { continue; }
       if (!st.isFile()) continue;
       const cur = Object.assign({}, cursors[fp] || { offset: 0, lastRid: null }); // a copy: never the caller's entry (B-6ded)
@@ -344,6 +402,8 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       delete cur.sid;
       cursors[fp] = cur;
     }
+    // B-5278 (L2): this folder's listings were read whole — an entry is dropped only by the proof (goneKeys)
+    if (prune && whole) for (const k of goneKeys(projKeys.get(pd) || [], new Set(files.map((f) => f.fp)))) if (Object.prototype.hasOwnProperty.call(cursors, k)) { delete cursors[k]; run.pruned++; }
   }
 
   // ── Codex rollouts (v2, R4): ~/.codex/sessions/**/rollout-*-<threadId>.jsonl
@@ -355,9 +415,14 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
   // (an incremental scan may start mid-file). input INCLUDES cached → fresh =
   // difference; rollouts report no cache-write counts (cw 0).
   const codexDir = codexSessionsDir || path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions');
-  let rollouts = [];
-  try { rollouts = fs.readdirSync(codexDir, { recursive: true }); } catch { }
+  let rollouts = [], codexRead = false;
+  try { rollouts = fs.readdirSync(codexDir, { recursive: true }); codexRead = true; } catch { }
+  if (prune && codexRead) {   // B-5278 (L2): by the proof (a runtime whose listing does not go deeper lists no rollout: nothing dropped)
+    const listed = new Set(rollouts.map((rel) => path.join(codexDir, String(rel))));
+    for (const k of goneKeys([].concat(...keysUnder(cursors, codexDir).values()), listed)) { delete cursors[k]; run.pruned++; }
+  }
   for (const rel of rollouts) {
+    if (spent()) break; // B-5278 (L1) the run's bound: the rollouts after it keep their cursors
     const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i.exec(String(rel));
     if (!m) continue;
     if (isFixtureSid(m[1])) continue; // synthetic thread id — same rule, both harnesses
@@ -376,8 +441,9 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       if (!zst) { yield* scanFileWith(fp, cur, st.size, onLine); return; }
       let plain; try { plain = zstdPlain(fs.readFileSync(fp)); } catch { return; }
       if (plain.length < cur.offset) { cur.offset = 0; cur.lastRid = null; }
-      yield* scanBufferSteps(plain, cur, onLine, meter);
-      cur.zsize = st.size; delete cur.zpart; // `zpart`: the shipped scanner's run stopped part-way (its bound) — read on
+      const wholeRead = yield* scanBufferSteps(plain, cur, onLine, meter, () => { run.readAny = true; return spent(); });
+      cur.zsize = st.size;
+      if (wholeRead) delete cur.zpart; else cur.zpart = 1; // `zpart`: a run stopped part-way (its bound) — the next one reads on from its offset
     };
     yield* scanRollout((line) => {
       // FORK REPLAY (2.369.203): a forked rollout (session_meta
@@ -417,9 +483,10 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       if (line.indexOf('"turn_context"') >= 0) {
         let r; try { r = JSON.parse(line); } catch { return; }
         if (r.type === 'turn_context' && r.payload) {
-          if (r.payload.model) cur.model = r.payload.model;
-          if (r.payload.cwd) cur.cwd = r.payload.cwd;
-          if (r.payload.effort) cur.effort = String(r.payload.effort); // reasoning effort per turn (0.149+) — persisted like model
+          // B-5278 (L3): persisted in the CURSOR — bounded as the event is (an over-long value reads as unknown)
+          if (r.payload.model) cur.model = overB(r.payload.model, NAME_MAX) ? null : r.payload.model;
+          if (r.payload.cwd) cur.cwd = overB(r.payload.cwd, PATH_MAX) ? null : r.payload.cwd;
+          if (r.payload.effort) cur.effort = overB(String(r.payload.effort), NAME_MAX) ? undefined : String(r.payload.effort); // reasoning effort per turn (0.149+) — persisted like model
         }
         return;
       }
@@ -433,7 +500,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
         let r; try { r = JSON.parse(line); } catch { return; }
         if (r.type === 'token_usage_record' && r.payload) {
           const u = r.payload.usage || {};
-          cur.pendMid = r.payload.response_id ? String(r.payload.response_id) : null;
+          cur.pendMid = r.payload.response_id ? idKey(String(r.payload.response_id)) : null; // B-5278 (L3): bounded in the cursor (over: still over, dropped)
           cur.pendTotal = typeof u.total_tokens === 'number' ? u.total_tokens : null;
           return;
         }
@@ -450,8 +517,8 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
       const pendMid = cur.pendMid || null, pendTotal = cur.pendTotal;
       delete cur.pendMid; delete cur.pendTotal; // consumed by this token_count whether or not it emits
       if (cur.forkTs && ts <= cur.forkTs + 2000) return; // a fork's replay of its ancestors' requests (FORK REPLAY above)
-      if (rid === cur.lastRid) return;
-      cur.lastRid = rid;
+      if (idKey(rid) === cur.lastRid) return;
+      cur.lastRid = idKey(rid); // B-5278 (L3): bounded in the cursor
       const cached = last.cached_input_tokens || 0;
       const mid = pendMid && (pendTotal == null || typeof last.total_tokens !== 'number' || pendTotal === last.total_tokens) ? pendMid : undefined;
       emit({
@@ -473,7 +540,7 @@ function* walkSteps({ home = os.homedir(), cursorFile = defaultCursorFile(),
     cursors[fp] = cur;
   }
 
-  return { events: out, cursors, cursorFile, filesTouched };
+  return { events: out, cursors, cursorFile, filesTouched, more: run.full, oversize: run.oversize, pruned: run.pruned };
 }
 
 // zstd rollouts (codex ≥0.153 may write rollout-*.jsonl.zst; S3). Node ≥22.15
@@ -498,7 +565,7 @@ function zstdPlain(buf) {
   return parts.length === 1 ? parts[0] : Buffer.concat(parts);
 }
 // A decompressed rollout's lines — the same budget points as a file's.
-function* scanBufferSteps(data, cur, onLine, meter) {
+function* scanBufferSteps(data, cur, onLine, meter, stopAfterLine = null) {   // → false when the run's bound stopped it before the end
   let lineStart = cur.offset, idx;
   while ((idx = data.indexOf(10, lineStart)) !== -1) {
     const line = data.subarray(lineStart, idx).toString('utf8');
@@ -506,8 +573,10 @@ function* scanBufferSteps(data, cur, onLine, meter) {
     const nb = Buffer.byteLength(line, 'utf8') + 1;
     cur.offset += nb;
     onLine(line);
+    if (stopAfterLine && stopAfterLine()) return false; // B-5278 (L1): after a WHOLE line
     if ((meter.spent += nb) >= meter.budget) { meter.spent %= meter.budget; yield; }
   }
+  return true;
 }
 /** The synchronous spelling (exported; the budget never fires). */
 function scanBufferWith(data, cur, onLine) {
@@ -515,4 +584,4 @@ function scanBufferWith(data, cur, onLine) {
   while (!steps.next().done) { }
 }
 
-module.exports = { runUsageWalk, defaultCursorFile, zstdPlain, scanBufferWith, ZSTD_OK, makeProjectCwdReader, encodeCwd };
+module.exports = { runUsageWalk, defaultCursorFile, zstdPlain, scanBufferWith, ZSTD_OK, makeProjectCwdReader, encodeCwd, ID_MAX, NAME_MAX, PATH_MAX, boundedEvent };

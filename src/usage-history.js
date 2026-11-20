@@ -735,6 +735,8 @@ class UsageHistory {
         },
       });
       filesTouched = walk.filesTouched;
+      // B-5278 (L3): the walk's dropped records (an id over its bound) are said once — this machine's own walk too
+      if (walk.oversize) console.warn(require('./agentd/answer-caps.js').droppedSaid('this machine', walk.oversize, 'usage walk'));
       // round 3 (smaller 5): THE RE-WALK AFTER A KILL RE-APPENDS NOTHING IT ALREADY APPENDED — a kill between the shard append
       // and the cursor write re-walks those rows (20 kills: 1 128 rows for 152 request ids, compounding). The ledger knows
       // every request id it holds once warm: the walk waits for the warm (its rows are in memory; the checks below re-run

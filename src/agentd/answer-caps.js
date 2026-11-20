@@ -69,6 +69,16 @@ function refusalOf(obj, bytes, cap = LINE_MAX) {
 // and its pending cursor is dropped — nothing is acked past refused events, and the next walk starts from the cursor
 // saved before. A walk with no new events commits its cursor at once. `commit(cursors)` writes the agent's cursor file.
 const PUSH_LINES = 500, PUSH_TEXT = 8 * MiB;
+// B-5278 (L1; the coordinator's r442): THE WALK's OWN BOUND. The push's walk child stops after a whole line once its events
+// pass PUSH_WALK_BYTES or its time PUSH_WALK_MS (src/usage-walker.js, the shipped scanner's law), far inside the child's
+// 64 MiB buffer and 120 s; a walk STOPPED ON ITS BOUND says so (its manifest's __more__), and the rest of the backlog is
+// walked after THAT batch's ack — never before: nothing is walked, sent or acked past what was sent. A kick meanwhile waits
+// for that ack, at most PUSH_ACK_WAIT_MS — the hub leaves a batch unacked on purpose when its rows were not made durable (a
+// held month), and the device then walks again from its committed cursor, as it always did. A whole-history walk used to
+// pass the child's buffer or deadline and fail every time, re-reading the whole history at each transcript change.
+// The walk's dropped events (an id over its bound: src/usage-walker.js) ride the batch's LAST chunk (`oversize`) and the
+// hub says them: a dropped usage event is money not counted, never silent.
+const PUSH_WALK_BYTES = 24 * MiB, PUSH_WALK_MS = 60 * 1000, PUSH_ACK_WAIT_MS = 60 * 1000;
 function pushChunksOf(lines, maxLines = PUSH_LINES, maxText = PUSH_TEXT) {
   const chunks = [];
   for (let i = 0, n = 0, start = 0; i <= lines.length; i++) {
@@ -78,29 +88,63 @@ function pushChunksOf(lines, maxLines = PUSH_LINES, maxText = PUSH_TEXT) {
   }
   return chunks;
 }
-function usagePushWalked(st, stdout, send, commit, { maxLines, maxText } = {}) {
+function usagePushWalked(st, stdout, send, commit, { maxLines, maxText, now = Date.now } = {}) {
   const lines = String(stdout || '').split('\n').filter(Boolean);
   const last = lines.pop();
   let manifest = null; try { manifest = JSON.parse(last || ''); } catch { }
   if (!manifest || !manifest.__cursors__) return { chunks: 0 };
-  if (!lines.length) { commit(manifest.__cursors__); return { committed: true, chunks: 0 }; }   // no new events: nothing to lose
+  const more = manifest.__more__ === true, oversize = Number(manifest.__oversize__) > 0 ? Math.floor(Number(manifest.__oversize__)) : 0;
+  if (!lines.length && !oversize) { commit(manifest.__cursors__); return { committed: true, more, chunks: 0 }; }   // no new events: nothing to lose
   const seq = ++st.seq;
   st.pendingCursors.set(seq, manifest.__cursors__);
-  const chunks = pushChunksOf(lines, maxLines, maxText);
+  if (more) { st.moreSeq = seq; st.moreAt = now(); }   // the rest is walked after THIS batch's ack
+  const chunks = lines.length ? pushChunksOf(lines, maxLines, maxText) : [[]];   // only dropped ones: their count still goes
   for (let c = 0; c < chunks.length; c++) {
     const isLast = c === chunks.length - 1;
-    let sent = true; try { sent = send({ op: 'usage-events', batch: chunks[c], ...(isLast ? { seq } : {}) }) !== false; } catch { sent = false; }
-    if (!sent) { st.pendingCursors.delete(seq); return { seq, refusedAt: c, chunks: chunks.length }; }
+    let sent = true; try { sent = send({ op: 'usage-events', batch: chunks[c], ...(isLast ? { seq, ...(oversize ? { oversize } : {}) } : {}) }) !== false; } catch { sent = false; }
+    if (!sent) { st.pendingCursors.delete(seq); if (st.moreSeq === seq) { delete st.moreSeq; delete st.moreAt; } return { seq, refusedAt: c, chunks: chunks.length, more }; }
   }
-  return { seq, sent: true, chunks: chunks.length };
+  return { seq, sent: true, chunks: chunks.length, more };
 }
-// the hub's ack of batch `seq` (its durable ingest): that batch's cursor commits, and every older pending one is dropped
-function usagePushAcked(st, seq, commit) {
+// may a walk start now? → 0, or the ms until it may: a walk stopped on its bound has its batch's ack awaited (≤ the wait)
+function usagePushWaitMs(st, t = Date.now()) {
+  if (!st || st.moreSeq == null) return 0;
+  if (!st.pendingCursors.has(st.moreSeq)) { delete st.moreSeq; delete st.moreAt; return 0; }
+  return Math.max(0, PUSH_ACK_WAIT_MS - (t - st.moreAt));
+}
+// the hub's ack of batch `seq` (its durable ingest): that batch's cursor commits, and every older pending one is dropped;
+// when that batch's walk stopped on its bound, `onMore` walks the rest (B-5278 L1)
+function usagePushAcked(st, seq, commit, onMore) {
   const cur = st && st.pendingCursors.get(seq);
   if (!cur) return false;
+  const more = st.moreSeq != null && st.moreSeq <= seq;
   for (const k of [...st.pendingCursors.keys()]) if (k <= seq) st.pendingCursors.delete(k);
+  if (more) { delete st.moreSeq; delete st.moreAt; }
   commit(cur);
+  if (more && typeof onMore === 'function') onMore();
   return true;
 }
+// B-5278 (L2): the hub-kept cursor map without each claude entry's `sid` — the walker sets it from the path at every walk
+// (the oldest agent that says usage-scan-hub-cursor too: test-usage-walk-bounds runs it), so it never needs to ride the
+// map the hub hands down on one control line (a fifth of a main transcript's entry)
+function cursorsWithoutSid(map) {
+  const out = {};
+  for (const [k, v] of Object.entries(map || {})) {
+    if (v && typeof v === 'object' && !Array.isArray(v) && Object.prototype.hasOwnProperty.call(v, 'sid')) { const { sid, ...rest } = v; out[k] = rest; } else out[k] = v;
+  }
+  return out;
+}
+// the shipped scanner's own count line of dropped events (`{"__oversize__":N}`, its output's last line) → N, else 0
+function oversizeOf(text) {
+  const t = String(text || '').trimEnd(), i = t.lastIndexOf('\n'), last = t.slice(i + 1);
+  if (last.indexOf('"__oversize__"') < 0) return 0;
+  let o = null; try { o = JSON.parse(last); } catch { return 0; }
+  const n = o && Number(o.__oversize__);
+  return n > 0 ? Math.floor(n) : 0;
+}
+// the hub's journal line for a walk's dropped events (each road says it once: a dropped usage event is money not counted)
+function droppedSaid(machine, n, road) {
+  return `[usage] ${machine || 'a machine'}: ${n} usage record${n === 1 ? '' : 's'} left out of its ${road || 'walk'} — an id longer than 256 bytes is no vendor id (B-5278); ${n === 1 ? 'its' : 'their'} tokens are not counted`;
+}
 
-module.exports = { MiB, FRAME_MAX, LINE_MAX, SMALL, CAPS, capOf, sizeOf, refusalOf, PUSH_LINES, PUSH_TEXT, pushChunksOf, usagePushWalked, usagePushAcked };
+module.exports = { MiB, FRAME_MAX, LINE_MAX, SMALL, CAPS, capOf, sizeOf, refusalOf, PUSH_LINES, PUSH_TEXT, PUSH_WALK_BYTES, PUSH_WALK_MS, PUSH_ACK_WAIT_MS, pushChunksOf, usagePushWalked, usagePushWaitMs, usagePushAcked, droppedSaid, cursorsWithoutSid, oversizeOf };

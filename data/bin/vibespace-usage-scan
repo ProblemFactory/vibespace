@@ -58,6 +58,41 @@ const T0 = Date.now();
 let outBytes = 0, readAny = false, full = false;
 function emit(s) { out.push(s); outBytes += Buffer.byteLength(s, 'utf8') + 1; }
 function spent() { return full || (full = readAny && (outBytes >= MAX_OUT || Date.now() - T0 >= MAX_MS)); }
+// B-5278 (MIRROR of src/usage-walker.js — test-usage-walk-bounds drives both): ONE EVENT's strings bounded by what a vendor
+// writes — an id over ID_MAX bytes is no vendor id: the event is DROPPED AND COUNTED (the count's own line ends the output,
+// `{"__oversize__":N}`, which the hub says), never cut; a model / tier / effort over NAME_MAX, a path over PATH_MAX, reads as
+// unknown. And THE CURSOR MAP = THE FILES ON DISK, by the hub's own proof: an entry is dropped only when its OWN folder was
+// listed this run, no longer holds its file, and still holds the file of another entry — an empty listing (an unmounted
+// mount point), a folder that could not be read, one gone with its files: nothing dropped.
+const ID_MAX = 256, NAME_MAX = 128, PATH_MAX = 4096;
+const overB = (v, max) => typeof v === 'string' && Buffer.byteLength(v, 'utf8') > max;
+const badS = (v, max) => v !== undefined && v !== null && (typeof v !== 'string' || Buffer.byteLength(v, 'utf8') > max);   // no string, or over
+function boundedEvent(ev) {
+  if (badS(ev.rid, ID_MAX) || badS(ev.mid, ID_MAX)) return null;   // an id that is no string is no vendor id either
+  for (const k of ['model', 'tier']) if (badS(ev[k], NAME_MAX)) ev[k] = null;
+  if (badS(ev.effort, NAME_MAX)) ev.effort = undefined;
+  if (badS(ev.cwd, PATH_MAX)) ev.cwd = null;
+  if (badS(ev.wcwd, PATH_MAX)) ev.wcwd = undefined;
+  return ev;
+}
+const idKey = (v) => (typeof v === 'string' && Buffer.byteLength(v, 'utf8') <= ID_MAX ? v : String(v).slice(0, ID_MAX + 1));   // an id as a cursor keeps it
+function goneKeys(keys, listed) {   // a folder holding a LISTED entry was listed: its other entries, not listed, are gone
+  const live = new Set();
+  for (const k of keys) if (listed.has(k)) live.add(path.dirname(k));
+  return keys.filter((k) => !listed.has(k) && live.has(path.dirname(k)));
+}
+let oversize = 0;
+function emitEv(ev) { if (!boundedEvent(ev)) { oversize++; return; } emit(JSON.stringify(ev)); }
+const keysUnder = (root) => {
+  const by = new Map(), pre = root + path.sep;
+  for (const k of Object.keys(cursors)) {
+    if (!k.startsWith(pre)) continue;
+    const top = k.slice(pre.length).split(path.sep)[0];
+    if (!by.has(top)) by.set(top, []);
+    by.get(top).push(k);
+  }
+  return by;
+};
 // A UUIDv7's millisecond stamp (its first 48 bits); null for any other id
 // shape. Codex mints thread AND turn ids as v7, so "minted after the fork" is
 // readable off a turn id itself (FORK REPLAY's identity end).
@@ -168,12 +203,12 @@ function handleLine(line, cur, info) {
   const u = msg.usage; if (!u || typeof u !== 'object') return;
   const rid = r.requestId || msg.id || r.uuid;
   if (!rid) return;
-  if (rid === cur.lastRid) return; // contiguous duplicate of the same request
-  cur.lastRid = rid;
+  if (idKey(rid) === cur.lastRid) return; // contiguous duplicate of the same request
+  cur.lastRid = idKey(rid); // B-5278: bounded in the cursor
   const cc = u.cache_creation || {};
   const own = r.cwd || null;
   const par = (info && info.pcwd) || null;  // null for a top-level transcript
-  emit(JSON.stringify({
+  emitEv({
     rid,
     // message.id join field (2.267.3 rule — live stdout records lack
     // requestId, so per-message billing lookups join on mid): keep field
@@ -194,11 +229,12 @@ function handleLine(line, cur, info) {
     cr: u.cache_read_input_tokens || 0,
     o: u.output_tokens || 0,
     tier: u.service_tier || null,
-  }));
+  });
 }
 
 let projDirs = [];
 try { projDirs = fs.readdirSync(PROJECTS); } catch { }
+const projKeys = keysUnder(PROJECTS);   // B-5278: this map's entries, by their project folder
 for (const pd of projDirs) {
   if (spent()) break; // the run's bound
   if (isFixtureProjectDir(pd)) continue; // a suite's throwaway cwd — never usage
@@ -229,8 +265,9 @@ for (const pd of projDirs) {
     }
   }
   mains.sort(); // the sibling fallback must pick the SAME file in both spellings
+  let whole = true;   // B-5278: every listed file of this folder was reached this run
   for (const { fp, sid, origin, wf, agent } of files) {
-    if (spent()) break; // the run's bound: the files after it keep their cursors
+    if (spent()) { whole = false; break; } // the run's bound: the files after it keep their cursors
     if (isFixtureSid(sid)) continue; // synthetic conversation id — no request ever happened
     let st; try { st = fs.statSync(fp); } catch { continue; }
     if (!st.isFile()) continue;
@@ -246,6 +283,8 @@ for (const pd of projDirs) {
     delete cur.sid;
     cursors[fp] = cur;
   }
+  // B-5278: this folder's listings were read whole — an entry is dropped only by the proof (goneKeys)
+  if (whole) for (const k of goneKeys(projKeys.get(pd) || [], new Set(files.map((f) => f.fp)))) if (Object.prototype.hasOwnProperty.call(cursors, k)) delete cursors[k];
 }
 
 // zstd rollouts (codex ≥0.153 may write rollout-*.jsonl.zst; S3). Node ≥22.15
@@ -286,8 +325,12 @@ function scanBufferWith(data, cur, onLine) {   // → false when the run's bound
 // cumulative token total (monotonic per thread); model/cwd persist in the
 // cursor; input INCLUDES cached → fresh = difference; no cache-write counts.
 const CODEX_DIR = path.join(process.env.CODEX_HOME || path.join(HOME, '.codex'), 'sessions');
-let rollouts = [];
-try { rollouts = fs.readdirSync(CODEX_DIR, { recursive: true }); } catch { }
+let rollouts = [], codexRead = false;
+try { rollouts = fs.readdirSync(CODEX_DIR, { recursive: true }); codexRead = true; } catch { }
+if (codexRead) {   // B-5278: by the proof (a runtime whose listing does not go deeper lists no rollout: nothing dropped)
+  const listed = new Set(rollouts.map((rel) => path.join(CODEX_DIR, String(rel))));
+  for (const k of goneKeys([].concat(...keysUnder(CODEX_DIR).values()), listed)) delete cursors[k];
+}
 for (const rel of rollouts) {
   if (spent()) break; // the run's bound
   const m = /rollout-.*-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl(\.zst)?$/i.exec(String(rel));
@@ -348,9 +391,10 @@ for (const rel of rollouts) {
     if (line.indexOf('"turn_context"') >= 0) {
       let r; try { r = JSON.parse(line); } catch { return; }
       if (r.type === 'turn_context' && r.payload) {
-        if (r.payload.model) cur.model = r.payload.model;
-        if (r.payload.cwd) cur.cwd = r.payload.cwd;
-        if (r.payload.effort) cur.effort = String(r.payload.effort); // reasoning effort per turn (0.149+) — persisted like model
+        // B-5278: persisted in the CURSOR — bounded as the event is (mirror)
+        if (r.payload.model) cur.model = overB(r.payload.model, NAME_MAX) ? null : r.payload.model;
+        if (r.payload.cwd) cur.cwd = overB(r.payload.cwd, PATH_MAX) ? null : r.payload.cwd;
+        if (r.payload.effort) cur.effort = overB(String(r.payload.effort), NAME_MAX) ? undefined : String(r.payload.effort); // reasoning effort per turn (0.149+) — persisted like model
       }
       return;
     }
@@ -363,7 +407,7 @@ for (const rel of rollouts) {
       let r; try { r = JSON.parse(line); } catch { return; }
       if (r.type === 'token_usage_record' && r.payload) {
         const u = r.payload.usage || {};
-        cur.pendMid = r.payload.response_id ? String(r.payload.response_id) : null;
+        cur.pendMid = r.payload.response_id ? idKey(String(r.payload.response_id)) : null; // B-5278: bounded in the cursor
         cur.pendTotal = typeof u.total_tokens === 'number' ? u.total_tokens : null;
         return;
       }
@@ -380,11 +424,11 @@ for (const rel of rollouts) {
     const pendMid = cur.pendMid || null, pendTotal = cur.pendTotal;
     delete cur.pendMid; delete cur.pendTotal; // consumed by this token_count whether or not it emits
     if (cur.forkTs && ts <= cur.forkTs + 2000) return; // a fork's replay of its ancestors' requests (FORK REPLAY above)
-    if (rid === cur.lastRid) return;
-    cur.lastRid = rid;
+    if (idKey(rid) === cur.lastRid) return;
+    cur.lastRid = idKey(rid); // B-5278: bounded in the cursor
     const cached = last.cached_input_tokens || 0;
     const mid = pendMid && (pendTotal == null || typeof last.total_tokens !== 'number' || pendTotal === last.total_tokens) ? pendMid : undefined;
-    emit(JSON.stringify({
+    emitEv({
       rid, mid, be: 'codex', ts, sid,
       model: cur.model || null,
       cwd: cur.cwd || null,
@@ -397,7 +441,7 @@ for (const rel of rollouts) {
       cr: cached,
       o: last.output_tokens || 0,
       tier: null,
-    }));
+    });
   });
   cursors[fp] = cur;
 }
@@ -409,6 +453,7 @@ for (const rel of rollouts) {
 // FIRST, with its error (EPIPE), and only then emits 'error' — the release
 // wrote the cursor there, past every event the hub never received.
 process.stdout.on('error', () => process.exit(1));
+if (oversize) out.push(JSON.stringify({ __oversize__: oversize }));   // B-5278: the dropped events' count, its own line (no rid: an older hub's ingest skips it)
 process.stdout.write(out.join('\n') + (out.length ? '\n' : ''), (err) => {
   if (err) { process.exitCode = 1; return; }
   try {

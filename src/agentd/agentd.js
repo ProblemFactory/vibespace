@@ -165,9 +165,15 @@ if (process.argv.includes('--usage-scan-child')) {
       if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('usage-scan: the hub cursor on stdin is not an object');
       opts.cursors = j; fromHub = true;
     }
+    // B-5278 (L1): the run's bound — the caller's (the push: its own; the hub's usage-scan: its harvest's), else the shipped
+    // scanner's own 32 MiB / 60 s; a walk stopped on it says so (__more__), and its dropped events' count rides the manifest
+    const argN = (flag) => { const i = process.argv.indexOf(flag); const n = i > 0 ? Number(process.argv[i + 1]) : NaN; return n > 0 ? n : 0; };
+    opts.maxOutBytes = argN('--max-out') || 32 * 1024 * 1024;
+    opts.maxMs = argN('--max-ms') || 60 * 1000;
+    opts.prune = true;   // B-5278 (L2): the map this walk hands on (the hub's kept cursor, the push cursor) = the files on disk
     const r = runUsageWalk(opts);
     process.stdout.on('error', () => process.exit(1));
-    const lines = r.events.concat(JSON.stringify({ __cursors__: r.cursors, __cursorFile__: r.cursorFile, ...(fromHub ? { __cursorsFrom__: 'hub' } : {}) }));
+    const lines = r.events.concat(JSON.stringify({ __cursors__: r.cursors, __cursorFile__: r.cursorFile, ...(fromHub ? { __cursorsFrom__: 'hub' } : {}), ...(r.more ? { __more__: true } : {}), ...(r.oversize ? { __oversize__: r.oversize } : {}) }));
     process.stdout.write(lines.join('\n') + '\n', () => process.exit(0));
   } catch (e) { console.error(e.message); process.exit(1); }
   return;
@@ -2261,26 +2267,33 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
                 fs.renameSync(cursorFile + '.tmp', cursorFile);
               } catch { }
             };
+            const AC = require('./answer-caps.js');
             const runWalk = () => {
               if (st.dead) return; // its link died (U1): no walk, no push, no cursor written for a link nobody hears
               if (st.running) { st.again = true; return; }
+              // B-5278 (L1): a walk that stopped on its bound has its batch's ack awaited — the rest is walked after it
+              const wait = AC.usagePushWaitMs(st);
+              if (wait > 0) { if (!st.waitTimer) { st.waitTimer = setTimeout(() => { st.waitTimer = null; runWalk(); }, wait); st.waitTimer.unref?.(); } return; }
               st.running = true;
-              require('child_process').execFile(process.execPath, [__filename, '--usage-scan-child', cursorFile],
+              require('child_process').execFile(process.execPath, [__filename, '--usage-scan-child', cursorFile, '--max-out', String(AC.PUSH_WALK_BYTES), '--max-ms', String(AC.PUSH_WALK_MS)],
                 { windowsHide: true, timeout: 120000, maxBuffer: 64 * 1024 * 1024, env: spawnEnv() }, (err, stdout) => {
                   st.running = false;
+                  let r = null;
                   try {
                     if (err) log('usage-events walk failed: ' + err.message);
                     // the batch law is answer-caps.js usagePushWalked (B-7f0b D8; the suite runs it): chunks under the line's bound,
                     // the seq on the LAST one, a refused chunk ends the batch before it and drops its pending cursor
-                    if (!err && stdout) require('./answer-caps.js').usagePushWalked(st, stdout, (obj) => mux.control(obj), st.commit);
+                    if (!err && stdout) r = AC.usagePushWalked(st, stdout, (obj) => mux.control(obj), st.commit);
                   } catch (e) { log('usage-events push failed: ' + e.message); }
+                  if (r && r.committed && r.more) st.again = true;   // stopped on its bound with nothing to send: the rest now
                   if (st.again && !st.dead) { st.again = false; setTimeout(runWalk, 200); }
                 });
             };
+            st.walkNow = () => { if (st.waitTimer) { clearTimeout(st.waitTimer); st.waitTimer = null; } runWalk(); };
             let timer = null;
             const kick = () => { if (timer) return; timer = setTimeout(() => { timer = null; runWalk(); }, 1500); };
             st.kick = kick;
-            st.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } };
+            st.clearKick = () => { if (timer) { clearTimeout(timer); timer = null; } if (st.waitTimer) { clearTimeout(st.waitTimer); st.waitTimer = null; } };
             armWatches(WATCH, st.watches, [path.join(home, '.claude', 'projects'),   // every root at once: one budget, one walk
               path.join(process.env.CODEX_HOME || path.join(home, '.codex'), 'sessions')], kick, 'usage-events-watch');
             runWalk(); // initial drain so the subscriber starts complete
@@ -2293,7 +2306,8 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         // the server confirmed durable ingest of batch `seq` → commit cursor
         try {
           const st = this._usageEvWatch;
-          if (st) require('./answer-caps.js').usagePushAcked(st, msg.seq, st.commit);   // that batch's cursor commits (B-7f0b D8: one law, run by the suite)
+          // that batch's cursor commits (B-7f0b D8: one law, run by the suite); a walk stopped on its bound walks the rest now (B-5278)
+          if (st) require('./answer-caps.js').usagePushAcked(st, msg.seq, st.commit, () => setImmediate(() => { if (!st.dead) st.walkNow(); }));
         } catch { }
         return;
       }
@@ -2862,6 +2876,9 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         const args = [__filename, '--usage-scan-child'];
         if (msg.cursorFile) args.push(String(msg.cursorFile));
         if (msg.hubCursor && msg.stdin64) args.push('--cursors-stdin'); // lane ledger-dedup-law F2: the hub's cursor rides stdin
+        // B-5278 (L1): the hub's harvest bound (an older hub names none: the walk takes the scanner's own 32 MiB / 60 s)
+        if (Number(msg.maxBytes) > 0) args.push('--max-out', String(Math.floor(Number(msg.maxBytes))));
+        if (Number(msg.maxMs) > 0) args.push('--max-ms', String(Math.floor(Number(msg.maxMs))));
         startStreamChild(msg, process.execPath, args);
         return;
       }

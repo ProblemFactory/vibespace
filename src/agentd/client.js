@@ -1771,27 +1771,29 @@ class DeviceManager {
    *  from its own file as it always did — the answer says which (`since: 'hub' | 'device'`; 'unsupported' = a hub cursor was
    *  offered and the daemon cannot take it). The device's cursor is NEVER written from here: the hub's durable ingest is
    *  the commit. */
-  async usageScan({ cursorFile, hubCursor = null } = {}) {
+  async usageScan({ cursorFile, hubCursor = null, bound = null } = {}) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('usage-scan')) throw new Error('daemon lacks usage-scan (capabilities gate)');
     const canHub = !!conn.info?.capabilities?.includes?.('usage-scan-hub-cursor');
     const chunks = [];
     const useHub = !!(hubCursor && typeof hubCursor === 'object' && canHub);
-    const r = await this._streamOp({ op: 'usage-scan', cursorFile, ...(useHub ? { hubCursor: true, stdin64: Buffer.from(JSON.stringify(hubCursor)).toString('base64') } : {}) }, { onData: (buf) => chunks.push(buf) });
+    // B-5278: the harvest's bound for the walk (L1; an older agent ignores it), and the map without the sid it re-derives (L2)
+    const lim = bound && Number(bound.maxBytes) > 0 ? { maxBytes: Math.floor(Number(bound.maxBytes)), ...(Number(bound.maxMs) > 0 ? { maxMs: Math.floor(Number(bound.maxMs)) } : {}) } : {};
+    const r = await this._streamOp({ op: 'usage-scan', cursorFile, ...lim, ...(useHub ? { hubCursor: true, stdin64: Buffer.from(JSON.stringify(AC.cursorsWithoutSid(hubCursor))).toString('base64') } : {}) }, { onData: (buf) => chunks.push(buf) });
     if (r.error) throw new Error(r.error);
     if (r.truncated) throw new Error('usage-scan stream truncated');
     if (r.code !== 0) throw new Error('usage-scan exit ' + r.code);
     const lines = Buffer.concat(chunks).toString('utf-8').split('\n').filter((l) => l.trim());
-    let cursors = null, cf = null, from = null;
+    let cursors = null, cf = null, from = null, more = false, oversize = 0;
     if (lines.length) {
       try {
         const last = JSON.parse(lines[lines.length - 1]);
-        if (last && last.__cursors__) { cursors = last.__cursors__; cf = last.__cursorFile__ || null; from = last.__cursorsFrom__ || null; lines.pop(); }
+        if (last && last.__cursors__) { cursors = last.__cursors__; cf = last.__cursorFile__ || null; from = last.__cursorsFrom__ || null; more = last.__more__ === true; oversize = Number(last.__oversize__) > 0 ? Math.floor(Number(last.__oversize__)) : 0; lines.pop(); }
       } catch { }
     }
     if (!cursors) throw new Error('usage-scan output missing cursor manifest');
     if (useHub && from !== 'hub') throw new Error('usage-scan: the daemon did not walk from the hub cursor it was handed');
-    return { ndjson: lines.length ? lines.join('\n') + '\n' : '', cursors, cursorFile: cf, since: useHub ? 'hub' : hubCursor ? 'unsupported' : 'device' };
+    return { ndjson: lines.length ? lines.join('\n') + '\n' : '', cursors, cursorFile: cf, since: useHub ? 'hub' : hubCursor ? 'unsupported' : 'device', more, oversize };
   }
 
   /** loopback TCP forward on the device: returns {write, close, onData, onClose}. A server that speaks first (an RFB

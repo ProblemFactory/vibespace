@@ -121,7 +121,7 @@ console.log('③ the agent: an over-long answer refused for that ONE op, a push 
   ok(p.op === 'line-refused' && p.of === 'usage-events' && p.code === 'answer-too-large' && !('batch' in p) && !('id' in p), 'a push (no id) becomes `line-refused` naming the push — the link kept (the usage push used to end it)', p);
   const AG = read('src/agentd/agentd.js');
   ok(AG.includes("overLong: (obj, bytes, cap) => require('./answer-caps.js').refusalOf(obj, bytes, cap),") && /'hub-key', 'answer-bounds'/.test(AG), 'the agent\'s Mux takes that refusal as its `overLong`, and its hello-ack states `answer-bounds`');
-  ok(AG.includes("if (!err && stdout) require('./answer-caps.js').usagePushWalked(st, stdout, (obj) => mux.control(obj), st.commit);") && AG.includes("if (st) require('./answer-caps.js').usagePushAcked(st, msg.seq, st.commit);") && !/pendingCursors\.(?:set|get|delete)\(/.test(AG),
+  ok(AG.includes("if (!err && stdout) r = AC.usagePushWalked(st, stdout, (obj) => mux.control(obj), st.commit);") && AG.includes("if (st) require('./answer-caps.js').usagePushAcked(st, msg.seq, st.commit, ") && !/pendingCursors\.(?:set|get|delete)\(/.test(AG),
     'the agent\'s usage push and its ack run the ONE law (answer-caps.js usagePushWalked / usagePushAcked, its own bounds) — the agent holds no copy of it');
   ok(AC.PUSH_LINES === 500 && AC.PUSH_TEXT === 8 * 1024 * 1024 && JSON.stringify(AC.pushChunksOf(Array.from({ length: 1200 }, (_, i) => 'e' + i)).map((c) => c.length)) === '[500,500,200]', 'the push\'s chunks: ≤ 500 lines and ≤ 8 MiB of their text each (1200 events ⇒ 500 + 500 + 200)');
   const tc = AC.pushChunksOf(['a'.repeat(40), 'b'.repeat(40), 'c'.repeat(40), 'd'.repeat(300), 'e'.repeat(10)], 500, 100);
@@ -152,7 +152,7 @@ console.log('③ the agent: an over-long answer refused for that ONE op, a push 
     ok(r.committed === true && st.seq === 0 && JSON.parse(fs.readFileSync(cf, 'utf8')).at === 'C2', 'a walk with no new events commits its cursor at once (nothing to lose, nothing sent)'); }
   // CONTROL: the refusal's stop cut, in a copy — the later chunks go on, the LAST one carries the seq, its ack commits C1: the refused events are lost
   const PM = mutantCopies('answer-caps-push', REPO);
-  const PushRel = PM.load('src/agentd/answer-caps.js', anchored(read('src/agentd/answer-caps.js'), '    if (!sent) { st.pendingCursors.delete(seq); return { seq, refusedAt: c, chunks: chunks.length }; }', '    if (!sent) { /* the stop cut */ }', 'push-stop'), 'push-stop');
+  const PushRel = PM.load('src/agentd/answer-caps.js', anchored(read('src/agentd/answer-caps.js'), '    if (!sent) { st.pendingCursors.delete(seq); if (st.moreSeq === seq) { delete st.moreSeq; delete st.moreAt; } return { seq, refusedAt: c, chunks: chunks.length, more }; }', '    if (!sent) { /* the stop cut */ }', 'push-stop'), 'push-stop');
   const red = runPush(PushRel, 1, 'false');
   ok(red.out.length === 2 && red.out.some((o) => 'seq' in o) && red.acked === true && red.saved === 'C1', `CONTROL (the stop cut, in a copy): after chunk 1 is refused the seq still goes out (${red.out.length} chunks out) and its ack commits C1 — the refused 500 events never walked again — RED`, { out: red.out.length, saved: red.saved });
   for (const r of copiesCensus(PM.files, PM.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(r.pass, r.name, r.detail);

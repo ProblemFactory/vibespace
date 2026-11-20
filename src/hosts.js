@@ -26,6 +26,7 @@ const { REMOTE_PRELUDE, nodeFinder, agentNodeOf } = require('./remote-shell.js')
 // the loop); an older DeviceManager without it ⇒ status().info. B-b83c reads the agent's own node through it
 const helloOf = (dm) => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } };
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
+const AC = require('./agentd/answer-caps.js'); // B-5278: a usage walk's dropped events said once; the device walk's harvest bound
 const { usageBearerOk, usageBearerRefusal } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW (B-5e0d — the host rungs follow the local ladder's rule)
 const { execFile } = require('child_process');
 /** B-2ca0: the port words and the destination of a record — module functions (sshArgs / sshCmd are also called with a stand-in
@@ -2036,6 +2037,7 @@ class HostManager {
       dm.watchUsageEvents?.((m) => {
         try {
           const text = (m.batch || []).join('\n');
+          if (m.seq != null && Number(m.oversize) > 0) console.warn(AC.droppedSaid((dm._machineName && dm._machineName()) || id, Math.floor(Number(m.oversize)), 'usage push'));   // B-5278: said once
           let r = this.onUsageEvents?.(id, text);
           // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — the seq is acked once EVERY chunk of
           // its push has (the daemon walks again from its committed cursor: an ack is never ahead of what landed)
@@ -3253,9 +3255,14 @@ class HostManager {
   _harvestLanded(id) { if (this._usageHarvestFail) this._usageHarvestFail.delete(id); }
   async harvestUsage(id, { force = false, scannerPath, minIntervalMs, ledger = null } = {}) {
     const h = this.get(id);
-    const ingest = (text, { cursors = null, since = null } = {}) => {
+    const ingest = (text, { cursors = null, since = null, oversize = 0 } = {}) => {
+      // B-5278: a walk's dropped usage events (an id over its bound) are said once, whichever road walked — money not counted
+      const dropped = oversize || AC.oversizeOf(text);
+      if (dropped) console.warn(AC.droppedSaid((h && h.name) || id, dropped, 'usage walk'));
       if (!ledger) return text;
-      const r = text ? ledger.ingestRemoteEvents(id, (h && h.name) || id, text, { cursors, since }) : { added: 0, appended: 0, duplicates: 0 };
+      // B-5278: a walk with no events still hands its cursors over (one stopped on its bound with none, one whose records were
+      // all dropped) — the hub's copy moves, never re-read from the same place at every harvest
+      const r = (text || cursors) ? ledger.ingestRemoteEvents(id, (h && h.name) || id, text || '', { cursors, since }) : { added: 0, appended: 0, duplicates: 0 };
       const out = (x) => (since ? { ...x, since } : x);
       return r && typeof r.then === 'function' ? r.then(out) : out(r); // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — awaited
     };
@@ -3288,7 +3295,7 @@ class HostManager {
         let r = null;
         try {
           const hub = ledger && typeof ledger.hostCursorOf === 'function' ? ledger.hostCursorOf(id) : null;
-          r = await dm.usageScan({ hubCursor: hub ? hub.cursors : null });
+          r = await dm.usageScan({ hubCursor: hub ? hub.cursors : null, bound: usageScanBound(this.usageHarvestLimits || USAGE_HARVEST_LIMITS) });
         } catch (e3) {
           if (!/lacks usage-scan/.test(e3.message || '')) console.warn('[usage] usage-scan op failed, falling back to script ship:', e3.message);
         }
@@ -3297,7 +3304,7 @@ class HostManager {
             if (!this._sinceSaid) this._sinceSaid = new Set();
             if (!this._sinceSaid.has(id)) { this._sinceSaid.add(id); console.warn(`[usage] ${(h && h.name) || id}: since-unsupported — its device agent cannot walk from the hub's cursor (an older daemon): each harvest re-reads the window since the device's own cursor and the ledger keeps none of it twice (0 bytes), until the device agent is updated`); }
           }
-          got = { text: r.ndjson, cursors: r.cursors || null, since: r.since || 'device' };
+          got = { text: r.ndjson, cursors: r.cursors || null, since: r.since || 'device', oversize: r.oversize || 0 };
         }
         if (!got) { // an older daemon (no usage-scan op) / the op failed: ship the scanner (it keeps its own cursor on the device)
           const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:usage-harvest' })).stdout.trim();
