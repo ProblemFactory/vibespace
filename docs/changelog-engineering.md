@@ -4,6 +4,29 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.416 — 2026-11-21
+
+### bl-ci — B-28b1 (1): the hosted runner installs the tree's pinned Claude Code; the newest is a look-ahead that never gates (K44)
+- WHY: run 44748179665 installed 2.1.329 the day line 14 pinned 2.1.328, and test-record-shape ran LENIENT, so the strict proof the pin asked for did not happen. The registry's newest moves almost daily.
+- LAW 1: the fast job and the heavy shards install `@anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)`. scripts/ci-claude.mjs `pin` prints SCHEMA_CLI_VERSION and requires nothing, so it runs before `npm ci`; the version is never typed in the workflow.
+- LAW 2: B-9ff2 step 1's dump step becomes the LOOK-AHEAD.
+  - `@latest` is installed beside the pin (its own `NPM_CONFIG_PREFIX`), then `ci-claude.mjs look-ahead` runs the tree's --auto road over it (strings, never run).
+  - It keeps the dump and draft as the artifact `claude-cli-dump-<sha>` and writes ONE line — how far ahead, its record-table changes — into the run's summary.
+  - Never a gate (continue-on-error, exit 0), never a turn, never a registration.
+- test-record-shape's closing line now says the record oracle's mode (STRICT / LENIENT / no binary).
+- test-cli-registration ⑤ holds it all:
+  - both installs are the pin and none is typed or bare; `@latest` exactly once, in the look-ahead, with its own prefix;
+  - `ci-claude.mjs pin` = SCHEMA_CLI_VERSION, read from a real child;
+  - the line's words in four cases;
+  - five red controls: typed, bare, a look-ahead that can fail the job, one that installs over the pin, none at all.
+- test-ci-gate §2g, the one npm door: the look-ahead is two steps, each ONE plain line (install beside the pin, then read). The door's pattern accepts exactly one form with a command in it: the pin's `$(node scripts/ci-claude.mjs pin)`. Five door steps now (the pinned claude and `npm ci` in fast and heavy, plus the newest).
+
+### bl-ci — r117: the hosted gate runs the Node majors the product runs on
+- 1. The fast tier also runs on production's major: ci.yml's fast matrix carries `node: [22, 24]`. The Node 22 jobs keep their names (`fast 1/2`, `fast 2/2`); the Node 24 jobs are `fast 1/2 node 24`, `fast 2/2 node 24`, by the name's own expression. `workflowFastPartsAt` reads the axis (`nodes`, `primary`) and refuses one whose name does not carry the major. The fail-log artifact names carry the major; the claude dump stays one job (part 1 on Node 22). Cost: ≈ 14 hosted runner-minutes a run (the two parts read 7.6 + 6.4 min on checkpoint 61's prep run); the heavy shards on 24 too would add ≈ 263 (seven shards, 33–42 min each) — the coordinator's ruling. test-ci-heavy-verdict (the tree's axis + six parser fixtures), test-ci-gate (one artifact per job), test-cli-registration ⑤ (one dump job) follow.
+- 4. B-ec25's remainder — no real agent CLI on the hosted heavy runner but one leg: the heavy shards' suite step sets `VS_NO_REAL_CLI: '1'` (a scratch hub's boot probes and a self-found claude refused by name, as on the test machines) and `VS_REAL_CLI_SANCTIONED: 'test-claude-steer-chrome §A'`, which that suite alone reads, on the Actions runner only: its §A runs the installed claude against its loopback mock. test-claude-wrapper-queue §A and test-stdout-registry's wire leg ⓕ (a real turn on the runner before) now skip there by the flag. Before it 217 of the 381 hosted heavy suites booted a hub or the device agent with no stand-in named (a read of the tree). test-ci-gate §2o: the step, the readers, the fences (seven controls then; part 5 below).
+- 5. THE RULINGS r140 + THE ROUND's MUST r144: the heavy shards run on Node 24 as well only on a branch named `ci/cut…` (a release's mirror) or `ci/proof…` (the block's proof run), keyed by `github.ref_name` in the matrix line; the verdict requires `heavy i/7 node 24` there by the run's branch (`workflowHeavyNodesAt`, `heavyNodesFor`; test-ci-heavy-verdict: the parser over nine fixtures, a mirror run with its Node 24 shards missing or failed refused by name, a prep run needing only Node 22's). The sanctions are a list by name: test-claude-steer-chrome §A and test-claude-wrapper-queue §A (loopback mock, made-up key) on every major, test-stdout-registry ⓕ on the Node 22 shard alone. THE CI SIGN-IN TO ONE MAJOR A TIER: the fast and heavy steps hand `VIBESPACE_CI_OAT` to the Node 22 jobs alone (9 jobs a run), and the Node 24 fast jobs run under `VS_NO_REAL_CLI=1` — the node axis had doubled test-chat-e2e's billed turn (the round's must). test-ci-gate §2o: thirteen controls and the count, stated.
+- KNOWN, CORRECTED (2.369.413's K54 said test-chat-e2e makes no real model turn in any gate — false of the hosted runner): on the hosted runner test-chat-e2e makes ONE real turn a run, in its part's Node 22 fast job, signed in by the repository's CI secret `VIBESPACE_CI_OAT` (its only reader); test-stdout-registry's wire leg starts the installed claude ONCE a run, on the Node 22 heavy shard, with the runner's own HOME and no CI secret (on checkpoint 61's prep run: «no tool executed», a skip). The box and the test machines make none (`VS_NO_REAL_CLI=1`).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said

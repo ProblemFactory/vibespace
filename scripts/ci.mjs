@@ -4071,15 +4071,54 @@ export function workflowShardsAt(text) {
   const n = Number(nm[1]);
   return n > 0 && slots.length === n && slots.every((v, k) => v === k + 1) ? { n, slots } : null;
 }
-/** The fast parts a ci.yml TEXT defines (B-7353): { n, slots } when its fast job's `part: [..]` list is 1..n and its name says
- *  `fast ${{ matrix.part }}/n`; else null (a workflow of ONE fast job). */
+/** The fast parts a ci.yml TEXT defines (B-7353): { n, slots, nodes, primary } when its fast job's `part: [..]` list is 1..n and its name
+ *  says `fast ${{ matrix.part }}/n`; else null (a workflow of ONE fast job). r117 (the coordinator, 2026-11-20): a `node: [..]` axis runs
+ *  every part on each listed Node major. The PRIMARY major's jobs keep the bare name; every other major's says ` node <major>`, by the
+ *  name's own expression `${{ matrix.node != <primary> && format(' node {0}', matrix.node) || '' }}` — so `nodes` lists the majors and
+ *  `primary` names the bare one (no axis: both null). An axis of two or more majors whose name does not carry the major (two jobs of
+ *  one name), a suffix naming a major the axis lacks, or a suffix with no axis: null — the verdict never reads a name it cannot tell. */
 export function workflowFastPartsAt(text) {
   const t = String(text || ''), job = /\n  fast:\n([\s\S]*?)(?=\n  [\w-]+:\n|$)/.exec(t);
   if (!job) return null;
-  const mat = /^\s+part:\s*\[([\d,\s]+)\]\s*$/m.exec(job[1]), nm = /^ {4}name:\s*fast \$\{\{ matrix\.part \}\}\/(\d+)\s*$/m.exec(job[1]);
+  const mat = /^\s+part:\s*\[([\d,\s]+)\]\s*$/m.exec(job[1]);
+  const nm = /^ {4}name:\s*fast \$\{\{ matrix\.part \}\}\/(\d+)(\$\{\{ matrix\.node != (\d+) && format\(' node \{0\}', matrix\.node\) \|\| '' \}\})?\s*$/m.exec(job[1]);
   if (!mat || !nm) return null;
   const slots = mat[1].split(',').map((x) => Number(x.trim())), n = Number(nm[1]);
-  return n > 1 && slots.length === n && slots.every((v, k) => v === k + 1) ? { n, slots } : null;
+  if (!(n > 1 && slots.length === n && slots.every((v, k) => v === k + 1))) return null;
+  const axis = /^\s+node:\s*\[([\d,\s]+)\]\s*$/m.exec(job[1]);
+  if (!axis) return nm[2] ? null : { n, slots, nodes: null, primary: null };
+  const nodes = axis[1].split(',').map((x) => Number(x.trim()));
+  if (new Set(nodes).size !== nodes.length) return null;
+  if (!nm[2]) return nodes.length === 1 ? { n, slots, nodes, primary: nodes[0] } : null;
+  const primary = Number(nm[3]);
+  return nodes.includes(primary) ? { n, slots, nodes, primary } : null;
+}
+/** The heavy shards' Node axis a ci.yml TEXT defines (r117, the coordinator's ruling r140, 2026-11-20): Node 24 as well ONLY on a branch
+ *  whose name starts with one of the listed prefixes (a release's mirror ci/cut…, the block's proof run ci/proof…), every other branch
+ *  the base list — by the matrix line `node: ${{ fromJSON((startsWith(github.ref_name, '<p>') || …) && '[<all>]' || '[<base>]') }}`.
+ *  → { prefixes, all, base, primary } (primary = the base's one major, the bare-named jobs; the job's name must carry
+ *  `${{ matrix.node != <primary> && format(' node {0}', matrix.node) || '' }}`); no `node:` line and a bare name: { prefixes: [], all:
+ *  null, base: null, primary: null } (one job a shard, the bare names); anything else — a plain list of two majors, a suffix with no
+ *  axis, a suffix naming another primary, a base of two majors, a base major the full list lacks: null (the verdict refuses it). */
+export function workflowHeavyNodesAt(text) {
+  const t = String(text || ''), job = /\n  heavy-shards:\n([\s\S]*?)(?=\n  [\w-]+:\n|$)/.exec(t);
+  if (!job) return null;
+  const nm = /^ {4}name:\s*heavy \$\{\{ matrix\.shard \}\}\/\d+(\$\{\{ matrix\.node != (\d+) && format\(' node \{0\}', matrix\.node\) \|\| '' \}\})?\s*$/m.exec(job[1]);
+  if (!nm) return null;
+  const line = /^\s+node:\s*(.+?)\s*$/m.exec(job[1]);
+  if (!line) return nm[1] ? null : { prefixes: [], all: null, base: null, primary: null };
+  const m = /^\$\{\{ fromJSON\(\((startsWith\(github\.ref_name, '[^']+'\)(?: \|\| startsWith\(github\.ref_name, '[^']+'\))*)\) && '\[([\d,\s]+)\]' \|\| '\[([\d,\s]+)\]'\) \}\}$/.exec(line[1]);
+  if (!m || !nm[1]) return null;
+  const list = (x) => x.split(',').map((v) => Number(v.trim()));
+  const prefixes = [...m[1].matchAll(/startsWith\(github\.ref_name, '([^']+)'\)/g)].map((x) => x[1]), all = list(m[2]), base = list(m[3]);
+  const primary = Number(nm[2]);
+  if (base.length !== 1 || base[0] !== primary || !all.includes(primary) || new Set(all).size !== all.length) return null;
+  return { prefixes, all, base, primary };
+}
+/** The heavy majors a run on `branch` holds, by the axis above (null axis: [null] — the bare names). PURE. */
+export function heavyNodesFor(hn, branch) {
+  if (!hn || !hn.all) return [null];
+  return hn.prefixes.some((p) => String(branch || '').startsWith(p)) ? hn.all : hn.base;
 }
 /** The HOSTED heavy names of the COMMIT's plan (LAW B, r3): its ci.mjs must be byte-for-byte the module running (same git blob),
  *  and every heavy suite's source is read from the COMMIT (`git cat-file --batch`) — a working tree, a skip-worktree flag or an
@@ -4123,7 +4162,13 @@ export function judgeMirrorRun({ sha, slug, run, jobs, totalJobs, workflow } = {
   const shards = workflowShardsAt(workflow);
   if (!shards) return no(`${MIRROR_WORKFLOW} at ${sha.slice(0, 9)} defines no readable heavy matrix`);
   const fp = workflowFastPartsAt(workflow); // B-7353: the fast tier as `fast i/n` jobs; a workflow before the split has ONE «fast»
-  const need = [...(fp ? fp.slots.map((i) => `fast ${i}/${fp.n}`) : ['fast']), ...shards.slots.map((i) => `heavy ${i}/${shards.n}`), 'heavy'];
+  // r117 (part 3): every job of the node axis — the primary major's bare `fast i/n`, every other major's `fast i/n node <major>`
+  const fastNames = fp ? fp.slots.flatMap((i) => (fp.nodes || [fp.primary]).map((nd) => `fast ${i}/${fp.n}${nd !== null && nd !== fp.primary ? ` node ${nd}` : ''}`)) : ['fast'];
+  // r117 (the ruling r140): the heavy shards of every major the run's BRANCH holds (Node 24 as well on ci/cut… and ci/proof…)
+  const hn = workflowHeavyNodesAt(workflow);
+  if (!hn) return no(`${MIRROR_WORKFLOW} at ${sha.slice(0, 9)} defines a heavy Node axis the verdict cannot read`);
+  const heavyNames = shards.slots.flatMap((i) => heavyNodesFor(hn, run.head_branch).map((nd) => `heavy ${i}/${shards.n}${nd !== null && nd !== hn.primary ? ` node ${nd}` : ''}`));
+  const need = [...fastNames, ...heavyNames, 'heavy'];
   for (const name of need) {
     const these = list.filter((x) => x && x.name === name);
     if (!these.length) return no(`the run has no job «${name}» (the workflow at ${sha.slice(0, 9)} defines ${shards.n} heavy shards)`);
