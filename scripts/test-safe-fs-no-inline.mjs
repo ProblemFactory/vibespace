@@ -112,9 +112,9 @@ console.log('③ the census: no pool keeps an inline road; a missing pool refuse
   // (d) the words: the router says the refusal in a person's words with its code on EVERY local answer (the Files window, a file's view,
   // the folder field) — the page words the code in the reader's language
   const ops = read('src/lib/file-explorer-ops.js');
-  ok(fr.includes("if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(NO_WORKER_HEAD)) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };")
-    && fr.includes("const STORAGE_NO_WORKER = 'the file readers are restarting (one stopped answering) — try again in a moment';")
-    && ops.includes("if (d && d.code === 'storage_no_worker') return t('the file readers are restarting (one stopped answering) — try again in a moment');"),
+  ok(fr.includes("if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(FILE_POOL_REFUSED)) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };")
+    && fr.includes("const STORAGE_NO_WORKER = 'the file readers are restarting — try again in a moment';")
+    && ops.includes("if (d && d.code === 'storage_no_worker') return t('the file readers are restarting — try again in a moment');"),
     'every local answer of the files router says the refusal in true words (code storage_no_worker; zh / ja by the i18n check)');
   const nw = SF.noWorkerRefusal('the file pool');
   ok(SF.NO_WORKER && SF.NO_WORKER.code === 'no-worker' && /^no worker of the file pool is running — one did not answer in time and is restarting, or none could start$/.test(nw.message) && nw.message.length <= 120 && nw.status === 503 && nw.noWorker === undefined,

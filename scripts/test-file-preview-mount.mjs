@@ -15,10 +15,11 @@
 //      code storage_sync_refused, the storage's name, the release, the way on — never the guard's raw words; the journal
 //      keeps its call-site line; an answer of ANOTHER router carrying the refusal is not re-said (the door is this
 //      router's)
-//      — RESTATED by B-3b03 (lane hub-loop-stalls): the in-main fallback is GONE (a path op never runs on the main thread), so
-//      the pool down ⇒ each preview route is REFUSED BY NAME (503, code storage_no_worker, the person's words) and the guard
-//      refuses NOTHING (no op reached the main thread: no journal line); the router's re-say of a guard refusal stays for any
-//      main-thread road left, unreachable from the pool's ops now
+//      — RESTATED by B-3b03 (lane hub-loop-stalls): the in-main fallback is GONE (a path op never runs on the main thread). So
+//      (a) the re-say is driven by a pool STAND-IN whose ops answer the guard's refusal (the shape a route's answer carries when a
+//      main-thread road meets the guard; the call-site journal line belonged to the in-main road and went with it), and (b) the
+//      pool down (no pool) ⇒ each preview route is REFUSED BY NAME (503, code storage_no_worker, the person's words) and the
+//      guard refuses NOTHING (W.counts.refused unchanged: no op reached the main thread)
 //   ⑤ the client's words: fsErrorText (src/lib/file-explorer-ops.js — the viewer's and the chat link-open's) says
 //      storage_sync_refused in zh / ja / en through t() — the dictionaries hold both sentences
 // RED on 6428c67e: ① the raw «refused: …», ③ the lag ≈ P, ④ the raw refusal, ⑤ the English `error` on a zh device.
@@ -26,7 +27,8 @@
 //   ⑥ the parse is bounded in every dimension and each cut is NAMED: a 60-sheet workbook ⇒ 50 + truncated.sheets = 10;
 //      a 2500-character cell ⇒ its first 2000 + «…»; a 300-column sheet ⇒ 256; ③'s 40 001 rows ⇒ cut.rows = 35 001
 //   ⑦ the READ is the bound: a FIFO fed 3 MB past a 1 MB cap is read to cap + 1 bytes — the writer's push ends in EPIPE
-//   ⑧ the sentence is the PREVIEW road's: a write, a mkdir, a rename the guard refused keep their own words
+//   ⑧ the sentence is the PREVIEW road's: a write, a mkdir, a rename the guard refused keep their own words (B-3b03: driven by the
+//      pool stand-in that answers the guard's refusal; the pool down refuses them by name, storage_no_worker)
 //   ⑨ a document parse runs in its OWN lane (src/safe-fs.js LANES): a stat with a short deadline while a parse runs (the
 //      fixture's __sleep in the parse lane) answers at once and the parse completes; a second parse whose turn never
 //      came is refused by name (parse_busy — the route says it too); a parse while the lane's worker respawns waits for
@@ -166,21 +168,33 @@ try {
   ok(h.status === 200 && h.body?.sheets?.[0]?.data?.length === 5000 && h.body.sheets[0].data[4999][0] === 4999, `the 40 000-row workbook previews (5000 rows serialized) (${h.status})`);
   ok(P >= 150 && worst < P / 3, `the main loop's worst timer lag across the request: ${Math.round(worst)} ms — well under P/3 = ${Math.round(P / 3)} ms (P ≥ 150 ms makes the hold worth naming)`);
 
-  console.log('④ R2 the pool down: each preview route is REFUSED BY NAME — never an op on the main thread (B-3b03 restated this leg)');
-  const B = await serve({});   // no pool: the files router refuses by name (B-3b03) — the release ran the op in-main, where the guard refused it
+  console.log('④ R2 a refusal still met is SAID — the storage by name, why, the way on; the pool down is refused by name (B-3b03)');
+  // (a) the re-say — a pool STAND-IN whose ops answer the guard's refusal (B-3b03: the pool's own ops never meet the guard on the
+  // main thread now; the release's in-main fallback did, and its call-site journal line went with it)
+  const guardPool = { call: async () => { throw new Error(SW.REFUSAL); } };
+  const B = await serve({ safeFs: guardPool });
   try {
-    const want = 'the file readers are restarting (one stopped answering) — try again in a moment';
-    const guardBefore = journal.filter((l) => /mount-guard/.test(l)).length;
+    const want = `this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there`;
     for (const route of [`/api/file/excel?path=${q(BOOK)}`, `/api/file/info?path=${q(BOOK)}`, `/api/file/content?path=${q(path.join(STORE, 'notes.txt'))}`]) {
       const r = await get(B.base, route);
-      ok(r.status === 503 && r.body?.code === 'storage_no_worker' && r.body.error === want && !String(r.body.error).includes(SW.REFUSAL),
-        `${route.split('?')[0]} ⇒ 503, code storage_no_worker, the person's words — never the guard's (${r.status}: ${JSON.stringify(r.body).slice(0, 220)})`);
+      ok(r.body?.code === 'storage_sync_refused' && r.body.error === want && r.body.params?.mount === 'NAS' && !('release' in r.body.params) && !/\d+\.\d+\.\d+/.test(r.body.error) && !String(r.body.error).includes(SW.REFUSAL),
+        `${route.split('?')[0]} ⇒ code storage_sync_refused, «NAS», the release — never the raw words (${r.status}: ${JSON.stringify(r.body).slice(0, 220)})`);
     }
-    const guardNew = journal.filter((l) => /mount-guard/.test(l)).slice(guardBefore);
-    ok(guardNew.length === 0, `no op reached the main thread — the guard refused nothing (${guardNew.slice(0, 2).join(' | ') || 'no line'})`);
     const o = await get(B.base, '/api/other/refused');
     ok(o.status === 400 && o.body?.error === SW.REFUSAL && !o.body.code, `another router's answer is its own (the door is the files router's) (${JSON.stringify(o.body)})`);
   } finally { B.srv.close(); }
+  // (b) B-3b03: NO pool ⇒ each preview route REFUSED BY NAME — never an op on the main thread (the release ran it there)
+  const B2 = await serve({});
+  try {
+    const want = 'the file readers are restarting — try again in a moment';
+    const refusedAt = W.counts.refused;
+    for (const route of [`/api/file/excel?path=${q(BOOK)}`, `/api/file/info?path=${q(BOOK)}`, `/api/file/content?path=${q(path.join(STORE, 'notes.txt'))}`]) {
+      const r = await get(B2.base, route);
+      ok(r.status === 503 && r.body?.code === 'storage_no_worker' && r.body.error === want && !String(r.body.error).includes(SW.REFUSAL),
+        `no pool: ${route.split('?')[0]} ⇒ 503, code storage_no_worker, the person's words — never the guard's (${r.status}: ${JSON.stringify(r.body).slice(0, 220)})`);
+    }
+    ok(W.counts.refused === refusedAt, `no pool: no op reached the main thread — the guard refused nothing (${W.counts.refused - refusedAt} refusals)`);
+  } finally { B2.srv.close(); }
 
   console.log('⑤ the client says storage_sync_refused in the reader\'s language (fsErrorText through t())');
   {
@@ -240,18 +254,27 @@ try {
     ok(pushed > 0 && pushed <= CAP + 1 + 256 * 1024 && pushed < FED, `the writer pushed ${pushed} of ${FED} bytes before EPIPE — the worker read at most cap + 1 = ${CAP + 1} (+ what sat in the pipe, ≤ 256 KiB)`);
   }
 
-  console.log('⑧ the sentence is the PREVIEW road\'s — a write, a mkdir, a rename keep their own words (r2; B-3b03: the pool down refuses them by name)');
+  console.log('⑧ the sentence is the PREVIEW road\'s — a write, a mkdir, a rename the guard refused keep their own words (r2); the pool down refuses them by name (B-3b03)');
   {
-    const C = await serve({});   // the pool down again: B-3b03 — refused by name (the release's in-main fallback met the guard here)
+    const WRITES = [['/api/file/write', { path: path.join(STORE, 'new.txt'), content: 'x' }], ['/api/mkdir', { path: path.join(STORE, 'new-dir') }], ['/api/rename', { oldPath: RENAME_ME, newPath: path.join(STORE, 'renamed.txt') }]];
+    const C = await serve({ safeFs: { call: async () => { throw new Error(SW.REFUSAL); } } });   // the pool stand-in answering the guard's refusal (④a)
     try {
-      for (const [route, body] of [['/api/file/write', { path: path.join(STORE, 'new.txt'), content: 'x' }], ['/api/mkdir', { path: path.join(STORE, 'new-dir') }], ['/api/rename', { oldPath: RENAME_ME, newPath: path.join(STORE, 'renamed.txt') }]]) {
+      for (const [route, body] of WRITES) {
         const r = await post(C.base, route, body);
-        ok(r.status === 503 && r.body?.code === 'storage_no_worker' && !String(r.body?.error).includes('preview') && !String(r.body?.error).includes(SW.REFUSAL),
-          `${route} ⇒ refused by name (503 storage_no_worker), never the preview's sentence, never the guard's words (${r.status}: ${JSON.stringify(r.body).slice(0, 200)})`);
+        ok(r.status === 400 && !r.body?.code && String(r.body?.error).startsWith(SW.REFUSAL) && !String(r.body?.error).includes('preview road'),
+          `${route} ⇒ its own words (err.message + roMountHint), never the preview's sentence (${r.status}: ${JSON.stringify(r.body).slice(0, 200)})`);
       }
-      const there = await Promise.all([RENAME_ME, path.join(STORE, 'new.txt'), path.join(STORE, 'new-dir')].map((p) => pool.call('exists', { path: p })));   // the pool's eyes: a test's own sync look is refused too
-      ok(JSON.stringify(there.map((x) => !!(x && (x.exists ?? x)))) === '[true,false,false]', `nothing was written on the way — each was refused (${JSON.stringify(there)})`);
     } finally { C.srv.close(); }
+    const C2 = await serve({});   // B-3b03: no pool — refused by name (the release's in-main fallback met the guard here)
+    try {
+      for (const [route, body] of WRITES) {
+        const r = await post(C2.base, route, body);
+        ok(r.status === 503 && r.body?.code === 'storage_no_worker' && !String(r.body?.error).includes('preview') && !String(r.body?.error).includes(SW.REFUSAL),
+          `no pool: ${route} ⇒ refused by name (503 storage_no_worker), never the preview's sentence, never the guard's words (${r.status}: ${JSON.stringify(r.body).slice(0, 200)})`);
+      }
+    } finally { C2.srv.close(); }
+    const there = await Promise.all([RENAME_ME, path.join(STORE, 'new.txt'), path.join(STORE, 'new-dir')].map((p) => pool.call('exists', { path: p })));   // the pool's eyes: a test's own sync look is refused too
+    ok(JSON.stringify(there.map((x) => !!(x && (x.exists ?? x)))) === '[true,false,false]', `nothing was written on the way — each was refused (${JSON.stringify(there)})`);
   }
 
   console.log('⑨ a document parse runs in its OWN lane — a stat never kills it, a second parse waits its turn (r2)');

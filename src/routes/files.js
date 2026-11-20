@@ -104,12 +104,12 @@ router.use((req, res, next) => {
 // main thread). Every local answer of this router that carries that refusal is SAID in a person's words with its code — the
 // Files window, a file's view, the chat's link-open and the downloads word storage_no_worker in the reader's language
 // (fsErrorText); the folder field shows `error` after «The machine did not answer:» — never the pool's inside words, never cut.
-const NO_WORKER_HEAD = require('../safe-fs').NO_WORKER.message.slice(0, 'no worker of '.length);
-const STORAGE_NO_WORKER = 'the file readers are restarting (one stopped answering) — try again in a moment';
+const FILE_POOL_REFUSED = require('../safe-fs').noWorkerRefusal('the file pool').message.split(' is running')[0];   // «no worker of the file pool» — another pool's refusal keeps its own words
+const STORAGE_NO_WORKER = 'the file readers are restarting — try again in a moment';   // true for every cause: a deadline kill, a crash, a worker that could not start (it is retried)
 router.use((req, res, next) => {
   const json = res.json;
   res.json = function (body) {
-    if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(NO_WORKER_HEAD)) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };
+    if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(FILE_POOL_REFUSED)) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };
     return json.call(this, body);
   };
   next();

@@ -30,7 +30,7 @@ export function fsErrorText(d) {
   if (d && d.code === 'storage_sync_refused') return p.mount ? t('this file is on the storage «{mount}», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there', { mount: p.mount }) : t('this file is on a storage, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there');
   if (d && d.code === 'parse_busy') return t('another document is being parsed — try again in a moment'); // the parse lane's turn never came (src/safe-fs.js LANES)
   // B-3b03: the file pool had no live worker (its readers restart after a storage that did not answer) — refused, never run on the hub's loop
-  if (d && d.code === 'storage_no_worker') return t('the file readers are restarting (one stopped answering) — try again in a moment');
+  if (d && d.code === 'storage_no_worker') return t('the file readers are restarting — try again in a moment');
   // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
   if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });
   // B-fcc7: a pull mount's folder while it is not mounted (src/routes/files.js pullShadowBody) — the row's state, never an empty folder

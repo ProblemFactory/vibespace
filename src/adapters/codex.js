@@ -663,7 +663,7 @@ function _transcriptPoolGet() {
         poolSize: 2,
         laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB } } },
         // B-3b03: no inlineRun — the pool never runs an op on the main thread (a refusal reaches its callers; their own sync
-        // fallback after ANY pool failure is theirs, said by name: _noteParseOnLoop / codex-parse-on-loop)
+        // fallback after ANY pool failure is theirs — SILENT but for parseCodexSessionJsonl's codex-parse-on-loop: row B-422c)
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, codexHistoryMergedPage: 120000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
       if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);
