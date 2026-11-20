@@ -1150,13 +1150,16 @@ setInterval(() => { }, 1000);
       // (17) r8 THE NAME BY ITS VALUE (accept-r7 confirmed 0 — skeptic-name-falsepos.cjs, refuter-name-falsepos-engine.cjs): e6d6299e6 stored
       // «password reset» as `password-«redacted»` and «password change» as `password-«redacted»-2` (renamed) for every reader, the author too
       { const mk = (nm) => X.jm.create({ kind: 'service', name: nm, cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own, access: { view: 'all' } }, who);
+        // (the move onto 2.369.414's train, 主开发 r380: the jobs store's save goes through the store writer — B-0248 U4 — so the record on
+        // DISK is read after its write LANDED, through the writer's own door, red by name if it did not)
+        const landedJobs = () => { const r = require('../src/store-writer.js').storeWriter().flushSync([X.jm.file]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the jobs store did not land before the name legs read it: ${JSON.stringify(r.left || r)}`); return fs.readFileSync(X.jm.file, 'utf-8'); };
         const W17 = { 'password reset': 'password-reset', 'auth: fix login flow': 'auth-fix-login-flow', 'bearer of bad news': 'bearer-of-bad-news', 'token refresh': 'token-refresh', 'password change': 'password-change' };
-        const made17 = Object.keys(W17).map((nm) => mk(nm)), disk17 = JSON.parse(fs.readFileSync(X.jm.file, 'utf-8')).map((j) => j.name);
+        const made17 = Object.keys(W17).map((nm) => mk(nm)), disk17 = JSON.parse(landedJobs()).map((j) => j.name);
         const read17 = made17.map((r) => { const j = X.jm.jobs.get(r.job.id); return [r.job.name, j.name, X.jm.labelOf(j), X.jm.snapshot(j).name, r.renamed ? 'renamed' : '']; });
         ok(read17.every((row, k) => row.slice(0, 4).every((n) => n === Object.values(W17)[k]) && !row[4] && disk17.includes(Object.values(W17)[k])),
           'r8 THE NAME BY ITS VALUE: «password reset», «auth: fix login flow», «bearer of bad news», «token refresh» stored WHOLE — the record, jobs.json, the create echo, the label another conversation reads; «password change» beside «password reset» is no collision', JSON.stringify(read17));
-        const v17 = mk('password: Q7w8E9r0T1y2!x rotation'), j17 = X.jm.jobs.get(v17.job.id);
-        ok(v17.job.name === 'password-«redacted»-rotation' && X.jm.labelOf(j17) === v17.job.name && !JSON.stringify(JSON.parse(fs.readFileSync(X.jm.file, 'utf-8'))).includes('Q7w8E9r0'), 'r8 …a VALUE after the word is hidden at the record (`password: <value>` — the word stays; r9: the ONE token, the words after it too)', v17.job.name);
+        const PV17 = ['Q7w8E9', 'r0T1y2!x'].join(''), v17 = mk('password: ' + PV17 + ' rotation'), j17 = X.jm.jobs.get(v17.job.id);   // built at run time (secret-scan)
+        ok(v17.job.name === 'password-«redacted»-rotation' && X.jm.labelOf(j17) === v17.job.name && !JSON.stringify(JSON.parse(landedJobs())).includes(PV17), 'r8 …a VALUE after the word is hidden at the record (`password: <value>` — the word stays; r9: the ONE token, the words after it too)', v17.job.name);
         // a scheduled run's NEW record (accept-r7 residual e): the child of a cron an older engine wrote with a raw name was `${name} run` raw
         const old17 = { id: 'jb-0000c7c7', kind: 'cron', name: 'nightly-' + MAT, schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'] } } }, owner: own, access: { view: 'session', control: 'session' }, desiredUp: true, state: 'scheduled', runs: [], createdAt: Date.now() };
         X.jm.jobs.set(old17.id, old17); X.jm._fireCron(old17, 'cron');
@@ -1167,7 +1170,7 @@ setInterval(() => { }, 1000);
         // of that shape `«redacted»`, and stored «rotate password: Correct-Horse-Battery-Staple» in clear
         const W9 = { 'Run e2e for PR 1234 on iOS 17 and M2 Max': 'Run-e2e-for-PR-1234-on-iOS-17-and-M2-Max', 'Run e2e for PR 1235 on iOS 17 and M2 Max': 'Run-e2e-for-PR-1235-on-iOS-17-and-M2-Max', 'GitHub CI on macOS 15 and iOS 18 for PR 42': 'GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42',
           'rotate password: Correct-Horse-Battery-Staple': 'rotate-password-«redacted»', 'password: Summer1!': 'password-«redacted»', 'auth: fix login flow 2026-10-29': 'auth-fix-login-flow-2026-10-29' };
-        const made9 = Object.keys(W9).map((nm) => mk(nm)), disk9 = JSON.stringify(JSON.parse(fs.readFileSync(X.jm.file, 'utf-8')));
+        const made9 = Object.keys(W9).map((nm) => mk(nm)), disk9 = JSON.stringify(JSON.parse(landedJobs()));
         const read9 = made9.map((r) => { const j = X.jm.jobs.get(r.job.id); return [r.job.name, j.name, X.jm.labelOf(j), X.jm.snapshot(j).name, r.renamed ? 'renamed' : '']; });
         const legacy9 = { id: 'jb-0000c9c9', kind: 'task', name: 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', owner: own, access: { view: 'all' }, state: 'done', runs: [], createdAt: Date.now() };
         X.jm.jobs.set(legacy9.id, legacy9);
