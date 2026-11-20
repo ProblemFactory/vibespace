@@ -42,6 +42,18 @@ const DECL = 'u({type:T("system"),subtype:T("background_tasks_changed"),tasks:C(
 const SEP = ';';   // a real build's statements are delimited: the identifier before «({type:» starts after it, never inside filler letters
 const MENTION = 'if(e.subtype==="background_tasks_changed")log("background_tasks_changed");';
 const execd = async (child, file) => { for (let i = 0; i < 300; i++) { try { if (fs.readlinkSync(`/proc/${child.pid}/exe`) === file) return true; } catch { } await new Promise((r) => setTimeout(r, 10)); } return false; };   // (wr3vak19m (3)) bounded 3 s
+// THE PLANT THAT STAYS ALIVE UNDER ANY NAME (主开发 r466): Ubuntu 26.04's sleep is the multi-call coreutils program — it reads its OWN
+// FILE NAME and ends in a few ms under a version name («Requested utility … does not match executable name»), while 24.04's classic
+// sleep runs under any name. The plant is a copy of the system's dash (≈ 130 KB on both, Debian's own POSIX shell ELF — it never looks
+// at its own name: argv[0] is only its $0), run as `<plant> -c 'read -r x'` with a pipe on its stdin THIS suite holds open: it blocks
+// until killed, on every machine. Never a coreutils program.
+const PLANT_SRC = ['/bin/dash', '/usr/bin/dash'].find((f) => { try { return fs.statSync(f).isFile(); } catch { return false; } }) || null;
+const plantRun = (file) => spawn(file, ['-c', 'read -r x'], { stdio: ['pipe', 'ignore', 'ignore'] });
+// THE PREMISE HELD, NOT GLIMPSED (r466 (2)): the planted process is ALIVE when the product is asked and after its answer — by its
+// identity (its start ticks under the same boot: proc-identity's judge), never by a name another process could also carry
+const PI = require(path.join(REPO, 'src/proc-identity.js'));
+const aliveAs = (child, id) => child.exitCode === null && child.signalCode === null && !!id && PI.judge(id).verdict === 'same';
+const endedWords = (child) => `the planted program ended before the ask: exit ${child.exitCode != null ? child.exitCode : child.signalCode}`;
 const filler = (n) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = 97 + (i * 7919 % 26); return b; };
 function plant(name, parts) { const f = path.join(ROOT, name); fs.writeFileSync(f, Buffer.concat(parts.map((p) => (Buffer.isBuffer(p) ? p : Buffer.from(p, 'latin1'))))); fs.chmodSync(f, 0o755); return f; }
 
@@ -140,21 +152,27 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
   ok(po.state === 'gone' && po.read === '2.1.431', '② RED CONTROL: the PATH\'s file read for it — the conversation\'s build is never read (its end stays refused for good)', po);
   MP._levelReset();
   // …through the PROCESS itself (Linux): a running program whose file on disk was then replaced is read as it was started
-  if (process.platform === 'linux' && fs.existsSync('/bin/sleep')) {
+  if (process.platform === 'linux' && PLANT_SRC) {
     const PD = path.join(ROOT, 'inst2'), PVD = path.join(PD, 'versions'), PB = path.join(PD, 'bin'); fs.mkdirSync(PVD, { recursive: true }); fs.mkdirSync(PB, { recursive: true });
     const run = path.join(PVD, '2.1.440');
-    fs.writeFileSync(run, Buffer.concat([fs.readFileSync('/bin/sleep'), Buffer.from(IDENT('2.1.440') + SEP + DECL, 'latin1')])); fs.chmodSync(run, 0o755);   // an ELF runs with bytes appended
+    fs.writeFileSync(run, Buffer.concat([fs.readFileSync(PLANT_SRC), Buffer.from(IDENT('2.1.440') + SEP + DECL, 'latin1')])); fs.chmodSync(run, 0o755);   // an ELF runs with bytes appended
+    console.log(`    the plant: a copy of ${PLANT_SRC} (${fs.statSync(PLANT_SRC).size} bytes) blocked on a held pipe — it does not look at its own name`);
     fs.writeFileSync(path.join(PVD, '2.1.441'), Buffer.concat([filler(1000), Buffer.from(IDENT('2.1.441'), 'latin1')])); fs.chmodSync(path.join(PVD, '2.1.441'), 0o755);
     fs.symlinkSync(path.join(PVD, '2.1.441'), path.join(PB, 'claude'));
-    const child = spawn(run, ['30'], { stdio: 'ignore' });
+    const child = plantRun(run);
     ok(await execd(child, run), 'the planted program RUNS (its exe link names the planted file) — waited for what happened, bounded at 3 s');
+    const id1 = PI.identityOf(child.pid);
     fs.unlinkSync(run); fs.writeFileSync(run, Buffer.concat([filler(1000), Buffer.from(IDENT('2.1.440'), 'latin1')]));   // replaced on disk: no declaration in the new bytes
     const askP = async (version) => { const a = await MP.cliLevel(path.join(PB, 'claude'), { version }); if (a.state !== 'reading') return a; await MP._levelInFlight(); return MP.cliLevel(path.join(PB, 'claude'), { version }); };
+    const before1 = aliveAs(child, id1);
     const viaProc = await askP('2.1.440');
-    try { child.kill('SIGKILL'); } catch { }
-    ok(viaProc.state === 'read' && viaProc.via === 'process' && viaProc.declared === true && viaProc.version === '2.1.440', 'through the PROCESS itself: a running program whose file was replaced on disk is read AS IT WAS STARTED (/proc/<pid>/exe)', viaProc);
+    const after1 = aliveAs(child, id1);
+    try { child.kill('SIGKILL'); } catch { } try { child.stdin.destroy(); } catch { }   // the held pipe goes with it
+    ok(before1 && after1, `SETUP: the planted program is ALIVE when the product is asked and after its answer (pid ${child.pid}, start ticks ${id1 && id1.starttime})${before1 && after1 ? '' : ' — ' + endedWords(child)}`, { before1, after1 });
+    if (before1 && after1) ok(viaProc.state === 'read' && viaProc.via === 'process' && viaProc.declared === true && viaProc.version === '2.1.440', 'through the PROCESS itself: a running program whose file was replaced on disk is read AS IT WAS STARTED (/proc/<pid>/exe)', viaProc);
+    else console.log('    (the product leg is not judged: its premise failed — the SETUP line above says why)');
     MP._levelReset();
-  } else console.log('    (the process road is Linux\'s — not on this machine)');
+  } else console.log('    (the process road is Linux\'s — not on this machine, or no dash to plant)');
   // round wiqep65pr's smalls, on the machine
   const MSRC3 = fs.readFileSync(path.join(REPO, 'src/machine-probes.js'), 'utf8');
   // (1) a NEW agent with no Claude Code on its PATH: the level always comes back when asked — «none», never «the agent is older»
@@ -188,21 +206,26 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
   const p3 = await id3(PRE);
   ok(p3.again === 'read' && p3.k === 1, '(3) RED CONTROL: filed under the identity taken BEFORE the scan — another file\'s verdict stands for this one', p3);
   // (4) step one's match outside a versions folder is tighter than a bare name equal to the version
-  if (process.platform === 'linux' && fs.existsSync('/bin/sleep')) {
+  if (process.platform === 'linux' && PLANT_SRC) {
     const OD = path.join(ROOT, 'loose'), OB = path.join(ROOT, 'loose-bin'); fs.mkdirSync(OD, { recursive: true }); fs.mkdirSync(OB, { recursive: true });
     const loose = path.join(OD, '2.1.483');
-    fs.writeFileSync(loose, Buffer.concat([fs.readFileSync('/bin/sleep'), Buffer.from(IDENT('2.1.483') + SEP + DECL, 'latin1')])); fs.chmodSync(loose, 0o755);
+    fs.writeFileSync(loose, Buffer.concat([fs.readFileSync(PLANT_SRC), Buffer.from(IDENT('2.1.483') + SEP + DECL, 'latin1')])); fs.chmodSync(loose, 0o755);
     const pathProg = path.join(OB, 'claude'); fs.writeFileSync(pathProg, Buffer.concat([filler(800), Buffer.from(IDENT('2.1.484'), 'latin1')])); fs.chmodSync(pathProg, 0o755);
-    const child = spawn(loose, ['30'], { stdio: 'ignore' });
+    const child = plantRun(loose);
     ok(await execd(child, loose), 'the planted program outside a versions folder RUNS (its exe link names it) — waited for, bounded at 3 s');
+    const id4 = PI.identityOf(child.pid);
     const viaOf = async (mod) => { mod._levelReset(); const a = await mod.cliLevel(pathProg, { version: '2.1.483' }); if (a.state === 'reading') { await mod._levelInFlight(); return mod.cliLevel(pathProg, { version: '2.1.483' }); } return a; };
+    const before4 = aliveAs(child, id4);
     const tight = await viaOf(MP);
     const BARE = mutantCopies('level-bare-name', REPO).load('src/machine-probes.js', anchored(MSRC3, "      if (path.basename(file) === version && (vdir ? path.dirname(file) === vdir : path.basename(path.dirname(file)) === 'versions')) return", "      if (path.basename(file) === version && (!vdir || path.dirname(file) === vdir)) return", 'bare-name'), 'bare-name');
     const bare = await viaOf(BARE);
-    try { child.kill('SIGKILL'); } catch { }
-    ok(tight.via !== 'process' && bare.via === 'process', '(4) a process whose file is NOT in a versions folder is not taken for that build by its bare name (the PATH program outside one) — RED CONTROL: the bare name equal to the version', { tight, bare });
+    const after4 = aliveAs(child, id4);
+    try { child.kill('SIGKILL'); } catch { } try { child.stdin.destroy(); } catch { }   // the held pipe goes with it
+    ok(before4 && after4, `SETUP: the planted program outside a versions folder is ALIVE from the first ask to the last answer (pid ${child.pid}, start ticks ${id4 && id4.starttime})${before4 && after4 ? '' : ' — ' + endedWords(child)}`, { before4, after4 });
+    if (before4 && after4) ok(tight.via !== 'process' && bare.via === 'process', '(4) a process whose file is NOT in a versions folder is not taken for that build by its bare name (the PATH program outside one) — RED CONTROL: the bare name equal to the version', { tight, bare });
+    else console.log('    (the product leg (4) is not judged: its premise failed — the SETUP line above says why)');
     MP._levelReset(); BARE._levelReset();
-  } else console.log('    (4) skipped: the process road is Linux\'s — not on this machine (no /proc or no /bin/sleep)');
+  } else console.log('    (4) skipped: the process road is Linux\'s — not on this machine (no /proc or no dash to plant)');
 }
 
 console.log('③ the hub keeps a machine\'s verdict by version');
