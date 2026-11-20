@@ -20,6 +20,10 @@
 //           dropped while its text and machine are the field's, never left hanging (an owed commit holds every door still waiting)
 //      each invariant with its RED CONTROL: the rule removed in a copy of the model (an anchored edit of the shipped source) — the
 //      same driver finds the scene by itself and prints its seed
+//   ②b THE EVENT CENSUS (every event handled is fired at a named site, every fire( names its event, the list closes in one place)
+//   ②c THE DOORS' WIRING (B-225c's read): read from the page's text — every door made is handed to the model, answer( at exactly
+//      three sites (a settle with «nothing», a commit with its info BEFORE onCommit, destroy() with the doors left), no door made on
+//      a destroyed field — four RED CONTROLS (the old settle, a commit with no door, set() unguarded, onCommit first)
 //   ③ this machine's home (LAW 2: a failed read is read again, bounded) and New Session's footer (createRefusal lists «unanswered»)
 // Run: node scripts/test-path-field-model.mjs   (PFM_SEED_ONLY=<seed> replays one seed of the law with its whole sequence)
 import fs from 'node:fs';
@@ -210,7 +214,7 @@ const CONTROLS = [
   ['I2', 'the pending words with nothing asked (the third commit\'s gate)', [["return sought ? 'pending' : 'quiet';", "return 'pending';"]]],
   ['I2', '«未生效：正在问…» left standing when the run moves on', [["  else if (s.err && s.err.kind === 'pending') s.err = null;\n", '']]],
   ['I3', 'a create committed on a partial reply', [["else if (run === 'reask') { if (s.owed.doors.length) { fx.push({ do: 'settle', result: 'owed', doors: s.owed.doors }); s.owed = { ...s.owed, doors: [] }; } s.err = { kind: 'pending' }; }", "else if (run === 'reask') { s.owed = null; fx.push({ do: 'commit', how: 'x', as: 'create' }); }"]]],
-  ['I4', 'an owed commit served on whatever text or machine answers (the fourth commit\'s)', [['    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);   // its doors answered «moved» (B-225c: only ITS doors — a new press is not among them)\n    if (s.errRun', '    if (s.errRun'], ["    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);\n  }\n  disarm(s, fx, 'soon');", "  }\n  disarm(s, fx, 'soon');"], ['      if (s.owed && s.owed.key === s.key) {\n        const g', '      if (s.owed) {\n        const g']]],
+  ['I4', 'an owed commit served on whatever text or machine answers (the fourth commit\'s)', [[/    if \(s\.owed && s\.owed\.key !== s\.key\) drop\(s, fx, false\);[^\n]*\n    if \(s\.errRun/, '    if (s.errRun'], ["    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);\n  }\n  disarm(s, fx, 'soon');", "  }\n  disarm(s, fx, 'soon');"], ['      if (s.owed && s.owed.key === s.key) {\n        const g', '      if (s.owed) {\n        const g']]],
   ['I4', 'an owed commit kept past a run that ended unanswered (the ruling\'s drop removed)', [['        else { drop(s, fx, true, s.answer.err); s.errRun = s.key; }', '        else { s.errRun = s.key; }']]],
   ['I5', 'the partial reply asked again for ever (the old loop)', [["run = s.run.n < PARTIAL_REPLIES ? 'reask' : 'stop';", "run = 'reask';"]]],
   ['I6', 'effects after «destroyed»', [['if (!s0 || s0.destroyed) return { state: s0, effects: [] };', 'if (!s0) return { state: s0, effects: [] };']]],
@@ -254,6 +258,42 @@ const census = (modelSrc, wireSrc) => {
   ok('②b RED CONTROL: Enter closing the list ITSELF (not through close()) — the census sees a second write of the open flag', bypass.closes === 2, bypass.closes);
   const cut = census(SRC, anchored(WIRE, "fire({ type: 'closed' })", 'void 0', 'the wiring without «closed»'));
   ok('②b RED CONTROL: the wiring without its «closed» — the census names «closed» as handled and fired by nothing', cut.notFired.join() === 'closed', cut.notFired);
+}
+
+/* ═══ ②c THE DOORS' WIRING (B-225c's fresh read, its first SHOULD: I9 holds the doors the MODEL names, but the fault lived in the PAGE —
+   a settle answered every waiting press with st.committed). Read from the page's own text: every press that makes a door hands it to the
+   model in the same statement; a settle answers exactly its doors with «nothing»; a commit answers exactly its doors with the info,
+   BEFORE onCommit (an onCommit that destroys the field never turns a taken press into «nothing»); only destroy() answers the doors left;
+   a press on a destroyed field makes no door (fire() would never answer it). RED CONTROLS: the old settle (a «moved» press answered with
+   the last committed path), commit() handing the model no door, set() without its destroyed guard, onCommit before the answer ═══ */
+const bodyOf = (src, head) => { const i = src.indexOf(head); if (i < 0) return ''; const j = src.indexOf('\n  function ', i + head.length); return src.slice(i, j < 0 ? undefined : j); };
+const doorWiring = (w) => {
+  const made = (w.match(/waiters\.set\(door, res\)/g) || []).length;
+  const handed = (w.match(/waiters\.set\(door, res\); fire\(\{ type: '(?:commit|set)'[^}\n]*\bdoor \}\)/g) || []).length;
+  const calls = [...w.matchAll(/\banswer\(([^;\n]*?)\);/g)].map((m) => m[1]);
+  const settle = w.includes("else if (e.do === 'settle') answer(e.doors, null);");
+  const cm = bodyOf(w, 'function committed(e) {'), dy = bodyOf(w, 'function destroy() {');
+  const order = cm.indexOf('answer(e.doors, info)') >= 0 && cm.indexOf('o.onCommit?.(info)') > cm.indexOf('answer(e.doors, info)');
+  const guard = (head) => /^[^\n]*\{\n    if \(st\.destroyed\) return Promise\.resolve\(null\);/.test(bodyOf(w, head));
+  const guards = { commit: guard('function commit(how = '), set: guard('function set(text, ') };
+  return { made, handed, calls, settle, order, rest: dy.includes('answer([...waiters.keys()], null)'), guards };
+};
+{
+  const d = doorWiring(WIRE);
+  const sites = ['e.doors, null', 'e.doors, info', '[...waiters.keys()], null'];
+  const good = (x) => x.made >= 2 && x.handed === x.made && x.settle && x.order && x.rest && x.guards.commit && x.guards.set && x.calls.length === 3 && sites.every((a) => x.calls.includes(a));
+  ok(`②c every press that makes a door hands it to the model (${d.handed} of ${d.made}); answer( is called at exactly three sites (${d.calls.join(' · ')}): a settle with «nothing», a commit with its info BEFORE onCommit, destroy() with the doors left; commit() and set() make no door on a destroyed field`, good(d), d);
+  const reds = [
+    ['the old settle — a «moved» press answered with the last committed path', ["else if (e.do === 'settle') answer(e.doors, null);", "else if (e.do === 'settle') answer(e.doors, e.result === 'moved' ? st.committed : null);"]],
+    ['commit() hands the model no door (its press would never be answered)', ["fire({ type: 'commit', how, door })", "fire({ type: 'commit', how })"]],
+    ['set() without its destroyed guard (a press on a dead field hangs)', ["  function set(text, { commit: c = true, how = 'set', derived = null } = {}) {\n    if (st.destroyed) return Promise.resolve(null);", "  function set(text, { commit: c = true, how = 'set', derived = null } = {}) {"]],
+    ['onCommit before the answer (an onCommit that destroys the field turns the taken press into «nothing»)', ["    answer(e.doors, info);", "    if (info) try { o.onCommit?.(info); } catch { }\n    answer(e.doors, info);"]],
+  ];
+  for (const [what, [from, to]] of reds) {
+    let x = null, err = '';
+    try { x = doorWiring(anchored(WIRE, from, to, what)); } catch (e) { err = String(e.message || e).slice(0, 200); }
+    ok(`②c RED CONTROL: ${what} — the pin goes red`, !!x && !good(x), x || err);
+  }
 }
 
 /* ═══ ③ this machine's home (LAW 2) · New Session's footer ═══ */

@@ -11,8 +11,9 @@
 //   askedOf(sent, reply)      → the probes a reply may mark ASKED (B-0f3d: only those sent and answered in time)
 // The events (each carries `cur` = keyOf(the box's text now, the machine now), and `now` = the clock):
 //   typed {soon?}        the person typed (debounced) or Tab completed (asked at once)
-//   set {commit, how}    a text SET from outside (a pick, a chip, set(), setDerived): asked at once (LAW 1)
-//   commit {how}         a commit pressed (leave, Enter, Create): judged now on a fresh complete answer, else OWED to its run
+//   set {commit, how, door}  a text SET from outside (a pick, a chip, set(), setDerived): asked at once (LAW 1)
+//   commit {how, door}   a commit pressed (leave, Enter, Create): judged now on a fresh complete answer, else OWED to its run
+//                        (`door` = the press's own, B-225c: its outcome names it)
 //   reply {key, kind, err}   an answer: kind 'listing' (complete) | 'partial' (the machine's budget ran out) | 'failed' (none)
 //   fired {which, connected} a timer fired: 'soon' (the debounce) or 'reask' (the bounded run's)
 //   refresh {}           the door's inputs moved (a group, the name, the machine)
@@ -145,6 +146,8 @@ function judge(s, fx, how, env, doors = []) {
     if (why) { s.err = { kind: 'refused', why }; fx.push({ do: 'settle', result: 'refused', doors }); return; }
     fx.push({ do: 'commit', how, as: 'create', key: s.key, doors }); return;
   }
+  // (B-225c's read: the two ends below are not reached today — commitFlow judges only a fresh complete answer or a resolved rank, and a
+  // reply judges only ok / missing / empty / searching; they stay as the safe ends, never a «refused» for a text nobody answered)
   if (g === 'pending') { s.err = { kind: 'pending' }; s.owed = { key: s.key, how, doors: [] }; fx.push({ do: 'settle', result: 'owed', doors }); return; }   // its door hears «nothing yet»; judged again when its answer lands, inside its run
   if (g === 'unanswered') { s.owed = null; s.err = { kind: 'unanswered', err: (s.answer && s.answer.err) || '' }; fx.push({ do: 'settle', result: 'refused', doors }); return; }
   if (g === 'quiet') { s.owed = null; fx.push({ do: 'settle', result: 'quiet', doors }); return; }   // nothing asked for this text on this machine: nothing said

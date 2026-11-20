@@ -636,10 +636,12 @@ export function pathField(input, opts = {}) {
       if (e.as === 'ok' && x.ok) { const r = x.r; info = infoOf(r.path, { isFile: !!r.file, via: { base: r.base, relative: !!r.relative, kind: how === 'picker' ? 'picker' : how === 'pick' ? 'pick' : r.kind, alias: '' }, how }); }
       else if (e.as === 'create' && x.missing) info = infoOf(x.path, { exists: false, create: true, isFile: kind === 'file', via: { base: x.base, relative: !!(x.base && x.base !== 'home' && x.base !== 'abs'), kind: how === 'pick' ? 'pick' : 'exact', alias: '' }, how });
     }
-    if (info) { st.committed = info; paint(); try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); } }
-    answer(e.doors, info);
+    if (info) { st.committed = info; paint(); }
+    answer(e.doors, info);   // B-225c: the presses hear their own outcome FIRST — an onCommit that destroys the field never turns it into «nothing»
+    if (info) try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); }
   }
   function set(text, { commit: c = true, how = 'set', derived = null } = {}) {
+    if (st.destroyed) return Promise.resolve(null);   // B-225c: a dead field takes no text and makes no door (the model hears nothing after «destroyed»: it would never be answered)
     input.value = String(text == null ? '' : text);
     st.derived = derived && input.value.trim() ? { text: input.value, note: String(derived.note || '') } : null;   // setDerived: the door's, not the person's
     if (st.open) close();
