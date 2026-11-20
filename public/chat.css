@@ -2091,8 +2091,10 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-artifact-card .chat-vs-notice-head { display: flex; align-items: center; gap: 6px; }
 .chat-artifact-ic { display: inline-flex; width: 16px; height: 16px; flex: none; }
 .chat-artifact-ic svg { width: 16px; height: 16px; }
-.chat-artifact-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chat-artifact-kind { margin-left: auto; font-size: 0.85em; }
+.chat-artifact-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+/* B-16ab (1): the kind chip is ONE word on ONE line — beside a long title the NAME yields (its ellipsis), never the chip (at 390 «设计»
+   stood one character a line) */
+.chat-artifact-kind { margin-left: auto; font-size: 0.85em; flex: none; white-space: nowrap; }
 .chat-artifact-path { font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .chat-artifact-meta { font-size: 0.85em; }
 /* lane artifacts-services-url: a service's url is not a path — LTR and END-truncated (the rtl path box painted the

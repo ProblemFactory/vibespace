@@ -1,6 +1,6 @@
 import { t } from './i18n.js';
 import { ago as pageAgo, markAgo } from './page-time.js'; // lane ui-language: the ONE formatter of a time a person reads
-import { menuPlace, menuKeyStep } from './menu-place.js'; // PURE (lane desktop-small P2-3): THE ONE placement of a menu inside the viewport
+import { menuPlace, menuKeyStep, MENU_PAD } from './menu-place.js'; // PURE (lane desktop-small P2-3): THE ONE placement of a menu inside the viewport
 import { metric } from './telemetry-client.js';
 import { pressCloses, pressPhase, tapVerdict, shouldCloseOnBlur } from './outside-press.js';
 import { NATIVE_PRESS_SELECTOR, PRESS_CHROME_SELECTOR, effectiveUserSelect, pointOnText, pressTargetClass, longPressVerdict, selectionCloses, selectStartAllowed, trustedContextMenu } from './press-select.js';
@@ -1699,9 +1699,15 @@ export function placeMenu(pop, x, y, { up = false, follow = false, placesItself 
     }
   };
   const place = () => {
-    unpin(); pop.style.maxHeight = ''; pop.style.overflowY = '';   // its natural size first
+    unpin(); pop.style.maxHeight = ''; pop.style.overflowY = ''; pop.style.maxWidth = '';   // its natural size first —
+    // B-16ab (3): MEASURED WHERE IT HAS THE SCREEN'S WIDTH. At x a fixed box is only as wide as the room right of it: the
+    // helper slid it by that squeezed width and it grew back into what it gained, flush on the edge (the Agents dialog's
+    // «+ Add account…» opened at x 205 of a 390 px phone: 201 + 189 = 390). Measured at the left pad, the box wider than the
+    // screen less its two pads is capped (menuPlace's maxW, now applied); every other box keeps the width it measured.
+    pop.style.left = (MENU_PAD / Z) + 'px';
     const mr = pop.getBoundingClientRect();
     const at = menuPlace({ x, y, w: mr.width, h: mr.height, vw: window.innerWidth, vh: window.innerHeight, up });
+    if (at.maxW != null) pop.style.maxWidth = (at.maxW / Z) + 'px';
     if (at.maxH != null) { pop.style.maxHeight = (at.maxH / Z) + 'px'; pop.style.overflowY = 'auto'; if (!placesItself) pinTail(); }
     pop.style.left = (at.left / Z) + 'px';
     pop.style.top = (at.top / Z) + 'px';

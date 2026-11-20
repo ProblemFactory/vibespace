@@ -4312,7 +4312,7 @@ body.taskbar-top #taskbar-hotzone { bottom: auto; top: 0; }
 /* only the MODAL gets the wide floor — in the rail panel the SAME class sits
    on the ~300px panel div (.rail-panel.agents-dialog-body, compound not
    descendant — the 380px floor leaking in was the 2.178.0 overflow bug) */
-.dialog.agents-dialog .agents-dialog-body { min-width: 380px; }
+.dialog.agents-dialog .agents-dialog-body { min-width: min(380px, 100%); } /* B-16ab (2): the floor holds where the dialog has the room — at 390 the dialog is 92vw (359 px) and a 380 px body ran «全部刷新» and every card under its right edge */
 .agents-dialog-body .ob-backend { margin: 0; }
 .agent-actions { display: flex; gap: 6px; align-items: center; }
 .agent-btn {

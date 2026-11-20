@@ -1,0 +1,178 @@
+#!/usr/bin/env node
+// test-fit-390-chrome — HEAVY (B-16ab: lane ui-phone-and-fit's three fit finds at 390 px, from ui-plain-words' pictures of
+// 2026-11-13). The REAL modules (an esbuild iife of the tree) and the REAL stylesheets in headless Chrome over a throwaway page
+// server, a 390 × 844 phone (touch), zh — in BOTH faces (runFontLegs: the hosted runner's DejaVu Sans through a scratch
+// fontconfig, and this box's own), each face read back from Chrome:
+//   ① THE DELIVERABLE CARD'S KIND CHIP NEVER WRAPS (src/lib/artifact-card.js renderArtifactCard + public/chat.css): three cards in
+//     a phone chat column — a short design, a design with a long title, a page — every kind chip («设计» / «页面») ONE line inside
+//     its card; beside the long title the NAME yields (its ellipsis), the short names stay whole. CONTROL: chat.css with the old
+//     chip rule (margin-left only) — the long card's chip stands two lines (one character a line)
+//   ② THE AGENTS DIALOG'S BODY NEVER RUNS PAST THE DIALOG (public/style.css `.dialog.agents-dialog .agents-dialog-body`): the
+//     dialog's own classes (the modal 92vw wide, its head «本机账号与配额 · 全部刷新», its cards) — the body, «全部刷新» and every card
+//     inside the dialog's right edge, nothing scrolls sideways. CONTROL: the old 380 px floor — the body and the button run past
+//   ③ A POP-UP IS BOUNDED BY THE SCREEN WITH THE USUAL MARGIN (src/lib/utils.js showContextMenu over menu-place.js menuPlace,
+//     MENU_PAD): the Agents dialog's «+ 添加账号…» rows opened from a button at x 205 (where the 11-13 picture had it) keep their
+//     natural width, every row on one line, 4 px off the screen's right edge; a menu wider than the screen is capped at the
+//     screen less its two pads. CONTROL: the helper as it measured before (at the point, squeezed by the edge) — flush on the edge
+// Requires google-chrome (SKIP without) and a built tree. Run: node scripts/test-fit-390-chrome.mjs [--font dejavu|box]
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { freePorts, scratch, ONBOARDED_SOURCE, CHROME_STORE, runFontLegs, runnerFontEnv, drawnFace } from './scratch.mjs';
+
+const require = createRequire(import.meta.url);
+const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
+if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
+const fi = process.argv.indexOf('--font'), FONT = fi > 0 ? process.argv[fi + 1] : null; // one font leg; none = every leg, each a child
+if (!FONT) process.exit(runFontLegs(fileURLToPath(import.meta.url)));
+let pass = 0, fail = 0;
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error('ok(cond, name, extra?)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.log('  ✗ ' + n + (e !== undefined ? '\n      ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 1600) : '')); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const express = require(path.join(repo, 'node_modules/express'));
+const esbuild = require(path.join(repo, 'node_modules/esbuild'));
+const WebSocket = require(path.join(repo, 'node_modules/ws'));
+const read = (p) => fs.readFileSync(path.join(repo, p), 'utf8');
+
+// ── the sheets now and as they were (each control's anchor must exist: a vacuous control proves nothing) ──
+const STYLE = read('public/style.css'), CHAT = read('public/chat.css'), UTILS_PATH = path.join(repo, 'src/lib/utils.js'), UTILS = fs.readFileSync(UTILS_PATH, 'utf8');
+const KIND_NOW = '.chat-artifact-kind { margin-left: auto; font-size: 0.85em; flex: none; white-space: nowrap; }';
+const BODY_NOW = '.dialog.agents-dialog .agents-dialog-body { min-width: min(380px, 100%); }';
+const MEASURE_NOW = "    pop.style.left = (MENU_PAD / Z) + 'px';\n";
+const CAP_NOW = "    if (at.maxW != null) pop.style.maxWidth = (at.maxW / Z) + 'px';\n";
+ok(CHAT.split(KIND_NOW).length === 2 && STYLE.split(BODY_NOW).length === 2 && UTILS.split(MEASURE_NOW).length === 2 && UTILS.split(CAP_NOW).length === 2,
+  'the three rules stand in the tree once each (chat.css\'s kind chip, style.css\'s dialog body, utils.js\'s measure + cap) — the controls take them out');
+const CHAT_OLD = CHAT.replace(KIND_NOW, '.chat-artifact-kind { margin-left: auto; font-size: 0.85em; }');   // stale-pins: kept — the CONTROL plants the old rule back (its anchor, the rule now, is checked once above)
+const STYLE_OLD = STYLE.replace(BODY_NOW, '.dialog.agents-dialog .agents-dialog-body { min-width: 380px; }');   // stale-pins: kept — the CONTROL plants the old rule back (its anchor, the rule now, is checked once above)
+const UTILS_OLD = UTILS.replace(MEASURE_NOW, '').replace(CAP_NOW, '');
+
+// ── the page bundles: the real modules (a built tree; an unbuilt one gets a stub build-version.js) ──
+const root = scratch('fit-390-chrome'), dir = path.join(root, 'web'), fontsDir = path.join(root, 'fonts');
+fs.mkdirSync(dir, { recursive: true }); fs.mkdirSync(fontsDir, { recursive: true });
+const FONT_ENV = FONT === 'dejavu' ? runnerFontEnv(fontsDir) : {};
+const stubVersion = fs.existsSync(path.join(repo, 'src/lib/build-version.js')) ? [] : [{ name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'fit-390';", loader: 'js' })); } }];
+const oldUtils = { name: 'old-utils', setup(b) { b.onLoad({ filter: /src[\\/]lib[\\/]utils\.js$/ }, () => ({ contents: UTILS_OLD, loader: 'js', resolveDir: path.dirname(UTILS_PATH) })); } };
+const ENTRY = `import { renderArtifactCard } from ${JSON.stringify(path.join(repo, 'src/lib/artifact-card.js'))};
+import { showContextMenu } from ${JSON.stringify(UTILS_PATH)};
+window.__card = renderArtifactCard; window.__menu = showContextMenu; window.__ready = true;`;
+const build = (name, plugins = []) => esbuild.build({ stdin: { contents: ENTRY, resolveDir: repo, loader: 'js' }, bundle: true, format: 'iife', platform: 'browser', target: 'es2020', outfile: path.join(dir, name), loader: { '.css': 'empty' }, logLevel: 'error', plugins: [...stubVersion, ...plugins] });
+await build('now.js');
+await build('old.js', [oldUtils]);
+
+const web = express();
+web.get('/style.css', (q, s) => s.type('css').send(q.query.old === '1' ? STYLE_OLD : STYLE));
+web.get('/chat.css', (q, s) => s.type('css').send(q.query.old === '1' ? CHAT_OLD : CHAT));
+web.get('/:b.js', (q, s) => s.type('js').send(fs.readFileSync(path.join(dir, q.params.b + '.js'))));
+web.get('/', (q, s) => {
+  const old = q.query.old === '1' ? '1' : '0';
+  s.type('html').send(`<!doctype html><html data-theme="dark" lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css?old=${old}"><link rel="stylesheet" href="/chat.css?old=${old}"><script>try{localStorage.setItem('vibespace.lang','zh')}catch{}</script></head><body><div id="stage"></div><script src="/${old === '1' ? 'old' : 'now'}.js"></script></body></html>`);
+});
+const [PORT, CDP_PORT] = await freePorts(2);
+const srv = await new Promise((r) => { const x = web.listen(PORT, '127.0.0.1', () => r(x)); });
+const chromeDir = path.join(root, 'chrome');
+const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--font-render-hinting=none', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...FONT_ENV } });
+const cleanup = () => { try { chrome.kill('SIGKILL'); } catch { } try { srv.close(); } catch { } try { fs.rmSync(root, { recursive: true, force: true }); } catch { } };
+process.on('exit', cleanup);
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });
+for (let i = 0; i < 120; i++) { try { await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json(); break; } catch { await sleep(250); } }
+
+/** one tab at 390 × 844 (touch), the page now or as it was */
+async function page({ old = false } = {}) {
+  const tg = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+  const ws = new WebSocket(tg.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+  await new Promise((r) => ws.on('open', r));
+  let seq = 0; const pend = new Map();
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m.result || {}); pend.delete(m.id); } });
+  const cdp = (method, params = {}, ms = 15000) => new Promise((r, j) => { const id = ++seq; const tm = setTimeout(() => { pend.delete(id); j(new Error(`CDP ${method}: no answer in ${ms / 1000} s`)); }, ms); pend.set(id, (m) => { clearTimeout(tm); r(m); }); ws.send(JSON.stringify({ id, method, params })); });
+  await cdp('Runtime.enable'); await cdp('Page.enable');
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
+  const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.exceptionDetails).slice(0, 600)); return r.result?.value; };
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?old=${old ? 1 : 0}` });
+  let ready = false;
+  for (let i = 0; i < 200 && !ready; i++) { ready = await ev('window.__ready === true').catch(() => false); if (!ready) await sleep(50); }
+  await ev('document.fonts.ready.then(() => true)');
+  return { ev, cdp, ready, close: () => { try { ws.close(); } catch { } } };
+}
+
+// ① the cards: three deliverables in a phone chat column (the column's own padding, the chat's own sheet)
+const CARDS = [
+  { key: 'k-a', kind: 'design', name: 'Acme 落地页', path: '/w/demo/designs/landing' },
+  { key: 'k-b', kind: 'design', name: '移动端新用户引导流程（第二版，含注册、验证手机号与首次设置）', path: '/w/demo/designs/mobile-onboarding-flow-with-a-very-long-folder-name' },
+  { key: 'k-c', kind: 'page', name: 'report.html', path: '/w/demo/report.html' },
+];
+const CARD_LEG = `(() => {
+  const col = document.createElement('div'); col.className = 'chat-view'; col.style.cssText = 'position:absolute;left:0;top:0;width:390px;padding:0 12px;box-sizing:border-box';
+  document.getElementById('stage').appendChild(col);
+  const probe = document.createElement('span'); probe.id = 'face-probe'; probe.className = 'chat-artifact-name'; probe.textContent = 'report.html'; col.appendChild(probe);
+  for (const b of ${JSON.stringify(CARDS)}) col.appendChild(window.__card({ type: 'system', noticeKind: 'artifact', content: [{ type: 'artifact', at: Date.now() - 60000, ...b }] }));
+  const lines = (e) => { const rg = document.createRange(); rg.selectNodeContents(e); return new Set([...rg.getClientRects()].map((x) => Math.round(x.top))).size; };
+  return [...col.querySelectorAll('.chat-artifact-card')].map((c) => { const k = c.querySelector('.chat-artifact-kind'), n = c.querySelector('.chat-artifact-name'), cr = c.getBoundingClientRect(), kr = k.getBoundingClientRect();
+    return { name: n.textContent, kind: k.textContent, kindLines: lines(k), kindW: Math.round(kr.width), kindIn: kr.right <= cr.right + 0.5 && kr.left >= cr.left - 0.5, nameCut: n.scrollWidth > n.clientWidth + 1, cardRight: Math.round(cr.right) }; });
+})()`;
+console.log(`① the deliverable card's kind chip at 390 (zh, ${FONT === 'dejavu' ? "the hosted runner's DejaVu Sans" : "this box's own face"})`);
+{
+  const now = await page(), was = await page({ old: true });
+  ok(now.ready && was.ready, 'the pages load the real modules (renderArtifactCard, showContextMenu)');
+  const A = await now.ev(CARD_LEG), B = await was.ev(CARD_LEG);
+  // the face, read back from a probe in the name's own class OUTSIDE the cards (a card is content-visibility: auto — its words may
+  // never be drawn in a background tab, so its font list stays empty): until it reads, 100 ms at a time, 30 tries (red by name then)
+  let face = null, tries = 0;
+  for (; tries < 30 && !face; tries++) { face = await drawnFace(now.cdp, '#face-probe'); if (!face) await sleep(100); }
+  ok(FONT === 'dejavu' ? face === 'DejaVu Sans' : !!face, `the leg's face, read back from Chrome (the name's own class, ${tries} read(s)): ${face}`, face);
+  const say = (r) => r.map((c) => `«${c.name.slice(0, 8)}» ${c.kind} ${c.kindLines} line(s) ${c.kindW} px${c.nameCut ? ', name cut' : ''}`).join(' · ');
+  console.log(`      now: ${say(A)}\n      the old chip rule: ${say(B)}`);
+  ok(A.length === 3 && A.every((c) => c.kindLines === 1 && c.kindIn && c.cardRight <= 390), `every kind chip ONE line inside its card (${A.map((c) => c.kind + ' ' + c.kindLines).join(', ')})`, A);
+  ok(A[1].nameCut && !A[0].nameCut && !A[2].nameCut, 'beside the long title the NAME yields — its ellipsis; the short names stay whole', A);
+  ok(B.length === 3 && B[1].kindLines >= 2 && B[1].kindW < A[1].kindW, `CONTROL: the old chip rule (margin-left only) — the long card's «${B[1] ? B[1].kind : '?'}» stands ${B[1] ? B[1].kindLines : '?'} lines (${B[1] ? B[1].kindW : '?'} px)`, B);
+  now.close(); was.close();
+}
+
+// ② the Agents dialog's body: the modal with its own classes, its head and two cards
+const AGENTS = `(() => {
+  const ov = document.createElement('div'); ov.className = 'dialog-overlay';
+  ov.innerHTML = '<div class="dialog agents-dialog"><div class="dialog-header"><h3>Agents</h3><button class="dialog-close">×</button></div>'
+    + '<div class="dialog-body agents-dialog-body"><div class="agents-tabs btn-bar"><button class="agents-tab active">账号</button><button class="agents-tab">机器</button><button class="agents-tab">指令</button></div>'
+    + '<div class="agents-overview-head btn-bar"><span class="agents-note btn-bar-text">本机账号与配额</span><button class="agent-btn agents-refresh-all"><svg viewBox="0 0 16 16"></svg><span>全部刷新</span></button></div>'
+    + '<div class="agents-machine-sec"><div class="ob-backend"><b>Claude Code</b> 2.1.321 未登录<div class="btn-bar"><button class="agent-btn">重新检查</button><button class="agent-btn">更新</button></div></div>'
+    + '<div class="ob-backend acct-section acct-roster"><b>Anthropic 账号</b> <button class="agent-btn acct-add">+ 添加账号…</button></div></div></div></div>';
+  document.body.appendChild(ov);
+  const R = (e) => e.getBoundingClientRect(), d = R(ov.querySelector('.dialog')), body = ov.querySelector('.agents-dialog-body'), b = R(body), ra = R(ov.querySelector('.agents-refresh-all'));
+  const past = [...ov.querySelectorAll('.dialog *')].filter((e) => e.getClientRects().length && R(e).right > d.right + 0.5).map((e) => String(e.className || e.tagName).slice(0, 40));
+  return { dialog: Math.round(d.width), dialogRight: Math.round(d.right), body: Math.round(b.width), bodyRight: Math.round(b.right), refreshRight: Math.round(ra.right), sideways: body.scrollWidth - body.clientWidth, past };
+})()`;
+console.log('② the Agents dialog at 390 — its body never runs past it');
+{
+  const now = await page(), was = await page({ old: true });
+  const A = await now.ev(AGENTS), B = await was.ev(AGENTS);
+  console.log(`      now: dialog ${A.dialog} px (right ${A.dialogRight}), body ${A.body} px (right ${A.bodyRight}), «全部刷新» right ${A.refreshRight}, ${A.past.length} past · the old floor: body ${B.body} px (right ${B.bodyRight}), «全部刷新» right ${B.refreshRight}, ${B.past.length} past`);
+  ok(A.dialog < 380 && A.bodyRight <= A.dialogRight + 0.5 && A.refreshRight <= A.dialogRight + 0.5 && !A.past.length && A.sideways <= 1, `the body (${A.body} px), «全部刷新» and every card inside the ${A.dialog} px dialog — nothing past its right edge`, A);
+  ok(B.bodyRight > B.dialogRight + 0.5 && B.refreshRight > B.dialogRight + 0.5 && B.past.length > 0, `CONTROL: the old 380 px floor — the body ends at ${B.bodyRight}, «全部刷新» at ${B.refreshRight}, past the dialog's ${B.dialogRight}`, B);
+  now.close(); was.close();
+}
+
+// ③ the popover helper: the add-account menu's own rows opened from x 205; a menu wider than the screen
+const ROWS = ['使用 Claude 登录（推荐）…', '在终端里登录另一个订阅…', '用长期 token 添加（登录生成或粘贴）…', '添加 Console 账号…', '添加 API key…', '添加第三方模型…'];
+const MENU = (rows, x) => `(() => {
+  document.querySelectorAll('.context-menu').forEach((m) => m.remove());
+  const m = window.__menu(${x}, 120, ${JSON.stringify(rows)}.map((label) => ({ label, action() {} })));
+  const r = m.getBoundingClientRect(), lines = (e) => { const rg = document.createRange(); rg.selectNodeContents(e); return new Set([...rg.getClientRects()].map((q) => Math.round(q.top))).size; };
+  return { left: Math.round(r.left * 10) / 10, right: Math.round(r.right * 10) / 10, w: Math.round(r.width * 10) / 10, gap: Math.round((innerWidth - r.right) * 10) / 10, multi: [...m.querySelectorAll('.context-menu-item')].filter((e) => lines(e) > 1).map((e) => e.textContent.trim()) };
+})()`;
+const WIDE = ['一个比屏幕还宽的菜单行：' + '这一行的文字很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长很长'];
+console.log('③ a pop-up at 390 — the screen bounds it with the usual margin (MENU_PAD 4 px)');
+{
+  const now = await page(), was = await page({ old: true });
+  const A = await now.ev(MENU(ROWS, 205)), W = await now.ev(MENU(WIDE, 205)), B = await was.ev(MENU(ROWS, 205));
+  console.log(`      now: the add-account rows from x 205 → left ${A.left}, ${A.w} px, ${A.gap} px off the edge, ${A.multi.length} row(s) on two lines · a menu wider than the screen → left ${W.left}, ${W.w} px, ${W.gap} px off · the old measure: left ${B.left}, ${B.w} px, ${B.gap} px off`);
+  ok(A.gap >= 3.5 && A.left >= 3.5 && !A.multi.length, `the add-account menu keeps the usual margin: ${A.gap} px off the screen's right edge, its ${A.w} px natural width, every row on one line`, A);
+  ok(W.left >= 3.5 && W.gap >= 3.5 && W.w <= 390 - 8 + 0.5, `a menu wider than the screen is capped at the screen less its two pads (${W.w} px, ${W.left} / ${W.gap} px off the edges)`, W);
+  ok(B.gap < 1, `CONTROL: the helper as it measured before (at the point, squeezed by the edge) — the same menu ${B.gap} px off the edge, ${B.w} px wide (flush)`, B);
+  now.close(); was.close();
+}
+
+console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass} passed, 0 failed)`);
+process.exit(fail ? 1 : 0);
