@@ -293,7 +293,7 @@ function tabsStaleStep(stale, event) {
   if (event === 'tabs' || event === 'switch') return false;
   return !!stale;
 }
-function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {}, windows = {}, leases = [], me = null, stale = false, front = null } = {}, tIn) {
+function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {}, windows = {}, leases = [], me = null, stale = false, front = null, made = {} } = {}, tIn) {
   const t = tOf(tIn);
   const human = !!(viewer && viewer.human);
   const ow = isObj(owners) ? owners : {};
@@ -321,9 +321,10 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
     const url = str(x.url).slice(0, 2048);
     const full = str(x.title).trim().slice(0, 300) || url;
     const fw = frontId === idKey(x.targetId) ? frontText({ ...fv, owner }, { name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn) : { mark: '', tip: '' };
+    const mw = madeText(isObj(made) ? made[idKey(x.targetId)] : null, owner, tIn); // B-e674 unit 2: the birth stamp, named
     return {
       targetId: idKey(x.targetId), tabId: str(x.tabId), title: twin.has(plain[i]) ? chipTitleTail(x.title, x.url) : plain[i], tip: full === url ? full : `${full} — ${url}`, url, host: hostOf(x.url), active: !!x.active, owner,
-      mark: ownerMarkText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn), markTip: ownerTipText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn),
+      mark: ownerMarkText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn) + (mw.mark ? ' · ' + mw.mark : ''), markTip: (mw.tip ? mw.tip + '\n' : '') + ownerTipText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn),
       // accept-fixes F4: the tab the agent is WORKING ON says so on its chip (never only a border) — apart from the one
       // this view watches (the dashed chip)
       here: owner === 'agent' && !!x.active, hereText: owner === 'agent' && x.active ? t('The agent is here') : '',
@@ -459,6 +460,16 @@ function frontVerdict({ windowId = null, windows = {}, visible = [], owners = {}
   return { state: word === (human ? 'you' : 'agent') ? 'own' : 'foreign', windowId: w, targetId: vis[0], owner: word, mates: mates.length };
 }
 /** A FOREIGN front tab's words: its chip's short line (`mark`) and its tip (whose it is, then what this view does about it). */
+/** B-e674 unit 2: a tab's BIRTH STAMP in words. RULING (i): a tab a page opened during the person's takeover stays that page's
+ *  holder's — NAMED (its mark: «opened in your takeover»); a tab no page opened, made while the person drove, is the person's
+ *  own (`you`) — its tip says why. → {mark, tip} ('' when there is nothing to say). */
+function madeText(m, owner, tIn) {
+  const t = tOf(tIn);
+  if (!isObj(m)) return { mark: '', tip: '' };
+  if (m.person && owner === 'you') return { mark: '', tip: t('Your tab — opened while you drove this window') };
+  if (!m.person && m.made === 'takeover' && owner !== 'you') return { mark: t('opened in your takeover'), tip: t('Opened during your takeover — it stays with the page that opened it') };
+  return { mark: '', tip: '' };
+}
 /** A FOREIGN front this view does NOT list (the bridge sends its state alone — no id, no name, no title): one general line. */
 function frontNoteText(tIn) {
   const t = tOf(tIn);
@@ -605,4 +616,5 @@ module.exports = {
   tabGroups, tabsCountText, windowLabelText, isBlankTab, // lane browser-tabs-by-window: the tabs by window, a window's spare blank folded
   FRONT_READS_MAX, FRONT_STATES, frontVerdict, frontText, // B-e674 unit 1: the front of this view's window, said
   FRONT_READ_MS, frontNoteText, // B-e674 unit 2: one front read's bound; the unlisted foreign front's general line
+  madeText, // B-e674 unit 2: the birth stamp in words
 };

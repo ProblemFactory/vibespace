@@ -466,6 +466,34 @@ function broughtFrontVerdict({ state = null, id = null, ack = null } = {}) {
   return state === 'unresponsive' && !!id && !!to && to.toUpperCase() === String(id).toUpperCase();
 }
 
+// ── B-e674 unit 2 (the coordinator's r548 / r562 / r605): EVERY ROAD A TAB IS CREATED BY, in one census ──
+// The front of a holder's window is said (src/browser-tabs.js frontVerdict) whatever put a tab there; this table names every
+// road that can: where its tab lands, whose it reads, and the leg that proves it — or why it is NOT ON THE BOX (the lane's
+// no-desktop road). `sites` = the code that creates a tab on that road ([file, a needle of its line]); a create site in the
+// agent browser's files that no row names is red (test-browser-front-tab ⑦). `proof` = [suite, the leg's own words].
+const CREATE_ROADS = Object.freeze([
+  { id: 'own-window', road: 'the keeper opens a holder\'s first tab (attach, `tab new`, Browse yourself, a restore)', lands: 'a new window of that holder (newWindow:true, focus:false)', whose: 'the holder — the keeper names it', sites: [['src/server/browser-viewport.js', "'Target.createTarget', W.windowCreateParams(url)"]], proof: ['test-browser-windows', 'one window per holder'] },
+  { id: 'in-window', road: 'a later tab of a holder', lands: 'the holder\'s window — window.open from one of its pages, verified (Browser.getWindowForTarget)', whose: 'the holder', sites: [['src/server/browser-viewport.js', "window.open('about:blank', '_blank', 'noopener')"]], proof: ['test-browser-windows', 'window_mismatch'] },
+  { id: 'in-window-rung2', road: 'a later tab when no page of the window answers', lands: 'the window activated first — verified; elsewhere ⇒ closed (window_mismatch), never a stray', whose: 'the holder', sites: [['src/server/browser-viewport.js', "'Target.createTarget', { ...W.RUNG2_CREATE }"]], proof: ['test-browser-windows', 'elsewhere once'] },
+  { id: 'mediated', road: 'a mediated lease\'s own create (its CDP connection through the proxy), forTab too', lands: 'a new window of that lease (the proxy rewrites it: ownWindowParams)', whose: 'the lease', sites: [['src/browser-mediation.js', "method === 'Target.createTarget'"], ['src/browser-mediation.js', "case 'Target.createTarget':"], ['src/server/browser-keeper.js', "'tab', 'new'], { extraEnv: env });"]], proof: ['test-browser-mediation', 'newWindow'] },
+  { id: 'driver-fallback', road: 'the session\'s own `tab new` when the keeper\'s own-window create is refused (window:\'shared\')', lands: 'Chrome\'s last focused window — often another holder\'s, where it takes the front', whose: 'the session (its witness) — said in front of the other holder\'s window', sites: [['src/server/browser-keeper.js', "[...pin, 'tab', 'new', ...(url ? [url] : [])"]], proof: ['test-browser-hidden-paint', 'B-e674 a2'] },
+  { id: 'rebind-new', road: 'a lease rebound after its browser was replaced, with no blank to take (profile-lock-roll L2)', lands: 'Chrome\'s last focused window', whose: 'the lease (its session\'s tab) — said in front of another holder\'s window', sites: [['src/server/browser-keeper.js', "[...pin, 'tab', 'new'], o)"]], proof: ['test-browser-front-tab', 'ANOTHER conversation'] },
+  { id: 'thaw-blank', road: 'the paint thaw\'s own blank (opened and closed at once)', lands: 'the activated front\'s window — read, closed; elsewhere ⇒ closed and journaled', whose: 'nobody — never tracked', sites: [['src/server/browser-dialogs.js', "'Target.createTarget', { url: 'about:blank' }, null, 2000)"]], proof: ['test-browser-hidden-paint', 'a thaw for A never creates a tab in B'] },
+  { id: 'stop-spare', road: 'a loop stopped on the browser\'s only page (a spare blank keeps the browser)', lands: 'the browser\'s one window', whose: 'nobody — said in front when it is', sites: [['src/server/browser-dialogs.js', "'Target.createTarget', { url: 'about:blank' }, null, 3000)"]], proof: ['test-browser-front-tab', 'a tab NOBODY holds'] },
+  { id: 'kept-restore', road: 'a conversation\'s kept tabs reopened on its own browser', lands: 'the conversation\'s own browser (every page its)', whose: 'the conversation', sites: [['src/browser-kept.js', "['tab', 'new', t.url, '--json']"]], proof: ['test-browser-kept', 'reopen'] },
+  { id: 'page-popup', road: 'a page opens a tab (window.open, target=_blank, a middle click) — the agent\'s page, or the person\'s click in a takeover', lands: 'its opener\'s window', whose: 'the opener\'s holder (the popup rule); born in the person\'s takeover it is NAMED «opened in your takeover» (ruling (i))', sites: [], proof: ['test-browser-front-tab', 'born in the person'] },
+  { id: 'raw-create', road: 'a client the hub does not drive creates a tab on a lease\'s CDP url (a non-mediated shared profile)', lands: 'Chrome\'s last focused window', whose: 'nobody — or the person\'s, when they drove the browser at its birth', sites: [], proof: ['test-browser-hidden-paint', 'B-e674 a1'] },
+  { id: 'person-keyboard', road: 'the person\'s own new tab from the browser\'s window (a key, the tab strip) on a headed desktop', lands: 'the window they work in', whose: 'the person\'s — the birth stamp (never an orphan)', sites: [], notOnBox: 'a CDP-dispatched key never reaches the browser\'s own shortcuts, and the box has no visible tab strip: only a headed desktop has this road' },
+  { id: 'tab-drag', road: 'a person drags a tab into another window', lands: 'the window it is dropped in', whose: 'unchanged', sites: [], notOnBox: 'a visible tab strip on a real desktop; the front read reads the claimed tab\'s window again, so a dragged tab is never named in front of its old window' },
+  { id: 'crash-restore', road: 'Chrome\'s own «restore pages» bubble after a crash', lands: 'Chrome\'s first window', whose: 'nobody', sites: [], notOnBox: 'it needs a person\'s click on a visible bubble' },
+  { id: 'session-restore', road: 'the profile\'s own «continue where you left off» at a relaunch', lands: 'Chrome\'s first window', whose: 'nobody (no opener, no root) — said in front when it is', sites: [], proof: ['test-browser-hidden-paint', 'B-e674 c1'] },
+  { id: 'paired-machine', road: 'any road on a paired machine\'s browser', lands: 'that machine\'s windows', whose: 'read through its agent', sites: [], notOnBox: 'the dialog watch (the birth stamp) is this machine\'s; a paired machine\'s browser is read through its agent' },
+]);
+/** The files the census reads for create sites (the agent browser's own code). */
+const CREATE_SITE_FILES = Object.freeze(['src/server/browser-viewport.js', 'src/browser-mediation.js', 'src/server/browser-keeper.js', 'src/server/browser-dialogs.js', 'src/browser-kept.js', 'src/server/cdp-mediator.js', 'src/browser-human.js']);
+/** A create site on one line of code (never a comment line). */
+const CREATE_SITE_RE = /Target\.createTarget'|['"]tab['"], ?['"]new['"]|window\.open\(/;
+
 module.exports = {
   WINDOWS_PROOF, ownWindowParams, windowCreateParams, instanceOf, hasOwnWindow, windowMates,
   TAB_LABELS_MAX, withTabLabel, labelTargetOf, withLabelsOnRows,
@@ -476,4 +504,5 @@ module.exports = {
   BACKGROUND_PAINT_FRAMES, BACKGROUND_PAINT_WINDOW_MS, paintsAgain, // verify r1 ④: the frame facts clear a lying page's verdict
   MAX_RUNNING_MIN, MAX_RUNNING_MAX, maxRunningOf,
   WATCH_TITLE_MAX, watchTitle, watchLineWords, foldMenuRows, WATCH_REFUSALS, watchRefusalWords, // lane live-watch-polish G1/G2/G5
+  CREATE_ROADS, CREATE_SITE_FILES, CREATE_SITE_RE, // B-e674 unit 2: every road a tab is created by
 };

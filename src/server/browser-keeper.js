@@ -3899,7 +3899,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function tabHoldersOf(profileId, activeFor = {}) {
     const out = [];
     const h = humans.get(profileId);
-    if (h) out.push({ key: h.key, roots: [h.ownTab, ...(Array.isArray(h.adopted) ? h.adopted : [])].filter(Boolean) });
+    const mine = personRootsOf(profileId); // B-e674 unit 2: the tabs the person's own input made (the birth stamp) — theirs, never an orphan
+    if (h) out.push({ key: h.key, roots: [h.ownTab, ...(Array.isArray(h.adopted) ? h.adopted : []), ...mine].filter(Boolean) });
+    else if (mine.length) out.push({ key: HM.humanKeyFor(profileId), roots: mine });
     const ls = reg.leases.filter((l) => l.profileId === profileId).sort((a, b) => (Number(a.since) || 0) - (Number(b.since) || 0));
     for (const l of ls) out.push({ key: l.browserKey, roots: [...(l.targetId ? [l.targetId] : []), ...(Array.isArray(l.tabRoots) ? l.tabRoots : [])], active: activeFor[l.browserKey] || null });
     return out;
@@ -4304,16 +4306,58 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const targets = await tabTargetsOf(rec.cdpUrl);
     if (!targets) return { ok: false };
     const act = activeTarget && TBS.TARGET_ID_RE.test(String(activeTarget)) ? String(activeTarget).toUpperCase() : null;
+    pruneBorn(p, targets); // B-e674 unit 2: a stamp lives as long as its tab
     const owners = TBS.tabOwners({ targets, holders: tabHoldersOf(p.id, bk && act ? { [bk]: act } : {}) });
     if (bk) keepTabRoots(p.id, bk, TBS.ownSetOf(owners, bk), before);
     const h = humans.get(p.id);
     const words = {};
     const whose = {};
-    for (const [id, k] of owners) { words[id] = TBS.ownerWord(k, { me: bk, humanKey: h ? h.key : null }); if (words[id] === 'other') { const w = whoseOf(p.id, k); if (w) whose[id] = w; } }
+    for (const [id, k] of owners) { words[id] = TBS.ownerWord(k, { me: bk, humanKey: h ? h.key : HM.humanKeyFor(p.id) }); if (words[id] === 'other') { const w = whoseOf(p.id, k); if (w) whose[id] = w; } } // B-e674 unit 2: the person's own key even with no Browse yourself (their stamped tabs)
     const windows = await tabWindowsOf(rec, targets); // lane browser-tabs-by-window: every tab's window + the holders' windows
     const leases = holderWindowsOf(p, rec, windows, bk, h);
     const front = await frontOfView(p, rec, { windows, words, act, bk, h, leases, whose }); // B-e674 unit 1
-    return { ok: true, owners: words, whose, windows, leases, front, mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
+    const made = {}; for (const [id, s] of Object.entries(bornOf(p.id))) if (s && words[id] !== undefined) made[id] = { made: s.made === 'browse' ? 'browse' : 'takeover', person: !!s.person }; // B-e674 unit 2
+    return { ok: true, owners: words, whose, windows, leases, front, made, mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
+  }
+  // ── B-e674 unit 2 (the coordinator's r548 / r562 / r605): THE BIRTH STAMP — who drove this browser when a tab appeared ──
+  // The dialog watch tells the keeper of every page tab the moment Chrome reports it (its own socket, `Target.targetCreated`),
+  // with the tab's opener and the agent's verb its own witness saw in flight. The keeper stamps what it knows at that instant:
+  // the person driving a TAKEOVER of a conversation's view, or their own BROWSING window. RULING (i): a tab a PAGE opened stays
+  // its opener's holder's (the popup rule) and is NAMED «opened in your takeover»; a tab no page opened and no agent's verb made,
+  // born while the person drives, is THE PERSON'S — a root of their holder, never an orphan (never adoptable or nobody's on a
+  // view). A raw client creating a tab at that very moment would be read as the person's too: the stamp is a NAME and an owner,
+  // never an act. Kept on the browser's record (persisted with it, gone with its run), ≤ BORN_KEEP, pruned at every read.
+  const BORN_KEEP = 64;
+  function personDriving(p) {
+    const h = humans.get(p.id);
+    if (h && h.state === 'driving') return { made: 'browse', of: null };
+    for (const l of reg.leases.filter((x) => x.profileId === p.id)) {
+      for (const pid of [p.id, null]) { const st = inputStateFor(l.browserKey, pid); if (st && st.input === 'user') return { made: 'takeover', of: String(l.browserKey) }; }
+    }
+    return null;
+  }
+  function noteTabBorn(profileId, targetId, { opener = null, witness = null } = {}) {
+    ensureLoaded();
+    const p = profile(String(profileId || '')); const rec = p ? reg.browsers[p.id] : null;
+    const tid = String(targetId || '').toUpperCase();
+    if (!p || isEph(p) || isMediated(p) || !rec || !B.isLiveBrowser(rec) || !TBS.TARGET_ID_RE.test(tid)) return null;
+    const d = personDriving(p);
+    if (!d) return null; // nobody drove it: no stamp (the ownership rules as before)
+    const person = !opener && !witness;
+    const stamps = { ...bornOf(p.id) };
+    stamps[tid] = { made: d.made, ...(d.of ? { of: d.of } : {}), person, at: now() };
+    const keys = Object.keys(stamps); if (keys.length > BORN_KEEP) for (const k of keys.slice(0, keys.length - BORN_KEEP)) delete stamps[k];
+    rec.bornBy = stamps; commit();
+    log.log?.(`[browser] "${p.label}": tab ${tid.slice(0, 8)} born while the person drove (${d.made === 'browse' ? 'their browsing window' : 'a takeover of ' + d.of}) — ${person ? 'the person\'s own tab' : 'its opener\'s, named «opened in your takeover»'}`);
+    return stamps[tid];
+  }
+  function bornOf(profileId) { const rec = reg.browsers[String(profileId || '')]; return rec && rec.bornBy && typeof rec.bornBy === 'object' && !Array.isArray(rec.bornBy) ? rec.bornBy : {}; }
+  function personRootsOf(profileId) { return Object.entries(bornOf(profileId)).filter(([, s]) => s && s.person).map(([id]) => id); }
+  function pruneBorn(p, targets) {
+    const rec = reg.browsers[p.id]; if (!rec || !rec.bornBy || typeof rec.bornBy !== 'object') return;
+    const live = new Set(TBS.pageTargets(targets).map((x) => x.targetId)); let n = 0;
+    for (const id of Object.keys(rec.bornBy)) if (!live.has(id)) { delete rec.bornBy[id]; n++; }
+    if (n) commit();
   }
   // ── B-e674 unit 1 (the coordinator's r548 / r562): THE FRONT OF THE VIEWED HOLDER'S WINDOW, SAID (src/browser-tabs.js
   // frontVerdict). Asked only when two or more tabs share that window. The view's own tab on show is asked first: visible ⇒ it
@@ -8788,7 +8832,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
     switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
-    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState, loginChannelFor, onProfileDrop /* lane vault-login */, onProfileDropNow /* r221: memory-only credential drops, at the press */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
+    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, noteTabBorn /* B-e674 unit 2: the birth stamp */, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState, loginChannelFor, onProfileDrop /* lane vault-login */, onProfileDropNow /* r221: memory-only credential drops, at the press */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
     installDir, retiredInstall: () => installs.slot.retiredAtBoot(), egressFor, egressRefusals, egressEngineOf, // lane engine-spi-egress: a wrapped engine's proxy per profile (L3: the names lost the anti-bot backend's word); the install rows' api in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields

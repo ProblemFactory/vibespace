@@ -495,6 +495,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (e.seenAt) e.owner = e.opener ? openerOwner(w, e.opener) : createdOwner(w);
     // verify r3 #2: the witness is WRITTEN on the lease record (the keeper's registry is on disk) — a VibeSpace restart read it
     // back through `tabsOf`; before, in memory per watch, the restart made the conversation's own tab nobody's again
+    // B-e674 unit 2: THE BIRTH STAMP — the keeper is told of every page tab born while this watch is open (with its opener and
+    // the agent's verb this witness saw in flight): who drove the browser at that instant is the keeper's fact to stamp
+    if (e.seenAt && keeper && typeof keeper.noteTabBorn === 'function') { try { keeper.noteTabBorn(w.profileId, tid, { opener: e.opener, witness: !e.opener ? e.owner : null }); } catch (err) { say('tab-born:' + (err && err.message), `${w.profileId}: a new tab's birth was not stamped — ${err && err.message}`); } }
     if (e.owner && keeper && typeof keeper.noteOwnTab === 'function') { try { keeper.noteOwnTab(w.profileId, e.owner, tid); } catch (err) { say('note-tab:' + (err && err.message), `${w.profileId}: a witnessed tab was not recorded on its lease — ${err && err.message}`); } }
     w.targets.set(tid, e);
     e.enabling = (async () => {

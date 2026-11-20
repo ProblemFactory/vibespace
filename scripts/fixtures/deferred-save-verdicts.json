@@ -888,6 +888,16 @@
   "why": "item id; worst case duplicate item"
  },
  {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > noteTabBorn · commit()",
+  "verdict": "none",
+  "why": "birth stamp; pruned at reads"
+ },
+ {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > pruneBorn · commit()",
+  "verdict": "none",
+  "why": "drops stamps of gone tabs"
+ },
+ {
   "key": "browser-keeper · src/server/browser-keeper.js · create > noteOwnTab · commit()",
   "verdict": "none",
   "why": "lease tab witness; pruned at connect"

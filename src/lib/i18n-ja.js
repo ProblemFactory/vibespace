@@ -7413,6 +7413,9 @@ export default {
   "The agent’s tab — take over to switch or close it; the agent is told at the handback": "エージェントのタブ — 引き継ぐと切り替えたり閉じたりできます。戻すときにエージェントに伝えられます",
   "Your tab": "あなたのタブ",
   // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
+  "opened in your takeover": "あなたの操作中に開いた",
+  "Opened during your takeover — it stays with the page that opened it": "あなたの操作中に開いたタブです — 開いたページの持ち主のままです",
+  "Your tab — opened while you drove this window": "あなたのタブ — このウィンドウを操作していたときに開いたもの",
   "In front": "最前面",
   "Another tab is in front of this window": "別のタブがこのウィンドウの最前面にあります",
   "A tab this view does not list is in front of this window — the picture here stays this view’s own tab; nothing is moved or closed for it": "このビューに一覧のないタブがこのウィンドウの最前面にあります — ここの画面はこのビュー自身のタブのままです。そのために移動や閉じる操作は行いません",
