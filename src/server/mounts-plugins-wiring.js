@@ -286,6 +286,8 @@ const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(k
   heldAccountOf: (key) => { const k = String(key); try { return require('../routes/sessions').heldAccountOf(k.slice(0, k.indexOf(':')), k.slice(k.indexOf(':') + 1)); } catch { return null; } },
   // the wake entry's POSTING mark, durable before its hand-over can land (conversation-deliver markEndedPosting — 14:26Z)
   markPosting: (cid) => (deliver && typeof deliver.markEndedPosting === 'function' ? deliver.markEndedPosting(cid) : false),
+  // place-8: the hand-over waits for THE RESUMED SESSION's inbox (the reopen answers when only its wrapper is spawned) — the ladder's own reach
+  inboxOf: require('./delivery-wake.js').inboxOfOver({ deliver: () => deliver, activeSessions }),
   // rule 3 (every wake is SEEN): the resumed session carries the line its window shows and the System panel's row repeats
   noteResumed: (sid, line) => { const s = activeSessions && activeSessions.get(sid); if (!s) return; s._resumedBy = line; if (typeof broadcastActiveSessions === 'function') broadcastActiveSessions(); },
   isArchived: isArchivedKey, rowOf: resumeRowOf, reopen: (item, o) => (typeof resumeRoad.reopen === 'function' ? reopenRoads(item, o) : Promise.resolve({ ok: false, why: 'this server cannot resume conversations yet (still booting) — try again in a moment' })) };   // the two roads' one seam

@@ -1668,6 +1668,11 @@ export class ChatInput {
     const p = ok ? { when: stampAt(line.at), what: String(line.params.what) } : null;
     // who ALLOWED it, when the conversation had been ended on purpose (the job's grant — the person, or a manager key by name);
     // a hand-over refused AFTER the resume says why (the words wait for its next turn)
+    // place-8 (主开发 2026-11-20 03:44Z): resumed, but its agent never took the message — said as that, with the way on
+    const miss = ok && line.refused ? line.refused.code : null, q = ok ? { ...p, seconds: String(Number(line.params.seconds) || 60) } : null;
+    if (miss === 'inbox_not_open') { el.textContent = t('Resumed {when} to deliver: {what} — its agent did not open its inbox within {seconds} s, so the message waits for its next turn: send anything to start it', q); return; }
+    if (miss === 'no_mid_session') { el.textContent = t('Resumed {when} to deliver: {what} — its agent takes no message mid-session, so the message waits for its next turn: send anything to start it', q); return; }
+    if (miss === 'inbox_gone') { el.textContent = t('Resumed {when} to deliver: {what} — it ended again before its agent opened its inbox; the message waits: resume it to receive it', q); return; }
     el.textContent = !ok ? '' : line.refused ? t('Resumed {when} to deliver: {what} — but the hand-over was refused: {why}', { ...p, why: refusalWords(line.refused.code) })
       : line.by && line.by.kind === 'person' ? t('Resumed {when} to deliver: {what} — you allowed it', p)
       : line.by && line.by.kind === 'key' ? t('Resumed {when} to deliver: {what} — allowed by the key «{by}»', { ...p, by: String(line.params.by || '') })

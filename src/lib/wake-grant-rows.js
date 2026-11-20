@@ -101,6 +101,9 @@ export function refusalWords(code) {
                 : code === 'harness_unread' ? t('what its resume starts by itself is not known — resume it yourself')
                   : code === 'needs_a_page' || code === 'cannot_resume' ? t('it resumes only in a window')
                     : code === 'archived' ? t('it is archived')
+                      : code === 'no_mid_session' ? t('its agent takes no message mid-session — the words wait for its next turn')
+                      : code === 'inbox_gone' ? t('it ended again before its agent opened its inbox')
+                      : code === 'inbox_not_open' ? t('its agent did not open its inbox in time — the words wait for its next turn')   // place-8: resumed, its CLI never answered to its inbox
                       : code === 'handover_failed' ? t('the hand-over did not land')
                         : t('the resume failed');
 }

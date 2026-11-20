@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // test-deliveries-resume-hub.mjs — the manager design's piece 7 ON A REAL HUB (主开发 2026-11-17; the owner's narrowed rule 04:56Z,
 // the grant on the job 05:02Z, its three writers 05:13Z): a throwaway hub (this tree), a stub CLI that logs every stdin frame by
-// conversation, the REAL jobs engine (notify-cron reminders), the REAL spend guard and ledger, the REAL resume road — and a
+// conversation (and stands in for the CLI's inbox — its registry record once started, the frames it takes: place-8), the REAL jobs engine (notify-cron reminders), the REAL spend guard and ledger, the REAL resume road — and a
 // MACHINE RESTART staged by ending every process rooted in the scratch tree, then booting again over the same data.
 //   ① the grant's writers BEFORE the end: the person's press (POST /api/jobs/:id/wake-grant); a manager key holding the verb
 //      jobs.wakeGrant (the row records the key); a key WITHOUT the verb refused by name; an agent token's write refused by name,
@@ -57,6 +57,16 @@ fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', J
 process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.274' }) + '\\n');
 // its transcript, where the CLI keeps one (~/.claude/projects/<the folder, encoded>/<id>.jsonl): an ENDED conversation is found by it
 if (!args.includes('--resume')) { const proj = require('path').join(require('os').homedir(), '.claude', 'projects', process.cwd().replace(/[/._]/g, '-')); fs.mkdirSync(proj, { recursive: true }); const at = new Date().toISOString(); fs.writeFileSync(proj + '/' + sid + '.jsonl', JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello' }, uuid: 'u-' + sid, timestamp: at, cwd: process.cwd(), sessionId: sid }) + '\\n' + JSON.stringify({ type: 'assistant', message: { id: 'msg_' + sid, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: 'a-' + sid, parentUuid: 'u-' + sid, timestamp: at, cwd: process.cwd(), sessionId: sid }) + '\\n'); }
+// THE CLI'S INBOX, STOOD IN (place-8, 主开发 2026-11-20 03:44Z): a real claude registers ~/.claude/sessions/<pid>.json once it has
+// STARTED — its conversation id, pid, /proc start time and a SERVED socket — with a key file beside it; a post is an auth line then a
+// user line. A frame it takes is logged as the CLI takes it: a user frame of this conversation (the hand-over's one road here)
+{
+  const net = require('net'), crypto = require('crypto');
+  const reg = ${JSON.stringify(path.join(fakeHome, '.claude', 'sessions'))}, sock = ${JSON.stringify(stubDir)} + '/in-' + process.pid + '.sock';
+  const key = crypto.randomBytes(16).toString('hex'), st = fs.readFileSync('/proc/self/stat', 'utf8'), procStart = st.slice(st.lastIndexOf(')') + 2).split(' ')[19];
+  const inbox = net.createServer((c) => { let b = '', authed = false; c.on('data', (d) => { b += d; let i; while ((i = b.indexOf('\\n')) >= 0) { const line = b.slice(0, i); b = b.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch { } if (m && m.type === 'auth') authed = m.token === key; else if (m && m.type === 'user' && authed) fs.appendFileSync(${JSON.stringify(stubDir)} + '/stdin-' + sid + '.ndjson', line + '\\n'); } }); });
+  inbox.listen(sock, () => { fs.mkdirSync(reg, { recursive: true }); fs.writeFileSync(reg + '/' + process.pid + '.' + crypto.createHash('sha256').update(key).digest('hex').slice(0, 16) + '.key', key, { mode: 0o600 }); fs.writeFileSync(reg + '/' + process.pid + '.json', JSON.stringify({ pid: process.pid, sessionId: sid, messagingSocketPath: sock, procStart, startedAt: Date.now() })); });
+}
 let inBuf = '';
 process.stdin.on('data', (d) => { inBuf += d; let i; while ((i = inBuf.indexOf('\\n')) >= 0) { const line = inBuf.slice(0, i); inBuf = inBuf.slice(i + 1); if (line.trim()) fs.appendFileSync(${JSON.stringify(stubDir)} + '/stdin-' + sid + '.ndjson', line + '\\n'); } });
 process.stdin.on('end', () => process.exit(0));

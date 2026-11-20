@@ -21,14 +21,15 @@
  *      and For-you notice happen inside the guard, once;
  * then the stash hand-over's CLAIM (before the resume: its start injection leaves the claimed entries; a PEER's wake may claim
  * nothing — its words are in the group log and ride the report of the turn the hand-over starts), the RESUME (inbox-reopen:
- * the page's own resume road, headless, nothing sent), and ONE hand-over under the delivery's reason ending with the design's
+ * the page's own resume road, headless, nothing sent), the wait for THAT session's inbox (it answers once its CLI started — a miss
+ * gives the claim back, said by name), and ONE hand-over under the delivery's reason ending with the design's
  * sentence (the ladder authorizes and charges it as the turn it is — ONE ledger row). A refused gate or a failed resume gives the
  * claim back: the words keep waiting. The answer goes back to the park, which says it to the producers (`wake`).
  */
 const D = require('../delivery-wake.js');
 const BY = 'system:deliveries';   // the resume's actor in the activity log: «VibeSpace, by itself» (device-acts-dialog whoText) — never a person
 
-function create({ resumeLine, seams, getStashHandover, spendGuard = null, identityOf = null, quotaVerdictFor = null, usageCacheKeyFor = null, isPoolScope = () => false, jobGrantOf = () => false, now = () => Date.now(), log = () => { } } = {}) {
+function create({ resumeLine, seams, getStashHandover, spendGuard = null, identityOf = null, quotaVerdictFor = null, usageCacheKeyFor = null, isPoolScope = () => false, jobGrantOf = () => false, now = () => Date.now(), sleep = (ms) => new Promise((r) => setTimeout(r, ms)), log = () => { } } = {}) {
   /** The facts object the guard and the pool engine read for an ENDED conversation: the fields a RESTORED session carries
    *  (boot-restore: `_accountId: meta.accountId`, `host`, `backend`) — read off the KEPT RECORD's meta, nothing invented. */
   function payerOf(meta, backend, stated = null) {
@@ -47,6 +48,24 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     const out = metas.map((m) => (m && m.jobName) || null).filter(Boolean);
     if ((Array.isArray(entry.producers) ? entry.producers : [entry.producer]).includes('groups') && entry.fromName) out.push(String(entry.fromName));
     return out;
+  }
+
+  /** THE RESUMED SESSION'S INBOX, waited for before the hand-over (place-8, 主开发 2026-11-20 03:35Z): the reopen answers at
+   *  «created» — only the wrapper is spawned then — and a CLI answers to its inbox once it has STARTED (claude: its registry record
+   *  and socket). Asked through `seams.inboxOf` (inboxOfOver: the ladder's own reachability) at a doubling step up to 1 s, bounded
+   *  by INBOX_WAIT_MS of steps waited. → {ok:true} | {ok:false, code, why}: `inbox_gone` (that session ended first), `no_mid_session`
+   *  (it runs, but its agent takes no message mid-session — the ladder's own words), `inbox_not_open` (the bound passed) */
+  async function inboxOpened(cid, sessionId) {
+    let waited = 0, step = 100, unread = null;
+    for (;;) {
+      let v = null;
+      try { v = seams.inboxOf(cid, sessionId); } catch (e) { v = null; if (!unread) { unread = String((e && e.message) || e).slice(0, 120); log(`[delivery-wake] ${cid}: its inbox could not be looked up (${unread}) — asked again until the bound`); } }
+      if (v && v.open) return { ok: true, waited };
+      if (v && v.gone) return { ok: false, code: 'inbox_gone', why: 'it ended before its agent opened its inbox' };
+      if (v && v.never) return { ok: false, code: 'no_mid_session', why: String(v.why || 'its agent takes no message mid-session') };
+      if (waited >= INBOX_WAIT_MS) return { ok: false, code: 'inbox_not_open', why: `its agent did not open its inbox within ${INBOX_WAIT_MS / 1000} s${unread ? ` (its inbox could not be looked up: ${unread})` : ''}` };
+      await sleep(step); waited += step; step = Math.min(step * 2, 1000);
+    }
   }
 
   /** the line's START for one owed wake (runs at its turn: at most two at a time hub-wide) */
@@ -103,8 +122,25 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     // MUST 3 (主开发 12:46Z): it was ALREADY running (a page resumed it under another id) — no hand-over, no «had been ended»
     // sentence into a live agent, no resumed mark: the claim goes back and the words ride the live roads
     if (r.already === true) { sh.releaseWake(cid, claim); return { ok: true, outcome: 'running', sessionId: r.sessionId, already: true, why: 'it was already running — the words ride its next turn' }; }
+    // THE LINE'S PLACE ENDS AT THE REOPEN (place-8, 主开发 2026-11-20 03:44Z, condition 1): the wait for THAT session's inbox and the
+    // hand-over run OFF the line (handOverResumed) — a slow CLI on one machine never holds another conversation's resume by the bound
+    return { ok: true, outcome: 'resumed', sessionId: r.sessionId, rest: () => handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended }) };
+  }
+  /** AFTER THE REOPEN, off the line (place-8): the wait for the resumed session's inbox, then ONE hand-over — or the claim back, said */
+  async function handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended }) {
     // the kept record is NOT dropped here (主开发 2026-11-19 03:25Z, replacing MUST 2's drop): a reopen that answered is registration —
     // the copy goes at the hand-over turn's end (boot-restore consumeKeptOf) or by the stopped list's live check; a failed turn keeps it
+    // THE HAND-OVER GOES TO THAT SESSION (place-8 — the law: a reopen that succeeded is never followed by «no live inbox» as an end):
+    // it waits for the resumed session's inbox; a miss gives the claim back (the words keep waiting, owed to its next turn), said by name
+    const inbox = await inboxOpened(cid, r.sessionId);
+    if (!inbox.ok) {
+      sh.releaseWake(cid, claim);
+      const why = `it was resumed as ${r.sessionId}, but ${inbox.why} — the message waits for its next turn${inbox.code === 'inbox_gone' ? '' : ' (sending anything starts it)'}`;
+      const line = D.resumedRefusedLine(namesOf(entry), now(), { code: inbox.code, why });
+      line.params.seconds = INBOX_WAIT_MS / 1000;   // the window's words name the bound (主开发 03:44Z condition 2)
+      try { if (typeof seams.noteResumed === 'function') seams.noteResumed(r.sessionId, line); } catch { }
+      return { ok: false, outcome: 'failed', code: inbox.code, why, sessionId: r.sessionId };
+    }
     // the POSTING mark goes on the entry, durably, before the frame can land (a hard kill now ⇒ «maybe delivered» at the boot)
     try { if (typeof seams.markPosting === 'function') seams.markPosting(cid); } catch (e) { log(`[delivery-wake] ${cid}: the posting mark could not be written — ${(e && e.message) || e}`); }
     const ho = await sh.handOverWake(cid, claim, { reason: entry.spendReason, tail: D.FRAME_TAIL, lead: peer ? D.peerLead(entry.fromName) : '', from: entry.fromName || null, card: entry.cardText || null });
@@ -133,10 +169,29 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     // JOINED a resume already in the line (a key's conversations.resume of the same conversation): its answer is the reopen's,
     // not a delivery's — wait for it, then the park LOOKS AGAIN (running ⇒ the words ride its next turn; else the line anew)
     if (q.joined) { try { await q.result; } catch { } return { outcome: 'again', why: 'a resume of this conversation was already in the line — looked again after it' }; }
-    return q.result;
+    const r = await q.result;
+    return r && typeof r.rest === 'function' ? r.rest() : r;   // place-8: the reopen freed its place in line; the wait and the hand-over follow here
   }
 
   return { onEndedWake, payerOf };
+}
+
+/** How long a resumed session's inbox is waited for (place-8): a CLI that has not started in a minute is not starting. */
+const INBOX_WAIT_MS = 60_000;
+/** seams.inboxOf over the ladder (place-8): (cid, sessionId) → {open} once the ladder can reach the conversation (peerReachable: a
+ *  CLI's registry record, a wrapper's lane, an owning machine) · {gone, why} when THAT session ended first · {never, why} when it
+ *  runs but its agent takes no message mid-session (the ladder's own words, wakeBlock) · {} not yet. */
+function inboxOfOver({ deliver = () => null, activeSessions = null } = {}) {
+  return (cid, sessionId) => {
+    const d = deliver();
+    if (!d || typeof d.peerReachable !== 'function') return { never: true, why: 'the delivery ladder is not ready on this server' };
+    if (d.peerReachable(cid)) return { open: true };
+    const s = activeSessions && activeSessions.get(sessionId);
+    if (!s || s.pty === null) return { gone: true, why: 'its agent ended before it opened its inbox' };
+    const b = typeof d.wakeBlock === 'function' ? d.wakeBlock(cid) : null;
+    if (b && b.cause && b.cause !== 'not-running') return { never: true, why: String(b.why || b.cause) };
+    return {};
+  };
 }
 
 /**
@@ -169,4 +224,4 @@ function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf =
   };
 }
 
-module.exports = { create, automationVerbs };
+module.exports = { create, automationVerbs, inboxOfOver, INBOX_WAIT_MS };

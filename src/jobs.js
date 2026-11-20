@@ -1219,6 +1219,9 @@ class JobManager {
     }
     if (rate.ts && now() - rate.ts < 30_000) {
       this._stashNotif(cid, job, ev, 'rate floor — queued for injection instead', { stampLast: !subscriber, held: { kind: 'rate-floor' }, mark });
+      // place-8 (主开发 2026-11-20 03:44Z): the floor paces SOCKET posts — an ENDED conversation takes none (the stamp may be an attempt
+      // that reached nothing), so a floored delivery to it still owes its wake; the words are stashed first, parkEndedWake refuses a live one
+      if (!(this.d.peerReachable && this.d.peerReachable(cid))) this._oweWake(cid, job, ev, { subscriber });
       this._dirty = true;
       return;
     }
