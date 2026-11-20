@@ -74,6 +74,12 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
   async function startOne(cid, entry, key, backend) {
     let facts = null;
     try { facts = await seams.factsOf(key); } catch (e) { facts = null; log(`[delivery-wake] ${cid}: its kept record could not be read — ${(e && e.message) || e}`); }
+    // B-f276 1a: the park's door is asked AGAIN here — after the start's only await, before every refusal, with nothing async left before
+    // the claim: a producer whose file became held while this wake waited in the line answers «held» — nothing is claimed, nothing
+    // resumes, the park sets the wake aside until the lift. (A start that answers after the line's bound is the bound's own: ended «failed».)
+    let heldNow = null;
+    try { const sh0 = getStashHandover(); heldNow = sh0 && typeof sh0.heldWhyOfWake === 'function' ? sh0.heldWhyOfWake(entry) : null; } catch (e) { heldNow = `whether its producer can judge it could not be asked (${(e && e.message) || e}) — unknown is held`; }
+    if (heldNow) return { ok: false, outcome: 'held', code: 'held', why: String(heldNow).slice(0, 200) };
     // the kept record read ONCE, through piece 4's reader (src/server/resume-line.js keptFacts): how it ended, who ended it, the account
     const meta = facts && facts.kept ? { stopReason: facts.stopReason || null, stoppedAt: facts.stoppedAt || null, endedBy: facts.endedBy || null, accountId: facts.accountId || null, host: facts.hostId || null } : null;
     const verdict = D.deliveryResumeVerdict({ ...(facts || {}), archived: seams.isArchived(key) }, seams.rowOf(backend));
@@ -113,6 +119,8 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     // its claim may be empty — the frame then starts that turn and says who woke it
     const peer = (Array.isArray(entry.producers) ? entry.producers : [entry.producer]).includes('groups');
     const claim = sh.claimForWake(cid, { bare: peer });
+    // B-f276 1a: nothing but KEPT entries (their reach cannot be judged now) — the wake stays owed and goes at the lift; never «nothing is waiting»
+    if (!claim.ok && claim.code === 'nothing_waiting' && Number(claim.kept) > 0) return { ok: false, outcome: 'held', code: 'kept', why: `${Number(claim.kept)} entr${Number(claim.kept) === 1 ? 'y waits' : 'ies wait'} for it whose reach cannot be judged now — it is resumed once they can be` };
     if (!claim.ok) return claim.code === 'nothing_waiting' ? { ok: false, outcome: 'refused', code: 'nothing_waiting', why: 'nothing is waiting for it any more' } : { ok: false, outcome: 'failed', code: claim.code, why: claim.error };
     let r = null;
     try { r = await seams.reopen({ sessionKey: key, cwd: (facts && facts.cwd) || '', hostId: (facts && facts.hostId) || undefined }, { by: BY, accountId: payer._accountId || null }); }   // VibeSpace by itself — never a person's press; on the judged account

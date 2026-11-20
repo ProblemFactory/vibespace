@@ -3860,7 +3860,7 @@ console.log('\n§5g B-0a33\'s remainders: an empty cap is said as itself; a lowe
     const mg = mutantModule('src/server/spend-guard.js', [["Object.defineProperty(rids, 'overCap', { get: () => overCapNow(Date.now()) }); ", '']]);
     ok('§5g (2) CONTROL: the verdict taken off the guard\'s waitingReservations answer in a copy (the patch hit)', !mg.err && mg.hits === 1, mg.err || '');
     if (!mg.err) { const wm = await wiring({ gMod: mg.mod }); ok('§5g (2) CONTROL: with it, the settings signal writes NO remove frame — the waiting frame would run past the cap — RED', wm.asked.length === 0, JSON.stringify(wm.frames)); }
-    const md = mutantModule('src/server/conversation-deliver.js', [['        if (!q[i] || q[i].ho || q[i].slot || capHeld(q[i]) || !pass(q[i])) { i++; continue; }', '        if (!q[i] || q[i].ho || q[i].slot || !pass(q[i])) { i++; continue; }'], ['    over -= q.filter((e) => capHeld(e) && !e.ho && !e.slot).length;\n', '']]);
+    const md = mutantModule('src/server/conversation-deliver.js', [['        if (!q[i] || q[i].ho || q[i].slot || capHeld(q[i]) || keptE(q[i]) || !pass(q[i])) { i++; continue; }', '        if (!q[i] || q[i].ho || q[i].slot || keptE(q[i]) || !pass(q[i])) { i++; continue; }'], ['    over -= q.filter((e) => capHeld(e) && !e.ho && !e.slot).length;\n', '']]);
     ok('§5g (2) CONTROL: the held words\' exemption from the stash cap removed from a copy of the ladder (the patch hit)', !md.err && md.hits === 2, md.err || '');
     if (!md.err) { const wd = await wiring({ dMod: md.mod }); ok('§5g (2) CONTROL: with it, the full stash EVICTS the oldest entry to make room — a drop — RED', wd.q.length === 30 && !wd.q.some((e) => e && e.text === 'older 0'), String(wd.q.length)); }
   }

@@ -466,7 +466,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const jm = jobsReady();
     const { msg: stashed, jobs, retry } = entriesOf(cid);
     const msg = [...retry, ...stashed];   // a parked notification rides the same frame — the oldest wait first
-    if (!msg.length && !jobs.length) return { ok: false, code: 'nothing_waiting', error: 'nothing is waiting for this conversation' };
+    if (!msg.length && !jobs.length) return { ok: false, code: 'nothing_waiting', error: 'nothing is waiting for this conversation', kept: d && typeof d.stashKeptCount === 'function' ? d.stashKeptCount(cid) : 0 };   // B-f276 1a: entries KEPT (their reach cannot be judged now) are not nothing — the wake's line waits for them
     const pm = msg.length ? renderMsgStash(msg, { maxEntries: HANDOVER_MAX_ENTRIES, maxBytes: HANDOVER_MAX_BYTES }) : { text: '', shown: [], rest: [] };
     const shownParked = pm.shown.filter((e) => e && e._retry);
     const shownStashed = pm.shown.filter((e) => e && !e._retry);
@@ -858,7 +858,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
 
   armOwedWakes(1);   // B-6721: AT BOOT — what a stopped hub left owed a wake is looked at from the 30 s step (restored sessions attach first)
-  return { waitingAll, summaryFor, billedFor, reachableFor, changed, handOver, claimForWake, handOverWake, releaseWake, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
+  /** B-f276 1a: the park's ONE door, asked by the resume line's start (a producer held while the wake waited in the line) */
+  function heldWhyOfWake(entry) { const d = getDeliver(); return d && typeof d.heldWhyOf === 'function' ? d.heldWhyOf(entry) : null; }
+  return { waitingAll, summaryFor, billedFor, reachableFor, changed, handOver, heldWhyOfWake, claimForWake, handOverWake, releaseWake, handOverGroups, groupInFlight: (cid) => groupInflight.has(cid), refreshLive, register, entriesOf, restoreHandedOver, redactDelivered, close, settle, isClosed: () => closed, inFlight: (cid) => inflight.has(cid), inFlightCount: () => inflight.size, _delivered: delivered };
 }
 
 module.exports = { create, STATUS, FROM_NAME, HANDOVER_MAX_ENTRIES, HANDOVER_MAX_BYTES, HANDOVER_TAG_RE, DELIVERED_TTL_MS, DELIVERED_MAX, DELIVERED_FILE, GROUP_HANDOVER_BYTES, GROUP_HANDED_WAIT_MS, GROUP_LATE_MS };

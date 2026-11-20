@@ -4333,7 +4333,7 @@ async function stashRevokeRun(EM, DM, tag, { revoke = true } = {}) {
   ok(/launch code is 0417/.test(kept.injected) && /Secret ops room/.test(kept.injected) && /THUMBSUP/.test(kept.injected) && /vendor id om-sent-1/.test(kept.injected), 'POSITIVE CONTROL: with access kept the same next prompt carries all three whole (the gate withholds only what a revoke took)', JSON.stringify(kept.injected).slice(0, 400));
   // CONTROLS: the ladder copy that never asks the gate, and the engine copy whose producers file no `about`
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
-  const G1 = '  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).slice(); }';
+  const G1 = '  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => !isKept(cid, e)); }';   // B-f276: a kept entry is not handed out
   const G2 = '  function stashPeek(cid) { gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }';
   ok(dsrc.split(G1).length === 2 && dsrc.split(G2).length === 2, 'CONTROL setup: both reads ask the gate, once each');
   const noGate = await stashRevokeRun(ENG, MUTE.load('src/server/conversation-deliver.js', dsrc.replace(G1, '  function stashEntries(cid) { return (stash[cid] || []).slice(); }').replace(G2, '  function stashPeek(cid) { return (stash[cid] || []).map((e) => ({ ...e })); }'), 'no-stash-gate'), 'nogate');

@@ -803,5 +803,80 @@ console.log('㉓ a wake WAITING for the settle is never dropped by the park\'s h
   ok(bx.atTurnEnd === 'none' && bx.owed === 1, 'CONTROL (the running end without the waiting wake, in a copy): (b)\'s wake stays owed while its conversation runs — kept to the settle for nothing — RED', bx);
 }
 
+console.log('㉔ B-f276 1a (lane bl-windows): an ended wake whose stash holds only KEPT entries WAITS — no resume, never «nothing is waiting» — and resumes ONCE at the lift');
+{
+  const DWO_SRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
+  const keptRun = async (deliverMod, mod, tag) => {
+    const X = cidOf(41);
+    const R = rig(`kept1a-${tag}`, { kept: { [X]: RESTART }, deliverMod, mod });
+    let held = true;
+    R.deliver.registerStashGate((cid, e) => (held && e && e.about && e.about.keys && e.about.keys[0] === 'held/c1' ? { keep: true } : null));
+    R.deliver.stashFor(X, { source: 'channel', kind: 'notification', fromName: 'Ops', text: 'the kept receipt', about: { keys: ['held/c1'] } });
+    R.deliver.parkEndedWake(X, { producer: 'jobs', spendReason: 'job-notification', kind: 'notification', fromName: 'Background Work · nightly', reason: 'done', meta: { jobId: 'jb-k', jobName: 'nightly', wake: 'result' } });
+    await R.at(3 * 3600e3);
+    const row = R.view.waitingAll()[X] || null;
+    const during = { reopens: R.reopens.length, probes: R.probes.length, owed: R.deliver.endedEntries(X).length, told: R.wakes.filter((w) => w.cid === X).map((w) => w.outcome), row: row && { n: row.n, code: row.code } };
+    held = false;
+    await R.at(3 * 3600e3 + 5 * 60e3);
+    const after = { reopens: R.reopens.length, carried: R.framesTo(X).filter((f) => f.text.includes('the kept receipt')).length, owed: R.deliver.endedEntries(X).length, told: R.wakes.filter((w) => w.cid === X).map((w) => w.outcome) };
+    R.deliver.closeRetries();
+    return { during, after };
+  };
+  const k0 = await keptRun(DELIVER, DWO, 'head');
+  console.log(`    facts: ${JSON.stringify(k0)}`);
+  ok(k0.during.reopens === 0 && k0.during.owed === 1 && k0.during.told.length === 0 && k0.during.probes === 1, 'B-f276 1a: three hours with every entry kept — no resume (asked of the guard ONCE, at the first look), the wake STAYS OWED, nobody told it ended', JSON.stringify(k0.during));
+  ok(!!k0.during.row && k0.during.row.n === 1 && !k0.during.row.code, 'B-f276 1a: …the ended row says «1 notice is waiting for it» — never «not resumed: nothing is waiting»', JSON.stringify(k0.during.row));
+  ok(k0.after.reopens === 1 && k0.after.carried === 1 && k0.after.owed === 0 && k0.after.told.join() === 'delivered', 'B-f276 1a: …the lift: ONE resume, the kept receipt carried in its frame, the wake ended «delivered»', JSON.stringify(k0.after));
+  const lineCut = MJ_DWL.load('src/server/delivery-wake.js', anchored(DWO_SRC, "if (!claim.ok && claim.code === 'nothing_waiting' && Number(claim.kept) > 0) return", 'if (false) return', 'the line never answers «held»'), 'line-held-cut');
+  const kx = await keptRun(DELIVER, lineCut, 'line-cut');
+  ok(kx.during.owed === 0 && kx.after.reopens === 0, 'B-f276 1a CONTROL (the line answers «nothing is waiting» over kept entries, as before): the wake is ENDED and nothing resumes it at the lift — red', JSON.stringify(kx));
+  // the read's should 1: a producer HELD while the wake waits in the line — the start asks the door again just before its claim
+  // A NEW DELIVERY while the wake waits on kept entries brings words of its own: the wait ends AT ONCE (liftHeld) — the new words carried
+  const secondRun = async (deliverMod, tag) => {
+    const X = cidOf(43);
+    const R = rig(`kept1a-second-${tag}`, { kept: { [X]: RESTART }, deliverMod });
+    R.deliver.registerStashGate((cid, e) => (e && e.about && e.about.keys && e.about.keys[0] === 'held/c1' ? { keep: true } : null));   // held for the whole scene
+    R.deliver.stashFor(X, { source: 'channel', kind: 'notification', fromName: 'Ops', text: 'the kept receipt', about: { keys: ['held/c1'] } });
+    R.deliver.parkEndedWake(X, { producer: 'jobs', spendReason: 'job-notification', kind: 'notification', fromName: 'Background Work · nightly', reason: 'done', meta: { jobId: 'jb-k1', jobName: 'nightly', wake: 'result' } });
+    await R.at(3600e3);
+    const before = R.reopens.length;
+    R.result(X, 'jb-k2', 'second', 'the second result: 2 files');
+    await R.at(3600e3 + 2 * 60e3);
+    const out = { before, reopens: R.reopens.length, carried: R.framesTo(X).filter((f) => f.text.includes('the second result')).length, keptCarried: R.framesTo(X).filter((f) => f.text.includes('the kept receipt')).length, wentBack: R.logs.filter((l) => /the clock went back/.test(l)).length };
+    R.deliver.closeRetries();
+    return out;
+  };
+  const n0 = await secondRun(DELIVER, 'head');
+  console.log(`    facts: a new delivery to a kept-only wait ${JSON.stringify(n0)}`);
+  ok(n0.before === 0 && n0.reopens === 1 && n0.carried === 1 && n0.keptCarried === 0 && n0.wentBack === 0, 'B-f276 1a (the READY read\'s should): a NEW delivery while the wake waits on kept entries — resumed within two minutes, the new words carried, the kept receipt still kept, no «the clock went back»', JSON.stringify(n0));
+  const n1 = await secondRun(MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, '      if (same.waitsHeld && same.waitsHeld.kept) { liftHeld(same); scheduleRetry(); }', '      if (false) { liftHeld(same); scheduleRetry(); }', 'a new delivery keeps the kept-only wait'), 'second-lift-cut'), 'cut');
+  ok(n1.reopens === 0, 'B-f276 1a SECOND-DELIVERY CONTROL (a new delivery leaves the kept-only wait in place, in a copy): the new words wait for the kept ones — red', JSON.stringify(n1));
+  const startRun = async (mod, tag) => {
+    const X = cidOf(42);
+    let held = false, flip = true;
+    const R = rig(`held1a-start-${tag}`, { kept: { get [X]() { if (flip) { held = true; flip = false; } return RESTART; } }, mod });   // its file becomes held while the start reads the kept record (its one await)
+    R.deliver.registerOwedWake('jobs-stand-in', { render: () => null, cancelled: () => { }, held: () => held });
+    R.deliver.stashFor(X, { source: 'agent', kind: 'notification', fromName: 'Background Work · nightly', text: 'nightly finished: 3 files' });
+    R.deliver.parkEndedWake(X, { producer: 'jobs-stand-in', spendReason: 'job-notification', kind: 'notification', fromName: 'Background Work · nightly', reason: 'done', meta: { jobId: 'jb-s', jobName: 'nightly', wake: 'result' } });
+    await R.at(2 * 3600e3);
+    const during = { reopens: R.reopens.length, owed: R.deliver.endedEntries(X).length, marked: R.deliver.endedEntries(X).some((x) => !!x.waitsHeld), told: R.wakes.filter((w) => w.cid === X).map((w) => w.outcome) };
+    held = false;
+    await R.at(2 * 3600e3 + 5 * 60e3);
+    const after = { reopens: R.reopens.length, carried: R.framesTo(X).filter((f) => f.text.includes('nightly finished')).length, owed: R.deliver.endedEntries(X).length };
+    R.deliver.closeRetries();
+    return { during, after };
+  };
+  const s0 = await startRun(DWO, 'head');
+  console.log(`    facts: held at the start ${JSON.stringify(s0)}`);
+  ok(s0.during.reopens === 0 && s0.during.owed === 1 && s0.during.marked && s0.during.told.length === 0, 'B-f276 1a (the read\'s should 1): a producer held while the wake waits in the line — the start answers «held» before its claim: no resume, the wake owed and set aside', JSON.stringify(s0.during));
+  ok(s0.after.reopens === 1 && s0.after.carried === 1 && s0.after.owed === 0, 'B-f276 1a: …the lift: ONE resume, the words carried', JSON.stringify(s0.after));
+  const startCut = MJ_DWL.load('src/server/delivery-wake.js', anchored(DWO_SRC, "    if (heldNow) return { ok: false, outcome: 'held', code: 'held',", "    if (false) return { ok: false, outcome: 'held', code: 'held',", 'the start never asks again'), 'start-held-cut');
+  const sx = await startRun(startCut, 'cut');
+  ok(sx.during.reopens === 1, 'B-f276 1a START CONTROL (the start never asks again, in a copy): the conversation is resumed over the held file — a billed hand-over — red', JSON.stringify(sx.during));
+  const parkCut = MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, "if (r && r.outcome === 'held') {", "if (false) {", 'the park ends a held answer'), 'park-held-cut');
+  const kp = await keptRun(parkCut, DWO, 'park-cut');
+  ok(kp.after.reopens === 0 && kp.after.owed === 0, 'B-f276 1a CONTROL (the park ends a «held» answer like any other): nothing resumes it at the lift — red', JSON.stringify(kp));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

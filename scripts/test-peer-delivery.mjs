@@ -24,7 +24,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
-import { stopWrapper } from './scratch.mjs';
+import { stopWrapper, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -585,5 +585,164 @@ ok('wrapperCaps surfaces peerMessage (stateless, negative verdicts never cached)
 }
 
 fs.rmSync(dataDir, { recursive: true, force: true });
+// ── B-f276 (lane bl-windows, 主开发 r520 + r596 unit 1a): THE FOURTH VERDICT {keep} — an entry whose reach cannot be judged now (a
+//    channel file is held) is neither delivered nor changed, kept in its order; a delivery of only kept entries takes nothing; at the
+//    lift it is handed over ONCE. Its controls are built with anchored() (an anchor gone or doubled throws by name).
+{
+  const CDP = path.join(REPO, 'src/server/conversation-deliver.js');
+  const src = read('src/server/conversation-deliver.js');
+  const MK = mutantCopies('peer-delivery-keep', REPO);
+  const mkD = (CDmod, kdir, logs = null) => CDmod.create({ dataDir: kdir, peerMsg: { findPeer: () => null, lookupPeer: () => null, postToPeer: async () => ({ ok: false }) }, getHosts: () => null, getConvIndex: () => null, serverSetting: () => false, activeSessions: new Map(), emitPeerCard: () => true, log: logs ? (...a) => logs.push(a.join(' ')) : () => {} });
+  const keepRun = async (CDmod, tag) => {
+    const kdir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-keep-${tag}-`));
+    const D = mkD(CDmod, kdir);
+    const K = 'kkkkkkkk-5555-4000-8000-000000000005';
+    D.stashFor(K, { source: 'channel', fromName: 'Ops', text: 'the kept one', about: { keys: ['a/c1'] } });
+    D.stashFor(K, { source: 'channel', fromName: 'Ops', text: 'the judged one', about: { keys: ['a/c2'] } });
+    let held = true;
+    D.registerStashGate((cid, e) => (held && e && e.about && e.about.keys && e.about.keys[0] === 'a/c1' ? { keep: true } : null));
+    const stored = () => { try { return (JSON.parse(fs.readFileSync(path.join(kdir, 'msg-stash.json'), 'utf8'))[K] || []).map((e) => JSON.stringify(e)); } catch { return []; } };
+    const kept0 = stored().find((x) => x.includes('the kept one'));
+    const r = {};
+    const mixed = D.stashEntries(K);
+    r.mixed = mixed.map((e) => e.text);
+    D.drainStash(K, new Set(mixed));
+    r.afterMixed = (D.stashPeek(K) || []).map((e) => e.text);
+    r.allKept = D.stashEntries(K).map((e) => e.text);
+    r.fullDrain = D.drainStash(K).map((e) => e.text);
+    r.keptSame = stored().find((x) => x.includes('the kept one')) === kept0;
+    r.keptCount = D.stashKeptCount(K);
+    held = false;   // the lift: the family reads again
+    r.lift = D.stashEntries(K).map((e) => e.text);
+    r.liftTook = D.drainStash(K, new Set(D.stashEntries(K))).map((e) => e.text);
+    r.again = D.stashEntries(K).map((e) => e.text);
+    // the read's must 4: an entry handed over, then KEPT while its post was on the wire — the drain by id takes EXACTLY what went out
+    held = false;
+    D.stashFor(K, { source: 'channel', fromName: 'Ops', text: 'on the wire', about: { keys: ['a/c1'] } });
+    const shown = D.stashEntries(K);
+    held = true; D.stashEntries(K);   // a strip broadcast's read during the post: the gate now keeps it
+    r.byIdTook = D.drainStash(K, new Set(shown)).map((e) => e.text);
+    held = false;
+    r.byIdLeft = D.stashEntries(K).map((e) => e.text);
+    try { D.flush?.(); } catch { }
+    fs.rmSync(kdir, { recursive: true, force: true });
+    return r;
+  };
+  const r = await keepRun(require(CDP), 'head');
+  console.log(`    facts: ${JSON.stringify(r)}`);
+  ok('B-f276 {keep}: a MIXED read hands over the judged entry only; the kept one stays, in its place', r.mixed.join('|') === 'the judged one' && r.afterMixed.join('|') === 'the kept one', JSON.stringify(r));
+  ok('B-f276 {keep}: every entry kept ⇒ nothing is taken (no entry handed, a full drain takes none) — its stored bytes are EQUAL (keep writes no text), and the claim\'s count says ONE kept', r.allKept.length === 0 && r.fullDrain.length === 0 && r.keptSame === true && r.keptCount === 1, JSON.stringify(r));
+  ok('B-f276 {keep}: at the lift the kept entry is judged at the first read and handed over ONCE', r.lift.join('|') === 'the kept one' && r.liftTook.join('|') === 'the kept one' && r.again.length === 0, JSON.stringify(r));
+  ok('B-f276 1a (the read\'s must 4): a drain BY ID takes exactly what went out — kept since or not (never handed over a second time at the lift)', r.byIdTook.join('|') === 'on the wire' && r.byIdLeft.length === 0, JSON.stringify(r));
+  const KEEP = '      if (v.keep) { kept.add(e); i++; continue; }   // B-f276: unknown now — neither delivered nor changed\n';
+  const rw = await keepRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, KEEP, "      if (v.keep) v = { text: 'held back — whether it still reaches you was unknown' };\n", 'keep as the precedent\'s rewrite'), 'keep-rewrite')), 'rewrite');
+  ok('B-f276 {keep} CONTROL (the precedent: the words rewritten for good): the kept entry\'s stored bytes CHANGE — red', rw.keptSame === false, JSON.stringify(rw));
+  const dr = await keepRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, KEEP, '      if (v.keep) { i++; continue; }\n', 'keep delivered as recorded'), 'keep-as-recorded')), 'as-recorded');
+  ok('B-f276 {keep} CONTROL (delivered as recorded, unjudged): the entry is handed over while its reach is unknown — red', dr.mixed.includes('the kept one') || dr.allKept.length > 0 || dr.fullDrain.length > 0, JSON.stringify(dr));
+  const bi = await keepRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, 'const mine = byId ? (e) => only.has(e) : ', 'const mine = byId ? (e) => only.has(e) && !isKept(cid, e) : ', 'the drain by id skips a kept entry (shape A)'), 'byid-skips-kept')), 'byid');
+  ok('B-f276 1a CONTROL (the drain by id skips an entry kept since, as shape A): what went out stays and is handed over again — red', bi.byIdTook.length === 0 && bi.byIdLeft.join('|') === 'on the wire', JSON.stringify(bi));
+
+  // THE CAP NEVER EVICTS A KEPT ENTRY (the read's must 3): a conversation NOBODY READS (not running) and the first arrival after a
+  // RESTART (the marks are memory) — the cap judges the queue fresh before it evicts; kept entries have their own bound, HELD_CAP
+  const capRun = async (CDmod, tag) => {
+    const kdir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-keepcap-${tag}-`));
+    const logs = [];
+    const K = 'kkkkkkkk-6666-4000-8000-000000000006';
+    const gate = (cid, e) => (e && e.about && e.about.keys && e.about.keys[0] === 'held' ? { keep: true } : null);
+    let D = mkD(CDmod, kdir, logs);
+    D.registerStashGate(gate);
+    for (let i = 0; i < 35; i++) D.stashFor(K, { source: 'channel', text: `kept ${i}`, about: { keys: ['held'] } });   // no read between the arrivals
+    const n35 = D.stashCount(K);
+    try { D.flush?.(); } catch { }
+    D = mkD(CDmod, kdir, logs);   // a restart: the kept marks are memory, gone
+    D.registerStashGate(gate);
+    D.stashFor(K, { source: 'channel', text: 'kept 35', about: { keys: ['held'] } });
+    const nRestart = D.stashCount(K);
+    for (let i = 36; i < 205; i++) D.stashFor(K, { source: 'channel', text: `kept ${i}`, about: { keys: ['held'] } });
+    const n205 = D.stashCount(K);
+    const heldCapSaid = logs.filter((l) => /fell off the held-entries cap of 200 a conversation/.test(l)).length;
+    const stashCapSaid = logs.filter((l) => /fell off the 30-entry cap/.test(l)).length;
+    try { D.flush?.(); } catch { }
+    fs.rmSync(kdir, { recursive: true, force: true });
+    return { n35, nRestart, n205, heldCapSaid, stashCapSaid };
+  };
+  const c0 = await capRun(require(CDP), 'head');
+  console.log(`    facts: the cap over kept entries nobody reads ${JSON.stringify(c0)}`);
+  ok('B-f276 1a (the read\'s must 3): 35 kept entries in a conversation NOBODY READS — the stash cap (30) evicts none', c0.n35 === 35, JSON.stringify(c0));
+  ok('B-f276 1a: …after a RESTART (the marks gone) the next arrival evicts none either (36)', c0.nRestart === 36, JSON.stringify(c0));
+  ok('B-f276 1a: past the held-entries cap the oldest kept entries fall — exactly 200 kept, said in the HELD cap\'s own words (never the 30-entry cap\'s)', c0.n205 === 200 && c0.heldCapSaid > 0 && c0.stashCapSaid === 0, JSON.stringify(c0));
+  const FRESH = '    if (q.filter((e) => e && !e.ho).length > STASH_CAP) gateQueue(cid, { write: false });\n';
+  const cx = await capRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, FRESH, '', 'the cap reads the last read\'s marks only (shape A)'), 'cap-stale-marks')), 'stale');
+  ok('B-f276 1a CAP CONTROL (the cap reads only the last read\'s marks, as shape A): kept entries nobody read are evicted — red', cx.n35 === 30, JSON.stringify(cx));
+  const HC = '    { let k = q.filter((e) => keptE(e) && !e.ho).length - HELD_CAP;';
+  const hx = await capRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, HC, '    { let k = q.filter((e) => keptE(e) && !e.ho).length - 1e9;', 'kept entries unbounded'), 'held-cap-cut')), 'unbounded');
+  ok('B-f276 1a HELD-CAP CONTROL (kept entries with no bound of their own, in a copy): 205 kept entries all stay — red', hx.n205 === 205 && hx.heldCapSaid === 0, JSON.stringify(hx));
+
+  // THE JUDGE'S {keep} (the read's should — it had no leg): the store that owns the words cannot judge now ⇒ `judgeOwed`, ON DISK; a
+  // restart reads it back and judges again at the read; the cap honours it; at the lift it is handed over once
+  const judgeRun = async (CDmod, tag, { keepFirst = false } = {}) => {
+    const kdir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-judgeowed-${tag}-`));
+    const K = 'kkkkkkkk-7777-4000-8000-000000000007';
+    let held = true;
+    const judge = keepFirst ? (entry) => (held ? { keep: true } : null) : (entry) => (held && /jb-owed/.test(String(entry.text)) ? { keep: true } : null);   // keepFirst: «held» answered before the entry is known to be its own (A3's must 3)
+    let D = mkD(CDmod, kdir);
+    D.registerStashJudge(judge);
+    for (let i = 0; i < 33; i++) D.stashFor(K, { source: 'agent', text: `job jb-owed-${i} finished` });
+    D.stashFor(K, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'a peer\'s words — no store of this judge owns them' });   // r596 «the group-id order of 3»: a judge keeps ONLY its own entries
+    const r = { onDisk: (() => { try { return (JSON.parse(fs.readFileSync(path.join(kdir, 'msg-stash.json'), 'utf8'))[K] || []).filter((e) => e.judgeOwed === true).length; } catch { return -1; } })() };
+    r.handedWhileHeld = D.stashEntries(K).filter((e) => /jb-owed/.test(e.text)).length;
+    r.notMineHanded = D.stashEntries(K).filter((e) => /a peer's words/.test(e.text)).length;
+    if (r.notMineHanded) D.drainStash(K, new Set(D.stashEntries(K).filter((e) => /a peer's words/.test(e.text))));
+    try { D.flush?.(); } catch { }
+    D = mkD(CDmod, kdir);   // a restart
+    D.registerStashJudge(judge);
+    r.afterRestart = D.stashEntries(K).length;
+    r.count = D.stashCount(K);
+    held = false;
+    r.lift = D.stashEntries(K).length;
+    r.took = D.drainStash(K, new Set(D.stashEntries(K))).length;
+    r.again = D.stashEntries(K).length;
+    try { D.flush?.(); } catch { }
+    fs.rmSync(kdir, { recursive: true, force: true });
+    return r;
+  };
+  const j0 = await judgeRun(require(CDP), 'head');
+  console.log(`    facts: the judge's keep ${JSON.stringify(j0)}`);
+  ok('B-f276 1a: a judge\'s {keep} is written (33 entries carry judgeOwed on disk), none handed while held, none evicted by the cap (33 > 30)', j0.onDisk === 33 && j0.handedWhileHeld === 0 && j0.count === 33, JSON.stringify(j0));
+  ok('B-f276 1a (r596, the group-id order of 3): the entry no store of that judge owns is handed over while the judge cannot judge its own — a keep is the judge\'s, entry by entry', j0.notMineHanded === 1, JSON.stringify(j0));
+  const jo = await judgeRun(require(CDP), 'keep-first', { keepFirst: true });
+  ok('B-f276 1a JUDGE-ORDER CONTROL (a stand-in judge that answers «held» before it knows the entry is its own — the shape the contract forbids): the peer\'s entry is kept too — red', jo.notMineHanded === 0, JSON.stringify(jo));
+  ok('B-f276 1a: …after a restart still kept (judged again at the read, never handed unjudged); at the lift all 33 handed over ONCE', j0.afterRestart === 0 && j0.lift === 33 && j0.took === 33 && j0.again === 0, JSON.stringify(j0));
+  // A JUDGE'S KEEP FAILS CLOSED (the fifth read's should): after a restart the judge THROWS, or none is registered yet — still kept
+  const failRun = async (CDmod, tag, mode) => {
+    const kdir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-judgefail-${tag}-`));
+    const K = 'kkkkkkkk-8888-4000-8000-000000000008';
+    let D = mkD(CDmod, kdir);
+    D.registerStashJudge((entry) => (/jb-owed/.test(String(entry.text)) ? { keep: true } : null));
+    for (let i = 0; i < 3; i++) D.stashFor(K, { source: 'agent', text: `job jb-owed-${i} finished` });
+    try { D.flush?.(); } catch { }
+    const logs = [];
+    D = mkD(CDmod, kdir, logs);   // a restart
+    if (mode === 'throws') { D.registerStashJudge(() => { throw new Error('its store could not be read'); }); D.registerStashJudge(() => { throw new Error('another store could not be read'); }); }   // two stores fail: each judge's throw is its own
+    const handed = D.stashEntries(K).length;
+    for (let i = 0; i < 9; i++) D.stashEntries(K);   // ten reads while held (the door asks once a minute)
+    const threwLines = logs.filter((l) => /a stash judge threw/.test(l)).length;
+    try { D.flush?.(); } catch { }
+    fs.rmSync(kdir, { recursive: true, force: true });
+    return { handed, count: 3, threwLines };
+  };
+  const ft = await failRun(require(CDP), 'throws', 'throws'), fn = await failRun(require(CDP), 'none', 'none');
+  ok('B-f276 1a: a judge\'s keep FAILS CLOSED — after a restart the judge throws, or no judge is registered yet: the owed entries are still kept (none handed unjudged)', ft.handed === 0 && fn.handed === 0, JSON.stringify({ ft, fn }));
+  ok('B-f276 1a (the delta read\'s must): …each judge\'s throw is SAID ONCE per entry over ten reads (2 judges × 3 entries = 6 lines, never 60 — no line a minute while held)', ft.threwLines === 6, JSON.stringify(ft));
+  const ftl = await failRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, "if (!said || !said.has(fn)) log('[deliver] a stash judge threw:'", "if (true) log('[deliver] a stash judge threw:'", 'the throw said at every read'), 'judge-throw-every-read')), 'throws-loud', 'throws');
+  ok('B-f276 1a THROW-SAID CONTROL (the throw said at every read, in a copy): 60 lines over ten reads — red', ftl.threwLines === 60, JSON.stringify(ftl));
+  const ftx = await failRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, ' entry.judgeOwed = true; } r = null; }', ' } r = null; }', 'a throw hands it unjudged'), 'judge-throw-open')), 'throws-cut', 'throws');
+  const fnx = await failRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, "      if (e && typeof e === 'object' && e.judgeOwed && !judges.length) { kept.add(e); i++; continue; }", '', 'no judge hands it unjudged'), 'judge-none-open')), 'none-cut', 'none');
+  ok('B-f276 1a JUDGE-FAIL CONTROLS (a throw, or no judge, hands the owed entry over, in copies): handed unjudged — red', ftx.handed === 3 && fnx.handed === 3, JSON.stringify({ ftx, fnx }));
+  const JK = '      if (r.keep === true) { entry.judgeOwed = true; continue; }';
+  const jx = await judgeRun(require(MK.write('src/server/conversation-deliver.js', anchored(src, JK, '      if (r.keep === true) continue;', 'the judge\'s keep not written'), 'judge-keep-cut')), 'cut');
+  ok('B-f276 1a JUDGE CONTROL (the judge\'s keep not written): the entries are handed over while their store cannot judge them — red', jx.handedWhileHeld > 0, JSON.stringify(jx));
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

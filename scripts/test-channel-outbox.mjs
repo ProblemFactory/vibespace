@@ -1033,7 +1033,7 @@ async function claimLeg(ladderMod, name) {
 {
   const c = await claimLeg(DEL, 'm195-claim');
   ok(c.claimed === 1 && c.during === 'waiting' && !c.evictedAt && c.took === 1 && c.after === 'handed' && c.left === 30, `merge-a a CLAIMED receipt is never evicted: 31 arrivals while its hand-over is in flight drop the oldest UNCLAIMED entry (${c.left} left), the card keeps "${c.during}", and the hand-over's drain says handed (${c.after})`, JSON.stringify(c));
-  const CAP = "    let over = q.filter((e) => !(e && e.ho)).length - STASH_CAP;";
+  const CAP = "    let over = q.filter((e) => !(e && e.ho) && !keptE(e)).length - STASH_CAP;";   // B-f276 1a: a kept entry is not the cap's
   ok(dsrc.split(CAP).length === 2, 'merge-a the unclaimed cap is spelled once (the control caps the whole store)');
   const capAll = MV2.load('src/server/conversation-deliver.js', dsrc.replace(CAP, "    let over = q.length - STASH_CAP; if (over > 0) return q.splice(0, over);"), 'm195-cap-all');
   const cc = await claimLeg(capAll, 'm195-claim-ctl');

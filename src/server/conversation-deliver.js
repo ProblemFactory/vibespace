@@ -194,7 +194,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // stashFor's `evicted` event carries (the .195 merge, lane channel-withdraw verify r2 + channel-jump r4): the cap is
   // the ONE place an entry leaves the queue undelivered, so it is the one place `evicted` is said — a fate never reads
   // "evicted" for a receipt a hand-over delivered, and a restore never trims.
-  function capUnclaimed(q) {
+  // B-f276 1a (主开发 r596): A KEPT ENTRY IS NEVER EVICTED BY THE CAP — a judge that could not judge it (`judgeOwed`) or a gate that
+  // kept it ({keep}) holds it for a producer whose file is held; kept entries have their OWN bound, HELD_CAP a conversation: past it the
+  // oldest kept entry falls, said on the same eviction road (its own `evicted` event and log line, in the held cap's words) — never a silent growth over a hold of days
+  const HELD_CAP = 200;
+  function capUnclaimed(q, cid = null) {
+    // a keyed slot or words a lowered cap took back are never «kept» here: the cap never counts nor drops them (below), so the held
+    // cap neither (the fresh read's nit: they were subtracted from `over` uncounted, and the held cap could drop them)
+    const keptE = (e) => !!(e && !e.slot && !(e.held && e.held.capHeld === true) && (e.judgeOwed || (cid && isKept(cid, e))));
     // the cap counts the UNCLAIMED entries (when every slot is claimed, a newcomer is the only unclaimed one — a
     // cap over the whole store would evict exactly the entry that just arrived); the oldest unclaimed fall off.
     // A MAY-HAVE-LANDED COPY GIVES WAY FIRST (notify-retry verify r3, reproduced: a park entry claimed by a hand-over when
@@ -202,15 +209,18 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // make room for it — a certain miss displaced by a possible repeat). At the cap, the unclaimed entries whose frame
     // may already have reached the agent (`held.maybeDelivered`) fall before any other, oldest first; then the oldest
     // unclaimed as before. The same rule in the jobs engine's store (src/jobs.js capUnclaimedNotifs)
-    let over = q.filter((e) => !(e && e.ho)).length - STASH_CAP;
+    const keptDrops = [];
+    { let k = q.filter((e) => keptE(e) && !e.ho).length - HELD_CAP; for (let i = 0; i < q.length && k > 0;) { if (keptE(q[i]) && !q[i].ho) { keptDrops.push(...q.splice(i, 1)); k--; } else i++; } }
+    keptDrops.heldCap = keptDrops.length;   // how many fell off the held cap (first in the list): stashFor says them in that cap's own words
+    let over = q.filter((e) => !(e && e.ho) && !keptE(e)).length - STASH_CAP;
     over -= q.filter((e) => e && e.slot && !e.ho).length;   // a KEYED SLOT entry (lane queued-is-not-woke, shape C: the sender's one waiting entry) is never counted and never dropped
     const capHeld = (e) => !!(e && e.held && e.held.capHeld === true);   // B-0a33 (2): words a lowered cap took back out of a wrapper's queue — never dropped (bounded by queued-wakes' 50 per conversation)
     over -= q.filter((e) => capHeld(e) && !e.ho && !e.slot).length;
-    const dropped = [];
+    const dropped = keptDrops;
     if (over <= 0) return dropped;
     for (const pass of [(e) => !!(e.held && e.held.maybeDelivered), () => true]) {
       for (let i = 0; i < q.length && over > 0;) {
-        if (!q[i] || q[i].ho || q[i].slot || capHeld(q[i]) || !pass(q[i])) { i++; continue; }
+        if (!q[i] || q[i].ho || q[i].slot || capHeld(q[i]) || keptE(q[i]) || !pass(q[i])) { i++; continue; }
         dropped.push(...q.splice(i, 1)); over--;
       }
     }
@@ -234,7 +244,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // an eviction is SAID (channel-jump verify r6): the injection walks newest-first, so under sustained arrivals the
     // OLDEST entries are the ones held turn after turn — and the cap then drops exactly those, while the strip's count
     // stays at the cap. A loss the log can trace, never a silence — and (withdraw verify r2) an `evicted` event below.
-    const evicted = capUnclaimed(q);
+    // B-f276 1a (the read's must 3): the cap's kept rule reads a FRESH verdict — whenever the cap would bite, the gate judges the whole
+    // queue first (the newcomer too): a conversation nobody reads (not running) and the first arrival after a restart (the marks are
+    // memory) never evict an entry the gate keeps
+    if (q.filter((e) => e && !e.ho).length > STASH_CAP) gateQueue(cid, { write: false });
+    const evicted = capUnclaimed(q, cid);
     // AN ENTRY WHOSE PRODUCER TRACKS ITS FATE IS DURABLE BEFORE THE PRODUCER IS TOLD (verify r3, 2026-09-27):
     // a `ref` means somebody records "stored for the next message" off the `stashed` event below — under the
     // 500 ms debounce a SIGKILL / OOM inside that window left the outbox saying `stashed` over a file without
@@ -259,8 +273,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // the journal names an evicted entry by its KIND, a peer by its sender's name — never by a label VibeSpace composed
     // from a record (`Background Work · <the job's name>`): every console line rides the server's ring into each incident
     // captured later, past a "Clear content…" of that job (lane-redact verify r8)
+    // B-f276 1a: the held-entries cap's drops (capUnclaimed puts them first) are said in that cap's own words, never as the 30-entry cap's
+    const keptOff = evicted.heldCap ? evicted.splice(0, evicted.heldCap) : [];
+    if (keptOff.length) log(`[deliver] ${cid}: ${keptOff.length} oldest kept entr${keptOff.length === 1 ? 'y' : 'ies'} (it could not be judged now) fell off the held-entries cap of ${HELD_CAP} a conversation — never delivered`);
     if (evicted.length) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr${evicted.length === 1 ? 'y' : 'ies'} fell off the ${STASH_CAP}-entry cap (${evicted.map((e) => `${e.source}:${stashKindOf(e)}${stashKindOf(e) === 'peer' && e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered`);
     emitStash('stashed', cid, [entry]);
+    if (keptOff.length) emitStash('evicted', cid, keptOff, { held: q.length, heldCap: HELD_CAP });
     if (evicted.length) emitStash('evicted', cid, evicted, { held: q.length });
     stashChanged(cid);
     if (!stored) { const why = `the queue could not be saved to disk (${(lastWriteError && lastWriteError.message) || 'write failed'}) — held in memory only: it is lost if VibeSpace restarts before that conversation's next turn`; emitStash('unwritten', cid, [entry], { why }); return { stored: false, why }; }
@@ -284,14 +302,25 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const stashGates = new Set();
   function registerStashGate(fn) { if (typeof fn !== 'function') return () => {}; stashGates.add(fn); return () => { stashGates.delete(fn); }; }
   const WITHHELD_TEXT = 'A VibeSpace notification waiting for this conversation was withheld — where it came from no longer reaches you.';
-  function gateQueue(cid) {
+  // B-f276 (主开发 r520): THE FOURTH VERDICT {keep} — an entry whose reach cannot be judged NOW (a channel file is held: unknown is
+  // never an orphan) is neither delivered nor changed: it stays in its place, in its order, its stored bytes untouched (keep writes no
+  // text), and every take (stashEntries, a full drain, the stash wake) passes over it; the next read judges it again and, once it
+  // can, hands it over ONCE. The mark is memory only — one gate pass's answer, never written.
+  const keptNow = new Map();   // cid → Set<entry> kept by the last gate pass
+  const isKept = (cid, e) => { const k = keptNow.get(cid); return !!(k && k.has(e)); };
+  function gateQueue(cid, { write = true } = {}) {
     const q = stash[cid];
-    if (!q || !q.length || !stashGates.size) return;
+    if (!q || !q.length || (!stashGates.size && !q.some((e) => e && e.judgeOwed))) { keptNow.delete(cid); return; }
+    const kept = new Set();
     const dropped = [];
     let changed = false;
     const memo = new Map();   // ONE pass: a gate may remember what it looked up for this queue (verify r3: the cost)
     for (let i = 0; i < q.length;) {
       const e = q[i];
+      // B-f276 A3: an entry whose words a judge could not judge (its store's file held) is judged AGAIN at every read — kept until it can,
+      // then judged (a clear reaches it) and handed over once; never delivered with words nobody judged
+      if (e && typeof e === 'object' && e.judgeOwed && !judges.length) { kept.add(e); i++; continue; }   // B-f276 1a: no judge registered yet (the boot) — still owed, never handed unjudged
+      if (e && typeof e === 'object' && e.judgeOwed) { delete e.judgeOwed; const hit = judgeEntry(e, { owed: true }); if (e.judgeOwed) { if (hit) changed = true; kept.add(e); i++; continue; } changed = true; }   // still owed ⇒ no write
       if (!e || typeof e !== 'object' || !e.about) { i++; continue; }
       let v = null;
       for (const fn of stashGates) {
@@ -299,6 +328,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if (v) break;
       }
       if (!v) { i++; continue; }
+      if (v.keep) { kept.add(e); i++; continue; }   // B-f276: unknown now — neither delivered nor changed
       changed = true;
       if (v.drop && !e.ref && !e.ho) { dropped.push(...q.splice(i, 1)); continue; }
       e.text = typeof v.text === 'string' && v.text ? v.text : WITHHELD_TEXT;
@@ -307,9 +337,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       delete e.about;
       i++;
     }
+    if (kept.size) keptNow.set(cid, kept); else keptNow.delete(cid);
     if (!changed) return;
     if (!q.length) delete stash[cid];
     if (dropped.length) log(`[deliver] ${cid}: ${dropped.length} waiting entr${dropped.length === 1 ? 'y was' : 'ies were'} withheld (${dropped.map((e) => `${e.source}${e.fromName ? ` "${String(e.fromName).replace(/\s+/g, ' ').slice(0, 40)}"` : ''}`).join('; ')}) — the producer says where the words came from no longer reaches that conversation`);
+    if (!write) return;   // stashFor's own ONE flush and change signal carry it (B-f276 1a: a take-back after a failed flush leaves nothing of it on disk)
     writeStashNow();
     stashChanged(cid);
   }
@@ -338,11 +370,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  a delivery, and a debounced write after it left a 500 ms window in which a killed process re-delivered at its
    *  next boot; a drain happens once per turn, the write is small. */
   function drainStash(cid, only = null) {
+    if (!(only instanceof Set)) gateQueue(cid);   // B-f276: a full drain judges first — a kept entry stays
     const q = stash[cid] || [];
     if (!q.length) return q;
     const byId = only instanceof Set;
-    if (byId || q.some((e) => e && e.ho)) {
-      const mine = byId ? (e) => only.has(e) : (e) => !(e && e.ho);
+    if (byId || q.some((e) => e && (e.ho || isKept(cid, e)))) {
+      const mine = byId ? (e) => only.has(e) : (e) => !(e && e.ho) && !isKept(cid, e);   // B-f276 1a (the read's must 4): by id = exactly what went out, kept since or not
       const took = q.filter(mine);
       const keep = q.filter((e) => !mine(e));
       if (keep.length) stash[cid] = keep; else delete stash[cid];
@@ -423,6 +456,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     return 0;
   }
   function stashCount(cid) { return (stash[cid] || []).length; }
+  /** B-f276 1a: how many of a conversation's entries the last gate pass KEPT (the wake's claim: every entry kept ⇒ it waits, never ends) */
+  function stashKeptCount(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => isKept(cid, e)).length; }
   /** "CLEAR CONTENT…" (verify r3, 2026-09-28): a held entry that carries a cleared record's words
    *  loses them. `match(entry) → null | {text?, fromName?}` is asked of every queued entry (every
    *  conversation); a non-null answer replaces those fields. A codex owner conversation's wrapper hands
@@ -496,13 +531,16 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // past clears, so a hand-back that lands after a restart is judged the same. A judge answers `null` or `{text?,
   // fromName?}`; never throws into the write.
   const judges = [];
+  const threwSaid = new WeakMap();   // B-f276 1a: owed entry → the judges whose throw over it was said (memory: a boot says it again, once)
   function registerStashJudge(fn) { if (typeof fn === 'function') judges.push(fn); }
-  function judgeEntry(entry) {
+  function judgeEntry(entry, { owed = false } = {}) {
     let hit = false;
     for (const fn of judges) {
-      let r = null;
-      try { r = fn(entry); } catch (e) { log('[deliver] a stash judge threw:', e && e.message); r = null; }
+      let r = null, threw = false;
+      try { r = fn(entry); } catch (e) { threw = true; const said = owed ? threwSaid.get(entry) : null; if (!said || !said.has(fn)) log('[deliver] a stash judge threw:', e && e.message); if (owed) { if (said) said.add(fn); else threwSaid.set(entry, new Set([fn])); entry.judgeOwed = true; } r = null; }   // B-f276 1a: re-judging an owed entry, a throw keeps it (unknown is never delivered), said once per (entry, judge)
+      if (owed && !threw) { const said = threwSaid.get(entry); if (said) said.delete(fn); }   // it answered: a later throw of it is said again
       if (!r || typeof r !== 'object') continue;
+      if (r.keep === true) { entry.judgeOwed = true; continue; }   // B-f276 A3: the store that owns the words cannot judge now (its file is held) — kept until it can
       if (typeof r.text === 'string') entry.text = r.text;
       if (typeof r.fromName === 'string') entry.fromName = r.fromName;
       hit = true;
@@ -515,7 +553,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function stashPeek(cid) { gateQueue(cid); return (stash[cid] || []).map((e) => ({ ...e })); }
   /** The entries waiting for a conversation (the SAME objects — `drainStash(cid, new Set(these))` takes them). Every
    *  read passes the stash gate first (verify r3): what a revoked reach no longer covers is never handed out. */
-  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).slice(); }
+  function stashEntries(cid) { gateQueue(cid); return (stash[cid] || []).filter((e) => !isKept(cid, e)); }   // B-f276: a kept entry is not handed out
 
   // ── THE RETRY PARK (see the header constants) ──────────────────────────────
   const clock = retryClock || { now: () => Date.now(), setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; }, clearTimeout: (t) => clearTimeout(t) };
@@ -619,7 +657,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       for (const e of q.slice()) {   // a copy: a posting wake leaves `q` inside the loop
         if (!e || typeof e !== 'object') continue;
         if (e.charged) e.charged.hold = null;
-        if (isOwed(e)) { delete e.paceRefusals; waitedOut++; }   // its schedule starts again here (owedEnd)
+        if (isOwed(e)) { delete e.paceRefusals; delete e.forceRefusedAt; waitedOut++; }   // its schedule starts again here (owedEnd)
         // A WAKE WHOSE FRAME WAS BEING POSTED (主开发 14:26Z — a hard kill between the post and the entry's end): its frame MAY have
         // landed — said, NEVER offered to the line again (a second resume and a second frame = two billed turns for one delivery);
         // the words the hand-over had claimed are released by the stash's own boot and ride the next turn (the park's own rule
@@ -711,7 +749,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!q || !q.length || !retryJudges.size) return;
     const dropped = [];
     for (const e of q.slice()) {
-      if (!e || e.inflight || e.ho) continue;
+      if (!e || e.inflight || e.ho || aside(e)) continue;   // B-f276 1a: a held wake is not judged (its producer's file is held)
       const fn = retryJudges.get(e.producer);
       if (!fn) continue;
       let owed = false, threw = false;
@@ -826,7 +864,15 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (changed) writeRetryNow();
     const due = [];
     for (const [cid, q] of Object.entries(retry)) if (q.some((e) => e && !e.inflight && !e.ho && !e.waitsReadopt && Number(e.nextAt) <= now)) due.push(cid);
-    for (const cid of due) await runAttempt(cid, 'timer');   // one frame per conversation: a due entry carries the not-yet-due ones along
+    const dueOf = (cid) => (retry[cid] || []).filter((e) => e && !e.inflight && !e.ho && !e.waitsReadopt && Number(e.nextAt) <= clock.now());
+    for (const cid of due) {
+      // B-f276 1a (the fourth read's must): a conversation whose due wakes are ALL held is asked by THE DOOR ALONE — never a whole attempt
+      // dragging its other wakes in once a minute (their pace asked, rows, writes, events, a force come early); a wake the door lifts is
+      // due at once and runs in this conversation's attempt, here
+      const d = dueOf(cid);
+      if (d.length && d.every(aside)) { asideHeld(cid); if (!dueOf(cid).some((e) => !aside(e))) continue; }
+      await runAttempt(cid, 'timer');   // one frame per conversation: a due entry carries the not-yet-due ones along
+    }
     // THE BELT (verify r1): an entry still due after its conversation's pass was not moved by anything above — it is
     // paced to the first step, never left to re-arm the timer at 0 ms (a hot loop is the one failure a park must not have)
     let belted = 0;
@@ -852,8 +898,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // …nor one marked may-have-landed at boot (verify r3): it is leaving at the first sweep, and evicting it here would
     // call a possible repeat "the oldest waiting" and stash it without the may-have-landed word
     const waiting = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
-    while (waiting().length > RETRY_CAP) {
-      const victim = waiting()[0];
+    if (waiting().length > RETRY_CAP) asideHeld(cid);   // B-f276 1a (the read's must 1): the door first — a held wake is never the cap's victim (fellRetry would fall it over its producer's held file)
+    for (let victim; waiting().length > RETRY_CAP && (victim = waiting().find((x) => !aside(x)));) {
       log(`[deliver] ${cid}: the retry park holds ${RETRY_CAP} waiting per conversation — ${victim.id} (the oldest waiting, parked ${Math.round((now - Number(victim.firstAt || now)) / 1000)} s ago${(retry[cid] || []).length - waiting().length ? `; ${(retry[cid] || []).length - waiting().length} more on the wire, claimed or leaving`: ''}) falls to the stash, evicted`);
       fellRetry(victim, 'not-reachable', `the retry park holds ${RETRY_CAP} per conversation — the oldest falls to the stash`, { evicted: true });
     }
@@ -885,15 +931,92 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     emitRetry('parked', cid, e, { nextAt: e.nextAt, phase: 'pace', busy: null, late: 0 });
     log(`[deliver] ${cid}: a wake the pace refused is parked for the window's end (${e.id}, sent in ${Math.ceil((at - now) / 1000)} s): ${String(reason).slice(0, 200)}`);
     const waiting = () => (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !x.maybeDelivered);
-    while (waiting().length > RETRY_CAP) fellRetry(waiting()[0], 'not-reachable', `the retry park holds ${RETRY_CAP} per conversation — the oldest falls to the stash`, { evicted: true });
+    if (waiting().length > RETRY_CAP) asideHeld(cid);   // B-f276 1a: the door first — the oldest NOT held falls; held wakes are bounded by their own key (one per producer and key)
+    for (let victim; waiting().length > RETRY_CAP && (victim = waiting().find((x) => !aside(x)));) fellRetry(victim, 'not-reachable', `the retry park holds ${RETRY_CAP} per conversation — the oldest falls to the stash`, { evicted: true });
     return { parked: true, id: e.id, retryAt: e.nextAt, retryInMs: at - now, merged: false };
   }
-  /** A FALL THE PRODUCER FOUND OUTSIDE THE PARK'S OWN ATTEMPT (a marker moved past a record no report carried, acceptance r6, P24): the same door, so the same words reach the sender */
+  /** A FALL THE PRODUCER FOUND OUTSIDE THE PARK'S OWN ATTEMPT (a marker moved past a record no report carried, acceptance r6, P24): the same door, so the same words reach the sender.
+   *  (B-f276 1a: it is the producer's own reading of its own store — a producer that says held never calls it; a held mark does not stop it) */
   function fellOwed(cid, e, reason, detail = {}) {
     if (e && !e.inflight && isOwed(e) && retry[cid] && retry[cid].includes(e)) { fellRetry(e, 'not-reachable', reason, detail); stashChanged(cid); scheduleRetry(); }
   }
+  // B-f276 1a (主开发 r596): THE PRODUCER SAYS «HELD» — `hooks.held(cid, entry)` (optional, one hook at the registration): true = the
+  // producer's own file is held, so whether the wake still reaches anyone cannot be judged. ONE DOOR asks it (shape B — the fresh read
+  // of shape A found a check on each road missed three roads and broke the cap's loop): `asideHeld(cid)` runs FIRST in every attempt
+  // and in both park caps, for every owed wake and every wake owed to an ENDED conversation (each producer it carries). A held wake is
+  // SET ASIDE — one mark, `waitsHeld {since, why, by, kept}`, on disk — and every road passes over a marked entry (`aside`): no fall (not
+  // running, no inbox, may have landed, the bound, the cap), no judge, no force, no render, no post, no resume. While held it is asked
+  // again every HELD_STEP_MS by the door alone, in memory only (no write, no attempt row, no event); at the lift its bound clock is moved
+  // by the hold (`liftHeld`) and it goes at once. A held() that throws is unknown = held. fellRetry is never asked to refuse:
+  // what it is handed it falls (its callers' contract). What waits is bounded by its own key: one owed wake per (producer, key), one
+  // ended wake per conversation (the parks merge them).
+  const HELD_STEP_MS = 60_000;
+  const aside = (x) => !!(x && x.waitsHeld);
+  const producersOf = (e) => (isEnded(e) ? (Array.isArray(e.producers) ? e.producers : [e.producer]) : isOwed(e) ? [e.producer] : []).filter(Boolean);
+  /** → {why, by} (by = the producer that said held) | null */
+  function heldWhy(e) {
+    for (const p of producersOf(e)) {
+      const h = owedProducers.get(p);
+      if (!h || typeof h.held !== 'function') continue;
+      let v = false;
+      try { v = !!h.held(e.cid, e); } catch { return { why: `its producer «${p}» could not say whether it can judge it (its held() threw) — unknown is held`, by: p }; }
+      if (v) return { why: `its producer «${p}» cannot judge it now (its file is held)`, by: p };
+    }
+    // THE PACE'S OWN FILE (registerWakePacer's `held`): an owed wake is paced by it — while it cannot be read, no pace is asked, no force
+    if (isOwed(e) && wakePacer && typeof wakePacer.held === 'function') {
+      let v = false;
+      try { v = !!wakePacer.held(e.cid, e); } catch { v = true; }
+      if (v) return { why: 'its wake pace cannot be read now (its file is held)', by: null };
+    }
+    // the line found nothing but KEPT entries for an ended wake (`kept`): it waits while the stash still keeps one
+    if (e.waitsHeld && e.waitsHeld.kept && stashKeptCount(e.cid) > 0) return { why: e.waitsHeld.why, by: null };
+    return null;
+  }
+  /** the deliverer's answer for one wake, asked by the resume line's start just before its claim (src/server/delivery-wake.js) */
+  function heldWhyOf(e) { const h = e && typeof e === 'object' ? heldWhy(e) : null; return h ? h.why : null; }
+  /** the ONE writer of the mark → true when it was set now (the caller writes the file once) */
+  function setAside(e, why, at = clock.now(), extra = {}) {
+    e.nextAt = at + HELD_STEP_MS;
+    if (e.waitsHeld) return false;
+    e.waitsHeld = { since: at, why: String(why || 'held').slice(0, 200), ...extra };
+    return true;
+  }
+  /** the ONE lift: the bound clock (owedEnd counts from max(firstAt, the boot)) moves by the hold since max(since, the boot); an ENDED
+   *  wake's hour counts from firstAt alone, so one lifted after a restart starts a fresh hour — it goes to the line at once anyway */
+  function liftHeld(e, at = clock.now()) {
+    e.firstAt = Math.max(Number(e.firstAt || at), parkBootAt) + Math.max(0, at - Math.max(Number(e.waitsHeld && e.waitsHeld.since) || at, parkBootAt));
+    delete e.waitsHeld;
+    e.nextAt = at;
+  }
+  function asideHeld(cid) {
+    const q = retry[cid];
+    if (!Array.isArray(q) || !q.length) return 0;
+    const at = clock.now();
+    const marked = [], lifted = [];
+    for (const e of q) {
+      if (!e || e.inflight || e.ho || !(isOwed(e) || isEnded(e))) continue;
+      const h = heldWhy(e);
+      if (h) { if (setAside(e, h.why, at, h.by ? { by: h.by } : {})) marked.push(e); continue; }
+      if (!e.waitsHeld) continue;
+      // the producer that said held is not registered yet (the boot's window): unknown is held — the mark stays until it registers
+      if (e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) {
+        if (at - parkBootAt <= RETRY_MAX_MS) { e.nextAt = at + HELD_STEP_MS; continue; }
+        delete e.waitsHeld; e.nextAt = at; lifted.push(e); continue;   // past the boot's hour: the mark gives way, its bound clock not moved — the unready road says it
+      }
+      liftHeld(e, at);   // a hold across a restart: the boot rebased the bound already — only the hold since it is credited
+      lifted.push(e);
+    }
+    if (!marked.length && !lifted.length) return 0;
+    writeRetryNow();
+    if (lifted.length) scheduleRetry();   // a lifted wake goes at once, whichever road asked the door
+    if (marked.length) log(`[deliver] ${cid}: ${marked.length} wake${marked.length === 1 ? '' : 's'} set aside, held — ${marked[0].waitsHeld.why} (${marked.map((e) => e.id).join(', ')}): no fall, no post, asked again every ${HELD_STEP_MS / 1000} s`);
+    if (lifted.length) log(`[deliver] ${cid}: ${lifted.length} held wake${lifted.length === 1 ? '' : 's'} can be judged again (${lifted.map((e) => e.id).join(', ')}) — on their way, the bound moved by the hold`);
+    stashChanged(cid);
+    return marked.length + lifted.length;
+  }
   function registerOwedWake(producer, hooks) { if (producer && hooks && typeof hooks.render === 'function') { owedProducers.set(producer, hooks); scheduleRetry(); } }
-  function registerWakePacer(fn) { if (typeof fn === 'function') wakePacer = fn; }
+  /** `fn.held(cid, entry)` (optional, B-f276 1a): true = the pace's own file is held — the ONE door sets every owed wake aside (no pace, no force) */
+  function registerWakePacer(fn) { if (typeof fn === 'function') { wakePacer = fn; scheduleRetry(); } }
   // ── THE WAKE OWED TO AN ENDED CONVERSATION (piece 7; see isEnded) ──────────────────────────────────────────────────────
   let endedHook = null;   // (cid, entry) → Promise<{outcome: 'delivered' | 'refused' | 'failed', why?, code?, until?}> — the hub's resume line (server.js)
   /** The hub wires its ONE LINE here; an entry parked before it (the boot) waits for it. */
@@ -921,6 +1044,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       if (meta) same.metas = [...metasOf(same), meta].slice(-ENDED_METAS);
       if (!same.cardText && cardText) { same.cardText = String(cardText).slice(0, 2000); same.fromName = fromName || same.fromName; }
       same.deliveries = (Number(same.deliveries) || 1) + 1;
+      if (same.waitsHeld && same.waitsHeld.kept) { liftHeld(same); scheduleRetry(); }   // B-f276 1a: new words — the kept-only wait ends
       writeRetrySoon();
       log(`[deliver] ${cid}: another delivery for the ended conversation rides the wake it is already owed (${same.id}${same.inflight ? ', in the resume line' : ''})`);
       return { parked: true, id: same.id, merged: true, inLine: !!same.inflight };
@@ -944,8 +1068,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** The attempt's first rung: a conversation that runs again leaves its owed wake (the next turn carries the words); else the
    *  oldest owed entry goes to the line (twins merge into it — ONE wake per conversation), marked in flight while there. */
   function attemptEnded(cid) {
-    const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && !x.waitsReadopt);   // a wake that waits for the re-adoption runs at its settle (readoptSettled)
-    const waiting = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && x.waitsReadopt);   // …unless it runs again first (a person resumed it): then that is its answer too
+    const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && !x.waitsReadopt && !aside(x));   // a wake that waits for the re-adoption runs at its settle (readoptSettled); a held one (B-f276 1a) at the lift
+    const waiting = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && x.waitsReadopt && !aside(x));   // …unless it runs again first (a person resumed it): then that is its answer too
     if (!ends.length && !waiting.length) return;
     if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3; writeRetrySoon(); scheduleRetry(); return; }   // B-95fc U1: a held list ENDS NOTHING (bl-jobs: never «running» with nobody to carry it) — asked again after the read
     if (liveForWake(cid)) { for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
@@ -966,6 +1090,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if (r && r.outcome === 'again' && (e.agains = (Number(e.agains) || 0) + 1) < 3) { e.nextAt = clock.now(); writeRetryNow(); scheduleRetry(); return; }
         // the stores chain's two roads (主开发 02:59Z): refused ONLY because the boot's re-adoption of the machines' left-running conversations has
         // not settled — the wake STAYS OWED (kept on disk, marked), runs ONCE at the settle (readoptSettled), never on a timer; the row says so
+        // B-f276 1a: the line found NOTHING BUT KEPT entries (their reach cannot be judged now): the wake stays owed, set aside, and goes
+        // when the stash keeps none (or a new delivery brings words) — never ended «nothing is waiting» over entries that wait
+        if (r && r.outcome === 'held') { if (e.attempts.length && e.attempts[e.attempts.length - 1] && e.attempts[e.attempts.length - 1].phase === 'line') e.attempts.pop(); const hh = r.code === 'kept' ? null : heldWhy(e); setAside(e, r.why || 'every entry waiting for it is kept (its reach cannot be judged now)', clock.now(), r.code === 'kept' ? { kept: true } : hh && hh.by ? { by: hh.by } : {}); endedAnswers.delete(e.cid); writeRetryNow();   /* no refusal: the row keeps «{n} notices are waiting for it» — true */ stashChanged(e.cid); scheduleRetry(); return; }
         if (r && r.outcome === 'waits') { e.waitsReadopt = true; endedAnswers.set(e.cid, { outcome: 'waits', code: r.code || 'readopt-pending', why: r.why || null, until: null, at: clock.now() }); if (readoptDone) { delete e.waitsReadopt; e.nextAt = clock.now(); } writeRetryNow(); stashChanged(e.cid); scheduleRetry(); return; }
         endEnded(e, r && r.outcome === 'again' ? { outcome: 'failed', why: r.why } : r);
       });
@@ -1026,7 +1153,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (typeof wakePacer !== 'function') return { ok: true };
     if (force) {
       for (const e of entries) for (const sender of Array.isArray(e.senders) ? e.senders : []) {
-        try { const pacer = wakePacer(sender); if (pacer && typeof pacer.force === 'function') { pacer.force(cid); return { ok: true, forced: true, refund: (o) => { try { if (pacer.refund) pacer.refund(cid, o); } catch { } } }; } }
+        try { const pacer = wakePacer(sender); if (pacer && typeof pacer.force === 'function') { const fr = pacer.force(cid); if (fr && typeof fr === 'object' && fr.ok === false) return { ok: false, forceRefused: true, retryInMs: Number(fr.retryInMs) > 0 ? Number(fr.retryInMs) : HELD_STEP_MS, reason: String(fr.why || fr.reason || 'no reason given') };   /* B-f276 1a (the read's must 2): a force the pacer REFUSES is no force */ return { ok: true, forced: true, refund: (o) => { try { if (pacer.refund) pacer.refund(cid, o); } catch { } } }; } }
         catch (err) { log('[deliver] the wake pace could not stamp a wake past its bound (it goes anyway):', err && err.message); }
       }
       return { ok: true, forced: true };
@@ -1107,7 +1234,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const seen = new Map();
     let n = 0;
     for (const e of [...q]) {
-      if (!isOwed(e) || unready(e) || e.inflight || e.ho || e.maybeDelivered) continue;
+      if (!isOwed(e) || unready(e) || e.inflight || e.ho || e.maybeDelivered || aside(e)) continue;
       const k = `${e.producer}|${e.key}`;
       const first = seen.get(k);
       if (!first) { seen.set(k, e); continue; }
@@ -1207,20 +1334,21 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  fresh verdict for the frame — a refusal falls the frame's entries as a first attempt's would), then the post. */
   async function attemptRetry(cid, why) {
     if (retryClosed) return;   // shutting down: no new post leaves (the ones in flight are waited for)
+    asideHeld(cid);   // B-f276 1a: THE DOOR, before any road — a held wake is set aside (every road below passes over it)
     judgeRetries(cid);   // lane jobs-addressed-push r4: the turn end's and the timer's attempt ask each entry's producer first
     attemptEnded(cid);   // piece 7: a wake owed to an ENDED conversation goes to the resume line (or leaves: it runs again)
     // a producer that never came up in a whole hour of this process: nothing here can send it — said, like every owed entry's end (D4)
-    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && unready(x) && clock.now() - Math.max(Number(x.firstAt || 0), parkBootAt) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `nothing on this server can send it (its producer «${e.producer}» never came up)`, { expired: true });
-    for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });
+    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !aside(x) && unready(x) && clock.now() - Math.max(Number(x.firstAt || 0), parkBootAt) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `nothing on this server can send it (its producer «${e.producer}» never came up)`, { expired: true });
+    for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !aside(x) && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });
     // THE BOUND HOLDS AT EVERY ATTEMPT (verify r1 N5, reproduced: an entry two hours old at boot — a downtime — was posted and
     // billed): a parked entry past RETRY_MAX_MS from its first miss is not posted, at a boot, a late timer or a turn end
     // — but a wake WAITING for the re-adoption's settle (waitsReadopt) is outside the bound: it runs once at the settle, however long the store stays held
     repairClock();   // a future stamp never holds the bound off (verify r2)
-    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !isOwed(x) && !x.waitsReadopt && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's ${RETRY_MAX_MS / 60000} min bound passed ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min after the first miss (${e.attempts.length} attempt${e.attempts.length === 1 ? '' : 's'})`, { expired: true });
+    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !aside(x) && !isOwed(x) && !x.waitsReadopt && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's ${RETRY_MAX_MS / 60000} min bound passed ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min after the first miss (${e.attempts.length} attempt${e.attempts.length === 1 ? '' : 's'})`, { expired: true });
     // the second judge: the attempts themselves (a turn end attempts regardless of the backoff; a clock that lies cannot run them for ever)
-    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !isOwed(x) && x.attempts.length >= RETRY_MAX_ATTEMPTS)) fellRetry(e, 'not-reachable', `the agent did not accept the message in ${e.attempts.length} attempts (the schedule's ${RETRY_MAX_ATTEMPTS}-attempt bound) over ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min`, { expired: true });
+    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !aside(x) && !isOwed(x) && x.attempts.length >= RETRY_MAX_ATTEMPTS)) fellRetry(e, 'not-reachable', `the agent did not accept the message in ${e.attempts.length} attempts (the schedule's ${RETRY_MAX_ATTEMPTS}-attempt bound) over ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min`, { expired: true });
     foldOwedTwins(cid);
-    let all = (retry[cid] || []).filter((e) => e && !isEnded(e) && !e.inflight && !e.ho && !unready(e));
+    let all = (retry[cid] || []).filter((e) => e && !isEnded(e) && !e.inflight && !e.ho && !aside(e) && !unready(e));
     if (!all.length) return;
     const now = clock.now();
     const peer = peerMsg.findPeer(cid);
@@ -1248,7 +1376,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if (threw) { owedMiss([e], { reason: `its words could not be read: ${threw.message || threw}`, phase: 'render', why }); continue; }
         if (!w) retryTake(cid, [e], { via: 'prompt' });
         else if (w.fall) fellRetry(e, 'not-reachable', w.fall, w.fallDetail || {});
-        else if (w.wait) owedMiss([e], { reason: w.wait, phase: 'wait', why });
+        else if (w.wait) owedMiss([e], { reason: w.wait, phase: 'wait', why });   // B-f276 1a: a producer's HOLD is said by its held() hook alone (the door above), never by a render's answer
         else words.set(e, w);
       }
       all = all.filter((e) => !isOwed(e) || words.has(e));
@@ -1262,6 +1390,27 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         if (!p.ok) {
           const at = clock.now();
           const wait = Math.max(OWED_MIN_WAIT_MS, Number(p.retryInMs) || 0);
+          // B-f276 1a (the reads' must 2): A REFUSED FORCE IS NO FORCE, SAID ONCE — its first refusal is one attempt row, one write, one
+          // event and one line; while the pacer keeps refusing (its own file held), the wake is asked again at the pacer's own time (never
+          // past the longest step) in memory only: no row, no write, no event, no line, never clamped to the bound already passed, never a pace refusal
+          if (p.forceRefused) {
+            const first = all.filter((e) => !e.forceRefusedAt);
+            const step = Math.min(wait, RETRY_STEPS_MS[RETRY_STEPS_MS.length - 1]);   // never past the longest step: repairClock pulls a later stamp back (a write and a «the clock went back» line each time)
+            for (const e of all) e.nextAt = at + step;
+            if (first.length) {
+              for (const e of first) {
+                e.forceRefusedAt = at;
+                e.attempts.push({ at, reason: String(p.reason).slice(0, 200), phase: 'pace', busy: null, late: 0, why });
+                if (e.attempts.length > RETRY_MAX_ATTEMPTS) { const i = e.attempts.findIndex((a, n) => n > 0 && a && a.phase === 'pace'); if (i > 0) e.attempts.splice(i, 1); }
+              }
+              writeRetryNow();
+              stashChanged(cid);
+              for (const e of first) emitRetry('attempt', e.cid, e, { why: 'paced', nextAt: e.nextAt, attempts: e.attempts.length });
+              log(`[deliver] ${cid}: the frame of ${all.map((e) => e.id).join(', ')} (${all.filter(owedOverdue).length} past the hard bound) — the pacer refused the force (${String(p.reason).slice(0, 120)}): no post; asked again in ${Math.ceil(step / 1000)} s, said once`);
+            }
+            scheduleRetry();
+            return;
+          }
           let next = at + wait;
           for (const e of all) {
             e.attempts.push({ at, reason: String(p.reason).slice(0, 200), phase: 'pace', busy: null, late: 0, why });
@@ -1273,6 +1422,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           rescheduleMany(all, next, 'paced');
           return;
         }
+        for (const e of all) delete e.forceRefusedAt;   // B-f276 1a: a force granted ends the refusal's «said once»
         if (force) log(`[deliver] ${cid}: ${all.map((e) => e.id).join(', ')} reached the hard bound of a paced wake — it goes now, past the pace (the wake was asked for; only the spend gate may refuse it)`);
         grant = p;
       }
@@ -2057,6 +2207,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   // THE STASH AS AN OWED WAKE'S STORE (a channel receipt the pace held, sign-in off): the entry waits in the stash — its reach
   // gate, its clear, the prompt's drain and a hand-over all stand — and the park owes the ONE wake; the frame takes it out
   registerOwedWake('stash-wake', {
+    // B-f276 1a (the read's should): its receipt KEPT by the gate (its reach cannot be judged now) ⇒ held — set aside on every road (the
+    // not-running fall, the no-inbox miss, the bound), never only at the render; it goes once the gate hands the receipt over
+    held(cid, e) { const ref = e && e.meta && e.meta.ref; if (!ref || stashEntries(cid).some((x) => x && x.ref === ref)) return false; return (stash[cid] || []).some((x) => x && x.ref === ref && isKept(cid, x)); },
     render(cid, e) {
       const same = stashEntries(cid).filter((x) => x && e.meta && x.ref === e.meta.ref);
       const ent = same.find((x) => !x.ho);
@@ -2089,7 +2242,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
 
   return {
     deliverToConversation, peerReachable, liveForWake, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
-    stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
+    stashEntries, stashKeptCount, heldWhyOf, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
     // lane queued-is-not-woke (law 1): the wrapper's queue and turn edges, and a queued frame handed back — read off its records

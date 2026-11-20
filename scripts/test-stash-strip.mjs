@@ -1906,7 +1906,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // ── r4 controls ──
   // the cap over the WHOLE store (claimed or not): 30 arrivals mid-flight evict every claimed entry — delivered 0, no originals
   // (cdsrc is the ladder source read above)
-  const anchor15 = "    let over = q.filter((e) => !(e && e.ho)).length - STASH_CAP;";
+  const anchor15 = "    let over = q.filter((e) => !(e && e.ho) && !keptE(e)).length - STASH_CAP;";   // B-f276 1a: a kept entry is not the cap's
   if (!cdsrc.includes(anchor15)) throw new Error('mutation anchor missing: cap-all');
   const CapAll = MUT.load('src/server/conversation-deliver.js', cdsrc.replace(anchor15, "    let over = q.length - STASH_CAP; if (over > 0) return q.splice(0, over);"), 'cap-all');
   {
