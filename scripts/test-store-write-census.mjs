@@ -1703,6 +1703,32 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
       const x = await scene(mutantCopies('swc-da-hold-cut', REPO).load('src/server/device-alerts.js', anchored(DASRC, HOLD_A, '    /* MUTANT: the release — a failed read is the first run */\n', 'da-hold-cut'), 'da-hold-cut'), 'hold-cut', { lift: false });
       ok(!x.held0 && x.heldBytes.some((b) => b && b.seen && !b.seen['pair:dev-old:1']), 'CONTROL (the hold cut, in a copy — the release): the unreadable ledger starts EMPTY and the first filing hands that ledger to the writer, over the file — every alert it told is told again (red)', x);
     }
+    // (c) src/server/decision-engine.js — the month's journal tail (Settings › Spending's readout; 1 of the 23): A READ THAT CAN WAIT
+    // ON STORAGE IS NOT MADE ON THE MAIN THREAD — after the engine's start (whose day-counter rebuild keeps its read at the call: once,
+    // before any call can spend — B-a85f), a status opens NO byte of the journal on the loop; the month arrives off the loop.
+    {
+      const DESRC = readSrc('src/server/decision-engine.js');
+      const OFF_A = "      monthP = journalTailOffLoop()\n";
+      ok(DESRC.split(OFF_A).length === 2, 'control setup: the month\'s off-loop read is found once in decision-engine.js');
+      const scene = async (Mod, name) => {
+        const d = scratchDir('de-tail-' + name); roots.push(d);
+        const J = path.join(d, 'decision-journal.jsonl'); fs.writeFileSync(J, JSON.stringify({ at: Date.now(), usd: 0.25, outcome: 'ok', use: 'x' }) + '\n');
+        const { W } = recordingWriter();
+        let clock = Date.now();
+        const eng = Mod.create({ dataDir: d, log: { log() { }, warn() { } }, writer: W, now: () => clock });
+        await new Promise((r) => setTimeout(r, 30)); clock += 61000;   // past the start's own read and its 60 s memo: the next status refreshes
+        const os0 = fs.openSync; let syncOpens = 0;
+        fs.openSync = function (f, ...a) { if (String(f) === J) syncOpens++; return os0.call(this, f, ...a); };
+        let month = null;
+        try { for (let i = 0; i < 200 && !(month = eng.status().month); i++) await new Promise((r) => setTimeout(r, 10)); }
+        finally { fs.openSync = os0; }
+        return { syncOpens, usd: month ? month.usd : null };
+      };
+      const r = await scene(require(path.join(REPO, 'src/server/decision-engine.js')), 'real');
+      ok(r.syncOpens === 0 && r.usd === 0.25, '⑩c the month so far: a status opens NO byte of the journal on the loop — the figure (0.25) arrives from a read OFF the loop', r);
+      const x = await scene(mutantCopies('swc-de-tail', REPO).load('src/server/decision-engine.js', anchored(DESRC, OFF_A, "      monthP = Promise.resolve(journalTail())   // MUTANT: the release — the tail read at the call\n", 'de-sync-tail'), 'de-sync-tail'), 'sync-tail');
+      ok(x.syncOpens >= 1, 'CONTROL (the release\'s read, in a copy): a status reads the journal\'s 2 MB tail ON the loop (red)', x);
+    }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
 

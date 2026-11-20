@@ -388,14 +388,32 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
 
   /** lane decision-spend-readout: the month so far for Settings › Spending — Σ usd of the journal's rows this local month,
    *  read from a BOUNDED tail (≤ 2 MB: the journal itself is cut at 5 000 lines / 30 days) and kept 60 s. */
-  let monthMemo = { at: -Infinity, v: null };
-  function monthSoFar() {
-    if (now() - monthMemo.at < 60000) return monthMemo.v;
-    const rows = journalTail();
-    const v = M.monthSpend(rows, today().day.slice(0, 7), tzOffset);
-    monthMemo = { at: now(), v };
-    return v;
+  // lane lg-store-writes (主开发 2026-11-20 03:10Z — measured on the owner's hub after 2.369.412: this tail's synchronous read held
+  // the loop once, 1–3 s, the main thread asleep on the storage): A READ THAT CAN WAIT ON STORAGE IS NOT MADE ON THE MAIN THREAD.
+  // The status answers the month it holds (null until the first read — the readout says no figure, as for a journal not read yet)
+  // and refreshes it OFF the loop (fs.promises, the threadpool), one read at a time, 60 s apart; the engine starts that read at
+  // once, so the figure is there by the time a person opens Settings › Spending. The BOOT's rebuild of the day's counter keeps its
+  // own read at the call (journalTail, above): once, before any call can spend (B-a85f's money law).
+  let monthMemo = { at: -Infinity, v: null }, monthP = null;
+  async function journalTailOffLoop() {
+    let fh = null;
+    try {
+      fh = await fs.promises.open(F.journal, 'r');
+      const size = (await fh.stat()).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
+      await fh.read(buf, 0, n, size - n);
+      return buf.toString('utf8').split('\n').slice(n < size ? 1 : 0).map((l) => { try { return JSON.parse(l); } catch { return null; } });
+    } catch { return []; } finally { if (fh) await fh.close().catch(() => { }); }
   }
+  function monthSoFar() {
+    if (now() - monthMemo.at >= 60000 && !monthP) {
+      monthP = journalTailOffLoop()
+        .then((rows) => { monthMemo = { at: now(), v: M.monthSpend(rows, today().day.slice(0, 7), tzOffset) }; })
+        .catch((e) => { log?.warn?.(`[decision] the month's journal tail could not be read: ${(e && e.message) || e}`); })
+        .finally(() => { monthP = null; });
+    }
+    return monthMemo.v;
+  }
+  monthSoFar();   // the read starts with the engine (off the loop): the figure is there when a person first asks
 
   function status() {
     const s = settings();
