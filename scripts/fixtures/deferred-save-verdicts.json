@@ -1084,7 +1084,7 @@
   "key": "jobs · src/jobs.js · JobManager.retryOwed · _saveNotifs()",
   "verdict": "rides",
   "why": "the ladder's parked copy leaves msg-retry.json at the notices' landing (handing)",
-  "at": "src/server/conversation-deliver.js:    leaveParkWhenLanded(dropped, riders);",
+  "at": "src/server/conversation-deliver.js:if (riders.length) leaveParkWhenLanded([e], riders); else leaveNow.push(e);",
   "crash": "the park keeps its copy until the notices land",
   "readers": "none: the ladder drops its copy at the landing"
  },

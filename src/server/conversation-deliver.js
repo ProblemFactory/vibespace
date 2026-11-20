@@ -719,10 +719,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!dropped.length) return;
     log(`[deliver] ${cid}: ${dropped.length} parked entr${dropped.length === 1 ? 'y is' : 'ies are'} no longer owed (its producer's judge) — dropped: no post, no wake, no stash (${dropped.map((e) => `${e.producer} ${e.id}`).join('; ')})`);
     // the moved2 cure 2's hunt (3): a judge that HELD a copy as a line of its own store (the jobs store's `unknown`) — the park's
-    // copy leaves the file only on that store's landing; the others leave now
-    const riders = [];
-    for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); }   // r5: a judge that threw is said as such
-    leaveParkWhenLanded(dropped, riders);
+    // copy leaves the file only on that store's landing; the others leave now. B-54b7 (主开发 r576): EACH taken entry leaves at ITS OWN
+    // taker's landing, as the fall road's one (a batch's one shared countdown kept every copy of it in the file until its last rider ran:
+    // a cap's eviction freed nothing, and a boot during a hold grew the park); the untaken leave in one write
+    const leaveNow = [];
+    for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; const riders = []; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); if (riders.length) leaveParkWhenLanded([e], riders); else leaveNow.push(e); }   // r5: a judge that threw is said as such
+    if (leaveNow.length) leaveParkWhenLanded(leaveNow, []);
     stashChanged(cid);
   }
   /** how many parked notices a conversation's next hand-over would carry — a COUNT, never judged (the ended row's fact reads it on a GET) */
