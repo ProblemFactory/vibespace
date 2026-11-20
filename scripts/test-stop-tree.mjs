@@ -903,7 +903,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)
   const sv = await escScene(WRAP, 'esc-view-mut', { jobsMod: viewCut });
   ok(sv.after && sv.after.left && sv.after.left.outside >= 1 && sv.after.view && !sv.after.view.outside, 'CONTROL (the view without `outside`, in a copy): the run records it but the card\'s row never sees it — RED', sv.after);
-  const TS = "  let taskStop = !keeps && !!stopping;", SS = "    for (const p of escapedOf()) if (keeps || p[2]) termOnce(p);";
+  const TS = "  let taskStop = !keeps && !!stopping;", SS = "    for (const p of escapedOf()) if (keeps || p[2]) { if (termOnce(p) && !keeps) stopEsc.set(termKey(p), p); }";
   const relEsc = anchored(anchored(WRAP, TS, "  let taskStop = false;   // MUTANT: the release — a task's escapees are said, not stopped", 'b7ca1-taskstop-cut'), SS, "    if (keeps) for (const p of escapedOf()) termOnce(p);", 'b7ca1-stopstep-cut');   // stale-pins: kept (the control plants the release's text in a copy)
   const sx = await escScene(relEsc, 'esc-stop-mut');
   ok(sx.after && sx.after.alive && sx.after.left && sx.after.left.escaped >= 1 && !sx.after.left.outside, 'CONTROL (the release\'s wrapper, in a copy): the re-parented child is LEFT RUNNING — said «left its group — not stopped» — RED', sx.after);
