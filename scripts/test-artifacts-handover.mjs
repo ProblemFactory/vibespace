@@ -330,7 +330,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     const recs = await person, st1 = C.pagedReadStats();
     return { records: recs && recs.length, gone: st1.gone - st0.gone, oneShot: st1.oneShot - st0.oneShot, row: !!rows(s)[':' + CWD + '/beside/' + aid + '.md'] };
   };
-  const MP = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), "{ tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } }", "{ tailOnly: false, onFail: (w) => { why = w; } }", 'a helper read without its slot'), 'noslot');
+  const MP = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), "{ tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } }", /* stale-pins: kept — the control's PLANT (a helper read in the history slot), not a pin */ "{ tailOnly: false, onFail: (w) => { why = w; } }", 'a helper read without its slot'), 'noslot');
   const bOwn = await beside(REG, 'a10'), bShared = await beside(MP, 'a11');
   REG.configure({ activeSessions: () => new Map(), log: quiet }); // the copy's configure pointed the rebuild's helper seam at itself — the real one again
   ok(bOwn.records === 3000 && bOwn.gone === 0 && bOwn.oneShot === 0 && bOwn.row && bShared.gone >= 1 && bShared.row,
@@ -356,18 +356,23 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   for (const [aid, nm] of [['a14', 'one'], ['a15', 'two']]) helper(aid, 'toolu_B' + aid, 'Bounded ' + nm, { mb: 0.05, writes: [{ atMb: 0.01, file: CWD + '/bounded/' + nm + '.md' }] });
   const TB = [agentUse('toolu_Ba14', 'Bounded one', 74), ends('toolu_Ba14', 'a14', 75), agentUse('toolu_Ba15', 'Bounded two', 76), ends('toolu_Ba15', 'a15', 77)];
   const told = [], s0 = REG.helperReadStats();
+  fs.appendFileSync(FL, '\n'); // the 34.5 MB helper changed: its read (hundreds of ms in the worker) holds the one helper-read turn
+  const busy = liveOf(REG, 'BBusy', T7);
+  await new Promise((r) => setTimeout(r, 20)); // its read is in the turn now: the prefetch's two wait behind it
   REG.configure({ activeSessions: () => new Map(), log: { log: (m) => told.push(String(m)), warn() {} } });
-  REG._setHelperPrefetchMsForTest(0);
+  REG._setHelperPrefetchMsForTest(1);
   const RB1 = mk('BB1', { _normalizer: null, _artifacts: null });
   await N.rebuildHistory(RB1, 'BB1', TB);
-  REG._setHelperPrefetchMsForTest(2000);
+  REG._setHelperPrefetchMsForTest(60000); // the next open waits for what is left (a slow machine's long read never cuts this leg)
+  await busy;
   const RB2 = mk('BB2', { _normalizer: null, _artifacts: null });
   await N.rebuildHistory(RB2, 'BB2', TB);
+  REG._setHelperPrefetchMsForTest(2000);
   const s1 = REG.helperReadStats();
   REG.configure({ activeSessions: () => new Map(), log: quiet });
   const B1 = CWD + '/bounded/';
-  ok(!rows(RB1)[':' + B1 + 'one.md'] && !rows(RB1)[':' + B1 + 'two.md'] && s1.left - s0.left === 2 && told.some((m) => /the history opened before 2 of 2 helper transcripts were read/.test(m)) && rows(RB2)[':' + B1 + 'one.md'] && rows(RB2)[':' + B1 + 'two.md'] && s1.read - s0.read === 2,
-    'a rebuild whose prefetch wait is spent opens without the two helpers\' rows and SAYS it; their reads go on — the next open folds both, each file read once', { first: shape(rows(RB1)), second: shape(rows(RB2)), left: s1.left - s0.left, reads: s1.read - s0.read, told });
+  ok(!rows(RB1)[':' + B1 + 'one.md'] && !rows(RB1)[':' + B1 + 'two.md'] && s1.left - s0.left === 2 && told.some((m) => /the history opened before 2 of 2 helper transcripts were read/.test(m)) && rows(RB2)[':' + B1 + 'one.md'] && rows(RB2)[':' + B1 + 'two.md'] && s1.read - s0.read === 3,
+    'a rebuild whose prefetch wait is spent (behind a long helper read) opens without the two helpers\' rows and SAYS it; their reads go on — the next open folds both, each file read once (three reads with the long one)', { first: shape(rows(RB1)), second: shape(rows(RB2)), left: s1.left - s0.left, reads: s1.read - s0.read, told });
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
