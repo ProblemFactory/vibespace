@@ -977,7 +977,7 @@ class HostManager {
       const kr0 = h.deviceKeyRefused && typeof h.deviceKeyRefused === 'object' && (!h.deviceKeyRefused.road || h.deviceKeyRefused.road === 'dial') ? h.deviceKeyRefused : null;
       // …and above the connect before it (the reader's M1): a connect's stamp is the link's identity (the keep box's liveSince /
       // keepSince), so two connects never share one, even while a refusal's stamp stands above a clock that stepped back
-      d.lastConnectAt = Math.max(at, Number(d.lastAuthFail && d.lastAuthFail.at) || 0, Number(d.lastGreetingRefused && d.lastGreetingRefused.at) || 0, Number(kr0 && kr0.at) || 0, d.lastConnectAt ? Number(d.lastConnectAt) + 1 : 0); if (!d.firstConnectAt) d.firstConnectAt = at;
+      d.lastConnectAt = Math.max(at, Number(d.lastAuthFail && d.lastAuthFail.at) || 0, Number(d.lastGreetingRefused && d.lastGreetingRefused.at) || 0, Number(kr0 && kr0.at) || 0, (Number(d.lastConnectAt) || 0) + 1); if (!d.firstConnectAt) d.firstConnectAt = at;
       urgent = true;
     } else if (event === 'disconnected') {
       d.lastDisconnectAt = at;

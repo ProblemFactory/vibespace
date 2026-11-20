@@ -831,13 +831,13 @@ console.log('— THE ORDER THE HUB RECORDED (list line 144\'s cure): between a c
   const HSRC = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
   // THE PARENT'S CODE (7a260a506), in a copy: noteDial's connect and its two refusals stamped by the clock alone (noteDeviceKey's
   // dial road already stamped `max(now, lastConnectAt + 1)` there — so its key kind is red only in (d), the other direction)
-  let rel = anchored(HSRC, "      d.lastConnectAt = Math.max(at, Number(d.lastAuthFail && d.lastAuthFail.at) || 0, Number(d.lastGreetingRefused && d.lastGreetingRefused.at) || 0, Number(kr0 && kr0.at) || 0, d.lastConnectAt ? Number(d.lastConnectAt) + 1 : 0); if (!d.firstConnectAt) d.firstConnectAt = at;", "      d.lastConnectAt = at; if (!d.firstConnectAt) d.firstConnectAt = at;", 'order-connect');   // stale-pins: kept — the RED copy rebuilds the release's stamping on purpose
+  let rel = anchored(HSRC, "      d.lastConnectAt = Math.max(at, Number(d.lastAuthFail && d.lastAuthFail.at) || 0, Number(d.lastGreetingRefused && d.lastGreetingRefused.at) || 0, Number(kr0 && kr0.at) || 0, (Number(d.lastConnectAt) || 0) + 1); if (!d.firstConnectAt) d.firstConnectAt = at;", "      d.lastConnectAt = at; if (!d.firstConnectAt) d.firstConnectAt = at;", 'order-connect');   // stale-pins: kept — the RED copy rebuilds the release's stamping on purpose
   rel = anchored(rel, "      d.lastAuthFail = { at: Math.max(at, (Number(d.lastConnectAt) || 0) + 1) };", "      d.lastAuthFail = { at };", 'order-authfail');   // stale-pins: kept — the RED copy rebuilds the release's stamping on purpose
   rel = anchored(rel, "      d.lastGreetingRefused = { at: Math.max(at, (Number(d.lastConnectAt) || 0) + 1) };", "      d.lastGreetingRefused = { at };", 'order-greeting');   // stale-pins: kept — the RED copy rebuilds the release's stamping on purpose
   const MO = mutantCopies('dialorder', REPO);
   const REL = MO.load('src/hosts.js', rel, 'order-parent');
   // the cure WITHOUT the connect's own order (the reader's M1): a connect stamped only above the refusals
-  const NOSEQ = MO.load('src/hosts.js', anchored(HSRC, ", d.lastConnectAt ? Number(d.lastConnectAt) + 1 : 0); if (!d.firstConnectAt)", "); if (!d.firstConnectAt)", 'order-noseq'), 'order-noseq');
+  const NOSEQ = MO.load('src/hosts.js', anchored(HSRC, ", (Number(d.lastConnectAt) || 0) + 1); if (!d.firstConnectAt)", "); if (!d.firstConnectAt)", 'order-noseq'), 'order-noseq');
   const CUR = require('../src/hosts.js');
   const T = 1795150000000;
   let n = 0;
@@ -870,7 +870,7 @@ console.log('— THE ORDER THE HUB RECORDED (list line 144\'s cure): between a c
     return { c1, c2, row: DFo.dialRowState({ ...hm.list().find((x) => x.deviceId === 'devO'), online: true }).state }; };
   const idCur = ids(CUR), idNo = ids(NOSEQ);
   ok(idCur.c2 > idCur.c1 && idCur.c1 >= T + 100 && idCur.row === 'connected', 'two connects with no refusal between them never share a stamp (the link\'s identity), even while a refusal stamped above the stepped-back clock stands — both read connected', idCur);
-  ok(idNo.c2 === idNo.c1, 'CONTROL (the cure without the connect\'s own order, in a copy): the two connects share one stamp — a second device would pass for the first at the keep box (RED)', idNo);
+  ok(idNo.c2 === idNo.c1 && idNo.c1 >= T + 100, 'CONTROL (the cure without the connect\'s own order, in a copy): the two connects share one stamp — a second device would pass for the first at the keep box (RED)', idNo);
   for (const x of copiesCensus(MO.files, MO.dir, REPO, { minCopies: 1, label: 'mutant-copy (order): ' })) ok(x.pass, x.name, x.detail);
 }
 
