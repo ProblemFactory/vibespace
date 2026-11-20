@@ -338,7 +338,7 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
     const app = { wm: { windows: wins }, sessions: new Map([['win-1', { sessionId: 'sid-1' }], ['win-2', { sessionId: 'sid-2' }], ['win-3', { sessionId: 'sid-3' }], ['win-6', { sessionId: 'sid-6' }]]), desktopManager: { activeDesktopId: 'd-1' } };
     const run = (src, { target = null, under = null, stack = [], open = [] } = {}) => new vm.Script(src).runInNewContext({ app, getComputedStyle, innerWidth: 1280, innerHeight: 820, window: {}, THE_EL: target,
       document: { body, visibilityState: 'visible', hasFocus: () => true, querySelector: () => null, querySelectorAll: () => open, elementFromPoint: () => under, elementsFromPoint: (x, y) => (typeof stack === 'function' ? stack(x, y) : stack) } });
-    return { run, corner, ws, b1, b2, b3, b6, c1, c6, all1, vis, item, pop, toast };
+    return { run, mk, main, corner, ws, b1, b2, b3, b6, c1, c6, all1, vis, item, pop, toast };
   };
   const W8 = world();
   const M = (target, under, o = {}) => W8.run(realClickMeasureSource('(THE_EL)', o), { target, under });
@@ -387,6 +387,19 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
     && bw[1 + B.windows] === `${15 - B.windows} more window(s)` && bw[bw.length - 1] === `open over the page: ${Array.from({ length: B.open }, (_, i) => el(i)).join(' · ')} · ${20 - B.open} more`
     && /«T{79}…»/.test(lostWords({ laid: false, size: '0×0', hiddenBy: null, win: { id: 'w', type: 'chat', title: longT, onShow: true, why: [] } })),
     `a scene's words are BOUNDED: a title at ${B.title} characters (the cut said «…»), ${B.windows} windows, ${B.over} elements over one, ${B.open} open things — the rest counted, never printed (the door's own sentence too)`, bw.map((l) => l.length));
+  // …counted from the PAGE's own counts (the follow-up read's should: the page lists at most 40 open things and 12 over a window, and
+  // says how many there were), each named element cut at its own bound, no whole-line cut that could eat a «more»
+  const counted = sceneWords({ page: 'visible', size: '1280×820', desktop: null, open: ['x'.repeat(300), ...Array.from({ length: 39 }, (_, i) => el(i))], openCount: 100,
+    windows: [{ id: 'w', type: 'chat', title: 't', onShow: true, box: '[0,0 1×1]', why: [], over: Array.from({ length: 12 }, (_, j) => el(j)), overCount: 30 }] });
+  const openLine = counted[counted.length - 1];
+  ok(openLine.startsWith('open over the page: ' + 'x'.repeat(B.item - 1) + '… · ') && openLine.endsWith(' · 94 more') && counted[1].endsWith(`${el(3)} · 26 more`),
+    `«N more» is the page's own count (100 open, 40 listed ⇒ «94 more»; 30 over a window, 12 listed ⇒ «26 more»); each element cut at ${B.item} characters`, counted);
+  // the read's should: the PAGE half counts what it stops listing (15 distinct elements over win-1, 12 listed; 45 open things, 40 listed)
+  const many = (n, tag) => Array.from({ length: n }, (_, i) => W8.mk('div', { cls: tag + i, rect: [10 * i, 0, 10, 10], parent: W8.main }));
+  const fifteen = many(15, 'f'), fortyFive = many(45, 'o');
+  const sc2 = W8.run(pageSceneSource(), { stack: (x) => (x < 800 ? [...fifteen, W8.c1] : [W8.c6]), open: fortyFive }), sw2 = sceneWords(sc2);
+  ok(sc2.windows[0].overCount === 15 && sc2.windows[0].over.length === 12 && sc2.openCount === 45 && sc2.open.length === 40 && sw2[1].endsWith('· 11 more') && sw2[sw2.length - 1].endsWith('· 39 more'),
+    'the PAGE half counts what it stops listing — 15 over a window (12 listed), 45 open things (40 listed) — and the words say «11 more», «39 more»', { over: [sc2.windows[0].overCount, sc2.windows[0].over.length], open: [sc2.openCount, sc2.open.length] });
   ok(sceneWords({ error: 'x' })[0] === '(the page could not be read: x)' && W8.run(pageSceneSource(), { stack: [], open: [] }).windows.length === 5, 'a page that cannot be read says so; the scene reads the window manager\'s windows');
 }
 {

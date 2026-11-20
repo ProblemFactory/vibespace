@@ -128,7 +128,8 @@ process.stdin.on('end', () => process.exit(0));
      *  The toast `uncover` clears is never one that holds the target (an Undo).
      *  A press NOT made is KEPT, said by the door (lane bl-tests-e, the .413 facts unit): `realClick.lastGiveUp` = { sel, tries, ms,
      *  made (a press made that MISSED), why (the door's last words), front (the door brought the page to the front), scene (the page
-     *  as it stood at the call's FIRST miss, after that try's own uncover and front — scratch.mjs pageSceneSource) }, null after
+     *  as it stood at the call's FIRST miss, after that try's own uncover and front — scratch.mjs pageSceneSource; null for «no such
+     *  element», { error } when not read within the call's budget) }, null after
      *  a press that was made; nothing is printed here (a suite prints it at its first red leg — `scene(names)` reads the page now). */
     const SETTLE_MS = 4000, SCENE_MS = 1000;
     const RC = realClicker({ evalJs, cdp });
@@ -144,9 +145,11 @@ process.stdin.on('end', () => process.exit(0));
         const miss = RC.lastMiss;
         // the page as it stood at this call's FIRST miss (read only) — never for «no such element» (nothing to place: a caller that polls
         // until an element appears pays nothing), and bounded: SCENE_MS or what is left of the call's budget, whichever is less
-        if (!firstMiss && miss !== null) { const left = Math.min(SCENE_MS, ms - (Date.now() - t0)); if (left > 0) firstMiss = await Promise.race([scene(), sleep(left).then(() => ({ error: `the page did not answer in ${left} ms` }))]); }
+        // (a read that loses the race still runs in the page, before the next try's measure — the page cannot be told to stop it)
+        const leftPage = miss === null && RC.reaimed && RC.reaimed.to === null;   // it WAS there at the measure and left the page before the press
+        if (!firstMiss && (miss !== null || leftPage)) { const left = Math.min(SCENE_MS, ms - (Date.now() - t0)); firstMiss = left > 0 ? await Promise.race([scene(), sleep(left).then(() => ({ error: `not read within the ${left} ms the call had left` }))]) : { error: 'the call\'s budget was spent before the page could be read' }; }
         if (RC.landed || miss === null || /never held still/.test((miss && miss.why) || '') || Date.now() - t0 > ms) {
-          realClick.lastGiveUp = { sel: String(sel), tries, ms: Date.now() - t0, made: !!RC.landed, why: miss === null ? 'no such element on the page' : (miss && miss.why) || 'no reason given', front, scene: firstMiss };
+          realClick.lastGiveUp = { sel: String(sel), tries, ms: Date.now() - t0, made: !!RC.landed, why: miss === null ? (RC.reaimed && RC.reaimed.to === null ? 'it left the page between the measure and the press (the one re-aim found nothing)' : 'no such element on the page') : (miss && miss.why) || 'no reason given', front, scene: firstMiss };
           return false;
         }
       }

@@ -57,7 +57,16 @@ const sayFirstRed = async (leg) => {
     console.log(lines.map((l) => '    ' + l).join('\n'));
   } catch (x) { console.log(`    [the first red leg on page P: ${leg}] — the page could not be read: ${(x && x.message) || x}`); }
 };
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); if (!firstRedSaid && PAGE) firstRedSaid = sayFirstRed(n); } };
+// …and EVERY later red press leg on P says the door's own words for its press (the facts run of 65ba040a3 placed the first five red
+// legs from the first red's print; the machine row's two presses after them said nothing — a first measure's miss is silent)
+const sayRedPress = (leg) => {
+  try {
+    const g = PAGE && PAGE.realClick.lastGiveUp; if (!g) return;
+    const lines = [`[a red press on page P: ${leg}] the press ${g.made ? 'MADE AND MISSED' : 'NOT made'}: ${g.sel.length > 200 ? g.sel.slice(0, 200) + '…' : g.sel}`, `  ${g.tries} tries in ${g.ms} ms${g.front ? ' — the door brought P to the front for it' : ''} — ${g.why}`, ...sceneWords(g.scene).map((l) => `  at its first miss: ${l}`)];
+    console.log(lines.map((l) => '    ' + l).join('\n'));
+  } catch (x) { console.log(`    [a red press on page P: ${leg}] — its words could not be printed: ${(x && x.message) || x}`); }
+};
+const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); if (!firstRedSaid && PAGE) firstRedSaid = sayFirstRed(n); else if (PAGE && /(^|: )a real click/i.test(n)) sayRedPress(n); } };
 // ── THE F4 CONTROL'S PRE-FIX WINDOW, DERIVED (lane mirror-330-reds — the .330 mirror red: the control replaced the whole
 //    `const isCmd = …;` line by its literal text, and int330 put vault-run-ask beside exit-run-ask, so the patch stopped
 //    applying and the control could not build its red). Now the kind under test leaves the verbatim-command list WHEREVER
@@ -499,6 +508,32 @@ try {
   {
     const w5 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { run: { mode: 'everyone', ask: false } });
     ok(w5.status === 200, 'commands → everyone, no ask (this leg\'s world)');
+    // THE PAGE STATE ⑤ RUNS IN, STATED (lane bl-tests-e — the facts run of 65ba040a3 placed its five first red legs: «NOT LAID OUT (0×0) —
+    // hidden by div.chat-exit-run (display: none) — in window … conversation 2 …, on show: yes»). Inside its machine's group a Machines
+    // card is ONE line (lane machine-card-compact, 2.369.207: public/chat.css «.chat-machine-compact:not(.chat-mline-open) > … display:
+    // none»; src/lib/chat-run-summary.js machineCompact = two cards or more); the run's detail is drawn only once THAT line is open. The
+    // legs below pressed inside cards whose line they never opened, and they were green only on a page nobody looked at: P sat behind P2
+    // since P2 was brought to the front before ④ (lane dialog-yield, «as the suite ran before the census»), a hidden page runs no animation frame, and a new card is
+    // folded on one (src/lib/chat-view.js: a tail append folds by requestAnimationFrame) — the cards were drawn whole. Since the one click
+    // door brings a hidden page forward (its line says so), the fold runs. Here P is brought to the front ON PURPOSE, said, and each card
+    // is opened the way a person opens it: a real click on its line, the leg saying the line opened — then the legs as they were.
+    await P.cdp('Page.bringToFront');
+    ok(await P.waitFor(`document.visibilityState === 'visible'`, 3000), 'page P is IN FRONT for ⑤ — brought forward on purpose by the suite (a person looks at it)');
+    // A card can be hidden TWICE: a Machines card that exited 0 is a member of its chat RUN, and a closed run draws none of its members
+    // (src/lib/chat-view.js _setRunOpen: chat-run-collapsed, display: none) — a person opens the run first, by its header. Each state is
+    // read and said; nothing rests on the order of the cards (opening one card's line happens to open its run: _setPeerOpen)
+    const openLine = async (card, what) => {
+      const cls = async () => P.evalJs(`(() => { const c = ${card}; return c ? { cls: c.className, rects: c.getClientRects().length } : null; })()`);
+      ok(await P.waitFor(`(() => { const c = ${card}; return !!c && c.classList.contains('chat-machine-compact') && !c.classList.contains('chat-mline-open'); })()`, 5000), `${what}: the card is ONE line in its machine's group (lane machine-card-compact), its detail closed`, await cls());
+      if (await P.evalJs(`(() => { const c = ${card}; return !!c && c.classList.contains('chat-run-collapsed'); })()`)) {
+        const header = `(() => { const c = ${card}; let h = c && c.previousElementSibling; while (h && !(h.classList && h.classList.contains('chat-run-header'))) h = h.previousElementSibling; return h || null; })()`;
+        ok(await P.realClick(header), `${what}: its chat run is CLOSED (the card not drawn) — a real click on the run's header`);
+        ok(await P.waitFor(`(() => { const c = ${card}; return !!c && !c.classList.contains('chat-run-collapsed'); })()`, 3000), `${what}: …the run OPENED`, await cls());
+      }
+      ok(await P.waitFor(`(() => { const c = ${card}; return !!c && c.getClientRects().length > 0; })()`, 3000), `${what}: the card's line is DRAWN (its run open, or none)`, await cls());
+      ok(await P.realClick(`(() => { const c = ${card}; return c ? c.querySelector(':scope > .chat-mline') : null; })()`), `${what}: a real click on the card's line`);
+      ok(await P.waitFor(`(() => { const c = ${card}; const r = c && c.querySelector(':scope > .chat-exit-run'); return !!c && c.classList.contains('chat-mline-open') && !!r && r.getClientRects().length > 0; })()`, 3000), `${what}: …the line OPENED — this call's detail is drawn under it`);
+    };
     const r5 = await runApi(S[1].token, 'echo out-line; echo ERR-LINE-1 1>&2; echo ERR-LINE-2 1>&2; exit 3');
     ok(r5.status === 200 && r5.j.code === 3 && /ERR-LINE-1/.test(r5.j.stderr) && r5.j.interpreter === 'sh' && r5.j.platform === process.platform, 'the REAL daemon ran it as {shell} through sh -lc: exit 3, both streams, interpreter sh, the platform stated', r5.j);
     const cardSel = `[...document.querySelectorAll('.chat-vs-notice')].find((c) => /exit 3/.test(c.textContent) && c.querySelector('.chat-exit-out'))`;
@@ -506,6 +541,7 @@ try {
     const nCards = await P.evalJs(`document.querySelectorAll('.chat-vs-notice').length`);
     const c5 = await P.evalJs(`(() => { const c = ${cardSel}; const pre = c.querySelector('.chat-exit-out'); const det = c.querySelector('.chat-exit-out-full'); return { head: c.querySelector('.chat-text')?.textContent || '', preview: pre.textContent, stream: pre.dataset.stream, mono: getComputedStyle(pre).fontFamily, summary: det && det.querySelector('summary').textContent, open: det && det.open, full: det ? [...det.querySelectorAll('.chat-exit-out-all')].map((p) => p.textContent) : [] }; })()`);
     ok(/^在 exmac 上运行了一条命令 — 退出码 3 · \d+\.\d s$/.test(c5.head) && c5.preview === 'ERR-LINE-1\nERR-LINE-2' && c5.stream === 'stderr' && /mono/i.test(c5.mono) && c5.summary === '显示输出' && c5.open === false && c5.full.join('|') === 'out-line\n|ERR-LINE-1\nERR-LINE-2\n', 'E3: the exit line, stderr\'s lines in mono under it, 显示输出 (closed) holding both stored heads whole', c5);
+    await openLine(cardSel, 'the exit-3 card');
     ok(await P.realClick(`(() => { const c = ${cardSel}; return c.querySelector('.chat-exit-out-full > summary'); })()`), 'a real click on 显示输出');
     const t5 = await P.evalJs(`(() => { const c = ${cardSel}; return { open: c.querySelector('.chat-exit-out-full').open, n: document.querySelectorAll('.chat-vs-notice').length, stdoutShown: !!c.querySelector('.chat-exit-out-all')?.getClientRects().length }; })()`);
     ok(t5.open === true && t5.n === nCards && t5.stdoutShown, 'the expander opens IN PLACE: the same card (no second card, none re-created), the stored stdout visible', t5);
@@ -550,6 +586,7 @@ try {
     ok(r7.status === 200 && r7.j.code === 0, 'a run whose first line is 3 000 characters');
     const longSel = `[...document.querySelectorAll('.chat-vs-notice .chat-exit-out')].find((p) => p.textContent.startsWith('xxxxxxxx'))`;
     ok(await P.waitFor(`!!${longSel}`, 8000), 'its card carries the preview');
+    await openLine(`(${longSel})?.closest('.chat-vs-notice')`, 'the 3 000-character run\'s card');
     const g7 = await P.evalJs(`(() => { const p = ${longSel}; const cs = getComputedStyle(p); return { h: p.offsetHeight, sh: p.scrollHeight, maxH: cs.maxHeight, ov: cs.overflowY }; })()`);
     ok(g7.h <= 170 && g7.sh > g7.h && g7.maxH === '160px' && g7.ov === 'auto', 'the preview is bounded at 160 px and scrolls (pre-fix: the card grew by the wrapped line)', g7);
     const r8 = await runApi(S[1].token, 'yes "" | head -c 5000');
@@ -578,6 +615,7 @@ try {
       return { vw: innerWidth, text: p.textContent, shown: p.checkVisibility(), w: p.clientWidth, sw: p.scrollWidth, summary: sum ? sum.textContent : null, len: det?.querySelector('.chat-exit-cmd-len')?.textContent || '', open: !!(det && det.open), last: !!det && det.parentElement.lastElementChild === det,
         titled: !!(p.title || (det && det.title) || (sum && sum.title)), outW: out ? out.clientWidth : -1, outSW: out ? out.scrollWidth : -1, words: p.closest('.chat-vs-notice')?.querySelector(':scope > .chat-text')?.textContent || '' }; })()`);
     ok(await P.waitFor(`!!${cmdOf('echo QQQ')} && !!${cmdOf('echo line-0')}`, 8000), 'both cards carry the command block');
+    await openLine(`${cmdOf('echo QQQ')}?.closest('.chat-vs-notice')`, 'the 1 370-character command\'s card');
     const a10 = await geo('echo QQQ');
     ok(a10 && a10.vw === 390 && /^在 \S+ 上运行了一条命令 — 退出码 0 · \d+\.\d s$/.test(a10.words) && !a10.shown && !a10.open && a10.summary === '技术细节' && a10.last && a10.outSW <= a10.outW + 1 && !a10.titled, 'at 390 px the card says 在 <machine> 上运行了一条命令 — 退出码 0 · …; the 1 370-character command is folded away under ONE closed 技术细节 after the output; its 1 365-byte output line wraps; no hover title', a10);
     ok(await P.realClick(`(${cmdOf('echo QQQ')}?.closest('details.chat-exit-tech')?.querySelector(':scope > summary') || null)`), 'a real click on 技术细节');
