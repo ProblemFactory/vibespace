@@ -15,7 +15,8 @@ import { rowToPick, pickToRow, exceptSaved } from './principal-picker-model.js';
 
 /**
  * THE TASK GROUP WINDOW (lane task-group-context — the POC v2.2 Group board + the owner's fourth level, 2026-10-23).
- * Tabs 设置 · Backlog (N) · 活动记录 · 成员 (N). 设置, top to bottom: 名称 → 说明 / 常驻指令 (told word for word to every
+ * Tabs 设置 · Backlog (N) · 活动记录 · 成员 (N). 设置, top to bottom: 名称 → 父组 (the groups this one inherits from — «No parent
+ * group» and the add link when there is none; lane lg-group-parents U5a) → 说明 / 常驻指令 (told word for word to every
  * member — the ONE home of the group's rules) → the CONTEXT TABLE (path · note · 告诉 agent in four levels · verbs · ×;
  * ＋ 添加路径… / ＋ 引用另一个任务组…; the budget bar) → 「新对话会收到」 (the renderer's EXACT output, GET
  * /api/tasks/:id/context — never an imitation) → 更多选项 (通知 · 对外可见性 · 浏览器档案 · 颜色 · 导出/导入, their
