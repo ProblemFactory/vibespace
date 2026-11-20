@@ -14636,4 +14636,8 @@ export default {
   "allowed by you, {when}": "由你允许，{when}",
   "it may run prompts still queued for it by itself — resume it yourself": "它可能会自行运行仍在排队的提示——请你自己恢复它",
   "what its resume starts by itself is not known — resume it yourself": "不知道它恢复时会自行开始什么——请你自己恢复它",
+  "what you changed while it was saving": "你在保存期间做的改动",
+  "The vault is locked — who may use it could not be read just now; this shows it as last read": "保险库已锁定——暂时读不到谁可以用；这里显示的是上次读到的",
+  "Who may use it could not be read just now — this shows it as last read": "暂时读不到谁可以用——这里显示的是上次读到的",
+  "«{name}» was removed from the vault": "「{name}」已从保险库中移除",
 };

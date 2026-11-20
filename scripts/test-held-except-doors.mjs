@@ -43,6 +43,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
+import { anchored } from './scratch.mjs';   // B-0d3e: THE ONE DOOR for a red control's edit (㉖, ㉗)
 const REPO = path.resolve(process.env.REPO || new URL('..', import.meta.url).pathname);
 const require = createRequire(path.join(REPO, 'package.json'));
 const esbuild = require('esbuild');
@@ -151,7 +152,7 @@ globalThis.__hx = {
   fetchJson: (u, o) => PAGE.cur.fetch(String(u), o || {}),
   api: (u, o) => PAGE.cur.fetch(String(u), o || {}),
   showToast: (m) => { PAGE.cur.toasts.push(String(m)); },
-  createModalShell: (o) => { const P = PAGE.cur; const dialog = new FakeEl('div'), body = new FakeEl('div'); dialog.appendChild(body); P.shell = { dialog, body, opts: o }; return { dialog, body, overlay: dialog, close: () => { P.closed++; try { o && o.onClose && o.onClose(); } catch { } }, raised: false, ready: Promise.resolve(true) }; },
+  createModalShell: (o) => { const P = PAGE.cur; const dialog = new FakeEl('div'), body = new FakeEl('div'); dialog.appendChild(body); P.shell = { dialog, body, opts: o }; const close = () => { P.closed++; try { o && o.onClose && o.onClose(); } catch { } }; return { dialog, body, overlay: dialog, close, dismiss: () => { if (o && o.unsaved && typeof o.unsaved.isDirty === 'function' && o.unsaved.isDirty()) { P.asks++; return; } close(); }, raised: false, ready: Promise.resolve(true) }; },   // B-f212: `dismiss` = the shell's guard (a dirty dialog asks — counted —, a clean one closes)
   picker: (o) => PAGE.cur.picker(o),
   roster: (app, opts = {}) => PAGE.cur.rosterRows.filter((r) => opts.groups !== false || r.kind !== 'group'),
 };
@@ -161,14 +162,14 @@ function newPage({ routes, roster = [] }) {
   const starve = Number(process.env.HX_STARVE_MS || 0);   // r11 CONTROL: a starved loop (a slow runner) — each page busy-waits this long
   if (starve > 0) { const t0 = Date.now(); while (Date.now() - t0 < starve) { /* the loop held, as on a loaded runner */ } }
   disposePage(PAGE.cur);
-  const P = { posts: [], toasts: [], closed: 0, shell: null, pickers: [], rosterRows: roster, timers: new Set(), inflight: 0 };
+  const P = { posts: [], toasts: [], closed: 0, asks: 0, shell: null, pickers: [], rosterRows: roster, timers: new Set(), inflight: 0 };
   P.fetch = async (url, o) => { P.inflight++; try { let body = {}; try { body = o && o.body ? JSON.parse(o.body) : {}; } catch { body = {}; } const method = (o && o.method) || 'GET'; if (method !== 'GET') P.posts.push({ url, method, body }); const r = await routes(url, method, body); return JSON.parse(J(r === undefined ? { error: 'no route', code: 'not-found' } : r)); } finally { P.inflight--; } };
   P.picker = (o) => {
     const raw = () => (typeof o.items === 'function' ? o.items() : o.items) || [];
     const allRow = o.everyone && typeof o.everyone === 'object' ? PM.everyoneRow({ key: o.everyone.key || 'everyone:*', name: 'All agents' }) : null;
     const source = () => { const r = raw(); return allRow && !r.some((x) => x && PM.isEveryone(x)) ? [allRow, ...r] : r; };
     const extra = () => { const e = o.except && o.except.extra; return (typeof e === 'function' ? e() : e) || []; };
-    const st = { sel: (o.selected || []).map(String), ex: ((o.except && o.except.selected) || []).map(String) };
+    const st = { sel: (o.selected || []).map(String), ex: ((o.except && o.except.selected) || []).map(String), only: ((o.only && o.only.keys) || []).map(String) };
     const known = new Map();
     const note = () => { for (const r of [...source(), ...extra()]) if (r && r.key != null && !known.has(String(r.key))) known.set(String(r.key), r); };
     note();
@@ -182,11 +183,15 @@ function newPage({ routes, roster = [] }) {
       except: (o = {}) => (o && o.nobody ? (Array.isArray(o.held) ? o.held.map(String) : []) : PM.exceptSaved(source(), st.sel, st.ex, o)),   // THE real picker's answer (src/lib/principal-picker.js api.except; r4: «Nobody» — the held ones)
       setNobody() { },
       setExcept: (keys) => { st.ex = (keys || []).map(String); },
+      // lane lg-group-parents U5b's «仅本组» (B-f212 r513): the real picker's answer — null when the door does not offer the switch
+      onlyKeys: () => (o.only ? st.sel.filter((k) => st.only.includes(k)) : null),
+      setOnly: (keys) => { if (o.only) st.only = (keys || []).map(String).filter((k) => st.sel.includes(k)); },
       knownRows: () => { note(); return [...known.values()]; },
       nameOf: (k) => (known.get(k) || {}).name || k,
       focus() { }, setBusy() { }, close() { },
       // the test's hands: a pick (a member picked itself leaves the 除了 — the real picker's syncExcept), a chip's ✕ in «除了»
       pick: (keys) => { st.sel = keys.map(String); st.ex = st.ex.filter((k) => !st.sel.includes(k)); note(); fire(); },
+      flipOnly: (k) => { if (!o.only) return; st.only = st.only.includes(k) ? st.only.filter((x) => x !== k) : [...st.only, k]; fire(); },   // a group chip's «仅本组» switch
       unexcept: (k) => { st.ex = st.ex.filter((x) => x !== k); if (o.except && typeof o.except.onChange === 'function') o.except.onChange(PM.exceptSaved(source(), st.sel, st.ex)); fire(); },
     };
     P.pickers.push(api);
@@ -1536,7 +1541,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     await esbuild.build({ stdin: { contents: `export { showUseGrantDialog } from ${J(file)};`, resolveDir: lib, loader: 'js' }, bundle: true, format: 'esm', platform: 'neutral', mainFields: ['module', 'main'], outfile: out, plugins: [stubs], logLevel: 'silent' });
     return (await import(pathToFileURL(out).href)).showUseGrantDialog;
   }
-  const swap = (from, to) => (src) => { const n = src.split(from).length - 1; if (n !== 1) throw new Error(`B-f212 RED anchor ${n ? 'not unique' : 'missing'} (${n}×): ${from.slice(0, 60)}`); return src.replace(from, to); };   // r13 (rule (b)): exactly once
+  const swap = (from, to) => (src) => anchored(src, from, to, 'B-f212 ㉖ RED');   // r13 (rule (b)): exactly once — through THE one door (scripts/scratch.mjs anchored: «ANCHOR GONE» / «ANCHOR NOT UNIQUE» by name)
   const VU_APP = { sidebar: { _webuiSessions: [['cid-ada', 'Ada'], ['cid-cee', 'Cee']].map(([id, name]) => ({ id: `w-${id}`, backendSessionId: id, name })), _tasks: [], _getSessionTaskGroups: () => [], getCustomName: () => '', _allSessions: [] } };
   const ENTRY = 'local:api-key#password';
   const sweepRoutes = (calls) => async (url, method, body) => {
@@ -1566,7 +1571,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ok(a.first.posts === 1 && !(a.first.picked || []).some((k) => k.includes('cid-cee')) && (a.first.picked || []).some((k) => k.includes('cid-ada')) && /policy was not/.test(a.first.err),
     '(a) the row lands with Cee SWEPT (the policy half refused, the dialog open): the picker holds the hub\'s row — Ada, no Cee', a.first);
   ok(a.posts === 1 && !/Name the hosts/.test(a.err), '(b) …so the repeated Save posts NO row again and asks nobody\'s hosts (only the policy is tried again)', { posts: a.posts, err: a.err });
-  const r1 = await drive(await bundleVU(swap("    if (lu) picker.setSelected(rowToPick({ to: snap.to, except: [] }, picker.knownRows(), pickWords()).selected);\n", '')), { members: [ada, cee] });
+  const r1 = await drive(await bundleVU(swap('return { selected: pk.selected, except: pk.except,', 'return { selected: prev.selected, except: pk.except,')), { members: [ada, cee] });   // the landing law's rowFields: the landed row's members ignored (the pick as pressed)
   ok((r1.first.picked || []).some((k) => k.includes('cid-cee')) && /Name the hosts (?:Cee|cid-cee) may use it for/.test(r1.err), '(c) RED — the swept member left in the picker (r11\'s shape): the repeated Save asks «Name the hosts Cee may use it for»', { picked: r1.first.picked, err: r1.err });
   const b = await drive(real, { members: [ada], end: '8h' });
   ok(b.first.posts === 1 && b.posts === 1 && b.untils[0].length === 1 && b.untils[0][0] >= b.pressAt + 8 * 3600e3 && b.untils[0][0] <= Date.now() + 8 * 3600e3, '(d) «8 hours» chosen: 8 hours from the PRESS, posted ONCE — the repeated Save is the same row (its ends count from the first landed Save), never re-posted', b);
@@ -1594,12 +1599,12 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ok(f.posts >= 2 && f.untils[1].length === 1 && f.untils[1][0] >= f.press2 + 30 * 86400e3, '(f) r13: another end chosen after the row landed ⇒ the row posts again with «30 days» counted from THAT press (not from the first landing)', f);
   ok(f.posts === 2, '(g) r13: …and the next repeated Save posts nothing (the landing moved the pin)', { posts: f.posts });
   const pinFrom = '    if (endPin != null && !p.error && p.changed && inputsOf() !== landedInputs) { saveAt = Date.now(); p = planOf(); }\n';
-  const pinMove = 'landedRow(r, pick.except, polWas); endPin = at; landedInputs = edited ? inputs0 : inputsOf(); previewNow(); }';
+  const pinMove = 'landRow(r, base); endPin = at; landedInputs = inputsKeyOf(clean); previewNow(); }';
   const srcVU = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
   ok(srcVU.split(pinFrom).length === 2 && srcVU.split(pinMove).length === 2, 'the RED controls\' plants are where they claim: the changed Save\'s own instant, and the landing that moves the pin — each once', { from: srcVU.split(pinFrom).length - 1, move: srcVU.split(pinMove).length - 1 });
   const rf = await drive2(await bundleVU(swap(pinFrom, '')));
   ok(rf.posts === 2 && rf.untils[1][0] < rf.press2 + 30 * 86400e3, '(h) RED — the pin applied to a Save that CHANGES the row (B-f212\'s shape): «30 days» counted from the first landing, short of 30 days from the press', rf);
-  const rg = await drive2(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); if (endPin == null) { endPin = at; landedInputs = edited ? inputs0 : inputsOf(); } previewNow(); }')));   // stale-pins: kept — a RED control: the pin set only at the first landing, restored on purpose
+  const rg = await drive2(await bundleVU(swap(pinMove, 'landRow(r, base); if (endPin == null) { endPin = at; landedInputs = inputsKeyOf(clean); } previewNow(); }')));   // stale-pins: kept — a RED control: the pin set only at the first landing, restored on purpose
   ok(rg.posts === 3, '(i) RED — the pin kept at the FIRST landing: the repeated Save after the changed one posts the row a third time', { posts: rg.posts, untils: rg.untils });
   // r13 (the shoulds' read): a change the HUB made is no reason to count anew — an older hub answers a landed Save WITHOUT the
   // row (every next Save then posts the row whole): with nothing the owner changed, the repeated Save posts the SAME ends
@@ -1636,10 +1641,10 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   // what landed (ends from the press that posted it) ⇒ it posts NOTHING; RED (q): the landing pins the flight's instant (the shared one)
   const n4 = await drive3(real, { revert: true });
   ok(n4.edited && n4.posts === 1, '(p) r14: an end picked while the post was in flight, then taken back ⇒ the next Save posts nothing (the pin is the press that posted, not the flight)', n4);
-  const rq = await drive3(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = edited ? inputs0 : inputsOf(); previewNow(); }')), { revert: true });
+  const rq = await drive3(await bundleVU(swap(pinMove, 'landRow(r, base); endPin = saveAt; landedInputs = inputsKeyOf(clean); previewNow(); }')), { revert: true });
   ok(rq.edited && rq.posts === 2 && rq.untils[1][0] > rq.untils[0][0], '(q) RED — the landing pins the shared instant (the preview\'s, during the flight): the taken-back Save re-posts the row with a LATER end (B-f212\'s own fault)', { posts: rq.posts, untils: rq.untils });
   ok(srcVU.split(pinMove).length === 2, 'the RED control\'s plant of (o) is where it claims: the landing pins the Save\'s own instant and inputs, once', srcVU.split(pinMove).length - 1);
-  const ro = await drive3(await bundleVU(swap(pinMove, 'landedRow(r, pick.except, polWas); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }')));   // stale-pins: kept — a RED control: r13's landing (the shared instant, the inputs as shown) restored on purpose
+  const ro = await drive3(await bundleVU(swap(pinMove, 'landRow(r, base); endPin = saveAt; landedInputs = inputsOf(); previewNow(); }')));   // stale-pins: kept — a RED control: r13's landing (the shared instant, the inputs as shown) restored on purpose
   ok(ro.edited && ro.posts === 2 && ro.untils[1][0] < ro.press2 + 30 * 86400e3, '(o) RED — the landing reads the shared instant and the inputs as the page shows them (r13): the in-flight edit counts as landed, the «30 days» count from the flight — short of 30 days from the press', { posts: ro.posts, untils: ro.untils, press2: ro.press2 });
   // r13 «also» (B-bc3b's read: the own-entry dialog words had only a picture) — the REAL dialog over an agent's OWN entry says a
   // grantee gets no card (another host is refused), and the «let the agent ask … --standing» line is not there (another
@@ -1656,6 +1661,421 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   ok(srcVU.split(askPlant).length === 2, 'the RED control\'s plant of (m) is where it claims: the ask line held back on an own entry, once', srcVU.split(askPlant).length - 1);
   const ownR = await dialogText(await bundleVU(swap(askPlant, '  body.append(askAgent);')), true);
   ok(/Let the agent ask/.test(ownR), '(m) RED — the dialog without the own-entry rule ⇒ an agent\'s own entry offers «Let the agent ask» (a road that is refused there)', ownR.slice(0, 200));
+  // ═══ ㉗ B-f212 THE LANDING LAW (主开发 r281) — a landing never takes a person's unsaved pick ═══
+  // What the person changed since the Save was pressed is kept over the landed row and stays unsaved; a dialog with an unsaved
+  // edit is never closed by a landing (it asks, as the person's own close does); the same when the landing is another client's
+  // save. THE TABLE and THE SEEDED LAW over src/lib/landing-merge.js (PURE), then the REAL dialog on a memory hub; every RED is
+  // that code with one rule taken back, each plant proved first through anchored()
+  console.log('㉗ B-f212: the landing law — the person\'s change since the press is kept over the landed row and stays unsaved; a landing never closes a dialog with an unsaved edit (it asks); the same for another client\'s save');
+  const LMpath = path.join(REPO, 'src/lib/landing-merge.js');
+  const LMsrc = fs.readFileSync(LMpath, 'utf8');
+  const LM = await import(pathToFileURL(LMpath).href);
+  const lmOf = async (src) => import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}`);   // a mutant of the PURE module (it imports nothing)
+  const setOf = (a) => [...new Set([...(a || [])].map(String))].sort();
+  const sameF = (a, b) => J(Array.isArray(a) || Array.isArray(b) ? setOf(a) : a) === J(Array.isArray(a) || Array.isArray(b) ? setOf(b) : b);
+  // [what, base, now, landed, clean, → fields, unsaved, moved]
+  const TABLE = [
+    ['nothing changed in flight: the page is what landed, clean', { s: ['A'], h: 'x' }, { s: ['A'], h: 'x' }, { s: ['A'], h: 'x' }, { s: ['A'], h: 'x' }, { s: ['A'], h: 'x' }, [], []],
+    ['(a) a member picked in flight: kept over the landed row, unsaved', { s: ['A'] }, { s: ['A', 'C'] }, { s: ['A'] }, { s: ['A'] }, { s: ['A', 'C'] }, ['s'], []],
+    ['a member taken out in flight: stays out, unsaved', { s: ['A', 'B'] }, { s: ['B'] }, { s: ['A', 'B'] }, { s: ['A', 'B'] }, { s: ['B'] }, ['s'], []],
+    ['the hub swept B at the Save (an ended 1-hour window): B leaves, clean', { s: ['A', 'B'] }, { s: ['A', 'B'] }, { s: ['A'] }, { s: ['A', 'B'] }, { s: ['A'] }, [], ['s']],
+    ['the hub swept B while C was picked in flight: B leaves, C stays, unsaved', { s: ['A', 'B'] }, { s: ['A', 'B', 'C'] }, { s: ['A'] }, { s: ['A', 'B'] }, { s: ['A', 'C'] }, ['s'], ['s']],
+    ['B taken out in flight AND swept by the hub: out, clean', { s: ['A', 'B'] }, { s: ['A'] }, { s: ['A'] }, { s: ['A', 'B'] }, { s: ['A'] }, [], []],
+    ['another client added D while C is picked here: both, unsaved', { s: ['A'] }, { s: ['A', 'C'] }, { s: ['A', 'D'] }, { s: ['A'] }, { s: ['A', 'C', 'D'] }, ['s'], ['s']],
+    ['another client took A out, untouched here: out, clean', { s: ['A'] }, { s: ['A'] }, { s: [] }, { s: ['A'] }, { s: [] }, [], ['s']],
+    ['the hosts typed in flight: kept, unsaved', { h: 'x' }, { h: 'y' }, { h: 'x' }, { h: 'q' }, { h: 'y' }, ['h'], []],
+    ['another client\'s hosts, untouched here: followed, clean', { h: 'x' }, { h: 'x' }, { h: 'z' }, { h: 'x' }, { h: 'z' }, [], ['h']],
+    ['both changed the hosts: the person\'s kept, unsaved', { h: 'x' }, { h: 'y' }, { h: 'z' }, { h: 'x' }, { h: 'y' }, ['h'], []],
+    ['an edit in flight taken back before the landing: what landed, clean', { h: 'x' }, { h: 'x' }, { h: 'x' }, { h: 'q' }, { h: 'x' }, [], []],
+    ['a field this landing does not carry (the policy, while only the row landed): shown as it is, its compare kept', { p: 'new' }, { p: 'new' }, {}, { p: 'old' }, { p: 'new' }, ['p'], []],
+    ['a box unticked in flight: kept, unsaved', { o: true }, { o: false }, { o: true }, { o: true }, { o: false }, ['o'], []],
+  ];
+  const tableRun = (M) => TABLE.map(([what, base, now, landed, clean, want, unsaved, moved]) => { const L = M.landingOf({ base, now, landed, clean }); const good = Object.keys(want).every((f) => sameF(L.fields[f], want[f])) && J(setOf(L.unsaved)) === J(setOf(unsaved)) && J(setOf(L.moved)) === J(setOf(moved)); return { what, good, got: { fields: L.fields, unsaved: L.unsaved, moved: L.moved } }; });
+  for (const r of tableRun(LM)) ok(r.good, `(t) ${r.what}`, r.got);
+  // THE SEEDED LAW — every case judged by the law's own words, the facts judged printed
+  const lawRun = (M, seeds = [7, 41, 212], n = 300) => {
+    const U = ['A', 'B', 'C', 'D', 'E'], V = ['x', 'y', 'z'];
+    const facts = { cases: 0, keptSet: 0, followedSet: 0, keptValue: 0, followedValue: 0, unsaved: 0, clean: 0, broken: [] };
+    for (const seed of seeds) {
+      let st = seed >>> 0; const rnd = () => { st = (st + 0x6D2B79F5) >>> 0; let x = st; x = Math.imul(x ^ (x >>> 15), x | 1); x ^= x + Math.imul(x ^ (x >>> 7), x | 61); return ((x ^ (x >>> 14)) >>> 0) / 4294967296; };   // mulberry32
+      const sub = () => U.filter(() => rnd() < 0.5), val = () => V[Math.floor(rnd() * V.length)];
+      for (let i = 0; i < n; i++) {
+        const base = { s: sub(), h: val() }, now = rnd() < 0.3 ? { s: [...base.s], h: base.h } : { s: sub(), h: val() }, landed = { s: sub(), h: val() };
+        const L = M.landingOf({ base, now, landed, clean: { s: [], h: '' } });
+        const out = new Set(setOf(L.fields.s)), b = new Set(base.s), nw = new Set(now.s), ld = new Set(landed.s);
+        facts.cases++;
+        const bad = (law) => { if (facts.broken.length < 4) facts.broken.push({ law, seed, i, base, now, landed, fields: L.fields }); };
+        for (const k of U) {
+          const touched = b.has(k) !== nw.has(k);
+          if (touched) { facts.keptSet++; if (out.has(k) !== nw.has(k)) bad('K: the person\'s set change is kept'); }
+          else { facts.followedSet++; if (out.has(k) !== ld.has(k)) bad('F: an untouched key follows what landed'); }
+        }
+        if (now.h !== base.h) { facts.keptValue++; if (L.fields.h !== now.h) bad('K: the person\'s value is kept'); }
+        else { facts.followedValue++; if (L.fields.h !== landed.h) bad('F: an untouched value follows what landed'); }
+        const differs = !sameF(L.fields.s, landed.s) || L.fields.h !== landed.h;
+        if (differs) facts.unsaved++; else facts.clean++;
+        if (differs !== L.unsaved.length > 0 || !sameF(L.clean.s, landed.s) || L.clean.h !== landed.h) bad('U: unsaved ⇔ it differs from what landed; the compare is what landed');
+        if (J(base.s.slice().sort()) === J(now.s.slice().sort()) && base.h === now.h && (L.unsaved.length || !sameF(L.fields.s, landed.s))) bad('N: nothing changed since the press ⇒ the page is exactly what landed');
+        const again = M.landingOf({ base: L.clean, now: L.fields, landed, clean: L.clean });
+        if (again.moved.length || !sameF(again.fields.s, L.fields.s) || again.fields.h !== L.fields.h) bad('I: the same landing again moves nothing');
+      }
+    }
+    return facts;
+  };
+  const law = lawRun(LM);
+  console.log(`    the law judged: ${law.cases} cases (seeds 7 / 41 / 212) — set keys the person changed ${law.keptSet}, untouched ${law.followedSet}; values the person changed ${law.keptValue}, untouched ${law.followedValue}; left unsaved ${law.unsaved}, clean ${law.clean}`);
+  ok(law.cases === 900 && !law.broken.length && law.keptSet > 100 && law.followedSet > 100 && law.keptValue > 100 && law.followedValue > 100 && law.unsaved > 50 && law.clean > 50, '(t) THE SEEDED LAW: in every case the person\'s change is kept (K), what the person did not touch follows what landed (F), unsaved ⇔ it differs from what landed (U), no change ⇒ exactly what landed (N), the same landing again moves nothing (I) — and every branch was reached', law);
+  // REDs of the PURE law: the landed SET wins over the pick (the row's fault (a)); the landed VALUE wins over the typing
+  const setLoses = await lmOf(anchored(LMsrc, 'out = [...new Set([...keysOf(landed[f]).filter((k) => !removed.has(k)), ...added])];', 'out = keysOf(landed[f]);', '㉗ RED the landed set wins'));
+  const valLoses = await lmOf(anchored(LMsrc, 'out = sameField(n, base[f]) ? landed[f] : n;', 'out = landed[f];', '㉗ RED the landed value wins'));
+  const tS = tableRun(setLoses).filter((r) => !r.good).map((r) => r.what), lS = lawRun(setLoses);
+  const tV = tableRun(valLoses).filter((r) => !r.good).map((r) => r.what), lV = lawRun(valLoses);
+  ok(tS.some((w) => w.startsWith('(a)')) && lS.broken.some((x) => x.law.startsWith('K: the person\'s set')), '(t) RED — the landed set wins (the row\'s fault (a)): the table\'s «(a) a member picked in flight» row and the law\'s K are red', { table: tS, law: lS.broken.slice(0, 1) });
+  ok(tV.some((w) => w.startsWith('the hosts typed in flight')) && lV.broken.some((x) => x.law.startsWith('K: the person\'s value')), '(t) RED — the landed value wins: the table\'s «the hosts typed in flight» row and the law\'s K are red', { table: tV, law: lV.broken.slice(0, 1) });
+
+  // ── THE REAL DIALOG on a memory hub: POST /api/vault/use-grants writes the row and answers it (as the hub's door does), GET
+  // /api/vault/contents lists it, the policy door keeps its words; `hold` runs inside a POST before it writes (the person's hands
+  // while the Save is in flight), `getHold` holds a read's answer (taken when it was asked) until the test lets it go
+  const ROSTER27 = [{ key: 'agent:cid-cee', kind: 'agent', id: 'cid-cee', name: 'Cee', groupIds: [], groupNames: [] }];
+  const hubOf = (members, { policyOk = true } = {}) => {
+    const H = { row: { to: members.map((m) => ({ ...m })), except: [], entryHosts: [] }, policy: '', posts: [], gets: 0, hold: null, getHold: null, getReply: null, gate: false, gates: [], log: [] };
+    const useOf = () => ({ ...H.row, to: H.row.to.map((m) => ({ ...m })), ...(H.policy ? { policy: { text: H.policy } } : {}) });
+    H.routes = async (url, method, body) => {
+      if (url === '/api/vault/use-grants' && method === 'POST') {
+        H.posts.push(body); H.log.push('post');
+        if (H.hold) { const h = H.hold; H.hold = null; await h(); }
+        if (H.gate) await new Promise((go) => H.gates.push({ body, go }));   // r365 (2): the post waits until the test lets it land — the hub writes in the order released
+        H.row = { ...H.row, to: (body.to || []).filter((m) => Array.isArray(m.scopes) && m.scopes.length).map((m) => ({ ...m, principal: m.kind === 'group' ? `group:${m.id}` : `conversation:${m.key}`, hosts: m.scopes.filter((sc) => sc.host).map((sc) => sc.host), scopes: m.scopes.map((sc) => (sc.command ? { kind: 'command', ...sc } : { kind: 'host', ...sc })) })), except: [] };
+        H.log.push('landed');
+        return { ok: true, use: useOf() };
+      }
+      if (url === '/api/vault/use-policy') { H.log.push('policy'); if (!policyOk) return { ok: false, code: 'not_written' }; H.policy = body.text; return { ok: true }; }
+      if (url === '/api/vault/contents' && method === 'GET' && H.getReply) { H.gets++; H.log.push('get'); return H.getReply(); }   // r365 (1): the hub's answer as the test sets it (unknown, refused, locked, gone)
+      if (url === '/api/vault/contents' && method === 'GET') { H.gets++; H.log.push('get'); const asked = useOf(); if (H.getHold) { const h = H.getHold; H.getHold = null; await h(); } H.log.push('got'); return { ok: true, state: 'unlocked', rows: [{ id: ENTRY, label: 'API key', run: { use: asked } }] }; }
+      return method !== 'GET' ? { ok: true } : undefined;
+    };
+    H.other = (to, { policy } = {}) => { H.row = { ...H.row, to: to.map((m) => ({ ...m })) }; if (policy !== undefined) H.policy = policy; };   // another client's save, written in the hub
+    return H;
+  };
+  const wsApp = () => { const fns = []; return { app: { ...VU_APP, ws: { onGlobal: (fn) => { fns.push(fn); }, offGlobal: (fn) => { const i = fns.indexOf(fn); if (i >= 0) fns.splice(i, 1); } } }, notify: () => { for (const fn of fns.slice()) fn({ type: 'vault-contents' }); }, fns }; };
+  const openL = (show, H, app = VU_APP, roster = ROSTER27) => {
+    const P = newPage({ routes: H.routes, roster });
+    show({ id: ENTRY, label: 'API key', run: { use: { to: H.row.to.map((m) => ({ ...m })), except: [], entryHosts: [] } } }, { app, refresh: () => { } });
+    const q = (c) => byCls(P.shell.body, c);
+    return { P, pk: P.pickers[0], hosts: q('vw-use-hosts'), end: q('vw-use-end'), pol: q('vw-use-policy-in'), dirty: () => !!P.shell.opts.unsaved.isDirty(), save: () => saved(P, P.shell.opts.unsaved.save()) };
+  };
+  const K_ADA = 'agent:cid-ada', K_CEE = 'agent:cid-cee';
+  const keysTo = (b) => ((b && b.to) || []).map((m) => m.key).sort();
+  const hostsTo = (b) => [...new Set(((b && b.to) || []).flatMap((m) => (m.scopes || []).map((sc) => sc.host).filter(Boolean)))].sort();
+  // ONE mutant bundle for the dialog's REDs (the fast tier's sum: one esbuild build, not six) — each rule taken back behind its
+  // own switch (globalThis.__f212red), each plant proved through anchored()
+  const REDS = {
+    base: ['landRow(r, base);', "landRow(r, globalThis.__f212red === 'base' ? fieldsNow() : base);"],   // the landing's base read AT the landing: every change counts as posted (fault (a))
+    close: ['if (!unsavedNow()) { close();', "if (globalThis.__f212red === 'close' || !unsavedNow()) { close();"],   // a whole landing closes whatever is left (fault (b))
+    hear: ['    app.ws.onGlobal(onContents);\n', "    if (globalThis.__f212red !== 'hear') app.ws.onGlobal(onContents);\n"],   // another client's save is never heard
+    extra: ['if (fresh.length) {', "if (globalThis.__f212red !== 'extra' && fresh.length) {"],   // a member the picker has not seen is not joined to its rows
+    stale: ['if (flying || at !== landings) owed = true;', "if (flying || (globalThis.__f212red !== 'stale' && at !== landings)) owed = true;"],   // a read older than a landing is taken as news
+    flight: ['if (flying || reading) { owed = true; return; }', "if ((globalThis.__f212red !== 'flight' && flying) || reading) { owed = true; return; }"],   // a read is made while the Save is in flight
+    one: ['if (!saving) {', "if (globalThis.__f212red === 'one' || !saving) {"],   // r365 (2): every press posts at once — two posts out, each landing its own reply
+    unknown: [': !lu || lu.unknown || !Array.isArray(lu.to) ?', ": !lu || (globalThis.__f212red !== 'unknown' && lu.unknown) || !Array.isArray(lu.to) ?"],   // r365 (1): a row the hub could not read lands as an empty one
+    pol: ['const polWas = polLanded, polNow = base.policy;', "const polWas = globalThis.__f212red === 'pol' ? ((u.policy && u.policy.text) || '') : polLanded, polNow = base.policy;"],   // the policy compared with the open's words, not what landed
+    drawn: ['const v = hostsViewOf(ms), kept = describes(prev, ms);', "const v = hostsViewOf(ms), kept = globalThis.__f212red !== 'drawn' && describes(prev, ms);"],   // the hosts this dialog's own Save wrote redrawn from the landed row
+    onlyrow: ['  const fieldsNow = () => Object.fromEntries(FIELDS.map((f) => [f.name, f.read()]));', "  if (globalThis.__f212red === 'onlyrow') FIELDS.splice(FIELDS.findIndex((f) => f.name === 'only'), 1);\n  const fieldsNow = () => Object.fromEntries(FIELDS.map((f) => [f.name, f.read()]));"],   // r513: «仅本组» left out of the dialog's field table
+    off: ['offContents = () => { try { app.ws.offGlobal(onContents); } catch { } };', "offContents = () => { if (globalThis.__f212red === 'off') return; try { app.ws.offGlobal(onContents); } catch { } };"],   // the listener outlives the dialog
+  };
+  const mutantVU = await bundleVU((src) => Object.entries(REDS).reduce((acc, [name, [from, to]]) => anchored(acc, from, to, `㉗ RED ${name}`), src));
+  const asRed = async (name, fn) => { globalThis.__f212red = name; try { return await fn(mutantVU); } finally { globalThis.__f212red = null; } };
+  // (a) + (b): a member picked while the Save's post is in flight
+  const inFlightPick = async (show) => {
+    const H = hubOf([ada]);
+    const d = openL(show, H);
+    d.end.value = '8h'; d.end.fire('change');   // the row changes: «8 hours»
+    H.hold = () => { d.pk.pick([K_ADA, K_CEE]); };   // the person picks Cee while the post is in flight
+    const said = await d.save();
+    const after = { picked: setOf(d.pk.selected()), dirty: d.dirty(), closed: d.P.closed, asks: d.P.asks, said, posted: keysTo(H.posts[0]), stored: H.row.to.map((m) => m.key) };
+    const said2 = await d.save();   // the person's own Save of what is left (the ask's Save, or the dialog's)
+    return { ...after, second: { posts: H.posts.length, posted: keysTo(H.posts[1]), closed: d.P.closed, said: said2, dirty: d.dirty() } };
+  };
+  const fa = await inFlightPick(real);
+  ok(J(fa.posted) === J(['cid-ada']) && J(fa.stored) === J(['cid-ada']) && J(fa.picked) === J([K_ADA, K_CEE]) && fa.dirty, '(a) a member picked WHILE the Save is in flight is KEPT over the landed row (Ada landed; Ada + Cee picked) and stays UNSAVED', fa);
+  ok(fa.closed === 0 && fa.asks === 1 && fa.said === 'what you changed while it was saving', '(b) …and the landing does not close the dialog over it: it ASKS, as the person\'s own close does (the ask\'s Save hears «what you changed while it was saving»)', fa);
+  ok(fa.second.posts === 2 && J(fa.second.posted) === J(['cid-ada', 'cid-cee']) && fa.second.closed === 1 && fa.second.said === true && !fa.second.dirty, '(a) …the next Save posts Cee too, lands clean and closes', fa.second);
+  const ra = await asRed('base', inFlightPick);
+  ok(!ra.picked.includes(K_CEE) && ra.closed === 1, '(a) RED — the landing\'s base read at the landing (every change taken as posted): Cee reset by the landed row and the dialog closed', ra);
+  const rb = await asRed('close', inFlightPick);
+  ok(rb.picked.includes(K_CEE) && rb.closed === 1 && rb.asks === 0, '(b) RED — a whole landing closes whatever is left: the dialog closed over Cee, no ask', rb);
+  // CONTROL: no edit in flight ⇒ the landing closes the dialog as before, no ask
+  {
+    const H = hubOf([ada]);
+    const d = openL(real, H);
+    d.end.value = '8h'; d.end.fire('change');
+    const said = await d.save();
+    ok(said === true && d.P.closed === 1 && d.P.asks === 0 && H.posts.length === 1, '(b) CONTROL — nothing changed in flight: the landing closes the dialog, no ask', { said, closed: d.P.closed, asks: d.P.asks });
+  }
+  // (a) for words and a box's kin: the hosts typed in flight, the policy typed in flight (the row and the policy both land)
+  {
+    const H = hubOf([ada]);
+    const d = openL(real, H);
+    d.end.value = '8h'; d.end.fire('change'); d.pol.value = 'Words A';
+    H.hold = () => { d.hosts.value = 'b.example'; d.hosts.fire('input'); d.pol.value = 'Words B'; };
+    const said = await d.save();
+    ok(J(hostsTo(H.posts[0])) === J(['api.example.com']) && H.policy === 'Words A' && d.hosts.value === 'b.example' && d.pol.value === 'Words B' && d.dirty() && d.P.closed === 0 && d.P.asks === 1, '(a) the hosts and the policy typed in flight are KEPT (the row landed with api.example.com, the policy with «Words A») and stay unsaved; the dialog asks', { posted: hostsTo(H.posts[0]), policy: H.policy, hosts: d.hosts.value, pol: d.pol.value, dirty: d.dirty(), closed: d.P.closed, asks: d.P.asks, said });
+    const before = d.P.posts.filter((q) => q.url === '/api/vault/use-policy').length;
+    await d.save();
+    const pols = d.P.posts.filter((q) => q.url === '/api/vault/use-policy').map((q) => q.body.text);
+    ok(H.posts.length === 2 && J(hostsTo(H.posts[1])) === J(['b.example']) && J(pols.slice(before)) === J(['Words B']) && d.P.closed === 1, '(a) …the next Save posts the row with b.example and the policy «Words B» — the policy compared against what LANDED («Words A»), not the open\'s', { posts: H.posts.length, hosts: hostsTo(H.posts[1]), pols });
+  }
+  // MULTI-CLIENT: another client's save lands in an open dialog by the same law (its base: what this dialog last knew)
+  const otherSave = async (show) => {
+    const H = hubOf([ada]);
+    const w = wsApp();
+    const d = openL(show, H, w.app);
+    d.pk.pick([K_ADA, K_CEE]);   // the person picks Cee — unsaved
+    H.other([{ ...ada, hosts: ['b.example'], scopes: [{ kind: 'host', host: 'b.example', until: now + 30 * 86400e3 }] }], { policy: 'Other words' });   // another client's save: Ada for b.example, a policy
+    w.notify(); await settledOf(d.P);
+    const after = { gets: H.gets, picked: setOf(d.pk.selected()), hosts: d.hosts.value, pol: d.pol.value, dirty: d.dirty(), closed: d.P.closed, asks: d.P.asks };
+    await d.save();
+    return { ...after, posted: keysTo(H.posts[0]), postedHosts: hostsTo(H.posts[0]), polPosts: d.P.posts.filter((q) => q.url === '/api/vault/use-policy').length, listeners: w.fns.length, closedAfter: d.P.closed };
+  };
+  const fm = await otherSave(real);
+  ok(fm.gets === 1 && J(fm.picked) === J([K_ADA, K_CEE]) && fm.dirty && fm.closed === 0 && fm.asks === 0, 'MULTI-CLIENT: another client\'s save lands in the open dialog (its notify ⇒ ONE read of the row): Cee, picked here, is KEPT and stays unsaved; the dialog never closes', fm);
+  ok(fm.hosts === 'b.example' && fm.pol === 'Other words', 'MULTI-CLIENT: …what the person did not touch FOLLOWS the other client\'s save (the hosts b.example, the policy «Other words»)', fm);
+  ok(J(fm.posted) === J(['cid-ada', 'cid-cee']) && J(fm.postedHosts) === J(['b.example']) && fm.polPosts === 0 && fm.closedAfter === 1 && fm.listeners === 0, 'MULTI-CLIENT: …the next Save posts Ada and Cee for b.example (never the stale api.example.com), no policy (it is what landed); the listener leaves with the dialog', fm);
+  const rm = await asRed('hear', otherSave);
+  ok(rm.gets === 0 && J(rm.postedHosts) === J(['api.example.com']), 'MULTI-CLIENT RED — the dialog deaf to another client\'s save: the next Save posts the stale api.example.com over it', rm);
+  const rpol = await asRed('pol', otherSave);
+  ok(rpol.polPosts === 1, 'MULTI-CLIENT RED — the policy compared with the words at the open, not what landed: the next Save posts «Other words» again', { polPosts: rpol.polPosts });
+  const roff = await asRed('off', otherSave);
+  ok(roff.listeners === 1, 'MULTI-CLIENT RED — the listener kept when the dialog closes: it outlives the dialog', { listeners: roff.listeners });
+  // MULTI-CLIENT: a member the picker has not seen (another client granted Zed) joins its rows — the next Save keeps Zed
+  const zedSave = async (show) => {
+    const H = hubOf([ada]);
+    const w = wsApp();
+    const d = openL(show, H, w.app);
+    const zed = { kind: 'conversation', key: 'cid-zed', principal: 'conversation:cid-zed', name: 'Zed', hosts: ['api.example.com'], scopes: [{ kind: 'host', host: 'api.example.com', until: now + 30 * 86400e3 }] };
+    H.other([ada, zed]);
+    w.notify(); await settledOf(d.P);
+    const after = { picked: setOf(d.pk.selected()), dirty: d.dirty() };
+    d.end.value = '8h'; d.end.fire('change');
+    await d.save();
+    return { ...after, posted: keysTo(H.posts[0]) };
+  };
+  const fz = await zedSave(real);
+  ok(fz.picked.includes('agent:cid-zed') && !fz.dirty && J(fz.posted) === J(['cid-ada', 'cid-zed']), 'MULTI-CLIENT: a member the picker had not seen (Zed, granted elsewhere) joins it, clean — and the next Save keeps Zed', fz);
+  const rz = await asRed('extra', zedSave);
+  ok(!rz.posted.includes('cid-zed'), 'MULTI-CLIENT RED — the unseen member not joined to the picker\'s rows: the next Save drops Zed', rz);
+  // A READ AND A SAVE: a read that began before this dialog's own landing answers with the row as it WAS — read again, never
+  // taken as news; a notify while the Save's post is in flight reads only after it landed
+  const staleRead = async (show) => {
+    const H = hubOf([ada], { policyOk: false });   // the policy half refused: the dialog stays open after the row lands
+    const w = wsApp();
+    const d = openL(show, H, w.app);
+    d.pol.value = 'Only for the staging deploy';
+    d.hosts.value = 'c.example'; d.hosts.fire('input');
+    let release = null; H.getHold = () => new Promise((r) => { release = r; });
+    w.notify();   // a notify: the dialog's read is asked NOW (it answers api.example.com, held)
+    for (let i = 0; i < 200 && !release; i++) await new Promise((r) => setImmediate(r));
+    const p = d.P.shell.opts.unsaved.save();   // the Save presses while that read is out
+    for (let i = 0; i < 2000 && !H.log.includes('policy'); i++) await new Promise((r) => setImmediate(r));
+    const landedFirst = H.log.includes('landed') && !H.log.includes('got');
+    if (release) release();
+    await saved(d.P, p);
+    return { landedFirst, held: !!release, gets: H.gets, hosts: d.hosts.value, stored: hostsTo({ to: H.row.to }), log: H.log.join(' ') };
+  };
+  const fs1 = await staleRead(real);
+  ok(fs1.held && fs1.landedFirst && fs1.gets === 2 && fs1.hosts === 'c.example' && J(fs1.stored) === J(['c.example']), 'A READ AND A SAVE: the read asked before the Save landed answers the OLD row after it — read again (2 reads), the dialog keeps c.example as landed', fs1);
+  const rs1 = await asRed('stale', staleRead);
+  ok(rs1.landedFirst && rs1.hosts === 'api.example.com', 'RED — the older read taken as news: the dialog shows the OLD api.example.com over the row that landed', rs1);
+  const flightRead = async (show) => {
+    const H = hubOf([ada], { policyOk: false });
+    const w = wsApp();
+    const d = openL(show, H, w.app);
+    d.pol.value = 'Only for the staging deploy';
+    d.end.value = '8h'; d.end.fire('change');
+    H.hold = () => { w.notify(); };   // a notify while the post is in flight (the hub's own, for this Save)
+    await d.save();
+    await settledOf(d.P);
+    return { log: H.log.join(' '), gets: H.gets };
+  };
+  const ff = await flightRead(real);
+  ok(/^post landed policy get got$/.test(ff.log), 'A READ AND A SAVE: a notify while the Save\'s post is in flight ⇒ the read is made only after the Save is done (post · landed · policy · get)', ff);
+  const rf1 = await asRed('flight', flightRead);
+  ok(/^post get/.test(rf1.log), 'RED — a read made while the Save is in flight: post · get … (the read raced the Save)', rf1);
+  // r365's should: THE REMOVAL IN FLIGHT on the real dialog (the direction where a person believes an access was taken away)
+  const ceeM = { kind: 'conversation', key: 'cid-cee', principal: 'conversation:cid-cee', name: 'Cee', hosts: ['api.example.com'], scopes: [{ kind: 'host', host: 'api.example.com', until: now + 30 * 86400e3 }] };
+  const inFlightTakeOut = async (show) => {
+    const H = hubOf([ada, ceeM]);
+    const d = openL(show, H);
+    d.end.value = '8h'; d.end.fire('change');
+    H.hold = () => { d.pk.pick([K_ADA]); };   // the person takes Cee OUT while the post (Ada + Cee) is in flight
+    const said = await d.save();
+    const after = { picked: setOf(d.pk.selected()), dirty: d.dirty(), closed: d.P.closed, asks: d.P.asks, said, posted: keysTo(H.posts[0]), stored: H.row.to.map((m) => m.key).sort() };
+    await d.save();
+    return { ...after, second: { posted: keysTo(H.posts[1]), stored: H.row.to.map((m) => m.key).sort(), closed: d.P.closed } };
+  };
+  const fo = await inFlightTakeOut(real);
+  ok(J(fo.posted) === J(['cid-ada', 'cid-cee']) && J(fo.picked) === J([K_ADA]) && fo.dirty && fo.closed === 0 && fo.asks === 1, '(a) a member taken OUT while the Save is in flight stays OUT over the landed row (Ada + Cee landed), unsaved — the dialog asks, never closes', fo);
+  ok(J(fo.second.posted) === J(['cid-ada']) && J(fo.second.stored) === J(['cid-ada']) && fo.second.closed === 1, '(a) …and the next Save posts Ada alone: the hub holds what the dialog showed', fo.second);
+  const ro2 = await asRed('base', inFlightTakeOut);
+  ok(ro2.picked.includes(K_CEE) && ro2.closed === 1, '(a) RED — the landing\'s base read at the landing: Cee put back by the landed row and the dialog closed as saved', ro2);
+  // r365 (1): A ROW THAT COULD NOT BE READ IS NOT AN EMPTY ROW — the dialog's read answered unknown / refused / locked / unverified /
+  // gone while the person has a pick: nothing is unpicked, the line says it, the next Save posts the person's own state
+  const STALE = 'vw-use-stale';
+  const unreadable = async (show, reply, { reread = false } = {}) => {
+    const H = hubOf([ada]);
+    const w = wsApp();
+    const d = openL(show, H, w.app);
+    d.pk.pick([K_ADA, K_CEE]);
+    H.getReply = reply;
+    w.notify(); await settledOf(d.P);
+    const note = byCls(d.P.shell.body, STALE);
+    const after = { picked: setOf(d.pk.selected()), note: textOf(note), shown: !!note && !note.hidden, dirty: d.dirty() };
+    if (reread) {   // the row read again as the hub holds it: the line goes, the person's pick stays
+      H.getReply = null;
+      w.notify(); await settledOf(d.P);
+      return { ...after, cleared: !!note && note.hidden, pickedAfter: setOf(d.pk.selected()) };
+    }
+    await d.save();   // the next Save, right after the read that could not be taken
+    return { ...after, posted: keysTo(H.posts[0]) };
+  };
+  const READS = [
+    ['the row marked unknown (empty lists)', () => ({ ok: true, state: 'unlocked', rows: [{ id: ENTRY, label: 'API key', run: { use: { unknown: true, to: [], except: [] } } }] }), /could not be read just now/],
+    ['a refused read', () => ({ ok: false, code: 'not_read' }), /could not be read just now/],
+    ['a locked vault', () => ({ ok: false, code: 'vault_locked' }), /The vault is locked/],
+    ['an unverified row (a locked vault cannot verify it)', () => ({ ok: true, state: 'unlocked', rows: [{ id: ENTRY, label: 'API key', run: { use: { unverified: true, to: [], except: [] } } }] }), /The vault is locked/],
+    ['the entry gone', () => ({ ok: true, state: 'unlocked', rows: [] }), /«API key» was removed from the vault/],
+  ];
+  for (const [what, reply, words] of READS) {
+    const u1 = await unreadable(real, reply), u2 = await unreadable(real, reply, { reread: true });
+    ok(J(u1.picked) === J([K_ADA, K_CEE]) && u1.shown && words.test(u1.note) && u1.dirty && J(u1.posted) === J(['cid-ada', 'cid-cee']), `r365 (1) ${what}: the landing is NOT taken — nothing unpicked, the dialog says «${u1.note}», the next Save posts the person's own Ada + Cee`, u1);
+    ok(u2.shown && u2.cleared && J(u2.pickedAfter) === J([K_ADA, K_CEE]), `r365 (1) ${what}: …a good read of the row clears the line, the person's pick kept`, u2);
+  }
+  const ru = await asRed('unknown', (show) => unreadable(show, READS[0][1]));
+  ok(!ru.picked.includes(K_ADA) && !ru.shown && !ru.posted.includes('cid-ada'), 'r365 (1) RED — the unknown row read as empty: Ada unpicked with no word, and the next Save removes Ada\'s access', ru);
+  // r365 (2): ONE SAVE IN FLIGHT — two presses, the posts held at the hub and released oldest first, then newest first
+  const until = async (c, n = 2000) => { for (let i = 0; i < n && !c(); i++) await new Promise((r) => setImmediate(r)); return c(); };
+  const twoPresses = async (show, order) => {
+    const H = hubOf([ada]); H.gate = true;
+    const d = openL(show, H);
+    let done = 0; const fin = () => { done++; };
+    d.pk.pick([K_ADA, K_CEE]);
+    d.P.shell.opts.unsaved.save().then(fin, fin);   // press 1: Ada + Cee
+    await until(() => H.gates.length === 1);
+    d.pk.pick([K_ADA]); d.end.value = '8h'; d.end.fire('change');   // the person takes Cee back out (and picks «8 hours») while press 1's post is out …
+    d.P.shell.opts.unsaved.save().then(fin, fin);   // … and presses Save again
+    await until(() => H.gates.length === 2, 200);   // a second post reaches the hub only if two may be out
+    const outAtOnce = H.gates.length;
+    let closedWith = null;
+    for (let step = 0; step < 6 && (done < 2 || H.gates.length); step++) {
+      if (!(await until(() => H.gates.length > 0 || done === 2, 400)) || !H.gates.length) break;
+      const g = order === 'newest' ? H.gates.pop() : H.gates.shift(), left = H.gates.length;
+      g.go();
+      await until(() => d.P.closed > 0 || H.gates.length !== left || done === 2, 400);   // THIS release's reply handled: the dialog closed, a kept press posted, or both presses ended
+      if (d.P.closed && !closedWith) closedWith = { out: H.gates.length, held: H.row.to.map((m) => m.key).sort() };
+    }
+    await settledOf(d.P);
+    return { order, outAtOnce, posts: H.posts.map(keysTo), stored: H.row.to.map((m) => m.key).sort(), closed: d.P.closed, asks: d.P.asks, closedWith, done };
+  };
+  for (const order of ['oldest', 'newest']) {
+    const tp = await twoPresses(real, order);
+    ok(tp.outAtOnce === 1 && J(tp.posts) === J([['cid-ada', 'cid-cee'], ['cid-ada']]) && J(tp.stored) === J(['cid-ada']) && tp.closed === 1 && tp.asks === 0 && tp.closedWith && tp.closedWith.out === 0 && J(tp.closedWith.held) === J(['cid-ada']) && tp.done === 2,
+      `r365 (2) two presses, released ${order} first: ONE post out at a time — the second press is KEPT and posts Ada alone once the first reply landed; the dialog closes with no post out and the hub holding Ada alone, no ask`, tp);
+  }
+  const rt = await asRed('one', (show) => twoPresses(show, 'newest'));
+  ok(rt.outAtOnce === 2 && rt.closedWith && rt.closedWith.out === 1 && rt.stored.includes('cid-cee'), 'r365 (2) RED — every press posts at once, the hub takes them newest first: the dialog closes on «Cee removed» with a post still out, and the hub ends holding Cee', rt);
+  // the hosts this dialog's own Save wrote are not redrawn from the landed row (they already describe it)
+  const ownWords = async (show) => {
+    const H = hubOf([ada], { policyOk: false });   // the policy half refused: the dialog stays open after the row lands
+    const d = openL(show, H);
+    d.hosts.value = 'c.example a.example'; d.hosts.fire('input');
+    d.pol.value = 'Only for the staging deploy';
+    await d.save();
+    return { hosts: d.hosts.value, stored: hostsTo({ to: H.row.to }) };
+  };
+  const fw = await ownWords(real);
+  ok(fw.hosts === 'c.example a.example' && J(fw.stored) === J(['a.example', 'c.example']), 'the hosts as this dialog\'s own Save typed them («c.example a.example») stay as typed once the row lands — they describe it', fw);
+  const rw = await asRed('drawn', ownWords);
+  ok(rw.hosts === 'c.example, a.example', 'RED — the landed row redraws the person\'s own words: «c.example, a.example»', rw);
+  // r513: «仅本组» (only this group — the train's line 61) IS ONE MORE NAMED FIELD of the dialog: counted unsaved like every other,
+  // merged by the same rule, kept as last read when the row could not be read, posted by the kept press as it is at that moment
+  const TEAM_ROW = { key: 'group:g-team', kind: 'group', id: 'g-team', name: 'Team', groupIds: [], groupNames: [] };
+  const ROSTER_G = [...ROSTER27, TEAM_ROW];
+  const team = (only) => ({ kind: 'group', id: 'g-team', principal: 'group:g-team', name: 'Team', hosts: ['api.example.com'], scopes: [{ kind: 'host', host: 'api.example.com', until: now + 30 * 86400e3 }], ...(only ? { only: true } : {}) });
+  const onlyOf = (b) => ((b && b.to) || []).filter((m) => m.kind === 'group').map((m) => `${m.id}:${m.only === true ? 'only' : m.only === false ? 'all' : '-'}`);
+  const K_TEAM = 'group:g-team';
+  // the unsaved guard: a change of «仅本组» ALONE is unsaved; taken back, it is not
+  const onlyGuard = async (show) => {
+    const H = hubOf([team(false)]);
+    const d = openL(show, H, VU_APP, ROSTER_G);
+    const before = d.dirty();
+    d.pk.flipOnly(K_TEAM);
+    const flipped = d.dirty();
+    d.pk.flipOnly(K_TEAM);
+    return { before, flipped, back: d.dirty() };
+  };
+  const og = await onlyGuard(real);
+  ok(!og.before && og.flipped && !og.back, 'r513 «仅本组» — the unsaved guard: switching it ALONE makes the dialog unsaved; switching it back makes it clean again', og);
+  // the landing (the dialog's own Save in flight): switched while the post is out ⇒ KEPT and unsaved, the dialog asks; the next Save posts it
+  const onlyInFlight = async (show) => {
+    const H = hubOf([team(false)]);
+    const d = openL(show, H, VU_APP, ROSTER_G);
+    d.end.value = '8h'; d.end.fire('change');
+    H.hold = () => { d.pk.flipOnly(K_TEAM); };
+    await d.save();
+    const after = { only: d.pk.onlyKeys(), dirty: d.dirty(), closed: d.P.closed, asks: d.P.asks, posted: onlyOf(H.posts[0]) };
+    await d.save();
+    return { ...after, second: { posted: onlyOf(H.posts[1]), stored: onlyOf({ to: H.row.to }), closed: d.P.closed } };
+  };
+  const oi = await onlyInFlight(real);
+  ok(J(oi.posted) === J(['g-team:-']) && J(oi.only) === J([K_TEAM]) && oi.dirty && oi.closed === 0 && oi.asks === 1, 'r513 «仅本组» — switched while the Save is in flight: KEPT over the landed row and unsaved; the dialog asks, never closes', oi);
+  ok(J(oi.second.posted) === J(['g-team:only']) && J(oi.second.stored) === J(['g-team:only']) && oi.second.closed === 1, 'r513 «仅本组» — …the next Save posts Team only:true and the hub holds it', oi.second);
+  // another client's landing: an UNTOUCHED «仅本组» follows the hub's row; a switched one is kept
+  const onlyOther = async (show, flip) => {
+    const H = hubOf([team(false)]);
+    const w = wsApp();
+    const d = openL(show, H, w.app, ROSTER_G);
+    if (flip) d.pk.flipOnly(K_TEAM);   // the person switches it here (unsaved)
+    H.other([{ ...team(!flip), hosts: ['b.example'], scopes: [{ kind: 'host', host: 'b.example', until: now + 30 * 86400e3 }] }]);   // elsewhere: Team only (untouched case) / all (switched case), for b.example
+    w.notify(); await settledOf(d.P);
+    return { only: d.pk.onlyKeys(), hosts: d.hosts.value, dirty: d.dirty() };
+  };
+  const oo1 = await onlyOther(real, false), oo2 = await onlyOther(real, true);
+  ok(J(oo1.only) === J([K_TEAM]) && oo1.hosts === 'b.example' && !oo1.dirty, 'r513 «仅本组» — another client switched it on, untouched here: it FOLLOWS the hub\'s row, clean', oo1);
+  ok(J(oo2.only) === J([K_TEAM]) && oo2.hosts === 'b.example' && oo2.dirty, 'r513 «仅本组» — switched here and another client saved Team as all: the person\'s switch is KEPT and unsaved; the hosts follow', oo2);
+  // the row that could not be read: the switch kept as last read; the next Save posts it
+  const onlyUnread = async (show) => {
+    const H = hubOf([team(false)]);
+    const w = wsApp();
+    const d = openL(show, H, w.app, ROSTER_G);
+    d.pk.flipOnly(K_TEAM);
+    H.getReply = READS[0][1];
+    w.notify(); await settledOf(d.P);
+    const after = { only: d.pk.onlyKeys(), shown: !byCls(d.P.shell.body, STALE).hidden };
+    H.getReply = null;
+    await d.save();
+    return { ...after, posted: onlyOf(H.posts[0]) };
+  };
+  const ou = await onlyUnread(real);
+  ok(J(ou.only) === J([K_TEAM]) && ou.shown && J(ou.posted) === J(['g-team:only']), 'r513 «仅本组» — the row could not be read (unknown): the switch kept as last read, the line shown, the next Save posts Team only:true', ou);
+  // the kept press: a press while a post is out posts «仅本组» as it is at THAT moment
+  const onlyKept = async (show) => {
+    const H = hubOf([team(false)]); H.gate = true;
+    const d = openL(show, H, VU_APP, ROSTER_G);
+    let done = 0; const fin = () => { done++; };
+    d.end.value = '8h'; d.end.fire('change');
+    d.P.shell.opts.unsaved.save().then(fin, fin);
+    await until(() => H.gates.length === 1);
+    d.pk.flipOnly(K_TEAM);
+    d.P.shell.opts.unsaved.save().then(fin, fin);
+    for (let step = 0; step < 4 && (done < 2 || H.gates.length); step++) { if (!(await until(() => H.gates.length > 0 || done === 2, 400)) || !H.gates.length) break; const left = H.gates.length - 1; H.gates.shift().go(); await until(() => d.P.closed > 0 || H.gates.length !== left || done === 2, 400); }
+    await settledOf(d.P);
+    return { posts: H.posts.map(onlyOf), stored: onlyOf({ to: H.row.to }), closed: d.P.closed, asks: d.P.asks };
+  };
+  const ok2 = await onlyKept(real);
+  ok(J(ok2.posts) === J([['g-team:-'], ['g-team:only']]) && J(ok2.stored) === J(['g-team:only']) && ok2.closed === 1 && ok2.asks === 0, 'r513 «仅本组» — the kept press posts the switch as it is at that moment (Team only:true), after the first reply; closed clean', ok2);
+  // RED: «仅本组» left out of the dialog's field table — a change of it alone is not unsaved, and a landing closes over it
+  const ro1 = await asRed('onlyrow', onlyGuard), ro3 = await asRed('onlyrow', onlyInFlight);
+  ok(!ro1.flipped && ro3.closed === 1 && ro3.asks === 0, 'r513 RED — «仅本组» left out of the field table: switching it alone counts as no change, and the landing closes the dialog over it, no ask', { guard: ro1, landing: { closed: ro3.closed, asks: ro3.asks, only: ro3.only } });
   globalThis.__hx.real = realWas;
 }
 

@@ -27,6 +27,7 @@ import { fetchJson, showToast, createModalShell } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { rowToPick, pickToRow, principalOfEntry } from './principal-picker-model.js';
 import { revealLeftMs, revealHeaders, forgetReveal, askRevealPassword, revealWords } from './vault-reveal.js';
+import { landingOf, fieldsDiffer, sameField } from './landing-merge.js'; // B-f212: THE LANDING LAW — a landing never takes a person's unsaved pick
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
 const EVERYONE_KEY = 'everyone:*';
@@ -256,7 +257,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const stored = rowToPick({ to: members, except: u.except || [] }, roster(), pickWords());   // r11: each member by its principal (`principal`)
   const extra = stored.extra || [];
   // r11 (主开发's acceptance of r10, MINOR 3): THE ROW THE NEXT SAVE IS COMPARED AGAINST — the row as the dialog opened, then
-  // the row as a Save LANDED it (`landedRow`: the hub's answer names it — null for an older hub's answer: every next Save then
+  // the row as a Save LANDED it (`landRow`: the hub's answer names it — null for an older hub's answer: every next Save then
   // posts the row whole); `held` = its 除了 as picker keys (r10)
   let snap = { to: members, except: u.except || [] }, held = stored.except;
   // B-f212: the instant a chosen end counts from — the press's own now, then the Save that LANDED (a repeated Save posts the same
@@ -266,32 +267,56 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   let endPin = null, saveAt = null, landedInputs = null;
   const endsFrom = () => (saveAt != null ? saveAt : endPin != null ? endPin : Date.now());
   let picker = null;
-  // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
-  let start = null, saveNow = () => false;
-  const stateOf = (pol) => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except({ held }).slice().sort() : [], picker && picker.onlyKeys ? (picker.onlyKeys() || []).slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', pol !== undefined ? pol : polIn ? polIn.value.trim() : '']);
-  const { body, close, raised } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
-    unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
+  // the unsaved guard (test-dialog-unsaved-census): the dialog's FIELDS (who, 除了, the hosts box and words, the end, the policy)
+  // against `clean`: what the dialog opened on, then what LANDED. B-f212 (src/lib/landing-merge.js): a landing keeps what the
+  // person changed since its base, and that change stays unsaved
+  let clean = null, saveNow = () => false, gone = false, offContents = null;
+  // THE DIALOG'S FIELDS — ONE TABLE (主开发 r513: «仅本组», the picker's only-this-group keys, is one more named field — no special
+  // case): each field's name, how the page reads it and how a landing writes it back. The unsaved guard compares every row, the
+  // landing (src/lib/landing-merge.js) judges every row by its kind (a set of keys, or one value), the unreadable row keeps every
+  // row as last read, the kept press posts every row as it is at that moment
+  const FIELDS = [
+    { name: 'selected', read: () => (picker ? picker.selected() : []), write: (v) => picker.setSelected(v) },
+    { name: 'except', read: () => (picker ? picker.except({ held }) : []), write: (v) => picker.setExcept(v) },
+    { name: 'only', read: () => (picker && typeof picker.onlyKeys === 'function' ? picker.onlyKeys() || [] : []), write: (v) => { if (typeof picker.setOnly === 'function') picker.setOnly(v); } },
+    { name: 'own', read: () => (ownBox ? ownBox.checked : null), write: (v) => { if (ownBox) { ownBox.checked = !!v; syncOwn(); } } },
+    { name: 'hosts', read: () => (hostsIn ? hostsIn.value.trim() : ''), write: (v) => { hostsIn.value = v; } },
+    { name: 'end', read: () => (endSel ? endSel.value : ''), write: (v) => { endSel.value = v; } },
+    { name: 'policy', read: () => (polIn ? polIn.value.trim() : ''), write: (v) => { polIn.value = v; } },
+  ];
+  const fieldsNow = () => Object.fromEntries(FIELDS.map((f) => [f.name, f.read()]));
+  const unsavedNow = () => clean !== null && fieldsDiffer(fieldsNow(), clean).length > 0;
+  const { body, close, dismiss, raised } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { gone = true; try { offContents && offContents(); } catch { } try { picker && picker.close(); } catch { } },
+    unsaved: { isDirty: unsavedNow, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
   let ownBox = null, hostsIn = null, endSel = null, polIn = null, previewNow = () => {};
   body.append(el('div', 'vw-ak-hint', u.own ? t('Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere, is refused: an agent\'s own value goes only where you say.') : t('Its agents use it for the hosts below without asking you each time, and never see the secret itself. Another host, or a command that could go anywhere (a shell, a script), still asks you.')));   // B-bc3b: an agent's own entry — another host is REFUSED there, never a card
   picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, only: { keys: (stored.only || []).slice() }, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra, onChange: () => previewNow() }, onChange: () => previewNow() });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
   // THE HOSTS: one list for the members this save writes; the entry's own («the hosts it was stored for») when it has them
-  const common = (() => { if (!members.length) return null; const k = JSON.stringify(members[0].hosts || []); return members.every((m) => JSON.stringify(m.hosts || []) === k) ? members[0].hosts || [] : null; })();
+  // the hosts box and words as a ROW draws them — the open, and a landing from another client (B-f212): the one list every member
+  // shares; the entry's own («the hosts it was stored for») when that list is it, or when no member holds it yet
+  const hostsViewOf = (ms) => {
+    const k = ms.length ? JSON.stringify(ms[0].hosts || []) : null;
+    const common = ms.length && ms.every((m) => JSON.stringify(m.hosts || []) === k) ? ms[0].hosts || [] : null;
+    const entryOnly = !!common && common.length === 1 && common[0] === ENTRY_HOSTS;
+    return { common, own: !ms.length || entryOnly, hosts: common && !entryOnly ? common.filter((h) => h !== ENTRY_HOSTS).join(', ') : '' };
+  };
+  const view0 = hostsViewOf(members), common = view0.common;
   body.append(el('div', 'vw-ak-sec', t('For which hosts')));
   // lane vault-standing-request (B-eba2 — the owner: 「主机是什么东西？我该怎么填」): what a host IS, said where it is typed
   body.append(el('div', 'vw-ak-hint vw-use-hosts-what', u.own ? t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. Another conversation sends an agent\'s value only to the hosts you name here; a command whose destination cannot be told is refused.') : t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.')));   // B-bc3b (the read): an agent's own entry — no card for a grantee
   if (entryHosts.length) {
     const lab = el('label', 'vw-ak-pick vw-use-own');
     ownBox = el('input'); ownBox.type = 'checkbox';
-    ownBox.checked = !members.length || (common && common.length === 1 && common[0] === ENTRY_HOSTS);
+    ownBox.checked = view0.own;
     lab.append(ownBox, el('span', null, t('The hosts it was stored for ({hosts})', { hosts: entryHosts.join(', ') })));
     body.append(lab);
   }
   hostsIn = el('input', 'vault-pw vw-use-hosts');
   hostsIn.type = 'text'; hostsIn.spellcheck = false; hostsIn.autocomplete = 'off';
   hostsIn.placeholder = common === null && members.length ? t('Each keeps its own hosts — or type hosts for all') : t('Host names or addresses, e.g. 192.168.1.1, router.lan');
-  hostsIn.value = common && !(common.length === 1 && common[0] === ENTRY_HOSTS) ? common.filter((h) => h !== ENTRY_HOSTS).join(', ') : '';
+  hostsIn.value = view0.hosts;
   body.append(hostsIn);
   // «让 agent 自己申请» (B-eba2): right under the field the owner could not fill — the agent can ask for exactly this grant, one card to allow
   const askAgent = el('div', 'vw-ak-hint vw-use-ask-agent');
@@ -321,8 +346,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // agent's standing request wrote them); ✕ on its chip takes the member back
   const withCmds = members.filter((m) => Array.isArray(m.commands) && m.commands.length);
   if (withCmds.length) body.append(el('div', 'vw-ak-hint vw-use-cmds', withCmds.map((m) => t('{name} may run: {commands} (kept)', { name: nameOf(m, app), commands: m.commands.map(commandWord).join(', ') })).join(' · ')));
+  // B-f212 (主开发 r365, 1): the dialog SAYS when its row could not be read again (`readRow`) — its view is then the row as last read
+  const stale = el('div', 'vw-ak-hint vw-use-stale'); stale.setAttribute('role', 'status'); stale.hidden = true;
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
-  body.append(err);
+  body.append(stale, err);
   const f = el('div', 'dialog-footer');
   const cancel = el('button', 'btn-cancel', t('Cancel'));
   const save = el('button', 'btn-create vw-use-save', t('Save'));
@@ -339,7 +366,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     // MINOR 1): the held list is the picker's OWN answer (the stored one less a kept-line ✕), so pickToRow keeps exactly what the
     // dialog shows and exceptRemovedOf names the ✕-ed one (passing the stored `held` re-added it — the ✕ did nothing)
     const exNow = picker.except({ held });
-    const pick = pickToRow(picker.knownRows(), picker.selected(), exNow, { held: exNow, only: typeof picker.onlyKeys === 'function' ? picker.onlyKeys() : null, onlyWas: stored.only || [] });   // the chain's cure (C): + «仅本组»
+    const pick = pickToRow(picker.knownRows(), picker.selected(), exNow, { held: exNow, only: typeof picker.onlyKeys === 'function' ? picker.onlyKeys() : null, onlyWas });   // the chain's cure (C): + «仅本组»
     const had = new Map((snap ? snap.to : members).map((m) => [keyOfM(m), m]));   // r11: by the principal; the row as it landed
     const to = [], fresh = [], kept = [], gone = [];
     for (const p of pick.to) {
@@ -359,7 +386,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   };
   // r13 (the readers of B-f212): the owner's own inputs — a change the hub made (a row answered without `use`, a 1-hour window
   // that ended meanwhile) is no reason to count the ends anew
-  const inputsOf = () => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except({ held }).slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '']);
+  const inputsKeyOf = (f) => JSON.stringify(FIELDS.filter((x) => x.name !== 'policy').map((x) => (Array.isArray(f[x.name]) ? [...f[x.name]].map(String).sort() : f[x.name])));   // the owner's inputs: every field but the policy
+  const inputsOf = () => inputsKeyOf(fieldsNow());
   // the plan as THIS press would post it: the ends from the landed pin; a Save whose inputs differ from what landed counts from now
   const planNow = () => {
     saveAt = endPin != null ? endPin : Date.now();
@@ -388,47 +416,136 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     });
     for (const x of plan.removed) preview.append(el('div', 'vw-use-preview-line vw-use-except-gone', t('{name} will no longer be excluded', { name: nameOf(x, app) })));   // r10 (MAJOR): an exception goes only where it is said
   };
-  // r11 (MINOR 3): a Save whose ROW landed — the dialog's snapshot becomes that row (the hub's answer `use`), its 除了 the held
-  // keys, the unsaved guard's start the row as saved (the policy as it was: a close still asks for an unsaved policy)
-  const landedRow = (r, sent, polWas) => {
+  // B-f212: the fields a ROW lands in this dialog — its members and 除了 as picker keys (one the picker has not seen joins its rows,
+  // as at the open), the hosts box and words as the open draws them unless the dialog's own already DESCRIBE the row (the hosts
+  // this dialog's Save wrote, «each keeps its own», a row with no member: nothing moves), its policy when `policy`
+  const describes = (f, ms) => ms.every((m) => {
+    const h = [...new Set((m.hosts || []).map(String))].sort();
+    if (f.own) return JSON.stringify(h) === JSON.stringify([ENTRY_HOSTS]);
+    const typed = [...new Set(String(f.hosts || '').split(/[\s,]+/).filter(Boolean))].sort();
+    return !typed.length || JSON.stringify(h) === JSON.stringify(typed);
+  });
+  const rowFields = (lu, prev, { policy = false } = {}) => {
+    const ms = (lu.to || []).filter(Boolean), known = picker.knownRows();
+    const pk = rowToPick({ to: ms, except: Array.isArray(lu.except) ? lu.except : [] }, known, pickWords());
+    const fresh = (pk.extra || []).filter((x) => !extra.some((y) => y.key === x.key) && !known.some((k) => String(k.key) === x.key));
+    if (fresh.length) { extra.push(...fresh); picker.refresh(); }
+    const v = hostsViewOf(ms), kept = describes(prev, ms);
+    return { selected: pk.selected, except: pk.except, only: pk.only || [], own: kept ? prev.own : ownBox ? v.own : null, hosts: kept ? prev.hosts : v.hosts, ...(policy ? { policy: (lu.policy && lu.policy.text) || '' } : {}) };
+  };
+  // THE LANDING (B-f212, the law: src/lib/landing-merge.js): the page takes what landed where the person changed nothing since
+  // `base`; what the person changed since is KEPT over it and stays unsaved (`clean` = what landed). r11: the snapshot the next
+  // Save is compared against is the row that landed; r10's held 除了 (what a Save writes while no Task Group is picked) is what
+  // the dialog now shows
+  let landings = 0, polLanded = (u.policy && u.policy.text) || '', onlyWas = (stored.only || []).slice();
+  const land = (base, landed) => {
+    const L = landingOf({ base, now: fieldsNow(), landed, clean: clean || {} });
+    clean = L.clean; landings++;
+    held = L.fields.except;
+    // every row of the table, in its order (who first: 除了 and «仅本组» are judged over the members picked): what the page shows
+    // is written only where it is not already what the landing leaves
+    for (const f of FIELDS) if (f.name in L.fields && !sameField(f.read(), L.fields[f.name])) f.write(L.fields[f.name]);
+    if (typeof clean.policy === 'string') polLanded = clean.policy;
+    if (Array.isArray(landed.only)) onlyWas = landed.only.slice();   // «仅本组» as the stored row now has it: what the next Save says switched off
+    previewNow();
+    return L;
+  };
+  // a Save whose ROW landed: the hub's answer names the row (`use`); an older hub's names none — what landed is what was posted
+  // (r11: every next Save then posts the row whole). B-f212 (r11's first follow-up): a member the hub SWEPT at this Save (an
+  // ended 1-hour window it pruned) leaves the picker — kept there, the next Save posted it as new to the row and asked its hosts
+  const landRow = (r, base) => {
     const lu = r && r.use && Array.isArray(r.use.to) ? r.use : null;
     snap = lu ? { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] } : null;
-    held = rowToPick({ to: [], except: snap ? snap.except : sent }, picker.knownRows(), pickWords()).except;
-    // B-f212 (r11's first follow-up): a member the hub SWEPT at this Save (an ended 1-hour window it pruned) leaves the picker
-    // too — kept there, the next Save posted it as a member new to the row and asked for its hosts
-    if (lu) picker.setSelected(rowToPick({ to: snap.to, except: [] }, picker.knownRows(), pickWords()).selected);
-    start = stateOf(polWas);
+    if (lu) { stale.textContent = ''; stale.hidden = true; }   // the hub just answered the row: it was read
+    land(base, lu ? { ...rowFields(lu, base), end: base.end } : asPressed(base));
   };
-  async function doSave() {
+  const asPressed = (base) => Object.fromEntries(FIELDS.filter((f) => f.name !== 'policy').map((f) => [f.name, base[f.name]]));
+  // B-f212 (主开发 r365, 2): ONE SAVE IN FLIGHT. The Save stays live (never a greyed button), but a press while a post is out is
+  // KEPT and posted once that reply has landed, with the fields of THAT moment (the presses of one flight are one kept press).
+  // So every reply lands in the order the hub took the posts, and the dialog closes only when no post is out and nothing is
+  // unsaved (two posts out, released in the other order, closed the dialog on «removed» while the hub held the access)
+  let saving = null, keptPress = null;
+  function doSave() {
+    if (!saving) { saving = saveOnce().finally(() => { saving = null; }); return saving; }
+    if (!keptPress) { const next = () => { keptPress = null; return doSave(); }; keptPress = saving.then(next, next); }
+    return keptPress;
+  }
+  async function saveOnce() {
     err.textContent = '';
     // B-f212: every end of this press's plan counts from the landed pin; r13: a Save the OWNER changed since (another end, a member
     // added, hours later in the same open dialog) counts from THIS press, never a past one
     const plan = planNow();
-    // r14 (主开发's read of r13): THIS Save's instant and inputs, taken at its plan — the preview redraws the shared `saveAt` (and
-    // the owner may edit) while the post is in flight; the landing pins what was POSTED, never what the page shows by then
-    const at = saveAt, inputs0 = inputsOf();
+    // r14 (主开发's read of r13) + B-f212 (the landing law): THIS Save's instant and FIELDS, taken at its plan — the preview redraws
+    // the shared `saveAt` and the person may edit while the post is in flight; the landing pins what was POSTED and keeps what
+    // the person changed since (it stays unsaved)
+    const at = saveAt, base = fieldsNow();
     if (plan.error) { err.textContent = plan.error; return false; }
     const { to, pick, removed, changed } = plan;
-    const polWas = (u.policy && u.policy.text) || '', polNow = polIn.value.trim();
+    const polWas = polLanded, polNow = base.policy;
     // r10 (主开发's acceptance of r9, MAJOR (2)): the ROW is posted only when it changed — a Save that sets only the policy never
     // rewrites the row behind the 验证是你 the owner gives for the policy
     const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except, ...(removed.length ? { removeExcept: removed.map(pkOf) } : {}) }, revealLeftMs() ? revealHeaders() : {});
     let r = { ok: true }, rowSaved = false;
-    if (changed) {
-      r = await send();
-      if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
-      if (r && r.ok) { rowSaved = true; const edited = inputsOf() !== inputs0; landedRow(r, pick.except, polWas); endPin = at; landedInputs = edited ? inputs0 : inputsOf(); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed); the preview redrawn over the picker as landed (the read's nit: setSelected fires no onChange)
+    flying++;
+    try {
+      if (changed) {
+        r = await send();
+        if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
+        if (r && r.ok) { rowSaved = true; landRow(r, base); endPin = at; landedInputs = inputsKeyOf(clean); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed)
+      } else land(base, asPressed(base));   // B-f212: no row to post — the row as stored IS what this press would write (hosts typed in another order, the same row)
+      if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
+        const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});
+        const notPol = t('The members were saved; the policy was not');   // r11 (MINOR 3): the row landed — said, never a silent half
+        let q = await sendP();
+        if (q && q.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) { if (rowSaved) { err.textContent = notPol; refresh?.(); } return false; } q = await sendP(); }
+        if (!q || !q.ok) { err.textContent = rowSaved ? `${notPol} — ${revealWords(q || {})}` : revealWords(q || {}); if (rowSaved) refresh?.(); return false; }
+        land(base, { policy: polNow });   // B-f212: the policy landed — words typed over it since the press stay unsaved
+      }
+      if (r && r.ok) {
+        if (changed) showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); else if (polNow !== polWas) showToast(t('Saved'));
+        // B-f212 (b): a landing closes a CLEAN dialog only. An edit made while the Save was in flight is still unsaved: the dialog
+        // asks, as the person's own close does (Save / Discard / Keep editing); the ask's own Save hears why it is not done
+        if (keptPress) { refresh?.(); return t('what you changed while it was saving'); }   // a press kept during this flight posts next: it closes or asks
+        if (!unsavedNow()) { close(); refresh?.(); return true; }
+        refresh?.();
+        dismiss();
+        return t('what you changed while it was saving');
+      }
+      err.textContent = saveWordsOf(r, plan, (m) => nameOf(m, app));
+      return false;
+    } finally { flying--; if (owed) readRow(); }
+  }
+  // B-f212 (multi-client): another client's save of this row — the vault's ONE notify (`vault-contents`) — lands here by the same
+  // law, its base what this dialog last knew (`clean`). The dialog reads its row again: one read at a time, never while its own
+  // Save is in flight (that answer lands first), and a read that began before one of this dialog's landings is read again (its
+  // row may be older than what landed)
+  let flying = 0, reading = false, owed = false;
+  async function readRow() {
+    if (gone) return;
+    if (flying || reading) { owed = true; return; }
+    reading = true; owed = false;
+    const at = landings;
+    let r = null;
+    try { r = await fetchJson('/api/vault/contents', { headers: revealHeaders() }); } catch { r = null; }
+    reading = false;
+    if (gone) return;
+    if (flying || at !== landings) owed = true;
+    else {
+      // B-f212 (主开发 r365, 1): A ROW THAT COULD NOT BE READ IS NOT AN EMPTY ROW — unknown is never read as empty. A row marked
+      // unknown (the hub could not read its grants: it answers empty lists), unverified (a locked vault cannot verify them), a
+      // failed read, a locked vault, an entry that is gone: the landing is NOT taken — the dialog keeps its view and says so; a
+      // Save then meets the hub's refusal by name, as before
+      const listed = !!r && r.ok !== false && Array.isArray(r.rows);
+      const x = listed ? r.rows.find((y) => y && y.id === row.id) : null, lu = x && x.run ? x.run.use : null;
+      const locked = (r && (r.code === 'vault_locked' || r.state === 'locked')) || !!(lu && lu.unverified);
+      const word = locked ? t('The vault is locked — who may use it could not be read just now; this shows it as last read')
+        : !listed ? t('Who may use it could not be read just now — this shows it as last read')
+          : !x ? t('«{name}» was removed from the vault', { name: row.label })
+            : !lu || lu.unknown || !Array.isArray(lu.to) ? t('Who may use it could not be read just now — this shows it as last read') : '';
+      stale.textContent = word; stale.hidden = !word;
+      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; land(clean, rowFields(lu, clean, { policy: true })); }
     }
-    if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
-      const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});
-      const notPol = t('The members were saved; the policy was not');   // r11 (MINOR 3): the row landed — said, never a silent half
-      let q = await sendP();
-      if (q && q.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) { if (rowSaved) { err.textContent = notPol; refresh?.(); } return false; } q = await sendP(); }
-      if (!q || !q.ok) { err.textContent = rowSaved ? `${notPol} — ${revealWords(q || {})}` : revealWords(q || {}); if (rowSaved) refresh?.(); return false; }
-    }
-    if (r && r.ok) { if (changed) showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); else if (polNow !== polWas) showToast(t('Saved')); close(); refresh?.(); return true; }
-    err.textContent = saveWordsOf(r, plan, (m) => nameOf(m, app));
-    return false;
+    if (owed && !flying) readRow();
   }
   save.onclick = () => { doSave(); };
   saveNow = doSave;
@@ -436,5 +553,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   previewNow = drawPreview; drawPreview();
   f.append(cancel, save);
   body.parentNode.append(f);
-  start = stateOf();
+  clean = fieldsNow();
+  if (app && app.ws && typeof app.ws.onGlobal === 'function') {
+    const onContents = (m) => { if (m && m.type === 'vault-contents') readRow(); };
+    app.ws.onGlobal(onContents);
+    offContents = () => { try { app.ws.offGlobal(onContents); } catch { } };
+  }
 }

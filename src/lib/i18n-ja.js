@@ -14635,4 +14635,8 @@ export default {
   "allowed by you, {when}": "あなたが許可、{when}",
   "it may run prompts still queued for it by itself — resume it yourself": "キューに残っているプロンプトを自動で実行する可能性があります — ご自身で再開してください",
   "what its resume starts by itself is not known — resume it yourself": "再開時に自動で何が始まるか分かりません — ご自身で再開してください",
+  "what you changed while it was saving": "保存中に変更した内容",
+  "The vault is locked — who may use it could not be read just now; this shows it as last read": "保管庫はロック中 — 誰が使えるかを今は読めません。表示は最後に読んだ内容です",
+  "Who may use it could not be read just now — this shows it as last read": "誰が使えるかを今は読めません — 表示は最後に読んだ内容です",
+  "«{name}» was removed from the vault": "「{name}」は保管庫から削除されました",
 };
