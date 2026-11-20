@@ -490,6 +490,7 @@ async function stoppedSessions() {
       startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || (accountBoundOf(m.backend) ? 'subscription' : null), kept: e.sockFile,
       ...(m.endedBy && typeof m.endedBy === 'object' ? { endedBy: m.endedBy } : {}), // lane end-obeys-verdict: who ended it on purpose
       ...(m.host ? { host: m.host } : {}), // its MACHINE: a paired machine's conversation is never listed as a local row (a resume goes there)
+      ...(m.nameExplicit === true && m.name ? { nameExplicit: true, webuiName: m.name } : {}), // THE NAME LADDER: a GIVEN name is rung ② (src/session-name.js); a default is not
       ...(k.startsWith('sock:') ? { forkPending: true } : {}) }); // a pending fork's copy: kept and listed here, but `id` is its PARENT's — no sidebar row (routes/sessions)
   }
   return rows;

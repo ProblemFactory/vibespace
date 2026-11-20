@@ -78,7 +78,7 @@ const payload = {
     { backend: 'other', backendSessionId: 'o2', sessionId: 'o2', cwd: '/srv/work/o', startedAt: T0 + 60 * 6e4, status: 'live', pid: 4242, name: 'a sign-in\'s own' },
   ] },
   signInPids: [4242],
-  kept: [{ backend: 'claude', backendSessionId: sids[3], sessionId: sids[3], status: 'stopped', name: 'the name the person knew', accountId: 'acc-kept', stopReason: 'hub-restart', stoppedAt: T0 + 1, kept: true }],
+  kept: [{ backend: 'claude', backendSessionId: sids[3], sessionId: sids[3], status: 'stopped', name: 'the name the person knew', nameExplicit: true, webuiName: 'the name the person knew', accountId: 'acc-kept', stopReason: 'hub-restart', stoppedAt: T0 + 1, kept: true }],
   bound: ['other'],
   facts: { roots: SP.snapshot(), blocked: DOOR.snapshot() },
 };
@@ -113,7 +113,7 @@ const inlList = JSON.parse(inl ? inl.buf.toString() : '{"sessions":[]}').session
 ok(iOf(sids[11]) >= 0 && Math.abs(iOf(sids[10]) - iOf(sids[11])) === 1 && iOf(sids[10]) === iIn(sids[10]) && iOf(sids[11]) === iIn(sids[11]), `a tie (one mtime): adjacent, in the walk's own order on both roads (${iOf(sids[11])}, ${iOf(sids[10])})`);
 const linked = rows.find((r) => r.sessionId === sids[7]), keptRow = rows.find((r) => r.sessionId === sids[3]);
 ok(linked && linked.cwd === LINK && linked.realCwd === fs.realpathSync(LINK), `a symlinked cwd carries its realpath (${linked && linked.realCwd})`);
-ok(keptRow && keptRow.name === 'the name the person knew' && keptRow.accountId === 'acc-kept' && keptRow.stopReason === 'hub-restart', 'a kept meta lends its stopped row the name, the account and why it stopped');
+ok(keptRow && keptRow.name === 'the name the person knew' && keptRow.nameExplicit === true && keptRow.accountId === 'acc-kept' && keptRow.stopReason === 'hub-restart', 'a kept meta lends its stopped row its GIVEN name (nameExplicit — the name ladder: a default never replaces the discovered name), the account and why it stopped');
 ok(rows.some((r) => r.sessionId === 'o1' && r.sessionKey === 'other:o1') && !rows.some((r) => r.sessionId === 'o2'), 'another harness\'s row is merged (keyed); a sign-in\'s own process is never a row');
 
 console.log('③ the rows a resume\'s account lookup reads');
@@ -199,7 +199,7 @@ console.log('⑤b the resume seam over the sweep\'s rows (B-a5a4 follow-up, met)
   // the route's own sweep through the REAL worker (a module copy of the route: its own pool), then the seam with no rows handed —
   // the claude row's account lives only in its copy: the copy at the sweep named one account, the copy kept since another
   const SRC = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8'), HAND = '_sweptStopped = Array.isArray(out.heldDisc) ? out.heldDisc : null;';
-  const keptAt = (accountId) => ({ backend: 'claude', backendSessionId: sids[3], sessionId: sids[3], status: 'stopped', name: 'the name the person knew', accountId, stopReason: 'hub-restart', stoppedAt: T0 + 1, kept: true });
+  const keptAt = (accountId) => ({ backend: 'claude', backendSessionId: sids[3], sessionId: sids[3], status: 'stopped', name: 'the name the person knew', nameExplicit: true, webuiName: 'the name the person knew', accountId, stopReason: 'hub-restart', stoppedAt: T0 + 1, kept: true });
   const seamOf = async (Mod) => {
     try {
       Mod.setup({ ...routeCtx(), stoppedSessions: async () => [keptAt('acc-then')] });
@@ -259,7 +259,7 @@ lock(kL, uuid(), LIVE_CWD);   // the live conversation's lock names ANOTHER id: 
 lock(kT, sidT, TMUX_CWD); lock(kE, sidE, EXT_CWD);
 fs.writeFileSync(PANES, `${kT}||work:0.1\n`);
 const liveTable = new Map([['sess-live', { backend: 'claude', claudeSessionId: sidL, backendSessionId: sidL, _childPid: kL, cwd: LIVE_CWD, name: 'a live one' }]]);
-const keptMeta = [{ backend: 'claude', backendSessionId: sidK, sessionId: sidK, status: 'stopped', name: 'kept by its name', stopReason: 'hub-restart', stoppedAt: T8, kept: true }];
+const keptMeta = [{ backend: 'claude', backendSessionId: sidK, sessionId: sidK, status: 'stopped', name: 'kept by its name', nameExplicit: true, webuiName: 'kept by its name', stopReason: 'hub-restart', stoppedAt: T8, kept: true }];
 const routeSrc = fs.readFileSync(path.join(REPO, 'src/routes/sessions.js'), 'utf8');
 const RL = mutantCopies('sessions-sweep-live', REPO).load('src/routes/sessions.js', routeSrc, 'live', { same: true });   // a fresh route (its own pool, its own cache)
 RL.setup({ ...routeCtx(), activeSessions: liveTable, webuiPids: new Set([kL]), stoppedSessions: async () => keptMeta });

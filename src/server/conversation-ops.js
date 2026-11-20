@@ -340,7 +340,7 @@ function opsOver(getDeps) {
   // wrapper's sidecar before the kill (boot-restore endFactsBefore, at most a second — a Terminate never waits longer).
   const keptMetaOf = (s, id) => ({ webuiSessionId: id, backend: s.backend || 'claude', backendSessionId: s.backendSessionId || s.claudeSessionId || null,
     claudeSessionId: s.claudeSessionId || null, name: s.name || '', cwd: s.cwd || '', mode: s.mode || 'terminal', accountId: s._accountId || null,
-    createdAt: s.createdAt || null, host: s.host || null });
+    createdAt: s.createdAt || null, host: s.host || null, ...(s._nameExplicit === true ? { nameExplicit: true } : {}) });   // THE NAME LADDER: the record says whether its name was GIVEN (a creation's / a rename's) — a default never outranks a discovered first message
   const endedByOf = (by) => {
     if (!(by && by.kind === 'automation')) return { kind: 'person', actorId: null, name: null, ...(by && by.proposedBy && by.proposedBy.key ? { proposedBy: { key: String(by.proposedBy.key).slice(0, 200), name: by.proposedBy.name ? String(by.proposedBy.name).slice(0, 120) : null } } : {}) };   // a person's sign-in handle is never stored as the actor's id (must 5); lane login-request-card (the cure's law 12): the proposal card's press names its proposer beside the person
     let name = null; try { name = typeof D().keyNameOf === 'function' ? D().keyNameOf(by.key) || null : null; } catch { name = null; }

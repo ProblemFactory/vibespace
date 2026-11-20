@@ -149,6 +149,10 @@ const LIVE_SESSION_FACTS = Object.freeze({
   // so the card's "N waiting" hint and the chat's strip are PATCHED in place from the payload (patchStashHints
   // below, ChatInput's strip) — a stash change never re-renders the list
   stash: { digest: null },
+  // the manager design's piece 7 (rule 3): {key, params, at} — a DELIVERY resumed it. The window's line reads it from the RAW list
+  // (chat-view _onActiveSessions); carried so the MERGED row holds it too (the census: published ⇒ carried or read by name) —
+  // no sidebar surface draws it, so it re-renders nothing
+  resumedBy: { digest: null },
   // lane bypass-no-prompts: how many of the CLI's own asks the bypass door answered this run (server.js `autoAllowed`) —
   // CARRIED-ONLY: Session Properties reads the merged row when it opens; no card draws it
   autoAllowed: { digest: null },

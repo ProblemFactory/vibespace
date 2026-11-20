@@ -51,8 +51,8 @@ function withSessionKey(session = {}) {
 }
 /** THE READ-BACK (lane dead-socket-keeps-chat-meta), PURE over rows: the metas a boot kept for dead local sessions (ctx
  *  .stoppedSessions — boot-restore) merged into the discovered rows, `rows` grown in place. A harness's own STOPPED row of
- *  the same conversation takes why it stopped and when, and the name / account / mode the session had (the name the person
- *  knew wins over a CLI title; a row's own account stays); a live or external row is the conversation running — the meta
+ *  the same conversation takes why it stopped and when, and the account / mode the session had, and its name only when it
+ *  was GIVEN (a given name wins over a CLI title — rung ②; a default never replaces the discovered first message; a row's own account stays); a live or external row is the conversation running — the meta
  *  adds nothing; no row (a harness with no discover, an index not read yet) ⇒ the meta's own row. */
 function mergeKeptStopped(rows, kept) {
   const keyOf = (r) => `${r.backend || 'claude'}:${r.backendSessionId || r.sessionId}`;
@@ -62,7 +62,11 @@ function mergeKeptStopped(rows, kept) {
     const r = byKey.get(keyOf(k));
     if (!r) { const n = withSessionKey(k); touched++; rows.push(n); byKey.set(keyOf(k), n); continue; }
     if (r.status !== 'stopped') continue;
-    Object.assign(r, { stopReason: k.stopReason, stoppedAt: k.stoppedAt, kept: k.kept, name: k.name || r.name, accountId: r.accountId || k.accountId || null, mode: r.mode || k.mode,
+    // THE NAME LADDER (主开发 2026-11-20 03:06Z): keeping a record never LOWERS a conversation's name — a kept name joins only when it was
+    // GIVEN (nameExplicit: a creation's / a rename's, then rung ② judges it); else the discovered name (the first message) stands
+    const given = k.nameExplicit === true && !!k.name;
+    Object.assign(r, { stopReason: k.stopReason, stoppedAt: k.stoppedAt, kept: k.kept, name: given ? k.name : (r.name || k.name), accountId: r.accountId || k.accountId || null, mode: r.mode || k.mode,
+      ...(given ? { nameExplicit: true, webuiName: k.name } : {}),
       ...(k.endedBy ? { endedBy: k.endedBy } : {}), ...(k.host && !r.host ? { host: k.host } : {}) }); // lane end-obeys-verdict: who ended it on purpose, and its machine, join the merge
   }
   return rows;

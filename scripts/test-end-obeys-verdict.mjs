@@ -467,5 +467,35 @@ console.log('⑩ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05
   ok(rel.ended === 1 && listed(relList) && !relList.r.groupsUnreadable, 'CONTROL — the store READ (no hold): the same key ends and lists the target (its groups read [] are real: in no group)', { ended: rel.ended, listed: listed(relList) });
 }
 
+console.log('⑪ THE NAME LADDER (主开发 2026-11-20 03:06Z): keeping a record of an end never LOWERS a conversation\'s name');
+{
+  const SA = require(path.join(REPO, 'src/sessions-assemble.js')), SN = require(path.join(REPO, 'src/session-name.js'));
+  const SA_SRC = fs.readFileSync(path.join(REPO, 'src/sessions-assemble.js'), 'utf8');
+  // a person ENDS an untitled conversation (no CLI title: an older claude, codex, an ACP harness, a turn before any title) whose live
+  // name is the creation default, and one whose name was GIVEN — through the REAL writer (keepEnded) and the REAL read-back (stoppedSessions)
+  const NOT = 'e2e00000-0000-4000-8000-0000000000c1', GIV = 'e2e00000-0000-4000-8000-0000000000c2', FIRST = 'Draft the launch post for bravo';
+  active.set('sess-n1', session({ backendSessionId: NOT, sockName: 'cw-21-1794880000021', name: 'Session 2' }));
+  active.set('sess-n2', session({ backendSessionId: GIV, sockName: 'cw-22-1794880000022', name: 'My launch notes', _nameExplicit: true }));
+  await ops().endConversation({ sessionId: 'sess-n1' }, { kind: 'human', actBy: 'person@sign-in' });
+  await ops().endConversation({ sessionId: 'sess-n2' }, { kind: 'human', actBy: 'person@sign-in' });
+  const kept = (await api.stoppedSessions()).filter((r) => r.backendSessionId === NOT || r.backendSessionId === GIV);
+  // discovery's own STOPPED rows of the same conversations: named by the first message (discovery-facts nameFromUserRecord)
+  const disc = () => [NOT, GIV].map((c) => ({ backend: 'claude', sessionId: c, backendSessionId: c, status: 'stopped', name: FIRST, startedAt: 1 }));
+  const rowOfC = (c, rows) => rows.find((r) => r.backendSessionId === c) || {};
+  const merged = SA.mergeKeptStopped(disc(), kept);
+  ok(kept.length === 2 && SN.sessionDisplayName(rowOfC(NOT, merged)) === FIRST && rowOfC(NOT, merged).stopReason === 'ended',
+    'an UNTITLED conversation a person ENDS is named by its FIRST MESSAGE (the sidebar / window / taskbar ladder over the merged row) — never the creation default «Session 2»; the row still says it was ended', { kept: kept.map((k) => ({ name: k.name, nameExplicit: k.nameExplicit })), name: SN.sessionDisplayName(rowOfC(NOT, merged)) });
+  ok(SN.sessionDisplayName(rowOfC(GIV, merged)) === 'My launch notes' && rowOfC(GIV, merged).nameExplicit === true,
+    'a GIVEN name (at creation / by a rename) survives the end: the record carries the mark and rung ② names the row (over the first message)', rowOfC(GIV, merged));
+  // a RESTART's kept copy (a dead socket) takes the same merge — the class is older than the end record
+  const dead = [{ backend: 'claude', sessionId: NOT, backendSessionId: NOT, status: 'stopped', stopReason: 'dead-socket-at-boot', name: 'Session 3' }];
+  ok(SN.sessionDisplayName(rowOfC(NOT, SA.mergeKeptStopped(disc(), dead))) === FIRST, 'a RESTART\'s kept copy with a default name: the first message stands too', null);
+  // RED: the merge as the release had it — the kept name taken whenever it has one
+  const AT = 'name: given ? k.name : (r.name || k.name)';
+  const MS = mutantCopies('name-ladder', REPO).load('src/sessions-assemble.js', anchored(SA_SRC, AT, 'name: k.name || r.name', 'kept-name-always'), 'kept-name-always');
+  const redName = SN.sessionDisplayName(rowOfC(NOT, MS.mergeKeptStopped(disc(), kept)));
+  ok(redName === 'Session 2', 'RED CONTROL: the merge taking the kept name whenever it has one — the ended untitled conversation reads «Session 2» (what the hosted run saw)', redName);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
