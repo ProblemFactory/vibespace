@@ -305,7 +305,17 @@ else {
   if (opened && opened.ok) {
     await typeAndSend('LONG-1 a turn that runs for a while');
     const streaming = await until(() => ev("!!document.querySelector('.chat-interrupt-btn')"), 10000, 100);
-    ok(streaming && capTexts().some((t) => t.includes('LONG-1')), '§B the first message started a turn (the Stop button is up, the CLI got it)', capTexts());
+    const tButton = Date.now();
+    ok(streaming, '§B the first message started a turn: the Stop button is up');
+    // (主开发 2026-11-20, 2.369.413's hosted run 44681506506: the capture was read ONCE right after the button and was empty —
+    // the hub raises the button when it ACCEPTS the send, before it writes the frame toward the CLI, src/server/user-input.js;
+    // a later leg counted that very frame) — what the CLI received is WAITED for with a bound of its own, and the time from the
+    // button to the capture is printed every run, pass or miss: over CAP_SLOW_MS it is said as slow (a first message that
+    // reached the CLI seconds after the button showed would be the product's, and the wait must not hide it)
+    const CAP_BOUND_MS = 10000, CAP_SLOW_MS = 2000;
+    const gotFirst = await until(() => capTexts().some((t) => t.includes('LONG-1')), CAP_BOUND_MS, 25);
+    const capMs = Date.now() - tButton;
+    ok(gotFirst, `§B …and the CLI got it: the stand-in's capture holds the frame ${gotFirst ? capMs + ' ms after the button' : 'NOT within ' + CAP_BOUND_MS + ' ms of the button'}${gotFirst && capMs > CAP_SLOW_MS ? ' — SLOW (over ' + CAP_SLOW_MS + ' ms)' : ''}`, { capture: capTexts(), capMs });
     await typeAndSend('these words are held mid-turn', { alt: true });
     const STRIP = `(() => { const s = document.querySelector('.chat-queue-strip'); const rows = s ? [...s.querySelectorAll('[data-queue-id]')].map((b) => b.dataset.queueId) : []; return { visible: !!(s && !s.classList.contains('hidden') && s.getBoundingClientRect().height > 0), text: s ? s.textContent : '', edits: s ? s.querySelectorAll('[data-queue-op="edit"]').length : 0, removes: s ? s.querySelectorAll('[data-queue-op="remove"]').length : 0, steers: s ? s.querySelectorAll('[data-queue-op="steer"],[data-queue-op="steer-all"],[data-queue-op="run-now"],[data-queue-op="run-all"]').length : 0, ids: [...new Set(rows)] }; })()`;
     await until(async () => (await ev(STRIP)).visible, 8000, 100);
