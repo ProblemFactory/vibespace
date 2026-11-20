@@ -573,6 +573,8 @@ html, body {
    truncates; under 6em left it takes the next line instead of a bare "…". */
 .acct-key-extra { flex-basis: 100%; font-size: 10px; min-width: 0; display: flex; flex-wrap: wrap; align-items: center; column-gap: 4px; white-space: nowrap; }
 .acct-key-extra > .acct-blocked-hint { flex: none; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+/* B-6a92: the row's own window unknown (its readings name another account's window) — its own full-width line under the name, wrapped */
+.acct-key-foreign { flex-basis: 100%; min-width: 0; font-size: 10px; line-height: 13px; color: var(--yellow); white-space: normal; overflow-wrap: anywhere; }
 .acct-extra-soft { flex: 1 1 0; min-width: min(6em, 100%); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Login-session expiry chip (2026-09-07). It IS the re-login button, so it
    reads as clickable. The SVG carries an EXPLICIT size: an unsized inline SVG
@@ -6263,6 +6265,7 @@ body.sidebar-right .sidebar.rail-collapsed { transform: translateX(0); }
   .acct-list > .acct-key-row > .acct-usage-cell:not(:empty) { margin-left: 6px; }
   .acct-list > .acct-key-row > .acct-key-main > .acct-key-line > .acct-reset-slot { grid-area: reset; justify-self: end; max-width: 100%; margin-left: 0; }
   .acct-list > .acct-key-row > .acct-key-main > .acct-key-extra { grid-area: extra; }
+  .acct-list > .acct-key-row > .acct-key-main > .acct-key-foreign { grid-column: 1 / -1; }   /* B-6a92: the unknown-window line spans the row (never auto-placed into the name's cell) */
   .acct-list > .acct-key-row > .acct-key-main > .acct-key-extra > .acct-blocked-hint { overflow-wrap: normal; word-break: normal; }
 }
 /* THE NAME'S OWN LINE (lane ui-phone-and-fit M2 — the sidebar's 200 px floor leaves the roster ~128 px: line 1 of the rung

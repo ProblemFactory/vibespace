@@ -571,7 +571,7 @@ export function machineLoginLinkHint(name, vendor = 'Anthropic') {
 // or was filed. The other account is named as the person named it (never an address; «another account» when it has no name).
 export function windowUnknownHtml(wu) {
   const other = (Array.isArray(wu && wu.otherNames) ? wu.otherNames : []).find((n) => typeof n === 'string' && n) || t('another account');
-  return `<span class="acct-usage-unread acct-usage-foreign">${escHtml(t('Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it', { other }))}</span>`;
+  return `<span class="acct-key-foreign acct-usage-foreign">${escHtml(t('Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it', { other }))}</span>`;
 }
 export function unreadUsageHtml() {
   return `<span class="acct-usage-unread">${escHtml(t('no reading yet — confirms when a session uses it'))}</span>`;
@@ -1720,10 +1720,12 @@ export function installManageAgents(App, ctx = {}) {
     if (!u) return '';
     // B-6a92: a row whose own window is UNKNOWN says so by the other account's name first; its own last reading (if any) follows —
     // never the other account's numbers (the engine never filed them)
+    // B-6a92: the cell keeps the row's OWN last reading only; the words of its unknown window are the row's own line
+    // (acct-key-foreign, under its name) — never squeezed into the cell, and never «no reading yet» (sessions DO use it)
     if (u.windowUnknown) {
       const own = { ...u }; delete own.windowUnknown;
       const unread = !Array.isArray(own.windows) && quotaModel.memberProofState(own, Date.now()) === 'unread';
-      return windowUnknownHtml(u.windowUnknown) + (unread ? '' : ' ' + this._acctUsageHtml(own, est, probeNote, backend));
+      return unread ? '' : this._acctUsageHtml(own, est, probeNote, backend);
     }
     const now = Date.now();
     // a reading that states no window at all is NO READING (quota-model memberProofState) — words, never 0 % donuts (r2)
@@ -3505,7 +3507,7 @@ export function installManageAgents(App, ctx = {}) {
       // modal AND panel; real screenshot report). Star stays direct: most-used.
       return `<div class="acct-key-row${isDef ? ' is-default' : ''}${blocked ? ' acct-row-blocked' : ''}" data-id="${escHtml(a.id)}" data-sub="${isSub ? '1' : ''}"${blocked ? ' data-blocked="1"' : ''}${hostSub ? ' data-hostsub="1"' : ''}${linked ? ' data-linked="1"' : ''}${isPool ? ' data-pooled="1"' : ''}>
         <span class="acct-type-icon" title="${iconTitle}">${isPool ? POOL : isSub ? CROWN : KEY}</span>
-        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${extrasTag}</span>
+        <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name" title="${escHtml(a.name)}">${escHtml(a.name)}</span><span class="acct-key-tail">${ident}${hint}</span>${creditsTag}${resetTag ? `<span class="acct-reset-slot">${resetTag}</span>` : ''}</span>${extrasTag}${rowSnap && rowSnap.u && rowSnap.u.windowUnknown ? windowUnknownHtml(rowSnap.u.windowUnknown) : ''}</span>
         <span class="acct-usage-cell"${usageStampAttrs}>${rowSnap ? usageHtml(rowSnap.u, rowSnap.est, probeNote) : isSub && !isPool && usageStamp && usageStamp.src === 'accounts' ? unreadUsageHtml() : ''}</span>
         <span class="acct-key-actions">
           <button class="acct-icon acct-def ${isDef ? 'on' : ''}" title="${isDef ? t('Default for new sessions — click to clear') : t('Set as default for new sessions')}">${isDef ? STAR_F : STAR_O}</button>
