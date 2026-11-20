@@ -152,12 +152,34 @@ async function chrome(argv, tag) {
   await call('Page.enable');
   await call('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // the chrome-suite census (no VibeSpace page here — harmless)
   return {
-    async open(url) {
+    // A READ OF A PAGE IS TIED TO ITS OWN NAVIGATION (主开发 r110, 2026-11-20 — the release mirror 44726884611 read '' on ④'s
+    // first leg): the wait ended on ANY load event, and a fresh Chrome's first page can still send its own load into the
+    // emptied list, so the text was read from a document not parsed yet. Now the document we leave is MARKED before the
+    // navigate; the read counts only in a document without that mark whose load has completed (readyState 'complete'), and
+    // polls inside its bound (10 s after the navigate's reply, the old wait's) until the body SAYS something. A text still
+    // empty at the bound comes back with `said`: red BY NAME with the bound in it (each leg prints what open() returned).
+    // A failed navigation (errorText: Chrome's own error page) waits for its document alone; its legs judge the error.
+    // `plantStale` and `anyLoad` are the CONTROL's (④ end): a stale load event planted in the emptied list, the old rule.
+    async open(url, { boundMs = 10000, plantStale = false, anyLoad = false } = {}) {
       events.length = 0;
+      if (plantStale) events.push({ method: 'Page.loadEventFired', params: { planted: true } });
+      await call('Runtime.evaluate', { expression: 'document.__vsLeft = true', returnByValue: true });
       const nav = await call('Page.navigate', { url });
-      for (let i = 0; i < 100 && !events.some((e) => e.method === 'Page.loadEventFired'); i++) await sleep(100);
-      const r = await call('Runtime.evaluate', { expression: 'document.body ? document.body.innerText : ""', returnByValue: true });
-      return { text: String((r.result && r.result.result && r.result.result.value) || ''), errorText: nav.result && nav.result.errorText };
+      const errorText = nav.result && nav.result.errorText;
+      const read = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, returnByValue: true }); const o = r.result && !r.result.exceptionDetails && r.result.result; return o && o.type === 'string' ? o.value : null; };   // a string, or null (not this document yet, a context gone mid-navigation, no reply)
+      if (anyLoad) {   // THE OLD RULE, for the control only: any load event ends the wait, one read
+        for (let i = 0; i < 100 && !events.some((e) => e.method === 'Page.loadEventFired'); i++) await sleep(100);
+        return { text: String((await read('document.body ? document.body.innerText : ""')) || ''), errorText, rule: 'any load event' };
+      }
+      const t0 = Date.now();
+      let v = null;
+      while (Date.now() - t0 < boundMs) {
+        v = await read(`document.__vsLeft || document.readyState !== 'complete' ? null : (document.body ? document.body.innerText : '')`);
+        if (v !== null && (v !== '' || errorText)) break;
+        await sleep(v === null ? 50 : 100);
+      }
+      const text = String(v || '');
+      return { text, errorText, ms: Date.now() - t0, ...(text || errorText ? {} : { said: `the page of ${url} said nothing within ${boundMs / 1000} s (${v === null ? 'its document never finished loading' : 'its document loaded with an empty body'})` }) };
     },
     async shot(file) { const r = await call('Page.captureScreenshot', { format: 'png' }); if (r.result && r.result.data) fs.writeFileSync(file, Buffer.from(r.result.data, 'base64')); return fs.existsSync(file) ? fs.statSync(file).size : 0; },
     // r5: Browser.close bounded (2 s), then 3 s for the exit, then the pid we hold is killed
@@ -316,6 +338,19 @@ console.log('④ LAW 2\'s page in the in-page browser (/proxy) AFTER the ordinar
     await br.shot(path.join(SHOTS, 'embedded-untrusted-cert-en.png'));
     ok('N5 + r3 N6 — the user\'s own shape (a self-signed certificate): «peer-alpha answered through Tailscale, but with a certificate the in-page browser does not trust (self-signed?) — it cannot open it from here: give the device a trusted certificate (tailscale cert)»; the detail line the code + plain words (no Node hint, no backticks) — never «is that device online?»',
       r3.text.startsWith('peer-alpha answered through Tailscale, but with a certificate the in-page browser does not trust (self-signed?) — it cannot open it from here: give the device a trusted certificate (tailscale cert)') && /DEPTH_ZERO_SELF_SIGNED_CERT — self-signed certificate/.test(r3.text) && !/use-system-ca|Node\.js|`|online\?/.test(r3.text), r3);
+  }
+  {
+    // ④ CONTROL (open()'s tie to its own navigation): a page whose words come 1.5 s after its first bytes, opened with a STALE
+    // load event planted in the emptied list (the race of the release mirror, made). The OLD rule (any load event, one read)
+    // ends on the plant and never reads the words; open() over the same plant reads them; a page whose body stays empty is
+    // red BY NAME with its bound.
+    const late = await listen(http.createServer((q, res) => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' }); res.write('<!doctype html><title>late</title><body>'); if (q.url.startsWith('/empty')) return res.end('</body>'); setTimeout(() => res.end('LATE-OK</body>'), 1500); }));
+    const old = await br.open(`http://127.0.0.1:${late}/old`, { plantStale: true, anyLoad: true });
+    ok('CONTROL (the plant is real): the OLD wait, over a planted stale load event, reads before the page said its words', old.text !== 'LATE-OK', old);
+    const tied = await br.open(`http://127.0.0.1:${late}/tied`, { plantStale: true });
+    ok('…open(), tied to its own navigation, reads the page\'s words over the same plant', tied.text === 'LATE-OK' && !tied.said, tied);
+    const mute = await br.open(`http://127.0.0.1:${late}/empty`, { boundMs: 2000 });
+    ok('…and a page whose body stays empty is red BY NAME with its bound', mute.text === '' && mute.said === `the page of http://127.0.0.1:${late}/empty said nothing within 2 s (its document loaded with an empty body)`, mute);
   }
   await br.close(); await door.close();
   if (process.env.VS_SHOT_DIR) console.log(`  (screenshots kept in ${SHOTS})`);

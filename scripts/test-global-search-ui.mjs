@@ -119,11 +119,16 @@ else await (async () => {
   const send = (method, params = {}) => new Promise((r) => { const id = ++seq; pend.set(id, r); cdp.send(JSON.stringify({ id, method, params })); });
   const S = JSON.stringify;
   let holdRunning = false; // ⑦: while set, a /status answer the page asks for is the real one with the walk shown RUNNING
-  cdp.on('message', async (d) => {
-    const m = JSON.parse(d); if (m.method !== 'Fetch.requestPaused') return;
+  let holdStatus = null;    // ⑦'s CONTROL: while an array, a /status request the page asks for waits in it UNANSWERED (released by answerStatus)
+  const answerStatus = async (requestId) => {
     const real = (await status()) || {};
     const body = holdRunning ? { ...real, backfill: { ...(real.backfill || {}), running: true, done: 1, total: 2 }, index: real.index ? { ...real.index, lastBuild: null } : real.index } : real;
-    send('Fetch.fulfillRequest', { requestId: m.params.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify(body)).toString('base64') });
+    send('Fetch.fulfillRequest', { requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(JSON.stringify(body)).toString('base64') });
+  };
+  cdp.on('message', async (d) => {
+    const m = JSON.parse(d); if (m.method !== 'Fetch.requestPaused') return;
+    if (holdStatus) { holdStatus.push(m.params.requestId); return; }
+    await answerStatus(m.params.requestId);
   });
   const ev = async (js) => {
     const r = await send('Runtime.evaluate', { expression: `(async () => { const app = window.app, wm = app.wm; const sw = () => [...wm.windows.values()].find((w) => w.type === 'search') || null; const q = (s) => sw()?.content.querySelector(s) || null; const qa = (s) => [...(sw()?.content.querySelectorAll(s) || [])]; ${js} })()`, returnByValue: true, awaitPromise: true });
@@ -154,18 +159,32 @@ else await (async () => {
   await ev(`document.querySelector('.global-settings-popover .gs-menu-item[data-id="tools"]').click(); return true;`);
   const toolsRow = await until(() => ev(`return [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].some((r) => /^Search everything…/.test(r.textContent.trim()));`), 3000);
   ok(toolsRow, 'the Tools flyout lists "Search everything…"', await ev(`return [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].map((r) => r.textContent.trim()).join(' | ');`));
-  await ev(`[...document.querySelectorAll('.global-settings-popover .gs-menu-item')].find((r) => /^Search everything…/.test(r.textContent.trim()))?.click(); return true;`);
+  await ev(`window.__gsClickAt = Date.now(); [...document.querySelectorAll('.global-settings-popover .gs-menu-item')].find((r) => /^Search everything…/.test(r.textContent.trim()))?.click(); return true;`);
   ok(await until(() => ev(`return !!sw();`), 4000), 'the row opened a window of type `search`');
   const box0 = await until(() => ev(`return document.activeElement === q('.search-input');`), 3000);
   ok(box0, 'the search box holds the focus');
-  await ev(`window.__gsStatusNode = q('.search-status'); window.__gsTexts = []; new MutationObserver(() => window.__gsTexts.push(window.__gsStatusNode.textContent)).observe(window.__gsStatusNode, { childList: true, characterData: true, subtree: true }); window.__gsTexts.push(window.__gsStatusNode.textContent); app.wm.focusWindow && null; return true;`);
+  await ev(`window.__gsStatusNode = q('.search-status'); window.__gsTexts = []; window.__gsAt = []; new MutationObserver(() => { window.__gsTexts.push(window.__gsStatusNode.textContent); window.__gsAt.push(Date.now()); }).observe(window.__gsStatusNode, { childList: true, characterData: true, subtree: true }); window.__gsTexts.push(window.__gsStatusNode.textContent); window.__gsAt.push(Date.now()); app.wm.focusWindow && null; return true;`);
   await ev(`app.openSearch({}); return true;`);
   const single = await ev(`return { n: [...wm.windows.values()].filter((w) => w.type === 'search').length, active: wm.windows.get(wm.activeWindowId)?.type || null };`);
   ok(single.n === 1 && single.active === 'search', 'a second open keeps ONE search window and it is the active one', S(single));
 
   console.log('\n⑦ the index state: said from /status, patched in place until it is built');
-  const t0 = await ev(`return window.__gsTexts[0];`);
-  ok(/minute|^Indexing/.test(t0 || ''), `before the backfill the window says the index is not built ("${t0}") — never counts of a half-filled index`, t0);
+  // THE LINE IS JUDGED ONCE IT SAYS SOMETHING (主开发 r107, 2026-11-20 — the cut tree's hosted run 44719731500 read '' here):
+  // the window makes its status line EMPTY at open and writes it only when its first /status answer arrives
+  // (src/lib/search-window.js idleState); a snapshot taken after the focus alone races that answer. The leg waits, with its
+  // own bound, for the line's FIRST WORDS (the observer keeps every text), then judges those words; a window that never
+  // states its index state inside the bound is red BY NAME with the bound. Printed every run: how long a person saw the line
+  // blank (from the row's click to the first words). The control (after the build, below) holds a window's first answer.
+  const SAY_MS = 8000;
+  const saidWithin = async (texts, ms) => {
+    const t0 = Date.now(); let w = '';
+    await until(async () => !!(w = await ev(`return (window.${texts} || []).find((x) => x !== '') || '';`)), ms);
+    return w ? { text: w, ms: Date.now() - t0 } : { text: '', ms: Date.now() - t0, red: `the search window never said its index state within ${ms / 1000} s — its status line stayed empty` };
+  };
+  const first = await saidWithin('__gsTexts', SAY_MS);
+  const blank = await ev(`const i = window.__gsTexts.findIndex((x) => x !== ''); return { i, click: window.__gsClickAt || null, at: i >= 0 ? window.__gsAt[i] : null, texts: window.__gsTexts.length };`);
+  console.log(`    (the first moment a person sees: ${blank.i < 0 || !blank.click ? 'no words yet' : blank.i === 0 ? `the line already held its words when the suite looked, ${blank.at - blank.click} ms after the row's click — blank for at most that` : `the line was BLANK until ${blank.at - blank.click} ms after the row's click (its first /status answer), then «${first.text}»`})`);
+  ok(!!first.text && /minute|^Indexing/.test(first.text), first.text ? `before the backfill the window says the index is not built ("${first.text}") — never counts of a half-filled index` : first.red, S({ ...first, blank }));
   holdRunning = true; await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/search/status*', requestStage: 'Request' }] });
   ok(await until(() => ev(`return window.__gsStatusNode.textContent === 'Indexing 1 of 2 conversations…';`), 6000), 'a running walk on /status is drawn as "Indexing 1 of 2 conversations…" on the same line', S(await ev(`return window.__gsTexts;`)));
   holdRunning = false; await send('Fetch.disable');
@@ -176,6 +195,27 @@ else await (async () => {
   const seen = await ev(`return window.__gsTexts;`);
   ok(seen.length >= 3 && seen.every((x, i) => i === 0 || x !== seen[i - 1]) && /files indexed$/.test(seen[seen.length - 1]), `the line changed only when its words did (${seen.length - 1} changes, a poll per second while unbuilt), ending at the counts`, S(seen));
   ok(await ev(`return window.__gsStatusNode.isConnected && q('.search-status') === window.__gsStatusNode;`), 'the status node was never replaced');
+  {
+    // ⑦ CONTROL (the leg's red, made): the hosted run's race on purpose — a fresh window whose FIRST /status answer is held at
+    // the door. The OLD snapshot (the line once the box has the focus) reads the blank line; the leg's wait with a short bound
+    // is red BY NAME; the answer released, the same wait reads the window's words. Then an ordinary window again.
+    await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'search') wm.closeWindow(w.id); return true;`);
+    holdStatus = []; await send('Fetch.enable', { patterns: [{ urlPattern: '*/api/search/status*', requestStage: 'Request' }] });
+    await ev(`app.openSearch({}); return true;`);
+    await until(() => ev(`return document.activeElement === q('.search-input');`), 3000);
+    await ev(`const n = q('.search-status'); window.__gsCtl = [n ? n.textContent : null]; if (n) new MutationObserver(() => window.__gsCtl.push(n.textContent)).observe(n, { childList: true, characterData: true, subtree: true }); return true;`);
+    const held = await until(() => holdStatus.length > 0, 3000);
+    const snap = await ev(`return window.__gsCtl[0];`);
+    const red = await saidWithin('__gsCtl', 1500);
+    ok(held && snap === '' && !red.text && red.red === 'the search window never said its index state within 1.5 s — its status line stayed empty', `CONTROL (⑦'s wait): a window whose first /status answer is held — the old snapshot reads the blank line ("${snap}") and the wait is red BY NAME: «${red.red || red.text}»`, S({ held: holdStatus.length, snap, red }));
+    const ids = holdStatus; holdStatus = null; for (const id of ids) await answerStatus(id);
+    const back = await saidWithin('__gsCtl', SAY_MS);
+    ok(/files indexed$/.test(back.text), `…the held answer released, the same wait reads the window's words («${back.text}» after ${back.ms} ms)`, S(back));
+    await send('Fetch.disable');
+    await ev(`for (const w of [...wm.windows.values()]) if (w.type === 'search') wm.closeWindow(w.id); return true;`);
+    await ev(`app.openSearch({}); return true;`);
+    await until(() => ev(`return document.activeElement === q('.search-input');`), 3000);
+  }
   ok(await until(async () => (await (await fetch(`http://127.0.0.1:${PORT}/api/search?q=${encodeURIComponent('设计笔记')}&scope=artifacts`)).json()).total >= 1, 15000), 'the live session\'s Write filed note.md and the index holds it (the registry\'s door)');
 
   console.log('\n② a 2-character Chinese query lists both conversations, grouped, marked');
