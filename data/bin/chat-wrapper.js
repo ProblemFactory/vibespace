@@ -189,9 +189,10 @@ try { CF = require(path.join(__dirname, '..', '..', 'src', 'conversation-facts.j
 // ITS OWN BIRTH beside its pid (B-03af — the record its child gets at spawn, B-5ee1, for itself): startToken's form (the
 // kernel's start ticks) + the boot id. A restarted hub proves it adopts THIS process in one clock (proc-identity tokenVerdict),
 // never through a wall clock. The ONE require of proc-identity here (EAGER: the module this build shipped); a failed read
-// leaves a birth-less record, which the hub judges as an older wrapper's.
+// leaves a birth-less record, which the hub judges as an older wrapper's. On a machine with no procfs no birth is taken (its
+// token would be a `ps` here, and one the hub's boot never reads by a program — round w57qbqw4n).
 let PI = null;
-try { PI = require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')); meta.pidStart = PI.startToken(process.pid); meta.pidBoot = PI.bootToken(); } catch { delete meta.pidStart; delete meta.pidBoot; }
+try { PI = require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')); if (PI.hasProc()) { meta.pidStart = PI.startToken(process.pid); meta.pidBoot = PI.bootToken(); } } catch { delete meta.pidStart; delete meta.pidBoot; }   // no procfs (macOS): no birth taken — the hub could not prove it without a program
 let factsFlush = null;
 function noteFacts(msg) {
   if (!CF || !meta.facts) return;

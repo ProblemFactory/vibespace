@@ -466,15 +466,19 @@ function wallStartOf(ticks, opts) {
 }
 /** B-03af — what proves «this pid is still the process that wrote its record», read NOW in one place (the hub's boot hands it
  *  to src/conversation-facts.js adoptionProof): { proc, state, verdict, startMs }.
- *  · proc: this machine has a procfs (false ⇒ state and startMs null — the caller SAYS it, never «gone»);
+ *  · proc FIRST: this machine has a procfs. Without one NOTHING else is read and NO PROGRAM IS STARTED (round w57qbqw4n: the
+ *    boot's restore is one synchronous pass — tokenVerdict's no-procfs rung is a `ps` per call): state and startMs null, the
+ *    verdict «unknown» for a recorded birth — the caller SAYS it could not be proven, never «gone»;
  *  · verdict: tokenVerdict of the birth the record carries (`start` in startToken's form + `boot`, the boot id) — ONE clock,
  *    the kernel's start ticks under the same boot; null when the record carries none (an older writer);
- *  · state: stat field 3, and startMs: the same read's start on the wall clock (wallStartOf — an older record's only bridge). */
+ *  · state: stat field 3; startMs: the same read's start on the wall clock (wallStartOf) — read ONLY for a record with no birth
+ *    (an older record's one bridge; the birth road never uses it). */
 function birthReading(pid, { start = '', boot = '' } = {}, opts) {
-  const verdict = typeof start === 'string' && start ? tokenVerdict(pid, start, typeof boot === 'string' ? boot : '') : null;
-  if (!hasProc(opts)) return { proc: false, state: null, verdict, startMs: null };
+  const born = typeof start === 'string' && start !== '';
+  if (!hasProc(opts)) return { proc: false, state: null, verdict: born ? 'unknown' : null, startMs: null };
   const r = statRest(pid, opts);
-  return { proc: true, state: r ? r[0] : null, verdict, startMs: r ? wallStartOf(r[19], opts) : null };
+  const verdict = born ? tokenVerdict(pid, start, typeof boot === 'string' ? boot : '') : null;
+  return { proc: true, state: r ? r[0] : null, verdict, startMs: r && !born ? wallStartOf(r[19], opts) : null };
 }
 
 module.exports = {

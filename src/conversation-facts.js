@@ -199,7 +199,7 @@ function factsFromSidecar(f) {
  *    startedAt after it started, so its true start is never later; the tolerance holds the two clocks' rounding (10 ms ticks,
  *    uptime's hundredths) with room, never a recycled pid's minutes. Later than that, the start COULD NOT BE PROVEN: a wall
  *    clock stepped forward since the wrapper started reads the same as a younger process, so neither is claimed;
- *  · no process file system and no birth recorded: said.
+ *  · no process file system: SAID on both roads (the birth is not read by a program on the boot's path — round w57qbqw4n), never «gone».
  *  `r` = { proc, state, verdict, startMs } → { pid: the adopted pid or -1, why: null or the reason }. */
 const ADOPT_PAIR_MS = 2000;
 function adoptionProof(meta, r) {
@@ -217,6 +217,7 @@ function adoptionProof(meta, r) {
     if (x.state === 'Z' || x.state === 'X' || x.state === 'x') return no('the process its file names is dead');
   }
   if (born) {
+    if (x.proc === false) return no('this machine has no process file system: its wrapper\'s recorded start could not be proven (no program is started to read it)');
     if (x.verdict === 'same') return { pid, why: null };
     if (x.verdict === 'pid-recycled') return no('its pid now names another process: not the start its wrapper recorded');
     if (x.verdict === 'gone') return no('the process its file names is gone');

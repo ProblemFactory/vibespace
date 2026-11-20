@@ -121,9 +121,7 @@ async function boot(label, { wrapper = WRAPPER, clock = 0 } = {}) {
   const gone = new Promise((r) => young.once('exit', r)); young.kill(); await gone;
   ok(CF.factsAtAdoption(noObs, proofOf(noObs).pid).old === true && pr.pid === -1 && /another process/.test(pr.why) && CF.factsAtAdoption(recycled, pr.pid, pr.why).old === true && po.pid === -1 && /could not be proven/.test(po.why),
     'CONTROL a sidecar without observations reads «old wrapper»; one whose pid names another process (its birth differs) is not adopted, nor an older one whose pid started after its file (could not be proven)', { pr, po });
-  const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  ok(!/\/cmdline/.test(br) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? PI.birthReading(p, { start: wrapperObs.pidStart, boot: wrapperObs.pidBoot }) : null);')
-    && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'the boot itself reads the stat file alone and hands the proof to factsAtAdoption (source pin)');
+  // the boot site's source pin lives in the FAST suite (test-conversation-facts §E — round w57qbqw4n: pins belong there)
   await h.stop();
 }
 {

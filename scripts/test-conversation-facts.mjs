@@ -495,7 +495,9 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   ok(other.pid === -1 && /its pid now names another process: not the start its wrapper recorded/.test(other.why), 'B-03af a proven mismatch of the start ticks is another process — said so', other);
   ok(/gone/.test(P(CF, born, reading(null, 'S', 'gone')).why) && /dead/.test(P(CF, born, reading(null, 'S', 'zombie')).why) && /could not be proven on this machine \(unknown\)/.test(P(CF, born, reading(null, 'S', 'unknown')).why)
     && /could not be proven on this machine \(not read\)/.test(P(CF, born, reading(null, 'S', null)).why), 'B-03af the birth road: gone (another boot), dead, and a verdict this machine cannot reach — each said, none adopted');
-  ok(P(CF, born, { proc: false, state: null, verdict: 'same', startMs: null }).pid === 4242, 'B-03af no process file system but a birth its ps rung proves (startToken\'s «p» form): adopted');
+  const noProcBorn = P(CF, born, { proc: false, state: null, verdict: 'unknown', startMs: null });
+  ok(noProcBorn.pid === -1 && /no process file system: its wrapper's recorded start could not be proven \(no program is started to read it\)/.test(noProcBorn.why) && P(CF, born, { proc: false, state: null, verdict: 'same', startMs: null }).pid === -1,
+    'B-03af round w57qbqw4n: no process file system and a recorded birth — «could not be proven», SAID (never adopted through a program, never «gone»)', noProcBorn);
   // the OLDER road: the pid's start on the wall clock, paired in ONE instant, against startedAt + the named tolerance
   ok(P(CF, older, reading(BIRTH - 400)).pid === 4242 && P(CF, older, reading(BIRTH - 400)).why === null && P(CF, older, reading(BIRTH + 1900)).pid === 4242,
     'MUST 1 an older wrapper that started before its file was born (or within the tolerance of the two clocks\' rounding) is ADOPTED');
@@ -528,6 +530,22 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   console.log(`    the planted machine: uptime ${UP} s at wall ${WALL}; the wrapper's start ticks ${T}; its file written at ${FB} → startMs ${rd.startMs}`);
   ok(PI.wallStartOf(T, fopts) === FB - 400 && rd.proc === true && rd.state === 'S' && rd.verdict === null && rd.startMs === FB - 400 && P(CF, olderF, rd).pid === 4242,
     'B-03af wallStartOf puts the start ticks on the wall clock with the uptime read in the same instant (exact to the tick); birthReading reads state + start in one stat read', rd);
+  // round w57qbqw4n: the birth road reads NO uptime (its startMs is never used); without a procfs nothing is read and no program is
+  // started — the verdict is «unknown» before any token is read. A COUNTED copy (the product's order) reads no verdict there;
+  // RED: the order of aa90f570a (the verdict read FIRST — on macOS a synchronous ps for every restored conversation) reads it
+  const bornRd = PI.birthReading(4242, { start: 'l' + T, boot: '' }, fopts);
+  ok(bornRd.proc === true && bornRd.startMs === null && typeof bornRd.verdict === 'string', 'B-03af the birth road reads no uptime: startMs stays null (only a record with no birth is bridged to the wall clock)', bornRd);
+  const TV = "  const verdict = born ? tokenVerdict(pid, start, typeof boot === 'string' ? boot : '') : null;\n";
+  const COUNTED = "  const verdict = born ? (globalThis.__b03afTv = (globalThis.__b03afTv || 0) + 1, tokenVerdict)(pid, start, typeof boot === 'string' ? boot : '') : null;\n";
+  const mCount = MUTE.load('src/proc-identity.js', anchored(srcPI, TV, COUNTED, 'counted-verdict'), 'counted-verdict');
+  const FIRST = "  if (!hasProc(opts)) return { proc: false, state: null, verdict: born ? 'unknown' : null, startMs: null };\n";
+  const mFirst = MUTE.load('src/proc-identity.js', anchored(anchored(srcPI, TV, COUNTED, 'counted-verdict-old'), FIRST, "  const verdictFirst = born ? (globalThis.__b03afTv = (globalThis.__b03afTv || 0) + 1, 'unknown') : null;\n  if (!hasProc(opts)) return { proc: false, state: null, verdict: verdictFirst, startMs: null };\n", 'verdict-first'), 'verdict-first');
+  globalThis.__b03afTv = 0;
+  const nb = mCount.birthReading(4242, { start: 'pFri Nov 20 08:00:00 2026', boot: '' }, { procRoot: path.join(fx, 'none') });
+  const counted = globalThis.__b03afTv; globalThis.__b03afTv = 0;
+  mFirst.birthReading(4242, { start: 'pFri Nov 20 08:00:00 2026', boot: '' }, { procRoot: path.join(fx, 'none') });
+  const countedRed = globalThis.__b03afTv; delete globalThis.__b03afTv;
+  ok(nb.proc === false && nb.verdict === 'unknown' && counted === 0 && countedRed === 1, 'B-03af round w57qbqw4n: no process file system — the birth is NOT read (no verdict, no program); RED: the verdict read before the procfs look reads it (a ps on macOS)', { nb, counted, countedRed });
   ok(PI.wallStartOf('', fopts) === null && PI.wallStartOf(T, { procRoot: path.join(fx, 'none'), now: () => WALL }) === null && JSON.stringify(PI.birthReading(4242, {}, { procRoot: path.join(fx, 'none') })) === JSON.stringify({ proc: false, state: null, verdict: null, startMs: null }),
     'B-03af no ticks or no uptime: no wall start (null, never a guess); a machine with no process file system reads proc:false');
   // RED (an anchor gap): the OLD bridge — this hub's time origin plus the tick difference — on a hub whose runtime stamped its
@@ -572,7 +590,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   ok(!/\/cmdline/.test(br) && site.length > 0 && !/\/proc\/|timeOrigin/.test(site) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? PI.birthReading(p, { start: wrapperObs.pidStart, boot: wrapperObs.pidBoot }) : null);')
     && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'MUST 1 the boot reads only the process\'s stat through proc-identity (birthReading; no /proc named, no time origin at the site) and hands the proof to factsAtAdoption (source pin)');
   const cw = fs.readFileSync(path.join(REPO, 'data/bin/chat-wrapper.js'), 'utf8');
-  ok(cw.includes("meta.pidStart = PI.startToken(process.pid); meta.pidBoot = PI.bootToken();") && cw.indexOf('meta.pidStart = PI.startToken(process.pid)') < cw.indexOf('function noteFacts('), 'B-03af the claude wrapper records its OWN birth beside its pid at its start (source pin)');
+  ok(cw.includes("if (PI.hasProc()) { meta.pidStart = PI.startToken(process.pid); meta.pidBoot = PI.bootToken(); }") && cw.indexOf('meta.pidStart = PI.startToken(process.pid)') < cw.indexOf('function noteFacts('), 'B-03af the claude wrapper records its OWN birth beside its pid at its start — only on a machine with a procfs (no ps at its start: round w57qbqw4n) (source pin)');
   ok(/\['src\/server\/boot-restore\.js', 'own-tree', 17, null, DATA\], \/\/ lane end-obeys-verdict \+1: the end record's ONE read before the kill/.test(fs.readFileSync(path.join(REPO, 'scripts/mount-reader-census.mjs'), 'utf8')), 'MUST 1 the reader census count for boot-restore: 16 with no command-line read — 17 with piece 3\'s one bounded read before a kill, named');
   const ND = "    if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');\n";
   const NS = "  if (x.startMs > m.startedAt + ADOPT_PAIR_MS) return no(`its start could not be proven: by this machine's clock the process its pid names started ${Math.round((x.startMs - m.startedAt) / 1000)} s after its file was written, and its older wrapper recorded no start ticks (a wall clock stepped since reads the same)`);\n";
