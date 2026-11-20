@@ -1315,7 +1315,6 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           ["src/server/channels-engine.js", "{ groups: routes.join(',') }", 1, "other"],
           ["src/server/channels-engine.js", "{ adapterLabel: label, scopeLabel, groups, windowM", 1, "answer"],
           ["src/server/channels-engine.js", "{ conversationKey: String(x.cid), groupIds: Array.", 1, "narrows"],
-          ["src/server/channels-engine.js", "{ conversationKey: String(cid), groupIds: Array.is", 1, "narrows"],
           ["src/server/channels-wiring.js", "{ channels, groups, touches, flushGroupCards, live", 1, "other"],
           ["src/server/conversation-facts.js", "{ key, ...(key ? {} : { keyWhy: 'the conversation ", 1, "roster"],   // conversations.list's row as LISTED: the two judges that read its groups (the list's reach, the proposal card's) hand the hold's fact themselves
           ["src/server/conversation-ops.js", "{ grant: 'through a grant of this key', instance: ", 1, "other"],   // the reach's WORDS by kind (`groups` = the words of a Task Group grant): no ids

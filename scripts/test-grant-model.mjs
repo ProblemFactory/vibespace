@@ -21,6 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // lane lg-group-parents (restack 415): the chain's controls by anchor (mutant-copy already loads scratch.mjs)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const GM = require('../src/grant-model.js');
@@ -292,9 +293,9 @@ console.log('⑥ lane lg-group-parents: a child group uses what its parents are 
     const HIT = "(F.groups.has(e.id) || (!e.only && toInherited && toInherited.has(e.id)))";
     const EXC = "    if (x.kind === 'group' && F.inherited && F.inherited.has(x.id)) return { state: 'excepted', row, entry: x, inherited: true };";   // the chain's cure (B): + it says it came through a parent
     ok(src.split(HIT).length === 2 && src.split(EXC).length === 2, 'CONTROL setup: the inherited hit and the inherited exception are each found exactly once');
-    const M1 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id))'), 'no-inherited-hit');   // stale-pins: kept (the mutant puts the release's own-only hit back)
+    const M1 = MZ.load('src/grant-model.js', anchored(src, HIT, '(F.groups.has(e.id))', 'no-inherited-hit'), 'no-inherited-hit');   // stale-pins: kept (the mutant puts the release's own-only hit back)
     ok(!M1.admits([row([P])], child).ok, 'CONTROL (c): a model with no inherited hit refuses the child — ⑥ rule ② would be red');
-    const M2 = MZ.load('src/grant-model.js', src.replace(HIT, '(F.groups.has(e.id) || (toInherited && toInherited.has(e.id)))'), 'ignores-only');
+    const M2 = MZ.load('src/grant-model.js', anchored(src, HIT, '(F.groups.has(e.id) || (toInherited && toInherited.has(e.id)))', 'ignores-only'), 'ignores-only');
     ok(M2.admits([row([PONLY])], child).ok, 'CONTROL (d): a model that ignores «仅本组» admits the child — ⑥ «仅本组» would be red');
     const M3 = MZ.load('src/grant-model.js', src.replace(EXC, ''), 'except-own-only');
     ok(M3.admits([row([{ kind: 'everyone' }], [P])], child).ok, 'CONTROL (e): an exception judged over own groups only lets the child escape «everyone except the parent» — ⑥ rule ③ would be red');
@@ -302,7 +303,7 @@ console.log('⑥ lane lg-group-parents: a child group uses what its parents are 
     // admits a child through its parent's visibility row (the leg «rule ④ holds IN THE MODEL» would be red)
     const G4 = "  const toInherited = row.door === 'group-visibility' ? null : F.inherited;";
     ok(src.split(G4).length === 2, 'CONTROL setup: the rule-④ guard is found exactly once');
-    const M4 = MZ.load('src/grant-model.js', src.replace(G4, '  const toInherited = F.inherited;'), 'rule4-off');
+    const M4 = MZ.load('src/grant-model.js', anchored(src, G4, '  const toInherited = F.inherited;', 'rule4-off'), 'rule4-off');
     ok(M4.admits([{ door: 'group-visibility', resource: 'tg-p', to: [{ kind: 'group', id: 'tg-p', level: 'visible' }], except: [] }], child).ok, 'CONTROL (rule ④): a model without the guard admits a child through its parent\'s visibility row — the rule-④ leg would be red');
   } finally { try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
 }

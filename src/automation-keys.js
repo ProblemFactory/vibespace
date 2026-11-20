@@ -372,10 +372,7 @@ function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach
   if (rv.ok) return { ok: true, by: rv.via === 'everyone' ? 'instance' : 'groups' };
   if (rv.code === 'excepted') return { ok: false, code: 'excepted', reach: reachKind(r), why: 'the owner left that conversation out of this grant\'s reach (an exception on the key\'s row in the Vault window) — ask the owner to lift it' };
   // THE STORE HELD UNREAD (the hold's law, 主开发 2026-11-19 05:42Z): a target whose Task Groups are unknown is refused BY NAME — never «not in the groups»
-  if (rv.code === 'groups_unreadable') return { ok: false, code: 'groups_unreadable', reach: reachKind(r), why: 'the Task Groups could not be read just now, so whether this grant reaches that conversation is unknown — nothing was done; try again in a moment' };
-  // lane lg-group-parents U3d (its read, 2): the target's Task Groups or their parents could not be read — a reach the groups
-  // decide is never judged against none (a parent's «除了» must still leave the child's conversation out)
-  if (rv.code === 'groups_unreadable') return { ok: false, code: 'groups_unreadable', reach: reachKind(r), why: 'that conversation\'s Task Groups could not be read just now — call again in a moment' };
+  if (rv.code === 'groups_unreadable') return { ok: false, code: 'groups_unreadable', reach: reachKind(r), why: 'the Task Groups could not be read just now, so whether this grant reaches that conversation is unknown — nothing was done; try again in a moment' };   // lane lg-group-parents U3d (its read, 2): a target whose PARENTS could not be read lands here too — a parent's «除了» still leaves the child's conversation out (restack 415: the chain's own copy of this refusal, below the release's, was dead — removed)
   const kind = reachKind(r);
   return { ok: false, code: 'not_granted', reach: kind, why: kind === 'groups'
     ? `that conversation is not in the Task Groups this grant reaches (${r.taskGroups.join(', ')}) and the key did not open it — widen the grant's reach on the key's row in the Vault window (整个 VibeSpace)`

@@ -512,7 +512,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     membershipRead: (a) => { asked.push(a.cwd); return a.cwd === '/w/b' ? Promise.resolve(true) : null; } };
   const R = RP.sessionRoster({ sessions: () => sess, tasks: () => tasksRP, addressableId: (s) => 'c-' + s.name, statusKey: (s, id) => 'claude:' + id });
   const built = R.build();
-  ok(J(built[0]) === J({ cid: 'c-one', name: 'one', groups: ['G'], webuiId: 'w1', reachability: null }) && built[1].groupsUnread === true && J(built[1].groups) === '[]',
+  ok(J(built[0]) === J({ cid: 'c-one', name: 'one', groups: ['G'], inherited: [], webuiId: 'w1', reachability: null })   /* lane lg-group-parents (restack 415): + the lineage beside the groups (a stand-in with no lineage reader answers []) */ && built[1].groupsUnread === true && J(built[1].groups) === '[]',
     'the roster entry of an answer still being read says `groupsUnread: true`; a read one is byte-identical to before', J(built));
   const n1 = await R.readUnread();
   const askedAll = asked.slice(); asked = [];

@@ -604,9 +604,10 @@ function create(engineCtx) {
     try { const s = (liveSessions() || []).find((x) => x && x.cid === cid); return s && Array.isArray(s.inherited) ? s.inherited.slice() : (s && s.inherited === null ? null : []); } catch { return []; }
   }
   /** the chain's cure (E): a RUNNING conversation's own groups and their ancestors NOW (`{groups, inherited}`), null when it is
-   *  not running — a principal stored earlier (an API proposal's) is judged with the live lineage while its conversation runs */
+   *  not running — a principal stored earlier (an API proposal's) is judged with the live lineage while its conversation runs;
+   *  restack 415: a roster row whose Task Groups are still being READ (B-43bc's `groupsUnread`) answers `groupsUnreadable` — never «in no group» */
   function liveGroupsOf(cid) {
-    try { const s = (liveSessions() || []).find((x) => x && x.cid === String(cid)); return s ? { groups: Array.isArray(s.groups) ? s.groups.map(String) : [], inherited: Array.isArray(s.inherited) ? s.inherited.map(String) : (s.inherited === null ? null : []) } : null; } catch { return null; }
+    try { const s = (liveSessions() || []).find((x) => x && x.cid === String(cid)); return s ? { groups: Array.isArray(s.groups) ? s.groups.map(String) : [], inherited: Array.isArray(s.inherited) ? s.inherited.map(String) : (s.inherited === null ? null : []), ...(s.groupsUnread === true ? { groupsUnreadable: true } : {}) } : null; } catch { return null; }
   }
   function convFor(adapterId, convId) {
     const en = store.index.peek(`${adapterId}/${convId}`);   // B-f32b: a copy of THAT row, never of the index

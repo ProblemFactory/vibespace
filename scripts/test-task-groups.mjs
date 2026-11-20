@@ -34,7 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -442,7 +442,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
   // the manager agent's verb never takes parents (a parent WIDENS what the child may use — the owner's door only)
   const ar = read('src/agent-routes.js');
   const adminUpd = (ar.match(/if \(update && update\.id\) \{[\s\S]*?tasks\.update\(update\.id, patch\);/) || [''])[0];
-  ok(adminUpd.length > 100 && !/parents/.test(adminUpd) && /app\.patch\('\/api\/tasks\/:id', \(req, res\) => \{\n    try \{ res\.json\(\{ success: true, task: tasks\.update\(req\.params\.id, req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\) \}\); \}/.test(read('src/server/task-groups-wiring.js'))
+  ok(adminUpd.length > 100 && !/parents/.test(adminUpd) && /app\.patch\('\/api\/tasks\/:id', \(req, res\) => \{\n    try \{ onDisk\(res, \{ success: true, task: tasks\.update\(req\.params\.id, req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\) \}\); \}/.test(read('src/server/task-groups-wiring.js'))
     && /tasks\.create\(req\.body \|\| \{\}, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/server/task-groups-wiring.js'))
     && /importBundle\?\.\(d, \{ bearer: !!require\('\.\.\/write-origin\.js'\)\.pressBearer\(req\.headers\) \}\)/.test(read('src/routes/persistence.js')), 'the manager agent\'s group-admin update never passes `parents`; the owner\'s create / PATCH and the config import hand the store WHO is asking (a bearer never sets a lineage)');
   // ⑥b the U2 adversarial read's findings, each a leg
@@ -579,7 +579,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     const src = read('src/task-groups.js');
     const CYC = "      if (up) no('parent_cycle',";
     ok(src.split(CYC).length === 2, 'CONTROL setup: the cycle refusal is found exactly once');
-    const MT = MZ.load('src/task-groups.js', src.replace(CYC, "      if (false && up) no('parent_cycle',"), 'no-cycle-check').TaskGroupManager;
+    const MT = MZ.load('src/task-groups.js', anchored(src, CYC, "      if (false && up) no('parent_cycle',", 'no-cycle-check'), 'no-cycle-check').TaskGroupManager;
     const dm = path.join(SCR, 'data-mut'); fs.mkdirSync(dm, { recursive: true });
     const sm = new MT({ dataDir: dm });
     const a = sm.create({ title: 'A' }), b = sm.create({ title: 'B', parents: [a.id] });
@@ -588,7 +588,7 @@ console.log('⑥ lane lg-group-parents: THE LINEAGE — parents[] by the ONE wri
     // CONTROL (A): an answer that omits an empty list (the unit's own spelling) lets the merged copy keep the removed parent
     const OUT = '  _out(t) { return { ...t, parents: Array.isArray(t.parents) ? [...t.parents] : [] }; }';
     ok(src.split(OUT).length === 2, 'CONTROL setup: the answer\'s list line is found exactly once');
-    const MO = MZ.load('src/task-groups.js', src.replace(OUT, '  _out(t) { return Array.isArray(t.parents) ? { ...t, parents: [...t.parents] } : { ...t }; }'), 'answer-omits-empty').TaskGroupManager;   // stale-pins: kept (the mutant restores the unit's own answer line)
+    const MO = MZ.load('src/task-groups.js', anchored(src, OUT, '  _out(t) { return Array.isArray(t.parents) ? { ...t, parents: [...t.parents] } : { ...t }; }', 'answer-omits-empty'), 'answer-omits-empty').TaskGroupManager;   // stale-pins: kept (the mutant restores the unit's own answer line)
     const dmo = path.join(SCR, 'data-mut-out'); fs.mkdirSync(dmo, { recursive: true });
     const ro = lastParentScene(new MO({ dataDir: dmo }));
     ok(same(ro.stored, [ro.P, ro.Q]), 'CONTROL (A): a store whose answer omits the empty list lets the next edit PUT THE REMOVED PARENT BACK — the leg above would be red', ro);

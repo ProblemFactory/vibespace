@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
+import { engineSource } from './channels-engine-src.mjs';   // lane lg-group-parents (restack 415): the engine with its families, for the live-mark control
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -508,7 +509,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     ['src/server/vault-run-door.js', 'const facts = { ...uf, conversationKeys:', 'spreads vaultUseFacts — its inheritedGroupIds ride in `...uf`'],
     ['src/automation-keys.js', 'const callerSubjects = (conversationId, groupIds = []) =>', 'the legacy subject list (session:<cid> + group:<gid>) — exported for GM.LEGACY\'s migration probes, no door calls it'],
     ['src/server/window-targets-engine.js', "const ctx = facts ? ctxOf(facts) : { sessionKeys: [], groupIds: [] };", 'no caller: nothing to inherit'],
-    ['src/server/window-targets-engine.js', "const c = row.principal.kind === 'group' ? ctxOf(", 'a group row asks ctxOf (which carries it); a conversation / All row asks no groups, as on the release'],
+    ['src/server/window-targets-engine.js', 'const c = needGroups ? ctxOf({ sessionId: id, session: s })', 'a row that needs groups (a group row, or a Task Group left out) asks ctxOf (which carries it); the rest ask no groups (the train\'s follow-owed should 4)'],
     ['src/channel-filter.js', "to: fromKeys, except: viaExceptOf(except) }], { conversationKey: str(cid), groupIds: Array.isArray(s.groups) ? s.groups.map(str) : [], inheritedGroupIds: [] }", 'the via judge\'s KEY-only groups (no access row: no «仅本组» to read) judge OWN groups only, as the release did — the rows are judged with the lineage (the chain\'s cure (D))'],
     ['src/channel-filter.js', "to: [{ kind: 'group', id: str(row.via) }], except: [] }], { conversationKey: str(row.principal.id)", 'the «via» shortcut (memberStill) judges OWN groups only, as memberVia'],
   ];
@@ -558,7 +559,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const reach2 = (inh) => AK2.reachVerdict({ keyId: key2.id, caller: 'c0', target: { conversationId: 'k1', groups: ['tg-c'], inherited: inh }, grants: [], opened: [], reach: { taskGroups: ['tg-p'] }, reachRows: [{ door: 'automation-key-reach', resource: 'ag-1', to: [P], except: [] }] });
     ok(reach2(['tg-p']).ok && !reach2([]).ok, 'automation-key-reach: a key reaching the parent reaches a conversation of its child (the target\'s lineage)', [reach2(['tg-p']), reach2([])]);
     const wSrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), opsSrc = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf-8'), aeSrc = fs.readFileSync(path.join(REPO, 'src/server/automation-engine.js'), 'utf-8');
-    ok(/const ids = grantMemberIds\(tasks, \{ sessionKey: sessionStatusKey\(s, id\)[^\n]*?const gg = tasks\.grantGroupsOf\(ids\); return \{ ids: gg\.ids, inherited: gg\.inherited, unreadable: !!ids\.unread \};/.test(wSrc) && /groups: g\.ids, inherited: g\.inherited \|\| \[\]/.test(wSrc) && /inherited = tasks \? tasks\.grantGroupsOf\(groups\)\.inherited : \[\]/.test(wSrc) && /lineageOf: \(ids\) => \{ const tk = getTasks && getTasks\(\); if \(!tk\) throw new Error\('the Task Group store is not ready'\); return tk\.grantGroupsOf\(ids\)\.inherited; \}/.test(wSrc) && (opsSrc.match(/lineageOfIds\(gl\)/g) || []).length === 2 && (opsSrc.match(/reach\(targetOf\(/g) || []).length === 2 && (aeSrc.match(/subjectInherited: inherited,/g) || []).length === 3 && /inherited: lineageIn\(caller\.inherited\),/.test(aeSrc) && (aeSrc.match(/lineageIn\(/g) || []).length === 4, 'the automation producers: the caller and every target (live or stopped) carry the lineage from the ONE reader; the engine hands it to every use / pick verdict and records it on an ask');
+    ok(/const ids = grantMemberIds\(tasks, \{ sessionKey: sessionStatusKey\(s, id\)[^\n]*?const gg = tasks\.grantGroupsOf\(ids\); return \{ ids: gg\.ids, inherited: gg\.inherited, unreadable: !!ids\.unread \};/.test(wSrc) && /groups: g\.ids, inherited: g\.inherited \|\| \[\]/.test(wSrc) && /inherited = tasks \? tasks\.grantGroupsOf\(groups\)\.inherited : \[\]/.test(wSrc) && /lineageOf: \(ids\) => \{ const tk = getTasks && getTasks\(\); if \(!tk\) throw new Error\('the Task Group store is not ready'\); return tk\.grantGroupsOf\(ids\)\.inherited; \}/.test(wSrc) && (opsSrc.match(/lineageOfIds\(gl\)/g) || []).length === 2 && (opsSrc.match(/reach\(targetOf\(/g) || []).length === 5 && (aeSrc.match(/subjectInherited: inherited,/g) || []).length === 3 && /inherited: lineageIn\(caller\.inherited\),/.test(aeSrc) && (aeSrc.match(/lineageIn\(/g) || []).length === 4, 'the automation producers: the caller and every target (live or stopped) carry the lineage from the ONE reader; the engine hands it to every use / pick verdict and records it on an ask');
     // the U3d read (1): a parent's grant never outranks the caller's own group's — ONE order (grant-model specificityOf)
     ok(GM.specificityOf('group', true) < GM.specificityOf('group') && GM.specificityOf('group', true) > GM.specificityOf('everyone') && GM.specificityOf('conversation', true) === GM.specificityOf('conversation') && GM.specificityOf('group', 'yes') === GM.specificityOf('group'), 'the rank: a parent\'s group entry sits below the caller\'s own group and above All agents (only `true` says so; a conversation\'s rank is its own)');
     const kOld = { id: 'ak-00000000001a', name: 'parent-key', scopes: [verb2], digest: 'd', at: 1 }, kNew = { id: 'ak-00000000001b', name: 'own-key', scopes: [verb2], digest: 'd', at: 2 };
@@ -675,6 +676,26 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const tLive = engL.apiTierFor(recorded, 'lark-y').tier;
     liveL = [];   // the conversation ended: the engine of the release (no lineage reader) keeps the recorded lineage
     const tEnded = engL.apiTierFor(recorded, 'lark-y').tier;
+    // restack 415 — the train's «still being read» mark (B-43bc: the roster's `groupsUnread`): a RUNNING conversation whose Task Groups
+    // are still being read is UNKNOWN to the tier — never «in no group» («All agents except C's own group» would serve C). RED (anchored,
+    // its plant proven by anchored()): the engine whose live reader drops the mark serves it
+    {
+      const MARK = '(s.inherited === null ? null : []), ...(s.groupsUnread === true ? { groupsUnreadable: true } : {}) } : null;';
+      const MU5 = mutantCopies('restack-415-live-mark', REPO);
+      try {
+        const ENGR = MU5.load('src/server/channels-engine.js', anchored(engineSource(REPO), MARK, '(s.inherited === null ? null : []) } : null;', 'live-mark-dropped'), 'live-mark-dropped');   // stale-pins: kept (the mutant restores the reader's line without the mark)
+        const tierOf = async (E, tag) => {
+          const d = dirOf(`api-unread-${tag}-${++worldN}`); fs.mkdirSync(d, { recursive: true });
+          const e = E.create({ dataDir: d, log: { log() {}, info() {}, warn() {}, error() {} }, fetch: async () => { throw new Error('no network in this suite'); }, liveSessions: () => [{ cid: 'k1', name: 'Child', groups: [], inherited: [], groupsUnread: true }] });
+          const w = await e.setApiGrants('lark-y', [FA.apiGrant({ principal: { kind: 'everyone', id: '*' }, cred: 'lark-y', tier: 'read', at: 1 })], { by: 'user', except: [{ kind: 'group', id: 'tg-c' }] });
+          return { set: w.ok === true, tier: e.apiTierFor(recorded, 'lark-y').tier };
+        };
+        const uMine = await tierOf(ENGL, 'mine'), uRed = await tierOf(ENGR, 'red');
+        console.log(`    judged (a running conversation still being read, «All agents except tg-c»): mine ${J(uMine)} · RED ${J(uRed)}`);
+        ok(uMine.set && uMine.tier === 'none', 'restack 415: a RUNNING conversation whose Task Groups are still being read (the roster\'s groupsUnread) gets NO tier from «All agents except its own group» — unknown, never «in no group»', uMine);
+        ok(uRed.set && uRed.tier === 'read', 'RED CONTROL: a live reader that drops the mark judges it «in no group» — «All agents except its own group» SERVES it (the harm)', uRed);
+      } finally { try { fs.rmSync(MU5.dir, { recursive: true, force: true }); } catch { } }
+    }
     ok(wL.ok && tFiled === 'write-ask' && tLive === 'none' && tEnded === 'write-ask', 'cure (E): the API tier of a recorded principal is judged with the LIVE lineage while its conversation runs (a parent removed since ⇒ none); an engine with no lineage reader keeps the recorded one for an ended conversation (the RED control of B-4852 below: the plant is the missing reader)', { wL: wL.ok, tFiled, tLive, tEnded });
     // B-4852: the engine as the hub builds it — WITH the Task Group store's lineage reader: an ENDED conversation's recorded own groups are
     // re-read NOW (a parent removed since no longer counts; one kept still does); a read that throws judges own groups alone
@@ -690,7 +711,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const ownGrant = await engE.setApiGrants('lark-y', [FA.apiGrant({ principal: { kind: 'group', id: 'tg-c', name: 'Child' }, cred: 'lark-y', tier: 'read', at: 2 })], { by: 'user' });
     const eOwn = engE.apiTierFor(recorded, 'lark-y').tier;
     const srvE = fs.readFileSync(path.join(REPO, 'server.js'), 'utf-8'), cwE = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf-8');
-    ok(wE.ok && eKept === 'write-ask' && eRemoved === 'none' && eThrew === 'none' && ownGrant.ok && eOwn === 'read' && /userTodos, lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited, readUserState:/.test(srvE) && /liveSessions, lineageOf, mountClients,/.test(cwE), 'B-4852: an ENDED conversation\'s API proposal is judged with its recorded own groups\' ancestors read NOW — a kept parent still counts, a removed one no longer does, a lineage read that throws is UNKNOWN — a parent\'s grant undecided (refused by name), the own group\'s grant still serves; server.js hands the ONE reader to the channels engine', { eKept, eRemoved, eThrew, eOwn });
+    ok(wE.ok && eKept === 'write-ask' && eRemoved === 'none' && eThrew === 'none' && ownGrant.ok && eOwn === 'read' && /userTodos, lineageOf: \(ids\) => tasks\.grantGroupsOf\(ids\)\.inherited, readUserState:/.test(srvE) && /liveSessions, lineageOf, readMembership, mountClients,/.test(cwE), 'B-4852: an ENDED conversation\'s API proposal is judged with its recorded own groups\' ancestors read NOW — a kept parent still counts, a removed one no longer does, a lineage read that throws is UNKNOWN — a parent\'s grant undecided (refused by name), the own group\'s grant still serves; server.js hands the ONE reader to the channels engine', { eKept, eRemoved, eThrew, eOwn });
   }
   // the chain's cure (B): `vibespace-channels status` never says «as a member of group P» for a conversation only in a child of P
   {
@@ -777,7 +798,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-filter.js'), 'utf-8');
       const CUTD = '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members, { rows: accessRows, except }) : null;';
       ok(fsrc.split(CUTD).length === 2, 'CONTROL setup: the via line hands the access rows, exactly once');
-      const CFx = MD.load('src/channel-filter.js', fsrc.replace(CUTD, '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members) : null;'), 'via-own-only');   // stale-pins: kept (the mutant restores the release's own-only via line)
+      const CFx = MD.load('src/channel-filter.js', anchored(fsrc, CUTD, '    const via = !keys.has(k) && v.watcher.principal.kind === \'agent\' ? memberVia(keys, v.watcher.principal.id, members) : null;', 'via-own-only'), 'via-own-only');   // stale-pins: kept (the mutant restores the release's own-only via line)
       const cx = CFx.validateWatchers([wD('k1')], accP, { members: membersD });
       ok(!cx.ok && cx.code === 'watcher-needs-access', 'CONTROL: a via judge without the access rows (own groups only) refuses the child — the leg above would be red', cx);
     } finally { try { fs.rmSync(MD.dir, { recursive: true, force: true }); } catch { } }
@@ -876,13 +897,13 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const bwOnly = BLw.byWhatOf({ rows: rowsW({ kind: 'group', id: 'tg-p', only: true }), subjects: BLw.byWhatSubjects(subjW) });
     ok(J(bw['conversation:k1']) === J(['this-account']) && J(bw['group:tg-c']) === J(['this-account']) && !bwOnly['conversation:k1'] && !bwOnly['group:tg-c'], 'web logins «by what» (restack 411, ruled (A)): a child\'s conversation and a child group are drawn admitted by the parent\'s row; a row for «this group only» admits neither', { bw, bwOnly });
     const mpw = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8');
-    ok(/\.\.\.\(\(r\) => \(\{ groupIds: r\.ids, inheritedGroupIds: Array\.isArray\(r\.inherited\) \? r\.inherited : \[\] \}\)\)\(automationGroupsRead\(s, id\)\)/.test(mpw) && /name: t\.title \|\| t\.id, inheritedGroupIds: tasks\.grantGroupsOf\(\[t\.id\]\)\.inherited \}\)\)/.test(mpw), 'web logins «by what»: the subjects producer hands each session its ancestors and each group its own, from the ONE reader');
+    ok(/\.\.\.\(\(gr\) => \(\{ groupIds: gr\.ids, inheritedGroupIds: Array\.isArray\(gr\.inherited\) \? gr\.inherited : \[\], \.\.\.\(gr\.unreadable \? \{ groupsUnreadable: true \} : \{\}\) \}\)\)\(automationGroupsRead\(s, id\)\)/.test(mpw) && /name: t\.title \|\| t\.id, inheritedGroupIds: tasks\.grantGroupsOf\(\[t\.id\]\)\.inherited \}\)\)/.test(mpw), 'web logins «by what»: the subjects producer hands each session its ancestors and each group its own, from the ONE reader');
     // CONTROL — it proves its plant first: «by what» without the session's ancestors draws the child conversation as NOT admitted
     const MW = mutantCopies('restack-by-what', REPO);
     try {
       const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-login.js'), 'utf-8');
-      const CUTW = ', inheritedGroupIds: Array.isArray(s.inheritedGroupIds) ? s.inheritedGroupIds.map(String) : [] } });';
-      const mutW = bsrc.split(CUTW).join(' } });');
+      const CUTW = ', inheritedGroupIds: Array.isArray(s.inheritedGroupIds) ? s.inheritedGroupIds.map(String) : [], ...(s.groupsUnreadable === true';   // restack 415: the train's hold mark follows the ancestors
+      const mutW = anchored(bsrc, CUTW, ', ...(s.groupsUnreadable === true', 'by-what-own-groups');
       ok(bsrc.split(CUTW).length === 2 && mutW !== bsrc && !mutW.includes('s.inheritedGroupIds'), 'CONTROL plant: the session facts\' ancestors are cut, exactly once — the plant is where it claims');
       const BLx = MW.load('src/browser-login.js', mutW, 'by-what-own-groups');
       const bx = BLx.byWhatOf({ rows: rowsW({ kind: 'group', id: 'tg-p' }), subjects: BLx.byWhatSubjects(subjW) });
@@ -942,7 +963,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const unknownNamed = CF11.rowNames(everyoneExceptP, ctxOf(null)), readNamed = CF11.rowNames(everyoneExceptP, ctxOf(['tg-p'])), emptyNamed = CF11.rowNames(everyoneExceptP, ctxOf([]));
     const mpw11 = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf-8'), ar11 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     ok(rThrew.length === 1 && rThrew[0].inherited === null && J(rRead[0].inherited) === J(['tg-p']) && unknownNamed === false && readNamed === false
-      && (mpw11.match(/if \(!(?:tk|tasks)\) throw new Error\('the Task Group store is not ready'\); return (?:tk|tasks)\.grantGroupsOf\(ids\)\.inherited;/g) || []).length === 4
+      && (mpw11.match(/if \(!(?:tk|tasks)\) throw new Error\('the Task Group store is not ready'\); return (?:tk|tasks)\.grantGroupsOf\(ids\)\.inherited;/g) || []).length === 5   /* restack 415: + the end proposals' hook */
       && /catch \{ inheritedGroups = null; \}/.test(ar11) && /\.inherited; \} catch \{ return null; \} \}\)\(\)/.test(ar11) && typeof ACL11 === 'object',
       'the restack\'s cure: a lineage read that throws is UNKNOWN (the roster answers null; an «everyone except P» row never names P\'s child on it); the three hooks throw without a store (may-use\'s already did); the channel principals answer null', { rThrew: rThrew[0] && rThrew[0].inherited, unknownNamed, readNamed });
     // RED CONTROL — the plant first: the OLD fallback («no parents», []) — the same child IS named by the «everyone except P» row (more access)
@@ -1024,7 +1045,7 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
   const fakeTasks = { groupsForSession: () => [{ id: 'tg-c' }], grantGroupsOf: (ids) => ({ ids, inherited: ids.includes('tg-c') ? ['tg-p'] : [] }), rev: () => 1 };
   const rb = typeof RP.createRosterBuild === 'function' ? RP.createRosterBuild : null;
   const rsrc = fs.readFileSync(path.join(REPO, 'src/server/roster-pass.js'), 'utf-8'), asrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8'), osrc = fs.readFileSync(path.join(REPO, 'src/server/channels-outbound.js'), 'utf-8'), apisrc = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf-8'), esrc2 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf-8');
-  ok(/inherited = tk && typeof tk\.grantGroupsOf === 'function' \? tk\.grantGroupsOf\(groups\)\.inherited : \[\]/.test(rsrc) && /return \{ cid, name: s\.name \|\| null, groups, inherited,/.test(rsrc) && /inheritedGroups = tasks\.grantGroupsOf\(myGroups\)\.inherited/.test(asrc) && /groups: myGroups, inheritedGroups,/.test(asrc) && (esrc2.match(/inheritedGroups: inheritedOfSession\(cid\)/g) || []).length === 2 && /drafterInherited/.test(osrc) && /inheritedGroups: p\.principal\.inheritedGroups \|\| \[\]/.test(apisrc), 'the channel producers: the roster and the agent\'s channel principal ask the ONE reader; the engine\'s hearers, a draft, a stash and an API proposal carry the lineage (a stored one beside the groups it stored)');
+  ok(/inherited = tk && typeof tk\.grantGroupsOf === 'function' \? tk\.grantGroupsOf\(groups\)\.inherited : \[\]/.test(rsrc) && /return \{ cid, name: s\.name \|\| null, groups, inherited,/.test(rsrc) && /inheritedGroups = tasks\.grantGroupsOf\(myGroups\)\.inherited/.test(asrc) && /groups: myGroups, inheritedGroups,/.test(asrc) && (esrc2.match(/inheritedGroups: inheritedOfSession\(cid\)/g) || []).length === 2 && /drafterInherited/.test(osrc) && /const judgedCtx = \(pr\) => \(\{[^\n]*inheritedGroups: pr\.inheritedGroups \|\| \[\]/.test(apisrc) && /const shapeCtx = \(s\) => \{[^\n]*inheritedGroups: s\.inheritedGroups \|\| \[\]/.test(apisrc)   /* restack 415: the release's two ctx builders carry it */, 'the channel producers: the roster and the agent\'s channel principal ask the ONE reader; the engine\'s hearers, a draft, a stash and an API proposal carry the lineage (a stored one beside the groups it stored)');
   void rb; void fakeTasks;
 }
 

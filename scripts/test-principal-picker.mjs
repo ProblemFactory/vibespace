@@ -22,6 +22,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // lane lg-group-parents (restack 415): the chain's controls by anchor (mutant-copy already loads scratch.mjs)
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const t0 = Date.now();
@@ -268,12 +269,12 @@ console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry adm
     const gsrc = read('src/grant-model.js');
     const HIT = '(!e.only && toInherited && toInherited.has(e.id))';
     ok(gsrc.split(HIT).length === 2, 'CONTROL setup: the model\'s «仅本组» check is found exactly once');
-    const GMx = M2.load('src/grant-model.js', gsrc.replace(HIT, '(toInherited && toInherited.has(e.id))'), 'ignores-only');
+    const GMx = M2.load('src/grant-model.js', anchored(gsrc, HIT, '(toInherited && toInherited.has(e.id))', 'ignores-only'), 'ignores-only');
     ok(bad(walk(GMx, PM)).length > 0, 'CONTROL: a model that ignores «仅本组» admits the child the chip says is left out — the leg above would be red');
     const psrc = read('src/lib/principal-picker-model.js');
     const RCH = "  return only ? 'only' : 'children';";
     ok(psrc.split(RCH).length === 2, 'CONTROL setup: entryReach\'s «仅本组» answer is found exactly once');
-    const PMx = await import(pathToFileURL(M2.write('src/lib/principal-picker-model.js', psrc.replace(RCH, "  return 'children';"), 'reach-always-children', { esm: true })).href);
+    const PMx = await import(pathToFileURL(M2.write('src/lib/principal-picker-model.js', anchored(psrc, RCH, "  return 'children';", 'reach-always-children'), 'reach-always-children', { esm: true })).href);
     ok(bad(walk(GM, PMx)).length > 0, 'CONTROL: a chip that says «and its child groups» on a «仅本组» entry claims a child the model refuses — the leg above would be red');
   } finally { try { fs.rmSync(M2.dir, { recursive: true, force: true }); } catch { } }
   // the chips draw THESE words (the switch's face is the entry's reach; an exception chip says «…, always»)
