@@ -2,6 +2,48 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.413 — 2026-11-19
+
+### Added
+- When VibeSpace cannot read its record of messages waiting behind running turns, For you says so, with Set it aside to rename the file and write it again.
+- Add machine can be filled from a pasted ssh config block, as VS Code writes it: you see each field it read and every line it left out, before anything is added.
+- A machine can be added behind one jump host (ssh -J). Its folders then mount read-only over the device link.
+- Add machine can log in with a key file already on this server, given by its path.
+
+### Changed
+- Locate's door for a session the «Stopped by a limit or overload» filter hides now reads «Turn off the "Stopped by a limit or overload" filter».
+- On the Tasks board, the «Stopped by a limit or overload (N)» count now counts the stopped sessions the board shows; the status filter no longer narrows it.
+
+### Fixed
+- A «file watches» notice still open when VibeSpace restarts now clears itself once watches work again, instead of staying for good.
+- A removed spend ledger, or an older copy put back, no longer resets the count of turns nobody typed in silence: For you says it, and it is counted.
+- An agent filling a date by the ref of one of its parts (Month, Day, Year) is now refused with how to fill the whole field; it used to set nothing and go on.
+- A sub-agent's last messages before it finishes now show live, and a sub-agent's message no longer shows twice in its view or its card's count.
+- A keyboard-opened menu starts on its first item even if unavailable, and a menu opening while you type in a desktop or browser view leaves your keys there.
+- A menu opened with Shift+F10 or the menu key can now always be walked with the keyboard, except over a remote desktop, which keeps the key.
+- A conversation on another machine in a symlinked folder is again a member of the Task Group whose folder is the link's target.
+- A dial-paired device removed from the hub now removes its own start (service, launch item, boot hook or logon task) and stops (agents of this release).
+- A blocked pool's For you notice that you dismissed stays dismissed after a restart, and one left open closes once the pool can serve again.
+- ⟳ for a paired machine's login no longer reads usage with a long-lived token; it says why instead.
+- A conversation started while Task Groups could not be read gets its Task Group's browser limit once they read, instead of the default for its whole life.
+- An API request an agent filed while Task Groups could not be read is never approved later as if the agent were in no Task Group; Approve says why.
+- Gmail: the For you item saying a company preset signs in with another client now says why it closed, also after you reopen it.
+- ⟳ on a paired machine's login keeps the usage its sessions reported when a long-lived token is refused; an expired login says «no valid login».
+- Importing a configuration now checks each SSH machine as adding one does: a machine whose user or port could act as an ssh option is skipped and named.
+- An SSH machine added from now on by a name with its own entry in the hub's ssh config keeps that entry's port when you leave Port empty.
+- On a cluster instance, connecting Dropline no longer stops the cluster's key from working; a cluster client with no relay page now says what to set.
+- Where an earlier Dropline connect hid a cluster's settings, the card now says so and offers «Use the cluster's settings».
+- If you restart VibeSpace inside a Background Work job, stopping that job no longer kills it (send its output to a file, or it ends with the job).
+- Stopping a Background Work job that is VibeSpace itself (VibeSpace started as the job) is refused and says why; it used to end VibeSpace.
+- A pooled Codex conversation's usage is shown under the account it runs on, no longer under the pool's name.
+- The usage meter's automatic Codex view shows only the default account's own numbers (a pool's: the account it uses now), and says when it has none yet.
+- Two VibeSpace processes on one data folder no longer each count their own turns nobody typed: the second starts none until the first ends, and says so.
+- A reset of the spend ledger is said only when turns that still count were lost, and its notice ends when they stop counting.
+- The meter's automatic Claude view does the same: the default account's own numbers (a pool's: its current account), never the CLI login's under its name.
+
+### Security
+- A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.
+
 ## 2.369.412 — 2026-11-19
 
 ### Added
