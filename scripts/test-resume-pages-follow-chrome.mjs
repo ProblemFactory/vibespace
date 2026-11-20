@@ -9,9 +9,17 @@
 //   ② the follow ON: the key resumes it — B's window e-1 is LIVE under the same row id and box on Desk 2, B did not switch, ONE window
 //      of the conversation on B; QUIET (the cure round's must 3): B's focused element, its active window (the person works in f-2,
 //      above e-1) and its stacking order are the SAME before and after; a THIRD page C, which built e-1 on Desk 2 and went back to
-//      Desk 1, follows too (live there, hidden, one window, no switch); A did not switch and made no window; the layout-syncs
-//      counted: at most ONE from B and ONE from C for Desk 2 and none after it settled, none from A
-//   ③ page A reloads and visits Desk 2: e-1 is live in place (the hub's record carries the live session)
+//      Desk 1, follows too (live there, hidden, one window, no switch); A did not switch and made no window. THE FRAMES END AND
+//      NOTHING IS LOST (place-14, 2.369.413's proof run: B and C follow one broadcast and write from one base; when the writes tie the
+//      hub keeps one and refuses the other as stale, and the refused page adopts and sends once more): THE TIE IS MADE — B's and C's
+//      first frames held and released together — and judged by followLaw (exactly one stale refusal, one frame more from the refused
+//      page, none after the settle, none from A, the record's windows kept, no «disagree» toast, the journal's line N → N), with two
+//      CONTROLS that are red (a page sending on and on; a window lost at the refusal)
+//   ②b THE UNTIED CASE IS MADE TOO: ended again; at the next resume C hears of it only after the hub kept B's record and C saw it —
+//      NO refusal; the same law. B follows live; C (its read-only e-1 closed by the product's re-key when it saw the record) holds no
+//      read-only view and stays on Desk 1, and a visit to Desk 2 builds e-1 LIVE in its row from the record (one window)
+//   ③ page A reloads and visits Desk 2: e-1 is live in place (the hub's record carries the live session — the last resume's)
+//   the journal: no refusal but stale ones of Desk 2, each N → N — one in the made tie, none in the untied pass
 // dtach missing is a RED, never a green skip (the socket tool is what the sessions run in).
 // Screenshots go to $RPF_SHOTS_DIR when set, else nowhere.
 import fs from 'node:fs';
@@ -59,6 +67,44 @@ const CID = 'c0ffee31-0000-4000-8000-000000000031';
 const GB = { left: 0.3, top: 0.2, width: 0.4, height: 0.5 };
 const META = [{ id: 'desk-1', name: 'Desk 1' }, { id: 'desk-2', name: 'Desk 2' }];
 const SECOND = 'pages follow leg second password';
+
+// THE FOLLOWERS' LAW (主开发 2026-11-20 07:55Z, place-14 — 2.369.413's proof run: one broadcast reaches B and C together, each follower
+// owes Desk 2 its own record from the same base, and when the two writes tie the hub's staleness gate keeps the first and refuses the
+// second «from an older base»; the refused page adopts and sends once more, then nothing — a person sees nothing). The frames END and
+// nothing is lost. PURE: one pass's facts → { ok, why: [each broken rule, by name] }. `made` = 'tie' (B's and C's first frames held and
+// released together: exactly ONE stale refusal) | 'untied' (C hears of the resume only after the hub kept B's record and C saw it: none).
+// `pages` = { B, C } each { sends, refused: [reason, …], sendsLater, refusedLater } (later = after the settle); `A` = A's sends;
+// `rec0` / `rec1` = the hub's Desk 2 record before / after ({ n, e1Session }); `session` = the resumed session; `toasts` = the pages'
+// «disagree» toasts; `journal` = the hub's REFUSED lines of this pass.
+const STALE_LINE = /\[layout-sync\] REFUSED a (?:phone |desktop )?record of desktop "Desk 2" \(desk-2\): written from an older base \([^)]*\) — (\d+) → (\d+) windows; the sender adopts the record kept/;
+const followLaw = ({ made, pages, A, rec0, rec1, session, toasts, journal, settled }) => {
+  const why = [];
+  const stale = (pg) => pg.refused.filter((r) => r === 'stale').length;
+  if (A !== 0) why.push(`page A sent ${A} frame(s) — it holds no row of the conversation`);
+  if (settled === false) why.push('the frames never went quiet for 2.5 s within 25 s — they did not end');
+  for (const [k, pg] of Object.entries(pages)) {
+    if (pg.tapped === false) why.push(`page ${k}'s socket was replaced (a reconnect) — its refusals were no longer counted`);
+    if (pg.refused.some((r) => r !== 'stale')) why.push(`page ${k} was refused for another reason: ${pg.refused.filter((r) => r !== 'stale').join(', ')}`);
+    if (pg.refused.length > 1) why.push(`page ${k} was refused ${pg.refused.length} times in one resume — a second refusal of the same record (the breaker's «disagree»)`);
+    if (pg.sends > 1 + stale(pg)) why.push(`page ${k} sent ${pg.sends} frames for ${stale(pg)} stale refusal(s) — at most one, plus one more per stale refusal it received`);
+    if (pg.sendsLater !== pg.sends) why.push(`page ${k} sent ${pg.sendsLater - pg.sends} frame(s) after the settle — the frames never ended (a ping-pong)`);
+    if (pg.refusedLater !== pg.refused.length) why.push(`page ${k} was refused after the settle`);
+  }
+  const total = Object.values(pages).reduce((n, pg) => n + stale(pg), 0);
+  if (made === 'tie') {
+    if (total !== 1) why.push(`the made tie gave ${total} stale refusal(s) — exactly ONE is owed (two writes from one base: the second is refused)`);
+    const refused = Object.entries(pages).filter(([, pg]) => stale(pg) === 1);
+    if (refused.length === 1 && refused[0][1].sends !== 2) why.push(`the refused page ${refused[0][0]} sent ${refused[0][1].sends} frame(s) — its first and ONE more from the record it adopted`);
+    for (const [k, pg] of Object.entries(pages)) if (!stale(pg) && pg.sends !== 1) why.push(`the kept page ${k} sent ${pg.sends} frame(s) — exactly its one`);
+  } else if (total !== 0) why.push(`the untied pass gave ${total} stale refusal(s) — none is owed when a page writes after it saw the other's record`);
+  if (!rec0 || !rec1 || rec1.n !== rec0.n) why.push(`the hub's record of Desk 2 went from ${rec0 && rec0.n} to ${rec1 && rec1.n} windows — a window lost`);
+  if (!rec1 || rec1.e1Session !== session) why.push(`the hub's record of Desk 2 holds e-1 on ${rec1 && rec1.e1Session}, not the resumed session ${session}`);
+  for (const [k, n] of Object.entries(toasts || {})) if (n) why.push(`page ${k} shows a «disagree» toast`);
+  const lines = journal || [];
+  for (const l of lines) { const m = STALE_LINE.exec(l); if (!m) why.push(`the journal holds a refusal that is not a stale one of Desk 2: ${l.slice(0, 200)}`); else if (m[1] !== m[2]) why.push(`the journal's stale line reads ${m[1]} → ${m[2]} windows — a window lost at the refusal`); }
+  if (lines.length !== total) why.push(`the journal holds ${lines.length} refusal line(s) for ${total} stale refusal(s) the pages received`);
+  return { ok: why.length === 0, why };
+};
 
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
@@ -174,7 +220,17 @@ process.stdin.on('end', () => process.exit(0));
       const up = await until(async () => { try { return await ev('!!(window.app && window.app.desktopManager && window.app.desktopManager.activeDesktopId)'); } catch { return false; } }, 30000, 200);
       if (up) await ev('window.app.ready');
       // every layout-sync this page sends, counted (its desktop, when)
-      if (up) await ev(`(() => { window.__syncs = []; const ws = app.ws, s = ws.send.bind(ws); ws.send = function (m) { if (m && m.type === 'layout-sync') window.__syncs.push([m.desktopId || null, Date.now()]); return s(m); }; return true; })()`);
+      // (+ place-14: the tie and the untied case are MADE, never waited for — `__holdOut` = a desktop whose FIRST frame this page holds until
+      // `__releaseOut()`; `__holdIn` = this page's live list (`active-sessions`) held until `__releaseIn()`: it hears of a resume later; every
+      // refusal it RECEIVES is counted beside its sends — [desktop, reason, when, the kept record's windows])
+      if (up) await ev(`(() => { window.__syncs = []; window.__refused = []; window.__holdOut = null; window.__heldOut = []; window.__holdIn = false; window.__heldIn = [];
+        const ws = app.ws, s = ws.send.bind(ws);
+        ws.send = function (m) { if (m && m.type === 'layout-sync') { if (window.__holdOut && m.desktopId === window.__holdOut && !window.__heldOut.length) { window.__heldOut.push(m); return; } window.__syncs.push([m.desktopId || null, Date.now()]); } return s(m); };
+        window.__releaseOut = () => { const q = window.__heldOut.splice(0); window.__holdOut = null; for (const m of q) { window.__syncs.push([m.desktopId || null, Date.now()]); s(m); } return q.length; };
+        const raw = ws.ws, on = raw.onmessage; raw.__vsTapped = true;
+        raw.onmessage = function (e) { let d = null; try { d = JSON.parse(e.data); } catch { } if (d && d.type === 'layout-sync-refused') window.__refused.push([d.desktopId || null, d.reason || null, Date.now(), d.state && Array.isArray(d.state.windows) ? d.state.windows.length : null]); if (d && d.type === 'active-sessions' && window.__holdIn) { window.__heldIn.push(e); return; } return on.call(this, e); };
+        window.__releaseIn = () => { window.__holdIn = false; const q = window.__heldIn.splice(0); for (const e of q) on.call(raw, e); return q.length; };
+        return true; })()`);
       return up;
     };
     X.shot = async (name) => { if (!SHOTS) return null; await sleep(300); const r = await send('Page.captureScreenshot', { format: 'png' }); const f = path.join(SHOTS, name + '.png'); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
@@ -232,9 +288,39 @@ process.stdin.on('end', () => process.exit(0));
 
     // ② the follow on: the key resumes it; B's ended window turns live IN ITS ROW, quietly; A is untouched
     const aDesk0 = await PA.ev('app.desktopManager.activeDesktopId');
+    // the facts the followers' law judges (followLaw, above): the hub's Desk 2 record; each page's Desk 2 frames and the refusals it
+    // received since a pass began, at a first look and again 3 s later (the settle); the «disagree» toasts; the hub's REFUSED lines
+    const deskRec = async () => { const l = (await req('GET', '/api/layouts')).json || {}; const a = ((l.desktops || {})['desk-2'] || {}).autoSave || {}; const wins = Array.isArray(a.windows) ? a.windows : []; const e1 = wins.find((w) => w && w.winId === 'e-1') || null; return { n: wins.length, at: a.updatedAt || null, e1Session: e1 ? e1.serverSessionId || null : null }; };
+    const factsOf = async (X, from) => ({ sends: (await X.ev('window.__syncs')).filter(([d, at]) => d === 'desk-2' && at >= from).length, refused: (await X.ev('window.__refused')).filter(([d, , at]) => d === 'desk-2' && at >= from).map((r) => r[1]), tapped: await X.ev('!!(app.ws.ws && app.ws.ws.__vsTapped)') });
+    // THE SETTLE, MEASURED (the read: never a fixed sleep): B's and C's Desk 2 frames and refusals since `from` unchanged for `still` ms
+    const quiet = async (from, still = 2500, ms = 25000) => {
+      const t0q = Date.now(); let last = -1, since = Date.now();
+      while (Date.now() - t0q < ms) { const f = [await factsOf(PB, from), await factsOf(PC, from)]; const n = f.reduce((a, x) => a + x.sends + x.refused.length, 0); if (n !== last) { last = n; since = Date.now(); } else if (Date.now() - since >= still) return true; await sleep(200); }
+      return false;
+    };
+    const sendsOfA = async (from) => (await PA.ev('window.__syncs')).filter(([, at]) => at >= from).length;
+    // a pass's facts: the first look once the frames have gone QUIET (bounded; a page that never goes quiet is said), a second 3 s later
+    const passFacts = async (from) => {
+      const settled = await quiet(from);
+      const B1 = await factsOf(PB, from), C1 = await factsOf(PC, from);
+      await sleep(3000);
+      const B2 = await factsOf(PB, from), C2 = await factsOf(PC, from);
+      return { settled, pages: { B: { sends: B1.sends, refused: B1.refused, sendsLater: B2.sends, refusedLater: B2.refused.length, tapped: B2.tapped }, C: { sends: C1.sends, refused: C1.refused, sendsLater: C2.sends, refusedLater: C2.refused.length, tapped: C2.tapped } }, A: await sendsOfA(from) };
+    };
+    const disagree = async () => { const n = (X) => X.ev(`[...document.querySelectorAll('#global-toasts .global-toast')].filter((t) => /disagree about desktop/.test(t.textContent)).length`); return { A: await n(PA), B: await n(PB), C: await n(PC) }; };
+    const refusedLines = (from) => journal.slice(from).split('\n').filter((l) => /REFUSED/.test(l));
+    // THE TIE IS MADE (place-14 — never left to luck): B's and C's FIRST frame for Desk 2 are held, then released in one step; both were
+    // written on the same broadcast from the same base, so the hub keeps one and refuses the other, always
+    const rec0 = await deskRec();
+    await PB.ev(`(window.__holdOut = 'desk-2', true)`); await PC.ev(`(window.__holdOut = 'desk-2', true)`);
+    const jTie = journal.length;
     const t0 = Date.now();
     const r2 = await cli(['conversations', 'resume', `claude:${CID}`], coord.token);
     ok(r2.code === 0 && r2.json && /^sess-/.test(String(r2.json.sessionId)) && r2.json.desktop && r2.json.desktop.id === 'desk-2' && r2.json.desktop.name === 'Desk 2' && /nothing was sent to it/.test(String(r2.json.note)), '② the key resumes it: exit 0, its sessionId, the desktop of its row (Desk 2), the note', r2.json || r2.err);
+    const heldBoth = await until(async () => (await PB.ev('window.__heldOut.length')) === 1 && (await PC.ev('window.__heldOut.length')) === 1, 20000, 100);
+    const heldBases = [await PB.ev('window.__heldOut[0] ? window.__heldOut[0].base ?? null : null'), await PC.ev('window.__heldOut[0] ? window.__heldOut[0].base ?? null : null')];
+    const released = await Promise.all([PB.ev('window.__releaseOut()'), PC.ev('window.__releaseOut()')]);
+    ok(!!heldBoth && released[0] === 1 && released[1] === 1, '② THE TIE IS MADE: B and C each wrote Desk 2\'s record on the same broadcast — each page\'s FIRST frame held, both released in one step', { heldBoth: !!heldBoth, released, heldBases });
     const live2 = await until(async () => !!(await PB.ev(VIEW))?.live, 20000, 250);
     const b2 = await PB.ev(VIEW);
     ok(live2 && b2.id === 'e-1' && b2.desk === 'desk-2' && b2.gb === J(GB) && !b2.note && b2.sid === r2.json.sessionId, '② page B: e-1 is LIVE — the same row id, its box, on Desk 2, showing the resumed session', b2);
@@ -248,12 +334,66 @@ process.stdin.on('end', () => process.exit(0));
     const feelC1 = await PC.ev(FEEL);
     ok(liveC && (await PC.ev('app.desktopManager.activeDesktopId')) === 'desk-1' && J(await PC.ev(OF_CONV)) === J(['e-1']) && feelC0.ae === feelC1.ae && feelC0.active === feelC1.active && J(feelC0.order) === J(feelC1.order),
       '② page C follows too: its e-1 on Desk 2 is live (C still shows Desk 1 — no switch), one window; C\'s focused element, active window and stacking order the same', { feelC0, feelC1 });
-    const sB = (await PB.ev('window.__syncs')).filter(([d, at]) => d === 'desk-2' && at >= t0), sA = (await PA.ev('window.__syncs')).filter(([, at]) => at >= t0);
-    const sC = (await PC.ev('window.__syncs')).filter(([d, at]) => d === 'desk-2' && at >= t0);
-    await sleep(3000);
-    const sB2 = (await PB.ev('window.__syncs')).filter(([d, at]) => d === 'desk-2' && at >= t0), sC2 = (await PC.ev('window.__syncs')).filter(([d, at]) => d === 'desk-2' && at >= t0);
-    ok(sB.length <= 1 && sC.length <= 1 && sB2.length === sB.length && sC2.length === sC.length && sA.length === 0, `② the frames: ${sB.length} layout-sync from B and ${sC.length} from C for Desk 2, none after it settled (${sB2.length - sB.length}, ${sC2.length - sC.length}), ${sA.length} from A`, { sB, sC, sA });
+    // THE FOLLOWERS' LAW over the made tie (followLaw, above): exactly ONE stale refusal; the refused page ONE frame more, accepted; the
+    // kept page its one; none after the settle (a ping-pong stays red); A none; the hub's Desk 2 keeps its windows, e-1 on the resumed
+    // session; no «disagree» toast; the journal's one stale line N → N
+    const F2 = await passFacts(t0), rec1 = await deskRec(), sess2 = r2.json && r2.json.sessionId, toasts2 = await disagree(), lines2 = refusedLines(jTie);
+    const L2 = followLaw({ made: 'tie', ...F2, rec0, rec1, session: sess2, toasts: toasts2, journal: lines2 });
+    ok(L2.ok, '② the frames END and nothing is lost — THE TIE MADE: exactly ONE stale refusal, the refused page one frame more (accepted), the kept page its one, none after the settle, none from A; the hub\'s Desk 2 keeps its windows with e-1 on the resumed session; no «disagree» toast; the journal\'s one stale line reads N → N', { why: L2.why, F2, rec0, rec1, lines2 });
+    // CONTROLS — the law goes red where the harm is (a copy of these very facts): the refused page sending on and on (no settle); a
+    // window lost at the refusal (the record one short, the journal's line N → N-1)
+    const refusedK = Object.keys(F2.pages).find((k) => F2.pages[k].refused.length) || 'B';
+    const cPing = followLaw({ made: 'tie', ...F2, pages: { ...F2.pages, [refusedK]: { ...F2.pages[refusedK], sendsLater: F2.pages[refusedK].sends + 3 } }, rec0, rec1, session: sess2, toasts: {}, journal: lines2 });
+    const cLost = followLaw({ made: 'tie', ...F2, rec0, rec1: { ...rec1, n: rec1.n - 1 }, session: sess2, toasts: {}, journal: lines2 });
+    const cLine = followLaw({ made: 'tie', ...F2, rec0, rec1, session: sess2, toasts: {}, journal: lines2.map((l) => l.replace(/— (\d+) → \d+ windows/, (m0, a) => `— ${a} → ${Number(a) - 1} windows`)) });
+    ok(!cPing.ok && cPing.why.some((w) => /after the settle/.test(w)), '② CONTROL: a copy in which the refused page sends on and on (no settle) is RED, by name', cPing.why);
+    ok(!cLost.ok && cLost.why.some((w) => /went from \d+ to \d+ windows — a window lost/.test(w)), '② CONTROL: a copy that loses a window at the refusal (the hub\'s record one short) is RED, by name', cLost.why);
+    ok(lines2.length >= 1 && !cLine.ok && cLine.why.some((w) => /stale line reads \d+ → \d+ windows — a window lost/.test(w)), '② CONTROL: a copy whose journal line reads N → N-1 windows is RED, by name (the made tie\'s line, mutated)', cLine.why);
     await PB.shot('b-after');
+    let rLive = sess2;   // the conversation's live session for ③: the last resume's, read where the hub states it
+
+    // ②b THE UNTIED CASE IS MADE TOO (place-14): the key ends it; at the next resume page C hears of it only AFTER the hub kept B's
+    // record and C saw it (C's live list held, then released) — C writes from that record's base: NO refusal is owed
+    const eU = await cli(['conversations', 'end', `claude:${CID}`], coord.token);
+    const endedU = eU.code === 0 && await until(async () => (await liveOf()).length === 0, 20000, 250) && await until(async () => !!(await PB.ev(VIEW))?.readOnly && !!(await PC.ev(VIEW))?.readOnly, 20000, 250);
+    ok(!!endedU, '②b the key ends it again: B\'s and C\'s e-1 are ended (read-only) again', eU.json || eU.err);
+    const tEnd = Date.now();
+    ok(await quiet(tEnd - 20000), '②b …what the end itself wrote has gone quiet before the pass (the journal leg below judges every line)');
+    const recU0 = await deskRec();
+    await PC.ev('(window.__holdIn = true, true)');
+    const jU = journal.length, tU = Date.now();
+    const rU = await cli(['conversations', 'resume', `claude:${CID}`], coord.token);
+    let liveU = null; await until(async () => (liveU = (await liveOf())[0] || null), 20000, 250);   // its session READ from the live list, never assumed from the answer (until answers only true / false: the row is kept here)
+    const sessU = liveU ? liveU.id : null;
+    ok(rU.code === 0 && !!sessU, '②b the key resumes it once more: exit 0, live again (its session read from the live list)', rU.json || rU.err);
+    let keptU = null; if (sessU) await until(async () => { const r = await deskRec(); return (keptU = r.e1Session === sessU && r.at ? r : null); }, 20000, 250);
+    const seenU = !!keptU && await until(async () => Number(await PC.ev(`app.desktopManager.stampOf('desk-2') || 0`)) >= Number(keptU.at), 10000, 100);
+    const heardLate = await PC.ev('window.__releaseIn()');
+    ok(!!keptU && !!seenU, '②b THE UNTIED CASE IS MADE: the hub KEPT B\'s record of Desk 2 (e-1 on the resumed session) and page C SAW it before C heard of the resume (its live list held, then released)', { kept: keptU || null, seen: !!seenU, heldLiveLists: heardLate });
+    // WHAT EACH PAGE HOLDS after the untied resume, PRINTED every run (the pre-run of 9093a91d4: «B and C both follow» was red with no
+    // facts). C saw B's record of Desk 2 BEFORE it heard of the resume, and the product's re-key rule closes C's hidden read-only e-1
+    // (src/lib/desktop-manager.js cacheRemoteState: «a DEAD view this page holds there (hidden) of a row whose record now names another
+    // session goes as the row's re-opening …, and the next switch builds the row from the record»); C's follow then finds no ended window
+    // (session-lifecycle _reopenRowOf endedOnly). So C is judged on THAT law: no read-only view of the running conversation, its own
+    // record of Desk 2 naming e-1 on the resumed session — and, after the pass's law below, a person who visits Desk 2 on C gets e-1 LIVE
+    const PAGE_FACTS = `(() => { const w = app.wm.windows.get('e-1'), v = app.sessions.get('e-1'); const held = app.desktopManager._savedStates && app.desktopManager._savedStates.get('desk-2'); const row = held && Array.isArray(held.windows) ? held.windows.find((r) => r && r.winId === 'e-1') : null;
+      const mine = [...app.wm.windows.values()].filter((x) => (x._openSpec && x._openSpec.backendSessionId === ${J(CID)}) || (x._conversation && x._conversation.backendSessionId === ${J(CID)})).map((x) => { const vv = app.sessions.get(x.id); return { id: x.id, desk: x._desktopId, readOnly: !!(vv && vv._readOnly), sid: (vv && vv.sessionId) || null }; });
+      return { desk: app.desktopManager.activeDesktopId, e1: !!w, view: v ? { sid: v.sessionId || null, readOnly: !!v._readOnly } : null, recordRow: row ? (row.serverSessionId || null) : null, heard: !!(app._liveConvKeys && app._liveConvKeys.has(${J('claude:' + CID)})), windows: mine, frames: (window.__syncs || []).filter(([d, at]) => d === 'desk-2' && at >= ${tU}).length }; })()`;
+    const liveBU = await until(async () => !!(await PB.ev(VIEW))?.live, 20000, 250);
+    const factsBU = await PB.ev(PAGE_FACTS), factsCU = await PC.ev(PAGE_FACTS);
+    console.log(`    [②b what each page holds] B ${J(factsBU)} · C ${J(factsCU)} · the resumed session ${sessU}`);
+    ok(!!liveBU, '②b page B follows: e-1 is LIVE on B (it heard of the resume at once)', factsBU);
+    let factsC2 = factsCU; const cHolds = await until(async () => { factsC2 = await PC.ev(PAGE_FACTS); return factsC2.recordRow === sessU && factsC2.windows.every((x) => !x.readOnly) && factsC2.desk === 'desk-1'; }, 10000, 250);
+    ok(!!cHolds, '②b page C (it saw B\'s record first) holds NO read-only view of the running conversation, stays on Desk 1 (QUIET: no switch), and its own record of Desk 2 names e-1 on the resumed session (the product\'s re-key: the row is built from that record at the next switch)', factsC2);
+    const FU = await passFacts(tU), recU1 = await deskRec(), toastsU = await disagree(), linesU = refusedLines(jU);
+    const LU = followLaw({ made: 'untied', ...FU, rec0: recU0, rec1: recU1, session: sessU, toasts: toastsU, journal: linesU });
+    ok(LU.ok, '②b the frames END and nothing is lost — THE UNTIED CASE MADE: NO refusal, each page one frame at most, none after the settle, none from A; the hub\'s Desk 2 keeps its windows with e-1 on the resumed session; no «disagree» toast; no journal line', { why: LU.why, FU, recU0, recU1, linesU });
+    if (sessU) rLive = sessU;
+    // …and THE PERSON'S ROAD on C: a visit to Desk 2 (a real click on its preview) builds e-1 from the record — LIVE in its row
+    await goto(PC, 'desk-2');
+    let viewCU = null; const liveCU = await until(async () => { viewCU = await PC.ev(VIEW); return !!viewCU && viewCU.live && viewCU.desk === 'desk-2' && viewCU.gb === J(GB) && viewCU.sid === sessU; }, 20000, 250);
+    const ofConvCU = await PC.ev(OF_CONV);
+    ok(!!liveCU && J(ofConvCU) === J(['e-1']), '②b …and a person who visits Desk 2 on page C gets e-1 LIVE in its row (the same id, its box, the resumed session) — ONE window of the conversation', { view: viewCU, windows: ofConvCU, facts: await PC.ev(PAGE_FACTS) });
 
     // ③ page A reloads and visits Desk 2: the conversation is live in place
     // the reload is PROVEN (the read: Page.reload answers before the new page loads — boot() alone passed on the OLD document): a marker
@@ -261,7 +401,7 @@ process.stdin.on('end', () => process.exit(0));
     // what A will READ at its reload is the hub's record as B / C's follow left it (the read: a check after the reload can be A's own save)
     const layPre = (await req('GET', '/api/layouts')).json || {};
     const e1pre = ((((layPre.desktops || {})['desk-2'] || {}).autoSave || {}).windows || []).find((w) => w && w.winId === 'e-1') || null;
-    ok(!!e1pre && !!r2.json && e1pre.serverSessionId === r2.json.sessionId, '③ BEFORE A reloads, the hub\'s record of Desk 2 already holds e-1 on the RESUMED session (written by B / C\'s follow)', { serverSessionId: e1pre && e1pre.serverSessionId, resumed: r2.json && r2.json.sessionId });
+    ok(!!e1pre && !!rLive && e1pre.serverSessionId === rLive, '③ BEFORE A reloads, the hub\'s record of Desk 2 already holds e-1 on the RESUMED session (written by B / C\'s follow)', { serverSessionId: e1pre && e1pre.serverSessionId, resumed: rLive });
     await PA.ev('(window.__preReload = 1, 1)');
     await PA.send('Page.reload', {});
     const fresh = await until(async () => { try { return await PA.ev('!window.__preReload'); } catch { return false; } }, 20000, 100);
@@ -275,9 +415,13 @@ process.stdin.on('end', () => process.exit(0));
     // the RESUMED session
     const lay = (await req('GET', '/api/layouts')).json || {};
     const e1rec = ((((lay.desktops || {})['desk-2'] || {}).autoSave || {}).windows || []).find((w) => w && w.winId === 'e-1') || null;
-    ok(!!e1rec && !!r2.json && e1rec.serverSessionId === r2.json.sessionId, '③ the HUB\'s record of Desk 2 holds e-1 on the RESUMED session (its serverSessionId = the resume\'s sessionId)', { serverSessionId: e1rec && e1rec.serverSessionId, resumed: r2.json && r2.json.sessionId });
+    ok(!!e1rec && !!rLive && e1rec.serverSessionId === rLive, '③ the HUB\'s record of Desk 2 holds e-1 on the RESUMED session (its serverSessionId = the resume\'s sessionId)', { serverSessionId: e1rec && e1rec.serverSessionId, resumed: rLive });
     await PA.shot('a-after-reload');
-    ok(!/REFUSED/.test(journal), 'the journal holds no refusal', journal.split('\n').filter((l) => /REFUSED/.test(l)).slice(0, 3));
+    // THE JOURNAL (place-14's law): no refusal of any kind but «stale», each reading N → N windows; the made tie's ONE (judged in its pass
+    // above), the untied pass's none; and none anywhere else, unless it is a lawful stale one of Desk 2 (an end's own records may tie)
+    const allRefused = journal.split('\n').filter((l) => /REFUSED/.test(l));
+    const badLines = allRefused.filter((l) => { const m = STALE_LINE.exec(l); return !m || m[1] !== m[2]; });
+    ok(badLines.length === 0 && lines2.length === 1 && linesU.length === 0, 'the journal holds no refusal but STALE ones of Desk 2, each N → N windows: ONE in the made tie, NONE in the untied pass', { total: allRefused.length, bad: badLines.slice(0, 3), tie: lines2.length, untied: linesU.length });
   } catch (e) {
     ok(false, 'the suite threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e));
   }
