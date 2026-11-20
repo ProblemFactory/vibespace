@@ -23,7 +23,7 @@ const fsp = require('fs').promises;
 const path = require('path');
 const crypto = require('crypto');
 const { redactSecrets } = require('../secret-shapes.js');   // PURE: the one secret-shape rule (a name shaped like a value is never shown)
-const SR = require('../store-read.js');   // PURE (B-f276): what ONE read of a store answers — data · missing · unreadable (held) · corrupt (set aside)   // PURE: the one secret-shape rule (a name shaped like a value is never shown)
+const SR = require('../store-read.js');   // PURE (B-f276): what ONE read of a store answers — data · missing · unreadable (held) · corrupt (set aside)
 
 const RETIRED = 'job-secrets.retired.json';   // = src/server/migrations.js JOB_SECRETS_RETIRED (scripts/test-migrations.mjs pins the two)
 // B-ef1b (主开发 r191, THE LAW): nothing sealed for a job outlives the act that sealed it without a record a person can see. A move
@@ -64,7 +64,7 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {}, write
   const liveTodos = () => (typeof userTodos === 'function' ? userTodos() : userTodos);
   const W = () => writer || require('../store-writer.js').storeWriter();   // THE store writer (its own thread, its exit flush), the file's mode kept
   const okEntry = (e) => e && /^secret:[\w.-]{1,160}$/.test(String(e.entry || ''));
-  const idOf = (st) => (st ? { ino: st.ino, size: st.size, ctimeMs: st.ctimeMs, ...(st.birthtimeMs ? { birthtimeMs: st.birthtimeMs } : {}) } : null);
+  const idOf = (st) => (st ? { ino: st.ino, size: st.size, ...(st.birthtimeMs ? { birthtimeMs: st.birthtimeMs } : {}) } : null);   // what sameFile compares — nothing else (a change time moves with a chmod)
   const sameFile = (a, st) => !!(a && st && st.isFile() && a.ino === st.ino && a.size === st.size && (!a.birthtimeMs || !st.birthtimeMs || a.birthtimeMs === st.birthtimeMs));   // the file a commit named: its inode, size and birth (a chmod or an xattr moves only the change time; a reused inode is born again)
   /** A record that cannot be read is NOT an empty record (主开发 r333; THE STORE READ, src/store-read.js — B-f276's law): bytes that
    *  were READ and do not parse are set aside beside it under a dated name (never written over) and the move refuses by name
@@ -81,7 +81,7 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {}, write
     try { read = { text: await fsp.readFile(leftFile, 'utf8') }; } catch (e) { read = { error: e }; }
     let a = SR.storeAnswer(read, { valid: REC_VALID });
     if (a.state === 'corrupt') { const to = await setAside(); a = to === '' ? { state: 'missing', writable: true } : SR.afterSetAside(a, to); }
-    if (a.state === 'data') return { at: Number(a.value.at) || 0, entries: a.value.entries.map((e) => ({ entry: String(e.entry), label: String(e.label || '').slice(0, 80), ...(e.committed && typeof e.committed === 'object' ? { committed: { ino: Number(e.committed.ino), size: Number(e.committed.size), ctimeMs: Number(e.committed.ctimeMs), ...(Number(e.committed.birthtimeMs) ? { birthtimeMs: Number(e.committed.birthtimeMs) } : {}) } } : {}) })) };
+    if (a.state === 'data') return { at: Number(a.value.at) || 0, entries: a.value.entries.map((e) => ({ entry: String(e.entry), label: String(e.label || '').slice(0, 80), ...(e.committed && typeof e.committed === 'object' ? { committed: { ino: Number(e.committed.ino), size: Number(e.committed.size), ...(Number(e.committed.birthtimeMs) ? { birthtimeMs: Number(e.committed.birthtimeMs) } : {}) } } : {}) })) };
     if (a.state === 'missing') return { at: 0, entries: [], ...(a.setAside ? { bad: a.why, aside: a.setAside } : {}) };
     // unreadable: NO answer — never «empty», never written over; bytes that did not parse and could NOT be set aside are «stuck»
     // (a person must fix or move the file — the move names it), a read that failed is held (the next press reads again)
@@ -113,7 +113,7 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {}, write
   let chain = Promise.resolve();
   const serial = (fn) => { const run = chain.then(fn, fn); chain = run.catch(() => { }); return run; };
   let inflight = null;   // the ids of the move running now (recorded before its first seal): no sweep drops them
-  let heldSaid = false;   // a held record is said in the journal once an episode
+  let heldN = 0;   // held reads in a row (a read that answers resets it): the first is «a moment», from the second the record's path is named (w2toukjw3)
   /** The leftover's ONE notice — filed for what is still left, or for a record set aside (a re-file of its key renews its words);
    *  a sweep's re-say of a notice a PERSON closed is not opened again while what it says has not changed (a FRESH leftover — an
    *  undo's — is always said); settled by a sweep that found nothing left and nothing set aside (`settle`). For you held unread:
@@ -158,8 +158,14 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {}, write
     const rd = await readRec();
     const asides = await asidesNow(), aside = rd.stuck ? `data/${LEFTOVER}` : asides.length ? `data/${asides[asides.length - 1]}` : rd.aside ? `data/${rd.aside}` : null;
     const locked = vault.state() !== 'unlocked';
-    if (rd.held && !rd.stuck) { if (!heldSaid) { heldSaid = true; log(`data/${LEFTOVER} could not be read (${rd.bad}) — held: the move refuses until a read answers`); } return { left: 0, aside, held: true, locked }; }
-    heldSaid = false;
+    if (rd.held && !rd.stuck) {
+      heldN++;
+      if (heldN === 1) { log(`data/${LEFTOVER} could not be read (${rd.bad}) — held: the move refuses until a read answers`); return { left: 0, aside, held: true, locked }; }
+      // a LASTING held read (no permission, a folder at its path): no more «a moment» — the record's path is named, here and in For you
+      sayLeft([], { aside: `data/${LEFTOVER}` });
+      return { left: 0, aside: `data/${LEFTOVER}`, held: false, locked };
+    }
+    heldN = 0;
     if (rd.stuck) { sayLeft([], { aside }); return { left: 0, aside, held: false, locked }; }
     const mine = (e) => !!(inflight && inflight.has(e.entry));
     let fileNow = null, fileUnsure = false;
@@ -202,7 +208,7 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {}, write
     try { sw = await sweepLeft(); } catch (e) { log(`the leftover sweep failed (${e.message})`); return named('store_failed'); }   // a press again removes an earlier try's copies FIRST… (a sweep that failed moves nothing)
     if (sw.held) return named('job_secrets_record_held');   // the record's READ failed: held — nothing moves until a read answers (the next press reads again)
     if (sw.aside) return named('job_secrets_record_unreadable', { file: sw.aside });   // r333: a record that did not parse is not an empty one — nothing moves until a person looked
-    if (sw.locked) return named('vault_locked');   // the vault locked while the sweep ran: the locked word, never «copies left»
+    if (sw.locked) return named('vault_locked', sw.left ? { leftover: sw.left } : {});   // the vault locked while the sweep ran: the locked word, never «copies left» — with their count (the page says it)
     if (sw.left) return named('job_secrets_leftover', { leftover: sw.left });   // …and while they cannot be removed it moves nothing: never a second copy of a value beside them (For you names them)
     let lst;
     try { lst = await fsp.lstat(file); } catch (e) { return gone(e, by) || named('job_secrets_unreadable'); }
@@ -228,7 +234,10 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {}, write
     if (!plan.length) return named('job_secrets_nothing', { skipped });   // no value to seal: the file is kept (its 「Delete the file」 deletes it)
     // THE RECORD COMES FIRST (主开发 r333): the ids this move is about to seal are on disk before the first seal — a hub that ends
     // anywhere in the move leaves a record the next sweep reads (and the For-you notice it says), never a silent copy
-    const ids = plan.map(() => `secret:${crypto.randomBytes(5).toString('hex')}`);
+    let holds0 = new Set();
+    try { holds0 = new Set((vault.secretNames() || []).map((x) => x && x.name)); } catch { holds0 = new Set(); }
+    const ids = [];
+    for (let k = 0; k < plan.length; k++) { let id; do { id = `secret:${crypto.randomBytes(5).toString('hex')}`; } while (holds0.has(id) || ids.includes(id)); ids.push(id); }   // never an id the vault already holds (a record naming one would let a sweep drop it)
     const labelOf = (k) => safeName(plan[k].name) || `Job secret ${k + 1}`;
     inflight = new Set(ids);
     try {
@@ -282,8 +291,19 @@ function create({ dataDir, vault, paste, userTodos = null, log = () => {}, write
       if (!now0 || !now0.isFile() || now0.size !== lst.size || now0.ctimeMs !== lst.ctimeMs || now0.ino !== lst.ino) { const leftover = await undo(); return named('job_secrets_changed', leftover ? { leftover } : {}); }
       // COMMITTED before the delete: these ids are this file's values now — a hub that ends after the delete leaves entries the
       // sweep keeps (their file is gone: the move completed); one that ends before it leaves copies it drops (the file holds them)
-      const committed = await serial(async () => { const rd = await readRec(); if (rd.held || rd.aside) return false; return writeRec([...rd.entries.filter((e) => !inflight.has(e.entry)), ...made.map((m) => ({ entry: m.entry, label: m.label, committed: idOf(now0) }))]); });
-      if (!committed) { const leftover = await undo(); return named('job_secrets_record_unwritable', leftover ? { leftover } : {}); }
+      const committed = await serial(async () => {
+        const rd = await readRec();
+        if (rd.stuck) return { aside: `data/${LEFTOVER}` };
+        if (rd.aside) return { aside: `data/${rd.aside}` };
+        if (rd.held) return { held: true };
+        return { ok: await writeRec([...rd.entries.filter((e) => !inflight.has(e.entry)), ...made.map((m) => ({ entry: m.entry, label: m.label, committed: idOf(now0) }))]) };
+      });
+      if (!committed.ok) {
+        const leftover = await undo(), left = leftover ? { leftover } : {};
+        if (committed.aside) return named('job_secrets_record_unreadable', { file: committed.aside, ...left });   // the record was found unparseable at the commit (a hand edit mid-move): «cannot be read», the truth
+        if (committed.held) return named('job_secrets_record_held', left);
+        return named('job_secrets_record_unwritable', left);
+      }
       // …and the vault still holds every value this move sealed (a hand or another door that dropped one meanwhile: the file is kept)
       { let names = []; try { names = vault.secretNames() || []; } catch { names = []; } const holds = new Set(names.map((x) => x && x.name)); if (!made.every((m) => holds.has(m.entry))) { const leftover = await undo(); return named('store_failed', leftover ? { leftover } : {}); } }
       try { await fsp.unlink(file); } catch (e) {

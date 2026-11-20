@@ -780,26 +780,54 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   okF(m1.hooks === 1 && m1.code === 'move' && m1.sealed === 2 && m1.fileGone, 'B-ef1b L3d: an unlock\'s sweep in the middle of a move takes none of its ids — the move completes', m1);
   const m1r = await midRoad(jsdCopy('    const mine = (e) => !!(inflight && inflight.has(e.entry));', '    const mine = () => false;', 'B-ef1b: the running move\'s ids swept').mod);
   okF(m1r.code !== 'move' && m1r.sealed === 0 && !m1r.fileGone, 'RED control: a sweep that may take the running move\'s ids ⇒ it drops them mid-move; the move refuses and keeps the file', m1r);
-  // L3e — a record whose READ FAILS (its name a folder: EISDIR) is HELD (src/store-read.js): the press refuses by name
-  //       (job_secrets_record_held), nothing is set aside, nothing written over, nothing sealed; once a read answers, the press moves.
-  //       RED: the old shape — a failed read set aside like bytes that do not parse
+  // L3e — a record whose READ FAILS (its name a folder: EISDIR) is HELD (src/store-read.js): the first held read refuses by name
+  //       (job_secrets_record_held, «a moment»), nothing set aside, nothing written over, nothing sealed; a LASTING one (the second
+  //       held read in a row) names the record's path — the press answers job_secrets_record_unreadable with it, and For you says
+  //       it; once a read answers, the press moves and the notice is done. REDs: a failed read set aside like bytes that do not
+  //       parse (the release's mixed shape); a lasting held read without its named road («a moment» at every press)
   const heldRoad = async (mod) => {
-    const D = ownDir(); plantIn(D, { FIRST_ONE: jsVals[0] }); fs.mkdirSync(path.join(D, LEFT));
+    const D = ownDir(); plantIn(D, { FIRST_ONE: jsVals[0] });
     const before = new Set(freeNames(W).map((x) => x.name));
-    const door = doorIn(mod, D);
-    const r = await door.answer('move');
-    const out = { code: r.code, sealed: freshSince(before).length, dirKept: (() => { try { return fs.statSync(path.join(D, LEFT)).isDirectory(); } catch { return false; } })(), asides: fs.readdirSync(D).filter((n) => n.startsWith(`${LEFT}.`)).length };
+    const door = doorIn(mod, D); await door.idle();   // its start read: the record missing (no held read yet)
+    fs.mkdirSync(path.join(D, LEFT));
+    const r1 = await door.answer('move');
+    const asidesOf = () => fs.readdirSync(D).filter((n) => n.startsWith(`${LEFT}.`)).length;
+    const dirKept = () => { try { return fs.statSync(path.join(D, LEFT)).isDirectory(); } catch { return false; } };
+    const one = { code: r1.code, sealed: freshSince(before).length, dirKept: dirKept(), asides: asidesOf() };
+    const r2 = await door.answer('move');
+    const two = { code: r2.code, file: r2.file || null, sealed: freshSince(before).length, dirKept: dirKept(), asides: asidesOf(), words: noticeWords() };
     fs.rmSync(path.join(D, LEFT), { recursive: true, force: true });
     for (const n of fs.readdirSync(D).filter((x) => x.startsWith(`${LEFT}.`))) fs.rmSync(path.join(D, n), { recursive: true, force: true });
-    const r2 = await door.answer('move');
-    out.after = r2.ok ? r2.answer : r2.code;
+    const r3 = await door.answer('move');
+    const three = { code: r3.ok ? r3.answer : r3.code, notices: noticeOf().length };
+    dropFresh(before); clearNotices();
+    return { one, two, three };
+  };
+  const h1 = await heldRoad(JSD_REAL);
+  okF(h1.one.code === 'job_secrets_record_held' && h1.one.sealed === 0 && h1.one.dirKept && h1.one.asides === 0, 'B-ef1b L3e: a record whose read fails is HELD — job_secrets_record_held, nothing set aside or sealed', h1.one);
+  okF(h1.two.code === 'job_secrets_record_unreadable' && h1.two.file === 'data/job-secrets.leftover.json' && h1.two.sealed === 0 && h1.two.dirKept && h1.two.asides === 0 && /it is kept as data\/job-secrets\.leftover\.json\./.test(h1.two.words || '') && h1.three.code === 'move' && h1.three.notices === 0,
+    'B-ef1b L3e: …a LASTING held read names the record\'s path (the press and For you), still never set aside; once a read answers the press moves and the notice is done', { two: h1.two, three: h1.three });
+  const h1r = await heldRoad(jsdCopy('    let a = SR.storeAnswer(read, { valid: REC_VALID });', "    let a = SR.storeAnswer(read, { valid: REC_VALID }); if (a.state === 'unreadable') a = { ...a, state: 'corrupt' };", 'B-ef1b: a failed read set aside').mod);
+  okF(h1r.one.asides === 1 && !h1r.one.dirKept, 'RED control: a failed read set aside like corrupt bytes (the release\'s mixed shape) ⇒ the live record moved away on a read error', h1r.one);
+  const h1m = await heldRoad(jsdCopy("      if (heldN === 1) { log(", "      if (heldN >= 1) { log(", 'B-ef1b: «a moment» at every press').mod);
+  okF(h1m.two.code === 'job_secrets_record_held' && !h1m.two.words, 'RED control: a lasting held read without its named road ⇒ «a moment» again at the second press, For you silent', h1m.two);
+  // L3f — a record found UNPARSEABLE at the commit (a hand edit mid-move — placed in the window, after the last seal): the press answers
+  //       «cannot be read» (job_secrets_record_unreadable naming the copy set aside), never «cannot be written»; nothing sealed, the
+  //       file kept. RED: the commit step that answers every failure «cannot be written»
+  const commitBad = async (mod) => {
+    const D = ownDir(), jf = path.join(D, JS_FILE); plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const before = new Set(freeNames(W).map((x) => x.name)); let seals = 0;
+    const pasteX = { addEntry: (o) => { const r = W.paste.addEntry(o); if (r && r.ok && ++seals === 2) fs.writeFileSync(path.join(D, LEFT), '{ edited by hand', { mode: 0o600 }); return r; }, dropEntry: (id, o) => W.paste.dropEntry(id, o) };
+    const r = await doorIn(mod, D, { paste: pasteX }).answer('move');
+    const out = { code: r.code, file: r.file || null, sealed: freshSince(before).length, fileKept: fs.existsSync(jf), asides: fs.readdirSync(D).filter((n) => n.startsWith(`${LEFT}.corrupt-`)).length };
+    for (const n of fs.readdirSync(D).filter((x) => x.startsWith(`${LEFT}.`))) fs.rmSync(path.join(D, n), { recursive: true, force: true });
     dropFresh(before); clearNotices();
     return out;
   };
-  const h1 = await heldRoad(JSD_REAL);
-  okF(h1.code === 'job_secrets_record_held' && h1.sealed === 0 && h1.dirKept && h1.asides === 0 && h1.after === 'move', 'B-ef1b L3e: a record whose read fails is HELD — job_secrets_record_held, nothing set aside or sealed; once a read answers the press moves', h1);
-  const h1r = await heldRoad(jsdCopy('    let a = SR.storeAnswer(read, { valid: REC_VALID });', "    let a = SR.storeAnswer(read, { valid: REC_VALID }); if (a.state === 'unreadable') a = { ...a, state: 'corrupt' };", 'B-ef1b: a failed read set aside').mod);
-  okF(h1r.asides === 1 && !h1r.dirKept, 'RED control: a failed read set aside like corrupt bytes (the release\'s mixed shape) ⇒ the live record moved away on a read error', h1r);
+  const cb = await commitBad(JSD_REAL);
+  okF(cb.code === 'job_secrets_record_unreadable' && /^data\/job-secrets\.leftover\.json\.corrupt-/.test(cb.file || '') && cb.sealed === 0 && cb.fileKept && cb.asides === 1, 'B-ef1b L3f: a record found unparseable at the commit ⇒ «cannot be read» (the copy set aside named), nothing sealed, the file kept', cb);
+  const cbr = await commitBad(jsdCopy("        if (committed.aside) return named('job_secrets_record_unreadable', { file: committed.aside, ...left });", '', 'B-ef1b: every commit failure «cannot be written»').mod);
+  okF(cbr.code === 'job_secrets_record_unwritable', 'RED control: the commit step that answers every failure «cannot be written» ⇒ the wrong truth on a record that could not be read', cbr);
   // L4 — the first press undone with BOTH copies left (their drops refused with the vault UNLOCKED — a store that cannot be written):
   //      ONE notice «2 left»; a press again while they still refuse MOVES NOTHING (job_secrets_leftover — never a second copy of a value
   //      beside them); one of them removable ⇒ the next press removes it and the ONE notice is renewed «1 left»; the fault gone ⇒ the
@@ -1037,8 +1065,11 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
     return out;
   };
   const l11 = await lockBetween(JSD_REAL);
-  okF(l11.code === 'vault_locked' && l11.lockedNow === 'locked', 'B-ef1b L11: a lock landing between the press\'s state check and its sweep ⇒ vault_locked (the locked word, never «copies left»)', l11);
-  const l11r = await lockBetween(jsdCopy("    if (sw.locked) return named('vault_locked');", '', 'B-ef1b: the locked sweep read as copies left').mod);
+  okF(l11.code === 'vault_locked' && l11.leftover === 1 && l11.lockedNow === 'locked', 'B-ef1b L11: a lock landing between the press\'s state check and its sweep ⇒ vault_locked (the locked word, never «copies left») WITH the count of the copies left (the page says it)', l11);
+  const L11LINE = "    if (sw.locked) return named('vault_locked', sw.left ? { leftover: sw.left } : {});";
+  const l11c = await lockBetween(jsdCopy(L11LINE, "    if (sw.locked) return named('vault_locked');", 'B-ef1b: the locked road without its count').mod);
+  okF(l11c.code === 'vault_locked' && l11c.leftover === 0, 'RED control: the locked road without its count ⇒ vault_locked with no leftover — the page says nothing about the copies left', l11c);
+  const l11r = await lockBetween(jsdCopy(L11LINE, '', 'B-ef1b: the locked sweep read as copies left').mod);
   okF(l11r.code === 'job_secrets_leftover', 'RED control: the move that reads the sweep\'s locked answer as copies left ⇒ job_secrets_leftover while the vault is locked', l11r);
   // the ROUTE (the world's own door over POST /api/vault/job-secrets/move): a record that cannot be read ⇒ 409 with its code and the
   // copy set aside; the two other statuses (job_secrets_leftover 409, job_secrets_record_unwritable 500) pinned in the route's table
