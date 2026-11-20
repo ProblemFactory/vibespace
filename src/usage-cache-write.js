@@ -592,6 +592,17 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   // freshest at t", the producers own that decision (the sibling fan-out
   // deliberately withholds it), and the repair writes an identity-only remnant
   // whose entire point is that NOTHING on it claims to be a reading.
+  // …AND IT NEVER MOVES BACKWARDS (B-37bc's follow, r639): a late record (an event measured before what the file already
+  // states) promotes nothing — the file keeps its own clocks (`fetchedAt` with the producer it names, `scopedFetchedAt`),
+  // by the one rule (quotaModel.laterInstant); its windows were already judged by their own instants in the merge above.
+  // Never on a REPLACE (the repair names what survives).
+  if (!replace && prevObj) {
+    if (out.fetchedAt !== undefined && quotaModel.laterInstant(prevObj.fetchedAt, out.fetchedAt) !== (Number(out.fetchedAt) > 0 ? Number(out.fetchedAt) : null)) {
+      out.fetchedAt = prevObj.fetchedAt;
+      if (prevObj.source !== undefined) out.source = prevObj.source;
+    }
+    if (out.scopedFetchedAt !== undefined && quotaModel.laterInstant(prevObj.scopedFetchedAt, out.scopedFetchedAt) !== (Number(out.scopedFetchedAt) > 0 ? Number(out.scopedFetchedAt) : null)) out.scopedFetchedAt = prevObj.scopedFetchedAt;
+  }
   try {
     fs.mkdirSync(cacheDir, { recursive: true });
     atomicWrite(file, JSON.stringify(out));

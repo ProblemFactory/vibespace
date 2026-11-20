@@ -452,8 +452,11 @@ function markRefused(set, lanes, at) {
       if (!w) return w;
       const k = l.scope === 'model' ? (isBudgetKind(w.kind) ? cap(String(l.limitId), l.name, laneResetSec(w)) : null) : laneOfLimit(l.limitId, w.kind);
       if (!k || !want.has(k)) return w;
+      // B-37bc's follow: a refusal OLDER than the window's own reading is old news — it marks nothing (the window was read
+      // after it), and a held refusal is never moved back
+      if (laterInstant(w.measuredAt, t) !== t) return w;
       moved = true;
-      return { ...w, refusedAt: t };
+      return { ...w, refusedAt: laterInstant(w.refusedAt, t) };
     });
     return moved ? { ...l, windows } : l;
   }) };
@@ -474,8 +477,9 @@ function markStated(set, lanes, at) {
       const k = l.scope === 'model' ? (isBudgetKind(w.kind) ? cap(String(l.limitId), l.name, laneResetSec(w)) : null) : laneOfLimit(l.limitId, w.kind);
       const u = laneUsedPct(w);
       if (!k || !want.has(k) || !(u != null && u >= 100)) return w;
+      if (laterInstant(w.measuredAt, t) !== t) return w;   // B-37bc's follow: an older statement of a newer reading states nothing of it
       moved = true;
-      return { ...w, statedAt: t };
+      return { ...w, statedAt: laterInstant(w.statedAt, t) };
     });
     return moved ? { ...l, windows } : l;
   }) };
@@ -1209,14 +1213,20 @@ function authoritativeScopesOf(parsed) {
 
 // ── merge ───────────────────────────────────────────────────────────────────
 
+/** A READING'S STAMP NEVER MOVES BACKWARDS (B-37bc's follow, the coordinator's r639): the later of the instant a record
+ *  already holds and the one a write says — a missing instant is older than any — ties to what is said. The ONE place
+ *  this rule lives: the window merge, the refused / stated marks and the write road's file clocks all ask it. */
+function laterInstant(held, said) {
+  const a = posNum(held), b = posNum(said);
+  return a != null && (b == null || a > b) ? a : b;
+}
 /** Merge one window into an existing one: the NEWER measurement wins whole. A
  *  measurement without a `measuredAt` is treated as older than any that has
  *  one, so a shape-only lift of a legacy record can never displace a real read. */
 function mergeWindow(prev, next) {
   if (!prev) return next;
   if (!next) return prev;
-  const a = posNum(prev.measuredAt) || 0, b = posNum(next.measuredAt) || 0;
-  return b >= a ? next : prev;
+  return laterInstant(prev.measuredAt, next.measuredAt) === posNum(next.measuredAt) ? next : prev;
 }
 
 /** Flags merge newer-over-older, except the TOMBSTONES, which UNION (the earliest instant per kind is when it
@@ -1964,7 +1974,7 @@ module.exports = {
   // windows
   windowState, windowRemaining, minutesOf,
   // the display verdict + the proving spawn's question (lane reset-unproven)
-  windowDisplay, memberProofState, withResetClaim, lanesOfReading, bucketInstant, lanesMeasured, laneOfBucket, laneOfLimit, statedLanesOf, markRefused, markStated, carryStamps, laneText, isLaneKey, resetsSeen, resetsSeenLanes, RESET_SEEN_MIN_DROP,
+  windowDisplay, memberProofState, withResetClaim, lanesOfReading, bucketInstant, laterInstant, lanesMeasured, laneOfBucket, laneOfLimit, statedLanesOf, markRefused, markStated, carryStamps, laneText, isLaneKey, resetsSeen, resetsSeenLanes, RESET_SEEN_MIN_DROP,
   // accessors
   limitsOf, windowsOf, windowOfKind, planLimit, limitFor, applicableLimits, limitNamesModel,
   remaining, deadline, bucketReport, countingWindows, isBudgetKind, bucketCounts,

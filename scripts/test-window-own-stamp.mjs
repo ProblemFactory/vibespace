@@ -25,6 +25,8 @@
 //      reset-seen rule on a lower reading
 //   ⑨ A STATUS-ONLY EVENT CARRIES (item 2): no number, the same reset — the week keeps its stored instant and its «14h»
 //   ⑩ CLAUDE FILES ONLY (item 4): a codex file written through the road is byte for byte the base projection's
+//   ⑪ A READING'S STAMP NEVER MOVES BACKWARDS (B-37bc's follow, r639): a late event — measured before what the file already
+//      states — changes nothing of that window (numbers, marks) nor the file's clocks; it may fill a window the file lacks
 //   RED CONTROLS: anchored mutants of this tree's write road (a copy of its module closure), each red at its own legs
 import fs from 'fs';
 import path from 'path';
@@ -295,6 +297,38 @@ process.stdout.write(JSON.stringify({ engine, stated, lanes: q.lanesOfReading(rl
     const a = pageAges(k, dir, key);
     return { ok: !!(w7 === T0 && f.sevenDay && f.sevenDay.measuredAt === T0 && a['plan:7d'] && a['plan:7d'].words === '14h'), detail: `a status-only 7d event over a week read 14 h ago: its window ${w7 ? MIN(w7) + ' min' : '—'}, its bucket ${f.sevenDay && f.sevenDay.measuredAt ? MIN(f.sevenDay.measuredAt) + ' min' : '—'}, the page «${a['plan:7d'] ? a['plan:7d'].words : '—'}»` };
   },
+  // ⑪ A READING'S STAMP NEVER MOVES BACKWARDS (B-37bc's follow, the coordinator's r639) — the real capture and the real door
+  async 'late-event'(k) {
+    const out = [], T1 = NOW - 10 * 60e3, T0 = NOW - 30 * 60e3, R7 = S + 3 * 86400;
+    const laneOf = (f, id) => k.q.lanesOfReading({ fetchedAt: f.fetchedAt, limits: f.limits || [] }).find((x) => x.lane === id) || {};
+    { const dir = mkDir('le1'), key = 'acct-le1';   // the week read at T1 (40 %), then a week event measured at T0 (20 %)
+      await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', utilization: 0.4, resetsAt: R7 }, T1);
+      const before = k.W.readCacheObject(dir, key) || {};
+      const heard = []; const off = typeof k.W.onVendorReset === 'function' ? k.W.onVendorReset((e) => { if (e && e.key === key) for (const x of e.resets || []) heard.push(x.lane); }) : () => { };
+      await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', utilization: 0.2, resetsAt: R7 }, T0);
+      off();
+      const f = k.W.readCacheObject(dir, key) || {}, w = laneOf(f, 'plan:7d');
+      out.push({ ok: !!(before.fetchedAt === T1 && f.fetchedAt === T1 && f.source === before.source && w.at === T1 && w.usedPct === 40 && f.sevenDay && f.sevenDay.utilization === 0.4 && !heard.length),
+        text: `the week read 10 min ago at 40 %, then an event measured 30 min ago at 20 %: the week ${w.usedPct} % @${w.at ? MIN(w.at) : '—'} min, the file's clock ${f.fetchedAt ? MIN(f.fetchedAt) : '—'} min (was ${before.fetchedAt ? MIN(before.fetchedAt) : '—'}), its producer ${f.source === before.source ? 'kept' : 'MOVED to ' + f.source}, a reset said ${heard.length ? 'YES' : 'no'}` }); }
+    { const dir = mkDir('le2'), key = 'acct-le2';   // a late REFUSAL of the week, older than its reading
+      await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', utilization: 0.4, resetsAt: R7 }, T1);
+      await rle(k, dir, key, { kind: 'sevenDay', status: 'rejected', utilization: null, resetsAt: R7 }, T0);
+      const x = k.q.lanesOfReading(k.W.readCacheObject(dir, key) || {}).find((y) => y.lane === 'plan:7d') || {};
+      out.push({ ok: !!(x.usedPct === 40 && !x.mark && x.refusedAt == null), text: `a week refusal measured 30 min ago over the week read at 40 % 10 min ago: the week ${x.usedPct} %, mark ${!!x.mark}, refusedAt ${x.refusedAt == null ? 'none' : MIN(x.refusedAt) + ' min'}` }); }
+    { const dir = mkDir('le3'), key = 'acct-le3';   // a late event for a window the file does NOT hold fills it, at its own instant
+      await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', utilization: 0.4, resetsAt: R7 }, T1);
+      const had5 = !!laneOf(k.W.readCacheObject(dir, key) || {}, 'plan:5h').lane;
+      await rle(k, dir, key, { kind: 'fiveHour', status: 'allowed', utilization: 0.3, resetsAt: S + 2 * 3600 }, T0);
+      const f = k.W.readCacheObject(dir, key) || {}, w5 = laneOf(f, 'plan:5h');
+      out.push({ ok: !!(!had5 && w5.usedPct === 30 && w5.at === T0 && f.fetchedAt === T1), text: `a 5h event measured 30 min ago over a file holding only the week (5h before: ${had5 ? 'held' : 'none'}): the 5h ${w5.usedPct} % @${w5.at ? MIN(w5.at) : '—'} min, the file's clock ${f.fetchedAt ? MIN(f.fetchedAt) : '—'} min` }); }
+    { const dir = mkDir('le4'), key = 'acct-le4';   // the door for any producer: a whole panel read OLDER than the file
+      await panel(k, dir, key, T1);
+      const before = k.W.readCacheObject(dir, key) || {};
+      await panel(k, dir, key, T0, { five: 0.05, week: 0.02, fable: 0.1 });
+      const f = k.W.readCacheObject(dir, key) || {}, wf = laneOf(f, 'model:fable');
+      out.push({ ok: !!(f.fetchedAt === T1 && f.scopedFetchedAt === before.scopedFetchedAt && wf.at === T1 && wf.usedPct === 50), text: `a panel read 30 min ago over one read 10 min ago: the file's clocks ${f.fetchedAt ? MIN(f.fetchedAt) : '—'} / scoped ${f.scopedFetchedAt ? MIN(f.scopedFetchedAt) : '—'} min, the cap ${wf.usedPct} % @${wf.at ? MIN(wf.at) : '—'} min` }); }
+    return { ok: out.every((x) => x.ok), detail: out.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
+  },
   // ⑩ CLAUDE FILES ONLY (item 4), by behaviour: a codex file written through the road holds no stamp, byte for byte what the
   //    base's projection writes (this tree's write road with its stamps taken out — the only projection change)
   async 'other-harness'(k, { base = null } = {}) {
@@ -313,7 +347,7 @@ process.stdout.write(JSON.stringify({ engine, stated, lanes: q.lanesOfReading(rl
 };
 
 say('THIS TREE');
-for (const leg of ['one-order', 'file-stamp', 'reverse', 'field', 'money', 'refusal-kept', 'status-only']) { inLeg = leg; const r = await LEGS[leg](kitOf(REPO)); ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of ['one-order', 'file-stamp', 'reverse', 'field', 'money', 'refusal-kept', 'status-only', 'late-event']) { inLeg = leg; const r = await LEGS[leg](kitOf(REPO)); ok(r.ok, `${leg}: ${r.detail}`); }
 { inLeg = '③ H'; const r = await LEGS['statusline-then-write'](kitOf(REPO), 'capture'); ok(r.ok, `③ H — a plain write after the statusline: ${r.detail}`); }
 { inLeg = '③ banner shape'; const r = await LEGS['statusline-then-write'](kitOf(REPO), 'banner'); ok(r.ok, `③ the banner's write shape after the statusline: ${r.detail}`); }
 { inLeg = '⑦ restart'; const r = await LEGS.restart(kitOf(REPO), { engine: true }); ok(r.ok, `⑦ restart: ${r.detail}`); }
@@ -365,6 +399,12 @@ const MUTANTS = [
     ['refusal-kept']],
   ['no-carry', 'the write road keeps no unmeasured window (the carry rule out)', [['src/usage-cache-write.js', '    next = carryUnmeasuredLimits(prevSet, next);\n', '']],
     ['status-only']],
+  // THE RELEASE'S BEHAVIOUR, one rule at a time (B-37bc's follow): the file's clocks step back with a late event; a late
+  // refusal marks a newer reading
+  ['clock-steps-back', 'the write door lets a late record move the file\'s clocks back (the release)', [['src/usage-cache-write.js', '  if (!replace && prevObj) {\n    if (out.fetchedAt !== undefined && quotaModel.laterInstant(', '  if (false) {\n    if (out.fetchedAt !== undefined && quotaModel.laterInstant(']],
+    ['late-event']],
+  ['marks-step-back', 'a refusal older than the window\'s reading still marks it (the release)', [['src/quota-model.js', '      if (laterInstant(w.measuredAt, t) !== t) return w;\n      moved = true;\n      return { ...w, refusedAt: laterInstant(w.refusedAt, t) };', '      moved = true;\n      return { ...w, refusedAt: t };']],
+    ['late-event']],
 ];
 { inLeg = '⑩ other-harness'; const B = kitOf(mutantTree('base-projection', MUTANTS.find((m) => m[0] === 'no-stamps')[2]));
   const r = await LEGS['other-harness'](kitOf(REPO), { base: B }); ok(r.ok, `⑩ other-harness: ${r.detail}`); }
