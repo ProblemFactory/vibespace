@@ -176,7 +176,7 @@ class SafeFs {
     if (rec.fails !== START_FAILS_SAID || this._downSaid) return;
     this._downSaid = true;
     const why = String((err && err.message) || err || 'no cause given').split('\n')[0].slice(0, 300);
-    console.error(`[safe-fs] ${this._words}: a worker could not start ${START_FAILS_SAID} times in a row (${why}) — every call is refused by name until one answers; it is tried again, the wait doubling up to 30 s`);
+    console.error(`[safe-fs] ${this._words}: a worker ended ${START_FAILS_SAID} times in a row before it answered (${why}) — every call is refused by name until one answers; it is tried again, the wait doubling up to 30 s`);
   }
 
   _rejectInflight(rec, message) {
@@ -342,8 +342,8 @@ class SafeFs {
     this._restarts++;
     try { global.__vsMetric?.('srv-safefs-restart', 1); } catch {}
     // terminate in the background (a truly D-state-stuck OS thread may linger,
-    // but main is unaffected — it never used the shared pool); respawn NOW so a
-    // replacement is ready immediately, not after terminate resolves.
+    // but main is unaffected — it never used the shared pool); the replacement is
+    // scheduled at once (the first step, below), never after terminate resolves.
     try { Promise.resolve(w?.terminate?.()).catch(() => {}); } catch {}
     // B-3b03 follow-up (the coordinator's law): a worker ended AT ITS DEADLINE started and took a call — it comes back at the
     // FIRST step (500 ms), never up the ladder: the ladder (1 s, 2 s … 30 s) is for a worker that cannot START. A dead path that

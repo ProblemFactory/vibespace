@@ -109,7 +109,7 @@ const STORAGE_NO_WORKER = 'the file readers are restarting — try again in a mo
 router.use((req, res, next) => {
   const json = res.json;
   res.json = function (body) {
-    if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(FILE_POOL_REFUSED)) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };
+    if (body && typeof body.error === 'string' && !body.code && (body.error.startsWith(FILE_POOL_REFUSED) || body.error === 'storage worker restarted')) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };   // its follow-up: a call whose worker ended under it too
     return json.call(this, body);
   };
   next();

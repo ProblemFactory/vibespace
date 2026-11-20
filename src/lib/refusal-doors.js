@@ -3,18 +3,19 @@
 // callers hand in what they own; scripts/test-safe-fs-no-inline.mjs ⑥ / ⑦ drive both with a RED each.
 
 /** A SAVE-AND-CLOSE editor (the CLI's external editor opened by Ctrl+G): the window closes, and the CLI hears «done», only after
- *  its save LANDED. A refused save keeps the window, the text and its unsaved mark for a second press (the release closed it and
- *  told the CLI «done» over the old file: the edits were lost). A programmatic close whose save fails tells the CLI nothing (the
- *  hub re-delivers the pending edit at the next attach).
+ *  its save LANDED. A refused save keeps the window, the text and its unsaved mark ONCE (the release closed it and told the CLI
+ *  «done» over the old file: the edits were lost); the toolbar says why. The NEXT ✕ closes it whatever the storage says — never a
+ *  window that cannot close (a machine gone, a read-only path) — and the CLI hears «done» only if that last save landed; else
+ *  nothing (the hub re-delivers the pending edit at the next attach). A programmatic close is never refused.
  *  `ed` = { save(): Promise<boolean>, signal(), close(), ready(): boolean } → { onCloseRequest(), onClose() } */
 export function saveCloseDoors(ed) {
-  let saved = false, pending = false;
+  let saved = false, pending = false, refused = false;
   return {
     onCloseRequest() {
-      if (saved || !ed.ready()) return true;   // nothing loaded yet: nothing to keep
+      if (saved || refused || !ed.ready()) return true;   // landed, or refused once already (the next ✕ closes), or nothing loaded yet
       if (pending) return false;               // a second ✕ while the save is out: one save at a time
       pending = true;
-      Promise.resolve(ed.save()).then((ok) => { pending = false; if (ok) { saved = true; ed.close(); } }, () => { pending = false; });
+      Promise.resolve(ed.save()).then((ok) => { pending = false; if (ok) { saved = true; ed.close(); } else refused = true; }, () => { pending = false; refused = true; });
       return false;                            // the window stays until the save landed
     },
     onClose() {
