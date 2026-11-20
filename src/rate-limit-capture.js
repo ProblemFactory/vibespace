@@ -300,8 +300,10 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   // …and every earlier stamp (B-37bc, the reverse harm): a bucket this event re-states is THIS event's statement — the
   // `asOf` an earlier render (the shipped statusline) put on it, or the `measuredAt` the write road projects from the stored
   // window, would date the event's lane at that older instant (the write path's stated lanes are «no later than a bucket's
-  // own stamp»). A producer's OWN stamp (a late record's instant) is never this copy's: it is the producer's to state
-  const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; return c; };
+  // own stamp»), and the marks of an earlier statement (`refusedAt` / `statedAt`, projected with it). A producer's OWN stamp
+  // (a late record's instant) is never this copy's: it is the producer's to state. A STATUS-ONLY event (no number, the same
+  // reset) re-states nothing: it keeps the stored bucket and its stamps (the «only carried» half)
+  const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; delete c.refusedAt; delete c.statedAt; return c; };
   // «NO 5h» (lane no-5h-window): this record as a passive answer (r3: a WITNESS the write path counts — see
   // usage-cache-write `passiveAnswer`; r4: counted for its PRODUCER, the session whose stream it is — a replay or a
   // re-drive names none and is no witness), and the key's OWN plan as stored — a base chosen from a SIBLING's freshest file

@@ -20,6 +20,11 @@
 //   ⑤ FILES IN THE FIELD (D / E / F): a whole legacy file reads exactly as before; its next write keeps the cap's instant
 //   ⑥ THE MONEY: the same render, then a real week reading measured 30 min ago — the file keeps the REAL reading
 //   ⑦ THE RESTART: a second engine (a fresh process) over the same file draws the week «14h»
+//   ⑧ A REFUSAL STAYS A REFUSAL (round wcslt7dwl item 1): a refused week spread forward by a 5h-only render keeps its refused
+//      and stated marks — the stored lanes' mark (the held fall reads only unmarked ones), the next write's carryStamps, the
+//      reset-seen rule on a lower reading
+//   ⑨ A STATUS-ONLY EVENT CARRIES (item 2): no number, the same reset — the week keeps its stored instant and its «14h»
+//   ⑩ CLAUDE FILES ONLY (item 4): a codex file written through the road is byte for byte the base projection's
 //   RED CONTROLS: anchored mutants of this tree's write road (a copy of its module closure), each red at its own legs
 import fs from 'fs';
 import path from 'path';
@@ -102,11 +107,11 @@ const panel = (k, dir, key, at, { five = 0.2, week = 0.08, fable = 0.5 } = {}) =
   fiveHour: { utilization: five, resetsAt: S + 3600 }, sevenDay: { utilization: week, resetsAt: S + 3 * 86400 }, scopedWeekly: [{ name: 'Fable', utilization: fable, resetsAt: RC }] }, measuredAt: at, source: 'on-demand', backend: 'claude', authoritativeScopes: ['model'],
   stated: { fiveHour: {}, sevenDay: {}, scopedWeekly: [{ name: 'Fable' }] } }));
 const rle = (k, dir, key, ev, now) => quiet(() => k.C.captureRateLimitEvent({ cacheDir: dir, key, identityIds: [key], ev: { overage: {}, ...ev }, now }));
-const bannerWrite = (k, dir, key) => quiet(() => {   // usage-pool-engine markLimitBannerNow's write for a 5h banner (a bump of the bucket, fetchedAt now, limits dropped)
-  const c = { ...(k.W.readCacheObject(dir, key) || {}) };
-  c.fiveHour = { ...(c.fiveHour || {}), state: undefined, utilization: 1, status: 'limited', resetsAt: (c.fiveHour && c.fiveHour.resetsAt) || S + 5 * 3600 };
+const bannerWrite = (k, dir, key, kind = 'fiveHour') => quiet(() => {   // usage-pool-engine markLimitBannerNow's write (a bump of the bucket, fetchedAt now, limits dropped)
+  const c = { ...(k.W.readCacheObject(dir, key) || {}) }, lane = kind === 'sevenDay' ? 'plan:7d' : 'plan:5h';
+  c[kind] = { ...(c[kind] || {}), state: undefined, utilization: 1, status: 'limited', resetsAt: (c[kind] && c[kind].resetsAt) || S + (kind === 'sevenDay' ? 24 : 5) * 3600 };
   c.fetchedAt = Date.now(); c.source = 'limit-banner'; delete c.limits;
-  return k.W.writeCacheObject({ cacheDir: dir, key, obj: c, measuredAt: c.fetchedAt, source: 'limit-banner', backend: 'claude', stated: ['plan:5h'], refused: ['plan:5h'] });
+  return k.W.writeCacheObject({ cacheDir: dir, key, obj: c, measuredAt: c.fetchedAt, source: 'limit-banner', backend: 'claude', stated: [lane], refused: [lane] });
 });
 // THE SHIPPED STATUSLINE (data/bin/vibespace-usage, the real file — it writes the file itself; its reader compares the write)
 function statusline(k, dir, key, rateLimits = { five_hour: { used_percentage: 21, resets_at: S + 3600 } }) {
@@ -199,14 +204,14 @@ const LEGS = {
         text: `the week re-measured now (a 7d rate_limit_event at 30 %) over a file whose week bucket was stamped ${stamped && stamped.measuredAt ? MIN(stamped.measuredAt) + ' min ago' : 'NOT'}: its window ${typed7 ? MIN(typed7) + ' min' : '—'}, its bucket ${f.sevenDay && f.sevenDay.measuredAt ? MIN(f.sevenDay.measuredAt) + ' min' : '—'}, stated at [${heard7.map(MIN).join(',')}] min, the page «${a['plan:7d'].words}»` }); }
     { const dir = mkDir('rva'), key = 'acct-rva';
       await panel(k, dir, key, NOW - 14 * H);
-      statusline(k, dir, key);
+      const sl = statusline(k, dir, key);
       const f0 = JSON.parse(fs.readFileSync(path.join(dir, key + '.json'), 'utf8')), R = NOW - 40 * 60e3;
       f0.fiveHour.asOf = R; f0.fetchedAt = R; fs.writeFileSync(path.join(dir, key + '.json'), JSON.stringify(f0));   // the render was 40 min ago
       const L = lanesHeard(k, dir), t0 = Date.now();
       await rle(k, dir, key, { kind: 'fiveHour', status: 'allowed', utilization: 0.35, resetsAt: S + 3600 }, t0);
       L.off();
       const heard5 = L.heard.filter((x) => x.lane === 'plan:5h').map((x) => x.at);
-      out.push({ ok: heard5.length > 0 && heard5.every((x) => x >= t0), text: `a 5h rate_limit_event now over a render 40 min old: the event's stated 5h at [${heard5.map(MIN).join(',')}] min (the event's instant, never the render's asOf)` }); }
+      out.push({ ok: sl.status === 0 && heard5.length > 0 && heard5.every((x) => x >= t0), text: `a 5h rate_limit_event now over a render 40 min old (the statusline exited ${sl.status}): the event's stated 5h at [${heard5.map(MIN).join(',')}] min (the event's instant, never the render's asOf)` }); }
     return { ok: out.every((x) => x.ok), detail: out.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
   },
   // ⑤ FILES IN THE FIELD (step 1's D / E / F): a whole legacy file reads exactly as it did; its next write keeps the cap's own
@@ -231,17 +236,18 @@ const LEGS = {
   async 'money'(k) {
     const dir = mkDir('mn'), key = 'acct-mn', AP = k.r('./src/account-pool-auto.js');
     await panel(k, dir, key, NOW - 14 * H, { week: 0.08 });
-    statusline(k, dir, key);
+    const sl = statusline(k, dir, key);
     await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', utilization: 0.5, resetsAt: S + 3 * 86400 }, Date.now() - 30 * 60e3);
     const f = k.W.readCacheObject(dir, key) || {}, wk = f.sevenDay && f.sevenDay.utilization;
     const rem = AP.bucketRemaining(f.sevenDay, Math.floor(Date.now() / 1000));
-    return { ok: wk === 0.5 && rem === 50, detail: `the week read 14 h ago at 8 %, the statusline's 5h render, then a week reading at 50 % measured 30 min ago: the file holds ${wk == null ? '—' : Math.round(wk * 100) + ' %'}, the pool reads the week ${rem} % left` };
+    return { ok: sl.status === 0 && wk === 0.5 && rem === 50, detail: `the week read 14 h ago at 8 %, the statusline's 5h render (exit ${sl.status}), then a week reading at 50 % measured 30 min ago: the file holds ${wk == null ? '—' : Math.round(wk * 100) + ' %'}, the pool reads the week ${rem} % left` };
   },
   // ⑦ THE RESTART: a second engine over the same file — a fresh process, so the write road's in-memory instants are gone
   async 'restart'(k, { engine = false } = {}) {
     const dir = mkDir('rs'), key = 'acct-rs';
     await panel(k, dir, key, NOW - 14 * H);
-    statusline(k, dir, key);
+    const sl = statusline(k, dir, key);
+    if (sl.status !== 0) return { ok: false, detail: `the statusline's render exited ${sl.status}` };
     const child = path.join(ROOT, 'second-engine.mjs');
     fs.writeFileSync(child, `import { createRequire } from 'module'; import path from 'path';
 const [T, dir, key, withEngine] = process.argv.slice(2); const r = createRequire(path.join(T, 'package.json'));
@@ -259,10 +265,55 @@ process.stdout.write(JSON.stringify({ engine, stated, lanes: q.lanesOfReading(rl
     const a = agesOf(new Map(got.lanes.map(([l, at]) => [l, Math.max(Number(at) || 0, Number((got.stated || {})[l]) || 0) || null])));
     return { ok: !!((!engine || got.engine === 'built') && Object.keys(got.stated || {}).length === 0 && a['plan:7d'] && a['plan:7d'].words === '14h' && a['model:fable'] && a['model:fable'].words === '14h'), detail: `a second ${engine ? 'engine' : 'process'} (${got.engine}, its in-memory stated instants: ${Object.keys(got.stated || {}).length}) over the file the statusline left: ${said(a)}` };
   },
+  // ⑧ A REFUSAL STAYS A REFUSAL (the coordinator's round wcslt7dwl, item 1)
+  async 'refusal-kept'(k) {
+    const dir = mkDir('rk'), key = 'acct-rk', out = [];
+    await panel(k, dir, key, NOW - 14 * H);
+    await bannerWrite(k, dir, key, 'sevenDay');
+    const sl = statusline(k, dir, key);   // the 5h only: the refused week is spread forward
+    const laneOf = () => k.q.lanesOfReading(k.W.readCacheObject(dir, key) || {}).find((x) => x.lane === 'plan:7d') || {};
+    const a = laneOf();
+    out.push({ ok: sl.status === 0 && a.mark === true && a.refusedAt != null && a.usedPct >= 100, text: `the week refused, then the statusline's 5h render (exit ${sl.status}): the spread week reads mark ${a.mark}, refusedAt ${a.refusedAt ? 'kept' : 'LOST'}, ${a.usedPct} %` });
+    await rle(k, dir, key, { kind: 'fiveHour', status: 'allowed', utilization: 0.3, resetsAt: S + 2 * 3600 }, Date.now());
+    const b = laneOf();
+    out.push({ ok: b.mark === true && b.refusedAt != null, text: `…after the next write (a 5h event): mark ${b.mark}, refusedAt ${b.refusedAt ? 'kept' : 'LOST'} (carryStamps)` });
+    const heard = []; const off = typeof k.W.onVendorReset === 'function' ? k.W.onVendorReset((e) => { if (e && e.key === key) for (const x of e.resets || []) heard.push(x.lane); }) : () => { };
+    await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', utilization: 0.3, resetsAt: S + 3 * 86400 }, Date.now());
+    off();
+    out.push({ ok: !heard.includes('plan:7d'), text: `…then a lower week reading (30 %): a vendor reset said ${heard.includes('plan:7d') ? 'YES — the refusal read as a measurement' : 'no'}` });
+    return { ok: out.every((x) => x.ok), detail: out.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
+  },
+  // ⑨ A STATUS-ONLY EVENT CARRIES (item 2): the same status, the same reset, no number — what it re-states is nothing
+  async 'status-only'(k) {
+    const dir = mkDir('so'), key = 'acct-so', T0 = NOW - 14 * H;
+    await panel(k, dir, key, T0);
+    await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', utilization: 0.08, resetsAt: S + 3 * 86400 }, T0);   // the week read at T0 WITH its status (the claim key holds the status)
+    await rle(k, dir, key, { kind: 'fiveHour', status: 'allowed', utilization: 0.3, resetsAt: S + 2 * 3600 }, NOW - H);   // a fresh 5h beside it
+    await rle(k, dir, key, { kind: 'sevenDay', status: 'allowed', resetsAt: S + 3 * 86400 }, Date.now());
+    const f = k.W.readCacheObject(dir, key) || {};
+    const w7 = Object.fromEntries(k.q.lanesOfReading({ fetchedAt: f.fetchedAt, limits: f.limits || [] }).map((x) => [x.lane, x.at]))['plan:7d'];
+    const a = pageAges(k, dir, key);
+    return { ok: !!(w7 === T0 && f.sevenDay && f.sevenDay.measuredAt === T0 && a['plan:7d'] && a['plan:7d'].words === '14h'), detail: `a status-only 7d event over a week read 14 h ago: its window ${w7 ? MIN(w7) + ' min' : '—'}, its bucket ${f.sevenDay && f.sevenDay.measuredAt ? MIN(f.sevenDay.measuredAt) + ' min' : '—'}, the page «${a['plan:7d'] ? a['plan:7d'].words : '—'}»` };
+  },
+  // ⑩ CLAUDE FILES ONLY (item 4), by behaviour: a codex file written through the road holds no stamp, byte for byte what the
+  //    base's projection writes (this tree's write road with its stamps taken out — the only projection change)
+  async 'other-harness'(k, { base = null } = {}) {
+    // ONE snapshot, parsed once, handed to both roads as the same bytes (a parse stamps its own clock)
+    const od0 = k.r('./src/harnesses/codex-quota.js').signalFromStream({ type: 'event_msg', payload: { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 50, window_minutes: 10080, resets_at: S + 3 * 86400 }, secondary: { used_percent: 20, window_minutes: 300, resets_at: S + 3600 } } } });
+    od0.fetchedAt = NOW - 2 * H; od0.source = 'codex-rate-limits';
+    const write = (kk) => { const dir = mkDir('oh'), key = 'acct-cx', cq = kk.r('./src/harnesses/codex-quota.js'), od = JSON.parse(JSON.stringify(od0));
+      const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { };
+      try { kk.W.writeCacheObject({ cacheDir: dir, key, obj: od, set: cq.limitSetFromSnapshot(od, { identity: key, source: 'codex-rate-limits' }), source: 'codex-rate-limits', backend: 'codex' }); } finally { console.log = o; console.warn = w; }
+      return fs.readFileSync(path.join(dir, key + '.json'), 'utf8'); };
+    const mine = write(k), ref = base ? write(base) : null;
+    const stamped = /"measuredAt"\s*:/.test(JSON.stringify(Object.fromEntries(Object.entries(JSON.parse(mine)).filter(([f]) => f !== 'limits'))));
+    let at = -1; if (ref != null && mine !== ref) { at = 0; while (at < mine.length && mine[at] === ref[at]) at++; }
+    return { ok: !stamped && (ref == null || mine === ref), detail: `a codex file through the road: its buckets ${stamped ? 'STAMPED' : 'carry no stamp'}; ${ref == null ? 'no base copy given' : `byte for byte the base projection's: ${mine === ref} (${mine.length} / ${ref.length} bytes)${at >= 0 ? ` — first difference at ${at}: «${mine.slice(Math.max(0, at - 40), at + 40)}» vs «${ref.slice(Math.max(0, at - 40), at + 40)}»` : ''}`}` };
+  },
 };
 
 say('THIS TREE');
-for (const leg of ['one-order', 'file-stamp', 'reverse', 'field', 'money']) { inLeg = leg; const r = await LEGS[leg](kitOf(REPO)); ok(r.ok, `${leg}: ${r.detail}`); }
+for (const leg of ['one-order', 'file-stamp', 'reverse', 'field', 'money', 'refusal-kept', 'status-only']) { inLeg = leg; const r = await LEGS[leg](kitOf(REPO)); ok(r.ok, `${leg}: ${r.detail}`); }
 { inLeg = '③ H'; const r = await LEGS['statusline-then-write'](kitOf(REPO), 'capture'); ok(r.ok, `③ H — a plain write after the statusline: ${r.detail}`); }
 { inLeg = '③ banner shape'; const r = await LEGS['statusline-then-write'](kitOf(REPO), 'banner'); ok(r.ok, `③ the banner's write shape after the statusline: ${r.detail}`); }
 { inLeg = '⑦ restart'; const r = await LEGS.restart(kitOf(REPO), { engine: true }); ok(r.ok, `⑦ restart: ${r.detail}`); }
@@ -306,11 +357,17 @@ const MUTANTS = [
     ['one-order', 'statusline-then-write', 'field', 'money']],
   ['no-stamps', 'the write road projects no window instant into the file\'s buckets', [['src/quota-model.js', 'if (stamps && posNum(w.measuredAt)) b.measuredAt = posNum(w.measuredAt);', ''], ['src/quota-model.js', 'if (stamps && posNum(w.measuredAt)) e.measuredAt = posNum(w.measuredAt);', '']],
     ['file-stamp', 'statusline-then-write', 'money', 'restart']],
-  ['stamp-rides', 'the capture\'s re-stated bucket keeps the stored window\'s projected measuredAt', [['src/rate-limit-capture.js', 'delete c.asOf; delete c.measuredAt; return c;', 'delete c.asOf; return c;']],
+  ['stamp-rides', 'the capture\'s re-stated bucket keeps the stored window\'s projected measuredAt', [['src/rate-limit-capture.js', 'delete c.asOf; delete c.measuredAt; delete c.refusedAt;', 'delete c.asOf; delete c.refusedAt;']],
     ['reverse']],
-  ['asof-rides', 'the capture\'s re-stated bucket keeps an earlier render\'s asOf', [['src/rate-limit-capture.js', 'delete c.state; delete c.asOf; delete c.measuredAt; return c;', 'delete c.state; delete c.measuredAt; return c;']],
+  ['asof-rides', 'the capture\'s re-stated bucket keeps an earlier render\'s asOf', [['src/rate-limit-capture.js', 'delete c.state; delete c.asOf; delete c.measuredAt;', 'delete c.state; delete c.measuredAt;']],
     ['reverse']],
+  ['no-marks', 'the projection carries the instant but not the refused / stated marks', [['src/quota-model.js', '    if (stamps && posNum(w.refusedAt)) b.refusedAt = posNum(w.refusedAt);\n    if (stamps && posNum(w.statedAt)) b.statedAt = posNum(w.statedAt);\n', ''], ['src/quota-model.js', '    if (stamps && posNum(w.refusedAt)) e.refusedAt = posNum(w.refusedAt);       // …with its marks (round wcslt7dwl item 1)\n    if (stamps && posNum(w.statedAt)) e.statedAt = posNum(w.statedAt);\n', '']],
+    ['refusal-kept']],
+  ['no-carry', 'the write road keeps no unmeasured window (the carry rule out)', [['src/usage-cache-write.js', '    next = carryUnmeasuredLimits(prevSet, next);\n', '']],
+    ['status-only']],
 ];
+{ inLeg = '⑩ other-harness'; const B = kitOf(mutantTree('base-projection', MUTANTS.find((m) => m[0] === 'no-stamps')[2]));
+  const r = await LEGS['other-harness'](kitOf(REPO), { base: B }); ok(r.ok, `⑩ other-harness: ${r.detail}`); }
 for (const [tag, what, edits, legs] of MUTANTS) {
   say(`RED CONTROL — ${tag}: ${what}`);
   let M = null; try { M = mutantTree(tag, edits); } catch (e) { ok(false, `${tag}: its patch applies to this tree (an anchor no longer in the file is red, never a skip)`, e.message); continue; }

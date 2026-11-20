@@ -1537,6 +1537,11 @@ function toLegacyView(set, { nowSec = null, stamps = false } = {}) {
     // writer that carries an unrendered bucket forward (the shipped statusline spreads every bucket it did not render)
     // carries when it was read; the one order (bucketInstant) reads it back on both sides
     if (stamps && posNum(w.measuredAt)) b.measuredAt = posNum(w.measuredAt);
+    // …WITH the record's word on itself (the coordinator's round wcslt7dwl, item 1): a bucket that carries an instant has a
+    // word of its own, so a refusal's 100 % must carry its refused / stated marks too — else a render that leaves the window
+    // out spreads it forward as a MEASURED 100 % (the reset-seen rule, the held fall and carryStamps read the marks)
+    if (stamps && posNum(w.refusedAt)) b.refusedAt = posNum(w.refusedAt);
+    if (stamps && posNum(w.statedAt)) b.statedAt = posNum(w.statedAt);
     return b;
   };
   // THE VIEW MAY NEVER BE MORE OPTIMISTIC THAN THE SET IT PROJECTS (r3).
@@ -1628,6 +1633,8 @@ function toLegacyView(set, { nowSec = null, stamps = false } = {}) {
     if (l.flags && l.flags.severity) e.severity = l.flags.severity;
     if (l.flags && l.flags.asOf) e.asOf = l.flags.asOf;
     if (stamps && posNum(w.measuredAt)) e.measuredAt = posNum(w.measuredAt);   // B-37bc (a), as toBucket
+    if (stamps && posNum(w.refusedAt)) e.refusedAt = posNum(w.refusedAt);       // …with its marks (round wcslt7dwl item 1)
+    if (stamps && posNum(w.statedAt)) e.statedAt = posNum(w.statedAt);
     scoped.push(e);
   }
   if (scoped.length) out.scopedWeekly = scoped;

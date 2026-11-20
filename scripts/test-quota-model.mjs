@@ -1053,7 +1053,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // producer too, so it is measured on that shape as well.
     const wBoth = mutantWorld('b1x', [QMFILE, WFILE, CFILE], {
       [QMFILE]: [['if (STATES.includes(b.state) && !(usedPct > 0)) w.state = b.state;', 'if (STATES.includes(b.state)) w.state = b.state;']],
-      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; return c; };', 'const restated = (b) => ({ ...b });']],
+      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; delete c.refusedAt; delete c.statedAt; return c; };', 'const restated = (b) => ({ ...b });']],
     });
     patchHit(wBoth, '⑯b removes BOTH halves (the branch as the verifier found it)');
     const p2 = b2({ W: load(wBoth, WFILE), CAP: load(wBoth, CFILE) });
@@ -1070,7 +1070,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
         ['if (STATES.includes(b.state) && !(usedPct > 0)) w.state = b.state;', 'if (STATES.includes(b.state)) w.state = b.state;'],
         ['    for (const w of spendingWindows(l)) {', '    for (const w of countingWindows(l)) {'],
       ],
-      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; return c; };', 'const restated = (b) => ({ ...b });']],
+      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; delete c.refusedAt; delete c.statedAt; return c; };', 'const restated = (b) => ({ ...b });']],
       [PFILE]: [['  if (!bucketStatesSpend(b)) return null;', '  if (!bucketCounts(b)) return null;']],
     });
     patchHit(wbx, '⑯b-x removes BOTH belts (the r3 defect with the r4 split undone)');
@@ -1085,7 +1085,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // just invalidated. Only this half catches the re-statement DOWN to 0 %,
     // which is why there are two controls and not one.
     const wProd = mutantWorld('b2', [CFILE], {
-      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; return c; };', 'const restated = (b) => ({ ...b });']],
+      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; delete c.refusedAt; delete c.statedAt; return c; };', 'const restated = (b) => ({ ...b });']],
     });
     patchHit(wProd, '⑯b restores the producer that carries a stale verdict forward');
     const p3 = b3({ W, CAP: load(wProd, CFILE) });
