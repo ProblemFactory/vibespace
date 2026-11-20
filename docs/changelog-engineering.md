@@ -625,6 +625,7 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-tests-a — test-new-session-dialog's «typing a path opens the suggestion list» says its premise (the fourth hosted run, red then green; tests only)
 - The leg proves that typing opens the list on a machine that answers inside its budget. Under the runner's load the 450 ms budget was missed three times in a row, the field's bounded ask-again ended, and with no further keystroke the list never opened: a bare false (the coordinator's placement, 2026-11-20 04:44Z). A tap on the page's fetch now records each dir-complete reply for the typed text and its `partial` mark; when the list does not open, the red NAMES what it saw — «PREMISE NOT MET — the machine did not answer in its budget: N partial replies …» with the field's line and the last reply, or «a WHOLE reply came … and the list did not open — the product's fault». Nothing loosened: a list that does not open on a whole reply stays red.
 
+
 ## 2.369.412 — 2026-11-19
 
 ### bl-tests-a — ckpt61 hosted red of test-path-field-chrome, tests only for .412 (主开发 21:37Z: the product cure rides .413 as its own unit, B-08d5): no product byte
