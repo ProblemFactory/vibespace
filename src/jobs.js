@@ -14,6 +14,7 @@ const PI = require('./proc-identity.js'); // B-1cc6: a pid is never an identity
 const WRAPPER_HELD = new Set(['up', 'starting', 'awaiting-user']);   // B-c134 cure: a job state whose wrapper the engine holds (an «unverified» one is a previous boot's pid: never kept out)
 const LOGS_SAY_AT_ONCE = 50;   // B-c330: a job-logs pass that removes this many run dirs or more is said at once (the steadier ones fold into a day's line)
 const crypto = require('crypto');
+const NAME_RULE_SAID = new Set(), NAME_BELT_SAID = { done: false };   // r366: the name rule's two journal lines, each said once (a name / the process)
 const { withoutNoticeHead } = require('./notification-senders.js'); // lane notify-retry: a parked frame carries the ladder's head; the floor's digest is of the raw text
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
@@ -3008,8 +3009,14 @@ class JobManager {
   _nameWords(s, { typed = false } = {}) {
     // r253 (round wlc6blvqo): a name the rule could not judge is RECORDED (one journal line, by name); a belt that cannot even be
     // loaded answers the MARK, never the raw name (the law: when in doubt the rule hides)
-    const failed = () => { try { this.d.log(`[jobs] the name rule could not judge a job's name — it was judged by the output belt and the run row instead`); } catch { } };
-    try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir, byValue: true, typed, onFailed: failed }); } catch { return '«redacted»'; }
+    // r366: the failed rule is said ONCE A NAME (a bounded set of names in memory — the line never carries the name), the belt that
+    // cannot load ONCE A PROCESS — never at every read
+    const raw = String(s == null ? '' : s);
+    const failed = () => { if (NAME_RULE_SAID.has(raw)) return; if (NAME_RULE_SAID.size >= 256) NAME_RULE_SAID.clear(); NAME_RULE_SAID.add(raw); try { this.d.log(`[jobs] the name rule could not judge a job's name — it was judged by the output belt and the run row instead`); } catch { } };
+    try { return require('./agent-output-belt.js').maskForSink(raw, { dataDir: this.d.dataDir, byValue: true, typed, onFailed: failed }); } catch (e) {
+      if (!NAME_BELT_SAID.done) { NAME_BELT_SAID.done = true; try { this.d.log(`[jobs] the name belt could not be loaded (${(e && e.message) || e}) — every job name is shown as «redacted» until VibeSpace restarts`); } catch { } }
+      return '«redacted»';
+    }
   }
   /** THE ONE ACCESSOR of a job's PERSON-FACING NAME (lane job-notify-user r5, accept-r4 confirmed 0 + refuted 0): the name
    *  belted on its own — every message-road copy (r3: the header, the chat card's label, the stash, the retry meta), and

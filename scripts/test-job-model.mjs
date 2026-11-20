@@ -436,9 +436,11 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
     ['r253: the header word with a lowercase run', 'bearer ' + L26, 'bearer-' + R], ['r253: the header word\'s value whatever it is', 'check bearer rotation', 'check-bearer-' + R],
     ['r253: a PUBLIC query value that hides a userinfo (the release\'s hidesHolder)', 'x ?next=https://admin:' + UP + '@db.example/', 'x-next-' + R],
     ['r253: a spaced `=` is prose (a blank — the word test)', 'DB_PASSWORD = ' + H7, 'DB_PASSWORD-' + H7],
+    ['r366 (主开发\'s ruling): a holder, a bare colon and a value with no blank is an assignment', 'password:' + H7, 'password-' + R], ['r366: …a short one', 'auth:' + ['fix'].join(''), 'auth-' + R],
+    ['r366: the spaced colon stays prose', 'auth: fix', 'auth-fix'],
     ['r253: a run with plain words between its joiners', 'build-iOS17-sim-tests', 'build-iOS17-sim-tests'], ['r253: …and a version', 'Node22-Ubuntu24.04-build', 'Node22-Ubuntu24.04-build'],
   ];
-  const TABLE_ROWS = 137;   // r253: the table's EXACT size — a row deleted is red by name
+  const TABLE_ROWS = 140;   // r253: the table's EXACT size — a row deleted is red by name
   const tableBad = TABLE.filter(([, asked, want]) => rn(asked) !== want).map(([why, asked, want]) => `«${asked.slice(0, 48)}» (${why}) → ${rn(asked)} (want ${want})`);
   for (const [why, asked] of TABLE) console.log(`      ${JSON.stringify(asked.length > 52 ? asked.slice(0, 44) + '…' : asked).padEnd(56)} → ${rn(asked)}   (${why})`);
   ok(TABLE.length === TABLE_ROWS && !tableBad.length, `r9 THE NAME RULE: a ${TABLE.length}-name table — every row's stored-as (the brief's examples, the skeptics' names, camelCase / PascalCase / brand names / dates / times / versions / paths / uuids / emails / URLs)${tableBad.length ? ' — ' + tableBad.join(' | ') : ''}`);
@@ -502,7 +504,8 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
   console.log(`      the belt on the throwing rule: ${JSON.stringify(RUN36)} → ${JSON.stringify(toldOut)}, the caller told ${told}×`);
   ok(told === 1 && !toldOut.includes(mat(36)), 'r253 a name the rule could not judge is RECORDED — maskForSink tells its caller once, the name still hidden', { told, toldOut });
   const jbSrc253 = fs.readFileSync(path.join(__dirname_jm, '../src/jobs.js'), 'utf8'), nwAt = jbSrc253.indexOf('  _nameWords(s, { typed = false } = {}) {'), nw253 = jbSrc253.slice(nwAt, jbSrc253.indexOf('\n  }\n', nwAt));
-  ok(nwAt > 0 && /onFailed: failed \}\); \} catch \{ return '«redacted»'; \}/.test(nw253) && /this\.d\.log\(`\[jobs\] the name rule could not judge a job's name/.test(nw253), 'r253 jobs.js _nameWords journals a fallback by name, and a belt that cannot load answers the MARK, never the raw name', nw253.slice(0, 400));
+  ok(nwAt > 0 && /onFailed: failed \}\); \} catch \(e\) \{/.test(nw253) && /return '«redacted»';\n    \}/.test(nw253) && /if \(NAME_RULE_SAID\.has\(raw\)\) return;/.test(nw253) && /if \(!NAME_BELT_SAID\.done\) \{ NAME_BELT_SAID\.done = true;/.test(nw253) && /this\.d\.log\(`\[jobs\] the name rule could not judge a job's name/.test(nw253),
+    'r253 / r366 jobs.js _nameWords journals a fallback ONCE A NAME (never the name), a belt that cannot load ONCE A PROCESS, and answers the MARK — never the raw name', nw253.slice(0, 600));
   ok(mOld !== mThrow && oldOut.text.includes(mat(36)), 'r10 CONTROL — r9\'s catch («as far as it got») with the same throw passes the 36-run WHOLE (the run row never ran): the fallback is what hides it', oldOut);
 }
 

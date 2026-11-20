@@ -139,10 +139,11 @@ separate setting — not audience 1's auto-notify:
   or 3+ parts joined by `-` `_` `.` with a capital or a digit. So
   `password reset`, `auth: fix login flow` and `token refresh` are
   stored as typed, and `password: Summer1!` is stored
-  `password-«redacted»`. An ASSIGNMENT hides ANY value: a `KEY=`,
-  `--key=` or `KEY:=` with no blank whose name says secret, a query
-  parameter like `?token=`, and the value after `bearer` / `basic` —
-  whatever its length or shape. A name typed as one long run of mixed
+  `password-«redacted»`. An ASSIGNMENT hides ANY value, whatever its
+  shape: a `KEY=`, `--key=`, `KEY:=` or `KEY:` with no blank whose name
+  says secret, and a query parameter like `?token=`; after `bearer` the
+  next six characters or more are hidden, after `basic` sixteen or
+  more (the header forms). A name typed as one long run of mixed
   case and digits with no plain word in it
   (`TestHandlerReturns404WhenMissing`) is hidden whole — use spaces. A secret goes in the vault
   (`vibespace-vault`), never in a name.

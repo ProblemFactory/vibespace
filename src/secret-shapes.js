@@ -837,11 +837,14 @@ function nameKv(text) {
     // `--password=…`, `api_key:=…`) is a command's own assignment, never prose: ANY non-empty value is hidden, as the release's R2
     // did (its value floor is the law's violation: r1 kept API_KEY=changeme). The value FLOOR (wordValue) is for PROSE only — a blank
     // after the head (`password: …`, `auth: fix login flow`), where a person's word stands
-    const sep = m[5], colonEq = sep === ':' && text[headEnd] === '=';
-    const assign = (sep === '=' || colonEq) && !NAME_BLANK_Y_TEST.test(text[headEnd + (colonEq ? 1 : 0)] || '');
+    // r366 (主开发's ruling): a holder, a BARE COLON and a value with no blank (`password:<value>`) is an assignment too — the release hid
+    // it; a sign, a blank, then the value (`password: …`) stays prose
+    const sep = m[5], colonEq = sep === ':' && text[headEnd] === '=', nx = text[headEnd + (colonEq ? 1 : 0)] || '';
+    // an assignment's value follows on the SAME line with no blank — `password:` ⏎ <value> is R2b's next-line form (the word test reads
+    // the next line), never an empty assignment (this round's first gate: the next line's value was kept)
+    const assign = (sep === '=' || sep === ':') && nx !== '' && !/\s/.test(nx) && !NAME_BLANK_Y_TEST.test(nx);
     let s = nameBlanksEnd(text, headEnd + (colonEq ? 1 : 0));                     // a no-break / thin / ideographic space after `:` / `=`
     if (!assign && text[s] === '=' && /[:=][ \t]*$/.test(sep)) s = nameBlanksEnd(text, s + 1);   // `password := …` (spaced) — the second sign is the head's
-    if (assign && (s >= text.length || text[s] === '\n' || text[s] === '\r')) { KV_HEAD.lastIndex = headEnd; continue; }   // `KEY=` empty: nothing to hide
     if (text[s] === '\n' || text[s] === '\r') s = blanksEnd(text, s);
     let tok = tokenAt(text, s);
     if (BLOCK_VAL.test(tok)) { s = blanksEnd(text, s + tok.length); tok = tokenAt(text, s); }
