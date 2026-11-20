@@ -62,6 +62,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A paired machine with a long usage history now sends its usage within seconds; a whole-history walk used to fail each time, leaving the slower harvest.
 - When the computer's clock was set during a stopped turn, the list of what it left running could name an earlier turn's process, or miss one of its own.
 - A Background Work job that fails while its conversation is not running now shows in For you by name, once per job, with its count.
+- When a helper agent or a workflow's agents finish, VibeSpace no longer pauses while it reads the files they wrote.
+- A helper agent that worked for a long time now has its early files in Artifacts too.
 
 ## 2.369.413 — 2026-11-20
 
