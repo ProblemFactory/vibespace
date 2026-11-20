@@ -29,6 +29,8 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// r349 (主开发): a wait is for WHAT HAPPENED — bounded, and it says what never came (then the leg's own judgement reads the state)
+const until = async (pred, ms, what) => { const t0 = Date.now(); for (;;) { const v = await pred(); if (v) return v; if (Date.now() - t0 > ms) { console.log(`  … waited ${ms} ms for ${what} — it never came`); return null; } await sleep(5); } };
 
 const OL = require(path.join(REPO, 'src/oauth-loopback.js'));
 const R = require(path.join(REPO, 'src/integration-registry.js'));
@@ -275,24 +277,24 @@ const quiet = { warn() {}, log() {}, error() {} };
   let release; const hold = new Promise((r) => { release = r; }); const seen = []; const dones = [];
   const st = await ol.begin({ id: 'g', mode: 'ephemeral', buildConsentUrl: ({ redirectUri, state }) => `https://x/?r=${encodeURIComponent(redirectUri)}&state=${state}`, onDone: (r) => { dones.push(r); }, exchange: async (args) => { seen.push({ before: args.cancelled(), flowId: args.flowId }); await hold; seen.push({ after: args.cancelled() }); return { access_token: 'u' }; } });
   const state = new URL(st.consentUrl).searchParams.get('state');
-  const landing = get(`${st.redirectUri}/?state=${state}&code=c1`); await sleep(30);
+  const landing = get(`${st.redirectUri}/?state=${state}&code=c1`); await until(() => seen.length === 1, 3000, '⑥ the exchange entered (its first cancelled() read)');
   ok(seen.length === 1 && seen[0].before === null && seen[0].flowId === st.flowId, 'the exchange is handed the flow id and a cancelled() that reads null while the flow is live');
   ok(ol.cancel(st.flowId, 'cancelled') === true, 'the flow is cancelled while its exchange is in flight');
-  release(); await landing; await sleep(30);
+  release(); await landing; await until(() => dones.length === 1, 3000, '⑥ the cancelled flow\'s one report');
   const s = ol.status(st.flowId);
   ok(seen.length === 2 && seen[1].after === 'cancelled', 'cancelled() inside the exchange reads the cancel that landed meanwhile (the exchange checks it before storing anything)');
   ok(s && s.done === true && s.ok === true && s.error === null && s.cancelled === 'cancelled', `r8: an exchange that RESOLVED after the cancel is a landed consent — the report is ok:true with the cancel carried (ok ${s && s.ok}, cancelled ${s && s.cancelled}, error ${s && s.error})`);
   ok(dones.length === 1 && dones[0].ok === true && dones[0].cancelled === 'cancelled' && dones[0].result && dones[0].result.access_token === 'u', 'onDone carries {ok:true, cancelled} + the result — the record door reads ok as landed, the pending path refuses the carried cancel itself');
   // the door's shape: an exchange that consults cancelled() and THROWS ⇒ {ok:false, cancelled} with the exchange's own sentence
-  { let rel; const h2 = new Promise((r) => { rel = r; });
-    const st3 = await ol.begin({ id: 'g3', mode: 'ephemeral', buildConsentUrl: ({ state: s3 }) => `https://x/?state=${s3}`, onDone: (r) => { dones.push(r); }, exchange: async (args) => { await h2; const c = args.cancelled(); if (c) throw new Error(`the Gmail sign-in was ${c} while it was being completed — nothing was connected`); return { access_token: 'v' }; } });
-    const l3 = get(`${st3.redirectUri}/?state=${new URL(st3.consentUrl).searchParams.get('state')}&code=c3`); await sleep(30);
-    ok(ol.cancel(st3.flowId, 'cancelled') === true, 'the door-shaped flow is cancelled while its exchange is in flight'); rel(); await l3; await sleep(30);
+  { let rel, entered3 = false; const h2 = new Promise((r) => { rel = r; });
+    const st3 = await ol.begin({ id: 'g3', mode: 'ephemeral', buildConsentUrl: ({ state: s3 }) => `https://x/?state=${s3}`, onDone: (r) => { dones.push(r); }, exchange: async (args) => { entered3 = true; await h2; const c = args.cancelled(); if (c) throw new Error(`the Gmail sign-in was ${c} while it was being completed — nothing was connected`); return { access_token: 'v' }; } });
+    const l3 = get(`${st3.redirectUri}/?state=${new URL(st3.consentUrl).searchParams.get('state')}&code=c3`); await until(() => entered3, 3000, '⑥ the door-shaped exchange entered');
+    ok(ol.cancel(st3.flowId, 'cancelled') === true, 'the door-shaped flow is cancelled while its exchange is in flight'); rel(); await l3; await until(() => dones.length === 2, 3000, '⑥ the refused flow\'s one report');
     const s3 = ol.status(st3.flowId); const d3 = dones[dones.length - 1];
     ok(s3 && s3.done === true && s3.ok === false && s3.cancelled === 'cancelled' && /was cancelled while it was being completed/.test(s3.error || ''), `an exchange that consulted cancelled() and refused ends {ok:false, cancelled} with ITS sentence (${s3 && s3.error})`);
     ok(d3 && d3.ok === false && d3.cancelled === 'cancelled' && d3.result === null, 'onDone carries {ok:false, cancelled} for the refused exchange'); }
   const st2 = await ol.begin({ id: 'g2', mode: 'ephemeral', buildConsentUrl: ({ state: s2 }) => `https://x/?state=${s2}`, onDone: (r) => { dones.push(r); }, exchange: async () => ({ access_token: 'u' }) });
-  await get(`${st2.redirectUri}/?state=${new URL(st2.consentUrl).searchParams.get('state')}&code=c2`); await sleep(30);
+  await get(`${st2.redirectUri}/?state=${new URL(st2.consentUrl).searchParams.get('state')}&code=c2`); await until(() => dones.length === 3, 3000, '⑥ the uncancelled flow\'s report');
   ok(dones.length === 3 && dones[2].ok === true && dones[2].cancelled === null, 'a flow that was not cancelled reports cancelled: null');
   ol.stopAll();
 }
@@ -445,10 +447,13 @@ console.log('\n⑧ the end drops every closure; the machine\'s own ends are said
     await sleep(10);
     ok(oRep.length === 1 && oRep[0].cancelled === OL.CAUSE_OVER_LIMIT && /open sign-ins at 32/.test(oRep[0].error) && ol2.status(o.flowId).cancelled === OL.CAUSE_OVER_LIMIT, `(c) the CAP reports the evicted flow once by its own cause ("${oRep[0] && oRep[0].error}")`);
     // mid-exchange: the exchange's own return is the ONE report (the timeout's not a second)
-    let rel; const holdX = new Promise((r) => { rel = r; }); const mRep = [];
-    const m = await ol2.begin({ id: 'mid', mode: 'ephemeral', timeoutMs: 60, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async ({ cancelled }) => { await holdX; const c2 = cancelled(); if (c2) throw new Error(`refused: ${c2}`); return { ok: true }; }, onDone: (r) => mRep.push(r) });
+    let rel; const holdX = new Promise((r) => { rel = r; }); const mRep = []; let mEntered = false;
+    const m = await ol2.begin({ id: 'mid', mode: 'ephemeral', timeoutMs: 60, buildConsentUrl: ({ state }) => `https://x/?state=${state}`, exchange: async ({ cancelled }) => { mEntered = true; await holdX; const c2 = cancelled(); if (c2) throw new Error(`refused: ${c2}`); return { ok: true }; }, onDone: (r) => mRep.push(r) });
     const landing = get(`${m.redirectUri}/?state=${new URL(m.consentUrl).searchParams.get('state')}&code=c`);
-    await sleep(120); rel(); await landing; await sleep(20);
+    // r349 (the class): WHAT HAPPENED — the exchange ENTERED, its 60 ms timeout FIRED mid-exchange, then the release and the exchange's own report
+    await until(() => mEntered, 3000, '(c) the mid-exchange flow\'s exchange entered');
+    await until(() => (ol2.status(m.flowId) || {}).cancelled === OL.CAUSE_TIMEOUT, 3000, '(c) the 60 ms timeout firing mid-exchange');
+    rel(); await landing; await until(() => mRep.some((r) => /refused: timeout/.test((r && r.error) || '')), 3000, '(c) the exchange\'s own refusal reported');
     ok(mRep.length === 1 && mRep[0].ok === false && mRep[0].cancelled === OL.CAUSE_TIMEOUT && /refused: timeout/.test(mRep[0].error), `(c) the timeout landing MID-EXCHANGE: exactly one report, the exchange's own refusal (${mRep.length}: ${mRep[0] && mRep[0].error})`);
     ol2.stopAll();
   }

@@ -1019,7 +1019,11 @@ console.log('⑫ verify r5: refresh races + the identity door');
       if (act === 'disconnect' || act === 'rebind') await e.disconnect('gmail');
       else if (act === 'cancel') await e.cancelAuth('gmail');
       else if (act === 'newer') { v.st.holdProfile = null; const r2 = await e.reauthorize('gmail', {}); await land(r2.flow, 'c1'); newerRt = rtOf(dir, row(e)); }
-      const s0 = v.st.sends; release(); await landing; await sleep(150);
+      clock += 1; const s0 = v.st.sends; const before = passMarks(e); release(); await landing;   // (one tick: a second ok pass at a FIXED clock writes the same lastPass)
+      // r349 (the class): the held flow's done hook ENDED (the door's refusal, or in a control copy its write); a flow that reported ok kicked a pass — it moved
+      const h1 = await until(() => HOOKS.get(r1.flow.flowId), 5000, `(j) the ${act} run's held flow's done hook`);
+      const p1 = h1 && h1.ok ? !!(await until(() => passMoved(e, before, h1.id), 5000, `(j) the pass the ${act} run's held flow kicked`)) : null;
+      ok(!!h1 && p1 !== false, `(j) [${tag}] ${act}: what the judgement waits for happened — the held flow's done hook${p1 === null ? '' : ', the pass it kicked'}`, JSON.stringify({ hook: !!h1, pass: p1 }));
       const rec = row(e); const disk = diskOf(dir).find((x) => x.id === 'gmail'); const view = e.adapterView(rec);
       const out = { held, live: !!rec.auth.tokenEnc, disk: !!disk.auth.tokenEnc, state: view.auth.state, key: rec.credentialKey, calls: v.st.sends - s0, err: rec.lastAuthError, rt: rec.auth.tokenEnc ? rtOf(dir, rec) : null, newerRt };
       e.stop();
@@ -1122,13 +1126,24 @@ console.log('⑫ verify r5: refresh races + the identity door');
     const connected = async (c) => { const r = await c.e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c0'); await c.e.pass('gmail', { force: true }); return rtOf(c.dir, row(c.e)); };
     const snap = (c, s0) => { const rec = row(c.e); const disk = diskOf(c.dir).find((x) => x.id === 'gmail'); const view = c.e.adapterView(rec); return { live: rtOf(c.dir, rec), disk: rtOf(c.dir, disk), state: view.auth.state, key: rec.credentialKey, err: rec.lastAuthError, calls: c.v.st.sends - s0, connectedLine: c.lines.some((l) => /: connected as member/.test(l)) }; };
     // (l1) the five acts in the window — cancel / a newer sign-in / the timer's cancel / disconnect / stop()
+    const STARTS_PASS = new Set(['cancel', 'timeout', 'newer']);   // the consent stands on a connected record of a running engine (disconnect / stop: none)
     const late = async (engineModule, OL, act, tag) => {
       const c = boot(engineModule, `late-${act}-${tag}`, { OL }); const { e, v, dir, oauth, lines } = c;
       const t0 = await connected(c);
       const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const flowA = r1.flow.flowId; const landing = landAsync(r1.flow, 'cA'); const held = await v.waitHeld('cA');
-      let stampAtStop = null; let acted = false;
-      oauth.h.after = async () => { acted = true; if (act === 'cancel') await e.cancelAuth('gmail'); else if (act === 'newer') await e.reauthorize('gmail', {}); else if (act === 'timeout') e.oauth.cancel(flowA, 'timeout'); else if (act === 'disconnect') await e.disconnect('gmail'); else if (act === 'shutdown') { e.stop(); e.oauth.stopAll(); stampAtStop = stamp(dir); } };
-      const s0 = v.st.sends; lines.length = 0; rel(); await landing; await sleep(120);
+      let stampAtStop = null; let acted = false; let actEnded = false;
+      oauth.h.after = async () => { acted = true; if (act === 'cancel') await e.cancelAuth('gmail'); else if (act === 'newer') await e.reauthorize('gmail', {}); else if (act === 'timeout') e.oauth.cancel(flowA, 'timeout'); else if (act === 'disconnect') await e.disconnect('gmail'); else if (act === 'shutdown') { e.stop(); e.oauth.stopAll(); stampAtStop = stamp(dir); } actEnded = true; };
+      // (the suite's clock is FIXED: a second ok pass at the same clock writes the SAME lastPass — one tick makes this pass's own end seen)
+      clock += 1; const s0 = v.st.sends; lines.length = 0; const before = passMarks(e); rel(); await landing;
+      // r349 (主开发; hosted 44774335413 try 1 printed «acted false», the flow's report still empty — read too early): WHAT HAPPENED,
+      // never a fixed sleep. The landing answers the browser BEFORE its exchange returns: the act inside the exchange ENDED (the stop
+      // act judged on the act itself), flow A's done hook ENDED (where a write after stop would land), and an act whose consent stands
+      // and so starts a pass (onAuthDone kicks one when the flow reports ok on a connected record of a running engine) — that pass MOVED
+      const waited = { act: !!(await until(() => actEnded, 5000, `(l) the ${act} act inside flow A's exchange ending`)) };
+      const hA = await until(() => HOOKS.get(flowA), 5000, `(l) flow A's done hook after the ${act} act`); waited.hook = !!hA;
+      waited.pass = hA && hA.ok && STARTS_PASS.has(act) ? !!(await until(() => passMoved(e, before, hA.id), 5000, `(l) the pass flow A's report kicked after the ${act} act`)) : null;
+      // what the judgement waits for HAPPENED — a wait that never came is red by name, never a slow green at its bound
+      ok(waited.act && waited.hook && waited.pass !== false, `(l) [${tag}] ${act}: what the judgement waits for happened — the act's end, flow A's done hook${waited.pass === null ? '' : ', the pass it kicked'}`, JSON.stringify(waited));
       const o = { held, acted, t0, ...snap(c, s0) }; const st = e.oauth.status(flowA) || {}; o.flowOk = st.ok; o.flowCancelled = st.cancelled; o.landed = o.disk !== null && o.disk !== t0;
       o.newerRunning = !!e.oauth.runningFor('gmail'); o.writtenAfterStop = stampAtStop !== null && stamp(dir) !== stampAtStop;
       if (act !== 'shutdown') { if (act === 'newer') await e.cancelAuth('gmail'); e.stop(); }
@@ -1158,9 +1173,9 @@ console.log('⑫ verify r5: refresh races + the identity door');
     { const c = boot(ENG, 'stop-inflight'); const { e, v, dir, lines } = c; const t0 = await connected(c);
       const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const landing = landAsync(r1.flow, 'cA'); await v.waitHeld('cA');
       const s0 = v.st.sends; lines.length = 0; e.stop(); const b0 = stamp(dir); const st0 = e.oauth.status(r1.flow.flowId);
-      rel(); await landing; await sleep(150);
+      rel(); await landing; const h2 = await until(() => HOOKS.get(r1.flow.flowId), 5000, '(l2) the stopped flow\'s done hook, its released exchange refused');   // r349 (the class): the exchange reports once when it returns
       const o = snap(c, s0); const st = e.oauth.status(r1.flow.flowId) || {}; const port = await get(`${r1.flow.redirectUri}/`);
-      ok(st0 && st0.cancelled === 'shutdown' && o.disk === t0 && o.live === t0 && st.ok === false && /ended by a shutdown/.test(st.error || '') && stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':') && o.calls === 0 && port.status === 0, `(l2) stop() mid-exchange: the door refused by name ("${st.error}"), the token untouched (${o.disk}), adapters.json's STATE unchanged after stop (the refused door still rides the store's unconditional atomic rewrite — same bytes, new inode: recorded), no vendor call, the listener closed (${port.body})`, JSON.stringify({ o, st, st0, sameBytes: stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':'), sameInode: stamp(dir).split(':')[0] === b0.split(':')[0] })); }
+      ok(!!h2 && st0 && st0.cancelled === 'shutdown' && o.disk === t0 && o.live === t0 && st.ok === false && /ended by a shutdown/.test(st.error || '') && stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':') && o.calls === 0 && port.status === 0, `(l2) stop() mid-exchange: the door refused by name ("${st.error}"), the token untouched (${o.disk}), adapters.json's STATE unchanged after stop (the refused door still rides the store's unconditional atomic rewrite — same bytes, new inode: recorded), no vendor call, the listener closed (${port.body})`, JSON.stringify({ o, st, st0, sameBytes: stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':'), sameInode: stamp(dir).split(':')[0] === b0.split(':')[0] })); }
     // (l3) the flow's OWN deadline (a real 300 ms one): mid-exchange ⇒ refused by name, untouched; after the write ⇒ stands
     { const c = boot(ENG, 'deadline-mid', { OL: OL8, timeoutMs: 300 }); const { e, v } = c; const t0 = await connected(c);
       const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const landing = landAsync(r1.flow, 'cA'); await v.waitHeld('cA');
@@ -1191,25 +1206,24 @@ console.log('⑫ verify r5: refresh races + the identity door');
     };
     for (const pth of ['door', 'pend']) for (const [i, seq] of SEQS.entries()) {
       const c = boot(ENG, `ord-${pth}-${i}`); const { e, v } = c; const t0 = await connected(c); const key0 = row(e).credentialKey;
-      const flows = {}; const rels = {}; const landings = {}; let cancelledB = false, disconnected = false; let sDc = 0; let tokenWrites = 0;
+      const flows = {}; const rels = {}; const landings = {}; let cancelledB = false, disconnected = false; let sDc = 0; let tokenWrites = 0; const missed = [];
       const orig = e.store.adapters.update; e.store.adapters.update = (fn) => orig((ad) => { const rec = ad.adapters.find((x) => x.id === 'gmail'); const b = rec && rec.auth && rec.auth.tokenEnc; const r = fn(ad); const a = rec && rec.auth && rec.auth.tokenEnc; if (a && a !== b) tokenWrites++; return r; });
       const s0 = v.st.sends;
       for (const step of seq) {
         if (step === 'A' || step === 'B') { rels[step] = v.hold(`c${step}`); const r = await e.reauthorize('gmail', pth === 'pend' ? { credentialKey: 'cluster:channels' } : {}); flows[step] = r.flow; if (step === 'A') { landings.A = landAsync(r.flow, 'cA'); await v.waitHeld('cA'); } }
         else if (step === 'Bl') { landings.B = landAsync(flows.B, 'cB'); await v.waitHeld('cB'); }
-        else if (step === 'rA' || step === 'rB') { rels[step[1]](); await landings[step[1]]; await sleep(60); }
+        else if (step === 'rA' || step === 'rB') { rels[step[1]](); await landings[step[1]]; if (!(await until(() => HOOKS.get(flows[step[1]].flowId), 5000, `(l4) flow ${step[1]}'s done hook (${seq.join(' ')})`))) missed.push(step); }   // r349 (the class): the next step waits for this flow's report, never a sleep
         else if (step === 'cB') { cancelledB = true; await e.cancelAuth('gmail'); }
         else if (step === 'dc') { disconnected = true; await e.disconnect('gmail'); sDc = v.st.sends; }
       }
-      await sleep(60);
-      await settled(c);   // the disk verdict waits for the write to land (never a longer sleep)
+      await settled(c);   // the disk verdict waits for the write to land (never a longer sleep; r349: each release above waited for its flow's report)
       const r = snap(c, disconnected ? sDc : s0); const wroteA = /cA/.test(r.disk || ''); const wroteB = /cB/.test(r.disk || '');
       const bLanded = seq.includes('rB'); const bCancelled = cancelledB && (seq.indexOf('cB') < seq.indexOf('rB') || !bLanded); const dcAfterB = disconnected && bLanded && seq.indexOf('dc') > seq.indexOf('rB');
       let good, why;
       if (disconnected) { good = r.live === null && r.disk === null && r.state !== 'connected' && !wroteA && r.calls === 0 && tokenWrites === (dcAfterB ? 1 : 0) && (r.err === null || /nothing was connected/.test(r.err)); why = `disconnected — nothing of A written, token writes ${tokenWrites}, ${r.calls} calls after the disconnect, line ${JSON.stringify(r.err)}`; }
       else if (bCancelled) { good = r.disk === t0 && r.live === t0 && r.state === 'connected' && r.key === key0 && tokenWrites === 0 && (r.err === null || /keeps its current sign-in/.test(r.err)); why = `B cancelled — the pre-flow record (${r.disk}, ${r.key}), 0 token writes, line ${JSON.stringify(r.err)}`; }
       else { good = wroteB && !wroteA && tokenWrites === 1 && r.state === 'connected' && r.err === null && r.key === (pth === 'pend' ? 'cluster:channels' : key0); why = `B's consent is the ONE write (${r.disk}, ${r.key}), A refused, no error line`; }
-      ok(good, `(l4) [${pth}] ${seq.join(' ')} ⇒ ${why}`, JSON.stringify({ ...r, tokenWrites, t0 }));
+      ok(good && !missed.length, `(l4) [${pth}] ${seq.join(' ')} ⇒ ${why}${missed.length ? ` — a report NEVER CAME for ${missed.join(', ')}` : ''}`, JSON.stringify({ ...r, tokenWrites, t0, missed }));
       e.stop();
     }
   }
@@ -1261,8 +1275,10 @@ console.log('⑬ lane channel-reauth-visible: a dead Gmail sign-in, end to end')
   ok(items().length === 1 && items()[0].id === it1[0].id, 'dismissed, then another unfinished consent: the item is back (the account still cannot sign in)');
   refuse = false;
   const r3 = await e13.reauthorize(A13.id, {});
-  await land(r3.flow, 'c-a');
-  await sleep(50);
+  // r349 (the class): the landing's PASS waited for (land with the engine), then the item's own resolution — the engine retracts the
+  // sign-in item AFTER that pass's lastPass write (channels-engine retractSignin), never a sleep
+  clock += 1; await land(r3.flow, 'c-a', { eng: e13 });   // (one tick: the pass's own lastPass is then seen to move)
+  await until(() => (ut13.get(it1[0].id) || {}).status === 'done', 5000, '⑬ the sign-in item retracted by the pass after the good consent');
   const done = ut13.get(it1[0].id) || {};
   ok(items().length === 0 && done.status === 'done' && done.resolvedBy === 'system' && view().authState === 'ok' && view().auth.state === 'connected',
     'a good consent + the pass after it: the item is done by the engine, the view ok', JSON.stringify({ status: done.status, by: done.resolvedBy, a: view().authState }));
