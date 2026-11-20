@@ -254,7 +254,6 @@ class JobManager {
     // A copy taken while held is invisible to every delivery door until its OWN step ran — at the lift's landing, never at the lift's start
     // (one deliverable copy at any instant); its leaving the stash first (the cap, a drop) runs the step at once
     this._unlanded = new Map();
-    this._bornAt = now();   // B-54b7: a park entry older than this engine may have a twin in the file the previous process left
     this.waiters = new Map();    // jobId → [{resolve, timer}] (poll --wait)
     this.ansWaiters = new Map(); // jobId → [{resolve, timer}]
     this._timers = [];
@@ -1453,6 +1452,11 @@ class JobManager {
     if (!entry || entry.producer !== 'jobs' || !entry.meta || !entry.meta.jobId) return false;
     if (ev === 'wake-owed') return false;   // _oweWake already journaled the owed wake
     if (ev === 'wake') { this._wakeAnswered(cid, entry.meta.jobId, extra); return false; }   // an entry written before `metas`
+    // B-54b7 (its re-read's should 3): an entry THIS engine saw parked can have no twin in a file the previous process left — known by its
+    // own event, never by a clock (a clock stepped back moved the old bound); kept while it is parked, at most a bound of the newest
+    const ownPark = ev === 'parked' || !!(this._parkedHere && this._parkedHere.has(entry.id));
+    if (ev === 'parked') { const P = this._parkedHere || (this._parkedHere = new Set()); P.add(entry.id); if (P.size > 2000) P.delete(P.values().next().value); }
+    else if ((ev === 'delivered' || ev === 'fell' || ev === 'dropped') && this._parkedHere) this._parkedHere.delete(entry.id);
     if ((ev === 'delivered' || ev === 'fell') && this._retryVerdicts) this._retryVerdicts.delete(entry.id);   // r6: the memo ends with its entry
     const meta = entry.meta;
     const job = this.jobs.get(meta.jobId) || null;
@@ -1473,7 +1477,7 @@ class JobManager {
         this._notifyLogPush(job, { lane, ok: true, to: extra.peerName || null, retries, deliveredAt: extra.deliveredAt || now(), parkedFor: Number(extra.parkedFor) || 0, via, ...(subscriber ? { sub: true } : {}) });
         if (via === 'prompt' && Number(entry.firstAt) >= M.terminalAt(job)) this.markAck(job, 'notified', now(), { quiet: true });   // rode the next prompt: read like a drained stash entry
       }
-      this._parkLeftHeld(entry);   // B-54b7 (its read's should 3)
+      this._parkLeftHeld(entry, ownPark);   // B-54b7 (its read's should 3)
       if (via === 'message') this._stampNotifyFloor(cid, withoutNoticeHead(entry.text));   // R5: the floor counts the delivery that LANDED — the raw text's digest (the ladder's head stripped)
       this._dirty = true;
       try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
@@ -1494,7 +1498,7 @@ class JobManager {
       // B-54b7 (ALSO CURED): a HELD VIEW's line (groups-unread) is a held line too — it answered a plain «taken» and the park's copy left
       // before the line was on disk; both ride the copy's own landing now
       if (verdict === 'unknown' || verdict === 'groups-unread') { this._save(); return this._taken(this._parkCopyIn(cid, entry.id)); }
-      this._parkLeftHeld(entry);   // B-54b7 (its read's should 3): refused / gone / withheld — it leaves the park, owed nowhere
+      if (!extra.threw) this._parkLeftHeld(entry, ownPark);   // B-54b7 (its read's should 3): refused / gone — owed nowhere (a judge that THREW withheld it: its twin is judged again at its drain)
       return true;
     }
     if (ev === 'fell') {
@@ -1539,21 +1543,28 @@ class JobManager {
     this._takenLiftArmed = true;
     this._afterNotifsLift('the parked notifications the jobs store took', () => {
       this._takenLiftArmed = false;
+      const told = new Set();
       for (const [item, rec] of [...(this._unlanded || [])]) {
         if (!rec.held) continue;
+        told.add(rec.cid);
         if (!rec.go) { this._unlanded.delete(item); continue; }
         try { rec.go(); } catch (e) { this.d.log('[jobs] a parked notification\'s step at the read again failed:', e && e.message); }
       }
+      // its re-read's should 1: the copies are offered from HERE (their landing) — each conversation's strip and its wake chain are told now
+      // (the lift's own word went out before this landing, while they were still hidden)
+      for (const c of told) { try { this.d.onStash?.(c); } catch { } }
+      if (told.size) { try { this.d.broadcast('jobs-updated', { notifs: true }); } catch { } }
     });
   }
   /** the stash copy taken for park entry `id` (the newest — `_stashNotif` just pushed it) */
   _parkCopyIn(cid, id) { const U = this._unlanded, q = (U && this.pendingNotifs.get(cid)) || []; for (let i = q.length - 1; i >= 0; i--) if (q[i] && q[i].rt === id && U.has(q[i])) return q[i]; return null; }
   /** a taken copy left the stash before its landing (the cap, a drop): the park's copy leaves now — what it held is said by that road */
   _letParkGo(n) { const rec = n && this._unlanded ? this._unlanded.get(n) : null; if (!rec) return; this._unlanded.delete(n); if (rec.go) rec.go(); }
-  /** B-54b7 (its read's should 3): a park entry this engine saw DELIVERED or dropped while job-notifications.json is held, and older than
-   *  this engine (only such an entry can have a twin in the held file: a kill between that twin's landing and the park's own rewrite) —
-   *  the lift's merge strikes the file's twin (rt). Bounded by what the previous process left parked; ends with the hold. */
-  _parkLeftHeld(entry) { if (this._notifsUnread && entry && entry.id && Number(entry.firstAt) <= this._bornAt) (this._parkLeftWhileHeld || (this._parkLeftWhileHeld = new Set())).add(String(entry.id)); }
+  /** B-54b7 (its read's should 3): a park entry this engine saw DELIVERED or dropped (not owed) while job-notifications.json is held, and
+   *  that it did not park itself (`own`: only an entry the previous process left can have a twin in the held file — a kill between that
+   *  twin's landing and the park's own rewrite) — the lift's merge strikes the file's twin (rt). Bounded by what the previous process left
+   *  parked; ends with the hold. */
+  _parkLeftHeld(entry, own = false) { if (this._notifsUnread && entry && entry.id && !own) (this._parkLeftWhileHeld || (this._parkLeftWhileHeld = new Set())).add(String(entry.id)); }
   /** B-54b7: a copy taken from the ladder WHILE job-notifications.json was held waits for its own step — no door delivers it before (its
    *  park copy is still on disk: delivered from memory, then a crash, the park's copy came back — twice); the hold's end is not its landing
    *  (its read's should 2: the lift's save may not land at once) */
@@ -1656,7 +1667,7 @@ class JobManager {
     const stale = job.clearedAt && !((ev && ev.at) > Math.max(job.clearedAt, job.reclearedAt || 0));   // …born before the LATEST clear (verify r4: a second clear of an `already` record keeps the first clearedAt)
     q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this.labelOf(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason), ...(mark ? { sub: true } : {}), ...(park ? { rt: String(park) } : {}) });   // `sub`: a subscriber's held copy — its stash line says so (lane jobs-addressed-push L4; an older item reads unmarked)
     const item = q[q.length - 1];
-    if (park) (this._unlanded || (this._unlanded = new Map())).set(item, { go: null, held: !!this._notifsUnread && !this.readOnly });   // B-54b7: taken from the ladder — its park copy leaves at its landing (_rideTaken)
+    if (park) (this._unlanded || (this._unlanded = new Map())).set(item, { go: null, held: !!this._notifsUnread && !this.readOnly, cid });   // B-54b7: taken from the ladder — its park copy leaves at its landing (_rideTaken)
     const dropped = capUnclaimedNotifs(q); // per-conversation cap; a may-have-landed copy first, then the oldest UNCLAIMED (a claimed one is being handed over — verify r4)
     for (const d of dropped) this._letParkGo(d);   // B-54b7 (r519 (2)): an evicted copy's park entry leaves at the eviction (said by name below) — the park holds at most the cap a conversation, through a hold of any length
     const n = dropped.length;

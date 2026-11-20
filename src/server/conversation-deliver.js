@@ -722,8 +722,17 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     // copy leaves the file only on that store's landing; the others leave now. B-54b7 (主开发 r576): EACH taken entry leaves at ITS OWN
     // taker's landing, as the fall road's one (a batch's one shared countdown kept every copy of it in the file until its last rider ran:
     // a cap's eviction freed nothing, and a boot during a hold grew the park); the untaken leave in one write
+    // its re-read's should 2: a taken entry's leave writes the file ONCE for every entry of the batch that leaves in the same pass (a
+    // landing runs its steps together: thirty whole-file writes in a row on the main thread was the cost) — a late leave keeps a copy the
+    // jobs store already holds, never neither (its id is known on disk)
     const leaveNow = [];
-    for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; const riders = []; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); if (riders.length) leaveParkWhenLanded([e], riders); else leaveNow.push(e); }   // r5: a judge that threw is said as such
+    let writeOwed = false;
+    const leaveOne = (e, riders) => {
+      let left = riders.length;
+      const one = () => { if (--left > 0) return; handing.delete(e); if (writeOwed) return; writeOwed = true; queueMicrotask(() => { writeOwed = false; writeRetryNow(); }); };
+      for (const r of riders) { try { r(one); } catch (err) { log('[deliver] a landing ride threw — the park\'s copy leaves now:', err && err.message); one(); } }
+    };
+    for (const e of dropped) { const threw = !!e._judgeThrew; delete e._judgeThrew; const riders = []; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); if (riders.length) leaveOne(e, riders); else leaveNow.push(e); }   // r5: a judge that threw is said as such
     if (leaveNow.length) leaveParkWhenLanded(leaveNow, []);
     stashChanged(cid);
   }
