@@ -142,6 +142,17 @@ const TABLES = {
       [eq(m.presentView(duo, { w: 1706, h: 891 }), m.fitView(duo, { w: 1706, h: 891 }, { pad: m.PRESENT_PAD, maxZ: m.ZOOM_MAX })) && [m.FIT_PAD, m.FOCUS_PAD, m.PRESENT_PAD].every((x) => typeof x === 'number'), true, 'EACH VIEW\'S RING IS ONE CONSTANT: fitView FIT_PAD, focusView FOCUS_PAD, presentView PRESENT_PAD'],
     ];
   },
+  // B-1217 member 12 — THE PERSON'S VIEW STANDS: what a re-read (setFrames keepView) or a resize does to the view
+  reflowView: (m) => [
+    [m.reflowView({ focused: true, moved: false }), 'refocus', 'the focused view the person has not moved follows its artboard (a re-read, a resize)'],
+    [m.reflowView({ focused: true, moved: true }), 'keep', 'THE LAW: once the person moved the focused view, a re-read and a resize leave it standing'],
+    [m.reflowView({ focused: true, moved: true, firstLayout: true }), 'keep', '…even at the first layout after a move the API made while the pane was hidden (nothing but their Fit or a new focus puts it back)'],
+    [m.reflowView({ focused: true, moved: false, firstLayout: true }), 'refocus', 'a focused view laid out for the first time (a hidden window) is placed'],
+    [m.reflowView({ focused: false, moved: false, firstLayout: true }), 'fit', 'a canvas laid out for the first time is fitted'],
+    [m.reflowView({ focused: false, moved: false }), 'keep', 'the canvas keeps its pan / zoom across a re-read and a resize'],
+    [m.reflowView({ focused: false, moved: true }), 'keep', '…moved or not'],
+    [m.reflowView(), 'keep', 'no facts ⇒ nothing moves'],
+  ],
   framesOf: (m) => {
     const man = { pages: [{ id: 'p1', name: 'Flows' }, { id: 'p2', name: 'Two' }], artboards: [
       { file: 'Main.html', x: 0, y: 0, w: 1280, h: 800, title: 'Home', page: 'p1', print: 'flow' },
@@ -397,7 +408,7 @@ function runTable(m, rule) {
   return rows.every(([a, b]) => eq(a, b));
 }
 const SECTIONS = [
-  ['① the view', ['zoom', 'zoomAt', 'pinch', 'fitView', 'focusView']],
+  ['① the view', ['zoom', 'zoomAt', 'pinch', 'fitView', 'focusView', 'reflowView']],
   ['② the world', ['framesOf', 'pages']],
   ['③ the read and the published page', ['normalizeRead']],
   ['④ THE PICK FENCE', ['pickFence', 'editFence', 'frameSay', 'frameKeyGate', 'routeMessage', 'quoteLine']],
@@ -407,6 +418,146 @@ const SECTIONS = [
 for (const [title, rules] of SECTIONS) {
   console.log(title);
   for (const rule of rules) for (const [a, b, n] of TABLES[rule](M)) ok(eq(a, b), `${rule}: ${n}`, eq(a, b) ? undefined : { got: a, want: b });
+}
+
+// ①b THE PERSON'S VIEW STANDS (B-1217 member 12) — the canvas core ITSELF (src/lib/design-canvas.js), run under a mini
+// DOM: in the focused view a person zooms (the bar's + then −), pans (a wheel, a drag) and zooms by key; then a file
+// re-read (setFrames keepView, the window's file-changed read) and a resize (the ResizeObserver) — the view stands.
+// Before the cure both called refocus() with no condition and threw the person's view away (hosted 44786427248: «Fit in
+// the focused view (from 0.92)» — b2 read back the contained 0.918, never a ladder step). Its controls ride ⑧.
+const DC_REL = 'src/lib/design-canvas.js';
+const DC = await import(pathToFileURL(path.join(REPO, DC_REL)).href);
+function canvasDom(w, h) {
+  const pane = { w, h };
+  let roFn = null;
+  const on = (o) => {
+    const l = new Map();
+    o.addEventListener = (t, fn) => { if (!l.has(t)) l.set(t, []); l.get(t).push(fn); };
+    o.removeEventListener = () => {};
+    o.fire = (t, ev = {}) => { for (const fn of l.get(t) || []) fn({ type: t, target: o, preventDefault() {}, stopPropagation() {}, ...ev }); };
+    return o;
+  };
+  const el = (tag) => {
+    const cls = new Set(), kids = [];
+    const e = on({
+      tagName: tag.toUpperCase(), children: kids, parent: null, dataset: {}, attrs: {}, title: '', textContent: '', tabIndex: 0,
+      style: { setProperty(k, v) { this[k] = v; } },
+      classList: { add: (...c) => c.forEach((x) => cls.add(x)), remove: (...c) => c.forEach((x) => cls.delete(x)), contains: (c) => cls.has(c), toggle: (c, f) => { const v = f === undefined ? !cls.has(c) : !!f; if (v) cls.add(c); else cls.delete(c); return v; } },
+      get className() { return [...cls].join(' '); }, set className(v) { cls.clear(); for (const c of String(v).split(/\s+/)) if (c) cls.add(c); },
+      setAttribute(k, v) { e.attrs[k] = String(v); }, getAttribute(k) { return k in e.attrs ? e.attrs[k] : null; },
+      appendChild(c) { kids.push(c); c.parent = e; return c; }, append(...cs) { for (const c of cs) e.appendChild(c); },
+      insertBefore(c, ref) { const i = kids.indexOf(ref); kids.splice(i < 0 ? kids.length : i, 0, c); c.parent = e; return c; },
+      remove() { const p = e.parent; if (p) { const i = p.children.indexOf(e); if (i >= 0) p.children.splice(i, 1); e.parent = null; } },
+      focus() {}, setPointerCapture() {}, releasePointerCapture() {},
+      getBoundingClientRect: () => ({ left: 0, top: 0, width: pane.w, height: pane.h }),
+      contentWindow: tag === 'iframe' ? { postMessage() {} } : undefined,
+    });
+    return e;
+  };
+  const win = on({});
+  const doc = on({ createElement: el, getElementById: () => null, activeElement: null, fullscreenEnabled: false, fullscreenElement: null, defaultView: win });
+  doc.head = el('head'); doc.documentElement = el('html');
+  const host = el('div'); host.ownerDocument = doc;
+  // the pane changes size, then the observer is told (as a browser does after layout)
+  return { host, resize(nw, nh) { pane.w = nw; pane.h = nh; if (roFn) roFn([]); }, setRo: (fn) => { roFn = fn; } };
+}
+function makeCanvas(DCm, w, h) {
+  const d = canvasDom(w, h);
+  const had = 'ResizeObserver' in globalThis, RO0 = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class { constructor(fn) { d.setRo(fn); } observe() {} disconnect() {} };
+  try { return { d, c: DCm.createDesignCanvas(d.host, {}) }; } finally { if (had) globalThis.ResizeObserver = RO0; else delete globalThis.ResizeObserver; }
+}
+const RV_A = { file: 'Duo.html', x: 0, y: 0, w: 951, h: 585, title: 'Duo', print: 'fixed', html: '<p>duo</p>' }; // the owner's board (A⑪'s)
+const RV_T = { file: 'Tall.html', x: 1000, y: 0, w: 390, h: 2400, title: 'Tall', html: '<p>tall</p>' };
+const rvRead = (a = RV_A) => ({ title: 'Duo', manifest: { title: 'Duo', artboards: [{ file: a.file, x: a.x, y: a.y, w: a.w, h: a.h, title: a.title, print: 'fixed' }] }, frames: [{ ...a }, { ...RV_T }] });
+/** The person's day in the focused view, step by step → every view read (`{threw}` when the core threw). EACH VERB runs ALONE
+ *  from a fresh Fit (`alone`), so the re-read and the resize after it judge THAT verb's own mark — never an earlier one's. */
+function viewRun(DCm) {
+  try {
+    const { d, c } = makeCanvas(DCm, 1240, 600);
+    const vp = c.el, v = () => c.view(), r = {};
+    const reread = (a = RV_A) => c.setFrames(rvRead(a), { keepView: true });
+    c.setFrames(rvRead());
+    c.focus('Duo.html');
+    r.a = v();                                                        // the contained view
+    c.zoomBy(+1); r.zi = v(); c.zoomBy(-1); r.b2 = v();               // the bar's + then −
+    reread(); r.afterRead = v();                                      // a file re-read
+    d.resize(1260, 600); r.afterResize = v();                         // a resize
+    d.resize(1240, 600);
+    const alone = (verb) => {
+      c.fit();
+      const o = { before: v() };
+      verb();
+      o.moved = v();
+      reread(); d.resize(1250, 610); o.after = v();
+      d.resize(1240, 600);
+      return o;
+    };
+    r.wheel = alone(() => vp.fire('wheel', { deltaX: 30, deltaY: 20, deltaMode: 0 }));
+    r.drag = alone(() => {
+      vp.fire('pointerdown', { pointerId: 1, pointerType: 'mouse', button: 0, clientX: 100, clientY: 100 });
+      vp.fire('pointermove', { pointerId: 1, clientX: 140, clientY: 130 });
+      vp.fire('pointerup', { pointerId: 1, clientX: 140, clientY: 130 });
+    });
+    r.key = alone(() => vp.fire('keydown', { key: '-' }));
+    r.label = alone(() => c.zoomTo(1));                               // the zoom label (100 %)
+    r.api = alone(() => c.setView({ x: 5, y: 7, z: 0.8 }));
+    r.still = alone(() => vp.fire('wheel', { deltaX: 0, deltaY: 0, deltaMode: 0 })); // moves nothing ⇒ marks nothing
+    // a re-read that MOVES the focused board in the world (the agent edits its x / y; an auto-placed board shifts)
+    c.fit(); c.zoomBy(+1);
+    const at0 = c.frameScreenRect('Duo.html'), z0 = v().z;
+    reread({ ...RV_A, x: 200, y: 120 }); r.movedRect = c.frameScreenRect('Duo.html'); r.movedZ = v().z; r.at0 = at0; r.z0 = z0;
+    reread(); r.backRect = c.frameScreenRect('Duo.html');
+    // the board grew in the folder: its frame follows its own size, the person's view stands
+    c.fit(); c.zoomBy(+1); r.grow0 = v();
+    reread({ ...RV_A, h: 600 }); r.grown = v(); r.grownRect = c.frameScreenRect('Duo.html');
+    c.fit(); r.fitted = v();                                          // their Fit
+    d.resize(1300, 640); r.followed = v();                            // a pane change before the person moved
+    reread(); r.reread = v();                                         // …and a re-read (the board back at 585)
+    c.zoomBy(+1); c.focus('Tall.html'); r.tallFocus = v();            // a new focus after a zoom on the last
+    reread(); d.resize(1240, 600); r.tall = v();
+    c.focus(null); c.zoomBy(-1); r.canvas = v();                      // the canvas
+    reread(); d.resize(1200, 600); r.canvasAfter = v();
+    c.dispose();
+    const h2 = makeCanvas(DCm, 0, 0);                                 // a window laid out for the first time
+    h2.c.setFrames(rvRead()); h2.d.resize(1000, 700); r.firstLayout = h2.c.view(); h2.c.dispose();
+    return r;
+  } catch (e) { return { threw: String((e && e.stack) || e).slice(0, 600) }; }
+}
+const rvContained = (a, w, h) => M.focusView(a, { w, h }, { declared: 'fixed' }).view;
+const rvStands = (o) => !!o && !eq(o.moved, o.before) && eq(o.after, o.moved);
+function viewRows(r) {
+  if (!r || r.threw) return [[false, true, `the canvas core ran the day (it threw: ${r ? r.threw : 'nothing returned'})`]];
+  const A600 = { ...RV_A, h: 600 };
+  const sameRect = (p, q) => !!p && !!q && near(p.x, q.x) && near(p.y, q.y) && near(p.w, q.w) && near(p.h, q.h);
+  return [
+    [eq(r.a, rvContained(RV_A, 1240, 600)), true, 'focus: the board CONTAINED (focusView)'],
+    [r.zi.z === M.zoomStep(r.a.z, +1) && r.b2.z === M.zoomStep(r.zi.z, -1) && r.b2.z === 0.75 && Math.abs(r.b2.z - r.a.z) > 1e-6, true, `THE PREMISE: + then − lands on the ladder (${r.a.z.toFixed(4)} → ${r.zi.z} → ${r.b2.z}), a view that differs from the contained one`],
+    [eq(r.afterRead, r.b2), true, 'THE LAW: a file re-read (setFrames keepView) leaves the person\'s zoom standing'],
+    [eq(r.afterResize, r.b2), true, 'THE LAW: a resize (the observer) leaves it standing'],
+    [rvStands(r.wheel) && eq(r.wheel.moved, M.panBy(r.wheel.before, -30, -20)), true, 'a wheel pan ALONE (from a fresh Fit) stands across a re-read and a resize'],
+    [rvStands(r.drag) && eq(r.drag.moved, M.panBy(r.drag.before, 40, 30)), true, 'a drag ALONE stands'],
+    [rvStands(r.key) && r.key.moved.z === M.zoomStep(r.key.before.z, -1), true, 'the − key ALONE stands'],
+    [rvStands(r.label) && r.label.moved.z === 1, true, 'the zoom label (100 %) ALONE stands'],
+    [rvStands(r.api) && eq(r.api.moved, { x: 5, y: 7, z: 0.8 }), true, 'the API\'s setView ALONE stands'],
+    [eq(r.still.moved, r.still.before) && eq(r.still.after, rvContained(RV_A, 1250, 610)), true, 'a wheel that moves nothing marks nothing: the re-read and the resize after it place the board again'],
+    [r.movedZ === r.z0 && sameRect(r.movedRect, r.at0) && sameRect(r.backRect, r.at0), true, 'a re-read that MOVES the focused board (x / y 0,0 → 200,120 and back): the board stays where the person had it on the screen, at their zoom'],
+    [eq(r.grown, r.grow0) && near(r.grownRect.h, 600 * r.grown.z), true, 'the board grew in the folder: its frame follows its own 600 px, the person\'s view stands'],
+    [eq(r.fitted, rvContained(A600, 1240, 600)), true, 'their Fit = the contained view again'],
+    [eq(r.followed, rvContained(A600, 1300, 640)), true, 'a pane change BEFORE the person moved: the focused view follows the pane'],
+    [eq(r.reread, rvContained(RV_A, 1300, 640)), true, '…and a re-read: it follows the board\'s new size'],
+    [eq(r.tallFocus, M.focusView(RV_T, { w: 1300, h: 640 }).view) && eq(r.tall, M.focusView(RV_T, { w: 1240, h: 600 }).view), true, 'a new focus (after a zoom on the last board): its own view, which follows a re-read and a resize until the person moves it'],
+    [eq(r.canvasAfter, r.canvas), true, 'the canvas keeps its pan / zoom across a re-read and a resize'],
+    [eq(r.firstLayout, M.fitView(M.boundsOf([RV_A, RV_T]), { w: 1000, h: 700 })), true, 'a canvas laid out for the first time (a hidden window) is fitted'],
+  ];
+}
+console.log('①b THE PERSON\'S VIEW STANDS (B-1217) — the canvas core run under a mini DOM');
+{
+  const r = viewRun(DC);
+  const z = (x) => (x ? `${x.x.toFixed(1)},${x.y.toFixed(1)}@${x.z.toFixed(4)}` : '?');
+  if (r && !r.threw) console.log(`    facts: contained ${z(r.a)} · + ${z(r.zi)} · − ${z(r.b2)} · re-read ${z(r.afterRead)} · resize ${z(r.afterResize)} · wheel alone ${z(r.wheel.moved)} → ${z(r.wheel.after)} · still wheel → ${z(r.still.after)} · board moved: rect ${r.at0.x.toFixed(1)},${r.at0.y.toFixed(1)} → ${r.movedRect.x.toFixed(1)},${r.movedRect.y.toFixed(1)} · Fit ${z(r.fitted)} · pane 1300×640 ${z(r.followed)}`);
+  else console.log(`    facts: the core threw — ${r && r.threw}`);
+  for (const [a, b, n] of viewRows(r)) ok(eq(a, b), `view stands: ${n}`, r);
 }
 
 console.log('④b THE PICKER, run under a mini DOM');
@@ -587,7 +738,15 @@ console.log('⑥ wiring pins — the canvas core');
     ok(srcdocs.length === 0, 'no srcdoc in the Design window or its present module — the app page\'s design frames all go through the host', srcdocs.join(', '));
     ok(!/writeFrame|frame-host/.test(viewer), 'the published page passes no writer: its artboards stay srcdoc frames under the published page\'s OWN sandbox policy (the hub\'s host needs the sign-in)');
   }
-  ok(/function refocus\(\) \{[\s\S]{0,160}?const fv = focusView\(f, paneSize\(\), \{ declared: declaredPrint\(st\.manifest, f\.file\) \}\);\n\s+rec\.focusH = fv\.frameH;/.test(code) && (code.match(/focusView\(/g) || []).length === 1, 'lane design-focus-whole: the focused view is ONE call of the rule, handed the manifest row\'s own print declaration (a frame\'s print is the hub\'s default) — its frameH is the frame\'s height');
+  ok(/function refocus\(keep = false, from = null\) \{[\s\S]{0,160}?const fv = focusView\(f, paneSize\(\), \{ declared: declaredPrint\(st\.manifest, f\.file\) \}\);\n\s+rec\.focusH = fv\.frameH;/.test(code) && (code.match(/focusView\(/g) || []).length === 1, 'lane design-focus-whole: the focused view is ONE call of the rule, handed the manifest row\'s own print declaration (a frame\'s print is the hub\'s default) — its frameH is the frame\'s height');
+  {
+    // B-1217 member 12: every person's verb marks the focused view theirs (moveView); the re-read and the observer ask reflowView
+    const inputs = code.slice(code.indexOf("vp.addEventListener('wheel'"), code.indexOf("vp.addEventListener('pointerup'"));
+    const moves = (code.match(/\bmoveView\(/g) || []).length;
+    ok(inputs.length > 0 && !/\bsetView\(/.test(inputs) && (inputs.match(/\bmoveView\(/g) || []).length === 5 && /function zoomBy\(dir, anchor = null\) \{\n\s+const p = paneSize\(\), nz = zoomStep\(st\.view\.z, dir\);\n\s+if \(nz === st\.view\.z\) return;[^\n]*\n\s+moveView\(/.test(code) && /function zoomTo\(z, anchor = null\) \{\n\s+const p = paneSize\(\);\n\s+if \(clampZoom\(z\) === st\.view\.z\) return;[^\n]*\n\s+moveView\(/.test(code) && /setView: moveView,/.test(code) && moves === 7 && /const moveView = \(v\) => \{\n\s+const n = normView\(v\);\n\s+if \(st\.focused && \(n\.x !== st\.view\.x \|\| n\.y !== st\.view\.y \|\| n\.z !== st\.view\.z\)\) st\.moved = true;\n\s+setView\(n\);\n\s+\};/.test(code), `B-1217: the person's verbs — wheel ×3, pinch, drag, zoomBy, zoomTo, the API's setView — go through moveView (${moves} calls), no bare setView in the input handlers; a + / − / 100 % that would not change the zoom returns first (no ulp drift marks the view)`);
+    ok((code.match(/\breflowView\(/g) || []).length === 2 && !/if \(st\.focused\) refocus\(\);/.test(code) && /if \(!keep\) \{ setView\(fv\.view\); return; \}/.test(code) && /refocus\(true, from\)/.test(code), 'B-1217: the re-read and the observer ask reflowView (2 calls) — no unconditional refocus is left; a kept view re-places the frame and keeps the view, moved with the board'); // stale-pins: kept (a deliberate absence check)
+    ok(/function fit\(\) \{\n\s+st\.moved = false;/.test(code) && /st\.focused = file;\n\s+st\.moved = false;/.test(code) && (code.match(/st\.moved = false;/g) || []).length === 2, 'B-1217: their Fit and a new focus clear the mark (2 places; out of the focused view nothing reads it — reflowView)');
+  }
   ok(read('docs/agent/design-manual.md').includes(`taller than ${M.PAGE_RATIO} × its width, which is taken for a page that scrolls`) && read('docs/kb-features.md').includes(`PAGE_RATIO ${M.PAGE_RATIO}`), `the agent manual and kb-features name the tall-page line by the model's own number (${M.PAGE_RATIO})`);
   ok(/setPointerCapture\(e\.pointerId\)/.test(code) && /'pointercancel', end/.test(code) && /'lostpointercapture', end/.test(code), 'a drag captures its pointer at the door and ends on up / cancel / lost capture');
   ok(/vp\.addEventListener\('dblclick', \(e\) => \{[\s\S]{0,200}?toWorld\(st\.view, local\(e\)\)[\s\S]{0,200}?onActivate\?\.\(hit\.file, 'dblclick'\)/.test(code) && !/shield\.addEventListener\('dblclick'/.test(code), 'a dblclick is read on the VIEWPORT by the world point under it (the drag\'s pointer capture retargets the click pair away from the shield — measured in Chrome: a shield listener never fired)');
@@ -713,6 +872,7 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
     ['focusView', 'no tall-page line (a 390×2400 page shown whole at 28 %)', "rect.h / rect.w > PAGE_RATIO ? 'page' : 'screen'", "false ? 'page' : 'screen'"],
     ['focusView', 'the declaration read as the hub\'s default (every row "fixed" — no page ever scrolls)', "return row && (row.print === 'fixed' || row.print === 'flow') ? row.print : null;", "return 'fixed';"],
     ['focusView', 'one ring for the screen, another for the page (the screen at the canvas\'s FIT_PAD)', 'return { view: fitView(rect, pane, { pad, maxZ }), frameH: rect.h,', 'return { view: fitView(rect, pane, { pad: FIT_PAD, maxZ }), frameH: rect.h,'],
+    ['reflowView', 'TODAY\'S RULE: the focused view put back whatever the person did', "  if (focused) return moved ? 'keep' : 'refocus';\n", "  if (focused) return 'refocus';\n"],
     ['framesOf', 'a manifest the hub refuses half-applied (the validation dropped)', 'const m = v.ok ? v.manifest : null;', 'const m = isObj(manifest) ? manifest : null;'],
     ['normalizeRead', 'a failed read becomes an empty canvas', "if (!isObj(r)) return { error: { code: 'unreachable', why: '', refusals: [] } };", "if (!isObj(r)) r = {};"],
     ['pickFence', 'the closed kind set opened', "if (!isObj(data) || !PICK_KINDS.includes(data.kind) || !frame || !isArtboardName(frame.file)) return null;", "if (!isObj(data) || !frame || !isArtboardName(frame.file)) return null;"],
@@ -770,6 +930,28 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
       const f2 = C.write(PREL, psrc.replace(a2, ''), 'picker-typing-leaks');
       const pm2 = await import(pathToFileURL(f2).href);
       ok(!(await pickerTable(pm2.pickerSource())).every(([x, y]) => eq(x, y)), 'picker CONTROL (typing in an edited text reaches the page\'s key handlers): the patched copy FAILS the table');
+    }
+  }
+  // B-1217 member 12: the canvas core's day (①b) under a patched copy — TODAY'S CODE puts the person's view back
+  {
+    const dsrc = read(DC_REL);
+    const real = viewRun(DC);
+    const CORE = [
+      ['re-read', 'TODAY\'S re-read: setFrames keepView refocuses with no condition', "    if (reflowView({ focused: !!st.focused, moved: st.moved }) === 'refocus') refocus(); else if (st.focused) refocus(true, from); else applyView();\n", "    if (st.focused) refocus(); else applyView();\n", (r) => eq(r.afterRead, r.a), 'the re-read put the zoom back to the contained view'], // stale-pins: kept (a control: its patch IS the code before B-1217)
+      ['resize', 'TODAY\'S observer: a resize refocuses with no condition', "    const r = reflowView({ focused: !!st.focused, moved: st.moved, firstLayout: !(was.w > 0 && was.h > 0) }); // first: a hidden desktop / tab\n    if (r === 'refocus') refocus(); else if (r === 'fit') fit(); else if (st.focused) refocus(true);\n", "    if (!(was.w > 0 && was.h > 0)) { if (st.focused) refocus(); else fit(); return; }\n    if (st.focused) refocus();\n", (r) => eq(r.afterRead, r.b2) && eq(r.afterResize, rvContained(RV_A, 1260, 600)), 'the resize put the zoom back to the contained view of the new pane'], // stale-pins: kept (a control: its patch IS the code before B-1217)
+      ['wheel', 'a wheel pan not marked as the person\'s', '    else moveView(panBy(st.view, -dx, -dy));\n', '    else setView(panBy(st.view, -dx, -dy));\n', (r) => !rvStands(r.wheel) && rvStands(r.drag), 'the wheel pan alone was thrown away (the drag still stands)'], // stale-pins: kept (a control: its patch IS the code before B-1217)
+      ['drag', 'a drag not marked as the person\'s', '      moveView(panBy(drag.start, dx, dy));\n', '      setView(panBy(drag.start, dx, dy));\n', (r) => !rvStands(r.drag) && rvStands(r.wheel), 'the drag alone was thrown away (the wheel still stands)'], // stale-pins: kept (a control: its patch IS the code before B-1217)
+      ['zoomBy', 'the bar\'s + / − and the keys not marked', '    moveView(zoomAt(st.view, nz, anchor || { x: p.w / 2, y: p.h / 2 }));\n', '    setView(zoomAt(st.view, nz, anchor || { x: p.w / 2, y: p.h / 2 }));\n', (r) => eq(r.afterRead, r.a) && !rvStands(r.key) && rvStands(r.label), 'the + / − zoom and the − key were put back (the label still stands)'], // stale-pins: kept (a control: its patch IS the code before B-1217)
+      ['still', 'a move that changes nothing marks the view', '    if (st.focused && (n.x !== st.view.x || n.y !== st.view.y || n.z !== st.view.z)) st.moved = true;\n', '    if (st.focused) st.moved = true;\n', (r) => !eq(r.still.after, rvContained(RV_A, 1250, 610)), 'after a still wheel the pane change was not followed'],
+      ['fit', 'their Fit leaves the mark (the view never follows the pane again)', '  function fit() {\n    st.moved = false;\n', '  function fit() {\n', (r) => !eq(r.followed, rvContained({ ...RV_A, h: 600 }, 1300, 640)), 'after Fit the pane change was not followed'],
+      ['focus', 'a new focus inherits the last board\'s mark', '    st.focused = file;\n    st.moved = false;\n', '    st.focused = file;\n', (r) => !eq(r.tall, M.focusView(RV_T, { w: 1240, h: 600 }).view), 'the new board did not follow the re-read and the resize'],
+      ['world', 'THE KEPT VIEW IN WORLD COORDINATES: a re-read that moves the board leaves the old translate', '    if (from && (from.x !== f.x || from.y !== f.y)) st.view = { x: st.view.x - (f.x - from.x) * z, y: st.view.y - (f.y - from.y) * z, z };\n', '', (r) => !!r.movedRect && !(near(r.movedRect.x, r.at0.x) && near(r.movedRect.y, r.at0.y)), 'the moved board left the place the person had it (the pane empty there)'],
+    ];
+    for (const [tag, what, a, b, saw, said] of CORE) {
+      if (!dsrc.includes(a)) { ok(false, `core CONTROL ${tag}: the patch anchor is still in the module`, a); continue; }
+      const f = C.write(DC_REL, dsrc.replace(a, b), `core-${tag}`);
+      const mr = viewRun(await import(pathToFileURL(f).href));
+      ok(!!real && viewRows(real).every(([x, y]) => eq(x, y)) && !!mr && !mr.threw && !viewRows(mr).every(([x, y]) => eq(x, y)) && saw(mr), `core CONTROL (${what}): the real core passes ①b, the patched copy FAILS it — ${said}`, mr && (mr.threw ? mr : { failed: viewRows(mr).filter(([x, y]) => !eq(x, y)).map((row) => row[2]) }));
     }
   }
   for (const r of copiesCensus(C.files, C.dir, REPO, { minCopies: MUTANTS.length + 1, label: '⑧ ' })) ok(r.pass, r.name, r.detail);

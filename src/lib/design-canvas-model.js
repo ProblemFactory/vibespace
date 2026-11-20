@@ -177,6 +177,16 @@ export function focusView(rect, pane, { pad = FOCUS_PAD, maxZ = 2, declared = nu
   return { view: { x: (pw - rect.w * z) / 2 - rect.x * z, y: pad - rect.y * z, z }, frameH, fit: 'page' };
 }
 
+/** THE PERSON'S VIEW STANDS (B-1217, member 12): what a file re-read (setFrames keepView) or a pane resize does to the
+ *  view. The FOCUSED view follows its artboard (refocus) only while the person has not moved it — a zoom, a pan, a
+ *  pinch, a wheel, the zoom buttons and keys — since its focus or their own Fit; once moved, it stands until their Fit
+ *  or a new focus (a re-read that moves the board moves the view with it). The canvas keeps its pan / zoom; a pane laid out for the first time (a hidden window) is fitted.
+ *  → 'refocus' | 'fit' | 'keep'. */
+export function reflowView({ focused = false, moved = false, firstLayout = false } = {}) {
+  if (focused) return moved ? 'keep' : 'refocus';
+  return firstLayout ? 'fit' : 'keep';
+}
+
 export const zoomPercent = (z) => `${Math.round(clampZoom(z) * 100)}%`;
 
 // ── pages, frames, notes ─────────────────────────────────────────────────────────────────────────────────────────────

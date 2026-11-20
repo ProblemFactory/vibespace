@@ -27,7 +27,7 @@
 //     for fullscreen on the user's press (a refusal leaves it filling its pane); the frames stay SHIELDED meanwhile.
 //   · Lifecycle: every listener on the caller's signal; `dispose()` aborts them and drops the DOM.
 import {
-  zoomStep, zoomAt, panBy, pinchView, fitView, focusView, declaredPrint, boundsOf, normView, toScreen, toWorld,
+  zoomStep, zoomAt, panBy, pinchView, fitView, focusView, reflowView, declaredPrint, boundsOf, normView, toScreen, toWorld,
   pagesOf, pageOf, notesOn, launchOf, NOTE_COLOR_VARS, routeMessage, frameSrcdoc, clampZoom, frameKeyGate, frameSay,
   EDIT_GRACE_MS, presentOrder, presentView, presentKey, presentGesture, presentStep,
 } from './design-canvas-model.js';
@@ -111,6 +111,7 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
   const st = {
     view: { x: 0, y: 0, z: 1 }, frames: [], notes: [], manifest: {}, pages: [{ id: '', name: '' }], page: '',
     focused: null, prevView: null, pick: false, pickColor: '', viewSet: false,
+    moved: false, // the person moved the FOCUSED view since its focus / their Fit: a re-read and a resize leave it (reflowView reads it only while focused)
     present: null, // presenting: { order: [file], i, fs, back: {view, page, focused, prevView} }
   };
   const els = new Map(); // file → { wrap, label, iframe|null, card|null, shield, srcdoc, html }
@@ -133,6 +134,14 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     emit();
   }
   const setView = (v) => { st.view = normView(v); applyView(); };
+  /** The PERSON'S move (wheel, drag, pinch, the zoom buttons and keys, the API's setView): in the focused view a move that
+   *  CHANGES the view marks it as theirs (a still wheel marks nothing; a + / − / 100 % that would not change the zoom is no
+   *  move at all — zoomBy / zoomTo return before zoomAt, whose anchor arithmetic can drift x by an ulp). */
+  const moveView = (v) => {
+    const n = normView(v);
+    if (st.focused && (n.x !== st.view.x || n.y !== st.view.y || n.z !== st.view.z)) st.moved = true;
+    setView(n);
+  };
 
   // ── frames ──
   function frameMode(rec) {
@@ -220,9 +229,12 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
   const pageFrames = () => st.frames.filter((f) => f.page === st.page);
 
   /** Lay out a whole read ({title, manifest, frames}). `keepView` keeps pan / zoom / page / focus (a reload, a
-   *  manifest change); a frame whose document did not change is not reloaded. */
+   *  manifest change) — a focused view the person has not moved follows its artboard (reflowView); a frame whose
+   *  document did not change is not reloaded. */
   function setFrames(input, { keepView = false } = {}) {
     const frames = Array.isArray(input && input.frames) ? input.frames : [];
+    const was = st.focused ? st.frames.find((x) => x.file === st.focused) : null;
+    const from = was ? { x: was.x, y: was.y } : null; // the focused board's place before this read (a kept view follows it)
     st.manifest = (input && input.manifest) || {};
     st.pages = pagesOf(st.manifest);
     st.frames = frames.map((f) => ({ ...f, page: pageOf(f, st.pages) }));
@@ -251,7 +263,7 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     if (!st.pages.some((p) => p.id === st.page)) st.page = st.pages[0].id;
     if (st.present) { presentReorder(); return; }
     showPage();
-    if (st.focused) refocus(); else applyView();
+    if (reflowView({ focused: !!st.focused, moved: st.moved }) === 'refocus') refocus(); else if (st.focused) refocus(true, from); else applyView();
   }
 
   /** Swap ONE artboard's document in place (`html` null + `refused` = it is refused now). false = no such frame. */
@@ -266,15 +278,21 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
 
   // ── view verbs ──
   function fit() {
+    st.moved = false;
     if (st.focused) { refocus(); return; }
     const b = boundsOf([...pageFrames(), ...notesOn(st.manifest, st.page, st.pages).map((n) => ({ x: n.x, y: n.y, w: n.w, h: 80 }))]);
     setView(fitView(b, paneSize()));
   }
   function zoomBy(dir, anchor = null) {
-    const p = paneSize();
-    setView(zoomAt(st.view, zoomStep(st.view.z, dir), anchor || { x: p.w / 2, y: p.h / 2 }));
+    const p = paneSize(), nz = zoomStep(st.view.z, dir);
+    if (nz === st.view.z) return; // the top / bottom rung: nothing to do
+    moveView(zoomAt(st.view, nz, anchor || { x: p.w / 2, y: p.h / 2 }));
   }
-  function zoomTo(z, anchor = null) { const p = paneSize(); setView(zoomAt(st.view, z, anchor || { x: p.w / 2, y: p.h / 2 })); }
+  function zoomTo(z, anchor = null) {
+    const p = paneSize();
+    if (clampZoom(z) === st.view.z) return; // already there (the 100 % label at 100 %)
+    moveView(zoomAt(st.view, z, anchor || { x: p.w / 2, y: p.h / 2 }));
+  }
   function setPage(id) {
     if (!st.pages.some((p) => p.id === id)) return false;
     if (st.present) endPresent();
@@ -284,14 +302,20 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     fit();
     return true;
   }
-  function refocus() {
+  /** The focused artboard placed by focusView; `keep` = the person's view stands (reflowView): the frame follows its own
+   *  size, the view is not put back. `from` = the board's world place before a re-read: a re-read that MOVED it (its x / y
+   *  edited, an auto-placed board shifted by a new one) moves the view with it — it stays where the person had it. */
+  function refocus(keep = false, from = null) {
     const f = st.frames.find((x) => x.file === st.focused);
     const rec = f && els.get(f.file);
     if (!f || !rec) return;
     const fv = focusView(f, paneSize(), { declared: declaredPrint(st.manifest, f.file) });
     rec.focusH = fv.frameH;
     placeFrame(rec, f);
-    setView(fv.view);
+    if (!keep) { setView(fv.view); return; }
+    const z = st.view.z;
+    if (from && (from.x !== f.x || from.y !== f.y)) st.view = { x: st.view.x - (f.x - from.x) * z, y: st.view.y - (f.y - from.y) * z, z };
+    applyView();
   }
   /** THE FOCUSED VIEW: one artboard enlarged (a screen whole, a tall page at fit-width), live (shield lifted), the others
    *  hidden. null = back to the canvas. */
@@ -304,6 +328,7 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     if (st.focused && st.focused !== file) { const old = els.get(st.focused); if (old) { old.focusH = 0; const of = st.frames.find((x) => x.file === st.focused); if (of) placeFrame(old, of); frameMode(old); } }
     st.page = f.page;
     st.focused = file;
+    st.moved = false;
     vp.classList.add('dc-focused');
     showPage();
     for (const rec of els.values()) frameMode(rec);
@@ -510,9 +535,9 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     if (st.present) return; // the presented view is ours
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? paneSize().h : 1;
     const dx = e.deltaX * unit, dy = e.deltaY * unit;
-    if (e.ctrlKey || e.metaKey) setView(zoomAt(st.view, st.view.z * Math.exp(-dy * WHEEL_ZOOM_RATE), local(e)));
-    else if (e.shiftKey && !dx) setView(panBy(st.view, -dy, 0));
-    else setView(panBy(st.view, -dx, -dy));
+    if (e.ctrlKey || e.metaKey) moveView(zoomAt(st.view, st.view.z * Math.exp(-dy * WHEEL_ZOOM_RATE), local(e)));
+    else if (e.shiftKey && !dx) moveView(panBy(st.view, -dy, 0));
+    else moveView(panBy(st.view, -dx, -dy));
   }, { passive: false, signal: sig });
   const ptrs = new Map(); // pointerId → {x, y, x0, y0, type, target}
   let drag = null, pinch = null;
@@ -540,13 +565,13 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     if (st.present) return; // a drag while presenting is a swipe, read at the release
     if (pinch && ptrs.size >= 2) {
       const [a, b] = [...ptrs.values()];
-      setView(pinchView(pinch.start, pinch.a0, pinch.b0, { x: a.x, y: a.y }, { x: b.x, y: b.y }));
+      moveView(pinchView(pinch.start, pinch.a0, pinch.b0, { x: a.x, y: a.y }, { x: b.x, y: b.y }));
     } else if (drag) {
       const dx = p.x - drag.x0, dy = p.y - drag.y0;
       if (!drag.moved && Math.hypot(dx, dy) < DRAG_SLOP_PX) return;
       drag.moved = true;
       vp.classList.add('dc-dragging');
-      setView(panBy(drag.start, dx, dy));
+      moveView(panBy(drag.start, dx, dy));
     }
   }, L);
   const end = (e) => {
@@ -595,7 +620,8 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomBy(-1); }
     else if (e.key === '0') { e.preventDefault(); fit(); }
   }, L);
-  // the pane changed size: a fitted / focused view follows only while the user has not moved it since
+  // the pane changed size: the focused view follows only while the person has not moved it since its focus / their Fit;
+  // a pane laid out for the first time is fitted (reflowView)
   let lastPane = paneSize();
   const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => {
     const p = paneSize();
@@ -603,15 +629,15 @@ export function createDesignCanvas(host, { signal = null, counterZoom = null, pi
     const was = lastPane;
     lastPane = p;
     if (st.present) { presentShow(); return; } // fullscreen in / out, a rotated phone: the artboard is fitted again
-    if (!(was.w > 0 && was.h > 0)) { if (st.focused) refocus(); else fit(); return; } // laid out for the first time (a hidden desktop / tab)
-    if (st.focused) refocus();
+    const r = reflowView({ focused: !!st.focused, moved: st.moved, firstLayout: !(was.w > 0 && was.h > 0) }); // first: a hidden desktop / tab
+    if (r === 'refocus') refocus(); else if (r === 'fit') fit(); else if (st.focused) refocus(true);
   }) : null;
   ro?.observe(vp);
   sig.addEventListener('abort', () => { ro?.disconnect(); clearTimeout(idleTimer); vp.remove(); els.clear(); }, { once: true });
 
   return {
     el: vp, world,
-    setFrames, updateFrame, fit, zoomBy, zoomTo, setPage, focus, setPick, setView,
+    setFrames, updateFrame, fit, zoomBy, zoomTo, setPage, focus, setPick, setView: moveView,
     /** PRESENT (lane design-present): start / end, one step, and where it stands ({i, n, file} | null). */
     present, presentGo, presenting,
     /** A seam module's subscription (view / page / pick changes, a frame's fenced `design-edit`) → unsubscribe. */

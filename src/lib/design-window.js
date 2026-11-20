@@ -306,7 +306,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
   ROW_ACTS.tweaks = () => winInfo._designTweaks.toggle();
 
   // ── the read ──
-  let loading = null, again = false, loadedOnce = false, lastRead = null, lastAt = null;
+  let loading = null, again = false, loadedOnce = false, lastRead = null, lastAt = null, reads = 0;
   const showError = (err) => {
     status.replaceChildren();
     const head = mk('div', 'design-status-head');
@@ -330,6 +330,7 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
         lastRead = r;
         canvas.setFrames(r, { keepView: loadedOnce });
         loadedOnce = true;
+        reads++;
         app.wm.setTitle(winInfo.id, r.title || baseName(d));
         drawPages();
         if (r.frames.length) status.style.display = 'none';
@@ -380,8 +381,9 @@ export function openDesign(app, { host = '', dir = '', sessionId = '', syncId, q
   onFileChanged((det) => {
     if (!det || hostKey(det.host) !== h || !foldPath(det.path).startsWith(under)) return;
     clearTimeout(reloadTimer);
-    reloadTimer = setTimeout(() => load(), RELOAD_COALESCE_MS);
+    reloadTimer = setTimeout(() => { reloadTimer = 0; load(); }, RELOAD_COALESCE_MS);
   }, { signal });
+  winInfo._designReads = () => ({ n: reads, busy: !!reloadTimer || !!loading }); // the heavy suite waits on what happened: the reads drawn, one owed or under way
 
   // ── comment (pick mode) ──
   const accent = () => { try { return getComputedStyle(document.documentElement).getPropertyValue('--accent').trim(); } catch { return ''; } };
