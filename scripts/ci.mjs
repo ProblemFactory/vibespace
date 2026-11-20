@@ -2697,6 +2697,25 @@ export function skipsOf(...texts) {
   return n ? { n, first } : null;
 }
 export const skipTail = (sk) => (sk ? ` · SKIP ${sk.n}: ${sk.first}` : '');
+// B-737b (主开发 r201, 2026-11-20): A SUITE THAT RAN NO LEG VOUCHES FOR NOTHING. A green suite's CLOSING line is a whole-suite
+// skip, whatever its wording, when it says SKIP first (B-479e: «SKIP: …», «SKIPPED (…)») or when the count of PASSED legs it states
+// is ZERO — «ALL PASS (0)», «ALL PASS (0, 1 skipped)», «0 passed, 0 failed, 2 skipped», «[tag] ALL PASS (0 passed, 0 failed, 1
+// skipped)». Measured: checkpoint 61's hosted run (2.369.412) counted seven heavy suites that ran NO leg on the runner as run, each
+// ending «ALL PASS (0, 1 skipped)» — so the mirror green vouched for them (test-browser-live-fit among them, for three months). A
+// closing that states one passed leg or more stays a run suite (its skipped legs said as before); one that states NO count is read
+// as its words claim — the tree's uncounted closings («ALL PASS», «… test passed») skip whole only through their own «SKIP: …» exit
+// (test-ci-heavy-verdict's census of the tree's closing words). A ✓ / ✗ leg line is never a count.
+export function passedCountOf(line) {
+  const s = String(line || '').trim();
+  if (/^[✓✗]/.test(s)) return null;
+  const m = /\bALL PASS \((\d+)(?=[\s,;)])/.exec(s) || /(?:^|[\s(:—–-])(\d+) passed\b/.exec(s);
+  return m ? Number(m[1]) : null;
+}
+/** PURE: a green suite's stdout → the words of its whole-suite skip (its closing line, ≤ 160), else undefined (it ran a leg). */
+export function wholeSkipOf(stdout) {
+  const last = (String(stdout || '').trim().split('\n').pop() || '').trim();
+  return /^SKIP/.test(last) || passedCountOf(last) === 0 ? last.slice(0, 160) : undefined;
+}
 // …and a green that skipped keeps its WHOLE output beside the red tries' (writeFailLog's dir): <sha8>.<suite>.skip.<try>.log
 // — pruneFailLogs bounds it with its commit's other files (FAIL_LOG_NAME reads «<suite>.skip» as the suite part)
 export function writeSkipLog(dir, sha, s, r, attempt, { tag = '[ci]', log = console.log } = {}) {
@@ -2749,8 +2768,8 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // carries its load as evidence — a timing leg's verdict is read beside it, never instead of it)
       const load = [l0, load1()], ld = `load ${load[0]}→${load[1]}`;
       // a green suite whose LAST line begins «SKIP» skipped ITSELF (the tree's convention — `SKIP: no chrome …`): it ran nothing (B-479e (1))
-      // (the tree's endings: «SKIP: …», «SKIPPED (…)», and «ALL PASS (0)» — zero legs ran — with or without a «— SKIPPED» after it)
-      const last = (stdout.trim().split('\n').pop() || '').trim(), selfSkip = /^SKIP/.test(last) || /^ALL PASS \(0\)/.test(last) ? last.slice(0, 160) : undefined;
+      // (the tree's endings: «SKIP: …», «SKIPPED (…)», and a stated passed count of ZERO — «ALL PASS (0)», «ALL PASS (0, 1 skipped)», «0 passed, …» — B-737b)
+      const last = (stdout.trim().split('\n').pop() || '').trim(), selfSkip = wholeSkipOf(stdout); // B-737b: zero legs passed, in any wording
       if (status === 0) {
         const sk = skipsOf(stdout, stderr); // B-4829: a SKIP said anywhere in the output is counted on the row, never only the last line (selfSkip: B-479e's whole-suite skip, beside it)
         resolve({ ok: true, ms, load, selfSkip, ...(sk ? { skips: sk, full: stdout + (stderr ? '\n── stderr ──\n' + stderr : '') } : {}), lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}${skipTail(sk)}`] });
@@ -3930,6 +3949,14 @@ export const SELF_SKIP_TITLE = 'ci-heavy-self-skipped';
 export const selfSkipBody = (names) => `(${names.length}):${names.length ? ' ' + names.slice().sort().join(' ') : ''}`;
 /** PURE: a heavy job's annotations → { names } | { err } — the ONE note of THIS job (its message begins with the job's name, `heavy i/n`:
  *  a nested run's note in a suite's red tail names no shard); none, two, or an unreadable one is a job the writer cannot verify. */
+/** B-737b (主开发 r372): THE VERDICT'S SUCCESS LINE, PURE — the cut is decided where it is read, so it names the suites that
+ *  skipped themselves on the runner («these N ran no leg there: prove them elsewhere»), never only how many the mirror vouches for. */
+export function heavyVerdictSaid(rec, runId, file, ranEarlier = []) {
+  const r = rec || {}, sk = Array.isArray(r.skippedOnRunner) ? r.skippedOnRunner : [];
+  return `✓ heavy verdict: CI mirror run ${runId} (attempt ${r.attempt}) is green for ${r.sha} — the HOSTED half: ${(r.selected || []).length} heavy suites (${(r.jobs || []).join(', ')})`
+    + (sk.length ? ` — these ${sk.length} ran no leg there: prove them elsewhere: ${sk.join(', ')}` : ' — every hosted heavy suite ran a leg there')
+    + (ranEarlier.length ? ` — copies read where they ran: ${ranEarlier.join(', ')}` : '') + ` — wrote ${file}`;
+}
 export function selfSkippedInNotes(notes, jobName) {
   if (!Array.isArray(notes)) return { err: 'its annotations are not a list' };
   const mine = notes.filter((n) => n && n.title === SELF_SKIP_TITLE && String(n.message || '').trim().startsWith(`${jobName} (`));
@@ -5448,7 +5475,7 @@ function main(argv) {
     const v = heavyVerdict({ sha: vSha, runId: vRun, dir });
     if (v.ok) {
       const ranEarlier = Object.entries(v.rec.vouchedBy || {}).filter(([, w]) => w.attempt !== v.rec.attempt).map(([n, w]) => `${n} at attempt ${w.attempt}`); // B-18eb
-      console.log(`✓ heavy verdict: CI mirror run ${vRun} (attempt ${v.rec.attempt}) is green for ${v.rec.sha} — the HOSTED half: ${v.rec.selected.length} heavy suites (${v.rec.jobs.join(', ')})${ranEarlier.length ? ` — copies read where they ran: ${ranEarlier.join(', ')}` : ''} — wrote ${v.file}`); return exitFlushed(0);
+      console.log(heavyVerdictSaid(v.rec, vRun, v.file, ranEarlier)); // B-737b: the names that ran no leg on the runner, where the cut is read return exitFlushed(0);
     }
     console.error(`✗ heavy verdict REFUSED for ${vSha || '(no sha)'}: ${v.why} — nothing written`); return exitFlushed(3);
   }

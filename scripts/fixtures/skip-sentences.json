@@ -11,7 +11,7 @@
   "scripts/test-chat-paging.mjs": 1,
   "scripts/test-ci-gate.mjs": 2,
   "scripts/test-ci-heavy-launch.mjs": 1,
-  "scripts/test-ci-heavy-verdict.mjs": 8,
+  "scripts/test-ci-heavy-verdict.mjs": 13,
   "scripts/test-claude-hot-switch.mjs": 2,
   "scripts/test-claude-md-retire.mjs": 1,
   "scripts/test-cli-self-measure.mjs": 1,

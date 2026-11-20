@@ -39,9 +39,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync } from './ci.mjs';
+import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync, passedCountOf, wholeSkipOf, heavyVerdictSaid } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), `vs-civerdict-${process.pid}-`));   // EVERY scratch path of this run lives here (§8)
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });   // even when a leg throws (r4)
@@ -708,6 +709,61 @@ const OLD_READER_SRC = (SRC.slice(0, UNION_AT) + OLD_BLOCK + SRC.slice(UNION_END
   const vnn = reWrite(reTwin(), null, noname).v;
   ok(!vnn.ok && /cannot verify heavy 2\/7's suites/.test(vnn.why) && reWrite(reTwin()).v.ok,
     `CONTROL: a match without the name reads heavy 4/7's original for heavy 2/7 (the same start and end) and refuses (${vnn.why}); the real one verifies it — §2's TWINS is the leg that reds`); }
+// B-737b (主开发 r201, 2026-11-20): A SUITE THAT RAN NO LEG VOUCHES FOR NOTHING. Checkpoint 61's hosted run of 2.369.412 counted seven
+// heavy suites that ran NO leg on the runner as run — each closing «ALL PASS (0, 1 skipped)» — so the mirror green vouched for them.
+// A closing that states ZERO passed legs, in any wording, is a whole-suite skip; one passed leg or more is a run suite (its skipped
+// legs said as before); an uncounted closing is read as its words claim; a ✓ leg line is never a count. Every fact judged is printed.
+{ const sr = scratch('b737b-root'); fs.mkdirSync(path.join(sr, 'scripts'));
+  const CASES = {
+    'test-zz-noleg': [["  ⊘ SKIP the real agent-browser is not resolvable here", '', 'ALL PASS (0, 1 skipped)'], true],
+    'test-zz-noleg-counted': [['  ⊘ SKIP no image here', '  ⊘ SKIP no image there', '', '0 passed, 0 failed, 2 skipped'], true],
+    'test-zz-noleg-tagged': [['  ⊘ SKIP no T_HOST', '', '[zz] ALL PASS (0 passed, 0 failed, 1 skipped)'], true],
+    'test-zz-skip-first': [['§1 nothing to do here', 'SKIP: no chrome/chromium on this machine'], true],
+    'test-zz-zero': [['ALL PASS (0)'], true],
+    'test-zz-mixed': [['  ✓ one leg ran', "  ⊘ SKIP the second leg's tool", '', 'ALL PASS (1, 1 skipped)'], false],
+    'test-zz-mixed-counted': [['  ✓ legs', '  ⊘ SKIP one', '', '21 passed, 0 failed, 1 skipped'], false],
+    'test-zz-words': [['  ✓ ① ran', '  ⊘ SKIP ② (no peer)', '', 'frp-like test passed (① only)'], false],
+    'test-zz-legline': [['  ⊘ SKIP a side leg', '  ✓ the counter says 0 passed'], false],
+  };
+  for (const [n, [lines]] of Object.entries(CASES)) fs.writeFileSync(path.join(sr, 'scripts', n + '.mjs'), lines.map((l) => `console.log(${JSON.stringify(l)});`).join('\n') + '\n');
+  const judgeWith = async (runner) => { const got = {}; for (const n of Object.keys(CASES)) { const r = await runner({ name: n, tier: 'heavy', why: 'slow — 1 s' }, { root: sr }); got[n] = { ok: r.ok, whole: !!r.selfSkip, said: r.selfSkip || null, skips: r.skips ? r.skips.n : 0 }; } return got; };
+  const got = await judgeWith(runSuiteAsync);
+  for (const [n, g] of Object.entries(got)) console.log(`    B-737b ${n}: green ${g.ok} · whole-suite skip ${g.whole}${g.said ? ` («${g.said}»)` : ''} · SKIP lines ${g.skips} — want ${CASES[n][1] ? 'whole' : 'run'}`);
+  const bad = Object.keys(CASES).filter((n) => !got[n].ok || got[n].whole !== CASES[n][1]);
+  ok(bad.length === 0, `B-737b: a closing that states ZERO passed legs is a whole-suite skip in every wording («ALL PASS (0, 1 skipped)», «0 passed, 0 failed, 2 skipped», «[tag] ALL PASS (0 passed, …)», «SKIP: …», «ALL PASS (0)»); one passed leg or more is a run suite, its skips still said; an uncounted closing reads as its words; a ✓ leg line is no count (${bad.length ? 'WRONG: ' + bad.join(', ') : 'all nine read as wanted'})`, got);
+  const table = [['ALL PASS (0, 1 skipped)', 0], ['ALL PASS (197 passed, 0 failed, 1 skipped)', 197], ['[design-window] ALL PASS (199, 2 skipped) · ended', 199], ['ALL PASS (91; 52 red controls SKIPPED — not in this clone)', 91], ['test-oat-add-door-chrome: 20 passed, 0 failed', 20], ['PASS — 0 passed, 0 failed', 0], ['frp plugin test passed (① only)', null], ['ALL PASS — 4 s', null], ['✓ the counter says 0 passed', null]];
+  const tbad = table.filter(([l, n]) => passedCountOf(l) !== n);
+  console.log(`    B-737b passedCountOf: ${table.map(([l]) => `«${l}» → ${passedCountOf(l)}`).join(' · ')}`);
+  ok(tbad.length === 0 && wholeSkipOf('x\nALL PASS (0, 1 skipped)\n') === 'ALL PASS (0, 1 skipped)' && wholeSkipOf('ALL PASS (3)') === undefined, 'B-737b PURE: the passed count read from the tree\'s closing forms (the hosted run\'s measured endings), none from a ✓ line or an uncounted closing', tbad);
+  // RED CONTROL: the release's reader (073cc4a1e: «SKIP…» or «ALL PASS (0)» only) counts the zero-leg suites as RUN — they vouch
+  const REL = anchored(SRC, 'selfSkip = wholeSkipOf(stdout); // B-737b: zero legs passed, in any wording', "selfSkip = /^SKIP/.test(last) || /^ALL PASS \\(0\\)/.test(last) ? last.slice(0, 160) : undefined;", 'B-737b the release reader');
+  const rel = await import(pathToFileURL(M.write('scripts/ci.mjs', REL, 'reader-073cc4a1e')).href);
+  const gotRel = await judgeWith(rel.runSuiteAsync);
+  console.log(`    B-737b CONTROL (the release's reader): ${Object.entries(gotRel).map(([n, g]) => `${n} ${g.whole ? 'whole' : 'run'}`).join(' · ')}`);
+  ok(!gotRel['test-zz-noleg'].whole && !gotRel['test-zz-noleg-counted'].whole && !gotRel['test-zz-noleg-tagged'].whole && gotRel['test-zz-zero'].whole && gotRel['test-zz-skip-first'].whole,
+    'CONTROL (the release\'s reader): «ALL PASS (0, 1 skipped)», «0 passed, …» and «[tag] ALL PASS (0 passed, …)» are counted as RUN — a suite that ran no leg vouches — RED for the law'); }
+// B-737b (主开发 r372): THE PERSON WHO CUTS IS TOLD WHICH SUITES RAN NO LEG ON THE RUNNER — the verdict's success line names them
+{ const rec = { sha: 'a'.repeat(40), attempt: 1, selected: ['test-hosted-a'], jobs: ['heavy 1/2', 'heavy 2/2'], skippedOnRunner: ['test-browser-live-fit', 'test-app-install'] };
+  const said = heavyVerdictSaid(rec, '44774335413', '/m/x.mirror.green'), none = heavyVerdictSaid({ ...rec, skippedOnRunner: undefined }, '7', '/m/y');
+  console.log(`    B-737b the verdict's line: «${said}» · with none: «${none}»`);
+  const CI737 = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/these 2 ran no leg there: prove them elsewhere: test-browser-live-fit, test-app-install/.test(said) && /1 heavy suites/.test(said) && /every hosted heavy suite ran a leg there/.test(none) && !/prove them elsewhere/.test(none)
+    && CI737.includes('console.log(heavyVerdictSaid(v.rec, vRun, v.file, ranEarlier));'),
+    'B-737b: the verdict\'s success line names the suites that ran no leg on the runner («these N ran no leg there: prove them elsewhere: …»), says so when there are none, and IS the line the CLI prints');
+  // CONTROL: the release's line (a count only) names none of them
+  const rel = `✓ heavy verdict: CI mirror run 44774335413 (attempt 1) is green for ${rec.sha} — the HOSTED half: ${rec.selected.length} heavy suites (${rec.jobs.join(', ')}) — wrote /m/x.mirror.green`;
+  ok(!/test-browser-live-fit/.test(rel) && /test-browser-live-fit/.test(said), 'CONTROL: the release\'s success line (a count only) names no suite that ran no leg — the cut was decided without the list'); }
+// THE TREE'S CLOSING WORDS (B-737b, the class): a suite that prints its OWN words for «nothing ran» says SKIP in them, else the reader
+// cannot see it. Every top-level (unindented) printed literal of scripts/test-*.mjs that says nothing / no leg ran carries SKIP or a
+// zero count — measured at f550f07e1: none does otherwise (the one indented «Ⓓ DID NOT RUN» is a leg's line with its red above it)
+{ const NOTHING = /^(?=[^\s\\]).{0,80}?\b(?:nothing (?:ran|was run|to (?:do|run|test))|no legs? ran|zero legs|none ran|did not run)\b/i;
+  // a printer that BEGINS a statement only (a fixture's printer inside a string literal is no closing of this suite)
+  const said = (dir) => { const out = []; for (const f of fs.readdirSync(dir).filter((x) => /^test-.*\.mjs$/.test(x))) { const t = fs.readFileSync(path.join(dir, f), 'utf-8'); for (const m of t.matchAll(/(?:^|[;{)]\s*)console\.(?:log|error)\(\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1/gm)) { const lit = m[2].replace(/^(?:\\n)+/, ''); if (NOTHING.test(lit) && !/SKIP|ALL PASS \(0|\b0 passed\b/.test(lit)) out.push(`${f}: «${lit.slice(0, 80)}»`); } } return out; };
+  const tree = said(path.join(REPO, 'scripts'));
+  const pl = scratch('b737b-plant'); fs.writeFileSync(path.join(pl, 'test-zz-own-words.mjs'), "console.log('\\nnothing ran here: the tool is absent');\n");
+  const plant = said(pl);
+  console.log(`    B-737b the tree's own «nothing ran» closings without SKIP: ${tree.length ? tree.join(' · ') : 'none'} · the planted one: ${plant.join(' · ') || 'NOT FOUND'}`);
+  ok(tree.length === 0 && plant.length === 1, 'B-737b: no suite of the tree closes on its own «nothing ran» words without SKIP (the reader would miss it); CONTROL: a planted one is found by name', { tree, plant }); }
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6, label: '§5 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 
 console.log('§6 THE CLI — known flags; refusals exit 3 and write nothing; it runs only when asked');
