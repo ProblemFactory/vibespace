@@ -666,6 +666,18 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   const headPiece = (x) => { const h = /^[`"'*<({\[,;]{0,3}-{0,2}["']?([A-Za-z_][A-Za-z0-9_.-]{0,80})["']?[ \t]*[:=][({\[«「『（【〔〈《‘“`"']{0,2}$/.exec(x); return !!h && HEAD_NAMES.has(h[1]); };   // a2: every MSG_PAIRS opener (the run at a3bd41c23: «api_key:〔»)
   const plainT = (c) => { if (headPiece(c)) return true; let a0 = 0, b0 = c.length; while (a0 < b0 && EDGE.includes(c[a0])) a0++; while (b0 > a0 && EDGE.includes(c[b0 - 1])) b0--; const core = c.slice(a0, b0);
     return core === '' ? c.length <= 3 : HEADWORDS.has(core) || /^(?:[a-z]{1,12}|[A-Z][a-z]{1,11}|[A-Z]{1,3})$/.test(core) || /^[぀-ヿ㐀-鿿]+$/u.test(core); };
+  // r632 (主开发 22:49Z, a box-zone red of another lane's gate, placed by reading): THE LINE'S OWN FIXED WORDS ARE NO VALUE. A random
+  // four-letter group of a letters-only grouped value fell INSIDE the second head's own word («password», which the line rule masks to
+  // the line end and the message mode keeps): a substring check read the head's word as the value. A must piece leaks only where it
+  // stands OUTSIDE every fixed word of the corpus — its heads in every spelling, its tails' connectives, its shapes' words, the member
+  // row, the mask word (each tail and shape drawn once, its values taken out) — and a value that merely CONTAINS a fixed word still counts
+  const fixedOf = (text, values) => values.reduce((t, v) => t.split(v).join(' '), text);
+  const FIXED_TEXT = [...HEADS, ...HEAD_NAMES, ...HEADWORDS, 'redacted', 'I reset the password', '@beta',
+    ...TAILS.map((f) => { const x = f(); return fixedOf(x.t, x.must); }), ...SHAPES.map((f) => { const x = f(); return fixedOf(x.core, [...x.must, ...(x.w || [])]); })].join(' ');
+  const FIXED_WORDS = [...new Set(FIXED_TEXT.match(/[A-Za-z][A-Za-z0-9_-]*/g) || [])];
+  const insideFixed = (c, at, len) => FIXED_WORDS.some((w) => { for (let i = c.indexOf(w); i >= 0 && i <= at; i = c.indexOf(w, i + 1)) if (at + len <= i + w.length) return true; return false; });
+  const holdsPiece = (c, t) => { for (let i = c.indexOf(t); i >= 0; i = c.indexOf(t, i + 1)) if (!insideFixed(c, i, t.length)) return true; return false; };
+  const leakedIn = (lo, mo, must) => must.some((t) => !lo.includes(t) && chunks(mo).some((c) => holdsPiece(c, t) && !headPiece(c)));
   const judge = (SSx, { stopAtFirst = false, rev = false, only = '' } = {}) => {   // a control stops at its first leak (and walks the openers from the end); `only` = one scene's rows
     const leaks = [], loose = [], nonIdem = []; let lines = 0, n0 = 0;
     const one = (L, op, must, opt, allowed = [], scene = '') => {
@@ -674,7 +686,7 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
       if (!stopAtFirst && SSx.redactSecrets(mo, { message: true, ...opt }).text !== mo) nonIdem.push(L + ' ⇒ ' + mo);   // r5: a second pass changes nothing
       // B-34c8 (ALSO CURED, run 8f594ece4-20261119034021-both): a token leaks only inside a chunk that is no head piece the corpus wrote — a
       // random app-password group «assw» inside a kept «,password=» was read as a leak by a substring check
-      if (must.some((t) => !lo.includes(t) && chunks(mo).some((c) => c.includes(t) && !headPiece(c)))) leaks.push({ L, op, mo, scene });
+      if (leakedIn(lo, mo, must)) leaks.push({ L, op, mo, scene });   // r632: never inside one of the line's own fixed words
       const lt = chunks(lo), extra = chunks(mo).filter((x) => { const at = lt.indexOf(x); if (at >= 0) { lt.splice(at, 1); return false; } return true; });
       const allowedIn = (x) => { const y = x.replace(/[.,;:!?]+$/, ''); return allowed.some((w) => y === w || (y.endsWith(w) && headPiece(y.slice(0, -w.length)))); };   // cure 2: «@beta,» and «session:@beta» (a head glued to it) are the member's @ too
       if (extra.some((x) => !plainT(x) && !allowedIn(x))) loose.push(L + ' ⇒ ' + mo);
@@ -720,6 +732,22 @@ console.log('the cure of batch 6 — THE LAW over a GENERATED corpus: a message 
   ok(g.lines > 5000 && g.leaks.length === 0, `THE LAW, a differential over ${g.lines} generated lines (every opener class × ${HEADS.length} heads × ${SEPS.length} separators, closed and open pairs; ${SHAPES.length} value shapes × ${TAILS.length} tails on every head — secrets after stops, brackets, plain words, a second head in 8 spellings, letters-only and grouped secrets; a member's mention after a CJK value, a stop, a credential word, «password» in prose; the piece before a glued inner head): where the line rule hides a token, the message mode hides it too${g.leaks.length ? ' — LEAKS: ' + g.leaks.slice(0, 4).map((x) => J(x.L + ' ⇒ ' + x.mo)).join(' · ') : ''}`);
   ok(g.loose.length === 0, `…and every chunk the message mode keeps beyond the line rule is a plain word by a STRICTER, independent rule (or the member's @)${g.loose.length ? ' — ' + g.loose.slice(0, 3).map(J).join(' · ') : ''}`);
   ok(g.nonIdem.length === 0, `…and a second message pass over its own output changes nothing, on all ${g.lines} lines (the group log belts twice)${g.nonIdem.length ? ' — ' + g.nonIdem.slice(0, 3).map(J).join(' · ') : ''}`);
+  // r632 THE VERY CASE, planted: a letters-only grouped value whose group «sswo» stands INSIDE the second head's word «password», after a
+  // CJK comma, a connective and that head with the CJK colon. The message mode hides every part of the value; the judge no longer reads
+  // the head's word as the value (green). CONTROLS (red): a real piece of the value standing in the output, and a value that merely
+  // CONTAINS a fixed word — each is a leak; and the previous judge (a plain substring) reads the planted case as one
+  {
+    const gs = ['kqzv', 'sswo', 'tbme', 'rjdl'], w2 = 'mnbvcxz', L = `token: ${gs[0]} ${gs[1]}, ${gs[2]} ${gs[3]}，然后 password：${w2}`, must = [...gs, w2];
+    const lo = SS.redactSecrets(L).text, mo = SS.redactSecrets(L, { message: true }).text;
+    const oldJudge = (t) => !lo.includes(t) && chunks(mo).some((c) => c.includes(t) && !headPiece(c));
+    const facts = { L, lo, mo, fixedWords: FIXED_WORDS.length, leaked: leakedIn(lo, mo, must), previousJudgeSaw: must.filter(oldJudge) };
+    ok(!facts.leaked && mo.includes('password') && facts.previousJudgeSaw.join() === 'sswo', 'r632 THE VERY CASE: a group inside the second head\'s own word «password» is no leak — the message mode hid every part of the value (the previous judge counted «sswo»)', J(facts));
+    if (!facts.leaked) console.log('      ' + J(facts));
+    const real = mo + ' sswo', contains = mo + ' zzpasswordqq';
+    const c1 = leakedIn(lo, real, must), c2 = leakedIn(lo, contains, ['zzpasswordqq']);
+    ok(c1 && c2, 'r632 CONTROLS: a real piece of the value standing in the output is a leak, and so is a value that merely CONTAINS a fixed word — the judge can still go red', J({ realPiece: c1, containsFixedWord: c2 }));
+    console.log('      ' + J({ realPiece: c1, containsFixedWord: c2 }));
+  }
   // r5 (the read's F1): a message mode that FAILS is the line rule — never the partial text a throw left (a control throws on purpose)
   { const TH = M.load('src/secret-shapes.js', SRC.replace('function messageValue(text, s, e, {', 'function messageValue(text, s, e, {') .replace("  let out = '', i = s, first = !later,", "  if (text.includes('THROWME')) throw new Error('control'); let out = '', i = s, first = !later,"), 'throws');
     const L = 'session: THROWME ghp_' + 'A'.repeat(36) + ' and Bearer ' + 'b'.repeat(30), a = TH.redactSecrets(L, { message: true }).text, b0 = TH.redactSecrets(L).text;
