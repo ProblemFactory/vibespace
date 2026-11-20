@@ -435,21 +435,29 @@ try {
     const JMg = mcB('job-notice-b74f5-giveup', ROOT).load('src/jobs.js', anchored(anchored(JSr, GIVEUP, '  _urlGaveUp(job, from, to) { const g = job._urlGaveUp; return !!(g && g.key === `${from} ${to}`); }', 'B-74f5 control: the mark for the process\'s life'), TEARCLR, 'this._endUrlCheck(job); delete job.urlPending; // B-74f5', 'B-74f5 control: the teardown keeps the mark'), 'giveup-for-life').JobManager;
     const g0a = await exhaust(JMg, 'g0t', { teardown: true }), g0b = await exhaust(JMg, 'g0n', { newRun: true });
     ok(!g0a.afterMove.started && g0a.afterMove.said.length === 0 && !g0b.afterMove.started && g0b.afterMove.said.length === 0, 'RED CONTROL (B-74f5 follow-up (2)): a give-up mark for the life of the process — after the teardown or a new run the real move to that address is never checked nor said', JSON.stringify({ teardown: g0a.afterMove, newRun: g0b.afterMove }));
-    // (b1) THE JOB'S OWN RESTART opens the grace: the hub up for 10 minutes, the service's run started just now — the FACT is when
-    // the first look happens (the stand-in records it), never a sleep
+    // (b1) THE JOB'S OWN RESTART opens the grace: the hub up for 10 minutes, the service's run started just now. The leg judges the
+    // wait ON THE CLOCK THAT SCHEDULES IT (主开发 2026-11-20 01:52Z: a red of 299 against 300, once): the product reads Date.now()
+    // and hands setTimeout a delay, and a Node timer is due on the event loop's own clock (cached at the loop's turn, whole
+    // milliseconds), so by Date.now() it may FIRE a millisecond early. So the leg records each setTimeout call of the publish
+    // (its delay and Date.now() at the call) and judges the URL check's timer by its DUE INSTANT on Date.now(): exact arithmetic,
+    // no slack. When it fires does not matter: the check looks when it fires, with no «too early» test of its own.
     const own = async (JM, tag) => {
-      said.length = 0; lines.length = 0; const looks = [];
-      const E = mkU(JM, tag, { urlGraceMs: 300, urlRelookMs: 20, urlAnswers: async (u) => { looks.push(Date.now()); return u === TCP0; } }); E._bootAt = Date.now() - 600_000;
+      said.length = 0; lines.length = 0;
+      const E = mkU(JM, tag, { urlGraceMs: 300, urlRelookMs: 20, urlAnswers: async (u) => u === TCP0 }); E._bootAt = Date.now() - 600_000;
       const runStart = Date.now(); const oj = jobU(tag, { runs: [{ startedAt: runStart, trigger: 'restart' }] }); E.jobs.set(oj.id, oj);
-      relay.mode = 'tcp'; await E._ensurePublish(oj); await waitLine(oj.id, /public URL changed/);
-      const out = { said: said.slice(), firstLookAfterStart: looks.length ? looks[0] - runStart : null }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
+      const realSetTimeout = globalThis.setTimeout, scheduled = new Map();
+      globalThis.setTimeout = (fn, ms, ...a) => { const at = Date.now(), t = realSetTimeout(fn, ms, ...a); scheduled.set(t, { at, ms: Number(ms) || 0 }); return t; };
+      try { relay.mode = 'tcp'; await E._ensurePublish(oj); } finally { globalThis.setTimeout = realSetTimeout; }
+      const urlTimer = [...(E._urlTimers || [])].map((t) => scheduled.get(t)).find(Boolean) || null; // the URL check's own timer, by the engine's own set
+      await waitLine(oj.id, /public URL changed/);
+      const out = { said: said.slice(), dueAfterStart: urlTimer ? urlTimer.at + urlTimer.ms - runStart : null, urlTimer }; stopEngine(E); cur = null; relay.mode = 'ok'; return out;
     };
     const o1 = await own(JobManager, 'own');
-    ok(o1.firstLookAfterStart !== null && o1.firstLookAfterStart >= 300 && o1.said.length === 1, 'B-74f5 r2 (b): a service\'s OWN restart (its run 0 s old, the hub 10 min up) opens the grace too — the first look comes only after the run\'s start + the grace', JSON.stringify(o1));
+    ok(o1.dueAfterStart !== null && o1.dueAfterStart >= 300 && o1.said.length === 1, 'B-74f5 r2 (b): a service\'s OWN restart (its run 0 s old, the hub 10 min up) opens the grace too — its URL check is DUE no earlier than the run\'s start + the grace (judged on Date.now(), the clock the product schedules with)', JSON.stringify(o1));
     const START = '    const start = Math.max(this._bootAt || 0, this._relayAt || 0, this._runStartOf(job));';
     const JMo = mcB('job-notice-b74f5-own', ROOT).load('src/jobs.js', anchored(JSr, START, '    const start = Math.max(this._bootAt || 0, this._relayAt || 0);', 'B-74f5 r2 control: no grace from the job\'s start'), 'no-own-grace').JobManager;
     const o0 = await own(JMo, 'ow0');
-    ok(o0.firstLookAfterStart !== null && o0.firstLookAfterStart < 300, 'RED CONTROL (B-74f5 r2 (b)): a grace measured from the hub\'s start only looks at the job\'s restart at once, inside its own grace', JSON.stringify(o0));
+    ok(o0.dueAfterStart !== null && o0.dueAfterStart < 300, 'RED CONTROL (B-74f5 r2 (b)): a grace measured from the hub\'s start only makes the job\'s restart\'s check DUE at once, inside its own grace', JSON.stringify(o0));
     const twice = async (JM, tag) => {
       said.length = 0; lines.length = 0; const asked = new Map();
       const E = mkU(JM, tag, { urlAnswers: async (u) => { const n = (asked.get(u) || 0) + 1; asked.set(u, n); return u === TCP0 || (u === URL0 && n > 1); } });
