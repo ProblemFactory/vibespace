@@ -1597,12 +1597,19 @@ class MessageManager extends MessageWindow {
     // model switches before a user noticed). Name-only telemetry, deduped per
     // process, so the NEXT new subtype shows up in Diagnostics instead of
     // waiting for a report. Add the handler, then it stops firing.
-    if (raw.subtype && !HANDLED_SYSTEM_SUBTYPES.has(raw.subtype) && !raw.tool_use_id) {
+    // B-9ff2 step 3 (the coordinator's law r172, 2026-11-20): AN UNKNOWN RECORD IS NEVER DROPPED WITHOUT A TRACE. A subtype on neither
+    // list that carries a call id (tool_use_id) used to skip all three — the breadcrumb, the record-kinds count, the card — and then
+    // fall through the task path below, which matches only task_*: dropped. 2.1.328's late_allow_not_run (request_id, tool_use_id,
+    // reason) was one, unlisted. Now it is the fall-back card by its own rule, with its record-kinds count; and EVERY subtype off the
+    // handled list is COUNTED by the breadcrumb, a call id or not — a declared card-less one (late_allow_not_run, permission_check_status)
+    // as the card-less ones without a call id always were.
+    if (raw.subtype && !HANDLED_SYSTEM_SUBTYPES.has(raw.subtype)) {
+      const unknown = !KNOWN_IGNORED_SYSTEM_SUBTYPES.has(raw.subtype);
       if (!MessageManager._seenUnknownSubtypes.has(raw.subtype)) {
         MessageManager._seenUnknownSubtypes.add(raw.subtype);
         try { global.__vsEvent?.('cli-unknown-system-subtype', String(raw.subtype).slice(0, 60)); } catch {}
       }
-      if (!KNOWN_IGNORED_SYSTEM_SUBTYPES.has(raw.subtype)) this._noteUnknownRecord('system', raw.subtype, raw, emit); // 2.369.119: a card, not a breadcrumb
+      if (unknown) this._noteUnknownRecord('system', raw.subtype, raw, emit); // 2.369.119: a card, not a breadcrumb
     }
 
     // Task lifecycle → edit existing tool message. Resolution goes through
@@ -2760,7 +2767,11 @@ class MessageManager extends MessageWindow {
     for (let i = this.messages.length - 1; i >= 0; i--) {
       const m = this.messages[i];
       if (m.permission?.requestId === raw.request_id) {
-        m.permission.resolved = 'denied';
+        // B-9ff2 step 3 (the coordinator's ruling r180): the CLI WITHDREW the request — nobody denied it. The card says what happened in
+        // the words the other order already uses (a cancelled-turn result first: «Not run — the request was withdrawn or the turn ended
+        // before an answer»), whichever of the two records comes first; «Denied» only when somebody denied. As a helper's ask, the
+        // withdrawal stands over an answer of ours (the CLI dropped it); a call that already RAN and was stopped keeps «stopped».
+        if (m.permission.resolved !== 'stopped') m.permission.resolved = 'cancelled';
         if (emit) this._emit({ op: 'edit', id: m.id, fields: { permission: m.permission } });
         break;
       }

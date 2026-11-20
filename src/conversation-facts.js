@@ -51,7 +51,9 @@ const FACTS_VERSION = 2;
 /** THE MEASURED SPAN of the background level signal: the tracked dumps of the CLI builds (scripts/fixtures/claude-cli/<v>.json)
  *  from the first to the newest that declare `background_tasks_changed` — «emitted whenever membership changes», so a set never
  *  published from the CLI's start IS the empty set on a build inside the span. A build outside it (older, or newer and not yet
- *  measured) reads UNKNOWN and says so; a measurement lane moves the bound (test-conversation-facts pins it to the dumps). */
+ *  measured) reads UNKNOWN and says so; a measurement lane moves the bound (test-conversation-facts pins it to the dumps).
+ *  A build BETWEEN two tracked dumps (2.1.323 to 2.1.327, between 2.1.322 and 2.1.328: never dumped) is read as INSIDE the span —
+ *  judged by the dumps on either side of it, not by a dump of its own (B-9ff2 step 3, said plainly). */
 const LEVEL_MEASURED_FROM = '2.1.281';
 const LEVEL_MEASURED_TO = '2.1.328';   // B-9ff2 step 2: the release tracks 2.1.328's dump (the hosted runner's build), which declares the signal (was 2.1.322, the restack onto int411)
 /** Tool names that set a CLI timer (the tree's own recordings: the init's tools list names ScheduleWakeup and CronCreate). */

@@ -28,7 +28,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -443,17 +443,25 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
         // a RUNNING call a stream-json Stop cut off — createSyntheticErrorMessage("user_interrupted") picks it over ww when the abort reason
         // is remote-cancel AND its 4th argument holds, the caller's ql(call) = `call.callRunning === true`; read off the installed bundle
         {
-          const ROW = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t'), WWR = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'ww');
-          // found by its CONTENT (ww's sentence + more), so a tree without the row fails here by name, never on a missing row
-          const sw = cen.sentences.find((x) => x.text === WWR.text), sm = cen.sentences.find((x) => x.text !== WWR.text && x.text.startsWith(WWR.text + ' Correction to the text above'));
-          if (!sm) console.log('    §4d the stopped-while-running sentence: not in this build (row m9t since ' + (ROW ? ROW.since : '—') + ')');
+          // B-9ff2 step 3 (the coordinator's r180): ANY NUMBER of corrections — 2.1.328 has two (nHn = m9t's text, and rHn: «… files it sends
+          // may have reached the connector»), both ww's sentence + « Correction to the text above». Each is found by its CONTENT and judged
+          // by THE row of its own text (never «the» first one); the pick may name them all in its remote-cancel branch, in any shape
+          // (a ternary inside it included), with ww the other branch — and the call site read is PRINTED, so a red says what the bundle has.
+          const WWR = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'ww');
+          const sw = cen.sentences.find((x) => x.text === WWR.text), corr = cen.sentences.filter((x) => x.text !== WWR.text && x.text.startsWith(WWR.text + ' Correction to the text above'));
+          if (!corr.length) console.log('    §4d the stopped-while-running sentence: not in this build (row m9t since ' + ((PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t') || {}).since || '—') + ')');
           else {
             const E = (n) => n.replace(/\$/g, '\\$');
-            const pick = !!sw && new RegExp('content:[\\w$]+\\(([\\w$]+)&&([\\w$]+)==="remote-cancel"\\?' + E(sm.name) + ':' + E(sw.name) + '\\)').exec(text);
+            const site = !!sw && new RegExp('content:[\\w$]+\\(([\\w$]+)&&([\\w$]+)==="remote-cancel"\\?([^]{0,400}?):' + E(sw.name) + '\\)').exec(text);
+            const branch = site ? site[3] : '';
+            const inBranch = corr.filter((x) => new RegExp('(^|[^\\w$])' + E(x.name) + '([^\\w$]|$)').test(branch)).map((x) => x.name);
+            const rowsOf = corr.map((x) => { const r = PO.PERMISSION_OUTCOME_ROWS.find((y) => y.text === x.text); return [x.name, r ? r.id + ' ' + r.outcome : 'NO ROW']; });
             const sig = /createSyntheticErrorMessage\(e,n,r,s\)\{if\(n==="user_interrupted"\)/.test(text);
             const caller = /createSyntheticErrorMessage\(e\.id,"user_interrupted",e\.assistantMessage,([\w$]+)\(e\)\)/.exec(text);
             const ran = !!caller && new RegExp('function ' + E(caller[1]) + '\\(e,n\\)\\{[^}]{0,160}return e\\.callRunning===!0').test(text);
-            oracleOk(`§4d the correction ${sm.name} is written ONLY for a RUNNING call a Stop cut off: createSyntheticErrorMessage("user_interrupted") writes ${sm.name}, not ${sw ? sw.name : 'ww'}, when the abort reason is remote-cancel and its 4th argument holds — the caller passes ${caller ? caller[1] : '?'}(call) = call.callRunning === true — and the table's row m9t says so (outcome stopped, never denied)`, !!pick && pick[1] === 's' && sig && ran && !!ROW && ROW.text === sm.text && ROW.outcome === 'stopped', { pick: pick && pick[0], sig, caller: caller && caller[0], ran, row: ROW ? ROW.outcome : 'NO m9t ROW' });
+            console.log(`    §4d the correction's call site, as the bundle has it: ${site ? JSON.stringify(site[0].slice(0, 300)) : 'NOT FOUND (no «content:…(s&&r==="remote-cancel"?…:' + (sw ? sw.name : 'ww') + ')» in the bundle)'} · corrections ${corr.map((x) => x.name).join(', ')} · rows ${rowsOf.map(([n, r]) => n + ' → ' + r).join(', ')}`);
+            oracleOk(`§4d the ${corr.length} correction(s) ${corr.map((x) => x.name).join(', ')} are written ONLY for a RUNNING call a Stop cut off: createSyntheticErrorMessage("user_interrupted") names every one in its remote-cancel branch, ${sw ? sw.name : 'ww'} otherwise — the caller passes ${caller ? caller[1] : '?'}(call) = call.callRunning === true — and each is the table's row of ITS OWN text, outcome stopped (never denied)`,
+              !!site && site[1] === 's' && inBranch.length === corr.length && sig && ran && rowsOf.every(([, r]) => / stopped$/.test(r)), { site: site ? site[0].slice(0, 300) : null, inBranch, rowsOf, sig, caller: caller && caller[0], ran });
           }
         }
       }
@@ -673,6 +681,10 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     // …and they ARE the table's list rows of THAT build (every row not spelled as a literal, `since` ≤ the build — lane cli-2-1-314-records)
     const listRowsOf = (v) => PO.PERMISSION_OUTCOME_ROWS.filter((r) => r.binary !== 'literal' && vcmp(String(r.since).replace(/^≤/, ''), v) <= 0);
     for (const d of dumps) { const c = outcomeCensus(d.sentences.rows || [], PO.PERMISSION_OUTCOME_ROWS, ''), want = listRowsOf(d.version); ok(`${d.version}: §4d ${(d.sentences.rows || []).length} permission sentences, none unresolved, each a row of src/permission-outcome.js — exactly the table's ${want.length} list rows of that build (since ≤ ${d.version})`, (d.sentences.rows || []).length === want.length && want.every((r) => d.sentences.rows.some((x) => x.text === r.text)) && d.sentences.unresolved.length === 0 && c.unclassified.length === 0, { unresolved: d.sentences.unresolved, c: c.unclassified, want: want.length }); }
+    // B-9ff2 step 3: every sentence of every tracked dump resolves to THE row of its own text — the longest-row lookup never lands on a
+    // prefix row (2.1.328's rHn and m9t's nHn both open with ww's sentence: each must read as itself, never as ww or as each other)
+    { const all = dumps.flatMap((d) => (d.sentences.rows || []).map((x) => [d.version, x])), misread = all.filter(([, x]) => { const o = PO.permissionOutcome(x.text, true); return !o.row || o.row.text !== x.text; }).map(([v, x]) => v + ' ' + x.name + ' → ' + (PO.permissionOutcome(x.text, true).row || { id: 'none' }).id);
+      ok(`every sentence of every tracked dump (${all.length} across ${dumps.length} builds) resolves to THE row of its own text — never a prefix row`, all.length >= 180 && misread.length === 0, misread); }
     const texts = (d, drop = []) => JSON.stringify(d.sentences.rows.map((x) => x.text).filter((t) => !drop.includes(t)).sort());
     const M9T = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t'), d314s = dumps.find((d) => d.version === '2.1.314');
     const OU9 = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'OU'), d319s = dumps.find((d) => d.version === '2.1.319'), d321s = dumps.find((d) => d.version === '2.1.321'), d322s = dumps.find((d) => d.version === '2.1.322');
@@ -1183,7 +1195,7 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
       { type: 'system', subtype: 'task_list_statuses', session_id: conv, uuid: 'u-328-t', statuses: [{ id: 'task-328', status: 'in_progress' }] },
       { type: 'result', subtype: 'success', session_id: conv, uuid: 'u-328-r', is_error: false, num_turns: 1, result: 'ok', duration_ms: 1, duration_api_ms: 1, stop_reason: 'end_turn', total_cost_usd: 0, usage: {}, modelUsage: {}, permission_denials: [], tool_pool_limit_ms: 900, restored_rewind: false, memory_check_detail: 'x' },
     ];
-    const live28 = (MMx, conv) => { const x = MMx === MM ? createMessageManager('claude', conv) : new MMx.MessageManager(conv); for (const r of recs28(conv)) x.processLive(JSON.parse(JSON.stringify(r))); const all = JSON.stringify(x.messages); return { unknown: unknownCards(x).length, names: unknownCards(x).map((m) => m.content[0].name).sort(), drift: driftCards(x).length, rows: ledgerOf(conv, MMx).length, words: all.includes('proj-328-folder') || all.includes('task-328') || all.includes('req-328') }; };
+    const live28 = (MMx, conv) => { const x = MMx === MM ? createMessageManager('claude', conv) : new MMx.MessageManager(conv); for (const r of recs28(conv)) x.processLive(JSON.parse(JSON.stringify(r))); const all = JSON.stringify(x.messages); return { unknown: unknownCards(x).length, names: unknownCards(x).map((m) => m.content[0].name).sort(), drift: driftCards(x).length, driftShapes: driftCards(x).map((m) => m.content[0].shape), rows: ledgerOf(conv, MMx).length, words: all.includes('proj-328-folder') || all.includes('task-328') || all.includes('req-328') }; };
     const real28 = live28(MM, 'e2e00000-0000-4000-8000-0000000003f1');
     ok('the REAL normalizer on a 2.1.328 conversation (the three new records, a user record and a result with new fields) ⇒ no unknown card, no drift card, no ledger row, and none of their words appear', real28.unknown === 0 && real28.drift === 0 && real28.rows === 0 && !real28.words, real28);
     const M28 = mutantCopies('record-328', REPO);
@@ -1192,11 +1204,31 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const IGN28 = mmSrc28.split('\n').filter((l) => SUB28.some((x) => l.startsWith(`  '${x}',`)));
     const MMno28 = rsSrc28.includes(FILL28) && IGN28.length === 3 && mmSrc28.split(REQ28).length === 2 ? require(M28.write('src/message-manager.js', IGN28.reduce((t, l) => anchored(t, l + '\n', '', 'ign-328'), anchored(mmSrc28, REQ28, 'require(' + JSON.stringify(M28.write('src/record-shape.js', anchored(rsSrc28, FILL28, '', 'fill-328'), 'no-fields-328')) + ')', 'req-328')), 'mm-no-328')) : null;
     const ctl28 = MMno28 && live28(MMno28, 'e2e00000-0000-4000-8000-0000000003f2');
-    ok('RED CONTROL: the same conversation on a copy without the three list lines and FIELDS_328 (the 073cc4a1e tree on 2.1.328) ⇒ two unknown-record notices, shell_cwd and task_list_statuses (late_allow_not_run carries a tool_use_id, which the fall-back card skips: dropped there either way — its list line is what the judge reads), and the drift card + ledger rows for the new fields', !!ctl28 && ctl28.unknown === 2 && ctl28.names.join() === 'shell_cwd,task_list_statuses' && ctl28.drift >= 1 && ctl28.rows >= 1, ctl28);
+    ok('RED CONTROL: the same conversation on a copy without the three list lines and FIELDS_328 (the 073cc4a1e lists on 2.1.328) ⇒ EXACTLY three unknown-record notices — late_allow_not_run, shell_cwd, task_list_statuses (since B-9ff2 step 3 a record with a call id is never dropped without a trace) — EXACTLY one drift card and one ledger row (the shape it names is printed: ' + JSON.stringify(ctl28 && ctl28.driftShapes) + ')', !!ctl28 && ctl28.unknown === 3 && ctl28.names.join() === 'late_allow_not_run,shell_cwd,task_list_statuses' && ctl28.drift === 1 && ctl28.rows === 1, ctl28);
     const DOORS28 = { known: ['queued_command', 'server_tool_use', 'web_search_tool_result'], nothing: [...SUB28.map((x) => 'system/' + x), ...NONREC28.filter((k) => !['queued_command', 'server_tool_use', 'web_search_tool_result'].includes(k)), ...f328.map((kf) => kf.replace('claude:stream:', '')), ...off28, 'rate_limit_event.rate_limit_info.memberSpendLimit'] };
     const named28 = diff28 ? [...diff28.newKeys, ...Object.entries(diff28.fields).flatMap(([k, f]) => f.add.map((x) => (k === 'result/success' ? 'result' : k) + '.' + x)), ...Object.entries(diff28.nested).flatMap(([at, f]) => f.add.map((x) => at + '.' + x))] : [];
     const doorOf28 = (n) => Object.entries(DOORS28).filter(([, l]) => l.includes(n)).map(([d]) => d);
     ok(`every name the 2.1.328 dump diff added has ONE door for the person — ${DOORS28.known.length} known (readers that exist), the rest nothing, by design — and a name with no door, or two, fails here`, [...new Set(named28)].length === 46 && [...new Set(named28)].every((n) => doorOf28(n).length === 1), [...new Set(named28)].filter((n) => doorOf28(n).length !== 1));
+    // THE DOORS CENSUS BITES (B-9ff2 step 3, the coordinator's r180): every name it calls «nothing» is SEARCHED for a reader — ONE
+    // fixed-string whole-word git grep over the code (src/, server.js, data/bin), comment lines and the two declaring files
+    // (src/record-shape.js, src/permission-outcome.js) and message-manager's list lines left out. A hit is a reader unless it is a
+    // SAME-NAMED other thing, each named below with its file. A word too common to tell from a reader by its name is listed, unsearched.
+    const COMMON28 = { anthropic: 'a common word (provider names)', failed: 'a common word', label: 'a common word', origin: 'a common word', reason: 'a common word', reply: 'a common word', tool_use_id: 'every tool record carries one', backgrounded: 'the tree\'s own taskInfo.backgrounded', planDigest: 'the desktop-access plan digest (src/app-system.js)' };
+    const SAME_NAME28 = { resource_link: { 'src/acp-message-manager.js': 'the ACP harness\'s own content-block reader (an ACP block, not a claude record)' }, not_found_error: { 'src/provider-test-model.js': 'a provider test\'s API-error text match (a model probe, not a claude record)' } };
+    const nameOf28 = (n) => n.split(/[./]/).pop();
+    const searched28 = [...new Set(DOORS28.nothing.map(nameOf28))].filter((n) => !(n in COMMON28)).sort();
+    const DECL28 = new Set(['src/record-shape.js', 'src/permission-outcome.js']), LIST28 = new RegExp(`^\\s*'(?:${SUB28.join('|')})',`);
+    const readersIn = (grepOut) => String(grepOut || '').split('\n').filter(Boolean).flatMap((l) => {
+      const m = /^([^:]+):(\d+):(.*)$/.exec(l); if (!m) return [];
+      const [, file, line, text] = m, t = text.trim();
+      if (DECL28.has(file) || t.startsWith('//') || t.startsWith('*') || t.startsWith('/*') || (file === 'src/message-manager.js' && LIST28.test(text))) return [];
+      return searched28.filter((n) => new RegExp('(^|[^\\w$])' + n + '([^\\w$]|$)').test(text) && !(SAME_NAME28[n] && SAME_NAME28[n][file])).map((n) => `${n} @ ${file}:${line}`);
+    });
+    const gg28 = spawnSync('git', ['-C', REPO, 'grep', '-n', '-F', '-w', ...searched28.flatMap((n) => ['-e', n]), '--', 'src', 'server.js', 'data/bin'], { encoding: 'utf8', maxBuffer: 64 << 20 });
+    const found28 = readersIn(gg28.stdout);
+    ok(`the doors census BITES: each of the ${searched28.length} searchable names it calls «nothing» has NO reader in the code (one fixed-string whole-word search; ${Object.keys(COMMON28).length} common names listed unsearched: ${Object.keys(COMMON28).join(', ')}; same-named other things: ${Object.entries(SAME_NAME28).map(([n, f]) => n + ' in ' + Object.keys(f).join(', ')).join(' · ')})`, (gg28.status === 0 || gg28.status === 1) && searched28.length >= 30 && found28.length === 0, { status: gg28.status, err: String(gg28.stderr || '').slice(0, 200), found28 });
+    const planted28 = readersIn(String(gg28.stdout || '') + '\nsrc/lib/chat-renderers.js:1:    if (msg.permission.takes_late_allow) keepOpen();\nsrc/server/x.js:2:  // a comment naming shell_cwd is no reader\n');
+    ok('CONTROL: a planted reader (a renderer reading takes_late_allow) is NAMED by the same judge — and a comment naming another is not', planted28.length === 1 && planted28[0] === 'takes_late_allow @ src/lib/chat-renderers.js:1', planted28);
     const C28 = 'e2e00000-0000-4000-8000-0000000003f3';
     const bare28 = recs28(C28).filter((r) => !SUB28.includes(r.subtype)).map((r) => { const c = { ...r }; for (const f of ['keeps_request_id', 'tool_pool_limit_ms', 'restored_rewind', 'memory_check_detail']) delete c[f]; return c; });
     const full28 = drawn21(recs28(C28), C28), stripped28 = drawn21(bare28, C28);

@@ -2096,5 +2096,37 @@ async function jsonlNextLeg(consumer, { lateWait = 100, refuseWatch = false } = 
   check('㉓ CONTROL (the file reader marking what it passes over, as released, under the two-way dedupe): the stream\'s record is swallowed — RED', d.sys === 0 && d.two === 1, d);
 }
 
+console.log('⑱g (B-9ff2 step 3, the coordinator\'s ruling r180) a main card the CLI WITHDREW reads «Not run — …», never «Denied» — whichever record comes first; RED on the 3ad452df5 line');
+{
+  // the records carry the BINARY's text: 2.1.328's b5e (the tracked dump), «… The request is still open; …» — cancelled by the ruling r140 (d)
+  const B5E = JSON.parse(read('scripts/fixtures/claude-cli/2.1.328.json')).sentences.rows.find((r) => r.name === 'b5e');
+  const M9T = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'm9t');
+  const use = { type: 'assistant', message: { id: 'm-wd', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_wd', name: 'Bash', input: { command: 'make deploy' } }] }, uuid: 'u-wd' };
+  const ask = { type: 'control_request', request_id: 'req-wd', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'make deploy' }, tool_use_id: 'toolu_wd' } };
+  const cancel = { type: 'control_cancel_request', request_id: 'req-wd' };
+  const deny = { type: 'control_response', response: { subtype: 'success', request_id: 'req-wd', response: { behavior: 'deny', message: 'User denied this action' } } };
+  const allow = { type: 'control_response', response: { subtype: 'success', request_id: 'req-wd', response: { behavior: 'allow', updatedInput: {} } } };
+  const res = (text) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_wd', content: text, is_error: true }] }, uuid: 'u-wdr' });
+  const run = (MMx, recs, id, how = 'live') => { const mm = new MMx(id); if (how === 'live') for (const r of recs) mm.processLive(JSON.parse(JSON.stringify(r))); else mm.convertHistory(JSON.parse(JSON.stringify(recs))); const c = mm.messages.find((m) => m.permission && m.permission.requestId === 'req-wd'); return c ? c.permission.resolved : null; };
+  const wordsOf = (w) => (H.mainAskSettledWords(w) || {}).text || '';
+  check('⑱g the fixture: 2.1.328\'s b5e, «… The request is still open …», from the tracked dump', !!B5E && /The request is still open/.test(B5E.text));
+  const orders = { 'cancel first, then the result': [use, ask, cancel, res(B5E.text)], 'the result first, then the cancel': [use, ask, res(B5E.text), cancel], 'the cancel alone': [use, ask, cancel] };
+  const got = Object.fromEntries(Object.entries(orders).flatMap(([k, v]) => [[k + ' (live)', run(MessageManager, v, 'sess-wd-l')], [k + ' (rebuilt)', run(MessageManager, v, 'sess-wd-r', 'history')]]));
+  check('⑱g a WITHDRAWN card reads `cancelled` in every order, live and rebuilt — «' + wordsOf('cancelled') + '» — never «Denied»: ' + JSON.stringify(got), Object.values(got).every((w) => w === 'cancelled') && /^Not run — the request was withdrawn/.test(wordsOf('cancelled')) && !/Denied/.test(wordsOf('cancelled')), got);
+  const dw = run(MessageManager, [use, ask, deny, cancel], 'sess-wd-d'), dOnly = run(MessageManager, [use, ask, deny], 'sess-wd-d2');
+  check('⑱g «Denied» is said only when somebody denied: a person\'s deny reads denied; the CLI\'s withdrawal after it stands over it (as a helper\'s ask: the CLI dropped the answer) — not run', dOnly === 'denied' && dw === 'cancelled', { dOnly, dw });
+  const st = run(MessageManager, [use, ask, allow, res(M9T.text), cancel], 'sess-wd-s');
+  check('⑱g …and a call that already RAN and was stopped keeps «stopped» — a withdrawal never says «not run» of a call that ran', st === 'stopped', st);
+  const s7 = { _normalizer: new MessageManager('sess-wd-p'), _subNormalizers: new Map(), _taskRecords: {}, _webuiId: 'sess-wd-p', backend: 'claude' };
+  for (const r of [use, ask, cancel]) N.feedLive(s7, JSON.parse(JSON.stringify(r)));
+  const v7 = H.answerVerdict(HA.settledState(s7, 'req-wd'));
+  check('⑱g the withdrawn card offers no Allow, and a stale press on it is REFUSED by the table (nothing written to the CLI): ' + JSON.stringify(v7), HA.settledState(s7, 'req-wd') === 'cancelled' && v7.write === false && v7.code === 'permission-settled', v7);
+  // RED CONTROL: the 3ad452df5 line (the withdrawal written `denied`) reads «Denied» for the cancel-first order
+  const mmSrc = read('src/message-manager.js'), CUT = "        if (m.permission.resolved !== 'stopped') m.permission.resolved = 'cancelled';\n";
+  const OldMM = mutantCopies('withdrawn-denied', REPO).load('src/message-manager.js', anchored(mmSrc, CUT, "        m.permission.resolved = 'denied';\n", 'withdrawn-denied'), 'withdrawn-denied').MessageManager;   // stale-pins: kept — the red control REBUILDS the 3ad452df5 line on purpose
+  const old = run(OldMM, orders['cancel first, then the result'], 'sess-wd-old');
+  check('⑱g RED CONTROL: the 3ad452df5 line reads the same withdrawal «' + wordsOf(old) + '» — the word this cures', old === 'denied' && wordsOf(old) === 'Denied', old);
+}
+
 console.log(`\n${failed ? '✗' : 'ALL PASS'} (${passed} passed${failed ? `, ${failed} failed` : ''})`);
 process.exit(failed ? 1 : 0);

@@ -2474,11 +2474,13 @@ class ChatRenderers {
       const prompt = document.createElement('div');
       prompt.className = 'chat-permission-prompt';
       const resolved = document.createElement('div');
-      resolved.className = `chat-permission-resolved ${msg.permission.resolved === 'denied' ? 'chat-permission-denied' : 'chat-permission-allowed'}`;
-      resolved.textContent = msg.permission.resolved === 'denied' ? '\u2717 ' + t('Cancelled') : '\u2713 ' + t('Answered');
+      // a questionnaire the person cancelled, or one the CLI withdrew (B-9ff2 step 3: a withdrawal settles `cancelled`, never «Answered»)
+      const notAnswered = msg.permission.resolved === 'denied' || msg.permission.resolved === 'cancelled';
+      resolved.className = `chat-permission-resolved ${notAnswered ? 'chat-permission-denied' : 'chat-permission-allowed'}`;
+      resolved.textContent = notAnswered ? '\u2717 ' + t('Cancelled') : '\u2713 ' + t('Answered');
       prompt.appendChild(resolved);
 
-      if (msg.permission.resolved !== 'denied' && msg.permission.selectedAnswers) {
+      if (!notAnswered && msg.permission.selectedAnswers) {
         for (const [qText, answer] of Object.entries(msg.permission.selectedAnswers)) {
           const row = document.createElement('div');
           row.className = 'chat-permission-question';

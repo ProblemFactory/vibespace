@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs'; // B-9ff2 step 3: the §1b control's edit fails by name when its line moves
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -45,6 +46,30 @@ console.log('§1 claude: EVERY unknown record is a card in the flow — top-leve
   const big = createMessageManager('claude', 'test-unknown-big');
   big.processLive({ type: 'huge_record', blob: 'z'.repeat(200000) });
   ok('a pathological record is truncated at 64 KB with a marker', cards(big)[0].content[0].record.length < 70000 && /truncated at 64 KB/.test(cards(big)[0].content[0].record));
+}
+
+console.log('§1b (B-9ff2 step 3, the coordinator\'s law r172) an unknown system record that CARRIES A CALL ID is never dropped without a trace: the card, its record-kinds count, the breadcrumb; RED on the 3ad452df5 line');
+{
+  const prevEv = global.__vsEvent; const names = []; global.__vsEvent = (n, d) => names.push([n, d]);
+  try {
+    const rec = (sub) => ({ type: 'system', subtype: sub, tool_use_id: 'toolu_zz', request_id: 'req-zz', reason: 'turn_running', uuid: 'u-zz-' + sub, session_id: 's-zz' });
+    const mm = createMessageManager('claude', 'test-unknown-call-id');
+    mm.processLive(rec('zz_call_linked_b9ff2'));
+    const c = cards(mm);
+    ok('a system subtype on neither list WITH a tool_use_id ⇒ ONE fall-back card carrying the whole record, its record-kinds count (system/zz_call_linked_b9ff2) and its breadcrumb (cli-unknown-system-subtype)', c.length === 1 && c[0].content[0].kind === 'system' && c[0].content[0].name === 'zz_call_linked_b9ff2' && /"tool_use_id": "toolu_zz"/.test(c[0].content[0].record) && mm.addedKinds().filter((k) => k.name === 'system/zz_call_linked_b9ff2').length === 1 && names.filter(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'zz_call_linked_b9ff2').length === 1, { cards: c.length, kinds: mm.addedKinds(), names });
+    const mm2 = createMessageManager('claude', 'test-known-call-id');
+    mm2.processLive(rec('late_allow_not_run'));
+    ok('…a DECLARED card-less one with a call id (2.1.328\'s late_allow_not_run) draws no card and adds no kind — and is COUNTED by the breadcrumb, as the card-less ones without a call id always were', cards(mm2).length === 0 && !mm2.addedKinds().some((k) => /late_allow_not_run/.test(k.name)) && names.filter(([n, d]) => n === 'cli-unknown-system-subtype' && d === 'late_allow_not_run').length === 1, { names });
+    const mm3 = createMessageManager('claude', 'test-handled-call-id');
+    mm3.processLive({ type: 'system', subtype: 'task_progress', tool_use_id: 'toolu_none', task_id: 't-none', uuid: 'u-tp', session_id: 's-zz' });
+    ok('…a HANDLED one with a call id is untouched: task_progress for a call this conversation never drew ⇒ no card, no kind, no breadcrumb', cards(mm3).length === 0 && mm3.addedKinds().length === 0 && !names.some(([, d]) => d === 'task_progress'));
+    // RED CONTROL: the 3ad452df5 gate (`&& !raw.tool_use_id`) — the same record leaves nothing
+    const mmSrc = read('src/message-manager.js');
+    const GATE = '    if (raw.subtype && !HANDLED_SYSTEM_SUBTYPES.has(raw.subtype)) {\n      const unknown = !KNOWN_IGNORED_SYSTEM_SUBTYPES.has(raw.subtype);\n';
+    const OldMM = mutantCopies('call-id-dropped', REPO).load('src/message-manager.js', anchored(mmSrc, GATE, GATE.replace('has(raw.subtype)) {', 'has(raw.subtype) && !raw.tool_use_id) {'), 'call-id-gate'), 'call-id-gate').MessageManager;   // stale-pins: kept — the red control REBUILDS the 3ad452df5 line on purpose
+    const old = new OldMM('test-old-call-id'); old.processLive(rec('zz_call_linked_b9ff2_old'));
+    ok('RED CONTROL: on the 3ad452df5 gate the same record is DROPPED — no card, no record-kinds count, no breadcrumb (the law this cures)', cards(old).length === 0 && old.addedKinds().length === 0 && !names.some(([, d]) => d === 'zz_call_linked_b9ff2_old'), { cards: cards(old).length, kinds: old.addedKinds(), names });
+  } finally { global.__vsEvent = prevEv; }
 }
 
 console.log('§2 history renders the same cards (the fall-back is a renderer, not an alert); handled / known-ignored never do');
