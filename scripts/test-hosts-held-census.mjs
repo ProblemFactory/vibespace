@@ -664,8 +664,8 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   ok(!!ho && JSON.stringify(ho) === JSON.stringify([`«${SENT}»`, `«${MSENT}»`, null, null]) && !!HOX && HOX({ code: 'mounts-unread' }) === null,
     'heldWordsOf: a hold\'s code (machines, mounts) → the page\'s sentence; another code or none → null (its own words stand); CONTROL (the mounts branch cut, in a copy): a mounts hold is not worded — RED', { ho });
   // the pages that fetch by hand: each refusal line asks heldWordsOf first (the exit runs and device activity dialogs; Settings' config export and import)
-  const HAND = [['src/lib/exit-runs-dialog.js', 1], ['src/lib/device-acts-dialog.js', 1], ['src/lib/app.js', 2]].map(([f, n]) => { const t = fs.readFileSync(path.join(ROOT, f), 'utf8'); return { f, want: n, got: (t.match(/throw new Error\(heldWordsOf\(d\) \|\| d\.error \|\| `HTTP \$\{res\.status\}`\)|\(heldWordsOf\(d\) \|\| credentialDoorWords\(d\) \|\| d\.error/g) || []).length, bare: (t.match(/throw new Error\(d\.error \|\| `HTTP \$\{res\.status\}`\)|: \(credentialDoorWords\(d\) \|\| d\.error/g) || []).length }; });   // stale-pins: kept (the bare forms are counted to be ABSENT)
-  ok(HAND.every((h) => h.got === h.want && h.bare === 0), 'the pages that fetch by hand word a hold first (heldWordsOf) — the exit runs dialog, the device activity dialog, Settings\' config export and import; none shows the hub\'s English for it', HAND);
+  const HAND = [['src/lib/exit-runs-dialog.js', 1], ['src/lib/device-acts-dialog.js', 1], ['src/lib/app.js', 1]].map(([f, n]) => { const t = fs.readFileSync(path.join(ROOT, f), 'utf8'); return { f, want: n, got: (t.match(/throw new Error\(heldWordsOf\(d\) \|\| d\.error \|\| `HTTP \$\{res\.status\}`\)|\(heldWordsOf\(d\) \|\| credentialDoorWords\(d\) \|\| d\.error/g) || []).length, bare: (t.match(/throw new Error\(d\.error \|\| `HTTP \$\{res\.status\}`\)|: \(credentialDoorWords\(d\) \|\| d\.error \|\| t\('Export failed'\)/g) || []).length }; });   // stale-pins: kept (the bare forms are counted to be ABSENT)
+  ok(HAND.every((h) => h.got === h.want && h.bare === 0), 'the pages that fetch by hand word a hold first (heldWordsOf) — the exit runs dialog, the device activity dialog, Settings\' config export (its import route never answers a hold\'s code); none shows the hub\'s English for it', HAND);
   // graduate-dial (Remove dial-out): its handler, compiled from its source, over a HELD machines list — 503 with the hold's name, so the page words it
   const PW = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
   const GH = "app.post('/api/hosts/:id/graduate-dial', async (req, res) => {", GC = "  } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (the page words it)";
@@ -682,6 +682,27 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const gd = await gradOf(PW), gdx = await gradOf(anchored(PW, GC, '  } catch (e) { res.status(400).json({ error: e.message }); }', 'hhc-8m4'));
   ok(!!gd && gd.status === 503 && gd.code === 'hosts-unread' && !!gdx && gdx.status === 400 && !gdx.code,
     'Remove dial-out (graduate-dial) while the machines list is held: 503 with the hold\'s name, so the page words it; CONTROL (the bare 400 put back, in a copy): a «400» with no name, the hub\'s English on the page — RED', { gd, gdx });
+  // the cures' read (round 2): three more Machines routes answered a held list as a bare 400 — Test connection, Install / Uninstall agent tools
+  const ER = fs.readFileSync(path.join(ROOT, 'src/server/exit-routes.js'), 'utf8');
+  const KEEPC = "  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name";
+  const ROUTES = [
+    { name: 'test', head: "app.post('/api/hosts/:id/test', ", call: "hosts.test(req.params.id, { by: DAU.byOfReq(req) })) }); }\n" },
+    { name: 'install', head: "app.post('/api/hosts/:id/agent-tools/install', ", call: "hosts.installAgentTools(req.params.id, AGENT_BIN_DIR)) }); }\n" },
+    { name: 'uninstall', head: "app.post('/api/hosts/:id/agent-tools/uninstall', ", call: "hosts.uninstallAgentTools(req.params.id)) }); }\n" },
+  ];
+  ok(ROUTES.every((r) => ER.split(r.head).length === 2 && ER.split(r.call + KEEPC).length === 2), 'control setup: the three routes and their catches are in exit-routes.js');
+  const routeOf = async (src, r) => {
+    const i = src.indexOf(r.head), j = src.indexOf('\n});\n', i);
+    const thrower = async () => { throw Object.assign(new Error('hosts.json in VibeSpace\'s data folder could not be read (EACCES); …'), { code: 'hosts-unread', status: 503 }); };
+    // eslint-disable-next-line no-new-func
+    const h = new Function('hosts', 'DAU', 'integrationEnabled', 'AGENT_BIN_DIR', `return (${src.slice(i + r.head.length, j + 2)});`)({ test: thrower, installAgentTools: thrower, uninstallAgentTools: thrower }, { byOfReq: () => null }, () => true, '/x');
+    let out = null; const res = { status(c) { this.code = c; return this; }, json(b) { out = { status: this.code, ...b }; return this; } };
+    await h({ params: { id: 'h-0001' }, body: {}, headers: {} }, res); return out;
+  };
+  const rr = [], rrx = [];
+  for (const r of ROUTES) { rr.push(await routeOf(ER, r)); rrx.push(await routeOf(anchored(ER, r.call + KEEPC, r.call + '  catch (e) { res.status(400).json({ error: e.message }); }', 'hhc-8r-' + r.name), r)); }
+  ok(rr.every((o) => o && o.status === 503 && o.code === 'hosts-unread') && rrx.every((o) => o && o.status === 400 && !o.code),
+    'Test connection, Install and Uninstall agent tools while the machines list is held: 503 with the hold\'s name, so the page words it; CONTROL (each bare 400 put back, in a copy): «400» with no name — RED', { rr, rrx });
   for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(MSENT) + ':'), `the mounts hold's sentence has its ${lang} row`);
 }
 

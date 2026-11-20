@@ -105,7 +105,7 @@ async function bundle(entry, patch = null) {
     b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'bv', namespace: 'stub' }));
     b.onResolve({ filter: /^\.\/utils\.js$/ }, (a) => (a.importer.endsWith('exit-runs-dialog.js') ? { path: 'utils', namespace: 'stub' } : undefined));
     b.onLoad({ filter: /^bv$/, namespace: 'stub' }, () => ({ contents: 'export const BUILD_VERSION = "test";' }));
-    b.onLoad({ filter: /^utils$/, namespace: 'stub' }, () => ({ contents: 'export const createModalShell = () => { throw new Error("no modal in this suite"); };\nexport const showToast = (m) => { (globalThis.__toasts ||= []).push(String(m)); };\nexport const copyText = (s) => { (globalThis.__clip ||= []).push(s); return Promise.resolve(); };' }));
+    b.onLoad({ filter: /^utils$/, namespace: 'stub' }, () => ({ contents: 'export const createModalShell = () => { throw new Error("no modal in this suite"); };\nexport const showToast = (m) => { (globalThis.__toasts ||= []).push(String(m)); };\nexport const copyText = (s) => { (globalThis.__clip ||= []).push(s); return Promise.resolve(); };\nexport const heldWordsOf = () => null;' }));   // + heldWordsOf (a hold\'s words: test-hosts-held-census §8)
     if (patch) b.onLoad({ filter: /\.js$/ }, (a) => (a.path === path.join(REPO, patch.file) ? { contents: patch.src, loader: 'js', resolveDir: path.dirname(a.path) } : undefined));
   } };
   const out = path.join(SCR, `b${++nb}.mjs`);

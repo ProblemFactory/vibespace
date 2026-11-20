@@ -273,7 +273,7 @@ console.log('③ the one appender (src/device-audit.js journal) over a stand-in 
     // the words, in-process: the REAL src/lib/device-acts-dialog.js bundled over stubbed i18n / page-time / utils
     const esbuild = require('esbuild');
     const stubs = { 'i18n.js': "export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p && p[k] !== undefined ? String(p[k]) : m)); export const deviceLocale = () => 'en';",
-      'page-time.js': "export const stampAt = (at) => 'AT:' + at;", 'utils.js': "export function createModalShell() { return {}; } export function showToast() { } export function escHtml(x) { return String(x); }" };   // the seam with ui-plain-words: plain-words.js (device-acts-dialog's nameOrGone) takes escHtml from utils.js
+      'page-time.js': "export const stampAt = (at) => 'AT:' + at;", 'utils.js': "export function createModalShell() { return {}; } export function showToast() { } export function escHtml(x) { return String(x); } export function heldWordsOf() { return null; }" };   // the seam with ui-plain-words: plain-words.js (device-acts-dialog's nameOrGone) takes escHtml from utils.js
     let dm = null;
     try {
       const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/device-acts-dialog.js')], bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',

@@ -1202,7 +1202,7 @@ class App {
             body: JSON.stringify({ file, sections, includeSensitive, passphrase }),
           });
           const d = await res.json().catch(() => ({}));
-          if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (heldWordsOf(d) || credentialDoorWords(d) || d.error || t('Import failed')); return; }
+          if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (credentialDoorWords(d) || d.error || t('Import failed')); return; }
           if (d.clientPrefs) {
             for (const [k, v] of Object.entries(d.clientPrefs)) {
               if (CLIENT_PREF_KEYS.includes(k)) localStorage.setItem(k, v);

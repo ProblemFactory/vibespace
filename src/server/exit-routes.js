@@ -320,7 +320,7 @@ app.post('/api/hosts/key', async (req, res) => {
 });
 app.post('/api/hosts/:id/test', async (req, res) => {
   try { res.json({ success: true, ...(await hosts.test(req.params.id, { by: DAU.byOfReq(req) })) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name
 });
 app.get('/api/hosts/:id/sessions', async (req, res) => {
   try { res.json({ sessions: await hosts.discoverSessions(req.params.id, req.query.fresh ? { ttlMs: 0 } : {}) }); }
@@ -414,11 +414,11 @@ app.post('/api/hosts/:id/agent-tools/install', async (req, res) => {
   // remote twin must not silently contradict a pristine-CLI state either.
   if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });
   try { res.json({ success: true, ...(await hosts.installAgentTools(req.params.id, AGENT_BIN_DIR)) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name
 });
 app.post('/api/hosts/:id/agent-tools/uninstall', async (req, res) => {
   try { res.json({ success: true, ...(await hosts.uninstallAgentTools(req.params.id)) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name
 });
 app.get('/api/hosts/:id/recent-cwds', async (req, res) => {
   // a paired ssh machine that cannot be reached is refused BY NAME before discovery spawns (lane hub-dies-dead-ssh-host)
