@@ -208,7 +208,7 @@ const readFlags = (src) => new Set([...branchOf(src).matchAll(/flags\.([a-z][a-z
 const INV = {
   svc: ['run', 'sleep 60', '--name', 'census-svc', '--note', 'a note', '--context', 'ctx words', '--cwd', CWD, '--until', 'READY', '--timeout', '6h', '--stdin-open', '--notify', 'on',
     '--view', 'all', '--control', 'group', '--keep-up', '--restart', 'always', '--port', '8123', '--publish', '--memory', '8G'],
-  task: ['run', 'true', '--name', 'census-task', '--notify-user', '--vault', 'TOK=vault://agent:conv-census/tok'],
+  task: ['run', 'true', '--name', 'census-task', '--notify-user', '--vault', 'TOK=vault://agent:conv-census/tok', '--propose-wake', 'census why'],
   every: ['run', 'echo hi', '--name', 'census-every', '--every', '30m', '--jitter', '5', '--notify-ok', '--notify-user'],
   cron: ['run', 'true', '--name', 'census-cron', '--cron', '41 9 * * *'],
   nc: ['notify-cron', '--name', 'census-nc', '--at', '+5m', '--text', 'census reminder', '--urgency', 'high', '--notify-user'],
@@ -229,6 +229,9 @@ const PINS = {
   '--keep-up': [['svc', 'kind', 'service']], '--restart': [['svc', 'restart', 'always']], '--port': [['svc', 'ports', [8123]]], '--publish': [['svc', 'publish', true]],
   '--view': [['svc', 'access.view', 'all']], '--control': [['svc', 'access.control', 'group']],
   '--text': [['nc', 'action.text', 'census reminder']], '--urgency': [['nc', 'action.urgency', 'high']],
+  // piece 7: the ROUTE consumes it (it files the proposal once the job exists — agent-routes proposeWake); it never enters the
+  // engine's spec, so its pin is the POST body's alone (`'body'`)
+  '--propose-wake': [['task', 'proposeWake', 'census why', 'body']],
 };
 const censusFindings = (src) => {
   const named = new Set([...printedFlags(src), ...readFlags(src)]);
@@ -236,9 +239,9 @@ const censusFindings = (src) => {
 };
 const landing = (flag, bodies, specs) => {
   const bad = [];
-  for (const [inv, field, want] of PINS[flag] || []) {
+  for (const [inv, field, want, only] of PINS[flag] || []) {
     for (const [hop, rec] of [['POST body', bodies[inv]], ['route spec', specs && specs[inv]]]) {
-      if (hop === 'route spec' && !specs) continue;
+      if (hop === 'route spec' && (!specs || only === 'body')) continue;   // a 'body' pin: a field the route consumes, never in the spec
       const v = get(rec, field);
       if (!(typeof want === 'function' ? want(v) : same(v, want))) bad.push(`${flag} → ${hop} ${field} = ${JSON.stringify(v)} (${inv})`);
     }

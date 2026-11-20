@@ -47,7 +47,7 @@ const verb = pos[0];
 // never learned — `--vault` before it existed) was SWALLOWED and the job started without it. test-jobs-cli-body pins this list
 // to the usage the CLI prints and the flags the branch reads.
 const RUN_FLAGS = Object.freeze(['name', 'note', 'context', 'cwd', 'until', 'timeout', 'stdin-open', 'notify', 'notify-user', 'notify-ok', 'memory',
-  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault']);
+  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault', 'propose-wake']);
 // a --vault is a REFERENCE (NAME=vault://…): anything else is refused HERE, before anything is sent — a value typed where a
 // reference belongs never leaves this command line (refused at its position, its text never echoed). The hub judges the rest.
 function vaultRefusal(v, isNotify) {
@@ -168,6 +168,7 @@ const USAGE = `vibespace-job — background work that OUTLIVES this conversation
 create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, survives your compaction)"]
            [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user] [--notify on|off]
            [--vault NAME=vault://…]… ← a vault value, read ONCE by the job from fd $NAME_FD (never env/argv/disk; ≤ 8 — docs vault)
+           [--propose-wake "why"]   ← ONE card for the person: may this job resume YOUR conversation after it is ended on purpose (docs background-work)
            [--memory 8G]   ← its memory bound (default: the owner's setting, else the cluster's, else 4G); past it the job is
                              stopped by name, and two such ends in a row park it
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
