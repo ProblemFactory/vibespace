@@ -112,6 +112,24 @@ const settle = () => tick(60);
 // …and a leg that counts DELIVERIES waits for them by their count, never a clock (B-2e0b: the .385 master run's INCIDENT leg read
 // {fired 2, sent 1} after settle()'s 60 ms at load 4.7 — the second send landed later). The guard only ends a wait that never comes.
 const delivered = async (w, n) => { for (let k = 0; k < 400 && w.fired.length < n; k++) await tick(20); return w.fired.length; };
+// r152 (主开发 2026-11-20 13:21Z: A WAIT IS FOR WHAT HAPPENED — the hosted run 44737828216 read fired=1 of 2 after settle()'s fixed
+// 60 ms at load 3.3; the retry was green): the leg waits until EVERY continue the wake DECIDED (r.fired: the conversations it fired)
+// has been delivered — each by its id, with its own bound (400 looks of 20 ms, a COUNT, never a clock compare) — PRINTS the time each
+// took (green or red), and hands back what never landed; the caller then judges the count EXACTLY (a second round would add more —
+// the floor's law). A wake that decided nothing has nothing to wait for: it answers at once. `from` = the count of deliveries
+// BEFORE this wake (taken before its call): a conversation continued by an earlier wake is never counted again as this one's.
+const landed = async (w, decided, label, from = 0) => {
+  const want = [...new Set((decided || []).map(String))];
+  const wakeT0 = Date.now(), tookMs = {};
+  for (let k = 0; k < 400; k++) {
+    for (const f of w.fired.slice(from)) if (want.includes(String(f.id)) && tookMs[f.id] === undefined) tookMs[f.id] = Date.now() - wakeT0;
+    if (want.every((id) => tookMs[id] !== undefined)) break;
+    await tick(20);
+  }
+  const missing = want.filter((id) => tookMs[id] === undefined);
+  console.log(`  · ${label}: ${want.length} continue(s) decided${want.length ? ' — ' + want.map((id) => `${id} ${tookMs[id] === undefined ? 'NOT delivered' : 'delivered after ' + tookMs[id] + ' ms'}`).join(', ') : ''}${missing.length ? ` — ${missing.length} MISSING at the bound (400 looks of 20 ms)` : ''}`);
+  return { missing, tookMs };
+};
 
 /** THE INCIDENT'S WORLD. Two exhausted members, a pool that holds both, two
  *  conversations parked and ARMED for a reset eight hours out — and a THIRD
@@ -345,7 +363,7 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
     w2.eng._poolAutoLast.set(w2.P, Date.now());
     w2.writeCache(w2.NEW, w2.healthy());
     const r2 = w2.eng.onMemberReadingFresh(w2.NEW, 'manual refresh');
-    await settle();
+    for (let k = 0; k < 400 && !(w2.linkOf(w2.A._webuiId) === w2.NEW && w2.linkOf(w2.B._webuiId) === w2.NEW); k++) await tick(20);   // r152: the re-decide's moves, waited for themselves (400 looks of 20 ms)
     ok('HALF ①: the pool re-decide moves both conversations off the spent member onto the newcomer — through a shut event-kick gate, and with no fire to do it for us',
       w2.linkOf(w2.A._webuiId) === w2.NEW && w2.linkOf(w2.B._webuiId) === w2.NEW, JSON.stringify(r2));
     ok('…and nothing was spent doing it: nobody was armed, so no continue was delivered',
@@ -359,9 +377,9 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
     w.login(w.NEW);
     w.writeCache(w.NEW, w.healthy());   // what /api/usage/refresh's rung just wrote
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    const L = await landed(w, r.fired, 'a manual refresh, two waiting');
     ok('a manual refresh that reveals a usable member re-drives the pool and continues both waiting conversations',
-      r.acted === true && r.fired.length === 2 && w.fired.length === 2, JSON.stringify({ r, fired: w.fired.length }));
+      r.acted === true && r.fired.length === 2 && !L.missing.length && w.fired.length === 2, JSON.stringify({ r, fired: w.fired.length, missing: L.missing }));
     // …and the edge itself reads NOTHING. Measured where the pre-fire gate
     // cannot run at all (nobody armed), because the gate's own probe is
     // synchronous inside attemptFire and would otherwise be counted as ours.
@@ -463,9 +481,10 @@ console.log('\n§3 idempotent, rate-floored, and never an unbounded side effect 
     const now = Date.now();
     const r1 = w.eng.onMemberReadingFresh(w.NEW, 'refresh 1', { at: now });
     const r2 = w.eng.onMemberReadingFresh(w.NEW, 'refresh 2', { at: now + 100 });
-    await settle();
-    ok('two refreshes 100 ms apart are ONE wake', r1.acted === true && r2.acted === false && r2.reason === 'wake-floor');
-    ok('…and only one round of continues was delivered', w.fired.length === 2, `fired=${w.fired.length}`);
+    const L = await landed(w, r1.fired, 'two refreshes 100 ms apart');
+    ok('two refreshes 100 ms apart are ONE wake (the second decides nothing)', r1.acted === true && r2.acted === false && r2.reason === 'wake-floor' && !(r2.fired || []).length, JSON.stringify({ r1: r1.fired, r2 }));
+    ok('…and only one round of continues was delivered: the TWO the wake decided, each landed, never a third',
+      r1.fired.length === 2 && !L.missing.length && w.fired.length === 2, `decided=${JSON.stringify(r1.fired)} delivered=${JSON.stringify(w.fired.map((f) => f.id))} missing=${JSON.stringify(L.missing)}`);
     ok('…the floor is stamped only when the wake ACTED (a declined wake must not eat the real one)',
       /THE FLOOR IS STAMPED ONLY WHEN WE ACT/.test(read('src/server/usage-pool-engine.js')));
   }
@@ -526,14 +545,15 @@ console.log('\n§5 the wake never spends by itself');
   // the newcomer rejects this conversation: the 2026-09-07 quarantine
   w.ar.armIfEnabled(w.A._webuiId, w.A, w.R5 * 1000, 'usage limit');
   const r1 = w.eng.onMemberReadingFresh(w.NEW, 'refresh 1');
-  await settle();
-  ok('the first wake continues the conversation', r1.fired.length === 1 && w.fired.length === 1);
+  const L1 = await landed(w, r1.fired, 'the first wake');
+  ok('the first wake continues the conversation', r1.fired.length === 1 && !L1.missing.length && w.fired.length === 1, JSON.stringify({ r1: r1.fired, missing: L1.missing }));
   w.reject(w.A);                                     // the CLI answers with a limit
   w.ar.armIfEnabled(w.A._webuiId, w.A, w.R5 * 1000, 'usage limit');
   w.eng._memberWakeAt.clear();
   w.writeCache(w.NEW, w.healthy());                  // a reading keeps arriving
+  const before2 = w.fired.length;
   const r2 = w.eng.onMemberReadingFresh(w.NEW, 'refresh 2');
-  await settle();
+  await landed(w, r2.fired, 'the wake after the rejection', before2);
   ok('SAME-IDENTITY QUARANTINE HOLDS: a member that just rejected this conversation is not fired at again, however many fresh readings arrive',
     r2.fired.length === 0 && w.fired.length === 1, JSON.stringify({ r2: r2.fired, fired: w.fired.length }));
   const chk = w.ar.canFire(w.A._webuiId, w.NEW, 'now', Date.now());
@@ -553,8 +573,9 @@ console.log('\n§5 the wake never spends by itself');
     // and `windowStart` — the cap itself — are untouched.
     const rec = w2.ar._fires.get(w2.A._webuiId);
     if (rec) { rec.last = null; rec.lastFireAt = 0; }
-    w2.eng.onMemberReadingFresh(w2.NEW, 'refresh ' + i);
-    await settle();
+    const beforeI = w2.fired.length;
+    const ri = w2.eng.onMemberReadingFresh(w2.NEW, 'refresh ' + i);
+    await landed(w2, ri.fired, 'the hourly cap, refresh ' + i, beforeI);
   }
   ok(`HOURLY CAP HOLDS: repeated wakes cannot exceed the ${FIRE_MAX_IMMEDIATE}/hour immediate budget (delivered ${w2.fired.length})`,
     w2.fired.length > 0 && w2.fired.length <= FIRE_MAX_IMMEDIATE, `delivered=${w2.fired.length}`);
@@ -963,7 +984,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     const w = await walled({ auto: false });
     const linkBefore = w.linkOf(w.A._webuiId);
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await landed(w, r.fired, 'the manual pool');   // r152: a wake that decided nothing has nothing in flight — judged by its decision, never a sleep
     ok('MANUAL pool (auto:false): the wake continues NOBODY — half ① cannot move the link, so a continue would land on the spent member',
       r.acted === true && r.fired.length === 0 && w.fired.length === 0, JSON.stringify(r));
     ok('…and it SAYS which conversation it left alone and where a continue would have landed',
@@ -985,7 +1006,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     ok('control setup: the PRE-FIX copy applied all four replacements', mut.hits === 4, JSON.stringify(mut));
     const w2 = await walled({ auto: false }, mut.mod);
     const r2 = w2.eng.onMemberReadingFresh(w2.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await landed(w2, r2.fired, 'the pre-fix copy');
     const spentCache = w2.readCache(w2.linkOf(w2.A._webuiId));
     ok('NEGATIVE CONTROL (pre-fix): the same world DOES spend a turn — on a member measured at 100% utilization — and the card names that member as recovered',
       r2.fired.length === 1 && w2.fired.length === 1 && spentCache?.fiveHour?.utilization === 1 && /Fish Max 已恢复可用/.test(cardsOf(w2)),
@@ -996,7 +1017,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
   {
     const w = await walled({ host: 'aidev' });
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await landed(w, r.fired, 'the remote conversation');   // r152: a wake that decided nothing has nothing in flight — judged by its decision, never a sleep
     ok('REMOTE conversation (s.host): same verdict — the per-session pass skips it by design, so the wake must not fire it either',
       r.acted === true && r.fired.length === 0 && w.fired.length === 0 && r.skipped[0]?.why === 'lands-elsewhere', JSON.stringify(r));
     ok('…and the pool half still ran (this is a refusal to SPEND, not a refusal to think)', r.pools.includes(w.P), JSON.stringify(r.pools));
@@ -1009,7 +1030,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
       w.linkOf(w.A._webuiId) === w.NEW && w.coldRestarts() >= 1, `onNew=${w.linkOf(w.A._webuiId) === w.NEW} restarts=${w.coldRestarts()}`);
     const restarts = w.coldRestarts();
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await landed(w, r.fired, 'the cold pool');   // r152: a wake that decided nothing has nothing in flight — judged by its decision, never a sleep
     ok('COLD pool (hot:false): the wake continues NOBODY — a cold conversation is RESTARTED, and master guards its own fireNow with the same `if (a.hot)`',
       r.acted === true && r.fired.length === 0 && w.fired.length === 0 && /^cold pool/.test(r.skipped[0]?.why || ''), JSON.stringify(r));
     ok('…and it added no second restart broadcast either (it only declined to spend)', w.coldRestarts() === restarts, `${restarts} → ${w.coldRestarts()}`);
@@ -1021,7 +1042,7 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     ok('control setup: the no-cold-gate copy applied its replacement', mut.hits === 1, JSON.stringify(mut));
     const w2 = await walled({ hot: false }, mut.mod);
     const r2 = w2.eng.onMemberReadingFresh(w2.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await landed(w2, r2.fired, 'the no-cold-gate copy');
     ok('NEGATIVE CONTROL (no cold gate): the same world spends a continue into a CLI the pool just told the client to replace',
       r2.fired.length === 1 && w2.fired.length === 1, JSON.stringify({ fired: w2.fired.length }));
   }
@@ -1177,7 +1198,11 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     w.unthrottle();
     w.login(w.NEW); w.writeCache(w.NEW, w.healthy());
     const r = w.eng.onMemberReadingFresh(w.NEW, 'login success');
-    await settle();
+    // r152: half ①'s move AND the continue it fires itself (not in r.fired), waited for themselves (400 looks of 20 ms), the time said
+    const halfT0 = Date.now();
+    let halfK = 0;
+    for (; halfK < 400 && !(w.linkOf(w.A._webuiId) === w.NEW && w.fired.length >= 1); halfK++) await tick(20);
+    console.log(`  · half ①'s own continue: link ${w.linkOf(w.A._webuiId) === w.NEW ? 'moved' : 'NOT moved'}, ${w.fired.length} delivered after ${Date.now() - halfT0} ms${halfK >= 400 ? ' — at the bound (400 looks of 20 ms)' : ''}`);
     ok('half ① moved the link and fired it ITSELF, so half ② stands down and names why',
       w.linkOf(w.A._webuiId) === w.NEW && r.fired.length === 0 && r.skipped[0]?.why === 'the wake moved it', JSON.stringify(r));
     ok('…and EXACTLY ONE continue was delivered, worded as the pool switch it was',
@@ -1199,13 +1224,13 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
     w.unthrottle(); w.writeCache(w.NEW, w.healthy());
     w.A._arFiring = true;                     // a pre-fire gate is in flight for this session
     const r = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await landed(w, r.fired, 'the re-entrant fire');   // r152: a wake that decided nothing has nothing in flight — judged by its decision, never a sleep
     ok('INTERLOCK: auto-resume refuses a re-entrant fire while its own gate is in flight (attemptFire\'s _arFiring)',
       r.fired.length === 0 && w.fired.length === 0 && !!w.ar._armed.get(w.A._webuiId), JSON.stringify(r));
     w.A._arFiring = false;
     w.eng._memberWakeAt.clear();
     const r2 = w.eng.onMemberReadingFresh(w.NEW, 'manual refresh (cli-panel)');
-    await settle();
+    await landed(w, r2.fired, 'the wake with the gate clear');
     ok('…and with the gate clear the same wake DOES continue it (the interlock is a gate, not a wall)',
       r2.fired.length === 1 && w.fired.length === 1, JSON.stringify(r2));
   }
