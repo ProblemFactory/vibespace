@@ -100,6 +100,20 @@ router.use((req, res, next) => {
   };
   next();
 });
+// B-3b03 (lane hub-loop-stalls): the file pool REFUSES a call while it has no live worker (src/safe-fs.js — never an op on the
+// main thread). Every local answer of this router that carries that refusal is SAID in a person's words with its code — the
+// Files window, a file's view, the chat's link-open and the downloads word storage_no_worker in the reader's language
+// (fsErrorText); the folder field shows `error` after «The machine did not answer:» — never the pool's inside words, never cut.
+const NO_WORKER_HEAD = require('../safe-fs').NO_WORKER.message.slice(0, 'no worker of '.length);
+const STORAGE_NO_WORKER = 'the file readers are restarting (one stopped answering) — try again in a moment';
+router.use((req, res, next) => {
+  const json = res.json;
+  res.json = function (body) {
+    if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(NO_WORKER_HEAD)) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };
+    return json.call(this, body);
+  };
+  next();
+});
 
 // Hung-mount circuit breaker (2.108.4): while a mount is CONNECTING (IO-probe
 // window) or was detected hanging, every file op under its root fails fast —
@@ -335,7 +349,7 @@ router.get('/api/files', async (req, res) => {
       return a.name.localeCompare(b.name);
     });
     res.json({ path: dirPath, items });
-  } catch (err) { res.status(err.status || 400).json({ error: err.message, ...(err.code === 'no-worker' ? { code: 'storage_no_worker' } : {}) }); }   // B-3b03: the Files window words the pool's refusal
+  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }   // B-3b03: a refusal of the pool is worded by the router (storage_no_worker)
 });
 
 // File info (size + binary detection) without reading full content

@@ -136,7 +136,8 @@ function folderPathVerdict(rel) {
   return { rel: segs.join('/') };
 }
 const sfsOf = (req) => (req.app && req.app.locals && req.app.locals.safeFs) || { call: async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); } };   // B-3b03: no pool ⇒ refused by name, never the op in-main
-/** The folder a `base` names, as its real path — or '' (not absolute, blocked, not a folder, unreadable). */
+/** The folder a `base` names, as its real path — or '' (not absolute, blocked, not a folder, unreadable). A storage that did not
+ *  answer (503: the pool's deadline or its refusal — B-3b03) THROWS: the navigation says so, never a preview without its folder. */
 async function judgeBase(req, base) {
   if (typeof base !== 'string' || !base.startsWith('/') || base.length > 4096 || base.includes('\0')) return '';
   const abs = path.resolve(base);
@@ -145,7 +146,7 @@ async function judgeBase(req, base) {
     const safeFs = sfsOf(req);
     const real = (await safeFs.call('realpath', { path: abs }, { timeoutMs: 8000 })).path;
     return (await safeFs.call('stat', { path: real }, { timeoutMs: 8000 })).isDirectory ? real : '';
-  } catch { return ''; }
+  } catch (e) { if (e && e.status === 503) throw e; return ''; }
 }
 const folderAddress = (req, tok) => { const own = ownOriginOf(req.headers, { encrypted: !!(req.socket && req.socket.encrypted) }); return own ? `${own}${FOLDER_PATH}${tok}/` : ''; };
 const HOST_HEADERS = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
@@ -153,7 +154,8 @@ const HOST_HEADERS = { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Contro
 function register(app) {
   app.get('/frame-host', async (req, res) => {
     if (req.query.kind === 'preview' && req.query.base != null) { // the folder, judged on the SIGNED-IN navigation
-      const dir = await judgeBase(req, req.query.base);
+      let dir = '';
+      try { dir = await judgeBase(req, req.query.base); } catch (e) { return res.status(503).set('Cache-Control', 'no-store').type('text/plain').send(e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.'); }
       if (dir) return res.set('Cache-Control', 'no-store').redirect(302, `${FOLDER_PATH}${mintFolder(dir)}/`);
     }
     const nonce = QUIET.includes(req.query.kind) ? crypto.randomBytes(18).toString('base64url') : '';

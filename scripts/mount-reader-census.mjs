@@ -223,7 +223,7 @@ export const ROWS = [
   ['src/sysinfo.js', 'own-tree', 10, null, PROC], // lane ledger-dedup-law F5: +1 = cmdlineHead (/proc/<pid>/cmdline — procfs)
   ['src/task-groups.js', 'user-path', 16, 'DOOR\\.blocked\\(', 'lane bl-windows: + the store\'s own read again of a HELD task-groups.json (its data folder — own tree, off the loop); the TASK.md writer (contextDir) + a session cwd realpath: skipped / not cached, said once; lane task-group-context: the Context table — a row\'s stat (_kindOf / _stat), a told file\'s read (_readText behind _stat) and a listed folder\'s walk (_walk) each ask the door first: a blocked row is told as "its storage is not answering" · B-55dc: + membership\'s OFF-LOOP fallback read (MEMBER_FALLBACK: fs.promises, used only when the hub has no SafeFs worker) — a row path / a cwd asked only after DOOR.blocked and storageRootOf said no (_memberNeeds / _realOf / _memberKindOf)'],
   ['src/telemetry.js', 'own-tree', 5, null, DATA],
-  ['src/transcript-service.js', 'own-tree', 6, null, CLI], // B-3b03 +1: picturePool asks whether the checkout ships its worker script (a constant over __dirname; the device bundle has none)
+  ['src/transcript-service.js', 'own-tree', 6, null, `${CLI}; B-3b03 +1: picturePool asks once whether the checkout ships its worker script (a constant over __dirname — the device bundle has none)`],
   ['src/turn-carry.js', 'own-tree', 2, null, `${DATA}; lane report-mark-on-ack r3: the outstanding deliveries by conversation (data/turn-carry-outstanding.json), read once when the routes are set up — the tidy after r4: opened, its size checked, read only under its 1 MiB bound`],
   ['src/usage-anchors.js', 'own-tree', 1, null, CLI],
   ['src/usage-cache-write.js', 'own-tree', 2, null, CLI],

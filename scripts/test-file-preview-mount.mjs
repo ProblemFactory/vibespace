@@ -15,6 +15,10 @@
 //      code storage_sync_refused, the storage's name, the release, the way on — never the guard's raw words; the journal
 //      keeps its call-site line; an answer of ANOTHER router carrying the refusal is not re-said (the door is this
 //      router's)
+//      — RESTATED by B-3b03 (lane hub-loop-stalls): the in-main fallback is GONE (a path op never runs on the main thread), so
+//      the pool down ⇒ each preview route is REFUSED BY NAME (503, code storage_no_worker, the person's words) and the guard
+//      refuses NOTHING (no op reached the main thread: no journal line); the router's re-say of a guard refusal stays for any
+//      main-thread road left, unreachable from the pool's ops now
 //   ⑤ the client's words: fsErrorText (src/lib/file-explorer-ops.js — the viewer's and the chat link-open's) says
 //      storage_sync_refused in zh / ja / en through t() — the dictionaries hold both sentences
 // RED on 6428c67e: ① the raw «refused: …», ③ the lag ≈ P, ④ the raw refusal, ⑤ the English `error` on a zh device.
@@ -162,17 +166,18 @@ try {
   ok(h.status === 200 && h.body?.sheets?.[0]?.data?.length === 5000 && h.body.sheets[0].data[4999][0] === 4999, `the 40 000-row workbook previews (5000 rows serialized) (${h.status})`);
   ok(P >= 150 && worst < P / 3, `the main loop's worst timer lag across the request: ${Math.round(worst)} ms — well under P/3 = ${Math.round(P / 3)} ms (P ≥ 150 ms makes the hold worth naming)`);
 
-  console.log('④ R2 a refusal still met is SAID — the storage by name, why, the way on');
-  const B = await serve({});   // no pool: SafeFs's in-main fallback runs the op on the main thread — the guard refuses it
+  console.log('④ R2 the pool down: each preview route is REFUSED BY NAME — never an op on the main thread (B-3b03 restated this leg)');
+  const B = await serve({});   // no pool: the files router refuses by name (B-3b03) — the release ran the op in-main, where the guard refused it
   try {
-    const want = `this file is on the storage «NAS», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there`;
+    const want = 'the file readers are restarting (one stopped answering) — try again in a moment';
+    const guardBefore = journal.filter((l) => /mount-guard/.test(l)).length;
     for (const route of [`/api/file/excel?path=${q(BOOK)}`, `/api/file/info?path=${q(BOOK)}`, `/api/file/content?path=${q(path.join(STORE, 'notes.txt'))}`]) {
       const r = await get(B.base, route);
-      ok(r.body?.code === 'storage_sync_refused' && r.body.error === want && r.body.params?.mount === 'NAS' && !('release' in r.body.params) && !/\d+\.\d+\.\d+/.test(r.body.error) && !String(r.body.error).includes(SW.REFUSAL),
-        `${route.split('?')[0]} ⇒ code storage_sync_refused, «NAS», the release — never the raw words (${r.status}: ${JSON.stringify(r.body).slice(0, 220)})`);
+      ok(r.status === 503 && r.body?.code === 'storage_no_worker' && r.body.error === want && !String(r.body.error).includes(SW.REFUSAL),
+        `${route.split('?')[0]} ⇒ 503, code storage_no_worker, the person's words — never the guard's (${r.status}: ${JSON.stringify(r.body).slice(0, 220)})`);
     }
-    ok(journal.some((l) => /^\[mount-guard\] openSync\(.*季度报表\.xlsx\) from src\/safe-fs-worker\.js:\d+ readCapped refused — use SafeFs\/async; the mount «.*NAS»$/.test(l)),
-      `the journal keeps its call-site line (${journal.filter((l) => /mount-guard/.test(l)).slice(0, 2).join(' | ')})`);
+    const guardNew = journal.filter((l) => /mount-guard/.test(l)).slice(guardBefore);
+    ok(guardNew.length === 0, `no op reached the main thread — the guard refused nothing (${guardNew.slice(0, 2).join(' | ') || 'no line'})`);
     const o = await get(B.base, '/api/other/refused');
     ok(o.status === 400 && o.body?.error === SW.REFUSAL && !o.body.code, `another router's answer is its own (the door is the files router's) (${JSON.stringify(o.body)})`);
   } finally { B.srv.close(); }
@@ -235,17 +240,17 @@ try {
     ok(pushed > 0 && pushed <= CAP + 1 + 256 * 1024 && pushed < FED, `the writer pushed ${pushed} of ${FED} bytes before EPIPE — the worker read at most cap + 1 = ${CAP + 1} (+ what sat in the pipe, ≤ 256 KiB)`);
   }
 
-  console.log('⑧ the sentence is the PREVIEW road\'s — a write, a mkdir, a rename the guard refused keep their own words (r2)');
+  console.log('⑧ the sentence is the PREVIEW road\'s — a write, a mkdir, a rename keep their own words (r2; B-3b03: the pool down refuses them by name)');
   {
-    const C = await serve({});   // the pool down again: the routes' in-main fallback meets the guard
+    const C = await serve({});   // the pool down again: B-3b03 — refused by name (the release's in-main fallback met the guard here)
     try {
       for (const [route, body] of [['/api/file/write', { path: path.join(STORE, 'new.txt'), content: 'x' }], ['/api/mkdir', { path: path.join(STORE, 'new-dir') }], ['/api/rename', { oldPath: RENAME_ME, newPath: path.join(STORE, 'renamed.txt') }]]) {
         const r = await post(C.base, route, body);
-        ok(r.status === 400 && !r.body?.code && String(r.body?.error).startsWith(SW.REFUSAL) && !String(r.body?.error).includes('preview road'),
-          `${route} ⇒ its own words (err.message + roMountHint), never the preview's sentence (${r.status}: ${JSON.stringify(r.body).slice(0, 200)})`);
+        ok(r.status === 503 && r.body?.code === 'storage_no_worker' && !String(r.body?.error).includes('preview') && !String(r.body?.error).includes(SW.REFUSAL),
+          `${route} ⇒ refused by name (503 storage_no_worker), never the preview's sentence, never the guard's words (${r.status}: ${JSON.stringify(r.body).slice(0, 200)})`);
       }
       const there = await Promise.all([RENAME_ME, path.join(STORE, 'new.txt'), path.join(STORE, 'new-dir')].map((p) => pool.call('exists', { path: p })));   // the pool's eyes: a test's own sync look is refused too
-      ok(JSON.stringify(there.map((x) => !!(x && (x.exists ?? x)))) === '[true,false,false]', `nothing was written on the way — the guard refused each (${JSON.stringify(there)})`);
+      ok(JSON.stringify(there.map((x) => !!(x && (x.exists ?? x)))) === '[true,false,false]', `nothing was written on the way — each was refused (${JSON.stringify(there)})`);
     } finally { C.srv.close(); }
   }
 

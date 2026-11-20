@@ -13404,7 +13404,7 @@ export default {
   "this file is on the storage «{mount}», and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "此文件在存储「{mount}」上，这类预览暂时不能显示存储上的文件——请下载它，或复制到本地文件夹后再打开",
   "this file is on a storage, and this kind of preview cannot be shown for a file on a storage yet — download it, or copy it to a local folder and open it there": "此文件在存储上，这类预览暂时不能显示存储上的文件——请下载它，或复制到本地文件夹后再打开",
   "another document is being parsed — try again in a moment": "另一个文档正在解析——请稍后再试",
-  "the storage did not answer in time and its file readers are restarting — try again in a moment": "存储没有及时响应，它的文件读取进程正在重启 — 请稍后再试",
+  "the file readers are restarting (one stopped answering) — try again in a moment": "文件读取进程正在重启（有一个停止了响应）— 请稍后再试",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "“{machine}” 已离线——只有机器连接时，此文件夹才会显示它的文件",
   "“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row": "“{machine}”的文件夹现在没有挂载——此文件夹是它出现的位置；会自动重试，也可以在它那一行按“立即重挂”",
   "Showing part of this workbook: {list}": "只显示了这个工作簿的一部分：{list}",

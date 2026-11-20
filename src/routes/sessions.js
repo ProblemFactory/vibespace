@@ -660,11 +660,11 @@ function setup(ctx) {
       // the worker down (its respawn backing off), wedged past its deadline, throwing, or its pool closed: THE LAST ANSWER
       // STANDS (the outer catch counts it, said) — never a walk on the loop while there is one. With none yet (a first
       // sweep), the old road ONCE, on this thread, said — ONLY when no worker exists at all (主开发 12:08Z, (1)): SafeFs's wait
-      // ended with nothing that ran it (noWorker) — or its inline door refused (sweep-pool-down: a BELT for a non-serial copy only; this serial pool sends every call with no live worker to its wait, so that door is never reached here). A sweep that RAN — past its
+      // ended with nothing that ran it (noWorker); B-3b03: no pool has an inline door any more, so its belt's `sweep-pool-down` went with it. A sweep that RAN — past its
       // deadline (the storage that held the worker), throwing, refused for its size — is said (a 500 with its words), and
       // that storage is never walked again on the loop
       if (_sessionsCache) throw e;
-      if (!(e && (e.noWorker || e.code === 'sweep-pool-down'))) throw e;
+      if (!(e && e.noWorker)) throw e;
       out = await require('../sessions-sweep.js').sweepInThread(payload);
     }
     const buf = Buffer.isBuffer(out.buf) ? out.buf : Buffer.from(out.buf.buffer, out.buf.byteOffset, out.buf.byteLength);

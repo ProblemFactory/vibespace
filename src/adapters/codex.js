@@ -638,16 +638,17 @@ function _noteParseOnLoop(threadId, fp, why) {
   console.warn(`[codex] parsed ${threadId} (${mb} MB rollout) ON THE MAIN LOOP — ${why || 'no reason given'}`);
 }
 
-let _transcriptPool = null, _workerScript = null;
+let _transcriptPool = null, _workerScript = null, _inPlace = null;
 // B-f64b cure (主开发 11:47Z): a pool whose construction failed is tried again — every POOL_RETRY_MS, POOL_RETRY_MAX times in all,
 // each failure said with its try — never «inline for good» after one failure (every codex row would read «still checking» until a restart)
 const POOL_RETRY_MS = 60000, POOL_RETRY_MAX = 5;
 let _poolFails = 0, _poolRetryAt = 0;
 function _transcriptPoolGet() {
-  // B-3b03: a bundle that ships no worker script (the device agent's single file) has no pool — its readers take their own sync
-  // road, as the release's inline runner did there; the hub's checkout always has the script
+  // B-3b03: a bundle that ships no worker script (the device agent's single file) runs every op IN PLACE, on its own loop —
+  // exactly what the release's inline runner did there (the device's task scan reads its own transcript: transcript-worker's
+  // taskLines, B-299b A2's MUST-2); never on the hub, whose checkout always has the script (the hub's pool refuses instead)
   if (_workerScript === null) _workerScript = fs.existsSync(path.join(__dirname, '..', 'transcript-worker.js'));   // once a process
-  if (!_workerScript) return null;
+  if (!_workerScript) return (_inPlace ||= { inPlace: true, call: async (op, payload) => (await require('../transcript-worker').runOp(op, payload)).result });
   if (_transcriptPool === null || (_transcriptPool === false && _poolFails < POOL_RETRY_MAX && Date.now() >= _poolRetryAt)) {
     try {
       const { SafeFs } = require('../safe-fs');
@@ -661,7 +662,8 @@ function _transcriptPoolGet() {
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'), name: 'transcript',
         poolSize: 2,
         laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB } } },
-        // B-3b03: no inlineRun — the pool never runs an op on the main thread (its callers keep their own sync road, below)
+        // B-3b03: no inlineRun — the pool never runs an op on the main thread (a refusal reaches its callers; their own sync
+        // fallback after ANY pool failure is theirs, said by name: _noteParseOnLoop / codex-parse-on-loop)
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, codexHistoryMergedPage: 120000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
       if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);

@@ -486,7 +486,7 @@ console.log('⑫ the chain\'s -cure (主开发 12:08Z): no walk on the loop afte
   const TIP_TAGS = new Set(['first', 'second', 'no-worker', 'cure', 'cure2-spaced']);
   const fresh = (src, tag, ctx = routeCtx()) => { const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) }); Mod.setup(ctx); return Mod; };
   // (1) a FIRST sweep (no list yet) whose worker RAN past its deadline: SAID (a 500), never walked again on this thread
-  const GUARD = "      if (!(e && (e.noWorker || e.code === 'sweep-pool-down'))) throw e;\n";
+  const GUARD = "      if (!(e && e.noWorker)) throw e;\n";   // B-3b03: the belt's code went with the belt
   const first = async (src, tag) => {
     const Mod = M12.load('src/routes/sessions.js', src, tag, { same: TIP_TAGS.has(tag) });
     Mod._sweepTestSeam({ workerFile: HUNG, timeoutMs: 150 }); Mod.setup(routeCtx());

@@ -63,7 +63,7 @@ ok(g.ends.every((x) => x === 'deadline') && g.alive === 0 && g.inline === 0 && g
   `every worker killed at its deadline (${g.ends.join(', ')}; alive ${g.alive}): the next call is REFUSED BY NAME (${g.got && g.got.code}, ${g.got && g.got.status}) — the inline runner entered ${g.inline} times`, JSON.stringify(g));
 // RED CONTROL: the release's inline road planted back (a copy through anchored()) — the main thread runs the stall
 const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
-const LAW = '      return Promise.reject(noWorkerRefusal(`the ${this.name} pool`));\n';
+const LAW = "      return Promise.reject(noWorkerRefusal(this.name === 'safe-fs' ? 'the file pool' : `the ${this.name} pool`));   // the hub's file pool is the unnamed one\n";
 const RELEASE = `      if (opts.noInline) return Promise.reject(Object.assign(new Error('no live SafeFs worker'), { code: 'no-worker' }));\n      try { return Promise.resolve((this._opts.inlineRun || require('./safe-fs-worker').runOp)(op, payload)).then(r => r.result); }\n      catch (e) { return Promise.reject(e); }\n`;   // stale-pins: kept — the release's inline road, planted back
 const SFr = src.split(LAW).length === 2 ? mutantCopies('safe-fs-no-inline', REPO).load('src/safe-fs.js', anchored(src, LAW, RELEASE, 'release-inline'), 'release-inline') : null;
 const r = SFr ? await scene(SFr, 'release') : null;
@@ -78,29 +78,45 @@ ok(!!g.after && !g.after.error, `a worker back (after its backoff): the pool ans
 console.log('③ the census: no pool keeps an inline road; a missing pool refuses too; the refusal is worded');
 {
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
-  // every SafeFs built in src/ and server.js — none passes an inline runner (the release's six: the file pool's default, the transcript
-  // pool, the transcript-picture pool, the mount canary, the incident freeze, the sessions sweep's belt and the agy cards' belt)
-  const files = ['server.js', 'src/adapters/codex.js', 'src/transcript-service.js', 'src/server/fs-canary.js', 'src/server/incident-wiring.js', 'src/routes/sessions.js', 'src/agy-backfill.js', 'src/safe-fs.js'];
-  const left = files.filter((f) => /inlineRun\s*[:,(]|_inlineRun\b|opts\.inlineRun/.test(read(f).replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')));
-  ok(!left.length, `no SafeFs in src/ keeps an inline road (${files.length} files read; left: ${left.join(', ') || 'none'})`);
-  // a bundle with NO worker script (the device agent's single file) reads in place by its own named rule (agy-backfill's) — only there
-  const ts = read('src/transcript-service.js'), cx = read('src/adapters/codex.js');
-  ok(ts.includes('if (!fs.existsSync(PICTURE_WORKER)) return (_picturePool = { inPlace: true,') && cx.includes('if (!_workerScript) return null;'), 'the device bundle (no worker script) reads in place, named — the hub always has the script, so the hub never runs in-main');
-  // the files router with no pool at all (server.js could not start it) refuses by name — never the op in-main
+  const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // comments out (a why may name the old road)
+  const srcFiles = ['server.js']; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js')) srcFiles.push(r); } };
+  walk('src');
+  // (a) EVERY file of src/ and server.js that builds a SafeFs (the release's seven inline roads: the file pool's default, the transcript
+  // pool, the transcript-picture pool, the mount canary, the incident freeze, the sessions sweep's belt, the agy cards' belt) — none
+  // passes an inline runner, and the pool reads none
+  const builders = srcFiles.filter((f) => /\bSafeFs\(\{|\bSafeFs\)\(\{/.test(code(read(f))));
+  const inl = builders.filter((f) => /inlineRun\s*[:,(]|_inlineRun\b|opts\.inlineRun/.test(code(read(f)))).concat(/inlineRun/.test(code(read('src/safe-fs.js'))) ? ['src/safe-fs.js'] : []);
+  ok(!inl.length && builders.length >= 8, `no SafeFs in src/ or server.js keeps an inline road (${srcFiles.length} files read, ${builders.length} build a pool; left: ${inl.join(', ') || 'none'})`);
+  // (b) EVERY require of a worker's op set (a src/ file named *-worker.js — the ops a pool runs off the loop) from a file that is not
+  // that worker: each is a ROW with its guard on the same line — the device bundle (no worker script) runs in place, as the release's
+  // inline runner did there; the hub's checkout always has the script, so the hub never runs one in-main
+  const workers = srcFiles.filter((f) => /-worker\.js$/.test(f)).map((f) => path.basename(f, '.js'));
+  const ROWS = {
+    'src/adapters/codex.js': 'if (!_workerScript) return (_inPlace ||= { inPlace: true,',   // the device's codex / claude readers (B-299b A2's MUST-2: its task scan)
+    'src/transcript-service.js': 'if (!fs.existsSync(PICTURE_WORKER)) return (_picturePool = { inPlace: true,',   // the device's picture op (answers «unavailable» there)
+    'src/store-writer.js': "const W = () => require('./store-writer-worker.js');",   // no SafeFs: the store writer's own main-thread road (B-48a4)
+  };
+  const reqRe = new RegExp(`require\\(\\s*(?:path\\.join\\([^)]*?)?['"\`][^'"\`]*\\b(?:${workers.join('|')})(?:\\.js)?['"\`]`);
+  const sites = []; for (const f of srcFiles) { if (workers.includes(path.basename(f, '.js'))) continue; read(f).replace(/^\s*\/\/.*$/gm, '').split('\n').forEach((l) => { if (reqRe.test(l)) sites.push([f, l.trim()]); }); }   // line comments out only (a block-comment cut could hide a line)
+  const unrowed = sites.filter(([f, l]) => !(ROWS[f] && l.includes(ROWS[f])));
+  ok(workers.length >= 10 && !unrowed.length && sites.length === Object.keys(ROWS).length,
+    `every require of a worker's op set (${workers.length} worker scripts) from another file is a row with its guard — ${sites.length} sites; unrowed: ${JSON.stringify(unrowed).slice(0, 400) || 'none'}`);
+  // CONTROL: the census sees a plant of the release's shape (a pool's inline runner required from main) — and the path.join form
+  const plant = "const { runOp } = require('../safe-fs-worker');", plant2 = "x = require(path.join(__dirname, 'transcript-worker.js'));";
+  ok(reqRe.test(plant) && reqRe.test(plant2) && /inlineRun\s*[:,(]/.test('new SafeFs({ inlineRun: runOp })'), 'CONTROL: a planted require of a worker op set (literal and path.join) and a planted inline runner are seen');
+  // (c) the files router with no pool at all (server.js could not start it) refuses by name — never the op in-main
   const fr = read('src/routes/files.js');
   ok(fr.includes("call: async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); },") && !fr.includes('_runOpInline'), 'the files router with no pool refuses by name (never the op in-main)');
-  // its read (M2): EVERY road that ran the file op set in-main when no pool was wired — no file in src/ requires the worker's op set
-  // any more but the worker itself (frame-host and the status route's attachments refuse by name too)
-  const srcFiles = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js')) srcFiles.push(r); } };
-  walk('src');
-  const reqWorker = srcFiles.filter((f) => f !== 'src/safe-fs-worker.js' && /require\(['"](?:\.\.?\/)+safe-fs-worker(?:\.js)?['"]\)/.test(read(f)));
-  ok(!reqWorker.length && srcFiles.length > 300, `no file in src/ requires the SafeFs worker's op set to run it in-main (${srcFiles.length} files read; left: ${reqWorker.join(', ') || 'none'})`);
-  // the Files window's words: the listing carries the code, the page words it in the reader's language
+  // (d) the words: the router says the refusal in a person's words with its code on EVERY local answer (the Files window, a file's view,
+  // the folder field) — the page words the code in the reader's language
   const ops = read('src/lib/file-explorer-ops.js');
-  ok(fr.includes("...(err.code === 'no-worker' ? { code: 'storage_no_worker' } : {})") && ops.includes("if (d && d.code === 'storage_no_worker') return t('the storage did not answer in time and its file readers are restarting — try again in a moment');"),
-    'the Files window says the refusal in true words (code storage_no_worker; zh / ja by the i18n check)');
+  ok(fr.includes("if (body && typeof body.error === 'string' && !body.code && body.error.startsWith(NO_WORKER_HEAD)) body = { ...body, error: STORAGE_NO_WORKER, code: 'storage_no_worker' };")
+    && fr.includes("const STORAGE_NO_WORKER = 'the file readers are restarting (one stopped answering) — try again in a moment';")
+    && ops.includes("if (d && d.code === 'storage_no_worker') return t('the file readers are restarting (one stopped answering) — try again in a moment');"),
+    'every local answer of the files router says the refusal in true words (code storage_no_worker; zh / ja by the i18n check)');
   const nw = SF.noWorkerRefusal('the file pool');
-  ok(SF.NO_WORKER && SF.NO_WORKER.code === 'no-worker' && /^no worker of the file pool is running — one did not answer in time and is restarting, or none could start/.test(nw.message) && nw.status === 503 && nw.noWorker === undefined, `the refusal's own words name its pool and both causes (an agent, a log): «${nw.message}»`);
+  ok(SF.NO_WORKER && SF.NO_WORKER.code === 'no-worker' && /^no worker of the file pool is running — one did not answer in time and is restarting, or none could start$/.test(nw.message) && nw.message.length <= 120 && nw.status === 503 && nw.noWorker === undefined,
+    `the refusal's own words (an agent, a log) name its pool and both causes, whole under the folder field's 120-character cut: «${nw.message}» (${nw.message.length})`);
 }
 
 report();
