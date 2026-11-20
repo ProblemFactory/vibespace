@@ -414,6 +414,8 @@ const I_RECV = {
   'src/server/session-brain.js|fact': ['status', 'the vcs event entry of a session\'s status history (its branch) — the record itself'],
   'src/agent-routes.js|u': ['carrier', 'the jobs UPDATE a turn is injected with (job events\' words) — the journal prints its SIZE'],
   'src/agent-routes.js|rep': ['group-message', 'a next-turn group REPORT (a line per group message) — the journal prints its SIZE'],
+  // bl-msg B-6edc (主开发 r337, the hosted red of line 32): the backlog edit's cap refusal names the cap it would pass
+  'src/agent-routes.js|BACKLOG_CAPS': ['constant', 'the backlog caps table (src/task-groups.js BACKLOG_CAPS: an item\'s line and detail lengths) — a NUMBER inside the edit\'s refusal sentence («a detail holds at most 6000»), never a record\'s words'],
   'data/bin/codex-chat-wrapper.js|data': ['carrier', 'the task context the codex wrapper injects (Activity notes, a status) — its log prints the LENGTH'],
   'src/server/stdout/claude-stream-json.js|po': ['carrier', 'the sender name of a message the CLI received (a job\'s `Background Work · <name>`) — the live chat card'],
   // ── not a record: what each is ──
