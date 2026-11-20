@@ -165,7 +165,7 @@ const [PORT] = await freePorts(1);
 const VNC = await vncEnv();
 const logPath = path.join(OUT, 'server.log'), logFd = fs.openSync(logPath, 'a');
 const boot = (tag, clock) => {
-  const env = { ...process.env, ...VNC, HOME, PORT: String(PORT), CLAUDE_CMD: launcher, VS_NO_REAL_CLI: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANGELOG_FIXTURE_DIR: FIX, BOOT_GATE_OUT: path.join(OUT, `clock-${tag}.json`), ...(clock ? { VIBESPACE_BOOT_TRACE_CPU: '1' } : {}) };
+  const env = { ...process.env, ...VNC, HOME, PORT: String(PORT), CLAUDE_CMD: launcher, VS_NO_REAL_CLI: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANGELOG_FIXTURE_DIR: FIX, BOOT_GATE_OUT: path.join(OUT, `clock-${tag}.json`), ...(clock ? { VIBESPACE_BOOT_TRACE_CPU: '1', VIBESPACE_BOOT_TRACE: '1' } : {}) };   // the CPU sampler + the sync ops kept: each hold's sites (a read, a parse, a start)
   fs.writeSync(logFd, `\n==== boot ${tag} ====\n`);
   srv = spawn(process.execPath, [...(clock ? ['-r', PRELOAD] : []), 'server.js'], { cwd: wt, env, stdio: ['ignore', logFd, logFd] });
   const me = srv; me.once('exit', (code, sig) => { if (srv === me && !me._stopping) { hubDied = { tag, code, sig, at: Date.now() }; console.log(`  THE HUB DIED (${tag}): exit ${code} signal ${sig}`); } });
@@ -237,7 +237,9 @@ async function report(tag, from, to, marks) {
   const trace = await getJson('/api/boot-trace?cpu=1');   // the CPU sampler's samples folded ONCE: every hold named by what ran in it
   const steps = trace ? [...(trace.steps || []), ...(trace.spans || [])].filter((x) => (x.ms || 0) >= 100).sort((a, b) => b.ms - a.ms).slice(0, 8).map((x) => `${x.name} ${x.ms} ms`) : [];
   const holdName = (h) => (h && (h.name || ((h.sites || [])[0] || {}).what)) || (h && h.faint && h.faint.length ? `unnamed (faint: ${h.faint.slice(0, 3).map((x) => `${x.ms} ms ${x.what}`).join(', ')})` : 'unnamed');
-  const named = trace && Array.isArray(trace.holds) ? trace.holds.filter((h) => (h.ms || 0) >= 100).sort((x, y) => y.ms - x.ms).slice(0, 8).map((h) => `${h.ms} ms at +${((h.at || 0) / 1000).toFixed(1)} s: ${holdName(h)}${(h.sites || []).length > 1 ? ` (+ ${(h.sites || []).slice(1, 3).map((x) => x.what).join(', ')})` : ''}`) : [];
+  // each hold with EVERY site the sampler saw in it, by its milliseconds (where a step's time went: a read, a parse, a fork)
+  const siteWords = (h) => (h.sites || []).slice(0, 14).map((x) => `${x.ms != null ? x.ms + ' ms ' : ''}${x.what}`).join(' · ');
+  const named = trace && Array.isArray(trace.holds) ? trace.holds.filter((h) => (h.ms || 0) >= 100).sort((x, y) => y.ms - x.ms).slice(0, 8).map((h) => `${h.ms} ms at +${((h.at || 0) / 1000).toFixed(1)} s: ${holdName(h)} — ${siteWords(h) || 'no site'}`) : [];
   console.log(`  ${tag}: window ${((to - first) / 1000).toFixed(1)} s from the first loop turn (${marks}); the first /login answer at ${firstAnswer ? ((firstAnswer.at + firstAnswer.ms - first) / 1000).toFixed(1) + ' s' : 'never'}`);
   console.log(`  ${tag}: /login — ${s.n} samples, ${s.preListen} refused before the listen, ${s.answered} answered, worst ${s.worst} ms (at +${s.worstAt != null ? (s.worstAt / 1000).toFixed(1) : '?'} s), ${s.overLaw} over ${ANSWER_LAW_MS} ms, ${s.overProbe} over the probe's ${PROBE_TIMEOUT_MS} ms; unanswered ${s.unansweredN} ${s.unansweredN ? S(s.unanswered) : ''}`);
   console.log(`  ${tag}: loop — longest hold ${h.maxHeld} ms; ${h.over} gaps held ≥ ${HOLD_LAW_MS} ms (${h.sum} ms in all); the top: ${h.top.map((g) => `+${((g.abs - first) / 1000).toFixed(1)} s ${g.ms} ms (cpu ${g.cpu} · wait ${g.wait} · control ${g.ctl} ⇒ held ${g.held})`).join('; ')}`);
