@@ -628,8 +628,194 @@ This file is the engineers' record of every release: the lanes, the verification
 
 ### lg-store-writes — B-0248: the measured holds after 2.369.412 (主开发 2026-11-20 03:10Z — the owner's hub, the first hour of the new build: 23 holds of 1–3 s on the storage) and its follow-up (round wf_3c7fc92a-819)
 - LIST LINE 117's MUST (主开发 2026-11-20 04:59Z — test-desktop-app-keeper §3, red on both tries at 0277bf2ba: the keeper's process SIGKILLed right after «ready», the next life read the launch's FIRST record — no pids, no display, no port — and tore the survivor down): what the next life needs to ADOPT a running application is ON DISK before the launch is told ready (`landedForReady`: the bring-up waits off the loop, said past each bound, never ending the app). The heavy leg is the product's own crash proof; the fast leg: test-app-launch-once ⑪ (the record stays «launching» while in the air; RED: the wait cut). Also: the adoption skips a record whose bring-up runs in this life (a relaunch may reuse an id).
+
+
+
+
+### lg-store-writes — B-0248: the measured holds after 2.369.412 (主开发 2026-11-20 03:10Z — the owner's hub, the first hour of the new build: 23 holds of 1–3 s on the storage) and its follow-up (round wf_3c7fc92a-819)
 - THE RECORD ON DISK AT «READY», two halves (主开发 2026-11-20 05:38Z — the rerun at 80e99335e: test-desktop-app-keeper §1 «the record is on disk with the same pids» red on both tries, the leg's own: it read the file ONCE after a handshake and asked for «ready», which since list line 133 is written off the loop right AFTER «ready»): (a) at the moment «ready» is seen the file ALREADY holds the same three pids and start times, the display and the port — read at once, no wait (line 133's law; the leg is its one heavy pin outside the hard-end section); (b) the state «ready» lands on disk within a bound — a wait on the file that fails by name with the state it found. The bring-up COMMITS right before its wait (主开发 05:21Z): the record whose landing is awaited is the record as it stands then, by construction (today every fact is already committed where it is set; test-app-launch-once ⑪ pins the line). The same shape restated in the desktop suites: test-desktop-app-keeper §3 writes its ghost records only once the adoption's own record landed (read at once, its landing could write over them) and judges the exit sweep on the document it wrote; test-office-desktop §4's control waits on the file for the stop's end facts instead of a 2.5 s sleep. The other reads are sound: the device road and test-desktop-serve write at the call; a launch's record lands before it answers, so the «nothing was recorded» checks hold.
 
+
+
+
+
+
+### lg-remote-hardening — the moved restack's and key-refused's cure (主开发 00:36Z: B, C and D)
+- B (the moved chain): scripts/test-desktop-remote pins the device agent's WHOLE capability list against the real agent — units 3 and 5 never added theirs there (44 pinned, 46 listed): 'device-key', 'hub-key' after 'pipe-detach'. Heavy: PROVE test-desktop-remote.
+- C (key-refused) THE MUST: its three new red controls were plain replaces on product text (the test-suite-files-parse ratchet counts them); each is now built through scratch.mjs anchored(). The smalls, in the unit: (1) a put-back never restores a refusal OLDER than a person's act (Forget, Let in without a key, Let it pin this hub's key — `hubPinClearedAt` is that act's time now); (2) it carries the seat's own fingerprint (the For-you watch meets the same episode, files nothing again); (3) the Machines page says where the doors are (Remote → the machine); (4) a graduated row whose dial link is refused no longer reads «Dial-out LIVE» in the accent colour, and its dialog says ops fall back to ssh; (5) the pairing sheet offers no send-over-its-link box on a refused link; (6) an anchored control each for three earlier musts (the hub-side For-you words of a dial-out row; never rebuilding a cleared record; the newest of greeting and key); (7) a device's code is bounded before it is stored.
+- D (the hunt — 2.369.411's hosts store writes off the loop; the chain's callers were written where the save had landed on return): an act that tells a person done waits for its record. pinHostKeys / unpinHostKeys wait for `persisted()`; not landed ⇒ the record is put back as it was and the act is refused by name (host-key-not-durable, 503): no pin file, no item resolved, never «pinned». Forget / Let in answer through the not-durable guard their sibling routes carry. Remove dial-out — the agent already gone from the machine — waits for its record and says when it is not saved (503 not_durable, removed: true).
+- PROOF: fast test-host-key-pin ⑥ (a pin / an unpin that did not land is undone and refused; landed, it pins; RED: a pin that does not wait), test-device-key-pin ③r (the act-older put-back refused, the seat's fingerprint, the code bound; anchored REDs: a rebuilt cleared record, «Let it pin» words for a dial-out row's bad proof), test-dial-facts ③ (anchored RED: a greeting judged first whatever its time).
+### lg-remote-hardening — B-7f0b's remainder: a dialed row whose key is refused no longer reads «connected»
+- THE FALSE ROW (my restack's reader): a refused stream stays dialed in (unit 4's cure: no close, no re-dial), so dialRowState read «connected» — a green dot, a green DEVICE badge and «Connected since …» — beside the red device-key chip, while every op was refused.
+- THE STATE: dial-facts `key-refused` (closed set, after greeting-refused): online AND a key refused on the DIAL road after this connect (`deviceKeyRefused.at` > lastConnectAt; a refusal with no road counts, an ssh-road one does not — one pin, one road); `side` 'device' (the device's key) or 'hub' (this hub's key, refused BY the device: hub-*). Its words name the door: Host key… for the device's key, Pairing command… for this hub's; the sidebar's dot and a KEY MISMATCH badge go red, and so does the Machines dot. zh / ja.
+- THE TIME FOLLOWS EVERY CONNECT (the reader's must 1): every dial-in moves lastConnectAt and its hello is refused the same way again, which hosts.js skipped as «the same refusal» — after a restart, a wake or a reconnect the row read «connected» again. A repeat on a NEW connect now moves the refusal's time past it (one write per connect); a refused copy re-seated after a newcomer's connect says it again (dial-pairing reseat → noteDeviceKey 'refused-again', its own road).
+- THE WORDS NAME A DOOR THE ROW HAS (the reader's must 2): by side, code and the row's door (pairingDoorOf) — a graduated machine is let pin this hub's key (Host key…), never «Pairing command…»; a hub that lost or cannot read its own key sends to Host key…; a forgotten pin whose agent proved nothing is said as that. Badge KEY MISMATCH / KEY REFUSED by code; the state line red for key-refused and greeting-refused too.
+- THE SECOND READ (a fresh reader of the cure; one must, cured): the Host key dialog draws «Let it pin this hub's key» for hub-key-mismatch on an ssh row only — so a missing / malformed / unsigned hub proof on a dial-out row now names its own doors (Dial-out → Remove dial-out, then Upgrade to dial-out), and a hub key this hub cannot read now names no door (its next greeting asks again). Its shoulds: refused-again carries the seat's own code and rebuilds a record a newcomer overwrote or cleared; the judged order is the closed set's (greeting-refused before key-refused); ja in the register of its neighbours (ホストキー / デバイスキー); the ssh-road leg no longer vacuous; copies censuses on the new mutants.
+- THE THIRD READ (two musts, cured): refused-again never REBUILDS a record that is gone — a person's act (Forget, Let in without a key, Let it pin this hub's key, a new hub key) clears it and the seat's kept refusal predates that act; it only puts back a live record a newcomer overwrote with another code, on the same road. A refused greeting and a refused key can come from two streams, so of the two newer than the connect the NEWEST is the row's state (at one instant the greeting). The writer's legs await the hosts store's `persisted()` before reading hosts.json (2.369.411's store writes off the loop).
+- ALSO CURED (the third read's shoulds, by the new rule): the Host key dialog and the For-you item name the row's doors too — a key this hub cannot read names no door on any row; a missing / malformed / unsigned hub proof on a dial-out row is a new pairing (Remove dial-out, then Upgrade); a plain ssh row's own pin gets «Let it pin this hub's key» for any of its refusals; a refused device proof with NO key pinned is said as that, with the row's pairing door; the put-back tells the For-you watch the seat's own code; the zh / ja door names are the buttons' own (拨出连接 / 発信接続, キー); the sentence legs cover every hub code × door; reseat's call carries its code in every leg.
+- PROOF: fast test-dial-facts — the state, side, code, door, a no-road refusal counted, the ssh road not, a refusal older than the connect not the state, auth-fail first, a graduated row; every sentence driven (zh / ja present); REDs: a copy without the state reads «connected», side-only words name «Pairing command…» on a graduated row. Fast test-device-key-pin through the REAL HostManager — a repeat on a new connect reads key-refused, refused-again once per road, the disk record; RED: a writer that skips the repeat reads «connected».
+### lg-remote-hardening restack-411 — B-7f0b: the chain onto the pushed 2.369.410 (e3754d9cd), and the smalls named «at the restack»
+- THE CHAIN: units 2, 4, 3, 5 and 6 of B-7f0b with every cure and shoulds commit recorded for 2.369.411, picked onto the release in their order; the meetings with the release are said in lines/lg-remote-hardening-restack-411.md (the machines row's status face — B-a31a's `_hostFace` — now carries unit 2's «host key changed» and unit 3's «pin cannot be used» and its wider error line).
+- THE SMALLS (主开发 16:28Z, unit 3's shoulds): a rollback knows its own attempt (an in-memory mark; a finished attempt never rolls back); while an upgrade runs, a second press and Remove dial-out are told to wait (code upgrade-running), never the remove-then-upgrade recipe; a pending «Let in without a key» is carried across the upgrade as a pending Forget is; the graduate route answers the refusal's code with its words.
+- THE MEETING THAT NEEDED CODE: the release's in-place face patch (B-a31a, mounts-live patchHostFace) took an ssh row's FIRST state chip as the face's, so the device-key and hub-key chips beside it were swapped for «testing…» and removed within seconds of a page load. They are made as key-pin chips (`host-pin-chip`), and the patch skips them.
+- SAID (主开发 16:22Z): «the same daemon» is judged by the boot id, which is made once per process start. Two machines resumed from ONE live memory snapshot state the same boot and are read as one daemon: each dial-in closes the other's stream. That case is named as known; the row's door (pair it under its own name) is its cure.
+### lg-remote-hardening unit 6 — B-7f0b: the reverse tunnel's own door (q-042 D8b)
+- THE HOLE: the hub end of a remote conversation's tunnel (a device's tcp-listen, an ssh -R) was the hub's WHOLE loopback http server. A hostile device was a local caller of the login page (one 127.0.0.1 rate-limit bucket), /otel (which trusts loopback), /hook and every page route.
+- THE CURE: src/server/agent-listener.js, a second listener on 127.0.0.1:0 over the hub's own app.
+  - It serves /api/agent/… and /api/editor/open; 404 for everything else, /api/home too (the `vibespace` CLI asks the hub on its own box, never through a tunnel). A dot segment, a doubled slash, a backslash (raw or encoded) or an encoded dot is refused, and so is an encoded slash that decodes into a dot segment or a doubled slash; any other encoded slash after the prefix is a name's own (a job name).
+  - No upgrade listener is added (§89): an upgrade is answered as a plain request.
+  - The FOUR tunnel ends take tunnelPort(PORT): a dialed device's tcp-listen, its back-tunnel re-owned at every dial-in (server.js), the ssh -R of a session and of a re-adopted one.
+  - THE PORT IS KEPT across restarts (data/agent-door.json, 0600, as tailnet-door keeps its own): a remote ssh session survives a restart with its -R fixed in its argv. It is chosen in 20000–32767, outside the default ephemeral ranges of Linux, macOS and Windows (a range widened over it is not covered), so no outgoing connection holds it while the hub restarts, and never the hub's own port. A kept port that is taken gets a new one, said once. A re-adopted session waits for the door (ready()); once listening the door keeps an error listener.
+  - Before it listens, it falls back to the hub's port, said once in the journal.
+- THE ROAD CENSUS (test-agent-door ③): every hub path the shipped tools name (hosts.js AGENT_TOOLS, each read where it lives: data/bin, the files copied there at boot, the generated helpers), 128 of them, crosses the door; a path counts after a quote, a `}` or a `$VAR`. OTEL is local-only, so it needs none. THE END CENSUS (④) reads server.js and src/ LINE BY LINE: a `.reverseForward(` call or an ssh -R `reverse:` template names tunnelPort(PORT) on its line (a push mount in its one form), and the one -R push into an argv passes its caller's target. Each has a RED (a planted page route; a named connectLocal, a sink over two lines, an -R to localhost).
+- LIMITS, said:
+  - a push mount's reverse tunnel (src/machine-mounts.js) still ends at the hub's own port, for its /dav: a door of its own is not built;
+  - /api/editor/open keeps its own check (a token only when sign-in is on, not tied to the session) — the door's one route outside /api/agent;
+  - a session started before a restart whose kept port was taken reaches its tools again when it restarts;
+  - a tool that builds a page-route path at runtime from parts would not be seen by the census (none is known).
+### lg-remote-hardening unit 5 — B-7f0b: the hub proves ITS key (q-042 D3, half b; 主开发's ruling 2026-11-18 00:00Z)
+- THE HOLE: a stolen host token (a data/ copy) could drive every paired device (T2). The device checked ONE bearer.
+- THE CURE: the hub's identity lives in the vault (`hub-identity`) and its public key rides every hello. The device pins it at the first verified ok (bound to the token that admitted it; a new pairing voids it) and from then on refuses:
+  - another hub key: hub-key-mismatch;
+  - a hello without one: hub-key-missing (no downgrade);
+  - an ok whose signature over THIS device's key and nonce fails: hub-signature-bad.
+  The device is authed only after the ok.
+- THE FOUR LAWS, as built:
+  - (1) the signing door signs ONE shape it builds itself (label, machine key, device nonce);
+  - (2) only a conversation of THAT machine (its session; the device key it brings must be the record's pinned one); a job token resolves no session;
+  - (3) no downgrade, no hang (a device too old to ask is never asked; every hub-* refusal is terminal); a LOST hub key is hub_identity_lost by name, and a new one is the person's act;
+  - (4) the refusal reaches the card (chip + Host key… door) and For you.
+- LIVE WHEN: the hub half and the attach child at this release; the device half only after a device's agent updates to a signed release carrying it. A device that has not updated pins nothing and works as today.
+- CURE after the lane's adversarial read (2 musts, 7 shoulds, notes):
+  - MUST 1: the vault name `hub-identity` was not one the vault takes, so a set-up vault refused every read and put. It is now `host:hub-identity`, with a vault-road leg.
+  - MUST 2: a re-pair did not void a device's pin, because the host token does not rotate. The pairing command run ON the device now removes state/hub.pub, and renew clears an ssh machine's pin over ssh.
+  - SHOULDS:
+    - a locked vault refuses before the hello;
+    - the hub's own key trouble is said as itself;
+    - a device without its own key never asks;
+    - a refusal after the settle tears the link down;
+    - hubPinned is recorded at the ok that pins;
+    - this box's DeviceManager carries the identity;
+    - the card clears on a link that opens, and «Forget» is hidden for hub-side refusals;
+    - «Forget» rebuilds the cached link;
+    - a first mint is exclusive;
+    - attach-cli logs the refusal's code.
+  - LEFT, said: link-sign writes no audit row of its own (its link-token sibling does). The PTY-mode resize-before-ok is unreachable today: only the dial bridge, which never asks.
+  - HAZARDS, said: before the vault is set up, the hub's key sits in data/agentd beside the host tokens (a data/ copy holds both; the vault closes that). A hub rolled back below this release is refused hub-key-missing by every updated device that pinned it.
+- CURE after 主开发's verdict of 2026-11-18 (NOT TAKEN: 4 musts that are TWO defects; the line file lg-remote-hardening-u5-cure.md):
+  - MUST A: THIS BOX'S OWN AGENT NEVER WAITS FOR THE VAULT. The local DeviceManager asked the hub's identity. A set-up vault is locked after every start, so the read threw vault_locked, the refusal was terminal, and the box's own machine was gone for the run, even after the unlock. The cure: NO HUB KEY ON THE LOCAL ROAD. server.js builds the local DeviceManager with no hubIdentity: a same-user socket, where a pin proves nothing a reader of the same files could not forge. The agent pins nothing there.
+  - A PAIRED machine while the vault is locked, said exactly: a running link is not cut (the hub's key is read at a connect, never during a link); a new connect waits, refused by name (vault_locked) in the words the chat's chip turns into «unlock the vault», before any hello; after the unlock the next connect opens.
+  - MUST B: A PIN ALWAYS HAS A DOOR, AND A KEY IS NEVER MINTED SILENTLY OVER A PIN.
+    - An ssh machine pinned to an older key of this hub gets a door on ITS road: «Let it pin this hub's key» (DELETE /api/hosts/:id/hub-pin, human only). Its state/hub.pub is removed over ssh, THEN the record and the link are cleared. A dialed device keeps its pairing command.
+    - Before a key is minted, every pin is counted: the wirings hand the pinning machines' names. A lost key with pins standing is refused by name with its recovery («re-pair these machines: …»).
+  - SHOULDS taken: the renew awaits its ssh clear before it rebuilds the link; the attach child treats a vault_locked link-sign as the vault wait (exit 7) and a key not learned yet as a wait.
+  - LEFT, said:
+    - the pre-vault key file is read at each use, not cached: a cache would hide a deleted key from the lost-key law. It is the same class as the host tokens' reads in data/agentd;
+    - 'hub-pinned' is marked when the hub sends its ok, the conservative direction;
+    - link-sign writes no audit row;
+    - the renew's person check is its siblings'.
+- PROOF (test-device-key-pin ⑦):
+  - the PURE shape and verdicts;
+  - signForMachine's laws, lost / renew;
+  - the door's route (job token, another machine);
+  - the REAL agent: pins, says it pins, another hub refused, no downgrade, a new pairing voids;
+  - the attach child against a strict device: its ok goes before its op;
+  - RED: an agent copy without the check, and an attach copy without the ok.
+- UNIT 5's CURE 2 (one machine, two agents — over unit 3's cure): a machine upgraded to dial-out runs its dial agent under its own root (dialRoot), which pins the hub too. «Let it pin this hub's key» (and the renew) clears the pin under EVERY root of the machine (mounts-plugins-wiring `hubPinRm`; a dialRoot of another shape is never put into the shell line), and a link that opened on ONE road («linked», said with its road) never clears the other road's refusal or its urgent item.
+### lg-remote-hardening unit 3 — B-7f0b: a paired device proves its own key (q-042 D3, half a)
+- THE HOLE: the hub believed whoever said hello with the right token. A leaked pairing command or a copied dial.json WAS the device (T3).
+- THE CURE (src/mutual-auth.js, PURE):
+  - the hub's hello carries a fresh nonce;
+  - the agent mints state/identity.pem once (0600, temp + rename, never sent / logged / shown) and answers {devPub, sigD};
+  - the record pins devPub at the first proof;
+  - from then on another key, a replayed or forged signature, and no proof at all are each refused by name: device-key-mismatch / device-signature-bad / device-key-missing.
+- Where the person sees it: the machine card's chip «device key changed», the Host key… door (on dial rows too; «Forget the device key»), and an urgent For-you item naming the door.
+- A new pairing command forgets the pin.
+- LIVE WHEN: the hub half at this release; the device half only after a device's agent updates to a signed release carrying it. Until then the hub pins nothing for that device, and it works as today.
+- UNIT 2 CURE'S SMALL THINGS: 主开发's ruling of 2026-11-18 05:26Z puts them in this commit, since the stack sits on the cure.
+  - A PINNED record whose address no pin line can name (an imported bundle) is never dialled: ProxyCommand=false, no master, strict over an empty file. Every road that words ssh's exit refuses it BY NAME (host-key-name), with its door: remove it and add it again with its plain address. It is never «host key changed», and the watch files nothing for it.
+  - The scan refuses such an address before ssh, and pinWhy judges only the NAME.
+  - The For-you row's identity is `hostId`.
+  - The REAL jump is pressed in test-card-grammar ⑥ (the bundled For-you model, a stand-in app); RED = the release's item.
+  - A device-kind item opens the same Host key… dialog, which holds the device-key section.
+  - The kb names the import's unlink beside the boot heal's synchronous calls.
+  - From the pictures' second take: the page words host-key-changed and host-key-name itself in en/zh/ja (a Chinese page printed the server's English), and the sentence no longer ends in four dots.
+  - From the cure's own reader: RED controls for the census's declared-dialog door, and the watch matches the record id as a string.
+  - From the reader of these additions:
+    - THE MUST: the dialog reads the machine's WHOLE record when an item's jump hands {id, name}. A device item had shown the ssh view, without «Forget the device key».
+    - An import that changes a kept machine's pin or address drops its connections.
+    - The scan and the pin judge the whole name, with no key needed.
+    - A record that carries keys none of which is an ssh key is never silently unpinned.
+    - The dialog's own toasts word the refusals.
+    - Real REDs for the fourth dot and the census's closed set.
+- NOT HERE: half b, the hub proving its key to the device. That is 主开发's ruling of 2026-11-18 00:00Z: a later unit, with the attach child's signing door under four laws.
+- PROOF (test-device-key-pin, fast):
+  - the PURE verdict table;
+  - a fake device over the real Mux: learn, keep, a swap refused with the dialed stream kept, no proof refused, the old agent not judged;
+  - the record's acts and the re-pair forget;
+  - For you, kind device;
+  - the route refuses a bearer;
+  - the REAL local agent (esbuild): mints and proves, the same key after a restart, a reinstall refused;
+  - RED: a hub without the verdict, and an agent without the proof.
+- ONE PIN, ONE ROAD (the cure of 主开发's verdict): a machine upgraded to dial-out runs a second agent under its own root, with its own key. Its device key is judged on the DIAL road only (where a copied pairing is the threat); its ssh road is guarded by ssh's own host key check and pins and refuses nothing (client.js `deviceJudged`, wired by hosts.js). The upgrade starts the dial road with no pin, and removing dial-out drops it.
+- THE DOOR THE ROW DRAWS: dial-facts.js `pairingDoorOf(h)` — 'pairing' (a dialed row: «Pairing command…»), 'dial-out' (an ssh row upgraded to dial-out: Dial-out → Remove dial-out, then Upgrade to dial-out), 'none'. The row draws its buttons by it, and the For-you item and the «pinned its new key» notice word their doors by it.
+### lg-remote-hardening unit 4 — B-7f0b: the device's greeting judged (q-042 D8a, the part that is buildable)
+- THE HOLE: client.js kept the hello-ack WHOLE as the link's `info` and drove decisions from it (platform → the shell road, capabilities → which ops are asked, posixShells → the Windows door, daemonVersion → the update). A hostile device could send any shape, up to the 64 MiB frame.
+- THE CURE: `helloAckVerdict` runs first in the handler. A field that is PRESENT must have its shape; an older agent that never says a field is not judged on it. A bad greeting is refused by name (hello-ack-shape), with one journal line, and nothing of it is kept.
+- The bounds: platform one Node.js names; capabilities ≤ 256 × ≤ 64; posixShells ≤ 16 names; the text fields ≤ 64; booleans; the whole greeting ≤ 64 KiB.
+- THE BOUNDS DEPART FROM THE DESIGN'S NUMBERS, said: the design wrote capabilities ≤ 64 × ≤ 40 and posixShells ≤ 8. This tree's own agent already says 43 capabilities (21 characters at most), so 64 would refuse the fleet within a few releases. The unit takes 256 × 64 and 16 shells. The version grammar is device-upgrade-watch's verOf, copied, because client.js reaches no server module.
+- CURE after the lane's adversarial read: a refused greeting is thrown at once by the connect loop on every road. It used to retry over the dead stream, wait out the 8 s handshake timer 14 times, and end as «cannot reach the local daemon» with the name lost. A dialed stream is kept, as on auth-fail.
+- NOT BUILT, NAMED: the design's chan-0 control line ≤ 1 MiB and per-op answer caps. chan-0 carries answers far over 1 MiB today (session-events ≈ 19 MiB a line, per the separation programme's census), so that bound waits for the separation's piece 2, held on its own branch.
+- PROOF (test-device-policy ⑤b, fast):
+  - a PURE 13-row table, plus this tree's own agent's capability list measured from the source;
+  - over the REAL Mux + DeviceManager: a good greeting connects; 300 capabilities or a foreign platform are refused by name with nothing kept;
+  - RED: a copy without the verdict keeps all 300 as `info`.
+- CURE after 主开发's verdict of 2026-11-18 (TAKEN, with one should kept as if a must; the line file lg-remote-hardening-u4-cure.md):
+  - A REFUSED GREETING ON A DIALED STREAM IS REMEMBERED, as a refused sign-in is. dial-pairing.js `refusedStreams` (every terminal refusal of the handshake by name — client.js TERMINAL_REFUSALS, a locked vault excepted) refuses every op on that stream at once by name for the re-greet interval: no new DeviceManager and no new hello.
+  - The refused handshake lets go of the stream: mux.js `detach()` ends its listeners and heartbeat, and the stream stays open. So N ops leave the stream's listeners where they were (RED: a copy that keeps the Mux piles N).
+  - The row reads `greeting-refused`, with its door: update its agent, or rerun its install command.
+  - Small: a platform WORD Node.js does not name yet passes (never a lock-out); daemonVersion is said to be the one required field; the version grammar is one copy (agentd-signature.js `verOf`, read by the upgrade watch too).
+### lg-remote-hardening unit 2 — B-7f0b: a machine's ssh host-key pin (q-042 D6)
+- THE HOLE: src/hosts.js dialled every ssh machine with StrictHostKeyChecking=accept-new over the hub user's own known_hosts, so the first key ssh met was trusted. A pod has none: every fresh hub's first connection to each machine could be anyone. Over that road go the device host token (installAgentd), the session tokens and a remote session's account env.
+- THE PIN (src/host-keys.js, SHARED):
+  - A record may carry `hostKeys` [{type, key, fp}]. `sshArgs` / `sshCmd` put `HK.hostKeyOpts` FIRST (ssh keeps the first value), and `SSH_BASE_OPTS` lost its accept-new.
+  - Unpinned ⇒ accept-new, as before. Pinned ⇒ StrictHostKeyChecking=yes + HostKeyAlias=<host> + UserKnownHostsFile="<data>/ssh/known_hosts.d/<id>" + GlobalKnownHostsFile=/dev/null. The alias keeps a config alias or a tailnet IP from moving the lookup.
+- The person's three acts: `hostKeyScan`, `pinHostKeys`, `unpinHostKeys`, behind GET / POST / DELETE /api/hosts/:id/host-keys. Any bearer is refused as human_only.
+  - The scan is ONE fresh ssh over the record's own road into a scratch known_hosts. ssh writes the key at key exchange, before any login.
+  - A pin re-scans and keeps only keys shown NOW whose fingerprints were chosen; otherwise host-key-not-seen.
+- THE REFUSAL BY NAME: `_ssh` and `sshRefusal` name ssh's host-key words `host-key-changed`, with the fingerprint shown. `sshRefusal` checks this before the 255 ⇒ unreachable verdict.
+  - The row's chip says «host key changed», and its Host key… door gets the accent.
+  - src/server/host-key-watch.js files ONE urgent For-you item per (machine, key shown). Its ledger survives a restart. A new pin or an unpin resolves it. It is wired on server.js's existing dial-health line (no new line).
+- Files: the pin file is healed at boot from the record, removed with the machine and written on import. The /api/hosts row carries type + fingerprint only.
+- LIMITS, said:
+  - A ControlMaster opened BEFORE a key change rides its old connection until ControlPersist ends (600 s idle).
+  - Only `_ssh` callers (probes, Test, discovery) raise the For-you item; a session's own ssh shows ssh's words in its pane.
+  - Existing records stay unpinned until the person pins them. No live session breaks at the upgrade.
+- CURE after the lane's adversarial read (4 musts, 6 shoulds; the read's table is in the line file):
+  - A NEW machine's key is offered for a pin BEFORE its first test (the add flow).
+  - The heavy RED copy dials with a fresh known_hosts (accept-new refuses a CHANGED key; it trusts only a first one).
+  - The row keeps the refusal's code across a re-probe.
+  - Test never re-diagnoses a key refusal over a live master.
+  - sshCmd single-quotes the pin's path for rsync.
+  - A pin or unpin drops the record's master and its cached device link.
+  - Only ssh's exit 255 is judged.
+  - The scan attempts no login.
+  - UpdateHostKeys=no.
+  - A record's keys are re-judged before the file.
+  - A removed machine takes its item.
+  - NOT built, said: a read-write folder mount (rclone sftp) checks no host key at all.
+- CURE after 主开发's verdict of 2026-11-18 (NOT TAKEN: 1 must, 1 should raised to a must; the line file lg-remote-hardening-u2-cure.md):
+  - THE MUST: mount-reader-census kept a row for host-key-watch.js, which reads nothing since the watch keeps no file (§86 dead row). The row is gone; the kb's two mentions of a ledger file are corrected.
+  - THE ITEM OPENS ITS OWN DOOR: its `action` {type 'host-key', hostId, kind} names the machine by its record's id; the registry row DECLARES `opens: 'host-key-dialog'`; the jump's one declared-dialog door opens that machine's Host key… before the `machines` key's Manage Agents (which has no key control). The refusal and the item say ONE door phrase, «Remote → {machine} → Host key…».
+  - The address is the pin line's NAME: whitespace or a control character in it is refused before anything is written, and the file's text is read back by unit 1's parser as exactly the keys under the one alias (`host-key-name`).
+  - The machine's keys are judged by unit 1's one function (ssh-key-format hostKeyWhy / isHostKey).
+  - A machine never pinned is told to pin the key it shows now, not «again». The scan also turns off GSSAPI and host-based authentication.
+  - A removal passes the kind through to the watch; an import that drops a machine is a removal (pin file gone, items resolved).
+  - The heavy test-conversation-needs gains the watch's producer row (it was missing at the first tip).
+  - SAID in the kb: a pin applies to new dials; why the boot heal's synchronous calls are allowed (before the first loop turn, one per pinned record; production's data folder is a network mount, so «local» is not the reason); exit 255 can be a nested ssh's own.
+- PROOF:
+  - fast test-host-key-pin: the PURE table, options and files, routes (RED: a copy without the person check lets a bearer unpin), For you, the page. The cure's legs: one door phrase, «again» only when pinned, the scan's methods, the one judge, the alias refusals (read back by the parser), the import drop, the kind through a removal, and THE DOOR (RED: the release's item, its key alone, lands on Manage Agents).
+  - heavy test-host-key-pin-real: real ssh against a loopback sshd -D child (no login). Scan, unpinned, pinned, THE SWAP refused by name, Test, a stale choice refused, re-pin, unpin. RED: a copy that ignores the pin trusts the swapped key.
 
 ## 2.369.412 — 2026-11-19
 
