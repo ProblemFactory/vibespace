@@ -155,8 +155,8 @@ function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf =
       const top = job.cronParent ? (jm.jobs.get(job.cronParent) || null) : job;
       const owner = top && top.owner && top.owner.conversation && top.owner.conversation.id;
       let groups = []; try { groups = owner ? (groupsOf(owner) || []) : []; } catch { groups = []; }
-      const v = owner ? reach({ conversationId: owner, webuiId: null, groups }) : null;
-      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: 'the key does not reach that job' };
+      const v = owner ? reach({ conversationId: owner, webuiId: null, groups, ...require('./groups-hold.js').fact() }) : null;   // the hold's fact: while held the owner's groups are UNKNOWN
+      if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.code === 'groups_unreadable' && v.why) || 'the key does not reach that job' };
       if (job.cronParent) return { ok: false, code: 'bad_args', why: `${job.id} is a run of the schedule ${job.cronParent} — set the schedule's grant` };
       let name = null; try { name = keyId ? keyNameOf(keyId) : null; } catch { name = null; }
       const r = jm.setWakeGrant(job, args.grant === true, { by: { kind: 'key', by: identity || (keyId ? `automation:${keyId}` : 'automation'), name } });

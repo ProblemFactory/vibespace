@@ -15,6 +15,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { checker } from './lib/check.mjs';
+import { anchored } from './scratch.mjs';   // the held store's red control (below) fails BY NAME when its anchor moves
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CK = checker();   // THE ONE assertion helper (scripts/lib/check.mjs, B-1747); its counts and its report
@@ -849,6 +850,31 @@ console.log('⑥ THE WORDS — three languages, and never «sleep»');
   ok(!SLEEP.test(said), 'NONE of the card\'s words says sleep', said.match(SLEEP));
   ok(SLEEP.test(said + '\nIt is asleep.') && SLEEP.test('它已休眠'), 'RED CONTROL: a planted «asleep» / «休眠» is caught by the same grep');
   ok(FA.ROW_OF['end-proposal'] && FA.ROW_OF['end-proposal'].answer === 'buttons' && FA.ROW_OF['end-proposal'].card === 'row' && FA.ROW_OF['end-proposal'].chat === true, 'the For-you registry row: its own buttons, drawn by the row, answerable in the chat too');
+}
+
+console.log('⑧ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05:42Z): the proposal\'s reach judges a target\'s Task Groups as UNKNOWN — refused BY NAME, nothing drawn');
+{
+  const GH = require(path.join(REPO, 'src/server/groups-hold.js'));
+  // the proposer's key reaches the whole VibeSpace EXCEPT the Task Group T-G; the target IS in T-G, but the store is held: its groups read []
+  const EXC = [{ door: 'automation-key-reach', resource: 'K-1', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-G' }] }];
+  const reachExc = (t) => AK.reachVerdict({ keyId: 'K-1', caller: CALLER.conversationId, target: t, reach: 'instance', reachRows: EXC });
+  const FACT = ", ...require('./groups-hold.js').fact()";
+  const AT = "webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : []" + FACT + " })";
+  const w = world(), wr = world({}, (src) => anchored(src, AT, AT.replace(FACT, ''), 'propose-fact-dropped'));   // the RED: the fact dropped
+  for (const x of [w, wr]) x.rows.set('claude:aaaa', raw('claude:aaaa'));
+  GH.setHeld(() => true);
+  let h, red;
+  try {
+    h = await w.store.propose({ targets: 'claude:aaaa', why: 'idle since yesterday' }, { caller: CALLER, reach: reachExc });
+    red = await wr.store.propose({ targets: 'claude:aaaa', why: 'idle since yesterday' }, { caller: CALLER, reach: reachExc });
+  } finally { GH.setHeld(() => false); }
+  const cards = (x) => x.todos.openItems().filter((i) => i.action && i.action.type === 'end-proposal').length;
+  ok(h.ok === false && h.code === 'groups_unreadable' && /Task Groups could not be read just now/.test(h.why || '') && JSON.stringify(h.targets) === '["claude:aaaa"]' && cards(w) === 0,
+    'the store HELD: a key reaching «everything except T-G» proposes T-G\'s conversation — refused BY NAME (groups_unreadable, its words, the target named), NO card filed', h);
+  ok(red.ok === true && cards(wr) === 1, 'RED CONTROL: the fact dropped — the card is FILED with T-G\'s conversation drawn for the person to terminate (the harm the law exists for)', red);
+  const rel = await w.store.propose({ targets: 'claude:aaaa', why: 'idle since yesterday' }, { caller: CALLER, reach: reachExc });
+  ok(rel.ok === true && cards(w) === 1, 'CONTROL — the store READ (no hold): the same key proposes it (its groups read [] are real: in no group)', rel);
+  w.stop(); wr.stop();
 }
 
 CK.report();

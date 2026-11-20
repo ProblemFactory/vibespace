@@ -370,6 +370,8 @@ function reachVerdict({ keyId = '', caller = '', target = {}, opened = [], reach
   const rv = GM.admits(rrows, facts);
   if (rv.ok) return { ok: true, by: rv.via === 'everyone' ? 'instance' : 'groups' };
   if (rv.code === 'excepted') return { ok: false, code: 'excepted', reach: reachKind(r), why: 'the owner left that conversation out of this grant\'s reach (an exception on the key\'s row in the Vault window) — ask the owner to lift it' };
+  // THE STORE HELD UNREAD (the hold's law, 主开发 2026-11-19 05:42Z): a target whose Task Groups are unknown is refused BY NAME — never «not in the groups»
+  if (rv.code === 'groups_unreadable') return { ok: false, code: 'groups_unreadable', reach: reachKind(r), why: 'the Task Groups could not be read just now, so whether this grant reaches that conversation is unknown — nothing was done; try again in a moment' };
   const kind = reachKind(r);
   return { ok: false, code: 'not_granted', reach: kind, why: kind === 'groups'
     ? `that conversation is not in the Task Groups this grant reaches (${r.taskGroups.join(', ')}) and the key did not open it — widen the grant's reach on the key's row in the Vault window (整个 VibeSpace)`

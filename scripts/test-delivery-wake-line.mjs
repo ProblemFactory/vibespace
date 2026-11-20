@@ -433,6 +433,22 @@ console.log('⑮ the key\'s verb: reach first, with the owner conversation\'s Ta
     'out of reach ⇒ refused by name — the SAME words for a schedule and for a run (no more than an existence), the reach asked of the owner WITH its Task Groups, nothing written', { a1, a2, asked });
   const a3 = V({ job: cron.id, grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: () => ({ ok: true, by: 'grant' }) });
   ok(a3.ok && a3.grant === true && a3.by.kind === 'key' && a3.by.name === 'dispatch' && jm.wakeGrantOf(cron.id).granted === true, 'in reach ⇒ the key sets the grant; the row records the key by name', a3);
+  // THE STORE HELD UNREAD (the hold's law, 主开发 2026-11-19 05:42Z): a key reaching «everything EXCEPT T-ops», the owner IS in T-ops,
+  // the store held (its groups read []) — the reach hands the hold's fact, refused BY NAME, nothing written; RED: the fact dropped ⇒ set
+  const GH = require(path.join(REPO, 'src/server/groups-hold.js')), AK = require(path.join(REPO, 'src/automation-keys.js'));
+  const EXC = [{ door: 'automation-key-reach', resource: 'K-1', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-ops' }] }];
+  const reachExc = (t) => AK.reachVerdict({ keyId: 'K-1', caller: cidOf(71), target: t, reach: 'instance', reachRows: EXC });
+  const cron2 = jm.create({ kind: 'cron', name: 'daily', schedule: { everyMs: 3600e3 * 24 }, action: { type: 'notify', text: 'd' }, owner: own, access: { view: 'group', control: 'session' } }, { conversationId: O, sessionId: 's-o', sessionCreatedAt: 1, groups: new Set() }).job;
+  const verbOf = (M) => M.automationVerbs({ jobs: () => jm, groupsOf: () => [], keyNameOf: () => 'dispatch' })['jobs.wakeGrant'];   // held: the owner's groups read []
+  const DW_SRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
+  const AT_FACT = "reach({ conversationId: owner, webuiId: null, groups, ...require('./groups-hold.js').fact() })";
+  const DWD = mutantCopies('wake-grant-held', REPO).load('src/server/delivery-wake.js', anchored(DW_SRC, AT_FACT, "reach({ conversationId: owner, webuiId: null, groups })", 'wake-grant-fact-dropped'), 'wake-grant-fact-dropped');
+  const CTX = { caller: {}, keyId: 'K-1', identity: 'automation:K-1', reach: reachExc };
+  GH.setHeld(() => true);
+  let h1, hRed;
+  try { h1 = verbOf(DWO)({ job: cron2.id, grant: true }, CTX); hRed = verbOf(DWD)({ job: cron2.id, grant: true }, CTX); } finally { GH.setHeld(() => false); }
+  ok(!h1.ok && h1.code === 'groups_unreadable' && /Task Groups could not be read just now/.test(h1.why || ''), 'the store HELD: a key reaching «everything except T-ops» is refused BY NAME for T-ops\' job (groups_unreadable, its words) — never judged «in no group»', h1);
+  ok(hRed.ok === true && jm.wakeGrantOf(cron2.id).granted === true, 'RED CONTROL: the fact dropped — the key «except T-ops» SETS the wake grant of T-ops\' job while the store is held (the harm the law exists for)', hRed);
 }
 
 console.log('⑯ an unknown goal: a harness whose resume continues nothing goes; an undeclared row waits');

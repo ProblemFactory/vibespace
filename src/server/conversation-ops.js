@@ -601,18 +601,19 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const snap = await listFacts.list();
       const selfKey = caller.sessionKey || `claude:${caller.conversationId}`;
       const rows = [];
-      let beyond = 0;
+      let beyond = 0, heldOut = 0;
       for (const r of snap.conversations || []) {
         const self = !!r.key && r.key === selfKey;
         const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
         let v = null;
-        if (!self) { try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [] }); } catch { v = null; } }
+        if (!self) { try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }); } catch { v = null; } }   // the hold's fact: while the store is held a row's groups are UNKNOWN (a grant «… except G» never lists it)
         if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;
+        if (!self && v && v.code === 'groups_unreadable') heldOut++;   // a held refusal is SAID in the answer (beyondWhy), never a silent «beyond reach»
       }
       for (let i = 0; i < rows.length; i++) rows[i] = endedByFor(rows[i], ctx.keyId);   // who ended it, toward an agent (lane end-obeys-verdict: must 5)
       const keys = new Set(rows.map((r) => r.key).filter(Boolean));
       const browsers = Array.isArray(snap.browsers) ? snap.browsers.filter((b) => !Array.isArray(b.holders) || !b.holders.length || b.holders.some((k) => keys.has(k))) : null;
-      return { ok: true, at: snap.at, machine: snap.machine, desktops: snap.desktops, ...(snap.desktopsWhy ? { desktopsWhy: snap.desktopsWhy } : {}), conversations: rows, browsers, ...(browsers ? {} : { browsersWhy: snap.browsersWhy || 'not collected' }), beyondReach: beyond, pass: snap.pass };
+      return { ok: true, at: snap.at, machine: snap.machine, desktops: snap.desktops, ...(snap.desktopsWhy ? { desktopsWhy: snap.desktopsWhy } : {}), conversations: rows, browsers, ...(browsers ? {} : { browsersWhy: snap.browsersWhy || 'not collected' }), beyondReach: beyond, pass: snap.pass, ...(heldOut ? { groupsUnreadable: true, beyondWhy: `the Task Groups could not be read just now — ${heldOut} conversation(s) a grant reaches by its Task Groups are not listed until they are` } : {}) };
     },
     // THE MANAGER DESIGN'S PIECE 4: resume an ENDED conversation the way a person's Resume press does — the page's own resume road
     // run headless (src/server/inbox-reopen.js reopen, through the one line), NOTHING sent into it and nothing billed (a person's
@@ -626,7 +627,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       const hit = findSession(args.target);
       if (hit) {   // NOT ENDED: refused by name (a resume that RACED a person's press answers `already` below — inbox-reopen's road)
         const [s, id] = hit;
-        const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id) });
+        const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id), ...require('./groups-hold.js').fact() });   // the hold's fact (as the end verb's)
         if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || args.target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // ONE shape for a live and an ended conversation
         const key = keyOf(s);
         return { ok: false, code: 'not_ended', why: 'there is nothing to resume — message it instead (its link is in this answer)', target: idOf(s) || id, sessionKey: key, sessionId: id, link: key ? `vibespace://conversation/${key}` : null };
@@ -634,7 +635,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       let d = null; try { d = deadOf(args.target); } catch { d = null; }
       if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target || null };
       const label = d.name || args.target;
-      const v = reach({ conversationId: d.conversationId, webuiId: null, groups: Array.isArray(d.groups) ? d.groups : [] });
+      const v = reach({ conversationId: d.conversationId, webuiId: null, groups: Array.isArray(d.groups) ? d.groups : [], ...require('./groups-hold.js').fact() });   // the hold's fact: an ended record's groups are read from the held store too
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v && v.reach ? { reach: v.reach } : {}) };
       const backend = d.sessionKey.slice(0, d.sessionKey.indexOf(':')) || 'claude';
       let facts = null; try { facts = (await resumeFactsOf(d.sessionKey)) || null; } catch { facts = null; }

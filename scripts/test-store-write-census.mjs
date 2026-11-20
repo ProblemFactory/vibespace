@@ -1126,9 +1126,9 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const cnt = (f, re) => (readSrc(f).match(re) || []).length;
       ok(!/\bsetGroupsHeld\b|\bgroupsHeld\b|groups-hold/.test(GMsrc) && !/^let /m.test(GMsrc) && !['src/channel-acl.js', 'src/channel-filter.js', 'src/automation-keys.js'].some((f) => /groupsHeld|groups-hold/.test(code(readSrc(f)))),
         '⑨ the PURE models read only their arguments: src/grant-model.js holds no module-level setter or state (the device bundle\'s module is the release\'s), nor do channel-acl, channel-filter and automation-keys ask any hold');
-      ok(cnt('src/server/channels-access.js', FACT) === 3 && cnt('src/server/channels-engine.js', FACT) === 2 && cnt('src/server/channels-outbound.js', FACT) === 2 && cnt('src/server/conversation-ops.js', FACT) === 2 && cnt('src/agent-routes.js', FACT_AR) === 2
+      ok(cnt('src/server/channels-access.js', FACT) === 3 && cnt('src/server/channels-engine.js', FACT) === 2 && cnt('src/server/channels-outbound.js', FACT) === 2 && cnt('src/server/conversation-ops.js', FACT) === 5 && cnt('src/server/delivery-wake.js', FACT) === 1 && cnt('src/server/end-proposals.js', FACT) === 1 && cnt('src/agent-routes.js', FACT_AR) === 2
         && /function wakeAdmits\(res, principal, \{ cid, groups = \[\], groupsUnreadable = false \} = \{\}\)/.test(readSrc('src/server/channels-grants.js')),
-        '⑨ …the hub\'s doors that judge a live agent from the roster HAND the fact: the channel principals (channelPrincipal ×2, the engine\'s hear / wake ctx ×2, outbound ×2, access ×1), the two watch wakes, the automation reach\'s two targets');
+        '⑨ …the hub\'s doors that judge a live agent from the roster HAND the fact: the channel principals (channelPrincipal ×2, the engine\'s hear / wake ctx ×2, outbound ×2, access ×1), the two watch wakes, the automation reach\'s targets (conversation-ops ×5: the end verb\'s two, and — login-request-card\'s cure on .413 checkpoint 2 — the list, the resume of a live and of an ended target; the wake grant\'s owner ×1, the proposal card\'s targets ×1)');
       // (2) THE PRINCIPAL BUILDERS (主开发 05:42Z (2) — the doors were pinned by COUNT, so a future door that builds an agent
       // principal from the roster's groups and forgets the fact stayed green; the follow-owed read: a ONE-LINE regex missed
       // `taskIds:`, `{ cid, groups }`, `reach({ conversationId, groups })`, a principal spread over lines, `groups: caller.groups`):
@@ -1196,6 +1196,8 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           ["src/server/channels-engine.js", "{ conversationKey: String(x.cid), groupIds: Array.", 1, "narrows"],
           ["src/server/channels-engine.js", "{ conversationKey: String(cid), groupIds: Array.is", 1, "narrows"],
           ["src/server/channels-wiring.js", "{ channels, groups, touches, flushGroupCards, live", 1, "other"],
+          ["src/server/conversation-facts.js", "{ key, ...(key ? {} : { keyWhy: 'the conversation ", 1, "roster"],   // conversations.list's row as LISTED: the two judges that read its groups (the list's reach, the proposal card's) hand the hold's fact themselves
+          ["src/server/conversation-ops.js", "{ grant: 'through a grant of this key', instance: ", 1, "other"],   // the reach's WORDS by kind (`groups` = the words of a Task Group grant): no ids
           ["src/server/conversation-ops.js", "{ s, id, conversationId: idOf(s), sessionKey: keyO", 1, "roster"],
           ["src/server/conversation-ops.js", "{ s: null, id: null, conversationId: d.conversatio", 1, "roster"],
           ["src/server/exit-routes.js", "{ sessions, groups }", 1, "answer"],

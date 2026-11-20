@@ -419,5 +419,50 @@ console.log('⑤ the words and the census of stopReason readers');
   ok(planted.length === 1, 'CONTROL a planted fifth reader is caught');
 }
 
+console.log('⑩ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05:42Z): the end, the list and the resume judge a target\'s Task Groups as UNKNOWN — refused BY NAME, never «in no group»');
+{
+  const GH = require(path.join(REPO, 'src/server/groups-hold.js')), AK = require(path.join(REPO, 'src/automation-keys.js'));
+  // a key whose reach is the whole VibeSpace EXCEPT the Task Group T-G; the target IS in T-G, but the store is held: its groups read []
+  const EXC = [{ door: 'automation-key-reach', resource: 'K-1', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-G' }] }];
+  const reachBy = (A) => (t) => A.reachVerdict({ keyId: 'K-1', caller: CALLER, target: t, reach: 'instance', reachRows: EXC });
+  const OPS_SRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-ops.js'), 'utf8'), AK_SRC = fs.readFileSync(path.join(REPO, 'src/automation-keys.js'), 'utf8');
+  const FACT = ", ...require('./groups-hold.js').fact()";
+  const MH = mutantCopies('store-held', REPO);
+  const dropped = (anchor, tag) => MH.load('src/server/conversation-ops.js', anchored(OPS_SRC, anchor, anchor.replace(FACT, ''), tag), tag);   // the RED: that site's fact dropped
+  const END_AT = "groupsOfLive(s, id), ...require('./groups-hold.js').fact() });   // + the hub's hold";
+  const LIST_AT = "webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() })";
+  const LIVE_AT = "groupsOfLive(s, id), ...require('./groups-hold.js').fact() });   // the hold's fact (as the end verb's)";
+  const DEAD_AT = "groups: Array.isArray(d.groups) ? d.groups : [], ...require('./groups-hold.js').fact() })";
+  const OLD = 'e2e00000-0000-4000-8000-0000000000f1';
+  const run = async (O, verb, args, A = AK) => {
+    const sessions = new Map([['sess-1', session()], ['sess-me', { backend: 'claude', mode: 'chat', backendSessionId: CALLER, name: 'Manager', _convFacts: idleFacts() }]]);
+    const ended = [];
+    const stubOps = { endConversation: async (target) => { ended.push(target); sessions.delete(target.webuiId); return { ok: true, sessionId: target.webuiId }; } };
+    const verbs = O.automationVerbs({ activeSessions: sessions, listFacts: COL.create({ activeSessions: sessions, ...srcs() }), ops: stubOps,
+      deadOf: (t) => (t === OLD ? { conversationId: OLD, sessionKey: `claude:${OLD}`, name: 'Old', groups: [] } : null) });
+    const r = await verbs[verb](args, { caller: { conversationId: CALLER, sessionKey: `claude:${CALLER}`, name: 'Manager' }, keyId: 'K-1', reach: reachBy(A) });
+    return { r, ended: ended.length };
+  };
+  const listed = (x) => !!(x.r && Array.isArray(x.r.conversations) && x.r.conversations.some((c) => c.key === `claude:${CID}`));
+  GH.setHeld(() => true);
+  let held, red;
+  try {
+    held = { end: await run(OPS, 'conversations.end', { target: CID }), list: await run(OPS, 'conversations.list', {}), live: await run(OPS, 'conversations.resume', { target: CID }), dead: await run(OPS, 'conversations.resume', { target: OLD }) };
+    red = { end: await run(dropped(END_AT, 'end-fact-dropped'), 'conversations.end', { target: CID }), list: await run(dropped(LIST_AT, 'list-fact-dropped'), 'conversations.list', {}),
+      live: await run(dropped(LIVE_AT, 'resume-live-fact-dropped'), 'conversations.resume', { target: CID }), dead: await run(dropped(DEAD_AT, 'resume-ended-fact-dropped'), 'conversations.resume', { target: OLD }),
+      unnamed: await run(OPS, 'conversations.end', { target: CID }, MH.load('src/automation-keys.js', anchored(AK_SRC, "  if (rv.code === 'groups_unreadable') return {", "  if (false) return {", 'reach-unnamed'), 'reach-unnamed')) };
+  } finally { GH.setHeld(() => false); }
+  const UNREAD = /Task Groups could not be read just now/;
+  ok(held.end.r.code === 'groups_unreadable' && UNREAD.test(held.end.r.why || '') && held.end.ended === 0, 'the END while held: a key reaching «everything except T-G» is refused BY NAME (groups_unreadable, its words) — nothing ended', held.end);
+  ok(held.list.r.ok === true && !listed(held.list) && held.list.r.groupsUnreadable === true && /1 conversation\(s\)/.test(held.list.r.beyondWhy || ''), 'the LIST while held: the target is not listed, and the answer SAYS why (groupsUnreadable, beyondWhy) — never a silent «beyond reach»', held.list.r);
+  ok(held.live.r.code === 'groups_unreadable' && held.dead.r.code === 'groups_unreadable' && UNREAD.test(held.dead.r.why || ''), 'the RESUME while held: refused BY NAME for a live target and for an ended one (its record\'s groups read from the same held store)', { live: held.live.r.code, dead: held.dead.r.code });
+  ok(red.end.ended === 1 && red.end.r.code !== 'groups_unreadable', 'RED CONTROL: the end\'s fact dropped — the key «except T-G» ENDS T-G\'s conversation (the harm the law exists for)', red.end);
+  ok(listed(red.list) && !red.list.r.groupsUnreadable, 'RED CONTROL: the list\'s fact dropped — T-G\'s conversation is LISTED to a key that excepts T-G', { listed: listed(red.list) });
+  ok(red.live.r.code !== 'groups_unreadable' && red.dead.r.code !== 'groups_unreadable', 'RED CONTROL: each resume\'s fact dropped — the reach ADMITS the target (the verb goes on to its own checks)', { live: red.live.r.code, dead: red.dead.r.code });
+  ok(red.unnamed.r.code === 'not_granted' && red.unnamed.ended === 0, 'RED CONTROL: the reach judge without its named refusal — refused as «not in the Task Groups this grant reaches» (the wrong words; the law says unknown)', red.unnamed.r.code);
+  const rel = await run(OPS, 'conversations.end', { target: CID }), relList = await run(OPS, 'conversations.list', {});
+  ok(rel.ended === 1 && listed(relList) && !relList.r.groupsUnreadable, 'CONTROL — the store READ (no hold): the same key ends and lists the target (its groups read [] are real: in no group)', { ended: rel.ended, listed: listed(relList) });
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

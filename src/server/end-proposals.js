@@ -93,18 +93,20 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     const seq0 = pressSeq.get(proposerKey) || 0;
     const snap = await listFacts.list();
     const rows = Array.isArray(snap && snap.conversations) ? snap.conversations : [];
-    const unseen = [], gone = [], ended = [], keyless = [], drawn = [];
+    const unseen = [], held = [], gone = [], ended = [], keyless = [], drawn = [];
     for (const target of t.targets) {
       const r = rowFor(rows, target);
       if (!r) { gone.push(target); continue; }
       const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
-      let v = null; try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [] }); } catch { v = null; }
+      let v = null; try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }); } catch { v = null; }   // the hold's fact: a grant «… except G» never draws G's conversation while the store is held
+      if (v && v.code === 'groups_unreadable') { held.push(target); continue; }   // the store HELD: refused BY NAME below, never «outside what your key reaches»
       if (!(v && v.ok)) { unseen.push(target); continue; }
       if (!r.key) { keyless.push(target); continue; }   // law 2: a row's identity cannot alias — no conversation id yet, no row
       if (r.state === 'ended') { ended.push(line(r.name || r.key)); continue; }
       drawn.push(EP.drawnRow(r));
     }
     // a proposer that names a conversation outside what it can see is refused BY NAME — nothing is filed
+    if (held.length) return { ok: false, code: 'groups_unreadable', why: `the Task Groups could not be read just now, so whether your key reaches ${held.join(', ')} is unknown — nothing was proposed; try again in a moment`, targets: held };
     if (unseen.length) return { ok: false, code: 'not_visible', why: `outside what your key reaches: ${unseen.join(', ')} — nothing was proposed`, targets: unseen };
     if (gone.length) return { ok: false, code: 'not_found', why: `no conversation by ${gone.length === 1 ? 'that id' : 'those ids'}: ${gone.join(', ')} — nothing was proposed`, targets: gone };
     if (keyless.length) return { ok: false, code: 'no_conversation_id', why: `${keyless.join(', ')} has not reported its conversation id yet — propose it once it has (it reports one at its first turn); nothing was proposed`, targets: keyless };
