@@ -78,7 +78,9 @@ ok(!!g.after && !g.after.error, `a worker back (after its backoff): the pool ans
 console.log('③ the census: no pool keeps an inline road; a missing pool refuses too; the refusal is worded');
 {
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
-  const code = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');   // comments out (a why may name the old road)
+  // comment LINES out (a why may name the old road) — never a /*…*/ match across lines: a '/*' inside a string (server.js has one) ate
+  // real code, and the census read 7 builders of 8 (its first gate)
+  const code = (src) => src.replace(/^\s*(?:\/\/|\/\*|\*).*$/gm, '');
   const srcFiles = ['server.js']; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js')) srcFiles.push(r); } };
   walk('src');
   // (a) EVERY file of src/ and server.js that builds a SafeFs (the release's seven inline roads: the file pool's default, the transcript
@@ -97,7 +99,7 @@ console.log('③ the census: no pool keeps an inline road; a missing pool refuse
     'src/store-writer.js': "const W = () => require('./store-writer-worker.js');",   // no SafeFs: the store writer's own main-thread road (B-48a4)
   };
   const reqRe = new RegExp(`require\\(\\s*(?:path\\.join\\([^)]*?)?['"\`][^'"\`]*\\b(?:${workers.join('|')})(?:\\.js)?['"\`]`);
-  const sites = []; for (const f of srcFiles) { if (workers.includes(path.basename(f, '.js'))) continue; read(f).replace(/^\s*\/\/.*$/gm, '').split('\n').forEach((l) => { if (reqRe.test(l)) sites.push([f, l.trim()]); }); }   // line comments out only (a block-comment cut could hide a line)
+  const sites = []; for (const f of srcFiles) { if (workers.includes(path.basename(f, '.js'))) continue; code(read(f)).split('\n').forEach((l) => { if (reqRe.test(l)) sites.push([f, l.trim()]); }); }
   const unrowed = sites.filter(([f, l]) => !(ROWS[f] && l.includes(ROWS[f])));
   ok(workers.length >= 10 && !unrowed.length && sites.length === Object.keys(ROWS).length,
     `every require of a worker's op set (${workers.length} worker scripts) from another file is a row with its guard — ${sites.length} sites; unrowed: ${JSON.stringify(unrowed).slice(0, 400) || 'none'}`);
