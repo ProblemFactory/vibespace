@@ -10,10 +10,12 @@
 //   every survivor's billing source, the page held back until then) under the whole law, and the restore's own line (every
 //   survivor; its registration pass and each batch under 250 ms). W2 (the page's re-attaches) is REPORTED, not judged here:
 //   hold 3 there (the claude transcript warm's one-shot reply) is the row's unit 2, then holds 4 and 5.
-//   RED CONTROLS — the release's one synchronous pass planted back into the scratch tree's copy: every survivor attached in ONE
-//   turn (W1 breaks; the restore says one batch); the release's forking backfill, verbatim (W1 breaks, the restore's batches
-//   still bounded); the same backfill under DEAD (it breaks). CD4B_PAGE=ready = the measure (the page back at ready, as in the
-//   field; every hold judged together; no controls).
+//   RED CONTROLS — the release's one synchronous pass planted back into the scratch tree's copy, each a restart judged on its W1:
+//   every survivor attached in ONE turn (W1 breaks by a hold the boot trace names «listen»; the restore says one batch); the
+//   release's forking backfill, verbatim (W1 breaks by a hold named in the restore file; the restore's batches still bounded).
+//   DEAD's law is the same judge over the same clock (its release measure: 567 / 571 ms, the backfill; under the planted backfill
+//   alone its hold read 268 ms — too near the law to be a control). CD4B_PAGE=ready = the measure (the page back at ready, as in
+//   the field; every hold judged together; no controls).
 // The scratch hub: this tree's code in a scratch worktree over production-shaped stores (scripts/boot-shape.mjs), an EMPTY
 // scratch home, the tree's stand-in CLI (scripts/fixtures/claude-stand-in-cli.cjs — no vendor binary) as CLAUDE_CMD, and N
 // claude chat conversations over synthetic transcripts of a stated size mix ($CD4B_MIX: «count x MB», …).
@@ -63,12 +65,12 @@ const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } els
 // ── the guard: the machine said, a container or too little memory refused in one line ──
 const pid1 = (() => { try { return fs.readFileSync('/proc/1/comm', 'utf8').trim(); } catch { return '?'; } })();
 const memAvailGiB = (() => { try { return Number(/MemAvailable:\s+(\d+)/.exec(fs.readFileSync('/proc/meminfo', 'utf8'))[1]) / 1048576; } catch { return 0; } })();
-const NEED_GIB = 4 + N * 0.15;
+const NEED_GIB = 4 + N * 0.05;   // measured on the first test machine: ~2.8 GiB with the 80 live, ~4.6 GiB at the end (setup → DEAD → SURVIVE → the controls)
 const memGiB = () => { try { return Number(/MemAvailable:\s+(\d+)/.exec(fs.readFileSync('/proc/meminfo', 'utf8'))[1]) / 1048576; } catch { return 0; } };
 console.log(`machine: ${os.cpus().length} cores (${(os.cpus()[0] || {}).model || '?'}), ${Math.round(os.totalmem() / 2 ** 30)} GiB, ${memAvailGiB.toFixed(1)} GiB available, load ${os.loadavg().map((x) => x.toFixed(1)).join(' ')}, PID 1 «${pid1}», node ${process.version}`);
 console.log(`N = ${N} · mix ${MIX} (count x MB of transcript) · shapes ${SHAPES.join(', ')} · pages ${PAGES} · boot-shape scale ${SCALE}`);
 if (!['systemd', 'init'].includes(pid1)) { console.log(`REFUSED — PID 1 is «${pid1}», not an init system: a container (a pod hosts a person's hub); this measure runs on the first test machine only`); process.exit(2); }
-if (memAvailGiB < NEED_GIB) { console.log(`REFUSED — ${memAvailGiB.toFixed(1)} GiB available, under the ${NEED_GIB.toFixed(1)} GiB this measure needs (4 + N × 0.15)`); process.exit(2); }
+if (memAvailGiB < NEED_GIB) { console.log(`REFUSED — ${memAvailGiB.toFixed(1)} GiB available, under the ${NEED_GIB.toFixed(1)} GiB this measure needs (4 + N × 0.05)`); process.exit(2); }
 
 // ── ONE minted root (scripts/hub-boot.mjs, the suites' one hub boot): the scratch worktree, the HOME, the clocks' files. The hub
 // and everything it starts carry that HOME, and the helper ends them BY IDENTITY at each stop and at the exit; this suite signals
@@ -237,7 +239,7 @@ function holdsOver(clock, control, from, to) {
   return { ok: true, top, maxHeld: top.length ? top[0].held : 0, over: gaps.filter((g) => g.held >= HOLD_LAW_MS).length, sum: gaps.filter((g) => g.held >= HOLD_LAW_MS).reduce((s, g) => s + g.held, 0) };
 }
 const holdLines = (tag) => logOf(tag).split('\n').filter((l) => l.includes('[loop-hold]')).map((l) => l.slice(0, 420));
-async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFirst = true } = {}) {
+async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFirst = true, plant = null } = {}) {
   const clock = readJson(path.join(OUT, `clock-${tag}.json`)), control = readJson(path.join(OUT, `control-${tag}.json`)), rows = readJson(path.join(OUT, `login-${tag}.json`)) || [];
   const first = fromFirst && clock && clock.first != null ? clock.origin + clock.first : from;   // a window from the first loop turn, or from `from`
   const firstAnswer = rows.find((r) => r.ms != null);
@@ -258,7 +260,9 @@ async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFi
     check(`${label}: THE LAW — /login answered within ${ANSWER_LAW_MS} ms at every ${SAMPLE_MS} ms sample past the listen (worst ${s.worst} ms, N = ${N})`, s.overLaw === 0 && s.unansweredN === 0 && s.answered > 0, s);
     check(`${label}: THE LAW — no loop hold ≥ ${HOLD_LAW_MS} ms from the first loop turn (longest ${h.maxHeld} ms, N = ${N})`, h.ok && h.over === 0, h.top);
   } else if (judge === 'red') {
-    check(`${label}: RED as it must be — the law breaks in this window: a loop hold ≥ ${HOLD_LAW_MS} ms (longest ${h.maxHeld} ms, ${h.over} of them, N = ${N})`, h.ok && h.over > 0, h.top);
+    // TIED TO ITS PLANT: a hold ≥ the law that the boot trace names by the planted code (its step, or the sites its samples stood in)
+    const tied = trace && Array.isArray(trace.holds) ? trace.holds.filter((x) => (x.ms || 0) >= HOLD_LAW_MS && !!plant && plant.re.test([x.name || '', ...(x.sites || []).map((y) => y.what), ...(x.faint || []).map((y) => y.what)].join(' · '))) : [];
+    check(`${label}: RED as it must be — the law breaks in this window BY ITS PLANT: a loop hold ≥ ${HOLD_LAW_MS} ms named by ${plant ? plant.what : '?'} (${tied.length ? tied.map((x) => `${x.ms} ms: ${holdName(x)}`).join('; ') : 'none'}; the longest hold ${h.maxHeld} ms, N = ${N})`, h.ok && h.over > 0 && tied.length > 0, h.top);
   } else console.log(`  ${label}: reported, not judged in this unit (worst /login ${s.worst} ms, longest hold ${h.maxHeld} ms)`);
   return { s, h };
 }
@@ -313,8 +317,14 @@ const RELEASE_BACKFILL = fs.readFileSync(path.join(repo, 'scripts', 'fixtures', 
 const BACKFILL_FROM = '  // Backfill billing identity for sessions restored WITHOUT a recorded\n', BACKFILL_TO = '\n  }, 3000);\n';
 const once = (t, x) => t.split(x).length === 2;
 const PLANTS = {
-  'one-pass-attach': (t) => (once(t, 'const ATTACH_BATCH = 8;') ? t.replace('const ATTACH_BATCH = 8;', 'const ATTACH_BATCH = Infinity;') : null),
+  'one-pass-attach': (t) => (once(t, 'const ATTACH_BATCH = 8,') ? t.replace('const ATTACH_BATCH = 8,', 'const ATTACH_BATCH = Infinity,') : null),
   'forking-backfill': (t) => { if (!once(t, BACKFILL_FROM)) return null; const i = t.indexOf(BACKFILL_FROM), j = t.indexOf(BACKFILL_TO, i); return j < 0 ? null : t.slice(0, i) + RELEASE_BACKFILL + t.slice(j + BACKFILL_TO.length); },
+};
+// what names each plant's hold in the boot trace: the one-pass attach runs in the listen step (its attaches' localAttach); the
+// forking backfill's callback is the planted code in the restore file
+const PLANT_NAMES = {
+  'one-pass-attach': { re: /^listen\b|session-stdout\.js/, what: 'the listen step (the attaches\' localAttach)' },
+  'forking-backfill': { re: /boot-restore\.js/, what: 'the restore file (the planted backfill)' },
 };
 const plant = (name) => { const t = name ? PLANTS[name](GREEN_RESTORE) : GREEN_RESTORE; if (t == null) return false; fs.writeFileSync(RESTORE, t); return true; };
 
@@ -357,34 +367,32 @@ async function deadShape(tag, { red = null } = {}) {
 }
 
 // ── ③ SURVIVE — a hub restart where dtach lives ──
-let filledOnce = false;
 async function surviveShape(tag, { red = null } = {}) {
   const label = red ? `RED ${red} (${tag})` : tag;
   console.log(`③ ${label} — a hub restart where dtach lives: every buffer full, the boot re-attaches them all; the page returns ${PAGE === 'held' ? 'once the restore\'s last effect landed (W1 = the restore alone)' : 'at ready (the field\'s order)'}`);
   check(`${label}: the live conversations to restore: ${liveIds.size}`, liveIds.size > 0);
-  if (!filledOnce) {
-    // every LIVE conversation's buffer filled to the chat wrapper's ring (500 KB): stream-json turns, each init with its billing
-    // source and each turn with its result line — written once nothing writes them (the stand-in says nothing until it is asked),
-    // so the file stays as written across the restarts. <id>.buf for EVERY live id: a wrapper the page never attached wrote none
-    // yet, and the restore reads that name whether the wrapper made it or not
-    check(`${label}: the live buffers settled (each size read the same twice)`, await settled(liveIds));
-    fs.mkdirSync(BUF, { recursive: true });
-    const bufs = [...liveIds].map((id) => id + '.buf');
-    const turn = (sid) => [
-      S({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: sid }),
-      S({ type: 'system', subtype: 'init', session_id: sid, cwd: CWDS[0], model: 'claude-sonnet-4-5', tools: ['Read', 'Edit', 'Bash'], apiKeySource: 'none' }),
-      S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'toolu_' + hex(24), name: 'Read', input: { file_path: '/src/a.js' } }], usage: { input_tokens: 9, output_tokens: 80 } }, session_id: sid }),
-      S({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_' + hex(24), content: words(5000) }] }, session_id: sid }),
-      S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: words(1200) }], usage: { input_tokens: 9, output_tokens: 300 } }, session_id: sid }),
-      S({ type: 'result', subtype: 'success', is_error: false, duration_ms: 8000 + Math.floor(Math.random() * 9000), num_turns: 2, result: words(400), session_id: sid, total_cost_usd: 0.05 + Math.random() / 10, usage: { input_tokens: 18, cache_read_input_tokens: 90000, output_tokens: 380 }, modelUsage: { 'claude-sonnet-4-5': { inputTokens: 18, outputTokens: 380, costUSD: 0.07 } } }),
-      S({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: sid }),
-    ].join('\n') + '\n';
-    let filled = 0;
-    for (const f of bufs) { let s = ''; while (s.length < 490000) s += turn(crypto.randomUUID()); fs.writeFileSync(path.join(BUF, f), s); filled += s.length; }
-    console.log(`  ${bufs.length} buffers filled: ${(filled / 1e6).toFixed(1)} MB`);
-    filledOnce = true;
-  }
   await stopHub('SIGKILL', { hubOnly: true });
+  // every LIVE conversation's buffer filled to the chat wrapper's ring (500 KB) — FOR EVERY RESTART, once the hub has stopped: a
+  // page's re-attach makes the wrapper rewrite its buffer from its own memory (the queue's resync), so a buffer planted once is
+  // gone by the next restart. Stream-json turns, each init with its billing source and each turn with its result line; written
+  // once nothing writes them (the stand-in says nothing until it is asked), so the file stays as written across the restart
+  // <id>.buf for EVERY live id: a wrapper the page never attached wrote none yet, and the restore reads that name whether the
+  // wrapper made it or not
+  check(`${label}: the live buffers settled (each size read the same twice)`, await settled(liveIds));
+  fs.mkdirSync(BUF, { recursive: true });
+  const bufs = [...liveIds].map((id) => id + '.buf');
+  const turn = (sid) => [
+    S({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: sid }),
+    S({ type: 'system', subtype: 'init', session_id: sid, cwd: CWDS[0], model: 'claude-sonnet-4-5', tools: ['Read', 'Edit', 'Bash'], apiKeySource: 'none' }),
+    S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'toolu_' + hex(24), name: 'Read', input: { file_path: '/src/a.js' } }], usage: { input_tokens: 9, output_tokens: 80 } }, session_id: sid }),
+    S({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_' + hex(24), content: words(5000) }] }, session_id: sid }),
+    S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: words(1200) }], usage: { input_tokens: 9, output_tokens: 300 } }, session_id: sid }),
+    S({ type: 'result', subtype: 'success', is_error: false, duration_ms: 8000 + Math.floor(Math.random() * 9000), num_turns: 2, result: words(400), session_id: sid, total_cost_usd: 0.05 + Math.random() / 10, usage: { input_tokens: 18, cache_read_input_tokens: 90000, output_tokens: 380 }, modelUsage: { 'claude-sonnet-4-5': { inputTokens: 18, outputTokens: 380, costUSD: 0.07 } } }),
+    S({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: sid }),
+  ].join('\n') + '\n';
+  let filled = 0;
+  for (const f of bufs) { let s = ''; while (s.length < 490000) s += turn(crypto.randomUUID()); fs.writeFileSync(path.join(BUF, f), s); filled += s.length; }
+  console.log(`  ${bufs.length} buffers filled: ${(filled / 1e6).toFixed(1)} MB`);
   console.log(`  ${unbill()} meta(s) without their billing source (the restart's backfill reads each survivor's again)`);
   startAux(tag); await auxUp(tag);
   const tBoot = Date.now(); boot(tag, true);
@@ -405,7 +413,7 @@ async function surviveShape(tag, { red = null } = {}) {
   if (red) {
     await asksAnswered(tag, Date.now());
     await stopAux();
-    await report(tag, tBoot, tW1 || Date.now(), `W1 — the spawn → ready → the restore and its backfill (${liveIds.size} survivors)`, { label, judge: 'red' });
+    await report(tag, tBoot, tW1 || Date.now(), `W1 — the spawn → ready → the restore and its backfill (${liveIds.size} survivors)`, { label, judge: 'red', plant: PLANT_NAMES[red] });
     return rl;
   }
   check(`${label}: the restore says every survivor, its registration pass and each batch under ${HOLD_LAW_MS} ms`, !!rl && rl.n === liveIds.size && rl.registered < HOLD_LAW_MS && rl.longest < HOLD_LAW_MS, rl);
@@ -452,8 +460,6 @@ if (REDS && SHAPES.includes('survive') && !hubDied && left() > 200000) {
   check('RED forking-backfill: planted (the release\'s backfill, verbatim)', plant('forking-backfill'));
   const r2 = await surviveShape('red-fork', { red: 'forking-backfill' });
   check('RED forking-backfill: the restore\'s own batches stay under the bound — the break is the backfill\'s', !!r2 && r2.batches > 1 && r2.longest < HOLD_LAW_MS, r2);
-  if (SHAPES.includes('dead') && !hubDied && left() > 150000) await deadShape('red-dead', { red: 'forking-backfill' });
-  else check(`RED forking-backfill (red-dead) skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
   plant(null);
 } else if (REDS) check(`the red controls skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
 else console.log(`  the red controls: not run (CD4B_PAGE=${PAGE}${process.env.CD4B_REDS === '0' ? ', CD4B_REDS=0' : ''}) — a measure, not the pin`);

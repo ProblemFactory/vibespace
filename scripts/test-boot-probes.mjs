@@ -78,12 +78,12 @@ const OLD = require(M.write('src/server/tls.js', tlsSrc.slice(0, rcAt) + OLD_RUN
 
 // ── a scratch data dir: sockets, metas (session-stdout's file shape), buffers + sidecars ──
 const dataDir = (tag) => { const d = path.join(ROOT, tag); for (const s of ['sockets', 'meta', 'buffers']) fs.mkdirSync(path.join(d, s), { recursive: true }); return d; };
-function instance(BRm, d) {
+function instance(BRm, d, { onAttach = null } = {}) {
   const SOCK = path.join(d, 'sockets'), META = path.join(d, 'meta'), BUF = path.join(d, 'buffers');
   const metaFile = (s) => path.join(META, s + '.json');
   const activeSessions = new Map(), attached = [], notes = [], broadcasts = { n: 0 }, ended = [];
   const api = BRm.create({ rootDir: d, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
-    activeSessions, sessionCounterRef: { value: 0 }, attachToDtach: (id, sp, s) => { attached.push(id); s.pty = null; }, setupSessionPty: () => { },
+    activeSessions, sessionCounterRef: { value: 0 }, attachToDtach: (id, sp, s, o) => { if (onAttach) onAttach(id, s, o); attached.push(id); s.pty = null; }, setupSessionPty: () => { },
     readSessionMeta: (s) => { try { return JSON.parse(fs.readFileSync(metaFile(s), 'utf8')); } catch { return {}; } },
     writeSessionMeta: (s, m) => fs.writeFileSync(metaFile(s), JSON.stringify(m)), deleteSessionMeta: (s) => { try { fs.unlinkSync(metaFile(s)); } catch { } },
     broadcastToSession: () => { }, broadcastActiveSessions: () => { broadcasts.n++; }, refreshWebuiPids: () => { }, sbNoteServerOp: () => { },
@@ -224,27 +224,69 @@ try {
       ok(sites(brSrc.replace('function restoreSessions() {\n', `function restoreSessions() {\n  try { ${plant} } catch { }\n`)) === 1, `CONTROL: a planted ${plant.split('(')[1].split('.')[1] || plant.slice(0, 30)} in restoreSessions is RED`);
   }
 
-  console.log('⑤ B-cd4b: the survivors\' attaches in bounded batches (every survivor in the live set at once)');
+  console.log('⑤ B-cd4b: the survivors\' attaches in bounded batches (every survivor in the live set at once; one used before its batch is attached at once)');
   {
     // 20 survivors no probe answered (adopted ALIVE, as ③): restoreSessions returns with all 20 in the live set and the FIRST
-    // batch attached; the rest attach a batch a turn after a yield, each queued one holding its typed input (the B-c20d road);
-    // one that ended while it waited is never attached; the restore's timing said once. RED: the bound taken away (one batch
-    // of all) ⇒ every attach in the listen turn
-    const BATCH = 'const ATTACH_BATCH = 8;';
+    // batch attached; the rest attach a batch a turn after a yield, each waiting one carrying its attach-at-first-use
+    // (`_attachPending` — every door that writes to its pty asks it first): one USED before its batch is attached at once and
+    // never again; one whose attach throws stays pending (said) and its next use attaches it; one that ended while it waited is
+    // never attached; every attach takes the local road (`restore: true`); the restore's timing said once. THE DOOR (the real
+    // sender, src/server/user-input.js send): a chat message to a survivor whose attach still waits is written after its attach,
+    // never refused. RED: the bound taken away (one batch of all) ⇒ every attach in the listen turn; the attach-at-first-use taken
+    // away ⇒ the used one waits for its batch; the door's ask taken away ⇒ «not a live chat session», nothing written
+    const BATCH = 'const ATTACH_BATCH = 8,';
     const run = async (BRm, tag) => {
-      const X = instance(BRm, dataDir(tag)); const socks = Array.from({ length: 20 }, (_, i) => X.add(300 + i));
+      const opts = [], threw = new Set(); let throwId = null;
+      const X = instance(BRm, dataDir(tag), { onAttach: (id, s, o) => { opts.push(o || null); if (id === throwId && !threw.has(id)) { threw.add(id); throw new Error('spawn EAGAIN (planted)'); } } });
+      const socks = Array.from({ length: 20 }, (_, i) => X.add(300 + i));
+      throwId = socks[15].id;
       const t = await logged(async () => X.api.restoreSessions());
-      const atReturn = { live: X.activeSessions.size, attached: X.attached.length, held: [...X.activeSessions.values()].filter((v) => v._bridgeHeldInputs && v._bridgeHeldInputs.pty === null && v._bridgeHeldInputs.replaying).length };
-      const gone = socks.find((x) => !X.attached.includes(x.id)); if (gone) X.activeSessions.delete(gone.id);   // a queued survivor ends before its turn
+      const pending = () => [...X.activeSessions.values()].filter((v) => typeof v._attachPending === 'function').length;
+      const atReturn = { live: X.activeSessions.size, attached: X.attached.length, pending: pending() };
+      const usedId = socks[12].id, used = X.activeSessions.get(usedId);
+      const usedPend = !!used && typeof used._attachPending === 'function';
+      if (usedPend) used._attachPending();   // a door's ask, before the survivor's batch
+      const usedAtOnce = X.attached.includes(usedId);
+      const gone = socks.find((x) => !X.attached.includes(x.id) && x.id !== throwId); if (gone) X.activeSessions.delete(gone.id);   // ends before its turn
       const lines = [];
-      const log0 = console.log; console.log = (...a) => lines.push(a.join(' '));
-      try { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); } finally { console.log = log0; }
-      return { atReturn, after: X.attached.length, goneAttached: gone ? X.attached.includes(gone.id) : null, said: lines.concat(t.lines).find((l) => /^\[boot-restore\] 20 survivor\(s\): registered in \d+ ms; attached in \d+ batch\(es\) of ≤ 8/.test(l)) || null };
+      const log0 = console.log, warn0 = console.warn; console.log = console.warn = (...a) => lines.push(a.join(' '));
+      try { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); } finally { console.log = log0; console.warn = warn0; }
+      const after = X.attached.length, thrown = X.activeSessions.get(throwId);
+      const stillPending = !!thrown && typeof thrown._attachPending === 'function' && !X.attached.includes(throwId);
+      if (stillPending) thrown._attachPending();   // its next use
+      return { atReturn, usedPend, usedAtOnce, usedOnce: X.attached.filter((x) => x === usedId).length, after, goneAttached: gone ? X.attached.includes(gone.id) : null,
+        stillPending, thrownAttached: X.attached.includes(throwId), allLocal: opts.length > 0 && opts.every((o) => !!o && o.restore === true),
+        warned: lines.find((l) => /the attach failed \(spawn EAGAIN \(planted\)\) — it stays pending: its next use attaches it, or a retry in 2 s/.test(l)) || null,
+        said: lines.concat(t.lines).find((l) => /^\[boot-restore\] 20 survivor\(s\): registered in \d+ ms; attached in \d+ batch\(es\) of ≤ 8 \(\d+ ms, the longest batch \d+ ms\); 1 attached at their first use$/.test(l)) || null };
     };
-    const g = await run(BR, 'batches'), r = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, BATCH, 'const ATTACH_BATCH = Infinity;', 'b-cd4b-one-pass'), 'cd4b-one-pass')), 'batches-red');
-    ok(g.atReturn.live === 20 && g.atReturn.attached === 8 && g.atReturn.held === 12 && g.after === 19 && g.goneAttached === false && !!g.said
-      && r.atReturn.attached === 20,
-      `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the first batch), ${g.atReturn.held} holding their input; then ${g.after} attached a batch a turn, the one that ended meanwhile never; said: «${g.said}»; RED the bound taken away ⇒ ${r.atReturn.attached} attaches in the listen turn`, { g, r });
+    const g = await run(BR, 'batches');
+    const r1 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, BATCH, 'const ATTACH_BATCH = Infinity,', 'b-cd4b-one-pass'), 'cd4b-one-pass')), 'batches-red');
+    const r2 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, ' entry[2]._attachPending = entry.pend; }', ' }', 'b-cd4b-no-first-use'), 'cd4b-no-first-use')), 'batches-red2');
+    ok(g.atReturn.live === 20 && g.atReturn.attached === 8 && g.atReturn.pending === 12 && g.usedPend && g.usedAtOnce && g.usedOnce === 1 && g.after === 18 && g.goneAttached === false
+      && g.stillPending && g.thrownAttached && g.allLocal && !!g.warned && !!g.said,
+      `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the first batch), ${g.atReturn.pending} waiting with their attach-at-first-use; one USED before its batch attached at once (and once: ${g.usedOnce}); then the batches, the one that ended never, the one whose attach threw said and kept pending — its next use attached it; every attach on the local road; said: ${g.said}`, g);
+    ok(r1.atReturn.attached >= 19 && r2.usedPend === false && r2.usedAtOnce === false,
+      `RED: one batch of all ⇒ every attach in the listen turn (${r1.atReturn.attached}); the attach-at-first-use taken away ⇒ a survivor used before its batch is not attached (${r2.usedAtOnce})`, { r1: r1.atReturn, r2: { usedPend: r2.usedPend, usedAtOnce: r2.usedAtOnce } });
+    // THE DOOR: the real sender, a chat survivor whose attach still waits
+    const UI_HOOK = "    if (!session.pty && typeof session._attachPending === 'function') session._attachPending();";
+    const uiSrc = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
+    const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
+    const ad = new ClaudeCodeAdapter({ buffersDir: ROOT });
+    const door = (UI) => {
+      const written = [];
+      const s = { mode: 'chat', backend: 'claude', buffer: '', pty: null };
+      s._attachPending = () => { s._attachPending = null; s.pty = {}; };   // as the restore's: the pty is there once it returns
+      const send = UI.createUserInputSender({ activeSessions: new Map([['w-pend', s]]), adapterRegistry: { get: () => ad }, BUFFERS_DIR: ROOT, broadcastToSession() { }, feedLive() { }, autoResume: null, reattachLocalPty() { }, ptyQuietSince: () => false, writeSessionInput: (x, l) => written.push(l), log() { } }).send;
+      const r = send('w-pend', 'typed before its batch', { msgId: 'm-pend', origin: 'ws' });
+      return { r, written, attached: !!s.pty };
+    };
+    const dg = door(require(path.join(REPO, 'src/server/user-input.js')));
+    const dr = door(require(M.write('src/server/user-input.js', anchored(uiSrc, UI_HOOK, '    // (the ask taken away)', 'b-cd4b-door'), 'cd4b-door')));
+    ok(dg.attached && dg.written.length === 1 && /typed before its batch/.test(dg.written[0]) && !(dg.r && dg.r.code === 'not_chat'),
+      `the door (the real send): a chat message to a survivor whose attach still waits attaches it and is written (${dg.written.length} line), never refused`, dg);
+    ok(!dr.attached && dr.written.length === 0 && !!dr.r && dr.r.code === 'not_chat', `RED the door's ask taken away: «${dr.r && dr.r.error}», nothing written — the message lost`, dr);
+    ok(/async function handleMessage\(data\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(data && typeof data\.sessionId === 'string'\) \{ const s = activeSessions\.get\(data\.sessionId\); if \(s && !s\.pty && typeof s\._attachPending === 'function'\) s\._attachPending\(\); \}\n\s*switch \(data\.type\) \{/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')),
+      'the page\'s socket (src/ws-handler.js): every message naming a session asks its attach-at-first-use BEFORE the switch (its input, an interrupt, a resize, an attach) — pinned by text: the handler is not loaded here');
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }
 

@@ -731,6 +731,9 @@ function registerWsHandler(wss, ctx) {
     });
 
     async function handleMessage(data) {
+      // B-cd4b: a restored survivor whose batched attach still waits (src/server/boot-restore.js) is attached at its first use —
+      // every message below may read or write its pty (input, an interrupt, a resize, an attach)
+      if (data && typeof data.sessionId === 'string') { const s = activeSessions.get(data.sessionId); if (s && !s.pty && typeof s._attachPending === 'function') s._attachPending(); }
       switch (data.type) {
         case 'create': {
           await convOps.openConversation(data, byOfWs(ws), { ws, attachedSessions }); // lane automation-verbs: THE seam — a ws caller runs its own create, byte-identical

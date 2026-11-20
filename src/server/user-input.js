@@ -82,6 +82,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
   function send(sessionId, text, { msgId: givenMsgId = null, origin = 'ws', by = null, steer = false, door = null } = {}) {
     const session = activeSessions.get(sessionId);
     if (!session) return { ok: false, code: 'no_session', error: 'no live session ' + sessionId };
+    if (!session.pty && typeof session._attachPending === 'function') session._attachPending();   // B-cd4b: a restored survivor whose batched attach still waits is attached at its first use
     if (!(session.pty && session.mode === 'chat')) return { ok: false, code: 'not_chat', error: 'not a live chat session' };
     // B-437e: a rewind is out — the CLI would run it FIRST and this message after it: the person's words wait, refused by
     // name with their door (the answer, at most the seconds left of the stated expiry; or Stop) — never past the expiry;

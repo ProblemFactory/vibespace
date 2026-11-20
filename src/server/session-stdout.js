@@ -705,7 +705,7 @@ function repaintFromBuf(id, session) {
 
 // Attach a PTY to an existing dtach socket for I/O.
 // opts.repaint (the RE-attach path): repaintFromBuf above.
-function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
+function attachToDtach(id, socketPath, session, { repaint = false, restore = false } = {}) {
   const repaintClients = () => { if (repaint) repaintFromBuf(id, session); };
   // Arm the liveness probe for THIS attach: if the bridge produced no byte at
   // all, heal it locally. The confirm stage exists because a blocked event
@@ -785,7 +785,9 @@ function attachToDtach(id, socketPath, session, { repaint = false } = {}) {
   // still takes the daemon. New sessions never took this path at all:
   // ws-create spawns `dtach -c` under its own node-pty.
   const deviceMgr = getDeviceMgr();
-  if (deviceMgr && !session.host && deviceMgr.status?.().connected) {
+  // B-cd4b: the restore's attaches stay LOCAL (`restore: true`): its bounded batches run over several turns, and a link that
+  // comes up mid-drain must not send the later survivors down this road (the gate above: the one-pass restore always ran first)
+  if (!restore && deviceMgr && !session.host && deviceMgr.status?.().connected) {
     // OBSERVE THE OPEN. `handle.ready` resolves on the daemon's `session-open`
     // and rejects on `session-error` / pre-ready link death (2.271.0 T1-6) —
     // fire-and-forget made both of those a dead bridge nobody could see.

@@ -641,27 +641,43 @@ async function reprobePass() {
 // stream consumer: a hub restart with 80 survivors held its listen turn 527 ms in ONE synchronous pass (the B-cd4b measure, the
 // first test machine). Every survivor is in the live set when restoreSessions returns (the listen callback's later steps and an
 // attach read it); its ATTACH runs here — the first ATTACH_BATCH at once (a small restore is what it always was), then
-// ATTACH_BATCH a turn with a yield between (setImmediate: the sign-in page and every request answer between two batches). A
-// survivor whose attach still waits HOLDS its typed input (the bridge's held-input road, B-c20d: setupSessionPty replays it onto
-// its new pty) and answers an attach from its buffer as before; one that ended or was replaced meanwhile is never attached.
+// ATTACH_BATCH a turn with a yield between (setImmediate: the sign-in page and every request answer between two batches).
+// A SURVIVOR USED BEFORE ITS BATCH IS ATTACHED AT ONCE: the doors read `session.pty` and refused a pty-less one («not a live chat
+// session» — the page's resent message, an agent's delivery: dropped), so each asks `session._attachPending()` first — the page's
+// socket messages (src/ws-handler.js: its input, an interrupt, a resize, an attach) and every chat send
+// (src/server/user-input.js send). A batch skips one attached that way, or one that ended or was replaced meanwhile. Every
+// restore attach takes the LOCAL road (`restore: true`), as the one-pass restore did (it ran before the device link was up): a
+// link that comes up mid-drain never sends the later survivors down the daemon road. An attach that throws (a refused fork) is
+// said and STAYS PENDING: its next use attaches it, and so do retries 2, 10 and 30 s on — a throw no longer stops the others.
 // ATTACH_BATCH = 8: the measured attach is ~1.1 ms of JavaScript a survivor plus its fork (localAttach 88 ms over 80) — eight a
 // turn stays an order of magnitude under the 250 ms boot law; the restore's own timing is said once, at the end.
-const ATTACH_BATCH = 8;
+const ATTACH_BATCH = 8, ATTACH_RETRY_MS = [2000, 10000, 30000];
 function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
   const total = queue.length;
   if (!total) return;
-  for (const [, , s] of queue.slice(ATTACH_BATCH)) if (!s._bridgeHeldInputs) s._bridgeHeldInputs = { pty: null, lines: [], replaying: true };
-  let batches = 0, longest = 0, attachMs = 0;
+  let batches = 0, longest = 0, attachMs = 0, used = 0;
+  const release = (entry) => { entry.done = true; if (entry[2]._attachPending === entry.pend) entry[2]._attachPending = null; };
+  const attach = (entry, { use = false } = {}) => {
+    const [id, socketPath, session] = entry;
+    if (entry.done) return;
+    if (activeSessions.get(id) !== session || session.pty) { release(entry); return; }   // ended or replaced, or attached by another road
+    try {
+      attachToDtach(id, socketPath, session, { restore: true });
+      release(entry);
+      if (use) used++;
+    } catch (e) {
+      const wait = ATTACH_RETRY_MS[entry.tries++];
+      console.warn(`[boot-restore] ${session.name || id}: the attach failed (${(e && e.message) || e}) — it stays pending: its next use attaches it${wait ? `, or a retry in ${wait / 1000} s` : ''}`);
+      if (wait) { const t = setTimeout(() => attach(entry), wait); if (t.unref) t.unref(); }
+    }
+  };
+  for (const entry of queue) { entry.tries = 0; entry.done = false; entry.pend = () => attach(entry, { use: true }); entry[2]._attachPending = entry.pend; }
   const one = () => {
     const t0 = performance.now();
-    for (const [id, socketPath, session] of queue.splice(0, ATTACH_BATCH)) {
-      if (activeSessions.get(id) !== session) continue;   // ended or replaced while it waited
-      try { attachToDtach(id, socketPath, session); } catch (e) { console.warn(`[boot-restore] ${id}: the attach failed (${e && e.message})`); }
-    }
+    for (const entry of queue.splice(0, ATTACH_BATCH)) attach(entry);
     const ms = performance.now() - t0; batches++; attachMs += ms; if (ms > longest) longest = ms;
     if (queue.length) { setImmediate(one); return; }
-    if (batches > 1) refreshWebuiPids();   // the pids of the survivors attached after the restore's own refresh
-    console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)`);
+    console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)${used ? `; ${used} attached at their first use` : ''}`);
   };
   one();
 }
@@ -950,23 +966,20 @@ function restoreSessions() {
   // apiKeySource (spawned before tracking): chat sessions carry the init
   // record in their buffer; terminal sessions get a /proc env probe (env
   // key = definite API). One broadcast when done.
-  // B-cd4b: NEVER A PROGRAM — the buffer's LAST `apiKeySource":"…"` is read by this process, OFF the loop (fs.promises), ONE
-  // conversation at a time. It used to fork `sh -c grep … | tail -1` for EVERY restored session in ONE synchronous pass: at 80
-  // survivors that was 80 forks of the hub's whole memory in one turn — the loop held 1.6 s (the B-cd4b measure, the first test
-  // machine; the owner's hub is several times that memory, and restarts at every update). A buffer is the wrapper's ≤ 500 KB
-  // ring: its read is the thread pool's, its lastIndexOf well under a millisecond. Until a session's value arrives, its one
-  // reader (src/harnesses/claude.js billingIdentity → the page's billing chip) shows the spawn-time guess marked `guessed`, or
-  // «unknown» — never a confirmed source it did not read (as during the old pass's window)
+  // B-cd4b: NEVER A PROGRAM, NO READ — the LAST `apiKeySource":"…"` of the buffer this restore already read for the conversation
+  // (`s.buffer`: the file resolveWrapperFiles named, the counter-collision case included — never `${id}.buf` by name). It used to
+  // fork `sh -c grep … | tail -1` for EVERY restored session in ONE synchronous pass: at 80 survivors that was 80 forks of the
+  // hub's whole memory in one turn — the loop held 1.6 s (the B-cd4b measure, the first test machine; the owner's hub is several
+  // times that memory, and restarts at every update). A buffer is the wrapper's ≤ 500 KB ring: its lastIndexOf is well under a
+  // millisecond. Until a session's value arrives, its one reader (src/harnesses/claude.js billingIdentity → the page's billing
+  // chip) shows the spawn-time guess marked `guessed`, or «unknown» — never a confirmed source it did not read
   const API_KEY_SOURCE = 'apiKeySource":"';
   const lastApiKeySource = (text) => { const k = text.lastIndexOf(API_KEY_SOURCE); if (k < 0) return null; const m = /^apiKeySource":"([^"]*)"/.exec(text.slice(k, k + 200)); return m ? m[1] : null; };
-  setTimeout(async () => {
+  setTimeout(() => {
     let changed = false;
-    for (const [id, s] of [...activeSessions]) {
-      if (!s.backend || capsOf(s.backend).streamProtocol !== 'stream-json' || s._apiKeySource) continue;
-      let text = '';
-      try { text = await fs.promises.readFile(path.join(BUFFERS_DIR, `${id}.buf`), 'utf8'); } catch { }
-      if (activeSessions.get(id) !== s || s._apiKeySource) continue;   // ended, or the live stream said it meanwhile (its own word wins)
-      const src = lastApiKeySource(text);
+    for (const [, s] of activeSessions) {
+      if (!s.backend || capsOf(s.backend).streamProtocol !== 'stream-json' || s._apiKeySource) continue;   // the live stream said it (its own word wins)
+      const src = lastApiKeySource(typeof s.buffer === 'string' ? s.buffer : '');
       if (src) {
         s._apiKeySource = src;
         if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), apiKeySource: src }); } catch { } }
