@@ -241,12 +241,12 @@ console.log('③ stop() is terminal for an arm in flight');
   const l1 = startLane({ name: 't1', now, log: quiet, onState: (s) => states.push(s.state), onEvent: async () => ({ ok: true }), connect: () => new Promise((res) => { release = () => res({ close() { conn.closed++; } }); }) });
   l1.stop();
   release();
-  await sleep(20);
+  await waitFor(() => conn.closed === 1 || states.includes('live'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
   ok(conn.closed === 1 && states[states.length - 1] === 'stopped' && !states.includes('live'), 'a connection that lands after stop() is closed on the spot and never reports live');
   // handlers of a stopped arm
   let hh = null; let engineCalls = 0; const st2 = [];
   const l2 = startLane({ name: 't2', now, log: quiet, onState: (s) => st2.push(s.state), onEvent: async () => { engineCalls++; return { ok: true }; }, connect: async (h) => { hh = h; return { close() {} }; } });
-  await sleep(10);
+  await waitFor(() => st2.includes('live'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
   ok(st2.includes('live'), 'positive control: the same lane reports live when the connect lands before stop()');
   l2.stop();
   const ans = await hh.event({ kind: 'record' });
@@ -409,13 +409,13 @@ console.log('⑥ the Lark long-connection lane');
   else {
     const st2 = [];
     const h2 = createLarkLive({ adapterId: 'lark', now, log: quiet, credential: () => ({ values: { appId: 'a', appSecret: 'b' } }), toRecord: async () => null }).start({ onState: (s) => st2.push(s), onEvent: async () => ({}) });
-    await sleep(20);
+    await waitFor(() => st2.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
     ok(st2.some((s) => s.state === 'unavailable' && /not installed/.test(s.why) && s.code === 'sdk-not-installed'), 'without the SDK the lane parks as `unavailable` naming the install line — never a crash, never a retry loop');
     h2.stop();
   }
   const st3 = [];
   const h3 = createLarkLive({ adapterId: 'lark', sdk, now, log: quiet, credential: () => ({ values: null, why: 'no app credential' }), toRecord: async () => null }).start({ onState: (s) => st3.push(s), onEvent: async () => ({}) });
-  await sleep(20);
+  await waitFor(() => st3.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
   ok(st3.some((s) => s.state === 'unavailable' && s.code === 'needs-credentials'), 'without an app credential the lane parks as `unavailable` (needs-credentials)');
   h3.stop();
 }
@@ -453,12 +453,12 @@ console.log('⑦ the Gmail push lane');
   ok(pulls <= pullsAtStop + 1, 'stop() ends the pull loop');
   const st2 = [];
   const h2 = mk({ tokenScopes: () => ['https://www.googleapis.com/auth/gmail.readonly'] }).start({ onState: (s) => st2.push(s), onEvent: async () => ({}) });
-  await sleep(20);
+  await waitFor(() => st2.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
   ok(st2.some((s) => s.state === 'unavailable' && s.code === 'scope-missing'), 'a token without the pubsub scope is a NAMED refusal (re-authorize with push enabled)');
   h2.stop();
   const st3 = [];
   const h3 = mk({ options: () => ({ topic: '', subscription: '' }) }).start({ onState: (s) => st3.push(s), onEvent: async () => ({}) });
-  await sleep(20);
+  await waitFor(() => st3.some((s) => s.state === 'unavailable'));   // (B-1217 member 17, unit 2) a verdict waits for what happened, never a fixed sleep
   ok(st3.some((s) => s.state === 'unavailable' && s.code === 'push-not-configured'), 'missing topic/subscription options are a NAMED refusal');
   h3.stop();
   // the default-off switch, through the ONE resolver

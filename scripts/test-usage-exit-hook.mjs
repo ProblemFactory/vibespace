@@ -110,13 +110,13 @@ setInterval(() => { }, 1000);
 `);
 const blockedStub = (fifo) => { const f = path.join(tmp, path.basename(fifo) + '-worker.js'); fs.writeFileSync(f, `const fs = require('fs'); const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (m && m.op === 'fold') fs.readFileSync(${JSON.stringify(fifo)}); });`); return f; };
 const busyStub = path.join(tmp, 'busy-worker.js');
-fs.writeFileSync(busyStub, `const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (m && m.op === 'fold') { let x = 0; for (;;) x += Math.sqrt(x + 1); } });`);
+fs.writeFileSync(busyStub, `const { parentPort } = require('worker_threads'); parentPort.on('message', (m) => { if (m && m.op === 'fold') { require('fs').writeFileSync(${JSON.stringify(path.join(tmp, 'spin.'))} + process.pid, ''); let x = 0; for (;;) x += Math.sqrt(x + 1); } });`);
 function child(name, uhPath, mode) {
   const data = path.join(tmp, name); fs.mkdirSync(data, { recursive: true });
   let stub = busyStub;
   if (mode !== 'busy') { const fifo = path.join(tmp, name + '.fifo'); execFileSync('mkfifo', [fifo]); stub = blockedStub(fifo); }
   const c = spawn(process.execPath, [childFile, uhPath, data, stub, mode], { stdio: ['ignore', 'pipe', 'pipe'] });
-  c.name = name; c.out = ''; c.err = '';
+  c.name = name; c.mode = mode; c.out = ''; c.err = '';
   c.stdout.on('data', (d) => { c.out += d; }); c.stderr.on('data', (d) => { c.err += d; });
   c.done = new Promise((r) => c.on('exit', (code, signal) => r({ code, signal, at: performance.now() })));
   children.push(c);
@@ -144,7 +144,13 @@ const legs = {
 const all = Object.values(legs);
 const up = await until(() => all.every((c) => /READY/.test(c.out) && (c.name.includes('busy') || c.name.includes('every') || asleep(c))), 20000, 'every child to be READY (a blocked fold asleep in its fifo open)');
 ok(up, `six child servers up: ${all.map((c) => c.name + ' ' + ((c.out.match(/READY (.*)/) || [])[1] || c.out.slice(-80) + c.err.slice(-200))).join(' · ')}`);
-await sleep(200); // the busy folds are spinning by now
+// (B-1217 member 17, unit 2) THE SCENE IS PLACED: each busy fold's worker writes «spin.<its process>» in the SAME synchronous step as
+// the loop it spins in, and the SIGTERM waits for every busy child's mark — never a 200 ms hope (a fold not yet spinning is judged
+// on a worker that is not busy)
+const spinning = (c) => fs.existsSync(path.join(tmp, 'spin.' + c.pid));
+const busyKids = all.filter((c) => c.mode === 'busy');
+const spun = await until(() => busyKids.every(spinning), 20000, 'every busy fold spinning (its spin mark)');
+ok(!!spun && busyKids.length === 2, `setup: every busy fold is spinning before the SIGTERM (${busyKids.map((c) => `${c.name} ${spinning(c)}`).join(' · ')})`);
 const t = performance.now();
 for (const c of all) c.kill('SIGTERM');
 const res = Object.fromEntries(await Promise.all(Object.entries(legs).map(async ([k, c]) => [k, await Promise.race([c.done, sleep(8000).then(() => null)])])));

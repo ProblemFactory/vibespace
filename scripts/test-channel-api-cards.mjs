@@ -11,6 +11,7 @@ import os from 'os';
 import path from 'path';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
+const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms / 2); k <= n; k++) { if (pred()) return true; await new Promise((r) => setTimeout(r, 2)); } console.log(`  … waited ${ms} ms of turns for ${what} — it never came`); return null; };   // B-1217 member 17: bounded by a COUNT of turns, says what never came
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -155,7 +156,8 @@ for (const k of Object.keys(IWORDS)) ok(IR[k], IWORDS[k], IR);
   h.setClock(Date.now()); h.add({ id: 'api-t1', at: Date.now() }); await h.cards.sync(); await h.cards.collect('api-t1');
   h.api.ran('api-t1'); await h.cards.sync();
   const held = h.delivered.length === 0;
-  h.setClock(Date.now() + 100); await new Promise((z) => setTimeout(z, 300));
+  h.setClock(Date.now() + 100); await waitUntil(() => h.delivered.length >= 1, 5000, 'the fallback timer\'s receipt');   // (B-1217 member 17, unit 2) the verdict waits for the receipt, never a 300 ms hope
+  await new Promise((z) => setTimeout(z, 300));   // …then the old 300 ms as an ABSENCE window: a second receipt (nothing to wait for) would still be seen — nothing loosened
   ok(held && h.delivered.length === 1 && /api-t1/.test(h.delivered[0].text), 'the fallback is its OWN one-shot timer — a held receipt whose CLI never reads it goes as a message after the window, with no other sync', JSON.stringify(h.delivered.map((d) => d.text.slice(0, 40))));
   h.cards.stop();
 }

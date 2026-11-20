@@ -51,6 +51,7 @@ import { createRequire } from 'node:module';
 import { scratch, anchored } from './scratch.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms / 2); k <= n; k++) { if (pred()) return true; await new Promise((r) => setTimeout(r, 2)); } console.log(`  … waited ${ms} ms of turns for ${what} — it never came`); return null; };   // B-1217 member 17: bounded by a COUNT of turns, says what never came
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -2512,7 +2513,7 @@ console.log('§R confirm, then mark — the group report, through the REAL promp
   // a caller that does not confirm keeps the old law (LEGACY), and the RED control is that law under the header
   await f.eng.post({ group: gid, from: A, text: 'a second note' });
   const r4 = await ask('vsst_beta', false);
-  await new Promise((r) => setTimeout(r, 30));
+  await waitUntil(() => marker() > at, 5000, 'the LEGACY marker moving');   // (B-1217 member 17, unit 2) the verdict waits for the marker, never a 30 ms hope
   ok(r4.context.includes('a second note') && !r4.delivery && marker() > at, 'a caller without the header (LEGACY): the marker moves as the answer is composed, as before');
   f.close();
 }

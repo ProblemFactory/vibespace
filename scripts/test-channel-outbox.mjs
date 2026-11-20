@@ -967,7 +967,7 @@ function mkReal(opts = {}) {
   const userTodos = new UserTodoManager({ dataDir, now });
   const e = (opts.engine || ENG).create({
     dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: reg, broadcast: (m) => events.push(m),
-    userTodos, deliver: ladder, now, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {} },
+    userTodos, deliver: ladder, now, serverSetting: () => undefined, log: opts.log || { log() {}, warn() {}, error() {} },
     liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }],
   });
   return { eng: e, events, delivered, userTodos, ladder, real, send, advance: (ms) => { offset += ms; }, dataDir };
@@ -1127,29 +1127,38 @@ async function takenLeg(ladderMod, name) {
 }
 // A REPLACE CUT IN HALF: the new draft stamped `replaces`, the old still awaiting when the process dies ⇒ at boot
 // the old one is withdrawn (replacedBy), the pointer counts one — never two approvable copies of one message
-async function crashLeg(ENGmod, name) {
+async function crashLeg(ENGmod, name, { sweep = true } = {}) {
   const W = mkReal({ name }); const { eng } = W; await prime(eng);
   const old = await eng.propose(AGENT, A, C, { text: 'first' });
   const nw = await eng.propose(AGENT, A, C, { text: 'second' });
   await eng.store.outbox.update((ob) => { ob.proposals[nw.proposal.id].replaces = old.proposal.id; });
   eng.stop();
-  await sleep(30);
-  const W2 = mkReal({ name, dataDir: W.dataDir, engine: ENGmod }); const { eng: e2 } = W2;
+  // (B-1217 member 17, unit 2) WHAT HAPPENED, never a sleep: the stopped engine's outbox — the file the next boot reads — is waited
+  // for through the store writer's OWN door (durable: its bytes on disk); the next boot's verdict waits for the replace sweep's OWN
+  // line («finished at boot»), said once its withdrawal (and the pointer with it) resolved. The control has no sweep: nothing happens to
+  // wait for there — an ABSENCE, judged after the old 60 ms window, named so
+  const landed = await require(path.join(REPO, 'src/store-writer.js')).storeWriter().durable(eng.store.outboxFile).then((x) => x !== false, () => false);
+  const lines = []; const cap = { log: (...a) => lines.push(a.join(' ')), warn: (...a) => lines.push(a.join(' ')), error: (...a) => lines.push(a.join(' ')) };
+  const W2 = mkReal({ name, dataDir: W.dataDir, engine: ENGmod, log: cap }); const { eng: e2 } = W2;
   e2.start();
-  await sleep(60);
+  let swept = null;
+  if (sweep) swept = await waitUntil(() => lines.some((l) => l.includes(`outbox ${old.proposal.id}: a replace by`) && l.includes('finished at boot')), 5000, 'the boot replace sweep finishing the cut replace');
+  else await sleep(60);   // the control: an absence window (its copy has no sweep — nothing to wait for)
+  await e2.settleWakes();
   const o = e2.store.outbox.snapshot().proposals[old.proposal.id], n = e2.store.outbox.snapshot().proposals[nw.proposal.id];
   const open = W2.userTodos.snapshot().open.filter((i) => i.sessionKey === 'channels');
   const receipts = W2.delivered.filter((d) => d.opts.spendReason === 'channel-receipt').length;
   e2.stop();
-  return { old: o.state, replacedBy: o.replacedBy || null, nw: n.state, newId: nw.proposal.id, detail: open.length ? open[0].detail : '', receipts };
+  return { old: o.state, replacedBy: o.replacedBy || null, nw: n.state, newId: nw.proposal.id, detail: open.length ? open[0].detail : '', receipts, landed, swept };
 }
 {
   const cr = await crashLeg(ENG, 'crash');
+  ok(cr.landed && cr.swept, `setup: the stopped engine's outbox was on disk (the writer's own durable) before the next boot read it (${cr.landed}), and the boot's replace sweep said it finished (${cr.swept})`);
   ok(cr.old === 'withdrawn' && cr.replacedBy === cr.newId && cr.nw === 'awaiting-approval' && /1 proposal awaiting/.test(cr.detail) && cr.receipts === 0, `A REPLACE CUT IN HALF is finished at boot: the old draft withdrawn (replacedBy the new), the new one awaiting, the pointer counts ONE, no receipt handed to the agent that replaced it`, JSON.stringify(cr));
   const SWEEP = "    sweepReplaces().catch((err) => log.warn(`[channels] boot replace sweep failed: ${(err && err.message) || err}`));   // verify r2: a replace the previous process died inside";
   ok(esrcV2.split(SWEEP).length === 2, 'the boot replace sweep is called once from start() (the control removes exactly that call)');
   const nosweep = MV2.load('src/server/channels-engine.js', esrcV2.replace(SWEEP, ''), 'no-replace-sweep');
-  const cc = await crashLeg(nosweep, 'crash-ctl');
+  const cc = await crashLeg(nosweep, 'crash-ctl', { sweep: false });
   ok(cc.old === 'awaiting-approval' && cc.nw === 'awaiting-approval' && cc.replacedBy === null, `CONTROL: without the sweep both copies await the user (${cc.old} + ${cc.nw}) — the leg would go red`);
 }
 // TWO Check-outcome PRESSES on one lost send ask the adapter ONCE (reconcile is on the proposal's chain)
@@ -1179,7 +1188,9 @@ async function drainAfterGuessLeg(ENGmod, name) {
   await eng.approve(p.proposal.id, {});
   await eng.store.outbox.update((ob) => { const x = ob.proposals[p.proposal.id]; x.receiptDrainedAt = 5; x.receiptDrainedHow = 'reconciled'; });
   real.drainStash('agent-1');
-  await sleep(15);
+  // (B-1217 member 17, unit 2) the verdict waits for the drain's own stamp (it moves off the reconciled 5 in the real engine and in the
+  // control alike), never a 15 ms hope
+  await waitUntil(() => eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDrainedAt !== 5, 5000, 'the drain applied to the proposal');
   const x = eng.store.outbox.snapshot().proposals[p.proposal.id], f = fateOf(W, p.proposal.id);
   eng.stop();
   return { at: x.receiptDrainedAt, how: x.receiptDrainedHow, text: f.text };
