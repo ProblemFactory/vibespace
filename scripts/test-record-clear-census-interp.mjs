@@ -600,6 +600,8 @@ const I_RECV = {
   'src/lib/browser-live-window.js|x': ['browser profile', 'a Running row\'s profile label (BROWSE YOURSELF\'s Stop refusal)'],
   'src/routes/browser.js|p0': ['browser profile', 'a profile\'s label (the human Restart refused while the person browses it — the .197 integration)'],
   'src/routes/browser.js|row': ['browser profile', 'a browser row\'s label (the Stop / Restart refused while the person browses it)'],
+  // B-5f2e line 2 (lane bl-browser-b): the vault fill's refusal names the tab's frames of another site — the hub's own sentence
+  'src/routes/browser.js|framed': ['frame origins', 'B-5f2e: the hub\'s OWN sentence about the tab\'s out-of-process frames (browser-stuck otherSiteFrameText: fixed words + each frame\'s web ORIGIN, scheme://host[:port] of the watch\'s kept iframe target url — no path, no title, no page text, no typed word) — answered to the asking agent\'s fill refusal only (its CLI\'s stderr), never a log, a journal, a toast or a kept card'],
   'src/lib/channel-thread-pane.js|r.proposal': ['channel proposal', 'the outbox engine\'s failure reason for a send (the channel\'s own error words) — no record of the five kinds'],
   'src/lib/manage-agents.js|said': ['pool verdict', 'the gather route\'s answer worded by PURE gatherWords (members and counts) — lane pool-pin'],
   'src/lib/session-lifecycle.js|r': ['account', 'a pool member row (the conversation\'s pin menu) — lane pool-pin'],
