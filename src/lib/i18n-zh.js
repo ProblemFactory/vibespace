@@ -1864,7 +1864,7 @@ export default {
   "End them": "结束它们",
   "Ended: {names}": "已结束：{names}",
   "Still running: {names}": "仍在运行：{names}",
-  "{n} had already ended": "{n} 个已自行结束",
+  "left-behind::{n} had already ended": "{n} 个已自行结束",
   "Only a press on this page can end them": "只有在本页面上按下才能结束它们",
   "Ending them on a paired machine is not offered yet": "暂不支持在配对的机器上结束它们",
   "Nothing is listed to end any more": "已没有可结束的进程",

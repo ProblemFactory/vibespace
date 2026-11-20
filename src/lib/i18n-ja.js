@@ -1864,7 +1864,7 @@ export default {
   "End them": "終了する",
   "Ended: {names}": "終了しました：{names}",
   "Still running: {names}": "まだ実行中：{names}",
-  "{n} had already ended": "{n} 個はすでに終了していました",
+  "left-behind::{n} had already ended": "{n} 個はすでに終了していました",
   "Only a press on this page can end them": "このページで押した場合だけ終了できます",
   "Ending them on a paired machine is not offered yet": "接続したマシンでの終了はまだできません",
   "Nothing is listed to end any more": "終了できるものはもうありません",

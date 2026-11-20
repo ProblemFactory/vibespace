@@ -12,7 +12,7 @@ import { fmtElapsed } from './subagent-card.js'; // lane agy-subagent-cards: a r
 import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
 import { UI_ICONS } from './icons.js';
-import { t } from './i18n.js';
+import { t, tc } from './i18n.js';
 import { pressVerdict } from './press-arm.js'; // B-ef04: a card row that opens a conversation counts a press only on what sat still
 /** B-ef04: the transcript's rows that OPEN A CONVERSATION — a channel card's row, a peer's name — a press on one that the list just
  *  moved under a still pointer is refused */
@@ -7145,7 +7145,7 @@ class ChatView {
       else {
         if (Array.isArray(m.ended) && m.ended.length) said.push(t('Ended: {names}', { names: [...new Set(m.ended)].join(', ') }));
         if (Array.isArray(m.still) && m.still.length) said.push(t('Still running: {names}', { names: [...new Set(m.still)].join(', ') }));
-        if (m.gone > 0) said.push(t('{n} had already ended', { n: m.gone }));
+        if (m.gone > 0) said.push(tc('left-behind', '{n} had already ended', { n: m.gone }));   // processes (the proposal card's same words count conversations)
         if (m.held > 0) said.push(t('{n} not ended: VibeSpace or a background job holds it now', { n: m.held }));
         if (m.unread > 0) said.push(t('{n} could not be checked again — not ended; press again', { n: m.unread }));
       }
