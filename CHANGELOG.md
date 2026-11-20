@@ -20,6 +20,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In 2.369.413 the agent was told it could not see or type into a frame from another site, though it can by ref; the note now says what is true.
 - For you's item about storages still on a replaced company client lists whole names, then how many more, when there are many.
 - A permission card the agent withdrew no longer says «Denied»: it says «Not run», as it did when the result came first. «Denied» means somebody denied it.
+- A comment in a document opened from a conversation that has since stopped now waits for that conversation, even when another live one also wrote the file.
 
 ## 2.369.413 — 2026-11-20
 

@@ -141,6 +141,12 @@ This file is the engineers' record of every release: the lanes, the verification
   - the span's comment and kb line say that a build BETWEEN two tracked dumps is read as inside the span.
 - (4) THE CORRECTION'S CALL SITE for any number of corrections (2.1.328 has two: nHn = m9t's text, and rHn). Each is found by its content and judged by the row of its own text; the pick may name them all in its remote-cancel branch, in any shape, with ww the other branch; the call site read is PRINTED. The binary is on no machine of ours: the hosted run on 2.1.328 proves it.
 
+### bl-proposals B-b0e3's remainder — a Doc window whose own conversation STOPPED reaches it, not the live holder
+- THE HARM (left, named, in 2.369.412's two-writer cure): the registry lists live sessions only, and a stopped session's rows go with its session-meta file. A window opened from conversation A that later stopped, while B (live) also held the file, sent its comments and saves to B. The stopped-owner memo (B-b51a) kept a document's LAST owner and a window's `from`, not whether that `from` wrote this document.
+- THE CURE (src/server/doc-engine.js): the memo remembers every conversation SEEN holding a document: `h` = docKey → {at, c: {cid: at}}, bounded MEMO_CAP documents × HOLDERS_CAP 20, in the same data/doc-owners.json (no new write site). ownerOf notes the live holders at every resolution (`artifacts.holdersOf` → PURE src/artifacts.js holdersIn). A window whose `from` is not live, and whose remembered conversation held the document, is answered FIRST, via 'stopped': its stash, or its resumed session by conversation id.
+- BOUND (said): a conversation never seen holding the file while it lived (no Doc owner read during its life) is not known to have held it; the live holder answers as before.
+- Gate: test-doc-model §6, the stopped leg over the REAL registry (A seen, A stops, A's comment into A's stash; a document A never held goes to B), with a RED control (an engine without the held check) that proves its plant first.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
