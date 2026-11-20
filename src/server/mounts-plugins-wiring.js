@@ -378,7 +378,7 @@ setTimeout(() => { try { const n = automation.reconcile(); if (n) console.log(`[
 app.locals.vaultGate = require('../routes/vault.js').vaultGate({ vault, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req) });
 // THE DECISION ENGINE (lane decision-core): the ONE decisions-API caller — the plugin row attaches its switches, the
 // registry row `llm` gives the key, its Test runner is the engine's own one-question judgment
-const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice });
+const decisionEngine = require('./decision-engine.js').create({ dataDir: path.join(rootDir, 'data'), integrations, serverNotice, settingsHeld: () => (persistenceRouter && typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null) });   // B-225b: the settings held ⇒ the judge refuses NOT NOW
 try { if (integrations && typeof integrations.registerTest === 'function') integrations.registerTest(decisionEngine.ROW_ID, decisionEngine.testRunner); } catch (e) { console.warn('[decision] Test runner not registered:', e.message); }
 // lane decision-inbox-rank: THE BOARD the For-you judge's facts are read from, once a pass — vibespace-status's record +
 // history of a conversation and its newest vibespace-task progress note (the stores' own readers; nothing is kept here)

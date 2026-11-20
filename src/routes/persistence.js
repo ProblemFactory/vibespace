@@ -1155,13 +1155,48 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // ── Settings ──
   const SETTINGS_FILE = path.join(dataDir, 'settings.json');
   let _settingsCache = null;
+  // B-225b (cut 4 — R1, R2, R3, R11): THE SETTINGS' HOLD. settings.json stays synchronous (written at the call) and is read ONCE at
+  // the start through its hold. HELD (a read that failed, bytes that are not the settings) ⇒ NO VALUE: GET /api/settings and every
+  // save answer 503 store_unread by name, nothing is written over it (the release read it as {} and the next save of the Settings
+  // page wrote its defaults over the person's — the spending caps included). Readers inside the hub get every row on its DEFAULT,
+  // handed as a FROZEN object that is not the cache (R3), carrying the hold under SETTINGS_HELD: the owner's rows' readers (the spend
+  // guard, the judge) ask it and answer NOT NOW — a refusal that uses nothing up (R11). THE LIFT IS A SETTINGS CHANGE (settingsAgain).
+  const SETTINGS_HELD = Symbol.for('vibespace.settings-held');   // (server.js serverSetting(key) hands any key through: serverSetting(SETTINGS_HELD))
+  let _settingsRead = false;
+  const settingsHold = SH.create({
+    file: SETTINGS_FILE,
+    valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
+    onLift: () => settingsAgain('its hold lifted'),
+    onSaid: (h) => { console.warn(`[settings] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the settings are HELD: every row runs on its default, nothing unattended spends, nothing is written over them`); storeWord('store-held', h); },
+  });
+  /** while HELD: every row on its default — a frozen object that is NOT the cache, the hold's facts under SETTINGS_HELD */
+  const heldSettingsView = (h) => Object.freeze(Object.defineProperty({}, SETTINGS_HELD, { value: Object.freeze({ ...h }), enumerable: false }));
 
   function readSettings() {
     if (_settingsCache) return _settingsCache;
-    ensureDir(dataDir);
-    try { _settingsCache = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf-8')); }
-    catch { _settingsCache = {}; }
+    if (!_settingsRead) { _settingsRead = true; ensureDir(dataDir); settingsHold.readAtStart(); }
+    const h = settingsHold.held();
+    if (h) return heldSettingsView(h);
+    const v = settingsHold.answer();
+    settingsHold.takeText();
+    _settingsCache = v === undefined ? {} : v;   // NOT THERE (R6): no row stored, nothing written
+    try { settingsHold.set(_settingsCache); } catch { /* not held here */ }
     return _settingsCache;
+  }
+  /** R11: THE LIFT IS A SETTINGS CHANGE — the read, the setting holds' OWED returns (each its own write, with its hooks), the write's
+   *  hooks, then spend: every waiting unattended turn is judged again against the real caps (noteLimitsWritten with no «before») */
+  const _settingsLiftHooks = [];
+  router.onSettingsLift = (fn) => { if (typeof fn === 'function') _settingsLiftHooks.push(fn); };
+  function settingsAgain(why) {
+    _settingsCache = null;
+    try { readSettings(); } catch (e) { console.warn(`[settings] the settings could not be read again (${why}): ${(e && e.message) || e}`); return; }
+    console.log(`[settings] the settings are read again (${why})`);
+    for (const fn of _settingsLiftHooks) { try { fn(); } catch (e) { console.warn('[settings] a lift hook failed:', e && e.message); } }
+    const data = readSettings(), spend = spendOf(data);
+    broadcast({ type: 'settings-updated', settings: data, ...(spend ? { spend } : {}) });
+    try { onSettingsWrite?.(data, {}); } catch (e) { console.warn('[settings] change callback failed:', e.message); }
+    try { require('../server/spend-guard.js').noteLimitsWritten(null, spend); } catch { }
+    storeWord('store-lifted', { file: 'settings.json', why });
   }
 
   // lane owner-press-attended r2: THE IN-FORCE SPEND NUMBERS RIDE THE WRITE — the POST's echo AND the settings-updated
@@ -1177,6 +1212,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   const blankCaps = (d) => { if (d && typeof d === 'object') for (const k of SPEND_CAP_KEYS) if (Object.prototype.hasOwnProperty.call(d, k) && d[k] === null) d[k] = ''; return d; };
   function spendOf(data) { try { return require('../spend-authorizer.js').budgetLimits((k) => (data || {})[k]); } catch { return null; } }
   function writeSettings(data) {
+    readSettings();
+    settingsHold.refuseIfHeld('this settings change');   // B-225b R1: the settings HELD — nothing is written over them
     ensureDir(dataDir);
     const prev = readSettings(); // capture BEFORE the cache swap (for the change callback)
     // settings-prune verify r1: a RETIRED key may leave the file (the boot migration archives it, then strips) but never
@@ -1185,7 +1222,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const back = RETIRED_SETTING_KEYS.filter((k) => Object.hasOwn(data, k) && !(prev && Object.hasOwn(prev, k)));
     if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }
     _settingsCache = data;
-    writeJsonAtomic(SETTINGS_FILE, data);
+    try { settingsHold.write(data); }   // the hold's ONE write: the pid temp, then the rename (NOT THERE ⇒ created exclusively)
+    catch (e) { if (e && e.code === 'store_appeared') settingsAgain('a file appeared where the start found none'); throw e; }
     const spend = spendOf(data);
     broadcast({ type: 'settings-updated', settings: data, ...(spend ? { spend } : {}) });
     // Server-side change hook (2.190.0): the ONLY settings key with a server
@@ -1204,7 +1242,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.readSettings = readSettings;
   /** settings-prune verify r1: a boot migration may rewrite data/settings.json AFTER something read it into the cache —
    *  server.js drops the cache once they ran, so GET (and the next save) start from what the file now holds. */
-  router.reloadSettings = () => { _settingsCache = null; };
+  router.reloadSettings = () => {
+    // B-225b R12: a re-read REPLACES the copy only with the settings it READ — a read that fails, or bytes that are not the settings,
+    // keep the copy in memory (said); a held store is read again by its own hold
+    if (settingsHold.held()) return;
+    let v;
+    try { v = SH.readNow(SETTINGS_FILE, { valid: (x) => !!x && typeof x === 'object' && !Array.isArray(x), what: 'reading the settings again' }); }
+    catch (e) { console.warn(`[settings] the settings could not be read again after the migrations — the copy in memory is kept: ${(e && e.message) || e}`); return; }
+    if (v === undefined) return;
+    _settingsCache = v; try { settingsHold.set(v); } catch { /* not held */ }
+  };
+  router.settingsHeld = () => settingsHold.held();
   /** lane browser-propose: a SERVER act that writes a setting the user approved — the PATCH route's own merge through the ONE writer (atomic file, `settings-updated` broadcast to every client). */
   router.patchSettings = (patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('patchSettings: expected an object');
@@ -1214,7 +1262,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return true;
   };
 
-  router.get('/api/settings', (req, res) => res.json(readSettings()));
+  router.get('/api/settings', (req, res) => { readSettings(); settingsHold.refuseIfHeld(); res.json(readSettings()); });   // B-225b R2: held ⇒ 503 by name (never the defaults)
   // lane engine-spi-egress L1b (V3): a browser engine's PROGRAM and SITE LIST rows are the owner's — a request carrying a bearer (an
   // agent, a job, an automation key) never writes them, sign-in on or off (src/browser-engines.js ENGINE_OWNER_ROW_RE). r2: ONE
   // verdict for EVERY bearer write road (PATCH, the whole-file POST, a config import's settings section): the file the write would
@@ -1287,6 +1335,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
 
   router.post('/api/settings', (req, res) => {
+    readSettings(); settingsHold.refuseIfHeld('this settings change');   // B-225b R1/R2: held ⇒ 503 by name, before any row is judged
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
     blankCaps(data);   // B-0a33 cure: the Settings page's cleared cap field (null) is stored BLANK — refused and said, never the default
@@ -1301,6 +1350,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   });
 
   router.patch('/api/settings', (req, res) => {
+    readSettings(); settingsHold.refuseIfHeld('this settings change');   // B-225b R1/R2: held ⇒ 503 by name
     const current = readSettings();
     const patch = req.body;
     if (!patch || typeof patch !== 'object') return res.status(400).json({ error: 'Expected object' });
@@ -1548,7 +1598,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   // B-225b: EVERY door of the desktops and the custom themes answers a held store BY NAME (503 store_unread) — its handlers wrapped
   // once, here, by path (the conversation list's and the bookmarks' doors say it in their own handlers)
-  for (const layer of router.stack) if (layer.route && /^\/api\/(layouts|layouts-active|layouts-autosave|custom-grids|layout-history|custom-themes)(\/|$)/.test(layer.route.path)) for (const l of layer.route.stack) l.handle = guarded(l.handle);
+  for (const layer of router.stack) if (layer.route && /^\/api\/(layouts|layouts-active|layouts-autosave|custom-grids|layout-history|custom-themes|settings)(\/|$)/.test(layer.route.path)) for (const l of layer.route.stack) l.handle = guarded(l.handle);
   return router;
 }
 

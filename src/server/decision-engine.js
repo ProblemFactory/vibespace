@@ -82,7 +82,11 @@ const sha = (s) => crypto.createHash('sha256').update(String(s)).digest('hex');
 function readJson(file, fallback) { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return fallback; } }
 
 function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis.fetch(...a), now = () => Date.now(),
-  tzOffset = (ms) => new Date(ms).getTimezoneOffset(), serverNotice = null, log = console, baseUrlFor = null, timeoutMs = 15000, writer = null } = {}) {
+  tzOffset = (ms) => new Date(ms).getTimezoneOffset(), serverNotice = null, log = console, baseUrlFor = null, timeoutMs = 15000, writer = null,
+  settingsHeld = () => null } = {}) {
+  // B-225b R3/R11 (the persistence holds): data/settings.json HELD — the plugin's rows (its daily dollar cap among them) read their
+  // DEFAULTS, so no billed call may lean on them: NOT NOW by name ('settings-unread'), nothing reserved, nothing spent
+  const settingsUnread = () => { try { return !!settingsHeld(); } catch { return false; } };
   const file = (n) => path.join(dataDir, n);
   const fetch = fetchImpl;                             // the request primitive by its census name (tests hand in a fake)
   const F = { memo: file('decision-memo.json'), usage: file('decision-usage.json'), journal: file('decision-journal.jsonl') };
@@ -298,6 +302,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
     const key = memoParts ? M.memoKey(use, memoParts, sha) : null;
     if (key && memo.has(key)) { const a = memo.get(key); memo.delete(key); memo.set(key, a); return { ok: true, memo: true, answers: n > 1 ? M.unbatchAnswers(a, n) : a }; }
     const s = settings();
+    if (settingsUnread()) return quiet(use, 'settings-unread');   // B-225b: the owner's cap is not known — never judged on its default
     const cred = credential(resolved);
     if (stop && cred && stop.sig !== credSig(cred)) { stop = null; say('ok', 'a new key or model is saved: calls resume'); }
     const input = M.buildInput(use, parts);
@@ -547,6 +552,7 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
   // ── THE LEDGER (lane rule-learning) — the budget door of the text-model client (header) ──
   const ledger = Object.freeze({
     settings,
+    settingsUnread,   // B-225b: the text-model client asks it before its verdict
     spentUsd: () => totalOf(today()).usd + reservedUsd(),
     useUsd: (use) => { const x = today().byUse[use]; return (x ? x.usd : 0) + [...open.values()].filter((r) => r.use === use).reduce((a, r) => a + r.usd, 0); },
     hold: (use, usd) => { const id = ++openSeq; open.set(id, { use, usd: Number(usd) || 0 }); return id; },

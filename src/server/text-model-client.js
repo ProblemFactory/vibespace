@@ -81,6 +81,7 @@ function create({ integrations = null, ledger = null, fetchImpl = (...a) => glob
   /** ONE completion. → {ok: true, answer, usage, usd, model, label} | {ok: false, why, status?}. */
   async function complete({ use = 'learn', messages = [], schema = null, est = 0, outMax = RL.LEARN.outputMax, name = 'proposal' } = {}) {
     if (!ledger) return { ok: false, why: 'plugin-off' };
+    if (typeof ledger.settingsUnread === 'function' && ledger.settingsUnread()) { ledger.journal({ use, model: null, outcome: 'refused', why: 'settings-unread', zdr: true }); return { ok: false, why: 'settings-unread' }; }   // B-225b: NOT NOW — the daily cap is not known
     const s = settings();
     const row = credential();
     const a = RL.availability({ integrationRow: row, pluginOn: s.pluginOn, learnOn: s.learnOn !== false });   // pluginOn + the drafter's switch + the row's provider + key

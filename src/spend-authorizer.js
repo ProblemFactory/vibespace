@@ -733,6 +733,9 @@ function authorizeUnattendedSpend({
   // processes each counting their own would allow a cap twice — so it starts none, by name, until the lock is its own
   if (ledger && ledger.held) return no('ledger-held-elsewhere', `another VibeSpace process on this data folder (pid ${String(ledger.pid || '?').slice(0, 12)}${ledger.host ? ' on ' + String(ledger.host).slice(0, 60) : ''}) keeps the record of unattended turns (data/spend-budget.json) — this one counts none, so none run`);
   if (ledger && ledger.unreadable) return no('ledger-unreadable', `the record of unattended turns (data/spend-budget.json) could not be read (${String(ledger.error || 'unreadable').slice(0, 120)}) — none can be counted, so none run`);
+  // B-225b R11 (the persistence holds): the SETTINGS could not be read at the start (data/settings.json held — every row on its
+  // default) — the limits are not known: NOT NOW, a refusal that uses nothing up, judged again against the real limits at the lift
+  if (ledger && ledger.settingsUnread) return no('settings-unread', `the settings (data/settings.json) could not be read (${String(ledger.code || ledger.kind || 'unreadable').slice(0, 60)}) — the spending limits are not known, so none run until they read; nothing is used up`);
   // THE HOLD IS PART OF THE SUM. `retryAfter` still speaks only of STAMPS: a
   // hold settles when its producer answers, not on a window boundary, so
   // promising an instant for it would be a guess (0 = "no promise about when",
@@ -995,6 +998,7 @@ const REFUSAL_WORDS = Object.freeze({
   'overage-in-use': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}', 'VibeSpace held {producer}: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}']),
   'ledger-held-elsewhere': Object.freeze(['VibeSpace held {producer} in «{conversation}»: another VibeSpace process on this data folder keeps its record of turns nobody typed, so this one counts none and starts none.', 'VibeSpace held {producer}: another VibeSpace process on this data folder keeps its record of turns nobody typed, so this one counts none and starts none.']),   // B-ef83
   'ledger-unreadable': Object.freeze(['VibeSpace held {producer} in «{conversation}»: its record of turns nobody typed could not be read, so it counts none and starts none.', 'VibeSpace held {producer}: its record of turns nobody typed could not be read, so it counts none and starts none.']),   // B-3b0f
+  'settings-unread': Object.freeze(['VibeSpace held {producer} in «{conversation}»: its settings could not be read, so the spending limits are not known and it starts none until they read again.', 'VibeSpace held {producer}: its settings could not be read, so the spending limits are not known and it starts none until they read again.']),   // B-225b
   'unknown-reason': Object.freeze(['VibeSpace refused a turn nobody typed in «{conversation}»: «{producer}» is not a declared reason.', 'VibeSpace refused a turn nobody typed: «{producer}» is not a declared reason.']),
   other: Object.freeze(['VibeSpace held {producer} in «{conversation}»: the spend ceiling refused it ({why}).', 'VibeSpace held {producer}: the spend ceiling refused it ({why}).']),
 });
@@ -1028,6 +1032,7 @@ const DOOR_WORDS = Object.freeze({
   unset: 'A limit left empty refuses every turn nobody typed until it is set: set a number in Settings → Spending. Turns you type, and the buttons you press that say «starts a turn», are never counted.',   // B-0a33 (3)
   ledger: 'This is VibeSpace failing closed, not a limit: the hub could not read data/spend-budget.json. Turns nobody typed start again within a minute of the file reading again — repair it, or remove it to start the count over. The limits in Settings → Spending cannot help here.',   // B-3b0f
   held: 'This is VibeSpace failing closed, not a limit: another VibeSpace process on this data folder holds data/spend-budget.lock. Turns nobody typed start again once that process ends — stop it, or remove the lock file if no other VibeSpace runs on this folder. The limits in Settings → Spending cannot help here.',   // B-ef83
+  settings: 'This is VibeSpace failing closed, not a limit: the hub could not read data/settings.json, so your limits are not known. Nothing was used up: turns nobody typed are judged again against your limits the moment the file reads again. The limits in Settings → Spending cannot help here.',   // B-225b
   wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
 });
 // lane setting-doors pick 1 (2026-11-14): a refusal that names a value names where to change it — THE ROW, as its link
@@ -1050,7 +1055,7 @@ function spendRowOf(v) {
 function spendRowLink(v) { const row = spendRowOf(v); return row ? SL.settingLink(row) : ''; }
 /** PURE. The ceiling an 80 % warning is about. */
 function warnRowOf(warn) { return warn ? SPEND_ROW_KEYS[warn.scope === 'hour' ? 'perIdentityHour' : warn.scope === 'instance' ? 'perInstanceDay' : 'perIdentityDay'] : null; }
-const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'ledger-held-elsewhere': 'held', 'unknown-reason': 'wiring', other: 'wiring' });
+const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'cap-unset': 'unset', 'cap-unset-instance': 'unset', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'ledger-unreadable': 'ledger', 'ledger-held-elsewhere': 'held', 'settings-unread': 'settings', 'unknown-reason': 'wiring', other: 'wiring' });
 const SPENT_ROWS = 6;
 const CAP_OF = Object.freeze({ 'hour-cap': ['perIdentityHour', 'hour'], 'day-cap': ['perIdentityDay', 'day'], 'instance-cap': ['perInstanceDay', 'instance'] });
 /** a producer as words: a declared reason says its `what` in the viewer's language; a legacy stamp says so */
@@ -1081,7 +1086,8 @@ function refusalI18n(v, { sessionName = null, behind = null } = {}) {
   const c = v.counts || {};
   const detail = [{ key: LINE_WORDS.held, params: { producer, reason: String(v.reason == null ? '?' : v.reason).slice(0, 80) } }];
   detail.push(account ? { key: LINE_WORDS.account, params: { account } } : { key: LINE_WORDS.accountUnknown });
-  if (row === 'ledger-unreadable' || row === 'ledger-held-elsewhere') { /* B-3b0f / B-ef83: no count can be said — the ledger they live in could not be read, or another process keeps it */ }
+  if (row === 'settings-unread') { /* B-225b: no count is said against limits that are not known */ }
+  else if (row === 'ledger-unreadable' || row === 'ledger-held-elsewhere') { /* B-3b0f / B-ef83: no count can be said — the ledger they live in could not be read, or another process keeps it */ }
   else if (account && v.counts) detail.push({ key: LINE_WORDS.counts, params: { hour: c.hour || 0, hourCap: Number(L.perIdentityHour) || 0, day: c.day || 0, dayCap: Number(L.perIdentityDay) || 0, instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });
   else if (v.counts) detail.push({ key: LINE_WORDS.countsInstance, params: { instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });   // r3: identity-unknown kept «(instance 7/800)» only in English
   // r3: what the English line says as «(+N in flight)» — the holds a cap sums with the stamps (a cap reached by holds alone

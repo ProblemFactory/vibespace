@@ -80,7 +80,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSess
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
 // B-48a4 (the exit door's cost; restacked on 2.369.410): the two audit rings onto the store writer through ONE appender — device-audit.js's
 // 3 and exit-proxy.js audit's 3 go to zero; every save of hosts.json through the store writer — hosts.js _save's 2 go to zero ⇒ 881 − 8 = 873
-const DEBT_MAX = 850;   // lane lg-store-writes (B-225b, the persistence holds — cut 3): −3 — the desktops (layouts.json), the bookmarks and the custom themes onto src/store-hold.js's one write; cut 2: −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 853 -3 = 850]
+const DEBT_MAX = 849;   // lane lg-store-writes (B-225b, the persistence holds — cut 4): −1 — the settings onto src/store-hold.js's one write; cut 3: −3 — the desktops (layouts.json), the bookmarks and the custom themes onto src/store-hold.js's one write; cut 2: −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 850 -1 = 849]
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -177,7 +177,7 @@ const ROWS = [
   ["src/remote-fs.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/routes/editor.js","*",2,"not-a-store","—","—","a person's own file (the editor's save)"],
   ["src/routes/files.js","*",21,"not-a-store","—","—","a person's own files (the file explorer); ckpt61 cure 3: + the archive entry's temp folder removed on its two new refusals (a reader that never started, a write that failed)"],
-  ["src/routes/persistence.js","*",21,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26)"],
+  ["src/routes/persistence.js","*",20,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26)"],
   ["src/safe-fs-worker.js","*",15,"not-main","—","—","the SafeFs worker thread"],
   ["src/search-index-worker.js","*",3,"not-main","—","—","the search index worker thread"],
   ["src/secret-box.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
@@ -2296,6 +2296,59 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const xo = order(mutantCopies('swc-drain-cut', REPO).load(PREL, anchored(PSRC, DRAIN_A, "    /* MUTANT: no drain */ (() => {})();   // B-225b R10", 'drain-cut'), 'drain-cut'), 'order-red');
       const xp = xo.renames.findIndex((n) => /^layout-.*\.json$/.test(n) && !n.endsWith('.meta.json'));
       ok(xp === -1 || xp > xo.renames.indexOf('layouts.json'), 'CONTROL (the flush\'s drain cut, in a copy): layouts.json is written while its rollback point is still owed (red)', xo.renames);
+    }
+    // (f) THE SETTINGS ON THE HOLD (cut 4 — R1, R2, R3, R11): a settings.json the START could not read answers its doors 503
+    // store_unread BY NAME and nothing is written over it (the release read {} — the Settings page's next save wrote its defaults
+    // over the person's, the spending caps included); the hub's readers get every row on its DEFAULT, a FROZEN object that is not the
+    // cache, the hold's facts under Symbol.for('vibespace.settings-held'); the spend guard answers NOT NOW ('settings-unread', nothing
+    // used up); the judge and the text-model client refuse by name; THE LIFT IS A SETTINGS CHANGE (its lift hooks, `settings-updated`,
+    // every waiting turn judged again — noteLimitsWritten with no «before»). RED (anchored, in a copy): the hold's answer cut — the
+    // release: the defaults handed to the spend guard as the settings, so an unattended turn runs on the DEFAULT caps.
+    {
+      const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+      const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
+      const SYM = Symbol.for('vibespace.settings-held');
+      const SET = { 'spend.unattendedPerIdentityHour': 2, 'appearance.theme': 'the person\'s' };
+      const sceneF = (P, tag) => {
+        const d = scratchDir('hold-f-' + tag); roots.push(d); const F = path.join(d, 'settings.json'); fs.writeFileSync(F, JSON.stringify(SET));
+        const sent = [];
+        P.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        failing(F, 'EIO', () => P.router.readSettings());   // the START read fails
+        const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
+        const call = (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
+        return { d, F, sent, call, P };
+      };
+      const SG = require(path.join(REPO, 'src/server/spend-guard.js'));
+      const guardOver = (P, d) => (fs.mkdirSync(path.join(d, 'g'), { recursive: true }), SG.create({ dataDir: path.join(d, 'g'), serverSetting: (k) => { try { return P.router.readSettings()[k]; } catch { return undefined; } }, log: () => { } }));
+      const who = { key: 'k', name: 'acct-1' };
+      const H = sceneF(freshP(), 'eio');
+      const view = H.P.router.readSettings();
+      const g = H.call('get', '/api/settings'), po = H.call('post', '/api/settings', { 'appearance.theme': 'a default' }), pa = H.call('patch', '/api/settings', { 'appearance.theme': 'a default' });
+      let ps = null; try { H.P.router.patchSettings({ 'appearance.theme': 'a default' }); } catch (e) { ps = e.code; }
+      const gv = guardOver(H.P, H.d).authorize({ reason: 'auto-resume', identity: who, cid: 'conv-f', now: Date.now() });
+      ok([g, po, pa].every((x) => x.status === 503 && x.body && x.body.code === 'store_unread') && g.body.held.file === 'settings.json' && ps === 'store_unread'
+        && Object.isFrozen(view) && Object.keys(view).length === 0 && view[SYM] && view[SYM].kind === 'unreadable' && view['spend.unattendedPerIdentityHour'] === undefined
+        && gv && gv.ok === false && gv.why === 'settings-unread' && !gv.hold && fs.readFileSync(H.F, 'utf8') === JSON.stringify(SET),
+        '⑪ (f) settings the start could NOT read: GET / POST / PATCH answer 503 store_unread BY NAME, the internal patch refuses, the hub reads every row on its default (a FROZEN object, the hold under its symbol), the spend guard answers NOT NOW (settings-unread, no hold taken) — the file untouched', { get: g.status, post: po.status, patch: pa.status, ps, why: gv && gv.why });
+      // THE LIFT IS A SETTINGS CHANGE: its lift hooks run, every page is told, every waiting turn is judged again (no «before»)
+      let hooked = 0; H.P.router.onSettingsLift(() => { hooked++; });
+      const rejudged = []; const off = SG.onLimitsWritten((prev, next) => rejudged.push([prev, next]));
+      const lifted = await (async () => { for (let i = 0; i < 100; i++) { const r = H.call('get', '/api/settings'); if (r.status === 200) return r; await new Promise((res) => setTimeout(res, 50)); } return null; })();
+      off();
+      const gv2 = guardOver(H.P, H.d).authorize({ reason: 'auto-resume', identity: who, cid: 'conv-f', now: Date.now() });
+      ok(!!lifted && lifted.body['appearance.theme'] === 'the person\'s' && hooked === 1 && H.sent.some((t) => t.startsWith('{"type":"settings-updated"')) && rejudged.some(([prev]) => prev === null) && gv2 && gv2.why !== 'settings-unread',
+        '⑪ (f) the read again LIFTS it as a settings CHANGE: the person\'s settings served, the lift hooks run (the setting holds\' owed returns), every page told, every waiting turn judged again against the REAL limits', { lifted: lifted && lifted.status, hooked, rejudged: rejudged.length, why2: gv2 && gv2.why });
+      // the judge and the text-model client (pins: their refusal comes BEFORE any reservation)
+      const DE = fs.readFileSync(path.join(REPO, 'src/server/decision-engine.js'), 'utf8'), TM = fs.readFileSync(path.join(REPO, 'src/server/text-model-client.js'), 'utf8'), MW = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+      const jc = DE.slice(DE.indexOf('async function judgeCall('), DE.indexOf('reserve(use,', DE.indexOf('async function judgeCall(')));
+      ok(/if \(settingsUnread\(\)\) return quiet\(use, 'settings-unread'\);/.test(jc) && /ledger\.settingsUnread\(\)\) \{ ledger\.journal\(\{ use, model: null, outcome: 'refused', why: 'settings-unread'/.test(TM) && /decision-engine\.js'\)\.create\(\{[^\n]*settingsHeld: \(\) => \(persistenceRouter && typeof persistenceRouter\.settingsHeld === 'function'/.test(MW),
+        '⑪ (f) the judge (before its reservation) and the text-model client refuse NOT NOW by name while the settings are held — the owner\'s daily cap is never judged on its default (pins; the hub hands the hold in)');
+      // RED
+      const VIEW_A = "    const h = settingsHold.held();\n    if (h) return heldSettingsView(h);\n    const v = settingsHold.answer();\n";
+      ok(PSRC.split(VIEW_A).length === 2, 'control setup: the settings\' held view and the hold\'s answer are found once in src/routes/persistence.js');
+      const X = sceneF(mutantCopies('swc-settings-cut', REPO).load(PREL, anchored(PSRC, VIEW_A, "    let v; try { v = settingsHold.answer(); } catch { v = undefined; }   /* MUTANT: the release — settings it could not read are {} */\n", 'settings-cut'), 'settings-cut'), 'eio-red');
+      const xv = guardOver(X.P, X.d).authorize({ reason: 'auto-resume', identity: who, cid: 'conv-f', now: Date.now() });
+      ok(xv && xv.why !== 'settings-unread', 'CONTROL (the hold\'s answer cut, in a copy — the release): the settings it could not read are handed to the spend guard as {} — the unattended turn is judged on the DEFAULT caps, never «not now» (red)', xv && { ok: xv.ok, why: xv.why });
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }

@@ -446,10 +446,14 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   const flush = () => { if (timer) { clearTimeout(timer); timer = null; } writeNow(); };
 
   const limits = () => A.budgetLimits(serverSetting);
+  // B-225b R11 (the persistence holds): data/settings.json HELD — the caps are not known (every row reads its default): NOT NOW, a
+  // refusal that uses nothing up, judged against the real caps at the lift (persistence's settingsAgain → noteLimitsWritten)
+  const SETTINGS_HELD = Symbol.for('vibespace.settings-held');
+  const settingsHeld = () => { try { return serverSetting(SETTINGS_HELD) || null; } catch { return null; } };
   // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
   const overCapNow = (now) => (heldBy ? [] : unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));   // B-ef83: a process that does not keep the ledger judges no waiting frame (the keeper counted them) — none pulled
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');
-  const ledgerFact = () => (heldBy ? { held: true, pid: heldBy.pid, host: heldBy.host } : unreadable ? { unreadable: true, error: unreadable.error } : null);   // B-3b0f / B-ef83, handed to every layer (the batch too)
+  const ledgerFact = () => { if (heldBy) return { held: true, pid: heldBy.pid, host: heldBy.host }; if (unreadable) return { unreadable: true, error: unreadable.error }; const sh = settingsHeld(); return sh ? { settingsUnread: true, kind: sh.kind || null, code: sh.code || null } : null; };   // B-3b0f / B-ef83, handed to every layer (the batch too)
 
   /** Retire the holds whose producer never came back. THE COUNT IS A CENSUS,
    *  not garbage collection: a hold that timed out is a site that authorized a
@@ -640,7 +644,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const wait = promisedHere > 0 && behind.length ? behind[0] : null;
     // THE KEY IS THE PLACE (follow-up 2): the account, the cap, the conversation the frames wait behind — never the oldest frame
     // (a queue that drains one frame a turn would mint a new key, and a new notice, at every carry)
-    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' ? `inbox|*|${v.why}` : `inbox|${key || '?'}|${v.why}`;   // B-3b0f: ONE notice for the instance, not one per account
+    const inboxSig = wait ? `inbox|${key || '?'}|${v.why}|at|${wait.key || '?'}` : v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'settings-unread' ? `inbox|*|${v.why}` : `inbox|${key || '?'}|${v.why}`;   // B-3b0f: ONE notice for the instance, not one per account
     const lastInbox = Number(state.notices[inboxSig]) || 0;
     // THE SEAM WITH LAWS 2 + 3 (shape C — 主开发 2026-11-13 15:30Z): while a «messages waiting» For-you item stands for the
     // conversation these frames wait behind (src/server/wait-watch.js, the same key `<backend>:<cid>`), IT speaks: the spending
@@ -653,14 +657,15 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure)
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
-        + (v.why === 'ledger-unreadable' ? `The ledger data/spend-budget.json could not be read (${unreadable ? unreadable.error : '?'}): no count can be said, so none run until it reads again or is removed.\n\n`   // B-3b0f
+        + (v.why === 'settings-unread' ? 'The settings data/settings.json could not be read: the spending limits are not known, so none run until it reads again. Nothing was used up; every waiting turn is judged again against your limits the moment it reads.\n\n'   // B-225b
+          : v.why === 'ledger-unreadable' ? `The ledger data/spend-budget.json could not be read (${unreadable ? unreadable.error : '?'}): no count can be said, so none run until it reads again or is removed.\n\n`   // B-3b0f
           : v.why === 'ledger-held-elsewhere' ? `Another VibeSpace process on this data folder keeps the ledger data/spend-budget.json (pid ${heldBy ? heldBy.pid : '?'}${heldBy && heldBy.host ? ' on ' + heldBy.host : ''}): this one counts none, so none run until that process ends (or data/spend-budget.lock is removed, if none runs).\n\n`   // B-ef83
           : `Unattended turns used: ${v.counts.hour}/${v.limits.perIdentityHour} this hour, ${v.counts.day}/${v.limits.perIdentityDay} today `
           + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`)
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
-        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
+        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'settings-unread' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
