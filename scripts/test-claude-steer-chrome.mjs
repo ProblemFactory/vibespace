@@ -1465,7 +1465,8 @@ else {
     fs.writeFileSync(release8, 'released after the made restart\n');
     await waitTurnEnd('v1', 40000);
     await until(() => delivered().some((d) => d.how === 'turn' && isH(d)), 8000, 100);
-    await sleep(600);
+    // a wait for WHAT HAPPENED (lesson c): the page says the held message ran — its bubble's chip gone — then the reads; red at the bound
+    await until(async () => (await bubbles('v1', 'PHONE-H')).some((b) => b.chip === null), 8000, 100);
     const hAfter = await bubbles('v1', 'PHONE-H'), idleH = !(await streaming('v1'));
     ok(S(hAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && isH(d)) && idleH, '§B ⑧c …and when the turn ended it ran: ONE bubble, no chip, and the page IDLE (never left «streaming»)', { hAfter, idleH, ...evH() });
     // ⑧d (the coordinator's law 08:14Z — A TURN THAT ENDED): a hub restarted 50 ms after a turn's END was said comes back IDLE: the
@@ -1488,8 +1489,11 @@ else {
     const endedI = await until(() => delivered().some((d) => d.how === 'turn' && /ENDS-I/.test(d.text)), 10000, 50) && await waitTurnEnd('v1', 15000);   // the turn's end SAID: the page went idle
     const rI = await madeRestart('turn-end', () => { const f = wrapperFile('ENDS-I'); const i = f.findIndex((x) => x.type === 'assistant' && S(x.message || {}).includes('ENDS-I'));
       return { reply: i >= 0, endAfter: i >= 0 && f.slice(i + 1).some((x) => x.type === 'result'), idleAfter: i >= 0 && f.slice(i + 1).some((x) => x.type === 'system' && x.subtype === 'session_state_changed' && x.state === 'idle') }; });
-    await sleep(1500);   // the reopened page settles; a turn with no end would show its Stop
+    // a wait for WHAT HAPPENED (the release's lesson c): the reopened page has drawn the turn's answer — its rebuild is done, and the
+    // idle read below is of that same rebuild (a turn with no end would show its Stop beside the answer); red by name at the bound
+    const drawnI = await until(async () => (await replies('ENDS-I')) >= 1, 15000, 100);
     const iBubbles = await bubbles('v1', 'ENDS-I'), iReplies = await replies('ENDS-I'), idleI = !(await streaming('v1'));
+    ok(drawnI, '§B ⑧d the reopened page DREW the ended turn\'s answer (its rebuild is done) before the idle read below', { iReplies });
     ok(!!rI.atStop && rI.atStop.reply && rI.atStop.endAfter && rI.atStop.idleAfter, '§B ⑧d THE CURE\'S FACT at the made instant: the wrapper\'s file already holds the turn\'s answer, its result and its «idle» after it (the base\'s timer had not written them)', rI.atStop);
     // the prompt was sent at IDLE: the wrapper records it nowhere (the hub's record is in its memory, the stand-in writes no
     // transcript — a real CLI's transcript holds it), so after the restart it is drawn at most once: never twice
