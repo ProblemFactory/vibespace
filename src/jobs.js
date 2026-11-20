@@ -1685,11 +1685,11 @@ class JobManager {
     // the queue read as it is (never peekNotifs: its held-view judge can stash, and this is asked from the stash hooks)
     return (this.pendingNotifs.get(cid) || []).filter((n) => n && !n.ho && n.held && WAKE_OWED_KINDS.includes(n.held.kind) && !n.held.maybeDelivered && !this._waitsForRecords(n));
   }
+  /** B-6721: For you was told for this conversation (now, or at For you's read — the wiring's deferred filing): its close asks the store */
+  noteWakeSaid(cid) { if (cid) (this._wakeSaid || (this._wakeSaid = new Set())).add(cid); }
   /** B-6721: the conversation is away and a notice that could not reach it waits — said in For you ONCE A WAITING EPISODE (the
    *  wiring files one item per conversation and never reopens one filed since the oldest waiting notice came — a person's
    *  dismissal stands); a floored one is no such case (it goes in seconds). → the item id | null */
-  /** B-6721: For you was told for this conversation (now, or at For you's read — the wiring's deferred filing): its close asks the store */
-  noteWakeSaid(cid) { if (cid) (this._wakeSaid || (this._wakeSaid = new Set())).add(cid); }
   sayWakeWaiting(cid) {
     // A FOR-YOU ITEM MARKS AN EVENT, NOT A STATE FOUND AT BOOT (主开发's ruling, round wdtmcza5y — measured on the owner's hub: 3
     // conversations held a not-running notice, two of them a month old): only a conversation a notice was stashed for WHILE THIS
@@ -1708,6 +1708,9 @@ class JobManager {
    *  the store only for a conversation this run said it for, or once per conversation per run (an item an earlier run filed) */
   wakeSettled(cid) {
     if (!cid || this.wakeOwed(cid).length) return;
+    // A CLAIM IS NOT A SETTLE (the move check's should 7): an owed notice a resume (or a hand-over) has CLAIMED is still waiting —
+    // its claim may come back; For you's «notices wait» stays until nothing is owed AND nothing owed is claimed
+    if ((this.pendingNotifs.get(cid) || []).some((n) => n && n.ho && n.held && WAKE_OWED_KINDS.includes(n.held.kind) && !n.held.maybeDelivered)) return;
     if (this._stoppedThisRun && !(this.pendingNotifs.get(cid) || []).length) this._stoppedThisRun.delete(cid);   // the queue EMPTY (a claimed entry may come back): the event is over (the set stays bounded)
     if (typeof this.d.resolveWakeWaiting !== 'function') return;
     const said = this._wakeSaid || (this._wakeSaid = new Set()), looked = this._wakeLooked || (this._wakeLooked = new Set());

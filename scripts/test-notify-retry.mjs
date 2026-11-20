@@ -2209,6 +2209,28 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     const wr = await writeRun(SHwrite);
     ok(wr.tries === 1 && wr.armed >= 1, 'RED control: without the rule the chain re-steps after a written frame — a second post (a second billed turn) at its next look', JSON.stringify(wr));
   }
+  // (k) THE MOVE CHECK's SHOULD 7: A CLAIM IS NOT A SETTLE — while a resume holds its claim on the owed notices, a chain that looks
+  // finds nothing owed but must NOT close For you's «notices wait»; the claim given back (the resume failed), the chain re-arms and says
+  // it again for the episode. RED: the settle that ignores a claim closes the item while the notices are only claimed
+  const claimRun = async (JMc) => {
+    const W = wakeRig('b6721-claim-' + rnd(), JMc); W.mk(SH);
+    await fire(W, 'fired while stopped'); await W.run();   // AWAY: For you says it
+    await fire(W, 'a newer one while stopped');           // a newer owed notice: the chain is armed again
+    const armed = W.scheduled.length;
+    const rel = W.jm.claimNotifs(W.cid, W.jm.peekNotifs(W.cid), 'ho-resume-1');   // the resume claims them first
+    await W.run();                                         // the chain looks: nothing owed (all claimed)
+    const closedWhileClaimed = W.resolved.includes(W.cid);
+    rel(); W.view().changed(); await sleep(20); await W.run();   // the resume failed: its claim comes back (the hand-over's finally says changed)
+    return { armed, closedWhileClaimed, filed: W.filed.length, owed: W.jm.wakeOwed(W.cid).length };
+  };
+  {
+    const c = await claimRun(JobManager);
+    ok(c.armed === 1 && !c.closedWhileClaimed && c.owed === 2 && c.filed >= 2, '(k) a resume\'s CLAIM is not a settle: while the owed notices are claimed For you\'s «notices wait» stays open; the claim given back, the chain re-arms and says it again for the episode', JSON.stringify(c));
+    const JSRCk = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+    const JMclaim = MB.load('src/jobs.js', anchored(JSRCk, "    if ((this.pendingNotifs.get(cid) || []).some((n) => n && n.ho && n.held && WAKE_OWED_KINDS.includes(n.held.kind) && !n.held.maybeDelivered)) return;\n", '', 'B-6721: a claim taken for a settle'), 'jobs-claim').JobManager;
+    const cr = await claimRun(JMclaim);
+    ok(cr.closedWhileClaimed === true, 'RED control: the settle that ignores a claim closes «notices wait» while the notices are only claimed (a failed resume then leaves For you silent for the episode)', JSON.stringify(cr));
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? ` (${skipped} skipped, each named above)` : ''}`);
