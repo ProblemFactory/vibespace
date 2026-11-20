@@ -51,6 +51,11 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const Att = require(path.join(REPO, 'src/channel-attachments.js'));
+// B-1217 member 17, unit 3 (主开发 r511): a gate leg says by a JUDGED setup line that its scene was reached before the gate opened —
+// the engine's joins are counted through its own pure verdict (the same module object it calls), the vendor fetch by its call log
+let JOINS = 0; { const fv0 = Att.fetchVerdict; Att.fetchVerdict = (o) => { const v = fv0(o); if (v && v.act === 'join') JOINS++; return v; }; }
+const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms / 2); k <= n; k++) { if (pred()) return true; await new Promise((r) => setTimeout(r, 2)); } console.log(`  … waited ${ms} ms of turns for ${what} — it never came`); return null; };   // bounded by a COUNT of turns
+const atGate = (W, id) => W.calls.attach.filter((x) => x === id).length;
 const lark = require(path.join(REPO, 'src/channels/lark.js'));
 const REC = require(path.join(REPO, 'src/channel-record.js'));
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -162,7 +167,7 @@ function worldModule(kind, W, { budgetDefault = 100 } = {}) {
         async older() { meter(1); return { records: [], exhausted: true }; },
         async fetchAttachment(id, { messageId, attachmentId } = {}) {
           const s = W.script[attachmentId] || 'ok';
-          if (s === 'late') await W.late;   // verify r1: Lark meters AFTER `await pace(1)` — the units land past an await
+          if (s === 'late') { W.lateArrived = (W.lateArrived || 0) + 1; await W.late; }   // verify r1: Lark meters AFTER `await pace(1)` — the units land past an await
           meter(1); W.calls.attach.push(attachmentId);
           if (W.gate) await W.gate;
           if (s === 'forbidden') throw new CH.ChannelError('forbidden', `vendor refuses ${attachmentId}`);
@@ -216,9 +221,11 @@ async function rig(name, { engineMod = ENG, budgetDefault = 100, more = null } =
   ok(R.W.calls.attach.length === 0, 'ON DEMAND: the ingest fetched NO bytes — a picture is fetched when a window asks for it (settled)');
   // single flight: five concurrent first requests
   let open; R.W.gate = new Promise((r) => { open = r; });
-  const before = R.spent();
+  const before = R.spent(); const j0 = JOINS;
   const five = Promise.all([1, 2, 3, 4, 5].map(() => R.get('pic-0')));
-  await sleep(50); open(); R.W.gate = null;
+  const sf = await waitUntil(() => atGate(R.W, 'pic-0') === 1 && JOINS - j0 === 4, 5000, 'one fetch of pic-0 at the gate and four requests joined');
+  ok(!!sf, `setup: before the gate opened, ONE fetch of pic-0 was held at the vendor and the other four had JOINED it (${atGate(R.W, 'pic-0')} fetch, ${JOINS - j0} joined)`);
+  open(); R.W.gate = null;
   const got = await five;
   ok(got.every((x) => x.status === 200 && x.buf.equals(got[0].buf) && x.headers.get('content-type') === 'image/png') && R.W.calls.attach.filter((x) => x === 'pic-0').length === 1, `SINGLE FLIGHT: five concurrent first requests of one picture = ONE vendor call (${R.W.calls.attach.filter((x) => x === 'pic-0').length}), five whole answers`);
   ok(R.spent() - before === 1, `…and ONE charge to the account's minute (${R.spent() - before})`);
@@ -342,9 +349,11 @@ const uniform = (r) => r.status === 404 && r.json && r.json.code === 'not-found'
   let open; R.W.gate = new Promise((r) => { open = r; });
   const a2 = R.agentSpent(), s2 = R.spent();
   const ownerP = R.get('pic-2');
-  await sleep(50);
+  const ow0 = await waitUntil(() => atGate(R.W, 'pic-2') === 1, 5000, 'the owner\'s fetch of pic-2 at the gate'); const j2 = JOINS;
   const agentP = R.agentGet('pic-2');
-  await sleep(50); open(); R.W.gate = null;
+  const ag0 = await waitUntil(() => JOINS - j2 === 1, 5000, 'the agent\'s request joined the owner\'s fetch');
+  ok(!!ow0 && !!ag0, `setup: before the gate opened, the owner's fetch of pic-2 was held at the vendor and the agent's request had JOINED it (${atGate(R.W, 'pic-2')} fetch, ${JOINS - j2} joined)`);
+  open(); R.W.gate = null;
   const [ow, ag] = await Promise.all([ownerP, agentP]);
   ok(ow.status === 200 && ag.status === 200 && ag.buf.equals(ow.buf) && R.calls('pic-2') === 1 && R.spent() === s2 + 1 && R.agentSpent() === a2, `JOINED: an agent asking a picture the owner's window is fetching rides that ONE call (${R.calls('pic-2')}) and that ONE charge (the owner's; agents' share ${a2} → ${R.agentSpent()})`);
   // another agent: Beta may read nothing — not even what is cached
@@ -385,7 +394,8 @@ async function revokeLeg(engineMod, name) {
   await R.eng.setAccess('pics', ROOM, [{ principal: AL, authority: 'draft' }]);
   let open; R.W.gate = new Promise((r) => { open = r; });
   const p = R.agentGet('pic-4');
-  await sleep(50);
+  const g4 = await waitUntil(() => atGate(R.W, 'pic-4') === 1, 5000, 'the agent\'s fetch of pic-4 at the gate');
+  ok(!!g4, `setup: the agent's fetch of pic-4 was held at the vendor before its access was revoked (${atGate(R.W, 'pic-4')})`);
   await R.eng.setAccess('pics', ROOM, []);
   open(); R.W.gate = null;
   const r = await p;
@@ -479,15 +489,18 @@ async function chargeLeg(engineMod, name) {
     let open; R.W.gate = new Promise((res) => { open = res; });
     const a0 = by().agent, o0 = by().owner;
     const ap = R.agentGet('pic-6');
-    await sleep(40);
+    const g6 = await waitUntil(() => atGate(R.W, 'pic-6') === 1, 5000, 'the agent\'s fetch of pic-6 at the gate');
     const op = R.get('pic-7');   // the owner's window opens a picture inside the agent's await
-    await sleep(40); open(); R.W.gate = null;
+    const g7 = await waitUntil(() => atGate(R.W, 'pic-7') === 1, 5000, 'the owner\'s fetch of pic-7 at the gate');
+    ok(!!g6 && !!g7, `setup: both fetches were held at the vendor before the gate opened — the agent's pic-6, then the owner's pic-7 inside its await (${atGate(R.W, 'pic-6')} / ${atGate(R.W, 'pic-7')})`);
+    open(); R.W.gate = null;
     await Promise.all([ap, op]);
     const during = { agent: by().agent - a0, owner: by().owner - o0 };
     R.W.script['pic-5'] = 'late'; let go; R.W.late = new Promise((res) => { go = res; });
     const a1 = by().agent;
-    const lp = R.agentGet('pic-5');
-    await sleep(40);
+    const la0 = R.W.lateArrived || 0; const lp = R.agentGet('pic-5');
+    const g5 = await waitUntil(() => (R.W.lateArrived || 0) - la0 === 1, 5000, 'the agent\'s fetch of pic-5 at its late await');
+    ok(!!g5, `setup: the agent's fetch of pic-5 was inside its await (before its meter) when the pass ran (${(R.W.lateArrived || 0) - la0})`);
     await R.eng.pass('pics', { force: true });   // a pass inside an agent fetch that meters after its await
     go();
     const late = await lp;
@@ -543,7 +556,9 @@ console.log('④ negative controls (patched copies in this run\'s scratch dir)')
   const A = await rig('ctl-join', { engineMod: noJoin });
   let open; A.W.gate = new Promise((r) => { open = r; });
   const five = Promise.all([1, 2, 3, 4, 5].map(() => A.get('pic-0')));
-  await sleep(50); open(); A.W.gate = null; await five;
+  const c5 = await waitUntil(() => atGate(A.W, 'pic-0') === 5, 5000, 'the no-join copy\'s five fetches of pic-0 at the gate');
+  ok(!!c5, `CONTROL setup: the copy without the join sent each of the five requests to the vendor before the gate opened (${atGate(A.W, 'pic-0')})`);
+  open(); A.W.gate = null; await five;
   const n = A.W.calls.attach.filter((x) => x === 'pic-0').length;
   ok(n > 1, `CONTROL: an engine without the join fetches the same picture ${n} times — the single-flight leg reddens on it`);
   A.server.close(); A.eng.stop();
