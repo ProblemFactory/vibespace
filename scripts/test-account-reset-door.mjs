@@ -923,7 +923,8 @@ const LEGS = {
   },
   // K3 (主开发's read of the .397 tip — the page): a lane a PERSON marked reset says so in the claim dialog's words (never
   // «confirms when a session uses it»); the age mark's units are the interface's; the door's CSS stands on theme variables;
-  // zh / ja name ⚙ → Update (since .397 no update arrives by itself); the row's stamp names the release the claim ships in
+  // zh / ja say the PERSON updates (since .397 no update arrives by itself) — and, since B-8703 unit 1 (主开发 r533: a zh / ja sentence
+  // names no menu path its English form does not), no «⚙ →» path: the English names none; the row's stamp names the release the claim ships in
   async 'page-k3'(T) {
     const rows = [];
     let US = null, AW = null; try { US = await esm(T, 'src/lib/usage-source.js'); AW = await esm(T, 'src/lib/account-wall-words.js'); } catch (e) { return { ok: false, detail: `the page modules: ${e.message}` }; }
@@ -947,8 +948,8 @@ const LEGS = {
     const literal = css.filter((l) => /#[0-9a-fA-F]{3,6}\b|border-radius: \d/.test(l));
     rows.push({ ok: css.length === 3 && !literal.length, text: `the door's CSS: ${css.length} rules, ${literal.length} with a literal colour or radius` });
     const lines = (src) => ['re-login these {n} accounts, or a VibeSpace update places them', 're-login {name}, or a VibeSpace update places it', 'those accounts wait until you update VibeSpace', 'to a release that has measured the version. Linux hubs; the check needs strace.'].map((k) => { const i = src.indexOf(k + '": "'); return i < 0 ? '' : src.slice(i, src.indexOf('\n', i)); });
-    const named = [...lines(zh), ...lines(ja)], waits = named.filter((l) => /等 VibeSpace 更新|VibeSpace の更新を待/.test(l) || !l.includes('⚙'));
-    rows.push({ ok: named.every(Boolean) && !waits.length, text: `zh / ja name ⚙ → Update: ${named.length - waits.length}/${named.length}` });
+    const named = [...lines(zh), ...lines(ja)], waits = named.filter((l) => /等 VibeSpace 更新|VibeSpace の更新を待/.test(l) || !/更新 VibeSpace|VibeSpace 更新到|VibeSpace を更新|VibeSpace に更新/.test(l) || l.includes('⚙'));
+    rows.push({ ok: named.every(Boolean) && !waits.length, text: `zh / ja say the person updates VibeSpace, with no ⚙ path (B-8703): ${named.length - waits.length}/${named.length}`, });
     // B-3b5a: the English of the «turned off» line and of the setting's OFF sentence says the same fact — the person updates (since
     // .397 no update arrives by itself) — and names no menu path (src/ui-needs.js: a sentence says the state, its line's door acts)
     const enOf = (f) => fs.readFileSync(path.join(T, f), 'utf8');

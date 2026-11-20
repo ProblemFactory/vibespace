@@ -174,6 +174,7 @@ const ROWS = {
   ],
   'src/vault-blocked.js': [['the vault is locked — ', 'agent', 'THE words toward an agent (AGENT_WORDS / agentWords — every agent door\'s vault_locked): judged with its own TOLD clause and a caller\'s where (④ checks every caller)', { count: 2, expand: { '${TOLD}': 'TOLD', '${what}': 'a person unlocks it on this instance\'s page' } }]],
   'src/channels/index.js': [['the vault is locked', 'match', 'recognises a sign-in the vault keeps closed (its words are agentWords below)']],
+  'src/ui-needs.js': [['The vault is locked — Unlock', 'match', 'B-8703: the ui-needs census\'s owed row recognises the vault window\'s «Unlock… above» sentence (its ja words name the direction) — no words of its own']],
   'src/routes/vault.js': [['unlock the vault', 'label', 'the PURPOSE word of a bearer\'s refused knock on the unlock door (its vault-use line) — no reader acts on it']],
   'src/server/integration-store.js': [['a person unlocks the vault on the page', 'log', 'the integrations journal line for a row the locked vault keeps closed (once per transition)']],
   'src/plugins/frp.js': [

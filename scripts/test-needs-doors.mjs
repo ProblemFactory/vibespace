@@ -34,7 +34,8 @@
 //      88 were never stored. A SERVER NOTICE's words are not stored as keys anywhere a later page
 //      draws them: serverNotice sends {key, params} once, the page words it on arrival, and its toast history (localStorage) keeps the
 //      words as said — never the key — so a reworded notice key (pick 5's LLM stop notice) strands nothing
-// DEBT (closure 3, the verifier's M5): the nets read the ENGLISH key — a need word added to a zh / ja VALUE only is not seen.
+// THE ZH / JA NET (B-8703 unit 1, the verifier's M5 — a need word added to a zh / ja VALUE only was not seen): the ui table's VALUE_NET
+// reads each dictionary VALUE whose English form the nets miss; a catch is claimed by its English form's row (a value is that sentence)
 // The machine table is read when it exists (it lands on its own lane's pick); the ui table always.
 // THE NET'S BLIND SPOTS (主开发 2026-11-19 04:02Z, said so nobody reads a green census as more than it is): it reads t() / tr() /
 // i18nKey() LITERALS only — a sentence built in a template string, or a server's own English text (an error string a route
@@ -43,6 +44,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { anchored } from './scratch.mjs';   // B-1e9a cure 3: the Connect block's RED controls
+import { dictEntries } from './i18n-extract.mjs';   // B-8703: the zh / ja VALUES the value net reads
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -61,13 +63,18 @@ walk('src');
 const words = new Map();
 for (const [file, text] of sources) for (const m of text.matchAll(tRe)) { let k; try { k = unescapeJs(m[1] != null ? m[1] : m[2]); } catch { continue; } if (!words.has(k)) words.set(k, new Set()); words.get(k).add(file); }
 
+// B-8703: every dictionary VALUE by its English form — the value net reads them (src/ui-needs.js VALUE_NET)
+const VALUES = new Map();
+for (const [lang, f] of [['zh', 'src/lib/i18n-zh.js'], ['ja', 'src/lib/i18n-ja.js']]) for (const e of dictEntries(fs.readFileSync(path.join(REPO, f), 'utf8'))) { if (!VALUES.has(e.key)) VALUES.set(e.key, {}); VALUES.get(e.key)[lang] = e.value; }
+/** a table's net over a sentence: its English form (inNet), or — the ui table's VALUE_NET — a zh / ja value of it */
+const netOf = (T, s, vals = VALUES) => T.inNet(s) || (!!T.VALUE_NET && ['zh', 'ja'].some((l) => { const v = (vals.get(s) || {})[l]; return typeof v === 'string' && T.VALUE_NET[l].some((r) => r.test(v)); }));
 /** The census of every table over a set of sentences: a sentence goes to the FIRST table that claims it (machine, then ui). */
-function census(ws) {
+function census(ws, vals = VALUES) {
   const out = TABLES.map(({ scope, T }) => ({ scope, T, rows: new Map(T.NEEDS.map((r) => [r.id, { row: r, sentences: [], files: new Set() }])), non: [], owed: [], unclaimed: [] }));
   for (const [s, files] of ws) {
     let taken = false;
     for (const c of out) {
-      if (!c.T.inNet(s)) continue;
+      if (!netOf(c.T, s, vals)) continue;
       const r = c.T.needOf(s);
       if (r) { const e = c.rows.get(r.id); e.sentences.push(s); for (const f of files) for (const g of [].concat((r.door.via && r.door.via[f]) || f)) e.files.add(g); taken = true; break; }
       const n = c.T.notNeedOf(s);
@@ -76,7 +83,7 @@ function census(ws) {
       if (o) { c.owed.push({ s, family: o.family, row: o }); taken = true; break; }
     }
     if (taken) continue;
-    const first = out.find((c) => c.T.inNet(s));
+    const first = out.find((c) => netOf(c.T, s, vals));
     if (first) first.unclaimed.push({ s, files: [...files] });
   }
   return out;
@@ -87,7 +94,7 @@ const doorless = (e, src = (f) => sources.get(f) || '') => (e.row.door.present ?
 console.log('① THE CENSUS (derived from the tree)');
 const C = census(words);
 for (const c of C) {
-  const caught = [...words.keys()].filter((s) => c.T.inNet(s)).length;
+  const caught = [...words.keys()].filter((s) => netOf(c.T, s)).length;
   console.log(`  [${c.scope}] the net catches ${caught} sentence(s)`);
   for (const e of c.rows.values()) {
     const d = e.row.door;
@@ -95,7 +102,7 @@ for (const c of C) {
     console.log(`  · [${c.scope}] ${e.row.id} — ${e.row.need} — ${e.sentences.length} sentence(s) — ${door}`);
   }
   console.log(`  · [${c.scope}] not needs: ${c.non.length} (${[...new Set(c.non.map((x) => x.why))].length} reasons)`);
-  if (c.T.DOORS_OWED) console.log(`  · [${c.scope}] DOORS OWED (family B-d073 — none left since its doors were built): ${c.owed.length} sentence(s) in ${c.T.DOORS_OWED.length} row(s) — ${c.owed.map((x) => '«' + x.s.slice(0, 48) + '»').join(' · ')}`);
+  if (c.T.DOORS_OWED) console.log(`  · [${c.scope}] DOORS OWED (B-d073 — none left since its doors were built; B-8703 — the closed path net and the zh / ja value net, listed): ${c.owed.length} sentence(s) in ${c.T.DOORS_OWED.length} row(s) — ${c.owed.map((x) => '«' + x.s.slice(0, 48) + '»').join(' · ')}`);
   ok(c.unclaimed.length === 0, `[${c.scope}] every sentence its net catches is claimed — by a row or a non-need with its reason (${caught})`, c.unclaimed.slice(0, 12));
   ok([...c.rows.values()].every((e) => e.sentences.length > 0), `[${c.scope}] every row claims at least one sentence of the tree (no dead row)`, [...c.rows.values()].filter((e) => !e.sentences.length).map((e) => e.row.id));
   ok(c.T.NEEDS.every((r) => (!!r.door.present + !!r.door.none + !!r.door.deferred) === 1), `[${c.scope}] every row has exactly one door verdict (present / none / deferred)`);
@@ -109,8 +116,16 @@ for (const c of C) {
     const PLANT = { why: 'PLANTED — a reason whose sentence is gone', match: /^A sentence no file says any more$/ };
     const planted = { ...c.T, NOT_NEEDS: [...c.T.NOT_NEEDS, PLANT] };
     ok(planted.NOT_NEEDS.includes(PLANT) && deadNon(planted).length === deadNon(c.T).length + 1 && deadNon(planted).some((w) => w.startsWith('PLANTED')), 'CONTROL: a planted non-need row whose sentence is gone is RED by its reason (the plant is in the table first)');
-    const OWED_CEILING = 0;   // 主开发's ruling (a), 2026-11-18 23:33Z, was 4 (bulk-resume's Close hint and toast, the Integrations window's two Test lines) — B-d073 built their doors; it only falls
-    ok(Array.isArray(c.T.DOORS_OWED) && c.T.DOORS_OWED.length <= OWED_CEILING && c.T.DOORS_OWED.every((r) => r.family === 'B-d073' && c.owed.some((x) => x.row === r)), `[ui] the doors owed are a count of debts apart from the non-needs: ${c.T.DOORS_OWED ? c.T.DOORS_OWED.length : 0} ≤ ${OWED_CEILING}, each of family B-d073, each claiming a live sentence`, (c.T.DOORS_OWED || []).filter((r) => !c.owed.some((x) => x.row === r)).map((r) => r.why.slice(0, 60)));
+    // each family's count only falls: B-d073 0 (主开发's ruling (a), 2026-11-18 23:33Z, was 4 — B-d073 built their doors); B-8703 29
+    // (主开发 r533, 2026-11-20: unit 1 LISTS what the closed path net and the zh / ja value net newly catch — 22 menu paths, 7 values;
+    // unit 2 makes doors of them where a helper that exists makes it one line)
+    const OWED_CEILING = Object.freeze({ 'B-d073': 0, 'B-8703': 29 });
+    const owedBy = (f) => (c.T.DOORS_OWED || []).filter((r) => r.family === f).length;
+    // a B-8703 row names its file(s), and each file it names says the sentence it claims (the list is honest about where)
+    const named = (r) => { const fs8 = (/^((?:src\/[\w./-]+\.js)(?:, src\/[\w./-]+\.js)*): /.exec(r.why) || [])[1]; const got = c.owed.filter((x) => x.row === r); return !!fs8 && got.length > 0 && got.every((x) => fs8.split(', ').every((f) => (words.get(x.s) || new Set()).has(f))); };
+    ok(Array.isArray(c.T.DOORS_OWED) && c.T.DOORS_OWED.every((r) => r.family in OWED_CEILING && c.owed.some((x) => x.row === r)) && Object.keys(OWED_CEILING).every((f) => owedBy(f) <= OWED_CEILING[f]) && c.T.DOORS_OWED.filter((r) => r.family === 'B-8703').every(named),
+      `[ui] the doors owed are a count of debts apart from the non-needs, each family under its ceiling (${Object.keys(OWED_CEILING).map((f) => `${f} ${owedBy(f)} ≤ ${OWED_CEILING[f]}`).join(', ')}), each claiming a live sentence, each B-8703 row naming the file that says it`,
+      (c.T.DOORS_OWED || []).filter((r) => !(r.family in OWED_CEILING) || !c.owed.some((x) => x.row === r) || (r.family === 'B-8703' && !named(r))).map((r) => r.why.slice(0, 80)));
   }
   // lane ui-needs-a-button pick 5: THE UI TABLE ENDS WITH NO DEFERRED ROW — every caught sentence a door, a none with its reason, or a non-need
   if (c.scope === 'ui') ok(c.T.NEEDS.every((r) => !r.door.deferred) && !('DEFERRED' in c.T), '[ui] no deferred row is left in the ui table (every caught sentence: a door, a none with its reason, or a non-need)', c.T.NEEDS.filter((r) => r.door.deferred).map((r) => r.id));
@@ -623,6 +638,23 @@ const ui = C.find((c) => c.scope === 'ui');
 const planted = new Map(words); planted.set('Turn it on in Settings → Frobnicate first', new Set(['src/lib/planted.js']));
 const P = census(planted).find((c) => c.scope === 'ui');
 ok(P && P.unclaimed.length === 1 && /Frobnicate/.test(P.unclaimed[0].s), 'CONTROL: a new «… in Settings → X» sentence that no row claims is RED by name', P && P.unclaimed);
+// B-8703 (the closed holes): a new «… in ⚙ → X» and a new «… in ⋯ → X» sentence that no row claims are RED by name
+{
+  const pg = new Map(words); pg.set('Stop it in ⚙ → Frobnicate first', new Set(['src/lib/planted.js'])); pg.set('Re-mint it in ⋯ → Frobnicate', new Set(['src/lib/planted.js']));
+  const G = census(pg).find((c) => c.scope === 'ui');
+  ok(!!G && G.unclaimed.length === 2 && G.unclaimed.every((x) => /Frobnicate/.test(x.s)), 'CONTROL (B-8703): a new «… in ⚙ → X» and a new «… in ⋯ → X» sentence that no row claims are RED by name (the gear and the three-dot menu are in the net — `\\b⚙` never matched)', G && G.unclaimed);
+}
+// B-8703 (the zh / ja net): the zh value that said «按上面的按钮» put back, and a ja value given a menu path — each English form RED by name
+// (the value net reads the value; the cured words are caught by nothing, their English forms by no net)
+{
+  const UIT = TABLES.find((x) => x.scope === 'ui').T;
+  const K1 = 'The sign-in was cancelled. Press the button to start again.', K2 = 'No sign-in is running — press the button to start again.';
+  const vz = new Map(VALUES); vz.set(K1, { ...(VALUES.get(K1) || {}), zh: '登录已取消。按上面的按钮可以重新开始。' }); vz.set(K2, { ...(VALUES.get(K2) || {}), ja: 'サインインは実行されていません — ⚙ → 設定 から始めてください。' });   // stale-pins: kept — the control puts the cured value back on purpose
+  const Z = census(words, vz).find((c) => c.scope === 'ui');
+  const cured = [K1, K2].map((k) => VALUES.get(k) || {});
+  ok(words.has(K1) && words.has(K2) && !netOf(UIT, K1) && !netOf(UIT, K2) && !!Z && Z.unclaimed.length === 2 && Z.unclaimed.map((x) => x.s).sort().join('|') === [K1, K2].sort().join('|'),
+    'CONTROL (B-8703): the zh «按上面的按钮» put back and a ja «⚙ → 設定» planted — each English form is RED by name (the zh / ja net reads the value); the cured values are caught by no net', { unclaimed: Z && Z.unclaimed.map((x) => x.s), cured });
+}
 const fc = ui && ui.rows.get('folder-create');
 const stripped = (f) => (f === 'src/lib/path-field.js' ? (sources.get(f) || '').replace(/data-act="tick"/g, 'data-act="gone"') : sources.get(f) || '');
 ok(fc && JSON.stringify(doorless(fc, stripped)) === JSON.stringify(['src/lib/path-field.js']), 'CONTROL: the folder field stating «create it?» with its create door taken out is RED by name', fc && doorless(fc, stripped));
@@ -923,7 +955,7 @@ globalThis.fetch = (...a) => FETCH(...a);
 const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
 const stubBuildVersion = { name: 'stub-build-version', setup(b) { b.onResolve({ filter: /build-version\.js$/ }, () => ({ path: 'build-version', namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, () => ({ contents: "export const BUILD_VERSION = 'test';", loader: 'js' })); } };
 const ENTRY = [['NL', 'need-line'], ['UT', 'utils'], ['SM', 'sidebar-mounts'], ['WN', 'window'], ['LB', 'browser-loop-banner'], ['SU', 'settings-ui'], ['SET', 'settings'], ['SS', 'settings-schema'],
-  ['DAL', 'desktop-app-launcher'], ['AID', 'app-install-dialog'], ['UTR', 'user-todos-row'], ['IW', 'inbox-window'], ['LAY', 'inbox-window-layout'], ['OCR', 'oauth-connect-row'], ['BNP', 'browser-new-profile-model'], ['CAD', 'channel-account-dialogs']]
+  ['DAL', 'desktop-app-launcher'], ['AID', 'app-install-dialog'], ['UTR', 'user-todos-row'], ['IW', 'inbox-window'], ['LAY', 'inbox-window-layout'], ['OCR', 'oauth-connect-row'], ['BNP', 'browser-new-profile-model'], ['CAD', 'channel-account-dialogs'], ['UM', 'usage-meter']]
   .map(([k, f]) => `export * as ${k} from './${f}.js';`).join('\n');
 let CL = null;
 try {
@@ -934,6 +966,41 @@ try {
 } catch (e) { ok(false, 'the client bundles and imports under the minimal DOM', String(e && e.message).slice(0, 600)); }
 const tick = (ms = 5) => new Promise((r) => setTimeout(r, ms));
 const fn = (m, k) => !!(CL && CL[m] && typeof CL[m][k] === 'function');
+// B-8703 part 3 (主开发 r533): THE OPEN USAGE POPUP IS REDRAWN THE MOMENT spend.allowOverageTurns FLIPS — the real meter (installUsageMeter,
+// _setupUsage, _renderUsage; in the one client bundle) over the minimal DOM, the popup OPEN with an in-use Credits chip; the switch flipped
+// through the settings' own listeners; the chip's tip and the door read AT ONCE (no poll in this leg: _pollUsage is a no-op). RED CONTROL:
+// the release had no listener — a settings object that never delivers one leaves the open popup as it was (the door drawn, «refused» said)
+if (CL && CL.UM && typeof CL.UM.installUsageMeter === 'function') {
+  const REFUSED = 'Automatic turns are refused on this account while it bills paid overage (a Spending setting can allow them).';
+  const RUNS = 'Automatic turns still run on this account while it bills paid overage (its Spending setting allows them).';
+  const flip = (deliver) => {
+    const App = class {}; CL.UM.installUsageMeter(App); const app = new App();
+    const vals = { 'spend.allowOverageTurns': false }, ls = {};
+    app.settings = { get: (k) => vals[k], on: (k, f) => { (ls[k] = ls[k] || []).push(f); } };
+    app._pollUsage = () => {};
+    const bar = new Nd('div'), pop = new Nd('div'); bar.id = 'taskbar-usage'; pop.id = 'usage-popup';
+    DOC.body.append(bar, pop);
+    let err = null, before = null, after = null;
+    try {
+      app._setupUsage();
+      const now = Date.now();
+      app._applyUsage({ rateLimit: { fetchedAt: now, overage: { inUse: true, asOf: now } }, globalLogin: { loggedIn: true } });
+      app._renderUsage();
+      const read = () => ({ door: /usage-spend-door/.test(pop.innerHTML), refused: pop.innerHTML.includes(REFUSED), runs: pop.innerHTML.includes(RUNS) });
+      before = read();
+      vals['spend.allowOverageTurns'] = true;
+      if (deliver) for (const f of ls['spend.allowOverageTurns'] || []) f(true);
+      after = read();
+    } catch (e) { err = String((e && e.stack) || e).slice(0, 400); }
+    bar.remove(); pop.remove();
+    return { err, before, after, listeners: (ls['spend.allowOverageTurns'] || []).length };
+  };
+  const live = flip(true), ctl = flip(false);
+  console.log('    B-8703 part 3, the facts judged: ' + JSON.stringify({ live, control: ctl }));
+  ok(!live.err && live.listeners === 1 && !!live.before && live.before.door && live.before.refused && !live.before.runs && !!live.after && !live.after.door && live.after.runs && !live.after.refused,
+    'B-8703 part 3: the OPEN usage popup is redrawn the moment spend.allowOverageTurns flips — the meter registers ONE listener; before, the in-use Credits chip says «refused» with «Allow automatic turns…» beside it; at once after (no poll), the chip says «still run» and the door is gone', live);
+  ok(!ctl.err && !!ctl.after && ctl.after.door && ctl.after.refused && !ctl.after.runs, 'CONTROL B-8703 part 3: the release (no listener — one never delivered) leaves the open popup as it was when the switch flips — the door drawn, «refused» said (red)', ctl);
+} else ok(false, 'B-8703 part 3: the usage meter is in the client bundle (installUsageMeter)', Object.keys(CL || {}));
 if (CL) {
   const { NL, UT, SM, WN, LB, SU, SET, SS, DAL, AID, UTR, IW, OCR, BNP, CAD } = CL;
   // need-line: the door makers DRIVEN (reader #4) — settingsDoor {section} opens the row's whole section; without, Settings searched

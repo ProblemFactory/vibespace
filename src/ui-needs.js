@@ -378,14 +378,50 @@ const NOT_NEEDS = Object.freeze([
 ]);
 /** THE DOORS OWED (主开发's ruling (a), 2026-11-18 23:33Z; their own heading at 2026-11-19 00:44Z): a sentence that sends a person down
  *  a menu path where a door ON ITS LINE is owed. B-d073 built the four its family held (bulk-resume's Close toast and hint, the
- *  Integrations window's two Test lines): the table stays, EMPTY — test-needs-doors' ceiling is 0, so an owed door is red, never listed. */
-const DOORS_OWED = Object.freeze([]);
+ *  Integrations window's two Test lines): its ceiling is 0. B-8703 unit 1 (主开发 r533, 2026-11-20): the path net's two holes closed
+ *  (the gear «⚙ →» — `\b⚙` could never match — and the three-dot menu «⋯ →» / «⋯ menu» / «in ⋯») and the zh / ja net over each
+ *  VALUE whose English form the nets miss (VALUE_NET) newly catch the sentences below — each LISTED here with its file, so the net is
+ *  honest and red on one more; unit 2 makes each a door where a helper that exists makes it one line, the rest keep their row with
+ *  the reason. Each family's count only falls (test-needs-doors). */
+const DOORS_OWED = Object.freeze([
+  { family: 'B-8703', why: 'src/lib/settings-schema.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^An app that draws its own title bar \(GTK header bars, e\./ },
+  { family: 'B-8703', why: 'src/lib/settings-schema.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^How large a desktop application draws itself, for sharp / },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Its first usage reading carried another account’s weekly/ },
+  { family: 'B-8703', why: 'src/lib/browser-exit-words.js, src/lib/browser-proxy-model.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Its proxy address carries its password, which is never used — pr/ },
+  { family: 'B-8703', why: 'src/lib/browser-panel-model.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Its proxy address carries its password, which is never used — «M/ },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Long-lived token \(used for remote machines\) expires in \{/ },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^No usage reading has checked this long-lived token again/ },
+  { family: 'B-8703', why: 'src/lib/session-props.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Re-mint it in Manage agents \(⋯ → Long-lived token\)\./ },
+  { family: 'B-8703', why: 'src/lib/settings-schema.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Records page errors, boot crashes and coarse feature eve/ },
+  { family: 'B-8703', why: 'src/lib/channel-webhook.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Shown once — paste it on the other VibeSpace: Channels →/ },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^The account’s usage window moved by this token’s own rea/ },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^The long-lived token EXPIRED — sessions using it fail un/ },
+  { family: 'B-8703', why: 'src/lib/channel-words.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^This account is disabled — enable it in the account’s ⋯ / },
+  { family: 'B-8703', why: 'src/lib/browser-live-window.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^This browser could not be started — VibeSpace stopped tr/ },
+  { family: 'B-8703', why: 'src/lib/browser-live-window.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^This browser keeps closing — VibeSpace stopped starting / },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^This row has no usage window of its own, and the token’s/ },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^This row’s usage window was last written by a step that / },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^VibeSpace holds the MASTER copy of this key; sessions ge/ },
+  { family: 'B-8703', why: 'src/lib/settings-schema.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^Which bar hosts each movable element, in what order \(\{zo/ },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^no target — pick a ChatGPT account in ⋯/ },
+  { family: 'B-8703', why: 'src/lib/manage-agents.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^no target — pick a subscription in ⋯/ },
+  { family: 'B-8703', why: 'src/lib/session-lifecycle.js: a menu path («⚙ → …» / «⋯ …») the closed path net catches — a door on its line is owed (B-8703 unit 2)', match: /^“\{name\}”’s long-lived token has expired — re-mint it in / },
+  { family: 'B-8703', why: 'src/lib/settings-schema.js: a direction to a control its zh and ja words say (the English form says it too, past the English net) — a door on its line is owed (B-8703 unit 2)', match: /^A shortcut that sets the switches below\. Change any swit/ },
+  { family: 'B-8703', why: 'src/lib/settings-schema.js: a direction to a control its zh words say (the English form says it too, past the English net) — a door on its line is owed (B-8703 unit 2)', match: /^Everything the AGENT can see or use from VibeSpace\. ON \(/ },
+  { family: 'B-8703', why: 'src/lib/sidebar-rail.js: a direction to a control its ja words say (the English form says it too, past the English net) — a door on its line is owed (B-8703 unit 2)', match: /^Managed under Active forwards above/ },
+  { family: 'B-8703', why: 'src/lib/browser-trace-view.js: a direction to a control its ja words say (the English form says it too, past the English net) — a door on its line is owed (B-8703 unit 2)', match: /^No profiles yet — create one with New profile… above; an/ },
+  { family: 'B-8703', why: 'src/plugin-settings.js: a direction to a control its zh and ja words say (the English form says it too, past the English net) — a door on its line is owed (B-8703 unit 2)', match: /^The model behind the four switches above\. Example: opena/ },
+  { family: 'B-8703', why: 'src/lib/vault-window.js: a direction to a control its ja words say (the English form says it too, past the English net) — a door on its line is owed (B-8703 unit 2)', match: /^The vault is locked — Unlock… above shows what it holds / },
+  { family: 'B-8703', why: 'src/mount-providers/drive.js: a direction to a control its zh words say (the English form says it too, past the English net) — a door on its line is owed (B-8703 unit 2)', match: /^“Shared with me” and Shared drives are separate spaces i/ },
+]);
 const owedOf = (sentence) => DOORS_OWED.find((r) => r.match.test(String(sentence))) || null;
 const needOf = (sentence) => NEEDS.find((r) => r.match.test(String(sentence))) || null;
 const notNeedOf = (sentence) => NOT_NEEDS.find((r) => r.match.test(String(sentence))) || null;
 /** The census's net (the words a person reads — every t() / tr() / i18nKey() literal). */
 const NET = Object.freeze({
-  path: /\b(Settings|⚙)\s*(→|›|▸)|(→|›|▸)\s*(Integrations|Plugins|Settings|Channels)\b|\bin Settings\b|\bthe ⋯ menu\b|⋯ menu\)|Services › Integrations/,
+  // B-8703: `\b⚙` could never match (JS \b is ASCII: no word boundary before a symbol) — the gear and the three-dot menu in every
+  // spelling the tree uses («⚙ →», «⋯ →», «⋯ menu», «in ⋯»)
+  path: /(?:\bSettings|⚙)\s*(→|›|▸)|(→|›|▸)\s*(Integrations|Plugins|Settings|Channels)\b|\bin Settings\b|⋯\s*(→|›|▸)|⋯ menu\b|\bin ⋯(?=$|[\s.,;:)—])|Services › Integrations/,
   direction: /\b(click|press|tap|pick|choose|use|paste|type|fill|enter|select|tick|open|sign in|add one|connect)\b[^.;—]{0,60}\b(below|above)\b|[“"«][^”"»]{2,40}[”"»]\s*(button\s+)?(below|above)\b|\b(button|switch|box|field|link|row|code|token|folder|address) (below|above)\b/i,
   company: /\byour company\b|\bcompany uses\b|\b(ask|contact) your admin(istrator)?\b|\bask your administrator\b/i,
   // reader follow-up #5 — THE NEED WORDS: a sentence that says something failed / is needed / is off / is not set / is missing
@@ -397,4 +433,12 @@ const NET = Object.freeze({
 // list, scripts/fixtures/need-debt.json (out of src: its sentences would read as surfaces to the tree's other censuses)
 const LISTED = new RegExp(NEEDS.map((r) => r.match.source).join('|'));
 const inNet = (s) => { const x = String(s); return NET.path.test(x) || NET.direction.test(x) || NET.company.test(x) || LISTED.test(x); };
-module.exports = { NEEDS, NOT_NEEDS, DOORS_OWED, NET, needOf, notNeedOf, owedOf, inNet };
+/** B-8703 (the verifier's M5): THE ZH / JA NET — read by test-needs-doors over each dictionary VALUE whose English form the nets
+ *  above miss: a menu path or a direction to a control said only in a translation is caught too, and claimed by its English form's
+ *  row (a value is the same sentence). [path, direction] per language; ja «上の / 下の» only after a sentence's start or its
+ *  punctuation («マシン上のフォルダー» is «on the machine», no direction). PURE: regexes only — the census does the reading. */
+const VALUE_NET = Object.freeze({
+  zh: Object.freeze([/(设置|⚙)\s*(→|›|▸)|(→|›|▸)\s*(集成|插件|设置|频道)|⋯\s*(菜单|→)|在\s*⋯\s*(里|中)/, /(上面|下面|上方|下方)(的|这|那)?[^，。；—]{0,12}(按钮|开关|框|字段|链接|代码|令牌|文件夹|地址)/]),
+  ja: Object.freeze([/(設定|⚙)\s*(→|›|▸)|(→|›|▸)\s*(連携|プラグイン|設定|チャンネル)|⋯\s*(メニュー|→)/, /(?:^|[、。（(—「]\s*)(?:上|下)の(?:「|[^、。；—]{0,14}(?:ボタン|スイッチ|欄|フィールド|リンク|コード|トークン|フォルダー|アドレス))/]),
+});
+module.exports = { NEEDS, NOT_NEEDS, DOORS_OWED, NET, VALUE_NET, needOf, notNeedOf, owedOf, inNet };

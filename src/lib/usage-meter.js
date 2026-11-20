@@ -99,6 +99,9 @@ export function installUsageMeter(App, ctx = {}) {
       this._renderUsage();
     });
 
+    // B-8703 (part 3): the popup's Credits chip tip and its «Allow automatic turns…» door are worded by spend.allowOverageTurns —
+    // redrawn the moment it flips (that door sends a person to this switch), never left to the next poll (8 s; 30 s while hidden)
+    this.settings?.on?.('spend.allowOverageTurns', () => { try { this._renderUsage(); } catch { } });
     // Poll usage for active sessions
     this._pollUsage();
   },
