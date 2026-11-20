@@ -445,9 +445,9 @@ console.log('⑮ the key\'s verb: reach first, with the owner conversation\'s Ta
   const DWD = mutantCopies('wake-grant-held', REPO).load('src/server/delivery-wake.js', anchored(DW_SRC, AT_FACT, "reach({ conversationId: owner, webuiId: null, groups })", 'wake-grant-fact-dropped'), 'wake-grant-fact-dropped');
   const CTX = { caller: {}, keyId: 'K-1', identity: 'automation:K-1', reach: reachExc };
   GH.setHeld(() => true);
-  let h1, hRed;
-  try { h1 = verbOf(DWO)({ job: cron2.id, grant: true }, CTX); hRed = verbOf(DWD)({ job: cron2.id, grant: true }, CTX); } finally { GH.setHeld(() => false); }
-  ok(!h1.ok && h1.code === 'groups_unreadable' && /Task Groups could not be read just now/.test(h1.why || ''), 'the store HELD: a key reaching «everything except T-ops» is refused BY NAME for T-ops\' job (groups_unreadable, its words) — never judged «in no group»', h1);
+  let h1, h1Wrote, hRed;
+  try { h1 = verbOf(DWO)({ job: cron2.id, grant: true }, CTX); h1Wrote = jm.wakeGrantOf(cron2.id).granted === true; hRed = verbOf(DWD)({ job: cron2.id, grant: true }, CTX); } finally { GH.setHeld(() => false); }   // the grant READ BACK before the red control writes the same store
+  ok(!h1.ok && h1.code === 'groups_unreadable' && /Task Groups could not be read just now/.test(h1.why || '') && h1Wrote === false, 'the store HELD: a key reaching «everything except T-ops» is refused BY NAME for T-ops\' job (groups_unreadable, its words) — never judged «in no group» — and NOTHING written (the grant read back: still not granted)', { h1, h1Wrote });
   ok(hRed.ok === true && jm.wakeGrantOf(cron2.id).granted === true, 'RED CONTROL: the fact dropped — the key «except T-ops» SETS the wake grant of T-ops\' job while the store is held (the harm the law exists for)', hRed);
 }
 

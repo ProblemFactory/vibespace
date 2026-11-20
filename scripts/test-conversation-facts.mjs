@@ -356,6 +356,11 @@ const known = { capsOf: () => KEEPS, turnOf: () => 'idle', turnKnown: (s) => s.m
   const term = CF.shapeRow({ key: KEY_T, name: 'Term', mode: 'terminal', turn: null, turnWhy: CF.WHY.terminal, background: null, backgroundWhy: CF.WHY.terminalNone, memBytes: null, memBytesWhy: CF.WHY.noProcess });
   const words = API.listWords({ machine: { memTotal: 64e9, memAvailable: 20e9 }, desktops: [], conversations: [term], browsers: [], beyondReach: 2 }, 1794880000000);
   ok(words.includes(`turn unknown (${CF.WHY.terminal})`) && words.includes(`memory unknown (${CF.WHY.noProcess})`) && !/turn idle|memory 0\b/.test(words) && words.includes('busy — turn_unknown') && words.includes('2 more beyond'), 'the table prints «unknown (<why>)» for every fact the hub does not know, the busy codes, and the count beyond reach', words);
+  // THE STORE HELD (login-request-card's builders cure, 主开发 02:14Z): the hub's answer carries its own sentence — the table prints it,
+  // never the count alone (rows NOT JUDGED are not rows outside the reach); with no such sentence, the count as before
+  const HELD = 'the Task Groups could not be read just now — 2 conversation(s) could not be judged against this key\'s reach and are not listed until they can be';
+  const heldWords = API.listWords({ machine: { memTotal: 64e9, memAvailable: 20e9 }, desktops: [], conversations: [term], browsers: [], beyondReach: 2, groupsUnreadable: true, beyondWhy: HELD }, 1794880000000);
+  ok(heldWords.includes('2 more beyond') && heldWords.includes(HELD) && !words.includes('could not be judged'), 'the table prints the hub\'s held sentence (beyondWhy) beside the count — a key\'s rows not judged are said, never read as rows beyond its reach; CONTROL: no sentence in the answer, the count alone', heldWords.split('\n').slice(-3));
   const BAN = /\b(sleep|asleep|hibernat\w*|suspend\w*|paus\w*)\b|睡眠|休眠|挂起|暂停|スリープ|休止/i;
   ok(!BAN.test(words) && !BAN.test(String(API.USAGE).split('vibespace-api list')[1] || '') && !BAN.test('List conversations and browsers 列出对话与浏览器 会話とブラウザーを一覧表示'), 'the list\'s words (table, usage, label in three languages) never say sleep');
 }

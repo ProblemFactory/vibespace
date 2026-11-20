@@ -613,7 +613,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], ops = null, wait
       for (let i = 0; i < rows.length; i++) rows[i] = endedByFor(rows[i], ctx.keyId);   // who ended it, toward an agent (lane end-obeys-verdict: must 5)
       const keys = new Set(rows.map((r) => r.key).filter(Boolean));
       const browsers = Array.isArray(snap.browsers) ? snap.browsers.filter((b) => !Array.isArray(b.holders) || !b.holders.length || b.holders.some((k) => keys.has(k))) : null;
-      return { ok: true, at: snap.at, machine: snap.machine, desktops: snap.desktops, ...(snap.desktopsWhy ? { desktopsWhy: snap.desktopsWhy } : {}), conversations: rows, browsers, ...(browsers ? {} : { browsersWhy: snap.browsersWhy || 'not collected' }), beyondReach: beyond, pass: snap.pass, ...(heldOut ? { groupsUnreadable: true, beyondWhy: `the Task Groups could not be read just now — ${heldOut} conversation(s) a grant reaches by its Task Groups are not listed until they are` } : {}) };
+      return { ok: true, at: snap.at, machine: snap.machine, desktops: snap.desktops, ...(snap.desktopsWhy ? { desktopsWhy: snap.desktopsWhy } : {}), conversations: rows, browsers, ...(browsers ? {} : { browsersWhy: snap.browsersWhy || 'not collected' }), beyondReach: beyond, pass: snap.pass, ...(heldOut ? { groupsUnreadable: true, beyondWhy: `the Task Groups could not be read just now — ${heldOut} conversation(s) could not be judged against this key's reach and are not listed until they can be` } : {}) };
     },
     // THE MANAGER DESIGN'S PIECE 4: resume an ENDED conversation the way a person's Resume press does — the page's own resume road
     // run headless (src/server/inbox-reopen.js reopen, through the one line), NOTHING sent into it and nothing billed (a person's

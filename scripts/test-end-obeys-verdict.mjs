@@ -438,10 +438,13 @@ console.log('⑩ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05
     const sessions = new Map([['sess-1', session()], ['sess-me', { backend: 'claude', mode: 'chat', backendSessionId: CALLER, name: 'Manager', _convFacts: idleFacts() }]]);
     const ended = [];
     const stubOps = { endConversation: async (target) => { ended.push(target); sessions.delete(target.webuiId); return { ok: true, sessionId: target.webuiId }; } };
+    let submits = 0;   // a COUNTING stand-in for the resume line: an ended record whose facts would resume it is QUEUED here
     const verbs = O.automationVerbs({ activeSessions: sessions, listFacts: COL.create({ activeSessions: sessions, ...srcs() }), ops: stubOps,
-      deadOf: (t) => (t === OLD ? { conversationId: OLD, sessionKey: `claude:${OLD}`, name: 'Old', groups: [] } : null) });
+      deadOf: (t) => (t === OLD ? { conversationId: OLD, sessionKey: `claude:${OLD}`, name: 'Old', groups: [] } : null),
+      resumeFactsOf: () => ({ goal: 'none', timerMark: null, mode: 'chat', queue: 0, cwd: '/tmp' }), resumeRowOf: () => ({ resumeContinues: 'nothing', headless: true }),
+      resumeLine: { submit: () => { submits++; return { ok: true, position: 1 }; } } });
     const r = await verbs[verb](args, { caller: { conversationId: CALLER, sessionKey: `claude:${CALLER}`, name: 'Manager' }, keyId: 'K-1', reach: reachBy(A) });
-    return { r, ended: ended.length };
+    return { r, ended: ended.length, submits };
   };
   const listed = (x) => !!(x.r && Array.isArray(x.r.conversations) && x.r.conversations.some((c) => c.key === `claude:${CID}`));
   GH.setHeld(() => true);
@@ -455,10 +458,10 @@ console.log('⑩ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05
   const UNREAD = /Task Groups could not be read just now/;
   ok(held.end.r.code === 'groups_unreadable' && UNREAD.test(held.end.r.why || '') && held.end.ended === 0, 'the END while held: a key reaching «everything except T-G» is refused BY NAME (groups_unreadable, its words) — nothing ended', held.end);
   ok(held.list.r.ok === true && !listed(held.list) && held.list.r.groupsUnreadable === true && /1 conversation\(s\)/.test(held.list.r.beyondWhy || ''), 'the LIST while held: the target is not listed, and the answer SAYS why (groupsUnreadable, beyondWhy) — never a silent «beyond reach»', held.list.r);
-  ok(held.live.r.code === 'groups_unreadable' && held.dead.r.code === 'groups_unreadable' && UNREAD.test(held.dead.r.why || ''), 'the RESUME while held: refused BY NAME for a live target and for an ended one (its record\'s groups read from the same held store)', { live: held.live.r.code, dead: held.dead.r.code });
+  ok(held.live.r.code === 'groups_unreadable' && held.dead.r.code === 'groups_unreadable' && UNREAD.test(held.dead.r.why || '') && held.live.submits === 0 && held.dead.submits === 0, 'the RESUME while held: refused BY NAME for a live target and for an ended one (its record\'s groups read from the same held store) — NOTHING queued (the counting resume line saw no submit)', { live: held.live, dead: held.dead });
   ok(red.end.ended === 1 && red.end.r.code !== 'groups_unreadable', 'RED CONTROL: the end\'s fact dropped — the key «except T-G» ENDS T-G\'s conversation (the harm the law exists for)', red.end);
   ok(listed(red.list) && !red.list.r.groupsUnreadable, 'RED CONTROL: the list\'s fact dropped — T-G\'s conversation is LISTED to a key that excepts T-G', { listed: listed(red.list) });
-  ok(red.live.r.code !== 'groups_unreadable' && red.dead.r.code !== 'groups_unreadable', 'RED CONTROL: each resume\'s fact dropped — the reach ADMITS the target (the verb goes on to its own checks)', { live: red.live.r.code, dead: red.dead.r.code });
+  ok(red.live.r.code !== 'groups_unreadable' && red.dead.r.code !== 'groups_unreadable' && red.dead.submits === 1 && red.dead.r.queued === true, 'RED CONTROL: each resume\'s fact dropped — the reach ADMITS the target: the ended one is QUEUED on the resume line for a key that excepts its group (the live one goes on to «not ended»)', { live: red.live.r.code, dead: red.dead });
   ok(red.unnamed.r.code === 'not_granted' && red.unnamed.ended === 0, 'RED CONTROL: the reach judge without its named refusal — refused as «not in the Task Groups this grant reaches» (the wrong words; the law says unknown)', red.unnamed.r.code);
   const rel = await run(OPS, 'conversations.end', { target: CID }), relList = await run(OPS, 'conversations.list', {});
   ok(rel.ended === 1 && listed(relList) && !relList.r.groupsUnreadable, 'CONTROL — the store READ (no hold): the same key ends and lists the target (its groups read [] are real: in no group)', { ended: rel.ended, listed: listed(relList) });
