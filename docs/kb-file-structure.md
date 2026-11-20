@@ -945,6 +945,7 @@ scripts/test-browser-profile-clone.mjs — lane browser-profile-clone gate (fast
 scripts/test-browser-builds.mjs — lane browser-admin 2a gate (fast): the build verdict table, the executable on every launching call, a vanished build refused by name + one For-you, Change build… tells holders, the serve op + capability gate, words, 3 controls ⇒ kb-file-structure.md
 scripts/test-browser-proxy.mjs — B-8b87 gate (fast): a profile's proxy — shape/verdict, the one ranking (proxyRoadOf), the forwarder via stand-in upstreams (a name no resolver answers reaches them as the name), the one reader, the real keeper; REDs ⇒ kb-features.md
 scripts/test-browser-exit.mjs — the exit check gate (fast): the address, the tolerant read, the zone, the one request through the forwarder (a direct-dial RED), the real keeper's press / confirm / refusals with no request, the doors ⇒ kb-features.md
+scripts/test-browser-environment.mjs — B-9584 U1 gate (fast, PURE): the table, the language rows, every refusal by name, the default (nothing kept, nothing told), Automatic said not guessed, a seeded law, four mutants through anchored()
 scripts/test-browser-profile-commands.mjs — B-acb9 gate (fast): the two core commands, one word back, a profile not here, the dialogs' onClose, the wiring; RED CONTROL (anchored). ⇒ kb-file-structure.md
 scripts/test-browser-profile-commands-chrome.mjs — B-acb9 r226 (heavy, chrome): the real dialogs + the real shell, a second press raises the live form, every caller hears the form's word; RED CONTROL. ⇒ kb-file-structure.md
 scripts/test-browser-build-download.mjs — lane chrome-builds-download gate (fast): Download another build… — the real keeper vs a loopback Chrome for Testing: lists, the whole path, md5, zip shape before unzip, egress, ONE slot, restart, removal; 3 controls
@@ -1921,6 +1922,7 @@ src/lib/browser-exit-dialog.js — «Check the exit…»: the press, what was re
 src/lib/browser-profile-commands.js — B-acb9: the two core commands a plugin's window runs (browser.profileProxy / browser.profileExitCheck): the card's own dialog, one word back, never a value. ⇒ kb-file-structure.md
 src/lib/browser-exit-words.js — PURE the exit check's page words: every code / unreadable kind the routes answer ⇒ the page's sentence; a server's or proxy's own words only as data after it; the kept exit's age ⇒ kb-features.md
 src/browser-exit.js — PURE the exit check's rules: checkUrlVerdict (https, no login, no private literal), readExitAnswer (the short key list), zoneVerdict (IANA via Intl), egressRecordOf (the hand-over's names) ⇒ kb-features.md
+src/browser-environment.js — PURE (B-9584 U1) a profile's own environment: SETTINGS, ONE table (time zone, language, location); this machine's / Automatic (the kept exit: keptExitOf, the one reader) / a value; resolveEnvironment says an Automatic it cannot follow
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
 | Task | Primary File(s) | Notes |
