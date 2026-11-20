@@ -1564,16 +1564,24 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       if (st.closed || tabRow.style.display === 'none' || !st.tabRow) return;
       const chips = [...tabRowList.children].filter((c) => c.dataset.target), dividers = [...tabRowList.children].filter((c) => !c.dataset.target);
       for (const c of [...chips, ...dividers]) c.style.display = '';
-      for (const c of chips) c.style.maxWidth = ''; // B-e674: a cut is re-judged from the chips' whole widths
+      for (const c of chips) { c.style.maxWidth = ''; c.classList.remove('bare'); } // B-e674: a cut is re-judged from the chips' whole widths
       const widths = {}; for (const c of chips) widths[c.dataset.target] = c.offsetWidth + 3;
       // B-e674 (r608): this view's own chip may yield room to a foreign front — never under its floor (the chip without its title + a few letters)
       const ownEl = chips.find((c) => c.classList.contains('active')) || null;
-      const ownMinPx = ownEl ? ownEl.offsetWidth - ((ownEl.querySelector('.browser-live-tabchip-title') || {}).offsetWidth || 0) + 28 : 0;
+      // line 100's cure (r618): ONLY ITS TITLE gives way — the floor is the chip without its title + an ellipsis; its «here» words and
+      // owner's mark are whole or not at all (bare: the chip without them, its title an ellipsis)
+      const ownTitleW = ownEl ? ((ownEl.querySelector('.browser-live-tabchip-title') || {}).offsetWidth || 0) : 0;
+      const ownPartsW = ownEl ? ['.browser-live-tabchip-here', '.browser-live-tabchip-mark'].reduce((a, q) => { const e = ownEl.querySelector(q); return a + (e && e.offsetWidth ? e.offsetWidth + 5 : 0); }, 0) : 0;
+      const ownMinPx = ownEl ? ownEl.offsetWidth - ownTitleW + 14 : 0, ownBareMinPx = ownEl ? Math.max(0, ownMinPx - ownPartsW) : 0;
+      // …and the fold that SAYS the front carries words: its pill is measured with them (never the plain pill's width)
+      const pillW = (txt) => { const was = tabRowMore.textContent, disp = tabRowMore.style.display; tabRowMore.style.display = ''; tabRowMore.textContent = txt; const w = tabRowMore.offsetWidth + 4; tabRowMore.textContent = was; tabRowMore.style.display = disp; return w; };
+      const nMax = Math.max(1, chips.length), morePx = pillW('▾+' + nMax), moreFrontPx = pillW('▾+' + nMax + ' · ' + t('In front'));
       const divPx = dividers.reduce((a, c) => a + c.offsetWidth + 3, 0); // lane browser-tabs-by-window: the window dividers take their room first
-      const f = tabRowFit({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12 - divPx, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44, ownMinPx, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
+      const f = tabRowFit({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12 - divPx, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx, moreFrontPx, ownMinPx, ownBareMinPx, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
       st.tabFolded = f.folded; st.tabFoldFront = f.foldFront || null;
       for (const c of chips) c.style.display = f.folded.includes(c.dataset.target) ? 'none' : '';
       if (ownEl && f.ownCutPx != null) ownEl.style.maxWidth = f.ownCutPx + 'px'; // its name cuts shorter (the title ellipsizes)
+      if (ownEl) ownEl.classList.toggle('bare', !!f.ownBare); // line 100's cure: its parts hidden WHOLE, never half
       for (const d of dividers) d.style.display = d.dataset.group === 'blanks' || st.tabRow.rows.some((r) => r.group === d.dataset.group && !f.folded.includes(r.targetId)) ? '' : 'none';   // the one-window row's «+N blank» stays said (its read's M1)
       tabRowMore.style.display = f.folded.length ? '' : 'none';
       // B-e674 (r608): when even a cut own chip cannot hold the foreign front, THE FOLD SAYS IT — in words, never by colour alone

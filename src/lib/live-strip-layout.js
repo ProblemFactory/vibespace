@@ -189,33 +189,47 @@ function tabRowFold({ rows = [], widths = {}, avail = Infinity, endPx = 0, moreP
  *      (`ownCutPx`), never under `ownMinPx` (the client measures it: the chip without its title + a few letters);
  *   3. when even that cannot hold the front beside it, the front folds and THE FOLD SAYS IT (`foldFront` = its target id): the
  *      «▾+N» pill carries the front's mark in words, its tip the front's words, its menu the front's row FIRST.
- * Nothing is said by colour alone. PURE. → { visible, folded, ownCutPx: px | null, foldFront: target id | null }
+ * Nothing is said by colour alone. PURE. → { visible, folded, ownCutPx: px | null, foldFront: target id | null, ownBare }
+ * LINE 100's CURE (the coordinator's r618 — the 390 picture clipped the own chip's owner mark mid-word, «age»):
+ *   · when the own chip yields, ONLY ITS TITLE gives way (down to nothing, with its ellipsis): `ownMinPx` = the chip without its
+ *     title + an ellipsis (the client measures it). Its other parts (its «here» words, its owner's mark) are whole or not at all:
+ *     when even that floor cannot fit, `ownBare` — the chip shows without them (`ownBareMinPx`: no title, no parts), never half;
+ *   · the fold that SAYS the front carries words, so its pill is wider: `moreFrontPx` (measured) is budgeted for it, never the
+ *     plain pill's `morePx` (the row's list clips what the fit did not budget).
  */
 const OWN_MIN_PX = 96;
-function tabRowFit({ rows = [], widths = {}, avail = Infinity, endPx = 0, morePx = MORE_PX, watchedRef = null, ownMinPx = OWN_MIN_PX } = {}) {
+function tabRowFit({ rows = [], widths = {}, avail = Infinity, endPx = 0, morePx = MORE_PX, moreFrontPx = null, watchedRef = null, ownMinPx = OWN_MIN_PX, ownBareMinPx = null } = {}) {
   const f = tabRowFold({ rows, widths, avail, endPx, morePx, watchedRef });
   const all = (rows || []).filter((r) => r && r.targetId);
   const front = all.find((r) => r.front === true) || null;
   if (!front) return { ...f, ownCutPx: null, foldFront: null };
-  const wOf = (id) => { const v = widths instanceof Map ? widths.get(id) : widths[id]; return Number.isFinite(Number(v)) ? Number(v) : estimateTabWidth((all.find((r) => r.targetId === id) || {}).title || id); };
-  const usedBy = (vis, nFolded) => vis.reduce((a, id) => a + wOf(id), 0) + endPx + (nFolded ? morePx : 0);
+  // a width the client did not measure is estimated from the tab's own title — a title-less tab estimates an empty label, never its id
+  // (test-window-types: no window or tab is ever named by its raw id, not even in a width estimate)
+  const titleOf = (id) => ((all.find((r) => r.targetId === id) || {}).title) || '';
+  const wOf = (id) => { const v = widths instanceof Map ? widths.get(id) : widths[id]; return Number.isFinite(Number(v)) ? Number(v) : estimateTabWidth(titleOf(id)); };
+  const pillFront = Number.isFinite(Number(moreFrontPx)) && Number(moreFrontPx) > 0 ? Number(moreFrontPx) : morePx;
+  const usedBy = (vis, nFolded, pill = morePx) => vis.reduce((a, id) => a + wOf(id), 0) + endPx + (nFolded ? pill : 0);
   const shown = (all.find((r) => r.active) || {}).targetId || null;
   const ownMin = Math.max(0, Number(ownMinPx) || 0);
-  const cutFor = (vis, nFolded) => { // the own chip's width that fits the rest, or null (no cut needed, or not even its floor fits)
-    const used = usedBy(vis, nFolded);
-    if (used <= avail) return { fits: true, cut: null };
-    if (!shown || shown === front.targetId || !vis.includes(shown)) return { fits: false, cut: null };
+  const bareMin = Number.isFinite(Number(ownBareMinPx)) && Number(ownBareMinPx) > 0 ? Math.min(ownMin, Number(ownBareMinPx)) : null;
+  const cutFor = (vis, nFolded, pill) => { // the own chip's width that fits the rest, or null (no cut needed, or not even its floor fits)
+    const used = usedBy(vis, nFolded, pill);
+    if (used <= avail) return { fits: true, cut: null, room: null };
+    if (!shown || shown === front.targetId || !vis.includes(shown)) return { fits: false, cut: null, room: null };
     const cut = Math.floor(avail - (used - wOf(shown)));
-    return cut >= ownMin ? { fits: true, cut } : { fits: false, cut: null };
+    return cut >= ownMin ? { fits: true, cut, room: cut } : { fits: false, cut: null, room: cut };
   };
-  const a = cutFor(f.visible, f.folded.length);
-  if (a.fits) return { ...f, ownCutPx: a.cut, foldFront: null };
+  const a = cutFor(f.visible, f.folded.length, morePx);
+  if (a.fits) return { ...f, ownCutPx: a.cut, foldFront: null, ownBare: false };
   // even its own chip cut to its floor cannot hold the front beside it: the front folds, and the fold says it
   const visible = f.visible.filter((id) => id !== front.targetId);
   const foldedSet = new Set([...f.folded, front.targetId]);
   const folded = all.filter((r) => foldedSet.has(r.targetId)).map((r) => r.targetId);
-  const b = cutFor(visible, folded.length);
-  return { visible, folded, ownCutPx: b.cut, foldFront: front.targetId };
+  const b = cutFor(visible, folded.length, pillFront); // the fold that says it: its worded pill is budgeted
+  if (b.fits) return { visible, folded, ownCutPx: b.cut, foldFront: front.targetId, ownBare: false };
+  // even its floor cannot fit beside the worded fold: its parts go WHOLE (never half) and its title takes what is left
+  if (bareMin !== null && b.room !== null) return { visible, folded, ownCutPx: Math.max(bareMin, b.room), foldFront: front.targetId, ownBare: true };
+  return { visible, folded, ownCutPx: b.room !== null ? Math.max(ownMin, b.room) : null, foldFront: front.targetId, ownBare: false };
 }
 
 module.exports = { rowStateWords, LABEL_MAX, TAB_BASE_PX, CJK_PX, LATIN_PX, DRIVER_PX, MORE_PX, CHIP_PX, shortLabel, estimateTabWidth, stripOrder, stripPriority, stripFold, stripFoldChip, chipFoldText, capChip, stoppableRows, tabRowFold, tabRowFit, OWN_MIN_PX };

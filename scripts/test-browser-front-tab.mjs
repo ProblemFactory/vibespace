@@ -309,13 +309,17 @@ console.log('— ⑤ the fit: a foreign front is never folded by width — this 
   const fr = { targetId: id('E'), title: 'Read - Meeting Report', owner: 'other', front: true };
   const o = (n) => ({ targetId: id(String(n)), title: 'other page ' + n, owner: 'agent' });
   const W = (pairs) => Object.fromEntries(pairs.map(([r, w]) => [r.targetId, w]));
-  const say = (r) => ({ v: r.visible.map((x) => x[0]), f: r.folded.map((x) => x[0]), cut: r.ownCutPx, foldFront: r.foldFront && r.foldFront[0] });
+  const say = (r) => ({ v: r.visible.map((x) => x[0]), f: r.folded.map((x) => x[0]), cut: r.ownCutPx, foldFront: r.foldFront && r.foldFront[0], bare: r.ownBare });
   const cells = [
     ['a row of two, roomy', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 240]]), avail: 700, endPx: 60 }), (r) => r.visible.length === 2 && r.ownCutPx === null && r.foldFront === null],
     ['a row of two, narrow: this view\'s own chip cuts, the front stays whole', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 200]]), avail: 420, endPx: 60, ownMinPx: 120 }), (r) => r.visible.includes(fr.targetId) && r.ownCutPx === 160 && r.foldFront === null],
     ['a row of five, narrow: three fold, own + front stay', LS.tabRowFit({ rows: [own, fr, o(1), o(2), o(3)], widths: W([[own, 240], [fr, 200], [o(1), 150], [o(2), 150], [o(3), 150]]), avail: 470, endPx: 60, ownMinPx: 120 }), (r) => r.visible.join() === [own.targetId, fr.targetId].join() && r.folded.length === 3 && r.ownCutPx === 166 && r.foldFront === null],
     ['one own chip with a long name', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 480], [fr, 200]]), avail: 420, endPx: 60, ownMinPx: 120 }), (r) => r.visible.includes(fr.targetId) && r.ownCutPx === 160],
     ['too narrow even for a cut own chip: the front folds and THE FOLD SAYS IT', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 200]]), avail: 300, endPx: 60, ownMinPx: 140 }), (r) => !r.visible.includes(fr.targetId) && r.folded.includes(fr.targetId) && r.foldFront === fr.targetId && r.ownCutPx === 196],
+    // line 100's cure (r618): the worded fold's pill is budgeted; only the title gives way — down to the floor, then the chip goes bare
+    ['the fold that says it is WIDER: its worded pill is budgeted (the old plain-pill budget cut to 196)', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 200]]), avail: 300, endPx: 60, morePx: 44, moreFrontPx: 90, ownMinPx: 140, ownBareMinPx: 40 }), (r) => r.foldFront === fr.targetId && r.ownCutPx === 150 && r.ownBare === false],
+    ['the cut stops AT the floor (the chip without its title + an ellipsis), its parts whole', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 200]]), avail: 290, endPx: 60, morePx: 44, moreFrontPx: 90, ownMinPx: 140, ownBareMinPx: 40 }), (r) => r.ownCutPx === 140 && r.ownBare === false],
+    ['below the floor its parts go WHOLE (bare), never half — its title takes what is left', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 200]]), avail: 250, endPx: 60, morePx: 44, moreFrontPx: 90, ownMinPx: 140, ownBareMinPx: 40 }), (r) => r.ownCutPx === 100 && r.ownBare === true],
     ['no front: the row\'s own fold, nothing cut, nothing said', LS.tabRowFit({ rows: [own, o(1), o(2)], widths: W([[own, 240], [o(1), 150], [o(2), 150]]), avail: 400, endPx: 60 }), (r) => r.ownCutPx === null && r.foldFront === null && r.folded.length >= 1],
   ];
   for (const [n, r] of cells) console.log(`  · ${n}: ${JSON.stringify(say(r))}`);
@@ -327,8 +331,8 @@ console.log('— ⑤ the fit: a foreign front is never folded by width — this 
   // the client's wiring of the fit
   const LW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
   const PINS = [
-    ['the fit is asked with the own chip\'s floor', 'const f = tabRowFit({'], ['…its floor measured (the chip without its title + a few letters)', "ownEl.offsetWidth - ((ownEl.querySelector('.browser-live-tabchip-title') || {}).offsetWidth || 0) + 28"],
-    ['a cut is re-judged from whole widths', "for (const c of chips) c.style.maxWidth = '';"], ['the own chip\'s cut', "if (ownEl && f.ownCutPx != null) ownEl.style.maxWidth = f.ownCutPx + 'px';"],
+    ['the fit is asked with the own chip\'s floor', 'const f = tabRowFit({'], ['…its floor measured: the chip without its title + an ellipsis (r618: only the title gives way)', 'const ownMinPx = ownEl ? ownEl.offsetWidth - ownTitleW + 14 : 0'], ['…and its bare floor (no parts)', 'ownBareMinPx = ownEl ? Math.max(0, ownMinPx - ownPartsW) : 0'], ['the worded pill measured (r618)', "moreFrontPx = pillW('▾+' + nMax + ' · ' + t('In front'))"], ['…both handed to the fit', 'morePx, moreFrontPx, ownMinPx, ownBareMinPx,'], ['a bare chip hides its parts whole', "ownEl.classList.toggle('bare', !!f.ownBare)"],
+    ['a cut is re-judged from whole widths (and a bare chip whole again)', "for (const c of chips) { c.style.maxWidth = ''; c.classList.remove('bare'); }"], ['the own chip\'s cut', "if (ownEl && f.ownCutPx != null) ownEl.style.maxWidth = f.ownCutPx + 'px';"],
     ['the fold says it in WORDS', "(fr ? ' · ' + t('In front') : '')"], ['…its tip the front\'s words', "(fr && fr.frontTip ? fr.frontTip + '\\n' : '')"],
     ['…its edge', "tabRowMore.classList.toggle('front-foreign', !!fr);"], ['the menu\'s FIRST row is the front', 'if (fr) items.push({ label: `${fr.frontText} — ${fr.title} · ${fr.mark}`'],
   ];

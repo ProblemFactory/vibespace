@@ -29,7 +29,8 @@
 //   dialog, the strip after it, and the zh / ja bar at 360 px; ⑨'s row at a 390 and a 1280 px viewport (B-e674 unit 1)
 //   ⑨ zh (B-e674 unit 1): a tab that is not this conversation's in FRONT of its window — its own chip says «在此窗口最前面»,
 //      its tip whose it is; CONTROL without the hub's verdict nothing is marked; a blank nobody holds in front is drawn; at 390
-//      and 1280 px the row is JUDGED (r608): the front's chip whole, or the fold naming it in words — never folded unsaid
+//      and 1280 px the row is JUDGED (r608): the front's chip whole, or the fold naming it in words — never folded unsaid; the
+//      wait is for the state its feed asks for, and no part of this view's own chip is clipped (r618: only its title gives way)
 //   ⑤ the agent's own `detach` retires its browser's record: a freshly loaded view (no browser remembered) still offers
 //      Resume off THE fact; a REAL click brings the three tabs back on a new record
 //   ⑥ (lane browser-resume C, the owner's ruling 3) THE TAB ROW: one chip per tab, "The agent's"; while the agent drives no
@@ -578,16 +579,24 @@ else await (async () => {
       // the front chip into «▾+1» with nothing said: the law is its chip whole (this view's own chip cuts first), else the fold
       // names it IN WORDS («▾+N · 最前面», the front's words in its tip). Then the picture (where VIBESPACE_TABS_PNG_DIR names a dir).
       const rowAt = `const root = L().el(); const vis = (e) => !!e && e.style.display !== 'none' && e.getBoundingClientRect().width > 0; const fc = root.querySelector('.browser-live-tabchip.front-foreign'); const more = root.querySelector('.browser-live-tabrow-more'); const own = root.querySelector('.browser-live-tabchip.active');
-        return { chip: vis(fc) ? { here: (fc.querySelector('.browser-live-tabchip-here') || {}).textContent || '', w: Math.round(fc.getBoundingClientRect().width) } : null, more: vis(more) ? { text: more.textContent, marked: more.classList.contains('front-foreign'), tip: more.title } : null, own: own ? { w: Math.round(own.getBoundingClientRect().width), cut: own.style.maxWidth || '' } : null, row: rect(root.querySelector('.browser-live-tabrow')) };`;
+        const list = root.querySelector('.browser-live-tabrow-list'); const listRight = list ? Math.round(list.getBoundingClientRect().right) : 0;
+        return { chip: vis(fc) ? { id: String(fc.dataset.target || '').slice(0, 1), here: (fc.querySelector('.browser-live-tabchip-here') || {}).textContent || '', w: Math.round(fc.getBoundingClientRect().width) } : null, more: vis(more) ? { text: more.textContent, marked: more.classList.contains('front-foreign'), tip: more.title } : null,
+          own: own ? { w: Math.round(own.getBoundingClientRect().width), cut: own.style.maxWidth || '', bare: own.classList.contains('bare'), scroll: own.scrollWidth, client: own.clientWidth, right: Math.round(own.getBoundingClientRect().right), parts: [...own.querySelectorAll('.browser-live-tabchip-here, .browser-live-tabchip-mark')].filter((e) => vis(e) && getComputedStyle(e).display !== 'none').map((e) => ({ s: e.scrollWidth, c: e.clientWidth, right: Math.round(e.getBoundingClientRect().right) })) } : null, listRight, row: rect(root.querySelector('.browser-live-tabrow')) };`;
       for (const wpx of [390, 1280]) {
         await send('Emulation.setDeviceMetricsOverride', { width: wpx, height: 900, deviceScaleFactor: 1, mobile: false });
         await ev(`const w = live(); const el = w.element; el.style.left = "0px"; el.style.width = "${wpx - 10}px"; el.style.height = "520px"; window.dispatchEvent(new Event("resize")); return true;`);
         await ev(feedOf({ ...base, front: frontE }) + 'return true;');
-        const seen = await ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 80; i++) { const r = read(); if ((r.chip && r.chip.here) || (r.more && r.more.marked)) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`);
+        // line 100's cure (r618): the wait is for THE STATE THIS FEED ASKS FOR — 企业助手's own chip, or a fold whose tip names 企业助手 —
+        // never «any marked fold» (the scene before left one behind); bounded, and the judge below is red by name when it never comes
+        const seen = await ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 80; i++) { const r = read(); if ((r.chip && r.chip.id === 'E' && r.chip.here) || (r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页'))) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`);
         console.log(`    ⑨ the row at ${wpx} px: ${S(seen)}`);
         const said = !!(seen && ((seen.chip && seen.chip.here === '在此窗口最前面') || (seen.more && seen.more.marked && seen.more.text.includes('最前面') && seen.more.tip.includes('企业助手 的标签页在此窗口最前面'))));
         ok(said, `⑨ zh at ${wpx} px: the foreign front is SAID — its chip whole («在此窗口最前面»), or the fold names it in words (r608: never folded unsaid)`, S(seen));
         if (wpx === 1280) ok(!!(seen && seen.chip && seen.chip.here === '在此窗口最前面'), '⑨ zh at 1280 px: there is room — the front\'s own chip, whole', S(seen));
+        // line 100's cure (r618): NO PART of this view's own chip is clipped — only its title gives way; its «here» words and owner's mark
+        // are whole (or not shown at all: bare), and the chip ends inside the row's list
+        const o9 = seen && seen.own;
+        ok(!!(o9 && o9.scroll <= o9.client + 1 && o9.right <= seen.listRight + 1 && o9.parts.every((q) => q.s <= q.c + 1 && q.right <= seen.listRight + 1)), `⑨ zh at ${wpx} px: no part of this view's own chip is clipped (its scroll width ${o9 && o9.scroll} ≤ its width ${o9 && o9.client}; it ends at ${o9 && o9.right} ≤ the list's ${seen && seen.listRight}${o9 && o9.bare ? '; bare — its parts shown not at all' : ''})`, S(o9));
         if (PNG_DIR) {
           const r = seen && seen.row;
           const shot = r && r.width > 0 ? await send('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r.left), y: Math.max(0, r.top), width: Math.max(1, Math.min(r.width, wpx)), height: Math.max(1, r.height), scale: 1 } }) : null;
