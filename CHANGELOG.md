@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - A message you held behind a running turn, or a turn that just started or ended, no longer goes missing from the chat if VibeSpace restarts right then.
 - On a paired Windows machine with a POSIX shell (Git Bash), a key helper named in the config folder its login shell sets is now seen at a start.
+- On a paired Windows machine, programs on its PATH are found, and a start is no longer refused for a POSIX shell that is installed (Git Bash).
 
 ## 2.369.413 — 2026-11-20
 
