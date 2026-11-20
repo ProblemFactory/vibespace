@@ -194,6 +194,42 @@ export function realClickMeasureSource(sel, { scroll = 'center', aimLeft = null 
   return `(() => { const desc = (h) => (h ? h.tagName + '.' + String(h.className).slice(0, 60) : null); const e = ${target}; if (!e) return null; ${SCROLL[scroll]} const q = e.getBoundingClientRect(); const x = ${aim}, y = q.top + q.height / 2; window.__vsRealClickEl = e; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: desc(hit), hits: !!hit && (hit === e || e.contains(hit)) }; })()`;
 }
 
+/** THE PRESS ARM, ASKED OF THE PRODUCT (lane bl-tests-e — the 2.369.413 checkpoint's hosted red: test-exit-access-ui's Allow,
+ *  pressed through this door ~80 ms after the door was called, counted for NOTHING — the product rightly ignored it — and the ask
+ *  expired 60 s later in a cascade of fifteen legs). An approval the product ARMS (src/lib/press-arm.js: a press counts only once the
+ *  control sat still ARM_MS since it appeared or moved) is pressed as a person's press: the door reads EVERY arm mark the product
+ *  keeps on the target and its ancestors — `_armSince` (with `_armTop`: none, or a top that moved since the product last read it,
+ *  is re-armed at the press — press-arm.js armAfterLayout), `_openedAt` (a card / dock opened under the pointer), an Outbox card's
+ *  `data-armed-at` (the time it may decide, on the Date clock) — never a list of selectors, and waits for the LATEST of them by
+ *  the page's own clock. The For-you WINDOW's pane arm is not readable from the page (its state getter carries no armAt) — a suite
+ *  that presses an armed action there keeps its own wait. The page half, PURE (a string): → { marks: [{ mark, since, age |
+ *  readyIn, moved }] }. */
+export function armProbeSource() {
+  return `(() => { const e = window.__vsRealClickEl; const marks = []; if (!e) return { marks }; const now = performance.now();
+    for (let n = e; n && n.nodeType === 1; n = n.parentElement) {
+      if (typeof n._armSince === 'number') { const moved = !!n.isConnected && (typeof n._armTop !== 'number' || Math.abs(n.getBoundingClientRect().top - n._armTop) > 1); marks.push({ mark: '_armSince', self: n === e, since: n._armSince, age: now - n._armSince, moved }); }
+      if (typeof n._openedAt === 'number') marks.push({ mark: '_openedAt', since: n._openedAt, age: now - n._openedAt, moved: false });
+      if (n.dataset && n.dataset.armedAt && Number.isFinite(Number(n.dataset.armedAt))) { const at = Number(n.dataset.armedAt); marks.push({ mark: 'data-armed-at', since: at, readyIn: at - Date.now(), moved: false }); }
+    }
+    return { marks }; })()`;
+}
+/** PURE: one probe → the door's next step: 'press' (no mark, or every mark ARM_MS old / past its ready time), or { wait: ms } — the
+ *  LATEST mark's rest, a whole arm when any moved since the product last read it (its next pass re-arms it, then it ages). */
+export function armStep(probe, armMs) {
+  const marks = (probe && Array.isArray(probe.marks)) ? probe.marks : [];
+  if (!marks.length) return 'press';
+  if (marks.some((m) => m.moved)) return { wait: armMs, moved: true };
+  const rest = Math.max(...marks.map((m) => (Number.isFinite(m.readyIn) ? m.readyIn : Number.isFinite(m.age) ? armMs - m.age : armMs)));
+  return rest <= 0 ? 'press' : { wait: Math.ceil(rest) };
+}
+let _armMs = null, _armErr = null;
+/** the product's ARM_MS, read from its own module (never typed here) — once, at the first armed target; a failed read says why */
+async function armMsOf() {
+  if (_armMs == null) { try { _armMs = (await import(new URL('../src/lib/press-arm.js', import.meta.url).href)).ARM_MS; } catch (e) { _armMs = NaN; _armErr = e; } }
+  if (!Number.isFinite(_armMs)) throw new Error('realClick: the product\'s press arm (src/lib/press-arm.js ARM_MS) could not be read', { cause: _armErr || undefined });
+  return _armMs;
+}
+
 /** A REAL CLICK AS ONE ACT (int358 — test-channel-jump ② was red 4 runs of 7 on the 2.369.358 train): a suite's real click
  *  MEASURED its element, then pressed where it HAD been; rows that move while an agent's turn lands (the card grows, the
  *  chat's tail pin scrolls it) put a NEIGHBOUR under the pointer, and the product rightly opened the neighbour. This door
@@ -203,19 +239,25 @@ export function realClickMeasureSource(sel, { scroll = 'center', aimLeft = null 
  *  `evalJs(expr)` = the suite's Runtime.evaluate (returnByValue); `cdp(method, params)` = its socket; `beforePress` = a
  *  test hook between the measure and the press (a RED control's scripted late shift). B-4f03: `scroll` / `aimLeft` / an
  *  EXPRESSION target (realClickMeasureSource above); `uncover` = the suite's own hook, run ONCE a call when another element
- *  covers the target's point (its toasts), then the point is measured again. */
-export function realClicker({ evalJs, cdp, log = (line) => console.log(line) }) {
+ *  covers the target's point (its toasts), then the point is measured again. A HIDDEN page is brought to the front first. An ARMED
+ *  target (armProbeSource above) is pressed only once its latest mark is ARM_MS old — measured after the page is in front and the
+ *  point proven; one that does not age within three arm times is NOT pressed and fails by name; a press the product re-stamped
+ *  the target's own arm at (it moved) fails by name. `realClick.armed` =
+ *  { mark, waitedMs } of the last armed press. `sleep` is injectable (a suite's fast legs drive the door on a scripted clock). */
+export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sleep = (ms) => new Promise((res) => setTimeout(res, ms)) }) {
   const desc = 'const desc = (h) => (h ? h.tagName + \'.\' + String(h.className).slice(0, 60) : null);';
   const MEASURE = (sel, o) => realClickMeasureSource(sel, o);
   const UNDER = (x, y) => `(() => { ${desc} const e = window.__vsRealClickEl, hit = document.elementFromPoint(${x}, ${y}); return { hit: desc(hit), hits: !!e && e.isConnected && !!hit && (hit === e || e.contains(hit)) }; })()`;
-  const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
   // B-8b8c (lane dialog-press): the same door's two halves — it waits while its target MOVES (THE still verdict: its rect on
   // two looks a frame apart, a running box-moving transition on it or an ancestor), then checks where the press LANDED. A
   // disabled or covered target is not waited on (a suite may press one on purpose; the re-aim below handles a cover).
   const ARM_REAL = `(() => { ${desc} const e = window.__vsRealClickEl; const S = window.__vsStillSeen = { down: null, up: null, click: null }; const rec = { down: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), what: desc(ev.target) }), up: (ev) => { if (!e || !e.isConnected) return { gone: true }; const h = document.elementFromPoint(ev.clientX, ev.clientY); return { mine: !!h && (h === e || e.contains(h)), what: desc(h) }; }, click: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), anc: !!e && ev.target !== e && typeof ev.target.contains === 'function' && ev.target.contains(e), what: desc(ev.target) }) }; const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); }; on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); return true; })()`;
   const realClick = async (sel, { beforePress = null, stillMs = 3000, scroll = 'center', aimLeft = null, uncover = null } = {}) => {
-    realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null;
+    realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null; realClick.armed = null;
     const mo = { scroll, aimLeft };
+    // a HIDDEN page is brought to the front first (a background tab advances no animation: the still look would wait for ever, and
+    // the press arm is measured on the page a person looks at); a visible page is left as the suite put it
+    try { if (await evalJs(`document.visibilityState === 'hidden'`)) await cdp('Page.bringToFront'); } catch { }
     let uncovered = false;
     const clearOnce = async (at) => { if (!uncover || uncovered) return false; uncovered = true; await uncover(at); return true; };
     let r = await evalJs(MEASURE(sel, mo));
@@ -241,6 +283,25 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line) }) 
       if (!r2 || !r2.hits) { realClick.lastMiss = r2; return false; }
       r = r2;
     }
+    // THE PRESS ARM (armProbeSource): an approval the product arms is pressed only once its mark is ARM_MS old, never inside it
+    let arm = await evalJs(armProbeSource());
+    const armedNow = (p) => !!(p && Array.isArray(p.marks) && p.marks.length);
+    const marksSaid = (p) => (p && p.marks || []).map((m) => m.mark + (m.moved ? ' (moved)' : '')).join(' + ');
+    if (armedNow(arm)) {
+      const ARM = await armMsOf();
+      let waited = 0;
+      for (let step = armStep(arm, ARM); step !== 'press'; step = armStep(arm, ARM)) {
+        if (waited >= 3 * ARM) { const mv = arm.marks.some((m) => m.moved); realClick.lastMiss = { ...r, arm, why: `ARMED (${marksSaid(arm)}) and not ${ARM} ms still after ${waited} ms${mv ? ' — it moved since the product last read it: its press would re-arm it and count for nothing' : ''} — not pressed` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why}`); return false; }
+        const w = Math.min(step.wait + 30, 3 * ARM - waited); await sleep(w); waited += w;
+        arm = await evalJs(armProbeSource());
+      }
+      realClick.armed = { mark: marksSaid(arm), waitedMs: waited };
+      if (waited) {
+        const u2 = await evalJs(UNDER(r.x, r.y));
+        if (!u2 || !u2.hits) { realClick.lastMiss = { ...r, atPress: u2, why: `not under the pointer after the arm's ${waited} ms — not pressed` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why} (${u2 && u2.hit})`); return false; }
+      }
+    }
+    const ownStamp = armedNow(arm) ? (arm.marks.find((m) => m.mark === '_armSince' && m.self) || null) : null;   // the target's OWN stamp, read right before the press
     await evalJs(ARM_REAL);
     await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: r.x, y: r.y, button: 'left', clickCount: 1 });
     await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: r.x, y: r.y, button: 'left', clickCount: 1 });
@@ -248,9 +309,14 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line) }) 
     for (let i = 0; i < 40; i++) { seen = await evalJs('window.__vsStillSeen || null'); if (seen && seen.down) break; await sleep(25); }
     realClick.landed = landingVerdict(seen, { click: 'any' });
     if (!realClick.landed.ok) { realClick.lastMiss = { ...r, seen, why: realClick.landed.why }; log(`  [realClick] ${sel}: MISSED — ${realClick.landed.why}`); return false; }
+    if (ownStamp) {   // the product re-stamped the target's OWN arm AT the press (it moved): the press counted for nothing — said here, never as a cascade
+      const after = await evalJs(armProbeSource());
+      const own = after && (after.marks || []).find((m) => m.mark === '_armSince' && m.self);
+      if (own && Number(own.since) > Number(ownStamp.since)) { realClick.lastMiss = { ...r, arm, after, why: 'the product RE-ARMED it at the press (_armSince) — the press counted for nothing' }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why}`); return false; }
+    }
     return true;
   };
-  realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null;
+  realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null; realClick.armed = null;
   return realClick;
 }
 

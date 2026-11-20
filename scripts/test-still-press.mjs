@@ -14,11 +14,13 @@
 //      or a grown one is RED by name, one that moved onto the door lowers its row (RED controls: a planted press, a converted suite)
 //   ⑥ B-4f03 — realClicker's options: the measure source over a stand-in page (each scroll mode, the aim, the expression, the
 //      refusals) and the door driven over a scripted page (the options reach the page, the press at the aim, uncover once a call)
+//   ⑦ the press arm — the product's own mark (armProbeSource), its ARM_MS from src/lib/press-arm.js, armStep; the door waits it out
+//      on a scripted clock, refuses by name what never ages, and says a press the product re-armed
 // Run: node scripts/test-still-press.mjs
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser, realClickMeasureSource, realClicker } from './scratch.mjs';
+import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser, realClickMeasureSource, realClicker, armProbeSource, armStep } from './scratch.mjs';
 import vm from 'node:vm';
 import { SUITES } from './ci.mjs';
 const t0 = Date.now();
@@ -212,23 +214,27 @@ console.log('⑥ B-4f03: the door\'s measure — an EXPRESSION target, the three
 
 // ⑥b the DOOR itself over a scripted page (B-4f03, the read's should: the source legs alone let a realClicker that dropped its
 // options, the aim's override or the once-a-call rule pass) — the evalJs answers by what each source asks
-{
-  const drive = async ({ measures, unders, uncover = null, opts = {} }) => {
-    const asked = [], sent = [], logs = []; let m = 0, u = 0;
-    const LOOK = { found: true, rect: [100, 300, 300, 40], x: 250, y: 320, hits: true, under: 'button.b', disabled: false, movers: [] };
-    const SEEN = { down: { mine: true, what: 'button.b' }, up: { mine: true, what: 'button.b' }, click: { mine: true, what: 'button.b' } };
-    const evalJs = async (s) => {
-      if (s.startsWith('window.__vsStillSeen')) return SEEN;
-      if (s.includes('__vsStillSeen = {')) return true;
-      if (s.includes('const e = window.__vsRealClickEl; if (!e || !e.isConnected)')) return LOOK;
-      if (s.includes('hit = document.elementFromPoint(') && s.includes('const e = window.__vsRealClickEl, hit')) return unders[Math.min(u++, unders.length - 1)];
-      asked.push(s); return measures[Math.min(m++, measures.length - 1)];
-    };
-    const RC = realClicker({ evalJs, cdp: async (meth, p) => { sent.push(`${p.type}@${Math.round(p.x)},${Math.round(p.y)}`); }, log: (l) => logs.push(l) });
-    let n = 0;
-    const r = await RC('.b', { ...opts, ...(uncover ? { uncover: async () => { n++; } } : {}) });
-    return { r, asked, sent, logs, uncovers: n, reaimed: RC.reaimed };
+// the DOOR over a scripted page (⑥b, ⑦): the evalJs answers by what each source asks
+const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ marks: [] }], sleep = undefined, hidden = false }) => {
+  const asked = [], sent = [], logs = [], asks = { hidden: 0 }; let m = 0, u = 0, a = 0;
+  const LOOK = { found: true, rect: [100, 300, 300, 40], x: 250, y: 320, hits: true, under: 'button.b', disabled: false, movers: [] };
+  const SEEN = { down: { mine: true, what: 'button.b' }, up: { mine: true, what: 'button.b' }, click: { mine: true, what: 'button.b' } };
+  const evalJs = async (s) => {
+    if (s.startsWith('window.__vsStillSeen')) return SEEN;
+    if (s.includes('__vsStillSeen = {')) return true;
+    if (s.includes('const e = window.__vsRealClickEl; if (!e || !e.isConnected)')) return LOOK;
+    if (s.includes('hit = document.elementFromPoint(') && s.includes('const e = window.__vsRealClickEl, hit')) return unders[Math.min(u++, unders.length - 1)];
+    if (s.includes('const marks = []')) return arms[Math.min(a++, arms.length - 1)];   // the press arm's probe (⑦)
+    if (s.includes("document.visibilityState === 'hidden'")) { asks.hidden++; return hidden; }   // the door asks whether the page is hidden
+    asked.push(s); return measures[Math.min(m++, measures.length - 1)];
   };
+  const RC = realClicker({ evalJs, cdp: async (meth, p) => { sent.push(meth === 'Page.bringToFront' ? 'front' : `${p.type}@${Math.round(p.x)},${Math.round(p.y)}`); }, log: (l) => logs.push(l), ...(sleep ? { sleep } : {}) });
+  let n = 0;
+  const r = await RC('.b', { ...opts, ...(uncover ? { uncover: async () => { n++; } } : {}) });
+  return { r, asked, sent, logs, asks, uncovers: n, reaimed: RC.reaimed, armed: RC.armed, miss: RC.lastMiss };
+};
+{
+  const drive = drive6;
   const HIT = { x: 250, y: 320, hits: true, hit: 'BUTTON.b' }, COVERED = { x: 250, y: 320, hits: false, hit: 'DIV.global-toast' };
   const A = await drive({ measures: [HIT], unders: [{ hits: true }], opts: { scroll: 'nearest', aimLeft: 40 } });
   ok(A.r === true && A.asked[0].includes("block: 'nearest'") && A.asked[0].includes('Math.min(q.width / 2, 40)') && A.sent.includes('mousePressed@140,320'), 'the options REACH the page (the measure asks the nearest scroll and the aim) and the press lands at the aim from the still look\'s rect (140, 320), never its centre', A);
@@ -240,6 +246,50 @@ console.log('⑥ B-4f03: the door\'s measure — an EXPRESSION target, the three
   ok(D.r === true && D.uncovers === 1 && D.reaimed && D.reaimed.uncovered === true && D.logs.some((l) => /covered at press time by DIV\.global-toast — the suite's uncover ran once/.test(l)), 'covered at the press: the suite\'s uncover runs, the point is measured again, and the log says a cover was cleared (never «it moved»)', D);
   const E = await drive({ measures: [COVERED], unders: [{ hits: true }] });
   ok(E.r === false && E.sent.length === 0, 'covered and no uncover hook: no press, as before', E);
+}
+
+// ⑦ THE PRESS ARM, ASKED OF THE PRODUCT (the 2.369.413 checkpoint's hosted red: test-exit-access-ui's Allow pressed ~80 ms after
+// the door was called counted for nothing; the ask expired 60 s later as fifteen red legs). The door reads EVERY arm mark the product
+// keeps on the target and its ancestors and presses only once the latest is ARM_MS old — ARM_MS read from src/lib/press-arm.js here too
+console.log('⑦ the press arm — the product\'s own marks, its ARM_MS, never a press inside it');
+{
+  const { ARM_MS } = await import(new URL('../src/lib/press-arm.js', import.meta.url).href);
+  ok(Number.isFinite(ARM_MS) && ARM_MS > 0, `the product's ARM_MS is read from its module (${ARM_MS} ms)`);
+  // the step, PURE: the LATEST mark decides
+  const st = (marks) => JSON.stringify(armStep({ marks }, ARM_MS));
+  ok(st([]) === '"press"' && st([{ age: ARM_MS + 1 }]) === '"press"' && st([{ age: ARM_MS - 300 }]) === JSON.stringify({ wait: 300 })
+    && st([{ age: ARM_MS + 500 }, { age: ARM_MS - 200 }]) === JSON.stringify({ wait: 200 }) && st([{ age: 99999, moved: true }]) === JSON.stringify({ wait: ARM_MS, moved: true })
+    && st([{ readyIn: 250 }]) === JSON.stringify({ wait: 250 }) && st([{ readyIn: -5 }, { age: ARM_MS + 9 }]) === '"press"' && st([{ age: NaN }]) === JSON.stringify({ wait: ARM_MS }),
+    'armStep: no mark or every mark old ⇒ press; else the LATEST mark\'s rest (a button\'s own stamp AND its card\'s open both gate it); moved ⇒ a whole arm; a ready time ⇒ until it passed');
+  // the probe over stand-in pages (vm): every mark on the chain, never a selector list
+  const el = (o = {}) => ({ nodeType: 1, isConnected: true, parentElement: null, getBoundingClientRect: () => ({ top: 100 }), ...o });
+  const probe = (target) => new vm.Script(armProbeSource()).runInNewContext({ window: { __vsRealClickEl: target }, performance: { now: () => 1500 }, Date: { now: () => 1000 } });
+  const card = el({ _openedAt: 1300 }), btn = el({ _armSince: 1000, _armTop: 100, parentElement: card });
+  const pc = probe(btn), mk = (p, k) => p.marks.find((m) => m.mark === k);
+  ok(pc.marks.length === 2 && mk(pc, '_armSince').age === 500 && mk(pc, '_armSince').self === true && !mk(pc, '_armSince').moved && mk(pc, '_openedAt').age === 200 && JSON.stringify(armStep(pc, ARM_MS)) === JSON.stringify({ wait: ARM_MS - 200 }),
+    'a button\'s own _armSince AND its card\'s younger _openedAt are both read — the door waits for the card (the later one), never presses into the card\'s arm', pc);
+  const moved = probe(el({ _armSince: 1000, _armTop: 140 })), never = probe(el({ _armSince: 1000 }));
+  ok(mk(moved, '_armSince').moved === true && mk(never, '_armSince').moved === true, 'a top that moved since the product read it, or NONE read at all (press-arm.js armAfterLayout re-arms both at the press), is «moved»', { moved, never });
+  const outbox = el({ dataset: { armedAt: '1400' } }), pb = probe(el({ parentElement: outbox, dataset: {} }));
+  ok(mk(pb, 'data-armed-at') && mk(pb, 'data-armed-at').readyIn === 400 && JSON.stringify(armStep(pb, ARM_MS)) === JSON.stringify({ wait: 400 }), 'an Outbox card\'s data-armed-at (its ready time, the Date clock): the door waits until it passed', pb);
+  ok(probe(el()).marks.length === 0, 'a plain control carries no mark: no wait');
+  // the door itself on a scripted page and a scripted clock (no real waiting)
+  const HIT = { x: 250, y: 320, hits: true, hit: 'BUTTON.b' };
+  const clock = () => { const waits = []; return { waits, sleep: async (ms) => { waits.push(ms); } }; };
+  const own = (age, since = 1000, extra = {}) => ({ mark: '_armSince', self: true, since, age, moved: false, ...extra });
+  const c1 = clock(), A = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c1.sleep, arms: [{ marks: [own(ARM_MS - 300)] }, { marks: [own(ARM_MS + 30)] }, { marks: [own(ARM_MS + 60)] }] });
+  ok(A.r === true && A.armed && A.armed.waitedMs === 330 && A.sent.includes('mousePressed@250,320'), `an armed control ${ARM_MS - 300} ms old: the door WAITS out the arm (${A.armed && A.armed.waitedMs} ms on the clock), proves the point again, then presses`, A);
+  const c2 = clock(), B = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c2.sleep, arms: [{ marks: [own(99999, 1000, { moved: true })] }] });
+  ok(B.r === false && !B.sent.includes('mousePressed@250,320') && /ARMED \(_armSince \(moved\)\).*moved since the product last read it.*not pressed/.test(B.miss && B.miss.why), 'a control that moved and was never re-read by the product: NOT pressed — it fails BY NAME at the press, never a press that counts for nothing', B.miss);
+  const c3 = clock(), C = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c3.sleep, arms: [{ marks: [own(ARM_MS + 100)] }, { marks: [own(1, 1900)] }] });
+  ok(C.r === false && C.sent.includes('mousePressed@250,320') && /RE-ARMED it at the press/.test(C.miss && C.miss.why), 'a press at which the product re-stamped the target\'s OWN arm (it moved under the pointer): said by name — the press counted for nothing', C.miss);
+  const c4 = clock(), D = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c4.sleep });
+  ok(D.r === true && D.armed === null && c4.waits.join() === '40', 'an unarmed control: no arm wait at all — the scripted clock holds only the still look\'s one 40 ms pause', { armed: D.armed, waits: c4.waits });
+  const c5 = clock(), E = await drive6({ measures: [HIT], unders: [{ hits: true }, { hits: false, hit: 'DIV.global-toast' }], sleep: c5.sleep, arms: [{ marks: [own(ARM_MS - 300)] }, { marks: [own(ARM_MS + 30)] }] });
+  ok(E.r === false && !E.sent.includes('mousePressed@250,320') && /not under the pointer after the arm/.test(E.miss && E.miss.why), 'the point no longer the target after the arm\'s wait: NOT pressed, said by name', E.miss);
+  const c6 = clock(), F = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c6.sleep, hidden: true });
+  const c7 = clock(), G = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c7.sleep, hidden: false });
+  ok(F.r === true && F.sent[0] === 'front' && G.r === true && !G.sent.includes('front'), 'the DOOR brings a HIDDEN page to the front before it measures (a background tab advances no animation); a visible page is left as the suite put it', { hidden: F.sent, visible: G.sent });
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass}) — ${Date.now() - t0} ms`);

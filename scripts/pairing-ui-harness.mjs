@@ -122,14 +122,13 @@ process.stdin.on('end', () => process.exit(0));
      *  It WAITS FOR ITS PLACE (lane race-sweep, B-6b74 — test-pair-dialog-ui F7's control): a target not yet the element at
      *  its point is asked again for ≤ ms; absent at once ⇒ false at once, as before; a target that never holds still within
      *  SETTLE_MS (lane chrome-157: a viewport change still laying out) ⇒ said and not pressed; a press that was MADE is never
-     *  made again. A HIDDEN page is brought to the front first: a background tab advances no animation, so the door's still
-     *  look would read its transition as running for ever (measured on test-vault-use-grants-chrome ⑦, 2.369.410's hosted run);
-     *  a visible page is left as the suite put it. The toast `uncover` clears is never one that holds the target (an Undo). */
+     *  made again. A HIDDEN page is brought to the front by the door itself (a background tab advances no animation — measured on
+     *  test-vault-use-grants-chrome ⑦, 2.369.410's hosted run), and an ARMED approval waits out the product's press arm there.
+     *  The toast `uncover` clears is never one that holds the target (an Undo). */
     const SETTLE_MS = 4000;
     const RC = realClicker({ evalJs, cdp });
     const clearToasts = () => evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => { if (!el.contains(window.__vsRealClickEl)) el.remove(); }); true`);   // a toast that HOLDS the target (an Undo) stays
     const realClick = async (sel, ms = 8000) => {
-      try { if (await evalJs(`document.visibilityState === 'hidden'`)) await cdp('Page.bringToFront'); } catch { }   // only a HIDDEN page: a visible one keeps the suite's world
       for (const t0 = Date.now(); ; await sleep(100)) {
         if (await RC(sel, { scroll: 'nearest', aimLeft: 40, stillMs: SETTLE_MS, uncover: clearToasts })) { await sleep(150); return true; }
         const miss = RC.lastMiss;

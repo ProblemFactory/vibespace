@@ -355,6 +355,14 @@ try {
   const effA = await P.evalJs(`(() => { const a = document.querySelector('#user-todos-popup .ut-item .ut-exit-allow'); let e = a, o = 1; while (e) { o *= Number(getComputedStyle(e).opacity); e = e.parentElement; } const it = a.closest('.ut-item'); return { o, inBar: !!a.closest('.ut-actions'), h: Math.round(a.getBoundingClientRect().height), hovered: it.matches(':hover'), afterCmd: !!a.closest('.ut-exit-answer') && it.querySelector('.ut-exit-cmd').compareDocumentPosition(a) === Node.DOCUMENT_POSITION_FOLLOWING }; })()`);
   ok(effA.o === 1 && !effA.inBar && !effA.hovered && effA.h >= 24 && effA.afterCmd, 'N-ask: with the pointer away from the row, 允许 is at full strength (effective opacity 1, 24 px, its own line under the command — not in the hover-dimmed bar)', effA);
   ok(await P.realClick(`#user-todos-popup .ut-item .ut-exit-allow`), 'a real click on 允许');
+  // THE PRESS COUNTED (the 2.369.413 checkpoint's hosted red: a press inside the product's press arm counted for nothing and the ask
+  // expired 60 s later as fifteen red legs): the row answers at once — said HERE, by name, before the run's answer is awaited
+  // the refusal's words are the product's own (src/lib/i18n-zh.js — never typed here)
+  const REFUSED = (fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8').match(/"That Allow moved under the pointer just now — read it, then press it again":\s*"([^"]+)"/) || [])[1] || null;
+  const THIS_ROW = `[...document.querySelectorAll('#user-todos-popup .ut-item')].find((r) => /echo pong/.test(r.querySelector('.ut-exit-cmd')?.textContent || ''))`;
+  const counted = await P.waitFor(`(() => { const r = ${THIS_ROW}; return !r || !r.querySelector('.ut-exit-allow') || /已允许/.test(r.textContent); })()`, 3000);
+  const toasts = await P.evalJs(`[...document.querySelectorAll('#global-toasts .global-toast')].map((t) => t.textContent).join(' | ')`);
+  ok(!!REFUSED && counted && !toasts.includes(REFUSED), 'the press on 允许 COUNTED: THIS row (echo pong) answered at once, and no «moved under the pointer» toast (the door waited out the product\'s press arm)', { counted, toasts: toasts || 'none', refusalWords: REFUSED });
   const ran = await pRun;
   ok(ran.status === 200 && ran.j.code === 0 && /pong/.test(ran.j.stdout) && ran.j.asked === true, 'Allow ⇒ the DEVICE ran it (exit 0, stdout pong)', ran);
   ok(await P.waitFor(`[...document.querySelectorAll('.chat-vs-notice')].some((c) => /Machines · exmac/.test(c.textContent) && /^在 exmac 上运行了一条命令 — 退出码 0 · /.test(c.querySelector(':scope > .chat-text')?.textContent || '') && c.querySelector('details.chat-exit-tech .chat-exit-cmd')?.textContent === 'echo pong')`, 8000), 'the chat window shows the "VibeSpace · Machines · exmac" card: 在 exmac 上运行了一条命令 — 退出码 0 · … (lane exit-card-margin), `echo pong` under its 技术细节', await P.evalJs(`[...document.querySelectorAll('.chat-vs-notice')].map((c) => c.textContent).join(' | ')`));
