@@ -5794,7 +5794,7 @@ export default {
   "Delete {label}?": "{label} を削除しますか?",
   "Its logins are kept aside under “Deleted profiles” until you press Delete permanently there.": "そのログインは、そこで「完全に削除」を押すまで「削除したプロファイル」に保管されます。",
   "Deleted {label} — kept aside until you delete it permanently": "{label} を削除しました — 完全に削除するまで保管されます",
-  "Deleted {label}, but its folder could not be set aside — it stays where it was, listed under the unregistered directories": "{label} を削除しましたが、フォルダを脇に置けませんでした — 元の場所に残り、未登録ディレクトリに表示されます",
+  "Deleted {label}, but its folder could not be set aside — it stays at {path}": "{label} を削除しましたが、フォルダを脇に置けませんでした — {path} に残っています",
   "{n} conversation(s) no longer use it": "{n} 件の会話は使わなくなりました",
   "The directory is moved beside itself (…forgotten-<time>) and listed under “Deleted profiles (kept aside)” below. Nothing is deleted until you click Delete permanently.": "ディレクトリは横に移動され（…forgotten-<time>）、下の「削除したプロファイル（保管中）」に表示されます。「完全に削除」を押すまで何も削除されません。",
   "Deleted profiles (kept aside)": "削除したプロファイル（保管中）",

@@ -1046,6 +1046,38 @@ await (async () => {
     const JLX = mutantCopies('ntr-held-lift', REPO).load('src/jobs.js', anchored(JSRC2, LIFT_A, "  afterNotifsLanded(step) { if (false) return this._afterNotifsLift(", 'the put-back waits for the lift'), 'held-no-lift-wait');
     const mhx = await heldScene(JLX, 'ride-handover-held-red');
     ok(mhx.hoOk && !mhx.heldOwed, 'CONTROL (the wait for the lift cut, in a copy): the put-back «lands» at once over a held file and the kept copy is GONE while the notices are in memory only — a restart now loses them (red)', mhx);
+    // 主开发's cure read wis993v2b, should 2: a drain while held is landed by fact — but a copy put back at the BOOT may already be in the
+    // held file (the last process died after that landing, before the stash dropped its copy): drained now, it came back at the lift's
+    // merge — handed over twice. The drain while held remembers what it took (by the notice's own identity) and the merge leaves it out.
+    const TWICE_A = "        if (merge && this._drainedWhileHeld && this._drainedWhileHeld.size) {";
+    ok(JSRC2.split(TWICE_A).length === 2, 'control setup: the lift\'s merge leaves out what a drain took while held (found once)');
+    const twiceScene = async (Mod, name) => {
+      const Rt = rig(name), { jm: jt, job: jbt } = mkJm(Mod, Rt, liftWriter().W);
+      jt._notifsHold({ code: 'EIO', why: 'a stand-in i/o error' });
+      jt._stashNotif(Rt.cid, jbt, { what: 'already in the held file' }, 'not reachable', { held: { kind: 'not-reachable' } });
+      const n0 = (jt.pendingNotifs.get(Rt.cid) || [])[0];
+      const copy = n0 ? JSON.parse(JSON.stringify(n0)) : null;
+      const took = jt.drainNotifs(Rt.cid).length;   // handed over while held
+      // …and the held file already had it — with a SUBSCRIBER's copy of the same job event at the same instant (one pass stashes the
+      // owner's and each subscriber's, one instant): the must of 主开发's read wf_3c7fc92a-819
+      const SUB = 'conv-subscriber-b';
+      fs.writeFileSync(jt.notifsFile, JSON.stringify(copy ? { [Rt.cid]: [copy], [SUB]: [{ ...copy }] } : {}));
+      await jt._notifsRetry();
+      const same = (cid) => (jt.pendingNotifs.get(cid) || []).filter((x) => copy && x.jobId === copy.jobId && x.ts === copy.ts).length;
+      const back = same(Rt.cid), sub = same(SUB);
+      clearTimeout(jt._notifsT); jt._notifsT = null;
+      return { took, lifted: !jt._notifsUnread, back, sub };
+    };
+    const tw = await twiceScene({ JobManager }, 'held-drain-twice');
+    ok(tw.took === 1 && tw.lifted && tw.back === 0 && tw.sub === 1, 'should 2: a notice drained while the file was held (its copy already IN the file) does not come back at the lift — never handed over twice; and a SUBSCRIBER\'s copy of the same job event at the same instant is still waiting (the identity carries the conversation)', tw);
+    const JTX = mutantCopies('ntr-held-twice', REPO).load('src/jobs.js', anchored(JSRC2, TWICE_A, "        if (false) {", 'the merge leaves out what a drain took'), 'held-twice-cut');
+    const twx = await twiceScene(JTX, 'held-drain-twice-red');
+    ok(twx.took === 1 && twx.lifted && twx.back === 1, 'CONTROL (the merge\'s filter cut, in a copy): the drained notice is BACK after the lift — handed over twice (red)', twx);
+    const D_ID = "took.add(`${cid}\\u0000${n.jobId}\\u0000${n.ts}`); }", M_ID = "this._drainedWhileHeld.has(`${cid}\\u0000${list[i].jobId}\\u0000${list[i].ts}`)";
+    ok([D_ID, M_ID].every((x) => JSRC2.split(x).length === 2), 'control setup: the drained identity carries the conversation at both sites (found once each)');
+    const JCX = mutantCopies('ntr-held-nocid', REPO).load('src/jobs.js', anchored(anchored(JSRC2, D_ID, "took.add(`${n.jobId}\\u0000${n.ts}`); }", 'drain identity without the conversation'), M_ID, "this._drainedWhileHeld.has(`${list[i].jobId}\\u0000${list[i].ts}`)", 'merge identity without the conversation'), 'held-nocid');
+    const twc = await twiceScene(JCX, 'held-drain-nocid-red');
+    ok(twc.took === 1 && twc.lifted && twc.sub === 0, 'CONTROL (the conversation dropped from the identity, in a copy): the SUBSCRIBER\'s copy is taken out at the lift — never told, nothing said (red)', twc);
   }
   {   // FINDING 11's RED (anchored): a copy of the hand-over that does not hold — «delivered» and the record of delivery at once, over a drain not on disk
     const SHSRC11 = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');

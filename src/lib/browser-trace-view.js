@@ -1026,9 +1026,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
       else if (res && res.machine) showToast(t('Deleted {label} and its folder on {machine}', { label: String(r.label || r.id), machine: String(res.machine.host || r.host || '') }), { duration: 7000 });
       // the moved line's must 3's should (主开发 2026-11-19 22:38Z): a Forget that only partly happened is SAID — a removal not on disk
       // yet was said by fetchJson (it finishes by itself: no «deleted» on top of it); a record removed whose folder could not be set
-      // aside says so (the panel lists the folder under the unregistered directories)
+      // aside says so, naming the folder's path (主开发's cure read wis993v2b: «the unregistered directories» was false for a profile adopted from a folder outside the browser's own base)
       else if (res && res.notOnDisk) { /* said by fetchJson's sayNotOnDisk (finishes-on-landing) */ }
-      else if (res && res.left) showToast(t('Deleted {label}, but its folder could not be set aside — it stays where it was, listed under the unregistered directories', { label: String(r.label || r.id) }), { type: 'warn', duration: 12000 });
+      else if (res && res.left) showToast(t('Deleted {label}, but its folder could not be set aside — it stays at {path}', { label: String(r.label || r.id), path: String(res.from || '') }), { type: 'warn', duration: 12000 });
       else if (res) showToast(t('Deleted {label} — kept aside until you delete it permanently', { label: String(r.label || r.id) }) + (res.detached || res.unpinned ? ' · ' + t('{n} conversation(s) no longer use it', { n: Math.max(Number(res.detached) || 0, Number(res.unpinned) || 0) }) : ''), { duration: 7000 });
       load();
     },

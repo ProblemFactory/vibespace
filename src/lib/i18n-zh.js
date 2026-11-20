@@ -5795,7 +5795,7 @@ export default {
   "Delete {label}?": "删除 {label}？",
   "Its logins are kept aside under “Deleted profiles” until you press Delete permanently there.": "其中的登录会保留在“已删除的配置”下，直到你在那里点击“永久删除”。",
   "Deleted {label} — kept aside until you delete it permanently": "已删除 {label} — 在你永久删除之前会被保留",
-  "Deleted {label}, but its folder could not be set aside — it stays where it was, listed under the unregistered directories": "已删除 {label}，但它的文件夹无法搁置 — 仍在原处，列在未登记目录中",
+  "Deleted {label}, but its folder could not be set aside — it stays at {path}": "已删除 {label}，但它的文件夹无法搁置 — 仍在 {path}",
   "{n} conversation(s) no longer use it": "{n} 个会话不再使用它",
   "The directory is moved beside itself (…forgotten-<time>) and listed under “Deleted profiles (kept aside)” below. Nothing is deleted until you click Delete permanently.": "目录会被移到旁边（…forgotten-<time>），并列在下方“已删除的配置（保留中）”下。在你点击“永久删除”之前不会删除任何东西。",
   "Deleted profiles (kept aside)": "已删除的配置（保留中）",

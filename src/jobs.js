@@ -765,9 +765,13 @@ class JobManager {
         const ids = new Set();
         for (const n of list) if (n && n.ho) { ids.add(n.ho); delete n.ho; }
         if (ids.size) { this.releasedAtBoot.push({ cid, ids: [...ids], n: list.length }); const ho = [...ids].filter((x) => x !== 'carry'), both = ids.has('carry') && ho.length > 0; this.d.log(`[jobs] ${cid}: ${[ids.has('carry') ? 'an unconfirmed answer\'s claim (carry)' : '', ho.length ? `a hand-over (${ho.join(', ')})` : ''].filter(Boolean).join(' and ')} ${both ? 'were' : 'was'} in flight when the previous server stopped — ${both ? 'their' : 'its'} job results wait again`); }   // lane report-mark-on-ack: a carry claim is an unconfirmed answer's, named apart from a hand-over
+        // a notice DRAINED while the file was held (its copy put back at the boot, already in the file) leaves the merge: never twice
+        if (merge && this._drainedWhileHeld && this._drainedWhileHeld.size) { for (let i = list.length - 1; i >= 0; i--) if (this._drainedWhileHeld.has(`${cid}\u0000${list[i].jobId}\u0000${list[i].ts}`)) list.splice(i, 1); }
         const mine = merge ? (this.pendingNotifs.get(cid) || []).filter((n) => !list.includes(n)) : [];
+        if (!list.length && !mine.length) continue;
         this.pendingNotifs.set(cid, mine.length ? [...list, ...mine].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0)) : list);   // a read again: what waited here joins the file's (no cap — the file's are the oldest, as a restore's)
       }
+      if (merge && this._drainedWhileHeld) this._drainedWhileHeld = null;   // the lift's merge took them out; the set ends with the hold
       if (this.releasedAtBoot.length && !this.readOnly) this._saveNotifs();
   }
   /** its read r2 (M2): a CLEARED job's notices may still wait in the HELD file — the clear reaches them at the read, by the record's
@@ -854,6 +858,7 @@ class JobManager {
     this._notifsUnread = null; this._notifsMissingAt = 0; this._notifsTries = 0; this._notifsUnreadSaid = false; this._notifsSaveSaid = false;
     if (this._notifsT) { clearTimeout(this._notifsT); this._notifsT = null; }
     if (a.state === 'data') this._notifsFrom(a.value, { merge: true });
+    this._drainedWhileHeld = null;   // the set ends with the hold, whatever the read answered (a merge, a file GONE, torn bytes set aside)
     const now2 = [...this.pendingNotifs.values()].reduce((k, l) => k + l.length, 0);
     this.d.log(`[jobs] job-notifications.json read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${a.state === 'data' ? `${now2 - waiting} notice(s) read` : a.setAside ? `torn bytes, kept aside as ${a.setAside}` : 'the file is GONE'} — ${waiting} that waited here kept`);
     const L = this._saveNotifs(); this._dirty = true;
@@ -1830,10 +1835,15 @@ class JobManager {
     // stays, a write that does not land is the writer's to retry (_onDisk says it). The census cure (finding 11): the drained list
     // CARRIES the drain's landing (`landed`, not enumerable — never in a record) — a hand-over holds what follows behind it
     const drained = this._saveNotifs();
-    // must 2's reader: while the file is HELD (its hold starts only at the boot's read) what waits in memory was never in it — a drain
-    // has nothing of the file to land: landed by that fact (the hand-over records its delivery at once; a wait for the lift would only
-    // stall it and, at a restart before the lift, hand the same notices over again)
+    // must 2's reader, said as it is (主开发's cure read wis993v2b, its should 2): while the file is HELD the drain writes nothing, and
+    // the hand-over records its delivery at once (a wait for the lift would stall its reply). What waits in memory is MOSTLY not in
+    // the held file — but a hand-over copy put back at the boot may ALREADY be in it (the last process died after that landing and
+    // before the stash dropped its copy): drained now, it would come back at the lift's merge and be handed over twice. So a drain
+    // while held REMEMBERS what it took — by the notice's own identity: ITS CONVERSATION, its job and its instant (one job event is
+    // stashed for its owner and for each subscriber in one pass, with one instant: without the conversation, a drain of the owner's
+    // copy took a subscriber's copy out of the file's merge too — a silent loss) — and the lift's merge leaves those out
     Object.defineProperty(q, 'landed', { value: !!(drained && drained.ok) || !!this._notifsUnread, enumerable: false });
+    if (this._notifsUnread) { const took = this._drainedWhileHeld || (this._drainedWhileHeld = new Set()); for (const n of q) if (n) took.add(`${cid}\u0000${n.jobId}\u0000${n.ts}`); }   // the conversation IN the identity (主开发's read wf_3c7fc92a-819, its must): one job event is stashed for its owner and each subscriber with ONE instant
     this._dirty = true;
     // A stash DRAINED into a resume has been read (triage §13 rule 1a): the
     // conversation sees it on its next turn. A stash entry older than the
