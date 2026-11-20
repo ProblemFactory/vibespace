@@ -343,7 +343,7 @@ class FileExplorer {
         let b = null;
         try { b = await r.json(); } catch { b = null; }
         const h = heldBodyOf(b);
-        if (h) { noteStoreHeld(h); throw Object.assign(new Error(storeHeldWords(h)), { said: true }); }
+        if (h) { this._bkLanded = false; this._bkHeld = h; noteStoreHeld(h); throw Object.assign(new Error(storeHeldWords(h)), { said: true }); }   // (B-225b: this page's list is no longer the hub's — the next change is refused here until a read lands)
         throw new Error(`HTTP ${r.status}`);
       }
     } catch (e) {

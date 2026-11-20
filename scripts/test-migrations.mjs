@@ -2022,7 +2022,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       ok(v.early === 8 && v.served === 0 && v.fresh === 0 && v.stale === 0 && v.kept, 'r1: after the boot migration GET serves no retired key, and neither a fresh tab\'s save nor a stale tab\'s whole-object save writes one back (the live value lands)', v);
       const M2 = mutantCopies('migrations-retired-cache', REPO_ROOT);
       const guardLine = '    if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }\n';
-      const reloadLine = '    _settingsCache = v; try { settingsHold.set(v); } catch { /* not held */ }\n';   // (B-225b: the re-read replaces the copy only with settings it READ)
+      const reloadLine = "    _settingsCache = v; _settingsRead = true; try { settingsHold.adoptRead(v); } catch { /* held since: its own ladder reads it */ }   // (the file is THERE now: a start read «missing» no longer makes the next write an exclusive create that meets it)\n";   // (B-225b: the re-read replaces the copy only with settings it READ — and the hold adopts it: the file is there now)
       ok(PSRC.split(guardLine).length === 2 && PSRC.split(reloadLine).length === 2, 'CONTROL scope: the writer guard and the cache drop are present once each');
       const noGuard = await survive(M2.load('src/routes/persistence.js', PSRC.replace(guardLine, ''), 'no-guard'), 'mut-guard');
       ok(noGuard.stale === 7 && noGuard.fresh === 0, 'NEGATIVE CONTROL: without the writer guard a stale tab writes all seven retired keys back', noGuard);

@@ -576,10 +576,26 @@ function refuseOwnerWrite() {
 function hookRegistrationSafe() { return rootVerdict().ok; }
 // auto=true (startup): respect the opt-out marker. auto=false (explicit Install
 // from the UI): always register + clear the marker.
+// B-225b (round wyzvr7567's MUST 2 — the strict side of a WRITE TO A PERSON'S OWN FILE): while the SETTINGS are held the
+// integration switch reads no value of the person's, so neither registering nor stripping the hooks writes the person's CLI
+// configs; at the lift the registration is replayed by the person's own switch (the switch's own change strips, as before)
+function settingsHeldNow() { try { const R = require('../routes/persistence.js').router; return R && typeof R.settingsHeld === 'function' ? R.settingsHeld() : null; } catch { return null; } }
+let _replayAtLift = false;
+function replayAtLift() {
+  if (_replayAtLift) return;
+  try {
+    const R = require('../routes/persistence.js').router;
+    if (!R || typeof R.onSettingsLift !== 'function') return;
+    _replayAtLift = true;
+    R.onSettingsLift(() => { if (!_replayAtLift) return; _replayAtLift = false; try { if ((R.readSettings() || {})['agents.vibespaceIntegration'] !== false) ensureAgentHooks({ auto: true }); } catch (e) { console.log('Hook registration after the settings lift skipped:', e.message); } });
+  } catch { _replayAtLift = false; }
+}
 function ensureAgentHooks({ auto = false } = {}) {
   const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const refused = refuseOwnerWrite();
   if (refused) return { skipped: true, refused };
+  const held = settingsHeldNow();
+  if (held) { replayAtLift(); return { skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }; }   // B-225b: no write while the settings are held
   if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return { optedOut: true };
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   const results = {};
@@ -614,6 +630,7 @@ function ensureAgentHooks({ auto = false } = {}) {
 // (and writing one would make a later re-enable silently not re-register).
 function stripAgentHookEntries() {
   if (refuseOwnerWrite()) return; // a worktree / temp server: never edit the owner's CLI configs
+  if (settingsHeldNow()) return;   // B-225b: the settings HELD — the switch's value is unknown, the person's CLI configs are not written
   for (const def of Object.values(HOOK_FILES)) {
     try {
       _patchHookFile(def.file(), false, (root) => stripHookEntries(root, ALL_HOOK_EVENTS))

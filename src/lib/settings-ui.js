@@ -1,5 +1,5 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
-import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords, settingFocusOf, footWords } from './settings-view.js';
+import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords, settingFocusOf, footWords, resetRefusedWords } from './settings-view.js';
 import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved, storeHeldWords } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
@@ -128,7 +128,7 @@ class SettingsUI {
     // openSpec (2.106.0, user request): the Settings window participates in
     // layout sync/persistence like any other window — it used to be transient.
     const winInfo = this.app.wm.createWindow({ title: t('Settings'), type: 'settings', width: 720, height: 560, syncId, openSpec: { action: 'openSettings' } });
-    winInfo.onClose = () => this._dropReloadSubs();   // verifier #1: the reload lines' listeners leave with the window
+    winInfo.onClose = () => { this._dropReloadSubs(); this._offLand?.(); this._offLand = null; this._offLift?.(); this._offLift = null; };   // verifier #1: the reload lines' listeners leave with the window (B-225b: the landing's and the lift's too)
     const dialog = document.createElement('div');
     dialog.className = 'settings-dialog settings-window';
     winInfo.content.appendChild(dialog);
@@ -166,7 +166,9 @@ class SettingsUI {
     resetAllBtn.className = 'settings-header-btn';
     resetAllBtn.textContent = t('Reset All');
     resetAllBtn.title = t('Reset all settings to defaults');
-    resetAllBtn.onclick = async () => { if (await showConfirmDialog({ title: t('Reset Settings'), message: t('Reset all settings to defaults?'), confirmText: t('Reset'), danger: true })) { this.settings.resetAll(); this._renderContent(content, nav); } };
+    // B-225b (round wyzvr7567's cure 1): a Reset All a hold refused is SAID after its confirm — inside the silent rungs too (a press is no
+    // background read); nothing was changed
+    resetAllBtn.onclick = async () => { if (await showConfirmDialog({ title: t('Reset Settings'), message: t('Reset all settings to defaults?'), confirmText: t('Reset'), danger: true })) { if (this.settings.resetAll() === false) showToast(resetRefusedWords(this.settings.held, t, storeHeldWords), { type: 'error' }); this._renderContent(content, nav); } };
     headerRight.append(resetAllBtn);
     header.append(title, headerRight);
 

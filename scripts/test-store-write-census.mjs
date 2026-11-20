@@ -2327,9 +2327,9 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       let ps = null; try { H.P.router.patchSettings({ 'appearance.theme': 'a default' }); } catch (e) { ps = e.code; }
       const gv = guardOver(H.P, H.d).authorize({ reason: 'auto-resume', identity: who, cid: 'conv-f', now: Date.now() });
       ok([g, po, pa].every((x) => x.status === 503 && x.body && x.body.code === 'store_unread') && g.body.held.file === 'settings.json' && ps === 'store_unread'
-        && Object.isFrozen(view) && Object.keys(view).length === 0 && view[SYM] && view[SYM].kind === 'unreadable' && view['spend.unattendedPerIdentityHour'] === undefined
+        && Object.isFrozen(view) && JSON.stringify(Object.keys(view).sort()) === JSON.stringify(Object.keys(require(path.join(REPO, 'src/settings-held-strict.js')).strictValues()).sort()) && view['permissions.bypassAnswersAsks'] === false && view['pool.avoidOverageMembers'] === true && view[SYM] && view[SYM].kind === 'unreadable' && view['spend.unattendedPerIdentityHour'] === undefined
         && gv && gv.ok === false && gv.why === 'settings-unread' && !gv.hold && fs.readFileSync(H.F, 'utf8') === JSON.stringify(SET),
-        '⑪ (f) settings the start could NOT read: GET / POST / PATCH answer 503 store_unread BY NAME, the internal patch refuses, the hub reads every row on its default (a FROZEN object, the hold under its symbol), the spend guard answers NOT NOW (settings-unread, no hold taken) — the file untouched', { get: g.status, post: po.status, patch: pa.status, ps, why: gv && gv.why });
+        '⑪ (f) settings the start could NOT read: GET / POST / PATCH answer 503 store_unread BY NAME, the internal patch refuses, the hub reads every row on its default — the rows that guard money, a safety ask, a vendor call or a person\'s file on their STRICT side (a FROZEN object, the hold under its symbol), the spend guard answers NOT NOW (settings-unread, no hold taken) — the file untouched', { get: g.status, post: po.status, patch: pa.status, ps, why: gv && gv.why });
       // THE LIFT IS A SETTINGS CHANGE: its lift hooks run, every page is told, every waiting turn is judged again (no «before»)
       let hooked = 0; H.P.router.onSettingsLift(() => { hooked++; });
       const rejudged = []; const off = SG.onLimitsWritten((prev, next) => rejudged.push([prev, next]));
@@ -2362,6 +2362,49 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         ok(keptAtStart && rh && rh.code === 'settings-unread' && rh.owed === true && pr && pr.code === 'store_unread' && owner.length === 0 && landed === 1 && writes.length === 1 && writes[0][ROW] === 800,
           '⑪ (f) the setting holds while the settings are held: a hold is KEPT at the start (never judged against the defaults), its return is OWED (no retry, no notice), a press refused by name — at the LIFT the owed return lands (back to «before»)', { keptAtStart, rh, pr: pr && pr.code, owner: owner.length, landed, writes });
       }
+      // (a should, taken) a start that read the settings «missing», then a migration wrote the file and the hub read it again
+      // (reloadSettings): the store is THERE now — the next change REPLACES it, never an exclusive create that meets the very file it
+      // read (409 store_appeared). RED: the re-read handed in as a plain set (the hold still «missing»), in a copy
+      {
+        const relScene = (P, tag) => {
+          const d = scratchDir('hold-f-rel-' + tag); roots.push(d); const F = path.join(d, 'settings.json'); const sent = [];
+          P.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+          P.router.readSettings();   // NOT THERE at the start
+          fs.writeFileSync(F, JSON.stringify(SET));   // a migration writes it
+          P.router.reloadSettings();
+          let r; try { r = P.router.patchSettings({ 'appearance.theme': 'a later change' }); } catch (e) { r = { code: e.code || String(e) }; }
+          return { code: r && r.code ? r.code : null, theme: JSON.parse(fs.readFileSync(F, 'utf8'))['appearance.theme'] };
+        };
+        const RL = relScene(freshP(), 'real');
+        ok(RL.code === null && RL.theme === 'a later change', '⑪ (f) settings «missing» at the start, written by a migration and read again: the next change REPLACES the file (the store is there now — never refused as «appeared» over the file it read)', RL);
+        const REL_A = "_settingsCache = v; _settingsRead = true; try { settingsHold.adoptRead(v); }";
+        const RLX = relScene(mutantCopies('swc-reload-set', REPO).load(PREL, anchored(PSRC, REL_A, "_settingsCache = v; _settingsRead = true; try { settingsHold.set(v); }", 'reload-set'), 'reload-set'), 'red');
+        ok(RLX.code === 'store_appeared', 'CONTROL (the re-read handed in as a plain set, in a copy): the hold stays «missing», so the next change is an exclusive create that meets the file it read — refused 409 store_appeared (red)', RLX);
+      }
+      // (cure 3) THE SPEND GUARD'S NOTICE while the settings are held: NONE in the hold's silent rungs (a read that answers on its next try
+      // is no news — the page's strip waits the same), ONE past them, and the LIFT resolves it: the item closed, its stamp cleared. While
+      // held no waiting frame is judged on the default caps (every one held, «*»). RED: the silent-rung wait cut, in a copy
+      {
+        const GSREL = 'src/server/spend-guard.js', GSSRC = fs.readFileSync(path.join(REPO, GSREL), 'utf8');
+        const noticeScene = (M, tag) => {
+          const items = []; let heldNow = { kind: 'unreadable', code: 'EIO', rung: 'silent' };
+          const UT = { add: (k, x) => { const id = 'n' + (items.length + 1); items.push({ id, key: k, status: 'open', ...x }); return { id }; }, idsWhere: (f) => items.filter(f).map((i) => i.id), setStatus: (id, st) => { const it = items.find((x) => x.id === id); if (it) it.status = st; } };
+          const dir = scratchDir('hold-f-notice-' + tag); roots.push(dir);
+          const G = M.create({ dataDir: dir, serverSetting: (k) => (k === Symbol.for('vibespace.settings-held') ? heldNow : undefined), getUserTodos: () => UT, log: () => { } });
+          const ask = () => G.authorize({ reason: 'auto-resume', identity: who, cid: 'conv-n', now: Date.now() });
+          const a1 = ask(); const silent = items.length, overCap = G.waitingOverCap();
+          heldNow = { ...heldNow, rung: 'said' }; const a2 = ask();
+          const said = items.filter((i) => i.status === 'open' && i.itemKey === M.SETTINGS_ITEM).length;
+          heldNow = null; M.noteLimitsWritten(null, null);
+          return { why: [a1.why, a2.why], silent, said, open: items.filter((i) => i.status === 'open').length, items: items.length, overCap };
+        };
+        const N = noticeScene(SG, 'real');
+        ok(N.why.every((w) => w === 'settings-unread') && N.silent === 0 && N.said === 1 && N.open === 0 && N.items === 1 && JSON.stringify(N.overCap) === '["*"]',
+          '⑪ (f) the spend guard\'s notice of held settings: NONE while the hold is in its silent rungs (the turn still refused NOT NOW), ONE past them, and the LIFT resolves it (closed — never a stale «could not be read» after the settings read); no waiting frame is judged on the default caps (all held)', N);
+        const SIL_A = " && !(v.why === 'settings-unread' && settingsSilent())) {";
+        const XN = noticeScene(mutantCopies('swc-spend-silent', REPO).load(GSREL, anchored(GSSRC, SIL_A, ') {', 'spend-silent'), 'spend-silent'), 'red');
+        ok(XN.silent === 1, 'CONTROL (the silent-rung wait cut, in a copy): the notice is filed at the FIRST refusal, inside the silent rungs — a read that answers a second later has already said «could not be read» (red)', XN);
+      }
       // RED
       const VIEW_A = "    const h = settingsHold.held();\n    if (h) return heldSettingsView(h);\n    const v = settingsHold.answer();\n";
       ok(PSRC.split(VIEW_A).length === 2, 'control setup: the settings\' held view and the hold\'s answer are found once in src/routes/persistence.js');
@@ -2386,6 +2429,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         return { d, call, P, f: (n) => path.join(d, n) };
       };
       const SET = JSON.stringify({ 'appearance.theme': 'the person\'s' }), LAY = JSON.stringify({ current: null, autoSave: null, saved: {}, customGrids: [{ rows: 2, cols: 2 }] });
+      const PAGE = { 'sec-fetch-site': 'same-origin' };   // the owner's page (a browser's own fetch)
       const IMP = (sections) => ({ file: { app: 'vibespace-config', version: 1, sections }, sections: Object.keys(sections), includeSensitive: [] });
       // a store that could not be READ (EIO at the start): the export and the import refuse WHOLE; the info says «could not be read»
       const G = sceneG(freshP(), 'eio', { 'settings.json': SET, 'layouts.json': LAY });
@@ -2401,14 +2445,50 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const D2 = sceneG(freshP(), 'dmg', { 'user-state.json': DMG });
       const bearer = await D2.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'an imported name' } } }), { headers: { authorization: 'Bearer vsst_aaaa' } });
       const keptAfterBearer = fs.readFileSync(D2.f('user-state.json'), 'utf8') === DMG;
-      const person = await D2.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'an imported name' } } }));
+      // (cure 2: the tree's ONE verdict for a write from the owner's page — a header-less script is no person either)
+      const script = await D2.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'a script\'s name' } } }));
+      const keptAfterScript = fs.readFileSync(D2.f('user-state.json'), 'utf8') === DMG;
+      const person = await D2.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'an imported name' } } }), { headers: PAGE });
       const aside = fs.readdirSync(D2.d).filter((n) => n.startsWith('user-state.json.damaged-'));
-      ok(bearer.status === 403 && bearer.body.code === 'store_person_only' && keptAfterBearer && person.status === 200 && Array.isArray(person.body.setAside) && person.body.setAside[0] === 'user-state.json'
+      ok(bearer.status === 403 && bearer.body.code === 'store_person_only' && keptAfterBearer && script.status === 403 && script.body.code === 'store_person_only' && script.body.why === 'no-browser' && keptAfterScript && person.status === 200 && Array.isArray(person.body.setAside) && person.body.setAside[0] === 'user-state.json'
         && aside.length === 1 && fs.readFileSync(path.join(D2.d, aside[0]), 'utf8') === DMG && JSON.parse(fs.readFileSync(D2.f('user-state.json'), 'utf8')).customNames['claude:y'] === 'an imported name',
-        '⑪ (g) a DAMAGED store: the import is the person\'s whole replace — its bytes set aside under a dated name (kept whole), the section lands as the first write; a bearer is refused by name and nothing moves', { bearer: bearer.status, person: person.status, aside });
+        '⑪ (g) a DAMAGED store: the import is the person\'s whole replace FROM THE OWNER\'S PAGE — its bytes set aside under a dated name (kept whole), the section lands as the first write; a bearer AND a header-less script are refused by name (the tree\'s one verdict, src/write-origin.js) and nothing moves', { script: script.status, bearer: bearer.status, person: person.status, aside });
+      {   // CONTROL (cure 2): the damaged door back on «no agent's sign-in» alone (the old line, in a copy) — a header-less script sets the
+          // person's damaged bytes aside and replaces the store (red)
+        const WHO_A = "    const why = require('../write-origin.js').ownerPageWhy(req);\n    if (why) {";
+        const WHO_OLD = "    const why = require('../write-origin.js').pressBearer(req.headers) ? 'bearer' : null;\n    if (why) {";
+        const XW = sceneG(mutantCopies('swc-damaged-who', REPO).load(PREL, anchored(PSRC, WHO_A, WHO_OLD, 'damaged-who'), 'damaged-who'), 'dmg-red', { 'user-state.json': DMG });
+        const xs = await XW.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'a script\'s name' } } }));
+        ok(xs.status === 200 && fs.readFileSync(XW.f('user-state.json'), 'utf8') !== DMG, 'CONTROL (the damaged door asks only «no bearer», in a copy): a header-less script sets the person\'s damaged bytes aside and replaces the store (red)', { status: xs.status });
+      }
+      {   // cure 4: an import that REPLACES damaged settings is their LIFT — the lift hooks (the setting holds' owed returns) run once,
+          // judged against what was imported; RED: the lift cut (in a copy) — the owed returns wait for a lift that never comes
+        const SDMG = '{"appearance.theme": "torn';
+        const liftScene = async (P, tag) => {
+          const S = sceneG(P, tag, { 'settings.json': SDMG }); let hooks = 0; S.P.router.onSettingsLift(() => { hooks++; });
+          const r = await S.call('post', '/api/config/import', IMP({ settings: { 'appearance.theme': 'an imported one' } }), { headers: PAGE });
+          const g = await S.call('get', '/api/settings');
+          return { r, hooks, theme: g.body && g.body['appearance.theme'], aside: fs.readdirSync(S.d).filter((n) => n.startsWith('settings.json.damaged-')).length };
+        };
+        const L = await liftScene(freshP(), 'dmg-settings');
+        ok(L.r.status === 200 && JSON.stringify(L.r.body.setAside) === '["settings.json"]' && L.aside === 1 && L.hooks === 1 && L.theme === 'an imported one',
+          '⑪ (g) an import that REPLACES damaged settings is their LIFT: the bytes set aside, the import lands, and the lift hooks run ONCE (the setting holds\' owed returns judged against what was imported, the waiting spend judged again)', L);
+        const LIFT_A = "    if (setAsideSaid.includes('settings.json')) settingsAgain('a person\\'s import replaced the damaged settings');\n";
+        const XL = await liftScene(mutantCopies('swc-import-lift', REPO).load(PREL, anchored(PSRC, LIFT_A, '', 'import-lift'), 'import-lift'), 'dmg-settings-red');
+        ok(XL.r.status === 200 && XL.hooks === 0, 'CONTROL (the import\'s lift cut, in a copy): the damaged settings are replaced and NO lift hook runs — the owed returns wait for a lift that never comes (red)', XL);
+      }
+      {   // an import that STOPS after it set a damaged store aside NAMES the set-aside: the bytes under a dated name, kept whole (the store's
+          // first write made to fail here — an EIO stand-in on its create)
+        const S = sceneG(freshP(), 'dmg-stop', { 'user-state.json': DMG });
+        const lk = fs.linkSync; fs.linkSync = function (a, b, ...r) { if (String(b) === S.f('user-state.json')) throw Object.assign(new Error('EIO: a stand-in'), { code: 'EIO' }); return lk.call(this, a, b, ...r); };
+        let st; try { st = await S.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'an imported name' } } }), { headers: PAGE }); } finally { fs.linkSync = lk; }
+        const aside = fs.readdirSync(S.d).filter((n) => n.startsWith('user-state.json.damaged-'));
+        ok(st.status === 500 && JSON.stringify(st.body && st.body.setAside) === '["user-state.json"]' && /set aside under a dated name/.test(st.body.error) && aside.length === 1 && fs.readFileSync(path.join(S.d, aside[0]), 'utf8') === DMG,
+          '⑪ (g) an import that STOPS after it set a damaged store aside says so: the answer names the set-aside (kept whole under a dated name) — never a bare failure that leaves the person looking for their file', { status: st.status, body: st.body });
+      }
       // the person's EMPTY store for a damaged one; an unreadable one is not «damaged» (409)
       const E2 = sceneG(freshP(), 'empty', { 'bookmarks.json': '[{"label": "torn' });
-      const em = await E2.call('post', '/api/stores/:file/empty', {}, { params: { file: 'bookmarks.json' } }), bg = await E2.call('get', '/api/bookmarks');
+      const em = await E2.call('post', '/api/stores/:file/empty', {}, { params: { file: 'bookmarks.json' }, headers: PAGE }), bg = await E2.call('get', '/api/bookmarks');
       const E3 = sceneG(freshP(), 'empty-eio', { 'bookmarks.json': '[]' });
       const ne = await (async () => { let r; const rf = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (String(f) === E3.f('bookmarks.json')) throw Object.assign(new Error('EIO: a stand-in'), { code: 'EIO' }); return rf.call(this, f, ...a); }; try { r = await E3.call('post', '/api/stores/:file/empty', {}, { params: { file: 'bookmarks.json' } }); } finally { fs.readFileSync = rf; } return r; })();
       ok(em.status === 200 && em.body.empty === true && fs.readdirSync(E2.d).some((n) => n.startsWith('bookmarks.json.damaged-')) && bg.status === 200 && Array.isArray(bg.body) && bg.body.length === 4 && ne.status === 409 && ne.body.code === 'store_not_damaged' && fs.readFileSync(E3.f('bookmarks.json'), 'utf8') === '[]',
@@ -2419,6 +2499,89 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       failing(XG.f('layouts.json'), 'EIO', () => { try { XG.P.router.readLayouts(); } catch { } });
       try { await XG.call('post', '/api/config/import', IMP({ settings: { 'appearance.theme': 'an imported one' }, layouts: { current: null, autoSave: null, saved: {}, customGrids: [] } })); } catch { /* the held layouts' own refusal, thrown after the settings landed */ }
       ok(fs.readFileSync(XG.f('settings.json'), 'utf8') !== SET, 'CONTROL (the import\'s first ask cut, in a copy): the settings section lands while the desktops are held — a PART of the import, the rest refused (red)');
+    }
+    // (i) THE DATA FOLDER ITSELF UNREADABLE AT THE FIRST READ (round wyzvr7567's MUST 1): the folder check before a store's start read
+    // throws (a stale or dead data mount: existsSync answers false on any stat error, then mkdirSync throws) — that IS the start read's
+    // failure: the store is HELD (never «read and empty»), its bytes are kept, the spend guard's input says held; and a hold whose start
+    // read never ran refuses every read, write and set BY NAME. REDS (anchored, in a copy): the flag set BEFORE the folder check — the
+    // hold never starts, the spend guard is handed NO hold (it judges unattended turns on the DEFAULT caps: open); the hold's own
+    // «not read» refusal cut — a store never read answers an empty value.
+    {
+      const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+      const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
+      const SETI = JSON.stringify({ 'spend.unattendedPerIdentityHour': 2 });
+      const staleScene = async (P, tag) => {
+        const d = scratchDir('hold-i-' + tag); roots.push(d); const F = path.join(d, 'settings.json'); fs.writeFileSync(F, SETI);
+        P.setup({ dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
+        const call = async (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; }, set() { return res; }, setHeader() { } }; try { await handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, (e) => { status = 500; o = { error: String(e && e.message || e) }; }); } catch (e) { status = 500; o = { error: String(e && e.message || e) }; } return { status, code: o && o.code, held: o && o.held };
+        };
+        const ex = fs.existsSync, mk = fs.mkdirSync;
+        fs.existsSync = function (q, ...a) { if (String(q) === d) return false; return ex.call(this, q, ...a); };
+        fs.mkdirSync = function (q, ...a) { if (String(q) === d) throw Object.assign(new Error('ESTALE: a stand-in stale data mount'), { code: 'ESTALE' }); return mk.call(this, q, ...a); };
+        let g, w;
+        try { g = await call('get', '/api/settings'); w = await call('post', '/api/settings', { 'spend.unattendedPerIdentityHour': 999 }); }
+        finally { fs.existsSync = ex; fs.mkdirSync = mk; }
+        const h = P.router.settingsHeld();
+        return { g, w, guard: h ? { kind: h.kind, code: h.code } : null, bytesKept: fs.readFileSync(F, 'utf8') === SETI };
+      };
+      const ri = await staleScene(freshP(), 'real');
+      ok(ri.g.status === 503 && ri.g.code === 'store_unread' && ri.w.status === 503 && ri.w.code === 'store_unread' && !!ri.guard && ri.guard.kind === 'unreadable' && ri.guard.code === 'ESTALE' && ri.bytesKept,
+        '⑪ (i) THE DATA FOLDER UNREADABLE AT THE FIRST READ (a stale mount: the folder check throws): the settings are HELD (unreadable, ESTALE) — the route answers 503 by name, a save is refused, the file\'s bytes are kept, and the spend guard\'s input says held (it refuses unattended turns)', ri);
+      const FLAG_A = "    if (!_settingsRead) { let pre; try { ensureDir(dataDir); } catch (e) { pre = { error: e }; } settingsHold.readAtStart(pre); _settingsRead = true; }";
+      const RX = mutantCopies('swc-flag-first', REPO).load(PREL, anchored(PSRC, FLAG_A, "    if (!_settingsRead) { _settingsRead = true; ensureDir(dataDir); settingsHold.readAtStart(); }", 'flag-first'), 'flag-first');
+      const rx = await staleScene(RX, 'red');
+      ok(rx.guard === null, 'CONTROL (the flag set before the folder check, in a copy — the unit as read): the start read never runs, the hold never starts — the spend guard is handed NO hold and judges unattended turns on the DEFAULT caps (red)', rx);
+      // the hold helper's own refusal before its start read
+      const notRead = (HM, tag) => {
+        const d = scratchDir('hold-i2-' + tag); roots.push(d); const F = path.join(d, 'store.json'); fs.writeFileSync(F, '{"v":1}');
+        const h = HM.create({ file: F, valid: (v) => !!v && typeof v === 'object', log: { warn() { } }, schedule: () => 0 });
+        const tr = (fn) => { try { return { value: fn() }; } catch (e) { return { code: e.code, kind: e.held && e.held.kind, why: e.held && e.held.code }; } };
+        return { answer: tr(() => h.answer('a read')), write: tr(() => h.write({ v: 2 })), set: tr(() => h.set({ v: 3 })), bytesKept: fs.readFileSync(F, 'utf8') === '{"v":1}' };
+      };
+      const SHREL = 'src/store-hold.js', SHSRC = fs.readFileSync(path.join(REPO, SHREL), 'utf8');
+      const nr = notRead(require(path.join(REPO, SHREL)), 'real');
+      ok(nr.answer.code === 'store_unread' && nr.answer.why === 'not read' && nr.write.code === 'store_unread' && nr.set.code === 'store_unread' && nr.bytesKept,
+        '⑪ (i) a hold whose START read never ran refuses every read, write and set BY NAME (store_unread, «not read») — never an empty value under the store\'s name', nr);
+      const NR_A = "  function answer(what = null) { if (!started) throw unreadError(file, NOT_READ(), what); if (held) throw unreadError(file, held, what); return value; }";
+      const nrx = notRead(mutantCopies('swc-not-read', REPO).load(SHREL, anchored(SHSRC, NR_A, "  function answer(what = null) { if (held) throw unreadError(file, held, what); return value; }", 'not-read-cut'), 'not-read-cut'), 'red');
+      ok(nrx.answer.code === undefined && nrx.answer.value === undefined, 'CONTROL (the «not read» refusal cut from answer, in a copy): a store never read answers an EMPTY value under its name (red)', nrx);
+    }
+    // (j) WHILE THE SETTINGS ARE HELD, THE STRICT SIDE (round wyzvr7567's MUST 2, by rule R3 — «never a default acted on»): every row
+    // that guards MONEY, a SAFETY ask, a VENDOR CALL or a WRITE TO A PERSON'S OWN FILE takes its strict side in the held view
+    // (src/settings-held-strict.js), whatever its default; the census over EVERY row of the settings schema and the harness tables
+    // finds no row of these kinds without one. The writers to a person's own files write NOTHING while held: the CLI-config sync
+    // (driven) and the hooks (pinned). CONTROLS: a planted new row of these kinds is red by name; the sync's held guard cut (in a
+    // copy) writes the CLI configs on values that are not the person's.
+    {
+      const { pathToFileURL } = await import('node:url');
+      const ST = require(path.join(REPO, 'src/settings-held-strict.js'));
+      const SCH = (await import(pathToFileURL(path.join(REPO, 'src/lib/settings-schema.js')).href)).SETTINGS_SCHEMA;
+      const HS = require(path.join(REPO, 'src/harness-settings.js'));
+      const rows = Object.keys(SCH).map((key) => ({ key, cliConfig: false }));
+      for (const [h, tab] of Object.entries(HS.HARNESS_SETTINGS)) for (const r of (tab && tab.rows) || []) rows.push({ key: `${h}.${r.key}`, cliConfig: !!(r.apply && r.apply.kind === 'cli-config') });
+      const c = ST.census(rows);
+      const sv = ST.strictValues();
+      const four = sv['permissions.bypassAnswersAsks'] === false && sv['antigravity.autoUsageReads'] === 'off' && sv['pool.avoidOverageMembers'] === true && !!ST.NO_WRITE_WHILE_HELD['agents.vibespaceIntegration'];
+      const defaults = { bypass: SCH['permissions.bypassAnswersAsks'] && SCH['permissions.bypassAnswersAsks'].default, avoid: SCH['pool.avoidOverageMembers'] && SCH['pool.avoidOverageMembers'].default };
+      ok(c.unnamed.length === 0 && c.caught.length >= 25 && four && Object.keys(ST.STRICT_WHILE_HELD).every((k) => rows.some((r) => r.key === k)) && defaults.bypass === true && defaults.avoid === false,
+        `⑪ (j) WHILE THE SETTINGS ARE HELD every row that guards money, a safety ask, a vendor call or a person's own file takes its STRICT side — ${c.caught.length} rows of ${rows.length} caught by the census, every one named (the auto-allow of the CLI's safety asks OFF though its default is on, the vendor's automatic reads OFF, avoid overage ON though its default is off, the hooks never written); every strict row is a real row`, c);
+      const pc = ST.census([...rows, { key: 'permissions.autoAllowEverything', cliConfig: false }]);
+      ok(JSON.stringify(pc.unnamed) === JSON.stringify(['permissions.autoAllowEverything']), 'CONTROL (planted): a NEW row of these kinds with no strict side is red BY NAME', pc.unnamed);
+      // the CLI-config sync writes nothing while held (its lift is a settings change: it runs then)
+      const HCREL = 'src/server/harness-config-sync.js', HCSRC = fs.readFileSync(path.join(REPO, HCREL), 'utf8');
+      const SYMH = Symbol.for('vibespace.settings-held');
+      let cliHomes = 0;
+      const syncRun = (M) => { const lines = []; const m = M.create({ serverSetting: (k) => (k === SYMH ? { kind: 'unreadable', code: 'EIO' } : undefined), harnesses: { list: () => [], get: () => null }, adapterRegistry: new Map(), activeSessions: new Map(), hookRegistrationSafe: () => false, home: (() => { const d = scratchDir('swc-cli-home-' + (++cliHomes)); roots.push(d); return d; })(), log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)) }); let r; try { r = m.syncCliConfig({ reason: 'boot' }); } catch (e) { r = { threw: e.message }; } return { r, lines }; };
+      const sr = syncRun(require(path.join(REPO, HCREL)));
+      ok(!!sr.r && sr.r.skipped === true && !!sr.r.settingsHeld && sr.r.settingsHeld.kind === 'unreadable' && sr.lines.some((l) => /no CLI config is written until they read/.test(l)),
+        '⑪ (j) the CLI-config sync writes NOTHING while the settings are held (said once in the journal) — the person\'s own CLI files are never written on values that are not theirs', sr);
+      const HC_A = "    if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return { skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }; }";
+      const srx = syncRun(mutantCopies('swc-cli-held', REPO).load(HCREL, anchored(HCSRC, HC_A, '', 'cli-held-cut'), 'cli-held-cut'));
+      ok(!!srx.r && !srx.r.settingsHeld && !!srx.r.refused, 'CONTROL (the sync\'s held guard cut, in a copy): the sync goes PAST the hold to its next gate (here the copy\'s own refusal stops it before any file; a hub would write the CLI configs on rows that are not the person\'s) — red', srx.r);
+      const AG = fs.readFileSync(path.join(REPO, 'src/server/agent-tool-generators.js'), 'utf8');
+      ok(/const held = settingsHeldNow\(\);\n  if \(held\) \{ replayAtLift\(\); return \{ skipped: true, settingsHeld:/.test(AG) && /function stripAgentHookEntries\(\) \{\n  if \(refuseOwnerWrite\(\)\) return;[^\n]*\n  if \(settingsHeldNow\(\)\) return;/.test(AG),
+        '⑪ (j) the hooks: neither registered nor stripped while the settings are held (the person\'s ~/.claude and ~/.codex configs untouched), the registration replayed at the lift by the person\'s own switch (a pin: the writers need a real home)');
     }
     // (h) THE ONE CHOKE (cut 7 — R1): every write site of src/routes/persistence.js, read on acorn's tree. A held store's file is
     // written ONLY through its hold's ONE write (the desktops, the bookmarks, the custom themes, the settings: one site each; the

@@ -215,6 +215,58 @@ const liftScene = (SM) => settingsScene(SM, async ({ sm, W, advance }) => {
   ok(V.footWords({ file: 'settings.json' }, (x) => x) === '' && /^Every change here saves as you make it/.test(V.footWords(null, (x) => x))
     && /const words = footWords\(this\.settings\.held, t\);/.test(read('src/lib/settings-ui.js')) && (read('src/lib/settings-ui.js').match(/this\._drawFoot\(\);/g) || []).length >= 4,
     'THE WINDOW\'S FOOT: while the settings are held it says nothing (its rule is false then); the window redraws it at every draw, every save state and the lift');
+  // round wyzvr7567's cure 1: A PERSON'S RESET ALL REFUSED BY A HOLD IS SAID AT THE PRESS — inside the hold's silent rungs too. A landed
+  // page that met a hold (here only in its silent rungs) refuses the reset at once: nothing changed, never left waiting in silence; the
+  // window says it after the confirm (its words, zh / ja). RED: the reset's hold guard cut — the rows reset on the page, unsaved, unsaid
+  const Q = 'chat.showHookCards';
+  const resetScene = (SM) => settingsScene(SM, async ({ sm, W, advance }) => {
+    W.hub = 'ok'; await sm.load();   // landed
+    W.hub = 'held-silent'; sm.set(P, false); await advance(600);   // a change met the hold in its SILENT rungs: the page knows it now
+    const knew = sm.held ? sm.held.rung : null, before = J(sm.toJSON());
+    const r = sm.resetAll(); await advance(600);
+    return { knew, r, same: J(sm.toJSON()) === before, posts: W.posts.length };
+  });
+  const rz = await resetScene(SettingsManager);
+  const U = await import('../src/lib/utils.js');
+  const tp = (x, ps) => String(x).replace(/\{(\w+)\}/g, (_, k) => (ps && ps[k] != null ? ps[k] : `{${k}}`));
+  const rw = V.resetRefusedWords(HELD('settings.json', 'silent'), tp, U.storeHeldWords), rw0 = V.resetRefusedWords(null, tp, U.storeHeldWords);
+  ok(rz.knew === 'silent' && rz.r === false && rz.same && rz.posts === 0 && /^Not reset: VibeSpace cannot read your settings right now — nothing was changed/.test(rw) && /^Not reset: the settings have not been read from VibeSpace yet/.test(rw0)
+    && /if \(this\.settings\.resetAll\(\) === false\) showToast\(resetRefusedWords\(this\.settings\.held, t, storeHeldWords\), \{ type: 'error' \}\);/.test(read('src/lib/settings-ui.js')),
+    'RESET ALL a hold refused is SAID AT THE PRESS, inside its silent rungs too: the page that met the hold refuses it at once (nothing changed, nothing sent, never left waiting in silence) and the window says «Not reset: …» after the confirm', J({ ...rz, rw, rw0 }));
+  const CTLz = await esmCopy('src/lib/settings.js', anchored(read('src/lib/settings.js'), "    if (this.held) return false;       // a hold this page met (said or in its silent rungs): the person's whole reset is refused at once, never left waiting in silence\n", '', 'the reset\'s hold guard'), 'no-reset-guard');
+  const rzx = await resetScene(CTLz.SettingsManager);
+  ok(rzx.r !== false && rzx.same === false, 'CONTROL (the reset\'s hold guard cut, in a copy): the rows reset on the page while the hub holds the settings — not saved, and nothing says so at the press (red)', J(rzx));
+  // the lift with NOTHING refused still tells the window (its foot was the hold's: it redraws); a change a hold refused never rides
+  // another row's save (a hub that reads again before its word reached this page) — it was said refused, it is never saved in silence
+  const nf = await settingsScene(SettingsManager, async ({ sm, W }) => {
+    await sm.load();   // held (said), nothing refused
+    const heard = []; sm.onLift((paths) => heard.push(paths.length));
+    W.hub = 'ok'; sm.applyRemote({ ...W.server });
+    return { heard, held: sm.held };
+  });
+  const ride = await settingsScene(SettingsManager, async ({ sm, W, advance }) => {
+    W.hub = 'ok'; await sm.load();
+    W.hub = 'held-said'; sm.set(P, false); await advance(600);   // refused by the hold: the row «Not now»
+    W.hub = 'ok'; sm.set(Q, false); await advance(600);   // the hub reads again; its word has not reached this page — the person changes ANOTHER row
+    return { body: W.posts[0] || null, refusedStill: sm.failHeldOf(P) };
+  });
+  ok(J(nf.heard) === '[0]' && nf.held === null && !!ride.body && !(P in ride.body) && ride.body[Q] === false && ride.body['x.server'] === 'the server\'s own value',
+    'the LIFT with nothing refused tells the window (its foot, the hold\'s, is redrawn); a change a HOLD refused rides no other row\'s save — the next POST carries the stored value of that row, never the refused one', J({ nf, ride }));
+  const CTLy = await esmCopy('src/lib/settings.js', anchored(read('src/lib/settings.js'), "    for (const p of this._failHeld) { if (p in this._server) data[p] = this._server[p]; else delete data[p]; }\n", '', 'the refused rows kept out'), 'refused-rides');
+  const ridex = await settingsScene(CTLy.SettingsManager, async ({ sm, W, advance }) => {
+    W.hub = 'ok'; await sm.load();
+    W.hub = 'held-said'; sm.set(P, false); await advance(600);
+    W.hub = 'ok'; sm.set(Q, false); await advance(600);
+    return { body: W.posts[0] || null };
+  });
+  ok(!!ridex.body && ridex.body[P] === false, 'CONTROL (the refused rows kept out of the save cut, in a copy): the change the hold refused — said «not saved» at its press — is SAVED in silence by another row\'s save (red)', J(ridex));
+  // the page's smaller shoulds (pins — their road needs the page's DOM): «Not now» toasted ONCE a hold (each refused row says it at the
+  // row); a bookmarks save a hold refused leaves the list NOT landed (the next change is refused on the page until a read lands); the
+  // Settings window lets its landing and lift listeners go at its close
+  ok(/const once = h \? `\$\{h\.file\}\|\$\{h\.since\}` : ''; if \(o && o\.refused && h && h\.rung !== 'silent' && this\._notNowSaid !== once\) \{ this\._notNowSaid = once;/.test(read('src/lib/app.js'))
+    && /if \(h\) \{ this\._bkLanded = false; this\._bkHeld = h; noteStoreHeld\(h\); throw /.test(read('src/lib/file-explorer.js'))
+    && /winInfo\.onClose = \(\) => \{ this\._dropReloadSubs\(\); this\._offLand\?\.\(\); this\._offLand = null; this\._offLift\?\.\(\); this\._offLift = null; \};/.test(read('src/lib/settings-ui.js')),
+    'the smaller shoulds (pins): «Not now» toasted ONCE a hold; a bookmarks save a hold refused leaves the list not landed (the next change refused on the page until a read lands); the Settings window lets its landing and lift listeners go at its close');
   const bc = await settingsScene(SettingsManager, async ({ sm, W, advance }) => {
     await sm.load();
     sm.applyRemote({ ...W.server, 'x.fromLift': 1 }); W.hub = 'ok';   // the lift's settings-updated: the hub's WHOLE state
@@ -268,7 +320,7 @@ console.log('§5 GET /api/stores/held names every store held NOW — each store 
   const G = setupP(require(path.join(REPO, PREL)));
   const h1 = await G.call('get', '/api/stores/held');
   const one = (h1.body && h1.body.held) || [];
-  const emptied = await G.call('post', '/api/stores/:file/empty', { params: { file: 'layouts.json' } });
+  const emptied = await G.call('post', '/api/stores/:file/empty', { params: { file: 'layouts.json' }, headers: { 'sec-fetch-site': 'same-origin' } });   // the owner's page (the damaged door's one verdict)
   const h2 = await G.call('get', '/api/stores/held');
   ok(h1.status === 200 && one.length === 1 && one[0].section === 'layouts' && one[0].file === 'layouts.json' && one[0].kind === 'damaged' && typeof one[0].rung === 'string'
     && !!emptied.body && emptied.body.success === true && J(h2.body) === J({ held: [] }),
@@ -433,6 +485,64 @@ const heldFrame = (W, sentAt) => W.frame({ type: 'layout-held', op: 'layout-sync
   Wd.dm.renameDesktop('d1', 'Renamed');
   ok(Wd.sent.some((m) => m.type === 'desktop-rename') && Wd.dm._desktops[0].name === 'Renamed', 'CONTROL (the rename\'s held refusal cut, in a copy): the page renames a desktop the hub holds unread — shown as done, refused by the hub (red)');
   Wd.done(); SH.noteStoreLifted('layouts.json');
+}
+
+{
+  // (c) round wyzvr7567's cure 1: A PERSON'S PRESS ON THE DESKTOPS IS SAID AT THE ACT — inside the hold's SILENT rungs too. A hold the page
+  // knows only in its silent rungs (the hub's list at a reconnect; never drawn) refuses the desktop's change BEFORE it is applied; a
+  // press the page could not know held is refused by the hub (`layout-held` for a desktop op) and said all the same; a preset's delete
+  // a hold refused is said and the preset stays; the scratch surface once the desktops read again says «load them first»
+  const META = { desktopMeta: [{ id: 'd1', name: 'One' }], desktops: {}, saved: {}, current: null };
+  ROUTE = (u, o) => (u === '/api/stores/held' ? answer(200, { held: [HELD('layouts.json', 'silent')] })
+    : u.startsWith('/api/layouts/') && o && o.method === 'DELETE' ? answer(503, heldBody(HELD('layouts.json', 'silent')))
+    : u === '/api/layouts' ? answer(200, META) : answer(404, {}));
+  const W = openPage(RealDM, RealLM);
+  await SH.refreshStoreHolds();
+  const quiet = { said: !!SH.storeHeld('layouts.json'), known: (SH.storeHeldKnown('layouts.json') || {}).rung || null };
+  const t0 = toasts().length;
+  W.dm.renameDesktop('d1', 'Renamed');
+  const r1 = { name: W.dm._desktops[0].name, sent: W.sent.some((m) => m.type === 'desktop-rename'), toasts: added(t0) };
+  ok(quiet.said === false && quiet.known === 'silent' && r1.name === 'One' && !r1.sent && r1.toasts.length === 1 && /cannot read your desktops/.test(r1.toasts[0] || ''),
+    'a desktop\'s RENAME while the hold is in its SILENT rungs (known from the hub\'s list, never drawn) is refused BEFORE it is applied and SAID at the press — the name kept, nothing sent', J({ quiet, r1 }));
+  SH.noteStoreLifted('layouts.json'); await settle();
+  const t1 = toasts().length;
+  W.frame({ type: 'layout-held', op: 'desktop-rename', desktopId: 'd1', held: HELD('layouts.json', 'silent'), sentAt: null });
+  const r2 = { toasts: added(t1), known: !!SH.storeHeldKnown('layouts.json'), drawn: !!SH.storeHeld('layouts.json') };
+  ok(r2.toasts.length === 1 && /cannot read your desktops/.test(r2.toasts[0] || '') && r2.known && !r2.drawn,
+    'a press the page could not know held, refused by the hub in the hold\'s silent rungs (`layout-held` for a desktop op), is SAID all the same — and the next press is refused before it is applied (the hold known, still not drawn)', J(r2));
+  SH.noteStoreLifted('layouts.json'); await settle();
+  W.lm._savedPresets = { Work: { windows: [] } };
+  const t2 = toasts().length;
+  const del = await W.lm.deletePreset('Work');
+  ok(del === false && !!W.lm._savedPresets.Work && added(t2).length === 1, 'a preset\'s DELETE refused by a hold (its silent rungs) is SAID at the press and the preset STAYS in the list — the hub kept it', J({ del, presets: Object.keys(W.lm._savedPresets), toasts: added(t2) }));
+  SH.noteStoreLifted('layouts.json'); await settle();
+  W.done();
+  const Sx = await scratchBoot(RealDM, RealLM);
+  SH.setScratch('lifted');
+  const t3 = toasts().length;
+  Sx.dm.renameDesktop('__scratch__', 'Mine');
+  ok(/^Your desktops can be read again — load them first/.test(added(t3)[0] || ''), 'the SCRATCH SURFACE once the desktops read again: a press is refused with «load them first» — never «cannot read» of a hold that ended', J(added(t3)));
+  Sx.done(); SH.noteStoreLifted('layouts.json'); SH.setScratch(null); await settle();
+  // CONTROLS
+  const DMS = read('src/lib/desktop-manager.js');
+  const CTLk = await esmCopy('src/lib/desktop-manager.js', anchored(anchored(DMS, "import { storeHeldKnown, scratchState } from './store-held.js';", "import { storeHeld, scratchState } from './store-held.js';", 'the import'), ": storeHeldKnown('layouts.json');", ": storeHeld('layouts.json');", 'the known hold'), 'said-only');
+  const Wk = openPage(CTLk.DesktopManager, RealLM);
+  await SH.refreshStoreHolds();
+  Wk.dm.renameDesktop('d1', 'Renamed');
+  ok(Wk.dm._desktops[0].name === 'Renamed' && Wk.sent.some((m) => m.type === 'desktop-rename'), 'CONTROL (the press asks only a hold the strip DRAWS, in a copy): in the silent rungs the rename is applied and sent — shown as done, refused by the hub (red)');
+  Wk.done(); SH.noteStoreLifted('layouts.json'); await settle();
+  const CTLo = await esmCopy('src/lib/layout.js', anchored(read('src/lib/layout.js'), "    if (msg.op && msg.op !== 'layout-sync' && msg.held) showToast(", "    if (msg.op && msg.op !== 'layout-sync' && msg.held && msg.held.rung !== 'silent') showToast(", 'the press said at any rung'), 'press-said-past-rungs');
+  const Wo = openPage(RealDM, CTLo.LayoutManager);
+  const t4 = toasts().length;
+  Wo.frame({ type: 'layout-held', op: 'desktop-rename', desktopId: 'd1', held: HELD('layouts.json', 'silent'), sentAt: null });
+  ok(added(t4).length === 0, 'CONTROL (a press said only past the silent rungs, in a copy — the cut-6 rule): the hub refused the rename and the page says NOTHING (red)', J(added(t4)));
+  Wo.done(); SH.noteStoreLifted('layouts.json'); await settle();
+  const CTLp = await esmCopy('src/lib/layout.js', anchored(read('src/lib/layout.js'), "      if (res && res.status === 503) { let b = null; try { b = await res.json(); } catch { } const h = heldBodyOf(b); if (h) { noteStoreHeld(h); showToast(storeHeldWords(h), { type: 'error' }); return false; } }\n", '', 'the delete\'s answer read'), 'delete-unread');
+  const Wp = openPage(RealDM, CTLp.LayoutManager);
+  Wp.lm._savedPresets = { Work: { windows: [] } };
+  await Wp.lm.deletePreset('Work');
+  ok(!Wp.lm._savedPresets.Work, 'CONTROL (the delete\'s answer unread, in a copy — the release): the preset leaves the list though the hub kept it, and nothing is said (red)');
+  Wp.done(); SH.noteStoreLifted('layouts.json'); await settle();
 }
 
 // ── §7 THE WRITERS' CENSUS ──

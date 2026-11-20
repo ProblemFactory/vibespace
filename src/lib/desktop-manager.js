@@ -1,5 +1,5 @@
 import { cssVarDefault, escHtml, showContextMenu, showInputDialog, showToast, uiScale, storeHeldWords } from './utils.js';
-import { storeHeld } from './store-held.js'; // B-225b: the desktops HELD — a change of them is refused by name here
+import { storeHeldKnown, scratchState } from './store-held.js'; // B-225b: the desktops HELD — a change of them is refused by name here (said or in its silent rungs: a press is said at the act)
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
 import { storedNameWords } from './value-words.js'; // lane ui-language: a default desktop name («Desktop 1») is worded at display, never in storage
@@ -211,7 +211,9 @@ export class DesktopManager {
   /** a change of the desktops while they are HELD (a scratch surface, or a hold the strip names): refused BY NAME, nothing changed
    *  (the hub would refuse it — `layout-held`) → true when refused */
   _heldRefuse() {
-    const h = this._scratch ? (this.app.layoutManager?._scratch || { file: 'layouts.json' }) : storeHeld('layouts.json');
+    // (the scratch surface once the desktops read again: no «cannot read» — the person loads them first, the strip's door)
+    if (this._scratch && scratchState() === 'lifted') { showToast(t('Your desktops can be read again — load them first («Load my desktops»); this change was not made.'), { type: 'error' }); return true; }
+    const h = this._scratch ? (this.app.layoutManager?._scratch || { file: 'layouts.json' }) : storeHeldKnown('layouts.json');   // (cure 1: a hold in its silent rungs too — refused BEFORE it is applied, said at the press)
     if (!h) return false;
     showToast(storeHeldWords(h), { type: 'error' });
     return true;

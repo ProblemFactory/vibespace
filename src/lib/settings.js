@@ -75,8 +75,10 @@ class SettingsManager {
    *  … right now». Each row a hold refused takes the STORED value again and its mark leaves — the person's refused change is not
    *  saved silently; it was said refused, and the row now shows what holds. Called once the server's state is here again. */
   _liftHeld() {
+    const had = !!this.held;
     this.held = null;
-    if (!this._failHeld.size) return;
+    // (a hold this page met refused nothing: its window still drew the hold's foot — the listeners redraw it, with no row)
+    if (!this._failHeld.size) { if (had) for (const fn of [...this._liftListeners]) { try { fn([]); } catch (e) { console.error('Settings lift listener error:', e); } } return; }
     const paths = [...this._failHeld];
     this._failHeld.clear();
     for (const p of paths) {
@@ -231,9 +233,10 @@ class SettingsManager {
     this.set(path, undefined);
   }
 
-  /** Reset all settings to defaults. */
+  /** Reset all settings to defaults → false when REFUSED (the caller says it at the press — round wyzvr7567's cure 1). */
   resetAll() {
     if (!this._landed) return false;   // B-225b R4: never a write over settings this page has not read (the Settings window shows no rows then)
+    if (this.held) return false;       // a hold this page met (said or in its silent rungs): the person's whole reset is refused at once, never left waiting in silence
     const oldValues = { ...this._values };
     this._values = {};
     // Notify all previously overridden settings
@@ -352,6 +355,9 @@ class SettingsManager {
       }
     }
     const data = this.toJSON();
+    // B-225b: a change a HOLD refused rides no other row's save — it was said refused at its press, and is never saved in silence
+    // (the row takes the stored value at the lift)
+    for (const p of this._failHeld) { if (p in this._server) data[p] = this._server[p]; else delete data[p]; }
     // Always write to localStorage as backup
     try { localStorage.setItem('webui-settings', JSON.stringify(data)); } catch {}
     // lane owner-press-attended: what this POST carries is 'saving' until the server answers

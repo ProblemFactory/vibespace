@@ -52,6 +52,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   let held = null;           // { kind, code, why, since, rung }
   let missing = false;
   let tries = 0, timer = null, inflight = null, stopped = false;
+  let started = false;       // the START read returned (round wyzvr7567's MUST 1): before it, no read, write or set is answered
   const later = schedule || ((fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; });
   const answerOf = (read) => SR.storeAnswer(read, { parse, valid });
 
@@ -60,6 +61,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function readAtStart(pre) {
     const read = pre && (typeof pre.text === 'string' || pre.error) ? pre : readSync(file);
     const a = answerOf(read);
+    started = true;   // (only once the read has an answer: a throw above leaves the store NOT READ — refused by name, read again next time)
     if (a.state === 'data') { value = a.value; text = read.text; missing = false; return 'data'; }
     if (a.state === 'missing') { missing = true; return 'missing'; }
     held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' };
@@ -92,15 +94,19 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   }
 
   /** the value, or the refusal by name (R2: a held read answers the refusal and nothing else) */
-  function answer(what = null) { if (held) throw unreadError(file, held, what); return value; }
+  /** a store whose START read never ran is no store yet (MUST 1: a folder check that threw left a flag set and «read and empty»
+   *  served): refused BY NAME, as a hold that cannot be read — never an empty value under the store's name */
+  const NOT_READ = () => ({ kind: 'unreadable', code: 'not read', since: now(), rung: 'said' });
+  function answer(what = null) { if (!started) throw unreadError(file, NOT_READ(), what); if (held) throw unreadError(file, held, what); return value; }
   /** refuse by name while held (a door's guard) */
-  function refuseIfHeld(what) { if (held) throw unreadError(file, held, what); }
+  function refuseIfHeld(what) { if (!started) throw unreadError(file, NOT_READ(), what); if (held) throw unreadError(file, held, what); }
 
   /** THE ONE WRITE (R1, R10): refuses a store with no value BY NAME; whole bytes, a pid temp name, then the rename — or, for a store
    *  that read `missing`, an EXCLUSIVE create (R6: a file found there is read and adopted, the change refused by name). `bytes`: the
    *  text, or its PARTS in order (a large store's text is never joined — the conversation list's state and its facts), else the
    *  value's JSON. → true */
   function write(next, bytes) {
+    if (!started) throw unreadError(file, NOT_READ(), 'this change');
     if (held) throw unreadError(file, held, 'this change');
     const parts = Array.isArray(bytes) ? bytes : [typeof bytes === 'string' ? bytes : JSON.stringify(next, null, 2)];
     const tmp = `${file}.${process.pid}.tmp`;
@@ -133,7 +139,11 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     return true;
   }
   /** the caller's in-memory value after a change it will write (the copy in memory is the truth while it exists — R12) */
-  function set(next) { if (held) throw unreadError(file, held, 'this change'); value = next; text = null; }
+  function set(next) { if (!started) throw unreadError(file, NOT_READ(), 'this change'); if (held) throw unreadError(file, held, 'this change'); value = next; text = null; }
+  /** a WHOLE read of the file made by the caller (a re-read after the migrations wrote it): the value as read — and the store is THERE
+   *  now, so its next write replaces it, never an exclusive create that meets the file it read (a start read «missing», then a
+   *  migration wrote it). Refused while held: a held store is read again by its own ladder */
+  function adoptRead(v) { if (held) throw unreadError(file, held, 'this read'); started = true; value = v; text = null; missing = false; }
   /** the bytes of the last read, ONCE (null after) — a large store's text is not kept beside its value */
   function takeText() { const t = text; text = null; return t; }
   /** THE DAMAGED DOOR (R5): a store held as `damaged` (bytes read whole that are not the store — they will not mend) is set ASIDE under
@@ -150,7 +160,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function stop() { stopped = true; if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; } }
 
   return {
-    readAtStart, readAgain, answer, refuseIfHeld, write, set, takeText, setAside, stop,
+    readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop,
     held: () => (held ? { file: path.basename(file), kind: held.kind, code: held.code, since: held.since, rung: held.rung } : null),
     isMissing: () => missing, file,
   };

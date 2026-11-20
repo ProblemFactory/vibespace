@@ -1,7 +1,7 @@
 import { track } from './telemetry-client.js';
 import { bootJson } from './boot-splash.js';
 import { cssVarDefault, showToast, showConfirmDialog, storeHeldWords } from './utils.js';
-import { heldBodyOf, noteStoreHeld, onStoreLift, saidRung, setScratch } from './store-held.js'; // B-225b: the desktops HELD — the scratch surface, the stale base, the lift
+import { heldBodyOf, noteStoreHeld, onStoreLift, setScratch } from './store-held.js'; // B-225b: the desktops HELD — the scratch surface, the stale base, the lift
 import { t } from './i18n.js';
 import { isTransientWindowType } from './window-types.js';
 import { legacyIdFor } from './agent-meta.js';
@@ -870,7 +870,8 @@ class LayoutManager {
   /** B-225b: a layout door refused BY NAME — the desktops are HELD (nothing applied, relayed or written). The hub answers, so the
    *  no-ack fallback (which settles a save as READ) never fires for it; the save's acts stay held and its desktop is owed again
    *  (a refused record releases nothing); the page is on its STALE BASE until the lift's re-read; a person's change of the
-   *  desktops themselves (create / rename / delete / reorder) is said — past the hold's silent rungs (R7). */
+   *  desktops themselves (create / rename / delete / reorder) is said AT THE PRESS, inside the silent rungs too (round wyzvr7567's
+   *  cure 1 — a press is no background read; the next press is refused before it is applied: the hold is known now). */
   _onLayoutHeld(msg) {
     this._serverAcks = true;
     if (msg.op === 'layout-sync') {
@@ -880,7 +881,7 @@ class LayoutManager {
     }
     if (!this._scratch) this._resyncStale = true;
     noteStoreHeld(msg.held);
-    if (msg.op && msg.op !== 'layout-sync' && saidRung(msg.held)) showToast(storeHeldWords(msg.held), { type: 'error' });
+    if (msg.op && msg.op !== 'layout-sync' && msg.held) showToast(storeHeldWords(msg.held), { type: 'error' });
   }
 
   /** B-225b R4 — THE SCRATCH SURFACE: this page opened while the desktops are HELD (layouts.json unread at the hub's start). It
@@ -2439,20 +2440,25 @@ class LayoutManager {
     if (stillChecking) showToast(t('{n} not resumed: still checking whether they run in another terminal — resume each one by itself', { n: stillChecking }), { type: 'info', duration: 15000, actions: [{ label: t('Try again'), run: () => { this.loadPreset(name); } }] });
 
     // Update active preset name
-    await fetch('/api/layouts-active', {
+    const act = await fetch('/api/layouts-active', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ name }),
     });
+    // B-225b (cure 1): the desktops HELD — the choice of the preset is not stored: said at the press, this page names no preset it did not store
+    if (act && act.status === 503) { let b = null; try { b = await act.json(); } catch { } const h = heldBodyOf(b); if (h) { noteStoreHeld(h); showToast(storeHeldWords(h), { type: 'error' }); return; } }
     this._currentName = name;
   }
 
-  // Delete a named preset
+  // Delete a named preset. B-225b (round wyzvr7567's cure 1): refused by a hold — said AT THE PRESS (inside the silent rungs too) and
+  // the preset stays in the list: the hub kept it → true when deleted
   async deletePreset(name) {
     try {
-      await fetch(`/api/layouts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      const res = await fetch(`/api/layouts/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (res && res.status === 503) { let b = null; try { b = await res.json(); } catch { } const h = heldBodyOf(b); if (h) { noteStoreHeld(h); showToast(storeHeldWords(h), { type: 'error' }); return false; } }
       delete this._savedPresets[name];
       if (this._currentName === name) this._currentName = null;
-    } catch {}
+      return true;
+    } catch { return false; }
   }
 
   // Refresh saved presets list from server

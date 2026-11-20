@@ -369,7 +369,8 @@ class App {
     // `store-held`; GET /api/stores/held at the boot and every reconnect); at its lift (`store-lifted`) each store's own reader fetches
     setStoreDoors({ importBackup: () => this._showTransferDialog?.('import'), rollback: () => this._showLayoutHistory?.() });
     // (the settings store imports nothing of the strip: suites load it bare) — a save a hold refused is SAID, the controls kept as left
-    this.settings.onHeld = (h, o) => { noteStoreHeld(h); if (o && o.refused && h && h.rung !== 'silent') showToast(t('Not now — VibeSpace cannot read your settings right now; this change was not saved.'), { type: 'error' }); };
+    // («Not now» said ONCE a hold — each refused row says it at the row; a toast per change was noise)
+    this.settings.onHeld = (h, o) => { noteStoreHeld(h); const once = h ? `${h.file}|${h.since}` : ''; if (o && o.refused && h && h.rung !== 'silent' && this._notNowSaid !== once) { this._notNowSaid = once; showToast(t('Not now — VibeSpace cannot read your settings right now; this change was not saved.'), { type: 'error' }); } };
     if (this.settings.held) noteStoreHeld(this.settings.held);   // a refusal its boot read met before this line
     onStoreLift('settings.json', () => { try { this.settings.refetch(); } catch { } });
     onStoreLift('custom-themes.json', () => { try { this._loadCustomThemes(); } catch { } });

@@ -27,13 +27,20 @@ export const heldBodyOf = (b) => (b && typeof b === 'object' && b.code === 'stor
 export const saidRung = (h) => !!h && h.rung !== 'silent';
 /** the hold of `file` this page knows (said), or null */
 export const storeHeld = (file) => HELD.get(String(file || '')) || null;
+// (round wyzvr7567's cure 1) the holds this page KNOWS in their silent rungs: never drawn (R7), but a PERSON'S OWN PRESS on such a
+// store is refused before it is applied and said at the act — a press is no background read. Let go at the lift (every lift says
+// `store-lifted`) and replaced by the hub's list at every reconnect
+const QUIET = new Map();
+/** the hold of `file` this page knows, said OR in its silent rungs, or null (a person's press asks this one) */
+export const storeHeldKnown = (file) => HELD.get(String(file || '')) || QUIET.get(String(file || '')) || null;
 
 /** A held answer or word. Said only past its silent rungs; `force` — a page that cannot work without saying it (the scratch
  *  surface). → true when the strip names it now */
 export function noteStoreHeld(held, { force = false } = {}) {
   if (!held || typeof held !== 'object' || typeof held.file !== 'string' || !held.file) return false;
-  if (!force && !saidRung(held) && !HELD.has(held.file)) return false;   // R7: the silent rungs are never said
+  if (!force && !saidRung(held) && !HELD.has(held.file)) { QUIET.set(held.file, { ...pick(held), rung: 'silent' }); return false; }   // R7: the silent rungs are never said (known, for a press)
   gen++;
+  QUIET.delete(held.file);
   HELD.set(held.file, { ...(HELD.get(held.file) || {}), ...pick(held), ...(force ? { rung: 'said' } : {}) });
   draw();
   return true;
@@ -43,7 +50,7 @@ export function noteStoreLifted(file) {
   const f = String(file || '');
   if (!f) return;
   gen++;
-  HELD.delete(f);
+  HELD.delete(f); QUIET.delete(f);
   draw();
   for (const fn of [...(LIFTS.get(f) || [])]) { try { fn(); } catch (e) { console.warn(`[store-held] a reader of ${f} failed at its lift`, e); } }
 }
@@ -62,8 +69,8 @@ export async function refreshStoreHolds() {
   const r = await fetchJson('/api/stores/held');
   if (!r || !Array.isArray(r.held) || asked !== gen) return false;
   const was = new Set(HELD.keys());
-  HELD.clear();
-  for (const h of r.held) if (h && typeof h.file === 'string' && h.file && (saidRung(h) || was.has(h.file) || (scratch === 'held' && h.file === 'layouts.json'))) HELD.set(h.file, { ...pick(h), rung: 'said' });
+  HELD.clear(); QUIET.clear();
+  for (const h of r.held) if (h && typeof h.file === 'string' && h.file) { if (saidRung(h) || was.has(h.file) || (scratch === 'held' && h.file === 'layouts.json')) HELD.set(h.file, { ...pick(h), rung: 'said' }); else QUIET.set(h.file, { ...pick(h), rung: 'silent' }); }
   draw();
   for (const f of was) if (!HELD.has(f)) for (const fn of [...(LIFTS.get(f) || [])]) { try { fn(); } catch (e) { console.warn(`[store-held] a reader of ${f} failed at its lift`, e); } }
   return true;

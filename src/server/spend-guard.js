@@ -65,6 +65,7 @@ const LOCK_RETRY_MS = 5 * 1000;           // the holder is most often the previo
 const LOCK_BEAT_MS = 30 * 1000;           // the keeper's heartbeat (async, unref'd)
 const LOCK_STALE_MS = 3 * LOCK_BEAT_MS;   // a holder only its heartbeat can vouch for is gone past this silence
 const HELD_ITEM = 'spend-ledger-held';    // the For-you item while another process keeps the ledger (resolved when it is this one's)
+const SETTINGS_ITEM = 'spend-settings-unread';   // B-225b (round wyzvr7567's cure 3): the For-you item while the settings are held — resolved at their lift
 const heldLocks = new Map();   // lock file → the token of the guard that keeps it — removed at exit when it still holds that token (ONE listener)
 let exitHooked = false;
 function releaseAtExit(f, token) {
@@ -450,8 +451,26 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // refusal that uses nothing up, judged against the real caps at the lift (persistence's settingsAgain → noteLimitsWritten)
   const SETTINGS_HELD = Symbol.for('vibespace.settings-held');
   const settingsHeld = () => { try { const h = serverSetting(SETTINGS_HELD); return h && typeof h === 'object' && typeof h.kind === 'string' ? h : null; } catch { return null; } };   // ONLY the hold's own fact (a reader that answers every key is no hold)
+  // (cure 3) its notice waits out the hold's SILENT rungs like the page's strip (a read that answers on its next try is no news), and
+  // the LIFT resolves it: settingsAgain says the limits moved (noteLimitsWritten) — the item closed, its stamp cleared (a later hold
+  // is told again), a notice still owed to For you's read dropped
+  const SETTINGS_SIG = 'inbox|*|settings-unread';
+  const settingsSilent = () => { const h = settingsHeld(); return !h || h.rung !== 'said'; };
+  let offSettingsLift = null;
+  const closeSettingsItem = () => { try { const ut = getUserTodos(); if (ut && typeof ut.idsWhere === 'function') for (const id of ut.idsWhere((i) => i && i.itemKey === SETTINGS_ITEM && i.status === 'open')) ut.setStatus(id, 'done', 'agent'); } catch { } };
+  const watchSettingsLift = () => {
+    if (offSettingsLift) return;
+    offSettingsLift = onLimitsWritten(() => {
+      if (settingsHeld()) return;
+      const off = offSettingsLift; offSettingsLift = null; if (off) off();
+      owedInbox.delete(SETTINGS_SIG);
+      if (state.notices[SETTINGS_SIG]) { delete state.notices[SETTINGS_SIG]; persist(); }
+      let ut0 = null; try { ut0 = getUserTodos(); } catch { ut0 = null; }
+      if (ut0 && typeof ut0.isHeldUnread === 'function' && ut0.isHeldUnread() && typeof ut0.whenRead === 'function') ut0.whenRead(closeSettingsItem, "the held settings' spending notice"); else closeSettingsItem();
+    });
+  };
   // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
-  const overCapNow = (now) => (heldBy ? [] : unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));   // B-ef83: a process that does not keep the ledger judges no waiting frame (the keeper counted them) — none pulled
+  const overCapNow = (now) => (heldBy ? [] : unreadable || settingsHeld() ? ['*'] : A.waitingOverCap(state, limits(), now));   // (B-225b: the settings HELD — no cap is known either: every waiting frame is held, none judged on the defaults)   // B-ef83: a process that does not keep the ledger judges no waiting frame (the keeper counted them) — none pulled
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');
   const ledgerFact = () => { if (heldBy) return { held: true, pid: heldBy.pid, host: heldBy.host }; if (unreadable) return { unreadable: true, error: unreadable.error }; const sh = settingsHeld(); return sh ? { settingsUnread: true, kind: sh.kind || null, code: sh.code || null } : null; };   // B-3b0f / B-ef83, handed to every layer (the batch too)
 
@@ -654,7 +673,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     const waitItemStands = !!(wait && wait.key) && waitItemOpen(wait.key);   // the ONE predicate (B-44f3: the owed notice judges the seam with it again at For you's read)
     const heldSig = 'held|' + inboxSig;
     if (waitItemStands && now - lastInbox > REFUSE_INBOX_MS && now - (Number(state.notices[heldSig]) || 0) > REFUSE_INBOX_MS) { state.notices[heldSig] = now; persist(); log(`[spend-guard] ${v.why}: the spending notice at ${wait.key} is not filed — its «messages waiting» item stands and speaks for that turn`); }
-    if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure)
+    if (v.why === 'settings-unread') watchSettingsLift();   // (cure 3: armed at the first refusal — the lift resolves what this hold said)
+    if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands && !(v.why === 'settings-unread' && settingsSilent())) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure); the held settings' notice only past the silent rungs (cure 3)
       const filed = fileInbox(text,
         `Reason: ${reason}\nIdentity: ${identity ? identity.name : 'unknown'}\nRefusal: ${v.why}\n`
         + (v.why === 'settings-unread' ? 'The settings data/settings.json could not be read: the spending limits are not known, so none run until it reads again. Nothing was used up; every waiting turn is judged again against your limits the moment it reads.\n\n'   // B-225b
@@ -665,7 +685,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
-        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'settings-unread' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
+        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' || v.why === 'settings-unread' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : v.why === 'settings-unread' ? SETTINGS_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -949,4 +969,4 @@ function noteLimitsWritten(prev, next) {
   for (const fn of [...limitsListeners]) { try { fn(prev || null, next || null); } catch { } }
 }
 
-module.exports = { create, onLimitsWritten, noteLimitsWritten, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry, LOCK_RETRY_MS, LOCK_BEAT_MS, LOCK_STALE_MS, HELD_ITEM };
+module.exports = { create, onLimitsWritten, noteLimitsWritten, REFUSE_LOG_MS, REFUSE_INBOX_MS, INBOX_KEY, NOTICE_TTL_MS, LEDGER_RECHECK_MS, noticeExpiry, LOCK_RETRY_MS, LOCK_BEAT_MS, LOCK_STALE_MS, HELD_ITEM, SETTINGS_ITEM };

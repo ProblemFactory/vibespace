@@ -123,6 +123,11 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     }
   }
   function syncCliConfig({ reason = 'boot' } = {}) {
+    // B-225b (round wyzvr7567's MUST 2 — a WRITE TO A PERSON'S OWN FILE takes its strict side): while the SETTINGS are held no
+    // row's value is the person's, so no CLI config is written; the lift's settings change runs this again with their values
+    let held = null;
+    try { held = serverSetting(Symbol.for('vibespace.settings-held')) || null; } catch { held = null; }
+    if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return { skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }; }
     warnRefusedValues();
     // ONE journal line per boot for every refused writer (refuseOwnerWrite
     // latches it); without the server's verdict, this module says it itself.

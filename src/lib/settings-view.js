@@ -239,6 +239,12 @@ export const IN_FORCE_UNSET = 'unset';
  *  until the next edit | 'failed'; a Spending row adds the number in force (`inForce`, see inForceOf). '' = nothing. */
 /** THE WINDOW'S FOOT (B-225b, 主开发 2026-11-20 12:54Z, pictures A4 / B1): «every change saves as you make it» is false while the
  *  settings are HELD — the foot then says nothing (the strip and the rows say the hold); otherwise its rule. PURE. */
+/** B-225b (round wyzvr7567's cure 1): a Reset All a hold refused, said after its confirm — PURE (`heldWords`: the page's ONE sentence
+ *  of a hold, utils.js storeHeldWords); no hold named (a read that never answered): the settings were not read yet */
+export function resetRefusedWords(held, t = (s) => s, heldWords = null) {
+  if (held && typeof heldWords === 'function') return t('Not reset: {why}', { why: heldWords(held) });
+  return t('Not reset: the settings have not been read from VibeSpace yet — nothing was changed.');
+}
 export function footWords(held, t = (s) => s) { return held ? '' : t('Every change here saves as you make it — there is nothing to press at the end.'); }
 export function saveMarkWords(state, t = (s) => s, { inForce = null, refused = null, held = false } = {}) {
   // the exit check (主开发 17:04Z): a value the server set aside — the reason AT THE ROW, by its code, in the page's language

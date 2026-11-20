@@ -128,6 +128,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return true;
   };
   /** a route whose store may be held: its refusal answered by name, anything else thrown as before */
+  const asideOf = new WeakMap();   // an import's request → the damaged stores it set aside (B-225b)
   const guarded = (fn) => function (req, res, next) {
     let r;
     try { r = fn.call(this, req, res, next); } catch (e) { if (storeRefused(res, e)) return undefined; throw e; }
@@ -166,7 +167,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // no sync read and no mkdir; '' (a file that could not be read) parses to the empty record as before
   function readLayouts(preread) {
     if (_layoutsCache) return _layoutsCache;
-    if (!_layoutsRead) { _layoutsRead = true; if (preread === undefined) ensureDir(dataDir); layoutsHold.readAtStart(preread); }   // (B-225b: ONE start read, through the hold)
+    // (B-225b: ONE start read, through the hold — the flag only AFTER it returned: a folder check that throws (a stale or dead data
+    // mount) IS that read's failure, a hold on the ladder, never «read and empty» — round wyzvr7567's MUST 1)
+    if (!_layoutsRead) { let pre = preread; if (pre === undefined) { try { ensureDir(dataDir); } catch (e) { pre = { error: e }; } } layoutsHold.readAtStart(pre); _layoutsRead = true; }
     const doc = layoutsHold.answer();   // R2: HELD ⇒ store_unread by name — never the empty layout under its name
     layoutsHold.takeText();
     _layoutsCache = doc === undefined ? LAYOUTS_EMPTY() : doc;   // NOT THERE (R6): the empty layout in memory, nothing written
@@ -375,6 +378,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return n;
   }
   function writeLayouts(data) {
+    if (!_layoutsRead) readLayouts();   // the start read first (a store never read is no store — MUST 1): held ⇒ refused by name
     layoutsHold.refuseIfHeld('this layout change');   // B-225b R1: the desktops HELD — nothing replaces them (a preset, a restore, an import)
     // THE CHOKE POINT keeps no record's words in a window title (above) — IN PLACE: the ws layout-sync handler relays
     // the SAME window objects it hands here, so the frame other clients receive carries the generic title too
@@ -701,13 +705,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
   function readBookmarks() {
     if (_bookmarksCache) return _bookmarksCache;
-    if (!_bookmarksRead) { _bookmarksRead = true; ensureDir(dataDir); bookmarksHold.readAtStart(); }
+    if (!_bookmarksRead) { let pre; try { ensureDir(dataDir); } catch (e) { pre = { error: e }; } bookmarksHold.readAtStart(pre); _bookmarksRead = true; }   // (the flag after the start read: MUST 1)
     const v = bookmarksHold.answer();   // R2: HELD ⇒ store_unread by name
     bookmarksHold.takeText();
     _bookmarksCache = v === undefined ? BOOKMARKS_DEFAULT() : v;
     return _bookmarksCache;
   }
   function writeBookmarks(data) {
+    if (!_bookmarksRead) readBookmarks();   // the start read first (MUST 1): held ⇒ refused by name
     ensureDir(dataDir);
     try { bookmarksHold.write(data); }   // R1: refuses a held list by name; NOT THERE ⇒ created exclusively
     catch (e) { if (e && e.code === 'store_appeared') { _bookmarksCache = null; try { broadcast({ type: 'bookmarks-updated', bookmarks: readBookmarks() }); } catch { /* said by the read */ } } throw e; }
@@ -739,7 +744,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   function readCustomThemes() {
     if (_customThemesCache) return _customThemesCache;
-    if (!_customThemesRead) { _customThemesRead = true; themesHold.readAtStart(); }
+    if (!_customThemesRead) { themesHold.readAtStart(); _customThemesRead = true; }
     const v = themesHold.answer();   // R2: HELD ⇒ store_unread by name
     themesHold.takeText();
     _customThemesCache = v === undefined ? {} : v;
@@ -747,6 +752,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
 
   function writeCustomThemes(data) {
+    if (!_customThemesRead) readCustomThemes();   // the start read first (MUST 1): held ⇒ refused by name
     ensureDir(dataDir);
     // q-059 r5 (lane cache-warmth-ramp r3): the ONE writer of the store — the POST save, the delete, the config import — drops a
     // value the warmth derivation SUPERSEDED (a bundle exported on .374, an old tab's save) with the same PURE rule the one-shot
@@ -1010,7 +1016,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // and the next write persisted it)
     // B-225b: THROUGH THE HOLD — read once at the start; a HELD list answers the refusal by name (store_unread) and nothing else (R2:
     // never the defaults under its name — the release served them and the next write saved them over the person's list)
-    if (!_userStateRead) { _userStateRead = true; userStateHold.readAtStart(); }
+    if (!_userStateRead) { userStateHold.readAtStart(); _userStateRead = true; }
     const parsed = userStateHold.answer();
     const rawText = userStateHold.takeText();
     if (parsed === undefined) { _userStateCache = { ...USER_STATE_DEFAULT }; return _userStateCache; }   // NOT THERE (R6): the defaults in memory, nothing written
@@ -1173,11 +1179,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     onSaid: (h) => { console.warn(`[settings] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the settings are HELD: every row runs on its default, nothing unattended spends, nothing is written over them`); storeWord('store-held', h); },
   });
   /** while HELD: every row on its default — a frozen object that is NOT the cache, the hold's facts under SETTINGS_HELD */
-  const heldSettingsView = (h) => Object.freeze(Object.defineProperty({}, SETTINGS_HELD, { value: Object.freeze({ ...h }), enumerable: false }));
+  // (round wyzvr7567's MUST 2: the rows that guard money, a safety ask, a vendor call or a write to a person's own file take their
+  // STRICT side in the held view — src/settings-held-strict.js; every other row runs on its default)
+  const heldSettingsView = (h) => Object.freeze(Object.defineProperty({ ...require('../settings-held-strict.js').strictValues() }, SETTINGS_HELD, { value: Object.freeze({ ...h }), enumerable: false }));
 
   function readSettings() {
     if (_settingsCache) return _settingsCache;
-    if (!_settingsRead) { _settingsRead = true; ensureDir(dataDir); settingsHold.readAtStart(); }
+    if (!_settingsRead) { let pre; try { ensureDir(dataDir); } catch (e) { pre = { error: e }; } settingsHold.readAtStart(pre); _settingsRead = true; }   // (the flag after the start read: MUST 1 — a dead data mount holds the settings, the spend guard refuses)
     const h = settingsHold.held();
     if (h) return heldSettingsView(h);
     const v = settingsHold.answer();
@@ -1193,6 +1201,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   function settingsAgain(why) {
     _settingsCache = null;
     try { readSettings(); } catch (e) { console.warn(`[settings] the settings could not be read again (${why}): ${(e && e.message) || e}`); return; }
+    if (settingsHold.held()) return;   // still HELD: no lift — no owed return is tried, nothing is said lifted (its own ladder reads it)
     console.log(`[settings] the settings are read again (${why})`);
     for (const fn of _settingsLiftHooks) { try { fn(); } catch (e) { console.warn('[settings] a lift hook failed:', e && e.message); } }
     const data = readSettings(), spend = spendOf(data);
@@ -1253,9 +1262,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     try { v = SH.readNow(SETTINGS_FILE, { valid: (x) => !!x && typeof x === 'object' && !Array.isArray(x), what: 'reading the settings again' }); }
     catch (e) { console.warn(`[settings] the settings could not be read again after the migrations — the copy in memory is kept: ${(e && e.message) || e}`); return; }
     if (v === undefined) return;
-    _settingsCache = v; try { settingsHold.set(v); } catch { /* not held */ }
+    _settingsCache = v; _settingsRead = true; try { settingsHold.adoptRead(v); } catch { /* held since: its own ladder reads it */ }   // (the file is THERE now: a start read «missing» no longer makes the next write an exclusive create that meets it)
   };
-  router.settingsHeld = () => settingsHold.held();
+  router.settingsHeld = () => { if (!_settingsRead) { try { readSettings(); } catch { /* the hold says it */ } } return settingsHold.held(); };   // (asked before any read: the START read first — never «no hold» for settings never read, MUST 1)
   /** lane browser-propose: a SERVER act that writes a setting the user approved — the PATCH route's own merge through the ONE writer (atomic file, `settings-updated` broadcast to every client). */
   router.patchSettings = (patch) => {
     if (!patch || typeof patch !== 'object') throw new Error('patchSettings: expected an object');
@@ -1418,7 +1427,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   const damagedReplace = (req, res, section) => {
     const h = STORE_SECTIONS[section].hold.held();
     if (!h || h.kind !== 'damaged') return true;   // not damaged: the door's own refusal (held) or its plain road (read)
-    if (require('../write-origin.js').pressBearer(req.headers)) { res.status(403).json({ error: `only the person, on this VibeSpace page, replaces ${h.file} — it could not be read (damaged)`, code: 'store_person_only', held: h }); return false; }
+    // THE TREE'S ONE VERDICT for a write from the owner's page (src/write-origin.js ownerPageWhy — round wyzvr7567's cure 2): no
+    // bearer AND the strict page verdict, so a header-less script is no person either (it would set the person's bytes aside)
+    const why = require('../write-origin.js').ownerPageWhy(req);
+    if (why) { res.status(403).json({ error: `only the person, on this VibeSpace page, replaces ${h.file} — it could not be read (damaged)`, code: 'store_person_only', why, held: h }); return false; }
     try { const aside = STORE_SECTIONS[section].hold.setAside(); console.warn(`[persistence] ${h.file} was damaged — set aside as ${path.basename(aside)} for a person's whole replace`); }
     catch (e) { res.status(500).json({ error: `${h.file} could not be set aside (${(e && (e.code || e.message)) || e}) — nothing was replaced`, code: 'store_set_aside_failed' }); return false; }
     return true;
@@ -1577,7 +1589,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // B-225b R8 + R5: every named section's hold asked FIRST — a held store that may answer later (unreadable, not allowed) refuses
     // the import WHOLE by name; a DAMAGED one is the person's whole replace: its bytes set aside under a dated name, then the section
     // lands as the store's first write
-    const setAsideSaid = [];
+    const setAsideSaid = []; asideOf.set(req, setAsideSaid);   // (a later throw names them — the wrapper below)
     { const hs = heldSections([].concat(sections).filter((n) => file.sections[n] !== undefined)), later = hs.filter((h) => h.kind !== 'damaged');   // ([].concat: the list as read, whatever its shape — a copy that reads it two ways still fails by ITS law)
       if (later.length) return res.status(503).json({ error: `the import was refused: ${later.map((h) => h.file).join(', ')} could not be read — nothing was imported`, code: 'store_unread', held: later });
       for (const h of hs) { if (!damagedReplace(req, res, h.section)) return; setAsideSaid.push(h.file); } }
@@ -1588,6 +1600,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       applied.push(name);
     };
     apply('settings', (d) => { if (d && typeof d === 'object') writeSettings(d); });
+    // B-225b (round wyzvr7567's cure 4): an import that REPLACED damaged settings ended their hold — that IS the lift: the setting
+    // holds' owed returns are judged against what was imported and land (or end), the waiting spend is judged again, every page told
+    if (setAsideSaid.includes('settings.json')) settingsAgain('a person\'s import replaced the damaged settings');
     apply('customThemes', (d) => { if (d && typeof d === 'object') { writeCustomThemes(d); } });
     apply('layouts', (d) => { if (d && typeof d === 'object') writeLayouts(d); });
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d, { whole: true }); });   // lane sidebar-echo-order r10: a person's import is an ACT at its time — an act made before it, re-sent after, does not land over it
@@ -1655,6 +1670,20 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // B-225b: EVERY door of the desktops and the custom themes answers a held store BY NAME (503 store_unread) — its handlers wrapped
   // once, here, by path (the conversation list's and the bookmarks' doors say it in their own handlers)
   for (const layer of router.stack) if (layer.route && /^\/api\/(layouts|layouts-active|layouts-autosave|custom-grids|layout-history|custom-themes|settings)(\/|$)/.test(layer.route.path)) for (const l of layer.route.stack) l.handle = guarded(l.handle);
+  // B-225b: an import that STOPS after it set a damaged store's bytes aside says so — the person's bytes are under a dated name, kept
+  // whole, and the store now starts empty: never a bare failure that leaves them looking for their file
+  for (const layer of router.stack) if (layer.route && layer.route.path === '/api/config/import') for (const l of layer.route.stack) {
+    const fn = l.handle;
+    l.handle = function (req, res, next) {
+      try { return fn.call(this, req, res, next); }
+      catch (e) {
+        const aside = asideOf.get(req) || [];
+        if (!aside.length || res.headersSent) throw e;
+        res.status((e && e.status) || 500).json({ error: `the import stopped (${(e && (e.code || e.message)) || e}) — ${aside.join(', ')} had been set aside under a dated name first (kept whole, nothing deleted)`, code: (e && e.code) || 'import_failed', setAside: aside });
+        return undefined;
+      }
+    };
+  }
   return router;
 }
 
