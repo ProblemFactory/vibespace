@@ -2675,6 +2675,30 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
           '⑪ (k) the integration switch reads OFF while the settings are held (the strict table — a person-file row: no NEW spawn gets the context delivery or the agent tools, the running conversations\' deliveries answer as with it off; ONE reading, integrationEnabled) — a person who turned it off is never overridden by the default ON', ivRow);
         const XST = mutantCopies('swc-strict-iv', REPO).load(SHREL, anchored(SHSRC, /^ {2}'agents\.vibespaceIntegration': row\('person-file', false, [^\n]*\n/m, '', 'strict-iv-cut'), 'strict-iv-cut');
         ok(XST.strictValues()['agents.vibespaceIntegration'] === undefined && SCH['agents.vibespaceIntegration'] && SCH['agents.vibespaceIntegration'].default !== false, 'CONTROL (the strict row cut, in a copy): the held view has no value for the switch — it reads the default ON (new spawns get the context and the tools of a person who turned them off) — red', { def: SCH['agents.vibespaceIntegration'] && SCH['agents.vibespaceIntegration'].default });
+        // (主开发 r565) THE ARCHIVE VERB WHILE THE LIST IS HELD: the reach verdict FIRST, the held refusal after it — the held refusal's
+        // label is the target's NAME (more than the caller's own reference), so a held list never tells a caller about a conversation
+        // it may not see: a caller the key does not reach gets the reach refusal and the list is not asked; a caller it reaches gets
+        // the hold by name (store_unread, the target named, nothing ended or archived). RED (in a copy): the held check back before the
+        // reach — a caller with no reach is answered the held list's refusal under the conversation's name
+        const COREL = 'src/server/conversation-ops.js', COSRC = fs.readFileSync(path.join(REPO, COREL), 'utf8');
+        const heldArchive = async (OPS) => {
+          let listAsked = 0; const archived = [];
+          const V = OPS.automationVerbs({ activeSessions: new Map(), groupsOf: () => [], isArchived: () => { listAsked++; return null; }, archive: (k) => { archived.push(k); return { ok: true, already: false }; }, asksOf: () => [],
+            deadOf: (t) => (/^(claude:)?gone7$/.test(t) ? { conversationId: 'gone7', sessionKey: 'claude:gone7', name: 'a private name', groups: [] } : null) });
+          const caller = { conversationId: 'c0ffee', sessionKey: 'claude:c0ffee', name: 'the caller', live: true, groups: [] };
+          const no = await V['conversations.archive']({ target: 'gone7' }, { caller, keyId: 'ak-000000000001', reach: () => ({ ok: false, code: 'not_granted', why: 'the key does not reach that conversation' }) });
+          const askedForNo = listAsked;
+          const yes = await V['conversations.archive']({ target: 'gone7' }, { caller, keyId: 'ak-000000000001', reach: () => ({ ok: true, by: 'opener' }) });
+          return { no: { code: no.code, why: no.why }, askedForNo, yes: { code: yes.code, target: yes.target, why: yes.why }, archived: archived.length };
+        };
+        const ha = await heldArchive(require(path.join(REPO, COREL)));
+        ok(ha.no.code === 'not_granted' && ha.askedForNo === 0 && ha.yes.code === 'store_unread' && ha.yes.target === 'a private name' && /nothing was ended or archived/.test(ha.yes.why) && ha.archived === 0,
+          '⑪ (k) (主开发 r565) the archive verb while the conversation list is held: the REACH verdict first — a caller the key does not reach gets the reach refusal and the held list is never asked; a caller it reaches gets the hold BY NAME (store_unread, the target named) — nothing ended or archived', ha);
+        const HELD_BLOCK = /^ {6}\/\/ B-225b R3: the archived list HELD[^\n]*\n {6}\/\/[^\n]*\n {6}\/\/[^\n]*\n( {6}if \(isArchived\(f\.sessionKey\) === null\) return \{ ok: false, code: 'store_unread'[^\n]*\n)/m;
+        const heldLine = (COSRC.match(HELD_BLOCK) || [])[1] || '';
+        const XCO = mutantCopies('swc-archive-held-first', REPO).load(COREL, anchored(anchored(COSRC, HELD_BLOCK, '', 'archive-held-cut'), '      const v = reach(targetOf({ conversationId: f.conversationId,', heldLine + '      const v = reach(targetOf({ conversationId: f.conversationId,', 'archive-held-first'), 'archive-held-first');
+        const xha = await heldArchive(XCO);
+        ok(xha.no.code === 'store_unread' && xha.askedForNo === 1, 'CONTROL (the held check back BEFORE the reach, in a copy): a caller the key does not reach is answered the held list\'s refusal — the list asked for a conversation it may not see (red)', xha);
       }
     }
     // (h) THE ONE CHOKE (cut 7 — R1): every write site of src/routes/persistence.js, read on acorn's tree. A held store's file is

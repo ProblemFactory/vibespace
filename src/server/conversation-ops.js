@@ -587,11 +587,12 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       }
       const label = f.name || args.target;
       if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', target: label };
-      // B-225b R3: the archived list HELD — refused by name BEFORE anything is ended (an archive that ended the conversation and then
-      // could not write the list would leave it ended and listed)
-      if (isArchived(f.sessionKey) === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — nothing was ended or archived; ask again once it is read', target: label };
       const v = reach(targetOf({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups, ...require('./groups-hold.js').fact() }, f.inherited !== undefined ? f.inherited : lineageOfIds(f.groups || [])));   // lane lg-group-parents U3d
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
+      // B-225b R3: the archived list HELD — refused by name BEFORE anything is ended (an archive that ended the conversation and then
+      // could not write the list would leave it ended and listed); AFTER the reach verdict (主开发 r565): its label is the target's
+      // name, so a held list never tells a caller about a conversation it may not see
+      if (isArchived(f.sessionKey) === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — nothing was ended or archived; ask again once it is read', target: label };
       let asks; try { asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, target: label }; throw e; }   // B-44f3: For you held unread — its asks are unknown, never «none»
       if (asks.length && !args.resolveAsks) return { ok: false, code: 'asks_open', why: `${asks.length} open For-you ask${asks.length === 1 ? '' : 's'} of that conversation (${asks.join(', ')}) — the owner answers them, or pass resolveAsks`, asks, target: label };
       const discountAsks = !!args.resolveAsks;   // the archive's recipe: the asks it resolves are no reason to refuse
