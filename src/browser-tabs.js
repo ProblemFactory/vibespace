@@ -337,8 +337,10 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
   const wn = isObj(windows) ? windows : {};
   const g = tabGroups({ tabs: list.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: wn[idKey(x.targetId)] })), leases, me, human, front: frontId }, tIn);
   const byId = new Map(rows.map((r) => [r.targetId, r]));
+  // B-e674 unit 2 (its round's should 2): a foreign front with no tab of this list to mark is said in general words
+  const frontNote = isObj(front) && front.state === 'foreign' && !(frontId && byId.has(frontId)) ? frontNoteText(tIn) : null;
   const groupOf = new Map(); for (const gr of g.groups) for (const id of gr.targetIds) groupOf.set(id, gr.key);
-  return { rows: g.order.map((id) => ({ ...byId.get(id), group: groupOf.get(id) })), counts, anyAgent: counts.agent > 0, groups: g.groups, grouped: g.grouped, blanks: g.blanks };
+  return { rows: g.order.map((id) => ({ ...byId.get(id), group: groupOf.get(id) })), counts, anyAgent: counts.agent > 0, groups: g.groups, grouped: g.grouped, blanks: g.blanks, frontNote };
 }
 
 // ── lane browser-tabs-by-window (the owner, 2026-10-08 "好做吧"): THE TABS BY WINDOW ─────────────────────────────────
@@ -423,6 +425,13 @@ function tabsCountText({ order = [], blanks = 0 } = {}, tIn) {
 // CDP has no move, a close loses a page, and an activation changes what someone sees.
 /** The most window-mates one read asks (a window of more names its front only when the asked ones answer it). */
 const FRONT_READS_MAX = 8;
+/** B-e674 unit 2 (its round's read): ONE front read's bound — shorter than a page reader's own (2.5 s), so a hung page holds the
+ *  tab-owners record back at most ~2 s (the view's own tab, then its mates at once). */
+const FRONT_READ_MS = 1000;
+// THE READ IS THE PAGE'S OWN WORD (its round's should 3): `document.visibilityState` is evaluated in the page's world, and a page
+// can override it. A page that lies `visible` beside the real front makes two answers (⇒ unread, no chip); alone, with the view's
+// own tab not asked first, it marks ITS chip «In front». The worst it can cause is a wrong chip and one journal line on that view:
+// no title or address of another tab, and NEVER an act — nothing may be moved, closed or activated on this verdict, ever.
 const FRONT_STATES = Object.freeze(['none', 'single', 'unread', 'own', 'foreign']);
 /**
  * `windowId` = this view's window (the viewed holder's: a lease's stamped window, the person's own tab's window);
@@ -450,6 +459,11 @@ function frontVerdict({ windowId = null, windows = {}, visible = [], owners = {}
   return { state: word === (human ? 'you' : 'agent') ? 'own' : 'foreign', windowId: w, targetId: vis[0], owner: word, mates: mates.length };
 }
 /** A FOREIGN front tab's words: its chip's short line (`mark`) and its tip (whose it is, then what this view does about it). */
+/** A FOREIGN front this view does NOT list (the bridge sends its state alone — no id, no name, no title): one general line. */
+function frontNoteText(tIn) {
+  const t = tOf(tIn);
+  return { text: t('Another tab is in front of this window'), tip: t('A tab this view does not list is in front of this window — the picture here stays this view’s own tab; nothing is moved or closed for it') };
+}
 function frontText(v, { name = '' } = {}, tIn) {
   const t = tOf(tIn);
   if (!isObj(v) || v.state !== 'foreign') return { mark: '', tip: '' };
@@ -590,4 +604,5 @@ module.exports = {
   ownerMarkText, ownerTipText, tabRefusalText, userActsSentence, noteUserActIn, agentTabLines,
   tabGroups, tabsCountText, windowLabelText, isBlankTab, // lane browser-tabs-by-window: the tabs by window, a window's spare blank folded
   FRONT_READS_MAX, FRONT_STATES, frontVerdict, frontText, // B-e674 unit 1: the front of this view's window, said
+  FRONT_READ_MS, frontNoteText, // B-e674 unit 2: one front read's bound; the unlisted foreign front's general line
 };

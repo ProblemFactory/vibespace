@@ -4329,16 +4329,31 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const v0 = TBS.frontVerdict({ windowId: viewWindow, windows, visible: [], owners: words, human });
     if (v0.state !== 'unread') return v0; // no window known, or one tab in it: nothing can stand in front
     const mates = Object.keys(windows).filter((id) => WIN.windowIdOf(windows[id]) === v0.windowId);
-    const ask = async (id) => {
-      try { const r = await (typeof visibilityOfFn === 'function' ? visibilityOfFn(rec.cdpUrl, id) : require('./browser-viewport.js').visibilityOf(rec.cdpUrl, id)); return r && r.ok ? String(r.visibility || '') : null; } catch { return null; }
+    const ask = async (id) => { // a read that throws, or answers no `ok`, is no answer (⇒ never a guessed front)
+      const o = { timeoutMs: TBS.FRONT_READ_MS }; // B-e674 unit 2: shorter than the reader's own bound — one hung page delays the record ≤ ~2 s
+      try { const r = await (typeof visibilityOfFn === 'function' ? visibilityOfFn(rec.cdpUrl, id, o) : require('./browser-viewport.js').visibilityOf(rec.cdpUrl, id, o)); return r && r.ok ? String(r.visibility || '') : null; } catch { return null; }
     };
     const mine = act && mates.includes(act) ? act : human && h && h.ownTab && mates.includes(String(h.ownTab).toUpperCase()) ? String(h.ownTab).toUpperCase() : null;
     let visible = [];
     if (mine && (await ask(mine)) === 'visible') visible = [mine];
     else { const rest = mates.filter((id) => id !== mine).slice(0, TBS.FRONT_READS_MAX); const ans = await Promise.all(rest.map(ask)); visible = rest.filter((id, i) => ans[i] === 'visible'); }
+    // B-e674 unit 2 (its round's should 4): a tab's window is KEPT for its life (tabWindowsOf), and a person can drag a tab into
+    // another window on a headed browser — the ONE tab about to be named in front has its window read again now; elsewhere ⇒ it
+    // is not this window's front (the kept window follows it)
+    if (visible.length === 1 && visible[0] !== mine) {
+      const now0 = await refreshTabWindow(rec, visible[0]);
+      if (now0 != null && now0 !== WIN.windowIdOf(v0.windowId)) { windows[visible[0]] = now0; visible = []; }
+    }
     const v = TBS.frontVerdict({ windowId: viewWindow, windows, visible, owners: words, human });
     sayFront(p, bk, v, whose);
     return v;
+  }
+  /** One tab's window, read NOW (never the kept one), and kept again — null when it did not answer (the kept one stands). */
+  async function refreshTabWindow(rec, id) {
+    let w = null;
+    try { w = WIN.windowIdOf(await (typeof windowOfFn === 'function' ? windowOfFn(rec.cdpUrl, id) : require('./browser-viewport.js').windowOf(rec.cdpUrl, id))); } catch { w = null; }
+    if (w != null) tabWindowKept.set(`${rec.cdpUrl}|${WIN.instanceOf(rec) || ''}|${id}`, w);
+    return w;
   }
   function sayFront(p, bk, v, whose) {
     if (!v || (v.state !== 'foreign' && v.state !== 'own')) return; // unread: nothing known, nothing said

@@ -564,15 +564,17 @@ else await (async () => {
       const base = { type: 'tab-owners', owners: { [A]: 'agent', [E]: 'other', [N]: 'orphan' }, titles: {}, names: { [E]: { sessionId: null, name: '企业助手' } }, windows: { [A]: WA, [E]: WA, [N]: WA }, leases: [{ windowId: WA, word: 'agent', sessionId: null, name: null }], mediated: false, adoptable: false };
       const frontE = { state: 'foreign', windowId: WA, targetId: E, owner: 'other' }, frontN = { state: 'foreign', windowId: WA, targetId: N, owner: 'orphan' };
       const feedOf = (rec) => `const w = L().ws(); w.onmessage({ data: ${S(S({ type: 'tabs', tabs }))} }); w.onmessage({ data: ${S(S(rec))} });`;
-      const chips = `await new Promise((r) => setTimeout(r, 300)); const root = L().el(); return [...root.querySelectorAll('.browser-live-tabrow-list > .browser-live-tabchip')].filter((e) => e.style.display !== 'none').map((e) => ({ id: e.dataset.target.slice(0, 1), front: e.classList.contains('front-foreign'), here: (e.querySelector('.browser-live-tabchip-here') || {}).textContent || '', tip: e.title }));`;
+      // B-e674 unit 2 (its round's should 5): no fixed sleep — the read WAITS for the chips it expects (≤ 2 s), then says what it saw
+      const chipsUntil = (cond) => `const read = () => [...L().el().querySelectorAll('.browser-live-tabrow-list > .browser-live-tabchip')].filter((e) => e.style.display !== 'none').map((e) => ({ id: e.dataset.target.slice(0, 1), front: e.classList.contains('front-foreign'), here: (e.querySelector('.browser-live-tabchip-here') || {}).textContent || '', tip: e.title }));
+        for (let i = 0; i < 80; i++) { const a = read(); if (${cond}) return a; await new Promise((r) => setTimeout(r, 25)); } return read();`;
       await ev('const w = live(); const el = w.element; el.style.width = "900px"; el.style.height = "620px"; window.dispatchEvent(new Event("resize")); return true;');
-      const f1 = await ev(feedOf({ ...base, front: frontE }) + chips);
+      const f1 = await ev(feedOf({ ...base, front: frontE }) + chipsUntil("a.some((x) => x.id === 'E' && x.front)"));
       const cE = (f1 || []).find((x) => x.id === 'E');
       ok(!!cE && cE.front && cE.here === '在此窗口最前面' && cE.tip.includes('企业助手 的标签页在此窗口最前面') && cE.tip.includes('不会为它移动或关闭任何标签页') && f1.filter((x) => x.front).length === 1,
         '⑨ zh: 企业助手\'s tab in front of this window — ITS chip says «在此窗口最前面», its tip whose it is and that nothing is moved or closed', S(f1));
-      const f0 = await ev(feedOf(base) + chips);
+      const f0 = await ev(feedOf(base) + chipsUntil('!a.some((x) => x.front)'));
       ok(Array.isArray(f0) && !f0.some((x) => x.front) && !f0.some((x) => x.id === '9'), '⑨ CONTROL: the same record without the verdict marks no chip, and the blank nobody holds stays hidden', S(f0));
-      const f2 = await ev(feedOf({ ...base, front: frontN }) + chips);
+      const f2 = await ev(feedOf({ ...base, front: frontN }) + chipsUntil("a.some((x) => x.id === '9' && x.front)"));
       const cN = (f2 || []).find((x) => x.id === '9');
       ok(!!cN && cN.front && cN.tip.includes('无人持有的标签页在此窗口最前面'), '⑨ zh: a blank NOBODY holds in front of this window is drawn and marked', S(f2));
       // B-e674 (the coordinator's r608): THE ROW AT 390 AND 1280 px, JUDGED — not only pictured. Line 97's 390 picture folded

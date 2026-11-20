@@ -8105,6 +8105,7 @@ label.chan-cap-row { cursor: default; }
 .browser-live-tabchip.bare .browser-live-tabchip-here, .browser-live-tabchip.bare .browser-live-tabchip-mark { display: none; } /* B-e674 (r618): a chip too narrow for its parts shows them not at all, never half */
 .browser-live-tabchip.front-foreign { border-color: var(--yellow); } /* B-e674 unit 1: a tab that is not this view's holder's is in front of its window */
 .browser-live-tabchip.front-foreign .browser-live-tabchip-here { color: var(--warn-text); }
+.browser-live-tabrow-front { color: var(--warn-text); } /* B-e674 unit 2: an unlisted tab in front of this window, said in general words */
 .browser-live-tabchip.watched { border-color: var(--accent); border-style: dashed; } /* lane browser-windows (U3): the tab THIS view watches (the agent's own stays .active) */
 .browser-live-watch-line { display: flex; align-items: center; gap: 8px; padding: 3px 8px; flex-shrink: 0; font-size: 11px; line-height: 1.4; color: var(--text); background: color-mix(in srgb, var(--accent) 10%, transparent); border-bottom: 1px solid var(--border); overflow-wrap: anywhere; } /* lane browser-windows: the watched tab / the tab on show that paints nothing (U0b) */
 .browser-live-watch-text { flex: 1 1 auto; min-width: 0; }

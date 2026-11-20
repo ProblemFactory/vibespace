@@ -7415,6 +7415,8 @@ export default {
   "Your tab": "你的标签页",
   // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
   "In front": "最前面",
+  "Another tab is in front of this window": "另一个标签页在此窗口最前面",
+  "A tab this view does not list is in front of this window — the picture here stays this view’s own tab; nothing is moved or closed for it": "一个本视图未列出的标签页在此窗口最前面——这里的画面仍是本视图自己的标签页；不会为它移动或关闭任何标签页",
   "{name}’s tab": "{name} 的标签页",
   "Another conversation’s tab": "其他对话的标签页",
   "A tab nobody holds": "无人持有的标签页",

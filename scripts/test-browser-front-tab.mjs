@@ -14,7 +14,10 @@
 //      command); RED CONTROL — the keeper copy without the read answers no front;
 //   ③ THE REAL BRIDGE over a stand-in upstream: `tab-owners` carries the front of a tab this view lists (only its state
 //      otherwise); the viewed tab going behind its window, and showing again, asks the owners again;
-//   ④ the words: every key frontText asks t() for has a zh and a ja row.
+//   ④ the words: every key frontText / frontNoteText (and the fold's «In front») asks t() for has a zh and a ja row;
+//   ⑤ the fit (r608): a foreign front is never folded by width — the own chip cuts first, else the fold names it (6 cells,
+//      a RED control, the client's 8 pins);
+//   ⑥ the client's wiring (unit 2): the record kept, handed to the row and the pane, drawn, cleared, never folded — 9 pins + a RED control.
 // ~3 s, port 0, scratch dirs only, no real browser, no vendor call.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -91,6 +94,11 @@ console.log('— ① PURE: frontVerdict over every cell, its words, the row draw
   const mUn = TT.tabRowModel({ tabs, owners: ow2, windows: wn2, leases, front: { state: 'unread' } });
   const mBare = TT.tabRowModel({ tabs, owners: ow2, windows: wn2, leases, front: { state: 'foreign' } }); // the bridge's answer for a tab this view does not list
   ok([mOwn, mUn, mBare].every((m) => !m.rows.some((r) => r.front) && !m.rows.some((r) => r.targetId === D)), 'its own tab in front, an unread front and a foreign front without a tab id draw nothing new');
+  // B-e674 unit 2 (its round's should 2): a foreign front this view does NOT list is said in general words, no name, no title
+  const mNote = TT.tabRowModel({ tabs, owners: ow2, windows: wn2, leases, front: { state: 'foreign' } });
+  const mNote2 = TT.tabRowModel({ tabs, owners: ow2, windows: wn2, leases, front: { state: 'foreign', targetId: T(0x77), owner: 'other' } });
+  ok(!!(mNote.frontNote && mNote.frontNote.text === 'Another tab is in front of this window' && /does not list/.test(mNote.frontNote.tip) && mNote2.frontNote && !m1.frontNote && !mOwn.frontNote && !mUn.frontNote && !m0.frontNote),
+    'the row says «Another tab is in front of this window» for a foreign front it cannot mark (no id, or a tab it does not list) — and never beside a marked chip, its own front, an unread one or none');
   const gt = [{ targetId: A, url: 'https://a.example/', active: true, windowId: 1 }, { targetId: D, url: 'about:blank', windowId: 1 }, { targetId: E, url: 'about:blank', windowId: 1 }];
   const g1 = TT.tabGroups({ tabs: gt, front: D }), g0 = TT.tabGroups({ tabs: gt });
   ok(g1.order.includes(D) && !g1.order.includes(E) && g1.blanks === 1 && g0.blanks === 2 && !g0.order.includes(D), 'tabGroups: the tab in front of a window is never folded as a spare blank (CONTROL: without it both blanks fold)', { g1: g1.order, g0: g0.order });
@@ -160,7 +168,8 @@ done({ success: true, data: { ok: true } });
   const winOf = new Map(), vis = new Set(), reads = { vis: [], win: 0 }, acted = [];
   const readTargets = async (url) => { const m = /fake-(.+)$/.exec(String(url)); const s = m ? nsState(m[1]) : null; return s ? { ok: true, targets: s.tabs.map((t) => ({ targetId: t.targetId, type: 'page', url: t.url, title: t.title, openerId: t.opener || undefined })) } : { ok: false, error: 'fake: no browser' }; };
   const windowOf = async (url, id) => { reads.win++; return winOf.has(id) ? winOf.get(id) : null; };
-  const visibilityOf = async (url, id) => { reads.vis.push(id); return { ok: true, visibility: vis.has(id) ? 'visible' : 'hidden' }; };
+  const fails = { throws: new Set(), notOk: new Set() }; // B-e674 unit 2: a read that throws / answers no `ok`
+  const visibilityOf = async (url, id, o) => { reads.vis.push(id); reads.opts = o || null; if (fails.throws.has(id)) throw new Error('the gate: this page never answered'); if (fails.notOk.has(id)) return { ok: false, error: 'the gate: no answer' }; return { ok: true, visibility: vis.has(id) ? 'visible' : 'hidden' }; };
   // every seam that ACTS on a window or a tab is a spy: the front is said, never acted on
   const spy = (name) => async () => { acted.push(name); return { ok: false, error: 'the gate opens no window' }; };
   const journal = [];
@@ -183,7 +192,7 @@ done({ success: true, data: { ok: true } });
     for (const [bk, tab, win] of [[KA, aTab, 1], [KB, bTab, 2]]) { const l = reg.leases.find((x) => x.profileId === p.id && String(x.browserKey) === bk); if (!l) return false; l.windowIn = WIN.instanceOf(rec); l.windowId = win; l.tabRoots = [tab]; }
     return true;
   });
-  return { k, p, NS, HUK, aTab, bTab, hisTab, stamped, run, winOf, vis, reads, acted, journal, cmds, edit, nsState };
+  return { k, p, NS, HUK, aTab, bTab, hisTab, stamped, run, winOf, vis, fails, reads, acted, journal, cmds, edit, nsState };
 }
 const W = await world(K, 'k');
 const TA = { kind: 'attachment', profileId: W.p.id, sessionName: 'vs-' + KA, ns: W.NS }, TB = { kind: 'attachment', profileId: W.p.id, sessionName: 'vs-' + KB, ns: W.NS };
@@ -230,6 +239,29 @@ const id8 = (x) => String(x).slice(0, 8);
   const h = await owners(TH, W.hisTab);
   console.log(`  · the person's window, A's popup in front: ${JSON.stringify(h.r.front)} · said ${JSON.stringify(h.said)}`);
   ok(!!(h.r.front && h.r.front.state === 'foreign' && h.r.front.owner === 'other' && h.r.front.targetId === aPop && h.reads[0] === W.hisTab && h.said.length === 1 && h.said[0].includes('in front of the person\'s browsing window 3: another conversation\'s tab')), 'the person\'s own browsing window: a conversation\'s tab in front of it is named too (their own tab asked first)');
+  // ── B-e674 unit 2 (its round's legs): the cap, a read that throws or answers no `ok`, the bound handed on, a dragged tab ──
+  const mates10 = Array.from({ length: 10 }, (_, i) => F2(0xA0 + i));
+  W.edit(W.NS, (s) => { for (const [i, id] of mates10.entries()) s.tabs.push({ tabId: 'ta' + i, targetId: id, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+  for (const id of mates10) W.winOf.set(id, 1);
+  W.vis.clear(); W.vis.add(mates10[9]); // the one visible tab sits past the cap: the window has 13 mates (A's, the blank, B's popup + ten)
+  const cap = await owners(TA, W.aTab);
+  ok(!!(cap.r.front && cap.r.front.state === 'unread' && cap.reads.length === 1 + TT.FRONT_READS_MAX && cap.reads[0] === W.aTab && !cap.reads.includes(mates10[9]) && cap.said.length === 0),
+    `THE CAP: a window of ${3 + mates10.length} tabs asks A's own then ${TT.FRONT_READS_MAX} mates (${cap.reads.length} reads) — the visible tab past them is never guessed (unread, nothing said)`, { front: cap.r.front, reads: cap.reads.length });
+  ok(!!(W.reads.opts && W.reads.opts.timeoutMs === TT.FRONT_READ_MS && TT.FRONT_READ_MS === 1000), `every front read is handed the shorter bound (${TT.FRONT_READ_MS} ms; a page reader's own is 2.5 s) — one hung page delays the record ≤ ~2 s`, W.reads.opts);
+  W.vis.clear(); W.vis.add(mates10[0]); W.fails.throws.add(mates10[0]);
+  const thr = await owners(TA, W.aTab);
+  W.fails.throws.clear(); W.fails.notOk.add(mates10[0]);
+  const nok = await owners(TA, W.aTab);
+  W.fails.notOk.clear();
+  ok(!!(thr.r.front && thr.r.front.state === 'unread' && nok.r.front && nok.r.front.state === 'unread' && thr.said.length === 0 && nok.said.length === 0), 'a read that THROWS, and one that answers no `ok`, is no answer: unread, nothing said — never a guessed front', { thr: thr.r.front, nok: nok.r.front });
+  // a person drags the visible tab into another window (a headed desktop): its kept window is stale; the front ask reads it again
+  W.vis.clear(); W.vis.add(mates10[1]); W.winOf.set(mates10[1], 5);
+  const drag = await owners(TA, W.aTab);
+  const after = await owners(TA, W.aTab);
+  ok(!!(drag.r.front && drag.r.front.state === 'unread' && drag.r.windows[mates10[1]] === 5 && after.r.windows[mates10[1]] === 5 && drag.said.length === 0), 'a DRAGGED tab: the one about to be named in front has its window read again — now window 5, so it is not this window\'s front (unread), and its kept window follows it', { front: drag.r.front, win: drag.r.windows[mates10[1]], after: after.r.windows[mates10[1]] });
+  W.vis.clear(); W.vis.add(mates10[2]);
+  const back = await owners(TA, W.aTab);
+  ok(!!(back.r.front && back.r.front.state === 'foreign' && back.r.front.targetId === mates10[2] && back.r.front.owner === 'orphan' && back.said.length === 1), 'CONTROL: a mate that did not move and answers visible is named in front again (one line)', { front: back.r.front, said: back.said });
   ok(W.acted.length === acted0 && driverDuring === 0, `NOTHING ACTED for any front: no window opened, no tab closed or activated (${W.acted.length - acted0} acting calls), no driver command (${driverDuring}) — reads only`);
 }
 // RED CONTROL: the keeper without the unit (its tabOwnersFor reads no front)
@@ -341,17 +373,41 @@ console.log('— ⑤ the fit: a foreign front is never folded by width — this 
   ok(miss.length === 0, `the client's fit wiring, each line ONCE (${PINS.length} pins)`, miss);
 }
 
+// ═══ ⑥ THE CLIENT'S WIRING (B-e674 unit 2, its round's should 5: only the heavy ⑨ read it) ═══════════════════════
+console.log('— ⑥ the client\'s wiring: the record kept, handed to the row and the pane, drawn on the chip, cleared on a switch');
+{
+  const LW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  const PINS = [
+    ['the record is KEPT', "st.tabFront = m.front && typeof m.front === 'object' ? { ...m.front } : null;"],
+    ['…cleared with the other tab facts on a switch', 'st.tabOwners = {}; st.tabFront = null;'],
+    ['…handed to the row', 'names: tabNamesNow(), front: st.tabFront }, t);'],
+    ['…handed to the pane (it never folds the marked tab)', "front: st.tabFront && st.tabFront.state === 'foreign' ? st.tabFront.targetId || null : null }, t);"],
+    ['the chip\'s words', "const hx = r.hereText || r.frontText || '';"],
+    ['the chip\'s class', "el.classList.toggle('front-foreign', !!r.front);"],
+    ['the chip\'s tip, first', "(r.frontTip ? r.frontTip + '\\n' : '')"],
+    ['the unlisted front\'s line', 'if (m.frontNote) {'],
+    ['…and the fold never hides it', "d.dataset.group === 'blanks' || d.dataset.group === 'front-note' ||"],
+  ];
+  const n = (txt, x) => txt.split(x).length - 1;
+  const miss = PINS.filter(([, x]) => n(LW, x) !== 1).map(([w, x]) => ({ w, x, n: n(LW, x) }));
+  ok(miss.length === 0, `the client's wiring, each line ONCE (${PINS.length} pins): ${PINS.map(([w]) => w).join(' · ')}`, miss);
+  // CONTROL: the copy without the row's hand-over is named by the pins
+  const cut = anchored(LW, 'names: tabNamesNow(), front: st.tabFront }, t);', 'names: tabNamesNow() }, t);', 'the row without the front');
+  ok(PINS.filter(([, x]) => n(cut, x) !== 1).map(([w]) => w).join() === '…handed to the row', 'CONTROL: a client copy that stops handing the front to the row is red on exactly that pin');
+}
+
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════
 console.log('— ④ the words: every key frontText asks t() for has a zh and a ja row');
 {
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
   const keys = []; const t = (s) => { keys.push(s); return s; };
   for (const owner of ['other', 'you', 'orphan']) { TT.frontText({ state: 'foreign', owner }, { name: 'N' }, t); TT.frontText({ state: 'foreign', owner }, {}, t); }
+  TT.frontNoteText(t); // B-e674 unit 2
   const lit = (s) => JSON.stringify(s).replace(/\\u([0-9a-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
   const has = (dict, k) => dict.includes(lit(k) + ':');
   const uniq = [...new Set(keys)];
   const miss = uniq.filter((k) => !has(zh, k) || !has(ja, k));
   keys.push('In front'); uniq.push('In front'); miss.push(...['In front'].filter((k) => !has(zh, k) || !has(ja, k))); // B-e674 (r608): the fold's word
-  ok(uniq.length === 7 && miss.length === 0, `every key frontText (and the fold's «In front») asks t() for (${uniq.length}) has a zh and a ja row`, miss);
+  ok(uniq.length === 9 && miss.length === 0, `every key frontText / frontNoteText (and the fold's «In front») ask t() for (${uniq.length}) has a zh and a ja row`, miss);
 }
 report();

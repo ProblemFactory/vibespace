@@ -7414,6 +7414,8 @@ export default {
   "Your tab": "あなたのタブ",
   // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
   "In front": "最前面",
+  "Another tab is in front of this window": "別のタブがこのウィンドウの最前面にあります",
+  "A tab this view does not list is in front of this window — the picture here stays this view’s own tab; nothing is moved or closed for it": "このビューに一覧のないタブがこのウィンドウの最前面にあります — ここの画面はこのビュー自身のタブのままです。そのために移動や閉じる操作は行いません",
   "{name}’s tab": "{name} のタブ",
   "Another conversation’s tab": "別の会話のタブ",
   "A tab nobody holds": "持ち主のいないタブ",

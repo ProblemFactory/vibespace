@@ -1399,7 +1399,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
    *  out of place — a broadcast never rebuilds the row under the pointer. */
   const renderTabs = () => {
     const tabsNow = st.tabsStale ? [] : st.tabs; // B-26bb: the pane lists no tab of a stopped run (the row's rule — its verdict's should)
-    const g = tabGroups({ tabs: tabsNow.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: tabWinOf(x) })), leases: tabLeasesNow(), human: !!H }, t);
+    const g = tabGroups({ tabs: tabsNow.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: tabWinOf(x) })), leases: tabLeasesNow(), human: !!H, front: st.tabFront && st.tabFront.state === 'foreign' ? st.tabFront.targetId || null : null }, t); // B-e674 unit 2: the pane never folds the tab the row marks in front
     const byId = new Map(tabsNow.filter((x) => x && x.targetId).map((x) => [String(x.targetId).toUpperCase(), x]));
     const placed = new Set(g.groups.flatMap((gr) => [...gr.targetIds, ...gr.blanks]));
     const rest = tabsNow.filter((x) => !(x && x.targetId && placed.has(String(x.targetId).toUpperCase()))); // a row with no CDP id: listed last, as before
@@ -1480,6 +1480,16 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const keep = new Set();
     let prev = null;
     let lastGroup = m.rows.length ? m.rows[0].group : null;
+    // B-e674 unit 2 (its round's should 2): a FOREIGN front this view does not list is said too — first, no name, no title
+    if (m.frontNote) {
+      let fn = have.get('g:front-note');
+      if (!fn) { fn = document.createElement('div'); fn.className = 'browser-live-tabrow-divider browser-live-tabrow-front'; fn.dataset.group = 'front-note'; }
+      if (fn.textContent !== m.frontNote.text) fn.textContent = m.frontNote.text;
+      if (fn.title !== m.frontNote.tip) fn.title = m.frontNote.tip;
+      keep.add('g:front-note');
+      if (tabRowList.firstChild !== fn) tabRowList.insertBefore(fn, tabRowList.firstChild);
+      prev = fn;
+    }
     for (const r of m.rows) {
       // lane browser-tabs-by-window: a thin divider chip names the NEXT window's holder (this window's chips stay first)
       if (m.grouped && r.group !== lastGroup) {
@@ -1582,7 +1592,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       for (const c of chips) c.style.display = f.folded.includes(c.dataset.target) ? 'none' : '';
       if (ownEl && f.ownCutPx != null) ownEl.style.maxWidth = f.ownCutPx + 'px'; // its name cuts shorter (the title ellipsizes)
       if (ownEl) ownEl.classList.toggle('bare', !!f.ownBare); // line 100's cure: its parts hidden WHOLE, never half
-      for (const d of dividers) d.style.display = d.dataset.group === 'blanks' || st.tabRow.rows.some((r) => r.group === d.dataset.group && !f.folded.includes(r.targetId)) ? '' : 'none';   // the one-window row's «+N blank» stays said (its read's M1)
+      for (const d of dividers) d.style.display = d.dataset.group === 'blanks' || d.dataset.group === 'front-note' || st.tabRow.rows.some((r) => r.group === d.dataset.group && !f.folded.includes(r.targetId)) ? '' : 'none'; // B-e674 unit 2: the unlisted front's line is never folded either   // the one-window row's «+N blank» stays said (its read's M1)
       tabRowMore.style.display = f.folded.length ? '' : 'none';
       // B-e674 (r608): when even a cut own chip cannot hold the foreign front, THE FOLD SAYS IT — in words, never by colour alone
       const fr = f.foldFront ? (st.tabRow.rows || []).find((r) => r.targetId === f.foldFront) : null;
