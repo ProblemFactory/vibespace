@@ -446,12 +446,13 @@ class JobManager {
       if (this._unreadT[which]) { clearTimeout(this._unreadT[which]); this._unreadT[which] = null; }
       // cure 2 (主开发 09:20Z, THE LAW): the hold is LIFTED — the note marked done, «nothing was lost», the clean-up resumed — ONLY on a
       // WHOLE read. A file that is GONE, or torn bytes, end the hold with THEIR own true sentence, and the clean-up stays held
-      // 主开发 05:36Z — THE STASH'S OWN LAW: every change of what a conversation's strip shows is said to it, once. The records read again:
-      // the notices that waited for them show now — a whole read judges them (a cleared job's take the clear's words), a gone or torn end
-      // lets them go as they are — one say for each conversation holding one (as the merge at the lift does)
-      let told = [];
-      if (a.state === 'data') { try { told = this._judgeNotifs(); } catch (e) { this.d.log('[jobs] the waiting notices could not be judged again:', e && e.message); } }   // its read r4 (S1): the records read again judge the waiting notices
-      else if (!this._recordsHeld()) told = [...this.pendingNotifs].filter(([, l]) => (l || []).some((n) => this._unjudged.has(n))).map(([cid]) => cid);
+      if (a.state === 'data') { try { this._judgeNotifs(); } catch (e) { this.d.log('[jobs] the waiting notices could not be judged again:', e && e.message); } }   // its read r4 (S1): the records read again judge the waiting notices
+      // 主开发 05:36Z — THE STASH'S OWN LAW: every change of what a conversation's strip shows is said to it, once. The records read again
+      // (a whole read) or ended (gone, torn): a notice that waited for them shows — the judge gives a cleared job's the clear's words; a gone
+      // or torn end lets them go as they are, FOR GOOD (their marks leave: a later hold never hides them again — its read's S2) — and a held
+      // line's verdict (owner, subscriber) may be known now (its read's S1): each conversation holding a notice of a job is told
+      if (a.state !== 'data' && !this._recordsHeld()) for (const l of this.pendingNotifs.values()) for (const n of l || []) this._unjudged.delete(n);
+      const told = [...this.pendingNotifs].filter(([, l]) => (l || []).some((n) => n && n.jobId)).map(([cid]) => cid);
       for (const cid of told) { try { this.d.onStash?.(cid); } catch { } }
       if (a.state === 'data') this._unreadLift(which, was).catch((e) => this.d.log(`[jobs] ${base}: its note could not be lifted:`, e && e.message));
       else this._unreadEnded(which, was, a, pre).catch((e) => this.d.log(`[jobs] ${base}: its end could not be said:`, e && e.message));
@@ -675,18 +676,15 @@ class JobManager {
     // 主开发 04:33Z (1): at the boot the ARCHIVE is loaded ONCE before the held check (a list naming a job jobs.json has not) — loaded
     // lazily by the first such notice, an archive whose hold began INSIDE this judge let that first list out with a cleared job's old words
     if (boot && !this.archive && !this.readOnly && list.some((n) => n && n.jobId && !this.jobs.has(n.jobId))) this._archiveAtBoot();
-    if (this._recordsHeld()) { for (const n of list) if (n && n.jobId) this._unjudged.add(n); return false; }
-    let changed = false;   // → true when what the list's conversation sees changed: a notice that waited shows now, or took the clear's words
+    if (this._recordsHeld()) { for (const n of list) if (n && n.jobId) this._unjudged.add(n); return; }
     for (const n of list) {
       if (!n || !n.jobId) continue;
-      if (this._unjudged.delete(n)) changed = true;
+      this._unjudged.delete(n);
       const j = this.jobs.get(n.jobId) || (this.archive || []).find((r) => r && r.id === n.jobId);   // the boot's ONE archive load is above (主开发 04:33Z (1))
-      if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; changed = true; }
+      if (j && j.clearedAt && !(Number(n.ts) > Math.max(j.clearedAt, j.reclearedAt || 0)) && (n.text !== CLEARED_TEXT || n.jobName !== CLEARED_TEXT)) { n.jobName = CLEARED_TEXT; n.text = CLEARED_TEXT; this._dirty = true; }
     }
-    return changed;
   }
-  /** → the conversations whose waiting notices the judge changed (shown now, or the clear's words) */
-  _judgeNotifs() { const told = []; for (const [cid, list] of this.pendingNotifs) if (this._judgeNotifsIn(list || [])) told.push(cid); return told; }
+  _judgeNotifs() { for (const list of this.pendingNotifs.values()) this._judgeNotifsIn(list || []); }
   /** store (5) cure: the job records (jobs.json) or the archive are held — a missing record is UNKNOWN, a clear unjudgeable */
   _recordsHeld() { return !!(this._unread && (this._unread.store || this._unread.archive)); }
   /** a notice that waits for the records' first whole read (cure (2)) */

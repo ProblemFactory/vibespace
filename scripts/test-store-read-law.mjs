@@ -783,7 +783,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   // its read r4 (S1): the boot found the JOB RECORDS held (jobs.json unreadable) and read the notices UNJUDGED — when the records read
   // again, the waiting notice of a job cleared in an earlier process takes the clear (it reached the conversation with its old words)
   {
-    const RJ = "      if (a.state === 'data') { try { told = this._judgeNotifs(); } catch (e) { this.d.log('[jobs] the waiting notices could not be judged again:', e && e.message); } }";
+    const RJ = "      if (a.state === 'data') { try { this._judgeNotifs(); } catch (e) { this.d.log('[jobs] the waiting notices could not be judged again:', e && e.message); } }";
     ok(JSRC.split(RJ).length === 2, 'control setup: the anchor of the control «the records read again judge the notices» is in jobs.js');
     const recScene = async (Mod, name) => {
       const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
@@ -804,10 +804,12 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
   }
   // 主开发 05:36Z — THE STASH'S OWN LAW at the records' read again: a notice that waited for the job records is HIDDEN from its
   // conversation's strip (peekNotifs) while they are held; when they read again (a whole read, or a gone file's second answer) it
-  // shows — its conversation is TOLD, once (its strip follows), and a conversation whose notices did not change is not
+  // shows — each conversation holding a notice of a job is TOLD, once (its strip follows; a held line's verdict may be known now too),
+  // a conversation holding none is not; a gone end lets the notices go FOR GOOD (a later hold never hides them again)
   {
     const SAYR = "      for (const cid of told) { try { this.d.onStash?.(cid); } catch { } }";
-    ok(JSRC.split(SAYR).length === 2, 'control setup: the records\' read-again say is found once in jobs.js');
+    const LETGO = "      if (a.state !== 'data' && !this._recordsHeld()) for (const l of this.pendingNotifs.values()) for (const n of l || []) this._unjudged.delete(n);";
+    ok(JSRC.split(SAYR).length === 2 && JSRC.split(LETGO).length === 2, 'control setup: the records\' read-again say and the gone end\'s let-go are found once each in jobs.js');
     const sayScene = async (Mod, name, { gone = false } = {}) => {
       const d = path.join(D, name); fs.mkdirSync(d, { recursive: true });
       const JF = path.join(d, 'jobs.json'), jbody = JSON.stringify([{ id: 'jb-0n000041', kind: 'task', name: 'nightly', state: 'done', owner: {}, access: { view: 'session', control: 'session' }, runs: [] }]);
@@ -822,14 +824,21 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
       if (gone) { fs.rmSync(JF, { force: true }); try { await J._unreadRetry('store'); } catch { } }   // a gone file: the hold stands until a SECOND answer says missing too
       try { await J._unreadRetry('store'); } catch { }
       const shown = J.peekNotifs('conv-s').length, held = !!J._unread.store;
-      J.shutdown(); return { hidden, shown, held, said: said.slice().sort() };
+      J._unread.archive = { code: 'EACCES', at: Date.now() };   // a LATER hold of the records (the archive)
+      const rehidden = J.peekNotifs('conv-s').length === 0;
+      J._unread.archive = null;
+      J.shutdown(); return { hidden, shown, held, rehidden, said: said.slice().sort() };
     };
     const sw = await sayScene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-say-read');
     const sg = await sayScene(require(path.join(ROOT, 'src/jobs.js')), 'notifs-say-gone', { gone: true });
     ok(sw.hidden === 0 && sw.shown === 1 && !sw.held && JSON.stringify(sw.said) === '["conv-s"]' && sg.hidden === 0 && sg.shown === 1 && !sg.held && JSON.stringify(sg.said) === '["conv-s"]',
       'the records read again (a whole read; a gone file\'s second answer): the notice that waited shows, and ITS conversation is told once — the other conversation (nothing of it changed) is not', { sw, sg });
-    const swx = await sayScene(MJ.load('src/jobs.js', anchored(JSRC, SAYR, '      /* MUTANT: the records\' read again tells nobody */', 'srl-say-cut'), 'records-say-cut'), 'notifs-say-read-mut');
-    ok(swx.shown === 1 && swx.said.length === 0, 'CONTROL (the say cut, in a copy): the notice shows but its conversation is never told — the strip keeps the old count until something else says — RED', swx);
+    ok(!sg.rehidden, 'a gone end lets the notices go FOR GOOD: a later hold of the records never hides them again (its read\'s S2)', sg);
+    const SAYCUT = MJ.load('src/jobs.js', anchored(JSRC, SAYR, '      /* MUTANT: the records\' read again tells nobody */', 'srl-say-cut'), 'records-say-cut');
+    const swx = await sayScene(SAYCUT, 'notifs-say-read-mut'), sgx = await sayScene(SAYCUT, 'notifs-say-gone-mut', { gone: true });
+    ok(swx.shown === 1 && swx.said.length === 0 && sgx.shown === 1 && sgx.said.length === 0, 'CONTROL (the say cut, in a copy): on both roads the notice shows but its conversation is never told — the strip keeps the old count until something else says — RED', { swx, sgx });
+    const sgl = await sayScene(MJ.load('src/jobs.js', anchored(JSRC, LETGO, '      /* MUTANT: the gone end keeps the marks */', 'srl-letgo-cut'), 'records-letgo-cut'), 'notifs-say-letgo-mut', { gone: true });
+    ok(sgl.shown === 1 && sgl.rehidden, 'CONTROL (the let-go cut, in a copy): after a gone end a later hold of the records hides the notice again, with no say — RED', sgl);
   }
   // its read r2 (M1): a clear made while the file was HELD, then a restart — the NEXT boot reads the file whole and judges it by the
   // record's clearedAt (in jobs.json); the release judged only at a read again in the same process
