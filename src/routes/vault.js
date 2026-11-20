@@ -57,7 +57,7 @@ const STATUS = Object.freeze({
   login_no_door: 409, login_totp_unknown: 400, login_site_required: 400, login_one_site: 400, login_words: 400, login_password_lines: 400,   // lane login-request-card: a website login asked for (src/server/vault-paste-door.js)
   login_no_entry: 404, login_not_pending: 409, login_pending_exists: 409, card_changed: 409, // lane vault-login r22/r23: human-only Confirm / Discard of pending web-login slots
   login_site_exists: 409, login_sites_full: 409, login_site_first: 400, login_site_absent: 404, login_merge_same: 400, login_merge_clash: 409,   // lane login-request-card: one login, several sites (the person's add / remove, the merge)
-  job_secrets_answer: 400, job_secrets_busy: 409, job_secrets_gone: 404, job_secrets_not_a_file: 409, job_secrets_unreadable: 422, job_secrets_nothing: 409, job_secrets_undeletable: 500, job_secrets_value_shape: 422, job_secrets_changed: 409,   // B-ef1b (src/server/job-secrets-door.js)
+  job_secrets_answer: 400, job_secrets_busy: 409, job_secrets_gone: 404, job_secrets_not_a_file: 409, job_secrets_unreadable: 422, job_secrets_nothing: 409, job_secrets_leftover: 409, job_secrets_record_unreadable: 409, job_secrets_record_unwritable: 500, job_secrets_record_held: 503, job_secrets_undeletable: 500, job_secrets_value_shape: 422, job_secrets_changed: 409,   // B-ef1b (src/server/job-secrets-door.js)
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
@@ -144,6 +144,10 @@ const WORDS = Object.freeze({
   job_secrets_undeletable: 'the file could not be deleted — nothing was moved; delete it yourself or try again',
   job_secrets_value_shape: 'a value is not a plain text, number or true/false (a list, an object, or text with spaces around it) — nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again',
   job_secrets_changed: 'the file changed while it was being moved — nothing was moved; press again',
+  job_secrets_leftover: 'copies an earlier try made are still in the vault and cannot be removed now — nothing was moved; For you names them',
+  job_secrets_record_unreadable: 'the record of the copies a move left could not be read — it is kept aside (For you names the file); nothing was moved',
+  job_secrets_record_unwritable: 'the record of the copies a move makes could not be written — nothing was moved; press again later',
+  job_secrets_record_held: 'the record of the copies a move left could not be read just now — nothing was moved; press again in a moment',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;

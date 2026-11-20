@@ -403,14 +403,17 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   });
   /** 「其他密钥或密码…」 (the Vault window's 添加 menu — the owner 2026-10-23: 「我压根没法添加啊」): a FREE entry the owner adds —
    *  a label, a kind, a note and the value (taken off the body by the route) → `secret:<10 hex>`. Unlocked only. */
-  function addEntry({ label, note = '', kind = 'secret', value = null, by = 'user' } = {}) {
+  function addEntry({ label, note = '', kind = 'secret', value = null, by = 'user', entry: made = null } = {}) {
     const m = P.entryMetaOf({ label, note, kind });
     if (!m.ok) return m;
     const vv = P.valueOf(value);
     if (!vv.ok) return vv;
     const st = vault.state();
     if (st !== 'unlocked') return named(st === 'locked' ? 'vault_locked' : 'vault_not_set_up');
-    const entry = `${P.ENTRY_PREFIX}${crypto.randomBytes(5).toString('hex')}`;
+    // bl-vault B-ef1b: a server caller may name the id it RECORDED before the seal (src/server/job-secrets-door.js writes the ids a
+    // move is about to seal first) — the same shape as a minted one, never an id the vault already holds; the route never passes one
+    if (made != null && !(typeof made === 'string' && new RegExp(`^${P.ENTRY_PREFIX}[0-9a-f]{10}$`).test(made) && !(vault.secretNames() || []).some((x) => x && x.name === made))) return named('store_failed');
+    const entry = made || `${P.ENTRY_PREFIX}${crypto.randomBytes(5).toString('hex')}`;
     const r = vault.secretPut(entry, vv.value, { prov: 'owner', label: m.label, note: m.note, kind: m.kind, noteShared: true });   // noteShared: the dialog says agents that may use it read its description (lane vault-entry-description)
     if (!r || !r.ok) { const c = String((r && r.code) || ''); return named(c.includes('vault_locked') ? 'vault_locked' : 'store_failed'); }
     audit('vault-secret-added', { by: String(by).slice(0, 40), entry, kind: m.kind });   // the name and the kind — never the label's value, never the value

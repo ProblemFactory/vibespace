@@ -435,9 +435,11 @@ export async function answerJobSecrets(answer) {
     return true;
   }
   // the vault shut between the press and the answer: its own door opens (never a sentence without the way to it — test-vault-words)
-  if (r && r.code === 'vault_locked') { showUnlock(); return false; }
+  if (r && r.code === 'vault_locked') { showUnlock(); if (Number(r.leftover) > 0) showToast(t('{n} copy(ies) it made are left in the vault — For you names them', { n: Number(r.leftover) }), { type: 'error' }); return false; }
   if (r && r.code === 'vault_not_set_up') { showSetup(); return false; }
-  showToast(jobSecretsRefusal(r, answer), { type: 'error' });
+  // bl-vault B-ef1b: a refusal whose undo could not remove every copy it made says so (For you names them)
+  const left = r && r.code !== 'job_secrets_leftover' ? Number(r.leftover) || 0 : 0;
+  showToast(jobSecretsRefusal(r, answer) + (left ? ` — ${t('{n} copy(ies) it made are left in the vault — For you names them', { n: left })}` : ''), { type: 'error' });
   return false;
 }
 function jobSecretsRefusal(r, answer) {
@@ -451,6 +453,10 @@ function jobSecretsRefusal(r, answer) {
     job_secrets_undeletable: () => (answer === 'delete' ? t('The file could not be deleted') : t('The file could not be deleted — nothing was moved')),
     job_secrets_value_shape: () => which + t('not a plain text, number or true/false (or text with spaces around it) — nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again'),
     job_secrets_changed: () => t('The file changed while it was being moved — nothing was moved; press again'),
+    job_secrets_leftover: () => t('Copies an earlier try made are still in the vault and cannot be removed now — nothing was moved; For you names them'),
+    job_secrets_record_unreadable: () => t('The record of the copies a move left could not be read — it is kept as {file}; nothing was moved. Delete the copies you do not want in the Vault window, then delete that file and press again', { file: (r && r.file) || 'data/job-secrets.leftover.json' }),
+    job_secrets_record_unwritable: () => t('The record of the copies a move makes could not be written — nothing was moved; press again later'),
+    job_secrets_record_held: () => t('The record of the copies a move left could not be read just now — nothing was moved; press again in a moment'),
     job_secrets_busy: () => t('The file is being moved — try again in a moment'),
     job_secrets_answer: () => t('That answer is not offered'),
     value_too_long: () => which + t('too long for the vault — nothing was moved; the file is kept'),

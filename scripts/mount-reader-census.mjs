@@ -178,7 +178,7 @@ export const ROWS = [
   ['src/server/hook-root-watch.js', 'own-tree', 2, null, CLI],
   ['src/server/incident-wiring.js', 'own-tree', 6, null, DATA],
   ['src/server/instance-url.js', 'own-tree', 1, null, DATA],
-  ['src/server/job-secrets-door.js', 'own-tree', 4, null, 'B-ef1b: data/job-secrets.retired.json (its own store under <checkout>/data — through fs.promises: move lstats it, reads it, lstats it again before the unlink (the file the values came from); delete lstats it)'],
+  ['src/server/job-secrets-door.js', 'own-tree', 7, null, 'B-ef1b: data/job-secrets.retired.json (its own store under <checkout>/data — through fs.promises: move lstats it, reads it, lstats it again before the unlink (the file the values came from); delete lstats it) + bl-vault B-ef1b (主开发 r191, r333): its own record of the copies a move made or left, data/job-secrets.leftover.json (read at the start, at each unlock and at each move), the listing of data/ for that record\'s dated copies set aside unread, and the sweep\'s lstat of the retired file (a committed move\'s file gone = the move completed)'],
   ['src/server/integration-store.js', 'own-tree', 1, null, DATA],
   ['src/server/job-where.js', 'user-path', 2, 'if \\(blocked\\(cwd\\)\\) cwdBlocked = true;[\\s\\S]*await statOnce\\(key, cwd, stat, statMs\\)', 'B-70f9: a REMOTE conversation\'s job folder, asked on the hub before the job is created (is it there?) — the blocked-path door first, then ONE stat off the loop, bounded (3 s: a mount that hangs answers «does not answer right now»), one stat a MOUNT in flight (cure 2) + /proc/self/mountinfo (procfs: which mount a folder lives on)'],
   ['src/server/login-expiry-watch.js', 'own-tree', 1, null, DATA],

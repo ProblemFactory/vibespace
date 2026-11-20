@@ -96,6 +96,7 @@ const GM = require(path.join(REPO, 'src/grant-model.js'));
 const VUG = require(path.join(REPO, 'src/server/vault-use-grants.js'));   // B-3fb5: a vault-use grant row on an agent's entry goes with it
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+const okF = (c, n, e) => ok(c, `${n} — ${JSON.stringify(e)}`, e);   // bl-vault B-ef1b (r185): a leg that judges prints every fact it judges, on a pass too
 const ROOT = scratch('vault-paste');
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 const PW = 'second password for the paste suite';
@@ -548,7 +549,8 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   // the read (r1): the file the values came from is the file deleted — one edited while the move ran keeps every byte, nothing sealed
   plantJS(W, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
   const f3 = freeNames(W).length, jsf = path.join(W.dataDir, JS_FILE);
-  const editing = require(path.join(REPO, 'src/server/job-secrets-door.js')).create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { fs.appendFileSync(jsf, ' '); return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } });
+  const DOORS = [W.jobSecrets];   // every door this section makes: each stays hooked on the suite's one vault — a block that needs the vault quiet waits for all of them (door.idle)
+  const editing = require(path.join(REPO, 'src/server/job-secrets-door.js')).create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { fs.appendFileSync(jsf, ' '); return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } }); DOORS.push(editing);
   const changed = await editing.answer('move');
   ok(changed.code === 'job_secrets_changed' && freeNames(W).length === f3 && jsHere(W), 'the file EDITED while the move ran (its size moved) ⇒ job_secrets_changed — the values sealed meanwhile dropped again, the file kept', { code: changed.code, sealed: freeNames(W).length - f3 });
   fs.unlinkSync(jsf);
@@ -559,7 +561,7 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
     const T = Math.floor(Date.now() / 1000) - 60; fs.utimesSync(jsf, T, T);
     await new Promise((r) => setTimeout(r, 30));   // the read: a kernel without fine-grained file times moves the ctime in 1–4 ms ticks — the edit lands in a later one
     const before = new Set(freeNames(W).map((x) => x.name)); let edited = false, ctMoved = null;
-    const d = doorMod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { if (!edited) { edited = true; const c0 = fs.statSync(jsf).ctimeMs; fs.writeFileSync(jsf, fs.readFileSync(jsf, 'utf8').replace('FIRST_ONE', 'FIRST_TWO')); fs.utimesSync(jsf, T, T); const st = fs.statSync(jsf); ctMoved = st.ctimeMs !== c0 && st.mtimeMs === T * 1000; } return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } });
+    const d = doorMod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: { addEntry: (o) => { if (!edited) { edited = true; const c0 = fs.statSync(jsf).ctimeMs; fs.writeFileSync(jsf, fs.readFileSync(jsf, 'utf8').replace('FIRST_ONE', 'FIRST_TWO')); fs.utimesSync(jsf, T, T); const st = fs.statSync(jsf); ctMoved = st.ctimeMs !== c0 && st.mtimeMs === T * 1000; } return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } }); DOORS.push(d);
     const r = await d.answer('move');
     const fresh = freeNames(W).filter((x) => !before.has(x.name));   // secretNames comes sorted by name: the new ones by difference
     const out = { code: r.code, sealed: fresh.length, kept: jsHere(W), ctMoved };
@@ -577,7 +579,7 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   const ssRed = await sameSize(mtCopy.exports);
   ok(ssRed.ctMoved === true && ssRed.code !== 'job_secrets_changed' && !ssRed.kept, 'RED control: the modification time compared (the batch\'s shape) ⇒ the edited file passes as the one read and is deleted', ssRed);
   // r13 «also» (the readers of batch 53: these guards had no leg) — each over the REAL door and the suite's vault
-  const jsDoorOf = (mod, extra = {}) => mod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: W.paste, ...extra });
+  const jsDoorOf = (mod, extra = {}) => { const d = mod.create({ dataDir: W.dataDir, vault: W.vault, userTodos: W.userTodos, paste: W.paste, ...extra }); DOORS.push(d); return d; };
   const freshSince = (before) => freeNames(W).filter((x) => !before.has(x.name));
   const dropFresh = (before) => { for (const x of freshSince(before)) { try { W.paste.dropEntry(x.name.slice('secret:'.length), { by: 'suite' }); } catch { } } };
   const JSD_REAL = require(jsdAbs);
@@ -626,6 +628,435 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
     const r = await jsDoorOf(JSD_REAL, { paste: { addEntry: (o) => { if (!swapped) { swapped = true; const nx = jsf + '.next'; fs.writeFileSync(nx, fs.readFileSync(jsf)); fs.renameSync(nx, jsf); } return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) } }).answer('move');
     ok(swapped && r.code === 'job_secrets_changed' && freshSince(before).length === 0 && jsHere(W), 'r13: another file renamed over the name mid-move (its inode moved) ⇒ job_secrets_changed — nothing sealed, the file kept', r);
     dropFresh(before); if (jsHere(W)) fs.unlinkSync(jsf); }
+  // (7) B-ef1b (主开发 r191, THE LAW: nothing sealed for a job outlives the act that sealed it without a record a person can see; r333:
+  // THE RECORD COMES FIRST, an unreadable record is not an empty one, nothing left settles the notice). Each road below has its OWN
+  // data folder (its record and its file), so another door hooked on the suite's one vault never acts on it; every leg prints the
+  // facts it judges (r185); a wait is for what the DOOR queued itself — door.idle(), its record chain as it stands (it sweeps
+  // nothing: the unlock's hook and the start's sweep are what the legs judge) — never a clock.
+  //   L1 — a vault LOCK placed in the window between the seal and the unlink, the move undone (the file edited meanwhile): the
+  //        drops need no key: nothing sealed is left, nothing recorded, no notice;
+  //   L2 — the same window, the first copy's drop REFUSED while locked (a stand-in answers vault_locked for it, as dropEntry does
+  //        when a grant row on the entry needs the key — that rule's own leg: test-vault-use-grants): the copy stays RECORDED (ids
+  //        and labels, no value), NAMED in ONE For-you notice, and the next unlock's hook REMOVES it. REDs: the release's shape (the
+  //        undo that leaves a refused drop unrecorded and unsaid); the door without its unlock hook.
+  const LEFT = 'job-secrets.leftover.json';
+  let dn = 0;
+  const ownDir = () => { const D = path.join(W.dataDir, `jsd-${++dn}`); fs.mkdirSync(D, { recursive: true }); return D; };
+  const plantIn = (D, doc) => fs.writeFileSync(path.join(D, JS_FILE), JSON.stringify(doc), { mode: 0o600 });
+  const recOf = (D) => { try { const d = JSON.parse(fs.readFileSync(path.join(D, LEFT), 'utf8')); return Array.isArray(d.entries) ? d.entries : null; } catch { return null; } };
+  const recordedIn = (D) => { const e = recOf(D); return !!(e && e.length); };
+  const doorIn = (mod, D, extra = {}) => { const d = mod.create({ dataDir: D, vault: W.vault, userTodos: W.userTodos, paste: W.paste, log: (m) => LOGS.push(String(m)), ...extra }); DOORS.push(d); return d; };
+  const quiet = () => Promise.all(DOORS.map((d) => (d && typeof d.idle === 'function' ? d.idle() : null)));
+  const note9 = (n) => `Moved from data/job-secrets.retired.json (the job secret ${n}).`;
+  const noticeOf = () => (W.userTodos.snapshot().open || []).filter((i) => i.sessionKey === 'vault' && i.itemKey === 'job-secrets-leftover');
+  const noticeWords = () => noticeOf().map((i) => `${i.text} ${i.detail}`).join(' | ') || null;
+  const clearNotices = () => { for (const it of noticeOf()) W.userTodos.setStatus(it.id, 'done', 'suite'); };
+  const jsdCopyN = (pairs, name) => { let src = jsdSrc; for (const [a, b] of pairs) src = anchored(src, a, b, name); const m = new Module(jsdAbs, null); m.filename = jsdAbs; m.paths = Module._nodeModulePaths(path.dirname(jsdAbs)); m._compile(src, jsdAbs); return { n: pairs.length, mod: m.exports }; };
+  const lockRoad = async (mod, { rowed = false } = {}) => {
+    const D = ownDir(), jf = path.join(D, JS_FILE);
+    plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const before = new Set(freeNames(W).map((x) => x.name)), rows = new Set(); let seals = 0;
+    const pasteX = {
+      addEntry: (o) => { const r = W.paste.addEntry(o); if (r && r.ok) { seals++; if (rowed && seals === 1) rows.add(r.entry); if (seals === 2) { fs.appendFileSync(jf, ' '); W.vault.lock('test'); } } return r; },   // the window: after the last seal the file is edited (the undo road) and the vault LOCKS
+      dropEntry: (id, o) => (rows.has(`secret:${id}`) && W.vault.state() !== 'unlocked' ? { ok: false, code: 'vault_locked' } : W.paste.dropEntry(id, o)),
+    };
+    const door = doorIn(mod, D, { paste: pasteX });
+    const r = await door.answer('move');
+    const leftText = fs.existsSync(path.join(D, LEFT)) ? fs.readFileSync(path.join(D, LEFT), 'utf8') : '';
+    const n0 = noticeOf();
+    const atLock = { code: r.code, leftover: r.leftover || 0, sealed: freshSince(before).length, recorded: recordedIn(D), notices: n0.length, notice: noticeWords(),
+      leakFree: !jsVals.some((v) => leftText.includes(v) || JSON.stringify(n0).includes(v) || JSON.stringify(r).includes(v)) };
+    const unl = await W.vault.unlock(PW); await door.idle(); await quiet();   // the unlock's hook queued the door's sweep: the wait is for that (and for every other door's, so none acts on the next leg)
+    const after = { unlocked: !!(unl && unl.ok), sealed: freshSince(before).length, recorded: recordedIn(D), open: noticeOf().length };
+    dropFresh(before); clearNotices();
+    return { atLock, after };
+  };
+  const l1 = await lockRoad(JSD_REAL);
+  okF(l1.atLock.code === 'job_secrets_changed' && l1.atLock.sealed === 0 && !l1.atLock.leftover && !l1.atLock.recorded && !l1.atLock.notice && l1.after.unlocked && l1.after.sealed === 0,
+    'B-ef1b L1: a vault LOCK between the seal and the unlink (the move undone) leaves NOTHING sealed — the drops need no key; nothing recorded, no notice', l1);
+  const l2 = await lockRoad(JSD_REAL, { rowed: true });
+  okF(l2.atLock.code === 'job_secrets_changed' && l2.atLock.leftover === 1 && l2.atLock.sealed === 1 && l2.atLock.recorded && l2.atLock.leakFree && l2.atLock.notices === 1 && /\(1 left: FIRST_ONE\)/.test(l2.atLock.notice) && /left copies in the vault/.test(l2.atLock.notice),
+    'B-ef1b L2: …a copy whose drop is REFUSED while locked (the stand-in for a grant row on it) stays RECORDED (no value), NAMED in ONE For-you notice (its label, no value) and the answer says how many were left', l2.atLock);
+  okF(l2.after.unlocked && l2.after.sealed === 0 && !l2.after.recorded && !l2.after.open,
+    'B-ef1b L2: …and the NEXT UNLOCK\'s hook removes it: the copy gone, the record emptied, the notice done', l2.after);
+  const lrr = await lockRoad(jsdCopyN([['          const keepIds = new Set(left.map((e) => e.entry));', '          const keepIds = new Set();'], ['        if (!left.length) return 0;\n', '        return 0;\n']], 'B-ef1b: a refused drop unrecorded and unsaid (the release)').mod, { rowed: true });
+  okF(lrr.atLock.sealed === 1 && !lrr.atLock.recorded && !lrr.atLock.notice && lrr.after.sealed === 1, 'RED control: the undo that leaves a refused drop unrecorded and unsaid (the release\'s shape) ⇒ the copy stays sealed after the unlock, with no record and no notice', lrr);
+  const lrh = await lockRoad(jsdCopy("  if (typeof vault.onUnlock === 'function') vault.onUnlock(() => {", "  if (false) vault.onUnlock(() => {", 'B-ef1b: no unlock hook').mod, { rowed: true });
+  okF(lrh.atLock.recorded && lrh.after.sealed === 1 && lrh.after.recorded, 'RED control: the door without its unlock hook ⇒ the unlock removes nothing (the copy and its record stay) — the leg judges the hook, not a sweep of its own', lrh);
+  // …a SECOND failing move after the first one's notice was settled (the same labels): the fresh leftover is said again — a notice
+  // closed by the hub's own sweep never silences new copies. RED: the closed-notice rule that holds every closed notice of the same words
+  const l2b = await lockRoad(JSD_REAL, { rowed: true });
+  okF(l2b.atLock.leftover === 1 && l2b.atLock.notices === 1 && /\(1 left: FIRST_ONE\)/.test(l2b.atLock.notice), 'B-ef1b L2: a second failing move with the same labels after the first notice was settled ⇒ the notice is open again (a fresh leftover is always said)', l2b.atLock);
+  const l2bR = await lockRoad(jsdCopy("      if (!fresh && it && it.status !== 'open' && it.resolvedBy !== 'system' && Number(it.resolvedAt) > Number(since) && it.detail === detail) return;", "      if (it && it.status !== 'open' && it.detail === detail) return;", 'B-ef1b: every closed notice held').mod, { rowed: true });
+  okF(l2bR.atLock.leftover === 1 && l2bR.atLock.notices === 0, 'RED control: the rule that holds every closed notice of the same words ⇒ the new copy is left unsaid while the page says «For you names them»', l2bR.atLock);
+  // L3 — THE RECORD COMES FIRST (r333): at each seal the record on disk already names the id being sealed; the move completes with the
+  //      record emptied again. A record that cannot be written ⇒ the move refuses by name (job_secrets_record_unwritable) and seals
+  //      NOTHING. REDs: the record written after (none at the seal); the move that seals without its record
+  const firstRoad = async (mod, extra = {}) => {
+    const D = ownDir(); plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const before = new Set(freeNames(W).map((x) => x.name)), atSeal = [];
+    const pasteX = { addEntry: (o) => { const rec = recOf(D) || []; atSeal.push(!!(o.entry && rec.some((e) => e.entry === o.entry && !e.committed))); return W.paste.addEntry(o); }, dropEntry: (id, o) => W.paste.dropEntry(id, o) };
+    const r = await doorIn(mod, D, { paste: pasteX, ...extra }).answer('move');
+    const out = { code: r.ok ? r.answer : r.code, seals: atSeal.length, atSeal, rec: recOf(D), sealed: freshSince(before).length, fileGone: !fs.existsSync(path.join(D, JS_FILE)) };
+    dropFresh(before);
+    return out;
+  };
+  const l3 = await firstRoad(JSD_REAL);
+  okF(l3.code === 'move' && l3.seals === 2 && l3.atSeal.every(Boolean) && Array.isArray(l3.rec) && l3.rec.length === 0 && l3.sealed === 2 && l3.fileGone,
+    'B-ef1b L3: THE RECORD COMES FIRST — at each seal the record on disk already names that id; the move completes and empties the record', l3);
+  const l3r = await firstRoad(jsdCopy('        return { ok: await writeRec([...rd.entries, ...ids.map((entry, k) => ({ entry, label: labelOf(k) }))]) };', '        return { ok: true };', 'B-ef1b: no record first').mod);
+  okF(l3r.seals === 2 && l3r.atSeal.every((x) => !x), 'RED control: the record not written first ⇒ each seal happens with no record of it on disk (a hub that ended there would leave it unsaid)', l3r);
+  const FAILW = { dirty() { }, durable: async () => false, forget() { } };   // a store writer whose writes never land (the disk refusing)
+  const l3w = await firstRoad(JSD_REAL, { writer: FAILW });
+  okF(l3w.code === 'job_secrets_record_unwritable' && l3w.seals === 0 && l3w.sealed === 0 && !l3w.fileGone, 'B-ef1b L3: a record that cannot be written ⇒ job_secrets_record_unwritable, NOTHING sealed, the file kept', l3w);
+  const l3n = await firstRoad(jsdCopy("      if (!first.ok) return named('job_secrets_record_unwritable');", '      if (false) { }', 'B-ef1b: seal without the record').mod, { writer: FAILW });
+  okF(l3n.seals === 2, 'RED control: the move that seals without its record ⇒ two values sealed with nothing on disk naming them', l3n);
+  // L3c — THE COMMIT (r333 (1), the read's MUST): a planted record with the vault holding the entry — committed + its file GONE ⇒ the
+  //       move completed: the entry KEPT, its row cleared; committed + the SAME file ⇒ the delete never ran: the copy dropped, the
+  //       file kept; «Delete the file» over a committed record ⇒ its rows written back as copies, dropped at the unlock; and at the
+  //       moment of a move's unlink its rows on disk are COMMITTED. REDs: every committed id dropped; every committed id kept;
+  //       the delete without its rewrite; the commit not written
+  const commitRoad = async (mod, { fileThere = false, del = false, other = false } = {}) => {
+    const D = ownDir(), jf = path.join(D, JS_FILE);
+    if (fileThere) plantIn(D, { FIRST_ONE: jsVals[0] });
+    const own = W.paste.addEntry({ label: 'FIRST_ONE', note: note9('FIRST_ONE'), kind: 'secret', value: jsVals[3], by: 'suite' });
+    const st = fileThere ? fs.lstatSync(jf) : null;
+    const id = st ? { ino: other ? st.ino + 1 : st.ino, size: st.size, ctimeMs: st.ctimeMs } : { ino: 1, size: 1, ctimeMs: 1 };   // other: the row names ANOTHER file than the one at the path now
+    fs.writeFileSync(path.join(D, LEFT), JSON.stringify({ entries: [{ entry: own.entry, label: 'FIRST_ONE', committed: id }] }), { mode: 0o600 });
+    let r = null;
+    if (del) { W.vault.lock('test'); const door = doorIn(mod, D); await door.idle(); r = await door.answer('delete'); await door.idle(); await W.vault.unlock(PW); await door.idle(); await quiet(); }
+    else { const door = doorIn(mod, D); await door.idle(); }   // the start's sweep, the vault open
+    const out = { kept: freeNames(W).some((x) => x.name === own.entry), rows: (recOf(D) || []).length, fileThere: fs.existsSync(jf), ...(r ? { answer: r.ok ? r.answer : r.code } : {}) };
+    try { W.paste.dropEntry(own.entry.slice('secret:'.length), { by: 'suite' }); } catch { } clearNotices();
+    return out;
+  };
+  const c1 = await commitRoad(JSD_REAL);
+  const c2 = await commitRoad(JSD_REAL, { fileThere: true });
+  const c3 = await commitRoad(JSD_REAL, { fileThere: true, del: true });
+  okF(c1.kept && c1.rows === 0, 'B-ef1b L3c: a committed row whose file is gone ⇒ the move completed: the entry is KEPT (the person\'s), the row cleared', c1);
+  okF(!c2.kept && c2.rows === 0 && c2.fileThere, 'B-ef1b L3c: a committed row whose file still stands as it was ⇒ the delete never ran: the copy is dropped, the file kept', c2);
+  okF(c3.answer === 'delete' && !c3.kept && c3.rows === 0 && !c3.fileThere, 'B-ef1b L3c: «Delete the file» over a committed row ⇒ its row written back as a copy, dropped at the unlock (the person deletes the values)', c3);
+  const c4 = await commitRoad(JSD_REAL, { fileThere: true, other: true });
+  okF(c4.kept && c4.rows === 0 && c4.fileThere, 'B-ef1b L3c: a committed row naming ANOTHER file than the one at the path ⇒ its move completed: the entry kept, the row cleared', c4);
+  const c4r = await commitRoad(jsdCopy('  const sameFile = (a, st) => !!(a && st && st.isFile() && a.ino === st.ino && a.size === st.size && (!a.birthtimeMs || !st.birthtimeMs || a.birthtimeMs === st.birthtimeMs));', '  const sameFile = (a, st) => !!(a && st && st.isFile());', 'B-ef1b: the file\'s identity not compared').mod, { fileThere: true, other: true });
+  okF(!c4r.kept, 'RED control: the file\'s identity not compared ⇒ any file at the path turns a completed move\'s entry into a copy to drop (the value lost)', c4r);
+  const c1r = await commitRoad(jsdCopy('    const done = (e) => !!e.committed && !fileUnsure && !sameFile(e.committed, fileNow);', '    const done = () => false;', 'B-ef1b: every committed id dropped').mod);
+  okF(!c1r.kept, 'RED control: every committed id dropped ⇒ a completed move\'s entry is deleted after its file is gone (the value lost)', c1r);
+  const c2r = await commitRoad(jsdCopy('    const done = (e) => !!e.committed && !fileUnsure && !sameFile(e.committed, fileNow);', '    const done = (e) => !!e.committed;', 'B-ef1b: every committed id kept').mod, { fileThere: true });
+  okF(c2r.kept, 'RED control: every committed id kept ⇒ the copy of a move whose delete never ran stays beside the file (twins at the next move)', c2r);
+  const c3r = await commitRoad(jsdCopy("if (!rd.entries.some((e) => sameFile(e.committed, lst))) return 'ok';", "return 'ok';", 'B-ef1b: the delete without its rewrite').mod, { fileThere: true, del: true });
+  okF(c3r.kept, 'RED control: «Delete the file» without writing the committed rows back ⇒ the copies survive as «completed» after the person deleted the values', c3r);
+  const PROBE = ['      try { await fsp.unlink(file); } catch (e) {\n', '      try { await (globalThis.__jsdUnlink || fsp.unlink)(file); } catch (e) {\n'];   // a probe placed at the unlink (not a control)
+  const atUnlink = async (mod) => {
+    const D = ownDir(); plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const before = new Set(freeNames(W).map((x) => x.name)); let seen = null;
+    let seenId = null;
+    globalThis.__jsdUnlink = (f) => { seen = recOf(D); const st = fs.lstatSync(f); seenId = { ino: st.ino, size: st.size }; return fs.promises.unlink(f); };
+    const r = await doorIn(mod, D).answer('move');
+    delete globalThis.__jsdUnlink;
+    const out = { code: r.ok ? r.answer : r.code, rowsAtUnlink: seen ? seen.length : null, committedAtUnlink: seen && seenId ? seen.filter((e) => e.committed && e.committed.ino === seenId.ino && e.committed.size === seenId.size).length : null, rowsAfter: (recOf(D) || []).length };
+    dropFresh(before);
+    return out;
+  };
+  const cu = await atUnlink(jsdCopy(PROBE[0], PROBE[1], 'B-ef1b: the unlink observed').mod);
+  okF(cu.code === 'move' && cu.rowsAtUnlink === 2 && cu.committedAtUnlink === 2 && cu.rowsAfter === 0, 'B-ef1b L3c: at the moment of the unlink both rows on disk are COMMITTED (with the file\'s identity); after it the record is empty', cu);
+  const cuR = await atUnlink(jsdCopyN([PROBE, ['label: m.label, committed: idOf(now0) }', 'label: m.label }']], 'B-ef1b: the commit not written').mod);
+  okF(cuR.rowsAtUnlink === 2 && cuR.committedAtUnlink === 0, 'RED control: the commit not written ⇒ plain rows at the unlink (a hub that ended right after it: the next sweep would delete the moved values)', cuR);
+  // L3d — an UNLOCK placed mid-move (the door's own hook fired right after the last seal, before the commit): the running move's ids are
+  //       no sweep's — the move completes. RED: a sweep that may take the running move's ids ⇒ they are dropped and the move refuses
+  //       (its check before the unlink: the vault must still hold every value it sealed — the file is kept)
+  const midRoad = async (mod) => {
+    const D = ownDir(), jf = path.join(D, JS_FILE); plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const hooks = [], V = { state: () => W.vault.state(), secretNames: () => W.vault.secretNames(), audit: (a, b) => W.vault.audit(a, b), onUnlock: (fn) => hooks.push(fn) };
+    let seals = 0;
+    const pasteX = { addEntry: (o) => { const r = W.paste.addEntry(o); if (r && r.ok && ++seals === 2) for (const h of hooks) h(); return r; }, dropEntry: (id, o) => W.paste.dropEntry(id, o) };
+    const before = new Set(freeNames(W).map((x) => x.name));
+    const r = await doorIn(mod, D, { vault: V, paste: pasteX }).answer('move');
+    const out = { hooks: hooks.length, code: r.ok ? r.answer : r.code, sealed: freshSince(before).length, fileGone: !fs.existsSync(jf) };
+    dropFresh(before); clearNotices();
+    return out;
+  };
+  const m1 = await midRoad(JSD_REAL);
+  okF(m1.hooks === 1 && m1.code === 'move' && m1.sealed === 2 && m1.fileGone, 'B-ef1b L3d: an unlock\'s sweep in the middle of a move takes none of its ids — the move completes', m1);
+  const m1r = await midRoad(jsdCopy('    const mine = (e) => !!(inflight && inflight.has(e.entry));', '    const mine = () => false;', 'B-ef1b: the running move\'s ids swept').mod);
+  okF(m1r.code !== 'move' && m1r.sealed === 0 && !m1r.fileGone, 'RED control: a sweep that may take the running move\'s ids ⇒ it drops them mid-move; the move refuses and keeps the file', m1r);
+  // L3e — a record whose READ FAILS (its name a folder: EISDIR) is HELD (src/store-read.js): the press refuses by name
+  //       (job_secrets_record_held), nothing is set aside, nothing written over, nothing sealed; once a read answers, the press moves.
+  //       RED: the old shape — a failed read set aside like bytes that do not parse
+  const heldRoad = async (mod) => {
+    const D = ownDir(); plantIn(D, { FIRST_ONE: jsVals[0] }); fs.mkdirSync(path.join(D, LEFT));
+    const before = new Set(freeNames(W).map((x) => x.name));
+    const door = doorIn(mod, D);
+    const r = await door.answer('move');
+    const out = { code: r.code, sealed: freshSince(before).length, dirKept: (() => { try { return fs.statSync(path.join(D, LEFT)).isDirectory(); } catch { return false; } })(), asides: fs.readdirSync(D).filter((n) => n.startsWith(`${LEFT}.`)).length };
+    fs.rmSync(path.join(D, LEFT), { recursive: true, force: true });
+    for (const n of fs.readdirSync(D).filter((x) => x.startsWith(`${LEFT}.`))) fs.rmSync(path.join(D, n), { recursive: true, force: true });
+    const r2 = await door.answer('move');
+    out.after = r2.ok ? r2.answer : r2.code;
+    dropFresh(before); clearNotices();
+    return out;
+  };
+  const h1 = await heldRoad(JSD_REAL);
+  okF(h1.code === 'job_secrets_record_held' && h1.sealed === 0 && h1.dirKept && h1.asides === 0 && h1.after === 'move', 'B-ef1b L3e: a record whose read fails is HELD — job_secrets_record_held, nothing set aside or sealed; once a read answers the press moves', h1);
+  const h1r = await heldRoad(jsdCopy('    let a = SR.storeAnswer(read, { valid: REC_VALID });', "    let a = SR.storeAnswer(read, { valid: REC_VALID }); if (a.state === 'unreadable') a = { ...a, state: 'corrupt' };", 'B-ef1b: a failed read set aside').mod);
+  okF(h1r.asides === 1 && !h1r.dirKept, 'RED control: a failed read set aside like corrupt bytes (the release\'s mixed shape) ⇒ the live record moved away on a read error', h1r);
+  // L4 — the first press undone with BOTH copies left (their drops refused with the vault UNLOCKED — a store that cannot be written):
+  //      ONE notice «2 left»; a press again while they still refuse MOVES NOTHING (job_secrets_leftover — never a second copy of a value
+  //      beside them); one of them removable ⇒ the next press removes it and the ONE notice is renewed «1 left»; the fault gone ⇒ the
+  //      next press removes the last copy FIRST, then moves: one copy of each value, the record emptied, the notice done. REDs: the
+  //      notice kept as first filed; the move that seals beside copies it could not remove (twins)
+  const againRoad = async (mod) => {
+    const D = ownDir(), jf = path.join(D, JS_FILE);
+    plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const before = new Set(freeNames(W).map((x) => x.name)), stuck = new Map(); let first = true, seals = 0;
+    const pasteX = {
+      addEntry: (o) => { const r = W.paste.addEntry(o); if (r && r.ok) { seals++; if (first) stuck.set(r.entry, o.label); if (first && seals === 2) fs.appendFileSync(jf, ' '); } return r; },   // the first press: its copies refuse their drop, the file edited after its last seal (the undo road)
+      dropEntry: (id, o) => (stuck.has(`secret:${id}`) ? { ok: false, code: 'store_failed' } : W.paste.dropEntry(id, o)),
+    };
+    const door = doorIn(mod, D, { paste: pasteX });
+    const step = async () => { const r = await door.answer('move'); first = false; const f = freshSince(before); return { code: r.ok ? r.answer : r.code, leftover: r.leftover || 0, sealed: f.length, firsts: f.filter((x) => x.label === 'FIRST_ONE').length, notices: noticeOf().length, words: noticeWords(), recorded: recordedIn(D) }; };
+    const one = await step();
+    const two = await step();
+    for (const [e, l] of [...stuck]) if (l === 'FIRST_ONE') stuck.delete(e);
+    const three = await step();
+    stuck.clear();
+    const four = { ...(await step()), fileGone: !fs.existsSync(jf) };
+    await door.sweepLeft(); dropFresh(before); clearNotices();
+    return { one, two, three, four };
+  };
+  const l4 = await againRoad(JSD_REAL);
+  okF(l4.one.code === 'job_secrets_changed' && l4.one.leftover === 2 && l4.one.sealed === 2 && l4.one.notices === 1 && /\(2 left: FIRST_ONE, SECOND_ONE\)/.test(l4.one.words) && l4.one.recorded,
+    'B-ef1b L4: the first press undone with both copies refused (the vault unlocked) ⇒ ONE notice «2 left», the record keeps them', l4.one);
+  okF(l4.two.code === 'job_secrets_leftover' && l4.two.leftover === 2 && l4.two.sealed === 2 && l4.two.notices === 1 && /\(2 left: FIRST_ONE, SECOND_ONE\)/.test(l4.two.words),
+    'B-ef1b L4: …a press again while they still refuse moves NOTHING (job_secrets_leftover) — no second copy of a value beside them', l4.two);
+  okF(l4.three.code === 'job_secrets_leftover' && l4.three.leftover === 1 && l4.three.sealed === 1 && l4.three.firsts === 0 && l4.three.notices === 1 && /\(1 left: SECOND_ONE\)/.test(l4.three.words),
+    'B-ef1b L4: …one of them removable ⇒ the next press removes it, and the ONE notice is renewed «1 left» (its key re-filed)', l4.three);
+  okF(l4.four.code === 'move' && l4.four.sealed === 2 && l4.four.firsts === 1 && !l4.four.recorded && l4.four.notices === 0 && l4.four.fileGone,
+    'B-ef1b L4: …the fault gone ⇒ the next press removes the last copy FIRST, then moves: one copy of each value, the record emptied, the notice done', l4.four);
+  const l4r = await againRoad(jsdCopy('      const n = entries.length, names = ', "      if ((live.idsWhere((i) => i.sessionKey === 'vault' && i.itemKey === LEFTOVER_ITEM && i.status === 'open') || []).length) return;\n      const n = entries.length, names = ", 'B-ef1b: the notice kept as first filed').mod);
+  okF(l4r.three.notices === 1 && /\(2 left/.test(l4r.three.words), 'RED control: the notice kept as first filed ⇒ «2 left» while 1 is', l4r.three);
+  const l4s = await againRoad(jsdCopy("    if (sw.left) return named('job_secrets_leftover', { leftover: sw.left });", '    if (false) { }', 'B-ef1b: the move beside copies left').mod);
+  okF(l4s.two.code === 'move' && l4s.two.firsts === 2, 'RED control: the move that seals beside copies it could not remove ⇒ two copies of FIRST_ONE in the vault (twins with one label)', l4s.two);
+  // L5 — the notice's own advice: the person DELETES the copies by hand in the Vault window while the hub runs ⇒ the next press finds
+  //      nothing left (what the vault no longer holds is no leftover), moves, and the notice is done. RED: the sweep that trusts the
+  //      record for what the vault no longer holds and counts «no such entry» as still left ⇒ Move keeps refusing
+  const handRoad = async (mod) => {
+    const D = ownDir(), jf = path.join(D, JS_FILE);
+    plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const before = new Set(freeNames(W).map((x) => x.name)), stuck = new Set(); let first = true, seals = 0;
+    const pasteX = {
+      addEntry: (o) => { const r = W.paste.addEntry(o); if (r && r.ok) { seals++; if (first) stuck.add(r.entry); if (first && seals === 2) fs.appendFileSync(jf, ' '); } return r; },
+      dropEntry: (id, o) => (stuck.has(`secret:${id}`) && freeNames(W).some((x) => x.name === `secret:${id}`) ? { ok: false, code: 'store_failed' } : W.paste.dropEntry(id, o)),   // refused while the vault holds it; one deleted by hand answers as the real door does
+    };
+    const door = doorIn(mod, D, { paste: pasteX });
+    const r1 = await door.answer('move'); first = false;
+    for (const e of stuck) W.paste.dropEntry(e.slice('secret:'.length), { by: 'suite' });   // the Vault window's delete, by the person
+    const r2 = await door.answer('move');
+    const out = { one: { code: r1.code, leftover: r1.leftover || 0 }, two: { code: r2.ok ? r2.answer : r2.code, sealed: freshSince(before).length, recorded: recordedIn(D), notices: noticeOf().length } };
+    await door.sweepLeft(); dropFresh(before); clearNotices();
+    return out;
+  };
+  const l5 = await handRoad(JSD_REAL);
+  okF(l5.one.leftover === 2 && l5.two.code === 'move' && l5.two.sealed === 2 && !l5.two.recorded && l5.two.notices === 0, 'B-ef1b L5: the copies deleted by hand in the Vault window ⇒ the next press finds nothing left and moves; the record emptied, the notice done', l5);
+  const l5r = await handRoad(jsdCopyN([["if (b && MOVED_NOTE.test(String(b.note || ''))) out.push({ entry: e.entry, label: String(b.label || e.entry).slice(0, 80) });", "if (!b || MOVED_NOTE.test(String(b.note || ''))) out.push({ entry: e.entry, label: String((b && b.label) || e.label || e.entry).slice(0, 80) });"], ["if (!(r && (r.ok || r.code === 'entry_unknown_id'))) still.push(e); }", 'if (!(r && r.ok)) still.push(e); }']], 'B-ef1b: the record trusted for what the vault no longer holds').mod);
+  okF(l5r.two.code === 'job_secrets_leftover', 'RED control: the sweep that trusts the record for what the vault no longer holds ⇒ after the person deleted both copies, Move still refuses', l5r);
+  // L6 — the leftover count on the two OTHER undo roads (a value the vault refuses; a file that cannot be deleted — its unlink made to
+  //      fail, a fault, not a control): each answer carries leftover 1 when its undo's drop is refused; a committed id is written back
+  //      as a copy to drop (never kept as a moved entry)
+  const otherRoads = async () => {
+    const before = new Set(freeNames(W).map((x) => x.name)), stuck = new Set();
+    const pasteS = { addEntry: (o) => { const r = W.paste.addEntry(o); if (r && r.ok) stuck.add(r.entry); return r; }, dropEntry: (id, o) => (stuck.has(`secret:${id}`) ? { ok: false, code: 'store_failed' } : W.paste.dropEntry(id, o)) };
+    const D1 = ownDir(); plantIn(D1, { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) });
+    const rv = await doorIn(JSD_REAL, D1, { paste: pasteS }).answer('move');
+    const D2 = ownDir(); plantIn(D2, { FIRST_ONE: jsVals[0] });
+    const md = jsdCopy('      try { await fsp.unlink(file); } catch (e) {\n', "      try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n", 'B-ef1b: the unlink made to fail (a fault in the window)').mod;
+    const ru = await doorIn(md, D2, { paste: pasteS }).answer('move');
+    const out = { value: { code: rv.code, leftover: rv.leftover || 0, recorded: recordedIn(D1) }, undeletable: { code: ru.code, leftover: ru.leftover || 0, recorded: recordedIn(D2), committedLeft: (recOf(D2) || []).some((e) => e.committed), fileKept: fs.existsSync(path.join(D2, JS_FILE)) } };
+    stuck.clear(); dropFresh(before); clearNotices();
+    return out;
+  };
+  const l6 = await otherRoads();
+  okF(l6.value.code === 'value_too_long' && l6.value.leftover === 1 && l6.value.recorded && l6.undeletable.code === 'job_secrets_undeletable' && l6.undeletable.leftover === 1 && l6.undeletable.recorded && !l6.undeletable.committedLeft && l6.undeletable.fileKept,
+    'B-ef1b L6: the refused value and the undeletable file each answer how many copies were left (leftover 1) and keep them recorded — a committed id written back as a copy to drop', l6);
+  // L7 — a record that CANNOT BE READ is not an empty record (r333): the press refuses by name (job_secrets_record_unreadable, naming
+  //      the copy set aside), the damaged bytes are kept under a dated name and never written over, nothing is sealed, the notice
+  //      says it; a press again refuses the same; once the person removed the set-aside file the press moves and the notice is done.
+  //      RED: the record read as empty (the bytes written over, the move sealing beside what it named)
+  const badRoad = async (mod) => {
+    const D = ownDir(); plantIn(D, { FIRST_ONE: jsVals[0], SECOND_ONE: jsVals[1] });
+    const bytes = '{"entries": [ this is not a record';
+    fs.writeFileSync(path.join(D, LEFT), bytes, { mode: 0o600 });
+    const before = new Set(freeNames(W).map((x) => x.name));
+    const door = doorIn(mod, D);
+    const r1 = await door.answer('move');
+    const asides = fs.readdirSync(D).filter((n) => n.startsWith(`${LEFT}.corrupt-`));
+    const one = { code: r1.ok ? r1.answer : r1.code, file: r1.file || null, asides: asides.length, keptBytes: asides.length === 1 && fs.readFileSync(path.join(D, asides[0]), 'utf8') === bytes, sealed: freshSince(before).length, words: noticeWords() };
+    const r2 = await door.answer('move');
+    const two = { code: r2.ok ? r2.answer : r2.code, sealed: freshSince(before).length };
+    for (const a of asides) fs.unlinkSync(path.join(D, a));
+    const r3 = await door.answer('move');
+    const three = { code: r3.ok ? r3.answer : r3.code, sealed: freshSince(before).length, notices: noticeOf().length };
+    dropFresh(before); clearNotices();
+    return { one, two, three };
+  };
+  const l7 = await badRoad(JSD_REAL);
+  okF(l7.one.code === 'job_secrets_record_unreadable' && /^data\/job-secrets\.leftover\.json\.corrupt-/.test(l7.one.file || '') && l7.one.asides === 1 && l7.one.keptBytes && l7.one.sealed === 0 && /could not be read; it is kept as data\/job-secrets\.leftover\.json\.corrupt-/.test(l7.one.words || ''),
+    'B-ef1b L7: a record that cannot be read ⇒ job_secrets_record_unreadable naming the copy set aside (its bytes kept, never written over), nothing sealed, the notice says it', l7.one);
+  okF(l7.two.code === 'job_secrets_record_unreadable' && l7.two.sealed === 0 && l7.three.code === 'move' && l7.three.sealed === 2 && l7.three.notices === 0,
+    'B-ef1b L7: …a press again refuses the same; once the set-aside file is removed the press moves and the notice is done', { two: l7.two, three: l7.three });
+  const l7r = await badRoad(jsdCopy("    if (a.state === 'corrupt') { const to = await setAside();", "    if (a.state === 'corrupt') { a = { state: 'missing', writable: true }; } if (false) { const to = await setAside();", 'B-ef1b: the record read as empty').mod);
+  okF(l7r.one.code === 'move' && !l7r.one.keptBytes, 'RED control: the damaged record read as empty ⇒ the move goes on and the bytes are written over', l7r.one);
+  // L8 — the record is a plain file under data/: a PLANTED one (a free entry the person keeps — no move's —, an unknown id, words a
+  //      person must never read as the hub's) drops NOTHING of it — only an entry a move sealed (its note) is ever dropped — and its
+  //      rows go. The start's sweep judges it (door.idle waits for it). RED: the sweep that drops whatever the record names
+  const plantRoad = async (mod) => {
+    const D = ownDir();
+    const own = W.paste.addEntry({ label: 'Router password', note: 'the flat router', kind: 'secret', value: jsVals[2], by: 'suite' });
+    const bait = ['Open', 'example.invalid/now'].join(' https://');
+    fs.writeFileSync(path.join(D, LEFT), JSON.stringify({ entries: [{ entry: own.entry, label: bait }, { entry: 'secret:00000000aa', label: bait }] }), { mode: 0o600 });
+    const door = doorIn(mod, D); await door.idle();
+    const out = { vault: W.vault.state(), kept: freeNames(W).some((x) => x.name === own.entry), recorded: recordedIn(D), saidBait: JSON.stringify(W.userTodos.snapshot().open || []).includes('example.invalid'), notices: noticeOf().length };
+    try { W.paste.dropEntry(own.entry.slice(7), { by: 'suite' }); } catch { } clearNotices();
+    return out;
+  };
+  const l8 = await plantRoad(JSD_REAL);
+  okF(l8.vault === 'unlocked' && l8.kept && !l8.recorded && !l8.saidBait && l8.notices === 0, 'B-ef1b L8: a planted record (the person\'s own entry — no move\'s —, an unknown id, bait words) ⇒ nothing dropped, nothing said, its rows gone (by the start\'s sweep)', l8);
+  const l8r = await plantRoad(jsdCopy("if (b && MOVED_NOTE.test(String(b.note || '')))", 'if (b)', 'B-ef1b: whatever the record names').mod);
+  okF(!l8r.kept, 'RED control: the sweep that drops whatever the record names ⇒ the person\'s own entry is deleted by a planted file', l8r);
+  // L9 — a LOCKED start (a stand-in vault: locked, its listing given): nothing is dropped and the record is kept; what the vault holds
+  //      as a move's copy is named with the VAULT's label (never the record's words); over an unreadable vault record (a listing of
+  //      nothing) the open notice is not settled; a notice the person CLOSED is not opened again at the next start while nothing it
+  //      says changed, and is when it does. REDs: the drop while locked; the label from the record; no start sweep; the closed
+  //      notice reopened at every start
+  const BAIT9 = ['Open', 'example.invalid/now'].join(' https://');
+  const TEXT9 = JSON.stringify({ entries: [{ entry: 'secret:11111111bb', label: BAIT9 }, { entry: 'secret:22222222cc', label: BAIT9 }] });
+  const lockedStart = async (mod, listing, D) => {
+    if (!recordedIn(D)) fs.writeFileSync(path.join(D, LEFT), TEXT9, { mode: 0o600 });
+    let drops = 0;
+    const door = mod.create({ dataDir: D, userTodos: W.userTodos, log: (m) => LOGS.push(String(m)), vault: { state: () => 'locked', secretNames: () => listing, audit() { }, onUnlock() { } }, paste: { addEntry: () => ({ ok: false, code: 'vault_locked' }), dropEntry: () => { drops++; return { ok: true }; } } });
+    await door.idle();   // the start's sweep is what is judged
+    return { drops, recorded: fs.existsSync(path.join(D, LEFT)) && fs.readFileSync(path.join(D, LEFT), 'utf8') === TEXT9, notices: noticeOf().length, words: noticeWords(), saidBait: JSON.stringify(W.userTodos.snapshot().open || []).includes('example.invalid') };
+  };
+  const held1 = [{ name: 'secret:11111111bb', label: 'FIRST_ONE', note: note9('FIRST_ONE'), kind: 'secret' }];
+  const held2 = [...held1, { name: 'secret:22222222cc', label: 'SECOND_ONE', note: note9('SECOND_ONE'), kind: 'secret' }];
+  const D9 = ownDir();
+  const l9a = await lockedStart(JSD_REAL, held1, D9);
+  const l9b = await lockedStart(JSD_REAL, [], D9);
+  okF(l9a.drops === 0 && l9a.recorded && l9a.notices === 1 && /\(1 left: FIRST_ONE\)/.test(l9a.words) && !l9a.saidBait, 'B-ef1b L9: a locked start drops nothing, keeps the record, and names the vault\'s own copy by the VAULT\'s label (never the record\'s words)', l9a);
+  okF(l9b.drops === 0 && l9b.recorded && l9b.notices === 1, 'B-ef1b L9: …over an unreadable vault record (a listing of nothing) the open notice stays open and the record kept', l9b);
+  for (const it of noticeOf()) W.userTodos.setStatus(it.id, 'done', 'user');   // the person closes it
+  const l9c = await lockedStart(JSD_REAL, held1, D9);
+  const l9d = await lockedStart(JSD_REAL, held2, D9);
+  okF(l9c.notices === 0 && l9d.notices === 1 && /\(2 left: FIRST_ONE, SECOND_ONE\)/.test(l9d.words), 'B-ef1b L9: a notice the person closed is NOT opened again at the next start while nothing it says changed — and is, once the copies left change', { same: l9c, changed: l9d });
+  clearNotices();
+  const D9r = ownDir();
+  const l9r = await lockedStart(jsdCopy("    if (vault.state() !== 'unlocked') {\n      if (was.length || held.length || aside)", '    if (false) {\n      if (was.length || held.length || aside)', 'B-ef1b: the sweep that drops while locked').mod, held1, D9r);
+  clearNotices();
+  okF(l9r.drops === 1 && !l9r.recorded, 'RED control: the sweep that drops while locked ⇒ a drop asked of a locked vault and the record rewritten on its word', l9r);
+  const l9w = await lockedStart(jsdCopy('label: String(b.label || e.entry).slice(0, 80)', 'label: String(e.label || b.label).slice(0, 80)', 'B-ef1b: the label taken from the record').mod, held1, ownDir());
+  clearNotices();
+  okF(l9w.saidBait, 'RED control: the label taken from the record ⇒ a planted record\'s words are said in a high-urgency notice from the hub', l9w);
+  const l9s = await lockedStart(jsdCopy('  sweepLeft().catch(() => { });   // the start:', '  void 0;   // the start:', 'B-ef1b: no start sweep').mod, held1, ownDir());
+  clearNotices();
+  okF(l9s.drops === 0 && l9s.notices === 0, 'RED control: the door without its start sweep ⇒ a stopped hub\'s leftover is said by nobody at the start — the leg judges the start, not a sweep of its own', l9s);
+  const D9o = ownDir();
+  await lockedStart(JSD_REAL, held1, D9o);
+  for (const it of noticeOf()) W.userTodos.setStatus(it.id, 'done', 'user');
+  const l9o = await lockedStart(jsdCopy("      if (!fresh && it && it.status !== 'open' && it.resolvedBy !== 'system' && Number(it.resolvedAt) > Number(since) && it.detail === detail) return;", '', 'B-ef1b: the closed notice reopened').mod, held1, D9o);
+  clearNotices();
+  okF(l9o.notices === 1, 'RED control: without the closed-notice rule a start reopens the notice the person closed though nothing changed', l9o);
+  // the closed-notice rule's two other clauses: a notice the HUB'S own sweep closed never silences the same copies at the next start;
+  // a record written AFTER the person closed it (its copies new, the words the same) opens it again. REDs: each clause cut
+  const held3 = [{ name: 'secret:11111111bb', label: 'THIRD_ONE', note: note9('THIRD_ONE'), kind: 'secret' }];
+  const D9s = ownDir();
+  await lockedStart(JSD_REAL, held3, D9s);
+  for (const it of noticeOf()) W.userTodos.setStatus(it.id, 'done', 'system');
+  const l9e = await lockedStart(JSD_REAL, held3, D9s);
+  for (const it of noticeOf()) W.userTodos.setStatus(it.id, 'done', 'system');   // closed by the hub again: the control below starts from the same state
+  const D9sr = ownDir();
+  const s9 = await lockedStart(JSD_REAL, held3, D9sr);   // the setup: filed again (it was closed by the hub)
+  for (const it of noticeOf()) W.userTodos.setStatus(it.id, 'done', 'system');
+  const l9er = await lockedStart(jsdCopy("      if (!fresh && it && it.status !== 'open' && it.resolvedBy !== 'system' && Number(it.resolvedAt) > Number(since) && it.detail === detail) return;", "      if (!fresh && it && it.status !== 'open' && Number(it.resolvedAt) > Number(since) && it.detail === detail) return;", 'B-ef1b: a hub-closed notice held').mod, held3, D9sr);
+  clearNotices();
+  okF(l9e.notices === 1 && /\(1 left: THIRD_ONE\)/.test(l9e.words || ''), 'B-ef1b L9: a notice the HUB\'s sweep closed never silences the same copies at the next start', l9e);
+  okF(s9.notices === 1 && l9er.notices === 0, 'RED control: the rule that holds a notice the hub closed ⇒ the copies are unsaid at the next start', l9er);
+  const lateWrite = async (mod, label) => {
+    const held4 = [{ name: 'secret:11111111bb', label, note: note9(label), kind: 'secret' }];   // its own words: the first start below always files it
+    const D = ownDir();
+    const first = await lockedStart(JSD_REAL, held4, D);
+    if (first.notices !== 1) return { setup: first };
+    for (const it of noticeOf()) W.userTodos.setStatus(it.id, 'done', 'user');   // the person closes it…
+    fs.writeFileSync(path.join(D, LEFT), JSON.stringify({ ...JSON.parse(TEXT9), at: Date.now() + 1000 }), { mode: 0o600 });   // …and a later write of the record names copies again
+    const out = await lockedStart(mod, held4, D);
+    clearNotices();
+    return out;
+  };
+  const l9f = await lateWrite(JSD_REAL, 'FOURTH_ONE');
+  okF(l9f.notices === 1 && /\(1 left: FOURTH_ONE\)/.test(l9f.words || ''), 'B-ef1b L9: a record written AFTER the person closed the notice (the same words) opens it again', l9f);
+  const l9fr = await lateWrite(jsdCopy("      if (!fresh && it && it.status !== 'open' && it.resolvedBy !== 'system' && Number(it.resolvedAt) > Number(since) && it.detail === detail) return;", "      if (!fresh && it && it.status !== 'open' && it.resolvedBy !== 'system' && it.detail === detail) return;", 'B-ef1b: the closed notice judged by its words alone').mod, 'FIFTH_ONE');
+  okF(!l9fr.setup && l9fr.notices === 0, 'RED control: the closed-notice rule judged by its words alone ⇒ copies written after the person closed it are unsaid', l9fr);
+  // L10 — AFTER A RESTART WITH NOTHING LEFT the open notice is settled (r333): an earlier hub's notice, no record, the vault open ⇒ the
+  //       start's sweep closes it. RED: the sweep that returns before it settles when the record and the vault hold nothing
+  const restartRoad = async (mod, { locked = false } = {}) => {
+    const D = ownDir();
+    W.userTodos.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', itemKey: 'job-secrets-leftover', text: 'Moving the job secrets stopped and left copies in the vault', detail: 'an earlier hub\'s words', openCap: 21 });
+    const before = noticeOf().length;
+    if (locked) W.vault.lock('test');   // every real start is LOCKED (no auto-unlock)
+    const door = doorIn(mod, D); await door.idle();
+    const out = { vault: W.vault.state(), before, notices: noticeOf().length };
+    if (locked) { await W.vault.unlock(PW); await quiet(); }
+    return out;
+  };
+  const l10L = await restartRoad(JSD_REAL, { locked: true });
+  clearNotices();
+  okF(l10L.vault === 'locked' && l10L.before === 1 && l10L.notices === 0, 'B-ef1b L10: a LOCKED start (every real one) with nothing left settles the open notice', l10L);
+  const l10Lr = await restartRoad(jsdCopy('      else if (!rd.entries.length) sayLeft([], { settle: true });', '', 'B-ef1b: no settle at a locked start').mod, { locked: true });
+  clearNotices();
+  okF(l10Lr.notices === 1, 'RED control: the locked start that never settles ⇒ the notice stays open until the first unlock', l10Lr);
+  const l10 = await restartRoad(JSD_REAL);
+  clearNotices();
+  okF(l10.vault === 'unlocked' && l10.before === 1 && l10.notices === 0, 'B-ef1b L10: after a restart with nothing left, the open notice is settled by the start\'s sweep', l10);
+  const l10r = await restartRoad(jsdCopy('    const still = [];\n    for (const e of was) {', '    if (!was.length && !rd.entries.length) return { left: 0, aside, locked: false };\n    const still = [];\n    for (const e of was) {', 'B-ef1b: no settle when nothing is left').mod);
+  clearNotices();
+  okF(l10r.notices === 1, 'RED control: the sweep that returns before it settles when nothing is left ⇒ the notice stays open after a restart', l10r);
+  // L11 — a LOCK landing between the move's state check and its sweep (placed in the vault's own listing, which the sweep reads) ⇒ the
+  //       press answers the locked word (vault_locked), never «copies left». RED: the move that reads the sweep's locked answer as copies left
+  const lockBetween = async (mod) => {
+    const D = ownDir(); plantIn(D, { FIRST_ONE: jsVals[0] });
+    const own = W.paste.addEntry({ label: 'FIRST_ONE', note: note9('FIRST_ONE'), kind: 'secret', value: jsVals[3], by: 'suite' });
+    fs.writeFileSync(path.join(D, LEFT), JSON.stringify({ entries: [{ entry: own.entry, label: 'FIRST_ONE' }] }), { mode: 0o600 });
+    let arm = false;
+    const V = { state: () => W.vault.state(), secretNames: () => { if (arm) { arm = false; W.vault.lock('test'); } return W.vault.secretNames(); }, audit: (a, b) => W.vault.audit(a, b) };
+    W.vault.lock('test');
+    const door = doorIn(mod, D, { vault: V }); await door.idle();   // locked at its start: it says, drops nothing
+    await W.vault.unlock(PW); arm = true;
+    const r = await door.answer('move');
+    const out = { code: r.code, leftover: r.leftover || 0, lockedNow: W.vault.state() };
+    await W.vault.unlock(PW);
+    try { W.paste.dropEntry(own.entry.slice(7), { by: 'suite' }); } catch { } clearNotices();
+    return out;
+  };
+  const l11 = await lockBetween(JSD_REAL);
+  okF(l11.code === 'vault_locked' && l11.lockedNow === 'locked', 'B-ef1b L11: a lock landing between the press\'s state check and its sweep ⇒ vault_locked (the locked word, never «copies left»)', l11);
+  const l11r = await lockBetween(jsdCopy("    if (sw.locked) return named('vault_locked');", '', 'B-ef1b: the locked sweep read as copies left').mod);
+  okF(l11r.code === 'job_secrets_leftover', 'RED control: the move that reads the sweep\'s locked answer as copies left ⇒ job_secrets_leftover while the vault is locked', l11r);
+  // the ROUTE (the world's own door over POST /api/vault/job-secrets/move): a record that cannot be read ⇒ 409 with its code and the
+  // copy set aside; the two other statuses (job_secrets_leftover 409, job_secrets_record_unwritable 500) pinned in the route's table
+  {
+    await quiet();   // every door hooked on the vault has finished the sweeps the unlocks above queued (no second reader of the planted record)
+    plantJS(W, { FIRST_ONE: jsVals[0] });
+    fs.writeFileSync(path.join(W.dataDir, LEFT), 'not a record', { mode: 0o600 });
+    const h = await S.hit('/api/vault/job-secrets/move');
+    const asides = fs.readdirSync(W.dataDir).filter((n) => n.startsWith(`${LEFT}.corrupt-`));
+    okF(h.status === 409 && h.json.code === 'job_secrets_record_unreadable' && /^data\/job-secrets\.leftover\.json\.corrupt-/.test(h.json.file || '') && asides.length === 1 && jsHere(W),
+      'B-ef1b the ROUTE: a record that cannot be read ⇒ 409 job_secrets_record_unreadable naming the copy set aside; nothing moved, the file kept', { status: h.status, code: h.json.code, file: h.json.file, asides: asides.length, kept: jsHere(W) });
+    for (const a of asides) fs.unlinkSync(path.join(W.dataDir, a));
+    try { fs.unlinkSync(jsf); } catch { }
+    clearNotices();
+    const RSRC = fs.readFileSync(path.join(REPO, 'src/routes/vault.js'), 'utf8');
+    const statuses = { leftover: /\bjob_secrets_leftover: 409,/.test(RSRC), unreadable: /\bjob_secrets_record_unreadable: 409,/.test(RSRC), unwritable: /\bjob_secrets_record_unwritable: 500,/.test(RSRC), held: /\bjob_secrets_record_held: 503,/.test(RSRC) };
+    okF(Object.values(statuses).every(Boolean), 'B-ef1b the route\'s statuses for the refusals no leg drives over the wire (a pin): job_secrets_leftover 409, job_secrets_record_unwritable 500, job_secrets_record_held 503', statuses);
+  }
   // (6) the not-a-file refusal says where to act (the page's words — a person reads them in the toast)
   ok(fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8').includes("job_secrets_not_a_file: () => t('data/job-secrets.retired.json is a link, a folder or a file with a second name — nothing was read or deleted. A link: put the file it points to in its place. A second name: delete that other name. A folder: move it out of the way. Then press again'),"), 'r13: job_secrets_not_a_file names the file and the way on for each kind — a link: the file it points to put in its place (never «remove the link»: the next press would settle the notice with the values still on disk), a second name deleted, a folder moved away');
   ok(fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8').includes("— nothing was moved; the file is kept: correct that value in data/job-secrets.retired.json, then press again')"), 'r13: job_secrets_value_shape names the way on too (correct that value in the file, then press again) — Delete is not the only road left');
@@ -1368,14 +1799,14 @@ async function runRoad(name, { door, routes } = {}) {
   const JSD = 'src/server/job-secrets-door.js';
   const jBase = await jsRoad('m-js-base', { doc: { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) } });
   ok(jBase.code === 'value_too_long' && jBase.sealed === 0 && jBase.here, 'B-ef1b the real door: a refused value seals nothing and keeps the file (the mutants\' baseline)', jBase);
-  const jUndo = await jsRoad('m-js-undo', { jsDoor: mutant(JSD, '        undo();\n        return named(', '        return named('), doc: { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) } });
+  const jUndo = await jsRoad('m-js-undo', { jsDoor: mutant(JSD, '          const leftover = await undo();\n          return named(', '          const leftover = 0;\n          return named('), doc: { FIRST_ONE: jsVals[0], TOO_LONG: 'x'.repeat(P.LIMITS.value + 1) } });
   ok(jUndo.code === 'value_too_long' && jUndo.sealed === 1, 'MUTANT B-ef1b no undo on a refused value ⇒ the one sealed before it stays — HALF-MOVED (RED)', jUndo);
   const JS_HEXNAME = ['x9QzA', '7pLm'].join('-') + '.tok';   // a value-looking string pasted as a NAME that the free entry's words rule takes but the door's safeName hides (no variable's shape) — the restack's tb runs showed an sk- name AND a hex run refused by the words rule itself (name_secret), so the mutant could not show either
-  const jShow = await jsRoad('m-js-show', { jsDoor: mutant(JSD, '      const shown = safeName(name);\n      const r = paste.addEntry(', '      const shown = name;\n      const r = paste.addEntry('), doc: { [JS_HEXNAME]: jsVals[2] } });
+  const jShow = await jsRoad('m-js-show', { jsDoor: mutant(JSD, '        const shown = safeName(name);\n        let r = null,', '        const shown = name;\n        let r = null,'), doc: { [JS_HEXNAME]: jsVals[2] } });
   ok(jShow.labels.includes(JS_HEXNAME), 'MUTANT B-ef1b every name shown ⇒ a pasted VALUE in the name field becomes an entry\'s name in the Vault window (RED — the real door names it «Job secret N»)', jShow.labels.length);
-  const jKept = await jsRoad('m-js-kept', { jsDoor: mutant(JSD, "    try { await fsp.unlink(file); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();", "    try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();"), doc: { FIRST_ONE: jsVals[0] } });
+  const jKept = await jsRoad('m-js-kept', { jsDoor: mutant(JSD, "      try { await fsp.unlink(file); } catch (e) {\n        if (!(e && e.code === 'ENOENT')) { const leftover = await undo();", "      try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n        if (!(e && e.code === 'ENOENT')) { const leftover = await undo();"), doc: { FIRST_ONE: jsVals[0] } });
   ok(jKept.code === 'job_secrets_undeletable' && jKept.sealed === 0 && jKept.here, 'B-ef1b a file that cannot be deleted (a copy whose unlink fails) ⇒ job_secrets_undeletable, NOTHING sealed (undone), the file kept — a second press is the same press', jKept);
-  const jKeptNoUndo = await jsRoad('m-js-kept-noundo', { jsDoor: mutant(JSD, "    try { await fsp.unlink(file); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) { undo();", "    try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n      if (!(e && e.code === 'ENOENT')) {"), doc: { FIRST_ONE: jsVals[0] } });
+  const jKeptNoUndo = await jsRoad('m-js-kept-noundo', { jsDoor: mutant(JSD, "      try { await fsp.unlink(file); } catch (e) {\n        if (!(e && e.code === 'ENOENT')) { const leftover = await undo();", "      try { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); } catch (e) {\n        if (!(e && e.code === 'ENOENT')) { const leftover = 0;"), doc: { FIRST_ONE: jsVals[0] } });
   ok(jKeptNoUndo.code === 'job_secrets_undeletable' && jKeptNoUndo.sealed === 1, 'MUTANT B-ef1b no undo when the file cannot be deleted ⇒ the value sealed AND the file kept — a second press would seal it twice (RED)', jKeptNoUndo);
   // lane login-request-card: the login road's own mutants
   const MPW = ['mutant', 'road', 'pw'].join('-');   // built, never a literal the secret scan reads as an assignment
@@ -1478,6 +1909,89 @@ console.log('⑳ B-44f3 (主开发 05:00Z, 1) — a vault LOCK while For you is 
     'a press while For you is held is refused BY ITS DOOR over the wire (503 todos-unread, the held store\'s own sentence — never «that request is gone»); a LOCK while held withdraws the request AT THE READ (done · vault_locked — a lock ends every ask that was not pressed)', L);
   const Lx = await lockScene('held-lock-c', mutant('src/server/vault-paste-door.js', "    if (userTodos && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') { if (!lockAtRead) {", "    if (false) { if (!lockAtRead) {"));
   ok(Lx.status === 'open', 'MUTANT the lock\'s withdraw not owed while held ⇒ the request stays OPEN after the read (pressable after a lock)', Lx);
+}
+
+console.log('⑧d B-ef1b — the job-secrets notice\'s two buttons on the PAGE (src/lib/vault-paste-box.js answerJobSecrets, bundled as it ships)');
+{
+  // THE PAGE'S HALF, the whole road: no vault ⇒ the SETUP (nothing posted); locked ⇒ the unlock asked FIRST, the move posted only once
+  // it unlocked (a close without one posts nothing); «Delete the file» ⇒ a CONFIRM first (declined ⇒ nothing posted); the vault shut
+  // between the press and the answer ⇒ its own door (the unlock). The module bundled as it ships; only its direct imports are the page
+  // edge (globalThis.__jsp records every post, toast, confirm, setup and unlock). REDs: each branch cut through anchored()
+  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+  const JDIR = scratch('vault-paste-jsp'); fs.mkdirSync(JDIR, { recursive: true });   // ended at exit by scratch.mjs (test-architecture: every /tmp/vs-* mint is ended)
+  const STUBS = {
+    './i18n.js': 'export const t = (s, p) => (p ? String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : s);',
+    './utils.js': 'const P = () => globalThis.__jsp; export const createModalShell = () => ({ body: null, close() {}, raised: false }); export const fetchJson = (u, o) => P().fetch(u, o); export const showToast = (m, o) => P().toast(m, o); export const latestRender = () => async () => true; export const escHtml = (x) => String(x); export const showConfirmDialog = (o) => P().confirm(o);',
+    './vault-unlock.js': 'const P = () => globalThis.__jsp; export const vaultFacts = () => ({ state: P().state }); export const showUnlock = (o) => P().unlock(o); export const showSetup = (o) => P().setup(o); export const unlockThen = (done) => P().unlockThen(done);',
+    './vault-login-row.js': 'export const loginFields = () => ({}); export const loginRefusalWords = () => "";',
+    './use-login-words.js': 'export const useLoginWords = () => "";',
+    '../inbox-origin.js': 'export const fieldWhole = () => true;',
+    './foryou-links.js': 'export const linkedHtml = (x) => String(x); export const maskedLinkNote = () => "";',
+    './vault-totp-row.js': 'export const showTotpAddDialog = () => {}; export const totpFields = () => ({ nodes: [], wipe() {}, doSave: async () => false });',
+  };
+  const SRC = fs.readFileSync(path.join(REPO, 'src/lib/vault-paste-box.js'), 'utf8');
+  let nb = 0;
+  const boxOf = async (src) => {
+    const out = await esbuild.build({ stdin: { contents: src, resolveDir: path.join(REPO, 'src/lib'), sourcefile: 'vault-paste-box.js', loader: 'js' }, bundle: true, format: 'cjs', platform: 'node', write: false, logLevel: 'silent',
+      plugins: [{ name: 'jsp', setup(b) { b.onResolve({ filter: /^(\.\/(i18n|utils|vault-unlock|vault-login-row|use-login-words|foryou-links|vault-totp-row)\.js|\.\.\/inbox-origin\.js)$/ }, (a) => ({ path: a.path, namespace: 'jsp' })); b.onLoad({ filter: /.*/, namespace: 'jsp' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    const f = path.join(JDIR, `box-${++nb}.cjs`); fs.writeFileSync(f, out.outputFiles[0].text); return require(f);
+  };
+  const press = async (M, answer, { state = 'unlocked', confirm = true, unlockTo = 'unlocked', reply = { ok: true, answer: 'move', moved: [{ entry: 'secret:x' }], skipped: 0 } } = {}) => {
+    const r = { posts: [], toasts: [], setup: 0, unlock: 0, confirms: 0, unlockThen: 0 };
+    globalThis.__jsp = {
+      state,
+      fetch: async (u) => { r.posts.push(String(u)); return reply; },
+      toast: (m) => { r.toasts.push(String(m)); },
+      confirm: async (o) => { r.confirms++; r.confirmTitle = o && o.title; return confirm; },
+      setup: () => { r.setup++; },
+      unlock: () => { r.unlock++; },
+      unlockThen: (done) => { r.unlockThen++; globalThis.__jsp.state = unlockTo; done(); },
+    };
+    try { r.answered = await M.answerJobSecrets(answer); } catch (e) { r.threw = String((e && e.message) || e); }
+    return r;
+  };
+  const roads = async (M) => ({
+    noVault: await press(M, 'move', { state: 'not_set_up' }),
+    lockedThenUnlocked: await press(M, 'move', { state: 'locked' }),
+    lockedClosed: await press(M, 'move', { state: 'locked', unlockTo: 'locked' }),
+    deleteDeclined: await press(M, 'delete', { confirm: false }),
+    deleteConfirmed: await press(M, 'delete', { confirm: true, reply: { ok: true, answer: 'delete' } }),
+    shutMeanwhile: await press(M, 'move', { reply: { ok: false, code: 'vault_locked' } }),
+    leftoverToast: await press(M, 'move', { reply: { ok: false, code: 'job_secrets_changed', leftover: 2 } }),
+    leftoverRefusal: await press(M, 'move', { reply: { ok: false, code: 'job_secrets_leftover', leftover: 1 } }),
+    lockedLeft: await press(M, 'move', { reply: { ok: false, code: 'vault_locked', leftover: 2 } }),
+    recordUnreadable: await press(M, 'move', { reply: { ok: false, code: 'job_secrets_record_unreadable', file: 'data/job-secrets.leftover.json.corrupt-T1' } }),
+    recordHeld: await press(M, 'move', { reply: { ok: false, code: 'job_secrets_record_held' } }),
+  });
+  const M0 = await boxOf(SRC);
+  const R = await roads(M0);
+  const MOVE = '/api/vault/job-secrets/move', DEL = '/api/vault/job-secrets/delete';
+  okF(R.noVault.setup === 1 && !R.noVault.posts.length && R.noVault.answered === false && !R.noVault.unlockThen, '⑧d no vault yet ⇒ «Move into the vault» opens the SETUP — nothing posted', R.noVault);
+  okF(R.lockedThenUnlocked.unlockThen === 1 && R.lockedThenUnlocked.posts.join() === MOVE && R.lockedThenUnlocked.answered === true && R.lockedThenUnlocked.toasts.some((x) => /1 secret\(s\) moved into the vault — the file is deleted/.test(x)),
+    '⑧d locked ⇒ the unlock is asked FIRST, and the move is posted once it unlocked (its toast says what moved)', R.lockedThenUnlocked);
+  okF(R.lockedClosed.unlockThen === 1 && !R.lockedClosed.posts.length && R.lockedClosed.answered === false, '⑧d …the unlock closed without unlocking ⇒ nothing is posted', R.lockedClosed);
+  okF(R.deleteDeclined.confirms === 1 && R.deleteDeclined.confirmTitle === 'Delete the file?' && !R.deleteDeclined.posts.length && R.deleteDeclined.answered === false, '⑧d «Delete the file» asks a CONFIRM first — declined ⇒ nothing is posted', R.deleteDeclined);
+  okF(R.deleteConfirmed.confirms === 1 && R.deleteConfirmed.posts.join() === DEL && R.deleteConfirmed.answered === true, '⑧d …confirmed ⇒ the delete is posted', R.deleteConfirmed);
+  okF(R.shutMeanwhile.posts.join() === MOVE && R.shutMeanwhile.unlock === 1 && R.shutMeanwhile.answered === false, '⑧d the vault shut between the press and the answer (vault_locked) ⇒ its own door opens (the unlock)', R.shutMeanwhile);
+  const cut = async (from, to, label) => roads(await boxOf(anchored(SRC, from, to, label)));
+  const noSetup = await cut("  } else if (vaultFacts()?.state === 'not_set_up') {\n    showSetup();\n    return false;\n  } else if (vaultFacts()?.state !== 'unlocked') {\n    const { unlockThen } = await import('./vault-unlock.js');", "  } else if (vaultFacts()?.state !== 'unlocked') {\n    const { unlockThen } = await import('./vault-unlock.js');", 'B-ef1b page: no setup road');
+  okF(noSetup.noVault.setup === 0 && noSetup.noVault.unlockThen === 1, 'RED control: without the setup road a vault that does not exist is asked to UNLOCK', noSetup.noVault);
+  const noConfirm = await cut("    if (!(await showConfirmDialog({ title: t('Delete the file?')", "    if (false && !(await showConfirmDialog({ title: t('Delete the file?')", 'B-ef1b page: no confirm');
+  okF(noConfirm.deleteDeclined.posts.join() === DEL, 'RED control: without the confirm a DECLINED delete is posted anyway (the values go with the file)', noConfirm.deleteDeclined);
+  const noUnlock = await cut('    await new Promise((done) => unlockThen(done));\n', '', 'B-ef1b page: no unlock first');
+  okF(noUnlock.lockedThenUnlocked.unlockThen === 0 && !noUnlock.lockedThenUnlocked.posts.length, 'RED control: without the unlock asked first, a locked press never moves (it stops at «still locked»)', noUnlock.lockedThenUnlocked);
+  okF(R.leftoverToast.toasts[0] === 'The file changed while it was being moved — nothing was moved; press again — 2 copy(ies) it made are left in the vault — For you names them' && R.leftoverRefusal.toasts[0] === 'Copies an earlier try made are still in the vault and cannot be removed now — nothing was moved; For you names them',
+    '⑧d a refusal whose undo left copies says how many and where they are named; the refusal FOR copies left says it once', { leftoverToast: R.leftoverToast.toasts, leftoverRefusal: R.leftoverRefusal.toasts });
+  const noLeft = await cut(" + (left ? ` — ${t('{n} copy(ies) it made are left in the vault — For you names them', { n: left })}` : '')", '', 'B-ef1b page: the leftover unsaid');
+  okF(noLeft.leftoverToast.toasts[0] === 'The file changed while it was being moved — nothing was moved; press again', 'RED control: the page that ignores the answer\'s leftover ⇒ «nothing was moved» while copies stay in the vault', noLeft.leftoverToast.toasts);
+  const noShut = await cut("  if (r && r.code === 'vault_locked') { showUnlock();", '  if (false) { showUnlock();', 'B-ef1b page: no unlock door on vault_locked');
+  okF(noShut.shutMeanwhile.unlock === 0, 'RED control: without the vault_locked branch a vault shut meanwhile opens no unlock door', noShut.shutMeanwhile);
+  okF(R.lockedLeft.unlock === 1 && R.lockedLeft.toasts.join(' | ') === '2 copy(ies) it made are left in the vault — For you names them' && R.recordUnreadable.toasts[0] === 'The record of the copies a move left could not be read — it is kept as data/job-secrets.leftover.json.corrupt-T1; nothing was moved. Delete the copies you do not want in the Vault window, then delete that file and press again',
+    '⑧d a vault locked mid-move with copies left opens the unlock door AND says how many copies were left; an unreadable record names the file it is kept as', { lockedLeft: { unlock: R.lockedLeft.unlock, toasts: R.lockedLeft.toasts }, recordUnreadable: R.recordUnreadable.toasts });
+  okF(R.recordHeld.toasts[0] === 'The record of the copies a move left could not be read just now — nothing was moved; press again in a moment', '⑧d a record held unread says so and asks for a press again', R.recordHeld.toasts);
+  const noLockedLeft = await cut(" if (Number(r.leftover) > 0) showToast(t('{n} copy(ies) it made are left in the vault — For you names them', { n: Number(r.leftover) }), { type: 'error' });", '', 'B-ef1b page: the locked road\'s copies unsaid');
+  okF(noLockedLeft.lockedLeft.unlock === 1 && noLockedLeft.lockedLeft.toasts.length === 0, 'RED control: the locked road that drops the copies-left count ⇒ the unlock door alone, the copies unsaid', { unlock: noLockedLeft.lockedLeft.unlock, toasts: noLockedLeft.lockedLeft.toasts });
+  delete globalThis.__jsp;
 }
 
 W.vault.close();
