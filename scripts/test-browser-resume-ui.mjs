@@ -28,7 +28,8 @@
 //   PNGs where VIBESPACE_TABS_PNG_DIR names a directory: ⑧'s tab row + pane, and (lane handback-words) the hand-back
 //   dialog, the strip after it, and the zh / ja bar at 360 px; ⑨'s row at a 390 and a 1280 px viewport (B-e674 unit 1)
 //   ⑨ zh (B-e674 unit 1): a tab that is not this conversation's in FRONT of its window — its own chip says «在此窗口最前面»,
-//      its tip whose it is; CONTROL without the hub's verdict nothing is marked; a blank nobody holds in front is drawn
+//      its tip whose it is; CONTROL without the hub's verdict nothing is marked; a blank nobody holds in front is drawn; at 390
+//      and 1280 px the row is JUDGED (r608): the front's chip whole, or the fold naming it in words — never folded unsaid
 //   ⑤ the agent's own `detach` retires its browser's record: a freshly loaded view (no browser remembered) still offers
 //      Resume off THE fact; a REAL click brings the three tabs back on a new record
 //   ⑥ (lane browser-resume C, the owner's ruling 3) THE TAB ROW: one chip per tab, "The agent's"; while the agent drives no
@@ -573,18 +574,28 @@ else await (async () => {
       const f2 = await ev(feedOf({ ...base, front: frontN }) + chips);
       const cN = (f2 || []).find((x) => x.id === '9');
       ok(!!cN && cN.front && cN.tip.includes('无人持有的标签页在此窗口最前面'), '⑨ zh: a blank NOBODY holds in front of this window is drawn and marked', S(f2));
-      if (PNG_DIR) {
-        for (const wpx of [390, 1280]) {
-          await send('Emulation.setDeviceMetricsOverride', { width: wpx, height: 900, deviceScaleFactor: 1, mobile: false });
-          await ev(`const w = live(); const el = w.element; el.style.left = "0px"; el.style.width = "${wpx - 10}px"; el.style.height = "520px"; window.dispatchEvent(new Event("resize")); return true;`);
-          await ev(feedOf({ ...base, front: frontE }) + 'return true;'); await sleep(400);
-          const r = await ev('return rect(L().el().querySelector(".browser-live-tabrow"));');
+      // B-e674 (the coordinator's r608): THE ROW AT 390 AND 1280 px, JUDGED — not only pictured. Line 97's 390 picture folded
+      // the front chip into «▾+1» with nothing said: the law is its chip whole (this view's own chip cuts first), else the fold
+      // names it IN WORDS («▾+N · 最前面», the front's words in its tip). Then the picture (where VIBESPACE_TABS_PNG_DIR names a dir).
+      const rowAt = `const root = L().el(); const vis = (e) => !!e && e.style.display !== 'none' && e.getBoundingClientRect().width > 0; const fc = root.querySelector('.browser-live-tabchip.front-foreign'); const more = root.querySelector('.browser-live-tabrow-more'); const own = root.querySelector('.browser-live-tabchip.active');
+        return { chip: vis(fc) ? { here: (fc.querySelector('.browser-live-tabchip-here') || {}).textContent || '', w: Math.round(fc.getBoundingClientRect().width) } : null, more: vis(more) ? { text: more.textContent, marked: more.classList.contains('front-foreign'), tip: more.title } : null, own: own ? { w: Math.round(own.getBoundingClientRect().width), cut: own.style.maxWidth || '' } : null, row: rect(root.querySelector('.browser-live-tabrow')) };`;
+      for (const wpx of [390, 1280]) {
+        await send('Emulation.setDeviceMetricsOverride', { width: wpx, height: 900, deviceScaleFactor: 1, mobile: false });
+        await ev(`const w = live(); const el = w.element; el.style.left = "0px"; el.style.width = "${wpx - 10}px"; el.style.height = "520px"; window.dispatchEvent(new Event("resize")); return true;`);
+        await ev(feedOf({ ...base, front: frontE }) + 'return true;');
+        const seen = await ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 80; i++) { const r = read(); if ((r.chip && r.chip.here) || (r.more && r.more.marked)) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`);
+        console.log(`    ⑨ the row at ${wpx} px: ${S(seen)}`);
+        const said = !!(seen && ((seen.chip && seen.chip.here === '在此窗口最前面') || (seen.more && seen.more.marked && seen.more.text.includes('最前面') && seen.more.tip.includes('企业助手 的标签页在此窗口最前面'))));
+        ok(said, `⑨ zh at ${wpx} px: the foreign front is SAID — its chip whole («在此窗口最前面»), or the fold names it in words (r608: never folded unsaid)`, S(seen));
+        if (wpx === 1280) ok(!!(seen && seen.chip && seen.chip.here === '在此窗口最前面'), '⑨ zh at 1280 px: there is room — the front\'s own chip, whole', S(seen));
+        if (PNG_DIR) {
+          const r = seen && seen.row;
           const shot = r && r.width > 0 ? await send('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r.left), y: Math.max(0, r.top), width: Math.max(1, Math.min(r.width, wpx)), height: Math.max(1, r.height), scale: 1 } }) : null;
           if (shot && shot.result?.data) { const f = path.join(PNG_DIR, `after-front-${wpx}-zh.png`); fs.writeFileSync(f, Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${f} (the row at a ${wpx} px viewport)`); }
           else console.log(`    PNG at ${wpx} px NOT written: the row has no box (${S(r)})`);
         }
-        await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
       }
+      await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
     }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });
   } finally {

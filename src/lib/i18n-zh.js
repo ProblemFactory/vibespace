@@ -7414,6 +7414,7 @@ export default {
   "The agent’s tab — take over to switch or close it; the agent is told at the handback": "agent 的标签页——接管后可以切换或关闭它；交还时会告诉 agent",
   "Your tab": "你的标签页",
   // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
+  "In front": "最前面",
   "{name}’s tab": "{name} 的标签页",
   "Another conversation’s tab": "其他对话的标签页",
   "A tab nobody holds": "无人持有的标签页",

@@ -175,9 +175,47 @@ function rowStateWords(row, rows) {
  */
 function tabRowFold({ rows = [], widths = {}, avail = Infinity, endPx = 0, morePx = MORE_PX, watchedRef = null } = {}) {
   const watched = watchedRef ? String(watchedRef).toUpperCase() : null;
-  const list = (rows || []).filter((r) => r && r.targetId).map((r) => ({ ref: r.targetId, label: r.title || '', state: r.owner === 'agent' || r.owner === 'you' ? 'running' : 'idle', keep: !!watched && String(r.targetId).toUpperCase() === watched }));
+  // B-e674 (the coordinator's r608): a FOREIGN tab in front of this window is never folded by width — kept like the watched tab
+  const list = (rows || []).filter((r) => r && r.targetId).map((r) => ({ ref: r.targetId, label: r.title || '', state: r.owner === 'agent' || r.owner === 'you' ? 'running' : 'idle', keep: (!!watched && String(r.targetId).toUpperCase() === watched) || r.front === true }));
   const shown = ((rows || []).find((r) => r && r.active) || {}).targetId || null;
   return stripFold({ rows: list, widths, avail, shownRef: shown, chipPx: endPx, morePx });
 }
 
-module.exports = { rowStateWords, LABEL_MAX, TAB_BASE_PX, CJK_PX, LATIN_PX, DRIVER_PX, MORE_PX, CHIP_PX, shortLabel, estimateTabWidth, stripOrder, stripPriority, stripFold, stripFoldChip, chipFoldText, capChip, stoppableRows, tabRowFold };
+/**
+ * B-e674 (the coordinator's r608 — line 97's picture at 390 px folded the front chip into «▾+1», so a phone hid the one fact the
+ * unit exists to say): THE TAB ROW'S FIT WITH A FOREIGN FRONT. Such a tab (`r.front`) is a fact the person must KNOW:
+ *   1. it is never folded by width (tabRowFold keeps it, like the watched tab);
+ *   2. when the chips that never fold overflow, THIS VIEW'S OWN chip (the one on show) yields first: its name cuts shorter
+ *      (`ownCutPx`), never under `ownMinPx` (the client measures it: the chip without its title + a few letters);
+ *   3. when even that cannot hold the front beside it, the front folds and THE FOLD SAYS IT (`foldFront` = its target id): the
+ *      «▾+N» pill carries the front's mark in words, its tip the front's words, its menu the front's row FIRST.
+ * Nothing is said by colour alone. PURE. → { visible, folded, ownCutPx: px | null, foldFront: target id | null }
+ */
+const OWN_MIN_PX = 96;
+function tabRowFit({ rows = [], widths = {}, avail = Infinity, endPx = 0, morePx = MORE_PX, watchedRef = null, ownMinPx = OWN_MIN_PX } = {}) {
+  const f = tabRowFold({ rows, widths, avail, endPx, morePx, watchedRef });
+  const all = (rows || []).filter((r) => r && r.targetId);
+  const front = all.find((r) => r.front === true) || null;
+  if (!front) return { ...f, ownCutPx: null, foldFront: null };
+  const wOf = (id) => { const v = widths instanceof Map ? widths.get(id) : widths[id]; return Number.isFinite(Number(v)) ? Number(v) : estimateTabWidth((all.find((r) => r.targetId === id) || {}).title || id); };
+  const usedBy = (vis, nFolded) => vis.reduce((a, id) => a + wOf(id), 0) + endPx + (nFolded ? morePx : 0);
+  const shown = (all.find((r) => r.active) || {}).targetId || null;
+  const ownMin = Math.max(0, Number(ownMinPx) || 0);
+  const cutFor = (vis, nFolded) => { // the own chip's width that fits the rest, or null (no cut needed, or not even its floor fits)
+    const used = usedBy(vis, nFolded);
+    if (used <= avail) return { fits: true, cut: null };
+    if (!shown || shown === front.targetId || !vis.includes(shown)) return { fits: false, cut: null };
+    const cut = Math.floor(avail - (used - wOf(shown)));
+    return cut >= ownMin ? { fits: true, cut } : { fits: false, cut: null };
+  };
+  const a = cutFor(f.visible, f.folded.length);
+  if (a.fits) return { ...f, ownCutPx: a.cut, foldFront: null };
+  // even its own chip cut to its floor cannot hold the front beside it: the front folds, and the fold says it
+  const visible = f.visible.filter((id) => id !== front.targetId);
+  const foldedSet = new Set([...f.folded, front.targetId]);
+  const folded = all.filter((r) => foldedSet.has(r.targetId)).map((r) => r.targetId);
+  const b = cutFor(visible, folded.length);
+  return { visible, folded, ownCutPx: b.cut, foldFront: front.targetId };
+}
+
+module.exports = { rowStateWords, LABEL_MAX, TAB_BASE_PX, CJK_PX, LATIN_PX, DRIVER_PX, MORE_PX, CHIP_PX, shortLabel, estimateTabWidth, stripOrder, stripPriority, stripFold, stripFoldChip, chipFoldText, capChip, stoppableRows, tabRowFold, tabRowFit, OWN_MIN_PX };

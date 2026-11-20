@@ -136,7 +136,7 @@ import { MODAL_OPEN_EVENT } from './utils.js'; // lane dialog-keys: every app mo
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerMenuItem } from './contributions.js';
 import { ownerDots, livePlacement, bindDoor } from './chain-layout.js'; // P7 (§4.6): the per-SESSION owner colour, never the group's; MULTIVIEW D5: where a new live view goes
-import { stripOrder, stripFold, chipFoldText, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFold } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
+import { stripOrder, stripFold, chipFoldText, capChip, shortLabel, stoppableRows, rowStateWords, tabRowFit } from './live-strip-layout.js'; // MULTIVIEW §2 A1 / D4: the strip's order, fold and own/cap chip (PURE); lane browser-resume C: the tab row's fold
 import { tabRowModel, tabRefusalText, tabGroups, tabsCountText, tabsStaleStep } from '../browser-tabs.js';
 import { tabClickVerdict, watchLineWords, foldMenuRows, watchRefusalWords } from '../browser-windows.js'; // lane browser-windows (U3/U0b): what a chip click does — bring forward / switch (driving) · watch / follow (watching) // lane browser-resume C (§3.9, ruling 3): whose tab it is and what this viewer may do to it (PURE)
 import { avatarOf } from './channel-avatar.js'; // lane browser-resume C (D3): a tab's badge = the host's initial on a stable hue (no network — never a favicon fetch)
@@ -399,7 +399,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     // offered), the note dialog open (the keys stay out of the page), the last hand-back from here
     resumeOffer: false, resuming: false, resumedHere: false, noteOpen: false, handedBack: false,
     // lane browser-resume C: the bridge's `tab-owners` (targetId → agent|you|other|orphan), the tab row's model + fold, the acts in flight
-    tabOwners: {}, tabFront: null /* B-e674: the hub's verdict on the front of this view's window */, tabTitles: {}, tabNames: {}, tabWindows: {}, tabLeases: [], tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
+    tabOwners: {}, tabFront: null /* B-e674: the hub's verdict on the front of this view's window */, tabTitles: {}, tabNames: {}, tabWindows: {}, tabLeases: [], tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabFoldFront: null /* B-e674 (r608): a foreign front the width folded — the fold says it */, tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
     // lane browser-windows: the tab THIS viewer watches instead of the agent's ({targetId, mode, pending}) and the bridge's
     // "the tab on show paints nothing" verdict ({targetId, since}) — both said on the watch line
     watch: null, bg: null,
@@ -1564,15 +1564,23 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       if (st.closed || tabRow.style.display === 'none' || !st.tabRow) return;
       const chips = [...tabRowList.children].filter((c) => c.dataset.target), dividers = [...tabRowList.children].filter((c) => !c.dataset.target);
       for (const c of [...chips, ...dividers]) c.style.display = '';
+      for (const c of chips) c.style.maxWidth = ''; // B-e674: a cut is re-judged from the chips' whole widths
       const widths = {}; for (const c of chips) widths[c.dataset.target] = c.offsetWidth + 3;
+      // B-e674 (r608): this view's own chip may yield room to a foreign front — never under its floor (the chip without its title + a few letters)
+      const ownEl = chips.find((c) => c.classList.contains('active')) || null;
+      const ownMinPx = ownEl ? ownEl.offsetWidth - ((ownEl.querySelector('.browser-live-tabchip-title') || {}).offsetWidth || 0) + 28 : 0;
       const divPx = dividers.reduce((a, c) => a + c.offsetWidth + 3, 0); // lane browser-tabs-by-window: the window dividers take their room first
-      const f = tabRowFold({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12 - divPx, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
-      st.tabFolded = f.folded;
+      const f = tabRowFit({ rows: st.tabRow.rows, widths, avail: tabRow.clientWidth - 12 - divPx, endPx: tabRowQuit.style.display === 'none' ? 0 : tabRowQuit.offsetWidth + 6, morePx: 44, ownMinPx, watchedRef: st.watch ? st.watch.targetId : null }); // live-watch-polish G3: the watched chip never folds
+      st.tabFolded = f.folded; st.tabFoldFront = f.foldFront || null;
       for (const c of chips) c.style.display = f.folded.includes(c.dataset.target) ? 'none' : '';
+      if (ownEl && f.ownCutPx != null) ownEl.style.maxWidth = f.ownCutPx + 'px'; // its name cuts shorter (the title ellipsizes)
       for (const d of dividers) d.style.display = d.dataset.group === 'blanks' || st.tabRow.rows.some((r) => r.group === d.dataset.group && !f.folded.includes(r.targetId)) ? '' : 'none';   // the one-window row's «+N blank» stays said (its read's M1)
       tabRowMore.style.display = f.folded.length ? '' : 'none';
-      tabRowMore.textContent = '▾+' + f.folded.length;
-      tabRowMore.title = t('{n} more tab(s) of this browser', { n: f.folded.length });
+      // B-e674 (r608): when even a cut own chip cannot hold the foreign front, THE FOLD SAYS IT — in words, never by colour alone
+      const fr = f.foldFront ? (st.tabRow.rows || []).find((r) => r.targetId === f.foldFront) : null;
+      tabRowMore.textContent = '▾+' + f.folded.length + (fr ? ' · ' + t('In front') : '');
+      tabRowMore.title = (fr && fr.frontTip ? fr.frontTip + '\n' : '') + t('{n} more tab(s) of this browser', { n: f.folded.length });
+      tabRowMore.classList.toggle('front-foreign', !!fr);
     });
   }
   if (typeof ResizeObserver === 'function') { const ro2 = new ResizeObserver(() => refoldTabs()); ro2.observe(tabRow); winInfo._listenerCtl?.signal?.addEventListener?.('abort', () => ro2.disconnect()); }
@@ -1581,12 +1589,15 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const r = tabRowMore.getBoundingClientRect();
     const rows = (st.tabRow && st.tabRow.rows || []).filter((x) => st.tabFolded.includes(x.targetId));
     const items = [];
+    // B-e674 (r608): a folded foreign front is the menu's FIRST row, its words first — its act when it has one, else its words said
+    const fr = st.tabFoldFront ? rows.find((x) => x.targetId === st.tabFoldFront) : null;
+    if (fr) items.push({ label: `${fr.frontText} — ${fr.title} · ${fr.mark}`, action: () => { if (clickOf(fr).act !== 'none' || fr.canSwitch) chipClick(fr); else showToast(fr.frontTip); } });
     // live-watch-polish G1: a folded row asks the SAME click verdict as its chip and says the act (Watch / Back / Switch);
     // a row with nothing to do is not listed — never a greyed row
     const acts = new Map(foldMenuRows(rows, (x) => clickOf(x), t).map((m) => [m.targetId, m]));
     for (const x of rows) {
       const m = acts.get(x.targetId);
-      if (m) items.push({ label: `${m.label} · ${x.mark}`, action: () => chipClick(x) });
+      if (m && x !== fr) items.push({ label: `${m.label} · ${x.mark}`, action: () => chipClick(x) }); // the front's own row came first
       if (x.canClose) items.push({ label: t('Close tab') + ' — ' + x.title, action: () => tabAct('close', x) });
     }
     if (items.length) showContextMenu(r.left, r.bottom + 2, items);

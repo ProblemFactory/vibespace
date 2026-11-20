@@ -7413,6 +7413,7 @@ export default {
   "The agent’s tab — take over to switch or close it; the agent is told at the handback": "エージェントのタブ — 引き継ぐと切り替えたり閉じたりできます。戻すときにエージェントに伝えられます",
   "Your tab": "あなたのタブ",
   // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
+  "In front": "最前面",
   "{name}’s tab": "{name} のタブ",
   "Another conversation’s tab": "別の会話のタブ",
   "A tab nobody holds": "持ち主のいないタブ",

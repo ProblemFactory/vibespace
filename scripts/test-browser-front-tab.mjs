@@ -300,6 +300,43 @@ console.log('— ③ the real bridge: tab-owners carries the front; the viewed t
   ws.close(); bridge.shutdown?.(); upWss.close();
 }
 
+// ═══ ⑤ THE FIT (the coordinator's r608: line 97's picture at 390 px folded the front chip into «▾+1») ═══════════════════
+console.log('— ⑤ the fit: a foreign front is never folded by width — this view\'s own chip cuts first, else the fold says it');
+{
+  const LS = require('../src/lib/live-strip-layout.js');
+  const id = (c) => c.repeat(32);
+  const own = { targetId: id('A'), title: 'Enterprise | Find a supplier', owner: 'agent', active: true };
+  const fr = { targetId: id('E'), title: 'Read - Meeting Report', owner: 'other', front: true };
+  const o = (n) => ({ targetId: id(String(n)), title: 'other page ' + n, owner: 'agent' });
+  const W = (pairs) => Object.fromEntries(pairs.map(([r, w]) => [r.targetId, w]));
+  const say = (r) => ({ v: r.visible.map((x) => x[0]), f: r.folded.map((x) => x[0]), cut: r.ownCutPx, foldFront: r.foldFront && r.foldFront[0] });
+  const cells = [
+    ['a row of two, roomy', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 240]]), avail: 700, endPx: 60 }), (r) => r.visible.length === 2 && r.ownCutPx === null && r.foldFront === null],
+    ['a row of two, narrow: this view\'s own chip cuts, the front stays whole', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 200]]), avail: 420, endPx: 60, ownMinPx: 120 }), (r) => r.visible.includes(fr.targetId) && r.ownCutPx === 160 && r.foldFront === null],
+    ['a row of five, narrow: three fold, own + front stay', LS.tabRowFit({ rows: [own, fr, o(1), o(2), o(3)], widths: W([[own, 240], [fr, 200], [o(1), 150], [o(2), 150], [o(3), 150]]), avail: 470, endPx: 60, ownMinPx: 120 }), (r) => r.visible.join() === [own.targetId, fr.targetId].join() && r.folded.length === 3 && r.ownCutPx === 166 && r.foldFront === null],
+    ['one own chip with a long name', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 480], [fr, 200]]), avail: 420, endPx: 60, ownMinPx: 120 }), (r) => r.visible.includes(fr.targetId) && r.ownCutPx === 160],
+    ['too narrow even for a cut own chip: the front folds and THE FOLD SAYS IT', LS.tabRowFit({ rows: [own, fr], widths: W([[own, 240], [fr, 200]]), avail: 300, endPx: 60, ownMinPx: 140 }), (r) => !r.visible.includes(fr.targetId) && r.folded.includes(fr.targetId) && r.foldFront === fr.targetId && r.ownCutPx === 196],
+    ['no front: the row\'s own fold, nothing cut, nothing said', LS.tabRowFit({ rows: [own, o(1), o(2)], widths: W([[own, 240], [o(1), 150], [o(2), 150]]), avail: 400, endPx: 60 }), (r) => r.ownCutPx === null && r.foldFront === null && r.folded.length >= 1],
+  ];
+  for (const [n, r] of cells) console.log(`  · ${n}: ${JSON.stringify(say(r))}`);
+  const bad = cells.filter(([, r, judge]) => !judge(r)).map(([n, r]) => ({ n, r: say(r) }));
+  ok(bad.length === 0, `tabRowFit over ${cells.length} cells: never a front folded unsaid — whole beside a cut own chip, or the fold names it`, bad);
+  // RED CONTROL: the row before r608 (the front not kept) folds it at the narrow width — and nothing says so
+  const pre = LS.tabRowFit({ rows: [own, { ...fr, front: false }], widths: W([[own, 240], [fr, 200]]), avail: 420, endPx: 60, ownMinPx: 120 });
+  ok(pre.folded.includes(fr.targetId) && pre.foldFront === null, 'RED CONTROL: unmarked, the same narrow row folds that tab with nothing said (line 97\'s 390 picture) — the cells above can go red', say(pre));
+  // the client's wiring of the fit
+  const LW = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+  const PINS = [
+    ['the fit is asked with the own chip\'s floor', 'const f = tabRowFit({'], ['…its floor measured (the chip without its title + a few letters)', "ownEl.offsetWidth - ((ownEl.querySelector('.browser-live-tabchip-title') || {}).offsetWidth || 0) + 28"],
+    ['a cut is re-judged from whole widths', "for (const c of chips) c.style.maxWidth = '';"], ['the own chip\'s cut', "if (ownEl && f.ownCutPx != null) ownEl.style.maxWidth = f.ownCutPx + 'px';"],
+    ['the fold says it in WORDS', "(fr ? ' · ' + t('In front') : '')"], ['…its tip the front\'s words', "(fr && fr.frontTip ? fr.frontTip + '\\n' : '')"],
+    ['…its edge', "tabRowMore.classList.toggle('front-foreign', !!fr);"], ['the menu\'s FIRST row is the front', 'if (fr) items.push({ label: `${fr.frontText} — ${fr.title} · ${fr.mark}`'],
+  ];
+  const n = (txt, x) => txt.split(x).length - 1;
+  const miss = PINS.filter(([, x]) => n(LW, x) !== 1).map(([w, x]) => ({ w, x, n: n(LW, x) }));
+  ok(miss.length === 0, `the client's fit wiring, each line ONCE (${PINS.length} pins)`, miss);
+}
+
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════
 console.log('— ④ the words: every key frontText asks t() for has a zh and a ja row');
 {
@@ -310,6 +347,7 @@ console.log('— ④ the words: every key frontText asks t() for has a zh and a 
   const has = (dict, k) => dict.includes(lit(k) + ':');
   const uniq = [...new Set(keys)];
   const miss = uniq.filter((k) => !has(zh, k) || !has(ja, k));
-  ok(uniq.length === 6 && miss.length === 0, `every key frontText asks t() for (${uniq.length}) has a zh and a ja row`, miss);
+  keys.push('In front'); uniq.push('In front'); miss.push(...['In front'].filter((k) => !has(zh, k) || !has(ja, k))); // B-e674 (r608): the fold's word
+  ok(uniq.length === 7 && miss.length === 0, `every key frontText (and the fold's «In front») asks t() for (${uniq.length}) has a zh and a ja row`, miss);
 }
 report();

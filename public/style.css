@@ -8115,6 +8115,7 @@ label.chan-cap-row { cursor: default; }
 .browser-live-tabchip-close:hover { color: var(--text); background: var(--hover-overlay); }
 .browser-live-tabchip-close svg { width: 10px; height: 10px; }
 .browser-live-tabrow-more { font-size: 11px; padding: 2px 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); cursor: pointer; flex: none; }
+.browser-live-tabrow-more.front-foreign { border-color: var(--yellow); color: var(--warn-text); } /* B-e674 (r608): the fold says a foreign front — its words carry it, the edge only marks */
 .browser-live-tabrow > .browser-live-tabrow-quit { width: auto; height: 22px; font-size: 11px; padding: 0 8px; flex: none; white-space: nowrap; } /* over .file-tool-btn's 24 px square */
 .browser-live-strip { display: flex; align-items: flex-end; gap: 4px; padding: 3px 6px 0; flex-shrink: 0; overflow: hidden; border-bottom: 1px solid var(--border); background: var(--bg-secondary); }
 /* MULTIVIEW (design-browser-multiview §2 A1): the tabs fold by priority into ▾+N (src/lib/live-strip-layout.js); the tab you look at never folds */
