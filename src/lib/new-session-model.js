@@ -71,7 +71,7 @@ export function footerChips(v = {}, folded = []) {
 export function createRefusal({ cwd = null, modelsNone = false, noAgent = false } = {}) {
   const st = cwd && cwd.status;
   if (st === 'empty') return { row: 'cwd', key: 'Choose a folder first' };
-  if (st === 'unresolved' || st === 'searching' || st === 'pending' || st === 'unreachable') return { row: 'cwd', text: String(cwd.text || ''), key: cwd.text ? null : 'The working directory is not chosen yet' };
+  if (st === 'unresolved' || st === 'searching' || st === 'pending' || st === 'unanswered' || st === 'unreachable') return { row: 'cwd', text: String(cwd.text || ''), key: cwd.text ? null : 'The working directory is not chosen yet' };   // (B-ckpt61: «unanswered» — the machine did not answer — says the line's words too)
   if (modelsNone && !noAgent) return { row: 'model', key: 'This account’s provider has no models — set them up first' };
   return null;
 }

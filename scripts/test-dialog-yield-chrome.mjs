@@ -1316,7 +1316,7 @@ await step('㊽', async () => {
   await shot('48-add-row-after');
   console.log('  ㊽ ' + J({ under0, underTyped, after }));
   check('㊽ «+ Add a path…» typed ~/dy-addB, Enter, the row added (the tasks-updated repaint ran) ⇒ the add box is EMPTY, focused, its line the empty-box hint again (0ae9fbcb: the kept field kept «= ~/dy-addB ✓ 1 file» under an empty box, state ok)', /dy-addB/.test(underTyped) && after.value === '' && after.focused && after.under === under0 && after.state !== 'ok', { under0, underTyped, after });
-  check('㊽ the kept row A is painted against the world as it is now — it never says its existing folder «does not exist» after the repaint (0ae9fbcb: the kept field was never repainted)', after.rowA !== null && !/does not exist/.test(after.rowA), after);
+  check('㊽ the kept row A is painted against the world as it is now — it never says its existing folder «does not exist» after the repaint (0ae9fbcb: the kept field was never repainted)', after.rowA !== null && !/does not exist/.test(after.rowA) && !/Asking the machine/.test(after.rowA), after);   // (B-ckpt61: nor stuck asking)
   await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-path-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
   await fetch(`${origin}/api/tasks/${tid}`, { method: 'DELETE' });
 });

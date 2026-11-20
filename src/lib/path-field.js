@@ -36,6 +36,9 @@ import { getFileIcon } from './file-types.js';
 import { imeOwnsKey } from './chat-enter-keys.js';
 import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
+// B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
+// its events and performs its effects; no verdict is decided here
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader } from '../path-field-model.js';
 import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
@@ -67,14 +70,15 @@ const world = (hk) => {
   if (!WORLD.has(hk)) WORLD.set(hk, { L: { home: hk ? '' : LOCAL.home, machine: hk || null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} }, self: null, recent: null, error: '' });
   return WORLD.get(hk);
 };
-const LOCAL = { home: '', p: null };
-/* this machine's home: the app's own answer when it has one (app.js reads /api/home at boot), else asked once — lazily, on the
-   field's first question, never while the page boots (a field is built during the app's init) */
+const LOCAL = { home: '' };
+/* this machine's home, read through the model's PURE homeReader (LAW 2: a failed read is read again, bounded) */
+const HOME_READ = homeReader(() => fetchJson('/api/home'));
+/* this machine's home: the app's own answer when it has one (app.js reads /api/home at boot), else asked — lazily, on the field's
+   first question, never while the page boots (a field is built during the app's init); a failed read is asked again (LAW 2) */
 function localHome() {
   if (!LOCAL.home && window.app?._localHome) { LOCAL.home = window.app._localHome; const W = WORLD.get(''); if (W && !W.L.home) W.L.home = LOCAL.home; }
-  if (LOCAL.home || LOCAL.p) return LOCAL.p || Promise.resolve(LOCAL.home);
-  LOCAL.p = fetchJson('/api/home').then((d) => { if (d && d.home) { LOCAL.home = d.home; const W = WORLD.get(''); if (W && !W.L.home) W.L.home = d.home; } return LOCAL.home; });
-  return LOCAL.p;
+  if (LOCAL.home) return Promise.resolve(LOCAL.home);
+  return HOME_READ().then((home) => { if (home && !LOCAL.home) { LOCAL.home = home; const W = WORLD.get(''); if (W && !W.L.home) W.L.home = home; } return LOCAL.home; });
 }
 const stripSlash = (p) => { const s = String(p || '').trim(); return s.length > 1 ? s.replace(/\/+$/, '') : s; };
 /* a machine's NAME for the words (my-mac, never its id): GET /api/hosts once, else the page's host picker. Until the list
@@ -220,7 +224,7 @@ export function pathField(input, opts = {}) {
   // Browse… again raises its own.
   const pickKey = `${fid}#${++pickerSeq}`;
   const call = (fn, dflt) => { try { const v = typeof fn === 'function' ? fn() : fn; return v == null ? dflt : v; } catch { return dflt; } };
-  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, answered: null, seq: 0, ctl: null, timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
+  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, seq: 0, pctl: null, ctl: null, timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
 
   /* ── DOM ── */
   const wrap = document.createElement('div');
@@ -314,63 +318,127 @@ export function pathField(input, opts = {}) {
   const derivedNow = () => (st.derived && st.derived.text === input.value ? st.derived : null);
   const fromHTML = () => { const d = derivedNow(); return d && d.note ? `<span class="pf-from">${escHtml(d.note)}</span>` : ''; };
 
-  /* ── asking the machine ── */
-  function ask(text = textNow(), { force = false } = {}) {
-    const h = hk();
-    if (!force && st.answered && st.answered.text === text && st.answered.h === h && Date.now() - st.answered.at < 2000) return Promise.resolve();
-    const W = world(h);
+  /* ── asking the machine: the MODEL decides (src/path-field-model.js, PURE) — this part turns what happens into its EVENTS and performs
+     its EFFECTS (B-08d5, the coordinator's ruling 22:19Z). A1: a field BUILT over a saved text starts with nothing asked ── */
+  let M = pfInit(keyOf(textNow(), hk()));
+  const T = { soon: null, reask: null };
+  const waiters = [];   // commit() promises: the model settles them (a commit, a refusal, owed, dropped)
+  const rankOf = (text) => { const m = model(text); return { empty: !text, resolved: m.resolved.length > 0, pathLike: /^[~/.]/.test(text) || text.includes('/'), missing: !!m.missing, file: !!(m.missing && (world(hk()).L.nondirs || {})[m.missing.path]) }; };
+  const envNow = () => ({ cur: keyOf(textNow(), hk()), rank: rankOf(textNow()), homeKnown: !!(world(hk()).L.home || (!hk() && LOCAL.home)), unreachable: !!(hk() && world(hk()).unreachable), tick: st.tick, createMode, folder: kind === 'folder' });
+  const settle = (v) => { while (waiters.length) { try { waiters.shift()(v); } catch { } } };
+  function fire(ev) {
+    if (st.destroyed && ev.type !== 'destroyed') return;
+    const env = envNow();
+    const r = pfStep(M, { ...ev, cur: env.cur, now: Date.now(), env });
+    M = r.state;
+    let painted = false;
+    for (const e of r.effects) {
+      if (e.do === 'ask') sliceAsk(e.key);
+      else if (e.do === 'arm') { clearTimeout(T[e.which]); T[e.which] = setTimeout(() => { T[e.which] = null; fire({ type: 'fired', which: e.which, connected: input.isConnected }); }, e.ms); }
+      else if (e.do === 'disarm') { for (const w of e.which === 'all' ? ['soon', 'reask'] : [e.which]) { clearTimeout(T[w]); T[w] = null; } }
+      else if (e.do === 'abort') st.ctl?.abort?.();
+      else if (e.do === 'commit') committed(e);
+      else if (e.do === 'settle') settle(e.result === 'moved' ? st.committed : null);
+      else if (e.do === 'paint') painted = true;
+    }
+    if (painted && !st.destroyed) {
+      const flash = r.effects.some((e) => e.do === 'settle' && e.result === 'refused') && M.err && M.err.why === 'tick';   // «create it?» shown again
+      if (flash) st.flash = true;
+      paint();
+      if (flash) st.flash = false;
+    }
+  }
+  /* the ask's URL (the probes the field needs: the groups' folders, the name rows, the recents, the missing path) */
+  function sliceUrl(text, h) {
+    const inp = inputsNow();
+    const m = rankCandidates(text, inp);
+    const probe = new Set();
+    for (const g of inp.groups) { for (const f of g.folders) probe.add(f); for (const f of g.absent || []) probe.add(f); if (g.context) probe.add(g.context); }
+    for (const g of groupsNow()) for (const f of g.folders) if (!HOST_ROW.test(f)) probe.add(f);
+    for (const n of m.nameRows) probe.add(n.path);
+    for (const r of inp.recent.slice(0, 8)) probe.add(r.path);
+    if (m.missing) probe.add(m.missing.path);
+    const fuzzy = m.mode === 'fuzzy' ? text : '';
+    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify([...probe].slice(0, 40)))}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;
+    return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe };
+  }
+  function mergeReply(W, h, d, probe) {
+    if (d && d.listing) {
+      mergeListing(W.L, d.listing);
+      W.L.machine = h || null;
+      if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
+      if (d.self) W.self = d.self;
+      W.asked = W.asked || new Map(); for (const p of probe) W.asked.set(p, Date.now());
+    }
+    W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
+    W.unreachable = (d && d.unreachable) || null;
+  }
+  /* the model's ask: the field's OWN text on its machine (one in flight — a newer one supersedes); its reply becomes the model's event */
+  function sliceAsk(key) {
+    const text = keyText(key), h = hk(), W = world(h);
     const go = () => {
-      const inp = inputsNow();
-      const m = rankCandidates(text, inp);
-      const probe = new Set();
-      for (const g of inp.groups) { for (const f of g.folders) probe.add(f); for (const f of g.absent || []) probe.add(f); if (g.context) probe.add(g.context); }
-      for (const g of groupsNow()) for (const f of g.folders) if (!HOST_ROW.test(f)) probe.add(f);
-      for (const n of m.nameRows) probe.add(n.path);
-      for (const r of inp.recent.slice(0, 8)) probe.add(r.path);
-      if (m.missing) probe.add(m.missing.path);
-      const fuzzy = m.mode === 'fuzzy' ? text : '';
-      const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify([...probe].slice(0, 40)))}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;
-      const url = (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs;
+      if (st.destroyed) return;
+      const { url, probe } = sliceUrl(text, h);
       st.ctl?.abort?.(); st.ctl = new AbortController();
       const my = ++st.seq;
       wrap.dataset.pending = '1';
       return fetchJson(url, { signal: st.ctl.signal }).then((d) => {
         if (my !== st.seq || st.destroyed) return;
         delete wrap.dataset.pending;
-        if (d && d.listing) {
-          mergeListing(W.L, d.listing);
-          W.L.machine = h || null;
-          if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
-          if (d.self) W.self = d.self;
-        }
-        if (d && d.listing) { W.asked = W.asked || new Map(); for (const p of probe) W.asked.set(p, Date.now()); }
-        W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
-        W.unreachable = (d && d.unreachable) || null;
-        st.answered = { text, h, at: Date.now() };
-        if (d && d.partial && !st.reasked) { st.reasked = true; setTimeout(() => { st.reasked = false; if (textNow() === text) ask(text, { force: true }); }, 450); }
-        paint();
+        mergeReply(W, h, d, probe);
+        fire({ type: 'reply', key, kind: d && d.listing && !d.partial ? 'listing' : d && d.partial ? 'partial' : 'failed', err: (d && d.error) || '' });
       });
     };
     return !h && !LOCAL.home ? localHome().then(go) : go();
   }
-  const askSoon = () => { clearTimeout(st.timer); st.timer = setTimeout(() => ask(), DEBOUNCE_MS); };
-
+  /* the picker's own asks (its tree, its search): their OWN sequence — never the field's ask aborted, never the field's answer */
+  function pickerAsk(q) {
+    const h = hk(), W = world(h);
+    const go = () => {
+      if (st.destroyed) return;
+      const { url, probe } = sliceUrl(q, h);
+      st.pctl?.abort?.(); st.pctl = new AbortController();
+      return fetchJson(url, { signal: st.pctl.signal }).then((d) => { if (!st.destroyed) mergeReply(W, h, d, probe); });
+    };
+    return !h && !LOCAL.home ? localHome().then(go) : go();
+  }
+  /* the «not applied» words (the model's err) and the words of an unanswered text */
+  const errNow = () => pfView(M, envNow()).err || null;
+  const unansweredWords = (errText = '') => { const err = errText || '', plain = t('the machine did not answer'); return err && err !== plain ? t('The machine did not answer: {err}', { err }) : plain; };
+  function errWords(err) {
+    if (!err) return '';
+    if (err.kind === 'pending') return t('Asking the machine…');
+    if (err.kind === 'unanswered') return unansweredWords(err.err);
+    if (err.why === 'ensure') return err.words;
+    const x = target(), path = x.path || textNow();
+    if (err.why === 'file') return t('{path} is a file — this needs a folder.', { path });
+    if (err.why === 'never') return t('{path} does not exist.', { path });
+    if (err.why === 'tick') return t('{path} does not exist — tick «{create}» and leave the field, or pick another.', { path, create: o.createWhen || t('Create this folder') });
+    return t('«{text}» is not a path (a few letters search) — nothing was set.', { text: textNow() });
+  }
+  const bestNow = () => ((errNow() || {}).why === 'notpath' ? bestOf() : '');
   /* ── the verdict (what the line says; what a form's footer may say) ── */
   function target(text = textNow()) {
     const m = model(text);
     if (!text) return { empty: true, m };
     if (m.resolved.length) return { ok: true, r: m.resolved[0], all: m.resolved, m };
     const pathLike = /^[~/.]/.test(text) || text.includes('/');
-    if (m.missing && pathLike) { const mv = missingVerdict(m.missing.path, world(hk()).L); return { missing: true, path: m.missing.path, base: m.missing.base, parentOk: mv.parentExists, parent: mv.parent, file: !!(world(hk()).L.nondirs || {})[m.missing.path], m }; }
+    if (m.missing && pathLike) {
+      const gate = pfView(M, envNow()).kind;   // the MODEL's verdict for the text on this machine
+      if (gate !== 'missing') return gate === 'searching' ? { search: true, m } : { [gate]: true, answerErr: pfView(M, envNow()).answerErr, m };
+      const mv = missingVerdict(m.missing.path, world(hk()).L); return { missing: true, path: m.missing.path, base: m.missing.base, parentOk: mv.parentExists, parent: mv.parent, file: !!(world(hk()).L.nondirs || {})[m.missing.path], m }; }
     return { search: true, m };
   }
   function verdictNow() {
     const text = textNow(); const x = target(text);
-    if (st.err) return { status: 'unresolved', text: t('Not applied:') + ' ' + st.err };
+    const ew = errWords(errNow());
+    if (ew) return { status: 'unresolved', text: t('Not applied:') + ' ' + ew };
     if (hk() && world(hk()).unreachable) return { status: 'unreachable', text: unreachableWords(hk()) };
     if (x.empty) return { status: 'empty', text: '' };
     if (x.ok) return { status: 'ok', text: '= ' + x.r.path, path: abs(x.r.path), alts: x.all.length - 1 };
-    if (wrap.dataset.pending && !st.answered) return { status: 'pending', text: t('Asking the machine…') };
+    if (x.pending) return { status: 'pending', text: t('Asking the machine…') };
+    if (x.unanswered) return { status: 'unanswered', text: unansweredWords(x.answerErr) };
+    if (x.quiet) return { status: 'pending', text: '' };   // A1: nothing asked yet — no words; a form still refuses
     if (x.missing) return { status: 'missing', text: x.parentOk ? t('{path} does not exist — create it?', { path: x.path }) : t('{path} does not exist, nor the folder above ({parent})', { path: x.path, parent: x.parent || '' }), path: abs(x.path), parentExists: !!x.parentOk };
     return { status: 'searching', text: t('«{text}» is not a path yet — pick a folder from the list', { text }) };
   }
@@ -410,7 +478,8 @@ export function pathField(input, opts = {}) {
   function underHTML() {
     const text = textNow(); const x = target(text); const L = world(hk()).L;
     let h = '';
-    if (st.err) h += `<div class="pf-res pf-err"><span class="pf-hint"><b>${escHtml(t('Not applied:'))}</b> ${escHtml(st.err)}</span>${st.errBest ? `<button type="button" class="pf-link pf-best" data-act="best">${UI_ICONS.check} ${escHtml(t('Use the first: {path}', { path: st.errBest }))}</button>` : ''}</div>`;
+    const ew = errWords(errNow()), best = ew ? bestNow() : '';
+    if (ew) h += `<div class="pf-res pf-err"><span class="pf-hint"><b>${escHtml(t('Not applied:'))}</b> ${escHtml(ew)}</span>${best ? `<button type="button" class="pf-link pf-best" data-act="best">${UI_ICONS.check} ${escHtml(t('Use the first: {path}', { path: best }))}</button>` : ''}</div>`;
     if (hk() && world(hk()).unreachable) return h + `<div class="pf-res pf-err pf-unreachable"><span class="pf-hint">${escHtml(unreachableWords(hk()))}</span></div>`;
     if (x.empty) {
       const h2 = hk();
@@ -424,6 +493,10 @@ export function pathField(input, opts = {}) {
         const same = text.replace(/\/+$/, '') === r.path && !derivedNow();
         h += `<div class="pf-res"><div class="pf-ln">${same ? '' : `<span class="pf-eq">= <b>${escHtml(r.path)}</b>${fromHTML()}</span>`}${r.kind === 'complete' ? `<span class="pf-tag">${escHtml(t('completed from the start · Tab'))}</span>` : ''}${r.kind === 'link' ? `<span class="pf-tag">${escHtml(t('through the link {via}', { via: r.via }))}</span>` : ''}${r.relative && !same ? `<span class="pf-meta">${escHtml(t('relative to {base}', { base: r.base }))}</span>` : ''}${facts ? `<span class="pf-meta ok">${UI_ICONS.check} ${escHtml(facts)}</span>` : ''}</div></div>`;
       }
+    } else if (x.quiet) {
+      // A1 (主开发 21:51Z): a field built over a saved text, never asked — no words, no tick, until a person touches it, a commit, or a refresh with the list open
+    } else if (x.pending || x.unanswered) {
+      h += `<div class="pf-res pf-pending"><span class="pf-hint">${escHtml(x.pending ? t('Asking the machine…') : unansweredWords(x.answerErr))}</span>${fromHTML()}</div>`;   // (LAW 1 / 2: never «missing», no path, no tick)
     } else if (x.missing) {
       if (x.file && kind === 'folder') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} is a file — this needs a folder.', { path: x.path }))}</span></div>`;
       else if (createMode === 'never') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} does not exist.', { path: x.path }))}</span></div>`;
@@ -432,9 +505,9 @@ export function pathField(input, opts = {}) {
         // parent too (the create at use is mkdir -p: /api/mkdir makes the folders above); the words say what it will make
         + (x.parentOk ? '' : `<span class="pf-meta pf-parents">${escHtml(t('The folder above, {parent}, does not exist either.', { parent: x.parent || '' }))}</span>`)
         + `<label class="pf-tickrow"><input type="checkbox" data-act="tick"${st.tick ? ' checked' : ''}> ${escHtml(o.createWhen || (x.parentOk ? t('Create this folder') : t('Create this folder and the missing folders above it')))}</label>` + '</div>';
-    } else if (!st.err && model().rows.length) {
+    } else if (!ew && model().rows.length) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(isPhone() ? t('No path called «{text}» — press a suggestion above.', { text }) : t('No path called «{text}» — choose a suggestion with ↑↓, Enter picks it.', { text }))}</span></div>`;
-    } else if (!st.err && st.answered) {
+    } else if (!ew && M.answer && M.answer.key === keyOf(text, hk())) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('Nothing found — try other letters, or press the folder button.'))}</span></div>`;
     }
     return h;
@@ -469,8 +542,8 @@ export function pathField(input, opts = {}) {
     emitState();
     if (st.chipsAt) paintChips();   // a 新建 mark the machine's answer moved (keyed: nothing else repaints)
   }
-  function open() { if (st.destroyed || st.open) return; st.open = true; st.active = -1; ask(); paint(); }
-  function close() { if (!st.open) return; st.open = false; st.active = -1; paint(); }
+  function open() { if (st.destroyed || st.open) return; st.open = true; st.active = -1; fire({ type: 'opened' }); }
+  function close() { st.active = -1; if (!st.open) return; st.open = false; fire({ type: 'closed' }); }   // the model hears every close (its refresh rows read it)
 
   /* ── the chips row (New Session): 由名字 per selected group + home (PURE nameChips), then the day-one folders (src/day-one.js
      folderChips) — painted on refresh() (never at construction: no fetch while the page boots), again when an answer moves a
@@ -543,39 +616,32 @@ export function pathField(input, opts = {}) {
     return { path: abs(path), display: path, text: input.value, host: h || null, isFile: false, exists: true, create: false, via: { base: '', relative: false, kind: 'exact', alias: '' }, how: 'api', derived: !!derivedNow(), ...extra };
   }
   const bestOf = () => { const m = model(); const b = m.best || m.rows.find((r) => !r.isNew); return b && !b.isNew ? b.path : ''; };
-  async function commit(how = 'api') {
-    if (st.destroyed) return null;
-    const text = textNow();
-    st.err = ''; st.errBest = '';
-    if (!text) { st.committed = null; paint(); return null; }
-    if (!st.answered || st.answered.text !== text || st.answered.h !== hk()) { try { await ask(text, { force: true }); } catch { } }
-    if (textNow() !== text) return st.committed;   // typed on while the machine answered
-    const x = target(text);
-    let info = null;
-    if (x.ok) {
-      const r = x.r;
-      info = infoOf(r.path, { isFile: !!r.file, via: { base: r.base, relative: !!r.relative, kind: how === 'picker' ? 'picker' : how === 'pick' ? 'pick' : r.kind, alias: '' }, how });
-    } else if (x.missing) {
-      if (x.file && kind === 'folder') st.err = t('{path} is a file — this needs a folder.', { path: x.path });
-      else if (createMode === 'never') st.err = t('{path} does not exist.', { path: x.path });
-      else if (!st.tick) { st.err = t('{path} does not exist — tick «{create}» and leave the field, or pick another.', { path: x.path, create: o.createWhen || t('Create this folder') }); st.flash = true; }
-      else info = infoOf(x.path, { exists: false, create: true, isFile: kind === 'file', via: { base: x.base, relative: !!(x.base && x.base !== 'home' && x.base !== 'abs'), kind: how === 'pick' ? 'pick' : 'exact', alias: '' }, how });
-    } else {
-      st.err = t('«{text}» is not a path (a few letters search) — nothing was set.', { text });
-      st.errBest = bestOf();
+  /* a commit pressed (leave, Enter, Create, a pick): the MODEL judges it now on a fresh complete answer, or OWES it to its run (its door
+     hears «nothing yet»; it is served at most once, inside its run, by a complete reply for its own text on its own machine) */
+  function commit(how = 'api') {
+    if (st.destroyed) return Promise.resolve(null);
+    settle(st.committed);   // an older commit still waiting is answered first: this one is the person's now
+    return new Promise((res) => { waiters.push(res); fire({ type: 'commit', how }); });
+  }
+  /* the model said «commit»: the info from the ranking's verdict for the text */
+  function committed(e) {
+    const how = e.how; let info = null;
+    if (e.as === 'empty') st.committed = null;
+    else {
+      const x = target();
+      if (e.as === 'ok' && x.ok) { const r = x.r; info = infoOf(r.path, { isFile: !!r.file, via: { base: r.base, relative: !!r.relative, kind: how === 'picker' ? 'picker' : how === 'pick' ? 'pick' : r.kind, alias: '' }, how }); }
+      else if (e.as === 'create' && x.missing) info = infoOf(x.path, { exists: false, create: true, isFile: kind === 'file', via: { base: x.base, relative: !!(x.base && x.base !== 'home' && x.base !== 'abs'), kind: how === 'pick' ? 'pick' : 'exact', alias: '' }, how });
     }
-    if (info) { st.committed = info; paint(); try { o.onCommit?.(info); } catch (e) { console.warn('[path-field] onCommit', e); } }
-    else { paint(); st.flash = false; }
-    return info;
+    if (info) { st.committed = info; paint(); try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); } }
+    settle(info);
   }
   function set(text, { commit: c = true, how = 'set', derived = null } = {}) {
     input.value = String(text == null ? '' : text);
     st.derived = derived && input.value.trim() ? { text: input.value, note: String(derived.note || '') } : null;   // setDerived: the door's, not the person's
-    st.err = ''; st.errBest = ''; st.answered = null;
-    if (st.open) close(); else paint();
-    if (c) return commit(how);
-    ask();
-    return Promise.resolve(null);
+    if (st.open) close();
+    if (!c) { fire({ type: 'set', how }); return Promise.resolve(null); }   // asked at once (LAW 1: the pending words from the first paint)
+    settle(st.committed);
+    return new Promise((res) => { waiters.push(res); fire({ type: 'set', commit: true, how }); });
   }
   function pickRow(r, how) {
     if (!r) return;
@@ -583,13 +649,13 @@ export function pathField(input, opts = {}) {
     const L = world(hk()).L;
     if (how === 'tab' && !r.file && L.dirs[r.path]) {
       input.value = r.path === '~' ? '~/' : r.path + '/';
-      st.active = -1; st.err = ''; ask(); paint();
+      st.active = -1; fire({ type: 'typed', soon: false });   // asked at once
       return;
     }
     st.tick = !!r.isNew;
     st.flash = !!r.isNew;
     input.value = r.path;
-    st.open = false; st.active = -1;
+    close();
     commit('pick');
   }
   async function ensure() {
@@ -597,23 +663,23 @@ export function pathField(input, opts = {}) {
     if (!v) return false;
     if (!v.create || kind === 'file') return true;
     const r = await fetchJson('/api/mkdir', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: v.path, host: v.host || undefined }) });
-    if (!r || r.error) { st.err = t('Could not create {path}: {err}', { path: v.display, err: (r && r.error) || t('server unreachable') }); paint(); return false; }
+    if (!r || r.error) { fire({ type: 'ensureFailed', words: t('Could not create {path}: {err}', { path: v.display, err: (r && r.error) || t('server unreachable') }) }); return false; }
     st.committed = { ...v, exists: true, create: false };
     const L = world(hk()).L; const par = parentOf(v.display);
     L.dirs[v.display] = { kids: [], fileCount: 0, mtime: Date.now() };
     if (par && L.dirs[par] && Array.isArray(L.dirs[par].kids) && !L.dirs[par].kids.includes(baseName(v.display))) L.dirs[par].kids.push(baseName(v.display));
-    st.answered = null; paint();
+    paint();
     return true;
   }
 
   /* ── events ── */
   const onInput = (e) => {
     if (e && (e.isComposing || input._pfComposing)) return;
-    st.err = ''; st.errBest = ''; st.derived = null;   // the person's text now
-    const x = target(); if (!x.missing) st.tick = false;
+    st.derived = null;   // the person's text now
     if (!st.open) st.open = true;
     st.active = -1;
-    paint(); askSoon();
+    fire({ type: 'typed' });   // asked, debounced: the pending words from the first paint
+    const x = target(); if (!x.missing && !x.pending && !x.unanswered && !x.quiet) st.tick = false;   // (a tick stands while the machine's answer for the text is owed)
   };
   input.addEventListener('input', onInput);
   input.addEventListener('compositionstart', () => { input._pfComposing = true; });
@@ -628,7 +694,7 @@ export function pathField(input, opts = {}) {
     if (e.key === 'Escape') { if (st.open) { e.preventDefault(); close(); } return; }
     if (e.key === 'Enter') {
       if (st.open && st.active >= 0 && rows[st.active]) { e.preventDefault(); pickRow(rows[st.active], 'enter'); return; }
-      st.open = false; st.active = -1; commit('enter');
+      close(); commit('enter');
       return;   // not prevented: a form's own Enter-to-submit still sees it (and awaits commit())
     }
     if (e.key === 'Tab' && !e.shiftKey) {
@@ -636,7 +702,7 @@ export function pathField(input, opts = {}) {
       if (st.open && st.active >= 0 && rows[st.active]) { e.preventDefault(); pickRow(rows[st.active], 'tab'); return; }
       const x = target(text);
       if (x.ok && !x.r.file && (x.r.kind === 'complete' || (!text.endsWith('/') && world(hk()).L.dirs[x.r.path] && (world(hk()).L.dirs[x.r.path].kids || []).length))) {
-        e.preventDefault(); input.value = (x.r.path === '~' ? '~' : x.r.path) + '/'; st.open = true; st.active = -1; st.err = ''; ask(); paint(); return;
+        e.preventDefault(); input.value = (x.r.path === '~' ? '~' : x.r.path) + '/'; st.open = true; st.active = -1; fire({ type: 'typed', soon: false }); return;
       }
       if (st.open && rows.length) { e.preventDefault(); st.active = 0; paint(); return; }
     }
@@ -652,19 +718,20 @@ export function pathField(input, opts = {}) {
   under.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     if (b.dataset.act === 'alt') { set(b.dataset.path, { commit: true, how: 'pick' }); return; }
-    if (b.dataset.act === 'best' && st.errBest) { set(st.errBest, { commit: true, how: 'pick' }); return; }
+    const best = b.dataset.act === 'best' ? bestNow() : '';
+    if (best) { set(best, { commit: true, how: 'pick' }); return; }
   });
   under.addEventListener('change', (e) => {
     if (e.target.dataset.act !== 'tick') return;
     st.tick = !!e.target.checked;
-    if (st.tick && st.err) commit('api'); else paint();
+    if (st.tick && errNow()) commit('api'); else paint();
   });
   /* LEAVING the field commits it (a press in its own list / line / picker is not leaving) */
   const inside = (n) => !!n && (wrap.contains(n) || list.contains(n) || !!(n.closest && n.closest('.pf-picker')));
   wrap.addEventListener('focusout', () => {
     setTimeout(() => {
       if (st.destroyed || inside(document.activeElement) || st.picking) return;
-      afterPointer(() => { if (st.destroyed || inside(document.activeElement)) return; st.open = false; st.active = -1; commit('blur'); });
+      afterPointer(() => { if (st.destroyed || inside(document.activeElement)) return; close(); commit('blur'); });
     }, 150);
   });
   const onReflow = () => placeList();
@@ -687,7 +754,7 @@ export function pathField(input, opts = {}) {
     if (st.picking) return;   // its listing is on its way: this press is the same ask
     st.picking = true; close();
     const h = hk(); const W = world(h);
-    if (!W.L.home) await (h ? ask('', { force: true }) : localHome());
+    if (!W.L.home) await (h ? pickerAsk('') : localHome());
     const x = target();
     const K = { sel: null, open: new Set(['~']), q: '', mk: false };
     if (x.ok) K.sel = x.r.file ? parentOf(x.r.path) : x.r.path;
@@ -696,7 +763,8 @@ export function pathField(input, opts = {}) {
     if (!K.sel) K.sel = (inputsNow().bases[0] || { path: '~' }).path;
     for (let q = K.sel; q && q.includes('/'); q = parentOf(q)) K.open.add(q);
     K.open.add(K.sel);
-    const shell = createModalShell({ id: 'path-picker', key: pickKey, beside: true, from, title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; st.picker = null; if (!st.destroyed) input.focus(); }, kind: 'form' });
+    let picked = false;   // B-ckpt61: closed WITHOUT a pick, the field's own text is asked again if the picker's asks (they share its sequence) left it no answer
+    const shell = createModalShell({ id: 'path-picker', key: pickKey, beside: true, from, title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; st.picker = null; if (!st.destroyed) input.focus(); fire({ type: 'pickerClosed', picked }); }, kind: 'form' });
     if (shell.raised) { st.picking = false; return; }   // (this field's picker opened meanwhile: it is raised, its tree as it was)
     st.picker = shell;
     if (shell.placed === 'behind') st.picking = false;   // not where the person can reach it: the latch never leaves a dead Browse… (a press raises it)
@@ -782,20 +850,21 @@ export function pathField(input, opts = {}) {
     }
     footEl.addEventListener('click', (e) => { const a = e.target.closest('[data-act]'); if (!a) return; if (a.dataset.act === 'cancel') shell.close(); if (a.dataset.act === 'go') go(); });
     let qTimer = null;
-    qIn.addEventListener('input', () => { if (qIn._c) return; K.q = qIn.value; clearTimeout(qTimer); draw(); qTimer = setTimeout(() => { const save = input.value; ask(K.q, { force: true }).then(() => { if (input.value === save) draw(); }); }, DEBOUNCE_MS); });
+    qIn.addEventListener('input', () => { if (qIn._c) return; K.q = qIn.value; clearTimeout(qTimer); draw(); qTimer = setTimeout(() => { const save = input.value; pickerAsk(K.q).then(() => { if (input.value === save) draw(); }); }, DEBOUNCE_MS); });
     qIn.addEventListener('compositionstart', () => { qIn._c = true; });
     qIn.addEventListener('compositionend', () => { qIn._c = false; qIn.dispatchEvent(new Event('input')); });
     function go() {
       try { localStorage.setItem(memKey(), L().dirs[K.sel] ? K.sel : parentOf(K.sel)); } catch { }
       const p = K.sel;
       st.picking = false;
+      picked = true;
       shell.close();
       st.tick = false;
       set(p, { commit: true, how: 'picker' });
     }
     draw();
     await Promise.all([listNode(K.sel), K.sel !== '~' ? listNode('~') : null, ...[...K.open].filter((p) => p !== K.sel && p !== '~').map(listNode)]);
-    if (K.q) await ask(K.q, { force: true });
+    if (K.q) await pickerAsk(K.q);
     draw();
     (K.q ? qIn : treeEl.querySelector('.pf-tn.sel:not(.pin)') || qIn)?.scrollIntoView?.({ block: 'center' });
     qIn.focus();
@@ -803,9 +872,17 @@ export function pathField(input, opts = {}) {
   pickBtn?.addEventListener('click', (e) => { e.preventDefault(); openPicker(); });
 
   /* ── the handle ── */
-  function refresh() { memo = { key: '', m: null }; st.answered = null; if (st.open) ask(); st.chipsAt = ''; paint(); paintChips(true); }   // the chips drawn once, forced
+  /* the door's inputs moved (a group, the name, the machine): the ranking is recomputed and the chips drawn once, forced; what is asked
+     is the model's 'refresh' row (src/path-field-model.js: the answer stands, stale; a text asked before with no answer on this machine
+     is asked, debounced; a field never asked stays quiet — A1; a stopped run only after REFRESH_AFTER_STOP_MS; an open list at once) */
+  function refresh() {
+    memo = { key: '', m: null };
+    fire({ type: 'refresh' });   // the MODEL: the answer stands (stale); asked again only as its rows say
+    st.chipsAt = ''; paintChips(true);
+  }
   function destroy() {
     st.destroyed = true; clearTimeout(st.timer); clearTimeout(st.probeTimer); st.ctl?.abort?.();
+    fire({ type: 'destroyed' }); st.pctl?.abort?.(); settle(null);   // the model's timers disarmed: no ask after the page is gone
     // lane dialog-yield r5: ITS OPEN PICKER GOES WITH IT, said — a pick there would land in no field (37c1b566: a Task Detail row
     // removed while its picker was open kept the picker, and the pick was dropped in silence)
     if (st.picker && st.picker.live()) { const pk = st.picker; st.picker = null; st.picking = false; pk.close(); showToast(t('The field this picker was for is gone — the picker closed and nothing was written')); }
@@ -815,6 +892,8 @@ export function pathField(input, opts = {}) {
     list.remove();
   }
   paint();   // the chips row waits for refresh() (a field is built while the page boots — no fetch then)
+  // B-ckpt61 A1 (主开发 21:51Z): a field BUILT over a saved text asks NOTHING at its build — its line stays quiet (status pending: a form
+  // still refuses) until a person touches it, a commit, or a refresh with the list open; a text SET from outside (set / setDerived) asks at once
   if (hk() && !HOSTS.names) hostNamesLoaded().then(() => { if (!st.destroyed) paint(); }); // the machine's name, once the list answers
   const setDerived = (text, { note = '', commit: c = false } = {}) => set(text, { commit: c, how: 'derived', derived: { note } });
   const picking = () => !!(st.picking || (st.picker && st.picker.live()));   // its picker open, or its listing on the way (lane dialog-yield r6: a repaint keeps such a field)

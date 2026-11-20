@@ -13,8 +13,11 @@
 //   ⑥ 「未生效：…」 — a few letters with no path, left: the text stays, the reason is said; 「用第一名」 commits the best
 //   ⑦ the commit waits past pointer-up: a press on another button — ITS click lands first, then the commit
 //   ⑧ «不存在 — 创建？»: a missing folder says so and is NOT taken until ticked; ticked ⇒ committed, ensure() makes it on
-//      disk; its parent missing ⇒ said, no tick
+//      disk; its parent missing ⇒ said AND its tick offered, the create makes both levels (read back from the disk)
 //   ⑨ two Task Groups + a name ⇒ ② = one <group folder>/<name> per group in selection order + ~/<name>; the chips row too
+//   ⑨b setDerived with a STALL PLACED in the listing's reply (B-ckpt61 LAW 1): while held, «正在问这台机器…» — no 不存在, no
+//      raw path, no tick; released, the folder with its facts · ⑨c the home's first read fails once (LAW 2): never «missing»,
+//      and a later ask reads the home again
 //   ⑩ a remote machine (my-mac) gets the same recommendations computed for it: the IR folder probed there, the one
 //      declared for it, compute-deal greyed «在 my-mac 上不存在 · 新建？», its recents with counts
 //   ⑪ THE PICKER: the folder button opens a dialog over the dialog — the groups' folders pinned with badges, home's tree
@@ -36,7 +39,7 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome'); process.exit(0); }
-let bad = 0, n = 0, skipped = 0;   // skipped: legs SKIPPED BY NAME (each said on its own «⊘ SKIP» line — counted, never a green)
+let bad = 0, n = 0;
 const ok = (name, cond, got) => { n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + String(JSON.stringify(got)).slice(0, 700)}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -72,6 +75,20 @@ hm._ssh = (h, cmd) => new Promise((resolve, reject) => execFile('sh', ['-c', cmd
 const jsonList = (v) => { try { const a = JSON.parse(v || '[]'); return Array.isArray(a) ? a : []; } catch { return []; } };
 const app = express();
 app.use(express.json());
+// B-ckpt61 (lane bl-tests-a): the suite's OWN server can HOLD a reply on a path until the leg releases it (a stall PLACED in the
+// listing's reply — never load), and can FAIL the home's next read (a 500 with no home)
+const HOLD = new Map();
+let homeFailsLeft = 0;
+const partialFor = { path: '', left: 0, failLeft: 0 };   // ⑨d: this path's next dir-complete replies are PARTIAL (the machine's budget ran out, nothing listed), then FAILED (a 500, no listing)
+app.use((req, res, next) => {
+  if (req.path === '/api/dir-complete' && partialFor.left > 0 && String(req.query.path || '') === partialFor.path) { partialFor.left--; res.json({ listing: { home: HOME, machine: null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} }, partial: true, took: 0 }); return; }
+  if (req.path === '/api/dir-complete' && partialFor.failLeft > 0 && String(req.query.path || '') === partialFor.path) { partialFor.failLeft--; res.status(500).json({ error: 'the listing failed (the leg\'s plant)' }); return; }
+  if (req.path === '/api/home' && homeFailsLeft > 0) { homeFailsLeft--; res.status(500).json({ error: 'the home read failed (the leg\'s plant)' }); return; }
+  const h = HOLD.get(req.path);
+  if (h) { h.p.then(() => next()); return; }
+  next();
+});
+const holdPath = (p) => { let open = null; const h = { p: new Promise((r) => { open = r; }) }; h.open = () => { HOLD.delete(p); open(); }; HOLD.set(p, h); return h; };
 app.get('/api/hosts/:id/dir-complete', async (req, res) => { try { res.json(await hm.dirSlice(req.params.id, { text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder') })); } catch (e) { res.json({ suggestions: [], error: e.message }); } });
 const NOW = Date.now();
 app.get('/api/hosts/:id/recent-cwds', (req, res) => res.json({ cwds: [], recent: PC.recentCounts([{ cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 3 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 4 * 86400 }, { cwd: MAC + '/Projects/website', mtime: NOW / 1000 - 5 * 86400 }, { cwd: MAC + '/Downloads', mtime: NOW / 1000 - 7 * 86400 }]) }));
@@ -116,11 +133,16 @@ host.onchange = () => window.pf.refresh();
 name.addEventListener('input', () => window.pf.refresh());
 document.getElementById('other').addEventListener('click', () => window.__log.push({ ev: 'click-other' }));
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.__log.push({ ev: 'esc', prevented: e.defaultPrevented }); });
+// ⑨e (A1): a field BUILT over a saved text before it is attached (a form queued behind a dirty one), attached later
+window.mkQueued = (v) => { const box = document.createElement('div'); box.id = 'qbox'; const i = document.createElement('input'); i.id = 'queued'; i.type = 'text'; i.value = v; box.appendChild(i); window.qf = pathField(i, { kind: 'folder', id: 'harness-queued' }); window.qbox = box; return true; };
+window.attachQueued = () => { document.getElementById('dlg').appendChild(window.qbox); return true; };
 window.__ready = true;
 `);
 try { execFileSync(path.join(REPO, 'node_modules/.bin/esbuild'), [path.join(TMP, 'entry.js'), '--bundle', `--outfile=${path.join(D, 'b.js')}`, '--format=iife', '--platform=browser', '--target=es2020', '--log-level=error'], { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] }); }
 catch (e) { ok('the harness bundle builds (a fresh worktree: `npm run build` once — src/lib/build-version.js is generated)', false, String(e.stderr || e.message).slice(0, 600)); process.exit(1); }
 fs.writeFileSync(path.join(D, 't.html'), '<!doctype html><html data-theme="dark" lang="zh"><head><meta charset="utf-8"><link rel="stylesheet" href="/style.css"></head><body><script src="/static/b.js"></script></body></html>');
+// B-08d5: the field's laws and their RED CONTROLS are the PURE model's (src/path-field-model.js, scripts/test-path-field-model.mjs — its
+// table and its seeded law); this suite's legs prove the field is WIRED to it (the events it sends, the effects it performs)
 
 /* ── chrome ── */
 const CDP_PORT = await freePort();
@@ -140,9 +162,9 @@ await cdp('Page.enable'); await cdp('Runtime.enable');
 // the §47 idiom (no app boots here — the page is a bare bundle — but one rule for every chrome suite) + the owner's language
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: "try { localStorage.setItem('vibespace.lang', 'zh'); } catch {}" });
-const load = async (phone = false) => {
+const load = async (phone = false, page = 't.html') => {
   await cdp('Emulation.setDeviceMetricsOverride', phone ? { width: 390, height: 844, deviceScaleFactor: 1, mobile: true } : { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
-  await cdp('Page.navigate', { url: BASE + '/static/t.html' + (phone ? '#phone' : '') });
+  await cdp('Page.navigate', { url: BASE + '/static/' + page + (phone ? '#phone' : '') });
   await until('window.__ready === true', 8000);
   if (phone) await ev('window.app.isMobile = true');
 };
@@ -305,6 +327,52 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   await reset();
 }
 
+console.log('\n── ⑧b the door refreshes a closed field (the name typed, the machine changed): its answer stands (B-ckpt61 MUST) ──');
+{
+  // the coordinator's scene: a folder that does not exist, ticked, then the session's NAME typed — the door calls refresh() on every
+  // keystroke with the field closed. THE LAW: the pending words only while an ask is really out — the missing line and its tick
+  // stand; a machine change asks again and the answer lands (the model's refresh rows; their controls are the model's)
+  const scene = async (page) => {
+    await load(false, page);
+    await press('#cwd'); await type('~/work/新项目3');
+    const said = await until(async () => /不存在 — 创建？/.test(await under()), 6000);
+    await press('.pf-under input[data-act="tick"]');
+    await press('#name');
+    await until(async () => (await log()).some((x) => x.ev === 'commit'), 6000);
+    for (const ch of ['周', '报', '3']) { await type(ch); await sleep(60); }
+    const tickOn = () => ev(`!!document.querySelector('.pf-under input[data-act="tick"]')?.checked`);
+    const stands = await until(async () => /不存在 — 创建？/.test(await under()) && (await tickOn()), 5000);
+    const after = { line: await under(), tick: await tickOn(), status: await ev('window.pf.verdict().status') };
+    const remote0 = await ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/hosts/h-mac/dir-complete')).length`);
+    await ev(`(() => { const h = document.getElementById('host'); h.value = 'h-mac'; h.dispatchEvent(new Event('change')); return true; })()`);
+    const machine = await until(async () => (await ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/hosts/h-mac/dir-complete')).length`)) > remote0 && !/正在问这台机器/.test(await under()), 8000);
+    const onMac = await under();
+    await ev(`(() => { const h = document.getElementById('host'); h.value = ''; h.dispatchEvent(new Event('change')); return true; })()`);
+    return { said: !!said, stands: !!stands, after, machine: !!machine, onMac };
+  };
+  const now = await scene('t.html');
+  ok('⑧b a missing folder ticked, then the name typed (refresh() per keystroke, the field closed): the line still says «不存在 — 创建？» with its tick checked, never «正在问这台机器…» (the coordinator\'s MUST)', now.said && now.stands && now.after.status === 'missing' && !/正在问这台机器/.test(now.after.line), now);
+  ok('⑧b …the machine changed (refresh() with the field closed): the field ASKS that machine and its answer lands — the pending words never stay with no ask out', now.machine && !/正在问这台机器/.test(now.onMac), now);
+  // THE WIRING (主开发's MUST 1 on 9daebd507 — the page never sent the model «closed», so after one touch it held the list open for good
+  // and every refresh asked at once): typed, then LEFT (the blur closes the list: the model hears «closed»), then the door's refresh
+  // with the list closed asks NOTHING — the answer stands. Its control is the model suite's event census (the wiring without «closed»)
+  {
+    await load();
+    const T8 = '~/work/新项目5';
+    const asks8 = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete?path=' + encodeURIComponent(${JSON.stringify(T8)}) + '&')).length`);
+    await press('#cwd'); await type(T8);
+    const answered = await until(async () => /不存在/.test(await under()), 6000);
+    await press('#other');   // left: the list closes, the commit is judged (no tick: «未生效»)
+    await until(async () => /未生效/.test(await under()), 6000);
+    const n0 = await asks8();
+    for (let i = 0; i < 3; i++) { await ev('window.pf.refresh(); true'); await sleep(200); }
+    await sleep(800);
+    const n1 = await asks8();
+    ok('⑧b WIRED: typed, left (the list closed), then three refreshes with the list closed — NOTHING asked (the answer stands)', !!answered && n0 >= 1 && n1 === n0, { answered, n0, n1, line: await under() });
+  }
+  await load();
+}
+
 console.log('\n── ⑨ two Task Groups + a name ⇒ one 新建 per group ──');
 {
   await ev(`window.sel = ['g-ir', 'g-cd']; document.getElementById('name').value = 'payments'; window.pf.refresh(); true`);
@@ -328,15 +396,21 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   await ev('window.pf.refresh(); true');
   ok('CONTROL: refresh() paints it (the home\'s folders asked once)', await until(async () => (await homeFolders()) >= 1, 3000), await homeFolders());
   const IR = HOME + '/work/investor-relations';
+  // B-ckpt61 (the block's hosted red, both tries): THE STALL PLACED in the listing's reply (the suite's own server holds
+  // /api/dir-complete) — while the machine has not answered for the text, the line says the pending words (LAW 1): no «不存在», no
+  // raw absolute path, no create tick. Then THE LEG'S LAW: it waits for the machine's FULL reply (a dir-complete reply landed after
+  // the set, the field no longer pending) before it judges, and prints the field's state when it fails
+  const dirReplies = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete')).length`);
+  const pfState = () => ev(`(() => { const w = document.querySelector('.path-field'); return { line: document.querySelector('.pf-under').innerText, pending: !!(w && w.dataset.pending), state: w && w.dataset.state, verdict: window.pf.verdict(), dirReplies: performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete')).length }; })()`);
+  const held = holdPath('/api/dir-complete'), before = await dirReplies();
   await ev(`window.sel = ['g-ir']; window.pf.refresh(); window.pf.setDerived(${JSON.stringify(IR)}, { note: '（来自任务组「投资者关系」）' }); true`);
-  // B-ckpt61 (主开发 21:37Z — 2.369.412 ships its legs, not the product cure): THIS ONE LEG IS SKIPPED BY NAME, row B-08d5. On a
-  // slow machine the folder field reads a partial or not-yet-landed reply as a missing folder (its first paint says «不存在» with the
-  // raw path — set() paints before it asks — and a partial reply, the listing's 450 ms budget run out, lists nothing); the product's
-  // cure rides 2.369.413. Never a longer wait for a lucky reply; never a green. The base's own 4 s settle stays (UNJUDGED), so every
-  // leg below runs on this field exactly as the base ran it — never before the reply it guards
-  await until(async () => { const u = await under(); return u.includes('来自任务组') && u.includes('个文件') ? u : null; }, 4000);
-  console.log('  ⊘ SKIP ⑨b (B-08d5) «setDerived fills the field and its line says = ~/work/investor-relations（来自任务组「投资者关系」）» BY NAME — the folder field reads a partial or not-yet-landed reply as a missing folder: cured in 2.369.413');
-  skipped++;
+  const askedOut = await until(() => ev(`!!document.querySelector('.path-field')?.dataset.pending`), 8000);   // the field's ask is out — held
+  const during = await pfState(), tickDuring = await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')`);
+  ok('⑨b HELD (the stall placed in the listing\'s reply): the line says «正在问这台机器…» — no «不存在», no raw absolute path, no create tick (LAW 1)', !!askedOut && /正在问这台机器/.test(during.line) && !/不存在/.test(during.line) && !during.line.includes(HOME) && !tickDuring, { askedOut, during, tickDuring });
+  held.open();
+  const landed = await until(async () => (await dirReplies()) > before && !(await ev(`!!document.querySelector('.path-field')?.dataset.pending`)), 30000);
+  const u1 = await under();
+  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）» with its facts — judged once the machine answered', (await cwd()) === IR && !!landed && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）') && u1.includes('个文件'), landed ? u1 : await pfState());
   ok('…the list did not pop, nothing was committed', !(await listOpen()) && !(await log()).some((x) => x.ev === 'commit'), await log());
   const c1 = await ev('window.pf.commit().then((i) => i && { path: i.path, derived: i.derived, how: i.how })');
   ok('a commit of that untouched text says derived: true', !!c1 && c1.derived === true && c1.path === IR, c1);
@@ -359,7 +433,7 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   await type('试');
   const k2 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/测试' && c.every((x) => x.isNew) ? c : null; }, 4000);
   ok('the next keystroke ⇒ they follow (<IR>/测试) and, once the machine said so, read 新建', !!k2 && /^新建/.test(k2[0].text), k2 || (await nameChips()));
-  ok('…the field\'s own line never moved while the name was typed (no «asking the machine»)', !(await under()).includes('询问'), await under());
+  ok('…the field\'s own line never moved while the name was typed (no «asking the machine»)', !(await under()).includes('正在问这台机器'), await under());   // (B-ckpt61: the zh words — «询问» never matched them)
   await ev(`(() => { const n = document.getElementById('name'); n.value = '草稿'; n.dispatchEvent(new Event('input')); return true; })()`);
   const k3 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/草稿' && c[1].isNew && !c[0].isNew ? c : null; }, 4000);
   ok('a folder that is there (<IR>/草稿) is no 新建; ~/草稿 is', !!k3, k3 || (await nameChips()));
@@ -374,6 +448,128 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   }
   await shot('09b-derived-and-name-chips');
   await reset();
+}
+
+console.log('\n── ⑨d a PARTIAL reply is asked again, BOUNDED (B-ckpt61, the coordinator 21:24Z) ──');
+{
+  // the suite's server answers this path PARTIAL (its budget ran out, nothing listed) as often as the leg says — a hung mount's shape
+  const T = HOME + '/work/payments';
+  const asksFor = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete?path=' + encodeURIComponent(${JSON.stringify(T)}) + '&')).length`);
+  await load();
+  partialFor.path = T; partialFor.left = 1000;
+  await ev(`window.pf.set(${JSON.stringify(T)}, { commit: false }); true`);
+  const seen = [];
+  const said = await until(async () => { const u = await under(); seen.push(u); return /这台机器没有回答/.test(u) ? u : null; }, 10000);
+  await sleep(1500);   // a fourth ask would be out 450 ms after the third reply
+  const n1 = await asksFor();
+  ok('⑨d every reply partial: the field asks THREE times, then its line says «这台机器没有回答» and asks no fourth time — never «不存在» on the way', !!said && n1 === 3 && !seen.some((l) => /不存在/.test(l)), { n1, said, seen: [...new Set(seen)].slice(0, 4) });
+  const c0 = await ev('window.pf.commit().then((i) => (i ? i.path : null))');
+  const ended = await until(async () => { const u = await under(); return /未生效/.test(u) && /这台机器没有回答/.test(u) ? u : null; }, 10000);
+  await sleep(1500);
+  const n2 = await asksFor();
+  ok('⑨d …a commit asks again (a new run of three) and, the replies still partial, ENDS with those words — never «正在问这台机器…» for good', c0 === null && !!ended && n2 === 6 && !/正在问这台机器/.test(ended), { c0, ended, n2 });
+  await ev('window.__log.length = 0; true');
+  partialFor.left = 1;   // one partial reply, then a complete one
+  const c1 = await ev('window.pf.commit().then((i) => (i ? i.path : null))');
+  const served = await until(async () => (await log()).find((x) => x.ev === 'commit') || null, 6000);
+  await sleep(600);   // a second commit would be out by now
+  const u1 = await under(), commits = (await log()).filter((x) => x.ev === 'commit').length;
+  ok('⑨d a commit whose reply was partial waits as owed (its door heard «nothing yet») and is judged AGAIN when the complete answer lands INSIDE its run: committed ONCE, the line says the folder', c1 === null && !!served && served.path === T && commits === 1 && /= ~\/work\/payments/.test(u1) && !/未生效/.test(u1), { c1, served, commits, u1 });
+  // THE RULING (主开发 21:45Z): an owed commit ENDS WITH ITS RUN — a partial reply, then a PLAIN failure: dropped, the line says it was
+  // not applied, and a complete reply that lands later repaints the line only: nothing is committed
+  await load();   // a fresh page: the listing does not show the folder yet (a commit on a text it shows commits at once)
+  await ev('window.__log.length = 0; true');
+  partialFor.left = 1; partialFor.failLeft = 1;
+  const c2 = await ev(`window.pf.set(${JSON.stringify(T)}, { commit: true }).then((i) => (i ? i.path : null))`);
+  const dropped = await until(async () => { const u = await under(); return /未生效/.test(u) && /这台机器没有回答/.test(u) ? u : null; }, 6000);
+  ok('⑨d a partial reply then a plain FAILURE: the owed commit is dropped — «未生效：这台机器没有回答…», never «正在问这台机器…» for good, nothing committed', c2 === null && !!dropped && !/正在问这台机器/.test(dropped) && !(await log()).some((x) => x.ev === 'commit'), { c2, dropped, log: await log() });
+  await ev('window.pf.open(); true');   // a person reopens it: asked again, the complete answer lands
+  const later = await until(async () => { const u = await under(); return /= ~\/work\/payments/.test(u) ? u : null; }, 6000);
+  await sleep(600);
+  ok('⑨d …a complete reply that lands later repaints the line (the folder, the run\'s «did not answer» words gone) and commits NOTHING (the run ended)', !!later && !/未生效/.test(later) && !(await log()).some((x) => x.ev === 'commit'), { later, log: await log() });
+  await key('Escape');
+  // a field destroyed while its re-ask waits asks nothing more
+  await load();
+  partialFor.left = 1000;
+  await ev(`window.pf.set(${JSON.stringify(T)}, { commit: false }); true`);
+  const first = await until(async () => ((await asksFor()) >= 1 ? true : null), 6000);
+  await ev('window.pf.destroy(); true');
+  await sleep(1500);
+  const n3 = await asksFor();
+  ok('⑨d a field destroyed while its re-ask waits asks nothing more (its timer is cleared)', !!first && n3 === 1, { first, n3 });
+  // AN OWED COMMIT ENDS WHEN ITS RUN MOVES ON (the ruling): (1) the door rewrites the box without set() (the Files bar's Up): the run's
+  // re-ask declines and drops what was owed — its «正在问这台机器…» never stands; (2) the machine changes while a commit is owed: the
+  // old run ends — the commit is never served on the other machine (the model's rows; their controls are the model's)
+  const owedScene = async (page, move) => {
+    await load(false, page);
+    await ev('window.__log.length = 0; true');
+    partialFor.path = T; partialFor.left = 1;   // ONE partial reply (the commit judges pending: owed) …
+    await ev(`window.pf.set(${JSON.stringify(T)}, { commit: true }); true`);
+    const owed = await until(async () => { const u = await under(); return /未生效/.test(u) && /正在问这台机器/.test(u) ? u : null; }, 6000);
+    const held = holdPath('/api/dir-complete');   // … then THIS machine's listing held (a placed stall): its run neither answers nor stops
+    await ev(move);
+    await sleep(3000);
+    const line = await under();
+    await ev(`(() => { const h = document.getElementById('host'); if (h.value) { h.value = ''; h.dispatchEvent(new Event('change')); } return true; })()`);
+    held.open(); partialFor.left = 0;
+    return { owed: !!owed, line, commits: (await log()).filter((x) => x.ev === 'commit') };
+  };
+  const REWRITE = `document.getElementById('cwd').value = ${JSON.stringify(HOME + '/work')}; true`;   // the door's own write: no input event
+  const MOVE = `(() => { const h = document.getElementById('host'); h.value = 'h-mac'; h.dispatchEvent(new Event('change')); return true; })()`;
+  const rw = await owedScene('t.html', REWRITE);
+  ok('⑨d the door rewrote the box mid-run (no input event): the re-ask declines and ENDS what was owed — no «正在问这台机器…» left standing, nothing committed', rw.owed && !/正在问这台机器/.test(rw.line) && rw.commits.length === 0, rw);
+  const mv = await owedScene('t.html', MOVE);
+  ok('⑨d the machine changed while a commit was owed: the old run ENDS — the commit is never judged on my-mac (nothing committed, no «未生效» there), no «正在问这台机器…» left once my-mac answered', mv.owed && mv.commits.length === 0 && !/未生效/.test(mv.line) && !/正在问这台机器/.test(mv.line), mv);
+  partialFor.left = 0; partialFor.failLeft = 0;
+  await load();
+}
+
+console.log('\n── ⑨e A1: a field BUILT over a saved text before it is shown (a queued form) asks nothing until touched (B-ckpt61, 主开发 21:51Z) ──');
+{
+  const Q = HOME + '/work/weekly-admin';
+  const asksQ = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete?path=' + encodeURIComponent(${JSON.stringify(Q)}) + '&')).length`);
+  const qLine = () => ev(`document.querySelector('#qbox .pf-under').innerText`);
+  const scene = async (page) => {
+    await load(false, page);
+    await ev(`window.mkQueued(${JSON.stringify(Q)})`);
+    await sleep(400);   // past the field's debounce: an ask at its build would be out by now
+    await ev('window.attachQueued()');
+    await sleep(600);
+    const line = await qLine(), status = await ev('window.qf.verdict().status'), asked = await asksQ();
+    await press('#queued');   // a person touches it
+    const touched = await until(async () => { const t = await qLine(); return /= ~\/work\/weekly-admin/.test(t) ? t : null; }, 8000);
+    return { line, status, asked, touched, after: await asksQ() };
+  };
+  const now = await scene('t.html');
+  ok('⑨e a field built over a saved text before it is shown asks NOTHING, and shown its line is QUIET — no «正在问这台机器…» with nothing asked, no «不存在», no tick; its status still pending (a form refuses)', now.asked === 0 && !/正在问这台机器|不存在/.test(now.line) && now.status === 'pending', now);
+  ok('⑨e …a person touches it: it asks, and the line names the folder with its facts', !!now.touched && now.after >= 1, now);
+  await load();
+}
+
+console.log('\n── ⑨c the home\'s first read FAILS once (B-ckpt61 LAW 2) ──');
+{
+  // a fresh page (the field's own home unknown, no app answer for it); the suite's server answers the home's NEXT read with a 500.
+  // The line never says «missing» on the way, the machine's reply still names the folder (its listing carries the home), and the
+  // next ask (a new text — the same text within 2 s is not asked again) reads the home AGAIN: a failed read is never kept. The
+  // control is the old code by construction (its kept promise answered '' for the page — the re-read never left the page)
+  const IR = HOME + '/work/investor-relations';
+  const dirReplies = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/dir-complete')).length`);
+  const homeReads = () => ev(`performance.getEntriesByType('resource').filter((e) => /\\/api\\/home(\\?|$)/.test(e.name)).length`);
+  const pending = () => ev(`!!document.querySelector('.path-field')?.dataset.pending`);
+  await load();
+  homeFailsLeft = 1;
+  const b2 = await dirReplies();
+  await ev(`window.sel = ['g-ir']; window.pf.setDerived(${JSON.stringify(IR)}, { note: '（来自任务组「投资者关系」）' }); true`);
+  const sawLines = [];
+  const landed = await until(async () => { sawLines.push(await under()); return (await dirReplies()) > b2 && !(await pending()); }, 30000);
+  const u3 = await under();
+  ok('⑨c the home\'s first read answered 500: the field still asked the machine, and its line names the folder with its facts — never «不存在» on the way', homeFailsLeft === 0 && !!landed && u3.includes('= ~/work/investor-relations') && u3.includes('个文件') && !sawLines.some((l) => /不存在/.test(l)), { homeFailsLeft, u3, sawLines: [...new Set(sawLines)].slice(0, 4), reads: await homeReads() });
+  const reads1 = await homeReads();
+  await ev(`window.pf.set(${JSON.stringify(HOME + '/work')}, { commit: false }); true`);
+  const reread = await until(async () => ((await homeReads()) >= 2 ? true : null), 8000);   // (a partial re-ask may have read it already)
+  ok('…and a later ask reads the home AGAIN (LAW 2: a failed read is never kept — the old kept promise read it once for the page)', !!reread, { reads1, now: await homeReads() });
+  homeFailsLeft = 0;
+  await reset();   // the same page: the home it read again is ⑩'s too (⑩ asks only the remote machine)
 }
 
 console.log('\n── ⑩ a remote machine (my-mac): the same recommendations, computed for it ──');
@@ -443,8 +639,8 @@ console.log('\n── ⑬ never offered unasked ──');
   await press('#cwd'); await type('~/');
   const r = await until(async () => { const x = await rows(); return x.some((y) => y.path === '~/work') ? x : null; }, 5000);
   ok('~/ lists the home without ~/vibespace (the checkout) or ~/.config', !!r && !r.some((x) => x.path === '~/vibespace' || x.path === '~/.config'), r);
-  await clear(); await type('~/vibespace'); await sleep(450);
-  const vv = await ev('window.pf.verdict()');
+  await clear(); await type('~/vibespace');
+  const vv = await until(async () => { const v = await ev('window.pf.verdict()'); return v && v.status === 'ok' ? v : null; }, 5000) || await ev('window.pf.verdict()');   // (B-ckpt61: the machine's answer waited for, never a 450 ms sleep)
   ok('typed explicitly, it resolves', vv.status === 'ok' && vv.path === HOME + '/vibespace', vv);
   await key('Escape'); await reset();
 }
@@ -461,5 +657,5 @@ console.log('\n── ⑭ the phone ──');
 
 ok(`⑮ 0 page errors`, errors.length === 0, errors);
 ws.close(); server.close();
-console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}${skipped ? ` · ${skipped} leg skipped by name, never counted green (above)` : ''}`);
+console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);
 process.exit(bad ? 1 : 0);
