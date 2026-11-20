@@ -2529,7 +2529,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       ok(ri.g.status === 503 && ri.g.code === 'store_unread' && ri.w.status === 503 && ri.w.code === 'store_unread' && !!ri.guard && ri.guard.kind === 'unreadable' && ri.guard.code === 'ESTALE' && ri.bytesKept,
         '⑪ (i) THE DATA FOLDER UNREADABLE AT THE FIRST READ (a stale mount: the folder check throws): the settings are HELD (unreadable, ESTALE) — the route answers 503 by name, a save is refused, the file\'s bytes are kept, and the spend guard\'s input says held (it refuses unattended turns)', ri);
       const FLAG_A = "    if (!_settingsRead) { let pre; try { ensureDir(dataDir); } catch (e) { pre = { error: e }; } settingsHold.readAtStart(pre); _settingsRead = true; }";
-      const RX = mutantCopies('swc-flag-first', REPO).load(PREL, anchored(PSRC, FLAG_A, "    if (!_settingsRead) { _settingsRead = true; ensureDir(dataDir); settingsHold.readAtStart(); }", 'flag-first'), 'flag-first');
+      const RX = mutantCopies('swc-flag-first', REPO).load(PREL, anchored(PSRC, FLAG_A, "    if (!_settingsRead) { _settingsRead = true; ensureDir(dataDir); settingsHold.readAtStart(); }", 'flag-first'), 'flag-first');   // stale-pins: kept — the replacement IS the old line (the control rebuilds it)
       const rx = await staleScene(RX, 'red');
       ok(rx.guard === null, 'CONTROL (the flag set before the folder check, in a copy — the unit as read): the start read never runs, the hold never starts — the spend guard is handed NO hold and judges unattended turns on the DEFAULT caps (red)', rx);
       // the hold helper's own refusal before its start read
@@ -2544,7 +2544,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       ok(nr.answer.code === 'store_unread' && nr.answer.why === 'not read' && nr.write.code === 'store_unread' && nr.set.code === 'store_unread' && nr.bytesKept,
         '⑪ (i) a hold whose START read never ran refuses every read, write and set BY NAME (store_unread, «not read») — never an empty value under the store\'s name', nr);
       const NR_A = "  function answer(what = null) { if (!started) throw unreadError(file, NOT_READ(), what); if (held) throw unreadError(file, held, what); return value; }";
-      const nrx = notRead(mutantCopies('swc-not-read', REPO).load(SHREL, anchored(SHSRC, NR_A, "  function answer(what = null) { if (held) throw unreadError(file, held, what); return value; }", 'not-read-cut'), 'not-read-cut'), 'red');
+      const nrx = notRead(mutantCopies('swc-not-read', REPO).load(SHREL, anchored(SHSRC, NR_A, "  function answer(what = null) { if (held) throw unreadError(file, held, what); return value; }", 'not-read-cut'), 'not-read-cut'), 'red');   // stale-pins: kept — the replacement IS the old line (the control rebuilds it)
       ok(nrx.answer.code === undefined && nrx.answer.value === undefined, 'CONTROL (the «not read» refusal cut from answer, in a copy): a store never read answers an EMPTY value under its name (red)', nrx);
     }
     // (j) WHILE THE SETTINGS ARE HELD, THE STRICT SIDE (round wyzvr7567's MUST 2, by rule R3 — «never a default acted on»): every row

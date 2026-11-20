@@ -126,7 +126,7 @@ const silentLaw = (S) => {
     && /scratch surface: windows opened here are not saved/.test(m3.scratchText) && /can be read again/.test(m4.scratchText) && m0 === null,
     'the strip\'s model: one hold = its own sentence, several = how many (Details names each: file, kind, code); a DAMAGED store has its door (start empty, import a backup — the desktops: a rollback point too); the scratch surface says nothing it shows is saved, and at the lift that the desktops can be loaded; nothing held = no strip',
     J({ m1: m1.text, m2: m2.text, d: m2.rows.map((r) => r.doors) }));
-  const CTL = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  if (!force && !saidRung(held) && !HELD.has(held.file)) return false;   // R7: the silent rungs are never said\n", '', 'silent gate'), 'silent-said');
+  const CTL = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  if (!force && !saidRung(held) && !HELD.has(held.file)) { QUIET.set(held.file, { ...pick(held), rung: 'silent' }); return false; }   // R7: the silent rungs are never said (known, for a press)\n", '', 'silent gate'), 'silent-said');
   const rc = silentLaw(CTL);
   ok(rc.silentSaid === true && rc.afterSilent === true, 'CONTROL (the silent gate cut, in a copy): a hold in its silent rungs is SAID — every restart on slow storage puts the strip on every device (red)', J(rc));
 }
@@ -525,7 +525,7 @@ const heldFrame = (W, sentAt) => W.frame({ type: 'layout-held', op: 'layout-sync
   Sx.done(); SH.noteStoreLifted('layouts.json'); SH.setScratch(null); await settle();
   // CONTROLS
   const DMS = read('src/lib/desktop-manager.js');
-  const CTLk = await esmCopy('src/lib/desktop-manager.js', anchored(anchored(DMS, "import { storeHeldKnown, scratchState } from './store-held.js';", "import { storeHeld, scratchState } from './store-held.js';", 'the import'), ": storeHeldKnown('layouts.json');", ": storeHeld('layouts.json');", 'the known hold'), 'said-only');
+  const CTLk = await esmCopy('src/lib/desktop-manager.js', anchored(anchored(DMS, "import { storeHeldKnown, scratchState } from './store-held.js';", "import { storeHeld, scratchState } from './store-held.js';", 'the import'), ": storeHeldKnown('layouts.json');", ": storeHeld('layouts.json');", 'the known hold'), 'said-only');   // stale-pins: kept — the replacement IS the tip's old spelling (the control rebuilds it)
   const Wk = openPage(CTLk.DesktopManager, RealLM);
   await SH.refreshStoreHolds();
   Wk.dm.renameDesktop('d1', 'Renamed');
