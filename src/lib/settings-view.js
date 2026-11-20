@@ -237,13 +237,13 @@ export const IN_FORCE_UNSET = 'unset';
 /** The row's save mark: 'typed' «Not saved yet — press Enter or leave the field» (the field differs from the store; nothing
  *  is stored) → 'pending' / 'saving' «Saving…» (committed; the debounce, then the POST) → 'saved' «Saved» — it STAYS
  *  until the next edit | 'failed'; a Spending row adds the number in force (`inForce`, see inForceOf). '' = nothing. */
-export function saveMarkWords(state, t = (s) => s, { inForce = null, refused = null } = {}) {
+export function saveMarkWords(state, t = (s) => s, { inForce = null, refused = null, held = false } = {}) {
   // the exit check (主开发 17:04Z): a value the server set aside — the reason AT THE ROW, by its code, in the page's language
   if (state === 'refused') return refused && refused.code === 'exit_url_invalid' ? t('Not saved — the exit check address must be a public https address with no user name or password in it; the stored one is kept') : t('Not saved — the server refused this value ({code}); the stored one is kept', { code: String((refused && refused.code) || '?') });
   const live = inForce === IN_FORCE_UNSET ? { value: t('none — every turn nobody typed is held until a number is set') } : inForce !== null && inForce !== undefined ? { value: inForce } : null;   // B-0a33 (3)
   if (state === 'typed') return live ? t('Not saved yet — press Enter or leave the field · in force now: {value}', live) : t('Not saved yet — press Enter or leave the field');
   if (state === 'pending' || state === 'saving') return t('Saving…');
-  if (state === 'failed') return t('Not saved — the server did not answer; change it again to retry');
+  if (state === 'failed') return held ? t('Not now — VibeSpace cannot read your settings right now; this change was not saved.') : t('Not saved — the server did not answer; change it again to retry');   // B-225b: refused by a HOLD
   if (state === 'saved') return live ? t('Saved · in force now: {value}', live) : t('Saved');
   return live ? t('In force now: {value}', live) : '';
 }

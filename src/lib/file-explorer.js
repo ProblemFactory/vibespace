@@ -1,5 +1,5 @@
 import { hostParam } from './file-download.js';
-import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale } from './utils.js';
+import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale, storeHeldWords } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
 import { installExplorerOps, fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';
 import { listingAndProbe } from './explorer-listing.js'; // B-23e5 r336: the listing, then its probe only when owed (never after a storage refusal)
@@ -14,6 +14,7 @@ import { explorerPhoneBits } from './phone-files.js'; // lane phone-files-door: 
 import { t, tc } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { needLine } from './need-line.js'; // lane ui-needs-a-button (phone-23)
+import { heldBodyOf, noteStoreHeld, onStoreLift } from './store-held.js'; // B-225b: a held bookmarks file — no write before a landed read; read again at its lift
 
 const DEFAULT_COLUMNS = { name: true, size: true, modified: true, created: false, type: false };
 const ALL_COLUMNS = [
@@ -280,12 +281,14 @@ class FileExplorer {
     // can offGlobal it — audit 2.81.0: the anonymous handler outlived closed
     // explorers, pinning the whole instance incl. its detached DOM forever)
     this._bkHandler = (msg) => {
-      if (msg.type === 'bookmarks-updated') {
+      if (msg.type === 'bookmarks-updated' && Array.isArray(msg.bookmarks)) {
         this._bookmarks = msg.bookmarks;
+        this._bkLanded = true; this._bkHeld = null;   // the hub's whole list (B-225b: a landing)
         this._renderBookmarks();
       }
     };
     this.app.ws.onGlobal(this._bkHandler);
+    this._offBkLift = onStoreLift('bookmarks.json', () => this._loadBookmarks());   // B-225b: read again at the lift (a word said while this page was away too)
 
     if (this._startPath) this.navigate(this._startPath);
     else this._loadHome();
@@ -310,8 +313,15 @@ class FileExplorer {
   async _loadBookmarks() {
     try {
       const r = await fetch('/api/bookmarks');
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      this._bookmarks = await r.json();
+      if (!r.ok) {
+        let b = null;
+        try { b = await r.json(); } catch { b = null; }
+        const h = heldBodyOf(b);
+        if (h) { this._bkHeld = h; noteStoreHeld(h); }   // B-225b: HELD — no list (never the empty one under its name)
+        throw new Error(`HTTP ${r.status}`);
+      }
+      const list = await r.json();
+      if (Array.isArray(list)) { this._bookmarks = list; this._bkLanded = true; this._bkHeld = null; }
     } catch { /* keep whatever we already show — a failed reload must not blank the panel */ }
     this._renderBookmarks();
   }
@@ -320,11 +330,24 @@ class FileExplorer {
     // Every caller re-renders the local array as if the change already stuck —
     // a swallowed POST failure (server lag/restart) let the edit quietly revert
     // on the next load or bookmarks-updated broadcast with nothing said.
+    // B-225b R4 — NO WRITE BEFORE A LANDED READ: the list is POSTed WHOLE, so a page that never read the hub's (a held file, a
+    // read still in flight) would land its own few rows over the real list — nothing is sent; said, and read again
+    if (!this._bkLanded) {
+      showToast(this._bkHeld ? storeHeldWords(this._bkHeld) : t('Bookmark change not saved: the bookmarks have not been read yet — try again in a moment'), { type: 'error' });
+      this._loadBookmarks();
+      return;
+    }
     try {
       const r = await fetch('/api/bookmarks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(this._bookmarks) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      if (!r.ok) {
+        let b = null;
+        try { b = await r.json(); } catch { b = null; }
+        const h = heldBodyOf(b);
+        if (h) { noteStoreHeld(h); throw Object.assign(new Error(storeHeldWords(h)), { said: true }); }
+        throw new Error(`HTTP ${r.status}`);
+      }
     } catch (e) {
-      showToast(t('Bookmark change not saved: {msg}', { msg: e.message }), { type: 'error' });
+      showToast(e && e.said ? e.message : t('Bookmark change not saved: {msg}', { msg: e.message }), { type: 'error' });
       this._loadBookmarks(); // reconcile the optimistic list with server truth
     }
   }
@@ -413,7 +436,7 @@ class FileExplorer {
     // Drop zone at bottom
     const dropZone = document.createElement('div');
     dropZone.className = 'file-bookmark-dropzone';
-    dropZone.textContent = this._bookmarks.length === 0 ? t('Drop folders here') : '';
+    dropZone.textContent = this._bkHeld && !this._bkLanded ? storeHeldWords(this._bkHeld) : this._bookmarks.length === 0 ? t('Drop folders here') : '';   // B-225b: a HELD list says so — never the empty list's words
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
     dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
     dropZone.addEventListener('drop', (e) => {
@@ -818,6 +841,7 @@ class FileExplorer {
   // window and pinned the instance + its detached DOM tree forever).
   dispose() {
     if (this._bkHandler) { this.app.ws.offGlobal(this._bkHandler); this._bkHandler = null; }
+    this._offBkLift?.(); this._offBkLift = null;
     if (this._previewRO) { this._previewRO.disconnect(); this._previewRO = null; }
     if (this._activeUploads) for (const u of this._activeUploads.values()) { try { u.xhr?.abort(); } catch {} }
     try { this._previewEl?._viewerCtl?.abort(); } catch {} // preview-panel viewer listeners (image pan etc.)

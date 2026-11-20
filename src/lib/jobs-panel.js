@@ -3,7 +3,7 @@
 // agent-/process-controlled and synced to all clients — EVERYTHING renders via
 // textContent; agent markup NEVER touches our DOM (panel md → sanitizeHtml, src/lib/safe-html.js).
 import { railRow } from './rail-row.js'; // lane ui-phone-and-fit M2: THE RAIL ROW
-import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, showContextMenu } from './utils.js';
+import { escHtml, fetchJson, showConfirmDialog, showToast, createModalShell, showContextMenu, stateLanded } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a job's menu + the cleared sentence
 import { CLEARED_TEXT } from '../record-clear.js'; // PURE: a family of cleared jobs is named by the stored key — worded here
 import { grantByWords } from './wake-grant-rows.js'; // the manager design's piece 7: who allowed a job's grant, and when
@@ -44,6 +44,7 @@ const escLine = (line) => { const e = document.createElement('div'); e.className
 // step with other clients through the user-state-updated broadcast. The
 // archive list is fetched only when its row is clicked.
 let FOLDS = null;
+let FOLDS_READ = false;   // B-225b R4: FOLDS holds the hub's map (a landed read, or its broadcast) — written whole only then
 let foldsWired = false;
 let ARCHIVE_OPEN = false;
 // ONLY this build's keys (lane-redact verify r6): an older build keyed a family's fold by the job's NAME — a copy of a
@@ -54,12 +55,13 @@ let foldsCleaned = false;
 async function loadFolds(app) {
   if (!foldsWired) {
     foldsWired = true;
-    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.jobsPanelFolds && typeof msg.state.jobsPanelFolds === 'object') FOLDS = foldsOf(msg.state.jobsPanelFolds).folds; });
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.jobsPanelFolds && typeof msg.state.jobsPanelFolds === 'object') { FOLDS_READ = true; FOLDS = foldsOf(msg.state.jobsPanelFolds).folds; } });
   }
-  if (FOLDS) return FOLDS;
+  if (FOLDS && FOLDS_READ) return FOLDS;
   const st = await fetchJson('/api/user-state');
-  const { folds, dropped } = foldsOf(st && st.jobsPanelFolds);
-  FOLDS = folds;
+  if (!stateLanded(st)) return FOLDS || {};   // B-225b R4: no map read (a held list) — the view's own folds, nothing written
+  const { folds, dropped } = foldsOf(st.jobsPanelFolds);
+  FOLDS = folds; FOLDS_READ = true;
   if (dropped && !foldsCleaned) { foldsCleaned = true; fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobsPanelFolds: FOLDS }) }).catch(() => {}); }
   return FOLDS;
 }
@@ -88,6 +90,7 @@ function seenAllButton(ids, refresh, { compact = false } = {}) {
  *  never outlive its group/session and grow user state without bound */
 function setFold(g, layout) {
   FOLDS = pruneFolds({ ...(FOLDS || {}), [g.key]: !g.expanded }, layout);
+  if (!FOLDS_READ) return;   // B-225b R4: the map was never read (a held list) — this fold is the view's only, never written WHOLE over the hub's
   fetch('/api/user-state', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jobsPanelFolds: FOLDS }) }).catch(() => {});
 }
 /** conversation id / webui id → the sidebar's own display name for the session */

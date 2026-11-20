@@ -1,6 +1,7 @@
 import { track } from './telemetry-client.js';
 import { bootJson } from './boot-splash.js';
-import { cssVarDefault, showToast, showConfirmDialog } from './utils.js';
+import { cssVarDefault, showToast, showConfirmDialog, storeHeldWords } from './utils.js';
+import { heldBodyOf, noteStoreHeld, onStoreLift, saidRung, setScratch } from './store-held.js'; // B-225b: the desktops HELD — the scratch surface, the stale base, the lift
 import { t } from './i18n.js';
 import { isTransientWindowType } from './window-types.js';
 import { legacyIdFor } from './agent-meta.js';
@@ -205,6 +206,10 @@ class LayoutManager {
     // untouched — and the re-send after the re-read carries them again); one queued while down (`at` null) has not left
     app.ws.onStateChange((connected) => { if (!connected) { this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); } if (connected) { this._clockTick(); this._lastRemoteSeq = 0; for (const s of this._unacked) if (s.at == null) s.at = Date.now(); if (this._connects++ > 0) setTimeout(() => this._resyncFromServer(), 250); } }); // a save queued while down LEAVES now (ws.js flushes right after the handlers): its no-ack clock starts here (verify r5 ⑤)
     app.ws.onStateChange((connected) => { if (connected) this._appliedSeq.clear(); }); // the server's seq restarts with the socket (guard 1)
+    // B-225b (R4): the desktops are read again — a scratch surface loads them (the page's own boot load); an open page re-reads
+    // through the existing guards (its stale base released, an act younger than a minute rides, an older one counted and said)
+    this._scratch = null;
+    this._offLayoutsLift = onStoreLift('layouts.json', () => this._onLayoutsLift());
 
     // THE BASE (lane layout-stale-record-sync): this page's own write stored — its stamp is the base of the next one
     app.ws.onGlobal((msg) => { if (msg.type === 'layout-sync-ack' && msg.updatedAt) this.app.desktopManager?.noteStamp?.(msg.desktopId, msg.updatedAt); });
@@ -212,7 +217,9 @@ class LayoutManager {
     app.ws.onGlobal((msg) => {
       if (msg.type === 'layout-sync-ack') { this._onLayoutAnswer(msg.desktopId, msg.sentAt, { refused: false }); return; } // the server READ a save (verify r5 ⑤)
       if (msg.type === 'layout-sync-refused') { this._onLayoutAnswer(msg.desktopId, msg.sentAt, { refused: true }); return; } // …or refused one: that desktop's acts stay held (the desktop manager reconciles + re-sends)
+      if (msg.type === 'layout-held') { this._onLayoutHeld(msg); return; } // …or refused BY NAME: the desktops are held (B-225b)
       if (msg.type !== 'layout-sync') return;
+      if (this._scratch) return; // B-225b: a scratch surface applies no record — its desktops come with its own boot load
       if (msg.seq) {
         if (msg.seq <= this._lastRemoteSeq) return; // stale echo — never re-apply older state
         this._lastRemoteSeq = msg.seq;
@@ -268,12 +275,26 @@ class LayoutManager {
    *  wire base listed (one the wire never listed is this client's own unsent change and stays) — the others
    *  cached; the meta follows. */
   async _resyncFromServer(attempt = 0) {
+    if (this._scratch) return; // B-225b: a scratch surface re-reads nothing — its lift is its own boot load (_onLayoutsLift)
     if (attempt === 0) { this._clockTick(); if (this._resyncing) return; this._resyncing = true; } // ONE read in flight (verify r3 ④: a held save re-asks it); a wake is noticed first (verify r5 ①)
     const startedAt = Date.now(); // the read covers every broadcast that landed BEFORE it was asked (verify r2 ⑤)
     let data = null;
     try {
       const res = await fetch('/api/layouts');
-      if (res.ok === false) throw new Error('HTTP ' + res.status);
+      if (res.ok === false) {
+        // B-225b (R4, R7): the desktops HELD — refused by name. The page goes on its STALE BASE in SILENCE (no toast — the ONE
+        // strip says the hold once it is past its silent rungs): its saves are held, the lift's word re-reads (_onLayoutsLift)
+        let b = null;
+        try { b = await res.json(); } catch { b = null; }
+        const h = heldBodyOf(b);
+        if (h) {
+          this._resyncing = false; this._resyncStale = true;
+          noteStoreHeld(h);
+          try { window.__vsOp?.('layout-resync-held', { rung: h.rung || null }); } catch { }
+          return;
+        }
+        throw new Error('HTTP ' + res.status);
+      }
       data = await res.json();
       if (!data || typeof data !== 'object') throw new Error('not a layout document');
     } catch (err) {
@@ -846,6 +867,38 @@ class LayoutManager {
   /** The server answered a record of `desk` sent at `sentAt` (an ack, or a refusal — the refused desktop's acts stay held:
    *  nothing carried them; the desktop manager reconciles and re-sends). An answer without `sentAt` (an older server's
    *  refusal, a switch's broadcast) is the oldest owed answer for that desktop. */
+  /** B-225b: a layout door refused BY NAME — the desktops are HELD (nothing applied, relayed or written). The hub answers, so the
+   *  no-ack fallback (which settles a save as READ) never fires for it; the save's acts stay held and its desktop is owed again
+   *  (a refused record releases nothing); the page is on its STALE BASE until the lift's re-read; a person's change of the
+   *  desktops themselves (create / rename / delete / reorder) is said — past the hold's silent rungs (R7). */
+  _onLayoutHeld(msg) {
+    this._serverAcks = true;
+    if (msg.op === 'layout-sync') {
+      this._onLayoutAnswer(msg.desktopId, msg.sentAt, { refused: true });
+      if (msg.desktopId) this.app.desktopManager?.markDirty?.(msg.desktopId);
+      this._lastSentJson = null; // the record the hub did NOT read is no «identical to the last one sent» no-op: it goes again after the lift
+    }
+    if (!this._scratch) this._resyncStale = true;
+    noteStoreHeld(msg.held);
+    if (msg.op && msg.op !== 'layout-sync' && saidRung(msg.held)) showToast(storeHeldWords(msg.held), { type: 'error' });
+  }
+
+  /** B-225b R4 — THE SCRATCH SURFACE: this page opened while the desktops are HELD (layouts.json unread at the hub's start). It
+   *  has no desktop the hub knows: ONE local desktop no write names, autosave never armed (nothing here is saved), the strip says
+   *  so. Its lift is the page's own boot load: at once when nothing is open here, else the person's press (the strip). */
+  _enterScratch(held) {
+    this._scratch = held && typeof held === 'object' ? held : { file: 'layouts.json', kind: 'unreadable' };
+    this.app.desktopManager?.enterScratch?.();
+    setScratch('held');
+    noteStoreHeld(this._scratch, { force: true });
+    try { window.__vsOp?.('layout-scratch', { kind: this._scratch.kind || null }); } catch { }
+  }
+  _onLayoutsLift() {
+    if (!this._scratch) { this._resyncFromServer(); return; }
+    if (!this.app.wm?.windows?.size) { location.reload(); return; } // nothing opened here: the boot load at once
+    setScratch('lifted');
+  }
+
   _onLayoutAnswer(desk, sentAt, { refused = false } = {}) {
     if (!refused) this._serverAcks = true;
     const key = desk || '';
@@ -1713,6 +1766,7 @@ class LayoutManager {
   // Auto-save (debounced, triggered on every window change)
   // Won't fire until initial restore is complete
   scheduleAutoSave() {
+    if (this._scratch) return; // B-225b: a scratch surface never arms its autosave (nothing it shows is the hub's)
     this._clockTick(); // a save after a sleep: its act's time is re-armed before guard 2 reads it (verify r5 ①)
     // Dynamic desktop: while staged, the ONLY thing to persist is the stage's
     // own grid config (through the stage store — desktop autosave stays
@@ -1742,6 +1796,7 @@ class LayoutManager {
    *  open queues the frame (ws.js) and the page takes it away: said, not solved here. → whether a save left. */
   _flushOnLeave(why) {
     if (this._restoreArmed()) return false; // a restore armed this page's reload: nothing leaves at its leave (_restoreArmed)
+    if (this._scratch) return false; // B-225b: a scratch surface takes nothing with it
     const timerDue = !!this._autoSaveTimer && this._saveAskedAt > (this._savedAt || 0), deferred = !!this._deferT; // asked AFTER the last save left (one asked in that same ms counts as left — a save sets _savedAt right after its own ask's debounce)
     if ((!timerDue && !deferred) || this.app.stage?.isActive) return false; // nothing due: the last asked save has left
     const dm = this.app.desktopManager;
@@ -1783,6 +1838,7 @@ class LayoutManager {
   }
 
   async _doAutoSave() {
+    if (this._scratch) return; // B-225b: a scratch surface saves nothing
     this._clockTick(); // the timer that was pending at the lid-close fires at the wake: the act it carries is re-armed first (verify r5 ①)
     // Dynamic desktop: while the STAGE view is active the desktop-layout
     // autosave/broadcast is suppressed — the stage persists through its own
@@ -1863,6 +1919,7 @@ class LayoutManager {
    *  bit, never an input time (§6b guard 2 keeps its meaning), never a desktop that owes nothing (no echo). The breaker holds what the
    *  server refused; an identical record the server READ is carried as of now. */
   _saveOwedRecipes() {
+    if (this._scratch) return; // B-225b: a scratch surface owes the hub nothing
     if (this._resyncStale) { if (!this._resyncing) this._resyncFromServer(); return; } // THE STALE BASE: nothing goes from it (verify r3 ④)
     const dm = this.app.desktopManager, owes = this._owedDesks(), at = Date.now(), desks = [];
     if (!dm) return; // a page with no desktops (the legacy single record): the person's next save carries it
@@ -1962,7 +2019,7 @@ class LayoutManager {
           await this.restoreState(toRestore);
         }
       }
-    } catch {}
+    } catch (e) { if (e && e.code === 'store_unread') this._enterScratch(e.held); } // B-225b: the desktops HELD — a scratch surface, never «Desktop 1» made of nothing
     // Offer a bulk resume for the sessions that came back stopped, then disarm
     // the collector so later desktop-switch replays don't re-prompt.
     const stopped = this._bootStoppedSessions || [];
@@ -2096,10 +2153,11 @@ class LayoutManager {
     const dm = this.app.desktopManager;
     const state = dm?.presetState ? dm.presetState() : this.captureState();
     try {
-      await fetch(`/api/layouts/${encodeURIComponent(name)}`, {
+      const saved = await fetch(`/api/layouts/${encodeURIComponent(name)}`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(state),
       });
+      if (saved && saved.status === 503) { let b = null; try { b = await saved.json(); } catch { } const h = heldBodyOf(b); if (h) { noteStoreHeld(h); showToast(storeHeldWords(h), { type: 'error' }); return; } } // B-225b: refused by name — never «saved» on this page
       await fetch('/api/layouts-active', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -2401,6 +2459,7 @@ class LayoutManager {
   async refresh() {
     try {
       const res = await fetch('/api/layouts');
+      if (res.ok === false) return; // B-225b: a held answer is no list — this page keeps the one it shows
       const data = await res.json();
       this._savedPresets = data.saved || {};
       this._currentName = data.current || null;

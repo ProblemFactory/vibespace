@@ -1423,6 +1423,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     catch (e) { res.status(500).json({ error: `${h.file} could not be set aside (${(e && (e.code || e.message)) || e}) — nothing was replaced`, code: 'store_set_aside_failed' }); return false; }
     return true;
   };
+  // R7 — THE PAGE'S ONE FACE reads the holds here: the boot and every reconnect (a word said while a page was away never arrives)
+  router.get('/api/stores/held', (req, res) => {
+    res.json({ held: heldSections(Object.keys(STORE_SECTIONS)) });   // [{ section, file, kind, code, since, rung }] — a page says only those past their silent rungs
+  });
   // the person's choice of an EMPTY store for a damaged one (R5, beside the rollback point and the import): set aside, then read again
   router.post('/api/stores/:file/empty', (req, res) => {
     const section = Object.keys(STORE_SECTIONS).find((k) => path.basename(STORE_SECTIONS[k].hold.file) === String(req.params.file || ''));

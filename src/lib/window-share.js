@@ -14,7 +14,7 @@
 // Every name (a session's, a group's) is peer-controlled text: it reaches the page through textContent only. Every
 // failure is a toast (fetchJson never throws; routes answer {error, code}). Nothing waits for a broadcast echo.
 import { t } from './i18n.js';
-import { createModalShell, createPopover, fetchJson, showToast } from './utils.js';
+import { createModalShell, createPopover, fetchJson, showToast, stateLanded } from './utils.js';
 import { groupTitle } from './channel-words.js';
 import { frameKeyOf } from './desktop-seamless.js';
 import { pickerModel, shareSummary, MODES, proposalOf, setProposal, launchShare, launchSummary, rememberedCount } from '../window-reach.js';
@@ -192,7 +192,7 @@ function wireMap(app) {
     REACH_MAP = m.state[REACH_KEY] && typeof m.state[REACH_KEY] === 'object' ? { ...m.state[REACH_KEY] } : {};
     notifyMap();
   });
-  mapLoaded = fetchJson('/api/user-state').then((st) => { if (REACH_MAP === null) { REACH_MAP = st && st[REACH_KEY] && typeof st[REACH_KEY] === 'object' ? { ...st[REACH_KEY] } : {}; notifyMap(); } });
+  mapLoaded = fetchJson('/api/user-state').then((st) => { if (REACH_MAP === null && stateLanded(st)) { REACH_MAP = st[REACH_KEY] && typeof st[REACH_KEY] === 'object' ? { ...st[REACH_KEY] } : {}; notifyMap(); } });   // B-225b: a refused read leaves the map UNREAD (null)
 }
 /** The key a launch's choice is remembered under (the desktopAppFrame key): the registry id, else `exec:<basename>`. */
 export const launchKeyOf = (payload) => frameKeyOf(payload && payload.appId ? { appId: payload.appId } : { exec: payload && payload.exec });
@@ -326,8 +326,17 @@ export function mountLaunchShareRow(app, rowEl, { isLocal = () => true } = {}) {
     /** After a successful launch: the choice the user made in THIS dialog is what that app proposes next time. */
     remember(key, share) {
       if (!touched || !key) return;
-      REACH_MAP = setProposal(REACH_MAP || {}, key, share || { principals: [], mode: 'auto' });
-      fetchJson('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ [REACH_KEY]: REACH_MAP }) }).then((r) => { if (r && r.error) showToast(t('Could not remember the share for this app') + `: ${r.error}`, { type: 'error' }); });
+      // B-225b R4: the map is written WHOLE — only over the hub's (an unread map is read first; a refused read remembers nothing, said)
+      const write = () => {
+        REACH_MAP = setProposal(REACH_MAP || {}, key, share || { principals: [], mode: 'auto' });
+        fetchJson('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ [REACH_KEY]: REACH_MAP }) }).then((r) => { if (r && r.error) showToast(t('Could not remember the share for this app') + `: ${r.error}`, { type: 'error' }); });
+      };
+      if (REACH_MAP !== null) { write(); return; }
+      fetchJson('/api/user-state').then((st) => {
+        if (!stateLanded(st)) { showToast(t('Could not remember the share for this app') + (st && st.error ? `: ${st.error}` : ''), { type: 'error' }); return; }
+        if (REACH_MAP === null) REACH_MAP = st[REACH_KEY] && typeof st[REACH_KEY] === 'object' ? { ...st[REACH_KEY] } : {};
+        write();
+      });
     },
     /** After a launch that applied the app's REMEMBERED share (the row untouched): say so, and where to change it. */
     announce(key, share, r) {

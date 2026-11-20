@@ -1,6 +1,12 @@
 import { SETTINGS_SCHEMA } from './settings-schema.js';
 import { unsetValue } from '../harness-settings.js';
 
+/** B-225b R7: a save refused while the hold is in its SILENT rungs is asked again this far apart, in silence */
+const SILENT_RETRY_MS = 3000;
+/** B-225b: the hold a refused body names (`store_unread`), or null — store-held.js heldBodyOf's reading, kept here so this module
+ *  imports nothing of the page's DOM half (suites load it bare); a hold is handed to the page's strip through `onHeld` */
+const heldBodyOf = (b) => (b && typeof b === 'object' && b.code === 'store_unread' && b.held && typeof b.held === 'object' && typeof b.held.file === 'string' && b.held.file ? b.held : null);
+
 /**
  * SettingsManager — centralized settings with server persistence and live change events.
  *
@@ -33,6 +39,52 @@ class SettingsManager {
     this._server = {};
     this._live = null;
     this._atLoad = null;     // lane ui-needs-a-button (reader follow-up #13): the values this PAGE loaded with (the first load)
+    // B-225b R4 — NO WRITE BEFORE A LANDED FETCH: until a read of the SERVER'S settings landed (a 200, or a broadcast of its whole
+    // state) this page's copy is not the server's (its localStorage, the defaults) — POSTed whole it would land over the real
+    // file (a held one, at its lift). `held` = the hold the last refused read named (store_unread), else null.
+    this._landed = false;
+    this.held = null;
+    this.onHeld = null;      // (held, { refused: [paths] }?) → the page's ONE strip, and «not now» said for a refused save (app.js)
+    this._failHeld = new Set();   // the failed paths a HOLD refused (past its silent rungs): their row says «Not now», never «the server did not answer»
+    this._landListeners = new Set();
+  }
+
+  /** a read of the server's settings LANDED on this page (B-225b R4) */
+  get landed() { return this._landed; }
+  /** fn() once a read lands (the Settings window draws its rows then) → the unsubscribe */
+  onLand(fn) { if (typeof fn !== 'function') return () => {}; this._landListeners.add(fn); return () => this._landListeners.delete(fn); }
+  /** GET /api/settings → { doc } (landed) | { held } (refused BY NAME: the store is held) | null (no answer) */
+  async _ask() {
+    try {
+      const res = await fetch('/api/settings');
+      if (res.ok) return { doc: await res.json() };
+      let b = null;
+      try { b = await res.json(); } catch { b = null; }
+      const h = heldBodyOf(b);
+      return h ? { held: h } : null;
+    } catch { return null; }
+  }
+  _noteHeld(h, refused = null) { this.held = h; try { this.onHeld?.(h, refused && refused.length ? { refused } : undefined); } catch { /* the strip's own */ } }
+  /** a failed path's save was refused by a HOLD (its row says «Not now») */
+  failHeldOf(path) { return this._failHeld.has(path); }
+  /** THE LANDING: the server's state replaces this page's copy — the person's acts the debounce still holds ride on it */
+  _landOn(doc, { spend = null } = {}) {
+    const fresh = doc && typeof doc === 'object' && !Array.isArray(doc) ? doc : {};
+    const mine = [...this._dirty].map((p) => [p, p in this._values, this._values[p]]);
+    this._values = { ...fresh };
+    for (const [p, has, v] of mine) { if (has) this._values[p] = v; else delete this._values[p]; }
+    this._server = { ...fresh };
+    this._live = spend && typeof spend === 'object' ? { spend } : null;
+    const first = !this._landed;
+    this._landed = true; this.held = null;
+    if (first) for (const fn of [...this._landListeners]) { try { fn(); } catch (e) { console.error('Settings land listener error:', e); } }
+  }
+  /** every path whose value moved since `old` (the copy before a landing) is told */
+  _notifyMoved(old) {
+    for (const path of new Set([...Object.keys(old), ...Object.keys(this._values)])) {
+      const was = path in old ? old[path] : SETTINGS_SCHEMA[path]?.default, now = this.get(path);
+      if (SETTINGS_SCHEMA[path] && JSON.stringify(was) !== JSON.stringify(now)) this._notify(path, now, was);
+    }
   }
 
   /** lane owner-press-attended: a path's save state — 'pending' (committed, the debounce has not fired) | 'saving' (the
@@ -60,17 +112,11 @@ class SettingsManager {
 
   /** Load settings from server, fall back to localStorage. Returns a promise. */
   async load() {
-    try {
-      const res = await fetch('/api/settings');
-      if (res.ok) {
-        this._values = await res.json();
-        this._server = { ...this._values };
-        this._live = null;
-      } else {
-        this._loadFromLocalStorage();
-      }
-    } catch {
-      this._loadFromLocalStorage();
+    const r = await this._ask();
+    if (r && r.doc) this._landOn(r.doc);
+    else {
+      if (r && r.held) this._noteHeld(r.held);
+      this._loadFromLocalStorage();   // what this page SHOWS meanwhile — never written (B-225b R4: the save asks first)
     }
     this._loaded = true;
     if (!this._atLoad) this._atLoad = { ...this._values };   // a setting that takes effect at the next load compares against THESE
@@ -87,9 +133,10 @@ class SettingsManager {
   async refetch() {
     if (this._saveTimer) return;
     try {
-      const res = await fetch('/api/settings');
-      if (!res.ok) return;
-      const fresh = await res.json();
+      const r = await this._ask();
+      if (!r || !r.doc) { if (r && r.held) this._noteHeld(r.held); return; }
+      const fresh = r.doc;
+      if (!this._landed) { const old = { ...this._values }; this._landOn(fresh); this._emitAllMarks(); this._notifyMoved(old); return; }   // B-225b: the first landing
       this._server = { ...fresh };
       this._live = null;   // r2: a refetch is the server's state — our last echo is no longer the source
       this._emitAllMarks();
@@ -149,7 +196,7 @@ class SettingsManager {
       this._notify(path, now, old);
     }
     for (const [p, was] of followers) { const is = this.get(p); if (JSON.stringify(was) !== JSON.stringify(is)) this._notify(p, is, was); }
-    this._dirty.add(path); this._failed.delete(path); this._saved.delete(path); this._refused.delete(path);
+    this._dirty.add(path); this._failed.delete(path); this._failHeld.delete(path); this._saved.delete(path); this._refused.delete(path);
     this._scheduleSave();
     this._emitSave([path]);
   }
@@ -161,6 +208,7 @@ class SettingsManager {
 
   /** Reset all settings to defaults. */
   resetAll() {
+    if (!this._landed) return false;   // B-225b R4: never a write over settings this page has not read (the Settings window shows no rows then)
     const oldValues = { ...this._values };
     this._values = {};
     // Notify all previously overridden settings
@@ -202,6 +250,7 @@ class SettingsManager {
     const stale = [...this._refused.keys()].filter((p) => JSON.stringify((data || {})[p]) !== JSON.stringify((this._server || {})[p]));
     this._values = data;
     this._server = { ...(data || {}) };
+    if (!this._landed) { this._landOn(data, { spend }); this._values = data; }   // B-225b R4: a broadcast of the server's WHOLE state is a landing (nothing is dirty: the guard above)
     for (const p of stale) this._refused.delete(p);
     if (stale.length) this._emitSave(stale);
     this._live = spend && typeof spend === 'object' ? { spend } : null;
@@ -259,6 +308,23 @@ class SettingsManager {
     // releases; the guard must cover the whole in-flight window — the
     // 2.177.0 stale-echo class).
     const myTimer = this._saveTimer;
+    // B-225b R4 — NO WRITE BEFORE A LANDED FETCH: the server's state is asked first; the person's acts the debounce holds ride on
+    // it. Refused BY NAME in the hold's silent rungs: asked again in silence (R7); past them, or no answer: nothing is written and
+    // the rows say «Not saved» (the strip names the hold)
+    if (!this._landed) {
+      const r = await this._ask();
+      if (r && r.doc) { const old = { ...this._values }; this._landOn(r.doc); this._emitAllMarks(); this._notifyMoved(old); }
+      else {
+        if (this._saveTimer === myTimer) this._saveTimer = null;
+        if (r && r.held && r.held.rung === 'silent') { this._noteHeld(r.held); if (!this._saveTimer) this._saveTimer = setTimeout(() => this._save(), SILENT_RETRY_MS); return; }
+        const carried = [...this._dirty];
+        this._dirty.clear();
+        for (const p of carried) { this._saved.delete(p); this._failed.add(p); if (r && r.held) this._failHeld.add(p); else this._failHeld.delete(p); }
+        if (r && r.held) this._noteHeld(r.held, carried);   // «not now», said — the controls stay as the person left them
+        this._emitSave(carried);
+        return;
+      }
+    }
     const data = this.toJSON();
     // Always write to localStorage as backup
     try { localStorage.setItem('webui-settings', JSON.stringify(data)); } catch {}
@@ -268,7 +334,7 @@ class SettingsManager {
     this._dirty.clear();
     for (const p of carried) this._inflight.set(p, mySeq);
     this._emitSave(carried);
-    let landed = false;
+    let landed = false, silent = false, heldNow = null;
     // Write to server
     try {
       const res = await fetch('/api/settings', {
@@ -277,6 +343,12 @@ class SettingsManager {
         body: JSON.stringify(data),
       });
       landed = !!(res && res.ok);
+      if (!landed && res && res.status === 503) {   // B-225b: refused by a hold — in its silent rungs the write waits, asked again in silence (R7)
+        let b = null;
+        try { b = await res.json(); } catch { b = null; }
+        const h = heldBodyOf(b);
+        if (h) { heldNow = h; silent = h.rung === 'silent'; }
+      }
       if (landed) {
         const before = this._server || {};
         this._server = { ...data };
@@ -292,8 +364,12 @@ class SettingsManager {
       for (const p of carried) {
         if (this._inflight.get(p) !== mySeq) continue;
         this._inflight.delete(p);
+        if (silent) { this._dirty.add(p); continue; }   // B-225b R7: still pending — the save is asked again below
         if (landed && this._refused.has(p)) { this._failed.delete(p); this._saved.delete(p); } else if (landed) { this._failed.delete(p); this._saved.add(p); } else { this._saved.delete(p); this._failed.add(p); }
+        if (!landed && heldNow) this._failHeld.add(p); else this._failHeld.delete(p);
       }
+      if (heldNow) this._noteHeld(heldNow, silent ? null : carried.filter((p) => this._failHeld.has(p)));
+      if (silent && this._dirty.size && !this._saveTimer) this._saveTimer = setTimeout(() => this._save(), SILENT_RETRY_MS);
       this._emitSave(carried);
     }
   }

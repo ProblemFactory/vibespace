@@ -38,6 +38,11 @@ export async function timedJson(url, { fetchImpl, stallMs = STALL_MS } = {}) {
   const go = (async () => {
     try {
       const r = await fetchImpl(url, { cache: 'no-store', signal: ctl?.signal });
+      if (!r.ok && r.status === 503) {   // B-225b: a store the hub's start could not read answers BY NAME — HELD, never a failure to retry blind
+        let b = null;
+        try { b = await r.json(); } catch { b = null; }
+        if (b && b.code === 'store_unread' && b.held && typeof b.held === 'object') return { ok: false, why: 'held', status: 503, held: b.held };
+      }
       if (!r.ok) return { ok: false, why: 'http', status: r.status };
       return { ok: true, status: r.status, json: await r.json() };
     } catch { return { ok: false, why: 'network' }; }
@@ -53,15 +58,18 @@ export function reasonOf(fail, stallMs = STALL_MS) {
   return { key: 'network error', params: {} };
 }
 
-/** A boot request on the ladder. Resolves the JSON, or { gaveUp: { url, tries, fail } } after the last rung.
- *  onRetry({ url, fail, waitMs, tries }) fires before each wait (the splash line). */
+/** A boot request on the ladder. Resolves the JSON, or { gaveUp: { url, tries, fail } } after the last rung, or { held } — a
+ *  store the hub HOLDS (B-225b R4): at once past its silent rungs; in them the ladder climbs IN SILENCE (no line, R7) and a
+ *  hold still silent at its top is held all the same. onRetry({ url, fail, waitMs, tries }) fires before each wait (the
+ *  splash line). */
 export async function ladderJson(url, { fetchImpl, sleep, stallMs = STALL_MS, ladder = LADDER_MS, onRetry = () => {} } = {}) {
   for (let tries = 1; ; tries++) {
     const r = await timedJson(url, { fetchImpl, stallMs });
     if (r.ok) return { json: r.json };
+    if (r.why === 'held' && r.held.rung !== 'silent') return { held: r.held };
     const waitMs = ladderWait(tries, ladder);
-    if (waitMs == null) return { gaveUp: { url, tries, fail: r } };
-    onRetry({ url, fail: r, waitMs, tries });
+    if (waitMs == null) return r.why === 'held' ? { held: r.held } : { gaveUp: { url, tries, fail: r } };
+    if (r.why !== 'held') onRetry({ url, fail: r, waitMs, tries });
     await sleep(waitMs);
   }
 }

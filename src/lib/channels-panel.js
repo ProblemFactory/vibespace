@@ -42,7 +42,7 @@
 // same shape core's session-card / window / gear menus use — registered by the
 // module that OWNS the feature, so gear-menu.js stays byte-identical to its
 // pinned legacy row list.
-import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml, createPopover } from './utils.js';
+import { fetchJson, showContextMenu, showToast, createModalShell, showConfirmDialog, escHtml, createPopover, stateLanded } from './utils.js';
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, clockOf, dateOf } from './page-time.js';
 import { pushClaimOptions } from './value-words.js'; // lane ui-language: the push declaration's options, one list
@@ -1234,6 +1234,8 @@ let VIEW = 'focus';
 // loaded ONCE per page, kept in step with other clients by the
 // `user-state-updated` broadcast. ──
 let FOLDS = null;
+let FOLDS_READ = false;   // B-225b R4: FOLDS / SEEN hold the hub's maps (a landed read, or its broadcast) — written whole only then
+let SEEN_READ = false;
 let foldsWired = false;
 /** lane channel-row-notices: THE NOTICES PUT AWAY — user state `channelsNoticesSeen` {accountId: the state's sig}, loaded with the
  *  folds (one GET), written whole (PATCH merge-only), kept to the live accounts; a notice whose state changed is shown again. */
@@ -1242,6 +1244,7 @@ const seenFrom = (st) => { const s = st && st.channelsNoticesSeen; return s && t
 function setSeen(id, sig) {
   const next = { ...(SEEN || {}), [id]: sig };
   SEEN = LIVE_ACCOUNTS ? Object.fromEntries(Object.entries(next).filter(([k]) => k === id || LIVE_ACCOUNTS.has(k))) : next;
+  if (!SEEN_READ) return;   // B-225b R4: never read (a held list) — put away on this view only, never written WHOLE over the hub's
   fetch('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ channelsNoticesSeen: SEEN }) }).catch(() => {});
 }
 /** lane channels-fold-default: this page's fold PATCHes in flight — the broadcast echo of an EARLIER one is older than
@@ -1253,17 +1256,19 @@ const FOLD_LISTENERS = new Set();
 async function loadFolds(app) {
   if (!foldsWired) {
     foldsWired = true;
-    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsNoticesSeen) SEEN = seenFrom(msg.state); });   // lane channel-row-notices
-    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsPanelFolds) { if (FOLD_WRITES > 0) return; FOLDS = foldsFrom(msg.state); for (const l of [...FOLD_LISTENERS]) { if (!l.c.isConnected) { FOLD_LISTENERS.delete(l); continue; } try { l.draw(); } catch {} } } });
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsNoticesSeen) { SEEN = seenFrom(msg.state); SEEN_READ = true; } });   // lane channel-row-notices
+    app.ws.onGlobal((msg) => { if (msg.type === 'user-state-updated' && msg.state && msg.state.channelsPanelFolds) { if (FOLD_WRITES > 0) return; FOLDS = foldsFrom(msg.state); FOLDS_READ = true; for (const l of [...FOLD_LISTENERS]) { if (!l.c.isConnected) { FOLD_LISTENERS.delete(l); continue; } try { l.draw(); } catch {} } } });
   }
-  if (FOLDS) return FOLDS;
+  if (FOLDS && FOLDS_READ) return FOLDS;
   const st = await fetchJson('/api/user-state');
-  FOLDS = foldsFrom(st && !st.error ? st : {});
-  SEEN = seenFrom(st && !st.error ? st : {});   // lane channel-row-notices
+  if (!stateLanded(st)) { if (!FOLDS) FOLDS = foldsFrom({}); if (!SEEN) SEEN = {}; return FOLDS; }   // B-225b R4: no map read (a held list) — the defaults drawn, nothing written
+  FOLDS = foldsFrom(st); FOLDS_READ = true;
+  SEEN = seenFrom(st); SEEN_READ = true;   // lane channel-row-notices
   return FOLDS;
 }
 function setFold(part, folded) {
   FOLDS = foldsToWrite({ ...(FOLDS || {}), [part]: !!folded }, LIVE_ACCOUNTS);
+  if (!FOLDS_READ) return;   // B-225b R4: the map was never read — this fold is the view's only, never written WHOLE over the hub's
   FOLD_WRITES++;
   fetch('/api/user-state', { method: 'PATCH', headers: JSON_HDR, body: JSON.stringify({ channelsPanelFolds: FOLDS }) }).catch(() => {}).finally(() => { FOLD_WRITES = Math.max(0, FOLD_WRITES - 1); });
 }

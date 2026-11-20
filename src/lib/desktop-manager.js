@@ -1,4 +1,5 @@
-import { cssVarDefault, escHtml, showContextMenu, showInputDialog, showToast, uiScale } from './utils.js';
+import { cssVarDefault, escHtml, showContextMenu, showInputDialog, showToast, uiScale, storeHeldWords } from './utils.js';
+import { storeHeld } from './store-held.js'; // B-225b: the desktops HELD — a change of them is refused by name here
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
 import { t } from './i18n.js';
 import { storedNameWords } from './value-words.js'; // lane ui-language: a default desktop name («Desktop 1») is worded at display, never in storage
@@ -85,6 +86,9 @@ function rideKept(held, built, ghosts) {
   return { built: out, rows: [...said].map(([id, c]) => withChain(rows.get(id), c)) };
 }
 
+/** B-225b: the scratch surface's ONE desktop (a page opened while the desktops are held) — local, never sent */
+const SCRATCH_DESK = '__scratch__';
+
 /**
  * DesktopManager — virtual desktop system.
  * Each desktop has its own set of windows, grid mode, and layout state.
@@ -118,6 +122,7 @@ export class DesktopManager {
 
     // Listen for desktop metadata updates from other clients
     app.ws.onGlobal((msg) => {
+      if (this._scratch) return; // B-225b: a scratch surface takes no desktop of the hub's — they come with its own boot load
       if (msg.type === 'desktop-updated') this._onRemoteDesktopUpdated(msg);
       else if (msg.type === 'layout-sync-refused') this.onSyncRefused(msg);
       else if (msg.type === 'layout-sync-ack' && msg.desktopId) { this._refusals?.delete(msg.desktopId); this._settleAsked(msg.desktopId, true, msg.sentAt); } // a write of it was accepted: the disagreement is over (and a dedup it carried stands — r3 G)
@@ -195,9 +200,27 @@ export class DesktopManager {
     this._renderSwitcher();
   }
 
+  /** B-225b R4 — THE SCRATCH SURFACE (layout.js _enterScratch): this page opened while the desktops are HELD. ONE local desktop the
+   *  hub never hears of (no write names it — _broadcastDesktopState, the desktop doors below); nothing here is saved. */
+  enterScratch() {
+    this._scratch = true;
+    this._desktops = [{ id: SCRATCH_DESK, name: t('Scratch') }];
+    this._activeId = SCRATCH_DESK;
+    this._renderSwitcher();
+  }
+  /** a change of the desktops while they are HELD (a scratch surface, or a hold the strip names): refused BY NAME, nothing changed
+   *  (the hub would refuse it — `layout-held`) → true when refused */
+  _heldRefuse() {
+    const h = this._scratch ? (this.app.layoutManager?._scratch || { file: 'layouts.json' }) : storeHeld('layouts.json');
+    if (!h) return false;
+    showToast(storeHeldWords(h), { type: 'error' });
+    return true;
+  }
+
   // ── Desktop CRUD ──
 
   createDesktop(name) {
+    if (this._heldRefuse()) return null;
     const id = this._generateId();
     const deskName = name || `Desktop ${this._desktops.length + 1}`;
     this._desktops.push({ id, name: deskName });
@@ -207,6 +230,7 @@ export class DesktopManager {
   }
 
   async deleteDesktop(desktopId) {
+    if (this._heldRefuse()) return;
     if (this._desktops.length <= 1) return; // can't delete last desktop
     let idx = this._desktops.findIndex(d => d.id === desktopId);
     if (idx < 0) return;
@@ -286,6 +310,7 @@ export class DesktopManager {
   }
 
   renameDesktop(desktopId, name) {
+    if (this._heldRefuse()) return;
     const desk = this._desktops.find(d => d.id === desktopId);
     if (desk) {
       desk.name = name;
@@ -1464,6 +1489,7 @@ export class DesktopManager {
   /** Broadcast a specific desktop's state (used during switch) */
   _broadcastDesktopState(desktopId, state) {
     if (desktopId === '__stage__') return; // stage state never enters desktop records
+    if (this._scratch) return; // B-225b: a scratch surface's desktop is no desktop of the hub's
     if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop deleted meanwhile: its record is nobody's to write (verify r2 ④ — the switch off it wrote an orphan record on the server)
     if (this.holdsBack(desktopId, state)) return; // THE BREAKER (inc-mw1ogdno-5jny): the very record the server refused is never re-sent
     const sentAt = Date.now();
@@ -2014,6 +2040,7 @@ export class DesktopManager {
 
   // Move dragId to sit just BEFORE targetId in the desktop order (2.250.0).
   reorderDesktop(dragId, targetId) {
+    if (this._heldRefuse()) return;
     const from = this._desktops.findIndex(d => d.id === dragId);
     const to = this._desktops.findIndex(d => d.id === targetId);
     if (from < 0 || to < 0 || from === to) return;

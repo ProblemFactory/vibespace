@@ -48,9 +48,11 @@ export async function awaitBootReady() {
   return true;
 }
 /** A first-paint request on the ladder; gives up into the Reload button and NEVER resolves then (restoring from
- *  nothing would let the first autosave overwrite the saved layout). */
+ *  nothing would let the first autosave overwrite the saved layout). A store the hub HOLDS (B-225b) THROWS by name —
+ *  `{ code: 'store_unread', held }`: the caller's own road (the desktops: a scratch surface), never a layout made of nothing. */
 export async function bootJson(url) {
   const r = await ladderJson(url, { ...bootDeps(), onRetry: (x) => splashLine(retryLine(x)) });
+  if (r.held) throw Object.assign(new Error(`${url}: the store is held`), { code: 'store_unread', held: r.held });
   if (r.gaveUp) { splashGiveUp(r.gaveUp); return new Promise(() => { }); }
   return r.json;
 }

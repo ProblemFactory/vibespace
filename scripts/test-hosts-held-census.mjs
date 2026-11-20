@@ -675,7 +675,7 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const heldOf = (src) => { const i = src.indexOf('export function hostsHeldWords() {'), k = src.indexOf(HOH), j = k < 0 ? -1 : src.indexOf('\n', k);
     if (i < 0 || j < 0) return null;
     return new Function('t', `${src.slice(i, j).replaceAll('export function', 'function')}\nreturn heldWordsOf;`)((s) => `«${s}»`); };   // eslint-disable-line no-new-func
-  const HO = heldOf(U), HOX = heldOf(anchored(U, "d && d.code === 'mounts-unread' ? mountsHeldWords() : null; }", 'null; }', 'hhc-8m3'));
+  const HO = heldOf(U), HOX = heldOf(anchored(U, "d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread'", "d && d.code === 'store_unread'", 'hhc-8m3'));
   const ho = HO && [HO({ code: 'hosts-unread', error: 'x' }), HO({ code: 'mounts-unread', error: 'x' }), HO({ code: 'no_dav_path', error: 'x' }), HO(null)];
   ok(!!ho && JSON.stringify(ho) === JSON.stringify([`«${SENT}»`, `«${MSENT}»`, null, null]) && !!HOX && HOX({ code: 'mounts-unread' }) === null,
     'heldWordsOf: a hold\'s code (machines, mounts) → the page\'s sentence; another code or none → null (its own words stand); CONTROL (the mounts branch cut, in a copy): a mounts hold is not worded — RED', { ho });

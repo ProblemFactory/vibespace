@@ -1915,8 +1915,23 @@ export function hostsHeldWords() { return t('VibeSpace cannot read its paired ma
 export function mountsHeldWords() { return t('VibeSpace cannot read the machines’ mounts right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'); }
 /** A refusal answered BY A HOLD (its code: `hosts-unread` / `mounts-unread`) → the page's sentence; any other answer → null (its own words
  *  stand). For the pages that fetch by hand (the exit runs and device activity dialogs, Settings' config export and import). */
-export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : null; }
+export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : d && d.code === 'store_unread' ? storeHeldWords(d.held) : null; }
+/** B-225b (lane lg-store-writes, the persistence holds): a persistence store the hub's START could not read is HELD — 503 `store_unread`
+ *  with `held` {file, kind, code, since, rung}. ONE sentence by its file and its kind, in the page's words (the hub's are English). */
+export function storeWhatOf(file) {
+  const f = String(file || '');
+  return f === 'layouts.json' ? t('your desktops') : f === 'user-state.json' ? t('your conversation list') : f === 'bookmarks.json' ? t('your bookmarks')
+    : f === 'custom-themes.json' ? t('your custom themes') : f === 'settings.json' ? t('your settings') : t('a saved list');
+}
+export function storeHeldWords(held) {
+  const what = storeWhatOf(held && held.file), kind = held && held.kind;
+  if (kind === 'damaged') return t('VibeSpace could not read {what}: the file is not what it should be. Nothing is written over it — replace it from a backup, or start it empty.', { what });
+  if (kind === 'not-allowed') return t('VibeSpace is not allowed to read {what} — nothing is written over it. Check the permissions of the data folder.', { what });
+  return t('VibeSpace cannot read {what} right now — nothing was changed and nothing is written over it. It reads it again by itself.', { what });
+}
 function refusalWords(body) {
+  if (body && typeof body === 'object' && body.code === 'store_unread') return { ...body, said: body.error, error: storeHeldWords(body.held) };   // B-225b: a held store, in the page's words
+  if (body && typeof body === 'object' && body.code === 'store_appeared') return { ...body, said: body.error, error: t('A saved file appeared since VibeSpace started — it was read and kept; this change was not made. Make it again.') };
   if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };   // the server's words kept as `said`
   if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };
   return body && typeof body === 'object' && body.error === 'cross-site' ? { ...body, code: 'cross-site', error: t('This action came from another site and was refused') } : body;
@@ -1945,6 +1960,11 @@ export async function fetchJson(url, opts) {
     return body;
   } catch { return null; }
 }
+
+/** B-225b R4: a user-state answer that LANDED — the server's state: not a refusal (`error` words — a held list's store_unread, any
+ *  other) and not a failed fetch (null). A key written WHOLE (PATCH merge-only replaces the key) is written only over a map read
+ *  from one of these — never over the defaults a refused read left (they would land over the real map at the lift). */
+export const stateLanded = (st) => !!st && typeof st === 'object' && !Array.isArray(st) && typeof st.error !== 'string';
 
 /** ONE text-filter predicate for sessions — local AND remote-discovered
  *  (2.275.0, CS unification). There were two hand-synced copies: the local one

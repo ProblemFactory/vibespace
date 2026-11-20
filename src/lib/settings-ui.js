@@ -1,7 +1,7 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
 import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords, settingFocusOf } from './settings-view.js';
 import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
-import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved } from './utils.js';
+import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved, storeHeldWords } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
 import { kernelDoors, kernelDownloadWords, kernelPollStep, kernelSaidStep } from './browser-build-model.js'; // B-0bc7: the engine row's «Download kernel» doors and their answer in words
@@ -201,6 +201,7 @@ class SettingsUI {
     this._facts = this._buildFacts(() => { if (content.isConnected) this._rerenderKeepingPlace(content, nav); });
     // the rows other rows' `when` reads: changing one re-draws, so a dependent row appears / goes at once
     this._content = content; this._nav = nav;
+    this._offLand?.(); this._offLand = this.settings.onLand?.(() => { if (content.isConnected) this._renderContent(content, nav); });   // B-225b: a held file's rows come at its landing
     this._governors = new Set(Object.values(SETTINGS_SCHEMA).flatMap((r) => whenClauses(r.when)).filter((c) => clauseKind(c) === 'setting').map((c) => c.setting));
     this._renderContent(content, nav);
     if (focus) this._focusRow(content, nav, focus);   // lane setting-doors pick 1: a link to one row
@@ -275,6 +276,15 @@ class SettingsUI {
     content.innerHTML = '';
     nav.innerHTML = '';
 
+    // B-225b R4: a HELD settings file — no rows (nothing this page holds is the server's), only its words; the rows are drawn
+    // when a read lands (onLand above)
+    if (this.settings.landed === false && this.settings.held) {
+      const p = document.createElement('p');
+      p.className = 'settings-held';
+      p.textContent = storeHeldWords(this.settings.held);
+      content.append(p);
+      return;
+    }
     const query = this._search;
     // CLI-config receipts are FRESH per render (design-harness-settings D2):
     // one /api/agent-hooks read shared by every cli-config row of this pass.
@@ -620,7 +630,7 @@ class SettingsUI {
     const S = this.settings;
     const st = this._typed && this._typed.has(path) ? 'typed' : typeof S.saveStateOf === 'function' ? S.saveStateOf(path) : 'idle';
     const inForce = inForceOf(path, { live: typeof S.liveEcho === 'function' ? S.liveEcho() : null, server: (k) => (typeof S.serverValue === 'function' ? S.serverValue(k) : S.get(k)), budgetLimits });
-    const text = saveMarkWords(st, t, { inForce, refused: typeof S.refusedOf === 'function' ? S.refusedOf(path) : null });
+    const text = saveMarkWords(st, t, { inForce, refused: typeof S.refusedOf === 'function' ? S.refusedOf(path) : null, held: typeof S.failHeldOf === 'function' && S.failHeldOf(path) });
     if (mark.textContent !== text) mark.textContent = text;
     if (mark.dataset.state !== st) mark.dataset.state = st;
     mark.hidden = !text;

@@ -1,5 +1,6 @@
 import { THEMES, BUILTIN_THEMES } from './themes.js';
-import { showToast, showConfirmDialog, uiScale, escHtml } from './utils.js';
+import { showToast, showConfirmDialog, uiScale, escHtml, heldWordsOf, storeHeldWords } from './utils.js';
+import { heldBodyOf, noteStoreHeld } from './store-held.js'; // B-225b: a held custom-themes file — no editor rows, its words
 import { t, tc } from './i18n.js'; // lane ui-language (the walk's gear-and-system-2: the Theme Editor was English in every language)
 import { themeWord } from './value-words.js'; // a built-in theme's name in the reader's words (lane ui-language)
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
@@ -104,13 +105,21 @@ class ThemeEditor {
 
   open(startFrom) {
     this._originalTheme = this.app.themeManager.current;
-    this._loadCustomThemes().then(() => this._showDialog(startFrom));
+    // B-225b R4: a HELD custom-themes file — the editor shows no rows (nothing this page holds is the hub's list), only its words
+    this._loadCustomThemes().then(() => { if (this._held) { showToast(storeHeldWords(this._held), { type: 'error' }); return; } this._showDialog(startFrom); });
   }
 
   async _loadCustomThemes() {
+    this._held = null;
     try {
       const res = await fetch('/api/custom-themes');
-      if (!res.ok) throw new Error();
+      if (!res.ok) {
+        let b = null;
+        try { b = await res.json(); } catch { b = null; }
+        const h = heldBodyOf(b);
+        if (h) { this._held = h; noteStoreHeld(h); }
+        throw new Error();
+      }
       this._customThemes = await res.json();
     } catch { this._customThemes = {}; }
   }
@@ -545,7 +554,7 @@ class ThemeEditor {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, css, terminal: this._termValues }),
       });
-      if (!res.ok) { const e = await res.json(); showToast(e.error || t('Save failed'), { type: 'error' }); return; }
+      if (!res.ok) { const e = await res.json(); if (heldBodyOf(e)) noteStoreHeld(e.held); showToast(heldWordsOf(e) || e.error || t('Save failed'), { type: 'error' }); return; }
     } catch (e) { showToast(t('Save failed: {error}', { error: e.message }), { type: 'error' }); return; }
 
     // Register locally
@@ -568,7 +577,7 @@ class ThemeEditor {
 
     try {
       const res = await fetch('/api/custom-themes/' + encodeURIComponent(name), { method: 'DELETE' });
-      if (!res.ok) { const e = await res.json(); showToast(e.error || t('Delete failed'), { type: 'error' }); return; }
+      if (!res.ok) { const e = await res.json(); if (heldBodyOf(e)) noteStoreHeld(e.held); showToast(heldWordsOf(e) || e.error || t('Delete failed'), { type: 'error' }); return; }
     } catch (e) { showToast(t('Delete failed: {error}', { error: e.message }), { type: 'error' }); return; }
 
     const wasActive = this.app.themeManager.current === name;

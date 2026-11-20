@@ -77,6 +77,7 @@ import { openDesign as openDesignFn, openDesignPublishDialog, installDesignWindo
 import { openArtifacts as openArtifactsFn } from './artifacts-window.js'; // lane artifacts-list-scale: the Artifacts window (window type `artifacts`) — the chip's list at full size behind its ⤢
 import { openDoc as openDocFn } from './doc-window.js'; // lane doc-window: the Doc window (window type `doc`) — a markdown file read, edited and annotated in one rendered view; the editor itself is the lazy public/doc-editor.js
 import { DesktopManager } from './desktop-manager.js';
+import { noteStoreHeld, noteStoreLifted, onStoreLift, refreshStoreHolds, setStoreDoors } from './store-held.js'; // B-225b R7: the page's ONE strip for a held store
 import { StageManager, STAGE_ID } from './stage-manager.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
@@ -363,6 +364,21 @@ class App {
     // Load settings asynchronously (non-blocking — modules use defaults until loaded)
     this.settings.load();
     this._loadSettingHolds(); // lane setting-doors pick 2: the rows' standing holds (a For-you card's held line, a Settings row's «End now»)
+
+    // B-225b (R4 / R7): a store the hub's start could not read is HELD — ONE strip says it past its silent rungs (the hub's
+    // `store-held`; GET /api/stores/held at the boot and every reconnect); at its lift (`store-lifted`) each store's own reader fetches
+    setStoreDoors({ importBackup: () => this._showTransferDialog?.('import'), rollback: () => this._showLayoutHistory?.() });
+    // (the settings store imports nothing of the strip: suites load it bare) — a save a hold refused is SAID, the controls kept as left
+    this.settings.onHeld = (h, o) => { noteStoreHeld(h); if (o && o.refused && h && h.rung !== 'silent') showToast(t('Not now — VibeSpace cannot read your settings right now; this change was not saved.'), { type: 'error' }); };
+    if (this.settings.held) noteStoreHeld(this.settings.held);   // a refusal its boot read met before this line
+    onStoreLift('settings.json', () => { try { this.settings.refetch(); } catch { } });
+    onStoreLift('custom-themes.json', () => { try { this._loadCustomThemes(); } catch { } });
+    onStoreLift('user-state.json', () => { try { this.sidebar?._fetchUserState?.(); } catch { } });
+    refreshStoreHolds();
+    this.ws.onGlobal((msg) => {
+      if (msg.type === 'store-held') noteStoreHeld(msg);
+      else if (msg.type === 'store-lifted') noteStoreLifted(msg.file);
+    });
 
     // Sync settings from other clients via WebSocket
     this.ws.onGlobal((msg) => {
@@ -673,6 +689,7 @@ class App {
       try { this.refreshAccounts?.(); } catch { }   // B-ee0a (its delta read): an accounts push missed while away — the list's word decides whether the tails are asked again
       try { this.settings?.refetch?.(); } catch {}
       try { this._loadSettingHolds?.(); } catch {} // lane setting-doors pick 2: the holds are a broadcast-only mirror too
+      refreshStoreHolds();   // B-225b R7: a hold said — or lifted — while this page was away (its word never arrives)
       // user-state too (2.223.4 — the userW names/stars/archives blackout):
       // a boot-time fetch that failed during a restart window left the tab
       // permanently stateless; reconnect re-applies the authoritative copy.
@@ -3032,6 +3049,9 @@ class App {
   async _loadCustomThemes() {
     const themes = await fetchJson('/api/custom-themes');
     if (!themes) return;
+    // B-225b (R4, R13): a HELD themes file is no list — nothing registered or dropped from it, and the pending theme keeps
+    // waiting (never the 'dark' fallback written in its place); its lift loads them again (onStoreLift above)
+    if (typeof themes.error === 'string') { noteStoreHeld(themes.held); return; }   // (a refusal's words — a theme may be NAMED «error»: its value is an object)
     this._applyCustomThemesFromServer(themes);
     this.themeManager.applyPendingTheme();
   }

@@ -79,7 +79,7 @@
 import { t, resolveLang } from './i18n.js';
 import { storedNameWords } from './value-words.js'; // lane ui-language: the registered default variant «Open» worded at display
 import { techFold } from './plain-words.js'; // lane ui-plain-words: the probes' findings fold under the one sentence
-import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale } from './utils.js';
+import { copyText, createModalShell, escHtml, fetchJson, showConfirmDialog, showContextMenu, showToast, uiScale, stateLanded } from './utils.js';
 import { registerCommand, registerMenuItem, runCommand } from './contributions.js';
 import { pathField } from './path-field.js'; // lane path-field: THE path field
 import { FILE_ICONS, UI_ICONS } from './icons.js';
@@ -947,6 +947,7 @@ export async function showLaunchDialog(app, opts = {}) {
   const docMachineName = () => (doc ? (doc.hostLabel || machineInSentence(machineOf(doc.host || 'local'))) : '');
   let data = null;
   let recents = [];
+  let recentsRead = false;   // B-225b R4: the recents are the hub's (a landed read) — the list is written WHOLE only then
   let advancedOpen = false;
   const busy = new Set();      // stop in flight, by session id
   const launching = new Set(); // card launch in flight, by registry row id
@@ -1113,7 +1114,7 @@ export async function showLaunchDialog(app, opts = {}) {
     if (r.reachError) showToast(t('The app started, but sharing it failed: {why}', { why: r.reachError.error || '' }), { type: 'error' });
     if (recent) {
       recents = pushRecent(recents, { ...recent, label: r.label });
-      patchUserState({ [RECENTS_KEY]: recents });
+      if (recentsRead) patchUserState({ [RECENTS_KEY]: recents });   // B-225b R4: an unread list (a held one) is never written whole over the hub's
     }
     close();
     app.openDesktopApp(r.id);
@@ -1489,7 +1490,7 @@ export async function showLaunchDialog(app, opts = {}) {
   const opened = Promise.all([fetchJson('/api/user-state'), refresh()]);
   holdApps(opened.then(([st]) => { if (st && st[SHOW_SYSTEM_KEY] === true && !showSystem) { showSystem = true; render({ seenOnly: true }); } })); // the person's "Show them" grows the group above too
   const [state, first] = await opened;
-  if (state && Array.isArray(state[RECENTS_KEY])) { recents = state[RECENTS_KEY].slice(0, RECENTS_MAX); render(); }
+  if (stateLanded(state)) { recentsRead = true; if (Array.isArray(state[RECENTS_KEY])) { recents = state[RECENTS_KEY].slice(0, RECENTS_MAX); render(); } }
   setAdvanced(doc ? false : advancedOpenFor(state, !!first?.registryEmpty)); // §7.9: a document never opens "Advanced"
   // lane dialog-yield r4: its liveness is the shell's live() (every observer above: a queued launcher's overlay is detached — its
   // body-childList observer read that as «closed» and unsubscribed every follower before it opened); the focus waits for the open

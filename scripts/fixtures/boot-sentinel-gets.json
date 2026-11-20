@@ -284,6 +284,7 @@
   "/api/sessions",
   "/api/setting-holds",
   "/api/settings",
+  "/api/stores/held",
   "/api/subagent-messages",
   "/api/subagents",
   "/api/sync/:store",
