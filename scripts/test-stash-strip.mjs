@@ -1989,7 +1989,14 @@ console.log('⑥ wiring pins');
   ok(/stash: stashFactOf\(s\),/.test(sv) && /onStashChange: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv) && /onStash: \(\) => \{ try \{ stashView\.changed\(\); \} catch \{ \} \}/.test(sv) && /stashView\.register\(app\);/.test(sv),
     'server.js: the payload carries `stash`, both stores\' hooks re-publish, the route is registered');
   const cd = read('src/server/conversation-deliver.js'), jb = read('src/jobs.js');
-  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && (jb.match(/this\.d\.onStash\?\.\(cid\)/g) || []).length === 3 && /peekNotifs\(cid\)/.test(jb), 'the ladder\'s stash and the jobs stash each say every write, every drain and every restore');
+  // the jobs stash BY SITE (the stores chain's hosted red, 主开发 05:26Z — never loosened): each of the four says once in its own method —
+  // the write (_stashNotif), the drain (drainNotifs), the restore (restoreNotifs) and the merge at the lift (_notifsRetry: each
+  // waiting conversation's strip follows a read again of job-notifications.json) — and the file says nowhere else
+  const SAY = /this\.d\.onStash\?\.\(cid\)/g;
+  const SAYS = { write: '  _stashNotif(cid, job, ev, reason, {', drain: '  drainNotifs(cid, only = null) {', restore: '  restoreNotifs(cid, items) {', merge: '  async _notifsRetry() {' };
+  const sayIn = Object.fromEntries(Object.entries(SAYS).map(([k, head]) => { const i = jb.indexOf(head), j = i < 0 ? -1 : jb.indexOf('\n  }\n', i); return [k, i < 0 || j < 0 ? -1 : (jb.slice(i, j).match(SAY) || []).length]; }));
+  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && Object.values(sayIn).every((n) => n === 1) && (jb.match(SAY) || []).length === 4 && /peekNotifs\(cid\)/.test(jb),
+    'the ladder\'s stash and the jobs stash each say every write, every drain and every restore — the jobs stash by site: the write, the drain, the restore and the merge at the lift, once each, four in all', { sayIn, all: (jb.match(SAY) || []).length });
   const sh = read('src/server/stash-handover.js');
   ok(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush,/.test(cd) && /claimNotifs\(cid, entries, id = null\) \{/.test(jb) && /releases\.push\(d\.claimStash\(cid, shownStashed, id\)\)/.test(sh) && /releases\.push\(d\.claimRetry\(cid, shownParked, id\)\)/.test(sh) && /releases\.push\(jm\.claimNotifs\(cid, jobs, id\)\)/.test(sh),
     'verify: every store exposes the claim door and the hand-over claims through each, BY ID (released in its finally) — the ladder\'s stash, its retry park (lane notify-retry) and the jobs stash');
