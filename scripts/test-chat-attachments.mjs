@@ -232,6 +232,21 @@ console.log('⑤ the index\'s cost — measured');
   const r = await fetch(`${slow.base}/api/chat-picture/${TX}/${U(1)}/0`), j = await r.json();
   slow.close();
   ok(r.status === 503 && j.code === 'finding' && j.retryMs === ROUTES.RETRY_MS && r.headers.get('retry-after') === '2', 'past the DEADLINE the route answers 503 `finding` + retryMs — the page is never held; the reading goes on', j);
+  // B-3b03 follow-up (lane hub-loop-stalls, the round's should): the picture pool REFUSED by name (no live worker — it restarts)
+  // ⇒ the same «finding» with its retry, never a final «unreadable»; RED: a copy without that line (any failure ⇒ 500 unreadable)
+  {
+    const refused = () => Promise.reject(require(path.join(REPO, 'src/safe-fs.js')).noWorkerRefusal('the transcript-picture pool'));
+    const ask = async (Routes) => { const app = express(); app.use(express.json()); Routes.registerChatAttachmentRoutes(app, { store, transcripts: { picture: refused } }); const srv = app.listen(0, '127.0.0.1'); await new Promise((x) => srv.once('listening', x));
+      try { const rr = await fetch(`http://127.0.0.1:${srv.address().port}/api/chat-picture/${TX}/${U(1)}/0`); return { status: rr.status, retry: rr.headers.get('retry-after'), j: await rr.json() }; } finally { srv.close(); } };
+    const now = await ask(ROUTES);
+    ok(now.status === 503 && now.j.code === 'finding' && now.j.retryMs === ROUTES.RETRY_MS && now.retry === '2', 'the picture pool REFUSED (no live worker) ⇒ 503 `finding` + its retry — never a final «unreadable» (B-3b03)', now);
+    const CAR = fs.readFileSync(path.join(REPO, 'src/routes/chat-attachments.js'), 'utf8');
+    const NW_LINE = CAR.split('\n').find((l) => l.includes("if (e && e.code === 'no-worker') { stats.finding++;")) || '';
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const Rel = NW_LINE ? mutantCopies('chat-attach-noworker', REPO).load('src/routes/chat-attachments.js', anchored(CAR, NW_LINE + '\n', '', 'the release: no refusal branch'), 'release-unreadable') : null;
+    const was = Rel ? await ask(Rel) : null;
+    ok(!!was && was.status === 500 && was.j.code === 'unreadable', 'RED CONTROL (a copy without the refusal\'s line — the release): the same refusal reads as a final 500 «unreadable»', was);
+  }
   let ran = 0, release; const held = new Promise((r) => { release = r; });
   // the readings are HELD until every ask has been answered (the way ⑥ holds them): the count depends on no arrival timing
   const dl = await serve({ store, transcripts: { picture: () => { ran++; return held.then(() => ({ gone: 'missing' })); } }, deadlineMs: 25 });

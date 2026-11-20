@@ -12,8 +12,8 @@
  *   terminate()s a wedged worker, spawning a replacement. Therefore: NEVER
  *   introduce async fs / streams here — that would silently re-share main's pool.
  *
- * The same runOp() is required by src/safe-fs.js as a last-resort in-main
- * fallback (only if the whole pool is unavailable), so it stays pure/exported.
+ * runOp() stays pure and exported for the suites (a RED control plants the release's in-main road with it). SafeFs never
+ * runs it on the main thread (B-3b03): with no live worker a call is refused by name.
  */
 
 'use strict';

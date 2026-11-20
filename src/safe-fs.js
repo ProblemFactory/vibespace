@@ -33,6 +33,11 @@ const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
 
 /** B-3b03: the refusal of a call that found no live worker (the words a route answers when it has no code of its own). */
 const NO_WORKER = Object.freeze({ code: 'no-worker', message: 'no worker of {pool} is running — one did not answer in time and is restarting, or none could start' });   // nothing ran on the main thread; ≤ 120 characters (the folder field cuts there)
+// B-3b03 follow-up: the pool's own name in words (the hub's unnamed file pool is «the file pool») — made once, at construction
+const poolWords = (name) => (!name || name === 'safe-fs' ? 'the file pool' : 'the ' + name + ' pool');
+// B-3b03 follow-up (the round's should 2): a worker that cannot START (its module fails to load, it dies before it answers) is
+// SAID once a streak, after this many starts in a row with no answer (500 ms + 1 s + 2 s in), naming the pool and the cause
+const START_FAILS_SAID = 3;
 const noWorkerRefusal = (pool = 'the file pool') => Object.assign(new Error(NO_WORKER.message.replace('{pool}', pool)), { status: 503, code: NO_WORKER.code });   // its read (S4): no `noWorker` flag — in `_wait` that flag means «no worker ever took a call»
 
 // Per-op deadlines (ms). A deadline hit under a hung mount is exactly the case
@@ -74,6 +79,8 @@ class SafeFs {
   constructor(opts = {}) {
     this.workerPath = opts.workerPath || path.join(__dirname, 'safe-fs-worker.js');
     this.name = opts.name || 'safe-fs'; // the memory census names slot k `<name>#k` (src/worker-memory.js)
+    this._words = poolWords(opts.name);   // B-3b03: its refusal and its said line name it
+    this._downSaid = false;               // B-3b03 follow-up: a streak of failed starts was said (cleared at the next answer)
     // B-3b03: `opts.inlineRun` (the release's in-main fallback, 2.235.0) is no longer read — the pool never runs an op inline
     this._blockedOf = opts.blocked || DOOR.blocked;   // B-afc4: (path) → blocked mount root | false
     this.poolSize = Math.max(1, opts.poolSize || 4);
@@ -88,7 +95,7 @@ class SafeFs {
     this._closed = false;
     this._workers = [];
     for (let i = 0; i < this.poolSize; i++) {
-      const rec = { slot: i, worker: null, alive: false, inflight: new Map(), backoff: 0 };
+      const rec = { slot: i, worker: null, alive: false, inflight: new Map(), backoff: 0, fails: 0 };
       this._workers.push(rec);
       this._spawnInto(rec, 0);
     }
@@ -109,6 +116,7 @@ class SafeFs {
       } catch (e) {
         // Construction itself failed — retry with backoff; calls are REFUSED by name meanwhile (B-3b03: never an op in-main).
         this._scheduleBackoff(rec);
+        this._failedStart(rec, e);
         return;
       }
       rec.worker = trackWorker(this.name + '#' + rec.slot, w);
@@ -132,6 +140,8 @@ class SafeFs {
   _onMessage(rec, msg) {
     if (msg && msg.ev === 'memory') return; // the memory census's answer (src/worker-memory.js askMemory takes it)
     rec.backoff = 0; // a worker that answers is healthy — reset the backoff
+    rec.fails = 0;
+    if (this._downSaid) { this._downSaid = false; console.log(`[safe-fs] ${this._words}: a worker answers again`); }
     const call = rec.inflight.get(msg.id);
     if (!call) return; // already timed out & rejected + worker being replaced
     rec.inflight.delete(msg.id);
@@ -155,6 +165,18 @@ class SafeFs {
     this._restarts++;
     try { global.__vsMetric?.('srv-safefs-restart', 1); } catch {}
     this._scheduleBackoff(rec);
+    this._failedStart(rec, err);
+  }
+
+  /** B-3b03 follow-up: a worker that went down (or could not be built) is one more failed start until a worker ANSWERS — after
+   *  START_FAILS_SAID in a row the pool says so ONCE a streak (the release's in-main fallback required the worker's module, so a
+   *  module that failed to load stopped the hub at boot, loudly; now every call is refused by name and this line names why). */
+  _failedStart(rec, err) {
+    rec.fails = (rec.fails || 0) + 1;
+    if (rec.fails !== START_FAILS_SAID || this._downSaid) return;
+    this._downSaid = true;
+    const why = String((err && err.message) || err || 'no cause given').split('\n')[0].slice(0, 300);
+    console.error(`[safe-fs] ${this._words}: a worker could not start ${START_FAILS_SAID} times in a row (${why}) — every call is refused by name until one answers; it is tried again, the wait doubling up to 30 s`);
   }
 
   _rejectInflight(rec, message) {
@@ -222,7 +244,7 @@ class SafeFs {
       // (every one between a deadline kill and its respawn backoff, or none could start) the call is REFUSED BY NAME — 503,
       // `no-worker` — and its caller says so. The release ran it inline «as a last resort»: a hung path then held the whole hub
       // (scripts/test-safe-fs-no-inline.mjs measured it: the loop lost 1.5 s to a 1.5 s stall). B-55dc's `noInline` is now the rule.
-      return Promise.reject(noWorkerRefusal(this.name === 'safe-fs' ? 'the file pool' : `the ${this.name} pool`));   // the hub's file pool is the unnamed one
+      return Promise.reject(noWorkerRefusal(this._words));   // the hub's file pool is the unnamed one: «the file pool»
     }
     return this._send(rec, op, payload, timeoutMs);
   }
@@ -323,6 +345,10 @@ class SafeFs {
     // but main is unaffected — it never used the shared pool); respawn NOW so a
     // replacement is ready immediately, not after terminate resolves.
     try { Promise.resolve(w?.terminate?.()).catch(() => {}); } catch {}
+    // B-3b03 follow-up (the coordinator's law): a worker ended AT ITS DEADLINE started and took a call — it comes back at the
+    // FIRST step (500 ms), never up the ladder: the ladder (1 s, 2 s … 30 s) is for a worker that cannot START. A dead path that
+    // ends every fresh worker at its deadline thus leaves refusal windows of ~500 ms, never 30 s, for healthy paths too
+    rec.backoff = 0; rec.fails = 0;
     this._scheduleBackoff(rec);
   }
 

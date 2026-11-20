@@ -50,7 +50,8 @@ async function scene(SF, tag) {
   const gap = maxGap;
   // ② a worker back: the pool answers again
   await sleep(1200);
-  let after = null; try { after = await pool.call('__sleep', { ms: 1 }); } catch (e) { after = { error: String(e && e.message) }; }
+  // (its round: the respawned worker loads and answers under a LONG deadline — a slow runner is no red; the scene's 300 ms is for the kills)
+  let after = null; try { after = await pool.call('__sleep', { ms: 1 }, { timeoutMs: 15000 }); } catch (e) { after = { error: String(e && e.message) }; }
   clearInterval(tick); pool.close();
   return { tag, ends, alive, got, callMs, gap, inline, after };
 }
@@ -63,7 +64,7 @@ ok(g.ends.every((x) => x === 'deadline') && g.alive === 0 && g.inline === 0 && g
   `every worker killed at its deadline (${g.ends.join(', ')}; alive ${g.alive}): the next call is REFUSED BY NAME (${g.got && g.got.code}, ${g.got && g.got.status}) — the inline runner entered ${g.inline} times`, JSON.stringify(g));
 // RED CONTROL: the release's inline road planted back (a copy through anchored()) — the main thread runs the stall
 const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
-const LAW = "      return Promise.reject(noWorkerRefusal(this.name === 'safe-fs' ? 'the file pool' : `the ${this.name} pool`));   // the hub's file pool is the unnamed one\n";
+const LAW = "      return Promise.reject(noWorkerRefusal(this._words));   // the hub's file pool is the unnamed one: «the file pool»\n";
 const RELEASE = `      if (opts.noInline) return Promise.reject(Object.assign(new Error('no live SafeFs worker'), { code: 'no-worker' }));\n      try { return Promise.resolve((this._opts.inlineRun || require('./safe-fs-worker').runOp)(op, payload)).then(r => r.result); }\n      catch (e) { return Promise.reject(e); }\n`;   // stale-pins: kept — the release's inline road, planted back
 const SFr = src.split(LAW).length === 2 ? mutantCopies('safe-fs-no-inline', REPO).load('src/safe-fs.js', anchored(src, LAW, RELEASE, 'release-inline'), 'release-inline') : null;
 const r = SFr ? await scene(SFr, 'release') : null;
@@ -101,6 +102,11 @@ console.log('③ the census: no pool keeps an inline road; a missing pool refuse
   const reqRe = new RegExp(`require\\(\\s*(?:path\\.join\\([^)]*?)?['"\`][^'"\`]*\\b(?:${workers.join('|')})(?:\\.js)?['"\`]`);
   const sites = []; for (const f of srcFiles) { if (workers.includes(path.basename(f, '.js'))) continue; code(read(f)).split('\n').forEach((l) => { if (reqRe.test(l)) sites.push([f, l.trim()]); }); }
   const unrowed = sites.filter(([f, l]) => !(ROWS[f] && l.includes(ROWS[f])));
+  // (its round: the census reads WORKER modules only — the one road where a pool's op set runs on the main thread by a CALLER's own
+  // rule is named here: the sessions route's first sweep when no worker ever took it, the coordinator's ruling 12:08Z)
+  const ses = read('src/routes/sessions.js');
+  ok(ses.split('sweepInThread(').length === 2 && ses.includes("      if (!(e && e.noWorker)) throw e;\n      out = await require('../sessions-sweep.js').sweepInThread(payload);\n"),
+    'the sessions route runs its sweep in-thread ONCE, only when no worker ever took it (`noWorker`) — its own ruled road, the one caller road of its kind');
   ok(workers.length >= 10 && !unrowed.length && sites.length === Object.keys(ROWS).length,
     `every require of a worker's op set (${workers.length} worker scripts) from another file is a row with its guard — ${sites.length} sites; unrowed: ${JSON.stringify(unrowed).slice(0, 400) || 'none'}`);
   // CONTROL: the census sees a plant of the release's shape (a pool's inline runner required from main) — and the path.join form
@@ -119,6 +125,61 @@ console.log('③ the census: no pool keeps an inline road; a missing pool refuse
   const nw = SF.noWorkerRefusal('the file pool');
   ok(SF.NO_WORKER && SF.NO_WORKER.code === 'no-worker' && /^no worker of the file pool is running — one did not answer in time and is restarting, or none could start$/.test(nw.message) && nw.message.length <= 120 && nw.status === 503 && nw.noWorker === undefined,
     `the refusal's own words (an agent, a log) name its pool and both causes, whole under the folder field's 120-character cut: «${nw.message}» (${nw.message.length})`);
+}
+
+console.log('④ the price of the cure, bounded: a worker ended AT ITS DEADLINE comes back at the first step; the ladder is for one that cannot START');
+{
+  // pure: the REAL class, its spawns recorded instead of made (a count asserted, never a clock)
+  const run = (Mod) => {
+    const P = new Mod.SafeFs({ poolSize: 1, name: 'price' });
+    const real = P._workers[0].worker;
+    const waits = []; P._spawnInto = (rec, backoff) => { waits.push(backoff); rec.worker = null; };
+    const rec = P._workers[0];
+    const kill = () => { rec.alive = true; rec.worker = { removeAllListeners() {}, terminate() { return Promise.resolve(); }, unref() {} }; rec.inflight.set('k', { resolve() {}, reject() {}, timer: null }); P._onTimeout(rec, 'k'); };
+    for (let i = 0; i < 4; i++) kill();   // a dead path ends every fresh worker at its deadline, four times in a row
+    const deadline = waits.splice(0);
+    const lines = []; const was = console.error; console.error = (...a) => lines.push(a.join(' '));
+    try { for (let i = 0; i < 4; i++) { rec.alive = true; rec.worker = { removeAllListeners() {} }; P._onWorkerDown(rec, new Error("Cannot find module '/nowhere/safe-fs-worker.js'")); } }
+    finally { console.error = was; }
+    const start = waits.splice(0);
+    const told = []; const wl = console.log; console.log = (...a) => told.push(a.join(' '));
+    try { P._onMessage(rec, { id: 'none' }); } finally { console.log = wl; }
+    try { if (real) { real.removeAllListeners(); real.terminate(); } } catch { } P._closed = true; clearInterval(P._gauge);   // its own exit never reaches the record
+    return { deadline, start, lines, told, said: P._downSaid };
+  };
+  const now = run(SF);
+  console.log(`  [measure] waits after four deadline ends: ${now.deadline.join(', ')} ms; after four failed starts: ${now.start.join(', ')} ms`);
+  ok(now.deadline.length === 4 && now.deadline.every((w) => w === 500), `four deadline ends in a row: each worker comes back at the first step (${now.deadline.join(', ')} ms) — a dead path leaves windows of ~500 ms, never 30 s`, now);
+  ok(now.start.join(',') === '1000,2000,4000,8000', `a worker that cannot START climbs the ladder (${now.start.join(', ')} ms after the deadline end's first step)`, now);
+  ok(now.lines.length === 1 && /^\[safe-fs\] the price pool: a worker could not start 3 times in a row \(Cannot find module '\/nowhere\/safe-fs-worker\.js'\) — every call is refused by name until one answers/.test(now.lines[0]),
+    `a streak of failed starts is SAID once, naming the pool and the cause («${now.lines[0] || 'nothing said'}»)`, now.lines);
+  ok(now.told.length === 1 && /^\[safe-fs\] the price pool: a worker answers again$/.test(now.told[0]) && now.said === false, `the next answer says it is back, once (${now.told.join(' | ')})`, now.told);
+  // RED CONTROL: the release's deadline end (no reset — the ladder climbs for a worker that DID start)
+  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
+  const RESET = '    rec.backoff = 0; rec.fails = 0;\n    this._scheduleBackoff(rec);\n';
+  const Rel = src.split(RESET).length === 2 ? mutantCopies('safe-fs-price', REPO).load('src/safe-fs.js', anchored(src, RESET, '    this._scheduleBackoff(rec);\n', 'release-ladder'), 'release-ladder') : null;
+  const was = Rel ? run(Rel) : null;
+  ok(!!was && was.deadline.join(',') === '500,1000,2000,4000', `RED CONTROL (the release's deadline end): the ladder climbs for a worker that started (${was && was.deadline.join(', ')} ms)`, was);
+}
+
+console.log('⑤ the router says the refusal in a person\'s words, with its code (no pool wired — the listing and the download)');
+{
+  const express = require('express');
+  const app = express(); app.use(express.json());
+  app.use(require(path.join(REPO, 'src/routes/files.js')));   // no app.locals.safeFs: the files router's own refusal
+  const srv = app.listen(0, '127.0.0.1'); await new Promise((r) => srv.once('listening', r));
+  const base = `http://127.0.0.1:${srv.address().port}`;
+  const get = async (p) => { const r = await fetch(base + p); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const listing = await get(`/api/files?path=${encodeURIComponent(here)}`);
+    const dl = await get(`/api/download?path=${encodeURIComponent(path.join(here, 'test-safe-fs-no-inline.mjs'))}`);
+    const raw = await get(`/api/file/raw?path=${encodeURIComponent(path.join(here, 'test-safe-fs-no-inline.mjs'))}`);
+    const WORDS = 'the file readers are restarting — try again in a moment';
+    for (const [name, r] of [['the listing', listing], ['a download', dl], ['a raw file', raw]]) {
+      ok(r.status === 503 && r.j && r.j.code === 'storage_no_worker' && r.j.error === WORDS, `${name}: 503, code storage_no_worker, «${r.j && r.j.error}»`, r);
+    }
+  } finally { srv.close(); }
 }
 
 report();
