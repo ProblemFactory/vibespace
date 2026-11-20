@@ -29,6 +29,8 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// B-1217 member 17 (主开发 r502): a racing act waits for the call's ARRIVAL at its hold — bounded, it says what never came (null)
+const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms / 2); k <= n; k++) { if (pred()) return true; await sleep(2); } console.log(`  … waited ${ms} ms of turns for ${what} — it never came`); return null; };   // bounded by a COUNT of turns (no wall clock)
 
 const gmail = require(path.join(REPO, 'src/channels/gmail.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
@@ -815,57 +817,59 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const v = mkVendor(); const sends = []; const f0 = v.fetchFn;
     const fetchFn = async (url, init) => { if (/gmail\.googleapis\.com/.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
-    let release = null, hold = null;   // ONE-SHOT: the first pace of a call is held open until `release()`; the rest pass
+    let release = null, hold = null, paceHeld = 0;   // ONE-SHOT: the first pace of a call is held open until `release()`; the rest pass
     const order = [];
     const tok = { st: { token: { access_token: 'ya29.old', expiresAt: now() + 3600e3, refresh_token: '1//r', scopes: [gmail.SCOPE] } }, read: () => ({ token: tok.st.token, why: null }), write: async (t) => { tok.st.token = t; }, clear: async () => { tok.st.token = null; } };
-    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; await h; } }, meter: (n) => { order.push('meter ' + n); } });
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; paceHeld++; await h; } }, meter: (n) => { order.push('meter ' + n); } });
     hold = new Promise((r) => { release = r; });
     const p1 = a.listConversations({ limit: 1 });
-    await sleep(10);
+    const w1 = await waitUntil(() => paceHeld === 1, 5000, 'the call held at its pace');
     tok.st.token = { ...tok.st.token, access_token: 'ya29.REAUTH' };   // the re-authorize landed during the wait
     release();
     await p1;
-    ok(sends.length >= 1 && sends.every((x) => x === 'Bearer ya29.REAUTH'), `a re-authorize that landed during the pace wait: the request carries the NEW bearer (${sends[0]}), never the one captured before the wait (${sends.length} sends, all new)`);
+    ok(!!w1 && sends.length >= 1 && sends.every((x) => x === 'Bearer ya29.REAUTH'), `a re-authorize that landed during the pace wait: the request carries the NEW bearer (${sends[0]}), never the one captured before the wait (${sends.length} sends, all new)`);
     const n1 = sends.length;
     hold = new Promise((r) => { release = r; });
     const p2 = a.listConversations({ limit: 1 }).then(() => null, (e) => e);
-    await sleep(10);
+    const w2 = await waitUntil(() => paceHeld === 2, 5000, 'the second call held at its pace');
     await tok.clear();   // the owner disconnected during the wait
     release();
     const e2 = await p2;
-    ok(e2 && e2.code === 'auth-expired' && /disconnected while the request waited/.test(e2.message) && e2.detail.tokenDropped === true && sends.length === n1 && order.slice(-2).join() === 'pace 10,meter 10', `a disconnect during the pace wait: refused by name (${e2 && e2.code}: ${e2 && String(e2.message).slice(0, 60)}…), nothing sent (${sends.length - n1} sends), the units already metered stay charged (never a leaked reservation)`, JSON.stringify({ e2: e2 && e2.message, order: order.slice(-4) }));
+    ok(!!w2 && e2 && e2.code === 'auth-expired' && /disconnected while the request waited/.test(e2.message) && e2.detail.tokenDropped === true && sends.length === n1 && order.slice(-2).join() === 'pace 10,meter 10', `a disconnect during the pace wait: refused by name (${e2 && e2.code}: ${e2 && String(e2.message).slice(0, 60)}…), nothing sent (${sends.length - n1} sends), the units already metered stay charged (never a leaked reservation)`, JSON.stringify({ e2: e2 && e2.message, order: order.slice(-4) }));
   }
 
   // ── verify r5: THE REFRESH'S OWN EDGES ──
   const mkTok = (t) => { const tok = { st: { token: t, writes: 0 }, read: () => ({ token: tok.st.token, why: tok.st.token ? null : 'never-authenticated' }), write: async (x) => { tok.st.writes++; tok.st.token = x; }, clear: async () => { tok.st.token = null; } }; return tok; };
-  const heldRefresh = (v) => { let release = null; const f0 = v.fetchFn; const sends = []; const fetchFn = async (url, init) => { const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null; if (form && form.grant_type === 'refresh_token') await new Promise((r) => { release = r; }); if (/gmail\.googleapis\.com/.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); }; return { fetchFn, sends, release: () => release && release() }; };
+  // (B-1217 member 17) the refresh POST's ARRIVAL is counted, and a release is never lost: one given before the arrival lets it pass
+  // (it used to be assigned only on arrival — a release before it was dropped and the refresh held for ever)
+  const heldRefresh = (v) => { let release = null, arrived = 0, opened = false; const f0 = v.fetchFn; const sends = []; const fetchFn = async (url, init) => { const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null; if (form && form.grant_type === 'refresh_token') { arrived++; if (!opened) await new Promise((r) => { release = r; }); } if (/gmail\.googleapis\.com/.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); }; return { fetchFn, sends, arrived: () => arrived, release: () => { opened = true; if (release) release(); } }; };
   const expired = () => ({ access_token: 'ya29.stale', expiresAt: now() - 1, refresh_token: '1//old', scopes: [gmail.SCOPE], email: 'member.a@example.com' });
   // (d) a RE-AUTHORIZE that lands while the refresh POST is in flight wins: the late refresh writes nothing, its callers use the re-authorize's token
   const raceReauth = async (rg) => {
     const v = mkVendor(); const h = heldRefresh(v); const tok = mkTok(expired());
     const ad = rg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: h.fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
     const ps = Array.from({ length: 5 }, () => ad.listConversations({ limit: 1 }).then(() => 'ok', (e) => e.code));
-    await sleep(10);
+    const held = await waitUntil(() => h.arrived() >= 1, 5000, '(d) the refresh POST at its hold');
     await tok.write({ access_token: 'ya29.REAUTH', expiresAt: now() + 3600e3, refresh_token: '1//reauth', scopes: [gmail.SCOPE], email: 'member.a@example.com' });   // the consent landed meanwhile
     h.release(); const rs = await Promise.all(ps);
-    return { rs, held: tok.st.token.refresh_token, bearers: [...new Set(h.sends)], writes: tok.st.writes };
+    return { rs, held: tok.st.token.refresh_token, bearers: [...new Set(h.sends)], writes: tok.st.writes, arrived: !!held };
   };
   {
     const r = await raceReauth(reg);
-    ok(r.rs.every((x) => x === 'ok') && r.held === '1//reauth' && r.bearers.join() === 'Bearer ya29.REAUTH' && r.writes === 1, `(d) a re-authorize landing during the refresh: the held token is the re-authorize's (${r.held}), the late refresh wrote nothing (${r.writes} write = the consent's), its 5 callers carried the new bearer (${r.bearers.join()})`, JSON.stringify(r));
+    ok(r.arrived && r.rs.every((x) => x === 'ok') && r.held === '1//reauth' && r.bearers.join() === 'Bearer ya29.REAUTH' && r.writes === 1, `(d) a re-authorize landing during the refresh: the held token is the re-authorize's (${r.held}), the late refresh wrote nothing (${r.writes} write = the consent's), its 5 callers carried the new bearer (${r.bearers.join()})`, JSON.stringify(r));
     const r4 = srcMain.replace("    const cur = readToken().token;\n    if (!cur) throw new ChannelError('auth-expired', 'Gmail was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });\n    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;\n    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads\n    if (w && w.superseded) return null;", '    await persistToken(next);');
     ok(r4 !== srcMain, 'CONTROL fixture: the write-only-while-current guard was removed from a copy');
     const modR4 = M.load('src/channels/gmail.js', r4, 'r4-write'); const rg4 = CH.createChannelRegistry(); rg4.register(modR4.adapter);
     const c = await raceReauth(rg4);
-    ok(c.held === '1//old' && c.bearers.join() !== 'Bearer ya29.REAUTH', `CONTROL: the r4 write REVERTS the re-authorize (held ${c.held}, bearers ${c.bearers.join()})`);
+    ok(c.arrived && c.held === '1//old' && c.bearers.join() !== 'Bearer ya29.REAUTH', `CONTROL: the r4 write REVERTS the re-authorize (held ${c.held}, bearers ${c.bearers.join()})`);
   }
   // (e) a DISCONNECT that lands while the refresh is in flight: the refreshed token is discarded, the callers refused by name, nothing sent
   {
     const v = mkVendor(); const h = heldRefresh(v); const tok = mkTok(expired());
     const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: h.fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet });
     const ps = Array.from({ length: 5 }, () => a.listConversations({ limit: 1 }).then(() => 'ok', (e) => `${e.code}:${/disconnected while its token was refreshed/.test(e.message) ? 'named' : e.message}`));
-    await sleep(10); await tok.clear(); h.release(); const rs = await Promise.all(ps);
-    ok(rs.every((x) => x === 'auth-expired:named') && tok.st.token === null && tok.st.writes === 0 && h.sends.length === 0, `(e) a disconnect landing during the refresh: nothing written back (store empty, ${tok.st.writes} writes), the 5 callers refused by name (${[...new Set(rs)].join()}), nothing sent`);
+    const waitedE = await waitUntil(() => h.arrived() >= 1, 5000, '(e) the refresh POST at its hold'); await tok.clear(); h.release(); const rs = await Promise.all(ps);
+    ok(!!waitedE && rs.every((x) => x === 'auth-expired:named') && tok.st.token === null && tok.st.writes === 0 && h.sends.length === 0, `(e) a disconnect landing during the refresh: nothing written back (store empty, ${tok.st.writes} writes), the 5 callers refused by name (${[...new Set(rs)].join()}), nothing sent`);
   }
   // (f) a store write that FAILS after a successful refresh: the vendor's token is served from memory and persisted at the first chance
   {
@@ -882,14 +886,14 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const v = mkVendor(); let refreshes = 0; const f0 = v.fetchFn; const sends = [];
     const fetchFn = async (url, init) => { const form = init && init.body ? Object.fromEntries(new URLSearchParams(String(init.body))) : null; if (form && form.grant_type === 'refresh_token') refreshes++; if (/gmail\.googleapis\.com/.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
-    let release = null, hold = null; const order = [];
+    let release = null, hold = null, paceHeld = 0; const order = [];
     const tok = mkTok({ access_token: 'ya29.short', expiresAt: now() + 120e3, refresh_token: '1//r', scopes: [gmail.SCOPE] });   // two minutes left: outside the margin, nobody refreshes on entry
-    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; await h; } }, meter: (n) => { order.push('meter ' + n); } });
+    const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens: tok, resolveIntegration: (id) => integrations.resolveIntegration(id), log: quiet, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; paceHeld++; await h; } }, meter: (n) => { order.push('meter ' + n); } });
     hold = new Promise((r) => { release = r; });
     const p1 = a.listConversations({ limit: 1 });
-    await sleep(10); clock += 130e3;   // the token expired while the request waited
+    const wg = await waitUntil(() => paceHeld === 1, 5000, '(g) the call held at its pace'); clock += 130e3;   // the token expired while the request waited
     release(); await p1; clock -= 130e3;
-    ok(refreshes === 1 && sends.length >= 1 && sends.every((x) => x === 'Bearer ya29.fixture-access-0003') && order.slice(0, 2).join() === 'pace 10,meter 10', `(g) a bearer that EXPIRED during the pace wait: ${refreshes} refresh AFTER the wait (pace → meter → refresh → send), every request of the list carries the new bearer (${sends.length} sends, ${sends[0]})`, JSON.stringify({ refreshes, sends, order }));
+    ok(!!wg && refreshes === 1 && sends.length >= 1 && sends.every((x) => x === 'Bearer ya29.fixture-access-0003') && order.slice(0, 2).join() === 'pace 10,meter 10', `(g) a bearer that EXPIRED during the pace wait: ${refreshes} refresh AFTER the wait (pace → meter → refresh → send), every request of the list carries the new bearer (${sends.length} sends, ${sends[0]})`, JSON.stringify({ refreshes, sends, order }));
   }
   // ── verify r6: THE TOKEN STORE CONTRACT — `meta.supersedes` honoured at APPLY time (what the engine's door does inside its serialized callback) ──
   /** a contract store: `supersedes` judged when the write APPLIES (after any hold); the write may be refused (`fail`) or held (`slow`) once */
@@ -955,15 +959,15 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   }
   // (m) verify r7: the consent write hands the door the flow's own `cancelled()` (the door refuses, inside its serialized write, a consent whose flow a disconnect / cancel / newer sign-in ended meanwhile); a flow cancelled DURING its exchange reports {ok:false, cancelled}
   {
-    const v = mkVendor(); const f0 = v.fetchFn; let release; const hold = new Promise((r) => { release = r; });
-    const fetchFn = async (url, init) => { if (/\/profile$/.test(new URL(String(url)).pathname)) await hold; return f0(url, init); };
+    const v = mkVendor(); const f0 = v.fetchFn; let release, profileHeld = 0; const hold = new Promise((r) => { release = r; });
+    const fetchFn = async (url, init) => { if (/\/profile$/.test(new URL(String(url)).pathname)) { profileHeld++; await hold; } return f0(url, init); };
     const OL2 = require(path.join(REPO, 'src/oauth-loopback.js')); const oauth = OL2.createOAuthLoopback({ now, log: quiet }); const done = []; const tok = mkTok(null);
     const seen = []; const tokens = { ...tok, write: async (t, meta) => { seen.push({ consent: meta.consent, cancelled: meta.consent && typeof meta.consent.cancelled === 'function' ? meta.consent.cancelled() : undefined }); return tok.write(t, meta); } };
     const a = reg.create('gmail', { id: 'gmail', options: {} }, { now, fetch: fetchFn, tokens, oauth, resolveIntegration: (id) => integrations.resolveIntegration(id), onAuthDone: (id, r) => done.push(r), log: quiet });
     const f = await a.auth.begin(); const st = new URL(f.consentUrl).searchParams.get('state');
-    const pb = a.auth.finish(f.flowId, `${f.redirectUri}/?state=${st}&code=c`); await sleep(30);
+    const pb = a.auth.finish(f.flowId, `${f.redirectUri}/?state=${st}&code=c`); const wm = await waitUntil(() => profileHeld >= 1, 5000, '(m) the exchange held at its profile read');
     oauth.cancel(f.flowId, 'cancelled'); release(); const r = await pb;
-    ok(seen.length === 1 && seen[0].consent && typeof seen[0].consent.cancelled === 'function' && seen[0].cancelled === 'cancelled', `(m) the consent write carries the flow's cancelled() and it reads the cancel that landed mid-exchange (${JSON.stringify(seen[0] && seen[0].cancelled)})`);
+    ok(!!wm && seen.length === 1 && seen[0].consent && typeof seen[0].consent.cancelled === 'function' && seen[0].cancelled === 'cancelled', `(m) the consent write carries the flow's cancelled() and it reads the cancel that landed mid-exchange (${JSON.stringify(seen[0] && seen[0].cancelled)})`);
     ok(r.ok === true && r.error === null && tok.st.token && done[0] && done[0].ok === true && done[0].cancelled === 'cancelled', `(m) r8: this memory store does not consult cancelled() and WROTE — the exchange resolved, so the report says ok:true with the cancel carried (the loopback cannot undo a write; the engine's doors are the ones that refuse) (ok ${r.ok}, cancelled ${done[0] && done[0].cancelled})`);
     oauth.stopAll();
   }

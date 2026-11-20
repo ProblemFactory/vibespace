@@ -717,6 +717,8 @@ async function receiptLegs(ENGmod, name) {
 // handed; a failed send the decider asked to hear NOW still wakes once; the concurrency counts ──
 console.log('§5v verify: the TTL sweep vs a replace in flight; the legacy fate; one billed turn per proposal');
 const sleep = (ms) => new Promise((z) => setTimeout(z, ms));
+// B-1217 member 17 (主开发 r502): a racing act waits for the call's ARRIVAL at its hold — bounded, it says what never came (null)
+const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms / 2); k <= n; k++) { if (pred()) return true; await sleep(2); } console.log(`  … waited ${ms} ms of turns for ${what} — it never came`); return null; };   // bounded by a COUNT of turns (no wall clock)
 // ci-346-reds: the collect window's legs — a clock that stands still from its first read (the send takes no engine time:
 // the window is open when the receipt is ready, whatever the box's load), and the fallback timer's delivery waited for
 // (bounded at 5 s), never a fixed sleep
@@ -956,7 +958,7 @@ function mkReal(opts = {}) {
   const mkA = reg.create;
   reg.create = (kind, record, deps) => {
     const a = mkA(kind, record, deps);
-    if (a && typeof a.send === 'function') { const s0 = a.send; a.send = async (convId, o) => { if (send.hold) await send.hold; if (send.throwOnce) { send.throwOnce = false; const e = new Error('socket hang up'); e.code = 'ECONNRESET'; throw e; } return s0(convId, o); }; }
+    if (a && typeof a.send === 'function') { const s0 = a.send; a.send = async (convId, o) => { if (send.hold) { send.heldCount = (send.heldCount || 0) + 1; await send.hold; } if (send.throwOnce) { send.throwOnce = false; const e = new Error('socket hang up'); e.code = 'ECONNRESET'; throw e; } return s0(convId, o); }; }
     if (a && typeof a.reconcile === 'function') { const r0 = a.reconcile; a.reconcile = async (...args) => { send.reconciles++; await sleep(15); return r0(...args); }; }
     return a;
   };
@@ -1198,7 +1200,10 @@ async function drainAfterGuessLeg(ENGmod, name) {
   W.advance(25 * 3600 * 1000);
   let release; send.hold = new Promise((z) => { release = z; });
   const ap = eng.approve(p.proposal.id, {});
-  await sleep(10);
+  // (B-1217 member 17) THE RACE IS PLACED: the sweep runs once the approved send is PARKED at the vendor (its hold reached), never after a
+  // 10 ms hope — an approve not yet at the send is still «approved», and the sweep would expire it
+  const parked = await waitUntil(() => (send.heldCount || 0) >= 1, 5000, 'the approved send parked at the vendor (its hold)');
+  ok(!!parked && eng.store.outbox.snapshot().proposals[p.proposal.id].state === 'sending', `setup: the approved send is held at the vendor before the sweep — the proposal reads ${eng.store.outbox.snapshot().proposals[p.proposal.id].state}`);
   const sw = await eng.expireSweep();
   release(); send.hold = null;
   const a = await ap;

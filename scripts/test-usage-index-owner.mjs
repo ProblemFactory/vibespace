@@ -212,7 +212,7 @@ console.log('§5 SIGTERM returns within the bound, wedged worker or not', el());
 // a worker wedged in a syscall on its file (here: open() of a FIFO nobody writes) — the case a D-state disk leaves
 const { parentPort } = require('worker_threads');
 parentPort.postMessage({ ev: 'state', state: 'ready', ms: 0, rows: 0, bytes: 0 });
-setTimeout(() => { parentPort.postMessage({ ev: 'progress' }); require('fs').openSync(${JSON.stringify(fifo)}, 'r'); }, 50);
+setTimeout(() => { parentPort.postMessage({ ev: 'progress' }); require('fs').writeFileSync(${JSON.stringify(path.join(root, 'in-open.'))} + process.pid, ''); require('fs').openSync(${JSON.stringify(fifo)}, 'r'); }, 50);
 `);
   const L = ledger('term', 2000);
   const BOUND = 700;
@@ -221,7 +221,12 @@ setTimeout(() => { parentPort.postMessage({ ev: 'progress' }); require('fs').ope
   const ctl = child(L.data, L.home, { owner: { workerFile: stub, closeBoundMs: BOUND, exitHook: false } });
   const real = child(L.data, L.home);
   await until(() => [w, ctl, real].every((c) => stateOf(c).some((x) => x.s === 'ready')), 'the three children to be up');
-  await sleep(300); // the stubs are inside their open() by now
+  // (B-1217 member 17) THE RACE IS PLACED: each stub writes «in-open.<its process>» in the SAME synchronous step as the open() that
+  // wedges it, and the SIGTERM waits for both marks — never a 300 ms hope (a stub not yet in its open() lets the no-exit-hook CONTROL
+  // exit by itself: the control would go red)
+  const inOpen = (c) => fs.existsSync(path.join(root, 'in-open.' + c.pid));
+  await until(() => inOpen(w) && inOpen(ctl), 'both wedged stubs inside their open() (their in-open marks)');
+  ok(inOpen(w) && inOpen(ctl), `setup: both wedged stubs are inside their open() before the SIGTERM (marks ${[w, ctl].map((c) => inOpen(c)).join(' / ')})`);
   const t = Date.now();
   for (const c of [w, ctl, real]) c.kill('SIGTERM');
   const [ex, ex2, ex3] = await Promise.all([w, ctl, real].map((c) => Promise.race([c.done, sleep(c === ctl ? 1500 : 8000).then(() => null)])));

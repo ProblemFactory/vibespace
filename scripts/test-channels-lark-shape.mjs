@@ -51,6 +51,8 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// B-1217 member 17 (主开发 r502): a racing act waits for the call's ARRIVAL at its hold — bounded, it says what never came (null)
+const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms / 2); k <= n; k++) { if (pred()) return true; await sleep(2); } console.log(`  … waited ${ms} ms of turns for ${what} — it never came`); return null; };   // bounded by a COUNT of turns (no wall clock)
 
 // B-9dd0 — THE SUITE'S OWN LAW, ENFORCED: an adapter created without its stand-in `fetch` falls back to the runtime's
 // (src/channels/lark.js deps.fetch || globalThis.fetch) and reaches the vendor. Every fetch past the loopback is RECORDED and
@@ -578,47 +580,49 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const v = mkVendor(); const sends = []; const f0 = v.fetchFn;
     const fetchFn = async (url, init) => { if (/\/open-apis\/im\//.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
-    let release = null, hold = null;
+    let release = null, hold = null, paceHeld = 0;
     const tokens = mkTokens(); tokens.st.token = { access_token: 'u-old', expiresAt: now() + 7200e3, refresh_token: 'ur-1', refreshExpiresAt: now() + 86400e3, scopes: ['im:message', 'im:message.send_as_user'], openId: 'ou_member_a' };
-    const a = reg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} }, pace: async () => { if (hold) { const h = hold; hold = null; await h; } } });
+    const a = reg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} }, pace: async () => { if (hold) { const h = hold; hold = null; paceHeld++; await h; } } });
     hold = new Promise((r) => { release = r; });
     const p1 = a.send('oc_ops_room_0001', { text: 'hi', idemKey: 'p-3' });
-    await sleep(10);
+    const w1 = await waitUntil(() => paceHeld === 1, 5000, 'the send held at its pace');
     tokens.st.token = { ...tokens.st.token, access_token: 'u-REAUTH' };
     release();
     await p1;
-    ok(sends.length === 1 && sends[0] === 'Bearer u-REAUTH', `a re-authorize that landed during a send's pace wait: the request carries the NEW bearer (${sends[0]})`);
+    ok(!!w1 && sends.length === 1 && sends[0] === 'Bearer u-REAUTH', `a re-authorize that landed during a send's pace wait: the request carries the NEW bearer (${sends[0]})`);
     hold = new Promise((r) => { release = r; });
     const p2 = a.listConversations({ limit: 10 }).then(() => null, (e) => e);
-    await sleep(10);
+    const w2 = await waitUntil(() => paceHeld === 2, 5000, 'the list call held at its pace');
     await tokens.clear();
     release();
     const e2 = await p2;
-    ok(e2 && e2.code === 'auth-expired' && /disconnected while the request waited/.test(e2.message) && e2.detail.tokenDropped === true && sends.length === 1, `a disconnect during the pace wait: refused by name (${e2 && e2.code}), nothing sent`);
+    ok(!!w2 && e2 && e2.code === 'auth-expired' && /disconnected while the request waited/.test(e2.message) && e2.detail.tokenDropped === true && sends.length === 1, `a disconnect during the pace wait: refused by name (${e2 && e2.code}), nothing sent`);
   }
 
   // ── verify r5: THE REFRESH'S OWN EDGES (the vendor ROTATES the refresh token) ──
   const expiredL = () => ({ access_token: 'u-stale', expiresAt: now() - 1, refresh_token: 'ur-old', refreshExpiresAt: now() + 2592000e3, scopes: ['im:message'], openId: 'ou_member_a', name: 'Member A' });
-  const rotating = () => { const v = mkVendor(); const used = new Set(); let n = 0; let release = null; let hold = false; const f0 = v.fetchFn; const sends = [];
-    const fetchFn = async (url, init) => { const body = init && init.body ? JSON.parse(init.body) : null; if (body && body.grant_type === 'refresh_token') { n++; if (hold) await new Promise((r) => { release = r; }); if (used.has(body.refresh_token)) return jsonRes(FX.tokenInvalidGrant, 400); used.add(body.refresh_token); return jsonRes({ ...FX.tokenRefreshed, access_token: `u-rot-${n}`, refresh_token: `ur-rot-${n}` }); } if (/\/open-apis\/im\//.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
-    return { fetchFn, sends, refreshes: () => n, hold: () => { hold = true; }, release: () => release && release() }; };
+  // (B-1217 member 17) the refresh POST's ARRIVAL is counted, and a release is never lost: one given before the arrival lets it pass
+  // (it used to be assigned only on arrival — a release before it was dropped and the refresh held for ever)
+  const rotating = () => { const v = mkVendor(); const used = new Set(); let n = 0; let release = null; let hold = false; let arrived = 0, opened = false; const f0 = v.fetchFn; const sends = [];
+    const fetchFn = async (url, init) => { const body = init && init.body ? JSON.parse(init.body) : null; if (body && body.grant_type === 'refresh_token') { n++; arrived++; if (hold && !opened) await new Promise((r) => { release = r; }); if (used.has(body.refresh_token)) return jsonRes(FX.tokenInvalidGrant, 400); used.add(body.refresh_token); return jsonRes({ ...FX.tokenRefreshed, access_token: `u-rot-${n}`, refresh_token: `ur-rot-${n}` }); } if (/\/open-apis\/im\//.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
+    return { fetchFn, sends, refreshes: () => n, arrived: () => arrived, hold: () => { hold = true; }, release: () => { opened = true; if (release) release(); } }; };
   const raceReauthL = async (rg) => {
     const v = rotating(); v.hold(); const tokens = mkTokens(); tokens.st.token = expiredL();
     const a = rg.create('lark', { id: 'lark' }, { now, fetch: v.fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} } });
     const ps = Array.from({ length: 5 }, () => a.listConversations({ limit: 10 }).then(() => 'ok', (e) => e.code));
-    await sleep(10);
+    const held = await waitUntil(() => v.arrived() >= 1, 5000, '(d) the refresh POST at its hold');
     await tokens.write({ ...expiredL(), access_token: 'u-REAUTH', expiresAt: now() + 7200e3, refresh_token: 'ur-reauth' });   // the consent landed meanwhile
     v.release(); const rs = await Promise.all(ps);
-    return { rs, held: tokens.st.token.refresh_token, bearers: [...new Set(v.sends)], writes: tokens.st.writes };
+    return { rs, held: tokens.st.token.refresh_token, bearers: [...new Set(v.sends)], writes: tokens.st.writes, arrived: !!held };
   };
   {
     const r = await raceReauthL(reg);
-    ok(r.rs.every((x) => x === 'ok') && r.held === 'ur-reauth' && r.bearers.join() === 'Bearer u-REAUTH' && r.writes === 1, `(d) a re-authorize landing during the refresh: the held token is the re-authorize's (${r.held}), the late (rotated) refresh wrote nothing, its 5 callers carried the new bearer`, JSON.stringify(r));
+    ok(r.arrived && r.rs.every((x) => x === 'ok') && r.held === 'ur-reauth' && r.bearers.join() === 'Bearer u-REAUTH' && r.writes === 1, `(d) a re-authorize landing during the refresh: the held token is the re-authorize's (${r.held}), the late (rotated) refresh wrote nothing, its 5 callers carried the new bearer`, JSON.stringify(r));
     const r4 = src.replace("    const { token: cur, why: curWhy } = readToken();\n    // r3: a vault locked while the POST was in flight — the vendor ROTATED the token, the store cannot take it now: it is held\n    // in memory (as an unsaved write) and written at the first read after the unlock; the request hears `vault-locked`\n    if (!cur && vaultLockedWhy(curWhy)) { unsaved = { token: next, supersedes: String(token.refresh_token || '') }; throw notConnectedError('Lark', curWhy); }\n    if (!cur) throw new ChannelError('auth-expired', 'Lark was disconnected while its token was refreshed — the refreshed token was discarded, the request was not sent', { retryable: false, detail: { tokenDropped: true } });\n    if (String(cur.refresh_token || '') !== String(token.refresh_token || '')) return null;\n    const w = await persistToken(next, String(token.refresh_token || ''));   // verify r6: the door's compare-and-swap — superseded at apply time ⇒ nothing written, the caller re-reads\n    if (w && w.superseded) return null;", '    await persistToken(next);');
     ok(r4 !== src, 'CONTROL fixture: the write-only-while-current guard was removed from a copy');
     const modR4 = M.load('src/channels/lark.js', r4, 'r4-write'); const rg4 = CH.createChannelRegistry(); rg4.register(modR4.adapter);
     const c = await raceReauthL(rg4);
-    ok(c.held === 'ur-rot-1', `CONTROL: the r4 write REVERTS the re-authorize to the old family's rotated token (held ${c.held})`);
+    ok(c.arrived && c.held === 'ur-rot-1', `CONTROL: the r4 write REVERTS the re-authorize to the old family's rotated token (held ${c.held})`);
   }
   // lane channel-reauth-visible (the hub's Lark, 2026-10-23 06:46 PT): `20064` — the same user signed in to the same app on
   // another instance — arrived as `vendor-error`, so 30 passes re-POSTed a dead grant for 7 h. A dead refresh token is
@@ -657,8 +661,8 @@ function gateCensus(src, { gateRe, ungatedIds }) {
     const v = rotating(); v.hold(); const tokens = mkTokens(); tokens.st.token = expiredL();
     const a = reg.create('lark', { id: 'lark' }, { now, fetch: v.fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} } });
     const ps = Array.from({ length: 5 }, () => a.listConversations({ limit: 10 }).then(() => 'ok', (e) => `${e.code}:${/disconnected while its token was refreshed/.test(e.message) ? 'named' : e.message}`));
-    await sleep(10); await tokens.clear(); v.release(); const rs = await Promise.all(ps);
-    ok(rs.every((x) => x === 'auth-expired:named') && tokens.st.token === null && tokens.st.writes === 0 && v.sends.length === 0, `(e) a disconnect landing during the refresh: nothing written back, the 5 callers refused by name (${[...new Set(rs)].join()}), nothing sent`);
+    const waitedE = await waitUntil(() => v.arrived() >= 1, 5000, '(e) the refresh POST at its hold'); await tokens.clear(); v.release(); const rs = await Promise.all(ps);
+    ok(!!waitedE && rs.every((x) => x === 'auth-expired:named') && tokens.st.token === null && tokens.st.writes === 0 && v.sends.length === 0, `(e) a disconnect landing during the refresh: nothing written back, the 5 callers refused by name (${[...new Set(rs)].join()}), nothing sent`);
   }
   // (f) a store write that FAILS after a ROTATED refresh — the old token is retired at the vendor: the rotated one is served from memory and persisted at the first chance (it used to be invalid_grant ⇒ needs-reauth at the next refresh)
   {
@@ -674,13 +678,13 @@ function gateCensus(src, { gateRe, ungatedIds }) {
   {
     const v = mkVendor(); const sends = []; let refreshes = 0; const f0 = v.fetchFn;
     const fetchFn = async (url, init) => { const body = init && init.body ? JSON.parse(init.body) : null; if (body && body.grant_type === 'refresh_token') refreshes++; if (/\/open-apis\/im\//.test(String(url))) sends.push((init.headers || {}).Authorization); return f0(url, init); };
-    let release = null, hold = null; const order = [];
+    let release = null, hold = null, paceHeld = 0; const order = [];
     const tokens = mkTokens(); tokens.st.token = { access_token: 'u-short', expiresAt: now() + 120e3, refresh_token: 'ur-1', refreshExpiresAt: now() + 86400e3, scopes: ['im:message'], openId: 'ou_member_a' };
-    const a = reg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} }, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; await h; } }, meter: (n) => { order.push('meter ' + n); } });
+    const a = reg.create('lark', { id: 'lark' }, { now, fetch: fetchFn, tokens, resolveIntegration: () => CRED, log: { warn() {} }, pace: async (n) => { order.push('pace ' + n); if (hold) { const h = hold; hold = null; paceHeld++; await h; } }, meter: (n) => { order.push('meter ' + n); } });
     hold = new Promise((r) => { release = r; });
     const p1 = a.listConversations({ limit: 10 });
-    await sleep(10); clock += 130e3; release(); await p1; clock -= 130e3;
-    ok(refreshes === 1 && sends.length === 1 && sends[0] === 'Bearer u-access-0002' && order.join() === 'pace 1,meter 1,pace 1,meter 1', `(g) a bearer that EXPIRED during the pace wait: one paced refresh AFTER the wait (${order.join(' → ')}), the request carries the new bearer (${sends[0]})`);
+    const wg = await waitUntil(() => paceHeld === 1, 5000, '(g) the call held at its pace'); clock += 130e3; release(); await p1; clock -= 130e3;
+    ok(!!wg && refreshes === 1 && sends.length === 1 && sends[0] === 'Bearer u-access-0002' && order.join() === 'pace 1,meter 1,pace 1,meter 1', `(g) a bearer that EXPIRED during the pace wait: one paced refresh AFTER the wait (${order.join(' → ')}), the request carries the new bearer (${sends[0]})`);
   }
   // ── verify r6: THE TOKEN STORE CONTRACT — `meta.supersedes` honoured at APPLY time (what the engine's door does inside its serialized callback) ──
   const tokC = (t) => { const s = { st: { token: t, writes: 0 }, mode: 'ok', releaseW: null, read: () => ({ token: s.st.token, why: s.st.token ? null : 'never-authenticated' }), write: async (x, meta) => { s.st.writes++; if (s.mode === 'fail') { s.mode = 'ok'; throw new Error('ENOSPC'); } if (s.mode === 'slow') { s.mode = 'ok'; await new Promise((r) => { s.releaseW = r; }); } if (meta && meta.supersedes !== undefined && String((s.st.token || {}).refresh_token || '') !== String(meta.supersedes)) return { written: false, superseded: true }; s.st.token = x; return { written: true }; }, clear: async () => { s.st.token = null; } }; return s; };
