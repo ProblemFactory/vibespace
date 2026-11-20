@@ -175,6 +175,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - The help, the missing-ref hint, the manual's new «Editing an item» section and kb-api say both forms; test-backlog-priority's usage pin follows the line; test-peer-text-census classifies the two counts printed.
 - PINS: test-backlog-no-truncation §3b — the real route (add, set, replace by name, plain clear refused, clear by name, the cap refusal that changes nothing) + a RED copy (the old replace in a copy of the route wipes the detail), and §5 — the real CLI (the body it sends, `--replace-detail` alone refused before sending, the answer's words, an older server said, the help and the manual).
 
+### lg-remote-hardening — list line 21: line 147's smalls moved onto the train, and Known K57 retired
+- The row order's two smalls (2.369.413's list line 147): the connect's own-order stamp is guarded as its neighbours are (a hand-edited, non-numeric stamp never reads NaN); its control is closed against two undefined stamps.
+- K57 (2.369.413, smalls with no row): the «Test connection» icon on a machine row titled its English literal although its zh / ja rows existed; it is titled through the page's words now (src/lib/sidebar-mounts.js). test-exit-access-ui's by-name leg (list line 150) reads the zh row.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
