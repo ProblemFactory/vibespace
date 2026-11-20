@@ -75,7 +75,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePorts, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -162,7 +162,7 @@ else await (async () => {
   /** ONE headless chrome = ONE page (its own profile + CDP port), with the real-input helpers (verify r1: two pages). */
   const mkPage = async (name) => {
     const [CDPn] = name === 'p1' ? [CDP] : await freePorts(1);
-    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDPn}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', '--window-size=1571,905', `--user-data-dir=${path.join(ROOT, 'chrome-' + name)}`, 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDPn}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', '--window-size=1571,905', `--user-data-dir=${path.join(ROOT, 'chrome-' + name)}`, 'about:blank'], { stdio: 'ignore' });
     procs.add(chrome);
     let target = null; for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDPn}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
     if (!target) return null;

@@ -39,7 +39,7 @@ import path from 'node:path';
 import { spawn, execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stopWrapper, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchDir, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, runnerFontEnv, realClicker, stopWrapper, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const WebSocket = require('ws');
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -290,7 +290,7 @@ const restartServer = async () => {
 };
 startServer();
 const fontEnv = runnerFontEnv(scratchDir('mto-fonts'));
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1200,900', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...envNoBus, ...fontEnv } });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1200,900', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...envNoBus, ...fontEnv } });
 procs.add(chrome);
 ok(await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 250), 'the scratch hub answered', journal.slice(-1200));
 const ctl = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);

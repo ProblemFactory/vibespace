@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -41,7 +41,7 @@ fs.mkdirSync(path.join(fakeHome, '.claude'), { recursive: true });
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome } });
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', ...(process.env.VS_CHROME ? ['--no-sandbox'] : []), `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // (VS_CHROME: a Chrome for Testing unpacked from its zip has no setuid sandbox helper — as the other suites run it)
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', ...(process.env.VS_CHROME ? ['--no-sandbox'] : []), `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });   // (VS_CHROME: a Chrome for Testing unpacked from its zip has no setuid sandbox helper — as the other suites run it)
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}
   try { fs.rmSync(`${wt}-chrome`, { recursive: true, force: true }); } catch {}

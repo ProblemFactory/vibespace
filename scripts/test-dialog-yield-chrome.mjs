@@ -73,7 +73,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, fontLegs, runnerFontEnv, boxSans, relayBroadcastJs } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, fontLegs, runnerFontEnv, boxSans, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const require = createRequire(import.meta.url);
@@ -159,7 +159,7 @@ const font = fontLegs().includes('dejavu') ? 'dejavu' : 'box';
 const fontEnv = font === 'dejavu' ? runnerFontEnv(FONTS) : {};
 console.log(`  (font: ${font === 'dejavu' ? 'DejaVu Sans — the hosted runner\'s, a scratch fontconfig' : `this box's own (${boxSans() || '?'})`}; the page's CPU throttled ×${THROTTLE})`);
 const CDP_PORT = await freePort();
-chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars',
+chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars',
   '--password-store=basic', '--disable-background-timer-throttling', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'],
 { stdio: 'ignore', env: { ...process.env, ...fontEnv, HOME: chromeHome, XDG_RUNTIME_DIR: chromeRun, DISPLAY: '' } });
 const WebSocket = require('ws');

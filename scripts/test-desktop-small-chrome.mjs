@@ -105,7 +105,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
 import { loadPage } from './cdp-page-load.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
@@ -357,7 +357,7 @@ const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot
  *  port; the page target's socket, the Fetch domain (the RED controls' bundles) and the returning-user script */
 const startChrome = async (font) => {
   const n = chromeStarts++; CDP_PORT = CDP_PORTS[n];
-  chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
+  chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
     '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--disable-background-timer-throttling', `--user-data-dir=${path.join(chromeDir, `${font}-${n}`)}`, 'about:blank'],
   { stdio: 'ignore', env: font === 'dejavu' ? { ...process.env, FONTCONFIG_FILE: DEJAVU_CONF } : process.env });
   let target = null;

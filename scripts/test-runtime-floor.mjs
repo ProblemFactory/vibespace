@@ -92,7 +92,7 @@ ok(mut !== src && red.some(([n]) => n.startsWith('v22.9.9')), `RED: a copy that 
 // verdict); the real paths come from an injected reader here (no disk read)
 {
   const RB = require(path.join(REPO, 'src/server/runtime-boot.js'));
-  const links = { '/srv/link/wt': '/tmp/real/wt' };
+  const links = { '/srv/link/wt': '/tmp/real/wt', '.': '/home/u/vibespace' };   // «.» as the hub's cwd would resolve it
   const real = async (p) => links[p] || p;
   const T = ['/tmp', '/var/tmp'];
   const scenes = [
@@ -103,6 +103,8 @@ ok(mut !== src && red.some(([n]) => n.startsWith('v22.9.9')), `RED: a copy that 
     ['a suite\'s hub (VS_NO_REAL_CLI=1)', { rootDir: '/home/u/vibespace', env: { VS_NO_REAL_CLI: '1' }, tmpRoots: T }, false],
     ['NO_AUTO_UPDATE', { rootDir: '/home/u/vibespace', env: { NO_AUTO_UPDATE: '1' }, tmpRoots: T }, false],
     ['RED CONTROL: the same /var/tmp root with /var/tmp left out of the list', { rootDir: '/var/tmp/vs-lane/wt', env: {}, tmpRoots: ['/tmp'] }, true],
+    ['r468: a temp folder variable set to the disk\'s root (TMPDIR=/) — a person\'s root stays armed', { rootDir: '/home/u/vibespace', env: {}, tmpRoots: ['/', '/tmp', '/var/tmp'] }, true],
+    ['r528: a RELATIVE temp spelling (TMPDIR=.) is never resolved — the hub\'s own folder stays armed', { rootDir: '/home/u/vibespace', env: {}, tmpRoots: ['.', '/tmp', '/var/tmp'] }, true],
   ];
   for (const [what, arg, want] of scenes) {
     const v = await RB.runtimeCheckArmed({ ...arg, realpath: real });
@@ -111,8 +113,10 @@ ok(mut !== src && red.some(([n]) => n.startsWith('v22.9.9')), `RED: a copy that 
   ok(RB.TMP_ROOTS().includes('/var/tmp') && RB.TMP_ROOTS().includes('/tmp'), `B-9dd0 the boot judges /tmp and /var/tmp beside os.tmpdir() (${RB.TMP_ROOTS().join(', ')})`);
   const bootSrc = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
   const bootFn = bootSrc.slice(bootSrc.indexOf('function boot('), bootSrc.indexOf('const answer ='));
-  ok(/runtimeCheckArmed\(\{ rootDir, env \}\)\.then\(\(v\) => \{ if \(!v\.armed\) return; const t = setTimeout\(/.test(bootFn) && (bootFn.match(/setTimeout\(/g) || []).length === 1,
+  ok(/runtimeCheckArmed\(\{ rootDir, env \}\)\.then\(\(v\) => \{ if \(!v\.armed\) \{ log\(`[^`\n]*`\); return; \} const t = setTimeout\(/.test(bootFn) && (bootFn.match(/setTimeout\(/g) || []).length === 1,
     'B-9dd0 boot() sets the runtime check\'s timer ONLY through runtimeCheckArmed (one setTimeout, inside its armed answer)');
+  ok(/if \(!v\.armed\) \{ log\(`\[runtime\] the boot's runtime check is off: \$\{v\.why\}`\); return; \}/.test(bootFn) && (bootFn.match(/runtime check is off/g) || []).length === 1,
+    'B-9dd0 r468: when the runtime check is off, boot() says its reason ONCE in the journal (boot runs once a process)');
 }
 
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);

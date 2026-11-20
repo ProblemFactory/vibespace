@@ -19,7 +19,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE, CHROME_QUIET } from './scratch.mjs';
 import { waitPageList } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -77,7 +77,7 @@ window.ready = true;`;
   const CDP_PORT = await freePort();
   const home = path.join(dir, 'home'), xdg = path.join(dir, 'xdg'); fs.mkdirSync(home); fs.mkdirSync(xdg, { mode: 0o700 });
   const env = { ...process.env, HOME: home, XDG_RUNTIME_DIR: xdg }; delete env.DISPLAY; delete env.WAYLAND_DISPLAY; delete env.DBUS_SESSION_BUS_ADDRESS;
-  chrome = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1100,820', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore', env });
+  chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', '--remote-debugging-port=' + CDP_PORT, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1100,820', '--user-data-dir=' + path.join(dir, 'chrome'), 'about:blank'], { stdio: 'ignore', env });
   const race = (pr, ms, what) => Promise.race([pr, new Promise((_, rej) => { const t = setTimeout(() => rej(new Error(what + ' timed out after ' + ms + 'ms')), ms); if (t.unref) t.unref(); })]);
   let list = null;
   list = await waitPageList(CDP_PORT, { polls: 80, everyMs: 200 }); // B-fcae: the one waiter (a miss always waits)

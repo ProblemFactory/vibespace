@@ -75,13 +75,15 @@ function install(file = FILE) {
         // the suite's OWN resolver, on a COPY of its options: judge what it answers (a stand-in mapped to the loopback, or a
         // refusal, is no egress)
         const look = t.o.lookup;
-        const copy = { ...t.o, lookup: function lookup(hostname, opts, cb) {
+        // the copy keeps the caller's PROTOTYPE (主开发 r468: an options object may carry its host, port or lookup by inheritance)
+        const copy = Object.assign(Object.create(Object.getPrototypeOf(t.o)), t.o);
+        copy.lookup = function lookup(hostname, opts, cb) {
           const done = typeof opts === 'function' ? opts : cb, o2 = typeof opts === 'function' ? {} : opts;
           return look.call(this, hostname, o2, (err, address, family) => {
             try { const a = answered(err, address); if (a) say(file, `${t.host}=${a}`, t.port); } catch { /* never the suite's */ }
             done(err, address, family);
           });
-        } };
+        };
         if (t.arr) t.arr[0] = copy; else args[0] = copy;
       }
     } catch { /* the count never breaks the suite's own connect */ }

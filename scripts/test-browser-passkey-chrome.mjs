@@ -28,7 +28,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -94,7 +94,7 @@ window.reg=(name)=>navigator.credentials.create({publicKey:{challenge:ch(),rp:{i
 window.signin=(cond)=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:'localhost',userVerification:'preferred',timeout:8000},...(cond?{mediation:'conditional'}:{})}).then(()=>'ok',(e)=>e.name);
 </script>`); });
   await new Promise((r) => pg.listen(0, '127.0.0.1', r)); const PAGE = `http://localhost:${pg.address().port}/`;
-  const ch = spawn(CHROME, [`--user-data-dir=${path.join(S, 'prof')}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--disable-gpu', 'about:blank'], { env: { ...BASE_ENV, DISPLAY: disp, HOME: path.join(S, 'home') }, stdio: 'ignore', detached: true }); kids.push(ch);
+  const ch = spawn(CHROME, [...CHROME_QUIET, `--user-data-dir=${path.join(S, 'prof')}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--disable-gpu', 'about:blank'], { env: { ...BASE_ENV, DISPLAY: disp, HOME: path.join(S, 'home') }, stdio: 'ignore', detached: true }); kids.push(ch);
   const portFile = path.join(S, 'prof', 'DevToolsActivePort');
   const pf = await until(() => fs.existsSync(portFile) && fs.readFileSync(portFile, 'utf8').split('\n').length >= 2 && fs.readFileSync(portFile, 'utf8'), 15000);
   const end = () => { for (const k of kids) { try { process.kill(-k.pid, 'SIGKILL'); } catch { } } try { pg.close(); } catch { } };

@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -43,7 +43,7 @@ const logFile = path.join(wt, 'server.log');
 const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, VIBESPACE_SKIP_AGENT_HOOKS: '1', NO_AUTO_UPDATE: '1' };
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', fs.openSync(logFile, 'w'), fs.openSync(logFile, 'a')] });
 // chrome WITH its own background throttling (the point of ①)
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,900', `--user-data-dir=${scratch('dkp-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1400,900', `--user-data-dir=${scratch('dkp-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const VNC_DISPLAY = VNC_ENV.VIBESPACE_VNC_DISPLAY, VNC_PORT = VNC_ENV.VIBESPACE_VNC_PORT;
 const ourXvnc = () => fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number).filter((pid) => {
   try { const a = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0'); return /^X(tiger)?vnc$/.test(path.basename(a[0])) && a.includes(VNC_DISPLAY) && a[a.indexOf('-rfbport') + 1] === VNC_PORT; } catch { return false; }

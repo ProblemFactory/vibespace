@@ -40,7 +40,7 @@ import http from 'node:http';
 import net from 'node:net';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, gtkRow, CHROME_STORE } from './scratch.mjs';
+import { scratch, freePort, gtkRow, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { windowLiveMode, windowModeBadge, leaseTransition, newViewerId } from '../src/lib/window-live-mode.js';
 
 const require = createRequire(import.meta.url);
@@ -728,7 +728,7 @@ async function laneE() {
         153: [{ re: CLOSED, when: 'a closed tree (153 registers with or without an a11y env)' }],
         154: [{ re: ABSENT, when: 'not on the bus (no a11y env in the launch — the scrubbed child)' }, { re: CLOSED, when: 'a closed 4-node tree (an a11y env reached the launch)' }],
       };
-      let chromeMajor = null; try { chromeMajor = Number((/(\d+)\./.exec(execFileSync(chromeBin, [...CHROME_STORE, '--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1]) || null; } catch { chromeMajor = null; }
+      let chromeMajor = null; try { chromeMajor = Number((/(\d+)\./.exec(execFileSync(chromeBin, [...CHROME_QUIET, ...CHROME_STORE, '--version'], { encoding: 'utf8', timeout: 10000 })) || [])[1]) || null; } catch { chromeMajor = null; }
       const rows = CTL_WHY[chromeMajor] || [];
       const seen = rows.find((r) => r.re.test(acl.out)) || null;
       const modeLine = (acl.out.match(/mode: .*/) || [''])[0];

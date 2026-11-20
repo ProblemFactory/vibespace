@@ -28,7 +28,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -75,7 +75,7 @@ const SERVER_LOG = path.join(home, 'server.log'); // the server's own words are 
 const bootServer = (extraEnv = {}) => { const fd = fs.openSync(SERVER_LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv(extraEnv), stdio: ['ignore', fd, fd] }); fs.closeSync(fd); return srv; };
 const serverLines = (re) => { try { return fs.readFileSync(SERVER_LOG, 'utf8').split('\n').filter((l) => re.test(l)).slice(-8); } catch { return []; } };
 bootServer();
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskfit-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', '--window-size=1400,900', `--user-data-dir=${scratch('deskfit-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const storeIds = () => { try { return Object.keys(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps); } catch { return []; } };
 const recordedPids = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps).flatMap((a) => Object.values(a.pids || {})).filter(Boolean); } catch { return []; } };
 const cleanup = () => {

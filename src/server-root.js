@@ -64,9 +64,11 @@ function isUnder(p, dir) {
 /** B-9dd0 (主开发 r321): THE «under a temp root» verdict — rule 3's ONE spelling for every reader that keeps a throwaway
  *  hub off the network (the update check's offline answer, src/server/ops-routes.js; the boot's runtime check,
  *  src/server/runtime-boot.js). `root` and `tmpRoots` as given, `realRoot` / `realTmps` their real paths (the CALLER reads
- *  them, so this stays pure: a hub reached through a linked temp path is one too) → the temp root it lies under, or null. */
+ *  them, so this stays pure: a hub reached through a linked temp path is one too) → the temp root it lies under, or null.
+ *  主开发 r468: the DISK'S ROOT is never a temp root (a temp folder variable set to / would make every checkout one, and a
+ *  person's hub would go offline without a word). */
 function tmpRootUnder({ root, realRoot = null, tmpRoots = [], realTmps = [] } = {}) {
-  const roots = [...new Set([...(tmpRoots || []), ...(realTmps || [])])].filter(isAbs);
+  const roots = [...new Set([...(tmpRoots || []), ...(realTmps || [])])].filter((t) => isAbs(t) && trimSlash(t) !== '/');
   return roots.find((t) => isUnder(root, t) || (realRoot != null && isUnder(realRoot, t))) || null;
 }
 /** The `gitdir: <path>` line of a worktree's (or submodule's) `.git` FILE, or null. */
@@ -89,7 +91,9 @@ function isLinkedWorktree(gitDir, gitCommonDir) {
 
 function rootVerdict({ root, gitCommonDir = null, gitDir = null, tmpRoots = [], envOverride = false, force = false, home = null, error = null } = {}) {
   const r = trimSlash(root);
-  const roots = (Array.isArray(tmpRoots) ? tmpRoots : []).filter(isAbs).map(trimSlash);
+  // B-9dd0 (主开发 r528): the disk's root is never a temp root here either — a temp folder variable set to / made every checkout
+  // «kind tmp» and the person's CLI hooks were never registered; rule 3 IS tmpRootUnder (one rule for both readers)
+  const roots = (Array.isArray(tmpRoots) ? tmpRoots : []).filter(isAbs).map(trimSlash).filter((t) => t !== '/');
   let refused = null;
   if (!isAbs(r)) {
     refused = { ok: false, kind: 'unknown', root: r || null, why: 'the server root is not an absolute path' };
@@ -100,7 +104,7 @@ function rootVerdict({ root, gitCommonDir = null, gitDir = null, tmpRoots = [], 
     const checkout = checkoutOfCommonDir(gitCommonDir);
     refused = { ok: false, kind: 'worktree', root: r, checkout, why: `this server runs from a git worktree of ${checkout}` };
   } else {
-    const tmp = roots.find((t) => isUnder(r, t));
+    const tmp = tmpRootUnder({ root: r, tmpRoots: roots });
     if (tmp) refused = { ok: false, kind: 'tmp', root: r, tmpRoot: tmp, why: `this server runs from a temporary folder (${r} is under ${tmp})` };
     else if (envOverride === true) refused = { ok: false, kind: 'override', root: r, why: `${OVERRIDE_ENV}=1 is set for this server` };
   }

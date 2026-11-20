@@ -50,7 +50,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, vncEnv, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, vncEnv, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -137,7 +137,7 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 const S = await bootServer(wt, 'deskapp-snap-home');
 check('the worktree server boots (under its own dbus-run-session)', S.up);
 const [CDP_PORT] = await freePorts(1);
-chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', `--window-size=${VW},${VH + 100}`, `--user-data-dir=${CHROME_DIR}`, 'about:blank'], { stdio: 'ignore', detached: true });
+chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--disable-background-timer-throttling', `--window-size=${VW},${VH + 100}`, `--user-data-dir=${CHROME_DIR}`, 'about:blank'], { stdio: 'ignore', detached: true });
 const WebSocket = require('ws');
 const target = await until(async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'), 20000, 250);
 async function page(t) {

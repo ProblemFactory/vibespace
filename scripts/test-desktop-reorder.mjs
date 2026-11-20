@@ -4,7 +4,7 @@
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs'; import path from 'node:path'; import http from 'node:http';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = new URL('..', import.meta.url).pathname.replace(/\/$/, '');
@@ -37,7 +37,7 @@ const env={...hubBase, HOME: home}; delete env.VIBESPACE_PASSWORD; delete env.VI
 const { DBUS_SESSION_BUS_ADDRESS: _bus, XDG_CONFIG_HOME: _cfg, ...chromeEnv } = process.env; chromeEnv.HOME = chromeDir;   // its crash handler too lives under the profile (B-ddc5)
 const [PORT, CDP_PORT] = await freePorts(2); // per-process (scripts/scratch.mjs)
 srv=spawn('node',[path.join(wt,'server.js')],{cwd:wt,env:{...env, ...VNC_ENV,PORT:String(PORT),VIBESPACE_SKIP_AGENT_HOOKS:'1'},stdio:'ignore'});
-chrome=spawn(CHROME,[...CHROME_STORE, '--headless=new',`--remote-debugging-port=${CDP_PORT}`,'--no-sandbox','--disable-gpu','--password-store=basic',`--user-data-dir=${chromeDir}`,'about:blank'],{stdio:'ignore',env:chromeEnv});
+chrome=spawn(CHROME,[...CHROME_QUIET, ...CHROME_STORE, '--headless=new',`--remote-debugging-port=${CDP_PORT}`,'--no-sandbox','--disable-gpu','--password-store=basic',`--user-data-dir=${chromeDir}`,'about:blank'],{stdio:'ignore',env:chromeEnv});
 await new Promise(r=>setTimeout(r,4000));
 const get=(u)=>new Promise((res,rej)=>http.get(u,s=>{let b='';s.on('data',d=>b+=d);s.on('end',()=>res(b))}).on('error',rej));
 const WebSocket=require(path.join(repo,'node_modules/ws/index.js'));

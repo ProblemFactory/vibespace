@@ -17,6 +17,9 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 
 export const MARK = /^--?(remote-debugging-port|remote-debugging-pipe|headless)\b/;
+// REACH (B-9dd0 r528): scripts/test-*.mjs and the scripts/ modules a suite imports by `from './x.mjs'` — not a dynamic import(), a
+// require, a ./lib/ path, a second-level import or a .cjs file; a launch whose argv is no array literal is caught only when its file has
+// no other launch (the TEXT_MARK coverage is per file). Today every other file with a Chrome marker is a dbg-* / measure-* / probes/* tool.
 export const TEXT_MARK = /remote-debugging-(?:port|pipe)\b|--headless\b/;   // the coverage reading: the file's whole TEXT (a comment and a string included)
 const SPAWNERS = new Set(['spawn', 'spawnSync', 'execFile', 'execFileSync']);
 const CHROMEISH = /chrom/i;
@@ -25,6 +28,14 @@ const isArgv = (a) => !!a && a.type === 'ArrayExpression' && a.elements.some((e)
 /** the array carries the store: a spread of CHROME_STORE, or Chrome's basic store flag as a literal — THE TREE DOES BOTH (主开发 12:21Z):
  *  most launches spread scripts/scratch.mjs CHROME_STORE; some suites write the basic store flag alone (no mock keychain) — accepted
  *  here because that flag is what keeps Chrome off the session bus's Secret Service; «every launch carries the constant» is not true */
+/** B-9dd0 unit 2: the array quiets Chrome's background network roads — a spread of scripts/scratch.mjs CHROME_QUIET, or the
+ *  background-networking switch as a literal (the one that turns the most roads off) */
+export const quiets = (a) => a.elements.some((e) => e && ((e.type === 'SpreadElement' && e.argument.type === 'Identifier' && e.argument.name === 'CHROME_QUIET') || /^--disable-background-networking$/.test(strOf(e) || '')));
+// B-9dd0 unit 2 (主开发 r528, MUST 1): A WRAPPED LAUNCH — the spawned program is not Chrome (a shell, a limit wrapper, a display
+// wrapper, nice, env) and Chrome's program is an ELEMENT of its argv: the switches count only AFTER that element (before it they are
+// the wrapper's own options — /bin/sh refuses an unknown long option and Chrome never starts)
+export const chromeAt = (a) => a.elements.findIndex((e) => !!e && ((e.type === 'Identifier' && /chrom/i.test(e.name)) || /\/(google-)?chrom(e|ium)(-stable|-browser)?$/i.test(strOf(e) || '')));
+export const quietsAfter = (a, at) => quiets({ elements: a.elements.slice(at + 1) });
 export const carries = (a) => a.elements.some((e) => e && ((e.type === 'SpreadElement' && e.argument.type === 'Identifier' && e.argument.name === 'CHROME_STORE') || /^--password-store=basic$/.test(strOf(e) || '')));
 function walk(n, f, up = null) { if (!n || typeof n.type !== 'string') return; f(n, up); for (const k of Object.keys(n)) { if (k === 'start' || k === 'end' || k === 'loc') continue; const v = n[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') walk(x, f, n); } else if (v && typeof v.type === 'string') walk(v, f, n); } }
 const nameOf = (c) => (!c ? null : c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier' ? c.property.name : null);
@@ -60,7 +71,14 @@ export function launchesOf(src, { acorn }) {
   });
   const lineOf = (at) => code.slice(0, at).split('\n').length;
   const seen = new Set(), launches = [], unread = [];
-  const take = (arr) => { if (!arr || seen.has(arr.start)) return; seen.add(arr.start); launches.push({ line: lineOf(arr.start), carried: carries(arr), open: arr.start + 1 }); };
+  // `wrapped` (MUST 1): a launch whose program is not Chrome and whose argv holds Chrome's program — {at: its element, quietAt: where the
+  // spread stands (-1: none)}; its `open` is right after Chrome's element (where the switches belong)
+  const take = (arr, chromeProg = true) => {
+    if (!arr || seen.has(arr.start)) return; seen.add(arr.start);
+    const at = chromeProg ? -1 : chromeAt(arr), next = at >= 0 ? arr.elements[at + 1] : null;
+    const quietAt = arr.elements.findIndex((e) => !!e && e.type === 'SpreadElement' && e.argument.type === 'Identifier' && e.argument.name === 'CHROME_QUIET');
+    launches.push({ line: lineOf(arr.start), carried: carries(arr), quiet: at >= 0 ? quietsAfter(arr, at) : quiets(arr), wrapped: at >= 0 ? { at, quietAt } : null, open: at >= 0 && next ? next.start : arr.start + 1 });
+  };
   walk(ast, (n) => {
     if (n.type !== 'CallExpression') return;
     const p0 = n.arguments[0];
@@ -72,7 +90,7 @@ export function launchesOf(src, { acorn }) {
     const argvs = cand.filter(isArgv);
     if (!chromeProg && isRuntime(p0)) return;   // the runtime itself: a holder, never a Chrome
     if (!chromeProg && argvs.length && NOT_BROWSER.test(`${progName(p0)} ${strOf(p0) || ''}`) && argvs.every(onlyHeadless)) return;   // an office conversion's bare --headless
-    if (argvs.length) { for (const x of argvs) take(x); return; }
+    if (argvs.length) { for (const x of argvs) take(x, chromeProg); return; }
     if (!chromeProg) return;   // a spawner whose argv holds no marker: no Chrome
     const arr = a && a.type === 'ArrayExpression' ? a : a && a.type === 'Identifier' ? arrays.get(a.name) : null;
     if (arr) take(arr);   // a spawner under any name, or a suite's own wrapper, given a Chrome program and an argv array
@@ -123,7 +141,7 @@ export const ROWS = Object.freeze({
  *  `patch` = a file's text replaced, `extra` = more files read as if in the scope (planted controls), `rows` = the named rows */
 export function census(repo, { acorn = null, patch = {}, extra = {}, rows = ROWS } = {}) {
   const A = acorn || createRequire(path.join(repo, 'package.json'))('acorn');
-  const out = { files: 0, launches: 0, rows: 0, bad: [], exempt: [], unparsed: [], unread: [], uncovered: [], stale: [] };
+  const out = { files: 0, launches: 0, rows: 0, bad: [], loud: [], wrapped: [], exempt: [], unparsed: [], unread: [], uncovered: [], stale: [] };
   for (const f of [...filesOf(repo), ...Object.keys(extra)]) {
     const src = f in extra ? extra[f] : f in patch ? patch[f] : fs.readFileSync(path.join(repo, f), 'utf8');
     const r = launchesOf(src, { acorn: A });
@@ -134,8 +152,10 @@ export function census(repo, { acorn = null, patch = {}, extra = {}, rows = ROWS
     for (const u of r.unread) if (!EXEMPT[f]) out.unread.push({ file: f, line: u.line });
     if (!r.launches.length) continue;
     out.files++; out.launches += r.launches.length;
+    // MUST 2 (主开发 r528): the exemption is about the STORE only — an exempt file's launches are still read for the quiet switches
+    for (const l of r.launches) { if (!l.quiet) out.loud.push({ file: f, line: l.line, open: l.open }); if (l.wrapped) out.wrapped.push({ file: f, line: l.line, ...l.wrapped, quiet: l.quiet }); }
     if (EXEMPT[f]) { out.exempt.push({ file: f, pinned: EXEMPT[f].pin.test(src) }); continue; }
-    for (const l of r.launches) if (!l.carried) out.bad.push({ file: f, line: l.line });
+    for (const l of r.launches) { if (!l.carried) out.bad.push({ file: f, line: l.line }); }   // B-9dd0 unit 2: `loud` = a launch without CHROME_QUIET
   }
   for (const f of Object.keys(rows)) if (!fs.existsSync(path.join(repo, f)) && !(f in extra)) out.stale.push(f);
   return out;

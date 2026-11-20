@@ -347,10 +347,19 @@ ok(/if \(integrationEnabled\(\)\) hookRootWatch\.sync\(\);/.test(srv) && /if \(!
     [{ root: '/private/tmp/wt', tmpRoots: ['/tmp'], realTmps: ['/private/tmp'] }, '/private/tmp', 'a temp root\'s REAL path counts too (macOS /tmp → /private/tmp)'],
     [{ root: '/home/u/vibespace', realRoot: '/home/u/vibespace', tmpRoots: T }, null, 'a person\'s checkout'],
     [{ root: 'relative/wt', tmpRoots: ['tmp'] }, null, 'relative paths are never judged under'],
+    [{ root: '/home/u/vibespace', realRoot: '/home/u/vibespace', tmpRoots: ['/', '/tmp'] }, null, 'r468: the DISK\'S ROOT is never a temp root (a temp folder variable set to /)'],
+    [{ root: '/home/u/vibespace', tmpRoots: ['/tmp'], realTmps: ['//'] }, null, 'r468: …nor a real path that resolves to it'],
   ];
   for (const [arg, want, what] of rows) { const got = SR.tmpRootUnder(arg); ok(got === want, `B-9dd0 tmpRootUnder: ${what} → ${got}`, `want ${want}`); }
+  // r528 (ruled in): rule 3 of rootVerdict is the same rule — the disk's root as a temp root (the incident's own hub, TMPDIR=/) never
+  // makes a person's checkout «kind tmp» (its CLI hooks would never be registered); CONTROL: a real temp root above it still does
+  const ck = { root: '/home/u/vibespace', gitCommonDir: '/home/u/vibespace/.git', gitDir: '/home/u/vibespace/.git' };
+  const vRoot = SR.rootVerdict({ ...ck, tmpRoots: ['/', '/tmp'] }), vCtl = SR.rootVerdict({ ...ck, tmpRoots: ['/home', '/tmp'] });
+  console.log(`  (rootVerdict with tmpRoots [/, /tmp]: ${vRoot.kind} — ${vRoot.why || 'ok'}; with [/home, /tmp]: ${vCtl.kind})`);
+  ok(vRoot.kind !== 'tmp' && vCtl.kind === 'tmp' && vCtl.tmpRoot === '/home', 'B-9dd0 r528: rootVerdict\'s rule 3 never calls a checkout «tmp» for the disk\'s root (TMPDIR=/); CONTROL: a temp root above the checkout still does');
+  ok(/const tmp = tmpRootUnder\(\{ root: r, tmpRoots: roots \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server-root.js'), 'utf8')), 'B-9dd0 r528: rule 3 IS tmpRootUnder (one rule, no second spelling)');
   const ops = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), rb = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
-  ok(/tmpRootUnder\(\{ root: rootDir, realRoot: r, tmpRoots, realTmps: real \}\)/.test(ops) && /SR\.tmpRootUnder\(\{ root: path\.resolve\(rootDir\), realRoot, tmpRoots, realTmps \}\)/.test(rb) && !/startsWith\(path\.resolve\(t\)/.test(rb),
+  ok(/tmpRootUnder\(\{ root: rootDir, realRoot: r, tmpRoots: absTmp\(\), realTmps: real \}\)/.test(ops) && /\.\.\.absTmp\(\)\.map\(realOr\)/.test(ops) && /SR\.tmpRootUnder\(\{ root: path\.resolve\(rootDir\), realRoot, tmpRoots: abs, realTmps \}\)/.test(rb) && /const abs = tmpRoots\.filter\(\(t\) => typeof t === 'string' && path\.isAbsolute\(t\)\);/.test(rb) && !/startsWith\(path\.resolve\(t\)/.test(rb),
     'B-9dd0: the update check and the boot\'s runtime check both ask tmpRootUnder (one verdict, no second spelling)');
 }
 

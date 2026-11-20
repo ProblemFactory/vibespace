@@ -40,7 +40,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -117,7 +117,7 @@ if (!INNER_CHROME) { skip(`no installed browser under ${BROWSERS} (the suite nev
 /** A throwaway Chrome (headless) with its own profile under ROOT; → { port, close }. */
 async function launchChrome(bin, { name, args = [], url = 'about:blank' } = {}) {
   const ud = path.join(ROOT, 'ud-' + name);
-  const ch = spawn(bin, ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${ud}`, '--no-first-run', '--no-default-browser-check', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--password-store=basic', ...args, url], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, NO_AT_BRIDGE: '1' } });
+  const ch = spawn(bin, [...CHROME_QUIET, '--headless=new', '--remote-debugging-port=0', `--user-data-dir=${ud}`, '--no-first-run', '--no-default-browser-check', '--no-sandbox', '--disable-gpu', '--disable-dev-shm-usage', '--disable-background-networking', '--disable-component-update', '--disable-sync', '--password-store=basic', ...args, url], { stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, NO_AT_BRIDGE: '1' } });
   procs.add(ch);
   let port = null, buf = '';
   ch.stderr.on('data', (d) => { buf += d; const m = /DevTools listening on ws:\/\/127\.0\.0\.1:(\d+)/.exec(buf); if (m) port = Number(m[1]); });

@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const VNC_ENV = await vncEnv();
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -50,7 +50,7 @@ const srvEnv = { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: home, XDG
 delete srvEnv.DBUS_SESSION_BUS_ADDRESS; // never the owner's session bus (the app's own bus is the plan's)
 delete srvEnv.AT_SPI_BUS_ADDRESS;
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: 'ignore' });
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1200,800', `--user-data-dir=${scratch('deskapp-notify-chrome')}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--window-size=1200,800', `--user-data-dir=${scratch('deskapp-notify-chrome')}`, 'about:blank'], { stdio: 'ignore' });
 const recordedPids = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps).flatMap((a) => Object.values(a.pids || {})).filter(Boolean); } catch { return []; } };
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch {}

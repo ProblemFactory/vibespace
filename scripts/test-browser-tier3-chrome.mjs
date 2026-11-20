@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, CHROME_STORE } from './scratch.mjs';
+import { scratch, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 
 let pass = 0, fail = 0, skipped = 0;
@@ -93,7 +93,7 @@ async function main() {
   const udd = path.join(dir, 'chrome-profile'); fs.mkdirSync(udd, { recursive: true });
   const cenv = { ...xenv, ACCESSIBILITY_ENABLED: '1', GTK_MODULES: 'gail:atk-bridge', HOME: path.join(dir, 'home') };
   fs.mkdirSync(cenv.HOME, { recursive: true });
-  const argv = [...CHROME_STORE, `--user-data-dir=${udd}`, '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--window-size=900,700', '--force-renderer-accessibility', 'about:blank'];
+  const argv = [...CHROME_QUIET, ...CHROME_STORE, `--user-data-dir=${udd}`, '--no-first-run', '--no-default-browser-check', '--disable-gpu', '--disable-dev-shm-usage', '--no-sandbox', '--window-size=900,700', '--force-renderer-accessibility', 'about:blank'];
   const ch = spawn(chrome, argv, { env: cenv, stdio: ['ignore', 'ignore', 'pipe'], detached: true });
   groups.add(ch.pid);
   let cerr = ''; ch.stderr.on('data', (d) => { cerr = (cerr + d).slice(-3000); });

@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
-import { scratch, freePort, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, freePort, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const REPO = new URL('..', import.meta.url).pathname;
 const arg = (k, d) => { const i = process.argv.indexOf(k); return i > 0 && process.argv[i + 1] ? process.argv[i + 1] : d; };
 const CHROME = arg('--chrome', ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p)) || '');
@@ -86,7 +86,7 @@ export async function fetchLiveProtocol({ chrome = CHROME, root = scratch('cdp-p
   fs.mkdirSync(root, { recursive: true });
   const port = await freePort();
   let spawnError = null;
-  const c = spawn(chrome, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${port}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(root, 'ud')}`, 'about:blank'], { stdio: 'ignore', detached: true });
+  const c = spawn(chrome, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${port}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(root, 'ud')}`, 'about:blank'], { stdio: 'ignore', detached: true });
   // lane-cdp-154: a missing / unrunnable binary is an 'error' EVENT — unheard, it crashed the process and left the root
   c.on('error', (e) => { spawnError = e; });
   try {

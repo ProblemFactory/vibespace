@@ -22,7 +22,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -46,7 +46,7 @@ const startServer = (holdMs) => { srv = spawn(process.execPath, ['server.js'], {
 const stopServer = async () => { const p = srv; srv = null; if (!p) return; p.kill('SIGKILL'); await new Promise((r) => { if (p.exitCode !== null || p.signalCode) r(); else p.once('exit', r); }); };
 const boot = async () => { try { const r = await fetch(`http://127.0.0.1:${PORT}/api/boot`); return r.ok ? await r.json() : null; } catch { return null; } };
 const untilBoot = async (pred, ms = 30000) => { const t0 = Date.now(); for (;;) { const b = await boot(); if (b && pred(b)) return b; if (Date.now() - t0 > ms) return b; await sleep(100); } };
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
   '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => {
   try { chrome.kill('SIGKILL'); } catch { }

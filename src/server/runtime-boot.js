@@ -25,8 +25,10 @@ const TMP_ROOTS = () => [require('os').tmpdir(), '/tmp', '/var/tmp'];
 function runtimeCheckArmed({ rootDir, env = process.env, tmpRoots = TMP_ROOTS(), realpath = (p) => require('fs').promises.realpath(p).catch(() => p) } = {}) {
   if (env.NO_AUTO_UPDATE) return Promise.resolve({ armed: false, why: 'NO_AUTO_UPDATE' });
   if (env.VS_NO_REAL_CLI === '1') return Promise.resolve({ armed: false, why: 'VS_NO_REAL_CLI=1' });
-  return Promise.all([realpath(rootDir), ...tmpRoots.map((t) => realpath(t))]).then(([realRoot, ...realTmps]) => {
-    const t = SR.tmpRootUnder({ root: path.resolve(rootDir), realRoot, tmpRoots, realTmps });
+  // only ABSOLUTE temp spellings are resolved: a relative one («.», TMPDIR=.) would resolve to the hub's own folder (主开发 r528)
+  const abs = tmpRoots.filter((t) => typeof t === 'string' && path.isAbsolute(t));
+  return Promise.all([realpath(rootDir), ...abs.map((t) => realpath(t))]).then(([realRoot, ...realTmps]) => {
+    const t = SR.tmpRootUnder({ root: path.resolve(rootDir), realRoot, tmpRoots: abs, realTmps });
     return t ? { armed: false, why: `the root lies under the temp folder ${t}` } : { armed: true, why: null };
   });
 }
@@ -95,7 +97,7 @@ function boot({ rootDir, env = process.env, log = (l) => console.log(l) } = {}) 
   // B-9dd0: a suite's hub (VS_NO_REAL_CLI=1) or a root under any temp folder never runs the runtime check — it would ask
   // nodejs.org (runtimeCheckArmed: the update check's own verdict); the timer is set only when armed
   const b = booted;
-  runtimeCheckArmed({ rootDir, env }).then((v) => { if (!v.armed) return; const t = setTimeout(() => b.afterListen({ autoUpdate: true }), 20000); if (t.unref) t.unref(); }, () => { });
+  runtimeCheckArmed({ rootDir, env }).then((v) => { if (!v.armed) { log(`[runtime] the boot's runtime check is off: ${v.why}`); return; } const t = setTimeout(() => b.afterListen({ autoUpdate: true }), 20000); if (t.unref) t.unref(); }, () => { });
   return booted;
 }
 const answer = () => (booted ? booted.answer() : create({ rootDir: path.resolve(__dirname, '..', '..') }).answer());

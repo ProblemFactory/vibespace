@@ -16,7 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import net from 'node:net';
-import { ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const freePort = () => new Promise((res, rej) => { const s = net.createServer(); s.once('error', rej); s.listen(0, '127.0.0.1', () => { const p = s.address().port; s.close(() => res(p)); }); });
 const require = createRequire(import.meta.url);
@@ -47,7 +47,7 @@ const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.
 // runners have a tiny /dev/shm and chrome cold-starts slowly there (the
 // first Actions run died with a bare null-target TypeError at 10s)
 const chromeLog = [];
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu',
   '--no-sandbox', '--disable-dev-shm-usage',
   `--user-data-dir=/tmp/vs-client-boot-chrome-${process.pid}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'] });
 chrome.stderr.on('data', (d) => { if (chromeLog.length < 40) chromeLog.push(d.toString()); });

@@ -21,7 +21,7 @@ import path from 'node:path';
 import { execSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -383,7 +383,7 @@ console.log('— ⑤ the first-use dialog in a real browser');
     fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(wt, 'node_modules'));
     const srv = spawn(process.execPath, ['server.js'], { cwd: wt, stdio: 'ignore', env: { ...process.env, ...VNC_ENV, PORT: String(PORT), VIBESPACE_PASSWORD: '', OPENCODE_CMD: STUB, VIBESPACE_OPENCODE_SERVE: '' } });
     const udd = `/tmp/vs-ocp-chrome-udd-${process.pid}`;
-    const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${udd}`, 'about:blank'], { stdio: 'ignore' });
+    const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${udd}`, 'about:blank'], { stdio: 'ignore' });
     const cleanup2 = () => {
       try { chrome.kill('SIGKILL'); } catch { }
       try { srv.kill('SIGKILL'); } catch { }

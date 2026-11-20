@@ -48,7 +48,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket, WebSocketServer } = require('ws');
@@ -195,7 +195,7 @@ else await (async () => {
     const t1 = tabsOf();
     ok([c1, c2, c3, c4].every((c) => c.code === 0) && t1.map((t) => t.url).join() === 'https://a.test/,https://b.test/,https://c.test/' && t1.find((t) => t.active).url === 'https://b.test/', 'the agent\'s browser runs three pages, the second on show', JSON.stringify({ codes: [c1, c2, c3, c4].map((c) => c.code), err: [c1, c2, c3, c4].map((c) => c.stderr.slice(0, 200)), tabs: t1 }));
 
-    chromeProc = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'ignore'] });
+    chromeProc = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1280,900', 'about:blank'], { stdio: ['ignore', 'ignore', 'ignore'] });
     procs.add(chromeProc);
     let target = null; for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }
     if (!ok(!!target, 'chrome exposed a CDP page target')) return;

@@ -23,7 +23,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const express = require('express');
@@ -67,7 +67,7 @@ window.signin=()=>navigator.credentials.get({publicKey:{challenge:ch(),rpId:'loc
   const PAGE = `http://localhost:${pg.address().port}/`;
   const startChrome = async (dir, args, env) => {
     fs.mkdirSync(dir, { recursive: true });
-    kids.push(spawn(CHROME, [`--user-data-dir=${dir}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--disable-gpu', ...args, 'about:blank'], { env: { ...BASE_ENV, ...env }, stdio: 'ignore', detached: true }));
+    kids.push(spawn(CHROME, [...CHROME_QUIET, `--user-data-dir=${dir}`, '--remote-debugging-port=0', '--no-first-run', '--no-default-browser-check', '--password-store=basic', '--disable-gpu', ...args, 'about:blank'], { env: { ...BASE_ENV, ...env }, stdio: 'ignore', detached: true }));
     const pf = await until(() => { const f = path.join(dir, 'DevToolsActivePort'); return fs.existsSync(f) && fs.readFileSync(f, 'utf8').split('\n').length >= 2 && fs.readFileSync(f, 'utf8'); }, 15000);
     if (!pf) return null;
     const [port, wsPath] = pf.split('\n'); return `ws://127.0.0.1:${port}${wsPath}`;

@@ -18,7 +18,7 @@
 import fs from 'node:fs'; import path from 'node:path'; import net from 'node:net';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, scratchDir, CHROME_STORE } from './scratch.mjs';   // test-architecture: every chrome suite pre-sets 'vs-onboarded' before it navigates
+import { ONBOARDED_SOURCE, scratchDir, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';   // test-architecture: every chrome suite pre-sets 'vs-onboarded' before it navigates
 import { waitPageTarget } from './cdp-page-target.mjs';
 const ROOT = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(path.join(ROOT, 'package.json'));
@@ -36,7 +36,7 @@ window.__menus = { showContextMenu: U.showContextMenu, followContent: U.followCo
 const js = (await esb.build({ stdin: { contents: entry, resolveDir: ROOT, loader: 'js' }, bundle: true, format: 'iife', write: false, logLevel: 'silent' })).outputFiles[0].text;
 fs.writeFileSync(path.join(tmp, 'menus.html'), `<!doctype html><html data-theme="dark"><head><link rel="stylesheet" href="file://${ROOT}/public/style.css"><link rel="stylesheet" href="file://${ROOT}/public/viewers.css"></head><body style="background:#1e1e1e;margin:0"><script>${js.replace(/<\/script/g, '<\\/script')}</script></body></html>`);
 const CDP = await freePort();
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--allow-file-access-from-files', `--user-data-dir=${path.join(tmp, 'prof')}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--allow-file-access-from-files', `--user-data-dir=${path.join(tmp, 'prof')}`, 'about:blank'], { stdio: 'ignore' });
 const cleanup = () => { try { chrome.kill('SIGKILL'); } catch {} try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
 try {

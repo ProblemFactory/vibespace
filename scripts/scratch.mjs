@@ -48,6 +48,12 @@ export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]
 // the session bus's Secret Service: a LOCKED login keyring hung 14 heavy Chrome suites to their full budget on 2026-11-15.
 // scripts/chrome-store-census.mjs + test-architecture §47b: a Chrome launch without it is red.
 export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock-keychain']);
+// B-9dd0 unit 2 (主开发 2026-11-20 r198): EVERY Chrome a suite launches starts with its BACKGROUND NETWORK ROADS OFF — no
+// component / variations / safe-browsing updates, no sync, no default apps, no pings, no domain-reliability or metrics uploads
+// — so a suite's Chrome reaches only the loopback the suite drives (the hub under test, a stand-in), never Google's servers. No
+// --disable-features here: a suite that passes its own would lose one of the two lists (Chrome keeps the last switch).
+// scripts/chrome-store-census.mjs + test-architecture §47c: a Chrome launch without it is red.
+export const CHROME_QUIET = Object.freeze(['--disable-background-networking', '--disable-component-update', '--disable-sync', '--disable-default-apps', '--no-pings', '--disable-domain-reliability', '--metrics-recording-only', '--no-first-run', '--no-default-browser-check']);
 /** THE ONE RELAY of a server broadcast to a page (主开发 2026-11-20 04:54Z, lane bl-tests-chrome — 2.369.413's fourth hosted run:
  *  test-channel-window-render ⑫c walked the page's LIVE handler list and skipped the open picker's handler, right after a stale
  *  one that took itself out). Page-side JS source that hands ONE message object to every global handler over a SNAPSHOT of the

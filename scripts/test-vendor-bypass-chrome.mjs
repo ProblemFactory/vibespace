@@ -10,7 +10,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { CHROME_STORE } from './scratch.mjs';   // lane setting-doors: a suite's Chrome keeps its own store
+import { CHROME_STORE, CHROME_QUIET } from './scratch.mjs';   // lane setting-doors: a suite's Chrome keeps its own store
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
@@ -37,7 +37,7 @@ document.title = 'rendered';
 </script></body></html>`;
 const env = { PATH: process.env.PATH, HOME: path.join(tmp, 'home'), XDG_RUNTIME_DIR: path.join(tmp, 'xdg'), TMPDIR: tmp, LANG: 'C.UTF-8' };
 fs.mkdirSync(env.HOME); fs.mkdirSync(env.XDG_RUNTIME_DIR, { mode: 0o700 });
-const chrome = (args) => execFileSync(CHROME, [...CHROME_STORE, '--headless=new', '--no-first-run', '--disable-gpu', '--allow-file-access-from-files', `--user-data-dir=${path.join(tmp, 'prof')}`, '--virtual-time-budget=3000', ...args], { env, encoding: 'utf-8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] });
+const chrome = (args) => execFileSync(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', '--no-first-run', '--disable-gpu', '--allow-file-access-from-files', `--user-data-dir=${path.join(tmp, 'prof')}`, '--virtual-time-budget=3000', ...args], { env, encoding: 'utf-8', timeout: 60000, stdio: ['ignore', 'pipe', 'ignore'] });
 const cardOf = (dom, id) => { const i = dom.indexOf(`data-card="${id}"`); const j = dom.indexOf('data-card="', i + 12); return i < 0 ? '' : dom.slice(i, j < 0 ? undefined : j); };
 for (const lang of ['en', 'zh']) {
   console.log(`\n① ${lang}: the three Bash cards`);

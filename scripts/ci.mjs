@@ -2734,7 +2734,7 @@ export const egressWords = (rows) => rows.map((r) => `${r.host}:${r.port} ×${r.
 // result carries when the count itself failed
 export const EGRESS_LOST_MARK = '[egress-sampler] LOST';
 export const EGRESS_UNLOADED = '(the reader did not load)', EGRESS_LOST = '(a host line was lost)';
-export const EGRESS_NOT_WATCHED = 'not watched: a child started without the reader, a bare DNS ask, UDP';
+export const EGRESS_NOT_WATCHED = 'not watched: a child started without the reader, a bare DNS ask, UDP, a name ending «.localhost» (taken as the loopback)';
 // ONE private folder per runner process (mkdtemp: never a predictable name another user could hold), removed at its exit
 let EGRESS_DIR = null;
 const egressFileFor = (name, lane) => {

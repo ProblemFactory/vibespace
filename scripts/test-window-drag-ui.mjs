@@ -54,7 +54,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePorts, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, deadPort, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePorts, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, deadPort, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const VNC_ENV = await vncEnv(); // never the machine-global :7/5901 (test-architecture §57)
@@ -217,7 +217,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
   }
 
   // ── headless chrome, ONE page ──
-  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=1', '--disable-background-timer-throttling', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1600,900', 'about:blank'], { stdio: 'ignore' });
+  const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--force-device-scale-factor=1', '--disable-background-timer-throttling', `--user-data-dir=${path.join(ROOT, 'chrome')}`, '--window-size=1600,900', 'about:blank'], { stdio: 'ignore' });
   procs.add(chrome);
   let target = null;
   for (let i = 0; i < 120 && !target; i++) { try { target = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!target) await sleep(250); }

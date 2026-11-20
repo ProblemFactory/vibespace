@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, anchored, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, scratch, anchored, ONBOARDED_SOURCE, CHROME_QUIET } from './scratch.mjs';
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -69,7 +69,7 @@ const srv = await new Promise((r) => { const s = web.listen(PORT, '127.0.0.1', (
 const CDP_PORT = await freePort();
 const chromeDir = scratch('bpc-chrome-profile');
 const env = { ...process.env }; delete env.DBUS_SESSION_BUS_ADDRESS;   // no keyring ask (a headless Chrome waits on it at every navigation)
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--password-store=basic', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env });
+const chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--hide-scrollbars', '--password-store=basic', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env });
 const cleanup = () => { try { chrome.kill('SIGKILL'); } catch { } try { srv.close(); } catch { } for (const d of [chromeDir, root]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } };
 process.on('exit', cleanup);
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => { cleanup(); process.exit(143); });

@@ -26,7 +26,7 @@ import vm from 'node:vm';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, PRESET_KEYS, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, PRESET_KEYS, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -94,7 +94,7 @@ const pageSrv = http.createServer((req, res) => {
 const landed = [];   // the instance's hits (the browser's own tab-icon request is not the page's)
 let instHoldMs = 0;   // B-fbcc ②b: the instance answers this much later (the redirect's commit waits on it)
 const instSrv = http.createServer((req, res) => { if (req.url !== '/favicon.ico') landed.push(req.url); setTimeout(() => res.writeHead(200, { 'Content-Type': 'text/html' }).end('<p id="landed">instance</p>'), instHoldMs); }).listen(INST_PORT, '127.0.0.1');
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', `--user-data-dir=${prof}`, 'about:blank'], { stdio: 'ignore' });
 process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch {} try { fs.rmSync(prof, { recursive: true, force: true }); } catch {} });
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => process.exit(143));
 const WebSocket = require('ws');

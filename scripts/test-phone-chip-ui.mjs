@@ -20,7 +20,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -65,7 +65,7 @@ try {
 } catch (e) { console.log(`  (control: the pre-fix bytes are not readable here — ${String(e.message).slice(0, 400)})`); }
 
 const CDP = await freePort();
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--allow-file-access-from-files', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--allow-file-access-from-files', `--user-data-dir=${path.join(ROOT, 'chrome')}`, 'about:blank'], { stdio: ['ignore', 'ignore', 'pipe'], detached: true });
 // THE WHOLE CHROME, THEN THE FOLDER (lane mirror-green-ui, 2.369.205): `chrome.kill('SIGKILL')` killed the browser
 // process ALONE — its 10–11 other processes (network service, storage, renderers) outlived it for ~40 ms and the network
 // service still wrote `Default/.com.google.Chrome.*` temp files after the kill (measured), so rmSync's walk met a

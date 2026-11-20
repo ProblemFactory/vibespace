@@ -21,8 +21,9 @@ const versionInfo = { fetchedAt: 0, latest: null, commit: null };
 const CANONICAL_RAW = 'https://raw.githubusercontent.com/ProblemFactory/vibespace/master/';
 let saidOffline = false, tmpJudged = null;
 const realOr = (p) => fs.promises.realpath(p).catch(() => p);
-const tmpRootOf = () => (tmpJudged = tmpJudged || Promise.all([realOr(rootDir), ...tmpRoots.map(realOr)]).then(([r, ...real]) => {
-  const t = tmpRootUnder({ root: rootDir, realRoot: r, tmpRoots, realTmps: real });
+const absTmp = () => tmpRoots.filter((t) => typeof t === 'string' && path.isAbsolute(t));   // B-9dd0 r528: a relative spelling is never resolved (it is the hub's own folder)
+const tmpRootOf = () => (tmpJudged = tmpJudged || Promise.all([realOr(rootDir), ...absTmp().map(realOr)]).then(([r, ...real]) => {
+  const t = tmpRootUnder({ root: rootDir, realRoot: r, tmpRoots: absTmp(), realTmps: real });
   return t ? `the hub's root ${rootDir} lies under the temp folder ${t} (server-root rule 3: never a person's instance)` : null;
 }));
 async function canonicalFile(name, timeoutMs) {

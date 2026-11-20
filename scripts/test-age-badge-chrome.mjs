@@ -19,7 +19,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePort, ONBOARDED_SOURCE } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -81,7 +81,7 @@ window.ready = true;`;
       env.FONTCONFIG_FILE = fc;
     }
     const port = await freePort();
-    const c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=' + port, '--no-first-run', '--disable-gpu', '--password-store=basic', '--user-data-dir=' + path.join(home, 'p'), 'about:blank'], { stdio: 'ignore', env });
+    const c = spawn(CHROME, [...CHROME_QUIET, '--headless=new', '--remote-debugging-port=' + port, '--no-first-run', '--disable-gpu', '--password-store=basic', '--user-data-dir=' + path.join(home, 'p'), 'about:blank'], { stdio: 'ignore', env });
     chromes.push(c);
     // B-7959 (the hotfix's hosted run 44198924165, shard 5: «chrome (…) never came up», green on the retry): the poll slept ONLY
     // in its catch — on a Chrome whose DevTools endpoint answered before its page target was listed, every poll ran back to back

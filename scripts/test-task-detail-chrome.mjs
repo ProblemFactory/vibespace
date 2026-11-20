@@ -30,7 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -76,7 +76,7 @@ const srvEnv = { ...baseEnv, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, XDG
 const srvLog = [];
 const bootServer = () => { const p = spawn(process.execPath, ['server.js'], { cwd: wt, env: srvEnv, stdio: ['ignore', 'pipe', 'pipe'], detached: true }); p.stdout.on('data', (d) => srvLog.push(String(d))); p.stderr.on('data', (d) => srvLog.push(String(d))); return p; };
 let srv = bootServer();   // `let`: the held scene restarts it (cleanup ends the one running)
-const client = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1100,900', `--user-data-dir=${scratch('tgc-client')}`, 'about:blank'], { stdio: 'ignore', detached: true, env: baseEnv });
+const client = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--window-size=1100,900', `--user-data-dir=${scratch('tgc-client')}`, 'about:blank'], { stdio: 'ignore', detached: true, env: baseEnv });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;

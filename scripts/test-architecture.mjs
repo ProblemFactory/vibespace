@@ -2116,6 +2116,33 @@ await section(async () => {
   const arr = (s, re) => { const m = re.exec(s); return m ? m[1].replace(/\s/g, '') : null; };
   const prof = arr(fs.readFileSync('src/browser-attach.js', 'utf8'), /const PROFILE_STORE = Object\.freeze\((\[[^\]]*\])\)/), store = arr(fs.readFileSync('scripts/scratch.mjs', 'utf8'), /^export const CHROME_STORE = Object\.freeze\((\[[^\]]*\])\)/m);
   ok(!!store && store === prof && /'--password-store=basic'/.test(store), `§47b scripts/scratch.mjs CHROME_STORE is the product's src/browser-attach.js PROFILE_STORE (${store})`);
+  // 47c. B-9dd0 unit 2 (主开发 2026-11-20 r198): every Chrome a suite launches starts with its BACKGROUND NETWORK ROADS OFF —
+  //     scripts/scratch.mjs CHROME_QUIET (no component / variations / safe-browsing updates, no sync, no default apps, no pings, no
+  //     domain-reliability or metrics uploads), read by the SAME census (its `loud` list): a suite's Chrome reaches only the
+  //     loopback the suite drives, never Google's servers. The heavy tier's own hosted run proves the launches still work.
+  {
+    ok(c.loud.length === 0, `§47c every Chrome a suite launches carries CHROME_QUIET — its background network roads off (${c.launches} launches)${c.loud.length ? ' — loud: ' + c.loud.map((l) => `${l.file}:${l.line}`).join(', ') : ''}`);
+    const quiet = (/^export const CHROME_QUIET = Object\.freeze\((\[[^\]]*\])\)/m.exec(fs.readFileSync('scripts/scratch.mjs', 'utf8')) || [])[1] || '';
+    ok(/'--disable-background-networking'/.test(quiet) && /'--disable-component-update'/.test(quiet) && /'--disable-sync'/.test(quiet) && !/--disable-features/.test(quiet),
+      `§47c scripts/scratch.mjs CHROME_QUIET turns the background roads off, and names no --disable-features (a suite's own list would lose to it) — ${quiet}`);
+    const Lq = (src) => CS.launchesOf(src, { acorn }).launches[0] || {};
+    const loudP = Lq("const c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");
+    const spreadP = Lq("const c = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");
+    const literalP = Lq("const c = spawn(CHROME, ['--disable-background-networking', '--password-store=basic', '--headless=new', '--remote-debugging-port=0']);\n");
+    ok(loudP.quiet === false && spreadP.quiet === true && literalP.quiet === true, '§47c CONTROL: a planted launch without CHROME_QUIET reads LOUD; with its spread, or the background-networking switch as a literal, it reads quiet', JSON.stringify({ loud: loudP.quiet, spread: spreadP.quiet, literal: literalP.quiet }));
+    // r528 MUST 1: a WRAPPED launch (the program is a shell, a limit wrapper, nice, env…; Chrome is an argv element) is quiet only with the
+    // switches AFTER Chrome's own element — before it they are the wrapper's options (/bin/sh refuses them and Chrome never starts)
+    const wrapLoud = Lq("const c = spawn('/bin/sh', [...CHROME_QUIET, '-c', 'ulimit -d 4194304 && exec \"$0\" \"$@\"', CHROME, '--headless=new', '--remote-debugging-port=0']);\n");
+    const wrapQuiet = Lq("const c = spawn('/bin/sh', ['-c', 'ulimit -d 4194304 && exec \"$0\" \"$@\"', CHROME, ...CHROME_QUIET, '--headless=new', '--remote-debugging-port=0']);\n");
+    console.log(`  · §47c the wrapped launches of the tree (${c.wrapped.length}): ${c.wrapped.map((w) => `${w.file}:${w.line} — Chrome at element ${w.at}, the spread at ${w.quietAt} (${w.quiet ? 'after: quiet' : 'NOT after: loud'})`).join('; ') || 'none'}`);
+    ok(wrapLoud.wrapped && wrapLoud.wrapped.at === 3 && wrapLoud.quiet === false && wrapQuiet.wrapped && wrapQuiet.quiet === true && c.wrapped.every((w) => w.quiet && w.quietAt > w.at),
+      '§47c r528 CONTROL: a launch through /bin/sh with the spread BEFORE Chrome\'s element reads LOUD, after it quiet; every wrapped launch of the tree has its spread after Chrome', JSON.stringify({ loud: wrapLoud.wrapped && wrapLoud.quiet, quiet: wrapQuiet.quiet, tree: c.wrapped }));
+    // r528 MUST 2: the EXEMPT row is the store's only — its file is still read for the quiet switches (planted without its spread: loud)
+    const EXF = Object.keys(CS.EXEMPT)[0], exSrc = fs.readFileSync(EXF, 'utf8');
+    const exLoud = CS.census(process.cwd(), { acorn, patch: { [EXF]: exSrc.replace('spawn(CHROME, [...CHROME_QUIET, ', 'spawn(CHROME, [') } });
+    ok(exSrc.includes('spawn(CHROME, [...CHROME_QUIET, ') && exLoud.loud.some((l) => l.file === EXF) && !c.loud.some((l) => l.file === EXF),
+      `§47c r528 CONTROL: the EXEMPT file (${EXF}) is read for the quiet switches too — without its spread it reads LOUD; at the tip it carries it`, JSON.stringify(exLoud.loud.filter((l) => l.file === EXF)));
+  }
   const L = (src) => CS.launchesOf(src, { acorn });
   const planted = L("import { scratch } from './scratch.mjs';\nconst c = spawn(CHROME, ['--headless=new', '--remote-debugging-port=0']);\n");
   const carried = L("import { CHROME_STORE } from './scratch.mjs';\nconst c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--remote-debugging-port=0']);\n");

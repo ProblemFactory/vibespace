@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { ONBOARDED_SOURCE, scratchDir, CHROME_STORE } from './scratch.mjs';
+import { ONBOARDED_SOURCE, scratchDir, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const require = createRequire(import.meta.url);
@@ -76,7 +76,7 @@ const srv = http.createServer((q, r) => {
   if (pages[u.pathname]) { r.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); r.end(pages[u.pathname]); return; }
   r.writeHead(404); r.end('{}');
 }).listen(port, '127.0.0.1');
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--no-sandbox', '--disable-gpu',
   '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${tmp}/chrome`, 'about:blank'], { stdio: 'ignore' });
 let ws = null;
 try {

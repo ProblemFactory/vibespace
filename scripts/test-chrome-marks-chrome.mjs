@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -89,7 +89,7 @@ async function launch(face, cdpPort) {
     const fc = path.join(prof, 'fonts.conf'); fs.writeFileSync(fc, `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>/usr/share/fonts/truetype/dejavu</dir><dir>/usr/share/fonts/truetype/liberation</dir><dir>/usr/share/fonts/opentype/noto</dir><dir>${emoji}</dir><cachedir>${path.join(prof, 'fc')}</cachedir><include ignore_missing="yes">/etc/fonts/conf.d</include></fontconfig>`);
     env.FONTCONFIG_FILE = fc;
   }
-  const c = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--password-store=basic',
+  const c = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--password-store=basic',
     '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${path.join(prof, 'p')}`, 'about:blank'], { stdio: 'ignore', env });
   chromes.push(c);
   let target = null;

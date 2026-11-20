@@ -22,7 +22,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -152,7 +152,7 @@ else await (async () => {
   const openChrome = async (leg) => {
     const CDP = await freePort();
     const xdg = fs.mkdtempSync(path.join(ROOT, 'xdg-')); fs.chmodSync(xdg, 0o700); // a PRIVATE XDG_RUNTIME_DIR
-    const ch = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', '--window-size=1571,905', `--user-data-dir=${path.join(ROOT, 'chrome-' + leg)}`, 'about:blank'], { stdio: 'ignore', env: { PATH: '/usr/bin:/bin', HOME: fakeHome, XDG_RUNTIME_DIR: xdg } });
+    const ch = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', '--window-size=1571,905', `--user-data-dir=${path.join(ROOT, 'chrome-' + leg)}`, 'about:blank'], { stdio: 'ignore', env: { PATH: '/usr/bin:/bin', HOME: fakeHome, XDG_RUNTIME_DIR: xdg } });
     procs.add(ch);
     const pages = async () => { try { return (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).filter((t) => t.type === 'page'); } catch { return []; } };
     let target = null; for (let i = 0; i < 120 && !target; i++) { target = (await pages())[0]; if (!target) await sleep(250); }

@@ -116,7 +116,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { writeHugeTranscript } from './huge-transcript-fixture.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -358,7 +358,7 @@ WS.prototype.send = function (data, ...a) { const r = sd.call(this, data, ...a);
   const onOut = (d) => { journal = (journal + d).slice(-20000); if (!cutSeenAt && /a client stopped draining/.test(String(d))) cutSeenAt = Date.now(); };
   srv.stdout.on('data', onOut); srv.stderr.on('data', onOut);
   const chromeDir = scratch(`rstorm-${variant}-chrome`); dirs.add(chromeDir);
-  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox',
+  const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox',
     '--disable-dev-shm-usage', '--window-size=1500,1050', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore' });
   procs.add(chrome);
   const up = await until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000);

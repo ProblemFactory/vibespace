@@ -40,7 +40,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
@@ -253,7 +253,7 @@ catch (e) { ok(false, 'the control bundle builds', String(e.stderr || e.message)
 fs.writeFileSync(path.join(D, 't-old.html'), fs.readFileSync(path.join(D, 't.html'), 'utf-8').replace(path.join(D, 'b.js'), path.join(D, 'b-old.js')));
 
 const CDP_PORT = await freePort();
-chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox',
+chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox',
   '--disable-dev-shm-usage', '--hide-scrollbars', '--force-device-scale-factor=1', '--window-size=900,1400',
   '--allow-file-access-from-files', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
 const WebSocket = require('ws');

@@ -21,7 +21,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
 const VNC_ENV = await vncEnv();
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -111,7 +111,7 @@ try {
       const fc = path.join(prof, 'fonts.conf'); fs.writeFileSync(fc, `<?xml version="1.0"?><!DOCTYPE fontconfig SYSTEM "fonts.dtd"><fontconfig><dir>/usr/share/fonts/truetype/dejavu</dir><dir>/usr/share/fonts/truetype/liberation</dir><dir>/usr/share/fonts/opentype/noto</dir><dir>${emoji}</dir><cachedir>${path.join(prof, 'fc')}</cachedir><include ignore_missing="yes">/etc/fonts/conf.d</include></fontconfig>`);
       env.FONTCONFIG_FILE = fc;
     }
-    const c = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--disable-background-timer-throttling', '--window-size=1200,800', `--user-data-dir=${path.join(prof, 'p')}`, 'about:blank'], { stdio: 'ignore', env });
+    const c = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${cdpPort}`, '--no-first-run', '--disable-gpu', '--password-store=basic', '--disable-background-timer-throttling', '--window-size=1200,800', `--user-data-dir=${path.join(prof, 'p')}`, 'about:blank'], { stdio: 'ignore', env });
     chromes.push(c);
     const target = await until(async () => (await (await fetch(`http://127.0.0.1:${cdpPort}/json`)).json()).find((t) => t.type === 'page'), 20000, 250);
     if (!target) throw new Error(`chrome (${face}) never exposed a page`);

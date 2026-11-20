@@ -35,7 +35,7 @@ import net from 'node:net';
 import { spawn, execFile, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch, ONBOARDED_SOURCE, CHROME_STORE } from './scratch.mjs';
+import { scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -128,7 +128,7 @@ const QUIET = ['--disable-background-networking', '--disable-component-update', 
 // ── a headless Chrome over raw CDP ──
 async function chrome(argv, tag) {
   const ud = argv.find((a) => a.startsWith('--user-data-dir=')).slice('--user-data-dir='.length);
-  const c = spawn(CHROME, [...CHROME_STORE, '--headless=new', '--no-sandbox', '--disable-gpu', ...QUIET, ...argv.filter((a) => a !== '--ozone-platform=x11')], { stdio: ['ignore', 'ignore', 'pipe'], detached: false });
+  const c = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', '--no-sandbox', '--disable-gpu', ...QUIET, ...argv.filter((a) => a !== '--ozone-platform=x11')], { stdio: ['ignore', 'ignore', 'pipe'], detached: false });
   kids.add(c); roots.add(c.pid);
   let err = ''; c.stderr.on('data', (d) => { err += d; if (err.length > 20000) err = err.slice(-10000); });
   const pf = path.join(ud, 'DevToolsActivePort');

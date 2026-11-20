@@ -20,7 +20,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, withoutVendorKeys } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, withoutVendorKeys, CHROME_QUIET } from './scratch.mjs';
 import { mintRoot, startHub } from './hub-boot.mjs';
 
 const require = createRequire(import.meta.url);
@@ -61,7 +61,7 @@ check(`the hub answered within the boot budget (${booted ? 'yes' : 'NO'})`, boot
 if (!booted) { console.log(hub.log().slice(-2000)); console.log('FAILED'); process.exit(1); }
 // the suite's own Chrome: no keyring (--password-store=basic), no session bus (a locked keyring hangs a headless navigation)
 const { DBUS_SESSION_BUS_ADDRESS: _bus, ...chromeEnv } = process.env;
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--password-store=basic', '--disable-background-timer-throttling', '--window-size=1600,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
+const chrome = spawn(CHROME, [...CHROME_QUIET, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--password-store=basic', '--disable-background-timer-throttling', '--window-size=1600,1000', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: chromeEnv });
 process.on('exit', () => { try { chrome.kill('SIGKILL'); } catch { } });   // the helper leaves a suite's own Chrome alone (it is not rooted by HOME)
 
 // ── raw CDP ──

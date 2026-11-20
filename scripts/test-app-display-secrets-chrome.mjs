@@ -12,6 +12,7 @@
 import { createRequire } from 'module';
 import fs from 'fs'; import os from 'os'; import path from 'path'; import http from 'http';
 import { spawn, spawnSync } from 'child_process';
+import { CHROME_QUIET } from './scratch.mjs';   // B-9dd0 unit 2: a suite's Chrome starts with its background network roads off
 const require = createRequire(import.meta.url);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const M = require(path.join(ROOT, 'src/desktop-apps.js')), D = require(path.join(ROOT, 'src/desktop-display.js'));
@@ -65,7 +66,7 @@ async function cdp(prof) { // DevToolsActivePort → the browser target's websoc
 let chromeChild = null; // lane display-secret-fd: the running app, for the environ census
 async function chromeRun(appDir, plan, prof, fn) {
   try { fs.unlinkSync(path.join(prof, 'DevToolsActivePort')); } catch { /* first run */ }
-  const c = spawn(CHROME, [`--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', '--disable-features=ChromeWhatsNewUI', 'about:blank'], { env: { ...env, DISPLAY: DISP, DBUS_SESSION_BUS_ADDRESS: plan.address, XDG_CURRENT_DESKTOP: 'GNOME' }, stdio: 'ignore' });
+  const c = spawn(CHROME, [...CHROME_QUIET, `--user-data-dir=${prof}`, '--no-first-run', '--no-default-browser-check', '--remote-debugging-port=0', '--disable-features=ChromeWhatsNewUI', 'about:blank'], { env: { ...env, DISPLAY: DISP, DBUS_SESSION_BUS_ADDRESS: plan.address, XDG_CURRENT_DESKTOP: 'GNOME' }, stdio: 'ignore' });
   kids.push(c); chromeChild = c;
   const b = await cdp(prof);
   const out = await fn(b);
@@ -98,7 +99,7 @@ const visit = async (b) => { const { targetId } = (await b.send('Target.createTa
 try {
   if (!CHROME) throw new Error('no Chrome on this machine');
   const X = spawn('Xvfb', [DISP, '-nolisten', 'tcp', '-screen', '0', '1280x800x24'], { stdio: 'ignore' }); kids.push(X); XVFB = X; await sleep(600);
-  console.log(`① with the Secret Service (Chrome ${spawnSync(CHROME, ['--version'], { encoding: 'utf8' }).stdout.trim()}, ${DISP})`);
+  console.log(`① with the Secret Service (Chrome ${spawnSync(CHROME, [...CHROME_QUIET, '--version'], { encoding: 'utf8' }).stdout.trim()}, ${DISP})`);
   const appOn = path.join(tmp, 'data', 'desktop-apps', 'da-chrome1'); fs.mkdirSync(appOn, { recursive: true });
   const profOn = path.join(tmp, 'prof-on');
   let b1 = await bus(appOn, 'on');

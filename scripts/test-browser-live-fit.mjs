@@ -45,7 +45,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -146,7 +146,7 @@ await (async () => {
     return { sessionId: c.sessionId, name, pairs, vb };
   }
   // ── the client chrome: one browser, a DESKTOP page and (later) a PHONE page ──
-  const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'client')}`, '--window-size=1920,1080', 'about:blank'], { stdio: 'ignore' });
+  const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', `--user-data-dir=${path.join(ROOT, 'client')}`, '--window-size=1920,1080', 'about:blank'], { stdio: 'ignore' });
   procs.add(chrome);
   let first = null;
   for (let i = 0; i < 120 && !first; i++) { try { first = (await (await fetch(`http://127.0.0.1:${CDP}/json`)).json()).find((t) => t.type === 'page'); } catch { } if (!first) await sleep(250); }
