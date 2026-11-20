@@ -290,10 +290,10 @@ console.log('⑤ negative controls');
   ok('the credential doors\' refusals are worded by ONE page function (the reveal, the export and the import dialogs): each code its words, anything else none',
     /^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_person_only' }) || '') && /^Only the person, on this VibeSpace page/.test(CW.credentialDoorWords({ code: 'credential_page_only' }) || '') && CW.credentialDoorWords({ code: 'x' }) === null
     // the export's and the import's refusal lines AS RULED (主开发 08:55Z — seamed with the release's Task Groups cure by int361): the
-    // release's TASK_GROUPS_UNREAD branch first, then credentialDoorWords(d), then d.error, then the fallback — each branch named, none
+    // release's TASK_GROUPS_UNREAD branch first, then a store hold's words (heldWordsOf — test-hosts-held-census §8), then credentialDoorWords(d), then d.error, then the fallback — each branch named, none
     // optional, each line once
-    && APP2.split("err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t(\"Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.\") : (credentialDoorWords(d) || d.error || t('Export failed'));").length === 2
-    && APP2.split("err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t(\"Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.\") : (credentialDoorWords(d) || d.error || t('Import failed'));").length === 2
+    && APP2.split("err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t(\"Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.\") : (heldWordsOf(d) || credentialDoorWords(d) || d.error || t('Export failed'));").length === 2
+    && APP2.split("err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t(\"Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.\") : (heldWordsOf(d) || credentialDoorWords(d) || d.error || t('Import failed'));").length === 2
     && read('src/lib/vault-reveal.js').includes('const cw = credentialDoorWords(r);'));
   const OTS = read('src/lib/account-tails.js');
   const SAME = '  if (!inflight && same()) return Promise.resolve(last);\n';
