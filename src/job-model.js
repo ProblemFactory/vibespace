@@ -443,6 +443,36 @@ function memoryMbOf(job, { setting, cluster, instanceMb, instanceOf } = {}) {
   if (!cap || (asked.mb && asked.mb <= cap.capMb)) return asked;
   return { mb: cap.capMb, source: asked.source, askedMb: asked.mb, cap: { limitMb: cap.limitMb, hubMb: cap.hubMb, ...(instanceOf ? { of: instanceOf } : {}) } };
 }
+// B-d73c: A JOB'S NODE HEAP FOLLOWS THE MEMORY IT NAMES (the coordinator's ruling of 2026-11-20, shape A + B's sentence).
+// MEASURED in real jobs through the kit (probe-job-heap, 2026-11-20): Node reads the job's OWN bound as its constrained memory (a
+// scope's memory.max on the cgroup rung, RLIMIT_DATA on the rlimit rung), and V8 caps its DEFAULT old space at 2 GB whenever
+// that memory is under 15 GB (4 GB from 15 GB on) — so a job given 4G or 8G got a 2 240 MB heap and a build died at it (rc 134).
+// THE RULE: a job that NAMES its memory (its own --memory / Memory bound: the ladder's source «job») is handed
+// `--max-old-space-size=<75 % of that bound>` beside its own NODE_OPTIONS — unless those already name a heap (the job's own
+// wins). A job that names none keeps TODAY's behaviour exactly (no flag: no default changed for every job without the owner's
+// word); its card says what Node's default is under that bound and how to use the bound. Unbounded (0): nothing is added.
+const NODE_HEAP = Object.freeze({ share: 0.75, bigMemoryMb: 15 * 1024, smallOldMb: 2048, bigOldMb: 4096 });
+const NODE_HEAP_FLAG = /(?:^|\s)--max[-_]old[-_]space[-_]size(?:=|\s+)(\d+)/;
+/** the heap a job's Node gets: { by: 'own' | 'bound' | 'node-default' | 'none', mb } — `own` = its NODE_OPTIONS name one;
+ *  `bound` = it named its memory (75 % of it); `node-default` = V8's own default under the bound (half of it, at most 2 GB under
+ *  15 GB of memory, 4 GB from 15 GB); `none` = unbounded (Node's default for the machine) */
+function nodeHeapOf({ boundMb, source, nodeOptions } = {}) {
+  const own = typeof nodeOptions === 'string' ? NODE_HEAP_FLAG.exec(nodeOptions) : null;
+  if (own) return { by: 'own', mb: Number(own[1]) };
+  const b = Math.floor(Number(boundMb) || 0);
+  if (b <= 0) return { by: 'none', mb: null };
+  if (source === 'job') return { by: 'bound', mb: Math.floor(b * NODE_HEAP.share) };
+  return { by: 'node-default', mb: Math.min(Math.floor(b / 2), b >= NODE_HEAP.bigMemoryMb ? NODE_HEAP.bigOldMb : NODE_HEAP.smallOldMb) };
+}
+/** the job's OWN env with the heap flag laid BESIDE its own NODE_OPTIONS when (and only when) the rule hands one — every other
+ *  key untouched; the same object's contents otherwise (a job that names no memory hands on NO flag) */
+function withNodeHeap(cmdEnv, heap) {
+  const env = { ...(cmdEnv && typeof cmdEnv === 'object' ? cmdEnv : {}) };
+  if (!heap || heap.by !== 'bound' || !heap.mb) return env;
+  const own = typeof env.NODE_OPTIONS === 'string' ? env.NODE_OPTIONS.trim() : '';
+  env.NODE_OPTIONS = (own ? own + ' ' : '') + `--max-old-space-size=${heap.mb}`;
+  return env;
+}
 /** WHICH LIMIT capped (round 4), by the cgroup that holds it: «/» — the root a container sees (a pod's cgroup namespace) — is
  *  the instance; user.slice / user-<uid>.slice the user slice; any other cgroup its own name (the hub's unit, a slice) */
 function limitHolder(cg) {
@@ -1277,6 +1307,7 @@ module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY,
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
+  NODE_HEAP, nodeHeapOf, withNodeHeap,   // B-d73c
   MEMORY, MEMORY_CAUSES, RUN_CAUSES, awayFactsOf, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftRecordFault, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,

@@ -1129,6 +1129,8 @@ const PRINTS = {
     'r.renamed': `${V}:a flag`, 'r.survivalNote': `${V}:the runtime note`, 'r.text': `${V}:the manual text (docs)`, 'res._neterr': `${V}:node's fetch error text`,
     'run.cause': `${V}:the run's cause`, 'run.exit': `${V}:an exit code`,
     // lane jobs-memory-bound: memLine(j) — the job's memory bound, the rung its last run measured, the park; and the `memory` verb's echo
+    // B-d73c: nodeHeapLine(j) — the heap the job's Node gets (the hub's src/job-model.js nodeHeapOf: an enum and a number of MB)
+    'j.nodeHeap': `${V}:the record {by, mb} the hub computed (nodeHeapOf)`, 'nh.mb': `${V}:a number of MB`,
     'j.memoryMb': `${V}:a number of MB`, 'j.memorySource': `${V}:an enum (job | setting | cluster | default)`, 'j.memoryBound': `${V}:the rung record {mb, by, why} the wrapper measured`, 'b.by': `${V}:an enum (cgroup | rlimit-data | none)`,
     'b.why': `${V}:the wrapper's own sentence (a fixed vocabulary + the scope's unit name VibeSpace built)`, 'b.mb': `${V}:a number of MB`, 'j.parkedFor': `${V}:an enum`, 'j.cronParent': `${V}:a job id`, 'r.memoryMb': `${V}:a number of MB`, 'r.memorySource': `${V}:an enum`,
     // acceptance round 3: THE INSTANCE'S CAP — the asked bound beside the effective one, and the cap {limitMb, hubMb} the hub read off its own cgroup

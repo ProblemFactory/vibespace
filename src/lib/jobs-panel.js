@@ -15,7 +15,7 @@ import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
 import { nameOrGone } from './plain-words.js'; // lane ui-plain-words M2a: a gone conversation / group is named in words, its id in the tooltip
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, runLeftWords } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, nodeHeapWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', waiting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -429,7 +429,10 @@ async function expandDetail(app, el, j, refresh) {
   // the instance’s limit 8 GB»)
   const memEff = document.createElement('span'); memEff.className = 'jobs-memory-fact';
   memEff.textContent = memoryEffectiveWords(job, t);
-  memRow.append(memLbl, memIn, memSet, memFact, memEff);
+  // B-d73c: the heap the job's Node gets — 75% of a bound the job names, its own NODE_OPTIONS' heap, or Node's own default (said)
+  const memHeap = document.createElement('span'); memHeap.className = 'jobs-memory-fact jobs-memory-heap';
+  memHeap.textContent = nodeHeapWords(job, t);
+  memRow.append(memLbl, memIn, memSet, memFact, memEff, memHeap);
   d.appendChild(memRow);
   // the manager design's piece 7: THE PERSON'S GRANT — this job or schedule may resume its conversation after that conversation
   // was ended on purpose (default no; said once here and it holds). Written through the person's own door (a press on this

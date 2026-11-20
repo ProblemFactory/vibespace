@@ -379,7 +379,7 @@ PIM.membersOf = (q = {}, o) => { const id = String(q.mark || '').split('=')[1]; 
 const legs = [];
 const leg = (title, body) => legs.push({ title, body, rows: [] });
 // the CLI's own memLine (data/bin/vibespace-job — a file that ships alone): its lines, run over the engine's snapshot
-const CLI = (() => { try { const src = read('data/bin/vibespace-job'), pick = (re) => (re.exec(src) || [''])[0]; return new Function(`${pick(/^const sizeWords = .*$/m)}\n${pick(/^const capWords = .*$/m)}\n${pick(/^function memLine\(j\) \{[\s\S]*?\n\}/m)}\nreturn { memLine };`)(); } catch { return { memLine: () => '' }; } })();
+const CLI = (() => { try { const src = read('data/bin/vibespace-job'), pick = (re) => (re.exec(src) || [''])[0]; return new Function(`${pick(/^const sizeWords = .*$/m)}\n${pick(/^const capWords = .*$/m)}\n${pick(/^function memLine\(j\) \{[\s\S]*?\n\}/m)}\n${pick(/^function nodeHeapLine\(j\) \{[\s\S]*?\n\}/m)}\nreturn { memLine };`)(); } catch { return { memLine: () => '' }; } })();
 
 leg('§3 IN-PROCESS ⑩ ONE JUDGE PER RUN END — five overlapping ticks while a scope\'s read is slow judge one ended run ONCE (round 4: once per tick — parked after a single OOM)', async (ok) => {
   // the reviewer's df2 repro, in-process and short: a service run whose wrapper is gone, its exit record oom-bound ONCE, its
@@ -839,7 +839,7 @@ try {
     ok(/memIn\.value = memoryFieldValue\(job\);/.test(panel) && /const value = memorySetValue\(job, memIn\.value\);\s*\n\s*if \(value === null\)/.test(panel), 'the properties field shows the stored bound exactly, and an unchanged Set posts nothing');
     ok(/capped by \$\{capWords\(c\)\} \(asked \$\{asked\}; the hub keeps/.test(cli) && /capped by \$\{capWords\(r\.memoryCap\)\} \(asked/.test(cli) && /r2\.memoryCap\?\.limitMb \? ' · ' \+ memoryCapWords\(r2\.memoryCap, t\)/.test(panel) && /memoryAskedMb: r\.memoryAskedMb \?\? null, memoryCap: r\.memoryCap \|\| null/.test(wiring),
       'the cap is said where the job is, and WHICH limit: `show` / `poll` (asked, effective, the hub\'s share), `memory <id>`, the properties toast, the API\'s runs');
-    ok(/memEff\.textContent = memoryEffectiveWords\(job, t\);/.test(panel) && /memRow\.append\(memLbl, memIn, memSet, memFact, memEff\);/.test(panel), 'the properties: the effective bound and its limit stand BESIDE the stored value, read-only');
+    ok(/memEff\.textContent = memoryEffectiveWords\(job, t\);/.test(panel) && /memRow\.append\(memLbl, memIn, memSet, memFact, memEff, memHeap\);/.test(panel), 'the properties: the effective bound and its limit stand BESIDE the stored value, read-only');
     // a stop ends the JOB: the gate execs it on every rung (the < 253 keeper sits beside it, never its parent) and nothing but
     // its own rung and child is read by a proof's timer
     ok(/const GATE_KEEP = 'read -r go <&3 \|\| exit 125; \( \(trap "" TERM INT HUP; read -r ack <&3\) <\/dev\/null >\/dev\/null 2>&1 & echo "keeper \$!" >&3 \); exec "\$@" 3<&-';/.test(WRAPPER_SRC) && /const isKeeper = \(pid\) => !!keeper && Number\(pid\) === keeper\.pid/.test(WRAPPER_SRC) && !/\/cmdline`/.test(WRAPPER_SRC.replace(/\nfunction hubShaped\(pid\) \{[\s\S]*?\n\}\n/, '\n')) && (WRAPPER_SRC.match(/\/cmdline`/g) || []).length === 1 && !/GATE_HOLD/.test(WRAPPER_SRC) && /r\.timer = setTimeout\(\(\) => prove\(r, c, deadline\), 10\)/.test(WRAPPER_SRC) && !/setTimeout\(\(\) => prove\(deadline\)/.test(WRAPPER_SRC),

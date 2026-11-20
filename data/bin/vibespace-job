@@ -123,7 +123,17 @@ function memLine(j) {
   const end = run.cause === 'oom-bound' ? ` · its last run was stopped: used more than ${sizeWords((b && b.mb) || j.memoryMb)}` : run.cause === 'oom' ? ' · its last run was killed: the instance ran out of memory' : '';
   const park = j.parkedFor === 'memory' ? ` · PARKED (out of memory twice): raise it (vibespace-job memory ${j.cronParent || j.id} 8G) or fix the job, then vibespace-job start ${j.cronParent || j.id}`
     : j.oomEnds ? ` · ${j.oomEnds} out-of-memory end in a row (2 park it)` : '';
-  return head + rung + end + park;
+  return head + rung + end + park + nodeHeapLine(j);
+}
+// B-d73c: the heap the job's Node gets — 75 % of the memory it names (handed as --max-old-space-size beside its own NODE_OPTIONS),
+// its own NODE_OPTIONS' heap, or Node's own default under the bound, with the door that changes it (the hub's facts, worded here)
+function nodeHeapLine(j) {
+  const nh = j.nodeHeap;
+  if (!nh || !nh.mb) return '';
+  if (nh.by === 'own') return ` · Node heap ${sizeWords(nh.mb)} (the job's own NODE_OPTIONS)`;
+  if (nh.by === 'bound') return ` · Node heap ${sizeWords(nh.mb)} (75 % of the memory it names — handed as --max-old-space-size beside its NODE_OPTIONS)`;
+  if (nh.by === 'node-default') return ` · Node's own default heap under this bound: about ${sizeWords(nh.mb)} — name the memory (vibespace-job memory ${j.cronParent || j.id} 8G) to give Node 75 % of it, or set NODE_OPTIONS=--max-old-space-size=N`;
+  return '';
 }
 // lane vault-job-road: the job's vault values by NAME and REFERENCE (never a value — the hub hands each on fd $NAME_FD at every
 // start) and what a waiting job waits for

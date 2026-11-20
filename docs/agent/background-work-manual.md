@@ -356,6 +356,15 @@ it, a limit on the user slice does (`show` names which).
   died that way counts too when the instance's own OOM record shows it (a restart for another reason never counts).
 - Under RLIMIT_DATA node counts ~600 MB of its own reservations against the bound — under ~512 MB node cannot
   even start. Give a node job at least 1G. A size under 256M is refused by name.
+- **Node's heap follows the memory you NAME.**
+  - Node sizes its default heap from the memory it is given: half of it, at most 2 GB under 15 GB of memory (4 GB from
+    15 GB on). So inside a job bounded at 4 GB or 8 GB, Node's own default heap is about 2 GB, and a big build dies at it
+    («JavaScript heap out of memory»).
+  - A job that names its memory (`--memory 8G` at create, or `vibespace-job memory <id> 8G`) is handed
+    `--max-old-space-size=<75 % of it>` beside its own `NODE_OPTIONS`: 8G gives Node 6 GB of heap.
+  - A heap its own `NODE_OPTIONS` name wins, and nothing else in its environment changes.
+  - A job that names no memory keeps Node's own default. `show` says which: «Node heap 6 GB (75 % of the memory it
+    names …)», or «Node's own default heap under this bound: about 2 GB — name the memory … to give Node 75 % of it».
 
 ## 8. Permissions model (why you can't see some jobs)
 

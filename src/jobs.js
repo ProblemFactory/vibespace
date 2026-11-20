@@ -2807,7 +2807,9 @@ class JobManager {
     // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
-      env: jobEnv({ ...(job.cmd.env || {}), ...(vj ? VJ.envOf(vj.plan) : {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:${runTs}`, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
+      // B-d73c: a job that NAMES its memory hands its Node a heap that follows it (75 %), beside its own NODE_OPTIONS — never over a
+      // heap its own options name; a job that names none hands on no flag (today's behaviour exactly)
+      env: jobEnv({ ...M.withNodeHeap(job.cmd.env, M.nodeHeapOf({ boundMb: hub.mb, source: hub.source, nodeOptions: (job.cmd.env || {}).NODE_OPTIONS })), ...(vj ? VJ.envOf(vj.plan) : {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:${runTs}`, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
       kind: job.kind === 'service' ? 'service' : 'task', // round 5 (the ruling): a service keeps what its run leaves running, a task's are stopped
       // round 4: the ASKED bound rides too — the cgroup rung caps it by what contains ITS scope, read once the scope exists
@@ -4473,7 +4475,7 @@ class JobManager {
       catchUp: job.catchUp || null, singleInstance: job.singleInstance !== false,
       // lane jobs-memory-bound: THE LADDER's answer now (a cron's: its task's), the rung its latest run measured, the park's
       // reason and the out-of-memory ends counted toward it
-      ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null }; })(), // round 4: the NEXT run's (a live run's own rides its memoryBound.cap)
+      ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); const own = job.kind === 'cron' && job.action && job.action.task ? job.action.task : job; return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null, nodeHeap: M.nodeHeapOf({ boundMb: m.mb, source: m.source, nodeOptions: ((own.cmd || {}).env || {}).NODE_OPTIONS }) }; })(), // B-d73c: the heap its Node gets (the card's words) · round 4: the NEXT run's (a live run's own rides its memoryBound.cap)
       memoryBound: run && run.memoryBound ? { ...run.memoryBound, words: M.boundWords(run.memoryBound) } : null, oomEnds: (job.supervise && job.supervise.oomEnds) || 0, // round 5: the record's words (an unbounded scope is never «0 MB»)
       parkedFor: (job.supervise && job.supervise.parkedAt && job.supervise.parkedFor) || null,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '', ...(run.left ? { left: { n: run.left.n, kept: !!run.left.kept, force: !!run.left.force, cleared: run.left.cleared || 0, gone: run.left.gone || 0, escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {}), ...(M.runEndWords(run) ? { endWords: M.runEndWords(run) } : {}) } : null, // round 5: what it left running / the kill we made

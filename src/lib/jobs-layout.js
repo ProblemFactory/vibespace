@@ -12,7 +12,7 @@
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
  *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
- *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · runLeftWords(run, t)
+ *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · nodeHeapWords(job, t) · runLeftWords(run, t)
  *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound);
  *                                       what a run's job left running (round 5)
  *
@@ -241,6 +241,18 @@ export function memoryEffectiveWords(j, t) {
   const size = memoryWords(c.limitMb);
   const lim = !c.of || c.of === 'instance' ? t('the instance’s limit {size}', { size }) : c.of === 'user slice' ? t('the user slice’s limit {size}', { size }) : t('{name}’s limit {size}', { name: c.of, size });
   return `${t('effective {size}', { size: memoryWords(j.memoryMb) })} · ${lim}`;
+}
+/** B-d73c: THE HEAP A JOB'S NODE GETS, beside the Memory bound (the snapshot's `nodeHeap`, src/job-model.js nodeHeapOf): a job
+ *  that names its memory gives Node 75% of it; its own NODE_OPTIONS naming a heap win; a job that names none keeps Node's own
+ *  default — said, with the door that changes it (this very field). '' when unbounded or from an older hub */
+export function nodeHeapWords(j, t) {
+  const h = j && j.nodeHeap;
+  if (!h || !h.mb) return '';
+  const size = memoryWords(h.mb);
+  if (h.by === 'own') return t('Node heap {size} — set by the job’s own options', { size });
+  if (h.by === 'bound') return t('Node heap {size} — 75% of the memory this job names', { size });
+  if (h.by === 'node-default') return t('Node’s own default heap under this bound: about {size} — set the memory bound here to give Node 75% of it', { size });
+  return '';
 }
 /** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by
  *  force past the grace), a service's kept while it runs — «left 1 running — stopped; to keep a daemon, run it as a service
