@@ -859,6 +859,7 @@ const CLOSE_FENCE = {
   'file-viewer.js::open': [1, 'a file with no dedicated viewer re-opened in the editor'],
   'form-window.js::toSheet': [1, 'a form window turned into a sheet'],
   'form-window.js::close': [1, 'a form window\'s own close'],
+  'code-editor.js::close': [1, 'B-3b03 follow-up (lane hub-loop-stalls): a save-and-close editor (the CLI\'s Ctrl+G editor) closes itself only after its save LANDED — src/lib/refusal-doors.js saveCloseDoors; never around a resume'],
   'machine-app.js::showSay': [2, 'a machine app / stream window giving way to the next one («Run again», «Pick a window…»)'],
   'machine-desktop.js::setMode': [1, 'a machine\'s ONE desktop window: its other windows close'],
   'plugin-client.js::onMessage': [1, 'a plugin window closing itself (vsp close)'],

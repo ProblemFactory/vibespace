@@ -373,6 +373,8 @@ const NOT_NEEDS = Object.freeze([
   // B-e3fe follow-up: «Set it aside»'s failure toast — said where the press was made; the door is the item's own button on that row
   { why: 'a press\'s own failure toast (the unreadable record of waiting messages): the «Set it aside» button it answers stays on the For-you item, its door', match: /^Could not set the file aside$/ },
   { why: 'the manager stack\'s piece 7 (deliveries resume their addressee): the reason a delivery did not resume an ended conversation, inside that row\'s «— not resumed: …» line (src/lib/wake-grant-rows.js refusalWords) — the ended row\'s own Resume is its door', match: /^the resume failed$/ },
+  // B-3b03 follow-up (lane hub-loop-stalls): a chat upload's outcome — what landed, and the hub's own reason for the rest
+  { why: 'B-3b03 follow-up: an upload\'s outcome said after the press — what landed and the hub\'s own reason for the rest (a refusal: «the file readers are restarting — try again in a moment»); its door is the same upload, pressed again', match: /^Uploaded \{n\}, \{failed\} not uploaded: \{msg\} \(e\.g\. \{name\}\)$/ },
 ]);
 /** THE DOORS OWED (主开发's ruling (a), 2026-11-18 23:33Z; their own heading at 2026-11-19 00:44Z): a sentence that sends a person down
  *  a menu path where a door ON ITS LINE is owed. B-d073 built the four its family held (bulk-resume's Close toast and hint, the
