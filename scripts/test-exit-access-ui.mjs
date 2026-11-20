@@ -408,7 +408,27 @@ try {
     await P.evalJs(`(() => { const p = document.querySelector('.mounts-panel'); if (p) p.scrollLeft = 0; return true; })()`);
     await sleep(200);
     const rc = await P.evalJs(machineRowCensusJs(HOST));
-    ok(rc.ok && rc.name === 'exmac' && rc.btns === 8 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), all ${rc.btns} icons inside it, both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, rc);
+    // THE ROW'S ICONS BY NAME (2.369.413, after a count pinned «8» went stale): each by the product's own words for it — its
+    // title's English key or that key's row in src/lib/i18n-zh.js (never typed here), each judged INSIDE the row. The ninth came
+    // with lane lg-remote-hardening: «Host key of "{name}"…», every machine row's door to its pins (an ssh machine's host key; on a
+    // dial row its DEVICE key) — the door each key refusal's words, its chip and its For-you item name
+    const ZHW = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8');
+    const zhOf = (en) => { const k = '  ' + JSON.stringify(en) + ': '; const i = ZHW.indexOf(k); const m = i < 0 ? null : ZHW.slice(i + k.length).match(/^"(?:[^"\\]|\\.)*"/); return m ? JSON.parse(m[0]) : null; };
+    const fill = (w, p) => w && w.replace(/\{(\w+)\}/g, (x, n) => (n in p ? p[n] : x));
+    const named = (en, p = {}, tail = '') => [fill(en, p) + tail, zhOf(en) && fill(zhOf(en), p) + tail].filter(Boolean);
+    const ROW_ICONS = [
+      named('Test connection'),
+      named('Host key of "{name}"…', { name: 'exmac' }),
+      named('Pairing command — see the dial state, pick an address, generate a new command (keeps the row)'),
+      named('Mount a folder from this VibeSpace onto "{name}"', { name: 'exmac' }),
+      named('Mount a folder from "{name}" into this VibeSpace', { name: 'exmac' }),
+      named('Forward a port from "{name}" (open its dev servers here)', { name: 'exmac' }),
+      named('Commands run on {machine}', { machine: 'exmac' }, '…'),
+      named('New session on this device'),
+      named('Unpair (the device can no longer dial in)'),
+    ];
+    const missing = ROW_ICONS.filter((ws) => !(rc.icons || []).some((ic) => ws.includes(ic.name) && ic.inside)).map((ws) => ws[0]);
+    ok(rc.ok && rc.name === 'exmac' && missing.length === 0 && rc.lines.length === 2, `N-row: the row shows its name (${rc.nameW} px), its ${ROW_ICONS.length} icons BY NAME each inside it («Host key…» among them), both exit lines whole, no sideways scroll (row ${rc.rowW} px)`, { ...rc, missing });
     const real = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
     ok(ROW_FIX_REVERT.every(([fixed]) => real.split(fixed).length === 2), 'N-row: the fix\'s rules are in public/style.css once each (the control\'s anchors)');
     const MUTR = mutantCopies('exitrow', REPO);

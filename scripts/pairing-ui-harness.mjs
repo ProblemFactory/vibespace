@@ -292,12 +292,14 @@ export const machineRowCensusJs = (hostId) => `(() => {
   const rr = r.getBoundingClientRect();
   const name = r.querySelector('.mounts-name'); const nr = name.getBoundingClientRect();
   const nameShown = nr.width > 0 && nr.width >= Math.min(name.scrollWidth, 30) - 1;
-  const btns = [...r.querySelectorAll('.mounts-row-actions button')].map((b) => b.getBoundingClientRect());
-  const btnsInside = btns.length > 0 && btns.every((q) => q.left >= rr.left - 1 && q.right <= rr.right + 1);
+  const btnEls = [...r.querySelectorAll('.mounts-row-actions button')], btns = btnEls.map((b) => b.getBoundingClientRect());
+  const inside = (q) => q.left >= rr.left - 1 && q.right <= rr.right + 1;
+  const btnsInside = btns.length > 0 && btns.every(inside);
+  const icons = btnEls.map((b, i) => ({ name: b.title, inside: inside(btns[i]) }));   // each icon by the product's own name (its title)
   const lines = [...r.querySelectorAll('.mounts-exit-line')].map((e) => ({ text: e.textContent, cut: e.scrollWidth > e.clientWidth + 1 }));
   const p = document.querySelector('.mounts-panel');
   const panelX = p ? p.scrollWidth - p.clientWidth : 0;
-  return { ok: nameShown && btnsInside && lines.length > 0 && lines.every((l) => !l.cut) && panelX <= 1, rowW: Math.round(rr.width), name: name.textContent, nameW: Math.round(nr.width), btns: btns.length, btnsInside, lines, panelX };
+  return { ok: nameShown && btnsInside && lines.length > 0 && lines.every((l) => !l.cut) && panelX <= 1, rowW: Math.round(rr.width), name: name.textContent, nameW: Math.round(nr.width), btns: btns.length, btnsInside, lines, panelX, icons };
 })()`;
 /** The N-row fix and its pre-fix spelling — a control's patched copy of public/style.css reverts it. */
 export const ROW_FIX_REVERT = [
