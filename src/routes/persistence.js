@@ -1347,7 +1347,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     { const held = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.unreadRefusal?.('an import of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD: refused WHOLE before any section is applied
     // B-ee0a (its delta read): an import that brings credentials in is the person's — refused WHOLE before any section is written
     if (includeSensitive.length && file.sensitive && !personOnlyDoor(req, res)) return;
-    const applied = [];
+    const applied = [], held = [];   // held: a section a HELD store refused by its code (the page words it in the reader's language)
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;
       fn(file.sections[name]);
@@ -1390,7 +1390,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         // records mapped); a refused write is SAID (never a machine silently open to nobody / to more than it was)
         const lists = r && r.skipped ? null : getExitProxy?.()?.importLists?.(sens.hosts, { by: 'import' });   // the B-f276 remainder: no exit lists for machines not imported
         const warn = [...(r?.warnings || []), ...(lists && !lists.ok ? [`who can use the machines was not imported: ${lists.error || lists.code}`] : [])];
-        applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');
+        if (r && r.code === 'hosts-unread') held.push(r.code); else applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');
       }
       if (includeSensitive.includes('mounts') && sens.mounts) {
         getMounts?.()?.importBundle?.(sens.mounts);
@@ -1413,7 +1413,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         applied.push('vsPassword');
       }
     }
-    res.json({ success: true, applied, clientPrefs });
+    res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}) });
   });
 
   return router;

@@ -704,6 +704,21 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   ok(rr.every((o) => o && o.status === 503 && o.code === 'hosts-unread') && rrx.every((o) => o && o.status === 400 && !o.code),
     'Test connection, Install and Uninstall agent tools while the machines list is held: 503 with the hold\'s name, so the page words it; CONTROL (each bare 400 put back, in a copy): «400» with no name — RED', { rr, rrx });
   for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(MSENT) + ':'), `the mounts hold's sentence has its ${lang} row`);
+  // the held-words line's LEFT (主开发 04:49Z: rides the park's line): Settings' config IMPORT while hosts.json is held answered 200 with the
+  // hosts section's English inside `applied` — the import names the hold by its CODE now and the page words it (hostsHeldWords, zh / ja)
+  const HS8 = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
+  const IMPC = "skipped: true, code: 'hosts-unread' };";
+  const impOf = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; try { const r = H.importBundle({ hosts: [{ id: 'h-0002', name: 'x', host: 'x.invalid' }] }); return { code: r && r.code || null, skipped: !!(r && r.skipped) }; } catch (e) { return { threw: (e && e.code) || 'threw' }; } };
+  const im = impOf(require(path.join(ROOT, 'src/hosts.js'))), imx = impOf(MJ.load('src/hosts.js', anchored(HS8, IMPC, 'skipped: true };', 'hhc-8i1'), 'import-no-code'));
+  ok(im.code === 'hosts-unread' && im.skipped && imx.skipped && imx.code === null, 'hosts.importBundle while held: skipped, with the hold\'s CODE (the page words it); CONTROL (the code cut, in a copy): no code — the route can only pass the English on — RED', { im, imx });
+  const PRS = fs.readFileSync(path.join(ROOT, 'src/routes/persistence.js'), 'utf8'), APS = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
+  ok(PRS.includes("        if (r && r.code === 'hosts-unread') held.push(r.code); else applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');")
+    && PRS.includes("    res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}) });")
+    && APS.includes("const heldSaid = Array.isArray(d.held) && d.held.includes('hosts-unread') ? hostsHeldWords() : null;")
+    && APS.includes("if (heldSaid && !(d.applied || []).length) { err.textContent = heldSaid; return; }")
+    && APS.includes("showToast([t('Imported: {sections} — reloading…', { sections: d.applied.join(', ') }), heldSaid].filter(Boolean).join(' '), heldSaid ? { type: 'warn', duration: 8000 } : undefined);")
+    && APS.includes('setTimeout(() => location.reload(), heldSaid ? 8000 : 900);'),
+    'the config import: the route answers a held hosts section as `held` (its code), never English inside `applied`; the page says the hold\'s sentence beside «Imported: …» and waits 8 s before the reload — or, nothing else imported, says it on the form\'s line and reloads nothing');
 }
 
 // ── §9 round wojcq4hn4 (its MUST): a held list is unknown BY NAME on the two doors the meeting cured — never «offline», never a bare 400

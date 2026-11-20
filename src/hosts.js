@@ -1006,7 +1006,7 @@ class HostManager {
   importBundle(bundle) {
     // remainder of B-f276: a held hosts.json takes no change — its read r1 (S3): SAID in the import's own answer, never a throw
     // inside the import route (Express answered its default 503 page, the rest of the import half-applied)
-    if (this._unread) return { warnings: [`the machines were not imported — ${this.unreadWords()}`], skipped: true };
+    if (this._unread) return { warnings: [`the machines were not imported — ${this.unreadWords()}`], skipped: true, code: 'hosts-unread' };   // the code: the page words it
     const warnings = [];
     if (!bundle || !Array.isArray(bundle.hosts)) return { warnings };
     fs.mkdirSync(this._sshDir, { recursive: true, mode: 0o700 });
