@@ -1607,18 +1607,48 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
   const fi = awayItems(R, B).find((i) => i.jobId === jf.id);
   okP(!!fi && fi.status === 'open' && fi.i18n.text.params.exit === '7' && fi.i18n.text.params.cause === 'timeout',
     'round 12: a failure parked for a live owner that ENDED before it landed is said — with the PARK\'S facts (exit 7, timeout), never the run a later fire left', { text: fi && fi.text });
+  // follow-up (4): a carried fall uses ONLY what it carried — a carried cause of none is «unknown», never the job's CURRENT run's cause
+  const jf2 = task(R, 'jb-away-fell2', 'late-two', B, { state: 'done', runs: [{ startedAt: Date.now() - 60e3, endedAt: Date.now(), exit: 0, cause: 'ok' }] });
+  R.jm._onRetryEvent('fell', B, { id: 'rt-fell-2', producer: 'jobs', firstAt: Date.now(), attempts: [{ reason: 'timeout' }], meta: { jobId: jf2.id, jobName: 'late-two', ev: { what: 'failed exit=7 (9m)', at: Date.now(), away: { exit: 7, cause: null } }, subscriber: false } }, { kind: 'not-running' });
+  await settle(() => awayItems(R, B).some((i) => i.jobId === jf2.id));
+  const fi2 = awayItems(R, B).find((i) => i.jobId === jf2.id);
+  okP(!!fi2 && fi2.i18n.text.params.exit === '7' && fi2.i18n.text.params.cause === 'unknown',
+    'follow-up (4): a park\'s fall that carried NO cause says «unknown» — never the next fire\'s «ok» beside the carried exit 7', { exit: fi2 && fi2.i18n.text.params.exit, cause: fi2 && fi2.i18n.text.params.cause, currentRun: jf2.runs[0].cause });
+  // follow-up (1): after a person CLOSED the named item, the next away failure (the ladder's road, kept closed) is still the named one —
+  // the conversation's «notices are waiting» is not filed for the failure the person just dismissed
+  {
+    const P = cidOf(0xf101), jq = task(R, 'jb-away-p', 'render-p', P);
+    failOf(R, jq);
+    await settle(() => awayItems(R, P).length === 1);
+    R.todos.setStatus(awayItems(R, P)[0].id, 'dismissed');
+    R.jm._notifyRate.delete(P);   // more than 30 s and 10 min after the post: the next failure takes the LADDER's road again
+    failOf(R, jq, 'failed exit=8 error (1m)');
+    await settle(() => jq.awayFail.count === 2 && (R.jm.pendingNotifs.get(P) || []).length === 2);
+    const said = R.jm.sayWakeWaiting(P);
+    okP(said === null && waitItems(R, P).length === 0 && awayItems(R, P)[0].status === 'dismissed' && jq.awayFail.count === 2,
+      'follow-up (1): the person CLOSED the named item; the next away failure (kept closed) files NO «notices are waiting» for it — the dismissal stands for both items',
+      { conversationItem: said, waitItems: waitItems(R, P).length, named: awayItems(R, P)[0].status, count: jq.awayFail.count });
+  }
   R.stop();
   // round 5: For you HELD UNREAD — the first filing WAITS for the read, never lost
   {
     const H = rig('away-held'), C5 = cidOf(0xf005), jh = task(H, 'jb-away-held', 'render-h', C5);
     H.todos._holdUnread({ code: 'EIO', why: 'a test hold' });
+    const waiters0 = H.todos._readWaiters.length;
     failOf(H, jh);
     await settle(() => (jh.notifyLog || []).some((l) => l.lane === 'user-inbox'));
+    failOf(H, jh); failOf(H, jh, 'failed exit=3 error (1m)');   // the duplicate's count and a floored one, still held
+    await settle(() => jh.awayFail.count === 3);
+    const waitersAdded = H.todos._readWaiters.length - waiters0, heldLines = (jh.notifyLog || []).filter((l) => l.lane === 'user-inbox' && l.copy === 'away-failed');
+    okP(waitersAdded === 1 && heldLines.length === 3 && heldLines.every((l) => l.ok === null && l.held === true) && jh.forYouLast['away-failed'].ok === null,
+      'follow-up (2)(3): three away failures while For you is held ⇒ ONE waiter (a job and a copy, the latest words win), and each journalled as WAITING (never a refusal)',
+      { waitersAdded, heldLines: heldLines.map((l) => ({ ok: l.ok, held: l.held })), forYouLast: jh.forYouLast['away-failed'] });
     const whileHeld = awayItems(H, C5).length;
     for (let k = 0; k < 4 && H.todos.isHeldUnread(); k++) await H.todos.readAgain();
     await settle(() => awayItems(H, C5).length === 1);
-    okP(whileHeld === 0 && !H.todos.isHeldUnread() && awayItems(H, C5).length === 1 && awayItems(H, C5)[0].status === 'open',
-      'round 5: For you held unread at the failure ⇒ nothing filed while held, the item filed AT THE READ (a one-shot that fails once is still said by name)', { whileHeld, lifted: !H.todos.isHeldUnread(), after: awayItems(H, C5).length });
+    const landed = (jh.notifyLog || []).filter((l) => l.lane === 'user-inbox' && l.copy === 'away-failed').pop();
+    okP(whileHeld === 0 && !H.todos.isHeldUnread() && awayItems(H, C5).length === 1 && awayItems(H, C5)[0].status === 'open' && /: 3$/.test(awayItems(H, C5)[0].text) && landed && landed.ok === true,
+      'round 5 + follow-up (3): nothing filed while held; ONE item filed AT THE READ with the latest count (3), and the Delivery log says it landed', { whileHeld, lifted: !H.todos.isHeldUnread(), after: awayItems(H, C5).map((i) => i.text), lastLine: landed && { ok: landed.ok, copy: landed.copy } });
     H.stop();
   }
 
@@ -1654,6 +1684,11 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     failOf(R2, yb);
     await settle(() => awayItems(R2, L).length === 1);
     okP(awayItems(R2, L).length === 1, 'RED CONTROL: the one verdict removed (a copy of the engine) ⇒ the floor files «was not running» for a LIVE local conversation — the MUST 1 leg would be red', { items: awayItems(R2, L).map((i) => i.jobId) });
+    const E2 = cidOf(0xe102), ye = task(R2, 'jb-red-e', 'render-e', E2);
+    failOf(R2, ye);
+    await settle(() => awayItems(R2, E2).length === 1);
+    R2.local.add(E2); failOf(R2, ye);   // the owner runs again; the duplicate window's count
+    okP(ye.awayFail.count === 2, '…and the same copy RENEWS through the duplicate window for an owner that runs again (count 2) — the «count stays 1» leg would be red', { count: ye.awayFail.count });
     R2.stop();
   }
   {
@@ -1684,6 +1719,19 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     const cz = R5.jm.sayWakeWaiting(G);
     okP(!!cz && waitItems(R5, G).length === 1 && awayItems(R5, G).length === 1, 'RED CONTROL: the named notice counted for the conversation\'s item too (a copy of the engine) ⇒ TWO items for one away failure — the MUST 2 leg would be red', { conversationItem: !!cz, named: awayItems(R5, G).length });
     R5.stop();
+  }
+  {
+    const R7 = rig('away-red-kept', wiringWith(anchored(JSRC, '    if ((filed || (v && v.kept === true)) && entry) (this._namedAway', '    if (filed && entry) (this._namedAway', 'b2566-kept-unmarked'), 'b2566-kept-unmarked'));   // stale-pins: kept (the control writes the pre-follow-up line back)
+    const P2 = cidOf(0xe401), w = task(R7, 'jb-red-p', 'render-p', P2);
+    failOf(R7, w);
+    await settle(() => awayItems(R7, P2).length === 1);
+    R7.todos.setStatus(awayItems(R7, P2)[0].id, 'dismissed');
+    R7.jm._notifyRate.delete(P2);
+    failOf(R7, w, 'failed exit=8 error (1m)');
+    await settle(() => (R7.jm.pendingNotifs.get(P2) || []).length === 2);
+    const cw = R7.jm.sayWakeWaiting(P2);
+    okP(!!cw && waitItems(R7, P2).length === 1, 'RED CONTROL: a kept renewal left unmarked (a copy of the engine) ⇒ «notices are waiting» is filed for the failure the person dismissed — the follow-up (1) leg would be red', { conversationItem: !!cw });
+    R7.stop();
   }
   {
     const R6 = rig('away-red-drain', wiringWith(anchored(JSRC, "      try { this.d.resolveAwayFailed?.(rec.id, cid); } catch (e) { this.d.log(`[jobs] ${rec.id}: the away-failure For-you item was not closed — ${e && e.message}`); }\n", '', 'b2566-drain-keeps'), 'b2566-drain-keeps'));

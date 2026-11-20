@@ -1545,13 +1545,16 @@ class JobManager {
     rec.awayFail = ep ? { ...ep, count: (Number(ep.count) || 0) + 1, lastAt: at } : { cid, since: at, count: 1, lastAt: at };
     this._dirty = true;
     // a renewal only after a filing that LANDED (round 13: a first filing the store refused — full — leaves the next failure a FIRST one)
-    const v = this._forYou(rec, M.forYouCopy(rec, 'away-failed', { exit: f.exit, cause: f.cause || run.cause || null, count: rec.awayFail.count, since: rec.awayFail.since, renew: !!ep && ep.filed !== false }));
+    const v = this._forYou(rec, M.forYouCopy(rec, 'away-failed', { exit: f.exit, cause: carried ? f.cause : (f.cause || run.cause || null), count: rec.awayFail.count, since: rec.awayFail.since, renew: !!ep && ep.filed !== false }));
     const filed = !(v && typeof v === 'object' && v.ok === false) || v.held === true;   // filed, renewed, or filed at the read
     rec.awayFail.filed = filed || (v && v.kept === true);
     // round MUST 2: the notice whose failure is said BY NAME is not also counted for the conversation's «notices are waiting»
-    if (filed && entry) (this._namedAway || (this._namedAway = new WeakSet())).add(entry);
+    // (follow-up 1) …and a renewal a person's close KEPT closed: its failure was said by name and dismissed — never said again as «notices wait»
+    if ((filed || (v && v.kept === true)) && entry) (this._namedAway || (this._namedAway = new WeakSet())).add(entry);
     return v;
   }
+  /** B-2566 follow-up (3): a For-you filing that waited for the read LANDED (or not) — journalled on its job like any filing → the verdict */
+  forYouAtRead(jobId, v, copy) { const job = jobId ? this.jobs.get(jobId) : null; return job ? this._forYouVerdict(job, v, String(copy || 'away-failed')) : null; }
   /** B-2566: the ONE «not running» verdict (the wiring's ownerAway — the ladder's wakeBlock); no verdict wired ⇒ live (never said) */
   _ownerAway(cid) { try { return typeof this.d.ownerAway === 'function' && this.d.ownerAway(cid) === true; } catch { return false; } }
   /** B-2566: the stash entry this engine just pushed for (cid, job) — the newest, or null */
@@ -3163,6 +3166,13 @@ class JobManager {
    *  run's verdict is its CRON's too (r4, unverified 2: poll / show of the id the agent holds said nothing). */
   _forYouVerdict(job, v, copy) {
     if (v && typeof v === 'object' && v.kept === true) return v;   // B-2566: a renewal of an item a PERSON closed — kept closed by design (no line a failure)
+    // B-2566 follow-up (3): a filing that WAITS for For you's read is no refusal — its line says it waits; the landing at the read is
+    // journalled by the wiring's waiter (forYouAtRead)
+    if (v && typeof v === 'object' && v.held === true && job) {
+      this._notifyLogPush(job, { lane: 'user-inbox', ok: null, held: true, reason: String(v.why || 'For you could not be read just now — filed when it reads').slice(0, 200), copy });
+      job.forYouLast = { ...(job.forYouLast || {}), [copy]: { ok: null, held: true, ts: now() } };
+      return v;
+    }
     const refused = !!(v && typeof v === 'object' && v.ok === false);
     const why = refused ? String(v.why || 'the For you store refused it').slice(0, 200) : null;
     if (!job) { if (refused) this.d.log(`[jobs] the For-you ${copy} notice was NOT filed — ${why}`); return v; }

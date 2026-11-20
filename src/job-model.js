@@ -376,7 +376,7 @@ const MEMORY = Object.freeze({ defaultMb: 4096, minMb: 256, maxMb: 1024 * 1024, 
 const MEMORY_CAUSES = Object.freeze(['oom-bound', 'oom']);
 // B-2566 (its round wem0s6k1d, 4): THE CLOSED SET a run's end is judged into (src/jobs.js _finalizeRun's `run.cause` and the boot's
 // memory verdict) — the away failure's copy says one of these words, any other value «unknown» (never a word of the run's output)
-const RUN_CAUSES = Object.freeze(['error', 'timeout', 'oom', 'oom-bound', 'wrapper-mismatch', 'update_window', 'interrupted', 'ok', 'ok(until-output)']);
+const RUN_CAUSES = Object.freeze(['error', 'timeout', 'oom', 'oom-bound', 'wrapper-mismatch', 'update_window', 'interrupted', 'env-restart', 'ok', 'ok(until-output)']);   // + the boot's env-restart (bootEndCause)
 /** B-2566: an away failure's facts from the job's LAST run — its exit code and its cause (a word of RUN_CAUSES, else null): what the
  *  copy says, and what a retry park carries (its fall files THOSE, never the run a schedule's next fire left) */
 function awayFactsOf(job) {

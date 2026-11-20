@@ -16,6 +16,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // THE FILER'S KEY (lane job-notify-user r5): this file is origin 'jobs''s one filer (src/inbox-origin.js FIELDS_FILERS) —
   // the store names it by its frame, and the key it hands here rides every filing (a caller with no frame needs it)
   let forYouKey = null;
+  const heldAway = new Map();   // B-2566 follow-up (2): ONE deferred away-failure filing a (owner, job, copy) while For you is held
   try { forYouKey = userTodos && typeof userTodos.filerKey === 'function' ? userTodos.filerKey('jobs') : null; } catch (e) { log('[jobs] the For-you store handed this wiring no key of its filer —', e.message); }
   const jm = new JobManager({
     dataDir,
@@ -47,8 +48,12 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         // stays closed (kept: no refusal, no journal line); with no item at all (a first filing For you refused) it is filed
         // B-2566 (its round, 5): For you HELD UNREAD — the away failure's filing WAITS for the read (as its close does), never lost: a one-shot
         // that fails once would otherwise never be said by name; the renewal's own check runs then, against the file
+        // follow-up (2): ONE waiter a (owner, job, copy) — its latest words win, and it files as a FIRST filing if any deferred one was —
+        // never a waiter a failure (an every-minute schedule while For you is held a day); (3) its landing is journalled on the job
         if (fact === 'away-failed' && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') {
-          userTodos.whenRead(() => { const v = notifyUser({ words, text, detail, fact, urgency, jobId, jobName, ownerCid, renewOnly }); if (v && v.ok === false && !v.kept) log('[jobs] the away-failure item was not filed at the read —', v.why); }, 'the away-failure item');
+          const key = `${ownerCid || ''}\u0000${jobId || ''}\u0000${fact}`, prev = heldAway.get(key);
+          heldAway.set(key, { words, text, detail, fact, urgency, jobId, jobName, ownerCid, renewOnly: prev ? prev.renewOnly && renewOnly : renewOnly });
+          if (!prev) userTodos.whenRead(() => { const a = heldAway.get(key); heldAway.delete(key); if (!a) return; const v = notifyUser(a); try { jm.forYouAtRead(a.jobId, v, a.fact); } catch (e) { log('[jobs] the away-failure item\'s landing was not journalled —', e.message); } if (v && v.ok === false && !v.kept) log('[jobs] the away-failure item was not filed at the read —', v.why); }, 'the away-failure item');
           return { ok: false, held: true, why: 'For you could not be read just now — the item is filed when it reads' };
         }
         if (renewOnly && jobId && fact) {
