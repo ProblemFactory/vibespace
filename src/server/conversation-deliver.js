@@ -895,8 +895,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  oldest owed entry goes to the line (twins merge into it — ONE wake per conversation), marked in flight while there. */
   function attemptEnded(cid) {
     const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && !x.waitsReadopt);   // a wake that waits for the re-adoption runs at its settle (readoptSettled)
+    const waiting = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && x.waitsReadopt);   // …unless it runs again first (a person resumed it): then that is its answer too
+    if (!ends.length && !waiting.length) return;
+    if (peerReachable(cid) || localSessionFor(cid)) { for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
     if (!ends.length) return;
-    if (peerReachable(cid) || localSessionFor(cid)) { for (const e of ends) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
     if (!endedHook) return;   // the line is not wired yet (the boot): registerEndedWake schedules the attempt again
     const [e, ...twins] = ends;
     for (const t of twins) { for (const x of t.senders) if (!e.senders.includes(x)) e.senders.push(x); e.producers = mergeProducers(e, t); e.metas = [...metasOf(e), ...metasOf(t)].slice(-ENDED_METAS); if (!e.cardText && t.cardText) { e.cardText = t.cardText; e.fromName = t.fromName || e.fromName; } e.deliveries = (Number(e.deliveries) || 1) + (Number(t.deliveries) || 1); removeRetry(t); }
@@ -1160,8 +1162,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const e of (retry[cid] || []).filter((x) => x && x.maybeDelivered && !x.inflight && !x.ho && !unready(x))) fellRetry(e, 'not-reachable', 'it was being posted when the previous server stopped — its frame may have landed, so it is not posted again', { maybeDelivered: true });
     // THE BOUND HOLDS AT EVERY ATTEMPT (verify r1 N5, reproduced: an entry two hours old at boot — a downtime — was posted and
     // billed): a parked entry past RETRY_MAX_MS from its first miss is not posted, at a boot, a late timer or a turn end
+    // — but a wake WAITING for the re-adoption's settle (waitsReadopt) is outside the bound: it runs once at the settle, however long the store stays held
     repairClock();   // a future stamp never holds the bound off (verify r2)
-    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !isOwed(x) && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's ${RETRY_MAX_MS / 60000} min bound passed ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min after the first miss (${e.attempts.length} attempt${e.attempts.length === 1 ? '' : 's'})`, { expired: true });
+    for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !isOwed(x) && !x.waitsReadopt && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's ${RETRY_MAX_MS / 60000} min bound passed ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min after the first miss (${e.attempts.length} attempt${e.attempts.length === 1 ? '' : 's'})`, { expired: true });
     // the second judge: the attempts themselves (a turn end attempts regardless of the backoff; a clock that lies cannot run them for ever)
     for (const e of (retry[cid] || []).filter((x) => x && !x.inflight && !x.ho && !isOwed(x) && x.attempts.length >= RETRY_MAX_ATTEMPTS)) fellRetry(e, 'not-reachable', `the agent did not accept the message in ${e.attempts.length} attempts (the schedule's ${RETRY_MAX_ATTEMPTS}-attempt bound) over ${Math.round((clock.now() - Number(e.firstAt || 0)) / 60000)} min`, { expired: true });
     foldOwedTwins(cid);

@@ -762,5 +762,45 @@ console.log('㉒ a floored delivery to an ENDED owner still owes its wake (place
     'a LIVE conversation that does not answer, two fires inside the floor: NO wake owed (it runs — its next turn carries both), nothing resumed', { lv, notifs: LR.jm.notifCount(Lv) });
 }
 
+console.log('㉑ a wake WAITING for the settle is never dropped by the park\'s hour bound, and ends as «running» when its conversation runs again (主开发 04:25Z: «the park\'s 60-minute bound can drop a waiting wake»)');
+{
+  // ⑳'s road with the store held past the park's hour bound (RETRY_MAX_MS). The park is asked again for the conversation only by its
+  // own TURN END (a person resumed it by hand — the person's roads never pass the gate):
+  //  (a) it ran one turn and is gone again when the turn end lands: the waiting wake must stay owed (the bound must not drop it) and
+  //      run ONCE at the settle;
+  //  (b) it runs on: the waiting wake's answer is «running» (its next turn carries the words) — ended, never kept to the settle
+  const BOUND = "!isOwed(x) && !x.waitsReadopt && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's";
+  const RUNS = "for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running',";
+  ok(DELIVER_SRC.split(BOUND).length === 2 && DELIVER_SRC.split(RUNS).length === 2, 'control setup: the hour bound\'s line (a waiting wake outside it) and the running end (a waiting wake in it) are found once each');
+  const scene = async (deliverMod, runsOn) => {
+    const X = cidOf(runsOn ? 92 : 91);
+    const R = rig(runsOn ? 'readopt-runs' : 'readopt-bound', { kept: { [X]: RESTART }, hosts: { [X]: 'h-0001' }, gateWire: WIRE_SRC, deliverMod });
+    R.result(X, 'jb-r', 'nightly report', 'done');
+    await R.at(10);
+    const sess = { claudeSessionId: X, backendSessionId: X, name: 'running', mode: 'chat', backend: 'claude' };
+    await R.at(61 * 60e3);
+    if (runsOn) { R.live.add(X); R.sessions.set('w-' + X, sess); }   // (b) a person resumed it and it runs on
+    await R.deliver.noteTurnEnd(sess);   // its turn ended — the park is asked again for X, past the hour
+    await R.at(61 * 60e3 + 10);
+    const outs = () => R.wakes.filter((w) => w.cid === X).map((w) => w.outcome);
+    const out = { atTurnEnd: outs().join() || 'none', owed: R.deliver.endedEntries(X).length };
+    R.gate.resumeRoad.adoptedRemote();   // the store read: the re-adoption settled
+    await R.at(61 * 60e3 + 60);
+    out.reopens = R.reopens.length; out.frames = R.framesTo(X).length; out.owedAtSettle = R.deliver.endedEntries(X).length; out.after = outs().join() || 'none';
+    return out;
+  };
+  const a = await scene(DELIVER, false), b = await scene(DELIVER, true);
+  ok(a.atTurnEnd === 'none' && a.owed === 1 && a.reopens === 1 && a.frames === 1 && a.owedAtSettle === 0,
+    '(a) the turn end lands past the hour with the conversation gone again: the waiting wake is NOT dropped (still owed, no answer) — at the settle ONE resume, ONE frame', a);
+  ok(b.atTurnEnd === 'running' && b.owed === 0 && b.reopens === 0 && b.after === 'running',
+    '(b) the conversation runs again: the waiting wake ends «running» at its turn end (its next turn carries the words) — nothing resumes it at the settle', b);
+  const cutBound = MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, BOUND, "!isOwed(x) && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's", 'readopt-bound-cut'), 'readopt-bound-cut');
+  const ax = await scene(cutBound, false);
+  ok(ax.atTurnEnd === 'dropped' && ax.owed === 0 && ax.reopens === 0, 'CONTROL (the hour bound over every ended wake again, in a copy): (a)\'s waiting wake is DROPPED at the turn end — its producer told «dropped», nothing wakes the conversation at the settle — RED', ax);
+  const cutRuns = MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, RUNS, "for (const e of ends) endEnded(e, { outcome: 'running',", 'readopt-runs-cut'), 'readopt-runs-cut');
+  const bx = await scene(cutRuns, true);
+  ok(bx.atTurnEnd === 'none' && bx.owed === 1, 'CONTROL (the running end without the waiting wake, in a copy): (b)\'s wake stays owed while its conversation runs — kept to the settle for nothing — RED', bx);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
