@@ -16,6 +16,7 @@ import { landDraft, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { createImageDoor, refusalText, heldOf } from './image-attach.js'; // B-c9ed: THE picture door — every picture judged by THE rule when it is handed
+import { lateFocus, openClock } from './late-focus.js'; // B-c87d: a focus after an await goes through THE door (the keyboard stays where the person last put it)
 import { imageLimitsOf } from '../backend-caps.js'; // batch 20 cure: the numbers a picture is judged by are its conversation's HARNESS row
 
 /** THE CAMERA DOOR (lane phone-take-photo, owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): Android Chrome opens an
@@ -1616,9 +1617,11 @@ export class ChatInput {
    *  message's total — claude: the model API's; none stated: none) or past VibeSpace's own ceiling becomes no chip, and ONE toast names each refused file and why; a
    *  taken picture carries the type its bytes say */
   _addImageAttachment(files) {
+    this._picAddAt = openClock();   // B-c87d: the add began NOW (the person's paste, pick or shot); the picture lands after its read
     if (!this._imageDoor) this._imageDoor = createImageDoor({
       held: () => heldOf(this._attachments),
-      onAdd: (attachment) => { this._attachments.push(attachment); this._renderAttachments(); this._textarea.focus(); },
+      // B-c87d: the composer takes the keys back after the read only if the person did nothing elsewhere since the add began
+      onAdd: (attachment) => { this._attachments.push(attachment); this._renderAttachments(); lateFocus({ focus: () => this._textarea.focus() }, { win: { content: this._textarea.closest('.window-content, .window') || this._textarea.parentElement }, since: this._picAddAt }); },
       onRefused: (list) => showToast(refusalText(list, t), { type: 'error' }),
       limits: () => imageLimitsOf(this._getBackend()),   // the harness's own numbers; one that states none takes any size
     });

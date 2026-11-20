@@ -106,6 +106,16 @@ export function modalOpen(el) {
  *  the dialog had focused its box, so the new name and its Enter went to the chat composer and the rename never happened.
  *  PURE over the overlays the caller lists ('keep' = leave the focus where it is). */
 export function lateFocusVerdict(overlays, active = null) { try { return Array.from(overlays || []).some((o) => modalOpen(o) && (!isFormRoot(o) || formHoldsNow(o, active))) ? 'keep' : 'take'; } catch { return 'take'; } } // lane dialog-yield r2: a FORM keeps the keys while the person works in it (the focus inside, its window the active one) — a form left behind another window does not
+/** B-c87d (the coordinator's law, 2026-11-20): THE KEYBOARD STAYS WHERE THE PERSON LAST PUT IT. PURE: may a window that finishes
+ *  opening — re-attaching, restoring, an upload or a lease answered — take the keys now? `since` = when its open began (the page's
+ *  clock; a missing one is the page's start); `act` = the person's last act on the page ({ at, inside }: `inside` = in the opening
+ *  window itself). 'take' unless the person pressed or typed ELSEWHERE after the open began — then 'drop': a late focus that lost
+ *  that race is dropped, never queued (the window is drawn; the person's next press into it gives it the keys). */
+export function lateFocusTakes({ since, act } = {}) {
+  const from = Number.isFinite(since) ? since : 0;
+  if (!act || !Number.isFinite(act.at) || !(act.at > from)) return 'take';
+  return act.inside ? 'take' : 'drop';
+}
 /** lane dialog-keys: where a dialog that TOOK the keys but focuses nothing itself gets them (the brief: "its first
  *  focusable / its input") — its first text box, else the overlay (a keydown there bubbles through the dialog's own
  *  handlers). Never a button: Enter on a primary button the dialog did not choose would act for the user. */

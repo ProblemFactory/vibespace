@@ -145,7 +145,8 @@ console.log('— ⑥ THE FOLLOW IS QUIET');
   ok(L.made[0] && L.made[0].quiet === false && L.sidebarClosed === 1, '⑥ RED CONTROL: the old shape (quiet turned off for the active row) — a phone\'s open sidebar closes under the finger', { made: L.made, sidebar: L.sidebarClosed });
   const sl = read('src/lib/session-lifecycle.js');
   const att = sl.slice(sl.indexOf('  attachSession(serverId, name, cwd, {'), sl.indexOf('  attachTmuxSession('));
-  ok((att.match(/if \(!quiet \|\| this\.wm\.activeWindowId === winInfo\.id\) lateFocus\((chatView|term)\);/g) || []).length === 2 && !/\n\s*lateFocus\((chatView|term)\);/.test(att) && /if \(!quiet\) this\._closeSidebarOnMobile\(\);/.test(att)
+  // B-c87d: the late focus goes through THE door with its window and the open's start — still guarded by `quiet` as createSession's is
+  ok((att.match(/if \(!quiet \|\| this\.wm\.activeWindowId === winInfo\.id\) lateFocus\((chatView|term), \{ win: winInfo, since: openAt \}\);/g) || []).length === 2 && !/\n\s*lateFocus\((chatView|term)[,)]/.test(att) && /if \(!quiet\) this\._closeSidebarOnMobile\(\);/.test(att)
     && (att.match(/if \(quiet\) \{ console\.log\(`\[attach\]/g) || []).length === 2, '⑥ attachSession: both late focus calls guarded as createSession\'s are (a quiet attach never takes the caret), the phone sidebar left open, the slow-attach words logged — never a toast');
 }
 

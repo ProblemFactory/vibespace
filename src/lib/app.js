@@ -24,6 +24,7 @@ import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
 import { heldWordsOf, anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
+import { lateFocus } from './late-focus.js'; // B-c87d: a go-to that lands after an await asks THE door (the keyboard stays where the person last put it)
 import { askTails, withTails, credentialDoorWords } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -2790,7 +2791,7 @@ class App {
   // goToWindow: tab-chain resolve, stage-aware, cross-desktop switch, flash.
   // The window itself is shown through wm.revealWindow (inc-muiq348r-jwb5: a
   // group's HOST is switched to as well — this used to resolve only a guest).
-  goToWinId(winId) {
+  goToWinId(winId, { since } = {}) {   // B-c87d: `since` = when the person's go-to began, for a caller that lands after an await
     const win = this.wm.windows.get(winId);
     if (!win) return;
     // the FRAME that carries it (a tab group's host) — the desktop, the flash
@@ -2814,7 +2815,8 @@ class App {
       doFlash();
     }
     const session = this.sessions.get(winId);
-    if (session) session.focus?.();
+    if (session && since !== undefined) lateFocus(session, { win, since });   // B-c87d: a late go-to keeps the keys where the person put them since
+    else if (session) session.focus?.();
   }
 
   // Flash a window's title bar + taskbar item to help user find it

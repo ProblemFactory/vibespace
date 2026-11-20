@@ -184,6 +184,7 @@ import { openShareDialog, openAskDialog, shareChipText } from './window-share.js
 import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { deskDoorAct } from '../browser-picture.js'; // lane desktop-x-seat-browser r2: the Watch door's ONE act (PURE)
+import { lateFocus, mayTakeKeys, openClock, PAGE_START } from './late-focus.js'; // B-c87d: a focus after an await goes through THE door (the keyboard stays where the person last put it)
 /** int267 seam: how long the outer ✕ waits for the hub's `close-asked` stamp before it sends close-window anyway. */
 const CLOSE_STAMP_WAIT_MS = 1500;
 
@@ -425,6 +426,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (win._desktopAppId === id && !win._desktopSatelliteWid) { if (!quiet) app.wm.revealWindow(winId, { replay: !!syncId }); return win; } // quiet (an agent's open): it stays where it is
   }
   app._hideWelcome();
+  const openAt = syncId ? PAGE_START : openClock();   // B-c87d: the app window's open began NOW (its picture connects later); a replay: the page's start
   const winInfo = app.wm.createWindow({
     title: t('Desktop app'), type: 'desktop-app', syncId, width: 900, height: 620,
     openSpec: { action: 'openDesktopApp', id }, ...(intoChain ? { intoChain } : {}), // lane e2a: the agent's browser beside its chat (app.linkPlacement)
@@ -507,7 +509,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') { applyViewOnly(); askBrowserSeat(); } else if (bseat.seat || bseat.failed) { Object.assign(bseat, { seat: null, why: null, failed: false, refused: 0, acts: 0 }); bseat.asked++; } applySeamless(); }, // lane desktop-x-seat-browser: each socket asks its own seat
     onSeat: (v) => applyBrowserSeat(v), // r2: the bridge's own word to THIS socket (its seat, why, a refused act) — never silent
     onRefused: (v) => sayClientRefusal(v), // r6: an act the client refused itself (his wheel where a raise would take his focus) — said too
-    mayFocus: () => app.wm.activeWindowId === winInfo.id, // lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
+    mayFocus: () => app.wm.activeWindowId === winInfo.id && mayTakeKeys({ win: winInfo, since: openAt }), // B-c87d: nor after the person acted elsewhere since the open began · lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
   });
   const setAppIcon = (dataUrl) => {
     if (!dataUrl || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return;
@@ -728,6 +730,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (seatWaits.length && paneSeated(seats, paneKey)) for (const w of seatWaits.splice(0)) { clearTimeout(w.timer); w.resolve(true); }
   };
   resumeBtn.onclick = async () => {
+    const at = openClock();   // B-c87d: «Resume here» began NOW; the lease answers later
     const until = Date.now() + RESUME_WAIT_MS;
     optimistic = { state: 'active', until };
     renderSeat(); // the overlay goes NOW — the takeover never waits for the broadcast echo
@@ -740,7 +743,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (r.lease && r.lease.takenBy && r.lease.takenBy.tag) myTag = String(r.lease.takenBy.tag);
     if (r.lease !== undefined) lease = r.lease || null;
     applyViewers(r.viewers); renderLease();
-    view?.focus();
+    lateFocus(view, { win: winInfo, since: at });   // B-c87d: the keys only if the person did nothing elsewhere while the lease came back
   };
 
   // ── the bar: backend rung, CPU/RSS, idle countdown, Keep running, Stop ──
@@ -819,13 +822,14 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     renderLease(); render();
   };
   takeBtn.onclick = async () => {
+    const at = openClock();   // B-c87d: «Take over» began NOW; the lease answers later
     const m = windowLiveMode({ lease, viewerTag: myTag });
     if (m.mine) return;
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/takeover`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
     if (!r || r.error) { showToast(r?.error || t('Could not take over'), { type: 'error' }); return; }
     myTag = r.lease && r.lease.takenBy && r.lease.takenBy.tag ? String(r.lease.takenBy.tag) : null; // my takeover's public name — the only way this pane learns it
     if (r.viewers) applyViewers(r.viewers); // x5: the human who took over is the ACTIVE viewer
-    applyLease(r.lease); view?.focus();
+    applyLease(r.lease); lateFocus(view, { win: winInfo, since: at });   // B-c87d
   };
   handBtn.onclick = async () => {
     const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/handback`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ viewerId }) });
@@ -1361,6 +1365,7 @@ function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, 
   const paneCss = x0 ? { w: Math.max(Math.ceil(x0.w / r0 - 1e-9), m0 ? m0.w : 0), h: Math.max(Math.ceil(x0.h / r0 - 1e-9), m0 ? m0.h : 0) } : { w: 640, h: 480 };
   const ws = app.wm.workspace, key = main && typeof main._desktopAppKey === 'function' ? main._desktopAppKey() : null;
   const at = !syncId && main && ws ? satellitePlacement({ x: main.element.offsetLeft, y: main.element.offsetTop, w: main.element.offsetWidth, h: main.element.offsetHeight }, { w: paneCss.w, h: paneCss.h + 32 }, { w: ws.clientWidth, h: ws.clientHeight }, key ? appPrefs(SATELLITE_PREF_KEY)[key] : null) : null;
+  const satAt = syncId ? PAGE_START : openClock();   // B-c87d: the satellite's open began NOW; it binds when the main view stands
   const winInfo = app.wm.createWindow({ title: title || t('Desktop app'), type: 'desktop-app', syncId, width: paneCss.w, height: paneCss.h + 32, ...(at || {}), openSpec: { action: 'openDesktopApp', id, wid, title: String(title || '') }, ...(quiet ? { quiet: true } : {}) });
   winInfo._desktopAppId = id;
   winInfo._desktopSatelliteWid = wid;
@@ -1474,7 +1479,7 @@ function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, 
     handle = entry.view.attachSatellite(mount, wid, cb);
     winInfo._desktopSatellite = handle; // the raw handle the heavy suite reads
     render();
-    if (fresh && !quiet) handle.focus();
+    if (fresh && !quiet) lateFocus(handle, { win: winInfo, since: satAt });   // B-c87d: a bind that comes late never takes the keys the person put elsewhere
   };
   const waiters = viewWaiters.get(id) || viewWaiters.set(id, new Set()).get(id);
   let lonely = null;

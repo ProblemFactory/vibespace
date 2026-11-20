@@ -9,6 +9,7 @@ import { openTerminalLink, TERMINAL_LINK_HANDLER } from './terminal-links.js'; /
 import { UI_ICONS } from './icons.js';
 import { t } from './i18n.js';
 import { themeWord } from './value-words.js'; // a theme's name in the reader's words (lane ui-language)
+import { lateFocus, openClock } from './late-focus.js'; // B-c87d: a focus after an await goes through THE door (the keyboard stays where the person last put it)
 import { keyboardOwned } from './keyboard-owner.js'; // lane J r2: a driven live view owns the keyboard — focus() stands down
 
 // Web fonts loaded via Google Fonts (always available)
@@ -288,8 +289,9 @@ class TerminalSession {
           if (_pasteInFlight) return; // dedupe rapid re-triggers
           _pasteInFlight = true;
           const blob = item.getAsFile();
+          const at = openClock();   // B-c87d: the upload began with the person's paste
           this._uploadImageBlob(blob).finally(() => {
-            this.terminal.focus();
+            lateFocus({ focus: () => this.terminal.focus() }, { win: this.winInfo, since: at });
             setTimeout(() => { _pasteInFlight = false; }, 1000);
           });
           return;
@@ -615,15 +617,17 @@ class TerminalSession {
   // directly); over HTTP fall back to a visible paste pad the user long-presses
   // → Paste into, which feeds the SAME paste-event pipeline as desktop Ctrl+V.
   async _mobilePaste() {
+    const at = openClock();   // B-c87d: the paste began with the person's tap; the clipboard and the upload answer later
+    const back = () => lateFocus({ focus: () => this.terminal.focus() }, { win: this.winInfo, since: at });
     try {
       if (navigator.clipboard?.read) {
         const items = await navigator.clipboard.read();
         for (const it of items) {
           const imgType = it.types.find(t => t.startsWith('image/'));
-          if (imgType) { const blob = await it.getType(imgType); await this._uploadImageBlob(blob); this.terminal.focus(); return; }
+          if (imgType) { const blob = await it.getType(imgType); await this._uploadImageBlob(blob); back(); return; }
         }
         const text = await navigator.clipboard.readText();
-        if (text) { this.terminal.paste(text); this.terminal.focus(); return; } // paste() respects the app's bracketed-paste mode
+        if (text) { this.terminal.paste(text); back(); return; } // paste() respects the app's bracketed-paste mode
       }
     } catch {} // permission denied / HTTP — fall through to the paste pad
     this._showPastePad();
@@ -644,7 +648,8 @@ class TerminalSession {
       for (const item of items) {
         if (item.type.startsWith('image/')) {
           const blob = item.getAsFile();
-          this._uploadImageBlob(blob).finally(() => this.terminal.focus());
+          const at = openClock();   // B-c87d: the pad's upload began with the person's paste
+          this._uploadImageBlob(blob).finally(() => lateFocus({ focus: () => this.terminal.focus() }, { win: this.winInfo, since: at }));
           hide();
           return;
         }

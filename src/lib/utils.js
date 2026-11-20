@@ -550,10 +550,18 @@ const _editable = (el) => !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SE
 // ITS OWN (the block checkpoint's red: test-needs-doors' move-mode legs count the document's keydown listeners — a page-long one
 // added at module load stood there after every Esc)
 let _menuKeyAt = 0, _menuOwnKeyAt = 0;
+// B-c87d: the person's LAST ACT on the page — a press or ANY key, where it landed, on the page's own clock — rides the same two
+// listeners (the late-focus door, src/lib/late-focus.js, asks whether the person acted elsewhere since a window's open began)
+let _personAct = null;
+const _now = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('pointerdown', () => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; }, true);
-  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); }, true);
+  window.addEventListener('pointerdown', (e) => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; _personAct = { at: _now(), target: e.target || null }; }, true);
+  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); _personAct = { at: _now(), target: e.target || null }; }, true);
 }
+/** B-c87d: the person's last act on the page ({ at, target } on the page's clock), or null before the first one */
+export function lastPersonAct() { return _personAct; }
+/** B-c87d: the page's clock the late-focus door compares on (an open's start is read from it) */
+export function pageClock() { return _now(); }
 /** A gesture neither listener above sees — the phone's back swipe (lane mobile-back-guard) — is the person's own act too:
  *  a toast it shows next is not an unread notification. */
 export function noteOwnGesture() { _gestureAt = Date.now(); }

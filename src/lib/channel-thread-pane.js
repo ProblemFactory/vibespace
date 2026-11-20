@@ -25,6 +25,7 @@ import { composerMode } from './channel-groups-view.js';
 import { pageUpVerdict, isUpKey, isTypingTarget, wheelTowardOlder } from './channel-paging.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 import { enterSubmits } from './chat-enter-keys.js';
+import { lateFocus, openClock } from './late-focus.js'; // B-c87d: the pane's composer takes the keys after its render only through THE door
 
 /** W1 — THE QUOTE LINE above a reply's body: `↩ author: first line` as a button (a click jumps to the parent);
  *  a parent not loaded / in another chat is said in words, never a blank. `onJump(vendorId, place)`. */
@@ -327,6 +328,7 @@ export function createThreadPane(host, ctx) {
    *  thread itself, undefined (a chip's open) = the target this thread last had. */
   function open(th, { from = null, target = undefined, focus = false } = {}) {
     if (!th) return;
+    const openAt = openClock();   // B-c87d: the pane's open began NOW (the person's «Reply in thread»); its render answers later
     if (cur) { scrolls.set(cur.key, list.scrollTop); const ta = foot.querySelector('textarea'); if (ta) drafts.set(cur.key, ta.value); }
     returnFocus = from || null;
     cur = { key: th.key, root: th.root || null, count: th.count || 0, separate: !!th.separate, walked: !!th.walked, rootRec: th.rootRec || null, fresh: !!th.fresh };
@@ -336,7 +338,7 @@ export function createThreadPane(host, ctx) {
     pane.dataset.threadKey = th.key;
     applyMode();
     // the bar's Reply in thread hands the keyboard to the pane's composer (a chip's open leaves it where it was)
-    serial(renderNow).then(() => { if (focus) { const ta = foot.querySelector('textarea'); if (ta) ta.focus({ preventScroll: true }); } return walk(); }).catch(() => {});
+    serial(renderNow).then(() => { if (focus) { const ta = foot.querySelector('textarea'); if (ta) lateFocus({ focus: () => ta.focus({ preventScroll: true }) }, { win: { content: pane }, since: openAt }); } return walk(); }).catch(() => {});
     if (beat) clearInterval(beat);
     // the pane's heartbeat (§3.1 b): a separately-listed thread is walked again while it is open (floored server-side)
     beat = setInterval(() => { if (!pane.hidden) walk().catch(() => {}); }, 60e3);

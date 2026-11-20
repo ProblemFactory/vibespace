@@ -113,7 +113,7 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
     entryPoints: [path.join(wt, 'src/client.js')], bundle: true, outfile: path.join(wt, 'public/bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, logLevel: 'silent',
     plugins: [
       ...(sessionName ? [{ name: 'session-name', setup(b) { b.onResolve({ filter: /(^|\/)session-name\.js$/ }, () => ({ path: sessionName })); } }] : []),
-      ...(lifecycle ? [{ name: 'session-lifecycle', setup(b) { b.onResolve({ filter: /(^|\/)session-lifecycle\.js$/ }, () => ({ path: lifecycle })); } }] : []), // leg f's control
+      ...(lifecycle ? [{ name: 'late-focus', setup(b) { b.onResolve({ filter: /(^|\/)late-focus\.js$/ }, () => ({ path: lifecycle })); } }] : []), // leg f's control (the answer's guard lives in THE late-focus door since B-c87d)
     ],
   });
   await bundle(null);
@@ -329,13 +329,15 @@ while :; do for f in "${EMIT}/$SID".*.json; do [ -f "$f" ] || continue; cat "$f"
 
   console.log('\nf — NEGATIVE CONTROL: the answer\'s focus without its dialog guard (THE .228 MIRROR)');
   {
-    const src = fs.readFileSync(path.join(repo, 'src/lib/session-lifecycle.js'), 'utf8');
-    const guard = "const lateFocus = (view) => { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) === 'take') view.focus(); };"; // lane dialog-yield r2: ONE predicate — an open decision, or a form the person works in
+    // B-c87d: the answer's guard is THE late-focus door's question (src/lib/late-focus.js mayTakeKeys: an open dialog first, then the
+    // person's act elsewhere since the open began) — the control cuts the WHOLE question: the base's answer, which took the keys whatever held them
+    const src = fs.readFileSync(path.join(repo, 'src/lib/late-focus.js'), 'utf8');
+    const guard = "export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {\n  try { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) !== 'take') return false; } catch { return false; }"; // lane dialog-yield r2: ONE predicate — an open decision, or a form the person works in
     if (!ok(src.includes(guard), 'the answer sites\' focus guard is where the control cuts')) return;
     // the copy lives outside the tree: its relative imports name the scratch worktree's modules (the bundle's own sources)
-    const cut = src.replace(guard, 'const lateFocus = (view) => view.focus(); // NEGATIVE CONTROL: the answer takes the keys whatever holds them')
+    const cut = src.replace(guard, 'export function mayTakeKeys() { return true; } // NEGATIVE CONTROL: the answer takes the keys whatever holds them\nfunction mayTakeKeysCut({ win = null, since = PAGE_START } = {}) {')
       .replace(/from '\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src/lib', f))}`).replace(/from '\.\.\/([^']+)'/g, (m, f) => `from ${S(path.join(wt, 'src', f))}`);
-    await bundle(null, MUT.write(path.join(repo, 'src/lib/session-lifecycle.js'), cut, 'no-late-focus-guard', { esm: true }));
+    await bundle(null, MUT.write(path.join(repo, 'src/lib/late-focus.js'), cut, 'no-late-focus-guard', { esm: true }));
     pageErrors.length = 0;
     if (!ok(await boot(), 'control: the app booted on the guard-less bundle', S(pageErrors))) return;
     const cr = await renameRace(A, RENAME); // a fresh boot, as leg b's: the double-click's clicks attach the session

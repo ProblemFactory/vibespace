@@ -143,7 +143,10 @@ console.log('§4 B-2dbe (lane bl-windows) — a replay raises only what is on sh
   s = scene(real, { stage: true }); s.wm.revealWindow('b1', { replay: true });
   ok(s.wm.activeWindowId === 'b1', '…the Stage on screen keeps its own focus rules (no desktop guard there)');
   // _focusExistingSession's replay: no restore, no keyboard focus into a window its desktop hides
-  const fes = (src) => new Function('return {' + src + '};')()._focusExistingSession;
+  // B-c87d: a replay's focus asks THE late-focus door (src/lib/late-focus.js) from the page's start — here the door as it stands on a page
+  // where the person has not acted (it takes the keys); its verdict over the person's acts is test-late-focus's
+  const DOOR_NO_ACT = (view) => { view.focus(); return true; };
+  const fes = (src) => new Function('lateFocus', 'PAGE_START', 'return {' + src + '};')(DOOR_NO_ACT, 0)._focusExistingSession;
   const sliceObj = (src, name) => { const i = src.indexOf('\n  ' + name + '('); const j = src.indexOf('\n  },\n', i); return i < 0 || j < 0 ? '' : src.slice(i, j + 4); }; // a method of an object literal (session-lifecycle's mixin)
   const fesScene = (src) => { const t = scene(real); const w = t.wins.get('b1'); w.isMinimized = true; let restored = 0, typed = 0;
     t.wm.restore = () => { restored++; }; const ctx = { sessions: new Map([['b1', { sessionId: 'S', focus() { typed++; } }]]), wm: t.wm, desktopManager: { keepInFront() {} } };
@@ -173,7 +176,7 @@ console.log('§4 B-2dbe (lane bl-windows) — a replay raises only what is on sh
   ok(noArrived !== slice(DMJ, '_refocusShown') && s.wm.activeWindowId === 'b2' && !s.wins.get('b2').element.classList.contains('window-arrived'), 'CONTROL: the refocus without the arrived check focuses the agent\'s window and wipes its mark (the arrived leg goes RED)', s.wm.activeWindowId);
   s = scene(real, { refocus: () => {} }); await s.dm.switchTo('D2');
   ok(s.wm.activeWindowId === 'a1', 'CONTROL: a switch with no refocus leaves the focus on the left desktop\'s window (the switch leg goes RED)', s.wm.activeWindowId);
-  const fr0 = fesScene(sliceObj(SLJ, '_focusExistingSession').replace(/\n        const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop[^\n]*/, '').replace('if (replay && !off && ', 'if (replay && ').replace('if (!off) term.focus();', 'term.focus();'));
+  const fr0 = fesScene(sliceObj(SLJ, '_focusExistingSession').replace(/\n        const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop[^\n]*/, '').replace('if (replay && !off && ', 'if (replay && ').replace('if (!off) { if (replay) lateFocus(term, { win: this.wm.windows.get(winId), since: PAGE_START }); else term.focus(); }', 'term.focus();'));   // stale-pins: kept (the release's text, planted)
   ok(fr0.restored === 1 && fr0.typed === 1, 'CONTROL: the release\'s _focusExistingSession restores the hidden window and types into it (the replay leg goes RED)', fr0);
 }
 

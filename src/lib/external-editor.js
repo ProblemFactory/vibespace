@@ -8,6 +8,7 @@ import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEdito
 import { t } from './i18n.js';
 import { fsErrorText } from './file-explorer-ops.js';   // B-3b03 follow-up: the pane's refused save in the reader's language
 import { Resizer } from './resizer.js';
+import { lateFocus, openClock } from './late-focus.js'; // B-c87d: the terminal takes its keys back through THE door (the keyboard stays where the person last put it)
 import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorState, Compartment, Prec } from '@codemirror/state';
@@ -22,6 +23,7 @@ import { indentWithTab } from '@codemirror/commands';
  * @param {string} sessionId - WebUI session ID that triggered the editor
  */
 export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
+  const openAt = openClock();   // B-c87d: the editor pane's open began NOW (the CLI's signal); its file loads later
   // host = the machine the CLI (and therefore the tmpfile + signal file) runs
   // on — remote Ctrl+G (B-2de8): every read/write/signal must target it.
   const hq = host ? `&host=${encodeURIComponent(host)}` : '';
@@ -200,7 +202,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         parent: editorBody,
       });
       if (targetWinInfo._editorState) targetWinInfo._editorState.editorView = editorView; // for closeExternalEditor teardown
-      setTimeout(() => editorView.focus(), 50);
+      setTimeout(() => lateFocus(editorView, { win: targetWinInfo, since: openAt }), 50);   // B-c87d: the pane takes the keys only if the person did nothing elsewhere since it began opening
 
       // Wire up editor settings buttons
       btnWrap.onclick = () => {
@@ -229,6 +231,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
       };
 
       const doSave = async () => {
+        const at = openClock();   // B-c87d: the close began NOW (the person's Save & Close); the save answers later
         const newContent = editorView.state.doc.toString();
         try {
           const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }) });
@@ -260,7 +263,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
           setTimeout(() => {
             termSession.fit();
             termSession.terminal.scrollToBottom();
-            termSession.terminal.focus();
+            lateFocus({ focus: () => termSession.terminal.focus() }, { win: targetWinInfo, since: at });   // B-c87d
           }, 150);
         }
       };
@@ -275,6 +278,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
       pathSpan.style.color = 'var(--red)';
       saveBtn.textContent = 'Close editor';
       saveBtn.onclick = async () => {
+        const at = openClock();   // B-c87d: the close began NOW; its signal answers later
         try { await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) }); } catch {}
         targetWinInfo._editorState = null;
         targetWinInfo._editorDoSave = null;
@@ -286,7 +290,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         termContainer.style.minHeight = '';
         termContainer.style.height = '';
         termContainer.style.flexBasis = '';
-        if (termSession) setTimeout(() => { termSession.fit(); termSession.terminal.focus(); }, 150);
+        if (termSession) setTimeout(() => { termSession.fit(); lateFocus({ focus: () => termSession.terminal.focus() }, { win: targetWinInfo, since: at }); }, 150);   // B-c87d
       };
     });
 }
