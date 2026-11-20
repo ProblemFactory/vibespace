@@ -236,7 +236,9 @@ const hubBefore = (expectEnded) => ({ dd }) => {
   const KO = 'exclude: ko });';
   if (!WRAP.includes(KO)) ok(false, 'the anchor of the control «the wrapper keeps nothing out» is not in the source');
   else {
-    const hc = await jobScene(WRAP.replace(KO, 'exclude: [] });   // MUTANT: keeps nothing out'), 'job-hub-mut', { argv: hubArgv(ddOf('job-hub-mut')), signalAlone: true, before: hubBefore(true), ready: hubReady });
+    // B-7ca1: the stand-in is node, kept by the walk's exclusion AND the keep test — «keeps nothing out» cuts every keep-out
+    const NOKO = 'function keptOutHere() {\n';
+    const hc = await jobScene(anchored(WRAP.replace(KO, 'exclude: [] });   // MUTANT: keeps nothing out'), NOKO, 'function keptOutHere() { return [];   // MUTANT: keeps nothing out\n', 'b7ca1-keeps-nothing'), 'job-hub-mut', { argv: hubArgv(ddOf('job-hub-mut')), signalAlone: true, before: hubBefore(true), ready: hubReady });
     ok(hc.after && hc.after.hub === 2 && hc.after.alive === 0 && !/left alone/.test(hc.log), 'CONTROL (the wrapper keeps nothing out): the stand-in hub and its child are ENDED by the job\'s stop — and nothing is said left alone', hc.after);
   }
 }
@@ -882,7 +884,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
         const sid = PI.identityOf(spid); mine.push(sid);
         const strangerOwn = PI.ppidOf(spid) !== process.pid && PI.pgidOf(spid) === spid;   // re-parented, its own group
         return { after: async () => {
-          await until(() => PI.aliveIdentity(id) === false, 1500);
+          await until(() => PI.aliveIdentity(id) === false, 500);   // the drain (or the engine's SIGKILL) ended it before the run's end: a short bound
           const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
           if (alive) PI.signalIdentity(id, 'SIGKILL');
           if (stranger) PI.signalIdentity(sid, 'SIGKILL');
