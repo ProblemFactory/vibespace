@@ -51,6 +51,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a phone, the Agents dialog no longer runs past its right edge: Refresh all and every card sit inside it.
 - A menu opened near the screen's right edge keeps a small margin instead of touching the edge.
 - An enlarged artboard you zoomed or moved in the Design window now stays put when the agent changes a file or the window resizes; Fit puts it back as it opened.
+- In «Who may use it…», a change made while a save goes through stays unsaved and the dialog asks before closing; a save in another window no longer undoes it.
+- After a restart with large mail or chat accounts, VibeSpace no longer stops answering for a second or more while it reads them again.
 
 ## 2.369.413 — 2026-11-20
 
