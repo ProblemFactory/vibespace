@@ -1932,9 +1932,11 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'remote daemon could not reach the inbox' };
         } catch (e) {
           if (undo2) undo2();
-          // capability gate / daemon down — an honest miss, the stash covers it. B-6721: a request SENT (the turn armed) that never
-          // got its answer (a timeout, a link lost) may have been posted by the device — `unanswered` says so to its caller
-          return { ok: false, lane: 'remote-message', hostId: hid, reason: e.message, ...(undo2 ? { unanswered: true } : {}) };
+          // capability gate / daemon down — an honest miss, the stash covers it. B-6721: a request that LEFT and never got its
+          // answer — the hub's own request timeout, a link lost — may have been posted by the device: `unanswered` says so to its
+          // caller; never a capability gate, a policy refusal or an error the device ANSWERED (nothing was posted: round w8g2bt5bs)
+          const unanswered = !!undo2 && !!e && (e.code === 'link_lost' || e.message === 'peer-post timeout');
+          return { ok: false, lane: 'remote-message', hostId: hid, reason: e.message, ...(unanswered ? { unanswered: true } : {}) };
         }
       }
       const live = liveWithoutLane(cid);
