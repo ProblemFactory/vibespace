@@ -624,7 +624,23 @@ try {
     const a11 = await geo('echo line-0');
     ok(a11 && a11.text === multi && !a11.open && a11.len === '命令 · 12 行', 'the 12-line script keeps its lines, folded away under 技术细节 (命令 · 12 行 inside)', a11);
     await P.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });
-    await openRemote(P);
+    // THE PAGE GROWS BACK TO DESKTOP WIDTH, AND THE PERSON'S ROAD TO THE REMOTE PANEL (lane bl-tests-e — the run of 4a255af35 placed the
+    // machine row's two presses: «NOT LAID OUT — hidden by div.sidebar-main (display: none) — in no window», page visible at 1280 px,
+    // nothing open). The 390 px legs made this page the PHONE class; growing back, the class switch (src/lib/viewport-switch.js, kicked by
+    // a resize or a media-query change and settled VC_SETTLE_MS later) rebuilds the desktop's rail beside a CLOSED sidebar — setPhoneMode(false)
+    // closes an open one (src/lib/sidebar.js; a fresh load would restore the layout's own chrome.sidebarOpen instead); public/style.css
+    // «.sidebar.rail-collapsed .sidebar-main { display: none }», the only rule that hides that pane — AFTER the suite's own open of the
+    // panel, which it closed. A person who narrows a window and widens it again sees that rail (sidebar.activityRail and
+    // sidebar.railPersistent, both on by default; the toolbar's ☰ besides) and opens the panel from its Remote item. These legs were green
+    // only on a hidden page: the switch is kicked by events a background tab never hears (viewport-switch.js says so), so the switch back
+    // at 1280 never closed the suite's open there (inferred from the red: proven only that it ran on the visible page). Now: the class is
+    // WAITED for (the product's own app._vc), the closed sidebar STATED, and the panel opened the person's way — the leg saying it is drawn
+    ok(await P.waitFor(`app._vc === 'desktop'`, 5000), 'the page is back at the DESKTOP class (the viewport switch has run after the resize)', await P.evalJs('app._vc || null'));
+    const railRemote = '#sidebar-rail .rail-item[data-rail="mounts"]';
+    ok(await P.waitFor(`document.getElementById('sidebar').classList.contains('rail-collapsed') && !!document.querySelector(${JSON.stringify(railRemote)})?.getClientRects().length`, 3000),
+      'the desktop builds the rail beside a CLOSED sidebar: its main pane not drawn, the rail\'s Remote item drawn (what a person sees after widening the page)', await P.evalJs(`({ cls: document.getElementById('sidebar').className, rail: !!document.querySelector(${JSON.stringify(railRemote)}) })`));
+    ok(await P.realClick(railRemote), 'a real click on the rail\'s Remote item');
+    ok(await P.waitFor(`!!document.querySelector('.mounts-panel')?.offsetParent && !!${rowOf}?.getClientRects().length`, 5000), '…the Remote panel is DRAWN, the machine row in it');
     const listIcon = `(${rowOf}?.querySelector('.mounts-row-actions button[title^="在 exmac 上运行过的命令"]') || null)`;
     ok(await P.realClick(listIcon), 'a real click on the machine row\'s Commands icon (在 exmac 上运行过的命令…)');
     ok(await P.waitFor(`document.querySelectorAll('#exit-runs-dialog .exit-runs-row').length >= 3`, 8000), '…opens the machine\'s command list in ONE click');
