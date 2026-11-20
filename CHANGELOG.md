@@ -35,6 +35,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A file or folder on storage that stopped answering is no longer asked again and again; VibeSpace says it did not answer and when it will try again.
 - Refresh in the Files window tries such a folder again at once, and a path that answers again is used again right away.
 - In English too, the note for a turned-off Claude Code check and its setting now say those accounts wait until you update VibeSpace.
+- A paired machine's reply that is too large is now refused for that one request, with its size and the limit; it used to end the whole connection.
 
 ## 2.369.413 — 2026-11-20
 
