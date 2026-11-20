@@ -841,22 +841,30 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   ok(rcx.left && rcx.left.force === true, 'CONTROL (the count alone decides, as before, in a copy): «they were stopped by force» for a kill that never happened — RED', rcx);
   // 2: the engine's errno of a list it could not read is CLEARED when the list later reads GONE, and a TIME-OUT says a time-out —
   // never an older read's errno. A stand-in scope folder (its list a folder: EISDIR), then gone; a read that never answers
+  // r268 (主开发 16:07Z): the engine keeps ONE read in flight a list — a call while a read is pending JOINS it. The scene waits for each
+  // read to SETTLE (its slot empties — what happened), bounded and red by name: the first reads of a LOCAL scratch folder answer at
+  // once, so their bound is the scene's own 5 s (no loaded runner meets it: the hosted red of run 44755316257 met the old 20 ms and its
+  // second ask joined the first read); the 20 ms (`reapReadMs`) only for the read that never answers
   const errOf = async (Mod) => {
     const self = Object.create(Mod.JobManager.prototype); self.d = { reapReadMs: 20 };
+    const LONG = 5000, unsettled = [];
+    const settle = async (sc, what) => { const t0 = Date.now(); while (self._procReads && self._procReads.has(sc.dir)) { if (Date.now() - t0 > LONG) { unsettled.push(what); return; } await sleep(5); } };
     const d = path.join(D, 'scope10-err-' + Math.random().toString(36).slice(2, 8)); fs.mkdirSync(path.join(d, 'cgroup.procs'), { recursive: true });
     const sc = { dir: d, unit: 'x.scope' };
-    const out = { first: (await self._scopeProcs(sc)), words1: self._listWords(sc, '2 s') };
+    const first = await self._scopeProcs(sc, LONG); await settle(sc, 'the first read (EISDIR)');
+    const out = { first, words1: self._listWords(sc, '2 s') };
     fs.rmSync(d, { recursive: true, force: true });
-    out.gone = await self._scopeProcs(sc); out.words2 = self._listWords(sc, '2 s');
-    fs.mkdirSync(path.join(d, 'cgroup.procs'), { recursive: true }); await self._scopeProcs(sc);   // unread again (EISDIR)…
+    out.gone = await self._scopeProcs(sc, LONG); await settle(sc, 'the read of the gone list'); out.words2 = self._listWords(sc, '2 s');
+    fs.mkdirSync(path.join(d, 'cgroup.procs'), { recursive: true }); await self._scopeProcs(sc, LONG); await settle(sc, 'the read unread again');   // unread again (EISDIR)…
     const real = fs.promises.readFile; fs.promises.readFile = (f, ...a) => (String(f).startsWith(d) ? new Promise(() => { }) : real.call(fs.promises, f, ...a));
     try { self._procReads = new Map(); out.hang = await self._scopeProcs(sc); out.words3 = self._listWords(sc, '0.02 s'); } finally { fs.promises.readFile = real; }
+    if (unsettled.length) out.unsettled = unsettled;
     return out;
   };
   const GONE_CLEAR = '{ if (this._listErr) this._listErr.delete(scope.dir); return []; }';
   ok(JSRC10.split(GONE_CLEAR).length === 2, 'control setup: the gone branch\'s clear is found once');
   const er = await errOf(JM10), erx = await errOf(cut(GONE_CLEAR, 'return [];', 'list-err-gone-cut'));
-  ok(er.first === null && er.words1 === 'could not be read (EISDIR)' && Array.isArray(er.gone) && er.words2 === 'did not answer a read in 2 s' && er.hang === null && er.words3 === 'did not answer a read in 0.02 s',
+  ok(!er.unsettled && er.first === null && er.words1 === 'could not be read (EISDIR)' && Array.isArray(er.gone) && er.words2 === 'did not answer a read in 2 s' && er.hang === null && er.words3 === 'did not answer a read in 0.02 s',
     'the engine\'s list words follow its LATEST read: unread — «could not be read (EISDIR)»; then GONE — no old errno left; a read that never answers — «did not answer a read», never the older errno', er);
   ok(erx.words2 === 'could not be read (EISDIR)', 'CONTROL (the clear on GONE cut, in a copy): a scope that has gone still «could not be read (EISDIR)» — RED', erx);
 }
