@@ -101,7 +101,7 @@ ok(ACL.validateDirectory({ singles: true }).ok && ACL.validateDirectory({ single
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
 const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
-function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngine = null, lines = null, refuse = null, gate = null } = {}) {
+function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngine = null, lines = null, refuse = null, gate = null, stashFail = null, onTakeWait = null } = {}) {
   const dataDir = path.join(ROOT, name);
   const clock = dayStartClock();
   const userTodos = new UserTodoManager({ dataDir, now: clock });
@@ -110,7 +110,8 @@ function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngi
     // r13 `refuse(k)`: the ladder refuses the k-th call (a daily cap) — the refused block is still recorded (`refused: true`)
     // r15 `gate(k)`: the k-th call waits on the promise it returns (a SLOW ladder — the press's block holds its chains meanwhile)
     deliverToConversation: async (cid, text, o) => { const no = !!(refuse && refuse(delivered.length)); delivered.push({ cid, text, o, ...(no ? { refused: true } : {}) }); const g = gate ? gate(delivered.length - 1) : null; if (g) await g; return no ? { ok: false, reason: 'the daily cap', refused: 'cap' } : { ok: true, lane: 'message' }; },
-    stashFor: (cid, e) => { stashed.push({ cid, ...e }); return { stored: true }; },
+    // B-1ca5 part B: `stashFail(cid, e)` = a planted stash refusal (a refused block that is not stashed ends unhanded: its take goes back)
+    stashFor: (cid, e) => { if (stashFail && stashFail(cid, e)) throw new Error('the stash refused (planted)'); stashed.push({ cid, ...e }); return { stored: true }; },
   };
   // the fake world follows THIS clock (a later pass sees the day's later records — new messages)
   const registry = createChannelRegistry();
@@ -119,7 +120,7 @@ function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngi
   if (sendHook) { const mk0 = fk.create; fk.create = (record, deps) => { const a = mk0(record, deps); const s0 = a.send; a.send = (convId, o) => sendHook(s0, convId, o); return a; }; }
   registry.register(fk);
   const log = lines ? { log: (x) => lines.push(String(x)), warn: (x) => lines.push(String(x)), error() {} } : { log() {}, warn() {}, error() {} };   // + lines: lane dm-reply-infers reads the journal
-  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos, deliver, now: clock, log, liveSessions: () => live || [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }], ...(decisionEngine ? { decisionEngine } : {}) });
+  const eng = ENGM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry, broadcast: () => {}, userTodos, deliver, now: clock, log, liveSessions: () => live || [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }], ...(decisionEngine ? { decisionEngine } : {}), ...(onTakeWait ? { onTakeWait } : {}) });   // B-1ca5 part B: the engine's seam «a chain waits on a start in flight»
   return { eng, userTodos, delivered, stashed, clock };
 }
 
@@ -1769,7 +1770,7 @@ const C2_13 = 'fake-poll-announce', K2_13 = `${A}/${C2_13}`;
 const BOTH13 = { match: 'any', rules: [{ kind: 'title', value: 'Ops' }, { kind: 'title', value: 'Announce' }] }, OPS13 = { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, ANN13 = { match: 'any', rules: [{ kind: 'title', value: 'Announce' }] };
 const pend13 = (eng, key) => ((eng.store.index.peek(key) || {}).pending || []).filter((p) => p && p.for === 'agent:agent-1' && !p.aside).length;
 async function inject13(m, cv, tag, pk = 'agent:agent-1') { const t0 = m.clock(); await m.eng.store.index.update(() => { const e2 = m.eng.store.index.entry(A, cv, { create: true }); if (!Array.isArray(e2.pending)) e2.pending = []; for (let i = 0; i < 30; i++) e2.pending.push({ record: { id: `${cv}-${tag}13-${i}`, text: `old message ${i}`, at: t0 - 3 * 86400e3 }, why: [], at: t0 - 3 * 86400e3, road: 'wake', for: pk }); }); }
-async function boot13(name, { ENGM = ENG, live, refuse = null, gate = null } = {}) { const m = mkEngine(name, { ENGM, live, refuse, gate }); m.eng.start(); await new Promise((r) => setTimeout(r, 30)); if (m.eng.settleWakes) await m.eng.settleWakes(); return m; }
+async function boot13(name, { ENGM = ENG, live, refuse = null, gate = null, stashFail = null, onTakeWait = null } = {}) { const m = mkEngine(name, { ENGM, live, refuse, gate, stashFail, onTakeWait }); m.eng.start(); await new Promise((r) => setTimeout(r, 30)); if (m.eng.settleWakes) await m.eng.settleWakes(); return m; }
 const req13 = (m) => (m.eng.store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held');
 const st13 = (m) => { const r = req13(m); const it = r && r.todoId ? m.userTodos.get(r.todoId) : null; return { status: r && r.status, rows: Object.fromEntries(((r && r.held && r.held.convs) || []).map((c) => { const n = Array.isArray(c.rows) ? c.rows.length : 0; return [c.id, c.dropped ? `${n} dropped ${c.dropped.n}` : n]; })), card: it ? (it.status === 'open' ? it.text : FA.settledWords(it, SAID10)) : null }; };
 async function digestWorld13(ENGM, name, { live, account = false, who = AGENT } = {}) {
@@ -1915,9 +1916,9 @@ async function settledWithin15(p, ms, name) {
 async function raceLeg15(ENGM, name, road, { placed = false } = {}) {
   const live = [];
   const { pid } = await digestWorld13(ENGM, name, { live, account: road === 'account' });
-  let open = () => {}, inLadder = () => {};
-  const gateP = new Promise((r) => { open = r; }), entered = new Promise((r) => { inLadder = r; });
-  const m2 = await boot13(name, { ENGM, live, gate: (k) => (k === 0 ? (inLadder(), gateP) : null) });
+  let open = () => {}, inLadder = () => {}, sawWait = () => {}, waitedOnTake = false;
+  const gateP = new Promise((r) => { open = r; }), entered = new Promise((r) => { inLadder = r; }), waitSig = new Promise((r) => { sawWait = r; });
+  const m2 = await boot13(name, { ENGM, live, gate: (k) => (k === 0 ? (inLadder(), gateP) : null), onTakeWait: placed ? () => { waitedOnTake = true; sawWait(); } : null });
   live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
   try {
     if (road === 'conversation') { const cw = await m2.eng.setGrain(A, { kind: 'conversation', convId: C2_13 }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', dailyWakeCap: 5 }] }, { person: true }); if (!cw.ok) throw new Error('setup (conversation): ' + J2s(cw)); }
@@ -1927,19 +1928,19 @@ async function raceLeg15(ENGM, name, road, { placed = false } = {}) {
     await entered;   // the press's ONE block is inside the ladder now
     let done = false;
     const other = (road === 'account' ? m2.eng.flushScope(A, 'account', null, 'agent:agent-1') : m2.eng.flushPending(A, C2_13, { pk: 'agent:agent-1' })).then((x) => { done = true; return x; });
-    // r504 (lane lg-text-legs-3): a CONTROL's second flush is PLACED, never timed. With round 15's chain hold cut it does not wait
-    // for the block's chain, so its read runs while the block is held in the ladder and it settles there (nothing pending, or its
-    // own billed call): the control waits for exactly that, bounded, a red by name at the bound (the train's engine has no seam
-    // for «a chain reached its read»). `readInFlight` = it settled while the block was still held.
+    // r504 / B-1ca5 part B (lane lg-text-legs-3): a CONTROL's second flush is PLACED, never timed. With round 15's chain hold cut
+    // it does not wait for the block's chain: its read runs while the block is held in the ladder, and then it either WAITS on
+    // the block's take (the engine's seam `onTakeWait`) or settles there (nothing pending, or its own billed call). The control
+    // waits for exactly that, bounded, a red by name at the bound. `readInFlight` = it reached its read while the block was held.
     let readInFlight = null;
-    if (placed) readInFlight = await settledWithin15(other, 5000, `${name}: the second flush did not settle while the block was held in the ladder (the cut did not free it)`);
+    if (placed) readInFlight = await settledWithin15(Promise.race([waitSig, other]), 5000, `${name}: the second flush neither waited on the block's take nor settled while the block was held in the ladder`);
     else await new Promise((r) => setTimeout(r, 25));
     const waited = !done;
     open();
     const d = await press, o = await other;
     if (m2.eng.settleWakes) await m2.eng.settleWakes();
     const calls = m2.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text), spend: x.o && x.o.spendReason }));
-    return { press: PRESS10(d), other: { ok: !!(o && o.ok), why: (o && o.why) || null }, waited, readInFlight, calls, after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
+    return { press: PRESS10(d), other: { ok: !!(o && o.ok), why: (o && o.why) || null }, waited, readInFlight, waitedOnTake, calls, after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
   } finally { open(); m2.eng.stop(); }
 }
 // THE MUTANT «one chain» (3928de8bd's block: the held scope's chain only, every `also` conversation read whatever chain owns it)
@@ -1951,8 +1952,33 @@ function oneChainMutant15() {
 // r504 (lane lg-text-legs-3): THE MUTANT «one chain, no take» — round 15's chain hold AND B-1ca5's take (the scope digest's, taken
 // before its ladder await) cut, each through cutOrFail: the release's order before B-1ca5, with the chain hold gone
 function bothCutsMutant15() {
-  const T15 = '      if (target.cid) for (const h of held) take = takeHits(rec.id, h.id, names, h.carried.hits, take);\n';
-  return cutOrFail(oneChainMutant15().cut, T15, '', 'one chain, no take: the digest take (B-1ca5)');
+  const T15 = '        const vR = judgeHits(rec.id, h.id, pk, target.cid, g.hits, { ranOut: true, take: take || true });\n';   // B-1ca5 part B: the digest's take is made IN its read after the wait
+  return cutOrFail(oneChainMutant15().cut, T15, T15.replace('take: take || true', 'take: null'), 'one chain, no take: the digest take (B-1ca5)');
+}
+// B-1ca5 part B — THE MUST'S SCENE: raceLeg15 (the account road) with the press's block REFUSED after the second flush read, and
+// its stash refused too (it ends unhanded: its take goes back); the second flush PLACED by the engine's seam (it waits on the take)
+async function refusedLeg15(ENGM, name) {
+  const live = [];
+  const { pid } = await digestWorld13(ENGM, name, { live, account: true });
+  let open = () => {}, inLadder = () => {}, sawWait = () => {}, waitedOnTake = false;
+  const gateP = new Promise((r) => { open = r; }), entered = new Promise((r) => { inLadder = r; }), waitSig = new Promise((r) => { sawWait = r; });
+  const m2 = await boot13(name, { ENGM, live, gate: (k) => (k === 0 ? (inLadder(), gateP) : null), refuse: (k) => k === 0, stashFail: () => true, onTakeWait: () => { waitedOnTake = true; sawWait(); } });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: OPS13 }, { person: true });
+    const before = m2.delivered.length;
+    const press = m2.eng.decideRequest(req13(m2).id, true, 'user', { person: true });
+    await entered;   // the press's ONE block is inside the ladder
+    let settled = false;
+    const other = m2.eng.flushScope(A, 'account', null, 'agent:agent-1').then((x) => { settled = true; return x; });   // the second flush reads while the block is in flight
+    const readInFlight = await settledWithin15(Promise.race([waitSig, other]), 5000, `${name}: the second flush neither waited on the block's take nor settled while the block was held in the ladder`);
+    const settledBeforeOpen = settled;
+    open();   // the block's ladder answers: REFUSED (and its stash refuses): it gives its take back
+    const d = await press, o = await other;
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const calls = m2.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text), refused: !!x.refused }));
+    return { press: PRESS10(d), other: { ok: !!(o && o.ok), why: (o && o.why) || null }, readInFlight, waitedOnTake, settledBeforeOpen, calls, refusedCalls: calls.filter((x) => x.refused).length, annDelivered: calls.filter((x) => x.ann && !x.refused).length, pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) }, card: st13(m2) };
+  } finally { open(); m2.eng.stop(); }
 }
 for (const road of ['account', 'conversation']) {
   const L15 = road === 'account' ? '(a)' : '(b)';
@@ -1970,14 +1996,27 @@ for (const road of ['account', 'conversation']) {
       const m = oneChainMutant15();
       const r = await raceLeg15(MUT.load('src/server/channels-engine.js', m.cut, 'held-one-chain'), 'e15-race-red', road, { placed: true });
       const annA = r.calls.filter((x) => x.ann).length;
-      console.log(`    CONTROL A — guards removed: round 15's chain hold (A15 + H15; B-1ca5's take stands) ⇒ ${r.calls.length} call(s), Announcements carried by ${annA}; the second flush settled while the block was in the ladder: ${r.readInFlight}, its answer: ${r.other.why}`);
-      ok(m.cut !== m.src && r.readInFlight === true && r.calls.length === 1 && annA === 1 && !r.other.ok && r.other.why === 'nothing-pending',
+      console.log(`    CONTROL A — guards removed: round 15's chain hold (A15 + H15; B-1ca5's take stands) ⇒ ${r.calls.length} call(s), Announcements carried by ${annA}; the second flush read while the block was in the ladder: ${r.readInFlight}, waited on its take: ${r.waitedOnTake}, its answer: ${r.other.why}`);
+      ok(m.cut !== m.src && r.readInFlight === true && r.waitedOnTake === true && r.calls.length === 1 && annA === 1 && !r.other.ok && r.other.why === 'nothing-pending',
         `CONTROL A «one chain» (3928de8bd's block, the take standing): the same race, the second flush read while the block was in flight ⇒ ${r.calls.length} call, Announcements carried ONCE — the second flush found ${r.other.why}: the take alone holds the law`, J2s({ calls: r.calls, readInFlight: r.readInFlight, other: r.other }));
       const rb = await raceLeg15(MUT.load('src/server/channels-engine.js', bothCutsMutant15(), 'held-one-chain-no-take'), 'e15-race-red-b', road, { placed: true });
       const annB = rb.calls.filter((x) => x.ann).length;
       console.log(`    CONTROL B — guards removed: round 15's chain hold (A15 + H15) AND B-1ca5's take (the scope digest's) ⇒ ${rb.calls.length} call(s), Announcements carried by ${annB}; the second flush settled while the block was in the ladder: ${rb.readInFlight}, its answer: ${rb.other.ok ? 'delivered' : rb.other.why}`);
       ok(rb.readInFlight === true && annB === 2,
         `CONTROL B «one chain, no take» (the chain hold and the take both cut): the same race, the second flush read while the block was in flight ⇒ ${rb.calls.length} calls, Announcements carried by ${annB} — the same held messages billed twice`, J2s({ calls: rb.calls, readInFlight: rb.readInFlight, other: rb.other }));
+      // B-1ca5 part B — THE MUST'S LEG (r432; round w5y5digbw items 4, 5, 9): the chain hold cut, the second flush reads while
+      // the press's block holds Announcements' messages in flight (PLACED: it waits on the block's take), then the block is
+      // REFUSED and its stash refused too (it gives its take back): the row was KEPT at that read and the messages are delivered
+      // ONCE, the row gone after. CONTROL: the first read as it was (a take counted as handed) clears the row — the messages lost
+      const mr = await refusedLeg15(MUT.load('src/server/channels-engine.js', m.cut, 'held-one-chain-refused'), 'e15-race-refused');
+      console.log(`    the must's leg — the block refused after the second flush read: it waited on the take ${mr.waitedOnTake}; Announcements delivered ${mr.annDelivered} time(s), its rows left ${mr.pend.ann}`);
+      ok(mr.readInFlight && mr.waitedOnTake && !mr.settledBeforeOpen && mr.refusedCalls === 1 && mr.annDelivered === 1 && mr.pend.ann === 0,
+        `r432 MUST: the chain hold cut, the second flush read while the block held Announcements' messages in flight and WAITED on its take; the block REFUSED — the row was KEPT and the messages delivered ONCE (${mr.annDelivered}), the row gone after (${mr.pend.ann})`, J2s(mr));
+      const FIRST_READ = '        const v0 = judgeHits(rec.id, en.id, pk, null, pend0.hits);\n';
+      const mrR = await refusedLeg15(MUT.load('src/server/channels-engine.js', cutOrFail(m.cut, FIRST_READ, '        const v0 = ((v) => ({ ...v, spent: [...v.spent, ...v.wait] }))(judgeHits(rec.id, en.id, pk, null, pend0.hits));\n', 'the first read counts a take as handed'), 'held-one-chain-refused-red'), 'e15-race-refused-red');
+      console.log(`    the must's control — the first read as it was: settled before the block answered ${mrR.settledBeforeOpen}; Announcements delivered ${mrR.annDelivered} time(s), its rows left ${mrR.pend.ann}`);
+      ok(mrR.settledBeforeOpen && mrR.annDelivered === 0 && mrR.pend.ann === 0,
+        `RED CONTROL: the second flush's first read as it was (a take counted as handed) cleared Announcements' rows at once; the block refused — the person's held messages LOST (${mrR.annDelivered} delivered, ${mrR.pend.ann} rows left)`, J2s(mrR));
     }
   } catch (e) { ok(false, `⑫ ${L15} threw on this tree: ` + ((e && e.stack) || e)); }
 }
