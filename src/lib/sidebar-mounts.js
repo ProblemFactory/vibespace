@@ -1200,7 +1200,7 @@ export function installSidebarMounts(Sidebar) {
         return b;
       };
       actions.append(
-        ibtn(MI.bolt, 'Test connection', async () => {
+        ibtn(MI.bolt, tr('Test connection'), async () => {   // Known K57 (2.369.413): the row's words in the reader's language (its zh / ja rows existed; the title skipped them)
           this._hostStatus = this._hostStatus || {};
           try {
             const r = await api(`/api/hosts/${h.id}/test`, { method: 'POST' });
