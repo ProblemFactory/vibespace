@@ -270,6 +270,23 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The cure (tests only, r356):** a listener counts only when it was BORN DURING the seed (its socket is absent from a snapshot taken when the seed begins). A world's fixed port is taken outside the kernel's bind(0) range (read from /proc/sys/net/ipv4/ip_local_port_range; a port in use is retried by name, within a bound).
 - **The fixed scene, at every gate:** seed 380113 with another listener of the process on the fixed port holds; its red control, a listener born during the seed on that port, is red by the same why.
 
+### gmail-connect-wall — B-9dd0 unit 1: no fast suite reaches a vendor's host (the reader, the shape suite, the boot's two vendor calls)
+- **The shape suite (test-channels-lark-shape):** leg ⑩'s two consent creates had no stand-in fetch. The adapter fell back to the runtime's fetch, POSTed a tenant token to open.feishu.cn, and passed on the refusal. Both now take the leg's recorded fetch. A recording, refusing global fetch counts every call past the loopback for the whole suite, and the count is a leg, with its control.
+- **The reader (NEW scripts/egress-sampler.cjs):**
+  - It is loaded by `--require` in every FAST suite's own argv (scripts/ci.mjs runSuiteAsync; never NODE_OPTIONS).
+  - It counts the connects past the loopback per host. An IP literal is judged as it stands. A NAME with the suite's OWN lookup is judged by what the lookup answers: an address past the loopback is counted, a REFUSAL is not (nothing left the box — 主开发 r321: test-tailnet-browsers fails three names through its stand-in on purpose). A name with no lookup of its own is counted before any lookup. The lookup is wrapped on a COPY of the options.
+  - A sentinel line proves it loaded; a host line it cannot write is said on stderr (a LOST marker) and the runner reads it as red.
+  - The row is RED by name, and so is a FAILED row that dialed; neither is retried, and the refusal names its cause (the hosts, the reader not loaded, a lost line). The red words say what is NOT watched: a child started without the reader, a bare DNS ask, UDP. ONE mkdtemp folder per runner.
+  - Its controls are in test-ci-gate §2n: the counted dials are planted so that no packet leaves (an own lookup answering 192.0.2.1 after its socket was destroyed; a literal destroyed before net connects it); the refusal, the loopback and the stand-in stay green; the verdict and the loopback table are pure legs.
+  - The heavy tier is unit 2's. The kit's runner does not pass it yet: the reader proves the hub box's fast tier and the hosted fast job.
+- **The read's finds, cured in the unit:**
+  - three false reds (own lookup seams: tailnet-browsers, egress-fence, apps-engine);
+  - two REAL egresses: test-browser-exit's direct-dial mutant (now a stand-in resolver), and test-cli-call's blackhole SYN to 10.255.255.1 (now a loopback listener whose process never accepts — backlog 1, queue filled; Node reads 0 as 511). That leg takes only the connect words now: a refused dial is the broken setup's shape, and the wait for the listener's port is bounded.
+- **A suite's hub asks no vendor:**
+  - cli-env refreshAvailableModels gets a refusal in front of the vendor model list under VS_NO_REAL_CLI=1; nothing moved, test-vendor-whitelist untouched.
+  - runtime-boot's runtime check is off under the switch and under any temp root, /var/tmp too (runtimeCheckArmed). The «under a temp root» verdict is ONE pure function, src/server-root.js tmpRootUnder over the real paths, shared with the update check (src/server/ops-routes.js).
+  - Legs: the model-list refusal in test-claude-update-needs-nothing (its control: the switch off makes the one request, to a stand-in); the runtime check's scenes in test-runtime-floor (with a red control); the verdict's table in test-server-root.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
