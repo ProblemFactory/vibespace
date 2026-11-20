@@ -507,13 +507,28 @@ class UserTodoManager {
     }
   }
 
+  /** the set-aside's name beside the file (ONE spelling: the boot's set-aside and the read again's) */
+  _asideName() { return `user-todos.json.corrupt-${new Date(this._now()).toISOString().replace(/[:.]/g, '-')}`; }
   /** r9: the unreadable file RENAMED beside itself (a copy when the rename cannot be done) → {why, to | null}. */
   _setAside(why, { quiet = false } = {}) {   // B-44f3: `quiet` — a damaged hold's retry says its failure once (the hold said it)
     const dir = path.dirname(this._file);
-    const to = `user-todos.json.corrupt-${new Date(this._now()).toISOString().replace(/[:.]/g, '-')}`;
+    const to = this._asideName();
     try { fs.renameSync(this._file, path.join(dir, to)); }
     catch (e) {
       try { fs.copyFileSync(this._file, path.join(dir, to)); }
+      catch (e2) { if (!quiet) console.warn(`[user-todos] user-todos.json is ${why} and could NOT be set aside (${(e2 && e2.code) || (e2 && e2.message)}) — HELD: the live file is its only copy, nothing writes it`); return { why, to: null }; }
+    }
+    console.warn(`[user-todos] user-todos.json was ${why} — set aside as ${to} (its bytes kept, never overwritten); For you starts empty`);
+    return { why, to };
+  }
+  /** B-44f3 (主开发 05:00Z, 5): the READ AGAIN's set-aside — a damaged hold is retried on a timer, so its rename / copy run OFF the
+   *  loop (fs.promises) on the data folder; the boot's set-aside above stays synchronous (the constructor's read is). Same words */
+  async _setAsideOff(why, { quiet = false } = {}) {
+    const dir = path.dirname(this._file);
+    const to = this._asideName();
+    try { await fs.promises.rename(this._file, path.join(dir, to)); }
+    catch (e) {
+      try { await fs.promises.copyFile(this._file, path.join(dir, to)); }
       catch (e2) { if (!quiet) console.warn(`[user-todos] user-todos.json is ${why} and could NOT be set aside (${(e2 && e2.code) || (e2 && e2.message)}) — HELD: the live file is its only copy, nothing writes it`); return { why, to: null }; }
     }
     console.warn(`[user-todos] user-todos.json was ${why} — set aside as ${to} (its bytes kept, never overwritten); For you starts empty`);
@@ -564,7 +579,7 @@ class UserTodoManager {
     const was = this._unread;
     this._unread = { file: path.basename(this._file), code: String(a.code || a.why || 'unreadable').slice(0, 60), why: String(a.why || 'unreadable').slice(0, 120), at: (was && was.at) || this._now() };
     if (!was) console.warn(`[user-todos] ${this._unread.file} could not be read (${this._unread.code}: ${this._unread.why}) — HELD: kept exactly as it is, nothing writes it, every write is refused by name (${TODOS_UNREAD}) until it reads; read again soon`);
-    else if (was.code !== this._unread.code) console.warn(`[user-todos] ${this._unread.file} still cannot be read — now ${this._unread.code}: ${this._unread.why}`);
+    else if (was.code !== this._unread.code) { console.warn(`[user-todos] ${this._unread.file} still cannot be read — now ${this._unread.code}: ${this._unread.why}`); this._notify(); }   // B-44f3 (主开发 05:00Z, 5): the open pages' held line follows the code
     this._unreadRetrySoon();
   }
   /** → { file, code, why, at, damaged } while the store is held, else null — the snapshot's `held`, the routes' question */
@@ -580,7 +595,10 @@ class UserTodoManager {
   }
   /** `fn` runs once the store has READ — now when it has, else right after the read that lifts the hold (a boot reconciler, a
    *  migration's step, a clear: what judges «not in For you» must judge the file, never the held store's empty memory). A
-   *  throwing fn is contained (logged). → true when it ran now */
+   *  throwing fn is contained (logged). → true when it ran now. The waiters are BOUNDED BY EVENTS, never by a timer: a caller with
+   *  no dedupe of its own (a refused job close, a proposal's end, a pool member's recovery, the ledger's recovery) adds one per such
+   *  event while held; a caller that asks on every pass keeps ONE (a flag — the cross-provider reconcile, the helper asks, the
+   *  queued file, the watch door, the vault lock's withdraw, the owed notices) */
   whenRead(fn, label = 'a deferred step') {
     if (typeof fn !== 'function') return false;
     if (!this._unread) { try { fn(); } catch (e) { console.warn(`[user-todos] ${String(label).slice(0, 80)} threw: ${(e && e.message) || e}`); } return true; }   // contained in BOTH roads (the first read's nit)
@@ -614,7 +632,8 @@ class UserTodoManager {
         state = { items: [] };
       } else if (a.state === 'corrupt') {
         // torn bytes (again): set aside now if they can be (r9's road — the store writable, ONE notice), else STILL damaged (its code kept)
-        const s0 = this._setAside(a.error ? `corrupt JSON (${String((a.error && a.error.message) || a.error).slice(0, 80)})` : 'not the expected shape', { quiet: wasDamaged });
+        const s0 = await this._setAsideOff(a.error ? `corrupt JSON (${String((a.error && a.error.message) || a.error).slice(0, 80)})` : 'not the expected shape', { quiet: wasDamaged });
+        if (this._unreadStopped || !this._unread) return !this._unread;   // stopped (or lifted) while the set-aside ran
         const b = SR.afterSetAside(a, s0.to);
         if (b.state !== 'missing') { this._holdUnread(b); return false; }
         state = { items: [] }; aside = s0;

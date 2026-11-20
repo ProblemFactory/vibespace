@@ -527,10 +527,35 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     } catch { return null; }
   }
 
-  function fileInbox(text, detail, urgency, expiresAt, i18n = null, about = null, itemKey = null) {
+  // B-44f3 (主开发 05:00Z, 2): a refusal's NOTICE while For you is held unread is OWED — the refusal stands (the gate decided, nothing
+  // here waits on For you), the person reads why at the read: filed ONCE then (the newest words of its key), its cadence stamp the
+  // refusal's own instant. At the read the seam with the «messages waiting» item is judged again over the READ list (the shape-C
+  // seam: one owner item per stuck turn — that item speaks), and a notice whose expiry passed meanwhile is not filed. In memory: a
+  // restart while held forgets it — the next refusal (it refuses again) files it as before
+  const owedInbox = new Map();   // the notice's key (inboxSig) → { args, at, waitKey }
+  let owedInboxAtRead = false;
+  const waitItemOpen = (key) => { try { const ut = getUserTodos(); const sn = ut && typeof ut.snapshot === 'function' ? ut.snapshot() : null; return !!sn && (sn.open || []).some((i) => i && i.sessionKey === key && String(i.itemKey || '').startsWith('messages-waiting:')); } catch { return false; } };
+  function fileOwedInbox() {
+    owedInboxAtRead = false;
+    let stamped = false;
+    const t = Date.now();
+    for (const [sig, o] of [...owedInbox]) {
+      owedInbox.delete(sig);
+      if (Number(o.args[3]) > 0 && Number(o.args[3]) <= t) continue;   // its expiry passed while held: the window it named is over
+      if (o.waitKey && waitItemOpen(o.waitKey)) { if (!(Number(state.notices['held|' + sig]) > o.at)) { state.notices['held|' + sig] = o.at; stamped = true; log(`[spend-guard] at For you's read: the spending notice at ${o.waitKey} is not filed — its «messages waiting» item stands and speaks for that turn`); } continue; }   // the waiting item speaks (the live path's seam, its line said)
+      if (fileInbox(...o.args) && !(Number(state.notices[sig]) > o.at)) { state.notices[sig] = o.at; stamped = true; }
+    }
+    if (stamped) persist();
+  }
+  function fileInbox(text, detail, urgency, expiresAt, i18n = null, about = null, itemKey = null, owe = null) {
     let userTodos = null;
     try { userTodos = getUserTodos(); } catch { userTodos = null; }
     if (!userTodos) return false;
+    if (owe && owe.sig && typeof userTodos.isHeldUnread === 'function' && userTodos.isHeldUnread() && typeof userTodos.whenRead === 'function') {
+      owedInbox.set(owe.sig, { args: [text, detail, urgency, expiresAt, i18n, about, itemKey], at: owe.at, waitKey: about && about.key ? about.key : null });
+      if (!owedInboxAtRead) { owedInboxAtRead = true; userTodos.whenRead(fileOwedInbox, "a spend refusal's notice"); }
+      return false;
+    }
     // kind 'notice' (2.369.118): a spend ceiling is FOR THE USER'S INFORMATION —
     // it sits in the popup's own Notices section and never in the red badge
     // …and it dies with the window it is about (`expiresAt`, see NOTICE_TTL_MS)
@@ -622,7 +647,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // notice for that conversation is not filed — one owner item per stuck turn; filed as before once that item is gone.
     // Its journal line keeps the notice's cadence under its OWN stamp (主开发 17:45Z): one line per REFUSE_INBOX_MS while the item
     // stands — never one per refusal — and never the notice's stamp, so the notice is filed at once when the item goes
-    const waitItemStands = !!(wait && wait.key) && (() => { try { const ut = getUserTodos(); const sn = ut && typeof ut.snapshot === 'function' ? ut.snapshot() : null; return !!sn && (sn.open || []).some((i) => i && i.sessionKey === wait.key && String(i.itemKey || '').startsWith('messages-waiting:')); } catch { return false; } })();
+    const waitItemStands = !!(wait && wait.key) && waitItemOpen(wait.key);   // the ONE predicate (B-44f3: the owed notice judges the seam with it again at For you's read)
     const heldSig = 'held|' + inboxSig;
     if (waitItemStands && now - lastInbox > REFUSE_INBOX_MS && now - (Number(state.notices[heldSig]) || 0) > REFUSE_INBOX_MS) { state.notices[heldSig] = now; persist(); log(`[spend-guard] ${v.why}: the spending notice at ${wait.key} is not filed — its «messages waiting» item stands and speaks for that turn`); }
     if (inbox && now - lastInbox > REFUSE_INBOX_MS && !waitItemStands) {   // inbox:false = a batch, answered in the person's own dialog (U2 cure)
@@ -635,7 +660,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + (wait ? `${promisedHere} of them are messages waiting behind running turns — in ${behind.slice(0, 3).map((b) => `«${b.name || '?'}»`).join(', ')}${behind.length > 3 ? ` and ${behind.length - 3} more` : ''}. They run when that turn ends, or when you stop it there.\n\n` : '')
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + `Background Work notifications and messages from other sessions. ${A.spendRowOf(v) ? `Adjust this one in Settings → Spending — vibespace://settings/${A.spendRowOf(v)} — or act on the account named above.` : 'Adjust them in Settings → Spending, or act on the account named above.'}`,   // lane setting-doors pick 1: the row, as its link
-        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : null);   // B-3b0f: ONE item across restarts, resolved when the file reads again
+        v.why === 'overage-in-use' || v.why === 'ledger-unreadable' || v.why === 'ledger-held-elsewhere' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName, behind }), wait && wait.key ? { key: wait.key } : null, v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : null, { sig: inboxSig, at: now });   // B-3b0f: ONE item across restarts, resolved when the file reads again
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;

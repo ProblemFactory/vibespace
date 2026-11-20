@@ -17,6 +17,9 @@
 //     count, its read count and its class (waits · refuses · contained · harmless). A file with no row is RED; a count that moved
 //     is RED (classify the new site, then move the count); a row naming nothing is DEAD (red); a write with NO try around it is RED
 //     unless the row counts it (`notry`, why); a write inside a catch that SWALLOWS is RED unless the row says why (`bare`).
+//     ITS BLIND SPOT (said — 主开发 05:00Z, 5): receivers are the common spellings, a per-file list, and the names LEARNED from a
+//     store-only method (idsWhere, forSession, setStatusMany …); a binding that calls ONLY common verbs (add / get / setStatus / flush)
+//     under an unlisted name is not seen — a strong heuristic, not a closed census (the fresh-binding control proves the learned road).
 //   ③ THE SCENES — driven: a data migration that touches For you is refused by name while held and runs at the read (the runner's
 //     ledger); a For-you clear and a job's clear are refused by name (nothing cleared — the job's items would come back with its
 //     name); the boot passes that judge «from before the restart» each wait for the read (pins, each with its control).
@@ -337,7 +340,7 @@ const ROWS = [
   { file: 'src/server/mounts-plugins-wiring.js', w: 9, r: 4, notry: 3, cls: 'refuses', why: 'the archive verb\'s asksOf throws todos-unread while held (conversation-ops answers it by name — a worker is never archived over asks it cannot see); the doors it hands (the browser forYou add / resolve, resolveAsks) carry no try of their own — every caller sits in its own try' },
   { file: 'src/server/record-clear.js', w: 2, r: 1, notry: 2, cls: 'refuses', why: 'a For-you clear and a job\'s clear are refused by name (todos_unread 503) BEFORE anything is cleared — the two clearItems lines are past that refusal' },
   { file: 'src/server/setting-holds.js', w: 1, r: 0, cls: 'contained', why: 'a setting hold\'s notice inside a try that logs; said again at the next hold' },
-  { file: 'src/server/spend-guard.js', w: 3, r: 3, cls: 'contained', why: 'the spend ledger\'s held notice (this .413 base): its close at a ledger load waits for For you\'s read (whenRead); spend notices inside tries that log; filed again at the next refusal of a turn', bare: SETTLE },
+  { file: 'src/server/spend-guard.js', w: 3, r: 3, cls: 'contained', why: 'the spend ledger\'s held notice (this .413 base): its close at a ledger load waits for For you\'s read (whenRead); a refusal\'s notice while held is OWED and filed once at the read (主开发 05:00Z, 2 — the «messages waiting» seam judged again over the read list by the live path\'s ONE predicate, waitItemOpen); other spend notices inside tries that log, filed again at the next refusal of a turn', bare: SETTLE },
   { file: 'src/server/tls.js', w: 2, r: 2, cls: 'contained', why: 'the HTTPS notice inside a try that logs; filed again at the next certificate check', bare: SETTLE },
   { file: 'src/server/unexpected-exit.js', w: 2, r: 1, cls: 'contained', why: 'an unexpected exit\'s item inside tries that log; the heal pass marks no conversation healed while held (the pass after the read heals)' },
   { file: 'src/server/usage-pool-engine.js', w: 18, r: 8, cls: 'contained', why: 'a blocked pool\'s episode item (this .413 base): its read finds nothing while held, judged again at the next poll after the read; the cross-provider asks reconcile (once a process) waits for the read (the first read\'s MUST); pool / usage / reset-credit items inside tries that log; the reset-credit asks are never seeded once from a held list; each filed again at its next judgment', bare: SETTLE },
@@ -456,6 +459,17 @@ console.log('③ the scenes — a migration waits for the read, a clear is refus
     ['src/server/spend-guard.js', "      if (ut0 && typeof ut0.isHeldUnread === 'function' && ut0.isHeldUnread() && typeof ut0.whenRead === 'function') ut0.whenRead(closeLedger, \"the spend ledger's unreadable notice\"); else closeLedger();"],
     ['src/server/usage-pool-engine.js', "    if (!_poolEndAtRead.has(poolId)) { _poolEndAtRead.add(poolId); todos.whenRead(() => { _poolEndAtRead.delete(poolId); poolBlockedTodoEnd(poolId, now); }, \"a blocked pool's recovery\"); }"],
     ['src/server/usage-pool-engine.js', "  if (typeof t.isHeldUnread === 'function' && t.isHeldUnread()) { if (!_crossAtRead && typeof t.whenRead === 'function') { _crossAtRead = true; t.whenRead(() => { _crossAtRead = false; reconcileCrossAsks(); }, 'the cross-provider asks reconcile'); } return; }"],
+    // 主开发 05:00Z (round wf_e05ff50c-68a): the vault lock's owed withdraw, a press on the held store named by its door, a spend refusal's
+    // owed notice, the channels' own presses never read as cut short by a late reconcile
+    ['src/server/vault-paste-door.js', "    if (userTodos && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') { if (!lockAtRead) { lockAtRead = true; userTodos.whenRead(() => { lockAtRead = false; withdrawAll(); }, \"the vault lock's withdraw of the paste requests\"); } return; }"],
+    ['src/server/vault-paste-door.js', "    if (!q && userTodos && userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('answering a paste request') };"],
+    ['src/server/vault-paste-door.js', "    if (!w && userTodos && userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('answering a words proposal') };"],
+    ['src/server/spend-guard.js', "      if (!owedInboxAtRead) { owedInboxAtRead = true; userTodos.whenRead(fileOwedInbox, \"a spend refusal's notice\"); }"],
+    ['src/server/spend-guard.js', "v.why === 'ledger-unreadable' ? LEDGER_ITEM : v.why === 'ledger-held-elsewhere' ? HELD_ITEM : null, { sig: inboxSig, at: now });"],
+    ['src/server/spend-guard.js', "      if (o.waitKey && waitItemOpen(o.waitKey)) {"],
+    ['src/server/spend-guard.js', "    const waitItemStands = !!(wait && wait.key) && waitItemOpen(wait.key);"],
+    ['src/server/channels-access.js', "  async function decideHeldMarked(req0, approve, by, opts = {}) { pressing.add(req0.id); try { return await decideHeld(req0, approve, by, opts); } finally { pressing.delete(req0.id); } }"],
+    ['src/server/channels-access.js', "(r.status === 'approved' || r.status === 'denied') && !pressing.has(r.id)).map((r) => r.id));"],
   ];
   const missing = PASSES.filter(([f, line]) => read(f).split(line).length !== 2).map(([f, line]) => `${f} «${line.slice(0, 70)}»`);
   ok(!missing.length, `the ${PASSES.length} boot passes / settles / absence judgments that read the list each wait for the read or refuse by name (their line stands once)`, missing);
@@ -536,7 +550,9 @@ console.log('③ the scenes — a migration waits for the read, a clear is refus
   const scene = async (OI, mode = 'mark') => {
     const d = dataDir(), td = path.join(d, 'todos'), f = path.join(td, 'user-todos.json'), dd = path.join(d, 'data');
     fs.mkdirSync(f, { recursive: true });
-    let m = quiet(() => new UT.UserTodoManager({ dataDir: td, expirySweepMs: 0, unreadRetry: RETRY }));
+    let adds = 0;   // every add of the check's bucket (主开发 05:00Z, 4: a DOUBLE filing is seen — the store merges same words into one item)
+    const counted = (t) => { const a0 = t.add.bind(t); t.add = (k, it) => { if (k === OI.INBOX_KEY) adds++; return a0(k, it); }; return t; };
+    let m = counted(quiet(() => new UT.UserTodoManager({ dataDir: td, expirySweepMs: 0, unreadRetry: RETRY })));
     let am = quiet(() => new AccountManager({ dataDir: dd }));
     const x = am.createSubscription({ name: 'X' }).id, y = am.createSubscription({ name: 'Y' }).id;
     quiet(() => am.setOat(x, tok()));
@@ -553,26 +569,27 @@ console.log('③ the scenes — a migration waits for the read, a clear is refus
     if (mode === 'restart') {   // as the hub boots: the account routes attach BEFORE the For-you store exists (its getter answers nothing), the store is built in the same turn
       m.stop(); let tRef = null; am = quiet(() => new AccountManager({ dataDir: dd })); wire(am);
       o = OI.create({ accounts: am, todos: () => tRef, windows: () => w, k: K, log: () => { }, journal: () => { } }); o.attach();
-      m = tRef = quiet(() => new UT.UserTodoManager({ dataDir: td, expirySweepMs: 0, unreadRetry: RETRY }));
+      m = tRef = counted(quiet(() => new UT.UserTodoManager({ dataDir: td, expirySweepMs: 0, unreadRetry: RETRY })));
       await new Promise((res) => setImmediate(res));   // the boot's next turn: the look finds the store now
     }
     fs.rmdirSync(f); fs.writeFileSync(f, JSON.stringify({ items: [] }));
     await quiet(() => m.readAgain());
+    if (mode === 'mark' || mode === 'replaced') { try { quiet(() => o.onReading(x, { window: win(OWN), at: Date.now(), viaToken: true, gen: am.oatCheckOf(x)?.gen, eligible: { ok: true, why: 'slot-verified' } })); } catch { } }   // a reading AFTER the read: nothing filed again
     const open = (m.forSession([OI.INBOX_KEY]) || []).filter((i) => i && i.status === 'open');
     const c1 = am.oatCheckOf(x) || {};
-    const out = { mode, seen, held, open: open.length, state: c1.state || null, todoId: c1.todoId || null, askId: c1.ask ? c1.ask.todoId || null : null, filedId: open[0] ? open[0].id : null };
+    const out = { mode, seen, held, adds, open: open.length, state: c1.state || null, todoId: c1.todoId || null, askId: c1.ask ? c1.ask.todoId || null : null, filedId: open[0] ? open[0].id : null };
     m.stop();
     return out;
   };
   const OI = require(path.join(ROOT, 'src/server/oat-identity.js'));
   const r = await scene(OI);
-  ok(r.held.held && r.held.state === 'mismatch' && r.held.placeable === false && r.held.todoId === OWED && r.seen[K - 1] === 'mismatch' && r.open === 1 && r.todoId && r.todoId === r.filedId,
+  ok(r.held.held && r.held.state === 'mismatch' && r.held.placeable === false && r.held.todoId === OWED && r.seen[K - 1] === 'mismatch' && r.open === 1 && r.adds === 1 && r.todoId && r.todoId === r.filedId,
     `DRIVEN (oat-identity, THE MONEY LAW): For you HELD — ${K} readings of a token that answers with another account's window MARK the member at once (the pool places nothing new on it; the item's id saved OWED); its notice is filed ONCE at the read, its id saved on the mark`, r);
   const Ox = MJ.load('src/server/oat-identity.js', anchored(OSRC, "    if (check.state !== 'pending') return { verdict: 'idle' };\n", "    if (check.state !== 'pending') return { verdict: 'idle' };\n    { const t0 = T(); if (t0 && typeof t0.isHeldUnread === 'function' && t0.isHeldUnread()) return { verdict: 'idle', held: true }; }\n", 'the held early return'), 'oat-held-return');
   const rx = await scene(Ox);
   ok(rx.held.state !== 'mismatch' && rx.held.placeable === true, 'CONTROL (the early return put back — the verdict waits on For you): nothing is marked while it is held and the pool keeps placing on a token of another account', rx);
   const rs = await scene(OI, 'restart'), rr = await scene(OI, 'replaced'), rh = await scene(OI, 'hint');
-  ok(rs.held.todoId === OWED && rs.state === 'mismatch' && rs.open === 1 && rs.todoId === rs.filedId,
+  ok(rs.held.todoId === OWED && rs.state === 'mismatch' && rs.open === 1 && rs.adds === 1 && rs.todoId === rs.filedId,
     'DRIVEN (oat-identity): the hub RESTARTS while the mark\'s item is owed — the debt is on the saved check (OWED), and the new orchestrator\'s look at the read files it (its id saved)', rs);
   ok(rr.held.todoId === OWED && rr.state === 'pending' && rr.open === 0 && !rr.todoId,
     'DRIVEN (oat-identity): a new token saved before the read REPLACED the owed mark — nothing is filed at the read (never a «belongs to another account» notice on a row the owner just fixed)', rr);
@@ -582,11 +599,95 @@ console.log('③ the scenes — a migration waits for the read, a clear is refus
   const Ob = MJ.load('src/server/oat-identity.js', anchored(OSRC, "    if (!bootLooked) { const t = setImmediate(look); if (t && t.unref) t.unref(); }\n", '', 'the boot look not tried again'), 'oat-boot-look');
   const rbx = await scene(Ob, 'restart');
   ok(rbx.open === 0, 'CONTROL (the boot\'s look not tried again on the next turn): the hub attaches before it builds the For-you store, so a mark owed before the restart is never said (no reading comes)', rbx);
+  const Od = MJ.load('src/server/oat-identity.js', anchored(anchored(OSRC, '    if (owedPass) return true;\n', '', 'one owed pass at a time'), "        if (c.state === 'mismatch' && c.todoId === OWED) {", "        if (c.state === 'mismatch') {", 'only what is owed'), 'oat-double-filing');
+  const rd = await scene(Od);
+  ok(rd.adds >= 2, 'CONTROL (the owed pass\'s guards cut — one pass at a time, only what is still owed): the mark\'s notice is FILED TWICE (the count of adds sees it; the store merges the words into one item)', rd);
   const rsx = await scene(Ow, 'restart'), rhx = await scene(Ow, 'hint');
   ok(rsx.open === 0 && rhx.open === 0, 'CONTROL (the debt not saved on the check — OWED dropped): after a restart the mark is never said, and the held ask is never filed', { rsx, rhx });
   const Og = MJ.load('src/server/oat-identity.js', anchored(OSRC, "        if (c.state === 'mismatch' && c.todoId === OWED) {", "        if (c.state === 'mismatch' || c.state === 'pending') {", 'the owed guard cut'), 'oat-owed-guard');
   const rrx = await scene(Og, 'replaced');
   ok(rrx.open === 1, 'CONTROL (the owed guard cut): the replaced check gets a «belongs to another account» notice at the read', rrx);
+}
+
+{
+  // DRIVEN (browser-dialogs — the first read's MUST, its leg asked 主开发 05:00Z, 4): the two sweeps of a PAST hub life's items wait
+  // for For you's read when it is held unread — run at the read, never at the create (a sweep over the held, empty list closes
+  // nothing and never runs again)
+  const BSRC = read('src/server/browser-dialogs.js');
+  const run = (BDm) => {
+    let held = true; const waiters = [], calls = [];
+    const forYou = { add: () => null, resolve() { }, isHeldUnread: () => held, whenRead: (fn) => { if (!held) { fn(); return true; } waiters.push(fn); return false; },
+      sweep: (pre) => { calls.push(`sweep:${held ? 'held' : 'read'}`); return 0; }, sweepAs: () => { calls.push(`sweepAs:${held ? 'held' : 'read'}`); return 0; } };
+    quiet(() => BDm.create({ keeper: { profile: () => null, cdpEndpointFor: async () => ({ ok: false }), onLease: () => () => { } }, log: { log() { }, warn() { } }, now: () => 1, forYou }));
+    const atCreate = calls.length;
+    held = false; for (const fn of waiters.splice(0)) fn();
+    return { atCreate, calls };
+  };
+  const b = run(require(path.join(ROOT, 'src/server/browser-dialogs.js')));
+  ok(b.atCreate === 0 && b.calls.length === 2 && b.calls.every((c) => c.endsWith(':read')), 'DRIVEN (browser-dialogs): For you held at the create — the past hub life\'s two sweeps (pk-left, the sign-in asks) run at the READ, none at the create', b);
+  const Bx = MJ.load('src/server/browser-dialogs.js', anchored(BSRC, "  if (forYou && typeof forYou.isHeldUnread === 'function' && forYou.isHeldUnread() && typeof forYou.whenRead === 'function') forYou.whenRead(sweepPastLife, \"a past hub life's browser items\"); else sweepPastLife();", '  sweepPastLife();', 'the past-life sweep not deferred'), 'dialogs-sweep-now');
+  const bx = run(Bx);
+  ok(bx.atCreate === 2 && bx.calls.every((c) => c.endsWith(':held')), 'CONTROL (the past-life sweep not deferred): both sweeps run over the HELD (empty) list at the create — and never again', bx);
+}
+{
+  // DRIVEN (vault-hooks — 主开发 05:00Z, 4): the vault's For-you item is judged at the READ by the lock state of then — the vault
+  // unlocked while For you was held ⇒ the file's «locked» item is CLOSED at the read (never «locked» over an open vault)
+  const VSRC = read('src/server/vault-hooks.js');
+  const scene = async (VHm) => {
+    const d = dataDir(), f = path.join(d, 'user-todos.json');
+    fs.mkdirSync(f);
+    const m = quiet(() => new UT.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY }));
+    let state = 'locked';
+    const vault = { onOpen() { }, onLock() { }, onUnlock() { }, onBlocked() { }, onFailing() { }, facts: () => ({ state }), blockedSummary: () => null };
+    quiet(() => VHm.wireVaultHooks({ vault, userTodos: m, log: { log() { }, warn() { } } }));
+    state = 'unlocked';   // the person unlocked while For you was held
+    fs.rmdirSync(f); fs.writeFileSync(f, JSON.stringify({ items: [{ ...ITEM('v1', VHm.VAULT_ITEM_TEXT), sessionKey: VHm.VAULT_INBOX_KEY, origin: 'vault', kind: 'action', action: { type: 'vault-unlock' } }] }));
+    await quiet(() => m.readAgain());
+    const it = m.get('v1');
+    m.stop();
+    return { status: it ? it.status : null };
+  };
+  const v = await scene(require(path.join(ROOT, 'src/server/vault-hooks.js')));
+  ok(v.status === 'done', 'DRIVEN (vault-hooks): the vault unlocked while For you was held — the file\'s «The vault is locked» item is closed at the read', v);
+  const Vx = MJ.load('src/server/vault-hooks.js', anchored(VSRC, '      else if (late) {', '      else if (false) {', 'the late close cut'), 'vault-late-close');
+  const vx = await scene(Vx);
+  ok(vx.status === 'open', 'CONTROL (the late close cut): the «locked» item stays open over an open vault after the read', vx);
+}
+
+{
+  // DRIVEN (spend-guard — 主开发 05:00Z, 2): a turn refused while For you is held STAYS refused (the gate decides, nothing waits on For
+  // you); its NOTICE is owed — filed ONCE at the read, its cadence stamped with the refusal's own instant (a refusal after the read
+  // files no second one)
+  const GSRC = read('src/server/spend-guard.js');
+  const scene = async (SGm, ago = 0) => {   // ago: the held refusals' clock that far back (their notice's expiry passed before the read)
+    const d = dataDir(), td = path.join(d, 'todos'), f = path.join(td, 'user-todos.json'), gd = path.join(d, 'data');
+    fs.mkdirSync(f, { recursive: true }); fs.mkdirSync(gd, { recursive: true });
+    const m = quiet(() => new UT.UserTodoManager({ dataDir: td, expirySweepMs: 0, unreadRetry: RETRY }));
+    let tried = 0; const a0 = m.add.bind(m); m.add = (k, it) => { if (it && it.origin === 'spend') tried++; return a0(k, it); };
+    const g = quiet(() => SGm.create({ dataDir: gd, serverSetting: (k) => (k === 'spend.unattendedPerIdentityHour' ? 0 : undefined), getUserTodos: () => m, log: () => { } }));
+    const id = { key: 'sub-held', name: 'Held account' };
+    const ask = (back = 0) => { try { const v = quiet(() => g.authorize({ reason: 'auto-resume', identity: id, hold: false, now: Date.now() - back })); return v && v.ok === false ? v.why : 'allowed'; } catch (e) { return 'threw: ' + e.message; } };
+    const held = [ask(ago), ask(ago)], triedHeld = tried;
+    fs.rmdirSync(f); fs.writeFileSync(f, JSON.stringify({ items: [] }));
+    await quiet(() => m.readAgain());
+    const spendOpen = () => (m.snapshot().open || []).filter((i) => i && i.origin === 'spend').length;
+    const filed = spendOpen();
+    const after = ask(), afterOpen = spendOpen();
+    m.stop();
+    return { held, triedHeld, filed, after, afterOpen, tried };
+  };
+  const sg = await scene(require(path.join(ROOT, 'src/server/spend-guard.js')));
+  ok(sg.held.every((w) => w === 'hour-cap') && sg.triedHeld === 0 && sg.filed === 1 && sg.after === 'hour-cap' && sg.afterOpen === 1 && sg.tried === 1,
+    'DRIVEN (spend-guard): two turns refused while For you is held stay REFUSED; the refusal\'s notice is owed (no add tried while held) and filed ONCE at the read; a refusal after it files no second one', sg);
+  const Gx = MJ.load('src/server/spend-guard.js', anchored(GSRC, ", { sig: inboxSig, at: now });", ");", 'the refusal notice not owed'), 'spend-notice-unowed');
+  const gx = await scene(Gx);
+  ok(gx.held.every((w) => w === 'hour-cap') && gx.filed === 0, 'CONTROL (the refusal\'s notice not owed): the person never reads why after the read — until another refusal comes', gx);
+  const SG = require(path.join(ROOT, 'src/server/spend-guard.js'));
+  const se = await scene(SG, 7 * 3600e3);
+  ok(se.held.every((w) => w === 'hour-cap') && se.filed === 0, 'DRIVEN (spend-guard): an owed notice whose expiry passed while For you was held is NOT filed at the read (the store would keep it with no end — the window it named is over)', se);
+  const Ge = MJ.load('src/server/spend-guard.js', anchored(GSRC, "      if (Number(o.args[3]) > 0 && Number(o.args[3]) <= t) continue;", '', 'the expiry skip cut'), 'spend-owed-expired');
+  const ge = await scene(Ge, 7 * 3600e3);
+  ok(ge.filed === 1, 'CONTROL (the expiry skip cut): a notice of a window that ended hours ago is filed at the read — and kept with no end', ge);
 }
 
 // ── ④ THE PAGE + THE ROUTES ──────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -596,6 +697,7 @@ console.log('④ the page draws the hold where «Nothing needs you» would stand
   const SENT = 'For you cannot read its saved list right now ({file}: {code}) — nothing can be filed or changed until it reads. It is read again soon.';
   const DMG = "For you's saved list is damaged and could not be set aside ({file}) — it is kept exactly as it is, and nothing can be filed or changed until it is fixed.";
   ok(A.includes('export function heldWords(todos) {') && A.includes(`t(${JSON.stringify(DMG)}, p)`) && A.includes(`t('${SENT}', p)`), 'ONE helper words the hold (user-todos-actions heldWords): the read failed / the bytes damaged');
+  ok(P.includes("btn.title = (heldWords(todos) || actionWords(action, total))") && P.includes("label = t('Inbox') + (heldNow ? ', ' + heldNow :"), 'the TASKBAR CHIP and the Inbox tab say what the tray says while held (主开发 05:00Z, 3) — never «Nothing waiting on you»');
   ok(P.includes("const held = heldWords(todos);") && P.includes("held ? t('cannot be read') : openActions ?") && P.includes("emptyWords = held || idle;") && P.includes("idle = emptyEl.dataset.idle != null ? emptyEl.dataset.idle : (emptyEl.dataset.idle = emptyEl.textContent)"), 'the For-you popup: the head reads «cannot be read» (never «all clear») and the empty line is the hold\'s words (else the element\'s own idle words — the plain-words debt sentence keeps its one site)');
   ok(WIN.includes(': heldWords(todos) ? heldWords(todos)'), 'the For-you window: the empty line is the hold\'s words');
   for (const lang of ['zh', 'ja']) {

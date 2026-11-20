@@ -43,7 +43,7 @@ const STATUS = Object.freeze({
   exists: 409, bad_seed: 400, seed_too_short: 400, bad_uri: 400, hotp_unsupported: 400, bad_digits: 400, bad_period: 400, bad_algorithm: 400, bad_text: 400, bad_name: 400,
   bad_args: 400, not_granted: 403, not_running: 409, failed: 500,
   // lane vault-run-door: the switch and the run card's answer (people's doors)
-  entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, ask_expired: 410, ask_changed: 409, bad_answer: 400,
+  entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, 'todos-unread': 503 /* B-44f3: For you held unread — the answer doors name it, try once it reads */, ask_expired: 410, ask_changed: 409, bad_answer: 400,
   ask_redrawn: 409, restore_failed: 500,   // lane vault-standing-request r4: the card drawn again at the press · a partial write not put back (by name)
   always_not_offered: 400, conversation_gone: 410,
   window_not_offered: 400, window_card_only: 400, window_end_required: 400, window_too_long: 400, window_excepted: 409,   // lane vault-standing-request r7: «Allow for 1 hour» (r8: + the writer's cap, 除了)
@@ -176,7 +176,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   const answer = (res, r) => {
     if (r && r.ok) return res.json({ ...r, ...vault.facts() });
     const code = (r && r.code) || 'error';
-    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || WORDS[code] || code });
+    res.status(STATUS[code] || 400).json({ ...vault.facts(), ...r, ok: false, code, error: (code === 'code_paced' && r && r.error) || (code === 'todos-unread' && r && r.words) || WORDS[code] || code });   // B-44f3: the held store's own sentence
   };
   /** The request's password field(s), taken OFF the request (no later reader sees them). */
   const take = (req, ...names) => {

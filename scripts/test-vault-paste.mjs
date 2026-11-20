@@ -1444,6 +1444,40 @@ async function runRoad(name, { door, routes } = {}) {
   ok(!t3.stored && !t3.entries.includes('totp:mutant-code'), 'MUTANT the totp branch of the answer gone ⇒ nothing lands as a two-step code (RED — the request\'s target is the two-step writer\'s)', t3);
 }
 
+console.log('⑳ B-44f3 (主开发 05:00Z, 1) — a vault LOCK while For you is held: its withdraw is OWED and runs at the read');
+{
+  // the request a past hub life filed (world A files it; its store's file is the bytes the held store reads later)
+  const A = makeWorld('held-lock-a');
+  await A.vault.setup(PW);
+  const r = A.paste.request({ caller: { conversationId: 'cid-held-1', scope: 'cid-held-1', sessionKey: 'w1', name: 'Lane asker' }, words: 'the held key', purpose: 'a held scene', kind: 'secret' });
+  A.userTodos.flush?.();
+  const fileBytes = fs.readFileSync(path.join(ROOT, 'held-lock-a', 'user-todos.json'), 'utf8');
+  A.vault.close();
+  const lockScene = async (name, DOORm) => {
+    const hf = path.join(ROOT, name, 'user-todos.json');
+    fs.mkdirSync(hf, { recursive: true });   // For you cannot be read at this start (EISDIR): the world's store is HELD
+    const o = console.warn; console.warn = () => { };
+    let B; try { B = makeWorld(name, { door: DOORm }); } finally { console.warn = o; }
+    await B.vault.setup(PW);
+    const s = await serve(B);
+    const press = await s.hit(`/api/vault/secret-requests/${r.requestId}/answer`, { body: { answer: 'deny' } });   // a press while held, over the wire
+    s.srv.close();
+    B.vault.lock('test');   // the person LOCKS while For you is held
+    fs.rmdirSync(hf); fs.writeFileSync(hf, fileBytes);
+    const o2 = console.warn, l2 = console.log; console.warn = () => { }; console.log = () => { };
+    try { await B.userTodos.readAgain(); } finally { console.warn = o2; console.log = l2; }
+    const it = (B.userTodos.snapshot().resolved || []).concat(B.userTodos.snapshot().open || []).find((x) => x.action && x.action.requestId === r.requestId);
+    B.userTodos.stop(); B.vault.close();
+    return { press: { status: press.status, code: press.json && press.json.code, error: String((press.json && press.json.error) || '').slice(0, 80) }, status: it ? it.status : null, by: it ? it.resolvedBy : null };
+  };
+  ok(r && r.ok && r.requestId && /"requestId"/.test(fileBytes), 'the past life\'s request is filed (its item in the file)', r);
+  const L = await lockScene('held-lock-b', require(path.join(REPO, 'src/server/vault-paste-door.js')));
+  ok(L.press.status === 503 && L.press.code === 'todos-unread' && /For you cannot read its saved list/.test(L.press.error) && L.status === 'done' && L.by === 'vault_locked',
+    'a press while For you is held is refused BY ITS DOOR over the wire (503 todos-unread, the held store\'s own sentence — never «that request is gone»); a LOCK while held withdraws the request AT THE READ (done · vault_locked — a lock ends every ask that was not pressed)', L);
+  const Lx = await lockScene('held-lock-c', mutant('src/server/vault-paste-door.js', "    if (userTodos && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') { if (!lockAtRead) {", "    if (false) { if (!lockAtRead) {"));
+  ok(Lx.status === 'open', 'MUTANT the lock\'s withdraw not owed while held ⇒ the request stays OPEN after the read (pressable after a lock)', Lx);
+}
+
 W.vault.close();
 console.log(`\n${fail ? '✗' : '✓'} test-vault-paste: ${pass} passed, ${fail} failed`);
 if (fail) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${pass})`); process.exit(0); }

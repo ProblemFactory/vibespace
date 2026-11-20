@@ -208,6 +208,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const id = String(requestId || '');
     index();
     const q = open.get(id);
+    if (!q && userTodos && userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('answering a paste request') };   // B-44f3: the held store — never «that request is gone»
     if (!q) return named(settled.has(id) ? 'ask_settled' : 'ask_unknown');
     const mark = () => { if (person) q.fact = { decidedBy: 'person', decidedAt: now() }; };   // r3: the person verdict's mark (the route's `person`) — the record's, never the agent's receipt
     // THE BELT: the item still open, still this request's (the owner answers what the tray shows — the item IS the record)
@@ -390,7 +391,16 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
   // A LOCK ACT WITHDRAWS EVERY OPEN REQUEST (design q-043 decision ③ — the lock ends every unanswered ask): its item done
   // vault_locked, its asker told at its next turn that it may ask again once the vault is unlocked (no quiet: the owner did not
   // refuse it). A restart is no lock act — a request kept over it, or filed while locked, waits (its box: vault_locked, 解锁…)
-  if (typeof vault.onLock === 'function') vault.onLock(() => { index(); for (const q of [...open.values()]) settle(q, 'withdrawn', { why: 'locked' }); for (const w of [...wopen.values()]) wsettle(w, 'withdrawn'); });   // + every proposal of an entry's words (lane vault-entry-description)
+  // B-44f3 (主开发 05:00Z, 1): a lock while For you is held unread — the index cannot be read (its list is empty because it is unread):
+  // the lock's withdraw is OWED and runs at the read, over the FILE's requests (a lock ends every ask that was not pressed; none can
+  // be filed or answered while held). ONE owed withdraw, in memory: a restart before the read leaves the requests waiting, as after any
+  // restart (a restart is no lock act)
+  let lockAtRead = false;
+  const withdrawAll = () => { index(); for (const q of [...open.values()]) settle(q, 'withdrawn', { why: 'locked' }); for (const w of [...wopen.values()]) wsettle(w, 'withdrawn'); };
+  if (typeof vault.onLock === 'function') vault.onLock(() => {
+    if (userTodos && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') { if (!lockAtRead) { lockAtRead = true; userTodos.whenRead(() => { lockAtRead = false; withdrawAll(); }, "the vault lock's withdraw of the paste requests"); } return; }
+    withdrawAll();
+  });
   /** 「其他密钥或密码…」 (the Vault window's 添加 menu — the owner 2026-10-23: 「我压根没法添加啊」): a FREE entry the owner adds —
    *  a label, a kind, a note and the value (taken off the body by the route) → `secret:<10 hex>`. Unlocked only. */
   function addEntry({ label, note = '', kind = 'secret', value = null, by = 'user' } = {}) {
@@ -536,6 +546,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const id = String(proposalId || '');
     index();
     const w = wopen.get(id);
+    if (!w && userTodos && userTodos.isHeldUnread?.()) return { ok: false, code: 'todos-unread', words: userTodos.unreadRefusal('answering a words proposal') };   // B-44f3: the held store — never «that request is gone»
     if (!w) return named(settled.has(id) ? 'ask_settled' : 'ask_unknown');
     const it = userTodos && typeof userTodos.get === 'function' ? userTodos.get(w.todoId) : null;
     if (!it || it.status !== 'open' || !it.action || it.action.type !== P.WORDS_TYPE || it.action.askId !== id) { wforget(w); return named('ask_settled'); }

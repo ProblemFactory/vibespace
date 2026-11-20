@@ -254,7 +254,7 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
   const P = read('src/lib/user-todos-panel.js'), W = read('src/lib/inbox-window.js'), ACT = read('src/lib/user-todos-actions.js'), CSS = read('public/style.css');
   const SR = read('src/lib/sidebar-render.js'), COL = read('src/lib/sidebar-column.js');
   const wiring = (p) => ({
-    badge: /const total = openCount\(todos\.open\);/.test(p) && /btn\.classList\.toggle\('ut-has-items', total > 0\);/.test(p) && /mBtn\.classList\.toggle\('ut-has-items', total > 0\);/.test(p) && /btn\.title = actionWords\(action, total\)/.test(p) && /ut-seg-quiet/.test(p),
+    badge: /const total = openCount\(todos\.open\);/.test(p) && /btn\.classList\.toggle\('ut-has-items', total > 0\);/.test(p) && /mBtn\.classList\.toggle\('ut-has-items', total > 0\);/.test(p) && /btn\.title = \(heldWords\(todos\) \|\| actionWords\(action, total\)\)/.test(p) && /ut-seg-quiet/.test(p),
     tab: /const words = actionWords\(action, c\.inbox\.action\);/.test(p),
     head: /const openActions = openCount\(todos\.open\);/.test(p),
   });
@@ -316,7 +316,7 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
       && /const HOME_ON_KEY = 'vibespace\.phoneHomeOn';/.test(P) && /noteHomeOn\(true\);/.test(P) && /noteHomeOn\(false\);/.test(P)
       && /this\._shownAtBoot = Object\.keys\(this\._shown\)\.length > 0;/.test(NAV) && /shownAtBoot\(\) \{ return this\._shownAtBoot; \}/.test(NAV),
     badge: /if \(app\.viewportClass\?\.\(\) === 'compact' && home\) \{\n\s+if \(homeShown\(\)\) \{ hideHome\(\); if \(!app\.wm\?\.activeWindowId\) app\.sidebar\?\.toggle\?\.\(true\); return; \}\n\s+if \(showHome\(\)\) \{/.test(P),
-    drawer: /b\.id = 'drawer-foryou';/.test(P) && /sec\.prepend\(b\);/.test(P) && /paintDrawerRow\(total\);/.test(P) && /`<span>\$\{escHtml\(t\('For you'\)\)\} · \$\{total\}<\/span>`/.test(P) && /html\[data-vc="compact"\] \.drawer-foryou \{ display: flex;[^}]*min-height: 44px;/.test(CSS),
+    drawer: /b\.id = 'drawer-foryou';/.test(P) && /sec\.prepend\(b\);/.test(P) && /paintDrawerRow\(total\);/.test(P) && /`<span>\$\{escHtml\(t\('For you'\)\)\} · \$\{heldWords\(todos\) \? escHtml\(t\('cannot be read'\)\) : total\}<\/span>`/.test(P) && /html\[data-vc="compact"\] \.drawer-foryou \{ display: flex;[^}]*min-height: 44px;/.test(CSS),
   };
   ok(doors.reload && doors.badge && doors.drawer, 'THE PHONE\'S FIRST SCREEN: a RELOAD of a tab that had a window on show keeps it (the page only on a cold open, nothing on show, or the page itself on show); the top bar\'s For you TOGGLES the page (the sheet only when it has no row); the ☰ drawer\'s first row «For you · N» opens it', doors);
   ok(!/if \(reloaded && homeWas !== '1' && app\.wm\?\.activeWindowId\) return;/.test(P.replace("        if (reloaded && homeWas !== '1' && app.wm?.activeWindowId) return;\n", '')), 'CONTROL: the base\'s boot (the guard cut — the page takes every reload) ⇒ RED');

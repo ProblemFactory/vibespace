@@ -246,6 +246,14 @@ If `vibespace-window list` shows the app's `portal` as `unavailable: …`, the
 chooser opens on the user's main desktop instead: ask them to pick the file
 there, or relaunch with the portal off (see the apps manual).
 
+A desktop-app browser's GTK file chooser (Chrome's Open / Upload) has its own
+road: `key <h> ctrl+l` does nothing there and `type` into its list is refused
+(`node_not_editable`). Open its location field through the tree instead —
+`click <h> @eN --action show_location` on the File Chooser Widget node — then
+take a new snapshot, `type` the path into the text field it shows (its `@ref`)
+and `click` Open (or Select). It is the way that works through the tree in that
+chooser (agent feedback, 2.369.410).
+
 ### `click @ref` — act on a node
 
 Runs the node's own declared action (`click` > `press` > `activate` >

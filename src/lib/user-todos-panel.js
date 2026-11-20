@@ -77,7 +77,7 @@ export function installUserTodos(app) {
     sec.prepend(b);
     return b;
   })();
-  const paintDrawerRow = (total) => { if (drawerRow) drawerRow.innerHTML = UI_ICONS.inbox + `<span>${escHtml(t('For you'))} · ${total}</span>`; };
+  const paintDrawerRow = (total) => { if (drawerRow) drawerRow.innerHTML = UI_ICONS.inbox + `<span>${escHtml(t('For you'))} · ${heldWords(todos) ? escHtml(t('cannot be read')) : total}</span>`; };   // B-44f3: the phone drawer's row says the hold too
   const model = inboxModel(app); // THE one store + the verbs (src/lib/user-todos-actions.js) — the For-you window asks for the same one
   onVaultFacts(() => document.querySelectorAll('.ut-secret').forEach((b) => applySecretBox(b))); // lane vault-paste-request: every paste box says the vault's state live (locked ⇒ 解锁… inline; unlocked ⇒ ready)
   let todos = { open: [], resolved: [] };
@@ -198,7 +198,7 @@ export function installUserTodos(app) {
                   quiet ? `<span class="ut-count ut-seg-quiet" title="${t('{n} more, none pressing', { n: quiet })}">${quiet}</span>` : '',
                   notices ? `<span class="ut-count ut-seg-notice" title="${t('{n} notices (for your information)', { n: notices })}">${notices}</span>` : ''].join('');
     btn.innerHTML = `<svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 9.5h3l1 1.8h4l1-1.8h3"/><path d="M3.5 3.5h9l1.5 6v3.5a1 1 0 01-1 1H3a1 1 0 01-1-1V9.5z"/></svg>${segs}`;
-    btn.title = actionWords(action, total) + (notices ? ' · ' + t('{n} notices (for your information)', { n: notices }) : '');
+    btn.title = (heldWords(todos) || actionWords(action, total)) + (notices ? ' · ' + t('{n} notices (for your information)', { n: notices }) : '');   // B-44f3: the chip says what the tray says — a held list is never «Nothing waiting on you»
     if (mBtn) {
       // same badge, same classes (the CSS colours by data-urgency / ut-has-items). lane phone-titlebar-title: + the bar's ONE-badge
       // form (style.css shows it while the phone bar's fold collapses the five — mobile-nav.js): the honest count in the worst
@@ -253,7 +253,8 @@ export function installUserTodos(app) {
         const nWords = t('{n} notices (for your information)', { n: c.inbox.notice });
         setCount(q('action'), c.inbox.action, TAB_SEG[c.inbox.urgency] || 'ut-seg-norm', c.inbox.action ? words : '');
         setCount(q('notice'), c.inbox.notice, 'ut-seg-notice', c.inbox.notice ? nWords : '');
-        label = t('Inbox') + (c.inbox.action ? ', ' + words : '') + (c.inbox.notice ? ', ' + nWords : '');
+        const heldNow = heldWords(todos);   // B-44f3: the tab says what the tray says
+        label = t('Inbox') + (heldNow ? ', ' + heldNow : c.inbox.action ? ', ' + words : '') + (c.inbox.notice ? ', ' + nWords : '');
       } else {
         const uWords = t('{n} unread', { n: c.history.unread });
         setCount(q('unread'), c.history.unread, 'ut-seg-norm', c.history.unread ? uWords : '');
