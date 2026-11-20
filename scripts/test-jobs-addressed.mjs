@@ -227,7 +227,7 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     const named = (n) => [...jm.jobs.values()].filter((j) => j.name === n);
     const B_RT = { conversationId: CID.B, sessionId: 'B', sessionCreatedAt: 1, groups: new Set([GI]) };   // B as the route sees it (its real Task Group's id)
     // the two verdicts' table (PURE, exported by the routes): what is kept, what is refused
-    const V = AR.agentJobAccessVerdict, TV = AR.agentJobTaskVerdict, RF = new Set(['cmd', 'kind', 'notifyOk', 'timeoutMs']);
+    const V = AR.agentJobAccessVerdict, TV = AR.agentJobTaskVerdict, CF = ['kind', 'name', 'cmd', 'timeoutMs', 'notify', 'context', 'action', 'access', 'owner', 'schedule', 'catchUp'];
     const VT = [
       ['absent ⇒ the engine\'s default', V(undefined), { ok: true, access: undefined }],
       ['null ⇒ the engine\'s default', V(null), { ok: true, access: undefined }],
@@ -239,10 +239,13 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
       ['any truthy lock', V({ view: 'all', lockedBy: 'agent' }).code, 'lock_person_only'],
       ['a number for a word', V({ view: 2 }).code, 'bad-scope'],
       ['an array access', V(['all']).code, 'bad-access'],
-      ['no task', TV({ action: { type: 'notify', text: 'x' } }, RF), { ok: true }],
-      ['a task of run fields', TV({ action: { type: 'spawn-task', task: { cmd: {}, kind: 'task', notifyOk: true } } }, RF), { ok: true }],
-      ['a task field of another shape is named as such', TV({ action: { type: 'spawn-task', task: { cmd: {}, 'x y': 1 } } }, RF).error, "the scheduled task's field (a field of another shape): a run carries only what a task's create takes — nothing was created"],
-      ['a task that is a string', TV({ action: { type: 'spawn-task', task: 'sh -c true' } }, RF).code, 'bad-task'],
+      ['a falsy access (false / \'\' / 0) reads as absent, as the engine read it', [V(false), V(''), V(0)], [{ ok: true }, { ok: true }, { ok: true }]],
+      ['RUN_FROM_SCHEDULE: a run\'s name, schedule, catch-up, action, owner, access, notify and context are its schedule\'s', AR.RUN_FROM_SCHEDULE, ['owner', 'name', 'schedule', 'catchUp', 'action', 'access', 'notify', 'context']],
+      ['no task', TV({ action: { type: 'notify', text: 'x' } }, CF), { ok: true }],
+      ['a task of run fields (+ notifyOk, the CLI\'s)', TV({ action: { type: 'spawn-task', task: { cmd: {}, kind: 'task', timeoutMs: 1, notifyOk: true } } }, CF), { ok: true }],
+      ['a task field of another shape is named as such', TV({ action: { type: 'spawn-task', task: { cmd: {}, 'x y': 1 } } }, CF).error, "the scheduled task's field (a field of another shape): a run carries only what a task's create takes — nothing was created"],
+      ['a task that is a string', TV({ action: { type: 'spawn-task', task: 'sh -c true' } }, CF).code, 'bad-task'],
+      ['every field a run takes from its schedule is refused in a task, by name', ['notify', 'context', 'action', 'access', 'owner', 'name', 'schedule', 'catchUp'].map((k) => (TV({ action: { type: 'spawn-task', task: { cmd: {}, [k]: 1 } } }, CF).error || '').startsWith(`the scheduled task's field ${k}:`)), [true, true, true, true, true, true, true, true]],
     ];
     for (const [n, got, want] of VT) ok(JSON.stringify(got) === JSON.stringify(want), `B-9407 verdict: ${n}`, { got, want });
     // the plant first: the route reaches the engine and keeps the words it is given
@@ -262,6 +265,10 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
       ['a run planted with B as a subscriber', RUN('b9407-subs', { subscribers: [{ conversationId: CID.B, sessionId: 's-B', ts: 1 }] }), 400, 'unknown_field', /^the scheduled task's field subscribers: a run carries only what a task's create takes — nothing was created$/],
       ['a run planted with a panel and a clear', RUN('b9407-panel', { interaction: { pending: { panel: { title: 'x' }, version: 1 }, answers: [] }, clearedAt: 1 }), 400, 'unknown_field', /^the scheduled task's fields interaction, clearedAt: a run carries/],
       ['a run planted with the person\'s wake grant', RUN('b9407-grant', { wakesEndedOwner: true }), 403, 'wake_grant_person_only', /^refused: an agent cannot set wakesEndedOwner when it registers a job/],
+      ['a run with its own notify (it would beat its schedule\'s: _notifyOverrideOf)', RUN('b9407-rnotify', { notify: 'on' }), 400, 'unknown_field', /^the scheduled task's field notify: a run carries/],
+      ['a run with its own context (the create caps only the schedule\'s)', RUN('b9407-rctx', { context: { payload: 'x'.repeat(9000) } }), 400, 'unknown_field', /^the scheduled task's field context: a run carries/],
+      ['a task inside the task (a nested grant past storedAction\'s one level)', RUN('b9407-nest', { action: { type: 'spawn-task', task: { notifyUser: true, wakesEndedOwner: true } } }), 400, 'unknown_field', /^the scheduled task's field action: a run carries/],
+      ['a run\'s own access (its schedule\'s is set on it)', RUN('b9407-racc', { access: { view: 'all', lockedBy: 'user' } }), 400, 'unknown_field', /^the scheduled task's field access: a run carries/],
     ];
     for (const [what, body, code, c, re] of REF) {
       const r = await post('A', '/api/agent/jobs', body);
@@ -270,6 +277,10 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     }
     const kept = await post('A', '/api/agent/jobs', RUN('b9407-kind', { kind: 'task', notifyOk: true, timeoutMs: 60000 }));
     ok(kept.code === 200 && named('b9407-kind').length === 1, 'B-9407: a run\'s task with the fields a task create takes (kind, notifyOk, timeoutMs — test-jobs-cli-body\'s shape) is still made', kept);
+    const cliRun = await cli('A', ['run', 'true', '--name', 'b9407-cli-run', '--every', '1h', '--memory', '2G', '--timeout', '5m', '--until', 'ready', '--restart', 'never', '--port', '9', '--stdin-open', '--publish', '--notify-ok', '--notify-user']);
+    const cr0 = named('b9407-cli-run')[0], crTask = cr0 && cr0.action && cr0.action.task;
+    console.log(`    judged (the CLI's scheduled run, every task flag): exit ${cliRun.code} · task fields ${crTask ? Object.keys(crTask).sort().join(',') : '(none)'} · ${cliRun.err.trim().slice(0, 200)}`);
+    ok(cliRun.code === 0 && crTask && ['cmd', 'memoryMb', 'notifyOk', 'ports', 'publish', 'restart', 'stdinOpen', 'timeoutMs', 'untilOutput'].every((k) => k in crTask), 'B-9407: the REAL CLI\'s scheduled run with every flag its task carries (--memory --timeout --until --restart --port --stdin-open --publish --notify-ok --notify-user) is made — its body\'s task fields are run fields', { code: cliRun.code, err: cliRun.err.slice(0, 300), task: crTask && Object.keys(crTask) });
     // the REAL CLI: a typo in --view is said, not stored
     const typo = await cli('A', ['notify-cron', '--name', 'b9407-typo', '--every', '15m', '--text', 'ping', '--view', 'everyone']);
     console.log(`    judged (the CLI's --view everyone): exit ${typo.code} · ${typo.err.trim().slice(0, 300)}`);
@@ -282,6 +293,16 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     const aAsk = await post('A', `/api/agent/jobs/${open.id}/ask`, { panel: PANEL_Q });
     ok(aAsk.code === 200 && open.interaction && open.interaction.pending && open.interaction.pending.panel.title === 'Q', 'B-9407: A (its owner) asks, as before', aAsk);
     jm.withdrawAsk(open, { self: false });
+    const vo = await post('A', '/api/agent/jobs', NOTE('b9407-viewonly'));   // the default access: B views it (the group), no control
+    const voj = named('b9407-viewonly')[0];
+    const bAsk2 = voj ? await post('B', `/api/agent/jobs/${voj.id}/ask`, { panel: PANEL_Q }) : { code: 0, o: {} };
+    judged('B asks on A\'s job it can only view', bAsk2);
+    ok(vo.code === 200 && voj && M.canView(voj, B_RT) && !M.canControl(voj, B_RT) && bAsk2.code === 403 && bAsk2.o.code === 'not-the-owner' && !(voj.interaction && voj.interaction.pending), 'B-9407 ALSO CURED: B, who can only VIEW A\'s job (its group\'s default), cannot ask under it', bAsk2);
+    const ls = jm.create({ kind: 'cron', name: 'b9407-lineageless', schedule: { everyMs: 3600e3 }, action: { type: 'notify', text: 'x' }, owner: { conversation: null, sessionId: 'A', sessionCreatedAt: 1, groupsSnapshot: [GI] } }, { conversationId: null, sessionId: 'A', sessionCreatedAt: 1, groups: new Set([GI]) });
+    const lsj = ls.job && jm.jobs.get(ls.job.id);
+    const aAsk2 = lsj ? await post('A', `/api/agent/jobs/${lsj.id}/ask`, { panel: PANEL_Q }) : { code: 0, o: {} };
+    ok(lsj && aAsk2.code === 200 && lsj.interaction && lsj.interaction.pending, 'B-9407: a job with no conversation id is asked under by its owner session (matched by session id + its creation time, as isOwner does)', aAsk2);
+    if (lsj) jm.withdrawAsk(lsj, { self: false });
     // RED CONTROLS: copies of the routes with each cure cut (each anchor asserted once first); the harm each cut lets through
     const AR0 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
     const MJ9 = mutantCopies('jobs-addressed-b9407', REPO);
@@ -306,6 +327,10 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     try { if (xc) jm._fireCron(xc, 'cron'); } finally { jm._spawn = spawn0; }
     const xrun = xc && [...jm.jobs.values()].find((j) => j.cronParent === xc.id);
     ok(xr.code === 200 && xrun && M.addressedTo(xrun, B_RT, xc) === 'subscriber' && !M.addressedTo(xc, B_RT) && !(xc.subscribers || []).length, 'B-9407 CONTROL (no run-field refusal, in a copy): the cron is made and its RUN carries B as a subscriber — B is addressed by a job it never subscribed to', { xr: xr.code, subs: xrun && xrun.subscribers, addressed: xrun && M.addressedTo(xrun, B_RT, xc) });
+    const xg = await callX(RR, 'POST /api/agent/jobs', 'A', {}, RUN('b9407-x-grant', { wakesEndedOwner: true }));
+    const xgj = named('b9407-x-grant')[0];
+    ok(xg.code === 200 && xgj && !('wakesEndedOwner' in xgj.action.task), 'B-9407 CONTROL (no run-field refusal): a wake grant in the task was made and SILENTLY stripped (storedAction) — the cure says it by name instead (403, as at the top)', { xg: xg.code, task: xgj && xgj.action.task });
+    for (const j of [xrun, xc, xgj]) if (j) jm.jobs.delete(j.id);   // the fake fire's run (B its subscriber) and the controls' records leave the shared engine
     const xq = await callX(RQ, 'POST /api/agent/jobs/:ref/:act', 'B', { ref: open.id, act: 'ask' }, { panel: PANEL_Q });
     ok(xq.code === 200 && open.interaction && open.interaction.pending, 'B-9407 CONTROL (no ask gate, in a copy): B puts a question to the person under A\'s job', { xq, pending: !!(open.interaction && open.interaction.pending) });
     jm.withdrawAsk(open, { self: false });

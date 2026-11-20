@@ -334,17 +334,23 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
   or user only; group/all control covers start/stop/kill/ack only (no
   cross-session prompt/argv injection).
 - **User locks stick**: `lockedBy:'user'` refuses agent access-edits (teaching
-  error) and survives rm+recreate via a (scope,name) tombstone (30 d).
+  error). The designed (scope,name) tombstone that would carry the lock across
+  rm+recreate (30 d) was NEVER BUILT: an agent holding control can `rm` a locked
+  job and create one of the same name unlocked (found 2026-11-20 by B-9407's
+  adversarial read; not built by it).
 - **An agent's create writes only what its later verbs could** (B-9407): the
   create keeps `access` as the view / control words within session|group|all (a
   word not given stays missing — read as session, never widened) and refuses BY
   NAME, nothing created: a lock (403 `lock_person_only` — the lock is the
   person's alone), a word that is no scope (400 `bad-scope`), another key or
-  shape. A scheduled run is built from its task (`{ ...action.task }`), so the
-  task takes only the fields a task's create takes — `subscribers`,
-  `interaction`, `clearedAt` … planted there would ride every run (400
-  `unknown_field`; a wake grant 403 as at the top). PURE `agentJobAccessVerdict`
-  / `agentJobTaskVerdict` (src/agent-routes.js); the person's own create
+  shape (a falsy `access` reads as absent). A scheduled run is built from its
+  task (`{ ...action.task }`), so the task takes only the RUN fields of the
+  create's copy — never what a run takes from its schedule (`RUN_FROM_SCHEDULE`:
+  name, schedule, catch-up, action, owner, access, notify — a run's own on/off
+  beats its schedule's — and context, capped only on the schedule), nor any
+  record field (`subscribers`, `interaction`, `clearedAt` … would ride every
+  run): 400 `unknown_field`; a wake grant 403 as at the top. PURE
+  `agentJobAccessVerdict` / `agentJobTaskVerdict` (src/agent-routes.js); the person's own create
   (src/server/jobs-wiring.js) does not pass there. A panel (`ask`) is asked by
   the job itself or its owner conversation only (403 `not-the-owner`), as the
   mutation rule above says.
