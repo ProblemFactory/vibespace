@@ -27,7 +27,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // status-bar chip read it off the same frame (`jm` is bound lazily: the
     // constructor never broadcasts)
     broadcast: (type, payload) => broadcastAll({ type, ...payload, held: jm.heldDigest() }),
-    notifyUser: ({ words = null, text, detail, fact = null, urgency, jobId, jobName, ownerCid }) => {
+    notifyUser: ({ words = null, text, detail, fact = null, urgency, jobId, jobName, ownerCid, renewOnly = false }) => {
       // ATTRIBUTION = the AGENT CONVERSATION that owns the job (owner verdict
       // 2.357.0: an ask hanging off a background-task entity is 反直觉 — the
       // user thinks in terms of the agent they were talking to, and 2.348.1's
@@ -43,6 +43,12 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         // fn's default (a codex-owned job falls back to the jobs bucket via
         // nameFor's sessionName). No cid (user-created job) → 'jobs' bucket.
         const sessKey = ownerCid ? `claude:${ownerCid}` : 'jobs';
+        // B-2566: a RENEWAL (an away failure's later count) re-files only while its item is OPEN — an item a person closed this episode
+        // stays closed (kept: no refusal, no journal line); with no item at all (a first filing For you refused) it is filed
+        if (renewOnly && jobId && fact) {
+          const mine = userTodos.idsWhere((i) => i.sessionKey === sessKey && i.jobId === jobId && i.jobFact === fact && !i.clearedAt).map((id) => userTodos.get(id)).filter(Boolean);
+          if (mine.length && !mine.some((i) => i.status === 'open')) return { ok: false, kept: true, why: 'its For-you item was closed this episode — kept closed' };
+        }
         let sessName = null;
         if (ownerCid && activeSessions) for (const s of activeSessions.values()) {
           if ((s.claudeSessionId || s.backendSessionId) === ownerCid) { sessName = s.name || null; break; }
@@ -113,6 +119,13 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         },
       });
       return (it && it.id) || null;
+    },
+    // B-2566: the owner conversation received its notices — its away failures' items are over (done, by the agent: delivered)
+    resolveAwayFailed: function resolveAwayFailed(jobId, cid) {
+      if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => resolveAwayFailed(jobId, cid), 'the away-failure item\'s close'); return 0; }
+      const ids = userTodos.idsWhere((i) => i.jobId === jobId && i.jobFact === 'away-failed' && i.status === 'open' && i.sessionKey === `claude:${cid}`);
+      for (const id of ids) { try { userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); } }
+      return ids.length;
     },
     resolveWakeWaiting: function resolveWakeWaiting(cid) {
       // B-44f3's law here too: For you held unread — the close runs AT THE READ, if nothing is owed a wake then

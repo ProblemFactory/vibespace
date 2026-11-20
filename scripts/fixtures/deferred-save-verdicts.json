@@ -150,6 +150,16 @@
   "why": "ack bookkeeping; next tick carries"
  },
  {
+  "key": "jobs · src/jobs.js · JobManager._awayFailure · _dirty = true",
+  "verdict": "none",
+  "why": "away count; the next tick carries"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager._awaySettled · _dirty = true",
+  "verdict": "none",
+  "why": "episode end; the next tick carries"
+ },
+ {
   "key": "jobs · src/jobs.js · JobManager.markAck · _dirty = true",
   "verdict": "none",
   "why": "ack bookkeeping; next tick carries"

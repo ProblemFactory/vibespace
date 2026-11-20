@@ -864,6 +864,10 @@ const FOR_YOU_WORDS = Object.freeze({
   // lane jobs-memory-bound (the seam with job-notify-user r3): a doubted previous run, a park for memory
   doubt: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running',
   'parked-memory': '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again',
+  // B-2566 (主开发 r327/r339): a FAILURE of a job whose owner conversation is not running (ended, archived) reaches a PERSON by name — ONE
+  // item a job (a cron's: its schedule's), renewed with its count while it is open, never once a failure; «what failed» is the engine's
+  // own words (its exit and cause token), never a line of the run's output
+  'away-failed': 'Background job {name} failed while its conversation was not running — exit {exit} ({cause}); failures since {since}: {count}',
   // THE STRAY'S OWN WORDS (r6, accept-r5 confirmed 1): a filing that skipped the one door is journaled and logged with its caller
   // (src/jobs.js _forYouStray) and the person gets THIS copy — never the stray's own shape (r5 carried it through unchanged)
   stray: 'Background job {name} has a notice for you — open it in the Jobs panel',
@@ -927,7 +931,7 @@ function forYouCopy(job, kind, opts = {}) {
   return c;
 }
 function forYouWords(job, kind, opts) {
-  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null, file = null, store = null, note = null, when = null, until = null } = opts || {};
+  const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null, file = null, store = null, note = null, when = null, until = null, exit = null, count = null, since = null, renew = false } = opts || {};
   if (opts && typeof opts === 'object' && Object.prototype.hasOwnProperty.call(opts, 'shape')) return { fact: null, words: null, urgency: null, copy: String(kind).slice(0, 24) === 'stray' ? 'stray' : 'shaped', refused: `a For-you copy carries the engine's own words — a shape handed to forYouCopy is refused (a filing outside the one door is journaled with its caller, never laundered through it)` };
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
@@ -949,6 +953,8 @@ function forYouWords(job, kind, opts) {
   if (kind === 'sweep-record-unread') return { fact: 'sweep-record-unread', words: { key: FOR_YOU_WORDS['sweep-record-unread'], params: { file: String(file || 'the clean-up\'s record'), error: recordsErrorParam(error) } }, urgency: 'normal' };
   if (kind === 'set-aside-other') return { fact: 'set-aside-other', words: { key: FOR_YOU_WORDS['set-aside-other'], params: { file: String(file || 'a file') } }, urgency: 'normal' };
   if (kind === 'records-held') return { fact: 'records-held', words: { key: FOR_YOU_WORDS['records-held'], params: { file: String(file || 'a set-aside file') } }, urgency: 'high' };
+  // B-2566: the away failure — `renew` = a later failure of the same episode: re-filed only while the item is OPEN (a person's close stands)
+  if (kind === 'away-failed') return { fact: 'away-failed', words: { key: FOR_YOU_WORDS['away-failed'], params: { name, exit: exit == null || exit === '' ? '—' : String(exit).slice(0, 12), cause: tok(cause, 48), count: String(Math.max(1, Math.floor(Number(count)) || 1)), since: recordsWhenParam(since) } }, urgency: 'normal', ...(renew ? { renewOnly: true } : {}) };
   if (kind === 'stray') return { fact: 'stray', words: { key: FOR_YOU_WORDS.stray, params: { name } }, urgency: 'normal' };
   return { fact: null, words: null, urgency: null, copy: tok(kind, 24), refused: `no For-you copy of kind «${String(kind).slice(0, 24)}» — the copies are ${Object.keys(FOR_YOU_WORDS).join(', ')}` };
 }

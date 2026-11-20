@@ -1424,5 +1424,160 @@ console.log('§U4 lane lg-store-writes (B-0248): THE STORE\'S SAVE GOES THROUGH 
   r.J.shutdown();
 }
 
+console.log('§12 B-2566: a failure of a job whose owner conversation is not running reaches a PERSON by name — one item a job, renewed with its count');
+{
+  const { UserTodoManager } = require(path.join(ROOT, 'src/user-todos.js'));
+  // a leg that judges prints every fact it judges (the .414 gates' rule) — on a pass too
+  const okP = (c, n, facts) => { ok(c, n, facts); if (c) console.log('    ' + (typeof facts === 'string' ? facts : JSON.stringify(facts))); };
+  const settle = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 5)); } return !!fn(); };
+  const AWAY = { ok: false, reason: 'no live inbox for this conversation on any reachable machine', notRunning: true };
+  const rig = (name, wiringMod = wiring) => {
+    const dir = mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 }), logs = [], live = new Set();
+    const W = wiringMod.create({ app: fakeApp().app, dataDir: dir, broadcastAll: () => { }, userTodos: todos, log: (...a) => logs.push(a.join(' ')), serverSetting: () => undefined, taskGroups: null, activeSessions: new Map(),
+      deliver: { peerReachable: (cid) => live.has(cid), deliverToConversation: async (cid) => (live.has(cid) ? { ok: true, lane: 'message' } : AWAY) } });
+    W.initAfterListen();
+    return { W, jm: W.jm, todos, logs, live, stop: () => { W.shutdown?.(); todos.stop(); } };
+  };
+  const owner = (cid) => ({ conversation: { backend: 'claude', id: cid }, sessionId: 's-' + cid, sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] });
+  const task = (R, id, name, cid, extra = {}) => { const j = { id, kind: 'task', name, note: '', state: 'failed', desiredUp: false, owner: owner(cid), access: { view: 'group', control: 'session' }, runs: [{ startedAt: Date.now() - 60e3, endedAt: Date.now(), exit: 1, cause: 'error', lastLine: 'Error: frame 7 failed to render' }], notifyLog: [], ...extra }; R.jm.jobs.set(id, j); return j; };
+  const failOf = (R, j, what = 'failed exit=1 error (1m)', extra = {}) => R.jm._notifyOwner(j, { what, wake: 'result', ...extra });
+  const awayItems = (R, cid) => { const s = R.todos.snapshot(); return [...s.open, ...s.resolved].filter((i) => i.sessionKey === `claude:${cid}` && i.jobFact === 'away-failed'); };
+  const inboxLines = (j) => (j.notifyLog || []).filter((l) => l.lane === 'user-inbox' && l.copy === 'away-failed').length;
+
+  // ── THE MEASURE FIRST (主开发 r327): how often it fires on the tree's measured day shape — jobs-triage-fixture.mjs (the owner's instance on
+  //    2026-09-14: 248 task records, 36 failed one-shots over five days); the failures whose owner notice the fixture journals as STASHED
+  //    («not reachable»: nobody drained it) are the ones this producer says — driven through the REAL engine, wiring and store
+  {
+    const R = rig('away-measure'), NOW = Date.now(), D = 86400e3, fx = makeFixture(NOW);
+    const away = fx.failedRows.filter((r) => r.kind === 'stash').map((r) => fx.jobs.find((x) => x.id === r.id));
+    for (const j of away) { R.jm.jobs.set(j.id, { ...j, notifyLog: [] }); failOf(R, R.jm.jobs.get(j.id)); }
+    await settle(() => awayItems(R, SESSIONS[0].conversationId).length + awayItems(R, SESSIONS[1].conversationId).length + awayItems(R, SESSIONS[2].conversationId).length >= away.length);
+    const all = SESSIONS.flatMap((s) => awayItems(R, s.conversationId));
+    const perDay = {}; for (const j of away) { const d = Math.floor((NOW - j.runs[0].endedAt) / D); perDay[d] = (perDay[d] || 0) + 1; }
+    okP(away.length === 6 && all.length === 6 && new Set(all.map((i) => i.jobId)).size === 6,
+      'MEASURED: on the fixture\'s five days (36 failed, 6 of them stashed for an owner that was not running) it files 6 items — one a job, at most 2 a day',
+      { failed: fx.failedRows.length, stashedForAnAwayOwner: away.length, itemsFiled: all.length, perDayByAge: perDay, busiestDay: Math.max(...Object.values(perDay)) });
+    // a schedule that fails EVERY MINUTE for a day while its owner is away: 1440 failures (the same words each time) — ONE item, renewed
+    const C = 'e2e00000-0000-4000-8000-00000000c001';
+    const cron = { id: 'jb-cron-min', kind: 'cron', name: 'sync-every-minute', state: 'scheduled', owner: owner(C), access: { view: 'group', control: 'session' }, runs: [], notifyLog: [] };
+    R.jm.jobs.set(cron.id, cron);
+    failOf(R, task(R, 'jb-cm-0', 'sync-every-minute run', C, { cronParent: cron.id }));
+    await settle(() => !!cron.awayFail);   // the first failure's answer is back (a minute apart in life)
+    for (let k = 1; k < 1440; k++) failOf(R, task(R, 'jb-cm-' + k, 'sync-every-minute run', C, { cronParent: cron.id }));
+    await settle(() => (cron.awayFail && cron.awayFail.count) === 1440);
+    const ci = awayItems(R, C);
+    okP(ci.length === 1 && ci[0].jobId === cron.id && cron.awayFail.count === 1440 && ci[0].i18n.text.params.count === '1440',
+      'MEASURED: a schedule failing every minute for a day (1440 failures, the same words) ⇒ ONE item under the schedule, its count renewed to 1440 — never once a failure',
+      { failures: 1440, items: ci.length, jobId: ci[0] && ci[0].jobId, count: cron.awayFail && cron.awayFail.count, itemCount: ci[0] && ci[0].i18n.text.params.count });
+    R.stop();
+  }
+
+  // ── THE LEGS ──
+  const A = 'e2e00000-0000-4000-8000-00000000d001', B = 'e2e00000-0000-4000-8000-00000000d002';
+  const R = rig('away-legs');
+  const j1 = task(R, 'jb-away-1', 'render-7', A);
+  failOf(R, j1);
+  await settle(() => awayItems(R, A).length === 1);
+  let it = awayItems(R, A)[0];
+  okP(!!it && it.origin === 'jobs' && it.jobId === j1.id && it.sessionKey === `claude:${A}` && it.status === 'open' && it.urgency === 'normal'
+      && /^Background job render-7 failed while its conversation was not running — exit 1 \(error\); failures since .+: 1$/.test(it.text) && it.i18n.text.key === require(path.join(ROOT, 'src/job-model.js')).FOR_YOU_WORDS['away-failed']
+      && it.i18n.text.params.since && it.i18n.text.params.since.at === j1.awayFail.since && !/frame 7/.test(JSON.stringify(it)) && inboxLines(j1) === 1,
+    'ONE failure while the owner is away ⇒ ONE For-you item BY NAME under the owner conversation: the job, what failed (exit + cause — never the run\'s output line), since when, the count; its jobId is For you\'s door to the job\'s row and log',
+    { text: it && it.text, jobId: it && it.jobId, sessionKey: it && it.sessionKey, status: it && it.status, since: it && it.i18n.text.params.since, journal: inboxLines(j1) });
+  failOf(R, j1);   // the SAME words within ten minutes: the duplicate the floor suppresses — still a failure, COUNTED
+  failOf(R, j1, 'failed exit=2 error (1m)');   // other words inside the 30 s floor: stashed, counted
+  await settle(() => j1.awayFail.count === 3 && /: 3$/.test((awayItems(R, A)[0] || {}).text || ''));
+  it = awayItems(R, A)[0];
+  okP(awayItems(R, A).length === 1 && j1.awayFail.count === 3 && /: 3$/.test(it.text) && it.status === 'open',
+    'two more failures (one the floor suppresses as a duplicate, one inside the 30 s floor) RENEW the one item — its count 3, never three items',
+    { items: awayItems(R, A).length, count: j1.awayFail.count, text: it.text });
+  // a SCHEDULE's identity is the schedule: three runs of one cron ⇒ ONE item under the cron's id
+  const cr = { id: 'jb-away-cron', kind: 'cron', name: 'nightly-export', state: 'scheduled', owner: owner(B), access: { view: 'group', control: 'session' }, runs: [], notifyLog: [] };
+  R.jm.jobs.set(cr.id, cr);
+  for (const k of [1, 2, 3]) failOf(R, task(R, 'jb-away-run-' + k, 'nightly-export run', B, { cronParent: cr.id }), `failed exit=${k} error (1m)`);
+  await settle(() => (cr.awayFail && cr.awayFail.count) === 3);
+  const bi = awayItems(R, B);
+  okP(bi.length === 1 && bi[0].jobId === cr.id && cr.awayFail.count === 3 && /^Background job nightly-export failed/.test(bi[0].text),
+    'three failed runs of ONE schedule ⇒ ONE item under the SCHEDULE (each fire is a new run id), count 3', { items: bi.map((i) => ({ jobId: i.jobId, text: i.text })), count: cr.awayFail && cr.awayFail.count });
+  // a PERSON closes it: the episode's later failures are counted, never reopen it, and journal nothing
+  R.todos.setStatus(it.id, 'dismissed');
+  const linesBefore = inboxLines(j1);
+  failOf(R, j1, 'failed exit=3 error (1m)');
+  await settle(() => j1.awayFail.count === 4);
+  okP(j1.awayFail.count === 4 && R.todos.get(it.id).status === 'dismissed' && inboxLines(j1) === linesBefore && awayItems(R, A).length === 1,
+    'a person CLOSED it: the next failure is counted (4) and the item STAYS closed — the dismissal stands for the episode, no journal line a failure',
+    { count: j1.awayFail.count, status: R.todos.get(it.id).status, journalBefore: linesBefore, journalAfter: inboxLines(j1) });
+  // the owner RECEIVES its notices (the drain: a hand-over, a resume's turn, the person's prompt) ⇒ the episode ends, the item is closed
+  const bItem = bi[0];
+  R.jm.drainNotifs(B);
+  okP(R.todos.get(bItem.id).status === 'done' && !cr.awayFail,
+    'the owner conversation RECEIVED its notices (drained) ⇒ the episode ends: the item done (by the agent), the record\'s count gone', { status: R.todos.get(bItem.id).status, awayFail: cr.awayFail || null });
+  failOf(R, task(R, 'jb-away-run-4', 'nightly-export run', B, { cronParent: cr.id }), 'failed exit=4 error (1m)');
+  await settle(() => R.todos.get(bItem.id).status === 'open');
+  okP(R.todos.get(bItem.id).status === 'open' && cr.awayFail.count === 1 && /: 1$/.test(R.todos.get(bItem.id).text),
+    '…and away again, the next failure files it anew (open, count 1)', { status: R.todos.get(bItem.id).status, count: cr.awayFail.count });
+  // what the person was ALREADY told by name is not said twice; a live owner, a success: nothing
+  const jp = task(R, 'jb-away-park', 'db-sync', A), jl = task(R, 'jb-away-live', 'live-one', B), jd = task(R, 'jb-away-done', 'ok-one', A, { state: 'done' });
+  failOf(R, jp, 'parked after 5 crashes (exit 1) — start it again once fixed', { personTold: true });
+  R.live.add(B); failOf(R, jl); failOf(R, jd, 'done exit=0 ok (1m)');
+  await settle(() => (jl.notifyLog || []).length > 0 && (jp.notifyLog || []).length > 0 && (jd.notifyLog || []).length > 0);   // each one's delivery journaled (the floor stashes the live one's)
+  okP(!jp.awayFail && !jl.awayFail && !jd.awayFail && !awayItems(R, A).some((i) => i.jobId === jp.id || i.jobId === jd.id) && !awayItems(R, B).some((i) => i.jobId === jl.id),
+    'not said: a failure the person was already told by name (a park\'s copy, a --notify-user end: personTold), a failure its LIVE owner received, a success',
+    { park: !!jp.awayFail, live: !!jl.awayFail, done: !!jd.awayFail });
+  R.live.delete(B);
+  // a failure PARKED for a live owner that ended before it landed (the retry park's fall, not-running) is said too
+  const jf = task(R, 'jb-away-fell', 'late-one', B);
+  R.jm._onRetryEvent('fell', B, { id: 'rt-fell-1', producer: 'jobs', firstAt: Date.now(), attempts: [{ reason: 'timeout' }], meta: { jobId: jf.id, jobName: 'late-one', ev: { what: 'failed exit=1 error (1m)', at: Date.now(), away: true }, subscriber: false } }, { kind: 'not-running' });
+  await settle(() => awayItems(R, B).some((i) => i.jobId === jf.id));
+  okP(awayItems(R, B).some((i) => i.jobId === jf.id && i.status === 'open') && jf.awayFail && jf.awayFail.count === 1,
+    'a failure parked for a LIVE owner that ENDED before it landed (the park\'s fall, not-running) reaches the person too', { items: awayItems(R, B).filter((i) => i.jobId === jf.id).map((i) => i.text) });
+  R.stop();
+
+  // ── RED CONTROLS: anchored copies of the ENGINE, loaded by the REAL wiring file (a fresh instance of it reading the copy's JobManager —
+  //    the For-you store hands its filer key only to src/server/jobs-wiring.js itself, so a copy of the wiring could file nothing) ──
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const MC = mutantCopies('jobs-triage-2566', ROOT);
+  const WIRING_PATH = path.join(ROOT, 'src/server/jobs-wiring.js'), JOBS_PATH = path.join(ROOT, 'src/jobs.js');
+  const wiringWith = (jobsSrc, tag) => {
+    const mut = MC.load('src/jobs.js', jobsSrc, tag), keepW = require.cache[WIRING_PATH], keepJ = require.cache[JOBS_PATH];
+    try { delete require.cache[WIRING_PATH]; require.cache[JOBS_PATH] = { id: JOBS_PATH, filename: JOBS_PATH, loaded: true, exports: mut, children: [], paths: [] }; return require(WIRING_PATH); }
+    finally { if (keepW) require.cache[WIRING_PATH] = keepW; else delete require.cache[WIRING_PATH]; if (keepJ) require.cache[JOBS_PATH] = keepJ; else delete require.cache[JOBS_PATH]; }
+  };
+  {
+    const R1 = rig('away-red-hook', wiringWith(anchored(JSRC, "        if (r && r.notRunning === true && !subscriber) this._awayFailure(cid, job, ev);   // B-2566: …and a FAILURE reaches a person by name\n", '', 'b2566-no-hook'), 'b2566-no-hook'));
+    const x = task(R1, 'jb-red-1', 'render-7', A);
+    failOf(R1, x);
+    await settle(() => (x.notifyLog || []).some((l) => l.lane === 'stash'));
+    const silent = awayItems(R1, A).length === 0 && (x.notifyLog || []).some((l) => l.lane === 'stash');
+    failOf(R1, x, 'failed exit=2 error (1m)');   // the floor's own hook is still in the copy: it CAN file (the control is not vacuous)
+    await settle(() => awayItems(R1, A).length === 1);
+    okP(silent && awayItems(R1, A).length === 1,
+      'RED CONTROL: the ladder\'s hook removed (a copy of the engine) ⇒ the first failure is only STASHED for the away owner, no person hears it (the first leg would be red); the floor\'s hook in the same copy files the second (the rig files)',
+      { firstSilent: silent, afterSecond: awayItems(R1, A).length, journal: (x.notifyLog || []).map((l) => l.lane) });
+    R1.stop();
+  }
+  {
+    const R2 = rig('away-red-cron', wiringWith(anchored(JSRC, '    const rec = (job.cronParent && this.jobs.get(job.cronParent)) || job;\n    const run = (job.runs', '    const rec = job;\n    const run = (job.runs', 'b2566-run-identity'), 'b2566-run-identity'));
+    const c2 = { id: 'jb-red-cron', kind: 'cron', name: 'nightly-export', state: 'scheduled', owner: owner(B), access: { view: 'group', control: 'session' }, runs: [], notifyLog: [] };
+    R2.jm.jobs.set(c2.id, c2);
+    for (const k of [1, 2, 3]) failOf(R2, task(R2, 'jb-red-run-' + k, 'nightly-export run', B, { cronParent: c2.id }), `failed exit=${k} error (1m)`);
+    await settle(() => awayItems(R2, B).length === 3);
+    okP(awayItems(R2, B).length === 3, 'RED CONTROL: a run\'s own id as the identity (a copy of the engine) ⇒ THREE items for one schedule — the schedule leg would be red', { items: awayItems(R2, B).map((i) => i.jobId) });
+    R2.stop();
+  }
+  {
+    const R3 = rig('away-red-reopen', wiringWith(anchored(JSRC, 'since: rec.awayFail.since, renew: !!ep }));', 'since: rec.awayFail.since, renew: false }));', 'b2566-reopens'), 'b2566-reopens'));
+    const y = task(R3, 'jb-red-2', 'render-7', A);
+    failOf(R3, y);
+    await settle(() => awayItems(R3, A).length === 1);
+    const yi = awayItems(R3, A)[0];
+    if (yi) R3.todos.setStatus(yi.id, 'dismissed');
+    failOf(R3, y, 'failed exit=3 error (1m)');
+    await settle(() => !!yi && R3.todos.get(yi.id).status === 'open');
+    okP(!!yi && R3.todos.get(yi.id).status === 'open', 'RED CONTROL: the renewal sent as a new filing (renewOnly dropped, a copy of the engine) ⇒ the item a person CLOSED reopens at the next failure — the dismissal leg would be red', { filed: !!yi, status: yi && R3.todos.get(yi.id).status });
+    R3.stop();
+  }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
