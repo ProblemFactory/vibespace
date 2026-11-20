@@ -537,7 +537,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   const tx = await termOf(anchored(W, TG, '', 'scope-term-hub-cut'), 1);
   ok(t1.join() === 'said 1 its stop unread' && t0.join() === 'scope SIGTERM' && tx.join() === 'scope SIGTERM', 'the manager\'s scope signal (its list unread) is never sent while the hub lives in the scope — said; CONTROL (the guard cut, in a copy): the whole scope signalled — RED', { t1, t0, tx });
   // the rows a stop signals one by one: never the hub's (the scope's, the group's, the mark's)
-  ok(/!isKeeper\(l\) && !\(kept && kept\(l\)\)\)\.map\(rowOf\)/.test(W) && /r\[0\] !== 'Z' && !\(kept && kept\(e\)\)\) out\.push/.test(W) && /if \(kept && kept\(e\)\) continue;\n\s+try \{ const env = fs\.readFileSync\(`\/proc\/\$\{e\}\/environ`/.test(W)
+  ok(/!isKeeper\(l\) && !\(kept && kept\(l\)\)\)\.map\(rowOf\)/.test(W) && /r\[0\] !== 'Z' && !\(kept && kept\(e\)\)\) out\.push/.test(W) && /if \(\(kept && kept\(e\)\) \|\| anc\.has\(Number\(e\)\)\) continue;\n\s+try \{ const env = fs\.readFileSync\(`\/proc\/\$\{e\}\/environ`/.test(W)
     && /own = \(\) => procsOf\(scopeDir\)\.filter\(\(p\) => !\(kept && kept\(p\)\)\)/.test(W) && (fnOf(W, 'async function drainScope() {').match(/procsOf\(scopeDir\)/g) || []).length === 2,
   'WIRING: the scope\'s rows, the group\'s rows and the marked escapees skip the hub\'s processes; the drain counts, waits on and kills only the job\'s (own())');
   // (c) the engine: its group signal never reaches a group the hub is in (compiled from its own source, PI stubbed — nothing signalled)
