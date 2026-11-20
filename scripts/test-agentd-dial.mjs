@@ -16,7 +16,7 @@ import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { endDaemonsAndWait } from './scratch.mjs';
+import { endDaemonsAndWait, anchored } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -437,9 +437,14 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
   fs.writeFileSync(path.join(dataD, 'bin', 'vibespace-agentd.js'), bundleA);
   const HD = new HostManager({ dataDir: dataD });
   const HOST_D = 'vsht_d' + crypto.randomBytes(6).toString('hex');
-  let casts = 0;
+  // EVERY BROADCAST LABELLED BY ITS WRITER (主开发 2026-11-20, list line 144's cure): a hosts note that answers «changed» names the
+  // cast that follows it (dial-pairing.js broadcasts synchronously right after its note); the server's own accept / close name theirs
+  const castLog = []; let castWhy = null;
+  const CAST_WORDS = { noteDial: (a) => `the dial row: ${a[1]}`, noteRuntime: () => 'the runtime first said', notePolicy: () => 'the policy first said', noteElevated: () => 'the elevation first said',
+    noteDeviceKey: (a) => (a[1] === 'learned' ? 'the device identity first pinned' : `the device identity ${a[1]}`) };
+  for (const [m, words] of Object.entries(CAST_WORDS)) { const fn = HD[m]; if (typeof fn === 'function') HD[m] = (...a) => { castWhy = null; const r = fn.apply(HD, a); if (r) { castWhy = words(a); queueMicrotask(() => { castWhy = null; }); } return r; }; }   // a label lives to the end of its synchronous turn: a note with no cast after it names nothing later
   const DPD = DPmod.create({ rootDir: path.join(tmp, `server-${tag}`), AGENTD_DIR: path.join(dataD, 'agentd'), agentdHostToken: () => HOST_D,
-    getHosts: () => HD, getMounts: () => null, getMachineMounts: () => ({ onMachineUnpaired() {} }), getPortForwards: () => ({ onMachineUnpaired() {} }), getExitProxy: () => ({ onMachineUnpaired() {} }), bcastAll: () => { casts++; } });
+    getHosts: () => HD, getMounts: () => null, getMachineMounts: () => ({ onMachineUnpaired() {} }), getPortForwards: () => ({ onMachineUnpaired() {} }), getExitProxy: () => ({ onMachineUnpaired() {} }), bcastAll: () => { castLog.push(castWhy || 'UNNAMED (a broadcast no note named)'); castWhy = null; } });
   HD.dialOnline = (d) => DPD.agentdDials.has(d);
   const wssD = new WebSocketServer({ noServer: true });
   const srvD = http.createServer((req, res) => { res.writeHead(404); res.end(); });
@@ -458,8 +463,8 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
       DPD.noteDialEvent(gate.deviceId, 'accepted', gate.facts);
       DPD.deviceForDial(gate.deviceId).catch(() => { });
       try { const old = DPD.agentdDialDevices.get(gate.deviceId); if (old && old._dialStream !== stream) { old.stop?.(); DPD.agentdDialDevices.delete(gate.deviceId); } } catch { }
-      casts++;
-      ws.on('close', () => { closes++; if (DPD.agentdDials.get(gate.deviceId) === stream) { DPD.agentdDials.delete(gate.deviceId); DPD.noteDialEvent(gate.deviceId, 'disconnected', {}); } casts++; });
+      castLog.push('the accept');   // the server's own accept broadcast (server.js)
+      ws.on('close', () => { closes++; if (DPD.agentdDials.get(gate.deviceId) === stream) { DPD.agentdDials.delete(gate.deviceId); DPD.noteDialEvent(gate.deviceId, 'disconnected', {}); } castLog.push('a close'); });
     });
     });
   });
@@ -467,8 +472,11 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
   const PD = srvD.address().port;
   const pairD = DPD.agentdMintDialPair('mac', { host: `127.0.0.1:${PD}` });
   const roots = {};
-  const spawnOne = (name, bundleSrc, token = pairD.dialToken) => {
+  // `identityFrom` (a state dir): A TRUE COPY — that root's own device identity file, state/identity.pem (where the agent keeps its
+  // key: src/agentd/agentd.js DEVICE_IDENTITY_FILE), copied before the start; nothing else of it
+  const spawnOne = (name, bundleSrc, token = pairD.dialToken, { identityFrom = null } = {}) => {
     const root = path.join(tmp, `dev-${tag}-${name}`); const st = path.join(root, 'state'); fs.mkdirSync(st, { recursive: true, mode: 0o700 });
+    if (identityFrom) { fs.copyFileSync(path.join(identityFrom, 'identity.pem'), path.join(st, 'identity.pem')); fs.chmodSync(path.join(st, 'identity.pem'), 0o600); }
     fs.writeFileSync(path.join(st, 'token'), HOST_D, { mode: 0o600 });
     fs.writeFileSync(path.join(st, 'dial.json'), JSON.stringify({ url: `ws://127.0.0.1:${PD}/api/device-dial?device=mac`, token }), { mode: 0o600 });
     const inst = path.join(root, '1.0.0'); fs.mkdirSync(inst); fs.writeFileSync(path.join(inst, 'vibespace-device.js'), bundleSrc); fs.symlinkSync(inst, path.join(root, 'current'));
@@ -476,7 +484,7 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
     d.unref(); daemonsToKill.push(st); roots[name] = st;
     return st;
   };
-  const facts = () => ({ accepts, closes, casts, row: HD.list().find((h) => h.deviceId === 'mac'), rs: DF9.dialRowState(HD.list().find((h) => h.deviceId === 'mac')), linked: DPD.agentdDials.has('mac') });
+  const facts = () => ({ accepts, closes, casts: castLog.length, castLog: castLog.slice(), row: HD.list().find((h) => h.deviceId === 'mac'), rs: DF9.dialRowState(HD.list().find((h) => h.deviceId === 'mac')), linked: DPD.agentdDials.has('mac') });
   const logOf = (name) => { try { return fs.readFileSync(path.join(roots[name], 'agentd.log'), 'utf8'); } catch { return ''; } };
   const statusOf = (name) => { try { return JSON.parse(fs.readFileSync(path.join(roots[name], 'dial-status.json'), 'utf8')); } catch { return null; } };
   const kill = (name) => killDaemon(roots[name]);
@@ -485,14 +493,28 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
 }
 {
   const bsrc = fs.readFileSync(bundle, 'utf8');
+  // THE BROADCAST LAW (主开发 2026-11-20): a broadcast is a change a person sees. A's first hello casts only NAMED once-per-record
+  // repaints, each at most once (an unnamed one is red); in the copy's window a refused dial casts ONLY when it changes what a person
+  // sees: exactly ONE (the duplicate note turning on), then ZERO for every refused dial after it (the copy's streak ≥ 2 proves more)
+  const ONCE = ['the accept', 'the dial row: accepted', 'the policy first said', 'the runtime first said', 'the device identity first pinned', 'the elevation first said'];
+  const onceBad = (list) => { const bad = [], seen = new Map(); for (const w of list) seen.set(w, (seen.get(w) || 0) + 1); for (const [w, n] of seen) { if (!ONCE.includes(w)) bad.push(`an unnamed cast: ${w}`); else if (n > 1) bad.push(`${w} ×${n}`); } return bad; };
+  const copyBad = (list, streak) => [
+    ...(list[0] === 'the dial row: duplicate' ? [] : [`the copy's first cast is not the duplicate note turning on (${list[0] || 'none'})`]),
+    ...(list.length > 1 ? [`${list.length - 1} more after it: ${list.slice(1).join(' · ')}`] : []),
+    ...(streak >= 2 ? [] : [`the copy's streak is ${streak} (no refused dial after its first)`])];
+  check('B9 CONTROL (A\'s window judge): an unnamed cast and a repeat are each RED by name; the named once-per-record list holds', onceBad(['the accept', 'a stray cast']).join() === 'an unnamed cast: a stray cast' && onceBad(['the accept', 'the runtime first said', 'the runtime first said']).join() === 'the runtime first said ×2' && onceBad(ONCE).length === 0);
+  const settledOf = (facts) => waitFor(() => { const r = facts().row; return r && r.deviceKey && r.deviceRuntime ? true : null; }, 20000);   // A's hello settled: its key pinned, its runtime said
   await twoDaemons({ tag: 'dup', bundleA: bsrc, bundleB: bsrc, run: async ({ spawnOne, facts, logOf, statusOf, kill }) => {
     spawnOne('a', bsrc);
     await sleep(3000);
     check('B9: daemon A dialed in (1 accept, the link held)', facts().accepts === 1 && facts().linked, JSON.stringify({ accepts: facts().accepts }));
+    const settled = await settledOf(facts), castsA = facts().castLog;
     spawnOne('b', bsrc); // the copy
     await sleep(9000);
-    const f = facts();
-    check(`B9: 9 s later the copy has NOT replaced A — still 1 accept, 0 closes, ≤ 5 broadcasts (before: one accept + one close per second, a broadcast each; lane device-node-version +1: A's first hello states its node once — the record's runtime moved, the card repaints; a re-dial of the same node moves nothing)`, f.accepts === 1 && f.closes === 0 && f.casts <= 5 && f.linked, JSON.stringify({ accepts: f.accepts, closes: f.closes, casts: f.casts }));
+    const f = facts(), cw = f.castLog.slice(castsA.length), sb0 = statusOf('b');
+    check(`B9: 9 s later the copy has NOT replaced A — still 1 accept, 0 closes (before: one accept + one close per second, a broadcast each)`, f.accepts === 1 && f.closes === 0 && f.linked, JSON.stringify({ accepts: f.accepts, closes: f.closes }));
+    check(`B9: A's first hello casts only NAMED once-per-record repaints, each at most once — the accept, the dial accepted, the policy and the runtime first said (lane device-node-version), the device identity first pinned (list line 144): ${castsA.join(' · ')}`, !!settled && castsA.includes('the accept') && castsA.includes('the device identity first pinned') && onceBad(castsA).length === 0, onceBad(castsA));
+    check(`B9: …and in the copy's window a refused dial casts only when it changes what a person sees — exactly ONE (the duplicate note turning on), then ZERO for the copy's ${Math.max(0, ((sb0 && sb0.streak) || 0) - 1)} refused dial(s) after it: ${cw.join(' · ') || 'none'}`, copyBad(cw, sb0 && sb0.streak).length === 0, copyBad(cw, sb0 && sb0.streak));
     check('B9: the row stays `connected` with NO failure streak (lastAccept.attempt 0) and carries the duplicate note (dup.from)', f.rs.state === 'connected' && f.rs.n === 0 && !!f.rs.dup && f.rs.dup.from === '127.0.0.1', JSON.stringify({ rs: f.rs, lastAccept: f.row.dial.lastAccept }));
     check('B9: hosts.json holds dial.lastDuplicate {at, from, boot, daemon}', !!f.row.dial.lastDuplicate && /^[0-9a-f]{16}$/.test(String(f.row.dial.lastDuplicate.boot)) && !!f.row.dial.lastDuplicate.daemon, JSON.stringify(f.row.dial.lastDuplicate));
     const sb = statusOf('b');
@@ -504,8 +526,35 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
     const t0 = Date.now();
     while (Date.now() - t0 < 40000 && !/dial-out connected/.test(logOf('b'))) await sleep(500);
     const g = facts();
-    check(`B9: once A is gone the copy is admitted on its next attempt (${Math.round((Date.now() - t0) / 1000)} s; ≤ 35 s = its 30 s ladder + a hello)`, /dial-out connected/.test(logOf('b')) && g.accepts === 2 && g.linked, JSON.stringify({ accepts: g.accepts, waited: Date.now() - t0 }));
-    check('B9: …and the row now reads connected — before that N attempts failed (another device dials in as this one), the note still on', g.rs.state === 'connected' && g.rs.n >= 2 && g.rs.reason === 'duplicate-device' && !!g.rs.dup, JSON.stringify(g.rs));
+    check(`B9: once A is gone the copy passes the gate on its next attempt (${Math.round((Date.now() - t0) / 1000)} s; ≤ 35 s = its 30 s ladder + a hello)`, /dial-out connected/.test(logOf('b')) && g.accepts === 2 && g.linked, JSON.stringify({ accepts: g.accepts, waited: Date.now() - t0 }));
+    // (i) THIS copy has its own root, so its OWN device identity: a different device holding a copied pairing, which list line 144
+    // refuses at the hello by design — the row reads key-refused with its door, never connected, the duplicate note kept
+    const kr = await waitFor(() => { const rs = facts().rs; return rs && rs.state === 'key-refused' ? rs : null; }, 15000);
+    const g2 = facts();
+    check('B9: …and its hello is REFUSED by its device identity (another device holding a copied pairing): the row reads key-refused — side device, device-key-mismatch, pinned, the pairing door — never connected, the duplicate note kept', !!kr && g2.rs.state === 'key-refused' && g2.rs.side === 'device' && g2.rs.code === 'device-key-mismatch' && g2.rs.pinned === true && g2.rs.door === 'pairing' && !!g2.rs.dup, JSON.stringify(g2.rs));
+  } });
+  // (ii) A TRUE COPY — what a migrated home folder is: the copy starts with A's OWN identity file and nothing else of A's. While A
+  // answers it is refused like any duplicate; once A is gone it proves the pinned key and is ADMITTED (the old leg's meaning, kept:
+  // a person who moved this machine's home folder is never locked out)
+  await twoDaemons({ tag: 'duptrue', bundleA: bsrc, bundleB: bsrc, run: async ({ spawnOne, facts, logOf, statusOf, kill, DPD }) => {
+    const stA = spawnOne('a', bsrc);
+    const pinnedA = await waitFor(() => { const r = facts().row; return r && r.deviceKey && fs.existsSync(path.join(stA, 'identity.pem')) ? r.deviceKey : null; }, 20000);
+    check('B9 (ii): daemon A dialed in and its device identity is pinned (state/identity.pem minted, the row holds its key)', !!pinnedA && facts().accepts === 1 && facts().linked, JSON.stringify({ accepts: facts().accepts }));
+    spawnOne('b', bsrc, undefined, { identityFrom: stA });
+    await sleep(9000);
+    const f = facts(), sb = statusOf('b');
+    check('B9 (ii): while A answers the TRUE copy is refused like any duplicate — 1 accept, 0 closes, its status refused-duplicate-device, streak ≥ 2', f.accepts === 1 && f.closes === 0 && f.linked && !!sb && sb.last.code === 'refused-duplicate-device' && sb.streak >= 2, JSON.stringify({ accepts: f.accepts, closes: f.closes, last: sb && sb.last && sb.last.code, streak: sb && sb.streak }));
+    kill('a');
+    const t0 = Date.now();
+    const adm = await waitFor(() => { const x = facts(); return /dial-out connected/.test(logOf('b')) && x.accepts === 2 && x.rs && x.rs.state === 'connected' ? x.rs : null; }, 45000, 500);
+    // the row reads connected at the ACCEPT, before the hello is judged: the copy is judged once the hub's link on ITS stream is up
+    // (src/agentd/client.js sets the link only after the key verdict and the hello passed), and again a second later (a refusal of
+    // the signed ok drops it)
+    const helloOn = () => { const dm = DPD.agentdDialDevices.get('mac'); return !!(dm && !dm._stopped && dm._dialStream === DPD.agentdDials.get('mac') && dm.status().connected); };
+    const hello = adm ? await waitFor(() => (helloOn() ? true : null), 15000) : null;
+    await sleep(1000);
+    const g = facts();
+    check(`B9 (ii): once A is gone the TRUE copy is ADMITTED (${Math.round((Date.now() - t0) / 1000)} s) — it proves the pinned key: the hub's hello on its stream passed and holds, the row reads connected, before that N attempts failed (another device dials in as this one), the note still on`, !!adm && !!hello && helloOn() && g.rs.state === 'connected' && g.rs.n >= 2 && g.rs.reason === 'duplicate-device' && !!g.rs.dup && g.linked && !g.row.deviceKeyRefused, JSON.stringify({ rs: g.rs, accepts: g.accepts, hello: !!hello, keyRefused: (g.row && g.row.deviceKeyRefused) || null }));
   } });
   // verify-r2 B9-r2a: the copy runs a bundle WITHOUT the boot header (an old bundle — or a stolen pairing whose
   // holder simply strips the header). r1 judged it "as before: replaced" ⇒ 9 accepts / 8 closes in 8 s, i.e. any
@@ -541,7 +590,20 @@ async function twoDaemons({ tag, bundleA, bundleB, run, DPmod = require('../src/
       spawnOne('b', noBoot);
       await sleep(8000);
       const f = facts();
-      check(`B9 CONTROL: under r1's "no boot id ⇒ replace" the header-less copy evicts the first daemon and the two flap (${f.accepts} accepts, ${f.closes} closes in 8 s) — the gate can go red`, f.accepts >= 4 && f.closes >= 3, JSON.stringify({ accepts: f.accepts, closes: f.closes, casts: f.casts }));
+      check(`B9 CONTROL: under r1's "no boot id ⇒ replace" the header-less copy EVICTS the first daemon — ${f.accepts} accepts, ${f.closes} close(s) of A's link in 8 s: more than one accept and a close, exactly what B9-r2a forbids (the gate can go red). Not a flap rate: since list line 144 a copy refused by its device identity keeps its stream, so the churn is damped`, f.accepts >= 2 && f.closes >= 1, JSON.stringify({ accepts: f.accepts, closes: f.closes, casts: f.casts }));
+    } });
+    // CONTROL (the copy's window): a gate whose EVERY refused dial casts — the row's «changed» and the 60 s throttle gone — is RED
+    // under the same window judge
+    const dpEvery = anchored(dpSrc, 'if (r.changed || now - (_dialBcastAt.get(deviceId) || 0) >= 60000) {', 'if (true) {', 'every-refusal-casts');
+    const DPe = M.load('src/server/dial-pairing.js', dpEvery, 'everycast');
+    await twoDaemons({ tag: 'dupcast', bundleA: bsrc, bundleB: bsrc, DPmod: DPe, run: async ({ spawnOne, facts, statusOf }) => {
+      spawnOne('a', bsrc);
+      await settledOf(facts);
+      const before = facts().castLog.length;
+      spawnOne('b', bsrc);
+      await sleep(8000);
+      const cw = facts().castLog.slice(before), sb = statusOf('b'), bad = copyBad(cw, sb && sb.streak);
+      check(`B9 CONTROL (the copy's window): a gate whose every refused dial casts is RED — ${cw.length} casts in the copy's window (${bad.join('; ') || 'none named'})`, cw.length >= 2 && bad.length > 0, JSON.stringify({ cw }));
     } });
   }
 }
