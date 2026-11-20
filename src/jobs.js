@@ -150,6 +150,8 @@ const REAP_TRIES = 12;
 const WEDGE_MS = 3000;
 // B-2c5c, round wwa7r2uc1 (THE MAIN DOOR): the words of a stop refused because the job's main process IS this hub
 const HUB_MAIN_WORDS = 'this job is the running VibeSpace: it is not stopped here';
+// B-2c5c (主开发 01:57Z): the errnos of a scope list that no longer EXISTS — read as an EMPTY scope (data/bin/job-wrapper.js holds the same set)
+const GONE_LIST = new Set(['ENOENT', 'ENOTDIR', 'ENODEV']);
 const pause = (ms) => new Promise((res) => setTimeout(res, ms));
 /** the typed held record for a stash entry, from the ladder's own answer */
 function heldOf(r, reason) {
@@ -1673,12 +1675,16 @@ class JobManager {
    *  stopped or ended (no stop asked, no grace, no kill step) */
   _hubMainRefusal(job, run, what = 'the stop') {
     const said = this._hubMainSaid || (this._hubMainSaid = new WeakMap()), roads = said.get(run) || new Set();
-    if (run && !roads.has(what)) { roads.add(what); said.set(run, roads); this.d.log(`[jobs] ${job.id}: ${what} refused — ${HUB_MAIN_WORDS}`); this._runLogLine(this._runLogFile(job), `[jobs] ${what}: refused — ${HUB_MAIN_WORDS}`); }
+    if (run && !roads.has(what)) { roads.add(what); said.set(run, roads); this.d.log(`[jobs] ${job.id}: ${what} refused — ${HUB_MAIN_WORDS}`); this._runLogLine(this._runLogFile(job), `[jobs] ${what}: refused — ${HUB_MAIN_WORDS}`); this._touch(job, { what: `${what} refused — ${HUB_MAIN_WORDS}` }); }   // its readers' should: said on the row too (a limit refused left the row silent)
     return { error: HUB_MAIN_WORDS, code: 'hub-is-main' };
   }
   /** B-2c5c (主开发's small 4): the hub test for ONE pass — memoised per pid, as the wrapper's keptTest is (a pass asks it of every
    *  process of a scope or of the job's mark: each walk read the same chain again) */
-  _hubTest(wrapper = 0) { const memo = new Map(); return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, this._hubsOwn(p, wrapper)); return memo.get(p); }; }
+  _hubTest(wrapper = 0) { const memo = new Map(); return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, this._hubsOwn(p, wrapper) || this._hubAncestor(p)); return memo.get(p); }; }
+  /** B-2c5c, its readers' should (round wwa7r2uc1): a process UP this hub's own parent chain — its launcher (`./run.sh`, `npm start`)
+   *  and what started it — is the hub's too: a reap after a killed wrapper SIGKILLed the launcher one by one (the hub left with no
+   *  supervisor). Read up from our parent, the same chain walk (a live ancestor's pid is that process now) */
+  _hubAncestor(pid) { const p = Number(pid); return p > 1 && p !== process.pid && PI.keptByChain(process.ppid, new Map([[p, 0]])); }
   /** B-2c5c: does this hub live in `scope`? Its OWN cgroup (/proc/self/cgroup, read once a life — a process never changes its cgroup
    *  by itself; `d.hubCgroup` = a fast suite's) is the scope's or under it */
   async _hubInScope(scope) {
@@ -1740,7 +1746,9 @@ class JobManager {
     const reads = this._procReads || (this._procReads = new Map());
     let p = reads.get(scope.dir);
     if (!p) {
-      p = fs.promises.readFile(path.join(scope.dir, 'cgroup.procs'), 'utf8').then((t) => t.split('\n').filter((l) => /^\d+$/.test(l)).map(Number), () => []);
+      // B-2c5c (主开发 01:57Z): the errno decides, by name — a list that no longer EXISTS (ENOENT, ENOTDIR, ENODEV: the emptied scope
+      // systemd removed) is EMPTY; one that exists and cannot be read is null (unread: retried, said) — every error read as «empty» before
+      p = fs.promises.readFile(path.join(scope.dir, 'cgroup.procs'), 'utf8').then((t) => t.split('\n').filter((l) => /^\d+$/.test(l)).map(Number), (e) => (e && GONE_LIST.has(e.code) ? [] : null));
       reads.set(scope.dir, p);
       p.then(() => { if (reads.get(scope.dir) === p) reads.delete(scope.dir); });
     }
@@ -2976,10 +2984,11 @@ class JobManager {
       }
       if (stamp) this._listenRead(job, stamp); // lane artifacts-services: the port it serves (async, ≤ 1 read / job / 30 s)
       // timeout — its SIGTERM and its words once per run (round 6: the kill step bound to it)
-      if (job.kind === 'task' && job.timeoutMs && run && !run.endedAt && !job._timedOut && now() - run.startedAt > job.timeoutMs) {
-        job._timedOut = true;
-        if (this._hubIsMain(job, run)) this._hubMainRefusal(job, run, 'its time limit');   // B-2c5c: THE MAIN DOOR — no grace, no kill step
-        else { this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run)); }
+      if (job.kind === 'task' && job.timeoutMs && run && !run.endedAt && !job._timedOut && !run._limitRefused && now() - run.startedAt > job.timeoutMs) {
+        // B-2c5c: THE MAIN DOOR — no grace, no kill step; its readers' should: a REFUSED limit marks the RUN (asked once), never the
+        // job's «timed out» (its end would read «timeout» for a limit that never acted)
+        if (this._hubIsMain(job, run)) { run._limitRefused = true; this._hubMainRefusal(job, run, 'its time limit'); }
+        else { job._timedOut = true; this._termRun(job, run); job._termAt = job._termAt || now(); this._armKillStep(job, run, this._runScope(job, run)); }
       }
       // THE LADDER (round 7) — a run SIGTERMed by a stop, a timeout or an until-marker: EVERY TICK while THAT run lives, a kill
       // step after its SIGTERM, _escalate — its scope (once), then a wrapper still there WEDGE_MS later with its group. Round 6
@@ -3058,8 +3067,8 @@ class JobManager {
       job._untilCursor += len;
       // literal substring on capped-length text (no agent regex on the main loop)
       if (buf.toString('utf-8').split('\n').some((l) => l.slice(0, 4096).includes(job.untilOutput))) {
+        if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, 'its until-marker'); return; }   // B-2c5c: THE MAIN DOOR — never said «completing», never marked hit (its end would read «until-output»)
         job._untilHit = true;
-        if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, 'its until-marker'); return; }   // B-2c5c: THE MAIN DOOR — never said «completing»
         this._event(job, 'until-marker hit — completing after grace');
         const grace = Number(process.env.VIBESPACE_JOBS_GRACE_MS) || 30_000; // env knob: tests shrink the until-grace
         const steps = job._killSteps || (job._killSteps = new Set()); // round 6: bound to ITS run — a new run disarms it (_spawn)

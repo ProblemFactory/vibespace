@@ -378,7 +378,13 @@ function readEvents(dir) {
 }
 /** the processes still in a cgroup (its cgroup.procs) — [] once it is empty or gone */
 function procsOf(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch { return []; } }
-function procsOrNull(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch { return null; } }   // B-2c5c r1: unread ≠ empty
+// B-2c5c (主开发 01:57Z, the hosted run's red): a scope whose list no longer EXISTS is an EMPTY scope — systemd removes a transient scope
+// once it empties: its list's PATH then reads ENOENT (ENOTDIR: a component of it no folder), a list opened while it lived reads
+// ENODEV (both seen on a real user scope: bl-jobs/probes/errno/scope-gone.mjs, kernel 7.0). Only a list that EXISTS and cannot be
+// read (EACCES, EPERM, EIO, EMFILE, ENFILE, …) is unread — named by its errno (`listUnread`), never a blanket catch
+const GONE_LIST = new Set(['ENOENT', 'ENOTDIR', 'ENODEV']);
+let listUnread = '';
+function procsOrNull(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch (e) { if (e && GONE_LIST.has(e.code)) return []; listUnread = (e && e.code) || 'an error'; return null; } }   // B-2c5c r1: unread ≠ empty; gone = empty
 /** the keeper (< 253) is ours, never something the job left — known by the PID its gate said, and its start (round 6) */
 const isKeeper = (pid) => !!keeper && Number(pid) === keeper.pid && Number((statOf(pid) || [])[19]) === keeper.start;
 
@@ -790,7 +796,7 @@ function onStop(sig, at, by) {
 /** round 9: the scope's processes as rows ([pid, start, pgid]) — never the keeper; null when its list cannot be read */
 function scopeRows() {
   let t;
-  try { t = fs.readFileSync(path.join(scopeDir, 'cgroup.procs'), 'utf8'); } catch { return null; }
+  try { t = fs.readFileSync(path.join(scopeDir, 'cgroup.procs'), 'utf8'); } catch (e) { if (e && GONE_LIST.has(e.code)) return []; listUnread = (e && e.code) || 'an error'; return null; }   // a gone list: no rows (the scope emptied); unread: null
   const kept = keptTest();   // B-2c5c: the hub's processes are never the stop's rows
   return t.split('\n').filter((l) => /^\d+$/.test(l) && Number(l) !== process.pid && !isKeeper(l) && !(kept && kept(l))).map(rowOf).filter(Boolean);
 }
@@ -900,7 +906,7 @@ async function drainScope() {
   // small 2: the END measured on a list that READS — an unread one is no «empty»: the job reads ended, said «could not be read: may
   // still run», and the engine reaps the scope (scopeEmpty false)
   const fin = procsOrNull(scopeDir), unread = fin === null;
-  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !unread && !fin.filter((p) => !(kept && kept(p))).length, ...(unread ? { scopeUnread: true } : {}) };
+  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !unread && !fin.filter((p) => !(kept && kept(p))).length, ...(unread ? { scopeUnread: listUnread || true } : {}) };
 }
 // A RUNG WITHOUT A SCOPE (rlimit-data, none — a fleet pod): what the job left is what still runs in OUR process group (the job
 // is our child in it; what it put in the background stays there) — a task's stopped and said, a service's kept and named by
@@ -1005,7 +1011,7 @@ async function ended(code, signal) {
   const drained = scoped() ? await drainScope() : await drainGroup();
   const named = memory.cause === 'oom-bound' ? ` — stopped: used more than ${memory.mb >= 1024 ? Math.round(memory.mb / 102.4) / 10 + ' GB' : memory.mb + ' MB'} (${memory.how})`
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
-  const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ' — its scope\'s list could not be read: what it started may still run' : '');
+  const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '');
   if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // …and what came on the pipes after the exit event, masked
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
   writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: true } : {}) } : {}) });
