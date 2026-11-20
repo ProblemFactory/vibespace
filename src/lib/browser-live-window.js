@@ -1628,7 +1628,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const stuckRow = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === stuckId) || { targetId: stuckId, title: '' };   // its read 4 (N2): the button the sentence names is always drawn
       // its read (M1): a FRONT tab whose script loops is unresponsive too — the hub says when a tab was HIDDEN in its window as it hung
       // (`polled`: a picture of it was polled while hidden — behind another tab, or its window minimized); brought to the front, the hub
-      // says `polled` false again (its read 4 M1). A hung tab on the drawn window the hub does not say is hidden — never polled, or
+      // re-says the record with `polled` false (its read 4 M1). A hung tab on the drawn window the hub does not say is hidden — never polled, or
       // brought forward — is told in words true in both places (its read 4 S1; its read 5: after a bring-forward the person may press
       // another tab in the browser's own strip, which the hub never sees — so «Reload it» alone is never said on the drawn window)
       const drawn = driving && xOn() && xp.status === 'connected';
