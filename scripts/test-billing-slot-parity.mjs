@@ -43,7 +43,7 @@ export const RESOLVERS = Object.freeze(['fireIdentityFor', 'sessionBillingMember
   'authorizeSpend', 'spendGuard.authorizeBatch', 'authorizeSpendBatch', 'stoppedRows', 'stoppedPlan', 'writeSnap@src/server/usage-pool-engine.js', 'billingIndex@src/server/auto-cli-loop.js',
   'chooseDefault@src/accounts.js', 'authorize@src/server/spend-guard.js', 'authorizeBatch@src/server/spend-guard.js']);
 export const STAGES = Object.freeze(['spend', 'cost', 'readings', 'pool', 'routes', 'pile']);
-// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (229 calls in 202 rows: the ten 66, the census cure's nine 80, the cure 2's net 72, the cure 3's handed-on names 7, the product cure's codexKeyOf 4); the census file names each line
+// [resolver, file, enclosing function, stage, calls] — derived by THIS suite's own scan (231 calls in 204 rows: the ten 66, the census cure's nine 80, the cure 2's net 72, the cure 3's handed-on names 7, the product cure's codexKeyOf 4, piece 7's delivery start 2); the census file names each line
 export const ROWS = Object.freeze([
   ['poolCurrentFor', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
   ['poolMemberOfSession', 'src/server/usage-attribution.js', 'recordUsageAttribution', 'cost', 1],
@@ -142,6 +142,7 @@ export const ROWS = Object.freeze([
   ['usageCacheKeyFor', 'src/server/usage-pool-engine.js', 'noteLateFact', 'readings', 1],
   ['usageCacheKeyFor', 'src/server/usage-pool-engine.js', 'recordRateLimitEventNow', 'readings', 2],
   ['usageCacheKeyFor', 'src/server/usage-pool-engine.js', 'wallSlotFor', 'pile', 1],
+  ['usageCacheKeyFor', 'src/server/delivery-wake.js', 'startOne', 'readings', 1],   // piece 7 (deliveries resume): the account's limit scope for the quota verdict — met my census at .413 checkpoint 2
   ['wallKeyFor', 'src/server/usage-pool-engine.js', '_wallScope', 'readings', 1],
   ['wallKeyFor', 'src/server/usage-pool-engine.js', 'creditIdentityFor', 'pile', 1],
   ['wallKeyFor', 'src/server/usage-pool-engine.js', 'demoteWalledAccount', 'readings', 1],
@@ -227,6 +228,7 @@ export const ROWS = Object.freeze([
   ['setConversationPin', 'src/server/account-usage-routes.js', '(module)', 'routes', 1],
   ['spendGuard.authorizeBatch', 'server.js', 'authorizeSpendBatch', 'pile', 1],
   ['spendGuard.authorize', 'server.js', 'authorizeSpend', 'pile', 2],
+  ['spendGuard.authorize', 'src/server/delivery-wake.js', 'startOne', 'spend', 1],   // piece 7: the guard's probe before a delivery starts (hold: false)
   ['spendGuard.authorize', 'src/agent-routes.js', 'dispatcher', 'spend', 1],
   ['spendGuard.authorize', 'src/agent-routes.js', 'setupAgentRoutes', 'spend', 1],
   ['spendGuard.authorize', 'src/server/conversation-ops.js', 'openConversation', 'spend', 1],
@@ -600,6 +602,7 @@ export const CONSUMERS = Object.freeze({
   "setup": {"file": "src/routes/sessions.js", "fields": [], "why": "Registers the session routes; /api/active puts sessionAuth's billing chip in each row (display); setup itself returns nothing."},
   "setupAgentRoutes": {"file": "src/agent-routes.js", "fields": null, "why": "the stop-nudge route asks the guard before it nudges; the answer is a response, nothing returned", "gap": "route setup: the verdict goes into an HTTP response, not a return whose fields can be named"},
   "spendOk": {"file": "src/server/auto-resume.js", "fields": [], "why": "auto-resume's spend check before a continue: asks the guard and returns true / false — the charge is noted inside, nothing handed on"},
+  "startOne": {"file": "src/server/delivery-wake.js", "fields": [], "why": "Piece 7 (deliveries resume): the delivery's start judge — usageCacheKeyFor scopes the account's quota verdict, spendGuard.authorize probes the guard (hold: false); returns the outcome and the session id, never an account."},
   "stopped": {"file": "src/server/bulk-resume-routes.js", "fields": null, "why": "the bulk resume's GET route: hands the stopped plan to the page — the rows' identities are the page's words", "gap": "a route handler: the plan (its rows carry each identity) goes into the HTTP response, not a return"},
   "summarizeCodexRateLimits": {"file": "src/usage-routes.js", "fields": ["byAccount", "overall"], "why": "the codex usage summary for the page and the cache: each reading filed under codexKeyOf's account — a map keyed BY account and the newest reading, not an answer of which account a conversation bills"},
   "sweepNonMemberLinks": {"file": "src/server/usage-pool-engine.js", "fields": ["pool", "removed", "moved", "stayed", "held", "defaultMoved"], "why": "Runs memberRemoved for each pool with stale links; returns the array of those reports, which echo members for the journal and suites."},
