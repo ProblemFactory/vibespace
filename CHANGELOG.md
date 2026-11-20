@@ -8,6 +8,14 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A message you held behind a running turn, or a turn that just started or ended, no longer goes missing from the chat if VibeSpace restarts right then.
 - On a paired Windows machine with a POSIX shell (Git Bash), a key helper named in the config folder its login shell sets is now seen at a start.
 - On a paired Windows machine, programs on its PATH are found, and a start is no longer refused for a POSIX shell that is installed (Git Bash).
+- A job may resume a conversation you ended only once that permission is saved; if it is not saved in time it is put back, and the jobs panel says so.
+- On slow storage, VibeSpace no longer freezes while it saves Background Work jobs and their notifications, or a Task Group's notes and edits.
+- When a change to a job, a Task Group or a cleared record is not on disk in time, the page and the agent's command now say so.
+- A Background Work run no longer starts while it cannot be saved; it says why instead.
+- On slow storage, a browser no longer starts while its launch record cannot be saved; it says why instead.
+- On slow storage, answering a job's panel or removing a job, Task Group or browser profile is saved at once and finishes by itself when the storage answers.
+- On slow storage, forgetting a browser profile now saves its removal before its folder is moved aside.
+- Deleting a browser profile whose folder could not be set aside now says so, and names the folder's path.
 
 ## 2.369.413 — 2026-11-20
 
