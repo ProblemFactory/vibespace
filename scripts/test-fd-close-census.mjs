@@ -20,12 +20,17 @@
 //   above-n       a close of a for loop's own counter: «every descriptor above N» (numbers it never opened)
 //   closer-keeps  a close()/end()/dispose() of an outer function's descriptor that keeps the number (a second call closes it
 //                 again — the placed fault's own shape)
-//   empty-catch   a close under an empty catch: TODAY'S 97 (98 with the held module's) are held as a NAMED ratchet by file (EMPTY_CATCH_DEBT — r621's list, by file,
+//   empty-catch   a close under an empty catch: TODAY'S 108 (109 with the held module's) are held as a NAMED ratchet by file (EMPTY_CATCH_DEBT — r621's list, by file,
 //                 line and function, sent to the coordinator); a new one is red by
 //                 its file, line and function; a file's count that falls is said (lower the row)
 // HELD: src/usage-ledger-dedup.js is lane lg-leak-census's (its unit A): its findings are PRINTED, never judged here.
 // Each rule has a PLANT red by name; the law's own forms (forget at the close, exclusive branches, a handle closed twice, a closer
-// that forgets) are planted GREEN. Fast: in-process, about 1.6 s (174 of 1245 files name an open or a close and are parsed).
+// that forgets) are planted GREEN. Fast: in-process, stated 2.5 s by its row (174 of 1245 files name an open or a close and are parsed).
+// THE EMPTY CATCH, both spellings: a close in a try whose catch is empty, and a HANDLE's close under `.catch(() => { })` (counted alike).
+// SHAPES THE MATCHER CANNOT SEE (none faulty today — round wwxskuzuw): a descriptor closed through an alias or a loop variable
+// (agentd.js open(): `for (const fd of [inFd, outFd, errFd])` is tied to no row); a descriptor kept in an array or an object literal;
+// a close helper that closes its argument, called twice; member descriptors (this.x = openSync) in the closer rule (none in the tree);
+// close / open destructured from fs and called bare, and fs.close on an alias outside FSLIKE (none in src, server.js or data/bin).
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -78,6 +83,8 @@ function closeOf(e, text) {
   if (propName(c) === 'close' && e.arguments.length === 0) return { key: text(c.object), arg: c.object, kind: 'handle' };
   return null;
 }
+/** the name of the function a node sits in (its declaration, its property / method key, its variable), '(top)' or '(anonymous)' */
+const fnName = (node) => { const f = fnOf(node); if (!f) return '(top)'; if (f.id) return f.id.name; const P = f._p; if (P && (P.type === 'Property' || P.type === 'MethodDefinition') && P.key) return P.key.name || P.key.value; if (P && P.type === 'VariableDeclarator' && P.id.type === 'Identifier') return P.id.name; return '(anonymous)'; };
 const stmtOf = (n) => { while (n && n._p && !/Statement$|Declaration$/.test(n.type)) n = n._p; return n; };
 const fnOf = (n) => { n = n && n._p; while (n && !isFn(n)) n = n._p; return n || null; };
 const contains = (a, b) => { for (let n = b; n; n = n._p) if (n === a) return true; return false; };
@@ -96,6 +103,17 @@ function forgettingClose(call, key, text) {
   if (list) { const i = list.indexOf(S); if (i >= 0 && list[i + 1] && forgets(list[i + 1], key, text)) return true; }
   // the close sits in a try whose finally (or the try's own next statement) forgets it
   for (let n = call._p; n && !isFn(n); n = n._p) if (n.type === 'TryStatement' && n.finalizer && !contains(n.finalizer, call) && forgets(n.finalizer, key, text)) return true;
+  return false;
+}
+/** the closer forgets its number: after the close's statement — or after an enclosing if / try of its OWN function — the next
+ *  statement of that block assigns the number null / undefined / -1 (the CLOSER rule only) */
+function forgetsAfter(call, key, text) {
+  if (forgettingClose(call, key, text)) return true;
+  const f = fnOf(call);
+  for (let x = stmtOf(call); x && x._p && x !== f && x._p !== f; x = x._p) {
+    const P = x._p; const list = P.type === 'BlockStatement' || P.type === 'Program' ? P.body : P.type === 'SwitchCase' ? P.consequent : null;
+    if (list) { const i = list.indexOf(x); if (i >= 0 && list[i + 1] && forgets(list[i + 1], key, text)) return true; }
+  }
   return false;
 }
 const TERM = /^(ReturnStatement|ThrowStatement|BreakStatement|ContinueStatement)$/;
@@ -167,10 +185,18 @@ function census(files) {
     stats.opens += binds.length; stats.closes += closes.length;
     // a close under an empty catch (any close site)
     const handleKeys = new Set(binds.filter((b) => b.kind !== 'fd' && b.kind !== 'fd-cb').map((b) => b.key));
-    for (const c of closes) { if (c.kind === 'handle' && !handleKeys.has(c.key)) continue; for (let n = c.node._p; n && !isFn(n); n = n._p) { if (n.type === 'TryStatement' && contains(n.block, c.node)) { if (n.handler && n.handler.body.body.length === 0) { { const bd = binds.find((x) => x.key === c.key && (x.member || c.decl === x.decl)); const oc = bd ? unwrap(bd.node.init || bd.node.right || bd.node) : null; const fl = oc && oc.arguments && oc.arguments[1]; const flags = !bd ? 'unknown (no open here)' : fl && fl.type === 'Literal' ? String(fl.value) : fl ? text(fl).slice(0, 40) : 'r (default)'; const w = !bd ? '?' : (fl && fl.type === 'Literal' ? /[wa+]/.test(String(fl.value)) : /O_WRONLY|O_RDWR|O_CREAT|O_APPEND|O_TRUNC/.test(fl ? text(fl) : '')) ? 'write' : 'read'; const synced = (() => { const f = fnOf(c.node); if (!f) return false; const t = text(f); const k = c.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); return new RegExp(`f(data)?syncSync\\(\\s*${k}\\b|${k}\\.(sync|datasync)\\(`).test(t); })();
-              findings.push({ rule: 'empty-catch', file: rel, line: lineAt(c.node.start), key: c.key, why: 'a close under an empty catch', flags, rw: w, synced, fn: (() => { const f = fnOf(c.node); if (!f) return '(top)'; if (f.id) return f.id.name; const P = f._p; if (P && (P.type === 'Property' || P.type === 'MethodDefinition') && P.key) return P.key.name || P.key.value; if (P && P.type === 'VariableDeclarator') return P.id.name; return '(anonymous)'; })() }); } stats.emptyCatch.push(`${rel}:${lineAt(c.node.start)}`); } break; } } }
+    const emptyFn = (a) => !!a && isFn(a) && a.body && a.body.type === 'BlockStatement' && a.body.body.length === 0;
+    for (const c of closes) {
+      if (c.kind === 'handle' && !handleKeys.has(c.key)) continue;
+      // the TRY form: the close in a try whose catch is empty; the PROMISE form (a handle's close): `.catch(() => {})` (round wwxskuzuw)
+      const M = c.node._p; let empty = !!(M && M.type === 'MemberExpression' && propName(M) === 'catch' && M._p && M._p.type === 'CallExpression' && M._p.callee === M && emptyFn(M._p.arguments[0]));
+      if (!empty) for (let n = c.node._p; n && !isFn(n); n = n._p) if (n.type === 'TryStatement' && contains(n.block, c.node)) { empty = !!(n.handler && n.handler.body.body.length === 0); break; }
+      if (!empty) continue;
+      { const bd = binds.find((x) => x.key === c.key && (x.member || c.decl === x.decl)); const oc = bd ? unwrap(bd.node.init || bd.node.right || bd.node) : null; const fl = oc && oc.arguments && oc.arguments[1]; const flags = !bd ? 'unknown (no open here)' : fl && fl.type === 'Literal' ? String(fl.value) : fl ? text(fl).slice(0, 40) : 'r (default)'; const w = !bd ? '?' : (fl && fl.type === 'Literal' ? /[wa+]/.test(String(fl.value)) : /O_WRONLY|O_RDWR|O_CREAT|O_APPEND|O_TRUNC/.test(fl ? text(fl) : '')) ? 'write' : 'read'; const synced = (() => { const f = fnOf(c.node); if (!f) return false; const t = text(f); const k = c.key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); return new RegExp(`f(data)?syncSync\\(\\s*${k}\\b|${k}\\.(sync|datasync)\\(`).test(t); })();
+              findings.push({ rule: 'empty-catch', file: rel, line: lineAt(c.node.start), key: c.key, why: 'a close under an empty catch', flags, rw: w, synced, fn: (() => { const f = fnOf(c.node); if (!f) return '(top)'; if (f.id) return f.id.name; const P = f._p; if (P && (P.type === 'Property' || P.type === 'MethodDefinition') && P.key) return P.key.name || P.key.value; if (P && P.type === 'VariableDeclarator') return P.id.name; return '(anonymous)'; })() }); }
+    }
     // a helper that closes every descriptor above N: closeSync(i) of the enclosing for loop's own counter
-    for (const c of closes) for (let n = c.node._p; n && !isFn(n); n = n._p) if (n.type === 'ForStatement' && n.update && c.arg.type === 'Identifier' && n.update.type === 'UpdateExpression' && n.update.argument.type === 'Identifier' && n.update.argument.name === c.arg.name) findings.push({ rule: 'above-n', file: rel, line: lineAt(c.node.start), key: c.key, why: 'closes every descriptor of a counted range (numbers it never opened)' });
+    for (const c of closes) for (let n = c.node._p; n && !isFn(n); n = n._p) if (n.type === 'ForStatement' && n.update && c.arg.type === 'Identifier' && n.update.type === 'UpdateExpression' && n.update.argument.type === 'Identifier' && n.update.argument.name === c.arg.name) findings.push({ rule: 'above-n', file: rel, line: lineAt(c.node.start), fn: fnName(c.node), key: c.key, why: 'closes every descriptor of a counted range (numbers it never opened)' });
     // the rows: each binding with its close sites
     for (const b of binds) {
       const scope = b.member ? null : (b.cbParam ? b.fn : b.fn);
@@ -178,23 +204,36 @@ function census(files) {
       const row = { file: rel, line: lineAt(b.node.start), key: b.key, kind: b.kind, closes: mine.map((c) => lineAt(c.node.start)) };
       rows.push(row);
       const keep = b.kind === 'handle' || b.kind === 'handle?' ? [] : mine.filter((c) => !forgettingClose(c.node, b.key, text));
-      if (b.kind === 'handle' || b.kind === 'handle?') for (const c of closes) if (c.kind === 'fd' && c.arg.type === 'MemberExpression' && propName(c.arg) === 'fd' && text(c.arg.object) === b.key) findings.push({ rule: 'handle-raw', file: rel, line: lineAt(c.node.start), key: c.key, why: 'the raw number of a FileHandle closed by hand — the handle closes it again' });
-      for (let i = 0; i < keep.length; i++) for (let j = i + 1; j < keep.length; j++) { const why = bothRun(keep[i].node, keep[j].node); if (why) findings.push({ rule: 'twice', file: rel, line: lineAt(b.node.start), key: b.key, sites: [lineAt(keep[i].node.start), lineAt(keep[j].node.start)], why }); }
+      if (b.kind === 'handle' || b.kind === 'handle?') for (const c of closes) if (c.kind === 'fd' && c.arg.type === 'MemberExpression' && propName(c.arg) === 'fd' && text(c.arg.object) === b.key) findings.push({ rule: 'handle-raw', file: rel, line: lineAt(c.node.start), fn: fnName(c.node), key: c.key, why: 'the raw number of a FileHandle closed by hand — the handle closes it again' });
+      for (let i = 0; i < keep.length; i++) for (let j = i + 1; j < keep.length; j++) { const why = bothRun(keep[i].node, keep[j].node); if (why) findings.push({ rule: 'twice', file: rel, line: lineAt(b.node.start), fn: fnName(keep[i].node), key: b.key, sites: [lineAt(keep[i].node.start), lineAt(keep[j].node.start)], why }); }
       // the loop: a variable declared outside a loop, opened inside it, closed in the loop's finally/catch without forgetting
       if (!b.member && b.node.type === 'AssignmentExpression') {
         let loop = null; for (let n = b.node._p; n && n !== b.fn; n = n._p) if (isLoop(n)) { loop = n; break; }
         if (loop && b.decl && typeof b.decl === 'object' && contains(loop, b.decl)) loop = null;   // declared inside the loop: fresh every turn
-        if (loop) for (const c of keep) if (contains(loop, c.node)) { let inFin = false; for (let n = c.node._p; n && n !== loop; n = n._p) if (n.type === 'TryStatement' && (contains(n.finalizer || {}, c.node) || contains(n.handler || {}, c.node)) && contains(n.block, b.node)) inFin = true; if (inFin) findings.push({ rule: 'loop-left', file: rel, line: lineAt(c.node.start), key: b.key, why: 'a loop closes a number kept from its previous turn when this turn\'s open threw' }); }
+        if (loop) for (const c of keep) if (contains(loop, c.node)) { let inFin = false; for (let n = c.node._p; n && n !== loop; n = n._p) if (n.type === 'TryStatement' && (contains(n.finalizer || {}, c.node) || contains(n.handler || {}, c.node)) && contains(n.block, b.node)) inFin = true; if (inFin) findings.push({ rule: 'loop-left', file: rel, line: lineAt(c.node.start), fn: fnName(c.node), key: b.key, why: 'a loop closes a number kept from its previous turn when this turn\'s open threw' }); }
       }
-      for (const g of streamGiven) if (g.key === b.key && mine.length) findings.push({ rule: 'stream-too', file: rel, line: lineAt(g.node.start), key: b.key, sites: mine.map((c) => lineAt(c.node.start)), why: 'handed to a stream that closes it, and closed again' });
+      for (const g of streamGiven) if (g.key === b.key && mine.length) findings.push({ rule: 'stream-too', file: rel, line: lineAt(g.node.start), fn: fnName(g.node), key: b.key, sites: mine.map((c) => lineAt(c.node.start)), why: 'handed to a stream that closes it, and closed again' });
     }
-    // a closer that keeps the number: a close of an OUTER function's descriptor inside a nested function named close/end/dispose
-    for (const c of closes) { const f = c.fn; if (!f) continue; const b = binds.find((x) => x.key === c.key && !x.member && x.fn && x.fn !== f && contains(x.fn, f) && x.kind !== 'handle' && x.kind !== 'handle?'); if (!b) continue; const P = f._p; const nm = P && P.type === 'Property' && P.key ? (P.key.name || P.key.value) : P && P.type === 'MethodDefinition' ? P.key.name : f.id ? f.id.name : null; if (/^(close|end|dispose|release|done|finish)$/i.test(nm || '') && !forgettingClose(c.node, c.key, text)) findings.push({ rule: 'closer-keeps', file: rel, line: lineAt(c.node.start), key: c.key, why: `a ${nm}() that closes an outer descriptor and keeps the number (a second call closes it again)` }); }
+    // a closer that keeps the number: a close of a descriptor DECLARED in an outer function, inside a nested function named
+    // close/end/dispose — matched by the declaring scope (round wwxskuzuw: a lazy open in a sibling function, attach-roads' fileTail)
+    for (const c of closes) {
+      const f = c.fn; if (!f || !c.decl || typeof c.decl !== 'object') continue;
+      const b = binds.find((x) => x.key === c.key && !x.member && x.kind !== 'handle' && x.kind !== 'handle?' && x.decl === c.decl); if (!b) continue;
+      const declFn = fnOf(c.decl); if (!declFn || declFn === f || !contains(declFn, f)) continue;
+      const P = f._p; const nm = P && P.type === 'Property' && P.key ? (P.key.name || P.key.value) : P && P.type === 'MethodDefinition' ? P.key.name : f.id ? f.id.name : null;
+      if (/^(close|end|dispose|release|done|finish)$/i.test(nm || '') && !forgetsAfter(c.node, c.key, text)) findings.push({ rule: 'closer-keeps', file: rel, line: lineAt(c.node.start), fn: nm, key: c.key, why: `a ${nm}() that closes an outer descriptor and keeps the number (a second call closes it again)` });
+    }
   }
   return { rows, findings, stats };
 }
 
-const HELD = Object.freeze({ 'src/usage-ledger-dedup.js': 'lane lg-leak-census cures it (its unit A, b69a526a1): printed here, never judged' });
+// THE HOLD NAMES EXACTLY WHAT IT HOLDS AND ENDS WITH IT (round wwxskuzuw's must): while held, a file's findings are PINNED one by one
+// (the rule and the function of each); any other finding in that file is red by name; a pin the file no longer has is red «stale
+// hold» with the pin (the row, when it is its last) to remove. Whichever lands second — this census or lane lg-leak-census's cure (its
+// unit A) — removes the row: from then on the file is judged like every other, and the fault's own shape is red here
+const HELD = Object.freeze({
+  'src/usage-ledger-dedup.js': { why: 'lane lg-leak-census cures it (its unit A) — the unit that lands second removes this row', pins: [['closer-keeps', 'close'], ['empty-catch', 'close']] },
+});
 // TODAY'S closes under an empty catch, by file (r621's list) — the sweep that says a failed close is its own unit; a NEW one is red
 const EMPTY_CATCH_DEBT = Object.freeze({
   "data/bin/agy-wrapper.js": 1,
@@ -208,20 +247,24 @@ const EMPTY_CATCH_DEBT = Object.freeze({
   "data/bin/vibespace-usage-scan": 2,
   "src/account-material.js": 3,
   "src/adapters/codex.js": 2,
+  "src/agent-routes.js": 1,
   "src/agentd/agentd.js": 5,   // (the fifth landed on the .414 train before this census: B-147f's start-that-never-happened, open(), its three pipe descriptors handed to the child — held as ruled)
   "src/agentd/attach-roads.js": 1,
   "src/agy-store-fs.js": 3,
   "src/app-secrets-seal.js": 1,
+  "src/app-serve.js": 1,
+  "src/app-system-serve.js": 1,
   "src/channel-store.js": 6,
   "src/claude-oat-probe.js": 1,
   "src/cli-identity.js": 1,
   "src/codex-fork-ledger-purge.js": 1,
+  "src/design-fs.js": 4,
   "src/desktop-serve.js": 3,
   "src/device-audit.js": 1,
   "src/exit-proxy.js": 2,
   "src/harnesses/claude-home.js": 1,
   "src/hosts.js": 3,
-  "src/jobs.js": 1,
+  "src/jobs.js": 2,
   "src/machine-probes.js": 1,
   "src/managed-claude-settings.js": 1,
   "src/plugins/frp.js": 3,
@@ -230,12 +273,14 @@ const EMPTY_CATCH_DEBT = Object.freeze({
   "src/run-reads.js": 1,
   "src/safe-fs-worker.js": 2,
   "src/secret-box.js": 1,
-  "src/secret-file.js": 2,
+  "src/secret-file.js": 3,
   "src/server/auto-resume-workflow.js": 2,
   "src/server/browser-attach-launch.js": 2,
   "src/server/browser-cli-install.js": 2,
+  "src/server/browser-engines.js": 1,
   "src/server/browser-installs.js": 2,
   "src/server/channel-api.js": 1,
+  "src/server/decision-engine.js": 1,
   "src/server/goal-sync.js": 1,
   "src/server/ops-routes.js": 2,
   "src/server/session-stdout.js": 1,
@@ -254,19 +299,25 @@ const EMPTY_CATCH_DEBT = Object.freeze({
   "src/usage-walker.js": 2,
   "src/weekly-lanes-unfold.js": 1,
   "src/workflow-usage-tailer.js": 1,
-  "src/ws-create.js": 1
+  "src/ws-create.js": 1,
 });
 const STRUCTURAL = ['twice', 'stream-too', 'handle-raw', 'loop-left', 'above-n', 'closer-keeps'];
 /** the census's verdict over a set of files: the structural findings outside HELD, the ratchet's new closes under an empty catch */
-function verdict(files) {
+function verdict(files, held = HELD, { debt = EMPTY_CATCH_DEBT, partial = false } = {}) {
   const r = census(files);
-  const judged = r.findings.filter((f) => !HELD[f.file]);
+  const pinned = (f) => !!held[f.file] && held[f.file].pins.some(([rule, fn]) => f.rule === rule && f.fn === fn);
+  const judged = r.findings.filter((f) => !pinned(f));
+  const stale = [];
+  for (const [file, h] of Object.entries(held)) if (files[file] !== undefined) for (const [rule, fn] of h.pins) if (!r.findings.some((f) => f.file === file && f.rule === rule && f.fn === fn)) stale.push(`stale hold: ${file} no longer has «${rule}» in ${fn}() — remove that pin${h.pins.length === 1 ? ' (its row: the file is judged like every other)' : ''}`);
   const structural = judged.filter((f) => STRUCTURAL.includes(f.rule));
   const per = {}; for (const f of judged.filter((x) => x.rule === 'empty-catch')) (per[f.file] = per[f.file] || []).push(f);
   const grown = [], fell = [];
-  for (const [file, list] of Object.entries(per)) if (list.length > (EMPTY_CATCH_DEBT[file] || 0)) grown.push(`${file}: ${list.length} closes under an empty catch (held ${EMPTY_CATCH_DEBT[file] || 0}) — ${list.map((f) => `${f.line} ${f.fn}() ${f.key}`).join('; ')}`);
-  for (const [file, n] of Object.entries(EMPTY_CATCH_DEBT)) if (files[file] !== undefined && (per[file] || []).length < n) fell.push(`${file}: ${(per[file] || []).length} of ${n}`);
-  return { r, structural, grown, fell, held: r.findings.filter((f) => HELD[f.file]) };
+  for (const [file, list] of Object.entries(per)) if (list.length > (debt[file] || 0)) grown.push(`${file}: ${list.length} closes under an empty catch (held ${debt[file] || 0}) — ${list.map((f) => `${f.line} ${f.fn}() ${f.key}`).join('; ')}`);
+  for (const [file, n] of Object.entries(debt)) {
+    if (files[file] === undefined) { if (!partial) fell.push(`${file}: a row for a file that no longer exists — remove the row`); continue; }
+    if ((per[file] || []).length < n) fell.push(`${file}: ${(per[file] || []).length} closes under an empty catch, held ${n} — restate the row to ${(per[file] || []).length} (a removed close and a new one never trade places silently)`);
+  }
+  return { r, structural, grown, fell, stale, held: r.findings.filter(pinned) };
 }
 const name = (f) => `${f.rule} ${f.file}:${f.line} ${f.key}${f.sites ? ' @' + f.sites.join(',') : ''} — ${f.why}`;
 
@@ -281,12 +332,13 @@ console.log(`  · ${T.r.rows.length} rows (${Object.entries(kinds).map(([k, n]) 
 ok(T.r.stats.failed.length === 0 && T.r.stats.scanned > 100 && T.r.rows.length > 150, `the census read the tree: ${T.r.stats.scanned} files parsed, none failed, ${T.r.rows.length} rows`, T.r.stats.failed);
 ok(T.structural.length === 0, 'no descriptor outside the held module can be closed twice (body + finally, normal + error road, a sequence, a stream that closes it too, a handle\'s raw .fd, a loop\'s last number, «every descriptor above N», a closer that keeps its number)', T.structural.map(name));
 ok(T.grown.length === 0, `no NEW close under an empty catch (today's ${Object.values(EMPTY_CATCH_DEBT).reduce((a, b) => a + b, 0)} held by file — the sweep that says a failed close is its own unit)`, T.grown);
-if (T.fell.length) console.log(`  · the empty-catch debt FELL (lower its row): ${T.fell.join(' · ')}`);
-for (const f of T.held) console.log(`  · HELD (${HELD[f.file]}): ${name(f)}`);
+ok(T.fell.length === 0, 'the empty-catch ratchet holds exactly: no row fell (a fall is restated by its count) and no row names a file that no longer exists', T.fell);
+ok(T.stale.length === 0, 'every hold names a finding its file still has (a hold ends with what it holds — «stale hold» otherwise)', T.stale);
+for (const f of T.held) console.log(`  · HELD (${HELD[f.file].why}): ${name(f)} — pinned as «${f.rule}» in ${f.fn}()`);
 
 // ── ② THE PLANTS: each rule red by name ──
 console.log('② each rule, planted, is red by name');
-const P = (src) => verdict({ 'src/planted.js': "const fs = require('fs'); const fsp = require('fs/promises');\n" + src });
+const P = (src, held = {}) => verdict({ 'src/planted.js': "const fs = require('fs'); const fsp = require('fs/promises');\n" + src }, held, { debt: {}, partial: true });
 const plants = {
   twice: ["function a(p, b) { const fd = fs.openSync(p, 'r'); try { fs.readSync(fd, b); fs.closeSync(fd); } finally { fs.closeSync(fd); } }", /in the try's body AND in its finally/],
   'twice ': ["function a(p) { const fd = fs.openSync(p, 'r'); try { use(fd); fs.closeSync(fd); } catch (e) { fs.closeSync(fd); throw e; } }", /normal road \(try\) AND on the error road/],
@@ -296,13 +348,30 @@ const plants = {
   'loop-left': ["function a(ps) { let fd; for (const p of ps) { try { fd = fs.openSync(p, 'r'); use(fd); } finally { fs.closeSync(fd); } } }", /previous turn/],
   'above-n': ["function a() { for (let i = 3; i < 1024; i++) { try { fs.closeSync(i); } catch (e) { log(e); } } }", /counted range/],
   'closer-keeps': ["function writerOf(p) { const fd = fs.openSync(p, 'w'); return { write(b) { fs.writeSync(fd, b); }, close() { fs.closeSync(fd); } }; }", /close\(\) that closes an outer descriptor and keeps the number/],
+  // the placed fault in its REAL spelling (src/usage-ledger-dedup.js writerOf + dedupSteps at the release): the number exposed on the
+  // object, the close under its empty catch, closed before the rename AND in the finally — once the hold ends, this plant guards it
+  'closer-keeps ': ["function writerOf(file) { const fd = fs.openSync(file, 'w'); const w = { bytes: 0, fd, raw(b) { fs.writeSync(fd, b); }, close() { try { fs.closeSync(fd); } catch { } } }; return w; }\nfunction dedupSteps(p) { const w = writerOf(p + '.tmp'); try { w.raw('x'); w.close(); fs.renameSync(p + '.tmp', p); return; } finally { w.close(); } }", /close\(\) that closes an outer descriptor and keeps the number/],
+  // the lazy open in a SIBLING function (attach-roads' fileTail spelling): the closer is judged by the scope that DECLARES the number
+  'closer-keeps  ': ["function fileTail(file) { let fd = null; const stat = () => { if (fd === null) fd = fs.openSync(file, 'r'); return fd; }; return { stat, close() { try { if (fd !== null) fs.closeSync(fd); } catch (e) { log(e); } } }; }", /close\(\) that closes an outer descriptor and keeps the number/],
 };
 for (const [rule, [src, re]] of Object.entries(plants)) {
   const v = P(src); const hit = v.structural.filter((f) => f.rule === rule.trim() && re.test(f.why));
   ok(v.r.stats.failed.length === 0 && hit.length >= 1, `PLANT ${rule.trim()}: «${src.slice(0, 96)}…» is RED by name`, v.structural.map(name));
 }
+{ const v = P("async function a(p) { const h = await fsp.open(p, 'r'); try { await h.read(); } finally { await h.close().catch(() => { }); } }");
+  ok(v.r.stats.failed.length === 0 && v.grown.length === 1 && /1 closes under an empty catch \(held 0\) — \d+ a\(\) h/.test(v.grown[0]), 'PLANT empty-catch (the PROMISE form): a handle\'s close under `.catch(() => { })` is counted like the try form — red by name', v.grown); }
+{ const H = { 'src/planted.js': { why: 'a plant', pins: [['closer-keeps', 'close']] } };
+  const WR = "function writerOf(file) { const fd = fs.openSync(file, 'w'); return { close() { try { fs.closeSync(fd); } catch (e) { log(e); } } }; }";
+  const held = P(WR, H), other = P(WR + "\nfunction b(p) { const fd = fs.openSync(p, 'r'); fs.closeSync(fd); fs.closeSync(fd); }", H), clean = P("function writerOf(file) { let fd = fs.openSync(file, 'w'); return { close() { if (fd === null) return; fs.closeSync(fd); fd = null; } }; }", H);
+  ok(held.structural.length === 0 && held.stale.length === 0 && held.held.length === 1, 'THE HOLD, held: the pinned finding (rule + function) is printed, not judged', { s: held.structural.map(name), st: held.stale });
+  ok(other.structural.length === 1 && other.structural[0].rule === 'twice' && other.structural[0].fn === 'b', 'THE HOLD names exactly what it holds: ANOTHER finding in the held file is red by name', other.structural.map(name));
+  ok(clean.stale.length === 1 && /stale hold: src\/planted\.js no longer has «closer-keeps» in close\(\) — remove that pin \(its row/.test(clean.stale[0]), 'THE HOLD ends with what it holds: a held file that reads CLEAN is red «stale hold», with the row to remove', clean.stale); }
 { const v = P("function a(p) { const fd = fs.openSync(p, 'r'); try { use(fd); } finally { try { fs.closeSync(fd); } catch { } } }");
   ok(v.r.stats.failed.length === 0 && v.grown.length === 1 && /src\/planted\.js: 1 closes under an empty catch \(held 0\) — \d+ a\(\) fd/.test(v.grown[0]), 'PLANT empty-catch: a NEW close under an empty catch is RED by its file, line, function and number', v.grown); }
+
+{ const base = { 'src/planted.js': "const fs = require('fs');\nfunction a(p) { const fd = fs.openSync(p, 'r'); try { use(fd); } finally { try { fs.closeSync(fd); } catch { } } }" };
+  const fell = verdict(base, {}, { debt: { 'src/planted.js': 2 } }), gone = verdict(base, {}, { debt: { 'src/planted.js': 1, 'src/gone.js': 1 } });
+  ok(fell.fell.length === 1 && /src\/planted\.js: 1 closes under an empty catch, held 2 — restate the row to 1/.test(fell.fell[0]) && gone.fell.length === 1 && /src\/gone\.js: a row for a file that no longer exists/.test(gone.fell[0]), 'PLANT the ratchet: a FALL is red with the count to restate, and a row for a file that no longer exists is red', { fell: fell.fell, gone: gone.fell }); }
 
 // ── ③ THE LAW'S OWN FORMS: green ──
 console.log('③ the law\'s own forms are never a finding');
@@ -312,18 +381,19 @@ const greens = {
   'if / else closes': "function a(p, x) { const fd = fs.openSync(p, 'r'); if (x) fs.closeSync(fd); else { use(fd); fs.closeSync(fd); } }",
   'a FileHandle closed on two roads (the handle forgets its number)': "async function a(p) { const h = await fsp.open(p, 'r'); try { await h.read(); } catch (e) { await h.close(); throw e; } await h.close(); }",
   'a closer that forgets its number': "function writerOf(p) { let fd = fs.openSync(p, 'w'); return { close() { if (fd === null) return; fs.closeSync(fd); fd = null; } }; }",
+  'a lazy open in a sibling function, the closer forgetting its number after its try (attach-roads\' fileTail form)': "function fileTail(file) { let fd = null; const stat = () => { if (fd === null) fd = fs.openSync(file, 'r'); return fd; }; return { stat, close() { try { if (fd !== null) fs.closeSync(fd); } catch (e) { log(e); } fd = null; } }; }",
   'a loop whose variable is fresh each turn': "function a(ps) { for (const p of ps) { let fd = null; try { fd = fs.openSync(p, 'r'); use(fd); } finally { if (fd !== null) fs.closeSync(fd); } } }",
   'a descriptor handed to a child at spawn, then closed once (the child holds its own copy)': "function a(p) { const fd = fs.openSync(p, 'a'); const c = spawn('x', [], { stdio: ['ignore', fd, fd] }); fs.closeSync(fd); return c; }",
 };
 for (const [what, src] of Object.entries(greens)) { const v = P(src); ok(v.r.stats.failed.length === 0 && v.r.rows.length >= 1 && v.structural.length === 0 && v.grown.length === 0, `GREEN: ${what}`, v.structural.map(name).concat(v.grown)); }
 
-// ── ④ THE PLACED FAULT, read by the census's own rule ──
+// ── ④ THE PLACED FAULT, read by the census's own rule (pinned while held — ① reds a stale hold or any other finding there) ──
 {
   const LD = FILES['src/usage-ledger-dedup.js'] || '';
   const v = census({ 'src/usage-ledger-dedup.js': LD });
   if (v.stats.failed.length) ok(false, '④ src/usage-ledger-dedup.js parses', v.stats.failed);
-  const fault = v.findings.filter((f) => f.rule === 'closer-keeps' || f.rule === 'twice');
-  if (fault.length) ok(fault.some((f) => f.rule === 'closer-keeps'), `④ the placed fault (src/usage-ledger-dedup.js, lane lg-leak-census's to cure) is FOUND by the census's own rule: ${fault.map(name).join(' · ')}`, fault.map(name));
-  else ok(LD.length > 0, '④ src/usage-ledger-dedup.js reads CLEAN — its cure (lane lg-leak-census) has landed; the closer-keeps plant above keeps the rule red', null);
+  const fault = v.findings.filter((f) => f.rule === 'closer-keeps');
+  if (HELD['src/usage-ledger-dedup.js']) ok(fault.length === 1 && fault[0].fn === 'close', `④ the placed fault (src/usage-ledger-dedup.js, lane lg-leak-census's to cure) is FOUND by the census's own rule: ${fault.map(name).join(' · ')}`, fault.map(name));
+  else ok(fault.length === 0, '④ src/usage-ledger-dedup.js is judged like every other file (its hold ended): no closer keeps its number there', fault.map(name));
 }
 report();
