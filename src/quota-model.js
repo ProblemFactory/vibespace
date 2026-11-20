@@ -348,6 +348,14 @@ const capWindowOf = (l) => windowOfKind(l, '7d') || windowsOf(l).find((x) => x &
  *  100 % from a wall source, or 100 % that was not its limit's last write.) Two buckets of one lane (a named cap and
  *  «Overage Included») are ONE lane: the newer reading stands. A legacy plan bucket a DIRECT writer left (the statusline
  *  drops the typed plan limit) is dated by its own stamp only — a bucket it spread forward unstated has no age. */
+/** A LEGACY BUCKET'S INSTANT — THE ONE ORDER (B-37bc: «a window's age is its own stamp, on both sides»): the bucket's own
+ *  stamp (`measuredAt`, which the write road projects from each window into its bucket — usage-cache-write; else `asOf`,
+ *  the shipped statusline's render), else a model cap's scoped instant (`scopedAt` = the object's `scopedFetchedAt`), else
+ *  the caller's file clock (`fileAt`). The read side (lanesOfReading) and the write side (fromLegacy over a STORED object)
+ *  both date a bucket HERE — never the same three steps written twice. A bucket with no stamp of its own dates as it did. */
+function bucketInstant(b, { scopedAt = null, fileAt = null } = {}) {
+  return posNum(b && b.measuredAt) ?? posNum(b && b.asOf) ?? posNum(scopedAt) ?? posNum(fileAt) ?? null;
+}
 function lanesOfReading(obj) {
   if (!obj || typeof obj !== 'object') return [];
   const { typed, cap } = laneNamer(obj);
@@ -379,17 +387,17 @@ function lanesOfReading(obj) {
   }
   // a legacy bucket whose limit is ABSENT from the typed array is a reading its producer wrote directly (the lift's restore
   // rung, usage-cache-write liftCacheObject: the shipped statusline drops the limits it measured) — dated by its own stamp
-  const ownAt = (b) => posNum(b && b.measuredAt) ?? posNum(b && b.asOf);
+  const ownAt = (b) => bucketInstant(b);   // its own stamp alone (the `own` flag: a bucket that says when it was read)
   if (!ids.has('plan')) {
     const fileClock = typed.length ? null : posNum(obj.fetchedAt);   // a whole legacy object: its clock is its buckets'
-    if (obj.fiveHour) put('plan:5h', obj.fiveHour, ownAt(obj.fiveHour) ?? fileClock, obj.source, null, ownAt(obj.fiveHour) != null);
-    if (obj.sevenDay) put('plan:7d', obj.sevenDay, ownAt(obj.sevenDay) ?? fileClock, obj.source, null, ownAt(obj.sevenDay) != null);
+    if (obj.fiveHour) put('plan:5h', obj.fiveHour, bucketInstant(obj.fiveHour, { fileAt: fileClock }), obj.source, null, ownAt(obj.fiveHour) != null);
+    if (obj.sevenDay) put('plan:7d', obj.sevenDay, bucketInstant(obj.sevenDay, { fileAt: fileClock }), obj.source, null, ownAt(obj.sevenDay) != null);
   }
   for (const s of Array.isArray(obj.scopedWeekly) ? obj.scopedWeekly : []) {
     if (!s || !s.name) continue;
     const id = scopedLimitId(s.name);
     if (ids.has(id)) continue;
-    put(cap(id, s.name, laneResetSec(s)), s, ownAt(s) ?? posNum(obj.scopedFetchedAt) ?? posNum(obj.fetchedAt), obj.source, s.name, ownAt(s) != null);
+    put(cap(id, s.name, laneResetSec(s)), s, bucketInstant(s, { scopedAt: obj.scopedFetchedAt, fileAt: obj.fetchedAt }), obj.source, s.name, ownAt(s) != null);
   }
   return [...out.values()];
 }
@@ -1486,7 +1494,7 @@ function legacyWindowLimit(set) {
 }
 
 /** typed set → the historical `{fiveHour, sevenDay, scopedWeekly, …}` shape. */
-function toLegacyView(set, { nowSec = null } = {}) {
+function toLegacyView(set, { nowSec = null, stamps = false } = {}) {
   const out = {};
   // The projection has to rank the 5-hour windows, and "which one binds" is a
   // question about NOW (a reset that has passed makes its window full again).
@@ -1525,6 +1533,10 @@ function toLegacyView(set, { nowSec = null } = {}) {
     // must still show the limit and say "starts on first use" — hiding a
     // vendor-reported limit would be a second kind of lie.
     if (w.state && w.state !== 'running') b.state = w.state;
+    // B-37bc (a): the window's own instant rides its bucket in the FILE (`stamps` — usage-cache-write's write only), so a
+    // writer that carries an unrendered bucket forward (the shipped statusline spreads every bucket it did not render)
+    // carries when it was read; the one order (bucketInstant) reads it back on both sides
+    if (stamps && posNum(w.measuredAt)) b.measuredAt = posNum(w.measuredAt);
     return b;
   };
   // THE VIEW MAY NEVER BE MORE OPTIMISTIC THAN THE SET IT PROJECTS (r3).
@@ -1615,6 +1627,7 @@ function toLegacyView(set, { nowSec = null } = {}) {
     if (w.state && w.state !== 'running') e.state = w.state;
     if (l.flags && l.flags.severity) e.severity = l.flags.severity;
     if (l.flags && l.flags.asOf) e.asOf = l.flags.asOf;
+    if (stamps && posNum(w.measuredAt)) e.measuredAt = posNum(w.measuredAt);   // B-37bc (a), as toBucket
     scoped.push(e);
   }
   if (scoped.length) out.scopedWeekly = scoped;
@@ -1641,13 +1654,18 @@ function toLegacyView(set, { nowSec = null } = {}) {
  *
  *  `familyOf` is INJECTED (this module imports nothing): callers that know the
  *  family vocabulary pass `src/model-family.js`'s `familyOfScopedBucket`. */
-function fromLegacy(legacy, { identity = null, source = null, fetchedAt = null, limitId = 'plan', familyOf = null, extraKeys = null } = {}) {
+function fromLegacy(legacy, { identity = null, source = null, fetchedAt = null, limitId = 'plan', familyOf = null, extraKeys = null, stored = false } = {}) {
   const src = legacy && typeof legacy === 'object' ? legacy : {};
   const at = posNum(fetchedAt) || posNum(src.fetchedAt) || null;
+  // B-37bc: a STORED object's bucket is dated by the one order (its own stamp, a cap's scoped instant, the file's clock —
+  // bucketInstant, the read side's); a producer's object is THIS write's reading (every window at `at`), and what it only
+  // carried is the stored window again (usage-cache-write carryUnmeasuredLimits) — so an older stamp riding a re-measured
+  // bucket can never date it (the reverse harm)
+  const dateOf = (b, scopedAt = null) => (stored ? bucketInstant(b, { scopedAt, fileAt: at }) : at);
   const srcName = str(source) || str(src.source);
   const limits = [];
   const planWindows = [];
-  const bucket = (b, kind) => {
+  const bucket = (b, kind, scopedAt = null) => {
     if (!b || typeof b !== 'object') return null;
     // `utilization` FIRST. Both spellings appear on a codex bucket and they are
     // written together, but a producer that marks a bucket DEAD in place sets
@@ -1655,7 +1673,7 @@ function fromLegacy(legacy, { identity = null, source = null, fetchedAt = null, 
     // preferring `usedPercent` reads back the stale number the mark replaced.
     const usedPct = num(b.utilization) != null ? Math.max(0, Math.min(1, num(b.utilization))) * 100
       : num(b.usedPercent);
-    const w = makeWindow({ kind, minutes: b.windowMinutes, usedPct, resetsAt: b.resetsAt, measuredAt: at, status: b.status });
+    const w = makeWindow({ kind, minutes: b.windowMinutes, usedPct, resetsAt: b.resetsAt, measuredAt: dateOf(b, scopedAt), status: b.status });
     if (b.resetsAtEstimated) w.resetsAtEstimated = true;
     // A STORED STATE OUTRANKS A RE-DERIVED ONE — BUT ONLY WHILE THE READING IT
     // DESCRIBES IS UNCHANGED (r3).
@@ -1698,7 +1716,7 @@ function fromLegacy(legacy, { identity = null, source = null, fetchedAt = null, 
   if (planWindows.length || ab5) limits.push(settleAbsence(makeLimit({ limitId, scope: 'plan', windows: planWindows, flags: ab5 ? { absent: { '5h': ab5 } } : null, source: srcName, fetchedAt: at })));
   for (const s of Array.isArray(src.scopedWeekly) ? src.scopedWeekly : []) {
     if (!s || !s.name) continue;
-    const w = bucket(s, '7d');
+    const w = bucket(s, '7d', src.scopedFetchedAt);
     if (!w) continue;
     const flags = {};
     if (s.severity) flags.severity = s.severity;
@@ -1708,7 +1726,7 @@ function fromLegacy(legacy, { identity = null, source = null, fetchedAt = null, 
       limitId: scopedLimitId(s.name),
       name: String(s.name), scope: 'model', model: placeholder ? null : String(s.name),
       family: placeholder ? null : (familyOf ? familyOf(s.name) : null),
-      windows: [w], flags, source: srcName, fetchedAt: posNum(s.asOf) || at,
+      windows: [w], flags, source: srcName, fetchedAt: stored ? (posNum(w.measuredAt) || at) : (posNum(s.asOf) || at),
     }));
   }
   if (src.overage && typeof src.overage === 'object') {
@@ -1939,7 +1957,7 @@ module.exports = {
   // windows
   windowState, windowRemaining, minutesOf,
   // the display verdict + the proving spawn's question (lane reset-unproven)
-  windowDisplay, memberProofState, withResetClaim, lanesOfReading, lanesMeasured, laneOfBucket, laneOfLimit, statedLanesOf, markRefused, markStated, carryStamps, laneText, isLaneKey, resetsSeen, resetsSeenLanes, RESET_SEEN_MIN_DROP,
+  windowDisplay, memberProofState, withResetClaim, lanesOfReading, bucketInstant, lanesMeasured, laneOfBucket, laneOfLimit, statedLanesOf, markRefused, markStated, carryStamps, laneText, isLaneKey, resetsSeen, resetsSeenLanes, RESET_SEEN_MIN_DROP,
   // accessors
   limitsOf, windowsOf, windowOfKind, planLimit, limitFor, applicableLimits, limitNamesModel,
   remaining, deadline, bucketReport, countingWindows, isBudgetKind, bucketCounts,

@@ -1053,7 +1053,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // producer too, so it is measured on that shape as well.
     const wBoth = mutantWorld('b1x', [QMFILE, WFILE, CFILE], {
       [QMFILE]: [['if (STATES.includes(b.state) && !(usedPct > 0)) w.state = b.state;', 'if (STATES.includes(b.state)) w.state = b.state;']],
-      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; return c; };', 'const restated = (b) => ({ ...b });']],
+      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; return c; };', 'const restated = (b) => ({ ...b });']],
     });
     patchHit(wBoth, '⑯b removes BOTH halves (the branch as the verifier found it)');
     const p2 = b2({ W: load(wBoth, WFILE), CAP: load(wBoth, CFILE) });
@@ -1070,7 +1070,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
         ['if (STATES.includes(b.state) && !(usedPct > 0)) w.state = b.state;', 'if (STATES.includes(b.state)) w.state = b.state;'],
         ['    for (const w of spendingWindows(l)) {', '    for (const w of countingWindows(l)) {'],
       ],
-      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; return c; };', 'const restated = (b) => ({ ...b });']],
+      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; return c; };', 'const restated = (b) => ({ ...b });']],
       [PFILE]: [['  if (!bucketStatesSpend(b)) return null;', '  if (!bucketCounts(b)) return null;']],
     });
     patchHit(wbx, '⑯b-x removes BOTH belts (the r3 defect with the r4 split undone)');
@@ -1085,7 +1085,7 @@ console.log('\n⑯ the round-3 defects: three ways a counting bucket stopped cou
     // just invalidated. Only this half catches the re-statement DOWN to 0 %,
     // which is why there are two controls and not one.
     const wProd = mutantWorld('b2', [CFILE], {
-      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; return c; };', 'const restated = (b) => ({ ...b });']],
+      [CFILE]: [['const restated = (b) => { const c = { ...b }; delete c.state; delete c.asOf; delete c.measuredAt; return c; };', 'const restated = (b) => ({ ...b });']],
     });
     patchHit(wProd, '⑯b restores the producer that carries a stale verdict forward');
     const p3 = b3({ W, CAP: load(wProd, CFILE) });
@@ -1481,6 +1481,7 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
   const T17 = 1788974610137;                 // the real file's own fetchedAt
   const OVER_AT = 1788911228197;             // …and its overage limit's own asOf
   const NOW17 = T17 + 607363;                // the event, ~10 min later
+  const CAPAT17 = T17 + 2;                   // B-37bc: the cap's OWN instant — the file's scopedFetchedAt, as the read side has always dated it (the one order, quotaModel.bucketInstant)
 
   // THE REAL SHAPE, verbatim from this instance's `usage-cache/sub-*.json`
   // (anonymised: the org/email fields are dropped, no ids, no tokens). Three
@@ -1517,7 +1518,7 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
   {
     const r = runEvent(W, CAP17);
     const b = { plan: limOf(r.before, 'plan'), fable: limOf(r.before, 'model:fable'), over: limOf(r.before, 'overage') };
-    ok(b.plan && b.fable && b.over && b.fable.source === 'on-demand' && b.fable.fetchedAt === T17,
+    ok(b.plan && b.fable && b.over && b.fable.source === 'on-demand' && b.fable.fetchedAt === CAPAT17,
       `⑰a the migrated real-shape file holds three limits, each with its own producer (${(r.before.limits || []).map((l) => `${l.limitId}:${l.source}@${l.fetchedAt}`).join(' | ')})`);
 
     const a = { plan: limOf(r.after, 'plan'), fable: limOf(r.after, 'model:fable'), over: limOf(r.after, 'overage') };
@@ -1526,10 +1527,10 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
     const w5 = QM.windowOfKind(a.plan, '5h');
     ok(w5 && w5.usedPct === 88 && w5.measuredAt === NOW17,
       `⑰a …and the reading LANDED (5h ${w5 && w5.usedPct}% measured at ${w5 && w5.measuredAt})`);
-    ok(a.fable.source === 'on-demand' && a.fable.fetchedAt === T17,
+    ok(a.fable.source === 'on-demand' && a.fable.fetchedAt === CAPAT17,
       `⑰a the model-scoped cap — which this record says NOTHING about — keeps the producer that measured it (${a.fable.source}@${a.fable.fetchedAt})`);
     const wf = QM.windowOfKind(a.fable, '7d');
-    ok(wf && wf.measuredAt === T17 && wf.usedPct === 100,
+    ok(wf && wf.measuredAt === CAPAT17 && wf.usedPct === 100,
       `⑰a …down to the instant its window was measured (${wf && wf.measuredAt}, still ${wf && wf.usedPct}%)`);
     ok(a.over.source === 'on-demand' && a.over.fetchedAt === OVER_AT,
       `⑰a the overage limit likewise (${a.over.source}@${a.over.fetchedAt})`);
@@ -1543,7 +1544,7 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
     // THE USER-VISIBLE HALF: the panel rows this feature added.
     const rows = SRC.limitRows(QM, W.limitsOfCache(r.after, { identity: r.key }), { t: (s) => s });
     const rowF = rows.find((x) => x.limitId === 'model:fable');
-    ok(rowF && rowF.source === 'on-demand' && rowF.fetchedAt === T17,
+    ok(rowF && rowF.source === 'on-demand' && rowF.fetchedAt === CAPAT17,
       `⑰a …so the panel row says "via ${rowF && rowF.sourceLabel}" and dates it ${rowF && rowF.fetchedAt}, not "just now"`);
 
     // NEGATIVE CONTROL: the round-3 write path, which lifted the whole object.
@@ -1579,7 +1580,7 @@ console.log('\n⑰ per-limit provenance and the right to retire a limit');
     const pwPlan = limOf(preW.after, 'plan'), pwFable = limOf(preW.after, 'model:fable');
     ok(QM.windowOfKind(pwPlan, '7d').measuredAt === NOW17 && QM.windowOfKind(pwPlan, '7d').usedPct === 83,
       `⑰a NEGATIVE CONTROL: per-LIMIT granularity re-clocks the 7-day number this event never mentioned (@${QM.windowOfKind(pwPlan, '7d').measuredAt})`);
-    ok(pwFable.source === 'on-demand' && pwFable.fetchedAt === T17,
+    ok(pwFable.source === 'on-demand' && pwFable.fetchedAt === CAPAT17,
       '⑰a NEGATIVE CONTROL: …while the wholly-untouched limits are unaffected, so only the window leg can catch it');
   }
 

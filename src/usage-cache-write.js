@@ -135,7 +135,7 @@ function liftCacheObject(obj, { identity = null, backend = null, familyOf = null
       const { CLAUDE_EXTRA_KEYS } = require('./harnesses/claude-quota.js');
       const legacy = quotaModel.fromLegacy(obj, {
         identity, source: obj.source || null, fetchedAt: Number(measuredAt) || Number(obj.fetchedAt) || null,
-        limitId: 'plan', familyOf, extraKeys: CLAUDE_EXTRA_KEYS,
+        limitId: 'plan', familyOf, extraKeys: CLAUDE_EXTRA_KEYS, stored: measuredAt == null,   // B-37bc: a stored object's buckets by their own stamps
       });
       const have = new Set(set.limits.map((l) => l && l.limitId));
       const restored = [];
@@ -167,6 +167,7 @@ function liftCacheObject(obj, { identity = null, backend = null, familyOf = null
   const { CLAUDE_EXTRA_KEYS } = require('./harnesses/claude-quota.js');
   return quotaModel.fromLegacy(obj, {
     identity, source: obj.source || null, fetchedAt: at, limitId: 'plan', familyOf, extraKeys: CLAUDE_EXTRA_KEYS,
+    stored: measuredAt == null,   // B-37bc: a STORED object (no write instant given) is dated by the one order; a write's own object by the write
   });
 }
 
@@ -557,7 +558,11 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   const statedKeys = [...new Set([...measuredLanes.map((x) => x.lane), ...refusedKeys, ...markKeys])];
   if (statedKeys.length) merged = quotaModel.markStated(merged, statedKeys, at);
   if (refusedKeys.length || markKeys.length) merged = quotaModel.markRefused(merged, [...new Set([...refusedKeys, ...markKeys])], at);   // the record's own mark (r3, MUST 2)
-  const view = quotaModel.toLegacyView(merged);
+  // B-37bc (a): a claude file's buckets carry each window's own instant (`stamps`), so a direct writer that spreads an
+  // unrendered bucket forward (the shipped statusline) keeps when it was read — the one order reads it back on both sides
+  // — the harness's own declared row says whose file this is (backend-caps `oauthUsage`: Claude's typed limits; no harness named
+  // reads the legacy harness's row, as the lift reads it), never an id spelled here
+  const view = quotaModel.toLegacyView(merged, { stamps: !!require('./backend-caps.js').capsOf(backend || backendOfCacheObject(obj)).oauthUsage });
   const out = { ...(obj && typeof obj === 'object' ? obj : {}) };
   // THE DERIVED VIEW WINS over whatever the producer computed for the bucket
   // fields — that is the whole point: the producer knows about its own limit,
