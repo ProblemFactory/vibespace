@@ -187,48 +187,50 @@ console.log('⑥ a save-and-close editor closes — and the CLI hears «done» �
   const DOORS_SRC = fs.readFileSync(path.join(REPO, 'src/lib/refusal-doors.js'), 'utf8');
   const MC6 = mutantCopies('refusal-doors', REPO);
   const drive = async (D) => {
-    const tick = () => new Promise((r) => setTimeout(r, 0));
-    const door = (answers, asks = []) => { const st = { signals: 0, closes: 0, asked: 0, saves: 0 }; const d = D.saveCloseDoors({ save: async () => { st.saves++; return answers.shift(); }, signal: () => { st.signals++; }, close: () => { st.closes++; }, ready: () => true, confirmDiscard: async () => { st.asked++; return asks.shift(); } }); return { d, st }; };
-    const press = async (x) => { const r = x.d.onCloseRequest(); await tick(); await tick(); if (x.st.closes && !x.closedOnce) { x.closedOnce = true; await x.d.onClose(); } return r; };
-    // (a) a refused save keeps the window; the next ✕ ASKS — «keep editing» keeps it, «discard» closes it and the CLI reads the file as it is
-    const a = door([false], [false, true]);
-    const a1 = await press(a);
-    const keptOnce = a1 === false && a.st.closes === 0 && a.st.signals === 0 && a.st.saves === 1;
-    const a2 = await press(a);   // asks: keep editing
-    const kept = a2 === false && a.st.asked === 1 && a.st.closes === 0 && a.st.signals === 0;
-    const a3 = await press(a);   // asks: discard
-    const discarded = { asked: a.st.asked, closes: a.st.closes, signals: a.st.signals, saves: a.st.saves, refusedAtOnce: a3 === false };
-    // (b) NEVER A TRAP, NEVER A SILENT LOSS: every save refused — the second ✕ asks; «discard» closes
-    const b = door([false, false], [true]);
-    await press(b); await press(b);
-    const trap = { asked: b.st.asked, closes: b.st.closes, signals: b.st.signals };
-    // (c) a save that LANDED elsewhere (Ctrl+S) clears the refusal: the next ✕ saves first again (never asks over newer edits)
-    const c = door([false, true], []);
-    await press(c); c.d.landed(); await press(c);
-    const cleared = { asked: c.st.asked, saves: c.st.saves, closes: c.st.closes, signals: c.st.signals };
-    // (d) a save that lands at the first ✕: the window closes itself, «done» once
-    const dd = door([true]); const d1 = await press(dd);
-    const landed = { first: d1, closes: dd.st.closes, signals: dd.st.signals };
-    // (e) a programmatic close (layout sync) whose save is refused: never refused, the CLI hears nothing
-    const e = door([false]); await e.d.onClose();
-    return { keptOnce, kept, discarded, trap, cleared, landed, programmatic: e.st.signals };
+    const tick = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 0)); };
+    // a stand-in editor: its save answers in order; `typing` changes the text while a save is out; the question answers in order
+    const door = (answers, asks = [], typing = []) => {
+      const st = { signals: 0, closes: 0, asked: 0, saves: 0, text: 'v1' };
+      const d = D.saveCloseDoors({ save: async () => { st.saves++; const t = typing.shift(); if (t) st.text = t; return answers.shift(); }, text: () => st.text,
+        signal: () => { st.signals++; }, close: () => { st.closes++; }, ready: () => true, confirmDiscard: async () => { st.asked++; const a = asks.shift(); if (a instanceof Error) throw a; return a; } });
+      return { d, st };
+    };
+    const press = async (x) => { const r = x.d.onCloseRequest(); await tick(); if (x.st.closes && !x.closed) { x.closed = true; await x.d.onClose(); } return r; };
+    // (a) EVERY ✕ SAVES FIRST: refused ⇒ asked; keep ⇒ stays; the next ✕ saves AGAIN (refused again ⇒ asked again); discard ⇒ closes, the CLI reads the file as it is
+    const a = door([false, false], [false, true]);
+    await press(a); const kept = { closes: a.st.closes, signals: a.st.signals, asked: a.st.asked, saves: a.st.saves };
+    await press(a); const discarded = { closes: a.st.closes, signals: a.st.signals, asked: a.st.asked, saves: a.st.saves };
+    // (b) NEVER A TRAP: every save refused — one ✕, one question, discard closes
+    const b = door([false], [true]); await press(b); const trap = { asked: b.st.asked, closes: b.st.closes };
+    // (c) typed while the save was out: it landed, but the text on screen is newer ⇒ stays; the next ✕ saves it and closes
+    const c = door([true, true], [], ['v2']); await press(c); const typed1 = { closes: c.st.closes, signals: c.st.signals }; await press(c);
+    const typed = { first: typed1, closes: c.st.closes, signals: c.st.signals, saves: c.st.saves };
+    // (d) a save that lands at the first ✕: closes itself, «done» once
+    const dd = door([true]); await press(dd); const landed = { closes: dd.st.closes, signals: dd.st.signals, asked: dd.st.asked };
+    // (e) the question itself fails (a dialog error) ⇒ keep, never a close
+    const e = door([false], [new Error('dialog gone')]); await press(e); const dialogGone = { closes: e.st.closes, asked: e.st.asked };
+    // (f) a programmatic close (layout sync) whose save is refused: never refused, the CLI hears nothing
+    const f = door([false]); await f.d.onClose();
+    return { kept, discarded, trap, typed, landed, dialogGone, programmatic: f.st.signals };
   };
   const now = await drive(await import(MC6.write('src/lib/refusal-doors.js', DOORS_SRC, 'now', { esm: true, same: true })));
-  ok(now.keptOnce && now.kept, 'a refused save keeps the window (its text and unsaved mark); the next ✕ ASKS, and «keep editing» keeps it — the CLI hears nothing', now);
-  ok(now.discarded.asked === 2 && now.discarded.closes === 1 && now.discarded.signals === 1 && now.discarded.saves === 1, `«discard» closes it once; the CLI reads the file as it is (a quit without saving) — no save over a refusal (${JSON.stringify(now.discarded)})`, now);
-  ok(now.trap.asked === 1 && now.trap.closes === 1, `NEVER A TRAP: every save refused — the second ✕ asks and closes on «discard» (${JSON.stringify(now.trap)})`, now);
-  ok(now.cleared.asked === 0 && now.cleared.saves === 2 && now.cleared.closes === 1 && now.cleared.signals === 1, `a save that landed elsewhere clears the refusal: the next ✕ saves first, never asks over newer edits (${JSON.stringify(now.cleared)})`, now);
-  ok(now.landed.first === false && now.landed.closes === 1 && now.landed.signals === 1, `a save that lands at the first ✕: the window closes itself, «done» once (${JSON.stringify(now.landed)})`, now);
+  ok(now.kept.closes === 0 && now.kept.signals === 0 && now.kept.asked === 1 && now.kept.saves === 1, `a refused save ASKS; «keep» keeps the window (its text and unsaved mark) — the CLI hears nothing (${JSON.stringify(now.kept)})`, now);
+  ok(now.discarded.saves === 2 && now.discarded.asked === 2 && now.discarded.closes === 1 && now.discarded.signals === 1, `the next ✕ saves AGAIN first, then asks; «discard» closes once and the CLI reads the file as it is (${JSON.stringify(now.discarded)})`, now);
+  ok(now.trap.asked === 1 && now.trap.closes === 1, `NEVER A TRAP: every save refused — the ✕'s question closes it on «discard» (${JSON.stringify(now.trap)})`, now);
+  ok(now.typed.first.closes === 0 && now.typed.first.signals === 0 && now.typed.closes === 1 && now.typed.signals === 1 && now.typed.saves === 2, `NEVER A SILENT LOSS: text typed while the save was out keeps the window; the next ✕ saves it and closes (${JSON.stringify(now.typed)})`, now);
+  ok(now.landed.closes === 1 && now.landed.signals === 1 && now.landed.asked === 0, `a save that lands at the first ✕: the window closes itself, «done» once, nothing asked (${JSON.stringify(now.landed)})`, now);
+  ok(now.dialogGone.closes === 0 && now.dialogGone.asked === 1, `the question failing reads as «keep» — never a close (${JSON.stringify(now.dialogGone)})`, now);
   ok(now.programmatic === 0, `a programmatic close whose save is refused tells the CLI nothing (signals ${now.programmatic})`, now);
   // WIRED: the editor window asks the door at the person's ✕ and at its close; the composer words its upload through the other door
   const CE = fs.readFileSync(path.join(REPO, 'src/lib/code-editor.js'), 'utf8'), CI = fs.readFileSync(path.join(REPO, 'src/lib/chat-input.js'), 'utf8');
-  ok(CE.includes("this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest());") && CE.includes('      if (doors) doors.onClose();\n') && !CE.includes('this.save().then(() => this.onSaveAndClose())')   // stale-pins: kept — the release's «save, then done» must stay GONE
+  ok(CE.includes("this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest());") && CE.includes('      if (doors) doors.onClose();\n')
+    && CE.includes('text: () => this.editorView.state.doc.toString(), signal: () => this.onSaveAndClose()') && CE.includes("confirmDiscard: () => showConfirmDialog({ title: t('Close without saving?')") && !CE.includes('this.save().then(() => this.onSaveAndClose())')   // stale-pins: kept — the release's «save, then done» must stay GONE
     && CI.includes('const words = uploadOutcomeWords(uploaded, failed, { t, fsErrorText });') && !CI.includes("couldn't be read (e.g. {name})"),
     'WIRED: the editor window asks saveCloseDoors at the ✕ and at its close (the release\'s «save, then done» is gone); the composer words its upload through uploadOutcomeWords');
   // RED CONTROL: the release's close — no veto, and «done» after any save
   const REL6 = anchored(anchored(DOORS_SRC,
-    "      if (saved || discarded || !ed.ready()) return true;   // landed, discarded by the person, or nothing loaded yet\n", "      return true;   // the release: the window closes at once\n", 'release-no-veto'),
-    "      if (saved || discarded) return ed.signal();\n      return Promise.resolve(ed.save()).then((ok) => { if (ok) return ed.signal(); return undefined; }, () => undefined);\n",
+    "      if (closing || !ed.ready()) return true;   // closing by this door's own word, or nothing loaded yet\n", "      return true;   // the release: the window closes at once\n", 'release-no-veto'),
+    "      if (closing) return ed.signal();           // saved (the text on screen), or discarded by the person\n      return Promise.resolve().then(() => ed.save()).then((ok) => (ok ? ed.signal() : undefined), () => undefined);\n",
     "      return Promise.resolve(ed.save()).then(() => ed.signal());   // the release: «done» whatever the save answered\n", 'release-done-anyway');
   const red = await drive(await import(MC6.write('src/lib/refusal-doors.js', REL6, 'release', { esm: true })));
   ok(red.programmatic === 1, `RED CONTROL (the release's close): a refused save still tells the CLI «done» (signals ${red.programmatic})`, red);
