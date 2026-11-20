@@ -48,6 +48,14 @@ export const ONBOARDED_SOURCE = `try { ${Object.entries(PRESET_KEYS).map(([k, v]
 // the session bus's Secret Service: a LOCKED login keyring hung 14 heavy Chrome suites to their full budget on 2026-11-15.
 // scripts/chrome-store-census.mjs + test-architecture §47b: a Chrome launch without it is red.
 export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock-keychain']);
+/** THE ONE RELAY of a server broadcast to a page (主开发 2026-11-20 04:54Z, lane bl-tests-chrome — 2.369.413's fourth hosted run:
+ *  test-channel-window-render ⑫c walked the page's LIVE handler list and skipped the open picker's handler, right after a stale
+ *  one that took itself out). Page-side JS source that hands ONE message object to every global handler over a SNAPSHOT of the
+ *  list, each handler isolated — src/lib/ws.js's own dispatch (`[...this.globalHandlers].forEach(call)`): a handler that
+ *  removes itself while handling (offGlobal splices the live list) never hides the next. `msg` = page-side JS source of the
+ *  message; `list` = the page expression of the handler list. test-ci-gate §2l: its control, and the census that makes any
+ *  suite still walking the live list red. */
+export const relayBroadcastJs = (msg, list = 'window.app.ws.globalHandlers') => `{ const __msg = (${msg}); for (const __h of [...${list}]) { try { __h(__msg); } catch (__e) {} } }`;
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 // B-d8e3: name → the path this PROCESS decided for it (below) — one map for every copy of this module in the process (a mutant)

@@ -24,7 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -339,7 +339,7 @@ else await (async () => {
         await until(() => X.ev(`[...document.querySelectorAll('button')].some((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`), 5000, 50);
         await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
         p = await next(); try { out.rid = JSON.parse(p.request.postData || '{}').rid || null; } catch { out.rid = null; }
-        await X.ev(`(() => { window.__mark7 = 1; for (const h of app.ws.globalHandlers) { try { h({ type: 'layout-restored', rid: 'r-another-device' }); } catch { } } return 1; })()`);
+        await X.ev(`(() => { window.__mark7 = 1; ${relayBroadcastJs(`{ type: 'layout-restored', rid: 'r-another-device' }`, "app.ws.globalHandlers")} return 1; })()`);
         await sleep(400); out.during = await X.ev('[...(window.__lh7 || [])]');
         const n0 = navs.length;
         await X.send('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 404, responseHeaders: [{ name: 'Content-Type', value: 'application/json' }], body: Buffer.from(J({ error: 'not found' })).toString('base64') });
@@ -373,7 +373,7 @@ else await (async () => {
         await X.click(`[...document.querySelectorAll('button')].find((b) => b.textContent === '恢复' && !b.classList.contains('lh-restore') && b.getClientRects().length)`);
         post = await next(); try { out.rid = JSON.parse(post.request.postData || '{}').rid || null; } catch { out.rid = null; }
         const n0 = navs.length, t0 = Date.now();
-        await X.ev(`(() => { for (const h of app.ws.globalHandlers) { try { h({ type: 'layout-restored', rid: ${J(out.rid)} }); } catch { } } return 1; })()`);
+        await X.ev(`(() => { ${relayBroadcastJs(`{ type: 'layout-restored', rid: ${J(out.rid)} }`, "app.ws.globalHandlers")} return 1; })()`);
         await sleep(300); out.toasts = await X.ev('[...(window.__lh8 || [])]').catch(() => null);
         await until(() => navs.length > n0, 3000, 20); out.ms = navs.length > n0 ? navs[n0] - t0 : null;
         await sleep(1500); out.reloads = navs.length - n0;

@@ -105,7 +105,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -1324,7 +1324,7 @@ const legToastYield = async () => {
         return { there: true, held: t.classList.contains('global-toast-held'), drawn, onPanel: !!pr && drawn && r.left < pr.right && r.right > pr.left && r.top < pr.bottom && r.bottom > pr.top, inView: drawn && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, w: Math.round(r.width), h: Math.round(r.height), seen: e ? !!e.seen : null }; };
       return { open: !!pr, grown: !!document.querySelector('.zz-grow-20'), panel: pr && [Math.round(pr.left), Math.round(pr.top), Math.round(pr.right), Math.round(pr.bottom)], toolbarBottom: tr ? Math.round(tr.bottom) : 0, vw: innerWidth, A: one('zz-A20'), B: one('zz-B20'), E: one('zz-E20') }; })()`;
     const LONG = 'is a stand-in notice long enough to fill the widest toast this window allows, so that no side of the open panel has room for it';
-    const notice = (mark, level) => evalJs(`(() => { for (const h of app.ws.globalHandlers) { try { h({ type: 'server-notice', key: ${J(mark)} + '-' + Date.now(), level: ${level}, text: ${J(mark + ' ' + LONG)} }); } catch { } } return true; })()`);
+    const notice = (mark, level) => evalJs(`(() => { ${relayBroadcastJs(`{ type: 'server-notice', key: ${J(mark)} + '-' + Date.now(), level: ${level}, text: ${J(mark + ' ' + LONG)} }`, "app.ws.globalHandlers")} return true; })()`);
     const forYou = async () => { if (await centre('#taskbar-user-todos')) { await press('#taskbar-user-todos'); return 'press'; } await evalJs(`document.getElementById('taskbar-user-todos').click(), true`); return 'click (the button not on screen)'; };
     await evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); document.querySelectorAll('#global-toasts > .global-toast').forEach((t) => t.remove()); localStorage.removeItem('vibespace.toastHistory'); return true; })()`);
     await sleep(300);

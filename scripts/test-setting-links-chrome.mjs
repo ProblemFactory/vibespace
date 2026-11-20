@@ -10,7 +10,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -164,7 +164,7 @@ try {
   check('not a byte written', sameBytes(b0, settingsBytes()));
 
   console.log('④ a notice: the server\'s notice frame, fed to the page\'s own handler, draws the link as a button');
-  await evalJs(`(() => { for (const h of app.ws.globalHandlers) { try { h({ type: 'server-notice', key: 'sl-' + Date.now(), level: 1, text: 'The instance ceiling is near — vibespace://settings/${K1}' }); } catch { } } return true; })()`);
+  await evalJs(`(() => { ${relayBroadcastJs(`{ type: 'server-notice', key: 'sl-' + Date.now(), level: 1, text: 'The instance ceiling is near — vibespace://settings/${K1}' }`, "app.ws.globalHandlers")} return true; })()`);
   const tLink = `.global-toast-setting[data-setting="${K1}"]`;
   check('the toast carries the link as a button', !!(await until(`!!document.querySelector(${JSON.stringify(tLink)})`, { timeout: 8000 })));
   check('a real press on it', (await press(tLink)) === true);

@@ -15,7 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -103,7 +103,7 @@ try {
     return { S, ev, ready };
   }
   const winOf = (sid) => `[...app.sessions.entries()].find(([, v]) => v && v.sessionId === ${JSON.stringify(sid)})[0]`;
-  const fire = (sid, appId) => `(app.ws.globalHandlers.forEach((h) => { try { h({ type: 'desktop-app-opened', sessionId: ${JSON.stringify(sid)}, appId: ${JSON.stringify(appId)}, origin: 'agent-browser' }); } catch (e) { console.error(e); } }), true)`;
+  const fire = (sid, appId) => `((() => ${relayBroadcastJs(`{ type: 'desktop-app-opened', sessionId: ${JSON.stringify(sid)}, appId: ${JSON.stringify(appId)}, origin: 'agent-browser' }`, 'app.ws.globalHandlers')})(), true)`;
   const shot = async (S, f) => { if (!PNG_DIR) return null; const r = await S('Page.captureScreenshot', { format: 'png' }); if (!r.result) return null; fs.mkdirSync(PNG_DIR, { recursive: true }); const out = path.join(PNG_DIR, f); fs.writeFileSync(out, Buffer.from(r.result.data, 'base64')); return out; };
   // the person's facts after an agent open: who is active, who holds the caret, what is drawn at the pane's centre, the taskbar
   const facts = (appId) => `(() => {

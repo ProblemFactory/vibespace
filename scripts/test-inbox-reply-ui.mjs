@@ -101,7 +101,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, takeCspReports, realClicker, CHROME_STORE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, takeCspReports, realClicker, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
@@ -679,7 +679,7 @@ try {
     // door) while the panel is open, none may meet the panel, and the point is CHECKED — its top element is the toggle inside the
     // panel; the three presses below stay raw at that point
     const topAt = (x, y) => `(() => { const e = document.elementFromPoint(${x}, ${y}); if (!e) return { fold: false, what: 'nothing' }; const t = e.closest('.global-toast'); const inPanel = !!e.closest('#user-todos-popup'); return { fold: !!e.closest('.ut-fold') && inPanel, what: t ? 'a toast: ' + (e.className || e.tagName) + ' «' + t.textContent.trim().slice(0, 60) + '»' : (inPanel ? 'in the panel: ' : 'outside the panel: ') + (e.className || e.tagName) }; })()`;
-    await evalJs(`(() => { for (let k = 0; k < 3; k++) for (const h of app.ws.globalHandlers) { try { h({ type: 'server-notice', key: 'b7a51-' + k + '-' + Date.now(), level: 1, text: 'B-7a51 stand-in notice ' + (k + 1) }); } catch { } } return true; })()`);
+    await evalJs(`(() => { for (let k = 0; k < 3; k++) ${relayBroadcastJs(`{ type: 'server-notice', key: 'b7a51-' + k + '-' + Date.now(), level: 1, text: 'B-7a51 stand-in notice ' + (k + 1) }`, "app.ws.globalHandlers")} return true; })()`);
     // WAIT ON THE PLACED STACK (its round's MUST — not a fixed 900 ms): the placement runs on the frame after each toast lands, so
     // two frames, then every toast's entrance (toast-in: a transform) finished, then one more frame — the rects read are the placed ones
     const PLACED15 = `(async () => { const fr = () => new Promise((r) => requestAnimationFrame(r)); await fr(); await fr(); const st = document.getElementById('global-toasts'); if (st) await Promise.all([...st.children].flatMap((t) => t.getAnimations()).map((a) => a.finished.catch(() => null))); await fr(); return true; })()`;

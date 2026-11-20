@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, relayBroadcastJs } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
@@ -292,7 +292,7 @@ try {
   //    ⇒ the folded-height leg red by name.
   console.log('㉓ THE PHONE\'S STRIP IS ONE ROW UNTIL TAPPED — folded ≤ 56 px, «View» opens the item in place (≤ 45 % of the screen), the head folds it (lane phone-dock-restore)');
   try {
-    const PUSH23 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const PUSH23 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos }`, "app.ws.globalHandlers")} return 1; })()`;
     const s23 = await newConv('strip'); await sleep(600); sayTo(s23, 'hello'); await sleep(1500);
     await A.front(); await toConv(A, s23, [], 390, 844, true);
     const KEY23 = await A.evalJs(`(app.foryouRows.keysForWin(${CHAT(s23)}.id) || [])[0] || null`);

@@ -101,7 +101,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, evalInBlankTab, takeCspReports, CHROME_STORE } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, evalInBlankTab, takeCspReports, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
 
@@ -120,13 +120,6 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
-/** THE ONE RELAY of a server broadcast to the page (主开发 04:44Z — 2.369.413's fourth hosted run, test-channel-window-render
- *  ⑫c): the message is handed to every global handler the way src/lib/ws.js dispatches it — ONE message, over a SNAPSHOT of the
- *  list (`[...this.globalHandlers].forEach(call)`), each handler isolated — so a handler that takes itself out while handling
- *  (offGlobal splices the LIVE list) never hides the one after it. A live walk skipped exactly that neighbour (the Notify
- *  dialog's left-over picker hid the open access picker's). `msg` = page-side JS source of the message; every relay of this
- *  suite goes through here, none walks the list itself. */
-const RELAY = (msg) => `{ const __msg = (${msg}); for (const __h of [...window.app.ws.globalHandlers]) { try { __h(__msg); } catch (__e) {} } }`;
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -448,19 +441,6 @@ ok(await p1.load(), 'the page loaded the app (zh)');
 // the clock pin reached the page (Chrome reads the zone when it starts): NOW is PIN_HOUR:xx on the page's own clock
 const CLK = await p1.evaljs(`({ zone: Intl.DateTimeFormat().resolvedOptions().timeZone, hour: new Date(${NOW}).getHours() })`);
 ok(CLK.hour === PIN_HOUR, `CLOCK PIN: NOW is ${PIN_HOUR}:xx on the page's clock (${process.env.TZ}) — every seeded room one local day, no run reaches midnight`, J(CLK));
-// THE RELAY's OWN CONTROL (rule (b): it proves itself before any leg leans on it): two probes put on the page's live list, a
-// handler that takes itself out while handling and a recorder right after it. RELAY reaches the recorder; a LIVE walk of the
-// list (the shape this suite used to have, run here on purpose over the two probes only) skips it — the plant is real
-const RELAYCTL = await p1.evaljs(`(() => {
-  const hs = window.app.ws.globalHandlers, msg = { type: 'vs-relay-probe' };
-  let relayed = 0, walked = 0;
-  const self1 = () => { const i = hs.indexOf(self1); if (i >= 0) hs.splice(i, 1); }, rec1 = () => { relayed++; };
-  hs.push(self1, rec1); ${RELAY("msg")} { const i = hs.indexOf(rec1); if (i >= 0) hs.splice(i, 1); }
-  const self2 = () => { const i = hs.indexOf(self2); if (i >= 0) hs.splice(i, 1); }, rec2 = () => { walked++; };
-  hs.push(self2, rec2); for (const fn of hs) { if (fn === self2 || fn === rec2) fn(msg); } { const i = hs.indexOf(rec2); if (i >= 0) hs.splice(i, 1); }
-  return { relayed, walked, left: [self1, rec1, self2, rec2].filter((f) => hs.includes(f)).length };
-})()`);
-ok(RELAYCTL.relayed === 1 && RELAYCTL.walked === 0 && RELAYCTL.left === 0, `RELAY delivers like ws.js: a handler that takes itself out does not hide the next one (relayed ${RELAYCTL.relayed}); a LIVE walk does (${RELAYCTL.walked}) — the control's plant is real`, J(RELAYCTL));
 
 /** Open a conversation window and wait until `ready` (a page expression over `w`) holds. */
 const OPEN = (a, c, ready) => `(async () => {
@@ -1403,7 +1383,7 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   await sleep(120);
   const R1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row:not(.pp-row-everyone) .pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent) }; })()`);
   // pager-01 dies; the roster broadcast reaches the picker's listener (the same frame the sidebar would relay)
-  await p1.evaljs(`(() => { const sb = window.app.sidebar; const i = sb._webuiSessions.findIndex((x) => x.name === 'pager-01'); if (i >= 0) sb._webuiSessions.splice(i, 1); ${RELAY("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);
+  await p1.evaljs(`(() => { const sb = window.app.sidebar; const i = sb._webuiSessions.findIndex((x) => x.name === 'pager-01'); if (i >= 0) sb._webuiSessions.splice(i, 1); ${relayBroadcastJs("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);
   await sleep(150);
   const R2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row:not(.pp-row-everyone) .pp-name').textContent, active: d.querySelectorAll('.pp-row.pp-active').length, box: d.querySelector('.pp-input').value }; })()`);
   await key('Enter');
@@ -1428,7 +1408,7 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   await key('ArrowDown'); await key('ArrowDown');   // pager-03 → pager-04 (pager-02 is picked already but still listed)
   await sleep(80);
   const H1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { rows: [...d.querySelectorAll('.pp-row:not(.pp-row-everyone) .pp-name')].map((x) => x.textContent).slice(0, 3), active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent) }; })()`);
-  await p1.evaljs(`(() => { const sb = window.app.sidebar; const i = sb._webuiSessions.findIndex((x) => x.name === 'pager-02'); if (i >= 0) sb._webuiSessions.splice(i, 1); ${RELAY("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);
+  await p1.evaljs(`(() => { const sb = window.app.sidebar; const i = sb._webuiSessions.findIndex((x) => x.name === 'pager-02'); if (i >= 0) sb._webuiSessions.splice(i, 1); ${relayBroadcastJs("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);
   await sleep(150);
   const H2 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return { first: d.querySelector('.pp-row:not(.pp-row-everyone) .pp-name').textContent, active: [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent), chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent), who: [...d.querySelectorAll('.chan-access-row .chan-access-who')].map((x) => x.textContent) }; })()`);
   await key('Enter');
@@ -1442,7 +1422,7 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   await key('ArrowDown'); await key('ArrowDown');   // pager-03 (picked, listed) → pager-04
   await sleep(80);
   const V1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return [...d.querySelectorAll('.pp-row.pp-active .pp-name')].map((x) => x.textContent); })()`);
-  await p1.evaljs(`(() => { ${RELAY("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);
+  await p1.evaljs(`(() => { ${relayBroadcastJs("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);
   await sleep(150);
   await key('Enter');
   await sleep(150);
@@ -1463,7 +1443,7 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   const CPT = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); const rows = [...d.querySelectorAll('.pp-row')].filter((r) => !r.classList.contains('pp-on') && !r.closest('.pp-except')); const row = rows[rows.length - 1]; row.scrollIntoView({ block: 'center' }); const r = row.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), name: row.querySelector('.pp-name').textContent, chips: [...d.querySelectorAll('.pp-chip-name')].map((x) => x.textContent), under: (document.elementFromPoint(Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)) || {}).className }; })()`);
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: CPT.x, y: CPT.y });
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: CPT.x, y: CPT.y, button: 'left', clickCount: 1 });
-  await p1.evaljs(`(() => { ${RELAY("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);   // the broadcast lands between press and release
+  await p1.evaljs(`(() => { ${relayBroadcastJs("{ type: 'active-sessions', sessions: [] }")} return 1; })()`);   // the broadcast lands between press and release
   await sleep(40);
   await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: CPT.x, y: CPT.y, button: 'left', clickCount: 1 });
   await sleep(150);
@@ -1567,7 +1547,7 @@ console.log('⑫b the picker at 500 sessions and 50 Task Groups: build, keystrok
     [...d.querySelectorAll('button')].find((b) => b.textContent.trim() === '取消').click();
     for (let i = 0; i < 40 && document.getElementById('chan-access-dialog'); i++) await sleep(50);
     const atClose = window.__hnew().length;
-    ${RELAY("{ type: 'active-sessions', sessions: [] }")}
+    ${relayBroadcastJs("{ type: 'active-sessions', sessions: [] }")}
     await sleep(100);
     return { closed: !document.getElementById('chan-access-dialog'), atClose, after: window.__hnew().length };
   })()`);

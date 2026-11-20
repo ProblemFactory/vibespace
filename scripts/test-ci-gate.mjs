@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS, FALSE_ROW_RATIO, falseFastRows, fastTimesRecord, fastTimesPath, judgeFastReadings, falseRowLine, stripComments } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
-import { anchored } from './scratch.mjs';
+import { anchored, relayBroadcastJs } from './scratch.mjs';
 import { callArgs } from './lib/check.mjs'; // B-1388: a helper's Nth argument (the swap census's argument scanner)
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
@@ -1178,6 +1178,34 @@ console.log('\n§2k one page-target waiter: no loop under scripts/ waits for a p
   ok(late === null && s4.asks() === 2 && /deadline/.test(String(waitPageTarget.lastSeen)), `…and a DEADLINE ends it whatever the polls left: an endpoint that takes 300 ms an ask, 200 ms between, a 1000 ms deadline ⇒ ${s4.asks()} asks of 80 (an injected clock, no wall time)`);
   const s5 = stub(1); const l5 = await waitPageList(0, { polls: 3, everyMs: 1, list: s5.list, sleep: async () => {}, quiet: true });
   ok(Array.isArray(l5) && l5.length === 2, 'waitPageList answers the WHOLE list once it holds a page (the callers that read other targets too)');
+}
+
+// ── §2l ONE RELAY OF A BROADCAST (主开发 2026-11-20 04:54Z, lane bl-tests-chrome — 2.369.413's fourth hosted run:
+// test-channel-window-render ⑫c walked the page's LIVE handler list; a stale handler that took itself out shifted the list and
+// the open access picker's handler right after it was skipped — eight legs red, the product right: src/lib/ws.js dispatches over
+// a snapshot). A suite plays a server broadcast through scratch.mjs relayBroadcastJs ONLY: one message, a snapshot, each
+// handler isolated. THE CONTROL (once, here): the helper's own page code run against a stand-in list reaches the handler after
+// a self-removing one; the LIVE walk over the same plant skips it (the plant is real). THE CENSUS: no script under scripts/
+// walks a page's global handler list live (a for…of over it, or its .forEach). The shapes are built here from pieces, so this
+// file carries none itself.
+console.log('\n§2l one relay of a broadcast: every suite hands a server message to the page over a snapshot of its handlers');
+{
+  const relayRun = (code) => { const hs = []; let reached = 0, seen = [], self = null; self = () => { const i = hs.indexOf(self); if (i >= 0) hs.splice(i, 1); }; hs.push(self, (m) => { reached++; seen.push(m); }, () => { throw new Error('a throwing handler'); }, (m) => { seen.push(m); }); new Function('window', code)({ app: { ws: { globalHandlers: hs } } }); return { reached, sameMsg: seen.length === 2 && seen[0] === seen[1], selfGone: !hs.includes(self) }; };
+  const viaHelper = relayRun(relayBroadcastJs("{ type: 'vs-relay-probe' }"));
+  ok(viaHelper.reached === 1 && viaHelper.sameMsg && viaHelper.selfGone, `relayBroadcastJs reaches the handler after one that takes itself out, hands ONE message to all, and a throwing handler stops nothing (${JSON.stringify(viaHelper)})`);
+  const G = ['window', 'app', 'ws', 'globalHandlers'].join('.');
+  const liveWalk = 'for (const fn of ' + G + ') { try { fn({ type: "vs-relay-probe" }); } catch (e) {} }';
+  const viaLive = relayRun(liveWalk);
+  ok(viaLive.reached === 0, `CONTROL: the LIVE walk over the same plant SKIPS that handler (reached ${viaLive.reached}) — the plant is real`);
+  const LIVE_WALK = new RegExp('for\\s*\\(\\s*(?:const|let|var)\\s+[\\w$]+\\s+of\\s+(?:window\\.)?app\\.ws\\.' + 'globalHandlers\\s*\\)|(?:window\\.)?app\\.ws\\.' + 'globalHandlers\\s*\\.forEach\\s*\\(', 'g');
+  const planted = { 'a for…of': liveWalk, 'app without window, let': liveWalk.replace('window.', '').replace('const fn', 'let h'), 'its .forEach': G + '.forEach((h) => h({ type: "x" }))' };
+  const cured = { 'the helper': relayBroadcastJs("{ type: 'x' }"), 'a spread copy': 'for (const h of [...' + G + ']) h(m);', 'a slice copy': 'for (const h of ' + G + '.slice()) h(m);' };
+  const nPlanted = Object.entries(planted).map(([k, v]) => [k, (v.match(LIVE_WALK) || []).length]), nCured = Object.entries(cured).map(([k, v]) => [k, (v.match(LIVE_WALK) || []).length]);
+  ok(nPlanted.every(([, n]) => n === 1) && nCured.every(([, n]) => n === 0), `CONTROLS: the census FINDS each live shape (${nPlanted.map(([k, n]) => `${k} ${n}`).join(' · ')}) and NOT a copied list (${nCured.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
+  const files = walk(path.join(REPO, 'scripts')), found = [];
+  for (const f of files) { const t = fs.readFileSync(f, 'utf8'); for (const m of t.matchAll(LIVE_WALK)) found.push(`${path.relative(REPO, f)}:${t.slice(0, m.index).split('\n').length}`); }
+  ok(files.length > 300 && found.length === 0, `no script under scripts/ walks a page's global handler list LIVE — ${files.length} scripts read, ${found.length} walk it${found.length ? ': ' + found.slice(0, 8).join(', ') : ''} (relay through scratch.mjs relayBroadcastJs)`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

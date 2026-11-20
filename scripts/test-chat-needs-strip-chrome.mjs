@@ -33,7 +33,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, relayBroadcastJs } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { chatNeedsKit, loadDesk } from './chat-needs-kit.mjs';
@@ -763,7 +763,7 @@ try {
     // r11 ONE ATTENTION POLICY (the r10 acceptance: bands 3–5 announced): a REAL plain question (band 5) moves a number only;
     // the acceptance's shapes — Dropline's band-5 dictionary reminder, a band-4 vault-rotate suggestion, a band-3 date — through
     // THE arrival path (a snapshot pushed through the page's own socket handlers, as a broadcast lands)
-    const PUSH = (extra) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = [...todos.open, ...${extra}]; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return todos.open.length; })()`;
+    const PUSH = (extra) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = [...todos.open, ...${extra}]; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos }`, "app.ws.globalHandlers")} return todos.open.length; })()`;
     const blinkOff = `(() => { for (const b of [document.getElementById('taskbar-user-todos'), document.getElementById('mobile-nav-todos')]) b && b.classList.remove('ut-blink'); return 1; })()`;
     await A.evalJs(blinkOff);
     sayTo(s1, 'a plain one do:q400');
@@ -937,7 +937,7 @@ try {
     const T9 = Date.now() - 2000; // (a FIXED filing: the card stands at the conversation's last record — the 'turn' placement)
     const ak = (detail = 'first use') => [{ id: 'ut-r11reach01', sessionKey: KEY9, status: 'open', kind: 'action', origin: 'vault', urgency: 'urgent', createdAt: T9,
       text: 'reach wants to use the automation key K1 (conversations.open)', detail, action: { type: 'automation-ask', askId: 'r'.repeat(32), groups: 'grp-1 grp-2', keyId: 'k1', verb: 'conversations.open' } }];
-    const PUSH9 = (extra) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = [...todos.open, ...${extra}]; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const PUSH9 = (extra) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = [...todos.open, ...${extra}]; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos }`, "app.ws.globalHandlers")} return 1; })()`;
     const WORD = { opened: 'Only the conversations it opens', groups: 'The conversations of its Task Groups', instance: 'The whole VibeSpace' }; // (automation-reach.js reachWord — en)
     const R9 = `(() => { const w = ${CHAT(s9)}; const card = w.element.querySelector('.cn-card .ut-item[data-id="ut-r11reach01"]'), dock = w.element.querySelector('.chat-attn-dock .cad-rows .ut-item[data-id="ut-r11reach01"]');
       const pick = (el) => (el ? (el.querySelector('.ut-ak-reach input:checked') || {}).value || null : 'n/a'), names = card ? [...new Set([...card.querySelectorAll('.ut-ak-reach input')].map((r) => r.name))] : [];
@@ -1026,7 +1026,7 @@ try {
     await A.evalJs(`(() => { app.phoneHome?.hide?.(); if (!${CHAT(s20)}) app.attachSession(${J(s20)}, 'yield', ${J(WORK)}, { mode: 'chat', backend: 'claude' }); const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return 1; })()`);
     await A.waitFor(`!!${CHAT(s20)}`, 8000); await sleep(1000);
     const KEY20 = await A.evalJs(`(() => { const w = ${CHAT(s20)}; return (app.foryouRows.keysForWin(w.id) || [])[0] || null; })()`);
-    const PUSH20 = (extra, only = false) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${only ? extra : `[...todos.open, ...${extra}]`}; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const PUSH20 = (extra, only = false) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${only ? extra : `[...todos.open, ...${extra}]`}; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos }`, "app.ws.globalHandlers")} return 1; })()`;
     // THE EXACT EXIT-ACCESS SHAPE: the exit ask the tray's ONLY row (a snapshot of it alone — its Allow then sits low, by the
     // For-you button, where the stack stands); the page's own snapshot comes back at the end (PUSH20('[]'))
     const T20 = Date.now(), ex = (id, cmd) => ({ id, sessionKey: KEY20, status: 'open', kind: 'action', origin: 'machines', urgency: 'urgent', createdAt: T20, expiresAt: T20 + 300000,
@@ -1074,7 +1074,7 @@ try {
     await A.waitFor(`!!${CHAT(s21)}`, 8000); await sleep(1000);
     await A.evalJs(`(() => { const w = ${CHAT(s21)}; app.wm.focusWindow?.(w.id); if (!w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`); await sleep(800);
     const KEY21 = await A.evalJs(`(() => { const w = ${CHAT(s21)}; return (app.foryouRows.keysForWin(w.id) || [])[0] || null; })()`);
-    const PUSH21 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const PUSH21 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos }`, "app.ws.globalHandlers")} return 1; })()`;
     const T21 = Date.now(), ex21 = (id, cmd, at = T21) => ({ id, sessionKey: KEY21, status: 'open', kind: 'action', origin: 'machines', urgency: 'urgent', createdAt: at, expiresAt: T21 + 3600e3,
       text: 'Allow "clear" to run a command on exmac?', detail: cmd, action: { type: 'exit-run-ask', askId: id.slice(-1).repeat(32), machine: 'exmac', cmd } });
     const noToasts = `(() => { for (const t of document.querySelectorAll('#global-toasts > .global-toast')) t.remove(); return 1; })()`;
@@ -1273,7 +1273,7 @@ try {
   try {
     await A.front(); await A.device(1280, 800, { mouse: true });
     const R22 = `const R = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return r.width && r.height ? { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom) } : null; };`;
-    const PUSH22 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const PUSH22 = (list) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos; todos.open = ${list}; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos }`, "app.ws.globalHandlers")} return 1; })()`;
     const noToasts = `(() => { for (const t of document.querySelectorAll('#global-toasts > .global-toast')) t.remove(); return 1; })()`;
     const mouse = (x, y) => A.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y });
     const CHATOF = (sid) => `[...app.wm.windows.values()].find((w) => w.type === 'chat' && app.sessions.get(w.id)?.sessionId === ${J(sid)})`;
@@ -1332,7 +1332,7 @@ try {
     // the ask's clock by the SERVER's time (its line counts by hubNow — the snapshot's `now`), a fresh id each try; THE
     // PRECONDITION is said and tried again (the full suite's runner-fonts run on 3a30a2cd5 saw no size change after the watch
     // went on): the clock still «… left» when the watch goes on, its words turning after it, the strip changing size at the turn
-    const PUSHCLK = (id, inMs) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos, base = Number(todos.now) || Date.now(); const it = ${J(RUN22(0))}; it.id = ${J(id)}; it.action.askId = ${J(id)}.slice(-1).repeat(32); it.expiresAt = base + ${inMs}; todos.open = [it]; for (const h of app.ws.globalHandlers) { try { h({ type: 'user-todos-updated', todos }); } catch { } } return 1; })()`;
+    const PUSHCLK = (id, inMs) => `(async () => { const d = await (await fetch('/api/user-todos')).json(); const todos = d.todos, base = Number(todos.now) || Date.now(); const it = ${J(RUN22(0))}; it.id = ${J(id)}; it.action.askId = ${J(id)}.slice(-1).repeat(32); it.expiresAt = base + ${inMs}; todos.open = [it]; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos }`, "app.ws.globalHandlers")} return 1; })()`;
     // the width at which the clock's «time is up» words take one more line than its «… left» words — both in the warn style the
     // line wears near its end; the dock's height measured with each, restored in the same task (nothing laid out between)
     const SWEEP22 = `(() => { const w = ${CHATOF(s22)}, d = w.element.querySelector('.chat-attn-dock'), dl = d.querySelector('.ut-deadline'), due = "time is up by the server's clock — waiting for the server", ws = app.wm.workspace.getBoundingClientRect();

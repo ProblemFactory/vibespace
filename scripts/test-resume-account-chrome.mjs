@@ -21,7 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -188,7 +188,7 @@ try {
   check('desk: 「重新登录」 opens Manage agents and runs Account B\'s own re-login door', !!agents && agents.relogin.length === 1 && agents.relogin[0][0] === B && agents.relogin[0][1] === 'Account B', agents);
   // the login finishes: B's file holds a live login again, the list broadcasts ⇒ the bar is Resume again
   fs.writeFileSync(credsOf(B), JSON.stringify(LIVE('b')));
-  await D.ev(`app.refreshAccounts().then(() => { app.ws.globalHandlers.forEach((h) => { try { h({ type: 'accounts-updated', accounts: app._accounts.accounts, defaultAccountId: app._accounts.defaultAccountId, defaultCodexAccountId: app._accounts.defaultCodexAccountId }); } catch (e) {} }); return true; })`);
+  await D.ev(`app.refreshAccounts().then(() => { ${relayBroadcastJs(`{ type: 'accounts-updated', accounts: app._accounts.accounts, defaultAccountId: app._accounts.defaultAccountId, defaultCodexAccountId: app._accounts.defaultCodexAccountId }`, 'app.ws.globalHandlers')} return true; })`);
   const back = await until(() => D.ev(`(() => { const f = ${barFacts(SID_DESK)}; return f && !f.account && /恢复此会话/.test(f.btns[0]?.text || '') ? f : null; })()`), 10000, 150);
   check('desk: the re-login finished (accounts-updated) ⇒ the bar is Resume again', !!back, back);
   // wiped again ⇒ the press re-reads the list (fresh facts) and refuses again

@@ -26,7 +26,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const require = createRequire(import.meta.url);
@@ -172,7 +172,7 @@ await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'no
 // ── page-side probes ──
 const RECT = 'const R = (e) => { const r = e.getBoundingClientRect(); return { l: r.left, t: r.top, r: r.right, b: r.bottom, w: r.width, h: r.height }; }; const X = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;';
 const clearToasts = () => evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((e) => e.remove()); true`);
-const portNotice = () => evalJs(`(() => { app.ws.globalHandlers.forEach((h) => { try { h({ type: 'machine-ports-new', hostId: '__local__', hostName: 'This machine', ports: [{ port: 9835, proc: 'chrome' }] }); } catch { } }); return true; })()`);
+const portNotice = () => evalJs(`(() => { ${relayBroadcastJs(`{ type: 'machine-ports-new', hostId: '__local__', hostName: 'This machine', ports: [{ port: 9835, proc: 'chrome' }] }`, 'app.ws.globalHandlers')} return true; })()`);
 const toastFacts = (others) => evalJs(`(() => { ${RECT}
   const el = [...document.querySelectorAll('.global-toast')].find((t) => /9835/.test(t.textContent)); if (!el) return null;
   // the toast's body passes taps through (B-a42d) — to ask «is it painted on top?» the probe lends it the pointer for one read
