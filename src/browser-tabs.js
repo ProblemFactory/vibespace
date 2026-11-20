@@ -293,17 +293,21 @@ function tabsStaleStep(stale, event) {
   if (event === 'tabs' || event === 'switch') return false;
   return !!stale;
 }
-function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {}, windows = {}, leases = [], me = null, stale = false } = {}, tIn) {
+function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, mediated = false, adoptable = false, titles = {}, names = {}, windows = {}, leases = [], me = null, stale = false, front = null } = {}, tIn) {
   const t = tOf(tIn);
   const human = !!(viewer && viewer.human);
   const ow = isObj(owners) ? owners : {};
   const wordOf = (x) => { const w = str(ow[idKey(x.targetId)] || ow[str(x.targetId)]); return OWNER_WORDS.includes(w) ? w : 'orphan'; };
   const tt = isObj(titles) ? titles : {}, nm = isObj(names) ? names : {};
+  // B-e674 unit 1: the hub's verdict on the front of this view's window — a FOREIGN front tab is always drawn (even a blank
+  // nobody holds), marked, and its tip says whose it is
+  const fv = isObj(front) && front.state === 'foreign' && isTargetId(front.targetId) ? front : null;
+  const frontId = fv ? idKey(fv.targetId) : null;
   // accept-fixes-strip F7: the PAGE's title (CDP's, else the binary's — never an address dressed as one); F8: a blank
   // tab nobody holds is not drawn (the tab on show always is)
   const list = (Array.isArray(tabs) && !stale ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId)) // B-26bb: a stopped run's tabs draw nothing
     .map((x) => ({ ...x, title: pageTitleOf(x, tt[idKey(x.targetId)]) }))
-    .filter((x) => x.active || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));
+    .filter((x) => x.active || idKey(x.targetId) === frontId || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));
   const counts = { agent: 0, you: 0, other: 0, orphan: 0 };
   for (const x of list) counts[wordOf(x)]++;
   const plain = list.map((x) => chipTitle(x.title, x.url));
@@ -316,12 +320,14 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
     // verify r1 F4: the tip and the url are BOUNDED like the kept store's rows (a title ≤ 300, a url ≤ 2048 — a page chose both)
     const url = str(x.url).slice(0, 2048);
     const full = str(x.title).trim().slice(0, 300) || url;
+    const fw = frontId === idKey(x.targetId) ? frontText({ ...fv, owner }, { name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn) : { mark: '', tip: '' };
     return {
       targetId: idKey(x.targetId), tabId: str(x.tabId), title: twin.has(plain[i]) ? chipTitleTail(x.title, x.url) : plain[i], tip: full === url ? full : `${full} — ${url}`, url, host: hostOf(x.url), active: !!x.active, owner,
       mark: ownerMarkText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn), markTip: ownerTipText(owner, { human, name: nameOfHolder(nm[idKey(x.targetId)]) }, tIn),
       // accept-fixes F4: the tab the agent is WORKING ON says so on its chip (never only a border) — apart from the one
       // this view watches (the dashed chip)
       here: owner === 'agent' && !!x.active, hereText: owner === 'agent' && x.active ? t('The agent is here') : '',
+      front: !!fw.mark, frontText: fw.mark, frontTip: fw.tip, // B-e674 unit 1: a foreign tab in front of this view's window
       canSwitch: sw.ok && !sw.noop, canClose: cl.ok,
       switchTip: sw.ok && !sw.noop ? t('Switch to this tab') : '', closeTip: cl.ok ? t('Close tab') : '',
     };
@@ -329,7 +335,7 @@ function tabRowModel({ tabs = [], owners = {}, viewer = {}, driving = false, med
   // lane browser-tabs-by-window: the chips BY WINDOW — this view's window first, then each other holder's, then the rest;
   // a window's spare blank folds into its group (the pane's head says the count), never the chip on show
   const wn = isObj(windows) ? windows : {};
-  const g = tabGroups({ tabs: list.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: wn[idKey(x.targetId)] })), leases, me, human }, tIn);
+  const g = tabGroups({ tabs: list.map((x) => ({ targetId: x.targetId, url: x.url, active: x.active, windowId: wn[idKey(x.targetId)] })), leases, me, human, front: frontId }, tIn);
   const byId = new Map(rows.map((r) => [r.targetId, r]));
   const groupOf = new Map(); for (const gr of g.groups) for (const id of gr.targetIds) groupOf.set(id, gr.key);
   return { rows: g.order.map((id) => ({ ...byId.get(id), group: groupOf.get(id) })), counts, anyAgent: counts.agent > 0, groups: g.groups, grouped: g.grouped, blanks: g.blanks };
@@ -370,12 +376,13 @@ function windowLabelText(kind, { word = 'other', name = '' } = {}, tIn) {
  *   holders' order · me = this view's window when no lease says it · human = the view is his own browsing window
  * → {grouped, groups:[{key, kind:'own'|'holder'|'elsewhere', label, tip, blankText, targetIds, blanks}], order, blanks}
  */
-function tabGroups({ tabs = [], leases = [], me = null, human = false } = {}, tIn) {
+function tabGroups({ tabs = [], leases = [], me = null, human = false, front = null } = {}, tIn) {
   const t = tOf(tIn);
   const list = (Array.isArray(tabs) ? tabs : []).filter((x) => isObj(x) && isTargetId(x.targetId)).map((x) => ({ id: idKey(x.targetId), win: windowIdIn(x.windowId), blank: isBlankTab(x), active: !!x.active }));
   const ls = (Array.isArray(leases) ? leases : []).filter((l) => isObj(l) && windowIdIn(l.windowId) != null)
     .map((l) => { const h = isObj(l.holder) ? l.holder : {}; return { win: windowIdIn(l.windowId), word: OWNER_WORDS.includes(str(h.word)) ? str(h.word) : 'other', name: str(h.name) }; });
   const shown = list.find((x) => x.active);
+  const fr = isTargetId(front) ? idKey(front) : null;
   const mine = ls.find((l) => l.word === (human ? 'you' : 'agent'));
   const own = mine ? mine.win : windowIdIn(me) != null ? windowIdIn(me) : shown ? shown.win : null;
   const heads = [];
@@ -389,7 +396,7 @@ function tabGroups({ tabs = [], leases = [], me = null, human = false } = {}, tI
   for (const x of list) if (x.win != null) { const a = perWin.get(x.win); if (a) a.push(x); else perWin.set(x.win, [x]); }
   const folded = new Set();
   for (const xs of perWin.values()) {
-    const spare = xs.filter((x) => x.blank && !x.active);
+    const spare = xs.filter((x) => x.blank && !x.active && x.id !== fr); // B-e674: the tab in front of a window is drawn, never folded
     for (const x of spare.length === xs.length ? spare.slice(1) : spare) folded.add(x.id);
   }
   const out = groups.filter((g) => g.members.length).map((g) => {
@@ -405,6 +412,49 @@ function tabsCountText({ order = [], blanks = 0 } = {}, tIn) {
   const t = tOf(tIn);
   const n = Array.isArray(order) ? order.length : 0, b = Number(blanks) || 0;
   return b > 0 ? t('{n} · +{b} blank', { n, b }) : String(n);
+}
+
+// ── B-e674 unit 1 (the coordinator's r548 / r562): THE FRONT OF THIS VIEW'S WINDOW ─────────────────────────────────────
+// On a shared profile a tab that is not this holder's can sit in FRONT of its window. A plain create lands in Chrome's
+// last focused window (src/browser-windows.js WINDOWS_PROOF); another holder's page, or a tab the browser itself made,
+// can be there too. The window then shows a page this view's row could not name: the root behind the owner's report of
+// 2026-11-19 (B-c9e3, whose cure keeps the picture this view's own tab). The keeper reads which of the window's tabs is
+// visible, and only when two or more share it. This verdict names that tab. NOTHING is moved, closed or activated for it:
+// CDP has no move, a close loses a page, and an activation changes what someone sees.
+/** The most window-mates one read asks (a window of more names its front only when the asked ones answer it). */
+const FRONT_READS_MAX = 8;
+const FRONT_STATES = Object.freeze(['none', 'single', 'unread', 'own', 'foreign']);
+/**
+ * `windowId` = this view's window (the viewed holder's: a lease's stamped window, the person's own tab's window);
+ * `windows` = {TARGETID: windowId|null} (the keeper's reads); `visible` = the tabs of that window whose page answered
+ * `visible`; `owners` = {TARGETID: OWNER_WORDS} in the VIEW's words; `human` = the view is the person's own browsing window.
+ * → {state, windowId, targetId, owner, mates}:
+ *   none     no window is known for this view
+ *   single   it holds one tab (nothing can stand in front of it)
+ *   unread   two or more, and not exactly ONE of them answered visible (a window shows one tab: never guessed)
+ *   own      the tab in front is this view's holder's (`agent` on a conversation's view, `you` on the person's)
+ *   foreign  the tab in front is another conversation's (`other`), the person's on a conversation's view (`you`), or
+ *            nobody's (`orphan`). PURE.
+ */
+function frontVerdict({ windowId = null, windows = {}, visible = [], owners = {}, human = false } = {}) {
+  const w = windowIdIn(windowId);
+  if (w == null) return { state: 'none', windowId: null, targetId: null, owner: null, mates: 0 };
+  const wn = isObj(windows) ? windows : {};
+  const mates = Object.keys(wn).filter((id) => isTargetId(id) && windowIdIn(wn[id]) === w).map(idKey);
+  if (mates.length < 2) return { state: 'single', windowId: w, targetId: mates[0] || null, owner: null, mates: mates.length };
+  const mateSet = new Set(mates); // one pass each (a window's page list is Chrome's own length)
+  const vis = [...new Set((Array.isArray(visible) ? visible : []).map(idKey))].filter((id) => mateSet.has(id));
+  if (vis.length !== 1) return { state: 'unread', windowId: w, targetId: null, owner: null, mates: mates.length };
+  const ow = isObj(owners) ? owners : {};
+  const word = OWNER_WORDS.includes(str(ow[vis[0]])) ? str(ow[vis[0]]) : 'orphan';
+  return { state: word === (human ? 'you' : 'agent') ? 'own' : 'foreign', windowId: w, targetId: vis[0], owner: word, mates: mates.length };
+}
+/** A FOREIGN front tab's words: its chip's short line (`mark`) and its tip (whose it is, then what this view does about it). */
+function frontText(v, { name = '' } = {}, tIn) {
+  const t = tOf(tIn);
+  if (!isObj(v) || v.state !== 'foreign') return { mark: '', tip: '' };
+  const who = v.owner === 'other' ? (name ? t('{name}’s tab', { name: str(name) }) : t('Another conversation’s tab')) : v.owner === 'you' ? t('Your tab') : t('A tab nobody holds');
+  return { mark: t('In front of this window'), tip: t('{who} is in front of this window — the picture here stays this view’s own tab; nothing is moved or closed for it', { who }) };
 }
 
 // ── THE WORDS (en; the client passes its t() — every key has zh + ja rows) ─────────────────────────────────────────
@@ -539,4 +589,5 @@ module.exports = {
   isUrlTitle, pageTitleOf, titlesOf, pageRows, nameOfHolder, BLANK_URL_RE, // accept-fixes-strip F7 (the page's own title) + F8 (whose, by name)
   ownerMarkText, ownerTipText, tabRefusalText, userActsSentence, noteUserActIn, agentTabLines,
   tabGroups, tabsCountText, windowLabelText, isBlankTab, // lane browser-tabs-by-window: the tabs by window, a window's spare blank folded
+  FRONT_READS_MAX, FRONT_STATES, frontVerdict, frontText, // B-e674 unit 1: the front of this view's window, said
 };

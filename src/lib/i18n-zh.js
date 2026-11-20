@@ -7413,6 +7413,12 @@ export default {
   "Nobody’s": "无主",
   "The agent’s tab — take over to switch or close it; the agent is told at the handback": "agent 的标签页——接管后可以切换或关闭它；交还时会告诉 agent",
   "Your tab": "你的标签页",
+  // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
+  "{name}’s tab": "{name} 的标签页",
+  "Another conversation’s tab": "其他对话的标签页",
+  "A tab nobody holds": "无人持有的标签页",
+  "In front of this window": "在此窗口最前面",
+  "{who} is in front of this window — the picture here stays this view’s own tab; nothing is moved or closed for it": "{who}在此窗口最前面——这里的画面仍是本视图自己的标签页；不会为它移动或关闭任何标签页",
   "Your own tab (Browse yourself)": "你自己的标签页（自己浏览）",
   "{name}’s tab — watch it here (view only); open its own live view to drive it": "{name} 的标签页——可以在这里观看（只看不动）；要操作它，请打开它自己的实时视图",
   "Watch this tab — view only; nobody’s tab moves": "观看这个标签页——只看不动，谁的标签页都不会被切换",

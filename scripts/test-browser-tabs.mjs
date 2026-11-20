@@ -266,7 +266,7 @@ for (const l of pureLegs(TB)) ok(l.c, l.n, l.extra);
   ok(Array.isArray(c5) && c5.some((n) => /F7/.test(n)), 'CONTROL F7: a title rule that accepts an address dressed as a title — red', c5);
   const c6 = redOf("  if (owner === 'other') return name ? str(name) : t('Another conversation’s');\n", "  if (owner === 'other') return t('Another conversation’s');\n", 'no-names');
   ok(Array.isArray(c6) && c6.some((n) => /F8/.test(n)), 'CONTROL F8: a mark that never names the holder ("Another conversation’s", the 2.369.202 words) — red', c6);
-  const c7 = redOf("    .filter((x) => x.active || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));\n", "    .filter(Boolean);\n", 'blank-orphans');
+  const c7 = redOf("    .filter((x) => x.active || idKey(x.targetId) === frontId || wordOf(x) !== 'orphan' || !BLANK_URL_RE.test(str(x.url).trim()));\n", "    .filter(Boolean);\n", 'blank-orphans'); // B-e674 unit 1: the line also keeps a foreign front tab
   ok(Array.isArray(c7) && c7.some((n) => /F8/.test(n)), 'CONTROL F8: a row that draws a blank tab nobody holds ("about:blank · Nobody’s") — red', c7);
   // lane browser-tabs-by-window: a copy that FLATTENS the groups, a copy that prints the window id — each red
   const c8 = redOf("  for (const x of list) (at.get(x.win) || groups[groups.length - 1]).members.push(x);\n", "  for (const x of list) groups[groups.length - 1].members.push(x);\n", 'flat-tabs');

@@ -7412,6 +7412,12 @@ export default {
   "Nobody’s": "持ち主なし",
   "The agent’s tab — take over to switch or close it; the agent is told at the handback": "エージェントのタブ — 引き継ぐと切り替えたり閉じたりできます。戻すときにエージェントに伝えられます",
   "Your tab": "あなたのタブ",
+  // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
+  "{name}’s tab": "{name} のタブ",
+  "Another conversation’s tab": "別の会話のタブ",
+  "A tab nobody holds": "持ち主のいないタブ",
+  "In front of this window": "このウィンドウの最前面",
+  "{who} is in front of this window — the picture here stays this view’s own tab; nothing is moved or closed for it": "{who}がこのウィンドウの最前面にあります — ここの画面はこのビュー自身のタブのままです。そのために移動や閉じる操作は行いません",
   "Your own tab (Browse yourself)": "あなた自身のタブ（自分で閲覧）",
   "{name}’s tab — watch it here (view only); open its own live view to drive it": "{name} のタブ — ここで見るだけできます（操作はしません）。操作するにはそのライブビューを開いてください",
   "Watch this tab — view only; nobody’s tab moves": "このタブを見る — 見るだけで、誰のタブも切り替わりません",

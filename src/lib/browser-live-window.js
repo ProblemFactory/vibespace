@@ -399,7 +399,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     // offered), the note dialog open (the keys stay out of the page), the last hand-back from here
     resumeOffer: false, resuming: false, resumedHere: false, noteOpen: false, handedBack: false,
     // lane browser-resume C: the bridge's `tab-owners` (targetId → agent|you|other|orphan), the tab row's model + fold, the acts in flight
-    tabOwners: {}, tabTitles: {}, tabNames: {}, tabWindows: {}, tabLeases: [], tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
+    tabOwners: {}, tabFront: null /* B-e674: the hub's verdict on the front of this view's window */, tabTitles: {}, tabNames: {}, tabWindows: {}, tabLeases: [], tabMediated: false, tabAdoptable: false, tabRow: null, tabFolded: [], tabRid: 0, tabActs: new Map(), tabError: null, quitAsked: null,
     // lane browser-windows: the tab THIS viewer watches instead of the agent's ({targetId, mode, pending}) and the bridge's
     // "the tab on show paints nothing" verdict ({targetId, since}) — both said on the watch line
     watch: null, bg: null,
@@ -1467,7 +1467,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   function renderTabRow() {
     if (st.closed) return;
     const driving = st.mode === 'takeover' && st.mine;
-    const m = tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable, titles: st.tabTitles, windows: st.tabWindows, leases: tabLeasesNow(), names: tabNamesNow() }, t);
+    const m = tabRowModel({ tabs: st.tabs, stale: !!st.tabsStale, owners: st.tabOwners, viewer: { human: !!H }, driving, mediated: st.tabMediated, adoptable: st.tabAdoptable, titles: st.tabTitles, windows: st.tabWindows, leases: tabLeasesNow(), names: tabNamesNow(), front: st.tabFront }, t);
     st.tabRow = m;
     const show = m.rows.length > 0 && !st.stopped && !st.hollow && !st.sessionEnded;
     const want = show ? '' : 'none';
@@ -1514,15 +1514,16 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const ti = el.querySelector('.browser-live-tabchip-title'); if (ti.textContent !== r.title) ti.textContent = r.title;
       const mk = el.querySelector('.browser-live-tabchip-mark'); if (mk.textContent !== r.mark) mk.textContent = r.mark; mk.title = r.markTip;
       el.classList.toggle('active', r.active);
-      const hr = el.querySelector('.browser-live-tabchip-here'); if (hr.textContent !== r.hereText) hr.textContent = r.hereText;
+      const hr = el.querySelector('.browser-live-tabchip-here'); const hx = r.hereText || r.frontText || ''; if (hr.textContent !== hx) hr.textContent = hx;
       el.classList.toggle('working', r.here);
+      el.classList.toggle('front-foreign', !!r.front); // B-e674 unit 1: another holder's tab (or nobody's) is in front of this view's window
       el.dataset.owner = r.owner;
       // lane browser-windows (U3/U0b): what a click does here — the PURE verdict (bring forward / switch while driving,
       // watch / follow while watching); the row's own verdict still answers his own window and the close buttons
       const cv = clickOf(r, driving);
       const clickTip = cv.act === 'front' ? t('Bring this tab to the front of its window') : cv.act === 'switch' ? r.switchTip || t('Switch to this tab') : cv.act === 'watch' ? (r.owner === 'agent' ? t('Watch this tab — the agent’s tab is not changed (take over to switch it)') : t('Watch this tab — view only; nobody’s tab moves')) : cv.act === 'follow' ? t('Back to the agent’s current tab') : (r.canSwitch ? r.switchTip : '');
       const clickable = cv.act !== 'none' || r.canSwitch;
-      const tip = (clickTip ? clickTip + '\n' : '') + r.tip + '\n' + r.markTip;
+      const tip = (clickTip ? clickTip + '\n' : '') + (r.frontTip ? r.frontTip + '\n' : '') + r.tip + '\n' + r.markTip;
       if (el.title !== tip) el.title = tip;
       if (clickable) { el.setAttribute('role', 'button'); el.tabIndex = 0; } else { el.removeAttribute('role'); el.removeAttribute('tabindex'); }
       el.classList.toggle('switchable', clickable);
@@ -2399,7 +2400,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
         break;
       // lane browser-resume C (§3.9, ruling 3): whose each tab is (the keeper's answer, replayed to a late viewer) and one act's answer
       case 'tab-owners':
-        st.tabOwners = m.owners && typeof m.owners === 'object' ? { ...m.owners } : {}; st.tabTitles = m.titles && typeof m.titles === 'object' ? { ...m.titles } : {}; st.tabNames = m.names && typeof m.names === 'object' ? { ...m.names } : {}; st.tabWindows = m.windows && typeof m.windows === 'object' ? { ...m.windows } : {}; st.tabLeases = Array.isArray(m.leases) ? m.leases.slice(0, 64) : []; st.tabMediated = !!m.mediated; st.tabAdoptable = !!m.adoptable; // accept-fixes-strip F7/F8: the pages' own titles + the holders' names
+        st.tabOwners = m.owners && typeof m.owners === 'object' ? { ...m.owners } : {}; st.tabTitles = m.titles && typeof m.titles === 'object' ? { ...m.titles } : {}; st.tabNames = m.names && typeof m.names === 'object' ? { ...m.names } : {}; st.tabWindows = m.windows && typeof m.windows === 'object' ? { ...m.windows } : {}; st.tabLeases = Array.isArray(m.leases) ? m.leases.slice(0, 64) : []; st.tabFront = m.front && typeof m.front === 'object' ? { ...m.front } : null; st.tabMediated = !!m.mediated; st.tabAdoptable = !!m.adoptable; // accept-fixes-strip F7/F8: the pages' own titles + the holders' names
         renderTabs(); renderTabRow(); // lane browser-tabs-by-window: the pane groups by the same windows
         break;
       case 'tab-ack': onTabAck(m); break;
@@ -2436,7 +2437,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     st.profileRef = profileRef || '';
     st.error = null; st.target = null; st.bg = null; st.bgClearedAt = 0; clearTimeout(st.bgSettleTimer); // the next hello names the pane (its read's M3: no verdict carried to another browser) (MULTIVIEW: a strip tab may name a helper's browser or EPHEMERAL_REF)
     if (st.stopped || st.hollow) { st.stopped = false; st.stoppedHow = null; st.hollow = false; renderMode(); } // a new pane has no last frame to grey
-    st.pkRelay = null; st.prRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabsStale = tabsStaleStep(st.tabsStale, 'switch'); st.tabOwners = {}; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
+    st.pkRelay = null; st.prRelay = null; st.pkPid = null; st.frames = 0; st.url = ''; st.tabs = []; st.tabsStale = tabsStaleStep(st.tabsStale, 'switch'); st.tabOwners = {}; st.tabFront = null; st.tabTitles = {}; st.tabNames = {}; st.tabWindows = {}; st.tabLeases = []; st.tabActs.clear(); st.console = []; st.running = false; st.reconnects = 0;
     st.fit = null; st.fitSent = null; st.navAt = 0; st.lastFrameAt = 0; st.openAt = 0; st.picture = 'ok'; st.pictureStale = false; root.classList.remove('picture-stale'); renderFit(); setZoom(ZOOM_NONE); // lane S4: a new pane has its own size and picture
     img.removeAttribute('src');
     timeline.clear(); renderTraceBtn(); // the next hello names the pane and re-seeds

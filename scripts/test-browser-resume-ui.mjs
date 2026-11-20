@@ -26,7 +26,9 @@
 //      folds; the hand-back is WHOLE ON THE BAR — lane handback-words: ja «メモを添えて戻す…» folded into the ⋯ row there,
 //      so ja says «メモで戻す…»; a ⋯ row no longer passes)
 //   PNGs where VIBESPACE_TABS_PNG_DIR names a directory: ⑧'s tab row + pane, and (lane handback-words) the hand-back
-//   dialog, the strip after it, and the zh / ja bar at 360 px
+//   dialog, the strip after it, and the zh / ja bar at 360 px; ⑨'s row at a 390 and a 1280 px viewport (B-e674 unit 1)
+//   ⑨ zh (B-e674 unit 1): a tab that is not this conversation's in FRONT of its window — its own chip says «在此窗口最前面»,
+//      its tip whose it is; CONTROL without the hub's verdict nothing is marked; a blank nobody holds in front is drawn
 //   ⑤ the agent's own `detach` retires its browser's record: a freshly loaded view (no browser remembered) still offers
 //      Resume off THE fact; a REAL click brings the three tabs back on a new record
 //   ⑥ (lane browser-resume C, the owner's ruling 3) THE TAB ROW: one chip per tab, "The agent's"; while the agent drives no
@@ -546,6 +548,42 @@ else await (async () => {
           const shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: r.left, y: r.top, width: Math.max(1, r.width), height: Math.max(1, r.height), scale: 1 } });
           if (shot.result?.data) { fs.writeFileSync(path.join(dir, name), Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${path.join(dir, name)}`); }
         }
+      }
+    }
+    // ⑨ B-e674 unit 1 (the coordinator's r548 / r562): A TAB THAT IS NOT THIS CONVERSATION'S IN FRONT OF ITS WINDOW, zh. The
+    //    hub's verdict (`tab-owners.front` — test-browser-front-tab proves the keeper's read and the bridge) fed through the live
+    //    view's OWN socket handler: THAT chip says «在此窗口最前面», its tip whose it is; CONTROL the same record without the
+    //    verdict marks nothing (and a blank nobody holds stays hidden); a blank nobody holds in front is drawn and marked. PNGs
+    //    of the row at a 390 px and a 1280 px viewport where VIBESPACE_TABS_PNG_DIR names a dir.
+    console.log('— ⑨ zh: a tab that is not this conversation\'s in front of its window — marked on its own chip');
+    {
+      const A = 'A'.repeat(32), E = 'E'.repeat(32), N = '9'.repeat(32), WA = 896114259;
+      const tabs = [{ tabId: 't1', targetId: A, title: 'Enterprise | Find a supplier', url: 'https://enterprise.example/find', active: true }, { tabId: 't5', targetId: E, title: 'Read - Meeting Report', url: 'https://read.example/meeting-report' }, { tabId: 't6', targetId: N, title: 'about:blank', url: 'about:blank' }];
+      const base = { type: 'tab-owners', owners: { [A]: 'agent', [E]: 'other', [N]: 'orphan' }, titles: {}, names: { [E]: { sessionId: null, name: '企业助手' } }, windows: { [A]: WA, [E]: WA, [N]: WA }, leases: [{ windowId: WA, word: 'agent', sessionId: null, name: null }], mediated: false, adoptable: false };
+      const frontE = { state: 'foreign', windowId: WA, targetId: E, owner: 'other' }, frontN = { state: 'foreign', windowId: WA, targetId: N, owner: 'orphan' };
+      const feedOf = (rec) => `const w = L().ws(); w.onmessage({ data: ${S(S({ type: 'tabs', tabs }))} }); w.onmessage({ data: ${S(S(rec))} });`;
+      const chips = `await new Promise((r) => setTimeout(r, 300)); const root = L().el(); return [...root.querySelectorAll('.browser-live-tabrow-list > .browser-live-tabchip')].filter((e) => e.style.display !== 'none').map((e) => ({ id: e.dataset.target.slice(0, 1), front: e.classList.contains('front-foreign'), here: (e.querySelector('.browser-live-tabchip-here') || {}).textContent || '', tip: e.title }));`;
+      await ev('const w = live(); const el = w.element; el.style.width = "900px"; el.style.height = "620px"; window.dispatchEvent(new Event("resize")); return true;');
+      const f1 = await ev(feedOf({ ...base, front: frontE }) + chips);
+      const cE = (f1 || []).find((x) => x.id === 'E');
+      ok(!!cE && cE.front && cE.here === '在此窗口最前面' && cE.tip.includes('企业助手 的标签页在此窗口最前面') && cE.tip.includes('不会为它移动或关闭任何标签页') && f1.filter((x) => x.front).length === 1,
+        '⑨ zh: 企业助手\'s tab in front of this window — ITS chip says «在此窗口最前面», its tip whose it is and that nothing is moved or closed', S(f1));
+      const f0 = await ev(feedOf(base) + chips);
+      ok(Array.isArray(f0) && !f0.some((x) => x.front) && !f0.some((x) => x.id === '9'), '⑨ CONTROL: the same record without the verdict marks no chip, and the blank nobody holds stays hidden', S(f0));
+      const f2 = await ev(feedOf({ ...base, front: frontN }) + chips);
+      const cN = (f2 || []).find((x) => x.id === '9');
+      ok(!!cN && cN.front && cN.tip.includes('无人持有的标签页在此窗口最前面'), '⑨ zh: a blank NOBODY holds in front of this window is drawn and marked', S(f2));
+      if (PNG_DIR) {
+        for (const wpx of [390, 1280]) {
+          await send('Emulation.setDeviceMetricsOverride', { width: wpx, height: 900, deviceScaleFactor: 1, mobile: false });
+          await ev(`const w = live(); const el = w.element; el.style.left = "0px"; el.style.width = "${wpx - 10}px"; el.style.height = "520px"; window.dispatchEvent(new Event("resize")); return true;`);
+          await ev(feedOf({ ...base, front: frontE }) + 'return true;'); await sleep(400);
+          const r = await ev('return rect(L().el().querySelector(".browser-live-tabrow"));');
+          const shot = r && r.width > 0 ? await send('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, r.left), y: Math.max(0, r.top), width: Math.max(1, Math.min(r.width, wpx)), height: Math.max(1, r.height), scale: 1 } }) : null;
+          if (shot && shot.result?.data) { const f = path.join(PNG_DIR, `after-front-${wpx}-zh.png`); fs.writeFileSync(f, Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${f} (the row at a ${wpx} px viewport)`); }
+          else console.log(`    PNG at ${wpx} px NOT written: the row has no box (${S(r)})`);
+        }
+        await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });
       }
     }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });

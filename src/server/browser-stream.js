@@ -1240,7 +1240,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
         const nm = l.name || (s0 ? (s0.name || s0.webuiName || '') : '');
         return { windowId: WIN.windowIdOf(l.windowId), word: String(l.word || 'other'), sessionId: l.sessionId ? String(l.sessionId) : null, name: nm ? String(nm).slice(0, 120) : null };
       });
-      const text = JSON.stringify({ type: 'tab-owners', owners, titles, names, windows, leases, mediated: !!r.mediated, adoptable: !!r.adoptable });
+      // B-e674 unit 1: the keeper's verdict on the FRONT of this view's window — a foreign front tab is named only when this view
+      // lists it (its name rides `names` above, like any other holder's tab)
+      const fr = r.front && typeof r.front === 'object' ? r.front : null;
+      const front = fr && fr.state === 'foreign' && listed.has(String(fr.targetId || '').toUpperCase()) ? { state: 'foreign', windowId: WIN.windowIdOf(fr.windowId), targetId: String(fr.targetId).toUpperCase(), owner: String(fr.owner || 'orphan') } : fr ? { state: String(fr.state || 'none') } : null;
+      const text = JSON.stringify({ type: 'tab-owners', owners, titles, names, windows, leases, front, mediated: !!r.mediated, adoptable: !!r.adoptable });
       if (text === relay.lastOwners) return;
       relay.lastOwners = text;
       for (const v of relay.viewers.values()) send(v.ws, text);
@@ -1344,6 +1348,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     log.log?.(`[browser-live] ${relay.key}: the tab on show (${String(id).slice(0, 8)}) is in the BACKGROUND of its window — it paints nothing; said on the view, its picture polled every ${bgPollMs} ms`);
     relay.lastBg = JSON.stringify({ type: 'tab-background', targetId: id, since: b.since, pollMs: bgPollMs });
     broadcast(relay, relay.lastBg);
+    scheduleOwners(relay); // B-e674 unit 1: another tab is in front of this window now — whose it is, asked again
     b.pollTimer = setInterval(() => pollBackground(relay), bgPollMs);
     if (b.pollTimer.unref) b.pollTimer.unref();
   }
@@ -1370,6 +1375,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     relay.lastBg = null;
     log.log?.(`[browser-live] ${relay.key}: the tab ${String(id || '').slice(0, 8)} is no longer a silent background tab (${why})`);
     broadcast(relay, { type: 'tab-background', targetId: null, why, ...(cause ? { cause } : {}) });
+    scheduleOwners(relay); // B-e674 unit 1: the front of this window changed again — asked again
   }
   function pollBackground(relay) {
     const b = relay.bg;

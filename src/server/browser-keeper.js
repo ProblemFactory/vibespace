@@ -229,6 +229,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // lane browser-windows (U1): the window a holder's tab opens in — `(cdpUrl, {url}) → {ok, targetId, windowId}` over the
   // keeper browser's own endpoint (browser-viewport.openWindow); injectable for the gate (a fake has no CDP)
   openWindow: openWindowFn = null, closeTarget: closeTargetFn = null, openTabInWindow: openInWindowFn = null, windowOf: windowOfFn = null, openTabByActivate: activateFn = null, // verify r2 T1: rung 2 of a later tab (browser-viewport.openTabByActivate)
+  visibilityOf: visibilityOfFn = null, // B-e674 unit 1: is a named tab visible — `(cdpUrl, targetId) → {ok, visibility}` (browser-viewport.visibilityOf); injectable for the gate
   // lane engine-plugin (design-custom-browser-plugin §1): THE ENGINE REGISTRY (src/server/browser-engines.js, or a getter) — a
   // profile whose `browser` is {kind:'plugin', id} runs that engine's kernel (its probe + launch options asked at each launch,
   // inside the in-flight start); `fleetFacts` = the presets' fleet.json facts (a getter → {browserEngine?} | null) the default
@@ -4310,7 +4311,48 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const whose = {};
     for (const [id, k] of owners) { words[id] = TBS.ownerWord(k, { me: bk, humanKey: h ? h.key : null }); if (words[id] === 'other') { const w = whoseOf(p.id, k); if (w) whose[id] = w; } }
     const windows = await tabWindowsOf(rec, targets); // lane browser-tabs-by-window: every tab's window + the holders' windows
-    return { ok: true, owners: words, whose, windows, leases: holderWindowsOf(p, rec, windows, bk, h), mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
+    const leases = holderWindowsOf(p, rec, windows, bk, h);
+    const front = await frontOfView(p, rec, { windows, words, act, bk, h, leases, whose }); // B-e674 unit 1
+    return { ok: true, owners: words, whose, windows, leases, front, mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
+  }
+  // ── B-e674 unit 1 (the coordinator's r548 / r562): THE FRONT OF THE VIEWED HOLDER'S WINDOW, SAID (src/browser-tabs.js
+  // frontVerdict). Asked only when two or more tabs share that window. The view's own tab on show is asked first: visible ⇒ it
+  // is the front (one read). Otherwise the window's other tabs are asked at once, at most TBS.FRONT_READS_MAX, each bounded
+  // by the reader's own timeout. ONE journal line a change (a foreign front, and its end). Never an act: nothing is moved,
+  // closed or activated for it (CDP has no move; a close loses a page; an activation changes what someone sees).
+  const frontSaid = new Map(); // `${profileId}|${view}` → `${windowId}|${targetId}|${state}`, the last front this view's journal said
+  const FRONT_SAID_KEEP = 512;
+  async function frontOfView(p, rec, { windows = {}, words = {}, act = null, bk = null, h = null, leases = [], whose = {} } = {}) {
+    const human = !bk;
+    const own = (Array.isArray(leases) ? leases : []).find((l) => l && l.word === (human ? 'you' : 'agent'));
+    const viewWindow = own ? own.windowId : act && windows[act] != null ? windows[act] : null;
+    const v0 = TBS.frontVerdict({ windowId: viewWindow, windows, visible: [], owners: words, human });
+    if (v0.state !== 'unread') return v0; // no window known, or one tab in it: nothing can stand in front
+    const mates = Object.keys(windows).filter((id) => WIN.windowIdOf(windows[id]) === v0.windowId);
+    const ask = async (id) => {
+      try { const r = await (typeof visibilityOfFn === 'function' ? visibilityOfFn(rec.cdpUrl, id) : require('./browser-viewport.js').visibilityOf(rec.cdpUrl, id)); return r && r.ok ? String(r.visibility || '') : null; } catch { return null; }
+    };
+    const mine = act && mates.includes(act) ? act : human && h && h.ownTab && mates.includes(String(h.ownTab).toUpperCase()) ? String(h.ownTab).toUpperCase() : null;
+    let visible = [];
+    if (mine && (await ask(mine)) === 'visible') visible = [mine];
+    else { const rest = mates.filter((id) => id !== mine).slice(0, TBS.FRONT_READS_MAX); const ans = await Promise.all(rest.map(ask)); visible = rest.filter((id, i) => ans[i] === 'visible'); }
+    const v = TBS.frontVerdict({ windowId: viewWindow, windows, visible, owners: words, human });
+    sayFront(p, bk, v, whose);
+    return v;
+  }
+  function sayFront(p, bk, v, whose) {
+    if (!v || (v.state !== 'foreign' && v.state !== 'own')) return; // unread: nothing known, nothing said
+    const k = `${p.id}|${bk || 'person'}`;
+    const was = frontSaid.get(k) || '';
+    const at = `${v.windowId}|${v.targetId}|${v.state}`;
+    if (was === at) return;
+    frontSaid.delete(k); frontSaid.set(k, at);
+    if (frontSaid.size > FRONT_SAID_KEEP) frontSaid.delete(frontSaid.keys().next().value);
+    const view = bk ? `the conversation ${bk}'s` : 'the person\'s browsing';
+    if (v.state === 'own') { if (was.endsWith('|foreign')) log.log?.(`[browser] "${p.label}": ${view} window ${v.windowId} has its own tab ${String(v.targetId).slice(0, 8)} in front again`); return; } // a front never said foreign ends nothing
+    const w = whose && whose[v.targetId];
+    const who = v.owner === 'other' ? `another conversation's tab${w && w.sessionId ? ` (session ${w.sessionId})` : w && w.job ? ` (job ${w.job})` : ''}` : v.owner === 'you' ? 'the person\'s own tab' : 'a tab nobody holds';
+    log.log?.(`[browser] "${p.label}": in front of ${view} window ${v.windowId}: ${who} ${String(v.targetId).slice(0, 8)} — said on its view; nothing moved, closed or activated`);
   }
   /** accept-fixes-strip F8: WHO holds another holder's tab — `{sessionId}` (the view names the conversation as its sidebar
    *  does) or `{job, name}` (a Background Work job's handle: its job's name, read live). null = not known. */
@@ -8629,7 +8671,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     ensureLoaded();
     if (!target || !target.ok || !TBS.TARGET_ID_RE.test(String(targetId || ''))) return { ok: false, error: 'no tab' };
     const VP = require('./browser-viewport.js');
-    return withCdpUrl(target, (url) => VP.visibilityOf(url, String(targetId).toUpperCase()));
+    return withCdpUrl(target, (url) => (typeof visibilityOfFn === 'function' ? visibilityOfFn : VP.visibilityOf)(url, String(targetId).toUpperCase())); // B-e674: the gate's seam
   }
   /** lane browser-windows (U3/U0b): ONE fresh picture of a named tab (a background tab's polled frame). */
   async function captureTabFor(target, targetId) {
