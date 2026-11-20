@@ -569,7 +569,7 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   }
   const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
   const site = br.slice(br.indexOf('const PI = require(\'../proc-identity.js\');'), br.indexOf('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'));
-  ok(!/\/cmdline/.test(br) && !/\/proc|timeOrigin/.test(site) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? PI.birthReading(p, { start: wrapperObs.pidStart, boot: wrapperObs.pidBoot }) : null);')
+  ok(!/\/cmdline/.test(br) && site.length > 0 && !/\/proc\/|timeOrigin/.test(site) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? PI.birthReading(p, { start: wrapperObs.pidStart, boot: wrapperObs.pidBoot }) : null);')
     && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'MUST 1 the boot reads only the process\'s stat through proc-identity (birthReading; no /proc named, no time origin at the site) and hands the proof to factsAtAdoption (source pin)');
   const cw = fs.readFileSync(path.join(REPO, 'data/bin/chat-wrapper.js'), 'utf8');
   ok(cw.includes("meta.pidStart = PI.startToken(process.pid); meta.pidBoot = PI.bootToken();") && cw.indexOf('meta.pidStart = PI.startToken(process.pid)') < cw.indexOf('function noteFacts('), 'B-03af the claude wrapper records its OWN birth beside its pid at its start (source pin)');
