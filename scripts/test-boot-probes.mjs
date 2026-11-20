@@ -21,7 +21,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -222,6 +222,29 @@ try {
     ok(sites(brSrc) === 0, `src/server/boot-restore.js: ${sites(brSrc)} execFileSync / spawnSync / execSync site(s) — none allowed`);
     for (const plant of ["require('child_process').execFileSync('fuser', [socketPath], { timeout: 2000 });", "require('child_process').spawnSync('pgrep', ['-f', socketPath]);", "require('child_process').execSync('true');"])
       ok(sites(brSrc.replace('function restoreSessions() {\n', `function restoreSessions() {\n  try { ${plant} } catch { }\n`)) === 1, `CONTROL: a planted ${plant.split('(')[1].split('.')[1] || plant.slice(0, 30)} in restoreSessions is RED`);
+  }
+
+  console.log('⑤ B-cd4b: the survivors\' attaches in bounded batches (every survivor in the live set at once)');
+  {
+    // 20 survivors no probe answered (adopted ALIVE, as ③): restoreSessions returns with all 20 in the live set and the FIRST
+    // batch attached; the rest attach a batch a turn after a yield, each queued one holding its typed input (the B-c20d road);
+    // one that ended while it waited is never attached; the restore's timing said once. RED: the bound taken away (one batch
+    // of all) ⇒ every attach in the listen turn
+    const BATCH = 'const ATTACH_BATCH = 8;';
+    const run = async (BRm, tag) => {
+      const X = instance(BRm, dataDir(tag)); const socks = Array.from({ length: 20 }, (_, i) => X.add(300 + i));
+      const t = await logged(async () => X.api.restoreSessions());
+      const atReturn = { live: X.activeSessions.size, attached: X.attached.length, held: [...X.activeSessions.values()].filter((v) => v._bridgeHeldInputs && v._bridgeHeldInputs.pty === null && v._bridgeHeldInputs.replaying).length };
+      const gone = socks.find((x) => !X.attached.includes(x.id)); if (gone) X.activeSessions.delete(gone.id);   // a queued survivor ends before its turn
+      const lines = [];
+      const log0 = console.log; console.log = (...a) => lines.push(a.join(' '));
+      try { for (let i = 0; i < 8; i++) await new Promise((r) => setImmediate(r)); } finally { console.log = log0; }
+      return { atReturn, after: X.attached.length, goneAttached: gone ? X.attached.includes(gone.id) : null, said: lines.concat(t.lines).find((l) => /^\[boot-restore\] 20 survivor\(s\): registered in \d+ ms; attached in \d+ batch\(es\) of ≤ 8/.test(l)) || null };
+    };
+    const g = await run(BR, 'batches'), r = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, BATCH, 'const ATTACH_BATCH = Infinity;', 'b-cd4b-one-pass'), 'cd4b-one-pass')), 'batches-red');
+    ok(g.atReturn.live === 20 && g.atReturn.attached === 8 && g.atReturn.held === 12 && g.after === 19 && g.goneAttached === false && !!g.said
+      && r.atReturn.attached === 20,
+      `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the first batch), ${g.atReturn.held} holding their input; then ${g.after} attached a batch a turn, the one that ended meanwhile never; said: «${g.said}»; RED the bound taken away ⇒ ${r.atReturn.attached} attaches in the listen turn`, { g, r });
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }
 

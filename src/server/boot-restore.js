@@ -637,6 +637,35 @@ async function reprobePass() {
   return tally;
 }
 
+// B-cd4b: THE SURVIVORS' ATTACHES IN BOUNDED BATCHES. Each attach starts a pty (a fork of the hub's whole memory) and wires its
+// stream consumer: a hub restart with 80 survivors held its listen turn 527 ms in ONE synchronous pass (the B-cd4b measure, the
+// first test machine). Every survivor is in the live set when restoreSessions returns (the listen callback's later steps and an
+// attach read it); its ATTACH runs here — the first ATTACH_BATCH at once (a small restore is what it always was), then
+// ATTACH_BATCH a turn with a yield between (setImmediate: the sign-in page and every request answer between two batches). A
+// survivor whose attach still waits HOLDS its typed input (the bridge's held-input road, B-c20d: setupSessionPty replays it onto
+// its new pty) and answers an attach from its buffer as before; one that ended or was replaced meanwhile is never attached.
+// ATTACH_BATCH = 8: the measured attach is ~1.1 ms of JavaScript a survivor plus its fork (localAttach 88 ms over 80) — eight a
+// turn stays an order of magnitude under the 250 ms boot law; the restore's own timing is said once, at the end.
+const ATTACH_BATCH = 8;
+function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
+  const total = queue.length;
+  if (!total) return;
+  for (const [, , s] of queue.slice(ATTACH_BATCH)) if (!s._bridgeHeldInputs) s._bridgeHeldInputs = { pty: null, lines: [], replaying: true };
+  let batches = 0, longest = 0, attachMs = 0;
+  const one = () => {
+    const t0 = performance.now();
+    for (const [id, socketPath, session] of queue.splice(0, ATTACH_BATCH)) {
+      if (activeSessions.get(id) !== session) continue;   // ended or replaced while it waited
+      try { attachToDtach(id, socketPath, session); } catch (e) { console.warn(`[boot-restore] ${id}: the attach failed (${e && e.message})`); }
+    }
+    const ms = performance.now() - t0; batches++; attachMs += ms; if (ms > longest) longest = ms;
+    if (queue.length) { setImmediate(one); return; }
+    if (batches > 1) refreshWebuiPids();   // the pids of the survivors attached after the restore's own refresh
+    console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)`);
+  };
+  one();
+}
+
 function restoreSessions() {
   ensureDir(SOCKETS_DIR);
   ensureDir(BUFFERS_DIR);
@@ -735,6 +764,7 @@ function restoreSessions() {
     claudeAlive: m.host ? remoteSockAlive.has(sockFile) : liveConvos.has(m.claudeSessionId),
   })));
 
+  const attachQueue = [], tRestore = performance.now();   // B-cd4b: every survivor in the live set at once, its attach queued
   for (const sockFile of sockets) {
     const socketPath = path.join(SOCKETS_DIR, sockFile);
     try { fs.statSync(socketPath); } catch { continue; }
@@ -900,11 +930,12 @@ function restoreSessions() {
     session._taskRecords = (meta.taskRecords && typeof meta.taskRecords === 'object') ? meta.taskRecords : null; // 2.369.140: the live-only task records survive the restart
     session._artifacts = (meta.artifacts && typeof meta.artifacts === 'object') ? meta.artifacts : null; // lane artifacts-model: the deliverable rows (the user's saves live only here) survive the restart
     session._helperAskedAt = (meta.helperAskedAt && typeof meta.helperAskedAt === 'object') ? meta.helperAskedAt : null; // verify r3: each waiting helper ask's first-seen instant — the 60 s inbox clock survives the restart
-    attachToDtach(id, socketPath, session);
+    attachQueue.push([id, socketPath, session]);   // B-cd4b: its pty attach in the bounded batches below (it is in the live set now)
     if (open.size) pendingProbes.set(sockFile, { id, session, socketPath, q: open });
 
     console.log(`  ✓ Reconnected: ${session.name} (${session.cwd})`);
   }
+  drainSurvivorAttaches(attachQueue, { tRestore, tBuilt: performance.now() });
   sayDead();
   if (pendingProbes.size) {
     const named = [...pendingProbes].slice(0, 3).map(([sockFile]) => `${P.unanswered.get(sockFile) || 'not asked'} ${sockFile}`).join(', ');
