@@ -32,7 +32,7 @@ const ok = (c, n, e) => { if (typeof n !== 'string') throw new TypeError('ok(): 
 
 const CID = 'e2e00000-0000-4000-8000-0000000000a1', CALLER = 'e2e00000-0000-4000-8000-0000000000ee';
 const KEEPS = { sidecarFacts: { background: true, timers: true, lastRecordAt: true } };
-const idleFacts = () => { const st = CF.factsFresh(); CF.factsStep(st, { type: 'system', subtype: 'init', claude_code_version: '2.1.312' }, 1); return st; };
+const idleFacts = () => { const st = CF.factsFresh(); CF.factsStep(st, { type: 'system', subtype: 'init', claude_code_version: CF.LEVEL_MEASURED_TO }, 1); return st; };   // the span's own top — read, never typed (a floor that moves never strands it)
 /** the sources of an idle conversation; `over` replaces one of them */
 const srcs = (over = {}) => ({ capsOf: () => KEEPS, keyOf: (s) => (s.backendSessionId ? `claude:${s.backendSessionId}` : null), turnOf: (s) => s._turn || 'idle', turnKnown: (s) => s.mode === 'chat',
   heldOf: () => 0, asksOf: () => [], goalOf: () => 'none', continueOf: () => ({ armed: false }), jobsOf: () => ({ running: 0, schedules: 0, nextFireAt: null, items: [] }),

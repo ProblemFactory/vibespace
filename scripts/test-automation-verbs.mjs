@@ -53,6 +53,14 @@ const BASE = `http://127.0.0.1:${PORT}`;
 // an ended worker by its transcript there (test-phone-resume-keeps-layout-ui's own reason, the same folder rule)
 const root = mintRoot('av-wt'), wt = path.join(root, 't'), stubDir = path.join(root, 'stub'), fakeHome = path.join(root, 'home'), CWD = fs.mkdtempSync(path.join(os.tmpdir(), 'av-cwd-'));
 for (const d of [stubDir, fakeHome, CWD]) fs.mkdirSync(d, { recursive: true });
+// THE STAND-IN STATES A VERSION THE VERDICT CAN JUDGE (主开发 2026-11-20 03:16Z — 2.369.413's second hosted run: every end by the
+// grant answered subject_busy): a CLI below the measured span (src/conversation-facts.js LEVEL_MEASURED_FROM…LEVEL_MEASURED_TO) has
+// unknown background tasks and is not ended without force — the product is right. The stand-in states the span's own TOP, READ from
+// the module, never typed, so the next move of the floor cannot strand it (its --version answer and its init record alike).
+// ⑤d keeps ONE worker BELOW the floor (a marker in its own folder) to prove that refusal by name, and that force by its opener ends it.
+const CF = require(path.join(repo, 'src/conversation-facts.js'));
+const CLI_V = CF.LEVEL_MEASURED_TO;
+const BELOW_V = (() => { const p = CF.LEVEL_MEASURED_FROM.split('.').map(Number); for (let i = p.length - 1; i >= 0; i--) { if (p[i] > 0) { p[i]--; for (let j = i + 1; j < p.length; j++) p[j] = 999; break; } } return p.join('.'); })();   // just under the floor
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -68,16 +76,17 @@ const stubPath = path.join(stubDir, 'claude');
 fs.writeFileSync(stubPath, `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('2.1.274 (Claude Code) stub'); process.exit(0); }
+const V = (() => { try { return fs.readFileSync(require('path').join(process.cwd(), '.stub-cli-version'), 'utf8').trim(); } catch { return ${JSON.stringify(CLI_V)}; } })();   // a worker's folder may hold a below-floor marker (⑤d)
+if (args.includes('--version')) { console.log(V + ' (Claude Code) stub'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
 // a RESUMED run (the manager design's piece 4) is that conversation: it echoes --resume's id; every run logs its stdin lines by id
 const sid = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : require('crypto').randomUUID();
 fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', JSON.stringify({ sid, args, token: process.env.VIBESPACE_SESSION_TOKEN || null, webui: process.env.CLAUDE_WEBUI_SESSION_ID || null }));
-process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.274' }) + '\\n');
+process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: V }) + '\\n');
 // its transcript, where the CLI keeps one (~/.claude/projects/<the folder, encoded>/<id>.jsonl): an ENDED conversation is found by it
 if (!args.includes('--resume')) { const proj = require('path').join(require('os').homedir(), '.claude', 'projects', process.cwd().replace(/[/._]/g, '-')); fs.mkdirSync(proj, { recursive: true }); const at = new Date().toISOString(); fs.writeFileSync(proj + '/' + sid + '.jsonl', JSON.stringify({ type: 'user', message: { role: 'user', content: 'hello' }, uuid: 'u-' + sid, timestamp: at, cwd: process.cwd(), sessionId: sid }) + '\\n' + JSON.stringify({ type: 'assistant', message: { id: 'msg_' + sid, role: 'assistant', model: 'claude-fable-5', content: [{ type: 'text', text: 'hi' }], usage: { input_tokens: 1, output_tokens: 1 } }, uuid: 'a-' + sid, parentUuid: 'u-' + sid, timestamp: at, cwd: process.cwd(), sessionId: sid }) + '\\n'); }
 let inBuf = '';
-process.stdin.on('data', (d) => { inBuf += d; let i; while ((i = inBuf.indexOf('\\n')) >= 0) { const line = inBuf.slice(0, i); inBuf = inBuf.slice(i + 1); if (line.trim()) fs.appendFileSync(${JSON.stringify(stubDir)} + '/stdin-' + sid + '.ndjson', line + '\\n'); } });
+process.stdin.on('data', (d) => { inBuf += d; let i; while ((i = inBuf.indexOf('\\n')) >= 0) { const line = inBuf.slice(0, i); inBuf = inBuf.slice(i + 1); try { const m = JSON.parse(line); if (m && m.type === 'user') process.stdout.write(JSON.stringify({ type: 'result', subtype: 'success', is_error: false, session_id: sid, result: 'ok' }) + '\\n'); } catch { } if (line.trim()) fs.appendFileSync(${JSON.stringify(stubDir)} + '/stdin-' + sid + '.ndjson', line + '\\n'); } });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
@@ -185,6 +194,10 @@ try {
   ws.send(JSON.stringify({ type: 'chat-input', sessionId: RS.sessionId, text: 'a person typed this' }));
   const typed = await until(() => (userFrames(W.claudeSessionId).length === 1 ? true : null), 10000);
   check('③b CONTROL: a person\'s chat-input into the resumed worker ⇒ its CLI reads ONE user frame (the probe sees a turn)', !!typed, stdinOf(W.claudeSessionId).map((m) => m.type));
+  // the typed turn ENDS: the stub answered the user line with a result BEFORE it logged the line `typed` waited on (the read's MUST: a
+  // turn the hub reads running is a refusal by the verdict, rightly); the hub reads it off the wrapper's pipe in milliseconds — no
+  // HTTP door shows a non-reporting CLI's turn without an audited verb (④ counts those), so the settle below is stated, by order
+  await sleep(500);
   const rs2 = await cli(['conversations', 'resume', W.claudeSessionId], C.token);
   check('③b a resume of a RUNNING conversation ⇒ exit 1 not_ended', rs2.code === 1 && /\(not_ended\)/.test(rs2.err), rs2);
   const enR = await cli(['conversations', 'end', RS.sessionId], C.token);
@@ -327,6 +340,23 @@ try {
   check('with instance reach the SAME call archives the old road\'s worker: ended by the key, then claude:<id> in the archived list', yes.code === 0 && yes.json && yes.json.ended === true && yes.json.archived === true && !!goneE && Array.isArray(ust3.archivedSessions) && ust3.archivedSessions.includes(`claude:${E.sid}`), { yes, goneE: !!goneE });
   const rAudit = fs.readFileSync(path.join(wt, 'data', 'automation-audit.jsonl'), 'utf8').trim().split('\n').map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((l) => l && l.verb === 'key.reach');
   check('the widening is audited (key.reach · instance · the grant\'s subject)', rAudit.length === 1 && rAudit[0].args.reach === 'instance' && rAudit[0].subject === `session:${C.sid}`, rAudit);
+
+  console.log('⑤d THE REFUSAL KEEPS HOLDING — a worker whose CLI is BELOW the measured floor');
+  // its background tasks are UNKNOWN (src/conversation-facts.js trackedFacts): the key's end is refused BY NAME — subject_busy, its
+  // version said — and nothing stops; FORCE by its OPENER (this key opened it) ends it. Never force anywhere else: one scene's worker
+  // the key did not open answers force_not_yours (⑤c's old-road worker)
+  const OLD = path.join(CWD, 'old-cli'); fs.mkdirSync(OLD, { recursive: true }); fs.writeFileSync(path.join(OLD, '.stub-cli-version'), BELOW_V);
+  const opO = await cli(['conversations', 'open', '--cwd', OLD, '--name', 'old cli'], C.token);
+  const WO = opO.json || {};
+  const enO = await cli(['conversations', 'end', WO.sessionId], C.token);
+  const liveO = await until(async () => (await active()).some((s) => s.id === WO.sessionId));
+  check(`⑤d a worker whose CLI states ${BELOW_V} (below the measured ${CF.LEVEL_MEASURED_FROM}–${CF.LEVEL_MEASURED_TO}): the key's end is REFUSED by name — subject_busy, «${BELOW_V} is not measured for background tasks» — and it stays live`,
+    opO.code === 0 && !!WO.sessionId && enO.code === 1 && /subject_busy/.test(enO.err || '') && (enO.err || '').includes(`${BELOW_V} is not measured for background tasks`) && !!liveO, { open: opO.code, enO });
+  const stillLive = (await active()).some((s) => s.id === WO.sessionId);   // read again just before the force: the refusal stopped nothing
+  check('⑤d …the refused end stopped NOTHING: the worker is still in the live list', stillLive);
+  const enF = await cli(['conversations', 'end', WO.sessionId, '--force'], C.token);
+  const goneO = await until(async () => !(await active()).some((s) => s.id === WO.sessionId));
+  check('⑤d …and FORCE by its opener (this key opened it) ends it: exit 0, gone from the live list', enF.code === 0 && !!goneO, enF);
 
   console.log('⑥ LOCKED ⇒ 423 on every verb');
   await req('POST', '/api/vault/lock');

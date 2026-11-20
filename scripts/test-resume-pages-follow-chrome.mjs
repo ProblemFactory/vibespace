@@ -69,14 +69,19 @@ else await (async () => {
   const wt = path.join(ROOT, 'wt'); const BIN = path.join(ROOT, 'bin'), STUB = path.join(ROOT, 'stub'); for (const d of [BIN, STUB]) fs.mkdirSync(d, { recursive: true });
   // a stub claude behind the real chat wrapper: it announces ITS conversation id (a resumed run echoes --resume's id), records its
   // token, and logs every stdin line by id (the resume sends it nothing — test-conversation-resume proves that in process)
+  // THE STAND-IN STATES A VERSION THE VERDICT CAN JUDGE (主开发 2026-11-20 03:16Z — 2.369.413's second hosted run: every end by the
+  // grant answered subject_busy): a CLI below the measured span (src/conversation-facts.js LEVEL_MEASURED_FROM…LEVEL_MEASURED_TO) has
+  // unknown background tasks and is not ended without force — the product is right. The stand-in states the span's own TOP, READ from
+  // the module, never typed, so the next move of the floor cannot strand it (its --version answer and its init record alike).
+  const CLI_V = require(path.join(repo, 'src/conversation-facts.js')).LEVEL_MEASURED_TO;
   fs.writeFileSync(path.join(BIN, 'claude'), `#!${process.execPath}
 const fs = require('fs');
 const args = process.argv.slice(2);
-if (args.includes('--version')) { console.log('2.1.274 (Claude Code) stub'); process.exit(0); }
+if (args.includes('--version')) { console.log(${J(CLI_V)} + ' (Claude Code) stub'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
 const sid = args.includes('--resume') ? args[args.indexOf('--resume') + 1] : require('crypto').randomUUID();
 fs.writeFileSync(${J(STUB)} + '/env-' + process.pid + '.json', JSON.stringify({ sid, args, token: process.env.VIBESPACE_SESSION_TOKEN || null }));
-process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.274' }) + '\\n');
+process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: sid, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: ${J(CLI_V)} }) + '\\n');
 let b = ''; process.stdin.on('data', (d) => { b += d; let i; while ((i = b.indexOf('\\n')) >= 0) { const l = b.slice(0, i); b = b.slice(i + 1); if (l.trim()) fs.appendFileSync(${J(STUB)} + '/stdin-' + sid + '.ndjson', l + '\\n'); } });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
@@ -251,13 +256,26 @@ process.stdin.on('end', () => process.exit(0));
     await PB.shot('b-after');
 
     // ③ page A reloads and visits Desk 2: the conversation is live in place
+    // the reload is PROVEN (the read: Page.reload answers before the new page loads — boot() alone passed on the OLD document): a marker
+    // set before it is gone in the page that answers after it
+    // what A will READ at its reload is the hub's record as B / C's follow left it (the read: a check after the reload can be A's own save)
+    const layPre = (await req('GET', '/api/layouts')).json || {};
+    const e1pre = ((((layPre.desktops || {})['desk-2'] || {}).autoSave || {}).windows || []).find((w) => w && w.winId === 'e-1') || null;
+    ok(!!e1pre && !!r2.json && e1pre.serverSessionId === r2.json.sessionId, '③ BEFORE A reloads, the hub\'s record of Desk 2 already holds e-1 on the RESUMED session (written by B / C\'s follow)', { serverSessionId: e1pre && e1pre.serverSessionId, resumed: r2.json && r2.json.sessionId });
+    await PA.ev('(window.__preReload = 1, 1)');
     await PA.send('Page.reload', {});
-    ok(await PA.boot(false), '③ page A reloaded');
+    const fresh = await until(async () => { try { return await PA.ev('!window.__preReload'); } catch { return false; } }, 20000, 100);
+    ok(!!fresh && await PA.boot(false), '③ page A reloaded — a NEW document (the old one\'s marker gone), its app booted');
     await declineOffer(PA);
     await goto(PA, 'desk-2');
     const live3 = await until(async () => !!(await PA.ev(VIEW))?.live, 20000, 250);
     const a3 = await PA.ev(VIEW);
     ok(live3 && a3.desk === 'desk-2' && a3.gb === J(GB) && J(await PA.ev(OF_CONV)) === J(['e-1']), '③ …and visits Desk 2: e-1 is live in place (same id, its box), one window', a3);
+    // …and what it read was the LIVE record, not a stale one (the read: the leg above passes on either): the hub's own Desk 2 holds e-1 on
+    // the RESUMED session
+    const lay = (await req('GET', '/api/layouts')).json || {};
+    const e1rec = ((((lay.desktops || {})['desk-2'] || {}).autoSave || {}).windows || []).find((w) => w && w.winId === 'e-1') || null;
+    ok(!!e1rec && !!r2.json && e1rec.serverSessionId === r2.json.sessionId, '③ the HUB\'s record of Desk 2 holds e-1 on the RESUMED session (its serverSessionId = the resume\'s sessionId)', { serverSessionId: e1rec && e1rec.serverSessionId, resumed: r2.json && r2.json.sessionId });
     await PA.shot('a-after-reload');
     ok(!/REFUSED/.test(journal), 'the journal holds no refusal', journal.split('\n').filter((l) => /REFUSED/.test(l)).slice(0, 3));
   } catch (e) {
