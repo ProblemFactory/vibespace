@@ -499,6 +499,18 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE (scripts/ci.mjs `stealDead`): the lock is renamed aside, the steal goes on only when the moved file is the record judged dead (pid, start, sha), and any other record is linked back at once (a link never replaces); the head then waits on the holder it reads. Left, said in the code: the two calls between the rename and the link-back.
 - LEGS (test-ci-heavy-queue-window ⑪⑫, through the suite's own placed stalls): W1 is held between judging a dead holder and its steal, its ticket reaped (placed); X steals the dead lock and takes it; W1 acts — the cure links X's lock back (it survives, W1 waits on X, nothing left aside, served X, W1); RED CONTROL, today's unlink: X's live lock removed, W1 takes it — two holders at once.
 
+### gmail-connect-wall — B-9dd0 unit 2: every Chrome a suite launches starts with its background network roads off
+- **The constant:** scripts/scratch.mjs CHROME_QUIET, beside CHROME_STORE: --disable-background-networking, --disable-component-update, --disable-sync, --disable-default-apps, --no-pings, --disable-domain-reliability, --metrics-recording-only, --no-first-run, --no-default-browser-check. It names no --disable-features, because a suite's own list would lose one of the two: Chrome keeps the last switch.
+- **The census:** scripts/chrome-store-census.mjs reads a launch's `quiet` (the spread, or the background-networking switch as a literal) beside `carried`. test-architecture §47c is red on a `loud` launch, pins the constant's content, and plants a loud, a spread and a literal launch.
+- **The edit:** one insertion run over the census's own launch list (`...CHROME_QUIET, ` right after each argv's `[`, and the import from scratch.mjs, merged into an existing one where there is one). 252 launches in 241 files; a second run finds nothing.
+- **Unit 1's three smalls (主开发 r468):** the disk's root is never a temp root (src/server-root.js tmpRootUnder), and the boot says once in the journal why its runtime check is off; the egress red's words name the «.localhost» names as not watched; the sampler's copy of a suite's options keeps their prototype. Each has its leg (test-server-root, test-runtime-floor, test-ci-gate §2n).
+- **The round's cure (主开发 r528):**
+  - a launch through a wrapper (a shell, a limit wrapper) carries the switches AFTER Chrome's own element; the census judges that position. The tree has one such launch, test-card-list-indent-chrome's /bin/sh.
+  - the exempt suite is read for the quiet switches too, and carries them;
+  - rootVerdict's rule 3 is tmpRootUnder (the disk's root is never a temp root, so a TMPDIR=/ hub registers its hooks);
+  - only absolute temp spellings are resolved.
+- **Left, named:** a resolver / dead-proxy belt for the two named suites. test-https-hub-chrome drives the box's own LAN address and test-plugin-consent-chrome a scratch hub, so a MAP * ~NOTFOUND rule would cut their own targets. Both carry CHROME_QUIET. Also left: the hub's own attach launch (src/browser-attach.js, the product's argv).
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
