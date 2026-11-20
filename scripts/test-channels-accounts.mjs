@@ -74,7 +74,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort } from './scratch.mjs';
+import { scratch, freePort, anchored } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 import { mutantCopies, copiesCensus, sweepLegacy } from './mutant-copy.mjs';
 import { storeOf } from './grant-fixtures.mjs';   // lane grants-unify: the grants store of a data dir
@@ -86,7 +86,15 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 
-const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
+const HOOKS = new Map();   // flowId → { ok, id } once the flow's done hook ENDED
+const hookDone = (onDone) => (onDone ? async (r) => { try { return await onDone(r); } finally { HOOKS.set(r && r.flowId, { ok: !!(r && r.ok), id: r && r.id }); } } : onDone);
+/* r135 (the box pre-run, (l2) red): the hook goes on the loopback the ENGINE ITSELF HOLDS, IN PLACE after create — WHICH loopback an
+   engine owns never changes (it stops only the one it made: `if (!oauth) flows.stopAll()`). Its adapters reach that same object
+   (`oauth: flows`, returned as `e.oauth`) at call time, so wrapping its `begin` sees every flow's done hook. Every engine module the
+   suite loads (the real one, each patched copy) has its `create` hooked once. */
+const hookOwn = (e) => { const lb = e && e.oauth; if (lb && typeof lb.begin === 'function' && !lb.__hooked) { const b = lb.begin; lb.begin = (o) => b({ ...o, onDone: hookDone(o.onDone) }); lb.__hooked = true; } return e; };
+const ownHook = (M) => { if (M && typeof M.create === 'function' && !M.create.__own) { const c = M.create; M.create = Object.assign((o) => hookOwn(c(o)), { __own: true }); } return M; };
+const ENG = ownHook(require(path.join(REPO, 'src/server/channels-engine.js')));
 const STORE = require(path.join(REPO, 'src/server/integration-store.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 const SB = require(path.join(REPO, 'src/secret-box.js'));
@@ -118,6 +126,13 @@ const T0 = 1_700_000_000_000;
 let clock = T0;
 const now = () => clock;
 const quiet = { log() {}, warn() {}, error() {} };
+/* r107 (the cut tree's hosted run 44719731500: red on both tries, a different leg each — two timers raced, a fixed sleep stood in for
+   completion): A WAIT IS FOR WHAT HAPPENED. `until(pred, ms, what)` polls with its own bound and, at the bound, SAYS what never came
+   (the leg then judges and is red by name). THE DONE HOOK, SEEN: the loopback reports a flow's end through `onDone` (the adapter's —
+   the engine's onAuthDone: the record's write, the pass it kicks); `hookDone` marks when that hook ENDED and whether the landing was ok. */
+const until = async (pred, ms, what) => { const t0 = Date.now(); for (;;) { const v = await pred(); if (v) return v; if (Date.now() - t0 > ms) { console.log(`  … waited ${ms} ms for ${what} — it never came`); return null; } await new Promise((r) => setTimeout(r, 5)); } };
+const passMarks = (eng) => new Map(eng.digest().adapters.map((a) => [a.id, JSON.stringify(a.lastPass || null)]));
+const passMoved = (eng, before, id) => eng.digest().adapters.some((a) => (!id || a.id === id || !before.has(a.id)) && JSON.stringify(a.lastPass || null) !== (before.has(a.id) ? before.get(a.id) : 'null'));
 const logLines = [];
 const capLog = { log: (...a) => logLines.push(a.join(' ')), warn: (...a) => logLines.push(a.join(' ')), error: (...a) => logLines.push(a.join(' ')) };
 const jsonRes = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, json: async () => body, text: async () => JSON.stringify(body) });
@@ -136,6 +151,7 @@ function mkVendor() {
     'c-e': { email: 'member.e@example.com', refresh: '1//re', thread: 'thr_e' },
   };
   const byAccess = new Map();
+  const holds = {};   // r107: thread id → a promise its mailbox's thread LIST waits for (a control holds a pass at a step)
   let n = 0;
   const fetchFn = async (url, init = {}) => {
     const u = new URL(String(url));
@@ -163,12 +179,12 @@ function mkVendor() {
     if (!acct) return jsonRes({ error: { code: 401, message: 'Invalid Credentials' } }, 401);
     const p = u.pathname.replace('/gmail/v1/users/me', '');
     if (p === '/profile') return jsonRes({ emailAddress: acct.email, historyId: '100' });
-    if (p === '/threads') return jsonRes({ threads: [{ id: acct.thread, snippet: `hello from ${acct.email}` }] });
+    if (p === '/threads') { if (holds[acct.thread]) await holds[acct.thread]; return jsonRes({ threads: [{ id: acct.thread, snippet: `hello from ${acct.email}` }] }); }
     if (/^\/threads\/[^/]+$/.test(p)) return jsonRes({ id: acct.thread, messages: [{ id: 'm1', internalDate: String(T0), payload: { headers: [{ name: 'Subject', value: `Subject of ${acct.thread}` }, { name: 'From', value: 'Someone <someone@example.com>' }, { name: 'Date', value: 'x' }] } }] });
     if (p === '/history') return jsonRes({ historyId: '100' });
     return jsonRes({ error: { code: 404, message: `unrouted ${p}` } }, 404);
   };
-  return { fetchFn, calls, tokenCalls: () => calls.filter((c) => c.host === 'oauth2.googleapis.com' && c.form && c.form.grant_type === 'refresh_token') };
+  return { fetchFn, calls, holds, tokenCalls: () => calls.filter((c) => c.host === 'oauth2.googleapis.com' && c.form && c.form.grant_type === 'refresh_token') };
 }
 const PRESETS = [
   { key: 'org1', label: 'Org 1', clientId: 'org1.apps.googleusercontent.com', clientSecret: 'org1-secret-000000' },
@@ -177,10 +193,14 @@ const PRESETS = [
 const holder = { list: PRESETS.slice() };
 const get = (url) => new Promise((resolve) => { http.get(url, (res) => { let b = ''; res.on('data', (c) => { b += c; }); res.on('end', () => resolve({ status: res.statusCode, body: b })); }).on('error', (e) => resolve({ status: 0, body: String(e.message) })); });
 /** The browser landing on the loopback after the consent page. */
-async function land(flow, code) {
+async function land(flow, code, { eng = null } = {}) {
   const cu = new URL(flow.consentUrl);
+  const before = eng ? passMarks(eng) : null;
   const r = await get(`${flow.redirectUri}/?state=${cu.searchParams.get('state')}&code=${code}`);
-  await sleep(80);   // the exchange + the done hook + the pass it kicked
+  // r107: WHAT HAPPENED, never a fixed sleep — the loopback answers the browser BEFORE its exchange; the flow's done hook ENDED (the
+  // exchange, the record's write, the pass kicked), and — given the engine — the pass that landing kicked ENDED (its lastPass moved)
+  const h = await until(() => HOOKS.get(flow.flowId), 5000, `the done hook of the ${flow.flowId} landing`);
+  if (eng && h && h.ok) await until(() => passMoved(eng, before, h.id), 5000, `the pass the ${flow.flowId} landing kicked (${h.id})`);
   return r;
 }
 /** Connect one account end to end through the REAL engine (the pre-r4
@@ -188,7 +208,7 @@ async function land(flow, code) {
 async function consent(eng, kind, opts, code) {
   const r = await eng.connect(kind, opts);
   const cu = new URL(r.flow.consentUrl);
-  const landed = await land(r.flow, code);
+  const landed = await land(r.flow, code, { eng });   // (a consent judges what its pass discovered: waited for)
   return { r, id: r.adapter.id, clientId: cu.searchParams.get('client_id'), landed };
 }
 const rowOf = (eng, id) => eng.digest().adapters.find((a) => a.id === id) || null;
@@ -201,7 +221,7 @@ const rawDisk = (dir) => fs.readFileSync(path.join(dir, 'channels', 'adapters.js
 function patchedEngine(needles) {
   const src = engineSource(REPO);   // lane dc-channels-seams: the engine + its three family files as one text (one closed world)
   for (const [n] of needles) if (src.split(n).length !== 2) throw new Error(`control needle not found exactly once: ${n.slice(0, 90)}`);
-  return require(MUTA.write(ENGINE_PATH, needles.reduce((acc, [a, b]) => acc.replace(a, b), src), 'prefix'));
+  return ownHook(require(MUTA.write(ENGINE_PATH, needles.reduce((acc, [a, b]) => acc.replace(a, b), src), 'prefix')));
 }
 /** The PRE-r4 engine, byte for byte from git (null when the history is not
  *  present — a shallow mirror clone — and the leg SAYS it skipped). */
@@ -209,7 +229,7 @@ function preR4Engine() {
   let src;
   try { src = execFileSync('git', ['show', `${PRE_R4}:src/server/channels-engine.js`], { cwd: REPO, env: gitEnvFrom(process.env), encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] }); }
   catch { return null; }
-  return require(MUTA.write(ENGINE_PATH, src, 'pre-r4'));
+  return ownHook(require(MUTA.write(ENGINE_PATH, src, 'pre-r4')));
 }
 
 const storeDir = path.join(ROOT, 'store'); fs.mkdirSync(storeDir, { recursive: true });
@@ -262,7 +282,24 @@ let idA = null, idB = null;
     'B\'s row: connected under cluster:channels; the row carries the presets for its Edit dialog and no custom client');
   const disk = diskOf(engDir);
   ok(disk.length === 2 && disk.find((r) => r.id === idA).credentialKey === 'cluster:org1' && disk.find((r) => r.id === idB).credentialKey === 'cluster:channels', 'adapters.json holds both records with their keys');
-  ok(eng.digest().conversations.some((c) => c.key === `${idA}/thr_a`) && eng.digest().conversations.some((c) => c.key === `${idB}/thr_b`), 'each account discovered ITS mailbox\'s thread under its own adapter id');
+  const want = [`${idA}/thr_a`, `${idB}/thr_b`], missingNow = () => want.filter((k) => !eng.digest().conversations.some((c) => c.key === k));
+  await until(() => missingNow().length === 0, 5000, `both accounts' discovered threads (${want.join(', ')})`);
+  ok(missingNow().length === 0, 'each account discovered ITS mailbox\'s thread under its own adapter id', JSON.stringify({ missing: missingNow() }));
+  // r107, the discovery law's CONTROL (made, not timed): a read taken at the landing's done hook ALONE — the pass it kicked still running,
+  // that mailbox's thread list HELD at the vendor — misses the thread (a fixed short wait reads exactly this); the read after the pass ENDED
+  // (land's own wait) has it
+  {
+    const v2 = mkVendor(), d2 = path.join(ROOT, 'r107-discovery'); fs.mkdirSync(d2, { recursive: true });
+    const e2 = ENG.create({ dataDir: d2, env: {}, now, broadcast: () => {}, integrations, fetch: v2.fetchFn, log: quiet, ...FAST_PACE });
+    let openThreads; v2.holds.thr_c = new Promise((x) => { openThreads = x; });
+    const r = await e2.connect('gmail', { credentialKey: 'cluster:org1' }), idC2 = r.adapter.id;
+    const landing = land(r.flow, 'c-c', { eng: e2 });
+    await until(() => HOOKS.get(r.flow.flowId), 5000, 'the control\'s done hook');
+    const has = () => e2.digest().conversations.some((c) => c.key === `${idC2}/thr_c`), atHook = has();
+    openThreads(); await landing; const afterPass = has();
+    ok(!atHook && afterPass, `CONTROL (the discovery law): read at the landing's done hook alone — the pass still running — the thread is ${atHook ? 'THERE (the control proves nothing)' : 'missing'}; read after the pass ENDED: ${afterPass ? 'there' : 'MISSING'}`, JSON.stringify({ atHook, afterPass }));
+    e2.stop();
+  }
   clock += 3600e3;
   v.calls.length = 0;
   const pa = await eng.pass(idA, { force: true });
@@ -842,7 +879,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
     const src = engineSource(REPO);
     const noCheck = src.replace("            if (mm) { verdict = { written: false, mismatch: mm }; return; }\n", '');   // verify r7: the check sits INSIDE the serialized callback
     ok(noCheck !== src, 'CONTROL fixture: the token door\'s identity check removed from a copy');
-    const ENG2 = require(MUTA.write(ENGINE_PATH, noCheck, 'no-identity'));
+    const ENG2 = ownHook(require(MUTA.write(ENGINE_PATH, noCheck, 'no-identity')));
     const v = google12(); const dir = path.join(ROOT, 'r5-ctl'); fs.mkdirSync(dir, { recursive: true });
     const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
     const e = ENG2.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, ...FAST_PACE });
@@ -878,7 +915,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
     const file = path.join(dir, 'channels', 'adapters.json'); const j = JSON.parse(fs.readFileSync(file, 'utf-8')); delete j.adapters.find((x) => x.id === 'gmail').identity; fs.writeFileSync(file, JSON.stringify(j));
     const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
     const e = ENG.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, ...FAST_PACE });
-    await sleep(30);
+    await until(() => row(e) && row(e).identity && (diskOf(dir).find((x) => x.id === 'gmail') || {}).identity, 3000, '(g) the boot stamp on the legacy record (live + disk)');
     const rec0 = row(e); const disk0 = diskOf(dir).find((x) => x.id === 'gmail');
     ok(rec0.identity && rec0.identity.email === 'member.a@example.com' && disk0.identity && disk0.identity.email === 'member.a@example.com', `(g) a legacy record is stamped at boot from the token it holds (live + disk: ${JSON.stringify(disk0.identity)})`);
     const rep = e.stampIdentities(); await rep.write;
@@ -895,15 +932,16 @@ console.log('⑫ verify r5: refresh races + the identity door');
     const LENV = { VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'tA', label: 'Tenant app A', values: { appId: 'cli_appa', appSecret: 'fs-a' } }]) };
     const larkV = () => { const st = { n: 0, access: new Map() }; const who = (code) => (/-x\b/.test(code) ? 'x' : 'a'); const fetchFn = async (url, init = {}) => { const u = new URL(String(url)); let body = null; try { body = init.body ? JSON.parse(String(init.body)) : null; } catch {} const at = String((init.headers || {}).Authorization || '').replace(/^Bearer /, ''); if (u.pathname === '/open-apis/authen/v2/oauth/token') { const w = body.grant_type === 'authorization_code' ? who(body.code) : (st.access.get(body.refresh_token) || 'a'); const atk = `u-${w}-${++st.n}`; const rt = `ur-${w}-${st.n}`; st.access.set(atk, w); st.access.set(rt, w); return jsonRes({ code: 0, access_token: atk, expires_in: 7200, refresh_token: rt, refresh_token_expires_in: 2592000, scope: 'im:message' }); } const w = st.access.get(at); if (!w) return jsonRes({ code: 99991668, msg: 'Invalid access token' }, 401); if (u.pathname === '/open-apis/authen/v1/user_info') return jsonRes({ code: 0, data: { open_id: `ou_appa_${w}`, union_id: `on_${w}`, user_id: `uid_${w}`, name: w === 'a' ? 'Member A' : 'Stranger X' } }); if (u.pathname === '/open-apis/im/v1/chats') return jsonRes({ code: 0, data: { items: [], has_more: false } }); return jsonRes({ code: 404, msg: 'unrouted' }, 404); }; return { st, fetchFn }; };
     const bootL = async (dir, v) => { fs.mkdirSync(dir, { recursive: true }); const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: LENV, now, broadcast: () => {}, log: quiet }); const port = await freePort(); const oauth = OAUTH.createOAuthLoopback({ now, log: quiet, fixedCallbackUrl: `http://127.0.0.1:${port}/lark/cb` }); const e = ENG.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, oauth, ...FAST_PACE }); return { e, stop: () => { oauth.stopAll(); e.stop(); } }; };
-    const landL = async (flow, code) => { const cu = new URL(flow.consentUrl); const u = new URL(flow.redirectUri); u.searchParams.set('state', cu.searchParams.get('state')); u.searchParams.set('code', code); const r = await get(u.toString()); await sleep(80); return r; };
+    const landL = async (flow, code) => { const cu = new URL(flow.consentUrl); const u = new URL(flow.redirectUri); u.searchParams.set('state', cu.searchParams.get('state')); u.searchParams.set('code', code); const r = await get(u.toString()); await until(() => HOOKS.get(flow.flowId), 5000, `the done hook of the Lark ${flow.flowId} landing`); return r; };
     const dir = path.join(ROOT, 'r6-lark-legacy'); const v = larkV();
     const b0 = await bootL(dir, v); const r = await b0.e.connect('lark', { credentialKey: 'cluster:tA' }); await landL(r.flow, 'c-a'); b0.stop();
     const box = SB.secretBox(path.join(dir, '.channels-key'));
     const file = path.join(dir, 'channels', 'adapters.json'); const j = JSON.parse(fs.readFileSync(file, 'utf-8')); const lr = j.adapters.find((x) => x.id === 'lark');
     ok(lr && lr.auth.tokenEnc && lr.identity && lr.identity.openId === 'ou_appa_a', `fixture: a Lark account connected through the engine (${JSON.stringify(lr && lr.identity)}; ${lr && lr.lastAuthError})`);
     delete lr.identity; const t = JSON.parse(box.dec(lr.auth.tokenEnc)); delete t.unionId; delete t.userId; lr.auth.user = t.name; lr.auth.tokenEnc = box.enc(JSON.stringify(t)); fs.writeFileSync(file, JSON.stringify(j));
-    const b1 = await bootL(dir, v); await sleep(30);
+    const b1 = await bootL(dir, v);
     const lrow = () => b1.e.adapterRecords().adapters.find((x) => x.id === 'lark');
+    await until(() => lrow() && lrow().identity && lrow().identity.openId, 3000, '(h) the boot stamp on the legacy Lark record');
     const rec0 = lrow(); const tok0 = rec0.auth.tokenEnc;
     ok(rec0.identity && rec0.identity.openId === 'ou_appa_a' && !rec0.identity.unionId, `(h) the legacy Lark record (auth.user "${rec0.auth.user}") is stamped at boot from its token's open_id`);
     const r1 = await b1.e.reauthorize('lark', {}); await landL(r1.flow, 'c-x');
@@ -917,13 +955,15 @@ console.log('⑫ verify r5: refresh races + the identity door');
   // (i) THE DOOR'S COMPARE-AND-SWAP IS LOAD-BEARING: an adapter copy with a 150 ms await between its re-read and its persist (the shape one edit reopens — r5 relied on there being none) still cannot revert a re-authorize on the real engine; an engine copy without the CAS does
   {
     const gsrc = fs.readFileSync(path.join(REPO, 'src/channels/gmail.js'), 'utf-8');
-    const gap = gsrc.replace("    const w = await persistToken(next, String(token.refresh_token || ''));", "    await new Promise((r) => setTimeout(r, 150));   // CONTROL: an await between the refresh's re-read and its persist\n    const w = await persistToken(next, String(token.refresh_token || ''));");
-    ok(gap !== gsrc, 'CONTROL fixture: a gmail copy with a 150 ms await between the refresh\'s re-read and its persist');
+    // r107: THE WINDOW IS MADE, never raced — the copy WAITS at a gap placed after the refresh's re-read (the leg opens it once the
+    // re-authorize's write has been SEEN to land) and says when its late persist returned; the order is asserted before either leg judges
+    const gap = anchored(anchored(gsrc, "    const w = await persistToken(next, String(token.refresh_token || ''));", "    await (globalThis.__casGap ? globalThis.__casGap() : null);   // CONTROL: a MADE gap between the refresh's re-read and its persist\n    const w = await persistToken(next, String(token.refresh_token || ''));", 'the made gap after the refresh\'s re-read'), "    if (w && w.superseded) return null;\n    return next.access_token;", "    if (globalThis.__casGapAfter) globalThis.__casGapAfter(w);\n    if (w && w.superseded) return null;\n    return next.access_token;", 'the mark when the late persist returned');
+    ok(gap !== gsrc && gap.includes('globalThis.__casGap()') && gap.includes('globalThis.__casGapAfter(w)'), 'CONTROL fixture: a gmail copy with a MADE gap (held by the leg) between the refresh\'s re-read and its persist, and a mark when the persist returned');
     const gmailGap = MUTA.load('src/channels/gmail.js', gap, 'await-gap');
     const esrc = engineSource(REPO);
     const noCas = esrc.replace("            if (supersedes !== undefined) {\n              const cur = read().token; const curRt = cur ? String(cur.refresh_token || '') : '';\n              if (!cur || curRt !== supersedes) { verdict = { written: false, superseded: true, held: cur ? curRt : null }; return; }\n            }\n", '');
     ok(noCas !== esrc, 'CONTROL fixture: the door\'s compare-and-swap removed from an engine copy');
-    const ENG3 = require(MUTA.write(ENGINE_PATH, noCas, 'no-cas'));
+    const ENG3 = ownHook(require(MUTA.write(ENGINE_PATH, noCas, 'no-cas')));
     const run = async (engineModule, tag) => {
       const v = google12(); const dir = path.join(ROOT, 'r6-cas-' + tag); fs.mkdirSync(dir, { recursive: true });
       const ints = STORE.create({ dataDir: path.join(dir, 'int'), env: {}, now, broadcast: () => {}, drivePresets: () => P12, log: quiet });
@@ -931,20 +971,25 @@ console.log('⑫ verify r5: refresh races + the identity door');
       const e = engineModule.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations: ints, fetch: v.fetchFn, log: quiet, registry: reg, ...FAST_PACE });
       const r = await e.connect('gmail', { credentialKey: 'cluster:org1' }); await land(r.flow, 'c1');
       await e.pass('gmail', { force: true }); clock += 3600e3;
-      let release; v.st.holdRefresh = new Promise((x) => { release = x; });
+      const order = [], rtNow = () => { const rc = row(e); return rc && rc.auth && rc.auth.tokenEnc ? JSON.parse(SB.secretBox(path.join(dir, '.channels-key')).dec(rc.auth.tokenEnc)).refresh_token : null; };
+      let openGap; const gapHeld = new Promise((x) => { openGap = x; });
+      globalThis.__casGap = async () => { order.push('re-read'); await gapHeld; };
+      globalThis.__casGapAfter = (w) => { order.push(w && w.superseded ? 'late persist (superseded)' : 'late persist'); };
       const p = e.pass('gmail', { force: true }).catch(() => {});
-      for (let w = 0; w < 40 && v.st.refreshes === 0; w++) await sleep(5);
-      release(); await sleep(10);   // the refresh re-reads (the old token) and enters its gap…
-      const rr = await e.reauthorize('gmail', {}); await land(rr.flow, 'c1');   // …the re-authorize lands inside it
-      await p; await sleep(60);
-      const box = SB.secretBox(path.join(dir, '.channels-key')); const rec = row(e); const held = JSON.parse(box.dec(rec.auth.tokenEnc)); const disk = diskOf(dir).find((x) => x.id === 'gmail');
+      await until(() => order.includes('re-read'), 5000, `(i) ${tag}: the refresh held at its gap, past its re-read`);
+      const rr = await e.reauthorize('gmail', {}); await land(rr.flow, 'c1');   // the re-authorize lands while the refresh is HELD in its gap
       const consentRt = [...v.st.issued.keys()].pop();
+      if (await until(() => rtNow() === consentRt, 5000, `(i) ${tag}: the re-authorize's write landing`)) order.push('consent write');
+      openGap(); await p;
+      await until(() => order.some((x) => x.startsWith('late persist')), 5000, `(i) ${tag}: the late persist returning`);
+      delete globalThis.__casGap; delete globalThis.__casGapAfter;
+      const box = SB.secretBox(path.join(dir, '.channels-key')); const rec = row(e); const held = JSON.parse(box.dec(rec.auth.tokenEnc)); const disk = diskOf(dir).find((x) => x.id === 'gmail');
       e.stop();
-      return { held: held.refresh_token, consentRt, reverted: held.refresh_token !== consentRt, diskSame: disk.auth.tokenEnc === rec.auth.tokenEnc, refreshes: v.st.refreshes };
+      return { order: order.join(' → '), made: order[0] === 're-read' && order[1] === 'consent write' && /^late persist/.test(order[2] || ''), held: held.refresh_token, consentRt, reverted: held.refresh_token !== consentRt, diskSame: disk.auth.tokenEnc === rec.auth.tokenEnc, refreshes: v.st.refreshes };
     };
     const real = await run(ENG, 'real'); const ctl = await run(ENG3, 'nocas');
-    ok(real.refreshes === 1 && !real.reverted && real.diskSame, `(i) the real door: a re-authorize landing inside the adapter's gap is KEPT (held ${real.held} = the consent's; the late persist superseded at apply time)`, JSON.stringify(real));
-    ok(ctl.reverted, `CONTROL: without the compare-and-swap the late persist REVERTS the re-authorize (held ${ctl.held}, the consent's ${ctl.consentRt})`, JSON.stringify(ctl));
+    ok(real.made && real.refreshes === 1 && !real.reverted && real.diskSame && /superseded/.test(real.order), `(i) the real door, in a MADE window (${real.order}): a re-authorize landing inside the adapter's gap is KEPT (held ${real.held} = the consent's; the late persist superseded at apply time)`, JSON.stringify(real));
+    ok(ctl.made && ctl.reverted, `CONTROL, in the same made window (${ctl.order}): without the compare-and-swap the late persist REVERTS the re-authorize (held ${ctl.held}, the consent's ${ctl.consentRt})`, JSON.stringify(ctl));
   }
   // ── verify r7 ──
   // (j) A HUMAN ACT DURING THE CONSENT'S COMPLETION WINS: a disconnect / a cancel / a newer sign-in / a client-switch
@@ -1016,7 +1061,7 @@ console.log('⑫ verify r5: refresh races + the identity door');
     const hoisted = src.replace("            const held = heldIdentity(rec, read().token);\n            const mm = identityMismatch(held, offered);\n            if (mm) { verdict = { written: false, mismatch: mm }; return; }\n", '')
       .replace("        let verdict = { written: true };\n        try {\n          await store.adapters.update(() => {\n            if (consent) {", "        let verdict = { written: true };\n        { const held0 = heldIdentity(rec, read().token); const mm0 = identityMismatch(held0, offered); if (mm0) throw new ChannelError('forbidden', mismatchSentence(rec.label || rec.id, mm0), { retryable: false, detail: { identityMismatch: mm0 } }); }\n        try {\n          await store.adapters.update(() => {\n            if (consent) {");
     ok(hoisted !== src && hoisted.split('heldIdentity(rec, read().token)').length === src.split('heldIdentity(rec, read().token)').length, 'CONTROL fixture: the identity judgement hoisted out of the serialized callback in an engine copy');
-    const ENG6 = require(MUTA.write(ENGINE_PATH, hoisted, 'hoisted-judgement'));
+    const ENG6 = ownHook(require(MUTA.write(ENGINE_PATH, hoisted, 'hoisted-judgement')));
     const ctl = await run(ENG6, 'hoisted');
     ok(ctl.twoConsents.c1.written === true && ctl.twoConsents.c2.written === true && ctl.twoConsents.identity === 'stranger@x.com', `CONTROL: judged before the await, BOTH consents land and the record ends bound to the stranger (${ctl.twoConsents.identity})`, JSON.stringify(ctl.twoConsents));
   }
@@ -1113,12 +1158,13 @@ console.log('⑫ verify r5: refresh races + the identity door');
       ok(st0 && st0.cancelled === 'shutdown' && o.disk === t0 && o.live === t0 && st.ok === false && /ended by a shutdown/.test(st.error || '') && stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':') && o.calls === 0 && port.status === 0, `(l2) stop() mid-exchange: the door refused by name ("${st.error}"), the token untouched (${o.disk}), adapters.json's STATE unchanged after stop (the refused door still rides the store's unconditional atomic rewrite — same bytes, new inode: recorded), no vendor call, the listener closed (${port.body})`, JSON.stringify({ o, st, st0, sameBytes: stamp(dir).split(':').slice(2).join(':') === b0.split(':').slice(2).join(':'), sameInode: stamp(dir).split(':')[0] === b0.split(':')[0] })); }
     // (l3) the flow's OWN deadline (a real 300 ms one): mid-exchange ⇒ refused by name, untouched; after the write ⇒ stands
     { const c = boot(ENG, 'deadline-mid', { OL: OL8, timeoutMs: 300 }); const { e, v } = c; const t0 = await connected(c);
-      const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const landing = landAsync(r1.flow, 'cA'); await v.waitHeld('cA'); await sleep(450);
-      const st0 = e.oauth.status(r1.flow.flowId); const s0 = v.st.sends; rel(); await landing; await sleep(120);
+      const rel = v.hold('cA'); const r1 = await e.reauthorize('gmail', {}); const landing = landAsync(r1.flow, 'cA'); await v.waitHeld('cA');
+      await until(() => (e.oauth.status(r1.flow.flowId) || {}).cancelled === 'timeout', 3000, '(l3) the flow\'s own 300 ms deadline firing mid-exchange');
+      const st0 = e.oauth.status(r1.flow.flowId); const s0 = v.st.sends; rel(); await landing; await until(() => HOOKS.get(r1.flow.flowId), 5000, '(l3) the refused landing\'s done hook');
       const o = snap(c, s0);
       ok(st0 && st0.cancelled === 'timeout' && o.disk === t0 && /past its time limit/.test(o.err || '') && o.calls === 0 && o.state === 'connected', `(l3) the deadline fired mid-exchange: refused by name ("${o.err}"), the record untouched (${o.disk}), no pass`, JSON.stringify(o)); e.stop();
       const c2 = boot(ENG, 'deadline-after', { OL: OL8, timeoutMs: 300 }); const t02 = await connected(c2);
-      const r2 = await c2.e.reauthorize('gmail', {}); const s02 = c2.v.st.sends; await land(r2.flow, 'cA'); const w = snap(c2, s02); await sleep(450); const a = snap(c2, s02); const st2 = c2.e.oauth.status(r2.flow.flowId) || {};
+      const r2 = await c2.e.reauthorize('gmail', {}); const began = Date.now(), s02 = c2.v.st.sends; await land(r2.flow, 'cA'); const w = snap(c2, s02); await until(() => Date.now() - began > 300 + 100, 1000, '(l3) the flow\'s 300 ms deadline instant passed'); const a = snap(c2, s02); const st2 = c2.e.oauth.status(r2.flow.flowId) || {};
       ok(w.disk !== t02 && a.disk === w.disk && a.err === null && st2.ok === true && st2.cancelled === null, `(l3) the deadline after the write: the write stands (${a.disk}), no refusal, the flow ok:${st2.ok} cancelled:${st2.cancelled}`, JSON.stringify({ w, a, st2 })); c2.e.stop(); }
     // (l4) THE PENDING PATH UNDER `superseded` — 20 orderings on the real engine (10 the record's door = a same-client
     // re-authorize, 10 the pending path = a client-switch rebind): A's exchange in flight, B (same account) begins ⇒ A
