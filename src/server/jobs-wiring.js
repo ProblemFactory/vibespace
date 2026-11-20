@@ -314,11 +314,18 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       else if (act === 'start') r = jm.start(job);
       else if (act === 'rm') r = jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
       else if (act === 'answer') r = jm.answerPanel(job, req.body?.answers || {});
-      else if (act === 'memory') r = jm.setMemory(job, req.body?.value ?? null, { byUser: true });
+      else if (act === 'memory') r = jm.setMemory(job, req.body?.value ?? null, { byUser: true });   // lane jobs-memory-bound: the job's properties (0 = unbounded: the owner's call)
       // the manager design's piece 7: the person's grant «may wake its conversation when that conversation was ended on purpose» —
       // a PERSON on this instance's own page only (no bearer, the strict page verdict — the vault doors' personVerdict rule; no
       // press is minted: no turn starts here). An agent's token is refused by name (src/jobs.js setWakeGrant)
-      else if (act === 'wake-grant') { r = jm.setWakeGrant(job, req.body?.grant === true, { by: personHere(req) ? { kind: 'person', by: 'person' } : null }); if (r.error) return res.status(r.code === 'wake_grant_person_only' ? 403 : 400).json({ error: r.error, code: r.code }); } // lane jobs-memory-bound: the job's properties (0 = unbounded: the owner's call)
+      else if (act === 'wake-grant') {   // THE ONE DOOR (src/jobs.js changeWakeGrants): answered once the change landed — not landed ⇒ 503 not_now, nothing changed
+        return void jm.changeWakeGrants([{ job, grant: req.body?.grant === true }], { by: personHere(req) ? { kind: 'person', by: 'person' } : null }).then((a) => {
+          const w = (a.rows || [])[0] || {};
+          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code });
+          const GF = require('../delivery-wake.js').GRANT_FIELD;
+          res.json({ success: true, changed: !!w.changed, [GF]: w[GF] === true, wakeGrantBy: w.wakeGrantBy || null });
+        }, (e) => res.status(500).json({ error: (e && e.message) || String(e), code: 'failed' }));
+      }
       // the user EXPANDED the row (triage §13 rule 1c): a terminal one-shot is
       // acknowledged by the person who opened it; anything else is a no-op
       else if (act === 'seen') { const changed = jm.markAck(job, 'user-opened'); if (!changed) return res.json({ success: true, changed, ack: M.ackState(job) }); jm._save(); return void jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, changed, ack: M.ackState(job), ...(saved ? {} : { notOnDisk: true }) }); } catch { } }); }   // the moved2 census: waits for the store
@@ -382,12 +389,13 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     } catch (e) { log('[jobs] accept catch-up failed:', e.message); }
   };
 
-  /** THE GRANT'S IN-PROCESS DOOR (piece 7 — the name lane login-request-card's proposal card calls on the person's press, 主开发
-   *  05:14Z): `by` = { kind: 'person' | 'key', by: the actor, name? } → setWakeGrant's answer | {error, code} */
-  const setWakeGrant = (jobId, yes, by) => { const job = jm.jobs.get(String(jobId || '')); return job ? jm.setWakeGrant(job, yes === true, { by }) : { error: 'no such job', code: 'not_found' }; };
+  /** THE GRANT'S IN-PROCESS DOOR for the cards (piece 7 — the proposals' card on the person's press, the END card's ticks): ONE ACT
+   *  for the whole list through THE ONE DOOR (src/jobs.js changeWakeGrants — one landing, off the loop; not landed ⇒ every changed
+   *  row back as it was, `not_now`). `changes` = [{ id, grant }], `by` = { kind: 'person' | 'key', by: the actor, name? } */
+  const setWakeGrants = (changes, by) => jm.changeWakeGrants((Array.isArray(changes) ? changes : []).map((c) => ({ id: String((c && c.id) || ''), grant: !!(c && c.grant === true) })), { by });
   return {
     jm,
-    setWakeGrant,
+    setWakeGrants,
     // piece 7: lane login-request-card's OWN unit binds its proposal store's `proposeWakeGrant(caller, {rows, why})` here (the agent
     // route's `vibespace-job propose-wake` / `--propose-wake` call it through the engine); nothing binds it in this unit ⇒
     // proposal_door_not_ready by name

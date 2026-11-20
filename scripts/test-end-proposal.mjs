@@ -79,14 +79,16 @@ const world = (opts = {}, mutate = null) => {
   const endConversation = async (target, by) => { ended.push({ target, by }); if (opts.onEnd) await opts.onEnd(target, by); return opts.endResult ? opts.endResult(target) : { ok: true }; };
   const wrote = [];
   const owners = new Map(Object.entries(opts.owners || {}));   // jobId → the conversation key it wakes
-  const setW = opts.setWakeGrant || (async (id, yes, by) => { if (!by || (by.kind !== 'person' && by.kind !== 'key')) return { error: GRANT_REFUSAL, code: 'wake_grant_person_only' }; if (!owners.has(id)) return { error: 'no such job', code: 'not_found' }; wrote.push({ id, yes, by }); return { changed: true }; });
+  // THE ONE DOOR's shape (src/jobs.js changeWakeGrants through jobs-wiring setWakeGrants — lane lg-store-writes): ONE act for a list of
+  // { id, grant } → { ok, code?, rows: [{ id, ok, changed, code?, error? }] }
+  const setWs = opts.setWakeGrants || (async (changes, by) => { if (!by || (by.kind !== 'person' && by.kind !== 'key')) return { ok: false, code: 'wake_grant_person_only', error: GRANT_REFUSAL, rows: [] }; const rows = (changes || []).map((c) => { if (!owners.has(c.id)) return { id: c.id, ok: false, changed: false, code: 'not_found', error: 'no such job' }; wrote.push({ id: c.id, yes: c.grant === true, by }); return { id: c.id, ok: true, changed: true }; }); return { ok: rows.every((r) => r.ok), rows }; });
   let create = require(path.join(REPO, 'src/server/end-proposals.js')).create;
   if (mutate) create = loadMutated('src/server/end-proposals.js', mutate).create;
   const store = create({ userTodos: todos, deliver, listFacts, endConversation,
     liveKeys: () => [...rows.values()].filter((r) => r.key && r.state !== 'ended').map((r) => r.key),
     endedKeys: async () => [...rows.values()].filter((r) => r.key && r.state === 'ended').map((r) => r.key),   // THE FACT: a stopped record
     jobOwnerOf: (id) => (owners.has(id) ? { key: owners.get(id), cid: owners.get(id).slice(owners.get(id).indexOf(':') + 1) } : null),
-    ...(opts.wake === false ? {} : { setWakeGrant: setW, storeWakeTicks: async (ticks, by) => { for (const x of ticks || []) { const r = await setW(x.id, x.grant === true, by); if (r && r.error) throw new Error(r.error); } } }) });
+    ...(opts.wake === false ? {} : { setWakeGrants: setWs, storeWakeTicks: async (ticks, by) => { const r = await setWs(ticks, by); if (!r || !r.ok) { const bad = (r && r.rows || []).find((x) => !x.ok) || r || {}; throw Object.assign(new Error(bad.error || bad.why || 'the ticks were not stored'), { code: bad.code || 'failed' }); } } }) });   // (the hub's storeWakeTicks, mounts-plugins-wiring — pinned below)
   return { todos, rows, owners, store, deliver, ended, wrote, stop: () => { try { todos.stop(); } catch { } } };
 };
 const CALLER = { conversationId: 'p0p0', sessionKey: 'claude:p0p0', name: 'Manager' };
@@ -380,20 +382,19 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
   const mk = (name) => { const r = hush(() => jm.create({ kind: 'cron', name, schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: name }, owner: OWN, access: { view: 'session', control: 'session' } }, OWNER)); if (!r.job) throw new Error('create: ' + JSON.stringify(r)); return jm.jobs.get(r.job.id); };
   const A = mk('morning digest'), B = mk('night report');
   // THE WIRING, as the hub binds it (both lines pinned below): jobs-wiring's in-process person door + setProposalDoor ⇐ proposeWakeGrant
-  const wiringDoor = (jobId, yes, by) => { const job = jm.jobs.get(String(jobId || '')); return job ? jm.setWakeGrant(job, yes === true, { by }) : { error: 'no such job', code: 'not_found' }; };
+  const wiringDoor = (changes, by) => jm.changeWakeGrants((Array.isArray(changes) ? changes : []).map((c) => ({ id: String((c && c.id) || ''), grant: !!(c && c.grant === true) })), { by });   // = jobs-wiring setWakeGrants (pinned below)
   // THE REAL READER the hub binds (end-proposals jobOwnerReader, pinned below) over this engine — no stub of the owner (主开发 23:06Z)
   const wiringOwner = require(path.join(REPO, 'src/server/end-proposals.js')).jobOwnerReader({ getJobs: () => jm, sessions: () => [], addressableId: require(path.join(REPO, 'src/claude-lock-capture.js')).addressableId });
   const jw = read('src/server/jobs-wiring.js'), mp = read('src/server/mounts-plugins-wiring.js'), ar = read('src/agent-routes.js');
-  ok(/const setWakeGrant = \(jobId, yes, by\) => \{ const job = jm\.jobs\.get\(String\(jobId \|\| ''\)\); return job \? jm\.setWakeGrant\(job, yes === true, \{ by \}\) : \{ error: 'no such job', code: 'not_found' \}; \};/.test(jw)
-    && /setProposalDoor: \(fn\) => \{ jm\.proposeWakeDoor = typeof fn === 'function' \? fn : null; \}/.test(jw)
-    && /jobsWiring\.setProposalDoor\(\(caller, a\) => endProposals\.proposeWakeGrant\(caller, a\)\)/.test(mp) && /jobsWiring\.setWakeGrant\(jobId, yes, by\)/.test(mp)
+  ok(/const setWakeGrants = \(changes, by\) => jm\.changeWakeGrants\(\(Array\.isArray\(changes\) \? changes : \[\]\)\.map\(\(c\) => \(\{ id: String\(\(c && c\.id\) \|\| ''\), grant: !!\(c && c\.grant === true\) \}\)\), \{ by \}\);/.test(jw) && /setProposalDoor: \(fn\) => \{ jm\.proposeWakeDoor = typeof fn === 'function' \? fn : null; \}/.test(jw)
+    && /jobsWiring\.setProposalDoor\(\(caller, a\) => endProposals\.proposeWakeGrant\(caller, a\)\)/.test(mp) && /jobsWiring\.setWakeGrants\(changes, by\)/.test(mp)
     && /wakeRowsNow: require\('\.\/end-proposals\.js'\)\.wakeRowsReader\(\{ getJobs: \(\) => \(jobsWiring && typeof jobsWiring\.getJobs === 'function' \? jobsWiring\.getJobs\(\) : null\) \}\),/.test(mp)
     && /jobOwnerOf: require\('\.\/end-proposals\.js'\)\.jobOwnerReader\(\{ getJobs: \(\) => \(jobsWiring && typeof jobsWiring\.getJobs === 'function' \? jobsWiring\.getJobs\(\) : null\), sessions: \(\) => activeSessions\.values\(\), addressableId: require\('\.\.\/claude-lock-capture\.js'\)\.addressableId \}\),/.test(mp)
     && /door\(\{ sessionKey: cid \? `\$\{s\.backend \|\| 'claude'\}:\$\{cid\}` : null, conversationId: cid, name: s\.name \|\| null \}, \{ rows: a\.jm\.wakeRowsOf\(\[target\]\), why: text \}\)/.test(ar) && /r\.id \? \{ proposal: r\.id \}/.test(ar),
     'the hub binds the card to piece 7: the propose door (jobs-wiring setProposalDoor ⇐ the store\'s proposeWakeGrant, called with jm.wakeRowsOf) and the person\'s writes through jobs-wiring\'s own in-process door');
   const run = async (mutate) => {
-    const w = world({ setWakeGrant: wiringDoor }, mutate);
-    w.store = (mutate ? loadMutated('src/server/end-proposals.js', mutate) : require(path.join(REPO, 'src/server/end-proposals.js'))).create({ userTodos: w.todos, deliver: w.deliver, listFacts: { list: async () => ({ conversations: [] }) }, endConversation: async () => ({ ok: true }), setWakeGrant: wiringDoor, jobOwnerOf: wiringOwner });
+    const w = world({ setWakeGrants: wiringDoor }, mutate);
+    w.store = (mutate ? loadMutated('src/server/end-proposals.js', mutate) : require(path.join(REPO, 'src/server/end-proposals.js'))).create({ userTodos: w.todos, deliver: w.deliver, listFacts: { list: async () => ({ conversations: [] }) }, endConversation: async () => ({ ok: true }), setWakeGrants: wiringDoor, jobOwnerOf: wiringOwner });
     jm.proposeWakeDoor = (caller, a) => w.store.proposeWakeGrant(caller, a);
     const caller = { sessionKey: 'claude:p0p0', conversationId: 'p0p0', name: 'Manager' };
     const r1 = await jm.proposeWakeDoor(caller, { rows: jm.wakeRowsOf([A]), why: 'the digest reaches it after an end' });
@@ -402,7 +403,7 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
     return { w, r1, r2, r3, cards: openProps(w) };
   };
   // a plain agent's direct write stays refused by name, and the refusal names the propose door
-  const direct = jm.setWakeGrant(A, true, { by: null });
+  const direct = await jm.changeWakeGrants([{ job: A, grant: true }], { by: null });   // THE ONE DOOR refuses a plain agent's write by name
   const namesDoor = (s) => /vibespace-job propose-wake <id>/.test(String(s || ''));
   ok(direct.code === 'wake_grant_person_only' && direct.error === DW.GRANT_REFUSAL && namesDoor(direct.error) && A[DW.GRANT_FIELD] !== true,
     'A PLAIN AGENT\'S DIRECT WRITE stays refused BY NAME — and the refusal names the propose door', direct);
@@ -424,8 +425,8 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
   // a job removed between the drawing and the press: the rest still land, the gone one is said — never a card stuck open on it
   const goneRun = async (mutate) => {
     const Cj = mk('c digest ' + (mutate ? 'red' : 'live')), Dj = mk('d report ' + (mutate ? 'red' : 'live'));
-    const gw = world({ setWakeGrant: wiringDoor }, mutate);
-    gw.store = (mutate ? loadMutated('src/server/end-proposals.js', mutate) : require(path.join(REPO, 'src/server/end-proposals.js'))).create({ userTodos: gw.todos, deliver: gw.deliver, listFacts: { list: async () => ({ conversations: [] }) }, endConversation: async () => ({ ok: true }), setWakeGrant: wiringDoor, jobOwnerOf: wiringOwner });
+    const gw = world({ setWakeGrants: wiringDoor }, mutate);
+    gw.store = (mutate ? loadMutated('src/server/end-proposals.js', mutate) : require(path.join(REPO, 'src/server/end-proposals.js'))).create({ userTodos: gw.todos, deliver: gw.deliver, listFacts: { list: async () => ({ conversations: [] }) }, endConversation: async () => ({ ok: true }), setWakeGrants: wiringDoor, jobOwnerOf: wiringOwner });
     const p = await gw.store.proposeWakeGrant({ sessionKey: 'claude:p0p0', conversationId: 'p0p0', name: 'Gone test' }, { rows: jm.wakeRowsOf([Cj, Dj]), why: 'both' });
     hush(() => jm.rm(Dj, { stop: true }));
     const r = await press(gw, p.id, { grant: [Cj.id, Dj.id] });
@@ -436,6 +437,116 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
     'A JOB REMOVED between the drawing and the press: the rest still land, the gone one is said to the proposer — the card is answered', { r: g1.r, said: g1.said });
   const g2 = await goneRun((src) => src.replace("      if (!o) { out.gone.push(r); continue; }\n", '').replace('      if (r.owner && ownId(o) !== ownId(r.owner))', '      if (o && r.owner && ownId(o) !== ownId(r.owner))').replace("      if (w && w.code === 'not_found') { out.gone.push(r); continue; }\n", ''));
   ok(g2.status === 'open' && g2.r.refused.length === 1 && g2.r.gone.length === 0, 'RED CONTROL: a store that does not tell a gone job from a refusal leaves the card open on a job that no longer exists — the leg above would read it', g2.r);
+  // ── THE ONE DOOR FOR A CHANGE OF A WAKE GRANT (lane lg-store-writes — 主开发's shape of 2026-11-20 08:17Z): every caller goes through
+  // src/jobs.js changeWakeGrants — the person's act route, the key's verb, the proposals' card, the END card's ticks. ONE act, ONE
+  // landing awaited off the loop; NOT LANDED ⇒ ONE TRUTH (what the act changed restored) and «not now» by name; nothing ended over
+  // ticks that did not land. A stand-in for the storage at the jobs file's LANDING only (the engine's writer, its `durable` answered
+  // here, counted); every write is the real one.
+  {
+    const G = DW.GRANT_FIELD, PERSON = { kind: 'person', by: 'person' }, KEYBY = { kind: 'key', by: 'automation:k1', name: 'a test key' };
+    const st = { landing: true, landings: 0, watch: new Set(), seen: [] };
+    const standIn = (eng) => { const realW = eng._writer(); eng._writer = () => Object.assign(Object.create(realW), { durable: (file, o) => { if (file !== eng.file) return realW.durable(file, o); st.landings++; for (const id of st.watch) st.seen.push(eng.wakeGrantOf(id).granted); return st.landing ? realW.durable(file, o) : Promise.resolve(false); } }); };
+    standIn(jm);
+    const DOOR_SRC = read('src/jobs.js'), RESTORE_A = "      if ((j[G] === true) !== a.after.on || (j.wakeGrantBy || null) !== a.after.by) continue;";
+    // (1) THE DOOR — set and withdraw, landed and not; inside the waiting window a SET is not yet made; a second press once back works
+    const door = async (eng, D1, D2) => {
+      await eng.changeWakeGrants([{ job: D2, grant: true }], { by: PERSON });   // D2 starts granted (landed)
+      st.landing = false; st.watch = new Set([D1.id]); st.seen = [];
+      const s1 = await eng.changeWakeGrants([{ job: D1, grant: true }], { by: PERSON }), w1 = await eng.changeWakeGrants([{ job: D2, grant: false }], { by: PERSON });
+      const after1 = { d1: D1[G] === true, d2: D2[G] === true, j1: eng.wakeGrantOf(D1.id).granted, j2: eng.wakeGrantOf(D2.id).granted, seen: st.seen.slice() };
+      st.landing = true; st.watch = new Set();
+      const s2 = await eng.changeWakeGrants([{ job: D1, grant: true }], { by: PERSON }), w2 = await eng.changeWakeGrants([{ job: D2, grant: false }], { by: PERSON });
+      return { s1, w1, after1, s2, w2, d1: D1[G] === true, d2: D2[G] === true };
+    };
+    const dr = await door(jm, mk('door set'), mk('door withdraw'));
+    ok(!dr.s1.ok && dr.s1.code === 'not_now' && /nothing was changed/.test(dr.s1.why || '') && !dr.after1.d1 && !dr.after1.j1 && dr.after1.seen.length >= 1 && dr.after1.seen.every((g) => g === false)
+      && !dr.w1.ok && dr.w1.code === 'not_now' && dr.after1.d2 && dr.after1.j2 && dr.s2.ok && dr.d1 && dr.w2.ok && !dr.d2,
+      'THE ONE DOOR, not landed: ONE TRUTH — a SET and a WITHDRAW both restored (memory, the judge and the disk agree), «not now» by name; inside the waiting window a SET is NOT yet made; a second press once the storage is back lands both', dr);
+    const JX = loadMutated('src/jobs.js', (s0) => anchored(s0, RESTORE_A, '      continue;   /* MUTANT: no restore */', 'door-restore-cut'));
+    const jx = new JX.JobManager({ dataDir: fs.mkdtempSync(path.join(scratch, 'jobs-red-')), broadcast() { }, log() { }, notifyUser() { return { ok: true }; }, deliverToConversation: async () => ({ ok: true }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true });
+    hush(() => jx.init()); for (const t of jx._timers || []) clearInterval(t);
+    standIn(jx);
+    const mkx = (name) => hush(() => jx.create({ kind: 'cron', name, schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: name }, owner: OWN, access: { view: 'session', control: 'session' } }, OWNER)).job;
+    const xd = await door(jx, mkx('red set'), mkx('red withdraw'));
+    ok(xd.after1.d1 === true && xd.after1.d2 === false, 'RED CONTROL (the door\'s restore cut, in a copy): a grant that did not land STAYS SET in memory (and a withdrawal stays withdrawn) while the caller is told «not now» — two truths', xd.after1);
+    try { jx.shutdown(); } catch { }
+    // (2) THE KEY'S VERB — set and withdraw, landed and not, its answer carries a CODE beside its words; RED: a verb that ignores the door
+    const VERB_SRC = read('src/server/delivery-wake.js'), VERB_A = "      if (!a.ok || !r.ok) return { ok: false, code: r.code || a.code || 'failed', why: r.error || a.error || a.why || 'refused', job: job.id, grant: r[D.GRANT_FIELD] === true };   // not_now: nothing was changed — said by name";
+    const verbOf = (M) => M.automationVerbs({ jobs: () => jm, keyNameOf: () => 'a test key', groupsOf: () => [] })['jobs.wakeGrant'];
+    const CTXK = { caller: null, keyId: 'k1', identity: 'automation:k1', reach: () => ({ ok: true }) };
+    const verbRun = async (M) => { const V1 = mk('verb job'); st.landing = false; const vs = await verbOf(M)({ job: V1.id, grant: true }, CTXK); st.landing = true; const vl = await verbOf(M)({ job: V1.id, grant: true }, CTXK); st.landing = false; const vw = await verbOf(M)({ job: V1.id, grant: false }, CTXK); st.landing = true; const vwl = await verbOf(M)({ job: V1.id, grant: false }, CTXK); return { vs, vl, vw, vwl, V1 }; };
+    const vr = await verbRun(require(path.join(REPO, 'src/server/delivery-wake.js')));
+    ok(!vr.vs.ok && vr.vs.code === 'not_now' && vr.vl.ok && vr.vl.code === 'granted' && !vr.vw.ok && vr.vw.code === 'not_now' && vr.vwl.ok && vr.vwl.code === 'withdrawn' && vr.V1[G] !== true,
+      'THE KEY\'S VERB through the one door: not landed ⇒ not_now by name (a code beside its words), nothing changed; landed ⇒ granted / withdrawn', { vs: vr.vs, vl: vr.vl, vw: vr.vw, vwl: vr.vwl });
+    ok(VERB_SRC.split(VERB_A).length === 2, 'control setup: the verb\'s refusal of a change that did not land is found once');
+    const vx = await verbRun(loadMutated('src/server/delivery-wake.js', (s0) => anchored(s0, VERB_A, '', 'verb-ignores-door')));
+    ok(vx.vs.ok === true && jm.wakeGrantOf(vx.V1.id).granted === false, 'RED CONTROL (the verb\'s refusal cut, in a copy): the key is told the change is done (ok) for a grant the door restored — the reply and the engine disagree', { vs: vx.vs });
+    // (3) THE PERSON'S ACT ROUTE (src/server/jobs-wiring.js POST /api/jobs/:id/wake-grant), the real wiring over its own engine
+    const PAGE = { host: 'hub.test', origin: 'http://hub.test', 'sec-fetch-site': 'same-origin' };   // a page of this hub (no endpoint: §81)
+    const routeRun = async (JWM) => {
+      const routes = {}; const app = { get: (p0, ...h) => { routes['GET ' + p0] = h[h.length - 1]; }, post: (p0, ...h) => { routes['POST ' + p0] = h[h.length - 1]; }, put() { }, patch() { }, delete() { }, use() { } };
+      const wr = hush(() => JWM.create({ app, dataDir: fs.mkdtempSync(path.join(scratch, 'jobs-route-')), broadcastAll: () => { }, userTodos: null, log: () => { }, serverSetting: () => undefined, taskGroups: null, activeSessions: new Map(), deliver: null }));
+      const eng = wr.jm; hush(() => eng.init()); for (const t of eng._timers || []) clearInterval(t); standIn(eng);
+      const R1 = hush(() => eng.create({ kind: 'cron', name: 'route job', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: 'r' }, owner: OWN, access: { view: 'session', control: 'session' } }, OWNER)).job;
+      const post = (grant) => new Promise((resolve) => { const res = { code: 200, status(c) { this.code = c; return this; }, json(o) { resolve({ status: this.code, body: o }); return this; }, set() { return this; }, setHeader() { } }; routes['POST /api/jobs/:id/:act']({ params: { id: R1.id, act: 'wake-grant' }, body: { grant }, headers: PAGE, socket: {} }, res); });
+      st.landing = false; const ps = await post(true); st.landing = true; const pl = await post(true); st.landing = false; const pw = await post(false); st.landing = true; const pwl = await post(false);
+      const out = { ps, pl, pw, pwl, held: R1[G] === true };
+      try { eng.shutdown(); } catch { }
+      return out;
+    };
+    let rr = null; try { rr = await routeRun(require(path.join(REPO, 'src/server/jobs-wiring.js'))); } catch (e) { rr = { error: (e && e.message) || String(e) }; }
+    ok(rr && rr.ps && rr.ps.status === 503 && rr.ps.body.code === 'not_now' && rr.pl.status === 200 && rr.pl.body.changed === true && rr.pw.status === 503 && rr.pw.body.code === 'not_now' && rr.pwl.status === 200 && rr.held === false,
+      'THE PERSON\'S ACT ROUTE through the one door: not landed ⇒ 503 not_now by name, nothing changed; landed ⇒ done — a set, then a withdrawal', rr);
+    const ROUTE_A = "          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code });";
+    let rx = null; try { rx = await routeRun(loadMutated('src/server/jobs-wiring.js', (s0) => anchored(s0, ROUTE_A, '', 'route-ignores-door'))); } catch (e) { rx = { error: (e && e.message) || String(e) }; }
+    ok(rx && rx.ps && rx.ps.status === 200, 'RED CONTROL (the route\'s refusal cut, in a copy): the person is told the grant is set for a change that did not land', rx && rx.ps);
+    // (4) THE PROPOSALS' CARD — 20 rows are ONE act (ONE landing); not landed ⇒ every row refused not_now, the card OPEN showing what is
+    // true; «keep all as they are» then leaves each grant as the card shows; RED: a landing a row
+    const cardRun = async (mutate) => {
+      const jobs = Array.from({ length: 20 }, (_, i) => mk(`card job ${i}${mutate ? ' red' : ''}`));
+      const cw = world({ setWakeGrants: wiringDoor }, mutate);
+      cw.store = (mutate ? loadMutated('src/server/end-proposals.js', mutate) : require(path.join(REPO, 'src/server/end-proposals.js'))).create({ userTodos: cw.todos, deliver: cw.deliver, listFacts: { list: async () => ({ conversations: [] }) }, endConversation: async () => ({ ok: true }), setWakeGrants: wiringDoor, jobOwnerOf: wiringOwner });
+      const p = await cw.store.proposeWakeGrant({ sessionKey: 'claude:p0p0', conversationId: 'p0p0', name: 'Card test' }, { rows: jm.wakeRowsOf(jobs), why: 'twenty' });
+      st.landing = false; st.landings = 0;
+      const r1 = await press(cw, p.id, { grant: jobs.map((j) => j.id) });
+      const notLandedLandings = st.landings, openAfter = cw.todos.get(p.id).status === 'open', allOff = jobs.every((j) => j[G] !== true), rowsShow = (cw.todos.get(p.id).card.rows || []).every((r) => r.grant !== true);
+      st.landing = true;
+      const keep = await press(cw, p.id, {});   // «keep all as they are»
+      const keptOff = jobs.every((j) => j[G] !== true);
+      return { r1, notLandedLandings, openAfter, allOff, rowsShow, keep: !!(keep && keep.ok), keptOff, cw };
+    };
+    const cr = await cardRun();
+    ok(cr.notLandedLandings === 1 && cr.r1 && cr.r1.refused.length === 20 && cr.r1.refused.every((r) => r.refused === 'not_now') && cr.openAfter && cr.allOff && cr.rowsShow && cr.keep && cr.keptOff,
+      'THE PROPOSALS\' CARD through the one door: 20 rows are ONE act — ONE landing; not landed ⇒ every row refused not_now, the card stays OPEN showing what is true (none granted); «keep all as they are» then leaves every job as the card shows', { landings: cr.notLandedLandings, refused: cr.r1 && cr.r1.refused.length, open: cr.openAfter });
+    const CARD_A = "      const a = await setWakeGrants(act.map((r) => ({ id: r.id, grant: yes.has(r.id) })), personBy(by));";
+    const crx = await cardRun((s0) => anchored(s0, CARD_A, "      const a = { ok: true, rows: [] }; for (const r of act) { const x = await setWakeGrants([{ id: r.id, grant: yes.has(r.id) }], personBy(by)); a.rows.push(...((x && x.rows) || [])); }   /* MUTANT: a landing a row */", 'card-a-landing-a-row'));
+    ok(crx.notLandedLandings === 20, 'RED CONTROL (a landing a row, in a copy): the 20-row card asks the writer 20 times', { landings: crx.notLandedLandings });
+    // (5) THE END CARD'S TICKS — set and withdraw, landed and not: NOTHING IS ENDED over ticks that did not land; RED: the ticks' refusal swallowed
+    const endRun = async (mutate, grant) => {
+      const E1 = mk(`end tick ${grant ? 'set' : 'withdraw'}${mutate ? ' red' : ''}`);
+      if (!grant) await jm.changeWakeGrants([{ job: E1, grant: true }], { by: PERSON });
+      const ew = world({ owners: { [E1.id]: 'claude:aaaa' }, setWakeGrants: wiringDoor }, mutate);
+      ew.rows.set('claude:aaaa', raw('claude:aaaa'));
+      await ew.store.propose({ targets: 'claude:aaaa', why: 'idle' }, { caller: CALLER, reach });
+      const id = openProps(ew)[0];
+      st.landing = false;
+      const r = await press(ew, id, { terminate: ['claude:aaaa'], wakeTicks: [{ id: E1.id, grant }] });
+      st.landing = true;
+      return { r, ended: ew.ended.length, held: E1[G] === true, ew };
+    };
+    const es = await endRun(null, true), ewd = await endRun(null, false);
+    ok(es.ended === 0 && es.held === false && es.r.failed.some((x) => x.failed === 'ticks_not_stored') && ewd.ended === 0 && ewd.held === true && ewd.r.failed.some((x) => x.failed === 'ticks_not_stored'),
+      'THE END CARD\'S TICKS through the one door: not landed ⇒ the conversation is NOT ended, the row failed by name, the job\'s grant as it was — a set and a withdrawal', { es: { ended: es.ended, failed: es.r.failed }, ewd: { ended: ewd.ended, held: ewd.held } });
+    const END_A = "        try { await storeWakeTicks(mine, personBy(by)); } catch (e) { out.failed.push({ ...d, failed: 'ticks_not_stored' }); still.push({ ...EP.drawnRow(nowRow), failed: 'ticks_not_stored' }); continue; }";
+    const ex = await endRun((s0) => anchored(s0, END_A, "        try { await storeWakeTicks(mine, personBy(by)); } catch (e) { }   /* MUTANT: the refusal swallowed */", 'end-ticks-swallowed'), true);
+    ok(ex.ended === 1, 'RED CONTROL (the END card\'s ticks refusal swallowed, in a copy): the conversation is ENDED over ticks that did not land', { ended: ex.ended });
+    // the hub's storeWakeTicks (mounts-plugins-wiring) throws BY NAME on an act that did not land — the leg above drives its mirror
+    ok(/storeWakeTicks: async \(ticks, by\) => \{ const r = await wakeDoor\(ticks, by\); if \(!r \|\| !r\.ok\) \{/.test(read('src/server/mounts-plugins-wiring.js')), 'the hub\'s storeWakeTicks hands the ticks to the one door as ONE act and throws by name when it did not land (the mirror the leg drives; a pin)');
+    // THE CENSUS: no caller of the engine's apply but the door, and the engine's old setter is gone
+    const appliers = []; for (const f of require('node:child_process').execFileSync('git', ['ls-files', 'src', 'server.js'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter((x) => /\.(c?js|mjs)$/.test(x))) { const t = read(f); if (/\._applyWakeGrant\(|\.setWakeGrant\(job/.test(t)) appliers.push(f); }   // stale-pins: kept — an ABSENCE check: the old setter must stay gone
+    ok(appliers.join() === 'src/jobs.js' && (read('src/jobs.js').match(/this\._applyWakeGrant\(/g) || []).length === 1 && !/^  setWakeGrant\(/m.test(read('src/jobs.js')), 'THE CENSUS: the engine\'s apply has ONE caller, the door (no other file sets a grant around it)', appliers);
+    for (const x of [cr.cw, crx.cw, es.ew, ewd.ew, ex.ew]) x.stop();
+  }
   for (const x of [w, dup.w, dupRows.w, g1.gw, g2.gw]) x.stop();
   try { jm.shutdown(); } catch { }
 }
@@ -455,15 +566,15 @@ console.log('④c THE OWNER BY ITS OWN ID — the REAL reader over piece 7\'s RE
   let n = 0;
   const mk = (name) => { const r = hush(() => jm.create({ kind: 'cron', name: `${name} ${++n}`, schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: name }, owner: OWN, access: { view: 'session', control: 'session' } }, OWNER)); if (!r.job) throw new Error('create: ' + JSON.stringify(r)); return jm.jobs.get(r.job.id); };
   let slow = null;
-  const door = async (jobId, yes, by) => { if (slow) await slow; const job = jm.jobs.get(String(jobId || '')); return job ? jm.setWakeGrant(job, yes === true, { by }) : { error: 'no such job', code: 'not_found' }; };
+  const door = async (changes, by) => { if (slow) await slow; return jm.changeWakeGrants((changes || []).map((c) => ({ id: String(c.id || ''), grant: c.grant === true })), { by }); };
   const CODEX = { sessionKey: 'codex:c0c0', conversationId: 'c0c0', name: 'Coder' };
   const live = new Map();
   const liveCoder = () => live.set('s-c', { backend: 'codex', backendSessionId: 'c0c0', name: 'Coder' });
   const endCoder = (w) => { live.delete('s-c'); w.rows.set('codex:c0c0', raw('codex:c0c0', { name: 'Coder', state: 'ended' })); };
   const build = (mutate, more = {}) => {
-    const w = world({ setWakeGrant: door });
+    const w = world({ setWakeGrants: door });
     const M = mutate ? loadMutated('src/server/end-proposals.js', mutate) : EPS;
-    w.store = M.create({ userTodos: w.todos, deliver: w.deliver, listFacts: { list: async () => ({ conversations: [...w.rows.values()].map((r) => CF.shapeRow(r)) }) }, endConversation: async () => ({ ok: true }), setWakeGrant: door,
+    w.store = M.create({ userTodos: w.todos, deliver: w.deliver, listFacts: { list: async () => ({ conversations: [...w.rows.values()].map((r) => CF.shapeRow(r)) }) }, endConversation: async () => ({ ok: true }), setWakeGrants: door,
       jobOwnerOf: M.jobOwnerReader({ getJobs: () => jm, sessions: () => live.values(), addressableId }), wakeRowsNow: M.wakeRowsReader({ getJobs: () => jm }), ...more });
     return w;
   };

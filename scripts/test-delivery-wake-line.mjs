@@ -463,11 +463,11 @@ console.log('⑮ the key\'s verb: reach first, with the owner conversation\'s Ta
   const asked = [];
   const V = DWO.automationVerbs({ jobs: () => jm, groupsOf: (cid) => (cid === O ? ['T-ops'] : []), keyNameOf: () => 'dispatch' })['jobs.wakeGrant'];
   const no = (v) => ({ ok: false, code: 'not_granted', why: 'out of reach' });
-  const a1 = V({ job: cron.id, grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: (q) => { asked.push(q); return no(q); } });
-  const a2 = V({ job: 'jb-run-of-weekly', grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: no });
+  const a1 = await V({ job: cron.id, grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: (q) => { asked.push(q); return no(q); } });
+  const a2 = await V({ job: 'jb-run-of-weekly', grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: no });
   ok(!a1.ok && a1.why === 'the key does not reach that job' && !a2.ok && a2.why === a1.why && !/schedule|person/.test(a2.why) && asked[0].conversationId === O && asked[0].groups.join() === 'T-ops' && jm.jobs.get(cron.id).wakesEndedOwner !== true,
     'out of reach ⇒ refused by name — the SAME words for a schedule and for a run (no more than an existence), the reach asked of the owner WITH its Task Groups, nothing written', { a1, a2, asked });
-  const a3 = V({ job: cron.id, grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: () => ({ ok: true, by: 'grant' }) });
+  const a3 = await V({ job: cron.id, grant: true }, { caller: {}, keyId: 'ak-1', identity: 'automation:ak-1', reach: () => ({ ok: true, by: 'grant' }) });
   ok(a3.ok && a3.grant === true && a3.by.kind === 'key' && a3.by.name === 'dispatch' && jm.wakeGrantOf(cron.id).granted === true, 'in reach ⇒ the key sets the grant; the row records the key by name', a3);
   // THE STORE HELD UNREAD (the hold's law, 主开发 2026-11-19 05:42Z): a key reaching «everything EXCEPT T-ops», the owner IS in T-ops,
   // the store held (its groups read []) — the reach hands the hold's fact, refused BY NAME, nothing written; RED: the fact dropped ⇒ set
@@ -482,7 +482,8 @@ console.log('⑮ the key\'s verb: reach first, with the owner conversation\'s Ta
   const CTX = { caller: {}, keyId: 'K-1', identity: 'automation:K-1', reach: reachExc };
   GH.setHeld(() => true);
   let h1, h1Wrote, hRed;
-  try { h1 = verbOf(DWO)({ job: cron2.id, grant: true }, CTX); h1Wrote = jm.wakeGrantOf(cron2.id).granted === true; hRed = verbOf(DWD)({ job: cron2.id, grant: true }, CTX); } finally { GH.setHeld(() => false); }   // the grant READ BACK before the red control writes the same store
+  // (the verb is async: THE ONE DOOR lands off the loop — lane lg-store-writes)
+  try { h1 = await verbOf(DWO)({ job: cron2.id, grant: true }, CTX); h1Wrote = jm.wakeGrantOf(cron2.id).granted === true; hRed = await verbOf(DWD)({ job: cron2.id, grant: true }, CTX); } finally { GH.setHeld(() => false); }   // the grant READ BACK before the red control writes the same store
   ok(!h1.ok && h1.code === 'groups_unreadable' && /Task Groups could not be read just now/.test(h1.why || '') && h1Wrote === false, 'the store HELD: a key reaching «everything except T-ops» is refused BY NAME for T-ops\' job (groups_unreadable, its words) — never judged «in no group» — and NOTHING written (the grant read back: still not granted)', { h1, h1Wrote });
   ok(hRed.ok === true && jm.wakeGrantOf(cron2.id).granted === true, 'RED CONTROL: the fact dropped — the key «except T-ops» SETS the wake grant of T-ops\' job while the store is held (the harm the law exists for)', hRed);
 }

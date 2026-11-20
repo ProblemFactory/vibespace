@@ -1055,9 +1055,15 @@ await (async () => {
       const Rt = rig(name), { jm: jt, job: jbt } = mkJm(Mod, Rt, liftWriter().W);
       jt._notifsHold({ code: 'EIO', why: 'a stand-in i/o error' });
       jt._stashNotif(Rt.cid, jbt, { what: 'already in the held file' }, 'not reachable', { held: { kind: 'not-reachable' } });
+      // (the move check's should, lane lg-store-writes: the copy in a held file is one the BOOT PUTS BACK — the stash hand-over's kept copy
+      // through restoreNotifs, the only road a held file's notice comes back by; the put-back is the mark, never a clock)
       const n0 = (jt.pendingNotifs.get(Rt.cid) || [])[0];
       const copy = n0 ? JSON.parse(JSON.stringify(n0)) : null;
+      jt.pendingNotifs.delete(Rt.cid); if (copy) jt.restoreNotifs(Rt.cid, [JSON.parse(JSON.stringify(copy))]);
       const took = jt.drainNotifs(Rt.cid).length;   // handed over while held
+      // …and a notice stashed IN THIS PROCESS while held, then drained: it can never be in the held file — never remembered (the bound)
+      jt._stashNotif(Rt.cid, jbt, { what: 'stashed while held, in this process' }, 'not reachable', { held: { kind: 'not-reachable' } });
+      const freshTook = jt.drainNotifs(Rt.cid).length, remembered = jt._drainedWhileHeld ? jt._drainedWhileHeld.size : 0;
       // …and the held file already had it — with a SUBSCRIBER's copy of the same job event at the same instant (one pass stashes the
       // owner's and each subscriber's, one instant): the must of 主开发's read wf_3c7fc92a-819
       const SUB = 'conv-subscriber-b';
@@ -1066,10 +1072,10 @@ await (async () => {
       const same = (cid) => (jt.pendingNotifs.get(cid) || []).filter((x) => copy && x.jobId === copy.jobId && x.ts === copy.ts).length;
       const back = same(Rt.cid), sub = same(SUB);
       clearTimeout(jt._notifsT); jt._notifsT = null;
-      return { took, lifted: !jt._notifsUnread, back, sub };
+      return { took, lifted: !jt._notifsUnread, back, sub, freshTook, remembered };
     };
     const tw = await twiceScene({ JobManager }, 'held-drain-twice');
-    ok(tw.took === 1 && tw.lifted && tw.back === 0 && tw.sub === 1, 'should 2: a notice drained while the file was held (its copy already IN the file) does not come back at the lift — never handed over twice; and a SUBSCRIBER\'s copy of the same job event at the same instant is still waiting (the identity carries the conversation)', tw);
+    ok(tw.took === 1 && tw.lifted && tw.back === 0 && tw.sub === 1 && tw.freshTook === 1 && tw.remembered === 1, 'should 2 (+ the move check\'s bound: a notice stashed in this process while held is drained and NEVER remembered — only an older copy is): a notice drained while the file was held (its copy already IN the file) does not come back at the lift — never handed over twice; and a SUBSCRIBER\'s copy of the same job event at the same instant is still waiting (the identity carries the conversation)', tw);
     const JTX = mutantCopies('ntr-held-twice', REPO).load('src/jobs.js', anchored(JSRC2, TWICE_A, "        if (false) {", 'the merge leaves out what a drain took'), 'held-twice-cut');
     const twx = await twiceScene(JTX, 'held-drain-twice-red');
     ok(twx.took === 1 && twx.lifted && twx.back === 1, 'CONTROL (the merge\'s filter cut, in a copy): the drained notice is BACK after the lift — handed over twice (red)', twx);

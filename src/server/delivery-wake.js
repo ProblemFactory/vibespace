@@ -244,7 +244,7 @@ function inboxOfOver({ deliver = () => null, activeSessions = null, isSocket = s
  */
 function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf = () => [] } = {}) {
   return {
-    'jobs.wakeGrant': (args, { caller, keyId, identity, reach }) => {
+    'jobs.wakeGrant': async (args, { caller, keyId, identity, reach }) => {   // (async: THE ONE DOOR lands the change off the loop — src/jobs.js changeWakeGrants)
       const jm = jobs();
       if (!jm || !jm.ready) return { ok: false, code: 'not_ready', why: 'the jobs engine is starting — try again in a moment' };
       const job = jm.jobs.get(args.job);
@@ -258,9 +258,10 @@ function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf =
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.code === 'groups_unreadable' && v.why) || 'the key does not reach that job' };
       if (job.cronParent) return { ok: false, code: 'bad_args', why: `${job.id} is a run of the schedule ${job.cronParent} — set the schedule's grant` };
       let name = null; try { name = keyId ? keyNameOf(keyId) : null; } catch { name = null; }
-      const r = jm.setWakeGrant(job, args.grant === true, { by: { kind: 'key', by: identity || (keyId ? `automation:${keyId}` : 'automation'), name } });
-      if (r.error) return { ok: false, code: r.code || 'failed', why: r.error };
-      return { ok: true, job: job.id, grant: r[D.GRANT_FIELD] === true, changed: !!r.changed, by: r.wakeGrantBy || null, owner };
+      const a = await jm.changeWakeGrants([{ job, grant: args.grant === true }], { by: { kind: 'key', by: identity || (keyId ? `automation:${keyId}` : 'automation'), name } });
+      const r = (a.rows || [])[0] || {};
+      if (!a.ok || !r.ok) return { ok: false, code: r.code || a.code || 'failed', why: r.error || a.error || a.why || 'refused', job: job.id, grant: r[D.GRANT_FIELD] === true };   // not_now: nothing was changed — said by name
+      return { ok: true, code: !r.changed ? 'unchanged' : r[D.GRANT_FIELD] === true ? 'granted' : 'withdrawn', job: job.id, grant: r[D.GRANT_FIELD] === true, changed: !!r.changed, by: r.wakeGrantBy || null, owner };
     },
   };
 }

@@ -130,6 +130,7 @@ const JOB_CPU_WEIGHT = 33;   // B-f494: a lowered job's scope CPUWeight — nice
 // how long after the wrapper changed on disk a mismatch is still the update's window (its restart is on the way: 45 s
 // measured on the owner's hub; an install + build bounded at minutes) — past it, the install itself is broken: a fault
 const UPDATE_WINDOW_MS = 15 * 60 * 1000;
+const WAKE_GRANT_LAND_MS = 20_000;   // lane lg-store-writes: the wake grant door's wait for its landing (off the loop), the writer's own bound
 const now = () => Date.now();
 const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
 // triage archive (design §13): newest ARCHIVE_CAP records kept; the sweep
@@ -229,6 +230,7 @@ class JobManager {
     this._sweepRun = null; this._sweepSkips = 0; // ONE JUDGE PER RUN END (round 5): a pass in flight is never entered twice
     this._reapLater = new Map();  // run → {job, tries}: a reap that did not finish (round 6: whoever started it) — retried by every tick
     this.jobs = new Map();
+    this._grantPending = new Set();   // job ids whose wake grant SET waits for its landing (the one door's window — the judge reads them as not yet set)
     this.readOnly = false;
     this.ready = false;
     this.events = [];            // ring of {ts, jobId, name, what, verb, alarm?} for injection — read ADDRESSED (updatesFor)
@@ -762,11 +764,12 @@ class JobManager {
         // a hand-over the previous process did not settle (verify r2, the ladder's stash has the same rule): the
         // entries wait again, by name in the log — the shutdown waits for a hand-over in flight, so a stamp here is a
         // process killed mid-post
+        // a notice DRAINED while the file was held (its copy put back at the boot, already in the file) leaves the merge: never twice — FIRST, so the journal
+        // never says «waits again» for a copy the merge then removes (the read's should)
+        if (merge && this._drainedWhileHeld && this._drainedWhileHeld.size) { for (let i = list.length - 1; i >= 0; i--) if (this._drainedWhileHeld.has(`${cid}\u0000${list[i].jobId}\u0000${list[i].ts}`)) list.splice(i, 1); }
         const ids = new Set();
         for (const n of list) if (n && n.ho) { ids.add(n.ho); delete n.ho; }
         if (ids.size) { this.releasedAtBoot.push({ cid, ids: [...ids], n: list.length }); const ho = [...ids].filter((x) => x !== 'carry'), both = ids.has('carry') && ho.length > 0; this.d.log(`[jobs] ${cid}: ${[ids.has('carry') ? 'an unconfirmed answer\'s claim (carry)' : '', ho.length ? `a hand-over (${ho.join(', ')})` : ''].filter(Boolean).join(' and ')} ${both ? 'were' : 'was'} in flight when the previous server stopped — ${both ? 'their' : 'its'} job results wait again`); }   // lane report-mark-on-ack: a carry claim is an unconfirmed answer's, named apart from a hand-over
-        // a notice DRAINED while the file was held (its copy put back at the boot, already in the file) leaves the merge: never twice
-        if (merge && this._drainedWhileHeld && this._drainedWhileHeld.size) { for (let i = list.length - 1; i >= 0; i--) if (this._drainedWhileHeld.has(`${cid}\u0000${list[i].jobId}\u0000${list[i].ts}`)) list.splice(i, 1); }
         const mine = merge ? (this.pendingNotifs.get(cid) || []).filter((n) => !list.includes(n)) : [];
         if (!list.length && !mine.length) continue;
         this.pendingNotifs.set(cid, mine.length ? [...list, ...mine].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0)) : list);   // a read again: what waited here joins the file's (no cap — the file's are the oldest, as a restore's)
@@ -1806,7 +1809,8 @@ class JobManager {
     if (!cid || !mine.length) return 0;
     const q = this.pendingNotifs.get(cid) || [];
     const had = new Set(q.map((n) => n && `${n.jobId}\u0000${n.ts}`));
-    for (const n of mine) { delete n.ho; if (!q.includes(n) && !had.has(`${n.jobId}\u0000${n.ts}`)) q.push(n); }
+    const putBack = this._putBack || (this._putBack = new WeakSet());   // (a copy PUT BACK — the only kind a held file can hold: the boot mark, exact — no clock)
+    for (const n of mine) { delete n.ho; putBack.add(n); if (!q.includes(n) && !had.has(`${n.jobId}\u0000${n.ts}`)) q.push(n); }
     q.sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0));
     // no cap on a restore (verify r4): the restored are the oldest — trimming here would evict exactly what came back
     this.pendingNotifs.set(cid, q);
@@ -1843,7 +1847,7 @@ class JobManager {
     // stashed for its owner and for each subscriber in one pass, with one instant: without the conversation, a drain of the owner's
     // copy took a subscriber's copy out of the file's merge too — a silent loss) — and the lift's merge leaves those out
     Object.defineProperty(q, 'landed', { value: !!(drained && drained.ok) || !!this._notifsUnread, enumerable: false });
-    if (this._notifsUnread) { const took = this._drainedWhileHeld || (this._drainedWhileHeld = new Set()); for (const n of q) if (n) took.add(`${cid}\u0000${n.jobId}\u0000${n.ts}`); }   // the conversation IN the identity (主开发's read wf_3c7fc92a-819, its must): one job event is stashed for its owner and each subscriber with ONE instant
+    if (this._notifsUnread) { const took = this._drainedWhileHeld || (this._drainedWhileHeld = new Set()), putBack = this._putBack; for (const n of q) if (n && putBack && putBack.has(n)) took.add(`${cid}\u0000${n.jobId}\u0000${n.ts}`); }   // BOUNDED BY CONSTRUCTION (the reads' shoulds): only a copy PUT BACK (restoreNotifs) can be in the held file — a notice stashed in this process meanwhile is never remembered; the mark is the put-back itself, never a clock (a clock stepped back cannot move it)   // the conversation IN the identity (主开发's read wf_3c7fc92a-819, its must): one job event is stashed for its owner and each subscriber with ONE instant
     this._dirty = true;
     // A stash DRAINED into a resume has been read (triage §13 rule 1a): the
     // conversation sees it on its next turn. A stash entry older than the
@@ -4075,19 +4079,60 @@ class JobManager {
    *  jobs.wakeGrant (the person's delegation), and nobody else: a plain agent token is refused BY NAME (GRANT_REFUSAL names the
    *  doors that exist today). A cron's RUN carries none — its schedule's is read.
    *  `by` = { kind: 'person' | 'key', by: the actor, name? } */
-  setWakeGrant(job, grant, { by = null } = {}) {
-    if (this.readOnly || !this.ready) return { error: this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly' };   // as its sibling writers
-    if (!by || (by.kind !== 'person' && by.kind !== 'key')) return { error: DW.GRANT_REFUSAL, code: 'wake_grant_person_only' };
-    if (job.cronParent) return { error: `refused: ${job.id} is a run of the schedule ${job.cronParent} — the grant is the schedule's`, code: 'bad_args' };
-    const on = grant === true;
-    if ((job[DW.GRANT_FIELD] === true) === on) return { changed: false, [DW.GRANT_FIELD]: on, wakeGrantBy: job.wakeGrantBy || null };
+  /** THE ONE DOOR FOR A CHANGE OF A WAKE GRANT (lane lg-store-writes — 主开发's shape of 2026-11-20 08:17Z, after three rounds whose
+   *  musts came from the cure itself): set or withdrawn, EVERY caller goes through it — the person's act route, the key's verb
+   *  jobs.wakeGrant, the proposals' card, the END card's ticks (test-end-proposal's census finds any other caller of the apply red).
+   *  `changes` = [{ job | id, grant }] is ONE ACT: the changes applied, the writer asked ONCE for the whole act, its landing awaited
+   *  OFF THE LOOP on the writer's own bound (durable — never a synchronous wait on a queued write).
+   *   LANDED ⇒ every row done.
+   *   NOT LANDED ⇒ ONE TRUTH: exactly what this act changed is restored (each field only if it still holds this act's value), so
+   *     memory, the wake's judge and the disk agree; every changed row answers `not_now` BY NAME — nothing was changed.
+   *   INSIDE THE WAITING WINDOW the judge (wakeGrantOf) reads a SET as not yet made and a WITHDRAW as made: no wake is ever allowed
+   *     on a grant that is then restored, and a grant being withdrawn wakes nothing (its words wait, as for any refused wake).
+   *  → { ok, code?, why?, rows: [{ id, ok, changed, code?, error?, [GRANT_FIELD], wakeGrantBy }] } */
+  async changeWakeGrants(changes, { by = null, timeoutMs = WAKE_GRANT_LAND_MS } = {}) {
+    if (this.readOnly || !this.ready) { const error = this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly'; return { ok: false, code: 'not_ready', error, rows: [] }; }   // as its sibling writers
+    if (!by || (by.kind !== 'person' && by.kind !== 'key')) return { ok: false, code: 'wake_grant_person_only', error: DW.GRANT_REFUSAL, rows: [] };
+    const G = DW.GRANT_FIELD, rows = [], acted = [];
+    for (const c of Array.isArray(changes) ? changes : []) {
+      const job = c && (c.job || this.jobs.get(String(c.id || '')));
+      if (!job) { rows.push({ id: c && (c.id || null), ok: false, changed: false, code: 'not_found', error: 'no such job' }); continue; }
+      if (job.cronParent) { rows.push({ id: job.id, ok: false, changed: false, code: 'bad_args', error: `refused: ${job.id} is a run of the schedule ${job.cronParent} — the grant is the schedule's` }); continue; }
+      const on = c.grant === true;
+      if ((job[G] === true) === on) { rows.push({ id: job.id, ok: true, changed: false, [G]: on, wakeGrantBy: job.wakeGrantBy || null }); continue; }
+      const before = { on: job[G] === true, by: job.wakeGrantBy || null };
+      this._applyWakeGrant(job, on, by);
+      const after = { on, by: job.wakeGrantBy || null };
+      if (on) this._grantPending.add(job.id);
+      acted.push({ job, before, after });
+      rows.push({ id: job.id, ok: true, changed: true, [G]: on, wakeGrantBy: after.by });
+    }
+    if (!acted.length) return { ok: rows.every((r) => r.ok), rows };
+    this._save();
+    let landed = false;
+    try { landed = !!(await this._writer().durable(this.file, { timeoutMs })); } catch { landed = false; }
+    for (const a of acted) this._grantPending.delete(a.job.id);
+    if (landed) { for (const a of acted) { try { this.d.broadcast('jobs-updated', { id: a.job.id }); } catch { } } return { ok: rows.every((r) => r.ok), rows }; }
+    // ONE TRUTH: the act did not land — exactly what it changed goes back (a field another act moved since is left as it is)
+    const why = 'the storage did not take it in time — nothing was changed; ask again once it answers';
+    for (const a of acted) {
+      const j = a.job;
+      if ((j[G] === true) !== a.after.on || (j.wakeGrantBy || null) !== a.after.by) continue;
+      if (a.before.on) { j[G] = true; j.wakeGrantBy = a.before.by; } else { delete j[G]; delete j.wakeGrantBy; }
+      this._touch(j, { what: `the wake grant change was not saved (the storage did not take it in time) — ${a.before.on ? 'it may still wake' : 'it still does not wake'} its conversation after that conversation is ended on purpose` });
+      try { this.d.broadcast('jobs-updated', { id: j.id }); } catch { }
+    }
+    this._save();
+    this.d.log(`[jobs] a wake grant change of ${acted.length} job(s) did not land in ${Math.round(timeoutMs / 1000)} s — restored; said not now`);
+    const beforeOf = new Map(acted.map((a) => [a.job.id, a.before]));
+    return { ok: false, code: 'not_now', why, rows: rows.map((r) => (beforeOf.has(r.id) ? { ...r, ok: false, changed: false, code: 'not_now', error: why, [G]: beforeOf.get(r.id).on, wakeGrantBy: beforeOf.get(r.id).by } : r)) };
+  }
+  /** the change in memory only — THE ONE DOOR above is its only caller (its write, its landing and its restore are the door's) */
+  _applyWakeGrant(job, on, by) {
     if (on) { job[DW.GRANT_FIELD] = true; job.wakeGrantBy = { by: String(by.by || by.kind), at: now(), kind: by.kind, ...(by.name ? { name: String(by.name).slice(0, 80) } : {}) }; }
     else { delete job[DW.GRANT_FIELD]; delete job.wakeGrantBy; }
     const who = by.kind === 'person' ? 'the person' : `the key ${by.name ? '«' + String(by.name).slice(0, 80) + '»' : by.by}`;
     this._touch(job, { what: on ? `may now wake its conversation after that conversation is ended on purpose (set by ${who})` : `no longer wakes its conversation after that conversation is ended on purpose (cleared by ${who})` });
-    this._save();
-    try { this.d.broadcast('jobs-updated', { id: job.id }); } catch { }
-    return { changed: true, [DW.GRANT_FIELD]: on, wakeGrantBy: job.wakeGrantBy || null };
   }
   /** the doors' rows for these jobs (piece 7): the facts each row needs, the NAME through the ONE accessor (labelOf); a CLEARED
    *  job answers its id (the clear honoured at the read) */
@@ -4097,7 +4142,7 @@ class JobManager {
   wakeGrantOf(jobId) {
     const j = this.jobs.get(jobId) || null;
     const g = j && (j.cronParent ? this.jobs.get(j.cronParent) : j);
-    return g && g[DW.GRANT_FIELD] === true ? { granted: true, by: g.wakeGrantBy || null } : { granted: false, by: null };
+    return g && g[DW.GRANT_FIELD] === true && !this._grantPending.has(g.id) ? { granted: true, by: g.wakeGrantBy || null } : { granted: false, by: null };   // (a SET still waiting for its landing is not yet made — the door's window)
   }
   setMemory(job, raw, { byUser = false } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };

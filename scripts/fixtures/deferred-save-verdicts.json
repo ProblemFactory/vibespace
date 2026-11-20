@@ -261,12 +261,12 @@
   "stops": "the agent's «done»: it says not on disk"
  },
  {
-  "key": "jobs · src/jobs.js · JobManager.setWakeGrant · _save()",
+  "key": "jobs · src/jobs.js · JobManager.changeWakeGrants · _save()",
   "verdict": "waits",
-  "why": "The person's door answers through persisted() (the act route); the key's verb and the proposals' card answer at once — piece 7's residual, said in the line.",
-  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true",
-  "branch": "(saved ? {} : { notOnDisk: true",
-  "stops": "the person's «changed»: past the bound it says not on disk"
+  "why": "THE ONE DOOR for a wake grant: one act, its landing awaited off the loop on the writer's bound; not landed ⇒ what it changed is restored and every caller is told not now.",
+  "at": "src/jobs.js:try { landed = !!(await this._writer().durable(this.file, { timeoutMs })); } catch { landed = false; }",
+  "branch": "if (landed) {",
+  "stops": "every caller's «done»: not landed ⇒ restored, said not now"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.stop · _save()",

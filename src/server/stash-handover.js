@@ -531,8 +531,12 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       if (tookJobs.length && tookJobs.landed === false && typeof jm.whenNotifsLanded === 'function') {
         // the writer's own bound answers; a timer of our own beside it (a writer that never answers a bound never holds the reply for good;
         // NOT unref'd: the reply is awaited — an unref'd timer let a process with nothing else alive end with the hand-over unanswered)
-        const L = await Promise.race([jm.whenNotifsLanded({ timeoutMs: handoverLandMs }), new Promise((r) => { setTimeout(() => r({ landed: false }), handoverLandMs + 50); })]);
-        if (!(L && L.landed)) { jm.afterNotifsLanded(() => { persistDelivered(); changed(); }); return { ...out, notOnDisk: true, code: 'finishes-on-landing' }; }
+        let raceT = null, L = null;   // (the move check's small 2 + its read's should: our own timer is cleared however the race ends — a landing, a bound, a rejection)
+        try { L = await Promise.race([jm.whenNotifsLanded({ timeoutMs: handoverLandMs }), new Promise((r) => { raceT = setTimeout(() => r({ landed: false }), handoverLandMs + 50); })]); }
+        catch { L = { landed: false }; }
+        finally { if (raceT) clearTimeout(raceT); }
+        // (small 3: the record of delivery made at the landing is tried as its sibling is — a throw there never rejects a hand-over already posted and drained)
+        if (!(L && L.landed)) { try { jm.afterNotifsLanded(() => { persistDelivered(); changed(); }); } catch (e) { log.warn?.(`[stash] ${cid}: hand-over ${id}'s record of delivery could not wait for the notices' landing: ${(e && e.message) || e}`); } return { ...out, notOnDisk: true, code: 'finishes-on-landing' }; }
       }
       persistDelivered();
       changed();

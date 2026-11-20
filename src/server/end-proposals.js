@@ -23,7 +23,7 @@ const FROM_NAME = 'VibeSpace proposals';   // src/notification-senders.js lists 
 const ANSWERED = 'answered', ALL_ENDED = 'all-ended';   // the card's two ends (src/foryou-actions.js row `ends` — a decision: nothing else closes it)
 const line = (s) => PT.toAgentText(String(s || ''), { kind: 'line', max: 120 });
 
-function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrant = null, jobOwnerOf = null, wakeRowsNow = null, heldWaitMs = 20000, log = () => { } } = {}) {
+function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrants = null, jobOwnerOf = null, wakeRowsNow = null, heldWaitMs = 20000, log = () => { } } = {}) {
   const inFlight = new Map();   // the cards a press is answering right now (id → that answer) — a second press is told so, the sweep leaves them alone, a proposal waits for it
   // THE OWNER BY ITS OWN ID (主开发 23:06Z): a job's record keeps its owner's conversation id only, so a key's backend is a guess when
   // the owner is not live — the press, the end card's ticks and the drawing compare and name by the conversation's id, never the key
@@ -66,7 +66,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
   /** A row of the list by what a caller names: its key, its conversation id, or its live webui id (to refuse a keyless one by name). */
   const rowFor = (rows, t) => rows.find((r) => r && ((r.key && (r.key === t || r.key.slice(r.key.indexOf(':') + 1) === t)) || r.id === t)) || null;
   // the press's act in piece 7's words: ONLY the person's own press ({kind:'human'} from the cookie-only route) becomes the jobs
-  // engine's { kind: 'person' } — anything else reaches setWakeGrant as null and is refused there by name
+  // engine's { kind: 'person' } — anything else reaches the one door (changeWakeGrants) as null and is refused there by name
   const personBy = (by) => (by && by.kind === 'human' ? { kind: 'person', by: 'person' } : null);
   const proposerOf = (caller) => (caller && typeof caller.sessionKey === 'string' && /^[a-z][\w-]*:\S+$/.test(caller.sessionKey) ? caller.sessionKey : null);
   const words = (n, name) => ({ key: n === 1 ? '«{name}» proposes ending 1 conversation' : '«{name}» proposes ending {n} conversations', params: { name, n } });
@@ -276,17 +276,26 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
     }
     const yes = new Set(grant.map(String));
     const changes = rows.filter((r) => (r.grant === true) !== yes.has(r.id));
-    if (changes.length && typeof setWakeGrant !== 'function') return { ok: false, code: 'not_ready', why: 'the jobs engine is not wired — nothing was written' };
+    if (changes.length && typeof setWakeGrants !== 'function') return { ok: false, code: 'not_ready', why: 'the jobs engine is not wired — nothing was written' };
     out.unchanged = rows.filter((r) => !changes.includes(r));
     const landed = new Map();
+    // THE ONE DOOR (lane lg-store-writes, 主开发 2026-11-20 08:17Z): the card's rows are ONE ACT — one landing mapped onto every row;
+    // not landed ⇒ every changed row back as it was (one truth) and REFUSED not_now: the card stays open showing what is true
+    const act = [];
     for (const r of changes) {
       const o = typeof jobOwnerOf === 'function' ? jobOwnerOf(r.id) : null;
       if (!o) { out.gone.push(r); continue; }
       if (r.owner && ownId(o) !== ownId(r.owner)) { out.moved.push(r); continue; }
-      const w = await setWakeGrant(r.id, yes.has(r.id), personBy(by));
-      if (w && w.code === 'not_found') { out.gone.push(r); continue; }
-      if (w && w.error) { out.refused.push({ ...r, refused: w.code || 'refused' }); continue; }
-      (yes.has(r.id) ? out.granted : out.withdrawn).push(r); landed.set(r.id, yes.has(r.id));
+      act.push(r);
+    }
+    if (act.length) {
+      const a = await setWakeGrants(act.map((r) => ({ id: r.id, grant: yes.has(r.id) })), personBy(by));
+      for (const r of act) {
+        const w = ((a && a.rows) || []).find((x) => x && x.id === r.id) || null;
+        if (w && w.code === 'not_found') { out.gone.push(r); continue; }
+        if (!w || !w.ok) { out.refused.push({ ...r, refused: (w && w.code) || (a && a.code) || 'refused' }); continue; }
+        (yes.has(r.id) ? out.granted : out.withdrawn).push(r); landed.set(r.id, yes.has(r.id));
+      }
     }
     let open = out.refused.length > 0;
     if (open) { try { userTodos.setCard(it.id, { ...card, rows: rows.map((r) => (landed.has(r.id) ? { ...r, grant: landed.get(r.id) } : r)) }); } catch { } }

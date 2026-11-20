@@ -271,7 +271,8 @@ const CLASS = {
   '_finalizeRun#5': 'end', '_sweepPass#1': 'event', '_sweepPass#2': 'event', '_untilScan#1': 'event', '_cronTick#1': 'alarm',
   '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event', 'withdrawAsk#1': 'event',   // B-8bd5: the filer withdraws its panel
   '_startAskedAtStop#1': 'alarm',   // B-cac2 (cure r1): a start asked during a stop that cannot be done — said in its events and to its owner
-  'setWakeGrant#1': 'event',   // the manager design's piece 7: the grant set / cleared (by the person or a key) — a fact on the job's own journal
+  '_applyWakeGrant#1': 'event',   // the manager design's piece 7: the grant set / cleared (by the person or a key) — a fact on the job's own journal (the one door's apply, lane lg-store-writes)
+  'changeWakeGrants#1': 'event',   // the one door's ONE TRUTH: a change that did not land, restored — said on the job's own journal
   '_hubMainRefusal#1': 'event',   // B-2c5c (THE MAIN DOOR): a stop, a time limit or an until-marker REFUSED because the job's main is this hub — said on the row, once a run and a road
   // lane lg-store-writes (the U4/U5 cure and cure 2, met at the move): a start REFUSED because its run could not be recorded on disk
   // (the alarm the refusal raises), and a one-shot schedule whose fire was refused for that (parked failed, said)
@@ -344,7 +345,8 @@ const DRIVERS = {
   '_cronTick#1': async () => { const j = mkJob(jm, { kind: 'cron', name: 'drv-missed', schedule: { at: Date.now() + 3600e3 }, catchUp: 'none', action: { type: 'notify', text: 'drv' } }); j.nextFireAt = Date.now() - 600000; const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); try { await jm._cronTick(); } catch { } for (const [k, v] of keep) jm.jobs.set(k, v); return j; },
   '_fireCron#1': async () => { const j = mkJob(jm, { kind: 'cron', name: 'drv-fire', schedule: { everyMs: 3600e3 }, action: { type: 'notify', text: 'post the digest' } }); jm._fireCron(j, 'cron'); return j; },
   'setMemory#1': async () => { const j = task('drv-memory'); jm.setMemory(j, '2G', { byUser: true }); return j; },
-  'setWakeGrant#1': async () => { const j = task('drv-wake-grant'); jm.setWakeGrant(j, true, { by: { kind: 'person', by: 'person' } }); return j; },
+  '_applyWakeGrant#1': async () => { const j = task('drv-wake-grant'); await jm.changeWakeGrants([{ job: j, grant: true }], { by: { kind: 'person', by: 'person' } }); return j; },
+  'changeWakeGrants#1': async () => { const j = task('drv-wake-grant-not-landed'); const realW = jm._writer(); const un = stub(jm, { _writer: () => Object.assign(Object.create(realW), { durable: () => Promise.resolve(false) }) }); try { await jm.changeWakeGrants([{ job: j, grant: true }], { by: { kind: 'person', by: 'person' } }); } finally { un(); } return j; },
   '_spawn#1': async () => { const j = task('drv-start-not-on-disk'); const un = stub(jm, { _onDisk: (f, what) => (/intent/.test(String(what)) ? { ok: false, why: 'held by the storage at the bound (a stand-in)' } : { ok: true }) }); try { JobManager.prototype._spawn.call(jm, j, 'manual'); } catch { } un(); return j; },   // the REAL _spawn (the engine's is a stand-in that never spawns); the refused intent throws before any process
   '_cronTick#2': async () => { const j = mkJob(jm, { kind: 'cron', name: 'drv-fire-refused', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: 'drv' } }); j.nextFireAt = Date.now() - 1000; const keep = new Map(jm.jobs); jm.jobs.clear(); jm.jobs.set(j.id, j); const un = stub(jm, { _fireCron: () => { throw Object.assign(new Error('not started (cron): its run could not be recorded on disk first (a stand-in)'), { code: 'EVSNOTONDISK' }); } }); try { await jm._cronTick(); } catch { } un(); for (const [k, v] of keep) jm.jobs.set(k, v); return j; },
   'ask#1': async () => { const j = task('drv-ask'); j.state = 'up'; jm.ask(j, PANEL); return j; },

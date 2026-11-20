@@ -314,10 +314,12 @@ const listFacts = (() => { const CFX = require('./conversation-facts.js'); const
 // lane login-request-card (majordomo piece 3b): THE PROPOSAL CARD — an agent proposes a person-only act (an end; piece 7's wake grant); ONE
 // card per proposer, refreshed; the person's press through the person's doors (the Terminate; piece 7's setWakeGrant); the answer free
 // at the proposer's next turn (src/server/end-proposals.js + the cookie-only door src/routes/end-proposals.js)
-const wakeDoor = (jobId, yes, by) => (jobsWiring && typeof jobsWiring.setWakeGrant === 'function' ? jobsWiring.setWakeGrant(jobId, yes, by) : { error: 'the jobs engine is not wired', code: 'not_ready' });
+// THE ONE DOOR for a wake grant (lane lg-store-writes, 主开发 2026-11-20 08:17Z): a card's rows or an END card's ticks are ONE act — one
+// landing; not landed ⇒ nothing changed, said by name (src/jobs.js changeWakeGrants through jobs-wiring setWakeGrants)
+const wakeDoor = (changes, by) => (jobsWiring && typeof jobsWiring.setWakeGrants === 'function' ? jobsWiring.setWakeGrants(changes, by) : Promise.resolve({ ok: false, code: 'not_ready', error: 'the jobs engine is not wired', rows: [] }));
 const endProposals = require('./end-proposals.js').create({ userTodos, deliver, listFacts, endConversation: (target, by) => require('./conversation-ops.js').endConversation(target, by),
   liveKeys: () => [...activeSessions.values()].map((x) => { const cid = x && (x.backendSessionId || x.claudeSessionId); return cid ? `${x.backend || 'claude'}:${cid}` : null; }).filter(Boolean),
-  setWakeGrant: wakeDoor, storeWakeTicks: async (ticks, by) => { for (const t of ticks || []) { const r = await wakeDoor(t.id, t.grant === true, by); if (r && r.error) throw new Error(r.error); } },
+  setWakeGrants: wakeDoor, storeWakeTicks: async (ticks, by) => { const r = await wakeDoor(ticks, by); if (!r || !r.ok) { const bad = (r && r.rows || []).find((x) => !x.ok) || r || {}; throw Object.assign(new Error(bad.error || bad.why || (r && (r.error || r.why)) || 'the ticks were not stored'), { code: bad.code || (r && r.code) || 'failed' }); } },   // NOTHING IS ENDED over ticks that did not land (the END card fails the row)
   // the conversation a job WAKES (its owner — a cron run's schedule's), read from the jobs engine at the drawing AND at the press —
   // THE ONE READER (end-proposals jobOwnerReader: the backend from the live session that ADDRESSES it, the store judging by the id)
   jobOwnerOf: require('./end-proposals.js').jobOwnerReader({ getJobs: () => (jobsWiring && typeof jobsWiring.getJobs === 'function' ? jobsWiring.getJobs() : null), sessions: () => activeSessions.values(), addressableId: require('../claude-lock-capture.js').addressableId }),
