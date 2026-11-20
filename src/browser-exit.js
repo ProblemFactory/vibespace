@@ -91,7 +91,7 @@ function zoneVerdict(v) {
   const say = (why) => ({ ok: false, code: 'exit_timezone_invalid', error: `${why} — give a zone name like Asia/Shanghai` });
   if (!z) return { ok: true, value: '' };
   if (/^[+\-−]\d|^(?:utc|gmt)\s*[+\-−]\s*\d/i.test(z) || /^etc\/gmt[+\-]\d/i.test(z)) return say(`«${z.slice(0, 40)}» is an offset, not a time zone`);
-  if (z !== 'UTC' && !z.includes('/')) return say(`«${z.slice(0, 40)}» is an abbreviation, not a time zone`);
+  if (z.toUpperCase() !== 'UTC' && !z.includes('/')) return say(`«${z.slice(0, 40)}» is an abbreviation, not a time zone`);   // UTC in any case (B-9584 U1 r617: the runtime spells it UTC)
   let canon = '';
   try { canon = new Intl.DateTimeFormat('en-US', { timeZone: z }).resolvedOptions().timeZone; } catch { return say(`«${z.slice(0, 40)}» is not a time zone`); }
   return { ok: true, value: canon || z };   // kept in its CANONICAL spelling (asia/tokyo ⇒ Asia/Tokyo)

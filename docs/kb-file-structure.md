@@ -1922,7 +1922,7 @@ src/lib/browser-exit-dialog.js — «Check the exit…»: the press, what was re
 src/lib/browser-profile-commands.js — B-acb9: the two core commands a plugin's window runs (browser.profileProxy / browser.profileExitCheck): the card's own dialog, one word back, never a value. ⇒ kb-file-structure.md
 src/lib/browser-exit-words.js — PURE the exit check's page words: every code / unreadable kind the routes answer ⇒ the page's sentence; a server's or proxy's own words only as data after it; the kept exit's age ⇒ kb-features.md
 src/browser-exit.js — PURE the exit check's rules: checkUrlVerdict (https, no login, no private literal), readExitAnswer (the short key list), zoneVerdict (IANA via Intl), egressRecordOf (the hand-over's names) ⇒ kb-features.md
-src/browser-environment.js — PURE (B-9584 U1) a profile's own environment: SETTINGS, ONE table (time zone, language, location); this machine's / Automatic (the kept exit: keptExitOf, the one reader) / a value; resolveEnvironment says an Automatic it cannot follow
+src/browser-environment.js — PURE (B-9584 U1) THE CONTRACT of a profile's own environment: SETTINGS, ONE table (timezone, language, location); resolveEnvironment → told (the hand-over's object, or null) · geolocation (accuracy, blocked) · unfollowed (said at the start)
 ## TASK → FILE MAP (moved verbatim from CLAUDE.md "Common Tasks → File Location Map", lane claude-md-diet)
 
 | Task | Primary File(s) | Notes |
