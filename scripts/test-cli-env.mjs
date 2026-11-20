@@ -93,7 +93,16 @@ const ZALIAS = ZSH ? mkShell('zalias-shell', `while [ $# -gt 0 ]; do case "$1" i
 const asks = () => { try { return fs.readFileSync(F('asks.log'), 'utf8').split('\n').filter(Boolean).length; } catch { return 0; } };
 const alive = (pid) => { if (!(pid > 1)) return false; try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return !/^\d+ \(.*\) Z /.test(st); } catch { return false; } };
 const readPid = (n) => { try { return Number(fs.readFileSync(F(n), 'utf8').trim()) || 0; } catch { return 0; } };
-const deadSoon = async (pid) => { for (let i = 0; i < 200 && alive(pid); i++) await new Promise((r) => setTimeout(r, 5)); return !alive(pid); };
+// THE DEATH, MEASURED (主开发 2026-11-20 08:58Z — the .413 cut's box-zone red: «…the shell AND its rc's leftover child are dead» judged
+// through ~1 s of 5 ms looks (the deadSoon it replaces), at load 5–6, and both were dead a moment later): the WALL CLOCK bounds the wait
+// (DEATH_MS), and
+// the answer is how many ms after `t0` the process was gone (a zombie counts gone) — null = still alive at the bound
+const DEATH_MS = 5000;
+const diedWithin = async (pid, t0, bound = DEATH_MS) => { if (!(pid > 1)) return null; while (alive(pid) && Date.now() - t0 < bound) await new Promise((r) => setTimeout(r, 10)); return alive(pid) ? null : Date.now() - t0; };
+// a try's leftovers BY ITS OWN GROUP (the read: a try whose child pid was never written left its `sleep 60` to outlive the suite): every
+// process whose process group is that try's sleepy shell — its pid read from the file the try's own shell just wrote — AND whose command
+// line is the sleepy rc's (its script, or `sleep 60`): /proc evidence, never a name alone
+const reapGroup = (pg) => { if (!(pg > 1)) return; for (const d of fs.readdirSync('/proc')) { if (!/^\d+$/.test(d)) continue; try { const st = fs.readFileSync(`/proc/${d}/stat`, 'utf8'); if (Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[2]) !== pg) continue; const cmd = fs.readFileSync(`/proc/${d}/cmdline`, 'utf8'); if (cmd.includes(SLEEPY) || cmd.startsWith('sleep\u000060')) process.kill(Number(d), 'SIGKILL'); } catch { } } };
 /** the sleepy shell's pids, killed by this suite only when /proc says they are still OUR scratch processes */
 const reapSleepy = () => { for (const n of ['sleepy.pid', 'sleepy-child.pid']) { const pid = readPid(n); try { const cmd = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8'); if (cmd.includes('sleepy-shell') || cmd.includes('sleep\u000060')) process.kill(pid, 'SIGKILL'); } catch { } } };
 process.env.SHELL = REGSH; // the REAL default road (loginShellOf → process.env.SHELL) asks a scratch shell, never this machine's own
@@ -401,7 +410,7 @@ const M = mutantCopies('cli-env', REPO); // ONE copy set for ④ and ⑦ — its
 
 /** ⑤ THE SHELL RUNG — rows over a module (the real one or a mutant copy). The groups touch disjoint scratch state (each its
  *  own shell and files), so they run SIDE BY SIDE; rows come back in a fixed order. */
-async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], boundGuardMs = 0 } = {}) {
+async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], boundGuardMs = 0, printDeaths = false, deathMs = DEATH_MS } = {}) {
   if (typeof mod.askShell !== 'function') return [{ name: 'THE SHELL RUNG exists: cli-cmd.js exports askShell (the person\'s login shell asked where a CLI is)', pass: false, detail: 'no askShell' }];
   const S = require(path.join(REPO, 'src/login-shell.js'));
   const G = {
@@ -447,15 +456,26 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
         const guard = new Promise((res) => setTimeout(() => res({ kind: 'GUARD', why: `no answer by the guard` }), boundGuardMs || bound * 3));
         const a = await Promise.race([mod.askShell(NAME, { shell: SLEEPY, timeoutMs: bound }), guard]);
         clearInterval(tick);
-        r = { a, ticks };
+        r = { a, ticks, at: Date.now() };   // the bound's answer: the product killed both just before it resolved
         if (a.kind === 'GUARD' || (readPid('sleepy.pid') > 1 && readPid('sleepy-child.pid') > 1)) break;
+        reapGroup(readPid('sleepy.pid'));   // a try that wrote no child pid is retried: what it started goes first (its group, just written)
       }
-      const { a, ticks } = r;
+      const { a, ticks, at } = r;
       leg(`an rc that never returns (sleep 60): unanswered:timeout — ended by the bound, not the guard; the hub's loop ran meanwhile (${ticks} ticks)`, a.kind === 'unanswered' && a.why === 'timeout' && ticks >= 1, JSON.stringify(a));
       const sp = readPid('sleepy.pid'), sc = readPid('sleepy-child.pid');
-      const dead = a.kind !== 'GUARD' && (await deadSoon(sp)) && (await deadSoon(sc)); // the guard ended it ⇒ nobody killed them: red, reaped below
-      leg('…the shell (its pid) AND its rc\'s leftover child (its own session) are dead', sp > 1 && sc > 1 && dead, `shell ${sp} alive=${alive(sp)} child ${sc} alive=${alive(sc)}`);
-      if (!dead) reapSleepy();
+      // the product SIGKILLs the shell AND the probe's own session at the bound (src/server/cli-cmd.js reap: child.kill('SIGKILL') +
+      // process.kill(-pid, 'SIGKILL') — the probe is spawned detached, its own group); it promises no time: a killed task dies when the
+      // kernel next runs it, on a loaded box later than deadSoon's ~1 s. Each death is WAITED for on the wall clock (DEATH_MS, both at
+      // once) and its time is the leg's own fact; a process the product never signalled stays alive past the bound: red (⑦'s mutant)
+      const [dS, dC] = a.kind !== 'GUARD' ? await Promise.all([diedWithin(sp, at, deathMs), diedWithin(sc, at, deathMs)]) : [null, null]; // the guard ended it ⇒ nobody killed them: red, reaped below
+      const dead = dS !== null && dC !== null;
+      const said = (pid, d) => (a.kind === 'GUARD' ? `${pid > 1 ? pid : '(no pid written)'} not waited for (the guard answered, not the bound)` : !(pid > 1) ? 'no pid written' : `${pid} ${d === null ? `ALIVE ${deathMs} ms after the bound answered` : `died ${d} ms after the bound answered`}`);
+      leg('…the shell (its pid) AND its rc\'s leftover child (its own session) are dead', sp > 1 && sc > 1 && dead, `shell ${said(sp, dS)} · child ${said(sc, dC)}`);
+      if (printDeaths) console.log(`    [the rc that never returns] the shell died ${dS === null ? 'NOT' : dS + ' ms'} and its leftover child ${dC === null ? 'NOT' : dC + ' ms'} after the bound answered (waited up to ${deathMs} ms)`);
+      if (!dead) {   // nobody's kill ended them (a mutant, the guard): reaped here — after the shell had a bounded moment to write its pids
+        for (const t0r = Date.now(); Date.now() - t0r < 1000 && !(readPid('sleepy.pid') > 1 && readPid('sleepy-child.pid') > 1);) await new Promise((res) => setTimeout(res, 20));
+        reapSleepy(); reapGroup(readPid('sleepy.pid'));
+      }
     },
   };
   const rows = await Promise.all(groups.map(async (g) => { const out = []; const push = (name, pass, detail) => out.push({ name, pass: !!pass, detail }); try { await G[g](push); } catch (e) { push(`the rung's «${g}» legs ran to their end`, false, e && e.stack); } return out; }));
@@ -540,7 +560,7 @@ async function registryLegs(mod, { slow = true } = {}) {
 }
 
 console.log('⑤ the login-shell rung over scratch shells');
-for (const r of await rungLegs(CLI)) ok(r.name, r.pass, r.detail);
+for (const r of await rungLegs(CLI, { printDeaths: true })) ok(r.name, r.pass, r.detail);
 let LSmod = null; try { LSmod = require(path.join(REPO, 'src/login-shell.js')); } catch (e) { ok('THE LADDER is spelled once: src/login-shell.js loads (the dial road\'s S0 and the local ask read it)', false, e.message.split('\n')[0]); }
 if (LSmod && typeof CLI.loginShellOf === 'function') {
   const LS = LSmod;
@@ -728,6 +748,8 @@ else {
 }
 
 // ⑦'s mutants START here and run beside ⑧–⑩ (disjoint scratch state); their rows print after ⑩
+let sleepyChain = Promise.resolve();
+const sleepyTurn = (f) => (sleepyChain = sleepyChain.then(f, f));   // the sleepy rc writes ONE pair of pid files: its mutants take turns
 const SEVEN = (() => {
   const cc = read('src/server/cli-cmd.js');
   const MUT = [
@@ -735,7 +757,9 @@ const SEVEN = (() => {
     ['sentinel parse removed (the first printed line is the answer)', '      const p = LS.parseShellAnswer(out);', "      const p = { complete: true, pathDone: true, cv: out.split('\\n').map((l) => l.trim()).filter(Boolean)[0] || '', path: null };", (m) => rungLegs(m, { groups: ['noisy'] }), /LAST pair wins|kind:none/],
     ['env unsanitized (the hub\'s process.env handed to the shell)', "env: serviceEnv(env, { keep: ['USER', 'LOGNAME'], add: { SHELL: shell, TERM: 'dumb', VIBESPACE_SHELL_PROBE: '1' } })", "env: { ...env, SHELL: shell }", (m) => rungLegs(m, { groups: ['env'] }), /SANITIZED ENV/],
     ['filter boot-only (B-544d: the shell\'s verdict ignored — the pre-fix /api/home)', '      if (missingOf(e)) return false;\n      // asked and NOT answered (the shell failed to start, timed out) is unknown, like not asked — only a real «none» says absent\n      return isAbs(e.current) || ((!e.answer || e.answer.kind === \'unanswered\') && !!unaskedBare);', '      return isAbs(e.current) || !!unaskedBare;', (m) => filterLegs(m), /^THE FILTER after the login shell found NO program/],
-    ['the bound removed (its timer ends nothing)', "    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);", '    timer = setTimeout(() => { }, timeoutMs);', (m) => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 40 }), /unanswered:timeout/],
+    ['the bound removed (its timer ends nothing)', "    timer = setTimeout(() => done({ kind: 'unanswered', why: 'timeout' }), timeoutMs);", '    timer = setTimeout(() => { }, timeoutMs);', (m) => sleepyTurn(() => rungLegs(m, { groups: ['sleepy'], boundGuardMs: 40 })), /unanswered:timeout/],
+    // 主开发 08:58Z: the death leg keeps its meaning — a leftover child the product did NOT signal (its session never killed) stays alive: red
+    ['session not signalled (only the shell is killed at the bound — the probe\'s own group never)', "    const killGroup = () => { if (child && Number.isInteger(child.pid) && child.pid > 1) { try { process.kill(-child.pid, 'SIGKILL'); } catch { } } };", '    const killGroup = () => { };', (m) => sleepyTurn(() => rungLegs(m, { groups: ['sleepy'], deathMs: 1500 })), /leftover child/],   // 1.5 s: the shell is gone at once, a child nobody signalled lives on (sleep 60) — the real leg keeps DEATH_MS
   ];
   const runs = MUT.map(([label, from, to, legs]) => cc.includes(from)
     ? legs(M.load('src/server/cli-cmd.js', cc.replace(from, to), label.split(' ')[0].replace(/[^a-z]/g, ''))).then((rs) => rs.filter((r) => !r.pass).map((r) => r.name))
@@ -997,7 +1021,7 @@ console.log('⑦ mutants of the shell rung (patched copies outside the tree, jud
     const red = reds[i];
     ok(`mutant «${label}» ⇒ RED (${red.length} red: ${red.slice(0, 2).join(' | ').slice(0, 160)})`, red.some((n) => want.test(n)), red.join(' | ').slice(0, 300));
   });
-  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 11 })) ok(r.name, r.pass, r.detail); // ④'s 3 + ⑦'s 5 + ⑪'s 3 (batch 63 cure: + the CLI's dir first, + a shorter ask prelude)
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 12 })) ok(r.name, r.pass, r.detail); // a FLOOR: ④'s 3 + ⑦'s 6 + ⑪'s 3 (⑪'s fourth and ⑨b's one write more) (batch 63 cure: + the CLI's dir first, + a shorter ask prelude)
 }
 
 // ⑫ NO SELF-FOUND AGENT CLI AT A HUB'S BOOT UNDER THE FLAG (B-ec25, lane bl-tests-e): a scratch hub booted with no stand-in
