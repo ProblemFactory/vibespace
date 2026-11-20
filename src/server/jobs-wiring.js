@@ -321,7 +321,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       else if (act === 'wake-grant') {   // THE ONE DOOR (src/jobs.js changeWakeGrants): answered once the change landed — not landed ⇒ 503 not_now, nothing changed
         return void jm.changeWakeGrants([{ job, grant: req.body?.grant === true }], { by: personHere(req) ? { kind: 'person', by: 'person' } : null }).then((a) => {
           const w = (a.rows || [])[0] || {};
-          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code });
+          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : (w.code || a.code) === 'busy' ? 409 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code });   // busy: an earlier change of this grant still waits (the door's order)
           const GF = require('../delivery-wake.js').GRANT_FIELD;
           res.json({ success: true, changed: !!w.changed, [GF]: w[GF] === true, wakeGrantBy: w.wakeGrantBy || null });
         }, (e) => res.status(500).json({ error: (e && e.message) || String(e), code: 'failed' }));

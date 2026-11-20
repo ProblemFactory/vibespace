@@ -354,6 +354,13 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
 }
 function rmButton(app, j, refresh) { const b = document.createElement('button'); b.className = 'jobs-btn'; b.textContent = '✕'; b.onclick = (ev) => { ev.stopPropagation(); jobAction(app, j, 'rm', refresh); }; return b; }
 
+/** the wake grant door's refusals in the page's words, by code (the hub's are English) — null: its own words stand */
+function grantRefusalWords(r) {
+  if (r && r.code === 'not_now') return t('Not saved: the storage did not take the change in time — nothing was changed. Ask again once it answers.');
+  if (r && r.code === 'busy') return t('Not saved: an earlier change of this is still waiting for the storage — this one was not made. Ask again once that one answers.');
+  return (r && r.error) || null;
+}
+
 async function expandDetail(app, el, j, refresh) {
   el.classList.add('jobs-open');
   // the user OPENED the row (triage §13 rule 1c): a terminal one-shot is now
@@ -428,8 +435,12 @@ async function expandDetail(app, el, j, refresh) {
     const gcb = document.createElement('input'); gcb.type = 'checkbox'; gcb.checked = job.wakesEndedOwner === true;
     const gl = document.createElement('span'); gl.textContent = t('May resume its conversation after that conversation was ended on purpose');
     gcb.onchange = async () => {
-      const r2 = await fetchJson(`/api/jobs/${j.id}/wake-grant`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant: gcb.checked }) });
-      if (!r2 || r2.error) { showToast((r2 && r2.error) || t('Save failed'), { type: 'error' }); gcb.checked = !gcb.checked; }
+      // ONE ACT AT A TIME (主开发 2026-11-20 08:50Z): the tick is not pressable while its own request is out — a second press inside
+      // the waiting window would be a second act on the same grant (the hub's door refuses it by name: busy)
+      gcb.disabled = true;
+      let r2 = null;
+      try { r2 = await fetchJson(`/api/jobs/${j.id}/wake-grant`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant: gcb.checked }) }); } finally { gcb.disabled = false; }
+      if (!r2 || r2.error) { showToast(grantRefusalWords(r2) || t('Save failed'), { type: 'error' }); gcb.checked = !gcb.checked; }
     };
     gr.append(gcb, gl);
     const gw = grantByWords(job.wakesEndedOwner === true ? job.wakeGrantBy : null);   // who allowed it, and when

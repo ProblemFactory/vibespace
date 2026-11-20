@@ -14530,6 +14530,8 @@ export default {
   "scroll::right": "右へ",
   "Jobs and schedules it owns — a ticked one may resume it later to deliver its result:": "この会話が持つジョブとスケジュール — チェックしたものは後で会話を再開して結果を届けられます：",
   "May resume its conversation after that conversation was ended on purpose": "会話が意図的に終了された後でも、その会話を再開できる",
+  "Not saved: the storage did not take the change in time — nothing was changed. Ask again once it answers.": "保存されていません：ストレージへの書き込みが間に合いませんでした——何も変更していません。ストレージが応答したらもう一度お試しください。",
+  "Not saved: an earlier change of this is still waiting for the storage — this one was not made. Ask again once that one answers.": "保存されていません：以前の変更がまだストレージを待っています——今回の変更は行っていません。その結果が出てからもう一度お試しください。",
   "Resumed {when} to deliver: {what}": "{when} に次を届けるため再開：{what}",
   "Resumed {when} to deliver: {what} — you allowed it": "{when} に次を届けるため再開：{what} — あなたが許可しました",
   "Resumed {when} to deliver: {what} — allowed by the key «{by}»": "{when} に次を届けるため再開：{what} — キー「{by}」が許可しました",

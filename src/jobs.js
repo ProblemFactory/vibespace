@@ -131,6 +131,13 @@ const JOB_CPU_WEIGHT = 33;   // B-f494: a lowered job's scope CPUWeight — nice
 // measured on the owner's hub; an install + build bounded at minutes) — past it, the install itself is broken: a fault
 const UPDATE_WINDOW_MS = 15 * 60 * 1000;
 const WAKE_GRANT_LAND_MS = 20_000;   // lane lg-store-writes: the wake grant door's wait for its landing (off the loop), the writer's own bound
+/** THE ORDER of the grant's door (主开发's must of 2026-11-20 08:50Z, round wpmw57sta): acts on ONE job's grant are ONE AT A TIME — a
+ *  second act on a job whose act still waits for its landing is refused BY NAME before anything is applied (never applied on top of
+ *  an unlanded value, never «already as asked» from one), and so is any act while the jobs file's last landing has not come within
+ *  its bound (the storage behind: the common stalled case never enters the window) */
+const WAKE_GRANT_BUSY = 'a change of this grant is still waiting for the storage — this one was not made; ask again once that one answers';
+const WAKE_GRANT_BEHIND = 'the storage has not taken the last change of the jobs yet — nothing was changed; ask again once it answers';
+const WAKE_GRANT_NOT_LANDED = 'the storage did not take it in time — nothing was changed (it was put back; if the storage takes it late, the panel shows what holds); ask again once it answers';
 const now = () => Date.now();
 const rid = () => 'jb-' + crypto.randomBytes(4).toString('hex');
 // triage archive (design §13): newest ARCHIVE_CAP records kept; the sweep
@@ -230,7 +237,7 @@ class JobManager {
     this._sweepRun = null; this._sweepSkips = 0; // ONE JUDGE PER RUN END (round 5): a pass in flight is never entered twice
     this._reapLater = new Map();  // run → {job, tries}: a reap that did not finish (round 6: whoever started it) — retried by every tick
     this.jobs = new Map();
-    this._grantPending = new Set();   // job ids whose wake grant SET waits for its landing (the one door's window — the judge reads them as not yet set)
+    this._grantActs = new Map();   // job id → { act, on }: the ONE act waiting on that job's grant for its landing (the door's order — one at a time; the judge reads a SET in it as not yet made)
     this.readOnly = false;
     this.ready = false;
     this.events = [];            // ring of {ts, jobId, name, what, verb, alarm?} for injection — read ADDRESSED (updatesFor)
@@ -4093,39 +4100,50 @@ class JobManager {
   async changeWakeGrants(changes, { by = null, timeoutMs = WAKE_GRANT_LAND_MS } = {}) {
     if (this.readOnly || !this.ready) { const error = this.initError ? `jobs engine down: ${this.initError}` : 'jobs engine not ready — retry shortly'; return { ok: false, code: 'not_ready', error, rows: [] }; }   // as its sibling writers
     if (!by || (by.kind !== 'person' && by.kind !== 'key')) return { ok: false, code: 'wake_grant_person_only', error: DW.GRANT_REFUSAL, rows: [] };
-    const G = DW.GRANT_FIELD, rows = [], acted = [];
+    const G = DW.GRANT_FIELD, rows = [], acted = [], act = {};   // `act`: this act's own token — the marks it sets are its own
+    // THE STORAGE BEHIND (the round's should): the jobs file's last landing did not come within its bound (or its write failed) —
+    // refused BEFORE anything is applied, so the common stalled case never enters the waiting window
+    let behind = null;
+    try { behind = (this._writer().whyNotDurable && this._writer().whyNotDurable(this.file)) || null; } catch { behind = null; }
+    const refuse = (job, code, error) => rows.push({ id: job.id, ok: false, changed: false, code, error, [G]: job[G] === true, wakeGrantBy: job.wakeGrantBy || null });
     for (const c of Array.isArray(changes) ? changes : []) {
       const job = c && (c.job || this.jobs.get(String(c.id || '')));
       if (!job) { rows.push({ id: c && (c.id || null), ok: false, changed: false, code: 'not_found', error: 'no such job' }); continue; }
       if (job.cronParent) { rows.push({ id: job.id, ok: false, changed: false, code: 'bad_args', error: `refused: ${job.id} is a run of the schedule ${job.cronParent} — the grant is the schedule's` }); continue; }
+      // ONE AT A TIME (主开发's must, 08:50Z): an act still waiting on this job (another caller's, or this act's own earlier row) —
+      // refused by name, nothing applied: never on top of its unlanded value, never «already as asked» from it
+      if (this._grantActs.has(job.id)) { refuse(job, 'busy', WAKE_GRANT_BUSY); continue; }
       const on = c.grant === true;
-      if ((job[G] === true) === on) { rows.push({ id: job.id, ok: true, changed: false, [G]: on, wakeGrantBy: job.wakeGrantBy || null }); continue; }
+      if ((job[G] === true) === on) { rows.push({ id: job.id, ok: true, changed: false, [G]: on, wakeGrantBy: job.wakeGrantBy || null }); continue; }   // (no act waits on it: the value is the last verdict's)
+      if (behind) { refuse(job, 'not_now', WAKE_GRANT_BEHIND); continue; }
       const before = { on: job[G] === true, by: job.wakeGrantBy || null };
       this._applyWakeGrant(job, on, by);
       const after = { on, by: job.wakeGrantBy || null };
-      if (on) this._grantPending.add(job.id);
+      this._grantActs.set(job.id, { act, on });   // THE MARK IS THIS ACT'S: the judge reads a SET in it as not yet made; only this act lets it go
       acted.push({ job, before, after });
       rows.push({ id: job.id, ok: true, changed: true, [G]: on, wakeGrantBy: after.by });
     }
-    if (!acted.length) return { ok: rows.every((r) => r.ok), rows };
-    this._save();
+    const refusedCode = () => { const r = rows.find((x) => !x.ok); return r ? { code: r.code, why: r.error } : {}; };
+    if (!acted.length) return { ok: rows.every((r) => r.ok), ...refusedCode(), rows };
+    const release = () => { for (const a of acted) { const m = this._grantActs.get(a.job.id); if (m && m.act === act) this._grantActs.delete(a.job.id); } };
     let landed = false;
-    try { landed = !!(await this._writer().durable(this.file, { timeoutMs })); } catch { landed = false; }
-    for (const a of acted) this._grantPending.delete(a.job.id);
-    if (landed) { for (const a of acted) { try { this.d.broadcast('jobs-updated', { id: a.job.id }); } catch { } } return { ok: rows.every((r) => r.ok), rows }; }
-    // ONE TRUTH: the act did not land — exactly what it changed goes back (a field another act moved since is left as it is)
-    const why = 'the storage did not take it in time — nothing was changed; ask again once it answers';
-    for (const a of acted) {
-      const j = a.job;
-      if ((j[G] === true) !== a.after.on || (j.wakeGrantBy || null) !== a.after.by) continue;
-      if (a.before.on) { j[G] = true; j.wakeGrantBy = a.before.by; } else { delete j[G]; delete j.wakeGrantBy; }
-      this._touch(j, { what: `the wake grant change was not saved (the storage did not take it in time) — ${a.before.on ? 'it may still wake' : 'it still does not wake'} its conversation after that conversation is ended on purpose` });
-      try { this.d.broadcast('jobs-updated', { id: j.id }); } catch { }
-    }
-    this._save();
-    this.d.log(`[jobs] a wake grant change of ${acted.length} job(s) did not land in ${Math.round(timeoutMs / 1000)} s — restored; said not now`);
+    try {
+      this._save();
+      try { landed = !!(await this._writer().durable(this.file, { timeoutMs })); } catch { landed = false; }
+      if (landed) { release(); for (const a of acted) { try { this.d.broadcast('jobs-updated', { id: a.job.id }); } catch { } } return { ok: rows.every((r) => r.ok), ...refusedCode(), rows }; }
+      // ONE TRUTH: the act did not land — exactly what it changed goes back (ordered acts: nothing else moved it meanwhile)
+      for (const a of acted) {
+        const j = a.job;
+        if ((j[G] === true) !== a.after.on || (j.wakeGrantBy || null) !== a.after.by) continue;
+        if (a.before.on) { j[G] = true; j.wakeGrantBy = a.before.by; } else { delete j[G]; delete j.wakeGrantBy; }
+        this._touch(j, { what: `the wake grant change was not saved in time and was put back — ${a.before.on ? 'it may wake' : 'it does not wake'} its conversation after that conversation is ended on purpose, unless the storage takes the change late (the next read shows what holds)` });
+        try { this.d.broadcast('jobs-updated', { id: j.id }); } catch { }
+      }
+      this._save();
+    } finally { release(); }
+    this.d.log(`[jobs] a wake grant change of ${acted.length} job(s) did not land in ${Math.round(timeoutMs / 1000)} s — put back; said not now`);
     const beforeOf = new Map(acted.map((a) => [a.job.id, a.before]));
-    return { ok: false, code: 'not_now', why, rows: rows.map((r) => (beforeOf.has(r.id) ? { ...r, ok: false, changed: false, code: 'not_now', error: why, [G]: beforeOf.get(r.id).on, wakeGrantBy: beforeOf.get(r.id).by } : r)) };
+    return { ok: false, code: 'not_now', why: WAKE_GRANT_NOT_LANDED, rows: rows.map((r) => (beforeOf.has(r.id) ? { ...r, ok: false, changed: false, code: 'not_now', error: WAKE_GRANT_NOT_LANDED, [G]: beforeOf.get(r.id).on, wakeGrantBy: beforeOf.get(r.id).by } : r)) };
   }
   /** the change in memory only — THE ONE DOOR above is its only caller (its write, its landing and its restore are the door's) */
   _applyWakeGrant(job, on, by) {
@@ -4142,7 +4160,8 @@ class JobManager {
   wakeGrantOf(jobId) {
     const j = this.jobs.get(jobId) || null;
     const g = j && (j.cronParent ? this.jobs.get(j.cronParent) : j);
-    return g && g[DW.GRANT_FIELD] === true && !this._grantPending.has(g.id) ? { granted: true, by: g.wakeGrantBy || null } : { granted: false, by: null };   // (a SET still waiting for its landing is not yet made — the door's window)
+    const waiting = g && this._grantActs.get(g.id);
+    return g && g[DW.GRANT_FIELD] === true && !(waiting && waiting.on) ? { granted: true, by: g.wakeGrantBy || null } : { granted: false, by: null };   // (a SET still waiting for its landing is not yet made — the door's window)
   }
   setMemory(job, raw, { byUser = false } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };

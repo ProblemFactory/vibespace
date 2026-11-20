@@ -14531,6 +14531,8 @@ export default {
   "scroll::right": "向右",
   "Jobs and schedules it owns — a ticked one may resume it later to deliver its result:": "它拥有的后台任务与定时任务——勾选的那一项以后可以恢复它，送达自己的结果：",
   "May resume its conversation after that conversation was ended on purpose": "在其对话被有意结束后，仍可恢复该对话",
+  "Not saved: the storage did not take the change in time — nothing was changed. Ask again once it answers.": "未保存：存储没能及时写入这次修改——什么都没有改。等存储恢复后再试。",
+  "Not saved: an earlier change of this is still waiting for the storage — this one was not made. Ask again once that one answers.": "未保存：之前的一次修改还在等待存储——这一次没有执行。等那一次有结果后再试。",
   "Resumed {when} to deliver: {what}": "{when} 为送达以下内容而恢复：{what}",
   "Resumed {when} to deliver: {what} — you allowed it": "{when} 为送达以下内容而恢复：{what}——你允许过",
   "Resumed {when} to deliver: {what} — allowed by the key «{by}»": "{when} 为送达以下内容而恢复：{what}——由密钥「{by}」允许",

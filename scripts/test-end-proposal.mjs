@@ -444,8 +444,10 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
   // here, counted); every write is the real one.
   {
     const G = DW.GRANT_FIELD, PERSON = { kind: 'person', by: 'person' }, KEYBY = { kind: 'key', by: 'automation:k1', name: 'a test key' };
-    const st = { landing: true, landings: 0, watch: new Set(), seen: [] };
-    const standIn = (eng) => { const realW = eng._writer(); eng._writer = () => Object.assign(Object.create(realW), { durable: (file, o) => { if (file !== eng.file) return realW.durable(file, o); st.landings++; for (const id of st.watch) st.seen.push(eng.wakeGrantOf(id).granted); return st.landing ? realW.durable(file, o) : Promise.resolve(false); } }); };
+    const st = { landing: true, landings: 0, watch: new Set(), seen: [], hold: false, held: [], behind: null };
+    // st.hold: the jobs file's landing WAITS until the leg answers it (st.held.shift()(true | false)); st.behind: the writer reports the
+    // file's last landing missed its bound (whyNotDurable)
+    const standIn = (eng) => { const realW = eng._writer(); eng._writer = () => Object.assign(Object.create(realW), { durable: (file, o) => { if (file !== eng.file) return realW.durable(file, o); st.landings++; for (const id of st.watch) st.seen.push(eng.wakeGrantOf(id).granted); if (st.hold) return new Promise((res) => st.held.push(res)); return st.landing ? realW.durable(file, o) : Promise.resolve(false); }, whyNotDurable: (file) => (file === eng.file && st.behind ? { ...st.behind } : (realW.whyNotDurable ? realW.whyNotDurable(file) : null)) }); };
     standIn(jm);
     const DOOR_SRC = read('src/jobs.js'), RESTORE_A = "      if ((j[G] === true) !== a.after.on || (j.wakeGrantBy || null) !== a.after.by) continue;";
     // (1) THE DOOR — set and withdraw, landed and not; inside the waiting window a SET is not yet made; a second press once back works
@@ -497,7 +499,7 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
     let rr = null; try { rr = await routeRun(require(path.join(REPO, 'src/server/jobs-wiring.js'))); } catch (e) { rr = { error: (e && e.message) || String(e) }; }
     ok(rr && rr.ps && rr.ps.status === 503 && rr.ps.body.code === 'not_now' && rr.pl.status === 200 && rr.pl.body.changed === true && rr.pw.status === 503 && rr.pw.body.code === 'not_now' && rr.pwl.status === 200 && rr.held === false,
       'THE PERSON\'S ACT ROUTE through the one door: not landed ⇒ 503 not_now by name, nothing changed; landed ⇒ done — a set, then a withdrawal', rr);
-    const ROUTE_A = "          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code });";
+    const ROUTE_A = "          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : (w.code || a.code) === 'busy' ? 409 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code });   // busy: an earlier change of this grant still waits (the door's order)";
     let rx = null; try { rx = await routeRun(loadMutated('src/server/jobs-wiring.js', (s0) => anchored(s0, ROUTE_A, '', 'route-ignores-door'))); } catch (e) { rx = { error: (e && e.message) || String(e) }; }
     ok(rx && rx.ps && rx.ps.status === 200, 'RED CONTROL (the route\'s refusal cut, in a copy): the person is told the grant is set for a change that did not land', rx && rx.ps);
     // (4) THE PROPOSALS' CARD — 20 rows are ONE act (ONE landing); not landed ⇒ every row refused not_now, the card OPEN showing what is
@@ -542,6 +544,135 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
     ok(ex.ended === 1, 'RED CONTROL (the END card\'s ticks refusal swallowed, in a copy): the conversation is ENDED over ticks that did not land', { ended: ex.ended });
     // the hub's storeWakeTicks (mounts-plugins-wiring) throws BY NAME on an act that did not land — the leg above drives its mirror
     ok(/storeWakeTicks: async \(ticks, by\) => \{ const r = await wakeDoor\(ticks, by\); if \(!r \|\| !r\.ok\) \{/.test(read('src/server/mounts-plugins-wiring.js')), 'the hub\'s storeWakeTicks hands the ticks to the one door as ONE act and throws by name when it did not land (the mirror the leg drives; a pin)');
+    // (6) THE ORDER (主开发's must, 2026-11-20 08:50Z, round wpmw57sta): ACTS ON ONE JOB'S GRANT ARE ONE AT A TIME — a second act on a
+    // job whose act still waits is refused BY NAME before anything is applied (`busy`), never applied on top of the unlanded value and
+    // never «already as asked» from it; any act is refused while the writer reports the jobs file behind. The storage held by hand here
+    // (st.hold: each landing answered by the leg). RED (anchored, in a copy): the busy refusal cut — each scene ends at a value no act
+    // landed, or an END over a grant that is then put back
+    const BUSY_A = "      if (this._grantActs.has(job.id)) { refuse(job, 'busy', WAKE_GRANT_BUSY); continue; }";
+    const BEHIND_A = "      if (behind) { refuse(job, 'not_now', WAKE_GRANT_BEHIND); continue; }";
+    const nextTurn = () => new Promise((r) => setImmediate(r));
+    const diskJob = async (eng, id) => {
+      st.hold = false; st.landing = true;
+      try { await eng._writer().durable(eng.file, { timeoutMs: 5000 }); } catch { }
+      let found = null;
+      const walk = (o) => { if (found || !o || typeof o !== 'object') return; if (!Array.isArray(o) && o.id === id) { found = o; return; } for (const v of Array.isArray(o) ? o : Object.values(o)) walk(v); };
+      try { walk(JSON.parse(fs.readFileSync(eng.file, 'utf8'))); } catch { }
+      return found;
+    };
+    const engineOf = (mutate) => {
+      if (!mutate) return { eng: jm, mkj: mk, door: wiringDoor, stop() { } };
+      const JM2 = loadMutated('src/jobs.js', mutate);
+      const e2 = new JM2.JobManager({ dataDir: fs.mkdtempSync(path.join(scratch, 'jobs-order-')), broadcast() { }, log() { }, notifyUser() { return { ok: true }; }, deliverToConversation: async () => ({ ok: true }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true });
+      hush(() => e2.init()); for (const t of e2._timers || []) clearInterval(t); standIn(e2);
+      const mkj = (name) => { const r = hush(() => e2.create({ kind: 'cron', name, schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: name }, owner: OWN, access: { view: 'session', control: 'session' } }, OWNER)); if (!r.job) throw new Error('create: ' + JSON.stringify(r)); return e2.jobs.get(r.job.id); };   // the engine's OWN record (create answers a view)
+      const door = (changes, by) => e2.changeWakeGrants((Array.isArray(changes) ? changes : []).map((c) => ({ id: String((c && c.id) || ''), grant: !!(c && c.grant === true) })), { by });
+      return { eng: e2, mkj, door, stop() { try { e2.shutdown(); } catch { } } };
+    };
+    // (6a) a SET then a WITHDRAW on one job, neither landed: the job ends at its ORIGINAL value, and each caller's words are true
+    const setThenWithdraw = async (E) => {
+      const J1 = E.mkj('order set-withdraw');
+      st.hold = true; st.held = [];
+      const pA = E.eng.changeWakeGrants([{ job: J1, grant: true }], { by: PERSON });   // the person's tick — its landing waits
+      await nextTurn();
+      const pB = E.eng.changeWakeGrants([{ job: J1, grant: false }], { by: PERSON });   // the untick inside the window
+      await nextTurn();
+      const mid = { field: J1[G] === true, judge: E.eng.wakeGrantOf(J1.id).granted };
+      while (st.held.length) st.held.shift()(false);   // nothing lands
+      const rA = await pA, rB = await pB;
+      await nextTurn(); while (st.held.length) st.held.shift()(false);
+      const d = await diskJob(E.eng, J1.id);
+      return { rA: { ok: rA.ok, code: rA.code }, rB: { ok: rB.ok, code: rB.code, changed: rB.rows[0] && rB.rows[0].changed }, mid, field: J1[G] === true, judge: E.eng.wakeGrantOf(J1.id).granted, disk: !!(d && d[G] === true) };
+    };
+    const o1 = await setThenWithdraw(engineOf(null));
+    ok(o1.rB.ok === false && o1.rB.code === 'busy' && o1.rB.changed === false && o1.mid.field === true && o1.mid.judge === false && o1.rA.code === 'not_now' && o1.field === false && o1.judge === false && o1.disk === false,
+      'THE ORDER: a set, then a withdrawal of the same job inside its waiting window — the second is refused BY NAME (busy), nothing applied; the first does not land and is put back: the job ends NOT granted in memory, for the judge and on disk, and both callers\' words are true', o1);
+    const E1x = engineOf((s0) => anchored(s0, BUSY_A, '', 'order-busy-cut'));
+    const o1x = await setThenWithdraw(E1x);
+    ok(o1x.field === true && o1x.judge === true && o1x.rA.code === 'not_now' && o1x.rB.code === 'not_now', 'RED CONTROL (the busy refusal cut, in a copy): the withdrawal is applied on top of the unlanded set and puts back ITS before — the job ends GRANTED though it started not granted and both callers were told nothing was changed', o1x);
+    E1x.stop();
+    // (6b) THE END CARD with a withdrawal in flight on one of its jobs: nothing is ended until that act's verdict
+    const endInFlight = async (E, tag) => {
+      const J2 = E.mkj('order end ' + tag);
+      st.hold = false; st.landing = true;
+      await E.eng.changeWakeGrants([{ job: J2, grant: true }], { by: PERSON });   // granted, landed
+      st.hold = true; st.held = [];
+      const pW = E.eng.changeWakeGrants([{ job: J2, grant: false }], { by: PERSON });   // the panel's withdrawal — its landing waits
+      await nextTurn();
+      const ew = world({ owners: { [J2.id]: 'claude:aaaa' }, setWakeGrants: E.door }, null);
+      ew.rows.set('claude:aaaa', raw('claude:aaaa'));
+      await ew.store.propose({ targets: 'claude:aaaa', why: 'idle' }, { caller: CALLER, reach });
+      const pid = openProps(ew)[0];
+      const r = await press(ew, pid, { terminate: ['claude:aaaa'], wakeTicks: [{ id: J2.id, grant: false }] });   // its tick off, as the panel asked
+      const endedMid = ew.ended.length;
+      while (st.held.length) st.held.shift()(false);   // the withdrawal does not land: put back
+      await pW; await nextTurn(); while (st.held.length) st.held.shift()(false);
+      st.hold = false; st.landing = true;
+      const out = { endedMid, failed: (r.failed || []).map((x) => x.failed), granted: E.eng.wakeGrantOf(J2.id).granted };
+      ew.stop();
+      return out;
+    };
+    const o2 = await endInFlight(engineOf(null), 'real');
+    ok(o2.endedMid === 0 && o2.failed.includes('ticks_not_stored') && o2.granted === true, 'THE ORDER at the END card: a withdrawal of its job still waits — the card\'s ticks are refused by name (never «already as asked» from the unlanded value), NOTHING is ended; the withdrawal is then put back: the grant stands on a conversation that was not ended', o2);
+    const E2x = engineOf((s0) => anchored(s0, BUSY_A, '', 'order-busy-cut-end'));
+    const o2x = await endInFlight(E2x, 'red');
+    ok(o2x.endedMid === 1 && o2x.granted === true, 'RED CONTROL (the busy refusal cut, in a copy): the card sees «already as asked» over the unlanded withdrawal, the conversation is ENDED, and the withdrawal is then put back — a grant on an ended conversation (a billed wake)', o2x);
+    E2x.stop();
+    // (6c) THREE acts on one job: the second and third are refused, the first's landing is the truth, its mark its own
+    const threeActs = async (E) => {
+      const J3 = E.mkj('order three');
+      st.hold = true; st.held = [];
+      const pA = E.eng.changeWakeGrants([{ job: J3, grant: true }], { by: PERSON });
+      await nextTurn();
+      const pB = E.eng.changeWakeGrants([{ job: J3, grant: false }], { by: PERSON });
+      await nextTurn();
+      const pC = E.eng.changeWakeGrants([{ job: J3, grant: true }], { by: KEYBY });
+      await nextTurn();
+      const judgeWaiting = E.eng.wakeGrantOf(J3.id).granted;
+      st.held.shift()(true);   // the FIRST lands
+      const rA = await pA;
+      while (st.held.length) st.held.shift()(false);   // anything after it does not
+      const rB = await pB, rC = await pC;
+      await nextTurn(); while (st.held.length) st.held.shift()(false);
+      const d = await diskJob(E.eng, J3.id);
+      return { judgeWaiting, rA: { ok: rA.ok }, rB: { ok: rB.ok, code: rB.code }, rC: { ok: rC.ok, code: rC.code }, field: J3[G] === true, judge: E.eng.wakeGrantOf(J3.id).granted, disk: !!(d && d[G] === true) };
+    };
+    const o3 = await threeActs(engineOf(null));
+    ok(o3.judgeWaiting === false && o3.rA.ok === true && o3.rB.code === 'busy' && o3.rC.code === 'busy' && o3.field === true && o3.judge === true && o3.disk === true,
+      'THE ORDER, three acts on one job: the second and the third are refused by name while the first waits (its set not yet made for the judge); the first LANDS — granted in memory, for the judge and on disk, as it was told', o3);
+    const E3x = engineOf((s0) => anchored(s0, BUSY_A, '', 'order-busy-cut-three'));
+    const o3x = await threeActs(E3x);
+    ok(o3x.rA.ok === true && o3x.field === false, 'RED CONTROL (the busy refusal cut, in a copy): the later acts apply on top of the first, and the last one\'s put-back takes the job back to a value NO act landed — not granted, though the first landed and was told granted, and the others said nothing was changed', o3x);
+    E3x.stop();
+    // (6d) THE STORAGE BEHIND: the writer reports the jobs file's last landing missed its bound — an act is refused BEFORE it is applied
+    const behindRun = async (E) => {
+      const J4 = E.mkj('order behind');
+      st.hold = false; st.landing = false; st.behind = { why: 'queued', ahead: 1, lastMs: 21000 };
+      const l0 = st.landings;
+      const r = await E.eng.changeWakeGrants([{ job: J4, grant: true }], { by: PERSON });
+      st.behind = null; st.landing = true;
+      return { ok: r.ok, code: r.code, why: r.why || '', asked: st.landings - l0, field: J4[G] === true };
+    };
+    const o4 = await behindRun(engineOf(null));
+    ok(o4.ok === false && o4.code === 'not_now' && /has not taken the last change/.test(o4.why) && o4.asked === 0 && o4.field === false, 'THE STORAGE BEHIND: an act is refused not_now BY NAME before anything is applied — no landing asked, the job as it was (the common stalled case never enters the waiting window)', o4);
+    const E4x = engineOf((s0) => anchored(s0, BEHIND_A, '', 'order-behind-cut'));
+    const o4x = await behindRun(E4x);
+    ok(o4x.asked === 1, 'RED CONTROL (the behind refusal cut, in a copy): the act is applied and enters the waiting window on a storage already behind', o4x);
+    E4x.stop();
+    // (6e) THE PANEL: its tick is not pressable while its own request is out; the door's refusals are said in the page's words
+    const JP = read('src/lib/jobs-panel.js');
+    const tickAt = JP.indexOf('      gcb.disabled = true;'), fetchAt = JP.indexOf("r2 = await fetchJson(`/api/jobs/${j.id}/wake-grant`");
+    ok(tickAt > 0 && fetchAt > tickAt && JP.includes('} finally { gcb.disabled = false; }') && JP.includes("if (r && r.code === 'not_now') return t(") && JP.includes("if (r && r.code === 'busy') return t("),
+      'THE PANEL: the grant\'s tick is disabled before its request leaves and enabled once it answers (a second press inside the window cannot be made there); not_now and busy are said in the page\'s words (zh, ja)');
+    // (6f) THE FIELD'S WRITES: the grant field and its stamp are written ONLY inside the door (the apply, the put-back) — anywhere else red
+    const FIELD_W = /\[(?:DW\.|D\.)?GRANT_FIELD\] ?=[^=]|\[G\] ?=[^=]|\.wakesEndedOwner ?=[^=]|\.wakeGrantBy ?=[^=]|delete [\w.]+\[(?:DW\.|D\.)?GRANT_FIELD\]|delete [\w.]+\.wakeGrantBy|delete \w+\[G\]|delete [\w.]+\.wakesEndedOwner/;
+    const fieldWrites = (files) => { const out = []; for (const [f, t] of files) t.split('\n').forEach((l, i) => { if (FIELD_W.test(l)) out.push(`${f}:${l.trim().slice(0, 90)}`); }); return out; };
+    const TREE = require('node:child_process').execFileSync('git', ['ls-files', 'src', 'server.js'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter((x) => /\.(c?js|mjs)$/.test(x)).map((f) => [f, read(f)]);
+    const fw = fieldWrites(TREE);
+    const ALLOWED = ['src/jobs.js:if (a.before.on) { j[G] = true; j.wakeGrantBy = a.before.by; } else { delete j[G]; delete j.wakeGrantBy; }', 'src/jobs.js:if (on) { job[DW.GRANT_FIELD] = true; job.wakeGrantBy = { by: String(by.by || by.kind), at: now(), kind: by.kind', 'src/jobs.js:else { delete job[DW.GRANT_FIELD]; delete job.wakeGrantBy; }'];
+    const fwPlant = fieldWrites([...TREE, ['src/a-new-import.js', '  job.wakesEndedOwner = true;']]);
+    ok(fw.length === 3 && fw.every((x) => ALLOWED.some((a0) => a0.startsWith(x.slice(0, 60)) || x.startsWith(a0.slice(0, 60)))) && fwPlant.length === 4 && fwPlant.some((x) => x.startsWith('src/a-new-import.js')),
+      'THE FIELD\'S WRITES: the grant and its stamp are written only by the door\'s apply and its put-back (3 lines of src/jobs.js); CONTROL (planted): a direct write in another file is found by name', { fw, plant: fwPlant.filter((x) => !fw.includes(x)) });
     // THE CENSUS: no caller of the engine's apply but the door, and the engine's old setter is gone
     const appliers = []; for (const f of require('node:child_process').execFileSync('git', ['ls-files', 'src', 'server.js'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter((x) => /\.(c?js|mjs)$/.test(x))) { const t = read(f); if (/\._applyWakeGrant\(|\.setWakeGrant\(job/.test(t)) appliers.push(f); }   // stale-pins: kept — an ABSENCE check: the old setter must stay gone
     ok(appliers.join() === 'src/jobs.js' && (read('src/jobs.js').match(/this\._applyWakeGrant\(/g) || []).length === 1 && !/^  setWakeGrant\(/m.test(read('src/jobs.js')), 'THE CENSUS: the engine\'s apply has ONE caller, the door (no other file sets a grant around it)', appliers);
