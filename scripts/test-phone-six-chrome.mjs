@@ -38,7 +38,8 @@
 //     ⑦d «Split» on a minimized window's row restores it beside the window on show, and a pane's window minimized ends
 //     the split, said, the pair dropped; ⑦e 669 × 867 beside the list column: a files window titled by a long path shows
 //     its folder's own name (the path in the title attribute), drawn whole or ≥ 8 em, a conversation's name too; a name
-//     that needs the room folds ⚙ into ⋯ (its row opens the settings), a short one («home») folds nothing
+//     that needs the room folds ⚙ into a ⋯ that stands (its row opens the settings); a files window's own menu holds no
+//     row in this class, so its ⋯ leaves the bar and ⚙ stays; a short name («home») folds nothing
 // RED: the same file run on the base tree (`--tree <a 91bf7e18 checkout, built>`) — every leg red, printed in the lane
 // report. Requires google-chrome (SKIP without) and a fresh `npm run build` of the tree.
 // Run: node scripts/test-phone-six-chrome.mjs [--tree <dir>] [--font dejavu|box] [--legs 1,2,3,4,5,6,7] [--shots <dir>]
@@ -626,7 +627,12 @@ try {
       const ncs = getComputedStyle(nav), sp = document.getElementById('mobile-nav-state');
       return { pad: ncs.paddingLeft + '/' + ncs.paddingRight + ' gap ' + ncs.columnGap, state: sp ? Math.round(sp.getBoundingClientRect().width) : null, navW: Math.round(nav.getBoundingClientRect().width), text: e.textContent, attr: e.title, w: Math.round(r.width), em, textW: Math.round(textW), full, last: full.split(/[\\\\/]+/).filter(Boolean).pop() || full, yield: nav.dataset.yield || '', listShown: !document.documentElement.classList.contains('vs-list-hidden'), col: Math.round(document.getElementById('workspace').getBoundingClientRect().width), btns }; })()`;
     await evalJs(`app._mobileNav.switchDesktop(${JSON.stringify(DESK.b)}); true`); await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(DESK.b)} && app.wm.windows.has(${JSON.stringify(FILES)})`, 8000);
-    await evalJs(`app.wm.revealWindow(${JSON.stringify(FILES)}); true`); await waitFor(`app.wm.activeWindowId === ${JSON.stringify(FILES)}`, 4000); await sleep(2500);
+    await evalJs(`app.wm.revealWindow(${JSON.stringify(FILES)}); true`); await waitFor(`app.wm.activeWindowId === ${JSON.stringify(FILES)}`, 4000);
+    // the files window holds a row as a conversation's menu does (a stand-in Download row — a viewer's own): its ⋯ stands, the
+    // room the fold below is measured in (主开发 2026-11-18 23:09Z: ⋯ stands only when it holds a row; a files window's OWN
+    // menu holds none in this class — the check after the fold)
+    await evalJs(`(() => { app.wm.windows.get(${JSON.stringify(FILES)})._fileDownload = { path: ${JSON.stringify(FILES_DIR)} }; app._updateMobileNavTitle(); return true; })()`);
+    const standIn = await waitFor(`!!document.getElementById('mobile-nav-more')?.classList.contains('on') && getComputedStyle(document.getElementById('mobile-nav-more')).display !== 'none'`, 4000); await sleep(2500);
     const e0 = await evalJs(HEAD);
     await shot('r2-title-669-files.png', { x: 0, y: 0, width: 669, height: 48 });
     await shot('r2-title-669-files-full.png');
@@ -638,7 +644,7 @@ try {
     // what yielded is still one tap away: ⚙ folded into ⋯ («Global settings» opens the settings), the Desktops door stays
     // the leg's premise, said by name (the checkpoint's red read yield '': the name fit, nothing yielded, ⋯ held no row): the
     // folder's readable minimum needs the room only ⚙'s fold gives (phone-head.js: this column leaves 104 px after 'win')
-    check(`⑦e …the name needs the room: «${e0.text}» keeps ${Math.round(mn0)} px only once ⚙ folds — the ladder reached 'gear' (it read «${e0.yield}»)`, e0.yield === 'gear', { e0, mn0 });
+    check(`⑦e …the name needs the room: «${e0.text}» keeps ${Math.round(mn0)} px only once ⚙ folds into the ⋯ its row makes stand — the ladder reached 'gear' (it read «${e0.yield}», ⋯ ${standIn ? 'on' : 'NOT on'})`, standIn && e0.yield === 'gear', { e0, mn0, standIn });
     const BAR = `({ gear: getComputedStyle(document.getElementById('mobile-nav-gear')).display, desks: getComputedStyle(document.getElementById('mobile-nav-desktops')).display, more: getComputedStyle(document.getElementById('mobile-nav-more')).display })`;
     const g0 = await evalJs(BAR);
     const m0 = await realClick('#mobile-nav-more');
@@ -649,13 +655,20 @@ try {
     const gs = await waitFor(`[...document.querySelectorAll('.global-settings-popover')].some((p) => getComputedStyle(p).display !== 'none' && p.getBoundingClientRect().width > 0)`, 4000);
     await evalJs(`document.querySelectorAll('.global-settings-popover, .taskbar-context-menu').forEach((e) => e.remove()); true`);
     check('⑦e …what yielded is one tap away: ⚙ folded into ⋯ — its «Global settings» row opens the settings —, the Desktops door and ⋯ stay on the bar', g0.gear === 'none' && g0.desks !== 'none' && g0.more !== 'none' && m0 && gRow && g1 && gs, { g0, m0, mRows, gRow, g1, gs, e0yield: e0.yield });
+    // …and a files window's OWN menu holds no row in this class (every window-manager verb is off): the stand-in row leaves ⇒ ⋯
+    // leaves the bar, and ⚙ — which folds only into a ⋯ that stands — is back on it; the name keeps its minimum in the room
+    await evalJs(`(() => { delete app.wm.windows.get(${JSON.stringify(FILES)})._fileDownload; app._updateMobileNavTitle(); return true; })()`);
+    const moreLeft = await waitFor(`getComputedStyle(document.getElementById('mobile-nav-more')).display === 'none' && getComputedStyle(document.getElementById('mobile-nav-gear')).display !== 'none'`, 4000);
+    const e3 = await evalJs(HEAD), g3 = await evalJs(BAR);
+    check(`⑦e …its own menu holds no row here: ⋯ leaves the bar, ⚙ is back on it (it folds only into a ⋯ that stands) and the name keeps ≥ ${Math.round(mn0)} px (${e3.w} px of ${e3.textW}; the ladder now «${e3.yield}»)`,
+      moreLeft && g3.more === 'none' && g3.gear !== 'none' && g3.desks !== 'none' && e3.text === e0.text && e3.w + 0.5 >= Math.min(e3.textW, mn0), { e3, g3, moreLeft });
     // …and the bar yields ONLY for a name that needs the room (the law's other half, read from the checkpoint's red: «home»
     // beside the list column — yield '', ⚙ on the bar): the same window shows the home folder
     const HN = path.basename(fakeHome);
     await evalJs(`app.wm.windows.get(${JSON.stringify(FILES)})?._explorer?.navigate(${JSON.stringify(fakeHome)}); true`);
     await waitFor(`document.getElementById('mobile-nav-title')?.textContent === ${JSON.stringify(HN)}`, 6000); await sleep(1200);
     const e2 = await evalJs(HEAD), g2 = await evalJs(BAR);
-    check(`⑦e …a short name («${HN}») needs no room: nothing yields — ⚙, the Desktops door and ⋯ stay on the bar`, e2.text === HN && e2.yield === '' && g2.gear !== 'none' && g2.desks !== 'none' && g2.more !== 'none', { e2, g2 });
+    check(`⑦e …a short name («${HN}») needs no room: nothing yields — ⚙ and the Desktops door stay on the bar (⋯, holding no row, is not on it)`, e2.text === HN && e2.yield === '' && g2.gear !== 'none' && g2.desks !== 'none' && g2.more === 'none', { e2, g2 });
     await evalJs(`app._mobileNav.switchDesktop(${JSON.stringify(DESK.one)}); true`); await waitFor(`app.desktopManager.activeDesktopId === ${JSON.stringify(DESK.one)} && app.wm.windows.has(${JSON.stringify(A)})`, 8000);
     await evalJs(`app.wm.revealWindow(${JSON.stringify(A)}); true`); await waitFor(`app.wm.activeWindowId === ${JSON.stringify(A)}`, 4000); await sleep(2500);
     const e1 = await evalJs(HEAD);

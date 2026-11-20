@@ -19,7 +19,7 @@
 import { t } from './i18n.js';
 import { UI_ICONS } from './icons.js';
 import { RAIL_ICONS } from './sidebar-rail.js';
-import { showWindowContextMenu, sessionForWin } from './taskbar.js';
+import { showWindowContextMenu, sessionForWin, windowMenuHolds } from './taskbar.js';
 import { openChannelsWindow } from './channels-panel.js';
 import { openJobsWindow } from './jobs-panel.js';
 import { openFilesDoor } from './phone-files.js';
@@ -81,6 +81,7 @@ export function installTrailingBar(app) {
   more.onclick = (e) => {
     e.stopPropagation();
     const w = activeWin(); if (!w) return;
+    if (!windowMenuHolds(app, w.id)) { update(); return; }   // its rows left since the last update: no empty menu — ⋯ leaves
     const r = more.getBoundingClientRect();
     const menu = showWindowContextMenu(app, w.id, r.left, r.top);
     // the menu opens INTO the conversation column, its top on the button's (SPEC-v3 §2.2): its RIGHT edge beside a vertical
@@ -119,7 +120,10 @@ export function installTrailingBar(app) {
     arts.classList.toggle('on', !!cv && w.type === 'chat');
     arts.title = t('Artifacts · {n}', { n }); arts.setAttribute('aria-label', arts.title);
     badge.textContent = n > 99 ? '99+' : String(n); badge.classList.toggle('hidden', !n);
-    more.classList.toggle('on', !!w);
+    // ⋯ STANDS ONLY WHEN IT HOLDS A ROW (主开发 2026-11-18 23:09Z): this class has no window-manager verb, so a files window's
+    // menu holds none — and ⚙ folds only into a ⋯ that stands (style.css). Its coming or going moves the head's room: re-fit.
+    const holds = !!w && windowMenuHolds(app, w.id), moved = holds !== more.classList.contains('on');
+    more.classList.toggle('on', holds);
     live.classList.toggle('on', conv && holdsBrowser(app, sessionForWin(app, w)));
     for (const { d, b } of dests) { const sel = !!d.on(app, w); b.classList.toggle('selected', sel); b.setAttribute('aria-pressed', sel ? 'true' : 'false'); }
     // the conversation's head = its name + its state word (SPEC-v3 §2.4): the title bar in landscape, the bar's title in portrait
@@ -131,6 +135,7 @@ export function installTrailingBar(app) {
     if (w?.titleSpan) { w.titleSpan.dataset.state = meta ? meta.label : ''; w.titleSpan.style.setProperty('--state-color', meta?.color || 'var(--text-dim)'); }
     stateEl.textContent = meta ? meta.label : '';
     stateEl.style.setProperty('--state-color', meta?.color || 'var(--text-dim)');
+    if (moved) app._mobileNav?._paintHead?.();
   }
   update();
   return { update, el: nav };

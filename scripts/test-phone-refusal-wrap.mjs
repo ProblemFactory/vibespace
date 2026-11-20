@@ -15,6 +15,10 @@
 //      CONTROL: the walk's 621 px picker over a 529 px chip top stands at y −96 unbounded
 //   ⑤ the wiring: the stylesheet rules (no sideways door in the New Session footer, the 44 px ✕, --dd-room), the port
 //      notice's plain words + the plug SVG (no emoji), requestClose speaking AFTER the close, every new word in zh + ja
+//   ⑥ the duo bar's ⋯ stands only when the window's menu holds a row (主开发 2026-11-18 23:09Z): taskbar.js windowMenuRows —
+//      the REAL window registry over the menu's own ctx — in the regular class: a files window holds none (the folded ⚙'s
+//      «Global settings» is no reason), a conversation, a download viewer and every window of the compact class do; a gone
+//      window holds nothing (the PURE rule + its RED control: test-phone-split ⑩)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -25,7 +29,7 @@ const TB = await import(path.join(REPO, 'src/lib/taskbar.js'));
 const SB = await import(path.join(REPO, 'src/lib/chat-status-bar.js'));
 const { marked } = require(path.join(REPO, 'node_modules/marked'));
 let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
+const ok = (c, n, e) => { if (typeof n !== 'string') throw new Error('ok(cond, name, extra?)'); if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 500) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
 console.log('① where the toast stack stands (toastSpot)');
@@ -93,6 +97,36 @@ const KEYS = ['A program on this machine started listening on port {ports}', 'Pr
 const miss = KEYS.flatMap((k) => [zh.includes(`  "${k}": `) ? null : 'zh ' + k, ja.includes(`  "${k}": `) ? null : 'ja ' + k]).filter(Boolean);
 ok(miss.length === 0, `every new word in zh + ja (${KEYS.length} keys)`, miss);
 ok(!zh.includes('🔌 on its machine row forwards it') && !ja.includes('🔌 on its machine row forwards it'), 'the old emoji sentence left both dictionaries');
+
+console.log('⑥ the duo bar\'s ⋯ stands only when the window\'s menu holds a row (windowMenuRows / windowMenuHolds)');
+{
+  const C = await import(path.join(REPO, 'src/lib/contributions.js'));
+  const H = require(path.join(REPO, 'src/phone-head.js'));
+  // the folded ⚙'s row as trailing-bar.js registers it (that module builds the bar's DOM — not loaded here; test-phone-split
+  // pins its line): its `when` is the fold's, here a switch
+  let folded = false;
+  C.registerMenuItem({ menu: 'window', group: '9_bar', order: 10, id: H.FOLDED_GEAR_ROW, when: () => folded, label: () => 'Global settings', run: () => { } });
+  const S1 = { status: 'live', webuiId: 'w-chat', sessionId: 'abc', name: 'N', backend: 'claude' };
+  const wins = new Map([
+    ['files-1', { id: 'files-1', type: 'files', title: '…/home/notes' }],
+    ['chat-1', { id: 'chat-1', type: 'chat', title: 'N', _openSpec: { serverId: 'w-chat' } }],
+    ['view-1', { id: 'view-1', type: 'viewer', title: 'x.pdf', _fileDownload: { path: '/w/x.pdf' } }],
+  ]);
+  const appOf = (vc) => ({ _vc: vc, isMobile: true, wm: { windows: wins }, sidebar: { _tasks: [], _allSessions: [S1] }, desktopManager: { getDesktopMenuItems: () => [] } });
+  const R = appOf('regular'), K = appOf('compact');
+  const words = (rows) => (rows || []).filter((x) => !x.separator).map((x) => x.label);
+  const f0 = TB.windowMenuRows(R, 'files-1');
+  console.log(`    regular, a files window: [${words(f0).join(' · ')}] · a conversation: [${words(TB.windowMenuRows(R, 'chat-1')).join(' · ')}] · a viewer: [${words(TB.windowMenuRows(R, 'view-1')).join(' · ')}] · compact, the files window: [${words(TB.windowMenuRows(K, 'files-1')).join(' · ')}]`);
+  ok(Array.isArray(f0) && words(f0).length === 0 && TB.windowMenuHolds(R, 'files-1') === false, 'the regular class: a files window\'s menu holds NO row (every window-manager verb is off here) — its ⋯ does not stand', words(f0));
+  folded = true;
+  const f1 = TB.windowMenuRows(R, 'files-1');
+  ok(words(f1).join() === 'Global settings' && TB.windowMenuHolds(R, 'files-1') === false, '…a folded ⚙\'s «Global settings» is its only row then, and no reason for ⋯ to stand (it only MOVES ⚙ — ⚙ folds only into a ⋯ that stands)', words(f1));
+  ok(TB.windowMenuHolds(R, 'chat-1') === true && words(TB.windowMenuRows(R, 'chat-1')).includes('Rename…') && !words(TB.windowMenuRows(R, 'chat-1')).some((x) => /Close/.test(x)), 'a conversation\'s menu holds its rows (Rename… — and no Close in this class): its ⋯ stands', words(TB.windowMenuRows(R, 'chat-1')));
+  folded = false;
+  ok(TB.windowMenuHolds(R, 'view-1') === true && words(TB.windowMenuRows(R, 'view-1')).includes('Download'), 'a viewer with a file to download holds its Download row: its ⋯ stands', words(TB.windowMenuRows(R, 'view-1')));
+  ok(TB.windowMenuHolds(K, 'files-1') === true && words(TB.windowMenuRows(K, 'files-1')).some((x) => /Close/.test(x)), 'the compact class keeps the window-manager verbs: the same files window holds rows there', words(TB.windowMenuRows(K, 'files-1')));
+  ok(TB.windowMenuRows(R, 'gone') === null && TB.windowMenuHolds(R, 'gone') === false, 'a window that is gone: no rows, no ⋯');
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

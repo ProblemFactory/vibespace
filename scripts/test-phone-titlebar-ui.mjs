@@ -993,13 +993,23 @@ else await (async () => {
     // become ONE only when the name would fall under its readable minimum (the ladder's «badges» step, after «win»); with room
     // the tablet keeps its five. The case (the owner's 12-glyph name, 31 open) and its opposite (a short name) side by side.
     const YIELD = `document.getElementById('mobile-nav').dataset.yield || ''`;
+    // the stand-in window holds a row as a conversation's menu does (a Download row — a viewer's own): its ⋯ stands, the room
+    // these two legs were measured in (主开发 2026-11-18 23:09Z: the regular bar's ⋯ stands only when it holds a row, and a
+    // files window's own menu holds none here — test-phone-six-chrome ⑦e reads that half)
+    const holdsRow = async () => {
+      await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'files'); if (w) w._fileDownload = { path: '/stand-in.txt' }; app._updateMobileNavTitle(); return !!w; })()`);
+      const on = await waitFor(`!!document.getElementById('mobile-nav-more')?.classList.contains('on')`, 4000); await settle();
+      return on;
+    };
+    const standIn = await holdsRow();
     const b = await bar(), y = await evalJs(YIELD); console.log(`    tablet portrait, the owner's name: ${say(b)} · yield ${y || '—'}`);
-    ok(b.vc === 'regular' && b.title.readable && y === 'badges' && b.badges.length === 1 && b.badges[0].c.includes('mnav-one') && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow'),
+    ok(standIn && b.vc === 'regular' && b.title.readable && y === 'badges' && b.badges.length === 1 && b.badges[0].c.includes('mnav-one') && !b.folded.length && !b.ctl.some((c) => c.id === 'overflow'),
       `a tablet in portrait (the regular class), the owner's 12-glyph name in its 348 px column: the five numbers become ONE only because the name would fall under its readable minimum (the ladder's «${y || 'no'}» step) — the name readable (${b.title.w} px ≥ ${b.title.minW}), no fold, no ⋯ (${b.dir}; ${ids(b)})`, say(b));
     await shot('after-en-tablet.png');
     await dress({ title: '游戏' }); await sleep(400); await settle();
+    const standIn5 = await holdsRow();
     const s5 = await bar(), y5 = await evalJs(YIELD); console.log(`    tablet portrait, a short name: ${say(s5)} · yield ${y5 || '—'}`);
-    ok(s5.vc === 'regular' && s5.title.whole && y5 !== 'badges' && s5.badges.length >= 2 && s5.badges.every((x) => !x.c.includes('mnav-one')) && !s5.folded.length && !s5.ctl.some((c) => c.id === 'overflow'),
+    ok(standIn5 && s5.vc === 'regular' && s5.title.whole && y5 !== 'badges' && s5.badges.length >= 2 && s5.badges.every((x) => !x.c.includes('mnav-one')) && !s5.folded.length && !s5.ctl.some((c) => c.id === 'overflow'),
       `…its opposite: the same tablet with a short name («游戏») keeps its FIVE numbers (${s5.badges.map((x) => x.n).join('/')}) — the name whole, no one-badge form, no fold, no ⋯`, say(s5));
     await shot('after-en-tablet-short.png');
     await dress({ title: OWNER }); await sleep(400); await settle();

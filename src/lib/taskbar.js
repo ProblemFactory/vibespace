@@ -8,6 +8,7 @@ import { windowWords, windowKindWords, windowTitle } from './window-types.js';
 import { terminalOnly, windowListMark } from './agent-meta.js'; // the harness table's own word for a plain shell (§78: no id branch here)
 import { visualTabOrder } from './chain-layout.js'; // the chooser lists a group in its STRIP order (split tabs v2: left half, then right)
 import { registerCommand, registerMenuItem, menuItems as contribMenuItems } from './contributions.js';
+import { moreHolds } from '../phone-head.js'; // PURE (主开发 2026-11-18 23:09Z): the bar's ⋯ stands only when the window's menu holds a row
 import { otherDesktopWindows, windowWaits } from '../desktop-switch.js'; // lane desktop-switch-phone: the ⧉ list's «Other desktops» group (PURE)
 import { warmthDrawn, warmthRows, paintTile, paintOverflowChip, paintListRow, byRowTimeLeft, tileIds } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the rings, the «+N» dot, the lists' bands
 
@@ -463,18 +464,39 @@ export function registerWindowMenu() {
 registerWindowMenu();
 // end registerWindowMenu (scripts/test-contributions.mjs extracts the block above)
 
-export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false, group = false, rowYielded = null } = {}) {
+/** THE WINDOW MENU'S CTX — ONE builder for the menu itself and for the question whether it holds a row (the regular
+ *  class's ⋯ stands only then: windowMenuHolds). null when the window is gone. */
+function windowMenuCtx(app, id, { closeLabel = null, switchSubmenu = false, group = false, rowYielded = null } = {}) {
   const win = app.wm.windows.get(id);
-  if (!win) return;
-  // Items come from the 'window' MENU REGISTRY (registerWindowMenu above; a
-  // plugin adds rows through the same call). Every kinded action — and each
-  // child of a kinded submenu — reports onAction(kind) after it runs.
+  if (!win) return null;
   const sess = sessionForWin(app, win);
   const closeKeeps = !closeLabel && !group && !!closeKeepsWord(sess);   // P2-2: a running session's window — its Close is not its Terminate
   closeLabel = closeLabel || '✕ ' + (closeKeeps ? t('Close window — it keeps running') : t('Close'));
   const ctx = { app, id, win, s: sess, switchSubmenu, closeLabel, group: !!group };
   ctx.rowYielded = Array.isArray(rowYielded) ? rowYielded : null;   // lane phone-six: what a phone switcher row yielded (window/phone-row-yielded)
   ctx.closeKeeps = closeKeeps;   // closeStyle reads it (the line above is test-tab-close-confirm's pin)
+  return ctx;
+}
+
+/** The window menu's items for window `id` as the menu would draw them now (the 'window' registry over windowMenuCtx);
+ *  null when the window is gone. */
+export function windowMenuRows(app, id) {
+  const ctx = windowMenuCtx(app, id);
+  return ctx ? contribMenuItems('window', ctx) : null;
+}
+
+/** Does window `id`'s menu hold a row — a reason for the bar's ⋯ to stand (PURE phone-head.js moreHolds: the folded ⚙'s
+ *  own row is none; 主开发 2026-11-18 23:09Z: a files window's ⋯ opened an empty menu in the regular class)? */
+export function windowMenuHolds(app, id) {
+  return moreHolds(windowMenuRows(app, id));
+}
+
+export function showWindowContextMenu(app, id, x, y, { closeLabel = null, onAction, switchSubmenu = false, group = false, rowYielded = null } = {}) {
+  // Items come from the 'window' MENU REGISTRY (registerWindowMenu above; a
+  // plugin adds rows through the same call). Every kinded action — and each
+  // child of a kinded submenu — reports onAction(kind) after it runs.
+  const ctx = windowMenuCtx(app, id, { closeLabel, switchSubmenu, group, rowYielded });
+  if (!ctx) return;
   const wrapAct = (item, kind = item.kind) => {
     const out = { ...item };
     if (kind && typeof item.action === 'function') out.action = () => { item.action(); onAction?.(kind); };

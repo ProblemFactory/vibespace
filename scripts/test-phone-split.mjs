@@ -164,7 +164,7 @@ if (H) {
     'one tap = one act: the press on the pane NOT on show (read in the capture phase, before the press focuses it) only makes it the one on show — the switcher opens from the head of the pane on show');
   ok(/import \{ headName, nameFits, YIELD_LADDER(?:, ROW_YIELD_LADDER, rowParts)? \} from '\.\.\/phone-head\.js';/.test(mn) && /const name = win \? \(headName\(win\.title\) \|\| windowKindWords\(win\.type\)\) : t\('No window'\);/.test(mn) && /el\.title = !home && full !== name \? full : t\('Switch window'\);/.test(mn) && /new ResizeObserver\(\(\) => this\._paintHead\(\)\)\.observe\(document\.getElementById\('mobile-nav'\)\)/.test(mn)
     && /titleSpan\.dataset\.name = headName\(title\);/.test(w) && /win\.titleSpan\.dataset\.name = headName\(t\);/.test(w)
-    && /#mobile-nav\[data-yield\] :is\(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live\) \{ display: none !important; \}/.test(css) && /#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\) #mobile-nav-gear:not\(\.vault-locked\) \{ display: none !important; \}/.test(css)
+    && /#mobile-nav\[data-yield\] :is\(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live\) \{ display: none !important; \}/.test(css) && /#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\):has\(#mobile-nav-more\.on\) #mobile-nav-gear:not\(\.vault-locked\) \{ display: none !important; \}/.test(css)
     && /registerMenuItem\(\{ menu: 'window', group: '9_bar', order: 10, id: 'window\/bar-gear', when: gearFolded, label: \(\) => t\('Global settings'\), run: \(c\) => c\.app\._pressGlobalSettings\(document\.getElementById\('mobile-nav-more'\)\) \}\);/.test(read('src/lib/trailing-bar.js')),
     'the head: MobileNav names with headName (the whole title in the title attribute), re-fits on every width change of the bar; the window\'s own head (landscape, a pane) names with it too; the stylesheet folds the ladder\'s steps (⚙ never with the locked vault\'s mark), and a folded ⚙ is ⋯\'s «Global settings» row');
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js'), K = 'The split ended: one of its windows was minimized, closed or moved to another desktop';
@@ -300,6 +300,34 @@ console.log('⑨ closure F13 on phone-six\'s painter: a title-less window is nam
   ok(rf.threw === null && rf.label === 'Window' && rfk.title === 'Window', `⑨ CONTROL: the full-name line put back to the bare word ⇒ the leg reads Window (its accessible name «${rf.label}», its hover «${rfk.title}»)`, { rf, rfk });
   const rn = paint(nameBare, true);
   ok(rn.threw === null && rn.text === 'Window', `⑨ CONTROL: the short-name line put back to the bare word ⇒ the leg reads Window (the head's text «${rn.text}»)`, rn);
+}
+
+// ⑩ THE BAR'S ⋯ STANDS ONLY WHEN IT HOLDS A ROW (主开发 2026-11-18 23:09Z, the 2.369.411 checkpoint's find: trailing-bar.js put ⋯
+// on for EVERY window, and in the regular class a files window's menu holds no row — its ⋯ opened an empty menu). PURE
+// phone-head.js moreHolds (the folded ⚙'s own row is no reason to stand) + the wiring: the bar asks taskbar.js windowMenuHolds
+// (the menu's own ctx and registry — test-phone-refusal-wrap ⑥ runs it), a press on a ⋯ whose rows left opens nothing, its coming
+// or going re-fits the head, the list's merge re-judges it, and ⚙ folds only into a ⋯ that stands. RED: the folded ⚙'s row counted.
+console.log('⑩ the bar\'s ⋯ stands only when the window\'s menu holds a row');
+{
+  const GEAR = { id: 'window/bar-gear', label: 'Global settings' }, SEP = { separator: true };
+  ok(H.FOLDED_GEAR_ROW === 'window/bar-gear' && H.moreHolds([]) === false && H.moreHolds([SEP]) === false && H.moreHolds([SEP, GEAR, SEP]) === false && H.moreHolds(null) === false,
+    'PURE moreHolds: no row, a separator, the folded ⚙\'s «Global settings» alone, no list — ⋯ does not stand');
+  ok(H.moreHolds([{ id: 'window/session-rename', label: 'Rename…' }]) === true && H.moreHolds([GEAR, { label: 'Download' }]) === true && H.moreHolds([{ caption: 'a word' }]) === true,
+    'PURE moreHolds: a row of its own (a conversation\'s Rename…, a Download beside the folded ⚙, a caption) — ⋯ stands');
+  const m3 = mutant('items.some((it) => !!it && !it.separator && it.id !== FOLDED_GEAR_ROW)', 'items.some((it) => !!it && !it.separator)', HEAD_SRC);
+  ok(m3.moreHolds([SEP, GEAR]) === true && H.moreHolds([SEP, GEAR]) === false,
+    'RED CONTROL: the folded ⚙\'s row counted ⇒ a files window\'s ⋯ stands to hold only ⚙ — the step that was to give the name room takes it back');
+  const TBAR = read('src/lib/trailing-bar.js'), TBK = read('src/lib/taskbar.js'), SBR = read('src/lib/sidebar.js'), css = read('public/style.css');
+  const merge = SBR.slice(SBR.indexOf('  _mergeAndRender() {'), SBR.indexOf('\n  }\n', SBR.indexOf('  _mergeAndRender() {')));
+  ok(/const holds = !!w && windowMenuHolds\(app, w\.id\), moved = holds !== more\.classList\.contains\('on'\);\n    more\.classList\.toggle\('on', holds\);/.test(TBAR) && !/more\.classList\.toggle\('on', !!w\);/.test(TBAR)   // stale-pins: kept — a deliberate absence check: the old line must stay gone
+    && /if \(!windowMenuHolds\(app, w\.id\)\) \{ update\(\); return; \}/.test(TBAR) && /if \(moved\) app\._mobileNav\?\._paintHead\?\.\(\);/.test(TBAR),
+    'the bar: ⋯ is on only while the window\'s menu holds a row (never «on for every window»); a press after its rows left opens nothing and the bar follows; its coming or going re-fits the head');
+  ok(/export function windowMenuHolds\(app, id\) \{\n  return moreHolds\(windowMenuRows\(app, id\)\);/.test(TBK) && /return ctx \? contribMenuItems\('window', ctx\) : null;/.test(TBK) && /const ctx = windowMenuCtx\(app, id, \{ closeLabel, switchSubmenu, group, rowYielded \}\);/.test(TBK),
+    'ONE reader: the question and the menu share windowMenuCtx and the window registry');
+  ok(merge.includes('this.app.syncSessionIdentity?.(this._allSessions);') && merge.includes('this.app?._mobileNav?.bar?.update?.();'),
+    'every merge of the list re-judges the bar (a conversation\'s menu holds its rows once its session is in the list)');
+  ok(!/#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\) #mobile-nav-gear/.test(css) && /:has\(#mobile-nav-more\.on\) #mobile-nav-gear:not\(\.vault-locked\)/.test(css),   // stale-pins: kept — a deliberate absence check: the old line must stay gone
+    'the stylesheet: ⚙ folds only into a ⋯ that stands (where ⋯ holds nothing the \'gear\' step gives nothing and ⚙ stays)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

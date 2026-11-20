@@ -3246,10 +3246,11 @@ html[data-vc="regular"] #all-sessions-list { overflow: visible !important; flex:
   /* round 2 (the integrator's pass: «/tm…» — three glyphs of a path): the name keeps ≥ 8 em or its whole width, the bar's
      buttons yield first (mobile-nav.js _paintHead over PURE src/phone-head.js YIELD_LADDER, each step tried in the layout):
      'win' — the window's own extras leave the bar (the switcher row's ✕ closes, the chat's status bar holds Artifacts, ⋯
-     the live view); 'gear' — ⚙ folds into ⋯ (trailing-bar.js: its row «Global settings»), never with the locked vault's
-     mark; 'icon' — the head is the window's type icon + the count, the name lives in the switcher */
+     the live view); 'gear' — ⚙ folds into ⋯ (trailing-bar.js: its row «Global settings»), only into a ⋯ that STANDS (a
+     window whose menu holds a row — ⋯ stands only then, phone-head.js moreHolds), never with the locked vault's mark;
+     'icon' — the head is the window's type icon + the count, the name lives in the switcher */
   html[data-vc="regular"] #mobile-nav[data-yield] :is(#mobile-nav-viewer-close, #mobile-nav-artifacts, #mobile-nav-live) { display: none !important; }
-  html[data-vc="regular"] #mobile-nav:is([data-yield="gear"], [data-yield="icon"]) #mobile-nav-gear:not(.vault-locked) { display: none !important; }
+  html[data-vc="regular"] #mobile-nav:is([data-yield="gear"], [data-yield="icon"]):has(#mobile-nav-more.on) #mobile-nav-gear:not(.vault-locked) { display: none !important; }
   html[data-vc="regular"] #mobile-nav[data-yield="icon"] #mobile-nav-title { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
   html[data-vc="regular"] #mobile-nav[data-yield="icon"] .mnav-state { display: none; }
 }
