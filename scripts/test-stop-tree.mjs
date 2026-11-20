@@ -804,7 +804,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   const kid10 = spawn('sleep', ['30'], { stdio: 'ignore' }); await new Promise((r) => setTimeout(r, 100)); mine.push(PI10.identityOf(kid10.pid));
   const ancOf = (Mod) => Mod.JobManager.prototype._hubTest.call({ _hubsOwn: () => false, _hubAncestor: Mod.JobManager.prototype._hubAncestor }, 0);
   const an = ancOf(JM10), anc = { parent: an(process.ppid), child: an(kid10.pid), self: an(process.pid), init: an(1) };
-  const anx = ancOf(cut('memo.set(p, this._hubsOwn(p, wrapper) || this._hubAncestor(p));', 'memo.set(p, this._hubsOwn(p, wrapper));', 'hub-ancestor-cut'));
+  const anx = ancOf(cut('memo.set(p, this._hubsOwn(p, wrapper) || this._hubAncestor(p));', 'memo.set(p, this._hubsOwn(p, wrapper));', 'hub-ancestor-cut'));   // stale-pins: kept — the control plants the older form in a copy
   const ancx = { parent: anx(process.ppid) };
   try { kid10.kill('SIGKILL'); } catch { }
   ok(anc.parent === true && anc.child === false && anc.self === false && anc.init === false,
