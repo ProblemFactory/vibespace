@@ -35,7 +35,8 @@
 //   touched during it → (b2) red; the store answering the writer null while it builds → (b3) red; a re-made chunk owing
 //   its bytes only at its landing → (b4) red; the per-account keys' landing forgetting the touched keys → (b5) red; the due list answering [] while it is built → (c1) red; the sweep's landing not reading
 //   the touched rows again → (d2) red; the sweep blind to a grants change → (d3) red; a tick that does not ask again →
-//   (f) red; the release's old whole-map walk → (g) red.
+//   (f) red; the release's old whole-map walk → (g) red; cut 3c: cut 3b's road for a mass of touched rows (the fourth build
+//   in one turn) → (c5) red; a merge whose touched rows are not judged meanwhile → (c5) red.
 // Run: node scripts/test-sliced-walk.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -327,8 +328,48 @@ const placeDue = async (e) => {
   const w = mkEng(ENG, copyOf(TPL_C, 'c4-whole'), { syncRows: 1e9 });
   const whole = w.dueListOf(A);
   w.stop();
-  const said = warns.filter((x) => /made stale during 3 sliced builds in a row/.test(x)).length;
+  const said = warns.filter((x) => /made stale by whole-map writes during 3 sliced builds in a row/.test(x)).length;
   ok(touched === 3 && stats.whole === 1 && said === 1 && dueRows(list) === dueRows(whole) && whole.length > 0, `(c4) THE BOUND: three sliced builds made stale (whole-map touches) — the next built in one turn (${stats.whole}), said ONCE (${said}), answering the whole build's ${whole.length} due rows (asked ${asked}×)`, { stats, warns: warns.slice(0, 3) });
+}
+
+// (c5) THE LAW (cut 3c, 主开发 r644): ordinary touches past the rebuild line during each of FOUR walks in a row (a sliced
+// build or a merge) — the index MERGED in slices and served meanwhile, never a whole build in one turn; DURING each merge the
+// served due list answers a whole build's of that instant (every due row, none not due); after them it answers it too
+async function mergeLeg(EM, tag) {
+  const applied = [];
+  let e = null, armed = 0, walks = 0;
+  const during = [];
+  const stamp = (eng, from, at) => { for (let i = 0; i < 500; i++) eng.store.stamps.set(`${A}/m-${(from + i) % NC}`, { lastPollAt: at }); };
+  const wholeNow = () => { const w = mkEng(ENG, copyOf(TPL_C, `c5-${tag}-w${during.length}`), { syncRows: 1e9 }); for (const [from, at] of applied) stamp(w, from, at); const l = w.dueListOf(A); w.stop(); return l; };
+  e = mkEng(EM, copyOf(TPL_C, `c5-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
+    if (armed <= 0 || i !== 1 || (what !== 'due' && what !== 'due-merge-keys')) return;   // the FIRST walk of a build or of a merge
+    armed--; walks++;
+    const from = walks * 311, at = walks % 2 ? T : T - 50 * H;
+    stamp(e, from, at); applied.push([from, at]);   // 500 rows touched DURING the walk (past the line: 187 + 256)
+    if (what === 'due-merge-keys') { const served = e.dueListOf(A, { sync: false }); during.push(!served.notReady && dueRows(served) === dueRows(wholeNow())); }
+  } });
+  await until('the due index to land', () => !e.dueListOf(A, { sync: false }).notReady);
+  stamp(e, 0, T); applied.push([0, T]);
+  armed = 4;
+  let l = null;
+  await until('four touched walks in a row and the index current', () => { l = e.dueListOf(A, { sync: false }); const st = e.dueIndexStats(); return !l.notReady && !(st.merging > 0) && (armed === 0 || st.whole > 0); }, 15000);
+  const stats = e.dueIndexStats();
+  e.stop();
+  const whole = wholeNow();
+  return { same: dueRows(l) === dueRows(whole), n: whole.length, stats, walks, during };
+}
+{
+  const r = await mergeLeg(ENG, 'law');
+  ok(r.walks === 4 && r.stats.whole === 0 && r.stats.merged >= 4 && r.during.length === 4 && r.during.every((x) => x === true) && r.same && r.n > 0, `(c5) THE LAW: 500 rows touched (past the line) during each of four merges in a row — merged ${r.stats.merged}× in slices, NEVER a build in one turn (${r.stats.whole}); DURING each merge the served due list answered the whole build's of that instant (${r.during.filter(Boolean).length}/4), after them its ${r.n} due rows`, { stats: r.stats, during: r.during });
+  const SRCm = engineSource(REPO);
+  const EM3b = M.load('src/server/channels-engine.js', anchored(anchored(SRCm,
+    "    if (ix && !ix.stale && ix.sig === sig && !sync && !dueFailed.has(rec.id) && (ix.merging || dueOverLine(ix)) && (ix.merging || store.index.keysOf(rec.id).length > DUE_SYNC_ROWS)) { ix.lane = lane; if (!ix.merging) dueMerge(rec, ix, lane, T); if (ix.merging) return ix; }\n", '', 'no merge (cut 3b: a mass of touched rows rebuilt)'),
+    "      dueRestarts.delete(rec.id);   // B-dfa4 cut 3c: a clean landing", "      if (ix.dirty.size > (ix.at.size >> 3) + 256) dueRestarts.set(rec.id, (dueRestarts.get(rec.id) || 0) + 1); else dueRestarts.delete(rec.id);", 'cut 3b: a landing past the line counts toward the one-turn bound'), 'cut3b-due');   // stale-pins: kept (the control restores cut 3b's lines)
+  const rc = await mergeLeg(EM3b, 'law-red');
+  ok(rc.stats.whole >= 1, `(c5) RED CONTROL: cut 3b's road (a landing past the line rebuilt, counted toward the bound) — after three such landings the fourth build runs in ONE turn (${rc.stats.whole}) — the leg above would go red`, rc.stats);
+  const EMj = M.load('src/server/channels-engine.js', anchored(SRCm, '      if (job && job.ix === ix) {', '      if (false) {', 'the touched rows not judged during a merge'), 'merge-unjudged');
+  const rj = await mergeLeg(EMj, 'judge-red');
+  ok(rj.during.some((x) => x === false), `(c5) RED CONTROL: a merge whose touched rows are not judged meanwhile serves a due list that is NOT the whole build's (${rj.during.filter((x) => !x).length} of ${rj.during.length} instants) — the leg above would go red`, { during: rj.during });
 }
 
 // ═══ (d) THE BOOT'S SWEEP ═══
