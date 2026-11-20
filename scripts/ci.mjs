@@ -1076,7 +1076,7 @@ export const SUITES = [
   { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
   { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.7 s (B-18eb, restated 2026-11-18: + the re-run attempt legs and their §5 mutants — alone on the test machine, alternated with the release\'s own suite file, 6 pairs over both zones: 7.47 s against 7.27 s, the medians — ×1.03 over 4.6 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
   { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.9 s (measured under the box\'s thermal cap, 2026-11-10: 8.61–8.87 s alone — not restated at full speed yet) — lane ci-heavy-queue (+ THE BUILD STAMP: a claim does not rebuild a tree built at its commit; a red build writes no verdict): the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
-  { name: 'test-ci-heavy-queue-window', tier: 'fast', why: 'LAW architecture · 4.1 s (measured alone on the test machine, 2026-11-20: 4.08 s, run 966e33dbf-20261120210633-box, node v24.22.1 — its ten scenes side by side; the r406 form was 2.40 s) — lane bl-ci (r406): the heavy lock\'s FRESH LOOK after the take (a waiter frozen between its head decision and its take gives back a lock an older live ticket is owed, and at its deadline times out by name), each ticket judged by the clock around its own stat, and the lock taken in ONE step (never empty: r518) — every window PLACED by a copy and said when reached, the staleness the queue\'s own 15 s (load decides nothing), each with its red control; real processes, six mutant copies, an exit guard' },
+  { name: 'test-ci-heavy-queue-window', tier: 'fast', why: 'LAW architecture · 4.1 s (measured alone on the test machine, 2026-11-20: 4.08 s, run 966e33dbf-20261120210633-box, node v24.22.1 — its ten scenes side by side; the r406 form was 2.40 s; with r571\'s steal scene, twelve: 4.14 s in run 5becc7b1f-20261120222134-box) — lane bl-ci (r406): the heavy lock\'s FRESH LOOK after the take (a waiter frozen between its head decision and its take gives back a lock an older live ticket is owed, and at its deadline times out by name), each ticket judged by the clock around its own stat, the lock taken in ONE step (never empty: r518), and the steal of a dead holder\'s lock undone when it moved a live one (r571) — every window PLACED by a copy and said when reached, the staleness the queue\'s own 15 s (load decides nothing), each with its red control; real processes, seven mutant copies, an exit guard' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-ledger-boot-load', tier: 'fast', why: 'in-process · 4.4 s measured in a depth-1 clone, three runs 4.37–4.42 s at a box load of ~5 (ledger-boot-load, 2.369.397: a 9 876-row real-shape ledger, 16 worker loads incl. 7 planted failures, three planted copies; the failing load\'s road in test-ledger-boot-fail)' }, // THE LEDGER'S FIRST LOAD OFF THE LOOP: «loading» until the worker's cache is swapped in; rows once; a dead worker said once, never a sync fallback
   { name: 'test-ledger-boot-fail', tier: 'fast', why: 'in-process · 6.0 s measured in a depth-1 clone, three runs 5.94–6.00 s at a box load of ~5 (ledger-boot-load round 2 + its follow-up, 2.369.397 — split from test-ledger-boot-load under the 10 s: a real-shape ledger, throwing and hung first loads, transcripts walked by the real scan through the real route handler on a fake app, eight planted copies)' }, // NOTHING WAITS ON A LOAD THAT IS FAILING: bounded by the try, a person\'s Retry tries now, LOADING a state
@@ -3771,6 +3771,22 @@ export function lockWaitLine(lockPath, h, waitMs, place, free = false) {
 // two heavy runs at once on the box (and each give-back opened the gap once more). Now the record is written ASIDE and put in place by a
 // hard link, which never replaces (EEXIST while held): the lock never exists empty. A filesystem without hard links keeps the old
 // create-and-write, in one call (the kernel's own two steps remain there), and the aside file never outlives the take.
+// THE STEAL OF A DEAD HOLDER'S LOCK, UNDONE WHEN WRONG (the coordinator's r571, 2026-11-20 — lane bl-ci; found beside r518). The
+// steal was check-then-act: read the holder, judge it dead, unlink. A head frozen between its judgment and its unlink — longer than a
+// ticket lives — removed the lock the NEXT holder had taken meanwhile: two heavy runs at once. Now the lock is RENAMED aside (one step:
+// whatever is there NOW moves), and the steal goes on only when the moved file is the very record judged dead (its pid, its start, its
+// sha); any other record — a live holder's — is linked back at once (a link never replaces) and the head waits as for any holder.
+// What is left: for the two calls between the rename and the link-back the path is empty — a taker that comes in exactly then takes it,
+// the link-back finds EEXIST and the moved holder has lost its file. Only a head acting on a stale look (frozen) can open that gap.
+const sameLockRecord = (a, b) => (!a && !b) || (!!a && !!b && a.pid === b.pid && a.startedAt === b.startedAt && a.sha === b.sha);
+function stealDead(lockPath, judged) {
+  const aside = `${lockPath}.${process.pid}.steal`;
+  try { fs.renameSync(lockPath, aside); } catch { return false; }   // gone already (released, or stolen by another): the loop looks again
+  if (sameLockRecord(readJson(aside), judged)) { try { fs.unlinkSync(aside); } catch { } return true; }
+  try { fs.linkSync(aside, lockPath); } catch { }
+  try { fs.unlinkSync(aside); } catch { }
+  return false;
+}
 const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
 function takeLock(lockPath, rec) {
   const aside = `${lockPath}.${process.pid}.take`;
@@ -3835,7 +3851,8 @@ export function acquireMachineLock(lockPath, { waitMs, sha, onWait, onGiveBack, 
         holder = readJson(lockPath);
         // A holder that is gone (reboot, SIGKILL, recycled pid) leaves a file
         // behind; stealing it is the only way the tier ever runs again.
-        if (!pidStillRunning(holder)) { try { fs.unlinkSync(lockPath); continue; } catch { /* someone else won the race — loop */ } }
+        const dead = !pidStillRunning(holder);
+        if (dead) { if (stealDead(lockPath, holder)) continue; holder = readJson(lockPath); }   // a steal that was wrong is undone (r571)
       } else holder = readJson(lockPath);
       if (Date.now() >= deadline) return { ok: false, timedOut: true, holder };
       const free = !holder && !fs.existsSync(lockPath);   // no holder at all: the turn is the waiter's ahead of us, not a holder's
