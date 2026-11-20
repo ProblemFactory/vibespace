@@ -28,16 +28,19 @@ const MAX_PROBES = 40;
 const PROBE_LATE_MS = 30e3;
 /* (2.369.413, the coordinator's law of 03:24Z: only a probe that is HUNG is skipped; a probe that was late is asked again on the next ask
    and its result is USED when it lands; a row never claims a fact the machine has not given) a late probe's call is NEVER sent again while
-   it is out: the next ask JOINS it inside its own budget; when it lands, its facts are kept LANDED_MS and the next ask uses them; a probe
-   still unanswered after PROBE_LATE_MS is asked anew (a hung one costs one call per window) */
-const LANDED_MS = 2000;
+   it is out: the next ask JOINS it inside its own budget; when it lands, its facts are KEPT for the mark's whole window (PROBE_LATE_MS) and
+   the next ask USES them whatever the gap; a kept fact older than LANDED_FRESH_MS is answered WITH and refreshed by ONE call sent behind it
+   (marked out like any call: a second ask joins it, its landing replaces the old fact); a call is marked the moment it is SENT (asks inside
+   its first budget join it: one call a path); a probe the answer leaves out is late, never «answered»; a probe still unanswered after
+   PROBE_LATE_MS is asked anew (a hung one costs one call per window). The field's OWN path never reads a kept fact (a commit still asks) */
+const LANDED_FRESH_MS = 2000;
 
 function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '..', '..'), dataDir = null, mounts = () => [], now = Date.now } = {}) {
   const listCache = new Map();   // abs → { at, entry }
   const indexCache = new Map();  // key → { at, dirs, links, p }
   let selfCache = { at: 0, v: null, p: null };
-  const lateProbes = new Map();  // abs → { at, pw }: a probe that ran out of its budget and is still OUT (joined by the next asks, never sent again)
-  const landed = new Map();      // abs → { at, fact }: a late probe's facts, kept when its call lands (LANDED_MS) — the next ask uses them
+  const lateProbes = new Map();  // abs → { at, pw, budget, late }: a probe call still OUT, marked when SENT (joined by every ask, never sent again)
+  const landed = new Map();      // abs → { at, fact }: a probe's facts, kept PROBE_LATE_MS when its call lands — the next ask uses them
   const dataRoot = dataDir || path.join(repoDir, 'data');
 
   async function listDirs(abs, { files = false, pkg = false } = {}) {
@@ -146,32 +149,42 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     // reply says `probesLate` (the field marks none of them asked), and a late probe is skipped for PROBE_LATE_MS
     if (got !== 'late' && probes.length) {
       const t1 = now();
-      for (const [lp, m] of lateProbes) if (t1 - m.at >= PROBE_LATE_MS) lateProbes.delete(lp);   // bounded: a mark lives PROBE_LATE_MS
-      for (const [lp, l] of landed) if (t1 - l.at >= LANDED_MS) landed.delete(lp);
-      // a probe UNDER a path whose probe is still out waits for that one (named late in this reply, asked once it lands) — never a call per
-      // keystroke into what may be a hung folder (the home and the root are never a late ANCESTOR)
-      const underLate = (p) => { for (const lp of lateProbes.keys()) if (p !== lp && lp !== home && lp !== '/' && p.startsWith(lp.endsWith('/') ? lp : lp + '/')) return true; return false; };
-      const fromLanded = [], joins = new Map(), askNow = [];
+      for (const [lp, m] of lateProbes) if (t1 - m.at >= PROBE_LATE_MS) lateProbes.delete(lp);   // bounded: a mark lives PROBE_LATE_MS from its send
+      for (const [lp, l] of landed) if (t1 - l.at >= PROBE_LATE_MS) landed.delete(lp);
+      const isLate = (m) => m.late || t1 - m.at >= m.budget;   // a call past its own budget (still out)
+      // a probe UNDER a path whose call ran past its budget waits for it (named late here, asked once it lands) — never a call per keystroke
+      // into what may be a hung folder (the home and the root are never a late ANCESTOR)
+      const underLate = (p) => { for (const [lp, m] of lateProbes) if (p !== lp && isLate(m) && lp !== home && lp !== '/' && p.startsWith(lp.endsWith('/') ? lp : lp + '/')) return true; return false; };
+      const fromLanded = [], joins = new Map(), askNow = [], refresh = [];
       for (const p of probes) {
-        const l = landed.get(p); if (l) { fromLanded.push(l.fact); continue; }   // its late result, landed: USED
-        const m = lateProbes.get(p); if (m) { if (!joins.has(m.pw)) joins.set(m.pw, []); joins.get(m.pw).push(p); continue; }   // still out: JOINED, never sent again
+        const m = lateProbes.get(p);
+        const l = landed.get(p);
+        if (l) { fromLanded.push(l.fact); if (t1 - l.at >= LANDED_FRESH_MS && !m) refresh.push(p); continue; }   // a kept fact: USED (and refreshed behind when older than 2 s)
+        if (m) { if (!joins.has(m.pw)) joins.set(m.pw, []); joins.get(m.pw).push(p); continue; }   // still out: JOINED, never sent again
         if (underLate(p)) { late.add(p); continue; }
         askNow.push(p);
       }
+      // ONE call for the paths this ask needs, ONE behind it for kept facts grown old — each MARKED the moment it is sent; whatever lands
+      // is kept (a mark answered goes), so the next ask has it whatever the gap
+      // (a failure inside the budget drops the mark: late for that reply only; one past it is the pool's deadline — a hung path keeps
+      // its mark for the window)
+      const send = (ps) => {
+        const at = now();
+        const pw = call('dirSlice', { dirs: [], probes: ps }).then((r) => (r && r.probes) || [], () => null);   // a call that fails is late, never the listing's end
+        for (const p of ps) lateProbes.set(p, { at, pw, budget: Math.max(50, budgetMs), late: false });
+        pw.then((r) => { const fast = now() - at < Math.max(50, budgetMs); for (const p of ps) { const m = lateProbes.get(p); if (m && m.pw === pw && (r || fast)) lateProbes.delete(p); } if (!r) return; const t2 = now(); for (const f of r) if (f && ps.includes(f.path) && !f.err) landed.set(f.path, { at: t2, fact: f }); if (landed.size > 2000) for (const k of [...landed.keys()].slice(0, 500)) landed.delete(k); });
+        return pw;
+      };
+      if (refresh.length) send(refresh);   // not waited for: this reply answers with the kept facts
       const races = [];
-      if (askNow.length) {
-        const pw = call('dirSlice', { dirs: [], probes: askNow }).then((r) => (r && r.probes) || [], () => null);   // a call that fails is late, never the listing's end
-        // when a LATE call lands, its marks go and its facts are kept for the next ask (slow, not hung: never 30 s of a healthy probe unread)
-        pw.then((r) => { if (!r) return; const at = now(); for (const f of r) { const m = f && lateProbes.get(f.path); if (m && m.pw === pw) { lateProbes.delete(f.path); landed.set(f.path, { at, fact: f }); } } });
-        races.push({ pw, ps: askNow, mine: true });
-      }
-      for (const [pw, ps] of joins) races.push({ pw, ps, mine: false });
+      if (askNow.length) races.push({ pw: send(askNow), ps: askNow });
+      for (const [pw, ps] of joins) races.push({ pw, ps });
       const outs = await Promise.all(races.map((x) => Promise.race([x.pw, deadline])));
       outs.forEach((pg, i) => {
-        const { pw, ps, mine } = races[i];
-        if (pg === null) for (const p of ps) late.add(p);   // the call FAILED: late for this reply only (a failure is no hang — no mark)
-        else if (pg === 'late') { const at = now(); for (const p of ps) { late.add(p); if (mine) lateProbes.set(p, { at, pw }); } }
-        else { const want = new Set(ps); for (const f of pg) if (f && want.has(f.path)) pr.push(f); for (const p of ps) { const m = lateProbes.get(p); if (m && m.pw === pw) lateProbes.delete(p); } }
+        const { ps } = races[i];
+        if (pg === null) for (const p of ps) late.add(p);   // the call FAILED: late for this reply only
+        else if (pg === 'late') { for (const p of ps) { late.add(p); const m = lateProbes.get(p); if (m) m.late = true; } }
+        else { const got2 = new Map(pg.filter(Boolean).map((f) => [f.path, f])); for (const p of ps) { if (got2.has(p)) pr.push(got2.get(p)); else late.add(p); } }   // a probe the answer left out is late, never «answered»
       });
       pr.push(...fromLanded);
     }
