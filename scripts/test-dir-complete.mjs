@@ -188,6 +188,38 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
   seen.length = 0;
   const c2 = await ds2.slice({ ...ASK, own: '', probe: ['~/work/weekly-admin'], budgetMs: 450 });
   ok('③b a SLOW probe (late, then answered): unmarked when it answers — the next ask probes it again and gets it in time', (c1.probesLate || []).includes('~/work/weekly-admin') && seen.includes(path.join(HOME, 'work', 'weekly-admin')) && !c2.probesLate, { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
+  // SLOW STORAGE, NOT HUNG (the coordinator's law, 2026-11-20 03:24Z, for 2.369.413): a Task Group's folder whose stat takes 600 ms EVERY
+  // time (a network mount; the budget is 450 ms). THE LAW: only a probe that is HUNG is skipped; a probe that was late is asked again on
+  // the next ask and its result is USED when it lands; a row never claims a fact the machine has not given. Asked at 0, at 0.5 s (the late
+  // call still out), at 1 s and at 5 s (a 5 s step of the clock the slice reads): the first reply names it late and the field marks it
+  // nothing; the next ones carry its facts — the landed result, or the call still out joined inside their own budget
+  {
+    const SLOWG = path.join(HOME, 'work', 'investor-relations');
+    let clock = Date.now(), sends = 0;
+    const slowCall = async (op, p) => { if (op === 'dirSlice' && (p.probes || []).includes(SLOWG)) { sends++; await sleep(600); } return (await runOp(op, p)).result; };
+    const dsS = DS.create({ home: HOME, repoDir: REPO, now: () => clock, call: slowCall });
+    const SL = { text: '~/work/payments', bases: ['~'], probe: ['~/work/investor-relations'], budgetMs: 450 };
+    const factsOf = (r) => { const e = r.listing.dirs['~/work/investor-relations']; return !!(e && e.fileCount != null) && !(r.probesLate || []).includes('~/work/investor-relations'); };
+    const PFMs = require('../src/path-field-model.js');
+    const t0 = Date.now();
+    const r0 = await dsS.slice(SL);
+    const asked0 = [...PFMs.askedOf(['~/work/investor-relations'], r0)];
+    await sleep(Math.max(0, 500 - (Date.now() - t0))); clock += 500;
+    const r05 = await dsS.slice(SL);
+    await sleep(Math.max(0, 1000 - (Date.now() - t0))); clock += 500;
+    const sendsBefore1 = sends;
+    const r1 = await dsS.slice(SL);
+    const sends1 = sends - sendsBefore1;
+    clock += 4000;
+    const sendsBefore5 = sends;
+    const r5 = await dsS.slice(SL);
+    const sends5 = sends - sendsBefore5;
+    const got = { first: { late: r0.probesLate || [], facts: factsOf(r0), asked: asked0 }, at05: { late: r05.probesLate || [], facts: factsOf(r05) }, at1: { facts: factsOf(r1), late: r1.probesLate || [], sends: sends1 }, at5: { facts: factsOf(r5), late: r5.probesLate || [], sends: sends5 } };
+    ok('③b SLOW storage (600 ms a stat, 450 ms budget), the first reply: the folder named late, no facts claimed, the field marks it nothing (no 新建, no «checked»)', got.first.late.includes('~/work/investor-relations') && !got.first.facts && got.first.asked.length === 0, got);
+    ok('③b …asked again 0.5 s later, while the late call is still out: NOT skipped — the call still out is waited for inside this budget, and its facts are in the reply (only a HUNG probe is skipped)', got.at05.facts, got);
+    ok('③b …at 1 s: its facts are in the reply — the late probe\'s own result USED when it landed', got.at1.facts, got);
+    ok('③b …at 5 s (the landed facts no longer fresh): asked AGAIN — a call is sent — and its facts used when they land, never a row that claims what the machine has not given', got.at5.sends >= 1 && (got.at5.facts || (got.at5.late.includes('~/work/investor-relations') && !PFMs.askedOf(['~/work/investor-relations'], r5).length)), got);
+  }
   // a probe call that FAILS at once (the worker ended under it): late for this reply only — the listing answers, nothing is marked
   failing = true;
   const ds3 = mk(DS);
