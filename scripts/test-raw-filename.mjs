@@ -66,7 +66,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -699,6 +699,47 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
       const filesSrc = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
       ok(/sweepOwnTmp\(\); upload\.array\('files'\)/.test(filesSrc) && (filesSrc.match(/\n\s+sweepOwnTmp\(\);\n/g) || []).length === 2,
         'B-3767 unit 2: the roads that write into the root ask the sweep (upload, temp file, paste) — throttled, never awaited');
+    }
+    // B-5527 (主开发 r590 — one release after B-3767): THE PASTE SWEEP'S LEGACY LEG IS RETIRED. It deleted claude-paste-* files older
+    // than a day BY NAME PREFIX over the SHARED temp folder, which reached a sibling scratch hub's files. A paste through the REAL route
+    // (this machine) lands in the hub's own folder and leaves an old paste-named file in the shared temp folder alone; it reads that folder
+    // not at all. Judged at the moment the route's own write resolves — where the retired leg began its read of the shared folder — then
+    // the request is let go (the clipboard step's poll is not this leg's). RED: a copy with the legacy leg back deletes it.
+    {
+      const okP = (c, n, facts) => { ok(c, n, facts); if (c) console.log('      ' + JSON.stringify(facts)); };
+      const PNG = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
+      const OLD2 = (Date.now() - 48 * 3600 * 1000) / 1000;
+      const plant = (n) => { const f = path.join(T, n); fs.writeFileSync(f, 'a legacy paste of another hub'); fs.utimesSync(f, OLD2, OLD2); return f; };
+      const pasteOnce = async (base) => {
+        const reads = [], P = fs.promises, origW = P.writeFile, origR = P.readdir;
+        let wrote; const landed = new Promise((r) => { wrote = r; });
+        P.readdir = function (d, ...a) { reads.push(path.resolve(String(d))); return origR.call(this, d, ...a); };
+        P.writeFile = async function (f, ...a) { const r = await origW.call(this, f, ...a); if (/claude-paste-\d+\.png$/.test(String(f))) setImmediate(() => wrote(String(f))); return r; };
+        const ac = new AbortController();
+        const req = fetch(base + '/api/paste-image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dataUrl: PNG }), signal: ac.signal }).catch(() => null);
+        try { const f = await Promise.race([landed, new Promise((r) => setTimeout(() => r(null), 10000))]); return { file: f, reads: [...reads] }; }
+        finally { P.writeFile = origW; P.readdir = origR; ac.abort(); await req; }
+      };
+      const there = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
+      const legacy = plant('claude-paste-1700000000000.png');
+      const a1 = await pasteOnce(S.base);
+      okP(!!a1.file && path.dirname(a1.file) === path.join(root, 'paste') && there(legacy) && !a1.reads.includes(path.resolve(T)),
+        'B-5527: a paste through the REAL route lands in the hub\'s own paste folder and leaves an old paste-named file in the SHARED temp folder alone — it never reads that folder',
+        { pasteLanded: a1.file && path.relative(T, a1.file), legacyKept: there(legacy), sharedFolderRead: a1.reads.includes(path.resolve(T)) });
+      const FSRC = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
+      const LEG = "  if (!host || !rfsInst) return;\n";
+      const OLDLEG = "  if (!host || !rfsInst) { const now0 = Date.now(); fs.promises.readdir(os.tmpdir()).then(async (names) => { for (const n of names) { if (!n.startsWith('claude-paste-')) continue; const p = path.join(os.tmpdir(), n); try { const st = await fs.promises.stat(p); if (now0 - st.mtimeMs > 24 * 3600 * 1000) await fs.promises.unlink(p); } catch {} } }).catch(() => {}); return; }\n";
+      const CALL = "    await fs.promises.writeFile(tmpPath, buf);   // B-3767 follow-up: off the loop (a reader's should); swept by sweepOwnTmp above (B-5527)\n";
+      const back = anchored(anchored(FSRC, LEG, OLDLEG, 'b5527-legacy-leg'), CALL, CALL + '    sweepPasteTemps();\n', 'b5527-legacy-call');   // stale-pins: kept (the control writes the retired call back)
+      const SL = await serve(M.load('src/routes/files.js', back, 'b5527-legacy'), null, { json: true });
+      try {
+        const legacy2 = plant('claude-paste-1700000000001.png');
+        const a2 = await pasteOnce(SL.base);
+        const t0 = Date.now(); while (there(legacy2) && Date.now() - t0 < 3000) await new Promise((r) => setTimeout(r, 10));   // the legacy leg's delete is what happened
+        okP(!!a2.file && !there(legacy2) && a2.reads.includes(path.resolve(T)),
+          'RED CONTROL B-5527: with the legacy leg back (a copy of the route) the paste READS the shared temp folder and DELETES the old paste-named file there — the leg above would be red',
+          { sharedFolderRead: a2.reads.includes(path.resolve(T)), legacyDeleted: !there(legacy2) });
+      } finally { await SL.close(); }
     }
   } finally { if (prevTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevTmp; await S.close(); }
 }

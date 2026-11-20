@@ -8031,7 +8031,6 @@ await section(async () => {
     ["src/ssh-key.js", "'vs-key-'", "unique", "mkdtemp"],
     ["src/usage-routes.js", "function probeCwdOf(probeConfigDir)", "read", "a cwd, nothing made"],
     ["data/bin/vibespace-window", "`vibespace-window-${typeof process.getuid", "per-user", "the window CLI's shot folder, this user's (B-3767)"],
-    ["src/routes/files.js", "sweepDir(os.tmpdir());", "read", "the paste sweep's legacy root: this user's old claude-paste-* files (new pastes live in the hub's own folder, B-3767)"],
     ["src/server/agent-tool-generators.js", "mktemp -u \"\\${TMPDIR:-/tmp}/claude-webui-edit-signal-", "unique", "the Ctrl+G helper's signal file: a fresh random name (its $$-$RANDOM fallback when mktemp fails rides the same line, counted with it; B-3767; a reused pid met an old signal)"],
     ["editor-helper.sh", "mktemp -u \"${TMPDIR:-/tmp}/claude-webui-edit-signal-", "unique", "the same, in the shipped helper"],
     ["data/bin/vibespace-browser", "const d = path.join(os.tmpdir(), `vibespace-browser-${", "per-user", "the browser CLI's default shot folder, this user's and private (B-3767; it sat in the shared root)"],

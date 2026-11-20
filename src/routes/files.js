@@ -734,31 +734,18 @@ router.post('/api/upload', uploadFiles, async (req, res) => {
   }
 });
 
-// Paste temp hygiene (restart audit #29): claude-paste-* files in tmpdir and
-// remote ~/.vibespace/paste/ were never cleaned by anything — /tmp only clears
-// on reboot/pod recreation and the remote dir grew forever. Sweep files older
-// than 24h, fire-and-forget, at most once per hour per target.
-const _pasteSweepAt = new Map(); // '__local__' | hostId → last sweep ts
+// Paste temp hygiene (restart audit #29): a REMOTE host's ~/.vibespace/paste/ was never cleaned by anything — it grew forever.
+// Sweep its files older than 24h, fire-and-forget, at most once per hour per host. THIS machine's pastes live in the hub's own
+// folder (<tmp>/vibespace-<uid>-<data hash>/paste, B-3767), swept with the rest of that root by HUB_TMP.sweepHubTmp (judged, by
+// age). B-5527 (one release after B-3767, 主开发 r590): the legacy leg — a delete by the name prefix claude-paste-* over the SHARED
+// temp folder, which reached a sibling scratch hub's files — is retired; nothing here looks at the shared temp folder.
+const _pasteSweepAt = new Map(); // hostId → last sweep ts
 function sweepPasteTemps(rfsInst, host) {
-  const key = host || '__local__';
+  if (!host || !rfsInst) return;
   const now = Date.now();
-  if (now - (_pasteSweepAt.get(key) || 0) < 60 * 60 * 1000) return;
-  _pasteSweepAt.set(key, now);
-  if (host && rfsInst) {
-    rfsInst._run(host, `find ~/.vibespace/paste -type f -mmin +1440 -delete 2>/dev/null || true`).catch(() => {});
-    return;
-  }
-  // async only — os.tmpdir() is local disk, but never risk a pool stall. B-3767: new pastes live in the hub's own folder
-  // (<tmp>/vibespace-<uid>-<data hash>/paste), swept with the rest of that root by HUB_TMP.sweepHubTmp (judged, by age); here
-  // only the LEGACY root's old claude-paste-* files of this user remain (retired a release later: B-5527)
-  const sweepDir = (dir) => fs.promises.readdir(dir).then(async (names) => {
-    for (const n of names) {
-      if (!n.startsWith('claude-paste-')) continue;
-      const p = path.join(dir, n);
-      try { const st = await fs.promises.stat(p); if (now - st.mtimeMs > 24 * 3600 * 1000) await fs.promises.unlink(p); } catch {}
-    }
-  }).catch(() => {});
-  sweepDir(os.tmpdir());
+  if (now - (_pasteSweepAt.get(host) || 0) < 60 * 60 * 1000) return;
+  _pasteSweepAt.set(host, now);
+  rfsInst._run(host, `find ~/.vibespace/paste -type f -mmin +1440 -delete 2>/dev/null || true`).catch(() => {});
 }
 
 // Paste image from clipboard → save to temp file + set X clipboard via xclip
@@ -791,8 +778,7 @@ router.post('/api/paste-image', async (req, res) => {
     const pasteDir = await HUB_TMP.hubTmpDir('paste', { dataDir: HUB_DATA });
     if (!pasteDir.dir) return res.status(500).json({ error: `the paste's temp folder: ${pasteDir.why}`, code: 'hub_tmp_refused' });
     const tmpPath = path.join(pasteDir.dir, `claude-paste-${Date.now()}.${ext}`);
-    await fs.promises.writeFile(tmpPath, buf);   // B-3767 follow-up: off the loop (a reader's should)
-    sweepPasteTemps();
+    await fs.promises.writeFile(tmpPath, buf);   // B-3767 follow-up: off the loop (a reader's should); swept by sweepOwnTmp above (B-5527)
     // Set system clipboard with image — macOS uses osascript, Linux uses xclip
     const isMac = process.platform === 'darwin';
     try {
