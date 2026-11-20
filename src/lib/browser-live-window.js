@@ -1611,7 +1611,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
    *  user never clicks a frozen picture in silence), else nothing. Patched in place. */
   function renderWatchLine() {
     if (st.closed) return;
-    const driving = st.mode === 'takeover' && st.mine;
+    const driving = st.mode === 'takeover' && st.mine && st.connected;   // ONE rule with the picture's (pictureNow): the takeover's words while it drives
     let text = '', btn = '', act = null;
     if (st.watch) {
       // live-watch-polish G2: the line names BOTH tabs (a page chose each title — bounded, set as textContent)
@@ -1622,7 +1622,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     } else if (st.bg && st.bg.state === 'unresponsive') {
       // B-d635 (userW's inc-murizo36-ecri): a tab that sends no picture and does not answer is SAID — never a blank canvas with no words
       // its read (S1): a hidden tab that hung keeps its LAST picture on the view — the words say that picture, never «no picture»
-      text = driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
+      // 主开发's ruling S2: on the DRAWN window a hung tab sits behind another tab — the browser's own reload there would reload THAT
+      // one; the sentence names where to press, in S3's shape (zh / ja)
+      text = driving ? (xOn() && xp.status === 'connected' ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab')) : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
     } else if (st.bg) {
       const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
       // 主开发's law (3) + ruling S3 (21:52Z): a takeover shows the WINDOW as it is — the sentence names where to press, never whose
@@ -2367,7 +2369,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       // lane browser-windows (U0b): the tab on show paints nothing (a background tab of its window) — or it does again
       case 'tab-background':
         // 主开发's law (1): the clear's moment is kept — the window returns only once it has held (BG_SETTLE_MS, no flap)
-        if (m.targetId) st.bgClearedAt = 0; else if (st.bg && st.bg.state === 'hidden') { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
+        if (m.targetId) st.bgClearedAt = 0; else if (st.bg && (st.bg.state === 'hidden' || st.bg.state === 'unresponsive')) { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
         st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true } : null; // B-d635: or a tab that never answers
         renderWatchLine(); renderPicture(); // the owner's report 2026-11-19: the picture follows the verdict (the tab's own, while hidden)
         break;
