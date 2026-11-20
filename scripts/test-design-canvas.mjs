@@ -468,6 +468,7 @@ function makeCanvas(DCm, w, h) {
   try { return { d, c: DCm.createDesignCanvas(d.host, {}) }; } finally { if (had) globalThis.ResizeObserver = RO0; else delete globalThis.ResizeObserver; }
 }
 const RV_A = { file: 'Duo.html', x: 0, y: 0, w: 951, h: 585, title: 'Duo', print: 'fixed', html: '<p>duo</p>' }; // the owner's board (A⑪'s)
+const RV_ONE = { ...RV_A, w: 1208, h: 568 }; // contained at exactly 1 in the 1240×600 pane
 const RV_T = { file: 'Tall.html', x: 1000, y: 0, w: 390, h: 2400, title: 'Tall', html: '<p>tall</p>' };
 const rvRead = (a = RV_A) => ({ title: 'Duo', manifest: { title: 'Duo', artboards: [{ file: a.file, x: a.x, y: a.y, w: a.w, h: a.h, title: a.title, print: 'fixed' }] }, frames: [{ ...a }, { ...RV_T }] });
 /** The person's day in the focused view, step by step → every view read (`{threw}` when the core threw). EACH VERB runs ALONE
@@ -503,6 +504,12 @@ function viewRun(DCm) {
     r.label = alone(() => c.zoomTo(1));                               // the zoom label (100 %)
     r.api = alone(() => c.setView({ x: 5, y: 7, z: 0.8 }));
     r.still = alone(() => vp.fire('wheel', { deltaX: 0, deltaY: 0, deltaMode: 0 })); // moves nothing ⇒ marks nothing
+    // the 100 % label on a board contained at EXACTLY 100 % (1208×568 in 1240×600 at FOCUS_PAD 16): no move at all — the guard
+    // returns before zoomAt, whose anchor arithmetic may drift x by an ulp (a mark nobody made)
+    c.fit(); reread(RV_ONE); r.one0 = v();
+    c.zoomTo(1); r.one1 = v();
+    reread(RV_ONE); d.resize(1250, 610); r.oneAfter = v(); d.resize(1240, 600);
+    reread();
     // a re-read that MOVES the focused board in the world (the agent edits its x / y; an auto-placed board shifts)
     c.fit(); c.zoomBy(+1);
     const at0 = c.frameScreenRect('Duo.html'), z0 = v().z;
@@ -541,6 +548,7 @@ function viewRows(r) {
     [rvStands(r.label) && r.label.moved.z === 1, true, 'the zoom label (100 %) ALONE stands'],
     [rvStands(r.api) && eq(r.api.moved, { x: 5, y: 7, z: 0.8 }), true, 'the API\'s setView ALONE stands'],
     [eq(r.still.moved, r.still.before) && eq(r.still.after, rvContained(RV_A, 1250, 610)), true, 'a wheel that moves nothing marks nothing: the re-read and the resize after it place the board again'],
+    [r.one0.z === 1 && eq(r.one1, r.one0) && eq(r.oneAfter, rvContained(RV_ONE, 1250, 610)), true, 'the 100 % label on a board contained at exactly 100 % is no move: the re-read and the resize after it place the board again'],
     [r.movedZ === r.z0 && sameRect(r.movedRect, r.at0) && sameRect(r.backRect, r.at0), true, 'a re-read that MOVES the focused board (x / y 0,0 → 200,120 and back): the board stays where the person had it on the screen, at their zoom'],
     [eq(r.grown, r.grow0) && near(r.grownRect.h, 600 * r.grown.z), true, 'the board grew in the folder: its frame follows its own 600 px, the person\'s view stands'],
     [eq(r.fitted, rvContained(A600, 1240, 600)), true, 'their Fit = the contained view again'],
@@ -943,6 +951,7 @@ console.log('⑧ controls — a patched copy of each rule turns its table red');
       ['drag', 'a drag not marked as the person\'s', '      moveView(panBy(drag.start, dx, dy));\n', '      setView(panBy(drag.start, dx, dy));\n', (r) => !rvStands(r.drag) && rvStands(r.wheel), 'the drag alone was thrown away (the wheel still stands)'], // stale-pins: kept (a control: its patch IS the code before B-1217)
       ['zoomBy', 'the bar\'s + / − and the keys not marked', '    moveView(zoomAt(st.view, nz, anchor || { x: p.w / 2, y: p.h / 2 }));\n', '    setView(zoomAt(st.view, nz, anchor || { x: p.w / 2, y: p.h / 2 }));\n', (r) => eq(r.afterRead, r.a) && !rvStands(r.key) && rvStands(r.label), 'the + / − zoom and the − key were put back (the label still stands)'], // stale-pins: kept (a control: its patch IS the code before B-1217)
       ['still', 'a move that changes nothing marks the view', '    if (st.focused && (n.x !== st.view.x || n.y !== st.view.y || n.z !== st.view.z)) st.moved = true;\n', '    if (st.focused) st.moved = true;\n', (r) => !eq(r.still.after, rvContained(RV_A, 1250, 610)), 'after a still wheel the pane change was not followed'],
+      ['label-noop', 'a press that changes nothing marks the view (what an ulp of drift in zoomAt did)', '    if (clampZoom(z) === st.view.z) return; // already there (the 100 % label at 100 %)\n', '    if (clampZoom(z) === st.view.z) { if (st.focused) st.moved = true; return; }\n', (r) => !eq(r.oneAfter, rvContained(RV_ONE, 1250, 610)), 'after the 100 % press the board did not follow the re-read and the resize'],
       ['fit', 'their Fit leaves the mark (the view never follows the pane again)', '  function fit() {\n    st.moved = false;\n', '  function fit() {\n', (r) => !eq(r.followed, rvContained({ ...RV_A, h: 600 }, 1300, 640)), 'after Fit the pane change was not followed'],
       ['focus', 'a new focus inherits the last board\'s mark', '    st.focused = file;\n    st.moved = false;\n', '    st.focused = file;\n', (r) => !eq(r.tall, M.focusView(RV_T, { w: 1240, h: 600 }).view), 'the new board did not follow the re-read and the resize'],
       ['world', 'THE KEPT VIEW IN WORLD COORDINATES: a re-read that moves the board leaves the old translate', '    if (from && (from.x !== f.x || from.y !== f.y)) st.view = { x: st.view.x - (f.x - from.x) * z, y: st.view.y - (f.y - from.y) * z, z };\n', '', (r) => !!r.movedRect && !(near(r.movedRect.x, r.at0.x) && near(r.movedRect.y, r.at0.y)), 'the moved board left the place the person had it (the pane empty there)'],
