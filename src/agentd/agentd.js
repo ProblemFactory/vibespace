@@ -1165,18 +1165,20 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
             if (!acquireSingleton()) throw new Error('the singleton lock is another agent\'s, or it could not be opened');
             server.removeAllListeners('error');
             let stayUp = false;
-            listenWithRetry(server, SOCK, { log, lockIsOurs, forMs: 0, onFatal: (e) => {
+            const stayFatal = (e) => {
               if (stayUp) { serverFatal(e); return; }   // a listening server's error: the boot's own fatal road, as after its listen
               log(`upgrade hand-over: it could not stay — ${SOCK} did not listen again (${(e && (e.code || e.message)) || e}) — exit 75`);
               exitDaemon(75);
-            }, onListening: () => {
+            };
+            const stayListening = () => {
               stayUp = true;
               try { fs.chmodSync(SOCK, 0o600); } catch { }
               upgradeLanded = false;
               const redial = redialAfterStay; redialAfterStay = null;
               log(`upgrade hand-over: the successor did not start — this daemon stays, listening again on ${SOCK}${redial ? '; its hub dialed again' : ''}`);
               if (redial) redial();
-            } });
+            };
+            listenWithRetry(server, SOCK, { log, lockIsOurs, forMs: 0, onFatal: stayFatal, onListening: stayListening });
           }, spawnNext: () => {
             try { fs.unlinkSync(LOCK); } catch { }
             try { fs.unlinkSync(SOCK); } catch { }
