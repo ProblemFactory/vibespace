@@ -425,7 +425,7 @@ await step('⑨', async () => {
     if (plant) await evalJs(`(() => { const a = document.activeElement; a._showSub = null; return true; })()`);   // the CONTROL: the row's keyboard opener gone
     const IN_SUB = `(() => { const a = document.activeElement, top = document.querySelector('.taskbar-context-menu'), sub = a && a.closest('[role="menu"]'); return !!sub && sub !== top && getComputedStyle(sub).display !== 'none'; })()`;
     await key('ArrowRight');
-    if (plant) { await sleep(600); return { parentRow, s1: await evalJs(`(() => { const a = document.activeElement, top = document.querySelector('.taskbar-context-menu'), sub = a && a.closest('[role="menu"]'); return { text: a ? (a.textContent || '').trim().split('\\n')[0].slice(0, 40) : null, inSub: !!sub && sub !== top }; })()`) }; }
+    if (plant) { await sleep(600); return { parentRow, s1: await evalJs(`(() => { const a = document.activeElement, top = document.querySelector('.taskbar-context-menu'), sub = a && a.closest('[role="menu"]'); return { text: a ? (a.textContent || '').trim().split('\\n')[0].slice(0, 40) : null, inSub: !!sub && sub !== top, menuOpen: !!top && top.isConnected, onRow: !!a && !!top && a.parentElement === top && a.getAttribute('aria-haspopup') === 'menu' }; })()`) }; }
     if (!(await wait4('ArrowRight on the «➤» row opens its submenu with the focus inside it', IN_SUB))) return null;
     const s1 = await evalJs(`(() => { const a = document.activeElement, sub = a && a.closest('[role="menu"]'); const top = document.querySelector('.taskbar-context-menu'); return { text: a ? (a.textContent || '').trim() : null, inSub: !!sub && sub !== top, subShown: !!sub && sub !== top && getComputedStyle(sub).display !== 'none' }; })()`);
     await key('ArrowLeft');
@@ -440,7 +440,10 @@ await step('⑨', async () => {
     if (r4) check(`⑩ ④ a window's menu opened a moment after a key: the «➤» row («${r4.parentRow}») reached by ArrowDown, ArrowRight opens its submenu WITH the focus in it («${r4.s1.text}»), ArrowLeft back to its row (the submenu hidden: ${r4.s2.subHidden}, aria-expanded ${r4.s2.expanded}), Escape closes the menu`,
       r4.s1.inSub && r4.s1.subShown && r4.s1.text === K4 && r4.s2.parent && r4.s2.subHidden && r4.s2.expanded === 'false' && r4.s3, r4);
     const c4 = await walk4({ plant: true });
-    check(`⑩ ④ RED CONTROL: the «➤» row's keyboard opener planted away — ArrowRight opens nothing, the focus never enters a submenu (it stays on «${c4 && c4.s1 && c4.s1.text}»)`, !!c4 && !!c4.s1 && !c4.s1.inSub, c4);
+    // red ONLY because the opener is gone: the menu still open and the focus still ON the arrow row (its words, captured before the
+    // key) — never a focus lost some other way (the reader's small, 02:08Z)
+    check(`⑩ ④ RED CONTROL: the «➤» row's keyboard opener planted away — ArrowRight opens nothing: the focus never enters a submenu, the menu still open (${c4 && c4.s1 && c4.s1.menuOpen}), the focus still on the arrow row «${c4 && c4.s1 && c4.s1.text}»`,
+      !!c4 && !!c4.s1 && !c4.s1.inSub && c4.s1.menuOpen && c4.s1.onRow && c4.s1.text === c4.parentRow, c4);
     await evalJs(`(() => { document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); return true; })()`);
   }
   await evalJs(`(() => { if (window.__k10win && app.wm.windows.get(window.__k10win)) app.wm.requestClose(window.__k10win); const d = app.desktopManager.desktops.find((x) => x.name === ${J(K4)}); if (d) app.desktopManager.deleteDesktop(d.id); return true; })()`).catch(() => null);   // leave the page as ⑩ found it
