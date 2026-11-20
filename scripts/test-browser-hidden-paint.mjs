@@ -18,6 +18,10 @@
 //      during A's thaws, its window read at birth — the red cell), no stray afterwards (Chrome's targets, both
 //      conversations' own `tab list`), B's next verb runs on B's page, one window per holder (windowCensus);
 //   f  CONTROL — the switch turned OFF on the same browser: 60 s with nobody ⇒ never frozen, the GPU still draws.
+//   B-e674 (the coordinator's r562 / r605, written once by a lane that runs no real driver): a1 a raw client's plain create
+//      lands in A's window and is named «a tab nobody holds» in front of it; a2 the session's own `tab new` is never named A's
+//      own; b1 a tab A's page opens while the person drives A's view stays A's and carries the birth stamp «opened in your
+//      takeover» (the real watch tells the keeper); c1 MEASURED: the profile's own «continue where you left off» at a relaunch.
 // SKIPs with evidence without the binary / Xvfb / Chrome. Zero vendor calls; ends every process this run's root started.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -284,6 +288,75 @@ try {
   await sleep(55000);
   const gF = await gpuPct(spy, 5);
   ok(frozenLines().length === nF && facts() && !facts().frozen && gF.pct >= 20, `f: 60 s with nobody and the switch OFF ⇒ never frozen (the keeper reads it at each sweep); the GPU still draws at ${gF.pct} %`, { lines: frozenLines().length - nF, facts: facts() });
+
+  // ══ B-e674 (the coordinator's r548 / r562 / r605): THE CREATE ROADS THAT NEED THE REAL PROGRAM — written once by the lane
+  //    (which runs no real driver), run on the box by the integrator. Each leg reads what the KEEPER says (tabOwnersFor: its
+  //    front, owners, birth stamps) and Chrome's own targets; the only acts are each leg's own setup (an activation, a create,
+  //    the close of what it created) — the keeper moves, closes and activates nothing for a front.
+  //    a1 a raw client's plain create · a2 the session's own `tab new` (the driver's plain create) · b1 a page's tab while the
+  //    person drives A's view (ruling (i)) · c1 MEASURED: this scratch profile's own «continue where you left off» at a relaunch
+  SET['browser.idlePaintFreeze'] = false;
+  const VA = { kind: 'attachment', profileId: prof.id, sessionName: 'vs-' + KA };
+  const pagesE = await pagesNow(rec); const tAe = pagesE.find((t) => /HP-A/.test(t.title));
+  const frontLines = () => journal.filter((x) => x.m.includes('in front of the conversation ' + KA));
+  const ownersA = () => kk.tabOwnersFor(VA, { activeTarget: tAe && tAe.targetId });
+  const closeOwn = async (id) => { if (id) { try { await spy.send('Target.closeTarget', { targetId: id }); } catch { /* gone */ } } };
+  // a1
+  console.log('— B-e674 a1: a client the hub does not drive creates a tab (no window named): it lands in the last focused window — said in front, nothing acted');
+  if (tAe) await spy.send('Target.activateTarget', { targetId: tAe.targetId }); // the leg's own setup: A's window is the last activated
+  const nL1 = frontLines().length;
+  const cr1 = await spy.send('Target.createTarget', { url: U('/raw-a1') });
+  const raw1 = cr1 && cr1.result && cr1.result.targetId;
+  const win1 = raw1 ? await VP.windowOf(rec.cdpUrl, raw1) : null;
+  const o1 = await until(async () => { const r = await ownersA(); return r && r.front && r.front.state === 'foreign' && r.front.targetId === String(raw1 || '').toUpperCase() ? r : null; }, 8000, 250) || await ownersA();
+  console.log(`    (a1: the raw tab ${String(raw1).slice(0, 8)} in window ${win1} — A's window ${winA}; the keeper's front ${JSON.stringify(o1 && o1.front)}; journal ${JSON.stringify(frontLines().slice(nL1).map((x) => x.m))})`);
+  const raw1Lives = raw1 ? (await pagesNow(rec)).some((t) => t.targetId === raw1) : false;
+  ok(!!(raw1 && win1 === winA && o1 && o1.front && o1.front.state === 'foreign' && o1.front.owner === 'orphan' && raw1Lives && frontLines().length > nL1),
+    'B-e674 a1: a RAW create on the shared browser lands in A\'s window (the last focused) and takes its front — the keeper names it «a tab nobody holds» in front of A\'s window, says it once in the journal, and moves or closes nothing (the tab still lives)', { raw1, win1, winA, front: o1 && o1.front });
+  await closeOwn(raw1);
+  // a2
+  console.log('— B-e674 a2: the session\'s own `tab new` (the driver\'s plain create, the keeper\'s fallback road) lands in the last focused window — said in front of the holder it is not');
+  if (tAe) await spy.send('Target.activateTarget', { targetId: tAe.targetId });
+  const before2 = new Set((await pagesNow(rec)).map((t) => t.targetId));
+  const ex2 = await kk._runtime.exec(require('../src/browser-profiles.js').sessionNameFor(prof.id), ['tab', 'new', U('/b-a2')], await kk.leaseCliOpts(prof.id, KB));
+  const new2 = (await pagesNow(rec)).find((t) => !before2.has(t.targetId)) || null;
+  const win2 = new2 ? await VP.windowOf(rec.cdpUrl, new2.targetId) : null;
+  const o2 = new2 ? (await until(async () => { const r = await ownersA(); return r && r.front && r.front.targetId === String(new2.targetId).toUpperCase() ? r : null; }, 8000, 250) || await ownersA()) : null;
+  console.log(`    (a2: B's driver made ${new2 ? String(new2.targetId).slice(0, 8) : 'nothing'} (exec ok ${!!(ex2 && ex2.ok)}) in window ${win2}; the keeper's front for A ${JSON.stringify(o2 && o2.front)})`);
+  ok(!!(new2 && (win2 !== winA || (o2 && o2.front && o2.front.state === 'foreign' && o2.front.owner !== 'agent'))),
+    'B-e674 a2: a tab B\'s own driver made with a plain create either stays out of A\'s window or, landed there in front, is named as NOT A\'s — never as A\'s own', { new2: new2 && new2.targetId, win2, winA, front: o2 && o2.front });
+  await closeOwn(new2 && new2.targetId);
+  // b1
+  console.log('— B-e674 b1: the person drives A\'s view and A\'s page opens a tab (a sign-in / consent window) — it stays A\'s, named «opened in your takeover»');
+  const tk1 = kk.takeover({ browserKey: KA, profileId: prof.id, viewerId: 9, sessionId: 'sess-a' });
+  const op1 = tAe ? await VP.openTabInWindow(rec.cdpUrl, { anchorTargetId: tAe.targetId, windowId: winA }) : null;
+  const pop1 = op1 && op1.ok ? String(op1.targetId).toUpperCase() : null;
+  const o3 = pop1 ? (await until(async () => { const r = await ownersA(); return r && r.made && r.made[pop1] ? r : null; }, 8000, 250) || await ownersA()) : null;
+  try { kk.handback({ browserKey: KA, profileId: prof.id, viewerId: 9, cause: 'explicit' }); } catch { /* not taken */ }
+  console.log(`    (b1: takeover ${!!(tk1 && tk1.ok)}; A's page opened ${pop1 ? pop1.slice(0, 8) : 'nothing'} (${JSON.stringify(op1 && { ok: op1.ok, code: op1.code })}); owner ${o3 && pop1 ? o3.owners[pop1] : '?'}; stamp ${JSON.stringify(o3 && pop1 ? o3.made[pop1] : null)})`);
+  ok(!!(tk1 && tk1.ok && pop1 && o3 && o3.owners[pop1] === 'agent' && o3.made[pop1] && o3.made[pop1].made === 'takeover' && o3.made[pop1].person === false),
+    'B-e674 b1: a tab A\'s page opened while the person drove A\'s view is still A\'s (the popup rule) and carries the birth stamp «opened in your takeover» — the real watch told the keeper at its birth', { pop1, owner: o3 && pop1 && o3.owners[pop1], made: o3 && pop1 && o3.made[pop1] });
+  await closeOwn(pop1);
+  // c1
+  console.log('— B-e674 c1: MEASURED — this scratch profile\'s own «continue where you left off» at a relaunch: what Chrome restores, and whose it reads');
+  let c1 = { measured: false };
+  try {
+    const urls0 = (await pagesNow(rec)).map((t) => t.url).filter((u) => /^https?:/.test(u));
+    const dir = (kk.browserOf(prof.id) || {}).dir || prof.dir || null;
+    try { spy?.close(); } catch { /* reopened below */ }
+    await kk.stop(prof.id, { why: 'user' });
+    const pf = dir ? path.join(dir, 'Default', 'Preferences') : null;
+    let prefsOk = false;
+    if (pf && fs.existsSync(pf)) { const j = JSON.parse(fs.readFileSync(pf, 'utf8')); j.session = { ...(j.session || {}), restore_on_startup: 1 }; fs.writeFileSync(pf, JSON.stringify(j)); prefsOk = true; }
+    const ra = await A(['get', 'title']); // A's next command starts the browser again
+    const rec2 = kk.browserOf(prof.id);
+    const pages2 = rec2 && rec2.cdpUrl ? await pagesNow(rec2) : [];
+    const restored = pages2.filter((t) => urls0.includes(t.url));
+    const o4 = await kk.tabOwnersFor(VA, {});
+    c1 = { measured: true, prefsOk, dir: !!dir, relaunched: ra.code === 0, before: urls0.length, after: pages2.length, restored: restored.map((t) => ({ id: String(t.targetId).slice(0, 8), url: t.url.replace(U(''), ''), owner: o4 && o4.owners ? o4.owners[String(t.targetId).toUpperCase()] : '?', stamped: !!(o4 && o4.made && o4.made[String(t.targetId).toUpperCase()]) })) };
+  } catch (e) { c1 = { measured: false, threw: String(e && e.message).slice(0, 200) }; }
+  console.log(`    (c1: ${JSON.stringify(c1)})`);
+  ok(!!(c1.measured && c1.restored.every((x) => x.owner !== 'you' && !x.stamped)), `B-e674 c1: MEASURED at a relaunch with the profile's own restore setting (${c1.measured ? `${c1.restored.length} tab(s) restored of ${c1.before}` : 'not measured'}) — a restored tab is never stamped as the person's (nobody drove at its birth): nobody's unless a holder's root names it`, c1);
 } catch (e) { if (!/^no browser$/.test(String(e && e.message))) ok(false, 'the run threw', String(e && e.stack)); }
 finally { try { spy?.close(); } catch { /* */ } try { dialogs.shutdown(); kk.shutdown(); } catch { /* */ } srv.close(); pages.close(); cleanup(); }
 done();
