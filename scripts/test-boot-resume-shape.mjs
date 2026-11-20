@@ -234,12 +234,15 @@ async function report(tag, from, to, marks) {
   const first = clock && clock.first != null ? clock.origin + clock.first : from;
   const firstAnswer = rows.find((r) => r.ms != null);
   const s = samplesOver(rows, first, to), h = holdsOver(clock, control, first, to);
-  const trace = await getJson('/api/boot-trace');
+  const trace = await getJson('/api/boot-trace?cpu=1');   // the CPU sampler's samples folded ONCE: every hold named by what ran in it
   const steps = trace ? [...(trace.steps || []), ...(trace.spans || [])].filter((x) => (x.ms || 0) >= 100).sort((a, b) => b.ms - a.ms).slice(0, 8).map((x) => `${x.name} ${x.ms} ms`) : [];
+  const holdName = (h) => (h && (h.name || ((h.sites || [])[0] || {}).what)) || (h && h.faint && h.faint.length ? `unnamed (faint: ${h.faint.slice(0, 3).map((x) => `${x.ms} ms ${x.what}`).join(', ')})` : 'unnamed');
+  const named = trace && Array.isArray(trace.holds) ? trace.holds.filter((h) => (h.ms || 0) >= 100).sort((x, y) => y.ms - x.ms).slice(0, 8).map((h) => `${h.ms} ms at +${((h.at || 0) / 1000).toFixed(1)} s: ${holdName(h)}${(h.sites || []).length > 1 ? ` (+ ${(h.sites || []).slice(1, 3).map((x) => x.what).join(', ')})` : ''}`) : [];
   console.log(`  ${tag}: window ${((to - first) / 1000).toFixed(1)} s from the first loop turn (${marks}); the first /login answer at ${firstAnswer ? ((firstAnswer.at + firstAnswer.ms - first) / 1000).toFixed(1) + ' s' : 'never'}`);
   console.log(`  ${tag}: /login — ${s.n} samples, ${s.preListen} refused before the listen, ${s.answered} answered, worst ${s.worst} ms (at +${s.worstAt != null ? (s.worstAt / 1000).toFixed(1) : '?'} s), ${s.overLaw} over ${ANSWER_LAW_MS} ms, ${s.overProbe} over the probe's ${PROBE_TIMEOUT_MS} ms; unanswered ${s.unansweredN} ${s.unansweredN ? S(s.unanswered) : ''}`);
   console.log(`  ${tag}: loop — longest hold ${h.maxHeld} ms; ${h.over} gaps held ≥ ${HOLD_LAW_MS} ms (${h.sum} ms in all); the top: ${h.top.map((g) => `+${((g.abs - first) / 1000).toFixed(1)} s ${g.ms} ms (cpu ${g.cpu} · wait ${g.wait} · control ${g.ctl} ⇒ held ${g.held})`).join('; ')}`);
   console.log(`  ${tag}: boot trace ≥ 100 ms: ${steps.join(' · ') || 'none'}`);
+  console.log(`  ${tag}: the boot trace's holds ≥ 100 ms, named: ${named.length ? '\n    ' + named.join('\n    ') : 'none'}`);
   const hl = holdLines(tag); console.log(`  ${tag}: the hub's [loop-hold] lines: ${hl.length}${hl.length ? '\n    ' + hl.slice(0, 6).join('\n    ') : ''}`);
   check(`${tag}: THE LAW — /login answered within ${ANSWER_LAW_MS} ms at every ${SAMPLE_MS} ms sample past the listen (worst ${s.worst} ms, N = ${N})`, s.overLaw === 0 && s.unansweredN === 0 && s.answered > 0, s);
   check(`${tag}: THE LAW — no loop hold ≥ ${HOLD_LAW_MS} ms from the first loop turn (longest ${h.maxHeld} ms, N = ${N})`, h.ok && h.over === 0, h.top);
