@@ -55,6 +55,7 @@ const P = require('../vault-paste.js');   // PURE: the ask's rules, the card's w
 const VK = require('../vault-kinds.js');   // PURE (lane vault-entry-description): which kinds carry words (the `words` surface)
 const VI = require('../vault-inventory.js');   // PURE: an entry's row (the name the window shows, its description)
 const V = require('../vault.js');   // B-3fb5: AGENT_NS_RE — the whole name of an agent's own entry (agent:<scope>/<name>)
+const VR = require('../vault-run.js');   // PURE: an entry's reference (B-3fb5: the delete line names it — the window's use counts end there)
 const VB = require('../vault-blocked.js');   // PURE: a caller's name in words; THE words toward an agent on a locked refusal
 const URL_ = require('url');   // lane login-request-card: a site's Unicode form beside its punycode one (P.siteWords takes the function)
 
@@ -454,7 +455,8 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     const id = `secrets:${e}#${P.ENTRY_FIELD}`;
     if (vaultRun && typeof vaultRun.forgetEntry === 'function') { try { vaultRun.forgetEntry(id); } catch (x) { log(`${e}: the run door could not forget it — ${x.message}`); } }
     index(); for (const w of [...wopen.values()]) if (w.entry === e) wsettle(w, 'gone');   // its words card answers nothing now
-    audit('vault-agent-secret-deleted', { who: who ? String(who).slice(0, 80) : null, ip, by: String(by).slice(0, 40), entry: e, why: e });   // the name and who — never a value (`why`: the engine's own line names it, as mint / put do)
+    const rf = VR.refFor('secrets', e, P.ENTRY_FIELD);
+    audit('vault-agent-secret-deleted', { who: who ? String(who).slice(0, 80) : null, ip, by: String(by).slice(0, 40), entry: e, why: e, ...(rf ? { ref: rf.ref } : {}) });   // the name and who — never a value (`why`: the engine's own line names it, as mint / put do)
     return { ok: true, entry: e };
   }
   // ── THE WORDS OF AN ENTRY (lane vault-entry-description) ──

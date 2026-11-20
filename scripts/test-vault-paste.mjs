@@ -457,6 +457,10 @@ async function agentDrop(w, s, name) {
   W.vaultRun._hostPasses.set(other, { scope: 'cid-asker-1', id: 'secrets:agent:cid-asker-1/other#secret', host: 'b.example.test', at: Date.now() });
   W.vaultRun._lateOnce.set('pair-b3fb5', { until: Date.now() + 60e3, entries: [id2], askId: 'ask-b3fb5' });
   const prop = W.paste.propose({ caller: { conversationId: 'cid-b3fb5', sessionKey: 'w1', name: 'Lane asker' }, entry: name2, ref: `vault://secrets/${name2}/secret`, seen: true, name: 'A better name' });
+  // B-3fb5 (主开发 r542): the old value's USES, noted by its reference as the run door notes them (two, by the conversation)
+  const ref2 = `vault://${name2}`, useBy = { by: 'agent', door: 'run', conv: 'cid-asker-1' }, oldBy = { by: 'agent', door: 'run', conv: 'cid-old-reader' };
+  W.vault.noteUse(ref2, oldBy, { outcome: 'ok' }); W.vault.noteUse(ref2, oldBy, { outcome: 'ok' });   // the OLD value's two uses, by another conversation
+  const usedBefore = (W.vault.useCounts()[ref2] || { uses: 0 }).uses;
   const del2 = await S.hit(`/api/vault/agent-secrets/${encodeURIComponent(name2)}`, { method: 'DELETE' });
   ok(prop.ok && del2.status === 200 && ![...W.vaultRun._hostPasses.values()].some((p) => p.id === id2) && !W.vaultRun._lateOnce.has('pair-b3fb5') && W.vaultRun._hostPasses.has(other)
     && !W.paste.proposalsOpen().some((p) => p.entry === name2) && W.paste.answerWords(prop.proposalId, { answer: 'allow' }).code === 'ask_settled',
@@ -464,6 +468,26 @@ async function agentDrop(w, s, name) {
   W.vaultRun._hostPasses.delete(other);
   const again = W.vault.agentMint(name, { length: 24 });
   ok(again.ok && !again.rotated, 'a re-mint of the same name after the delete is a NEW entry (not a rotation: no words kept)', again);
+  // B-3fb5: a value an agent mints again under a DELETED entry's name starts its use counts at 0 — the person's delete line names
+  // the entry's reference, and the window's counts (src/vault-use.js countsOf over the audit tail) end there; a use of the new
+  // value counts. RED: the counts that read through a delete line (the release) — the old value's two uses shown for the new one
+  const again2 = W.vault.agentMint(name2, { length: 24 });
+  const usedAfterMint = (W.vault.useCounts()[ref2] || { uses: 0 }).uses;
+  W.vault.noteUse(ref2, useBy, { outcome: 'ok', purpose: 'vault-agent-secret-deleted' });   // the new value's use — its purpose (the agent's own words) holds the delete line's event name
+  const usedNew = W.vault.useCounts()[ref2] || { uses: 0, convs: 0 };
+  const delLine = fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8').split('\n').filter((l) => { try { const o = JSON.parse(l); return o.event === 'vault-agent-secret-deleted' && o.entry === name2; } catch { return false; } });   // the delete line itself (a use line may hold its words)
+  const f3 = { usedBefore, minted: !!(again2 && again2.ok), usedAfterMint, usedNew: { uses: usedNew.uses, convs: usedNew.convs }, deleteLineNamesRef: delLine.length === 1 && delLine[0].includes(`"ref":"${ref2}"`) };
+  okF(f3.usedBefore === 2 && f3.minted && f3.usedAfterMint === 0 && f3.usedNew.uses === 1 && f3.usedNew.convs === 1 && f3.deleteLineNamesRef,
+    'B-3fb5: a value minted again under a deleted agent entry\'s name starts at 0 uses (the old value\'s 2, by another conversation, never shown for it); its own use counts — even one whose purpose holds the delete\'s words — and the delete line names the reference', f3);
+  const vuAbs = path.join(REPO, 'src/vault-use.js');
+  const vuCopy = (from, to, label) => { const m = new Module(vuAbs, null); m.filename = vuAbs; m.paths = Module._nodeModulePaths(path.dirname(vuAbs)); m._compile(anchored(fs.readFileSync(vuAbs, 'utf8'), from, to, label), vuAbs); return m.exports; };
+  const VUr = vuCopy("typeof d.ref === 'string') acc.delete(clean(d.ref, 200));", "typeof d.ref === 'string') void 0;", 'B-3fb5: counts read through a delete');
+  const redUses = (VUr.countsOf(fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8'))[ref2] || { uses: 0 }).uses;
+  okF(redUses === 3, 'RED control: the counts that read through a delete line ⇒ the new value shows the old value\'s uses too (3 for 1)', { redUses });
+  const VUs = vuCopy("d.event === 'vault-agent-secret-deleted') { if (typeof d.ref === 'string') acc.delete(clean(d.ref, 200)); continue; }", "d.event === 'vault-agent-secret-deleted') { if (typeof d.ref === 'string') acc.delete(clean(d.ref, 200)); } continue;", 'B-3fb5: every line holding the words skipped');
+  const skipUses = (VUs.countsOf(fs.readFileSync(path.join(W.dataDir, 'vault-audit.jsonl'), 'utf8'))[ref2] || { uses: 0 }).uses;
+  okF(skipUses === 0, 'RED control: a reset that skips every line HOLDING the delete\'s words ⇒ a real use whose purpose an agent worded so is never counted', { skipUses });
+  W.vault.secretDrop(name2);
   W.vault.secretDrop(name); W.vault.secretDrop(free.json.entry);
 }
 {

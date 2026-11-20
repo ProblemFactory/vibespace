@@ -22,7 +22,9 @@
 //     fields (entry, purpose, when, door, outcome, receipt). A line never holds a value, and another conversation's are skipped.
 //   · THE COUNTS (lane vault-use-grants — the Vault window's «used 12× by 3 conversations»): `countsOf(text)` over the same tail —
 //     per entry, the uses that OPENED (outcome ok) and how many conversations made them, and the same per GRANT (`grant` = the
-//     vault-use grant's id, src/vault-use-grant.js, when a standing approval admitted the use — the run door writes it).
+//     vault-use grant's id, src/vault-use-grant.js, when a standing approval admitted the use — the run door writes it); a
+//     person's delete of an agent's entry (its `vault-agent-secret-deleted` line names the reference) ENDS that reference's count
+//     (B-3fb5: a value an agent mints again under the name starts at 0).
 // PURE: imports nothing (scripts/test-architecture.mjs PURE set).
 
 const BY = Object.freeze(['human', 'agent', 'job', 'automation', 'system']);
@@ -146,12 +148,21 @@ function usesOf(text, conv, limit = USES_MAX) {
   }
   return out;
 }
-/** lane vault-use-grants: THE COUNTS over the audit tail `text` — `vault-use` lines that OPENED (outcome ok) → { <entry>:
+/** lane vault-use-grants: THE COUNTS over the audit tail `text` — `vault-use` lines that OPENED (outcome ok), each reference's
+ *  count ENDED by a person's delete line naming it (B-3fb5: a value minted again under the name starts at 0) → { <entry>:
  *  { uses, convs, grants: { <grant id>: { uses, convs } } } } (`convs` = how many conversations; a line with no conversation
  *  counts as a use only). Each line re-checked (a line the file holds is read, never trusted whole). */
 function countsOf(text) {
   const acc = new Map();
   for (const l of String(text == null ? '' : text).split('\n')) {
+    // B-3fb5: a person's DELETE of an agent's entry ends its count — a value an agent mints again under that name starts at 0
+    // (the tail is the file's order: the uses before the delete line were the old value's). The line names its reference.
+    // Only a line whose EVENT is the delete resets — a use line that merely holds those words (an agent's own purpose) still counts
+    if (l && l.indexOf('"vault-agent-secret-deleted"') >= 0) {
+      let d = null;
+      try { d = JSON.parse(l); } catch { d = null; }
+      if (d && typeof d === 'object' && d.event === 'vault-agent-secret-deleted') { if (typeof d.ref === 'string') acc.delete(clean(d.ref, 200)); continue; }
+    }
     if (!l || l.indexOf('"vault-use"') < 0) continue;
     let o = null;
     try { o = JSON.parse(l); } catch { continue; }
