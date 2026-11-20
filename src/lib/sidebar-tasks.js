@@ -496,7 +496,7 @@ export function installSidebarTasks(SidebarClass) {
     const first = this._firstFolder(task);
     if (first.hostId) {
       let d = null; try { d = await fetchJson('/api/hosts'); } catch { d = null; }
-      const unread = !d || d.error || d.held || !Array.isArray(d.hosts);
+      const unread = !d || d.error || d.unread || !Array.isArray(d.hosts);   // a HELD list (the hub's `unread`: hosts.json held) is said as unread, never «not paired any more»
       if (unread || !d.hosts.some((h) => h && h.id === first.hostId)) {
         const msg = unread ? tr('The machines list cannot be read right now, so this Task Group\'s folder on another machine was not opened — nothing was started.')
           : tr('This Task Group\'s first folder is on a machine that is not paired any more ({id}) — nothing was opened. Point the folder at a paired machine in the group\'s Context table.', { id: first.hostId });

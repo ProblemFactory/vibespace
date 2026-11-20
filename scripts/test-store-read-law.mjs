@@ -587,7 +587,7 @@ console.log('§2 machine-mounts.json (src/machine-mounts.js) — every mount of 
     ok(cut.every((c) => c !== 'mounts-unread'), 'CONTROLS (each guard cut alone, in a copy): that call is no longer refused by the hold\'s name', cut);
   }
   const SVM = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
-  ok((SVM.match(/catch \(e\) \{ res\.status\(e && e\.status === 503 \? 503 : 400\)\.json\(\{ error: e\.message, \.\.\.\(e && e\.status === 503 && e\.code \? \{ code: e\.code \} : \{\}\) \}\); \}/g) || []).length === 3,
+  ok((SVM.match(/catch \(e\) \{ res\.status\(e && e\.status === 503 \? 503 : 400\)\.json\(\{ \.\.\.require\('\.\/src\/mount-error-words\.js'\)\.errorBody\(e\), \.\.\.\(e && e\.status === 503 && e\.code \? \{ code: e\.code \} : \{\}\) \}\); \}/g) || []).length === 3,
     'WIRING (主开发 23:21Z; its read S2): the mount, unmount and remount routes keep a hold\'s status (503) and its name — machine-mounts.json\'s (mounts-unread) AND hosts.json\'s (hosts-unread, a machine looked up while the paired machines are held)');
   // its read r1 (M2): the next try armed FIRST — a try that meets a read in flight arms the next, and the read that then fails leaves it
   const armM = async (Mod, name) => {

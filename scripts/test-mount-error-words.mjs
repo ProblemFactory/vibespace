@@ -164,8 +164,8 @@ ok(/MW\.wordsFor\(m && m\.errorCode, \(m && m\.errorParams\) \|\| \{\}, \{ t: tr
 // ═══ ⑤ the wiring ═══
 console.log('⑤ the wiring');
 const SJ = read('server.js'), PW = read('src/server/mounts-plugins-wiring.js'), MS = read('src/mounts.js'), MMS = read('src/machine-mounts.js');
-ok((SJ.match(/res\.status\(400\)\.json\(require\('\.\/src\/mount-error-words\.js'\)\.errorBody\(e\)\)/g) || []).length === 3 && !/app\.(post|delete)\('\/api\/machine-mounts[^\n]*\n?[^\n]*json\(\{ error: e\.message \}\)/.test(SJ),
-  '⑤ server.js: the three machine-mount routes answer errorBody (no line added)');
+ok((SJ.match(/res\.status\(e && e\.status === 503 \? 503 : 400\)\.json\(\{ \.\.\.require\('\.\/src\/mount-error-words\.js'\)\.errorBody\(e\), /g) || []).length === 3 && !/app\.(post|delete)\('\/api\/machine-mounts[^\n]*\n?[^\n]*json\(\{ error: e\.message \}\)/.test(SJ),
+  '⑤ server.js: the three machine-mount routes answer errorBody (no line added; a hold keeps its 503 and its name — the stores chain)');
 const mountRoute = PW.slice(PW.indexOf("app.post('/api/mounts/:id/mount'"), PW.indexOf('app.post(', PW.indexOf("app.post('/api/mounts/:id/mount'") + 10));
 ok(mountRoute.includes("require('../mount-error-words.js').errorBody(e)") && MS.includes('error: this._errors.get(m.id) || null, ...this._errorCodeOf(m.id),'), '⑤ the cloud connect route answers errorBody; the cloud row spreads _errorCodeOf');
 ok((SB.match(/mmApi\(`\/api\/(machine-mounts|mounts)\//g) || []).length === 10 && !/[^m]api\(`\/api\/machine-mounts\//.test(SB) && !/[^m]api\(`\/api\/mounts\/\$\{[^}]+\}\/mount`/.test(SB),   // stale-pins: kept — an absence check

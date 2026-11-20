@@ -123,7 +123,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     hostsAskedAt = Date.now();
     const key = (d) => (d && Array.isArray(d.hosts) ? JSON.stringify(d.hosts.map((h) => [h && h.id, h && h.name])) : null);   // «no list» is not «an empty list»
     fetchJson('/api/hosts').then((d) => {
-      if (closed || !d || !Array.isArray(d.hosts)) return;
+      if (closed || !d || d.unread || !Array.isArray(d.hosts)) return;   // a HELD list (`unread`) is never the roster: the table keeps what it said, asked again on the next paint
       const was = key(sidebar._hostsData);
       try { overlayLastRuns(d.hosts, sidebar._lastRunSeen); } catch { }   // a run pushed while this list was on its way stays shown (the Machines panel's rule)
       sidebar._hostsData = d;

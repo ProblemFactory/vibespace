@@ -427,6 +427,8 @@ console.log('§4 every page reader of the machines list is a row');
     { file: 'src/lib/sidebar-rail.js', at: "fetchJson('/api/port-forwards'), fetchJson('/api/hosts')", n: 1, cls: 'harmless', pin: "this._railSetBadge('mounts', off ? off + '⏻' : '');", why: 'a badge count of offline devices — no badge while held; nothing is changed' },
     { file: 'src/lib/sidebar-rail.js', at: "hostsList = (await fetchJson('/api/hosts'))?.hosts || [];", n: 1, cls: 'harmless', pin: "if (!c.isConnected) return;", why: 'the System panel\'s machine chooser lists this machine only until it is opened again' },
     { file: 'src/lib/sidebar-rail.js', at: "hosts = ((await api('/api/hosts')) || {}).hosts || [];", n: 1, cls: 'harmless', pin: "const machines = [{ id: '__local__', name: tr('This machine'), online: true },", why: 'the publish dialog offers This machine only; nothing on a machine it does not list is changed' },
+    { file: 'src/lib/sidebar-tasks.js', at: "let d = null; try { d = await fetchJson('/api/hosts'); } catch { d = null; }", n: 1, cls: 'refuses', pin: 'const unread = !d || d.error || d.unread || !Array.isArray(d.hosts);', why: 'B-06de\'s group door (a first folder on another machine): a held list refuses in its own words («cannot be read right now»), never «not paired any more» — nothing is opened (§5b drives it)' },
+    { file: 'src/lib/task-detail.js', at: "fetchJson('/api/hosts').then((d) => {", n: 1, cls: 'waits', pin: 'if (closed || !d || d.unread || !Array.isArray(d.hosts)) return;', why: 'B-06de\'s group window re-reads the machines list: a held answer is never the roster (the table keeps what it said; asked again on the next paint — §5b drives it)' },
     { file: 'src/lib/sidebar-workbench.js', at: "fetch('/api/hosts').then(r => r.json()).then(d => {", n: 1, cls: 'waits', pin: 'if (d.unread) { const first = !this._hostsHeld; this._hostsHeld = true; this._hostsDataFailAt = Date.now(); if (first) this._render(); return; }', why: 'Recent / History machine picks: a held list is never the roster (kept, no «no longer exists»); asked again after the backoff (§2 drives it)' },
     { file: 'src/lib/toolbar-fold.js', at: "const d = await fetchJson('/api/hosts'); hostsList = d?.hosts || []; held = (d && d.unread) || null;", n: 1, cls: 'refuses', pin: '...(held ? [{ caption: t(\'Your paired machines cannot be read right now', why: 'the terminal button opens its menu with the hold\'s words — never a local shell in place of the machine meant' },
   ];
@@ -521,6 +523,46 @@ console.log('§5 the readers that named an absence now say the hold');
   const lk = linkOf(require(path.join(ROOT, 'src/hosts.js')));
   const lkx = linkOf(MJ.load('src/hosts.js', anchored(HSRC, LH, '    const h = this.get(id);', 'hhc-519a'), 'link-no-held'));
   ok(lk === 'offline' && lkx === 'threw:hosts-unread', 'linkState while held answers «offline» (a dark source); CONTROL (the release\'s first line, in a copy): it throws — usage-pool-engine\'s darkSources swallowed it into an EMPTY list', { lk, lkx });
+}
+
+// ── §5b B-06de's two readers of the machines list (the move onto 921c0de17 met them): a HELD answer (`unread`) is said as unread ──
+console.log('§5b B-06de\'s machines-list readers take a held answer as unread');
+{
+  const HELD = { hosts: [], key: { exists: true }, unread: 'hosts.json in VibeSpace\'s data folder could not be read (EACCES)' };   // GET /api/hosts while held (exit-routes)
+  const bodyOf = (src, head) => { const i = src.indexOf(head); if (i < 0) return null; const j = src.indexOf('{', i + head.length); let d = 0; for (let k = j; k < src.length; k++) { if (src[k] === '{') d++; else if (src[k] === '}' && --d === 0) return src.slice(j, k + 1); } return null; };
+  // (a) the group door (sidebar-tasks _openGroupSession): a group whose first folder is on h-0001, the list held
+  const STS = fs.readFileSync(path.join(ROOT, 'src/lib/sidebar-tasks.js'), 'utf8');
+  const OG = 'proto._openGroupSession = async function(task, extra = {})', UR = 'const unread = !d || d.error || d.unread || !Array.isArray(d.hosts);';
+  ok(STS.includes(OG) && STS.split(UR).length === 2, 'control setup: the group door and its held read are in sidebar-tasks.js');
+  const openScene = async (src) => {
+    const io = { said: [], opened: 0 };
+    // eslint-disable-next-line no-new-func
+    const door = new Function('fetchJson', 'showToast', 'tr', 'openMachinesTab', `return async function(task, extra = {}) ${bodyOf(src, OG)};`)(
+      async () => HELD, (m) => io.said.push(/cannot be read right now/.test(m) ? 'unread' : /not paired any more/.test(m) ? 'not-paired' : m), (t, v) => (v ? t.replace(/\{(\w+)\}/g, (x, k) => String(v[k])) : t), () => { });
+    const r = await door.call({ _firstFolder: () => ({ cwd: '/srv/app', hostId: 'h-0001' }), app: { showNewSessionDialog: () => { io.opened++; return 'opened'; }, openTaskDetail() { } } }, { id: 'T-1' });
+    return { r, opened: io.opened, said: io.said };
+  };
+  const og = await openScene(STS), ogx = await openScene(anchored(STS, UR, 'const unread = !d || d.error || d.held || !Array.isArray(d.hosts);', 'hhc-5b1'));
+  ok(og.r === null && og.opened === 0 && JSON.stringify(og.said) === '["unread"]' && ogx.r === null && JSON.stringify(ogx.said) === '["not-paired"]',
+    'B-06de\'s group door while the machines list is HELD: nothing is opened and the list is said as UNREAD («cannot be read right now»); CONTROL (the door\'s first read, `d.held` — a mark the hub never sends, in a copy): «not paired any more», a false word that sends the person to re-point the row — RED', { og, ogx });
+  // (b) the group window's fresh read (task-detail freshHosts): the roster it holds, the list held
+  const TDS = fs.readFileSync(path.join(ROOT, 'src/lib/task-detail.js'), 'utf8');
+  const FH = '  const freshHosts = () => {\n', FU = 'if (closed || !d || d.unread || !Array.isArray(d.hosts)) return;';
+  const fi = TDS.indexOf(FH), fj = fi < 0 ? -1 : TDS.indexOf('\n  };\n', fi);
+  ok(fi > 0 && fj > fi && TDS.slice(fi, fj).split(FU).length === 2, 'control setup: freshHosts and its held read are in task-detail.js');
+  const freshScene = async (src) => {
+    const i = src.indexOf(FH), j = src.indexOf('\n  };\n', i);
+    const kept = { hosts: [{ id: 'h-0001', name: 'Build box' }] }, sidebar = { _hostsData: kept, _lastRunSeen: null };
+    let painted = 0;
+    // eslint-disable-next-line no-new-func
+    const fresh = new Function('fetchJson', 'sidebar', 'overlayLastRuns', 'state', 'renderSettings', `let hostsAskedAt = 0, closed = false;\n${src.slice(i, j + 5)}\nreturn freshHosts;`)(
+      () => Promise.resolve(HELD), sidebar, () => { }, { tab: 'settings' }, () => { painted++; });
+    fresh(); await new Promise((r) => setImmediate(r));
+    return { kept: sidebar._hostsData === kept, painted };
+  };
+  const fh = await freshScene(TDS), fhx = await freshScene(anchored(TDS, FU, 'if (closed || !d || !Array.isArray(d.hosts)) return;', 'hhc-5b2'));
+  ok(fh.kept && fh.painted === 0 && !fhx.kept && fhx.painted === 1,
+    'B-06de\'s group window re-reading the machines list while HELD: the roster it holds is KEPT and nothing repaints; CONTROL (the read\'s first line, in a copy): the held answer (no machines) becomes the roster and the Context table repaints with its machine rows as not paired — RED', { fh, fhx });
 }
 
 // ── §6 WIRING (its read r2, N14): the boot's re-adoption waits for the read at its one caller; both installers word exit 16 as a wait ──
