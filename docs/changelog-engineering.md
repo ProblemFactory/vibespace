@@ -626,6 +626,9 @@ This file is the engineers' record of every release: the lanes, the verification
 - The leg proves that typing opens the list on a machine that answers inside its budget. Under the runner's load the 450 ms budget was missed three times in a row, the field's bounded ask-again ended, and with no further keystroke the list never opened: a bare false (the coordinator's placement, 2026-11-20 04:44Z). A tap on the page's fetch now records each dir-complete reply for the typed text and its `partial` mark; when the list does not open, the red NAMES what it saw — «PREMISE NOT MET — the machine did not answer in its budget: N partial replies …» with the field's line and the last reply, or «a WHOLE reply came … and the list did not open — the product's fault». Nothing loosened: a list that does not open on a whole reply stays red.
 
 
+### lg-store-writes — B-0248: the measured holds after 2.369.412 (主开发 2026-11-20 03:10Z — the owner's hub, the first hour of the new build: 23 holds of 1–3 s on the storage) and its follow-up (round wf_3c7fc92a-819)
+- LIST LINE 117's MUST (主开发 2026-11-20 04:59Z — test-desktop-app-keeper §3, red on both tries at 0277bf2ba: the keeper's process SIGKILLed right after «ready», the next life read the launch's FIRST record — no pids, no display, no port — and tore the survivor down): what the next life needs to ADOPT a running application is ON DISK before the launch is told ready (`landedForReady`: the bring-up waits off the loop, said past each bound, never ending the app). The heavy leg is the product's own crash proof; the fast leg: test-app-launch-once ⑪ (the record stays «launching» while in the air; RED: the wait cut). Also: the adoption skips a record whose bring-up runs in this life (a relaunch may reuse an id).
+
 ## 2.369.412 — 2026-11-19
 
 ### bl-tests-a — ckpt61 hosted red of test-path-field-chrome, tests only for .412 (主开发 21:37Z: the product cure rides .413 as its own unit, B-08d5): no product byte
