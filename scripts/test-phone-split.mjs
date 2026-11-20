@@ -319,13 +319,16 @@ console.log('⑩ the bar\'s ⋯ stands only when the window\'s menu holds a row'
     'RED CONTROL: the folded ⚙\'s row counted ⇒ a files window\'s ⋯ stands to hold only ⚙ — the step that was to give the name room takes it back');
   const TBAR = read('src/lib/trailing-bar.js'), TBK = read('src/lib/taskbar.js'), SBR = read('src/lib/sidebar.js'), css = read('public/style.css');
   const merge = SBR.slice(SBR.indexOf('  _mergeAndRender() {'), SBR.indexOf('\n  }\n', SBR.indexOf('  _mergeAndRender() {')));
-  ok(/const holds = !!w && windowMenuHolds\(app, w\.id\), moved = holds !== more\.classList\.contains\('on'\);\n    more\.classList\.toggle\('on', holds\);/.test(TBAR) && !/more\.classList\.toggle\('on', !!w\);/.test(TBAR)   // stale-pins: kept — a deliberate absence check: the old line must stay gone
+  ok(/const holds = !!w && regular\(\) && windowMenuHolds\(app, w\.id\), moved = holds !== more\.classList\.contains\('on'\);[^\n]*\n    more\.classList\.toggle\('on', holds\);/.test(TBAR) && !/more\.classList\.toggle\('on', !!w\);/.test(TBAR)   // stale-pins: kept — a deliberate absence check: the old line must stay gone
     && /if \(!windowMenuHolds\(app, w\.id\)\) \{ update\(\); return; \}/.test(TBAR) && /if \(moved\) app\._mobileNav\?\._paintHead\?\.\(\);/.test(TBAR),
-    'the bar: ⋯ is on only while the window\'s menu holds a row (never «on for every window»); a press after its rows left opens nothing and the bar follows; its coming or going re-fits the head');
+    'the bar: ⋯ is on only while the window\'s menu holds a row (never «on for every window»), judged only in the regular class (where it is drawn); a press after its rows left opens nothing and the bar follows; its coming or going re-fits the head');
   ok(/export function windowMenuHolds\(app, id\) \{\n  return moreHolds\(windowMenuRows\(app, id\)\);/.test(TBK) && /return ctx \? contribMenuItems\('window', ctx\) : null;/.test(TBK) && /const ctx = windowMenuCtx\(app, id, \{ closeLabel, switchSubmenu, group, rowYielded \}\);/.test(TBK),
     'ONE reader: the question and the menu share windowMenuCtx and the window registry');
-  ok(merge.includes('this.app.syncSessionIdentity?.(this._allSessions);') && merge.includes('this.app?._mobileNav?.bar?.update?.();'),
-    'every merge of the list re-judges the bar (a conversation\'s menu holds its rows once its session is in the list)');
+  ok(merge.includes('this.app.syncSessionIdentity?.(this._allSessions);') && merge.includes('this.app?._mobileNav?.bar?.onList?.();') && !merge.includes('this.app?._mobileNav?.bar?.update?.();')
+    && /if \(key === listSeen\) return;\n    listSeen = key;\n    update\(\);/.test(TBAR) && /const key = JSON\.stringify\(\[w\?\.id \|\| null, regular\(\), s && \[s\.webuiId, s\.sessionId, s\.status, s\.browserKey, s\.host, s\.browserProfileActive, !!s\.browserInput\], /.test(TBAR) && /return \{ update, onList, el: nav \};/.test(TBAR),
+    'every merge of the list asks the bar (a conversation\'s menu holds its rows once its session is in the list) — and the bar updates only when the window on show\'s own session facts moved (the reading w7vpg6swt: a 5 s poll that moved nothing runs no registry)');
+  ok(/winInfo\._desktopAppCaps = rec\.caps \|\| null;[^\n]*\n    app\._mobileNav\?\.bar\?\.update\?\.\(\);/.test(read('src/lib/desktop-app-window.js')) && /winInfo\._fileDownload = target;\n  globalThis\.app\?\._mobileNav\?\.bar\?\.update\?\.\(\);/.test(read('src/lib/file-download.js')),
+    'the rows that land after the bar was drawn ask it at once: a desktop app\'s caps and state (its render), a viewer\'s Download (wireFileDownload)');
   ok(!/#mobile-nav:is\(\[data-yield="gear"\], \[data-yield="icon"\]\) #mobile-nav-gear/.test(css) && /:has\(#mobile-nav-more\.on\) #mobile-nav-gear:not\(\.vault-locked\)/.test(css),   // stale-pins: kept — a deliberate absence check: the old line must stay gone
     'the stylesheet: ⚙ folds only into a ⋯ that stands (where ⋯ holds nothing the \'gear\' step gives nothing and ⚙ stays)');
 }

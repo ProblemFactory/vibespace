@@ -849,6 +849,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     const sc = scaleChipText(rec); scaleChip.textContent = sc; scaleChip.style.display = sc ? '' : 'none';
     applyScaleChipControl(sc);
     winInfo._desktopAppCaps = rec.caps || null; // the window-menu rows read the cells (Scale ▸ / Show window frame ▸)
+    app._mobileNav?.bar?.update?.(); // the regular bar's ⋯ stands for the rows these facts make (caps; keep / stop read rec.state)
     barFold?.schedule(); // lane I: bar-fold.js decides the ⋯ — shown for xpra (Show window frame ▸ / Scale ▸), for a shareable app on EVERY rung (lane E: Share with agent… / Ask an agent…) and while anything is folded
     const ft = fitChipText(rec); fitChip.textContent = ft; fitChip.style.display = ft ? '' : 'none';
     // lane e2b: the record's pin — the chip, and the view re-fits IN PLACE (every showing client hears the broadcast; no re-create)

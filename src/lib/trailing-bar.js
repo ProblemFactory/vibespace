@@ -122,7 +122,7 @@ export function installTrailingBar(app) {
     badge.textContent = n > 99 ? '99+' : String(n); badge.classList.toggle('hidden', !n);
     // ⋯ STANDS ONLY WHEN IT HOLDS A ROW (主开发 2026-11-18 23:09Z): this class has no window-manager verb, so a files window's
     // menu holds none — and ⚙ folds only into a ⋯ that stands (style.css). Its coming or going moves the head's room: re-fit.
-    const holds = !!w && windowMenuHolds(app, w.id), moved = holds !== more.classList.contains('on');
+    const holds = !!w && regular() && windowMenuHolds(app, w.id), moved = holds !== more.classList.contains('on');   // judged only where ⋯ is drawn
     more.classList.toggle('on', holds);
     live.classList.toggle('on', conv && holdsBrowser(app, sessionForWin(app, w)));
     for (const { d, b } of dests) { const sel = !!d.on(app, w); b.classList.toggle('selected', sel); b.setAttribute('aria-pressed', sel ? 'true' : 'false'); }
@@ -138,7 +138,18 @@ export function installTrailingBar(app) {
     if (moved) app._mobileNav?._paintHead?.();
   }
   update();
-  return { update, el: nav };
+  /** The list moved (sidebar.js _mergeAndRender — every poll, every frame). Of it the bar reads only the window on show's own
+   *  session facts (its rows, the live view, the state word), so it updates only when those changed: a merge that moved
+   *  nothing runs no window registry and no style read (the reading w7vpg6swt). */
+  let listSeen = '';
+  function onList() {
+    const w = activeWin(), s = sessionForWin(app, w);
+    const key = JSON.stringify([w?.id || null, regular(), s && [s.webuiId, s.sessionId, s.status, s.browserKey, s.host, s.browserProfileActive, !!s.browserInput], s ? app.sidebar?.getSessionStatus?.(s)?.state || '' : '']);
+    if (key === listSeen) return;
+    listSeen = key;
+    update();
+  }
+  return { update, onList, el: nav };
 }
 
 // ⚙ folded into ⋯ (lane phone-six r2 — the name keeps 8 em, mobile-nav.js _paintHead's 'gear' step): ⋯'s last row is it

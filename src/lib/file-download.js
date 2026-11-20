@@ -48,5 +48,6 @@ export function fileDownloadButton(target, className = 'file-tool-btn media-btn'
  *  and the button comes back for the window to seat in its toolbar. */
 export function wireFileDownload(winInfo, target, className) {
   winInfo._fileDownload = target;
+  globalThis.app?._mobileNav?.bar?.update?.(); // the regular bar's ⋯: the Download row lands after the bar was drawn
   return fileDownloadButton(target, className);
 }

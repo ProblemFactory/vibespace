@@ -1357,8 +1357,9 @@ class Sidebar {
     // (real report: 订阅徽章消失 on reload).
     this.app.syncSessionIdentity?.(this._allSessions);
     // …and the regular class's trailing bar: a conversation's menu holds its rows once its session is in this list, and ⋯
-    // stands only while the window's menu holds a row (主开发 2026-11-18 23:09Z) — re-judged at every merge (+ the state word)
-    this.app?._mobileNav?.bar?.update?.();
+    // stands only while the window's menu holds a row (主开发 2026-11-18 23:09Z) — re-judged when a merge moved the window on
+    // show's own session facts (+ the state word); a merge that moved nothing costs a key
+    this.app?._mobileNav?.bar?.onList?.();
     // …and the render-gating LIVE facts (round-4 verifier): a fact that reaches
     // `_merge()` but not this digest cannot repaint the card that draws it.
     // The suffix is DERIVED from LIVE_SESSION_FACTS so the drift guard covers
