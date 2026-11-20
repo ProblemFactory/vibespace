@@ -933,6 +933,19 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     writeRetryNow();
     return true;
   }
+  /** THE RECORD SAYS WHAT HAPPENED (piece 7, place-8 follow-up — 主开发 2026-11-20 04:50Z): a wake whose start answered AFTER the line's
+   *  bound was ended here «failed»; its rest ran anyway and handed over or gave the claim back by name. Its own end is said once more on
+   *  the same roads (the journal, the producers' `wake`, the ended row's answer): the last line a person reads is what happened.
+   *  `e` = the owed entry the park handed to the line (its producers and metas). → true when said. */
+  function noteLateWake(cid, e, r = {}) {
+    if (!cid || !e || !r) return false;
+    if (r.outcome === 'refused' || r.outcome === 'failed') endedAnswers.set(cid, { outcome: r.outcome, code: r.code || null, why: r.why || null, until: r.until || null, at: clock.now() });
+    else endedAnswers.delete(cid);
+    log(`[deliver] ${cid}: the wake owed to the ended conversation (${e.id}) — its start answered after the line's bound, and then: ${r.outcome || 'ended'}${r.why ? ': ' + r.why : ''}`);
+    emitRetry('wake', cid, e, { outcome: r.outcome || 'failed', why: r.why || null, code: r.code || null, until: r.until || null, sessionId: r.sessionId || null, attempts: Array.isArray(e.attempts) ? e.attempts.length : 0, late: true });
+    stashChanged(cid);
+    return true;
+  }
   /** the conversation runs again (a turn started, a delivery landed): its last refusal is history — never an old one after a later end */
   function clearEndedAnswer(cid) { endedAnswers.delete(cid); }
   /** the conversations a stash entry waits for (the ladder's own stash) — the row's count reads these few, never every row */
@@ -1986,7 +1999,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     queuedFileState: () => queued.fileState(), onQueuedFileState: (fn) => queued.onFileState(fn), queuedSetAside: () => queued.setAside(),   // B-e3fe follow-up: an unread msg-queued.json is said in For you, with the person's «set it aside»
     noteProcessGone, noteAttached, sweepQueued,   // round 2: the wrapper gone ⇒ the HUB hands back; a (re)attach ⇒ the hub ASKS for the queue
     parkOwedWake, registerOwedWake, registerWakePacer, owedEntries, wakeBlock, fellOwed, fellOwedPart,
-    parkEndedWake, registerEndedWake, readoptSettled, endedEntries, endedAnswerOf, stashCids, retryWaitingCount, markEndedPosting,   // piece 7: a wake owed to an ENDED conversation — a rung of the park, handed to the hub's resume line
+    parkEndedWake, registerEndedWake, readoptSettled, noteLateWake, endedEntries, endedAnswerOf, stashCids, retryWaitingCount, markEndedPosting,   // piece 7: a wake owed to an ENDED conversation — a rung of the park, handed to the hub's resume line
       // lane paced-wake-retry: a wake the pace refused is owed — parked for the window's end
     onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, registerRetryJudge, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,

@@ -28,6 +28,7 @@
 //      (主开发 04:07Z, NOT TAKEN → cured) ㉑ a start answering AFTER the line's bound still ends its claim (RED: the rest started only by
 //      its asker); a delivery never reopens a kind that takes no message mid-session (RED: the row before); the belt after a reopen;
 //      a pty exited with its socket alive is not «gone» (RED: the old rule); one registry read a tick shared by every wait
+//      (主开发 04:50Z) …and the late start's own end is RECORDED — delivered, the ended row cleared (RED: the late end not written)
 //   ㉒ the jobs engine's 30 s floor paces SOCKET posts: a floored delivery to an ENDED owner still owes its wake — RED CONTROL: the
 //      owing line removed (the box's P and A at their second fire: «rate floor — queued for injection instead», never resumed)
 import path from 'node:path';
@@ -132,6 +133,7 @@ function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = 
         }
         return (mod.inboxOfOver || DWO.inboxOfOver)({ deliver: () => R.deliver, activeSessions: sessions, isSocket: (q) => R.sockets.has(q), registryIds: R.registryIds })(cid, sid);
       },
+      noteLateWake: (cid, entry, a) => R.deliver.noteLateWake(cid, entry, a),   // the wiring's seam: a late start's own end, on the ladder's record
     },
     spendGuard: { authorize: (q) => { R.calls.push('probe'); R.probes.push({ reason: q.reason, hold: q.hold, identity: q.identity && q.identity.key }); return cap ? { ok: false, why: 'per-identity-hour', detail: cap } : { ok: true }; } },
     identityOf: () => { R.calls.push('identity'); return { key: 'slot-1', name: 'Personal' }; },
@@ -651,11 +653,18 @@ console.log('㉑b a claim taken is ALWAYS ended; a delivery reopens only a kind 
     for (let i = 0; i < 10 && R.framesTo(X).length === 0; i++) await sleep(5);
     const again = R.view.claimForWake(X);
     if (again.ok) R.view.releaseWake(X, again);
-    return { wake: (R.wakes.find((w) => w.cid === X) || {}).why || null, frames: R.framesTo(X).length, claimed: R.deliver.claimedCount(X), stash: R.deliver.stashCount(X), again: again.code || (again.ok ? 'claimed' : null) };
+    const ws = R.wakes.filter((w) => w.cid === X);
+    return { wake: (ws[0] || {}).why || null, first: (ws[0] || {}).code || null, last: ws.length > 1 ? { outcome: ws[ws.length - 1].outcome, late: ws[ws.length - 1].late === true } : null, answer: R.deliver.endedAnswerOf(X), frames: R.framesTo(X).length, claimed: R.deliver.claimedCount(X), stash: R.deliver.stashCount(X), again: again.code || (again.ok ? 'claimed' : null) };
   };
   const cured = await late(DWO, 'cured');
-  ok(/did not answer in/.test(cured.wake || '') && cured.frames === 1 && cured.claimed === 0 && cured.stash === 0 && cured.again !== 'in_flight',
-    'a start that answers AFTER the line\'s bound (its answer dropped there): its rest still runs — the words handed over, no claim left, no hand-over «in flight» for good', cured);
+  ok(/did not answer in/.test(cured.wake || '') && cured.first === 'start_bound' && cured.frames === 1 && cured.claimed === 0 && cured.stash === 0 && cured.again !== 'in_flight',
+    'a start that answers AFTER the line\'s bound (its answer dropped there, told by the line\'s CODE start_bound): its rest still runs — the words handed over, no claim left, no hand-over «in flight» for good', cured);
+  ok(!!cured.last && cured.last.outcome === 'delivered' && cured.last.late === true && cured.answer === null,
+    '…and THE RECORD SAYS WHAT HAPPENED: the late rest writes its own end — the producers\' last «wake» (the jobs journal\'s line) says delivered; no «failed» answer is left on the row (主开发 04:50Z)', cured);
+  const NOREC = mutantCopies('wake-late-unrecorded', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, '      if (late.has(entry)) { late.delete(entry);', '      if (false) { late.delete(entry);', 'late-unrecorded'), 'late-unrecorded');
+  const norec = await late(NOREC, 'norec');
+  ok(norec.frames === 1 && norec.last === null && norec.first === 'start_bound',
+    '㉑b RED CONTROL: the late end not written — the words landed, yet the producers\' only «wake» still says «failed: the start did not answer» (the jobs journal\'s last line is wrong; the row clears itself when the words land)', norec);
   const LAZY = mutantCopies('wake-rest-lazy', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, '    const rest = handOverResumed(cid, entry,', '    const rest = () => handOverResumed(cid, entry,', 'rest-lazy'), 'rest-lazy');
   const red = await late(LAZY, 'red');
   ok(red.frames === 0 && red.claimed === 1 && red.again === 'in_flight',

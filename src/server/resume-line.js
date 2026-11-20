@@ -56,7 +56,7 @@ function createResumeLine({ start, ready = null, maxStarts = L.MAX_STARTS, perAs
       if (Number.isFinite(startBoundMs) && startBoundMs > 0) {
         timer = setTimer(() => {
           const why = `the start did not answer in ${startBoundMs >= 1000 ? Math.round(startBoundMs / 1000) + ' s' : startBoundMs + ' ms'} — its place in line is freed`;
-          end({ ok: false, why });
+          end({ ok: false, code: 'start_bound', why });   // a CODE beside the words: an asker tells the bound apart by it (piece 7's late rest)
         }, startBoundMs);
       }
       Promise.resolve()

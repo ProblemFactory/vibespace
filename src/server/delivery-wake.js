@@ -50,6 +50,8 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     return out;
   }
 
+  // the owed wakes whose start passed the line's bound (resume-line's code start_bound): their late rest records its own end
+  const late = new WeakSet();
   /** THE RESUMED SESSION'S INBOX, waited for before the hand-over (place-8, 主开发 2026-11-20 03:35Z): the reopen answers at
    *  «created» — only the wrapper is spawned then — and a CLI answers to its inbox once it has STARTED (claude: its registry record
    *  and socket). Asked through `seams.inboxOf` (inboxOfOver: the ladder's own reachability) at a doubling step up to 1 s, bounded
@@ -127,10 +129,14 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     // A CLAIM TAKEN IS ALWAYS ENDED (主开发 04:07Z, the must): the rest STARTS HERE, whoever hears this answer — a start that answers after
     // the line's own bound (its answer dropped there) still hands over or gives the claim back by name; a throw gives it back
     const rest = handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended }).catch((e) => {
-      sh.releaseWake(cid, claim);
       const why = `it was resumed as ${r.sessionId}, but its hand-over failed (${String((e && e.message) || e).slice(0, 160)}) — the message waits for its next turn`;
-      log(`[delivery-wake] ${cid}: ${why}`);
+      try { sh.releaseWake(cid, claim); log(`[delivery-wake] ${cid}: ${why}`); } catch { }   // the handler throws nothing: nobody may await a late rest
       return { ok: false, outcome: 'failed', code: 'handover_failed', why, sessionId: r.sessionId };
+    }).then((x) => {
+      // THE RECORD SAYS WHAT HAPPENED (主开发 2026-11-20 04:50Z): the line gave up on this start (its bound) and the park ended the wake
+      // «failed» — the late rest writes its OWN end to the same record (delivered, or the miss by name): the last line a person reads is true
+      if (late.has(entry)) { late.delete(entry); try { if (typeof seams.noteLateWake === 'function') seams.noteLateWake(cid, entry, x); } catch (e) { log(`[delivery-wake] ${cid}: the late start's end could not be recorded — ${(e && e.message) || e}`); } }
+      return x;
     });
     return { ok: true, outcome: 'resumed', sessionId: r.sessionId, rest };
   }
@@ -180,7 +186,8 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     const r = await q.result;
     if (r && r.rest && typeof r.rest.then === 'function') return r.rest;   // place-8: the reopen freed its place in line; its wait and hand-over run on
     // the line's own bound answered first: a start that still answers runs its rest by itself (the claim is never dropped with the answer)
-    if (r && r.ok === false && /did not answer in/.test(String(r.why || ''))) log(`[delivery-wake] ${cid}: its start passed the line's bound — if it still answers, its hand-over runs then, or its claim is given back`);
+    if (r && r.ok === false && r.code === 'start_bound') late.add(entry);   // the line's own code (never its words): a start that still answers records its end
+    if (r && r.ok === false && r.code === 'start_bound') log(`[delivery-wake] ${cid}: its start passed the line's bound — if it still answers, its hand-over runs then, or its claim is given back`);
     return r;
   }
 
