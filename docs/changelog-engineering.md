@@ -212,6 +212,12 @@ This file is the engineers' record of every release: the lanes, the verification
   - W3's pause is MEASURED and printed, with the tickets judged and their ages;
   - a pause past the derived bound is said BY NAME («the box held W3 for N ms, past the scene's own bound»), never as a wrong order.
 
+### lg-text-legs-3 — B-1ca5: two chains across one ladder await can no longer each start a billed turn for the same delivery
+- **The race** (B-43bc's «race left», ruled a row by 主开发 r199): a scope digest flushes under its scope chain alone yet reads the pending rows of every conversation it carries; a conversation wake holds that conversation's chain alone. The same message waiting for the same agent on both — the account digest's row and a Task Group's row whose round-robin picks that agent — could be started twice when the digest's window ended while the group's wake sat in its ladder await (both read the hand-over mark empty).
+- **The law and the cure** (src/server/channels-engine.js): one delivery starts at most one billed turn. A billed site TAKES the mark of what it is about to start, under the watcher's and the receiver's names, in the same synchronous step as its read and before its first await; a start that took writes the mark over its takes; any other end gives them back by name in a `finally`. A second chain that meets a take waits for that start (bounded, `heldBound.takeWaitMs`), then reads again — handed: nothing; given back: it may start; past the bound: left out, its row kept. The spend guard is untouched.
+- **Legs** (test-channel-revisions ⑧, a stall placed IN the window — never load; each prints its count of starts): the race, ONE start (RED, the release's order: two starts); the first start refused and its stash refused, its take given back — the second chain starts it once (RED, the take never given back: nothing billed).
+- **Also:** test-channel-revisions restated 7.0 → 8.0 s (the unit's gate: 7.4 / 8.0 s); FAST_SUM_CAP_MS 1534 → 1535 by arithmetic over the train tip 761e48c07 (1534.937 s over 757).
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
