@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -30,15 +31,14 @@ const check = (name, cond, extra) => {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // build the daemon bundle at two "versions" (same code, different stamp)
-function buildBundle(version, outfile) {
-  fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
-  execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', `--outfile=${outfile}`], { cwd: repo });
+async function buildBundle(version, outfile) {
+  await agentdBundle({ version, outfile });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 }
 
 const bundleA = path.join(tmp, 'agentd-A.js');
 const bundleB = path.join(tmp, 'agentd-B.js');
-buildBundle('9.9.1', bundleA);
-buildBundle('9.9.2', bundleB);
+await buildBundle('9.9.1', bundleA);
+await buildBundle('9.9.2', bundleB);
 
 const { DeviceManager } = require('../src/agentd/client.js');
 
@@ -105,8 +105,6 @@ console.log('— agentd M0: flock singleton (no double daemon) —');
 dmB.stop(); dmC.stop();
 // kill the daemon we spawned
 try { process.kill(pidAfter, 'SIGTERM'); } catch {}
-// restore the real version stamp
-execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M0 tests passed');

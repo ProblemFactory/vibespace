@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -32,9 +33,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // build the bundle + land it in the "remote" install root (as remote install would)
 const version = require('../package.json').version;
-fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
 const bundle = path.join(tmp, 'agentd.js');
-execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', '--external:node-pty', `--outfile=${bundle}`], { cwd: repo });
+await agentdBundle({ version: version, outfile: bundle, external: ['node-pty'] });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 const instDir = path.join(AGENTD_ROOT, version);
 fs.mkdirSync(instDir, { recursive: true });
 fs.copyFileSync(bundle, path.join(instDir, 'agentd.js'));
@@ -153,7 +153,6 @@ check('drain includes the sentinel', out3.toString().includes('"_remote_exit"'),
 
 dm2.stop(); dm3.stop();
 try { process.kill(daemonPid, 'SIGTERM'); } catch {}
-execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M2 remote tests passed');

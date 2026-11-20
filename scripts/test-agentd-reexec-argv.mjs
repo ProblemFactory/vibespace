@@ -23,6 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies } from './mutant-copy.mjs';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -50,8 +51,7 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-reexec-bundle-'));
   const out = path.join(tmp, 'agentd.js');
   const version = require('../package.json').version;
-  fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
-  execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', `--outfile=${out}`], { cwd: repo });
+  await agentdBundle({ version: version, outfile: out });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
   const bundle = fs.readFileSync(out, 'utf-8');
   check('bundle builds and contains the reExecArgv helper', bundle.includes('reExecArgv') && bundle.includes('argv.slice(2)'));
   check('bundle inlines the hand-over + the busy-address retry (lane win-upgrade-pipe)', /function handOver\d*\(/.test(bundle) && /function listenWithRetry\d*\(/.test(bundle));

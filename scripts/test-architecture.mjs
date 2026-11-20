@@ -2319,9 +2319,9 @@ await section(async () => {
 // DERIVED: every scripts/*.mjs write (writeFileSync/copyFileSync) whose target
 // is `path.join(<the checkout>, 'src…')`, `path.join(<the checkout>,
 // path.dirname(rel))`, or a variable assigned one of those — <the checkout> =
-// a name bound from `import.meta.url` + '..'. The two generated build
-// artifacts a bare run stands in for (src/lib/build-version.js,
-// src/agentd/version.js) and the committed generated words table
+// a name bound from `import.meta.url` + '..' — and a `node -e` writer run with cwd = <the checkout> (a
+// `writeFileSync('src/…')` in its code: the old restore line of the device suites). The generated build
+// artifact a bare run stands in for (src/lib/build-version.js) and the committed generated words table
 // (src/api-call-words.generated.js ⇐ scripts/gen-api-call-words.mjs, whose
 // --check is test-api-call-words) and the Mac screen helper's source as text
 // (src/agentd/mac-helper-source.js ⇐ scripts/mac-helper-embed.mjs, held to
@@ -2331,6 +2331,10 @@ await section(async () => {
 // scripts/mic-helper-embed.mjs, held to tools/vibespace-mic/ by test-stream-mic-op — lane stream-mic-road) are the declared exceptions. And .gitignore carries
 // no wildcard `.js` pattern that could apply under src/ — a stray copy must be
 // VISIBLE, never hidden.
+// src/agentd/version.js is NO exception since B-ba47's class (主开发 r543, 2026-11-20): nineteen device suites stamped the
+// checkout's own copy, bundled, and wrote it back — two in one shard's lanes met in it (test-agentd red then green on the
+// hosted runner: the daemon reported the release's version). A suite bundles at a stamp through scripts/agentd-bundle.mjs
+// (the stamp answered in the build); a write of it into the checkout is red here.
 console.log('§51 no suite writes a patched copy into the tree');
 await section(async () => {
   const judge = (src) => {
@@ -2363,6 +2367,9 @@ await section(async () => {
       return arg === nth ? src.slice(start, i) : null;
     };
     const hits = [];
+    // a `node -e` writer run IN the checkout: its code writes a relative src/ path (the old device suites' restore line)
+    const nodeE = new RegExp(`\\b(?:execFileSync|execFile|spawnSync|spawn)\\(\\s*['"]node['"]\\s*,\\s*\\[\\s*['"]-e['"]\\s*,\\s*(\`[^\`]*\`|'[^'\\n]*'|"[^"\\n]*")\\s*\\]\\s*,\\s*\\{[^}]*\\bcwd:\\s*(?:${C})\\b`, 'g');
+    for (const m of src.matchAll(nodeE)) if (/writeFileSync\(\s*['"]src\//.test(m[1])) hits.push(`${src.slice(0, m.index).split('\n').length}: node -e ${m[1].slice(0, 60)} (cwd = the checkout)`);
     for (const m of src.matchAll(/(writeFileSync|copyFileSync)\(\s*/g)) {
       const raw = targetAt(m.index + m[0].length, m[1] === 'copyFileSync' ? 1 : 0);
       if (raw == null) continue;
@@ -2371,7 +2378,7 @@ await section(async () => {
       const direct = new RegExp('^' + inTree.source).test(call) || (/^path\.join\(\s*(\w+)\s*,/.test(a) && vars.has(/^path\.join\(\s*(\w+)/.exec(a)[1]));
       if (!(direct || vars.has(a))) continue;
       const line = src.slice(0, m.index).split('\n').length;
-      if (/build-version\.js|agentd\/version\.js|api-call-words\.generated\.js|mac-helper-source\.js|wgc-helper-source\.js|mic-helper-source\.js/.test(a + ' ' + (vars.get(a) || ''))) continue;   // the generated build artifacts (declared exceptions)
+      if (/build-version\.js|api-call-words\.generated\.js|mac-helper-source\.js|wgc-helper-source\.js|mic-helper-source\.js/.test(a + ' ' + (vars.get(a) || ''))) continue;   // the generated build artifacts (declared exceptions)
       hits.push(`${line}: ${a.slice(0, 70)}`);
     }
     return hits;
@@ -2387,7 +2394,13 @@ await section(async () => {
     && judge(HDR + "const f = MUT.write('src/server/auto-resume.js', src);\nfs.writeFileSync(path.join(ROOT, 'src', 'x.js'), s);").length === 0
     && judge(HDR + "const bv = path.join(REPO, 'src/lib/build-version.js');\nif (!fs.existsSync(bv)) fs.writeFileSync(bv, 'x');").length === 0
     && judge(HDR + "fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D5, 'vibespace-browser-verbs.js'));").length === 0
-    && judge(HDR + "fs.copyFileSync(path.join(ROOT, 'x.js'), path.join(REPO, 'src/lib', `vs-x-${process.pid}.js`));").length === 1,
+    && judge(HDR + "fs.copyFileSync(path.join(ROOT, 'x.js'), path.join(REPO, 'src/lib', `vs-x-${process.pid}.js`));").length === 1
+    // B-ba47's class: the device stamp written into the checkout (directly, or by a node -e run there) is red; the same into a
+    // scratch copy, and the helper's build, are not
+    && judge(HDR + "fs.writeFileSync(path.join(REPO, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(v)} };\\n`);").length === 1
+    && judge(HDR + "execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = {}')`], { cwd: REPO });").length === 1
+    && judge(HDR + "fs.writeFileSync(path.join(COPY, 'src/agentd/version.js'), 'x');\nexecFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'x')`], { cwd: COPY });").length === 0
+    && judge(HDR + "await agentdBundle({ version, outfile: bundle, external: ['node-pty'] });").length === 0,
   '§51 NEGATIVE CONTROL: the sibling shapes (dirname(rel), an in-tree dir variable, a direct join) are caught; a mutant-copy write, a scratch-root `src`, and the build-version stand-in are not; copyFileSync is judged by its DESTINATION (a copy out of src/ passes, a copy into src/ is caught)');
   const gi = fs.readFileSync('.gitignore', 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const hides = gi.filter((l) => /\*/.test(l) && /\.js$/.test(l) && (l.startsWith('src/') || !l.includes('/')));

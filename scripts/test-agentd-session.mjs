@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { endDaemonsAndWait } from './scratch.mjs';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -36,9 +37,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // build the daemon bundle (real version stamp)
 const version = require('../package.json').version;
-fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
 const bundle = path.join(tmp, 'agentd.js');
-execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', `--outfile=${bundle}`], { cwd: repo });
+await agentdBundle({ version: version, outfile: bundle });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 
 const { DeviceManager } = require('../src/agentd/client.js');
 const runtimes = [];   // lane device-node-version: what each hello-ack said of the daemon's node (onRuntime)
@@ -328,7 +328,6 @@ console.log('— lane device-node-version: the hello says the node the daemon ru
 }
 
 // restore version stamp + cleanup
-execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 for (const pid of extraDaemons) { try { process.kill(pid, 'SIGTERM'); } catch {} }
 endDaemonsAndWait(path.join(tmp, 'agentd'));
 // the daemon just got SIGTERM and may still be writing its state files while

@@ -21,6 +21,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { endDaemonsAndWait } from './scratch.mjs';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -42,9 +43,8 @@ const check = (n, c, e) => { if (c) console.log(`  ✓ ${n}`); else { failed++; 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const version = require('../package.json').version;
-fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
 const bundle = path.join(tmp, 'agentd.js');
-execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', '--external:node-pty', `--outfile=${bundle}`], { cwd: repo });
+await agentdBundle({ version: version, outfile: bundle, external: ['node-pty'] });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 
 const { DeviceManager } = require('../src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {} });
@@ -186,7 +186,6 @@ console.log('— M5 shape: device-owned long-lived mount-class process lifecycle
 
 endDaemonsAndWait(AGENTD_ROOT);
 dm.stop();
-execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd M3/M4 acceptance tests passed');

@@ -16,6 +16,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { endDaemonsAndWait } from './scratch.mjs';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -28,11 +29,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // build bundles
 const version = require('../package.json').version;
-fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
 const daemonBundle = path.join(tmp, 'agentd.js');
 const attachBundle = path.join(tmp, 'attach.js');
-execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', '--external:node-pty', `--outfile=${daemonBundle}`], { cwd: repo });
-execFileSync('npx', ['esbuild', 'src/agentd/attach-cli.js', '--bundle', '--platform=node', `--outfile=${attachBundle}`], { cwd: repo });
+await agentdBundle({ version: version, outfile: daemonBundle, external: ['node-pty'] });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+await agentdBundle({ version: version, outfile: attachBundle, entry: 'src/agentd/attach-cli.js' });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 // install into the throwaway root + provision the token
 const instDir = path.join(AGENTD_ROOT, version); fs.mkdirSync(instDir, { recursive: true });
 fs.copyFileSync(daemonBundle, path.join(instDir, 'agentd.js'));
@@ -111,7 +111,6 @@ check('wrapper finalized with the child exit code (7)', wrapperExit === 7, Strin
 
 hub.close();
 endDaemonsAndWait(path.dirname(stateDir));
-execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = { VERSION: ' + JSON.stringify(require('./package.json').version) + ' };\\n')`], { cwd: repo });
 fs.rmSync(tmp, { recursive: true, force: true });
 if (failed) { console.error(`\n${failed} FAILED`); process.exit(1); }
 console.log('\nall agentd WIRED-CHAIN tests passed');

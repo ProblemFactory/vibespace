@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -51,9 +52,8 @@ const rec = (rid) => JSON.stringify({ type: 'assistant', requestId: rid, timesta
 fs.writeFileSync(jsonl, rec('r1') + rec('r2'));
 
 const version = require('../package.json').version;
-fs.writeFileSync(path.join(repo, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
 const bundle = path.join(tmp, 'agentd.js');
-execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', `--outfile=${bundle}`], { cwd: repo });
+await agentdBundle({ version: version, outfile: bundle });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 
 const { DeviceManager } = require('../src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: pidLog });

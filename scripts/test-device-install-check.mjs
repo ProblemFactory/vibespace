@@ -28,6 +28,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: the daemon bundled at a stamp, nothing written under src/
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const T0 = Date.now();
@@ -50,8 +51,7 @@ process.on('SIGINT', () => process.exit(130));
 // ── the REAL bundle, built from this tree into the scratch dir ──
 const bundle = path.join(S, 'vibespace-device.js');
 const version = require(path.join(REPO, 'package.json')).version;
-fs.writeFileSync(path.join(REPO, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(version)} };\n`);
-execFileSync('npx', ['esbuild', 'src/agentd/agentd.js', '--bundle', '--platform=node', '--external:node-pty', `--outfile=${bundle}`, '--log-level=warning'], { cwd: REPO });
+await agentdBundle({ version: version, outfile: bundle, external: ['node-pty'] });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 
 // ── the scratch server: the REAL dial gate + a real HostManager, serving the bundle ──
 const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
