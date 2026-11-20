@@ -94,6 +94,7 @@ export default {
   "the tab's own picture, a new one every half second — its window shows another tab in front": "该标签页自己的画面，每半秒一张新的 — 它所在的窗口前面是另一个标签页",
   "the tab's own picture — its window's picture again in a moment": "该标签页自己的画面 — 稍后回到它所在窗口的画面",
   "This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward": "这个标签页在它所在窗口里另一个标签页的后面，而且没有回答：在浏览器自己的标签栏里点这个标签页，或点「提到前面」",
+  "This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Bring it forward, then reload it in the browser, or switch to another tab": "这个标签页没有响应 — 没有画面，询问它也没有回答（页面忙或卡死）。先点「提到前面」，再在浏览器里重新加载它，或切换到另一个标签页",
   "This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward": "这个标签页在它所在窗口里另一个标签页的后面：在浏览器自己的标签栏里点这个标签页，或点「提到前面」",
   "the tab's last own picture — it does not answer, and its window shows another tab in front": "该标签页自己的最后一张画面 — 它没有响应，它所在窗口的前面是另一个标签页",
   "The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers": "agent 的标签页没有响应 — 显示的是它的最后一张画面，询问它也没有回答（页面忙或卡死）。它一回答，这里就会更新",

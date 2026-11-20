@@ -731,7 +731,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (msg.type === 'tabs' && Array.isArray(msg.tabs)) {
       const act = msg.tabs.find((x) => x && x.active);
       const u = act && typeof act.url === 'string' ? act.url : '';
-      { const prevAct = relay.activeTarget; relay.activeTarget = act && act.targetId ? String(act.targetId) : null; if (relay.bg.state && relay.activeTarget !== prevAct) clearBackground(relay, 'another tab is on show'); if (relay.activeTarget !== prevAct) xFollow(relay); } // verify r2: every `tabs` record re-says which tab the user is looking at; lane browser-windows: a background verdict is of ONE tab
+      { const prevAct = relay.activeTarget; relay.activeTarget = act && act.targetId ? String(act.targetId) : null; if (relay.bg.state && relay.activeTarget !== prevAct) clearBackground(relay, 'another tab is on show', 'switch'); if (relay.activeTarget !== prevAct) xFollow(relay); } // verify r2: every `tabs` record re-says which tab the user is looking at; lane browser-windows: a background verdict is of ONE tab
       // B-1626 (heavy test-browser-hidden-paint c: a live view on a frozen browser streamed a hidden page — 0 frames): a viewer's
       // thaw is asked when it JOINS, before its relay has read which tab it streams, so on a browser two conversations hold the
       // thaw's scope (activeTargetsFor) was empty and the view's own front stayed hidden. The moment the relay learns (or
@@ -1262,6 +1262,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
         // lane browser-windows (U0b, userW's inc-muqdohf0-hkjc — his chip clicks left no line anywhere): every act is RECORDED
         log.log?.(`[browser-live] ${relay.key}: viewer ${viewer.id}'s tab ${v.act} on ${id8} — ${r && r.broughtForward ? 'brought the agent\'s current tab to the front of its window' : r && r.noop ? 'already the tab on show (nothing ran)' : v.act === 'switch' ? 'switched the agent\'s current tab' : 'closed it'}`);
         if (r && (r.broughtForward || r.switchedTo) && relay.bg.state) relay.bg.checkedAt = 0; // re-judged at once: a tab brought forward paints again
+        if (r && WIN.broughtFrontVerdict({ state: relay.bg.state, id: relay.bg.targetId, ack: r })) frontBackground(relay);   // its read 4 (M1): a hung tab brought forward is in FRONT
         ack({ ok: true, switchedTo: (r && r.switchedTo) || null, ...(r && r.noop ? { noop: true } : {}), ...(r && r.broughtForward ? { broughtForward: true } : {}) });
         scheduleOwners(relay, 0);
       })
@@ -1345,7 +1346,21 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     b.pollTimer = setInterval(() => pollBackground(relay), bgPollMs);
     if (b.pollTimer.unref) b.pollTimer.unref();
   }
-  function clearBackground(relay, why) {
+  // the live-picture follow-up, its read 4 (M1): a hung tab the person brought forward is IN FRONT — its record says so at once
+  // (`polled` false, `front` true): the line offers the reload that now acts on THIS tab, and a watcher's view shows the window
+  function frontBackground(relay) {
+    const b = relay.bg;
+    if (b.state !== 'unresponsive' || !relay.lastBg) return;
+    let was = null; try { was = JSON.parse(relay.lastBg); } catch { return; }
+    if (!was || was.front === true) return;
+    b.shotOf = null;
+    relay.lastBg = JSON.stringify({ ...was, polled: false, front: true });
+    log.log?.(`[browser-live] ${relay.key}: the hung tab ${String(b.targetId || '').slice(0, 8)} was brought to the front of its window — said in front (the window's picture again)`);
+    broadcast(relay, relay.lastBg);
+  }
+  // its read 4 (S2): a clear made by a SWITCH (the agent's current tab is another tab now) says so (`cause`) — the view never holds the
+  // old tab's last picture under the new tab's name
+  function clearBackground(relay, why, cause = null) {
     const b = relay.bg;
     if (!b.state) return;
     const id = b.targetId;
@@ -1353,7 +1368,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
     relay.lastBg = null;
     log.log?.(`[browser-live] ${relay.key}: the tab ${String(id || '').slice(0, 8)} is no longer a silent background tab (${why})`);
-    broadcast(relay, { type: 'tab-background', targetId: null, why });
+    broadcast(relay, { type: 'tab-background', targetId: null, why, ...(cause ? { cause } : {}) });
   }
   function pollBackground(relay) {
     const b = relay.bg;

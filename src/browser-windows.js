@@ -452,11 +452,19 @@ function watchRefusalWords({ refused = '', why = '', error = '' } = {}, tIn) {
 function stuckPolledVerdict({ state = null, id = null, prevTargetId = null, shotOf = null } = {}) {
   return state === 'unresponsive' && !!id && prevTargetId === id && shotOf === id;
 }
+/** The live-picture follow-up, its read 4 (M1): a hung tab the person brought to the front of its window is IN FRONT now — the hub
+ *  says it again with `polled` false and `front` true, so the line offers the reload that now acts on THIS tab and a watcher gets the
+ *  window back. PURE: (state, id, ack) → boolean: the tab act's ack brought forward, or switched to, THIS unresponsive tab — never a
+ *  no-op (the keeper names the tab of a switch that ran nothing). */
+function broughtFrontVerdict({ state = null, id = null, ack = null } = {}) {
+  const to = ack && !ack.noop && (ack.broughtForward || ack.switchedTo) ? String(ack.switchedTo || ack.targetId || '') : '';   // a no-op ran nothing (an ephemeral browser's own tab)
+  return state === 'unresponsive' && !!id && !!to && to.toUpperCase() === String(id).toUpperCase();
+}
 
 module.exports = {
   WINDOWS_PROOF, ownWindowParams, windowCreateParams, instanceOf, hasOwnWindow, windowMates,
   TAB_LABELS_MAX, withTabLabel, labelTargetOf, withLabelsOnRows,
-  stuckPolledVerdict, WATCH_FIRST_FRAME_MS, WATCH_POLL_MS, watchModeVerdict, TAB_CLICK_ACTS, tabClickVerdict, BACKGROUND_SILENCE_MS, UNRESPONSIVE_MS,
+  stuckPolledVerdict, broughtFrontVerdict, WATCH_FIRST_FRAME_MS, WATCH_POLL_MS, watchModeVerdict, TAB_CLICK_ACTS, tabClickVerdict, BACKGROUND_SILENCE_MS, UNRESPONSIVE_MS,
   ONE_WINDOW_PER_HOLDER, OPENER_ANCHORS_MAX, OPENER_PROOF, BACKGROUND_PAINT_PROOF, windowIdOf, windowCensus, multiWindowHolders,
   ANCHOR_PROBE_MS, RUNG2_TRIES, STRAYS_NOTE, RUNG2_CREATE, rung2Plan, strayWindowsOf, // verify r4: the plan takes {viewers, driven}; the create is a background one // verify r3: the anchor probe, rung 2's tries + plan (the window-state cycle off a real display), the strays said once // verify r1 T2 ⑧ + r2 T1: one window per holder, the measured opener table, the census of the red cell
   DRIVE_ENDED_NOTICE_KIND, driveEndedNotice, driveEndedText, renderDriveEndedNotice, // verify r5 ②: the refused holders told, free, when the user's drive ends

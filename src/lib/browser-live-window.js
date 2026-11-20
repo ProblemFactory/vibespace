@@ -173,7 +173,7 @@ import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
 import { pictureSourceOf, pictureForView, BG_SETTLE_MS } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
-import { deskDoorOf, deskDoorStuck } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
+import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
 import { createXpraView, keyInputOf, workerUrlFor, streamUrl as xStreamUrl } from './xpra-view.js'; // lane browser-x-in-window: the desktop app window's view draws the browser's OWN window
 import { bufferRefresh as xBufferRefresh, focusPacket as xFocusPacket } from './xpra-proto.js'; // lane browser-x-in-window: a repaint after a resize, the window's focus at a takeover
 
@@ -1622,14 +1622,17 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     } else if (st.bg && st.bg.state === 'unresponsive') {
       // B-d635 (userW's inc-murizo36-ecri): a tab that sends no picture and does not answer is SAID — never a blank canvas with no words
       // its read (S1): a hidden tab that hung keeps its LAST picture on the view — the words say that picture, never «no picture»
-      // 主开发's ruling S2: on the DRAWN window a hung tab sits behind another tab — the browser's own reload there would reload THAT
-      // one; the sentence names where to press, in S3's shape (zh / ja)
-      const stuckRow = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase());
-      // its read (M1): a FRONT tab whose script loops is unresponsive too — only a tab the hub says was BEHIND (`polled`) is behind; (M2) its
-      // sentence names Bring it forward, so the button is drawn
-      const behind = driving && st.bg.polled === true && xOn() && xp.status === 'connected';
-      text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
-      if (behind && stuckRow) { btn = t('Bring it forward'); act = () => tabAct('switch', stuckRow); }
+      // 主开发's ruling S2: on the DRAWN window a hung tab hidden in its window (behind another tab) — the browser's own reload there would
+      // reload the tab in front; the sentence names where to press, in S3's shape (zh / ja)
+      const stuckId = String(st.bg.targetId || '').toUpperCase();
+      const stuckRow = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === stuckId) || { targetId: stuckId, title: '' };   // its read 4 (N2): the button the sentence names is always drawn
+      // its read (M1): a FRONT tab whose script loops is unresponsive too — the hub says when a tab was HIDDEN in its window as it hung
+      // (`polled`: a picture of it was polled while hidden — behind another tab, or its window minimized), and when the person brought it
+      // to the FRONT (`front`, its read 4 M1: the reload now acts on it); a tab of neither is told in words true in both places (its read 4 S1)
+      const drawn = driving && xOn() && xp.status === 'connected';
+      const behind = drawn && st.bg.polled === true, unplaced = drawn && !behind && st.bg.front !== true;
+      text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : unplaced ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Bring it forward, then reload it in the browser, or switch to another tab') : driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
+      if (behind || unplaced) { btn = t('Bring it forward'); act = () => tabAct('switch', stuckRow); }
     } else if (st.bg) {
       const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
       // 主开发's law (3) + ruling S3 (21:52Z): a takeover shows the WINDOW as it is — the sentence names where to press, never whose
@@ -2374,8 +2377,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       // lane browser-windows (U0b): the tab on show paints nothing (a background tab of its window) — or it does again
       case 'tab-background':
         // 主开发's law (1): the clear's moment is kept — the window returns only once it has held (BG_SETTLE_MS, no flap)
-        if (m.targetId) st.bgClearedAt = 0; else if (st.bg && (st.bg.state === 'hidden' || st.bg.state === 'unresponsive')) { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
-        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true } : null; // B-d635: or a tab that never answers
+        if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && (st.bg.state === 'hidden' || st.bg.state === 'unresponsive')) { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
+        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true, front: m.front === true } : null; // B-d635: or a tab that never answers
         renderWatchLine(); renderPicture(); // the owner's report 2026-11-19: the picture follows the verdict (the tab's own, while hidden)
         break;
       case 'tabs':

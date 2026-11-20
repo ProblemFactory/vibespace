@@ -94,6 +94,7 @@ export default {
   "the tab's own picture, a new one every half second — its window shows another tab in front": "このタブ自身の画面（0.5 秒ごとに新しく）— そのウィンドウの前面には別のタブがあります",
   "the tab's own picture — its window's picture again in a moment": "このタブ自身の画面 — まもなくウィンドウの画面に戻ります",
   "This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward": "このタブはウィンドウ内の別のタブの後ろにあり、応答していません：ブラウザ自身のタブ列でこのタブを押すか、「前面に出す」を押してください",
+  "This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Bring it forward, then reload it in the browser, or switch to another tab": "このタブは応答していません — 画面がなく、問い合わせにも答えませんでした（ページがビジーかハングしています）。「前面に出す」を押してからブラウザで再読み込みするか、別のタブに切り替えてください",
   "This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward": "このタブはウィンドウ内の別のタブの後ろにあります：ブラウザ自身のタブ列でこのタブを押すか、「前面に出す」を押してください",
   "the tab's last own picture — it does not answer, and its window shows another tab in front": "このタブ自身の最後の画面 — 応答がなく、そのウィンドウの前面には別のタブがあります",
   "The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers": "エージェントのタブが応答していません — 最後の画面を表示しています。問い合わせにも答えませんでした（ページがビジーかハングしています）。応答があり次第この表示は更新されます",

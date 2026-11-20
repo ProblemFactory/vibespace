@@ -78,6 +78,9 @@ const isX = (v) => !!v && v.source === PICTURE_X;
  *  meanwhile — it paints again); a takeover returns the window at once. Its read (M2): the hub says «hidden» again only after
  *  BACKGROUND_SILENCE_MS (2 s) without a frame, judged on a 1 s tick, then a CDP ask — the settle outlasts that: 2 s + 2 × 1 s. */
 const BG_SETTLE_MS = 4000;
+/** The live-picture follow-up, its read 4 (S2): a clear the hub says came from a SWITCH (`cause`: the agent's tab is another tab now)
+ *  never settles — the settle holds ONE tab's picture against its own flap, never one tab's last picture under another's name. PURE. */
+const settlesOnClear = (m) => !(m && m.cause === 'switch');
 function pictureForView(v, { bg = null, driving = false, shownWhy = null, clearedAt = 0, now = Date.now(), settleMs = BG_SETTLE_MS } = {}) {
   if (!isX(v) || driving) return v;
   if (bg && bg.state === 'hidden' && bg.targetId) return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };
@@ -281,6 +284,6 @@ function deskDoorOf({ source = null, xShown = false, stuck = null, human = false
 
 module.exports = {
   PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
-  pictureSourceOf, pictureForView, BG_SETTLE_MS, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
+  pictureSourceOf, pictureForView, BG_SETTLE_MS, settlesOnClear, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
   xShownTarget, xWindowLookups, xTicketMoved, xFollowVerdict, // hotfix 2026-11-17: the picture shows the tab the view says it shows (+ cure r2: moved by the CDP window)
 };
