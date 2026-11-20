@@ -205,6 +205,13 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE HUB: src/server/cli-level-reported.js keeps machines' verdicts by version with the machine that said it (only a whole read's, only for the version asked; ≤ 20, through the store writer; a failed read HELD); the facts read of a paired conversation above the span is the trigger (the manager's list reads it before an end), the door judged FIRST in memory (no longer paired / not connected / an older agent: said from the first read, nothing asked), ONE ask per (machine, version) on a 5 / 15 / 45 s schedule, every end said once by name; src/hosts.js cliLevelOf asks only a connected agent with the capability, reading its hello in memory; cli-model-catalog levelSignalOf answers its own read first, then a machine's; the manager's reason names the door (src/conversation-facts.js levelPending).
 - LEGS: test-cli-level-scan (fast; red controls for every law — the overlap, the identity read on, the loop held (measured from outside, perf_hooks), the cut forgotten, the PATH's file read for the conversation, the pre-scan identity, the bare-name match, the held store, the trims, a dropped ask that never ends, the one-minute mismatch pause, a list that connects, the door judged late, the status() read); test-cli-level-op (heavy, a real agent over a 342 MiB planted build: 337.0 MiB in 66 ms on the box, the longest step 1 ms).
 
+### bl-ci — B-9ff2 step 3's follow-up (the round wpuahmyim's should r237) and test-ci-heavy-queue's scene (r234); tests and one small
+- A WITHDRAWN CARD PROVED WRONG: a card the CLI withdrew (`cancelled`, «Not run») moves to the result's word when the call's own result proves it RAN — a success reads allowed, «stopped while it ran» reads stopped — in either order (a cancel after such a result leaves the result's word). No build is shown to do this; a result that says the call did not run leaves «Not run». test-helper-ask ⑱g: three orders live and rebuilt, and a red control without the move.
+- test-ci-heavy-queue's frozen-head scene (the 2.369.414 readers' UTC red, placed as the scene — the queue's frozen-head rule working: W3's untouched ticket passed W1's old 4 s under 180 suites side by side):
+  - W1's staleness is DERIVED from the scene's own bounds: 4 × the longest pause the scene can make (W2's release + W1's rejoin + the free-try sleep);
+  - W3's pause is MEASURED and printed, with the tickets judged and their ages;
+  - a pause past the derived bound is said BY NAME («the box held W3 for N ms, past the scene's own bound»), never as a wrong order.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
