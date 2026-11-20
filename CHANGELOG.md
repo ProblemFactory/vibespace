@@ -16,6 +16,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On slow storage, answering a job's panel or removing a job, Task Group or browser profile is saved at once and finishes by itself when the storage answers.
 - On slow storage, forgetting a browser profile now saves its removal before its folder is moved aside.
 - Deleting a browser profile whose folder could not be set aside now says so, and names the folder's path.
+- Diagnostics no longer says Claude Code 2.1.328 is newer than VibeSpace's record table: the table now includes that version.
 
 ## 2.369.413 — 2026-11-20
 

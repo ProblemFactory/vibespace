@@ -82,6 +82,23 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CONTROLS, red by name: the no-CAS mutant must REVERT inside the made window (and the window must be made, its order printed); the discovery law's control is MADE too — a mailbox's thread list HELD at the vendor: a read at the done hook alone misses the thread, the read after the pass ended has it.
 - LEFT, named: four `await landing; await sleep(N)` waits in the r8 block (a held exchange released: lines near 999, 1108, 1138, 1177) — the same family, outside the named class; each judges «no pass» or a pass after its landing, so each needs the hook AND (where it judges one) the pass.
 
+### bl-ci — B-9ff2 step 2: the hosted runner's Claude Code 2.1.328 registered from its dump
+- THE BUILD: npm's newest on 2026-11-19, installed by ci.yml on the hosted runner. The tree's dump script read it there (fast part 1, the claude-cli-dump artifact; strings, never run), and the integrator handed over the JSON. The binary is on no machine of ours: the box holds 2.1.322. The tracked dump is scripts/fixtures/claude-cli/2.1.328.json (the artifact without its `draft`). Production runs the pinned older build, so this is look-ahead.
+- 54 CHANGES against 2.1.322, each classified from the dump's own literals:
+  - three new subtypes, card-less (message-manager KNOWN_IGNORED, a shape row each, SHAPE_SINCE 2.1.328): `late_allow_not_run` («why no late Allow runs the call»), `shell_cwd`, `task_list_statuses`;
+  - nine zod non-records (ZOD_NON_RECORDS) and `queued_command`, an attachment message-manager already reads (ATTACHMENT_PAYLOADS, known);
+  - 26 fields on twelve stream shapes (FIELDS_328, each ignored by its name — no describe text could be read) and six off a stream shape (FIELDS_328_ELSEWHERE);
+  - one nested key (rate_limit_info.memberSpendLimit);
+  - five permission sentences (src/permission-outcome.js): pBe, w5e, b5e and k5e are `cancelled`; rHn is `stopped`, being ww plus a correction that the call ran and its files may have reached a connector. b5e and k5e say the approval request is STILL OPEN: the coordinator's ruling r140 (d) reads them `cancelled` (not run, nobody decided: true when written).
+- SCHEMA_CLI_VERSIONS / SCHEMA_CLI_VERSION and PERMISSION_OUTCOME_CLI_VERSION are now 2.1.328. The hosted runner's record oracle is therefore STRICT on its own build (an unpinned build was lenient there).
+- LEGS: test-record-shape covers the diff recomputed, the field maps equal to it, the three rows and their lists, the ten non-records, the nested key, the five sentences, the strict judge clean on 2.1.328 and 2.1.322, and a doors census. Its controls go RED on the 073cc4a1e tree: «UNLISTED» ×3, every stream field «UNDECLARED», the five sentences unclassified (rHn alone reading denied), and the real normalizer on a mutant copy (three unknown-record notices). test-cli-registration ②e: registered, the newest, and a red control over the .413 list. test-helper-ask: the version pin.
+- WHAT MOVES WITH THE PIN, by the tree's own rules:
+  - src/conversation-facts.js LEVEL_MEASURED_TO is now 2.1.328. The measured span IS the tracked dumps that declare the background level signal, and 2.1.328's does. So a 2.1.328 CLI's background facts read known, not «above the measured span».
+  - test-level-signal read «the first build above the span» as a typed 2.1.323, which now falls inside it. It reads it from the module now (LEVEL_MEASURED_TO's patch + 1), the cure the tree already holds for its stand-ins.
+  - scripts/fixtures/cli-update-census.json: record-oracle-since 23 → 27 and permission-outcome-rows 8 → 13 sites. These are the new SHAPE_SINCE / note labels and the five rows' `since`, judged again: labels, matched by text, never keyed by build.
+  - The mutant control reads TWO unknown-record notices (shell_cwd, task_list_statuses): late_allow_not_run carries a tool_use_id, and the fall-back card skips such a record, so on the old tree it was dropped, not carded.
+- REMAINDER (row B-9ff2): a door that tells a person whether a late Allow ran the call (system/late_allow_not_run, control_cancel_request.takes_late_allow) is not built here (the ruling r140 (d)).
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
