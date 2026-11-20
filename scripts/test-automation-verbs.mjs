@@ -184,24 +184,51 @@ try {
   const opened = await until(() => (ledger().key === 1 ? ledger() : null));
   const rs = await cli(['conversations', 'resume', W.claudeSessionId], C.token);
   const RS = rs.json || {};
-  const back = await until(async () => (await active()).find((s) => s.id === RS.sessionId && (s.backendSessionId === W.claudeSessionId || s.claudeSessionId === W.claudeSessionId)));
-  const resumedStub = await until(() => stubs().find((x) => x.args.includes('--resume') && x.args[x.args.indexOf('--resume') + 1] === W.claudeSessionId));
+  // THE TWO LAWFUL ANSWERS (lane bl-tests-e — the .413 fourth hosted run, place-10: asked ~5 s after this hub started, the resume
+  // answered «queued, position 1» with no session id; the hub's ONE resume line stays shut until the boot's re-adoption has settled,
+  // by design — no resume races the adoption of a session still running — and the leg had read the session id from that answer, so
+  // everything after it cascaded). A resume nobody pressed may be STARTED (its sess- id) or QUEUED (a position ≥ 1 and its next road,
+  // no session id): both pinned here by their fields; the same conversation and the note either way (src/server/conversation-ops.js)
+  const started = /^sess-/.test(String(RS.sessionId)) && RS.queued === undefined && RS.position === undefined && RS.next === undefined;
+  const queuedShape = RS.queued === true && Number.isInteger(RS.position) && RS.position >= 1 && RS.sessionId === undefined
+    && RS.next === `conversations status claude:${W.claudeSessionId} answers once it runs; asking again keeps its place`;
+  check('③b conversations resume (the ENDED worker, by its conversation id): exit 0 with one of its two LAWFUL answers, by its fields — STARTED (its sess- id) or QUEUED (position ≥ 1, its next road, no session id); the same conversation; the note says nothing was sent',
+    rs.code === 0 && (started || queuedShape) && RS.target === W.claudeSessionId && RS.sessionKey === `claude:${W.claudeSessionId}` && /nothing was sent to it/.test(String(RS.note)), { answered: started ? 'STARTED' : queuedShape ? `QUEUED at ${RS.position}` : 'NEITHER shape', rs: rs.json || rs.err });
+  // …then the resume is proven on what HAPPENS: live again on the same conversation — its session id READ from the live list, never
+  // taken from the answer (a queued one has none) — and its CLI started with --resume <id>; a bounded wait on the live list, failing by name
+  const back = await until(async () => (await active()).find((s) => s.backendSessionId === W.claudeSessionId || s.claudeSessionId === W.claudeSessionId), 30000);
+  const RSID = back ? back.id : null;
+  const resumedStub = await until(() => stubs().find((x) => x.args.includes('--resume') && x.args[x.args.indexOf('--resume') + 1] === W.claudeSessionId), 30000);
   check('③b conversations resume (the ENDED worker, by its conversation id): exit 0 — LIVE AGAIN on the same conversation, its CLI started with --resume <id>, the note says nothing was sent',
-    rs.code === 0 && /^sess-/.test(String(RS.sessionId)) && RS.sessionKey === `claude:${W.claudeSessionId}` && !!back && !!resumedStub && /nothing was sent to it/.test(String(RS.note)), { rs, back: !!back, stub: !!resumedStub });
+    rs.code === 0 && /^sess-/.test(String(RSID)) && (!started || RSID === RS.sessionId) && !!resumedStub && /nothing was sent to it/.test(String(RS.note)),
+    { rs: rs.json || rs.err, live: RSID || 'NOT in the live list within 30 s of the answer', stub: resumedStub ? 'started with --resume' : 'NO CLI started with --resume <id> within 30 s' });
   await sleep(3000);   // past the spend guard's write debounce and the wrapper's start
   const after = ledger();
-  check('③b …its CLI read ZERO user frames, and the spend ledger has NO new row (still the open\'s ONE automation-open stamp)', userFrames(W.claudeSessionId).length === 0 && !!opened && after.key === opened.key && after.instance === opened.instance, { frames: stdinOf(W.claudeSessionId).map((m) => m.type), opened, after });
-  ws.send(JSON.stringify({ type: 'chat-input', sessionId: RS.sessionId, text: 'a person typed this' }));
+  // the zero-frames check is judged only once that CLI EXISTS (before, a resume that had not started yet passed it with no CLI at all)
+  check('③b …its CLI read ZERO user frames, and the spend ledger has NO new row (still the open\'s ONE automation-open stamp)', !!resumedStub && userFrames(W.claudeSessionId).length === 0 && !!opened && after.key === opened.key && after.instance === opened.instance, { cli: !!resumedStub, frames: stdinOf(W.claudeSessionId).map((m) => m.type), opened, after });
+  ws.send(JSON.stringify({ type: 'chat-input', sessionId: RSID, text: 'a person typed this' }));
   const typed = await until(() => (userFrames(W.claudeSessionId).length === 1 ? true : null), 10000);
   check('③b CONTROL: a person\'s chat-input into the resumed worker ⇒ its CLI reads ONE user frame (the probe sees a turn)', !!typed, stdinOf(W.claudeSessionId).map((m) => m.type));
   // the typed turn ENDS: the stub answered the user line with a result BEFORE it logged the line `typed` waited on (the read's MUST: a
-  // turn the hub reads running is a refusal by the verdict, rightly); the hub reads it off the wrapper's pipe in milliseconds — no
-  // HTTP door shows a non-reporting CLI's turn without an audited verb (④ counts those), so the settle below is stated, by order
-  await sleep(500);
+  // turn the hub reads running is a refusal by the verdict, rightly). THE DOOR THAT SHOWS IT (the 03:57Z should; its read): the live
+  // list every page socket receives ON CONNECT (`active-sessions`, src/ws-handler.js — the same payload as the hub's broadcast) carries
+  // each session's `turn` from src/server/turn-facts.js turnOf, the very fact the end verdict reads; a fresh socket per look attaches to
+  // nothing and audits nothing. The input marks the turn running BEFORE its stdin write, so after `typed` an «idle» there means the
+  // result was read. A bounded wait, failing by name — never a sleep in its place
+  const turnNow = (sid) => new Promise((resolve) => {
+    const w = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    const done = (v) => { clearTimeout(t); try { w.close(); } catch { } resolve(v); };
+    const t = setTimeout(() => done('no live-sessions frame in 3 s'), 3000);
+    w.on('message', (d) => { try { const m = JSON.parse(String(d)); if (m && m.type === 'active-sessions') { const row = (m.sessions || []).find((x) => x.id === sid); done(row ? row.turn : 'not in the live list'); } } catch { } });
+    w.on('error', (e) => done(`the socket failed: ${(e && e.message) || e}`));
+  });
+  let lastTurn = null;
+  const idle = !!RSID && await until(async () => ((lastTurn = await turnNow(RSID)) === 'idle' ? true : null), 10000);
+  check('③b …the typed turn ENDED: the live list a page receives on connect says turn idle (the fact the end verdict reads)', !!idle, { turn: lastTurn });
   const rs2 = await cli(['conversations', 'resume', W.claudeSessionId], C.token);
   check('③b a resume of a RUNNING conversation ⇒ exit 1 not_ended', rs2.code === 1 && /\(not_ended\)/.test(rs2.err), rs2);
-  const enR = await cli(['conversations', 'end', RS.sessionId], C.token);
-  const goneR = await until(async () => !(await active()).some((s) => s.id === RS.sessionId));
+  const enR = await cli(['conversations', 'end', RSID], C.token);   // the id the live list states for it now — never the answer's
+  const goneR = !!RSID && await until(async () => !(await active()).some((s) => s.id === RSID));
   check('③b …and the key ends it again', enR.code === 0 && !!goneR, enR);
   // lane conversations-archive-verb: the opener's lifecycle ends with the sidebar's 归档 — AFTER the end, by the conversation id (the key opened it; no grant of its own)
   const ar = await cli(['conversations', 'archive', W.claudeSessionId], C.token);
@@ -343,8 +370,9 @@ try {
 
   console.log('⑤d THE REFUSAL KEEPS HOLDING — a worker whose CLI is BELOW the measured floor');
   // its background tasks are UNKNOWN (src/conversation-facts.js trackedFacts): the key's end is refused BY NAME — subject_busy, its
-  // version said — and nothing stops; FORCE by its OPENER (this key opened it) ends it. Never force anywhere else: one scene's worker
-  // the key did not open answers force_not_yours (⑤c's old-road worker)
+  // version said — and nothing stops; FORCE by its OPENER (this key opened it) ends it. No other end in this suite passes --force (the
+  // 03:57Z should: what is proven here); the refusal of force for a conversation the key did not open (force_not_yours) is proven in
+  // scripts/test-end-obeys-verdict.mjs, not here
   const OLD = path.join(CWD, 'old-cli'); fs.mkdirSync(OLD, { recursive: true }); fs.writeFileSync(path.join(OLD, '.stub-cli-version'), BELOW_V);
   const opO = await cli(['conversations', 'open', '--cwd', OLD, '--name', 'old cli'], C.token);
   const WO = opO.json || {};
