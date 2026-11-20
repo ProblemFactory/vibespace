@@ -1198,15 +1198,19 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
    *  hooks, then spend: every waiting unattended turn is judged again against the real caps (noteLimitsWritten with no «before») */
   const _settingsLiftHooks = [];
   router.onSettingsLift = (fn) => { if (typeof fn === 'function') _settingsLiftHooks.push(fn); };
-  function settingsAgain(why) {
+  function settingsAgain(why, { afterWrite = false } = {}) {   // afterWrite: the caller's own write ran the write hooks (the import): not again
     _settingsCache = null;
     try { readSettings(); } catch (e) { console.warn(`[settings] the settings could not be read again (${why}): ${(e && e.message) || e}`); return; }
     if (settingsHold.held()) return;   // still HELD: no lift — no owed return is tried, nothing is said lifted (its own ladder reads it)
     console.log(`[settings] the settings are read again (${why})`);
     for (const fn of _settingsLiftHooks) { try { fn(); } catch (e) { console.warn('[settings] a lift hook failed:', e && e.message); } }
     const data = readSettings(), spend = spendOf(data);
-    broadcast({ type: 'settings-updated', settings: data, ...(spend ? { spend } : {}) });
-    try { onSettingsWrite?.(data, {}); } catch (e) { console.warn('[settings] change callback failed:', e.message); }
+    // (主开发 r552) afterWrite: the caller's write already broadcast the settings and ran the write hooks — run them ONCE (every stored
+    // spawn row pushed to the running conversations once); the lift's own re-judge of the waiting turns still runs (no «before»)
+    if (!afterWrite) {
+      broadcast({ type: 'settings-updated', settings: data, ...(spend ? { spend } : {}) });
+      try { onSettingsWrite?.(data, {}); } catch (e) { console.warn('[settings] change callback failed:', e.message); }
+    }
     try { require('../server/spend-guard.js').noteLimitsWritten(null, spend); } catch { }
     storeWord('store-lifted', { file: 'settings.json', why });
   }
@@ -1602,7 +1606,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('settings', (d) => { if (d && typeof d === 'object') writeSettings(d); });
     // B-225b (round wyzvr7567's cure 4): an import that REPLACED damaged settings ended their hold — that IS the lift: the setting
     // holds' owed returns are judged against what was imported and land (or end), the waiting spend is judged again, every page told
-    if (setAsideSaid.includes('settings.json')) settingsAgain('a person\'s import replaced the damaged settings');
+    if (setAsideSaid.includes('settings.json')) settingsAgain('a person\'s import replaced the damaged settings', { afterWrite: true });
     apply('customThemes', (d) => { if (d && typeof d === 'object') { writeCustomThemes(d); } });
     apply('layouts', (d) => { if (d && typeof d === 'object') writeLayouts(d); });
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d, { whole: true }); });   // lane sidebar-echo-order r10: a person's import is an ACT at its time — an act made before it, re-sent after, does not land over it

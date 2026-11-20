@@ -67,6 +67,7 @@ function create({ dataDir, ensureAgentHooks, rootRecovery, ownerWriteRefusal, in
   function sync() {
     const r = ensureAgentHooks({ auto: true });
     if (r && r.refused && r.refused.kind === 'unknown') unknown(r.refused);
+    else if (r && r.skipped && r.settingsHeld) arm();   // B-225b (主开发 r552): a skip while the settings are held registered NOTHING — no recovery said, read again (the backoff)
     else if (r && !r.refused) recovered();
     return r;
   }

@@ -122,11 +122,13 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
       if (bad != null) warn(`[cli-config] ${h.id}.${row.key} = ${JSON.stringify(bad)} is not one of ${row.options.map((o) => JSON.stringify(o.value)).join('|')} — the default ${JSON.stringify(row.default)} rides instead (the Settings window only offers the listed values)`);
     }
   }
+  let heldSkipped = false;
   function syncCliConfig({ reason = 'boot' } = {}) {
     // B-225b (round wyzvr7567's MUST 2 — a WRITE TO A PERSON'S OWN FILE takes its strict side): while the SETTINGS are held no
     // row's value is the person's, so no CLI config is written; the lift's settings change runs this again with their values
     let held = null;
     try { held = serverSetting(Symbol.for('vibespace.settings-held')) || null; } catch { held = null; }
+    heldSkipped = !!held;   // (主开发 r552: a sync the hold skipped is OWED — the lift replays it, whatever its rows say)
     if (held) { log(`[cli-config] skipped (${reason}): the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — no CLI config is written until they read`); return { skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }; }
     warnRefusedValues();
     // ONE journal line per boot for every refused writer (refuseOwnerWrite
@@ -171,7 +173,8 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
   /** The settings-write diff hook (persistence.js onSettingsWrite). */
   function onSettingsWrite(next, prev) {
     const n = next || {}, p = prev || {};
-    if (cliConfigKeys().some((k) => n[k] !== p[k])) syncCliConfig({ reason: 'settings change' });
+    if (heldSkipped) syncCliConfig({ reason: 'the settings read again' });   // the lift's own replay: rows at their defaults differ from no «before»
+    else if (cliConfigKeys().some((k) => n[k] !== p[k])) syncCliConfig({ reason: 'settings change' });
     for (const { harness, row, path } of liveRows()) {
       if (n[path] === p[path]) continue;
       const value = coerce(row, n[path]);

@@ -64,6 +64,10 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
       let hooks = null;
       try { if (integrationEnabled()) hooks = ensureAgentHooks({ auto: true }); } catch (e) { hooks = { error: e.message }; }
       const cfg = harnessConfig.syncCliConfig({ reason: 'Apply' });
+      // B-225b (主开发 r552 — a person's refused act is SAID at the press): while the SETTINGS are held both writers skip and write
+      // nothing; the door answers the hold BY NAME (the store's unread refusal with the held fact), never «applied» over nothing
+      const heldOf = (x) => (x && x.skipped && x.settingsHeld ? x.settingsHeld : null), held = heldOf(hooks) || heldOf(cfg);
+      if (held) return res.status(503).json({ error: `the settings could not be read (${held.kind}${held.code ? ', ' + held.code : ''}) — the CLI config was not applied; nothing was written`, code: 'store_unread', held: { file: 'settings.json', kind: held.kind, code: held.code || null, since: held.since || null, rung: 'said' } });
       const failed = [
         ...Object.entries(hooks && typeof hooks === 'object' ? hooks : {}).filter(([, v]) => v && v.ok === false && v.missing !== 'no-dir').map(([k, v]) => `${k}: ${v.error}`),
         ...((cfg && cfg.receipts) || []).filter((x) => x.state === 'error' || x.state === 'refused').map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`),

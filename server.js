@@ -479,8 +479,8 @@ function checkAgentHookHealth() {
       if (!info.fileExists || info.parseError) continue; // that CLI isn't set up here / unreadable
       if (info.stale || !info.installed || scriptMissing) {
         global.__vsEvent?.('agent-hook-broken', `${key}${info.stale ? '/stale' : ''}${!info.installed ? '/missing-entry' : ''}${scriptMissing ? '/script-missing' : ''}`);
-        ensureAgentHooks({ auto: true }); // self-heal the registration in place
-        if (!hookRootWatch.saidRecoveryInstead(info, scriptMissing)) serverNotice(`hook-health-${key}`, // verify r2 ①: a root never registered because it could not be read is a recovery, not "broken and repaired"
+        const healed = ensureAgentHooks({ auto: true }); // self-heal the registration in place (B-225b r552: while the settings are held it SKIPS — nothing repaired, nothing said)
+        if (!(healed && healed.skipped) && !hookRootWatch.saidRecoveryInstead(info, scriptMissing)) serverNotice(`hook-health-${key}`, // verify r2 ①: a root never registered because it could not be read is a recovery, not "broken and repaired"
           `VibeSpace's ${key} agent-hook registration was broken (stale or missing path) and has been repaired — CLI sessions already running pick the fix up only after they restart or compact.`,
           { level: 2 });
       }
@@ -952,11 +952,11 @@ app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), inte
 app.post('/api/agent-hooks/install', (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
   // right back — refuse with guidance instead of silently contradicting.
-  if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });
+  { const sh = typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null; if (sh) return res.status(503).json({ error: `the settings could not be read (${sh.kind}${sh.code ? ', ' + sh.code : ''}) — the hooks were not installed; nothing was written`, code: 'store_unread', held: sh }); } if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });   // B-225b r552: the HOLD answered by name first (its strict side reads the switch OFF)
   createHookHelper(); // regenerate the script too (repair path)
   const results = ensureAgentHooks({ auto: false }); // explicit → clears any opt-out
   // A worktree / temp server refuses BY NAME (src/server-root.js) — never "installed"
-  if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: agentHooksStatus() });
+  if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: agentHooksStatus() }); if (results.skipped && results.settingsHeld) return res.status(503).json({ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: { file: 'settings.json', kind: results.settingsHeld.kind, code: results.settingsHeld.code || null, since: null, rung: 'said' } });
   res.json({ success: true, results, status: agentHooksStatus() });
 });
 hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)

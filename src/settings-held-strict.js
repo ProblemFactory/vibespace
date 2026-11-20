@@ -26,7 +26,8 @@ const STRICT_WHILE_HELD = Object.freeze({
   'accounts.activeUsagePolling': row('vendor', false, 'no usage is polled'),
   'accounts.onDemandQuotaRefresh': row('vendor', 'manual', "no automatic read; a person's own press still reads"),
   'antigravity.autoUsageReads': row('vendor', 'off', "no automatic read; a person's own press still reads"),
-  // A WRITE TO A PERSON'S OWN FILE OR MACHINE
+  // A WRITE TO A PERSON'S OWN FILE OR MACHINE (or a conversation's environment)
+  'agents.vibespaceIntegration': row('person-file', false, "no NEW spawn gets VibeSpace's context delivery or its agent tools (they are written into a conversation's environment), and the running conversations' context deliveries answer as with the switch off (ONE reading of the switch, src/agent-routes.js integrationOnMaster) — a person who turned it off is never overridden by the default; its hooks are neither written nor stripped (NO_WRITE_WHILE_HELD)"),
   'accounts.shipSubscriptionToRemote': row('person-file', false, 'no sign-in is shipped to another machine'),
   'agentd.autoGraduate': row('person-file', false, 'no machine is moved to another link by itself'),
 });
