@@ -47,6 +47,7 @@ function fakeProc(rows) {
     fs.writeFileSync(path.join(d, 'stat'), statLine(r.pid, r.comm, r.state || 'S', r.ppid || 1, r.start));
     if (r.fifo) { execFileSync('mkfifo', [path.join(d, 'environ')]); fifos.push(path.join(d, 'environ')); }
     else fs.writeFileSync(path.join(d, 'environ'), (r.env || []).join('\0') + '\0');
+    if (r.exe) fs.symlinkSync(r.exe, path.join(d, 'exe'));   // the program the kernel says it runs (a link; its target need not exist)
     if (r.threadD) { fs.mkdirSync(path.join(d, 'task', String(r.pid + 1)), { recursive: true }); fs.writeFileSync(path.join(d, 'task', String(r.pid + 1), 'stat'), statLine(r.pid + 1, r.comm, 'D', r.ppid || 1, r.start)); }
   }
   return dir;
@@ -57,8 +58,8 @@ const MARK = 'CLAUDE_WEBUI_SESSION_ID=sess-lb-1', OTHER = 'CLAUDE_WEBUI_SESSION_
 const TURN_AGE = 60000, AFTER = ticksAt(NOW - 30000), BEFORE = ticksAt(NOW - 120000);
 const SECRET = ['tok', 'en', '-', 'value'].join('');
 const PROC = [
-  { pid: 9101, comm: 'node', start: AFTER, ppid: 1, env: [MARK, `API_TOKEN=${SECRET}`] },          // left: re-parented, this conversation
-  { pid: 9102, comm: 'python3', start: AFTER + 5, ppid: 1, env: [MARK] },                           // left
+  { pid: 9101, comm: 'MainThread', exe: '/opt/node-v24.22.1/bin/node', start: AFTER, ppid: 1, env: [MARK, `API_TOKEN=${SECRET}`] },   // left: its MAIN THREAD renamed (Node 24), its program node
+  { pid: 9102, comm: 'python3', start: AFTER + 5, ppid: 1, env: [MARK] },                           // left: no program link readable — its stat's name
   { pid: 9103, comm: 'sleep', start: AFTER, ppid: 1, env: [OTHER] },                                // another conversation's
   { pid: 9104, comm: 'old', start: BEFORE, ppid: 1, env: [MARK] },                                  // started before this turn
   { pid: 9105, comm: 'gone', start: AFTER, ppid: 1, env: [MARK], state: 'Z' },                      // a zombie
@@ -81,11 +82,15 @@ console.log('— ① the read over a stand-in /proc');
 const root = fakeProc(PROC);
 {
   const r = await LB.leftBehind({ ...READ, procRoot: root });
-  ok(ids(r.left) === '9101,9102' && r.left.map((x) => x.comm).join(',') === 'node,python3', '① this conversation\'s leftovers only: re-parented, its mark, started after the turn (node, python3) — never another conversation\'s, one started before, a zombie, the reader\'s own supervisor', r);
+  ok(ids(r.left) === '9101,9102' && r.left.map((x) => x.comm).join(',') === 'node,python3', '① this conversation\'s leftovers only: re-parented, its mark, started after the turn (node, python3) — never another conversation\'s, one started before, a zombie, the reader\'s own supervisor — each NAMED BY ITS PROGRAM (a stat saying «MainThread» with the link /opt/node-v24.22.1/bin/node reads «node»; no readable link: the stat\'s name)', r);
   ok(!r.left.concat(r.kept).some((x) => x.pid === 9201) && r.scan.held === 1 && ids(r.kept) === '9301', '① a process under a HELD root (the hub\'s own records — a job) is never named (counted held); under THIS conversation\'s CLI (its record) it is the CLI\'s own: KEPT, named apart', { kept: r.kept, scan: r.scan });
   ok(ids(r.jobs) === '9106' && !r.left.some((x) => x.pid === 9106), '① a JOB\'s re-parented child (the job\'s own mark beside the conversation\'s) is named as a job\'s, never offered for ending', r.jobs);
   ok(r.scan.unreadable === 3 && !r.left.concat(r.kept).some((x) => [9601, 9602, 9107].includes(x.pid)), '① a process in D, with a thread in D, or whose parent chain broke mid-read (and still breaks when read again) is never named — counted unreadable only when it is this conversation\'s, so the caller SAYS it', r.scan);
   ok(r.left.every((x) => JSON.stringify(Object.keys(x).sort()) === JSON.stringify([...LB.ROW_KEYS].sort())) && !JSON.stringify(r).includes(SECRET), '① ONLY pid, command name and start time leave the read — never an environment\'s bytes (the token), never arguments', r.left);
+  ok(LB.nameOf('MainThread', '/usr/local/bin/node') === 'node' && LB.nameOf('MainThread', '/usr/bin/python3.12 (deleted)') === 'python3.12' && LB.nameOf('MainThread', null) === 'MainThread' && LB.nameOf('x', '/' + 'a'.repeat(40)).length === 32, '① PURE nameOf: the program\'s base name (a deleted program\'s too), bounded as the row; no link: the stat\'s name', [LB.nameOf('MainThread', '/usr/local/bin/node'), LB.nameOf('MainThread', null)]);
+  const statOnly = M.load('src/left-behind.js', anchored(SRC, "comm: nameOf(s.comm, await exeOf(procRoot, p)), start: s.start, startedAt:", "comm: String(s.comm).slice(0, 32), start: s.start, startedAt:", 'B-69a7 the program name (the release candidate\'s stat-only read)'), 'statonly');
+  const ro = await statOnly.leftBehind({ ...READ, procRoot: root });
+  ok(ro.left.some((x) => x.pid === 9101 && x.comm === 'MainThread'), '① RED CONTROL (the release candidate\'s read — the stat\'s name alone): the node process left behind is named «MainThread»', ro.left.map((x) => x.comm));
   const cut = await LB.leftBehind({ ...READ, procRoot: root, maxRows: 1 });
   ok(cut.scan.cut === true && cut.scan.scanned === 1, '① a read past its ROW bound reads no more than the bound and says CUT (the caller says «could not be read», never «nothing left»)', cut.scan);
   const none = await LB.leftBehind({ mark: MARK, ageMs: 0, procRoot: path.join(ROOT, 'no-such-proc'), now: NOW });
@@ -226,6 +231,7 @@ console.log('— ④ real processes and the End door');
     return { holder, child };
   };
   const alive = (p) => { try { process.kill(p, 0); return true; } catch { return false; } };
+  const NODE = path.basename(process.execPath);   // the planted processes run THIS node: named by its base name on every Node (Node 24 calls its main thread «MainThread»)
   const row = (p) => { const s = LB.statOf(fs.readFileSync(`/proc/${p}/stat`, 'utf8')); return { pid: p, start: s.start, comm: s.comm }; };   // the row as the read would list it
   let off = () => { };
   try {
@@ -235,7 +241,7 @@ console.log('— ④ real processes and the End door');
     off = PI.keepOut('left-behind-test-job', () => [[job.holder, 0]]);
     await sleep(150);
     const r = await LB.leftBehind({ mark, ageMs: 5000, keep: PI.keptOut([]), recordPids: [cli] });
-    ok(r.left.some((x) => x.pid === mine && x.comm === 'node') && !r.left.some((x) => x.pid === theirs || x.pid === cli), '④ a REAL detached process carrying this conversation\'s mark is found (node); another conversation\'s is not, nor the conversation\'s own recorded CLI', { left: r.left, scan: r.scan });
+    ok(r.left.some((x) => x.pid === mine && x.comm === NODE) && !r.left.some((x) => x.pid === theirs || x.pid === cli), '④ a REAL detached process carrying this conversation\'s mark is found, named by its program (this suite\'s own node); another conversation\'s is not, nor the conversation\'s own recorded CLI', { left: r.left, scan: r.scan });
     ok(!r.left.concat(r.kept).some((x) => x.pid === job.child) && r.scan.held >= 1, '④ a REAL hub job\'s child carrying the SAME mark is never named — held out by the hub\'s own record of the job, never by a name', { left: r.left, job });
     const noHeld = M.load('src/left-behind.js', anchored(SRC, "    if (by === 'held') { put(() => { out.scan.held++; }); return; }\n", '', 'B-69a7 the held exclusion (real)'), 'noheld-real');
     const rh = await noHeld.leftBehind({ mark, ageMs: 5000, keep: PI.keptOut([]), recordPids: [cli] });
@@ -276,7 +282,7 @@ console.log('— ④ real processes and the End door');
     ok(stuckCheck === 'unread', '④ the press\'s own environ read has the scan\'s stuck check and time bound: a read that never returns answers «unread», never hangs the press', stuckCheck);
     const ended = await DOOR.endLeft(session, { by: { kind: 'human' }, at: 7, graceMs: 1000 });
     for (let k = 0; k < 50 && alive(mine); k++) await sleep(20);
-    ok(ended.ok && ended.ended.includes('node') && !alive(mine) && alive(theirs) && alive(job.child) && alive(cli) && session._leftBehind === null, '④ «End them» (a person\'s press on its line): the listed process re-checked and ended; it says what ended; the other conversation\'s, the job\'s and the conversation\'s own untouched', ended);
+    ok(ended.ok && ended.ended.includes(NODE) && !alive(mine) && alive(theirs) && alive(job.child) && alive(cli) && session._leftBehind === null, '④ «End them» (a person\'s press on its line): the listed process re-checked and ended; it says what ended; the other conversation\'s, the job\'s and the conversation\'s own untouched', ended);
     const noStart = M.load('src/left-behind.js', anchored(SRC, " || s.start !== Number(start)) { v = 'gone'; return; }", ") { v = 'gone'; return; }", 'B-69a7 the start-time check at the press'), 'nostart');
     const victim = run({ CLAUDE_WEBUI_SESSION_ID: id });
     await sleep(150);

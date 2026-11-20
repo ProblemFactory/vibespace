@@ -39,6 +39,17 @@ function statOf(txt) {
   const r = a.slice(i + 2).split(' ');
   return { comm: a.slice(a.indexOf('(') + 1, i), state: r[0], ppid: Number(r[1]), start: Number(r[19]) };
 }
+/** THE NAME A PERSON READS FOR A PROCESS IS THE PROGRAM'S, NEVER A THREAD'S (主开发 10:15Z, the cut of .413): the stat's name in
+ *  its parentheses is the MAIN THREAD's, and a program may rename it (Node 24 names it «MainThread»). → the base name of the
+ *  program the kernel says the process runs (its exe link: «/usr/bin/node» or «… (deleted)»), bounded as the row's name;
+ *  only when that cannot be read, the stat's name. PURE. */
+function nameOf(statName, exeTarget) {
+  const t = typeof exeTarget === 'string' ? exeTarget.replace(/ \(deleted\)$/, '') : '';
+  const base = t ? t.slice(t.lastIndexOf('/') + 1) : '';
+  return String(base || statName || '').slice(0, 32);
+}
+/** the exe link of a process found (read only for the rows the read names — off the loop, inside the read's bound); null when it cannot be read */
+async function exeOf(procRoot, p) { try { return await fsp.readlink(`${procRoot}/${p}/exe`); } catch { return null; } }
 const realUidOf = (txt) => { const m = /^Uid:\s+(\d+)/m.exec(String(txt || '')); return m ? Number(m[1]) : -1; };
 const pidsOf = (l) => (Array.isArray(l) ? l : [l]).map((x) => Number(Array.isArray(x) ? x[0] : x)).filter((p) => Number.isInteger(p) && p > 1);
 // THE ENVIRON SLOTS (process-wide): a read the kernel holds (a target's thread stuck in D) keeps its slot until it returns
@@ -154,7 +165,7 @@ async function leftBehind({ mark, ageMs = 0, keep = [], own = [], records = [], 
     if (e === null) { put(() => { out.scan.unreadable++; }); return; }
     if (!e.mark) return;
     if (by === 'broken') { put(() => { out.scan.unreadable++; }); return; }   // this conversation's, but whose chain it is in is not known
-    const row = { pid: p, comm: String(s.comm).slice(0, 32), start: s.start, startedAt: Math.round((btime + s.start / HZ) * 1000) };
+    const row = { pid: p, comm: nameOf(s.comm, await exeOf(procRoot, p)), start: s.start, startedAt: Math.round((btime + s.start / HZ) * 1000) };
     if (e.job) { put(() => { out.jobs.push(row); }); return; }   // a job's (its own mark beside the conversation's): never offered
     const kept = by === 'own' || (await underOlder(p));
     put(() => { (kept ? out.kept : out.left).push(row); });
@@ -188,7 +199,7 @@ async function stillLeft({ pid, start }, mark, { procRoot = '/proc', keep = [], 
     if (e === null) { v = 'unread'; return; }
     if (!e.mark) { v = 'gone'; return; }
     if (e.job) { v = 'held'; return; }
-    v = { pid: Number(pid), starttime: s.start, comm: s.comm };
+    v = { pid: Number(pid), starttime: s.start, comm: nameOf(s.comm, await exeOf(procRoot, pid)) };   // judged by pid, start time and mark; named by its program
   })();
   if (!(await raced(work, timeLeft(t0, maxMs)))) { closed = true; envPrune(); return 'unread'; }
   closed = true;
@@ -202,4 +213,4 @@ async function leftBehindOp(msg, { procRoot = '/proc', keep = [], records = [] }
   const pick = (x) => Object.fromEntries(ROW_KEYS.map((k) => [k, x[k]]));
   return { left: r.left.map(pick), kept: r.kept.map(pick), jobs: r.jobs.map(pick), scan: r.scan, ...(r.unread ? { unread: r.unread } : {}) };
 }
-module.exports = { leftBehind, leftBehindOp, stillLeft, statOf, recordPidsOf, ROW_KEYS, HZ, MARK_RE, ENV_SLOTS, envSlotsBusy: () => envBusy, envSlotsWaiting: () => envQueue.length };
+module.exports = { leftBehind, leftBehindOp, stillLeft, statOf, nameOf, recordPidsOf, ROW_KEYS, HZ, MARK_RE, ENV_SLOTS, envSlotsBusy: () => envBusy, envSlotsWaiting: () => envQueue.length };
