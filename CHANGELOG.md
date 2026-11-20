@@ -30,7 +30,6 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A terminal conversation, or one whose harness reports too little, is a person's to end, unless the key opened it (then --force ends it).
 
 ### Fixed
-- On a paired machine, a key helper named in the project's Claude settings or in your own settings file is now seen at a start, as on this machine.
 - A «file watches» notice still open when VibeSpace restarts now clears itself once watches work again, instead of staying for good.
 - A removed spend ledger, or an older copy put back, no longer resets the count of turns nobody typed in silence: For you says it, and it is counted.
 - An agent filling a date by the ref of one of its parts (Month, Day, Year) is now refused with how to fill the whole field; it used to set nothing and go on.
@@ -59,6 +58,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Notifications no longer cover the open For you panel: they move above or beside it, or wait and later show in full; errors and Undo stay; a press keeps it open.
 - After you stop a Claude turn, the chat says which processes its command tool left running, with «End them» to end them on this machine.
 - A sign-in form inside a frame from another site: the agent now says whose frame it is and asks you to sign in there in the live view, not a dead-end tip.
+- On a paired machine, a key helper named in the project's Claude settings or in your own settings file is now seen at a start, as on this machine.
 
 ### Security
 - A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.
