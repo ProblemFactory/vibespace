@@ -446,6 +446,16 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (!writer || typeof writer.durable !== 'function') return true;   // the device road: written at the call
     try { return !!(await writer.durable(storeFile, { timeoutMs: LAND_BEFORE_SPAWN_MS })); } catch { return false; }
   }
+  /** the bring-up's wait for its record's landing before «ready»: true once on disk; false when the record died meanwhile */
+  async function landedForReady(id) {
+    for (let said = false; ;) {
+      const rec = store.apps[id];
+      if (!rec || !M.isLiveState(rec.state) || stopping.has(id)) return false;
+      if (await landedBeforeSpawn()) return !!(store.apps[id] && M.isLiveState(store.apps[id].state));
+      if (!said) { said = true; log.warn?.(`[desktop] ${id}: its record is not on disk yet (the storage is slow or failing) — it is told ready once it lands`); }
+      await new Promise((r) => { const t = setTimeout(r, 1000); t.unref?.(); });   // a writer that answers «not yet» at once is never asked in a loop
+    }
+  }
   function refuseUnlanded(id, what) {
     const seat = rdpSeats.get(id); if (seat) { rdpSeats.delete(id); try { seat.close?.(); } catch { /* its own words */ } }
     delete store.apps[id]; commit();
@@ -1348,6 +1358,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
         if (!holder) { await failed(`127.0.0.1:${up.port} answered ${rec.probe === 'http' ? 'HTTP' : 'an RFB banner'} but the socket is not held by the picture server (pid ${serverPid}) — the port was taken by another process; nothing was recorded as ready`); return; }
       }
       if (gone()) return;
+      // THE ADOPTABLE RECORD LANDS BEFORE «READY» (主开发 2026-11-20 04:59Z, list line 117's must — test-desktop-app-keeper §3 kills the
+      // keeper's process right after «ready»): what the next life needs to ADOPT a running application — its parts' pids and start
+      // times, its display, its port, all committed above — is ON DISK before the launch is told ready, so a hub that dies hard after
+      // «ready» always adopts it (the release wrote each commit at the call). The wait is the bring-up's own, off the loop; it never
+      // ends the app: past each bound it is said and waited again, the record still «launching» (a hub that dies first has an app that
+      // was never told ready); a stop meanwhile ends it as any stop does
+      if (!(await landedForReady(id))) return;
       rec.state = M.transition(rec.state, 'server-listening') || rec.state;
       rec.readyAt = now();
       log.log?.(`[desktop] ${id} ready: ${rec.label} on ${rec.display} via ${rec.backend}/${rec.via} (${rec.recipe}) port ${rec.port}${rec.fallbackWhy ? ` (${rec.fallbackWhy})` : ''}`);
@@ -1932,6 +1949,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     for (const rec of Object.values(store.apps)) {
       if (!M.isLiveState(rec.state)) continue;
       if (!prior.has(rec.id)) continue;   // made after the adoption took its list: this life's, judged by its own bring-up
+      if (inflight.has(rec.id) || deferred.has(rec.id)) continue;   // a bring-up of THIS life runs for it (a relaunch may reuse an id of the last life — 主开发's should, 04:56Z)
       const own = M.capsOf(rec, backends).ownsDisplay;
       // rule 8: no child handles exist at boot, so every part is judged by
       // pid AND starttime — a record with none is not proven and is reaped

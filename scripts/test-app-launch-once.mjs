@@ -396,6 +396,38 @@ await leg('⑩', async () => {
   const x = await run(MX, 'lift-launch-red');
   ok(x.lifted && (x.state === 'failed' || x.state === 'exited'), 'CONTROL (the adoption\'s own list cut, in a copy): the person\'s new launch is judged a dead hub\'s leftover and ended (red)', x);
 });
+await leg('⑪', async () => {
+  console.log('⑪ lane lg-store-writes (主开发 2026-11-20 04:59Z, list line 117\'s must) — a launch is told READY only once its adoptable record is ON DISK');
+  // what the next life needs to adopt a running app (its parts' pids and start times, its display, its port) lands BEFORE «ready»:
+  // a hub killed hard right after «ready» always adopts it (test-desktop-app-keeper §3 is the product's own crash proof). Here the
+  // writer lands the launch's first record at once and HOLDS the landing the bring-up waits for: the record stays «launching»
+  // with its parts recorded, and turns ready at the landing. RED (anchored, in a copy): the wait cut — «ready» over a record in the air.
+  const DSRC = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  const READY_A = "      if (!(await landedForReady(id))) return;\n";
+  ok(DSRC.split(READY_A).length === 2, 'control setup: the bring-up waits for its record\'s landing before «ready» (found once)');
+  const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
+  const STAY2 = { id: 'stay2', label: 'Stay App 2', exec: script('stay-app-2', 'exec sleep 600'), args: [], category: 'app' };
+  const run = async (mod, tag) => {
+    let calls = 0, release = null;
+    const W = { dirty() { }, durable: () => { calls++; return calls === 1 ? Promise.resolve(true) : new Promise((r) => { release = r; }); }, flushSync: () => ({ written: [], left: [] }), pending: () => true };
+    const ds = mod.install({ dataDir: path.join(root, `ds-${tag}`), env, display: fakeDisplay, backends: BACKENDS, registryRows: [STAY2], log, now, tickMs: 3600e3, apps: noApps, writer: W });
+    const v = await ds.launch({ appId: 'stay2' }, {});
+    await until(() => release || ds._store().apps[v.id]?.state === 'ready', 8000);
+    const held = { ...(ds._store().apps[v.id] || {}) };
+    const out = { waitAsked: !!release, stateWhileInAir: held.state, partsRecorded: !!(held.pids && held.pids.x) };
+    if (release) release(true);
+    await until(() => ds._store().apps[v.id]?.state === 'ready', 5000);
+    out.stateAtLanding = ds._store().apps[v.id]?.state;
+    try { await ds.stop(v.id, { why: 'user', force: true }); } catch { /* the finally kills the kids */ }
+    ds.shutdown();
+    return out;
+  };
+  const r = await run(DS, 'ready-landed');
+  ok(r.waitAsked && r.stateWhileInAir === 'launching' && r.partsRecorded && r.stateAtLanding === 'ready', '⑪ while its adoptable record is in the air the launch stays «launching» (its parts recorded); at the landing it is READY', r);
+  const MX = mutantCopies('alo-ready', repo).load('src/desktop-serve.js', anchored(DSRC, READY_A, '      /* MUTANT: ready before the record lands */\n', 'alo-ready-early'), 'alo-ready-early');
+  const x = await run(MX, 'ready-early');
+  ok(!x.waitAsked && x.stateWhileInAir === 'ready', 'CONTROL (the wait cut, in a copy): «ready» while the record the next life needs is still in the air — a hard end then loses the app (red)', x);
+});
 await leg('⑧', async () => {
   console.log('⑧ lane launch-picture-size — a launch with a PICTURE SIZE: born pinned, a keeper-fixed rung started AT the pin, an unpinnable rung refused by name');
   const PINAPP = script('pin-app', 'exec sleep 600');
