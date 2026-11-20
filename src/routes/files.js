@@ -64,7 +64,7 @@ const { parseArchiveListing, fsErrorBody } = require('../remote-fs'); // verify-
 const { contentDisposition, fileNameOf } = require('../file-disposition');
 function sfs(req) {
   return req.app.locals.safeFs || {
-    call: async () => { throw require('../safe-fs').noWorkerRefusal(); },   // B-3b03: no pool ⇒ refused by name, never an in-main run
+    call: async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); },   // B-3b03: no pool ⇒ refused by name, never an in-main run
   };
 }
 

@@ -60,7 +60,7 @@ app.post('/api/agent/user-todo', async (req, res) => {
         const reg = require('../server/artifact-registry.js');
         const MAX = require('../user-todos.js').ARTIFACTS_MAX;
         const sfs = req.app.locals.safeFs;
-        const fsCall = sfs ? (op, p) => sfs.call(op, p) : async (op, p) => (await require('../safe-fs-worker').runOp(op, p)).result;
+        const fsCall = sfs ? (op, p) => sfs.call(op, p) : async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); };   // B-3b03: no pool ⇒ refused by name, never the op in-main
         const j = items.length > MAX ? { bad: [{ item: '', why: 'too-many', error: `${items.length} attachments — at most ${MAX} per item; attach the rest to a second item` }] }
           : await reg.judgeAsk({ session: s, items, fsCall, remote: req.app.locals.getRemoteFs?.() || null });
         if (j.bad.length) return res.status(422).json({ code: 'bad-artifact', refused: j.bad, error: `nothing was filed — ${j.bad.length} attachment${j.bad.length > 1 ? 's' : ''} would not open for the user: ${j.bad.map((b) => b.error).join(' | ')}` });

@@ -37,7 +37,7 @@ function createFsCanary({ file, record = () => {}, log = (...a) => console.error
   const blameOf = typeof blame === 'function' ? blame : (from, to) => LB.blameWords(LB.blame(from, to));
   const pool = probe || new SafeFs({
     workerPath: path.join(__dirname, 'fs-canary-worker.js'), name: 'fs-canary',
-    // B-3b03: no inlineRun — a probe with no live worker is refused (counted «lost», never a slow mount), never run on the loop
+    // B-3b03: no inlineRun — a probe with no live worker is refused (counted «lost», never a strike, never a healthy mount)
     poolSize: 1,
     timeouts: { probe: deadlineMs * 3 },
   });

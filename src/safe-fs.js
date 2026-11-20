@@ -32,8 +32,8 @@ const DOOR = require('./mount-door');
 const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
 
 /** B-3b03: the refusal of a call that found no live worker (the words a route answers when it has no code of its own). */
-const NO_WORKER = Object.freeze({ code: 'no-worker', message: 'The storage did not answer in time and its file readers are restarting — try again in a moment.' });
-const noWorkerRefusal = () => Object.assign(new Error(NO_WORKER.message), { status: 503, code: NO_WORKER.code, noWorker: true });
+const NO_WORKER = Object.freeze({ code: 'no-worker', message: 'no worker of {pool} is running — one did not answer in time and is restarting, or none could start; nothing was run on the main thread' });
+const noWorkerRefusal = (pool = 'the file pool') => Object.assign(new Error(NO_WORKER.message.replace('{pool}', pool)), { status: 503, code: NO_WORKER.code });   // its read (S4): no `noWorker` flag — in `_wait` that flag means «no worker ever took a call»
 
 // Per-op deadlines (ms). A deadline hit under a hung mount is exactly the case
 // we defend — generous enough for a real large read/copy on healthy storage,
@@ -107,8 +107,7 @@ class SafeFs {
       try {
         w = new Worker(this.workerPath, { env: process.env, ...(this._opts.resourceLimits ? { resourceLimits: this._opts.resourceLimits } : {}) });   // a pool may bound its workers' heaps (the transcript pool's history lane: lane resume-all-paced L3 — a HARD limit a parent --max-old-space-size replaces; the worker's own check is the bound that binds)
       } catch (e) {
-        // Construction itself failed — retry with backoff; calls fall back to
-        // the in-main runOp meanwhile (SafeFs.call handles no-alive-worker).
+        // Construction itself failed — retry with backoff; calls are REFUSED by name meanwhile (B-3b03: never an op in-main).
         this._scheduleBackoff(rec);
         return;
       }
@@ -223,7 +222,7 @@ class SafeFs {
       // (every one between a deadline kill and its respawn backoff, or none could start) the call is REFUSED BY NAME — 503,
       // `no-worker` — and its caller says so. The release ran it inline «as a last resort»: a hung path then held the whole hub
       // (scripts/test-safe-fs-no-inline.mjs measured it: the loop lost 1.5 s to a 1.5 s stall). B-55dc's `noInline` is now the rule.
-      return Promise.reject(noWorkerRefusal());
+      return Promise.reject(noWorkerRefusal(`the ${this.name} pool`));
     }
     return this._send(rec, op, payload, timeoutMs);
   }

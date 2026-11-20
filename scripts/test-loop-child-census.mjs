@@ -38,8 +38,8 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/claude-oat-probe.js', 'measure', 'child:execFileSync', 2, OFF, 'the measurement runs only in the FORKED child (the hub requires the module for its constants alone)'],
     ['src/claude-oat-probe.js', 'preflight', 'child:execFileSync', 3, OFF, 'the forked measurement child (preflight runs inside measure)'],
     ['src/claude-oat-probe.js', 'preflight > walk', 'walk', 1, OFF, 'the forked measurement child: the walk of its own new scratch'],
-    ['src/safe-fs-worker.js', 'contextFiles > walk', 'walk', 1, DEBT, 'per act — a context listing; a WORKER thread, EXCEPT the inline road: while the safe-fs pool backs off after a worker timeout, SafeFs.call runs it on the MAIN thread (src/safe-fs.js — test-sync-fs-census rows the same site)'],
-    ['src/safe-fs-worker.js', 'folderCensus > walk', 'walk', 1, DEBT, 'per act — a folder census; a WORKER thread, EXCEPT the inline road: while the safe-fs pool backs off after a worker timeout, SafeFs.call runs it on the MAIN thread (src/safe-fs.js)'],
+    ['src/safe-fs-worker.js', 'contextFiles > walk', 'walk', 1, OFF, 'per act — a context listing; a WORKER thread only (B-3b03: SafeFs.call never runs it on the main thread — with no live worker it refuses by name)'],
+    ['src/safe-fs-worker.js', 'folderCensus > walk', 'walk', 1, OFF, 'per act — a folder census; a WORKER thread only (B-3b03: SafeFs.call never runs it on the main thread)'],
     ['src/proc-identity.js', 'psOf', 'child:spawnSync', 1, FALLBACK, 'NO-/proc fallback only (macOS / BSD): /proc is the rung above it (test-architecture\'s process-table allowlist)'],
     ['src/proc-identity.js', 'startToken', 'child:spawnSync', 1, FALLBACK, 'B-f64b: NO-/proc fallback only (macOS / BSD) — where /proc exists an unreadable stat is gone, no ps (it had no timeout): per spawn on the device agent and opencode-serve\'s spawn tick / tokenVerdict only there'],
     ['src/discovery-facts.js', 'listOpenRolloutPathsViaLsof', 'child:spawnSync', 1, FALLBACK, 'NO-/proc fallback only (macOS / BSD codex liveness), ONE per scan'],
@@ -79,7 +79,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
   // rows tell the truth on every road (safe-fs's inline road ×2, startToken's unbounded ps on Linux for an exited pid)
-  const DEBT_MAX = 24;   // B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
+  const DEBT_MAX = 22;   // B-3b03 (lane hub-loop-stalls): safe-fs-worker's contextFiles and folderCensus walks run in a worker only now (24 → 22); B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
   const key = (f, sc, k) => `${f}|${sc}|${k}`;
   const judge = (r) => {
     const by = new Map(); for (const st of r.sites) by.set(key(st.file, st.scope, st.kind), (by.get(key(st.file, st.scope, st.kind)) || 0) + 1);

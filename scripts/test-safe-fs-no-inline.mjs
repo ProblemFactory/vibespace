@@ -88,12 +88,19 @@ console.log('③ the census: no pool keeps an inline road; a missing pool refuse
   ok(ts.includes('if (!fs.existsSync(PICTURE_WORKER)) return (_picturePool = { inPlace: true,') && cx.includes('if (!_workerScript) return null;'), 'the device bundle (no worker script) reads in place, named — the hub always has the script, so the hub never runs in-main');
   // the files router with no pool at all (server.js could not start it) refuses by name — never the op in-main
   const fr = read('src/routes/files.js');
-  ok(fr.includes("call: async () => { throw require('../safe-fs').noWorkerRefusal(); },") && !fr.includes('_runOpInline'), 'the files router with no pool refuses by name (never the op in-main)');
+  ok(fr.includes("call: async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); },") && !fr.includes('_runOpInline'), 'the files router with no pool refuses by name (never the op in-main)');
+  // its read (M2): EVERY road that ran the file op set in-main when no pool was wired — no file in src/ requires the worker's op set
+  // any more but the worker itself (frame-host and the status route's attachments refuse by name too)
+  const srcFiles = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js')) srcFiles.push(r); } };
+  walk('src');
+  const reqWorker = srcFiles.filter((f) => f !== 'src/safe-fs-worker.js' && /require\(['"](?:\.\.?\/)+safe-fs-worker(?:\.js)?['"]\)/.test(read(f)));
+  ok(!reqWorker.length && srcFiles.length > 300, `no file in src/ requires the SafeFs worker's op set to run it in-main (${srcFiles.length} files read; left: ${reqWorker.join(', ') || 'none'})`);
   // the Files window's words: the listing carries the code, the page words it in the reader's language
   const ops = read('src/lib/file-explorer-ops.js');
   ok(fr.includes("...(err.code === 'no-worker' ? { code: 'storage_no_worker' } : {})") && ops.includes("if (d && d.code === 'storage_no_worker') return t('the storage did not answer in time and its file readers are restarting — try again in a moment');"),
     'the Files window says the refusal in true words (code storage_no_worker; zh / ja by the i18n check)');
-  ok(SF.NO_WORKER && SF.NO_WORKER.code === 'no-worker' && /did not answer in time/.test(SF.NO_WORKER.message), `the refusal's own words (an agent, a log): «${SF.NO_WORKER && SF.NO_WORKER.message}»`);
+  const nw = SF.noWorkerRefusal('the file pool');
+  ok(SF.NO_WORKER && SF.NO_WORKER.code === 'no-worker' && /^no worker of the file pool is running — one did not answer in time and is restarting, or none could start/.test(nw.message) && nw.status === 503 && nw.noWorker === undefined, `the refusal's own words name its pool and both causes (an agent, a log): «${nw.message}»`);
 }
 
 report();

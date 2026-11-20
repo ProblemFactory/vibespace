@@ -61,7 +61,6 @@ const path = require('path');
 const MF = require('../mail-frame.js');
 const DOOR = require('../mount-door'); // B-afc4: the blocked-path door — asked BEFORE a user-path read
 const { ownOriginOf } = require('../write-origin.js');
-const { runOp: runOpInline } = require('../safe-fs-worker');
 
 /** The host's ONE script: the document from its parent, once, written in place. */
 const HOST_JS = "(function(){var done=false;addEventListener('message',function(e){if(done||e.source!==parent||parent===window)return;var d=e.data;if(!d||d.vsFrameDoc!==1||typeof d.html!=='string')return;done=true;document.open();document.write(d.html);document.close();});})();";
@@ -136,7 +135,7 @@ function folderPathVerdict(rel) {
   if (!ext || !FOLDER_EXTS.includes(ext.toLowerCase())) return { why: 'not-a-web-file' };
   return { rel: segs.join('/') };
 }
-const sfsOf = (req) => (req.app && req.app.locals && req.app.locals.safeFs) || { call: async (op, payload) => runOpInline(op, payload).result }; // the pool (server.js) — else the same op in-main
+const sfsOf = (req) => (req.app && req.app.locals && req.app.locals.safeFs) || { call: async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); } };   // B-3b03: no pool ⇒ refused by name, never the op in-main
 /** The folder a `base` names, as its real path — or '' (not absolute, blocked, not a folder, unreadable). */
 async function judgeBase(req, base) {
   if (typeof base !== 'string' || !base.startsWith('/') || base.length > 4096 || base.includes('\0')) return '';

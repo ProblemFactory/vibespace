@@ -522,7 +522,7 @@ try {
   });
   console.log(`[safe-fs] worker pool up (${app.locals.safeFs.poolSize} workers)`);
 } catch (e) {
-  console.error('[safe-fs] pool init failed — every file op is refused by name until a restart (B-3b03: never run on the main thread):', e.message);
+  console.error('[safe-fs] pool init failed — the file routes refuse every file op by name until a restart (B-3b03: never run on the main thread):', e.message);
 }
 app.use(fileRoutes);
 
