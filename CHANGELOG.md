@@ -53,6 +53,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An enlarged artboard you zoomed or moved in the Design window now stays put when the agent changes a file or the window resizes; Fit puts it back as it opened.
 - In «Who may use it…», a change made while a save goes through stays unsaved and the dialog asks before closing; a save in another window no longer undoes it.
 - After a restart with large mail or chat accounts, VibeSpace no longer stops answering for a second or more while it reads them again.
+- If your desktops, settings, bookmarks, themes or conversation list cannot be read at a start, nothing is written over them; one strip says so until they read.
+- A damaged saved file has its door on that strip: start it empty (the file is set aside first), import a backup, or for your desktops restore an earlier layout.
+- A page opened while your desktops cannot be read is a scratch surface: nothing on it is saved, and you load your desktops as soon as they read.
+- A change made while your settings cannot be read says «Not now» and keeps the field as you left it, instead of saving the page's old copy over them.
+- Diagnostics no longer calls a moment the main loop was held «JavaScript» from one sample taken as it ended; that sample is shown as its last moment.
+- When the samples of such a hold split evenly between JavaScript and native code, Diagnostics says both, with their counts.
+- A paired machine with a long usage history now sends its usage within seconds; a whole-history walk used to fail each time, leaving the slower harvest.
 
 ## 2.369.413 — 2026-11-20
 
