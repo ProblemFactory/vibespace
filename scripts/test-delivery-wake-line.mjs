@@ -25,6 +25,9 @@
 //   (place-8, 主开发 2026-11-20 03:35Z / 03:44Z) ㉑ the hand-over waits for THE RESUMED SESSION's inbox (a CLI answers once it started,
 //      never at «created»), OFF the line; a miss gives the claim back and says it by name — RED CONTROLS: the wait removed (the
 //      box's «no live inbox» after a reopen), the wait put back ON the line (a slow CLI holds another conversation's resume)
+//      (主开发 04:07Z, NOT TAKEN → cured) ㉑ a start answering AFTER the line's bound still ends its claim (RED: the rest started only by
+//      its asker); a delivery never reopens a kind that takes no message mid-session (RED: the row before); the belt after a reopen;
+//      a pty exited with its socket alive is not «gone» (RED: the old rule); one registry read a tick shared by every wait
 //   ㉒ the jobs engine's 30 s floor paces SOCKET posts: a floored delivery to an ENDED owner still owes its wake — RED CONTROL: the
 //      owing line removed (the box's P and A at their second fire: «rate floor — queued for injection instead», never resumed)
 import path from 'node:path';
@@ -63,13 +66,13 @@ const AGENT = { stopReason: 'ended', stoppedAt: T0 - 60e3, endedBy: { kind: 'age
 let seq = 0;
 
 /** the rig: the REAL ladder + park + hand-over + line + start; ONE manual clock for the park; `live` = the conversations running */
-function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, mod = DWO, postHook = null, backendOf = {}, rows = null, held = {}, cli = {} } = {}) {
+function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, mod = DWO, postHook = null, backendOf = {}, rows = null, held = {}, cli = {}, tick = 0, clock = null, lineBound = null } = {}) {
   const dataDir = dir || path.join(ROOT, name + '-' + (++seq));
   fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: T0, timers: [] };
   const retryClock = { now: () => c.now, setTimeout: (fn, ms) => { const t = { at: c.now + Math.max(0, ms), fn }; c.timers.push(t); return t; }, clearTimeout: (t) => { const i = c.timers.indexOf(t); if (i >= 0) c.timers.splice(i, 1); } };
   const sessions = new Map(), live = new Set();
-  const R = { c, dataDir, sessions, live, posts: [], notes: [], auths: [], probes: [], calls: [], reopens: [], lines: [], wakes: [], logs: [], inReopen: 0, maxInReopen: 0, kept, grants, archived, inboxAsks: [], slept: [], sleepGate: null };
+  const R = { c, dataDir, sessions, live, posts: [], notes: [], auths: [], probes: [], calls: [], reopens: [], lines: [], wakes: [], logs: [], inReopen: 0, maxInReopen: 0, kept, grants, archived, inboxAsks: [], slept: [], sleepGate: null, sockets: new Set(), registryReads: 0 };
   const log = (...a) => R.logs.push(a.join(' '));
   R.deliver = deliverMod.create({
     dataDir, activeSessions: sessions, serverSetting: () => undefined, retryClock, log, renderBatch: AR.renderMsgStash,
@@ -85,7 +88,9 @@ function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = 
   R.deliver.onRetry?.((ev, cid, e, extra) => { if (ev === 'wake') R.wakes.push({ cid, ...extra }); });
   R.jm = typeof jobs === 'function' ? jobs(R) : null;
   R.view = SH.create({ activeSessions: sessions, getDeliver: () => R.deliver, getJobs: () => R.jm, broadcastSessions: () => { }, renderMsgStash: AR.renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } }, now: () => c.now, dataDir });
-  R.line = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : { ok: false, why: 'no start' }), log: () => { } });
+  R.line = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : { ok: false, why: 'no start' }), log: () => { }, ...(lineBound ? { startBoundMs: lineBound } : {}) });
+  // the CLI registry's ids, ONE shared read a tick (`tick` null = the module's own tick; 0 = a read at every ask); `clock` = its time
+  R.registryIds = (mod.sharedRegistryIds || DWO.sharedRegistryIds)({ read: () => { R.registryReads++; return new Set(live); }, ...(tick === null ? {} : { tickMs: tick }), clock: clock || (() => R.slept.reduce((a, b) => a + b, 0)) });
   R.reopenRoad = async (item, o) => {
     const cid = item.sessionKey.slice(item.sessionKey.indexOf(':') + 1);
     R.calls.push('reopen'); R.reopens.push({ cid, by: o && o.by, accountId: (o && o.accountId) || null });
@@ -93,7 +98,7 @@ function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = 
     R.inReopen++; R.maxInReopen = Math.max(R.maxInReopen, R.inReopen);
     try { if (reopenHold) await reopenHold(cid); else await sleep(5); } finally { R.inReopen--; }
     if (!cli[cid]) live.add(cid);   // place-8: a CLI with a plan opens its inbox when its plan says (inboxOf below)
-    sessions.set('w-' + cid, { claudeSessionId: cid, backendSessionId: cid, name: 'resumed', mode: 'chat', backend: 'claude' });
+    sessions.set('w-' + cid, { claudeSessionId: cid, backendSessionId: cid, name: 'resumed', mode: 'chat', backend: backendOf[cid] || 'claude' });
     return { ok: true, sessionId: 'w-' + cid };
   };
   // the stores chain's two roads (主开发 02:59Z): the wiring's ONE gate both reopening roads pass, compiled from its source over this park
@@ -119,7 +124,13 @@ function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = 
         const plan = cli[cid] || null; R.inboxAsks.push(cid);
         if (plan && plan.ends) sessions.delete(sid);
         if (plan && Number.isInteger(plan.after) && R.inboxAsks.filter((x) => x === cid).length > plan.after) live.add(cid);
-        return (mod.inboxOfOver || DWO.inboxOfOver)({ deliver: () => R.deliver, activeSessions: sessions })(cid, sid);
+        // {reattach: n}: its attach pty exited while its socket still answers (the re-attach window) for n looks, then its CLI is up
+        if (plan && Number.isInteger(plan.reattach) && sessions.get(sid)) {
+          const ss = sessions.get(sid);
+          if (R.inboxAsks.filter((x) => x === cid).length <= plan.reattach) { ss.pty = null; ss.socketPath = 'sock-' + cid; R.sockets.add(ss.socketPath); }
+          else { ss.pty = {}; live.add(cid); }
+        }
+        return (mod.inboxOfOver || DWO.inboxOfOver)({ deliver: () => R.deliver, activeSessions: sessions, isSocket: (q) => R.sockets.has(q), registryIds: R.registryIds })(cid, sid);
       },
     },
     spendGuard: { authorize: (q) => { R.calls.push('probe'); R.probes.push({ reason: q.reason, hold: q.hold, identity: q.identity && q.identity.key }); return cap ? { ok: false, why: 'per-identity-hour', detail: cap } : { ok: true }; } },
@@ -587,7 +598,7 @@ console.log('㉑ the hand-over waits for THE RESUMED SESSION\'s inbox, off the l
   const waited = B.slept.reduce((a, b) => a + b, 0), wz = B.wakes.find((w) => w.cid === Z) || {}, lz = (B.lines[B.lines.length - 1] || {}).line || {};
   ok(B.reopens.length === 1 && B.posts.length === 0 && B.notes.length === 0 && waited >= DWO.INBOX_WAIT_MS && waited < DWO.INBOX_WAIT_MS + 1000 && Math.max(...B.slept) === 1000,
     'a CLI that never opens its inbox: the start waits its bound (60 s of steps, each at most 1 s) — nothing posted, nothing charged', { waited, steps: B.slept.length });
-  ok(wz.outcome === 'failed' && wz.code === 'inbox_not_open' && /resumed as w-/.test(wz.why) && /did not open its inbox within 60 s/.test(wz.why) && /sending anything starts it/.test(wz.why) && !/no live inbox/.test(wz.why),
+  ok(wz.outcome === 'failed' && wz.code === 'inbox_not_open' && /resumed as w-/.test(wz.why) && /did not open its inbox within 60 s/.test(wz.why) && /sending anything starts it, or end and resume it/.test(wz.why) && !/no live inbox/.test(wz.why),
     '…the end says it BY NAME — resumed (which session), no inbox within the bound, the message waits for its next turn — never «no live inbox»', wz);
   ok(B.deliver.stashCount(Z) === 1 && B.deliver.claimedCount(Z) === 0 && lz.refused && lz.refused.code === 'inbox_not_open' && lz.params.seconds === 60 && lz.params.what === 'nightly report',
     '…the claim went back: the words wait in the stash, owed to its next turn; the window\'s line carries the code and the bound', { stash: B.deliver.stashCount(Z), claimed: B.deliver.claimedCount(Z), line: lz });
@@ -620,9 +631,81 @@ console.log('㉑ the hand-over waits for THE RESUMED SESSION\'s inbox, off the l
   };
   const off = await run(DWO, 'off');
   ok(off.waiting === 3 && off.landed && off.reopens.length === 4, 'three resumed conversations wait for their inboxes OFF the line — a fourth is resumed and its frame lands meanwhile (the line serves the next)', off);
-  const ONLINE = mutantCopies('wake-wait-on-line', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, "return { ok: true, outcome: 'resumed', sessionId: r.sessionId, rest: () => handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended }) };", 'return handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended });', 'wait-on-line'), 'wait-on-line');
+  const ONLINE = mutantCopies('wake-wait-on-line', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, "    return { ok: true, outcome: 'resumed', sessionId: r.sessionId, rest };", '    return await rest;', 'wait-on-line'), 'wait-on-line');
   const on = await run(ONLINE, 'on');
   ok(on.waiting === 2 && !on.landed && on.reopens.length === 2 && on.line.running === 2 && on.line.waiting === 2, '㉑ RED CONTROL: the wait put back ON the line — two waiting CLIs hold both places; the third and the fourth wait in line, not even resumed', on);
+}
+
+console.log('㉑b a claim taken is ALWAYS ended; a delivery reopens only a kind it can hand its words to (主开发 2026-11-20 04:07Z)');
+{
+  const DWSRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
+  const until = async (fn) => { for (let i = 0; i < 200; i++) { if (fn()) return true; await sleep(5); } return false; };
+  // THE MUST: the reopen is held past a small line bound — the line answers «did not answer», the start answers late with its rest
+  const late = async (mod, tag) => {
+    const X = cidOf(tag === 'cured' ? 100 : 101);
+    const R = rig('late-' + tag, { kept: { [X]: RESTART }, lineBound: 30, reopenHold: () => sleep(120), mod });
+    R.result(X, 'jb-late', 'nightly report', 'nightly report finished: the start answered late');
+    await R.at(10);
+    // the late reopen ends, then its rest (cured) lands within a few turns — a red's never-coming frame is not waited for
+    await until(() => R.reopens.length === 1 && R.inReopen === 0);
+    for (let i = 0; i < 10 && R.framesTo(X).length === 0; i++) await sleep(5);
+    const again = R.view.claimForWake(X);
+    if (again.ok) R.view.releaseWake(X, again);
+    return { wake: (R.wakes.find((w) => w.cid === X) || {}).why || null, frames: R.framesTo(X).length, claimed: R.deliver.claimedCount(X), stash: R.deliver.stashCount(X), again: again.code || (again.ok ? 'claimed' : null) };
+  };
+  const cured = await late(DWO, 'cured');
+  ok(/did not answer in/.test(cured.wake || '') && cured.frames === 1 && cured.claimed === 0 && cured.stash === 0 && cured.again !== 'in_flight',
+    'a start that answers AFTER the line\'s bound (its answer dropped there): its rest still runs — the words handed over, no claim left, no hand-over «in flight» for good', cured);
+  const LAZY = mutantCopies('wake-rest-lazy', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, '    const rest = handOverResumed(cid, entry,', '    const rest = () => handOverResumed(cid, entry,', 'rest-lazy'), 'rest-lazy');
+  const red = await late(LAZY, 'red');
+  ok(red.frames === 0 && red.claimed === 1 && red.again === 'in_flight',
+    '㉑b RED CONTROL: the rest started only by its asker (88fc70195\'s shape) — the late answer is dropped with its claim: the words stay CLAIMED, hidden from every drain, every later claim «in flight»', red);
+  // REFUSE BEFORE THE RESUME: opencode's own row takes no message mid-session — a delivery never reopens it
+  const RLP = require(path.join(REPO, 'src/resume-line.js')), CAPS = require(path.join(REPO, 'src/backend-caps.js'));
+  const O = cidOf(102);
+  const N = rig('no-mid-session', { kept: { [O]: RESTART }, backendOf: { [O]: 'opencode' }, rows: { opencode: RLP.harnessRowOf(CAPS.capsOf('opencode')) } });
+  N.result(O, 'jb-o', 'nightly report', 'nightly report finished: opencode');
+  await N.at(10);
+  const wo = N.wakes.find((w) => w.cid === O) || {}, row = N.view.waitingAll()[O];
+  ok(N.reopens.length === 0 && N.probes.length === 0 && N.posts.length === 0 && wo.outcome === 'refused' && wo.code === 'no_mid_session' && N.deliver.stashCount(O) === 1 && N.deliver.claimedCount(O) === 0 && !!row && row.code === 'no_mid_session',
+    'a kind whose own row takes no message mid-session (opencode) is NEVER reopened by a delivery: nothing probed, resumed or posted; the words stay stashed, the ended row says why', { wo, row });
+  const O2 = cidOf(103);
+  const N2 = rig('no-mid-session-red', { kept: { [O2]: RESTART }, backendOf: { [O2]: 'opencode' }, rows: { opencode: { resumeContinues: 'nothing', headless: true } } });
+  N2.result(O2, 'jb-o2', 'nightly report', 'nightly report finished');
+  await N2.at(10);
+  ok(N2.reopens.length === 1, '㉑b RED CONTROL: the row before this cure (no mid-session field) — the same delivery REOPENS it', N2.reopens);
+  // …the belt, after a reopen (a row that did not say): its agent takes no message mid-session — said at once, no wait, claim back
+  const O3 = cidOf(104);
+  const N3 = rig('no-mid-session-belt', { kept: { [O3]: RESTART }, backendOf: { [O3]: 'opencode' }, rows: { opencode: { resumeContinues: 'nothing', headless: true } }, cli: { [O3]: { never: true } } });
+  N3.result(O3, 'jb-o3', 'nightly report', 'nightly report finished: the belt');
+  await N3.at(10);
+  const w3 = N3.wakes.find((w) => w.cid === O3) || {}, l3 = (N3.lines[N3.lines.length - 1] || {}).line || {};
+  ok(N3.reopens.length === 1 && N3.posts.length === 0 && N3.slept.length === 0 && w3.code === 'no_mid_session' && /takes no message mid-session/.test(w3.why) && N3.deliver.claimedCount(O3) === 0 && N3.deliver.stashCount(O3) === 1 && l3.refused && l3.refused.code === 'no_mid_session',
+    'the belt after a reopen: its agent takes no message mid-session — said at once by name (no wait), the claim back, the window\'s line carries the code', { w3, slept: N3.slept.length });
+  // A PTY EXITED WITH ITS SOCKET ALIVE (the re-attach window) is a CLI still starting — never «it ended again»
+  const Q = cidOf(105);
+  const A = rig('reattach', { kept: { [Q]: RESTART }, cli: { [Q]: { reattach: 2 } } });
+  A.result(Q, 'jb-q', 'nightly report', 'nightly report finished: after the re-attach');
+  await A.at(10);
+  ok(A.framesTo(Q).length === 1 && A.wakes.some((w) => w.cid === Q && w.outcome === 'delivered') && A.slept.length === 2,
+    'its attach pty exited while its socket still answers: NOT gone — waited, then its inbox opened and the words were handed over', { wakes: A.wakes, slept: A.slept });
+  const OLDGONE = mutantCopies('wake-pty-gone', REPO).load('src/server/delivery-wake.js', anchored(DWSRC, 'const gone = !s || (s.pty === null && !isSocket(s.socketPath));', 'const gone = !s || s.pty === null;', 'pty-gone'), 'pty-gone');
+  const Q2 = cidOf(106);
+  const A2 = rig('reattach-red', { kept: { [Q2]: RESTART }, cli: { [Q2]: { reattach: 2 } }, mod: OLDGONE });
+  A2.result(Q2, 'jb-q2', 'nightly report', 'nightly report finished');
+  await A2.at(10);
+  ok(A2.framesTo(Q2).length === 0 && A2.wakes.some((w) => w.cid === Q2 && w.code === 'inbox_gone'), '㉑b RED CONTROL: a pty that exited read as gone — «it ended again» said of a CLI still starting', A2.wakes);
+  // ONE REGISTRY READ A TICK, shared: three waits inside one tick of the module's own read share it
+  const run3 = async (tick) => {
+    const S = [cidOf(107), cidOf(108), cidOf(109)];
+    const H = rig('shared-read-' + tick, { kept: Object.fromEntries(S.map((c) => [c, RESTART])), cli: Object.fromEntries(S.map((c) => [c, { never: true }])), tick, clock: () => 0 });
+    for (const c of S) H.result(c, 'jb-r' + c.slice(-2), 'slow report', 'slow');
+    await H.at(10);
+    return { asks: H.inboxAsks.length, reads: H.registryReads, ends: H.wakes.filter((w) => w.code === 'inbox_not_open').length };
+  };
+  const shared = await run3(null), each = await run3(0);
+  ok(shared.ends === 3 && shared.asks > 150 && shared.reads === 1, 'three conversations waiting in one tick: ONE registry read for all their looks (the module\'s own tick)', shared);
+  ok(each.ends === 3 && each.reads === each.asks, '…CONTROL: with no tick every look reads the registry (the count the shared read saves)', each);
 }
 
 console.log('㉒ a floored delivery to an ENDED owner still owes its wake (place-8: the box\'s P and A at their second fire)');
@@ -643,11 +726,11 @@ console.log('㉒ a floored delivery to an ENDED owner still owes its wake (place
     const granted = R.jm.create({ kind: 'cron', name: 'granted-digest', schedule: { everyMs: 3600e3 }, action: { type: 'notify', text: 'the granted digest' }, owner: OWNX, access: { view: 'group', control: 'session' } }, CALLER).job;
     R.grants[granted.id] = { granted: true, by: { kind: 'person', at: T0 } };   // the person's grant on the second one only
     R.jm._fireCron(R.jm.jobs.get(plain.id), 'cron');   // its attempt reaches nothing — and stamps the 30 s floor
-    for (let i = 0; i < 20 && !R.deliver.endedEntries(X).length; i++) await sleep(5);
+    for (let i = 0; i < 20 && R.jm.notifCount(X) < 1; i++) await sleep(5);   // its words stashed (the attempt answered)
     await R.at(10);
     const first = R.wakes.filter((w) => w.cid === X).map((w) => w.code);
     R.jm._fireCron(R.jm.jobs.get(granted.id), 'cron');   // within the floor: stashed «rate floor — queued for injection instead»
-    for (let i = 0; i < 20 && !R.deliver.endedEntries(X).length; i++) await sleep(5);
+    for (let i = 0; i < 20 && R.jm.notifCount(X) < 2; i++) await sleep(5);   // the floored stash is written (cured or not)
     const owed = R.deliver.endedEntries(X).length;
     await R.at(20);
     return { first, owed, reopens: R.reopens.length, frames: R.framesTo(X).map((f) => f.text) };
@@ -661,6 +744,13 @@ console.log('㉒ a floored delivery to an ENDED owner still owes its wake (place
   const red = await twoFires(floorRig('floor-red', Y, JM0), Y);
   ok(red.first.includes('ended_on_purpose') && red.owed === 0 && red.reopens === 0 && red.frames.length === 0,
     '㉒ RED CONTROL: the owing line removed — the granted fire is floored into a stash nothing will ever carry: no wake owed, never resumed', red);
+  // a LIVE conversation whose inbox does not answer (running here, its CLI not registered) inside the floor owes NOTHING: it runs
+  const Lv = cidOf(110);
+  const LR = floorRig('floor-live', Lv, JobManager);
+  LR.sessions.set('w-' + Lv, { claudeSessionId: Lv, backendSessionId: Lv, name: 'running', mode: 'chat', backend: 'claude' });
+  const lv = await twoFires(LR, Lv);
+  ok(lv.owed === 0 && lv.reopens === 0 && lv.frames.length === 0 && LR.jm.notifCount(Lv) === 2 && LR.deliver.endedEntries(Lv).length === 0,
+    'a LIVE conversation that does not answer, two fires inside the floor: NO wake owed (it runs — its next turn carries both), nothing resumed', { lv, notifs: LR.jm.notifCount(Lv) });
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

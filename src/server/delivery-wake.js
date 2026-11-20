@@ -123,8 +123,16 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     // sentence into a live agent, no resumed mark: the claim goes back and the words ride the live roads
     if (r.already === true) { sh.releaseWake(cid, claim); return { ok: true, outcome: 'running', sessionId: r.sessionId, already: true, why: 'it was already running — the words ride its next turn' }; }
     // THE LINE'S PLACE ENDS AT THE REOPEN (place-8, 主开发 2026-11-20 03:44Z, condition 1): the wait for THAT session's inbox and the
-    // hand-over run OFF the line (handOverResumed) — a slow CLI on one machine never holds another conversation's resume by the bound
-    return { ok: true, outcome: 'resumed', sessionId: r.sessionId, rest: () => handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended }) };
+    // hand-over run OFF the line (handOverResumed) — a slow CLI on one machine never holds another conversation's resume by the bound.
+    // A CLAIM TAKEN IS ALWAYS ENDED (主开发 04:07Z, the must): the rest STARTS HERE, whoever hears this answer — a start that answers after
+    // the line's own bound (its answer dropped there) still hands over or gives the claim back by name; a throw gives it back
+    const rest = handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended }).catch((e) => {
+      sh.releaseWake(cid, claim);
+      const why = `it was resumed as ${r.sessionId}, but its hand-over failed (${String((e && e.message) || e).slice(0, 160)}) — the message waits for its next turn`;
+      log(`[delivery-wake] ${cid}: ${why}`);
+      return { ok: false, outcome: 'failed', code: 'handover_failed', why, sessionId: r.sessionId };
+    });
+    return { ok: true, outcome: 'resumed', sessionId: r.sessionId, rest };
   }
   /** AFTER THE REOPEN, off the line (place-8): the wait for the resumed session's inbox, then ONE hand-over — or the claim back, said */
   async function handOverResumed(cid, entry, { sh, claim, peer, r, g, deliveries, ended }) {
@@ -135,7 +143,7 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     const inbox = await inboxOpened(cid, r.sessionId);
     if (!inbox.ok) {
       sh.releaseWake(cid, claim);
-      const why = `it was resumed as ${r.sessionId}, but ${inbox.why} — the message waits for its next turn${inbox.code === 'inbox_gone' ? '' : ' (sending anything starts it)'}`;
+      const why = `it was resumed as ${r.sessionId}, but ${inbox.why} — the message waits for its next turn${inbox.code === 'inbox_not_open' ? ' (sending anything starts it, or end and resume it)' : inbox.code === 'no_mid_session' ? ' (sending anything starts it)' : ''}`;
       const line = D.resumedRefusedLine(namesOf(entry), now(), { code: inbox.code, why });
       line.params.seconds = INBOX_WAIT_MS / 1000;   // the window's words name the bound (主开发 03:44Z condition 2)
       try { if (typeof seams.noteResumed === 'function') seams.noteResumed(r.sessionId, line); } catch { }
@@ -170,7 +178,10 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     // not a delivery's — wait for it, then the park LOOKS AGAIN (running ⇒ the words ride its next turn; else the line anew)
     if (q.joined) { try { await q.result; } catch { } return { outcome: 'again', why: 'a resume of this conversation was already in the line — looked again after it' }; }
     const r = await q.result;
-    return r && typeof r.rest === 'function' ? r.rest() : r;   // place-8: the reopen freed its place in line; the wait and the hand-over follow here
+    if (r && r.rest && typeof r.rest.then === 'function') return r.rest;   // place-8: the reopen freed its place in line; its wait and hand-over run on
+    // the line's own bound answered first: a start that still answers runs its rest by itself (the claim is never dropped with the answer)
+    if (r && r.ok === false && /did not answer in/.test(String(r.why || ''))) log(`[delivery-wake] ${cid}: its start passed the line's bound — if it still answers, its hand-over runs then, or its claim is given back`);
+    return r;
   }
 
   return { onEndedWake, payerOf };
@@ -180,14 +191,37 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
 const INBOX_WAIT_MS = 60_000;
 /** seams.inboxOf over the ladder (place-8): (cid, sessionId) → {open} once the ladder can reach the conversation (peerReachable: a
  *  CLI's registry record, a wrapper's lane, an owning machine) · {gone, why} when THAT session ended first · {never, why} when it
- *  runs but its agent takes no message mid-session (the ladder's own words, wakeBlock) · {} not yet. */
-function inboxOfOver({ deliver = () => null, activeSessions = null } = {}) {
+ *  runs but its agent takes no message mid-session (the ladder's own words, wakeBlock) · {} not yet. GONE is the session no longer
+ *  listed, or its attach pty exited AND its socket is gone: a pty that exited while the socket still answers is the re-attach
+ *  window of a CLI still starting — not yet (主开发 2026-11-20 04:07Z). */
+const socketAlive = (p) => { try { return !!p && require('fs').statSync(p).isSocket(); } catch { return false; } };
+/** ONE REGISTRY READ A TICK, SHARED BY EVERY WAITING CONVERSATION (place-8, the round's should): the CLI registry's conversation ids
+ *  (presence only — the full identity check stays the ladder's), read at most once per `tickMs` of `clock`; a read that fails is
+ *  null (the wait then asks the ladder's full lookup). `read` → Set of ids. */
+function sharedRegistryIds({ read = readRegistryIds, tickMs = 500, clock = () => Date.now() } = {}) {
+  let at = -Infinity, ids = null;
+  return () => { const t = clock(); if (ids === null || t - at >= tickMs) { at = t; try { ids = read(); } catch { ids = null; } } return ids; };
+}
+/** the registry's conversation ids as the CLI wrote them (~/.claude/sessions/<pid>.json `sessionId`) — src/peer-messaging.js's folder */
+function readRegistryIds() {
+  const fs = require('fs'), path = require('path'), dir = require('../peer-messaging.js').REGISTRY_DIR, ids = new Set();
+  for (const f of fs.readdirSync(dir)) {
+    if (!/^\d+\.json$/.test(f)) continue;
+    try { const r = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')); if (r && r.sessionId) ids.add(String(r.sessionId)); } catch { }
+  }
+  return ids;
+}
+function inboxOfOver({ deliver = () => null, activeSessions = null, isSocket = socketAlive, registryIds = sharedRegistryIds() } = {}) {
   return (cid, sessionId) => {
     const d = deliver();
     if (!d || typeof d.peerReachable !== 'function') return { never: true, why: 'the delivery ladder is not ready on this server' };
-    if (d.peerReachable(cid)) return { open: true };
     const s = activeSessions && activeSessions.get(sessionId);
-    if (!s || s.pty === null) return { gone: true, why: 'its agent ended before it opened its inbox' };
+    const gone = !s || (s.pty === null && !isSocket(s.socketPath));
+    // a LOCAL session of a kind whose inbox is the CLI's registry: not listed in this tick's shared read ⇒ not yet (no full lookup)
+    let listed = true;
+    try { if (s && !s.host && require('../backend-caps.js').capsOf(s.backend).peerDelivery === 'cli-inbox') { const ids = registryIds(); listed = !ids || ids.has(String(cid)); } } catch { listed = true; }
+    if (listed && d.peerReachable(cid)) return { open: true };
+    if (gone) return { gone: true, why: 'its agent ended before it opened its inbox' };
     const b = typeof d.wakeBlock === 'function' ? d.wakeBlock(cid) : null;
     if (b && b.cause && b.cause !== 'not-running') return { never: true, why: String(b.why || b.cause) };
     return {};
@@ -224,4 +258,4 @@ function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf =
   };
 }
 
-module.exports = { create, automationVerbs, inboxOfOver, INBOX_WAIT_MS };
+module.exports = { create, automationVerbs, inboxOfOver, sharedRegistryIds, INBOX_WAIT_MS };

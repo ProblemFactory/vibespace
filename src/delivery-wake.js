@@ -69,6 +69,9 @@ function owesWake(d = {}) {
  */
 function deliveryResumeVerdict(facts = {}, harness = {}) {
   const v = R.resumeVerdict(facts, harness);
+  // A DELIVERY RESUMES ONLY A KIND IT CAN HAND ITS WORDS TO (主开发 2026-11-20 04:07Z): a kind whose own row takes no message
+  // mid-session is never reopened by a delivery — the words stay stashed for its next prompt, said as stashed
+  if (v.ok && harness && harness.midSession === false) return { ok: false, code: 'no_mid_session', why: 'its agent takes no message mid-session — the words wait for its next prompt' };
   return v.ok ? { ok: true } : { ok: false, code: v.code, why: v.why };
 }
 

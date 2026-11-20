@@ -14450,7 +14450,7 @@ export default {
   "its agent did not open its inbox in time — the words wait for its next turn": "エージェントが時間内に受信箱を開きませんでした — 内容は次のターンを待ちます",
   "its agent takes no message mid-session — the words wait for its next turn": "エージェントはセッションの途中でメッセージを受け取りません — 内容は次のターンを待ちます",
   "it ended again before its agent opened its inbox": "エージェントが受信箱を開く前に再び終了しました",
-  "Resumed {when} to deliver: {what} — its agent did not open its inbox within {seconds} s, so the message waits for its next turn: send anything to start it": "{when} に次を届けるため再開：{what} — エージェントが {seconds} 秒以内に受信箱を開かなかったため、メッセージは次のターンを待っています：何か送るとそのターンが始まります",
+  "Resumed {when} to deliver: {what} — its agent did not open its inbox within {seconds} s, so the message waits for its next turn: send anything to start it, or end and resume it": "{when} に次を届けるため再開：{what} — エージェントが {seconds} 秒以内に受信箱を開かなかったため、メッセージは次のターンを待っています：何か送るとそのターンが始まります。または終了してから再開してください",
   "Resumed {when} to deliver: {what} — its agent takes no message mid-session, so the message waits for its next turn: send anything to start it": "{when} に次を届けるため再開：{what} — エージェントはセッションの途中でメッセージを受け取らないため、メッセージは次のターンを待っています：何か送るとそのターンが始まります",
   "Resumed {when} to deliver: {what} — it ended again before its agent opened its inbox; the message waits: resume it to receive it": "{when} に次を届けるため再開：{what} — ただしエージェントが受信箱を開く前に再び終了しました。メッセージは待っています：再開すると受け取れます",
   "Resumed {when} to deliver: {what} — but the hand-over was refused: {why}": "{when} に次を届けるため再開：{what} — ただし引き渡しは拒否されました：{why}",

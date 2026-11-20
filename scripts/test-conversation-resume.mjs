@@ -194,8 +194,9 @@ console.log('— ③ THE KEPT RECORD: a resume nobody pressed starts no turn nob
   const rowsNow = Object.fromEntries(['claude', 'codex', 'opencode', 'antigravity', 'shell', 'no-such-harness'].map((b) => [b, harnessRowOf(capsOf(b))]));
   ok(rowsNow.claude.resumeContinues === 'nothing' && rowsNow.codex.resumeContinues === 'goal' && rowsNow.opencode.resumeContinues === 'nothing' && rowsNow.antigravity.resumeContinues === 'nothing'
     && rowsNow.claude.headless && rowsNow.codex.headless && rowsNow.opencode.headless && rowsNow.antigravity.headless && rowsNow.shell.headless === false
-    && rowsNow['no-such-harness'].resumeContinues === 'unread' && rowsNow['no-such-harness'].headless === false,
-  '③ the declared rows (src/backend-caps.js): claude/opencode/antigravity \'nothing\', codex \'goal\'; the shell and an undeclared harness have no headless road', rowsNow);
+    && rowsNow['no-such-harness'].resumeContinues === 'unread' && rowsNow['no-such-harness'].headless === false
+    && rowsNow.claude.midSession === true && rowsNow.codex.midSession === true && rowsNow.antigravity.midSession === true && rowsNow.opencode.midSession === false && rowsNow.shell.midSession === false && rowsNow['no-such-harness'].midSession === false,
+  '③ the declared rows (src/backend-caps.js): claude/opencode/antigravity \'nothing\', codex \'goal\'; the shell and an undeclared harness have no headless road; a message mid-session reaches claude/codex/antigravity, never opencode or the shell (piece 7 reads it: 主开发 2026-11-20 04:07Z)', rowsNow);
   const V = require(path.join(REPO, 'src/resume-line.js')).resumeVerdict;
   ok(['unread', undefined, 'maybe'].every((rc) => V({ goal: 'none', mode: 'chat' }, { resumeContinues: rc, headless: true }).code === 'harness_unread') && V({ goal: 'unknown', mode: 'chat' }, { resumeContinues: 'unread', headless: true }).code === 'harness_unread',
     '③ a row that declares NEITHER value is refused whatever the goal says — harness_unread, even with a stated none (the cure round\'s must 1)');

@@ -79,10 +79,12 @@ function resumeVerdict(facts = {}, harness = {}) {
 }
 
 /** The harness half of the verdict from its capability row (src/backend-caps.js capsOf): its declared `resumeContinues`, and
- *  `headless` — a chat stream to parse (the headless resume starts chat only; a terminal-only harness has none). */
+ *  `headless` — a chat stream to parse (the headless resume starts chat only; a terminal-only harness has none). `midSession` (piece
+ *  7, 主开发 2026-11-20 04:07Z): its row names a lane that takes a message mid-session (peerDelivery, never 'stash-only') — only a
+ *  DELIVERY reads it (src/delivery-wake.js deliveryResumeVerdict: it resumes only a kind it can hand its words to). */
 function harnessRowOf(caps) {
   const c = caps || {};
-  return { resumeContinues: c.resumeContinues, headless: !c.terminalOnly && !!c.streamProtocol };
+  return { resumeContinues: c.resumeContinues, headless: !c.terminalOnly && !!c.streamProtocol, midSession: !!c.peerDelivery && c.peerDelivery !== 'stash-only' };
 }
 
 /** The desktop of the row that shows conversation `sessionKey` (`backend:id`) in the hub's layouts (data/layouts.json: each desktop's
