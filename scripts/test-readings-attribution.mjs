@@ -2979,7 +2979,7 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       ok('§16c STANDING SWEEP CONTROL: …and it really would — the same verdict over the same tree PLUS one synthetic module persisting the slot somewhere else says no',
         !onlyKnownSibling(census([...entries, { file: 'src/fake-third-home.js', text: "const f = path.join(dataDir, 'usage-cache.json');" }]).by));
       ok('§16c STANDING SWEEP: …and the remaining root is a DEVICE\'s own store (`~/.vibespace/usage-cache`), NAMED out of scope: it belongs to that machine, reaches us only as `usage-cache/host-*.json`, and the repair\'s own predicate refuses those because no anchor stream describes a host\'s login — it has no established window to judge or seed one with',
-        by.device.some((x) => x.startsWith('src/agentd/agentd.js:')) && by.device.some((x) => x.startsWith('data/bin/vibespace-usage:'))
+        by.device.some((x) => x.startsWith('src/agentd/agentd.js:')) && by.device.some((x) => x.startsWith('data/bin/vibespace-usage:'))   // stale-pins: kept — a census ENTRY's file prefix, not a pinned text: the census reads the same 16 sites in the same three buckets at the release and at this stack's tip (only line numbers move; B-0248's move check)
         && /!f\.startsWith\('host-'\)/.test(read('src/reading-repair.js'))
         && /host-\*` is excluded for the same reason the engine excludes it from/.test(read('src/reading-repair.js')),
         JSON.stringify(by.device));
