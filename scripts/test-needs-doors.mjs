@@ -2226,6 +2226,12 @@ console.log('⑩ THE VERIFIER\'S LIST FOR PICKS 3–6 (stored words — the cens
     for (const x of red) ok(false, `stored words (closure 3): «${x.s.slice(0, 110)}…» — a ${relVer} hub stored it (${(SWR.words.get(x.s) || []).slice(0, 2).join(', ')}); an item it filed is drawn after the update, so it keeps its zh and ja rows and, filed by no producer now, is a NAMED legacy row`, { rows: x.rows, named: x.named, filedNow: x.filedNow });
     ok(red.length === 0, `stored words (closure 3): each of the ${relStored.size} sentences the release ${relVer} stored keeps its zh and ja rows now; the ${lost.length} no producer files any more are named legacy rows`, red.map((x) => x.s.slice(0, 90)));
     ok(Object.values(LEG).every((e) => e.left !== relVer || relStored.has(e.key)), `stored words: every legacy row left in ${relVer} is a sentence that release STORED (read from it, never picked)`, Object.entries(LEG).filter(([, e]) => e.left === relVer && !relStored.has(e.key)).map(([k]) => k));
+    // THE LAW OF `left` (主开发 r126): it names the LAST release that STORED the sentence — so a sentence the release this tree was cut
+    // from stored (no producer files it now) is named with THAT release, never an older one; and (the leg above) a row naming it
+    // must be one that release stored, never the release its producer stopped in
+    const lastLaw = (L) => Object.entries(L).filter(([, e]) => relStored.has(e.key) && e.left !== relVer).map(([k, e]) => `${k}: left ${e.left}`);
+    ok(lastLaw(LEG).length === 0, `stored words: a legacy row whose sentence the release ${relVer} stored names ${relVer} — the LAST release that stored it`, lastLaw(LEG));
+    { const k0 = [...relStored][0]; ok(!!k0 && lastLaw({ planted: { left: '2.369.400', filedBy: 'src/foryou-actions.js', key: k0 } }).length === 1, `CONTROL: a row naming an OLDER release for a sentence ${relVer} stored is red by its name`); }
   }
   // EACH LEGACY ROW: its release, its producer, its two rows, filed by no producer now — and an item stored with it says it in zh / ja.
   // «Filed» is a PRODUCER's filing (the census above); a page may still say the sentence by itself (ui-plain-words vault-7: the login
