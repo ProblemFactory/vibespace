@@ -341,7 +341,7 @@ const { ptyInput } = require('./pty-input.js');   // B-5019: one UTF-8 decoder p
 // PURE (bundled): the ONE spawn-env sanitizer the orchestrator's agentEnv()
 // also is — every daemon child and every daemon re-exec is born from
 // `daemonEnv(process.env)`, never from `process.env` (see spawnEnv below).
-const { daemonEnv } = require('../agent-env.js');
+const { daemonEnv, withSpawnPath } = require('../agent-env.js');
 
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
 // verify-r1 B9: THIS process's boot id rides every dial attempt (x-vibespace-daemon-boot) so the server can tell our
@@ -475,18 +475,12 @@ function consoleCodePage() {
   return codePageAsk;
 }
 function spawnEnv(extra) {
-  const home = os.homedir();
-  const nodeDir = path.dirname(process.execPath);
-  const extras = [
-    nodeDir, path.join(home, '.local', 'bin'),
-    '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin',
-  ];
   const merged = { ...daemonEnv(process.env), ...(extra || {}) };
-  const cur = String(merged.PATH || process.env.PATH || '');
-  const parts = cur.split(':').filter(Boolean);
-  for (let i = extras.length - 1; i >= 0; i--) if (!parts.includes(extras[i])) parts.unshift(extras[i]);
-  merged.PATH = parts.join(':');
-  return merged;
+  // B-3d06: the PATH by THE PLATFORM'S OWN separator and key (src/agent-env.js withSpawnPath, PURE) — a Windows PATH was split on
+  // its drive colons (programs «not found», the hello's sh probe missing Git Bash so the hub refused a start); on Windows the
+  // agent's own folders go AFTER the person's PATH (主开发 r128)
+  const agentDirs = [path.dirname(process.execPath), path.join(os.homedir(), '.local', 'bin'), ...(process.platform === 'win32' ? [] : ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'])];
+  return withSpawnPath(merged, { platform: process.platform, agentDirs, fallback: process.env.PATH });   // on Windows AFTER the person's PATH (r128)
 }
 // ── R2 worker pool (src/agentd/worker-pool.js): deadline → terminate → respawn, BOUNDED (B-442c: a pool whose respawns
 // all crash — the bundle deleted under the daemon — backs off instead of doubling to 45 GB). runFs() prefers a

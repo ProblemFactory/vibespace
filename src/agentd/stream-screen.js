@@ -152,9 +152,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     } catch { return false; }
   }
   async function findFfmpeg() {
-    // PATH = this process's own (Windows' is the real `Path` — spawnEnv's copy is colon-joined) and then the spawn env's (its
-    // ~/.local/bin); the folders from this process's environment
-    const PATH = [lookupEnv.PATH, env.PATH].filter(Boolean).join(path.delimiter);
+    // PATH = this process's own and then the spawn env's (its ~/.local/bin) — the spawn env keeps the key as the env spells it
+    // (`Path` on Windows: B-3d06), both joined by the platform's own separator; the folders from this process's environment
+    const PATH = [lookupEnv.PATH, env.PATH || env.Path].filter(Boolean).join(path.delimiter);
     const candidates = SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }, delim: path.delimiter, sep: path.sep });
     // lane machine-needs-at-pairing: the FIRST that PASSES (SP.firstPassingFfmpeg), in the same order — an old ffmpeg on PATH no
     // longer shadows a good one in %LOCALAPPDATA%\vibespace\ffmpeg\bin; the microphone and the sound ride this same pick

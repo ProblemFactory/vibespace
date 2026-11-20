@@ -263,5 +263,48 @@ const one = (name) => { const a = AD.indexOf(`function ${name}(script) {`); retu
 ok(/execFileSync\('powershell\.exe', psOnceArgs\(script\), \{ windowsHide: true, timeout: 30000,/.test(one('psOnceSync')) && /execFile\('powershell\.exe', psOnceArgs\(script\), \{ windowsHide: true, timeout: 60000,/.test(one('psOnce')) && /const psOnceArgs = \(script\) => \['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', HS\.encodePs\(script\)\];/.test(AD), 'both one-shots: powershell.exe -EncodedCommand, windowsHide: true, bounded (30 s sync look, 60 s task)');
 ok(Buffer.from(HS.encodePs('exit 20'), 'base64').toString('utf16le') === 'exit 20', 'encodePs = UTF-16LE base64 (what -EncodedCommand reads)');
 
+// B-3d06: THE DEVICE'S SPAWN PATH by the platform's own separator (src/agent-env.js withSpawnPath — PURE, so its legs run here with
+// Windows-shaped values). THE RELEASE'S RULE (agentd.js spawnEnv as it was) is kept below as the reference: on a POSIX machine the
+// new rule gives its bytes BY CONSTRUCTION (spawnEnv builds the same agent folders with its own path module); on Windows it is the
+// red control — run as the release ran there: `merged.PATH` absent (the env spells `Path`), so it read process.env.PATH, the same
+// Windows PATH, and split it on its drive colons. ON WINDOWS THE PERSON'S PATH COMES FIRST (主开发's ruling r128).
+console.log('— B-3d06: the device agent\'s spawn PATH, by the platform\'s own separator —');
+{
+  const { withSpawnPath } = require(path.join(REPO, 'src/agent-env.js'));
+  const released = (env, extras, fallback = '') => {   // the release's spawnEnv PATH, verbatim but for its inputs
+    const merged = { ...env }; const cur = String(merged.PATH || fallback || ''); const parts = cur.split(':').filter(Boolean);
+    for (let i = extras.length - 1; i >= 0; i--) if (!parts.includes(extras[i])) parts.unshift(extras[i]);
+    merged.PATH = parts.join(':'); return merged;
+  };
+  const WIN_PATH = 'C:\\Program Files\\Git\\usr\\bin;C:\\Windows\\system32;C:\\Windows', NODE = 'C:\\Program Files\\vibespace-agent\\node', LBIN = 'C:\\Users\\u\\.local\\bin';
+  const WIN_DIRS = [NODE, LBIN], N = WIN_PATH.split(';').length;
+  // the Windows judge: the PERSON'S PATH first and WHOLE, then the agent's folders it lacked, ONE PATH key
+  const winBad = (env) => {
+    const keys = Object.keys(env).filter((k) => k.toUpperCase() === 'PATH'), parts = String(env[keys[keys.length - 1]] || '').split(';'), bad = [];
+    if (keys.length !== 1) bad.push(`${keys.length} PATH keys (${keys.join(', ')})`);
+    if (parts.slice(0, N).join(';') !== WIN_PATH) bad.push(`the person's PATH is not first and whole: ${parts.slice(0, N).join(';').slice(0, 160)}`);
+    if (parts.slice(N).join(';') !== `${NODE};${LBIN}`) bad.push(`the agent's folders are not after it: ${parts.slice(N).join(' | ')}`);
+    return bad;
+  };
+  const w = withSpawnPath({ Path: WIN_PATH, USERPROFILE: 'C:\\Users\\u' }, { platform: 'win32', agentDirs: WIN_DIRS, fallback: WIN_PATH });
+  ok(!winBad(w).length && Object.keys(w).includes('Path'), 'win32: the PERSON\'S PATH first and whole (Git\'s usr\\bin among it, so the hello\'s sh probe finds it), the agent\'s node dir and ~\\.local\\bin AFTER it, on the key the env spells (Path)', { got: w.Path, bad: winBad(w) });
+  const rel = released({ Path: WIN_PATH }, WIN_DIRS, WIN_PATH), relFirst = String(rel.PATH).split(';')[0];
+  ok(winBad(rel).length > 0 && relFirst.includes(NODE) && relFirst.includes('Git\\usr\\bin'), 'RED CONTROL (the release\'s rule, run as it ran on Windows): the PATH split on its drive colons — the node dir, the local bin AND Git\'s usr\\bin glued into ONE garbled first entry, a second PATH key beside Path', { first: relFirst, bad: winBad(rel) });
+  const w2 = withSpawnPath({ Path: 'C:\\Windows', PATH: WIN_PATH }, { platform: 'win32', agentDirs: WIN_DIRS });
+  ok(Object.keys(w2).filter((k) => k.toUpperCase() === 'PATH').join() === 'PATH' && !winBad(w2).length, 'win32: two PATH keys that differ by case end as ONE — the later (an explicit extra) wins, never two in the child\'s env', w2);
+  const held = `c:\\program files\\vibespace-agent\\node\;${WIN_PATH}`, w3 = withSpawnPath({ Path: held }, { platform: 'win32', agentDirs: WIN_DIRS });
+  ok(w3.Path === `${held};${LBIN}`, 'win32: an agent folder the PATH already holds (another case, a trailing backslash) is not added again, and the person\'s order is untouched — compared as Windows compares', w3.Path);
+  ok(withSpawnPath({}, { platform: 'win32', agentDirs: WIN_DIRS, fallback: 'C:\\Windows' }).PATH === `C:\\Windows;${NODE};${LBIN}`, 'win32: an env with no PATH takes the fallback first, the agent\'s folders after, by the same separator');
+  // POSIX: byte for byte the release's rule with the same agent folders, over shapes a machine has (an extra, a dup, empty entries,
+  // none — the fallback), and the whole env object
+  const PX_DIRS = ['/opt/node/bin', path.posix.join('/home/u', '.local', 'bin'), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
+  const shapes = [{ PATH: '/usr/bin:/home/u/bin', path: 'lower' }, { PATH: '/opt/node/bin:/usr/local/bin' }, { PATH: '/a::/b:' }, { PATH: '' }, {}];
+  const posixSame = (plat) => shapes.every((e) => JSON.stringify(withSpawnPath(e, { platform: plat, agentDirs: PX_DIRS, fallback: '/fb' })) === JSON.stringify(released(e, PX_DIRS, '/fb')));
+  ok(posixSame('linux') && posixSame('darwin'), 'a POSIX machine (linux, darwin): the env is byte for byte the release\'s, PATH and every other key, over five shapes and the fallback', shapes.map((e) => withSpawnPath(e, { platform: 'linux', agentDirs: PX_DIRS, fallback: '/fb' }).PATH));
+  // the wiring: spawnEnv builds the agent's folders with its own path module (no POSIX folder on win32) and returns withSpawnPath
+  ok(/function spawnEnv\(extra\) \{\n  const merged = \{ \.\.\.daemonEnv\(process\.env\), \.\.\.\(extra \|\| \{\}\) \};\n[^]*?  const agentDirs = \[path\.dirname\(process\.execPath\), path\.join\(os\.homedir\(\), '\.local', 'bin'\), \.\.\.\(process\.platform === 'win32' \? \[\] : \['\/opt\/homebrew\/bin', '\/usr\/local\/bin', '\/usr\/bin', '\/bin'\]\)\];\n  return withSpawnPath\(merged, \{ platform: process\.platform, agentDirs, fallback: process\.env\.PATH \}\);[^\n]*\n\}/.test(AD) && !/cur\.split\(':'\)/.test(AD),
+    'WIRING: spawnEnv (src/agentd/agentd.js) builds the release\'s agent folders (no POSIX folder on win32) and returns withSpawnPath over its merge with this process\'s platform; the release\'s colon split is gone');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

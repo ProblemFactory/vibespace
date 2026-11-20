@@ -13109,6 +13109,19 @@ display's DISPLAY / XAUTHORITY (chosen as before); the remote re-adopt (src/serv
 Gates: test-agent-env ④–⑥ (the door, six real ssh roads with a fake ssh, a REAL ControlMaster on a private sshd),
 test-mount-providers ⑦, test-tailscale-dns, test-architecture §93 (SSH ROADS, DERIVED, ENV_FUNCS + 12 mutants).
 
+**The spawn PATH (B-3d06)**: `withSpawnPath(env, { platform, agentDirs, fallback })` joins the agent's own folders to the env's
+PATH — spawnEnv (src/agentd/agentd.js) builds them with its own path module: the agent's node dir and ~/.local/bin, and on a POSIX
+machine /opt/homebrew/bin, /usr/local/bin, /usr/bin, /bin — split and joined by the platform's OWN separator (';' on win32, ':'
+elsewhere), on the key the env spells (Windows keeps `Path`; ONE key, the later — an explicit extra — wins). WHERE: in FRONT on a
+POSIX machine (the release's order, byte for byte); on Windows AFTER the person's PATH, each only when the PATH lacks it (compared
+ignoring case and a trailing backslash) — the coordinator's ruling: the person's PATH is the truth for where a program is, and the
+installer's private Node in front would change what node / npm / npx mean in the person's own terminals. The release split a
+Windows PATH on its drive colons: one garbled first entry that swallowed the agent's folders and the person's first PATH folder (a
+program «not found»; with Git's usr\bin first, the hello's sh probe found no shell and the hub refused a start). stream-screen's
+ffmpeg search reads the spawn env's PATH by either spelling. The agent's OWN programs that still go through PATH on a paired
+machine (the usage scanner's old-daemon fallback, the hook register's `$VS_NODE`, the tools' `#!/usr/bin/env node`) are named in
+the row's census. READ BY THE CODE, NOT MEASURED on a real Windows machine: none runs in our gates.
+
 ### src/key-file.js (PURE) — THE KEY-FILE LAW (lane key-file-law-stores, .269; credential class)
 
 ONE rule for every key store under data/: `loadOrMintKey({ readKey, mintKey, hasCiphertext, parse })` →

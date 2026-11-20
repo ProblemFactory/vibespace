@@ -110,6 +110,31 @@ function agentEnv(base, { keep = AGENT_ENV_KEEP, drop = [] } = {}) {
  *  spawn is merged over: the agent rule plus the daemon tier's own names. */
 function daemonEnv(base, { drop = [] } = {}) { return agentEnv(base, { keep: DAEMON_ENV_KEEP, drop }); }
 
+/** B-3d06: the PATH a device child is born with — the agent's own folders (`agentDirs`: its node dir, ~/.local/bin, and on a POSIX
+ *  machine its usual bin folders; src/agentd/agentd.js spawnEnv builds them with its own path module) joined to the env's PATH,
+ *  split and joined by THE PLATFORM'S OWN separator (';' on win32, ':' elsewhere: a Windows PATH split on its drive colons became
+ *  one garbled first entry), on the key the env spells (Windows keeps `Path`; ONE key, never two that differ by case — the later,
+ *  an explicit extra, wins). WHERE they go: in FRONT on a POSIX machine (the release's order, byte for byte); on Windows AFTER the
+ *  person's PATH (主开发's ruling r128: the person's PATH is the truth for where a program is — the installer's private Node in
+ *  front would change what node / npm / npx mean in the person's own terminals and projects), each only when the PATH lacks it,
+ *  compared as Windows compares (case and a trailing backslash ignored). PURE: the platform is handed in; `fallback` is the PATH
+ *  used when the env carries none. */
+function withSpawnPath(env, { platform, agentDirs = [], fallback = '' } = {}) {
+  const win = platform === 'win32', sep = win ? ';' : ':';
+  const same = win ? (x) => String(x).replace(/[\\/]+$/, '').toLowerCase() : (x) => x;
+  const out = { ...env };
+  const keys = Object.keys(out).filter((k) => (win ? k.toUpperCase() === 'PATH' : k === 'PATH'));
+  const key = keys.length ? keys[keys.length - 1] : 'PATH';
+  const cur = String(out[key] || fallback || '');
+  for (const k of keys) if (k !== key) delete out[k];
+  const parts = cur.split(sep).filter(Boolean);
+  const have = new Set(parts.map(same));
+  if (win) { for (const d of agentDirs) if (d && !have.has(same(d))) { parts.push(d); have.add(same(d)); } }
+  else for (let i = agentDirs.length - 1; i >= 0; i--) { const d = agentDirs[i]; if (d && !have.has(same(d))) { parts.unshift(d); have.add(same(d)); } }
+  out[key] = parts.join(sep);
+  return out;
+}
+
 /** What every service keeps from `base` (+ every LC_*). DISPLAY / XAUTHORITY / DBUS_SESSION_BUS_ADDRESS are NOT here:
  *  the hub's own would point the child at another display or bus — the caller ADDS the ones its child needs. */
 const SERVICE_ENV_KEEP = Object.freeze(['PATH', 'HOME', 'LANG', 'TMPDIR', 'XDG_RUNTIME_DIR', 'TERM']);
@@ -151,4 +176,4 @@ function serviceEnv(base, { keep = [], add = {}, egress = false } = {}) {
   return out;
 }
 
-module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, SERVICE_ENV_KEEP, SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP, SECRET_SHAPE, agentEnv, daemonEnv, serviceEnv };
+module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, SERVICE_ENV_KEEP, SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP, SECRET_SHAPE, agentEnv, daemonEnv, serviceEnv, withSpawnPath };
