@@ -102,6 +102,13 @@ console.log('③ the producers carry code + params');
   ok(same(MW.errorBody(new Error('host not found')), { error: 'host not found', code: 'host_not_found', params: {} }) && same(MW.errorBody(new Error(slowW)), { error: slowW, code: 'device_link_slow', params: { s: '10' } })
     && same(MW.codeOfWords(MW.wordsFor('mp_no_permission', { mp: '/m', owner: 'u' })), { code: 'mp_no_permission', params: { mp: '/m', owner: 'u' } }) && MW.codeOfWords('rclone: Failed to create file system') === null,
     '③ a sentence of ours thrown with NO code (src/hosts.js\'s «host not found» and slow device link — their error contract is other roads\' too) is found by its WORDS, its holes read back as params; tool text is not');   // stale-pins: kept — the registry's runtime words
+  // B-2ca0's two jump-host refusals (src/hosts.js jumpArgsOf — every ssh road, a machine-mount's too): read from the LIVE source,
+  // the machine's name filled as the code fills it; each is found by its words with the name read back, and a changed word is not
+  const jumpT = [...read('src/hosts.js').matchAll(/throw new Error\(`("\$\{h\.name \|\| h\.host\}": [^`]*)`\);/g)].map((m) => m[1].replace('${h.name || h.host}', '{name}'));
+  const jumpE = jumpT.map((s) => MW.errorBody(new Error(s.replace('{name}', 'box-1'))));
+  ok(jumpT.length === 2 && same(jumpE.map((b) => b.code), ['jump_host_form', 'jump_target_chars']) && jumpE.every((b) => same(b.params, { name: 'box-1' })) && jumpT.every((s, i) => MW.WORDS[jumpE[i].code] === s)
+    && MW.codeOfWords(jumpT[0].replace('{name}', 'box-1').replace('add the machine', 'add it')) === null,
+    '③ the jump host\'s two refusals (src/hosts.js, B-2ca0 — every ssh road, a machine-mount\'s too) are found by their WORDS, the machine\'s name read back; a changed word is not', { jumpT, jumpE });
   const dmSrc = read('src/device-mount.js');
   ok(/refusal\('unmount_hung', \{ mountpoint, s: Math\.round\(ms \/ 1000\) \}\)/.test(dmSrc) && /refusal\('serve_folder_failed'/.test(dmSrc) && /refusal\(rcGone \? 'webdav_mount_exited' : 'webdav_mount_not_up'/.test(dmSrc),
     '③ device-mount: the hung release, serve-folder and the webdav mount refuse by code');

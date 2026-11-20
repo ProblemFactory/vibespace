@@ -2696,6 +2696,8 @@ export default {
   "this folder did not answer when checked — nothing was added; try again, or pick another folder": "这个文件夹在检查时没有回应——什么都没有添加；请重试，或换一个文件夹",
   "host not found": "找不到该机器",
   "device link not responding within {s}s — it may be flapping; reconnection keeps retrying in the background, try again shortly": "设备链路 {s} 秒内没有响应——可能时断时续；后台会持续重连，请稍后再试",
+  "\"{name}\": its jump host is not one [user@]host[:port] — add the machine again": "“{name}”：它的跳板机不是一个 [user@]host[:port] 形式的地址——请重新添加这台机器",
+  "\"{name}\": a machine behind a jump host has an address of plain host characters — add the machine again": "“{name}”：经跳板机连接的机器，地址只能用普通的主机名字符——请重新添加这台机器",
   "the storage did not connect": "存储没有连上",
   "No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'": "没有权限创建挂载位置 {mp}——请选一个可写的位置，或先自己创建：sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'",
   "The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} '{mp}'": "挂载位置 {mp} 已存在，但 VibeSpace 无法写入——请修正所有者：sudo chown {owner} '{mp}'",

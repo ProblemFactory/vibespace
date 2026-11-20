@@ -2696,6 +2696,8 @@ export default {
   "this folder did not answer when checked — nothing was added; try again, or pick another folder": "このフォルダーは確認時に応答しませんでした — 何も追加していません。もう一度試すか、別のフォルダーを選んでください",
   "host not found": "マシンが見つかりません",
   "device link not responding within {s}s — it may be flapping; reconnection keeps retrying in the background, try again shortly": "デバイスのリンクが {s} 秒以内に応答しません — 不安定な可能性があります。バックグラウンドで再接続を続けているので、少し待って再試行してください",
+  "\"{name}\": its jump host is not one [user@]host[:port] — add the machine again": "「{name}」：踏み台ホストが [user@]host[:port] の形ではありません — マシンを追加し直してください",
+  "\"{name}\": a machine behind a jump host has an address of plain host characters — add the machine again": "「{name}」：踏み台ホスト経由のマシンのアドレスは、ホスト名に使える文字だけにしてください — マシンを追加し直してください",
   "the storage did not connect": "ストレージに接続できませんでした",
   "No permission to create the mount point {mp} — pick a writable location, or create it yourself first: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'": "マウント先 {mp} を作成する権限がありません — 書き込める場所を選ぶか、先に自分で作成してください: sudo mkdir -p '{mp}' && sudo chown {owner} '{mp}'",
   "The mount point {mp} exists but is not writable by VibeSpace — fix ownership: sudo chown {owner} '{mp}'": "マウント先 {mp} はありますが VibeSpace から書き込めません — 所有者を直してください: sudo chown {owner} '{mp}'",

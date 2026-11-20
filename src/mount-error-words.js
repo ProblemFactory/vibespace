@@ -43,6 +43,9 @@ const WORDS = Object.freeze({
   // ── the machine registry, on the mount roads (src/hosts.js) ──
   host_not_found: i18nKey('host not found'),
   device_link_slow: i18nKey('device link not responding within {s}s — it may be flapping; reconnection keeps retrying in the background, try again shortly'),
+  // B-2ca0's two jump-host refusals (jumpArgsOf) run on every ssh road — a machine-mount's too; found by their words
+  jump_host_form: i18nKey('"{name}": its jump host is not one [user@]host[:port] — add the machine again'),
+  jump_target_chars: i18nKey('"{name}": a machine behind a jump host has an address of plain host characters — add the machine again'),
   // ── the device side of a pull (src/device-mount.js) ──
   unmount_hung: i18nKey('could not release the folder {mountpoint} — its unmount did not answer in {s} s'),
   serve_folder_failed: i18nKey('device serve-folder failed: {detail}'),
