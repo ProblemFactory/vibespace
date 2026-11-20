@@ -292,6 +292,7 @@ function createInjector({ platform = process.platform, spawn = null, env = proce
     step({ t: 'spawn' });
     me.on('error', () => { if (child === me) { child = null; step({ t: 'gone' }); settleAll('err spawn 0'); } });
     me.on('exit', () => { if (child === me) { child = null; step({ t: 'gone' }); settleAll('err exited 0'); } });
+    if (!me.stdin || !me.stdout) return false;   // B-147f: a start that failed at once has no pipes — its end is said by the listener above
     me.stdin.on('error', () => { });
     me.stdout.setEncoding('utf8');
     me.stdout.on('data', (d) => {

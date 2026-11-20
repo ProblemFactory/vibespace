@@ -45,15 +45,21 @@ function repointCurrent(fsx, { root, dir, platform = process.platform }, pathx =
 // code, which spawns before it lets go — only the new bundle's retry can save that hop). The singleton lock stays the
 // authority: a retry happens only while the lock file names THIS pid, so a genuine second instance (refused at the lock
 // long before it listens) never waits here. `timers` / `now` are injected so the win32-shaped test runs on any machine.
-function handOver({ server, spawnNext, exit, log = () => {}, waitMs = 1500, timers = { setTimeout, clearTimeout } }) {
+function handOver({ server, spawnNext, exit, stay = null, log = () => {}, waitMs = 1500, timers = { setTimeout, clearTimeout } }) {
   let done = false;
   const go = (line) => {
     if (done) return; done = true;
     log(line);
-    // B-147f: a successor that did not start (spawnNext answers false) ends this daemon NON-ZERO and says so — its supervisor
-    // (systemd Restart=always, launchd KeepAlive) brings the installed bundle back; a silent exit 0 left no agent
-    let started = true;
-    try { started = spawnNext() !== false; } finally { if (!started) log('upgrade hand-over: the successor did not start — exiting non-zero for the supervisor'); exit(started ? 0 : 75); }
+    // B-147f: spawnNext answers whether the successor STARTED (a throw is one that did not, said). Started ⇒ this daemon exits as
+    // before. NOT started (a full file table, the node binary gone) ⇒ THIS daemon STAYS — `stay` takes its lock and its socket
+    // again: an exit here, of any code, left the machine with NO agent where nothing restarts it (a Windows logon task, a bare
+    // start) and a restart loop's gap where something does. Only a stay that fails ends it, non-zero (75) for a supervisor
+    let started = false;
+    try { started = spawnNext() !== false; } catch (e) { log(`upgrade hand-over: the successor's start threw (${(e && e.message) || e})`); }
+    if (started) { exit(0); return; }
+    log('upgrade hand-over: the successor did not start — this daemon stays');
+    if (typeof stay === 'function') { try { stay(); return; } catch (e) { log(`upgrade hand-over: it could not stay (${(e && e.message) || e})`); } }
+    exit(75);
   };
   const t = timers.setTimeout(() => go(`upgrade hand-over: the listener did not close within ${waitMs} ms — starting the successor anyway (it retries a busy address)`), waitMs);
   try { server.close(() => { timers.clearTimeout(t); go('upgrade hand-over: listener closed — starting the successor'); }); }

@@ -618,6 +618,7 @@ function startXServer({ bin, binPath, authFile, geometry = '1280x800', depth = 2
     spawned.catch((e) => done(reject, e));
     if (!child) return;
     child.once('exit', (code, signal) => done(reject, namedError('x-exited', `${bin} exited (${signal || `code ${code}`}) before reporting a display`)));
+    if (!child.stdio || !child.stdio[3]) return;   // B-147f: a start that failed at once has no stdio — `spawned` rejects in its own words
     let buf = '';
     child.stdio[3].on('data', (b) => {
       buf += b.toString('utf8');
@@ -724,6 +725,7 @@ function startXpra({ binPath, port, dir, env, logFd = 'ignore', deadlineMs = 150
     spawned.catch((e) => done(reject, e));
     if (!child) return;
     child.once('exit', (code, signal) => done(reject, namedError('x-exited', `xpra exited (${signal || `code ${code}`}) before reporting a display — see xpra.log in the app dir`)));
+    if (!child.stdio || !child.stdio[3]) return;   // B-147f: a start that failed at once has no stdio — `spawned` rejects in its own words
     let buf = '';
     child.stdio[3].on('data', (b) => {
       buf += b.toString('utf8');

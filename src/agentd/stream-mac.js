@@ -382,6 +382,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       bound.unref?.();
       c.on('exit', () => clearTimeout(bound));
       let buf = '';
+      if (!c.stderr || !c.stdout) return;   // B-147f: a start that failed at once has no pipes — its listener says the end
       c.stderr.setEncoding('utf8');
       c.stderr.on('data', (d) => { if (c !== child) return; buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i).trim(); buf = buf.slice(i + 1); if (l) onLine(l); } if (buf.length > 65536) buf = ''; });
       const r = SP.flvReader();

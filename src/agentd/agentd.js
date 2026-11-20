@@ -774,12 +774,15 @@ const WATCH = { fs, log: (m) => log(m), said: new Set() };
 // original flag); the successor is born sanitized (src/agent-env.js) with the caller's own names on top.
 function startSuccessor(argv, env) {
   const { spawn } = require('child_process');
-  const child = spawn(process.execPath, argv, {
-    // windowsHide (lane device-upgrade-stuck): a DETACHED child on Windows gets its own console window — a
-    // visible black window whose close kills the daemon; the installer starts it hidden, so must the re-exec
-    detached: true, stdio: 'ignore', windowsHide: true,
-    env: { ...daemonEnv(process.env), ...env },
-  });
+  let child;
+  try {
+    child = spawn(process.execPath, argv, {
+      // windowsHide (lane device-upgrade-stuck): a DETACHED child on Windows gets its own console window — a
+      // visible black window whose close kills the daemon; the installer starts it hidden, so must the re-exec
+      detached: true, stdio: 'ignore', windowsHide: true,
+      env: { ...daemonEnv(process.env), ...env },
+    });
+  } catch (e) { log(`the successor could not be started: ${(e && e.message) || e}`); return false; }   // B-147f: a throw too is a successor that did not start
   // B-147f: the error listener at once — a start that fails (a full file table: EMFILE / ENFILE, EAGAIN, the node binary gone)
   // queues its error for the next tick; unheard it ended this daemon with no successor. → whether the successor STARTED (a pid):
   // the caller exits only for a successor that exists
@@ -1141,7 +1144,12 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
         setTimeout(() => {
           // lane win-upgrade-pipe: FREE THE ADDRESS, THEN START THE SUCCESSOR (src/agentd/reexec.js handOver) — on Windows
           // SOCK is a named pipe no unlink frees; the successor's listen died EADDRINUSE while this process still held it
-          handOver({ server, log, exit: exitDaemon, spawnNext: () => {
+          handOver({ server, log, exit: exitDaemon, stay: () => {
+            // B-147f: the successor did not start — THIS daemon stays: its lock and its socket taken again (the upgrade's files stay
+            // in place: `current` names the new bundle, so the next start of any kind runs it; the hub sees the old version and asks again)
+            if (!acquireSingleton()) throw new Error('the singleton lock is another agent\'s');
+            listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: (e) => { log('server error: ' + e.message); process.exit(1); }, onListening: () => { try { fs.chmodSync(SOCK, 0o600); } catch { } log(`upgrade hand-over: the successor did not start — listening again on ${SOCK}`); } });
+          }, spawnNext: () => {
             try { fs.unlinkSync(LOCK); } catch { }
             try { fs.unlinkSync(SOCK); } catch { }
             // The re-exec is the one moment a RUNNING daemon's environ can be
@@ -1384,17 +1392,19 @@ const pipeSessions = {
     // the normal exit sentinel so the wrapper finalizes instead of hanging.
     // B-147f: and it comes FIRST — the meta write below opens a file on the very table that failed the start (a full table):
     // it threw before the listener was attached, and the queued error then ended the daemon
+    // its end in node's OWN words (the error's message), written ONCE — the mark set only when the sentinel LANDED (a full table
+    // can refuse the write too: one retry a beat later, when the handles below are closed)
     let endSaid = false;
-    const sayEnd = (why) => {
-      if (endSaid) return; endSaid = true;
-      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: 127, spawnError: why }) + '\n'); } catch { }
+    const sayEnd = (why, retry = true) => {
+      if (endSaid) return;
+      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: 127, spawnError: why }) + '\n'); endSaid = true; }
+      catch { if (retry) { setTimeout(() => sayEnd(why, false), 250).unref?.(); } return; }
       try { const cur = this._meta(sid) || {}; fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: 127, exitedAt: Date.now() })); } catch { }
     };
     child.on('error', (e) => { sayEnd(String(e && e.message || e)); log(`pipe-session ${sid} spawn error: ${e && e.message}`); });
     child.unref();
-    if (!Number.isInteger(child.pid) || child.pid <= 0) {   // the start never happened: nothing to own; its handles closed, its end said now (the table has room again)
+    if (!Number.isInteger(child.pid) || child.pid <= 0) {   // the start never happened: nothing to own; its handles closed (the listener above says its end)
       for (const fd of [inFd, outFd, errFd]) { try { fs.closeSync(fd); } catch { } }
-      sayEnd('the program could not be started (the device\'s file table is full, or it could not be run)');
       return { pid: null, existing: false };
     }
     this._own.add(child.pid);

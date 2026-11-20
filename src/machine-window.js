@@ -359,6 +359,8 @@ function runWindowTrack({ platform, params, spawn, env, mac = null, onAnswer = (
     let c;
     try { c = spawn(how.argv[0], how.argv.slice(1), { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { emit({ state: 'error', code: 'spawn_failed', error: String((e && e.message) || e) }); return; }
     child = c;
+    c.on('error', (e) => { if (child === c) { child = null; emit({ state: 'error', code: 'spawn_failed', error: String((e && e.message) || e) }); end(); } });   // B-147f: the listener first (a start that failed at once has no pipes)
+    if (!c.stdout || !c.stderr) return;   // its end is said by the listener above
     c.stdout.setEncoding?.('utf8'); c.stderr.setEncoding?.('utf8');
     c.stderr.on('data', (d) => { if (err.length < 4096) err += String(d); });
     c.stdout.on('data', (d) => {
@@ -380,7 +382,6 @@ function runWindowTrack({ platform, params, spawn, env, mac = null, onAnswer = (
         if (stopped) return;
       }
     });
-    c.on('error', (e) => { if (child === c) { child = null; emit({ state: 'error', code: 'spawn_failed', error: String((e && e.message) || e) }); end(); } });
     c.on('close', (code) => {
       if (child !== c) return;
       child = null;

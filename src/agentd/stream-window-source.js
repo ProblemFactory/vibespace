@@ -166,11 +166,11 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
     // ── the encoder: one ffmpeg per frame size (and per bitrate) ──
     function startEncoder(w, h) {
       const c = spawn(plan.ffmpeg, SP.windowEncodeArgv(plan, { w, h, kbps: rate.kbps }), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('encoder_exited', `encoder: ${e && (e.code || e.message)}`); });   // B-147f: the listener first — before anything reads a pipe
       const etail = [];
       c.asked = false; c.role = 'encoder'; procs.add(c); enc = c; encSize = { w, h }; encAus = 0; encAt = now();
       const clock = encClock = [];
-      c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { etail.push(l.trim().slice(0, 200)); if (etail.length > TAIL) etail.shift(); } });
-      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('encoder_exited', `encoder: ${e && (e.code || e.message)}`); });
+      if (c.stderr) c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { etail.push(l.trim().slice(0, 200)); if (etail.length > TAIL) etail.shift(); } });
       c.on('exit', (code, sig) => { procs.delete(c); if (!c.asked && !stopped) finish('encoder_exited', `encoder exit ${code == null ? sig : code}${etail.length ? ': ' + etail[etail.length - 1] : ''}`); });
       c.stdin.on('error', () => { /* the encoder died: its exit says so */ });
       const r = SP.flvReader();
@@ -264,6 +264,7 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
     }
     function startHelper() {
       const c = spawn(plan.helper, SP.wgcCaptureArgv(plan), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('helper_missing', `the window helper did not start (${e && (e.code || e.message)})`); });   // B-147f: the listener first
       c.asked = false; c.role = 'helper'; procs.add(c); cap = c;
       let rest = '';
       c.stderr.on('data', (d) => {
@@ -272,7 +273,6 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
       });
       c.stdout.on('data', onData);
       c.stdin.on('error', () => { });
-      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('helper_missing', `the window helper did not start (${e && (e.code || e.message)})`); });
       c.on('exit', (code, sig) => {
         procs.delete(c);
         if (c.asked || stopped) return;

@@ -75,17 +75,22 @@ function createSound({ platform = process.platform, spawn, env, log = () => { },
       enc.stdin.on('error', () => { });
       enc.stderr.on('data', (d) => { const l = String(d).trim().split(/\r?\n/).pop(); if (l) { tail.push(l.slice(0, 200)); if (tail.length > 3) tail.shift(); } });
       enc.stdin.write(Buffer.from(SM.soundWavHeader()));
-      const hc = r.helper = spawn(h.exe, ['loopback'], { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
-      hc.stdin.on('error', () => { });
-      hc.stdout.pipe(enc.stdin);
+      const hc = spawn(h.exe, ['loopback'], { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
+      let hcErr = null;
+      hc.on('error', (e) => { hcErr = e; });   // B-147f: heard at once (the promise below answers it in its own words); its pipes guarded
+      r.helper = hc;
+      if (hc.stdin) hc.stdin.on('error', () => { });
+      if (hc.stdout) hc.stdout.pipe(enc.stdin);
       run = r;
       return new Promise((resolve) => {
         let said = false, buf = '';
         const answer = (v) => { if (said) return; said = true; clearTimeout(timer); resolve(v); };
         const timer = setTimeout(() => answer(named('capture_failed', `the sound did not start within ${SM.SOUND_LIMITS.startMs / 1000} s${tail.length ? ` (${tail[tail.length - 1]})` : ''}`)), SM.SOUND_LIMITS.startMs);
         timer.unref?.();
-        hc.on('error', (e) => { answer(named('helper_missing', `the sound helper did not run (${(e && (e.code || e.message)) || e})`)); });
-        hc.stderr.on('data', (d) => {
+        const helperMissing = (e) => answer(named('helper_missing', `the sound helper did not run (${(e && (e.code || e.message)) || e})`));
+        if (hcErr) helperMissing(hcErr);
+        hc.on('error', helperMissing);
+        if (hc.stderr) hc.stderr.on('data', (d) => {
           buf += String(d); const lines = buf.split(/\r?\n/); buf = lines.pop();
           for (const l of lines) {
             let o = null; try { o = JSON.parse(l); } catch { continue; }

@@ -230,9 +230,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       const finish = (r) => { if (done) return; done = true; clearTimeout(timer); if (c && c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } resolve(r); };
       const timer = setTimeout(() => finish(named('still_timeout', `the display handed no picture within ${STILL_MS / 1000} s`)), STILL_MS);
       try { c = spawn(plan.ffmpeg, mapped ? SP.stillHalfArgv(plan) : SP.stillArgv(plan), { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { finish(named('still_failed', `the capture could not start (${(e && (e.code || e.message)) || e})`)); return; }
-      c.stdout.on('data', (d) => { n += d.length; if (n > want) { finish(named('still_failed', 'the capture handed more bytes than one picture')); return; } chunks.push(d); });
-      c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
-      c.on('error', (e) => finish(named('still_failed', `the capture could not start (${(e && (e.code || e.message)) || e})`)));
+      c.on('error', (e) => finish(named('still_failed', `the capture could not start (${(e && (e.code || e.message)) || e})`)));   // B-147f: the listener first (a queued error is always heard)
+      if (c.stdout) c.stdout.on('data', (d) => { n += d.length; if (n > want) { finish(named('still_failed', 'the capture handed more bytes than one picture')); return; } chunks.push(d); });
+      if (c.stderr) c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
       c.on('close', (code) => {
         if (done) return;
         const buf = Buffer.concat(chunks);
@@ -288,12 +288,12 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     /** ONE ffmpeg: its stderr tail kept, its unasked exit = the session's end by name. */
     function ffmpeg(args, role, { stdin = 'ignore' } = {}) {
       const c = spawn(plan.ffmpeg, args, { env, windowsHide: true, stdio: [stdin, 'pipe', 'pipe'] });
+      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('capture_failed', `${role}: ${e && (e.code || e.message)}`); });   // B-147f: the listener first — before anything reads a pipe
       const tail = [];
       c.asked = false;
       procs.add(c);
       unthrottle(c.pid); // lane stream-hdr-passthrough → stream-sdr-ecoqos: every road's ffmpegs
-      c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
-      c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('capture_failed', `${role}: ${e && (e.code || e.message)}`); });
+      if (c.stderr) c.stderr.on('data', (d) => { for (const l of String(d).split(/\r?\n/)) if (l.trim()) { tail.push(l.trim().slice(0, 200)); if (tail.length > TAIL) tail.shift(); } });
       c.on('exit', (code, sig) => {
         procs.delete(c);
         if (c.asked || stopped) return;
