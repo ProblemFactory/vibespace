@@ -2352,6 +2352,10 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     // its record back on disk — is no crash a process can make. Restored at this block's end
     const W8 = require('../src/store-writer.js').storeWriter(), gen8 = new Map(), afterLanding8 = W8.afterLanding;
     W8.afterLanding = function (file, step, ...rest) { const g = gen8.get(file) || 0; return afterLanding8.call(this, file, () => ((gen8.get(file) || 0) === g ? step() : undefined), ...rest); };
+    // (the round's should: the writer is put back in a FINALLY — a throw inside the block never leaves the wrapper on the process writer.
+    // Note: the crash stand-in's forget still resolves the dead keeper's waiters and ride promises as «landed» (store-writer forget);
+    // no scene reads them, and the generation makes their steps do nothing)
+    try {
     const judge8 = (id, who, truth, got) => { const diffs = []; for (const [k2, want] of Object.entries(truth)) { const g = got[k2]; let pass2; if (want instanceof RegExp) pass2 = typeof g === 'string' && want.test(g); else pass2 = JSON.stringify(g) === JSON.stringify(want); if (!pass2) diffs.push(`${k2}: truth ${String(want).slice(0, 90)} | product ${JSON.stringify(g === undefined ? null : g).slice(0, 200)}`); } TABLE8.push({ id, who, agree: !diffs.length, diffs }); if (diffs.length) console.log(`    DISAGREE ${id} — ${diffs.join(' / ')}`); return !diffs.length; };
     const MK8 = B.LINEAGE_MARKER; const tokOf8 = (dir) => { try { return fs.readFileSync(path.join(dir, MK8), 'utf8').trim(); } catch { return null; } };
     const entry8 = (kk, dir) => (kk._reg().dirHosts || {})[dir] || null;
@@ -2568,8 +2572,8 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
       ok(noSave !== ksrc8, '④k control setup: the move\'s save is where the control cuts');
       const c19 = await runR8(M.load('src/server/browser-keeper.js', noSave, 'move-never-saves'), 'ctl19', ['S76']);
       ok(c19.S76.crashClean === true && c19.S76.diskNamesNew === false && c19.S76.bootPruned === true && c19.S76.err === 'profile_locked' && (isRoot || (c19.S76b.refusedCode === null && c19.S76b.stillThere === false)), '④k CONTROL 19 (verify r9): a keeper whose move re-keys in memory only (r8) loses the lineage at a crash after a Forget — pruned at the next boot, the adopted-back directory refused by name — and an unwritable data/ refuses nothing (moved, the disk names the old path): S76 / S76b catch it', { d: c19.S76.diskNamesNew, p: c19.S76.bootPruned, e: c19.S76.err, o: c19.S76.owedAtCrash, c: c19.S76.crashClean, b: isRoot ? null : [c19.S76b.refusedCode, c19.S76b.stillThere] }); }
-    W8.afterLanding = afterLanding8;   // (r284: the writer as it was — the generations end with this block)
     // (verify r9 (⑤): the lineage ledger has no product reader — a git grep over src/, data/bin, server.js and a pin of src/server/browser-keeper.js: MOVED to the fast scripts/test-browser-share-model-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
+    } finally { W8.afterLanding = afterLanding8; }   // (r284: the writer as it was — the generations end with this block)
   }
 }
 for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 44 })) ok(x.pass, x.name + (x.pass ? '' : ' — ' + x.detail));

@@ -216,7 +216,7 @@ try {
     // (lane lg-store-writes, 主开发 r221: a run's end is RECORDED first and its For-you item rides that record's landing — a kill
     // first re-judges the end at boot and says it once) the leg waits for WHAT HAPPENED — the item itself, bounded, red by name
     await until(() => toldFor(kids[0]) && toldFor(kids[2]), 10000);
-    try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // every end LANDED — so the control's silence below is a silence, not a ride still out
+    { const r = require('../src/store-writer.js').storeWriter().flushSync([C.file, C.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the jobs store did not land before the silence control: ${JSON.stringify(r.left)}`); }   // every end LANDED — so the control's silence below is a silence, not a ride still out (a write left owed is red by name, as 7e)
     ok(toldFor(kids[0]) && C.snapshot(made[0]).notifyUser === true, 'run --at … --notify-user (the CLI\'s body): the child\'s end tells the user, and the cron\'s own record says notifyUser=true', JSON.stringify(notifications.slice(before)));
     ok(!toldFor(kids[1]) && C.snapshot(made[1]).notifyUser === false, 'CONTROL: without the flag the child ends silently for the user, notifyUser=false');
     ok(toldFor(kids[2]) && C.snapshot(made[2]).notifyUser === true, 'an older CLI\'s body (the flag only inside action.task) is still honoured — and shown', JSON.stringify(made[2] && C.snapshot(made[2]).notifyUser));

@@ -573,7 +573,7 @@ console.log('§8 主开发 r221 (2026-11-20 14:20Z): a removed profile\'s login 
     'r221: while the storage HOLDS the removal\'s write, the profile\'s memory-only credential drops have RUN at the press (the login values gone while the write is still out) — what must match the disk waits for the landing, then runs once', r);
   const NOW_A = "    for (const fn of [...profileDropNowListeners]) { try { fn(id); } catch { /* best effort */ } }   // r221: a credential's MEMORY goes at the press — never behind the write\n";
   const rx = await dropScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, NOW_A, '', 'drop-now-cut'), 'drop-now-cut'), 'red');
-  ok(rx.during.now.length === 0, 'CONTROL (the tip\'s order — the memory drop behind the write, in a copy): the removed profile\'s login values are still in memory while the write is out (red)', rx.during);
+  ok(rx.during.now.length === 0 && JSON.stringify(rx.after.rides) === JSON.stringify([rx.id]), 'CONTROL (the tip\'s order — the memory drop behind the write, in a copy): the removed profile\'s login values are still in memory while the write is out (red) — and the copy still ran the scene (its landing\'s listeners fired once)', rx);
   const BDS = fs.readFileSync(path.join(ROOT, 'src/server/browser-dialogs.js'), 'utf8');
   ok(/const clearLoginMemory = \(profileId\) => \{ const pid = String\(profileId \|\| ''\); if \(pid\) clearProfileLoginFencesOnStop\(pid, watches\.get\(pid\)\); \};/.test(BDS) && /unsubDrops\.push\(keeper\.onProfileDropNow\(clearLoginMemory\)\)/.test(BDS),
     'r221: the login watch hands its MEMORY clear (clearProfileLoginFencesOnStop — the values, the one-time codes, the in-flight asks, the scrub names) to the keeper\'s at-the-press listeners (a pin: the watch needs a browser)');
@@ -587,11 +587,11 @@ console.log('§8 主开发 r221 (2026-11-20 14:20Z): a removed profile\'s login 
     const keeper = { onProfileDropNow: (fn) => { nowL.add(fn); return () => nowL.delete(fn); }, onProfileDrop: (fn) => { rideL.add(fn); return () => rideL.delete(fn); }, loginFenceStateOf: () => ({ fences: [] }) };
     const d = DMod.create({ keeper, log: quiet });
     const pid = 'bp-r346' + tag, out = {};
-    for (const road of ['ready-not-adopted', 'replaced']) {
+    for (const road of ['ready-not-adopted', 'replaced', 'removal']) {
       const tid = `T-r346-${tag}-${road}`;
       LFM.rememberFilledSecrets(tid, 0, [`a login value (${road})`], pid);
       const before = LFM.valuesForTarget(tid).length;
-      for (const fn of [...rideL]) fn(pid);   // the lease-tabs drop, as either road fires it
+      for (const fn of [...(road === 'removal' ? nowL : rideL)]) fn(pid);   // the lease-tabs drop, as either road fires it — or the removal's press (the at-the-press door)
       out[road] = { before, after: LFM.valuesForTarget(tid).length };
     }
     const doors = { now: nowL.size, ride: rideL.size };
@@ -599,11 +599,11 @@ console.log('§8 主开发 r221 (2026-11-20 14:20Z): a removed profile\'s login 
     return { ...out, doors, unsubscribed: nowL.size + rideL.size };
   };
   const dg = dlgScene(require(path.join(ROOT, 'src/server/browser-dialogs.js')), 'real');
-  ok(dg['ready-not-adopted'].before === 1 && dg['ready-not-adopted'].after === 0 && dg.replaced.before === 1 && dg.replaced.after === 0 && dg.doors.now === 1 && dg.doors.ride === 1 && dg.unsubscribed === 0,
+  ok(dg['ready-not-adopted'].before === 1 && dg['ready-not-adopted'].after === 0 && dg.replaced.before === 1 && dg.replaced.after === 0 && dg.removal.before === 1 && dg.removal.after === 0 && dg.doors.now === 1 && dg.doors.ride === 1 && dg.unsubscribed === 0,
     'r346: the dialogs\' clear hangs on BOTH doors — a profile\'s browser ready again and not adopted, and a browser replaced (the lease-tabs drop) clear its login values in memory; the removal clears them at the press; the watch\'s end lets both go', dg);
   const BOTH_A = "  if (keeper && typeof keeper.onProfileDrop === 'function') unsubDrops.push(keeper.onProfileDrop(clearLoginMemory));\n";
   const dgx = dlgScene(MJ.load('src/server/browser-dialogs.js', anchored(BDS, BOTH_A, '', 'drop-door-cut'), 'drop-door-cut'), 'red');
-  ok(dgx['ready-not-adopted'].after === 1 && dgx.replaced.after === 1, 'CONTROL (the tip\'s single subscription — the at-the-press door only, in a copy): a fresh browser not adopted and a replaced browser leave the profile\'s login values in memory after the keeper deleted its fence state (red)', dgx);
+  ok(dgx['ready-not-adopted'].after === 1 && dgx.replaced.after === 1 && dgx.removal.after === 0, 'CONTROL (the tip\'s single subscription — the at-the-press door only, in a copy): a fresh browser not adopted and a replaced browser leave the profile\'s login values in memory after the keeper deleted its fence state (red)', dgx);
   const KS8 = fs.readFileSync(path.join(ROOT, 'src/server/browser-keeper.js'), 'utf8');
   ok(/\(ev\.kind === 'browser-ready' && !ev\.adopted\)\)\) \{ dropLeaseTabs\(ev\.profileId\);/.test(KS8) && /if \(replaced\) \{ const n = dropLeaseTabs\(rec\.profileId\);/.test(KS8) && /function dropLeaseTabs\(profileId\) \{[\s\S]{0,700}for \(const fn of \[\.\.\.profileDropListeners\]\) \{ try \{ fn\(pid\); \}/.test(KS8),
     'r346: the keeper\'s two roads into the lease-tabs drop (a browser ready and not adopted; a replaced browser) fire the drop door the dialogs hang on (pins: the roads need a browser)');

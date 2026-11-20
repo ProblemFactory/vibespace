@@ -2011,8 +2011,11 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
 // ── ⑫ THE WRITER'S forget IS THE FILE OWNER'S REMOVAL, NEVER A DROP (主开发 r286) ──────────────────────────────────────────────
 // A step riding a write runs ONLY once that write LANDED, or when the file's OWNER removes the file (forget, then its unlink — its
 // riding steps are told «landed»: the record they waited for is the removal). A suite's crash stand-in that used forget as a drop
-// ran half a removal (r284); the census names the product's callers of the writer's forget — ONE today, the conversation's stdout
-// file unlinked next (src/server/session-stdout.js) — and a second caller is red by name
+// ran half a removal (r284); the census names the product's callers of the writer's forget — TWO today: the conversation's stdout
+// file unlinked next (src/server/session-stdout.js) and the usage cursors' settle (src/usage-history.js, a drop pinned safe below) —
+// and a third caller is red by name. WHAT IT CANNOT SEE (a mistake-guard over the product's text, not a proof): a writer handle that
+// reaches forget under a spelling it does not bind — a parameter (`(W) => W.forget(…)`), a deps object (`this.d.writer.forget(…)`),
+// a destructured or re-aliased name (`const { forget } = storeWriter()`, `const W2 = W`), or a handle stored on an object
 console.log('⑫ the writer\'s forget is the file owner\'s removal — a step riding a write runs only once that write landed, or the owner removes the file');
 {
   const { scratchDir } = await import('./scratch.mjs');
@@ -2057,6 +2060,49 @@ console.log('⑫ the writer\'s forget is the file owner\'s removal — a step ri
   const planted = new Map(files); planted.set('src/server/browser-keeper.js', files.get('src/server/browser-keeper.js') + '\nfunction zzDrop() { const W = writerOf(); W.forget(storeKey); }\n');
   const pc = forgetCensus(planted);
   ok(pc['src/server/browser-keeper.js'] === 1 && JSON.stringify(pc) !== JSON.stringify(FORGET_CALLERS), 'CONTROL (planted in a copy\'s text): a SECOND caller of the writer\'s forget — a drop of the registry\'s owed write — is red by name', pc);
+}
+
+// ── ⑬ EVERY REGISTRY SAVE OF THE BROWSER KEEPER HAS ITS SIDE (主开发's round w4izmdrbq, its should 3 — r284's point 3 as a census) ──
+// Each function of src/server/browser-keeper.js that saves the registry is named with its side:
+//   lands            — its result a later boot must find is ON DISK before the act replies (commitSync / saveNow / landNow / landedOrThrow;
+//                      a commit() in it is the owed rest)
+//   rides            — owed, and what cannot be undone rides its landing (a crash first brings the record back whole)
+//   owed-reply-waits — owed, but the reply that tells a person waits for the landing (whenLanded; a fill types nothing before its fence)
+//   owed             — owed, safe at a crash: a boot rebuilds it (leases, tabs, a browser's running state) or nobody needs it after it
+//   helper           — the save doors themselves
+// A NEW save without a stated side is red by name; a «lands» function that no longer lands is red by name
+console.log('⑬ every registry save of the browser keeper has its side (lands / rides / owed with its why)');
+{
+  const SIDES = {
+    ...Object.fromEntries(['batched', 'commit', 'commitSync', 'landNow', 'landedOrThrow', 'save', 'saveNow'].map((f) => [f, 'helper'])),
+    ...Object.fromEntries(['addSiteHint', 'attachStart', 'blocked', 'cardOnLanding', 'clearBlocked', 'copyPin', 'dropSiteHint', 'keepEgress', 'moveDirLineage', 'moveProxyPassword', 'newChild', 'proposeSiteReset', 'restorePin', 'setCap', 'setPin', 'start', 'startEphemeral', 'stepProposal', 'switchBackend', 'updateProfileNow', 'userStoppedDisplay', 'watchTabFor'].map((f) => [f, 'lands'])),
+    ...Object.fromEntries(['adoptScratch', 'clearPin', 'removeProfile'].map((f) => [f, 'rides'])),
+    ...Object.fromEntries(['createProfile', 'saveLoginFenceState'].map((f) => [f, 'owed-reply-waits'])),
+    ...Object.fromEntries(['adoptOrphan', 'agentTabAct', 'attach', 'boot', 'browse', 'closeHumanTab', 'closeLeaseSession', 'detach', 'dropChild', 'dropLeaseTabs', 'endHuman', 'ensureEphemeral', 'forgetOwnTab', 'freshDaemon', 'hangCause', 'healBrowser', 'humanRelease', 'humanTake', 'jobHandleFor', 'judgeEphemeral', 'keepTabRoots', 'leaseCdpUrl', 'mirrorLeaseInput', 'navigateHuman', 'noteAnswer', 'noteBuildMissing', 'noteEngineLive', 'noteOwnTab', 'notePermission', 'noteProposal', 'noteViewport', 'openInLease', 'orphanCensus', 'ownWindowAtAttach', 'pruneOwnTabs', 'rejudgeUnstable', 'releaseJobHandle', 'restartProfile', 'retireInSteps', 'shutdown', 'stampGroupCap', 'stop', 'streamPortFor', 'takeRebound', 'tell', 'tick', 'userTabAct'].map((f) => [f, 'owed'])),
+  };
+  const savesOf = (text) => {
+    const out = {}; let fn = null;
+    const DECL = /^  (?:async )?function ([A-Za-z0-9_$]+)\(|^  const ([A-Za-z0-9_$]+) = (?:async )?\(/;
+    const KINDS = { commitSync: /\bcommitSync\(\)/, saveNow: /\bsaveNow\(\)/, landNow: /\blandNow\(\)/, landedOrThrow: /\blandedOrThrow\(\)/, commit: /(?<![A-Za-z0-9_.$])commit\(\)/, save: /(?<![A-Za-z0-9_.$])save\(\)/ };
+    for (const l of text.split('\n')) {
+      const m = DECL.exec(l); if (m) fn = m[1] || m[2];
+      if (/^\s*\/\//.test(l)) continue;
+      for (const [k, re] of Object.entries(KINDS)) if (re.test(l)) (out[fn] = out[fn] || new Set()).add(k);
+    }
+    return out;
+  };
+  const judge = (text) => {
+    const found = savesOf(text), unnamed = Object.keys(found).filter((f) => !SIDES[f]).sort(), gone = Object.keys(SIDES).filter((f) => !found[f]).sort();
+    const notLanding = Object.keys(found).filter((f) => SIDES[f] === 'lands' && !['commitSync', 'saveNow', 'landNow', 'landedOrThrow'].some((k) => found[f].has(k))).sort();
+    return { n: Object.keys(found).length, unnamed, gone, notLanding };
+  };
+  const KSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  const kj = judge(KSRC);
+  ok(!kj.unnamed.length && !kj.gone.length && !kj.notLanding.length && kj.n >= 70, `⑬ every function of the keeper that saves the registry has its side (${kj.n}: ${Object.entries(Object.values(SIDES).reduce((a, v) => ((a[v] = (a[v] || 0) + 1), a), {})).map(([k, v]) => `${k} ${v}`).join(', ')}) — each «lands» one lands`, kj);
+  const kx = judge(KSRC + '\n  function zzNewAct(id) { reg.zz = id; commit(); }\n');
+  ok(JSON.stringify(kx.unnamed) === JSON.stringify(['zzNewAct']), 'CONTROL (planted in a copy\'s text): a NEW keeper save without a stated side is red by name', kx.unnamed);
+  const kl = judge(KSRC.replace(/^(  function setCap\([^\n]*\n)([\s\S]*?)\bcommitSync\(\)/m, '$1$2commit()'));
+  ok(kl.notLanding.includes('setCap'), 'CONTROL (planted): a «lands» act whose landing became a plain commit() is red by name', kl.notLanding);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
