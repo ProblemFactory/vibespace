@@ -285,7 +285,7 @@ try {
     ok(dg.attached && dg.written.length === 1 && /typed before its batch/.test(dg.written[0]) && !(dg.r && dg.r.code === 'not_chat'),
       `the door (the real send): a chat message to a survivor whose attach still waits attaches it and is written (${dg.written.length} line), never refused`, dg);
     ok(!dr.attached && dr.written.length === 0 && !!dr.r && dr.r.code === 'not_chat', `RED the door's ask taken away: «${dr.r && dr.r.error}», nothing written — the message lost`, dr);
-    ok(/async function handleMessage\(data\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(data && typeof data\.sessionId === 'string'\) \{ const s = activeSessions\.get\(data\.sessionId\); if \(s && !s\.pty && typeof s\._attachPending === 'function'\) s\._attachPending\(\); \}\n\s*switch \(data\.type\) \{/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')),
+    ok(/async function handleMessage\(data\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(data && typeof data\.sessionId === 'string' && activeSessions\) \{ const s = activeSessions\.get\(data\.sessionId\); if \(s && !s\.pty && typeof s\._attachPending === 'function'\) s\._attachPending\(\); \}\n\s*switch \(data\.type\) \{/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')),
       'the page\'s socket (src/ws-handler.js): every message naming a session asks its attach-at-first-use BEFORE the switch (its input, an interrupt, a resize, an attach) — pinned by text: the handler is not loaded here');
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }

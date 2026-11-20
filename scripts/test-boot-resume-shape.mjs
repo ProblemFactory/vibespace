@@ -60,7 +60,7 @@ const S = JSON.stringify;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const left = () => END_BY - Date.now();
 let failed = 0, passed = 0;
-const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : S(e)).slice(0, 1600) : ''}`); } };
+const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('check(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : S(e)).slice(0, 1600) : ''}`); } };
 
 // ── the guard: the machine said, a container or too little memory refused in one line ──
 const pid1 = (() => { try { return fs.readFileSync('/proc/1/comm', 'utf8').trim(); } catch { return '?'; } })();
