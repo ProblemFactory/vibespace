@@ -762,7 +762,7 @@ console.log('㉒ a floored delivery to an ENDED owner still owes its wake (place
     'a LIVE conversation that does not answer, two fires inside the floor: NO wake owed (it runs — its next turn carries both), nothing resumed', { lv, notifs: LR.jm.notifCount(Lv) });
 }
 
-console.log('㉑ a wake WAITING for the settle is never dropped by the park\'s hour bound, and ends as «running» when its conversation runs again (主开发 04:25Z: «the park\'s 60-minute bound can drop a waiting wake»)');
+console.log('㉓ a wake WAITING for the settle is never dropped by the park\'s hour bound, and ends as «running» when its conversation runs again (主开发 04:25Z: «the park\'s 60-minute bound can drop a waiting wake»)');
 {
   // ⑳'s road with the store held past the park's hour bound (RETRY_MAX_MS). The park is asked again for the conversation only by its
   // own TURN END (a person resumed it by hand — the person's roads never pass the gate):
