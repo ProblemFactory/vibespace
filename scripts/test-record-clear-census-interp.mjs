@@ -704,6 +704,9 @@ const I_RECV = {
   'src/browser-login.js|third.e': ['vault entry', 'a third web-login entry\'s clear name named in the merge\'s login_exists — never a record\'s words'],
   'src/routes/vault.js|req.query': ['caller', 'the person\'s own ?name= / ?site= / ?user= — the login and the site an add is asked about, handed to the web-login store'],
   'src/routes/vault.js|b': ['caller', 'the request body — the person\'s own login name, site and the name it signs in under there, or the two logins to merge, handed to the web-login store'],
+  // ALSO CURED (the train's own red at 7c30f13eb, met by this unit's heavy read — B-225b's page half): the held store's row in its
+  // «Start {what} empty?» dialog — `what` = storeWhatOf(file), the store's OWN fixed name (src/lib/store-held.js), never a record's words
+  'src/lib/store-held.js|row': ['held store', 'a held store\'s row: `what` is the store\'s own fixed name (storeWhatOf), its file the store\'s file name — never a record\'s words'],
 };
 // the per-site class of every record / carrier read: `file|sink|read` → [class, why]
 const I_SITES = {
