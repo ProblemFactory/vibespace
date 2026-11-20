@@ -8,6 +8,7 @@
 //   view(state, env)          → { status, kind, err?, tick } — what the line and the verdict say (env = the ranking's verdict for the
 //                               text: empty / resolved / path-like / missing, and whether the machine's home is known)
 //   keyOf(text, machine)      → the field's KEY: its text on its machine (a relative text's moving bases are the coordinator's LEFT row)
+//   askedOf(sent, reply)      → the probes a reply may mark ASKED (B-0f3d: only those sent and answered in time)
 // The events (each carries `cur` = keyOf(the box's text now, the machine now), and `now` = the clock):
 //   typed {soon?}        the person typed (debounced) or Tab completed (asked at once)
 //   set {commit, how}    a text SET from outside (a pick, a chip, set(), setDerived): asked at once (LAW 1)

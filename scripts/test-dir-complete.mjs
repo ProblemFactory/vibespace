@@ -172,7 +172,7 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
   const a = await ds.slice(ASK);
   ok('③b a probe hangs (a stale mount): the reply still LISTS what was typed (not partial), asks the text\'s OWN path inside its race (never named late), and names only the auxiliary probe late', a.partial === false && !!a.listing.dirs['~/work'] && seenOwn() && JSON.stringify(a.probesLate) === JSON.stringify(['~/work/investor-relations']), { partial: a.partial, probesLate: a.probesLate });
   seen.length = 0;
-  const b = await ds.slice({ ...ASK, text: '~/work/pay', own: '', probe: ['~/work/investor-relations', '~/work/investor-relations/测试'] });
+  const b = await ds.slice({ ...ASK, text: '~/work/pay', own: '', probe: ['~/work/investor-relations', '~/work/investor-relations/测试'], budgetMs: 450 });   // (nothing waits: a full budget, no timing luck)
   ok('③b …the next ask skips the late probe AND a path under it (a name row under the hung folder) — no worker held per keystroke — and names both late', !seen.some((x) => x.startsWith(IR)) && b.partial === false && ['~/work/investor-relations', '~/work/investor-relations/测试'].every((x) => (b.probesLate || []).includes(x)), { seen: [...seen], probesLate: b.probesLate });
   // the text's own path in the auxiliary batch (the shape before): named late with the hung probe — the field could not decide the text
   const M = mutantCopies('dir-complete-probe-old', REPO);
@@ -186,15 +186,29 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
   slowOpen && slowOpen(); slow = null;
   await sleep(100);   // the slow probe's answer lands (no budget waits on it)
   seen.length = 0;
-  const c2 = await ds2.slice({ ...ASK, own: '', probe: ['~/work/weekly-admin'] });
+  const c2 = await ds2.slice({ ...ASK, own: '', probe: ['~/work/weekly-admin'], budgetMs: 450 });
   ok('③b a SLOW probe (late, then answered): unmarked when it answers — the next ask probes it again and gets it in time', (c1.probesLate || []).includes('~/work/weekly-admin') && seen.includes(path.join(HOME, 'work', 'weekly-admin')) && !c2.probesLate, { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
   // a probe call that FAILS at once (the worker ended under it): late for this reply only — the listing answers, nothing is marked
   failing = true;
   const ds3 = mk(DS);
-  const d1 = await ds3.slice({ ...ASK, probe: ['~/work/contracts', '~/work/payments'] });
+  const d1 = await ds3.slice({ ...ASK, probe: ['~/work/contracts', '~/work/payments'], budgetMs: 450 });
   failing = false; seen.length = 0;
-  const d2 = await ds3.slice({ ...ASK, probe: ['~/work/contracts', '~/work/payments'] });
+  const d2 = await ds3.slice({ ...ASK, probe: ['~/work/contracts', '~/work/payments'], budgetMs: 450 });
   ok('③b a probe call that FAILS at once: the listing answers (not partial), the probe is late for that reply only — the next ask asks it again', d1.partial === false && !!d1.listing.dirs['~/work'] && (d1.probesLate || []).includes('~/work/contracts') && seen.includes(path.join(HOME, 'work', 'contracts')) && !d2.probesLate, { d1: { partial: d1.partial, probesLate: d1.probesLate }, seen: [...seen], d2: d2.probesLate });
+  // THE OWN PATH decides what the listing cannot: a folder PAST the listing's 400 entries (the worker sorts, then cuts) is known only
+  // by its own probe — CONTROL: the reply without the own probe's facts; and the own path itself hung ⇒ the reply is PARTIAL (honest)
+  const BIG = path.join(HOME, 'big');
+  for (let i = 0; i < 450; i++) fs.mkdirSync(path.join(BIG, 'd' + String(i).padStart(3, '0')), { recursive: true });
+  fs.mkdirSync(path.join(BIG, 'zz-proj'), { recursive: true });
+  const OWNBIG = { text: '~/big/zz-proj', own: '~/big/zz-proj', bases: ['~'], probe: [], budgetMs: 450 };
+  const e1 = await mk(DS).slice(OWNBIG);
+  ok('③b the text\'s own folder PAST the listing\'s 400 entries: decided by its own probe (its facts in the reply), the cut listing marked `more`', e1.partial === false && !!e1.listing.dirs['~/big'] && e1.listing.dirs['~/big'].more === true && !!e1.listing.dirs['~/big/zz-proj'], { partial: e1.partial, more: e1.listing.dirs['~/big'] && e1.listing.dirs['~/big'].more, own: e1.listing.dirs['~/big/zz-proj'] });
+  const NOOWN = M.load('src/server/dir-slice.js', anchored(read('src/server/dir-slice.js'), 'probes: [...(ownPr || []), ...pr]', 'probes: [...pr]', 'the reply without the own probe\'s facts'), 'noown');
+  const e2 = await mk(NOOWN).slice(OWNBIG);
+  ok('③b CONTROL: without the own probe\'s facts the folder past the cut is not in the reply (the field would read it «missing»)', !e2.listing.dirs['~/big/zz-proj'], e2.listing.dirs['~/big/zz-proj']);
+  hung.add(path.join(BIG, 'zz-proj'));
+  const e3 = await mk(DS).slice({ ...OWNBIG, budgetMs: 150 });
+  ok('③b the text\'s own path itself hung: the reply is PARTIAL (asked again, bounded — never judged)', e3.partial === true, { partial: e3.partial });
   // RED CONTROL: the old shape — the probes inside the listing's race — a hung probe throws the finished listing away
   const OLD = M.load('src/server/dir-slice.js', anchored(read('src/server/dir-slice.js'), '      return { me, listed, idx, ownPr };\n    })();', "      const pr = probes.length ? (await call('dirSlice', { dirs: [], probes })).probes : [];\n      return { me, listed, idx, ownPr, pr };\n    })();", 'the old shape: the probes in the listing\'s race'), 'oldprobe');
   const c = await mk(OLD).slice(ASK);

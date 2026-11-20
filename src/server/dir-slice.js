@@ -89,7 +89,9 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
   }
 
   /** One answer. `text` = what the field holds; `bases` / `probe` = paths (`~/…` or absolute); `q` = the fuzzy words.
-   *  → { listing, self, took, partial } */
+   *  `own` (B-0f3d) = the field's text's own path, decided inside the listing's race; the reply names the AUXILIARY probes that ran
+   *  out of the budget in `probesLate` (the field's own strings)
+   *  → { listing, self, took, partial, probesLate? } */
   async function slice({ text = '', bases = [], probe = [], own = '', q = '', kind = 'folder', budgetMs = 450 } = {}) {
     const t0 = now();
     const files = kind === 'file';
@@ -138,20 +140,21 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     // reply says `probesLate` (the field marks none of them asked), and a late probe is skipped for PROBE_LATE_MS
     if (got !== 'late' && probes.length) {
       const t1 = now();
-      for (const [q, at] of lateProbes) if (t1 - at >= PROBE_LATE_MS) lateProbes.delete(q);   // bounded: a mark lives PROBE_LATE_MS
+      for (const [lp, at] of lateProbes) if (t1 - at >= PROBE_LATE_MS) lateProbes.delete(lp);   // bounded: a mark lives PROBE_LATE_MS
       // a probe AT or UNDER a path marked late is skipped (the name rows under a hung Task Group folder change with every keystroke)
-      const underLate = (p) => { for (const q of lateProbes.keys()) if (p === q || p.startsWith(q.endsWith('/') ? q : q + '/')) return true; return false; };
-      const ask = probes.filter((p) => { if (underLate(p)) { late.add(p); return false; } return true; });
-      if (ask.length) {
-        const pw = call('dirSlice', { dirs: [], probes: ask }).then((r) => (r && r.probes) || [], () => null);   // a call that fails is late, never the listing's end
+      // (the home and the root are never a late ANCESTOR: a recent conversation started in ~ that rode a hung batch skips nothing under it)
+      const underLate = (p) => { for (const lp of lateProbes.keys()) if (p === lp || (lp !== home && lp !== '/' && p.startsWith(lp.endsWith('/') ? lp : lp + '/'))) return true; return false; };
+      const askNow = probes.filter((p) => { if (underLate(p)) { late.add(p); return false; } return true; });
+      if (askNow.length) {
+        const pw = call('dirSlice', { dirs: [], probes: askNow }).then((r) => (r && r.probes) || [], () => null);   // a call that fails is late, never the listing's end
         const pg = await Promise.race([pw, deadline]);
-        if (pg === null) for (const p of ask) late.add(p);   // the call FAILED: late for this reply only (a failure is no hang — no mark)
+        if (pg === null) for (const p of askNow) late.add(p);   // the call FAILED: late for this reply only (a failure is no hang — no mark)
         else if (pg === 'late') {
           const at = now();
-          for (const p of ask) { late.add(p); lateProbes.set(p, at); }
+          for (const p of askNow) { late.add(p); lateProbes.set(p, at); }
           // slow, not hung: the moment it answers, its marks go — the next ask probes it again (never 30 s of a healthy probe called late)
-          pw.then((r) => { if (r) for (const p of ask) if (lateProbes.get(p) === at) lateProbes.delete(p); });
-        } else { pr = pg; for (const p of ask) lateProbes.delete(p); }
+          pw.then((r) => { if (r) for (const p of askNow) if (lateProbes.get(p) === at) lateProbes.delete(p); });
+        } else { pr = pg; for (const p of askNow) lateProbes.delete(p); }
       }
     }
     const probesLate = [...late].flatMap((a) => sentAs.get(a) || [a]);
