@@ -1368,7 +1368,7 @@ class JobManager {
       // B-95fc (round w00h341sv): it asks the park's own «live» (liveForWake — a remote conversation its machine said ended is not live), else the reach
       const liveOf = this.d.liveForWake || this.d.peerReachable;
       if (!(liveOf && liveOf(cid))) this._oweWake(cid, job, ev, { subscriber });
-      if (!subscriber && !(liveOf && liveOf(cid))) this._awayFailure(cid, job, ev);   // B-2566: …and a FAILURE reaches a person by name (the park's own «live», as above)
+      if (!subscriber) this._awayFailure(cid, job, ev, this._lastStashed(cid, job));   // B-2566: …and a FAILURE reaches a person by name (the ONE verdict inside)
       this._dirty = true;
       return;
     }
@@ -1389,7 +1389,7 @@ class JobManager {
     // THE RETRY PARK (lane notify-retry): a transient miss on a LIVE pid is parked by the ladder for this producer —
     // the meta is what this engine needs to book the outcome later (the job, the event, the raw text's digest for
     // the floor), with or without the job record still in the registry
-    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: this.labelOf(job), ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now(), ...(!subscriber && ev && ev.wake === 'result' && ev.personTold !== true && job.state === 'failed' ? { away: true } : {}) }, subscriber: !!subscriber, ...(mark ? { sub: true } : {}) } };   // the NAME belted (lane job-notify-user r3)
+    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: this.labelOf(job), ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now(), ...(!subscriber && ev && ev.wake === 'result' && ev.personTold !== true && job.state === 'failed' ? { away: M.awayFactsOf(job) } : {}) }, subscriber: !!subscriber, ...(mark ? { sub: true } : {}) } };   // the NAME belted (lane job-notify-user r3)
     const deliver = this.d.deliverToConversation
       ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + this.labelOf(job), kind: 'notification', spendReason: 'job-notification', retry })
       : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
@@ -1406,7 +1406,7 @@ class JobManager {
       } else {
         this._stashNotif(cid, job, ev, (r && r.reason) || 'unreachable', { stampLast: !subscriber, held: heldOf(r, (r && r.reason) || 'unreachable'), mark });
         if (r && r.notRunning === true) this._oweWake(cid, job, ev, { subscriber });   // the manager design's piece 7: the words are stashed (durable) FIRST
-        if (r && r.notRunning === true && !subscriber) this._awayFailure(cid, job, ev);   // B-2566: …and a FAILURE reaches a person by name
+        if (r && r.notRunning === true && !subscriber) this._awayFailure(cid, job, ev, this._lastStashed(cid, job));   // B-2566: …and a FAILURE reaches a person by name
         this._save();   // the moved2 census (its jobs pass): a copy STASHED after its delivery failed is that notice's only copy — urgent, never the paced tick
       }
       this._dirty = true;
@@ -1493,7 +1493,7 @@ class JobManager {
       if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } }
       const target = job || { id: meta.jobId, name: meta.jobName || meta.jobId };   // the record is gone: the stash still names it
       this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held, mark: !!meta.sub });
-      if (job && !subscriber && meta.ev && meta.ev.away === true && held.kind === 'not-running') this._awayFailure(cid, job, { wake: 'result' });   // B-2566: a failure parked for a live owner that ENDED before it landed
+      if (job && !subscriber && meta.ev && meta.ev.away && held.kind === 'not-running') this._awayFailure(cid, job, { wake: 'result', away: meta.ev.away }, this._lastStashed(cid, job));   // B-2566: a failure parked for a live owner that ENDED before it landed — its OWN run's facts
       this._save();   // the fallen entry's ONE copy is now this store's: an act, urgent (the 2 s tick was the only save — the hunt (2))
       try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
       return this._taken();
@@ -1534,15 +1534,28 @@ class JobManager {
    *  its notices ends the episode (_awaySettled). A failure the person was ALREADY told by name (a park's copy, a --notify-user end) is
    *  not said twice (`ev.personTold`). The person is For you's: the instance's owner; the item sits under the job's own owner
    *  conversation (its record) — a groupmate's agent still sees only the count (job-model othersFailedLine). → the door's verdict | null */
-  _awayFailure(cid, job, ev) {
-    if (!cid || !job || !ev || ev.wake !== 'result' || ev.personTold === true || job.state !== 'failed') return null;
+  _awayFailure(cid, job, ev, entry = null) {
+    if (!cid || !job || !ev || ev.wake !== 'result' || ev.personTold === true) return null;
+    const carried = ev.away && typeof ev.away === 'object' ? ev.away : null;   // a park's fall: the facts of ITS run (the schedule may have fired again)
+    if (!carried && job.state !== 'failed') return null;
+    if (!this._ownerAway(cid)) return null;   // round wem0s6k1d MUST 1: THE ONE VERDICT (the ladder's wakeBlock), at every road that files or renews
     const rec = (job.cronParent && this.jobs.get(job.cronParent)) || job;
-    const run = (job.runs && job.runs[job.runs.length - 1]) || {};
+    const run = (job.runs && job.runs[job.runs.length - 1]) || {}, f = carried || M.awayFactsOf(job);
     const ep = rec.awayFail && rec.awayFail.cid === cid ? rec.awayFail : null, at = now();
     rec.awayFail = ep ? { ...ep, count: (Number(ep.count) || 0) + 1, lastAt: at } : { cid, since: at, count: 1, lastAt: at };
     this._dirty = true;
-    return this._forYou(rec, M.forYouCopy(rec, 'away-failed', { exit: run.exit, cause: run.cause || null, count: rec.awayFail.count, since: rec.awayFail.since, renew: !!ep }));
+    // a renewal only after a filing that LANDED (round 13: a first filing the store refused — full — leaves the next failure a FIRST one)
+    const v = this._forYou(rec, M.forYouCopy(rec, 'away-failed', { exit: f.exit, cause: f.cause || run.cause || null, count: rec.awayFail.count, since: rec.awayFail.since, renew: !!ep && ep.filed !== false }));
+    const filed = !(v && typeof v === 'object' && v.ok === false) || v.held === true;   // filed, renewed, or filed at the read
+    rec.awayFail.filed = filed || (v && v.kept === true);
+    // round MUST 2: the notice whose failure is said BY NAME is not also counted for the conversation's «notices are waiting»
+    if (filed && entry) (this._namedAway || (this._namedAway = new WeakSet())).add(entry);
+    return v;
   }
+  /** B-2566: the ONE «not running» verdict (the wiring's ownerAway — the ladder's wakeBlock); no verdict wired ⇒ live (never said) */
+  _ownerAway(cid) { try { return typeof this.d.ownerAway === 'function' && this.d.ownerAway(cid) === true; } catch { return false; } }
+  /** B-2566: the stash entry this engine just pushed for (cid, job) — the newest, or null */
+  _lastStashed(cid, job) { const q = this.pendingNotifs.get(cid) || []; const e = q[q.length - 1]; return e && job && e.jobId === job.id ? e : null; }
   /** B-2566: is an away episode open for this job (a cron's: its schedule's) and this owner conversation? */
   _awayOpen(cid, job) {
     const rec = job && ((job.cronParent && this.jobs.get(job.cronParent)) || job);
@@ -1551,15 +1564,16 @@ class JobManager {
   /** B-2566: the owner conversation RECEIVED its notices (the drain: a hand-over, a resume's turn, the person's prompt) — the away episode of
    *  every job they carried ends: its item is resolved (by the agent: delivered) and the next failure while it is away again files anew */
   _awaySettled(cid, drained) {
-    const seen = new Set();
-    for (const n of drained || []) {
-      const job = n && this.jobs.get(n.jobId), rec = job && ((job.cronParent && this.jobs.get(job.cronParent)) || job);
-      if (!rec || seen.has(rec.id) || !rec.awayFail || rec.awayFail.cid !== cid) continue;
-      seen.add(rec.id);
-      delete rec.awayFail; this._dirty = true;
+    const handed = new Set();
+    for (const n of drained || []) { const job = n && this.jobs.get(n.jobId), rec = job && ((job.cronParent && this.jobs.get(job.cronParent)) || job); if (rec) handed.add(rec.id); }
+    let n = 0;
+    for (const rec of this.jobs.values()) {
+      if (!rec.awayFail || rec.awayFail.cid !== cid) continue;
+      delete rec.awayFail; this._dirty = true; n++;   // the owner runs again: the episode ends (round 6), whatever the drained queue holds
+      if (!handed.has(rec.id)) continue;   // its notice fell off the stash (never handed to the agent): the item stays for the person
       try { this.d.resolveAwayFailed?.(rec.id, cid); } catch (e) { this.d.log(`[jobs] ${rec.id}: the away-failure For-you item was not closed — ${e && e.message}`); }
     }
-    return seen.size;
+    return n;
   }
   /** STASH = held, and every held entry says WHY (5b ①): `held` is
    *  {kind: spend-cap|rate-floor|not-reachable|off, why?, identity?, cap?,
@@ -1937,7 +1951,7 @@ class JobManager {
     // HUB RAN (stopped then) is said — the item then counts every notice waiting there; what a boot finds waits where it waits
     // today (the Background Work panel) and is still handed over when the conversation runs again
     if (!this._stoppedThisRun || !this._stoppedThisRun.has(cid)) return null;
-    const owed = this.wakeOwed(cid).filter((n) => n.held.kind !== 'rate-floor');
+    const owed = this.wakeOwed(cid).filter((n) => n.held.kind !== 'rate-floor' && !(this._namedAway && this._namedAway.has(n)));   // B-2566 MUST 2: a failure said by name is ONE item
     if (!owed.length || typeof this.d.noticeWakeWaiting !== 'function') return null;
     try {
       const id = this.d.noticeWakeWaiting({ cid, since: Math.min(...owed.map((n) => Number(n.ts) || now())) }) || null;

@@ -587,11 +587,11 @@ ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, n
   // B-2566: the AWAY FAILURE's copy — the job's name a field, what failed the engine's own words (exit + a cause TOKEN), the count, since when
   // (an instant: the device's clock); a renewal carries renewOnly (re-filed only while its item is open)
   {
-    const T = 1790000000000, aw = M.forYouCopy({ ...j, name: 'render-7' }, 'away-failed', { exit: 1, cause: 'Error Exit', count: 3, since: T }), aw2 = M.forYouCopy({ ...j, name: 'render-7' }, 'away-failed', { exit: null, cause: null, count: 0, since: null, renew: true });
-    const facts = { first: { fact: aw.fact, params: aw.words.params, urgency: aw.urgency, renewOnly: aw.renewOnly === true }, renewal: { params: aw2.words.params, renewOnly: aw2.renewOnly === true } };
-    ok(aw.fact === 'away-failed' && aw.words.key === M.FOR_YOU_WORDS['away-failed'] && aw.words.params.name === 'render-7' && aw.words.params.exit === '1' && aw.words.params.cause === 'error-exit' && aw.words.params.count === '3' && aw.words.params.since.at === T && aw.urgency === 'normal' && !('renewOnly' in aw)
+    const T = 1790000000000, aw = M.forYouCopy({ ...j, name: 'render-7' }, 'away-failed', { exit: 1, cause: 'timeout', count: 3, since: T }), aw3 = M.forYouCopy({ ...j, name: 'render-7' }, 'away-failed', { exit: 1, cause: 'Error: frame 7 failed', count: 1, since: T }), aw2 = M.forYouCopy({ ...j, name: 'render-7' }, 'away-failed', { exit: null, cause: null, count: 0, since: null, renew: true });
+    const facts = { first: { fact: aw.fact, params: aw.words.params, urgency: aw.urgency, renewOnly: aw.renewOnly === true }, renewal: { params: aw2.words.params, renewOnly: aw2.renewOnly === true }, outsideTheSet: aw3.words.params.cause, causes: M.RUN_CAUSES };
+    ok(aw.fact === 'away-failed' && aw.words.key === M.FOR_YOU_WORDS['away-failed'] && aw.words.params.name === 'render-7' && aw.words.params.exit === '1' && aw.words.params.cause === 'timeout' && aw3.words.params.cause === 'unknown' && M.RUN_CAUSES.includes('error') && aw.words.params.count === '3' && aw.words.params.since.at === T && aw.urgency === 'normal' && !('renewOnly' in aw)
       && aw2.renewOnly === true && aw2.words.params.exit === '—' && aw2.words.params.cause === 'unknown' && aw2.words.params.count === '1' && aw2.words.params.since.key === 'at an unknown earlier time' && Object.isFrozen(aw.words.params),
-      'forYouCopy away-failed (B-2566): the name a field, exit + a cause TOKEN (never a line of the run output), the count (≥ 1), since an instant (or the unknown-time words); a renewal carries renewOnly', JSON.stringify(facts));
+      'forYouCopy away-failed (B-2566): the name a field, exit + a cause of the CLOSED set RUN_CAUSES (anything else «unknown» — never a line of the run output), the count (≥ 1), since an instant (or the unknown-time words); a renewal carries renewOnly', JSON.stringify(facts));
     console.log('    ' + JSON.stringify(facts));
   }
   // r6 (accept-r5 confirmed 1): the stray copy is the engine's OWN words + the fact `stray`; a shape handed in is refused BY NAME, any kind

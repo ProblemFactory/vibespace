@@ -374,6 +374,15 @@ function onServiceExit(job, { uptimeMs, now }) {
 // exactly like a sweep's.
 const MEMORY = Object.freeze({ defaultMb: 4096, minMb: 256, maxMb: 1024 * 1024, parkAfter: 2, hubShareMinMb: 1024, hubShareRatio: 0.25 });
 const MEMORY_CAUSES = Object.freeze(['oom-bound', 'oom']);
+// B-2566 (its round wem0s6k1d, 4): THE CLOSED SET a run's end is judged into (src/jobs.js _finalizeRun's `run.cause` and the boot's
+// memory verdict) — the away failure's copy says one of these words, any other value «unknown» (never a word of the run's output)
+const RUN_CAUSES = Object.freeze(['error', 'timeout', 'oom', 'oom-bound', 'wrapper-mismatch', 'update_window', 'interrupted', 'ok', 'ok(until-output)']);
+/** B-2566: an away failure's facts from the job's LAST run — its exit code and its cause (a word of RUN_CAUSES, else null): what the
+ *  copy says, and what a retry park carries (its fall files THOSE, never the run a schedule's next fire left) */
+function awayFactsOf(job) {
+  const run = (job && Array.isArray(job.runs) && job.runs[job.runs.length - 1]) || {};
+  return { exit: run.exit == null ? null : run.exit, cause: RUN_CAUSES.includes(run.cause) ? run.cause : null };
+}
 const MEMORY_RUNGS = Object.freeze(['cgroup', 'rlimit-data']); // best first; `none` = neither answered (said, never silent)
 const MEMORY_PARK_TEXT = 'parked: out of memory twice — raise its bound or fix the job';
 const SIZE_UNIT = { k: 1 / 1024, m: 1, g: 1024, t: 1024 * 1024 };
@@ -954,7 +963,7 @@ function forYouWords(job, kind, opts) {
   if (kind === 'set-aside-other') return { fact: 'set-aside-other', words: { key: FOR_YOU_WORDS['set-aside-other'], params: { file: String(file || 'a file') } }, urgency: 'normal' };
   if (kind === 'records-held') return { fact: 'records-held', words: { key: FOR_YOU_WORDS['records-held'], params: { file: String(file || 'a set-aside file') } }, urgency: 'high' };
   // B-2566: the away failure — `renew` = a later failure of the same episode: re-filed only while the item is OPEN (a person's close stands)
-  if (kind === 'away-failed') return { fact: 'away-failed', words: { key: FOR_YOU_WORDS['away-failed'], params: { name, exit: exit == null || exit === '' ? '—' : String(exit).slice(0, 12), cause: tok(cause, 48), count: String(Math.max(1, Math.floor(Number(count)) || 1)), since: recordsWhenParam(since) } }, urgency: 'normal', ...(renew ? { renewOnly: true } : {}) };
+  if (kind === 'away-failed') return { fact: 'away-failed', words: { key: FOR_YOU_WORDS['away-failed'], params: { name, exit: exit == null || exit === '' ? '—' : String(exit).slice(0, 12), cause: RUN_CAUSES.includes(cause) ? cause : 'unknown', count: String(Math.max(1, Math.floor(Number(count)) || 1)), since: recordsWhenParam(since) } }, urgency: 'normal', ...(renew ? { renewOnly: true } : {}) };
   if (kind === 'stray') return { fact: 'stray', words: { key: FOR_YOU_WORDS.stray, params: { name } }, urgency: 'normal' };
   return { fact: null, words: null, urgency: null, copy: tok(kind, 24), refused: `no For-you copy of kind «${String(kind).slice(0, 24)}» — the copies are ${Object.keys(FOR_YOU_WORDS).join(', ')}` };
 }
@@ -1268,7 +1277,7 @@ module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY,
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
-  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftRecordFault, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
+  MEMORY, MEMORY_CAUSES, RUN_CAUSES, awayFactsOf, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftRecordFault, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
   notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, mintedFor, jobIdOf, NO_ID, legacyCopyFact, labelVia,

@@ -27,7 +27,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // status-bar chip read it off the same frame (`jm` is bound lazily: the
     // constructor never broadcasts)
     broadcast: (type, payload) => broadcastAll({ type, ...payload, held: jm.heldDigest() }),
-    notifyUser: ({ words = null, text, detail, fact = null, urgency, jobId, jobName, ownerCid, renewOnly = false }) => {
+    notifyUser: function notifyUser({ words = null, text, detail, fact = null, urgency, jobId, jobName, ownerCid, renewOnly = false }) {
       // ATTRIBUTION = the AGENT CONVERSATION that owns the job (owner verdict
       // 2.357.0: an ask hanging off a background-task entity is 反直觉 — the
       // user thinks in terms of the agent they were talking to, and 2.348.1's
@@ -45,6 +45,12 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         const sessKey = ownerCid ? `claude:${ownerCid}` : 'jobs';
         // B-2566: a RENEWAL (an away failure's later count) re-files only while its item is OPEN — an item a person closed this episode
         // stays closed (kept: no refusal, no journal line); with no item at all (a first filing For you refused) it is filed
+        // B-2566 (its round, 5): For you HELD UNREAD — the away failure's filing WAITS for the read (as its close does), never lost: a one-shot
+        // that fails once would otherwise never be said by name; the renewal's own check runs then, against the file
+        if (fact === 'away-failed' && userTodos.isHeldUnread?.() && typeof userTodos.whenRead === 'function') {
+          userTodos.whenRead(() => { const v = notifyUser({ words, text, detail, fact, urgency, jobId, jobName, ownerCid, renewOnly }); if (v && v.ok === false && !v.kept) log('[jobs] the away-failure item was not filed at the read —', v.why); }, 'the away-failure item');
+          return { ok: false, held: true, why: 'For you could not be read just now — the item is filed when it reads' };
+        }
         if (renewOnly && jobId && fact) {
           const mine = userTodos.idsWhere((i) => i.sessionKey === sessKey && i.jobId === jobId && i.jobFact === fact && !i.clearedAt).map((id) => userTodos.get(id)).filter(Boolean);
           if (mine.length && !mine.some((i) => i.status === 'open')) return { ok: false, kept: true, why: 'its For-you item was closed this episode — kept closed' };
@@ -120,6 +126,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       });
       return (it && it.id) || null;
     },
+    // B-2566 (its round, MUST 1): THE ONE «NOT RUNNING» VERDICT the away failure files or renews on — the ladder's own wakeBlock
+    // (src/server/conversation-deliver.js: no peer lane, no live state, no live local session ⇒ cause not-running); a conversation
+    // that runs but takes no message mid-turn (opencode, ACP, Codex in a terminal, a wrapper restarting, a resume in progress) is LIVE
+    ownerAway: (cid) => { try { const b = deliver && typeof deliver.wakeBlock === 'function' ? deliver.wakeBlock(cid) : null; return !!(b && b.cause === 'not-running'); } catch { return false; } },
     // B-2566: the owner conversation received its notices — its away failures' items are over (done, by the agent: delivered)
     resolveAwayFailed: function resolveAwayFailed(jobId, cid) {
       if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => resolveAwayFailed(jobId, cid), 'the away-failure item\'s close'); return 0; }
