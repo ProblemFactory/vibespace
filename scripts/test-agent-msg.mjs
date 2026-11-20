@@ -12,6 +12,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';   // B-6721: the remote rung's «unanswered» control
+import { mutantCopies } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
@@ -74,6 +76,23 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   remoteResult = { ok: false, reason: 'no live inbox on this machine' };
   const r3 = await D.deliverToConversation('cid-remote', 'yo2');
   ok(!r3.ok && r3.lane === 'remote-message' && r3.reason, 'remote miss reports honestly');
+  // B-6721 (round w8g2bt5bs's should): the remote rung says `unanswered` ONLY when the request LEFT and no answer came (the hub's
+  // own request timeout, a link lost) — the stash's wake chain then ends rather than post again; never a capability gate, a policy
+  // refusal or an error the device ANSWERED (nothing was posted). RED: the previous shape (any throw after the turn was armed)
+  const throwingWith = async (DD, err) => { const was = fakeHosts.device; fakeHosts.device = async () => ({ peerPost: async () => { throw err; } }); try { return await DD.deliverToConversation('cid-remote', 'yo3'); } finally { fakeHosts.device = was; } };
+  const uaOf = async (DD) => ({
+    timeout: await throwingWith(DD, new Error('peer-post timeout')), lost: await throwingWith(DD, Object.assign(new Error('device link lost'), { code: 'link_lost' })),
+    gate: await throwingWith(DD, new Error('daemon lacks peer-post (capabilities gate)')), answered: await throwingWith(DD, new Error('no live inbox on this machine')),
+  });
+  const ua = await uaOf(D);
+  ok(ua.timeout.unanswered === true && ua.lost.unanswered === true && !ua.gate.unanswered && !ua.answered.unanswered && Object.values(ua).every((x) => x.ok === false && x.lane === 'remote-message'),
+    'B-6721: the remote rung says «unanswered» for a request that left and got no answer (a timeout, a link lost) — never for a capability gate or an error the device answered', JSON.stringify(ua));
+  const CDSRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+  const MCU = mutantCopies('agent-msg-unanswered', REPO);
+  const CDany = MCU.load('src/server/conversation-deliver.js', anchored(CDSRC, "          const unanswered = !!undo2 && !!e && (e.code === 'link_lost' || e.message === 'peer-post timeout');", '          const unanswered = !!undo2;', 'B-6721: unanswered for any throw after the turn armed'), 'cd-unanswered');
+  const Dany = CDany.create({ dataDir: dir, peerMsg: fakePeerMsg, getHosts: () => fakeHosts, getConvIndex: () => fakeHosts.convIndex, serverSetting: () => undefined, activeSessions: new Map(), emitPeerCard: () => { } });
+  const uaR = await uaOf(Dany);
+  ok(uaR.gate.unanswered === true && uaR.answered.unanswered === true, 'RED control: the previous shape says «unanswered» for a capability gate and for an error the device answered (nothing was posted — the chain ended with a «may have landed» journal line)', JSON.stringify(uaR));
   // unknown everywhere
   const r4 = await D.deliverToConversation('cid-nowhere', 'x');
   ok(!r4.ok && /no live inbox/.test(r4.reason), 'unroutable conversation fails with a named reason');
