@@ -549,6 +549,10 @@ This file is the engineers' record of every release: the lanes, the verification
   - a CENSUS: every attended reason of the authorizer has its words, with a RED control of a planted reason;
   - the route, gate and placement pins.
 
+### bl-ci — test-ci-remote's real teardown is handed only ids minted for its own process (the coordinator's r626)
+- THE RED (the whole-tree readers at line 101's tip, box zone): leg ⑥'s control «a teardown for another run id + snap kills none of these» and «each one named with what tied it to the run». The fixture's mark and both teardown ids were FIXED words, and two runs of the suite at once on one machine as one user (two tips' readers, two seconds apart) met there: one run's real teardown ended the other's marked process.
+- THE CURE (tests only): every id the leg hands the real teardown — the fixture's mark, the teardown's id, the control's other id — is minted for this process (its pid + random bytes); the snap folder was already the suite's scratch. A leg pins it: two mints differ, the id has its pid, no fixed run id stands in the file.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
