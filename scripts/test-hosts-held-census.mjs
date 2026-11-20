@@ -709,16 +709,40 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const HS8 = fs.readFileSync(path.join(ROOT, 'src/hosts.js'), 'utf8');
   const IMPC = "skipped: true, code: 'hosts-unread' };";
   const impOf = (Mod) => { const H = Object.create(Mod.HostManager.prototype); H._state = { hosts: [] }; H._unread = { code: 'EACCES' }; try { const r = H.importBundle({ hosts: [{ id: 'h-0002', name: 'x', host: 'x.invalid' }] }); return { code: r && r.code || null, skipped: !!(r && r.skipped) }; } catch (e) { return { threw: (e && e.code) || 'threw' }; } };
-  const im = impOf(require(path.join(ROOT, 'src/hosts.js'))), imx = impOf(MJ.load('src/hosts.js', anchored(HS8, IMPC, 'skipped: true };', 'hhc-8i1'), 'import-no-code'));
+  const im = impOf(require(path.join(ROOT, 'src/hosts.js'))), imx = impOf(MJ.load('src/hosts.js', anchored(HS8, IMPC, 'skipped: true };', 'hhc-8i1'), 'import-no-code'));   // stale-pins: kept (the control plants the release's text in a copy)
   ok(im.code === 'hosts-unread' && im.skipped && imx.skipped && imx.code === null, 'hosts.importBundle while held: skipped, with the hold\'s CODE (the page words it); CONTROL (the code cut, in a copy): no code — the route can only pass the English on — RED', { im, imx });
   const PRS = fs.readFileSync(path.join(ROOT, 'src/routes/persistence.js'), 'utf8'), APS = fs.readFileSync(path.join(ROOT, 'src/lib/app.js'), 'utf8');
   ok(PRS.includes("        if (r && r.code === 'hosts-unread') held.push(r.code); else applied.push(warn.length ? 'hosts (' + warn.join('; ') + ')' : 'hosts');")
     && PRS.includes("    res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}) });")
-    && APS.includes("const heldSaid = Array.isArray(d.held) && d.held.includes('hosts-unread') ? hostsHeldWords() : null;")
+    && APS.includes("const heldSaid = Array.isArray(d.held) && d.held.includes('hosts-unread') ? t('Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.') : null;")
     && APS.includes("if (heldSaid && !(d.applied || []).length) { err.textContent = heldSaid; return; }")
     && APS.includes("showToast([t('Imported: {sections} — reloading…', { sections: d.applied.join(', ') }), heldSaid].filter(Boolean).join(' '), heldSaid ? { type: 'warn', duration: 8000 } : undefined);")
     && APS.includes('setTimeout(() => location.reload(), heldSaid ? 8000 : 900);'),
     'the config import: the route answers a held hosts section as `held` (its code), never English inside `applied`; the page says the hold\'s sentence beside «Imported: …» and waits 8 s before the reload — or, nothing else imported, says it on the form\'s line and reloads nothing');
+  // the import round's read (its should): the ROUTE driven — a bundle exported with the machines, imported while hosts.json is held
+  const HELDLINE = "        if (r && r.code === 'hosts-unread') held.push(r.code); else applied.push(";
+  ok(PRS.split(HELDLINE).length === 2, 'control setup: the import route\'s held branch is found once');
+  const routeImport = async (Pmod, tag) => {
+    const D = scratch('hosts-held-census-imp-' + tag); fs.rmSync(D, { recursive: true, force: true }); fs.mkdirSync(D, { recursive: true });
+    let mode = 'export';
+    const hostsStub = { exportBundle: () => ({ hosts: [{ id: 'h-0001', name: 'box' }] }), unreadWords: () => null,
+      importBundle: () => (mode === 'held' ? { warnings: ['the machines were not imported — hosts.json in VibeSpace\'s data folder could not be read (EACCES)'], skipped: true, code: 'hosts-unread' } : { warnings: [] }) };
+    Pmod.setup({ dataDir: D, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => hostsStub, getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+    const door = (p) => Pmod.router.stack.find((l) => l.route && l.route.path === p && l.route.methods.post).route.stack[0].handle;
+    const call = (p, body) => new Promise((resolve) => { const out = { status: 200 }; const res = { status(c) { out.status = c; return this; }, set() { return this; }, setHeader() { }, get() { return undefined; }, json(o) { out.body = o; resolve(out); }, send(o) { out.body = o; resolve(out); }, end() { resolve(out); } }; door(p)({ body, headers: { 'sec-fetch-site': 'same-origin' }, query: {}, params: {}, app: { locals: {} }, socket: {} }, res, () => resolve(out)); });
+    const ex = await call('/api/config/export', { sections: [], includeSensitive: ['hosts'], passphrase: 'walk-pass-0001' });
+    mode = 'held';
+    const im = ex.body && ex.body.sensitive ? await call('/api/config/import', { file: ex.body, sections: [], includeSensitive: ['hosts'], passphrase: 'walk-pass-0001' }) : null;
+    try { fs.rmSync(D, { recursive: true, force: true }); } catch { }
+    return { exported: ex.status, status: im && im.status, applied: im && im.body && im.body.applied, held: (im && im.body && im.body.held) || null };
+  };
+  const ri = await routeImport(require(path.join(ROOT, 'src/routes/persistence.js')), 'a');
+  const rix = await routeImport(MJ.load('src/routes/persistence.js', anchored(PRS, HELDLINE, '        applied.push(', 'hhc-8i2'), 'import-held-cut'), 'b');
+  ok(ri.exported === 200 && ri.status === 200 && Array.isArray(ri.applied) && !ri.applied.some((a) => /^hosts/.test(a)) && JSON.stringify(ri.held) === '["hosts-unread"]'
+    && rix.status === 200 && Array.isArray(rix.applied) && rix.applied.some((a) => /^hosts \(the machines were not imported — hosts\.json/.test(a)) && rix.held === null,
+    'the import route, driven: a bundle with the machines imported while hosts.json is held answers `held: [hosts-unread]` and no hosts entry in `applied`; CONTROL (the held branch cut, in a copy): the English hold words inside `applied`, no `held` — RED', { ri, rix });
+  const ISENT = 'Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.';
+  for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(ISENT) + ':'), `the import\'s held sentence has its ${lang} row`);
 }
 
 // ── §9 round wojcq4hn4 (its MUST): a held list is unknown BY NAME on the two doors the meeting cured — never «offline», never a bare 400

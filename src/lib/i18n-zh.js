@@ -2573,6 +2573,7 @@ export default {
   "Your paired machines cannot be read right now — nothing is lost; they come back here when they read.": "暂时读不到你已配对的机器 — 没有丢失；读到后它们会回到这里。",
   "VibeSpace cannot read its paired machines right now — nothing was paired or changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到已配对的机器 — 没有配对或更改任何东西。几分钟后再试（它会自己再读一次）。",
   "VibeSpace cannot read the machines’ mounts right now — nothing was changed. Try again in a few minutes (it reads them again by itself).": "VibeSpace 暂时读不到机器上的挂载 — 没有更改任何东西。几分钟后再试（它会自己再读一次）。",
+  "Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.": "你的机器没有导入 — VibeSpace 暂时读不到已配对的机器。几分钟后再导入一次。",
   "VibeSpace cannot read its paired machines right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to machines wait until then.": "VibeSpace 暂时读不到已配对的机器，所以这里一台也没列出。没有丢失：读到后它们会回到这里（每隔几分钟会再试一次）；对机器的更改要等到那时。",
   "VibeSpace cannot read the machines’ mounts right now, so none are listed. Nothing is lost: they come back here when they read (it tries again every few minutes); changes to mounts wait until then.": "VibeSpace 暂时读不到机器上的挂载，所以这里一个也没列出。没有丢失：读到后它们会回到这里（每隔几分钟会再试一次）；对挂载的更改要等到那时。",
   "(removed machine)": "(已删除的机器)",

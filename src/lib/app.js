@@ -23,7 +23,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
-import { heldWordsOf, anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal, hostsHeldWords } from './utils.js';
+import { heldWordsOf, anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
 import { askTails, withTails, credentialDoorWords } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -1208,9 +1208,10 @@ class App {
               if (CLIENT_PREF_KEYS.includes(k)) localStorage.setItem(k, v);
             }
           }
-          // the machines a HELD hosts.json refused (`held`): the page's own sentence, in the reader's language — long enough to read before
+          // the machines a HELD hosts.json refused (`held`): the page's own sentence (its own: «nothing was changed» beside «Imported» would
+          // read as the whole import), in the reader's language — long enough to read before
           // the reload; nothing else imported ⇒ said on the form's line, nothing reloads
-          const heldSaid = Array.isArray(d.held) && d.held.includes('hosts-unread') ? hostsHeldWords() : null;
+          const heldSaid = Array.isArray(d.held) && d.held.includes('hosts-unread') ? t('Your machines were not imported — VibeSpace cannot read its paired machines right now. Import them again in a few minutes.') : null;
           if (heldSaid && !(d.applied || []).length) { err.textContent = heldSaid; return; }
           close();
           showToast([t('Imported: {sections} — reloading…', { sections: d.applied.join(', ') }), heldSaid].filter(Boolean).join(' '), heldSaid ? { type: 'warn', duration: 8000 } : undefined);
