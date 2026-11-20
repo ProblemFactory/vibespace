@@ -329,13 +329,15 @@ await step('⑨', async () => {
     check(`⑩ ①: Enter on the off «更新…» pressed nothing — no click reached it (${r2 && r2.clicks}), the same menu, no second update asked (${heldReqs.length} held), no dialog; ArrowDown reaches «卸载…» (${r2 && r2.text})`, !!r2 && r2.clicks === 0 && r2.same && r2.text === '卸载…' && !r2.dialog && heldReqs.length === 1, { r2, held: heldReqs.length });
     await key('Escape', BACK);
   } finally {
+    // the row the held update will redraw is MARKED BEFORE the request is let go (the hosted red of checkpoint 1: stamped after the
+    // «已是最新» toast was seen, it landed on the NEW row on a fast runner — the product says the toast first and redraws after it)
+    await evalJs(`(() => { const r = document.querySelector('${hrow}'); if (r) r.dataset.k10old = '1'; return true; })()`).catch(() => null);
     for (const h of heldReqs) await cdp('Fetch.continueRequest', { requestId: h.requestId }).catch(() => null);   // every request held, not only the first
     await cdp('Fetch.disable').catch(() => null);
   }
   const saidH = await waitFor(`[...document.querySelectorAll('.global-toast')].some((x) => x.textContent.includes('${HID} 已是最新（0.1.0）'))`, 20000);
   check('⑩ ①: …the held update let go, it ends as before («已是最新» said)', saidH);
-  await evalJs(`(() => { const r = document.querySelector('${hrow}'); if (r) r.dataset.k10old = '1'; return true; })()`);
-  check('⑩ the plugin list redrawn after the held update (a new row for ②)', await waitFor(NEWROW, 15000));
+  check('⑩ the plugin list redrawn after the held update (a new row for ②: not the row marked before the request was let go)', await waitFor(NEWROW, 15000));
   // ① THE REDRAW WHEN THE HELD UPDATE ENDS (主开发 09:53Z): Enter on the NEW row's «⋯» — the focus on its first stop, the live
   // «更新…» again, never «卸载…»
   await evalJs(`(() => { document.querySelectorAll('.context-menu').forEach((e) => e.remove()); const b = document.querySelector('${hrow} .rail-row-more'); if (b) b.focus(); return !!b && document.activeElement === b; })()`);
@@ -397,27 +399,51 @@ await step('⑨', async () => {
 
   // ⑩ ④ — A SUBMENU BY ITS ARROW: a window (a file explorer) and a second desktop — its title bar's menu opened a moment after a
   // key; the «➤» row (Move to Desktop) reached by ArrowDown, ArrowRight opens its submenu WITH the focus in it, ArrowLeft goes back
-  // to its row (the submenu hidden), Escape closes the menu
-  await evalJs(`(() => { app.desktopManager.createDesktop('zz-k10'); app.openFileExplorer(); return true; })()`);
-  await waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'file-explorer' && w.titleBar && w.titleBar.getClientRects().length)`, 10000);
-  await evalJs(`(() => { if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); return true; })()`);
-  await KEYT('a', 'a');
-  await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'file-explorer'); const r = w.titleBar.getBoundingClientRect(); w.titleBar.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 40, clientY: r.top + r.height / 2, button: 2 })); return true; })()`);
-  const inTop = `(() => { const a = document.activeElement; return !!a && !!a.parentElement && a.parentElement === document.querySelector('.taskbar-context-menu'); })()`;   // a submenu carries the same class: the TOP menu is the first in the tree
-  await waitFor(inTop, 3000);
-  let parentRow = null;
-  for (let i = 0; i < 16 && !parentRow; i++) {
-    parentRow = await evalJs(`(() => { const a = document.activeElement; return a && a.getAttribute('aria-haspopup') === 'menu' && /➤/.test(a.textContent || '') ? (a.textContent || '').trim() : null; })()`);
-    if (!parentRow) { const before = await evalJs(`(document.activeElement && document.activeElement.textContent || '').trim()`); await key('ArrowDown', `(document.activeElement && document.activeElement.textContent || '').trim() !== ${J(before)}`); }
+  // to its row (the submenu hidden), Escape closes the menu. The window is found by the type the PRODUCT gives it — 'files'
+  // (app.openFileExplorer; checkpoint 1's hosted red: the type 'file-explorer', which no window ever had, timed a silent wait out
+  // and the next line threw) — and by its id (the one this leg opened). Every wait the walk depends on is red BY ITS NAME.
+  // RED CONTROL: the same walk with the «➤» row's keyboard opener planted away (`_showSub`, B-6944's door) — ArrowRight then opens
+  // nothing and the focus never enters a submenu
+  const K4 = 'zz-k10';
+  const wait4 = async (name, expr, ms = 4000) => { if (await waitFor(expr, ms)) return true; check(`⑩ ④ ${name} — waited ${ms} ms in vain`, false, await evalJs(`(() => { const a = document.activeElement; return { focus: a ? (a.textContent || '').trim().slice(0, 40) : null, menus: document.querySelectorAll('.taskbar-context-menu').length }; })()`).catch(() => null)); return false; };
+  const fx = await evalJs(`(() => { const before = new Set(app.wm.windows.keys()); app.desktopManager.createDesktop(${J(K4)}); app.openFileExplorer(); const w = [...app.wm.windows.values()].find((x) => !before.has(x.id) && x.type === 'files'); window.__k10win = w ? w.id : null; return { id: window.__k10win, types: [...app.wm.windows.values()].filter((x) => !before.has(x.id)).map((x) => x.type) }; })()`);
+  const WIN4 = `app.wm.windows.get(window.__k10win)`;
+  const s4 = { fx };
+  const walk4 = async ({ plant = false } = {}) => {
+    // a key a moment before the menu opens (its stamp; the focus on no field), then the title bar's contextmenu
+    await evalJs(`(() => { document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); return true; })()`);
+    await KEYT('a', 'a');
+    await evalJs(`(() => { const w = ${WIN4}; const r = w.titleBar.getBoundingClientRect(); w.titleBar.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 40, clientY: r.top + r.height / 2, button: 2 })); return true; })()`);
+    const inTop = `(() => { const a = document.activeElement; return !!a && !!a.parentElement && a.parentElement === document.querySelector('.taskbar-context-menu'); })()`;   // a submenu carries the same class: the TOP menu is the first in the tree
+    if (!(await wait4(`${plant ? '(control) ' : ''}the window's menu opened a moment after a key takes the focus at a row of the top menu`, inTop, 3000))) return null;
+    let parentRow = null;
+    for (let i = 0; i < 16 && !parentRow; i++) {
+      parentRow = await evalJs(`(() => { const a = document.activeElement; return a && a.getAttribute('aria-haspopup') === 'menu' && /➤/.test(a.textContent || '') ? (a.textContent || '').trim().split('\\n')[0].slice(0, 40) : null; })()`);
+      if (!parentRow) { const before = await evalJs(`(document.activeElement && document.activeElement.textContent || '').trim()`); await key('ArrowDown'); if (!(await wait4(`${plant ? '(control) ' : ''}ArrowDown moves the focus to the next row (from «${before.slice(0, 30)}»)`, `(document.activeElement && document.activeElement.textContent || '').trim() !== ${J(before)}`))) return null; }
+    }
+    if (!parentRow) { check(`⑩ ④ ${plant ? '(control) ' : ''}the «➤» row (Move to Desktop) reached by ArrowDown within 16 rows`, false); return null; }
+    if (plant) await evalJs(`(() => { const a = document.activeElement; a._showSub = null; return true; })()`);   // the CONTROL: the row's keyboard opener gone
+    const IN_SUB = `(() => { const a = document.activeElement, top = document.querySelector('.taskbar-context-menu'), sub = a && a.closest('[role="menu"]'); return !!sub && sub !== top && getComputedStyle(sub).display !== 'none'; })()`;
+    await key('ArrowRight');
+    if (plant) { await sleep(600); return { parentRow, s1: await evalJs(`(() => { const a = document.activeElement, top = document.querySelector('.taskbar-context-menu'), sub = a && a.closest('[role="menu"]'); return { text: a ? (a.textContent || '').trim().split('\\n')[0].slice(0, 40) : null, inSub: !!sub && sub !== top }; })()`) }; }
+    if (!(await wait4('ArrowRight on the «➤» row opens its submenu with the focus inside it', IN_SUB))) return null;
+    const s1 = await evalJs(`(() => { const a = document.activeElement, sub = a && a.closest('[role="menu"]'); const top = document.querySelector('.taskbar-context-menu'); return { text: a ? (a.textContent || '').trim() : null, inSub: !!sub && sub !== top, subShown: !!sub && sub !== top && getComputedStyle(sub).display !== 'none' }; })()`);
+    await key('ArrowLeft');
+    if (!(await wait4('ArrowLeft goes back to the «➤» row in the top menu', inTop))) return null;
+    const s2 = await evalJs(`(() => { const a = document.activeElement; const sub = a && a.querySelector(':scope > [role="menu"]'); return { text: a ? (a.textContent || '').trim().split('\\n')[0].slice(0, 40) : null, parent: !!a && a.getAttribute('aria-haspopup') === 'menu', expanded: a ? a.getAttribute('aria-expanded') : null, subHidden: !sub || getComputedStyle(sub).display === 'none' }; })()`);
+    await key('Escape');
+    if (!(await wait4('Escape closes the menu', `!document.querySelector('.taskbar-context-menu')`))) return null;
+    return { parentRow, s1, s2, s3: true };
+  };
+  if (await wait4(`the file explorer this leg opened is drawn — found by the type the product gives it ('files', its id ${fx && fx.id}; new windows' types ${J(fx && fx.types)})`, `(() => { const w = ${WIN4}; return !!w && w.type === 'files' && !!w.titleBar && w.titleBar.getClientRects().length > 0; })()`, 10000)) {
+    const r4 = await walk4();
+    if (r4) check(`⑩ ④ a window's menu opened a moment after a key: the «➤» row («${r4.parentRow}») reached by ArrowDown, ArrowRight opens its submenu WITH the focus in it («${r4.s1.text}»), ArrowLeft back to its row (the submenu hidden: ${r4.s2.subHidden}, aria-expanded ${r4.s2.expanded}), Escape closes the menu`,
+      r4.s1.inSub && r4.s1.subShown && r4.s1.text === K4 && r4.s2.parent && r4.s2.subHidden && r4.s2.expanded === 'false' && r4.s3, r4);
+    const c4 = await walk4({ plant: true });
+    check(`⑩ ④ RED CONTROL: the «➤» row's keyboard opener planted away — ArrowRight opens nothing, the focus never enters a submenu (it stays on «${c4 && c4.s1 && c4.s1.text}»)`, !!c4 && !!c4.s1 && !c4.s1.inSub, c4);
+    await evalJs(`(() => { document.querySelectorAll('.taskbar-context-menu').forEach((m) => m.remove()); return true; })()`);
   }
-  await key('ArrowRight', `(() => { const a = document.activeElement; const sub = a && a.closest('[role="menu"]'); return !!sub && !sub.classList.contains('taskbar-context-menu') || (!!sub && sub.parentElement && !!sub.parentElement.closest('.taskbar-context-menu')); })()`);
-  const s1 = await evalJs(`(() => { const a = document.activeElement, sub = a && a.closest('[role="menu"]'); const top = document.querySelector('.taskbar-context-menu'); return { text: a ? (a.textContent || '').trim() : null, inSub: !!sub && sub !== top, subShown: !!sub && sub !== top && getComputedStyle(sub).display !== 'none' }; })()`);
-  await key('ArrowLeft', inTop);
-  const s2 = await evalJs(`(() => { const a = document.activeElement; const sub = a && a.querySelector(':scope > [role="menu"]'); return { text: a ? (a.textContent || '').trim() : null, parent: !!a && a.getAttribute('aria-haspopup') === 'menu', expanded: a ? a.getAttribute('aria-expanded') : null, subHidden: !sub || getComputedStyle(sub).display === 'none' }; })()`);
-  await key('Escape', `!document.querySelector('.taskbar-context-menu')`);
-  const s3 = await evalJs(`!document.querySelector('.taskbar-context-menu')`);
-  await evalJs(`(() => { for (const w of [...app.wm.windows.values()].filter((x) => x.type === 'file-explorer')) app.wm.requestClose(w.id); const d = app.desktopManager.desktops.find((x) => x.name === 'zz-k10'); if (d) app.desktopManager.deleteDesktop(d.id); return true; })()`).catch(() => null);   // leave the page as ⑩ found it
-  check(`⑩ ④ a window's menu opened a moment after a key: the «➤» row (${parentRow}) reached by ArrowDown, ArrowRight opens its submenu WITH the focus in it («${s1 && s1.text}»), ArrowLeft back to its row (the submenu hidden), Escape closes the menu`, !!parentRow && !!s1 && s1.inSub && s1.subShown && s1.text === 'zz-k10' && !!s2 && s2.parent && s2.subHidden && s3, { parentRow, s1, s2, s3 });
+  await evalJs(`(() => { if (window.__k10win && app.wm.windows.get(window.__k10win)) app.wm.requestClose(window.__k10win); const d = app.desktopManager.desktops.find((x) => x.name === ${J(K4)}); if (d) app.desktopManager.deleteDesktop(d.id); return true; })()`).catch(() => null);   // leave the page as ⑩ found it
   } catch (e) { check('⑩ B-6944\'s round: the leg ran to its end', false, String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); }
 });
 check('no page exceptions', pageErrors.length === 0, pageErrors.slice(0, 3));
