@@ -442,6 +442,38 @@ const detailGuardFailures = (src) => {
   ok(bad.some((b) => /without fetching/.test(b)), 'NEGATIVE CONTROL: the pre-r5 guard (return, nothing repainted) fails the check', bad);
 }
 
+// r600 (1) — lane lg-group-parents (row B-91a7 U5a; the hosted run 44818862371 placed test-record-clear-client's heap legs on it):
+// A TASK GROUP'S SETTINGS PAINT HOLDS NO COPY OF ANOTHER RECORD'S WORDS BETWEEN PAINTS. Every closure of the paint shares ONE V8
+// context (the path fields' onEmpty / onCommit callbacks among them) and the typing guard above defers the repaint, so a Map of
+// WHOLE groups kept in the paint (U5a's byId) held a cleared group's Activity notes reachable from the page. The census reads the
+// paint's own body: no whole-group store, no other group read but through the LIVE reader at use, and the inherited rows' «seen»
+// set (the parents' row paths) scoped to its own function. RED (anchored): U5a's byId planted back; the seen set back in the paint.
+const paintHolderFailures = (src) => {
+  const s0 = src.indexOf('  const renderSettings = (to = null) => {'), s1 = src.indexOf('  const paintMore = (host) => {');
+  const paint = s0 >= 0 && s1 > s0 ? src.slice(s0, s1) : '';
+  const bad = [];
+  if (!paint) return ['the settings paint (renderSettings … paintMore) is not found'];
+  if (/\.map\(\((\w+)\) => \[\1\.id, \1\]\)/.test(paint) || /\bbyId\b/.test(paint)) bad.push('the paint keeps a store of WHOLE groups (a Map id → group)');
+  if (!paint.includes('    const groupNow = (id) => (sidebar._tasks || []).find((g) => g && g.id === id) || null;\n')) bad.push('no live reader of another group at use (groupNow)');
+  if (!/const parentsNow = \(\) => \{[^\n]*\.filter\(\(id\) => !!groupNow\(id\)\); \};/.test(paint) || !paint.includes('      const g = groupNow(pid);\n')) bad.push('a parent is not read through the live reader');
+  if ((paint.match(/\.map\(\(id\) => groupNow\(id\)\)/g) || []).length !== 2) bad.push('the inherited rules and rows do not read their parents through the live reader');
+  if (!paint.includes('    const inhRows = ((seenAt) => ') || /\n    const seenAt = /.test(paint)) bad.push('the inherited rows\' seen set (the parents\' row paths) is held in the paint\'s own scope');
+  return bad;
+};
+{
+  const TD_REL = 'src/lib/task-detail.js', TD_SRC = fs.readFileSync(path.join(ROOT, TD_REL), 'utf8');
+  const hb = paintHolderFailures(TD_SRC);
+  console.log(`    judged (the settings paint, ${TD_REL}): ${JSON.stringify(hb)}`);
+  ok(hb.length === 0, 'r600 (1): the Task Group settings paint holds no copy of another record\'s words between paints — no whole-group store; parents, the inherited rules and rows read the LIVE list at use; the parents\' row paths stay out of the paint\'s shared scope', hb);
+  const LIVE = '    const groupNow = (id) => (sidebar._tasks || []).find((g) => g && g.id === id) || null;\n';
+  const redA = paintHolderFailures(anchored(TD_SRC, LIVE, LIVE + '    const byId = new Map((sidebar._tasks || []).map((g) => [g.id, g]));\n', 'paint-whole-group-store'));
+  const SEEN = '    const inhRows = ((seenAt) => ';
+  const redB = paintHolderFailures(anchored(TD_SRC, SEEN, '    const seenAt = new Set();\n' + SEEN, 'paint-seen-set-in-scope'));
+  console.log(`    judged (RED: U5a's byId planted back): ${JSON.stringify(redA)} · (RED: the seen set back in the paint): ${JSON.stringify(redB)}`);
+  ok(redA.some((b) => /WHOLE groups/.test(b)), 'NEGATIVE CONTROL: U5a\'s Map of whole groups planted back in the paint fails the census', redA);
+  ok(redB.some((b) => /seen set/.test(b)), 'NEGATIVE CONTROL: the seen set declared in the paint\'s own scope fails the census', redB);
+}
+
 // verify r5 (reproduced in chrome): Session Properties skips its WHOLE render while one of its selects has the focus (an open
 // native list must not be torn down) — every broadcast returned there, so a window whose select kept the focus showed a
 // cleared status history entry's words (and a cleared "Now" reason) for good. The guard repaints both in place.

@@ -511,11 +511,14 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // is the judge (a cycle is refused there by name); the list greys what it would refuse, from the view's derived lineage
     const parSec = section(host, t('Parent groups'), t('this group uses what each parent is granted, and is told the rows and rules each parent gives its child groups'));
     parSec.classList.add('task-parents');
-    const byId = new Map((sidebar._tasks || []).map((g) => [g.id, g]));
-    const parents = Array.isArray(task.parents) ? task.parents.filter((id) => byId.has(id)) : [];
+    // r600 (1) — A SETTINGS PAINT HOLDS NO COPY OF ANOTHER RECORD'S WORDS BETWEEN PAINTS: every closure of this paint shares ONE
+    // context (the path fields' callbacks among them), and a typing guard defers the repaint — a Map of whole groups kept here held a
+    // cleared group's notes reachable from the page. Another group is read from the LIVE list at use; the paint keeps ids only.
+    const groupNow = (id) => (sidebar._tasks || []).find((g) => g && g.id === id) || null;
+    const parents = Array.isArray(task.parents) ? task.parents.filter((id) => !!groupNow(id)) : [];
     // the U5a read, 4: an edit reads the list as the store last answered it (never the last paint), one write at a time
     let parentsBusy = false;
-    const parentsNow = () => { const cur = (sidebar._tasks || []).find((g) => g.id === task.id) || task; return (Array.isArray(cur.parents) ? cur.parents : []).filter((id) => byId.has(id)); };
+    const parentsNow = () => { const cur = (sidebar._tasks || []).find((g) => g.id === task.id) || task; return (Array.isArray(cur.parents) ? cur.parents : []).filter((id) => !!groupNow(id)); };
     // the chain's cure (A): the copy the next edit reads is the store's ANSWER at once — an answer without the list is the empty
     // list, never the old one (the last parent removed then a parent added before the broadcast put the removed one back)
     // the cure's cure (2): the list the copy holds (the store's last answer) rides as the base — a stale one is refused parents_stale
@@ -523,7 +526,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     const parList = document.createElement('div'); parList.className = 'task-parents-list';
     if (!parents.length) parList.innerHTML = `<span class="task-detail-hint">${escHtml(t('No parent group'))}</span>`;
     for (const pid of parents) {
-      const g = byId.get(pid);
+      const g = groupNow(pid);
       const c = document.createElement('span'); c.className = 'task-parent-chip' + (g.archived ? ' archived' : '');
       c.innerHTML = `<span class="task-parent-name">${escHtml(g.title || pid)}</span>${g.archived ? `<span class="task-detail-hint">${escHtml(t('archived — gives nothing itself (its parents still reach through it)'))}</span>` : ''}`;
       const x = document.createElement('button'); x.className = 'task-detail-x task-parent-x'; x.textContent = '×'; x.title = t('Remove this parent');
@@ -560,7 +563,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     obj.onchange = () => { const v = obj.value; Promise.resolve(patch({ objective: v, ...(task.kind !== 'task' ? { kind: 'task' } : {}) })).then((d) => { if (d && d.task && d.task.objective === v && obj.value === v) markLanded(obj); }, () => { }); };
     objSec.appendChild(obj);
     // lane lg-group-parents U5a: «继承自 X» — each ancestor's standing instructions, read-only here (nearest parent first)
-    const inhRules = (Array.isArray(task.ancestors) ? task.ancestors : []).map((id) => byId.get(id)).filter((g) => g && String(g.objective || '').trim());
+    const inhRules = (Array.isArray(task.ancestors) ? task.ancestors : []).map((id) => groupNow(id)).filter((g) => g && String(g.objective || '').trim());
     if (inhRules.length) {
       const box = document.createElement('div'); box.className = 'task-inherited task-inherited-rules';
       box.innerHTML = `<div class="task-detail-hint">${escHtml(t('Standing rules inherited from parent groups (read-only here)'))}</div>`
@@ -633,10 +636,10 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // lane lg-group-parents U5a: the rows each ancestor gives its child groups (含子组), read-only here — «继承自 X»
     // the U5a read, 8: each row shown where it points (the parent's resolved path), and once — the group's own rows and a nearer
     // parent's win, as the injection tells them (src/task-groups.js _toldRows)
-    const seenAt = new Set((task.ctx || []).map((o, k) => ((task.ctxRes || [])[k] || {}).abs || (o && o.path)).filter(Boolean));
-    const inhRows = (Array.isArray(task.ancestors) ? task.ancestors : []).map((id) => byId.get(id)).filter(Boolean)
+    // r600 (1): the «seen» set is scoped to its own function — a closure of THIS paint holding it would keep the parents' row paths
+    const inhRows = ((seenAt) => (Array.isArray(task.ancestors) ? task.ancestors : []).map((id) => groupNow(id)).filter(Boolean)
       .map((g) => ({ g, rows: (g.ctx || []).map((o, k) => ({ o, at: ((g.ctxRes || [])[k] || {}).abs || (o && o.path) })).filter(({ o, at }) => o && !o.ref && o.children === true && !seenAt.has(at) && (seenAt.add(at), true)) }))
-      .filter((x) => x.rows.length);
+      .filter((x) => x.rows.length))(new Set((task.ctx || []).map((o, k) => ((task.ctxRes || [])[k] || {}).abs || (o && o.path)).filter(Boolean)));
     if (inhRows.length) {
       const box = document.createElement('div'); box.className = 'task-inherited task-inherited-rows';
       box.innerHTML = `<div class="task-detail-hint">${escHtml(t('Rows inherited from parent groups (read-only here — change them in the parent)'))}</div>`
