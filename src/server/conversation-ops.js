@@ -505,7 +505,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
     if (!hit) return { ok: false, code: 'not_found', why: 'no live conversation by that id', target: target || null };
     const [s, id] = hit;
     const glr = groupsOfLive(s, id), gl = glr || [];
-    const v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl)));   // lane lg-group-parents U3d: + the lineage   // ONE rule: opener / self / the grant's reach (B-3190)
+    const v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl)));   // + the hub's hold (lane bl-windows): a reach «… except G» never admits a target whose groups are unknown   // lane lg-group-parents U3d: + the lineage   // ONE rule: opener / self / the grant's reach (B-3190)
     if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // lane key-instance-scope: the refusal names the grant's reach
     return { ok: true, s, id, by: (v && v.by) || null };   // lane end-obeys-verdict: how the key reached it (`opener` = it opened it)
   }
@@ -620,7 +620,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
         const self = !!r.key && r.key === selfKey;
         const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
         let v = null;
-        if (!self) { try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }); } catch { v = null; } }   // the hold's fact: while the store is held a row's groups are UNKNOWN (a grant «… except G» never lists it)
+        if (!self) { try { v = reach(targetOf({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }, lineageOfIds(Array.isArray(r.groups) ? r.groups : []))); } catch { v = null; } }   // the hold's fact: while the store is held a row's groups are UNKNOWN (a grant «… except G» never lists it)   // lane lg-group-parents (restack 415): + the row's ancestors — a grant naming a parent group lists its child's conversation, «… except P» never does; a lineage that cannot be read is unreadable (said in beyondWhy)
         if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;
         if (!self && v && v.code === 'groups_unreadable') heldOut++;   // a held refusal is SAID in the answer (beyondWhy), never a silent «beyond reach»
       }
@@ -641,7 +641,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       const hit = findSession(args.target);
       if (hit) {   // NOT ENDED: refused by name (a resume that RACED a person's press answers `already` below — inbox-reopen's road)
         const [s, id] = hit;
-        const v = reach({ conversationId: idOf(s), webuiId: id, groups: groupsOfLive(s, id), ...require('./groups-hold.js').fact() });   // the hold's fact (as the end verb's)
+        const glr = groupsOfLive(s, id), v = reach(targetOf({ conversationId: idOf(s), webuiId: id, groups: glr || [], ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(glr)));   // the hold's fact (as the end verb's)   // lane lg-group-parents (restack 415): + the lineage, and own groups that could not be read are unreadable (groupsOfLive's null — as the end verb's)
         if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: s.name || args.target || null, ...(v && v.reach ? { reach: v.reach } : {}) };   // ONE shape for a live and an ended conversation
         const key = keyOf(s);
         return { ok: false, code: 'not_ended', why: 'there is nothing to resume — message it instead (its link is in this answer)', target: idOf(s) || id, sessionKey: key, sessionId: id, link: key ? `vibespace://conversation/${key}` : null };
@@ -649,7 +649,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       let d = null; try { d = deadOf(args.target); } catch { d = null; }
       if (!d || !d.conversationId) return { ok: false, code: 'not_found', why: 'no conversation by that id — live, or ended on this machine', target: args.target || null };
       const label = d.name || args.target;
-      const v = reach({ conversationId: d.conversationId, webuiId: null, groups: Array.isArray(d.groups) ? d.groups : [], ...require('./groups-hold.js').fact() });   // the hold's fact: an ended record's groups are read from the held store too
+      const v = reach(targetOf({ conversationId: d.conversationId, webuiId: null, groups: Array.isArray(d.groups) ? d.groups : [], ...require('./groups-hold.js').fact() }, d.inherited !== undefined ? d.inherited : lineageOfIds(Array.isArray(d.groups) ? d.groups : [])));   // the hold's fact: an ended record's groups are read from the held store too   // lane lg-group-parents (restack 415): + the lineage the wiring read with the record (endedKeyOf — as the archive's)
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v && v.reach ? { reach: v.reach } : {}) };
       const backend = d.sessionKey.slice(0, d.sessionKey.indexOf(':')) || 'claude';
       let facts = null; try { facts = (await resumeFactsOf(d.sessionKey)) || null; } catch { facts = null; }

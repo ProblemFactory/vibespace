@@ -23,7 +23,10 @@ const FROM_NAME = 'VibeSpace proposals';   // src/notification-senders.js lists 
 const ANSWERED = 'answered', ALL_ENDED = 'all-ended';   // the card's two ends (src/foryou-actions.js row `ends` — a decision: nothing else closes it)
 const line = (s) => PT.toAgentText(String(s || ''), { kind: 'line', max: 120 });
 
-function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrants = null, jobOwnerOf = null, wakeRowsNow = null, heldWaitMs = 20000, log = () => { } } = {}) {
+function create({ userTodos, deliver, listFacts, endConversation, liveKeys = null, endedKeys = null, storeWakeTicks = null, setWakeGrants = null, jobOwnerOf = null, wakeRowsNow = null, heldWaitMs = 20000, log = () => { }, lineageOf = null } = {}) {
+  // lane lg-group-parents (restack 415): a row's Task Group ANCESTORS through the ONE reader the wiring hands (tasks.grantGroupsOf);
+  // a read that throws (or answers no list) is UNREADABLE — refused by name like the hold, never «no parents»
+  const lineageFacts = (groups) => { if (typeof lineageOf !== 'function') return { inherited: [] }; let l = null; try { l = lineageOf(groups); } catch { l = null; } return Array.isArray(l) ? { inherited: l } : { inherited: [], groupsUnreadable: true }; };
   const inFlight = new Map();   // the cards a press is answering right now (id → that answer) — a second press is told so, the sweep leaves them alone, a proposal waits for it
   // THE OWNER BY ITS OWN ID (主开发 23:06Z): a job's record keeps its owner's conversation id only, so a key's backend is a guess when
   // the owner is not live — the press, the end card's ticks and the drawing compare and name by the conversation's id, never the key
@@ -98,7 +101,7 @@ function create({ userTodos, deliver, listFacts, endConversation, liveKeys = nul
       const r = rowFor(rows, target);
       if (!r) { gone.push(target); continue; }
       const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
-      let v = null; try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }); } catch { v = null; }   // the hold's fact: a grant «… except G» never draws G's conversation while the store is held
+      let v = null; try { v = reach({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...lineageFacts(Array.isArray(r.groups) ? r.groups : []), ...require('./groups-hold.js').fact() }); } catch { v = null; }   // the hold's fact: a grant «… except G» never draws G's conversation while the store is held   // lane lg-group-parents (restack 415): + the row's ancestors (a grant «… except P» never draws P's child's conversation)
       if (v && v.code === 'groups_unreadable') { held.push(target); continue; }   // the store HELD: refused BY NAME below, never «outside what your key reaches»
       if (!(v && v.ok)) { unseen.push(target); continue; }
       if (!r.key) { keyless.push(target); continue; }   // law 2: a row's identity cannot alias — no conversation id yet, no row

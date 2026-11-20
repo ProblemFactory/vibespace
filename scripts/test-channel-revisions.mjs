@@ -749,9 +749,9 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   }
   const wr = await wrongLeg(ENG, 'wrong-recipient');
   // (engineSource inlines the access family — its wake-time judge is mutated in the same text)
-  const STILL_JUDGE = '    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members)) } : e0;\n';
+  const STILL_JUDGE = '    let e = hasVia ? { ...e0, watchers: e0.watchers.filter((it) => F.memberStill(it.watcher, members, { rows: e0.access })) } : e0;';   // lane lg-group-parents (restack 415): the judge as merged — the chain's cure (D) hands the grain's access rows (its comment follows the line)
   ok(src.split(STILL_JUDGE).length === 2, 'control setup: the wake-time membership judge (channels-access wakeEffOf) is present once');
-  const wrR = await wrongLeg(MUT.load('src/server/channels-engine.js', src.replace(STILL_JUDGE, '    let e = e0;\n'), 'no-member-judge'), 'wrong-recipient-red');
+  const wrR = await wrongLeg(MUT.load('src/server/channels-engine.js', src.replace(STILL_JUDGE, '    let e = e0;'), 'no-member-judge'), 'wrong-recipient-red');
   ok(wr.said === 1 && wr.all === 0, `L5: kept, said once — then the read lands and says NOT a member: the kept message reaches nobody (${wr.all} records)`, J(wr));
   ok(wrR.all >= 1, `RED CONTROL: without the wake-time membership judge the member the read excludes is handed it (${wrR.all} records)`, J(wrR));
 

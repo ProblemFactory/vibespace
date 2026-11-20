@@ -240,9 +240,9 @@ function inboxOfOver({ deliver = () => null, activeSessions = null, isSocket = s
  * {job, grant}` sets or clears a job's or schedule's grant to resume its conversation after that conversation was ended on purpose.
  * The person gave the verb to the key — that IS the delegation; no second fence. The job's OWNER conversation must be one the key
  * reaches (the engine's ONE reach rule: opener / grant / instance — an ended owner is judged by its id). The row records the
- * key as who set it. `jobs` = () => the jobs engine; `keyNameOf(keyId)` = the key's name for the record (the window line says it).
+ * key as who set it. `jobs` = () => the jobs engine; `keyNameOf(keyId)` = the key's name for the record (the window line says it). `lineageOf(cid)` = the owner's Task Group ancestors (lane lg-group-parents).
  */
-function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf = () => [] } = {}) {
+function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf = () => [], lineageOf = () => [] } = {}) {
   return {
     'jobs.wakeGrant': async (args, { caller, keyId, identity, reach }) => {   // (async: THE ONE DOOR lands the change off the loop — src/jobs.js changeWakeGrants)
       const jm = jobs();
@@ -253,8 +253,8 @@ function automationVerbs({ jobs = () => null, keyNameOf = () => null, groupsOf =
       // rule WITH that conversation's Task Groups — a job the key does not reach is told no more than that it exists
       const top = job.cronParent ? (jm.jobs.get(job.cronParent) || null) : job;
       const owner = top && top.owner && top.owner.conversation && top.owner.conversation.id;
-      let groups = []; try { groups = owner ? (groupsOf(owner) || []) : []; } catch { groups = []; }
-      const v = owner ? reach({ conversationId: owner, webuiId: null, groups, ...require('./groups-hold.js').fact() }) : null;   // the hold's fact: while held the owner's groups are UNKNOWN
+      let groups = [], inherited = []; try { groups = owner ? (groupsOf(owner) || []) : []; } catch { groups = []; } try { const l = owner ? lineageOf(owner) : []; inherited = Array.isArray(l) ? l : null; } catch { inherited = null; }   // lane lg-group-parents (restack 415): the owner's ancestors — a read that throws is null (unreadable, never «no parents»)
+      const v = owner ? reach({ conversationId: owner, webuiId: null, groups, inherited: inherited || [], ...(inherited === null ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() }) : null;   // the hold's fact: while held the owner's groups are UNKNOWN   // lane lg-group-parents (restack 415): + the lineage
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.code === 'groups_unreadable' && v.why) || 'the key does not reach that job' };
       if (job.cronParent) return { ok: false, code: 'bad_args', why: `${job.id} is a run of the schedule ${job.cronParent} — set the schedule's grant` };
       let name = null; try { name = keyId ? keyNameOf(keyId) : null; } catch { name = null; }

@@ -477,8 +477,8 @@ console.log('⑮ the key\'s verb: reach first, with the owner conversation\'s Ta
   const cron2 = jm.create({ kind: 'cron', name: 'daily', schedule: { everyMs: 3600e3 * 24 }, action: { type: 'notify', text: 'd' }, owner: own, access: { view: 'group', control: 'session' } }, { conversationId: O, sessionId: 's-o', sessionCreatedAt: 1, groups: new Set() }).job;
   const verbOf = (M) => M.automationVerbs({ jobs: () => jm, groupsOf: () => [], keyNameOf: () => 'dispatch' })['jobs.wakeGrant'];   // held: the owner's groups read []
   const DW_SRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
-  const AT_FACT = "reach({ conversationId: owner, webuiId: null, groups, ...require('./groups-hold.js').fact() })";
-  const DWD = mutantCopies('wake-grant-held', REPO).load('src/server/delivery-wake.js', anchored(DW_SRC, AT_FACT, "reach({ conversationId: owner, webuiId: null, groups })", 'wake-grant-fact-dropped'), 'wake-grant-fact-dropped');
+  const AT_FACT = "reach({ conversationId: owner, webuiId: null, groups, inherited: inherited || [], ...(inherited === null ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact() })";   // lane lg-group-parents (restack 415): + the owner's lineage
+  const DWD = mutantCopies('wake-grant-held', REPO).load('src/server/delivery-wake.js', anchored(DW_SRC, AT_FACT, "reach({ conversationId: owner, webuiId: null, groups, inherited: inherited || [], ...(inherited === null ? { groupsUnreadable: true } : {}) })", 'wake-grant-fact-dropped'), 'wake-grant-fact-dropped');
   const CTX = { caller: {}, keyId: 'K-1', identity: 'automation:K-1', reach: reachExc };
   GH.setHeld(() => true);
   let h1, h1Wrote, hRed;

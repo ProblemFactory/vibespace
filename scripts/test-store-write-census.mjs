@@ -1308,7 +1308,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           ["src/server/browser-trace.js", "{ groups: [{ key: pid, entries: files }], now: t }", 1, "other"],
           ["src/server/channel-api.js", "{ id: `shape-${crypto.randomBytes(5).toString('hex", 1, "record"],
           ["src/server/channels-access.js", "{ cid: String(x.cid), name: x.name || null, groups", 1, "roster"],
-          ["src/server/channels-access.js", "{ gen, id: ctx.id, groups: g, n, by: new Map() }", 1, "record"],
+          ["src/server/channels-access.js", "{ gen, id: ctx.id, groups: g, n, inh: ih, inhN: ih", 1, "record"],   // lane lg-group-parents (restack 415): the memo carries the lineage beside the groups
           ["src/server/channels-access.js", "{ cid: String(x.cid), groups: Array.isArray(x.grou", 1, "roster"],
           ["src/server/channels-access.js", "{ id: String(a.id), kind: a.kind || '', vendor: a.", 1, "answer"],
           ["src/server/channels-auth.js", "{ flowId: st.flowId, mode: st.mode, running: !!st.", 1, "answer"],
@@ -1336,8 +1336,8 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           ["src/server/migrations.js", "{ archived: archived.length, groups: Object.keys(g", 1, "other"],
           ["src/server/migrations.js", "{ groups: 0, rows: 0, folders: 0, notes: 0, merged", 1, "other"],
           ["src/server/mounts-plugins-wiring.js", "{ sessions, groups }", 1, "answer"],
-          ["src/server/mounts-plugins-wiring.js", "{ conversationId: cid, sessionKey, name, groups }", 1, "roster"],
-          ["src/server/roster-pass.js", "{ cid, name: s.name || null, groups, webuiId: id, ", 1, "roster"],
+          ["src/server/mounts-plugins-wiring.js", "{ conversationId: cid, sessionKey, name, groups, i", 1, "roster"],   // lane lg-group-parents (restack 415): endedKeyOf carries the record's lineage
+          ["src/server/roster-pass.js", "{ cid, name: s.name || null, groups, inherited, we", 1, "roster"],   // lane lg-group-parents (restack 415): the roster row carries the lineage
           ["src/server/search-index.js", "{ groups: copiesOf(null, { cachedOnly: true }), wh", 2, "other"],
           ["src/server/search-index.js", "{ groups: copiesOf(null), whole: true }", 1, "other"],
           ["src/server/search-index.js", "{ groups, whole: !partial.length }", 1, "other"],
@@ -1407,7 +1407,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
         const loses = (f, from, to) => { const t = BF.get(f), t2 = t.replace(from, to); return t2 !== t && bcensus(new Map([[f, t2]]), BROWS.filter((r) => r[0] === f)).problems.some((p) => p.startsWith(`${f}: NO ROW`)); };
         ok(SHAPES.every((s) => owed(s) === 1) && WITH.every((s) => owed(s) === 0) && owed("const p = { kind: 'agent', id: cid, groups: [g /* ...require('./groups-hold.js').fact() */] };") === 1 && owed("const p = { kind: 'agent', id: cid, groups: g, groupsUnreadable: false };") === 1
           && loses('src/server/channels-outbound.js', "...(!live && a.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };", "msgLevelFor: () => 'none' };")
-          && loses('src/agent-routes.js', "groups: myGroups, ...(require('./server/groups-hold.js').fact()),", 'groups: myGroups,'),
+          && loses('src/agent-routes.js', "groups: myGroups, inheritedGroups, ...(require('./server/groups-hold.js').fact()),", 'groups: myGroups, inheritedGroups,'),   // lane lg-group-parents (restack 415): the principal's lineage beside its groups
           `CONTROL: each of the ${SHAPES.length} shapes (a principal, a mayAttach's taskIds, a { cid, groups } watch, a reach target, a principal over seven lines, a caller re-built for a use door) planted with no fact is RED by name; with the fact (a spread, a key, an Object.assign) it owes nothing; a fact named only in a comment, or a literal false, is RED; channels-outbound's stash-gate principal and agent-routes' multi-line one that LOSE the fact are RED`);
       }
       {
@@ -1451,7 +1451,7 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
           '⑨ follow-owed (1): the hold\'s For-you item says the lost wake — both detail sentences, their zh / ja rows', rows);
         ok(/say\(pw \|\| createRefusalWords\(r, t\) \|\| buildRefusalWords\(r, t\) \|\| whoRefusalWords\(r, t\) \|\|/.test(readSrc('src/lib/browser-new-profile.js')) && /case 'TASK_GROUPS_UNREAD': return t\(/.test(readSrc('src/lib/browser-who-model.js')),
           '⑨ follow-owed (4): the create dialog words the who list\'s refusals — the hold among them — in the page\'s words (zh / ja rows), never the server\'s English');
-        ok(/if \(require\('\.\/groups-hold\.js'\)\.held\(\) \|\| \(p\.principal && p\.principal\.groupsUnreadable === true\)\) return null;   \/\/ Task Groups held unread, or the card filed while they were/.test(readSrc('src/server/channel-api-cards.js')) && /groups: p\.principal\.groups \|\| \[\], \.\.\.\(p\.principal\.groupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\) \}\);/.test(readSrc('src/server/channel-api-cards.js')),
+        ok(/if \(require\('\.\/groups-hold\.js'\)\.held\(\) \|\| \(p\.principal && p\.principal\.groupsUnreadable === true\)\) return null;   \/\/ Task Groups held unread, or the card filed while they were/.test(readSrc('src/server/channel-api-cards.js')) && /groups: p\.principal\.groups \|\| \[\], inheritedGroups: p\.principal\.inheritedGroups \|\| \[\], \.\.\.\(p\.principal\.groupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\) \}\);/.test(readSrc('src/server/channel-api-cards.js')),
           '⑨ follow-owed (3): a recorded proposal\'s card never ENDS «withdrawn» on an unread tier — its liveness answers null while held AND for a card filed while held (its principal\'s own mark rides ctxOf too)');
         { const CO = readSrc('src/server/channels-outbound.js'), WT = readSrc('src/server/window-targets-engine.js');
           ok(/const drafterGroupsOf = \(ctx\) => [^\n]*\.\.\.\(ctx\.groupsUnreadable === true \? \{ drafterGroupsUnreadable: true \} : \{\}\)/.test(CO) && /\.\.\.\(!live && p\.drafterGroupsUnreadable === true \? \{ groupsUnreadable: true \} : \{\}\), \.\.\.require\('\.\/groups-hold\.js'\)\.fact\(\)/.test(CO) && !/groupsOfSession\(String\(d\.id\)\)/.test(CO)
