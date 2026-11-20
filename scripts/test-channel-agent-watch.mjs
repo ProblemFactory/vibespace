@@ -2060,8 +2060,12 @@ try {
     `(a) a refused block's re-hold is written UNDER its hold ⇒ the account window queued behind it found ${g.a2.why}, the card kept 60, the second press carried them: Announcements' 30 held rows in ${g.annOldCalls} billed call (beb0cc795: 2 — the queued window, then the second press)`, J2s(g));
   const m = lateReholdMutant16();
   const r = await reholdLeg16(MUT.load('src/server/channels-engine.js', m.cut, 'held-late-rehold'), 'e16-rehold-red');
-  ok(m.cut !== m.src && r.annOldCalls === 2 && r.a2.ok && r.a2.n === 30,
-    `CONTROL «re-hold after the block» (beb0cc795): the same run ⇒ the queued window billed Announcements' ${r.a2.n} AND the card kept them — ${r.annOldCalls} billed calls carry the same held rows`, J2s({ calls: r.calls, a2: r.a2, mid: r.mid }));
+  // THE SYMPTOM ONLY THIS CURE PREVENTS (lane lg-text-legs-3, 2.369.413 checkpoint 1's hosted red): the queued window bills
+  // rows the card still holds. The old fault's second bill (the second press re-billing those rows) is now ALSO stopped by
+  // B-43bc's hand-over mark (one billed turn a receiving conversation, read at the scope digest's site) — a second belt, so
+  // the double bill is not this control's to count
+  ok(m.cut !== m.src && r.a2.ok && r.a2.n === 30 && J2s(r.mid.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }),
+    `CONTROL «re-hold after the block» (beb0cc795): the same run ⇒ the queued window billed Announcements' ${r.a2.n} while the card still held them (${J2s(r.mid.rows)}) — the same held rows billed AND kept (${r.annOldCalls} billed call(s) carry them; the hand-over mark stops the second press re-billing them)`, J2s({ calls: r.calls, a2: r.a2, mid: r.mid }));
 } catch (e) { ok(false, '⑬ (a) threw on this tree: ' + ((e && e.stack) || e)); }
 // (b) A STOP INSIDE THE BLOCK (repro/accept-r15/skep-midflight.mjs (A)): the press's ladder never answers, the stores are flushed, the
 // engine stops; the next boot ⇒ exactly ONE held request for those rows (the same one, open again with its 60) and ONE open card (its
