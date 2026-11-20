@@ -13,7 +13,6 @@ This file is the engineers' record of every release: the lanes, the verification
 - LEGS: test-queue-putback §6b (fast) — the file at the moment each record is said; a MADE RESTART at +50 ms rebuilds the Queued bubble + strip row; edit / removal / hand-over first in the file; a turn's init / running / result in the file when said; MUTANTS (the base whole) red. test-claude-steer-chrome §B ⑧c / ⑧d / ⑧e (heavy): restarts MADE 50 ms after a hold / a turn's end / a turn's start, each reading the wrapper's file at that instant, then the page. test-queue-putback's row restated 0.2 → 3.5 s (measured 3.4 s), the fast cap 1519 → 1523 s.
 - FOUND, NOT MINE: the hub trims its own in-memory buffer to 500 KB past 750 KB with no pin on held copies (src/server/stdout/claude-stream-json.js:523) — a held copy can go before the first page attach; records said in the few ms between a hub's boot read and its dtach attach are lost (dtach replays nothing); pipe sessions (off by default) draw no held copy after a restart.
 
-
 ### bl-machines-b — B-77ed's remainder: a Windows machine's login shell is asked when its agent starts conversations under one
 - THE GAP (found by the read of the .413 pins cure, ruled 主开发 2026-11-20 06:16Z / 07:52Z): a Windows machine WITH a POSIX shell (Git Bash) passes the hub's door and starts its conversations under `sh -lc` (src/spawn/dial.js), yet `loginConfigDir` (src/machine-probes.js) returned '' on win32: a CLAUDE_CONFIG_DIR set by that login shell was never read there, and a key helper named in that folder could outrank the pick (B-77ed's harm on that road).
 - THE WHEN (the spawn's own test, never a second guess): the list the agent's LAST HELLO said (`posixShells` in src/agentd/agentd.js, kept as `posixShellsSaid`, handed to the probe by `machineProbes.useShellsSaid`) holds `sh` — the very value the door read. None handed (the hub's own process) or no `sh` ⇒ '' (today).
@@ -108,6 +107,39 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE ROW (the EXCLUDED package's cure-2 readers, 2026-11-18): both suites already had a scratch hub home, the hooks switch and the identity stop, but their Chrome kept the real HOME (its crash handler's database lands in the machine user's ~/.config), their hub kept the machine user's XDG stores and session bus variable, and test-stage-preview had no SIGINT/SIGTERM stop.
 - THE CURE, as test-window-menu at its excluded-eight follow-up: the stop (exit, SIGINT, SIGTERM; srv and chrome as `let`, ended through `?.`) is installed BEFORE the worktree add; the hub's env drops DBUS_SESSION_BUS_ADDRESS and XDG_CONFIG/DATA/CACHE/STATE_HOME (XDG_RUNTIME_DIR stays: the device agent's socket rule is keyed by the scratch root); Chrome's env drops the bus variable and XDG_CONFIG_HOME, and its HOME is its profile dir; the identity stop runs over the worktree, the home and the profile. Dropping the variable does not cut the bus (libdbus falls back to XDG_RUNTIME_DIR/bus): the keyring stays away by --password-store=basic, and the comments now say so (test-window-menu's too, the same words). Both are heavy rows: their runs alone are the integrator's.
 
+### gmail-connect-wall — the client-swap notice's shoulds a person would notice (round w890up8gp; 主开发 r198)
+- **The name list:** a preset with many mounts no longer has its list cut mid-name by the store's 600-character param cut. It shows whole names in order while they fit (560), then «and {more} more.» — one sentence of its own, with zh / ja.
+- **Legs (test-mounts-oauth §5):**
+  - many mounts: whole names only, the count of the rest, every judged fact printed;
+  - a FULL tray: said once an episode, the episode ending when the item is filed;
+  - the doors that ask the check: _adoptClient and _mintedImport driven through a spy, remove() and update() pinned by their own lines (they move folders and children);
+  - the RESTART through a new MountManager's own load and a new producer over the same For-you store.
+  - setMinted's ordering is commented: the check runs in a later microtask, so an await inside setMinted would break it.
+- **Left, named:**
+  - the door's two toasts (client code, no fast harness; the browser road is pinned by its text);
+  - the dead supersede close (one itemKey per key: the store re-opens the same item — correct);
+  - the memo's write rides the store's existing synchronous _save (its sync-write debt, unchanged);
+  - the names in the detail are the record's own labels, as the producer's other items carry (PROVE test-record-clear-census-interp stands).
+
+### bl-ci — B-9ff2 step 3 (the coordinator's r172 / r180): an unknown record never dropped without a trace; a withdrawn card's word; the dump legs
+- (1) THE LAW «an unknown record is never dropped without a trace»: message-manager _processSystem used to give a system subtype on NEITHER list that carries a call id (tool_use_id) no breadcrumb, no record-kinds count and no card. It then fell through the task path, which matches task_* only. 2.1.328's late_allow_not_run was one, unlisted. Now:
+  - an unknown subtype with a call id is the fall-back card by its own rule, with its kinds count;
+  - EVERY subtype off the handled list is counted by the breadcrumb (cli-unknown-system-subtype), a call id or not, so the declared card-less late_allow_not_run is counted too.
+  test-unknown-records §1b holds it, with a red control on the 3ad452df5 gate.
+- (2) A WITHDRAWN CARD'S WORD (no late-Allow door: after the cancel our card offers no Allow): _processControlCancel wrote `denied`, so a card nobody denied read «Denied». It now writes `cancelled`, whose words («Not run — the request was withdrawn or the turn ended before an answer») the other order already used. The rules:
+  - live and rebuilt, whichever record comes first;
+  - «Denied» only when somebody denied;
+  - the withdrawal stands over an answer of ours, as a helper's ask's does;
+  - a call that ran and was stopped keeps «stopped»;
+  - a stale press is refused by the table;
+  - an AskUserQuestion card withdrawn reads «Cancelled», never «Answered».
+  test-helper-ask ⑱g holds it, with a red control on the 3ad452df5 line.
+- (3) THE DUMP LEGS (test-record-shape):
+  - every sentence of every tracked dump (182 in 12 builds) resolves to THE row of its own text;
+  - the doors census BITES: each of its 32 searchable «nothing» names is searched (one fixed-string whole-word git grep over src/, server.js and data/bin) and has no reader. Common words are listed unsearched, and two same-named other things are named (ACP's resource_link reader, a provider test's not_found_error match). A planted reader is named;
+  - the 2.1.328 red control reads exact counts (3 unknown notices by name, 1 drift card, 1 ledger row; the card's shape printed);
+  - the span's comment and kb line say that a build BETWEEN two tracked dumps is read as inside the span.
+- (4) THE CORRECTION'S CALL SITE for any number of corrections (2.1.328 has two: nHn = m9t's text, and rHn). Each is found by its content and judged by the row of its own text; the pick may name them all in its remote-cancel branch, in any shape, with ww the other branch; the call site read is PRINTED. The binary is on no machine of ours: the hosted run on 2.1.328 proves it.
 
 ## 2.369.413 — 2026-11-20
 
