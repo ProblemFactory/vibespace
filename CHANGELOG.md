@@ -21,6 +21,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - For you's item about storages still on a replaced company client lists whole names, then how many more, when there are many.
 - A permission card the agent withdrew no longer says «Denied»: it says «Not run», as it did when the result came first. «Denied» means somebody denied it.
 - A comment in a document opened from a conversation that has since stopped now waits for that conversation, even when another live one also wrote the file.
+- A file saved into a machine's folder that waits behind another machine's folder (two nested rows) is now refused and says why, not left on this computer.
 
 ## 2.369.413 — 2026-11-20
 
