@@ -9763,6 +9763,8 @@ export default {
   "the proposal did not mention this line — kept": "提案はこの行に触れていません — 残します",
   "no reason given": "理由なし",
   "Discard": "破棄",
+  "Close without saving?": "保存せずに閉じますか？",
+  "Your edits were not saved: {msg}. Close the editor and discard them?": "編集内容は保存されていません：{msg}。エディターを閉じて編集内容を破棄しますか？",
   "Draft from my verdicts": "判定から下書き",
   "Asks {model} to rewrite this block from your ✓ / ✗ answers — it proposes, you save": "{model} が ✓ / ✗ の回答からこの欄の書き直しを提案します — 保存するのはあなたです",
   "Drafting…": "下書き中…",

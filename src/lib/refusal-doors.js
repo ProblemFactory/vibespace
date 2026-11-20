@@ -3,25 +3,33 @@
 // callers hand in what they own; scripts/test-safe-fs-no-inline.mjs ⑥ / ⑦ drive both with a RED each.
 
 /** A SAVE-AND-CLOSE editor (the CLI's external editor opened by Ctrl+G): the window closes, and the CLI hears «done», only after
- *  its save LANDED. A refused save keeps the window, the text and its unsaved mark ONCE (the release closed it and told the CLI
- *  «done» over the old file: the edits were lost); the toolbar says why. The NEXT ✕ closes it whatever the storage says — never a
- *  window that cannot close (a machine gone, a read-only path) — and the CLI hears «done» only if that last save landed; else
- *  nothing (the hub re-delivers the pending edit at the next attach). A programmatic close is never refused.
- *  `ed` = { save(): Promise<boolean>, signal(), close(), ready(): boolean } → { onCloseRequest(), onClose() } */
+ *  its save LANDED — or after the person chose to discard. A refused save keeps the window, the text and its unsaved mark (the
+ *  release closed it and told the CLI «done» over the old file: the edits were lost); the toolbar says why. The NEXT ✕ ASKS —
+ *  close and discard, or keep editing: never a window that cannot close (a machine gone, a read-only path), never a silent loss.
+ *  Discarded ⇒ the CLI reads the file as it is on disk (a quit without saving). A save that lands elsewhere (Ctrl+S, the Save
+ *  button) clears the refusal (`landed()`): the next ✕ saves first again. A programmatic close is never refused; its refused
+ *  save tells the CLI nothing (the hub re-delivers the pending edit at the next attach).
+ *  `ed` = { save(): Promise<boolean>, signal(), close(), ready(): boolean, confirmDiscard(): Promise<boolean> }
+ *  → { onCloseRequest(), onClose(), landed() } */
 export function saveCloseDoors(ed) {
-  let saved = false, pending = false, refused = false;
+  let saved = false, pending = false, refused = false, discarded = false;
   return {
     onCloseRequest() {
-      if (saved || refused || !ed.ready()) return true;   // landed, or refused once already (the next ✕ closes), or nothing loaded yet
-      if (pending) return false;               // a second ✕ while the save is out: one save at a time
+      if (saved || discarded || !ed.ready()) return true;   // landed, discarded by the person, or nothing loaded yet
+      if (pending) return false;                            // a ✕ while a save or the question is out: one at a time
       pending = true;
+      if (refused) {   // its save was refused: ASK — close and discard, or keep editing
+        Promise.resolve(ed.confirmDiscard()).then((yes) => { pending = false; if (yes) { discarded = true; ed.close(); } }, () => { pending = false; });
+        return false;
+      }
       Promise.resolve(ed.save()).then((ok) => { pending = false; if (ok) { saved = true; ed.close(); } else refused = true; }, () => { pending = false; refused = true; });
-      return false;                            // the window stays until the save landed
+      return false;                                         // the window stays until the save landed
     },
     onClose() {
-      if (saved) return ed.signal();
+      if (saved || discarded) return ed.signal();
       return Promise.resolve(ed.save()).then((ok) => { if (ok) return ed.signal(); return undefined; }, () => undefined);
     },
+    landed() { refused = false; },
   };
 }
 

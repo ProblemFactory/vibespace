@@ -9764,6 +9764,8 @@ export default {
   "the proposal did not mention this line — kept": "提议没提这一行——默认保留",
   "no reason given": "没给理由",
   "Discard": "放弃",
+  "Close without saving?": "不保存就关闭？",
+  "Your edits were not saved: {msg}. Close the editor and discard them?": "你的修改没有保存：{msg}。关闭编辑器并放弃这些修改吗？",
   "Draft from my verdicts": "从我的判定起草",
   "Asks {model} to rewrite this block from your ✓ / ✗ answers — it proposes, you save": "让 {model} 按你的 ✓ / ✗ 改写这一段——它只提议，由你保存",
   "Drafting…": "起草中…",

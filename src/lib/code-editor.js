@@ -396,7 +396,9 @@ class CodeEditor {
     const prevOnClose = this.winInfo.onClose;
     // B-3b03 follow-up (a MUST of its round's point 5): a save-and-close window closes — and the CLI hears «done» — only after its
     // save LANDED; a refused save keeps the window, the text and its unsaved mark (src/lib/refusal-doors.js)
-    const doors = this.onSaveAndClose ? saveCloseDoors({ save: () => this.save(), signal: () => this.onSaveAndClose(), close: () => this.app?.wm?.closeWindow?.(this.winInfo.id), ready: () => !!this.editorView }) : null;
+    const doors = this.onSaveAndClose ? saveCloseDoors({ save: () => this.save(), signal: () => this.onSaveAndClose(), close: () => this.app?.wm?.closeWindow?.(this.winInfo.id), ready: () => !!this.editorView,
+      confirmDiscard: () => showConfirmDialog({ title: t('Close without saving?'), message: t('Your edits were not saved: {msg}. Close the editor and discard them?', { msg: this._lastSaveError || t('Error') }), confirmText: t('Discard'), danger: true }) }) : null;
+    this._closeDoors = doors;   // a save that lands elsewhere (Ctrl+S, the Save button) clears its refusal
     if (doors) { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest()); }
     this.winInfo.onClose = () => {
       if (this._themeObserver) this._themeObserver.disconnect();
@@ -578,9 +580,11 @@ class CodeEditor {
       this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
       setTimeout(() => { if (!this.modified) this.saveIndicator.textContent = ''; }, 2000);
+      this._closeDoors?.landed();
       return true;
     } catch (err) {
       this.saveIndicator.textContent = `✕ ${err.message || t('Error')}`; this.saveIndicator.style.color = 'var(--red)';
+      this._lastSaveError = err.message || t('Error');
       return false;   // B-3b03 follow-up: the save-and-close door reads it (never «done» over a refused save)
     }
   }
