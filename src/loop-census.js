@@ -76,7 +76,7 @@ const OWNERS = Object.freeze([
   { id: 'interface', words: 'the interface: the page protocol and its fan-out, sign-in, the page-written stores — and the hub process’s own (the listener, boot and exit, the store writer, the loop’s instrument)',
     rules: [/^src\/agentd\/(?:mux|answer-caps)\.js$/,   // lane lg-remote-hardening (B-7f0b D8): the device link's bound beside its frames
       name('ws-heartbeat|ws-keepalive|session-broadcast|sync-store|op-seq|static-public|app-csp|csp-reports|frame-host|auth|clerk-auth|write-origin|tls|tls-plan|login-words|persistence|user-state-ops|editor|custom-theme-normalize|retired-settings|desktop-record|day-one|phone-doors|changelog-style|instance-url'),
-      name('runtime-boot|runtime-floor|node-runtime|boot-phase|boot-trace|migration-runner|ops-routes|exit-hook|exit-settle|child-starter|child-starter-proc|store-writer|store-writer-worker|store-read|store-exit-keeper|telemetry|opslog|timed-sync|fd-budget|fd-gauge|memory-census|memory-sampler|worker-memory|cpu-capture|sync-fs-witness|sync-fs-witness-worker'),
+      name('runtime-boot|runtime-floor|node-runtime|boot-phase|boot-trace|migration-runner|ops-routes|exit-hook|exit-settle|child-starter|child-starter-proc|store-writer|store-writer-worker|store-read|store-hold|store-exit-keeper|telemetry|opslog|timed-sync|fd-budget|fd-gauge|memory-census|memory-sampler|worker-memory|cpu-capture|sync-fs-witness|sync-fs-witness-worker'),
       lead('loop|incident'),
       name('ui-needs')] },   // lane ui-needs-a-button: the need table of the page's sentences (PURE, no state; read by test-needs-doors)
   { id: 'vault', words: 'the vault: the key and every sealed entry, the mask and its belt, the integration credentials, web logins',

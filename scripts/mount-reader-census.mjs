@@ -130,6 +130,7 @@ export const ROWS = [
   ['src/server/browser-bindings.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-logins.js', 'own-tree', 1, null, `${DATA} (lane vault-login r27: data/browser-login-reminders.json — 32-hex digests of 7-day pending reminders already filed, kept outside vault.json so aged .390 pending entries incur 0 writes on unlock/list/fill; nothing a person names)`],
   ['src/server/writes-lost.js', 'own-tree', 1, null, DATA + ' (lane cli-2-1-319-records r2: data/writes-lost.json — a lost write\'s warning, kept past its process)'],
+  ['src/store-hold.js', 'own-tree', 3, null, DATA + ' (lane lg-store-writes, B-225b: a persistence store read at the start, read again off the loop while held, and read back when a file appeared since the start)'],
   ['src/server/browser-builds-keeper.js', 'own-tree', 8, null, DATA],
   ['src/server/browser-cli-install.js', 'own-tree', 2, null, DATA],
   ['src/server/browser-clone-run.js', 'own-tree', 2, null, DATA],

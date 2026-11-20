@@ -242,6 +242,7 @@ const ROWS = [
   ["src/server/session-stdout.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/session-stdout.js","writeSessionMeta",3,"durable","boot-restore, browser-env, usage-routes, channels liveness, weekly-lanes-unfold, reading-repair (each reads the files itself)","NOT idempotent: a live socket without its meta is restored as a stranger","a session's FIRST meta (a new socket) — its UPDATES go through the store writer"],
   ["src/server/spend-guard.js","*",11,"durable","—","NOT idempotent: money / authority / a credential","the unattended-spend budget + its journal (money) + its birth marker (B-23c3: written after every ledger write, so a removed ledger or an older copy is told apart from a first start) — must be on disk before the answer; B-ef83 +7: the ledger's LOCK (data/spend-budget.lock — authority: a lock lost is two processes counting one ledger): its temp linked into place (or created exclusively and written where the folder makes no hard link), a stale lock set aside and removed, and its removal at the process's exit"],
+  ["src/store-hold.js","*",5,"durable","—","a person's own store (layouts, the conversation list, bookmarks, themes, settings with the spend caps): a lost write is what the person made","THE STORE HOLD (lane lg-store-writes, B-225b): the ONE write of the persistence stores — whole bytes through a pid temp name, an exclusive create for a store read missing; persistence.js's own rows fall as each store moves onto it"],
   ["src/server/stash-handover.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/sync-fs-witness-worker.js","*",1,"not-main","—","—","the witness's watchdog thread (its journal line on fd 2)"],
   ["src/store-exit-keeper.js","*",1,"not-main","—","—","round 4 (MUST 2): the writer's exit keeper thread — its ONE line on fd 2 at the exit's bound, then the process ends"],
@@ -2102,6 +2103,81 @@ console.log('⑬ every registry save of the browser keeper has its side (lands /
   ok(JSON.stringify(kx.unnamed) === JSON.stringify(['zzNewAct']), 'CONTROL (planted in a copy\'s text): a NEW keeper save without a stated side is red by name', kx.unnamed);
   const kl = judge(KSRC.replace(/^(  function setCap\([^\n]*\n)([\s\S]*?)\bcommitSync\(\)/m, '$1$2commit()'));
   ok(kl.notLanding.includes('setCap'), 'CONTROL (planted): a «lands» act whose landing became a plain commit() is red by name', kl.notLanding);
+}
+
+// ── ⑪ THE STORE HOLD (lane lg-store-writes, B-225b — 主开发's shape of 2026-11-20 04:37Z, R1–R13): src/store-hold.js, the helper the
+// persistence stores read and write through, its own legs ONCE. A held store has NO VALUE and its one write refuses by name; the
+// kind (unreadable / damaged / not-allowed); the ladder (silent rungs, then said); the lift; `missing` writes nothing and creates
+// EXCLUSIVELY (a file that appeared is adopted, never written over); every temp name carries the pid. Stand-ins for the storage.
+console.log('⑪ the store hold: a store that could not be read has no value, and nothing is written over it');
+{
+  const { scratchDir, anchored } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const HSRC = fs.readFileSync(path.join(REPO, 'src/store-hold.js'), 'utf8');
+  const HMOD = require(path.join(REPO, 'src/store-hold.js'));
+  const roots = [];
+  const failing = (file, code, fn) => { const rf = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (String(f) === file) throw Object.assign(new Error(`${code}: a stand-in`), { code }); return rf.call(this, f, ...a); }; try { return fn(); } finally { fs.readFileSync = rf; } };
+  const SEED = JSON.stringify({ v: 1, kept: 'the person\'s' });
+  const valid = (j) => !!j && typeof j === 'object' && j.v === 1;
+  const tried = (fn) => { try { fn(); return null; } catch (e) { return { code: e.code, status: e.status, held: e.held || null }; } };
+  try {
+    // (a) a read that FAILED (EIO): held, kind unreadable — no value; the read answers the refusal alone; the one write refuses
+    const scene = (Mod, name, code, bytes = SEED) => {
+      const d = scratchDir('hold-' + name); roots.push(d); const F = path.join(d, 'store.json'); fs.writeFileSync(F, bytes);
+      const delays = [], saids = [];
+      const h = Mod.create({ file: F, valid, log: { warn() { } }, schedule: (fn, ms) => { delays.push({ fn, ms }); return 0; }, onSaid: (x) => saids.push(x) });
+      const r = code ? failing(F, code, () => h.readAtStart()) : h.readAtStart();
+      const ans = tried(() => h.answer('a read'));
+      const wr = tried(() => h.write({ v: 1, kept: 'EMPTY' }));
+      return { F, h, r, held: h.held(), ans, wr, bytesKept: fs.readFileSync(F, 'utf8') === bytes, delays, saids };
+    };
+    const a = scene(HMOD, 'eio', 'EIO');
+    ok(a.r === 'held' && a.held && a.held.kind === 'unreadable' && a.held.rung === 'silent' && a.ans && a.ans.code === 'store_unread' && a.ans.status === 503 && a.ans.held.kind === 'unreadable' && a.wr && a.wr.code === 'store_unread' && a.bytesKept, '⑪ a read that FAILED (EIO): HELD, kind unreadable, NO value — a read answers the refusal alone (503 store_unread with the file, kind and code), the one write refuses, the bytes untouched', a.held);
+    const nb = scene(HMOD, 'eacces', 'EACCES'), dm = scene(HMOD, 'damaged', null, '{"v":1,"torn');
+    ok(nb.held && nb.held.kind === 'not-allowed' && dm.held && dm.held.kind === 'damaged' && dm.bytesKept, '⑪ the kind: a permission is not-allowed, bytes read whole that are not the store are damaged (and kept as they are)', { nb: nb.held, dm: dm.held });
+    // (b) THE LADDER: quick silent reads again (about 15 s), then said once; the hold lifts when the file reads
+    const SIL = HMOD.SILENT_RUNGS_MS;
+    ok(SIL.reduce((x, y) => x + y, 0) >= 10000 && SIL.reduce((x, y) => x + y, 0) <= 20000 && a.delays.length === 1 && a.delays[0].ms === SIL[0], '⑪ the ladder starts with the SILENT rungs (about 15 s in all), one read armed at a time', { SIL, first: a.delays[0] && a.delays[0].ms });
+    {
+      const d = scratchDir('hold-ladder'); roots.push(d); const F = path.join(d, 'store.json'); fs.writeFileSync(F, '{"torn');
+      const delays = [], saids = [], lifts = [];
+      const h = HMOD.create({ file: F, valid, log: { warn() { } }, schedule: (fn, ms) => { delays.push(ms); return 0; }, onSaid: (x) => saids.push(x.rung), onLift: (v) => lifts.push(v) });
+      h.readAtStart();
+      for (let i = 0; i < SIL.length; i++) await h.readAgain();
+      const saidAfterSilent = saids.slice();
+      fs.writeFileSync(F, SEED); const lifted = await h.readAgain();
+      ok(JSON.stringify(saidAfterSilent) === '["said"]' && delays.length > SIL.length && delays[SIL.length] >= 30000 && lifted === true && !h.held() && h.answer().kept === 'the person\'s' && lifts.length === 1, '⑪ past the silent rungs the hold is SAID once (then 30 s doubling); a read again that answers lifts it — the value is the file\'s, the lift\'s hook runs once', { saidAfterSilent, delays, lifted });
+    }
+    // (c) MISSING writes nothing; the first real change CREATES the file exclusively; a file that APPEARED is adopted, never written over
+    {
+      const d = scratchDir('hold-missing'); roots.push(d); const F = path.join(d, 'store.json');
+      const h = HMOD.create({ file: F, valid, log: { warn() { } }, schedule: () => 0 });
+      const r = h.readAtStart(); const nothing = !fs.existsSync(F);
+      fs.writeFileSync(F, SEED);   // a late mount: the real file arrives after the start read «missing»
+      const ap = tried(() => h.write({ v: 1, kept: 'a first-run default' }));
+      ok(r === 'missing' && nothing && ap && ap.code === 'store_appeared' && fs.readFileSync(F, 'utf8') === SEED && h.answer().kept === 'the person\'s', '⑪ «missing» writes NOTHING at the read; a real file that appeared later is READ and ADOPTED — the change refused by name, never a rename over it', ap);
+      const d2 = scratchDir('hold-create'); roots.push(d2); const F2 = path.join(d2, 'store.json');
+      const h2 = HMOD.create({ file: F2, valid, log: { warn() { } }, schedule: () => 0 }); h2.readAtStart();
+      const wf = fs.writeFileSync; const temps = [];
+      fs.writeFileSync = function (f, ...x) { temps.push(String(f)); return wf.call(this, f, ...x); };
+      try { h2.write({ v: 1, kept: 'born' }); } finally { fs.writeFileSync = wf; }
+      ok(JSON.parse(fs.readFileSync(F2, 'utf8')).kept === 'born' && temps.length === 1 && temps[0].includes(`.${process.pid}.tmp`), '⑪ the first real change creates the file (exclusive create), through a temp name that carries the PID (R10)', temps);
+    }
+    // REDs (anchored, in copies)
+    const HOLD_A = "    held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' };\n    tries = 0; arm();\n    return 'held';";
+    const EXCL_A = "      try { fs.linkSync(tmp, file); }";
+    ok([HOLD_A, EXCL_A].every((x) => HSRC.split(x).length === 2), 'control setup: the hold and the exclusive create are found once each in src/store-hold.js');
+    const xh = scene(mutantCopies('swc-hold-cut', REPO).load('src/store-hold.js', anchored(HSRC, HOLD_A, "    value = undefined; missing = false;   /* MUTANT: the release — a failed read starts EMPTY and is written over */\n    return 'data';", 'hold-cut'), 'hold-cut'), 'eio-red', 'EIO');
+    ok(!xh.held && !xh.wr && !xh.bytesKept, 'CONTROL (the hold cut, in a copy — the release): the failed read starts EMPTY and the one write saves the defaults OVER the file (red)', { held: xh.held, wr: xh.wr });
+    {
+      const XM = mutantCopies('swc-excl-cut', REPO).load('src/store-hold.js', anchored(HSRC, EXCL_A, "      try { fs.renameSync(tmp, file); }   /* MUTANT: a rename over whatever is there */", 'excl-cut'), 'excl-cut');
+      const d = scratchDir('hold-missing-red'); roots.push(d); const F = path.join(d, 'store.json');
+      const h = XM.create({ file: F, valid, log: { warn() { } }, schedule: () => 0 }); h.readAtStart();
+      fs.writeFileSync(F, SEED);
+      tried(() => h.write({ v: 1, kept: 'a first-run default' }));
+      ok(fs.readFileSync(F, 'utf8') !== SEED, 'CONTROL (the exclusive create cut, in a copy): the first-run default is renamed OVER the real file that arrived late (red)');
+    }
+  } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
