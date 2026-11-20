@@ -131,10 +131,6 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       });
       return (it && it.id) || null;
     },
-    // B-2566 (its round, MUST 1): THE ONE «NOT RUNNING» VERDICT the away failure files or renews on — the ladder's own wakeBlock
-    // (src/server/conversation-deliver.js: no peer lane, no live state, no live local session ⇒ cause not-running); a conversation
-    // that runs but takes no message mid-turn (opencode, ACP, Codex in a terminal, a wrapper restarting, a resume in progress) is LIVE
-    ownerAway: (cid) => { try { const b = deliver && typeof deliver.wakeBlock === 'function' ? deliver.wakeBlock(cid) : null; return !!(b && b.cause === 'not-running'); } catch { return false; } },
     // B-2566: the owner conversation received its notices — its away failures' items are over (done, by the agent: delivered)
     resolveAwayFailed: function resolveAwayFailed(jobId, cid) {
       if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => resolveAwayFailed(jobId, cid), 'the away-failure item\'s close'); return 0; }

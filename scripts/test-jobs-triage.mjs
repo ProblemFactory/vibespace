@@ -1432,19 +1432,20 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
   const okP = (c, n, facts) => { ok(c, n, facts); if (c) console.log('    ' + (typeof facts === 'string' ? facts : JSON.stringify(facts))); };
   const settle = async (fn, ms = 3000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (fn()) return true; await new Promise((r) => setTimeout(r, 5)); } return !!fn(); };
   const AWAY = { ok: false, reason: 'no live inbox for this conversation on any reachable machine', notRunning: true };
-  // the ladder's own verdicts, as conversation-deliver answers them: `live` = a peer lane (reachable, takes messages); `local` = a LOCAL
-  // conversation that runs but takes no message mid-turn (opencode / ACP / Codex in a terminal): no peer lane, its delivery parks, and
-  // wakeBlock calls it live (null); any other conversation is NOT RUNNING (wakeBlock: cause not-running)
+  // the ladder's own verdicts, as conversation-deliver answers them on the train (B-95fc): `live` = a peer lane (reachable, takes messages);
+  // `local` = a LOCAL conversation that runs but takes no message mid-turn (opencode / ACP / Codex in a terminal): no peer lane, its delivery
+  // parks; `ended` = a reachable PAIRED owner whose machine said it ended there (the remote rung's notRunning + remoteEnded). The park's own
+  // «live» (liveForWake) = a session here, or a reachable machine that has not said it ended — any other conversation is NOT RUNNING
   const rig = (name, wiringMod = wiring) => {
-    const dir = mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 }), logs = [], live = new Set(), local = new Set(), metas = [];
+    const dir = mkDir(name), todos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 }), logs = [], live = new Set(), local = new Set(), ended = new Set(), metas = [];
     const W = wiringMod.create({ app: fakeApp().app, dataDir: dir, broadcastAll: () => { }, userTodos: todos, log: (...a) => logs.push(a.join(' ')), serverSetting: () => undefined, taskGroups: null, activeSessions: new Map(),
       deliver: {
         peerReachable: (cid) => live.has(cid),
-        wakeBlock: (cid) => (live.has(cid) || local.has(cid) ? null : { cause: 'not-running', why: 'not running' }),
-        deliverToConversation: async (cid, text, opts) => { if (opts && opts.retry) metas.push({ cid, meta: opts.retry.meta }); return live.has(cid) ? { ok: true, lane: 'message' } : local.has(cid) ? { ok: false, parked: true, reason: 'busy', phase: 'mid-turn', busy: true } : AWAY; },
+        liveForWake: (cid) => local.has(cid) || (live.has(cid) && !ended.has(cid)),
+        deliverToConversation: async (cid, text, opts) => { if (opts && opts.retry) metas.push({ cid, meta: opts.retry.meta }); return ended.has(cid) ? { ok: false, lane: 'remote-message', hostId: 'h-paired', reason: 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true } : live.has(cid) ? { ok: true, lane: 'message' } : local.has(cid) ? { ok: false, parked: true, reason: 'busy', phase: 'mid-turn', busy: true } : AWAY; },
       } });
     W.initAfterListen();
-    return { W, jm: W.jm, todos, logs, live, local, metas, stop: () => { W.shutdown?.(); todos.stop(); } };
+    return { W, jm: W.jm, todos, logs, live, local, ended, metas, stop: () => { W.shutdown?.(); todos.stop(); } };
   };
   const owner = (cid) => ({ conversation: { backend: 'claude', id: cid }, sessionId: 's-' + cid, sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] });
   const task = (R, id, name, cid, extra = {}) => { const j = { id, kind: 'task', name, note: '', state: 'failed', desiredUp: false, owner: owner(cid), access: { view: 'group', control: 'session' }, runs: [{ startedAt: Date.now() - 60e3, endedAt: Date.now(), exit: 1, cause: 'error', lastLine: 'Error: frame 7 failed to render' }], notifyLog: [], ...extra }; R.jm.jobs.set(id, j); return j; };
@@ -1518,7 +1519,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     failOf(R, jb);   // inside the floor: the floor's road
     const am = (R.metas.find((m) => m.meta && m.meta.jobId === ja.id) || {}).meta;
     okP(awayItems(R, L).length === 0 && !ja.awayFail && !jb.awayFail && (jb.notifyLog || []).some((l) => l.lane === 'stash'),
-      'MUST 1: a LIVE local conversation with no peer lane — two failures within 30 s (the ladder parks the first, the floor stashes the second) ⇒ NO item: «not running» is the ladder\'s own verdict (wakeBlock) on every road',
+      'MUST 1: a LIVE local conversation with no peer lane — two failures within 30 s (the ladder parks the first, the floor stashes the second) ⇒ NO item: «not running» is the park\'s own verdict (liveForWake) on every road',
       { items: awayItems(R, L).length, firstParked: (ja.notifyLog || []).map((l) => l.lane), secondFloored: (jb.notifyLog || []).map((l) => l.lane) });
     // round item 10: the retry park carries the failure's OWN facts (its fall files THOSE)
     okP(!!am && am.ev && am.ev.away && am.ev.away.exit === 1 && am.ev.away.cause === 'error', 'the retry park\'s record carries the failure\'s own facts (exit 1, cause error) for its fall', am && am.ev);
@@ -1530,6 +1531,14 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     okP(je.awayFail.count === 1 && /: 1$/.test(awayItems(R, E)[0].text),
       'MUST 1: once the owner RUNS again, a failure renews nothing — neither the duplicate window\'s count nor the floor (count stays 1)', { count: je.awayFail.count, text: awayItems(R, E)[0].text });
     R.local.delete(E);
+    // the seam with B-95fc (主开发 r537): a PAIRED owner whose machine said it ended there is not live — for the park AND the named item
+    const X = cidOf(0xe003), jx = task(R, 'jb-away-x', 'render-x', X);
+    R.live.add(X); R.ended.add(X);
+    failOf(R, jx);
+    await settle(() => awayItems(R, X).length === 1);
+    okP(awayItems(R, X).length === 1 && jx.awayFail && jx.awayFail.count === 1,
+      'the seam (r537): a reachable PAIRED owner whose machine said the conversation ended there (remoteEnded) counts as NOT running — the named item is filed, as the park parks its wake', { items: awayItems(R, X).map((i) => i.text) });
+    R.live.delete(X); R.ended.delete(X);
   }
   // a SCHEDULE's identity is the schedule: three runs of one cron ⇒ ONE item under the cron's id
   const cr = schedule(R, 'jb-away-cron', 'nightly-export', B);
@@ -1676,7 +1685,7 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     R1.stop();
   }
   {
-    const R2 = rig('away-red-verdict', wiringWith(anchored(JSRC, "    if (!this._ownerAway(cid)) return null;   // round wem0s6k1d MUST 1: THE ONE VERDICT (the ladder's wakeBlock), at every road that files or renews\n", '', 'b2566-no-verdict'), 'b2566-no-verdict'));
+    const R2 = rig('away-red-verdict', wiringWith(anchored(JSRC, "    if (this._ownerLive(cid)) return null;   // round wem0s6k1d MUST 1 + 主开发 r537: THE ONE VERDICT, the park's own «live» (_ownerLive), at every road that files or renews\n", '', 'b2566-no-verdict'), 'b2566-no-verdict'));
     const L = cidOf(0xe101); R2.local.add(L);
     const ya = task(R2, 'jb-red-la', 'build-a', L), yb = task(R2, 'jb-red-lb', 'build-b', L);
     failOf(R2, ya);
@@ -1719,6 +1728,17 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     const cz = R5.jm.sayWakeWaiting(G);
     okP(!!cz && waitItems(R5, G).length === 1 && awayItems(R5, G).length === 1, 'RED CONTROL: the named notice counted for the conversation\'s item too (a copy of the engine) ⇒ TWO items for one away failure — the MUST 2 leg would be red', { conversationItem: !!cz, named: awayItems(R5, G).length });
     R5.stop();
+  }
+  {
+    // a SECOND spelling of «is the owner live» (the reach alone, as the first shape had it) misses the paired owner its machine said ended
+    const R8 = rig('away-red-reach', wiringWith(anchored(JSRC, '    if (this._ownerLive(cid)) return null;', '    if (this.d.peerReachable && this.d.peerReachable(cid)) return null;', 'b2566-reach-only'), 'b2566-reach-only'));
+    const X2 = cidOf(0xe501), jx2 = task(R8, 'jb-red-x', 'render-x', X2);
+    R8.live.add(X2); R8.ended.add(X2);
+    failOf(R8, jx2);
+    await settle(() => (jx2.notifyLog || []).some((l) => l.lane === 'stash'));
+    okP(awayItems(R8, X2).length === 0 && (jx2.notifyLog || []).some((l) => l.lane === 'stash'),
+      'RED CONTROL: the verdict spelt as the reach alone (a copy of the engine) ⇒ the paired owner its machine said ended is NOT said — the seam leg would be red', { items: awayItems(R8, X2).length, journal: (jx2.notifyLog || []).map((l) => l.lane) });
+    R8.stop();
   }
   {
     const R7 = rig('away-red-kept', wiringWith(anchored(JSRC, '    if ((filed || (v && v.kept === true)) && entry) (this._namedAway', '    if (filed && entry) (this._namedAway', 'b2566-kept-unmarked'), 'b2566-kept-unmarked'));   // stale-pins: kept (the control writes the pre-follow-up line back)

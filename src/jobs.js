@@ -1366,7 +1366,7 @@ class JobManager {
       // place-8 (主开发 2026-11-20 03:44Z): the floor paces SOCKET posts — an ENDED conversation takes none (the stamp may be an attempt
       // that reached nothing), so a floored delivery to it still owes its wake; the words are stashed first, parkEndedWake refuses a live one
       // B-95fc (round w00h341sv): it asks the park's own «live» (liveForWake — a remote conversation its machine said ended is not live), else the reach
-      const liveOf = this.d.liveForWake || this.d.peerReachable;
+      const liveOf = (c) => this._ownerLive(c);   // B-2566 (主开发 r537): the ONE «is the owner live» of this file — the away failure asks it too
       if (!(liveOf && liveOf(cid))) this._oweWake(cid, job, ev, { subscriber });
       if (!subscriber) this._awayFailure(cid, job, ev, this._lastStashed(cid, job));   // B-2566: …and a FAILURE reaches a person by name (the ONE verdict inside)
       this._dirty = true;
@@ -1538,7 +1538,8 @@ class JobManager {
     if (!cid || !job || !ev || ev.wake !== 'result' || ev.personTold === true) return null;
     const carried = ev.away && typeof ev.away === 'object' ? ev.away : null;   // a park's fall: the facts of ITS run (the schedule may have fired again)
     if (!carried && job.state !== 'failed') return null;
-    if (!this._ownerAway(cid)) return null;   // round wem0s6k1d MUST 1: THE ONE VERDICT (the ladder's wakeBlock), at every road that files or renews
+    if (typeof this.d.resolveAwayFailed !== 'function') return null;   // r537: filed only where its close is wired (the product's wiring) — never an item nobody closes
+    if (this._ownerLive(cid)) return null;   // round wem0s6k1d MUST 1 + 主开发 r537: THE ONE VERDICT, the park's own «live» (_ownerLive), at every road that files or renews
     const rec = (job.cronParent && this.jobs.get(job.cronParent)) || job;
     const run = (job.runs && job.runs[job.runs.length - 1]) || {}, f = carried || M.awayFactsOf(job);
     const ep = rec.awayFail && rec.awayFail.cid === cid ? rec.awayFail : null, at = now();
@@ -1555,8 +1556,10 @@ class JobManager {
   }
   /** B-2566 follow-up (3): a For-you filing that waited for the read LANDED (or not) — journalled on its job like any filing → the verdict */
   forYouAtRead(jobId, v, copy) { const job = jobId ? this.jobs.get(jobId) : null; return job ? this._forYouVerdict(job, v, String(copy || 'away-failed')) : null; }
-  /** B-2566: the ONE «not running» verdict (the wiring's ownerAway — the ladder's wakeBlock); no verdict wired ⇒ live (never said) */
-  _ownerAway(cid) { try { return typeof this.d.ownerAway === 'function' && this.d.ownerAway(cid) === true; } catch { return false; } }
+  /** B-2566 + B-95fc (主开发 r537): THE ONE «is the owner live» of this file — the park's own, as the train has it (the wiring's
+   *  liveForWake: a session here, or a machine that may carry it unless that machine said it ended there), else the reach (an engine
+   *  wired without it). The floor's owed wake and the away failure ask it; a remote owner its machine said ended is not live for either */
+  _ownerLive(cid) { const liveOf = this.d.liveForWake || this.d.peerReachable; return !!(liveOf && liveOf(cid)); }
   /** B-2566: the stash entry this engine just pushed for (cid, job) — the newest, or null */
   _lastStashed(cid, job) { const q = this.pendingNotifs.get(cid) || []; const e = q[q.length - 1]; return e && job && e.jobId === job.id ? e : null; }
   /** B-2566: is an away episode open for this job (a cron's: its schedule's) and this owner conversation? */
