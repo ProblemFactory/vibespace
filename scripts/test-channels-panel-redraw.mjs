@@ -63,6 +63,12 @@ const J = (x) => JSON.stringify(x);
 const RELAY = (msg) => `{ const __msg = (${msg}); for (const __h of [...window.app.ws.globalHandlers]) { try { __h(__msg); } catch (__e) {} } }`;
 /** The redraw bound: measured 2–4 ms here after the fix (90–115 before), ×10 slack for a loaded runner. */
 const BOUND_MS = 40;
+/** (主开发 05:29Z, the fifth hosted run 44676722011: one sample of three over 40 ms on a loaded shard, the product right) a redraw
+ *  time is judged by the MEDIAN OF FIVE — every one of the five answered and printed — against BOUND_MS, and NO single sample may
+ *  reach the cost before the fix (PRE_FIX_MS): that keeps ② red for the regression it exists to catch. Whole and partial each. */
+const PRE_FIX_MS = 90;
+const median = (xs) => xs.slice().sort((a, b) => a - b)[(xs.length - 1) >> 1];
+const redrawJudged = (xs) => Array.isArray(xs) && xs.length === 5 && xs.every((x) => Number.isFinite(x)) && median(xs) < BOUND_MS && Math.max(...xs) < PRE_FIX_MS;
 const N = 879;
 
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -174,8 +180,8 @@ const MEASURE = (d) => `(async () => {
   const s0 = snap();
   // the handler AND the layout it left dirty (a forced read right after — what the next frame pays)
   const ms = (dd) => { const t0 = performance.now(); fire(dd); void document.body.offsetHeight; return performance.now() - t0; };
-  const whole = [ms(d), ms(d), ms(d)];
-  const partial = [ms(one), ms(one), ms(one)];
+  const whole = [ms(d), ms(d), ms(d), ms(d), ms(d)];   // five each: the leg judges the median (BOUND_MS) and every sample under PRE_FIX_MS
+  const partial = [ms(one), ms(one), ms(one), ms(one), ms(one)];
   const s1 = snap();
   const same = (a, b) => a.length > 0 && a.length === b.length && a.every((x, i) => x === b[i]);
   const gaps = []; let last = performance.now(); let stop = false;
@@ -221,8 +227,8 @@ const O = await p1.evaljs(OPEN);
 ok(O.grows >= N && O.rows >= N && O.more === 0, `FIXTURE: every list read to its end by scrolling its end into view — the first screen (${O.grows} rows) and the account card (${O.rows} rows), ${O.clicks} scrolls, no button`, J(O));
 ok(O.kept === true, '① design 008: a page append KEEPS every row already drawn (the same elements, the new rows after them)', J(O));
 const M = await p1.evaljs(MEASURE(digest));
-console.log(`    (measured: whole ${M.whole.join(' / ')} ms · partial ${M.partial.join(' / ')} ms · storm ${M.storm.busyMs} ms busy of ${M.storm.wallMs} = ${M.storm.share} %, long frames ${M.storm.longGaps}, p95 ${M.storm.p95} ms)`);
-ok(M.whole.every((x) => x < BOUND_MS) && M.partial.every((x) => x < BOUND_MS), `② a partial digest naming EVERY row (design 008: the first read is bounded; a broadcast names changed rows) and one naming ONE row each redraw the 1 758-row panel in < ${BOUND_MS} ms (whole ${M.whole.join(' / ')}, partial ${M.partial.join(' / ')} — 90–115 ms before the fix)`, J(M));
+console.log(`    (measured: whole ${M.whole.join(' / ')} ms (median ${median(M.whole)}) · partial ${M.partial.join(' / ')} ms (median ${median(M.partial)}) · storm ${M.storm.busyMs} ms busy of ${M.storm.wallMs} = ${M.storm.share} %, long frames ${M.storm.longGaps}, p95 ${M.storm.p95} ms)`);
+ok(redrawJudged(M.whole) && redrawJudged(M.partial), `② a partial digest naming EVERY row (design 008: the first read is bounded; a broadcast names changed rows) and one naming ONE row each redraw the 1 758-row panel in < ${BOUND_MS} ms by the median of five, no sample at the pre-fix ${PRE_FIX_MS} ms (whole ${M.whole.join(' / ')} → ${median(M.whole)}, partial ${M.partial.join(' / ')} → ${median(M.partial)} — 90–115 ms before the fix)`, J(M));
 ok(M.sameGrows && M.sameRows && M.sameBox && M.sameList && M.samePart && M.sameSec, '② every row, the rows box, the group list, the Accounts part and the account section are the SAME elements after the redraws (kept and reconciled, never rebuilt)', J(M));
 ok(M.storm.n === 20 && M.storm.share < 15, `③ twenty broadcasts 250 ms apart keep the handler's share of the main thread under 15 % (${M.storm.share} % — 37 % before the fix)`, J(M.storm));
 // ═══ ④ the trusted click across a broadcast ═══
