@@ -29,6 +29,7 @@ import prettierGraphql from 'prettier/plugins/graphql';
 import { onFileChanged, sameFile } from './file-changed.js'; // §7.9: the server's file-changed signal
 import { writeFrame, hostAddress } from './frame-host.js'; // lane frame-host-preview: the HTML preview's frame
 import { fsErrorText } from './file-explorer-ops.js'; // lane file-preview-mount r2: a load / save refusal in the reader's language
+import { saveCloseDoors } from './refusal-doors.js'; // B-3b03 follow-up: a save-and-close window closes only after its save landed
 
 const PRETTIER_PLUGINS = [prettierBabel, prettierEstree, prettierHtml, prettierCss, prettierMarkdown, prettierTypescript, prettierYaml, prettierGraphql];
 
@@ -393,9 +394,13 @@ class CodeEditor {
     // cleanup + welcome check) BEFORE this async load completes — overwriting
     // it leaked temp files and never restored the welcome screen.
     const prevOnClose = this.winInfo.onClose;
+    // B-3b03 follow-up (a MUST of its round's point 5): a save-and-close window closes — and the CLI hears «done» — only after its
+    // save LANDED; a refused save keeps the window, the text and its unsaved mark (src/lib/refusal-doors.js)
+    const doors = this.onSaveAndClose ? saveCloseDoors({ save: () => this.save(), signal: () => this.onSaveAndClose(), close: () => this.app?.wm?.closeWindow?.(this.winInfo.id), ready: () => !!this.editorView }) : null;
+    if (doors) { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest()); }
     this.winInfo.onClose = () => {
       if (this._themeObserver) this._themeObserver.disconnect();
-      if (this.onSaveAndClose) { this.save().then(() => this.onSaveAndClose()); }
+      if (doors) doors.onClose();
       if (prevOnClose) prevOnClose();
     };
 
@@ -573,8 +578,10 @@ class CodeEditor {
       this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
       setTimeout(() => { if (!this.modified) this.saveIndicator.textContent = ''; }, 2000);
+      return true;
     } catch (err) {
       this.saveIndicator.textContent = `✕ ${err.message || t('Error')}`; this.saveIndicator.style.color = 'var(--red)';
+      return false;   // B-3b03 follow-up: the save-and-close door reads it (never «done» over a refused save)
     }
   }
 

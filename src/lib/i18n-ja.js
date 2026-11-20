@@ -1267,6 +1267,7 @@ export default {
   "Upload file/folder to working directory": "作業ディレクトリにファイル/フォルダをアップロード",
   "Upload folder": "フォルダをアップロード",
   "Uploaded {n}, {failed} couldn't be read (e.g. {name})": "{n} 件アップロード、{failed} 件は読み取れませんでした（例：{name}）",
+  "Uploaded {n}, {failed} not uploaded: {msg} (e.g. {name})": "{n} 件アップロード、{failed} 件はアップロードされていません：{msg}（例：{name}）",
   "Uploading {d}/{total}…": "アップロード中 {d}/{total}…",
   "Uploading {n} items…": "{n} 項目をアップロード中…",
   "Uploading {n} item…": "{n} 項目をアップロード中…",

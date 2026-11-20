@@ -2,6 +2,8 @@ import { escHtml, saveDraft, loadDraft, clearDraft, getStateSync, showContextMen
 import { UI_ICONS, FILE_ICONS } from './icons.js';
 import { composerSendModes, slashCompletionList } from './agent-meta.js';
 import { t } from './i18n.js';
+import { fsErrorText } from './file-explorer-ops.js';   // B-3b03 follow-up: a refused upload in the reader's language
+import { uploadOutcomeWords } from './refusal-doors.js';
 import { stampAt } from './page-time.js'; // piece 7 rule 3: the resumed line's time, in the viewer's zone
 import { refusalWords } from './wake-grant-rows.js'; // piece 7: a hand-over refused after the resume, in the person's words
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
@@ -614,16 +616,10 @@ export class ChatInput {
       if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);
       const kept = uploaded.find((f) => f && f.keptDir);   // lane chat-attachments-persist: said, never silent
       if (kept) showToast(t('Kept with this conversation in {dir} — {from} is a temporary folder', { dir: kept.keptDir, from: kept.keptFrom }), { duration: 8000 });
-      if (failed.length && !uploaded.length && failed[0].error) {
-        // B-3767: nothing landed — the server's own reason, by name (a temp folder the hub cannot use names its path)
-        this._uploadToast(t('Upload failed: {msg}', { msg: failed[0].error }), true);
-      } else if (failed.length) {
-        this._uploadToast(t("Uploaded {n}, {failed} couldn't be read (e.g. {name})", { n: uploaded.length, failed: failed.length, name: failed[0].name }), true);
-      } else if (!uploaded.length) {
-        this._uploadToast(t('Upload failed — no files could be read'), true);
-      } else {
-        this._uploadToast(null);
-      }
+      // B-3767: nothing landed — the server's own reason, by name; B-3b03 follow-up (a MUST of its round's point 5): a failure the hub
+      // REFUSED by name is said in its words (the reader's language), never «couldn't be read» (src/lib/refusal-doors.js)
+      const words = uploadOutcomeWords(uploaded, failed, { t, fsErrorText });
+      this._uploadToast(words, !!words);
     } catch (e) {
       this._uploadToast(t('Upload failed: {msg}', { msg: e.message }), true);
     }

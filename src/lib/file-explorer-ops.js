@@ -589,7 +589,7 @@ export function installExplorerOps(FileExplorer) {
     const n = await showInputDialog({ title: t('Rename'), label: t('New name'), value: oldName, confirmText: t('Rename') });
     if (!n || n === oldName) return;
     const r = await fetch('/api/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(here.hb({ oldPath: here.path(oldName), newPath: here.path(n) })) }).catch(() => null);
-    if (!r?.ok) showToast(t('Rename failed'), { type: 'error' });
+    if (!r?.ok) { const d = r ? await r.json().catch(() => null) : null; showToast(t('Rename failed') + (d?.error ? `: ${fsErrorText(d)}` : ''), { type: 'error', action: fsErrorAction(d, here.host) }); }   // B-3b03 follow-up: the hub's reason (a refusal: «the file readers are restarting…»), never a bare «failed»
     this.refresh();
   },
 

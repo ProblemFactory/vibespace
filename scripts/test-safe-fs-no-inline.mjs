@@ -182,4 +182,55 @@ console.log('⑤ the router says the refusal in a person\'s words, with its code
   } finally { srv.close(); }
 }
 
+console.log('⑥ a save-and-close editor closes — and the CLI hears «done» — only after its save landed (the round\'s point 5, a MUST)');
+{
+  const DOORS_SRC = fs.readFileSync(path.join(REPO, 'src/lib/refusal-doors.js'), 'utf8');
+  const MC6 = mutantCopies('refusal-doors', REPO);
+  const drive = async (D) => {
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    let saves = [false, true], signals = 0, closes = 0;
+    const ed = { save: async () => saves.shift(), signal: () => { signals++; }, close: () => { closes++; }, ready: () => true };
+    const d = D.saveCloseDoors(ed);
+    const first = d.onCloseRequest(); await tick(); await tick();
+    const afterRefused = { kept: first === false && closes === 0, signals };
+    const second = d.onCloseRequest(); await tick(); await tick();
+    if (closes) await d.onClose();   // the window manager's close runs onClose
+    const afterLanded = { second, closes, signals };
+    let sig2 = 0; const d2 = D.saveCloseDoors({ save: async () => false, signal: () => { sig2++; }, close() {}, ready: () => true });
+    await d2.onClose();   // a programmatic close (layout sync) whose save is refused
+    return { afterRefused, afterLanded, programmatic: sig2 };
+  };
+  const now = await drive(await import(MC6.write('src/lib/refusal-doors.js', DOORS_SRC, 'now', { esm: true, same: true })));
+  ok(now.afterRefused.kept && now.afterRefused.signals === 0, `a refused save keeps the window (its text and unsaved mark) and tells the CLI nothing (${JSON.stringify(now.afterRefused)})`, now);
+  ok(now.afterLanded.second === false && now.afterLanded.closes === 1 && now.afterLanded.signals === 1, `the second press: the save lands, the window closes, the CLI hears «done» once (${JSON.stringify(now.afterLanded)})`, now);
+  ok(now.programmatic === 0, `a programmatic close whose save is refused tells the CLI nothing (signals ${now.programmatic})`, now);
+  // RED CONTROL: the release's close — no veto, and «done» after any save
+  const REL6 = anchored(anchored(DOORS_SRC,
+    "      if (saved || !ed.ready()) return true;   // nothing loaded yet: nothing to keep\n", "      return true;   // the release: the window closes at once\n", 'release-no-veto'),
+    "      if (saved) return ed.signal();\n      return Promise.resolve(ed.save()).then((ok) => { if (ok) return ed.signal(); return undefined; }, () => undefined);\n",
+    "      return Promise.resolve(ed.save()).then(() => ed.signal());   // the release: «done» whatever the save answered\n", 'release-done-anyway');
+  const red = await drive(await import(MC6.write('src/lib/refusal-doors.js', REL6, 'release', { esm: true })));
+  ok(red.programmatic === 1, `RED CONTROL (the release's close): a refused save still tells the CLI «done» (signals ${red.programmatic})`, red);
+}
+
+console.log('⑦ a chat upload the hub REFUSED by name is said in its words — never «couldn\'t be read» (the round\'s point 5, a MUST)');
+{
+  const UP_SRC = fs.readFileSync(path.join(REPO, 'src/lib/refusal-doors.js'), 'utf8');
+  const MC7 = mutantCopies('refusal-doors-upload', REPO);
+  const t = (k, v = {}) => k.replace(/\{(\w+)\}/g, (_, x) => String(v[x]));
+  const fsErrorText = (d) => (d && d.code === 'storage_no_worker' ? 'WORDS-OF-THE-REFUSAL' : d.error);
+  const run = (D) => ({
+    partialRefused: D.uploadOutcomeWords([{ name: 'a' }], [{ name: 'b.png', error: 'the file readers are restarting — try again in a moment', code: 'storage_no_worker' }], { t, fsErrorText }),
+    partialUnread: D.uploadOutcomeWords([{ name: 'a' }], [{ name: 'c.bin', error: 'Failed to fetch' }], { t, fsErrorText }),
+    allRefused: D.uploadOutcomeWords([], [{ name: 'b.png', error: 'x', code: 'storage_no_worker' }], { t, fsErrorText }),
+    allLanded: D.uploadOutcomeWords([{ name: 'a' }], [], { t, fsErrorText }),
+  });
+  const now = run(await import(MC7.write('src/lib/refusal-doors.js', UP_SRC, 'now', { esm: true, same: true })));
+  ok(now.partialRefused === 'Uploaded 1, 1 not uploaded: WORDS-OF-THE-REFUSAL (e.g. b.png)' && now.partialUnread === "Uploaded 1, 1 couldn't be read (e.g. c.bin)" && now.allRefused === 'Upload failed: WORDS-OF-THE-REFUSAL' && now.allLanded === null,
+    `a refused part says the hub's words in the reader's language; a file the page could not read says so; all landed says nothing (${JSON.stringify(now)})`, now);
+  const RED7 = anchored(UP_SRC, "  if (failed.length && said) return t('Uploaded {n}, {failed} not uploaded: {msg} (e.g. {name})', { n: uploaded.length, failed: failed.length, msg: fsErrorText(said), name: said.name });\n", '', 'release-unread');
+  const red = run(await import(MC7.write('src/lib/refusal-doors.js', RED7, 'release', { esm: true })));
+  ok(red.partialRefused === "Uploaded 1, 1 couldn't be read (e.g. b.png)", `RED CONTROL (the release's words): the refused part reads as a file that «couldn't be read» (${red.partialRefused})`, red);
+}
+
 report();

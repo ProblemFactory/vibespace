@@ -1105,7 +1105,7 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
     const url = host ? `/api/upload?host=${encodeURIComponent(host)}` : '/api/upload';
     const res = await fetch(url, { method: 'POST', body: fd });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok || data.success === false) throw new Error(data.error || `HTTP ${res.status}`);
+    if (!res.ok || data.success === false) throw Object.assign(new Error(data.error || `HTTP ${res.status}`), data.code ? { code: data.code, params: data.params } : {});   // B-3b03 follow-up: a refusal by name keeps its code
     // lane chat-attachments-persist: the server kept them with the conversation (a temporary cwd) — each file says where from
     return (data.files || []).map((f) => (data.keptWithConversation ? { ...f, keptFrom: data.keptFrom || '', keptDir: data.dir || '' } : f));
   };
@@ -1119,12 +1119,12 @@ export async function uploadFilesBatched(files, { destDir, preservePaths, onProg
       uploaded.push(...await postChunk(chunk));
     } catch (e) {
       if (chunk.length === 1) {
-        failed.push({ name: _uploadName(chunk[0]), error: e.message });
+        failed.push({ name: _uploadName(chunk[0]), error: e.message, ...(e.code ? { code: e.code, params: e.params } : {}) });
       } else {
         // Isolate the unreadable file(s): retry each on its own.
         for (const f of chunk) {
           try { uploaded.push(...await postChunk([f])); }
-          catch (e2) { failed.push({ name: _uploadName(f), error: e2.message }); }
+          catch (e2) { failed.push({ name: _uploadName(f), error: e2.message, ...(e2.code ? { code: e2.code, params: e2.params } : {}) }); }
         }
       }
     }

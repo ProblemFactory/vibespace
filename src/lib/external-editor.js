@@ -6,6 +6,7 @@
 
 import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme, activeLineSelectionPatch } from './code-editor.js';
 import { t } from './i18n.js';
+import { fsErrorText } from './file-explorer-ops.js';   // B-3b03 follow-up: the pane's refused save in the reader's language
 import { Resizer } from './resizer.js';
 import { EditorView, basicSetup } from 'codemirror';
 import { oneDark } from '@codemirror/theme-one-dark';
@@ -232,7 +233,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         try {
           const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ path: filePath, content: newContent, host: host || undefined }) });
           const data = await res.json().catch(() => ({}));
-          if (!res.ok || data.error) throw new Error(data.error || `HTTP ${res.status}`);
+          if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);   // B-3b03 follow-up: a refusal in the reader's language
           await fetch('/api/editor/signal', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ signalPath, filePath, host: host || undefined }) });
         } catch (err) {
           // Write failed — keep the editor open with the user's edits instead

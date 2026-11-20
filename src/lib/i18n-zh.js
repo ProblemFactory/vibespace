@@ -1268,6 +1268,7 @@ export default {
   "Upload file/folder to working directory": "上传文件/文件夹到工作目录",
   "Upload folder": "上传文件夹",
   "Uploaded {n}, {failed} couldn't be read (e.g. {name})": "已上传 {n} 个，{failed} 个无法读取（例如 {name}）",
+  "Uploaded {n}, {failed} not uploaded: {msg} (e.g. {name})": "已上传 {n} 个，{failed} 个未上传：{msg}（例如 {name}）",
   "Uploading {d}/{total}…": "上传中 {d}/{total}…",
   "Uploading {n} items…": "上传 {n} 个项目中…",
   "Uploading {n} item…": "上传 {n} 个项目中…",
