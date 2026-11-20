@@ -423,6 +423,11 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       try { writer.dirty(storeFile, { name: 'desktop-apps.write', rank: 0, urgent: true, makeDir: true, produce: storeBytes, onWritten: (ok, e) => { if (!ok) log.warn?.(`[desktop] could not write ${STORE_FILE}: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } }); dirty = false; return true; }
       catch (e) { log.warn?.(`[desktop] could not write ${STORE_FILE}: ${e.message}`); return false; }
     }
+    return writeAtCall();
+  }
+  /** the DEVICE AGENT's road (no writer handed — the daemon bundles this module): written at the call, as the release did; off the
+   *  hub's loop (src/server/desktop-app-keeper.js hands the hub's writer in) */
+  function writeAtCall() {
     try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, store); dirty = false; return true; }
     catch (e) { log.warn?.(`[desktop] could not write ${STORE_FILE}: ${e.message}`); return false; }
   }
@@ -2023,7 +2028,18 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
 
   /** MIGRATIONS ONLY (src/server/migrations.js, 2026-09-runaway-parks-void): reshape the IN-MEMORY store and commit
    *  (atomic save + broadcast) — a file edit beside a loaded keeper is overwritten by its next save. */
-  function reshapeStore(fn) { refuseIfHeld('a migration of the desktop app records'); const r = fn(store); commit(); return r; }
+  /** a boot migration's reshape (src/server/migrations.js) is ON DISK before it returns — the runner records the migration next, and a
+   *  reshape recorded but never written would never run again: on the hub the writer's write is LANDED here (bounded; once, at the
+   *  boot); not on disk ⇒ the migration throws by name and is tried again at the next boot */
+  function reshapeStore(fn) {
+    refuseIfHeld('a migration of the desktop app records');
+    const r = fn(store); commit();
+    if (writer && typeof writer.flushSync === 'function') {
+      const f = writer.flushSync([storeFile]); const miss = f && (f.deferred ? { why: 'the hub is stopping' } : (f.left || []).find((x) => x.file === storeFile));
+      if (miss) throw Object.assign(new Error(`the desktop app records' reshape is not on disk yet (${miss.why}) — tried again at the next boot`), { code: 'EVSNOTONDISK' });
+    }
+    return r;
+  }
   /** lane launch-picture-size: the pin's ONE stamp — the launch (a record born pinned) and setPin write the fact here only. */
   function stampPin(rec, pin) { const p = pinOf(pin); if (p) rec.pin = p; else delete rec.pin; return p; }
   /** lane launch-picture-size: the X server's first size — a pinned window on the Xvfb+x11vnc rung (fit 'fixed': its

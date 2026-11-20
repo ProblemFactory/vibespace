@@ -123,20 +123,23 @@ function create({ userTodos = null, dataDir = null, log = () => {}, now = () => 
     save();
   }
   if (ledgerFile) {
+    // A LOAD READS WHAT THIS PROCESS STILL OWES (as the decision engine's): a ledger made again in the same process (a suite's restart)
+    // lands the write the last one handed the writer BEFORE it reads; a hub's boot owes nothing (pending() is false: no wait)
+    try { const w0 = W(); if (typeof w0.pending === 'function' && w0.pending(ledgerFile) && typeof w0.flushSync === 'function') w0.flushSync([ledgerFile]); } catch { /* read as it is */ }
     let read; try { read = { text: fs.readFileSync(ledgerFile, 'utf-8') }; } catch (error) { read = { error }; }
     const a = SR.storeAnswer(read, { valid: LEDGER_VALID });
     if (a.state === 'data') seen = a.value.seen;
     else if (a.state !== 'missing') holdLedger(a);   // a missing file is the first run; anything else HOLDS
   }
   const produce = () => { if (held) throw Object.assign(new Error('device-alerts.json is held (its read failed) — nothing is written over it until it reads'), { code: 'EHELD' }); return JSON.stringify({ version: 1, seen }, null, 2); };
-  const save = () => {
+  function save() {
     if (!ledgerFile) return;
     if (held) { if (!heldSaveSaid) { heldSaveSaid = true; log('[device-alerts] the ledger\'s write was refused: device-alerts.json could not be read, and nothing is written over it until it reads'); } return; }
     const keys = Object.keys(seen);
     if (keys.length > LEDGER_MAX) for (const k of keys.sort((a, b) => seen[a] - seen[b]).slice(0, keys.length - LEDGER_MAX)) delete seen[k];
     try { W().dirty(ledgerFile, { name: 'device-alerts.write', mode: 0o600, produce, onWritten: (ok, e) => { if (!ok) log(`[device-alerts] ledger not written: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } }); }
     catch (e) { log(`[device-alerts] ledger not written: ${e.message}`); }
-  };
+  }
   /** File ONE item for an event (once per its key) — urgent, or a notice for a signed forward upgrade. → {filed, key, id} | null */
   function file(kind, facts = {}) {
     if (!KINDS.includes(kind)) return null;

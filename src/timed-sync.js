@@ -57,7 +57,9 @@ const STORES = Object.freeze({
   'channels-people.write': row('write', 'channels/<account>/people', 'src/channel-store.js', ['peopleWrite']),
   'channels-stamps.write': row('write', 'channels/poll-stamps', 'src/channel-store.js', ['oweStamps', 'stampsFlush']),
   'decision-memo.write': row('write', 'decision-memo', 'src/server/decision-engine.js', ['saveMemo']),   // through the store writer (lane lg-store-writes, B-0248 U1: the judge's memo — paced, the hub's own cache)
-  'decision-usage.write': row('write', 'decision-usage', 'src/server/decision-engine.js', ['saveUsage']),   // through the store writer (lane lg-store-writes, B-0248 U1: the day's counter — money, an act)
+  'decision-usage.write': row('write', 'decision-usage', 'src/server/decision-engine.js', ['saveUsage']),
+  'desktop-apps.write': row('write', 'desktop-apps', 'src/desktop-serve.js', ['save']),   // through the store writer on the hub (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the desktop app records — an act; the device agent writes at the call)
+  'device-alerts.write': row('write', 'device-alerts', 'src/server/device-alerts.js', ['save']),   // through the store writer (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the device alerts' dedup ledger)   // through the store writer (lane lg-store-writes, B-0248 U1: the day's counter — money, an act)
   'turn-carry-outstanding.write': row('write', 'turn-carry-outstanding', 'src/turn-carry.js', ['save']),   // through the store writer (lane lg-store-writes, B-0248 U2: the outstanding deliveries — a mark an act, the rest paced)
   'usage-shards.write': row('write', 'usage-history/events-<month>', 'src/usage-history.js', ['_walkAndAppend', '_appendRemote']), // lane ledger-dedup-law r4: the remote append is `_appendRemote` (the ingest's and a drained hold's)
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),   // through the store writer (lane hub-loop-stalls commit 2)
