@@ -963,6 +963,7 @@ function escapedOf() { // started after us, outside our group, carrying the job'
 async function drainGroup() {
   const left = groupLeft();
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
+  if (out.cut) { try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stop: its scan for what left its group read only part of the processes (past 250 ms) — what it did not read may be left running\n`)); } catch { } }   // B-7ca1 (its round's should 5): a cut scan is said, as the engine's
   // B-7ca1 (the group rung — no scope: a container, a pod): a TASK's stop ends what carries its mark outside its group too — a child that
   // made its own group (setsid, the timeout program) and was re-parented before the stop is neither in the group nor under the tree the
   // stop read; by identity (pid + start), never one that started before us, never a hub started inside the job (keptTest)
@@ -1019,7 +1020,7 @@ async function drainGroup() {
   // earlier pass (the stop step's, the drain's with grace left) had its grace. A state the table holds — no clock in the count
   const short = stopping ? [...killed].filter((k) => { const t = termed.get(k); return !t || t.pass === 'kill'; }).length : 0;
   if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
-  return { left: { n: all, ...(still ? { force: true } : {}), ...(taskStop ? (() => { const sk = new Set(runStopped.map(termKey)), not = outside.filter((p) => !sk.has(termKey(p))).length; return { ...(runStopped.length ? { outside: runStopped.length } : {}), ...(not ? { escaped: not } : {}) }; })() : outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };   // B-7ca1: a stop's are STOPPED (outside), a natural end's said (escaped)
+  return { left: { n: all, ...(still ? { force: true } : {}), ...(taskStop ? (() => { const sk = new Set(runStopped.map(termKey)), not = outside.filter((p) => !sk.has(termKey(p)) && same(p)).length;   /* its round's should 6: one that ended by itself is not «not stopped» */ return { ...(runStopped.length ? { outside: runStopped.length } : {}), ...(not ? { escaped: not } : {}) }; })() : outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };   // B-7ca1: a stop's are STOPPED (outside), a natural end's said (escaped)
 }
 
 async function ended(code, signal) {
