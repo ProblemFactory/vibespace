@@ -138,8 +138,8 @@ function mkEngine(opts = {}) {
   const retryListeners = new Set();
   const held = new Map();
   const deliver = {
-    delay: 0,   // verify: holds the ladder (a receipt in flight) for the sweep-window leg
-    async deliverToConversation(cid, text, o) { delivered.push({ cid, text, opts: o }); if (deliver.delay) await new Promise((z) => setTimeout(z, deliver.delay)); if (o && o.noWake === false && deliver.wakeOk) return { ok: true, lane: 'message' }; return opts.deliverOk ? { ok: true, lane: 'rpc-queue', steered: true } : { ok: false, reason: 'no free lane', refused: 'no-wake' }; },
+    gate: null, atGate: 0, gated: null,   // r401: the delivery `gate.match` names waits on `gate.wait` (consumed) — a hold PLACED in the sweep-window leg's race
+    async deliverToConversation(cid, text, o) { delivered.push({ cid, text, opts: o }); if (deliver.gate && deliver.gate.match(text, o)) { const g = deliver.gate; deliver.gate = null; deliver.atGate++; deliver.gated = String(text).split('\n').slice(-1)[0]; await g.wait; } if (o && o.noWake === false && deliver.wakeOk) return { ok: true, lane: 'message' }; return opts.deliverOk ? { ok: true, lane: 'rpc-queue', steered: true } : { ok: false, reason: 'no free lane', refused: 'no-wake' }; },
     stashFor(cid, env) { stash.push({ cid, env }); (held.get(cid) || held.set(cid, []).get(cid)).push(env); if (env.ref) for (const fn of stashListeners) fn('stashed', cid, [env]); },
     onStash(fn) { stashListeners.add(fn); return () => stashListeners.delete(fn); },
     onRetry(fn) { retryListeners.add(fn); return () => retryListeners.delete(fn); },   // lane paced-wake-retry (D6): the park's events
@@ -691,7 +691,7 @@ async function receiptLegs(ENGmod, name) {
   const fate0 = P.receiptFateOf(v0);
   const e0 = events.length;
   deliver.drain('agent-1');
-  await new Promise((z) => setTimeout(z, 30));
+  await outboxPast(eng, 'the drained receipt\'s fate');   // r401: an order, never a 30 ms timer
   const v1 = eng.outboxView({ key: KEY }).proposals.find((x) => x.id === p.proposal.id);
   const bc = events.slice(e0).filter((m) => m.type === 'channel-outbox-updated');
   const out = { text: rc ? rc.env.text : '', noWake: delivered.filter((d) => d.opts.spendReason === 'channel-receipt').every((d) => d.opts.noWake === true), fate0: fate0 && fate0.kind, fate1: P.receiptFateOf(v1) && P.receiptFateOf(v1).kind, drainedAt: v1.receiptDrainedAt, bc: bc.length };
@@ -721,10 +721,32 @@ const sleep = (ms) => new Promise((z) => setTimeout(z, ms));
 // the window is open when the receipt is ready, whatever the box's load), and the fallback timer's delivery waited for
 // (bounded at 5 s), never a fixed sleep
 const heldClock = () => { const t = Date.now(); return () => t; };
+/** r401: A WAIT FOR WHAT HAPPENED — `cond` polled every 5 ms, bounded, and RED BY NAME when it never happens. → {ok, ms, what} */
+async function settled(what, cond, ms = 5000) {
+  const t0 = Date.now();
+  while (!cond()) { if (Date.now() - t0 > ms) { ok(false, `waited ${ms} ms for ${what} — it never happened`); return { ok: false, ms: Date.now() - t0, what }; } await sleep(5); }
+  return { ok: true, ms: Date.now() - t0, what };
+}
+/** …the same for a promise (it settles, or the bound is red by name). */
+async function settledP(what, pr, ms = 5000) {
+  const t0 = Date.now(); let tm = null;
+  const won = await Promise.race([pr.then(() => true, () => true), new Promise((z) => { tm = setTimeout(() => z(false), ms); })]);
+  clearTimeout(tm);
+  if (!won) ok(false, `waited ${ms} ms for ${what} — it never happened`);
+  return { ok: won, ms: Date.now() - t0, what };
+}
+/** r401: THE OUTBOX'S WRITE CHAIN PAST WHAT WAS ASKED — every handler a leg fires (a fall, a drain, the boot's reconcile)
+ *  queues its outbox write before its first await: a no-op update queued after it resolves once that write landed and
+ *  the broadcast / audit / For-you item it is followed by were made. An ORDER, never a timer (bounded, red by name). */
+function outboxPast(eng, what) { return settledP(`the outbox's write chain past ${what}`, eng.store.outbox.update(() => {})); }   // hoisted: an earlier leg asks it
 const untilDelivered = async (delivered, ms = 5000) => { const t0 = Date.now(); while (!delivered.length && Date.now() - t0 < ms) await sleep(20); await sleep(40); };
 /** THE WINDOW: two due proposals; the sweep is busy with the FIRST (its receipt parked in the ladder) when a
  *  replace of the SECOND passes its check and makes the new draft; the sweep's write on the second then lands
- *  BETWEEN the replace's check and its withdrawal unless the hold is asked at apply time. */
+ *  BETWEEN the replace's check and its withdrawal unless the hold is asked at apply time.
+ *  r401: THE RACE IS PLACED, never timed (a control went green under the test machines' load — its mutant did not lose
+ *  the race that time): the sweep's FIRST receipt is held at the ladder (deliver.gate) until the replace HOLDS the second
+ *  — its make() opens the gate and waits for the sweep to END before it proposes — so the sweep's write on the second
+ *  lands inside the replace's window whatever the load; each wait bounded and red by name. */
 async function sweepWindowLeg(ENGmod, name) {
   const W = mkEngine({ name, engine: ENGmod });
   const { eng, deliver, delivered } = W;
@@ -735,19 +757,25 @@ async function sweepWindowLeg(ENGmod, name) {
   const d1 = await eng.propose(AGENT, A, C, { text: 'due one — the newer, swept first' });
   W.advance(25 * 3600 * 1000);
   const n0 = Object.keys(eng.store.outbox.snapshot().proposals).length, r0 = delivered.length;
-  deliver.delay = 40;
-  const sweep = eng.expireSweep();
-  await sleep(5);
-  const r = await eng.replaceProposal({ replaces: d2.proposal.id, by: AGENT, make: async () => { await sleep(80); return eng.propose(AGENT, A, C, { text: 'fresh' }); } });
-  await sweep;
-  deliver.delay = 0;
-  const out = { d1: eng.store.outbox.snapshot().proposals[d1.proposal.id].state, d2: eng.store.outbox.snapshot().proposals[d2.proposal.id].state, ok: r.ok, replaced: !!r.replaced, code: r.replaceCode || null, made: Object.keys(eng.store.outbox.snapshot().proposals).length - n0, receipts: delivered.slice(r0).filter((d) => d.opts.spendReason === 'channel-receipt').length };
+  let open = null;
+  deliver.gate = { wait: new Promise((z) => { open = z; }), match: (text, o) => !!(o && o.spendReason === 'channel-receipt' && String(text).includes(d1.proposal.id)) };   // d1's expiry receipt, by name
+  const sweep = eng.expireSweep();   // its due list (both) is taken in this call, before any hold
+  let sweepEnd = 'pending'; sweep.then(() => { sweepEnd = 'ended'; }, (e) => { sweepEnd = `threw: ${(e && e.message) || e}`; });
+  const atGate = await settled('the sweep\'s first receipt to reach the ladder', () => deliver.atGate === 1);
+  let inWindow = null;
+  const r = await eng.replaceProposal({ replaces: d2.proposal.id, by: AGENT, make: async () => {
+    open();   // the replace holds the second now: the sweep goes on to it
+    inWindow = await settledP('the sweep to end inside the replace\'s window', sweep);
+    return eng.propose(AGENT, A, C, { text: 'fresh' });
+  } });
+  if (!inWindow || !inWindow.ok) await settledP('the sweep to end', sweep);
+  const out = { d1: eng.store.outbox.snapshot().proposals[d1.proposal.id].state, d2: eng.store.outbox.snapshot().proposals[d2.proposal.id].state, ok: r.ok, replaced: !!r.replaced, code: r.replaceCode || null, placed: !!(atGate.ok && inWindow && inWindow.ok && sweepEnd === 'ended'), gated: deliver.gated, sweepEnd, made: Object.keys(eng.store.outbox.snapshot().proposals).length - n0, receipts: delivered.slice(r0).filter((d) => d.opts.spendReason === 'channel-receipt').length };
   eng.stop();
   return out;
 }
 {
   const sw = await sweepWindowLeg(ENG, 'sweep-window');
-  ok(sw.d1 === 'expired' && sw.d2 === 'withdrawn' && sw.ok && sw.replaced && sw.made === 1 && sw.receipts === 1, `THE SWEEP RE-ASKS THE HOLD AT APPLY TIME: the due list taken before the hold, the first expires, the HELD second ends withdrawn (${sw.d2}), ONE new draft, ONE receipt (the first's expiry) — never an "expired" receipt for a draft the agent just replaced`, JSON.stringify(sw));
+  ok(sw.placed && sw.d1 === 'expired' && sw.d2 === 'withdrawn' && sw.ok && sw.replaced && sw.made === 1 && sw.receipts === 1, `THE SWEEP RE-ASKS THE HOLD AT APPLY TIME (the race placed: ${sw.placed} — held at «${sw.gated}», the sweep ${sw.sweepEnd} inside the replace's window): the due list taken before the hold, the first expires, the HELD second ends withdrawn (${sw.d2}), ONE new draft, ONE receipt (the first's expiry) — never an "expired" receipt for a draft the agent just replaced`, JSON.stringify(sw));
   const esrc = engineSource(REPO);
   const GUARD = "      if (typeof unless === 'function' && unless(p)) { verdict = { ok: false, why: 'held: a replace of this proposal is in flight', held: true }; return; }";
   ok(esrc.split(GUARD).length === 2, 'the apply-time guard line is present once (the control removes exactly it)');
@@ -755,7 +783,7 @@ async function sweepWindowLeg(ENGmod, name) {
   const MV = mutantCopies('chan-outbox-verify', REPO);
   const unguarded = MV.load('src/server/channels-engine.js', esrc.replace(GUARD, ''), 'sweep-unguarded');
   const sc = await sweepWindowLeg(unguarded, 'sweep-window-ctl');
-  ok(sc.d2 === 'expired' && sc.made === 1 && sc.receipts === 2, `CONTROL: a copy that asks the hold only before the write lets the sweep land between the replace's check and its withdrawal — the new draft made, the old one EXPIRED under it, two receipts (d2 ${sc.d2}, made ${sc.made}, ${sc.receipts} receipts) — the leg would go red`);
+  ok(sc.placed && sc.d2 === 'expired' && sc.made === 1 && sc.receipts === 2, `CONTROL: a copy that asks the hold only before the write lets the sweep land between the replace's check and its withdrawal — the new draft made, the old one EXPIRED under it, two receipts (the race placed: ${sc.placed} — held at «${sc.gated}»; d2 ${sc.d2}, made ${sc.made}, ${sc.receipts} receipts) — the leg would go red`);
   // THE LEGACY FATE: a receipt stashed before the stash carried a ref (the owner's three of 2026-09-27) has no
   // drained event; at boot, one whose entry is gone from its drafter's stash is read as handed with an earlier message
   async function legacyLeg(ENGmod2, name) {
@@ -772,7 +800,7 @@ async function sweepWindowLeg(ENGmod, name) {
     await eng.store.outbox.update((ob) => { for (const id of [gone.proposal.id, kept.proposal.id]) { const x = ob.proposals[id]; x.receiptDelivery = legacy(); x.receiptDrainedAt = null; } });
     const e0 = W.events.length;
     eng.start();
-    await sleep(30);
+    await outboxPast(eng, 'the boot\'s receipt-fate reconcile');   // r401: it queues its write in start()'s own turn — an order, never a 30 ms timer
     const fg = P.receiptFateOf(eng.store.outbox.snapshot().proposals[gone.proposal.id]), fk = P.receiptFateOf(eng.store.outbox.snapshot().proposals[kept.proposal.id]);
     const bc = W.events.slice(e0).filter((m) => m.type === 'channel-outbox-updated');
     eng.stop();
@@ -819,9 +847,14 @@ async function sweepWindowLeg(ENGmod, name) {
   await sleep(10);
   ok(parks.length === 1, 'CONTROL: a next-turn choice owes no wake');
   // D6: the wake falls — the card's fate changes, an audit row, ONE For-you item keyed by the proposal; a spend refusal's item is the guard's
-  const fellOne = async (id, cid, extra) => { deliver.retryEvent('fell', cid, { producer: 'stash-wake', meta: { ref: id } }, extra); await sleep(20); };
+  // r401: a fall is fired once the receipt is delivered and waited for until it is BOOKED (the card's fate) — never a fixed sleep
+  const propOf = (id) => eng.store.outbox.snapshot().proposals[id] || {};
+  const fellOne = async (id, cid, extra) => {
+    deliver.retryEvent('fell', cid, { producer: 'stash-wake', meta: { ref: id } }, extra);
+    return outboxPast(eng, `${id}'s fall (its audit row and For-you item follow the write)`);
+  };
   deliver.retryEvent('fell', C, { producer: 'jobs', meta: { ref: p.proposal.id } }, { kind: 'not-running' });
-  await sleep(20);
+  await outboxPast(eng, 'another producer\'s fall');
   ok(!eng.store.outbox.snapshot().proposals[p.proposal.id].receiptDelivery.wakeFell, 'D6: another producer\'s fall moves nothing here');
   await fellOne(p.proposal.id, C, { kind: 'not-reachable', why: 'paced-out', reason: 'paced-out — the agent did not accept the wake' });
   const fell = eng.store.outbox.snapshot().proposals[p.proposal.id];
@@ -840,8 +873,8 @@ async function sweepWindowLeg(ENGmod, name) {
   // P4: a frame that may have landed is said as that, and the item closes when the agent reads the receipt
   const p6 = await eng.propose(AGENT, A, C, { text: 'on the wire when the hub died' });
   await eng.approve(p6.proposal.id, { deliver: 'wake-now', mayWake });
-  await sleep(10);
   await fellOne(p6.proposal.id, C, { kind: 'not-reachable', maybeDelivered: true, reason: 'it was being posted when the previous server stopped' });
+  const filed6 = await settled('the may-have-landed fall\'s For-you item to be kept on the proposal', () => !!propOf(p6.proposal.id).receiptWakeTodoId);
   const f6 = eng.store.outbox.snapshot().proposals[p6.proposal.id];
   const tt = (k, o) => k.replace(/\{(\w+)\}/g, (_, n) => String(o[n]));
   ok(P.receiptFateOf(f6).wakeFell === 'may-have-landed' && /may have reached it/.test(P.receiptFateText(P.receiptFateOf(f6), { t: tt })) && !/did not reach/.test(P.receiptFateText(P.receiptFateOf(f6), { t: tt })), 'P4: a may-have-landed fall: the card says it may have reached it, never «did not reach»', JSON.stringify(P.receiptFateOf(f6)));
@@ -849,8 +882,8 @@ async function sweepWindowLeg(ENGmod, name) {
   ok(it6 && /waking it again may start a second turn/.test(String(it6.detail)) && !/was not woken/.test(String(it6.text)), 'P4: …the For-you item says «may have been woken», and warns off a second wake by hand', JSON.stringify(it6 && it6.text));
   ok(f6.receiptWakeTodoId === (it6 && it6.id), 'P4: …its id is kept on the proposal', f6.receiptWakeTodoId);
   deliver.drain('agent-1');
-  await sleep(20);
-  ok(W.userTodos.get(it6.id).status === 'done' && !eng.store.outbox.snapshot().proposals[p6.proposal.id].receiptWakeTodoId, 'P4: …and it closes when the agent reads the receipt', W.userTodos.get(it6.id).status);
+  const closed6 = await settled('the receipt\'s read to close its For-you item', () => !!it6 && W.userTodos.get(it6.id).status === 'done' && !propOf(p6.proposal.id).receiptWakeTodoId);
+  ok(closed6.ok && !!it6 && W.userTodos.get(it6.id).status === 'done' && !propOf(p6.proposal.id).receiptWakeTodoId, `P4: …and it closes when the agent reads the receipt (item ${it6 ? W.userTodos.get(it6.id).status : 'never filed'}, the proposal's item id ${propOf(p6.proposal.id).receiptWakeTodoId || 'cleared'}; filed in ${filed6.ms} ms, closed in ${closed6.ms} ms of the 5000 ms bound)`, it6 && W.userTodos.get(it6.id).status);
   // P5: a HELD send: the words match what will happen
   const heldP = { state: 'sending', receiptChoicePaced: 'the rule', receiptPacedMs: 25000, failure: { code: 'rate-limited' }, held: { until: 1794000000000, vendor: 'lark' } };
   ok(P.outcomeOf(heldP).kind === 'held', 'P5: (the fixture is a held send)', JSON.stringify(P.outcomeOf(heldP)));
