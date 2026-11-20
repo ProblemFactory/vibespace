@@ -54,6 +54,13 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const J = (x) => JSON.stringify(x);
+/** THE ONE RELAY of a server broadcast to the page (主开发 04:44Z — 2.369.413's fourth hosted run, test-channel-window-render
+ *  ⑫c): the message is handed to every global handler the way src/lib/ws.js dispatches it — ONE message, over a SNAPSHOT of the
+ *  list (`[...this.globalHandlers].forEach(call)`), each handler isolated — so a handler that takes itself out while handling
+ *  (offGlobal splices the LIVE list) never hides the one after it. A live walk skipped exactly that neighbour (the Notify
+ *  dialog's left-over picker hid the open access picker's). `msg` = page-side JS source of the message; every relay of this
+ *  suite goes through here, none walks the list itself. */
+const RELAY = (msg) => `{ const __msg = (${msg}); for (const __h of [...window.app.ws.globalHandlers]) { try { __h(__msg); } catch (__e) {} } }`;
 /** The redraw bound: measured 2–4 ms here after the fix (90–115 before), ×10 slack for a loaded runner. */
 const BOUND_MS = 40;
 const N = 879;
@@ -161,7 +168,7 @@ const OPEN = `(async () => {
 const MEASURE = (d) => `(async () => {
   const d = ${J(d)};
   const one = { ...d, partial: true, conversations: d.conversations.slice(0, 1) };
-  const fire = (dd) => { for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: dd, partial: !!dd.partial }); } catch (e) {} } };
+  const fire = (dd) => { ${RELAY("{ type: 'channels-updated', digest: dd, partial: !!dd.partial }")} };
   const snap = () => ({ grows: [...document.querySelectorAll('.chan-grow')], rows: [...document.querySelectorAll('.chan-row')], box: document.querySelector('.chan-rows'), list: document.querySelector('.chan-groups'), part: document.querySelector('.chan-part[data-part="accounts"]'), sec: document.querySelector('.chan-sec.chan-account') });
   fire(d); await new Promise((r) => setTimeout(r, 50));
   const s0 = snap();
@@ -185,7 +192,7 @@ async function clickAcrossBroadcast(p, d) {
   const pt = await p.evaljs(`(() => { const rows = [...document.querySelectorAll('.chan-row')]; const row = rows[Math.min(5, rows.length - 1)]; row.scrollIntoView({ block: 'center' }); const r = row.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), conv: row.dataset.conv, wins: window.app.wm.windows ? window.app.wm.windows.size : Object.keys(window.app.wm._windows || {}).length }; })()`);
   await p.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y });
   await p.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
-  await p.evaljs(`(() => { const d = ${J(d)}; for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: d }); } catch (e) {} } return 1; })()`);
+  await p.evaljs(`(() => { const d = ${J(d)}; ${RELAY("{ type: 'channels-updated', digest: d }")} return 1; })()`);
   await sleep(40);
   await p.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
   await sleep(400);
@@ -197,6 +204,19 @@ async function clickAcrossBroadcast(p, d) {
 console.log('① ② ③ the panel over 879 conversations: a digest naming every row and one naming one, redrawn in place, the storm');
 const p1 = await newPage();
 ok(await p1.load(), 'the page loaded');
+// THE RELAY's OWN CONTROL (rule (b): it proves itself before any leg leans on it): two probes put on the page's live list, a
+// handler that takes itself out while handling and a recorder right after it. RELAY reaches the recorder; a LIVE walk of the
+// list (the shape this suite used to have, run here on purpose over the two probes only) skips it — the plant is real
+const RELAYCTL = await p1.evaljs(`(() => {
+  const hs = window.app.ws.globalHandlers, msg = { type: 'vs-relay-probe' };
+  let relayed = 0, walked = 0;
+  const self1 = () => { const i = hs.indexOf(self1); if (i >= 0) hs.splice(i, 1); }, rec1 = () => { relayed++; };
+  hs.push(self1, rec1); ${RELAY("msg")} { const i = hs.indexOf(rec1); if (i >= 0) hs.splice(i, 1); }
+  const self2 = () => { const i = hs.indexOf(self2); if (i >= 0) hs.splice(i, 1); }, rec2 = () => { walked++; };
+  hs.push(self2, rec2); for (const fn of hs) { if (fn === self2 || fn === rec2) fn(msg); } { const i = hs.indexOf(rec2); if (i >= 0) hs.splice(i, 1); }
+  return { relayed, walked, left: [self1, rec1, self2, rec2].filter((f) => hs.includes(f)).length };
+})()`);
+ok(RELAYCTL.relayed === 1 && RELAYCTL.walked === 0 && RELAYCTL.left === 0, `RELAY delivers like ws.js: a handler that takes itself out does not hide the next one (relayed ${RELAYCTL.relayed}); a LIVE walk does (${RELAYCTL.walked}) — the control's plant is real`, J(RELAYCTL));
 const O = await p1.evaljs(OPEN);
 ok(O.grows >= N && O.rows >= N && O.more === 0, `FIXTURE: every list read to its end by scrolling its end into view — the first screen (${O.grows} rows) and the account card (${O.rows} rows), ${O.clicks} scrolls, no button`, J(O));
 ok(O.kept === true, '① design 008: a page append KEEPS every row already drawn (the same elements, the new rows after them)', J(O));
@@ -213,7 +233,7 @@ ok(C.chanWindows >= 1, `④ the click on ${C.conv} across a broadcast OPENED its
 console.log('⑤ a collapsed account stays collapsed across a redraw; a row that left the digest leaves the list');
 const F = await p1.evaljs(`(async () => {
   const d = ${J(digest)};
-  const fire = (dd) => { for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: dd, partial: !!dd.partial }); } catch (e) {} } };
+  const fire = (dd) => { ${RELAY("{ type: 'channels-updated', digest: dd, partial: !!dd.partial }")} };
   const sec = document.querySelector('.chan-sec.chan-account');
   // lane channels-fold-default: a section with nothing that needs the person starts folded — fold it only if it is open
   if (!sec.classList.contains('chan-collapsed')) sec.querySelector('.chan-sec-head').click();
@@ -239,7 +259,7 @@ console.log('⑤b a second principal granted access reaches the row\'s line 3 (t
 const withAccess = (d, ids) => ({ ...d, partial: true, conversations: d.conversations.filter((c) => c.id === 'oc_5').map((c) => ({ ...c, access: ids.map((id) => ({ principal: { kind: 'group', id, name: id }, authority: 'draft', source: 'conversation' })), watchers: [], assignment: { principal: { kind: 'group', id: ids[0], name: ids[0] }, mode: null, notify: null, digestMinutes: null, dailyWakeCap: null, authority: 'draft', authorityStored: 'draft', authorityClamped: false, authorityWhy: null, authorityWhyCap: null, source: 'conversation', patternId: null, patternLabel: null, hits7d: 0 } })) });
 const ACC = await p1.evaljs(`(async () => {
   const d = ${J(digest)};
-  const fire = (dd) => { for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: dd, partial: !!dd.partial }); } catch (e) {} } };
+  const fire = (dd) => { ${RELAY("{ type: 'channels-updated', digest: dd, partial: !!dd.partial }")} };
   const line = () => { const r = document.querySelector('.chan-row[data-conv="lark/oc_5"]'); const a = r && r.querySelector('.chan-row-assign'); return a ? a.textContent : null; };
   const row = () => document.querySelector('.chan-row[data-conv="lark/oc_5"]');
   fire(${J(withAccess(digest, ['Alpha']))}); await new Promise((r) => setTimeout(r, 50));
@@ -268,7 +288,7 @@ async function clickHeadAcross(p, d, sel, bc) {
   // design 008: the card's unread is the ACCOUNT's kept count (adapters[].scheduler.unread) — an 'unread' broadcast moves it as a message does
   // `bc`: false = no broadcast; true = a partial digest naming ONE row unchanged (round 5); 'unread' = the same row with
   // its unread +1 — the head's COUNT title changes ("{n} conversations · {k} unread"), what every message brings (round 6)
-  if (bc) { await p.evaljs(`(() => { const d = ${J(d)}; const rows = d.conversations.slice(0, 1).map((c) => (${J(bc === 'unread')} ? { ...c, unread: (Number(c.unread) || 0) + 1 + Math.floor(Math.random() * 1000) } : c)); const bump = rows[0] && ${J(bc === 'unread')} ? rows[0].unread - (Number(d.conversations[0].unread) || 0) : 0; const adapters = (d.adapters || []).map((a) => (bump && rows[0] && a.id === rows[0].adapterId && a.scheduler ? { ...a, scheduler: { ...a.scheduler, unread: (Number(a.scheduler.unread) || 0) + bump } } : a)); const one = { ...d, adapters, partial: true, conversations: rows }; for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: one, partial: true }); } catch (e) {} } return 1; })()`); await sleep(40); }
+  if (bc) { await p.evaljs(`(() => { const d = ${J(d)}; const rows = d.conversations.slice(0, 1).map((c) => (${J(bc === 'unread')} ? { ...c, unread: (Number(c.unread) || 0) + 1 + Math.floor(Math.random() * 1000) } : c)); const bump = rows[0] && ${J(bc === 'unread')} ? rows[0].unread - (Number(d.conversations[0].unread) || 0) : 0; const adapters = (d.adapters || []).map((a) => (bump && rows[0] && a.id === rows[0].adapterId && a.scheduler ? { ...a, scheduler: { ...a.scheduler, unread: (Number(a.scheduler.unread) || 0) + bump } } : a)); const one = { ...d, adapters, partial: true, conversations: rows }; ${RELAY("{ type: 'channels-updated', digest: one, partial: true }")} return 1; })()`); await sleep(40); }
   await p.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 });
   await sleep(300);
   return p.evaljs(`(() => { const menus = document.querySelectorAll('.context-menu').length - window.__m0; const mm = document.querySelector('.context-menu'); const at = mm ? [Math.round(mm.getBoundingClientRect().left), Math.round(mm.getBoundingClientRect().top)] : null; const sec = document.querySelector('.chan-sec.chan-account'); const toggled = sec.classList.contains('chan-collapsed') !== window.__c0; const sameHead = sec.querySelector('.chan-sec-head') === window.__h0; for (const m of document.querySelectorAll('.context-menu')) m.remove(); if (sec.classList.contains('chan-collapsed')) sec.querySelector('.chan-sec-head').click(); return { found: true, menus, at, toggled, sameHead }; })()`);
@@ -335,7 +355,7 @@ const scrollerOf = `(() => { for (let n = document.querySelector('.chan-groups')
     sc.scrollTop = Math.max(0, sc.scrollTop - 600); await sleep(300);
     out.g3 = G(); out.top3 = sc.scrollTop;
     const first = await (await fetch('/api/channels')).json();
-    for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: { ...first, partial: false } }); } catch (e) {} }
+    ${RELAY("{ type: 'channels-updated', digest: { ...first, partial: false } }")}
     await sleep(150); out.g4mid = G();
     await sleep(2500);
     out.g4 = G(); out.top4 = sc.scrollTop;
@@ -403,7 +423,7 @@ console.log('⑦ CONTROL: the scratch bundle rebuilt as round 4 left it (no equa
   ok(await p3.load(), 'the round-4 control page loaded');
   await p3.evaljs(OPEN);
   const ACC3 = await p3.evaljs(`(async () => {
-    const fire = (dd) => { for (const fn of window.app.ws.globalHandlers) { try { fn({ type: 'channels-updated', digest: dd, partial: !!dd.partial }); } catch (e) {} } };
+    const fire = (dd) => { ${RELAY("{ type: 'channels-updated', digest: dd, partial: !!dd.partial }")} };
     const line = () => { const r = document.querySelector('.chan-row[data-conv="lark/oc_5"]'); const a = r && r.querySelector('.chan-row-assign'); return a ? a.textContent : null; };
     fire(${J(withAccess(digest, ['Alpha']))}); await new Promise((r) => setTimeout(r, 50));
     const one = line();
