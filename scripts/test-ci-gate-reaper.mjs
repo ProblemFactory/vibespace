@@ -670,6 +670,55 @@ console.log('\n§9d the directory sweep (B-60d2)');
       } finally { process.chdir(cwd0); if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome; }
     } finally { if (prev === undefined) delete process.env.VIBESPACE_CI_SCRATCH_ROOTS; else process.env.VIBESPACE_CI_SCRATCH_ROOTS = prev; }
   }
+  // B-f397 (the stamp door, 2026-11-20): an acceptance STAMPS each root it makes — `node scripts/scratch-run.mjs stamp <root> --owner
+  // <pid>` — so the reaper judges its processes by that owner, as every root's. The owner is required (the root's long-lived process);
+  // no owner, a dead owner, a folder no pattern names, a folder BENEATH a root and a missing root are refused by name, nothing written.
+  // Every fact judged is printed (the refusals' words, the record, the owner's state while it runs and after its exit event)
+  {
+    const SR = await import('./scratch-run.mjs');
+    const acc2 = fs.mkdtempSync(path.join(os.tmpdir(), 'cigate9e-stamp-')); tmpDirs.push(acc2);   // NOT /tmp/vs-*: only the pattern names it
+    const root = path.join(acc2, 'wt-accept-s', '.rev-shell'), beneath = path.join(root, 'run'), plain = path.join(acc2, 'wt-accept-s', 'plain');
+    for (const d of [beneath, plain]) fs.mkdirSync(d, { recursive: true });
+    const owner = spawn('sleep', ['30'], { stdio: 'ignore' });
+    const dead = spawnSync('true');   // a pid whose process has ended before any stamp
+    const env = { ...process.env, VIBESPACE_CI_SCRATCH_ROOTS: `${acc2}/wt-accept-*/.rev-*` };
+    const stamp = (args) => { const r = spawnSync(process.execPath, [path.join(REPO, 'scripts/scratch-run.mjs'), 'stamp', ...args], { env, encoding: 'utf8', timeout: 20000 }); return { code: r.status, out: (r.stdout || '').trim(), err: (r.stderr || '').trim() }; };
+    try {
+      const refusals = {
+        noOwner: stamp([root]),
+        deadOwner: stamp([root, '--owner', String(dead.pid)]),
+        notRoot: stamp([plain, '--owner', String(owner.pid)]),
+        beneath: stamp([beneath, '--owner', String(owner.pid)]),
+        missing: stamp([path.join(acc2, 'wt-accept-s', '.rev-none'), '--owner', String(owner.pid)]),
+      };
+      const written = [root, plain, beneath].filter((d) => fs.existsSync(path.join(d, SR.RUN_RECORD)));
+      const good = stamp([root, '--owner', String(owner.pid)]);
+      const rec = SR.readRunRecord(root), whileAlive = rec ? SR.runOwnerState(rec) : null;
+      const exited = new Promise((res) => owner.once('exit', res)); owner.kill('SIGKILL'); await exited;   // the owner ends: its exit event, the fact
+      const afterEnd = rec ? SR.runOwnerState(rec) : null;
+      const said = Object.fromEntries(Object.entries(refusals).map(([k, v]) => [k, `${v.code}: ${v.err}`]));
+      console.log(`    B-f397 stamp door — refusals ${JSON.stringify(said)} · written before the stamp ${JSON.stringify(written)} · stamped ${good.code}: ${good.out} · the owner while it runs: ${whileAlive && whileAlive.why} · after its exit: ${afterEnd && afterEnd.why}`);
+      ok(Object.values(refusals).every((v) => v.code === 2 && /^scratch-run stamp: refused — /.test(v.err)) && /no --owner/.test(refusals.noOwner.err) && /no live process/.test(refusals.deadOwner.err) && /no scratch root the reaper names/.test(refusals.notRoot.err) && /no scratch root the reaper names/.test(refusals.beneath.err) && /does not exist/.test(refusals.missing.err) && !written.length,
+        `B-f397: the stamp door refuses by name — no owner, a dead owner, a folder no pattern names, a folder BENEATH a root, a missing root — and writes nothing (${Object.keys(said).join(', ')})`);
+      ok(good.code === 0 && rec && rec.pid === owner.pid && JSON.parse(good.out || '{}').pid === owner.pid && whileAlive && whileAlive.alive === true && afterEnd && afterEnd.alive === false,
+        `B-f397: a configured root stamped with its long-lived owner — the reaper's own owner test reads it ALIVE while the owner runs (${whileAlive && whileAlive.why}) and GONE once it has ended (${afterEnd && afterEnd.why})`);
+      // CONTROL: WHY THE OWNER IS REQUIRED — a record naming a process that ended at once (the stamping command's own pid, an agent's
+      // one-shot shell) reads GONE at the next sweep, and the acceptance's live processes would be judged orphans
+      const oneShot = SR.makeRunRecord({ pid: dead.pid }), oneShotState = SR.runOwnerState(oneShot);
+      ok(oneShotState.alive === false, `CONTROL B-f397: a record owned by a one-shot process is GONE at once (${oneShotState.why}) — why --owner names the root's long-lived process`);
+      // a SERVICE MANAGER as the owner is refused (under env.sh a command's $PPID is the user manager: alive for ever, the root never
+      // judged) — the door in-process over a fake /proc table whose owner is a `systemd` of this user
+      const fakeProc = path.join(acc2, 'proc'); fs.mkdirSync(path.join(fakeProc, '4242'), { recursive: true });
+      fs.writeFileSync(path.join(fakeProc, '4242', 'stat'), '4242 (systemd) S 1 4242 4242 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 1 0 12345 0 0\n');
+      fs.writeFileSync(path.join(fakeProc, '4242', 'status'), `Name:\tsystemd\nUid:\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\n`);
+      const prevR = process.env.VIBESPACE_CI_SCRATCH_ROOTS, errs = [];
+      let mgr = null;
+      try { process.env.VIBESPACE_CI_SCRATCH_ROOTS = env.VIBESPACE_CI_SCRATCH_ROOTS; mgr = await SR.stampCli(['stamp', root, '--owner', '4242'], { procRoot: fakeProc, out: () => {}, err: (s) => errs.push(String(s).trim()) }); }
+      finally { if (prevR === undefined) delete process.env.VIBESPACE_CI_SCRATCH_ROOTS; else process.env.VIBESPACE_CI_SCRATCH_ROOTS = prevR; }
+      console.log(`    B-f397 stamp door — a service manager as the owner: ${mgr}: ${errs.join(' | ')}`);
+      ok(mgr === 2 && /a service manager never ends/.test(errs.join(' ')) && SR.readRunRecord(root).pid === owner.pid, `B-f397: a service manager as the owner (a \`systemd\` of this user) is refused by name and the root keeps its record (${errs.join(' | ')})`);
+    } finally { try { owner.kill('SIGKILL'); } catch { } }
+  }
 }
 
 // ── §10 THE LAUNCHER, ONCE, FOR REAL (B-f4cb, 2026-09-27) ────────────────

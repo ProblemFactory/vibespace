@@ -25,6 +25,7 @@
 // root whose owner is alive is never a candidate, whatever else it names.
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export const RUN_RECORD = '.vs-run.json';
 export const RUN_RECORD_VERSION = 1;
@@ -119,3 +120,37 @@ export function runOwnerState(rec, { procRoot = '/proc', bootId = machineBootId(
   if (puid != null && puid !== uid) return { alive: false, why: `${who} is another user's process (uid ${puid}, not ${uid})` };
   return { alive: true, why: `${who} is alive` };
 }
+
+// B-f397: THE STAMP DOOR — a root made outside this tree's helpers (an acceptance's `.rev-shell/` or `.chrome-<n>/` under its own
+// worktree, named by the box gate's VIBESPACE_CI_SCRATCH_ROOTS) is stamped by whoever made it, at once:
+//   node scripts/scratch-run.mjs stamp <root> --owner <pid>
+// The OWNER is required: the root's own long-lived process — the scratch hub or the browser started in it, its pid — never this
+// command's own pid, which ends at once (its record would read the root's live processes as orphaned at the next sweep).
+// Refused by name, exit 2, nothing written: no root named or not a directory; a folder the reaper does not name as a root (ci.mjs
+// scratchRootOf: /tmp/vs-* or a configured pattern — the root itself, never a folder beneath one, never the home or the checkout);
+// an owner that is no live process of this user, or a SERVICE MANAGER (pid 1, a `systemd` or `init` — it never ends, so the root would
+// never be judged: under env.sh a command's $PPID is the user manager). Then `ci.mjs --reap --dry-run` judges the root's processes by that owner, as it
+// judges every root's. ci.mjs is read only on this road (a dynamic import: ci.mjs itself imports this file).
+export async function stampCli(argv = process.argv.slice(2), { procRoot = '/proc', out = (s) => process.stdout.write(s), err = (s) => process.stderr.write(s) } = {}) {
+  const refuse = (why) => { err(`scratch-run stamp: refused — ${why}\n`); return 2; };
+  if (argv[0] !== 'stamp') return refuse('usage: node scripts/scratch-run.mjs stamp <root> --owner <pid>');
+  const root = argv[1] && !argv[1].startsWith('--') ? path.resolve(argv[1]) : null;
+  const oi = argv.indexOf('--owner'), owner = oi > 0 ? Number(argv[oi + 1]) : NaN;
+  if (!root) return refuse('no root named');
+  if (!Number.isInteger(owner) || owner <= 1) return refuse("no --owner <pid>: the root's long-lived process owns it (this command ends at once)");
+  let st = null; try { st = fs.statSync(root); } catch { return refuse(`${root} does not exist`); }
+  if (!st.isDirectory()) return refuse(`${root} is not a directory`);
+  let real = root; try { real = fs.realpathSync(root); } catch { real = root; }
+  const { scratchRootOf } = await import('./ci.mjs');
+  if (scratchRootOf(real) !== real) return refuse(`${real} is no scratch root the reaper names (/tmp/vs-* or a VIBESPACE_CI_SCRATCH_ROOTS pattern — the root itself, never a folder beneath one)`);
+  const ps = procStat(owner, procRoot);
+  if (!ps || ps.state === 'Z' || ps.state === 'X') return refuse(`the owner ${owner} is no live process`);
+  if (owner === 1 || ps.comm === 'systemd' || ps.comm === 'init') return refuse(`the owner ${owner} is ${ps.comm} — a service manager never ends, so the root would never be judged: name the root's own long-lived process`);
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (uid !== null && procUid(owner, procRoot) !== uid) return refuse(`the owner ${owner} is not this user's process`);
+  const rec = stampScratchRun(real, { pid: owner, procRoot });
+  out(JSON.stringify(rec) + '\n');
+  return 0;
+}
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) stampCli().then((code) => { process.exitCode = code; });
+
