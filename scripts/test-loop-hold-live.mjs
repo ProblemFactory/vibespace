@@ -1010,11 +1010,19 @@ async function legRound4(node, tag, tree = null) {
   const tailJs = inTail.filter((a) => leftOf(a) >= JS_SURE), tailEdge = inTail.filter((a) => leftOf(a) <= EDGE_SURE), tailBand = inTail.filter((a) => leftOf(a) > EDGE_SURE && leftOf(a) < JS_SURE);
   // the frame by name or by location alone (a spent name budget); the same frame as a late answer's is said once, «— also its last moment»
   // r237's should: an edge ask with no frame to say (unreadable) is «answered at its last moment» — the product's own law allows it
-  const TRUE_EDGE = [LH.V.unsampled, LH.V.cpu, LH.V.unknown], LAST_RE = /its last moment(?:: [^;]*\bsrc\/hogs\.js:\d+\)?)? \(the held work's end, or the JavaScript right after it\)|answered at its last moment\b/;
+  // 主开发's r415 (the box at cf39ff219: left 17.84 ms, the product's edge words with a FRAME CHAIN after the hog's frame — «pbkdfHog
+  // (src/hogs.js:24) ← (outside the repo) ← listOnTimeout (node:internal/timers:685) (the held work's end, …)» — and the old pattern
+  // wanted the frame to END at src/hogs.js): the hog's frame anywhere in the said frame, whatever chain follows it
+  const TRUE_EDGE = [LH.V.unsampled, LH.V.cpu, LH.V.unknown], LAST_RE = /its last moment: [^;]*\bsrc\/hogs\.js:\d+[^;]* \(the held work's end, or the JavaScript right after it\)|— also its last moment \(the held work's end|answered at its last moment\b/;
+  // THE LAW (r415): «not sampled» is never dressed as «JavaScript» — a line saying JavaScript holds a sample that landed
+  const jsSampled = (a) => a.verdict === LH.V.js && /; \d+ samples?: /.test(a.line || '') && !/not sampled/.test(a.line || '');
   const edgeTrue = (a) => (TRUE_EDGE.includes(a.verdict) || kernelSaid(a)) && LAST_RE.test(a.line || '');
   const wrongJs = inNative.filter((a) => a.verdict !== LH.V.native && !kernelSaid(a)), wrongTail = tailJs.filter((a) => a.verdict !== LH.V.js && !kernelSaid(a));
-  const edgeJs = tailEdge.filter((a) => a.verdict === LH.V.js && !kernelSaid(a));   // admitted, counted: this leg cannot see the product's own end
-  const wrongEdge = tailEdge.filter((a) => a.verdict !== LH.V.js && !edgeTrue(a)), wrongBand = tailBand.filter((a) => !(a.verdict === LH.V.js || edgeTrue(a)));
+  const edgeJs = tailEdge.filter((a) => jsSampled(a) && !kernelSaid(a));   // admitted, counted: this leg cannot see the product's own end
+  const wrongEdge = tailEdge.filter((a) => !jsSampled(a) && !edgeTrue(a)), wrongBand = tailBand.filter((a) => !(jsSampled(a) || edgeTrue(a)));
+  // r415: THE DISTRIBUTION, printed — every tail ask's time left (the hog's own clock) against the form its hold's line said
+  const formOf = (a) => (jsSampled(a) ? 'JavaScript (sampled)' : edgeTrue(a) ? 'its last moment' : a.verdict === LH.V.js ? 'JavaScript, NOT SAMPLED' : String(a.verdict || '?'));
+  say(`(A) every tail ask by the time left at the ask (r415): ${inTail.slice().sort((p, q) => leftOf(p) - leftOf(q)).map((a) => `${leftOf(a).toFixed(1)} ms → ${formOf(a)}`).join(' · ') || 'none'}`);
   const nativeAll = [...inNative, ...gcNative.filter((a) => !a.asleepAsk)], saidJs = nativeAll.filter((a) => a.verdict === LH.V.js);   // never «JavaScript», strict or not
   const named = inNative.filter((a) => a.tail >= 5), namedOk = named.filter((a) => /the first JavaScript after it: [^;]*\b(pbkdfHog|parseHog) \(src\/hogs\.js:\d+\)/.test(a.line || ''));
   const xs = inNative.map((a) => a.x);
@@ -1030,6 +1038,12 @@ async function legRound4(node, tag, tree = null) {
     else ok(namedOk.length >= Math.ceil(0.8 * named.length), `(A) ${tag}: its late answer names the tail as «the first JavaScript after it: … pbkdfHog / parseHog (src/hogs.js:…)» — the chain from the first frame that ran (${named.length - namedOk.length} missed, said; ${namedOk.length} of ${named.length})`, named.filter((a) => !namedOk.includes(a)).slice(0, 2));
     site(); if (tailJs.length < 3) skip(`(A) ${tag}: an ask posted INSIDE the JavaScript tail, ${JS_SURE} ms or more before the hold's end, is «JavaScript»`, `no sample this run: ${tailJs.length} of 3 asks inside the tail with ${JS_SURE} ms or more left found the thread running${extraT ? ' after the tail set' : ''} (${tailAsleep.length} more found it asleep at the ask — judged by the asleep leg)`);
     else ok(!wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail with ${JS_SURE} ms or more of the hold left (${tailJs.length} holds; ${tailAsleep.length} more found the thread asleep at the ask — judged by the asleep leg) is «JavaScript»${tailJs.some(kernelSaid) ? ` (${tailJs.filter(kernelSaid).length} «${LH.V.kernel}», admitted only by the hold's own numbers)` : ''} — the law cuts both ways`, wrongTail.slice(0, 3));
+    { // r415's control of the law: a line saying «JavaScript» with «not sampled» is refused — over a built line, and over every real tail line
+      const bad = '[loop-hold] the main loop was held 0.1 s — JavaScript: the main thread ran 0.1 s of the 0.1 s measured (user 0.1, kernel 0.0); not sampled (no sample landed inside it — asked 1 time: answered as it ended)';
+      const lied = inTail.filter((a) => a.verdict === LH.V.js && !jsSampled(a));
+      ok(!jsSampled({ verdict: LH.V.js, line: bad }) && jsSampled({ verdict: LH.V.js, line: '[loop-hold] the main loop was held 0.1 s — JavaScript: x; 1 sample: pbkdfHog (src/hogs.js:24) ×1' }) && !lied.length,
+        `(A) ${tag}: «not sampled» is never dressed as «${LH.V.js}» — a built line saying it is refused, a sampled one passes; of ${inTail.length} real tail lines, ${lied.length} said it`, lied.slice(0, 2));
+    }
     // r147: THE EDGE — an ask answered at the hold's last moment never names it: the window's own verdict, its frame said neutrally
     site(); if (!tailEdge.length) skip(`(A) ${tag}: an ask at the hold's last moment (${EDGE_SURE} ms or less left) is said as its last moment or «JavaScript», never «native»`, `no sample this run: the box placed no tail ask within ${EDGE_SURE} ms of the hold's end (the shape is made in test-loop-hold)`);
     else ok(!wrongEdge.length, `(A) ${tag}: an ask at the hold's last moment (${tailEdge.length} holds, ${EDGE_SURE} ms or less left by the hog's own clock) says the window's own verdict with «its last moment: … src/hogs.js:… (the held work's end, or the JavaScript right after it)» — never «${LH.V.native}» — or «${LH.V.js}» (${edgeJs.length}, admitted and counted: the leg cannot see the product's own end — the fast suite's REDs guard r147): ${byVerdict(tailEdge)}`, wrongEdge.slice(0, 3));
