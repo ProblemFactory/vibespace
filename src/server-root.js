@@ -61,6 +61,14 @@ function isUnder(p, dir) {
   if (d === '/') return true;
   return a === d || a.startsWith(d + '/');
 }
+/** B-9dd0 (主开发 r321): THE «under a temp root» verdict — rule 3's ONE spelling for every reader that keeps a throwaway
+ *  hub off the network (the update check's offline answer, src/server/ops-routes.js; the boot's runtime check,
+ *  src/server/runtime-boot.js). `root` and `tmpRoots` as given, `realRoot` / `realTmps` their real paths (the CALLER reads
+ *  them, so this stays pure: a hub reached through a linked temp path is one too) → the temp root it lies under, or null. */
+function tmpRootUnder({ root, realRoot = null, tmpRoots = [], realTmps = [] } = {}) {
+  const roots = [...new Set([...(tmpRoots || []), ...(realTmps || [])])].filter(isAbs);
+  return roots.find((t) => isUnder(root, t) || (realRoot != null && isUnder(realRoot, t))) || null;
+}
 /** The `gitdir: <path>` line of a worktree's (or submodule's) `.git` FILE, or null. */
 function parseGitFile(text) {
   const m = /^gitdir:[ \t]*(.+?)[ \t]*$/m.exec(String(text == null ? '' : text));
@@ -136,4 +144,4 @@ function registeredAfterErrorLine({ time = '?', error = '' } = {}) {
   return `VibeSpace registered the agent hooks at ${time} after an earlier read error (${String(error || '').slice(0, 200)}) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction.`;
 }
 
-module.exports = { OVERRIDE_ENV, FORCE_ENV, KINDS, REJUDGE_BACKOFF_MS, ROOT_FACTS_TTL_MS, trimSlash, isUnder, parseGitFile, checkoutOfCommonDir, isLinkedWorktree, rootVerdict, refusalLine, nextRejudgeDelay, unknownNoticeDue, registeredAfterErrorLine };
+module.exports = { OVERRIDE_ENV, FORCE_ENV, KINDS, REJUDGE_BACKOFF_MS, ROOT_FACTS_TTL_MS, trimSlash, isUnder, tmpRootUnder, parseGitFile, checkoutOfCommonDir, isLinkedWorktree, rootVerdict, refusalLine, nextRejudgeDelay, unknownNoticeDue, registeredAfterErrorLine };

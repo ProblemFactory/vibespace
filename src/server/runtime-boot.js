@@ -14,6 +14,22 @@ const path = require('path');
 const { spawn } = require('child_process');
 const RF = require('../runtime-floor');
 const NR = require('../node-runtime');
+const SR = require('../server-root.js');
+
+// B-9dd0: the temp roots the boot's runtime check judges (the update check's own list, src/server/ops-routes.js)
+const TMP_ROOTS = () => [require('os').tmpdir(), '/tmp', '/var/tmp'];
+/** B-9dd0 (主开发 r321): is the boot's runtime check ARMED for this root? It asks nodejs.org, so never under a suite
+ *  (VS_NO_REAL_CLI=1 — the test machines, a suite's scratch hub), never with NO_AUTO_UPDATE, never for a root under a temp
+ *  folder (the lanes' /var/tmp worktrees too) — judged by src/server-root.js tmpRootUnder over the REAL paths, the update
+ *  check's own verdict. The switches are read at the call (before any await). → Promise<{armed, why}> */
+function runtimeCheckArmed({ rootDir, env = process.env, tmpRoots = TMP_ROOTS(), realpath = (p) => require('fs').promises.realpath(p).catch(() => p) } = {}) {
+  if (env.NO_AUTO_UPDATE) return Promise.resolve({ armed: false, why: 'NO_AUTO_UPDATE' });
+  if (env.VS_NO_REAL_CLI === '1') return Promise.resolve({ armed: false, why: 'VS_NO_REAL_CLI=1' });
+  return Promise.all([realpath(rootDir), ...tmpRoots.map((t) => realpath(t))]).then(([realRoot, ...realTmps]) => {
+    const t = SR.tmpRootUnder({ root: path.resolve(rootDir), realRoot, tmpRoots, realTmps });
+    return t ? { armed: false, why: `the root lies under the temp folder ${t}` } : { armed: true, why: null };
+  });
+}
 
 function create({ rootDir, switched = { state: 'none' }, version = process.version, execPath = process.execPath, log = (l) => console.log(l), spawnFn = spawn } = {}) {
   const root = path.join(rootDir, 'data');
@@ -76,13 +92,12 @@ function boot({ rootDir, env = process.env, log = (l) => console.log(l) } = {}) 
   delete env.VIBESPACE_RUNTIME_REEXEC;
   booted = create({ rootDir, switched, log });
   setImmediate(() => log(booted.line()));
-  const os = require('os');
-  // B-9dd0: a suite's hub (VS_NO_REAL_CLI=1) or a root under any temp folder (the lanes' /var/tmp worktrees too, as ops-routes'
-  // version check judges it) never runs the runtime check — it would ask nodejs.org
-  const throwaway = env.VS_NO_REAL_CLI === '1' || [os.tmpdir(), '/tmp', '/var/tmp'].some((t) => (path.resolve(rootDir) + path.sep).startsWith(path.resolve(t) + path.sep));
-  if (!env.NO_AUTO_UPDATE && !throwaway) { const t = setTimeout(() => booted.afterListen({ autoUpdate: true }), 20000); if (t.unref) t.unref(); }
+  // B-9dd0: a suite's hub (VS_NO_REAL_CLI=1) or a root under any temp folder never runs the runtime check — it would ask
+  // nodejs.org (runtimeCheckArmed: the update check's own verdict); the timer is set only when armed
+  const b = booted;
+  runtimeCheckArmed({ rootDir, env }).then((v) => { if (!v.armed) return; const t = setTimeout(() => b.afterListen({ autoUpdate: true }), 20000); if (t.unref) t.unref(); }, () => { });
   return booted;
 }
 const answer = () => (booted ? booted.answer() : create({ rootDir: path.resolve(__dirname, '..', '..') }).answer());
 
-module.exports = { create, boot, answer };
+module.exports = { create, boot, answer, runtimeCheckArmed, TMP_ROOTS };

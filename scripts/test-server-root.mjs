@@ -336,5 +336,23 @@ console.log('— ⑥ REAL filesystem shapes through the SHIPPED reader (verify r
 ok(/if \(integrationEnabled\(\)\) hookRootWatch\.sync\(\);/.test(srv) && /if \(!hookRootWatch\.probeMayRun\(\) \|\| !integrationEnabled\(\) \|\| fs\.existsSync\(HOOK_OPTOUT_FILE\)\) return;/.test(srv) && /if \(!hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/.test(srv) && /require\('\.\/src\/server\/hook-root-watch\.js'\)\.create\(\{ dataDir: path\.join\(__dirname, 'data'\), ensureAgentHooks, rootRecovery, ownerWriteRefusal, integrationEnabled: \(\) => integrationEnabled\(\), serverNotice: \(\.\.\.a\) => serverNotice\(\.\.\.a\) \}\)/.test(srv), 'server.js: the boot / toggle sync, the probe\'s gate and the probe\'s words all go through THE hook-root watch (src/server/hook-root-watch.js) — verify r2 ①');
 }
 
+// B-9dd0 (主开发 r321): THE «under a temp root» verdict, one spelling (the update check, the boot's runtime check)
+{
+  const T = ['/tmp', '/var/tmp'];
+  const rows = [
+    [{ root: '/var/tmp/vs-lane/wt', tmpRoots: T }, '/var/tmp', 'a lane worktree under /var/tmp'],
+    [{ root: '/var/tmpfoo/wt', tmpRoots: T }, null, '/var/tmpfoo is not under /var/tmp (segment boundary)'],
+    [{ root: '/tmp', tmpRoots: T }, '/tmp', 'the temp root itself'],
+    [{ root: '/srv/link/wt', realRoot: '/tmp/real/wt', tmpRoots: T }, '/tmp', 'a root reached through a link: its REAL path is judged'],
+    [{ root: '/private/tmp/wt', tmpRoots: ['/tmp'], realTmps: ['/private/tmp'] }, '/private/tmp', 'a temp root\'s REAL path counts too (macOS /tmp → /private/tmp)'],
+    [{ root: '/home/u/vibespace', realRoot: '/home/u/vibespace', tmpRoots: T }, null, 'a person\'s checkout'],
+    [{ root: 'relative/wt', tmpRoots: ['tmp'] }, null, 'relative paths are never judged under'],
+  ];
+  for (const [arg, want, what] of rows) { const got = SR.tmpRootUnder(arg); ok(got === want, `B-9dd0 tmpRootUnder: ${what} → ${got}`, `want ${want}`); }
+  const ops = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), rb = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
+  ok(/tmpRootUnder\(\{ root: rootDir, realRoot: r, tmpRoots, realTmps: real \}\)/.test(ops) && /SR\.tmpRootUnder\(\{ root: path\.resolve\(rootDir\), realRoot, tmpRoots, realTmps \}\)/.test(rb) && !/startsWith\(path\.resolve\(t\)/.test(rb),
+    'B-9dd0: the update check and the boot\'s runtime check both ask tmpRootUnder (one verdict, no second spelling)');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

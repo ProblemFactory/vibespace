@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync, spawn } = require('child_process');
-const { isUnder } = require('../server-root.js');   // B-9dd0: the one «under a root» (segment boundary)
+const { tmpRootUnder } = require('../server-root.js');   // B-9dd0: the one «under a temp root» verdict (segment boundary, real paths)
 
 function create({ app, rootDir, wss, WS_OPEN, bootPhase = null, tmpRoots = [require('os').tmpdir(), '/tmp', '/var/tmp'] }) {
 // ── Version / update visibility (⚙ menu shows current + latest at the Update entry) ──
@@ -22,7 +22,7 @@ const CANONICAL_RAW = 'https://raw.githubusercontent.com/ProblemFactory/vibespac
 let saidOffline = false, tmpJudged = null;
 const realOr = (p) => fs.promises.realpath(p).catch(() => p);
 const tmpRootOf = () => (tmpJudged = tmpJudged || Promise.all([realOr(rootDir), ...tmpRoots.map(realOr)]).then(([r, ...real]) => {
-  const t = [...new Set([...tmpRoots, ...real])].find((x) => isUnder(r, x) || isUnder(rootDir, x));
+  const t = tmpRootUnder({ root: rootDir, realRoot: r, tmpRoots, realTmps: real });
   return t ? `the hub's root ${rootDir} lies under the temp folder ${t} (server-root rule 3: never a person's instance)` : null;
 }));
 async function canonicalFile(name, timeoutMs) {

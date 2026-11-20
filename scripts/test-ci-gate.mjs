@@ -964,37 +964,76 @@ console.log('\n§2n B-9dd0: a fast suite\'s sockets past the loopback are a red 
   const CI = await import('./ci.mjs');
   const root = mktmp('egress'), sha = 'c0ffee0123456789';
   fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
-  // a planted suite that connects to a vendor's NAME with a lookup that fails (nothing leaves the box) and passes; one that
-  // connects only to the loopback (a closed port) and passes — every fact the legs judge is printed
-  const dial = (host, extra = '') => `import net from 'node:net';\nconst s = net.connect({ host: ${JSON.stringify(host)}, port: 443${extra} });\ns.on('error', () => { console.log('ALL PASS (1)'); process.exit(0); });\ns.on('connect', () => { s.destroy(); console.log('ALL PASS (1)'); process.exit(0); });\n`;
-  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-egress.mjs'), dial('vendor.example', ", lookup: (h, o, cb) => cb(Object.assign(new Error('planted: no lookup'), { code: 'ENOTFOUND' }))"));
-  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-loopback.mjs'), dial('127.0.0.1').replace('port: 443', 'port: 9'));
-  const [vend, loop, off, heavy] = await Promise.all([
-    CI.runSuiteAsync({ name: 'test-planted-egress', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 1 }),
-    CI.runSuiteAsync({ name: 'test-planted-loopback', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 2 }),
-    CI.runSuiteAsync({ name: 'test-planted-egress', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 3, egress: false }),
-    CI.runSuiteAsync({ name: 'test-planted-egress', tier: 'heavy', budgetMs: 8000 }, { root, sha, lane: 4 }),
+  const plant = (name, src) => fs.writeFileSync(path.join(root, 'scripts', `${name}.mjs`), `import fs from 'node:fs';\nimport net from 'node:net';\n${src}\n`);
+  const PASS = "console.log('ALL PASS (1)'); process.exit(0);";
+  // THE COUNTED DIALS, planted so that NO PACKET LEAVES the box (主开发 r321: the control sits on a dial still counted):
+  // · a vendor's NAME whose OWN lookup answers an address past the loopback (192.0.2.1, TEST-NET-1) a tick later — the socket
+  //   was destroyed at once, so net never connects to the answer (its lookup callback sees the socket is no longer connecting);
+  plant('test-planted-egress', `const s = net.connect({ host: 'vendor.example', port: 443, lookup: (h, o, cb) => process.nextTick(() => { if (o && o.all) cb(null, [{ address: '192.0.2.1', family: 4 }]); else cb(null, '192.0.2.1', 4); ${PASS} }) });\ns.on('error', () => { });\ns.destroy();`);
+  // · an ADDRESS LITERAL past the loopback, destroyed in the same tick (net connects a literal on the NEXT tick, if still connecting)
+  plant('test-planted-literal', `const s = net.connect({ host: '192.0.2.1', port: 443 });\ns.on('error', () => { });\ns.destroy();\n${PASS}`);
+  // NOT COUNTED: a name the suite's own lookup REFUSES (test-tailnet-browsers' shape: its stand-in fails the name on purpose);
+  // the loopback (a closed port); a name the suite's own lookup maps to the loopback (its stand-in)
+  plant('test-planted-refused', `const s = net.connect({ host: 'vendor.example', port: 443, lookup: (h, o, cb) => cb(Object.assign(new Error('planted: refused'), { code: 'ENOTFOUND' })) });\ns.on('error', (e) => { console.log('the dial ended: ' + e.code); ${PASS} });`);
+  plant('test-planted-loopback', `const s = net.connect({ host: '127.0.0.1', port: 9 });\ns.on('error', () => { ${PASS} });\ns.on('connect', () => { s.destroy(); ${PASS} });`);
+  plant('test-planted-standin', `const s = net.connect({ host: 'vendor.example', port: 9, lookup: (h, o, cb) => (o && o.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4)) });\ns.on('error', () => { ${PASS} });\ns.on('connect', () => { s.destroy(); ${PASS} });`);
+  // THE COUNT ITSELF FAILED: the sentinel gone (the reader did not load); a host line the sampler could not write (its file
+  // replaced by a folder after the sentinel: a removed folder, a full disk) — each is red, never a green whose count went missing
+  plant('test-planted-unloaded', `fs.writeFileSync(process.env.VIBESPACE_SUITE_EGRESS_FILE, '');\n${PASS}`);
+  plant('test-planted-lost', `const f = process.env.VIBESPACE_SUITE_EGRESS_FILE;\nfs.rmSync(f, { force: true }); fs.mkdirSync(f);\nconst s = net.connect({ host: '192.0.2.1', port: 443 });\ns.on('error', () => { });\ns.destroy();\n${PASS}`);
+  // a suite that FAILED and dialed past the loopback keeps its hosts in the result (its green retry cannot hide them)
+  plant('test-planted-failed', `const s = net.connect({ host: '192.0.2.1', port: 443 });\ns.on('error', () => { });\ns.destroy();\nconsole.log('  ✗ planted: a red leg'); process.exit(1);`);
+  // the reader wraps a COPY: one options object reused for three connects keeps the suite's own lookup
+  plant('test-planted-reuse', `const look = (h, o, cb) => process.nextTick(() => (o && o.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4)));\nconst opts = { host: 'vendor.example', port: 9, lookup: look };\nlet same = 0;\nfor (let i = 0; i < 3; i++) { const s = net.connect(opts); s.on('error', () => { }); s.destroy(); if (opts.lookup === look) same++; }\nconsole.log('the options object keeps its own lookup after 3 connects: ' + same + ' of 3');\nif (same !== 3) { console.log('  ✗ the reader changed the suite\\'s own options'); process.exit(1); }\n${PASS}`);
+  const F = (name, lane, o = {}) => CI.runSuiteAsync({ name, tier: o.tier || 'fast', budgetMs: 8000 }, { root, sha, lane, ...(o.egress === false ? { egress: false } : {}) });
+  const [vend, lit, refused, loop, stand, unl, lost, failed, reuse] = await Promise.all([
+    F('test-planted-egress', 1), F('test-planted-literal', 2), F('test-planted-refused', 3), F('test-planted-loopback', 4), F('test-planted-standin', 5),
+    F('test-planted-unloaded', 6), F('test-planted-lost', 7), F('test-planted-failed', 8), F('test-planted-reuse', 9),
   ]);
+  const [offV, offL, heavyV] = await Promise.all([F('test-planted-egress', 1, { egress: false }), F('test-planted-literal', 2, { egress: false }), F('test-planted-egress', 3, { tier: 'heavy' })]);
+  const said = (n, r) => console.log(`      ${n}: ${r.ok ? 'green' : 'RED'} · egress ${r.egress ? CI.egressWords(r.egress) : '(none)'} · ${String(r.lines[0] || '').trim().slice(0, 260)}`);
+  for (const [n, r] of [['egress (own lookup → 192.0.2.1)', vend], ['literal 192.0.2.1', lit], ['refused (own lookup errs)', refused], ['loopback', loop], ['stand-in (own lookup → 127.0.0.1)', stand], ['unloaded', unl], ['lost line', lost], ['failed + dialed', failed], ['options reused', reuse], ['egress, reader off', offV], ['literal, reader off', offL], ['egress, heavy row', heavyV]]) said(n, r);
   okd(fs.existsSync(CI.EGRESS_SAMPLER) && CI.egressArgv().join(' ') === `--require ${CI.EGRESS_SAMPLER}`, 'the reader rides the suite\'s OWN argv (`--require` scripts/egress-sampler.cjs) — never NODE_OPTIONS', CI.egressArgv().join(' '));
-  okd(!vend.ok && /it opened sockets past the loopback .*: vendor\.example:443 ×1/.test(vend.lines[0]) && Array.isArray(vend.egress) && vend.egress[0].host === 'vendor.example', 'a GREEN suite that dialed a vendor\'s name (its lookup failed: nothing left the box) is a RED row naming the host and its count', vend.lines[0]);
+  okd(!vend.ok && /it opened sockets past the loopback .*: vendor\.example=192\.0\.2\.1:443 ×1/.test(vend.lines[0]) && vend.egress[0].host === 'vendor.example=192.0.2.1', 'a GREEN suite whose OWN lookup answered an address past the loopback is a RED row naming the name, the address and the count (no packet left: the socket was destroyed first)', vend.lines[0]);
+  okd(!lit.ok && /: 192\.0\.2\.1:443 ×1/.test(lit.lines[0]), 'a GREEN suite that dialed an address LITERAL past the loopback is a RED row (judged as it stands; destroyed before net connects it)', lit.lines[0]);
+  okd(vend.lines[0].includes(CI.EGRESS_NOT_WATCHED), `the red words say what the reader does NOT watch («${CI.EGRESS_NOT_WATCHED}»)`, vend.lines[0]);
+  okd(refused.ok && !refused.egress, 'THE MUST (r321): a name the suite\'s OWN lookup refuses never left the box — not counted, the row stays green (test-tailnet-browsers\' shape)', refused.lines[0]);
   okd(loop.ok && !loop.egress, 'a suite that reached only the loopback stays green', loop.lines[0]);
-  okd(off.ok && heavy.ok, 'CONTROL: the same planted suite WITHOUT the reader (egress: false), and as a heavy row (the heavy tier is unit 2\'s), stays green — the red is the reader\'s', `${off.lines[0]} | ${heavy.lines[0]}`);
+  okd(stand.ok && !stand.egress, 'a vendor\'s NAME the suite\'s own lookup maps to the loopback (its stand-in) stays green — the address the lookup answers is judged', stand.lines[0]);
+  okd(offV.ok && offL.ok && heavyV.ok, 'CONTROL: the same planted suites WITHOUT the reader (egress: false), and as a heavy row (the heavy tier is unit 2\'s), stay green — the red is the reader\'s', `${offV.lines[0]} | ${offL.lines[0]} | ${heavyV.lines[0]}`);
+  okd(!unl.ok && /its egress reader did not load/.test(unl.lines[0]), 'a suite whose egress file lost the sampler\'s sentinel is RED by name (the reader did not load: its sockets were never counted)', unl.lines[0]);
+  okd(!lost.ok && /its egress reader LOST 1 host line/.test(lost.lines[0]) && lost.egress.some((x) => x.host === CI.EGRESS_LOST), 'a host line the sampler could not WRITE (its file gone after the sentinel) is a RED row — never a green whose count went missing', lost.lines[0]);
+  okd(!failed.ok && Array.isArray(failed.egress) && failed.egress.some((x) => x.host === '192.0.2.1') && /: 192\.0\.2\.1:443 ×1/.test(failed.lines[0]), 'a suite that FAILED and dialed past the loopback keeps its hosts in the result and its ✗ line', failed.lines[0]);
+  okd(reuse.ok && !reuse.egress, 'the reader wraps a COPY of the options: one options object reused for three connects keeps the suite\'s own lookup', reuse.lines[0]);
   const rows = CI.egressOf((() => { const f = path.join(root, 'egress.ndjson'); fs.writeFileSync(f, '{"host":"a.example","port":443}\n{"host":"a.example","port":443}\nnot json\n{"host":"b.example","port":80}\n'); return f; })());
   okd(CI.egressWords(rows) === 'a.example:443 ×2, (an unreadable line):0 ×1, b.example:80 ×1', 'the count by host: two sockets to one host are ×2, an unreadable line is a row of its own (never dropped)', CI.egressWords(rows));
-  // the suite's OWN stand-in resolver mapping the vendor's name to the loopback is no egress (it is judged by the address its
-  // lookup answers); a suite whose egress file lost the sampler's sentinel is red (the reader did not load — never a silent green)
-  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-standin.mjs'), dial('vendor.example', ", lookup: (h, o, cb) => (o && o.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4))").replace('port: 443', 'port: 9'));
-  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-unloaded.mjs'), "import fs from 'node:fs';\nfs.writeFileSync(process.env.VIBESPACE_SUITE_EGRESS_FILE, '');\nconsole.log('ALL PASS (1)');\n");
-  const [stand, unl] = await Promise.all([
-    CI.runSuiteAsync({ name: 'test-planted-standin', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 5 }),
-    CI.runSuiteAsync({ name: 'test-planted-unloaded', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 6 }),
-  ]);
-  okd(stand.ok && !stand.egress, 'a vendor\'s NAME the suite\'s own lookup maps to the loopback (its stand-in) stays green — the address the lookup answers is judged', stand.lines[0]);
-  okd(!unl.ok && /its egress reader did not load/.test(unl.lines[0]), 'a suite whose egress file lost the sampler\'s sentinel is RED by name (the reader did not load: its sockets were never counted)', unl.lines[0]);
-  const why = CI.fastRetryRefusal({ name: 'test-planted-egress', tier: 'fast' }, vend);
-  okd(typeof why === 'string' && /sockets past the loopback/.test(why), 'an egress red is never retried as a flake (fastRetryRefusal names it)', why);
+  // the retry refusals: each names its cause (an egress, the reader not loaded, a lost line)
+  const why = (r) => CI.fastRetryRefusal({ name: 'test-planted', tier: 'fast' }, r);
+  console.log(`      the retry refusals: «${why(vend)}» · «${why(unl)}» · «${why(lost)}» · «${why(failed)}»`);
+  okd(/sockets past the loopback/.test(why(vend) || '') && /sockets past the loopback/.test(why(failed) || ''), 'an egress red is never retried as a flake — a green one, and a FAILED one that dialed (fastRetryRefusal names it)', `${why(vend)} | ${why(failed)}`);
+  okd(/egress reader did not load/.test(why(unl) || '') && /lost a host line/.test(why(lost) || ''), 'the refusal names the READER when it did not load, and a lost line as a lost line (never «it opened sockets»)', `${why(unl)} | ${why(lost)}`);
+  // THE VERDICT, pure (the branches a plant cannot reach without a packet: a NAME with no lookup of its own would ask the box's
+  // resolver) + the loopback table + one spelling of the lost marker
+  const S = createRequire(import.meta.url)(CI.EGRESS_SAMPLER);
+  const vt = [
+    [{ host: 'vendor.example', o: {} }, 'count'], [{ host: 'vendor.example', o: null }, 'count'], [{ host: 'vendor.example', o: { lookup() { } } }, 'lookup'],
+    [{ host: '192.0.2.1', o: { lookup() { } } }, 'count'], [{ host: '[2001:db8::1]', o: null }, 'count'], [{ host: '127.0.0.1', o: {} }, 'skip'], [{ host: 'localhost', o: {} }, 'skip'], [null, 'skip'],
+  ];
+  const vBad = vt.filter(([t, want]) => S.verdict(t) !== want).map(([t, want]) => `${t && t.host}: ${S.verdict(t)} (want ${want})`);
+  console.log(`      the verdict table: ${vt.map(([t]) => `${t ? t.host + (t.o && t.o.lookup ? '+lookup' : '') : 'null'}→${S.verdict(t)}`).join(' · ')}`);
+  okd(!vBad.length, 'THE VERDICT: a NAME with no lookup of its own is counted (before any lookup), with one it is judged by the answer, an address literal as it stands (a lookup or not), the loopback skipped', vBad.join('; '));
+  const tg = [S.target([{ path: '/tmp/x.sock' }]), S.target([443, 'vendor.example']), S.target(['/tmp/x.sock']), S.target([[{ host: 'h.example', port: 1 }, null]])];
+  okd(tg[0] === null && tg[1].host === 'vendor.example' && tg[1].port === 443 && tg[2] === null && tg[3].host === 'h.example' && Array.isArray(tg[3].arr), 'target(): a unix socket is nothing to judge; (port, host) and net\'s own normalized array are read', JSON.stringify(tg.map((x) => x && { host: x.host, port: x.port, arr: !!x.arr })));
+  const an = [S.answered(new Error('x'), null), S.answered(null, '127.0.0.1'), S.answered(null, '192.0.2.1'), S.answered(null, [{ address: '127.0.0.1' }, { address: '192.0.2.7' }])];
+  console.log(`      answered(): refused → ${an[0]} · 127.0.0.1 → ${an[1]} · 192.0.2.1 → ${an[2]} · [127.0.0.1, 192.0.2.7] → ${an[3]}`);
+  okd(an[0] === null && an[1] === null && an[2] === '192.0.2.1' && an[3] === '192.0.2.7', 'answered(): a refusal and a loopback answer are not counted; an address past the loopback is, and ANY such entry of an all:true list (the header says so)', JSON.stringify(an));
+  const LB = ['127.0.0.1', '127.9.8.7', '::1', '[::1]', '0:0:0:0:0:0:0:1', '::ffff:127.0.0.1', '::ffff:7f00:1', 'localhost', 'LOCALHOST.', 'a.localhost', '0.0.0.0', '::'];
+  const NOT = ['192.0.2.1', '10.0.0.1', '::ffff:192.0.2.1', '::ffff:c000:201', 'vendor.example', 'localhost.example', '127.example', '127.0.0.1.example'];
+  const lbBad = [...LB.filter((h) => !S.LOOPBACK(h)).map((h) => `${h}: not loopback`), ...NOT.filter((h) => S.LOOPBACK(h)).map((h) => `${h}: taken as loopback`)];
+  console.log(`      the loopback table: ${LB.length} loopback, ${NOT.length} past it — ${lbBad.length ? lbBad.join('; ') : 'each as written'}`);
+  okd(!lbBad.length, 'the loopback table: 127/8 literals, ::1 (both spellings), the v4-mapped 127 forms, localhost and *.localhost, 0.0.0.0 and :: — and never a NAME that merely begins «127.» or a mapped address past it', lbBad.join('; '));
+  okd(S.LOST_MARK === CI.EGRESS_LOST_MARK, 'the lost marker is ONE spelling: the sampler\'s LOST_MARK is the runner\'s EGRESS_LOST_MARK', `${S.LOST_MARK} | ${CI.EGRESS_LOST_MARK}`);
 }
-
 // ── §2j A SUITE READS NO HISTORY MASTER DOES NOT HAVE (B-4291, lane int361, 2.369.369: test-stash-strip's r5 leg read
 // `git show 280ccd2e:…` — a LANE-BRANCH commit only the production repo had — so the push gate alone ran the leg, red at four
 // pushes in a row and called a flake, while every lane, the runner (depth 1) and each by-hand rerun SKIPPED it and said green) ──

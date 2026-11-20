@@ -2599,7 +2599,11 @@ export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = fa
 export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
   const row = noRetry.find((x) => x.name === (s && s.name));
   if (row) return row.why;
-  if (r && Array.isArray(r.egress) && r.egress.length) return 'it opened sockets past the loopback (B-9dd0) — a green second try proves nothing about the first';
+  if (r && Array.isArray(r.egress) && r.egress.length) {
+    if (r.egress.some((x) => x.host === EGRESS_UNLOADED)) return 'its egress reader did not load (B-9dd0) — its sockets were never counted, and a second try is not the first';
+    if (r.egress.some((x) => x.host === EGRESS_LOST)) return 'its egress reader lost a host line (B-9dd0) — what the first try dialed is not known, and a second try is not the first';
+    return 'it opened sockets past the loopback (B-9dd0) — a green second try proves nothing about the first';
+  }
   if (r && r.killedFromOutside) return 'it died of a signal this runner did not send — the run is being torn down, not a flake';
   if (r && (r.hangReport || (r.error && r.error.code === 'ETIMEDOUT'))) return 'it hung — to its budget or to its own watchdog — and a second hang would cost the gate as much again (its hang report names the threads)';
   // …and a red that ran most of its budget (batch 24's reader: a hang by another road, a suite ending itself near its clock) — a second
@@ -2738,8 +2742,11 @@ const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
 // in its OWN argv (never NODE_OPTIONS — the fast tier's rule), its file in $VIBESPACE_SUITE_EGRESS_FILE; any host past the
 // loopback in that file when the suite ends is a RED row naming each host and its count (the law: a suite reaches the loopback
 // or a stand-in of its own, never a vendor's host), and a file WITHOUT the sampler's sentinel line is red too (the reader did
-// not load — never a silent green). The runner's own sampler (this tree's), so a planted root is judged too; a spawned child
-// (a hub) is not sampled (fork / Worker inherit the argv). The heavy tier's Chrome is its own unit (scratch.mjs CHROME_QUIET).
+// not load — never a silent green), and so is a host line the sampler could not write (its LOST marker on the suite's stderr).
+// The runner's own sampler (this tree's), so a planted root is judged too. A suite's own lookup is judged by what it answers (a
+// refusal never left the box: not counted — scripts/egress-sampler.cjs `verdict`). NOT WATCHED (the red words say it): a child
+// started without the argv (a spawned hub, a CLI — fork / Worker inherit it), a bare DNS ask with no socket, UDP, a name ending
+// «.localhost». The heavy tier's Chrome is its own unit (scratch.mjs CHROME_QUIET).
 export const EGRESS_SAMPLER = path.join(path.dirname(HERE), 'egress-sampler.cjs');
 export const egressArgv = () => (fs.existsSync(EGRESS_SAMPLER) ? ['--require', EGRESS_SAMPLER] : []);
 /** A suite's egress file → [{host, port, n}] by count (an unreadable line is a row of its own); `.loaded` = the sampler's
@@ -2762,6 +2769,11 @@ export function egressOf(file) {
   return rows;
 }
 export const egressWords = (rows) => rows.map((r) => `${r.host}:${r.port} ×${r.n}`).join(', ');
+// the sampler's own spelling (scripts/egress-sampler.cjs LOST_MARK — test-ci-gate §2n holds them equal) and the two rows a
+// result carries when the count itself failed
+export const EGRESS_LOST_MARK = '[egress-sampler] LOST';
+export const EGRESS_UNLOADED = '(the reader did not load)', EGRESS_LOST = '(a host line was lost)';
+export const EGRESS_NOT_WATCHED = 'not watched: a child started without the reader, a bare DNS ask, UDP';
 // ONE private folder per runner process (mkdtemp: never a predictable name another user could hold), removed at its exit
 let EGRESS_DIR = null;
 const egressFileFor = (name, lane) => {
@@ -2812,11 +2824,14 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // B-9dd0: the sockets the suite opened past the loopback — a green suite with any is RED by name, a red one says them too
       const opened = egressOn ? egressOf(egressFile) : [];
       if (egressOn) { try { fs.rmSync(egressFile, { force: true }); } catch { } }
-      const unloaded = egressOn && !opened.loaded;
-      const egressNote = opened.length ? ` — it opened sockets past the loopback (B-9dd0: a suite reaches the loopback or its own stand-in only): ${egressWords(opened)}`
-        : unloaded ? ' — its egress reader did not load (B-9dd0: the sampler\'s sentinel line is missing — its sockets were not counted)' : '';
-      if (status === 0 && (opened.length || unloaded)) {
-        resolve({ ok: false, ms, load, egress: opened.length ? opened : [{ host: '(the reader did not load)', port: 0, n: 1 }], full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [`\n✗ ${s.name} FAILED (${ms}ms) ${tag} ${ld}${egressNote}`, stdout.split('\n').slice(-40).join('\n'), stderr || ''] });
+      const lostN = egressOn ? stderr.split('\n').filter((l) => l.startsWith(EGRESS_LOST_MARK)).length : 0;
+      const unloaded = egressOn && !opened.loaded && !lostN;
+      const egressNote = (opened.length ? ` — it opened sockets past the loopback (B-9dd0: a suite reaches the loopback or its own stand-in only; ${EGRESS_NOT_WATCHED}): ${egressWords(opened)}` : '')
+        + (lostN ? ` — its egress reader LOST ${lostN} host line(s) (B-9dd0: the sampler could not write them — what the suite dialed is not known; its stderr says which)` : '')
+        + (unloaded ? ' — its egress reader did not load (B-9dd0: the sampler\'s sentinel line is missing — its sockets were not counted)' : '');
+      const egressRows = [...opened, ...(lostN ? [{ host: EGRESS_LOST, port: 0, n: lostN }] : []), ...(unloaded ? [{ host: EGRESS_UNLOADED, port: 0, n: 1 }] : [])];
+      if (status === 0 && egressRows.length) {
+        resolve({ ok: false, ms, load, egress: egressRows, full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [`\n✗ ${s.name} FAILED (${ms}ms) ${tag} ${ld}${egressNote}`, stdout.split('\n').slice(-40).join('\n'), stderr || ''] });
         return;
       }
       if (status === 0) {
@@ -2829,7 +2844,8 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       const hl = asked ? readHangReport(asked, { root, envExcluded: hr.envExcluded }) : null, digest = hl && hl.lines.length ? '\n' + hl.lines.join('\n') : '';
       // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
-      resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
+      // B-9dd0 (r321 should 5): a row that FAILED and opened sockets keeps them in its result — its green retry cannot hide them
+      resolve({ ok: false, ms, load, ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
         `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });

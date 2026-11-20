@@ -87,5 +87,33 @@ const mut = src.replace('  const low = below(t, tripleOf(row.floor));', '  const
 const red = run(M.load('src/runtime-floor.js', mut, 'lexical')).filter(([, s, w, ws, ww]) => s !== ws || w !== ww);
 ok(mut !== src && red.some(([n]) => n.startsWith('v22.9.9')), `RED: a copy that compares versions as TEXT reads 22.9.9 as fixed (${red.length} rows red)`, red.map((r) => r[0]));
 
+// B-9dd0 (主开发 r321): THE BOOT'S RUNTIME CHECK (it asks nodejs.org) is armed only for a person's root — never under a suite's
+// switch, NO_AUTO_UPDATE, or a root under a temp folder (src/server-root.js tmpRootUnder over the REAL paths: the update check's
+// verdict); the real paths come from an injected reader here (no disk read)
+{
+  const RB = require(path.join(REPO, 'src/server/runtime-boot.js'));
+  const links = { '/srv/link/wt': '/tmp/real/wt' };
+  const real = async (p) => links[p] || p;
+  const T = ['/tmp', '/var/tmp'];
+  const scenes = [
+    ['a person\'s root', { rootDir: '/home/u/vibespace', env: {}, tmpRoots: T }, true],
+    ['a lane worktree under /var/tmp', { rootDir: '/var/tmp/vs-lane/wt', env: {}, tmpRoots: T }, false],
+    ['/var/tmpfoo (not under /var/tmp)', { rootDir: '/var/tmpfoo/wt', env: {}, tmpRoots: T }, true],
+    ['a root reached through a link into /tmp', { rootDir: '/srv/link/wt', env: {}, tmpRoots: T }, false],
+    ['a suite\'s hub (VS_NO_REAL_CLI=1)', { rootDir: '/home/u/vibespace', env: { VS_NO_REAL_CLI: '1' }, tmpRoots: T }, false],
+    ['NO_AUTO_UPDATE', { rootDir: '/home/u/vibespace', env: { NO_AUTO_UPDATE: '1' }, tmpRoots: T }, false],
+    ['RED CONTROL: the same /var/tmp root with /var/tmp left out of the list', { rootDir: '/var/tmp/vs-lane/wt', env: {}, tmpRoots: ['/tmp'] }, true],
+  ];
+  for (const [what, arg, want] of scenes) {
+    const v = await RB.runtimeCheckArmed({ ...arg, realpath: real });
+    ok(v.armed === want, `B-9dd0 the boot's runtime check — ${what}: ${v.armed ? 'ARMED' : 'off (' + v.why + ')'}`, JSON.stringify(v));
+  }
+  ok(RB.TMP_ROOTS().includes('/var/tmp') && RB.TMP_ROOTS().includes('/tmp'), `B-9dd0 the boot judges /tmp and /var/tmp beside os.tmpdir() (${RB.TMP_ROOTS().join(', ')})`);
+  const bootSrc = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
+  const bootFn = bootSrc.slice(bootSrc.indexOf('function boot('), bootSrc.indexOf('const answer ='));
+  ok(/runtimeCheckArmed\(\{ rootDir, env \}\)\.then\(\(v\) => \{ if \(!v\.armed\) return; const t = setTimeout\(/.test(bootFn) && (bootFn.match(/setTimeout\(/g) || []).length === 1,
+    'B-9dd0 boot() sets the runtime check\'s timer ONLY through runtimeCheckArmed (one setTimeout, inside its armed answer)');
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass} passed)`);
 process.exit(fail ? 1 : 0);

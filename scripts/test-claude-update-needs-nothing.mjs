@@ -465,6 +465,26 @@ try {
     const rowOf = (k) => C.rows.find((r) => r.file + '|' + r.match === k);
     red(grown.get('src/usage-anchors.js|family-word') !== rowOf('src/usage-anchors.js|family-word').sites && grown.get('src/usage-history.js|family-key') !== rowOf('src/usage-history.js|family-key').sites, 'a new site in an already-rowed file (an `includes(\'opus\')` in usage-anchors; a `fable-6` row in DEFAULT_PRICING) moves its row\'s count — red');
   }
+  // B-9dd0 (主开发 r321): a hub a SUITE boots asks no vendor for its model list — under VS_NO_REAL_CLI=1 the refusal stands in
+  // FRONT of the request (an inherited ANTHROPIC_API_KEY never sends it to the vendor). The same call with the switch off is the
+  // RED CONTROL: its one request is made — to a recording stand-in of https.request, never sent
+  {
+    const https = require('https'), asked = [], real = https.request;
+    const saved = { sw: process.env.VS_NO_REAL_CLI, key: process.env.ANTHROPIC_API_KEY };
+    https.request = (u) => { asked.push(String(u)); const rq = new (require('events'))(); rq.end = () => { }; return rq; };
+    try {
+      process.env.ANTHROPIC_API_KEY = 'standin-api-key';
+      process.env.VS_NO_REAL_CLI = '1'; env.refreshAvailableModels(); const under = asked.length;
+      delete process.env.VS_NO_REAL_CLI; env.refreshAvailableModels(); const off = asked.length - under;
+      console.log(`  (B-9dd0: model-list requests — under VS_NO_REAL_CLI=1: ${under}; the switch off: ${off} — ${asked.join(', ') || 'none'})`);
+      ok(under === 0, 'B-9dd0: under VS_NO_REAL_CLI=1 the model list asks no vendor, an API key set (the refusal stands in front of the request)', asked.join(', '));
+      ok(off === 1 && /^https:\/\/api\.anthropic\.com\/v1\/models\?/.test(asked[under] || ''), 'B-9dd0 RED CONTROL: the same call with the switch off makes its one request (the stand-in sees it — the zero above is the refusal\'s)', asked.join(', '));
+    } finally {
+      https.request = real;
+      if (saved.sw === undefined) delete process.env.VS_NO_REAL_CLI; else process.env.VS_NO_REAL_CLI = saved.sw;
+      if (saved.key === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = saved.key;
+    }
+  }
 } catch (e) { fail++; console.log('  ✗ the drill threw: ' + ((e && e.stack) || e)); }
 console.log(fail ? `\n${fail} FAILED (${pass} passed, ${skip} skipped)` : `\nALL PASS (${pass}${skip ? `, ${skip} skipped` : ''})`);
 process.exit(fail ? 1 : 0);

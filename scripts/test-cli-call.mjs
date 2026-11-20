@@ -86,15 +86,21 @@ CC.configure({ override: 300 });
   // accepts (its loop blocked), its queue filled first: the kernel drops the dial's SYN, so the connect hangs. It used to be a SYN
   // to a blackhole address off the box (10.255.255.1 — on a hosted runner, its network's own range)
   const deaf = spawn(process.execPath, ['-e', "const s=require('net').createServer();s.listen({port:0,host:'127.0.0.1',backlog:1},()=>{process.stdout.write(s.address().port+'\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20000);process.exit(0)})"], { stdio: ['ignore', 'pipe', 'ignore'] });
-  const deafPort = await new Promise((r) => { let b = ''; deaf.stdout.on('data', (d) => { b += d; if (b.includes('\n')) r(Number(b.trim())); }); });
+  // its port, within a bound (a child that never prints is a named red, never the suite's whole budget)
+  const deafPort = await new Promise((r) => { let b = ''; const tm = setTimeout(() => r(0), 5000); deaf.stdout.on('data', (d) => { b += d; if (b.includes('\n')) { clearTimeout(tm); r(Number(b.trim()) || 0); } }); deaf.once('exit', () => { clearTimeout(tm); r(0); }); });
+  ok(deafPort > 0, `② the deaf listener said its port within 5 s (${deafPort || 'none'})`);
   const fillers = Array.from({ length: 4 }, () => { const f = net.connect(deafPort, '127.0.0.1'); f.on('error', () => { }); return f; });
   // the kernel's accept queue (backlog 1 holds two, Node reads 0 as its default 511) is full once two fillers have connected
   await Promise.all(fillers.slice(0, 2).map((f) => new Promise((r) => { f.once('connect', r); setTimeout(r, 2000); })));   // each with its own bound
   const c0 = Date.now();
   const k = await T(`http://127.0.0.1:${deafPort}/x`).then(() => null, (x) => x);
+  const deafAlive = deaf.exitCode === null && deaf.signalCode === null;   // the scene stood for the whole dial (a refused dial = the broken setup)
   for (const f of fillers) f.destroy();
   try { deaf.kill('SIGKILL'); } catch { }
-  ok(k && ((k.code === 'CLI_CALL_EXPIRED' && k.phase === 'connect' && /did not take the connection in 0\.3 s — nothing was sent/.test(k.line)) || /ENETUNREACH|EHOSTUNREACH|ECONNREFUSED/.test(String(k.code))), `② an address that never takes the connection: the CONNECT words, by the budget (${k && (k.phase || k.code)}, ${Date.now() - c0} ms)`, k && (k.line || k.message));
+  console.log(`  (② the deaf listener: port ${deafPort}, alive through the dial: ${deafAlive}; the dial ended ${k ? `${k.code} / ${k.phase || '-'}` : 'with no error'})`);
+  // B-9dd0 (r321 should 2): ONLY the connect words — a refused or unreachable dial is the broken setup's own shape here (the
+  // loopback listener gone), never a pass
+  ok(deafAlive && k && k.code === 'CLI_CALL_EXPIRED' && k.phase === 'connect' && /did not take the connection in 0\.3 s — nothing was sent/.test(k.line), `② an address that never takes the connection: the CONNECT words, by the budget (${k && (k.phase || k.code)}, ${Date.now() - c0} ms)`, k && (k.line || k.message));
 }
 CC.configure({ override: null });
 {
