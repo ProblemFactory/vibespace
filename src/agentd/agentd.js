@@ -430,6 +430,10 @@ function posixShells() {
   posixShellsRun = Promise.all(['sh', 'bash', 'dash', 'zsh', 'ksh'].map(one)).then((l) => l.filter(Boolean)).finally(() => { posixShellsRun = null; });
   return posixShellsRun;
 }
+// B-77ed's remainder: the list THE LAST HELLO SAID (the very value the hub's door read before it sends a `sh -lc` start) — the
+// start's helper probe asks this machine's login shell on win32 exactly when it holds `sh` (src/machine-probes.js loginConfigDir)
+let posixShellsSaid = null;
+machineProbes.useShellsSaid(() => posixShellsSaid);
 // lane win-run-codepage → lane win-run-hide-console: the console's code page a run-cmd child writes in — ASKED UNTIL KNOWN
 // (PURE XS.codePageAsker: one hidden cmd.exe spawn, the registry's OEMCP when chcp names none, 15 s each; a known answer is
 // kept for the daemon's life, a failed / timed-out probe answers its runs with utf-8-fallback and is NEVER cached — pre-lane
@@ -1969,7 +1973,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           ...(nonceD ? { nonceD, hubPinned: !!hubPin } : {}), // D3 half b: THIS device's fresh nonce — the hub's ok must sign it
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
           openssl: process.versions.openssl, nodeOwn: nodeOwn(), // lane device-node-version: the runtime's TLS library + whether this node is the installer's own (<root>/node — re-running the installer replaces it; a system node it never touches)
-          posixShells: shells, // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it)
+          posixShells: (posixShellsSaid = shells), // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it) — kept as the list last said (B-77ed's remainder)
           policy: DP.reportOf(POLICY), // lane device-allow-flags: THIS machine's allow list (read-only for the hub: it shows it, asks it first)
           elevated, // lane win-input-elevated: THIS daemon's own token runs elevated (admin), read live each hello; absent on an old daemon ⇒ the hub treats it as not-elevated and never asks it to type into an admin window
           // per-op capability gating (three-tier design): consumers check the

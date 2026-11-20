@@ -877,6 +877,60 @@ console.log('— ⑨b B-77ed: a paired machine reads the START\'s files — the 
   const asked = fs.existsSync(LCOUNT) ? fs.readFileSync(LCOUNT, 'utf8').split('\n').filter(Boolean).length : 0;
   ok(asked === 1, `three starts at once: the login shell is asked ONCE (${asked}), the others join it`);
   fs.rmSync(PROF, { force: true }); fs.rmSync(LCOUNT, { force: true }); PROBES.forgetLoginDir();
+  // (2b) B-77ed's REMAINDER (主开发 2026-11-20): a Windows machine with a POSIX shell starts its conversations under `sh -lc` (the door
+  // lets the spawn through when the agent's LAST HELLO said `sh`), and there the login shell's dir is read by a NATIVE child of that
+  // shell: the agent's own node, handed as $0 (what the CLI, such a child, will read). Both sides, here with process.platform as
+  // win32; the native-child read runs for real (this node is the agent's node). NOT MEASURED on Windows itself: no Windows machine
+  // runs in our gates.
+  const asWin = async (shells, fn, probes = PROBES) => {
+    const pd = Object.getOwnPropertyDescriptor(process, 'platform');
+    probes.useShellsSaid(() => shells); probes.forgetLoginDir();
+    Object.defineProperty(process, 'platform', { ...pd, value: 'win32' });
+    try { return await fn(probes); } finally { Object.defineProperty(process, 'platform', pd); probes.useShellsSaid(null); probes.forgetLoginDir(); }
+  };
+  const loginRuns = () => (fs.existsSync(LCOUNT) ? fs.readFileSync(LCOUNT, 'utf8').split('\n').filter(Boolean).length : 0);
+  const winProfile = () => { fs.writeFileSync(PROF, `echo x >> ${JSON.stringify(LCOUNT)}\nexport CLAUDE_CONFIG_DIR=${LCCD}\n`); fs.rmSync(LCOUNT, { force: true }); };
+  winProfile();
+  const winSh = await asWin(['sh', 'bash'], (p) => p.startHelperFact({ cwd: CWD }));
+  ok(winSh === 'named' && loginRuns() === 1, `win32, the last hello said sh: the login shell is asked once (${loginRuns()}) and its CLAUDE_CONFIG_DIR, read by the agent's own node as a native child of it, names the helper (${winSh})`, { winSh, runs: loginRuns() });
+  winProfile();
+  const WIN_OLD = M.load('src/machine-probes.js', anchored(PROBES_SRC, "  if (process.platform === 'win32' && !startsUnderSh()) return '';", "  if (process.platform === 'win32') return '';", 'win32-never-asks'), 'win32-never-asks');   // stale-pins: kept — the control plants the rule as it was
+  const winOld = await asWin(['sh', 'bash'], (p) => p.startHelperFact({ cwd: CWD }), WIN_OLD);
+  ok(winOld === 'none' && loginRuns() === 0, `RED CONTROL (the rule before: win32 never asks): the login shell's helper is missed — ${winOld} while the CLI started under that shell would read it`, { winOld, runs: loginRuns() });
+  for (const [what, shells] of [['the last hello said no sh (bash only)', ['bash']], ['nothing said (the hub\'s own process: no seam handed)', null]]) {
+    winProfile();
+    const got = await asWin(shells, (p) => p.startHelperFact({ cwd: CWD }));
+    ok(got === 'none' && loginRuns() === 0, `win32, ${what}: no login shell is started (${loginRuns()}) — today's answer, the empty folder (${got})`, { got, runs: loginRuns() });
+  }
+  winProfile();
+  const WIN_ALWAYS = M.load('src/machine-probes.js', anchored(PROBES_SRC, "  if (process.platform === 'win32' && !startsUnderSh()) return '';", "  if (false) return '';", 'win32-asks-always'), 'win32-asks-always');
+  const winAlways = await asWin(['bash'], (p) => p.startHelperFact({ cwd: CWD }), WIN_ALWAYS);
+  ok(winAlways === 'named' && loginRuns() === 1, `RED CONTROL (asked whatever the hello said): a Windows machine whose agent never starts under sh had its login shell started (${loginRuns()})`, { winAlways, runs: loginRuns() });
+  winProfile(); PROBES.useShellsSaid(() => []); PROBES.forgetLoginDir();
+  let posixGot; try { posixGot = await PROBES.startHelperFact({ cwd: CWD }); } finally { PROBES.useShellsSaid(null); PROBES.forgetLoginDir(); }
+  ok(process.platform !== 'win32' && posixGot === 'named' && loginRuns() === 1, `a machine that is not win32 keeps today's read, whatever list is handed (${posixGot}, asked ${loginRuns()})`, { posixGot, runs: loginRuns() });
+  // WHICH READ answered (its read's S1): a CLAUDE_CONFIG_DIR the profile sets but does NOT export is the shell's variable, never a
+  // child's — the native child (as the CLI, a child of that shell) does not see it, today's printf on a POSIX machine does
+  fs.writeFileSync(PROF, `echo x >> ${JSON.stringify(LCOUNT)}\nCLAUDE_CONFIG_DIR=${LCCD}\n`); fs.rmSync(LCOUNT, { force: true });
+  const winUnexp = await asWin(['sh'], (p) => p.startHelperFact({ cwd: CWD }));
+  ok(winUnexp === 'none' && loginRuns() === 1, `win32: a variable the profile sets but does not export is not the CLI's — the native child reads none of it, as the CLI would (${winUnexp}, asked ${loginRuns()})`, { winUnexp, runs: loginRuns() });
+  fs.rmSync(LCOUNT, { force: true });
+  const WIN_PRINTF = M.load('src/machine-probes.js', anchored(PROBES_SRC, "process.platform === 'win32' ? ['-lc', WIN_CCD_READ, process.execPath.replace(/\\\\/g, '/'), WIN_CCD_JS] : ", '', 'win32-printf-read'), 'win32-printf-read');
+  const winPrintf = await asWin(['sh'], (p) => p.startHelperFact({ cwd: CWD }), WIN_PRINTF);
+  ok(winPrintf === 'named', `RED CONTROL (win32 given the printf read): the shell's own variable read as the CLI's folder (${winPrintf}) — the native-child leg above tells the two reads apart`, { winPrintf });
+  fs.rmSync(LCOUNT, { force: true }); PROBES.useShellsSaid(() => ['sh']); PROBES.forgetLoginDir();
+  let posixUnexp; try { posixUnexp = await PROBES.startHelperFact({ cwd: CWD }); } finally { PROBES.useShellsSaid(null); PROBES.forgetLoginDir(); }
+  ok(posixUnexp === 'named' && loginRuns() === 1, `a machine that is not win32 keeps today's printf read, unchanged (the shell's variable: ${posixUnexp})`, { posixUnexp, runs: loginRuns() });
+  // THE AGENT SIDE (its read's MUST): the hello-ack KEEPS the list it says, and the agent hands it to the probe — text-pinned here
+  // (the real daemons are the heavy suites'), each with its red control
+  const AGENTD_SRC = read('src/agentd/agentd.js');
+  const seamBad = (src) => [
+    ...(src.split('posixShells: (posixShellsSaid = shells),').length === 2 ? [] : ['the hello-ack no longer keeps the list it says (posixShells: (posixShellsSaid = shells))']),
+    ...(src.split('machineProbes.useShellsSaid(() => posixShellsSaid);').length === 2 ? [] : ['the agent no longer hands that list to the probe (machineProbes.useShellsSaid(() => posixShellsSaid))'])];
+  ok(typeof PROBES.useShellsSaid === 'function' && !seamBad(AGENTD_SRC).length, 'the agent side: its hello-ack keeps the list it SAYS (the value the door reads) and hands it to the probe, once each', seamBad(AGENTD_SRC));
+  ok(seamBad(anchored(AGENTD_SRC, 'posixShells: (posixShellsSaid = shells),', 'posixShells: shells,', 'hello-keeps-nothing')).length === 1 && seamBad(anchored(AGENTD_SRC, 'machineProbes.useShellsSaid(() => posixShellsSaid);', '', 'agent-hands-nothing')).length === 1,   // stale-pins: kept — the control plants the hello line as it was
+    'RED CONTROL (the agent side): a hello that keeps nothing, or an agent that hands nothing, is RED by name');
+  fs.rmSync(PROF, { force: true }); fs.rmSync(LCOUNT, { force: true }); PROBES.forgetLoginDir();
   // (3) A HOSTILE NAME through sh over a scratch tree: a single quote, a dollar with parentheses, a backtick, a space — read as
   // the path it is, nothing in it runs
   const HOSTILE = path.join(HOME, "it's $(touch RAN-1) `touch RAN-2` a b"), RUNAT = scratchDir('bpick-77ed-runat');

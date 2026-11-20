@@ -78,13 +78,26 @@ async function settingsReadOff(file) {
 const START_FACT_MS = 5000;   // the whole start answer: past it, «cannot be read» (billing wins) — the hub's own bound is 8 s
 let loginDirMemo = null;      // the login shell's CLAUDE_CONFIG_DIR (the CLI on this machine starts under `sh -lc`), asked at most once a minute
 let loginDirAsk = null, loginDirGen = 0;   // ONE login shell in flight: starts that find it asking join it (as the file reads do)
+// B-77ed's remainder (主开发 2026-11-20): a Windows machine starts a conversation under `sh -lc` exactly when the hub's door lets the
+// spawn through — when the list its agent's LAST HELLO said holds `sh` (src/agentd/agentd.js posixShells: a shell that answered a
+// POSIX line within 3 s). The agent hands that list here; none handed (the hub's own process) or no `sh` = '' (today's answer).
+let shellsSaid = () => null;
+function useShellsSaid(fn) { shellsSaid = typeof fn === 'function' ? fn : () => null; }
+const startsUnderSh = () => { try { const l = shellsSaid(); return Array.isArray(l) && l.includes('sh'); } catch { return false; } };
+// …and there the value is read the way the CLI will read it: by a NATIVE child of that same login shell — the agent's own node,
+// handed as $0 (never typed into the command text; its path with forward slashes, a word the shell runs as a path), its program
+// handed as $1, printing the one value between the markers and nothing else of that environment. Right by construction,
+// whatever the shell does to a path on its way to a native program (no table of ours about how it spells a drive, a home or a
+// mount). NOT MEASURED: no Windows machine runs in our gates (see the kb).
+const WIN_CCD_READ = '"$0" -e "$1"';
+const WIN_CCD_JS = "process.stdout.write('\\n__VS_CCD__' + (process.env.CLAUDE_CONFIG_DIR || '') + '\\n')";
 async function loginConfigDir() {
-  if (process.platform === 'win32') return '';
+  if (process.platform === 'win32' && !startsUnderSh()) return '';
   if (loginDirMemo && Date.now() - loginDirMemo.at < 60000) return loginDirMemo.dir;
   if (loginDirAsk) return loginDirAsk;
   const gen = loginDirGen;
   const ask = (async () => {
-    const out = await exec('sh', ['-lc', 'printf "\\n__VS_CCD__%s\\n" "$CLAUDE_CONFIG_DIR"'], 3000);
+    const out = await exec('sh', process.platform === 'win32' ? ['-lc', WIN_CCD_READ, process.execPath.replace(/\\/g, '/'), WIN_CCD_JS] : ['-lc', 'printf "\\n__VS_CCD__%s\\n" "$CLAUDE_CONFIG_DIR"'], 3000);   // POSIX machines: today's read, unchanged
     const i = out == null ? -1 : out.lastIndexOf('\n__VS_CCD__');
     const dir = i < 0 ? null : out.slice(i + 11).split('\n')[0].trim();
     if (gen === loginDirGen) loginDirMemo = { at: Date.now(), dir };   // an unanswered login shell (null ⇒ cannot be read) is remembered too: no 3 s a start; an answer asked before a forget writes nothing
@@ -313,4 +326,4 @@ async function cliBinaryIdentity(cmd) {
   try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
 }
 
-module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir };
+module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };

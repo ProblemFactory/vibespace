@@ -65,9 +65,10 @@ const TABLE = [
   { file: 'src/spawn/ssh.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
   { file: 'src/ws-handler.js', has: "await dm.runCmd('sh', ['-c', `rm -f", verdict: 'refused', how: DOOR },
   // B-77ed's cure: the start's CLAUDE_CONFIG_DIR as the CLI's own login shell sets it — a local `sh -lc` of the machine the
-  // probe runs on (no hub→device road), and NEVER on Windows: loginConfigDir returns '' at its head there, so the probe reads
-  // only the agent's own env and ~/.claude. The guard is pinned below: removed, or moved under the site ⇒ red.
-  { file: 'src/machine-probes.js', has: "await exec('sh', ['-lc', 'printf", verdict: 'n/a', how: 'runs on the other platforms only: loginConfigDir returns \'\' on win32 at its head, above the site', guard: { has: "if (process.platform === 'win32') return '';", within: 6 } },
+  // probe runs on (no hub→device road). B-77ed's remainder: on Windows only when the agent's LAST HELLO said `sh` (the very list
+  // the hub's door keys on before it sends a `sh -lc` start), the value read there by the agent's own node as a native child of
+  // that shell; else '' at the head of loginConfigDir. The guard is pinned below: removed, or moved under the site ⇒ red.
+  { file: 'src/machine-probes.js', has: "await exec('sh', process.platform === 'win32' ? ['-lc', WIN_CCD_READ, process.execPath.replace(", verdict: 'win32', how: 'asked on win32 only when the agent\'s last hello said `sh` (agentd.js posixShells — what the door judges before a `sh -lc` start), the value read by the agent\'s own node as a native child of that login shell; else \'\' at the head of loginConfigDir', guard: { has: "if (process.platform === 'win32' && !startsUnderSh()) return '';", within: 7 } },
 ];
 /** one file's shell sites (the census's walk, and a control that changes ONE file rescans only it) */
 function sitesOf(f, read) {
@@ -125,7 +126,7 @@ for (const r of TABLE) for (const s of J.claimed.get(r) || []) console.log(`    
   ok(judge(extra, TABLE).unclassified.length === 1, 'CONTROL: a new `dm.runCmd(\'sh\'` line is red until it has a row');
   ok(judge(sites, TABLE.concat([{ file: 'src/hosts.js', has: 'no such line ever', verdict: 'refused', how: DOOR }])).stale.length === 1, 'CONTROL: a row whose site is gone is red (stale)');
 }
-{ // controls of the guard form, on the machine-probes row: the platform return removed, then moved below the site — each red
+{ // controls of the guard form, on the machine-probes row: its guard (the win32 shell test) removed, then moved below the site — each red
   // by name (the site still classified: only the guard leg sees it)
   const F = 'src/machine-probes.js', ROW = TABLE.find((r) => r.file === F), G = ROW.guard.has, real = readHead(F).split('\n');
   const gi = real.findIndex((l) => l.includes(G)), si = real.findIndex((l) => l.includes(ROW.has));
@@ -134,7 +135,7 @@ for (const r of TABLE) for (const s of J.claimed.get(r) || []) console.log(`    
   const asIf = (lines) => (f) => (f === F ? lines.join('\n') : readHead(f));
   for (const [what, lines] of [['removed', removed], ['moved below the site', below]]) {
     const read = asIf(lines), Jx = judge(sites.filter((s) => s.file !== F).concat(sitesOf(F, read)), TABLE), bad = guardProblems(Jx.claimed, read);
-    ok(Jx.unclassified.length === 0 && bad.length === 1 && bad[0].startsWith(`${F}:`), `CONTROL: the machine-probes row's platform return ${what} ⇒ RED by name (its guard leg), the site itself still classified`, bad);
+    ok(Jx.unclassified.length === 0 && bad.length === 1 && bad[0].startsWith(`${F}:`), `CONTROL: the machine-probes row's guard (the win32 shell test) ${what} ⇒ RED by name (its guard leg), the site itself still classified`, bad);
   }
 }
 
