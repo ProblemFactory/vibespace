@@ -173,6 +173,72 @@ export async function evalInBlankTab(cdpPort, expression, { ms = 15000 } = {}) {
   }
 }
 
+/** WHAT THE DOOR SAW, SAID (lane bl-tests-e — the 2.369.413 hosted run: test-exit-access-ui's «a real click on 显示输出» logged
+ *  «covered at press time by DIV.» and «measured again at (0, 0)» — an empty class named nothing, and a ZERO box was called a cover).
+ *  The page half's helpers, one text every page source of the door carries. `desc` names an element by its tag, id, classes (three)
+ *  and its box [left,top width×height]; one with no id and no class names its nearest ancestor that has one. `hider` = the NEAREST
+ *  ancestor-or-self that hides it: display: none, content-visibility: hidden, or where a visibility other than visible STARTS.
+ *  `winSay` = a product window's facts: its id, type, title, the conversation it shows, on show or every reason it is not (the
+ *  window manager's own flags — minimized, another desktop, the Stage, a hidden tab — then the DOM: a hider, no box, a hidden page).
+ *  `lostSay` = a target that is not under its point: gone (it left the document), NOT LAID OUT (a zero box) or hidden, each with its
+ *  hider and its window. Read only: nothing here writes the page. */
+const NAME_SRC = String.raw`const cls = (n) => String(typeof n.className === 'string' ? n.className : (typeof n.getAttribute === 'function' && n.getAttribute('class')) || '').trim(); const nm = (n) => String(n.tagName || '?').toLowerCase() + (n.id ? '#' + n.id : '') + (cls(n) ? '.' + cls(n).split(/\s+/).slice(0, 3).join('.') : ''); const named = (n) => { let s = nm(n); if (!n.id && !cls(n)) { let a = n.parentElement; while (a && !a.id && !cls(a)) a = a.parentElement; s += a ? ' (no id, no class — inside ' + nm(a) + ')' : ' (no id, no class)'; } return s; };`;
+// the press instant's listeners (ARM_REAL) name what they saw WITHOUT a box: reading a box there would flush layout before the product's handlers
+const NAME_ONLY_SRC = NAME_SRC + String.raw` const desc = (n) => (n && n.tagName ? named(n) : null);`;
+const DESC_SRC = NAME_SRC + String.raw` const box = (n) => { const q = n.getBoundingClientRect(); return '[' + Math.round(q.left) + ',' + Math.round(q.top) + ' ' + Math.round(q.width) + '×' + Math.round(q.height) + ']'; }; const desc = (n) => { if (!n || !n.tagName) return null; const s = named(n), i = s.indexOf(' ('); return i < 0 ? s + ' ' + box(n) : s.slice(0, i) + ' ' + box(n) + s.slice(i); };`;
+// hider: the nearest ancestor-or-self that hides `e` — a visibility only when e itself is not visible (a visible descendant is drawn), and
+// only where it STARTS; content-visibility: hidden only on an ancestor (e's own box is drawn); a CLOSED <details> hides all but its summary
+const SAY_SRC = DESC_SRC + String.raw` const hider = (e) => { const own = getComputedStyle(e).visibility !== 'visible'; for (let n = e, prev = null; n && n.nodeType === 1; prev = n, n = n.parentElement) { const cs = getComputedStyle(n), why = []; if (cs.display === 'none') why.push('display: none'); if (n !== e && cs.contentVisibility === 'hidden') why.push('content-visibility: hidden'); if (own && cs.visibility !== 'visible' && !(n.parentElement && n.parentElement.nodeType === 1 && getComputedStyle(n.parentElement).visibility !== 'visible')) why.push('visibility: ' + cs.visibility); if (prev && String(n.tagName).toUpperCase() === 'DETAILS' && !n.open && !(String(prev.tagName).toUpperCase() === 'SUMMARY' && (typeof n.querySelector !== 'function' || n.querySelector(':scope > summary') === prev))) why.push('a closed details: only its summary is drawn'); if (why.length) return desc(n) + ' (' + why.join(', ') + ')'; } return null; };
+ const frameOf = (w) => { const A = typeof app !== 'undefined' ? app : null; const ch = w && w._tabChain; const host = ch && Array.isArray(ch.tabs) && A && A.wm && A.wm.windows ? A.wm.windows.get(ch.tabs[0]) : null; return host || w; };
+ const winSay = (w, el) => { const top = w ? frameOf(w) : null; const frame = (top && top.element) || el || null; const node = (w && w.content) || el || frame; const why = []; if (top) { if (top.isMinimized) why.push('minimized' + (top !== w ? ' (its tab group)' : '')); if (top._hiddenByDesktop) why.push('on another desktop'); if (top._hiddenByStage) why.push('behind the Stage'); } if (w && w.content && w.content.classList && w.content.classList.contains('tab-hidden')) why.push('a hidden tab'); if (node) { const h = hider(node); if (h) why.push('hidden by ' + h); const q = node.getBoundingClientRect(); if (!(q.width > 0 && q.height > 0)) why.push('not laid out'); } if (document.visibilityState !== 'visible') why.push('the page is ' + document.visibilityState); const A = typeof app !== 'undefined' ? app : null; const s = w && A && A.sessions && typeof A.sessions.get === 'function' ? A.sessions.get(w.id) : null; return { id: w ? w.id : (el && el.id) || null, type: w ? w.type : null, title: w ? w.title : null, conv: (s && s.sessionId) || null, ...(top && top !== w ? { tabOf: top.id } : {}), onShow: !why.length, why, box: node ? box(node) : null, active: !!(frame && frame.classList && frame.classList.contains('window-active')) }; };
+ const winOf = (e) => { const A = typeof app !== 'undefined' ? app : null; const pick = (part) => { let best = null, depth = -1; for (const v of A.wm.windows.values()) { const n0 = v[part]; if (!n0 || typeof n0.contains !== 'function' || !n0.contains(e)) continue; let d = 0; for (let n = n0; n; n = n.parentElement) d++; if (d > depth) { depth = d; best = v; } } return best; }; const best = A && A.wm && A.wm.windows ? (pick('content') || pick('element')) : null; if (best) return winSay(best); const el = typeof e.closest === 'function' ? e.closest('.window') : null; return el ? winSay(null, el) : null; };
+ const lostSay = (e) => { if (!e) return { gone: 'no target' }; if (!e.isConnected) return { gone: 'it left the document' }; let out; try { const q = e.getBoundingClientRect(); out = { laid: q.width > 0 && q.height > 0, size: Math.round(q.width) + '×' + Math.round(q.height) }; } catch (x) { return { sayErr: String((x && x.message) || x) }; } try { out.hiddenBy = hider(e); out.win = winOf(e); } catch (x) { out.sayErr = String((x && x.message) || x); } return out; };`;
+/** PURE: the Node half of the words — a miss the page half described (lostSay's fields + `hit`, what stood under the point) → one
+ *  sentence. A zero box is NOT LAID OUT and names what hides it and the window it sits in, on show or why not — never «covered». */
+export function lostWords(m) {
+  if (!m) return 'nothing measured (no such element on the page)';
+  if (m.gone) return m.gone === 'no target' ? 'no target' : `it left the page (${m.gone})`;
+  const w = m.win;
+  if (m.sayErr && m.laid !== false) return `the page could not say why (${m.sayErr}); under its point: ${m.hit || 'nothing'}`;
+  const where = w ? `in window ${w.id || '(no id)'} (${[w.type, w.title ? `«${w.title}»` : null, w.conv ? `conversation ${w.conv}` : null, w.tabOf ? `a tab of ${w.tabOf}` : null].filter(Boolean).join(', ') || 'no window record'}${w.box ? ' ' + w.box : ''}), on show: ${w.onShow ? 'yes' : `no — ${(w.why || []).join(', ')}`}` : 'in no window';
+  if (m.laid === false) return `NOT LAID OUT (${m.size}) — ${m.hiddenBy ? `hidden by ${m.hiddenBy}` : m.sayErr ? `the page could not say what hides it (${m.sayErr})` : 'no ancestor hides it (an empty box)'} — ${where}`;
+  if (m.hiddenBy) return `HIDDEN by ${m.hiddenBy} — ${where}; under its point: ${m.hit || 'nothing'}`;
+  return `covered by ${m.hit || 'nothing'} — ${where}`;
+}
+
+/** THE PAGE AS IT STANDS (lane bl-tests-e, the .413 facts unit — a red press is placed from what the page held, never guessed): the
+ *  page half, PURE (a string), read only → { page, size, desktop, windows: [winSay + name + over], open, error? }. Every product
+ *  window: the conversation it shows (`names` = { sessionId: a suite's own name }), on show or every reason not, and — when on show —
+ *  what stands OVER the middle of its part on the page (each named as the highest ancestor that does not hold the window — a popup
+ *  inside #main-wrapper is the popup; a window in a tab group is judged by its group's frame, as the product's own hider is). `open` = what is open over the page: the For-you
+ *  popup, a dialog's overlay, a popover, a menu, a toast — laid out and not hidden. */
+export function pageSceneSource({ names = {} } = {}) {
+  return `(() => { try { ${SAY_SRC} const NAMES = ${JSON.stringify(names)}; const A = typeof app !== 'undefined' ? app : null;
+    const out = { page: document.visibilityState + (typeof document.hasFocus === 'function' ? (document.hasFocus() ? ', focused' : ', not focused') : ''), size: innerWidth + '×' + innerHeight, desktop: null, windows: [], open: [] };
+    try { out.desktop = A && A.desktopManager ? (A.desktopManager.activeDesktopId || null) : null; } catch { }
+    const top = (n, frame) => { let k = n; while (k.parentElement && k.parentElement !== document.body && !k.parentElement.contains(frame)) k = k.parentElement; return k; };   // the highest ancestor that does not hold the window (a popup inside #main-wrapper is the popup, never #main-wrapper)
+    for (const w of (A && A.wm && A.wm.windows ? [...A.wm.windows.values()] : [])) {
+      const s = winSay(w); if (s.conv && Object.prototype.hasOwnProperty.call(NAMES, s.conv)) s.name = NAMES[s.conv]; s.over = [];
+      const frame = (frameOf(w) || w).element || w.element;
+      if (s.onShow && frame && typeof document.elementsFromPoint === 'function') { const c = (w.content || frame).getBoundingClientRect(); const l = Math.max(c.left, 0), r = Math.min(c.left + c.width, innerWidth), t = Math.max(c.top, 0), b = Math.min(c.top + c.height, innerHeight); if (!(r > l && b > t)) s.over.push('(its middle is off the page)'); else { const seen = new Set(); for (const n of document.elementsFromPoint((l + r) / 2, (t + b) / 2)) { if (frame.contains(n)) break; const k = top(n, frame); if (!seen.has(k)) { seen.add(k); s.over.push(desc(k)); } if (s.over.length >= 4) break; } } }
+      out.windows.push(s);
+    }
+    for (const n of document.querySelectorAll('#user-todos-popup, .dialog-overlay, [data-popover], .context-menu, .taskbar-context-menu, #global-toasts > .global-toast')) { const q = n.getBoundingClientRect(); if (q.width > 0 && q.height > 0 && !hider(n)) out.open.push(desc(n)); }
+    return out; } catch (x) { return { error: String((x && x.message) || x) }; } })()`;
+}
+/** PURE: a scene (pageSceneSource's answer) → lines a log reads. */
+export function sceneWords(sc) {
+  if (!sc) return ['(no scene was read)'];
+  if (sc.error) return [`(the page could not be read: ${sc.error})`];
+  const lines = [`page: ${sc.page} · ${sc.size}${sc.desktop ? ` · desktop ${sc.desktop}` : ''} · ${sc.windows.length} window(s)`];
+  for (const w of sc.windows) {
+    const what = [w.type, w.title ? `«${w.title}»` : null, w.conv ? `conversation ${w.conv}${w.name ? ` (${w.name})` : ''}` : null, w.tabOf ? `(a tab of ${w.tabOf})` : null].filter(Boolean).join(' ');
+    lines.push(`window ${w.id} ${what} — ${w.onShow ? `ON SHOW ${w.box}${w.active ? ', active' : ''}${w.over && w.over.length ? ` · over its middle: ${w.over.join(' · ')}` : ' · nothing over its middle'}` : `NOT on show: ${(w.why || []).join(', ')}`}`);
+  }
+  lines.push(sc.open && sc.open.length ? `open over the page: ${sc.open.join(' · ')}` : 'open over the page: nothing');
+  return lines;
+}
+
 /** THE MEASURE, PURE (B-4f03, lane bl-tests-e — the three last copies' needs, folded into the one door): realClicker's page half
  *  as a string. `sel` = a selector, or an EXPRESSION (a string that starts with «(», evaluated in the page — pairing-ui-harness's
  *  text matches). `scroll` = 'center' (the default) | 'nearest' (the least move: a row in a list) | 'if-needed' (centred ONLY when
@@ -191,7 +257,7 @@ export function realClickMeasureSource(sel, { scroll = 'center', aimLeft = null 
   if (!Object.hasOwn(SCROLL, scroll)) throw new Error(`realClick: scroll is center / nearest / if-needed (got ${JSON.stringify(scroll)})`);
   if (aimLeft != null && !(Number.isFinite(aimLeft) && aimLeft >= 0)) throw new Error(`realClick: aimLeft is a number of px ≥ 0 (got ${JSON.stringify(aimLeft)})`);
   const aim = aimLeft == null ? 'q.left + q.width / 2' : `q.left + Math.min(q.width / 2, ${aimLeft})`;
-  return `(() => { const desc = (h) => (h ? h.tagName + '.' + String(h.className).slice(0, 60) : null); const e = ${target}; if (!e) return null; ${SCROLL[scroll]} const q = e.getBoundingClientRect(); const x = ${aim}, y = q.top + q.height / 2; window.__vsRealClickEl = e; const hit = document.elementFromPoint(x, y); return { x, y, w: q.width, h: q.height, hit: desc(hit), hits: !!hit && (hit === e || e.contains(hit)) }; })()`;
+  return `(() => { ${SAY_SRC} const e = ${target}; if (!e) return null; ${SCROLL[scroll]} const q = e.getBoundingClientRect(); const x = ${aim}, y = q.top + q.height / 2; window.__vsRealClickEl = e; const hit = document.elementFromPoint(x, y); const hits = !!hit && (hit === e || e.contains(hit)); return { x, y, w: q.width, h: q.height, hit: desc(hit), hits, ...(hits ? {} : lostSay(e)) }; })()`;
 }
 
 /** THE PRESS ARM, ASKED OF THE PRODUCT (lane bl-tests-e — the 2.369.413 checkpoint's hosted red: test-exit-access-ui's Allow,
@@ -243,44 +309,69 @@ async function armMsOf() {
  *  target (armProbeSource above) is pressed only once its latest mark is ARM_MS old — measured after the page is in front and the
  *  point proven; one that does not age within three arm times is NOT pressed and fails by name; a press the product re-stamped
  *  the target's own arm at (it moved) fails by name. `realClick.armed` =
- *  { mark, waitedMs } of the last armed press. `sleep` is injectable (a suite's fast legs drive the door on a scripted clock). */
+ *  { mark, waitedMs } of the last armed press. `sleep` is injectable (a suite's fast legs drive the door on a scripted clock).
+ *  WHAT IT SAW IS SAID (lane bl-tests-e, the .413 facts unit): every miss carries `why` (lostWords — an element by its tag, id,
+ *  classes and box); a target with a ZERO box is NOT LAID OUT — named with the ancestor that hides it and the window it sits in, on
+ *  show or why not — never «covered», never aimed at its (0, 0); at the measure and at the press it is looked at once more (laid
+ *  out and covered there: the suite's uncover once, as before), then fails by name; after the press arm's wait it fails at once. A
+ *  box under a hiding ancestor is HIDDEN, never «moved». The door never changes which page is in front without saying so in its
+ *  line (`realClick.front`). */
 export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sleep = (ms) => new Promise((res) => setTimeout(res, ms)) }) {
-  const desc = 'const desc = (h) => (h ? h.tagName + \'.\' + String(h.className).slice(0, 60) : null);';
+  const desc = NAME_ONLY_SRC;   // the press instant's words (NAME_ONLY_SRC above): tag, id, classes — never an empty class; no box read there
   const MEASURE = (sel, o) => realClickMeasureSource(sel, o);
-  const UNDER = (x, y) => `(() => { ${desc} const e = window.__vsRealClickEl, hit = document.elementFromPoint(${x}, ${y}); return { hit: desc(hit), hits: !!e && e.isConnected && !!hit && (hit === e || e.contains(hit)) }; })()`;
+  const UNDER = (x, y) => `(() => { ${SAY_SRC} const e = window.__vsRealClickEl, hit = document.elementFromPoint(${x}, ${y}); const hits = !!e && e.isConnected && !!hit && (hit === e || e.contains(hit)); return { hit: desc(hit), hits, ...(hits ? {} : lostSay(e)) }; })()`;
   // B-8b8c (lane dialog-press): the same door's two halves — it waits while its target MOVES (THE still verdict: its rect on
   // two looks a frame apart, a running box-moving transition on it or an ancestor), then checks where the press LANDED. A
   // disabled or covered target is not waited on (a suite may press one on purpose; the re-aim below handles a cover).
   const ARM_REAL = `(() => { ${desc} const e = window.__vsRealClickEl; const S = window.__vsStillSeen = { down: null, up: null, click: null }; const rec = { down: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), what: desc(ev.target) }), up: (ev) => { if (!e || !e.isConnected) return { gone: true }; const h = document.elementFromPoint(ev.clientX, ev.clientY); return { mine: !!h && (h === e || e.contains(h)), what: desc(h) }; }, click: (ev) => ({ mine: !!e && (ev.target === e || e.contains(ev.target)), anc: !!e && ev.target !== e && typeof ev.target.contains === 'function' && ev.target.contains(e), what: desc(ev.target) }) }; const on = (type, key) => { const f = (ev) => { if (!S[key]) S[key] = rec[key](ev); document.removeEventListener(type, f, true); }; document.addEventListener(type, f, true); }; on('pointerdown', 'down'); on('pointerup', 'up'); on('click', 'click'); const own = () => (e && typeof e._armSince === 'number' ? e._armSince : null); const sd = () => { S.stampDown = own(); document.removeEventListener('pointerdown', sd, true); }; document.addEventListener('pointerdown', sd, true); const sc = () => { document.removeEventListener('click', sc, true); setTimeout(() => { S.stampAfter = own(); }, 0); }; document.addEventListener('click', sc, true); return true; })()`;
   const realClick = async (sel, { beforePress = null, stillMs = 3000, scroll = 'center', aimLeft = null, uncover = null } = {}) => {
-    realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null; realClick.armed = null;
+    realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null; realClick.armed = null; realClick.front = false;
     const mo = { scroll, aimLeft };
     // a HIDDEN page is brought to the front first (a background tab advances no animation: the still look would wait for ever, and
-    // the press arm is measured on the page a person looks at); a visible page is left as the suite put it
-    try { if (await evalJs(`document.visibilityState === 'hidden'`)) await cdp('Page.bringToFront'); } catch { }
+    // the press arm is measured on the page a person looks at); a visible page is left as the suite put it. The door SAYS it in its
+    // line: which page is in front is the suite's world, and a press made after the door changed it is read with that line beside it
+    let hiddenPage = false;
+    try { hiddenPage = !!(await evalJs(`document.visibilityState === 'hidden'`)); } catch { }
+    if (hiddenPage) {
+      try { await cdp('Page.bringToFront'); realClick.front = true; log(`  [realClick] ${sel}: the page was HIDDEN (another page in front) — the door brought it to the front (Page.bringToFront) before the measure`); }
+      catch (x) { log(`  [realClick] ${sel}: the page is HIDDEN and could not be brought to the front (${(x && x.message) || x})`); }
+    }
     let uncovered = false;
     const clearOnce = async (at) => { if (!uncover || uncovered) return false; uncovered = true; await uncover(at); return true; };
+    const missOf = (m, extra = {}) => (m ? { ...m, ...extra, why: extra.why || lostWords(m) } : null);   // null stays null: no such element
     let r = await evalJs(MEASURE(sel, mo));
-    if (r && !r.hits && await clearOnce(r)) r = await evalJs(MEASURE(sel, mo));
-    if (!r || !r.hits) { realClick.lastMiss = r; return false; }
+    if (r && !r.hits && r.laid === false) r = await evalJs(MEASURE(sel, mo));   // a ZERO box is NOT a cover: looked at once more, never uncovered
+    if (r && !r.hits && r.laid !== false && await clearOnce(r)) r = await evalJs(MEASURE(sel, mo));
+    if (!r || !r.hits) { realClick.lastMiss = missOf(r); return false; }
     {
       const t0 = Date.now(); let prev = null, look = null, v = 'moving';
       while (Date.now() - t0 < stillMs) { look = await evalJs(stillLookSource('JS:window.__vsRealClickEl')); v = stillVerdict(prev, look); if (v !== 'moving') break; prev = look; await sleep(40); }
       if (v === 'moving') { realClick.lastMiss = { ...r, why: `it never held still in ${stillMs} ms${look && look.movers && look.movers.length ? ` (moving: ${look.movers.join(', ')})` : ''}` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why} — no press`); return false; }
-      if (look && look.found) r = { ...r, ...(aimLeft == null ? { x: look.x, y: look.y } : { x: look.rect[0] + Math.min(look.rect[2] / 2, aimLeft), y: look.rect[1] + look.rect[3] / 2 }) };
+      // a look with no box (stillVerdict 'gone') is never the aim: its centre is (0, 0), the page's corner — the press loop below says it
+      if (look && look.found && Array.isArray(look.rect) && look.rect[2] > 0 && look.rect[3] > 0) r = { ...r, ...(aimLeft == null ? { x: look.x, y: look.y } : { x: look.rect[0] + Math.min(look.rect[2] / 2, aimLeft), y: look.rect[1] + look.rect[3] / 2 }) };
     }
     if (beforePress) await beforePress(r);
     for (let aim = 0; ; aim++) {
       await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y });
       const u = await evalJs(UNDER(r.x, r.y));
       if (u && u.hits) break;
+      const again = (m) => (!m ? 'nothing (gone)' : m.hits ? `(${Math.round(m.x)}, ${Math.round(m.y)})` : m.laid === false ? lostWords(m) : `(${Math.round(m.x)}, ${Math.round(m.y)}) — still not under its point: ${lostWords(m)}`);
+      if (u && u.laid === false) {   // a ZERO box: NOT LAID OUT — never «covered»; looked at once more (the one re-aim), then failed by name
+        let r2 = aim === 0 ? await evalJs(MEASURE(sel, mo)) : null, cleared2 = false;
+        // laid out again on that look but not under its point: the suite's uncover runs once there, as the old door's did, and it is measured again
+        if (r2 && !r2.hits && r2.laid !== false && await clearOnce(r2)) { cleared2 = lostWords(r2); r2 = await evalJs(MEASURE(sel, mo)); }
+        const then = !r2 ? '' : r2.hits ? `; laid out again at ${again(r2)}` : r2.laid === false ? ' and once more' : `; on one more look ${again(r2)}`;
+        const uncov = cleared2 ? ` (on that look ${cleared2} — the suite's uncover ran once)` : '';
+        if (r2 && r2.hits) { realClick.reaimed = { from: { x: Math.round(r.x), y: Math.round(r.y) }, notLaidOut: true, to: { x: Math.round(r2.x), y: Math.round(r2.y) }, ...(cleared2 ? { uncovered: true } : {}) }; log(`  [realClick] ${sel}: ${lostWords(u)} — seen at the press${uncov}${then} — re-aimed once`); r = r2; continue; }
+        realClick.lastMiss = { ...r, atPress: u, again: r2, why: `${lostWords(u)} — seen at the press${uncov}${then}` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why} — not pressed`); return false;
+      }
       const cleared = aim === 0 ? await clearOnce(u) : false;
-      if (aim === 1) { realClick.lastMiss = { ...r, atPress: u, why: 'still not under the pointer after one re-aim' }; log(`  [realClick] ${sel}: still not under the pointer after one re-aim (${u && u.hit}) — no press`); return false; }
+      if (aim === 1) { realClick.lastMiss = { ...r, atPress: u, why: `still not under the pointer after one re-aim — ${lostWords(u)}` }; log(`  [realClick] ${sel}: still not under the pointer after one re-aim (${lostWords(u)}) — no press`); return false; }
       const r2 = await evalJs(MEASURE(sel, mo));
       realClick.reaimed = { from: { x: Math.round(r.x), y: Math.round(r.y) }, under: u && u.hit, to: r2 ? { x: Math.round(r2.x), y: Math.round(r2.y) } : null, ...(cleared ? { uncovered: true } : {}) };
-      if (cleared) log(`  [realClick] ${sel}: covered at press time by ${u && u.hit} — the suite's uncover ran once; measured again at ${r2 ? `(${Math.round(r2.x)}, ${Math.round(r2.y)})` : 'nothing'}`);
-      else log(`  [realClick] ${sel}: it moved between the measure and the press — at (${Math.round(r.x)}, ${Math.round(r.y)}) the pointer was over ${u && u.hit}; re-aimed once at ${r2 ? `(${Math.round(r2.x)}, ${Math.round(r2.y)})` : 'nothing (gone)'}`);
-      if (!r2 || !r2.hits) { realClick.lastMiss = r2; return false; }
+      if (cleared) log(`  [realClick] ${sel}: ${u && u.hiddenBy ? `HIDDEN at press time — ${lostWords(u)}` : `covered at press time by ${u && u.hit}`} — the suite's uncover ran once; measured again: ${again(r2)}`);
+      else log(`  [realClick] ${sel}: ${u && u.gone ? `it left the page between the measure and the press (${u.gone})` : u && u.hiddenBy ? `HIDDEN at press time — ${lostWords(u)}` : 'it moved between the measure and the press'} — at (${Math.round(r.x)}, ${Math.round(r.y)}) the pointer was over ${u && u.hit}; re-aimed once at ${again(r2)}`);
+      if (!r2 || !r2.hits) { realClick.lastMiss = missOf(r2); return false; }
       r = r2;
     }
     // THE PRESS ARM (armProbeSource): an approval the product arms is pressed only once its mark is ARM_MS old, never inside it
@@ -298,7 +389,7 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sl
       realClick.armed = { mark: marksSaid(arm), waitedMs: waited };
       if (waited) {
         const u2 = await evalJs(UNDER(r.x, r.y));
-        if (!u2 || !u2.hits) { realClick.lastMiss = { ...r, atPress: u2, why: `not under the pointer after the arm's ${waited} ms — not pressed` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why} (${u2 && u2.hit})`); return false; }
+        if (!u2 || !u2.hits) { realClick.lastMiss = { ...r, atPress: u2, why: `not under the pointer after the arm's ${waited} ms — not pressed (${u2 ? lostWords(u2) : 'nothing measured'})` }; log(`  [realClick] ${sel}: ${realClick.lastMiss.why}`); return false; }
       }
     }
     const ownStamp = armedNow(arm) ? (arm.marks.find((m) => m.mark === '_armSince' && m.self) || null) : null;   // the target carries its OWN stamp: judged at the press itself (ARM_REAL)
@@ -317,7 +408,7 @@ export function realClicker({ evalJs, cdp, log = (line) => console.log(line), sl
     }
     return true;
   };
-  realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null; realClick.armed = null;
+  realClick.lastMiss = null; realClick.reaimed = null; realClick.landed = null; realClick.armed = null; realClick.front = false;
   return realClick;
 }
 

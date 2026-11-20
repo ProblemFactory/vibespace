@@ -29,14 +29,34 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { bootWorld, CHROME, sleep, rectCensusJs, REPO, labelRowCensusJs, LABEL_FIX_REVERT, swapStyleJs, machineRowCensusJs, ROW_FIX_REVERT, buildPatchedBundle } from './pairing-ui-harness.mjs';
+import { bootWorld, CHROME, sleep, rectCensusJs, REPO, labelRowCensusJs, LABEL_FIX_REVERT, swapStyleJs, machineRowCensusJs, ROW_FIX_REVERT, buildPatchedBundle, sceneWords } from './pairing-ui-harness.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { parse as acornParse } from 'acorn';
 
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const T0 = Date.now();
 let pass = 0, fail = 0;
-const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); } };
+// THE FIRST RED LEG SAYS THE PAGE (lane bl-tests-e, the .413 facts unit — ten legs from «a real click on 显示输出» were red on both
+// hosted tries and could not be placed: the door said «covered … by DIV.» and nothing of the page). At the first red leg the suite
+// prints, for page P: the last press NOT made (the door's own words — a cover by its tag, id, classes and box; a zero box NOT LAID OUT
+// with what hides it and the window it sits in), whether the door brought P to the front for it, the page as it stood at that press's
+// first miss, and the page now — which conversation each chat window shows, which are on show (or every reason not), what stands
+// over each and what is open over the page (the For-you popup, a dialog, a popover, a toast). Once — the first red AFTER P opens (an
+// earlier red there takes it; the door's own line still prints at every press); read only — no leg changes.
+let PAGE = null, NAMES = {}, firstRedSaid = null;
+const sayFirstRed = async (leg) => {
+  try {
+    const g = PAGE.realClick.lastGiveUp;
+    const lines = [`[the first red leg on page P: ${leg}]`];
+    if (g) {
+      lines.push(`the last press ${g.made ? 'MADE AND MISSED' : 'NOT made'}: ${g.sel.length > 200 ? g.sel.slice(0, 200) + '…' : g.sel}`, `  ${g.tries} tries in ${g.ms} ms${g.front ? ' — the door brought P to the front for it' : ''} — ${g.why}`);
+      lines.push(...sceneWords(g.scene).map((l) => `  at its first miss (after that try's own uncover and front): ${l}`));
+    } else lines.push('the last press on P was made (or none was asked since)');
+    lines.push(...sceneWords(await PAGE.scene(NAMES)).map((l) => `  now: ${l}`));
+    console.log(lines.map((l) => '    ' + l).join('\n'));
+  } catch (x) { console.log(`    [the first red leg on page P: ${leg}] — the page could not be read: ${(x && x.message) || x}`); }
+};
+const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + (typeof d === 'string' ? d : JSON.stringify(d)) : '')); if (!firstRedSaid && PAGE) firstRedSaid = sayFirstRed(n); } };
 // ── THE F4 CONTROL'S PRE-FIX WINDOW, DERIVED (lane mirror-330-reds — the .330 mirror red: the control replaced the whole
 //    `const isCmd = …;` line by its literal text, and int330 put vault-run-ask beside exit-run-ask, so the patch stopped
 //    applying and the control could not build its red). Now the kind under test leaves the verbatim-command list WHEREVER
@@ -122,6 +142,7 @@ try {
   ok(bind.status === 200, 'conversation 1 is bound to 运维');
 
   const P = await W.openPage({ width: 1280, height: 820, lang: 'zh', first: true });
+  PAGE = P; NAMES = Object.fromEntries(S.map((s, i) => [s.sid, 'conversation ' + (i + 1)]));   // the first red leg's scene names them
   ok(await openRemote(P), 'the Remote tab');
   ok(await P.waitFor(`!!${exitIcon}`, 15000), 'the machine row\'s summary line IS the door "谁能把 … 当出口使用…" (B-cb72: a button, no strip icon)');
   ok(await P.evalJs(`/^出口：网络 — 没有人 · 命令 — 没有人$/.test(${rowOf}.querySelector('.mounts-exit-line')?.textContent || '')`), 'the row says 出口：网络 — 没有人 · 命令 — 没有人 (the migration default: nobody)');
@@ -579,6 +600,8 @@ try {
   try { process.kill(W.lockPid(pair.root), 'SIGTERM'); } catch { }
 } catch (e) {
   fail++; console.error('  ✗ threw:', e.stack || e.message);
+  if (!firstRedSaid && PAGE) firstRedSaid = sayFirstRed('threw: ' + String(e && e.message).slice(0, 120));
 }
+if (firstRedSaid) await Promise.race([firstRedSaid, sleep(15000).then(() => console.log('    [the first red leg on page P] — the page did not answer in 15 s'))]);
 console.log(fail ? `\n${fail} FAILED (${pass} passed) · ${((Date.now() - T0) / 1000).toFixed(1)} s` : `\nALL PASS (${pass}) · ${((Date.now() - T0) / 1000).toFixed(1)} s`);
 process.exit(fail ? 1 : 0);

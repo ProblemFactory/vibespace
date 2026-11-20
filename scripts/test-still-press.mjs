@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser, realClickMeasureSource, realClicker, armProbeSource, armStep } from './scratch.mjs';
+import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser, realClickMeasureSource, realClicker, armProbeSource, armStep, lostWords, pageSceneSource, sceneWords } from './scratch.mjs';
 import vm from 'node:vm';
 import { SUITES } from './ci.mjs';
 const t0 = Date.now();
@@ -215,13 +215,14 @@ console.log('⑥ B-4f03: the door\'s measure — an EXPRESSION target, the three
 // ⑥b the DOOR itself over a scripted page (B-4f03, the read's should: the source legs alone let a realClicker that dropped its
 // options, the aim's override or the once-a-call rule pass) — the evalJs answers by what each source asks
 // the DOOR over a scripted page (⑥b, ⑦): the evalJs answers by what each source asks
-const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ marks: [] }], sleep = undefined, hidden = false, stamps = { stampDown: 1000, stampAfter: 1000 } }) => {
-  const asked = [], sent = [], logs = [], asks = { hidden: 0 }; let m = 0, u = 0, a = 0;
-  const LOOK = { found: true, rect: [100, 300, 300, 40], x: 250, y: 320, hits: true, under: 'button.b', disabled: false, movers: [] };
+const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ marks: [] }], sleep = undefined, hidden = false, stamps = { stampDown: 1000, stampAfter: 1000 }, look = null }) => {
+  const asked = [], sent = [], logs = [], asks = { hidden: 0 }, bad = [], armSrc = []; let m = 0, u = 0, a = 0;
+  const LOOK = look || { found: true, rect: [100, 300, 300, 40], x: 250, y: 320, hits: true, under: 'button.b', disabled: false, movers: [] };
   const SEEN = { down: { mine: true, what: 'button.b' }, up: { mine: true, what: 'button.b' }, click: { mine: true, what: 'button.b' }, ...stamps };   // the target's own stamp at the press and after it (ARM_REAL)
   const evalJs = async (s) => {
+    try { new vm.Script(s); } catch (x) { bad.push(`${x.message} — ${s.slice(0, 80)}`); }   // every page source the door sends COMPILES
     if (s.startsWith('window.__vsStillSeen')) return SEEN;
-    if (s.includes('__vsStillSeen = {')) return true;
+    if (s.includes('__vsStillSeen = {')) { armSrc.push(s); return true; }
     if (s.includes('const e = window.__vsRealClickEl; if (!e || !e.isConnected)')) return LOOK;
     if (s.includes('hit = document.elementFromPoint(') && s.includes('const e = window.__vsRealClickEl, hit')) return unders[Math.min(u++, unders.length - 1)];
     if (s.includes('const marks = []')) return arms[Math.min(a++, arms.length - 1)];   // the press arm's probe (⑦)
@@ -231,7 +232,7 @@ const drive6 = async ({ measures, unders, uncover = null, opts = {}, arms = [{ m
   const RC = realClicker({ evalJs, cdp: async (meth, p) => { sent.push(meth === 'Page.bringToFront' ? 'front' : `${p.type}@${Math.round(p.x)},${Math.round(p.y)}`); }, log: (l) => logs.push(l), ...(sleep ? { sleep } : {}) });
   let n = 0;
   const r = await RC('.b', { ...opts, ...(uncover ? { uncover: async () => { n++; } } : {}) });
-  return { r, asked, sent, logs, asks, uncovers: n, reaimed: RC.reaimed, armed: RC.armed, miss: RC.lastMiss };
+  return { r, asked, sent, logs, asks, uncovers: n, reaimed: RC.reaimed, armed: RC.armed, miss: RC.lastMiss, front: RC.front, bad, armSrc };
 };
 {
   const drive = drive6;
@@ -292,6 +293,128 @@ console.log('⑦ the press arm — the product\'s own marks, its ARM_MS, never a
   const c6 = clock(), F = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c6.sleep, hidden: true });
   const c7 = clock(), G = await drive6({ measures: [HIT], unders: [{ hits: true }], sleep: c7.sleep, hidden: false });
   ok(F.r === true && F.sent[0] === 'front' && G.r === true && !G.sent.includes('front'), 'the DOOR brings a HIDDEN page to the front before it measures (a background tab advances no animation); a visible page is left as the suite put it', { hidden: F.sent, visible: G.sent });
+}
+
+// ⑧ THE DOOR SAYS WHAT IT SAW (lane bl-tests-e, the .413 facts unit — the hosted run's «a real click on 显示输出»: «covered at press
+// time by DIV.», «measured again at (0, 0)», and ten red legs nobody could place). A cover is named by its tag, id, classes and box,
+// never an empty class; a ZERO box is NOT LAID OUT — with the ancestor that hides it and the window it sits in, on show or why not —
+// never «covered», never aimed at its (0, 0); the door says when it brings a page to the front. The page half runs here over a
+// stand-in DOM in the PRODUCT'S shape (public/index.html: #main-wrapper holds #workspace, the taskbar and the For-you popup; a tab
+// group's guest content lives in its host's element — src/lib/tab-group.js), the door over a scripted page (drive6).
+console.log('⑧ the door says what it saw — a cover by its element, a zero box NOT LAID OUT, the page brought to the front said');
+{
+  const world = () => {
+    const own = new Map();
+    const mk = (tag, { id = '', cls = '', rect = [0, 0, 0, 0], parent = null, style = {}, extra = {} } = {}) => {
+      const n = { nodeType: 1, tagName: tag.toUpperCase(), id, className: cls, parentElement: parent, isConnected: true, ...extra,
+        getBoundingClientRect: () => ({ left: rect[0], top: rect[1], width: rect[2], height: rect[3], right: rect[0] + rect[2], bottom: rect[1] + rect[3] }),
+        contains: (o) => { for (let k = o; k; k = k.parentElement) if (k === n) return true; return false; },
+        closest: (sel) => { for (let k = n; k; k = k.parentElement) if ((' ' + k.className + ' ').includes(' ' + sel.replace(/^\./, '') + ' ')) return k; return null; },
+        classList: { contains: (c) => (' ' + cls + ' ').includes(' ' + c + ' ') }, scrollIntoView: () => { } };
+      own.set(n, style); return n;
+    };
+    // computed style: display / content-visibility are the element's own; visibility INHERITS (as a browser's does)
+    const getComputedStyle = (n) => { const o = own.get(n) || {}; let v = o.visibility; for (let k = n.parentElement; !v && k; k = k.parentElement) v = (own.get(k) || {}).visibility; return { display: o.display || 'block', contentVisibility: o.contentVisibility || 'visible', visibility: v || 'visible' }; };
+    const body = mk('body', { rect: [0, 0, 1280, 820] }), main = mk('div', { id: 'main-wrapper', rect: [0, 0, 1280, 820], parent: body });
+    const taskbar = mk('footer', { id: 'taskbar', rect: [0, 0, 1280, 40], parent: main }), corner = mk('div', { rect: [0, 0, 200, 40], parent: taskbar });
+    const ws = mk('main', { id: 'workspace', rect: [0, 40, 1280, 780], parent: main });
+    // win-1 ON SHOW (the For-you popup over its middle); win-2 MINIMIZED (display: none — the hosted shape); win-3 on another desktop;
+    // win-5 + win-6 a TAB GROUP: win-6's content lives in win-5's element (its own element display: none), win-5's own content a hidden tab
+    const w1 = mk('div', { cls: 'window window-active', rect: [100, 60, 700, 500], parent: ws }), c1 = mk('div', { cls: 'window-content', rect: [100, 90, 700, 470], parent: w1 });
+    const b1 = mk('summary', { rect: [120, 300, 80, 20], parent: c1 });
+    const det1 = mk('details', { cls: 'chat-exit-out-full', rect: [120, 340, 300, 20], parent: c1, extra: { open: false } }), sum1 = mk('summary', { rect: [120, 340, 300, 20], parent: det1 }), all1 = mk('pre', { cls: 'chat-exit-out-all', parent: det1 });
+    const hold = mk('div', { cls: 'hold', rect: [120, 400, 300, 40], parent: c1, style: { visibility: 'hidden' } }), vis = mk('button', { cls: 'v', rect: [120, 400, 80, 20], parent: hold, style: { visibility: 'visible' } });
+    const w2 = mk('div', { cls: 'window', parent: ws, style: { display: 'none' } }), c2 = mk('div', { cls: 'window-content', parent: w2 });
+    const card2 = mk('div', { cls: 'chat-vs-notice', parent: c2 }), det2 = mk('details', { cls: 'chat-exit-out-full', parent: card2, extra: { open: false } }), b2 = mk('summary', { parent: det2 });
+    const w3 = mk('div', { cls: 'window', rect: [200, 80, 600, 400], parent: ws, style: { visibility: 'hidden', contentVisibility: 'hidden' } }), c3 = mk('div', { cls: 'window-content', rect: [200, 110, 600, 370], parent: w3 });
+    const b3 = mk('summary', { rect: [220, 300, 80, 20], parent: c3 });
+    const w5 = mk('div', { cls: 'window', rect: [850, 60, 400, 300], parent: ws }), c5 = mk('div', { cls: 'window-content tab-hidden', parent: w5, style: { display: 'none' } });
+    const w6 = mk('div', { cls: 'window', parent: ws, style: { display: 'none' } }), c6 = mk('div', { cls: 'window-content', rect: [850, 90, 400, 270], parent: w5 }), b6 = mk('button', { cls: 'go', rect: [870, 200, 60, 20], parent: c6 });
+    const pop = mk('div', { id: 'user-todos-popup', cls: 'ut-popup', rect: [100, 280, 420, 300], parent: main }), item = mk('div', { cls: 'ut-item', rect: [110, 290, 400, 60], parent: pop });
+    const toasts = mk('div', { id: 'global-toasts', rect: [900, 700, 360, 60], parent: body }), toast = mk('div', { cls: 'global-toast', rect: [900, 700, 360, 60], parent: toasts });
+    const chain = { tabs: ['win-5', 'win-6'] };
+    const wins = new Map([['win-1', { id: 'win-1', type: 'chat', title: 'proj1', element: w1, content: c1 }], ['win-2', { id: 'win-2', type: 'chat', title: 'proj2', element: w2, content: c2, isMinimized: true }], ['win-3', { id: 'win-3', type: 'chat', title: 'proj3', element: w3, content: c3, _hiddenByDesktop: true }],
+      ['win-5', { id: 'win-5', type: 'chat', title: 'proj5', element: w5, content: c5, _tabChain: chain }], ['win-6', { id: 'win-6', type: 'chat', title: 'proj6', element: w6, content: c6, _tabChain: chain }]]);
+    const app = { wm: { windows: wins }, sessions: new Map([['win-1', { sessionId: 'sid-1' }], ['win-2', { sessionId: 'sid-2' }], ['win-3', { sessionId: 'sid-3' }], ['win-6', { sessionId: 'sid-6' }]]), desktopManager: { activeDesktopId: 'd-1' } };
+    const run = (src, { target = null, under = null, stack = [], open = [] } = {}) => new vm.Script(src).runInNewContext({ app, getComputedStyle, innerWidth: 1280, innerHeight: 820, window: {}, THE_EL: target,
+      document: { body, visibilityState: 'visible', hasFocus: () => true, querySelector: () => null, querySelectorAll: () => open, elementFromPoint: () => under, elementsFromPoint: (x, y) => (typeof stack === 'function' ? stack(x, y) : stack) } });
+    return { run, corner, ws, b1, b2, b3, b6, c1, c6, all1, vis, item, pop, toast };
+  };
+  const W8 = world();
+  const M = (target, under, o = {}) => W8.run(realClickMeasureSource('(THE_EL)', o), { target, under });
+  // the hosted shape: the card's summary in a MINIMIZED window — a zero box; the page's corner under its (0, 0)
+  const zero = M(W8.b2, W8.corner, { scroll: 'nearest', aimLeft: 40 });
+  const zw = lostWords(zero);
+  ok(zero && zero.hits === false && zero.laid === false && zero.size === '0×0' && zero.hiddenBy === 'div.window [0,0 0×0] (display: none)' && zero.win && zero.win.id === 'win-2' && zero.win.conv === 'sid-2' && zero.win.onShow === false
+    && /^NOT LAID OUT \(0×0\) — hidden by div\.window \[0,0 0×0\] \(display: none\) — in window win-2 \(chat, «proj2», conversation sid-2 \[0,0 0×0\]\), on show: no — minimized, hidden by div\.window/.test(zw) && !/covered/.test(zw),
+    'a ZERO box is NOT LAID OUT: the ancestor that hides it (display: none) and the window it sits in — its conversation, on show: no and why — never «covered»', { zero, zw });
+  ok(zero.hit === 'div [0,0 200×40] (no id, no class — inside footer#taskbar)', 'what stood under its point is named by its box and its nearest named ancestor — never an empty class («DIV.»)', zero.hit);
+  // a real cover: the For-you popup's row over a laid-out target in a window on show
+  const cw = lostWords(M(W8.b1, W8.item));
+  ok(cw === 'covered by div.ut-item [110,290 400×60] — in window win-1 (chat, «proj1», conversation sid-1 [100,90 700×470]), on show: yes',
+    'a COVER is named by its tag, classes and box, with the target\'s window on show', cw);
+  // hidden, not covered: a window on another desktop (visibility: hidden starts AT the window; its content inherits it)
+  const hid = M(W8.b3, W8.ws), hw = lostWords(hid);
+  ok(hid.laid === true && /^HIDDEN by div\.window \[200,80 600×400\] \(content-visibility: hidden, visibility: hidden\) — in window win-3 \(chat, «proj3», conversation sid-3 \[200,110 600×370\]\), on show: no — on another desktop, hidden by div\.window/.test(hw) && /under its point: main#workspace \[0,40 1280×780\]$/.test(hw),
+    'a target with a box under a hidden window is HIDDEN by the element where the hiding STARTS (never its inheriting content, never «covered»)', hw);
+  // the read's must: a TAB of a group is judged by the group's frame, as the product's own hider is (its own element is display: none)
+  const tabw = lostWords(M(W8.b6, W8.item));
+  ok(tabw === 'covered by div.ut-item [110,290 400×60] — in window win-6 (chat, «proj6», conversation sid-6, a tab of win-5 [850,90 400×270]), on show: yes',
+    'a window shown as a TAB (its content in its host\'s element, its own element display: none) is ON SHOW — never «hidden by its own element»', tabw);
+  // the read's should: a closed <details> hides all but its summary — named, never «an empty box»
+  const fold = lostWords(M(W8.all1, W8.corner));
+  ok(/^NOT LAID OUT \(0×0\) — hidden by details\.chat-exit-out-full \[120,340 300×20\] \(a closed details: only its summary is drawn\) — in window win-1/.test(fold), 'a target inside a CLOSED details is hidden by that details, by name', fold);
+  ok(/^covered by div \[0,0 200×40\]/.test(lostWords(M(W8.vis, W8.corner))), 'a visible descendant of a visibility: hidden ancestor is drawn: never «hidden by» that ancestor', lostWords(M(W8.vis, W8.corner)));
+  ok(lostWords({ gone: 'it left the document' }) === 'it left the page (it left the document)' && lostWords(null) === 'nothing measured (no such element on the page)'
+    && /^NOT LAID OUT \(0×0\) — the page could not say what hides it \(boom\)/.test(lostWords({ laid: false, size: '0×0', sayErr: 'boom' })), 'a target that left the page, none at all, or a zero box the page could not explain — each says so (a zero box stays NOT LAID OUT)');
+  // the scene: each window's conversation, on show or why not, what stands over it; what is open over the page
+  const sc = W8.run(pageSceneSource({ names: { 'sid-1': 'conversation 1' } }), { stack: (x) => (x < 800 ? [W8.item, W8.pop, W8.c1] : [W8.c6]), open: [W8.pop, W8.toast] });
+  const sw = sceneWords(sc);
+  ok(sw.length === 7 && sw[0] === 'page: visible, focused · 1280×820 · desktop d-1 · 5 window(s)'
+    && sw[1] === 'window win-1 chat «proj1» conversation sid-1 (conversation 1) — ON SHOW [100,90 700×470], active · over its middle: div#user-todos-popup.ut-popup [100,280 420×300]'
+    && /^window win-2 chat «proj2» conversation sid-2 — NOT on show: minimized, hidden by div\.window \[0,0 0×0\] \(display: none\), not laid out$/.test(sw[2])
+    && /^window win-3 chat «proj3» conversation sid-3 — NOT on show: on another desktop, hidden by div\.window/.test(sw[3])
+    && sw[4] === 'window win-5 chat «proj5» — NOT on show: a hidden tab, hidden by div.window-content.tab-hidden [0,0 0×0] (display: none), not laid out'
+    && sw[5] === 'window win-6 chat «proj6» conversation sid-6 (a tab of win-5) — ON SHOW [850,90 400×270] · nothing over its middle'
+    && sw[6] === 'open over the page: div#user-todos-popup.ut-popup [100,280 420×300] · div.global-toast [900,700 360×60]',
+    'the PAGE AS IT STANDS: which conversation each chat window shows (a tab by its group), which are on show (or every reason not), what stands over a shown one — the popup itself, never #main-wrapper that holds it — and what is open over the page', sw);
+  ok(sceneWords({ error: 'x' })[0] === '(the page could not be read: x)' && W8.run(pageSceneSource(), { stack: [], open: [] }).windows.length === 5, 'a page that cannot be read says so; the scene reads the window manager\'s windows');
+}
+{
+  // the door itself, scripted: a zero box at the press, at the first measure, at the still look; the hidden page said
+  const NLO = { hits: false, hit: 'div [0,0 200×40] (no id, no class — inside footer#taskbar)', laid: false, size: '0×0', hiddenBy: 'div.window [0,0 0×0] (display: none)', win: { id: 'win-2', type: 'chat', title: 'proj2', conv: 'sid-2', onShow: false, why: ['minimized'], box: '[0,0 0×0]' } };
+  const HIT = { x: 250, y: 320, hits: true, hit: 'button.b [100,300 300×40]' }, HIT2 = { x: 260, y: 330, hits: true, hit: 'button.b [110,310 300×40]' };
+  const TOAST = { x: 260, y: 330, hits: false, hit: 'div.global-toast [200,310 300×60]', laid: true, hiddenBy: null, win: null };
+  const A = await drive6({ measures: [HIT, { x: 0, y: 0, ...NLO }], unders: [NLO], uncover: true });
+  ok(A.r === false && A.uncovers === 0 && !A.sent.some((x) => x.startsWith('mousePressed')) && /^NOT LAID OUT \(0×0\) — hidden by div\.window .* — seen at the press and once more$/.test(A.miss && A.miss.why)
+    && A.logs.length === 1 && /: NOT LAID OUT \(0×0\) .* — seen at the press and once more — not pressed$/.test(A.logs[0]) && !A.logs.some((l) => /covered/.test(l)),
+    'NOT LAID OUT at the press: no uncover, looked at once more, failed BY NAME in one line — never «covered»', A);
+  const B = await drive6({ measures: [HIT, HIT2], unders: [NLO, { hits: true }], uncover: true });
+  ok(B.r === true && B.uncovers === 0 && B.reaimed && B.reaimed.notLaidOut === true && B.sent.includes('mousePressed@260,330') && /NOT LAID OUT \(0×0\) .* — seen at the press; laid out again at \(260, 330\) — re-aimed once/.test(B.logs.join('\n')),
+    'a zero box that lays out again on the one more look: pressed where it now is, the line says it (the door\'s one re-aim, as for a move)', B);
+  const B2 = await drive6({ measures: [HIT, TOAST, HIT2], unders: [NLO, { hits: true }], uncover: true });
+  ok(B2.r === true && B2.uncovers === 1 && B2.reaimed && B2.reaimed.uncovered === true && B2.sent.includes('mousePressed@260,330') && /seen at the press \(on that look covered by div\.global-toast \[200,310 300×60\] — in no window — the suite's uncover ran once\); laid out again at \(260, 330\)/.test(B2.logs.join('\n')),
+    'the read\'s must: laid out on that look but COVERED there — the suite\'s uncover runs once (as the old door\'s did) and the press is made; the cover is said', B2.logs);
+  const B3 = await drive6({ measures: [HIT, TOAST], unders: [NLO] });
+  ok(B3.r === false && /— seen at the press; on one more look \(260, 330\) — still not under its point: covered by div\.global-toast \[200,310 300×60\]/.test(B3.miss && B3.miss.why) && !/once more/.test(B3.miss && B3.miss.why) && B3.miss.again && B3.miss.again.hit === TOAST.hit,
+    'laid out on that look and covered, no uncover hook: not pressed — the second look\'s cover NAMED (never «not laid out … once more»), its facts kept (`lastMiss.again`)', B3.miss);
+  const C = await drive6({ measures: [{ x: 0, y: 0, ...NLO }], unders: [{ hits: true }], uncover: true });
+  ok(C.r === false && C.uncovers === 0 && C.sent.length === 0 && C.asked.length === 2 && /^NOT LAID OUT \(0×0\)/.test(C.miss && C.miss.why), 'NOT LAID OUT at the first measure: looked at once more (as the uncover\'s second measure gave it before), no uncover, no press — `lastMiss.why` names it', { miss: C.miss, measures: C.asked.length });
+  const C2 = await drive6({ measures: [{ x: 0, y: 0, ...NLO }, HIT], unders: [{ hits: true }], uncover: true });
+  ok(C2.r === true && C2.uncovers === 0 && C2.sent.includes('mousePressed@250,320'), 'a zero box at the first measure that lays out on the second look is pressed (a single-call suite keeps the recovery it had)', C2.sent);
+  const D = await drive6({ measures: [HIT, { x: 0, y: 0, ...NLO }], unders: [NLO], look: { found: true, rect: [0, 0, 0, 0], x: 0, y: 0, hits: false, under: 'div', disabled: false, movers: [] } });
+  ok(D.r === false && D.sent.includes('mouseMoved@250,320') && !D.sent.some((x) => /@0,0$/.test(x)) && /NOT LAID OUT/.test(D.miss && D.miss.why),
+    'a still look with NO box is never the aim (its centre is the page\'s corner, (0, 0)): the pointer stays at the measured point and the press loop names it', D.sent);
+  const E = await drive6({ measures: [HIT], unders: [{ hits: true }], hidden: true }), F = await drive6({ measures: [HIT], unders: [{ hits: true }] });
+  ok(E.r === true && E.front === true && E.logs.some((l) => /the page was HIDDEN \(another page in front\) — the door brought it to the front \(Page\.bringToFront\)/.test(l)) && F.front === false && !F.logs.some((l) => /front/.test(l)),
+    'the door SAYS when it changes which page is in front (`realClick.front`, a line); a visible page: no line', { hidden: E.logs, visible: F.logs });
+  const G = await drive6({ measures: [HIT, HIT2], unders: [{ hits: false, hit: 'div.ut-item [110,290 400×60]', laid: true, hiddenBy: null, win: { id: 'win-1', onShow: true, why: [] } }, { hits: true }], uncover: true });
+  ok(G.r === true && G.uncovers === 1 && /covered at press time by div\.ut-item \[110,290 400×60\] — the suite's uncover ran once; measured again: \(260, 330\)/.test(G.logs.join('\n')), 'a real cover at the press: named by its element and box, the uncover runs once, the point measured again', G.logs);
+  const H = await drive6({ measures: [HIT, HIT2], unders: [{ hits: false, hit: 'main#workspace [0,40 1280×780]', laid: true, hiddenBy: 'div.window [200,80 600×400] (visibility: hidden)', win: null }, { hits: true }] });
+  ok(H.r === true && H.logs.some((l) => /HIDDEN at press time — HIDDEN by div\.window .* the pointer was over main#workspace/.test(l)) && !H.logs.some((l) => /it moved/.test(l)), 'the read\'s should: a target HIDDEN with a box at the press and no uncover hook is said HIDDEN — never «it moved»', H.logs);
+  ok(!A.armSrc.length && B.armSrc.length === 1 && !B.armSrc[0].includes('getBoundingClientRect') && B.armSrc[0].includes('const desc = (n) => (n && n.tagName ? named(n) : null)'), 'the press instant\'s listeners name what they saw WITHOUT reading a box (no layout flush before the product\'s handlers)', B.armSrc.map((x) => x.length));
+  const all = [A, B, B2, B3, C, C2, D, E, F, G, H].flatMap((x) => x.bad);
+  ok(all.length === 0 && A.asked.length >= 1, 'every page source the door sent COMPILES (vm) — measure, under, still look, arm probe, landing', all);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass}) — ${Date.now() - t0} ms`);

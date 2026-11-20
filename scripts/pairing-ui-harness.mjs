@@ -12,7 +12,8 @@ import { execSync, execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, realClicker } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, realClicker, pageSceneSource } from './scratch.mjs';
+export { sceneWords } from './scratch.mjs';   // a suite prints a page's scene (pageSceneSource) in the door's words
 const require = createRequire(import.meta.url);
 export const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 export const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));   // (lane chrome-157: VS_CHROME names another Chrome — a Chrome for Testing build the runner has — as test-tailnet-reach-chrome reads it)
@@ -124,18 +125,32 @@ process.stdin.on('end', () => process.exit(0));
      *  SETTLE_MS (lane chrome-157: a viewport change still laying out) ⇒ said and not pressed; a press that was MADE is never
      *  made again. A HIDDEN page is brought to the front by the door itself (a background tab advances no animation — measured on
      *  test-vault-use-grants-chrome ⑦, 2.369.410's hosted run), and an ARMED approval waits out the product's press arm there.
-     *  The toast `uncover` clears is never one that holds the target (an Undo). */
+     *  The toast `uncover` clears is never one that holds the target (an Undo).
+     *  A press NOT made is KEPT, said by the door (lane bl-tests-e, the .413 facts unit): `realClick.lastGiveUp` = { sel, tries, ms,
+     *  made (a press made that MISSED), why (the door's last words), front (the door brought the page to the front), scene (the page
+     *  as it stood at the call's FIRST miss, after that try's own uncover and front — scratch.mjs pageSceneSource) }, null after
+     *  a press that was made; nothing is printed here (a suite prints it at its first red leg — `scene(names)` reads the page now). */
     const SETTLE_MS = 4000;
     const RC = realClicker({ evalJs, cdp });
     const clearToasts = () => evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => { if (!el.contains(window.__vsRealClickEl)) el.remove(); }); true`);   // a toast that HOLDS the target (an Undo) stays
+    const scene = (names = {}) => evalJs(pageSceneSource({ names })).catch((x) => ({ error: String((x && x.message) || x) }));
     const realClick = async (sel, ms = 8000) => {
+      realClick.lastGiveUp = null;
+      let firstMiss = null, tries = 0, front = false;
       for (const t0 = Date.now(); ; await sleep(100)) {
-        if (await RC(sel, { scroll: 'nearest', aimLeft: 40, stillMs: SETTLE_MS, uncover: clearToasts })) { await sleep(150); return true; }
+        tries++;
+        const pressed = await RC(sel, { scroll: 'nearest', aimLeft: 40, stillMs: SETTLE_MS, uncover: clearToasts }); front = front || !!RC.front;
+        if (pressed) { await sleep(150); return true; }
         const miss = RC.lastMiss;
-        if (RC.landed || miss === null || /never held still/.test((miss && miss.why) || '') || Date.now() - t0 > ms) return false;
+        if (!firstMiss) firstMiss = await scene();   // the page as it stood at this call's FIRST miss (read only)
+        if (RC.landed || miss === null || /never held still/.test((miss && miss.why) || '') || Date.now() - t0 > ms) {
+          realClick.lastGiveUp = { sel: String(sel), tries, ms: Date.now() - t0, made: !!RC.landed, why: miss === null ? 'no such element on the page' : (miss && miss.why) || 'no reason given', front, scene: firstMiss };
+          return false;
+        }
       }
     };
-    return { sock, cdp, evalJs, waitFor, waitApp, key, type, realClick, errors, requests, on: (fn) => listeners.push(fn) };
+    realClick.lastGiveUp = null;
+    return { sock, cdp, evalJs, waitFor, waitApp, key, type, realClick, scene, errors, requests, on: (fn) => listeners.push(fn) };
   }
   let firstTarget = null;
   for (let i = 0; withChrome && i < 120 && !firstTarget; i++) {
