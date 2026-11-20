@@ -104,12 +104,15 @@ function runChild(cmd, args, { timeoutMs = CHILD_MS, cwd } = {}) {
     const env = { PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin', LANG: 'C' };
     let child;
     try { child = spawn(cmd, args, { cwd, env, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true }); } catch (e) { resolve({ code: -1, out: String(e && e.message) }); return; }
+    // B-147f: the listeners FIRST, the pipes guarded — a start that fails at once (a full file table) has no pipes and its error
+    // queued: a pipe read first threw and the error then ended the process (the hub or the device agent: both load this)
     const take = (d) => { if (out.length < 65536) out += d; };
-    child.stdout.on('data', take); child.stderr.on('data', take);
-    const timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { } }, timeoutMs);
+    let timer = null;
     const end = (code) => { if (done) return; done = true; clearTimeout(timer); resolve({ code, out: out.trim() }); };
     child.on('error', (e) => { take(String(e && e.message)); end(-1); });
     child.on('close', (code) => end(code == null ? -1 : code));
+    if (child.stdout) child.stdout.on('data', take); if (child.stderr) child.stderr.on('data', take);
+    timer = setTimeout(() => { try { child.kill('SIGKILL'); } catch { } }, timeoutMs);
   });
 }
 

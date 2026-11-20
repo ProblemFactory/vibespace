@@ -821,12 +821,13 @@ function rdpTrustRun({ exec, argv, env, configDir, stdinLine, deadlineMs = 20000
     const timer = setTimeout(() => { timedOut = true; try { child && child.kill('SIGKILL'); } catch { /* gone */ } }, deadlineMs);
     try { child = spawn(exec, argv, { env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true }); }
     catch (e) { finish(null, null, `not started: ${e.message}`); return; }
-    const keep = (b) => { if (size < 65536) { chunks.push(b); size += b.length; } };
-    child.stdout.on('data', keep); child.stderr.on('data', keep);
-    child.stdin.on('error', () => { /* the client closed its stdin early — its exit says why */ });
+    // B-147f: the error listener FIRST, every pipe guarded — a start that fails at once (a full file table) has no pipes and its
+    // error queued: a pipe read first threw, and the error then ended the process (the hub, or the device agent: both load this)
     child.on('error', (e) => finish(null, null, `not started: ${e.message}`));
     child.on('close', (code, signal) => finish(code, signal));
-    child.stdin.end(`${stdinLine()}\n`);
+    const keep = (b) => { if (size < 65536) { chunks.push(b); size += b.length; } };
+    if (child.stdout) child.stdout.on('data', keep); if (child.stderr) child.stderr.on('data', keep);
+    if (child.stdin) { child.stdin.on('error', () => { /* the client closed its stdin early — its exit says why */ }); child.stdin.end(`${stdinLine()}\n`); }
   });
 }
 /** The certificate a `/cert:tofu` run stored in its own config dir → { certFp (sha256, colon hex lowercase), certWhy: null }
@@ -855,8 +856,7 @@ function applyXResources({ binPath, env, text, deadlineMs = 5000 }) {
     let child;
     try { child = execFile(binPath, ['-merge'], { env, timeout: deadlineMs }, (err) => resolve(err ? { ok: false, why: `xrdb -merge failed: ${err.message.split('\n')[0]}` } : { ok: true, why: null })); }
     catch (e) { resolve({ ok: false, why: `xrdb -merge failed: ${e.message}` }); return; }
-    child.stdin.on('error', () => { /* the exit callback reports */ });
-    child.stdin.end(text);
+    if (child.stdin) { child.stdin.on('error', () => { /* the exit callback reports */ }); child.stdin.end(text); }   // B-147f: no stdin after a start that failed at once (execFile answers it)
   });
 }
 

@@ -430,7 +430,7 @@ function posixShells() {
     const tm = setTimeout(() => { end(null); try { child.kill('SIGKILL'); } catch { } }, POSIX_PROBE_MS);
     try {
       child = execFile(c, ['-c', 'echo vs-$((40+2))'], { env: spawnEnv(), windowsHide: true, maxBuffer: 4096 }, (err, out) => end(!err && String(out).trim() === 'vs-42' ? c : null));
-      child.on('error', () => end(null)); child.stdin.end(); // a prompt (WSL's first run) reads EOF, never a hub byte
+      child.on('error', () => end(null)); if (child.stdin) child.stdin.end(); // a prompt (WSL's first run) reads EOF, never a hub byte; B-147f: no stdin after a start that failed at once
     } catch { end(null); }
   });
   posixShellsRun = Promise.all(['sh', 'bash', 'dash', 'zsh', 'ksh'].map(one)).then((l) => l.filter(Boolean)).finally(() => { posixShellsRun = null; });
@@ -667,6 +667,9 @@ if (process.argv.includes('--stdio')) {
         const child = cpB.spawn(process.execPath, [__filename], {
           detached: true, stdio: 'ignore', windowsHide: true, env: daemonEnv(process.env), // a daemon is born sanitized at every site (src/agent-env.js)
         });
+        // B-147f: heard at once — a start that fails (a full file table, EAGAIN) queues its error; unheard it ended this bridge
+        // before its retries (the connect loop below keeps trying: a supervisor may bring the daemon up meanwhile)
+        child.on('error', (e) => { process.stderr.write(`vibespace-device --stdio: the daemon could not be started (${(e && e.code) || e})\n`); });
         child.unref();
       }
       if (tries > 40) { process.stderr.write('vibespace-device --stdio: daemon unreachable\n'); process.exit(6); }
@@ -777,7 +780,12 @@ function startSuccessor(argv, env) {
     detached: true, stdio: 'ignore', windowsHide: true,
     env: { ...daemonEnv(process.env), ...env },
   });
+  // B-147f: the error listener at once — a start that fails (a full file table: EMFILE / ENFILE, EAGAIN, the node binary gone)
+  // queues its error for the next tick; unheard it ended this daemon with no successor. → whether the successor STARTED (a pid):
+  // the caller exits only for a successor that exists
+  child.on('error', (e) => log(`the successor could not be started: ${(e && e.code) || e}`));
   child.unref();
+  return Number.isInteger(child.pid) && child.pid > 0;
 }
 
 // THE RELEASE SIGNATURE (lane device-bundle-signing, design q-042 D2): an upgrade lands only when it is signed by a
@@ -968,7 +976,7 @@ HS.consoleStep({
   platform: process.platform, marked: process.env.VIBESPACE_AGENTD_HIDDEN === '1',
   attached: [0, 1, 2].some((fd) => { try { return require('tty').isatty(fd); } catch { return false; } }),
   look: () => psOnceSync(HS.consoleProbeScript(process.pid)).code,
-  reExec: () => { startSuccessor(reExecArgv(process.argv[1] || __filename), { [HS.HIDDEN_MARK]: '1' }); exitDaemon(0); },
+  reExec: () => { if (startSuccessor(reExecArgv(process.argv[1] || __filename), { [HS.HIDDEN_MARK]: '1' })) exitDaemon(0); else log('the hidden successor did not start — this daemon stays (in its console)'); },   // B-147f
   log,
 });
 if (!acquireSingleton()) {
@@ -1143,7 +1151,7 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
             // born under an older build is cleaned at the FOLLOWING re-exec or
             // a restart — while its CHILDREN are protected from the moment this
             // bundle runs, because spawnEnv() sanitizes its base regardless.
-            startSuccessor(reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), { VIBESPACE_AGENTD_VERSION: version });
+            return startSuccessor(reExecArgv(path.join(dir, path.basename(process.argv[1] || 'agentd.js'))), { VIBESPACE_AGENTD_VERSION: version });   // B-147f: handOver exits non-zero for a successor that did not start
           } });
         }, 200);
       }
@@ -1371,17 +1379,26 @@ const pipeSessions = {
       detached: true, stdio: [inFd, outFd, errFd], windowsHide: true,
       cwd: useCwd, env: spawnEnv(env),
     });
-    child.unref();
-    this._own.add(child.pid);
-    fs.writeFileSync(P2.meta, JSON.stringify({ childPid: child.pid, startedAt: Date.now(), cmd: [cmd, ...(args || [])], startTime: pidStartTime(child.pid) }));
-    // a spawn failure (ENOENT cmd, EACCES, etc.) arrives async — WITHOUT this
+    // a spawn failure (ENOENT cmd, EACCES, EMFILE etc.) arrives async — WITHOUT this
     // listener it is an uncaught 'error' that kills the daemon. Turn it into
     // the normal exit sentinel so the wrapper finalizes instead of hanging.
-    child.on('error', (e) => {
-      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: 127, spawnError: String(e && e.message || e) }) + '\n'); } catch { }
+    // B-147f: and it comes FIRST — the meta write below opens a file on the very table that failed the start (a full table):
+    // it threw before the listener was attached, and the queued error then ended the daemon
+    let endSaid = false;
+    const sayEnd = (why) => {
+      if (endSaid) return; endSaid = true;
+      try { fs.appendFileSync(P2.out, JSON.stringify({ type: '_remote_exit', code: 127, spawnError: why }) + '\n'); } catch { }
       try { const cur = this._meta(sid) || {}; fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: 127, exitedAt: Date.now() })); } catch { }
-      log(`pipe-session ${sid} spawn error: ${e && e.message}`);
-    });
+    };
+    child.on('error', (e) => { sayEnd(String(e && e.message || e)); log(`pipe-session ${sid} spawn error: ${e && e.message}`); });
+    child.unref();
+    if (!Number.isInteger(child.pid) || child.pid <= 0) {   // the start never happened: nothing to own; its handles closed, its end said now (the table has room again)
+      for (const fd of [inFd, outFd, errFd]) { try { fs.closeSync(fd); } catch { } }
+      sayEnd('the program could not be started (the device\'s file table is full, or it could not be run)');
+      return { pid: null, existing: false };
+    }
+    this._own.add(child.pid);
+    fs.writeFileSync(P2.meta, JSON.stringify({ childPid: child.pid, startedAt: Date.now(), cmd: [cmd, ...(args || [])], startTime: pidStartTime(child.pid) }));
     // we CAN wait on our own detached child — write the real exit sentinel
     // (code, signal) — B-3052 r2: a killed CLI is `code null` + the signal;
     // `code ?? 0` stays the exit every reader acts on, `signal` is ADDED so the
@@ -1392,7 +1409,7 @@ const pipeSessions = {
       const cur = this._meta(sid) || {};
       fs.writeFileSync(P2.meta, JSON.stringify({ ...cur, exited: code ?? 0, ...(signal ? { exitSignal: signal } : {}), exitedAt: Date.now() }));
     });
-    fs.closeSync(outFd); fs.closeSync(errFd); // child holds its own copies
+    fs.closeSync(outFd); fs.closeSync(errFd); fs.closeSync(inFd); // child holds its own copies (B-147f, ALSO CURED: the fifo's too — its own stdin is O_RDWR, so it never reads EOF; each write opens its own; one handle leaked a start)
     log(`pipe-session ${sid} spawned pid=${child.pid}`);
     return { pid: child.pid, existing: false };
   },
@@ -2839,6 +2856,10 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           const child = sp(String(cmd), (args || []).map(String), {
             env: spawnEnv(msg.env), cwd: msg.cwd || process.env.HOME, windowsHide: true, // lane win-run-hide-console
           });
+          // B-147f: heard at once (the stream-exit listener below comes after the pipes) — a start that fails at once (a full file
+          // table) has no pipes and its error queued: read first, a pipe threw and the error then ended the daemon
+          child.on('error', () => { });
+          if (!child.stdout || !child.stderr || !child.stdin) { mux.control({ op: 'stream-start', id: msg.id, chan: msg.chan, error: 'the program could not be started (no pipes: the device\'s file table is full)' }); return; }
           const chanS = msg.chan;
           // count stdout bytes → stream-exit carries `sent` so the client can
           // hold its resolve until the credit-gated tail actually landed (a

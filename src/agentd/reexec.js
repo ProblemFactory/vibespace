@@ -50,7 +50,10 @@ function handOver({ server, spawnNext, exit, log = () => {}, waitMs = 1500, time
   const go = (line) => {
     if (done) return; done = true;
     log(line);
-    try { spawnNext(); } finally { exit(0); }
+    // B-147f: a successor that did not start (spawnNext answers false) ends this daemon NON-ZERO and says so — its supervisor
+    // (systemd Restart=always, launchd KeepAlive) brings the installed bundle back; a silent exit 0 left no agent
+    let started = true;
+    try { started = spawnNext() !== false; } finally { if (!started) log('upgrade hand-over: the successor did not start — exiting non-zero for the supervisor'); exit(started ? 0 : 75); }
   };
   const t = timers.setTimeout(() => go(`upgrade hand-over: the listener did not close within ${waitMs} ms — starting the successor anyway (it retries a busy address)`), waitMs);
   try { server.close(() => { timers.clearTimeout(t); go('upgrade hand-over: listener closed — starting the successor'); }); }

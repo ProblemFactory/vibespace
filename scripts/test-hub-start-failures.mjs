@@ -10,6 +10,8 @@
 //  ④k THE SELF-UPDATE'S FAILED START IS SAID: the dialog's log carries the failure and its end mark, a second press tries again,
 //     the log write allowed and refused; RED each half (not written and not kept · the status's fallback · the in-flight check)
 //  ④l THE STREAM LAW on the copy and archive roads, read in the route's own order; RED each claim flipped alone
+//  ④m B-147f THE DEVICE AGENT's starts under a full table (the node runtime, the RDP trust run, the X resources merge: answered,
+//     alive; the upgrade's hand-over exits non-zero for a successor that did not start); RED each in the tip's order
 //  ④j THE CLASS, over every module the HUB loads (the require graph from server.js) and every form of a start (bare, an alias
 //     of one, namespaced, inline, fork, an execFile with a pipe touched): the error listener before the first unguarded pipe
 //     touch, a catch in a start's own flow signals only with a real pid; the named debt (scripts/fixtures/spawn-listener-debt.json)
@@ -174,6 +176,42 @@ try {
     ok(Object.values(sGreen).every(Boolean) && sReds.every(([, , flipped]) => flipped),
       `the stream law on the copy and archive roads: ${Object.entries(sGreen).map(([k, v]) => `${k} ${v ? '✓' : '✗'}`).join(' · ')}; RED each flips only its own claim: ${sReds.map(([w, , f]) => `${w} ${f}`).join(' · ')}`, { sGreen, sReds });
 
+    // ④m B-147f — THE DEVICE AGENT'S STARTS UNDER A FULL TABLE (the modules it bundles, each loaded in a child node under its own
+    // `ulimit -n 128`, its table filled): the node runtime's bounded child answers «not started» (code -1, the spawn's EMFILE) and the
+    // RDP trust run «not started», the X resources merge «failed» — the process ALIVE after; the upgrade's hand-over, told its
+    // successor did not start, exits NON-ZERO (75: its supervisor — systemd Restart=always, launchd KeepAlive — brings the installed
+    // bundle back; a silent exit 0 left the machine with no agent). RED, the tip's order: the node runtime's pipes first ⇒ the unheard
+    // «spawn true EMFILE», exit 1, no answer line; the RDP trust run's pipes first ⇒ the same; the old hand-over ⇒ exit 0.
+    // (agentd.js itself starts the daemon when it is loaded: its own starts — the pipe conversation, the successor, the stream child,
+    // the stdio bridge — are read by ④j's census below, each put back as a red.)
+    const AGF = path.join(T, 'agent-full.cjs'), AGCFG = path.join(T, 'agent-rdp-cfg');
+    fs.mkdirSync(AGCFG, { recursive: true });
+    fs.writeFileSync(AGF, "const fs = require('fs'); const [nrPath, ddPath, rxPath, cfg] = process.argv.slice(2);\nconst NR = require(nrPath), DD = require(ddPath), RX = require(rxPath);\nconst held = []; let full = null; try { for (let i = 0; i < 100000; i++) held.push(fs.openSync('/dev/null', 'r')); } catch (e) { full = e.code; }\n(async () => {\n  const nr = await NR.runChild('true', [], { timeoutMs: 3000 });\n  const rdp = await DD.rdpTrustRun({ exec: 'true', argv: [], env: { PATH: process.env.PATH }, configDir: cfg, stdinLine: () => 'y', deadlineMs: 3000 });\n  const xr = await DD.applyXResources({ binPath: 'true', env: { PATH: process.env.PATH }, text: 'x', deadlineMs: 3000 });\n  let handOverExit = null; RX.handOver({ server: { close: (cb) => cb() }, spawnNext: () => false, exit: (c) => { handOverExit = c; }, log: () => { } });\n  await new Promise((r) => setTimeout(r, 300));   // every queued error has had its turn\n  for (const fd of held) fs.closeSync(fd);\n  process.stdout.write(JSON.stringify({ full, nr, rdp: { code: rdp.code, out: rdp.out }, xr, handOverExit }) + '\\n'); process.exit(0);\n})();");
+    const agentRun = (nrPath, ddPath, rxPath) => new Promise((resolve) => {
+      let out = '', err = '', c;
+      try { c = CP.spawn('sh', ['-c', 'ulimit -n 128 && exec "$0" "$@"', process.execPath, AGF, nrPath, ddPath, rxPath, AGCFG], { stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { resolve({ code: null, err: String(e) }); return; }
+      c.on('error', (e) => { err += String(e); });
+      if (c.stdout) c.stdout.on('data', (d) => { out += d; });
+      if (c.stderr) c.stderr.on('data', (d) => { err += d; });
+      const t = setTimeout(() => { try { c.kill('SIGKILL'); } catch { } }, 20000);
+      c.on('close', (code) => { clearTimeout(t); let j = null; try { j = JSON.parse(out.trim().split('\n').pop()); } catch { } resolve({ code, j, unheard: /Unhandled 'error' event|Emitted 'error' event on ChildProcess/.test(err), died: (/Error: spawn (\S+) EMFILE/.exec(err) || [])[1] || null, err: err.slice(-400) }); });
+    });
+    const NRP = path.join(REPO, 'src/node-runtime.js'), DDP = path.join(REPO, 'src/desktop-display.js'), RXP = path.join(REPO, 'src/agentd/reexec.js');
+    const nrSrc = fs.readFileSync(NRP, 'utf8'), ddSrc = fs.readFileSync(DDP, 'utf8'), rxSrc = fs.readFileSync(RXP, 'utf8');
+    const [ag, agNr, agDd, agRx] = await Promise.all([
+      agentRun(NRP, DDP, RXP),
+      agentRun(MC.write('src/node-runtime.js', anchored(nrSrc, "    child.on('error', (e) => { take(String(e && e.message)); end(-1); });\n    child.on('close', (code) => end(code == null ? -1 : code));\n    if (child.stdout) child.stdout.on('data', take); if (child.stderr) child.stderr.on('data', take);\n", "    child.stdout.on('data', take); child.stderr.on('data', take);\n    child.on('error', (e) => { take(String(e && e.message)); end(-1); });\n    child.on('close', (code) => end(code == null ? -1 : code));\n", 'b147f-nr-order'), 'red-b147f-nr'), DDP, RXP),
+      agentRun(NRP, MC.write('src/desktop-display.js', anchored(ddSrc, "    child.on('error', (e) => finish(null, null, `not started: ${e.message}`));\n    child.on('close', (code, signal) => finish(code, signal));\n    const keep = (b) => { if (size < 65536) { chunks.push(b); size += b.length; } };\n    if (child.stdout) child.stdout.on('data', keep); if (child.stderr) child.stderr.on('data', keep);\n", "    const keep = (b) => { if (size < 65536) { chunks.push(b); size += b.length; } };\n    child.stdout.on('data', keep); child.stderr.on('data', keep);\n    child.on('error', (e) => finish(null, null, `not started: ${e.message}`));\n    child.on('close', (code, signal) => finish(code, signal));\n", 'b147f-dd-order'), 'red-b147f-dd'), RXP),
+      agentRun(NRP, DDP, MC.write('src/agentd/reexec.js', anchored(rxSrc, "    try { started = spawnNext() !== false; } finally { if (!started) log('upgrade hand-over: the successor did not start \u2014 exiting non-zero for the supervisor'); exit(started ? 0 : 75); }", "    try { spawnNext(); } finally { exit(0); }", 'b147f-rx-exit'), 'red-b147f-rx')),
+    ]);
+    const aj = ag.j || {};
+    ok(ag.code === 0 && aj.full === 'EMFILE' && aj.nr && aj.nr.code === -1 && /EMFILE/.test(String(aj.nr.out)) && aj.rdp && /not started: spawn true EMFILE/.test(String(aj.rdp.out)) && aj.xr && aj.xr.ok === false && /EMFILE/.test(String(aj.xr.why)) && aj.handOverExit === 75
+      && agNr.code === 1 && agNr.unheard && agNr.died === 'true' && !agNr.j
+      && agDd.code === 1 && agDd.unheard && agDd.died === 'true' && !agDd.j
+      && agRx.code === 0 && agRx.j && agRx.j.handOverExit === 0,
+      `the device agent's starts under a FULL table (the next open «${aj.full}»): the node runtime's child «${aj.nr && aj.nr.out}» (code ${aj.nr && aj.nr.code}), the RDP trust run «${String(aj.rdp && aj.rdp.out).trim().slice(0, 60)}», the X resources merge «${aj.xr && aj.xr.why}» — the process ALIVE (exit ${ag.code}); the hand-over told its successor did not start exits ${aj.handOverExit} (non-zero: the supervisor restarts the installed bundle); RED the tip's order: the node runtime ⇒ exit ${agNr.code}, the unheard «spawn ${agNr.died} EMFILE»; the RDP trust run ⇒ exit ${agDd.code}, «spawn ${agDd.died} EMFILE»; the old hand-over ⇒ exit ${agRx.j && agRx.j.handOverExit}`,
+      { ag: { code: ag.code, j: ag.j, err: ag.err }, agNr: { code: agNr.code, died: agNr.died, err: agNr.err }, agDd: { code: agDd.code, died: agDd.died, err: agDd.err }, agRx: { code: agRx.code, j: agRx.j } });
+
     // ④j THE CLASS (cure 2: every module the HUB loads, every form of a start): the hub's module set is DERIVED — the require graph
     // from server.js, never a typed list — and in each, every start is read: a bare spawn / fork / execFile destructured from
     // child_process, a namespaced one (cp.spawn), an inline require('child_process').spawn. A spawn / fork attaches its 'error'
@@ -277,13 +315,29 @@ try {
           const body = blockAt(win, m.index + m[0].length - 1);
           for (const t of body.matchAll(/\b([A-Za-z_$][\w$]*)\.kill\(/g)) { if (t[1] === 'process') continue; const ls = body.lastIndexOf('\n', t.index) + 1, le = body.indexOf('\n', t.index); if (!new RegExp(`\\b${t[1].replace(/\$/g, '\\$')}\\.pid\\b`).test(body.slice(ls, le < 0 ? undefined : le))) killNoPid.push(t[1]); }
         }
-        out.push({ site, form: c.form, v, killNoPid, bad: killNoPid.length > 0 || (c.form === 'execFile' ? first >= 0 : (!v || lis < 0 || (first >= 0 && first < lis))) });
+        // B-147f: NOTHING that can throw stands between a spawn / fork and its listener — a synchronous fs call there (it throws EMFILE
+        // on the very table that failed the start) skips the listener as a pipe read does; read in the start's OWN block (a sibling
+        // branch never runs after it), a call inside a one-line try is guarded
+        let syncFirst = false;
+        if (c.form !== 'execFile' && v && lis > 0) {
+          const seg = win.slice(0, lis); let depth = 0;
+          for (let k = 0; k < seg.length && !syncFirst; k++) {
+            const ch = seg[k];
+            if (ch === '{') depth++;
+            else if (ch === '}') { if (--depth < 0) break; }
+            else if (depth === 0 && ch === 'f' && /^fs\.\w+Sync\(/.test(seg.slice(k, k + 48)) && !/[\w$.]/.test(seg[k - 1] || ' ')) {
+              const ls = seg.lastIndexOf('\n', k) + 1, le = win.indexOf('\n', k), line = win.slice(ls, le < 0 ? undefined : le), at = k - ls;
+              if (!(/\btry \{/.test(line.slice(0, at)) && /\}\s*catch\b/.test(line.slice(at)))) syncFirst = true;
+            }
+          }
+        }
+        out.push({ site, form: c.form, v, killNoPid, syncFirst, bad: killNoPid.length > 0 || syncFirst || (c.form === 'execFile' ? first >= 0 : (!v || lis < 0 || (first >= 0 && first < lis))) });
       }
       return out;
     }
     const RAW = new Map(), BLANK = new Map();   // a module read and blanked ONCE: the require walk and the census share it
-    const hubModules = () => {
-      const seen = new Set(), todo = ['server.js'];
+    const walk = (root) => {
+      const seen = new Set(), todo = [root];
       while (todo.length) {
         const rel = todo.pop(); if (seen.has(rel)) continue; let src; try { src = fs.readFileSync(path.join(REPO, rel), 'utf8'); } catch { continue; } seen.add(rel);
         RAW.set(rel, src); BLANK.set(rel, blank(src));
@@ -295,7 +349,10 @@ try {
       }
       return [...seen].sort();
     };
-    const mods = hubModules(), sites = mods.flatMap((r) => sitesOf(r, RAW.get(r), BLANK.get(r)));
+    // B-147f: the device agent's own module set too (the require graph from src/agentd/agentd.js — its bundle): a start that ends
+    // the agent ends every link of that machine (its supervisor may bring it back, or nothing does: a Windows logon task, a bare start)
+    const hubMods = walk('server.js'), agentMods = walk('src/agentd/agentd.js');
+    const mods = [...new Set([...hubMods, ...agentMods])].sort(), sites = mods.flatMap((r) => sitesOf(r, RAW.get(r), BLANK.get(r)));
     const rd = (r) => RAW.get(r) ?? fs.readFileSync(path.join(REPO, r), 'utf8');
     // THE NAMED DEBT (主开发 20:53Z, road (b)): scripts/fixtures/spawn-listener-debt.json — the sites whose listener comes after a pipe
     // touch, a count a file that only FALLS (the founding sums below are this commit's: raising one is an edit here too), and the
@@ -304,7 +361,7 @@ try {
     const FIX = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/spawn-listener-debt.json'), 'utf8')), DEBT = FIX.pipeFirst, SURV = FIX.survives;
     // FOUNDING, a count a FILE (cure 3, the read's SHOULD: a sum let one file grow while another fell): raising one is an edit here
     const FOUNDING = {
-      pipeFirst: { 'src/routes/files.js': 3, 'src/machine-mounts.js': 2, 'src/remote-fs.js': 1, 'src/desktop-display.js': 2, 'src/node-runtime.js': 1 },
+      pipeFirst: { 'src/routes/files.js': 3, 'src/machine-mounts.js': 2, 'src/remote-fs.js': 1 },   // B-147f: desktop-display (2) and node-runtime (1) cured — out
       survives: { 'src/mounts.js': 2, 'src/plugins/frp.js': 1, 'src/plugins/tailscale.js': 2, 'src/vnc.js': 1, 'src/routes/files.js': 4, 'src/remote-fs.js': 1, 'src/claude-oat-probe.js': 1, 'src/device-mount.js': 1 },
     };
     const SURV_MARK = 'ckpt61 cure 2: the hub survives a start that fails';
@@ -324,6 +381,7 @@ try {
       'a stdio slot read first': "const { spawn } = require('child_process');\nfunction f() { const x = spawn('x', [], { stdio: ['ignore', 'ignore', 'ignore', 'pipe'] }); x.stdio[3].on('data', () => {}); x.on('error', () => {}); }",
       'a pipe handed on before the listener': "const { spawn } = require('child_process');\nfunction f(r) { const w = spawn('x', [], { stdio: 'pipe' }); r.pipe(w.stdin); w.on('error', () => {}); }",
       'a catch that signals a child with no pid check': "const { spawn } = require('child_process');\nfunction f() { let c; try { c = spawn('x', []); c.on('error', () => {}); more(); } catch (e) { c.kill('SIGTERM'); } }",
+      'a meta write between a start and its listener': "const { spawn } = require('child_process'); const fs = require('fs');\nfunction f() { const c = spawn('x', [], { stdio: 'ignore' }); fs.writeFileSync('m', String(c.pid)); c.on('error', () => {}); }",
       'a listener of ANOTHER child of the same name': "const { spawn } = require('child_process'); const fs = require('fs');\nfunction f(r) { const w = spawn('x', [], { stdio: 'pipe' }); r.pipe(w.stdin); }\nfunction g() { const w = fs.createWriteStream('p'); w.on('error', () => {}); }",
       'a start behind a «/*» in a string and a comment': "const { spawn } = require('child_process');\nconst ROUTE = '/files/*'; // a route /api/x/* serves it\nfunction f() { const c = spawn('x', [], { stdio: 'pipe' }); c.stdout.on('data', () => {}); }\n// */",
     };
@@ -332,6 +390,8 @@ try {
       'a child handed on': "const { spawn } = require('child_process');\nfunction f(ran) { return new Promise((r) => { ran(spawn('x', [], { stdio: 'ignore' }), r); }); }",
       'a try-guarded pipe': "const cp = require('child_process');\nfunction f() { const c = cp.execFile('x', [], () => {}); if (c.stdin) c.stdin.on('error', () => {}); try { c.stdin.end('y'); } catch { } }",
       'a kill in a later callback (the failed start\'s handle is gone by then)': "const { spawn } = require('child_process');\nfunction f() { const c = spawn('x', []); c.on('error', () => {}); setTimeout(() => { try { c.kill(); } catch { c.kill('SIGKILL'); } }, 10); }",
+      'a sync fs call in a SIBLING branch': "const { spawn } = require('child_process'); const fs = require('fs');\nfunction f(a) { let c; if (a) { c = spawn('x', []); } else { fs.mkdirSync('d'); c = spawn('y', []); } c.on('error', () => {}); }",
+      'a one-line try around a sync close': "const { spawn } = require('child_process'); const fs = require('fs');\nfunction f(fd) { const c = spawn('x', [], { stdio: ['ignore', fd, fd] }); try { fs.closeSync(fd); } catch { } c.on('error', () => {}); }",
       'pipes listed in an array': "const cp = require('child_process');\nfunction f() { const c = cp.spawn('x', []); for (const p of [c.stdin, c.stdout]) if (p) p.destroy(); c.on('error', () => {}); }",
     };
     const reds = [
@@ -342,11 +402,17 @@ try {
       ['the desktop session X server (no listener: its display slot read first)', sitesOf('src/vnc.js', anchored(rd('src/vnc.js'), /\n {6}x\.on\('error', \(e\) => \{ console\.warn\(`\[vnc\][^\n]*/, '', 'class-vnc')).filter((x) => x.bad).length],
       ['the single-file copy writer (no listener; the later `const w` is another child)', sitesOf('src/routes/files.js', anchored(rd('src/routes/files.js'), "      w.on('error', (e) => { wErr = e; });\n", '', 'class-copy-writer')).filter((x) => x.bad && x.v === 'w').length],
       ['the folder copy catch (a child signalled with no pid check)', sitesOf('src/routes/files.js', anchored(rd('src/routes/files.js'), 'Number.isInteger(c.pid) && c.pid > 0 && ', '', 'class-copy-kill')).some((x) => x.killNoPid && x.killNoPid.length) ? 1 : 0],
+      ["the agent's pipe conversation (its meta written before its listener)", sitesOf("src/agentd/agentd.js", anchored(rd("src/agentd/agentd.js"), "    child.on('error', (e) => { sayEnd(String(e && e.message || e)); log(`pipe-session ${sid} spawn error: ${e && e.message}`); });\n    child.unref();\n", "    child.unref();\n    fs.writeFileSync(P2.meta, '{}');\n    child.on('error', (e) => { sayEnd(String(e && e.message || e)); log(`pipe-session ${sid} spawn error: ${e && e.message}`); });\n", "b147f-0")).filter((x) => x.bad).length > 0 ? 1 : 0],
+      ["the agent's successor (no listener)", sitesOf("src/agentd/agentd.js", anchored(rd("src/agentd/agentd.js"), "  child.on('error', (e) => log(`the successor could not be started: ${(e && e.code) || e}`));\n", "", "b147f-1")).filter((x) => x.bad).length > 0 ? 1 : 0],
+      ["the agent's stream child (its pipe first)", sitesOf("src/agentd/agentd.js", anchored(rd("src/agentd/agentd.js"), "          child.on('error', () => { });\n          if (!child.stdout || !child.stderr || !child.stdin) {", "          if (false) {", "b147f-2")).filter((x) => x.bad).length > 0 ? 1 : 0],
+      ["the agent's stdio bridge (no listener)", sitesOf("src/agentd/agentd.js", anchored(rd("src/agentd/agentd.js"), "        child.on('error', (e) => { process.stderr.write(`vibespace-device --stdio: the daemon could not be started (${(e && e.code) || e})\\n`); });\n", "", "b147f-3")).filter((x) => x.bad).length > 0 ? 1 : 0],
+      ["the RDP trust run (its pipes first)", sitesOf("src/desktop-display.js", anchored(rd("src/desktop-display.js"), "    child.on('error', (e) => finish(null, null, `not started: ${e.message}`));\n    child.on('close', (code, signal) => finish(code, signal));\n    const keep = (b) => { if (size < 65536) { chunks.push(b); size += b.length; } };\n    if (child.stdout) child.stdout.on('data', keep); if (child.stderr) child.stderr.on('data', keep);\n", "    const keep = (b) => { if (size < 65536) { chunks.push(b); size += b.length; } };\n    child.stdout.on('data', keep); child.stderr.on('data', keep);\n    child.on('error', (e) => finish(null, null, `not started: ${e.message}`));\n    child.on('close', (code, signal) => finish(code, signal));\n", "b147f-4")).filter((x) => x.bad).length > 0 ? 1 : 0],
+      ["the node runtime's child (its pipes first)", sitesOf("src/node-runtime.js", anchored(rd("src/node-runtime.js"), "    child.on('error', (e) => { take(String(e && e.message)); end(-1); });\n    child.on('close', (code) => end(code == null ? -1 : code));\n    if (child.stdout) child.stdout.on('data', take); if (child.stderr) child.stderr.on('data', take);\n", "    child.stdout.on('data', take); child.stderr.on('data', take);\n    child.on('error', (e) => { take(String(e && e.message)); end(-1); });\n    child.on('close', (code) => end(code == null ? -1 : code));\n", "b147f-5")).filter((x) => x.bad).length > 0 ? 1 : 0],
       ['the cache count (its pipe first)', sitesOf('src/mounts.js', anchored(rd('src/mounts.js'), "      c.on('error', end); c.on('close', end);\n      if (c.stdout) c.stdout.on(", "      c.stdout.on(", 'class-cache-count')).filter((x) => x.bad).length],
     ];
     const kept = Object.entries(keep).map(([w, src]) => [w, sitesOf('kept.js', src).filter((x) => x.bad).length]);
-    ok(mods.length > 100 && mods.includes('src/agentd/client.js') && mods.includes('src/mounts.js') && sites.length > 100 && !newBad.length && DEBT.every((d) => debtNow[d.file] <= d.n) && survOk && reds.every(([, n]) => n === 1) && kept.every(([, n]) => n === 0),
-      `the hub's ${mods.length} modules (the require graph from server.js) hold ${sites.length} starts (${sites.filter((x) => x.handed).length} handed on): every spawn / fork has its error listener before its first unguarded pipe touch, every execFile's pipes guarded${newBad.length ? '; NOT: ' + newBad.join(', ') : ''}; the named debt (a count a file only falls): ${DEBT.map((d) => `${d.file} ${debtNow[d.file]}/${d.n}`).join(', ')}; the starts that only survive (words owed): ${survNow.map((r) => `${r.file} ${r.held}/${r.n}`).join(', ')}; RED each planted break named once: ${reds.map(([w, n]) => `${w} ${n}`).join(' · ')}; never flagged: ${kept.map(([w, n]) => `${w} ${n}`).join(' · ')}`, { newBad, debtNow, survNow, unnamedSurv, reds, kept });
+    ok(mods.length > 100 && mods.includes('src/agentd/client.js') && mods.includes('src/mounts.js') && agentMods.includes('src/agentd/agentd.js') && agentMods.includes('src/node-runtime.js') && sites.length > 100 && !newBad.length && DEBT.every((d) => debtNow[d.file] <= d.n) && survOk && reds.every(([, n]) => n === 1) && kept.every(([, n]) => n === 0),
+      `the hub's ${hubMods.length} modules and the device agent's ${agentMods.length} (the require graphs from server.js and src/agentd/agentd.js; ${mods.length} in all) hold ${sites.length} starts (${sites.filter((x) => x.handed).length} handed on): every spawn / fork has its error listener before its first unguarded pipe touch, every execFile's pipes guarded${newBad.length ? '; NOT: ' + newBad.join(', ') : ''}; the named debt (a count a file only falls): ${DEBT.map((d) => `${d.file} ${debtNow[d.file]}/${d.n}`).join(', ')}; the starts that only survive (words owed): ${survNow.map((r) => `${r.file} ${r.held}/${r.n}`).join(', ')}; RED each planted break named once: ${reds.map(([w, n]) => `${w} ${n}`).join(' · ')}; never flagged: ${kept.map(([w, n]) => `${w} ${n}`).join(' · ')}`, { newBad, debtNow, survNow, unnamedSurv, reds, kept });
   }
 
 } finally {
