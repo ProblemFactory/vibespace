@@ -352,12 +352,21 @@ const M = mutantCopies('chanrx', REPO);
   const { pathToFileURL: fileUrl } = await import('node:url');
   const hotProbe = (meterPath) => `const { startWorkMeter, measure } = await import(${JSON.stringify(fileUrl(meterPath).href)}); startWorkMeter();`
     + ` const { createRequire } = await import('node:module'); const R = createRequire(${JSON.stringify(path.join(REPO, 'package.json'))})(${JSON.stringify(path.join(REPO, 'src/channel-record.js'))});`
-    + ` for (let i = 0; i < 200000; i++) R.isReactionKey('K' + (i % 50)); const t = [];`
+    + ` for (let i = 0; i < 200000; i++) R.isReactionKey('K' + (i % 50));`
+    + ` %PrepareFunctionForOptimization(R.isReactionKey); R.isReactionKey('K0'); R.isReactionKey('K1'); %OptimizeFunctionOnNextCall(R.isReactionKey); R.isReactionKey('K2');`
+    + ` const status = %GetOptimizationStatus(R.isReactionKey); const t = [];`
     + ` for (let k = 0; k < 12; k++) t.push(measure(() => { for (let i = 0; i < 1000; i++) R.isReactionKey('K' + i); }, ['src/channel-record.js']).blocks);`
-    + ' console.log(JSON.stringify(t));';
-  const runHot = (meterPath) => { const r = spawnSync(process.execPath, ['--input-type=module', '-e', hotProbe(meterPath)], { encoding: 'utf8', timeout: 60000 }); try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return null; } };
-  const fT = runHot(fPath), rT = runHot(path.join(REPO, METER));
-  ok(fSrc !== meterSrc && Array.isArray(fT) && fT.some((b) => b < 1000) && Array.isArray(rT) && rT.length === 12 && rT.every((b) => b === 1000), `CONTROL (f): a meter copy without the optimizer pin loses a hot function's calls — 1 000 calls read ${fT && fT.join(' / ')} (the real meter, the same child: ${rT && rT.join(' / ')})`, { fT, rT });
+    + ' console.log(JSON.stringify({ t, status }));';
+  const runHot = (meterPath) => { const r = spawnSync(process.execPath, ['--allow-natives-syntax', '--input-type=module', '-e', hotProbe(meterPath)], { encoding: 'utf8', timeout: 60000 }); try { return JSON.parse(String(r.stdout).trim().split('\n').pop()); } catch { return null; } };
+  // (B-1217 member 11, 主开发 r423) THE CONTROL NEVER WAITS ON THE OPTIMIZER'S OWN TIMING: each child ASKS for the optimization by
+  // name (V8's natives switch, --allow-natives-syntax: %PrepareFunctionForOptimization + %OptimizeFunctionOnNextCall on isReactionKey
+  // after its warm calls). Under load the tier-up never came inside the twelve takes and the pinless copy counted every call — a red
+  // of the CONTROL; the leg under test read right and is not touched. The pinned meter keeps the function interpreted even when it
+  // is asked by name. THE PREMISE IS JUDGED BY BEHAVIOUR ALONE (主开发 r438: the engine's status word is its own layout, not a promise —
+  // the hosted fast jobs run Node 22): with the ask, the pinless copy loses calls in at least one take and the real meter in none of
+  // twelve; each child's %GetOptimizationStatus word is PRINTED as a fact, judged by nothing
+  const fH = runHot(fPath), rH = runHot(path.join(REPO, METER)); const fT = fH && fH.t, rT = rH && rH.t;
+  ok(fSrc !== meterSrc && Array.isArray(fT) && fT.some((b) => b < 1000) && Array.isArray(rT) && rT.length === 12 && rT.every((b) => b === 1000), `CONTROL (f): a meter copy without the optimizer pin loses a hot function's calls — asked by name to optimize it, 1 000 calls read ${fT && fT.join(' / ')} (the real meter, the same child and the same ask: ${rT && rT.join(' / ')}) · printed, judged by nothing: the status words ${fH && fH.status} (copy) / ${rH && rH.status} (real meter) on node ${process.versions.node}`, { fH, rH });
   for (const row of copiesCensus(M.files, M.dir, REPO, { minCopies: 5, label: 'chanrx: ' })) ok(row.pass, row.name, row.detail);
 }
 
