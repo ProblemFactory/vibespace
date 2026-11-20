@@ -20,6 +20,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import { anchored } from './scratch.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const require = createRequire(import.meta.url);
@@ -592,7 +593,7 @@ console.log('⑪ round 4 — the smaller items');
     && T({ className: 'TypeError', description: 'TypeError: x is not a function' }).words === 'the sample could not run (TypeError)' && !T({ className: 'TypeError' }).deep
     && T({ className: 'Weird Class <script>' }).words === 'the sample could not run (an error)' && T({ err: new Error('x') }).words === 'the sample could not run (the session refused it)',
     '(5) a sample that threw says «the stack was nearly full (deep recursion)» only when it was; another error is «the sample could not run (<its class>)» — the class a plain word, else «an error»');
-  ok(LH.askOf({ postedAt: 0, answeredAt: 0.4, state: 'running', answer: T({ className: 'TypeError' }), beat: 1, beat0: 1, holdEnd: 9 }).cls === 'js' && LH.askOf({ postedAt: 0, answeredAt: 30, state: 'running', answer: T({ className: 'TypeError' }), beat: 1, beat0: 1, holdEnd: 99 }).after === null,
+  ok(LH.askOf({ postedAt: 0, answeredAt: 0.4, state: 'running', answer: T({ className: 'TypeError' }), beat: 1, beat0: 1, holdEnd: 9000 }).cls === 'js' && LH.askOf({ postedAt: 0, answeredAt: 30, state: 'running', answer: T({ className: 'TypeError' }), beat: 1, beat0: 1, holdEnd: 99 }).after === null,
     '(5) a sample that could not run answered at JavaScript speed WAS in JavaScript; late, it names no «after» frame');
   // (4) OFF MID-HOLD: the switch and a debugger re-read at every step of a live hold
   ok(LH.stepRefusalOf(1 | 8) === null && LH.stepRefusalOf(8) === 'off' && LH.stepRefusalOf(1 | 2 | 8) === 'debugger' && LH.stepRefusalOf(1) === 'unknown'
@@ -1235,6 +1236,119 @@ console.log('⑱ 主开发 2026-11-18 12:20Z — a stack that ends in the runtim
   const m = mutantLH('cutstack', CUTR, '  return raw;\n');
   const rel = m ? ans(RUNTIME, m) : null;
   ok(rel && rel.key === 'src/server/loop-blame.js:64' && /loop-blame/.test(rel.words) && !rel.noOurs, `RED CONTROL: the release's trim keeps the stack whole and names the wrapper's line — «${rel && rel.words}»`, rel);
+}
+
+console.log('r116 + r147 (lane hub-loop-stalls): an ask at the hold\'s EDGE is its LAST MOMENT, never its class; a tie on the CPU says BOTH');
+{
+  // BOTH edge cases MADE by construction — an ask placed inside the hold's last SESSION_MS (answered 3–4 ms before its end), never by
+  // luck or load — on a window that says the thread was on the CPU the whole hold: (1) a native call's own continuation answered it
+  // (afterParse ← jsonHog); (2) a TRUE JavaScript hold's own last moment answered it (busyHog). One sample cannot tell them apart.
+  const FROM = 30000, B0 = 9;
+  const Rw = (at, f) => R(at, f || { ut: 0, st: 0, run: 0, wait: 0 });
+  const winCpu = (ms) => LH.schedDelta(Rw(FROM, { ut: 0, st: 0, run: 0, wait: 0 }), Rw(FROM + ms, { ut: ms / 10, st: 0, run: ms, wait: 0 }));
+  const CONT = { kind: 'js', words: 'afterParse (src/hogs.js:4) ← jsonHog (src/hogs.js:5)', key: 'src/hogs.js:4', keyWords: 'afterParse (src/hogs.js:4)' };
+  const BUSY = { kind: 'js', words: 'busyHog (src/hogs.js:2)', key: 'src/hogs.js:2', keyWords: 'busyHog (src/hogs.js:2)' };
+  const native = (postedAt, fr = CONT) => ({ postedAt, answeredAt: postedAt + 30, state: 'running', answer: fr, beat: B0 });   // posted on the CPU, answered late
+  const jsAt = (postedAt, fr) => ({ postedAt, answeredAt: postedAt + 0.3, state: 'running', answer: fr, beat: B0 });   // answered at JavaScript speed
+  const holdOf = (Lh, asks, ms, d = winCpu(ms), extra = {}) => {
+    const TO = FROM + ms, J = Lh.judgeAsks(asks, { beat0: B0, holdEnd: TO });
+    const h = { from: FROM, to: TO, fromM: FROM, toM: TO, ms, msHi: ms, samples: J.samples, outside: J.outside, after: J.after && J.after.words, afterKey: J.after && J.after.key, last: J.last && J.last.words, d, ...extra };
+    return { J, fo: Lh.foldHold(h), line: Lh.holdLine(h) };
+  };
+  const words = (line) => { const i = line.indexOf(' — '); return i < 0 ? line : line.slice(i + 3, i + 140); };
+  const LAST = (fr) => `its last moment: ${fr.words} (the held work's end, or the JavaScript right after it)`;
+  // (1) THE ONE-ASK NATIVE SHAPE and (2) THE ONE-ASK JAVASCRIPT SHAPE: the same neutral words, the window's own verdict, never a class
+  const c1 = holdOf(LH, [jsAt(FROM + 1196, CONT)], 1200), c2 = holdOf(LH, [jsAt(FROM + 1196, BUSY)], 1200);
+  ok(c1.J.samples.length === 0 && c1.J.outside.edge === 1 && c1.fo.verdict === LH.V.unsampled && c1.line.includes(LAST(CONT)) && !c1.line.includes('the first JavaScript after it'),
+    `(1) a native call's continuation answered the one ask: the window's own verdict («${c1.fo.verdict}»), the ask said as its last moment — never «JavaScript», never «after it»: «${words(c1.line)}…»`, c1.line);
+  ok(c2.fo.verdict === LH.V.unsampled && c2.line.includes(LAST(BUSY)) && !c2.line.includes('the first JavaScript after it'),
+    `(2) a TRUE JavaScript hold's last moment answered the one ask: the same neutral words — true in both cases — and the window's own verdict («${c2.fo.verdict}»)`, c2.line);
+  // (3) THE TWO-ASK NATIVE SHAPE: an inside sample keeps its class; (4) a JavaScript hold with inside samples stays JavaScript, its edge said apart
+  const c3 = holdOf(LH, [native(FROM + 750), jsAt(FROM + 2097, CONT)], 2100), c4 = holdOf(LH, [jsAt(FROM + 750, BUSY), jsAt(FROM + 2000, BUSY), jsAt(FROM + 2996, BUSY)], 3000);
+  // (its read 3 M1) the law's own two-ask native shape: the late answer and the edge ask land in ONE frame — said once, AND as its last moment
+  const ALSO = ` — also its last moment (the held work's end, or the JavaScript right after it)`;
+  ok(c3.fo.verdict === LH.V.native && c3.line.includes(`the first JavaScript after it: ${CONT.words}${ALSO}`) && c4.fo.verdict === LH.V.js && c4.line.includes(LAST(BUSY)),
+    `(3) a native sample inside + an edge ask in the same frame ⇒ native, the frame said once — after it, and also its last moment; (4) JavaScript samples inside + an edge ask ⇒ JavaScript, its last moment said apart — «${words(c3.line)}…» / «${c4.fo.verdict}»`, { c3: c3.line, c4: c4.line });
+  // the shapes the read named unlegged: an edge-only hold with NO window; two edge asks (the latest frame, said once); an unreadable edge frame
+  const e0 = holdOf(LH, [jsAt(FROM + 1196, CONT)], 1200, null), e2 = holdOf(LH, [jsAt(FROM + 1185, BUSY), jsAt(FROM + 1196, CONT)], 1200);
+  const eu = holdOf(LH, [jsAt(FROM + 1196, { kind: 'js', words: LH.KEYS.unreadable, key: LH.KEYS.unreadable, keyWords: LH.KEYS.unreadable })], 1200);
+  ok(e0.fo.verdict === LH.V.unknown && e0.line.includes(LAST(CONT)) && e2.J.outside.edge === 2 && e2.line.includes(LAST(CONT)) && e2.line.split('its last moment: ').length === 2 && eu.J.outside.edge === 1 && !eu.line.includes('its last moment: '),
+    `no window: the edge-only hold says «${e0.fo.verdict}» and its last moment; two edge asks: the latest frame, said once; an unreadable edge frame: counted, no frame`, { e0: e0.line, e2: e2.line, eu: eu.line });
+  // (its read 4 S2) a deep stack answered at the edge is the edge too — its answer time (the worker's receipt) is an upper bound; never the hold's name
+  const deepA = LH.askOf({ postedAt: FROM + 1190, answeredAt: FROM + 1199, state: 'running', answer: { kind: 'js', deep: true, words: LH.WORDS.deep, key: LH.KEYS.deep, keyWords: LH.KEYS.deep }, beat: B0, beat0: B0, holdEnd: FROM + 1200 });
+  const deepIn = LH.askOf({ postedAt: FROM + 750, answeredAt: FROM + 751, state: 'running', answer: { kind: 'js', deep: true, words: LH.WORDS.deep, key: LH.KEYS.deep, keyWords: LH.KEYS.deep }, beat: B0, beat0: B0, holdEnd: FROM + 1200 });
+  ok(deepA.cls === 'edge' && !deepA.last && deepIn.cls === 'js', `a deep stack answered at the edge is the edge («${deepA.cls}», no frame said); well inside it is a JavaScript sample («${deepIn.cls}»)`, { deepA, deepIn });
+  // (its read 4 S4 / read 5 S1) a one-ask edge hold says «last moment» ONCE: «answered as it ended» + its frame, or — no frame to say — «answered at its last moment»
+  const edgeWords = (l) => (l.split('not sampled (').slice(-1)[0] || '').slice(0, 110);
+  ok(c1.line.split('last moment').length === 2 && c1.line.includes('answered as it ended') && eu.line.split('last moment').length === 2 && eu.line.includes('answered at its last moment'),
+    `a one-ask edge hold says its last moment once — with its frame («${edgeWords(c1.line)}…»), and with none («${edgeWords(eu.line)}…»)`, { c1: c1.line, eu: eu.line });
+  // (its read 4 N8) a native sample inside + an edge ask in ANOTHER frame: both said, the last moment once
+  const c5 = holdOf(LH, [native(FROM + 750), jsAt(FROM + 2097, BUSY)], 2100);
+  ok(c5.fo.verdict === LH.V.native && c5.line.includes(`the first JavaScript after it: ${CONT.words};`) && c5.line.includes(LAST(BUSY)) && c5.line.split('last moment').length === 2, `a native sample + an edge ask in another frame: native, the late answer after it, the edge as its last moment once`, c5.line);
+  // CONTROLS (green on the release too — they guard the cure, they are no REDs): samples only inside native work ⇒ native; one inside JavaScript sample ⇒ JavaScript
+  const nat = holdOf(LH, [native(FROM + 750), native(FROM + 2000)], 3000), js1 = holdOf(LH, [jsAt(FROM + 750, BUSY)], 1300);
+  ok(nat.fo.verdict === LH.V.native && js1.fo.verdict === LH.V.js, `CONTROLS: samples only inside native work ⇒ native (${nat.fo.verdict}); one JavaScript sample well inside ⇒ JavaScript (${js1.fo.verdict})`, { nat: nat.line, js1: js1.line });
+  // (5) A TIE INSIDE (a window): BOTH, in the order they came, each counted, in the line; the table and the day report keep ONE fixed word
+  const tNJ = holdOf(LH, [native(FROM + 750), jsAt(FROM + 2000, BUSY)], 3000), tJN = holdOf(LH, [jsAt(FROM + 750, BUSY), native(FROM + 2000)], 3000);
+  const T = new Map(); LH.tableAdd(T, tNJ.fo, 3000); LH.tableAdd(T, tJN.fo, 3000);
+  ok(tNJ.fo.verdict === LH.V.tie && tJN.fo.verdict === LH.V.tie && words(tNJ.line).startsWith(`${LH.V.native} ×1 and ${LH.V.js} ×1 (a tie, in the order they came)`) && words(tJN.line).startsWith(`${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came)`) && T.size === 1,
+    `(5) a tie on the CPU: the line says both, counted, in order («${words(tNJ.line).slice(0, 90)}…»); the table keeps ONE row under «${LH.V.tie}» (${T.size})`, { a: tNJ.line, b: tJN.line });
+  // (6) THE NO-WINDOW TIE: the samples alone — the same both-words, never a winner by list order
+  const tNo = holdOf(LH, [native(FROM + 750), jsAt(FROM + 2000, BUSY)], 3000, null);
+  ok(tNo.fo.verdict === LH.V.tie && words(tNo.line).startsWith(`${LH.V.native} ×1 and ${LH.V.js} ×1 (a tie, in the order they came)`), `(6) no scheduler window: a tie says both too («${words(tNo.line).slice(0, 90)}…»)`, tNo.line);
+  // (its read 4 NIT) the no-window tie production makes: without a window a late ask is «runnable», never «native»
+  const runnableAt = (postedAt) => ({ postedAt, answeredAt: postedAt + 30, state: 'running', answer: CONT, beat: B0 });
+  const TOw = FROM + 3000, Jw = LH.judgeAsks([runnableAt(FROM + 750), jsAt(FROM + 2000, BUSY)], { beat0: B0, holdEnd: TOw, windowed: false });
+  const hw = { from: FROM, to: TOw, fromM: FROM, toM: TOw, ms: 3000, msHi: 3000, samples: Jw.samples, outside: Jw.outside, after: Jw.after && Jw.after.words, d: null };
+  const fw = LH.foldHold(hw), lw = LH.holdLine(hw);
+  ok(fw.verdict === LH.V.tie && words(lw).startsWith(`${LH.V.runnable} ×1 and ${LH.V.js} ×1 (a tie, in the order they came)`), `the no-window tie as production makes it: «${words(lw).slice(0, 100)}…»`, lw);
+  // (r237's should) a THREE-way tie with no window names all three, in the order they came — never two of them
+  const unreadAt = (postedAt) => ({ postedAt, answeredAt: postedAt + 30, state: 'unknown', answer: CONT, beat: B0 });
+  const J3 = LH.judgeAsks([runnableAt(FROM + 750), jsAt(FROM + 1500, BUSY), unreadAt(FROM + 2200)], { beat0: B0, holdEnd: TOw, windowed: false });
+  const h3 = { from: FROM, to: TOw, fromM: FROM, toM: TOw, ms: 3000, msHi: 3000, samples: J3.samples, outside: J3.outside, after: J3.after && J3.after.words, d: null };
+  const f3 = LH.foldHold(h3), l3 = LH.holdLine(h3);
+  ok(f3.verdict === LH.V.tie && l3.includes(` — ${LH.V.runnable} ×1 and ${LH.V.js} ×1 and ${LH.V.notJs} ×1 (a tie, in the order they came): `), `a three-way tie with no window names all three, in order (the whole line read — the three words run past the short excerpt): «${words(l3).slice(0, 150)}…»`, l3);
+  { // its RED CONTROL: the copy that words a no-window tie over the CPU classes first names two of the three
+    const SRC3 = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8'), A3 = "(h.d && h.d.wallMs > 0 ? tieWords(n, CPU_CLS, fa, gcShare) : tieWords(n, ['js', 'native', 'runnable', 'notJs'], fa, false))";
+    let red3 = null;
+    if (SRC3.split(A3).length !== 2) ok(false, `the anchor of the control «tie-two-of-three» is not in src/loop-hold.js (once)`);
+    else { const m = { exports: {} }; vm.compileFunction(anchored(SRC3, A3, "(tieWords(n, CPU_CLS, fa, gcShare) || tieWords(n, ['js', 'native', 'runnable', 'notJs'], fa, false))", 'tie-two-of-three'), ['module', 'exports', 'require'], { filename: 'loop-hold-tie-two-of-three-mutant.js' })(m, m.exports, require); red3 = m.exports.holdLine(h3); }   // stale-pins: kept (the RED's copy of the old wording, deliberately absent from the product)
+    ok(!!red3 && !red3.includes(` — ${LH.V.runnable} ×1 and ${LH.V.js} ×1 and ${LH.V.notJs} ×1 (a tie, in the order they came): `), `RED CONTROL (the CPU classes first): the three-way no-window tie names two of three («${red3 && words(red3).slice(0, 110)}…»)`, red3);
+  }
+  // (its read 3 S1) the tie's native word names a collection only on the verdict's own rule (its SHARE), never the observer merely on
+  const tGc0 = holdOf(LH, [native(FROM + 750), jsAt(FROM + 2000, BUSY)], 3000, winCpu(3000), { gc: [] });
+  ok(tGc0.fo.verdict === LH.V.tie && words(tGc0.line).startsWith(`${LH.V.native} ×1 and ${LH.V.js} ×1`), `the collector observed, no collection: the tie says «${LH.V.native}», never «${LH.V.gc}» («${words(tGc0.line).slice(0, 70)}…»)`, tGc0.line);
+  // (its read 3 S2) the day report books a tie under its fixed word — never under its JavaScript sample's frame (a JavaScript hold keeps its frame)
+  const LDR = require(path.join(REPO, 'src/loop-day-report.js'));
+  // (its read 4 S1) a tie that is one part of two books under the tie's word too
+  const cTie2 = LDR.causeOf({ verdict: `${LH.V.tie}, then ${LH.V.blocked}`, frame: BUSY.words });
+  const cTie = LDR.causeOf({ verdict: LH.V.tie, frame: BUSY.words }), cJs = LDR.causeOf({ verdict: LH.V.js, frame: BUSY.words });
+  ok(cTie === LH.V.tie && cTie2 === LH.V.tie && cJs === 'src/hogs.js:2', `the day report: a tie books under «${cTie}» — alone or a part of two (${cTie2}); a JavaScript hold under its frame (${cJs})`, { cTie, cTie2, cJs });
+  // THE RED CONTROLS, each over the copy that lacks its rule
+  const mut = (name, anchor, repl) => {
+    const src = fs.readFileSync(path.join(REPO, 'src/loop-hold.js'), 'utf8');
+    if (src.split(anchor).length !== 2) { ok(false, `the anchor of the control «${name}» is not in the source (once): ${JSON.stringify(anchor.trim().slice(0, 80))}`); return null; }
+    const m = { exports: {} };
+    vm.compileFunction(anchored(src, anchor, repl, name), ['module', 'exports', 'require'], { filename: `loop-hold-${name}-mutant.js` })(m, m.exports, require);
+    return m.exports;
+  };
+  const noEdge = mut('no-edge', '  if (fast && ranInside && framed && Number.isFinite(holdEnd) && Number.isFinite(answeredAt) && holdEnd - answeredAt <= SESSION_MS) {', '  if (false) {');
+  const asAfter = mut('edge-as-after', "    if (a.cls === 'edge') { outside.edge++; if (a.last) last = a.last; continue; }", "    if (a.cls === 'edge') { outside.edge++; if (a.last && !after) after = a.last; continue; }");
+  const noTie = mut('no-tie', '  const cpuV = tie ? V.tie : (', '  const cpuV = (');
+  const noAlso = mut('no-also', "${h.last && h.last === h.after ? ' — also its last moment (the held work\\'s end, or the JavaScript right after it)' : ''}", '');
+  const noTieNoWin = mut('no-tie-no-window', "  if (top === 'js' && tieWords(n, ['js', 'native', 'runnable', 'notJs'], firstAt, gc)) return V.tie;", '');
+  const r4 = noAlso ? holdOf(noAlso, [native(FROM + 750), jsAt(FROM + 2097, CONT)], 2100) : null, r5 = noTieNoWin ? holdOf(noTieNoWin, [native(FROM + 750), jsAt(FROM + 2000, BUSY)], 3000, null) : null;
+  ok(!!r4 && !r4.line.includes('its last moment'), `RED (the same frame dropped — read 3's M1): the two-ask native hold never says its last moment`, r4 && r4.line);
+  ok(!!r5 && r5.fo.verdict !== LH.V.tie, `RED (no window, a winner by list order): the tie reads «${r5 && r5.fo.verdict}»`, r5 && r5.line);
+  const ldrSrc = fs.readFileSync(path.join(REPO, 'src/loop-day-report.js'), 'utf8'), TIE_LINE = "  if (typeof verdict === 'string' && verdict.split(', then ').includes(TIE)) return TIE;";
+  let rTie = null;
+  if (ldrSrc.split(TIE_LINE).length !== 2) ok(false, `the anchor of the control «tie-by-frame» is not in src/loop-day-report.js (once): ${JSON.stringify(TIE_LINE.trim().slice(0, 80))}`);
+  else { const m = { exports: {} }; vm.compileFunction(anchored(ldrSrc, TIE_LINE, '', 'tie-by-frame'), ['module', 'exports', 'require'], { filename: 'loop-day-report-tie-by-frame-mutant.js' })(m, m.exports, require); rTie = m.exports.causeOf({ verdict: LH.V.tie, frame: BUSY.words }); }
+  ok(rTie === 'src/hogs.js:2', `RED (a tie booked by its frame): the day report books the tie under «${rTie}» — the JavaScript hog where half the time was native`, rTie);
+  const r1 = noEdge ? holdOf(noEdge, [jsAt(FROM + 1196, CONT)], 1200) : null, r2 = asAfter ? holdOf(asAfter, [jsAt(FROM + 1196, BUSY)], 1200) : null, r3 = noTie ? holdOf(noTie, [native(FROM + 750), jsAt(FROM + 2000, BUSY)], 3000) : null;
+  ok(!!r1 && r1.fo.verdict === LH.V.js, `RED (no edge rule — the release): the native continuation's one ask names the hold «${r1 && r1.fo.verdict}»`, r1 && r1.line);
+  ok(!!r2 && r2.line.includes('the first JavaScript after it: busyHog'), `RED (r116's first wording, the edge as «after it»): a true JavaScript hold's own last moment is said as what ran AFTER it — false (${r2 && words(r2.line).slice(0, 60)}…)`, r2 && r2.line);
+  ok(!!r3 && r3.fo.verdict !== LH.V.tie, `RED (a winner by list order): the tie reads «${r3 && r3.fo.verdict}»`, r3 && r3.line);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

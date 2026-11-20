@@ -32,21 +32,24 @@
  *   split by TIME (on the CPU vs asleep) decides and the samples name each part; a sample of the smaller part is printed
  *   as a sample and never names the hold; two real parts (each ≥ PART_SHARE W, each sampled) are said as two, in time
  *   order, with their seconds («JavaScript for 2.1 s, then in the kernel (blocked) for 2.6 s»); the on-CPU part with only
- *   asleep samples is «on the CPU — JavaScript or native code, no sample of that part». With NO covering window:
+ *   asleep samples is «on the CPU — JavaScript or native code, no sample of that part»; the on-CPU part whose JavaScript and
+ *   native samples tie is THE TIE (r116 (b): both, counted, in order; V.tie in the table). With NO covering window:
  * — THE ASKS (round 4's law: A SAMPLE SPEAKS FOR WHERE THE THREAD WAS WHEN IT WAS ASKED — `askOf`): each ask carries
  *   its post time, its answer's first instruction (or none), the thread's kernel state AT THE POST (/proc stat) and its
- *   frames; the class most asks inside the hold fell in decides (ties: the kernel, stopped, JavaScript, native, unread),
- *   and the line says no window covered it:
+ *   frames; the class most asks inside the hold fell in decides (ties: the kernel, stopped, JavaScript, native, unread —
+ *   but JavaScript tied with native / runnable / unread is THE TIE, r116 (b): both said, counted, in the order they came;
+ *   the table's fixed word V.tie), and the line says no window covered it:
  *   in the kernel (blocked)          asked while ASLEEP (its wait channel said)
  *   not running (…)                  asked while STOPPED
  *   JavaScript                       answered at JavaScript speed (≤ JS_FAST_MS of the post), before the hold's end, with a
- *                                    JavaScript frame on its stack
+ *                                    JavaScript frame on its stack — but answered within SESSION_MS of the hold's end it is
+ *                                    the hold's LAST MOMENT (r147: never a sample, never the class; its frame said apart)
  *   garbage collection               the main thread's own collections cover ≥ GC_SHARE W (opted in)
  *   native code or garbage collection   asked while ON THE CPU and not answered at JavaScript speed — its only road; the
  *                                    late answer is «the first JavaScript after it»
  *   not in JavaScript when asked     its kernel state unread and not answered at JavaScript speed (never «native»)
  *   not sampled                      no ask spoke for an instant inside it (not asked, answered at its end with no frame
- *                                    of it, or asked after it ended)
+ *                                    of it, answered as it ended — its last moment —, or asked after it ended)
  * Throttling (cpu.stat) is said, never judged by — and untested on a real quota (the box measured had none).
  * WHAT IT MAY SAY (law G): a function name and a file:line only for a frame whose file is the hub's own code (server.js,
  * src/, node_modules/, scripts/ under the root — a REAL file, the name only where its own line spells it) or a node: internal; a V8 built-in is «(built-in)»; anything else —
@@ -518,6 +521,7 @@ const V = {
   js: 'JavaScript', gc: 'garbage collection', native: 'native code or garbage collection', unsampled: 'on the CPU in user mode — JavaScript or native code, not sampled',
   unknown: 'not sampled, and no scheduler facts', notJs: 'not in JavaScript when asked (its kernel state unread)',
   cpu: 'on the CPU — JavaScript or native code, no sample of that part', runnable: 'not in JavaScript when asked (running or waiting for a CPU)',
+  tie: 'JavaScript and native code (a tie of their samples)',   // r116 (b): the FIXED word of a tie (the table, the day report); the line says it counted, in order
 };
 /** PURE (round 5, smaller 1): why a hold the watchdog did not watch was not sampled — its own check ran ≥ STARVED_MS late
  *  ⇒ it was not running either; under that ⇒ none of its checks came while it was held (B-7c97: an on-time watchdog asks
@@ -533,13 +537,25 @@ function unsampledWords(h) {
 const PART_SHARE = 0.25;
 const CPU_CLS = ['js', 'native', 'notJs'], SLEEP_CLS = ['kernel', 'stopped'];
 const topIn = (n, ks) => { let t = null; for (const k of ks) if ((n[k] || 0) > (t ? n[t] : 0)) t = k; return t; };
+/** PURE (r116 (b), lane hub-loop-stalls): a TIE at the top of the CPU classes that holds JavaScript — the window cannot split
+ *  JavaScript from native work (both are on the CPU) and a winner by list order named a JavaScript hog where the time was
+ *  native — is said as BOTH, in the order they came, each with its count: «native code or garbage collection ×1 and
+ *  JavaScript ×1 (a tie, in the order they came)». `firstAt` = {cls: the time of its first sample}. → the words, or null. */
+const CLS_WORDS = (k, gc) => (k === 'js' ? V.js : k === 'native' ? (gc ? V.gc : V.native) : k === 'runnable' ? V.runnable : V.notJs);
+function tieWords(n, ks, firstAt = {}, gc = false) {
+  const max = Math.max(0, ...ks.map((k) => n[k] || 0));
+  const tied = max > 0 ? ks.filter((k) => (n[k] || 0) === max) : [];
+  if (tied.length < 2 || !tied.includes('js')) return null;
+  const at = (k) => (Number.isFinite(firstAt[k]) ? firstAt[k] : Infinity);
+  return tied.slice().sort((a, b) => at(a) - at(b) || ks.indexOf(a) - ks.indexOf(b)).map((k) => `${CLS_WORDS(k, gc)} ×${n[k]}`).join(' and ') + ' (a tie, in the order they came)';
+}
 /** PURE (round 5, law B): THE WINDOW SAYS HOW MUCH, A SAMPLE SAYS WHERE. With a window covering the hold, its split by TIME
  *  — on the CPU (`ranMs`) vs asleep (the rest, less the wait for a CPU) — decides; the samples only name what each part
  *  was (the on-CPU part: which JavaScript, or native; the asleep part: its wait channel). A sample of the smaller part
  *  never names the hold (it is printed as a sample). Two REAL parts (each ≥ PART_SHARE of the window), each sampled, are
  *  said as two parts in time order (`order`: 'sleep' when the first asleep sample came before the first on-CPU one).
  *  → null (no covering window: the samples alone, by count) | [{v, ms, part}] (one or two, in time order). */
-function partsOf({ d = null, n = {}, gc = false, order = null, spanMs = null } = {}) {
+function partsOf({ d = null, n = {}, gc = false, order = null, spanMs = null, firstAt = {} } = {}) {
   const W0 = d && d.wallMs > 0 ? d.wallMs : 0;
   if (!W0 || d.ranMs == null) return null;
   // the follow-up (minor 1): the parts' shares are taken over the HOLD's own span — the window measured reaches up to a beat
@@ -548,7 +564,8 @@ function partsOf({ d = null, n = {}, gc = false, order = null, spanMs = null } =
   const W = Number.isFinite(spanMs) && spanMs > 0 ? Math.min(W0, spanMs) : W0;
   const cpuMs = Math.min(d.ranMs, W), sleepMs = Math.max(0, W - cpuMs - Math.min(d.waitMs || 0, W - cpuMs));
   const ct = topIn(n, CPU_CLS), st = topIn(n, SLEEP_CLS);
-  const cpuV = ct === 'js' ? V.js : gc ? V.gc : ct === 'native' ? V.native : ct === 'notJs' ? V.notJs : st ? V.cpu : V.unsampled;
+  const tie = tieWords(n, CPU_CLS, firstAt, gc);   // r116 (b): never a winner by list order
+  const cpuV = tie ? V.tie : (ct === 'js' ? V.js : gc ? V.gc : ct === 'native' ? V.native : ct === 'notJs' ? V.notJs : st ? V.cpu : V.unsampled);
   const cpu = { v: cpuV, ms: cpuMs, part: 'cpu' }, sleep = { v: st === 'stopped' ? V.notRunning : V.blocked, ms: sleepMs, part: 'sleep' };
   if (cpuMs >= PART_SHARE * W && sleepMs >= PART_SHARE * W && ct && st) return order === 'sleep' ? [sleep, cpu] : [cpu, sleep];
   return [cpuMs >= sleepMs ? cpu : sleep];
@@ -564,7 +581,7 @@ const ASK_ORDER = ['kernel', 'stopped', 'js', 'native', 'runnable', 'notJs'];
 /** PURE (B-1409): the window's run-queue wait reached WAIT_SHARE of it — said: as THE verdict when it is the hold's larger
  *  part, else beside the hold's own parts («it also waited N s for a CPU») — a congested box never hides the function */
 const waitedMuch = (d) => !!d && d.wallMs > 0 && d.waitMs != null && d.waitMs >= WAIT_SHARE * d.wallMs;
-function verdict({ d = null, n = {}, gcMs = null, lateMs = 0, order = null, spanMs = null } = {}) {
+function verdict({ d = null, n = {}, gcMs = null, lateMs = 0, order = null, spanMs = null, firstAt = {} } = {}) {
   const W = d && d.wallMs > 0 ? d.wallMs : 0;
   if (W && d.ranMs != null) {
     if (lateMs >= STOPPED_LATE_SHARE * W && d.ranMs + (d.waitMs || 0) < STOPPED_RUN_SHARE * W) return V.notRunning;
@@ -572,13 +589,14 @@ function verdict({ d = null, n = {}, gcMs = null, lateMs = 0, order = null, span
     if (d.ranMs < RAN_SHARE * W) return V.blocked;
     if (d.userMs != null && d.kernelMs != null && d.userMs + d.kernelMs > 0 && d.kernelMs >= KERNEL_SHARE * (d.userMs + d.kernelMs)) return V.kernel;
     // round 5 (law B): the window's split by time decides; the samples name each part (never the count of samples)
-    return partsOf({ d, n, gc: !!(gcMs != null && gcMs >= GC_SHARE * W), order, spanMs }).map((p) => p.v).join(', then ');
+    return partsOf({ d, n, gc: !!(gcMs != null && gcMs >= GC_SHARE * W), order, spanMs, firstAt }).map((p) => p.v).join(', then ');
   }
   // no window covers it: the samples alone, by count — the line says so and claims no more than they say
   const gc = !!(W && gcMs != null && gcMs >= GC_SHARE * W);
   let top = null;
   for (const k of ASK_ORDER) if ((n[k] || 0) > (top ? n[top] : 0)) top = k;
   if (!top) return gc ? V.gc : W && d.ranMs != null ? V.unsampled : V.unknown;
+  if (top === 'js' && tieWords(n, ['js', 'native', 'runnable', 'notJs'], firstAt, gc)) return V.tie;   // r116 (b): no winner by list order here either
   if (top === 'kernel') return V.blocked;
   if (top === 'stopped') return V.notRunning;
   if (top === 'js') return V.js;
@@ -607,6 +625,8 @@ const RUNNING_KERNEL_WORDS = 'on the CPU (JavaScript or native work)', WOKE_WORD
  *    'stopped'  STOPPED at the post;
  *    'js'       answered at JavaScript speed (≤ jsFastMs after the post — a deep stack is JavaScript by its own error),
  *               before the hold's end, with a JavaScript frame on its stack;
+ *    'edge'     the same, but answered within SESSION_MS of the hold's end (r147): the hold's LAST MOMENT — a native call's
+ *               continuation or a JavaScript hold's last frame alike — never a sample, never its class; `last` = its frame;
  *    'end'      answered at JavaScript speed with NO JavaScript on its stack (the loop's own machinery — the held code had
  *               returned), or in / after the beat that ended the gap: never inside — the hold's end is the fact, no margin;
  *    'native'   ON THE CPU at the post, not answered at JavaScript speed: native code or a collection — its only road;
@@ -623,6 +643,15 @@ function askOf({ postedAt = null, answeredAt = null, state = 'unknown', kernel =
   if (state === 'asleep') { const w = kernel === RUNNING_KERNEL_WORDS ? WOKE_WORDS : `asleep: ${kernel || 'in a call'}`; return { cls: 'kernel', words: w, key: `(${w})`, keyWords: `(${w})`, after }; }
   if (state === 'stopped') return { cls: 'stopped', words: ASK_WORDS.stopped, key: '(stopped)', keyWords: '(stopped)', after };
   const fast = !!answer && answer.kind === 'js' && (answer.deep === true || (Number.isFinite(answeredAt) && Number.isFinite(postedAt) && answeredAt - postedAt <= jsFastMs));
+  if (fast && ranInside && framed && Number.isFinite(holdEnd) && Number.isFinite(answeredAt) && holdEnd - answeredAt <= SESSION_MS) {   // a deep stack too: its answer time is the worker's receipt, an upper bound — at the edge it never names the hold
+    // r116 (a), lane hub-loop-stalls: an ask answered at the hold's EDGE — within the session bound of its end, the held work's own
+    // continuation — never names the on-CPU part (a native call's caller answered it after the call returned); r116 first said it
+    // «the first JavaScript after it» (a reported one-ask hold was worded «JavaScript» with nothing in the line against it)
+    // r147 (the law as it stands): one sample at the edge cannot tell a native call's continuation from the LAST MOMENT of a true
+    // JavaScript hold — it never names the hold, never decides its class; it is said as the hold's last moment with its frame
+    const readable = !answer.deep && !answer.failed && answer.key !== KEYS.unreadable;
+    return { cls: 'edge', ...(readable ? { last: { words: answer.words, key: answer.key, keyWords: answer.keyWords } } : {}) };
+  }
   if (fast) return !ranInside || !framed ? { cls: 'end' } : { cls: 'js', words: answer.words, key: answer.key, keyWords: answer.keyWords, ...(answer.noOurs ? { noOurs: true } : {}) };
   // round 5 (smaller 3): stat R is «running OR runnable» — only a scheduler window covering the hold tells the two apart
   if (state === 'running' && !windowed) return { cls: 'runnable', words: ASK_WORDS.runnable, key: '(running or waiting for a CPU)', keyWords: '(running or waiting for a CPU)', after };
@@ -630,22 +659,24 @@ function askOf({ postedAt = null, answeredAt = null, state = 'unknown', kernel =
   return { cls: 'notJs', words: ASK_WORDS.notJs, key: '(not in JavaScript)', keyWords: '(not in JavaScript)', after };
 }
 /** PURE: a hold's asks → `samples` (the asks that speak for an instant INSIDE it, each with its class), `outside` ({end,
- *  outside, withdrawn}), `after` (the first nameable «after» frame). The watchdog calls it at the hold's end; the suite's
+ *  outside, edge, withdrawn}), `after` (the first nameable «after» frame), `last` (r147: the latest edge ask's frame — the
+ *  hold's last moment, never a sample). The watchdog calls it at the hold's end; the suite's
  *  table too. ROUND 5 (law A): AN ASK THE SAMPLER WITHDREW IS NOT A SAMPLE — one it answered with a stand-down
  *  (`withdrawn`: a debugger opened, an accessor on Error.prepareStackTrace) and, in a hold during which it stood down
  *  (`standDown`), one that got no answer at all (its silence may be the debugger's) say nothing about the thread: they
  *  are counted `withdrawn`, never «running, no fast answer» ⇒ native. Only a REAL answer of the same hold samples it. */
 function judgeAsks(asks, { beat0 = null, holdEnd = null, jsFastMs = JS_FAST_MS, standDown = null, windowed = true } = {}) {
-  const samples = [], outside = { end: 0, outside: 0, withdrawn: 0 };
-  let after = null;
+  const samples = [], outside = { end: 0, outside: 0, withdrawn: 0, edge: 0 };
+  let after = null, last = null;
   for (const q of asks || []) {
     if (q && (q.withdrawn || (standDown && !q.answer))) { outside.withdrawn++; continue; }
     const a = askOf({ ...q, beat0, holdEnd, jsFastMs, windowed });
     if (a.cls === 'end' || a.cls === 'outside') { outside[a.cls]++; continue; }
+    if (a.cls === 'edge') { outside.edge++; if (a.last) last = a.last; continue; }   // r147: its last moment, said apart — the latest edge ask's frame
     samples.push(Number.isFinite(q.postedAt) ? { ...a, at: q.postedAt } : a);   // round 5 (law B): the time order of a hold's parts
     if (a.after && !after) after = a.after;
   }
-  return { samples, outside, after };
+  return { samples, outside, after, last };
 }
 
 /** PURE: THE HEAP THAT FILLS (round 4): the process dies when its OLD generation reaches its limit — heap_size_limit also
@@ -760,12 +791,14 @@ const stepRefusalOf = (flags) => (!(flags & 8) ? 'unknown' : !(flags & 1) ? 'off
 const insideOf = (h) => (h.samples || []).filter((x) => !x.landed || x.landed === 'inside');
 /** PURE: a sample's class (a PURE caller's own fixture without one: a framed JavaScript sample is 'js', any other 'notJs') */
 const clsOf = (x) => x.cls || (x.kind === 'js' ? 'js' : 'notJs');
-const OUTSIDE_WORDS = { end: 'the answer came at its end, with no frame of it', outside: 'asked after it ended' };
+const OUTSIDE_WORDS = { end: 'the answer came at its end, with no frame of it', outside: 'asked after it ended', edge: 'answered as it ended' };   // r147: the edge's frame is said once, as «its last moment: …»
 /** PURE: the asks that spoke for no instant inside — «asked 2 times: the answer came at its end, with no frame of it» */
 function notInsideWords(h) {
-  const o = h.outside || {}, n = (o.end || 0) + (o.outside || 0);
+  const o = h.outside || {}, n = (o.end || 0) + (o.outside || 0) + (o.edge || 0);
   if (!n) return UNSAMPLED.inside;
-  const where = ['end', 'outside'].filter((k) => o[k]).map((k) => OUTSIDE_WORDS[k] + (o[k] > 1 ? ` (${o[k]})` : ''));
+  // r147: an edge ask whose frame is said below reads «answered as it ended»; with no frame to say (unreadable, a deep stack) it is
+  // «answered at its last moment» here — the hold's last moment said once either way
+  const where = ['end', 'edge', 'outside'].filter((k) => o[k]).map((k) => (k === 'edge' && !h.last ? 'answered at its last moment' : OUTSIDE_WORDS[k]) + (o[k] > 1 ? ` (${o[k]})` : ''));
   return `${UNSAMPLED.inside} — asked ${n} time${n === 1 ? '' : 's'}: ${where.join(', ')}`;
 }
 /** PURE: a hold's facts → its fold (the verdict, the table's key — a LOCATION — and its display words, the counts). */
@@ -778,9 +811,14 @@ function foldHold(h) {
   const firstAt = (ks) => { let t = null; for (const x of samples) if (ks.includes(clsOf(x)) && Number.isFinite(x.at) && (t == null || x.at < t)) t = x.at; return t; };
   const tc = firstAt(CPU_CLS), ts = firstAt(SLEEP_CLS), order = tc != null && ts != null && ts < tc ? 'sleep' : 'cpu';
   const spanMs = Number.isFinite(h.msHi) ? h.msHi : Number.isFinite(h.ms) ? h.ms : null;
-  const v = verdict({ d: h.d, n, gcMs: h.gc ? gc.ms : null, lateMs: h.lateMs || 0, order, spanMs });
+  const fa = {}; for (const k of [...CPU_CLS, 'runnable']) { const t = firstAt([k]); if (t != null) fa[k] = t; }   // r116 (b): a tie says its classes in the order they came
+  const v = verdict({ d: h.d, n, gcMs: h.gc ? gc.ms : null, lateMs: h.lateMs || 0, order, spanMs, firstAt: fa });
+  const gcShare = !!(h.gc && gc.ms != null && h.d && h.d.wallMs > 0 && gc.ms >= GC_SHARE * h.d.wallMs);   // the verdict's own rule: a collection's SHARE, never the observer merely on
+  // the counted words, in order — over the classes the verdict itself tied: the CPU classes with a window, every not-asleep class
+  // without one (r237's should: a no-window tie of JavaScript, «running or waiting for a CPU» and «not in JavaScript» named two of three)
+  const tieLine = v.includes(V.tie) ? (h.d && h.d.wallMs > 0 ? tieWords(n, CPU_CLS, fa, gcShare) : tieWords(n, ['js', 'native', 'runnable', 'notJs'], fa, false)) : null;
   const W = h.d && h.d.wallMs > 0 ? h.d.wallMs : 0;
-  const parts = W && h.d.ranMs != null && v.includes(', then ') ? partsOf({ d: h.d, n, gc: !!(h.gc && gc.ms != null && gc.ms >= GC_SHARE * W), order, spanMs }) : null;
+  const parts = W && h.d.ranMs != null && v.includes(', then ') ? partsOf({ d: h.d, n, gc: !!(h.gc && gc.ms != null && gc.ms >= GC_SHARE * W), order, spanMs, firstAt: fa }) : null;
   // the follow-up (minor 3): parts that INTERLEAVE (JavaScript, asleep, JavaScript …) are said as both, never one «then»
   const seq = samples.filter((x) => Number.isFinite(x.at)).slice().sort((p, q) => p.at - q.at).map((x) => (CPU_CLS.includes(clsOf(x)) ? 'c' : SLEEP_CLS.includes(clsOf(x)) ? 's' : '')).filter(Boolean).join('').replace(/(.)\1+/g, '$1');
   const interleaved = !!parts && seq.length > 2;
@@ -812,7 +850,7 @@ function foldHold(h) {
   // so (S2): a plugin's stack topped by a built-in shares the key «(built-in)» with a stack of built-ins alone
   const jsTop = topOf('js');
   const noOurs = v === V.js && !!jsTop && samples.every((x) => clsOf(x) !== 'js' || x.key !== jsTop.key || x.noOurs === true);
-  return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts, interleaved, noOurs };
+  return { verdict: v, frame, frameKey, js, none, n, gc, inside: samples.length, parts, interleaved, noOurs, ...(tieLine ? { tieLine } : {}) };
 }
 /** B-7c97: the words and key of a hold asleep while starting a child process (fork + exec: the parent waits on the exec-status
  *  pipe) — and of one asleep for a WHOLE synchronous child run (spawnSync / execFileSync: any other wait channel) */
@@ -835,7 +873,8 @@ const SCHED_FIRST = new Set([V.notRunning, V.waiting, V.blocked, V.kernel]);
 function holdLine(h) {
   const f = h.fold || foldHold(h);
   // round 5 (law B): a hold with two real parts says both, in time order, with the window's seconds
-  const vw = f.parts && f.parts.length === 2 ? (f.interleaved ? `${f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(' and ')}, interleaved` : f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(', then ')) : f.verdict;
+  const vw0 = f.parts && f.parts.length === 2 ? (f.interleaved ? `${f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(' and ')}, interleaved` : f.parts.map((p) => `${p.v} for ${secs(p.ms)} s`).join(', then ')) : f.verdict;
+  const vw = f.tieLine ? vw0.split(V.tie).join(f.tieLine) : vw0;   // r116 (b): the line says a tie counted, in the order it came (the table keeps the fixed word)
   const also = f.verdict !== V.waiting && waitedMuch(h.d) ? `; it also waited ${secs(h.d.waitMs)} s for a CPU` : '';   // B-1409
   const head = h.boot ? `[loop-hold] the boot held the main loop ${heldWords(h)} before its first turn — ${vw}${also}` : `[loop-hold] the main loop was held ${heldWords(h)} — ${vw}${also}`;
   const parts = [schedWords(h.d)];
@@ -847,7 +886,9 @@ function holdLine(h) {
     if (h.budgetSpent) parts.push(BUDGET_WORDS);
   } else if (h.unsampled) parts.push(`not sampled (${unsampledWords(h)})`);
   else if (asked) parts.push(`not sampled (${notInsideWords(h)})`);
-  if (h.after) parts.push(`the first JavaScript after it: ${h.after}`);
+  // r147: the hold's LAST MOMENT is always said when an edge ask met it — never its class; the same frame as the late answer's is said once
+  if (h.after) parts.push(`the first JavaScript after it: ${h.after}${h.last && h.last === h.after ? ' — also its last moment (the held work\'s end, or the JavaScript right after it)' : ''}`);
+  if (h.last && h.last !== h.after) parts.push(`its last moment: ${h.last} (the held work's end, or the JavaScript right after it)`);
   if (h.namesUnread && h.namesUnread.n) parts.push(`the frames of ${h.namesUnread.n} source file${h.namesUnread.n === 1 ? '' : 's'} said by location alone (${NAMES_UNREAD[h.namesUnread.why] || NAMES_UNREAD.budget})`);
   parts.push(f.gc.words, memWords(h.mem));
   const e = pct(h.eluBefore);

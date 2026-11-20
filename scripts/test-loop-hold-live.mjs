@@ -52,6 +52,13 @@ let floorSites = 0, siteArmed = false; const site = () => { floorSites++; siteAr
 // the box put to sleep is judged by ITS true forms; a floor not met is a NAMED, COUNTED non-verdict, never a red (the closing
 // line counts both)
 const WAITED = '(?:; it also waited \\d+\\.\\d s for a CPU)?';   // B-1409's TRUE suffix after a verdict (a runner's CPU wait)
+// 主开发's r249: a hold made in NATIVE work (a sync zlib) — its line says native (or «on the CPU — no sample of that part»), or a tie that
+// holds native; never JavaScript alone; never «blocked»; the hog's frame named
+function zlibTrue(l) {
+  if (!l || / — in the kernel \(blocked\)/.test(l) || !/zlibHog \(src\/hogs\.js:6\)/.test(l)) return false;
+  const nat = `(?:${reEsc(LH.V.native)}|${reEsc(LH.V.cpu)})`, js = reEsc(LH.V.js), n = reEsc(LH.V.native);
+  return new RegExp(` — ${nat}${WAITED}[:,]`).test(l) || new RegExp(` — (?:${js} ×\\d+ and ${n} ×\\d+|${n} ×\\d+ and ${js} ×\\d+) \\(a tie, in the order they came\\)${WAITED}[:,]`).test(l);
+}
 const SCHED_TAIL = "[^;]*(?:; (?:its group was throttled|\\d+ major page faults?|the box's pressure)[^;]*)*";   // B-1409's true facts after the numbers
 const verdictOfLine = (l) => { const m = new RegExp(`^\\[loop-hold\\] the main loop was held [\\d.–]+ s — (.+?)${WAITED}: `).exec(String(l || '')); return m ? m[1] : null; };
 // the kernel form is TRUE only when the hold's OWN numbers carry it (src/loop-hold.js verdict(): kernel ≥ KERNEL_SHARE of user +
@@ -328,7 +335,14 @@ else if (plan === 'pressRefuse') later(400, () => { out.checks.press = W.holds()
 else if (plan === 'deadWatchdog') later(300, () => { out.checks.press = W.holds().startProfile(400); W.stop(); setTimeout(() => { out.checks.after = W.holds().report().profile; done(50); }, 1000); });
 else if (plan === 'telemetry') later(500, () => { H.busyHog(320); done(); });
 else if (plan === 'busy') later(600, () => { H.busyHog(320); done(); });
-else if (plan === 'json') { const s = '[' + new Array(1300000).fill('{"a":1,"b":"vvvvvv"}').join(',') + ']'; later(700, () => { H.jsonHog(s); done(); }); }
+else if (plan === 'json') {   // r116 (lane hub-loop-stalls): the parse SIZED by a calibration parse so it lasts at least 6 holdMs — a hold
+  // well past the bar whatever the runner's speed (a fixed size made the hold the runner's speed). ONE ask is in flight at a time: the
+  // first, posted inside the parse, is answered only when it returns — the parse holds ONE sample; a later ask meets its continuation
+  const unit = '{"a":1,"b":"vvvvvv"}', mk = (k) => '[' + new Array(k).fill(unit).join(',') + ']';
+  let n = 1300000, s = mk(n); const c0 = kmono(); JSON.parse(s); const cal = kmono() - c0;
+  if (cal < 600) { n = Math.min(4000000, Math.ceil(n * 600 / Math.max(1, cal))); s = mk(n); }
+  out.checks.parsePlan = { n, calibrationMs: Math.round(cal) };
+  later(1500, () => { H.jsonHog(s); done(); }); }
 else if (plan === 'jsonMany') { const s = '[' + new Array(1300000).fill('{"a":1,"b":"vvvvvv"}').join(',') + ']'; let k = 0;   // round 5 (law B): many parse holds in one child
   const next = () => { if (k++ >= (cfg.n || 12)) return done(); H.jsonHog(s); setTimeout(next, 400); }; later(700, next); }
 else if (plan === 'zlib') { const b = Buffer.alloc(40 << 20); for (let i = 0; i < b.length; i += 4096) b.writeUInt32LE((i * 2654435761) >>> 0, i); later(700, () => { H.zlibHog(b); done(); }); }
@@ -498,11 +512,30 @@ async function legNamed(tag, node) {
   if (tag !== 'Node 24') { const sl = await run({ plan: 'sleep' }, { node }); const l = lineWith(sl, /sleepHog/); ok(l && / — in the kernel \(blocked\): /.test(l) && /\d samples?: asleep: \S+ in \w+/.test(l), `a sync child: in the kernel, its sample asleep with the kernel's wait channel: ${l}`, sl.lines); return; }
   const js = await run({ plan: 'json' });
   const jl = lineWith(js, /the first JavaScript after it: .*jsonHog \(src\/hogs\.js:5\)/);
+  {   // r116: the parse's own length and its samples, MEASURED and printed. ONE ask is in flight at a time and an ask posted inside a native
+    // parse is answered only when it returns — so a native parse holds ONE sample however long it is; a later ask lands in its continuation
+    // (the edge), which the reporter says as the hold's last moment (r147), never its class nor a tie
+    const sp = ((js.out && js.out.spans) || []).find((x) => x.fn === 'jsonHog'), plan = (js.out && js.out.checks && js.out.checks.parsePlan) || {};
+    const nS = Number((/; (\d+) samples?: /.exec(jl || '') || [])[1]) || 0, lastSaid = /(?: its last moment: [^;]*\b(?:afterParse|jsonHog) \(src\/hogs\.js:\d+\)| — also its last moment \()/.test(jl || '');
+    console.log(`  [measure] the planted parse: ${sp ? Math.round(sp.ms) : '?'} ms (${plan.n} elements, sized from a ${plan.calibrationMs} ms calibration parse); ${nS} sample(s) inside its hold; its continuation ${lastSaid ? 'said as its last moment' : 'met no ask'}`);
+    // the parse's length is the runner's speed: a floor the box did not reach is a NAMED non-verdict, never a red — and it guards this leg
+    site(); if (!sp || sp.ms < 450) skip('the planted parse is a hold well past the bar (≥ 450 ms): a sample inside it, never «JavaScript» nor a tie', `the parse ran ${sp ? Math.round(sp.ms) : '?'} ms (${plan.n} elements, the most the plan sizes) on this box`);
+    else ok(nS >= 1 && verdictOfLine(jl) !== LH.V.js && !/ \(a tie, in the order they came\)/.test(jl), `the parse's hold (${Math.round(sp.ms)} ms) has ${nS} sample(s) inside it, and its edge never names it «JavaScript» nor a tie: «${verdictOfLine(jl)}»`, { ms: sp && sp.ms, nS, plan, line: jl });
+  }
   ok(jl && (v => v === LH.V.native || v === LH.V.cpu || (v === LH.V.kernel && kernelTrue(jl)))(verdictOfLine(jl)) && !/ — in the kernel \(blocked\)/.test(jl) && /the first JavaScript after it: [^;]*afterParse \(src\/hogs\.js:4\)/.test(jl),
     `a JSON.parse of a large buffer: on the CPU, not JavaScript while it parsed (never «blocked» — round 5 law B), the first JavaScript after it names the parse's caller (afterParse ← jsonHog): ${jl}`, js.lines);
   const zl = await run({ plan: 'zlib' });
   const z = lineWith(zl, /zlibHog \(src\/hogs\.js:6\)/);
-  ok(z && new RegExp(` — (native code or garbage collection|JavaScript|on the CPU — JavaScript or native code, no sample of that part)${WAITED}[:,]`).test(z) && !/ — in the kernel \(blocked\)/.test(z) && /zlibHog \(src\/hogs\.js:6\)/.test(z), `a sync zlib: native while it compressed (round 4: an ask is JavaScript only when answered at JavaScript speed — round 3's «named» was a late answer), zlibHog named: ${z}`, zl.lines);
+  // 主开发's r249 (the box at bde7b4bc5: «JavaScript ×1 and native code or garbage collection ×1 (a tie, in the order they came)», both
+  // samples naming zlib driven by zlibHog): a hold MADE in native work says native, or a tie that holds native — never JavaScript
+  // ALONE — and its driver (the hog's frame) is named in every form
+  ok(zlibTrue(z), `a sync zlib: native while it compressed, or a tie that holds native — never «${LH.V.js}» alone (round 4: an ask is JavaScript only when answered at JavaScript speed); zlibHog named: ${z}`, zl.lines);
+  { // its RED CONTROL, over the box's own line: the same line with «JavaScript» alone at its head is refused; without its driver too
+    const BOX = `[loop-hold] the main loop was held 0.3 s — ${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came): the main thread ran 0.3 s of the 0.3 s measured (user 0.3, kernel 0.0); 2 samples: node’s own code — zlib, driven by zlibHog (src/hogs.js:6) ×1, on the CPU, not in JavaScript (native code or a collection) ×1`;
+    const jsAlone = BOX.replace(`${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came)`, LH.V.js), nat = BOX.replace(`${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came)`, LH.V.native);
+    ok(zlibTrue(BOX) && zlibTrue(nat) && !zlibTrue(jsAlone) && !zlibTrue(BOX.split('zlibHog (src/hogs.js:6)').join('somethingElse (src/other.js:1)')),
+      `RED CONTROL (the zlib leg's own law): the box's tie line and a native line pass; the same line saying «${LH.V.js}» alone is refused, and so is one without its driver`);
+  }
   const rx = await run({ plan: 'regex' });
   const r = lineWith(rx, /regexHog \(src\/hogs\.js:7\)/);
   ok(r && new RegExp(` — JavaScript${WAITED}: `).test(r) && /\(built-in\) ← regexHog \(src\/hogs\.js:7\)/.test(r), `a catastrophic regex: the built-in under regexHog: ${r}`, rx.lines);
@@ -717,11 +750,18 @@ async function legConditions() {
   // round 5: each job does ~1 µs of JavaScript (awaitWorkHog: 400 000 jobs ≈ 0.47 s) — a bare `await` loop spends nearly all its time between jobs,
   // where an ask finds no JavaScript frame and round 4's law calls it the loop's own machinery (the claim on 9530a1999 read
   // «not sampled» once in two runs); with work in the job an ask lands in it
-  const aw = await run({ plan: 'await', n: 400000, work: true });
   // the chain's jobs run from V8's microtask queue: a sample lands BETWEEN them (no JavaScript frame on the stack —
   // «between JavaScript frames») or inside the drain Node runs them from (runNextTicks / processTicksAndRejections)
-  const al = holdLines(aw).find((l) => /between JavaScript frames|task_queues|awaitHog|awaitWorkHog/.test(l));
-  ok(al && new RegExp(` — JavaScript${WAITED}: `).test(al) && !/no JavaScript frame|idle/.test(al), `condition 3: a loop held by an await chain — JavaScript (between its jobs, or in the drain that runs them), never «idle», never «no JavaScript frame»: ${al}`, aw.lines);
+  // 主开发's r352 (the hosted runner 44774335413, load 2.4): a 0.5 s chain whose three asks were ALL answered at its end with no frame
+  // of it — «not sampled», the product's honest word — read as a red. WHERE A SAMPLE LANDS IS THE RUNNER'S: the plan runs up to three
+  // times and the law is judged on the first run a sample landed in; in EVERY run the hold's line never says «idle» nor «no JavaScript
+  // frame»; a box that landed none is a NAMED skip with its line printed
+  const AW_RE = /between JavaScript frames|task_queues|awaitHog|awaitWorkHog/;
+  let aw = null, al = null; const awTries = [];
+  for (let k = 0; k < 3 && !al; k++) { aw = await run({ plan: 'await', n: 400000, work: true }); const hl = holdLines(aw); awTries.push(hl.find((l) => l.startsWith('[loop-hold] the main loop was held')) || '(no hold line)'); al = hl.find((l) => AW_RE.test(l)) || null; }
+  ok(awTries.every((l) => !/no JavaScript frame|idle/.test(l)), `condition 3, every run (${awTries.length}): an await chain's hold never says «idle» nor «no JavaScript frame» — sampled or not`, awTries);
+  site(); if (!al) skip('condition 3: a loop held by an await chain is JavaScript (between its jobs, or in the drain that runs them)', `no sample landed inside the chain in ${awTries.length} runs — its lines: ${awTries.map((l) => l.slice(0, 200)).join(' | ')}`);
+  else ok(new RegExp(` — JavaScript${WAITED}: `).test(al) && !/no JavaScript frame|idle/.test(al), `condition 3: a loop held by an await chain — JavaScript (between its jobs, or in the drain that runs them), never «idle», never «no JavaScript frame» (run ${awTries.length} of at most 3): ${al}`, aw.lines);
   const pr = await run({ plan: 'prep' });
   const pl = holdLines(pr).find((l) => /src\/hogs\.js:12/.test(l));
   ok(pl && !pl.includes(ROOT) && new RegExp(` — JavaScript${WAITED}: `).test(pl) && !/slowPrepHook/.test(pl), `condition 2: a hold inside the program's own stack formatting — V8's string form read for LOCATIONS only (a name there cannot be told from the text around it), repo-relative, no absolute path: ${pl}`, pr.lines);
@@ -872,7 +912,8 @@ async function sweepA(node, tag, tree = null, sets = null) {
       // The sweep runs samplesPerHold 1, so none is expected: the (A) leg ASSERTS none (a harness change that ran more would trip it)
       const nS = h && h.line ? samplesIn(h.line) : 0, anyAsleep = !!(h && h.line && ASLEEP_IN_LINE.test(h.line));
       const asleepAsk = anyAsleep && nS === 1, partAsleep = anyAsleep && nS > 1;
-      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, outside: !!(sv && sv.outside), gc, asleepAsk, partAsleep });
+      // r147: `left` = the hold's time LEFT at the post by the child's own clock (the hog's return less the post) — the edge split below
+      A.push({ kind, tail, N: x.N, x: post ? +(x.nativeEnd - post.at).toFixed(2) : null, left: post ? +(x.end - post.at).toFixed(2) : null, verdict: h ? h.verdict : null, line: h ? h.line : null, outside: !!(sv && sv.outside), gc, asleepAsk, partAsleep });
     }
   }
   return A;
@@ -884,6 +925,14 @@ async function legRound4(node, tag, tree = null) {
   //     (stamped in the watchdog's own thread) against the native call's own end: x = end − post
   let A = await sweepA(node, tag, tree);
   const fast = LH.JS_FAST_MS;
+  // r147 (lane hub-loop-stalls): an ask the product judges at the hold's EDGE — answered within SESSION_MS of its end — is the hold's
+  // LAST MOMENT, never a sample (askOf 'edge'): a tail ask is split by the hold's time LEFT at its post (`left`). From JS_SURE up (the
+  // bound plus an answer's own JavaScript speed) the product cannot call it the edge ⇒ «JavaScript»; up to EDGE_SURE (the bound less
+  // 5 ms for the beat that stamps the end) it is the edge ⇒ the window's own verdict with its frame said as «its last moment» — or
+  // «JavaScript»: the leg cannot tell the product's end (the beat that ended the gap) from the hog's return, so it admits both there,
+  // counted and said — r147 itself is guarded by the fast suite's REDs; between, either. The edge shapes are MADE in the fast suite (test-loop-hold, r116 + r147); here the box places them, and a run
+  // that placed none says so by name
+  const JS_SURE = LH.SESSION_MS + fast + 1, EDGE_SURE = LH.SESSION_MS - 5, leftOf = (a) => (Number.isFinite(a.left) ? a.left : a.tail + a.x);
   // THE COLLECTOR, BY THE CHILD'S OWN RECORD (主开发's ruling 08:30Z): a hold whose ask's LATENCY window (sweepA) holds a
   // collection leaves (A)'s two strict legs and its sentence is ASSERTED to be one of the TRUE forms for that case;
   // a hold the record shows no collection for stays strict. THE FLOOR: STRICT_FLOOR of (A)'s judged holds strict AND at
@@ -920,7 +969,9 @@ async function legRound4(node, tag, tree = null) {
   // the release mirror at e3754d9cd: a 0.1 s hold (asked now at 80 ms — B-7c97) ran «user 0.0, kernel 0.1» (allocation faults):
   // «in the kernel (on the CPU)» is then its TRUE form too — checked against the hold's OWN numbers in its line, never admitted blind
   const trueOf = (forms) => (a) => forms.includes(a.verdict) || (a.verdict === LH.V.kernel && kernelTrue(a));
-  const gcLies = [...gcNative.filter((a) => !trueOf(TRUE_NATIVE)(a)), ...gcTail.filter((a) => !trueOf(TRUE_TAIL)(a))];
+  // r147: a tail ask answered at the hold's last moment keeps the window's own verdict — its true forms join the tail's
+  const TRUE_TAIL_EDGE = [...TRUE_TAIL, LH.V.unsampled, LH.V.unknown];   // only where the product may call it the edge (under JS_SURE left)
+  const gcLies = [...gcNative.filter((a) => !trueOf(TRUE_NATIVE)(a)), ...gcTail.filter((a) => !trueOf(leftOf(a) >= JS_SURE ? TRUE_TAIL : TRUE_TAIL_EDGE)(a))];
   const kernelBy = (L) => L.filter((a) => a.verdict === LH.V.kernel && kernelTrue(a)).length;   // (should 1) the kernel form, counted where admitted
   say(`(A) the child's own record: ${gcHolds.length} of ${A.filter(judged).length} judged holds had a collection in the ask's window — ${gcNative.length} posted in native code, ${gcTail.length} in the tail — judged by their TRUE forms`);
   if (!tree) ok(!gcLies.length, `(A) ${tag}: a hold with a collection in its ask's window (the child's own record) says one of its TRUE forms — posted in native code: «${LH.V.native}» or «${LH.V.cpu}»; posted in the JavaScript tail: those or «${LH.V.js}»; either: «${LH.V.kernel}» when the hold's own numbers put the kernel at or above user time (${gcNative.length} + ${gcTail.length} holds; ${gcAsleep.length} more found the thread asleep at the ask — judged by the asleep leg below; ${kernelBy([...gcNative, ...gcTail])} «${LH.V.kernel}» admitted by the hold's own numbers)`, gcLies.slice(0, 3));
@@ -956,11 +1007,18 @@ async function legRound4(node, tag, tree = null) {
   say(`(A) the box starved ${A.filter((a) => a.outside).length} of ${A.length} holds («waiting for a CPU», the suite's own count agreeing) — outside the asks' law; ${A.filter((a) => a.partAsleep).length} carried several samples with an asleep one — the parts' verdict, judged by neither set (counted)`);
   if (!tree) ok(!A.some((a) => a.partAsleep), `(A) ${tag}: the sweep runs ONE ask a hold (samplesPerHold 1) — no hold of several samples, so none leaves the strict sets unseen`, A.filter((a) => a.partAsleep).slice(0, 2));
   const kernelSaid = (a) => a.verdict === LH.V.kernel && kernelTrue(a);   // (cure 3) a hold whose OWN numbers put the kernel first
-  const wrongJs = inNative.filter((a) => a.verdict !== LH.V.native && !kernelSaid(a)), wrongTail = inTail.filter((a) => a.verdict !== LH.V.js && !kernelSaid(a));
+  const tailJs = inTail.filter((a) => leftOf(a) >= JS_SURE), tailEdge = inTail.filter((a) => leftOf(a) <= EDGE_SURE), tailBand = inTail.filter((a) => leftOf(a) > EDGE_SURE && leftOf(a) < JS_SURE);
+  // the frame by name or by location alone (a spent name budget); the same frame as a late answer's is said once, «— also its last moment»
+  // r237's should: an edge ask with no frame to say (unreadable) is «answered at its last moment» — the product's own law allows it
+  const TRUE_EDGE = [LH.V.unsampled, LH.V.cpu, LH.V.unknown], LAST_RE = /its last moment(?:: [^;]*\bsrc\/hogs\.js:\d+\)?)? \(the held work's end, or the JavaScript right after it\)|answered at its last moment\b/;
+  const edgeTrue = (a) => (TRUE_EDGE.includes(a.verdict) || kernelSaid(a)) && LAST_RE.test(a.line || '');
+  const wrongJs = inNative.filter((a) => a.verdict !== LH.V.native && !kernelSaid(a)), wrongTail = tailJs.filter((a) => a.verdict !== LH.V.js && !kernelSaid(a));
+  const edgeJs = tailEdge.filter((a) => a.verdict === LH.V.js && !kernelSaid(a));   // admitted, counted: this leg cannot see the product's own end
+  const wrongEdge = tailEdge.filter((a) => a.verdict !== LH.V.js && !edgeTrue(a)), wrongBand = tailBand.filter((a) => !(a.verdict === LH.V.js || edgeTrue(a)));
   const nativeAll = [...inNative, ...gcNative.filter((a) => !a.asleepAsk)], saidJs = nativeAll.filter((a) => a.verdict === LH.V.js);   // never «JavaScript», strict or not
   const named = inNative.filter((a) => a.tail >= 5), namedOk = named.filter((a) => /the first JavaScript after it: [^;]*\b(pbkdfHog|parseHog) \(src\/hogs\.js:\d+\)/.test(a.line || ''));
   const xs = inNative.map((a) => a.x);
-  say(`(A) ${A.length} holds: asked while the native call ran (x = ${xs.length ? Math.min(...xs).toFixed(1) : '–'}…${xs.length ? Math.max(...xs).toFixed(1) : '–'} ms before its end) ${inNative.length} — ${inNative.filter((a) => a.verdict === LH.V.native).length} «native», ${inNative.filter(kernelSaid).length} «${LH.V.kernel}» by the hold's own numbers, ${inNative.filter((a) => a.verdict === LH.V.js).length} «JavaScript»; asked inside the tail ${inTail.length} — ${inTail.filter((a) => a.verdict === LH.V.js).length} «JavaScript», ${inTail.filter(kernelSaid).length} «${LH.V.kernel}» by its own numbers`);
+  say(`(A) ${A.length} holds: asked while the native call ran (x = ${xs.length ? Math.min(...xs).toFixed(1) : '–'}…${xs.length ? Math.max(...xs).toFixed(1) : '–'} ms before its end) ${inNative.length} — ${inNative.filter((a) => a.verdict === LH.V.native).length} «native», ${inNative.filter(kernelSaid).length} «${LH.V.kernel}» by the hold's own numbers, ${inNative.filter((a) => a.verdict === LH.V.js).length} «JavaScript»; asked inside the tail ${inTail.length} — ${inTail.filter((a) => a.verdict === LH.V.js).length} «JavaScript», ${inTail.filter(kernelSaid).length} «${LH.V.kernel}» by its own numbers; by the time left at the ask (r147): ${tailJs.length} ≥ ${JS_SURE} ms, ${tailBand.length} between, ${tailEdge.length} ≤ ${EDGE_SURE} ms (the edge: ${tailEdge.filter(edgeTrue).length} said as its last moment)`);
   if (!tree) {
     const floorMet = nativeAll.length >= 8 && nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length >= 6;
     site(); if (!floorMet) skip(`(A) ${tag}: the count floor (8 asks inside the native call, 6 of them 5–55 ms)`, `the watchdog was late on this box: ${nativeAll.length} of 8 asks inside the native call (${nativeAll.filter((a) => a.x >= 5 && a.x <= 55).length} of 6 in 5–55 ms) after ${1 + extraA} sweeps`);
@@ -970,8 +1028,13 @@ async function legRound4(node, tag, tree = null) {
     // one miss is allowed, and said by count
     site(); if (named.length < 5) skip(`(A) ${tag}: the late answer's «first JavaScript after it»`, `no sample this run: ${named.length} of 5 asks inside the native call with a tail ≥ 5 ms (${namedOk.length} named)`);
     else ok(namedOk.length >= Math.ceil(0.8 * named.length), `(A) ${tag}: its late answer names the tail as «the first JavaScript after it: … pbkdfHog / parseHog (src/hogs.js:…)» — the chain from the first frame that ran (${named.length - namedOk.length} missed, said; ${namedOk.length} of ${named.length})`, named.filter((a) => !namedOk.includes(a)).slice(0, 2));
-    site(); if (inTail.length < 3) skip(`(A) ${tag}: an ask posted INSIDE the JavaScript tail is «JavaScript»`, `no sample this run: ${inTail.length} of 3 asks inside the tail found the thread running${extraT ? ' after the tail set' : ''} (${tailAsleep.length} more found it asleep at the ask — judged by the asleep leg)`);
-    else ok(!wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail (${inTail.length} holds; ${tailAsleep.length} more found the thread asleep at the ask — judged by the asleep leg) is «JavaScript»${inTail.some(kernelSaid) ? ` (${inTail.filter(kernelSaid).length} «${LH.V.kernel}», admitted only by the hold's own numbers)` : ''} — the law cuts both ways`, wrongTail.slice(0, 3));
+    site(); if (tailJs.length < 3) skip(`(A) ${tag}: an ask posted INSIDE the JavaScript tail, ${JS_SURE} ms or more before the hold's end, is «JavaScript»`, `no sample this run: ${tailJs.length} of 3 asks inside the tail with ${JS_SURE} ms or more left found the thread running${extraT ? ' after the tail set' : ''} (${tailAsleep.length} more found it asleep at the ask — judged by the asleep leg)`);
+    else ok(!wrongTail.length, `(A) ${tag}: an ask posted INSIDE the JavaScript tail with ${JS_SURE} ms or more of the hold left (${tailJs.length} holds; ${tailAsleep.length} more found the thread asleep at the ask — judged by the asleep leg) is «JavaScript»${tailJs.some(kernelSaid) ? ` (${tailJs.filter(kernelSaid).length} «${LH.V.kernel}», admitted only by the hold's own numbers)` : ''} — the law cuts both ways`, wrongTail.slice(0, 3));
+    // r147: THE EDGE — an ask answered at the hold's last moment never names it: the window's own verdict, its frame said neutrally
+    site(); if (!tailEdge.length) skip(`(A) ${tag}: an ask at the hold's last moment (${EDGE_SURE} ms or less left) is said as its last moment or «JavaScript», never «native»`, `no sample this run: the box placed no tail ask within ${EDGE_SURE} ms of the hold's end (the shape is made in test-loop-hold)`);
+    else ok(!wrongEdge.length, `(A) ${tag}: an ask at the hold's last moment (${tailEdge.length} holds, ${EDGE_SURE} ms or less left by the hog's own clock) says the window's own verdict with «its last moment: … src/hogs.js:… (the held work's end, or the JavaScript right after it)» — never «${LH.V.native}» — or «${LH.V.js}» (${edgeJs.length}, admitted and counted: the leg cannot see the product's own end — the fast suite's REDs guard r147): ${byVerdict(tailEdge)}`, wrongEdge.slice(0, 3));
+    site(); if (!tailBand.length) skip(`(A) ${tag}: a tail ask between ${EDGE_SURE} and ${JS_SURE} ms before the end says one of the two true forms`, `no sample this run: the box placed no tail ask in that band`);
+    else ok(!wrongBand.length, `(A) ${tag}: the ${tailBand.length} tail asks between ${EDGE_SURE} and ${JS_SURE} ms before the end say one of the two true forms («${LH.V.js}», or the edge's)`, wrongBand.slice(0, 3));
   }
   // (B) the MIXED hold: 0.75 s of JavaScript then 0.75 s in a sync child, the watchdog's thread starting D ms into it (its
   //     scheduler window then covers less than half the hold from D = 750 on — round 3's regression said «native» there)
@@ -1134,7 +1197,8 @@ async function legGcLies(node, tag) {
   const ALWAYS_SETS = [['pbkdf2', [F1 - 20, F1 - 15, F1 - 10, F1 - 5], [50]]];   // the «always» control's own: its lie shows on TAIL asks (native under the first ask, a 50 ms tail: the hold passes the bar)
   const judge = (A) => {
     const j = A.filter((a) => a.x != null && a.verdict && !a.outside && !a.partAsleep);
-    const sN = j.filter((a) => !a.gc && a.x >= fast + 1 && !a.asleepAsk), sT = j.filter((a) => !a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
+    // r147: sT counts the tail asks the product can never call the hold's edge (JS_SURE ms or more left) — the lie is «native» on those
+    const sN = j.filter((a) => !a.gc && a.x >= fast + 1 && !a.asleepAsk), sT = j.filter((a) => !a.gc && !a.asleepAsk && a.x <= -1 && (Number.isFinite(a.left) ? a.left : a.tail + a.x) >= LH.SESSION_MS + fast + 1);
     const gN = j.filter((a) => a.gc && a.x >= fast + 1 && !a.asleepAsk), gT = j.filter((a) => a.gc && !a.asleepAsk && a.x <= -1 && a.tail + a.x >= 2);
     return { strictNativeSaidJs: sN.filter((a) => a.verdict === LH.V.js).length, strictTailNotJs: sT.filter((a) => a.verdict === LH.V.native).length, gcNativeSaidJs: gN.filter((a) => a.verdict === LH.V.js).length, n: j.length, sN: sN.length, gN: gN.length, sT: sT.length };
   };

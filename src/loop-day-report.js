@@ -46,6 +46,7 @@ const VERDICTS = Object.freeze([   // src/loop-hold.js V — the hold verdict's 
   'JavaScript', 'garbage collection', 'native code or garbage collection', 'on the CPU in user mode — JavaScript or native code, not sampled',
   'not sampled, and no scheduler facts', 'not in JavaScript when asked (its kernel state unread)',
   'on the CPU — JavaScript or native code, no sample of that part', 'not in JavaScript when asked (running or waiting for a CPU)',
+  'JavaScript and native code (a tie of their samples)',   // r116 (b): a tie's fixed word
 ]);
 const NO_CAUSE = '(no cause recorded)';
 const NO_OURS = '(no frame of ours)';   // 主开发 12:20Z: a hold whose row had no frame of the tree — apart, never a verdict's word
@@ -58,9 +59,12 @@ const ENGINE_FIELDS = Object.freeze([...ENGINES, 'native', 'outside']);
 const SHORT_RE = /^[a-z][a-z0-9-]{0,39}$/;   // a split file's short name (src/loop-census.js SPLIT `short`)
 const AGES = Object.freeze(['turn-running', 'turn-waiting', 'idle-under-1h', 'idle-1-2h', 'idle-2-4h', 'idle-over-4h', 'turn-unknown']);
 
-/** a hold's CAUSE: the hub's own code location in its frame (`src/x.js:12`), else its verdict (one of the fixed words) */
+const TIE = VERDICTS.find((v) => v.endsWith('(a tie of their samples)'));   // r116 (b) / r147: a tie books under its fixed word, never its JavaScript frame
+/** a hold's CAUSE: a tie's fixed word (alone or a part of two); else the hub's own code location in its frame (`src/x.js:12`), else
+ *  its verdict (one of the fixed words) */
 function causeOf({ verdict = null, frame = null, noOurs = false } = {}) {
   if (noOurs === true) return NO_OURS;
+  if (typeof verdict === 'string' && verdict.split(', then ').includes(TIE)) return TIE;   // its JavaScript sample's frame names half the hold at most — the tie is the cause (alone, or a part of two)
   const m = typeof frame === 'string' ? /(?:^|[\s(])((?:src\/[\w./-]+|server\.js):\d+)(?=[)\s]|$)/.exec(frame) : null;
   if (m && !m[1].includes('..')) return m[1];
   if (typeof verdict === 'string' && verdict) return VERDICTS.includes(verdict) ? verdict : OTHER;

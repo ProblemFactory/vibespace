@@ -266,8 +266,8 @@ class Telemetry {
    *  from the rows the hub already keeps; no file, no notice, no budget of its own. The rows: kind 'metric', name
    *  'srv-loop-hold-ms' — ONE a hold of a second or more, written by src/server/loop-holds.js onHold as the loop turns again:
    *  `value` = the hold's ms, `detail` = «verdict · frame» (« · (the boot)» after a boot's own hold). THE CAUSE = the hourly
-   *  report's own key (src/loop-day-report.js causeOf — loop-day-report R5: the day and its hours key alike): the hub's code
-   *  location in the frame, else the verdict's fixed words (none ⇒ NO_CAUSE); a BOOT's hold is apart — `boot` {ms, count} of
+   *  report's own key (src/loop-day-report.js causeOf — loop-day-report R5: the day and its hours key alike): a tie's fixed word
+   *  (r116 / r147), else the hub's code location in the frame, else the verdict's fixed words (none ⇒ NO_CAUSE); a BOOT's hold is apart — `boot` {ms, count} of
    *  each period, never in its ms, count or causes. THE DAY CUT IS UTC: a row's day = the UTC date of its `ts` (as byDay and the monthly shards) — so a hold
    *  across midnight counts on the day it ended; today = the UTC date of `now`, yesterday = the UTC date before it, the
    *  seven days = today and the six UTC dates before it (a row dated after today counts nowhere). Each period:
