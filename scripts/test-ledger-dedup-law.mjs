@@ -16,6 +16,12 @@
 //   ⑧ (r11) the usage fold worker requires only what it folds — never the hold road (src/usage-hold-road.js) nor the dedup
 //   ⑨ B-6ed4 (r18): a set's mark whose unlink FAILS stays known (this process's — never «twice») and is removed again; the
 //     next start finds no leftover; CONTROL the release's _unmark (memory first, the failure dropped) ⇒ RED
+//   ⑩ (r611) ONE OWNER, ONE CLOSE — the count: around dedupSteps on its three roads (rename, nothing repeated, split with a
+//     small id bound and an archive copy) every descriptor opened is closed EXACTLY once and no number is closed that is not
+//     open; CONTROL the release's close planted back ⇒ RED on the rename and the split roads
+//   ⑪ (r611) THE THEFT, placed by a stall (never by load): a helper thread opens a file while the rename runs and receives the
+//     number the tmp writer's close freed; afterwards its descriptor is still ITS file; CONTROL the release's close ⇒ closed
+//     under the helper
 // Sparse files only (fs.truncateSync — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -338,10 +344,14 @@ await leg('⑦', async () => {
   const tmpLeft = fs.existsSync(sh + LD.TMP_SUFFIX);
   const res = LD.runNow(LD.dedupSteps(sh, { step: 64 * 1024 }));
   ok(tmpLeft && res.renamed && size(sh) === uniqueBytes && !fs.existsSync(sh + LD.TMP_SUFFIX), '⑦ a restart mid-way: the stale tmp is discarded, the run resumes and ends at the same ⅓');
-  // the boot law: stepped on the loop, no turn ≥ 250 ms
+  // the boot law: stepped on the loop. ALSO CURED (r611's unit A): a literal wall-clock bound (`maxStepMs < 250`) judged the
+  // MACHINE — the wall-clock census saw it once this suite named src/usage-ledger-dedup.js as a string (⑩'s copy). Judged now by
+  // a CENSUS OF THE WORK: each step reads at most one step's bytes, so the run takes at least ⌈the shard's bytes / the step⌉
+  // steps; the longest step's time is printed, judged by nothing
   fs.writeFileSync(sh, windows.join('\n') + '\n');
-  const r2 = await LD.runStepped(LD.dedupSteps(sh, { step: 64 * 1024 }), { sliceMs: 40 });
-  ok(r2.drive && r2.drive.steps > 10 && r2.drive.maxStepMs < 250, `⑦ stepped: ${r2.drive && r2.drive.steps} steps, the longest ${r2.drive && r2.drive.maxStepMs} ms (< 250 — the boot law)`, r2.drive);
+  const STEP7 = 64 * 1024, minSteps7 = Math.ceil(size(sh) / STEP7);
+  const r2 = await LD.runStepped(LD.dedupSteps(sh, { step: STEP7 }), { sliceMs: 40 });
+  ok(r2.drive && r2.drive.steps > 10 && r2.drive.steps >= minSteps7, `⑦ stepped: ${r2.drive && r2.drive.steps} steps for ${size(sh)} B read ${STEP7} B at a time — at least ⌈bytes / step⌉ = ${minSteps7} (the work is cut by bytes; the longest step took ${r2.drive && r2.drive.maxStepMs} ms, printed, judged by nothing)`, r2.drive);
   // through the runner: the boot goes on at once ("started"), the ledger records it when it ENDS
   fs.writeFileSync(sh, windows.join('\n') + '\n');
   const [res3] = await quiet(() => M.runLocalMigrations({ only: ['2026-10-usage-ledger-dedup'] }));
@@ -459,6 +469,81 @@ await leg('⑨ B-6ed4', async () => {
     } finally { fs.promises.unlink = real; }
     ok(after.disk && after.marked, '⑨ r1: a retry in flight when the set fails again ⇒ that failure\'s mark stays (on disk and known) — the unlink that took it wrote it back', after);
   }
+});
+
+// ⑩ ⑪ ONE OWNER, ONE CLOSE (主开发 r611, 2026-11-20 — placed by the coordinator's readers): dedupSteps closed its tmp writer's descriptor
+// TWICE on the rename road (before the rename, then in the finally) and both writers twice on the split road, the second close
+// under an empty catch. With another thread the number freed by the first close is that thread's next open, and the second close
+// closes ITS file (the store writer's thread lost its entry script that way; Node aborted). The release's close is planted back on
+// a copy (its writer kept the number for ever and swallowed the error) as each leg's RED CONTROL.
+const DEDUP_SRC = fs.readFileSync(REPO + '/src/usage-ledger-dedup.js', 'utf8');
+const ONE_CLOSE = "    close() { if (fd === null) return; const mine = fd; fd = null; try { fs.closeSync(mine); } catch (e) { if (e && typeof e === 'object' && !e.path) e.path = file; throw e; } },";
+const RELEASE_CLOSE = '    close() { try { fs.closeSync(fd); } catch { } },';   // stale-pins: kept — the release's close, planted back as the RED CONTROL
+const releaseCopy = async () => {
+  const { mutantCopies } = await import('./mutant-copy.mjs'), { anchored } = await import('./scratch.mjs');
+  return mutantCopies('ldl-one-close', REPO).load('src/usage-ledger-dedup.js', anchored(DEDUP_SRC, ONE_CLOSE, RELEASE_CLOSE, 'test-ledger-dedup-law ⑩ the release close'), 'release-close');
+};
+const shardRows = (dir, rows) => { fs.mkdirSync(dir, { recursive: true }); const f = path.join(dir, 'usage-ledger-2026-10~fdc.ndjson'); fs.writeFileSync(f, rows.map((r) => JSON.stringify(r)).join('\n') + '\n'); return f; };
+const FDC_T0 = Date.UTC(2026, 9, 1);   // this pair's rows (the suite's T0 is the harvest window)
+const ROADS = {
+  rename: (d) => ({ file: shardRows(d, [1, 2, 3, 2, 4, 5, 3].map((i) => ({ rid: `r${i}`, ts: FDC_T0 + i, n: 1 }))), opts: {} }),
+  'nothing repeated': (d) => ({ file: shardRows(d, [1, 2, 3, 4, 5].map((i) => ({ rid: `r${i}`, ts: FDC_T0 + i, n: 1 }))), opts: {} }),
+  'split + an archive copy': (d) => ({ file: shardRows(d, [...[1, 2, 3, 4, 5, 6, 7, 8].map((i) => ({ rid: `r${i}`, ts: FDC_T0 + i * 1000, n: 1 })), { rid: 'r2', ts: FDC_T0 + 2000, n: 2 }]), opts: { maxIds: 3, archiveDir: path.join(d, 'arch') } }),
+};
+// every descriptor number the module opens by hand is closed EXACTLY once, and no number is closed that is not open
+const fdCount = (fn) => {
+  const ro = fs.openSync, rc = fs.closeSync, open = new Map(), bad = [];
+  let opens = 0, closes = 0;
+  fs.openSync = function (...a) { const fd = ro.apply(this, a); opens++; if (open.has(fd)) bad.push(`fd ${fd} opened again while open (${open.get(fd)})`); open.set(fd, path.basename(String(a[0]))); return fd; };
+  fs.closeSync = function (fd, ...a) { closes++; if (!open.has(fd)) bad.push(`fd ${fd} closed while not open`); else open.delete(fd); return rc.call(this, fd, ...a); };
+  let res, threw = null;
+  try { res = fn(); } catch (e) { threw = e; } finally { fs.openSync = ro; fs.closeSync = rc; }
+  for (const [fd, f] of open) bad.push(`fd ${fd} (${f}) never closed`);
+  return { res, threw, opens, closes, bad };
+};
+await leg('⑩ one close', async () => {
+  const counts = async (L, tag) => Object.fromEntries(Object.entries(ROADS).map(([road, mk]) => { const { file, opts } = mk(path.join(tmp, `fdc-${tag}-${road.replace(/\W+/g, '-')}`)); return [road, fdCount(() => L.runNow(L.dedupSteps(file, opts)))]; }));
+  const now = await counts(LD, 'tree');
+  const say = (c) => Object.entries(c).map(([road, x]) => `${road}: ${x.opens} opened / ${x.closes} closed${x.res ? `, renamed ${x.res.renamed}, removed ${x.res.removed}, passes ${x.res.passes}, archived ${x.res.archived}` : ''}${x.threw ? ', THREW ' + x.threw.message : ''}${x.bad.length ? ' — ' + x.bad.join('; ') : ''}`).join(' | ');
+  ok(Object.values(now).every((x) => !x.threw && x.bad.length === 0 && x.opens > 0 && x.opens === x.closes) && now.rename.res.renamed && now.rename.res.removed === 2 && !now['nothing repeated'].res.renamed && now['split + an archive copy'].res.passes > 1 && now['split + an archive copy'].res.archived >= 1,
+    `⑩ every descriptor dedupSteps opens is closed EXACTLY once, on its three roads — ${say(now)}`);
+  const rel = await counts(await releaseCopy(), 'release');
+  ok(rel.rename.bad.some((b) => /closed while not open/.test(b)) && rel['split + an archive copy'].bad.some((b) => /closed while not open/.test(b)) && rel['nothing repeated'].bad.length === 0,
+    `⑩ RED CONTROL: the release's close planted back closes a number that is no longer open on the rename road and on the split road (the second close of the SAME number); the road that renames nothing closes once — ${say(rel)}`);
+});
+await leg('⑪ the theft', async () => {
+  // THE THEFT, PLACED BY A STALL (never by load): a helper thread idles; for ONE run the rename is a stand-in that, called for
+  // the tmp file, lets the helper open a file of its own and waits (bounded) for its number — the lowest free one: the number the
+  // writer's close just freed — then renames for real. Afterwards the helper's descriptor must still be ITS file.
+  const { Worker } = await import('node:worker_threads');
+  const scene = async (L, tag) => {
+    const d = path.join(tmp, `theft-${tag}`), { file } = ROADS.rename(d), mine = path.join(d, 'the-helper-file.txt');
+    fs.writeFileSync(mine, "the helper's own file\n");
+    const cell = new Int32Array(new SharedArrayBuffer(8));   // [0] 0 = waiting, 1 = opened; [1] the helper's number
+    const helper = new Worker(`const { parentPort, workerData } = require('node:worker_threads'); const fs = require('node:fs');
+      const cell = new Int32Array(workerData.sab); let fd = -1;
+      parentPort.on('message', (m) => {
+        if (m === 'open') { fd = fs.openSync(workerData.mine, 'r'); Atomics.store(cell, 1, fd); Atomics.store(cell, 0, 1); Atomics.notify(cell, 0); }
+        if (m === 'check') { let st = null; try { st = fs.fstatSync(fd); } catch { st = null; } const ino = fs.statSync(workerData.mine).ino; parentPort.postMessage({ fd, open: !!st, mine: !!st && st.ino === ino }); try { fs.closeSync(fd); } catch { } }
+      });`, { eval: true, workerData: { sab: cell.buffer, mine } });
+    await new Promise((r) => helper.once('online', r));
+    const realRename = fs.renameSync, realOpen = fs.openSync;
+    let stalled = null, tmpFd = null;
+    fs.openSync = function (f, ...a) { const fd = realOpen.call(this, f, ...a); if (String(f) === file + L.TMP_SUFFIX) tmpFd = fd; return fd; };   // the tmp writer's number
+    fs.renameSync = function (from, to, ...a) {
+      if (!stalled && String(from) === file + L.TMP_SUFFIX) { helper.postMessage('open'); stalled = Atomics.wait(cell, 0, 0, 5000); }
+      return realRename.call(this, from, to, ...a);
+    };
+    let res = null, threw = null;
+    try { res = L.runNow(L.dedupSteps(file, {})); } catch (e) { threw = e; } finally { fs.renameSync = realRename; fs.openSync = realOpen; }
+    const seen = await new Promise((r) => { helper.once('message', r); helper.postMessage('check'); });
+    await helper.terminate();
+    return { res, threw, stalled, tmpFd, opened: Atomics.load(cell, 0) === 1, ...seen };
+  };
+  const now = await scene(LD, 'tree'), rel = await scene(await releaseCopy(), 'release');
+  const say = (x) => `the tmp writer held fd ${x.tmpFd}; the helper opened fd ${x.fd} during the rename (${x.opened ? 'opened' : 'NEVER opened'}, the stall ${x.stalled}: ${x.fd === x.tmpFd ? 'the number the writer\'s close freed' : 'ANOTHER number'}); after the run: ${x.open ? (x.mine ? 'still open, still its file' : 'open but ANOTHER file') : 'CLOSED under it'}; renamed ${x.res && x.res.renamed}${x.threw ? ', threw ' + x.threw.message : ''}`;
+  ok(now.opened && now.fd === now.tmpFd && now.open && now.mine && now.res && now.res.renamed && !now.threw, `⑪ another thread's descriptor survives the rewrite — ${say(now)}`);
+  ok(rel.opened && rel.fd === rel.tmpFd && !(rel.open && rel.mine), `⑪ RED CONTROL: with the release's close the number the writer's close freed is closed AGAIN — under the helper, which had just been given it — ${say(rel)}`);
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

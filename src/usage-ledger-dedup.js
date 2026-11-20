@@ -165,6 +165,7 @@ async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infini
   const named = (e) => { if (e && typeof e === 'object' && !e.path) { try { e.path = file; } catch { } } return e; };
   let fh;
   try { fh = await on(file, fs.promises.open(file, 'r')); } catch (e) { if (e && e.code === 'ENOENT') return { end: from, lineEnd: from, eof: true, missing: true }; throw named(e); }
+  let failing = null;   // r611: the error this read is throwing — a failed close rides it, never replaces it
   try {
     let buf = Buffer.alloc(step), pos = from, lineEnd = from, carry = 0; // buf[0, carry) = an unfinished line read at `pos`
     for (;;) {
@@ -184,28 +185,41 @@ async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infini
       if (lineEnd - from >= limit) return { end: lineEnd, lineEnd, eof: false };
       if (buf.length > step && carry < step) { const b2 = Buffer.alloc(step); buf.copy(b2, 0, 0, carry); buf = b2; }
     }
-  } catch (e) { throw named(e); } finally { await on(file, fh.close()).catch(() => { }); } // r10: the close is a file call of the road too — bounded and said like the open and the read
+  } catch (e) { failing = named(e); throw failing; } finally {
+    // r10: the close is a file call of the road too — bounded and said like the open and the read. r611 (ONE OWNER, ONE CLOSE): a
+    // failed close is a fault that is SAID — it throws (named), or rides the error already thrown as its closeError; never swallowed
+    try { await on(file, fh.close()); } catch (ce) { if (!failing) throw named(ce); failing.closeError = named(ce); }
+  }
 }
 
-/** A tmp file written in batches of ≥ `step` bytes → { keep(buf, a, b), flush(), bytes, close() }. */
+/** A tmp file written in batches of ≥ `step` bytes → { keep(buf, a, b), flush(), bytes, fd, close() }.
+ *  ONE OWNER, ONE CLOSE (主开发 r611, 2026-11-20 — the double close the coordinator's readers placed): the writer FORGETS its
+ *  number in the statement that closes it, so a close asked again closes nothing. A number freed here is the next open's ANYWHERE
+ *  in the process, so a second close of it closes ANOTHER thread's file (the store writer's thread lost the entry script it was
+ *  reading on such a number and Node aborted — test-ledger-readers-census, 2026-11-20). A failed close THROWS (named): it is said,
+ *  never swallowed. `fd` reads null once closed; a write after the close throws by name. */
 function writerOf(file, step) {
-  const fd = fs.openSync(file, 'w');
+  let fd = fs.openSync(file, 'w');
   const parts = []; let n = 0;
+  const open = () => { if (fd === null) throw Object.assign(new Error(`${path.basename(file)}: written after its close`), { path: file }); return fd; };
   const w = {
-    bytes: 0, fd,
+    bytes: 0, get fd() { return fd; },
     keep(buf, a, b) { const piece = Buffer.allocUnsafe(b - a + 1); buf.copy(piece, 0, a, b); piece[b - a] = 10; parts.push(piece); n += piece.length; if (n >= step) w.flush(); },
-    raw(b) { w.flush(); fs.writeSync(fd, b); w.bytes += b.length; },
-    flush() { if (!parts.length) return; const b = Buffer.concat(parts, n); fs.writeSync(fd, b); w.bytes += b.length; parts.length = 0; n = 0; },
-    close() { try { fs.closeSync(fd); } catch { } },
+    raw(b) { w.flush(); fs.writeSync(open(), b); w.bytes += b.length; },
+    flush() { if (!parts.length) return; const b = Buffer.concat(parts, n); fs.writeSync(open(), b); w.bytes += b.length; parts.length = 0; n = 0; },
+    close() { if (fd === null) return; const mine = fd; fd = null; try { fs.closeSync(mine); } catch (e) { if (e && typeof e === 'object' && !e.path) e.path = file; throw e; } },
   };
   return w;
 }
 /** `from`'s bytes appended to `to` (a rename when `to` does not exist yet), a step at a time. */
 function appendFile(to, from, step) {
   if (!fs.existsSync(to)) { fs.renameSync(from, to); fs.writeFileSync(from, ''); return; }
-  const src = fs.openSync(from, 'r'), dst = fs.openSync(to, 'a'), buf = Buffer.alloc(step);
-  try { for (let pos = 0; ;) { const n = fs.readSync(src, buf, 0, buf.length, pos); if (n <= 0) break; fs.writeSync(dst, buf, 0, n); pos += n; } fs.fsyncSync(dst); }
-  finally { fs.closeSync(src); fs.closeSync(dst); }
+  const src = fs.openSync(from, 'r'), buf = Buffer.alloc(step);
+  try {   // r611: each descriptor has one owner and one close — the source's is closed even when the destination never opens
+    const dst = fs.openSync(to, 'a');
+    try { for (let pos = 0; ;) { const n = fs.readSync(src, buf, 0, buf.length, pos); if (n <= 0) break; fs.writeSync(dst, buf, 0, n); pos += n; } fs.fsyncSync(dst); }
+    finally { fs.closeSync(dst); }
+  } finally { fs.closeSync(src); }
 }
 /** One ts range of a split pass holds the row? A row whose ts cannot be read belongs to the first range. */
 function inRange(range, buf, a, b, first) {
@@ -242,7 +256,7 @@ function* dedupSteps(file, { step = STEP_BYTES, maxIds = MAX_IDS, archiveDir = n
   let span = null;   // [min, max] ts of the shard's rows — read by one pass of its own at the first split
   for (;;) {
     const w = writerOf(tmp, step);
-    let arch = null;
+    let arch = null, failing = null;   // failing: the error this step is throwing (a failed close rides it, never replaces it)
     const archive = (buf, a, b) => { // → true when the copy is kept in the archive (then it may leave the shard)
       if (!archTmp || (arch && arch.bytes + (b - a) > ARCHIVE_MAX_BYTES)) return false;
       if (!arch) { fs.mkdirSync(archiveDir, { recursive: true }); arch = writerOf(archTmp, step); }
@@ -342,9 +356,13 @@ function* dedupSteps(file, { step = STEP_BYTES, maxIds = MAX_IDS, archiveDir = n
         fs.renameSync(tmp, file);
         return Object.assign(res, { after: w.bytes, renamed: true, at: now() });
       }
-    } finally {
-      w.close(); if (arch) arch.close();
+    } catch (e) { failing = e; throw e; } finally {
+      // r611 ONE OWNER, ONE CLOSE: each writer still open is closed here ONCE (the rename road and the split road closed theirs
+      // in the body; a closed writer's close is nothing now — it was the second close of the SAME number, the placed fault)
+      let closeError = null;
+      for (const x of [w, arch]) if (x) { try { x.close(); } catch (ce) { closeError = closeError || ce; } }
       if (!res.renamed && !split) for (const f of [tmp, archTmp]) if (f) { try { fs.unlinkSync(f); } catch { } }
+      if (closeError) { if (failing) failing.closeError = closeError; else throw closeError; }   // a failed close is SAID
     }
   }
 }

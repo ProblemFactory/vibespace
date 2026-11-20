@@ -23,7 +23,8 @@
 //   empty-catch   a close under an empty catch: TODAY'S 108 (109 with the held module's) are held as a NAMED ratchet by file (EMPTY_CATCH_DEBT — r621's list, by file,
 //                 line and function, sent to the coordinator); a new one is red by
 //                 its file, line and function; a file's count that falls is said (lower the row)
-// HELD: src/usage-ledger-dedup.js is lane lg-leak-census's (its unit A): its findings are PRINTED, never judged here.
+// HELD: nothing since lane lg-leak-census's unit A cured src/usage-ledger-dedup.js and removed its row (r690): that file is judged here
+// like every other, and leg ④ reds the placed fault's own shape there.
 // Each rule has a PLANT red by name; the law's own forms (forget at the close, exclusive branches, a handle closed twice, a closer
 // that forgets) are planted GREEN. Fast: in-process, stated 2.5 s by its row (174 of 1245 files name an open or a close and are parsed).
 // THE EMPTY CATCH, both spellings: a close in a try whose catch is empty, and a HANDLE's close under `.catch(() => { })` (counted alike).
@@ -231,9 +232,7 @@ function census(files) {
 // (the rule and the function of each); any other finding in that file is red by name; a pin the file no longer has is red «stale
 // hold» with the pin (the row, when it is its last) to remove. Whichever lands second — this census or lane lg-leak-census's cure (its
 // unit A) — removes the row: from then on the file is judged like every other, and the fault's own shape is red here
-const HELD = Object.freeze({
-  'src/usage-ledger-dedup.js': { why: 'lane lg-leak-census cures it (its unit A) — the unit that lands second removes this row', pins: [['closer-keeps', 'close'], ['empty-catch', 'close']] },
-});
+const HELD = Object.freeze({});   // EMPTY since lane lg-leak-census's unit A (r611 / r690): its cure landed second and removed src/usage-ledger-dedup.js's row — that file is judged like every other
 // TODAY'S closes under an empty catch, by file (r621's list) — the sweep that says a failed close is its own unit; a NEW one is red
 const EMPTY_CATCH_DEBT = Object.freeze({
   "data/bin/agy-wrapper.js": 1,
