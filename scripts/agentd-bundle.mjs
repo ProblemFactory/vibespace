@@ -9,7 +9,8 @@
 //   await agentdBundle({ version, outfile, entry }) → outfile
 //     THE BUNDLE A SUITE TESTS IS THE BUNDLE THAT SHIPS but for the stamp (主开发 r561): the entry's (default src/agentd/agentd.js)
 //     esbuild step is READ from package.json's build:agentd (buildPlan — its flags mapped one by one, a flag with no mapping
-//     throws by name), run through esbuild's JS API over the tree's own sources into `outfile` (OUTSIDE the tree's src/), then
+//     throws by name), run through esbuild's JS API over the tree's own sources into `outfile` (OUTSIDE the tree — anywhere in it
+//     is refused by name: the law is the whole tree, not only src/), then
 //     the build's own strip step (scripts/agentd-bundle-strip.mjs) when build:agentd strips that entry. `version` (x.y.z) answers
 //     src/agentd/version.js; for the daemon's entry the stamp MUST be in the bundle (a moved stamp module throws by name).
 //   buildPlan(scripts, entry) → { entry, options, outfile, strip, flags } — PURE; flagsOf(plan) re-spells the flags (test-architecture
@@ -77,8 +78,12 @@ export function stampPlugin(version, { repo = REPO, onHit = null } = {}) {
 export async function agentdBundle({ version, outfile, entry = DAEMON, repo = REPO, logLevel = 'error', ...rest } = {}) {
   if (Object.keys(rest).length) throw new Error(`agentd-bundle: ${Object.keys(rest).join(', ')} — a suite passes no flags of its own (they are build:agentd's)`);
   if (!outfile) throw new Error('agentd-bundle: an outfile is required');
-  const out = path.resolve(String(outfile)), src = real(path.join(repo, 'src'));
-  if (real(path.dirname(out)) === src || real(path.dirname(out)).startsWith(src + path.sep)) throw new Error(`agentd-bundle: the outfile ${out} lies under the tree's src/ — a bundle goes to the suite's scratch`);
+  const out = path.resolve(String(outfile)), tree = real(repo), outDir = real(path.dirname(out));
+  if (outDir === tree || outDir.startsWith(tree + path.sep)) throw new Error(`agentd-bundle: the outfile ${out} lies inside the tree ${tree} — a bundle goes to the suite's scratch (no suite writes in the tree it runs in)`);
+  // the entry, spelled ONCE (relative to the tree, forward slashes): the plan's lookup and the stamp check read the same name
+  const ent = path.relative(repo, path.resolve(repo, String(entry))).split(path.sep).join('/');
+  if (ent.startsWith('../') || path.isAbsolute(ent)) throw new Error(`agentd-bundle: the entry ${entry} lies outside the tree ${tree}`);
+  entry = ent;
   const plan = buildPlan(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).scripts, entry);
   let hits = 0;
   const plugin = stampPlugin(version, { repo, onHit: () => { hits++; } });

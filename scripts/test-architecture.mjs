@@ -2370,9 +2370,44 @@ await section(async () => {
       return arg === nth ? src.slice(start, i) : null;
     };
     const hits = [];
-    // a `node -e` writer run IN the checkout: its code writes a relative src/ path (the old device suites' restore line)
-    const nodeE = new RegExp(`\\b(?:execFileSync|execFile|spawnSync|spawn)\\(\\s*['"]node['"]\\s*,\\s*\\[\\s*['"]-e['"]\\s*,\\s*(\`[^\`]*\`|'[^'\\n]*'|"[^"\\n]*")\\s*\\]\\s*,\\s*\\{[^}]*\\bcwd:\\s*(?:${C})\\b`, 'g');
-    for (const m of src.matchAll(nodeE)) if (/writeFileSync\(\s*['"]src\//.test(m[1])) hits.push(`${src.slice(0, m.index).split('\n').length}: node -e ${m[1].slice(0, 60)} (cwd = the checkout)`);
+    // A CHILD RUN IN THE CHECKOUT that writes it (B-ba47's class; its round's readers, 主开发 r641): a call's TOP-LEVEL arguments, read
+    // quote- and bracket-aware (an options object may hold a nested object or a spread before its cwd), judged when the options name
+    // `cwd: <the checkout>` — ① node (the bare word, or the running node's own path process.execPath) with -e code that writes a
+    // relative src/ path (the old device suites' restore line); ② a package manager (npm / pnpm / yarn) running a build script
+    // (`run build…`: build:agentd rewrites src/agentd/version.js and data/bin — test-host-mounts-tunnel's old line). execSync / exec
+    // judge their one command string the same way.
+    const argsOf = (from) => {
+      const out = []; let depth = 0, q = null, start = from, i = from;
+      for (; i < src.length && i < from + 4000; i++) {
+        const ch = src[i];
+        if (q) { if (ch === '\\') i++; else if (ch === q) q = null; continue; }
+        if (ch === "'" || ch === '"' || ch === '`') { q = ch; continue; }
+        if (ch === '(' || ch === '[' || ch === '{') depth++;
+        else if (ch === ')' || ch === ']' || ch === '}') { if (depth === 0) { out.push(src.slice(start, i).trim()); return out; } depth--; }
+        else if (ch === ',' && depth === 0) { out.push(src.slice(start, i).trim()); start = i + 1; }
+      }
+      return null;
+    };
+    const inCheckout = (opts) => !!opts && new RegExp(`(?:^|[{,\\s])cwd\\s*:\\s*(?:${C})\\b`).test(opts);
+    const NODE_PROG = /^(?:['"`]node['"`]|process\.execPath)$/, PM_PROG = /^['"`](?:npm|pnpm|yarn)['"`]$/;
+    const SRC_WRITE = /writeFileSync\(\s*\\?['"`]src\//, PM_BUILD = /['"`]run['"`]\s*,\s*['"`]build[\w:.-]*['"`]/;
+    for (const m of src.matchAll(/\b(execFileSync|execFile|spawnSync|spawn|execSync|exec)\(\s*/g)) {
+      if (m.index > 0 && /[\w$.]/.test(src[m.index - 1]) && !/(?:^|[^\w$])(?:cp|child_process|childProcess)\.$/.test(src.slice(Math.max(0, m.index - 20), m.index))) continue;
+      const args = argsOf(m.index + m[0].length);
+      if (!args) continue;
+      const line = src.slice(0, m.index).split('\n').length;
+      if (m[1] === 'execSync' || m[1] === 'exec') {
+        const cmd = args[0] || '';
+        if (!inCheckout(args[1])) continue;
+        if (/\b(?:npm|pnpm|yarn)\s+run\s+build/.test(cmd)) hits.push(`${line}: ${m[1]} ${cmd.slice(0, 60)} (a build script, cwd = the checkout)`);
+        else if (/\bnode\s+-e\b/.test(cmd) && SRC_WRITE.test(cmd)) hits.push(`${line}: ${m[1]} ${cmd.slice(0, 60)} (node -e, cwd = the checkout)`);
+        continue;
+      }
+      const [prog = '', argv = '', opts = ''] = args;
+      if (!inCheckout(opts)) continue;
+      if (NODE_PROG.test(prog) && /^\[\s*['"`]-e['"`]/.test(argv) && SRC_WRITE.test(argv)) hits.push(`${line}: node -e ${argv.slice(0, 60)} (cwd = the checkout)`);
+      else if (PM_PROG.test(prog) && PM_BUILD.test(argv)) hits.push(`${line}: ${prog} ${argv.slice(0, 40)} (a build script, cwd = the checkout)`);
+    }
     for (const m of src.matchAll(/(writeFileSync|copyFileSync)\(\s*/g)) {
       const raw = targetAt(m.index + m[0].length, m[1] === 'copyFileSync' ? 1 : 0);
       if (raw == null) continue;
@@ -2403,7 +2438,15 @@ await section(async () => {
     && judge(HDR + "fs.writeFileSync(path.join(REPO, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(v)} };\\n`);").length === 1
     && judge(HDR + "execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = {}')`], { cwd: REPO });").length === 1
     && judge(HDR + "fs.writeFileSync(path.join(COPY, 'src/agentd/version.js'), 'x');\nexecFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'x')`], { cwd: COPY });").length === 0
-    && judge(HDR + "await agentdBundle({ version, outfile: bundle });").length === 0,
+    && judge(HDR + "await agentdBundle({ version, outfile: bundle });").length === 0
+    // the round's three blind shapes (主开发 r641), each red by name: the running node's own path; an options object with a nested
+    // object or a spread before its cwd; a package manager running a build script in the checkout (npm / execSync alike)
+    && /node -e .*cwd = the checkout/.test(judge(HDR + "execFileSync(process.execPath, ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'x')`], { cwd: REPO });").join(' '))
+    && judge(HDR + "execFileSync('node', ['-e', `require('fs').writeFileSync('src/a.js', 'x')`], { env: { ...process.env, A: '1' }, cwd: REPO });").length === 1
+    && judge(HDR + "execFileSync('node', ['-e', `require('fs').writeFileSync('src/a.js', 'x')`], { ...base, cwd: REPO });").length === 1
+    && /a build script, cwd = the checkout/.test(judge(HDR + "execFileSync('npm', ['run', 'build:agentd'], { cwd: REPO, stdio: 'ignore' });").join(' '))
+    && /a build script, cwd = the checkout/.test(judge(HDR + "execSync('npm run build', { cwd: REPO, stdio: 'ignore' });").join(' '))
+    && judge(HDR + "execFileSync('npm', ['run', 'build:agentd'], { cwd: COPY });\nexecFileSync('npm', ['test'], { cwd: REPO });\nexecFileSync(process.execPath, ['-e', 'console.log(1)'], { cwd: REPO });").length === 0,
   '§51 NEGATIVE CONTROL: the sibling shapes (dirname(rel), an in-tree dir variable, a direct join) are caught; a mutant-copy write, a scratch-root `src`, and the build-version stand-in are not; copyFileSync is judged by its DESTINATION (a copy out of src/ passes, a copy into src/ is caught)');
   // B-ba47's class (主开发 r561): THE BUNDLE A SUITE TESTS IS THE BUNDLE THAT SHIPS but for the stamp — scripts/agentd-bundle.mjs reads
   // each entry's esbuild step from package.json build:agentd (its strip step too), never a flag list of the suites' own: the plan

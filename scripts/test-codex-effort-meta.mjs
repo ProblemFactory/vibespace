@@ -935,7 +935,11 @@ const _homeBefore = process.env.HOME, _codexHomeBefore = process.env.CODEX_HOME;
 {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-b6b6d-home-'));
   process.env.HOME = home; process.env.CODEX_HOME = path.join(home, '.codex');
-  const rdir = path.join(REPO, 'data', 'remote-jsonl', 'b6b6d-fixture', 'codex');
+  // the remote rollout's host folder, a name MINTED for this run (主开发 r634/r641): two runs in one shard never meet in the checkout's
+  // data/remote-jsonl (the store finds the rollout by its thread id under any host folder); removed at the leg's end and at any exit
+  const FIX = path.join(REPO, 'data', 'remote-jsonl', `b6b6d-fixture-${process.pid}-${Date.now().toString(36)}`);
+  process.once('exit', () => { try { fs.rmSync(FIX, { recursive: true, force: true }); } catch { } });
+  const rdir = path.join(FIX, 'codex');
   fs.mkdirSync(rdir, { recursive: true });
   const TID = '01a072a3-0d70-78c3-9a90-a69a61e14466';
   const rec = (o) => JSON.stringify(o) + '\n';
@@ -1133,7 +1137,7 @@ const _homeBefore = process.env.HOME, _codexHomeBefore = process.env.CODEX_HOME;
   const harmArgs = new ClaudeCodeAdapter({}).buildSessionArgs({ cwd: '/w', resumeId: FID, model: 'claude-fable-5', mode: 'chat' });
   ok(harmArgs.args.join(' ').includes('--model claude-fable-5'),
     'negative control: the served id WOULD have been commanded verbatim — which is the [1m] downgrade, in one argv');
-    try { fs.rmSync(path.join(REPO, 'data', 'remote-jsonl', 'b6b6d-fixture'), { recursive: true, force: true }); } catch { }
+    try { fs.rmSync(FIX, { recursive: true, force: true }); } catch { }
 }
 process.env.HOME = _homeBefore; if (_codexHomeBefore === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = _codexHomeBefore;
 

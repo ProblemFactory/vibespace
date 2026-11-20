@@ -21,6 +21,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { agentdBundle } from './agentd-bundle.mjs';   // B-ba47's class: build:agentd's own bundle at a stamp, nothing written in the tree
+import { scratch } from './scratch.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(dir, '..');
@@ -35,13 +37,15 @@ const { MountTokens, registerWebdav } = require('../src/webdav.js');
 const { MachineMounts } = require('../src/machine-mounts.js');
 const { HostManager } = require('../src/hosts.js');
 
-// ensure a fresh agentd bundle exists
+// a fresh agentd bundle — build:agentd's own (scripts/agentd-bundle.mjs) into this run's scratch, never `npm run build:agentd` in the
+// checkout (it rewrote src/agentd/version.js and data/bin of the tree it runs in: test-architecture §51, 主开发 r641)
 const version = require('../package.json').version;
-execFileSync('npm', ['run', 'build:agentd'], { cwd: repo, stdio: 'ignore' });
+const RUN = scratch('host-mounts-tunnel'); fs.mkdirSync(RUN, { recursive: true });
+const BUNDLE = await agentdBundle({ version, outfile: path.join(RUN, 'vibespace-agentd.js') });
 
 // wire the data-plane deps exactly as server.js does, FORCED ON
 const hosts = new HostManager({ dataDir: path.join(repo, 'data') });
-const tokDir = path.join(repo, 'data', 'agentd'); fs.mkdirSync(tokDir, { recursive: true });
+const tokDir = path.join(RUN, 'agentd'); fs.mkdirSync(tokDir, { recursive: true });   // the run's own host tokens (never the checkout's data/)
 function tokenFor(id) {
   const f = path.join(tokDir, 'host-' + id + '.token');
   try { return fs.readFileSync(f, 'utf-8').trim(); } catch { }
@@ -50,9 +54,9 @@ function tokenFor(id) {
   return t;
 }
 hosts.agentdDeps = {
-  ensureAgentdOnHost: async (id) => hosts.installAgentd(id, path.join(repo, 'data/bin/vibespace-agentd.js'), version, tokenFor(id)),
+  ensureAgentdOnHost: async (id) => hosts.installAgentd(id, BUNDLE, version, tokenFor(id)),
   agentdHostToken: (id) => tokenFor(id),
-  bundlePath: path.join(repo, 'data/bin/vibespace-agentd.js'),
+  bundlePath: BUNDLE,
   version,
 };
 hosts.dataPlaneOn = () => true;
