@@ -479,11 +479,13 @@ class UserTodoManager {
     // reconcilers / migrations / clears wait for the read (whenRead), and it is read again soon. At the read the FILE is the truth:
     // memory held nothing meanwhile (every write was refused), so nothing is merged.
     this._unread = null; this._unreadT = null; this._unreadTries = 0; this._unreadP = null; this._unreadStopped = false;
+    this._heldIntent = null;   // B-44f3: the last run's set-aside intent an UNREADABLE boot could not judge (judged at the lift)
     this._unreadGoneOnce = false;   // a held file found GONE at one read again (a mark, never a clock): the next read that finds it gone lifts
     this._unreadRetryCfg = unreadRetry && typeof unreadRetry === 'object' ? unreadRetry : {};
     this._readWaiters = [];
     let setAside = null;
     const a0 = SR.storeAnswer(this._readNow(), { valid: STORE_SHAPE });
+    setAside = this._bootIntent(a0);   // B-44f3 remainder: the last run's set-aside that no list named (its intent file)
     if (a0.state === 'data') { this._state = a0.value; this._lastWritten = JSON.stringify(this._state, null, 2); }
     else if (a0.state === 'corrupt') {
       const s = this._setAside(a0.error ? `corrupt JSON (${String((a0.error && a0.error.message) || a0.error).slice(0, 80)})` : 'not the expected shape');   // the release's words (the notice's detail)
@@ -499,7 +501,7 @@ class UserTodoManager {
     // interval — the store's OWN timer, because server.js has no shared sweep
     // cadence other stores hook into (each keeper runs its own).
     this._expiryTimer = null;
-    if (setAside) this._fileSetAside(setAside);
+    if (setAside) { this._fileSetAside(setAside); try { this.flush(); } catch { } this.whenWritten().then(() => this._dropIntentOff(), () => { }); }   // B-44f3: the notice naming the bytes on disk AT ONCE (a crash later in this boot keeps it); the intent goes after
     this.expireDue();
     if (expirySweepMs > 0) {
       this._expiryTimer = setInterval(() => { try { this.expireDue(); } catch { } }, expirySweepMs);
@@ -523,9 +525,8 @@ class UserTodoManager {
   }
   /** B-44f3 (主开发 05:00Z, 5): the READ AGAIN's set-aside — a damaged hold is retried on a timer, so its rename / copy run OFF the
    *  loop (fs.promises) on the data folder; the boot's set-aside above stays synchronous (the constructor's read is). Same words */
-  async _setAsideOff(why, { quiet = false } = {}) {
+  async _setAsideOff(why, { quiet = false, to = this._asideName() } = {}) {
     const dir = path.dirname(this._file);
-    const to = this._asideName();
     try { await fs.promises.rename(this._file, path.join(dir, to)); }
     catch (e) {
       try { await fs.promises.copyFile(this._file, path.join(dir, to)); }
@@ -630,22 +631,45 @@ class UserTodoManager {
         // the next read (the reference: machine-mounts' rule, the first read's should) — the next boot would start empty anyway: lifted
         if (!wasDamaged && !this._unreadGoneOnce) { this._unreadGoneOnce = true;   /* a mark, never a clock (ONE CLOCK: test-decision-inbox ⑦) */ this._holdUnread({ code: 'ENOENT', why: 'the file is not there since it could not be read' }); return false; }
         state = { items: [] };
+        // B-44f3 remainder: an intent the boot could not judge (it read the file UNREADABLE) is judged at this lift — the file gone and
+        // its aside there ⇒ the last run's set-aside that no list named is named now (off the loop)
+        if (this._heldIntent) {
+          let hi = this._heldIntent; this._heldIntent = null;
+          if (hi === 'reread') {   // the boot could not read the intent itself (the folder unreadable then): read now, off the loop
+            const t = await fs.promises.readFile(this._intentPath(), 'utf-8').then((x) => x, () => null);
+            let o = null; try { o = t ? JSON.parse(t) : null; } catch { o = null; }
+            hi = o && typeof o.to === 'string' && /^user-todos\.json\.corrupt-[\w-]+$/.test(o.to) ? { why: String(o.why || 'torn').slice(0, 120), to: o.to } : null;
+          }
+          if (hi && await fs.promises.access(path.join(path.dirname(this._file), hi.to)).then(() => true, () => false)) aside = hi; else this._dropIntentOff();
+          if (this._unreadStopped || !this._unread) return !this._unread;
+        }
       } else if (a.state === 'corrupt') {
         // torn bytes (again): set aside now if they can be (r9's road — the store writable, ONE notice), else STILL damaged (its code kept)
-        const s0 = await this._setAsideOff(a.error ? `corrupt JSON (${String((a.error && a.error.message) || a.error).slice(0, 80)})` : 'not the expected shape', { quiet: wasDamaged });
+        const why0 = a.error ? `corrupt JSON (${String((a.error && a.error.message) || a.error).slice(0, 80)})` : 'not the expected shape';
+        // B-44f3 remainder: the set-aside's INTENT first (off the loop) — a process that ends between the rename and the list's write
+        // (the hub's exit runs no continuation) is named by the next boot from it (_bootIntent)
+        const to0 = this._asideName();
+        this._heldIntent = null;   // a kept intent of the boot is replaced by this set-aside's own
+        try { await fs.promises.writeFile(this._intentPath(), JSON.stringify({ why: why0, to: to0 })); } catch (e) { console.warn(`[user-todos] the set-aside's intent could not be written (${(e && e.message) || e}) — set aside all the same`); }
+        if (this._unreadStopped || !this._unread) { this._dropIntentOff(); return !this._unread; }
+        const s0 = await this._setAsideOff(why0, { quiet: wasDamaged, to: to0 });
+        if (!s0 || !s0.to) this._dropIntentOff();   // nothing was set aside
+        // stopped WHILE the set-aside ran (the process lives on): the bytes ARE aside — what the set-aside began is finished at once
+        if (this._unreadStopped && this._unread && s0 && s0.to) { this._finishAside(s0); return true; }
         if (this._unreadStopped || !this._unread) return !this._unread;   // stopped (or lifted) while the set-aside ran
         const b = SR.afterSetAside(a, s0.to);
         if (b.state !== 'missing') { this._holdUnread(b); return false; }
         state = { items: [] }; aside = s0;
       } else { this._unreadGoneOnce = false; this._holdUnread(a); return false; }
       const was = this._unread, tries = this._unreadTries;
+      if (this._heldIntent) { this._heldIntent = null; this._dropIntentOff(); }   // lifted on data / a set-aside of its own: the kept intent is stale
       this._unreadGoneOnce = false;
       this._unread = null; this._state = state; this._lastWritten = a.state === 'data' ? JSON.stringify(this._state, null, 2) : null; this._dirty = false;
       this._unreadTries = 0;
       if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }
       try { this._afterLoad(); } catch (e) { console.warn(`[user-todos] the load's rungs failed after the read: ${(e && e.message) || e}`); }
       console.log(`[user-todos] ${was.file} read again after ${tries} tr${tries === 1 ? 'y' : 'ies'}: ${a.state === 'data' ? `${this._state.items.length} item(s)` : a.state === 'missing' ? 'its torn file was moved away — For you starts empty' : `its torn bytes are set aside as ${aside && aside.to} — For you starts empty`} — the hold is lifted`);
-      if (aside) this._fileSetAside(aside);   // r9's ONE notice, now that the store can be written
+      if (aside) { this._fileSetAside(aside); this.whenWritten().then(() => this._dropIntentOff(), () => { }); }   // r9's ONE notice, now that the store can be written; its intent goes once the list is on disk
       try { this.expireDue(); } catch { }
       const waiters = this._readWaiters; this._readWaiters = [];
       for (const w of waiters) { try { w.fn(); } catch (e) { console.warn(`[user-todos] ${w.label} (waited for the read) failed: ${(e && e.message) || e}`); } }
@@ -661,6 +685,36 @@ class UserTodoManager {
    *  expiry timer cleared AND a pending debounced write flushed NOW (r2: the
    *  500 ms write timer outlived stop() and fired into a data dir its owner had
    *  already removed — ENOENT from a timer nobody could catch). */
+  /** B-44f3 remainder: a stop() (a suite's, a migration's private store) that lands while the read again's rename is out — the
+   *  continuation runs (the process lives on) and the bytes ARE aside: the empty list with ITS notice naming them is written now.
+   *  THE HUB'S EXIT never runs this continuation: the boot judges the set-aside's INTENT file instead (_bootIntent) */
+  _finishAside(s0) {
+    if (!this._unread || !s0 || !s0.to) return false;
+    this._unread = null; this._state = { items: [] }; this._lastWritten = null; this._dirty = false;
+    try { this._fileSetAside(s0); this.flush(); this._dropIntentOff(); } catch (e) { console.warn(`[user-todos] stopped while its torn list was set aside: the bytes are kept as ${s0.to}, the notice naming them was not written (${(e && e.message) || e})`); }
+    return true;
+  }
+  /** B-44f3 remainder (THE SHAPE CHANGED at its second read, lesson b — a finish at the exit's flush races the rename still out):
+   *  a read again's set-aside is ANNOUNCED in a small intent file beside the store BEFORE its rename (off the loop), and dropped
+   *  once the list with its notice is on disk. The BOOT judges a left intent: the live file GONE and its aside there ⇒ the rename
+   *  landed and the process ended before the list was written — the store starts empty WITH the notice naming the bytes; else (the
+   *  live file there: the rename never landed, the boot reads the bytes itself) the intent is stale and dropped. An UNREADABLE boot
+   *  keeps it (judged when the hold lifts on a missing file). Two sync reads at the boot only; every drop is off the loop, and the
+   *  intent goes only once the list naming the bytes is on disk */
+  _intentPath() { return this._file + '.aside-intent'; }
+  _bootIntent(a0) {
+    let o = null;
+    let text = null;
+    try { text = fs.readFileSync(this._intentPath(), 'utf-8'); } catch (e) { if (!(e && e.code === 'ENOENT') && a0.state === 'unreadable') this._heldIntent = 'reread'; return null; }   // none — or not readable now: kept (an unreadable boot reads it again at the lift)
+    try { o = JSON.parse(text); } catch { this._dropIntentOff(); return null; }   // torn: dropped (a later set-aside writes its own)
+    const to = o && typeof o.to === 'string' && /^user-todos\.json\.corrupt-[\w-]+$/.test(o.to) ? o.to : null;
+    const it = to ? { why: String(o.why || 'torn').slice(0, 120), to } : null;
+    if (a0.state === 'unreadable') { this._heldIntent = it; return null; }   // cannot be judged now: kept (judged when the hold lifts on a missing file)
+    if (!it || a0.state !== 'missing' || !fs.existsSync(path.join(path.dirname(this._file), to))) { this._dropIntentOff(); return null; }   // stale: the live file was there (data / torn)
+    console.warn(`[user-todos] ${path.basename(this._file)} is missing and its torn bytes were set aside as ${to} by the last run (it ended before the list was written) — For you starts empty and says where they are`);
+    return it;   // dropped once the list with its notice is on disk (the constructor, after the notice)
+  }
+  _dropIntentOff() { fs.promises.unlink(this._intentPath()).catch(() => { }); }
   stop() {
     if (this._expiryTimer) { clearInterval(this._expiryTimer); this._expiryTimer = null; }
     this._unreadStopped = true; if (this._unreadT) { clearTimeout(this._unreadT); this._unreadT = null; }   // B-44f3: no read again after the stop

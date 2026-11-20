@@ -1751,6 +1751,7 @@ export default {
   "all clear": "全部处理完",
   "cannot be read": "无法读取",
   "For you cannot read its saved list right now ({file}: {code}) \u2014 nothing can be filed or changed until it reads. It is read again soon.": "「待你处理」现在无法读取保存的列表（{file}：{code}）— 在读到之前，什么都不能填入或更改。很快会再读一次。",
+  "For you cannot read its saved list right now \u2014 nothing was saved. Try again once it reads.": "「待你处理」现在无法读取保存的列表 — 什么都没有保存。等它读到之后再试。",   // B-44f3 remainder: the paste box's press while For you is held
   "For you's saved list is damaged and could not be set aside ({file}) \u2014 it is kept exactly as it is, and nothing can be filed or changed until it is fixed.": "「待你处理」保存的列表已损坏且无法另存（{file}）— 它原样保留，修好之前什么都不能填入或更改。",
   "by the agent": "由 Agent",
   "automatically": "自动",

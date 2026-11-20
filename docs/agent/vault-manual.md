@@ -347,6 +347,7 @@ password you were handed in the chat when they can.
 |---|---|---|
 | `vault_locked` | the vault is locked; the user has already been told | Unlock… at the top of the page (the second password) — wait |
 | `vault_not_set_up` | no second password yet — nothing is sealed | ⚙ System ▸ Vault… (set it up) |
+| `todos-unread` (503) | For you cannot read its saved list right now: nothing was filed — a paste request (`request "<what>" --purpose …`) and `describe` answer it; `request <vault://…>` (plain or `--standing`) and a run card answer `ask_unfiled` while it lasts. It is read again soon — the CLI says so and exits 1, it does not retry | — ask again once it reads |
 | `human_only` | a person's door (unlock, set up, change, show a value, open for runs, answer a card) | the page |
 | `entry_not_runnable` | the entry is closed for runs (never one of your own) | the Vault window row's «Usable by agent runs» — or your `request` in For you |
 | `use_not_granted` | this conversation may not use it (another conversation's own entry, or a grant that ended) | your `request` in For you |

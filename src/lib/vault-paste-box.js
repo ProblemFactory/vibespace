@@ -52,6 +52,7 @@ export function wordsRefusalWords(code, r) {
   if (code === 'hidden_chars') return t('It holds a hidden or direction character — type it again');
   if (code === 'vault_locked') return t('The vault is locked (vault_locked) — unlock it, then save');
   if (code === 'words_not_here') return t('This kind of entry has no name or description of its own');
+  if (code === 'todos-unread') return t('For you cannot read its saved list right now — nothing was saved. Try again once it reads.');   // B-44f3: the press while held (503) — in the page's own words, never the hub's English
   return (r && r.error) || t('server unreachable');
 }
 /** The proposed words of a NEW entry, read back from the request's own lines (the item is the record — src/vault-paste.js cardOf). */
@@ -355,7 +356,7 @@ export async function submitSecretBox(model, item, box, answer) {
 
 /** A login answer's refusal in words — THE SAME sentence in the box and in its toast (the toast had said the hub's own English
  *  word for the code, in any language — lane login-request-card, the use door's follow-up). */
-const loginSay = (code, r) => (['vault_not_set_up', 'ask_settled', 'ask_unknown'].includes(code) ? refusalSay(code, r) : loginRefusalWords(code, r));
+const loginSay = (code, r) => (['vault_not_set_up', 'ask_settled', 'ask_unknown', 'todos-unread'].includes(code) ? refusalSay(code, r) : loginRefusalWords(code, r));   // B-44f3: a held For you — the page's own words
 /** lane login-request-card: the login box's press — its fields through the model's ONE verb (the same door); the password field
  *  is emptied once answered, every other field kept on a refusal (said in the box by the add door's own words). */
 async function submitLoginBox(model, item, box, answer) {

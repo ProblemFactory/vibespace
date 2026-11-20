@@ -2996,10 +2996,10 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
   const J = JSON.stringify;
   const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
   const ID = { key: 'slot-F', name: 'F' };
-  const world = (hourCap, dayCap = 200, { files = {}, ut = null, log = () => { } } = {}) => {
+  const world = (hourCap, dayCap = 200, { files = {}, ut = null, log = () => { }, mod = guardMod } = {}) => {
     let vclock = 1_800_000_000_000; const dataDir = tmpdir('vs-spend-b0a33-');
     const settings = { 'spend.unattendedPerIdentityHour': hourCap, 'spend.unattendedPerIdentityDay': dayCap, 'spend.unattendedPerInstanceDay': 10000 };
-    const g = guardMod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ID, getUserTodos: () => ut, log });
+    const g = mod.create({ dataDir, serverSetting: (k) => settings[k], identityOf: () => ID, getUserTodos: () => ut, log });
     const mkQ = (readFile = (fl) => { if (!(fl in files)) throw Object.assign(new Error('ENOENT: no such file'), { code: 'ENOENT' }); return files[fl]; }) => QWf.create({ dataDir, now: () => vclock, writer: { dirty: (file, o) => { files[file] = o.produce(); } }, readFile,
       noteSpend: (rec) => g.note({ ...rec, now: vclock }), releaseSpend: (rec) => g.release({ ...rec, now: vclock }), reservationState: (rid) => g.reservationState(rid), waitingReservations: () => g.waitingReservations(), stashHas: () => false, log: () => { } });
     const W = { g, files, clock: () => vclock, adv: (ms) => { vclock += ms; }, q: null, mkQ,
@@ -3225,6 +3225,32 @@ console.log('\n§5f B-0a33: a reservation is counted where its turn runs — eve
       ok('§5f THE SEAM\'S JOURNAL LINE KEEPS THE NOTICE\'S CADENCE: 36 refusals in six hours while the item stands ⇒ ONE line, 0 notices; 72 in twelve hours ⇒ two lines (at 10 min and 6 h 20), never one per refusal; the item gone ⇒ the notice is filed at once under its key',
         refused === 72 && inWindow === 1 && noticesHeld === 0 && J(at) === J([10, 380]) && lines.every((x) => /the spending notice at antigravity:cid-1 is not filed/.test(x.l)) && !v3.ok && adds3.length === 1 && adds3[0].key === 'antigravity:cid-1' && lines.length === 2,
         J({ refused, inWindow, noticesHeld, at, after: adds3.map((x) => x.key) }));
+    }
+    // B-44f3 (its remainder, round wf_98627db5-966): THE SEAM AT FOR YOU'S READ — a refusal while For you is HELD owes its notice; at
+    // the read the seam is judged again over the READ list: the «messages waiting» item standing there speaks (no spending notice,
+    // the journal line said at the read)
+    {
+      const heldSeam = (mod) => {
+        let held = true; const waiters = [], adds4 = [], lines4 = [], standing = [];
+        const ut4 = { add: (key, it) => { if (held) throw Object.assign(new Error('For you is held unread'), { code: 'todos-unread' }); if (it && it.i18n) adds4.push({ key, it }); return { id: 'n' + adds4.length }; },
+          snapshot: () => ({ open: held ? [] : standing.slice(), resolved: [] }), isHeldUnread: () => held, whenRead: (fn) => { if (!held) { fn(); return true; } waiters.push(fn); return false; } };
+        const W4 = world(4, 200, { ut: ut4, log: (l) => lines4.push(String(l)), mod });
+        for (const [key, name] of convs) { const e = W4.send(key.split(':')[1], 'x', { key, name }); W4.q.answer(e.id, { mode: 'queued' }); }
+        W4.adv(MIN); const v = W4.g.authorize({ reason: 'job-notification', identity: ID, now: W4.clock() });
+        const owed = waiters.length;
+        standing.push({ id: 'mw1', sessionKey: 'antigravity:cid-1', itemKey: 'messages-waiting:cid-1:1', status: 'open' });   // the READ list holds the waiting item
+        held = false;
+        const realNow = Date.now; Date.now = () => W4.clock();   // the read on the world's OWN clock (its notice's expiry is the world's; the real clock would pass it one day)
+        try { for (const fn of waiters.splice(0)) fn(); } finally { Date.now = realNow; }
+        return { refused: !v.ok && v.why, owed, filed: adds4.map((x) => x.key), said: lines4.filter((l) => /at For you's read: the spending notice at antigravity:cid-1 is not filed/.test(l)) };
+      };
+      const hs = heldSeam(guardMod);
+      ok('§5f B-44f3 THE SEAM AT FOR YOU\'S READ: a refusal while For you is held owes its notice; at the read the «messages waiting» item standing in the READ list speaks — no spending notice filed, the journal line said (printed)',
+        hs.refused === 'hour-cap' && hs.owed === 1 && hs.filed.length === 0 && hs.said.length === 1, J(hs));
+      const { anchored } = await import('./scratch.mjs');   // the suite's own copy (imported once above — the cached module)
+      let seamCut = null; try { seamCut = require(MUT.write('src/server/spend-guard.js', anchored(read('src/server/spend-guard.js'), '      if (o.waitKey && waitItemOpen(o.waitKey)) {', '      if (false) {', 'B-44f3: the seam not judged at the read'))); } catch (e) { seamCut = { err: e.message }; }
+      const hx = seamCut && !seamCut.err ? heldSeam(seamCut) : seamCut;
+      ok('§5f CONTROL (the seam not judged again at the read): the spending notice is filed beside the «messages waiting» item — two owner items for one stuck turn', !!hx && !hx.err && hx.filed.length === 1 && hx.filed[0] === 'antigravity:cid-1', J(hx));
     }
     // THE NOTICE DOES NOT GO SILENT WHILE THE WAIT STILL REFUSES (主开发 08:35Z): a 13-hour wait, a refusal every 61 minutes ⇒
     // notices at 0 h, after 6 h, after 12 h — and at no instant two open (each expires at its own 6-hour mark)

@@ -1750,6 +1750,7 @@ export default {
   "all clear": "すべて対応済み",
   "cannot be read": "読み込めません",
   "For you cannot read its saved list right now ({file}: {code}) \u2014 nothing can be filed or changed until it reads. It is read again soon.": "「あなた宛て」は保存済みの一覧を今読み込めません（{file}：{code}）— 読み込めるまで何も追加・変更できません。まもなく読み直します。",
+  "For you cannot read its saved list right now \u2014 nothing was saved. Try again once it reads.": "「あなた宛て」は保存済みの一覧を今は読めません — 何も保存されていません。読めるようになってからもう一度お試しください。",   // B-44f3 remainder: the paste box's press while For you is held
   "For you's saved list is damaged and could not be set aside ({file}) \u2014 it is kept exactly as it is, and nothing can be filed or changed until it is fixed.": "「あなた宛て」の保存済みの一覧は壊れていて退避もできませんでした（{file}）— そのまま保持し、直るまで何も追加・変更できません。",
   "by the agent": "エージェントによる",
   "automatically": "自動的に",

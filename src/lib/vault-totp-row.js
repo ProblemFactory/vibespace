@@ -199,6 +199,7 @@ const ADD_WORDS = {
   vault_locked: () => t('The vault is locked — unlock it first, then preview again'),
   vault_not_set_up: () => t('The vault is not set up yet — set the second password first'),
   preview_first: () => t('Check the code first — the code it shows is the one your authenticator should show'),
+  'todos-unread': () => t('For you cannot read its saved list right now — nothing was saved. Try again once it reads.'),   // B-44f3: a press while For you is held
 };
 const addWords = (r, x = {}) => (ADD_WORDS[r && r.code] ? ADD_WORDS[r.code](x) : failWords(r));
 

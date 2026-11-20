@@ -198,6 +198,85 @@ console.log('① THE STORE — held on a failed read, every write refused by nam
   ok(e && e.code === 'todos-unread' && /a write is refused/.test(e.message) && m._writeTimer == null && fs.statSync(f).isDirectory(), 'THE BELT ALONE (add\'s own refusal cut): the save refuses by name — no write armed, the live path untouched', { e: e && e.message });
 }
 
+{
+  // A READ AGAIN'S SET-ASIDE AND THE PROCESS'S END (B-44f3 remainder — THE SHAPE CHANGED at its second read: a finish at the exit's
+  // flush raced the rename still out). The set-aside announces an INTENT file before its rename; THE NEXT BOOT judges it.
+  //   'stop'        a stop() lands while the rename is out and the process lives on (a suite's / a migration's store): finished at once
+  //   'exit-after'  the rename LANDED and the process ends before its continuation (the hub's exit): the next start names the bytes
+  //   'exit-before' the process ends before the rename lands: the next start reads the torn bytes itself (sets them aside, names them)
+  const USRC = read('src/user-todos.js');
+  const scene = async (UTm, mode = 'stop', { judgeIntent = false } = {}) => {   // judgeIntent: only where the drop is asserted (the bounded wait costs time)
+    const d = dataDir(), f = path.join(d, 'user-todos.json');
+    fs.mkdirSync(f);   // held at the start (EISDIR)
+    const m = quiet(() => new UTm.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY }));
+    fs.rmdirSync(f); fs.writeFileSync(f, '{"items": [ torn');   // torn bytes at the read again — they CAN be set aside
+    const asideNow = () => fs.readdirSync(d).filter((x) => x.startsWith('user-todos.json.corrupt-'));
+    const namings = (items, aside) => (items || []).filter((i) => i && i.status === 'open' && aside.some((x) => String(i.text || '').includes(x))).length;
+    const nextStart = () => {   // the NEXT start over the same folder: what it says (EXACTLY one notice naming the bytes)
+      const m2 = quiet(() => new UTm.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY }));
+      const aside = asideNow();
+      const out = { aside: aside.length, notices: namings(m2.snapshot().open, aside), held: m2.isHeldUnread() };
+      m2.stop();   // its list (with the notice) on disk — the intent goes after that, off the loop
+      return out;
+    };
+    const intentGone = async () => { for (let k = 0; k < 80 && fs.existsSync(f + '.aside-intent'); k++) await new Promise((res) => setTimeout(res, 25)); return !fs.existsSync(f + '.aside-intent'); };   // a bounded wait for the drop (an event), never a verdict on the clock
+    const r0 = fs.promises.rename;
+    let reached = null, atNext = null;
+    const reachedP = new Promise((res) => { reached = res; });
+    fs.promises.rename = async (a, b) => {
+      if (mode === 'stop') { m.stop(); return r0.call(fs.promises, a, b); }   // the stop lands while the rename is out
+      if (mode === 'exit-after') await r0.call(fs.promises, a, b);           // the rename LANDED …
+      m.stop(); atNext = nextStart(); reached();                              // … and the process ends here: the next start
+      return new Promise(() => { });                                          // (its continuation never runs)
+    };
+    let lifted = null, self = null;
+    try {
+      if (mode === 'stop') { lifted = await quiet(() => m.readAgain()); let own = null; try { own = JSON.parse(fs.readFileSync(f, 'utf8')); } catch { own = null; } self = own ? namings(own.items, asideNow()) : -1; }   // the stopped store's OWN list, before any next start
+      else { const ended = await Promise.race([reachedP.then(() => 'reached'), m.readAgain().then(() => 'returned', () => 'threw')]); if (ended !== 'reached') return { mode, never: ended }; }   // a rename never reached ends the scene by name
+    } finally { fs.promises.rename = r0; }
+    if (mode === 'stop') { m.stop(); atNext = nextStart(); }
+    return { mode, lifted, self, ...atNext, intentGone: judgeIntent ? await intentGone() : null };
+  };
+  const a = await scene(UT), ae = await scene(UT, 'exit-after', { judgeIntent: true }), ab = await scene(UT, 'exit-before', { judgeIntent: true });
+  ok(a.lifted === true && a.self === 1 && a.aside === 1 && a.notices === 1 && !a.held, 'a STOP while the read again sets torn bytes aside (the process lives on): the stopped store FINISHES it — its own list holds the ONE notice naming the bytes; the next start reads it', a);
+  ok(ae.aside === 1 && ae.notices === 1 && !ae.held && ae.intentGone, 'THE HUB\'S EXIT after the rename landed, before the list was written: the NEXT START names the bytes from the set-aside\'s intent (empty list + its notice; the intent dropped)', ae);
+  ok(ab.aside === 1 && ab.notices === 1 && !ab.held && ab.intentGone, 'the exit BEFORE the rename landed: the next start reads the torn bytes itself — set aside and named by its own boot (the stale intent dropped)', ab);
+  const Ux = MJ.load('src/user-todos.js', anchored(USRC, '    setAside = this._bootIntent(a0);', '    setAside = null;', 'the boot not judging the intent'), 'boot-intent');
+  const aex = await scene(Ux, 'exit-after');
+  ok(aex.aside === 1 && aex.notices === 0, 'CONTROL (the boot not judging the intent): the bytes are aside and the next start names nothing — an empty list, the person never told', aex);
+  const Uw = MJ.load('src/user-todos.js', anchored(USRC, "        try { await fs.promises.writeFile(this._intentPath(), JSON.stringify({ why: why0, to: to0 })); }", '        try { }', 'no intent before the rename'), 'no-intent');
+  const Us = MJ.load('src/user-todos.js', anchored(USRC, '        if (this._unreadStopped && this._unread && s0 && s0.to) { this._finishAside(s0); return true; }', '', 'the stopped set-aside not finished'), 'stop-finish');
+  const asx = await scene(Us);
+  ok(asx.self === -1, 'CONTROL (the stopped set-aside not finished): the stopped store writes no list of its own — only the next boot could name the bytes', asx);
+  // AN UNREADABLE BOOT keeps the intent it cannot judge (and one it cannot READ then: read again at the lift); the hold's lift on a
+  // missing file («gone twice») names the bytes from it
+  const heldBoot = async (UTm, reread = false) => {
+    const d = dataDir(), f = path.join(d, 'user-todos.json'), to = 'user-todos.json.corrupt-2026-11-20T00-00-00-000Z', ip = f + '.aside-intent';
+    fs.writeFileSync(path.join(d, to), '{"items": [ torn');
+    if (reread) fs.mkdirSync(ip); else fs.writeFileSync(ip, JSON.stringify({ why: 'corrupt JSON', to }));   // reread: the intent unreadable at the boot too (EISDIR)
+    fs.mkdirSync(f);   // the store unreadable at the boot (EISDIR)
+    const m = quiet(() => new UTm.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY }));
+    fs.rmdirSync(f);   // the file gone
+    if (reread) { fs.rmdirSync(ip); fs.writeFileSync(ip, JSON.stringify({ why: 'corrupt JSON', to })); }   // the folder readable again
+    const r1 = await quiet(() => m.readAgain());   // gone once (held again)
+    const kept = fs.existsSync(ip) && m.isHeldUnread();   // judged AFTER a turn: an async drop would have landed
+    const r2 = await quiet(() => m.readAgain());   // gone twice (lifted)
+    const n = (m.snapshot().open || []).filter((i) => i && String(i.text || '').includes(to)).length;
+    m.stop();
+    return { reread, kept, r1, r2, n };
+  };
+  const hb = await heldBoot(UT), hr = await heldBoot(UT, true);
+  ok(hb.kept && hb.r1 === false && hb.r2 === true && hb.n === 1, 'an UNREADABLE boot keeps the last run\'s set-aside intent; the hold\'s lift on the missing file names the bytes (ONE notice)', hb);
+  ok(hr.kept && hr.r2 === true && hr.n === 1, '…an intent the boot could not READ either (the folder unreadable then) is read again at the lift, off the loop — named (ONE notice)', hr);
+  const Uk = MJ.load('src/user-todos.js', anchored(USRC, "    if (a0.state === 'unreadable') { this._heldIntent = it; return null; }", "    if (a0.state === 'unreadable') { this._dropIntentOff(); return null; }", 'the unreadable boot dropping the intent'), 'held-intent');
+  const hk = await heldBoot(Uk);
+  ok(hk.n === 0, 'CONTROL (an unreadable boot dropping the intent it cannot judge): the lift names nothing', hk);
+
+
+  const aew = await scene(Uw, 'exit-after');
+  ok(aew.aside === 1 && aew.notices === 0, 'CONTROL (no intent written before the rename): the next start names nothing', aew);
+}
+
 // ── ② EVERY CALLER IS A ROW ──────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('② every server file that writes or reads the For-you store is a row (its counts, its class, why)');
 const W = 'add|setStatus|setStatusMany|readNotices|resolveAnswered|noteFact|resolveByReply|resolveByAgent|resolveByJob|setCard|setJudged|setFacts|redrawItem|reshapeItems|clearItems|rekey|flush|expireDue';
