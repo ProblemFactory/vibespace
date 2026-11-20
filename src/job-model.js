@@ -385,8 +385,10 @@ function leftRecord(l) {
  *  left (`short` ≤ `n`); a record that says more is a bug in its writer, named for the hub's log ('' = sound). leftRecord clamps
  *  it all the same — the words never say more than were left */
 function leftRecordFault(l) {
-  if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 0 || !Number.isInteger(l.short) || l.short <= l.n) return '';
-  return `its exit record counts more than it left (short ${l.short} of n ${l.n}) — a bug in the wrapper's record, said as ${l.n}`;
+  if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 0) return '';
+  if (Number.isInteger(l.short) && l.short > l.n) return `its exit record counts more than it left (short ${l.short} of n ${l.n}) — a bug in the wrapper's record, said as ${l.n}`;
+  if (Number.isInteger(l.outside) && l.outside > l.n) return `its exit record counts more than it left (outside ${l.outside} of n ${l.n}) — a bug in the wrapper's record, said as ${l.n}`;   // B-7ca1
+  return '';
 }
 /** «the job left 1 process running — it was stopped; to keep a daemon, run it as a service job» · «… stopped by force …» ·
  *  «it left 1 process running — kept: a service's own until it is stopped or started again» · round 6: «1 process left its

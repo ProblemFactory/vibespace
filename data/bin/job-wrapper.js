@@ -790,7 +790,7 @@ function onStop(sig, at, by) {
     // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later). Round 7: the group
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
-    for (const p of escapedOf()) termOnce(p);   // B-7ca1: a TASK's too — what carries its mark outside its group hears the stop with the main (its grace runs from the stop)
+    for (const p of escapedOf()) if (keeps || p[2]) termOnce(p);   // B-7ca1: a TASK's too — what carries THIS RUN's mark outside its group hears the stop with the main (its grace runs from the stop)
     const t = setTimeout(() => { graceUp = true; if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; killMain(); }, left); t.unref?.();
     return;
   }
@@ -932,17 +932,22 @@ function groupLeft() {
 }
 const same = ([pid, st]) => { const r = statOf(pid); return !!r && r[0] !== 'Z' && Number(r[19]) === st; };
 const MARK = spec && spec.env && spec.env.VIBESPACE_JOB_ID ? `VIBESPACE_JOB_ID=${spec.env.VIBESPACE_JOB_ID}` : '';
-function escapedOf() { // started after us, outside our group, carrying the job's mark — never us (our own env carries it too)
+// B-7ca1 (its read's MUST): THIS RUN's own mark — the job's mark is per job, and an earlier run's leftover (and what it forks during
+// this run) carries it too; a task's stop ends only what carries THIS run's ([2] of a row: true)
+const MARK_RUN = spec && spec.env && spec.env.VIBESPACE_JOB_RUN ? `VIBESPACE_JOB_RUN=${spec.env.VIBESPACE_JOB_RUN}` : '';
+function escapedOf() { // started after us, outside our group, carrying the job's mark — never us (our own env carries it too); bounded (B-7ca1: it runs at every stop)
   const out = [], kept = keptTest();   // B-2c5c: a hub started inside the job carries the job's mark — never an escapee
   let ents = [];
   if (!MARK) return out;
   try { ents = fs.readdirSync('/proc'); } catch { return out; }
+  const t0 = Date.now();
   for (const e of ents) {
     if (!/^\d+$/.test(e) || Number(e) === process.pid) continue;
+    if (Date.now() - t0 > 250) { out.cut = true; break; }   // B-7ca1 (its read): bounded — a cut scan is said by the caller's count, never «none»
     const r = statOf(e);
-    if (!r || r[0] === 'Z' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime) continue;
+    if (!r || r[0] === 'Z' || r[0] === 'D' || Number(r[2]) === process.pid || Number(r[19]) < stamp.starttime) continue;   // D: an environ read takes its memory map's lock
     if (kept && kept(e)) continue;
-    try { if (fs.readFileSync(`/proc/${e}/environ`, 'latin1').split('\0').includes(MARK)) out.push([Number(e), Number(r[19])]); } catch { }
+    try { const env = fs.readFileSync(`/proc/${e}/environ`, 'latin1').split('\0'); if (env.includes(MARK)) out.push([Number(e), Number(r[19]), !!MARK_RUN && env.includes(MARK_RUN)]); } catch { }
   }
   return out;
 }
@@ -952,18 +957,19 @@ async function drainGroup() {
   // B-7ca1 (the group rung — no scope: a container, a pod): a TASK's stop ends what carries its mark outside its group too — a child that
   // made its own group (setsid, the timeout program) and was re-parented before the stop is neither in the group nor under the tree the
   // stop read; by identity (pid + start), never one that started before us, never a hub started inside the job (keptTest)
-  const taskStop = !keeps && !!stopping;
+  let taskStop = !keeps && !!stopping;   // read again before the kill pass: a stop that lands while a natural end drains is a stop (its read's S2)
+  const ours = (p) => !!p[2];   // carries THIS run's mark (an earlier run's leftover, and what it forks, never does)
   // B-c134: a STOP's tree — what of it the stop step read outside our group and is still there is the stop's to end, with the rest
   { const g = new Set(left.map(termKey)); for (const p of stopping ? stopTree.filter(same) : []) if (!g.has(termKey(p))) { left.push(p); g.add(termKey(p)); } }
   if (!left.length && !out.length) return {};
   // round 10c: EVERY COUNT IN THE RECORD IS THE SIZE OF ONE SET of processes (`pid:start`) — one both scans saw (it left our group
   // between them) is one process, never two
-  const inGroup = new Set(left.map(termKey)), outside = out.filter((p) => !inGroup.has(termKey(p)));
-  const rows = keeps || taskStop ? [...left, ...outside] : left, n = rows.length;
+  const inGroup = new Set(left.map(termKey)), outside = out.filter((p) => !inGroup.has(termKey(p))), runOut = outside.filter(ours);
+  const rows = keeps ? [...left, ...outside] : taskStop ? [...left, ...runOut] : left, n = rows.length;
   const kept = keeps ? { kept: true, pids: rows.slice(0, 64), boot: bootId(), ...(outside.length ? { escaped: outside.length } : {}), ...(n > 64 ? { recorded: 64 } : {}) } : null;
   if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
   if (!n) return { left: { n: 0, escaped: outside.length } }; // a task's that left its group: said, not stopped
-  if (mine || taskStop) left.push(...outside);
+  if (mine) left.push(...outside); else if (taskStop) left.push(...runOut);
   // round 7: what our SIGTERM reaches only now hears it now (the group's and a stopped service's escapees' heard it at the stop).
   // Round 8: A STOP HAS ONE CLOCK — its grace runs from the stop, for every process: one first seen at the drain gets what is LEFT
   // of it, never a fresh grace (round 7's per-process deadline ran to twice the grace, past the engine's kill step a second after
@@ -979,15 +985,16 @@ async function drainGroup() {
   if (!late && live.length) do { await nap(25); live = live.filter(same); } while (live.length && Date.now() < deadline);
   // by force: the group once more and a stopped service's marked processes — rescanned until a pass finds none (one that forks on
   // its SIGTERM leaves no child behind), at most three passes
+  if (!taskStop && !keeps && stopping) taskStop = true;   // a stop landed while this drain waited: its stop step SIGTERMed this run's escapees — they are a stop's now
   const killed = new Set();
   for (let pass = 0; pass < 3; pass++) {
-    const more = [...groupLeft(), ...(mine || taskStop ? escapedOf() : []), ...(stopping ? stopTree.filter(same) : [])].filter((p) => !killed.has(termKey(p)));
+    const more = [...groupLeft(), ...(mine ? escapedOf() : taskStop ? escapedOf().filter(ours) : []), ...(stopping ? stopTree.filter(same) : [])].filter((p) => !killed.has(termKey(p)));
     if (!more.length) break;
     for (const p of more) if (killNow(p)) killed.add(termKey(p));
   }
   const still = killed.size;
   if (still && !forced) forced = `${still} process${still === 1 ? '' : 'es'} it left ${still === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its SIGTERM'} — killed`;
-  const counted = new Set([...rows.map(termKey), ...killed]), all = counted.size; // forked while it drained: counted with the rest
+  const counted = new Set([...rows.map(termKey), ...killed, ...(taskStop ? runOut.filter((p) => !same(p) || killed.has(termKey(p))).map(termKey) : [])]), all = counted.size; // forked while it drained: counted with the rest (B-7ca1: and a late stop's escapees of this run)
   // what got less than the full grace — OF WHAT IT LEFT (round 10c: r10 counted every SIGTERM of the run, one that ended before
   // the drain too — 4 of 3). Round 11: what we KILLED that NO step reached with SIGTERM (the stop step's, the drain's — the one
   // table): it only ever got SIGKILL. One the drain SIGTERMed heard the stop — what was left of its grace was its to use, ended on
@@ -996,7 +1003,7 @@ async function drainGroup() {
   // earlier pass (the stop step's, the drain's with grace left) had its grace. A state the table holds — no clock in the count
   const short = stopping ? [...killed].filter((k) => { const t = termed.get(k); return !t || t.pass === 'kill'; }).length : 0;
   if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
-  return { left: { n: all, ...(still ? { force: true } : {}), ...(outside.length ? (taskStop ? { outside: outside.length } : { escaped: outside.length }) : {}), ...(short ? { short } : {}) } };   // B-7ca1: a stop's are STOPPED (outside), a natural end's said (escaped)
+  return { left: { n: all, ...(still ? { force: true } : {}), ...(taskStop ? { ...(runOut.length ? { outside: runOut.length } : {}), ...(outside.length > runOut.length ? { escaped: outside.length - runOut.length } : {}) } : outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };   // B-7ca1: a stop's are STOPPED (outside), a natural end's said (escaped)
 }
 
 async function ended(code, signal) {

@@ -216,12 +216,14 @@ const popts = { procRoot: FP };
 // THE WRAPPER'S TWIN, with what it knows: the hub's pid (data/server.pid, written at the hub's boot) — a job that restarted the hub
 // (a job running the server's own start script) ends nothing under it. The scene: a stand-in «hub» the job started (setsid, its own
 // sleep), its pid in the scratch data folder's server.pid; the stop is a signal to the WRAPPER ALONE (no engine intent: only the
-// wrapper's own walk can reach it)
-const hubArgv = (dd) => ['sh', '-c', `setsid sh -c 'sleep 313 & wait' & echo $! > ${JSON.stringify(path.join(dd, 'server.pid'))}; timeout 314 sleep 314 & wait`];
+// wrapper's own walk can reach it). B-7ca1: the stand-in is NODE, as a hub is — a task's stop now ends what left its group carrying
+// its run's mark, and the wrapper keeps out a server.pid root only while it is not PROVEN no hub (B-2c5c r2: a root that is not node
+// at all is a recycled pid); an `sh` stand-in was spared only because a task's escapees were never stopped
+const hubArgv = (dd) => ['sh', '-c', `setsid node -e "require('child_process').spawn('sleep', ['313'], { stdio: 'ignore' }); setInterval(() => { }, 1e9)" & echo $! > ${JSON.stringify(path.join(dd, 'server.pid'))}; timeout 314 sleep 314 & wait`];
 const hubReady = (tree) => tree.some((m) => m.comm === 'timeout') && tree.filter((m) => m.comm === 'sleep').length >= 2;
 const hubBefore = (expectEnded) => ({ dd }) => {
   let hubPid = 0; try { hubPid = Number(fs.readFileSync(path.join(dd, 'server.pid'), 'utf8').trim()); } catch { }
-  const hub = hubPid > 1 ? [{ ...PI.identityOf(hubPid), comm: 'sh' }, ...PI.treeOf([hubPid])] : [];
+  const hub = hubPid > 1 ? [{ ...PI.identityOf(hubPid), comm: 'node' }, ...PI.treeOf([hubPid])] : [];
   mine.push(...hub);
   const alive = () => hub.filter((m) => PI.aliveIdentity(m) === true).length;
   return { keep: expectEnded ? new Set() : new Set(hub.map((m) => m.pid)), after: async () => { if (expectEnded) await until(() => alive() === 0, 3000); return { hub: hub.length, alive: alive() }; } };
@@ -869,37 +871,52 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
       ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(ESC) && fs.readFileSync(ESC, 'utf8').trim().length > 0,
       before: ({ tree, jm }) => {
         const pid = Number(fs.readFileSync(ESC, 'utf8').trim()), id = PI.identityOf(pid); mine.push(id);
+        const job = [...jm.jobs.values()][0], ownGroup = PI.pgidOf(pid) === pid, inTree = tree.some((m) => m.pid === pid);   // read BEFORE the stop (its read's NIT)
+        // its read's MUST: a STRANGER carrying the job's mark but ANOTHER run's (an earlier run's leftover forks it during this run) —
+        // started after the wrapper, outside its group: a stop of THIS run never ends it
+        const st = spawn('sleep', ['320'], { env: { ...process.env, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:1` }, stdio: 'ignore', detached: true }); st.unref();   // detached: its own session and group (setsid)
+        const sid = PI.identityOf(st.pid); mine.push(sid);
         return { after: async () => {
           await until(() => PI.aliveIdentity(id) === false, 1500);
-          const alive = PI.aliveIdentity(id) === true, job = [...jm.jobs.values()][0], run = job && job.runs[job.runs.length - 1];
+          const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
           if (alive) PI.signalIdentity(id, 'SIGKILL');
+          if (stranger) PI.signalIdentity(sid, 'SIGKILL');
           let view = null; try { view = ((jm.snapshot(job) || {}).run || {}).left || null; } catch (e) { view = { threw: String(e && e.message) }; }   // the API's view (the card's row reads it)
-          return { pid, alive, inTree: tree.some((m) => m.pid === pid), ownGroup: PI.pgidOf(pid) === pid || !alive, left: (run && run.left) || null, view };
+          return { pid, alive, stranger, inTree, ownGroup, left: (run && run.left) || null, view };
         } };
       } });
   };
   // (a) a stop through the wrapper (its stop step and its drain)
   const sa = await escScene(WRAP, 'esc-stop');
-  ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside >= 1 && !sa.after.left.escaped,
-    'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried the job\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
-  const TS = "  const taskStop = !keeps && !!stopping;\n", SS = "    for (const p of escapedOf()) termOnce(p);   // B-7ca1: a TASK's too — what carries its mark outside its group hears the stop with the main (its grace runs from the stop)\n";
-  const relEsc = anchored(anchored(WRAP, TS, "  const taskStop = false;   // MUTANT: the release — a task's escapees are said, not stopped\n", 'b7ca1-taskstop-cut'), SS, "    if (keeps) for (const p of escapedOf()) termOnce(p);\n", 'b7ca1-stopstep-cut');   // stale-pins: kept (the control plants the release's text in a copy)
+  ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside === 1,
+    'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried THIS run\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
+  ok(sa.after && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
   ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
   const VW = 'escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {})';
   const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)
   const sv = await escScene(WRAP, 'esc-view-mut', { jobsMod: viewCut });
   ok(sv.after && sv.after.left && sv.after.left.outside >= 1 && sv.after.view && !sv.after.view.outside, 'CONTROL (the view without `outside`, in a copy): the run records it but the card\'s row never sees it — RED', sv.after);
+  const TS = "  let taskStop = !keeps && !!stopping;", SS = "    for (const p of escapedOf()) if (keeps || p[2]) termOnce(p);";
+  const relEsc = anchored(anchored(WRAP, TS, "  let taskStop = false;   // MUTANT: the release — a task's escapees are said, not stopped", 'b7ca1-taskstop-cut'), SS, "    if (keeps) for (const p of escapedOf()) termOnce(p);", 'b7ca1-stopstep-cut');   // stale-pins: kept (the control plants the release's text in a copy)
   const sx = await escScene(relEsc, 'esc-stop-mut');
   ok(sx.after && sx.after.alive && sx.after.left && sx.after.left.escaped >= 1 && !sx.after.left.outside, 'CONTROL (the release\'s wrapper, in a copy): the re-parented child is LEFT RUNNING — said «left its group — not stopped» — RED', sx.after);
-  // (b) a FORCE stop: the wrapper is SIGKILLed (its stop step never runs) — the ENGINE ends what carries the mark, beside the tree
+  const OURS = "  const ours = (p) => !!p[2];";
+  const anyRun = anchored(WRAP, OURS, "  const ours = () => true;   // MUTANT: the job's mark alone", 'b7ca1-run-mark-cut');
+  const sr = await escScene(anyRun, 'esc-run-mut');
+  ok(sr.after && !sr.after.stranger, 'CONTROL (the job\'s mark alone, in a copy): the STRANGER — another run\'s — is ended by this run\'s stop — RED', sr.after);
+  // (b) a FORCE stop: the wrapper is SIGKILLed (its stop step never runs) — the ENGINE ends what carries THIS run's mark, beside the tree
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
-  const MK = "      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || PI.pgidOf(id.pid) === Number(stamp.pid) || hubs(id.pid)) continue;\n";
-  ok(JSRC.split(MK).length === 2, 'control setup: the engine\'s mark kill is found once in jobs.js');
+  const MK = "      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || (!group && PI.pgidOf(id.pid) === Number(stamp.pid)) || hubs(id.pid) || ko.has(id.pid)) continue;";
+  const RM = "mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`";
+  ok(JSRC.split(MK).length === 2 && JSRC.split(RM).length === 2, 'control setup: the engine\'s mark kill and its run\'s mark are found once each in jobs.js');
   const fa = await escScene(WRAP, 'esc-force', { force: true });
-  ok(fa.after && !fa.after.alive && /carrying its mark outside its group \(re-parented\)/.test(fa.said), 'B-7ca1: a FORCE stop (the wrapper SIGKILLed) — the engine kills the re-parented child carrying the mark, said in the log', { after: fa.after, said: fa.said.slice(0, 400) });
-  const noMark = MJ.load('src/jobs.js', anchored(JSRC, MK, '      continue;   /* MUTANT: no mark kill */\n', 'b7ca1-engine-mark-cut'), 'b7ca1-engine-mark-cut');
+  ok(fa.after && !fa.after.alive && fa.after.stranger && /carrying its run's mark outside its group \(re-parented\)/.test(fa.said), 'B-7ca1: a FORCE stop (the wrapper SIGKILLed) — the engine kills the re-parented child carrying the run\'s mark, said in the log; the stranger (another run\'s) lives', { after: fa.after, said: fa.said.slice(0, 400) });
+  const noMark = MJ.load('src/jobs.js', anchored(JSRC, MK, '      continue;   /* MUTANT: no mark kill */', 'b7ca1-engine-mark-cut'), 'b7ca1-engine-mark-cut');
   const fx = await escScene(WRAP, 'esc-force-mut', { force: true, jobsMod: noMark });
   ok(fx.after && fx.after.alive, 'CONTROL (the engine without its mark kill, in a copy): the force stop leaves the re-parented child RUNNING — RED', fx.after);
+  const jobMark = MJ.load('src/jobs.js', anchored(JSRC, RM, 'mark: `VIBESPACE_JOB_ID=${job.id}`', 'b7ca1-engine-runmark-cut'), 'b7ca1-engine-runmark-cut');
+  const fj = await escScene(WRAP, 'esc-force-jobmark', { force: true, jobsMod: jobMark });
+  ok(fj.after && !fj.after.stranger, 'CONTROL (the engine by the job\'s mark, in a copy): the force stop kills the STRANGER — another run\'s — RED', fj.after);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

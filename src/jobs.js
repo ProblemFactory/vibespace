@@ -1989,20 +1989,23 @@ class JobManager {
     const killed = [], refused = [];
     let unjudged = 0;
     for (const m of tree) { const r = PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }); if (r.ok) killed.push(m.comm); else if (r.why === 'not-ours') refused.push(m.comm); else if (r.why !== 'gone' && r.why !== 'stale' && r.why !== 'pid-recycled') unjudged++; }   // a recycled pid: that member had ended
-    // B-7ca1 (the group rung — no scope: a container, a pod): what carries the job's MARK outside its group and outside the tree read now —
-    // a child that made its own group (setsid, the timeout program) and was re-parented before the stop — ends too, by identity (a
-    // bounded scan, its cut said); never the wrapper (the caller's own signal), never a hub started inside the job (B-2c5c)
-    const inTree = new Set(t.map((m) => `${m.pid}:${m.starttime}`)), run0 = job.runs && job.runs[job.runs.length - 1], hubs = this._hubTest(this._runWrapper(job, run0));
-    const marked = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}`, since: Number(stamp.starttime) || 0 }), mscan = marked.scan || {};
+    // B-7ca1 (the group rung — no scope: a container, a pod): what carries THIS RUN's mark outside its group and outside the tree read
+    // now — a child that made its own group (setsid, the timeout program) and was re-parented before the stop — ends too, by identity (a
+    // bounded scan, its cut said). Its read: the RUN's mark (an earlier run's leftover, and what it forks, carries the job's only); never
+    // on a scope's rung (its scope ends its own; what left the scope is not this row's); never the wrapper (the caller's signal), a hub
+    // started inside the job (B-2c5c) or what another stop keeps out (holders, other jobs' wrappers)
+    const inTree = new Set(t.map((m) => `${m.pid}:${m.starttime}`)), run0 = job.runs && job.runs[job.runs.length - 1], sc = run0 ? this._runScope(job, run0) : null;
+    const marks = !!(run0 && run0.startedAt) && !(sc && sc.dir), hubs = marks ? this._hubTest(this._runWrapper(job, run0)) : null, ko = marks ? new Set((PI.keptOut([]) || []).map((x) => Number(Array.isArray(x) ? x[0] : x))) : null;
+    const marked = marks ? PI.membersOf({ mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`, since: Number(stamp.starttime) || 0 }) : [], mscan = marked.scan || {};
     let escaped = 0;
     for (const id of marked) {
-      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || PI.pgidOf(id.pid) === Number(stamp.pid) || hubs(id.pid)) continue;
+      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || (!group && PI.pgidOf(id.pid) === Number(stamp.pid)) || hubs(id.pid) || ko.has(id.pid)) continue;   // the group's own die with the group's SIGKILL — unless the hub is in it (never signalled: each one here)
       const r = PI.signalIdentity(id, 'SIGKILL', { what: `job ${job.id}'s mark` }); if (r.ok) escaped++; else if (r.why === 'not-ours') refused.push(`pid ${id.pid}`); else if (r.why !== 'gone' && r.why !== 'stale' && r.why !== 'pid-recycled') unjudged++;
     }
     // B-c134 cure (MUST B): said where the person reads — the job's OWN log (a force stop's wrapper is dead: nobody else writes it),
     // a refused signal named, a cut walk said; and in the hub's log as before
-    const n = killed.length, line = `its forced end killed ${n} process${n === 1 ? '' : 'es'} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`
-      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (escaped ? `; and ${escaped} carrying its mark outside its group (re-parented)` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '') + (mscan.cut ? ` — its mark's scan read ${mscan.scanned} of ${mscan.total} processes: what left its group may be left` : '');
+    const n = killed.length, es = (k) => (k === 1 ? '' : 'es'), line = `its forced end killed ${[...(n || !escaped ? [`${n} process${es(n)} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`] : []), ...(escaped ? [`${escaped} process${es(escaped)} carrying its run's mark outside its group (re-parented)`] : [])].join(' and ')}`
+      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '') + (mscan.cut ? ` — its mark's scan read ${mscan.scanned} of ${mscan.total} processes: what left its group may be left` : '');
     if (n || escaped || refused.length || unjudged || t.cut || mscan.cut) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
     return n + escaped;
   }
@@ -2740,7 +2743,7 @@ class JobManager {
     // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
-      env: jobEnv({ ...(job.cmd.env || {}), ...(vj ? VJ.envOf(vj.plan) : {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
+      env: jobEnv({ ...(job.cmd.env || {}), ...(vj ? VJ.envOf(vj.plan) : {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:${runTs}`, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
       kind: job.kind === 'service' ? 'service' : 'task', // round 5 (the ruling): a service keeps what its run leaves running, a task's are stopped
       // round 4: the ASKED bound rides too — the cgroup rung caps it by what contains ITS scope, read once the scope exists
