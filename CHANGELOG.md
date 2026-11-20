@@ -9,10 +9,25 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Add machine can be filled from a pasted ssh config block, as VS Code writes it: you see each field it read and every line it left out, before anything is added.
 - A machine can be added behind one jump host (ssh -J). Its folders then mount read-only over the device link.
 - Add machine can log in with a key file already on this server, given by its path.
+- An agent holding a granted key can now list conversations and browsers: what runs in each, whether it may be ended and why not, its desktop and its memory.
+- A conversation ended on purpose says who ended it and when — by hand, or by the key that asked, by name; an end that cut the work says «ended mid-task».
+- An agent holding an automation key can resume an ended conversation (`vibespace-api conversations resume`). Nothing is sent to it and nothing is billed.
+- It refuses, saying why, a conversation whose resume could start a billed turn by itself (an active goal, messages in its queue). At most two start at a time.
+- A page that shows that conversation as ended turns its window live in place, without switching desktops or taking focus.
+- A job result, a reminder or a wake sent to one conversation now resumes it when a restart ended it — one turn, after its limit and spend ceiling are asked.
+- A conversation ended on purpose is resumed only by a job you allowed: tick it in the Terminate confirm or in the job's row in Background Work.
+- A resumed window says what resumed it and when.
+- An ended conversation's row and window say how many notices wait for it, and why a delivery did not resume it.
+- An agent that may not end a conversation can propose it on a For-you card: you tick which to terminate, and it reads your answer at its next turn.
+- An agent can ask that a job may resume its conversation after you end it: one card per agent naming that conversation, and one press allows the ticked jobs.
+- For you names the Google Drive and Gmail storages still signed in with a company preset's replaced OAuth client, with a Re-authorize door.
+- When you browse a profile yourself, a site's sign-in shows in your window: VibeSpace's sign-in form, or the browser's own sheet with a door to it.
 
 ### Changed
 - Locate's door for a session the «Stopped by a limit or overload» filter hides now reads «Turn off the "Stopped by a limit or overload" filter».
 - On the Tasks board, the «Stopped by a limit or overload (N)» count now counts the stopped sessions the board shows; the status filter no longer narrows it.
+- For coordinators: an agent's end (or archive) is refused while the conversation is busy; ending your OWN busy worker now takes --force.
+- A terminal conversation, or one whose harness reports too little, is a person's to end, unless the key opened it (then --force ends it).
 
 ### Fixed
 - A «file watches» notice still open when VibeSpace restarts now clears itself once watches work again, instead of staying for good.
@@ -40,6 +55,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Two VibeSpace processes on one data folder no longer each count their own turns nobody typed: the second starts none until the first ends, and says so.
 - A reset of the spend ledger is said only when turns that still count were lost, and its notice ends when they stop counting.
 - The meter's automatic Claude view does the same: the default account's own numbers (a pool's: its current account), never the CLI login's under its name.
+- Notifications no longer cover the open For you panel: they move above or beside it, or wait and later show in full; errors and Undo stay; a press keeps it open.
+- After you stop a Claude turn, the chat says which processes its command tool left running, with «End them» to end them on this machine.
+- A sign-in form inside a frame from another site: the agent now says whose frame it is and asks you to sign in there in the live view, not a dead-end tip.
 
 ### Security
 - A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.
