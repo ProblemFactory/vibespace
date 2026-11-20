@@ -70,8 +70,12 @@ export function installSessionLifecycle(App, ctx = {}) {
     });
   },
 
-  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false, bulk = false }) {
-    const openAt = unattendedOpen(this, quiet) ? PAGE_START : openClock();   // B-c87d: the open began NOW (the person's act — whatever ids it reuses); nobody on this page started it: the page's start
+  /** B-c87d r558: THE START OF A PERSON'S OPEN, read now — for a road outside this file that reads it where the person's act starts
+   *  the open, before its own awaits, and hands it on as `openAt` (layout.js: a desktop switch's replay, a preset the person loads) */
+  _openStartNow() { return unattendedOpen(this) ? PAGE_START : openClock(); },
+
+  createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false, bulk = false, openAt: pressAt = null }) {
+    const openAt = unattendedOpen(this, quiet) ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock());   // B-c87d: the open began at the person's act — the press a road hands on (r558), else NOW; nobody on this page started it: the page's start
     const createArgs = arguments[0] || {}; // B-864f: the create as it was asked — a window that waits for the vault replays it whole
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
@@ -871,7 +875,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   // link…) ⇒ wm.revealWindow — its own tab even when it hosts a group that shows another (inc-muiq348r-jwb5);
   // a MACHINE path (`replay`: a layout replay / boot restore / remote apply that found the window already open)
   // only raises it, as before — the record's `active` decides the tab.
-  _focusExistingSession(serverId, { replay = false, unattended = unattendedOpen(this) } = {}) {
+  _focusExistingSession(serverId, { replay = false, unattended = unattendedOpen(this), at = null } = {}) {
     for (const [winId, term] of this.sessions) {
       if (term.sessionId === serverId) {
         // A REVEAL WAITS ONLY FOR WHAT IS NOT YET STANDING (r5 O): the person named a window that stands — revealed now; a group
@@ -883,7 +887,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // B-c87d: the person's own open of a standing window takes its keys at once (the same task — whatever ids it reuses, r364);
         // one NOBODY ON THIS PAGE STARTED (a boot restore, a record from another device, an unattended open) goes through the door from
         // the page's start — it takes the keys only while the person has not acted on the page since it loaded
-        if (!off) lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : openClock() });   // through THE door either way (an open dialog keeps the keys; this road is reached late too, after an attach's await)
+        if (!off) lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : (Number.isFinite(at) ? at : openClock()) });   // through THE door either way (an open dialog keeps the keys; this road is reached late too, after an attach's await)
         return true;
       }
     }
@@ -897,13 +901,13 @@ export function installSessionLifecycle(App, ctx = {}) {
    *  attaching here came through this door as a person's open — keepInFront, an act nobody made, and revealWindow's switch back to
    *  that window's desktop ~1 s after the person's own switch, a reveal in flight retired, nothing said): a replay / restore
    *  (`replay` — attachSession's `syncId` or `machine`) only raises it, as _focusExistingSession's replay does. */
-  _focusPendingAttach(serverId, { replay = false, unattended = unattendedOpen(this) } = {}) {
+  _focusPendingAttach(serverId, { replay = false, unattended = unattendedOpen(this), at = null } = {}) {
     const w = this._attachWins && this._attachWins.get(serverId);
     const sent = this.ws && this.ws._attachInFlight && this.ws._attachInFlight.get(serverId);
     if (!w || !sent || Date.now() - sent >= 15000 || !this.wm.windows.has(w.id)) { if (w) this._attachWins.delete(serverId); return false; }
     if (!replay) this.desktopManager?.keepInFront?.(w.id); // a person's open: it stands — revealed now, in front of a group still forming around it (r5 O)
     this.wm.revealWindow(w.id, { replay });
-    if (!unattended) w._lateFocusSince = openClock();   // B-c87d: the person pressed it AGAIN while it attaches — the open starts again now (an impatient re-press keeps its keys)
+    if (!unattended) w._lateFocusSince = Number.isFinite(at) ? at : openClock();   // B-c87d: the person pressed it AGAIN while it attaches — the open starts again at that press (an impatient re-press keeps its keys)
     return true;
   },
 
@@ -938,17 +942,18 @@ export function installSessionLifecycle(App, ctx = {}) {
     return { set: (s) => { el.textContent = s; }, remove: () => el.remove() };
   },
 
-  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, machine = false, quiet = false } = {}) {
+  attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, machine = false, quiet = false, openAt: pressAt = null } = {}) {
     const unattended = unattendedOpen(this, quiet);   // B-c87d (r364): a fact of the page, never the syncId or `machine` an open reuses
-    const openAt = unattended ? PAGE_START : openClock();   // B-c87d: the open began NOW (the person's act); nobody on this page started it: the page's start
+    const openAt = unattended ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock());   // B-c87d: the open began at the person's act (the press a road hands on — r558 — else NOW); nobody on this page started it: the page's start
     cwd = stripCwdHostLabel(cwd); // keep openSpec.cwd a REAL path — it persists into layouts and feeds later resumes
     if (!quiet) this._closeSidebarOnMobile();   // a QUIET attach (a page following a resume nobody pressed) leaves a phone's open sidebar as it is
     // If we already have a window for this session, show it (a replay / restore — `syncId` or `machine` — only raises it)
-    if (this._focusExistingSession(serverId, { replay: !!(syncId || machine), unattended })) return null;
+    if (this._focusExistingSession(serverId, { replay: !!(syncId || machine), unattended, at: openAt })) return null;
     // AN OPEN RESOLVES TO THE WINDOW THIS PAGE HAS FIRST (r7 S — the r6 acceptance: with the conversation's window still attaching
     // here — not yet in this.sessions, filled at 'attached' — the open went to another desktop that listed it, nothing was built
     // there and the page said its window did not appear): the window shown (above), then the window still attaching, only then a
     // held window on another desktop — never a copy of the one this page has (desktop-manager revealHeldSession)
+    if (unattended && this._focusPendingAttach(serverId, { replay: !!(syncId || machine), unattended })) return null;   // B-c87d r558: an open nobody pressed (quiet) while a pressed attach is in flight renews nothing
     if (this._focusPendingAttach(serverId, { replay: !!(syncId || machine) })) return null; // B-0cc8: the attach in flight IS the answer — no second frame
     // ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — the writer of the triple): the shortcut above sees only the windows
     // this page BUILT; a conversation whose window waits in the record of a desktop not visited since the page loaded got a SECOND
@@ -1331,7 +1336,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       message: t('VibeSpace has not finished checking whether this conversation is running in another terminal. Resuming it now could start a second agent on the same conversation.'),
       confirmText: t('Resume anyway') });
   },
-  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false, bulk = false, unknownOk = false } = {}) {
+  resumeSession(sessionId, cwd, sessionName, { mode, model, effort, permission, accountId, worktree, syncId, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, hostId, keeperSid, winBounds, excludeWebuiId, onCreateResult, onCreateEnd, initialMessage, stay = false, fromWin = null, unattended = false, bulk = false, unknownOk = false, openAt = null } = {}) {
     const shown = this.wm.activeWindowId; // the window the person is in, before anything here moves the focus (r4 N3)
     this._closeSidebarOnMobile();
     const targetBackendId = backendSessionId || sessionId;
@@ -1381,7 +1386,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         const match = (sidebar._allSessions || []).find(s => (s.backendSessionId || s.sessionId) === targetBackendId && (s.backend || 'claude') === backend && s.webuiId);
         if (match && term.sessionId === match.webuiId && match.webuiId !== gone) {
           if (from) this._closeSecondView(from, { backend, cid: targetBackendId }); // the window pressed in shows a conversation this page shows live — a second view
-          this._focusExistingSession(match.webuiId, { replay: !!syncId });
+          this._focusExistingSession(match.webuiId, { replay: !!syncId, unattended: unattended || stay, at: openAt });   // B-c87d r558: the resume's own fact and start
           return;
         }
       }
@@ -1436,7 +1441,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     const liveRow = rec ? (runs(rec.openSpec?.serverId) || runs(rec.serverSessionId)) : null;
     if (liveRow) {
       const elsewhere = held && !tile && row.desk && row.desk !== dm?.activeDesktopId; // the row stands on a desktop not on show, unbuilt here
-      if (!elsewhere || (!given && this.stage?.isActive)) this._attachInRow({ ...row, place: winBounds }, liveRow.webuiId, sessionName, cwd, { mode: liveRow.webuiMode || rec.openSpec?.mode || mode, backend, backendSessionId: targetBackendId, hostId });
+      if (!elsewhere || (!given && this.stage?.isActive)) this._attachInRow({ ...row, place: winBounds }, liveRow.webuiId, sessionName, cwd, { mode: liveRow.webuiMode || rec.openSpec?.mode || mode, backend, backendSessionId: targetBackendId, hostId, openAt });
       else if (!given) dm?.revealHeld?.(row.id, row.desk, sessionName || null);
       return { row: row.id, desk: row.desk, live: liveRow.webuiId };
     }
@@ -1475,6 +1480,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       ...(unpressed ? { quiet: true } : {}), // nobody pressed it: drawn, the person's window keeps the focus (r4 N3)
       backend,
       keeperSid,
+      openAt, // B-c87d r558: a pressed resume's start is its press, never the create's moment
       backendSessionId: backendSessionId || sessionId,
       hostId, // remote session resumes ON its host
       agentKind,

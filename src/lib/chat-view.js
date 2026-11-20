@@ -7592,7 +7592,7 @@ class ChatView {
    *  the same id — another page's resume rebuilt this dead view live, layout _deadFor — is another window). */
   _ownsWindow() { return !this._disposed && !!this.winInfo && this.app?.wm?.windows?.get?.(this.winInfo.id) === this.winInfo; }
 
-  _resumeAndClose({ accountId, asked = false } = {}) {
+  _resumeAndClose({ accountId, asked = false, at = this.app?._openStartNow?.() } = {}) {   // B-c87d r558: the open's start is THIS press, read before the account check's wait and handed to the create
     // A DISPOSED VIEW NEVER ACTS (r3 N4): after the account check's wait this view may have lost its window — closed, or re-made
     // under its id as the live session another page resumed: nothing to resume here (the live window is the answer — raised, said)
     if (!this._ownsWindow()) {
@@ -7619,7 +7619,7 @@ class ChatView {
       this.app.resumeAccountCheck(q).catch(() => null).then((v) => {
         if (btn) btn.disabled = false;
         if (v && !v.ok) this._showAccountRefusalBar(v, q);
-        else this._resumeAndClose({ asked: true });
+        else this._resumeAndClose({ asked: true, at });
       });
       return;
     }
@@ -7631,7 +7631,7 @@ class ChatView {
       // THE WINDOW PRESSED IN IS THE ROW (lane phone-resume-keeps-layout r2, N1): resumeSession closes it as its re-opening and the
       // resumed session takes its id — never closed here (a close after the resume closed the RESUMED window: the row went as 'closed')
       fromWin: this.winInfo?.id,
-      backendSessionId,
+      backendSessionId, openAt: at, // B-c87d r558: the open's start is the press, handed to the create
       // remote sessions resume ON their host — omitting this spawned a LOCAL
       // `claude --resume <remote-id>` (wrong machine, double-writer class)
       hostId: ids.host || undefined,

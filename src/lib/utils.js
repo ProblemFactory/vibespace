@@ -564,14 +564,19 @@ export function keyIsAct(e) {
   if (!t || (typeof document !== 'undefined' && (t === document.body || t === document.documentElement))) return false;
   return _editable(t) || !!(typeof t.closest === 'function' && t.closest('.window'));
 }
-const _actRef = (t) => (t && typeof WeakRef === 'function' ? new WeakRef(t) : { deref: () => t || null });
+const _weak = (t) => (t && typeof WeakRef === 'function' ? new WeakRef(t) : { deref: () => t || null });
+// …and beside it the window PART the act landed in — its tab's content, else its frame (r558): a press on what the open removes
+// before it asks the door (the opening window's own «Connecting…» body) still lies inside that window. Both held weakly.
+const _partOf = (t) => (t && typeof t.closest === 'function' ? t.closest('.window-content') || t.closest('.window') : null);
+const _actRef = (t) => { const r = _weak(t), p = _weak(_partOf(t)); return { deref: () => r.deref(), part: () => p.deref() || null }; };
 const _now = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
   window.addEventListener('pointerdown', (e) => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; if (e.isTrusted !== false) _personAct = { at: _now(), ref: _actRef(e.target) }; }, true);
   window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); if (keyIsAct(e)) _personAct = { at: _now(), ref: _actRef(e.target) }; }, true);
 }
-/** B-c87d: the person's last act on the page ({ at, target } on the page's clock — target null once its tree is gone), or null before the first */
-export function lastPersonAct() { return _personAct ? { at: _personAct.at, target: _personAct.ref.deref() || null } : null; }
+/** B-c87d: the person's last act on the page ({ at, target, part } on the page's clock — target null once its tree is gone; part = the
+ *  window content or frame it landed in, kept while that window stands), or null before the first */
+export function lastPersonAct() { return _personAct ? { at: _personAct.at, target: _personAct.ref.deref() || null, part: _personAct.ref.part() } : null; }
 /** B-c87d: the page's clock the late-focus door compares on (an open's start is read from it) */
 export function pageClock() { return _now(); }
 /** A gesture neither listener above sees — the phone's back swipe (lane mobile-back-guard) — is the person's own act too:

@@ -177,7 +177,7 @@ console.log('§4 B-2dbe (lane bl-windows) — a replay raises only what is on sh
   ok(noArrived !== slice(DMJ, '_refocusShown') && s.wm.activeWindowId === 'b2' && !s.wins.get('b2').element.classList.contains('window-arrived'), 'CONTROL: the refocus without the arrived check focuses the agent\'s window and wipes its mark (the arrived leg goes RED)', s.wm.activeWindowId);
   s = scene(real, { refocus: () => {} }); await s.dm.switchTo('D2');
   ok(s.wm.activeWindowId === 'a1', 'CONTROL: a switch with no refocus leaves the focus on the left desktop\'s window (the switch leg goes RED)', s.wm.activeWindowId);
-  const fr0 = fesScene(sliceObj(SLJ, '_focusExistingSession').replace(/\n        const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop[^\n]*/, '').replace('if (replay && !off && ', 'if (replay && ').replace('if (!off) lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : openClock() });', 'term.focus();'));   // stale-pins: kept (the release's text, planted)
+  const fr0 = fesScene(sliceObj(SLJ, '_focusExistingSession').replace(/\n        const off = replay && !!this\.wm\.windows\.get\(winId\)\?\._hiddenByDesktop[^\n]*/, '').replace('if (replay && !off && ', 'if (replay && ').replace('if (!off) lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : (Number.isFinite(at) ? at : openClock()) });', 'term.focus();'));   // stale-pins: kept (the release's text, planted)
   ok(fr0.restored === 1 && fr0.typed === 1, 'CONTROL: the release\'s _focusExistingSession restores the hidden window and types into it (the replay leg goes RED)', fr0);
 }
 

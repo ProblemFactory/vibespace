@@ -41,6 +41,15 @@ export function insideWindow(win, target) {
   return !other;
 }
 
+/** did the act `a` ({ target, part } — lastPersonAct) land inside `win`? Where it landed, or — when the open REMOVED it before the door
+ *  was asked (the window's own «Connecting…» body the person clicked, r558) — the window part it landed in: that window's content, or
+ *  its frame */
+export function actInside(win, a) {
+  if (!win || !a) return false;
+  if (insideWindow(win, a.target)) return true;
+  return !!a.part && (a.part === win.content || (!!win.element && a.part === win.element));   // another tab's content is another part
+}
+
 /** the door's question alone — may a late focus of `win` (opened at `since`) take the keys now? — for a view that asks before it
  *  focuses itself (xpra-view's `mayFocus` on connect): the same verdict, the same stamps, the same dialog rule */
 export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {
@@ -50,7 +59,7 @@ export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {
   const ae = document.activeElement;
   if (ae && String(ae.tagName || '').toUpperCase() === 'IFRAME' && !insideWindow(win, ae)) return false;
   const a = lastPersonAct();
-  return lateFocusTakes({ since, act: a ? { at: a.at, inside: insideWindow(win, a.target) } : null }) === 'take';
+  return lateFocusTakes({ since, act: a ? { at: a.at, inside: actInside(win, a) } : null }) === 'take';
 }
 
 /** THE DOOR. `view` = what takes the keys (a ChatView, a TerminalSession, a box — anything with focus()); `win` = the opening window

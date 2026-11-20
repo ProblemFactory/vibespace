@@ -1536,6 +1536,7 @@ class LayoutManager {
 
   // Restore workspace from state (used for autosave restore on startup)
   async restoreState(state) {
+    const replayAt = this.app._openStartNow?.();   // B-c87d r558: the open's start is the act that asked for this replay (a desktop switch), read before the reads below
     if (!state || !state.windows) return;
 
     // Resume-all offer (2.250.0): collect the stopped sessions restored as
@@ -1622,7 +1623,7 @@ class LayoutManager {
       }, 2000);
     };
 
-    this.app.wm._restoring = true; // batch mode: suppress per-window O(all-windows) bookkeeping (see window.js _notify)
+    this.app.wm._restoring = true; this.app._replayStart = Number.isFinite(replayAt) ? replayAt : null; // batch mode: suppress per-window O(all-windows) bookkeeping (see window.js _notify) · B-c87d r558: this loop's opens start at the replay's act
     try {
     for (const ws of state.windows) {
       // A WINDOW IS NEVER BUILT TWICE FOR ONE ENTRY (lane layout-stopped-window r2): every caller hands entries this page has
@@ -1753,7 +1754,7 @@ class LayoutManager {
       }
     }
     } finally {
-      this.app.wm._restoring = false;
+      this.app.wm._restoring = false; this.app._replayStart = null;
       this.app.wm._notify(); // the ONE bookkeeping pass for the whole batch
       this.app.wm._scheduleOverlapUpdate?.();
     }
@@ -2170,6 +2171,7 @@ class LayoutManager {
 
   // Load a named preset — rearranges workspace without killing sessions
   async loadPreset(name) {
+    const presetAt = this.app._openStartNow?.();   // B-c87d r558: the open's start is the person's load of the preset, read before the reads below
     const preset = this._savedPresets[name];
     if (!preset) return;
 
@@ -2296,7 +2298,7 @@ class LayoutManager {
           if (activeMatch) {
             // Active but no window — attach (use custom name if available)
             const customName = this.app.sidebar?.getCustomName(backendSessionId);
-            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { backend: activeMatch.backend || backend, mode: activeMatch.mode || ws.type, machine: true });
+            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { backend: activeMatch.backend || backend, mode: activeMatch.mode || ws.type, machine: true, openAt: presetAt });
             if (winInfo) {
               matchedWinIds.add(winInfo.id);
               applyPosition(winInfo, ws);
@@ -2316,7 +2318,7 @@ class LayoutManager {
             if (stoppedMatch) {
               const customName = this.app.sidebar?.getCustomName(backendSessionId);
               this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name, {
-                backend,
+                backend, openAt: presetAt,
                 backendSessionId,
                 hostId: hostOf(ws) || undefined, // remote sessions resume ON their host
               });
@@ -2357,7 +2359,7 @@ class LayoutManager {
           const activeMatch = liveSessionOf(ws, activeSessions); // the restore's ladder (see the terminal branch — r10)
           if (activeMatch) {
             const customName = this.app.sidebar?.getCustomName(backendSessionId);
-            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { mode: 'chat', backend: activeMatch.backend || backend, machine: true });
+            const winInfo = this.app.attachSession(activeMatch.id, customName || activeMatch.name, activeMatch.cwd, { mode: 'chat', backend: activeMatch.backend || backend, machine: true, openAt: presetAt });
             if (winInfo) { matchedWinIds.add(winInfo.id); applyPosition(winInfo, ws); }
           }
         }
