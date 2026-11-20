@@ -370,6 +370,7 @@ function boundWords(b) {
 function leftRecord(l) {
   if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 0) return null;
   const escaped = Number.isInteger(l.escaped) && l.escaped > 0 ? Math.min(l.escaped, 9999) : 0;
+  const outside = !l.kept && Number.isInteger(l.outside) && l.outside > 0 ? Math.min(l.outside, l.n) : 0;   // B-7ca1: of the n a task's stop ended, those outside its group (never more than n)
   if (l.n < 1 && !escaped) return null;
   const pids = l.kept && Array.isArray(l.pids) ? l.pids.filter((p) => Array.isArray(p) && Number.isInteger(p[0]) && p[0] > 1 && Number.isFinite(p[1])).slice(0, 64).map((p) => [p[0], p[1]]) : [];
   const n = Math.min(l.n, 9999), recorded = pids.length && Number.isInteger(l.recorded) && l.recorded < n ? l.recorded : 0;
@@ -378,7 +379,7 @@ function leftRecord(l) {
   // round 8; round 9: ONE SOURCE — the wrapper's count, kept whenever it said one (round 8 kept it only beside force: the job's log
   // said «2 processes got less than the full grace», the card, the journal and show/poll said nothing)
   const short = (cleared || !l.kept) && Number.isInteger(l.short) && l.short > 0 ? Math.min(l.short, n) : 0;
-  return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}), ...(gone ? { gone } : {}), ...(short ? { short } : {}) };
+  return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(outside ? { outside } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}), ...(gone ? { gone } : {}), ...(short ? { short } : {}) };
 }
 /** round 10c: THE RECORD'S COUNTS ARE SETS — of what a job left, how many got less than the full grace is never more than it
  *  left (`short` ≤ `n`); a record that says more is a bug in its writer, named for the hub's log ('' = sound). leftRecord clamps
@@ -405,7 +406,8 @@ function leftWords(l) {
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
   const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
   if (!n) return `${esc}; run it as a service job`;
-  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${sh}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
+  const out = l.outside ? ` (${l.outside} outside its group)` : '';   // B-7ca1: a task's stop ended what left its group too
+  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${out}${sh}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
 }
 /** what a run's end says beyond its cause (the journal, `show` / `poll`): what its job left (round 6: and when the engine
  *  stopped what it kept), else a kill we made */

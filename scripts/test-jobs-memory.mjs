@@ -173,6 +173,16 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
   ok(JSON.stringify(lr({ n: 0, escaped: 2 })) === '{"n":0,"escaped":2}' && lr({ n: 0 }) === null && JSON.stringify(lr({ n: 70, kept: true, pids: [[123, 4]], recorded: 64, cleared: at })) === JSON.stringify({ n: 70, kept: true, pids: [[123, 4]], boot: '', recorded: 64, cleared: at }) && !('cleared' in (lr({ n: 1, force: true, cleared: at }) || {})) && !('recorded' in (lr({ n: 2, kept: true, recorded: 1 }) || {})),
     'exit.json `left`, sanitized: an escapee-only record; the rows it names of more; WHEN a stopped service\'s were stopped (a kept record\'s only); a `recorded` with no rows is none');
   ok(typeof JW.leftWords === 'function' && [{ n: 0, escaped: 1 }, { n: 2, force: true, escaped: 3 }, { n: 70, kept: true, pids: [[2, 1]], recorded: 64, escaped: 2 }, { n: 1, kept: true, cleared: at }, { n: 2, kept: true, gone: at }].every((l) => WF('leftWords')(l) === lw(l)), 'round 6: the job\'s own log line says the new words the SAME way (the twins, pinned over every new shape — round 7: «had already ended» too)');
+  // B-7ca1 (the group rung — no scope): a TASK's STOP ends what left its group carrying its mark — counted with what it stopped
+  // (`outside`, never more than `n`), said on the job's log, show / poll and the card; a NATURAL end's are still said, not stopped
+  const sto = { n: 2, outside: 1 }, stoF = { n: 3, force: true, outside: 2, short: 1 };
+  ok(lw(sto) === 'the job left 2 processes running — they were stopped (1 outside its group); to keep a daemon, run it as a service job'
+    && lw(stoF) === 'the job left 3 processes running — they were stopped by force (2 outside its group) (1 process got less than the full grace); to keep a daemon, run it as a service job'
+    && [sto, stoF].every((l) => WF('leftWords')(l) === lw(l))
+    && rlw({ left: sto }, t) === 'left 2 running — stopped; to keep a daemon, run it as a service job · 1 of them outside its group'
+    && JSON.stringify(lr({ n: 2, outside: 1 })) === '{"n":2,"outside":1}' && JSON.stringify(lr({ n: 1, outside: 5 })) === '{"n":1,"outside":1}' && !('outside' in (lr({ n: 2, kept: true, outside: 1 }) || {})) && lr({ n: 0, outside: 1 }) === null,
+    'B-7ca1 words: a task\'s stop says what it stopped outside its group — «they were stopped (1 outside its group)» in the log and show / poll (the wrapper\'s twin the same), «· 1 of them outside its group» on the card; the record keeps `outside` ≤ n, never on a kept record, never alone', [lw(sto), rlw({ left: sto }, t), lr({ n: 1, outside: 5 })]);
+  for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(REPO, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify('{n} of them outside its group') + ':'), `B-7ca1: the card\'s new words have their ${lang} row`);
   // ROUND 7 — the card says «run it as a service job» ONCE beside what left the group (336761e5: twice); what a service kept that
   // had already ended on its own is said so — never «stopped at» (nothing was signalled)
   const once = rlw({ left: { n: 2, force: true, escaped: 1 } }, t);

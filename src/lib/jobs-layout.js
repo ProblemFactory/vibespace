@@ -245,7 +245,8 @@ export function memoryEffectiveWords(j, t) {
 /** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by
  *  force past the grace), a service's kept while it runs — «left 1 running — stopped; to keep a daemon, run it as a service
  *  job»; round 6: what the engine stopped later says when (`cleared` — this device's clock: «left 1 running — stopped at
- *  14:05», never «kept» once they are gone), and a task's processes that left its group are said, not stopped; '' when it left
+ *  14:05», never «kept» once they are gone), and a task's processes that left its group are said, not stopped — unless a STOP ended
+ *  them (B-7ca1: `outside`, «· 1 of them outside its group»); '' when it left
  *  nothing */
 export function runLeftWords(run, t, stamp = null) {
   const l = run && run.left;
@@ -262,7 +263,8 @@ export function runLeftWords(run, t, stamp = null) {
   if (!(l.n > 0)) return esc;
   // round 7: the advice once — beside what left its group, the stopped ones are said plain
   if (esc) return `${l.force ? t('left {n} running — stopped by force', { n: l.n }) : t('left {n} running — stopped', { n: l.n })}${sh} · ${esc}`;
-  return (l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n })) + sh;
+  const out = l.outside > 0 ? ` · ${t('{n} of them outside its group', { n: l.outside })}` : '';   // B-7ca1: a task's stop ended what left its group too
+  return (l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n })) + out + sh;
 }
 /** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
 export function memoryEndWords(j, t) {

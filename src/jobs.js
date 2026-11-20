@@ -1989,12 +1989,22 @@ class JobManager {
     const killed = [], refused = [];
     let unjudged = 0;
     for (const m of tree) { const r = PI.signalIdentity(m, 'SIGKILL', { what: `job ${job.id}'s tree` }); if (r.ok) killed.push(m.comm); else if (r.why === 'not-ours') refused.push(m.comm); else if (r.why !== 'gone' && r.why !== 'stale' && r.why !== 'pid-recycled') unjudged++; }   // a recycled pid: that member had ended
+    // B-7ca1 (the group rung — no scope: a container, a pod): what carries the job's MARK outside its group and outside the tree read now —
+    // a child that made its own group (setsid, the timeout program) and was re-parented before the stop — ends too, by identity (a
+    // bounded scan, its cut said); never the wrapper (the caller's own signal), never a hub started inside the job (B-2c5c)
+    const inTree = new Set(t.map((m) => `${m.pid}:${m.starttime}`)), run0 = job.runs && job.runs[job.runs.length - 1], hubs = this._hubTest(this._runWrapper(job, run0));
+    const marked = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}`, since: Number(stamp.starttime) || 0 }), mscan = marked.scan || {};
+    let escaped = 0;
+    for (const id of marked) {
+      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || PI.pgidOf(id.pid) === Number(stamp.pid) || hubs(id.pid)) continue;
+      const r = PI.signalIdentity(id, 'SIGKILL', { what: `job ${job.id}'s mark` }); if (r.ok) escaped++; else if (r.why === 'not-ours') refused.push(`pid ${id.pid}`); else if (r.why !== 'gone' && r.why !== 'stale' && r.why !== 'pid-recycled') unjudged++;
+    }
     // B-c134 cure (MUST B): said where the person reads — the job's OWN log (a force stop's wrapper is dead: nobody else writes it),
     // a refused signal named, a cut walk said; and in the hub's log as before
     const n = killed.length, line = `its forced end killed ${n} process${n === 1 ? '' : 'es'} it started outside its group (${[...new Set(killed)].join(', ') || '—'})`
-      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '');
-    if (n || refused.length || unjudged || t.cut) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
-    return n;
+      + (refused.length ? `; could not end ${refused.length} (${[...new Set(refused)].join(', ')}: not ours to signal)` : '') + (unjudged ? `; ${unjudged} could not be judged (its identity unreadable): not signalled` : '') + (escaped ? `; and ${escaped} carrying its mark outside its group (re-parented)` : '') + (t.cut ? ' — its tree was read only in part: what it started may be left' : '') + (mscan.cut ? ` — its mark's scan read ${mscan.scanned} of ${mscan.total} processes: what left its group may be left` : '');
+    if (n || escaped || refused.length || unjudged || t.cut || mscan.cut) { this.d.log(`[jobs] ${job.id}: ${line}`); this._runLogLine(this._runLogFile(job), `[jobs] stop: ${line}`); }
+    return n + escaped;
   }
   /** B-c134 cure: the latest run's own log file (the path alone) */
   _runLogFile(job) {

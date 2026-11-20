@@ -94,11 +94,11 @@ const PIsrc = fs.readFileSync(path.join(ROOT, 'src/proc-identity.js'), 'utf8'), 
 ok(twinOf(PIsrc) && twinOf(PIsrc) === twinOf(WRAP), 'data/bin/job-wrapper.js carries src/proc-identity.js childTreeOf byte-for-byte (the wrapper cannot require src/)');
 
 console.log('§4 THE JOB DOOR — the wrapper\'s one table: a stopped job leaves nothing of its tree, each heard ONCE, its queue marker free');
-const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAlone = false, before = null, ready = null } = {}) => {
+const jobScene = async (wrapperText, tag, { force = false, argv = null, signalAlone = false, before = null, ready = null, jobsMod = null } = {}) => {
   const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true });
   fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), wrapperText);
   const marker = path.join(dd, 'queue.lock'), heard = path.join(dd, 'heard');
-  const { JobManager } = require(path.join(ROOT, 'src/jobs.js'));
+  const { JobManager } = jobsMod || require(path.join(ROOT, 'src/jobs.js'));   // B-7ca1: a control's copy of the engine
   const logs = [];
   const jm = new JobManager({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log: (...a) => logs.push(a.join(' ')), apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
   jm.init();
@@ -855,6 +855,45 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   ok(er.first === null && er.words1 === 'could not be read (EISDIR)' && Array.isArray(er.gone) && er.words2 === 'did not answer a read in 2 s' && er.hang === null && er.words3 === 'did not answer a read in 0.02 s',
     'the engine\'s list words follow its LATEST read: unread — «could not be read (EISDIR)»; then GONE — no old errno left; a read that never answers — «did not answer a read», never the older errno', er);
   ok(erx.words2 === 'could not be read (EISDIR)', 'CONTROL (the clear on GONE cut, in a copy): a scope that has gone still «could not be read (EISDIR)» — RED', erx);
+}
+
+console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what carries its mark outside its group, re-parented before the stop');
+{
+  // the reported shape where jobs have no scope (a container, a pod): a child that made its OWN group (setsid) and was re-parented
+  // BEFORE the stop (its parent, a subshell, ended at once) — neither in the job's process group nor under the tree the stop reads;
+  // it still carries the job's mark (VIBESPACE_JOB_ID, inherited). It writes its pid, so the scene can follow it
+  const escScene = async (wrapperText, tag, opts = {}) => {
+    const ESC = path.join(D, tag, 'esc.pid');
+    const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(ESC)}; exec sleep 318' &); timeout 319 sleep 319 & wait`];
+    return jobScene(wrapperText, tag, { ...opts, argv,
+      ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(ESC) && fs.readFileSync(ESC, 'utf8').trim().length > 0,
+      before: ({ tree, jm }) => {
+        const pid = Number(fs.readFileSync(ESC, 'utf8').trim()), id = PI.identityOf(pid); mine.push(id);
+        return { after: async () => {
+          await until(() => PI.aliveIdentity(id) === false, 1500);
+          const alive = PI.aliveIdentity(id) === true, job = [...jm.jobs.values()][0], run = job && job.runs[job.runs.length - 1];
+          if (alive) PI.signalIdentity(id, 'SIGKILL');
+          return { pid, alive, inTree: tree.some((m) => m.pid === pid), ownGroup: PI.pgidOf(pid) === pid || !alive, left: (run && run.left) || null };
+        } };
+      } });
+  };
+  // (a) a stop through the wrapper (its stop step and its drain)
+  const sa = await escScene(WRAP, 'esc-stop');
+  ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside >= 1 && !sa.after.left.escaped,
+    'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried the job\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
+  const TS = "  const taskStop = !keeps && !!stopping;\n", SS = "    for (const p of escapedOf()) termOnce(p);   // B-7ca1: a TASK's too — what carries its mark outside its group hears the stop with the main (its grace runs from the stop)\n";
+  const relEsc = anchored(anchored(WRAP, TS, "  const taskStop = false;   // MUTANT: the release — a task's escapees are said, not stopped\n", 'b7ca1-taskstop-cut'), SS, "    if (keeps) for (const p of escapedOf()) termOnce(p);\n", 'b7ca1-stopstep-cut');
+  const sx = await escScene(relEsc, 'esc-stop-mut');
+  ok(sx.after && sx.after.alive && sx.after.left && sx.after.left.escaped >= 1 && !sx.after.left.outside, 'CONTROL (the release\'s wrapper, in a copy): the re-parented child is LEFT RUNNING — said «left its group — not stopped» — RED', sx.after);
+  // (b) a FORCE stop: the wrapper is SIGKILLed (its stop step never runs) — the ENGINE ends what carries the mark, beside the tree
+  const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
+  const MK = "      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || PI.pgidOf(id.pid) === Number(stamp.pid) || hubs(id.pid)) continue;\n";
+  ok(JSRC.split(MK).length === 2, 'control setup: the engine\'s mark kill is found once in jobs.js');
+  const fa = await escScene(WRAP, 'esc-force', { force: true });
+  ok(fa.after && !fa.after.alive && /carrying its mark outside its group \(re-parented\)/.test(fa.said), 'B-7ca1: a FORCE stop (the wrapper SIGKILLed) — the engine kills the re-parented child carrying the mark, said in the log', { after: fa.after, said: fa.said.slice(0, 400) });
+  const noMark = MJ.load('src/jobs.js', anchored(JSRC, MK, '      continue;   /* MUTANT: no mark kill */\n', 'b7ca1-engine-mark-cut'), 'b7ca1-engine-mark-cut');
+  const fx = await escScene(WRAP, 'esc-force-mut', { force: true, jobsMod: noMark });
+  ok(fx.after && fx.after.alive, 'CONTROL (the engine without its mark kill, in a copy): the force stop leaves the re-parented child RUNNING — RED', fx.after);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

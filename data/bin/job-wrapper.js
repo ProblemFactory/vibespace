@@ -87,7 +87,8 @@ function leftWords(l) {
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
   const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
   if (!n) return `${esc}; run it as a service job`;
-  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${sh}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
+  const out = l.outside ? ` (${l.outside} outside its group)` : '';   // B-7ca1: a task's stop ended what left its group too
+  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${out}${sh}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
 }
 /** PURE (B-f494): a LOWERED job's scope property — `-p CPUWeight=<w>` when the server asked one (1–10000) AND cpu is ENABLED
  *  among the scope's siblings (the cgroup.subtree_control of its parent: app.slice under the user systemd, or the manager's own
@@ -789,7 +790,7 @@ function onStop(sig, at, by) {
     // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later). Round 7: the group
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
-    if (keeps) for (const p of escapedOf()) termOnce(p);
+    for (const p of escapedOf()) termOnce(p);   // B-7ca1: a TASK's too — what carries its mark outside its group hears the stop with the main (its grace runs from the stop)
     const t = setTimeout(() => { graceUp = true; if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; killMain(); }, left); t.unref?.();
     return;
   }
@@ -948,17 +949,21 @@ function escapedOf() { // started after us, outside our group, carrying the job'
 async function drainGroup() {
   const left = groupLeft();
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
+  // B-7ca1 (the group rung — no scope: a container, a pod): a TASK's stop ends what carries its mark outside its group too — a child that
+  // made its own group (setsid, the timeout program) and was re-parented before the stop is neither in the group nor under the tree the
+  // stop read; by identity (pid + start), never one that started before us, never a hub started inside the job (keptTest)
+  const taskStop = !keeps && !!stopping;
   // B-c134: a STOP's tree — what of it the stop step read outside our group and is still there is the stop's to end, with the rest
   { const g = new Set(left.map(termKey)); for (const p of stopping ? stopTree.filter(same) : []) if (!g.has(termKey(p))) { left.push(p); g.add(termKey(p)); } }
   if (!left.length && !out.length) return {};
   // round 10c: EVERY COUNT IN THE RECORD IS THE SIZE OF ONE SET of processes (`pid:start`) — one both scans saw (it left our group
   // between them) is one process, never two
   const inGroup = new Set(left.map(termKey)), outside = out.filter((p) => !inGroup.has(termKey(p)));
-  const rows = keeps ? [...left, ...outside] : left, n = rows.length;
+  const rows = keeps || taskStop ? [...left, ...outside] : left, n = rows.length;
   const kept = keeps ? { kept: true, pids: rows.slice(0, 64), boot: bootId(), ...(outside.length ? { escaped: outside.length } : {}), ...(n > 64 ? { recorded: 64 } : {}) } : null;
   if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
   if (!n) return { left: { n: 0, escaped: outside.length } }; // a task's that left its group: said, not stopped
-  if (mine) left.push(...outside);
+  if (mine || taskStop) left.push(...outside);
   // round 7: what our SIGTERM reaches only now hears it now (the group's and a stopped service's escapees' heard it at the stop).
   // Round 8: A STOP HAS ONE CLOCK — its grace runs from the stop, for every process: one first seen at the drain gets what is LEFT
   // of it, never a fresh grace (round 7's per-process deadline ran to twice the grace, past the engine's kill step a second after
@@ -976,7 +981,7 @@ async function drainGroup() {
   // its SIGTERM leaves no child behind), at most three passes
   const killed = new Set();
   for (let pass = 0; pass < 3; pass++) {
-    const more = [...groupLeft(), ...(mine ? escapedOf() : []), ...(stopping ? stopTree.filter(same) : [])].filter((p) => !killed.has(termKey(p)));
+    const more = [...groupLeft(), ...(mine || taskStop ? escapedOf() : []), ...(stopping ? stopTree.filter(same) : [])].filter((p) => !killed.has(termKey(p)));
     if (!more.length) break;
     for (const p of more) if (killNow(p)) killed.add(termKey(p));
   }
@@ -991,7 +996,7 @@ async function drainGroup() {
   // earlier pass (the stop step's, the drain's with grace left) had its grace. A state the table holds — no clock in the count
   const short = stopping ? [...killed].filter((k) => { const t = termed.get(k); return !t || t.pass === 'kill'; }).length : 0;
   if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
-  return { left: { n: all, ...(still ? { force: true } : {}), ...(outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };
+  return { left: { n: all, ...(still ? { force: true } : {}), ...(outside.length ? (taskStop ? { outside: outside.length } : { escaped: outside.length }) : {}), ...(short ? { short } : {}) } };   // B-7ca1: a stop's are STOPPED (outside), a natural end's said (escaped)
 }
 
 async function ended(code, signal) {
