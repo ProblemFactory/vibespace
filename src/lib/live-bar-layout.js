@@ -113,6 +113,33 @@ export function barLadder({ widthPx = 0, items = [], gapPx = 0, overflowPx = 0, 
   return { ...v, floor, compact: base.filter((it) => compact.has(it.key) && shown.has(it.key)).map((it) => it.key) };
 }
 
+/**
+ * THE CHIP LINE (r600 (2), lane lg-group-parents — design 015 §2b's «Who can use it» cell): a line of chips folds by width into its
+ * «+N» pill like any bar, with two rules BEFORE a chip folds whole —
+ *   · a chip's own words yield first (`compactPx`: a Task Group chip without its reach words «and its child groups» / «this group
+ *     only», which stay its tooltip): barLadder's compaction, minimal and monotone;
+ *   · THE FIRST CHIP never folds whole while its MINIMUM (`firstMinPx`: its glyph and a few characters of its name, the rest
+ *     ellipsized) fits beside the never-fold items and the pill — a non-empty cell shows at least its first row BY NAME. It is
+ *     SQUEEZED instead, every other chip folded, and only when it would fold otherwise.
+ * chipLineLayout({ widthPx, items:[{ key, px, compactPx?, priority }], gapPx, overflowPx, firstKey, firstMinPx })
+ *   → barLadder's verdict + { squeezed: the first chip's key when it is squeezed, else null }
+ */
+export function chipLineLayout({ widthPx = 0, items = [], gapPx = 0, overflowPx = 0, firstKey = null, firstMinPx = 0 } = {}) {
+  const v = barLadder({ widthPx, items, gapPx, overflowPx });
+  const fk = firstKey == null ? null : String(firstKey);
+  if (fk === null || !v.overflow.includes(fk)) return { ...v, squeezed: null };
+  const width = Math.max(0, Number(widthPx) || 0), gap = Math.max(0, Number(gapPx) || 0), more = Math.max(0, Number(overflowPx) || 0);
+  const list = (Array.isArray(items) ? items : []).filter((it) => it && it.key != null && Number(it.px) > 0);
+  const first = list.find((it) => String(it.key) === fk);
+  const minPx = Math.min(Number(first.px), Number(firstMinPx) > 0 ? Number(firstMinPx) : Number(first.px));
+  const keep = list.filter((it) => String(it.key) === fk || !(Math.max(0, Number(it.priority) || 0) > 0));
+  const rest = list.filter((it) => !keep.includes(it));
+  const need = keep.reduce((s, it) => s + (String(it.key) === fk ? minPx : Number(it.px)), 0) + gap * Math.max(0, keep.length - 1) + (rest.length ? more + gap : 0);
+  if (need > width) return { ...v, squeezed: null };   // narrower than even its minimum: it folds — the pill says how many
+  const kept = new Set(keep.map((it) => String(it.key)));
+  return { ...v, shown: keep.map((it) => String(it.key)), overflow: rest.map((it) => String(it.key)), need, fits: true, compact: [...new Set([...v.compact.filter((k) => kept.has(k)), fk])], squeezed: fk };
+}
+
 /** The mode badge's SHORT words (the bar's never-fold item; the full sentence — "…— agent asked to pause" —
  *  is its tooltip): 'Agent is driving' | 'You are driving' | 'Another viewer is driving'. English keys: the
  *  views pass them through t(). */

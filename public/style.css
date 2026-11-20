@@ -8723,6 +8723,10 @@ label.chan-cap-row { cursor: default; }
 .bprof-who-chip.bprof-who-all { flex: 0 1 auto; } /* the ONE value (All agents…) shrinks with an ellipsis before Change… is cut (ja at 860 px) */
 .bprof-who-chip { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 4px; min-width: 0; max-width: 220px; padding: 1px 8px 1px 5px; border-radius: 999px; border: 1px solid var(--border); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--text); font-size: 11px; line-height: 16px; }
 .bprof-who-chip .bprof-who-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* r600 (2) — a chip's own words yield before it folds whole (PURE chipLineLayout): COMPACT = its reach words («and its child groups» /
+   «this group only», kept in its tooltip) gone; SQUEEZED = the FIRST chip shrinks, its name ellipsized, so a non-empty cell always shows its first row by name */
+.bprof-who-chip.is-compact .bprof-who-reach { display: none; }
+.bprof-who-chip.is-squeezed { flex: 0 1 auto; }
 .bprof-who-chip .bprof-who-glyph { flex: 0 0 auto; width: 12px; height: 12px; font-size: 12px; }
 .bprof-who-chip.is-stopped { color: var(--text-dim); background: transparent; }
 .bprof-who-dot { flex: 0 0 7px; width: 7px; height: 7px; box-sizing: border-box; border-radius: 50%; border: 1px solid var(--text-dim); }

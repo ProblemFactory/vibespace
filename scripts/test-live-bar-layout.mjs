@@ -499,6 +499,46 @@ console.log('§5 wiring pins');
   ok(missing.length === 0, `every t() literal in browser-live-window.js / taskbar.js / desktop-app-window.js has zh + ja (${missing.length} missing)`, missing.join(' | '));
 }
 
+// ── r600 (2) THE CHIP LINE (lane lg-group-parents, row B-91a7 cure B4; the hosted run 44818862371 placed test-browser-who-ui ⑤ and
+// test-browser-profiles-ui's 860 legs on it): the «Who can use it» cell folded EVERY chip into «+N» once each Task Group chip carried
+// its reach words. THE LAW: a non-empty cell shows its first row BY NAME at every width where Change… fits — the chips' own words
+// yield first (compact), then the first chip is squeezed (its name ellipsized) before it folds whole. The widths are the hosted log's
+// (lineW 172, Change… 53, the pill 16, gap 4) with a Task Group chip at 130 px (75 without its reach words). Every verdict printed.
+console.log('§r600 chipLineLayout — the who cell\'s first row is never folded whole while Change… fits');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const C = (key, px, compactPx) => ({ key, px, priority: 1, ...(compactPx ? { compactPx } : {}) });
+  const CHANGE = (key) => ({ key, px: 53, priority: 0 });
+  const scene = (M, widthPx, chips, minPx = 45) => M.chipLineLayout({ widthPx, gapPx: 4, overflowPx: 16, firstKey: '0', firstMinPx: minPx, items: [...chips, CHANGE(String(chips.length))] });
+  const two = [C('0', 130, 75), C('1', 130, 75)], long = [C('0', 220, 200), C('1', 130, 75)], twelve = Array.from({ length: 12 }, (_, i) => C(String(i), 130, 75));
+  const v700 = scene(L, 172, two), vLong = scene(L, 172, long), v12 = scene(L, 260, twelve), vWide = scene(L, 400, two), vTight = scene(L, 100, two);
+  const pick = (v) => ({ shown: v.shown, overflow: v.overflow, compact: v.compact, squeezed: v.squeezed, fits: v.fits });
+  for (const [n, v] of [['700 px (the hosted widths)', v700], ['a long first name', vLong], ['twelve Task Groups, 260 px', v12], ['wide, 400 px', vWide], ['too narrow for even the minimum, 100 px', vTight]]) console.log(`    judged (${n}): ${JSON.stringify(pick(v))}`);
+  ok(same(v700.shown, ['0', '2']) && same(v700.overflow, ['1']) && same(v700.compact, ['0']) && v700.squeezed === null,
+    'at 700 px the first Task Group chip is SHOWN by name without its reach words (compact), the second folds into «+1» — never «+2» with no name', pick(v700));
+  ok(same(vLong.shown, ['0', '2']) && same(vLong.overflow, ['1']) && vLong.squeezed === '0' && vLong.compact.includes('0'),
+    'a first chip too wide even without its words is SQUEEZED (its name ellipsized) rather than folded whole; every other chip folds', pick(vLong));
+  ok(v12.shown.includes('0') && v12.shown.length + v12.overflow.length === 13 && v12.overflow.length >= 1 && v12.compact.includes('0'),
+    'twelve Task Groups: the first is shown by name, the rest fold into «+N» (shown + folded = all twelve and Change…)', pick(v12));
+  ok(same(vWide.shown, ['0', '1', '2']) && !vWide.overflow.length && !vWide.compact.length && vWide.squeezed === null,
+    'a line that holds every chip whole keeps each chip\'s reach words and squeezes nothing (minimal)', pick(vWide));
+  ok(same(vTight.shown, ['2']) && vTight.squeezed === null && same(vTight.overflow, ['0', '1']),
+    'a line narrower than Change… + the first chip\'s minimum + the pill folds the first too — honestly «+2», never a cut chip', pick(vTight));
+  // RED CONTROLS: (a) the release's fit (barLayout over the natural widths, the cure B4's chips); (b) the model without its squeeze
+  const rel = L.barLayout({ widthPx: 172, gapPx: 4, overflowPx: 16, items: [C('0', 130), C('1', 130), CHANGE('2')] });
+  const SQ = "  if (fk === null || !v.overflow.includes(fk)) return { ...v, squeezed: null };\n";
+  const Mno = await import(pathToFileURL(MUT.write('src/lib/live-bar-layout.js', anchored(read('src/lib/live-bar-layout.js'), SQ, '  return { ...v, squeezed: null };\n', 'chip-line-no-squeeze'), 'chip-line-no-squeeze', { esm: true })).href);
+  const vNo = scene(Mno, 172, long);
+  console.log(`    judged (RED: the release's fit at 700 px): ${JSON.stringify({ shown: rel.shown, overflow: rel.overflow })} · (RED: no squeeze, a long first name): ${JSON.stringify(pick(vNo))}`);
+  ok(same(rel.shown, ['2']) && same(rel.overflow, ['0', '1']), 'RED CONTROL (a): the release\'s fit over the reach-word chips folds BOTH at 700 px — «+2» and no name (the hosted ⑤ red)', rel);
+  ok(same(vNo.shown, ['2']) && vNo.squeezed === null, 'RED CONTROL (b): the model without its first-chip squeeze folds a long first name whole — the cell shows no name', pick(vNo));
+  // the DOM half: the who cell hands the rule to the fit; the chip's own CSS draws compact / squeezed
+  const tv = read('src/lib/browser-trace-view.js'), css = read('public/style.css');
+  ok(/const folded = fitLine\(line, items, more, \(n\) => '\+' \+ \(n \+ countRest\.length\), chipFit\);/.test(tv) && /chipLineLayout\(\{ widthPx: width, items: rows,/.test(tv)
+    && /\.bprof-who-chip\.is-compact \.bprof-who-reach \{ display: none; \}/.test(css) && /\.bprof-who-chip\.is-squeezed \{ flex: 0 1 auto; \}/.test(css),
+    'the who cell hands its chips to the fit as a CHIP line (chipLineLayout), and the chip\'s own rule draws «compact» (no reach words) and «squeezed» (it shrinks)');
+}
+
 for (const r of copiesCensus(MUT.files, MUT.dir, repo, { minCopies: 3 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -59,7 +59,7 @@ import { dividerText, sessionRowText, sessionReplays, retentionText, sizeText } 
 import { displayFactText } from './browser-display-words.js';
 import { rowLine, rowFold, rowMenu, gridNeed, orphanOrder, usageLine as usageCell, diskFold } from './browser-panel-model.js'; // design 015 (lane browser-panel-tidy): the row's line / fold / menu (PURE)
 import { createPasskeysSection, isPhoneWidth } from './browser-passkeys-view.js'; // lane passkey-ui: a profile's Passkeys table
-import { barLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
+import { barLayout, chipLineLayout } from './live-bar-layout.js'; // design 015 §2b: a cell's line never wraps — what does not fit folds by width (the bar-fold rule) // lane headless-fallback: a browser that runs headless because the machine has no desktop session says so
 import { createTakeoverSection, takeoverWindowTitle } from './browser-takeover-queue.js'; // lane browser-takeover-queue: «Waiting for you» — the takeover requests, above Profiles
 import { openProxyDialog } from './browser-proxy-dialog.js'; // B-8b87: a profile's proxy and its login (kept in the vault)
 import { proxyWords, proxyDoor, PROXY_REFUSALS } from './browser-proxy-model.js'; // B-8b87 cure: a proxy refusal in the page's words
@@ -644,17 +644,23 @@ export function rowWhyText(r) {
  * design 015 §2b (lane browser-panel-tidy): ONE cell line that never wraps — every item keeps its width; what does not
  * fit folds, from the end, into the line's "+n" pill (the bar-fold rule, PURE barLayout: priority 0 never folds).
  * `items` = [{el, priority}] in DOM order (the line's flex items, one gap). → the folded items ([] while unlaid).
+ * `chip` (r600 (2), a CHIP line): { first: the first chip's index (-1: none), compactPxOf(el) → a chip's width without its own
+ * words (0: none), minPxOf(el) → the first chip's minimum } — PURE chipLineLayout: the words yield first, the first chip is squeezed
+ * before it folds whole (classes is-compact / is-squeezed, drawn by the chip's own CSS rule).
  */
-export function fitLine(line, items, more, moreText) {
+export function fitLine(line, items, more, moreText, chip = null) {
   const width = line.getBoundingClientRect().width;
   if (!(width > 0)) return [];
-  for (const it of items) it.el.style.display = '';
+  for (const it of items) { it.el.style.display = ''; it.el.classList.remove('is-compact', 'is-squeezed'); }   // measured at full width
   more.textContent = moreText(items.filter((it) => it.priority > 0).length); more.style.display = '';
   const px = (e) => e.getBoundingClientRect().width;
   const gap = parseFloat(getComputedStyle(line).columnGap) || 0;
-  const plan = barLayout({ widthPx: width, items: items.map((it, i) => ({ key: String(i), px: px(it.el), priority: it.priority })), gapPx: gap, overflowPx: px(more) });
-  const folded = new Set(plan.overflow.map(Number));
-  items.forEach((it, i) => { it.el.style.display = folded.has(i) ? 'none' : ''; });
+  const rows = items.map((it, i) => { const c = chip && typeof chip.compactPxOf === 'function' ? chip.compactPxOf(it.el) : 0; return { key: String(i), px: px(it.el), priority: it.priority, ...(c > 0 ? { compactPx: c } : {}) }; });
+  const fi = chip && Number.isInteger(chip.first) && chip.first >= 0 && chip.first < items.length ? chip.first : -1;
+  const plan = chip ? chipLineLayout({ widthPx: width, items: rows, gapPx: gap, overflowPx: px(more), firstKey: fi >= 0 ? String(fi) : null, firstMinPx: fi >= 0 && typeof chip.minPxOf === 'function' ? chip.minPxOf(items[fi].el) : 0 })
+    : barLayout({ widthPx: width, items: rows, gapPx: gap, overflowPx: px(more) });
+  const folded = new Set(plan.overflow.map(Number)), compact = new Set((plan.compact || []).map(Number));
+  items.forEach((it, i) => { it.el.style.display = folded.has(i) ? 'none' : ''; if (chip) { it.el.classList.toggle('is-compact', compact.has(i)); it.el.classList.toggle('is-squeezed', plan.squeezed === String(i)); } });
   more.style.display = 'none';
   return items.filter((_, i) => folded.has(i));
 }
@@ -670,6 +676,7 @@ export function fitLine(line, items, more, moreText) {
  * chips reconciled by `data-key`, a text replaced only when it changed — so a who-change never re-creates the row or a
  * chip that did not change. Returns `{el, patch(row), fit()}`.
  */
+const FIRST_NAME_MIN_PX = 30;   // r600 (2): the first chip's name never squeezed below about two characters and the ellipsis
 export function whoCell(app, { onChange = null } = {}) {
   const root = chromeEl('div', 'bprof-cell bprof-who');
   const line = chromeEl('div', 'bprof-l1 bprof-who-line');
@@ -735,7 +742,13 @@ export function whoCell(app, { onChange = null } = {}) {
   function fit() {
     const shown = [...chips.childNodes];
     const items = [...(allText.style.display === 'none' ? [] : [{ el: allText, priority: 0 }]), ...shown.map((el) => ({ el, priority: 1 })), { el: change, priority: 0 }];
-    const folded = fitLine(line, items, more, (n) => '+' + (n + countRest.length));
+    // r600 (2): the first row is shown BY NAME at every width where Change… fits — the chips' reach words yield first, then the first
+    // chip is squeezed (its name ellipsized) before it folds whole (PURE chipLineLayout)
+    const wpx = (e) => (e ? e.getBoundingClientRect().width : 0), ml = (e) => (e ? parseFloat(getComputedStyle(e).marginLeft) || 0 : 0);
+    const chipFit = { first: shown.length ? (allText.style.display === 'none' ? 0 : 1) : -1,
+      compactPxOf: (el) => { const r = el.classList.contains('bprof-who-chip') && !el.classList.contains('bprof-who-all') ? el.querySelector('.bprof-who-reach') : null; return r ? Math.max(1, wpx(el) - wpx(r) - ml(r)) : 0; },
+      minPxOf: (el) => { const r = el.querySelector('.bprof-who-reach'); return Math.max(1, wpx(el) - wpx(el.querySelector('.bprof-who-name')) - wpx(r) - ml(r) + FIRST_NAME_MIN_PX); } };
+    const folded = fitLine(line, items, more, (n) => '+' + (n + countRest.length), chipFit);
     const rest = [...folded.filter((it) => it.priority > 0).map((it) => (it.el.querySelector('.bprof-who-name') || it.el).textContent), ...countRest.map((c) => c.name)];
     more.style.display = rest.length ? '' : 'none';
     setText(more, rest.length ? '+' + rest.length : ''); // the mockup's "+n" pill (its title names every folded row)
