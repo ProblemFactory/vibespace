@@ -182,10 +182,21 @@ export function tableFromSchemaDir(dir) {
   };
 }
 
+/** «x.y.z» in semver order (missing parts are 0) → <0 | 0 | >0. */
+export function cmpVersion(a, b) {
+  const x = String(a).split('.').map(Number), y = String(b).split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0);
+  return 0;
+}
+
 /** Judge the wrapper against one measured table → findings (empty = in step).
  *  `neverShipped` = consumed names deliberately absent from every measured
- *  binary, each with a reason. */
-export function judge(table, src, { neverShipped = {} } = {}) {
+ *  binary, each with a reason. `retired` = names a measured version STOPPED
+ *  sending or asking — `{ [name]: { since, why } }`, `since` the first measured
+ *  version without it: a table at or after `since` does not report the name
+ *  (older versions still use it, so the wrapper keeps its handling). The row is
+ *  pinned both ways by retiredRowVerdict, never a hiding place. */
+export function judge(table, src, { neverShipped = {}, retired = {} } = {}) {
   const findings = [];
   for (const s of wrapperRequestSites(src)) {
     if (!s.methods.length) { findings.push({ kind: 'unresolved-site', line: s.line, detail: 'a request() whose method could not be read off the source' }); continue; }
@@ -205,18 +216,37 @@ export function judge(table, src, { neverShipped = {} } = {}) {
   }
   const c = wrapperConsumed(src);
   const known = new Set([...table.serverNotifications, ...table.serverRequests]);
-  for (const n of c.compared) if (!known.has(n) && !(n in neverShipped) && !table.clientRequests[n]) findings.push({ kind: 'retired-notification', method: n, detail: `the wrapper consumes \`${n}\`, which codex ${table.codexVersion} never sends` });
-  for (const n of c.serverRequests) if (!table.serverRequests.includes(n)) findings.push({ kind: 'retired-server-request', method: n, detail: `the wrapper answers \`${n}\`, which codex ${table.codexVersion} never asks` });
+  const gone = (n) => Object.prototype.hasOwnProperty.call(retired, n) && cmpVersion(table.codexVersion, retired[n].since) >= 0;
+  for (const n of c.compared) if (!known.has(n) && !(n in neverShipped) && !gone(n) && !table.clientRequests[n]) findings.push({ kind: 'retired-notification', method: n, detail: `the wrapper consumes \`${n}\`, which codex ${table.codexVersion} never sends` });
+  for (const n of c.serverRequests) if (!table.serverRequests.includes(n) && !gone(n)) findings.push({ kind: 'retired-server-request', method: n, detail: `the wrapper answers \`${n}\`, which codex ${table.codexVersion} never asks` });
   for (const n of c.notifies) if (!table.clientNotifications.includes(n)) findings.push({ kind: 'unknown-client-notification', method: n, detail: `the wrapper sends notification \`${n}\`, unknown to codex ${table.codexVersion}` });
   return findings;
+}
+
+/** A RETIRED row against the measured tables (oldest first) → null when it holds, else why not. It holds only when
+ *  `since` is a MEASURED version, at least one table before it exists and every one of them still sends or asks the
+ *  name, no table from `since` on does, and the wrapper still handles the name (`src`). So a row that names a version
+ *  wrongly is red, and a reply kept for a name NO measured table asks is red too — the row is not a hiding place. */
+export function retiredRowVerdict(name, row, tables, src) {
+  const holds = (t) => (t.serverRequests || []).includes(name) || (t.serverNotifications || []).includes(name);
+  if (!row || !/^\d+\.\d+\.\d+$/.test(String(row.since || '')) || !String(row.why || '').trim()) return `${name}: a retired row names its first version without it and a reason`;
+  if (!tables.some((t) => t.version === row.since)) return `${name}: ${row.since} is no measured version (${tables.map((t) => t.version).join(', ')})`;
+  const before = tables.filter((t) => cmpVersion(t.version, row.since) < 0), from = tables.filter((t) => cmpVersion(t.version, row.since) >= 0);
+  if (!before.length) return `${name}: no measured table before ${row.since} — nothing shows a version that still asks it`;
+  const quiet = before.filter((t) => !holds(t.table));
+  if (quiet.length) return `${name}: ${quiet.map((t) => t.version).join(', ')} (before ${row.since}) do not send or ask it — the row names its version wrongly`;
+  const loud = from.filter((t) => holds(t.table));
+  if (loud.length) return `${name}: ${loud.map((t) => t.version).join(', ')} (from ${row.since} on) still send or ask it — the row names its version wrongly`;
+  const c = wrapperConsumed(src);
+  if (!c.serverRequests.includes(name) && !c.compared.includes(name)) return `${name}: the wrapper no longer handles it — a stale row`;
+  return null;
 }
 
 /** Every measured table in the fixture dir, oldest first (semver order). */
 export function measuredTables(repo) {
   const dir = path.join(repo, TABLE_DIR);
-  const cmp = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); return 0; };
   return fs.readdirSync(dir).map((f) => f.match(/^(\d+\.\d+\.\d+)-methods\.json$/)).filter(Boolean)
-    .sort((a, b) => cmp(a[1], b[1])).map((m) => ({ version: m[1], file: path.join(dir, m[0]), table: JSON.parse(fs.readFileSync(path.join(dir, m[0]), 'utf8')) }));
+    .sort((a, b) => cmpVersion(a[1], b[1])).map((m) => ({ version: m[1], file: path.join(dir, m[0]), table: JSON.parse(fs.readFileSync(path.join(dir, m[0]), 'utf8')) }));
 }
 
 /** The INSTALLED codex-cli version, launch-free first: the npm package.json

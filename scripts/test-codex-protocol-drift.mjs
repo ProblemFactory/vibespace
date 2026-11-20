@@ -10,7 +10,9 @@
 //  ① every measured table is well-formed and names the version it measured;
 //  ② the wrapper's census (every request(), every consumed name) is judged
 //    against EVERY measured table — a missing required field, an unknown
-//    method, a renamed field, a retired notification FAILS by name;
+//    method, a renamed field, a retired notification FAILS by name; a name a
+//    measured version RETIRED (older versions still use it, so the wrapper keeps
+//    its handling) is a RETIRED row, pinned both ways (r606, lane bl-ci);
 //  ③ every reset-credit outcome the CLI declares is handled by the engine;
 //  ④ THE VERSION GATE: the installed codex-cli has a measured table — an update
 //    nobody measured FAILS here by name (re-measure, read the diff, fix);
@@ -26,7 +28,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
-import { judge, wrapperRequestSites, wrapperConsumed, measuredTables, installedCodexVersion, WRAPPER } from './codex-protocol-census.mjs';
+import { judge, wrapperRequestSites, wrapperConsumed, measuredTables, installedCodexVersion, WRAPPER, cmpVersion, retiredRowVerdict } from './codex-protocol-census.mjs';
 import { scratch, stopWrapper, withoutVendorKeys, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { writeStub } from './codex-app-server-stub.mjs';
@@ -42,6 +44,13 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const NEVER_SHIPPED = {
   'thread/resumed': 'absent from every measured binary (0.153.4 and 0.159.3: schema AND strings) — a defensive alias beside thread/started; the thread/resume RESPONSE carries the Thread (updateMetaFromThread)',
 };
+/** names a measured version RETIRED — `since` = the first measured version that no longer sends or asks it. Older versions a person
+ *  may still run do, so the wrapper keeps its handling; the judge does not report the name on a table at or after `since`, and each row
+ *  is pinned both ways below (r606, lane bl-ci, 2026-11-20). */
+const RETIRED = {
+  'currentTime/read': { since: '0.171.0', why: 'a server request codex 0.171.0 no longer asks (0.153.4 to 0.170.0 do) — every older version a person may still run asks it, so the wrapper keeps its automatic reply' },
+};
+const RULES = { neverShipped: NEVER_SHIPPED, retired: RETIRED };
 
 console.log('— ① the measured tables');
 const TABLES = measuredTables(REPO);
@@ -65,10 +74,31 @@ ok(methods.includes('thread/start') && methods.includes('thread/resume') && meth
 const missingFromNewest = methods.filter((m) => !(m in (NEWEST.table.wrapperMethods || {})));
 ok(missingFromNewest.length === 0, `every method the wrapper calls was PROBED by the newest table (${NEWEST.version}) — a new call is measured before it ships`, missingFromNewest.join(', ') + ' — run node scripts/measure-codex-protocol.mjs');
 for (const { version, table } of TABLES) {
-  const f = judge(table, SRC, { neverShipped: NEVER_SHIPPED });
+  const f = judge(table, SRC, RULES);
   ok(f.length === 0, `codex ${version}: the wrapper is in step (0 findings over ${methods.length} methods + ${wrapperConsumed(SRC).compared.length} consumed names)`, f.map((x) => `[${x.kind}] ${x.detail}${x.line ? ' (line ' + x.line + ')' : ''}`).join(' | '));
 }
 for (const [n, why] of Object.entries(NEVER_SHIPPED)) ok(TABLES.every(({ table }) => !table.serverNotifications.includes(n) && !table.serverRequests.includes(n)), `never shipped, pinned: ${n} — ${why.split(' — ')[0]}`);
+for (const [n, row] of Object.entries(RETIRED)) {
+  const v = retiredRowVerdict(n, row, TABLES, SRC);
+  const asks = TABLES.filter(({ table }) => table.serverRequests.includes(n) || table.serverNotifications.includes(n)).map((t) => t.version);
+  ok(v === null, `retired, pinned BOTH WAYS: ${n} — every table before ${row.since} has it (${asks.join(', ')}), none from ${row.since} on; the wrapper still handles it (${row.why.split(' — ')[1] || row.why})`, v);
+}
+{
+  // the row is not a hiding place: each wrong row is red by name
+  const [n, row] = Object.entries(RETIRED)[0];
+  const prev = TABLES.filter((t) => cmpVersion(t.version, row.since) < 0).pop();
+  const wrong = [
+    ['a version before the first one without it', { ...row, since: prev.version }, /still send or ask it/],
+    ['a version nobody measured', { ...row, since: '9.99.0' }, /no measured version/],
+    ['no reason', { since: row.since, why: '' }, /a reason/],
+    ['the first measured version (nothing before it asks the name)', { ...row, since: TABLES[0].version }, /no measured table before/],
+  ];
+  for (const [what, bad, re] of wrong) { const v = retiredRowVerdict(n, bad, TABLES, SRC); ok(typeof v === 'string' && re.test(v), `CONTROL: a retired row with ${what} is RED by name`, v); }
+  const noAsk = retiredRowVerdict('thread/resumed', { since: TABLES[1].version, why: 'x' }, TABLES, SRC);
+  ok(typeof noAsk === 'string' && /do not send or ask it/.test(noAsk), 'CONTROL: a retired row for a name NO measured table asks (the never-shipped alias) is RED — a kept reply needs a version that asks it', noAsk);
+  const stale = retiredRowVerdict(n, row, TABLES, SRC.replace(/'currentTime\/read': \{ kind: 'auto'/, "'currentTime/gone': { kind: 'auto'"));
+  ok(typeof stale === 'string' && /no longer handles it/.test(stale), 'CONTROL: a retired row for a name the wrapper no longer handles is RED (a stale row)', stale);
+}
 // the census's changed rows, printed (what moved between the last two tables)
 {
   const [a, b] = [TABLES[TABLES.length - 2], NEWEST];
@@ -101,11 +131,11 @@ console.log('— ②b the reset-credit helper (lane reset-path) judged against e
   ok(hm.every((m) => m in (NEWEST.table.wrapperMethods || {})), `every helper method was PROBED by the newest table (${NEWEST.version})`, hm.filter((m) => !(m in (NEWEST.table.wrapperMethods || {}))).join(', '));
   ok(JSON.stringify(wrapperConsumed(HELPER).notifies) === '["initialized"]', 'the helper sends exactly one notification: initialized');
   for (const { version, table } of TABLES) {
-    const f = judge(table, HELPER, { neverShipped: NEVER_SHIPPED });
+    const f = judge(table, HELPER, RULES);
     ok(f.length === 0, `codex ${version}: the helper is in step (0 findings)`, f.map((x) => `[${x.kind}] ${x.detail}`).join(' | '));
   }
   const pre = HELPER.replace("request('account/rateLimitResetCredit/consume', { idempotencyKey })", "request('account/rateLimitResetCredit/consume', {})");
-  ok(pre !== HELPER && judge(NEWEST.table, pre, { neverShipped: NEVER_SHIPPED }).some((x) => x.kind === 'missing-required' && x.field === 'idempotencyKey'), 'CONTROL: a helper consume without the key is named — missing-required idempotencyKey');
+  ok(pre !== HELPER && judge(NEWEST.table, pre, RULES).some((x) => x.kind === 'missing-required' && x.field === 'idempotencyKey'), 'CONTROL: a helper consume without the key is named — missing-required idempotencyKey');
 }
 console.log('— ② controls: each finding kind is produced when its drift is planted');
 {
@@ -113,7 +143,7 @@ console.log('— ② controls: each finding kind is produced when its drift is p
   ok(SRC.includes(consumeLine), 'the consume site is spelled as the controls expect');
   const preFix = SRC.replace(consumeLine, "request('account/rateLimitResetCredit/consume', {}, 30000)");
   for (const { version, table } of TABLES) {
-    const f = judge(table, preFix, { neverShipped: NEVER_SHIPPED });
+    const f = judge(table, preFix, RULES);
     ok(f.length === 1 && f[0].kind === 'missing-required' && f[0].field === 'idempotencyKey', `CONTROL (${version}): the PRE-FIX consume (\`{}\`) is named — missing-required idempotencyKey`, JSON.stringify(f));
   }
   const t = JSON.parse(JSON.stringify(NEWEST.table));
@@ -121,11 +151,17 @@ console.log('— ② controls: each finding kind is produced when its drift is p
   delete t.clientRequests['turn/steer'];
   t.clientRequests['thread/goal/set'].properties = t.clientRequests['thread/goal/set'].properties.filter((k) => k !== 'objective');
   t.serverNotifications = t.serverNotifications.filter((n) => n !== 'turn/plan/updated');
-  const kinds = judge(t, SRC, { neverShipped: NEVER_SHIPPED }).map((x) => `${x.kind}:${x.method}${x.field ? '.' + x.field : ''}`).sort();
+  const kinds = judge(t, SRC, RULES).map((x) => `${x.kind}:${x.method}${x.field ? '.' + x.field : ''}`).sort();
   ok(JSON.stringify(kinds) === JSON.stringify(['missing-required:turn/start.brandNewField', 'retired-notification:turn/plan/updated', 'unknown-field:thread/goal/set.objective', 'unknown-method:turn/steer']),
     'CONTROL: a planted new required field / retired method / renamed field / retired notification each FAILS by name', kinds.join(' | '));
-  const f2 = judge(NEWEST.table, SRC, { neverShipped: {} });
+  const f2 = judge(NEWEST.table, SRC, { neverShipped: {}, retired: RETIRED });
   ok(f2.length === 1 && f2[0].method === 'thread/resumed', 'CONTROL: without its never-shipped row the alias is reported (the row is load-bearing)', JSON.stringify(f2));
+  for (const [n, row] of Object.entries(RETIRED)) {
+    const at = TABLES.find((t) => t.version === row.since);
+    const f3 = at ? judge(at.table, SRC, { neverShipped: NEVER_SHIPPED }) : [];
+    ok(f3.length === 1 && f3[0].method === n && f3[0].kind === (at.table.serverRequests && wrapperConsumed(SRC).serverRequests.includes(n) ? 'retired-server-request' : 'retired-notification'),
+      `CONTROL: without its retired row ${n} is reported on codex ${row.since} (the row is load-bearing)`, JSON.stringify(f3));
+  }
 }
 
 console.log('— ③ every reset-credit outcome the CLI declares is handled');
