@@ -578,7 +578,7 @@ class CodeEditor {
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
       // B-3b03 follow-up (its read's S1): text typed while the save was out is NOT saved — its unsaved mark stays
       if (this.editorView.state.doc.toString() === content) { this.modified = false; this.saveIndicator.textContent = '✓ ' + t('Saved'); this.saveIndicator.style.color = 'var(--green)'; }
-      else this.saveIndicator.textContent = '';
+      else { this.saveIndicator.textContent = '● ' + t('Unsaved'); this.saveIndicator.style.color = 'var(--yellow)'; }   // its read's S2: the mark stays true
       this._diskChip.style.display = 'none';
       this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change

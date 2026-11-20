@@ -6,7 +6,8 @@
  *  read: every state a round added, the next round found a fault in): EVERY ✕ SAVES FIRST. The save landed and the text on screen
  *  is the text it sent ⇒ the window closes and the CLI hears «done». The person typed while it was out ⇒ the window stays, never
  *  asked (the unsaved mark shows; the next ✕ saves again). The save was REFUSED ⇒ the person is ASKED «Close without saving?»,
- *  Keep editing focused and Enter keeping (a question that opens seconds late must not take a keystroke meant for the text):
+ *  Cancel focused, Enter keeping and Discard off for its first second (a question that opens seconds late must not take a
+ *  keystroke or a tap meant for something else):
  *  discard (a press on the button) ⇒ it closes and the CLI reads the file as it is on disk (a quit without saving); keep ⇒ it stays. Never a window that
  *  cannot close, never a close or a «done» over a refused save the person did not choose. (The release closed at once and told
  *  the CLI «done» whatever the save answered: the edits were lost.) A programmatic close is never refused; its refused save tells

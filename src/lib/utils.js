@@ -501,6 +501,9 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
     });
     setTimeout(() => (cancelDefault ? cancelBtn : okBtn).focus(), 0);
+    // cancelDefault: the confirm button is OFF for its first second — a Tab then Enter, or a tap, meant for what the person was doing
+    // when the question appeared late never confirms it (B-3b03 follow-up, its read's S1)
+    if (cancelDefault) { okBtn.disabled = true; setTimeout(() => { okBtn.disabled = false; }, 1000); }
   });
 }
 
