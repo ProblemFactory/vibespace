@@ -917,34 +917,38 @@ function restoreSessions() {
 
   // Backfill billing identity for sessions restored WITHOUT a recorded
   // apiKeySource (spawned before tracking): chat sessions carry the init
-  // record in their buffer (grep the last occurrence — bounded child
-  // process, off the boot critical path); terminal sessions get a /proc env
-  // probe (env key = definite API). One broadcast when done.
-  setTimeout(() => {
-    const { execFile } = require('child_process');
-    let pending = 0, changed = false;
-    const finish = () => { if (--pending === 0 && changed) broadcastActiveSessions(); };
-    for (const [id, s] of activeSessions) {
+  // record in their buffer; terminal sessions get a /proc env probe (env
+  // key = definite API). One broadcast when done.
+  // B-cd4b: NEVER A PROGRAM — the buffer's LAST `apiKeySource":"…"` is read by this process, OFF the loop (fs.promises), ONE
+  // conversation at a time. It used to fork `sh -c grep … | tail -1` for EVERY restored session in ONE synchronous pass: at 80
+  // survivors that was 80 forks of the hub's whole memory in one turn — the loop held 1.6 s (the B-cd4b measure, the first test
+  // machine; the owner's hub is several times that memory, and restarts at every update). A buffer is the wrapper's ≤ 500 KB
+  // ring: its read is the thread pool's, its lastIndexOf well under a millisecond. Until a session's value arrives, its one
+  // reader (src/harnesses/claude.js billingIdentity → the page's billing chip) shows the spawn-time guess marked `guessed`, or
+  // «unknown» — never a confirmed source it did not read (as during the old pass's window)
+  const API_KEY_SOURCE = 'apiKeySource":"';
+  const lastApiKeySource = (text) => { const k = text.lastIndexOf(API_KEY_SOURCE); if (k < 0) return null; const m = /^apiKeySource":"([^"]*)"/.exec(text.slice(k, k + 200)); return m ? m[1] : null; };
+  setTimeout(async () => {
+    let changed = false;
+    for (const [id, s] of [...activeSessions]) {
       if (!s.backend || capsOf(s.backend).streamProtocol !== 'stream-json' || s._apiKeySource) continue;
-      const buf = path.join(BUFFERS_DIR, `${id}.buf`);
-      pending++;
-      execFile('sh', ['-c', `grep -o 'apiKeySource":"[^"]*"' ${JSON.stringify(buf)} 2>/dev/null | tail -1`], { timeout: 20000 }, (err, out) => {
-        const m = /apiKeySource":"([^"]*)"/.exec(String(out || ''));
-        if (m) {
-          s._apiKeySource = m[1];
-          if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), apiKeySource: m[1] }); } catch { } }
-          changed = true;
-        } else if (!s._authAtSpawn && s._childPid) {
-          // terminal session: env probe (only the env-key case is provable)
-          try {
-            const env = fs.readFileSync(`/proc/${s._childPid}/environ`, 'utf-8');
-            if (env.includes('ANTHROPIC_API_KEY=')) { s._apiKeySource = 'ANTHROPIC_API_KEY'; changed = true; }
-          } catch { }
-        }
-        finish();
-      });
+      let text = '';
+      try { text = await fs.promises.readFile(path.join(BUFFERS_DIR, `${id}.buf`), 'utf8'); } catch { }
+      if (activeSessions.get(id) !== s || s._apiKeySource) continue;   // ended, or the live stream said it meanwhile (its own word wins)
+      const src = lastApiKeySource(text);
+      if (src) {
+        s._apiKeySource = src;
+        if (s.sockName) { try { writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), apiKeySource: src }); } catch { } }
+        changed = true;
+      } else if (!s._authAtSpawn && s._childPid) {
+        // terminal session: env probe (only the env-key case is provable)
+        try {
+          const env = fs.readFileSync(`/proc/${s._childPid}/environ`, 'utf-8');
+          if (env.includes('ANTHROPIC_API_KEY=')) { s._apiKeySource = 'ANTHROPIC_API_KEY'; changed = true; }
+        } catch { }
+      }
     }
-    if (!pending) { /* nothing to backfill */ }
+    if (changed) broadcastActiveSessions();
   }, 3000);
 
   // Re-arm live subagent monitoring for agents that span the restart: the

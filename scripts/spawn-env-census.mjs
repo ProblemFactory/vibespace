@@ -360,7 +360,6 @@ export const ROWS = Object.freeze([
   ['src/routes/files.js', "'sh'", 'probe', 1, PROBE + ' (du, 30 s)'],
   ['src/routes/files.js', "'zip'", 'probe', 1, PROBE + ' (a folder download stream)'],
   ['src/routes/files.js', "'du'", 'probe', 1, PROBE + ' (15 s)'],
-  ['src/server/boot-restore.js', "'sh'", 'probe', 1, PROBE + ' (a transcript grep, 20 s)'],
   ['src/server/cli-cmd.js', "'/usr/bin/which'", 'probe', 1, PROBE + ' (2 s)'],
   ['src/server/cli-env.js', 'CODEX_CMD', 'probe', 1, PROBE + ' (codex sandbox -- true, 20 s)'],
   ['src/server/desktop-access.js', 'launch[0]', 'default', 1, "create()'s default env; server.js hands agentEnv()"],
