@@ -169,7 +169,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       note: "chat.collapseKinds saved before the 'agent' kind existed (2.368.19) cannot distinguish 'user unchecked it' from 'the option predates the save' — codex collab cards (Agent Wait, send_message…) broke every fold on instances with ANY saved selection (owner report). Add the default-on kind once; unticking it afterwards sticks.",
       run() {
         const f = path.join(dataDir, 'settings.json');
-        let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; }
+        // B-225b R9: through the settings' three answers — not there ⇒ nothing to do; HELD ⇒ THROWN by name (runs at the next start;
+        // the release returned here and was recorded done over a file it never read)
+        const doc = require('../store-hold.js').readNow(f, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), what: 'this migration' });
+        if (doc === undefined) return;
         const v = doc['chat.collapseKinds'];
         if (!Array.isArray(v) || v.includes('agent')) return;
         v.push('agent');
@@ -182,7 +185,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       note: "lane S3 (naive-user study 2): the new 'note' kind (VibeSpace's notes to the assistant — the Stop nudge, the tools intro) ships ON in chat.collapseKinds, and a SAVED selection cannot tell 'user unchecked it' from 'the option predates the save' (the 'agent' precedent above). Add it once; unticking it afterwards sticks.",
       run() {
         const f = path.join(dataDir, 'settings.json');
-        let doc; try { doc = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch { return; }
+        // B-225b R9: through the settings' three answers — not there ⇒ nothing to do; HELD ⇒ THROWN by name (runs at the next start;
+        // the release returned here and was recorded done over a file it never read)
+        const doc = require('../store-hold.js').readNow(f, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), what: 'this migration' });
+        if (doc === undefined) return;
         const v = doc['chat.collapseKinds'];
         if (!Array.isArray(v) || v.includes('note')) return;
         v.push('note');
@@ -1150,6 +1156,8 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
    *  run then needs the live store that owns it), then the move through the live PluginManager + integration store. */
   function migrateLlmRename() {
     const FROM = 'decision-api', TO = 'llm';
+    { const st0 = typeof settings === 'function' ? settings() : settings; let sv = null; try { sv = st0 && typeof st0.read === 'function' ? st0.read() : null; } catch { sv = null; }
+      if (sv && sv[Symbol.for('vibespace.settings-held')]) throw new Error('the settings (data/settings.json) could not be read — nothing was moved; it runs at the next start'); }   // B-225b R9: never moved over the defaults
     const inSettings = peek('settings.json', (d) => Object.keys(d).some((k) => k.startsWith(`plugin.${FROM}.`)));
     const inPlugins = peek('plugins.json', (d) => d.plugins && d.plugins[FROM]);
     const inStore = peek('integrations.json', (d) => d.integrations && (d.integrations[FROM] || (d.integrations[TO] && d.integrations[TO].values && d.integrations[TO].values.model !== undefined)));
@@ -1453,10 +1461,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
    *  returned as the archive (the ledger report). Written the way the settings route writes it (2-space JSON, atomic,
    *  the file's mode kept) and ONLY when something was stripped — a file without them stays byte-identical. */
   function stripRetiredSettingsFile(file) {
-    let text;
-    try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return { settings: 'absent', stripped: {} }; throw e; }
-    let doc;
-    try { doc = JSON.parse(text); } catch { return { settings: 'unparseable', stripped: {} }; }   // never rewrite what we cannot read
+    // B-225b R9: through the settings' three answers — HELD (unreadable, or bytes that are not the settings) ⇒ THROWN by name: never
+    // rewritten, never recorded (the release recorded «unparseable» as done, for good)
+    const doc = require('../store-hold.js').readNow(file, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), what: 'this migration' });
+    if (doc === undefined) return { settings: 'absent', stripped: {} };
     const { doc: kept, stripped } = stripRetiredSettings(doc, RETIRED_2026_10); // the keys THIS migration shipped with — a later retirement carries its own
     if (!Object.keys(stripped).length) return { settings: 'untouched', stripped };
     let mode = 0o644; try { mode = fs.statSync(file).mode & 0o777; } catch { }
@@ -1663,6 +1671,7 @@ const AGY_READS_MIGRATION_ID = '2026-11-agy-reads-follow-claude-off';
 function agyReadsFollowClaudeOff(store) {
   if (!store || typeof store.read !== 'function' || typeof store.patch !== 'function') throw new Error('no live settings store was handed in — it runs at the next boot');
   const doc = store.read() || {};
+  if (doc[Symbol.for('vibespace.settings-held')]) throw new Error('the settings (data/settings.json) could not be read — nothing was written; it runs at the next boot');   // B-225b R9: never judged on the defaults
   if (doc['accounts.onDemandQuotaRefresh'] !== 'off') return { changed: false, why: `Claude's row is ${JSON.stringify(doc['accounts.onDemandQuotaRefresh'] || 'manual')} — Antigravity's automatic reads stay on (their default)` };
   if (doc['antigravity.autoUsageReads'] !== undefined) return { changed: false, why: `antigravity.autoUsageReads already holds ${JSON.stringify(doc['antigravity.autoUsageReads'])} — left as it is` };
   store.patch({ 'antigravity.autoUsageReads': 'off' });

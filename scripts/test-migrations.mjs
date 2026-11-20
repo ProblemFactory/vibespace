@@ -1952,7 +1952,9 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       const r6 = mkRoot('bad');
       fs.writeFileSync(settingsOf(r6), '{"agents.vibespaceChannel": true,');
       const res6 = runOnly(create({ rootDir: r6, homeDir: scratchHomeDir, serverNotice: () => { } }), r6).find((x) => x.id === ID);
-      ok(res6.status === 'ran' && res6.report.settings === 'unparseable' && fs.readFileSync(settingsOf(r6), 'utf8') === '{"agents.vibespaceChannel": true,', 'an unparseable settings.json is left exactly as it is (never rewrite what we cannot read)');
+      // B-225b R9 (the persistence holds): settings that are not the settings are HELD — the migration fails BY NAME, rewrites nothing
+      // and is not recorded (it runs again at the next start; the release recorded «unparseable» as done, for good)
+      ok(res6.status === 'failed' && /settings\.json could not be read \(damaged/.test(res6.error || '') && fs.readFileSync(settingsOf(r6), 'utf8') === '{"agents.vibespaceChannel": true,', 'an unparseable settings.json is left exactly as it is (never rewrite what we cannot read) — and the migration fails by name, not recorded', res6);
     }
     // NEGATIVE CONTROLS — PATCHED COPIES of src/server/migrations.js (scripts/mutant-copy.mjs): the same scenario must go red
     {

@@ -41,7 +41,12 @@ const CANNOT_KEEP = {
   moment: { key: 'its moment is not a number' },
 };
 
-function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, userTodos = null, log = () => { }, now = () => Date.now(), writer = null, setTimer = setTimeout, clearTimer = clearTimeout } = {}) {
+function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, userTodos = null, log = () => { }, now = () => Date.now(), writer = null, setTimer = setTimeout, clearTimer = clearTimeout, settingsHeld = () => null } = {}) {
+  // B-225b R11 (the persistence holds): data/settings.json HELD at the start — every row reads its DEFAULT, so no hold is judged
+  // against it (liveness, a pending press): a hold is KEPT; its return is OWED (no retry used, no notice) and lands at the lift
+  // (`atLift`, the settings store's lift hook) — before anything unattended spends; a press is refused by name meanwhile
+  const isHeld = () => { try { return !!settingsHeld(); } catch { return false; } };
+  const owed = new Set();
   const file = path.join(dataDir, 'setting-holds.json');
   const W = () => writer || require('../store-writer.js').storeWriter();
   let holds = {};   // key → { key, value, before (the stored value; null = the row's default), untilAt, at, pending? }
@@ -95,6 +100,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   /** THE RETURN (the moment, or «End now»): back to «before» — only a LIVE hold; one the hand moved has already ended. */
   async function returnHold(key, why) {
     const h = holds[key]; if (!h) return { ok: true, none: true };
+    if (isHeld()) { owed.add(key); disarm(key); log(`[setting-holds] return ${key} → ${h.before} is OWED: the settings could not be read — it lands when they read`); return { ok: false, code: 'settings-unread', owed: true, value: null }; }
     const cur = presentOf(key), raw = rawOf(readSettings() || {}, key);
     if (!AS.holdIsLive(h, raw)) { endChangedByHand(key, said(raw), why === 'end' ? 'End now' : 'its moment'); return { ok: true, returned: false, changedByHand: true, value: cur }; }   // cure 2: a return never writes over a value it did not write
     try { write({ [key]: h.before }); }   // null = the row's default (a sparse store drops it)
@@ -130,6 +136,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
    *  with the present one: the card says it and its words follow). */
   async function take({ key, value, untilRel = null, untilAt = null, shown }) {
     if (!AS.isProposable(key)) return { ok: false, status: 400, code: 'not-proposable', error: `${key} is not a row a press may change; ${AS.LINK(key)}` };
+    if (isHeld()) return { ok: false, status: 503, code: 'store_unread', error: 'the settings could not be read — nothing was changed; press again once they read' };   // B-225b: never judged against the defaults
     const present = presentOf(key);
     const presentNone = noNumber(rawOf(readSettings() || {}, key)) && rawOf(readSettings() || {}, key) !== undefined;   // cure 2: «none», never 0, in what the press answers
     if (NUM(Number(shown)) == null || Number(shown) !== present) return { ok: false, status: 409, code: 'moved', present, ...(presentNone ? { presentNone } : {}), error: `it is ${presentNone ? 'none' : present} now` };
@@ -181,6 +188,7 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
         log(`[setting-holds] dropped at start: ${k} (${why.key})`);
         delete holds[k]; changed = true; continue;
       }
+      if (isHeld()) { arm(k); continue; }   // B-225b: the settings held — kept as it is, judged at the lift (atLift), never against the defaults
       const cur = rawOf(readSettings() || {}, k);   // cure 2: the RAW stored value decides liveness
       if (h.pending !== undefined) { if (NUM(h.pending) === cur) h.value = h.pending; delete h.pending; changed = true; }   // a second press that never landed: the hold stands on the old value
       if (!AS.holdIsLive(h, cur)) { log(`[setting-holds] ${k}: the row holds ${said(cur)}, not the hold's ${h.value} (changed while the hub was down, or a first press that never landed) — the hold ended; it will not go back`); delete holds[k]; changed = true; continue; }
@@ -191,7 +199,22 @@ function create({ dataDir, readSettings, patchSettings, broadcast = () => { }, u
   }
   const end = (key) => returnHold(key, 'end');
   const stop = () => { for (const k of [...timers.keys()]) disarm(k); };
-  return { start, take, end, list, returnHold, noteSettingsWrite, holdOf, stop, file };
+  /** B-225b R11: THE SETTINGS READ AGAIN (their hold lifted) — what the start could not judge is judged now (a press that never
+   *  landed, a row the hand moved), then every OWED return lands (synchronously: patchSettings is), before anything unattended spends */
+  function atLift() {
+    let changed = false;
+    for (const k of Object.keys(holds)) {
+      const h = holds[k], cur = rawOf(readSettings() || {}, k);
+      if (h.pending !== undefined) { if (NUM(h.pending) === cur) h.value = h.pending; delete h.pending; changed = true; }
+      if (!AS.holdIsLive(h, cur)) { log(`[setting-holds] ${k}: the row holds ${said(cur)}, not the hold's ${h.value} (changed while the settings could not be read) — the hold ended; it will not go back`); delete holds[k]; disarm(k); owed.delete(k); changed = true; }
+    }
+    if (changed) saveLater('the settings read again');
+    const due = [...owed]; owed.clear();
+    for (const k of due) returnHold(k, 'moment').catch((x) => log(`[setting-holds] return ${k} failed: ${x && x.message}`));
+    if (changed) tell();
+    return due.length;
+  }
+  return { start, take, end, list, returnHold, noteSettingsWrite, holdOf, stop, file, atLift };
 }
 
 module.exports = { create, STORE_NAME, RETRY_MS, RETRIES };

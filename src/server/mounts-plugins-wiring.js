@@ -203,7 +203,8 @@ require('../routes/chat-attachments.js').registerChatAttachmentRoutes(app, { sto
 const settingHolds = require('./setting-holds.js').create({ dataDir: path.join(rootDir, 'data'),
   readSettings: () => persistenceRouter.readSettings(), patchSettings: (p) => persistenceRouter.patchSettings(p),
   broadcast: (m) => bcastAll(m), log: (m) => console.log(m),
-  userTodos });
+  userTodos, settingsHeld: () => (typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null) });
+if (typeof persistenceRouter.onSettingsLift === 'function') persistenceRouter.onSettingsLift(() => settingHolds.atLift());   // B-225b R11: the owed returns land first at the lift
 settingHolds.start().catch((e) => console.log('[setting-holds] start failed:', e && e.message));
 require('../routes/setting-holds.js').registerSettingHoldRoutes(app, { holds: settingHolds });
 app.locals.settingHolds = settingHolds;   // the agent's ask route judges a lasting change against a live hold (law A)

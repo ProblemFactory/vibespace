@@ -2343,6 +2343,25 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const jc = DE.slice(DE.indexOf('async function judgeCall('), DE.indexOf('reserve(use,', DE.indexOf('async function judgeCall(')));
       ok(/if \(settingsUnread\(\)\) return quiet\(use, 'settings-unread'\);/.test(jc) && /ledger\.settingsUnread\(\)\) \{ ledger\.journal\(\{ use, model: null, outcome: 'refused', why: 'settings-unread'/.test(TM) && /decision-engine\.js'\)\.create\(\{[^\n]*settingsHeld: \(\) => \(persistenceRouter && typeof persistenceRouter\.settingsHeld === 'function'/.test(MW),
         '⑪ (f) the judge (before its reservation) and the text-model client refuse NOT NOW by name while the settings are held — the owner\'s daily cap is never judged on its default (pins; the hub hands the hold in)');
+      // THE SETTING HOLDS (src/server/setting-holds.js) while the settings are held: a hold is KEPT at the start (never judged against
+      // the defaults — the release ended every hold as «changed while the hub was down»), its return is OWED (no retry used, no notice),
+      // a press is refused by name; AT THE LIFT what the start could not judge is judged and every owed return lands (atLift)
+      {
+        const SHM = require(path.join(REPO, 'src/server/setting-holds.js'));
+        const ROW = 'spend.unattendedPerInstanceDay', T0 = Date.now();
+        const dir = scratchDir('hold-f-holds'); roots.push(dir);
+        fs.writeFileSync(path.join(dir, 'setting-holds.json'), JSON.stringify({ v: 1, holds: { [ROW]: { key: ROW, value: 1600, before: 800, untilAt: T0 + 3600e3, at: T0 } } }));
+        let heldNow = { kind: 'unreadable' }; const st = { [ROW]: 1600 }, owner = [], writes = [];
+        const HS = SHM.create({ dataDir: dir, readSettings: () => (heldNow ? Object.freeze({}) : st), patchSettings: (p) => { if (heldNow) throw Object.assign(new Error('held'), { code: 'store_unread' }); writes.push(p); Object.assign(st, p); },
+          userTodos: { add: (k, x) => { owner.push({ k, ...x }); return { id: 'n1' }; } }, log: () => { }, now: () => T0, writer: { dirty: () => { }, durable: async () => true }, setTimer: () => ({}), clearTimer: () => { }, settingsHeld: () => heldNow });
+        await HS.start();
+        const keptAtStart = HS.list().some((h) => h.key === ROW);
+        const rh = await HS.returnHold(ROW, 'moment'), pr = await HS.take({ key: ROW, value: 2000, untilRel: 3600e3, shown: 1600 });
+        heldNow = null;
+        const landed = HS.atLift();
+        ok(keptAtStart && rh && rh.code === 'settings-unread' && rh.owed === true && pr && pr.code === 'store_unread' && owner.length === 0 && landed === 1 && writes.length === 1 && writes[0][ROW] === 800,
+          '⑪ (f) the setting holds while the settings are held: a hold is KEPT at the start (never judged against the defaults), its return is OWED (no retry, no notice), a press refused by name — at the LIFT the owed return lands (back to «before»)', { keptAtStart, rh, pr: pr && pr.code, owner: owner.length, landed, writes });
+      }
       // RED
       const VIEW_A = "    const h = settingsHold.held();\n    if (h) return heldSettingsView(h);\n    const v = settingsHold.answer();\n";
       ok(PSRC.split(VIEW_A).length === 2, 'control setup: the settings\' held view and the hold\'s answer are found once in src/routes/persistence.js');
