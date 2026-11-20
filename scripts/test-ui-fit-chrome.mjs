@@ -28,6 +28,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, DAEMON_ROOT_ENV } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (test-architecture §57c)
 import { armWatchdog } from './suite-watchdog.mjs';
 import { clientSources, checkLabelSites } from './ui-fit-census.mjs';
@@ -153,7 +154,7 @@ await cdp('Page.addScriptToEvaluateOnNewDocument', { source: `(() => { const F =
   }; })();` });
 const desk = async (w = 1440, h = 900) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: false }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'hover' }, { name: 'pointer', value: 'fine' }] }); };
 const phone = async (w = 390, h = 844) => { await cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 3, mobile: true }); await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 }); await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] }); };
-const load = async () => { await cdp('Page.navigate', { url: ORIGIN + '/' }); await waitFor('!!(window.app && app.ready)', 60000); await evalJs('app.ready.then(() => true)'); await waitFor(`!document.getElementById('loading-screen')`, 30000); await sleep(1200); };
+const load = async () => { await loadPage(cdp, ORIGIN + '/', { bootMs: 60000 }); await waitFor(`!document.getElementById('loading-screen')`, 30000); await sleep(1200); };
 /** checkpoint 61 (the coordinator's readers): every census fold stands on its OWN full row — its left and width are its id row's
  *  content box (±1 px); the folds that do not, said */
 const FOLD_ROWS = `(() => { const fs = [...document.querySelectorAll('#all-sessions-list .ob-cli-where-fold')].filter((d) => d.getClientRects().length);

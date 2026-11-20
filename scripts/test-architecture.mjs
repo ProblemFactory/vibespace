@@ -2066,17 +2066,22 @@ await section(async () => {
 //     parts → scripts/xpra-window-boot.mjs, lane xpra-window-split) is read
 //     with that module's text first — where its page opener lived when it was
 //     one file — so the module's import + addScript precede the part's navs.
+//     THE ONE PAGE LOAD (B-1217 (13), 2026-11-20): in a suite that imports loadPage from ./cdp-page-load.mjs, a `loadPage(` call
+//     IS a navigate of the suite's (a suite's own helper that is merely NAMED loadPage is not one)
+//     — its position is judged like a 'Page.navigate' literal — and the helper is no boot module: it navigates only where a suite
+//     asks, so its text is never read ahead of the suite's (its own 'Page.navigate' would stand before every suite's addScript).
 await section(async () => {
-  const scope = fs.readdirSync('scripts').filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => 'scripts/' + f).filter((f) => fs.readFileSync(f, 'utf8').includes("'Page.navigate'"));
+  const importsLoad = (s) => /import\s*\{[^}]*\bloadPage\b[^}]*\}\s*from\s*'\.\/cdp-page-load\.mjs'/.test(s);
+  const scope = fs.readdirSync('scripts').filter((f) => /^test-.*\.mjs$/.test(f)).map((f) => 'scripts/' + f).filter((f) => { const s = fs.readFileSync(f, 'utf8'); return s.includes("'Page.navigate'") || importsLoad(s); });
   const judge = (s) => {
     if (s.includes('// onboarding-under-test') || s.includes('// cdp-protocol-under-test')) return null;
     if (!/import\s*\{[^}]*\bONBOARDED_SOURCE\b[^}]*\}\s*from\s*'\.\/scratch\.mjs'/.test(s)) return 'no ONBOARDED_SOURCE import from ./scratch.mjs';
-    const navs = [...s.matchAll(/'Page\.navigate'/g)].map((m) => m.index);
+    const navs = [...s.matchAll(importsLoad(s) ? /'Page\.navigate'|\bloadPage\(/g : /'Page\.navigate'/g)].map((m) => m.index);
     const sets = [...s.matchAll(/addScriptToEvaluateOnNewDocument'\s*,\s*\{\s*source:\s*ONBOARDED_SOURCE\s*\}/g)].map((m) => m.index);
     for (const at of navs) if (!sets.some((i) => i < at)) return 'a Page.navigate with no ONBOARDED_SOURCE addScript before it';
     return null;
   };
-  const bootMods = (s) => [...s.matchAll(/\bimport\s*\{[^}]*\}\s*from\s*'\.\/((?!scratch\.mjs')(?!test-)[\w.-]+\.mjs)'/g)].map((m) => { try { return fs.readFileSync('scripts/' + m[1], 'utf8'); } catch { return ''; } });
+  const bootMods = (s) => [...s.matchAll(/\bimport\s*\{[^}]*\}\s*from\s*'\.\/((?!scratch\.mjs')(?!cdp-page-load\.mjs')(?!test-)[\w.-]+\.mjs)'/g)].map((m) => { try { return fs.readFileSync('scripts/' + m[1], 'utf8'); } catch { return ''; } });
   const asRead = (s) => [...bootMods(s), s].join('\n');
   const bad = scope.map((f) => [f, judge(asRead(fs.readFileSync(f, 'utf8')))]).filter(([, why]) => why);
   ok(scope.length >= 30, `§47 census scope is non-vacuous (${scope.length} chrome suites navigate a page)`);
@@ -2086,6 +2091,11 @@ await section(async () => {
     '§47 the xpra window part navigates and passes ONLY through the module it boots in (alone it is red; a boot module that never adds the script is red)');
   ok(bad.length === 0, `every chrome suite pre-sets 'vs-onboarded' through ONBOARDED_SOURCE before every Page.navigate${bad.length ? ' — ' + bad.map(([f, w]) => f + ': ' + w).join('; ') : ''}`);
   ok(judge("import { scratch } from './scratch.mjs';\nawait cdp('Page.navigate', { url: U });") !== null && judge("import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await cdp('Page.navigate', { url: U });") === null && judge("// onboarding-under-test\nawait cdp('Page.navigate', { url: U });") === null, 'NEGATIVE CONTROL: a bare navigate is caught, the shared idiom passes, the declared exemption passes');
+  const LP = "import { scratch, ONBOARDED_SOURCE } from './scratch.mjs';\nimport { loadPage } from './cdp-page-load.mjs';\n";
+  ok(judge(LP + "await loadPage(cdp, U);\nawait cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });") !== null && judge(LP + "await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); await loadPage(cdp, U);") === null
+    && !importsLoad("const loadPage = async (t) => t;\nawait loadPage('x');") && !scope.includes('scripts/test-user-state-echo.mjs')
+    && bootMods("import { loadPage } from './cdp-page-load.mjs';").length === 0 && scope.some((f) => importsLoad(fs.readFileSync(f, 'utf8')) && !fs.readFileSync(f, 'utf8').includes("'Page.navigate'")),
+    'NEGATIVE CONTROL (B-1217 (13)): an imported loadPage( before the addScript is caught and after it passes; a suite\'s own helper merely named loadPage is no navigate (test-user-state-echo keeps one: out of scope); the one page load is no boot module; a suite whose only navigates are loadPage( calls is in scope');
 });
 
 

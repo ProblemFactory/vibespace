@@ -36,6 +36,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const require = createRequire(import.meta.url);
@@ -174,9 +175,7 @@ const hides = () => evalJs(`window.__ops.filter((o) => o.op === 'popup-hide')`);
 /** The previous page, then VibeSpace; the op ring tapped (every op the incident recorder receives is also kept here). */
 const boot = async () => {
   await cdp('Page.navigate', { url: PREV }); await sleep(300);
-  await cdp('Page.navigate', { url: `${ORIGIN}/` });
-  await waitFor('!!(window.app && app.ready)', 20000);
-  await evalJs('app.ready.then(() => true)');
+  await loadPage(cdp, `${ORIGIN}/`, { bootMs: 20000 });   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
   await waitFor('!app.layoutManager._restoring', 15000);
   await sleep(1200);
   return evalJs(`(() => { const rec = typeof window.__vsOp === 'function'; window.__ops = []; const o = window.__vsOp; window.__vsOp = (n, d) => { window.__ops.push({ op: n, ...(d || {}) }); return o && o(n, d); }; return { rec, voiceRows: window.__voiceRows | 0, mobile: app.isMobile, touch: app.isTouch, absent: document.documentElement.classList.contains('voice-absent'), state: history.state }; })()`);

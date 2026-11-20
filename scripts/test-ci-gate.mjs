@@ -1304,6 +1304,124 @@ console.log('\n§2l one relay of a broadcast: every suite hands a server message
   ok(copy.length === 0, `…and none relays over a COPY of its own at the call site (the one helper holds the snapshot) — ${copy.length}${copy.length ? ': ' + copy.slice(0, 8).join(', ') : ''}`);
   console.log(`  (§2l read ${files.length} scripts in ${Date.now() - t0} ms)`);
 }
+
+// ── §2m THE ONE PAGE LOAD (B-1217 member 13, lane lg-leak-census, 主开发 r434 / r443 2026-11-20 — hosted run 44786427248:
+// test-foryou-honest-chrome «page threw: ReferenceError: app is not defined», red then green; placed by
+// the coordinator's readers). Twelve suites loaded the app with one copied shape: navigate, an UNCHECKED wait for window.app
+// (the old document can answer it before the navigation commits, and its timeout was swallowed), then a bare evaluate of app.ready,
+// which could land in a document whose boot had not run. They ask scripts/cdp-page-load.mjs loadPage now: the wait is tied to the
+// navigation's own loader, the old document is marked, and a timeout is a NAMED red. THE CENSUS (oldAppWaits over acorn, every
+// script under scripts/): the old shape outside its NAMED DEBT rows is red by name; each debt row is exact (a cure lowers its row in
+// the same commit). THE HELPER over a FAKE PAGE (node:vm documents, an injected clock: no Chrome, no wall time): the old document
+// answering first is never taken, by the loader and by the mark alone; a commit that never comes, a failed navigation, a
+// same-document navigation and a dead page are named; RED CONTROL: the copied helper's own steps over the same fake throw the
+// hosted ReferenceError (its wait renamed, so this file carries no old shape for the census to read).
+// cdp-protocol-under-test — §2m's 'Page.navigate' literals are CDP MESSAGES to a FAKE page (node:vm documents), never a page of
+// VibeSpace's: test-architecture §47's onboarding rule has no wizard to judge here (test-browser-windows declares the same)
+console.log('\n§2m one page load: a suite waits for the NEW document\'s app, tied to its navigation — the old shape is red by name');
+{
+  const acorn = createRequire(import.meta.url)('acorn');
+  const vm = await import('node:vm');
+  const { loadPage, oldAppWaits, APP_BOOTED, LOAD_MARK } = await import('./cdp-page-load.mjs');
+  const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
+  const files = walk(path.join(REPO, 'scripts')), found = new Map(), unread = [];
+  for (const f of files) for (const h of oldAppWaits(fs.readFileSync(f, 'utf8'), acorn)) { const k = path.relative(REPO, f); if (h.error) unread.push(`${k} ${h.error.slice(0, 60)}`); else found.set(k, [...(found.get(k) || []), h.line]); }
+  // THE NAMED DEBT — unit 2 (afterNavigation): each a wait after a navigation the PAGE makes, or after a reload, never a navigate
+  // call's; each site is read before it is cured (a navigation within the document keeps its own wait, and its row says why)
+  const DEBT = {
+    'scripts/test-exit-hop-chrome.mjs': [1, 'settle(): the boot after a navigation the page makes (the exit hop) — afterNavigation, unit 2'],
+    'scripts/test-exit-late-chrome.mjs': [1, 'settle(): the boot after a navigation the page makes — afterNavigation, unit 2'],
+    'scripts/test-exit-slow-chrome.mjs': [1, 'settle(): the boot after a navigation the page makes — afterNavigation, unit 2'],
+    'scripts/test-mobile-back-chrome.mjs': [2, 'settle() after a navigation the page makes, and the boot after Page.reload — afterNavigation, unit 2'],
+  };
+  const sites = [...found.values()].reduce((a, l) => a + l.length, 0), owed = Object.values(DEBT).reduce((a, [n]) => a + n, 0);
+  const over = [...found].filter(([f, l]) => !DEBT[f] || l.length !== DEBT[f][0]).map(([f, l]) => `${f} line ${l.join(', ')} (its debt row: ${DEBT[f] ? DEBT[f][0] : 'none'})`);
+  const stale = Object.keys(DEBT).filter((f) => !found.has(f));
+  ok(files.length > 300 && over.length === 0 && stale.length === 0,
+    `no script carries the old load shape beyond its named debt — ${files.length} scripts walked, ${sites} site(s): ${[...found].map(([f, l]) => `${path.basename(f)} ${l.join('/')}`).join(' · ') || 'none'}; debt ${owed} in ${Object.keys(DEBT).length} file(s)${over.length ? ' — RED: ' + over.join('; ') : ''}${stale.length ? ' — a debt row whose file is cured (lower it): ' + stale.join(', ') : ''}`);
+  ok(Object.values(DEBT).every(([n, why]) => n > 0 && why.length > 20), `…each debt row names its count and why (${Object.entries(DEBT).map(([f, [n]]) => `${path.basename(f)} ${n}`).join(' · ')})`);
+  ok(unread.length === 0, `…and every script that names window.app parsed (an unparsable one would hide the shape): ${unread.length ? unread.slice(0, 4).join(', ') : 'all'}`);
+  const OLD = {
+    'the copied load': "const load = async () => { await cdp('Page.navigate', { url: U }); await waitFor('!!(window.app && app.ready)', 30000); await evalJs('app.ready.then(() => true)'); };",
+    'on its own lines, templates': "async function boot() {\n  await cdp('Page.navigate', { url: U });\n  await waitFor(`!!(window.app && app.ready)`, 20000);\n  await evalJs(`app.ready.then(() => true)`);\n}",
+    'a member wait, another read': "await page.waitForApp('!!window.app', 9000); await page.evaluate('app.wm.windows.size');",
+    'in a switch case': "switch (k) { case 1: await waitFor('!!window.app'); await evalJs('app.ready'); break; }",
+  };
+  const CURED = {
+    'the one page load': "await loadPage(cdp, U); await evalJs('app.ready.then(() => true)');",
+    'a checked wait': "if (!(await waitFor('!!(window.app && app.ready)', 30000))) throw new Error('never booted'); await evalJs('app.ready.then(() => true)');",
+    'a wait kept': "const booted = await waitFor('!!(window.app && app.ready)', 12000); await evalJs('app.ready.then(() => true)');",
+    'a guarded read next': "await waitFor('!!window.app', 20000); await evalJs('window.app && app.ready');",
+    'a wait for something else': "await waitFor('!!document.body', 20000); await evalJs('app.ready.then(() => true)');",
+  };
+  const seenOld = Object.entries(OLD).map(([k, v]) => [k, oldAppWaits(v, acorn).length]), seenCured = Object.entries(CURED).map(([k, v]) => [k, oldAppWaits(v, acorn).length]);
+  ok(seenOld.every(([, n]) => n === 1), `CONTROLS: each old shape, planted, is FOUND by the tree (${seenOld.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
+  ok(seenCured.every(([, n]) => n === 0), `CONTROLS: the correct shapes are NOT found (${seenCured.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
+
+  // A FAKE PAGE: each document is a node:vm context whose window is itself; `app` appears when the document boots. Every CDP ask is
+  // one tick: a navigation commits `commitAfter` ticks after its navigate, its app boots `bootAfter` ticks after the commit.
+  const fakePage = ({ commitAfter = 3, bootAfter = 2, errorText = null, sameDoc = false, neverCommit = false, lyingTree = false, deadAt = 0 } = {}) => {
+    let ticks = 0, pending = null, newLoader = null;
+    const mkDoc = (loader, booted) => { const ctx = vm.createContext({}); ctx.window = ctx; if (booted) ctx.app = { ready: Promise.resolve(true) }; return { loader, ctx, bootsAt: Infinity }; };
+    let doc = mkDoc('L-old', true);   // the document before the navigation: its app booted long ago
+    const asked = [];
+    const call = async (method, params = {}) => {
+      ticks++; asked.push(method);
+      if (deadAt && ticks >= deadAt) throw new Error(`cdp ${method}: no answer in 45000 ms`);
+      if (pending && ticks >= pending.commitAt) { doc = pending.doc; doc.bootsAt = ticks + bootAfter; pending = null; }
+      if (doc.bootsAt <= ticks && !doc.ctx.app) doc.ctx.app = { ready: Promise.resolve(true) };
+      if (method === 'Page.navigate') {
+        if (errorText) return { frameId: 'F', errorText };
+        if (sameDoc) return { frameId: 'F' };
+        newLoader = `L-new-${ticks}`; if (!neverCommit) pending = { doc: mkDoc(newLoader, false), commitAt: ticks + commitAfter };
+        return { frameId: 'F', loaderId: newLoader };
+      }
+      if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'F', loaderId: lyingTree && newLoader ? newLoader : doc.loader } } };
+      if (method === 'Runtime.evaluate') {
+        try { let v = vm.runInContext(params.expression, doc.ctx); if (params.awaitPromise && v && typeof v.then === 'function') v = await v; return { result: { type: typeof v, value: v } }; }
+        catch (e) { return { result: { type: 'object' }, exceptionDetails: { text: 'Uncaught', exception: { description: `${e.name}: ${e.message}` } } }; }
+      }
+      return {};
+    };
+    return { call, asked, doc: () => doc, ticks: () => ticks };
+  };
+  const clock = () => { let t = 0; return { now: () => t, sleep: async (ms) => { t += ms; } }; };
+  const U = 'http://127.0.0.1:1/';
+  const tryLoad = async (fake, opts = {}) => { const c = clock(); try { return { ok: await loadPage(fake.call, U, { ...c, ...opts }), tookMs: c.now() }; } catch (e) { return { err: e, tookMs: c.now() }; } };
+  // (1) the old document answers the boot test until the commit: loadPage takes only the new one
+  const f1 = fakePage({ commitAfter: 4, bootAfter: 3 }), r1 = await tryLoad(f1);
+  ok(r1.ok && f1.doc().loader.startsWith('L-new') && !!f1.doc().ctx.app && f1.doc().ctx[LOAD_MARK] === undefined && r1.ok.asks > 1,
+    `the old document's answer is never taken: loadPage returned only once the navigation's own document booted (loader ${f1.doc().loader}, ${r1.ok ? r1.ok.asks : '?'} ask(s), ${r1.tookMs} ms on the injected clock; the asks: ${f1.asked.join(' ')})${r1.err ? ' — threw: ' + r1.err.message : ''}`);
+  // (1b) THE MARK ALONE: a frame tree that names the new loader before the commit (a lying answer) — the old document carries the mark
+  const f1b = fakePage({ commitAfter: 4, bootAfter: 2, lyingTree: true }), r1b = await tryLoad(f1b);
+  ok(r1b.ok && f1b.doc().loader.startsWith('L-new') && !!f1b.doc().ctx.app, `…and by the mark alone: with a frame tree that names the new loader before the commit, the old (marked) document is still never taken (${r1b.ok ? r1b.ok.asks : '?'} ask(s))${r1b.err ? ' — threw: ' + r1b.err.message : ''}`);
+  // (2) a commit that never comes: a NAMED red at the bound, on the clock that schedules the polls
+  const f2 = fakePage({ neverCommit: true }), r2 = await tryLoad(f2, { bootMs: 3000, everyMs: 150 });
+  ok(!!r2.err && /the app never booted in 3 s after the navigation to http:\/\/127\.0\.0\.1:1\/ — last seen: the old document still answers/.test(r2.err.message) && r2.tookMs >= 3000 && r2.tookMs < 3300,
+    `a navigation that never commits is a NAMED red at its bound («${r2.err ? r2.err.message.slice(0, 170) : 'no error'}», at ${r2.tookMs} ms on the injected clock) — never a later ReferenceError`);
+  // (3) a failed navigation, (4) a same-document navigation (no new loader: the marked document stays)
+  const r3 = await tryLoad(fakePage({ errorText: 'net::ERR_CONNECTION_REFUSED' }));
+  ok(!!r3.err && /the navigation to http:\/\/127\.0\.0\.1:1\/ failed \(net::ERR_CONNECTION_REFUSED\)/.test(r3.err.message) && r3.tookMs === 0, `a failed navigation is named at once («${r3.err ? r3.err.message.slice(0, 120) : 'no error'}»)`);
+  const r4 = await tryLoad(fakePage({ sameDoc: true }), { bootMs: 1500 });
+  ok(!!r4.err && /never booted in 2 s .* no new document has booted yet \(the old one carries the mark\)/.test(r4.err.message), `a navigation that makes no new document is named, not taken from the old one («${r4.err ? r4.err.message.slice(0, 170) : 'no error'}»)`);
+  // (5) a dead page ends the wait at once through the caller's own rule (test-phone-titlebar-ui's deadPage)
+  const f5 = fakePage({ neverCommit: true, deadAt: 4 }), r5 = await tryLoad(f5, { fatal: (e) => /no answer in/.test(e.message) });
+  ok(!!r5.err && /^cdp Page\.getFrameTree: no answer in/.test(r5.err.message) && f5.ticks() === 4, `a dead page ends the wait at once through the caller's fatal rule («${r5.err ? r5.err.message : 'no error'}», ${f5.ticks()} asks)`);
+  // RED CONTROL: the copied helper's own steps (navigate, an unchecked wait, a bare evaluate) over the same fake as (1)
+  const copied = async (call, url, { now, sleep }) => {
+    const evalJs = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
+    const pollFor = async (expr, ms) => { const t0 = now(); while (now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch { } await sleep(150); } try { return await evalJs(expr); } catch { return false; } };
+    await call('Page.navigate', { url });
+    const booted = await pollFor(APP_BOOTED, 30000);   // the copy dropped this value; kept here only so this file holds no old shape
+    await evalJs('app.ready.then(() => true)');
+    return booted;
+  };
+  const fc = fakePage({ commitAfter: 2, bootAfter: 3 }), cc = clock();
+  let red = null; try { await copied(fc.call, U, cc); } catch (e) { red = e; }
+  const fl = fakePage({ commitAfter: 2, bootAfter: 3 }), rl = await tryLoad(fl);
+  ok(!!red && red.message === 'page threw: ReferenceError: app is not defined' && !!rl.ok,
+    `RED CONTROL: the copied load over the same fake throws the hosted red («${red ? red.message : 'it did not throw'}»: the old document answered the wait, the bare evaluate landed in the new one before its boot); loadPage over it is green (${rl.ok ? rl.ok.asks + ' ask(s)' : rl.err.message})`);
+}
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }

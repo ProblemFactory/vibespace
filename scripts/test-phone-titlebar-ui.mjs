@@ -79,6 +79,7 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -175,6 +176,8 @@ else await (async () => {
   // next — before anything was named, past the caller's cap late in a run): a call that went past ITS bound is a page that
   // answers nothing, so the wait fails BY NAME at once, never asking again
   const deadPage = (e) => /^cdp \S+: (no answer in|the page's socket closed)/.test(String(e && e.message));
+  // loadPage's sender answers the CDP RESULT; this suite's cdp answers the whole message — the two-line adapter (B-1217 (13))
+  const cdpResult = async (method, params) => { const m = await cdp(method, params); if (m.error) throw new Error(`${method}: ${m.error.message}`); return m.result || {}; };
   const waitFor = async (expr, ms = 10000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await evalJs(expr)) return true; } catch (e) { if (deadPage(e)) throw e; } await sleep(120); } try { return !!(await evalJs(expr)); } catch (e) { if (deadPage(e)) throw e; return false; } };
   await cdp('Runtime.enable'); await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
@@ -184,12 +187,10 @@ else await (async () => {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: mouse ? 'hover' : 'none' }, { name: 'pointer', value: mouse ? 'fine' : 'coarse' }] });
   };
   const load = async (lang) => {
-    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-    await waitFor('!!(window.app && app.ready)', 30000); await evalJs('app.ready.then(() => true)');
+    await loadPage(cdpResult, `http://127.0.0.1:${PORT}/`, { fatal: deadPage });   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
     if (lang !== undefined) {
       await evalJs(`(() => { ${lang ? `localStorage.setItem('vibespace.lang', '${lang}')` : `localStorage.removeItem('vibespace.lang')`}; return 1; })()`);
-      await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/` });
-      await waitFor('!!(window.app && app.ready)', 30000); await evalJs('app.ready.then(() => true)');
+      await loadPage(cdpResult, `http://127.0.0.1:${PORT}/`, { fatal: deadPage });
     }
     await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(1200);
   };

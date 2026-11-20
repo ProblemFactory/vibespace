@@ -49,6 +49,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, runnerFontEnv, realClicker, stillPresser } from './scratch.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, DAEMON_ROOT_ENV } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (test-architecture §57c)
 import { armWatchdog } from './suite-watchdog.mjs';
 import { navTitleMinText } from '../src/lib/title-chips.js'; // the release's readable minimum (lane phone-titlebar-title) — the ladder's since 主开发 09:33Z
@@ -177,8 +178,7 @@ const desktopPage = async () => {
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'hover' }, { name: 'pointer', value: 'fine' }] });
 };
 const load = async () => {
-  await cdp('Page.navigate', { url: ORIGIN + '/' });
-  await waitFor('!!(window.app && app.ready)', 60000); await evalJs('app.ready.then(() => true)');
+  await loadPage(cdp, ORIGIN + '/', { bootMs: 60000 });   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
   await waitFor(`!document.getElementById('loading-screen')`, 30000); await sleep(1000);
 };
 /** The phone's window area on show (the For-you page put away when it covers it). */

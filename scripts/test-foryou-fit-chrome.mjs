@@ -23,6 +23,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv } from './scratch.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { LADDER, PHONE_LADDER, fitVerdictSource, fits, runLadder, ladderFaults } from './lib/fit-ladder.mjs';
@@ -110,8 +111,7 @@ const page = async ({ w = 1440, h = 900, phone = false, lang = LANG } = {}) => {
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: phone, maxTouchPoints: phone ? 5 : 1 });
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: phone ? 'none' : 'hover' }, { name: 'pointer', value: phone ? 'coarse' : 'fine' }] });
   await evalJs(`(() => { try { localStorage.setItem('vibespace.lang', ${J(lang)}); } catch {} return true; })()`).catch(() => {});
-  await cdp('Page.navigate', { url: ORIGIN + '/' });
-  await waitFor('!!(window.app && app.ready)', 60000); await evalJs('app.ready.then(() => true)');
+  await loadPage(cdp, ORIGIN + '/', { bootMs: 60000 });   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
   await waitFor(`!document.getElementById('loading-screen')`, 30000); await sleep(1200);
   if (!phone) SID = await ensureChat();
 };

@@ -54,6 +54,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -185,9 +186,7 @@ const desk = async () => {
 /** The previous page, then VibeSpace (`query` = a deep link); waits for the restore to settle. */
 const boot = async (query = '') => {
   await cdp('Page.navigate', { url: PREV }); await sleep(300);
-  await cdp('Page.navigate', { url: `${ORIGIN}/${query}` });
-  await waitFor('!!(window.app && app.ready)', 20000);
-  await evalJs('app.ready.then(() => true)');
+  await loadPage(cdp, `${ORIGIN}/${query}`, { bootMs: 20000 });   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
   await waitFor('!app.layoutManager._restoring', 15000);
   await sleep(1200);
 };

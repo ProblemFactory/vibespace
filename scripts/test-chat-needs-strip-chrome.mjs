@@ -34,6 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, relayBroadcastJs } from './scratch.mjs';
+import { loadPage } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 import { chatNeedsKit, loadDesk } from './chat-needs-kit.mjs';
@@ -202,8 +203,7 @@ async function connect(target) {
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: mouse ? 'hover' : 'none' }, { name: 'pointer', value: mouse ? 'fine' : 'coarse' }] });
   };
   const load = async () => {
-    await cdp('Page.navigate', { url: ORIGIN + '/' });
-    await waitFor('!!(window.app && app.ready)', 30000); await evalJs('app.ready.then(() => true)');
+    await loadPage(cdp, ORIGIN + '/');   // B-1217 (13): the wait is tied to THIS navigation's document; a timeout is a named red (scripts/cdp-page-load.mjs)
     await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(900);
   };
   const tapAt = async (x, y) => {
