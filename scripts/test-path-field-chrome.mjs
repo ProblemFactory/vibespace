@@ -335,12 +335,16 @@ console.log('\n── ⑧b the door refreshes a closed field (the name typed, th
   const scene = async (page) => {
     await load(false, page);
     await press('#cwd'); await type('~/work/新项目3');
-    const said = await until(async () => /不存在 — 创建？/.test(await under()), 6000);
-    await press('.pf-under input[data-act="tick"]');
-    await press('#name');
-    await until(async () => (await log()).some((x) => x.ev === 'commit'), 6000);
-    for (const ch of ['周', '报', '3']) { await type(ch); await sleep(60); }
+    // (2.369.413's hosted red, placed: the tick was pressed while the list was OPEN and a reply could still repaint the line — it never
+    // TOOK. THE LAW: press only on a SETTLED line, the list closed — as ⑧ does — and start from a tick PROVEN taken)
+    const said = await until(async () => /不存在 — 创建？/.test(await under()) && !(await ev(`!!document.querySelector('.path-field')?.dataset.pending`)), 6000);
+    await press('#other');   // left: the list closes (the commit refused without the tick: «未生效»), the line settles
+    await until(async () => /未生效/.test(await under()), 6000);
     const tickOn = () => ev(`!!document.querySelector('.pf-under input[data-act="tick"]')?.checked`);
+    await press('.pf-under input[data-act="tick"]');
+    const taken = await until(async () => (await tickOn()) && (await log()).some((x) => x.ev === 'commit' && x.create === true), 6000);
+    await press('#name');
+    for (const ch of ['周', '报', '3']) { await type(ch); await sleep(60); }
     const stands = await until(async () => /不存在 — 创建？/.test(await under()) && (await tickOn()), 5000);
     const after = { line: await under(), tick: await tickOn(), status: await ev('window.pf.verdict().status') };
     const remote0 = await ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/hosts/h-mac/dir-complete')).length`);
@@ -348,9 +352,10 @@ console.log('\n── ⑧b the door refreshes a closed field (the name typed, th
     const machine = await until(async () => (await ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/hosts/h-mac/dir-complete')).length`)) > remote0 && !/正在问这台机器/.test(await under()), 8000);
     const onMac = await under();
     await ev(`(() => { const h = document.getElementById('host'); h.value = ''; h.dispatchEvent(new Event('change')); return true; })()`);
-    return { said: !!said, stands: !!stands, after, machine: !!machine, onMac };
+    return { said: !!said, taken: !!taken, stands: !!stands, after, machine: !!machine, onMac };
   };
   const now = await scene('t.html');
+  ok('⑧b the scene\'s own start: the tick TAKEN — the box reads checked and the commit with create is in the log — before the name is typed (else the legs below prove nothing)', now.said && now.taken, now);
   ok('⑧b a missing folder ticked, then the name typed (refresh() per keystroke, the field closed): the line still says «不存在 — 创建？» with its tick checked, never «正在问这台机器…» (the coordinator\'s MUST)', now.said && now.stands && now.after.status === 'missing' && !/正在问这台机器/.test(now.after.line), now);
   ok('⑧b …the machine changed (refresh() with the field closed): the field ASKS that machine and its answer lands — the pending words never stay with no ask out', now.machine && !/正在问这台机器/.test(now.onMac), now);
   // THE WIRING (主开发's MUST 1 on 9daebd507 — the page never sent the model «closed», so after one touch it held the list open for good
@@ -370,7 +375,14 @@ console.log('\n── ⑧b the door refreshes a closed field (the name typed, th
     const n1 = await asks8();
     ok('⑧b WIRED: typed, left (the list closed), then three refreshes with the list closed — NOTHING asked (the answer stands)', !!answered && n0 >= 1 && n1 === n0, { answered, n0, n1, line: await under() });
   }
+  // (2.369.413's hosted red, placed: the fresh page this scene leaves had NO HOME read yet — every group row showed a raw absolute path and
+  // the legs after it, which find rows by their ~ form, found nothing. THE LAW: a scene that reloads the page restores what the later legs
+  // stand on — the home read by one answered ask, then the field reset)
   await load();
+  await ev(`window.pf.set(${JSON.stringify(HOME + '/work')}, { commit: false }); true`);
+  const homed = await until(async () => /= ~\/work/.test(await under()), 6000);
+  await reset();
+  ok('⑧b …the page it reloads is left as the legs after it stand on: the home read (the line says «= ~/work»), the field reset', !!homed, await under());
 }
 
 console.log('\n── ⑨ two Task Groups + a name ⇒ one 新建 per group ──');
