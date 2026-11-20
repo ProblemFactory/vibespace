@@ -37,7 +37,7 @@ const ACT_WORDS = {
   'stream-offer': 'Stream its screen', 'stream-answer': 'Stream its screen', 'stream-stop': 'Stream its screen', 'stream-stats': 'Stream its screen', 'stream-windows': 'Stream its screen',
   'stream-audio': 'Stream its screen', 'window-track': 'Stream its screen', 'window-untrack': 'Stream its screen', 'proc-list': 'Read system information', 'left-behind': 'Read system information',
   'dial-status': 'Read system information', 'probe-cli': 'Read system information', 'probe-creds': 'Read system information', 'ping-info': 'Read system information',
-  'ok': 'Read system information', 'transcript-op': 'Read its conversations', 'quota-refresh': 'Read usage', 'tcp-connect:loopback': 'Connect to a port', 'fs-op:stat': 'Read files',
+  'ok': 'Read system information', 'transcript-op': 'Read its conversations', 'peer-state': 'Read its conversations', 'quota-refresh': 'Read usage', 'tcp-connect:loopback': 'Connect to a port', 'fs-op:stat': 'Read files',
   'fs-op:list': 'Read files', 'fs-op:read-range': 'Read files', 'fs-op:home': 'Read files', 'fs-op:du': 'Read files', 'design-fs:read': 'Read files', 'design-fs:meta': 'Read files',
   'design-fs:tokens': 'Read files', 'desktop-serve:facts': 'Read system information', 'desktop-serve:status': 'Read system information', 'desktop-serve:list': 'Read system information',
   'desktop-serve:windows': 'Read system information', 'desktop-serve:app-status': 'Read system information', 'desktop-serve:app-plan': 'Read system information',
