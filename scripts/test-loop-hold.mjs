@@ -664,7 +664,7 @@ const excused12 = (x) => !!x && x.waitMs != null && LH.waitedMuch({ wallMs: x.ms
 function judge12(x, truth) {
   if (!x) return false;
   return x.ms <= truth + 1 + (x.waitMs > 0 ? x.waitMs : 0) && (x.msHi || x.ms) + 40 >= truth && (x.msHi || x.ms) < 3 * truth
-    && (excused12(x) ? x.samples >= 1 && !NOT_SAMPLED.includes(x.verdict) : x.verdict === LH.V.js);
+    && (excused12(x) ? x.samples >= 1 && !NOT_SAMPLED.includes(x.verdict) : x.verdict === LH.V.js || x.verdict === LH.V.tie);   // r116 (b): the spin calls performance.now() — an ask inside that native call is native, so a 1:1 of JavaScript and native is THE TIE, true and counted (the machine's UTC run at b056a2453: «JavaScript ×1 and native code or garbage collection ×1 (a tie, in the order they came)»); this leg guards the clock, never the class
 }
 console.log('⑫a B-f534 — after the exit mark the watchdog connects to nothing (the REAL thread, in this process)');
 {
