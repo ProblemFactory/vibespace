@@ -212,7 +212,7 @@ const swap = (rel, from, to) => { const s = realRead(rel); const t = s.replace(f
 const ca = swap(ENTRY, 'windowsHide: true, timeout: Math.min(Number(msg.timeoutMs)', 'timeout: Math.min(Number(msg.timeoutMs)');
 const ra = redOf({ [ENTRY]: ca.text });
 ok(ca.applies && ra.red.length === 1 && /execFile\(plan\.file, plan\.args/.test(ra.red[0]), 'CONTROL (a): run-cmd without windowsHide ⇒ RED at its line', ra.red);
-const cb = swap(ENTRY, "so must the re-exec\n    detached: true, stdio: 'ignore', windowsHide: true,", "so must the re-exec\n    detached: true, stdio: 'ignore',");
+const cb = swap(ENTRY, "so must the re-exec\n      detached: true, stdio: 'ignore', windowsHide: true,", "so must the re-exec\n      detached: true, stdio: 'ignore',");   // B-147f: the successor's start inside its try (one indent deeper)
 const rb = redOf({ [ENTRY]: cb.text });
 ok(cb.applies && rb.red.length === 1 && /spawn\(process\.execPath, argv/.test(rb.red[0]), 'CONTROL (b): the re-exec without windowsHide ⇒ RED', rb.red);
 const cc = swap('src/exit-shell.js', "env: envOf(), windowsHide: true, windowsVerbatimArguments: true", "env: envOf(), windowsVerbatimArguments: true");

@@ -229,7 +229,7 @@ try {
   console.log('— ⑦b a device agent: its start, its provisioning');
   ok(NR.reexecOnOwnRuntime({ ...base, platform: 'win32', execve: fake, probe: () => 'v22.41.0' }).state === 'unsupported' && calls.length === 0, 'on win32 the switch is never tried (no execve there — a Windows agent\'s road stays the installer\'s re-provision)');
   const AG = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-  ok(/if \(nodeOwn\(\)\) \{ RUNTIME\.reexecOnOwnRuntime\(\{ root: ROOT/.test(AG) && /\['node', 'runtime'\]\.some\(/.test(AG) && /const child = spawn\(process\.execPath, argv, \{/.test(AG),
+  ok(/if \(nodeOwn\(\)\) \{ RUNTIME\.reexecOnOwnRuntime\(\{ root: ROOT/.test(AG) && /\['node', 'runtime'\]\.some\(/.test(AG) && /(?:const )?child = spawn\(process\.execPath, argv, \{/.test(AG),
     'the device agent switches at its start ONLY on its own node (a self-upgrade\'s successor, started on the same node, switches the same way) and counts <root>/runtime as its own (the hello\'s nodeOwn)');
   const prov = AG.slice(AG.indexOf('function provisionOwnRuntime()'), AG.indexOf('function provisionOwnRuntime()') + 1600);
   ok(/if \(!nodeOwn\(\) \|\| process\.platform === 'win32' \|\|/.test(prov) && /os\.tmpdir\(\)/.test(prov) && /RUNTIME\.provision\(v\.wanted, \{ root: ROOT, mirror, log \}\)/.test(prov) && /hub \+ '\/vibespace-node'/.test(prov),
