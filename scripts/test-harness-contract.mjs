@@ -286,13 +286,13 @@ console.log('— settings tables');
     const h = HARNESSES[id];
     if (!h.settingsPrefix) { ok(h.settings === null && h.configFiles && Object.keys(h.configFiles).length === 0, `${id}: no settings prefix ⇒ settings null, no config files`); continue; }
     const adapterHas = (verb) => typeof h.Adapter.prototype[verb] === 'function';
-    const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles, adapterHas });
+    const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles, adapterHas, wordsApart: true });   // B-82b8: a built-in table's words live apart (judged by the census below)
     ok(errs.length === 0, `${id}: checkTable passes with the descriptor's context`, errs.join('; '));
     for (const [fid, spec] of Object.entries(h.configFiles || {})) ok(spec.rel === h.settings.files[fid].rel && typeof spec.file === 'function' && CREATE_RULES.includes(spec.createIfMissing), `${id}: configFiles.${fid}.rel IS the table's rel array (one spelling) + file()/createIfMissing ∈ ${JSON.stringify(CREATE_RULES)}`);
     if (h.inject && h.inject.hookFile) ok(Object.values(h.configFiles).includes(h.inject.hookFile), `${id}: inject.hookFile IS one of configFiles (identity — the hook entries and the managed keys share the file object)`);
     for (const row of rowsOfKind(h.settings, 'cli-config')) ok(!!h.configFiles[row.apply.file] && h.configFiles[row.apply.file].writable !== false, `${id}: cli-config row ${row.key} targets a declared writable file (${row.apply.file})`);
     const ad = registry.get(id);
-    for (const row of rowsOfKind(h.settings, 'spawn')) ok(spawnRowConsumed(ad, row), `${id}: spawn row ${row.key} CHANGES the spawn when set (${row.apply.how})`);
+    for (const row of rowsOfKind(h.settings, 'spawn')) ok(spawnRowConsumed(ad, row), `${id}: spawn row ${row.key} CHANGES the spawn when set (${row.apply.via || 'opts.settings.' + row.key})`);
     for (const row of rowsOfKind(h.settings, 'spawn').filter((r) => r.apply.live)) ok(typeof ad[row.apply.live] === 'function', `${id}: live verb ${row.apply.live} (row ${row.key}) is an adapter method`);
   }
   ok(!spawnRowConsumed(registry.get('claude'), { key: 'nobodyReadsMe', type: 'boolean', default: false, apply: { kind: 'spawn', how: 'nothing' } }), 'NEGATIVE CONTROL: a synthetic spawn row nobody consumes is caught (the checker can say no)');
@@ -1494,6 +1494,47 @@ console.log('\n— a frame queued behind a turn: every row\'s peer lane says wha
 
 console.log('\ntree: the patched copies never touch the tree');
 for (const r of copiesCensus(MUTH.files, MUTH.dir, REPO, { minCopies: 1 })) ok(r.pass, 'tree: ' + r.name, r.pass ? undefined : r.detail);
+
+// B-82b8 (主开发 r654): THE SETTINGS WORDS LEAVE THE DEVICE BUNDLE — every word a person reads about a built-in row lives in
+// src/harness-settings-words.js, keyed by the row's own name; the device's table keeps its machine facts. ONE TABLE OWNS EACH FACT:
+// a row with no words, or words with no row, or a word left in the device's table, is RED by name (wordsCensus) — never a blank
+// on the Settings screen. And the eight apply notes that were engineers' English are a person's words, in zh and ja.
+console.log('B-82b8 the settings words live apart from the device\'s table');
+{
+  const okP = (c, n, facts) => { ok(c, n, JSON.stringify(facts)); if (c) console.log('      ' + JSON.stringify(facts)); };
+  const HSW = require(path.join(REPO, 'src/harness-settings-words.js'));
+  const census = HSW.wordsCensus(HARNESS_SETTINGS);
+  const rows = Object.values(HARNESS_SETTINGS).reduce((n, t) => n + t.rows.length, 0), opts = Object.values(HARNESS_SETTINGS).reduce((n, t) => n + t.rows.reduce((m, r) => m + (r.options || []).length, 0), 0);
+  okP(census.length === 0, 'B-82b8 CENSUS: every built-in row has its words (label, description, every option\'s label, the apply note), every word has its row, and the device\'s table keeps no word of a person\'s', { tables: Object.keys(HARNESS_SETTINGS), rows, options: opts, red: census });
+  const joined = Object.entries(HARNESS_SETTINGS).map(([id, t]) => [id, checkTable(HSW.withWords(t), {})]), bare = Object.entries(HARNESS_SETTINGS).map(([id, t]) => [id, checkTable(t, { wordsApart: true }).length, checkTable(t, {}).length]);
+  okP(joined.every(([, e]) => e.length === 0) && bare.every(([, apart, whole]) => apart === 0 && whole > 0), 'B-82b8: each table JOINED to its words is whole by checkTable; the bare table is whole with its words apart and NOT without them (it carries none)', { joinedErrors: joined.map(([id, e]) => [id, e.length]), bare });
+  // RED CONTROLS: a planted row with no words, words with no row, a word left in the device's table — each named
+  const planted = { ...HARNESS_SETTINGS, claude: { ...HARNESS_SETTINGS.claude, rows: [...HARNESS_SETTINGS.claude.rows, { key: 'plantedRow', type: 'boolean', default: false, apply: { kind: 'server' } }] } };
+  const extraWords = { ...HSW.HARNESS_SETTINGS_WORDS, codex: { ...HSW.HARNESS_SETTINGS_WORDS.codex, rows: { ...HSW.HARNESS_SETTINGS_WORDS.codex.rows, plantedWords: { label: 'x', description: 'y' } } } };
+  const leftWord = { ...HARNESS_SETTINGS, opencode: { ...HARNESS_SETTINGS.opencode, rows: HARNESS_SETTINGS.opencode.rows.map((r, i) => (i === 0 ? { ...r, label: 'a word left behind' } : r)) } };
+  const c1 = HSW.wordsCensus(planted), c2 = HSW.wordsCensus(HARNESS_SETTINGS, extraWords), c3 = HSW.wordsCensus(leftWord);
+  okP(c1.includes('claude.plantedRow: a row with no words') && c2.includes('codex.plantedWords: words with no row') && c3.some((x) => /^opencode\.\w+: «label» is still in the device's table$/.test(x)),
+    'B-82b8 RED CONTROLS: a planted row with no words, words with no row, and a word left in the device\'s table are each named', { rowNoWords: c1, wordsNoRow: c2, leftWord: c3 });
+  // THE EIGHT NOTES (主开发 2026-11-17 03:25Z): a person's words, each a dictionary entry with zh and ja; no engineers' phrase remains
+  const zh = new Set(Object.keys(require(path.join(REPO, 'src/lib/i18n-zh.js')).default || {})), ja = new Set(Object.keys(require(path.join(REPO, 'src/lib/i18n-ja.js')).default || {}));
+  // a note that names the agent's own flag or environment name (`--model`, `--settings outputStyle`, CLAUDE_CODE_…) is the machine's
+  // name shown as it is, never translated; every OTHER note is prose a person reads, and is judged here
+  const allNotes = Object.entries(HSW.HARNESS_SETTINGS_WORDS).flatMap(([id, w]) => Object.entries(w.rows).filter(([, r]) => typeof r.how === 'string').map(([k, r]) => [`${id}.${k}`, r.how]));
+  const machineName = (h) => /^--|\b[A-Z][A-Z0-9]*_[A-Z0-9_]+\b/.test(h);
+  const notes = allNotes.filter(([, h]) => !machineName(h)), names = allNotes.filter(([, h]) => machineName(h));
+  const OLD = /appended argv|\(while off\)|the wrapper's thread personality|pool engine|exhaustion ladder|rung/;   // stale-pins: kept (an absence check: the engineers' phrases must be gone)
+  okP(notes.length >= 8 && notes.every(([, h]) => zh.has(h) && ja.has(h)) && allNotes.every(([, h]) => !OLD.test(h)), 'B-82b8 THE EIGHT NOTES (and every other note in prose): each is a person\'s words with a zh AND a ja entry — none of the engineers\' phrases («appended argv», «(while off)», «pool engine — … rung …») is left', { notes, missing: notes.filter(([, h]) => !zh.has(h) || !ja.has(h)), oldPhrase: allNotes.filter(([, h]) => OLD.test(h)), machineNames: names.length, machineNameNotes: names.map(([k]) => k) });
+  // EVERY OPTION LABEL is a name shown as it is (the label IS its value: «Concise», a model id) or a person's words with a zh AND a
+  // ja entry. The words module keeps the labels as a value → label map, no `label:` field, so test-ui-language's ① does not see
+  // them there: this leg does. RED CONTROL: a planted label in English words of its own is named.
+  const optionFaults = (W) => Object.entries(W).flatMap(([id, w]) => Object.entries(w.rows).flatMap(([k, r]) => Object.entries(r.options || {}).map(([v, l]) => [`${id}.${k}`, v, l])))
+    .filter(([, v, l]) => l !== v && !(zh.has(l) && ja.has(l)));
+  const optionLabels = Object.values(HSW.HARNESS_SETTINGS_WORDS).flatMap((w) => Object.values(w.rows).flatMap((r) => Object.entries(r.options || {})));
+  const plantedLabel = { ...HSW.HARNESS_SETTINGS_WORDS, codex: { ...HSW.HARNESS_SETTINGS_WORDS.codex, rows: { ...HSW.HARNESS_SETTINGS_WORDS.codex.rows, outputStyle: { ...HSW.HARNESS_SETTINGS_WORDS.codex.rows.outputStyle, options: { ...HSW.HARNESS_SETTINGS_WORDS.codex.rows.outputStyle.options, plantedValue: 'Words of its own nobody translated' } } } } };
+  const realFaults = optionFaults(HSW.HARNESS_SETTINGS_WORDS), plantedFaults = optionFaults(plantedLabel);
+  okP(optionLabels.length >= 81 && realFaults.length === 0 && plantedFaults.length === 1 && plantedFaults[0][0] === 'codex.outputStyle' && plantedFaults[0][1] === 'plantedValue',
+    `B-82b8 every option label (${optionLabels.length}) is its own value (a name: ${optionLabels.filter(([v, l]) => l === v).length}) or a person's words with a zh AND a ja entry; a planted label in words of its own is named`, { faults: realFaults, planted: plantedFaults });
+}
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

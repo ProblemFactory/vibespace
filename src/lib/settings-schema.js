@@ -16,7 +16,8 @@
  */
 
 import { t } from './i18n.js';
-import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js'; // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
+import { HARNESS_SETTINGS, settingPath, checkTable, rowsOfKind } from '../harness-settings.js';
+import { withWords } from '../harness-settings-words.js'; // B-82b8: a built-in table's words (a person's) live apart from its machine facts — joined here, by the row's own name // PURE (CJS): the descriptor-declared per-harness tables — the Claude/Codex/OpenCode sections are DERIVED from them (docs/design-harness-settings.zh.md §4)
 import { whenClauses } from './settings-view.js'; // PURE: the tier / when rules (WHEN_KINDS) — re-exported below
 import { CHANNEL_SETTINGS, settingPath as channelSettingPath } from '../channel-settings.js';
 import { IDLE_PAINT_DEFAULT } from '../browser-idle.js'; // PURE (CJS): browser.idlePaintFreeze's ONE default — the keeper reads the same value
@@ -1760,7 +1761,7 @@ function deriveHarnessTable(tbl) {
   HARNESS_SETTING_OWNERS.set(tbl.prefix, { category: t(tbl.category), paths, table: tbl });
   return paths;
 }
-for (const tbl of Object.values(HARNESS_SETTINGS)) deriveHarnessTable(tbl);
+for (const tbl of Object.values(HARNESS_SETTINGS)) deriveHarnessTable(withWords(tbl));   // B-82b8: the table joined to its words — the shape it always had
 /** A CONTRIBUTED harness's table (design §7; arrives on /api/home): validated
  *  with the contributor rules — its prefix must be its own id, never a
  *  built-in namespace — then derived exactly like a built-in one. Mirrors

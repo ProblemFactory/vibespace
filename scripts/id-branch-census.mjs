@@ -67,6 +67,7 @@ export const ALLOW = [
 export const EXEMPT = [
   { family: 'harness', file: 'src/backend-caps.js', table: /^const BACKEND_CAPS\s*=/m, reason: 'THE caps registry — one declared row per built-in harness (a contributed one arrives through register())' },
   { family: 'harness', file: 'src/harness-settings.js', table: /^const HARNESS_SETTINGS\s*=/m, reason: 'the declared per-harness settings tables (design-harness-settings §2) — the descriptor joins its own by identity' },
+  { family: 'harness', file: 'src/harness-settings-words.js', table: /^const HARNESS_SETTINGS_WORDS\s*=/m, reason: 'B-82b8: the WORDS of those tables (a person\'s — the device bundle never loads them), keyed by the same ids' },
   { family: 'harness', file: 'src/lib/agent-meta.js', table: /^export const BACKEND_META\s*=/m, reason: 'the client META registry — the descriptor rows mirrored key for key (test-harness-contract deep-compares)' },
   { family: 'harness', file: 'src/record-shape.js', reason: 'the transcript-record SCHEMA ORACLE per harness:carrier:shape — naming the harness whose record shape it states is its job' },
   { family: 'harness', file: 'src/server/cli-env.js', table: /^const AVAILABLE_MODELS\s*=/m, reason: 'the /api/available-models seed table (the model list a harness offers before its own source answers)' },

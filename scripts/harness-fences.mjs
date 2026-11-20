@@ -49,6 +49,8 @@ export function scanSet(repo) { return trackedFiles(repo, ...SCAN_PATHSPECS, { u
 
 /** The names a harness is keyed by, read off its descriptor. `program` = the executable cli-env resolves (`h.acp ||
  *  h.exe`; a chat harness without either runs a program named as its id — claude, codex); a terminal harness has none. */
+/** B-82b8: a built-in harness's settings category (a person's word) from src/harness-settings-words.js, by its table's prefix */
+function wordsCategory(prefix) { try { const w = require('../src/harness-settings-words.js').HARNESS_SETTINGS_WORDS[prefix]; return (w && w.category) || null; } catch { return null; } }
 export function harnessNames(d) {
   const program = d.exe?.command || d.acp?.command || (d.kind === 'terminal' ? null : d.id);
   const table = d.settings && typeof d.settings === 'object' ? d.settings : null;
@@ -59,7 +61,7 @@ export function harnessNames(d) {
     brand: d.brand || d.acp?.brand || null,
     hasCreds: !!d.creds,
     settingsPrefix: table ? (table.prefix || d.settingsPrefix || d.id) : null,
-    category: table ? (table.category || null) : null,
+    category: table ? (table.category || wordsCategory(table.prefix || d.settingsPrefix || d.id) || null) : null,   // B-82b8: a built-in table's category is a word — it lives in src/harness-settings-words.js
   };
 }
 
@@ -213,6 +215,7 @@ export const FENCE_EXEMPT = Object.freeze([
   { file: 'scripts/test-settings-view.mjs', needle: 'harnesses', ids: ['shell'], why: 'the installed-CLI facts of the Settings view; shell has no settings section' },
   { file: 'src/artifacts.js', needle: 'AGENT_CONFIG_DIR', ids: ['antigravity', 'shell'], why: "keyed by the agent's config DOTDIR, not its id: antigravity's is .gemini (listed); a terminal has none" },
   { file: 'src/harness-settings.js', needle: 'HARNESS_SETTINGS', ids: ['shell'], why: 'shell declares no settings table (the contract allows none)' },
+  { file: 'src/harness-settings-words.js', needle: 'HARNESS_SETTINGS_WORDS', ids: ['shell'], why: 'B-82b8: the words of the declared settings tables — shell declares no settings table, so it has no words' },
   { file: 'src/harnesses/predict-adapters.js', needle: "claude: () => require('./claude-predict.js')", ids: ['opencode', 'shell'], why: 'the prediction adapters BY SOURCE (usage-predict pick 3): a harness that states no quota (NULL_QUOTA: predict { none }) has no row, and a missing row reads no prior — the safe default; a new harness WITH a quota is flagged here until it names its adapter' },
   { file: 'src/lib/app.js', needle: 'BACKEND_SESSION_OPTIONS', ids: ['shell'], why: 'a terminal has no model / effort options' },
   { file: 'src/lib/manage-agents.js', needle: 'BACKENDS', ids: ['opencode', 'shell'], why: "the Agents panel's CLI rows (a login / update / install command each): an ACP agent's presence rides the server's harness list (cli-env), a terminal is no CLI" },

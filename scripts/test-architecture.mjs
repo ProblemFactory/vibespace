@@ -438,6 +438,9 @@ const PURE = new Set(['src/settings-merge.js' /* B-e7c0: the ONE settings merge 
   // DECLARED tables + validator + coerce + the plan builder — imports nothing, bundled into the
   // browser (settings-schema derives the harness sections), required by the server and the daemon
   'src/harness-settings.js',
+  // B-82b8: the WORDS of those tables (a person's: category, label, description, details, option labels, the apply note), keyed
+  // by the row's name — imports nothing, bundled into the browser, read by the hub; never the daemon (§107)
+  'src/harness-settings-words.js',
   // CHANNEL SETTINGS (B-df40 part 3, design desk settings-cleanup §2 P3): the per-vendor budget / pace tables — the
   // harness precedent for channel adapters; imports nothing, bundled (settings-schema derives the "Per vendor" rows),
   // required by the adapters (caps spread budgetOf / paceOf), the registry (undeclared keys refused) and the engine
@@ -7902,6 +7905,9 @@ await section(async () => {
   // the device agent's bundle (the descriptor reaches it only by a path the worker pool starts, never a require)
   const in107 = Object.keys(r107.metafile.inputs);
   ok(in107.some((k) => /src\/agy-backfill\.js$/.test(k)) && !in107.some((k) => /src\/agy-cards(?:-worker)?\.js$/.test(k)), `§107 the device bundle carries agy-backfill (the descriptor's reader) but NOT the hub's agy-cards worker nor its reads (${in107.filter((k) => /agy-/.test(k)).join(', ')})`);
+  // B-82b8 (主开发 r654): the harness settings' WORDS (a person's — shown only by the hub's Settings window) never ride the device bundle;
+  // the table of machine facts does (the descriptors read its keys, types, defaults and apply road)
+  ok(in107.some((k) => /src\/harness-settings\.js$/.test(k)) && !in107.some((k) => /src\/harness-settings-words\.js$/.test(k)), `§107 B-82b8: the device bundle carries src/harness-settings.js (the machine facts) but NOT src/harness-settings-words.js (a person's words) — the bundle is ${size107} bytes`, in107.filter((k) => /harness-settings/.test(k)));
   ok(size107 <= RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 the device bundle stays within ${DEVICE_BUNDLE_MARGIN * 100} % of ${RELEASE_BUNDLE_BYTES} bytes — the 2.369.415 release's signed device bundle, plus ${DEVICE_BUNDLE_MARGIN * 100} % for this block's device code — as shipped (${size107})${size107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN) ? ' — OVER: is the new code device code? a hub-only library goes --external in build:agentd; device code over the margin is the coordinator\'s to rule — the base is the last release\'s signed size, restated only at a cut' : ''}`, size107);
   ok(Buffer.byteLength(plain107) > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same bundle NOT stripped (${Buffer.byteLength(plain107)} bytes) is over the cap — the size leg goes red without the strip step`);
   // the strip removes comments and margins ONLY: esbuild's column-0 module banners (whose code a line is — §5 reads them) and the
@@ -8133,7 +8139,7 @@ await section(async () => {
     ["src/browser-verbs.js", "no session directory is known here", "words", "the same"],
     ["src/browser-verbs.js", "save under ${place}, /tmp or ~/Downloads", "words", "the same"],
     ["src/exit-reach.js", "local_path_refused: 'the local path is outside the project, /tmp and ~/Downloads'", "words", "a refusal"],
-    ["src/harness-settings.js", "VibeSpace's own agent tools", "words", "a setting description"],
+    ["src/harness-settings-words.js", "VibeSpace's own agent tools", "words", "a setting description (B-82b8: the words moved with it)"],
     ["src/install-slot.js", "T=/tmp/vibespace-$u;", "per-user", "the install slot: $XDG_RUNTIME_DIR, else /tmp/vibespace-<uid> checked -O (owned)"],
     ["src/install-slot.js", "an old lock file in an aged /tmp", "words", "a comment beside code"],
     ["src/watch-door.js", "probeFs.watch(os.tmpdir(),", "read", "the watch door's probe (the 2.369.411 hotfix, lane bl-loop-b): one watch armed on the temp folder and closed at once, to learn whether the machine still grants watches — nothing is made there"],

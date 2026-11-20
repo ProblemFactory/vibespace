@@ -89,7 +89,9 @@ function assertQuotaContract(id, quota, { full = true } = {}) {
 function assertSettingsContract(h, { full }) {
   if (h.settings === undefined || h.settings === null) return;
   const adapterHas = (verb) => !!(h.Adapter && h.Adapter.prototype && typeof h.Adapter.prototype[verb] === 'function');
-  const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles || {}, adapterHas, contributed: full ? null : { id: h.id } });
+  // B-82b8: a BUILT-IN descriptor's table keeps its words apart (src/harness-settings-words.js, never in the device bundle) —
+  // judged here without them; a contributed table brings its words and is judged whole
+  const errs = checkTable(h.settings, { settingsPrefix: h.settingsPrefix, configFiles: h.configFiles || {}, adapterHas, contributed: full ? null : { id: h.id }, wordsApart: !!full });
   if (errs.length) throw new Error(`harness '${h.id}': settings table invalid — ${errs.join('; ')}`);
 }
 

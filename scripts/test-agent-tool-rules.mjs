@@ -70,6 +70,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const R = require(path.join(REPO, 'src/agent-tool-rules.js'));
 const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const HS = require(path.join(REPO, 'src/harness-settings.js'));
+const HSW = require(path.join(REPO, 'src/harness-settings-words.js'));   // B-82b8: a built-in row's words live apart — read through the join
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n      ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } return !!c; };
@@ -273,7 +274,7 @@ console.log('⑦ the Always Allow field (the CLI\'s spelling)');
 
 console.log('⑧ the harness row');
 {
-  const row = HS.rowOf(HS.HARNESS_SETTINGS.claude, 'allowAgentTools');
+  const row = HS.rowOf(HSW.withWords(HS.HARNESS_SETTINGS.claude), 'allowAgentTools');
   ok(!!row && row.type === 'boolean' && row.default === true && row.apply.kind === 'spawn' && !row.apply.mode && !row.apply.via, 'claude declares allowAgentTools: boolean, default ON, a SPAWN row (both modes, through the bag)');
   ok(HS.coerce(row, undefined) === true && HS.coerce(row, false) === false && HS.coerce(row, 'false') === true, 'unset ⇒ ON; only an explicit false turns it off (the string "false" is not a boolean)');
   ok(!HS.rowOf(HS.HARNESS_SETTINGS.codex, 'allowAgentTools'), 'codex declares no such row — its reason is written down (CODEX_NOTE)');
@@ -308,7 +309,7 @@ console.log('⑩ i18n');
   const keys = new Set(['Agent browser', 'also runs: {cmds}', 'Always allow: {rules}']);
   const lit = /\b(?:t|i18nKey)\(\s*(?:'((?:[^'\\]|\\.)*)'|"((?:[^"\\]|\\.)*)")/g;
   for (const f of ['src/agent-tool-rules.js', 'src/lib/permission-mode-labels.js']) for (const m of fs.readFileSync(path.join(REPO, f), 'utf8').matchAll(lit)) keys.add(new Function('return ' + (m[1] !== undefined ? "'" + m[1] + "'" : '"' + m[2] + '"'))());
-  const row = HS.rowOf(HS.HARNESS_SETTINGS.claude, 'allowAgentTools');
+  const row = HS.rowOf(HSW.withWords(HS.HARNESS_SETTINGS.claude), 'allowAgentTools');
   keys.add(row.label); keys.add(row.description);
   const miss = [...keys].filter((k) => !zh.has(k) || !ja.has(k));
   ok(keys.size >= 50 && !miss.length, `every new key (${keys.size}) has a zh AND a ja entry`, miss);

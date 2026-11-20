@@ -294,7 +294,7 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   const sb = read('src/lib/chat-status-bar.js');
   ok('the picker exists and is HONEST that it only applies next resume', sb.includes('chat-status-style') && sb.includes('A running session cannot change style'));
   // 2.369.123: the row is DECLARED in the claude harness's PURE table and the schema derives the Claude section from it
-  ok('the default style is a documented setting', (() => { const { HARNESS_SETTINGS, rowOf } = require(path.join(REPO, 'src/harness-settings.js')); const r = rowOf(HARNESS_SETTINGS.claude, 'outputStyle'); return !!r && r.type === 'enum' && r.apply.via === 'outputStyle' && /deriveHarnessTable\(tbl\)/.test(read('src/lib/settings-schema.js')); })());
+  ok('the default style is a documented setting', (() => { const { HARNESS_SETTINGS, rowOf } = require(path.join(REPO, 'src/harness-settings.js')); const r = rowOf(HARNESS_SETTINGS.claude, 'outputStyle'); return !!r && r.type === 'enum' && r.apply.via === 'outputStyle' && /deriveHarnessTable\(withWords\(tbl\)\)/.test(read('src/lib/settings-schema.js')); })());
   // ── STRIKE FOUR (2.368.1, owner-caught within hours): the sidebar's
   // per-session-config WHITELIST silently dropped both new keys — the exact
   // bug its own comment documents for 'account' (2.43.0) and 'groupManager'

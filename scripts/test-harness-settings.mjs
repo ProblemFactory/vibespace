@@ -34,6 +34,7 @@ fs.rmSync(root, { recursive: true, force: true });
 fs.mkdirSync(root, { recursive: true });
 
 const HS = require(path.join(repo, 'src/harness-settings.js'));
+const HSW = require(path.join(repo, 'src/harness-settings-words.js'));   // B-82b8: a built-in row's words live apart — read through the join
 const HC = require(path.join(repo, 'src/harness-config.js'));
 const harnesses = require(path.join(repo, 'src/harnesses/index.js'));
 const { create: createSync } = require(path.join(repo, 'src/server/harness-config-sync.js'));
@@ -150,7 +151,7 @@ console.log('§3 the typed accessors');
   ok('limitResetCredit: the NEW `ask` value is in the closed vocabulary and survives the typed read', sync.harnessSetting('codex', 'limitResetCredit') === 'ask');
   store['codex.limitResetCredit'] = 'always';
   ok('…an unlisted mode falls back to the default `off` (NEVER to auto)', sync.harnessSetting('codex', 'limitResetCredit') === 'off');
-  const lrcRow = rowOf(HARNESS_SETTINGS.codex, 'limitResetCredit');
+  const lrcRow = rowOf(HSW.withWords(HARNESS_SETTINGS.codex), 'limitResetCredit');
   const schemaMod = await import(path.join(repo, 'src/lib/settings-schema.js'));
   const fx = JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/harness-settings-schema-2.369.120.json'), 'utf8'));
   ok('…the row lists exactly off | ask | auto with off the default, and the schema derives the same options',
@@ -183,9 +184,9 @@ console.log('§3 the typed accessors');
   ok('shell has an empty bag', Object.keys(sync.harnessSpawnSettings('shell')).length === 0);
   // CLAUDE CODE'S OWN AUTO-CONTINUE (owner ruling 2026-09-22): a spawn row, default OFF, strict boolean
   {
-    const row = HS.rowOf(HS.HARNESS_SETTINGS.claude, 'autoContinueAtUsageLimit');
+    const row = HS.rowOf(HSW.withWords(HS.HARNESS_SETTINGS.claude), 'autoContinueAtUsageLimit');
     ok('claude declares autoContinueAtUsageLimit: boolean, default false, apply kind SPAWN (inline --settings — the CLI reads policy > --settings > user; never cli-config, which would change the user\'s OWN non-VibeSpace sessions)',
-      !!row && row.type === 'boolean' && row.default === false && row.apply.kind === 'spawn' && /--settings autoContinueAtUsageLimit/.test(row.apply.how) && !row.apply.mode && !row.apply.via);
+      !!row && row.type === 'boolean' && row.default === false && row.apply.kind === 'spawn' && /Claude Code's own continue at a usage limit/.test(row.apply.how) && !row.apply.mode && !row.apply.via);   // stale-pins: kept (the row is read through the words' join — the note lives in harness-settings-words.js, B-82b8)
     ok('…and it is NOT a cli-config row (NEGATIVE CONTROL: the ~/.claude/settings.json plan never names it)', !HS.rowsOfKind(HS.HARNESS_SETTINGS.claude, 'cli-config').some((r) => r.key === 'autoContinueAtUsageLimit'));
     ok('unset ⇒ the bag says false (default off)', sync.harnessSpawnSettings('claude').autoContinueAtUsageLimit === false);
     store['claude.autoContinueAtUsageLimit'] = 'true';

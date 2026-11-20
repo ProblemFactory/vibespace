@@ -5,6 +5,14 @@
 // it), required by the server (harnessSetting()/the config plan) and carried
 // by the daemon bundle. CJS on purpose — the backend-caps.js pattern.
 //
+// THE WORDS LIVE APART (B-82b8, 主开发 r654): every word a PERSON reads about a built-in row — the table's category, a row's
+// label, description and details, its options' labels and the apply note (`how`) — lives in src/harness-settings-words.js,
+// keyed by the row's own name. THIS file keeps what a machine acts on (keys, types, defaults, options' values, the apply road),
+// and the device agent's bundle never loads the words (test-architecture §107). The browser's settings-schema.js and the hub's
+// conversation-ops.js read the table JOINED to its words (withWords) — the same shape this table had before; checkTable judges a
+// built-in table here with `wordsApart`, and the words' own census (wordsCensus, test-harness-contract) names a row with no words
+// or words with no row. A CONTRIBUTED harness's table still carries its words inline (it arrives whole on /api/home).
+//
 // ONE table per harness: `{ prefix, category, files, rows }`. A ROW is pure
 // data (no functions — the table must survive a JSON round trip, because a
 // contributed harness sends its table over /api/home). Its persisted settings
@@ -12,7 +20,7 @@
 // needs no migration and an older bundle's tab reads the same key.
 //
 // `apply` is a CLOSED tagged union (APPLY_KINDS):
-//   {kind:'spawn', how, via?, live?, mode?}
+//   {kind:'spawn', how, via?, live?, mode?}   (`how`: in the words module for a built-in row)
 //       consumed by adapter.buildSessionArgs — through `opts.settings.<key>`
 //       by default, or through the named top-level option field when `via` is
 //       set (model/effort/permissionMode/extraArgs/outputStyle ride the resume
@@ -36,10 +44,7 @@
 //       agent-tools uninstall never touches it (the retention a user asked for
 //       is not "our entry").
 //
-// `t` below is only the EXTRACTION MARKER (English-string-as-key): the client
-// re-wraps every label/description/option label with the real t() when it
-// derives the schema rows, so the same key hits the same zh/ja entry.
-const t = (s) => s;
+// (B-82b8: the EXTRACTION MARKER `t` and every word it marked moved to src/harness-settings-words.js with them.)
 
 const APPLY_KINDS = Object.freeze(['spawn', 'server', 'cli-config']);
 const ROW_TYPES = Object.freeze(['boolean', 'number', 'string', 'text', 'enum']);
@@ -66,7 +71,6 @@ const GENERIC_LEGACY_KEYS = Object.freeze({ autoResumeOnLimit: 'claude.autoResum
 const HARNESS_SETTINGS = {
   claude: {
     prefix: 'claude',
-    category: t('Claude'),
     // The CLI config files VibeSpace may WRITE (display facts only here —
     // `rel` under $HOME + format; the descriptor's `configFiles.<id>` object
     // is DERIVED from this entry (harness-config.cliConfigFile) and adds the
@@ -79,75 +83,63 @@ const HARNESS_SETTINGS = {
       key: "outputStyle",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("CLI default") },
-        { value: "Concise", label: "Concise" },
-        { value: "Explanatory", label: "Explanatory" },
-        { value: "Learning", label: "Learning" },
-        { value: "Proactive", label: "Proactive" },
+        { value: "" },
+        { value: "Concise" },
+        { value: "Explanatory" },
+        { value: "Learning" },
+        { value: "Proactive" },
       ],
-      label: t("Default output style (Claude)"),
-      description: t("The CLI output style new chat sessions start with. \"Concise\" makes Claude lead with results and skip preamble. Blank = the CLI's own default. A stream-json session cannot switch style mid-conversation, so a change takes effect on the next resume; the chat status bar sets it per session."),
-      apply: { kind: 'spawn', how: '--settings outputStyle', via: 'outputStyle' },
+      apply: { kind: 'spawn', via: 'outputStyle' },
     },
     {
       key: "defaultModel",
       type: "enum", default: "", combobox: true,
       options: [
-        { value: "", label: t("Default") },
-        { value: "fable", label: "fable (latest, 200k)" },
-        { value: "fable[1m]", label: "fable[1m] (latest, 1M context)" },
-        { value: "opus", label: "opus (latest, 200k)" },
-        { value: "opus[1m]", label: "opus[1m] (latest, 1M context)" },
-        { value: "sonnet", label: "sonnet (latest)" },
-        { value: "sonnet[1m]", label: "sonnet[1m] (latest, 1M context)" },
-        { value: "haiku", label: "haiku (latest)" },
+        { value: "" },
+        { value: "fable" },
+        { value: "fable[1m]" },
+        { value: "opus" },
+        { value: "opus[1m]" },
+        { value: "sonnet" },
+        { value: "sonnet[1m]" },
+        { value: "haiku" },
       ],
-      label: t("Default model"),
-      description: t("Select an alias or choose \"Custom...\" to type a specific model ID (e.g. claude-opus-4-6-20250414). Applies to NEW sessions: a resumed conversation keeps the model the Claude CLI recorded for it (a transcript names the model that served a turn but never its 1M-context variant, so VibeSpace commands none) — set one for a specific conversation under Session parameters on its card."),
-      apply: { kind: 'spawn', how: '--model', via: 'model' },
+      apply: { kind: 'spawn', via: 'model' },
     },
     {
       key: "defaultPermissionMode",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("Default") },
-        { value: "auto", label: t("Auto") },
-        { value: "bypassPermissions", label: t("Bypass") },
-        { value: "plan", label: t("Plan") },
-        { value: "acceptEdits", label: t("Accept Edits") },
+        { value: "" },
+        { value: "auto" },
+        { value: "bypassPermissions" },
+        { value: "plan" },
+        { value: "acceptEdits" },
       ],
-      label: t("Default permission mode"),
-      description: t("Default Claude permission mode for new or resumed Claude sessions."),
-      apply: { kind: 'spawn', how: '--permission-mode', via: 'permissionMode' },
+      apply: { kind: 'spawn', via: 'permissionMode' },
     },
     {
       key: "defaultEffort",
       type: "enum", default: "", combobox: true,
       options: [
-        { value: "", label: t("Auto (model default)") },
-        { value: "low", label: t("Low") },
-        { value: "medium", label: t("Medium") },
-        { value: "high", label: t("High") },
-        { value: "max", label: t("Max") },
+        { value: "" },
+        { value: "low" },
+        { value: "medium" },
+        { value: "high" },
+        { value: "max" },
       ],
-      label: t("Default effort level"),
-      description: t("Select a level or choose \"Custom...\" to type any value (e.g. xhigh). Applies to NEW sessions: nothing Claude writes records the effort a turn ran at, so a resume commands none and the CLI’s own config decides — set one for a specific conversation under Session parameters on its card."),
-      apply: { kind: 'spawn', how: '--effort', via: 'effort' },
+      apply: { kind: 'spawn', via: 'effort' },
     },
     {
       key: "defaultExtraArgs",
       type: "text", default: "",
-      label: t("Default extra args"),
-      description: t("Extra Claude CLI args appended when starting a Claude session."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
+      apply: { kind: 'spawn', via: 'extraArgs' },
     },
     {
       key: "disableModelFallback",
       type: "boolean", default: false,
-      label: t("Disable model fallback"),
-      description: t("When safeguards flag a message, pause the turn instead of automatically switching to another model (the CLI's \"Switch models when a message is flagged\" set to off). Applies to new sessions at start and to running chat sessions from their next turn; sessions started while enabled also cover their subagents. A stopped turn shows a notice — rephrase and resend to continue."),
-      apply: { kind: 'spawn', how: '--settings switchModelsOnFlag=false + CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK', live: 'formatSetFallbackPolicy' },
+      apply: { kind: 'spawn', live: 'formatSetFallbackPolicy' },
     },
     // CLAUDE CODE'S OWN "WAIT FOR THE RESET, THEN CONTINUE" (owner ruling
     // 2026-09-22). The 2.1.280 binary declares `autoContinueAtUsageLimit` in
@@ -172,9 +164,7 @@ const HARNESS_SETTINGS = {
     {
       key: "autoContinueAtUsageLimit",
       type: "boolean", default: false,
-      label: t("Let Claude Code continue by itself at a usage limit"),
-      description: t("Claude Code's own wait-and-continue at a usage limit (its autoContinueAtUsageLimit setting). Chat sessions never run it — VibeSpace starts Claude Code non-interactively there, and VibeSpace's own auto-resume (with the unattended-spend ceiling and the account pool) is what continues them, when it is on. In terminal sessions it is the only automatic continue: off (the default) means a terminal session stops at the limit, the limit dialog offers the wait as a choice, and nothing continues it by itself; on leaves Claude Code's own setting alone (its default is on), so terminal sessions continue by themselves at the reset — outside the unattended-spend ceiling. Applies to newly started sessions."),
-      apply: { kind: 'spawn', how: '--settings autoContinueAtUsageLimit=false (while off)' },
+      apply: { kind: 'spawn' },
     },
     // VIBESPACE'S OWN AGENT TOOLS NEVER ASK PER COMMAND (lane L, 2026-09-25 —
     // the naive-user study: 7–15 "Permission: Bash" cards per browser task in
@@ -185,80 +175,64 @@ const HARNESS_SETTINGS = {
     {
       key: "allowAgentTools",
       type: "boolean", default: true,
-      label: t("Let the agent use VibeSpace's own tools without asking"),
-      description: t("On: the agent uses VibeSpace’s own tools (its browser, status, inbox and the like) without asking at each step; publishing a page and starting a background command still ask."),
-      details: [t("VibeSpace's own agent tools — its browser (vibespace-browser), status, task, inbox, messages, desktop windows, channels, manuals, and the list of its published pages — run without a permission card for every step, in every permission mode. Only these tools: any other command still asks, and so does the part of a command line that runs something else. Starting a background shell command (vibespace-job run) still asks, because it can run anything, and publishing a page (vibespace-page publish) asks every time, unless the session runs with full access (Never ask), where it runs as it always did. The trade-off: anything the agent can read, it can type or upload into a web page without asking — except an upload from ~/.claude, ~/.ssh, ~/.vibespace, ~/.codex or VibeSpace's account stores, which the browser tool refuses. The browser tool also writes files (a screenshot, a PDF, a download) only under the project directory, /tmp or ~/Downloads — never over your keys, logins or config. Off = every step asks again. Applies to newly started and resumed sessions; nothing is written to your Claude settings file.")], // lane ui-plain-words settings-9: the whole rule, under «详情»
-      apply: { kind: 'spawn', how: '--settings permissions.allow + permissions.ask (VibeSpace\'s own agent tools; publishing a page asks in a mode that asks anyway)' },
+      apply: { kind: 'spawn' },
     },
     {
       key: "transcriptRetentionDays",
       type: "number", default: 36500, min: 0, max: 36500, step: 30,
-      label: t("Keep Claude Code conversations for (days)"),
-      description: t("Claude Code deletes conversation transcripts older than this at every start (its own default is 30 days). VibeSpace writes the value into ~/.claude/settings.json (cleanupPeriodDays) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed. 0 = leave Claude Code's own setting alone."),
       tier: 'advanced',
       apply: { kind: 'cli-config', file: 'settings', path: ['cleanupPeriodDays'], off: 0, onUninstall: 'keep' },
     },
     {
       key: "brief",
       type: "boolean", default: false,
-      label: t("Let the agent send you messages and files (--brief)"),
-      description: t("Starts new Claude sessions with the CLI's agent-to-user channel enabled: the agent gets the SendUserMessage and SendUserFile tools and VibeSpace renders each call as a highlighted \"message for you\" card (files are published to a private link in this instance). Off by default because it changes how the agent writes — with --brief, plain text outside the tool is hidden from the message view. Applies to newly started sessions."),
-      apply: { kind: 'spawn', how: '--brief' },
+      apply: { kind: 'spawn' },
     },
     {
       key: "systemPromptSnapshot",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("CLI default") },
-        { value: "on", label: t("On — record once, reuse verbatim") },
-        { value: "off", label: t("Off — never record") },
+        { value: "" },
+        { value: "on" },
+        { value: "off" },
       ],
-      label: t("System prompt snapshot (--system-prompt-snapshot)"),
-      description: t("Passes the CLI's --system-prompt-snapshot flag to new Claude sessions: \"on\" records the system prompt once per conversation and reuses it verbatim on every request and resume, which keeps the prompt cache warm across resumes. Blank = leave the CLI's own default alone."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: '--system-prompt-snapshot' },
+      apply: { kind: 'spawn' },
     },
     {
       key: "excludeDynamicSystemPromptSections",
       type: "boolean", default: false,
-      label: t("Move per-machine prompt sections into the first message"),
-      description: t("Passes --exclude-dynamic-system-prompt-sections: the cwd, environment info, memory paths and git status move out of the system prompt and into the first user message, so the cached prefix is identical across machines and users. Only applies with the default system prompt. Off by default — measure before turning it on."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: '--exclude-dynamic-system-prompt-sections' },
+      apply: { kind: 'spawn' },
     },
     {
       key: "autocompact",
       type: "enum", default: "", combobox: true,
       options: [
-        { value: "", label: t("CLI default") },
-        { value: "auto", label: t("Auto") },
-        { value: "100k", label: "100k" },
-        { value: "200k", label: "200k" },
-        { value: "500k", label: "500k" },
+        { value: "" },
+        { value: "auto" },
+        { value: "100k" },
+        { value: "200k" },
+        { value: "500k" },
       ],
-      label: t("Auto-compact window size (--autocompact)"),
-      description: t("Passes --autocompact to new Claude sessions. \"auto\", or a token budget between 100k and 1M (e.g. 500k, 200000). A smaller window compacts sooner, which keeps each request cheaper at the cost of more compaction. Blank = the CLI decides. A value the CLI would reject is ignored rather than passed on."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: '--autocompact' },
+      apply: { kind: 'spawn' },
     },
     {
       key: "tuiRenderer",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("Auto (CLI preference)") },
-        { value: "fullscreen", label: t("Fullscreen (flicker-free)") },
-        { value: "classic", label: t("Classic (main screen)") },
+        { value: "" },
+        { value: "fullscreen" },
+        { value: "classic" },
       ],
-      label: t("Terminal TUI renderer"),
-      description: t("Renderer for terminal-mode Claude sessions. \"Fullscreen\" forces the flicker-free alternate-screen renderer with virtualized scrollback (CLAUDE_CODE_NO_FLICKER=1, same as /tui fullscreen); \"Classic\" forces the main-screen renderer; \"Auto\" follows the preference saved by the CLI (/tui). Applies to newly started sessions."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: 'CLAUDE_CODE_NO_FLICKER / CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN', mode: 'terminal' },
+      apply: { kind: 'spawn', mode: 'terminal' },
     },
     ],
   },
   codex: {
     prefix: 'codex',
-    category: t('Codex'),
     when: { harness: 'codex' }, // the whole section only where that CLI is installed (settings-view.js)
     files: {
       hooks: { rel: ['.codex', 'hooks.json'], format: 'json' },
@@ -275,14 +249,12 @@ const HARNESS_SETTINGS = {
       key: "outputStyle",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("agent default") },
-        { value: "none", label: "none" },
-        { value: "friendly", label: "friendly" },
-        { value: "pragmatic", label: "pragmatic" },
+        { value: "" },
+        { value: "none" },
+        { value: "friendly" },
+        { value: "pragmatic" },
       ],
-      label: t("Default response style (Codex)"),
-      description: t("The personality new Codex chat sessions start with. Blank = leave it to your own ~/.codex/config.toml (this is the default; VibeSpace used to force \"pragmatic\" on every session). Unlike Claude, a running Codex session CAN be re-styled from the chat status bar — it applies from the next turn."),
-      apply: { kind: 'spawn', how: 'CODEX_WEBUI_PERSONALITY (the wrapper\'s thread personality)', via: 'outputStyle' },
+      apply: { kind: 'spawn', via: 'outputStyle' },
     },
     {
       key: "limitResetCredit",
@@ -298,60 +270,50 @@ const HARNESS_SETTINGS = {
       // disabled row (a row here is a working control — the "only working
       // code" settings law).
       options: [
-        { value: "off", label: t("Off — never spend a reset credit automatically") },
-        { value: "ask", label: t("Ask — offer it in For you when it is worth it") },
-        { value: "auto", label: t("Auto — use one when it is worth it (advanced)") },
+        { value: "off" },
+        { value: "ask" },
+        { value: "auto" },
       ],
-      label: t("Use stored reset credits on a usage limit (Codex)"),
-      description: t("ChatGPT plans can hold rate-limit reset credits. A consumed credit starts a NEW window at once: the limit is full again and the next reset moves one full window from now (Claude's web reset works differently — it refills in place and the weekly reset time does not move; Claude Code offers it only as the interactive /limit-reset). Because a re-opened window is worth most right at the limit, VibeSpace judges a credit worth using as soon as a limit is hit — except the last credit with less than a tenth of a window left. A conversation that is mid-turn or whose prompt cache is still warm tries the credit before switching accounts (a switch re-bills the whole context); a cold one switches first and uses a credit only when no pool member can take it. \"Off\" (the default) never spends one by itself; \"Ask\" files one decision in For you per limit; \"Auto\" spends it for you, within the unattended-spend ceiling."),
-      apply: { kind: 'server', how: 'pool engine — the codex reset-credit rung of the exhaustion ladder' },
+      apply: { kind: 'server' },
     },
     {
       key: "defaultModel",
       type: "enum", default: "", combobox: true,
       options: [
-        { value: "", label: t("Default") },
-        { value: "gpt-6-astra", label: "gpt-6-astra" },
+        { value: "" },
+        { value: "gpt-6-astra" },
       ],
-      label: t("Default model"),
-      description: t("Select a known model or choose \"Custom...\" to type a specific model ID. Applies to NEW sessions: a resumed conversation keeps its own value (set one for a specific conversation under Session parameters on its card)."),
-      apply: { kind: 'spawn', how: '--model', via: 'model' },
+      apply: { kind: 'spawn', via: 'model' },
     },
     {
       key: "defaultPermissionMode",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("Default") },
-        { value: "read-only", label: t("Read Only") },
-        { value: "safe-yolo", label: t("Safe Yolo") },
-        { value: "yolo", label: t("Yolo") },
+        { value: "" },
+        { value: "read-only" },
+        { value: "safe-yolo" },
+        { value: "yolo" },
       ],
-      label: t("Default permission mode"),
-      description: t("Default Codex permission mode for new or resumed Codex sessions."),
-      apply: { kind: 'spawn', how: '--permission-mode', via: 'permissionMode' },
+      apply: { kind: 'spawn', via: 'permissionMode' },
     },
     {
       key: "defaultEffort",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("Auto (model default)") },
-        { value: "minimal", label: t("Minimal") },
-        { value: "low", label: t("Low") },
-        { value: "medium", label: t("Medium") },
-        { value: "high", label: t("High") },
-        { value: "xhigh", label: t("XHigh") },
+        { value: "" },
+        { value: "minimal" },
+        { value: "low" },
+        { value: "medium" },
+        { value: "high" },
+        { value: "xhigh" },
       ],
-      label: t("Default effort level"),
-      description: t("Default Codex reasoning effort for NEW Codex sessions. A resumed conversation keeps the effort its own last turn ran at; set one for a specific conversation under Session parameters on its card."),
-      apply: { kind: 'spawn', how: '--effort', via: 'effort' },
+      apply: { kind: 'spawn', via: 'effort' },
     },
     {
       key: "defaultExtraArgs",
       type: "text", default: "",
-      label: t("Default extra args"),
-      description: t("Extra Codex CLI args appended when starting a Codex session."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
+      apply: { kind: 'spawn', via: 'extraArgs' },
     },
     {
       // THE ONE MANAGED config.toml ROW (2.369.123) — the codex analogue of
@@ -370,19 +332,16 @@ const HARNESS_SETTINGS = {
       key: 'historyPersistence',
       type: 'enum', default: 'save-all',
       options: [
-        { value: '', label: t('CLI default (leave config.toml alone)') },
-        { value: 'save-all', label: t('Save all — keep every conversation (rollout) on disk') },
-        { value: 'none', label: t('None — write no rollouts (history is empty)') },
+        { value: '' },
+        { value: 'save-all' },
+        { value: 'none' },
       ],
-      label: t('Keep Codex conversations on disk'),
-      description: t('Codex records each conversation as a rollout file under ~/.codex/sessions only while [history] persistence is "save-all" (its own default). VibeSpace writes this value into ~/.codex/config.toml (comments and formatting preserved) at start-up and whenever it changes, and onto remote hosts when their agent tools are installed or a session starts there. "None" means Codex writes nothing and this instance shows no history for those sessions.'),
       apply: { kind: 'cli-config', file: 'config', path: ['history', 'persistence'], off: '', onUninstall: 'keep' },
     },
     ],
   },
   opencode: {
     prefix: 'opencode',
-    category: t('OpenCode'),
     when: { harness: 'opencode' }, // the whole section only where that CLI is installed (settings-view.js)
     files: {},
     rows: [
@@ -390,31 +349,25 @@ const HARNESS_SETTINGS = {
       key: "defaultModel",
       type: "enum", default: "", combobox: true,
       options: [
-        { value: "", label: t("Default") },
+        { value: "" },
       ],
-      label: t("Default model"),
-      description: t("A model id the agent offers (provider/model, e.g. opencode/big-pickle) — the list fills from the agent once a session has started; empty keeps the agent default. Applies to NEW sessions: a resumed conversation keeps the model OpenCode’s own session record names (that needs the OpenCode background service; without it the default applies and the server log says which rung it used)."),
-      apply: { kind: 'spawn', how: '--model', via: 'model' },
+      apply: { kind: 'spawn', via: 'model' },
     },
     {
       key: "defaultPermissionMode",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("Default") },
-        { value: "build", label: t("Build") },
-        { value: "plan", label: t("Plan") },
+        { value: "" },
+        { value: "build" },
+        { value: "plan" },
       ],
-      label: t("Default permission mode"),
-      description: t("Default OpenCode session mode for new sessions: build executes tools per its permission rules, plan disallows edits."),
-      apply: { kind: 'spawn', how: '--permission-mode', via: 'permissionMode' },
+      apply: { kind: 'spawn', via: 'permissionMode' },
     },
     {
       key: "defaultExtraArgs",
       type: "text", default: "",
-      label: t("Default extra args"),
-      description: t("Extra OpenCode CLI args appended when starting an OpenCode session."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
+      apply: { kind: 'spawn', via: 'extraArgs' },
     },
     ],
   },
@@ -424,7 +377,6 @@ const HARNESS_SETTINGS = {
   // chat restarts agy on the same conversation (its stream has no switch verb).
   antigravity: {
     prefix: 'antigravity',
-    category: t('Antigravity CLI'),
     when: { harness: 'antigravity' }, // the whole section only where that CLI is installed (settings-view.js)
     files: {},
     rows: [
@@ -432,18 +384,16 @@ const HARNESS_SETTINGS = {
       key: "defaultModel",
       type: "enum", default: "", combobox: true,
       options: [
-        { value: "", label: t("Default") },
-        { value: "gemini-4-carbon-medium", label: "gemini-4-carbon-medium" },
-        { value: "gemini-4-carbon-high", label: "gemini-4-carbon-high" },
-        { value: "gemini-4-carbon-low", label: "gemini-4-carbon-low" },
-        { value: "gemini-4-argon-high", label: "gemini-4-argon-high" },
-        { value: "gemini-4-argon-medium", label: "gemini-4-argon-medium" },
-        { value: "gemini-3.8-flash-high", label: "gemini-3.8-flash-high" },
-        { value: "gemini-3.8-flash-medium", label: "gemini-3.8-flash-medium" },
+        { value: "" },
+        { value: "gemini-4-carbon-medium" },
+        { value: "gemini-4-carbon-high" },
+        { value: "gemini-4-carbon-low" },
+        { value: "gemini-4-argon-high" },
+        { value: "gemini-4-argon-medium" },
+        { value: "gemini-3.8-flash-high" },
+        { value: "gemini-3.8-flash-medium" },
       ],
-      label: t("Default model"),
-      description: t("The model slug new Antigravity sessions start on (empty keeps Antigravity's own choice). “agy models” lists what your login may use; an unknown slug is refused by name."),
-      apply: { kind: 'spawn', how: '--model', via: 'model' },
+      apply: { kind: 'spawn', via: 'model' },
     },
     {
       // Antigravity's own row for its automatic usage reads (lane usage-predict) — told above unsetValue, below the table
@@ -451,49 +401,41 @@ const HARNESS_SETTINGS = {
       type: "enum", default: "on", storeDefault: true,
       unsetFollows: { setting: "accounts.onDemandQuotaRefresh", when: "off", value: "off" },
       options: [
-        { value: "on", label: t("Automatically") },
-        { value: "off", label: t("Only when I press Re-check") },
+        { value: "on" },
+        { value: "off" },
       ],
-      label: t("Antigravity usage reads"),
-      description: t("Automatically: an account's usage is read once each time one of its conversations hits a usage wall, and once after a stretch of work — when a turn ends and 5 minutes pass with no new turn on the account; that read comes at most once per account per 30 minutes, never during a turn, never for an idle account. Only when I press Re-check: nothing is read by itself. Either way, Re-check in the account's menu reads it: this row decides only the reads that happen by themselves."),
-      apply: { kind: 'server', how: t("when a conversation hits a usage wall, and after a stretch of work") },   // the note a person reads under the row: plain words, through the dictionary
+      apply: { kind: 'server' },   // the note a person reads under the row: plain words, through the dictionary
     },
     {
       key: "defaultEffort",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("Default") },
-        { value: "low", label: "low" },
-        { value: "medium", label: "medium" },
-        { value: "high", label: "high" },
-        { value: "xhigh", label: "xhigh" },
-        { value: "max", label: "max" },
+        { value: "" },
+        { value: "low" },
+        { value: "medium" },
+        { value: "high" },
+        { value: "xhigh" },
+        { value: "max" },
       ],
-      label: t("Default effort"),
-      description: t("Reasoning effort for new Antigravity sessions (--effort)."),
-      apply: { kind: 'spawn', how: '--effort', via: 'effort' },
+      apply: { kind: 'spawn', via: 'effort' },
     },
     {
       key: "defaultPermissionMode",
       type: "enum", default: "",
       options: [
-        { value: "", label: t("Default") },
-        { value: "accept-edits", label: t("Edit files freely, ask before commands") },
-        { value: "auto", label: t("Auto — a safety check decides") },
-        { value: "plan", label: t("Plan only — read and propose, change nothing") },
-        { value: "bypassPermissions", label: t("Never ask (full access)") },
+        { value: "" },
+        { value: "accept-edits" },
+        { value: "auto" },
+        { value: "plan" },
+        { value: "bypassPermissions" },
       ],
-      label: t("Default permission mode"),
-      description: t("How a new Antigravity session handles tools that need approval. In a chat, Antigravity cannot ask — a tool it would ask about is skipped and said in the chat; “Never ask” runs everything."),
-      apply: { kind: 'spawn', how: '--mode · --dangerously-skip-permissions', via: 'permissionMode' },
+      apply: { kind: 'spawn', via: 'permissionMode' },
     },
     {
       key: "defaultExtraArgs",
       type: "text", default: "",
-      label: t("Default extra args"),
-      description: t("Extra Antigravity CLI args appended when starting an Antigravity session."),
       tier: 'advanced',
-      apply: { kind: 'spawn', how: 'appended argv', via: 'extraArgs' },
+      apply: { kind: 'spawn', via: 'extraArgs' },
     },
     ],
   },
@@ -628,7 +570,10 @@ function checkTable(table, ctx = {}) {
   const errs = [];
   if (!isPlainObject(table)) return ['settings table must be an object'];
   if (typeof table.prefix !== 'string' || !PREFIX_RE.test(table.prefix)) errs.push(`prefix must be a lowercase slug (got ${JSON.stringify(table.prefix)})`);
-  if (typeof table.category !== 'string' || !table.category.trim()) errs.push('category must be a non-empty string');
+  // B-82b8: a BUILT-IN table's words live apart (src/harness-settings-words.js) — `wordsApart` judges its machine facts only;
+  // the words' census judges the words (a contributed table carries its words and is judged whole)
+  const words = !ctx.wordsApart;
+  if (words && (typeof table.category !== 'string' || !table.category.trim())) errs.push('category must be a non-empty string');
   if (ctx.settingsPrefix !== undefined && table.prefix !== ctx.settingsPrefix) errs.push(`prefix ${JSON.stringify(table.prefix)} does not match the descriptor's settingsPrefix ${JSON.stringify(ctx.settingsPrefix)}`);
   if (ctx.contributed) {
     if (table.prefix !== ctx.contributed.id) errs.push(`a contributed harness may only own its own namespace: prefix must be ${JSON.stringify(ctx.contributed.id)} (got ${JSON.stringify(table.prefix)})`);
@@ -659,8 +604,8 @@ function checkTable(table, ctx = {}) {
     seen.add(row.key);
     if (hasFunctionDeep(row)) errs.push(`${at}: rows are pure data — a function cannot cross the wire`);
     if (!ROW_TYPES.includes(row.type)) errs.push(`${at}: type must be one of ${ROW_TYPES.join('|')} (got ${JSON.stringify(row.type)})`);
-    if (typeof row.label !== 'string' || !row.label) errs.push(`${at}: label required`);
-    if (typeof row.description !== 'string') errs.push(`${at}: description required (may be empty)`);
+    if (words && (typeof row.label !== 'string' || !row.label)) errs.push(`${at}: label required`);
+    if (words && typeof row.description !== 'string') errs.push(`${at}: description required (may be empty)`);
     if (row.scope !== undefined && row.scope !== 'instance') errs.push(`${at}: scope must be 'instance' (v1)`);
     switch (row.type) {
       case 'boolean': if (typeof row.default !== 'boolean') errs.push(`${at}: boolean default required`); break;
@@ -673,7 +618,7 @@ function checkTable(table, ctx = {}) {
         if (typeof row.default !== 'string') errs.push(`${at}: enum default must be a string`);
         if (!Array.isArray(row.options) || !row.options.length) errs.push(`${at}: enum needs a non-empty options list`);
         else {
-          for (const o of row.options) if (!isPlainObject(o) || typeof o.value !== 'string' || typeof o.label !== 'string') { errs.push(`${at}: every option is {value, label} (strings)`); break; }
+          for (const o of row.options) if (!isPlainObject(o) || typeof o.value !== 'string' || (words && typeof o.label !== 'string')) { errs.push(words ? `${at}: every option is {value, label} (strings)` : `${at}: every option has a string value`); break; }
           if (typeof row.default === 'string' && row.options.every((o) => !o || o.value !== row.default)) errs.push(`${at}: default ${JSON.stringify(row.default)} is not among its options`);
         }
         break;
@@ -691,7 +636,7 @@ function checkTable(table, ctx = {}) {
     const a = row.apply;
     if (!isPlainObject(a) || !APPLY_KINDS.includes(a.kind)) { errs.push(`${at}: apply.kind must be one of ${APPLY_KINDS.join('|')}`); return; }
     if (a.kind === 'spawn') {
-      if (typeof a.how !== 'string' || !a.how) errs.push(`${at}: apply.how (display text) required`);
+      if (words && (typeof a.how !== 'string' || !a.how)) errs.push(`${at}: apply.how (display text) required`);
       if (a.via !== undefined && (typeof a.via !== 'string' || !KEY_RE.test(a.via))) errs.push(`${at}: apply.via must name a buildSessionArgs option field`);
       if (a.mode !== undefined && !SPAWN_MODES.includes(a.mode)) errs.push(`${at}: apply.mode must be ${SPAWN_MODES.join('|')}`);
       if (a.live !== undefined) {
@@ -699,7 +644,7 @@ function checkTable(table, ctx = {}) {
         else if (typeof ctx.adapterHas === 'function' && !ctx.adapterHas(a.live)) errs.push(`${at}: live verb ${JSON.stringify(a.live)} is not implemented by the adapter`);
       }
     } else if (a.kind === 'server') {
-      if (typeof a.how !== 'string' || !a.how) errs.push(`${at}: apply.how (who reads it) required`);
+      if (words && (typeof a.how !== 'string' || !a.how)) errs.push(`${at}: apply.how (who reads it) required`);
     } else {
       const f = isPlainObject(files) ? files[a.file] : null;
       if (typeof a.file !== 'string' || !f) errs.push(`${at}: apply.file ${JSON.stringify(a.file)} is not in the table's files`);

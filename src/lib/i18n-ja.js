@@ -14929,4 +14929,14 @@ export default {
   "location": "位置",
   "{a} and {b}": "{a}と{b}",
   "{a}, {b} and {c}": "{a}・{b}・{c}",
+  // B-82b8: the settings apply notes in a person's words (the eight that were engineers' English)
+  "added at the end of the command that starts the agent": "エージェントを起動するコマンドの末尾に追加",
+  "new sessions start without Claude Code's own continue at a usage limit, unless this is on": "ここがオンでない限り、新しいセッションは Claude Code 自身の「上限に達したら続行」を使いません",
+  "VibeSpace's own agent tools run without asking; publishing a page still asks in a mode that asks anyway": "VibeSpace 自身のエージェントツールは確認なしで実行されます。もともと確認するモードでは、ページの公開は引き続き確認します",
+  "the personality a new Codex conversation starts with": "新しい Codex 会話が始まるときの個性",
+  "when every Codex account in the pool has reached its limit": "プールのすべての Codex アカウントが上限に達したとき",
+  // B-82b8 ALSO: the seed model labels with a 1M context had no entry (the dictionary held «… (latest, 1M)», an older spelling)
+  "fable[1m] (latest, 1M context)": "fable[1m]（最新、1M コンテキスト）",
+  "opus[1m] (latest, 1M context)": "opus[1m]（最新、1M コンテキスト）",
+  "sonnet[1m] (latest, 1M context)": "sonnet[1m]（最新、1M コンテキスト）",
 };

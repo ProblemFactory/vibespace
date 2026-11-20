@@ -157,9 +157,11 @@ function limitChoices({ accounts = null } = {}) {
   let ids = [], HS = null;
   try { ids = require('../harnesses').ids(); } catch { ids = []; }
   try { HS = require('../harness-settings'); } catch { HS = null; }
+  let joinWords = (tbl) => tbl;   // B-82b8: the option labels are a person's words — joined from the words module (the hub's; never the device's)
+  try { joinWords = require('../harness-settings-words').withWords; } catch { }
   const permissionModes = [], models = [];
   for (const id of ids) {
-    const table = HS && HS.HARNESS_SETTINGS ? HS.HARNESS_SETTINGS[id] : null;
+    const table = HS && HS.HARNESS_SETTINGS ? joinWords(HS.HARNESS_SETTINGS[id]) : null;
     const rows = table && HS ? HS.rowsOfKind(table, 'spawn') : [];
     const via = (v) => rows.find((r) => r && r.apply && r.apply.via === v) || null;
     for (const [row, out] of [[via('permissionMode'), permissionModes], [via('model'), models]]) {

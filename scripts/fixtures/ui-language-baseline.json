@@ -284,19 +284,6 @@
    "File viewer",
    "Hex viewer"
   ],
-  "src/harness-settings.js": [
-   "Concise",
-   "Explanatory",
-   "Learning",
-   "Proactive",
-   "gemini-4-carbon-medium",
-   "gemini-4-carbon-high",
-   "gemini-4-carbon-low",
-   "gemini-4-argon-high",
-   "gemini-4-argon-medium",
-   "gemini-3.8-flash-high",
-   "gemini-3.8-flash-medium"
-  ],
   "src/permission-rules.js": [
    "enterprise-managed layer",
    "user config (profile “",

@@ -264,10 +264,10 @@
   },
   {
    "id": "autocompact-help",
-   "file": "src/harness-settings.js",
+   "file": "src/harness-settings-words.js",
    "keyedOn": "model",
    "needsReleaseOnOrdinaryUpdate": false,
-   "road": "the --autocompact help's token range (words; no model)",
+   "road": "the --autocompact help's token range (words; no model) — B-82b8: the words moved with it into the words module",
    "suite": "test-claude-update-needs-nothing",
    "match": "context-claim",
    "sites": 1
@@ -355,6 +355,16 @@
    "suite": "test-claude-update-needs-nothing",
    "match": "family-key",
    "sites": 7
+  },
+  {
+   "id": "settings-default-model-labels",
+   "file": "src/harness-settings-words.js",
+   "keyedOn": "model",
+   "needsReleaseOnOrdinaryUpdate": false,
+   "road": "B-82b8: claude.defaultModel's option LABELS (a person's words, by value); the values are the seed in src/harness-settings.js (the row above), which app.js replaces with /api/available-models at boot and on every available-models-dirty signal",
+   "suite": "test-claude-update-needs-nothing",
+   "match": "family-key",
+   "sites": 1
   },
   {
    "id": "offline-fallback-models",
