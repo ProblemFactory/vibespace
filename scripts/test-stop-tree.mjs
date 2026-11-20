@@ -906,33 +906,17 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   // (a) a stop through the wrapper (its stop step and its drain)
   const VW = 'escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {})';
   const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)
-  const sa = await escScene(WRAP, 'esc-stop', { viewMod: viewCut });
-  ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside === 1,
-    'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried THIS run\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
-  ok(sa.after && sa.after.strangerOwn && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
-  ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
-  ok(sa.after && sa.after.left && sa.after.left.outside >= 1 && sa.after.viewCut && !sa.after.viewCut.outside, 'CONTROL (the view without `outside`, in a copy — over the same run): the run records it but the card\'s row never sees it — RED', sa.after && sa.after.viewCut);
   const TS = "  let taskStop = !keeps && !!stopping;", SS = "    for (const p of escapedOf()) if (keeps || p[2]) { if (termOnce(p) && !keeps) stopEsc.set(termKey(p), p); }";
   const relEsc = anchored(anchored(WRAP, TS, "  let taskStop = false;   // MUTANT: the release — a task's escapees are said, not stopped", 'b7ca1-taskstop-cut'), SS, "    if (keeps) for (const p of escapedOf()) termOnce(p);", 'b7ca1-stopstep-cut');   // stale-pins: kept (the control plants the release's text in a copy)
-  const sx = await escScene(relEsc, 'esc-stop-mut');
-  ok(sx.after && sx.after.alive && sx.after.left && sx.after.left.escaped >= 1 && !sx.after.left.outside, 'CONTROL (the release\'s wrapper, in a copy): the re-parented child is LEFT RUNNING — said «left its group — not stopped» — RED', sx.after);
   const OURS = "  const ours = (p) => !!p[2];";
   const anyRun = anchored(WRAP, OURS, "  const ours = () => true;   // MUTANT: the job's mark alone", 'b7ca1-run-mark-cut');
-  const sr = await escScene(anyRun, 'esc-run-mut');
-  ok(sr.after && !sr.after.stranger, 'CONTROL (the job\'s mark alone, in a copy): the STRANGER — another run\'s — is ended by this run\'s stop — RED', sr.after);
   // (b) a FORCE stop: the wrapper is SIGKILLed (its stop step never runs) — the ENGINE ends what carries THIS run's mark, beside the tree
   const JSRC = fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8');
   const MK = "      if (id.pid === Number(stamp.pid) || inTree.has(`${id.pid}:${id.starttime}`) || (!group && PI.pgidOf(id.pid) === Number(stamp.pid)) || hubs(id.pid) || ko.has(id.pid)) continue;";
   const RM = "mark: `VIBESPACE_JOB_RUN=${job.id}:${run0.startedAt}`";
   ok(JSRC.split(MK).length === 2 && JSRC.split(RM).length === 2, 'control setup: the engine\'s mark kill and its run\'s mark are found once each in jobs.js');
-  const fa = await escScene(WRAP, 'esc-force', { force: true });
-  ok(fa.after && !fa.after.alive && fa.after.stranger && /carrying its run's mark outside its group \(re-parented\)/.test(fa.said), 'B-7ca1: a FORCE stop (the wrapper SIGKILLed) — the engine kills the re-parented child carrying the run\'s mark, said in the log; the stranger (another run\'s) lives', { after: fa.after, said: fa.said.slice(0, 400) });
   const noMark = MJ.load('src/jobs.js', anchored(JSRC, MK, '      continue;   /* MUTANT: no mark kill */', 'b7ca1-engine-mark-cut'), 'b7ca1-engine-mark-cut');
-  const fx = await escScene(WRAP, 'esc-force-mut', { force: true, jobsMod: noMark });
-  ok(fx.after && fx.after.alive, 'CONTROL (the engine without its mark kill, in a copy): the force stop leaves the re-parented child RUNNING — RED', fx.after);
   const jobMark = MJ.load('src/jobs.js', anchored(JSRC, RM, 'mark: `VIBESPACE_JOB_ID=${job.id}`', 'b7ca1-engine-runmark-cut'), 'b7ca1-engine-runmark-cut');
-  const fj = await escScene(WRAP, 'esc-force-jobmark', { force: true, jobsMod: jobMark });
-  ok(fj.after && !fj.after.stranger, 'CONTROL (the engine by the job\'s mark, in a copy): the force stop kills the STRANGER — another run\'s — RED', fj.after);
   // (c) its read r2 (S1): a task that restarted the hub with a LAUNCHER — `(setsid sh -c '<the hub> & echo $! > server.pid; wait' &)`:
   // the launcher carries this run's mark, sits in its own group, re-parented, and is the hub's PARENT (never under it): a stop of
   // this run never ends it (the engine's _hubAncestors; the wrapper's keptAncestors)
@@ -948,10 +932,30 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
           for (const x of [...PI.treeOf([hid.pid]), lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };   // the stand-in's own sleep too (its read r3: it outlived the scene)
       } });
   });
-  const la = await launchScene(WRAP, 'esc-launcher');
-  ok(la.after && la.after.launcher && la.after.hub, 'B-7ca1 (its read r2, S1): a task\'s stop never ends the hub\'s LAUNCHER (it carries this run\'s mark, re-parented, its own group — the hub\'s parent) nor the hub', { ...la.after, state: la.state, ms: la.ms });
   const KA = "    if ((kept && kept(e)) || anc.has(Number(e))) continue;";
-  const lx = await launchScene(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), 'esc-launcher-mut');
+  // the eight scenes are INDEPENDENT (their own folders, managers, marks and processes): they run together — the suite's time is the
+  // slowest scene's, not their sum (it measured 9.9 s alone with them in a row; the fast tier's bound is 10 s)
+  const [sa, sx, sr, fa, fx, fj, la, lx] = await Promise.all([
+    escScene(WRAP, 'esc-stop', { viewMod: viewCut }),
+    escScene(relEsc, 'esc-stop-mut'),
+    escScene(anyRun, 'esc-run-mut'),
+    escScene(WRAP, 'esc-force', { force: true }),
+    escScene(WRAP, 'esc-force-mut', { force: true, jobsMod: noMark }),
+    escScene(WRAP, 'esc-force-jobmark', { force: true, jobsMod: jobMark }),
+    launchScene(WRAP, 'esc-launcher'),
+    launchScene(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), 'esc-launcher-mut')
+  ]);
+  ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside === 1,
+    'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried THIS run\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
+  ok(sa.after && sa.after.strangerOwn && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
+  ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
+  ok(sa.after && sa.after.left && sa.after.left.outside >= 1 && sa.after.viewCut && !sa.after.viewCut.outside, 'CONTROL (the view without `outside`, in a copy — over the same run): the run records it but the card\'s row never sees it — RED', sa.after && sa.after.viewCut);
+  ok(sx.after && sx.after.alive && sx.after.left && sx.after.left.escaped >= 1 && !sx.after.left.outside, 'CONTROL (the release\'s wrapper, in a copy): the re-parented child is LEFT RUNNING — said «left its group — not stopped» — RED', sx.after);
+  ok(sr.after && !sr.after.stranger, 'CONTROL (the job\'s mark alone, in a copy): the STRANGER — another run\'s — is ended by this run\'s stop — RED', sr.after);
+  ok(fa.after && !fa.after.alive && fa.after.stranger && /carrying its run's mark outside its group \(re-parented\)/.test(fa.said), 'B-7ca1: a FORCE stop (the wrapper SIGKILLed) — the engine kills the re-parented child carrying the run\'s mark, said in the log; the stranger (another run\'s) lives', { after: fa.after, said: fa.said.slice(0, 400) });
+  ok(fx.after && fx.after.alive, 'CONTROL (the engine without its mark kill, in a copy): the force stop leaves the re-parented child RUNNING — RED', fx.after);
+  ok(fj.after && !fj.after.stranger, 'CONTROL (the engine by the job\'s mark, in a copy): the force stop kills the STRANGER — another run\'s — RED', fj.after);
+  ok(la.after && la.after.launcher && la.after.hub, 'B-7ca1 (its read r2, S1): a task\'s stop never ends the hub\'s LAUNCHER (it carries this run\'s mark, re-parented, its own group — the hub\'s parent) nor the hub', { ...la.after, state: la.state, ms: la.ms });
   ok(lx.after && !lx.after.launcher, 'CONTROL (the hub\'s ancestors not kept, in a copy): the stop ends the hub\'s launcher — RED', lx.after);
   // a hub started INSIDE a job never hands that run's mark to what it starts (its env loses it at the engine's construction)
   const envOf = (Mod, tag) => { const d = path.join(D, tag); fs.mkdirSync(d, { recursive: true }); process.env.VIBESPACE_JOB_RUN = 'jb-0000aaaa:1'; try { new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, memoryRungs: [] }); } catch { } const had = 'VIBESPACE_JOB_RUN' in process.env; delete process.env.VIBESPACE_JOB_RUN; return had; };
