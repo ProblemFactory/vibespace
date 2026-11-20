@@ -43,6 +43,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a paired machine, VibeSpace's hooks keep working after VibeSpace updates the Node it runs on.
 - On a paired machine, VibeSpace's hooks are set up with the agent's own Node first, so a too old Node first on PATH no longer breaks them.
 - A job named «password reset» or «auth: fix login flow» keeps its words; a password or key typed in a job's name is still hidden, extra spaces too.
+- A job result or wake sent to an ended conversation on a paired machine now resumes it there and delivers once it is ready (after the device agent update).
 
 ## 2.369.413 — 2026-11-20
 
