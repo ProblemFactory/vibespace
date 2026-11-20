@@ -969,23 +969,36 @@ try {
   // writer is flushed through its OWN door first (flushSync: the write in flight lands, then every owed store), so no tmp file
   // exists to meet; a write left owed is red BY NAME. No catch around the read: a real file vanishing stays a throw.
   const SW5 = require(path.join(REPO, 'src/store-writer.js')).storeWriter();   // the one writer every store here (and the mutant copies' requires) reach
-  const sweep5 = (dir, tag) => {
+  // ALSO CURED (lane login-request-card; met at d0c45eb38 and at 5b3eb6063, box zone): the keeper's store is written by the store
+  // writer's WORKER through `<file>.tmp-<pid>-w` and a rename, so a sweep walking while that write was in flight listed the temp
+  // file and read it after its rename (ENOENT, the suite died). The sweep reads what LANDED: every file it walks (a temp file
+  // by its own store's name) is awaited on the writer's whenDurable first, and a file gone between the listing and its read
+  // takes the walk again (a few takes, then the real error).
+  // (the union at the move onto 4d78a1334, 主开发 r5365: BOTH cures kept — the writer flushed through its own door and red by name
+  // if a write is left owed, THEN every walked file awaited on the writer and a file gone between the listing and its read takes
+  // the walk again, a few takes, then the real error)
+  const landed5 = (dir) => SW5.whenDurable(walkDataFiles5(dir).map((f) => path.resolve(f.replace(/\.tmp-\d+(?:-w|-[0-9a-f]{8})?$/, ''))));
+  const sweep5 = async (dir, tag) => {
     const fl = SW5.flushSync(null);
     ok(fl.left.length === 0, `RULE 5′ ${tag}: the sweep reads what has landed — the store writer flushed through its own door before listing (${fl.written.length} written now${fl.written.length ? ': ' + fl.written.map((x) => path.basename(String(x))).join(', ') : ''}; ${fl.left.length} left${fl.left.length ? ': ' + fl.left.map((x) => `${path.basename(String(x.file || x.name))} — ${x.why}`).join('; ') : ''})`);
-    const hits = [];
-    for (const f of walkDataFiles5(dir)) {
-      const txt = realRead(f, 'utf8');
-      const rel = path.relative(dir, f);
-      for (const [lbl, sec] of secrets5) {
-        if (!sec) continue;
-        for (const form of shaForms(sec)) {
-          if (txt.includes(form)) hits.push(`${rel}:${lbl}`);
+    for (let take = 1; ; take++) {
+      await landed5(dir);
+      const hits = []; let gone = false;
+      for (const f of walkDataFiles5(dir)) {
+        let txt;
+        try { txt = realRead(f, 'utf8'); } catch (e) { if (e && e.code === 'ENOENT' && take < 5) { gone = true; break; } throw e; }
+        const rel = path.relative(dir, f);
+        for (const [lbl, sec] of secrets5) {
+          if (!sec) continue;
+          for (const form of shaForms(sec)) {
+            if (txt.includes(form)) hits.push(`${rel}:${lbl}`);
+          }
         }
       }
+      if (!gone) return hits;
     }
-    return hits;
   };
-  const sweepHits0 = sweep5(d5, '(the live run)');
+  const sweepHits0 = await sweep5(d5, '(the live run)');
   ok(fillCur5.ok && fillNew5.ok && Boolean(p15) && walkDataFiles5(d5).length >= 3 && sweepHits0.length === 0,
     'RULE 5′ runtime data/ sweep (live browser-dialogs fillVaultField): store keys, vault password, account secret and typed web-login P0/P1 leave 0 raw/sha256/sha1/sha512 traces across all files under data/',
     sweepHits0.join(' | '));
@@ -1020,7 +1033,7 @@ try {
     fs.writeFileSync(path.join(d5M4, 'profiles', 'bp-00000001', 'leak.json'), JSON.stringify({ h: crypto.createHash('sha1').update(p05, 'utf8').digest('hex') }), { mode: 0o600 });
     fs.mkdirSync(path.join(d5M4, 'run'), { recursive: true });
     fs.writeFileSync(path.join(d5M4, 'run', 'leak.json'), JSON.stringify({ h: crypto.createHash('sha256').update(p05, 'utf8').digest('base64url') }), { mode: 0o600 });
-    sweepHitsM4 = sweep5(d5M4, '(the M4 red control)');
+    sweepHitsM4 = await sweep5(d5M4, '(the M4 red control)');
     w5M4.shutdown();
   }
   ok(Boolean(Dm5M4)
