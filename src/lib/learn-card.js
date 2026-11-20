@@ -37,6 +37,7 @@ const LINE_BOX_MAX = 300;   // a proposed line's box; a kept line is the person'
 const REFUSALS = () => ({
   'no-zdr': t('the model has no zero-data-retention endpoint — pick the other model in “Model that drafts” below'),
   'use-budget': t('today\'s drafts used their $0.10 — try again tomorrow'),
+  'settings-unread': t('the settings could not be read, so the daily limit is not known — try again once they read'),   // B-225b: NOT NOW — the daily limit is never judged on its default
   'daily-budget': t('the LLM plugin\'s daily limit is spent — try again tomorrow'),
   'no-examples': t('answer ✓ and ✗ on a few judged rows first'),
   reconnect: t('OpenRouter refused the key — check it in Integrations & keys'),

@@ -449,7 +449,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
   // B-225b R11 (the persistence holds): data/settings.json HELD — the caps are not known (every row reads its default): NOT NOW, a
   // refusal that uses nothing up, judged against the real caps at the lift (persistence's settingsAgain → noteLimitsWritten)
   const SETTINGS_HELD = Symbol.for('vibespace.settings-held');
-  const settingsHeld = () => { try { return serverSetting(SETTINGS_HELD) || null; } catch { return null; } };
+  const settingsHeld = () => { try { const h = serverSetting(SETTINGS_HELD); return h && typeof h === 'object' && typeof h.kind === 'string' ? h : null; } catch { return null; } };   // ONLY the hold's own fact (a reader that answers every key is no hold)
   // B-0a33 (2) × B-3b0f: while the ledger cannot be read no wait can be judged — '*' = every waiting frame is held
   const overCapNow = (now) => (heldBy ? [] : unreadable ? ['*'] : A.waitingOverCap(state, limits(), now));   // B-ef83: a process that does not keep the ledger judges no waiting frame (the keeper counted them) — none pulled
   const overagePolicy = () => (serverSetting('spend.allowOverageTurns') === true ? 'allow' : 'refuse');

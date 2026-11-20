@@ -9857,6 +9857,7 @@ export default {
   "new line": "新增",
   "the model has no zero-data-retention endpoint — pick the other model in “Model that drafts” below": "所选模型没有零数据保留端点——在下面的「起草用的模型」里换另一档",
   "today's drafts used their $0.10 — try again tomorrow": "今天的起草额度（$0.10）已用完——明天再试",
+  "the settings could not be read, so the daily limit is not known — try again once they read": "设置读不出来，所以不知道每日上限——等设置能读出后再试",
   "the LLM plugin's daily limit is spent — try again tomorrow": "LLM 插件今天的花费上限已用完——明天再试",
   "OpenRouter refused the key — check it in Integrations & keys": "OpenRouter 拒绝了这个 key——到「集成与密钥」里检查",
   "OpenRouter says the plan does not allow this model": "OpenRouter 说当前套餐不能用这个模型",

@@ -128,7 +128,7 @@ console.log('④ EVERY WRITER of the settings file — a grep-derived census, pr
 {
   const ROWS = [
     { file: 'src/routes/persistence.js', re: /^const SETTINGS_FILE = path\.join\(dataDir, 'settings\.json'\);/, road: 'the settings file itself (data/settings.json)', spend: 'only through the roads below' },
-    { file: 'src/routes/persistence.js', re: /^writeJsonAtomic\(SETTINGS_FILE, data\);/, road: 'THE ONE WRITER (writeSettings: atomic write + the settings-updated broadcast)', spend: 'only as its callers allow' },
+    { file: 'src/routes/persistence.js', re: /^try \{ settingsHold\.write\(data\); \}/, road: 'THE ONE WRITER (writeSettings: atomic write + the settings-updated broadcast)', spend: 'only as its callers allow' },
     { file: 'src/plugins.js', fn: '_writeSettings', re: /this\._settings\.patch\(out\);/, road: 'the plugin manager\'s row writer (its keys = PS.rowPath of PLUGIN_SETTINGS rows; an unknown key throws)', spend: 'the judge\'s budget row only: through the owner\'s page (/api/settings) or the old /config door — both ask ownerPageWhy' },
     { file: 'src/plugins.js', fn: 'migrateConfigToSettings', re: /this\._settings\.patch\(patch\);/, road: 'the plugin manager\'s one-time config → settings move (a boot migration)', spend: 'a server act: moves the stored config as it was — no request' },
     { file: 'src/plugins.js', fn: 'renamePlugin', re: /this\._settings\.patch\(patch\);/, road: 'the plugin manager\'s rename (llm-plugin-rename: plugin.<from>.* → plugin.<to>.*)', spend: 'a server act: carries the stored rows over — no request' },
@@ -147,7 +147,7 @@ console.log('④ EVERY WRITER of the settings file — a grep-derived census, pr
     { file: 'src/server/setting-holds.js', re: /^const write = \(patch\) => \{ ownWrite\+\+; try \{ patchSettings\(patch\); \} finally \{ ownWrite--; \} \};$/, road: 'THE HOLD STORE\'S ONE SETTINGS WRITE (`write`, pick 2 + the check\'s laws): the owner\'s press (timed: after the hold is on disk; lasting: before a live hold is released) and the RETURN (at its moment — a server act — or «End now» from the owner\'s page); marked as the store\'s own, so the hand-write hook never reads it as a hand\'s (test-setting-holds pins its three calls)', spend: 'the three ceilings only (ask-setting PROPOSABLE), a press only from the owner\'s page (ownerPageWhy); a return back to the value before the first press ONLY while the row still holds the hold\'s value (a hand change ends the hold where it lands — law B)' },
     { file: 'src/server/mounts-plugins-wiring.js', re: /readSettings: \(\) => persistenceRouter\.readSettings\(\), patchSettings: \(p\) => persistenceRouter\.patchSettings\(p\),/, road: 'the hold store\'s handle (src/server/setting-holds.js: the row above)', spend: 'the press and the return only' },
   ];
-  const SITE = /\bwriteSettings\(|\bpatchSettings\(|path\.join\(dataDir, 'settings\.json'\)|writeJsonAtomic\(SETTINGS_FILE|SETTINGS_FILE\b.*(write|rename)|this\._settings\.patch\(/;   // f3: + the plugin store's own handle
+  const SITE = /\bwriteSettings\(|\bpatchSettings\(|path\.join\(dataDir, 'settings\.json'\)|writeJsonAtomic\(SETTINGS_FILE|settingsHold\.write\(|SETTINGS_FILE\b.*(write|rename)|this\._settings\.patch\(/;   // f3: + the plugin store's own handle
   const files = [...new Set(require('node:child_process').execFileSync('git', ['ls-files', 'src', 'server.js', 'data/bin'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter((f) => /\.(m?js|cjs)$/.test(f) || /^data\/bin\//.test(f)))];
   const sites = [];
   for (const f of files) {

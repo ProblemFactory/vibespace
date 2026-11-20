@@ -9856,6 +9856,7 @@ export default {
   "new line": "新しい行",
   "the model has no zero-data-retention endpoint — pick the other model in “Model that drafts” below": "選んだモデルにはデータを保持しないエンドポイントがありません — 下の「下書きに使うモデル」で別のモデルを選んでください",
   "today's drafts used their $0.10 — try again tomorrow": "今日の下書き枠（$0.10）を使い切りました — 明日もう一度どうぞ",
+  "the settings could not be read, so the daily limit is not known — try again once they read": "設定を読めないため、1 日の上限が分かりません——設定が読めるようになってから、もう一度お試しください",
   "the LLM plugin's daily limit is spent — try again tomorrow": "LLM プラグインの今日の上限に達しました — 明日もう一度どうぞ",
   "OpenRouter refused the key — check it in Integrations & keys": "OpenRouter がキーを拒否しました — 「連携とキー」で確認してください",
   "OpenRouter says the plan does not allow this model": "OpenRouter によると、このプランではこのモデルを使えません",
