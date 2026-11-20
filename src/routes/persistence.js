@@ -563,6 +563,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       } catch {}
       return res.json({ success: true, desktopId: only, windows: back.size, restoredFrom: saved.at });
     }
+    // B-225b R5: the desktops DAMAGED (bytes that are not a layout) — the WHOLE restore is the person's whole replace: the damaged
+    // bytes set aside under a dated name first, then the point lands as the store's first write (a one-desktop restore stays refused)
+    if (!damagedReplace(req, res, 'layouts')) return;
     // Warm the cache first: a restore issued before anything else read layouts
     // (server restarted while the tab stayed open — the usual sequence right
     // after a layout bug) left _lastGood null, so no rollback point was
@@ -1396,25 +1399,64 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   const readFileJson = (fp) => { try { return JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch { return null; } };
 
+  // ── B-225b (cut 5 — R5, R8): THE STORES BY SECTION — each its hold, its own read (a read asks the start's read) and its read again ──
+  const STORE_SECTIONS = {
+    settings: { hold: settingsHold, read: () => readSettings(), again: (why) => settingsAgain(why) },
+    customThemes: { hold: themesHold, read: () => readCustomThemes(), again: (why) => { _customThemesCache = null; let v = {}; try { v = readCustomThemes(); } catch { } storeWord('store-lifted', { file: 'custom-themes.json', why }); broadcast({ type: 'custom-themes-updated', themes: v }); } },
+    layouts: { hold: layoutsHold, read: () => readLayouts(), again: (why) => layoutsAgain(why) },
+    userState: { hold: userStateHold, read: () => readUserState(), again: (why) => userStateAgain(why) },
+    bookmarks: { hold: bookmarksHold, read: () => readBookmarks(), again: (why) => { _bookmarksCache = null; let v = []; try { v = readBookmarks(); } catch { } storeWord('store-lifted', { file: 'bookmarks.json', why }); broadcast({ type: 'bookmarks-updated', bookmarks: v }); } },
+  };
+  /** the HELD stores among `names` — each asked its read first (a request may be the start's first read) → [{ section, file, kind, code, since, rung }] */
+  const heldSections = (names) => {
+    const out = [];
+    for (const n of names || []) { const st = STORE_SECTIONS[n]; if (!st) continue; try { st.read(); } catch { /* the hold says it */ } const h = st.hold.held(); if (h) out.push({ section: n, ...h }); }
+    return out;
+  };
+  /** R5 — THE DAMAGED DOOR: a person's own WHOLE replace of a store held as `damaged` sets its bytes ASIDE (a dated name) first; the
+   *  replace then lands as the store's first write. A bearer (an agent, a job, a key) never replaces a damaged store. → true to go on */
+  const damagedReplace = (req, res, section) => {
+    const h = STORE_SECTIONS[section].hold.held();
+    if (!h || h.kind !== 'damaged') return true;   // not damaged: the door's own refusal (held) or its plain road (read)
+    if (require('../write-origin.js').pressBearer(req.headers)) { res.status(403).json({ error: `only the person, on this VibeSpace page, replaces ${h.file} — it could not be read (damaged)`, code: 'store_person_only', held: h }); return false; }
+    try { const aside = STORE_SECTIONS[section].hold.setAside(); console.warn(`[persistence] ${h.file} was damaged — set aside as ${path.basename(aside)} for a person's whole replace`); }
+    catch (e) { res.status(500).json({ error: `${h.file} could not be set aside (${(e && (e.code || e.message)) || e}) — nothing was replaced`, code: 'store_set_aside_failed' }); return false; }
+    return true;
+  };
+  // the person's choice of an EMPTY store for a damaged one (R5, beside the rollback point and the import): set aside, then read again
+  router.post('/api/stores/:file/empty', (req, res) => {
+    const section = Object.keys(STORE_SECTIONS).find((k) => path.basename(STORE_SECTIONS[k].hold.file) === String(req.params.file || ''));
+    if (!section) return res.status(404).json({ error: 'no such store', code: 'not_found' });
+    heldSections([section]);
+    const h = STORE_SECTIONS[section].hold.held();
+    if (!h || h.kind !== 'damaged') return res.status(409).json({ error: `${req.params.file} is not damaged — only a store that could not be read as itself starts empty here`, code: 'store_not_damaged', ...(h ? { held: h } : {}) });
+    if (!damagedReplace(req, res, section)) return;
+    STORE_SECTIONS[section].again('set aside — it starts empty');
+    res.json({ success: true, file: h.file, empty: true });
+  });
+
   // What's available to export + entry counts for the dialog
   router.get('/api/config/export-info', (req, res) => {
-    const settings = readSettings();
-    const themes = readCustomThemes();
-    const layouts = readLayouts();
-    const state = readUserState();
-    const bookmarks = readBookmarks();
+    // B-225b R8: a HELD store's section says it could not be read (`unread`, its hold) — never «0», never the defaults' count
+    const heldOf = new Map(heldSections(Object.keys(STORE_SECTIONS)).map((h) => [h.section, h]));
+    const unread = (n) => ({ unread: true, held: heldOf.get(n) });
+    const settings = heldOf.has('settings') ? {} : readSettings();
+    const themes = heldOf.has('customThemes') ? {} : readCustomThemes();
+    const layouts = heldOf.has('layouts') ? {} : readLayouts();
+    const state = heldOf.has('userState') ? {} : readUserState();
+    const bookmarks = heldOf.has('bookmarks') ? [] : readBookmarks();
     res.json({
       sections: {
-        settings: { count: Object.keys(settings).length },
-        customThemes: { count: Object.keys(themes || {}).length },
-        layouts: { count: Object.keys(layouts?.layouts || {}).length + (layouts?.autoSave ? 1 : 0), desktops: (layouts?.desktopMeta || []).length },
-        userState: {
+        settings: heldOf.has('settings') ? unread('settings') : { count: Object.keys(settings).length },
+        customThemes: heldOf.has('customThemes') ? unread('customThemes') : { count: Object.keys(themes || {}).length },
+        layouts: heldOf.has('layouts') ? unread('layouts') : { count: Object.keys(layouts?.layouts || {}).length + (layouts?.autoSave ? 1 : 0), desktops: (layouts?.desktopMeta || []).length },
+        userState: heldOf.has('userState') ? unread('userState') : {
           count: Object.keys(state?.customNames || {}).length + Object.keys(state?.starredSessions || {}).length
             + Object.keys(state?.archivedSessions || {}).length + Object.keys(state?.archivedFolders || {}).length
             + Object.keys(state?.sessionGroups || {}).length + Object.keys(state?.sessionConfigs || {}).length,
           groups: Object.keys(state?.sessionGroups || {}).length,
         },
-        bookmarks: { count: (bookmarks || []).length },
+        bookmarks: heldOf.has('bookmarks') ? unread('bookmarks') : { count: (bookmarks || []).length },
         tasks: { count: (getTasks?.()?.list?.() || []).length, ...(getTasks?.()?.unreadState?.() ? { unread: true } : {}) },   // THE STORE HELD UNREAD (lane bl-windows): never «0 groups» for a store that cannot be read
         pricing: (() => {
           const p = getUsageHistory?.()?.pricingTable?.() || {};
@@ -1441,6 +1483,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // the B-f276 remainder (its read r1, N3): a backup asked to carry the machines while hosts.json is HELD would leave them out in silence
     const hostsHeld = includeSensitive.includes('hosts') && getHosts?.()?.unreadWords?.();
     if (hostsHeld) return res.status(503).json({ error: `the export asks for the machines: ${hostsHeld}`, code: 'hosts-unread' });
+    // B-225b R8: every named section's hold asked FIRST — a held store refuses the export WHOLE by name (a backup that leaves it out,
+    // or carries its defaults, would read as an empty one and be imported over the person's)
+    { const hs = heldSections(Array.isArray(sections) ? sections : []); if (hs.length) return res.status(503).json({ error: `the export was refused: ${hs.map((h) => h.file).join(', ')} could not be read — nothing was exported`, code: 'store_unread', held: hs }); }
     const file = {
       app: 'vibespace-config', version: 1,
       exportedAt: new Date().toISOString(),
@@ -1525,6 +1570,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     { const held = sections.includes('tasks') && file.sections.tasks !== undefined ? getTasks?.()?.unreadRefusal?.('an import of Task Groups') : null; if (held) return res.status(503).json({ error: held, code: 'TASK_GROUPS_UNREAD' }); }   // THE STORE HELD UNREAD: refused WHOLE before any section is applied
     // B-ee0a (its delta read): an import that brings credentials in is the person's — refused WHOLE before any section is written
     if (includeSensitive.length && file.sensitive && !personOnlyDoor(req, res)) return;
+    // B-225b R8 + R5: every named section's hold asked FIRST — a held store that may answer later (unreadable, not allowed) refuses
+    // the import WHOLE by name; a DAMAGED one is the person's whole replace: its bytes set aside under a dated name, then the section
+    // lands as the store's first write
+    const setAsideSaid = [];
+    { const hs = heldSections([].concat(sections).filter((n) => file.sections[n] !== undefined)), later = hs.filter((h) => h.kind !== 'damaged');   // ([].concat: the list as read, whatever its shape — a copy that reads it two ways still fails by ITS law)
+      if (later.length) return res.status(503).json({ error: `the import was refused: ${later.map((h) => h.file).join(', ')} could not be read — nothing was imported`, code: 'store_unread', held: later });
+      for (const h of hs) { if (!damagedReplace(req, res, h.section)) return; setAsideSaid.push(h.file); } }
     const applied = [], held = [];   // held: a section a HELD store refused by its code (the page words it in the reader's language)
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;
@@ -1593,7 +1645,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         applied.push('vsPassword');
       }
     }
-    res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}) });
+    res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}), ...(setAsideSaid.length ? { setAside: setAsideSaid } : {}) });   // held: the sections a held machines list refused; setAside: the damaged stores this import replaced (B-225b)
   });
 
   // B-225b: EVERY door of the desktops and the custom themes answers a held store BY NAME (503 store_unread) — its handlers wrapped

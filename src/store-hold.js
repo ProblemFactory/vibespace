@@ -136,10 +136,21 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function set(next) { if (held) throw unreadError(file, held, 'this change'); value = next; text = null; }
   /** the bytes of the last read, ONCE (null after) — a large store's text is not kept beside its value */
   function takeText() { const t = text; text = null; return t; }
+  /** THE DAMAGED DOOR (R5): a store held as `damaged` (bytes read whole that are not the store — they will not mend) is set ASIDE under
+   *  a dated name, once a person's whole replace asks; the store is then NOT THERE (its first write creates it exclusively). Only for
+   *  `damaged`: an unreadable or not-allowed store may answer later, and nothing is moved over it. → the aside's path */
+  function setAside(when = now()) {
+    if (!held || held.kind !== 'damaged') throw Object.assign(new Error(`${path.basename(file)} is not damaged — only bytes that are not the store are set aside`), { status: 409, code: 'store_not_damaged' });
+    const aside = `${file}.damaged-${new Date(when).toISOString().replace(/[:.]/g, '-')}`;
+    fs.renameSync(file, aside);
+    if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; }
+    held = null; missing = true; value = undefined; text = null; tries = 0;
+    return aside;
+  }
   function stop() { stopped = true; if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; } }
 
   return {
-    readAtStart, readAgain, answer, refuseIfHeld, write, set, takeText, stop,
+    readAtStart, readAgain, answer, refuseIfHeld, write, set, takeText, setAside, stop,
     held: () => (held ? { file: path.basename(file), kind: held.kind, code: held.code, since: held.since, rung: held.rung } : null),
     isMissing: () => missing, file,
   };

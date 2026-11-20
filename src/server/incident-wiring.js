@@ -64,7 +64,7 @@ function _incidentServerState() {
       }))).slice(0, 300),
     };
     out.layoutHistory = ((listLayoutHistory ? listLayoutHistory() : []) || []).slice(0, 40);
-  } catch (e) { out.layout = 'failed: ' + e.message; }
+  } catch (e) { out.layout = e && e.code === 'store_unread' ? { held: e.held || null } : 'failed: ' + e.message; }   // B-225b R8: a HELD layouts.json is recorded as held (never «failed», never an empty desktop)
   // DESKTOP (2.369.118, userW's "Desktop disconnected" bundle carried nothing about
   // the picture server or the bridge): the singleton's last known state, every
   // desktop-app session and the stream bridge's counters.

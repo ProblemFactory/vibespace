@@ -242,7 +242,7 @@ const ROWS = [
   ["src/server/session-stdout.js","*",7,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/session-stdout.js","writeSessionMeta",3,"durable","boot-restore, browser-env, usage-routes, channels liveness, weekly-lanes-unfold, reading-repair (each reads the files itself)","NOT idempotent: a live socket without its meta is restored as a stranger","a session's FIRST meta (a new socket) — its UPDATES go through the store writer"],
   ["src/server/spend-guard.js","*",11,"durable","—","NOT idempotent: money / authority / a credential","the unattended-spend budget + its journal (money) + its birth marker (B-23c3: written after every ledger write, so a removed ledger or an older copy is told apart from a first start) — must be on disk before the answer; B-ef83 +7: the ledger's LOCK (data/spend-budget.lock — authority: a lock lost is two processes counting one ledger): its temp linked into place (or created exclusively and written where the folder makes no hard link), a stale lock set aside and removed, and its removal at the process's exit"],
-  ["src/store-hold.js","*",7,"durable","—","a person's own store (layouts, the conversation list, bookmarks, themes, settings with the spend caps): a lost write is what the person made","THE STORE HOLD (lane lg-store-writes, B-225b): the ONE write of the persistence stores — whole bytes through a pid temp name, an exclusive create for a store read missing; persistence.js's own rows fall as each store moves onto it"],
+  ["src/store-hold.js","*",8,"durable","—","a person's own store (layouts, the conversation list, bookmarks, themes, settings with the spend caps): a lost write is what the person made","THE STORE HOLD (lane lg-store-writes, B-225b): the ONE write of the persistence stores — whole bytes through a pid temp name, an exclusive create for a store read missing; persistence.js's own rows fall as each store moves onto it"],
   ["src/server/stash-handover.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/sync-fs-witness-worker.js","*",1,"not-main","—","—","the witness's watchdog thread (its journal line on fd 2)"],
   ["src/store-exit-keeper.js","*",1,"not-main","—","—","round 4 (MUST 2): the writer's exit keeper thread — its ONE line on fd 2 at the exit's bound, then the process ends"],
@@ -2368,6 +2368,57 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const X = sceneF(mutantCopies('swc-settings-cut', REPO).load(PREL, anchored(PSRC, VIEW_A, "    let v; try { v = settingsHold.answer(); } catch { v = undefined; }   /* MUTANT: the release — settings it could not read are {} */\n", 'settings-cut'), 'settings-cut'), 'eio-red');
       const xv = guardOver(X.P, X.d).authorize({ reason: 'auto-resume', identity: who, cid: 'conv-f', now: Date.now() });
       ok(xv && xv.why !== 'settings-unread', 'CONTROL (the hold\'s answer cut, in a copy — the release): the settings it could not read are handed to the spend guard as {} — the unattended turn is judged on the DEFAULT caps, never «not now» (red)', xv && { ok: xv.ok, why: xv.why });
+    }
+    // (g) THE DOORS THAT SPAN STORES + THE DAMAGED DOOR (cut 5 — R5, R8): the config export asks every named section's hold FIRST and
+    // refuses WHOLE by name; its info says a held section «could not be read» (never a count); the import refuses WHOLE for a held
+    // section that may answer later, and for a DAMAGED one is the person's whole replace (the bytes set aside under a dated name, the
+    // section the store's first write); a bearer never replaces a damaged store; a damaged store may start EMPTY by the person's door.
+    // RED (anchored, in a copy): the import's first ask cut — a section of the import lands while another is held (partly imported).
+    {
+      const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+      const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
+      const sceneG = (P, tag, files) => {
+        const d = scratchDir('hold-g-' + tag); roots.push(d);
+        for (const [n, b] of Object.entries(files)) fs.writeFileSync(path.join(d, n), b);
+        P.setup({ dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
+        const call = async (method, p, body, { params = {}, headers = {} } = {}) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; }, set() { return res; }, setHeader() { } }; await handler(method, p)({ body, query: {}, params, headers }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
+        return { d, call, P, f: (n) => path.join(d, n) };
+      };
+      const SET = JSON.stringify({ 'appearance.theme': 'the person\'s' }), LAY = JSON.stringify({ current: null, autoSave: null, saved: {}, customGrids: [{ rows: 2, cols: 2 }] });
+      const IMP = (sections) => ({ file: { app: 'vibespace-config', version: 1, sections }, sections: Object.keys(sections), includeSensitive: [] });
+      // a store that could not be READ (EIO at the start): the export and the import refuse WHOLE; the info says «could not be read»
+      const G = sceneG(freshP(), 'eio', { 'settings.json': SET, 'layouts.json': LAY });
+      failing(G.f('layouts.json'), 'EIO', () => { try { G.P.router.readLayouts(); } catch { } });
+      const info = await G.call('get', '/api/config/export-info'), ex = await G.call('post', '/api/config/export', { sections: ['settings', 'layouts'] });
+      const im = await G.call('post', '/api/config/import', IMP({ settings: { 'appearance.theme': 'an imported one' }, layouts: { current: null, autoSave: null, saved: {}, customGrids: [] } }));
+      ok(info.status === 200 && info.body.sections.layouts.unread === true && info.body.sections.layouts.held.file === 'layouts.json' && typeof info.body.sections.settings.count === 'number'
+        && ex.status === 503 && ex.body.code === 'store_unread' && ex.body.held[0].file === 'layouts.json' && im.status === 503 && im.body.code === 'store_unread'
+        && fs.readFileSync(G.f('settings.json'), 'utf8') === SET && fs.readFileSync(G.f('layouts.json'), 'utf8') === LAY,
+        '⑪ (g) a store the start could not READ: the export and the import refuse WHOLE by name (no section of the import lands — the settings untouched too), the export\'s info says the section could not be read', { info: info.body && info.body.sections.layouts, ex: ex.status, im: im.status });
+      // a DAMAGED store: the import is the person's whole replace — set aside under a dated name, then the section lands; a bearer is refused
+      const DMG = '{"customNames": {"claude:x": "torn';
+      const D2 = sceneG(freshP(), 'dmg', { 'user-state.json': DMG });
+      const bearer = await D2.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'an imported name' } } }), { headers: { authorization: 'Bearer vsst_aaaa' } });
+      const keptAfterBearer = fs.readFileSync(D2.f('user-state.json'), 'utf8') === DMG;
+      const person = await D2.call('post', '/api/config/import', IMP({ userState: { customNames: { 'claude:y': 'an imported name' } } }));
+      const aside = fs.readdirSync(D2.d).filter((n) => n.startsWith('user-state.json.damaged-'));
+      ok(bearer.status === 403 && bearer.body.code === 'store_person_only' && keptAfterBearer && person.status === 200 && Array.isArray(person.body.setAside) && person.body.setAside[0] === 'user-state.json'
+        && aside.length === 1 && fs.readFileSync(path.join(D2.d, aside[0]), 'utf8') === DMG && JSON.parse(fs.readFileSync(D2.f('user-state.json'), 'utf8')).customNames['claude:y'] === 'an imported name',
+        '⑪ (g) a DAMAGED store: the import is the person\'s whole replace — its bytes set aside under a dated name (kept whole), the section lands as the first write; a bearer is refused by name and nothing moves', { bearer: bearer.status, person: person.status, aside });
+      // the person's EMPTY store for a damaged one; an unreadable one is not «damaged» (409)
+      const E2 = sceneG(freshP(), 'empty', { 'bookmarks.json': '[{"label": "torn' });
+      const em = await E2.call('post', '/api/stores/:file/empty', {}, { params: { file: 'bookmarks.json' } }), bg = await E2.call('get', '/api/bookmarks');
+      const E3 = sceneG(freshP(), 'empty-eio', { 'bookmarks.json': '[]' });
+      const ne = await (async () => { let r; const rf = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (String(f) === E3.f('bookmarks.json')) throw Object.assign(new Error('EIO: a stand-in'), { code: 'EIO' }); return rf.call(this, f, ...a); }; try { r = await E3.call('post', '/api/stores/:file/empty', {}, { params: { file: 'bookmarks.json' } }); } finally { fs.readFileSync = rf; } return r; })();
+      ok(em.status === 200 && em.body.empty === true && fs.readdirSync(E2.d).some((n) => n.startsWith('bookmarks.json.damaged-')) && bg.status === 200 && Array.isArray(bg.body) && bg.body.length === 4 && ne.status === 409 && ne.body.code === 'store_not_damaged' && fs.readFileSync(E3.f('bookmarks.json'), 'utf8') === '[]',
+        '⑪ (g) the person\'s EMPTY store for a damaged one: set aside, then the defaults (nothing written until a change); a store that could not be READ is not damaged — refused 409, nothing moved', { em: em.status, bg: bg.status, ne: ne.status });
+      const ASK_A = "      if (later.length) return res.status(503).json({ error: `the import was refused: ${later.map((h) => h.file).join(', ')} could not be read — nothing was imported`, code: 'store_unread', held: later });\n";
+      ok(PSRC.split(ASK_A).length === 2, 'control setup: the import\'s first ask of every section\'s hold is found once in src/routes/persistence.js');
+      const XG = sceneG(mutantCopies('swc-import-ask-cut', REPO).load(PREL, anchored(PSRC, ASK_A, "      /* MUTANT: no first ask */\n", 'import-ask-cut'), 'import-ask-cut'), 'eio-red', { 'settings.json': SET, 'layouts.json': LAY });
+      failing(XG.f('layouts.json'), 'EIO', () => { try { XG.P.router.readLayouts(); } catch { } });
+      try { await XG.call('post', '/api/config/import', IMP({ settings: { 'appearance.theme': 'an imported one' }, layouts: { current: null, autoSave: null, saved: {}, customGrids: [] } })); } catch { /* the held layouts' own refusal, thrown after the settings landed */ }
+      ok(fs.readFileSync(XG.f('settings.json'), 'utf8') !== SET, 'CONTROL (the import\'s first ask cut, in a copy): the settings section lands while the desktops are held — a PART of the import, the rest refused (red)');
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
