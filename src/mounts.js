@@ -2792,7 +2792,9 @@ class MountManager {
    *  saved again (a re-paste) keeps the client it already names — only another token clears it. */
   static setMinted(m, x, tok) {
     const mc = MountManager.mintClientOf(m, x, tok);
-    if (x && typeof x.clientSwapCheck === 'function') x.clientSwapCheck().catch(() => { });   // B-e40d: who is counted may change (it runs after this save's code)
+    // B-e40d: who is counted may change. The check runs in a LATER microtask: setMinted is synchronous, so the record is complete
+    // by then — an await inside setMinted would break that (the check would read the record half-written)
+    if (x && typeof x.clientSwapCheck === 'function') x.clientSwapCheck().catch(() => { });
     if (mc) { m.mintedClient = mc; return; }
     let prev = null; try { const se = MountManager._sealedTokenOf(m); prev = se ? MountManager._rtOf(x._dec(se)) : null; } catch { prev = null; }
     if (!m.clientId && m.mintedClient && prev && prev === MountManager._rtOf(tok)) return;

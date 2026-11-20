@@ -9060,6 +9060,7 @@ export default {
   "Files written into {path} while storage {name} was disconnected were moved to {dest} — nothing was deleted": "ストレージ {name} の切断中に {path} へ書き込まれたファイルを {dest} に移動しました — 何も削除していません",
   "Storage: the preset «{preset}» signs in with another OAuth client now — {n} mount(s) still on the old one; re-authorize each": "ストレージ：プリセット「{preset}」は別の OAuth クライアントでサインインするようになりました——{n} 件のマウントがまだ古いクライアントです。それぞれ再認証してください",
   "These mounts keep refreshing with the client they signed in with until it is deleted: {names}.": "これらのマウントは、削除されるまでサインイン時のクライアントで更新を続けます：{names}。",
+  "These mounts keep refreshing with the client they signed in with until it is deleted: {names} and {more} more.": "これらのマウントは、削除されるまでサインイン時のクライアントで更新を続けます：{names}、ほか {more} 件。",
   "Re-authorize opens the first; this item resolves when none is left.": "「再認証…」で最初のものを開きます。すべて済むとこの項目は自動で消えます。",
   "Re-authorize…": "再認証…",
   "Open the first mount's Re-authorize — sign in again under the preset's new client": "最初のマウントの再認証を開きます——プリセットの新しいクライアントでサインインし直します",

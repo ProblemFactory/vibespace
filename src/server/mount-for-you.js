@@ -32,6 +32,16 @@ const STRANDED = i18nKey('Files written into {path} while storage {name} was dis
 const SWAP_TYPE = 'mount-reauth';
 const SWAP = i18nKey('Storage: the preset «{preset}» signs in with another OAuth client now — {n} mount(s) still on the old one; re-authorize each');
 const SWAP_L1 = i18nKey('These mounts keep refreshing with the client they signed in with until it is deleted: {names}.');
+// a preset with MANY mounts: whole names only, then the count of the rest (the store keeps a param's first 600 characters — a
+// list cut there would end mid-name), as ONE sentence of its own
+const SWAP_L1_MORE = i18nKey('These mounts keep refreshing with the client they signed in with until it is deleted: {names} and {more} more.');
+const SWAP_NAMES_MAX = 560;
+/** The names the item shows: whole names, in order, while the list fits its room (at least one) → {names, more}. */
+const namesOf = (need) => {
+  const out = []; let len = 0;
+  for (const r of need) { const n = String(r.name); const add = (out.length ? 2 : 0) + n.length; if (out.length && len + add > SWAP_NAMES_MAX) break; out.push(n); len += add; }
+  return { names: out.join(', '), more: need.length - out.length };
+};
 const SWAP_L2 = i18nKey('Re-authorize opens the first; this item resolves when none is left.');
 const { clientSwapStep } = require('../client-swap-step.js');
 
@@ -143,9 +153,10 @@ function create({ getUserTodos, mountCount = () => 0, log = () => { }, onReopen 
         const step = clientSwapStep(m ? { to: m.to, named: m.named, open: isOpen(m.itemId) } : null, g.to, need.map((r) => r.id));
         let itemId = step.supersede || !m || m.to !== g.to ? null : m.itemId, sig = m && m.to === g.to ? m.sig : '';
         if (step.act === 'file' || step.act === 'redraw') {
-          const params = { preset: String(g.preset || k || 'default'), n: need.length }, names = need.map((r) => r.name).join(', ');
-          const text = fill(SWAP, params), detail = `${fill(SWAP_L1, { names })}\n${SWAP_L2}`;
-          const i18n = { text: { key: SWAP, params }, detail: [{ key: SWAP_L1, params: { names } }, { key: SWAP_L2, params: {} }] };
+          const params = { preset: String(g.preset || k || 'default'), n: need.length }, shown = namesOf(need);
+          const L1 = shown.more ? SWAP_L1_MORE : SWAP_L1, p1 = shown.more ? { names: shown.names, more: shown.more } : { names: shown.names };
+          const text = fill(SWAP, params), detail = `${fill(L1, p1)}\n${SWAP_L2}`;
+          const i18n = { text: { key: SWAP, params }, detail: [{ key: L1, params: p1 }, { key: SWAP_L2, params: {} }] };
           const action = { type: SWAP_TYPE, mountId: need[0].id };
           const want = JSON.stringify([text, detail, action.mountId]);
           if (step.act === 'file') {
