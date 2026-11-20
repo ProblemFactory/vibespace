@@ -23,7 +23,7 @@ import { LayoutManager } from './layout.js';
 import { ChatView } from './chat-view.js';
 import { createReconnectQueue } from './reconnect-queue.js';
 import { Resizer } from './resizer.js';
-import { anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
+import { heldWordsOf, anchorFixedPopup, drawnAnchorRect, api, configureToasts, registerSettingLinks, createPopover, createModalShell, fetchJson, initStateSync, installLongPressContextMenu, frontTruncate, escHtml, showContextMenu, showToast, showConfirmDialog, showInputDialog, applyUiPrefs, uiScale, setInstanceUrl, markTyped, wasTyped, announceModal } from './utils.js';
 import { askTails, withTails, credentialDoorWords } from './account-tails.js'; // B-ba7d: the accounts list carries no key tail — the person's read lays it on
 import { t, tc, resolveLang } from './i18n.js';
 import { stampAt as when, clockOf } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
@@ -1100,7 +1100,7 @@ class App {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sections, includeSensitive, passphrase, clientPrefs, ...(includeSensitive.length && info.sensitive.secondPassword ? { secondPassword: passRow.querySelector('#cfg-exp-second')?.value || '' } : {}) }),
         });
-        if (!res.ok) { const d = await res.json().catch(() => ({})); err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (credentialDoorWords(d) || d.error || t('Export failed')); return; }   // THE STORE HELD UNREAD: the page's own words
+        if (!res.ok) { const d = await res.json().catch(() => ({})); err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (heldWordsOf(d) || credentialDoorWords(d) || d.error || t('Export failed')); return; }   // THE STORE HELD UNREAD: the page's own words
         const blob = await res.blob();
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -1202,7 +1202,7 @@ class App {
             body: JSON.stringify({ file, sections, includeSensitive, passphrase }),
           });
           const d = await res.json().catch(() => ({}));
-          if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (credentialDoorWords(d) || d.error || t('Import failed')); return; }
+          if (!res.ok) { err.textContent = d.code === 'TASK_GROUPS_UNREAD' ? t("Task Groups cannot be read right now — nothing was recorded. For you says why and what to do.") : (heldWordsOf(d) || credentialDoorWords(d) || d.error || t('Import failed')); return; }
           if (d.clientPrefs) {
             for (const [k, v] of Object.entries(d.clientPrefs)) {
               if (CLIENT_PREF_KEYS.includes(k)) localStorage.setItem(k, v);

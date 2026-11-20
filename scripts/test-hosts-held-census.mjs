@@ -611,7 +611,7 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const wordsOf = (src) => {
     const i = src.indexOf('export function hostsHeldWords() {'), j = src.indexOf('\n}\n', src.indexOf('function refusalWords(body) {'));
     if (i < 0 || j < 0) return null;
-    return new Function('t', `${src.slice(i, j + 2).replace('export function', 'function')}\nreturn refusalWords;`)((k) => `«${k}»`);   // eslint-disable-line no-new-func
+    return new Function('t', `${src.slice(i, j + 2).replaceAll('export function', 'function')}\nreturn refusalWords;`)((k) => `«${k}»`);   // eslint-disable-line no-new-func
   };
   const HELD = { error: 'removing a machine: hosts.json in VibeSpace\'s data folder could not be read (EACCES); …', code: 'hosts-unread' };
   const RW = wordsOf(U), w = RW && RW(HELD), other = RW && RW({ error: 'no such machine', code: 'not-found' });
@@ -639,6 +639,7 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
   const ANS = {
     '/api/machine-mounts/h-0001': { status: 503, body: MHELD },
     '/api/hosts/h-0001': { status: 503, body: { error: 'removing a machine: hosts.json in VibeSpace\'s data folder could not be read (EACCES); …', code: 'hosts-unread' } },
+    '/api/hosts/h-0002': { status: 503, body: { error: 'removing a machine: machine-mounts.json in VibeSpace\'s data folder could not be read (EACCES); …', code: 'mounts-unread' } },
     '/api/machine-mounts/mm-1/remount': { status: 400, body: { error: 'machine is offline — start its daemon first', code: 'machine_offline_start' } },
   };
   const doorsSay = async (src) => {
@@ -652,8 +653,35 @@ console.log('§8 the page words `hosts-unread` itself: a usage refresh, the dial
     return out;
   };
   const ds = await doorsSay(MDS), dsx = await doorsSay(anchored(MDS, HW, '  const worded = d.code', 'hhc-8m2'));
-  ok(JSON.stringify(ds) === JSON.stringify([`«${MSENT}»`, `«${SENT}»`, '«machine_offline_start»']) && JSON.stringify(dsx) === JSON.stringify([MHELD.error, ANS['/api/hosts/h-0001'].body.error, '«machine_offline_start»']),
-    'the mount doors\' one api(): a mount refused while machine-mounts.json is held and a machine\'s removal while hosts.json is held say the page\'s sentence (by the hold\'s code, on any route); a coded mount refusal keeps B-af94\'s words; CONTROL (the hold branch cut, in a copy): the hub\'s English for both — RED', { ds, dsx });
+  ok(JSON.stringify(ds) === JSON.stringify([`«${MSENT}»`, `«${SENT}»`, `«${MSENT}»`, '«machine_offline_start»']) && JSON.stringify(dsx) === JSON.stringify([MHELD.error, ANS['/api/hosts/h-0001'].body.error, ANS['/api/hosts/h-0002'].body.error, '«machine_offline_start»']),
+    'the mount doors\' one api(): a mount refused while machine-mounts.json is held and a machine\'s removal while hosts.json OR machine-mounts.json is held say the page\'s sentence (by the hold\'s code, on any route); a coded mount refusal keeps B-af94\'s words; CONTROL (the hold branch cut, in a copy): the hub\'s English for both — RED', { ds, dsx });
+  const HOH = 'export function heldWordsOf(d) {';
+  const heldOf = (src) => { const i = src.indexOf('export function hostsHeldWords() {'), k = src.indexOf(HOH), j = k < 0 ? -1 : src.indexOf('\n', k);
+    if (i < 0 || j < 0) return null;
+    return new Function('t', `${src.slice(i, j).replaceAll('export function', 'function')}\nreturn heldWordsOf;`)((s) => `«${s}»`); };   // eslint-disable-line no-new-func
+  const HO = heldOf(U), HOX = heldOf(anchored(U, "d && d.code === 'mounts-unread' ? mountsHeldWords() : null; }", 'null; }', 'hhc-8m3'));
+  const ho = HO && [HO({ code: 'hosts-unread', error: 'x' }), HO({ code: 'mounts-unread', error: 'x' }), HO({ code: 'no_dav_path', error: 'x' }), HO(null)];
+  ok(!!ho && JSON.stringify(ho) === JSON.stringify([`«${SENT}»`, `«${MSENT}»`, null, null]) && !!HOX && HOX({ code: 'mounts-unread' }) === null,
+    'heldWordsOf: a hold\'s code (machines, mounts) → the page\'s sentence; another code or none → null (its own words stand); CONTROL (the mounts branch cut, in a copy): a mounts hold is not worded — RED', { ho });
+  // the pages that fetch by hand: each refusal line asks heldWordsOf first (the exit runs and device activity dialogs; Settings' config export and import)
+  const HAND = [['src/lib/exit-runs-dialog.js', 1], ['src/lib/device-acts-dialog.js', 1], ['src/lib/app.js', 2]].map(([f, n]) => { const t = fs.readFileSync(path.join(ROOT, f), 'utf8'); return { f, want: n, got: (t.match(/throw new Error\(heldWordsOf\(d\) \|\| d\.error \|\| `HTTP \$\{res\.status\}`\)|\(heldWordsOf\(d\) \|\| credentialDoorWords\(d\) \|\| d\.error/g) || []).length, bare: (t.match(/throw new Error\(d\.error \|\| `HTTP \$\{res\.status\}`\)|: \(credentialDoorWords\(d\) \|\| d\.error/g) || []).length }; });
+  ok(HAND.every((h) => h.got === h.want && h.bare === 0), 'the pages that fetch by hand word a hold first (heldWordsOf) — the exit runs dialog, the device activity dialog, Settings\' config export and import; none shows the hub\'s English for it', HAND);
+  // graduate-dial (Remove dial-out): its handler, compiled from its source, over a HELD machines list — 503 with the hold's name, so the page words it
+  const PW = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const GH = "app.post('/api/hosts/:id/graduate-dial', async (req, res) => {", GC = "  } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (the page words it)";
+  const gi = PW.indexOf(GH), gj = gi < 0 ? -1 : PW.indexOf('\n});\n', gi);
+  ok(gi > 0 && gj > gi && PW.slice(gi, gj).split(GC).length === 2, 'control setup: graduate-dial\'s handler and its catch are in mounts-plugins-wiring.js');
+  const gradOf = async (src) => {
+    const i = src.indexOf(GH), j = src.indexOf('\n});\n', i);
+    const held = { get: () => { throw Object.assign(new Error('graduating a machine: hosts.json in VibeSpace\'s data folder could not be read (EACCES); …'), { code: 'hosts-unread', status: 503 }); } };
+    // eslint-disable-next-line no-new-func
+    const h = new Function('hosts', `return (${src.slice(i + "app.post('/api/hosts/:id/graduate-dial', ".length, j + 2)});`)(held);
+    let out = null; const res = { status(c) { this.code = c; return this; }, json(b) { out = { status: this.code, ...b }; return this; } };
+    await h({ params: { id: 'h-0001' }, body: {}, headers: {} }, res); return out;
+  };
+  const gd = await gradOf(PW), gdx = await gradOf(anchored(PW, GC, '  } catch (e) { res.status(400).json({ error: e.message }); }', 'hhc-8m4'));
+  ok(!!gd && gd.status === 503 && gd.code === 'hosts-unread' && !!gdx && gdx.status === 400 && !gdx.code,
+    'Remove dial-out (graduate-dial) while the machines list is held: 503 with the hold\'s name, so the page words it; CONTROL (the bare 400 put back, in a copy): a «400» with no name, the hub\'s English on the page — RED', { gd, gdx });
   for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify(MSENT) + ':'), `the mounts hold's sentence has its ${lang} row`);
 }
 

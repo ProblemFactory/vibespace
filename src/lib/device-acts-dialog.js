@@ -7,7 +7,7 @@
 // string of a line is textContent (judged again by the PURE row rule) — never innerHTML.
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
-import { createModalShell, showToast } from './utils.js';
+import { createModalShell, showToast, heldWordsOf } from './utils.js';
 import { rowOf, kindOf, BY_KINDS } from '../device-acts.js';
 import { nameOrGone } from './plain-words.js';
 
@@ -173,7 +173,7 @@ export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
     try {
       const res = await fetch(`/api/hosts/${encodeURIComponent(hostId)}/device-acts?${q}`);
       d = await res.json().catch(() => ({}));
-      if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+      if (!res.ok || d.error) throw new Error(heldWordsOf(d) || d.error || `HTTP ${res.status}`);   // a hold by its code: the page's sentence
     } catch (e) {
       body.textContent = t('Could not load the activity') + (e && e.message ? ` — ${e.message}` : '');
       showToast(t('Could not load the activity'), { type: 'error' });

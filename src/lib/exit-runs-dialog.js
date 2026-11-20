@@ -8,7 +8,7 @@
 // of a run (the command, the output, a conversation's name) is textContent — never innerHTML.
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
-import { createModalShell, showToast, copyText } from './utils.js';
+import { createModalShell, showToast, copyText, heldWordsOf } from './utils.js';
 import { runRow, spawnFailureText, platformLabel, RUNS_DEFAULT, EXIT_RUN_TIMEOUT_MS, fmtBytes } from '../exit-reach.js';
 import { encodedCommandOf } from '../encoded-command.js'; // lane machine-card-fold: a PowerShell -EncodedCommand row reads as its script
 import { revealHidden } from '../hidden-chars.js';
@@ -146,7 +146,7 @@ export async function openExitRunsDialog(app, { hostId, name = '' } = {}) {
   try {
     const res = await fetch(`/api/hosts/${encodeURIComponent(hostId)}/exit-runs?limit=${RUNS_DEFAULT}`);
     d = await res.json().catch(() => ({}));
-    if (!res.ok || d.error) throw new Error(d.error || `HTTP ${res.status}`);
+    if (!res.ok || d.error) throw new Error(heldWordsOf(d) || d.error || `HTTP ${res.status}`);   // a hold by its code: the page's sentence
   } catch (e) {
     unhook();
     body.textContent = t('Could not load the command list') + (e && e.message ? ` — ${e.message}` : '');

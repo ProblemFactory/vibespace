@@ -1902,6 +1902,9 @@ export function hostsHeldWords() { return t('VibeSpace cannot read its paired ma
 /** …and its machines' MOUNTS (machine-mounts.json could not be read — 503 `mounts-unread`): ONE sentence the page words by code — a
  *  mount's add, remove and mount-again, a machine's removal (the stores chain's read on 921c0de17: they showed the hub's English). */
 export function mountsHeldWords() { return t('VibeSpace cannot read the machines’ mounts right now — nothing was changed. Try again in a few minutes (it reads them again by itself).'); }
+/** A refusal answered BY A HOLD (its code: `hosts-unread` / `mounts-unread`) → the page's sentence; any other answer → null (its own words
+ *  stand). For the pages that fetch by hand (the exit runs and device activity dialogs, Settings' config export and import). */
+export function heldWordsOf(d) { return d && d.code === 'hosts-unread' ? hostsHeldWords() : d && d.code === 'mounts-unread' ? mountsHeldWords() : null; }
 function refusalWords(body) {
   if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };   // the server's words kept as `said`
   if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };

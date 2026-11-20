@@ -539,7 +539,7 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
     if (serverUrl && !req.body?.viaRelay) { const v = require('../dial-facts.js').dialBaseVerdict(serverUrl); if (!v.ok) return res.status(400).json({ error: `not an address the machine can dial (${v.code})`, code: 'bad_base', why: v.code }); serverUrl = v.base; }
     const out = await graduateHostToDial(h, { serverUrl, viaRelay: req.body?.viaRelay, by: require('../device-audit.js').byOfReq(req), from: (req.socket && req.socket.remoteAddress) || '' });
     res.json(out);
-  } catch (e) { res.status(400).json({ error: e.message }); }
+  } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (the page words it)
 });
 
 // ── PAIRING (lane-pairing ①②③, B-7007; the owner's MacBook 2026-09-27) ──

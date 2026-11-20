@@ -135,7 +135,7 @@ console.log('④ the owner\'s finish line names who landed (DOM-free)');
 {
   const esbuild = require('esbuild');
   const STUBS = {
-    'utils.js': 'export const createModalShell = () => null, showToast = () => {}, copyText = () => {}, escHtml = (s) => String(s);',
+    'utils.js': 'export const createModalShell = () => null, showToast = () => {}, copyText = () => {}, escHtml = (s) => String(s), hostsHeldWords = () => "", mountsHeldWords = () => "";',   // + the two hold sentences mounts-dialog.js words a hold with
     'path-field.js': 'export const pathField = (el) => ({ el, input: el });',   // lane path-field: THE path field (was autocomplete.js)
     // B-af94: mounts-dialog.js words a mounts route's refusal in the reader's language (resolveLang beside t)
     'i18n.js': 'export const resolveLang = () => \'en\'; export const t = (s, p) => { const v = (globalThis.__I18N && globalThis.__I18N[s]) || s; return p ? v.replace(/\\{(\\w+)\\}/g, (m, k) => (k in p ? String(p[k]) : m)) : v; };',
