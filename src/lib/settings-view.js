@@ -237,6 +237,9 @@ export const IN_FORCE_UNSET = 'unset';
 /** The row's save mark: 'typed' «Not saved yet — press Enter or leave the field» (the field differs from the store; nothing
  *  is stored) → 'pending' / 'saving' «Saving…» (committed; the debounce, then the POST) → 'saved' «Saved» — it STAYS
  *  until the next edit | 'failed'; a Spending row adds the number in force (`inForce`, see inForceOf). '' = nothing. */
+/** THE WINDOW'S FOOT (B-225b, 主开发 2026-11-20 12:54Z, pictures A4 / B1): «every change saves as you make it» is false while the
+ *  settings are HELD — the foot then says nothing (the strip and the rows say the hold); otherwise its rule. PURE. */
+export function footWords(held, t = (s) => s) { return held ? '' : t('Every change here saves as you make it — there is nothing to press at the end.'); }
 export function saveMarkWords(state, t = (s) => s, { inForce = null, refused = null, held = false } = {}) {
   // the exit check (主开发 17:04Z): a value the server set aside — the reason AT THE ROW, by its code, in the page's language
   if (state === 'refused') return refused && refused.code === 'exit_url_invalid' ? t('Not saved — the exit check address must be a public https address with no user name or password in it; the stored one is kept') : t('Not saved — the server refused this value ({code}); the stored one is kept', { code: String((refused && refused.code) || '?') });

@@ -195,6 +195,26 @@ const liftScene = (SM) => settingsScene(SM, async ({ sm, W, advance }) => {
   const lb = lifted.posts[0] || {};
   ok(lifted.boot.landed === false && lifted.boot.held === 'settings.json' && lifted.boot.shows === 'this page\'s old copy' && lifted.posts.length === 1 && lb[P] === false && lb['x.server'] === 'the server\'s own value' && !('x.pageOnly' in lb) && lifted.landed === true && lifted.state === 'saved',
     'a page that booted during the hold SHOWS its own copy, but its first save asks the hub first: the change lands on the hub\'s settings (the old copy\'s rows stay unwritten)', J(lifted));
+  // THE LIFT (主开发 12:54Z, picture B2): a LANDED page's change refused by a hold past its rungs, then the hold ends (the hub's whole
+  // settings broadcast) — the row reads the STORED value again and its «not now … right now» mark leaves; the window hears which rows
+  const liftScene2 = (SM) => settingsScene(SM, async ({ sm, W, advance }) => {
+    W.hub = 'ok'; await sm.load();   // landed
+    W.hub = 'held-said'; sm.set(P, false); await advance(600);   // refused by the hold: the row «Not now»
+    const during = { state: sm.saveStateOf(P), byHold: sm.failHeldOf(P), shows: sm.get(P) };
+    const heard = []; sm.onLift((paths) => heard.push(...paths));
+    W.hub = 'ok'; sm.applyRemote({ ...W.server });   // the lift's settings-updated: the hub's whole state
+    return { during, state: sm.saveStateOf(P), byHold: sm.failHeldOf(P), shows: sm.get(P), heard, posts: W.posts.length, held: sm.held };
+  });
+  const lf = await liftScene2(SettingsManager);
+  ok(lf.during.state === 'failed' && lf.during.byHold === true && lf.during.shows === false && lf.state === 'idle' && lf.byHold === false && lf.shows === true && J(lf.heard) === J([P]) && lf.posts === 0 && lf.held === null,
+    'THE LIFT: a row a hold refused («Not now», the person\'s value shown) reads the STORED value again once the hold is over and its mark leaves — no «right now» after the hold, no value shown that is not stored, and the refused change is NOT saved silently; the window hears the rows to redraw', J(lf));
+  const CTLL = await esmCopy('src/lib/settings.js', anchored(read('src/lib/settings.js'), "    this._liftHeld();   // B-225b: the server's whole state is here again — the rows a hold refused read it (no «right now» after the hold)\n", '', 'the lift in applyRemote'), 'no-lift');
+  const lfx = await liftScene2(CTLL.SettingsManager);
+  ok(lfx.state === 'failed' && lfx.byHold === true && J(lfx.heard) === '[]', 'CONTROL (the lift cut, in a copy): after the hold the row still says «not now … cannot read your settings right now» — of a hold that ended — and the window is never told to redraw it, so its box keeps the person\'s refused value (red)', J(lfx));
+  // THE WINDOW'S FOOT: «every change saves as you make it» is not said while the settings are held
+  ok(V.footWords({ file: 'settings.json' }, (x) => x) === '' && /^Every change here saves as you make it/.test(V.footWords(null, (x) => x))
+    && /const words = footWords\(this\.settings\.held, t\);/.test(read('src/lib/settings-ui.js')) && (read('src/lib/settings-ui.js').match(/this\._drawFoot\(\);/g) || []).length >= 4,
+    'THE WINDOW\'S FOOT: while the settings are held it says nothing (its rule is false then); the window redraws it at every draw, every save state and the lift');
   const bc = await settingsScene(SettingsManager, async ({ sm, W, advance }) => {
     await sm.load();
     sm.applyRemote({ ...W.server, 'x.fromLift': 1 }); W.hub = 'ok';   // the lift's settings-updated: the hub's WHOLE state

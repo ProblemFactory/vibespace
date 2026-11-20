@@ -47,6 +47,7 @@ class SettingsManager {
     this.onHeld = null;      // (held, { refused: [paths] }?) → the page's ONE strip, and «not now» said for a refused save (app.js)
     this._failHeld = new Set();   // the failed paths a HOLD refused (past its silent rungs): their row says «Not now», never «the server did not answer»
     this._landListeners = new Set();
+    this._liftListeners = new Set();
   }
 
   /** a read of the server's settings LANDED on this page (B-225b R4) */
@@ -67,6 +68,28 @@ class SettingsManager {
   _noteHeld(h, refused = null) { this.held = h; try { this.onHeld?.(h, refused && refused.length ? { refused } : undefined); } catch { /* the strip's own */ } }
   /** a failed path's save was refused by a HOLD (its row says «Not now») */
   failHeldOf(path) { return this._failHeld.has(path); }
+  /** fn(paths) when a hold ends on this page: the rows a hold refused read the stored value again (the Settings window redraws them)
+   *  → the unsubscribe */
+  onLift(fn) { if (typeof fn !== 'function') return () => {}; this._liftListeners.add(fn); return () => this._liftListeners.delete(fn); }
+  /** THE LIFT (主开发 2026-11-20 12:54Z, picture B2): the hold is over, so no row keeps a value that is not stored under «not now
+   *  … right now». Each row a hold refused takes the STORED value again and its mark leaves — the person's refused change is not
+   *  saved silently; it was said refused, and the row now shows what holds. Called once the server's state is here again. */
+  _liftHeld() {
+    this.held = null;
+    if (!this._failHeld.size) return;
+    const paths = [...this._failHeld];
+    this._failHeld.clear();
+    for (const p of paths) {
+      this._failed.delete(p); this._saved.delete(p);
+      if (this._dirty.has(p) || this._inflight.has(p)) continue;   // a newer change of the row is on its way: it speaks
+      const was = this.get(p);
+      if (p in this._server) this._values[p] = this._server[p]; else delete this._values[p];
+      const now = this.get(p);
+      if (JSON.stringify(was) !== JSON.stringify(now)) this._notify(p, now, was);
+    }
+    this._emitSave(paths);
+    for (const fn of [...this._liftListeners]) { try { fn(paths); } catch (e) { console.error('Settings lift listener error:', e); } }
+  }
   /** THE LANDING: the server's state replaces this page's copy — the person's acts the debounce still holds ride on it */
   _landOn(doc, { spend = null } = {}) {
     const fresh = doc && typeof doc === 'object' && !Array.isArray(doc) ? doc : {};
@@ -76,7 +99,8 @@ class SettingsManager {
     this._server = { ...fresh };
     this._live = spend && typeof spend === 'object' ? { spend } : null;
     const first = !this._landed;
-    this._landed = true; this.held = null;
+    this._landed = true;
+    this._liftHeld();
     if (first) for (const fn of [...this._landListeners]) { try { fn(); } catch (e) { console.error('Settings land listener error:', e); } }
   }
   /** every path whose value moved since `old` (the copy before a landing) is told */
@@ -138,6 +162,7 @@ class SettingsManager {
       const fresh = r.doc;
       if (!this._landed) { const old = { ...this._values }; this._landOn(fresh); this._emitAllMarks(); this._notifyMoved(old); return; }   // B-225b: the first landing
       this._server = { ...fresh };
+      this._liftHeld();   // B-225b: a hold this page met is over — the rows it refused read the stored value again
       this._live = null;   // r2: a refetch is the server's state — our last echo is no longer the source
       this._emitAllMarks();
       for (const [path, val] of Object.entries(fresh)) {
@@ -251,6 +276,7 @@ class SettingsManager {
     this._values = data;
     this._server = { ...(data || {}) };
     if (!this._landed) { this._landOn(data, { spend }); this._values = data; }   // B-225b R4: a broadcast of the server's WHOLE state is a landing (nothing is dirty: the guard above)
+    this._liftHeld();   // B-225b: the server's whole state is here again — the rows a hold refused read it (no «right now» after the hold)
     for (const p of stale) this._refused.delete(p);
     if (stale.length) this._emitSave(stale);
     this._live = spend && typeof spend === 'object' ? { spend } : null;

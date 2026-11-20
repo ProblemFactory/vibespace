@@ -1,5 +1,5 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
-import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords, settingFocusOf } from './settings-view.js';
+import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords, settingFocusOf, footWords } from './settings-view.js';
 import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText, markTyped, markLandedOnSave, carryUnsaved, storeHeldWords } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
@@ -195,13 +195,16 @@ class SettingsUI {
     // own (a secret, the decisions box) has it beside its field
     const foot = document.createElement('div');
     foot.className = 'settings-foot';
-    foot.textContent = t('Every change here saves as you make it — there is nothing to press at the end.');
+    this._foot = foot;
+    this._drawFoot();   // B-225b: while the settings are held the foot says nothing (footWords)
     dialog.append(header, searchWrap, body, foot);
 
     this._facts = this._buildFacts(() => { if (content.isConnected) this._rerenderKeepingPlace(content, nav); });
     // the rows other rows' `when` reads: changing one re-draws, so a dependent row appears / goes at once
     this._content = content; this._nav = nav;
     this._offLand?.(); this._offLand = this.settings.onLand?.(() => { if (content.isConnected) this._renderContent(content, nav); });   // B-225b: a held file's rows come at its landing
+    // B-225b: a hold this page met is over — the rows it refused read the stored value again (their typed marks leave with them)
+    this._offLift?.(); this._offLift = this.settings.onLift?.((paths) => { for (const p of paths || []) this._typed?.delete(p); if (content.isConnected) this._rerenderKeepingPlace(content, nav); this._drawFoot(); });
     this._governors = new Set(Object.values(SETTINGS_SCHEMA).flatMap((r) => whenClauses(r.when)).filter((c) => clauseKind(c) === 'setting').map((c) => c.setting));
     this._renderContent(content, nav);
     if (focus) this._focusRow(content, nav, focus);   // lane setting-doors pick 1: a link to one row
@@ -272,6 +275,7 @@ class SettingsUI {
   }
 
   _renderContent(content, nav) {
+    this._drawFoot();   // B-225b: the foot follows the hold at every draw
     this._dropReloadSubs();   // verifier #1: the rows drawn last time leave with their listeners
     content.innerHTML = '';
     nav.innerHTML = '';
@@ -615,6 +619,7 @@ class SettingsUI {
       const c = this._content;
       if (!c || !c.isConnected) return;
       for (const m of c.querySelectorAll('.settings-save-mark')) if (m.dataset.path === p) this._drawSaveMark(m, p);
+      this._drawFoot();   // a save a hold refused: the foot stops promising
     });
     return mark;
   }
@@ -625,6 +630,14 @@ class SettingsUI {
     if (typed) this._typed.add(path); else this._typed.delete(path);
     const c = this._content;
     if (c && c.isConnected) for (const m of c.querySelectorAll('.settings-save-mark')) if (m.dataset.path === path) this._drawSaveMark(m, path);
+  }
+  /** the window's foot: its rule, or nothing while the settings are held (footWords, B-225b) */
+  _drawFoot() {
+    const f = this._foot;
+    if (!f) return;
+    const words = footWords(this.settings.held, t);
+    if (f.textContent !== words) f.textContent = words;
+    f.hidden = !words;
   }
   _drawSaveMark(mark, path) {
     const S = this.settings;
