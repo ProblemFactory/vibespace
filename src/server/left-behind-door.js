@@ -29,6 +29,13 @@ const SAID = new WeakMap();   // conversation → the «could not be read» reas
 const PRESSING = new WeakMap();   // conversation → the lines (`at`) whose press is running now
 const markOf = (id) => `CLAUDE_WEBUI_SESSION_ID=${id}`;
 const nameOfHost = (hosts, id) => { try { const h = hosts && typeof hosts.get === 'function' ? hosts.get(id) : null; return (h && h.name) || String(id); } catch { return String(id); } };
+/** A WALL-CLOCK STEP SINCE THE TURN OPENED (主开发 r274 / r541): the hub's wall clock minus its monotonic one (against its time
+ *  origin), sampled when the turn opened (session-brain setTurnBy → `_turnBy.step`) and now. Their difference is the step a clock
+ *  set DURING the turn made — taken out of the turn's age, so the birth-time cut (src/left-behind.js: the kernel's btime, derived
+ *  from the wall clock at each read) names the turn's own start: a forward step no longer lists an earlier turn's process as this
+ *  turn's, a backward one no longer hides this turn's. A turn with no sample (an older record) is aged as before. */
+const wallStepNow = () => Math.round(Date.now() - (performance.timeOrigin + performance.now()));
+function stepSince(session, nowStep) { const s = session && session._turnBy && session._turnBy.step; return Number.isFinite(s) && Number.isFinite(nowStep) ? nowStep - s : 0; }
 /** the start of the turn that stopped: the later of the input stamps and the CLI's own opening of the turn — or null */
 function startOf(session) {
   const a = turnStartOf(session) || 0, b = Number(session && session._turnBy && session._turnBy.at) || 0;
@@ -49,20 +56,21 @@ function fresh(session, reasons, withRows) {
 }
 
 /** after a person's Stop settled: read once, say once → the said line's data (null when nothing was said) */
-async function afterStop(session, id, { broadcastToSession, hosts = null, read = LB.leftBehind, now = Date.now, buffersDir = BUFFERS } = {}) {
+async function afterStop(session, id, { broadcastToSession, hosts = null, read = LB.leftBehind, now = Date.now, buffersDir = BUFFERS, wallStep = wallStepNow } = {}) {
   if (!session || !id || typeof broadcastToSession !== 'function') return null;
   const started = startOf(session), mark = markOf(id);
+  const ageOf = () => Math.max(0, now() - started - stepSince(session, wallStep()));   // the turn's age with a step made during it taken out
   let r;
   if (!started) r = { unread: 'no-turn-start' };
   else if (session.host) {
-    const ageMs = Math.max(0, now() - started), sid = typeof session.keeperSid === 'string' && /^[\w-]+$/.test(session.keeperSid) ? session.keeperSid : null;
+    const ageMs = ageOf(), sid = typeof session.keeperSid === 'string' && /^[\w-]+$/.test(session.keeperSid) ? session.keeperSid : null;
     try {
       const dm = hosts && typeof hosts.deviceBounded === 'function' ? await hosts.deviceBounded(session.host, 6000) : null;
       r = dm && typeof dm.leftBehind === 'function' ? await dm.leftBehind({ mark, ageMs, sid }) : { unread: 'no-agent-op' };
     } catch (e) { r = { unread: /lacks left-behind/.test(String(e && e.message)) ? 'no-agent-op' : e && e.code === 'hosts-unread' ? 'hosts-unread' : 'machine-unreachable' }; }   // the B-f276 stores chain: a HELD machines list is its own reason — VibeSpace cannot read its record of the machine, never «unreachable»
   } else {
     const own = [...recordedOf(session), ...ptyOf(session)], file = recordFileOf(buffersDir, id);
-    r = await read({ mark, ageMs: Math.max(0, now() - started), keep: PI.keptOut(own), own: ptyOf(session), recordPids: recordedOf(session), records: file ? [file] : [] });
+    r = await read({ mark, ageMs: ageOf(), keep: PI.keptOut(own), own: ptyOf(session), recordPids: recordedOf(session), records: file ? [file] : [] });
   }
   const left = Array.isArray(r && r.left) ? r.left : [], kept = Array.isArray(r && r.kept) ? r.kept : [], jobs = Array.isArray(r && r.jobs) ? r.jobs : [];
   const n = Math.max(0, Number(r && r.scan && r.scan.unreadable) || 0);

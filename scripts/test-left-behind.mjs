@@ -184,6 +184,19 @@ console.log('— ③ the hub\'s one read after a settled Stop');
   let asked2 = null;
   await DOOR.afterStop(sess({ _turnBy: { by: 'notification', at: NOW - 5000 } }), 'sess-lb-1', { broadcastToSession: bcast, now, buffersDir: BUF, read: async (o) => { asked2 = o; return { left: [], kept: [], scan: {} }; } });
   ok(!!asked2 && asked2.ageMs === 5000, '③ a turn the CLI opened itself: the window starts at the CLI\'s init (session-brain _turnBy.at), never at an older input', asked2 && asked2.ageMs);
+  // A CLOCK SET DURING THE TURN (主开发 r274 / r541): the turn's age takes out the step made since the turn opened (session-brain samples
+  // the hub's wall-minus-monotonic step in _turnBy.step), so the kernel's birth-time cut names the turn's own start — RED: the age
+  // read off the wall clock alone (a forward step lists an earlier turn's process, a backward one hides this turn's)
+  const stepped = async (mod, step) => { let o = null; await mod.afterStop(sess({ _turnBy: { by: 'person', at: NOW - 5000, step: 0 } }), 'sess-lb-1', { broadcastToSession: bcast, now, buffersDir: BUF, wallStep: () => step, read: async (x) => { o = x; return { left: [], kept: [], scan: {} }; } }); return o && o.ageMs; };
+  const fwd = await stepped(DOOR, 3000), back = await stepped(DOOR, -2000), none = await stepped(DOOR, 0);
+  let noSample = null; await DOOR.afterStop(sess({ _turnBy: { by: 'person', at: NOW - 5000 } }), 'sess-lb-1', { broadcastToSession: bcast, now, buffersDir: BUF, wallStep: () => 3000, read: async (x) => { noSample = x; return { left: [], kept: [], scan: {} }; } });
+  ok(fwd === 2000 && back === 7000 && none === 5000 && noSample && noSample.ageMs === 5000, '③ a wall clock set DURING the turn (+3 s / −2 s): the turn\'s age takes the step out (2 s / 7 s for a 5 s wall difference) — a turn with no step sample is aged as before', { fwd, back, none, noSample: noSample && noSample.ageMs });
+  const DSRC = fs.readFileSync(path.join(REPO, 'src/server/left-behind-door.js'), 'utf8');
+  const WALL = mutantCopies('left-behind-wall-age', REPO).load('src/server/left-behind-door.js', anchored(DSRC, "  const ageOf = () => Math.max(0, now() - started - stepSince(session, wallStep()));", "  const ageOf = () => Math.max(0, now() - started);", 'wall-age'), 'wall-age');
+  const fwdRed = await stepped(WALL, 3000);
+  ok(fwdRed === 5000, '③ RED CONTROL: the age read off the wall clock alone — a +3 s step during the turn widens the cut by 3 s (an earlier turn\'s process of this conversation listed as this one\'s)', fwdRed);
+  const BSRC = fs.readFileSync(path.join(REPO, 'src/server/session-brain.js'), 'utf8');
+  ok(BSRC.includes("function setTurnBy(session, v) { const f = { ...v, at: Date.now(), step: wallStep() }; session._turnBy = f; return f; }") && BSRC.includes("...(Number.isFinite(fact.step) ? { step: fact.step } : {})"), '③ the turn\'s opening samples the step (session-brain setTurnBy), and the opener\'s verdict keeps it (source pin)');
   // the REAL read through the door over the fresh chain: no meta file of the conversation's ⇒ said «could not be read», no door
   said.length = 0;
   const realRead = (o) => LB.leftBehind({ ...o, procRoot: fresh, now: NOW });

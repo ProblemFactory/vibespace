@@ -34,10 +34,13 @@ function turnKeyOf(msg) {
   return null;
 }
 const openerKeyOf = (tb) => (tb && typeof tb.by === 'string' && tb.source !== 'pending' ? tb.by + (tb.name ? '|' + tb.name : '') : 'unrecorded');
-function setTurnBy(session, v) { const f = { ...v, at: Date.now() }; session._turnBy = f; return f; }
+// the WALL-CLOCK STEP at the turn's opening (主开发 r274/r541): the hub's wall clock minus its monotonic one, against its time origin —
+// src/server/left-behind-door.js takes the difference at the Stop out of the turn's age (a clock set DURING the turn moves nothing)
+const wallStep = () => Math.round(Date.now() - (performance.timeOrigin + performance.now()));
+function setTurnBy(session, v) { const f = { ...v, at: Date.now(), step: wallStep() }; session._turnBy = f; return f; }
 function byVerdict(session, fact, v, source) {
   if (session._turnBy !== fact) return;   // a newer turn owns the fact (by identity — never by the clock)
-  session._turnBy = { ...(v || { by: 'unrecorded' }), at: fact.at, source };
+  session._turnBy = { ...(v || { by: 'unrecorded' }), at: fact.at, ...(Number.isFinite(fact.step) ? { step: fact.step } : {}), source };
 }
 function byRecord(session, fact, rec, stamped) {
   byVerdict(session, fact, require('../message-manager.js').turnOpenerOf(rec, { stamped }), stamped ? 'frame-stamp' : (rec ? 'cli-record' : 'no-record'));
