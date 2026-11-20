@@ -245,6 +245,7 @@ const CLASS = {
   '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event', 'withdrawAsk#1': 'event',   // B-8bd5: the filer withdraws its panel
   '_startAskedAtStop#1': 'alarm',   // B-cac2 (cure r1): a start asked during a stop that cannot be done — said in its events and to its owner
   'setWakeGrant#1': 'event',   // the manager design's piece 7: the grant set / cleared (by the person or a key) — a fact on the job's own journal
+  '_hubMainRefusal#1': 'event',   // B-2c5c (THE MAIN DOOR): a stop, a time limit or an until-marker REFUSED because the job's main is this hub — said on the row, once a run and a road
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -292,6 +293,7 @@ const DRIVERS = {
   '_stopDoubt#2': async () => { const j = svc('drv-stopdoubt'), r = run0(j, { endedAt: Date.now() }); const un = stub(jm, { _runScope: () => null, _graceMs: () => 0 }); const unPI = stub(PI, { membersOf: () => Object.assign([], { scan: {} }) }); await jm._stopDoubt(j, r); un(); unPI(); return j; },
   '_clearBefore#1': async () => { const j = svc('drv-clearbefore'), r = run0(j, { endedAt: Date.now() }); const un = stub(jm, { _clearKept: async () => { }, _reapScope: async () => false, _runDoubt: () => '', _graceMs: () => 0 }); await jm._clearBefore(j, r, 'manual'); un(); return j; },
   '_refuseRun#1': async () => { const j = task('drv-refuse'); jm._refuseRun(j, { error: 'refused: a vendor pattern' }, 'manual'); return j; },
+  '_hubMainRefusal#1': async () => { const j = task('drv-hubmain'), r = run0(j); jm._hubMainRefusal(j, r, 'its time limit'); return j; },
   '_settleWait#1': async () => { const j = task('drv-settle'); j.state = 'waiting'; jm._settleWait(j, 'the vault was never unlocked'); return j; },
   '_vaultGate#1': async () => { const j = task('drv-vaultgate'); const un = stub(jm, { _vaultJob: { gate: () => ({ code: 'vault_refused', words: 'a value it names is gone' }) } }); try { jm._vaultGate(j, 'manual'); } catch { } un(); return j; },
   '_waitFor#1': async () => { const j = task('drv-waitfor'); jm._waitFor(j, 'vault', null); return j; },
