@@ -1446,13 +1446,22 @@ function apiDerivedWindow(key, { witness = false } = {}) {
     for (const [n, r] of Object.entries(w.scoped || {})) if (Number(r) > 0) v.scoped[String(n).toLowerCase()] = Number(r);
     if (v.sevenDay || Object.keys(v.scoped).length) out = v;
   }
-  return witness ? { window: out, ring, k: API_WITNESS_K } : out;
+  if (!witness) return out;
+  // B-6a92: the row's window UNKNOWN by name — standing only while the row's own established window does not name that phase
+  // (a proven read that stamps it there resolves it at once, before the next run clears it)
+  let foreign = null;
+  if (w && w.foreign && Array.isArray(w.foreign.names) && w.foreign.names.length && Number(w.foreign.phase) > 0) {
+    let own = null; try { own = establishedWindows()[key] || null; } catch { own = null; }
+    const ownPhase = own && Number(own.sevenDay) > 0 ? Number(own.sevenDay) : null;
+    if (!(ownPhase && readingLag.weeklyNear(ownPhase, Number(w.foreign.phase)) === true)) foreign = { names: w.foreign.names.slice(0, 4), phase: Number(w.foreign.phase), at: Number(w.foreign.at) || null };
+  }
+  return { window: out, ring, k: API_WITNESS_K, foreign };
 }
 /** Feed ONE eligible weekly candidate into the account's witness ring.
  *  `outcome` = what the guard did with the reading (write / archived /
  *  refiled). Returns `{run, k, established, moved}`, or null when the reading
  *  is not weekly or the sidecar could not be written. */
-function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = null } = {}) {
+function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = null, names = [] } = {}) {
   try {
     if (!key || !ev || !(Number(ev.resetsAt) > 0)) return null;
     if (ev.kind !== 'sevenDay' && !(ev.kind === 'scoped' && ev.scopedName)) return null; // a 5h window names a TIME, never an account (reading-lag r2)
@@ -1464,7 +1473,8 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
     RR.forget(path.join(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key)));   // B-403e: a read before the sidecar is REWRITTEN looks again
     const raw = readApiWitnessFile(key) || {};
     const ring = (Array.isArray(raw.ring) ? raw.ring.filter((e) => e && Number(e.resetsAt) > 0) : []).slice(-(API_WITNESS_RING - 1));
-    const entry = { resetsAt: Number(ev.resetsAt), kind: ev.kind, name: ev.kind === 'scoped' ? String(ev.scopedName).toLowerCase() : null, at: Date.now(), sid: session?._webuiId || null, outcome, ...(producer ? { producer } : {}) };
+    const named = (Array.isArray(names) ? names : []).filter((k) => typeof k === 'string' && k && k !== key).slice(0, 4);   // B-6a92: whose window the guard found it to name
+    const entry = { resetsAt: Number(ev.resetsAt), kind: ev.kind, name: ev.kind === 'scoped' ? String(ev.scopedName).toLowerCase() : null, at: Date.now(), sid: session?._webuiId || null, outcome, ...(producer ? { producer } : {}), ...(named.length ? { names: named } : {}) };
     ring.push(entry);
     let run = 0;
     for (let i = ring.length - 1; i >= 0 && readingLag.weeklyNear(ring[i].resetsAt, entry.resetsAt) === true; i--) run++;
@@ -1478,6 +1488,22 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
       const phaseRefOf = (w) => (w ? (Number(w.sevenDay) > 0 ? Number(w.sevenDay) : (Number(Object.values(w.scoped || {})[0]) || null)) : null);
       const ref = phaseRefOf(anchor) || phaseRefOf(next);
       const moved = ref ? readingLag.weeklyNear(ref, entry.resetsAt) === false : false;
+      // B-6a92 (主开发 r560) — A MOVE ONTO A WINDOW ANOTHER KNOWN ACCOUNT HOLDS IS NOT THIS SLOT'S TO MAKE: the guard found each of
+      // these readings to name that account's window (`names`), and a run of the conversation's own live readings cannot tell a
+      // login holding the other account from an honest plan change. NOTHING MOVES and nothing is filed (the readings stay archived);
+      // the row's own window is UNKNOWN, by name, until a proven read of this slot's OWN credential stamps it through its own road
+      // (the panel's /usage read, the approved usage read on its own schedule, a captured login) — nothing here starts a read.
+      // Honest sharing converges there: once the row's own stamp names that phase, its readings agree and write.
+      const heldBy = moved ? [...new Set(agreeing.flatMap((e) => (Array.isArray(e.names) ? e.names : [])))].filter((k) => k && k !== key) : [];
+      if (moved && heldBy.length) {
+        const was = raw.foreign && Array.isArray(raw.foreign.names) ? raw.foreign.names.join(',') + '@' + raw.foreign.phase : null;
+        next.foreign = { names: heldBy.slice(0, 4), phase: entry.resetsAt, at: entry.at, n: run };
+        res.held = { names: next.foreign.names, phase: entry.resetsAt };
+        if (was !== next.foreign.names.join(',') + '@' + entry.resetsAt) console.log(`[usage] window held: ${nameOf(key)}'s readings name ${next.foreign.names.map(nameOf).join(', ')}'s weekly window (${run} in a row) — not re-anchored, nothing filed; ${nameOf(key)}'s own window is unknown until its own read proves it`);
+        const ok0 = usageWrite.writeSidecar(USAGE_CACHE_DIR, readingLag.apiWindowSidecarName(key), next);
+        return ok0 ? res : null;
+      }
+      delete next.foreign;   // the run agrees with the row's own window, or moves onto a phase no known account holds: no longer unknown
       const w = moved ? { sevenDay: null, scoped: {} } : { sevenDay: next.sevenDay, scoped: { ...next.scoped } };
       for (const e of agreeing) { if (e.kind === 'sevenDay') w.sevenDay = e.resetsAt; else if (e.name) w.scoped[e.name] = e.resetsAt; }
       next.sevenDay = w.sevenDay; next.scoped = w.scoped; next.at = entry.at; next.sessionId = entry.sid; next.source = 'rate-limit-events'; next.n = run;
@@ -1616,6 +1642,8 @@ function guardReadingTarget(key, readingWindow, { session = null, what = 'readin
   // fact against it, and neither is guessed away — the reading is archived, named, and nothing is written
   if (d.action === 'refile' && noRefile) d = { ...d, action: 'archive', reason: `the reading and its request disagree — its window names ${nameOf(d.key)}, its request went out on ${nameOf(key)} (${d.reason})` };
   const sid = session?._webuiId || session?.claudeSessionId || '-';
+  // B-6a92: the verdict handed BACK to the caller — the account(s) whose window this reading names travel with it to the slot's ring
+  if (entry && typeof entry === 'object') { try { entry.verdict = { action: d.action, names: (Array.isArray(d.matched) && d.matched.length ? d.matched : (d.key ? [d.key] : [])).filter((k) => k && k !== key).slice(0, 4) }; } catch { } }
   if (d.action === 'refile') {
     noteWindowVerdict(sid, key, d.key, () => console.log(`[usage] ${what}: window says these numbers are ${nameOf(d.key)}'s, not ${nameOf(key)}'s — re-filed (${d.reason})`));
     global.__vsEvent?.('usage-reading-window-refiled', `${key}→${d.key}:${what}`);
@@ -3863,15 +3891,17 @@ function recordRateLimitEventNow(session, msg) {
     // row's window is seen by the check of the same reading — ONE call, three exits (archived, re-filed, written)
     const postCheck = () => { if (win) { try { oatIdentity.onReading(slotKey, { window: win, at: Date.now() - (Number(liveFactVerdict(session, msg).lateMs) || 0), viaToken: () => road().viaToken, gen: () => road().gen, eligible: witness, sid: session._webuiId || null }); } catch { } } };
     if (win) {
-      const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: { ev, slot, witness }, noRefile: !!(slot && slot.slotReason === 'request-stamped') });
+      const gEntry = { ev, slot, witness };
+      const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: gEntry, noRefile: !!(slot && slot.slotReason === 'request-stamped') });
+      const names = (gEntry.verdict && gEntry.verdict.names) || [];   // B-6a92: whose window the guard found this reading to name
       if (!target) {                             // archived with a reason — never written where it provably does not belong
-        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'archived', producer: producer() });
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'archived', producer: producer(), names });
         postCheck();
         return;
       }
       if (target !== key) {
         key = target; refiled = true;
-        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer() });
+        if (witness && witness.ok) noteApiDerivedWindow(slotKey, witnessEv, session, { outcome: 'refiled', producer: producer(), names });
         // the window is better evidence than the pin that produced the wrong
         // answer, so the REST of the turn follows it too (the 06:10:46Z shape:
         // a pin held from before three re-points filed one member's fresh

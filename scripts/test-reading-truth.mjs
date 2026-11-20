@@ -449,5 +449,82 @@ console.log('MUTANTS — law 1, each red by name');
   const r = m ? await askLeg(m) : null;
   ok('MUTANT (the ask\'s fresh-slot fallback back, red by name): with no request known the answered request\'s ask is keyed to the link NOW — recorded, and the moved conversation\'s other-family cap is taken on the member it was moved to', !!r && !r.noAsk && !r.notTakenOnMoved, J(r));
 }
+console.log('B-6a92 — a conversation in NO pool whose login answers as ANOTHER known account (主开发 r560): its window is never re-anchored onto that account\'s, its numbers never filed, the row says so by name');
+{
+  const WS = require(path.join(REPO, 'src/window-stamp.js'));
+  const { setupUsage } = require(path.join(REPO, 'src/usage-routes.js'));
+  const held = (engMod = realEng, { ownReading = true, again = null } = {}) => {
+    // `again`: the same data folder and accounts under a FRESH engine (a restart: no in-memory window cache)
+    const root = again ? again.root : endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], FIXTURE_CWD_PREFIX + 'rtruth-held-')));
+    const dataDir = path.join(root, 'data');
+    const am = again ? again.am : new AccountManager({ dataDir });
+    const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), CREDS(id), { mode: 0o600 });
+    const V = again ? again.V : am.createSubscription({ name: 'Vela' }).id; if (!again) login(V);
+    const O = again ? again.O : am.createSubscription({ name: 'Orin' }).id; if (!again) login(O);
+    const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+    const nowS = Math.floor(Date.now() / 1000), RV = again ? again.RV : nowS + 2 * 86400, RO = again ? again.RO : nowS + 5 * 86400, RX = again ? again.RX : nowS + 3 * 86400 + 11 * 3600;
+    if (!again && ownReading) fs.writeFileSync(path.join(cacheDir, V + '.json'), J({ fetchedAt: Date.now() - 3600e3, source: 'cli-usage', sevenDay: { utilization: 0.2, resetsAt: RV } }));   // Vela's OWN last reading
+    fs.writeFileSync(path.join(cacheDir, O + '.json'), J({ fetchedAt: Date.now() - 60000, source: 'cli-usage', sevenDay: { utilization: 0.81, resetsAt: RO } }));
+    if (!again) for (const [id, r] of [[V, RV], [O, RO]]) fs.writeFileSync(path.join(cacheDir, readingLag.windowSidecarName(id)), J({ at: Date.now(), source: 'on-demand', sevenDay: r }));
+    const sessions = new Map();
+    const app = { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+    const eng = engMod.create({ app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions, wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { },
+      serverNotice() { }, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
+      recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => null, getQuotaProbe: () => null });
+    const s = { backend: 'claude', mode: 'chat', host: null, _webuiId: 'sess-held', claudeSessionId: 'cid-held', _accountId: V, pty: { write() { } }, name: 'h' };   // billed to Vela, in no pool
+    sessions.set('sess-held', s);
+    const reading = (u, r7) => { s._isStreaming = true; s._turnState = 'running'; TS.noteRequestSent(s, Date.now()); quiet(() => eng.recordRateLimitEvent(s, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: u, resetsAt: r7 } })); };
+    const readJ = (f) => { try { return JSON.parse(fs.readFileSync(path.join(cacheDir, f), 'utf8')); } catch { return null; } };
+    // the REAL usage route over the same account manager and engine (the scene's wiring: a stub app, the engine's own doors)
+    const routes = {};
+    const rapp = { get: (p0, h) => { routes['GET ' + p0] = h; }, post() { }, put() { }, delete() { }, use() { }, locals: {} };
+    quiet(() => setupUsage({ app: rapp, accounts: am, hosts: null, usageHistory: null, activeSessions: sessions, serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir, CODEX_SESSIONS_DIR: path.join(root, 'nocodex'), META_DIR: path.join(root, 'session-meta'), AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(root, 'buffers'), apiDerivedWindow: eng.apiDerivedWindow, establishedWindows: eng.establishedWindows }));
+    const usage = () => { const res = { body: null, json(o) { this.body = o; return this; }, status() { return this; } }; quiet(() => routes['GET /api/usage']({ query: {}, headers: {} }, res)); return res.body; };
+    return { root, am, eng, V, O, RV, RO, RX, cacheDir, reading, own: () => readJ(V + '.json'), stamp: () => readJ(readingLag.windowSidecarName(V)), wit: () => readJ(readingLag.apiWindowSidecarName(V)), usage };
+  };
+  // c2b: SIX readings in a row, every one with Orin's window, on a conversation billed to Vela
+  const run6 = async (H) => { for (let i = 0; i < 6; i++) { H.reading(0.81, H.RO); await sleep(3); } };
+  const H = held();
+  await run6(H);
+  const ring = (H.wit() && H.wit().ring) || [];
+  const named = ring.filter((e) => Array.isArray(e.names) && e.names.includes(H.O)).length;
+  const own = H.own(), st = H.stamp(), f = (H.eng.apiDerivedWindow(H.V, { witness: true }) || {}).foreign;
+  console.log(`    the ring: ${ring.length} entries, ${named} naming Orin's window; Vela's stamp ${st && st.sevenDay} (its own ${H.RV}); Vela's file ${J(own && own.sevenDay)}`);
+  ok('B-6a92 the guard\'s verdict reaches the ring: each archived reading NAMES the account whose window it carries (≥ K of them)', named >= 3, ring);
+  ok('B-6a92 NOTHING MOVES: Vela\'s established window stays its own after six readings of Orin\'s window (no re-anchor)', st && st.sevenDay === H.RV, st);
+  ok('B-6a92 NOTHING IS FILED: Vela\'s file keeps its OWN last reading — never Orin\'s numbers (0.81) or window', own && own.sevenDay && own.sevenDay.utilization === 0.2 && own.sevenDay.resetsAt === H.RV, own);
+  ok('B-6a92 the row\'s own window is UNKNOWN, by the other account: the witness names Orin', f && Array.isArray(f.names) && f.names[0] === H.O, f);
+  const u = H.usage(), wu = u && u.accounts && u.accounts[H.V] && u.accounts[H.V].windowUnknown;
+  ok('B-6a92 the usage route carries it on Vela\'s row with the name the person gave Orin — never an address', wu && wu.otherNames && wu.otherNames[0] === 'Orin' && !J(wu).includes('@') && !(u.accounts[H.O] && u.accounts[H.O].windowUnknown), wu);
+  // THE POOL (主开发 r560 item 3): what the pool engine reads for that member while its window is unknown
+  const pv = H.eng.poolReadCache(null)(H.V);
+  ok('B-6a92 THE POOL reads Vela\'s OWN last reading (its age said by its fetchedAt) — never the other account\'s numbers', pv && pv.sevenDay && pv.sevenDay.utilization === 0.2 && pv.sevenDay.resetsAt === H.RV, pv && pv.sevenDay);
+  const H0 = held(realEng, { ownReading: false });
+  await run6(H0);
+  const pv0 = H0.eng.poolReadCache(null)(H0.V);
+  ok('B-6a92 THE POOL with no reading of Vela\'s own: UNKNOWN (no weekly numbers) — as any member with no reading, never Orin\'s', !(pv0 && pv0.sevenDay && Number.isFinite(pv0.sevenDay.utilization)), pv0);
+  // RED CONTROL: the ring that weighs a phase alone (the hold removed) — Vela re-anchored onto Orin's window, Orin's numbers filed on Vela
+  const src = read(ENG);
+  const HOLD = "      if (moved && heldBy.length) {\n";
+  const mRed = src.includes(HOLD) ? require(MUT.write(ENG, src.split(HOLD).join("      if (false) {\n"), 'b6a92-no-hold')) : null;
+  const R = mRed ? held(mRed) : null;
+  if (R) await run6(R);
+  const rOwn = R && R.own(), rSt = R && R.stamp();
+  ok('B-6a92 RED CONTROL (the hold removed): Vela re-anchored onto Orin\'s window and Orin\'s numbers filed on Vela\'s row — the row\'s harm', !!R && rSt && rSt.sevenDay === R.RO && rOwn && rOwn.sevenDay && rOwn.sevenDay.utilization === 0.81, { rSt, rOwn: rOwn && rOwn.sevenDay });
+  // HONEST SHARING CONVERGES at the row's own proven read: its own stamp names the phase ⇒ no longer unknown, its readings write
+  const S = held();
+  await run6(S);
+  quiet(() => WS.writeWindowStamp(S.cacheDir, S.V, { sevenDay: S.RO, fiveHour: null, scoped: {}, at: Date.now(), source: 'on-demand' }, 'login'));   // the row's OWN read (the panel's road) names Orin's phase
+  const S2 = held(realEng, { again: S });   // the engine as it reads after its 5 s window cache (a fresh instance over the same data)
+  const fS = (S2.eng.apiDerivedWindow(S2.V, { witness: true }) || {}).foreign;
+  S2.reading(0.4, S2.RO); await sleep(3);
+  const sOwn = S2.own();
+  ok('B-6a92 HONEST SHARING: once the row\'s own proven read stamps the shared phase, it is no longer unknown and its next reading WRITES on it', !fS && sOwn && sOwn.sevenDay && sOwn.sevenDay.utilization === 0.4 && sOwn.sevenDay.resetsAt === S.RO, { fS, sOwn: sOwn && sOwn.sevenDay });
+  // A MOVE ONTO A PHASE NO KNOWN ACCOUNT HOLDS is as today: K readings re-anchor it
+  const X = held();
+  for (let i = 0; i < 4; i++) { X.reading(0.33, X.RX); await sleep(3); }
+  const xSt = X.stamp(), xF = (X.eng.apiDerivedWindow(X.V, { witness: true }) || {}).foreign;
+  ok('B-6a92 a move onto a phase NO known account holds re-anchors at K, as today (a genuine plan change), and nothing is unknown', xSt && xSt.sevenDay === X.RX && !xF, { xSt, xF });
+}
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -567,6 +567,12 @@ export function machineLoginLinkHint(name, vendor = 'Anthropic') {
  *  snapshot right now keeps its last paint (the poll never blanks a row). */
 /** A MEMBER NEVER READ says so in its bucket slot (lane reset-unproven r2, 主开发's ruling): an empty slot reads as «no
  *  data, unusable»; the words say what fills it. Kept visible at every width (its own class, not `.acct-usage`). */
+// B-6a92 (主开发 r560): the row's OWN weekly window is unknown — its readings name ANOTHER known account's window, and nothing moved
+// or was filed. The other account is named as the person named it (never an address; «another account» when it has no name).
+export function windowUnknownHtml(wu) {
+  const other = (Array.isArray(wu && wu.otherNames) ? wu.otherNames : []).find((n) => typeof n === 'string' && n) || t('another account');
+  return `<span class="acct-usage-unread acct-usage-foreign">${escHtml(t('Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it', { other }))}</span>`;
+}
 export function unreadUsageHtml() {
   return `<span class="acct-usage-unread">${escHtml(t('no reading yet — confirms when a session uses it'))}</span>`;
 }
@@ -1712,6 +1718,13 @@ export function installManageAgents(App, ctx = {}) {
   // Codex roster passes 'codex').
   _acctUsageHtml(u, est, probeNote = null, backend = null) {
     if (!u) return '';
+    // B-6a92: a row whose own window is UNKNOWN says so by the other account's name first; its own last reading (if any) follows —
+    // never the other account's numbers (the engine never filed them)
+    if (u.windowUnknown) {
+      const own = { ...u }; delete own.windowUnknown;
+      const unread = !Array.isArray(own.windows) && quotaModel.memberProofState(own, Date.now()) === 'unread';
+      return windowUnknownHtml(u.windowUnknown) + (unread ? '' : ' ' + this._acctUsageHtml(own, est, probeNote, backend));
+    }
     const now = Date.now();
     // a reading that states no window at all is NO READING (quota-model memberProofState) — words, never 0 % donuts (r2)
     if (!Array.isArray(u.windows) && quotaModel.memberProofState(u, now) === 'unread') return unreadUsageHtml();

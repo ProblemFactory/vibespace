@@ -1696,6 +1696,13 @@ app.get('/api/usage', (req, res) => {
   const lanesAt = (() => { const o = {}; try { for (const id of [...Object.keys(viewedAccounts), '__global__']) { const m = usageWrite.lanesReadAt(id); if (Object.keys(m).length) o[id] = m; } } catch { } return o; })();
   const accountsOut = {};
   for (const [id, a] of Object.entries(viewedAccounts)) accountsOut[id] = lanesAt[id] && a && typeof a === 'object' ? { ...a, lanesReadAt: lanesAt[id] } : a;
+  // B-6a92 (主开发 r560): an account whose OWN weekly window is unknown because its readings name ANOTHER known account's window
+  // (the engine held the move: apiDerivedWindow's `foreign`, resolved against the row's own stamp) — the row says so by the other
+  // account's NAME as the person gave it, never an address; its numbers are never the other account's
+  const nameOfOther = (k) => { try { const n = accounts.get(k)?.name; return typeof n === 'string' && n && !n.includes('@') ? n.slice(0, 80) : null; } catch { return null; } };
+  const unknownOf = (id) => { try { const f = typeof apiDerivedWindow === 'function' ? (apiDerivedWindow(id, { witness: true }) || {}).foreign : null; return f && Array.isArray(f.names) && f.names.length ? { others: f.names.slice(0, 4), otherNames: f.names.slice(0, 4).map(nameOfOther), phase: f.phase, at: f.at || null } : null; } catch { return null; } };
+  let claudeIds = []; try { claudeIds = (accounts.list().accounts || []).filter((x) => x && x.type === 'subscription' && (x.backend || 'claude') === 'claude').map((x) => x.id); } catch { claudeIds = []; }
+  for (const id of new Set([...Object.keys(viewedAccounts), ...claudeIds])) { const u = unknownOf(id); if (u) accountsOut[id] = { ...(accountsOut[id] && typeof accountsOut[id] === 'object' ? accountsOut[id] : {}), windowUnknown: u }; }
   const globalOut = lanesAt.__global__ && viewedGlobal && typeof viewedGlobal === 'object' ? { ...viewedGlobal, lanesReadAt: lanesAt.__global__ } : viewedGlobal;
   res.json({
     rateLimit: globalOut, codexRateLimit: codexRl.overall, resetClaims: claimsForClients, lanesReadAt: lanesAt,

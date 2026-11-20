@@ -677,7 +677,7 @@ const hookCensus = (src) => {
   const before = calls.length === 1 ? lines.slice(calls[0][1] + 1, calls[0][1] + 6).join('\n') : '';
   // fix r2 F-C: it runs AFTER the guard and the witness ring — at each of the three exits a reading with a window takes
   const runs = (src.match(/\bpostCheck\(\);/g) || []).length;
-  const after = /\{ outcome: 'archived', producer: producer\(\) \}\);\n\s+postCheck\(\);\n\s+return;/.test(src) && /if \(r\.unknownType\) \{ global\.__vsEvent\?\.\('rate-limit-event-unknown-type', r\.unknownType\); postCheck\(\); return; \}/.test(src)
+  const after = /\{ outcome: 'archived', producer: producer\(\), names \}\);\n\s+postCheck\(\);\n\s+return;/.test(src) && /if \(r\.unknownType\) \{ global\.__vsEvent\?\.\('rate-limit-event-unknown-type', r\.unknownType\); postCheck\(\); return; \}/.test(src)
     && /noteApiDerivedWindow\(writeKey, witnessEv, session, \{ outcome: 'write', producer: producer\(\) \}\);\n\s+postCheck\(\);/.test(src)
     // + lane readings-attribution-2 P2: law 2's record with nothing left but a cap the turn never asked of the account — archived, the check run
     && /if \(!statesALane\(ev\)\) \{ postCheck\(\); return; \}/.test(src)

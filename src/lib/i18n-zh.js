@@ -13277,6 +13277,8 @@ export default {
   "marked reset by you at {time} — the next refresh confirms or corrects it": "你在 {time} 标记为已重置 — 下次刷新时确认或更正",
   "reset · unconfirmed": "已重置 · 未证实",
   "no reading yet — confirms when a session uses it": "还没有用量读数——有会话用到它时确认",
+  "Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it": "它的读数指向「{other}」的每周窗口——在它自己的读取证实之前，这个账号自己的窗口未知",
+  "another account": "另一个账号",
   "Open this browser's display in Desktop to act on Chrome's own window": "在「桌面」打开这个浏览器的显示，就能操作 Chrome 自己的窗口",
   "Open in Desktop": "在桌面中打开",
   "Only your own window takes your clicks and keys here — the agents' windows are view only": "在这里只有你自己的窗口接收点击和按键——agent 的窗口只能看",

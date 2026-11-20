@@ -13276,6 +13276,8 @@ export default {
   "marked reset by you at {time} — the next refresh confirms or corrects it": "{time} にあなたがリセット済みとしてマーク — 次の更新で確定または訂正されます",
   "reset · unconfirmed": "リセット済み · 未確認",
   "no reading yet — confirms when a session uses it": "まだ使用量の読み取りなし — セッションが使うと確定します",
+  "Its readings name {other}’s weekly window — this account’s own window is unknown until its own read proves it": "読み取りが「{other}」の週次ウィンドウを指しています — このアカウント自身のウィンドウは、自身の読み取りで確かめられるまで不明です",
+  "another account": "別のアカウント",
   "Open this browser's display in Desktop to act on Chrome's own window": "「デスクトップ」でこのブラウザーの画面を開くと、Chrome 自身のウィンドウを操作できます",
   "Open in Desktop": "デスクトップで開く",
   "Only your own window takes your clicks and keys here — the agents' windows are view only": "ここでクリックとキー入力を受け取るのは自分のウィンドウだけです——agent のウィンドウは表示のみです",
