@@ -261,7 +261,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   ok(liveReads.length === 0 && rbReads.length === 0, 'NO MAIN-THREAD READ of the helper transcript — live (the Task\'s end) and at a rebuild', { live: liveReads, rebuild: rbReads });
   const R5b = mk('B1r2', { _normalizer: null, _artifacts: null });
   const lists = await dirReads(async () => { await N.rebuildHistory(R5b, 'B1r2', T5); });
-  const MQ = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), 'for (const { file, via } of named || helperFilesOf(session, record, state))', 'for (const { file, via } of helperFilesOf(session, record, state))', 'the fold asks the hook again'), 'askstwice');
+  const MQ = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), 'for (const { file, via } of named || helperFilesOf(session, record, state))', /* stale-pins: kept — the control's PLANT (the fold asking the hook again), not a pin */ 'for (const { file, via } of helperFilesOf(session, record, state))', 'the fold asks the hook again'), 'askstwice');
   MQ.configure({ activeSessions: () => new Map(), log: quiet });
   const R5c = mk('B1r3', { _normalizer: null, _artifacts: null });
   const listsTwice = await dirReads(async () => { await N.rebuildHistory(R5c, 'B1r3', T5); });
