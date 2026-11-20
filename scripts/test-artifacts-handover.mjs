@@ -122,8 +122,8 @@ console.log('① a Task subagent\'s writes are the PARENT\'s rows (via.subagent)
   const rr = (rb6._artifacts || {})[':' + PG];
   ok(rr && rr.by === 'agent' && AF.intentOf(rr) === 'foryou', 'the rebuild (the same helper door) says the same', rr);
   const hsrc = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
-  const STRIP = "        const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)\n        out.push({ ...op, id, via, cwd: rec.cwd || session.cwd || '' });";
-  const MH = hsrc.includes(STRIP) ? M.load('src/server/artifact-registry.js', hsrc.replace(STRIP, "        out.push({ ...o, id, via, cwd: rec.cwd || session.cwd || '' });"), 'helperby') : null;
+  const STRIP = "    const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)\n    out.push({ ...op, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });"; // B-299b: helperTagged
+  const MH = hsrc.includes(STRIP) ? M.load('src/server/artifact-registry.js', hsrc.replace(STRIP, "    out.push({ ...o, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });"), 'helperby') : null;
   const hm = mk('M6');
   if (ok(MH, 'CONTROL needle present: the helper door\'s strip of the reader\'s tag (r3) — a tree without it has nothing to patch')) { // r4: a control that cannot find its anchor says so by name, never «null»
     MH.configure({ activeSessions: () => new Map([['M6', hm]]), log: quiet }); for (const r of T4) MH.observe(hm, r); await MH.helperSettled(hm); REG.configure({ activeSessions: () => new Map([['L6', hp]]), log: quiet });
