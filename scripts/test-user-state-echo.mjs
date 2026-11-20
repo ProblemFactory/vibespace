@@ -1538,7 +1538,7 @@ const noFalseSaved = (p) => (p.__said || []).every((x) => !/^Saved/.test(x.text)
     const held = () => (onDisk(w).archivedSessions || []).includes(X);
     hearing(p, w, held);
     let full = true;
-    fs.writeFileSync = function (f, ...a) { if (full && String(f).startsWith(w.dataDir) && /user-state\.json\.tmp$/.test(String(f))) { const e = new Error('ENOSPC: no space left on device, write'); e.code = 'ENOSPC'; throw e; } return realWrite.call(this, f, ...a); };
+    fs.writeFileSync = function (f, ...a) { if (full && String(f).startsWith(w.dataDir) && /user-state\.json\.(\d+\.)?tmp$/.test(String(f))) { const e = new Error('ENOSPC: no space left on device, write'); e.code = 'ENOSPC'; throw e; } return realWrite.call(this, f, ...a); };
     let r503 = null;
     try {
       p.toggleArchive(w.sessions[1]);

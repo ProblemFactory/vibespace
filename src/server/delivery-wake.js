@@ -191,7 +191,9 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     const k = seams.keyOf(cid);
     if (!k || !k.sessionKey) return { outcome: 'failed', why: 'no conversation key for it' };
     const key = k.sessionKey, backend = key.slice(0, key.indexOf(':')) || 'claude';
-    if (seams.isArchived(key)) return { outcome: 'refused', code: 'archived', why: 'it is archived' };
+    const archived = seams.isArchived(key);
+    if (archived === null) return { outcome: 'refused', code: 'store_unread', why: 'the conversation list could not be read — whether it is archived is not known' };   // B-225b R3: UNKNOWN refuses by name (the words keep waiting)
+    if (archived) return { outcome: 'refused', code: 'archived', why: 'it is archived' };
     const q = resumeLine.submit({ target: key, by: null, payload: { run: () => startOne(cid, entry, key, backend) } });
     if (!q.ok) return { outcome: 'refused', code: q.code, why: `the resume line refused it (${q.code}${q.count ? ', ' + q.count : ''})` };
     // JOINED a resume already in the line (a key's conversations.resume of the same conversation): its answer is the reopen's,

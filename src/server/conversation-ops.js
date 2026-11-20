@@ -587,6 +587,9 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       }
       const label = f.name || args.target;
       if (!f.sessionKey) return { ok: false, code: 'pending', why: 'the conversation has not reported its id yet — poll conversations.status, then archive', target: label };
+      // B-225b R3: the archived list HELD — refused by name BEFORE anything is ended (an archive that ended the conversation and then
+      // could not write the list would leave it ended and listed)
+      if (isArchived(f.sessionKey) === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — nothing was ended or archived; ask again once it is read', target: label };
       const v = reach(targetOf({ conversationId: f.conversationId, webuiId: f.id, groups: f.groups, ...require('./groups-hold.js').fact() }, f.inherited !== undefined ? f.inherited : lineageOfIds(f.groups || [])));   // lane lg-group-parents U3d
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v.reach ? { reach: v.reach } : {}) };
       let asks; try { asks = (asksOf(f.sessionKey) || []).map((i) => i && i.id).filter(Boolean); } catch (e) { if (e && e.code === 'todos-unread') return { ok: false, code: 'todos-unread', why: e.message, target: label }; throw e; }   // B-44f3: For you held unread — its asks are unknown, never «none»
@@ -654,7 +657,9 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       if (!v || !v.ok) return { ok: false, code: (v && v.code) || 'not_granted', why: (v && v.why) || 'the key does not reach that conversation', target: label, ...(v && v.reach ? { reach: v.reach } : {}) };
       const backend = d.sessionKey.slice(0, d.sessionKey.indexOf(':')) || 'claude';
       let facts = null; try { facts = (await resumeFactsOf(d.sessionKey)) || null; } catch { facts = null; }
-      let archived = false; try { archived = !!isArchived(d.sessionKey); } catch { archived = false; }
+      let archived = null; try { archived = isArchived(d.sessionKey); } catch { archived = null; }
+      if (archived === null) return { ok: false, code: 'store_unread', why: 'the conversation list could not be read — whether that conversation is archived is not known; ask again once it is read', target: label };   // B-225b R3
+      archived = !!archived;
       let row = null; try { row = resumeRowOf(backend) || null; } catch { row = null; }
       const verdict = require('../resume-line.js').resumeVerdict({ ...(facts || { goal: 'unknown', timerMark: null, mode: null }), archived }, row || { resumeContinues: 'unread', headless: false });
       if (!verdict.ok) return { ok: false, code: verdict.code, why: verdict.why, target: label };

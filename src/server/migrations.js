@@ -810,8 +810,12 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       id: '2026-10-task-group-archived-members',
       note: "AN ARCHIVED CONVERSATION LEAVES ITS TASK GROUPS (lane task-group-fanout, measured 2026-10-24: 752 member keys in the lanes group, never pruned — every one rode every tasks-updated broadcast and every membership test). From this release an archive unbinds it through the store's ONE unbind writer (unbindKeys, rule task-membership membersWithout); this run prunes the keys the archive list (data/user-state.json archivedSessions — `<backend>:<id>`, or an older bare id) already names. A key whose conversation is merely not discovered yet (a machine offline at boot) is NEVER pruned. ARCHIVE FIRST: the pruned keys per group go to data/archive/task-group-archived-members.json, then the store drops them. THROUGH the live TaskGroupManager when there is one, else the file (atomic). No archive list / no store = nothing to do; an unreadable store fails by name (retried next boot).",
       run() {
-        let archived = [];
-        try { const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'user-state.json'), 'utf-8')); archived = Array.isArray(st && st.archivedSessions) ? st.archivedSessions.map(String) : []; } catch { return { archived: 0 }; }
+        // B-225b R9: the conversation list through its THREE answers — not there ⇒ nothing to do; HELD (a read that failed, bytes that
+        // are not the list) ⇒ THROWN by name, so the runner runs it again at the next start (the release returned «0 archived» here and
+        // was recorded as applied for good over a list it never read)
+        const st = require('../store-hold.js').readNow(path.join(dataDir, 'user-state.json'), { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), what: 'this migration' });
+        if (st === undefined) return { archived: 0 };
+        const archived = Array.isArray(st.archivedSessions) ? st.archivedSessions.map(String) : [];
         if (!archived.length) return { archived: 0 };
         const tm = typeof tasks === 'function' ? tasks() : tasks;
         { const held = tm && typeof tm.unreadRefusal === 'function' ? tm.unreadRefusal('this migration') : null; if (held) throw new Error(held); }   // THE STORE HELD UNREAD (lane bl-windows): a dry run over the EMPTY held store would mark it done with nothing pruned — run again at the next start

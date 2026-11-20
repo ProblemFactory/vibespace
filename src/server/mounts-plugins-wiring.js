@@ -271,7 +271,8 @@ function endedKeyOf(target) {
   if (!t || /^sess-/.test(t)) return null;   // a dead webui id names nothing durable
   const cid = t.includes(':') ? t.slice(t.indexOf(':') + 1) : t;
   let backend = t.includes(':') ? t.slice(0, t.indexOf(':')) : null, name = null;
-  const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {};
+  let st = {};   // B-225b: a HELD list names nothing (no name, no backend from it) — the doors after this ask isArchived, which answers UNKNOWN
+  try { st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; } catch (e) { if (!(e && e.code === 'store_unread')) throw e; }
   const keyed = (o) => Object.keys(o || {}).find((k) => k.endsWith(`:${cid}`));
   const known = keyed(st.customNames) || keyed(st.sessionConfigs) || keyed(st.sessionModes) || null;
   if (!backend && known) backend = known.slice(0, known.indexOf(':'));
@@ -285,7 +286,7 @@ function endedKeyOf(target) {
   try { inherited = tasks ? tasks.grantGroupsOf(groups).inherited : null; } catch { inherited = null; }   // null = could not be read (the reach refuses by name); restack 416 (r311 (d)): no store ready ⇒ unknown, as the two hooks beside it
   return { conversationId: cid, sessionKey, name, groups, inherited };
 }
-const isArchivedKey = (key) => !!(persistenceRouter && typeof persistenceRouter.isArchived === 'function' && persistenceRouter.isArchived(key));   // persistence's ONE reader (in memory; a bare-id entry answers too)
+const isArchivedKey = (key) => { if (!persistenceRouter || typeof persistenceRouter.isArchived !== 'function') return false; const a = persistenceRouter.isArchived(key); return a === null ? null : !!a; };   // null = UNKNOWN (B-225b R3: the list is held — its doors refuse by name)   // persistence's ONE reader (in memory; a bare-id entry answers too)
 const resumeRowOf = (backend) => RL_PURE.harnessRowOf(require('../backend-caps.js').capsOf(backend));
 // piece 7's seams: what a delivery's start reads of an ended conversation, through piece 4's own readers and road
 const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(key),   // which account the reopen will bill (主开发 12:46Z, the read): the conversation's STATED one (its saved settings — the
@@ -371,7 +372,7 @@ require('../routes/automation.js').registerAutomationRoutes(app, { engine: autom
   permissionNow: (cwd) => require('./permission-rules.js').resolveDefaultMode({ backend: 'claude', cwd: cwd || process.cwd() }),   // q-049 M2: the picker's 「CLI 自己的设置（现在是 X）」 — the key's first folder, else the hub's own
   callerOf: sessionCallerOf, subjects: conversationSubjects,
   // lane vault-key-row-compact: an ended grant's words — the names the sidebar kept (user-state customNames, keyed <backend>:<id>)
-  conversationNames: () => { const st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; const out = {}; for (const [k, v] of Object.entries(st.customNames || {})) if (k.includes(':') && v) out[k.slice(k.indexOf(':') + 1)] = String(v); return out; } });
+  conversationNames: () => { let st = {}; try { st = (persistenceRouter && persistenceRouter.readUserState && persistenceRouter.readUserState()) || {}; } catch (e) { if (!(e && e.code === 'store_unread')) throw e; } const out = {}; for (const [k, v] of Object.entries(st.customNames || {})) if (k.includes(':') && v) out[k.slice(k.indexOf(':') + 1)] = String(v); return out; } });
 setTimeout(() => { try { const n = automation.reconcile(); if (n) console.log(`[automation] ${n} first-use card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // r2 (verify r1): THE GATE the credential doors registered before this line ask (the account key, the mount config, the export)
 app.locals.vaultGate = require('../routes/vault.js').vaultGate({ vault, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req) });

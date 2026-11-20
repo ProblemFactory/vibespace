@@ -121,7 +121,7 @@ const OBJ = (() => { const mk = (n) => { const o = {}; for (let i = 0; i < n; i+
 // clocks; this suite's ratios were red ALONE on the serial lane, ×3.45 of 3). What a request DID is counted in a CHILD (a fresh
 // node, as B-518e's first leg: the wrapped built-ins never touch this process's own Sets): the hub's real route on a scratch
 // data dir, the scenario's pre-state imported first (uncounted), then each request with Set.prototype.add, Map.prototype.set,
-// the elements each Array.prototype.includes / indexOf walked, and the store's writes (a rename onto user-state.json) counted
+// the elements each Array.prototype.includes / indexOf walked, and the store's writes (a rename onto user-state.json, or the link that creates it) counted
 // around its handler alone — and (the cure's read) the elements the array passes walked (a filter / map / forEach / some /
 // every / find / findIndex / reduce / flatMap callback, a slice's cut) and the bytes JSON.stringify made against the bytes
 // written to the store. `items` = what the request carries (its ops, or the items of the keys it sends) + what the store held
@@ -150,18 +150,19 @@ const itemsIn = (p, b, st) => {
   const u = p === '/api/config/import' ? (((b.file || {}).sections || {}).userState || {}) : b;
   return [Object.keys(u).reduce((n, key) => n + itemsOf(u[key]), 0), Object.keys(u).reduce((n, key) => n + itemsOf(st[key]), 0)];
 };
-const add = Set.prototype.add, mset = Map.prototype.set, inc = Array.prototype.includes, iof = Array.prototype.indexOf, ren = fs.renameSync, wfs = fs.writeFileSync, str = JSON.stringify, slc = Array.prototype.slice;
+const add = Set.prototype.add, mset = Map.prototype.set, inc = Array.prototype.includes, iof = Array.prototype.indexOf, ren = fs.renameSync, lnk = fs.linkSync, wfs = fs.writeFileSync, str = JSON.stringify, slc = Array.prototype.slice;
 const CB = ['filter', 'map', 'forEach', 'some', 'every', 'find', 'findIndex', 'reduce', 'flatMap'], cbOrig = CB.map((m) => Array.prototype[m]);
 let sets = 0, scans = 0, walks = 0, writes = 0, strBytes = 0, wrote = 0;
 const walked = (a, x, from) => { const s0 = Math.max(0, Math.trunc(Number(from) || 0)), i = iof.call(a, x, s0); return i < 0 ? Math.max(0, a.length - s0) : i - s0 + 1; };
 const on = () => { Set.prototype.add = function (v) { sets++; return add.call(this, v); }; Map.prototype.set = function (k, v) { sets++; return mset.call(this, k, v); };
   Array.prototype.includes = function (x, from) { scans += walked(this, x, from); return inc.call(this, x, from); }; Array.prototype.indexOf = function (x, from) { scans += walked(this, x, from); return iof.call(this, x, from); };
   fs.renameSync = function (a, b) { if (path.basename(String(b)) === 'user-state.json') writes++; return ren.call(fs, a, b); };
+  fs.linkSync = function (a, b) { if (path.basename(String(b)) === 'user-state.json') writes++; return lnk.call(fs, a, b); };   // (B-225b: a list NOT THERE is created exclusively — its first write is a link)
   fs.writeFileSync = function (f, d, o) { if (path.basename(String(f)).startsWith('user-state.json')) wrote += typeof d === 'string' ? d.length : d && d.length ? d.length : 0; return wfs.call(fs, f, d, o); };
   JSON.stringify = function (...a) { const t = str.apply(JSON, a); if (typeof t === 'string') strBytes += t.length; return t; };
   CB.forEach((m, j) => { const o = cbOrig[j]; Array.prototype[m] = function (cb, ...a) { const f = typeof cb === 'function' ? function (...x) { walks++; return cb.apply(this, x); } : cb; return o.call(this, f, ...a); }; });
   Array.prototype.slice = function (...a) { const r = slc.apply(this, a); walks += r.length; return r; }; };
-const off = () => { Set.prototype.add = add; Map.prototype.set = mset; Array.prototype.includes = inc; Array.prototype.indexOf = iof; fs.renameSync = ren; fs.writeFileSync = wfs; JSON.stringify = str;
+const off = () => { Set.prototype.add = add; Map.prototype.set = mset; Array.prototype.includes = inc; Array.prototype.indexOf = iof; fs.renameSync = ren; fs.linkSync = lnk; fs.writeFileSync = wfs; JSON.stringify = str;
   CB.forEach((m, j) => { Array.prototype[m] = cbOrig[j]; }); Array.prototype.slice = slc; };
 const out = [];
 for (const f of FILES) {

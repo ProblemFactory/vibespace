@@ -344,7 +344,7 @@ class TaskGroupManager {
     this._archLive = new Set();
     this._archOwed = new Set();   // the census cure (finding 3): archived keys whose unbind is not on disk yet — kept OUT of the baseline
     this._archSeen = null;
-    if (typeof readUserState === 'function') { try { const st = readUserState(); this._archSeen = new Set((st && Array.isArray(st.archivedSessions) ? st.archivedSessions : []).map(String)); } catch { this._archSeen = new Set(); } }
+    if (typeof readUserState === 'function') { try { const st = readUserState(); this._archSeen = new Set((st && Array.isArray(st.archivedSessions) ? st.archivedSessions : []).map(String)); } catch (e) { this._archSeen = e && e.code === 'store_unread' ? null : new Set(); } }   // B-225b: a HELD list is no list — its first read after the lift is taken as seen, nothing unbound on a guess
     // THE STORE HELD UNREAD: `unreadNotice` = { say(words) → a handle | null (the For-you door; null/throw = not up yet — said at
     // the next try), lift(handle) } (task-groups-wiring.js); `unreadRetry` = { firstMs, maxMs } of the read again (a suite's)
     this._readUserState = readUserState;
@@ -433,8 +433,12 @@ class TaskGroupManager {
     if (existed === false && typeof readUserState === 'function') { // a store that could not be read is NOT absent: never migrated over
       // One-time legacy Groups migration (file existence is the guard: once the
       // store exists, legacy sessionGroups in user-state stay dormant).
-      try { this._migrateGroups(readUserState()); } catch { /* fresh install */ }
-      this._save({ boot: true });
+      let listHeld = false;
+      try { this._migrateGroups(readUserState()); } catch (e) { if (e && e.code === 'store_unread') listHeld = true; /* else: a fresh install */ }
+      // B-225b R9: the conversation list HELD is not «no legacy groups» — the store is not written now, so the next start (its file
+      // still absent) migrates from the list it reads; a change made before then writes it as any change does
+      if (listHeld) console.warn('[task-groups] the conversation list could not be read — the one-time legacy groups migration waits for a start that reads it');
+      else this._save({ boot: true });
     } else if (migrated) {
       this._save({ boot: true });
     }

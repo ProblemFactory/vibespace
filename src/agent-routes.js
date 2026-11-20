@@ -543,10 +543,12 @@ function resolveAgentGroup(hit, req, res) {
     // A designated Group MANAGER may target ANY group by explicit --group
     // (2.152.0, user directive: manager scope = ALL groups, not belonging) —
     // so a manager can log progress / park backlog / read `show` anywhere.
-    if (isManagerSession(key)) {
+    const mgr = isManagerSession(key);
+    if (mgr) {
       try { tasks.get(want); return want; }
       catch { res.status(404).json({ error: `no Task Group ${want} (run \`vibespace-task group-list\`)` }); return null; }
     }
+    if (mgr === null) { res.status(503).json({ error: MANAGER_UNKNOWN, code: 'store_unread' }); return null; }   // B-225b R3: by name, never «does not belong»
     res.status(403).json({ error: `this session does not belong to Task Group ${want}` });
     return null;
   }
@@ -565,10 +567,13 @@ function resolveAgentGroup(hit, req, res) {
 // (serverSetting / persistence readUserState), so per-prompt calls are cheap.
 // A webui:<id> key (backend id not yet adopted) is never a manager — the
 // toggle is stored under the backend:backendSessionId form.
+const MANAGER_UNKNOWN = 'whether this session is a Group manager is not known yet — the conversation list could not be read (nothing is written over it); ask again once it is read';
 function isManagerSession(key) {
   if (!serverSetting('agents.allowGroupManagement')) return false;
   if (!key || key.startsWith('webui:')) return false;
-  const us = (readUserState && readUserState()) || {};
+  let us;
+  try { us = (readUserState && readUserState()) || {}; }
+  catch (e) { if (e && e.code === 'store_unread') return null; throw e; }   // B-225b R3: UNKNOWN while the conversation list is held — no manager power is used on it
   return ((us.sessionConfigs || {})[key] || {}).groupManager === true;
 }
 // Taught ONCE to a designated manager session (2.152.0, user directive: the
@@ -1640,7 +1645,9 @@ app.post('/api/agent/group-admin', (req, res) => {
     if (!serverSetting('agents.allowGroupManagement')) {
       return res.status(403).json({ error: 'agent group management is disabled — the user can enable it (Settings → Integration → "Allow agents to manage Task Groups"), then designate this session as a Group manager in its Session Properties' });
     }
-    if (!isManagerSession(key)) {
+    const mgr = isManagerSession(key);
+    if (mgr === null) return res.status(503).json({ error: MANAGER_UNKNOWN, code: 'store_unread' });   // B-225b R3: by name
+    if (!mgr) {
       return res.status(403).json({ error: 'this session is not a designated Group manager — ask the user to enable the "Group manager" toggle in this session\'s Properties (session key: ' + key + ')' });
     }
     // Path allowlist: contextDir/folders must resolve under a configured root

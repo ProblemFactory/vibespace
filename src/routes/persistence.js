@@ -15,6 +15,7 @@ const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollb
 const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window): one desktop restored alone takes its windows back from the others
 const { namedTwinIn } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window r3): the point that still names a nameless window's conversation
 const { noteDupsLeft } = require('../lib/desktop-record.js'); // PURE (r4 K, inc-mw1ogdno-5jny): a desktop's dedup trace never names a window its record lists
+const SH = require('../store-hold.js'); // B-225b (lane lg-store-writes): a store that could not be read has NO VALUE — its one read, hold and write
 const UO = require('../user-state-ops.js'); // PURE (lane sidebar-echo-order, inc-mwbn2xp8-ks0b): user state by item, in the server's order (stateRev within a life, stateEpoch)
 const { normalizeCustomThemes } = require('../custom-theme-normalize.js'); // PURE (lane cache-warmth-ramp r3): a value a theme derivation superseded is dropped at the store's ONE writer
 const { personOnlyDoor } = require('./account-tails.js');   // B-ee0a: the no-vault export of credentials asks the person verdict first
@@ -597,11 +598,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.archiveSession = (key) => {
     const k = String(key || '');
     if (!k || !k.includes(':')) return { ok: false, code: 'bad_args', why: 'an archive key is <backend>:<conversation id>' };
-    const cur = readUserState();
-    const list = Array.isArray(cur.archivedSessions) ? cur.archivedSessions : [];
-    const bare = k.slice(k.indexOf(':') + 1);
-    if (list.some((x) => String(x) === k || String(x) === bare)) return { ok: true, already: true };
-    writeUserState({ ...cur, archivedSessions: [...list, k] });
+    try {
+      const cur = readUserState();
+      const list = Array.isArray(cur.archivedSessions) ? cur.archivedSessions : [];
+      const bare = k.slice(k.indexOf(':') + 1);
+      if (list.some((x) => String(x) === k || String(x) === bare)) return { ok: true, already: true };
+      writeUserState({ ...cur, archivedSessions: [...list, k] });
+    } catch (e) { if (e && (e.code === 'store_unread' || e.code === 'store_appeared')) return { ok: false, code: e.code, why: e.message }; throw e; }   // B-225b: by name
     return { ok: true, already: false };
   };
 
@@ -610,7 +613,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.isArchived = (key) => {
     const k = String(key || '');
     if (!k) return false;
-    const list = (_userStateCache || readUserState()).archivedSessions;
+    let st;
+    try { st = _userStateCache || readUserState(); }
+    catch (e) { if (e && e.code === 'store_unread') return null; throw e; }   // B-225b R3: UNKNOWN while the list is held — a door that acts for nobody refuses on it by name
+    const list = st.archivedSessions;
     const bare = k.includes(':') ? k.slice(k.indexOf(':') + 1) : k;
     return Array.isArray(list) && list.some((x) => String(x) === k || String(x) === bare);
   };
@@ -708,6 +714,19 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   // ── User State ──
   const USER_STATE_FILE = path.join(dataDir, 'user-state.json');
+  // B-225b (lane lg-store-writes — 主开发's shape of 2026-11-20 04:37Z, R1–R3, R6, R12): THE CONVERSATION LIST'S HOLD (src/store-hold.js).
+  // A read that FAILED, or bytes that are not the list, is HELD and has NO VALUE: no door serves its defaults (R2 — 503 store_unread,
+  // by name), nothing writes over it (R1 — its one write refuses), the readers inside the hub get UNKNOWN (R3 — isArchived answers
+  // null and the doors that act for nobody refuse on it by name). A list NOT THERE writes nothing: the defaults live in memory and the
+  // first real change CREATES the file exclusively (R6 — a file that appeared since is read and adopted, the change refused by name).
+  // A hold begins only at the START (R12): once read, the copy in memory is the list. THE LIFT IS A CHANGE (userStateAgain).
+  let _userStateRead = false;
+  const userStateHold = SH.create({
+    file: USER_STATE_FILE,
+    valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
+    onLift: () => userStateAgain('its hold lifted'),
+    onSaid: (h) => console.warn(`[user-state] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the conversation list is HELD: nothing is written over it, its doors refuse by name until it reads`),
+  });
   // lane sidebar-echo-order (inc-mwbn2xp8-ks0b): user state BY ITEM, IN THE SERVER'S ORDER — the ops (src/user-state-ops.js, PURE,
   // shared with the page), the write counter `stateRev` and the server's LIFE `stateEpoch` (round 2, law 3: one id per process
   // start — the counter orders states within one life; a restore of an older file, a LOWER counter, always restarts the hub,
@@ -752,7 +771,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
   const userStateParts = (st, draft = null) => userStateTexts(st, draft).parts;
   /** user-state.json written whole — the ONE call both writers make (a state, or the facts alone): its texts, for the broadcast */
-  const writeUserStateFile = (st, draft) => { const texts = userStateTexts(st, draft); writeJsonAtomic(USER_STATE_FILE, { [TEXT_PARTS]: texts.parts }); return texts; };
+  // B-225b: THROUGH THE HOLD'S ONE WRITE — it refuses a held list by name (R1), creates a list NOT THERE exclusively (R6: a file that
+  // appeared since is adopted and every page told, this change refused by name — 409 store_appeared), every temp name with the pid
+  const writeUserStateFile = (st, draft) => {
+    const texts = userStateTexts(st, draft);
+    try { userStateHold.write(st, texts.parts); }
+    catch (e) { if (e && e.code === 'store_appeared') userStateAgain('a file appeared where the start found none'); throw e; }
+    return texts;
+  };
   const userStateText = (st, draft = null) => userStateParts(st, draft).join('');
   /** what a client is told: the store minus the server's facts, plus the server's life */
   const wireOf = (st) => { const { [UO.FACTS_KEY]: _f, [UO.CLOCK_KEY]: _c, ...rest } = st || {}; return { ...rest, [UO.EPOCH_KEY]: userStateEpoch() }; };
@@ -897,19 +923,34 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // normalizer's own rewrite (legacy refs, a stored junk key) is tried on its own and, should the disk refuse it, said once — never
     // the default served for a write that failed (a hub booting on a full disk or a read-only data dir served an empty sidebar,
     // and the next write persisted it)
-    let rawText = null, parsed = null;
-    try { rawText = fs.readFileSync(USER_STATE_FILE, 'utf-8'); parsed = JSON.parse(rawText); } catch { parsed = null; }
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) { _userStateCache = { ...USER_STATE_DEFAULT }; return _userStateCache; }
+    // B-225b: THROUGH THE HOLD — read once at the start; a HELD list answers the refusal by name (store_unread) and nothing else (R2:
+    // never the defaults under its name — the release served them and the next write saved them over the person's list)
+    if (!_userStateRead) { _userStateRead = true; userStateHold.readAtStart(); }
+    const parsed = userStateHold.answer();
+    const rawText = userStateHold.takeText();
+    if (parsed === undefined) { _userStateCache = { ...USER_STATE_DEFAULT }; return _userStateCache; }   // NOT THERE (R6): the defaults in memory, nothing written
     _userStateCache = normalizeUserState(parsed);
     if (UO.revOf(parsed)) _userStateCache[UO.REV_KEY] = UO.revOf(parsed);   // the counter survives a restart (the file holds it)
     const mark = Number(parsed[UO.CLOCK_KEY]);
     if (Number.isSafeInteger(mark) && mark > 0) { _userStateCache[UO.CLOCK_KEY] = mark; if (mark > _userStateClockMark) _userStateClockMark = mark; }   // the hub's clock mark survives too
     _userStateFacts.load(parsed[UO.FACTS_KEY]);   // as read (pruned only at a write)
-    if (userStateText(_userStateCache) !== String(rawText).trim()) {
-      try { writeJsonAtomic(USER_STATE_FILE, userStateText(_userStateCache)); }
+    if (rawText != null && userStateText(_userStateCache) !== String(rawText).trim()) {
+      try { userStateHold.write(_userStateCache, userStateText(_userStateCache)); }
       catch (e) { if (!_userStateReadOnlySaid) { _userStateReadOnlySaid = true; console.warn('[user-state] the normalized state could not be written back — it is served as read:', (e && (e.code || e.message)) || e); } }
     }
+    try { userStateHold.set(_userStateCache); } catch { /* not held here */ }   // (the hold keeps the list in memory, never a second copy of what was read)
     return _userStateCache;
+  }
+
+  /** the list read again WHOLE (its hold lifted, or a file appeared where the start found none): a NEW life — every page takes it
+   *  whatever its number (the life's rule) — and the write hook runs on it (the archived list the groups judge). R11's «the lift is a change» */
+  function userStateAgain(why) {
+    _userStateCache = null; _userStateEpoch = null;
+    let st;
+    try { st = readUserState(); } catch (e) { console.warn(`[user-state] the list could not be read again (${why}): ${(e && e.message) || e}`); return; }
+    console.log(`[user-state] the conversation list is read again (${why})`);
+    broadcastText(() => `{"type":"user-state-updated","state":${JSON.stringify(wireOf(st))}}`);
+    try { onUserStateWrite(st); } catch (e) { console.warn('[user-state] write hook failed:', e && e.message); }
   }
 
   function writeUserState(data, { facts = null, decided = null, writer = null, omits = false, whole = false, maxMoves = Infinity } = {}) {
@@ -955,7 +996,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }); };
   router.use('/api/user-state/batches', userStateBody(UO.MAX_BODY_BYTES));
   { const layer = router.stack[router.stack.length - 1]; router.ownsBody = (p) => layer.regexp.test(p); }   // (the parser's own layer: ONE match)
-  router.get('/api/user-state', (req, res) => res.json(wireOf(readUserState())));   // lane sidebar-echo-order: + stateEpoch, − stateBatches
+  /** B-225b: a store's refusal BY NAME — held ⇒ 503 store_unread {held: file, kind, code, since, rung} (R2: never a 200 with the
+   *  defaults); a file that appeared since the start ⇒ 409 store_appeared. → true when answered */
+  const storeRefused = (res, e) => {
+    if (!e || (e.code !== 'store_unread' && e.code !== 'store_appeared')) return false;
+    res.status(e.status || 503).json({ error: e.message, code: e.code, ...(e.held ? { held: e.held } : {}) });
+    return true;
+  };
+  router.get('/api/user-state', (req, res) => {   // lane sidebar-echo-order: + stateEpoch, − stateBatches
+    let st; try { st = readUserState(); } catch (e) { if (storeRefused(res, e)) return; throw e; }
+    res.json(wireOf(st));
+  });
 
   router.post('/api/user-state', (req, res) => {
     const data = req.body;
@@ -963,6 +1014,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // (an older page before its first fetch POSTs its whole copy — round 10: its gaps are no acts. MASTER'S ROAD (round 13): it takes
     // what master takes — no bound master does not have; past MAX_WHOLE_MOVES changed items the write is ONE record a key naming the items it changed — round 14)
     try { writeUserState(data, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) {
+      if (storeRefused(res, e)) return;
       return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` });
     }
     res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });
@@ -989,8 +1041,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       return res.status(400).json({ error: 'ops go to PATCH /api/user-state/batches — this door takes whole top-level keys' });
     // MASTER'S ROAD (round 13): an older page's whole key takes what master takes — no bound master does not have; past MAX_WHOLE_MOVES
     // changed items the write is ONE record a key naming the items it changed (round 14 — never a refusal)
-    readUserState();
-    try { writeUserState({ ...readUserState(), ...data }, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) { return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` }); }
+    try { writeUserState({ ...readUserState(), ...data }, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) { if (storeRefused(res, e)) return; return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` }); }
     res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });
   });
   // THE OPS DOOR: each op judged against its slot's fact — THE LATER ACT WINS (round 7): applied when no other writer changed the
@@ -1006,7 +1057,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // (its body is read at most MAX_BODY_BYTES at its parser, below — round 12, law C: a header no longer decides it)
     const r = UO.parseRequest(batches);
     if (r.error) return res.status(400).json({ error: r.error, code: r.code || 'malformed' });   // (round 9: a CODE the page words in the person's language)
-    const cur = readUserState();   // the facts are loaded WITH the state — the first request of a new process may be a re-send
+    let cur;   // the facts are loaded WITH the state — the first request of a new process may be a re-send
+    try { cur = readUserState(); } catch (e) { if (storeRefused(res, e)) return; throw e; }   // B-225b R4: held ⇒ refused by name, the page keeps its acts pending
     const now = userStateNow();
     // round 7: THE LATER ACT WINS — each op judged against its slot's fact by the act's age (UO.judgeRequest)
     const j = UO.judgeRequest(_userStateFacts.draft(), r.page, r.list, cur, now);
@@ -1018,7 +1070,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (UO.changedKeys(cur, next).length) writeUserState(next, { facts: j.facts, decided: j.decided, writer: last });
       else if (j.decided.size) writeUserFacts(j.facts, now);
     }
-    catch (e) { return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'}) — nothing was applied` }); }
+    catch (e) { if (storeRefused(res, e)) return; return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'}) — nothing was applied` }); }
     const of = (k) => j.verdicts.filter((v) => v.verdict === k).map((v) => v.id);
     const named = (k) => j.verdicts.filter((v) => v.verdict === k).map((v) => ({ batch: v.id, error: v.problem, code: v.code || null }));
     answer({ applied: of('applied'), held: of('held'), superseded: of('superseded'), old: named('old'), refused: named('refused'), dropped: j.verdicts.filter((v) => v.dropped && v.dropped.length).map((v) => ({ batch: v.id, ops: v.dropped })) });

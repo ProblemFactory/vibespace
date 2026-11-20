@@ -28,6 +28,9 @@ function kindOf(a) {
   return code === 'EACCES' || code === 'EPERM' ? 'not-allowed' : 'unreadable';
 }
 
+/** ONE sync read of the file → store-read's input ({ text } | { error }) — the start's read and the read back of a file that appeared */
+function readSync(file) { try { return { text: fs.readFileSync(file, 'utf8') }; } catch (error) { return { error }; } }
+
 /** a named refusal (an Error with the HTTP status and the hold's facts) */
 function unreadError(file, held, what) {
   const words = `${what ? `${what} was refused: ` : ''}${path.basename(file)} could not be read (${held.kind}${held.code ? `, ${held.code}` : ''}) — nothing is written over it`;
@@ -44,6 +47,7 @@ function unreadError(file, held, what) {
 function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, schedule = null } = {}) {
   if (!file) throw new Error('store-hold: file is required');
   let value;                 // the document (undefined: none — held, or not read yet)
+  let text = null;           // the bytes the value was read from, until the caller takes them once (takeText: its normalizer compares)
   let held = null;           // { kind, code, why, since, rung }
   let missing = false;
   let tries = 0, timer = null, inflight = null, stopped = false;
@@ -52,9 +56,9 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
 
   /** THE READ AT THE START (sync — a start reads its stores before it serves). → 'data' | 'missing' | 'held' */
   function readAtStart() {
-    let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
+    const read = readSync(file);
     const a = answerOf(read);
-    if (a.state === 'data') { value = a.value; missing = false; return 'data'; }
+    if (a.state === 'data') { value = a.value; text = read.text; missing = false; return 'data'; }
     if (a.state === 'missing') { missing = true; return 'missing'; }
     held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' };
     tries = 0; arm();
@@ -74,7 +78,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     tries++;
     const a = answerOf(read);
     if (a.state === 'data') {
-      const was = held; held = null; value = a.value; missing = false; tries = 0;
+      const was = held; held = null; value = a.value; text = read.text; missing = false; tries = 0;
       try { onLift?.(value, was); } catch (e) { log.warn?.(`[store-hold] ${path.basename(file)}: its lift's hooks failed: ${(e && e.message) || e}`); }
       return true;
     }
@@ -91,22 +95,24 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function refuseIfHeld(what) { if (held) throw unreadError(file, held, what); }
 
   /** THE ONE WRITE (R1, R10): refuses a store with no value BY NAME; whole bytes, a pid temp name, then the rename — or, for a store
-   *  that read `missing`, an EXCLUSIVE create (R6: a file found there is read and adopted, the change refused by name). → true */
-  function write(next, text) {
+   *  that read `missing`, an EXCLUSIVE create (R6: a file found there is read and adopted, the change refused by name). `bytes`: the
+   *  text, or its PARTS in order (a large store's text is never joined — the conversation list's state and its facts), else the
+   *  value's JSON. → true */
+  function write(next, bytes) {
     if (held) throw unreadError(file, held, 'this change');
-    const bytes = typeof text === 'string' ? text : JSON.stringify(next, null, 2);
+    const parts = Array.isArray(bytes) ? bytes : [typeof bytes === 'string' ? bytes : JSON.stringify(next, null, 2)];
     const tmp = `${file}.${process.pid}.tmp`;
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(tmp, bytes);
+    for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });
     if (missing) {
       try { fs.linkSync(tmp, file); }
       catch (e) {
         try { fs.unlinkSync(tmp); } catch { /* gone */ }
         if (e && e.code === 'EEXIST') {   // a file arrived where the read found none (a late mount): adopted, never written over
           missing = false; value = undefined;
-          let read; try { read = { text: fs.readFileSync(file, 'utf8') }; } catch (error) { read = { error }; }
+          const read = readSync(file);
           const a = answerOf(read);
-          if (a.state === 'data') value = a.value; else { held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' }; tries = 0; arm(); }
+          if (a.state === 'data') { value = a.value; text = read.text; } else { held = { kind: kindOf(a), code: a.code || null, why: a.why || null, since: now(), rung: 'silent' }; tries = 0; arm(); }
           throw Object.assign(new Error(`${path.basename(file)} appeared since the start — it is read and kept; this change was not made`), { status: 409, code: 'store_appeared' });
         }
         throw e;
@@ -114,18 +120,31 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
       try { fs.unlinkSync(tmp); } catch { /* the link stands */ }
       missing = false;
     } else fs.renameSync(tmp, file);
-    value = next;
+    value = next; text = null;
     return true;
   }
   /** the caller's in-memory value after a change it will write (the copy in memory is the truth while it exists — R12) */
-  function set(next) { if (held) throw unreadError(file, held, 'this change'); value = next; }
+  function set(next) { if (held) throw unreadError(file, held, 'this change'); value = next; text = null; }
+  /** the bytes of the last read, ONCE (null after) — a large store's text is not kept beside its value */
+  function takeText() { const t = text; text = null; return t; }
   function stop() { stopped = true; if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; } }
 
   return {
-    readAtStart, readAgain, answer, refuseIfHeld, write, set, stop,
+    readAtStart, readAgain, answer, refuseIfHeld, write, set, takeText, stop,
     held: () => (held ? { file: path.basename(file), kind: held.kind, code: held.code, since: held.since, rung: held.rung } : null),
     isMissing: () => missing, file,
   };
 }
 
-module.exports = { create, kindOf, unreadError, SILENT_RUNGS_MS, LADDER };
+/** ONE read through the three answers, for a reader with no hold of its own (a boot migration — R9): the value; `undefined` when the
+ *  file is not there; anything else THROWS by name (store_unread) — never the defaults (the migration runner records a plain return
+ *  as applied for good, a throw runs again at the next start) */
+function readNow(file, { valid = () => true, parse = JSON.parse, now = Date.now, what = null } = {}) {
+  const read = readSync(file);
+  const a = SR.storeAnswer(read, { parse, valid });
+  if (a.state === 'data') return a.value;
+  if (a.state === 'missing') return undefined;
+  throw unreadError(file, { kind: kindOf(a), code: a.code || null, since: now(), rung: 'said' }, what);
+}
+
+module.exports = { create, readNow, kindOf, unreadError, SILENT_RUNGS_MS, LADDER };

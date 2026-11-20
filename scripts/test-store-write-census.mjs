@@ -80,7 +80,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSess
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
 // B-48a4 (the exit door's cost; restacked on 2.369.410): the two audit rings onto the store writer through ONE appender — device-audit.js's
 // 3 and exit-proxy.js audit's 3 go to zero; every save of hosts.json through the store writer — hosts.js _save's 2 go to zero ⇒ 881 − 8 = 873
-const DEBT_MAX = 855;   // (moved onto bl-vault's 598d4ba7c: 857 − 2 = 855) lane lg-store-writes U5b (B-0248): −2 — src/server/browser-keeper.js's registry save through the writer (the write and its mkdir). Was 863 (moved onto checkpoint 60 + bl-jobs d17441191: 863 − 2 = 861) Before: (moved onto bl-vault's 598d4ba7c: 859 − 2 = 857) lane lg-store-writes U5 (B-0248): −2 — src/task-groups.js's store save through the writer. Was 865 (moved onto checkpoint 60 + bl-jobs d17441191: 865 − 2 = 863) Before: lane lg-store-writes U4 (B-0248), moved onto bl-vault's 598d4ba7c: −3 — src/jobs.j
+const DEBT_MAX = 853;   // lane lg-store-writes (B-225b, the persistence holds — cut 2): −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 855 -2 = 853]
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -177,7 +177,7 @@ const ROWS = [
   ["src/remote-fs.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/routes/editor.js","*",2,"not-a-store","—","—","a person's own file (the editor's save)"],
   ["src/routes/files.js","*",21,"not-a-store","—","—","a person's own files (the file explorer); ckpt61 cure 3: + the archive entry's temp folder removed on its two new refusals (a reader that never started, a write that failed)"],
-  ["src/routes/persistence.js","*",26,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26)"],
+  ["src/routes/persistence.js","*",24,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26)"],
   ["src/safe-fs-worker.js","*",15,"not-main","—","—","the SafeFs worker thread"],
   ["src/search-index-worker.js","*",3,"not-main","—","—","the search index worker thread"],
   ["src/secret-box.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
@@ -2176,6 +2176,46 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       fs.writeFileSync(F, SEED);
       tried(() => h.write({ v: 1, kept: 'a first-run default' }));
       ok(fs.readFileSync(F, 'utf8') !== SEED, 'CONTROL (the exclusive create cut, in a copy): the first-run default is renamed OVER the real file that arrived late (red)');
+    }
+    // (d) THE CONVERSATION LIST ON THE HOLD (cut 2 — src/routes/persistence.js, data/user-state.json; R1–R3, R6): a list the start
+    // could not read answers every door by NAME (503 store_unread — never a 200 with the defaults), nothing is written over it, and
+    // isArchived is UNKNOWN (null — the deliveries' wake and the automation verbs refuse on it by name); the read again LIFTS it: the
+    // list served, every page told (a user-state-updated frame). A list NOT THERE writes nothing at the read; its first change creates
+    // it. RED (anchored, in a copy): the hold's answer cut — the release's read: the defaults served under the list's name.
+    {
+      const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+      const CID = 'aaaaaaaa-0000-4000-8000-0000000000d1', KEY = 'claude:' + CID;
+      const LIST = JSON.stringify({ archivedSessions: [KEY], customNames: { [KEY]: 'the person\'s name' } });
+      const fresh = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
+      const listScene = (P, tag, { bytes = LIST, code = 'EIO' } = {}) => {
+        const d = scratchDir('hold-list-' + tag); roots.push(d); const F = path.join(d, 'user-state.json');
+        if (bytes != null) fs.writeFileSync(F, bytes);
+        const sent = [];
+        const boot = () => P.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => sent.push(String(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        if (code) failing(F, code, boot); else boot();
+        const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
+        const call = (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
+        return { F, d, sent, call, P };
+      };
+      const L = listScene(fresh(), 'eio');
+      const g = L.call('get', '/api/user-state'), po = L.call('post', '/api/user-state', { archivedSessions: [], customNames: {} });
+      const pa = L.call('patch', '/api/user-state', { customNames: {} }), ba = L.call('patch', '/api/user-state/batches', { batches: [{ batch: 'pgholdlist01:1', age: 0, ops: [] }] });
+      const arch = L.P.router.isArchived(KEY), ar = L.P.router.archiveSession('claude:bbbbbbbb-0000-4000-8000-0000000000d2');
+      ok(g.status === 503 && g.body && g.body.code === 'store_unread' && g.body.held && g.body.held.kind === 'unreadable' && g.body.held.file === 'user-state.json'
+        && [po, pa].every((x) => x.status === 503 && x.body && x.body.code === 'store_unread') && ba.status === 503 && ba.body && ba.body.code === 'store_unread' && arch === null && ar && ar.ok === false && ar.code === 'store_unread'
+        && fs.readFileSync(L.F, 'utf8') === LIST, '⑪ (d) a conversation list the start could NOT read: every door answers 503 store_unread BY NAME (the read, the whole doors, the ops door), isArchived is UNKNOWN (null), the archive verb refuses by name — and the file is untouched', { get: g.status, post: po.status, patch: pa.status, batches: ba.status, arch, ar });
+      const lifted = await (async () => { for (let i = 0; i < 100; i++) { const r = L.call('get', '/api/user-state'); if (r.status === 200) return r; await new Promise((res) => setTimeout(res, 50)); } return null; })();
+      ok(!!lifted && Array.isArray(lifted.body.archivedSessions) && lifted.body.archivedSessions.includes(KEY) && L.P.router.isArchived(KEY) === true && L.sent.some((t) => t.startsWith('{"type":"user-state-updated"') && t.includes(CID)) && fs.readFileSync(L.F, 'utf8').includes(CID),
+        '⑪ (d) the read again (the first silent rung, ≈1 s) LIFTS it: the person\'s list is served, an archived conversation answers archived, every page is told (user-state-updated)', { lifted: lifted && lifted.status, frames: L.sent.length });
+      const N = listScene(fresh(), 'missing', { bytes: null, code: null });
+      const ng = N.call('get', '/api/user-state'), nothing = !fs.existsSync(N.F);
+      const nw = N.call('patch', '/api/user-state', { customNames: { [KEY]: 'a first name' } });
+      ok(ng.status === 200 && nothing && nw.status === 200 && JSON.parse(fs.readFileSync(N.F, 'utf8')).customNames[KEY] === 'a first name', '⑪ (d) a list NOT THERE: the defaults are served and NOTHING is written at the read; the first real change creates the file', { get: ng.status, nothing, write: nw.status });
+      const ANS_A = "    const parsed = userStateHold.answer();\n";
+      ok(PSRC.split(ANS_A).length === 2, 'control setup: the list\'s read through the hold\'s answer is found once in src/routes/persistence.js');
+      const X = listScene(mutantCopies('swc-list-cut', REPO).load(PREL, anchored(PSRC, ANS_A, "    let parsed; try { parsed = userStateHold.answer(); } catch { parsed = undefined; }   /* MUTANT: the release — a list it could not read is served as the defaults */\n", 'list-cut'), 'list-cut'), 'eio-red');
+      const xg = X.call('get', '/api/user-state');
+      ok(xg.status === 200 && Array.isArray(xg.body.archivedSessions) && xg.body.archivedSessions.length === 0 && X.P.router.isArchived(KEY) === false, 'CONTROL (the hold\'s answer cut, in a copy — the release): the list it could not read is served as the DEFAULTS (an empty sidebar) and the archived conversation answers «not archived» — a delivery would wake it (red)', { get: xg.status, n: xg.body && xg.body.archivedSessions && xg.body.archivedSessions.length });
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
