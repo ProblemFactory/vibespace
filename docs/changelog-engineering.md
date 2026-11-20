@@ -13,6 +13,7 @@ This file is the engineers' record of every release: the lanes, the verification
 - LEGS: test-queue-putback §6b (fast) — the file at the moment each record is said; a MADE RESTART at +50 ms rebuilds the Queued bubble + strip row; edit / removal / hand-over first in the file; a turn's init / running / result in the file when said; MUTANTS (the base whole) red. test-claude-steer-chrome §B ⑧c / ⑧d / ⑧e (heavy): restarts MADE 50 ms after a hold / a turn's end / a turn's start, each reading the wrapper's file at that instant, then the page. test-queue-putback's row restated 0.2 → 3.5 s (measured 3.4 s), the fast cap 1519 → 1523 s.
 - FOUND, NOT MINE: the hub trims its own in-memory buffer to 500 KB past 750 KB with no pin on held copies (src/server/stdout/claude-stream-json.js:523) — a held copy can go before the first page attach; records said in the few ms between a hub's boot read and its dtach attach are lost (dtach replays nothing); pipe sessions (off by default) draw no held copy after a restart.
 
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
