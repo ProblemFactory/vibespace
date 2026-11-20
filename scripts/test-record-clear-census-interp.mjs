@@ -122,7 +122,10 @@ const I_SINKS = [
   ['todo', (c) => /(^|\.)(userTodos|todos)(\(\))?\.add$/.test(c) || /(^|\.)(notifyUser|_forYou|_forYouDep|forYouDep)$/.test(c), 'a For-you item — a DERIVED record when made from another record\'s words'],   // r4: the door calls the dep it HOLDS (`this._forYouDep`); r6: held off the object graph, read into `forYouDep`
   ['activity', (c) => /(^|\.)addProgress$/.test(c), 'an Activity entry'],
   ['status', (c) => /(^|\.)(pushNotice|setByAgent|setByUser|noteEvent)$/.test(c), 'a status entry / a notice queued for the agent\'s next turn'],
-  ['peer', (c) => /(^|\.)(deliverToConversation|_notifyOwner|_deliverTo|postToPeer|emitPeerCard|injectPeerCard|feedPeerCard)$/.test(c), 'a delivery into a conversation (the agent\'s context + the chat card drawn for it)'],
+  // B-95fc (the candidate's hosted red, 主开发 r594): the device's peer-post op hands its text to the SHARED body peerPostAnswer
+  // (src/peer-messaging.js — it waits for the inbox, then posts): a peer delivery door by its own name, so the field read in its
+  // argument is judged as the device's post always was
+  ['peer', (c) => /(^|\.)(deliverToConversation|_notifyOwner|_deliverTo|postToPeer|peerPostAnswer|emitPeerCard|injectPeerCard|feedPeerCard)$/.test(c), 'a delivery into a conversation (the agent\'s context + the chat card drawn for it)'],
   ['console', (c, rel) => iIsLib(rel) && (/^console\.(warn|error)$/.test(c) || /^(window\.)?__vsOp$/.test(c)), 'the incident recorder\'s console ring (400 chars a line) and op ring (`window.__vsOp` breadcrumbs) → an incident bundle a capture writes, even after the clear'],
   ['sentence', (c, rel) => !iIsLib(rel) && /^(res|r|reply)(\.status\([^)]*\))?\.(send|end)$/.test(c), 'a route\'s text answer (→ a client toast)'],
   // verify r8 ③: the journal is NOT a class that reaches no client — every server console line rides the in-memory ring
@@ -712,7 +715,7 @@ const I_SITES = {
   'src/agent-routes/status.js|todo|add.options': ['own', 'the agent files its own item'],
   'src/agent-routes.js|activity|req.body.note': ['own', 'the agent\'s own Activity entry'],
   'src/agent-routes.js|activity|req.body.detail': ['own', 'the agent\'s own Activity entry'],
-  'src/agentd/agentd.js|peer|msg.text': ['transcript', 'the device posts the delivered text into the CLI\'s inbox'],
+  'src/agentd/agentd.js|peer|msg.text': ['transcript', 'the device posts the delivered text into the CLI\'s inbox (through the shared body peerPostAnswer since B-95fc: it waits for the inbox, then posts)'],
   'src/jobs.js|peer|a.text': ['transcript', 'the notify action\'s own text delivered to the owner conversation'],
   'src/jobs.js|todo|job.name': ['cascade', 'a For-you item filed by the job (failed / parked / missed / needs input) carries its jobId — the job\'s clear cascades to it'],
   'src/jobs.js|todo|a.text': ['cascade', 'the notify action\'s For-you item carries the jobId — cleared with the job (r3: the --text rides `_forYou`, the one door)'],
@@ -890,6 +893,10 @@ console.log('§I controls: one planted interpolation per class, each RED on its 
     ok(pre !== src, 'I control 19b (notify-rate-keeps-text) anchors present');
     const m = MUT.write(rel, pre, 'notify-rate-keeps-text');
     ok(!iNotifyDigest(fs.readFileSync(m, 'utf8')), 'CONTROL 19b (verify r9 ⑥): the pre-r9 jobs notify floor (the last notification\'s text kept per conversation) is RED'); }
+  // CONTROL 20 (B-95fc, the candidate's hosted red, 主开发 r594): the device's post through the SHARED body is judged by its own name —
+  // ANOTHER record field put into peerPostAnswer's argument is RED by name (a read with no class), never unseen
+  { const rel = 'src/agentd/agentd.js', m = plant(20, rel, "peerPostAnswer({ cid: msg.cid, text: msg.text, inboxWaitMs: msg.inboxWaitMs }", "peerPostAnswer({ cid: msg.cid, text: msg.text + ' (' + msg.name + ')', inboxWaitMs: msg.inboxWaitMs }", 'peer-post-names-a-record');
+    const c = judge(rel, m); ok(c.bad.length === 1 && /agentd\.js\|peer\|msg\.name .*no class/.test(c.bad[0]), 'CONTROL 20 (B-95fc): another record field handed to the device\'s peer-post body (peerPostAnswer) is RED by name — the shared body is a peer delivery door', c.bad); }
   for (const row of copiesCensus(MUT.files, MUT.dir, ROOT, { minCopies: 20, label: '§I ' })) ok(row.pass, row.name, row.detail);   // §I's own copies (46 in the whole suite before the split, 26 by §H6's end)
 }
 
