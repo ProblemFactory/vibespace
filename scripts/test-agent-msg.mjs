@@ -76,23 +76,70 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   remoteResult = { ok: false, reason: 'no live inbox on this machine' };
   const r3 = await D.deliverToConversation('cid-remote', 'yo2');
   ok(!r3.ok && r3.lane === 'remote-message' && r3.reason, 'remote miss reports honestly');
-  // B-6721 (round w8g2bt5bs's should): the remote rung says `unanswered` ONLY when the request LEFT and no answer came (the hub's
-  // own request timeout, a link lost) — the stash's wake chain then ends rather than post again; never a capability gate, a policy
-  // refusal or an error the device ANSWERED (nothing was posted). RED: the previous shape (any throw after the turn was armed)
-  const throwingWith = async (DD, err) => { const was = fakeHosts.device; fakeHosts.device = async () => ({ peerPost: async () => { throw err; } }); try { return await DD.deliverToConversation('cid-remote', 'yo3'); } finally { fakeHosts.device = was; } };
+  // B-6721 (round w8g2bt5bs's should; the move check w3pnpw53m's MUST): the remote rung says `unanswered` ONLY when the request LEFT
+  // and no answer came — and both «left, no reply» shapes are MADE BY THE CLIENT'S OWN CODE: the REAL DeviceManager (src/agentd/client.js)
+  // over the stream transport talks to a stand-in DEVICE on the real Mux, which (a) never answers the peer-post (the client's own
+  // bound fires — its op name and its words) or (b) drops the link with the request pending (the client's own close path rejects it).
+  // Never `unanswered`: (c) an error the device ANSWERED, (d) a device without the capability (nothing left). RED: the previous shape.
+  const { Mux, PROTO_VERSION } = require(REPO + '/src/agentd/mux.js');
+  const { DeviceManager } = require(REPO + '/src/agentd/client.js');
+  const net = require('node:net');
+  const deviceThat = async (onPost, caps = ['peer-post']) => {
+    let smux = null;
+    const srv = net.createServer((sock) => {
+      smux = new Mux(sock, { onControl: (m) => { if (m.op === 'hello') smux.control({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '1.1.1', capabilities: caps, platform: 'linux' }); else if (m.op === 'peer-post') onPost(m, smux, sock); }, onData: (c, b) => smux.credit(c, b.length), onDead: () => { } });
+    });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const s = await new Promise((res, rej) => { const c = net.connect(srv.address().port, '127.0.0.1'); c.on('connect', () => res(c)); c.on('error', rej); });
+    const dm = new DeviceManager({ dataDir: dir, bundlePath: path.join(dir, 'no-bundle-here.js'), version: '1.1.1', log: () => { }, transport: { kind: 'stream', hostToken: 'vsht_x', getStream: () => s } });
+    await dm.connect();   // the link is up BEFORE the post (the bound shortened below is the request's own, never the handshake's)
+    return { dm, close: () => { try { dm.stop(); } catch { } try { s.destroy(); } catch { } try { srv.close(); } catch { } } };
+  };
+  // `short`: ONLY where the device never answers — peer-post's OWN 15 s bound (client.js peerPost) shortened in time only; every other
+  // case keeps the real bound (its close or its answer comes first — a 40 ms bound for all lost those races on a loaded test machine)
+  const throughDevice = async (DD, onPost, caps, { short = false } = {}) => {
+    const dev = await deviceThat(onPost, caps);
+    const was = fakeHosts.device; fakeHosts.device = async () => dev.dm;
+    const realST = globalThis.setTimeout;
+    if (short) globalThis.setTimeout = (fn, ms, ...a) => realST(fn, ms === 15000 ? 40 : ms, ...a);
+    try { return await DD.deliverToConversation('cid-remote', 'yo3'); } finally { globalThis.setTimeout = realST; fakeHosts.device = was; dev.close(); }
+  };
   const uaOf = async (DD) => ({
-    timeout: await throwingWith(DD, new Error('peer-post timeout')), lost: await throwingWith(DD, Object.assign(new Error('device link lost'), { code: 'link_lost' })),
-    gate: await throwingWith(DD, new Error('daemon lacks peer-post (capabilities gate)')), answered: await throwingWith(DD, new Error('no live inbox on this machine')),
+    timeout: await throughDevice(DD, () => { }, undefined, { short: true }),   // (a) the device never answers: the client's own bound
+    lost: await throughDevice(DD, (m, mux, sock) => setImmediate(() => sock.destroy())),   // (b) the link drops with the request pending
+    answered: await throughDevice(DD, (m, mux) => mux.control({ op: 'peer-post-result', id: m.id, error: 'the device answered an error' })),   // (c)
+    gate: await throughDevice(DD, () => { }, []),   // (d) no peer-post capability: nothing leaves
   });
   const ua = await uaOf(D);
-  ok(ua.timeout.unanswered === true && ua.lost.unanswered === true && !ua.gate.unanswered && !ua.answered.unanswered && Object.values(ua).every((x) => x.ok === false && x.lane === 'remote-message'),
-    'B-6721: the remote rung says «unanswered» for a request that left and got no answer (a timeout, a link lost) — never for a capability gate or an error the device answered', JSON.stringify(ua));
+  ok(/peer-post timeout/.test(ua.timeout.reason) && /link lost/.test(ua.lost.reason) && ua.timeout.unanswered === true && ua.lost.unanswered === true && !ua.answered.unanswered && !ua.gate.unanswered && Object.values(ua).every((x) => x.ok === false && x.lane === 'remote-message'),
+    'B-6721: the remote rung says «unanswered» for the CLIENT\'s own «left, no reply» errors — its request bound and its lost link — and never for an error the device answered or a missing capability (the real DeviceManager over the real Mux)', JSON.stringify(ua));
   const CDSRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
   const MCU = mutantCopies('agent-msg-unanswered', REPO);
   const CDany = MCU.load('src/server/conversation-deliver.js', anchored(CDSRC, "          const unanswered = !!undo2 && !!e && (e.code === 'link_lost' || e.message === 'peer-post timeout');", '          const unanswered = !!undo2;', 'B-6721: unanswered for any throw after the turn armed'), 'cd-unanswered');
   const Dany = CDany.create({ dataDir: dir, peerMsg: fakePeerMsg, getHosts: () => fakeHosts, getConvIndex: () => fakeHosts.convIndex, serverSetting: () => undefined, activeSessions: new Map(), emitPeerCard: () => { } });
   const uaR = await uaOf(Dany);
-  ok(uaR.gate.unanswered === true && uaR.answered.unanswered === true, 'RED control: the previous shape says «unanswered» for a capability gate and for an error the device answered (nothing was posted — the chain ended with a «may have landed» journal line)', JSON.stringify(uaR));
+  ok(uaR.answered.unanswered === true && uaR.gate.unanswered === true, 'RED control: the previous shape says «unanswered» for an error the device answered and for a missing capability (nothing was posted — the chain ended with a «may have landed» journal line)', JSON.stringify(uaR));
+  // THE CENSUS (the MUST's law): every way the client's request maker (`_request`) ends a request is pinned by name and count — a NEW
+  // way to fail is red here until the rung says which side it is on: BEFORE THE SEND (an act without a valid sender, the act gate, the
+  // connect, the device's allow list) — nothing left; an ANSWER (the device's error; or the lost link's own synthetic answer, `linkLost`
+  // ⇒ code link_lost — LEFT, no reply); the request's own BOUND (`<op> timeout` — LEFT, no reply)
+  const CLSRC = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
+  const ROADS = [
+    ['before the send: an act without a valid sender', '    if (act && !DA.validBy(payload.by)) return this._refuseAct(payload);'],
+    ['before the send: the act gate (a refusal throws)', '    const facts = asked !== undefined ? asked : act && DA.auditable(payload) ? await this._gate(payload, { consent }) : null;'],
+    ['before the send: the connect', '    const conn = await this.connect();'],
+    ['before the send: the device\'s allow list', '    const noFlag = this._policyError(conn, payload, true); if (noFlag) return Promise.reject(gateRefusal(noFlag));'],
+    ['an ANSWER (the device\'s error, or the lost link\'s synthetic answer)', '        return m.error ? reject(replyError(m)) : resolve(m);'],
+    ['LEFT, no reply: the request\'s own bound', "reject(new Error(payload.op + ' timeout')); } }, payload.waitMs || payload.timeoutMs || 30000);"],
+  ];
+  const roadsOf = (src) => {
+    const a = src.indexOf('  async _request(payload'), b = src.indexOf('  /** One audit line of an act sent through this client');
+    const body = a >= 0 && b > a ? src.slice(a, b) : '';
+    return { body, pinned: ROADS.every(([, line]) => body.split(line).length === 2), rejects: (body.match(/\breject\(/g) || []).length, awaits: (body.match(/\bawait\b/g) || []).length, returns: (body.match(/\breturn this\._refuseAct\(|\breturn Promise\.reject\(/g) || []).length };
+  };
+  const census = (src) => { const r = roadsOf(src); return r.pinned && r.rejects === 3 && r.awaits === 2 && r.returns === 2 && src.split("for (const r of pending.values()) { try { r({ error: 'device link lost', linkLost: true }); } catch { } }").length === 2 && src.includes("m.linkLost ? { code: 'link_lost' } : {}") && src.includes("const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000, by });"); };
+  ok(census(CLSRC), 'census (B-6721, the MUST): the client\'s request maker ends a request on exactly SIX roads, pinned by name — four before the send, the answer (the lost link\'s own `linkLost` answer among them, code link_lost), the request\'s own bound (`peer-post timeout`); the rung\'s «unanswered» judges the last two', JSON.stringify((() => { const r = roadsOf(CLSRC); return { pinned: r.pinned, rejects: r.rejects, awaits: r.awaits, returns: r.returns }; })()));
+  ok(!census(anchored(CLSRC, '      conn.mux.control({ ...payload, id });', "      if (payload.op === 'x') { conn.pending.delete(id); reject(new Error('x')); return; }\n      conn.mux.control({ ...payload, id });", 'B-6721: a new way for a request to fail')), 'RED control: a NEW way for a request to end (an added reject) is red until the rung says which side it is on');
   // unknown everywhere
   const r4 = await D.deliverToConversation('cid-nowhere', 'x');
   ok(!r4.ok && /no live inbox/.test(r4.reason), 'unroutable conversation fails with a named reason');
