@@ -2664,7 +2664,7 @@ await (async () => {
     const bt = await batchScene({ JobManager }, CD, 'batch');
     console.log('    facts (batch) ' + JSON.stringify(bt));
     ok(bt.before === 30 && bt.back === 30 && bt.batched && bt.evicted === 29 && bt.park === 30 && bt.mem === 30, 'B-54b7 (the read\'s must, r576): a boot during the hold judges the thirty taken copies as ONE batch — each leaves the park at its own taker\'s landing, so twenty-nine events past the cap leave msg-retry.json at the cap (30)', JSON.stringify(bt));
-    const EACH_A = "const riders = []; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); if (riders.length) leaveParkWhenLanded([e], riders); else leaveNow.push(e); }";
+    const EACH_A = "const riders = []; emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, riders); if (riders.length) leaveOne(e, riders); else leaveNow.push(e); }";
     const shared = anchored(anchored(CDSRC, EACH_A, "emitRetry('dropped', cid, e, { attempts: e.attempts.length, ...(threw ? { threw: true } : {}) }, sharedRiders); leaveNow.push(e); }", 'b54b7 each entry leaves at its own landing'),
       '    if (leaveNow.length) leaveParkWhenLanded(leaveNow, []);', '    leaveParkWhenLanded(leaveNow, sharedRiders);   // MUTANT: one shared countdown for the batch', 'b54b7 the untaken leave in one write');
     const btx = await batchScene({ JobManager }, MB.load('src/server/conversation-deliver.js', anchored(shared, '    const leaveNow = [];', '    const leaveNow = [], sharedRiders = [];', 'b54b7 the batch'), 'b54b7-shared-countdown'), 'batch-shared');
