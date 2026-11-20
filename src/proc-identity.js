@@ -450,10 +450,38 @@ function legacyOnce(door, pid, say) {
   return line;
 }
 
+/** B-03af — A START ON THE WALL CLOCK, PAIRED IN ONE INSTANT: `ticks` (stat field 22, USER_HZ 100 after boot) put on this
+ *  machine's wall clock with the boot's uptime and the wall clock read together, here — never another moment's anchor (a
+ *  reader whose own start was slow, or whose time origin was stamped late, moves nothing). Wall ms, or null (no procfs, an
+ *  unreadable uptime, no ticks). A wall clock stepped since that process started still moves the answer by the step: only a
+ *  record in ticks (startToken) is free of it. `opts.now` = the wall clock (a suite's stand-in). */
+const USER_HZ = 100;
+function wallStartOf(ticks, opts) {
+  const t = Number(ticks);
+  if (ticks == null || ticks === '' || !Number.isFinite(t) || t < 0) return null;
+  let up = NaN;
+  try { up = Number(String(fs.readFileSync(`${rootOf(opts)}/uptime`, 'utf8')).split(' ')[0]); } catch { return null; }
+  const wallNow = opts && typeof opts.now === 'function' ? Number(opts.now()) : Date.now();
+  return Number.isFinite(up) && up > 0 && Number.isFinite(wallNow) ? Math.round(wallNow - (up * 1000 - t * (1000 / USER_HZ))) : null;
+}
+/** B-03af — what proves «this pid is still the process that wrote its record», read NOW in one place (the hub's boot hands it
+ *  to src/conversation-facts.js adoptionProof): { proc, state, verdict, startMs }.
+ *  · proc: this machine has a procfs (false ⇒ state and startMs null — the caller SAYS it, never «gone»);
+ *  · verdict: tokenVerdict of the birth the record carries (`start` in startToken's form + `boot`, the boot id) — ONE clock,
+ *    the kernel's start ticks under the same boot; null when the record carries none (an older writer);
+ *  · state: stat field 3, and startMs: the same read's start on the wall clock (wallStartOf — an older record's only bridge). */
+function birthReading(pid, { start = '', boot = '' } = {}, opts) {
+  const verdict = typeof start === 'string' && start ? tokenVerdict(pid, start, typeof boot === 'string' ? boot : '') : null;
+  if (!hasProc(opts)) return { proc: false, state: null, verdict, startMs: null };
+  const r = statRest(pid, opts);
+  return { proc: true, state: r ? r[0] : null, verdict, startMs: r ? wallStartOf(r[19], opts) : null };
+}
+
 module.exports = {
   childTreeOf, keptByChain, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
   hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, ppidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
+  wallStartOf, birthReading,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

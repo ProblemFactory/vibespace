@@ -874,12 +874,13 @@ function restoreSessions() {
       // (src/conversation-facts.js); a sidecar without them = an older wrapper — unknown with its reason, never guessed
       {
         const CF = require('../conversation-facts.js');
-        // the observations are accepted only from the wrapper this boot adopts, PROVEN FROM /proc/<pid>/stat ALONE (proc-identity):
-        // the pid and start moment its sidecar names against that process's state and start time — never its command line (a
-        // wrapper stuck in the uninterruptible state can hold that read for ever). Not proven ⇒ not from its start — unknown, said.
+        // the observations are accepted only from the wrapper this boot adopts, PROVEN FROM THAT PROCESS'S STAT ALONE (proc-identity
+        // birthReading): the pid and the birth its sidecar names against that process's state and start ticks, in ONE clock (B-03af:
+        // never this hub's time origin, which a slow start stamps late) — never its command line (a wrapper stuck in the
+        // uninterruptible state can hold that read for ever). Not proven ⇒ not from its start — unknown, said.
         const PI = require('../proc-identity.js');
         const p = wrapperObs && Number.isInteger(wrapperObs.pid) ? wrapperObs.pid : 0;
-        const proof = CF.adoptionProof(wrapperObs, p > 1 ? { state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin } : null);
+        const proof = CF.adoptionProof(wrapperObs, p > 1 ? PI.birthReading(p, { start: wrapperObs.pidStart, boot: wrapperObs.pidBoot }) : null);
         session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);
         if (Number.isInteger(wrapperHeld)) session._convFacts.heldAtBoot = wrapperHeld;
       }

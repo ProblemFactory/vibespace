@@ -187,27 +187,44 @@ function factsFromSidecar(f) {
     tools: Array.isArray(f.tools) ? f.tools.filter((n) => typeof n === 'string').map((n) => n.slice(0, 64)).slice(0, TOOLS_MAX) : [], toolsFull: f.toolsFull === true,
     wake: f.wake === true, at: Number.isFinite(f.at) ? f.at : null };
 }
-/** THE ADOPTION PROOF (acceptance round 2, must 1): is the process a sidecar names the wrapper that wrote it? Judged from
- *  /proc/<pid>/stat ALONE (the boot reads it through proc-identity's stateOf / starttimeOf) — never that process's command
- *  line, which a wrapper stuck in the uninterruptible state on a sick mount can hold for ever. The sidecar's own `pid` and
- *  `startedAt` (the wrapper writes both at its start) against that pid's state and start time: a process in the
- *  uninterruptible ('D') or a dead state ('Z', 'X', gone) is NOT adopted; one that started after the sidecar was born is
- *  another process on a recycled pid. The start time is put on the wall clock through the hub's own (its stat ticks and its
- *  start moment, USER_HZ 100 as the tree's other /proc readers); a wall clock stepped forward since then reads «not adopted»
- *  — the safe side. `r` = { state, ticks, selfTicks, selfStartMs } → { pid: the adopted pid or -1, why: null or the reason }. */
-const ADOPT_SLOP_MS = 2000, USER_HZ = 100;
+/** THE ADOPTION PROOF (acceptance round 2, must 1; B-03af: ONE CLOCK): is the process a sidecar names the wrapper that wrote
+ *  it? Judged from that process's stat ALONE (the boot reads it through proc-identity's birthReading) — never its command line,
+ *  which a wrapper stuck in the uninterruptible state on a sick mount can hold for ever. A process in the uninterruptible ('D')
+ *  or a dead state ('Z', 'X', gone) is NOT adopted. Then:
+ *  · a sidecar that carries its wrapper's BIRTH (`pidStart` in startToken's form + `pidBoot`, written at the wrapper's start):
+ *    proc-identity's tokenVerdict — the kernel's start ticks of that pid now against the recorded ones, under the same boot.
+ *    No wall clock is read: a stepped clock or a hub that started slowly changes nothing; a proven mismatch is another process;
+ *  · an OLDER wrapper's sidecar (pid + startedAt only): the pid's start put on the wall clock in ONE instant (the boot's
+ *    uptime and the wall clock read together — proc-identity wallStartOf) against startedAt + ADOPT_PAIR_MS. The wrapper stamps
+ *    startedAt after it started, so its true start is never later; the tolerance holds the two clocks' rounding (10 ms ticks,
+ *    uptime's hundredths) with room, never a recycled pid's minutes. Later than that, the start COULD NOT BE PROVEN: a wall
+ *    clock stepped forward since the wrapper started reads the same as a younger process, so neither is claimed;
+ *  · no process file system and no birth recorded: said.
+ *  `r` = { proc, state, verdict, startMs } → { pid: the adopted pid or -1, why: null or the reason }. */
+const ADOPT_PAIR_MS = 2000;
 function adoptionProof(meta, r) {
   const m = meta && typeof meta === 'object' ? meta : {};
   const no = (why) => ({ pid: -1, why });
   const pid = Number.isInteger(m.pid) && m.pid > 1 ? m.pid : 0;
   if (!pid) return no('its file names no wrapper process');
-  if (!Number.isFinite(m.startedAt)) return no('its file names no start moment');
   const x = r && typeof r === 'object' ? r : {};
-  if (x.state == null) return no('the process its file names is gone');
-  if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');
-  if (x.state === 'Z' || x.state === 'X' || x.state === 'x') return no('the process its file names is dead');
-  if (![x.ticks, x.selfTicks, x.selfStartMs].every(Number.isFinite)) return no('the start time of the process its file names could not be read');
-  if (x.selfStartMs + (x.ticks - x.selfTicks) * (1000 / USER_HZ) > m.startedAt + ADOPT_SLOP_MS) return no('its pid now names a process that started after the file was written');
+  const born = typeof m.pidStart === 'string' && m.pidStart !== '';
+  if (!born && x.proc === false) return no('this machine has no process file system and its older wrapper recorded no start ticks: its start could not be proven');
+  if (!born && !Number.isFinite(m.startedAt)) return no('its file names no start moment');
+  if (x.proc !== false) {
+    if (x.state == null) return no('the process its file names is gone');
+    if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');
+    if (x.state === 'Z' || x.state === 'X' || x.state === 'x') return no('the process its file names is dead');
+  }
+  if (born) {
+    if (x.verdict === 'same') return { pid, why: null };
+    if (x.verdict === 'pid-recycled') return no('its pid now names another process: not the start its wrapper recorded');
+    if (x.verdict === 'gone') return no('the process its file names is gone');
+    if (x.verdict === 'zombie') return no('the process its file names is dead');
+    return no(`its wrapper's recorded start could not be proven on this machine (${typeof x.verdict === 'string' && x.verdict ? x.verdict : 'not read'})`);
+  }
+  if (!Number.isFinite(x.startMs)) return no('the start time of the process its file names could not be read');
+  if (x.startMs > m.startedAt + ADOPT_PAIR_MS) return no(`its start could not be proven: by this machine's clock the process its pid names started ${Math.round((x.startMs - m.startedAt) / 1000)} s after its file was written, and its older wrapper recorded no start ticks (a wall clock stepped since reads the same)`);
   return { pid, why: null };
 }
 /** At the hub's boot: the sidecar's observations are accepted only from the wrapper the boot adopted (its pid, proven by

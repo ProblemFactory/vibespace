@@ -186,6 +186,12 @@ meta.caps.receipts = true;   // lane human-cli: the receipts road (an ack by id,
 const FACTS_FLUSH_MS = 60 * 1000;
 let CF = null;
 try { CF = require(path.join(__dirname, '..', '..', 'src', 'conversation-facts.js')); meta.facts = CF.factsFresh(); meta.caps.facts = CF.FACTS_VERSION; } catch { CF = null; }
+// ITS OWN BIRTH beside its pid (B-03af — the record its child gets at spawn, B-5ee1, for itself): startToken's form (the
+// kernel's start ticks) + the boot id. A restarted hub proves it adopts THIS process in one clock (proc-identity tokenVerdict),
+// never through a wall clock. The ONE require of proc-identity here (EAGER: the module this build shipped); a failed read
+// leaves a birth-less record, which the hub judges as an older wrapper's.
+let PI = null;
+try { PI = require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')); meta.pidStart = PI.startToken(process.pid); meta.pidBoot = PI.bootToken(); } catch { delete meta.pidStart; delete meta.pidBoot; }
 let factsFlush = null;
 function noteFacts(msg) {
   if (!CF || !meta.facts) return;
@@ -1253,7 +1259,7 @@ function startChild() {
   meta.childPid = child.pid;
   // its BIRTH beside the pid, same write (B-5ee1): the server's interrupt signals meta.childPid only while this names it;
   // a birth is a record, never a reason for the wrapper to die at spawn — a failed read leaves a birth-less (legacy) record
-  try { const PI = require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js')); meta.childStart = child.pid ? PI.startToken(child.pid) : ''; meta.childBoot = PI.bootToken(); } catch { meta.childStart = ''; meta.childBoot = ''; }
+  try { meta.childStart = child.pid && PI ? PI.startToken(child.pid) : ''; meta.childBoot = PI ? PI.bootToken() : ''; } catch { meta.childStart = ''; meta.childBoot = ''; }
   scheduleMeta();
 
   // Child stdout → parse JSON lines → buffer + tee to our stdout (dtach PTY).

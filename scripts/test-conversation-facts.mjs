@@ -472,46 +472,113 @@ console.log('D · the musts of the acceptance, each with its red control');
 // ── E · THE ACCEPTANCE'S ROUND TWO (主开发 2026-11-17 12:33Z) — each must by its leg and its red control ──────────────────────
 console.log('E · round two: the boot proof, the set as seen, owned jobs, the first-seen step, the small items');
 {
-  // MUST 1 — the boot proves the adoption from /proc/<pid>/stat ALONE: the sidecar's pid + start moment against that process's
-  // state and start time (proc-identity); a stuck (D) or dead process is not adopted; no command-line read is left on the boot
+  // MUST 1 — the boot proves the adoption from that process's stat ALONE (proc-identity birthReading): a stuck (D) or dead
+  // process is not adopted; no command-line read is left on the boot. B-03af — ONE CLOCK: a sidecar carrying its wrapper's
+  // birth (pidStart, startToken's form + pidBoot) is judged by the kernel's start ticks under the same boot (tokenVerdict);
+  // an OLDER sidecar (pid + startedAt) by the pid's start on the wall clock paired in ONE instant (wallStartOf); a failed
+  // proof says «could not be proven», never «started after»; no process file system is said
   const PI = require(path.join(REPO, 'src/proc-identity.js'));
   const MUTE = mutantCopies('conversation-facts-r2-proof', REPO);
   const srcCF = fs.readFileSync(path.join(REPO, 'src/conversation-facts.js'), 'utf8');
-  const BIRTH = 1794880000000, SELF0 = 1794870000000;
-  const meta = { pid: 4242, startedAt: BIRTH };
-  const reading = (startMs, state = 'S') => ({ state, ticks: 500000 + (startMs - SELF0) / 10, selfTicks: 500000, selfStartMs: SELF0 });
+  const srcPI = fs.readFileSync(path.join(REPO, 'src/proc-identity.js'), 'utf8');
+  const BIRTH = 1794880000000;
+  const older = { pid: 4242, startedAt: BIRTH };   // an older wrapper's sidecar: no birth recorded
+  const born = { pid: 4242, startedAt: BIRTH, pidStart: 'l500000', pidBoot: 'b-1' };
+  const reading = (startMs, state = 'S', verdict = null) => ({ proc: true, state, verdict, startMs });
   const P = (Mx, m, r) => Mx.adoptionProof(m, r);
-  ok(P(CF, meta, reading(BIRTH - 400)).pid === 4242 && P(CF, meta, reading(BIRTH - 400)).why === null, 'MUST 1 a live wrapper that started just before its file was born is ADOPTED (its pid and start time, nothing else read)');
-  const stuck = P(CF, meta, reading(BIRTH - 400, 'D'));
-  ok(stuck.pid === -1 && /uninterruptible/.test(stuck.why), 'MUST 1 a process in the UNINTERRUPTIBLE state is not adopted (facts unknown — the safe side)', stuck);
-  ok(['Z', 'X'].every((z) => P(CF, meta, reading(BIRTH - 400, z)).pid === -1 && /dead/.test(P(CF, meta, reading(BIRTH - 400, z)).why)) && /gone/.test(P(CF, meta, { state: null }).why),
+  ok(!/started after/.test(srcCF) && !/selfStartMs|timeOrigin/.test(srcCF.slice(srcCF.indexOf('function adoptionProof'), srcCF.indexOf('function factsAtAdoption'))),
+    'B-03af the proof never says «started after» and reads no time origin of the hub (one clock)');
+  // the BIRTH road: the verdict alone decides — no wall clock is read
+  ok(P(CF, born, reading(null, 'S', 'same')).pid === 4242 && P(CF, born, reading(BIRTH + 3600000, 'S', 'same')).pid === 4242,
+    'B-03af a sidecar with its wrapper\'s birth and the same start ticks under the same boot is ADOPTED — whatever a wall clock says (an hour\'s step)');
+  const other = P(CF, born, reading(BIRTH - 400, 'S', 'pid-recycled'));
+  ok(other.pid === -1 && /its pid now names another process: not the start its wrapper recorded/.test(other.why), 'B-03af a proven mismatch of the start ticks is another process — said so', other);
+  ok(/gone/.test(P(CF, born, reading(null, 'S', 'gone')).why) && /dead/.test(P(CF, born, reading(null, 'S', 'zombie')).why) && /could not be proven on this machine \(unknown\)/.test(P(CF, born, reading(null, 'S', 'unknown')).why)
+    && /could not be proven on this machine \(not read\)/.test(P(CF, born, reading(null, 'S', null)).why), 'B-03af the birth road: gone (another boot), dead, and a verdict this machine cannot reach — each said, none adopted');
+  ok(P(CF, born, { proc: false, state: null, verdict: 'same', startMs: null }).pid === 4242, 'B-03af no process file system but a birth its ps rung proves (startToken\'s «p» form): adopted');
+  // the OLDER road: the pid's start on the wall clock, paired in ONE instant, against startedAt + the named tolerance
+  ok(P(CF, older, reading(BIRTH - 400)).pid === 4242 && P(CF, older, reading(BIRTH - 400)).why === null && P(CF, older, reading(BIRTH + 1900)).pid === 4242,
+    'MUST 1 an older wrapper that started before its file was born (or within the tolerance of the two clocks\' rounding) is ADOPTED');
+  const stuck = P(CF, older, reading(BIRTH - 400, 'D'));
+  ok(stuck.pid === -1 && /uninterruptible/.test(stuck.why) && /uninterruptible/.test(P(CF, born, reading(null, 'D', 'same')).why), 'MUST 1 a process in the UNINTERRUPTIBLE state is not adopted on either road (facts unknown — the safe side)', stuck);
+  ok(['Z', 'X'].every((z) => P(CF, older, reading(BIRTH - 400, z)).pid === -1 && /dead/.test(P(CF, older, reading(BIRTH - 400, z)).why)) && /gone/.test(P(CF, older, { proc: true, state: null }).why),
     'MUST 1 a dead process (zombie, dead) or a gone one is not adopted, each said');
-  const recycled = P(CF, meta, reading(BIRTH + 60000));
-  ok(recycled.pid === -1 && /started after the file was written/.test(recycled.why), 'MUST 1 a process that started AFTER the file was born (a recycled pid) is not adopted', recycled);
-  ok(P(CF, { pid: 4242 }, reading(BIRTH - 400)).pid === -1 && P(CF, meta, { state: 'S', ticks: null, selfTicks: 1, selfStartMs: 1 }).pid === -1 && P(CF, { startedAt: BIRTH }, reading(BIRTH)).pid === -1,
+  const young = P(CF, older, reading(BIRTH + 60000));
+  ok(young.pid === -1 && /its start could not be proven: by this machine's clock the process its pid names started 60 s after its file was written/.test(young.why) && !/started after/.test(young.why),
+    'B-03af an older sidecar whose pid\'s start reads 60 s after its file: «could not be proven» (a younger process and a stepped clock read the same) — never «started after»', young);
+  const noProc = P(CF, older, { proc: false, state: null, verdict: null, startMs: null });
+  ok(noProc.pid === -1 && /no process file system/.test(noProc.why), 'B-03af no process file system and no birth recorded: SAID (never «gone»)', noProc);
+  ok(P(CF, { pid: 4242 }, reading(BIRTH - 400)).pid === -1 && P(CF, older, reading(null)).pid === -1 && /could not be read/.test(P(CF, older, reading(null)).why) && P(CF, { startedAt: BIRTH }, reading(BIRTH)).pid === -1,
     'MUST 1 a file with no start moment, an unreadable start time, or no pid: not adopted');
   const obs = CF.factsFresh(); CF.factsStep(obs, { type: 'system', subtype: 'init', claude_code_version: '2.1.312' }, 1);
   const K = { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' };
-  const notAd = CF.trackedFacts(CF.factsAtAdoption({ ...meta, facts: JSON.parse(JSON.stringify(obs)) }, stuck.pid, stuck.why), K);
+  const notAd = CF.trackedFacts(CF.factsAtAdoption({ ...older, facts: JSON.parse(JSON.stringify(obs)) }, stuck.pid, stuck.why), K);
   ok(notAd.background === null && /not adopted at the hub's start: .*uninterruptible/.test(notAd.backgroundWhy) && /not adopted/.test(notAd.timersWhy), 'MUST 1 the proof\'s reason reaches the facts: background and timers unknown, «not adopted … uninterruptible»', notAd);
-  // the REAL helper on REAL processes: this suite (adopted), and a child born AFTER a recorded birth (a recycled pid's shape)
-  const read = (p) => ({ state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin });
-  const child = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { stdio: 'ignore' });
-  await sleep(100);
-  const self = P(CF, { pid: process.pid, startedAt: Date.now() }, read(process.pid));
-  const young = P(CF, { pid: child.pid, startedAt: Date.now() - 30000 }, read(child.pid));
-  const fair = P(CF, { pid: child.pid, startedAt: Date.now() }, read(child.pid));
-  const gone = new Promise((r) => child.once('exit', r)); child.kill(); await gone;   // this suite's own child, ended before the next leg
-  ok(self.pid === process.pid && young.pid === -1 && /started after/.test(young.why) && fair.pid === child.pid, 'MUST 1 on real processes through proc-identity: this process is adopted; a child born 30 s after the file\'s birth is NOT; the same child against a birth after its start is', { self, young, fair });
+  // wallStartOf / birthReading over a planted process file system: the boot's uptime and the wall clock read in ONE instant
+  const fx = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-b03af-'));
+  const plant = (rel, text) => { fs.mkdirSync(path.dirname(path.join(fx, rel)), { recursive: true }); fs.writeFileSync(path.join(fx, rel), text); };
+  const statLine = (pid, state, ticks) => `${pid} (node) ${state} 1 ${pid} ${pid} 0 -1 4194304 0 0 0 0 0 0 0 0 20 0 1 0 ${ticks} 0 0\n`;
+  const WALL = Date.now(), UP = 100000;   // the stand-in wall clock now, and this planted machine's uptime (s)
+  const bootWall = WALL - UP * 1000;
+  const FB = WALL - 10000, olderF = { pid: 4242, startedAt: FB };   // an older wrapper's file written 10 s ago on the planted machine
+  const T = Math.round((FB - 400 - bootWall) / 10);   // its wrapper started 400 ms before its file — ticks after THIS machine's boot
+  plant('self/stat', statLine(1, 'S', 1)); plant('uptime', `${UP.toFixed(2)} 1.00\n`); plant('4242/stat', statLine(4242, 'S', T));
+  const fopts = { procRoot: fx, now: () => WALL };
+  const rd = PI.birthReading(4242, {}, fopts);
+  console.log(`    the planted machine: uptime ${UP} s at wall ${WALL}; the wrapper's start ticks ${T}; its file written at ${FB} → startMs ${rd.startMs}`);
+  ok(PI.wallStartOf(T, fopts) === FB - 400 && rd.proc === true && rd.state === 'S' && rd.verdict === null && rd.startMs === FB - 400 && P(CF, olderF, rd).pid === 4242,
+    'B-03af wallStartOf puts the start ticks on the wall clock with the uptime read in the same instant (exact to the tick); birthReading reads state + start in one stat read', rd);
+  ok(PI.wallStartOf('', fopts) === null && PI.wallStartOf(T, { procRoot: path.join(fx, 'none'), now: () => WALL }) === null && JSON.stringify(PI.birthReading(4242, {}, { procRoot: path.join(fx, 'none') })) === JSON.stringify({ proc: false, state: null, verdict: null, startMs: null }),
+    'B-03af no ticks or no uptime: no wall start (null, never a guess); a machine with no process file system reads proc:false');
+  // RED (an anchor gap): the OLD bridge — this hub's time origin plus the tick difference — on a hub whose runtime stamped its
+  // time origin 3 s after its fork (a slow start on a loaded machine) refuses the live wrapper; the one-instant pairing adopts it
+  const S = Math.round((performance.timeOrigin - 3000 - bootWall) / 10);
+  plant(`${process.pid}/stat`, statLine(process.pid, 'S', S));
+  const OLD_PAIR = "  return Number.isFinite(up) && up > 0 && Number.isFinite(wallNow) ? Math.round(wallNow - (up * 1000 - t * (1000 / USER_HZ))) : null;\n";
+  const mGap = MUTE.load('src/proc-identity.js', anchored(srcPI, OLD_PAIR, "  return Math.round(performance.timeOrigin + (t - starttimeOf(process.pid, opts)) * (1000 / USER_HZ));\n", 'anchor-at-another-moment'), 'anchor-at-another-moment');
+  const gapR = mGap.birthReading(4242, {}, fopts), gapP = P(CF, olderF, gapR);
+  console.log(`    the anchor gap: own ticks ${S}, time origin ${Math.round(performance.timeOrigin)} → the old bridge's start ${gapR.startMs} (${gapR.startMs - FB} ms after the file); the one-instant start ${rd.startMs}`);
+  ok(gapP.pid === -1 && /could not be proven/.test(gapP.why) && P(CF, olderF, rd).pid === 4242, 'B-03af RED: the anchor taken at another moment (the old bridge) refuses a live wrapper by the hub\'s slow start; the one-instant pairing adopts it', { gapR, gapP });
+  // RED (a forward step): without the birth road, a wall clock stepped 5 s forward since the wrapper started refuses it; the ticks do not
+  const BORN = "  const born = typeof m.pidStart === 'string' && m.pidStart !== '';\n";
+  const mWall = MUTE.load('src/conversation-facts.js', anchored(srcCF, BORN, "  const born = false;\n", 'no-birth-road'), 'no-birth-road');
+  const stepped = reading(BIRTH + 5000, 'S', 'same');
+  ok(P(CF, born, stepped).pid === 4242 && P(mWall, born, stepped).pid === -1 && /could not be proven/.test(P(mWall, born, stepped).why), 'B-03af RED: a 5 s forward step of the wall clock refuses the wrapper through the wall bridge; through its recorded start ticks it is adopted');
+  fs.rmSync(fx, { recursive: true, force: true });
+  // THE FAIR SCENE on REAL processes through proc-identity: the file's birth is placed from WHAT HAPPENED (the child's stat is
+  // readable — it runs — and only then its «file» is stamped, as a wrapper stamps after its start); its facts printed
+  if (!PI.hasProc()) console.log('    SKIP the real-process scene: this machine has no process file system (the planted legs above stand)');
+  else {
+    const child = require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 20000)'], { stdio: 'ignore' });
+    for (let i = 0; i < 300 && PI.starttimeOf(child.pid) == null; i++) await sleep(10);   // what happened: it is in the process table (bounded: 300 looks)
+    if (PI.starttimeOf(child.pid) == null) throw new Error('the child never showed in the process table (300 looks)');
+    const wall = Date.now();   // the file's birth: after the process demonstrably runs
+    const fairR = PI.birthReading(child.pid, {});
+    const fair = P(CF, { pid: child.pid, startedAt: wall }, fairR);
+    const youngR = P(CF, { pid: child.pid, startedAt: wall - 30000 }, PI.birthReading(child.pid, {}));
+    const rec = { pid: child.pid, startedAt: wall, pidStart: PI.startToken(child.pid), pidBoot: PI.bootToken() };
+    const bornP = P(CF, rec, PI.birthReading(child.pid, { start: rec.pidStart, boot: rec.pidBoot }));
+    const forged = 'l' + (Number(rec.pidStart.slice(1)) + 1);
+    const forgedP = P(CF, { ...rec, pidStart: forged }, PI.birthReading(child.pid, { start: forged, boot: rec.pidBoot }));
+    const selfTok = PI.startToken(process.pid);
+    const self = P(CF, { pid: process.pid, startedAt: wall, pidStart: selfTok, pidBoot: PI.bootToken() }, PI.birthReading(process.pid, { start: selfTok, boot: PI.bootToken() }));
+    console.log(`    the fair scene: child ticks ${PI.starttimeOf(child.pid)}, own ticks ${PI.starttimeOf(process.pid)}, time origin ${Math.round(performance.timeOrigin)}, the file's birth ${wall} → the one-instant start ${fairR.startMs} (${fairR.startMs - wall} ms from the birth)`);
+    const gone = new Promise((r) => child.once('exit', r)); child.kill(); await gone;   // this suite's own child, ended before the next leg
+    ok(fair.pid === child.pid && bornP.pid === child.pid && self.pid === process.pid, 'B-03af on real processes: a child whose file was born after it ran is adopted (older road, one instant), and by its recorded birth; this process by its own', { fair, bornP, self });
+    ok(youngR.pid === -1 && /could not be proven/.test(youngR.why) && forgedP.pid === -1 && /another process/.test(forgedP.why), 'B-03af on real processes: a file born 30 s before its pid\'s start could not be proven; a birth one tick off is another process', { youngR, forgedP });
+  }
   const br = fs.readFileSync(path.join(REPO, 'src/server/boot-restore.js'), 'utf8');
-  ok(!/\/cmdline/.test(br) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? { state: PI.stateOf(p), ticks: PI.starttimeOf(p), selfTicks: PI.starttimeOf(process.pid), selfStartMs: performance.timeOrigin } : null);')
-    && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'MUST 1 the boot reads only the stat file through proc-identity and hands the proof to factsAtAdoption — no command-line read left in boot-restore (source pin)');
+  const site = br.slice(br.indexOf('const PI = require(\'../proc-identity.js\');'), br.indexOf('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'));
+  ok(!/\/cmdline/.test(br) && !/\/proc|timeOrigin/.test(site) && br.includes('const proof = CF.adoptionProof(wrapperObs, p > 1 ? PI.birthReading(p, { start: wrapperObs.pidStart, boot: wrapperObs.pidBoot }) : null);')
+    && br.includes('session._convFacts = CF.factsAtAdoption(wrapperObs, proof.pid, proof.why);'), 'MUST 1 the boot reads only the process\'s stat through proc-identity (birthReading; no /proc named, no time origin at the site) and hands the proof to factsAtAdoption (source pin)');
+  const cw = fs.readFileSync(path.join(REPO, 'data/bin/chat-wrapper.js'), 'utf8');
+  ok(cw.includes("meta.pidStart = PI.startToken(process.pid); meta.pidBoot = PI.bootToken();") && cw.indexOf('meta.pidStart = PI.startToken(process.pid)') < cw.indexOf('function noteFacts('), 'B-03af the claude wrapper records its OWN birth beside its pid at its start (source pin)');
   ok(/\['src\/server\/boot-restore\.js', 'own-tree', 17, null, DATA\], \/\/ lane end-obeys-verdict \+1: the end record's ONE read before the kill/.test(fs.readFileSync(path.join(REPO, 'scripts/mount-reader-census.mjs'), 'utf8')), 'MUST 1 the reader census count for boot-restore: 16 with no command-line read — 17 with piece 3\'s one bounded read before a kill, named');
-  const ND = "  if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');\n";
-  const NS = "  if (x.selfStartMs + (x.ticks - x.selfTicks) * (1000 / USER_HZ) > m.startedAt + ADOPT_SLOP_MS) return no('its pid now names a process that started after the file was written');\n";
+  const ND = "    if (x.state === 'D') return no('the process its file names is stuck in an uninterruptible wait');\n";
+  const NS = "  if (x.startMs > m.startedAt + ADOPT_PAIR_MS) return no(`its start could not be proven: by this machine's clock the process its pid names started ${Math.round((x.startMs - m.startedAt) / 1000)} s after its file was written, and its older wrapper recorded no start ticks (a wall clock stepped since reads the same)`);\n";
   if (srcCF.split(ND).length !== 2 || srcCF.split(NS).length !== 2) throw new Error('anchor missing: the proof lines');
   const mD = MUTE.load('src/conversation-facts.js', anchored(srcCF, ND, '', 'no-state-look'), 'no-state-look'), mS = MUTE.load('src/conversation-facts.js', anchored(srcCF, NS, '', 'no-start-look'), 'no-start-look');
-  ok(P(mD, meta, reading(BIRTH - 400, 'D')).pid === 4242 && P(mS, meta, reading(BIRTH + 60000)).pid === 4242, 'MUST 1 RED: without the state look a stuck process is adopted; without the start look a recycled pid is');
+  ok(P(mD, older, reading(BIRTH - 400, 'D')).pid === 4242 && P(mS, older, reading(BIRTH + 60000)).pid === 4242, 'MUST 1 RED: without the state look a stuck process is adopted; without the start look an older sidecar\'s younger pid is');
 }
 {
   // MUST 2 — the wrapper records the set AS SEEN: the raw count beside it, an element without a task id kept as such; the hub

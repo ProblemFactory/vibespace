@@ -30,6 +30,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a paired machine's row, the «Test connection» button's tooltip is now in your language.
 - An agent with an automation key can end idle conversations on a paired machine whose Claude Code is newer than this server's: that machine now reads its own.
 - A channel message that reached the same agent through two notifications at the same moment could start two paid turns; now it starts one.
+- After VibeSpace restarted, a conversation that was still running could show its background work and timers as «unknown» with a wrong reason, so a key's end of it was refused. It is now recognised by the start its own process recorded.
 
 ## 2.369.413 — 2026-11-20
 
