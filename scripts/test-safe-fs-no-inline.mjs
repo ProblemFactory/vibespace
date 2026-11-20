@@ -63,7 +63,7 @@ ok(g.ends.every((x) => x === 'deadline') && g.alive === 0 && g.inline === 0 && g
   `every worker killed at its deadline (${g.ends.join(', ')}; alive ${g.alive}): the next call is REFUSED BY NAME (${g.got && g.got.code}, ${g.got && g.got.status}) — the inline runner entered ${g.inline} times`, JSON.stringify(g));
 // RED CONTROL: the release's inline road planted back (a copy through anchored()) — the main thread runs the stall
 const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
-const LAW = '      return Promise.reject(noWorkerRefusal());\n';
+const LAW = '      return Promise.reject(noWorkerRefusal(`the ${this.name} pool`));\n';
 const RELEASE = `      if (opts.noInline) return Promise.reject(Object.assign(new Error('no live SafeFs worker'), { code: 'no-worker' }));\n      try { return Promise.resolve((this._opts.inlineRun || require('./safe-fs-worker').runOp)(op, payload)).then(r => r.result); }\n      catch (e) { return Promise.reject(e); }\n`;   // stale-pins: kept — the release's inline road, planted back
 const SFr = src.split(LAW).length === 2 ? mutantCopies('safe-fs-no-inline', REPO).load('src/safe-fs.js', anchored(src, LAW, RELEASE, 'release-inline'), 'release-inline') : null;
 const r = SFr ? await scene(SFr, 'release') : null;

@@ -34,7 +34,8 @@ const DEVICE_HANDLE = '\u0000device:'; // opaque to the route; never a real path
 // lane chat-attachments-persist (the cut): pictures are read in ONE transcript worker of their own (its indexes are kept
 // and extended there — one copy, never one per pool thread); inline (the pool down) the op answers «unavailable»
 let _picturePool = null;
-const PICTURE_WORKER = require('path').join(__dirname, 'transcript-worker.js');   // a checkout constant (the device bundle has no such file)
+const path = require('path');
+const PICTURE_WORKER = path.join(__dirname, 'transcript-worker.js');   // a checkout constant (the device bundle has no such file)
 function picturePool() {
   if (_picturePool) return _picturePool;
   // B-3b03: a bundle that ships no worker script (the device agent's single file) reads its OWN transcripts in place, on its own
