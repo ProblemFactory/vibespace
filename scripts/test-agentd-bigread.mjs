@@ -32,7 +32,7 @@ const sha = (b) => crypto.createHash('sha256').update(b).digest('hex');
 
 const version = require('../package.json').version;
 const bundle = path.join(tmp, 'agentd.js');
-await agentdBundle({ version: version, outfile: bundle });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+await agentdBundle({ version, outfile: bundle });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 
 const { DeviceManager } = require('../src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: bundle, version, log: () => {} });

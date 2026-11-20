@@ -39,7 +39,7 @@ try { execFileSync('python3', ['-c', `import sqlite3;c=sqlite3.connect(${JSON.st
 
 const version = require('../package.json').version;
 const bundle = path.join(tmp, 'agentd.js');
-await agentdBundle({ version: version, outfile: bundle, external: ['node-pty'] });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+await agentdBundle({ version, outfile: bundle });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 
 const { DeviceManager } = require('../src/agentd/client.js');
 const { deviceFolderMount } = require('../src/device-mount.js');

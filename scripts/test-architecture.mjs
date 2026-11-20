@@ -2400,8 +2400,25 @@ await section(async () => {
     && judge(HDR + "fs.writeFileSync(path.join(REPO, 'src/agentd/version.js'), `module.exports = { VERSION: ${JSON.stringify(v)} };\\n`);").length === 1
     && judge(HDR + "execFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'module.exports = {}')`], { cwd: REPO });").length === 1
     && judge(HDR + "fs.writeFileSync(path.join(COPY, 'src/agentd/version.js'), 'x');\nexecFileSync('node', ['-e', `require('fs').writeFileSync('src/agentd/version.js', 'x')`], { cwd: COPY });").length === 0
-    && judge(HDR + "await agentdBundle({ version, outfile: bundle, external: ['node-pty'] });").length === 0,
+    && judge(HDR + "await agentdBundle({ version, outfile: bundle });").length === 0,
   '§51 NEGATIVE CONTROL: the sibling shapes (dirname(rel), an in-tree dir variable, a direct join) are caught; a mutant-copy write, a scratch-root `src`, and the build-version stand-in are not; copyFileSync is judged by its DESTINATION (a copy out of src/ passes, a copy into src/ is caught)');
+  // B-ba47's class (主开发 r561): THE BUNDLE A SUITE TESTS IS THE BUNDLE THAT SHIPS but for the stamp — scripts/agentd-bundle.mjs reads
+  // each entry's esbuild step from package.json build:agentd (its strip step too), never a flag list of the suites' own: the plan
+  // re-spells every flag of the build's step exactly (a flag that drifts in, unmapped, throws by name)
+  const AB51 = await import(path.resolve('scripts/agentd-bundle.mjs'));
+  const scripts51 = JSON.parse(read('package.json') || '{}').scripts || {};
+  const step51 = (entry) => String(scripts51['build:agentd'] || '').split('&&').map((x) => x.trim()).find((x) => { const t = x.split(/\s+/); return t[0] === 'esbuild' && t[1] === entry; }) || '';
+  const trip51 = (entry) => { const own = step51(entry).split(/\s+/).slice(2).sort(); let back = null, plan = null; try { plan = AB51.buildPlan(scripts51, entry); back = AB51.flagsOf(plan).slice().sort(); } catch (e) { back = [String(e.message)]; } return { own, back, plan }; };
+  const d51 = trip51('src/agentd/agentd.js'), a51 = trip51('src/agentd/attach-cli.js');
+  ok(d51.own.length > 2 && JSON.stringify(d51.own) === JSON.stringify(d51.back) && !!d51.plan && d51.plan.strip === true && a51.own.length > 1 && JSON.stringify(a51.own) === JSON.stringify(a51.back) && !!a51.plan && a51.plan.strip === false,
+    `§51 the device suites bundle what ships but for the stamp: agentd-bundle's plan of build:agentd re-spells every flag — the daemon «${d51.own.join(' ')}» + the strip step, attach-cli «${a51.own.join(' ')}»`, { d51, a51 });
+  const why51 = (f) => { try { f(); return ''; } catch (e) { return String(e.message); } };
+  const real51 = String(scripts51['build:agentd'] || '');
+  const dropped51 = (() => { try { return AB51.buildPlan({ 'build:agentd': real51.replace('--external:xlsx ', '') }, 'src/agentd/agentd.js').options.external.join(','); } catch (e) { return 'threw: ' + e.message; } })();
+  ok(/esbuild flag --minify \(the step for src\/agentd\/agentd\.js\) has no mapping/.test(why51(() => AB51.buildPlan({ 'build:agentd': real51.replace('--preserve-symlinks', '--preserve-symlinks --minify') }, 'src/agentd/agentd.js')))
+    && /no esbuild step for src\/agentd\/nope\.js/.test(why51(() => AB51.buildPlan(scripts51, 'src/agentd/nope.js')))
+    && real51.includes('--external:xlsx ') && dropped51 === 'node-pty',
+    `§51 CONTROLS: a flag drifted into build:agentd (--minify) is red by name; an entry the build does not bundle is refused by name; an external dropped from the build drops from the plan (${dropped51}: read, never retyped)`);
   const gi = fs.readFileSync('.gitignore', 'utf8').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
   const hides = gi.filter((l) => /\*/.test(l) && /\.js$/.test(l) && (l.startsWith('src/') || !l.includes('/')));
   ok(hides.length === 0, `§51 .gitignore hides no wildcard .js family under src/ (a stray copy must be visible)${hides.length ? ' — ' + hides.join(', ') : ''}`);

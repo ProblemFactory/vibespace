@@ -51,7 +51,7 @@ const { reExecArgv } = require('../src/agentd/reexec.js');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-reexec-bundle-'));
   const out = path.join(tmp, 'agentd.js');
   const version = require('../package.json').version;
-  await agentdBundle({ version: version, outfile: out });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+  await agentdBundle({ version, outfile: out });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
   const bundle = fs.readFileSync(out, 'utf-8');
   check('bundle builds and contains the reExecArgv helper', bundle.includes('reExecArgv') && bundle.includes('argv.slice(2)'));
   check('bundle inlines the hand-over + the busy-address retry (lane win-upgrade-pipe)', /function handOver\d*\(/.test(bundle) && /function listenWithRetry\d*\(/.test(bundle));

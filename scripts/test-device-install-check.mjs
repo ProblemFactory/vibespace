@@ -51,7 +51,7 @@ process.on('SIGINT', () => process.exit(130));
 // ── the REAL bundle, built from this tree into the scratch dir ──
 const bundle = path.join(S, 'vibespace-device.js');
 const version = require(path.join(REPO, 'package.json')).version;
-await agentdBundle({ version: version, outfile: bundle, external: ['node-pty'] });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+await agentdBundle({ version, outfile: bundle });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 
 // ── the scratch server: the REAL dial gate + a real HostManager, serving the bundle ──
 const { HostManager } = require(path.join(REPO, 'src/hosts.js'));

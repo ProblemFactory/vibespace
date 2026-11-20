@@ -31,8 +31,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const version = require('../package.json').version;
 const daemonBundle = path.join(tmp, 'agentd.js');
 const attachBundle = path.join(tmp, 'attach.js');
-await agentdBundle({ version: version, outfile: daemonBundle, external: ['node-pty'] });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
-await agentdBundle({ version: version, outfile: attachBundle, entry: 'src/agentd/attach-cli.js' });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+await agentdBundle({ version, outfile: daemonBundle });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+await agentdBundle({ version, outfile: attachBundle, entry: 'src/agentd/attach-cli.js' });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 // install into the throwaway root + provision the token
 const instDir = path.join(AGENTD_ROOT, version); fs.mkdirSync(instDir, { recursive: true });
 fs.copyFileSync(daemonBundle, path.join(instDir, 'agentd.js'));

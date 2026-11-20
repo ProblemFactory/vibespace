@@ -32,7 +32,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // build the daemon bundle at two "versions" (same code, different stamp)
 async function buildBundle(version, outfile) {
-  await agentdBundle({ version, outfile });   // the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
+  await agentdBundle({ version, outfile });   // build:agentd's own bundle, the stamp answered in the build (scripts/agentd-bundle.mjs): nothing written under src/
 }
 
 const bundleA = path.join(tmp, 'agentd-A.js');

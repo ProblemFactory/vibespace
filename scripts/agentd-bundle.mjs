@@ -6,20 +6,53 @@
 // THE LAW (test-architecture §51): no suite writes under src/ of the tree it runs in.
 // NOT a test-*.mjs on purpose (like scratch.mjs: the tier census would demand a tier).
 //
-//   await agentdBundle({ version, outfile, entry, external }) → outfile
-//     esbuild over the tree's own `entry` (default src/agentd/agentd.js) — bundle, platform node, the suite's `external` (e.g.
-//     node-pty), as `npx esbuild … --bundle --platform=node` did from the checkout — into `outfile` (a path OUTSIDE the tree's src/).
-//     `version` (x.y.z) answers src/agentd/version.js; for the daemon's own entry the stamp MUST be in the bundle (a moved stamp
-//     module throws by name, never a bundle at the release's version).
+//   await agentdBundle({ version, outfile, entry }) → outfile
+//     THE BUNDLE A SUITE TESTS IS THE BUNDLE THAT SHIPS but for the stamp (主开发 r561): the entry's (default src/agentd/agentd.js)
+//     esbuild step is READ from package.json's build:agentd (buildPlan — its flags mapped one by one, a flag with no mapping
+//     throws by name), run through esbuild's JS API over the tree's own sources into `outfile` (OUTSIDE the tree's src/), then
+//     the build's own strip step (scripts/agentd-bundle-strip.mjs) when build:agentd strips that entry. `version` (x.y.z) answers
+//     src/agentd/version.js; for the daemon's entry the stamp MUST be in the bundle (a moved stamp module throws by name).
+//   buildPlan(scripts, entry) → { entry, options, outfile, strip, flags } — PURE; flagsOf(plan) re-spells the flags (test-architecture
+//     §51 holds the round trip equal to the build step's own).
 //   stampPlugin(version) → the plugin, for a suite's own esbuild.build (a mutant bundle stamped the same way).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DAEMON = 'src/agentd/agentd.js';
 const real = (p) => { try { return fs.realpathSync(p); } catch { return path.resolve(p); } };
+
+/** THE PRODUCT BUILD'S PLAN for one entry (PURE over package.json's scripts): its build:agentd esbuild step mapped to the JS API, and
+ *  whether the strip step follows it on that step's own outfile. A flag with no mapping THROWS BY NAME. */
+export function buildPlan(scripts, entry = DAEMON) {
+  const cmd = String((scripts || {})['build:agentd'] || '');
+  if (!cmd) throw new Error("agentd-bundle: package.json has no build:agentd — the product's flags cannot be read");
+  const steps = cmd.split('&&').map((x) => x.trim());
+  const at = steps.findIndex((st) => { const t = st.split(/\s+/); return t[0] === 'esbuild' && t[1] === entry; });
+  if (at < 0) throw new Error(`agentd-bundle: build:agentd has no esbuild step for ${entry} — a suite bundles only what ships`);
+  const options = { bundle: false, platform: undefined, external: [], preserveSymlinks: false };
+  let outfile = null;
+  const flags = steps[at].split(/\s+/).slice(2);
+  for (const t of flags) {
+    if (t === '--bundle') options.bundle = true;
+    else if (t.startsWith('--platform=')) options.platform = t.slice('--platform='.length);
+    else if (t.startsWith('--external:')) options.external.push(t.slice('--external:'.length));
+    else if (t === '--preserve-symlinks') options.preserveSymlinks = true;
+    else if (t.startsWith('--outfile=')) outfile = t.slice('--outfile='.length);
+    else throw new Error(`agentd-bundle: build:agentd's esbuild flag ${t} (the step for ${entry}) has no mapping here — map it, or the bundle a suite tests drifts from the one that ships`);
+  }
+  if (!outfile) throw new Error(`agentd-bundle: build:agentd's esbuild step for ${entry} names no --outfile`);
+  const sm = /^node scripts\/agentd-bundle-strip\.mjs (\S+) (\S+)$/.exec(steps[at + 1] || '');
+  return { entry, options, outfile, strip: !!(sm && sm[1] === outfile), flags };
+}
+/** The flags a plan stands for, re-spelled (the step's own, in the plan's order: bundle, platform, externals, symlinks, outfile). */
+export function flagsOf(plan) {
+  const o = plan.options;
+  return [...(o.bundle ? ['--bundle'] : []), ...(o.platform ? [`--platform=${o.platform}`] : []), ...o.external.map((x) => `--external:${x}`), ...(o.preserveSymlinks ? ['--preserve-symlinks'] : []), `--outfile=${plan.outfile}`];
+}
 
 /** The esbuild plugin that answers the tree's own src/agentd/version.js with `{ VERSION: <version> }`. `hit()` says it answered. */
 export function stampPlugin(version, { repo = REPO } = {}) {
@@ -40,14 +73,18 @@ export function stampPlugin(version, { repo = REPO } = {}) {
   };
 }
 
-/** Bundle `entry` from the tree's own sources into `outfile`, src/agentd/version.js answered by `version` in the build. → outfile */
-export async function agentdBundle({ version, outfile, entry = DAEMON, external = [], repo = REPO, logLevel = 'error' } = {}) {
+/** Bundle `entry` as build:agentd does, from the tree's own sources, into `outfile`; src/agentd/version.js answered by `version`. → outfile */
+export async function agentdBundle({ version, outfile, entry = DAEMON, repo = REPO, logLevel = 'error', ...rest } = {}) {
+  if (Object.keys(rest).length) throw new Error(`agentd-bundle: ${Object.keys(rest).join(', ')} — a suite passes no flags of its own (they are build:agentd's)`);
   if (!outfile) throw new Error('agentd-bundle: an outfile is required');
   const out = path.resolve(String(outfile)), src = real(path.join(repo, 'src'));
   if (real(path.dirname(out)) === src || real(path.dirname(out)).startsWith(src + path.sep)) throw new Error(`agentd-bundle: the outfile ${out} lies under the tree's src/ — a bundle goes to the suite's scratch`);
+  const plan = buildPlan(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).scripts, entry);
   const plugin = stampPlugin(version, { repo });
+  const raw = plan.strip ? path.join(path.dirname(out), `.${path.basename(out, '.js')}.raw.js`) : out;   // the build's own side name, beside the outfile
   const esbuild = require('esbuild');
-  await esbuild.build({ entryPoints: [path.join(repo, entry)], absWorkingDir: repo, bundle: true, platform: 'node', outfile: out, external: [...external], logLevel, plugins: [plugin] });
+  await esbuild.build({ entryPoints: [path.join(repo, entry)], absWorkingDir: repo, outfile: raw, logLevel, plugins: [plugin], ...plan.options });
   if (entry === DAEMON && !plugin.hit()) throw new Error(`agentd-bundle: the stamp module src/agentd/version.js is not in the bundle of ${entry} — the daemon would report another version (move the stamp with the module)`);
+  if (plan.strip) execFileSync(process.execPath, [path.join(repo, 'scripts', 'agentd-bundle-strip.mjs'), raw, out], { stdio: ['ignore', 'ignore', 'inherit'] });   // the build's own strip: written beside out, renamed over it, raw gone
   return out;
 }
