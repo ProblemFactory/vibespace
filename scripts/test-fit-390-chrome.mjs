@@ -40,13 +40,15 @@ const read = (p) => fs.readFileSync(path.join(repo, p), 'utf8');
 const STYLE = read('public/style.css'), CHAT = read('public/chat.css'), UTILS_PATH = path.join(repo, 'src/lib/utils.js'), UTILS = fs.readFileSync(UTILS_PATH, 'utf8');
 const KIND_NOW = '.chat-artifact-kind { margin-left: auto; font-size: 0.85em; flex: none; white-space: nowrap; }';
 const BODY_NOW = '.dialog.agents-dialog .agents-dialog-body { min-width: min(380px, 100%); }';
+const ROSTER_NOW = '.dialog.agents-dialog .ob-backend.acct-roster { align-items: stretch; }';
 const MEASURE_NOW = "    pop.style.left = (MENU_PAD / Z) + 'px';\n";
 const CAP_NOW = "    if (at.maxW != null) pop.style.maxWidth = (at.maxW / Z) + 'px';\n";
-ok(CHAT.split(KIND_NOW).length === 2 && STYLE.split(BODY_NOW).length === 2 && UTILS.split(MEASURE_NOW).length === 2 && UTILS.split(CAP_NOW).length === 2,
-  'the three rules stand in the tree once each (chat.css\'s kind chip, style.css\'s dialog body, utils.js\'s measure + cap) — the controls take them out');
+ok(CHAT.split(KIND_NOW).length === 2 && STYLE.split(BODY_NOW).length === 2 && STYLE.split(ROSTER_NOW).length === 2 && UTILS.split(MEASURE_NOW).length === 2 && UTILS.split(CAP_NOW).length === 2,
+  'the rules stand in the tree once each (chat.css\'s kind chip, style.css\'s dialog body and roster column, utils.js\'s measure + cap) — the controls take them out');
 const CHAT_OLD = CHAT.replace(KIND_NOW, '.chat-artifact-kind { margin-left: auto; font-size: 0.85em; }');   // stale-pins: kept — the CONTROL plants the old rule back (its anchor, the rule now, is checked once above)
 const STYLE_OLD = STYLE.replace(BODY_NOW, '.dialog.agents-dialog .agents-dialog-body { min-width: 380px; }');   // stale-pins: kept — the CONTROL plants the old rule back (its anchor, the rule now, is checked once above)
 const UTILS_OLD = UTILS.replace(MEASURE_NOW, '').replace(CAP_NOW, '');
+const STYLE_NOROSTER = STYLE.replace(ROSTER_NOW, '');   // ②b's control: ONLY the roster's rule out (the body floor stays the cure's)
 
 // ── the page bundles: the real modules (a built tree; an unbuilt one gets a stub build-version.js) ──
 const root = scratch('fit-390-chrome'), dir = path.join(root, 'web'), fontsDir = path.join(root, 'fonts');
@@ -62,11 +64,11 @@ await build('now.js');
 await build('old.js', [oldUtils]);
 
 const web = express();
-web.get('/style.css', (q, s) => s.type('css').send(q.query.old === '1' ? STYLE_OLD : STYLE));
+web.get('/style.css', (q, s) => s.type('css').send(q.query.old === '1' ? STYLE_OLD : q.query.old === 'roster' ? STYLE_NOROSTER : STYLE));
 web.get('/chat.css', (q, s) => s.type('css').send(q.query.old === '1' ? CHAT_OLD : CHAT));
 web.get('/:b.js', (q, s) => s.type('js').send(fs.readFileSync(path.join(dir, q.params.b + '.js'))));
 web.get('/', (q, s) => {
-  const old = q.query.old === '1' ? '1' : '0';
+  const old = q.query.old === '1' ? '1' : q.query.old === 'roster' ? 'roster' : '0';
   s.type('html').send(`<!doctype html><html data-theme="dark" lang="zh"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"><link rel="stylesheet" href="/style.css?old=${old}"><link rel="stylesheet" href="/chat.css?old=${old}"><script>try{localStorage.setItem('vibespace.lang','zh')}catch{}</script></head><body><div id="stage"></div><script src="/${old === '1' ? 'old' : 'now'}.js"></script></body></html>`);
 });
 const [PORT, CDP_PORT] = await freePorts(2);
@@ -91,7 +93,7 @@ async function page({ old = false } = {}) {
   await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   const ev = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r.exceptionDetails).slice(0, 600)); return r.result?.value; };
-  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?old=${old ? 1 : 0}` });
+  await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?old=${old === 'roster' ? 'roster' : old ? 1 : 0}` });
   let ready = false;
   for (let i = 0; i < 200 && !ready; i++) { ready = await ev('window.__ready === true').catch(() => false); if (!ready) await sleep(50); }
   await ev('document.fonts.ready.then(() => true)');
@@ -138,11 +140,15 @@ const AGENTS = `(() => {
     + '<div class="dialog-body agents-dialog-body"><div class="agents-tabs btn-bar"><button class="agents-tab active">账号</button><button class="agents-tab">机器</button><button class="agents-tab">指令</button></div>'
     + '<div class="agents-overview-head btn-bar"><span class="agents-note btn-bar-text">本机账号与配额</span><button class="agent-btn agents-refresh-all"><svg viewBox="0 0 16 16"></svg><span>全部刷新</span></button></div>'
     + '<div class="agents-machine-sec"><div class="ob-backend"><b>Claude Code</b> 2.1.321 未登录<div class="btn-bar"><button class="agent-btn">重新检查</button><button class="agent-btn">更新</button></div></div>'
-    + '<div class="ob-backend acct-section acct-roster"><b>Anthropic 账号</b> <button class="agent-btn acct-add">+ 添加账号…</button></div></div></div></div>';
+    + '<div class="ob-backend acct-section acct-roster"><div class="acct-roster-head btn-bar"><b class="btn-bar-text">Anthropic 账号</b><button class="agent-btn acct-add">+ 添加账号…</button></div>'
+    + '<div class="acct-list"><div class="acct-row"><span class="acct-name">Work Max</span></div></div></div></div></div></div>';
   document.body.appendChild(ov);
   const R = (e) => e.getBoundingClientRect(), d = R(ov.querySelector('.dialog')), body = ov.querySelector('.agents-dialog-body'), b = R(body), ra = R(ov.querySelector('.agents-refresh-all'));
   const past = [...ov.querySelectorAll('.dialog *')].filter((e) => e.getClientRects().length && R(e).right > d.right + 0.5).map((e) => String(e.className || e.tagName).slice(0, 40));
-  return { dialog: Math.round(d.width), dialogRight: Math.round(d.right), body: Math.round(b.width), bodyRight: Math.round(b.right), refreshRight: Math.round(ra.right), sideways: body.scrollWidth - body.clientWidth, past };
+  const ro = ov.querySelector('.acct-roster'), rc = getComputedStyle(ro), rr = R(ro), cl = rr.left + parseFloat(rc.borderLeftWidth) + parseFloat(rc.paddingLeft), cr = rr.right - parseFloat(rc.borderRightWidth) - parseFloat(rc.paddingRight);
+  const hd = R(ro.querySelector('.acct-roster-head')), ti = R(ro.querySelector('.acct-roster-head b')), li = R(ro.querySelector('.acct-list'));
+  const roster = { contentLeft: Math.round(cl), contentRight: Math.round(cr), headLeft: Math.round(hd.left), headRight: Math.round(hd.right), titleLeft: Math.round(ti.left), listLeft: Math.round(li.left), listRight: Math.round(li.right), alignItems: rc.alignItems };
+  return { dialog: Math.round(d.width), dialogRight: Math.round(d.right), body: Math.round(b.width), bodyRight: Math.round(b.right), refreshRight: Math.round(ra.right), sideways: body.scrollWidth - body.clientWidth, past, roster };
 })()`;
 console.log('② the Agents dialog at 390 — its body never runs past it');
 {
@@ -151,7 +157,13 @@ console.log('② the Agents dialog at 390 — its body never runs past it');
   console.log(`      now: dialog ${A.dialog} px (right ${A.dialogRight}), body ${A.body} px (right ${A.bodyRight}), «全部刷新» right ${A.refreshRight}, ${A.past.length} past · the old floor: body ${B.body} px (right ${B.bodyRight}), «全部刷新» right ${B.refreshRight}, ${B.past.length} past`);
   ok(A.dialog < 380 && A.bodyRight <= A.dialogRight + 0.5 && A.refreshRight <= A.dialogRight + 0.5 && !A.past.length && A.sideways <= 1, `the body (${A.body} px), «全部刷新» and every card inside the ${A.dialog} px dialog — nothing past its right edge`, A);
   ok(B.bodyRight > B.dialogRight + 0.5 && B.refreshRight > B.dialogRight + 0.5 && B.past.length > 0, `CONTROL: the old 380 px floor — the body ends at ${B.bodyRight}, «全部刷新» at ${B.refreshRight}, past the dialog's ${B.dialogRight}`, B);
-  now.close(); was.close();
+  // ②b the roster's head spans the roster (主开发 r531: «Anthropic 账号» and its button stood ~50 px in — the column centred them)
+  const nr = await page({ old: 'roster' }), C = (await nr.ev(AGENTS)).roster, H = A.roster;
+  console.log(`      the roster now: content ${H.contentLeft}–${H.contentRight}, head ${H.headLeft}–${H.headRight}, title at ${H.titleLeft}, list ${H.listLeft}–${H.listRight} (align-items ${H.alignItems}) · without its rule: head ${C.headLeft}–${C.headRight}, title at ${C.titleLeft}, list ${C.listLeft}–${C.listRight} (align-items ${C.alignItems})`);
+  ok(Math.abs(H.headLeft - H.contentLeft) <= 1 && Math.abs(H.headRight - H.contentRight) <= 1 && Math.abs(H.titleLeft - H.contentLeft) <= 1 && Math.abs(H.listLeft - H.contentLeft) <= 1 && Math.abs(H.listRight - H.contentRight) <= 1,
+    `②b the roster's head and list span the roster: the title at its left edge (${H.titleLeft} vs ${H.contentLeft}), the head and the list to its right edge (${H.headRight} / ${H.listRight} vs ${H.contentRight})`, H);
+  ok(C.headLeft - C.contentLeft > 10 && C.listLeft - C.contentLeft > 10, `CONTROL: without the roster's rule the column CENTRES its head (${C.headLeft - C.contentLeft} px in) and its short list (${C.listLeft - C.contentLeft} px in) — .ob-backend's later centre wins`, C);
+  now.close(); was.close(); nr.close();
 }
 
 // ③ the popover helper: the add-account menu's own rows opened from x 205; a menu wider than the screen
