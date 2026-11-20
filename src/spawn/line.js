@@ -62,6 +62,14 @@ function priorityArgv(priority) {
   return [nice, '-n', String(by)];
 }
 
+/** PURE (B-460d's remainder): a PAIRED machine's spawn spec {cmd, args} with the start's priority in front — `<nice> -n <by>
+ *  cmd …args` (priorityArgv's words) — or the spec as it is (none: the release's, byte for byte). Both dial branches
+ *  (src/spawn/dial.js: the chat's pipe session, the terminal's pty) build their spec with it. */
+function withPriority({ cmd, args = [] }, priority) {
+  const pre = priorityArgv(priority);
+  return pre.length ? { cmd: pre[0], args: [...pre.slice(1), cmd, ...args] } : { cmd, args };
+}
+
 /** THE LINE: { argv, env } — argv for dtach's tail / the daemon pipe, env for that spawn's `env` option.
  *  `env` = the base the create built (agentEnv + the session's names); `pairs` join it (a later pair wins).
  *  `priority` (B-460d) = { nice, by } — the line starts with `<nice> -n <by>` — or null (none). */
@@ -74,4 +82,4 @@ function sessionSpawnLine({ node, wrapper, bufFile, metaFile, exe, args = [], en
   };
 }
 
-module.exports = { sessionSpawnLine, pairsEnv, exeRefusal, priorityArgv, PRIORITY_BY };
+module.exports = { sessionSpawnLine, pairsEnv, exeRefusal, priorityArgv, withPriority, PRIORITY_BY };

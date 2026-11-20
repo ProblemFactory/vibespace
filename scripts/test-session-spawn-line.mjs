@@ -22,6 +22,11 @@
 //     from 19 (a judged premise there; r598: never a red for the niceness the suite runs at); the fact rides the session and
 //     its meta, and its words are Session Properties' row; the job wrapper's 'error' listener runs (a late exec failure is
 //     ONE journal line, never a throw — RED: a copy without the listener throws).
+//   ⑤ B-460d's remainder — A PAIRED MACHINE'S CONVERSATION STARTS BELOW ITS MACHINE'S AGENT: the nice look in ONE shared file
+//     (src/nice-program.js — the hub's verdict and the device agent's hello); the device's verdict IS priorityFor with the
+//     machine's own program (nicePathOf: its shape); the paired spec's builder (none ⇒ the release's spec byte for byte); both
+//     dial branches wired; the spawn census RED for a spec without the builder and a hello without nicePath; the Windows shell
+//     door still sees `sh`; the row's words. The REAL agent's processes: test-sysinfo-op 4c.
 // Run: node scripts/test-session-spawn-line.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -297,7 +302,7 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   ok(!clean.length && cutWs.some((r) => /PRIORITY ROAD src\/ws-create\.js/.test(r)) && cutJob.some((r) => /PRIORITY ROAD src\/jobs\.js/.test(r)) && newRoad.some((r) => /UNLISTED session line src\/server\/new-road\.js/.test(r))
     && twoInBr.some((r) => /PRIORITY EXCEPTION src\/server\/boot-restore\.js: 2 session line/.test(r)) && cutVault.some((r) => /PRIORITY ROAD src\/server\/vault-run-door\.js/.test(r)),
     `THE SPAWN CENSUS: the ${C.PRIORITY_ROADS.length} places read clean; RED for the ws-create line with its priority cut, the job spawn without it, the vault run door's command without it (B-7f18), a NEW caller of the session line with no row, and a SECOND (local) line in the excepted file`, { clean, cutWs, cutJob, cutVault, newRoad, twoInBr });
-  ok(/session\._cpuNice = ocPty \? null : r6Pri\.fact;/.test(src) && /child\.once\('error', /.test(JSRC),
+  ok(/session\._cpuNice = ocPty \? null : \(session\.host && session\._cpuNice !== undefined \? session\._cpuNice : r6Pri\.fact\);/.test(src) && /child\.once\('error', /.test(JSRC),
     'an OpenCode serve terminal (its pty is the serve\'s, never this line) gets no fact — no row claims it lowered; a job wrapper whose exec fails late is an error event the engine catches, never the hub\'s crash');
   // the words a person reads (Session Properties' row, src/lib/cpu-priority-words.js)
   const { cpuPriorityWords } = await import(path.join(REPO, 'src/lib/cpu-priority-words.js'));
@@ -306,8 +311,89 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   ok(words[0] === 'Below the server (nice +5) — and everything it starts' && /off in Settings/.test(words[1]) && /no nice program/.test(words[2]) && /its own machine/.test(words[3]) && words[4] === null && words[5] === null,
     'Session Properties\' «CPU priority» row: below the server (nice +5), the server\'s own with its reason, a remote machine\'s own — no row for a start that predates the fact', words);
   const SPROPS = read('src/lib/session-props.js'), SV = read('server.js'), BR = read('src/server/boot-restore.js'), SB = read('src/lib/sidebar.js');
-  ok(/const cpuWords = cpuPriorityWords\(s\.cpuNice, t\);\n    if \(cpuWords\) row\(idSec, t\('CPU priority'\), escHtml\(cpuWords\)\);/.test(SPROPS) && /cpuNice: s\._cpuNice \|\| null/.test(SV) && /\n  cpuNice: \{ digest: null \},/.test(SB) && /\n    _cpuNice: meta\.cpuNice && /.test(BR),
+  ok(/const cpuWords = cpuPriorityWords\(s\.cpuNice, t, \{ remote: !!s\.host \}\);[^\n]*\n    if \(cpuWords\) row\(idSec, t\('CPU priority'\), escHtml\(cpuWords\)\);/.test(SPROPS) && /cpuNice: s\._cpuNice \|\| null/.test(SV) && /\n  cpuNice: \{ digest: null \},/.test(SB) && /\n    _cpuNice: meta\.cpuNice && /.test(BR),
     'the fact\'s road to the row: the session list carries `cpuNice` (a carried-only live fact), the restore reads the meta back, the identity section draws the row');
+}
+console.log('— ⑤ B-460d\'s remainder: a PAIRED machine\'s conversation starts below ITS machine\'s agent — the same verdict, that machine\'s own nice program');
+{
+  const SPRI = require(path.join(REPO, 'src/server/spawn-priority.js')), NP = require(path.join(REPO, 'src/nice-program.js'));
+  const AG = read('src/agentd/agentd.js');
+  NP._resetNice(); const winLook = NP.niceProgram({ platform: 'win32', access: () => { } }); NP._resetNice();
+  ok(SPRI.niceProgram === NP.niceProgram && SPRI.NICE_DIRS === NP.NICE_DIRS && winLook === null && !/function niceProgram/.test(read('src/server/spawn-priority.js'))   // stale-pins: kept (the look moved OUT of spawn-priority.js on purpose: this pins its absence there)
+    && AG.includes("const { niceProgram } = require('../nice-program.js');") && AG.includes('nicePath: niceProgram(),'),
+    'THE nice look lives in ONE shared file (src/nice-program.js): the hub\'s verdict uses it, the device agent\'s hello says its answer (nicePath); none on Windows', { winLook });
+  const T = [[{ nicePath: '/usr/bin/nice', platform: 'linux' }, '/usr/bin/nice'], [{ nicePath: '/opt/homebrew/bin/nice', platform: 'darwin' }, '/opt/homebrew/bin/nice'],
+    [{ nicePath: 'nice' }, null], [{ nicePath: '/usr/bin/ni ce' }, null], [{ nicePath: '/usr/bin/nice\u202e' }, null], [{ nicePath: '/usr/bin/nice\n' }, null],
+    [{ nicePath: '/' + 'x'.repeat(1024) }, null], [{ nicePath: '/usr/bin/nice', platform: 'win32' }, null], [{ nicePath: 42 }, null], [{ nicePath: null }, null], [{}, null], [null, null]];
+  const wrongP = T.filter(([h, want]) => SPRI.nicePathOf(h) !== want);
+  ok(!wrongP.length, `PURE nicePathOf, ${T.length} rows: an absolute path with no space, control or direction-changing character, ≤ 1024, never from a Windows agent — else none`, wrongP);
+  const H = { nicePath: '/usr/bin/nice', platform: 'linux' }, OFFS = (k) => (k === SPRI.SETTING ? false : undefined);
+  const dOn = SPRI.devicePriorityFor({ hello: H }), dOff = SPRI.devicePriorityFor({ serverSetting: OFFS, hello: H }), dOld = SPRI.devicePriorityFor({ hello: { platform: 'linux' } });
+  const dNone = SPRI.devicePriorityFor({ hello: { nicePath: null, platform: 'linux' } }), dWin = SPRI.devicePriorityFor({ hello: { nicePath: '/usr/bin/nice', platform: 'win32' } }), dNo = SPRI.devicePriorityFor({});
+  const dThrow = SPRI.devicePriorityFor({ serverSetting: () => { throw new Error('settings not ready'); }, hello: H });
+  const remoteFact = (x) => x.priority === null && x.fact.by === 0 && x.fact.why === 'remote';
+  ok(JSON.stringify(dOn) === JSON.stringify({ priority: { nice: '/usr/bin/nice', by: 5 }, fact: { by: 5 } }) && dThrow.priority && dThrow.priority.by === 5 && [dOff, dOld, dNone, dWin, dNo].every(remoteFact),
+    'the device\'s verdict IS priorityFor with the machine\'s own nice program: on ⇒ ITS nice -n 5, the fact {by: 5}; a setting that cannot be read = on; the setting off, an older agent (no nicePath), a machine with none, a Windows agent, no hello ⇒ today\'s answer (none, «set by its own machine»)', { dOn, dOff, dOld, dNone, dWin, dNo });
+  SPRI._reset(); const said = []; SPRI.devicePriorityFor({ hello: { nicePath: null } }); SPRI.devicePriorityFor({ hello: H });
+  const hubNone = SPRI.priorityFor({ nice: () => null, log: { warn: (l) => said.push(l) } }); SPRI._reset();
+  ok(hubNone.fact.why === 'no-nice' && said.length === 1, 'a paired machine\'s answer never says nor spends the hub\'s own once-said «no nice program» line', said);
+  const plainSpec = L.withPriority({ cmd: 'sh', args: ['-lc', 'x'] }, null), lowSpec = L.withPriority({ cmd: 'sh', args: ['-lc', 'x'] }, dOn.priority);
+  let badW = null; try { L.withPriority({ cmd: 'sh', args: [] }, { nice: 'nice', by: 5 }); } catch (e) { badW = e.message; }
+  ok(JSON.stringify({ ...plainSpec, cwd: '/w' }) === JSON.stringify({ cmd: 'sh', args: ['-lc', 'x'], cwd: '/w' }) && JSON.stringify(lowSpec) === JSON.stringify({ cmd: '/usr/bin/nice', args: ['-n', '5', 'sh', '-lc', 'x'] }) && /absolute/.test(String(badW)),
+    'the paired spec\'s builder: none ⇒ the release\'s spec byte for byte (its keys in their order); a priority ⇒ `<its nice> -n 5 sh -lc …` (priorityArgv\'s words); a bare name refused by name', { plainSpec, lowSpec, badW });
+  const DIAL = read('src/spawn/dial.js'), WSC = read('src/ws-create.js'), cnt = (s, x) => s.split(x).length - 1;
+  ok(cnt(DIAL, 'const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello() });') === 2
+    && cnt(DIAL, "pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd,") === 1
+    && cnt(DIAL, "spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd } }") === 1
+    && cnt(DIAL, "{ cmd: 'sh', args: ['-lc', shellCmd]") === 2 && cnt(DIAL, 'session._cpuNice = devPri.fact;') === 1 && cnt(DIAL, 'session._cpuNice = dialKeeperSid ? null : devPri.fact;') === 1 && DIAL.includes('hosts.connectedDevice(h.id)')
+    && WSC.includes('session._cpuNice = ocPty ? null : (session.host && session._cpuNice !== undefined ? session._cpuNice : r6Pri.fact);'),
+    'THE WIRING: both dial branches (the terminal\'s pty, the chat\'s pipe session) ask the device\'s verdict from a link already up and build their spec with the builder — no spec left without it; each fresh start keeps ITS machine\'s fact (ws-create keeps a paired start\'s own)');
+  // THE LADDER ITSELF (the round's S2): src/spawn/dial.js's terminal and chat, driven with a stand-in device — Integration off, no
+  // account, a bridge that answers a port — and the cfg file each writes read back (what the attach client hands the device)
+  const DL = require(path.join(REPO, 'src/spawn/dial.js')), dlDir = scratchDir('sline-dial');
+  const helloDm = { helloInfo: () => ({ nicePath: '/usr/bin/nice', platform: 'linux' }) };
+  let dn = 0;
+  const drive5 = async (mode, { hosts, data = {}, setting } = {}) => {
+    const sent = [], session = {}, id = `d5-${mode}-${++dn}`;
+    const ctx = { hosts, path, fs, os, AGENT_BIN_DIR: '/x/bin', EDITOR_CMD: '/x/code', PORT: 3999, ownerWriteRefusal: () => null, cliConfigPlanB64: () => '', serverSetting: setting || (() => undefined),
+      ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), NODE_CMD: '/n/node', agentdRemote: { lockedWhy: () => null, agentdDir: dlDir, attachBundle: '/a/attach.js' }, dialBridge: { ensure: async () => 41234 } };
+    const c = { ctx, execFileAsync: async () => ({ stdout: '' }), ws: { send: (m) => sent.push(m) }, data: { reqId: 1, ...data }, id, backend: 'claude', SP: {}, sessionMode: mode, session, cwd: '/home/u/p',
+      spawnAccount: null, integrationOn: false, spawnBrowserPre: '', needsClaudeLoginHelper: false, sweepOpts: () => ({}), h: { id: 'dial-d5', name: 'd5', deviceId: 'd5', transport: 'dial' },
+      shq: (x) => `'${String(x).split("'").join(`'\\''`)}'`, rcmd: 'claude', rargs: [], spawnCmd: 'claude', spawnArgs: [], spawnEnvPairs: [], spawnCwd: '/home/u/p' };
+    const ans = await DL[mode](c);
+    let cfg = null; try { cfg = JSON.parse(fs.readFileSync(path.join(dlDir, 'session-' + id + '.json'), 'utf8')); } catch { }
+    return { ans, cfg, session, sent };
+  };
+  const upH = { connectedDevice: () => helloDm };
+  const cT = await drive5('terminal', { hosts: upH }), cC = await drive5('chat', { hosts: upH });
+  const lowCfg = (x) => !!x && x.cmd === '/usr/bin/nice' && JSON.stringify(x.args.slice(0, 4)) === '["-n","5","sh","-lc"]';
+  const relCfg = (x, keys) => !!x && x.cmd === 'sh' && x.args[0] === '-lc' && JSON.stringify(Object.keys(x)) === JSON.stringify(keys);
+  ok(lowCfg(cT.cfg && cT.cfg.pty) && JSON.stringify(Object.keys(cT.cfg.pty)) === '["cmd","args","cwd","env","cols","rows"]' && lowCfg(cC.cfg && cC.cfg.spawn) && cT.session._cpuNice?.by === 5 && cC.session._cpuNice?.by === 5 && !cT.sent.length && !cC.sent.length,
+    'THE LADDER (src/spawn/dial.js, a stand-in device whose hello names its nice): the terminal\'s pty spec and the chat\'s pipe-session spec start with THAT nice -n 5 sh -lc …; each start\'s fact {by: 5}', { pty: cT.cfg && cT.cfg.pty, spawn: cC.cfg && cC.cfg.spawn, sent: [...cT.sent, ...cC.sent] });
+  const reD = await drive5('chat', { hosts: { connectedDevice: () => null, device: async () => helloDm } });
+  ok(lowCfg(reD.cfg && reD.cfg.spawn) && reD.session._cpuNice?.by === 5, 'a cached handle a re-dial left behind (connectedDevice: none): the create asks the dial road itself and still lowers');
+  const noneC = await drive5('chat', { hosts: {} }), noneT = await drive5('terminal', { hosts: {} }), offC = await drive5('chat', { hosts: upH, setting: OFFS }), adopt = await drive5('chat', { hosts: upH, data: { keeperSid: 'k-live-1' } });
+  ok(relCfg(noneC.cfg && noneC.cfg.spawn, ['cmd', 'args', 'cwd']) && relCfg(noneT.cfg && noneT.cfg.pty, ['cmd', 'args', 'cwd', 'env', 'cols', 'rows']) && noneC.session._cpuNice?.why === 'remote' && noneT.session._cpuNice?.why === 'remote'
+    && relCfg(offC.cfg && offC.cfg.spawn, ['cmd', 'args', 'cwd']) && offC.session._cpuNice?.why === 'remote' && !!adopt.cfg && !adopt.cfg.spawn && adopt.session._cpuNice === null
+    && !lowCfg(noneC.cfg && noneC.cfg.spawn) && !lowCfg(offC.cfg && offC.cfg.spawn),
+    'the release\'s spec, its keys in their order, and the fact «set by its own machine»: no hello (an older agent, no handle) — both branches — and the setting off; an ADOPTED start sends no spec and states NO fact (no row: its child keeps the priority it started with); the judge reads each of them NOT lowered (the control)', { noneC: noneC.cfg, offC: offC.cfg, adopt: adopt.cfg, adoptFact: adopt.session._cpuNice });
+  const C = await import(path.join(REPO, 'scripts/spawn-env-census.mjs'));
+  const FILES = C.filesOf(REPO), rdp = (patch) => (f) => (f in patch ? patch[f] : (() => { try { return read(f); } catch { return ''; } })());
+  const cutPty = C.priorityJudge(rdp({ 'src/spawn/dial.js': DIAL.replace("pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd,", "pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd,") }), FILES);   // stale-pins: kept (the red control rebuilds the release's pty spec on purpose)
+  const cutHello = C.priorityJudge(rdp({ 'src/agentd/agentd.js': AG.replace('nicePath: niceProgram(),', '') }), FILES);
+  ok(!C.priorityJudge(rdp({}), FILES).length && cutPty.some((r) => /PRIORITY ROAD src\/spawn\/dial\.js/.test(r)) && cutHello.some((r) => /PRIORITY ROAD src\/agentd\/agentd\.js/.test(r)),
+    'THE SPAWN CENSUS holds the paired machine\'s places: RED for a dial spec built without the builder, and for an agent whose hello says no nice program', { cutPty, cutHello });
+  const CL = require(path.join(REPO, 'src/agentd/client.js'));
+  ok(!!CL.posixShellRefusal({ platform: 'win32', posixShells: [] }, 'sh') && SPRI.nicePathOf({ platform: 'win32', nicePath: '/usr/bin/nice' }) === null,
+    'the Windows shell door still sees `sh`: a Windows agent is never handed the prefix, so its spec keeps the shell first (the door keys on it)');
+  const { cpuPriorityWords } = await import(path.join(REPO, 'src/lib/cpu-priority-words.js'));
+  const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? p[x] : m));
+  const KEY = 'Below its machine’s agent (nice +{n}), and everything it starts';
+  const wr5 = cpuPriorityWords({ by: 5 }, tt, { remote: true }), wl5 = cpuPriorityWords({ by: 5 }, tt), wrr = cpuPriorityWords({ by: 0, why: 'remote' }, tt, { remote: true });
+  const ZH = read('src/lib/i18n-zh.js'), JA = read('src/lib/i18n-ja.js'), SPROPS = read('src/lib/session-props.js');
+  ok(wr5 === 'Below its machine’s agent (nice +5), and everything it starts' && wl5 === 'Below the server (nice +5) — and everything it starts' && /its own machine/.test(wrr)
+    && ZH.includes(JSON.stringify(KEY) + ': ') && JA.includes(JSON.stringify(KEY) + ': ') && SPROPS.includes('cpuPriorityWords(s.cpuNice, t, { remote: !!s.host })'),
+    'Session Properties\' row for a paired machine\'s conversation: «Below its machine’s agent (nice +5), and everything it starts» (en, zh, ja); a local one keeps «Below the server…»; every not-lowered case keeps today\'s sentence', { wr5, wl5, wrr });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

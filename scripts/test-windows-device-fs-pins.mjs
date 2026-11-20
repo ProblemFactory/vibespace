@@ -60,8 +60,8 @@ const TABLE = [
   { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', 'printf %s \"$HOME\"'], { timeoutMs: 8000, by })", verdict: 'refused', how: DOOR },
   { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c',", exact: true, verdict: 'refused', how: DOOR },
   { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', `chmod 600", verdict: 'refused', how: DOOR },
-  { file: 'src/spawn/dial.js', has: "pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd,", verdict: 'refused', how: 'a session spawn spec ⇒ openSession / openPipeSession ⇒ the door' },
-  { file: 'src/spawn/dial.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
+  { file: 'src/spawn/dial.js', has: "pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd,", verdict: 'refused', how: 'a session spawn spec ⇒ openSession / openPipeSession ⇒ the door (B-460d\'s remainder: `<its nice> -n 5` goes in front only for an agent that names its nice program — never a Windows one, so the door still sees `sh`)' },
+  { file: 'src/spawn/dial.js', has: "spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door (B-460d\'s remainder: the nice prefix never reaches a Windows agent)' },
   { file: 'src/spawn/ssh.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
   { file: 'src/ws-handler.js', has: "await dm.runCmd('sh', ['-c', `rm -f", verdict: 'refused', how: DOOR },
   // B-77ed's cure: the start's CLAUDE_CONFIG_DIR as the CLI's own login shell sets it — a local `sh -lc` of the machine the

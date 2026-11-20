@@ -276,7 +276,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
     const connLabel = { live: t('LIVE (VibeSpace-managed)'), tmux: t('Running in tmux'), external: t('Running externally'), stopped: t('Stopped') }[s.status] || s.status;
     row(idSec, t('Connection'), escHtml(connLabel) + (s.pid ? ` <span style="color:var(--text-dim)">PID ${escHtml(String(s.pid))}</span>` : ''));
     // B-460d: where a person looks for «why is my build slower» — the priority THIS start got (none for an older start)
-    const cpuWords = cpuPriorityWords(s.cpuNice, t);
+    const cpuWords = cpuPriorityWords(s.cpuNice, t, { remote: !!s.host });   // B-460d's remainder: a paired machine's step is below ITS agent
     if (cpuWords) row(idSec, t('CPU priority'), escHtml(cpuWords));
 
     // ── State (current + change) ──

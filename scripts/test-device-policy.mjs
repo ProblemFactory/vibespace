@@ -224,7 +224,8 @@ console.log('— ⑤b the greeting is judged before it is believed (lane lg-remo
     [{ ...good, capabilities: 'probe' }, false], [{ ...good, posixShells: ['/bin/sh; rm -rf ~'] }, false], [{ ...good, posixShells: Array.from({ length: 17 }, () => 'sh') }, false],
     [{ ...good, daemonVersion: 'x'.repeat(41) }, false], [{ ...good, daemonVersion: 5 }, false], [{ ...good, nodeVersion: 'v'.repeat(65) }, false], [{ ...good, elevated: 'yes' }, false],
     [{ ...good, pad: 'x'.repeat(70 * 1024) }, false],
-    [{ ...good, nodePath: 42 }, false], [{ ...good, nodePath: '/opt/agent/node/bin/node' }, true], [{ ...good, nodePath: 'node' }, true]];   // B-b83c: a nodePath is a string (the hub reads only an absolute path; a name is ignored, not refused)
+    [{ ...good, nodePath: 42 }, false], [{ ...good, nodePath: '/opt/agent/node/bin/node' }, true], [{ ...good, nodePath: 'node' }, true],
+    [{ ...good, nicePath: 42 }, false], [{ ...good, nicePath: '/usr/bin/nice' }, true], [{ ...good, nicePath: null }, true]];   // B-460d's remainder: a nicePath is a string or none (the hub lowers only by an absolute path: spawn-priority.js nicePathOf)   // B-b83c: a nodePath is a string (the hub reads only an absolute path; a name is ignored, not refused)
   const wrong = T.filter(([m, want]) => CL.helloAckVerdict(m).ok !== want);
   ok(!wrong.length && CL.HELLO_BOUNDS.capabilities === 256 && CL.HELLO_BOUNDS.bytes === 65536,
     `PURE helloAckVerdict, ${T.length} rows: a well-formed greeting and an older agent's (fields it never said) pass (a platform WORD Node.js does not name yet passes — never a lock-out); a platform that is no word, 257 capabilities, a capability with a space, capabilities not a list, a shell that is no name, 17 shells, a long or non-string version, a long nodeVersion, a non-boolean elevated, a 70 KiB greeting — each refused`, wrong.map(([m]) => CL.helloAckVerdict(m)));

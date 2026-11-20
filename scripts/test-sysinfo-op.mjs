@@ -6,7 +6,8 @@
 // interpretations DRIFTED (the false-100% incident: raw memory.current vs
 // working set). Pins: (1) the op returns the module's own shape byte-
 // compatible with the local read; (2) the capability gates an old daemon;
-// (3) the ssh-script fallback's parse still yields the same field names.
+// (3) the ssh-script fallback's parse still yields the same field names. (4c) B-460d's remainder: a paired machine's
+// conversation starts below its machine's agent — this real agent, the started process's niceness read from /proc.
 import { endDaemonsAndWait, DAEMON_ROOT_ENV, DAEMON_ARGV, DAEMON_COMM } from './scratch.mjs';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -119,6 +120,64 @@ ok(/daemon lacks proc-list \(capabilities gate\)/.test(cli), 'proc-list client m
     const u = await dm.leftBehind({ mark: lbMark, ageMs: 5000 });
     ok(u.unread === 'own-unknown' && Array.isArray(u.left) && u.left.length === 0, 'with no keeper sid the device knows no chain of the conversation: own-unknown, nothing named');
   } finally { for (const p of lbLive) { try { if (fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').includes('setTimeout')) process.kill(p, 'SIGKILL'); } catch { } } }
+}
+
+// 4c. B-460d's remainder (主开发 r486 / r494): A PAIRED MACHINE'S CONVERSATION STARTS BELOW ITS MACHINE'S AGENT — this REAL agent
+// (the built bundle) is the stand-in paired machine. Its hello names its own nice program (the shared look, src/nice-program.js);
+// the dial road's spec (src/spawn/line.js withPriority + src/server/spawn-priority.js devicePriorityFor — the SAME verdict the
+// hub's own starts take) is opened as a pipe session, and the started process and its child are read from THEIR OWN process
+// entries (/proc/<pid>/stat, the niceness field): the agent's own + 5. The setting off and an older agent's hello (no nicePath)
+// = the release's spec byte for byte, at the agent's own; the same judge on the spec with the prefix dropped is RED (the
+// control). It reads process facts (Linux /proc). nice and sleep run by their own names, never a copy under another name (a
+// multi-call program decides what it is by its file name). The leg ends its own sleep child, by pid, after its parent is
+// proven the session's shell; the shell then exits by itself.
+{
+  const SPRI = require(REPO + '/src/server/spawn-priority.js'), NP = require(REPO + '/src/nice-program.js'), { withPriority } = require(REPO + '/src/spawn/line.js');
+  const hello = (() => { try { return dm.helloInfo(); } catch { return null; } })() || conn.info || {};
+  const own = NP.niceProgram();
+  ok(typeof own === 'string' && hello.nicePath === own && NP.NICE_DIRS.includes(path.dirname(own)), `the REAL agent's hello names its own nice program — the shared look's answer on this machine (${hello.nicePath})`);
+  const statOf = (pid) => { try { const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return s.slice(s.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
+  const niceOf = (pid) => { const f = statOf(pid); return f ? Number(f[16]) : NaN; };
+  const ppidOf = (pid) => { const f = statOf(pid); return f ? Number(f[1]) : NaN; };
+  const gone = (pid) => { const f = statOf(pid); return !f || f[0] === 'Z' || f[0] === 'X'; };
+  const agentPid = Number(fs.readFileSync(path.join(process.env.VIBESPACE_AGENTD_ROOT, 'state', 'agentd.pid'), 'utf8').trim());
+  const agentNice = niceOf(agentPid), want = Math.min(19, agentNice + 5);
+  const tag = `vs460-${process.pid}`, started = [];
+  const scriptOf = () => `: ${tag}; sleep 30 & echo $! > "$VS460_PID"; wait`;   // the pid file's path rides the session's env (any TMPDIR spelling)
+  const openRead = async (pri, n) => {   // the spec the dial road builds, opened on the real agent → its words + [the started process's niceness, its child's]
+    const spec = withPriority({ cmd: 'sh', args: ['-lc', scriptOf(n)] }, pri.priority), pidFile = path.join(home, `${tag}-${n}.pid`);
+    const h = await dm.openPipeSession({ sid: `${tag}-${n}`, ...spec, cwd: home, env: { VS460_PID: pidFile } });
+    const r = await h.ready;
+    let child = 0;
+    { const end = Date.now() + 10000; while (!(child = Number((() => { try { return fs.readFileSync(pidFile, 'utf8').trim(); } catch { return ''; } })())) && Date.now() < end) await new Promise((res) => setTimeout(res, 20)); }   // the child's pid written: the condition, not a clock
+    started.push({ sh: r.pid, child, h });
+    return { spec, nice: [niceOf(r.pid), child && ppidOf(child) === r.pid ? niceOf(child) : NaN] };
+  };
+  try {
+    const lowP = SPRI.devicePriorityFor({ hello }), low = await openRead(lowP, 'low');
+    const offP = SPRI.devicePriorityFor({ serverSetting: (k) => (k === SPRI.SETTING ? false : undefined), hello }), off = await openRead(offP, 'off');
+    const oldP = SPRI.devicePriorityFor({ hello: { ...hello, nicePath: undefined } }), old = await openRead(oldP, 'old');
+    const release = (n) => JSON.stringify({ cmd: 'sh', args: ['-lc', scriptOf(n)] });   // the spec the release sends
+    const lowered = (x) => x.nice.length === 2 && x.nice.every((v) => v === want);
+    // r598: judged at ANY niceness — min(19, the agent's + 5); at 19 itself no step can be shown: a judged PREMISE row, said by name
+    const premise = agentNice >= 19;
+    ok(lowP.priority && lowP.fact.by === 5 && low.spec.cmd === own && JSON.stringify(low.spec.args.slice(0, 4)) === JSON.stringify(['-n', '5', 'sh', '-lc']) && (premise ? low.nice.length === 2 && low.nice.every((v) => v === 19) : lowered(low)),
+      premise ? `PREMISE (judged): the agent runs at niceness 19, the cap — the dial road's spec still starts with ITS nice (${low.spec.cmd} -n 5 sh -lc …), and no step below 19 can be shown (read ${JSON.stringify(low.nice)})`
+        : `REAL agent: the dial road's spec starts with ITS nice (${low.spec.cmd} -n 5 sh -lc …); the started process and its child, each read from its own /proc entry, run at niceness ${want} — the agent's ${agentNice} + 5, at most 19 (read ${JSON.stringify(low.nice)})`);
+    ok(offP.priority === null && offP.fact.why === 'remote' && JSON.stringify(off.spec) === release('off') && off.nice.every((v) => v === agentNice),
+      `the setting off: the release's spec byte for byte, both at the agent's own niceness ${agentNice} (read ${JSON.stringify(off.nice)}), the fact «set by its own machine»`);
+    ok(oldP.priority === null && oldP.fact.why === 'remote' && JSON.stringify(old.spec) === release('old') && old.nice.every((v) => v === agentNice),
+      `an OLDER agent (a hello with no nicePath): the release's spec byte for byte, never asked anything new, at its own niceness (read ${JSON.stringify(old.nice)})`);
+    if (!premise) ok(!lowered(off) && !lowered(old), 'RED CONTROL: the same judge on the spec with the prefix dropped (the release\'s) reads NOT lowered — this leg can go red');
+  } finally {
+    for (const s of started) {
+      if (s.child && ppidOf(s.child) === s.sh) { try { process.kill(s.child, 'SIGKILL'); } catch { } }   // this leg's own sleep (its parent: the session's shell)
+      try { s.h.kill(); } catch { }
+    }
+    const end = Date.now() + 5000;
+    while (started.some((s) => !gone(s.sh) || (s.child && !gone(s.child))) && Date.now() < end) await new Promise((res) => setTimeout(res, 20));   // gone: the condition
+    ok(started.every((s) => gone(s.sh) && (!s.child || gone(s.child))), `the leg's own processes are gone (${started.length} shells and their children)`);
+  }
 }
 
 // 5. the shared parser + cap (the ssh fallback rung's interpretation)

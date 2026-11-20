@@ -1009,6 +1009,7 @@ export default {
   "LIVE (VibeSpace-managed)": "実行中（VibeSpace 管理）",
   "CPU priority": "CPU 優先度",
   "Below the server (nice +{n}) — and everything it starts": "サーバーより低い（nice +{n}）——起動するものもすべて同じ",
+  "Below its machine’s agent (nice +{n}), and everything it starts": "そのマシンのエージェントより低い（nice +{n}）、起動するものもすべて同じ",
   "The server’s own — lowering it is off in Settings": "サーバーと同じ——設定で引き下げがオフ",
   "The server’s own — this machine has no nice program": "サーバーと同じ——このマシンには nice プログラムがない",
   "Set by its own machine — not lowered from here": "そのマシンが決める——ここからは下げない",

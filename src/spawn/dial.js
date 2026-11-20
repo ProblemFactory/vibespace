@@ -16,6 +16,8 @@
 const { buildRemoteExec, nodeFinder, agentNodeOf, buildRemoteShellPrelude } = require('../remote-shell');
 const { sweepWriters } = require('../writer-sweep');
 const { S0_SH } = require('../login-shell'); // the login-shell ladder, spelled once (lane cli-shell-truth)
+const SPRI = require('../server/spawn-priority.js'); // B-460d's remainder: a paired machine's start, the hub's SAME verdict
+const { withPriority } = require('./line.js'); // …and the SAME words in front of the device's spec (PURE)
 
 function dialLadder(c) {
   const { ctx, execFileAsync, ws, data, id, backend, SP, sessionMode, session, cwd, spawnAccount, integrationOn,
@@ -23,6 +25,15 @@ function dialLadder(c) {
   const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote, dialBridge } = ctx;
   let { spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = c;
   const answer = () => ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd });
+  // B-460d's remainder: the device's OWN hello — from the link that is up (connectedDevice: memory only); a cached handle a re-dial
+  // left behind (the agent's self-upgrade re-exec, the moment nicePath first appears) is not linked, so the create asks the dial
+  // road itself, as a session-establishing path does (deviceForDial rebuilds a stale handle, fails fast when the device is
+  // offline). None ⇒ null — the release's spec
+  const deviceHello = async () => {
+    const helloOf = (dm) => (typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info);
+    try { const up = typeof hosts.connectedDevice === 'function' ? hosts.connectedDevice(h.id) : null; if (up) return helloOf(up); } catch { }
+    try { const dm = typeof hosts.device === 'function' ? await hosts.device(h.id) : null; return dm ? helloOf(dm) : null; } catch { return null; }
+  };
           // B.3: the same agent prelude for a DIAL device, over the device
           // link (no ssh). Tools + the 0600 token ride fsWrite; VIBESPACE_API
           // is a REVERSE-FORWARD (device binds a loopback port whose bytes
@@ -183,6 +194,9 @@ function dialLadder(c) {
                   if ((spawnAccount?.secret && !spawnAccount._hostSubReady) || needsClaudeLoginHelper) throw e; // held billing rides dialAcctAssign — only a real key placement failure (or the required login helper, PR #23) is fatal
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
+                // B-460d's remainder: it starts below ITS machine's agent — the hub's SAME verdict with that machine's own nice
+                // program (its hello's nicePath); an older agent, none there, the setting off ⇒ the release's spec and today's fact
+                const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello() });
                 // tools PATH only while integrated — leftover tools from an
                 // earlier ON spawn must not be name-resolvable in a pristine one
                 const shellCmd = buildRemoteExec({
@@ -199,7 +213,7 @@ function dialLadder(c) {
                   hub: { port: PORT },
                   sid: id,
                   version: require('../../package.json').version,
-                  pty: { cmd: 'sh', args: ['-lc', shellCmd], cwd, env: { TERM: 'xterm-256color', COLORTERM: 'truecolor' }, cols: 120, rows: 30 },
+                  pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd, env: { TERM: 'xterm-256color', COLORTERM: 'truecolor' }, cols: 120, rows: 30 },
                 };
                 ensureDir(agentdRemote.agentdDir);
                 const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
@@ -214,6 +228,7 @@ function dialLadder(c) {
                 session._dialDeviceId = h.deviceId;
                 session._bridgePort = bridgePort;
                 session._agentdCfgFile = cfgFile;
+                session._cpuNice = devPri.fact;   // B-460d's remainder: THIS machine's fact — ws-create keeps a paired start's own
               } catch (e) {
                 ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, message: `dial terminal failed: ${e.message} (is the device online?)` })); return;
               }
@@ -304,6 +319,9 @@ function dialLadder(c) {
                   if ((spawnAccount?.secret && !spawnAccount._hostSubReady) || needsClaudeLoginHelper) throw e; // wrong billing / a required login helper must fail, not silently degrade (held rides dialAcctAssign — placement can't fail)
                   console.warn('[dial] agent setup degraded:', e.message); return { envPairs: [], tokenAssign: '' };
                 });
+                // B-460d's remainder: it starts below ITS machine's agent — the hub's SAME verdict with that machine's own nice
+                // program (its hello's nicePath); an older agent, none there, the setting off ⇒ the release's spec and today's fact
+                const devPri = SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello() });
                 // tools PATH only while integrated (see the pty branch note)
                 const shellCmd = buildRemoteExec({
                   cwd, shq,
@@ -320,7 +338,7 @@ function dialLadder(c) {
                   // cwd runs ON THE DEVICE — send the resolved device cwd, not
                   // this server's homedir (a path absent on the device). The
                   // daemon also falls back to HOME if it still doesn't exist.
-                  ...(dialKeeperSid ? {} : { spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd } }),
+                  ...(dialKeeperSid ? {} : { spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd } }),
                 };
                 ensureDir(agentdRemote.agentdDir);
                 const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
@@ -335,6 +353,7 @@ function dialLadder(c) {
                 session._dialDeviceId = h.deviceId;
                 session._bridgePort = bridgePort;
                 session._agentdCfgFile = cfgFile;
+                session._cpuNice = dialKeeperSid ? null : devPri.fact;   // a fresh start's fact; an ADOPTED one states none (no row): its child keeps the priority it started with, which this create cannot read
                 // the pipe sid the kill path must target (attach-adopted
                 // sessions keep the SURVIVING sid, not the fresh webui id)
                 session.keeperSid = dialKeeperSid || id;

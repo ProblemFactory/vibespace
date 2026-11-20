@@ -614,6 +614,9 @@ const SHARED = new Set(['src/agentd/answer-caps.js' /* lane lg-remote-hardening 
   // witness reader; node builtins only (crypto; fs by injection) — the daemon, its --stdio bridge and the hub's
   // local transport read the ONE rule
   'src/sock-path.js',
+  // B-460d's remainder: THE nice program's look (fixed system dirs, once per process) — the hub's starts (spawn-priority.js) and
+  // the device agent's hello (agentd.js says its answer: nicePath) require the ONE file; fs + path only (the daemon bundles it)
+  'src/nice-program.js',
   // lane-pairing verify-r3: THE ONE DOOR of a pairing token (mint / hash / constant-time compare) — node crypto only;
   // the hub's gate + minter and the device's hello share it (the daemon bundles it)
   'src/pairing-token.js',

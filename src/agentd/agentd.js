@@ -348,6 +348,7 @@ const { ptyInput } = require('./pty-input.js');   // B-5019: one UTF-8 decoder p
 // also is — every daemon child and every daemon re-exec is born from
 // `daemonEnv(process.env)`, never from `process.env` (see spawnEnv below).
 const { daemonEnv, withSpawnPath } = require('../agent-env.js');
+const { niceProgram } = require('../nice-program.js');   // B-460d's remainder (SHARED, bundled): THE nice look the hub's own starts use — the hello says its answer
 
 const VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION;
 // verify-r1 B9: THIS process's boot id rides every dial attempt (x-vibespace-daemon-boot) so the server can tell our
@@ -2038,6 +2039,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
           openssl: process.versions.openssl, nodeOwn: nodeOwn(), // lane device-node-version: the runtime's TLS library + whether this node is the installer's own (<root>/node — re-running the installer replaces it; a system node it never touches)
           nodePath: process.execPath, // B-b83c: THIS agent's own node (absolute) — the hub's node finder and the scanner's fallback run the agent's own programs on it first
+          nicePath: niceProgram(), // B-460d's remainder: THIS machine's own nice program (fixed system dirs; null on Windows or none) — the hub starts a conversation here below this agent with it
           posixShells: (posixShellsSaid = shells), // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it) — kept as the list last said (B-77ed's remainder)
           policy: DP.reportOf(POLICY), // lane device-allow-flags: THIS machine's allow list (read-only for the hub: it shows it, asks it first)
           elevated, // lane win-input-elevated: THIS daemon's own token runs elevated (admin), read live each hello; absent on an old daemon ⇒ the hub treats it as not-elevated and never asks it to type into an admin window

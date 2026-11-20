@@ -12,28 +12,19 @@
 //
 // The setting `agents.lowerCpuPriority` (default on; off = the release's spawn, byte for byte) is read at each START: a
 // running conversation keeps the priority it started with. A machine with no nice program is never unable to start one:
-// it starts at the hub's priority, and the journal says so once. NOT HERE: a paired machine's conversations (the device
-// agent needs a signed release), CPU weights or a group per conversation (the separation programme's).
-const fs = require('fs');
-const path = require('path');
+// it starts at the hub's priority, and the journal says so once. A PAIRED machine's conversation (B-460d's remainder):
+// devicePriorityFor — the SAME verdict with THAT machine's own nice program as its input (the device agent's hello says it,
+// from the shared look src/nice-program.js); the agent rides the signed update. NOT HERE: CPU weights or a group per
+// conversation (the separation programme's), an ssh host, a Windows machine.
 const { PRIORITY_BY } = require('../spawn/line.js');
+const NP = require('../nice-program.js');   // THE look, ONE file: the hub's starts and the device agent's hello
 
 const SETTING = 'agents.lowerCpuPriority';
-// where the nice program lives (coreutils / busybox / Homebrew) — FIXED local system directories, never the PATH: a
-// PATH entry may sit on a network mount, and this is looked at on the main thread
-const NICE_DIRS = Object.freeze(['/usr/bin', '/bin', '/usr/local/bin', '/opt/homebrew/bin']);
+// where the nice program lives — the shared look (src/nice-program.js): FIXED local system directories, never the PATH
+const { NICE_DIRS, niceProgram } = NP;
 const FACT_WHY = Object.freeze(['off', 'no-nice', 'remote']);
 
-let niceAt;            // undefined = not looked yet; null = none here; else its absolute path (ONE look per process)
 let saidMissing = false;
-
-/** The nice program's absolute path, or null — looked up ONCE per process (a few local stats, the first start). */
-function niceProgram({ dirs = NICE_DIRS, access = (p) => fs.accessSync(p, fs.constants.X_OK) } = {}) {
-  if (niceAt !== undefined) return niceAt;
-  niceAt = null;
-  for (const d of dirs) { const p = path.join(d, 'nice'); try { access(p); niceAt = p; break; } catch { } }
-  return niceAt;
-}
 
 /** THE START'S PRIORITY. → { priority: {nice, by} | null (src/spawn/line.js priorityArgv), fact: {by} | {by: 0, why} }:
  *  the fact is what the conversation's properties say (`why` ∈ FACT_WHY). `local` false = a remote conversation's local
@@ -51,6 +42,24 @@ function priorityFor({ serverSetting = () => undefined, local = true, log = cons
   return { priority: { nice: p, by: PRIORITY_BY }, fact: { by: PRIORITY_BY } };
 }
 
+/** PURE (B-460d's remainder): the nice program a device agent's hello names (`nicePath`, its own look) — an absolute path with no
+ *  space, control or direction-changing format character, at most 1024 characters, never from a Windows agent; else null */
+function nicePathOf(info) {
+  const p = info && typeof info.nicePath === 'string' ? info.nicePath : '';
+  if (!p || p.length > 1024 || !p.startsWith('/') || (info && info.platform === 'win32') || /[\s\u0000-\u001f\u007f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(p)) return null;
+  return p;
+}
+
+/** B-460d's remainder — A PAIRED MACHINE'S START: the SAME verdict (priorityFor) with THAT machine's own nice program as its
+ *  input — the one its agent's hello names. Lowered only when the agent named one and the setting is on; every other case
+ *  (an older agent that says none, a machine with none, Windows, the setting off) is today's remote answer: the release's
+ *  spec, the fact «set by its own machine». The step is relative to the device agent's own niceness, as +5 is the hub's. */
+function devicePriorityFor({ serverSetting = () => undefined, hello = null } = {}) {
+  const p = nicePathOf(hello);
+  const pri = p ? priorityFor({ serverSetting, local: true, nice: () => p }) : null;
+  return pri && pri.priority ? pri : priorityFor({ local: false });
+}
+
 /** PURE: a stored fact (a session's meta `cpuNice`) → the fact, or null when it is not one */
 function factOf(x) {
   if (!x || typeof x !== 'object' || Array.isArray(x) || !Number.isInteger(x.by) || x.by < 0 || x.by > 19) return null;
@@ -59,6 +68,6 @@ function factOf(x) {
 }
 
 /** a suite's seam: forget the one look and the said line */
-function _reset() { niceAt = undefined; saidMissing = false; }
+function _reset() { NP._resetNice(); saidMissing = false; }
 
-module.exports = { priorityFor, niceProgram, factOf, SETTING, NICE_DIRS, FACT_WHY, _reset };
+module.exports = { priorityFor, devicePriorityFor, nicePathOf, niceProgram, factOf, SETTING, NICE_DIRS, FACT_WHY, _reset };
