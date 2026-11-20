@@ -49,8 +49,10 @@ const M = mutantCopies('evp', REPO);
 
 // ═══ ① THE CENSUS ═══════════════════════════════════════════════════════════
 console.log('① the census: every permission surface offers ALL AGENTS (or says why not); every reach model spells it');
-/** Every `principalPicker({ … })` CALL of a source text: `[{at, text}]` — the options object, braces balanced (strings
- *  and template literals skipped). The definition (`function principalPicker(`) is not a call. */
+/** Every `principalPicker({ … })` CALL of a source text: `[{at, text}]` — the options object, braces balanced (strings,
+ *  template literals and COMMENTS skipped — an apostrophe in a `//` comment («the window's», «the chain's») opened a «string»
+ *  that ran the call's text into the file's NEXT picker: four calls ran away, window-share's into the «Agent» row, matched by two
+ *  rows on the .414 train). The definition (`function principalPicker(`) is not a call. */
 function pickerCalls(src) {
   const out = [];
   const re = /(?<![\w.])principalPicker\(\{/g;
@@ -62,6 +64,8 @@ function pickerCalls(src) {
     for (; i < src.length; i++) {
       const c = src[i];
       if (q) { if (c === '\\') { i++; continue; } if (c === q) q = null; continue; }
+      if (c === '/' && src[i + 1] === '/') { const e = src.indexOf('\n', i); i = e < 0 ? src.length : e; continue; }   // a line comment
+      if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? src.length : e + 1; continue; }   // a block comment
       if (c === '"' || c === "'" || c === '`') { q = c; continue; }
       if (c === '{') depth++;
       else if (c === '}') { depth--; if (depth === 0) { i++; break; } }
@@ -181,6 +185,16 @@ console.log('  · [inherits] the raw-API tier rows (SharedContext/vibespace-chan
   ok(planted[f] !== libFiles[f] && c1.problems.some((p) => /Grant reach to/.test(p) && /no ALL AGENTS row/.test(p)), 'CONTROL (1): the reach editor\'s picker without `everyone:` is RED (a surface without the All row)', c1.problems);
   const plantedNew = { ...libFiles, 'src/lib/planted-share.js': "import { principalPicker } from './principal-picker.js';\nconst p = principalPicker({ items: [], multi: true, label: t('Planted') });\n" };
   ok(census(plantedNew).problems.some((p) => /planted-share\.js/.test(p) && /no census row names/.test(p)), 'CONTROL (1b): a NEW picker call no row names is RED (a new permission surface must say how it offers All agents)');
+  {   // (1d) a comment inside a call: its apostrophe never opens a string — each call's text ends at its own close. RED: the
+      // extractor without its comment skip (rebuilt from its own text) runs the first call into the second
+    const TWO = "const a = principalPicker({ items: [], // the window's share\n  label: t('One') });\nconst b = principalPicker({ items: [], label: t('Two') });\n";
+    const two = pickerCalls(TWO);
+    const SKIP = /\n {6}if \(c === '\/' && src\[i \+ 1\] === '\/'\)[^\n]*\n {6}if \(c === '\/' && src\[i \+ 1\] === '\*'\)[^\n]*/;
+    const oldSrc = pickerCalls.toString().replace(SKIP, '');
+    const oldCalls = oldSrc !== pickerCalls.toString() ? new Function('return ' + oldSrc)()(TWO) : null;
+    ok(two.length === 2 && /t\('One'\) \}$/.test(two[0].text) && !/Two/.test(two[0].text) && !!oldCalls && /Two/.test(oldCalls[0].text),
+      'CONTROL (1d): an apostrophe in a comment inside a picker call never opens a string — each call ends at its own close; the extractor without its comment skip runs the first call into the second (red)', { two: two.map((c) => c.text.length), old: oldCalls && oldCalls.map((c) => c.text.length) });
+  }
   // lane key-grant-everyone: the Vault key picker WITHOUT its row (= 91bf7e18's call) is RED now that it is a surface
   const fv = 'src/lib/vault-automation.js';
   const plantedV = { ...libFiles, [fv]: libFiles[fv].replace('everyone: { key: EVERYONE_SUBJECT }, ', '') };
