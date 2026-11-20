@@ -377,11 +377,13 @@ function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null, 
   let rows = {};
   let prev = null;
   const hstate = { runs: new Map(), seen: new Set() }; // lane artifacts-handover: the helper door's state for THIS derivation
+  const who = helper ? { backend: helper.backend, cwd, host, claudeSessionId: helper.sessionId } : null;
+  let read = null;
   const fold = (raw) => {
     let ops = [];
     try { ops = artifactsOf(raw) || []; } catch { ops = []; }
     if (raw && (raw.parent_tool_use_id || raw.isSidechain)) ops = []; // a helper's own record: the helper door folds it at the Task's end
-    if (helper && artifactHelperSource && raw) { try { ops = ops.concat(artifactHelperSource({ backend: helper.backend, cwd, host, claudeSessionId: helper.sessionId }, raw, hstate) || []); } catch { } }
+    if (helper && artifactHelperSource && raw) { try { ops = ops.concat(artifactHelperSource(who, raw, hstate, read) || []); } catch { } }
     ops = AF.quotedOps(ops, quoted); // r10: a tray answer's quote is the agent's only when it quotes the conversation's ask (no source: nobody's)
     for (const o of ops) {
       const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: AF.opAuthor(o) }); // the person's own page link stays theirs (lane artifacts-by-intent)
@@ -390,7 +392,8 @@ function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null, 
       if (AF.cardWorthy(r.row)) { const b = AF.cardBlock(r.row); if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b); }
     }
   };
-  return { before: (raw) => { if (prev) fold(prev); prev = raw; }, end: () => { if (prev) fold(prev); prev = null; return rows; } };
+  const prefetch = async (records) => { if (who && artifactHelperPrefetch) { try { read = await artifactHelperPrefetch(who, records); } catch { read = null; } } };
+  return { prefetch, before: (raw) => { if (prev) fold(prev); prev = raw; }, end: () => { if (prev) fold(prev); prev = null; return rows; } };
 }
 // lane artifacts-registries: the pages / designs rows a rebuild reads from THEIR stores (src/server/artifact-registry.js
 // storeRowsOf, set by its configure) — the third merge input beside the transcript's derivation and the persisted rows
@@ -401,9 +404,10 @@ function setArtifactStoreSource(fn) { artifactStoreSource = typeof fn === 'funct
 let artifactServiceSource = null;
 function setArtifactServiceSource(fn) { artifactServiceSource = typeof fn === 'function' ? fn : null; }
 // lane artifacts-handover: THE HELPER DOOR (src/server/artifact-registry.js helperOps, set by its configure) — a record
-// that ends a Task / workflow agent brings the helper transcript's writes as this conversation's rows (via: subagent)
-let artifactHelperSource = null;
-function setArtifactHelperSource(fn) { artifactHelperSource = typeof fn === 'function' ? fn : null; }
+// that ends a Task / workflow agent brings the helper transcript's writes as this conversation's rows (via: subagent);
+// B-299b: `prefetch` reads every helper the records name OFF the loop before the derivation — the fold reads none
+let artifactHelperSource = null, artifactHelperPrefetch = null;
+function setArtifactHelperSource(fn, prefetch = null) { artifactHelperSource = typeof fn === 'function' ? fn : null; artifactHelperPrefetch = typeof prefetch === 'function' ? prefetch : null; }
 // lane artifacts-by-intent r6: THE REBUILD'S STAMP PERSISTED (src/server/artifact-registry.js persistSoon, set by its
 // configure) — a merge that stamped a row `shown` the persisted rows lacked writes the rows at once, like any op would
 let artifactPersistSink = null;
@@ -476,6 +480,7 @@ async function convertWithCards(mm, records, cards, opts = {}) {
   if (!due.length && !derive) return mm.convertHistoryAsync(records, rest);
   let i = 0;
   const beforeRecord = (raw) => { if (derive) derive.before(raw); const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
+  if (derive) await derive.prefetch(records);
   await mm.convertHistoryAsync(records, { ...rest, beforeRecord });
   if (derive) mm.derivedArtifacts = derive.end();
   while (i < due.length) placeAnyCard(mm, due[i++]);

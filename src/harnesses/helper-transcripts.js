@@ -11,7 +11,8 @@
 //   · a tool_result saying "Run ID: wf_…" REMEMBERS the run under its tool-use id (ctx.runs) — its notification reads
 //     every agent of the run
 // `ctx` = {sessionId, cwd, home, runs: Map}; this machine's disk only (a remote conversation's sidechains are not
-// fetched — none is read). A record that ends nothing ⇒ []. Never throws.
+// fetched — none is read). A record that ends nothing ⇒ []. Never throws. The transcripts are read by the artifact registry OFF the
+// hub's loop (B-299b: the transcript pool's pager — src/server/artifact-registry.js helperFileOps), never here.
 const fs = require('fs');
 const path = require('path');
 
@@ -74,13 +75,4 @@ function claude(record, ctx = {}) {
   }
   return out;
 }
-/** A helper transcript's records (bounded: the newest 8 MB of a file). */
-function readRecords(file, max = 8 * 1024 * 1024) {
-  let text = '';
-  try { const st = fs.statSync(file); const fd = fs.openSync(file, 'r'); const n = Math.min(st.size, max); const buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, st.size - n); fs.closeSync(fd); text = buf.toString('utf8'); } catch { return []; }
-  const out = [];
-  for (const line of text.split('\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch { } }
-  return out;
-}
-
-module.exports = { claude, readRecords, subagentsDir };
+module.exports = { claude, subagentsDir };

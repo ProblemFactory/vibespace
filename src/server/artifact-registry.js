@@ -56,7 +56,7 @@ function configure(d = {}) {
   deps = { ...deps, ...d };
   try { normalizers().setArtifactStoreSource(storeRowsOf); } catch (e) { deps.log.warn?.(`[artifacts] store-rows seam not set: ${e.message}`); }
   try { normalizers().setArtifactServiceSource(servicesOf); } catch (e) { deps.log.warn?.(`[artifacts] service-rows seam not set: ${e.message}`); }
-  try { normalizers().setArtifactHelperSource(helperOps); } catch (e) { deps.log.warn?.(`[artifacts] helper seam not set: ${e.message}`); }
+  try { normalizers().setArtifactHelperSource(helperOps, helperPrefetch); } catch (e) { deps.log.warn?.(`[artifacts] helper seam not set: ${e.message}`); }
   try { normalizers().setArtifactPersistSink((s) => persistSoon(s, 0)); } catch (e) { deps.log.warn?.(`[artifacts] persist seam not set: ${e.message}`); }
   try { normalizers().setArtifactQuoteSource(askIdOf); } catch (e) { deps.log.warn?.(`[artifacts] quote seam not set: ${e.message}`); }
   return api;
@@ -107,9 +107,14 @@ function observe(session, record) {
   if (record.parent_tool_use_id || record.isSidechain) return 0; // a helper's own record: the helper door folds it at the Task's end (with its `via`)
   let ops = [];
   try { ops = of(record) || []; } catch { return 0; }
-  // the helper door: the descriptor's hook names what ENDS a helper (claude: a user record; antigravity: a finished `subagent` card)
-  if (!session._helperArtifacts) session._helperArtifacts = { runs: new Map(), seen: new Set() };
-  ops = ops.concat(helperOps(session, record, session._helperArtifacts));
+  // the helper door: the descriptor's hook names what ENDS a helper (claude: a user record; antigravity: a finished `subagent` card);
+  // B-299b: its transcript is read OFF the loop — its rows land when its pages have (helperSettled), the count below is the record's own
+  if (!session._helperArtifacts) session._helperArtifacts = { runs: new Map(), seen: new Set(), chain: null };
+  foldHelpers(session, record, session._helperArtifacts);
+  return noteOps(session, ops);
+}
+/** The ops of one record (or of one helper) into the session's rows → how many moved a row. */
+function noteOps(session, ops) {
   ops = AF.quotedOps(ops, askIdOf(session, session.sockName)); // r10: a tray answer's quote is the agent's only when it quotes this conversation's ask
   let n = 0;
   for (const o of ops) { try { if (!noteOp(session, { ...o, by: AF.opAuthor(o) }).skipped) n++; } catch (e) { deps.log.warn?.(`[artifacts] op skipped: ${e.message}`); } }
@@ -117,31 +122,110 @@ function observe(session, record) {
 }
 
 // ── THE HELPER DOOR (lane artifacts-handover) ──
-/** The ops a record that ENDS a helper brings: the helper transcript's write records through the session's own
- *  `artifactsOf`, each tagged `via`. `state` = {runs: Map (workflow launches), seen: Set (op ids already folded — the
- *  parse + the device feed, or a background agent read at its launch and again at its end, fold an op once)}.
- *  A remote conversation (host ≠ '') reads nothing (its sidechains are on its machine; none is fetched). */
-function helperOps(session, record, state = { runs: new Map(), seen: new Set() }) {
-  if (!session || !record || (session.host && session.host !== 'local')) return [];
+// A record that ENDS a helper brings the helper transcript's write records through the session's own `artifactsOf`, each tagged
+// `via`. `state` = {runs: Map (workflow launches), seen: Set (op ids already folded — the parse + the device feed, or a background
+// agent read at its launch and again at its end, fold an op once), chain (the live folds, one after another)}. A remote conversation
+// (host ≠ '') reads nothing (its sidechains are on its machine; none is fetched).
+// B-299b (MEASURED on the test machine: a workflow's end read its 10 agents' transcripts in ONE call, 304 ms of the main loop; 30 —
+// 662 ms): NO helper transcript is read or parsed on the hub's main thread. The transcript pool's pager (src/adapters/codex.js
+// readJsonlBoundedParsedPagedAsync, called as it stands) reads and parses it in the `history` worker and hands its records back in
+// pages; here they become ops HELPER_SLICE records a loop turn. `tailOnly: false` = the pager's head+tail road: a file ≤ 34 MB is
+// read whole (today's 8 MB cap read a file under 8 MB whole too — the same records); a longer one gives its first 2 MB and its last
+// 32 MB; and that road never prints the chat window's «tail-only display» line (only the tailOnly road says it). No pool, or a read
+// that failed ⇒ NO main-thread read: that helper's rows are not derived, said once a process. A file's ops are kept by its size +
+// mtime (HELPER_OPS_MAX ops in all, oldest dropped) — a rebuild, or a background agent's end after its launch, re-reads a file that
+// changed only. The live door folds after the record's own ops; the rebuild reads every helper its records name BEFORE it derives
+// (helperPrefetch — the normalizers' helper seam), so its fold reads none.
+const HELPER_SLICE = 2000, HELPER_NOTE_SLICE = 500, HELPER_OPS_MAX = 50000;
+const _helperOps = new Map(); // file → {size, mtimeMs, ops: [{o, cwd}]} (oldest first)
+let _helperOpsN = 0;
+const _helperStats = { read: 0, kept: 0, unread: 0, said: false };
+const helperReadStats = () => ({ read: _helperStats.read, kept: _helperStats.kept, unread: _helperStats.unread });
+const loopTurn = () => new Promise((r) => setImmediate(r));
+function harnessHooks(session) {
   let h = null;
   try { h = require('../harnesses').harnessOf(session.backend || 'claude'); } catch { h = null; }
-  const of = h && h.artifactsOf, helpers = h && h.helperTranscriptsOf;
-  if (typeof of !== 'function' || typeof helpers !== 'function') return [];
-  let files = [];
-  try { files = helpers(record, { sessionId: session.claudeSessionId || session.backendSessionId || null, cwd: session.cwd || '', runs: state.runs }) || []; } catch { return []; }
-  const out = [];
-  for (const { file, via } of files) {
-    for (const rec of require('../harnesses/helper-transcripts.js').readRecords(file)) {
-      let ops = [];
-      try { ops = of(rec) || []; } catch { ops = []; }
-      for (const o of ops) {
-        const id = o.id ? 'sub:' + o.id : null;
-        if (id && state.seen) { if (state.seen.has(id)) continue; state.seen.add(id); }
-        const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)
-        out.push({ ...op, id, via, cwd: rec.cwd || session.cwd || '' });
-      }
-    }
+  return h && typeof h.artifactsOf === 'function' && typeof h.helperTranscriptsOf === 'function' ? h : null;
+}
+/** The helper transcripts a record ENDS → [{file, via}] (the descriptor's hook: what ends a helper, and where its transcript is). */
+function helperFilesOf(session, record, state) {
+  if (!session || !record || (session.host && session.host !== 'local')) return [];
+  const h = harnessHooks(session);
+  if (!h) return [];
+  try { return h.helperTranscriptsOf(record, { sessionId: session.claudeSessionId || session.backendSessionId || null, cwd: session.cwd || '', runs: state.runs }) || []; } catch { return []; }
+}
+/** ONE helper transcript → its ops [{o, cwd}] (the hook's own ops of each record, untagged), read off the loop; null = not read. */
+async function helperFileOps(of, file) {
+  let st = null;
+  try { st = await require('fs').promises.stat(file); } catch { return []; } // gone: nothing to fold (the release's reader read nothing either)
+  const kept = _helperOps.get(file);
+  if (kept && kept.size === st.size && kept.mtimeMs === st.mtimeMs) { _helperOps.delete(file); _helperOps.set(file, kept); _helperStats.kept++; return kept.ops; }
+  let why = null;
+  const recs = await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, onFail: (w) => { why = w; } });
+  if (!recs) {
+    _helperStats.unread++;
+    if (!_helperStats.said) { _helperStats.said = true; deps.log.warn?.(`[artifacts] a helper's rows were not derived — its transcript was not read off the main loop (${why || 'no reason given'}); none is read on it (B-299b). Said once a process.`); }
+    return null;
   }
+  _helperStats.read++;
+  const out = [];
+  for (let i = 0; i < recs.length; i++) {
+    if (i && i % HELPER_SLICE === 0) await loopTurn();
+    const rec = recs[i];
+    let ops = [];
+    try { ops = of(rec) || []; } catch { ops = []; }
+    for (const o of ops) out.push({ o, cwd: rec && rec.cwd });
+  }
+  const old = _helperOps.get(file);
+  if (old) { _helperOps.delete(file); _helperOpsN -= old.ops.length; }
+  _helperOps.set(file, { size: st.size, mtimeMs: st.mtimeMs, ops: out }); _helperOpsN += out.length;
+  for (const [k, v] of _helperOps) { if (_helperOpsN <= HELPER_OPS_MAX || k === file) break; _helperOps.delete(k); _helperOpsN -= v.ops.length; }
+  return out;
+}
+/** One helper's ops as the PARENT's: `via`, each op once (`state.seen`), the reader's person tag dropped. */
+function helperTagged(session, list, via, state, at = null) {
+  const out = [];
+  for (const { o, cwd } of list || []) {
+    const id = o.id ? 'sub:' + o.id : null;
+    if (id && state.seen) { if (state.seen.has(id)) continue; state.seen.add(id); }
+    const { by: _who, ...op } = o; // a helper's transcript is an agent's: its Task prompt is the parent's words, never the person's (lane artifacts-by-intent r3)
+    out.push({ ...op, id, via, cwd: cwd || session.cwd || '', ...(at ? { at } : {}) });
+  }
+  return out;
+}
+/** THE LIVE DOOR: the helpers a record ends, read off the loop one after another; each one's rows land when its read has (stamped
+ *  with the record's own instant), HELPER_NOTE_SLICE ops a loop turn. */
+function foldHelpers(session, record, state) {
+  const files = helperFilesOf(session, record, state);
+  if (!files.length) return;
+  const h = harnessHooks(session), at = Date.now();
+  state.chain = Promise.resolve(state.chain).then(async () => {
+    for (const { file, via } of files) {
+      const list = await helperFileOps(h.artifactsOf, file);
+      const ops = list && list.length ? helperTagged(session, list, via, state, at) : [];
+      for (let i = 0; i < ops.length; i += HELPER_NOTE_SLICE) { if (i) await loopTurn(); noteOps(session, ops.slice(i, i + HELPER_NOTE_SLICE)); } // a helper of thousands of writes: HELPER_NOTE_SLICE rows a turn
+    }
+  }).catch((e) => { deps.log.warn?.(`[artifacts] a helper's rows failed: ${e.message}`); });
+}
+/** → a promise that settles when every live helper fold of the session has (tests; a reader that must see them). */
+const helperSettled = (session) => Promise.resolve(session && session._helperArtifacts && session._helperArtifacts.chain);
+/** THE REBUILD'S READ (the normalizers' helper seam, before the derivation runs): every helper the records name, read off the loop →
+ *  {ops: Map file → [{o, cwd}] | null}. The walk asks the hook as the fold will (its own `runs`), a loop turn every 4096 records. */
+async function helperPrefetch(session, records) {
+  const h = session && harnessHooks(session);
+  if (!h || !Array.isArray(records) || (session.host && session.host !== 'local')) return null;
+  const state = { runs: new Map() }, ops = new Map();
+  for (let i = 0; i < records.length; i++) {
+    if (i && i % 4096 === 0) await loopTurn();
+    for (const { file } of helperFilesOf(session, records[i], state)) if (!ops.has(file)) ops.set(file, null);
+  }
+  for (const file of ops.keys()) ops.set(file, await helperFileOps(h.artifactsOf, file));
+  return { ops };
+}
+/** THE REBUILD'S FOLD (sync): the ops a record that ENDS a helper brings — from `read` (helperPrefetch's), never from the disk. */
+function helperOps(session, record, state = { runs: new Map(), seen: new Set() }, read = null) {
+  const out = [];
+  for (const { file, via } of helperFilesOf(session, record, state)) for (const o of helperTagged(session, read && read.ops && read.ops.get(file), via, state)) out.push(o);
   return out;
 }
 
@@ -424,5 +508,5 @@ function hostNamesOf(ids) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, helperOps, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, helperOps, helperPrefetch, helperSettled, helperReadStats, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
 module.exports = api;

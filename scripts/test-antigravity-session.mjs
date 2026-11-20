@@ -199,9 +199,9 @@ try {
     const shape = (ms) => ms.map((m) => `${m.role}:${m.toolName || ''}:${m.status}`).join(',');
     ok(liveView.length >= 7 && liveView[0].role === 'user' && liveView.filter((m) => m.role === 'tool').length === 4 && holder === session && shape(fromJournal) === shape(liveView),
       'the virtual session sub-<id>: the task bubble, four tool cards, its last words — and the SAME timeline rebuilt from the journal alone (memory gone)', { live: shape(liveView), journal: shape(fromJournal) });
-    // the files the sub wrote: a FINISHED card brings them through the descriptor's helper door
+    // the files the sub wrote: a FINISHED card brings them through the descriptor's helper door (B-299b: read off the loop — its rows land when the read has)
+    const rep = await until(() => Object.values(session._artifacts || {}).find((r) => r.path === '/home/u/workspace/示例项目/report.md'), 5000);
     const rows = Object.values(session._artifacts || {});
-    const rep = rows.find((r) => r.path === '/home/u/workspace/示例项目/report.md');
     ok(!!rep && rep.via && rep.via.kind === 'subagent' && rep.via.name === '示例评审专家', 'the file the sub wrote joins THIS conversation\'s Artifacts rows, via the sub (the helper door read its transcript in the account\'s store)', rows.map((r) => [r.path, r.via]));
     // an OLDER agy's row (no subagent_info): no card, no error — the row ends as a row
     const before = frames.map(cardOf).filter(Boolean).length;

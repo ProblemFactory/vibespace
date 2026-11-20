@@ -314,7 +314,7 @@ console.log('— ⑪ A SUB THAT ALREADY RAN (the cards\' addendum): the hub draw
     onData(JOURNAL);
     for (let k = 0; k < 500 && !frames.some((f) => f.type === 'subagent-message' && f.subId === S); k++) await new Promise((r) => setTimeout(r, 10)); // B-299b A1: the turn end's read answers off the loop
   } finally { for (const k of RS) fs[k] = realRS[k]; }
-  ok(helperReads.every((p) => p.endsWith(path.join('logs', 'transcript_full.jsonl'))), `the turn end's main-thread reads under the store: ${helperReads.length}, each one the ARTIFACT door's (helper-transcripts readRecords of the finished sub's transcript_full, as the release read it — named, not this unit's)`, [...new Set(helperReads)].map((x) => path.relative(home, x)));
+  ok(helperReads.length === 0, `the turn end's main-thread reads under the store: NONE — the artifact door's read of the finished sub's transcript_full left the loop too (B-299b: the transcript pool's pager)`, [...new Set(helperReads)].map((x) => path.relative(home, x)));
   const cardFrame = frames.find((f) => f.type === 'msg' && ((f.op === 'edit' && f.fields?.taskInfo?.subId === S) || (f.op === 'create' && f.message?.taskInfo?.subId === S)));
   const subFrames = frames.filter((f) => f.type === 'subagent-message' && f.subId === S);
   ok(!!cardFrame && subFrames.length === 13 && s4.subagentBuffers?.get(S)?.length === 13, 'acp-events at the old wrapper\'s prompt_end: THE CARD frame + 13 subagent-message frames (the sub-<id> viewer\'s live feed)', { card: !!cardFrame, subs: subFrames.length });
