@@ -5384,8 +5384,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return null;
     });
   }
-  if (keeper && typeof keeper.onProfileDrop === 'function') {
-    unsubProfileDrop = keeper.onProfileDrop((profileId) => {
+  // r221 (主开发 14:20Z): a removed profile's login values in MEMORY go at the PRESS (the keeper's onProfileDropNow — never behind the
+  // registry's write); a keeper without it (an older stand-in) still drops them at the removal
+  const dropNowOf = keeper && typeof keeper.onProfileDropNow === 'function' ? keeper.onProfileDropNow : keeper && typeof keeper.onProfileDrop === 'function' ? keeper.onProfileDrop : null;
+  if (dropNowOf) {
+    unsubProfileDrop = dropNowOf((profileId) => {
       const pid = String(profileId || '');
       if (pid) clearProfileLoginFencesOnStop(pid, watches.get(pid));
     });

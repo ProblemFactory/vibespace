@@ -983,16 +983,19 @@ await (async () => {
   ok(ho.ok && back === 1 && jm.peekNotifs(R.cid).length === 1 && rec0.jobsOwed === true && (rec0.jobs || []).length === 1,
     '(must 1) a hand-over\'s frame that comes back: its job notification is back in the jobs store AND the hand-over memory keeps its copy (jobsOwed, on disk) while the put-back is not on disk', { ho, back, rec0 });
   // A START after a kill (the put-back never landed): a new jobs engine on the same folder, a new hand-over view — the copy goes back
-  const jm2 = mkJm({ JobManager }, R, heldWriter().W).jm;
+  // THE KILL WRITES NOTHING AFTER IT (主开发 r183): the dead engine's writer H is never landed again — the copy is dropped by the NEW
+  // engine's own landing (its writer H2), the put-back the start made again
+  const H2 = heldWriter(), jm2 = mkJm({ JobManager }, R, H2.W).jm;
   SH.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm2, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log() { }, warn() { } } });
   await sleep(30);
   const atStart = jm2.peekNotifs(R.cid).length;
   SH.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => jm2, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log() { }, warn() { } } });
   await sleep(30);
   ok(atStart === 1 && jm2.peekNotifs(R.cid).length === 1, '(must 1) a START puts the copy still held back into the jobs store — and a second start never twice (the same job at the same instant)', { atStart, again: jm2.peekNotifs(R.cid).length });
-  H.land();
+  const owedBeforeLanding = !!(Object.values(mem())[0] || {}).jobsOwed;
+  H2.land();
   const rec1 = Object.values(mem())[0] || {};
-  ok(!rec1.jobsOwed && (rec1.jobs || []).length === 0, '(must 1) …and the copy is dropped only when the put-back LANDS', rec1);
+  ok(owedBeforeLanding && !rec1.jobsOwed && (rec1.jobs || []).length === 0, '(must 1) …and the copy is dropped only when the put-back LANDS — the new engine\'s (the dead one\'s writer never lands after the kill)', { owedBeforeLanding, rec1 });
   // the moved2 cure 3: its RED control — a copy of the hand-over that drops its kept copy at once (anchored)
   {
     const SHSRC = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');

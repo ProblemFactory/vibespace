@@ -227,6 +227,9 @@ console.log('— legacy checklist → backlog seed (one-time migration) —');
   check('dormant plan untouched by the seed', m2.get('T-9').plan.length === 2, '');
   // a second load must not re-seed (backlog now defined — even if emptied)
   m2.update('T-9', { backlog: [] });
+  // a RELOAD, not a crash: the stop lands what this process owes (the hub's exit flush) — landed HERE, by name, before the second
+  // load reads; never left to that load's own landing of an owed write (lane lg-store-writes, 主开发 r183: a scene states its stop)
+  { const r = require('../src/store-writer.js').storeWriter().flushSync(); if (r.deferred || (r.left && r.left.length)) throw new Error(`the stop's flush left owed writes: ${JSON.stringify(r.left)}`); }
   const m3 = new TaskGroupManager({ dataDir: tmp2, onChange: () => {} });
   check('seed is one-time (empty backlog stays empty on reload)', m3.get('T-9').backlog.length === 0, '');
   fs.rmSync(tmp2, { recursive: true, force: true });

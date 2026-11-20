@@ -213,6 +213,10 @@ try {
     const kids = made.map((j) => [...C.jobs.values()].find((x) => x.cronParent === j.id));
     ok(await until(() => kids.every((k) => k && ['done', 'failed'].includes(k.state))), 'each scheduled run\'s fire spawned a REAL child that ended', kids.map((k) => k && k.state).join(','));
     const toldFor = (k) => !!k && notifications.slice(before).some((n) => n.jobId === k.id && /: done \(ok\)$/.test(n.text));
+    // (lane lg-store-writes, 主开发 r221: a run's end is RECORDED first and its For-you item rides that record's landing — a kill
+    // first re-judges the end at boot and says it once) the leg waits for WHAT HAPPENED — the item itself, bounded, red by name
+    await until(() => toldFor(kids[0]) && toldFor(kids[2]), 10000);
+    try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { }   // every end LANDED — so the control's silence below is a silence, not a ride still out
     ok(toldFor(kids[0]) && C.snapshot(made[0]).notifyUser === true, 'run --at … --notify-user (the CLI\'s body): the child\'s end tells the user, and the cron\'s own record says notifyUser=true', JSON.stringify(notifications.slice(before)));
     ok(!toldFor(kids[1]) && C.snapshot(made[1]).notifyUser === false, 'CONTROL: without the flag the child ends silently for the user, notifyUser=false');
     ok(toldFor(kids[2]) && C.snapshot(made[2]).notifyUser === true, 'an older CLI\'s body (the flag only inside action.task) is still honoured — and shown', JSON.stringify(made[2] && C.snapshot(made[2]).notifyUser));
@@ -247,10 +251,10 @@ try {
   const js1 = C.jobs.get(rs1.job.id);
   const subCaller = { conversationId: 'conv-SUB', sessionId: 'sess-SUB', sessionCreatedAt: 2, groups: new Set(['T-g']) };
   ok(C.subscribe(js1, subCaller).ok && C.subscribe(js1, subCaller).already, 'subscribe is idempotent by conversation lineage');
-  await until(() => js1.state === 'failed' && cids.length >= 2, 15000);
+  await until(() => js1.state === 'failed' && cids.some((c) => c.cid === 'conv-T') && cids.some((c) => c.cid === 'conv-SUB') && !!js1.lastNotify, 15000);   // (r221: the owner's message rides the end's landing — waited for itself)
   ok(cids.some((c) => c.cid === 'conv-T') && cids.some((c) => c.cid === 'conv-SUB'), 'failure notifies OWNER and SUBSCRIBER conversations', JSON.stringify(cids));
-  ok(cids.every((c) => c.hasCtx), 'notification text carries the {payload} context echo (E2E-caught bug pinned)');
-  ok(js1.lastNotify && js1.lastNotify.lane === 'message' && C.snapshot(js1).subscribersCount === 1, 'lastNotify narrates the owner lane; snapshot counts subscribers');
+  ok(cids.every((c) => c.hasCtx), 'notification text carries the {payload} context echo (E2E-caught bug pinned)', JSON.stringify(cids));
+  ok(js1.lastNotify && js1.lastNotify.lane === 'message' && C.snapshot(js1).subscribersCount === 1, 'lastNotify narrates the owner lane; snapshot counts subscribers', JSON.stringify({ lastNotify: js1.lastNotify || null, subscribers: C.snapshot(js1).subscribersCount }));
   ok(C.unsubscribe(js1, subCaller).removed === 1, 'unsubscribe removes the conversation');
 
   // 7f. recurring cron: repeated distinct failures notify EACH time (multi-fire)
@@ -367,10 +371,12 @@ try {
   const jp1 = C.jobs.get(rp1.job.id);
   const ask1 = C.ask(jp1, { title: 't', blocks: [{ type: 'md', text: 'x' }, { type: 'buttons', options: [{ id: 's', label: 'ok' }] }] });
   C.answerPanel(jp1, { button: 's', version: ask1.version }); // r6 D-F5: an answer names the panel it answers
-  ok(resolved.some((r) => r.jobId === jp1.id), 'answerPanel resolves the needs-your-input inbox entry');
+  await until(() => resolved.some((r) => r.jobId === jp1.id), 5000);   // (r221: the answer's resolve rides the record's landing — waited for itself)
+  ok(resolved.some((r) => r.jobId === jp1.id), 'answerPanel resolves the needs-your-input inbox entry', JSON.stringify(resolved));
   C.stop(jp1, { force: true });
   const settled = await until(() => ['interrupted', 'failed'].includes(jp1.state));
   const rmr = C.rm(jp1, {});
+  await until(() => resolved.some((r) => r.jobId === jp1.id && r.opts && r.opts.onlyAsk === false), 5000);   // (r221: the removal's resolve rides its landing — waited for itself)
   ok(resolved.some((r) => r.jobId === jp1.id && r.opts && r.opts.onlyAsk === false), 'rm clears ALL of the job inbox items', `settled=${settled} state=${jp1.state} rm=${JSON.stringify(rmr)} resolved=${JSON.stringify(resolved)}`);
 
   // 8. store hygiene: raw token never persisted

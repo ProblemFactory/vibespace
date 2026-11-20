@@ -108,7 +108,22 @@ const engineIn = (dir) => (extra = {}) => {
   engines.push(E);
   return E;
 };
-const stopEngine = (E) => { for (const j of E.jobs.values()) j.desiredUp = false; E.shutdown(); }; // its backoff timers find nothing to restart
+// (r183's class, the hosted red of ci/prep414c: under the store writer (lane lg-store-writes U4) a save is OWED until it lands, and its
+// bytes are made AT the landing — the shutdown's landing wrote this helper's own flip below, so the next engine read every service
+// «not wanted» and replayed nothing. The store lands HERE as the engine left it (what the hub's stop writes), THEN the flip — the
+// helper's device so that its backoff timers find nothing to restart — never reaches the disk)
+const stopEngine = (E) => { { const r = E._writer().flushSync([E.file, E.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the engine's store did not land before its stop: ${JSON.stringify(r.left)}`); } for (const j of E.jobs.values()) j.desiredUp = false; E.shutdown(); }; // its backoff timers find nothing to restart
+// THE DEATH (主开发 r215 — a death or boot scene leaves on disk ONLY what a hub that dies would leave; a teardown never changes a record a
+// later write can still carry): the scene's save LANDS (the hub died after it — the bytes the next boot reads), then the engine dies
+// with NO shutdown: read-only (no later write of it can land anything), its intervals ended (a dead process runs none), its services'
+// wish quieted in memory only (never written: read-only). Its lock stays as a dead hub leaves it (this process's pid — the next engine
+// takes it). The next engine proves the replay with trigger boot over the dead one's bytes
+const dieEngine = (E) => {
+  E._save();
+  { const r = E._writer().flushSync([E.file, E.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the scene's save did not land before the death: ${JSON.stringify(r.left)}`); }
+  E.readOnly = true; for (const t of E._timers || []) clearInterval(t);
+  for (const j of E.jobs.values()) j.desiredUp = false;
+};
 const ctlOf = (j) => path.dirname(j.runs[j.runs.length - 1].log);
 // the run is over when its exit record exists AND its wrapper is gone (it writes exit.json, then exits — a sweep between the
 // two sees it alive and judges nothing; the engine's own 5 s tick would judge it next)
@@ -430,7 +445,7 @@ leg('§4 REAL — the park law through the engine\'s doors (a boot replay counts
   await settle(C1, j);
   ok(lastRun(j).cause === 'oom-bound' && (j.supervise || {}).oomEnds === 1 && j.state === 'down' && !(j.supervise || {}).parkedAt, 'service: its first oom-bound end counts 1 — down, not parked', { cause: lastRun(j).cause, sup: j.supervise, state: j.state });
   ok(C1.events.some((e) => e.jobId === id && /stopped: used more than 1 GB — 1 more out-of-memory end parks it/.test(e.what || '')), 'service: the journal names the end and what the next one does');
-  C1._save(); stopEngine(C1);
+  dieEngine(C1);
   const C2 = engine({ memoryRungs: ['rlimit-data'] }); // THE BOOT: the replay starts the desiredUp service (base: forever)
   j = C2.jobs.get(id);
   ok(lastRun(j).trigger === 'boot', 'boot: the replay starts it again (trigger boot)', lastRun(j).trigger);
@@ -440,7 +455,7 @@ leg('§4 REAL — the park law through the engine\'s doors (a boot replay counts
   ok(said.some((n) => n.jobId === id && /parked — out of memory twice\. Raise its bound/.test(n.text) && n.i18n && n.i18n.text && /parked — out of memory twice/.test(n.i18n.text.key)) && C2.events.some((e) => e.jobId === id && e.what.includes(parkWords)), 'park: said to the owner in For you (worded per device) and in the job\'s journal');
   ok(LF('memoryEndWords')(C2.snapshot(j), (k) => k) === parkWords, 'park: the card says «parked: out of memory twice — raise its bound or fix the job»');
   const runs = j.runs.length;
-  C2._save(); stopEngine(C2);
+  dieEngine(C2);
   const C3 = engine({ memoryRungs: ['rlimit-data'] }); // the next boot leaves a parked job alone
   j = C3.jobs.get(id);
   ok(j.runs.length === runs && j.state === 'failed', 'park: the next boot does NOT replay it (not restarted until the owner acts)', { runs: j.runs.length, was: runs, state: j.state });
@@ -458,11 +473,11 @@ leg('§4 REAL ⓑ a non-memory end resets — oom → a restart → oom is NOT t
   let j = E1.jobs.get(id);
   await settle(E1, j);
   ok(lastRun(j).cause === 'oom-bound' && (j.supervise || {}).oomEnds === 1, 'reset (service): run 1 ends oom-bound — 1 of 2', { cause: lastRun(j).cause, sup: j.supervise });
-  fs.writeFileSync(flag, ''); E1._save(); stopEngine(E1);
+  fs.writeFileSync(flag, ''); dieEngine(E1);
   const E2 = engine(deps); // the boot replays it — this run sleeps, and the instance restarts under it
   j = E2.jobs.get(id);
   ok(await running(E2, j) && await killGroup(E2, j), 'reset (service): run 2 runs, and the instance restarts under it (its group killed, no exit record)');
-  E2._save(); stopEngine(E2); fs.rmSync(flag, { force: true });
+  dieEngine(E2); fs.rmSync(flag, { force: true });
   const E3 = engine(deps); // the boot judges run 2 env-restart — then replays run 3 (an oom again)
   j = E3.jobs.get(id);
   const cut = j.runs[j.runs.length - 2] || {};
@@ -487,7 +502,7 @@ leg('§4 REAL ⓒ the same for a cron — fire 1 oom, fire 2 cut by a restart, f
   E1._fireCron(cron, 'schedule');
   kid = kidOf(E1);
   ok(await running(E1, kid) && await killGroup(E1, kid), 'reset (cron): fire 2 runs, and the instance restarts under it');
-  E1._save(); stopEngine(E1); fs.rmSync(flag, { force: true });
+  dieEngine(E1); fs.rmSync(flag, { force: true });
   const E2 = engine(deps);
   cron = E2.jobs.get(cid); kid = kidOf(E2);
   ok(lastRun(kid).cause === 'env-restart' && !(kid.supervise || {}).oomEnds, 'reset (cron): the boot ends fire 2 env-restart — the count RESETS (0259f1ea: still 1)', { cause: lastRun(kid).cause, sup: kid.supervise });
@@ -510,7 +525,7 @@ leg('§5 REAL ⓐ the boot\'s judge: the instance\'s OOM count ROSE and the job 
     bumpGroupKill(cg); // the container's own OOM kill — memory.oom.group: every process of it at once
     await killGroup(E, j);
     ok(!fs.existsSync(path.join(ctlOf(j), 'exit.json')), `pressure ${n}: no exit record survives (as under memory.oom.group)`);
-    E._save(); stopEngine(E);
+    dieEngine(E);
   };
   await cycle(D1, 1);
   const D2 = engine(deps);
@@ -537,7 +552,7 @@ leg('§5 REAL ⓑ a rolling update of a pod full of cache — no OOM kill ⇒ en
   let j = R1.jobs.get(id);
   ok(await until(() => { const p = readJson(path.join(ctlOf(j), 'pressure.json')); return p && (p.jobAnonMb >= 90 || p.jobMb >= 100); }, 6000, 10), 'rolling: the wrapper samples the instance (95 % of its limit in use)');
   await killGroup(R1, j); // the update's restart: no OOM kill in the instance's count
-  R1._save(); stopEngine(R1);
+  dieEngine(R1);
   const R2 = engine(deps);
   j = R2.jobs.get(id);
   const prev = j.runs[j.runs.length - 2] || {};

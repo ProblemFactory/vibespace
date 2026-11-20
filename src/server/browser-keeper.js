@@ -524,6 +524,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   const leaseListeners = new Set();
   const profileDropListeners = new Set();
   function onProfileDrop(fn) { if (typeof fn !== 'function') return () => {}; profileDropListeners.add(fn); return () => profileDropListeners.delete(fn); }
+  // 主开发's word (r221, 2026-11-20 14:20Z — THE LAW: what the hub holds IN MEMORY of a removed profile's logins goes AT THE PRESS, in the
+  // same step, never behind a write): the listeners that only clear MEMORY of a credential (the login values, the one-time codes, the
+  // in-flight credential asks, the fill's scrub names) run at the removal's call; only what must match the disk rides its landing
+  // (onProfileDrop). A stalled storage never keeps a removed profile's login values alive; a removal that then does not land brings
+  // the profile back WITHOUT them — the strict side (signed in again or unlocked, as after a restart)
+  const profileDropNowListeners = new Set();
+  function onProfileDropNow(fn) { if (typeof fn !== 'function') return () => {}; profileDropNowListeners.add(fn); return () => profileDropNowListeners.delete(fn); }
   const digestExtras = new Set();
   const changeListeners = new Set(); // lane S2: `onChange` — the browser fact's re-publish hook (notify() fans out)
   function emitLease(ev) {
@@ -1706,6 +1713,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     dropEgress(id); // lane engine-spi-egress: its egress proxy never outlives its record (a conversation's browser on a wrapped engine had one each)
     const sweep = sweepIds.has(id);   // read before the commit below (its piece's own id set)
     if (sweepIds.has(id)) sweepDirty = true; else commit(); // keeper-sweep-yields F5: the walk's own removal is written and broadcast with its PIECE (retireInSteps)
+    for (const fn of [...profileDropNowListeners]) { try { fn(id); } catch { /* best effort */ } }   // r221: a credential's MEMORY goes at the press — never behind the write
     // lane lg-store-writes (the moved2 cure 2 — THE STEP THAT CANNOT BE UNDONE RIDES THE LANDING, no roll back and no half state): the
     // record is out of memory and marked for the writer as always; what cannot be undone — its grant row, the keeper's marked config,
     // its passkeys, the drop listeners, and (`machine`: the record's snapshot) the paired machine's folder — runs once the removal is
@@ -8711,7 +8719,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
     switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
-    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState, loginChannelFor, onProfileDrop /* lane vault-login */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
+    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState, loginChannelFor, onProfileDrop /* lane vault-login */, onProfileDropNow /* r221: memory-only credential drops, at the press */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
     installDir, retiredInstall: () => installs.slot.retiredAtBoot(), egressFor, egressRefusals, egressEngineOf, // lane engine-spi-egress: a wrapped engine's proxy per profile (L3: the names lost the anti-bot backend's word); the install rows' api in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields

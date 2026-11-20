@@ -197,6 +197,9 @@ async function legBoot(jobs = null) {
   const r = A.create({ kind: 'service', restart: 'never' });
   const id = r.job.id;
   await A.until(() => A.jm.jobs.get(id).state === 'down' && A.got().length === 1);
+  // (主开发 r183: a crash writes nothing after it) the run's end is ON DISK before the crash point — A.end() stops A without its stop's
+  // flush, so the next engine's load never lands what A still owed: B boots on what the disk holds
+  { const r = require('../src/store-writer.js').storeWriter().flushSync([A.jm.file, A.jm.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the run's end did not land before the crash point: ${JSON.stringify(r.left)}`); }
   A.end(); A.vault.lock('door');
   const B = await world('boot2', { jobs, dataDir: A.dd, vault: A.vault });
   const job = B.jm.jobs.get(id);

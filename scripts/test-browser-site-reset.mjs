@@ -537,6 +537,8 @@ try {
       chrome.addTab(SP, 'S12', 'https://app.bank.test/live'); await sleep(60);
       keeper.noteOwnTab(shared.id, sA._browserKey, 'GHOST1'); keeper.noteOwnTab(shared.id, sA._browserKey, 'S12'); keeper.noteOwnTab(shared.id, sB._browserKey, 'GHOST2');
       const before = { a: keeper.holderTabs(shared.id, sA._browserKey), b: keeper.holderTabs(shared.id, sB._browserKey) };
+      // (主开发 r183/r215: a RESTART states its stop — the store as the running keeper left it LANDS first, never left to the next keeper's load)
+      { const r0 = require('../src/store-writer.js').storeWriter().flushSync(); if (r0.deferred || (r0.left && r0.left.length)) throw new Error('the registry did not land before the restart: ' + JSON.stringify(r0.left)); }
       const k3 = K.create({ dataDir: DATA, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB, FAKE_AB_CDP_PORT: String(chrome.port) }), serverSetting: (k) => settings[k], liveKeys: () => new Set([...active.values()].map((s) => s._browserKey)), install: false, log: quiet, hostKnown: () => false, driveHoldMs: 200 });
       const h3 = (pid) => (k3.list().leases || []).filter((l) => l && l.profileId === pid && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral }));
       const d3 = D.create({ keeper: k3, log: quiet, holdersOf: h3, leaseCountOf: (pid) => new Set(h3(pid).map((h) => h.browserKey)).size, tabsOf: (q) => k3.holderTabs(q && q.profileId, q && q.browserKey) || [] });
@@ -549,6 +551,7 @@ try {
       ok(ksrc3.includes(pn), 'control setup: the prune is found in src/server/browser-keeper.js pruneOwnTabs');
       const Kc3 = MUT.load('src/server/browser-keeper.js', ksrc3.replace(pn, '      const kept = l.tabs;'), 'r4-no-prune');
       keeper.noteOwnTab(shared.id, sA._browserKey, 'GHOST3');
+      { const r0 = require('../src/store-writer.js').storeWriter().flushSync(); if (r0.deferred || (r0.left && r0.left.length)) throw new Error('the registry did not land before the restart: ' + JSON.stringify(r0.left)); }
       const kc = Kc3.create({ dataDir: DATA, homeDir: HOME, env: () => ({ PATH: PATH_ENV, HOME, FAKE_AB_STATE: AB, FAKE_AB_CDP_PORT: String(chrome.port) }), serverSetting: (k) => settings[k], liveKeys: () => new Set([...active.values()].map((s) => s._browserKey)), install: false, log: quiet, hostKnown: () => false, driveHoldMs: 200 });
       const hc = (pid) => (kc.list().leases || []).filter((l) => l && l.profileId === pid && l.browserKey).map((l) => ({ browserKey: l.browserKey, sessionId: l.sessionId || null, ephemeral: !!l.ephemeral }));
       const dc = D.create({ keeper: kc, log: quiet, holdersOf: hc, leaseCountOf: (pid) => new Set(hc(pid).map((h) => h.browserKey)).size, tabsOf: (q) => kc.holderTabs(q && q.profileId, q && q.browserKey) || [] });

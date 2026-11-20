@@ -444,7 +444,8 @@ srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)
 const API = `http://127.0.0.1:${srv.address().port}`;
 const CLI = path.join(REPO, 'data/bin/vibespace-browser');
 const cliEnvFor = (s) => ({ PATH: PATH_ENV, HOME: fakeHome, FAKE_AB_STATE: AB_STATE, XDG_RUNTIME_DIR: XDG, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: s.agentToken, VIBESPACE_SKIP_AGENT_HOOKS: '1', ...S.pairsToEnv(s._browserEnv) });
-const cli = (args, env) => new Promise((resolve) => execFile(process.execPath, [CLI, ...args], { env, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
+// (r184: the run's exit is a FACT a leg prints — a status, the signal and «killed» when the 30 s bound ended it, and how long it took)
+const cli = (args, env) => { const t0 = Date.now(); return new Promise((resolve) => execFile(process.execPath, [CLI, ...args], { env, encoding: 'utf8', timeout: 30000 }, (err, stdout, stderr) => resolve({ status: err ? (typeof err.code === 'number' ? err.code : null) : 0, killed: !!(err && err.killed), signal: (err && err.signal) || null, ms: Date.now() - t0, stdout: String(stdout || ''), stderr: String(stderr || '') }))); };
 const ephOf = (kk, key) => kk._reg().profiles.find((p) => B.isEphemeralProfile(p) && p.owner.id === key) || null;
 const NOTE_HEADLESS = /^note: this machine has no desktop session, so this browser runs headless .*\[browser_headless\]$/m;
 const cfgOfLaunch = (l) => { try { return JSON.parse(fs.readFileSync(l.config, 'utf8')); } catch { return null; } };
@@ -549,7 +550,14 @@ const KEY_N = 'bk-0000d001', KEY_D = 'bk-0000d002', KEY_W = 'bk-0000d003', KEY_C
   c = await cli(['snapshot'], cliX(sH2));
   const LH2 = launches().slice(b1).filter((l) => l.sess === 'vs-bk-0000d0a2');
   const recH2 = ephOf(kx, 'bk-0000d0a2') ? kx.browserOf(ephOf(kx, 'bk-0000d0a2').id) : null;
-  ok(c.status === 0 && LH2.length === 1 && LH2[0].headed === false && LH2[0].xvfb === false && recH2.display.fallback.rung === 'headless' && /\[browser_headless\]/.test(c.stderr), 'browser.noDisplayMode = "Always headless": Xvfb present, the launch is headless', { LH2, stderr: c.stderr });
+  // r184 (主开发): the leg PRINTS every fact it judges — the run's exit (status, killed, signal, ms), the record's rung, the tag — first,
+  // so a cut print still shows them
+  // (r206: the record's fallback whole, or that the record is NULL; and the stderr from the display note to its END on a line of its
+  // own — the facts' print is cut at 700 characters, so the note is never read by a prefix)
+  const fbH2 = !recH2 ? 'the record is null' : !recH2.display ? 'the record has no display' : (recH2.display.fallback || 'the record has no fallback');
+  const rungH2 = (fbH2 && typeof fbH2 === 'object' && fbH2.rung) || null, tagH2 = /\[browser_headless\]/.test(c.stderr);
+  const okH2 = ok(c.status === 0 && LH2.length === 1 && LH2[0].headed === false && LH2[0].xvfb === false && rungH2 === 'headless' && tagH2, 'browser.noDisplayMode = "Always headless": Xvfb present, the launch is headless', { status: c.status, signal: c.signal, killed: c.killed, ms: c.ms, fallback: fbH2, tag: tagH2, launches: LH2.length, LH2 });
+  if (!okH2) { const at = c.stderr.indexOf('note: this machine has no desktop'); console.error('    the stderr from the display note to its end: ' + JSON.stringify(at >= 0 ? c.stderr.slice(at) : c.stderr)); }
   const dispH = await (await fetch(API + '/api/browser/display')).json();
   ok(dispH.mode === 'headless', 'the route says the mode', dispH);
   settings['browser.noDisplayMode'] = '';

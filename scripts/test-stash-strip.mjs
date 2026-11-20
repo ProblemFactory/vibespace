@@ -2012,8 +2012,34 @@ console.log('⑥ wiring pins');
     'verify: every store exposes the claim door and the hand-over claims through each, BY ID (released in its finally) — the ladder\'s stash, its retry park (lane notify-retry) and the jobs stash');
   // the .195 merge: the claim's write is judged (a failed one is logged by name — withdraw's checklist ⑧) and a by-id
   // drain also emits withdraw's `drained` with what it TOOK; both still write through at once
-  ok(/for \(const e of mine\) e\.ho = tag;\n(?:\s*\/\/[^\n]*\n)*\s*if \(mine\.length && !writeStashNow\(\)\) log\(/.test(cd) && /for \(const n of mine\) n\.ho = tag;\n    if \(mine\.length\) this\._saveNotifs\(\);/.test(jb) && /if \(took\.length\) \{ writeStashNow\(\); stashChanged\(cid\); emitStash\('drained', cid, took\); \}/.test(cd) && /delete stash\[cid\]; writeStashNow\(\); stashChanged\(cid\);/.test(cd) && /\} else this\.pendingNotifs\.delete\(cid\);\n(?:\s*\/\/[^\n]*\n)*\s*const w = this\._saveNotifs\(\);/.test(jb),
+  ok(/for \(const e of mine\) e\.ho = tag;\n(?:\s*\/\/[^\n]*\n)*\s*if \(mine\.length && !writeStashNow\(\)\) log\(/.test(cd) && /if \(took\.length\) \{ writeStashNow\(\); stashChanged\(cid\); emitStash\('drained', cid, took\); \}/.test(cd) && /delete stash\[cid\]; writeStashNow\(\); stashChanged\(cid\);/.test(cd),   // (the jobs store's half is judged BY BEHAVIOUR below — 主开发 r215: a pin on a local's name never matched)
     'verify r2: the claim is the entry\'s own `ho` stamp written to disk at once in BOTH stores, and every drain persists at once (the ladder\'s store and the jobs store)');
+  {   // verify r2's JOBS-STORE half BY BEHAVIOUR (主开发 r215): a claim and a drain are ON DISK before the call returns — the save that
+      // ends in the waited landing, the drain's reply carrying it as landed — read RAW (no flush). RED: a save that only marks the file
+      // dirty (in a copy): the claim's stamp is not on disk when the hand-over's post leaves
+    const JSRC = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
+    const r2b = (JM, tag) => {
+      const dir = scratch('stash-strip-r2b-' + tag + '-' + Math.random().toString(36).slice(2, 7));
+      const jm = new JM({ dataDir: dir, log: () => {}, broadcast: () => {}, onStash: () => {} }); jm.init();
+      const job = { id: 'jb-r2b00001', kind: 'task', name: 'r2b', state: 'done', owner: { conversation: { id: 'conv-r2b' } }, access: { view: 'all', control: 'session' }, runs: [] };
+      jm.jobs.set(job.id, job);
+      jm._stashNotif('conv-r2b', job, { what: 'a kept result' }, 'not reachable', { held: { kind: 'not-reachable' } });
+      try { require(path.join(REPO, 'src/store-writer.js')).storeWriter().flushSync(); } catch { }   // the stash itself on disk first (the scene is the claim's)
+      const raw = () => { try { return fs.readFileSync(path.join(dir, 'job-notifications.json'), 'utf8'); } catch { return ''; } };
+      const entries = [...(jm.pendingNotifs.get('conv-r2b') || [])];
+      const release = jm.claimNotifs('conv-r2b', entries, 'ho-r2b');
+      const atClaim = raw();
+      const drained = jm.drainNotifs('conv-r2b', new Set(entries));
+      const atDrain = raw();
+      try { release(); } catch { } try { jm.shutdown(); } catch { }
+      return { entries: entries.length, stamped: atClaim.includes('"ho-r2b"'), landed: !!(drained && drained.landed), goneOnDisk: !atDrain.includes('a kept result') };
+    };
+    const g = r2b(JobManager, 'real');
+    ok(g.entries === 1 && g.stamped && g.landed && g.goneOnDisk, 'verify r2 (the jobs store, BY BEHAVIOUR): the claim\'s `ho` stamp is ON DISK when claimNotifs returns, and the drain is on disk when drainNotifs returns — its reply says landed (read raw, no flush)', g);
+    const SAVE_A = "return this._onDisk(this.notifsFile, 'the notifications (a claim, a drain)');";
+    const gx = r2b(mutantCopies('stash-strip-r2b', REPO).load('src/jobs.js', anchored(JSRC, SAVE_A, "return { ok: true, why: null };   /* MUTANT: the save only marks the file dirty */", 'notifs-save-marks-only'), 'notifs-marks-only').JobManager, 'red');
+    ok(!gx.stamped || !gx.goneOnDisk, 'CONTROL (a notifications save that only marks the file dirty, in a copy): the claim\'s stamp is not on disk when the hand-over\'s post leaves (red)', gx);
+  }
   ok(/deliver\.registerFrameRestorer\(\(cid, text, meta\) => stashView\.restoreHandedOver\(cid, text, meta\)\)/.test(sv) && /stashView\.settle\(maxMs\)/.test(read('src/server/exit-settle.js')) && /settleInFlight\(\{ stashView, deliver, n, m \}\)\.finally\(shutdownNow\)/.test(sv) && /function shutdown\(\)[\s\S]{0,700}stashView\.inFlightCount\(\)/.test(sv) && /renderNotifStash: require\('\.\/src\/job-model\.js'\)\.renderNotifStash, dataDir: path\.join\(__dirname, 'data'\) \}\); stashView\.register\(app\);/.test(sv),
     'verify r2: server.js registers the hand-over restorer on the ladder (r4: with the echo\'s kind) and the shutdown waits for a hand-over in flight before it exits; r4: the view gets the data dir (the delivered memory on disk)');
   ok(/function shutdown\(\)[\s\S]{0,700}stashView\.close\(\); n = stashView\.inFlightCount\(\)/.test(sv) && /text: vibespaceNoticeText\(frame\) \}\);/.test(sh) && /if \(typeof rec\.text === 'string'\) return echoed\.trim\(\) === rec\.text\.trim\(\);/.test(sh) && /if \(!sameFrame\(rec, echoed\)\) \{/.test(sh),   // the lane-redact merge: the exact-text rule lives in sameFrame (a cleared record keeps its frame's digest)

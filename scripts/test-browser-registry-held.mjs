@@ -544,5 +544,40 @@ console.log('§7 round wm6qxcqcw (主开发 03:35Z): the hold is TOLD once in Fo
   ok(m7.liftedAfter === 2 && m7x.liftedAfter === 1, 'a «missing» answer right after an unreadable one is read ONCE MORE before an empty start; CONTROL (cut, in a copy): the first «missing» starts empty — RED', { m7, m7x });
 }
 
+console.log('§8 主开发 r221 (2026-11-20 14:20Z): a removed profile\'s login values IN MEMORY go AT THE PRESS — never behind the registry\'s write');
+{
+  // THE STALL is placed in the landing: the process writer's afterLanding HOLDS every step riding browser-profiles.json (the storage
+  // has not taken the write). The removal's memory-only credential drops (onProfileDropNow — browser-dialogs' login values) have run
+  // when the call returns; what must match the disk (onProfileDrop: the grant row, the passkey store, the marked config) waits; the
+  // storage answers — the held steps run, and the rest follows. RED: the tip's order (the memory drop behind the write), in a copy
+  const W = require(path.join(ROOT, 'src/store-writer.js')).storeWriter();
+  const mk8 = (Mod, name) => { const d = path.join(D, 'r221-' + name), H = path.join(d, 'home'); fs.mkdirSync(H, { recursive: true }); return Mod.create({ dataDir: d, homeDir: H, env: () => ({ HOME: H }), serverSetting: () => undefined, install: false, log: quiet }); };
+  const dropScene = async (Mod, name) => {
+    const k = mk8(Mod, name); await k.boot().catch(() => null);
+    const p = k.createProfile({ label: 'to remove ' + name });
+    try { W.flushSync(); } catch { }   // its creation on disk first (the stall is the REMOVAL's)
+    const now = [], rides = [];
+    if (typeof k.onProfileDropNow === 'function') k.onProfileDropNow((pid) => now.push(pid));
+    k.onProfileDrop((pid) => rides.push(pid));
+    const held = [], orig = W.afterLanding;
+    W.afterLanding = (file, step) => { held.push(step); return new Promise(() => { }); };
+    let threw = null; try { k.removeProfile(p.id); } catch (e) { threw = e && e.message; } finally { W.afterLanding = orig; }
+    const during = { now: now.slice(), rides: rides.slice(), held: held.length, listed: k.list().profiles.some((x) => x.id === p.id) };
+    for (const st of held) { try { st(); } catch { } }   // the storage answers
+    const after = { now: now.slice(), rides: rides.slice() };
+    try { W.flushSync(); } catch { } try { k.shutdown(); } catch { }
+    return { id: p.id, threw, during, after };
+  };
+  const r = await dropScene(require(path.join(ROOT, 'src/server/browser-keeper.js')), 'real');
+  ok(!r.threw && r.during.held >= 1 && !r.during.listed && JSON.stringify(r.during.now) === JSON.stringify([r.id]) && r.during.rides.length === 0 && JSON.stringify(r.after.rides) === JSON.stringify([r.id]) && r.after.now.length === 1,
+    'r221: while the storage HOLDS the removal\'s write, the profile\'s memory-only credential drops have RUN at the press (the login values gone while the write is still out) — what must match the disk waits for the landing, then runs once', r);
+  const NOW_A = "    for (const fn of [...profileDropNowListeners]) { try { fn(id); } catch { /* best effort */ } }   // r221: a credential's MEMORY goes at the press — never behind the write\n";
+  const rx = await dropScene(MJ.load('src/server/browser-keeper.js', anchored(KSRC, NOW_A, '', 'drop-now-cut'), 'drop-now-cut'), 'red');
+  ok(rx.during.now.length === 0, 'CONTROL (the tip\'s order — the memory drop behind the write, in a copy): the removed profile\'s login values are still in memory while the write is out (red)', rx.during);
+  const BDS = fs.readFileSync(path.join(ROOT, 'src/server/browser-dialogs.js'), 'utf8');
+  ok(/const dropNowOf = keeper && typeof keeper\.onProfileDropNow === 'function' \? keeper\.onProfileDropNow :/.test(BDS) && /unsubProfileDrop = dropNowOf\(\(profileId\) => \{\n      const pid = String\(profileId \|\| ''\);\n      if \(pid\) clearProfileLoginFencesOnStop\(pid, watches\.get\(pid\)\);/.test(BDS),
+    'r221: the login watch hands its MEMORY clear (clearProfileLoginFencesOnStop — the values, the one-time codes, the in-flight asks, the scrub names) to the keeper\'s at-the-press listeners (a pin: the watch needs a browser)');
+}
+
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'browser-registry-held ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 report();

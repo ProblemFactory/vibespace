@@ -357,7 +357,11 @@ ok(!lost.length, `every pin lands: ${Object.keys(PINS).length} flags in the POST
 
 console.log('(3) FIRE — through the real route into the engine: the user\'s For you copy and the owner conversation');
 const snapOf = (E, n) => { const j = jobOf(E, n); return j ? E.jm.snapshot(j) : { kind: null }; };
-const endRun = (E, job) => { const run = job.runs[job.runs.length - 1]; E.jm._finalizeRun(job, run, { code: 0, endedAt: Date.now() }, 'sweep'); };
+// (lane lg-store-writes, 主开发 r221: a run's end, an ask, a park and an answer are RECORDED first and their For-you items ride that
+// record's LANDING — a kill first re-judges it at boot and says it once) a leg that reads the items lands the jobs store through its
+// door first: the writer's one synchronous flush, which runs the steps riding it (a write it left owed is red by name)
+const landedJ = (E = WIRED) => { const r = require('../src/store-writer.js').storeWriter().flushSync([E.jm.file, E.jm.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the jobs store did not land: ${JSON.stringify(r.left)}`); };
+const endRun = (E, job) => { const run = job.runs[job.runs.length - 1]; E.jm._finalizeRun(job, run, { code: 0, endedAt: Date.now() }, 'sweep'); landedJ(E); };
 const FIRES = [[REAL, ['nc1', 'nc0', 'at1', 'at0', 'ev1']], [NOHAND, ['ctl']], [OLD, ['old1', 'oldm']], [WIRED, ['mask', 'urg', 'full', 'urgu']], [NOBELT, ['nobelt']]];
 for (const [E, names] of FIRES) for (const n of names) { const j = jobOf(E, n); if (j) j.nextFireAt = Date.now() - 1000; }
 // ANOTHER conversation subscribed (r3). lane jobs-addressed-push r3: a subscriber the PULL admits — the job's view opened to
@@ -428,6 +432,7 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
   if (ta) WIRED.jm.ask(ta, { title: 'pick', blocks: [{ type: 'buttons', options: ['ok'] }] });
   if (ts) park(ts);
   if (tm) { tm.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); }
+  landedJ();
   const capped = [[te, 'end'], [ta, 'ask'], [ts, 'parked'], [tm, 'missed']].map(([j, c]) => { const e = fyOf(j); return { c, ok: !!(j && e && e.ok === false && e.copy === c && e.reason === 'For you is full (20 open)' && !items().some((i) => i.jobId === j.id)), e }; });
   ok(capped.every((x) => x.ok), 'EVERY copy refused at the cap is journaled user-inbox ✗ with the store\'s why, naming the copy — a task\'s end, an ask, a park, a missed time (r2: silent, no line)', JSON.stringify(capped));
   // r4: a scheduled run whose end copy is refused (its CRON is what the agent polls), and the ask's verdict pushed out of the window
@@ -458,11 +463,13 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
   if (np) WIRED.jm.ask(np, { title: 'pick', blocks: [{ type: 'buttons', options: ['ok'] }] });
   if (ns) park(ns);
   if (nm) { nm.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); }
+  landedJ();
   const of = (j) => items().filter((i) => j && i.jobId === j.id).map((i) => i.text).sort();
   const four = { end: of(nr), ask: of(np), park: of(ns), missed: of(nm) };
   ok(same(four.end, ['Task refresh-token: done (ok)', 'Task refresh-token: failed (error)']), 'a job NAMED refresh-token: «Task refresh-token: done (ok)» and «…: failed (error)» — the outcome whole, TWO items (the dedupe key is the job + its outcome, never the words)', JSON.stringify(four.end));
   ok(same(four.ask, ['rotate-db-password needs your input']) && same(four.park, [`Service db-password crash-looped and was parked — vibespace-job start ${ns && ns.id} to retry`]) && same(four.missed, ['Scheduled job api-password MISSED its time (server was down)']), 'the ask, the park and the missed time of jobs named …-password keep the product\'s sentence whole', JSON.stringify(four));
   const ans = np && WIRED.jm.answerPanel(np, { button: 'ok', version: np.interaction.pending.version });
+  landedJ();
   const askItem = items().find((i) => np && i.jobId === np.id);
   ok(ans && ans.ok && askItem && askItem.status === 'done' && askItem.jobFact === 'ask', 'the answered ask CLOSES — the resolver keys on the item\'s fact (jobFact ask), never on its words', JSON.stringify(askItem && { s: askItem.status, f: askItem.jobFact }));
   const refused = (o) => { try { todos.add(`claude:${cidOf('named')}`, { origin: 'jobs', i18n: { text: { key: '{name} x', params: { name: 'n' } } }, ...o }); return null; } catch (e) { return e.message; } };
@@ -503,6 +510,7 @@ console.log('(5) SHOW — the params line says what the flag does; the create ec
   const cu = await post('named', { kind: 'cron', name: 'caught-up', schedule: { at: T0 + 3600e3 }, action: { type: 'notify', text: 'a caught-up reminder' }, notifyUser: false });
   const jc = cu.j && cu.j.job && WIRED.jm.jobs.get(cu.j.job.id);
   if (jc) { jc.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); await new Promise((r) => setTimeout(r, 20)); }
+  landedJ();
   const fy = (j) => { const s0 = todos.snapshot(); return [...s0.open, ...s0.resolved].filter((i) => j && i.jobId === j.id); };
   const KINDS = [
     ['a task', snapOf(REAL, 'tk1'), 'Its asks reach you in For you', fy(jobOf(WIRED, 'rotate-db-password')).some((i) => i.jobFact === 'ask')],
