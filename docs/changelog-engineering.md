@@ -640,9 +640,6 @@ This file is the engineers' record of every release: the lanes, the verification
 
 
 
-### lg-remote-hardening — the row reads the order the hub recorded (list line 144's cure)
-- Between a connect and a refusal of the same machine (a greeting refused, a sign-in failure, the dial road's device-key refusal) the row now reads the order the hub recorded them, never the luck of the clock: hosts.js stamps a refusal never at or before the connect it was recorded after, and a connect never before a refusal it was recorded after (a tie of the clock or a clock that stepped back read right in both directions; test-dial-link-kept's UTC-only red was an accept and its refusals in one millisecond).
-
 ### lg-remote-hardening — the moved restack's and key-refused's cure (主开发 00:36Z: B, C and D)
 - B (the moved chain): scripts/test-desktop-remote pins the device agent's WHOLE capability list against the real agent — units 3 and 5 never added theirs there (44 pinned, 46 listed): 'device-key', 'hub-key' after 'pipe-detach'. Heavy: PROVE test-desktop-remote.
 - C (key-refused) THE MUST: its three new red controls were plain replaces on product text (the test-suite-files-parse ratchet counts them); each is now built through scratch.mjs anchored(). The smalls, in the unit: (1) a put-back never restores a refusal OLDER than a person's act (Forget, Let in without a key, Let it pin this hub's key — `hubPinClearedAt` is that act's time now); (2) it carries the seat's own fingerprint (the For-you watch meets the same episode, files nothing again); (3) the Machines page says where the doors are (Remote → the machine); (4) a graduated row whose dial link is refused no longer reads «Dial-out LIVE» in the accent colour, and its dialog says ops fall back to ssh; (5) the pairing sheet offers no send-over-its-link box on a refused link; (6) an anchored control each for three earlier musts (the hub-side For-you words of a dial-out row; never rebuilding a cleared record; the newest of greeting and key); (7) a device's code is bounded before it is stored.
@@ -819,6 +816,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - PROOF:
   - fast test-host-key-pin: the PURE table, options and files, routes (RED: a copy without the person check lets a bearer unpin), For you, the page. The cure's legs: one door phrase, «again» only when pinned, the scan's methods, the one judge, the alias refusals (read back by the parser), the import drop, the kind through a removal, and THE DOOR (RED: the release's item, its key alone, lands on Manage Agents).
   - heavy test-host-key-pin-real: real ssh against a loopback sshd -D child (no login). Scan, unpinned, pinned, THE SWAP refused by name, Test, a stale choice refused, re-pin, unpin. RED: a copy that ignores the pin trusts the swapped key.
+
+
+
+### lg-remote-hardening — the row reads the order the hub recorded (list line 144's cure)
+- Between a connect and a refusal of the same machine (a greeting refused, a sign-in failure, the dial road's device-key refusal) the row now reads the order the hub recorded them, never the luck of the clock: hosts.js stamps a refusal never at or before the connect it was recorded after, and a connect never before a refusal it was recorded after (a tie of the clock or a clock that stepped back read right in both directions; test-dial-link-kept's UTC-only red was an accept and its refusals in one millisecond).
 
 ## 2.369.412 — 2026-11-19
 
