@@ -1020,6 +1020,62 @@ try {
       const rowOf = (id) => mm2.list().find((r) => r.id === id) || {};
       const ry = rowOf('mm-young'), rn = rowOf('mm-nest');
       check('§17 EXISTING records on one folder (a symlink too) or nested: the YOUNGER held — its row says why by the elder\'s name, as a code the page words; the elder and a free one are not', held.has('mm-young') && held.has('mm-nest') && !held.has('mm-old') && !held.has('mm-free2') && ry.errorCode === 'mount_point_in_use' && ry.errorParams?.machine === 'Studio Mac' && rn.errorCode === 'mount_point_nested' && rn.errorParams?.kind === 'inside' && /held — /.test(said17.join('\n')), JSON.stringify({ held: [...held.keys()], ry, rn }));
+      // ── B-02f6: a WRITE under a HELD outer folder (its inner pair holds the place, live inside it) is refused with the hold ──
+      {
+        const outerLink = path.join(base, 'outer-link'); fs.symlinkSync(mpOuter, outerLink);   // the held folder written through a link
+        const SCENES = {
+          over: [{ id: 'mm-hin', dir: 'pull', hostId: 'h1', remotePath: '/Users/in', mountpoint: mpB, createdAt: 1 }, { id: 'mm-hout', dir: 'pull', hostId: 'h2', remotePath: '/out', mountpoint: mpOuter, createdAt: 5 }],
+          overLink: [{ id: 'mm-hin', dir: 'pull', hostId: 'h1', remotePath: '/Users/in', mountpoint: mpB, createdAt: 1 }, { id: 'mm-hout', dir: 'pull', hostId: 'h2', remotePath: '/out', mountpoint: outerLink, createdAt: 5 }],
+          sameLink: [{ id: 'mm-hin', dir: 'pull', hostId: 'h1', remotePath: '/Users/a', mountpoint: mpA, createdAt: 1 }, { id: 'mm-hout', dir: 'pull', hostId: 'h2', remotePath: '/x', mountpoint: mpLink, createdAt: 5 }],
+        };
+        // the REAL pair check (`_recheckPairs`: real paths by a child) with the elder live — the younger is held
+        const scene = async (MM, name, recs) => {
+          const dd = path.join(tmp, name); fs.mkdirSync(dd, { recursive: true }); fs.writeFileSync(path.join(dd, 'machine-mounts.json'), JSON.stringify({ mounts: recs }));
+          const m = new MM({ dataDir: dd, hosts, rcloneBin: () => 'rclone', broadcast: () => { }, log: (l) => said17.push(String(l)) }); clearInterval(m._sweep);
+          m._live.set('mm-hin', { teardown: async () => { }, mountpoint: recs[0].mountpoint, at: Date.now() });
+          const held = await m._recheckPairs();
+          const w = (q) => m.shadowedBy(q, { writer: true });
+          return { m, held, w, r: (q) => m.shadowedBy(q) };
+        };
+        const g = await scene(MMx.MachineMounts, 'pairs-02f6', SCENES.over), hw = g.held.get('mm-hout');
+        const wOut = g.w(path.join(mpOuter, 'new.txt')), wSelf = g.w(mpOuter), rOut = g.r(path.join(mpOuter, 'new.txt')), wIn = g.w(path.join(mpB, 'x.txt'));
+        const body3 = wOut ? MMx.pullShadowBody(wOut) : null;
+        MMx.registerPullDoor(() => g.m); let viaDoor = null; try { viaDoor = MMx.pullShadowOf(path.join(mpOuter, 'sub', 'f.txt'), { writer: true }); } finally { MMx.registerPullDoor(null); }
+        console.log('    B-02f6 over, the facts judged: ' + JSON.stringify({ held: hw, wOut, wSelf: wSelf && wSelf.id, rOut, wIn, body: body3, viaDoor: viaDoor && viaDoor.id }));
+        check('§17 B-02f6: a WRITE under a HELD outer folder (its inner pair live inside it) — and at that folder itself — is refused with the HOLD: code machine_folder_held over the held row\'s own code and words, the machine and the row\'s folder named; the files route and WebDAV ask the same door',
+          !!hw && hw.kind === 'over' && wOut?.id === 'mm-hout' && wOut.pairHeld === true && wSelf?.id === 'mm-hout' && viaDoor?.id === 'mm-hout'
+            && body3?.code === 'machine_folder_held' && body3.params.machine === 'Laptop' && body3.params.mountpoint === mpOuter && body3.params.heldCode === hw.code && body3.params.heldCode === 'mount_point_nested'
+            && body3.error === `“Laptop”’s folder ${mpOuter} is not mounted — ${hw.words}`);
+        check('§17 B-02f6: a READER under the held folder lists the bare folder (nothing refused); under the inner pair\'s LIVE mount point the machine answers (nothing refused)', rOut === null && wIn === null);
+        // the held folder written THROUGH A LINK (its read's MUST): a path by the link that reaches the LIVE pull is the machine's
+        const gl = await scene(MMx.MachineMounts, 'pairs-02f6-link', SCENES.overLink), gs = await scene(MMx.MachineMounts, 'pairs-02f6-same', SCENES.sameLink);
+        const lIn = gl.w(path.join(outerLink, 'b', 'x.txt')), lOut = gl.w(path.join(outerLink, 'new.txt')), sIn = gs.w(path.join(mpLink, 'x.txt')), sRead = gs.r(path.join(mpLink, 'x.txt'));
+        console.log('    B-02f6 links, the facts judged: ' + JSON.stringify({ overHeld: gl.held.get('mm-hout') && gl.held.get('mm-hout').kind, lIn, lOut: lOut && [lOut.id, lOut.mountpoint], sameHeld: gs.held.get('mm-hout') && gs.held.get('mm-hout').kind, sIn, sRead }));
+        check('§17 B-02f6 (its read): the held folder written THROUGH A LINK — a write by the link INTO the live inner pull is the machine\'s (nothing refused), one beside it is refused under the row\'s folder as written; on ONE folder by a link (the holder live) nothing is refused, read or write',
+          gl.held.get('mm-hout')?.kind === 'over' && lIn === null && lOut?.id === 'mm-hout' && lOut.mountpoint === outerLink && gs.held.get('mm-hout')?.kind === 'same' && sIn === null && sRead === null);
+        // the page words it: its key = the server's English (the machine, the folder, the hold's own words by code), a zh and a ja row
+        const R3 = (rel) => fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), '..', rel), 'utf8');
+        const ops3 = R3('src/lib/file-explorer-ops.js'), en3 = (R3('src/machine-mounts.js').match(/error: `([^`]*)`, code: 'machine_folder_held'/) || [])[1], key3 = (ops3.match(/d\.code === 'machine_folder_held'\) return t\('([^']*)'/) || [])[1];
+        const zh3 = R3('src/lib/i18n-zh.js'), ja3 = R3('src/lib/i18n-ja.js'), fb3 = 'another pull row holds this folder — remove one of the two rows';
+        check('§17 B-02f6: the client words machine_folder_held — its key = the server\'s English, the hold by its own code (mountWords), a zh and a ja row for the key and its fallback',
+          !!en3 && !!key3 && en3.replace('${s.machine}', '{machine}').replace('${s.mountpoint}', '{mountpoint}').replace('${why}', '{why}') === key3 && /why: mountWords\(p\.heldCode, p\.heldParams \|\| \{\}, \{ t, lang: resolveLang\(\) \}\)/.test(ops3)
+            && [key3, fb3].every((k) => zh3.includes(JSON.stringify(k) + ':') && ja3.includes(JSON.stringify(k) + ':')), { en3, key3 });
+        // RED CONTROLS, each cut alone in a copy: (1) the release's skip planted back (a pair-held record answers nothing) — the write
+        // under the held folder is NOT refused; (2) the live-pull check after the pick cut (with it the link mapping) — a write by the link into the live pull is refused
+        const src3 = R3('src/machine-mounts.js'), A3 = "      if (!h || (pair && !writer) || (!pair && !writer && this._bare?.get(m.id) !== 'empty')) continue;";
+        const L3 = "      if (this._state.mounts.some((o) => o.dir === 'pull' && this._live.has(o.id) && this._pullFolders(o).some((x) => x !== '/' && (asReal === x || asReal.startsWith(x + '/'))))) return null;";
+        const copy3 = (edited) => { const Mod = require('module'), file3 = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'machine-mounts.js'), mo3 = new Mod(file3, null); mo3.filename = file3; mo3.paths = Mod._nodeModulePaths(path.dirname(file3)); mo3._compile(edited, file3); return mo3.exports.MachineMounts; };
+        if (src3.split(A3).length !== 2 || src3.split(L3).length !== 2) check('§17 B-02f6 CONTROL: an anchor of shadowedBy moved — update this suite', false);
+        else {
+          const c3 = await scene(copy3(src3.replace(A3, "      if (!h || pair || (!writer && this._bare?.get(m.id) !== 'empty')) continue;")), 'pairs-02f6-ctl', SCENES.over);
+          const c3w = c3.w(path.join(mpOuter, 'new.txt'));
+          const c4 = await scene(copy3(src3.replace(L3, '')), 'pairs-02f6-ctl2', SCENES.sameLink);
+          const c4w = c4.w(path.join(mpLink, 'x.txt'));
+          console.log('    B-02f6 controls, the facts judged: ' + JSON.stringify({ skipBack: { held: c3.held.get('mm-hout') && c3.held.get('mm-hout').kind, w: c3w }, mapCut: { held: c4.held.get('mm-hout') && c4.held.get('mm-hout').kind, w: c4w && c4w.id } }));
+          check('CONTROL §17 B-02f6 (the release\'s skip): the outer record is held the same, and the write under its folder is answered by nothing — it would land in the bare folder (red)', c3.held.get('mm-hout')?.kind === 'over' && c3w === null);
+          check('CONTROL §17 B-02f6 (the live-pull check after the pick cut, the link mapping with it): a write by the held record\'s link into the LIVE holder is refused as held (red)', c4.held.get('mm-hout')?.kind === 'same' && c4w?.id === 'mm-hout');
+        }
+      }
       released.length = 0; mountsAsked.length = 0;
       let threw = ''; try { await mm2._up(mm2._state.mounts.find((m) => m.id === 'mm-young')); } catch (e) { threw = String(e.code || '') + ' ' + e.message; }
       check('§17 a HELD record is never mounted and never releases its folder (the elder\'s): its heal refuses with its words', /^mount_point_in_use /.test(threw) && released.length === 0 && mountsAsked.length === 0, JSON.stringify({ threw, released, asked: mountsAsked.length }));

@@ -13540,6 +13540,8 @@ export default {
   "the file readers are restarting — try again in a moment": "ファイル読み取りプロセスが再起動中です — 少し待ってからもう一度お試しください",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "「{machine}」はオフラインです——このフォルダーはマシンの接続中にだけそのファイルを表示します",
   "“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row": "「{machine}」のフォルダーは現在マウントされていません——このフォルダーがその表示場所です。自動で再試行されます。行の「今すぐ再マウント」も使えます",
+  "“{machine}”’s folder {mountpoint} is not mounted — {why}": "「{machine}」のフォルダー {mountpoint} はマウントされていません — {why}",
+  "another pull row holds this folder — remove one of the two rows": "別のプルマウントがこのフォルダーを使っています — 2 つの行のどちらかを削除してください",
   "Showing part of this workbook: {list}": "このブックの一部だけを表示しています：{list}",
   "the first {n} rows": "先頭の {n} 行",
   "the first {n} columns": "先頭の {n} 列",

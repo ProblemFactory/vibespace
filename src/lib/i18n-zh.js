@@ -13541,6 +13541,8 @@ export default {
   "the file readers are restarting — try again in a moment": "文件读取进程正在重启 — 请稍后再试",
   "“{machine}” is offline — this folder shows its files only while the machine is connected": "“{machine}” 已离线——只有机器连接时，此文件夹才会显示它的文件",
   "“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row": "“{machine}”的文件夹现在没有挂载——此文件夹是它出现的位置；会自动重试，也可以在它那一行按“立即重挂”",
+  "“{machine}”’s folder {mountpoint} is not mounted — {why}": "“{machine}”的文件夹 {mountpoint} 没有挂载——{why}",
+  "another pull row holds this folder — remove one of the two rows": "另一个拉取挂载占用着这个文件夹——请删除两行中的一行",
   "Showing part of this workbook: {list}": "只显示了这个工作簿的一部分：{list}",
   "the first {n} rows": "前 {n} 行",
   "the first {n} columns": "前 {n} 列",

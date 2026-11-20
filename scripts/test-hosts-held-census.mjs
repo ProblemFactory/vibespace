@@ -787,19 +787,20 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   ok(!!s9x && s9x.offline === true && !s9x.hostsHeld && bodyOf(MSRC9)(s9x).code === 'machine_offline' && b9x.code !== 'hosts-unread', 'CONTROLS (each cut alone, in a copy): the shadow drops the mark — the online check says «offline» for a machine that may be connected; the route without its held branch never names the hold — each RED', { s9x, b9x });
   // (a3) 主开发 19:21Z (the move's range check, wkazpjzcs): a PAIR-held record (two records on one folder — its holder answers) TOGETHER
   // with the held machines list — two meanings kept apart: the pair-held record is passed over though its machine cannot be read, and the
-  // holder's row answers by the LIST's hold, under its own machine's name
-  const PAIRSKIP = "      if (!h || this._held.has(m.id) || (!writer && this._bare?.get(m.id) !== 'empty')) continue;";
-  ok(MSRC9.split(PAIRSKIP).length === 2, 'control setup: the shadow\'s pair-held skip is found once');
+  // holder's row answers by the LIST's hold, under its own machine's name. B-02f6: a pair-held record now answers a WRITER under its
+  // folder with its pair's hold — on ONE folder the holder's own state wins (the rank's tie), which is what keeps this leg's answer
+  const PAIRSKIP = "      if (!best || mp.length > best.mp.length || (mp.length === best.mp.length && best.pair && !pair)) best = { m, mp, h, pair };";
+  ok(MSRC9.split(PAIRSKIP).length === 2, 'control setup: the shadow\'s holder-wins rank (one folder) is found once');
   const pairShadow = (Mod) => {
     const M = Object.create(Mod.MachineMounts.prototype);
     Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-pb', dir: 'pull', hostId: 'h-0002', mountpoint: MP9 }, { id: 'mm-pa', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _realMp: new Map(), _held: new Map([['mm-pb', { kind: 'same', otherId: 'mm-pa', words: 'held' }]]), _bare: new Map() });
     return M.shadowedBy(path.join(MP9, 'notes.md'), { writer: true });
   };
   const ps = pairShadow(require(path.join(ROOT, 'src/machine-mounts.js')));
-  const psx = pairShadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, PAIRSKIP, PAIRSKIP.replace('this._held.has(m.id) || ', ''), 'shadow-pairskip-cut'), 'shadow-pairskip-cut'));
+  const psx = pairShadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, PAIRSKIP, PAIRSKIP.replace(' || (mp.length === best.mp.length && best.pair && !pair)', ''), 'shadow-pairskip-cut'), 'shadow-pairskip-cut'));
   const pb = ps ? bodyOf(MSRC9)(ps) : {};
   ok(!!ps && ps.id === 'mm-pa' && ps.hostsHeld === true && !ps.offline && pb.code === 'hosts-unread' && pb.error.startsWith('“h-0001”’s folder: '), 'a pair-held record beside the held machines list: the pair-held record is passed over (its holder answers) and the holder\'s row is refused by the LIST\'s hold, under its own machine — the two holds never mix', { ps, pb });
-  ok(!!psx && psx.id === 'mm-pb', 'CONTROL (the pair-held skip cut, in a copy): the pair-held record answers for its holder\'s folder (another machine named) — RED', psx);
+  ok(!!psx && psx.id === 'mm-pb', 'CONTROL (the holder-wins rank cut, in a copy): the pair-held record answers for its holder\'s folder (another machine named) — RED', psx);
   // (a2) the restack meets line 244: the PAIR check (two records on one folder) WAITS while the machines list is held — every record read
   // «gone» there and every pair hold was dropped; the current holds stand, judged once the list reads (keyed whenRead)
   const PAIRW = "    if (this.hosts && typeof this.hosts.held === 'function' && this.hosts.held()) {";

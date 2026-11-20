@@ -1,5 +1,6 @@
 import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, placeMenu, absUrl as absUrlShared, hostsHeldWords } from './utils.js';
-import { t } from './i18n.js';
+import { t, resolveLang } from './i18n.js';
+import { wordsFor as mountWords } from '../mount-error-words.js'; // B-02f6: a pull folder's hold worded by its code (the row's own words)
 import { agentUpdateAction, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: «Update its agent…» on a refusal for an old agent
 import { stampAt as when, num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
 import { startFileDownload } from './file-download.js';
@@ -37,6 +38,8 @@ export function fsErrorText(d) {
   // the B-f276 remainder (round wojcq4hn4): the machines list is HELD — said as the hold, never «offline»
   if (d && d.code === 'hosts-unread') return t('“{machine}”’s folder: {why}', { machine: p.machine || '?', why: hostsHeldWords() });
   if (d && d.code === 'machine_offline') return t('“{machine}” is offline — this folder shows its files only while the machine is connected', { machine: p.machine || '?' });
+  // B-02f6: a write under a pull folder HELD by its pair (another row holds its place) — the row's hold, in the reader's language
+  if (d && d.code === 'machine_folder_held') return t('“{machine}”’s folder {mountpoint} is not mounted — {why}', { machine: p.machine || '?', mountpoint: p.mountpoint || '', why: mountWords(p.heldCode, p.heldParams || {}, { t, lang: resolveLang() }) || t('another pull row holds this folder — remove one of the two rows') });
   if (d && d.code === 'machine_folder_down') return t('“{machine}”’s folder is not mounted right now — this folder is where it appears; it is tried again by itself, or press Remount now on its row', { machine: p.machine || '?' });
   if (d && d.code === 'windows_no_shell') return t('this needs a POSIX shell ({shell}), and this Windows machine has none — not available on Windows machines without one yet', { shell: p.shell || 'sh' });
   return String((d && d.error) || '');
