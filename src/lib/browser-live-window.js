@@ -1624,7 +1624,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       // its read (S1): a hidden tab that hung keeps its LAST picture on the view — the words say that picture, never «no picture»
       // 主开发's ruling S2: on the DRAWN window a hung tab sits behind another tab — the browser's own reload there would reload THAT
       // one; the sentence names where to press, in S3's shape (zh / ja)
-      text = driving ? (xOn() && xp.status === 'connected' ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab')) : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
+      const stuckRow = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase());
+      // its read (M1): a FRONT tab whose script loops is unresponsive too — only a tab the hub says was BEHIND (`polled`) is behind; (M2) its
+      // sentence names Bring it forward, so the button is drawn
+      const behind = driving && st.bg.polled === true && xOn() && xp.status === 'connected';
+      text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
+      if (behind && stuckRow) { btn = t('Bring it forward'); act = () => tabAct('switch', stuckRow); }
     } else if (st.bg) {
       const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
       // 主开发's law (3) + ruling S3 (21:52Z): a takeover shows the WINDOW as it is — the sentence names where to press, never whose

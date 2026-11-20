@@ -85,7 +85,7 @@ function pictureForView(v, { bg = null, driving = false, shownWhy = null, cleare
   // its read (M1): the HUB says it (`polled`: this tab's own picture was polled before it stopped answering) — never the view's own
   // memory, which a hand back, a reconnect or a new pane loses
   if (bg && bg.state === 'unresponsive' && bg.targetId && bg.polled === true) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };
-  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };
+  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };   // a stuck tab's clear settles too (its read's M3)
   return v;
 }
 
