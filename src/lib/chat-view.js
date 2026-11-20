@@ -6333,7 +6333,7 @@ class ChatView {
     const q = new URLSearchParams({ backend: backend || 'codex', threadId: backendSessionId });
     if (host) q.set('host', host);
     const r = await fetchJson(`/api/subagents?${q.toString()}`);
-    if (r?.error) { showToast(r.error); return; }
+    if (r?.error) { showToast(r.error, { type: 'error' }); return; }
     const list = Array.isArray(r?.subagents) ? r.subagents : [];
     const hit = list.find((s) => s.agentPath === agentPath)
       || (name ? list.find((s) => String(s.agentPath || '').endsWith('/' + name)) : null);
