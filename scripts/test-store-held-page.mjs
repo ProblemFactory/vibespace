@@ -257,6 +257,35 @@ console.log('§5 GET /api/stores/held names every store held NOW — each store 
   ok(J(r1.body) === J({ held: [] }), 'CONTROL (the route asks no store its read first, in a copy): at a fresh start it answers «nothing held» over a torn file — a page opened first says nothing and shows an empty desktop (red)', J(r1.body));
 }
 
+// §5b THE HUB'S WORD REACHES THE STRIP: a hold past its silent rungs is SAID with its FILE (store-hold.js onSaid → the `store-held`
+// frame) — the page's strip names a store by its file and ignores a word without one. The real hold over a directory (EISDIR), its
+// ladder run by hand. RED (anchored, in a copy): the said word without its file — the page never shows the strip for a hold said
+// after it opened (the B-225b pictures met exactly this: «[settings] undefined still cannot be read», no strip)
+console.log('§5b the hub\'s «store-held» word carries its FILE — the strip names the store from it');
+{
+  const SHREL = 'src/store-hold.js', SHSRC = read(SHREL);
+  const saidScene = async (HM, tag) => {
+    const d = scratchDir('store-held-said-' + tag); roots.push(d);   // (one folder a scene: a name gives the same folder within a run)
+    const F = path.join(d, 'settings.json'); fs.mkdirSync(F);   // a directory where the store should be: EISDIR, unreadable
+    const q = [], saids = [];
+    const h = HM.create({ file: F, valid: (v) => !!v && typeof v === 'object', log: { warn() { } }, schedule: (fn) => { q.push(fn); return 0; }, onSaid: (x) => saids.push(x) });
+    const r = h.readAtStart();
+    // each rung run by hand, then a wait for WHAT HAPPENED — the next rung armed or the word said — bounded at 5 s (the read is real I/O)
+    for (let i = 0; i < 8 && !saids.length && q.length; i++) { q.shift()(); for (const t0 = Date.now(); !q.length && !saids.length && Date.now() - t0 < 5000;) await new Promise((res) => setTimeout(res, 5)); }
+    h.stop?.();
+    const word = saids[0] || null;
+    const shown = word ? SH.noteStoreHeld(word) : false, named = !!SH.storeHeld('settings.json');
+    SH.noteStoreLifted('settings.json');
+    return { r, word, shown, named };
+  };
+  const real = await saidScene(require(path.join(REPO, SHREL)), 'real');
+  ok(real.r === 'held' && !!real.word && real.word.file === 'settings.json' && real.word.rung === 'said' && real.word.kind === 'unreadable' && real.shown === true && real.named === true,
+    'the hold\'s SAID word (past its silent rungs) carries its file, its kind and its rung — fed to the page, the strip names the store', real);
+  const CTL = M.load(SHREL, anchored(SHSRC, 'onSaid?.({ file: path.basename(file), ...held })', 'onSaid?.({ ...held })', 'said-no-file'), 'said-no-file');   // stale-pins: kept — the replacement IS cut 1's old form (the control rebuilds it)
+  const red = await saidScene(CTL, 'red');
+  ok(!!red.word && red.word.file === undefined && red.shown === false && red.named === false, 'CONTROL (the said word without its file, in a copy — cut 1 as it was): the page ignores the word — no strip for a hold said after the page opened (red)', red);
+}
+
 // ── §6 THE DESKTOPS ──
 console.log('§6 the desktops HELD: a page opened during the hold is a SCRATCH SURFACE (no desktop of the hub\'s, nothing saved); an open page goes on its STALE BASE; the lift re-reads');
 const { DesktopManager: RealDM } = await import('../src/lib/desktop-manager.js');

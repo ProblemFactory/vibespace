@@ -86,7 +86,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     }
     // still held: a file GONE since the hold stays held (the next START judges a truly absent file); the kind follows the read
     if (a.state !== 'missing') { held.kind = kindOf(a); held.code = a.code || null; held.why = a.why || null; }
-    if (held.rung === 'silent' && tries >= silentMs.length) { held.rung = 'said'; try { onSaid?.({ ...held }); } catch { /* said by the caller */ } }
+    if (held.rung === 'silent' && tries >= silentMs.length) { held.rung = 'said'; try { onSaid?.({ file: path.basename(file), ...held }); } catch { /* said by the caller */ } }   // the FILE rides the word (the page's strip names the store by it — the pictures found a word without it)
     arm();
     return false;
   }
