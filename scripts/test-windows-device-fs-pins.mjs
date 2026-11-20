@@ -68,7 +68,7 @@ const TABLE = [
   // probe runs on (no hub→device road). B-77ed's remainder: on Windows only when the agent's LAST HELLO said `sh` (the very list
   // the hub's door keys on before it sends a `sh -lc` start), the value read there by the agent's own node as a native child of
   // that shell; else '' at the head of loginConfigDir. The guard is pinned below: removed, or moved under the site ⇒ red.
-  { file: 'src/machine-probes.js', has: "await exec('sh', process.platform === 'win32' ? ['-lc', WIN_CCD_READ, process.execPath.replace(", verdict: 'win32', how: 'asked on win32 only when the agent\'s last hello said `sh` (agentd.js posixShells — what the door judges before a `sh -lc` start), the value read by the agent\'s own node as a native child of that login shell; else \'\' at the head of loginConfigDir', guard: { has: "if (process.platform === 'win32' && !startsUnderSh()) return '';", within: 7 } },
+  { file: 'src/machine-probes.js', has: "await exec('sh', process.platform === 'win32' ? ['-lc', WIN_CCD_READ, process.execPath.replace(", verdict: 'win32', how: 'asked on win32 only when the agent\'s last hello said `sh` (agentd.js posixShells — what the door judges before a `sh -lc` start), the value read by the agent\'s own node as a native child of that login shell; else \'\' at the head of loginConfigDir', guard: { has: "if (process.platform === 'win32' && !startsUnderSh()) return shSaidOnce ? null : '';", within: 7 } },
 ];
 /** one file's shell sites (the census's walk, and a control that changes ONE file rescans only it) */
 function sitesOf(f, read) {

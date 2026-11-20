@@ -81,9 +81,12 @@ let loginDirAsk = null, loginDirGen = 0;   // ONE login shell in flight: starts 
 // B-77ed's remainder (主开发 2026-11-20): a Windows machine starts a conversation under `sh -lc` exactly when the hub's door lets the
 // spawn through — when the list its agent's LAST HELLO said holds `sh` (src/agentd/agentd.js posixShells: a shell that answered a
 // POSIX line within 3 s). The agent hands that list here; none handed (the hub's own process) or no `sh` = '' (today's answer).
-let shellsSaid = () => null;
-function useShellsSaid(fn) { shellsSaid = typeof fn === 'function' ? fn : () => null; }
-const startsUnderSh = () => { try { const l = shellsSaid(); return Array.isArray(l) && l.includes('sh'); } catch { return false; } };
+// Its read (round wdg6h2r4m, should 1): «last said» is ONE value for the agent, while the door decides each link by its own hello —
+// a later hello whose sh probe timed out drops `sh` while an earlier link still passes `sh -lc` starts. So a list that HAD `sh` and
+// lost it reads «cannot be read» (null), never the empty word (a helper in the login shell's folder would be missed as «none»)
+let shellsSaid = () => null, shSaidOnce = false;
+function useShellsSaid(fn) { shellsSaid = typeof fn === 'function' ? fn : () => null; shSaidOnce = false; }
+const startsUnderSh = () => { try { const l = shellsSaid(); const yes = Array.isArray(l) && l.includes('sh'); if (yes) shSaidOnce = true; return yes; } catch { return false; } };
 // …and there the value is read the way the CLI will read it: by a NATIVE child of that same login shell — the agent's own node,
 // handed as $0 (never typed into the command text; its path with forward slashes, a word the shell runs as a path), its program
 // handed as $1, printing the one value between the markers and nothing else of that environment. Right by construction,
@@ -92,7 +95,7 @@ const startsUnderSh = () => { try { const l = shellsSaid(); return Array.isArray
 const WIN_CCD_READ = '"$0" -e "$1"';
 const WIN_CCD_JS = "process.stdout.write('\\n__VS_CCD__' + (process.env.CLAUDE_CONFIG_DIR || '') + '\\n')";
 async function loginConfigDir() {
-  if (process.platform === 'win32' && !startsUnderSh()) return '';
+  if (process.platform === 'win32' && !startsUnderSh()) return shSaidOnce ? null : '';   // a list that HAD sh and lost it: cannot be read
   if (loginDirMemo && Date.now() - loginDirMemo.at < 60000) return loginDirMemo.dir;
   if (loginDirAsk) return loginDirAsk;
   const gen = loginDirGen;

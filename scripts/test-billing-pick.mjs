@@ -894,7 +894,7 @@ console.log('— ⑨b B-77ed: a paired machine reads the START\'s files — the 
   const winSh = await asWin(['sh', 'bash'], (p) => p.startHelperFact({ cwd: CWD }));
   ok(winSh === 'named' && loginRuns() === 1, `win32, the last hello said sh: the login shell is asked once (${loginRuns()}) and its CLAUDE_CONFIG_DIR, read by the agent's own node as a native child of it, names the helper (${winSh})`, { winSh, runs: loginRuns() });
   winProfile();
-  const WIN_OLD = M.load('src/machine-probes.js', anchored(PROBES_SRC, "  if (process.platform === 'win32' && !startsUnderSh()) return '';", "  if (process.platform === 'win32') return '';", 'win32-never-asks'), 'win32-never-asks');   // stale-pins: kept — the control plants the rule as it was
+  const WIN_OLD = M.load('src/machine-probes.js', anchored(PROBES_SRC, "  if (process.platform === 'win32' && !startsUnderSh()) return shSaidOnce ? null : '';", "  if (process.platform === 'win32') return '';", 'win32-never-asks'), 'win32-never-asks');   // stale-pins: kept — the control plants the rule as it was
   const winOld = await asWin(['sh', 'bash'], (p) => p.startHelperFact({ cwd: CWD }), WIN_OLD);
   ok(winOld === 'none' && loginRuns() === 0, `RED CONTROL (the rule before: win32 never asks): the login shell's helper is missed — ${winOld} while the CLI started under that shell would read it`, { winOld, runs: loginRuns() });
   for (const [what, shells] of [['the last hello said no sh (bash only)', ['bash']], ['nothing said (the hub\'s own process: no seam handed)', null]]) {
@@ -903,12 +903,22 @@ console.log('— ⑨b B-77ed: a paired machine reads the START\'s files — the 
     ok(got === 'none' && loginRuns() === 0, `win32, ${what}: no login shell is started (${loginRuns()}) — today's answer, the empty folder (${got})`, { got, runs: loginRuns() });
   }
   winProfile();
-  const WIN_ALWAYS = M.load('src/machine-probes.js', anchored(PROBES_SRC, "  if (process.platform === 'win32' && !startsUnderSh()) return '';", "  if (false) return '';", 'win32-asks-always'), 'win32-asks-always');
+  const WIN_ALWAYS = M.load('src/machine-probes.js', anchored(PROBES_SRC, "  if (process.platform === 'win32' && !startsUnderSh()) return shSaidOnce ? null : '';", "  if (false) return '';", 'win32-asks-always'), 'win32-asks-always');
   const winAlways = await asWin(['bash'], (p) => p.startHelperFact({ cwd: CWD }), WIN_ALWAYS);
   ok(winAlways === 'named' && loginRuns() === 1, `RED CONTROL (asked whatever the hello said): a Windows machine whose agent never starts under sh had its login shell started (${loginRuns()})`, { winAlways, runs: loginRuns() });
   winProfile(); PROBES.useShellsSaid(() => []); PROBES.forgetLoginDir();
   let posixGot; try { posixGot = await PROBES.startHelperFact({ cwd: CWD }); } finally { PROBES.useShellsSaid(null); PROBES.forgetLoginDir(); }
   ok(process.platform !== 'win32' && posixGot === 'named' && loginRuns() === 1, `a machine that is not win32 keeps today's read, whatever list is handed (${posixGot}, asked ${loginRuns()})`, { posixGot, runs: loginRuns() });
+  // A LIST THAT HAD sh AND LOST IT (round wdg6h2r4m, should 1): a later hello's probe dropped `sh` while an earlier link's door may
+  // still pass a `sh -lc` start — «cannot be read» (billing wins), never the empty word; the login shell is not started for it
+  const lostOf = async (probes) => asWin(['sh'], async (p) => { const said = { l: ['sh'] }; p.useShellsSaid(() => said.l); const first = await p.startHelperFact({ cwd: CWD }); said.l = ['bash']; p.forgetLoginDir(); const runs = loginRuns(); const then = await p.startHelperFact({ cwd: CWD }); return { first, then, more: loginRuns() - runs }; }, probes);
+  winProfile();
+  const lost = await lostOf(PROBES);
+  ok(lost.first === 'named' && lost.then === 'unread' && lost.more === 0, `win32, sh said then LOST in a later hello: «cannot be read», not the empty word, and no login shell started for it (${lost.first} → ${lost.then})`, lost);
+  winProfile();
+  const LOST_OLD = M.load('src/machine-probes.js', anchored(PROBES_SRC, 'return shSaidOnce ? null : \'\';', 'return \'\';', 'lost-sh-reads-none'), 'lost-sh-reads-none');
+  const lostOld = await lostOf(LOST_OLD);
+  ok(lostOld.then === 'none', `RED CONTROL (a lost sh read as the empty word): «none» while an earlier link may still start under that shell (${lostOld.then})`, lostOld);
   // WHICH READ answered (its read's S1): a CLAUDE_CONFIG_DIR the profile sets but does NOT export is the shell's variable, never a
   // child's — the native child (as the CLI, a child of that shell) does not see it, today's printf on a POSIX machine does
   fs.writeFileSync(PROF, `echo x >> ${JSON.stringify(LCOUNT)}\nCLAUDE_CONFIG_DIR=${LCCD}\n`); fs.rmSync(LCOUNT, { force: true });
