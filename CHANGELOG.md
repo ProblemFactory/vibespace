@@ -70,6 +70,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A newer reading of your weekly limit that reaches VibeSpace a little late is no longer dropped for an older number.
 - A second VibeSpace on the same machine no longer has its old pasted images deleted by another one; each cleans up only its own.
 - A helper agent that worked for a long time now has its early files in Artifacts too, which can push the oldest out past its 500 files.
+- A vault entry an agent saves again under the name of one you deleted no longer shows the deleted value's uses: its count starts at zero.
 
 ## 2.369.413 — 2026-11-20
 
