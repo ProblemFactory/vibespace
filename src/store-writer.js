@@ -47,6 +47,11 @@ const LC = require('./server/loop-counts.js');   // loop-day-report M5: the hour
 
 const GRACE = P.stopGraceOf(process.env);   // what the service manager allows a stop (systemd 90 s, a pod 30 s, or stated) — round 6: the exit's only bound
 const SLOW_MS = 1000;           // a single write slower than this is said
+// B-dfa4 cut 3: a producer's answer NOT READY (the channels index's layout built in slices): nothing is written and nothing
+// is settled — every durable() waiter waits for the write its store asks for (dirty) when its bytes are ready; null stays
+// «equal to the disk». A synchronous flush asks produce({sync: true}): the bytes in that turn. One symbol by name, so a
+// store reads it without loading this module first.
+const LATER = Symbol.for('vibespace.store-writer.later');
 const SLOW_SAY_EVERY_MS = 60000;
 const mono = () => { const t = process.hrtime(); return t[0] * 1e3 + t[1] / 1e6; };
 const mbOf = (b) => (b >= P.MB ? `${(b / P.MB).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`);
@@ -148,6 +153,8 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (rank === 0) s.rank = 0;   // a person's act / a binding is pending: it goes first at the exit (until written)
     if (allowEmpty !== undefined) s.allowEmpty = !!allowEmpty;
     s.version++;
+    s.later = false;   // B-dfa4 cut 3: its store asks again — due once more
+    if (s.urgentNext) { s.urgentNext = false; s.urgent = true; s.rank = 0; }   // B-dfa4 cut 3: a write answered LATER while a durable() waited stays urgent
     if (typeof produce === 'function') s.produce = produce;
     if (Number.isFinite(debounceMs)) s.debounceMs = debounceMs;
     if (mode !== undefined) s.mode = mode;
@@ -163,7 +170,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   const backoffEnd = (s) => (s.failures > 0 && Number.isFinite(s.failedAt) ? s.failedAt + P.retryMs(s.failures) : -Infinity);
   const rowOf = (s) => ({ name: s.file, dirtySince: s.dirtySince, urgent: s.urgent, failedAt: s.failures > 0 ? s.failedAt : null,
     due: s.urgent ? Math.max(s.dirtySince, backoffEnd(s)) : P.dueAt({ dirtySince: s.dirtySince, lastEndAt: s.lastEndAt, bytes: s.bytes, debounceMs: s.debounceMs, failures: s.failures, failedAt: s.failedAt, lastMs: s.lastMs }, pace) });
-  const dueRows = () => [...stores.values()].filter((s) => s.dirty && s.produce && s.file && !(inflight && inflight.name === s.file)).map(rowOf);
+  const dueRows = () => [...stores.values()].filter((s) => s.dirty && !s.later && s.produce && s.file && !(inflight && inflight.name === s.file)).map(rowOf);
   function schedule() {
     if (stopped || exiting || inflight) return;
     const rows = dueRows();
@@ -193,6 +200,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     let p;
     try {
       const bytes = s.produce();
+      if (bytes === LATER) { s.dirty = true; s.dirtySince = since; s.later = true; if (s.waiters.length) s.urgentNext = true; schedule(); return; }   // still OWED (an exit's flush writes it; stats say it) but not due until its store dirties it again   // B-dfa4 cut 3: NOT READY — nothing written, nothing settled: its waiters wait for the write its store asks for when ready
       if (bytes === null) { settled(s, s.writingVersion); return; }   // equal to the disk: nothing to write — ONLY null says so (round 3, smaller 4: undefined is a failed write, said)
       p = partsOf(bytes, { allowEmpty: s.allowEmpty });
     } catch (e) { fail(s, since, e); return; }
@@ -438,7 +446,12 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
       const since = s.dirtySince;
       s.dirty = false; s.dirtySince = null; s.urgent = false; s.writingVersion = s.version;
       let p;
-      try { const bytes = s.produce(); if (bytes === null) { settled(s, s.writingVersion); return; } p = partsOf(bytes, { allowEmpty: s.allowEmpty }); }
+      try {
+        const bytes = s.produce({ sync: true });   // B-dfa4 cut 3: a synchronous flush (close, the exit, a suite) — a store makes its bytes in this turn
+        if (bytes === LATER) { s.dirty = true; s.dirtySince = since; s.later = true; left.push({ name: s.name, file: s.file, why: 'its bytes were not ready' }); return; }
+        if (bytes === null) { settled(s, s.writingVersion); return; }
+        p = partsOf(bytes, { allowEmpty: s.allowEmpty });
+      }
       catch (e) { fail(s, since, e); left.push({ name: s.name, file: s.file, why: `its bytes could not be made (${(e && e.message) || e})` }); return; }
       const r = writeWaiting(s, p, since, deadline, waitedBy);
       if (r === 'ok') written.push(s.name);
@@ -601,7 +614,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function stop() { stopped = true; if (timer) clearTimeout(timer); timer = null; const w = worker; worker = null; try { w && w.terminate(); } catch { } const k = keeperT; keeperT = null; try { k && k.terminate(); } catch { } }
   if (keeperOn) startKeeper();   // a suite's own writer may ask for one; the server's is started by bootKeeper() at its boot
   const waits = () => ({ timedOut: waitsTimedOut });   // round 6's amend: waits that ended by their poll, not the write's end
-  return { dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, _now: now };
+  return { LATER, dirty, durable, whenDurable, afterLanding, owed, whyNotDurable, flushSync, noteSignal, beginExit, exitFlush, exitStartedAt, startKeeper, forget, pending, stats, waits, mode, stop, graceMs, _now: now };
 }
 
 /** THE process's writer (one thread, one queue for every store) */
@@ -639,4 +652,4 @@ function ride(W, file, step, opts = {}) {
   return Promise.resolve({ landed: true, value: v, ...(error ? { error } : {}) });
 }
 
-module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, ride, GRACE, SLOW_MS, RESTARTS_MAX };
+module.exports = { create, storeWriter, bootKeeper, partsOf, identityAtExit, ride, GRACE, SLOW_MS, RESTARTS_MAX, LATER };

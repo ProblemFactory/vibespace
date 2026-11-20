@@ -97,6 +97,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
 const { createChannelStore } = require('../channel-store.js');
+const { walkSliced, WALK_SYNC_ROWS, WALK_SLICE_MS } = require('../channel-store.js');   // B-dfa4 cut 3: the one budgeted walk
 const { clientSwapStep } = require('../client-swap-step.js');   // B-166e part 2's rule (PURE) — B-e40d's storage mounts say a swap by it too
 const { createChannelRegistry, ChannelError } = require('../channels/index.js');
 const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence, stampIdentity } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent; lane slack-grid-identity: the one stamp rule
@@ -529,13 +530,16 @@ function create(deps = {}) {
     // lane grants-unify: THE grants store (src/server/grants-store.js — or a getter); absent ⇒ the instance's installed one
     // for this data dir. Who may see a conversation, who a notification may wake, the raw-API tiers: its rows.
     grants = null,
+    // B-dfa4 cut 3: a suite's { syncRows, sliceMs, onSlice } for every budgeted walk (the store's layout, the due index, the
+    // boot's sweep) — a small stand-in walked in slices, a write placed between two of them; absent ⇒ the store's numbers
+    walk = null,
   } = deps;
   if (!dataDir) throw new Error('channels-engine: dataDir is required');
   const CG = ChannelsGrants.create({ grants, dataDir });
 
   // lane channel-threads: ONE write hook — every log writer (a pass, the push lane, a backfill, a trim, the side
   // log) keeps the derived caches (the thread index, the message → conversation map) honest; never a call-site list
-  const store = createChannelStore({ dir: path.join(dataDir, 'channels'), now, log, onWrite: (a, c, w) => onStoreWrite(a, c, w) });
+  const store = createChannelStore({ dir: path.join(dataDir, 'channels'), now, log, onWrite: (a, c, w) => onStoreWrite(a, c, w), walk });
   // lane decision-attention (D2): the first screen's JUDGED rows — the scan, the examples, the draft; a verdict is patched
   // in by one partial broadcast of its row. The body it reads = the conversation's newest records (the store's tail).
   const attention = require('./channels-attention.js').create({ dataDir, decision: decisionEngine, serverSetting, now, log, notify: (keys) => notify(keys),
@@ -1221,18 +1225,21 @@ function create(deps = {}) {
    *  conversation the vendor no longer lists (`unlistedAt`) is not polled.
    *  lane channel-feed-authority: read from THE DUE INDEX (below) — the named rows, the owed-mark rows and the index's
    *  head ≤ t, each judged by `dueRow` (the one rule); only the forced pass (`all`) walks every row. */
-  function dueList(rec, e, t = now(), { all = false } = {}) {
+  function dueList(rec, e, t = now(), { all = false, sync = false, turnMax = Infinity } = {}) {
     const T = tiers();
     const out = [];
     if (all) {
       const live = store.index.live();   // B-dfa4 U2: this account's rows only (the store keeps each account's keys)
       for (const k of store.index.keysOf(rec.id)) { const en = live[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, true); }
     } else {
-      const ix = dueIndex(rec, t, T);
+      const ix = dueIndex(rec, t, T, { sync });
+      if (!ix) return dueNotReady();   // B-dfa4 cut 3: its due index is being built in slices — said, never «nothing due»
       const cand = new Set(e.dueNow);
       for (const k of ix.marks) cand.add(k);
       const late = [];
-      for (let i = 0; i < ix.keys.length && ix.keys[i].at <= t; i++) { cand.add(ix.keys[i].key); late.push(ix.keys[i].key); }
+      let more = false;
+      for (let i = 0; i < ix.keys.length && ix.keys[i].at <= t; i++) { if (late.length >= turnMax) { more = true; break; } cand.add(ix.keys[i].key); late.push(ix.keys[i].key); }
+      if (more) { out.more = true; out.lateTotal = dueSeek(ix.keys, t, '\uffff'); }   // B-dfa4 cut 3: the overdue count from the sorted index
       for (const k of cand) { const en = store.index.peek(k); if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, false); }
       // a head the clock did not make due after all (its tier relaxed since it was keyed — the key is a LOWER bound) moves
       // to its true instant: each row is re-keyed once per tier step, never re-judged every pass
@@ -1266,15 +1273,72 @@ function create(deps = {}) {
   // pause, an owed mark, unlisted), its poll stamp (`store.stamps.set`), a watch start. Built in ONE O(rows) pass at
   // boot and whenever the account's shared inputs change (the tier settings; the lane: push, the feed carrying or not).
   const dueIx = new Map();   // adapterId -> { sig, keys: [{key, at}], at: Map<key, at>, marks: Set<key>, dirty: Set<key>, stale }
-  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0 };
+  // B-dfa4 cut 3: A BIG ACCOUNT'S DUE INDEX IS BUILT IN SLICES — one O(rows) build of an 89 000-row mailbox held the loop
+  // 1.2 s at the boot's first tick (measured, the tree's loop-hold reader). An account of at most DUE_SYNC_ROWS rows still
+  // builds in its one turn, as before; a bigger one in slices (walkSliced, WALK.sliceMs, a macrotask between): a touch
+  // during the build lands in ITS dirty set (markDue: re-keyed at the first read after it lands), a whole touch makes it
+  // stale and it starts again — what lands equals a whole build at the instant it is read; until it lands the due list says
+  // NOT READY (the tick skips the account by that name unless something else is due; the pass awaits the build before its
+  // due turn). A forced pass (`all`) reads no index.
+  const WALK = { syncRows: (walk && Number.isFinite(walk.syncRows)) ? walk.syncRows : WALK_SYNC_ROWS, sliceMs: (walk && Number.isFinite(walk.sliceMs)) ? walk.sliceMs : WALK_SLICE_MS, onSlice: (walk && typeof walk.onSlice === 'function') ? walk.onSlice : null };
+  const DUE_SYNC_ROWS = WALK.syncRows;
+  // the due TURN (the tick's look, the pass's turn) takes the most overdue rows only (each re-judged by dueRow, ~10 µs):
+  // after a long stop EVERY row of a big account is overdue, and re-judging all 89 000 in one turn held the loop 0.8 s; the
+  // rest wait for the next turn (counted: `lateTotal`, the card's waiting). A census (dueListOf) reads every due row.
+  const DUE_TURN_MAX = 2000;
+  const dueBuilding = new Map();   // adapterId -> { ix, promise }
+  const dueFailed = new Set();     // accounts whose sliced build threw: built in one turn next (a throw there fails the pass, as before — never a loop of builds)
+  function dueWarm(rec, sig, lane, T, keys) {
+    if (stopped) return null;   // a stopped engine builds nothing (its readers are ending)
+    const cur = dueBuilding.get(rec.id);
+    if (cur && cur.ix.sig === sig && !cur.ix.stale) return cur.promise;
+    const ix = { sig, lane, keys: [], at: new Map(), marks: new Set(), dirty: new Set(), stale: false };
+    const job = { ix, promise: null };
+    dueBuilding.set(rec.id, job);
+    job.promise = (async () => {
+      const t0 = Date.now(), t = now();
+      // the keys are the account's at the build's START (a stated snapshot); a row born or touched since is in `dirty`
+      const rows = store.index.rows();   // read-only (live() inside an async update in flight would be a whole touch)
+      const r = await walkSliced(keys, (k) => {
+        const en = rows[k];
+        if (!en || en.adapterId !== rec.id) return;
+        const d = dueKeyOf(rec, lane, en, t, T);
+        if (d.owed) ix.marks.add(en.key);
+        if (d.at !== Infinity) { ix.at.set(en.key, d.at); ix.keys.push({ key: en.key, at: d.at }); }
+      }, { what: 'due', sliceMs: WALK.sliceMs, stats: dueStats, onSlice: WALK.onSlice, alive: () => !stopped && !ix.stale && dueBuilding.get(rec.id) === job });
+      if (!r.done) return;
+      const s1 = Date.now();
+      ix.keys.sort((a, b) => dueCmp(a, b.at, b.key));
+      { const sortMs = Date.now() - s1; if (sortMs > dueStats.maxSortMs) dueStats.maxSortMs = sortMs; }
+      if (dueBuilding.get(rec.id) !== job || ix.stale) return;
+      dueIx.set(rec.id, ix);
+      dueStats.builds++; dueStats.sliced++; dueStats.lastBuildMs = Date.now() - t0;
+    })().catch((err) => { dueFailed.add(rec.id); log.warn(`[channels] ${rec.id}: the due index build failed: ${(err && err.message) || err} — the next build is made in one turn (its error reaches the pass)`); })
+      .finally(() => { if (dueBuilding.get(rec.id) === job) dueBuilding.delete(rec.id); });
+    return job.promise;
+  }
+  /** A due list that is NOT READY (the account's due index is being built in slices): empty, and marked so — every reader
+   *  checks `notReady` (the tick skips the account by name; the pass awaits the build), none takes it for «nothing due». */
+  const dueNotReady = () => Object.assign([], { notReady: true });
+  /** The due list once its index is ready: awaits every sliced build in flight (a whole touch during one starts another). */
+  async function dueListReady(rec, e, opts = {}) {
+    let dl = dueList(rec, e, now(), opts);
+    while (dl.notReady) { const b = dueBuildOf(rec.id); if (!b || stopped) break; await b; dl = dueList(rec, e, now(), opts); }   // a stop ends the wait (the pass is ending)
+    return dl;
+  }
+  /** The due build in flight for this account (the pass awaits it before its due turn), or null. */
+  const dueBuildOf = (adapterId) => { const b = dueBuilding.get(adapterId); return b ? b.promise : null; };
+  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0, sliced: 0, slices: 0, maxSliceMs: 0, maxSortMs: 0 };
   // lane scheduler-census-index: the scheduler card's CENSUS INDEX (`clockIndexed`, beside `schedulerScan`) is re-judged
   // at the same writes as the due index
   const censusIx = new Map();   // adapterId -> { sig, t, kept, rows: Map<key, judgement>, order: [judgement], dirty: Set<key>, stale }
   function markDue(key) {
-    if (key === null || key === undefined) { for (const ix of dueIx.values()) ix.stale = true; for (const cx of censusIx.values()) cx.stale = true; return; }
+    if (key === null || key === undefined) { for (const ix of dueIx.values()) ix.stale = true; for (const b of dueBuilding.values()) b.ix.stale = true; for (const cx of censusIx.values()) cx.stale = true; return; }
     const k = String(key), i = k.indexOf('/');
     const ix = i > 0 ? dueIx.get(k.slice(0, i)) : null;
     if (ix) ix.dirty.add(k);
+    const b = i > 0 ? dueBuilding.get(k.slice(0, i)) : null;   // B-dfa4 cut 3: a touch during a sliced build lands in it
+    if (b) b.ix.dirty.add(k);
     const cx = i > 0 ? censusIx.get(k.slice(0, i)) : null;
     if (cx) cx.dirty.add(k);
   }
@@ -1312,12 +1376,18 @@ function create(deps = {}) {
   }
   /** The account's due index, current: built (one O(rows) pass) when absent / stale / its shared inputs changed; else
    *  the rows written since are re-keyed (O(written · log rows)). */
-  function dueIndex(rec, t, T) {
+  function dueIndex(rec, t, T, { sync = false } = {}) {
     const lane = laneOrScan(rec, {});
     const sig = JSON.stringify([T, lane.via, lane.pollCadence, lane.why || null, lane.feedSeconds || null]);
     let ix = dueIx.get(rec.id);
     // a mass write (a boot's stamps, a big discovery page run) is one O(rows) build, never thousands of O(rows) splices
     if (!ix || ix.stale || ix.sig !== sig || ix.dirty.size > (ix.at.size >> 3) + 256) {
+      const ks = store.index.keysOf(rec.id);
+      if (!sync && ks.length > DUE_SYNC_ROWS && !dueFailed.has(rec.id)) {   // B-dfa4 cut 3: in slices — NOT READY until it lands (never an empty index taken as truth)
+        dueWarm(rec, sig, lane, T, ks);
+        return null;
+      }
+      dueBuilding.delete(rec.id);   // a build asked in one turn (a census) replaces a sliced one in flight
       const t0 = Date.now();
       ix = { sig, lane, keys: [], at: new Map(), marks: new Set(), dirty: new Set(), stale: false };
       const live = store.index.live();
@@ -1330,6 +1400,7 @@ function create(deps = {}) {
       }
       ix.keys.sort((a, b) => dueCmp(a, b.at, b.key));
       dueIx.set(rec.id, ix);
+      dueFailed.delete(rec.id);
       dueStats.builds++; dueStats.lastBuildMs = Date.now() - t0;
       return ix;
     }
@@ -2607,8 +2678,10 @@ function create(deps = {}) {
           // THE TIMER'S TURN (Drain rule 13): the pass's opening one, or a tick that found this pass busy while the account was due (`e.timerDue`, r5 verify) — the due rows by the clock NOW
           if (Drain.wantsTurn(e.dq, e.timerDue)) {
             e.timerDue = false;
+            const dueNow = await dueListReady(rec, e, { all: e.dq.pass.force, turnMax: DUE_TURN_MAX });   // B-dfa4 cut 3: a sliced due build lands first
+            e.dueBeyond = dueNow.more ? Math.max(0, (dueNow.lateTotal || 0) - DUE_TURN_MAX) : 0;   // the overdue rows past this turn (the card counts them as waiting)
             const fd = feedDecl(rec);
-            e.dq = Drain.turn(e.dq, { due: dueList(rec, e, now(), { all: e.dq.pass.force }), discoveryDue: discoveryDue(rec, e), feedDue: feedDue(rec, e, now()), feedPerPass: fd ? fd.pagesPerPass : undefined, recheckDue: recheckDueFor(rec) });   // lane lark-threads: rule 22a's rows
+            e.dq = Drain.turn(e.dq, { due: dueNow, discoveryDue: discoveryDue(rec, e), feedDue: feedDue(rec, e, now()), feedPerPass: fd ? fd.pagesPerPass : undefined, recheckDue: recheckDueFor(rec) });   // lane lark-threads: rule 22a's rows
           }
           const act = Drain.next({ ...e.dq, ...facts(connected) });
           e.dq = Drain.apply(e.dq, act);   // the step is taken (an async action BEGINS)
@@ -2619,7 +2692,7 @@ function create(deps = {}) {
           let result;
           try {
             if (act.type === 'fetch') result = await fetchOne(act);
-            else if (act.type === 'discover') { e.chargeBy = 'timer'; await discover(rec, e); result = { due: dueList(rec, e, now(), { all: e.dq.pass.force }) }; }
+            else if (act.type === 'discover') { e.chargeBy = 'timer'; await discover(rec, e); result = { due: await dueListReady(rec, e, { all: e.dq.pass.force, turnMax: DUE_TURN_MAX }) }; }
             else if (act.type === 'feed') { e.chargeBy = 'timer'; result = await feedPage(rec, e); }   // lane lark-search-poll: ONE change-feed page (rule 21)
             else if (act.type === 'recheck') { e.chargeBy = 'timer'; result = await recheckOne(rec, e, idOf(act.key), { by: 'timer' }); }   // lane lark-threads: ONE recent-roots page (rule 22a)
             else if (act.type === 'scanHost') {
@@ -2647,11 +2720,11 @@ function create(deps = {}) {
         if (ended.why === 'stopped' || ended.why === 'dropped') return { ok: false, why: ended.why === 'dropped' ? 'account-changed' : 'stopped', changed, results };
         if (ended.why === 'not-connected') return { ok: false, why: 'not-connected' };
         if (failure) { notify(changed.filter((k) => !early.has(k)), { full: false }); return { ok: false, why: failure.code, changed, results }; }
-        if (ended.why === 'budget') { e.waiting = dueList(rec, e).length; return { ok: false, why: 'budget' }; }
+        if (ended.why === 'budget') { const dl = dueList(rec, e, now(), { turnMax: DUE_TURN_MAX }); if (!dl.notReady) e.waiting = dl.more ? dl.lateTotal : dl.length; return { ok: false, why: 'budget' }; }
         // a drain that fetched nothing inside a back-off (every request refused) changes NOTHING about the back-off
         if (ended.why === 'backoff') return { ok: false, why: 'backoff', results };
-        if (ended.cut) e.waiting = ended.waiting;
-        else if (ended.timerWork) e.waiting = 0;
+        if (ended.cut) e.waiting = ended.waiting + (e.dueBeyond || 0);   // B-dfa4 cut 3: + the overdue rows past the turn's DUE_TURN_MAX
+        else if (ended.timerWork) e.waiting = e.dueBeyond || 0;   // the turn's work done; those past it wait for the next turn
         e.failures = 0;
         e.nextAt = 0;
         e.rateStrikes = 0; e.backoffKind = null; e.retryAfterSec = null;
@@ -3485,22 +3558,46 @@ function create(deps = {}) {
   /** THE WRITE-TIME HALF: every conversation of the account whose verdict predates
    *  the credential change is re-judged and PERSISTED in one index write (the
    *  caller then broadcasts ONE whole digest). Answers how many were touched. */
+  const rejudgeStats = { sliced: 0, slices: 0, maxSliceMs: 0 };   // B-dfa4 cut 3: the sliced re-judge's slices (its leg prints the longest)
   async function rejudgeConvCaps(rec, why = 'credential changed') {
     if (!rec) return 0;
     let n = 0;
+    // B-dfa4 cut 1: this account's keys, its rows read-only (`rows()`: never a touch), and a touch of the map's own key
+    // for each row it changes — `live()` inside an update was a whole-map touch (every account's rows re-written, every
+    // kept index rebuilt)
+    const judge = (rows, k) => {
+      const en = rows[k];
+      if (!en || en.adapterId !== rec.id || !en.convCaps) return;
+      const next = effectiveConvCaps(rec, en);
+      if (next !== en.convCaps) { en.convCaps = next; store.index.touch(k); n++; }
+    };
     try {
-      await store.index.update(() => {
-        // B-dfa4 cut 1: this account's keys, its rows read-only (`rows()`: never a touch), and a touch of the map's own key
-        // for each row it changes — `live()` inside an update was a whole-map touch (every account's rows re-written, every
-        // kept index rebuilt)
-        const rows = store.index.rows();
-        for (const k of store.index.keysOf(rec.id)) {
-          const en = rows[k];
-          if (!en || en.adapterId !== rec.id || !en.convCaps) continue;
-          const next = effectiveConvCaps(rec, en);
-          if (next !== en.convCaps) { en.convCaps = next; store.index.touch(k); n++; }
-        }
-      });
+      // B-dfa4 cut 3: A BIG ACCOUNT IS RE-JUDGED IN SLICES — one update a slice of at most WALK.sliceMs over the account's keys
+      // at its start, a macrotask between (the boot's re-judge of an 89 000-row mailbox sat in start()'s held turn, measured);
+      // an account of at most WALK.syncRows rows in one update, as before. It WAITS for the per-account keys still being
+      // built from the load (keysReady), never finishing them in its caller's turn. Nobody reads half: every reader of a
+      // row's verdict (a send, a card, the digest) re-judges it on its way out (effectiveConvCaps) — what this persists is
+      // that same judgement; a row born since is judged at its birth; a credential change starts its own re-judge; the
+      // caller that awaits it (a re-authorization before its one digest) awaits every slice.
+      // a big index: nothing of it in the caller's turn (the boot's start()) — the per-account keys waited for while built
+      let big = 0; for (const k in store.index.rows()) if (++big > WALK.syncRows) break;
+      if (big > WALK.syncRows) { if (typeof store.index.keysReady === 'function' && store.index.keysStats().warming) await store.index.keysReady(); else await new Promise((r) => setImmediate(r)); }
+      let keys = null, i = 0;
+      do {
+        await store.index.update(() => {
+          const rows = store.index.rows();
+          if (!keys) {   // the account's keys, read INSIDE the update (the kept set + what it touched — B-dfa4 cut 1)
+            const ks = store.index.keysOf(rec.id);
+            if (ks.length <= WALK.syncRows) { for (const k of ks) judge(rows, k); return; }   // the account whole, in this update
+            keys = ks;   // past the bound: this snapshot, one update a slice (a row born since is judged at its birth)
+          }
+          const s0 = Date.now();
+          do judge(rows, keys[i++]); while (i < keys.length && Date.now() - s0 < WALK.sliceMs);
+          const ms = Date.now() - s0; rejudgeStats.slices++; if (ms > rejudgeStats.maxSliceMs) rejudgeStats.maxSliceMs = ms;
+        });
+        if (keys && i < keys.length) { await new Promise((r) => setImmediate(r)); if (WALK.onSlice) await WALK.onSlice(i, 'rejudge'); }
+      } while (keys && i < keys.length && !stopped);
+      if (keys) rejudgeStats.sliced++;
     } catch (err) { log.warn(`[channels] ${rec.id}: re-judging the conversations after "${why}" failed: ${(err && err.message) || err} — each is re-judged as it is read`); return 0; }
     if (n) log.log(`[channels] ${rec.id}: ${why} — ${n} conversation(s) re-judged against the new credential`);
     return n;
@@ -9310,10 +9407,13 @@ function create(deps = {}) {
       // claims. The budget is the account's, in the vendor's unit: an
       // exhausted window waits for the next minute and the card says so.
       // lane lark-search-poll: a quiet account whose change feed is due runs a pass too (else the feed never runs)
-      const due = discoveryDue(rec, e, t) || e.dueNow.size > 0 || feedDue(rec, e, t) || dueList(rec, e, t).length > 0;
+      const otherDue = discoveryDue(rec, e, t) || e.dueNow.size > 0 || feedDue(rec, e, t);
+      const dl = otherDue ? null : dueList(rec, e, t, { turnMax: DUE_TURN_MAX });
+      if (dl && dl.notReady) continue;   // B-dfa4 cut 3: its due index is being built in slices (NOT READY, by name) — a later tick reads it
+      const due = otherDue || dl.length > 0;
       if (!due) continue;
       if (e.passing) { e.timerDue = true; continue; }   // r5 verify: busy while due — the pass in flight (or the next drain) does the timer's work, a request storm cannot starve the due list
-      if (!affordable(rec, e)) { e.waiting = dueList(rec, e, t).length; continue; }
+      if (!affordable(rec, e)) { const w = dl || dueList(rec, e, t, { turnMax: DUE_TURN_MAX }); if (!w.notReady) e.waiting = w.more ? w.lateTotal : w.length; continue; }
       pass(rec.id).catch((err) => console.warn('[channels] pass failed:', err && err.message));
     }
   }
@@ -9327,9 +9427,10 @@ function create(deps = {}) {
    * after boot, never blocking it; a row stamped 0 is never re-read; the rows
    * that turned out to hold one are said in one partial broadcast.
    */
-  async function healSelfAt({ windowMs = 48 * 3600e3, tail = 200 } = {}) {
+  async function healSelfAt({ windowMs = SELF_AT_WINDOW_MS, tail = 200, plan: planned = null } = {}) {
     const t = now();
-    const plan = Object.values(store.index.live()).filter((en) => en && !('selfAt' in en) && Number(en.lastAt) > t - windowMs).map((en) => en.key);
+    // B-dfa4 cut 3: at boot the plan is the boot sweep's (selfAtPlanned, the same rule read once with the censuses)
+    const plan = Array.isArray(planned) ? planned : Object.values(store.index.live()).filter((en) => selfAtPlanned(en, t, windowMs)).map((en) => en.key);
     const found = [];
     for (const key of plan) {
       if (stopped) break;
@@ -9349,27 +9450,29 @@ function create(deps = {}) {
    *  copy of a store from another version). The PURE reader (`F.grainOf`)
    *  already leaves such a row INERT; this names them once so nobody wonders
    *  why a listed notification never fires. Returns `[{grain, id, principal}]`. */
-  function orphanWatchers() {
+  function orphanWatchers({ rows = true } = {}) {
     const out = [];
-    const check = (grain, id, raw, read) => {
-      const rawW = Array.isArray(raw && raw.watchers) ? raw.watchers.filter((w) => w && pkOf(w.principal)) : [];
-      // lane grants-unify: the grain's access is its row; a watcher its watch row does not list is inert too. lane
-      // wake-approve-card r6: read by THE one reader (the access ABOVE the grain counts — F.grainOf with none named a FIRING rule
-      // digest and room wake «without access at their grain» at every boot)
-      const kept = new Set((read ? read.watchers : []).map((w) => pkOf(w.principal)));
-      for (const w of rawW) if (!kept.has(pkOf(w.principal))) out.push({ grain, id, principal: pkOf(w.principal) });
-    };
+    const check = (grain, id, raw, read) => orphansAt(grain, id, raw, read, out);
     for (const [id, g] of Object.entries(store.index.table('accountAssignments') || {})) check('account', id, g, grainReadAt(id, { kind: 'account' }));
     for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) check('pattern', id, g, g && g.adapterId ? grainReadAt(g.adapterId, { kind: 'pattern', id }) : null);
-    for (const en of Object.values(store.index.live())) { const rd = grainReadLive(en); if (rd) check('conversation', en.key, en, rd); }   // r8: the live row, read only when it stores a row (no copy)
+    if (rows) for (const en of Object.values(store.index.live())) { const rd = grainReadLive(en); if (rd) check('conversation', en.key, en, rd); }   // r8: the live row, read only when it stores a row (no copy)
     return out;
+  }
+  /** orphanWatchers' rule for ONE grain (the boot sweep's too): its stored rows the one reader does not keep → `out`. */
+  function orphansAt(grain, id, raw, read, out) {
+    const rawW = Array.isArray(raw && raw.watchers) ? raw.watchers.filter((w) => w && pkOf(w.principal)) : [];
+    // lane grants-unify: the grain's access is its row; a watcher its watch row does not list is inert too. lane
+    // wake-approve-card r6: read by THE one reader (the access ABOVE the grain counts — F.grainOf with none named a FIRING rule
+    // digest and room wake «without access at their grain» at every boot)
+    const kept = new Set((read ? read.watchers : []).map((w) => pkOf(w.principal)));
+    for (const w of rawW) if (!kept.has(pkOf(w.principal))) out.push({ grain, id, principal: pkOf(w.principal) });
   }
   /** r6: every grain's rows IN EFFECT, read by the one reader (`fn(row, grain, id)` for each) — the boot censuses below. r8: a
    *  conversation's through grainReadLive (the live row, never a copy; one that stores no row has none in effect). */
-  function eachRowInEffect(fn) {
+  function eachRowInEffect(fn, { rows = true } = {}) {
     for (const id of Object.keys(store.index.table('accountAssignments') || {})) for (const w of (grainReadAt(id, { kind: 'account' }) || { watchers: [] }).watchers) fn(w, 'account', id);
     for (const [id, g] of Object.entries(store.index.table('patternAssignments') || {})) if (g && g.adapterId) for (const w of (grainReadAt(g.adapterId, { kind: 'pattern', id }) || { watchers: [] }).watchers) fn(w, 'pattern', id);
-    for (const en of Object.values(store.index.live())) for (const w of (grainReadLive(en) || { watchers: [] }).watchers) fn(w, 'conversation', en.key);
+    if (rows) for (const en of Object.values(store.index.live())) for (const w of (grainReadLive(en) || { watchers: [] }).watchers) fn(w, 'conversation', en.key);
   }
   /** R4 verify r5 (money): RELEASE THE RESERVATIONS OF A DEAD BOOT. A wake
    *  reservation (reserveWake, written before the ladder) whose `bootId` is
@@ -9396,8 +9499,17 @@ function create(deps = {}) {
         }
       }
     };
+    // B-dfa4 remainder: the rows holding a STALE reservation are found READ-ONLY first (store.index.rows() touches nothing),
+    // then only they are touched and swept — reaching ix.conversations inside the update was a whole-map touch at EVERY boot:
+    // every kept index (the due index, the census, the row facts, the kept first read) rebuilt and the whole index rewritten
+    const stale = (ws) => Array.isArray(ws) && ws.some((w) => w && w.stats && [w.stats, ...(w.stats.fan && typeof w.stats.fan === 'object' ? Object.values(w.stats.fan) : [])]
+      .some((l) => l && Array.isArray(l.wakes) && l.wakes.some((r) => r && r.reserved === true && r.bootId !== BOOT_ID)));
+    const staleKeys = [];
+    const rows0 = store.index.rows() || {};
+    for (const k of Object.keys(rows0)) { const en = rows0[k]; if (en && stale(en.watchers)) staleKeys.push(k); }   // a cheap read of each row's own field (no pair per row)
     return store.index.update((ix) => {
-      for (const en of Object.values(ix.conversations || {})) if (en) sweep(en.watchers);
+      const rows = store.index.rows();
+      for (const k of staleKeys) { const en = rows[k]; if (!en) continue; store.index.touch(k); sweep(en.watchers); }
       for (const g of Object.values(ix.accountAssignments || {})) if (g) sweep(g.watchers);
       for (const g of Object.values(ix.patternAssignments || {})) if (g) sweep(g.watchers);
       return released;
@@ -9413,25 +9525,129 @@ function create(deps = {}) {
   function capZeroDigests() {
     const out = [];
     // r6: the rows in effect as THE one reader reads them (the access above each grain included)
-    eachRowInEffect((w, grain, id) => { if (w && w.notify === 'digest' && Number(w.dailyWakeCap) === 0) out.push({ grain, id, principal: pkOf(w.principal) }); });
+    eachRowInEffect((w, grain, id) => { if (capZeroRow(w)) out.push({ grain, id, principal: pkOf(w.principal) }); });
     return out;
   }
+  const capZeroRow = (w) => !!(w && w.notify === 'digest' && Number(w.dailyWakeCap) === 0);   // capZeroDigests' rule (the sweep's too)
   /** 2026-09-27: the per-watcher `receiptWake` opt-in is DEPRECATED (the
    *  delivery of a receipt is chosen at the Approve / Reject action) — the
    *  watchers still carrying `true`, counted for the ONE boot line. */
   function deprecatedReceiptWakes() {
     const out = [];
-    eachRowInEffect((w, grain, id) => { if (w && w.receiptWake === true) out.push({ grain, id, principal: pkOf(w.principal) }); });   // r6: the one reader
+    eachRowInEffect((w, grain, id) => { if (receiptWakeRow(w)) out.push({ grain, id, principal: pkOf(w.principal) }); });   // r6: the one reader
     return out;
+  }
+  const receiptWakeRow = (w) => !!(w && w.receiptWake === true);   // deprecatedReceiptWakes' rule (the sweep's too)
+
+  // ── B-dfa4 cut 3: THE BOOT'S SWEEP ──────────────────────────────────────
+  // start() walked every row FOUR times in its one turn for what only its log lines and the selfAt heal read: the three
+  // censuses above (each row read by the one reader; capZeroDigests alone held 0.3–0.4 s of start() on 96 500 rows, measured
+  // by the tree's loop-hold reader) and healSelfAt's plan. They are now ONE walk reading each row once (bootRowOf: the same
+  // rules — orphansAt, capZeroRow, receiptWakeRow, selfAtPlanned): in start()'s own turn for a store of at most
+  // WALK.syncRows rows, as before; for a bigger one in slices (walkSliced) over the keys at its start. A row touched meanwhile
+  // is read again when it lands; a change of the grants rows (CG.generation: every row's reading by the one reader rests on
+  // them) or a whole touch STARTS IT AGAIN (after BOOT_SWEEP_RESTARTS it walks in one turn, so it always lands) — what it
+  // says equals the whole walks at the instant it lands. Its only readers are the three log lines and the heal, both at the
+  // landing (a person's first page reads none of it). The two walks whose readers act AT ONCE stay in start()'s own turn:
+  // the stale reservations' release (a wake's cap must never count a dead boot's slot) and the boot deliveries' scan
+  // (parkedKeys, the boot timers) — each a cheap read of a row's own field.
+  const SELF_AT_WINDOW_MS = 48 * 3600e3;
+  const BOOT_SWEEP_RESTARTS = 3;
+  const bootSweepStats = { sliced: 0, rows: 0, slices: 0, maxSliceMs: 0, walkMs: 0, reread: 0, restarts: 0, whole: 0, failed: 0 };
+  let bootJob = null;   // the sliced sweep in flight: { touched: Set<key>, stale, gen }
+  store.index.onTouch((k) => { if (!bootJob) return; if (k === null || k === undefined) bootJob.stale = true; else bootJob.touched.add(String(k)); });
+  /** healSelfAt's rule: a row active in the window that was never stamped. */
+  const selfAtPlanned = (en, t, windowMs = SELF_AT_WINDOW_MS) => !!(en && !('selfAt' in en) && Number(en.lastAt) > t - windowMs);
+  /** ONE conversation row as the boot reads it (the one reader, once) → its census rows + whether the heal plans it, or null. */
+  function bootRowOf(en, t) {
+    const rd = grainReadLive(en);
+    const receipt = [], capZero = [], orphans = [];
+    for (const w of (rd || { watchers: [] }).watchers) {
+      if (receiptWakeRow(w)) receipt.push({ grain: 'conversation', id: en.key, principal: pkOf(w.principal) });
+      if (capZeroRow(w)) capZero.push({ grain: 'conversation', id: en.key, principal: pkOf(w.principal) });
+    }
+    if (rd) orphansAt('conversation', en.key, en, rd, orphans);
+    const selfAt = selfAtPlanned(en, t);
+    return (receipt.length || capZero.length || orphans.length || selfAt) ? { receipt, capZero, orphans, selfAt } : null;
+  }
+  /** The landing: the grains' rows (read now — a handful) first, then each row's in the map's order — the whole walks' order. */
+  function bootLand(per, order) {
+    const out = { receipt: [], capZero: [], orphans: [], selfAtPlan: [], failed: {} };
+    try { out.orphans = orphanWatchers({ rows: false }); } catch (err) { out.failed.orphans = err; }   // each census as before: one failing says so, the others are said
+    try {
+      eachRowInEffect((w, grain, id) => {
+        if (receiptWakeRow(w)) out.receipt.push({ grain, id, principal: pkOf(w.principal) });
+        if (capZeroRow(w)) out.capZero.push({ grain, id, principal: pkOf(w.principal) });
+      }, { rows: false });
+    } catch (err) { out.failed.receipt = out.failed.capZero = err; }
+    for (const k of order) {
+      const r = per.get(k);
+      if (!r) continue;
+      out.receipt.push(...r.receipt); out.capZero.push(...r.capZero); out.orphans.push(...r.orphans);
+      if (r.selfAt) out.selfAtPlan.push(k);
+    }
+    return out;
+  }
+  /** THE BOOT'S SWEEP → { sync: result } for a small store (this turn), else { promise } of the result (null once stopped).
+   *  result = { receipt, capZero, orphans } as deprecatedReceiptWakes / capZeroDigests / orphanWatchers say them, and
+   *  selfAtPlan (healSelfAt's). `syncRows` / `sliceMs` / `onSlice`: a suite's (WALK's by default). */
+  function bootSweep({ syncRows = WALK.syncRows, sliceMs = WALK.sliceMs, onSlice = WALK.onSlice } = {}) {
+    let err0 = null;
+    const visitor = (per, rows, t) => (k) => {
+      const en = rows[k];
+      if (!en) { per.delete(k); return; }
+      let r = null;
+      try { r = bootRowOf(en, t); } catch (err) { bootSweepStats.failed++; if (!err0) err0 = err; }
+      if (r) per.set(k, r); else per.delete(k);
+    };
+    const said = (out) => { if (err0) log.warn(`[channels] boot census: ${bootSweepStats.failed} row(s) could not be read (${(err0 && err0.message) || err0}) — counted as none`); return out; };
+    const n = Object.keys(store.index.rows()).length;
+    if (n <= syncRows) {
+      const t0 = Date.now(), t = now(), rows = store.index.rows(), keys = Object.keys(rows), per = new Map();
+      keys.forEach(visitor(per, rows, t));
+      const out = bootLand(per, keys);
+      bootSweepStats.rows = keys.length; bootSweepStats.walkMs = Date.now() - t0;
+      return { sync: said(out) };
+    }
+    const promise = (async () => {
+      await new Promise((r) => setImmediate(r));   // nothing of it in the caller's turn (start())
+      const t0 = Date.now();
+      for (let attempt = 0; ; attempt++) {
+        if (stopped) return null;
+        const t = now(), rows = store.index.rows(), keys = Object.keys(rows), per = new Map();
+        const job = { touched: new Set(), stale: false, gen: CG.generation() };
+        bootJob = job;
+        const visit = visitor(per, rows, t);
+        let done;
+        if (attempt >= BOOT_SWEEP_RESTARTS) { const s0 = Date.now(); keys.forEach(visit); done = true; bootSweepStats.whole++; bootSweepStats.slices++; bootSweepStats.maxSliceMs = Math.max(bootSweepStats.maxSliceMs, Date.now() - s0); }
+        else done = (await walkSliced(keys, visit, { what: 'boot-sweep', sliceMs, onSlice, stats: bootSweepStats, alive: () => !stopped && !job.stale && CG.generation() === job.gen })).done;
+        if (bootJob === job) bootJob = null;
+        if (stopped) return null;
+        if (!done || job.stale || CG.generation() !== job.gen) { bootSweepStats.restarts++; continue; }   // a whole touch / a grants change: AGAIN
+        // the rows touched meanwhile, read again as they stand now (a removed one leaves, one born since is read)
+        const s1 = Date.now();
+        for (const k of job.touched) { bootSweepStats.reread++; visit(k); }
+        const out = bootLand(per, Object.keys(store.index.rows()));
+        bootSweepStats.maxSliceMs = Math.max(bootSweepStats.maxSliceMs, Date.now() - s1);
+        bootSweepStats.sliced++; bootSweepStats.rows = keys.length; bootSweepStats.walkMs = Date.now() - t0;
+        return said(out);
+      }
+    })();
+    return { promise };
   }
   function start() {
     if (timer || stopped) return;
     timer = setInterval(tick, 5000);
     if (timer.unref) timer.unref();
-    healSelfAt().catch((err) => log.warn(`[channels] selfAt heal failed: ${(err && err.message) || err}`));
-    try { const d = deprecatedReceiptWakes(); if (d.length) log.log(`[channels] ${d.length} watcher(s) still carry receiptWake:true — IGNORED since 2026-09-27 (a receipt's delivery is chosen at the Approve / Reject action: "tell it with its next message" or "wake it now"): ${d.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot receiptWake census failed: ${(err && err.message) || err}`); }
-    try { const orphans = orphanWatchers(); if (orphans.length) log.warn(`[channels] ${orphans.length} notification row(s) without access at their grain or above it (the account, a matching rule) — inert until a person grants it: ${orphans.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot notification census failed: ${(err && err.message) || err}`); }
-    try { const z = capZeroDigests(); if (z.length) log.warn(`[channels] ${z.length} digest notification(s) stored with a daily cap of 0 — read as cap 1 (a digest is a paced wake and cap 0 never delivers); the store is not rewritten, edit each to set a real cap: ${z.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot digest-cap census failed: ${(err && err.message) || err}`); }
+    // B-dfa4 cut 3: the three censuses and the heal's plan — ONE walk (bootSweep), in this turn for a small store, in slices for a big one
+    const bootSaid = (r) => {
+      if (!r) return;
+      healSelfAt({ plan: r.selfAtPlan }).catch((err) => log.warn(`[channels] selfAt heal failed: ${(err && err.message) || err}`));
+      try { if (r.failed && r.failed.receipt) throw r.failed.receipt; const d = r.receipt; if (d.length) log.log(`[channels] ${d.length} watcher(s) still carry receiptWake:true — IGNORED since 2026-09-27 (a receipt's delivery is chosen at the Approve / Reject action: "tell it with its next message" or "wake it now"): ${d.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot receiptWake census failed: ${(err && err.message) || err}`); }
+      try { if (r.failed && r.failed.orphans) throw r.failed.orphans; const orphans = r.orphans; if (orphans.length) log.warn(`[channels] ${orphans.length} notification row(s) without access at their grain or above it (the account, a matching rule) — inert until a person grants it: ${orphans.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot notification census failed: ${(err && err.message) || err}`); }
+      try { if (r.failed && r.failed.capZero) throw r.failed.capZero; const z = r.capZero; if (z.length) log.warn(`[channels] ${z.length} digest notification(s) stored with a daily cap of 0 — read as cap 1 (a digest is a paced wake and cap 0 never delivers); the store is not rewritten, edit each to set a real cap: ${z.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot digest-cap census failed: ${(err && err.message) || err}`); }
+    };
+    try { const sw = bootSweep(); if (sw.promise) track(sw.promise.then(bootSaid, (err) => log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`))); else bootSaid(sw.sync); } catch (err) { log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`); }
     try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
     reconcileReceiptFates().catch((err) => log.warn(`[channels] boot receipt-fate reconcile failed: ${(err && err.message) || err}`));
     try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }
@@ -9576,7 +9792,7 @@ function create(deps = {}) {
     // R4 (2026-09-27): access and notification — two operations, access first; the compose verb; the agent's search
     setGrain, setAccess, setWatchers, removePattern, accessFor, migrateGrants, compose, searchFor, setAccountPolicy, effectiveForAccount,
     // lane channel-feed-authority: the scheduler's due rows of one account (the census legs) and the due index's counters
-    dueListOf: (adapterId, { all = false } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all }) : null; },
+    dueListOf: (adapterId, { all = false, sync = true } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all, sync }) : null; },   // B-dfa4 cut 3: a census reads every due row, built in its turn (sync: false = the tick's reading)
     dueIndexStats: () => ({ ...dueStats }),
     walkCostStats: () => ({ ...walkCost, kept: keptRows.size }),   // B-dfa4 U3: rows the recheck / revisions walks read, and the recheck turns answered kept
     recheckDueOf: (adapterId, t = null) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? recheckDueFor(rec, t == null ? now() : t) : null; },   // B-dfa4 U3: the drain turn's recheck list (the leg)
@@ -9689,6 +9905,7 @@ function create(deps = {}) {
     // R4 verify r5: the boot GC of a dead boot's stuck wake reservations (a
     // suite drives it by hand — it also runs in `start()`)
     releaseStaleReservations, capZeroDigests,
+    bootSweep, bootSweepStats: () => ({ ...bootSweepStats }), rejudgeConvCaps, rejudgeStats: () => ({ ...rejudgeStats }),   // B-dfa4 cut 3: the boot's one sweep (its legs: parity, a write between two slices)
     pendingWindows: () => [...wakeTimers.entries()].map(([k, w]) => { const i = k.lastIndexOf('|'); return { key: i > 0 ? k.slice(0, i) : k, principal: i > 0 ? k.slice(i + 1) : null, kind: w.kind, startedAt: w.startedAt }; }),
     REQUESTS_PER_MINUTE, RECONCILE_SECONDS, PAGE, MAX_PAGES, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PENDING_CAP, ESTIMATE_CAP,
     DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS,

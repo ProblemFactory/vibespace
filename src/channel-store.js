@@ -242,6 +242,35 @@ const EMPTY_INDEX = () => ({ v: 1, conversations: {}, updatedAt: 0 });
 const INDEX_CHUNK = 256;
 const SWEEP_CHUNKS = 2;
 const DRIFT_SAY_MS = 10 * 60 * 1000;
+// B-dfa4 cut 3: THE ONE BUDGETED WALK. A first build over a big store's rows (the index's layout here; an account's due index
+// and the boot's sweep in the engine) walked every row in ONE turn of the loop: 1.6 s / 1.2 s / 0.4 s on a store of 96 500
+// rows (measured by the tree's loop-hold reader). A walk over at most WALK_SYNC_ROWS rows still runs in its caller's turn;
+// a bigger one walks its items in SLICES of at most WALK_SLICE_MS by its own clock, a macrotask (setImmediate) between two
+// slices, so the loop answers between them. Each caller states its snapshot and says what a reader gets before it lands.
+const WALK_SYNC_ROWS = 4000;
+const WALK_SLICE_MS = 25;
+/** Walk `items` (the caller's STATED SNAPSHOT — an array) in slices, the first one a turn after the call: `fn(item, i)` for
+ *  each; `alive()` is asked after each yield — false stops the walk (the caller knows why: closed, replaced, stale). `stats` (optional) counts the slices and
+ *  keeps the longest (what a leg prints); `onSlice(i, what)` (a suite's) runs between two slices, awaited (`what` names the walk).
+ *  → Promise<{ done, rows, slices, maxSliceMs, walkMs }>. */
+async function walkSliced(items, fn, { sliceMs = WALK_SLICE_MS, alive = () => true, stats = null, onSlice = null, what = 'walk' } = {}) {
+  const t0 = Date.now();
+  let i = 0, slices = 0, maxSliceMs = 0;
+  if (items.length) { await new Promise((r) => setImmediate(r)); if (!alive()) return { done: false, rows: 0, slices, maxSliceMs, walkMs: Date.now() - t0 }; }   // nothing of it in the caller's turn (a tick starting several)
+  while (i < items.length) {
+    const s0 = Date.now();
+    do { fn(items[i], i); i++; } while (i < items.length && Date.now() - s0 < sliceMs);
+    const ms = Date.now() - s0;
+    slices++; if (ms > maxSliceMs) maxSliceMs = ms;
+    if (stats) { stats.slices = (stats.slices || 0) + 1; if (ms > (stats.maxSliceMs || 0)) stats.maxSliceMs = ms; }
+    if (i < items.length) {
+      await new Promise((r) => setImmediate(r));
+      if (onSlice) await onSlice(i, what);   // a suite's seam: what happens between two slices (a write placed there, awaited)
+      if (!alive()) return { done: false, rows: i, slices, maxSliceMs, walkMs: Date.now() - t0 };
+    }
+  }
+  return { done: true, rows: i, slices, maxSliceMs, walkMs: Date.now() - t0 };
+}
 /** `_`-prefixed keys are runtime-only — never on disk (both index writers use this replacer). */
 const RUNTIME_KEYS = (k, v) => (k.startsWith('_') ? undefined : v);
 // THE POLL STAMPS LEAVE THE ROW (design 011 lane 2, 2026-10-03): a pass that brought nothing changed nothing but these
@@ -320,7 +349,7 @@ const dayStamp = (ms) => new Date(ms).toISOString().slice(0, 10);
  * Build the store. `dir` is `<dataDir>/channels`. `now` is injectable so the
  * retention and audit-roll rules are testable without a clock.
  */
-function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024, stampsFlushMs = STAMPS_FLUSH_MS } = {}) {
+function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024, stampsFlushMs = STAMPS_FLUSH_MS, walk = null } = {}) {
   // lane hub-loop-stalls commit 2: the index reaches the disk through THE STORE WRITER (its own thread; a pace stated for
   // the index's size) — a 21.7 MB index's rename held the owner's main loop 1.3 s median, 58 times in six hours
   const W = () => writer || require('./store-writer.js').storeWriter();
@@ -541,9 +570,31 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let allDirty = true;         // the next write re-serializes every row (boot, a whole-map update, a verify drift)
   const dirtyKeys = new Set();
   let layout = null;           // { chunks: [{ keys, buf, n }], chunkOf: Map<key, chunk> } — the cached rows
+  // B-dfa4 cut 3: A BIG INDEX'S LAYOUT IS BUILT IN SLICES (walkSliced). The first write after a boot (and after a whole-map
+  // touch, or a mass of touched rows: a boot's passes) laid out EVERY row on the loop: 1.6 s for 96 500 rows. An index of at
+  // most LAYOUT_SYNC_ROWS rows still builds in the write's own turn; a bigger one in slices over a STATED SNAPSHOT of the
+  // keys taken at its start: a row written since is in dirtyKeys (the write that follows re-serializes its chunk), a row
+  // born since joins the last chunk, a removed one leaves its chunk there; a whole touch makes it stale and it STARTS AGAIN.
+  // So what the first write lays down equals a whole layout at the instant it is written. Until it lands the writer is
+  // answered LATER (src/store-writer.js: nothing written, the index stays owed, every durable() waiter WAITS — never a
+  // partial file, never «on disk» before it is); the landing dirties it again. A synchronous flush (close, the exit, a
+  // suite: the writer's flushSync asks produce({sync: true})) lays out in its own turn, as before.
+  const LAYOUT_SYNC_ROWS = (walk && Number.isFinite(walk.syncRows)) ? walk.syncRows : WALK_SYNC_ROWS;
+  const LAYOUT_SLICE_MS = (walk && Number.isFinite(walk.sliceMs)) ? walk.sliceMs : WALK_SLICE_MS;
+  const layoutSeam = (walk && typeof walk.onSlice === 'function') ? walk.onSlice : null;   // a suite's: between two slices
+  const NOT_READY = Symbol('layout not ready');
+  const LATER = Symbol.for('vibespace.store-writer.later');   // the writer's NOT READY answer (src/store-writer.js)
+  let warm = null, warmFailed = false;   // warm: { stale, promise } while a sliced layout is built; warmFailed: the next layout is built whole
+  // THE BOUND ON LATER: a write answered LATER waits for at most LATER_MAX sliced builds (a whole touch restarting the layout,
+  // rows touched faster than their chunks are re-made) — then the next write is made in its own turn, said once: the index
+  // always lands, never a durable() waiting out its 60 s
+  const LATER_MAX = 3;
+  let laterJobs = 0, laterOwed = false;
+  // a mass of touched rows is re-made in slices once its CHUNKS (the cost: ~4 ms each, measured) pass this many
+  const APPLY_SYNC_CHUNKS = 6;
   let sweepAt = 0;
   const touchHooks = [];
-  const flushStats = { full: 0, incremental: 0, fallback: 0, swept: 0, drift: 0, lastFull: 'boot', writes: 0, skipped: 0 };
+  const flushStats = { full: 0, incremental: 0, fallback: 0, swept: 0, drift: 0, lastFull: 'boot', writes: 0, skipped: 0, layoutSliced: 0, applySliced: 0, layoutSlices: 0, layoutMaxSliceMs: 0, layoutRestarts: 0 };
   let driftSaidAt = 0;         // the sweep's line: the first drift, then at most one per DRIFT_SAY_MS
   // VIBESPACE_CHANNELS_INDEX_VERIFY=1|<file> (the gates' census): every incremental write is compared with the
   // whole-file serialization; a difference is said (and appended to <file>) and the whole file is written instead
@@ -557,8 +608,14 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   let byAcct = null;              // Map<adapterId, Set<key>> — null = build at the next read (boot, a whole-map touch)
   const acctOfKey = new Map();    // key → the account whose set holds it ('' = oddKeys)
   const oddKeys = new Set();
-  const acctStats = { builds: 0, moves: 0 };
-  function acctPlace(key) {
+  const acctStats = { builds: 0, moves: 0, sliced: 0 };
+  // B-dfa4 cut 3: A BIG INDEX'S PER-ACCOUNT KEYS ARE BUILT IN SLICES FROM THE LOAD (walkSliced) — the first keysOf() of a
+  // 96 500-row index built them in the boot's held turn (acctPlace ← keysOf, measured). The stated snapshot: the keys at the
+  // load, placed in the map's order; a key touched meanwhile is placed again at the landing (a birth joins its account's
+  // end, as ever); a whole-map touch voids the build (the next read builds them whole, as before). A reader before it
+  // lands (keysOf) FINISHES the rest in its own turn — never a partial set.
+  let acctWarm = null;            // { map, keys, i, touched } while the per-account keys are built in slices
+  function acctPlace(key, byAcct = byAcctNow()) {
     const prev = acctOfKey.get(key);
     const row = hasOwn(ix.conversations, key) ? ix.conversations[key] : null;
     const a = row && typeof row.adapterId === 'string' ? row.adapterId : null;
@@ -579,6 +636,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  reads undefined), and every key once the update reached the whole map: a superset, never a missed row. */
   function keysOf(adapterId) {
     if (curTouch && curTouch.all) return Object.keys(ix.conversations);
+    if (acctWarm) acctFinish();   // B-dfa4 cut 3: the rest of the sliced build, in this turn
     if (!byAcct) { byAcct = new Map(); acctOfKey.clear(); oddKeys.clear(); acctStats.builds++; for (const k of Object.keys(ix.conversations)) acctPlace(k); }
     const set = byAcct.get(String(adapterId));
     const out = oddKeys.size ? [...(set || []), ...oddKeys] : (set ? [...set] : []);
@@ -589,12 +647,28 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  map's order, a row whose key is not its account's (only a damaged act line) and, inside an update, a row it touched
    *  after them (a key gone meanwhile is skipped). Never a touch: a caller that CHANGES a row inside an update walks
    *  `keysOf` + `rows()` and touches the MAP key, as a `rows()` scan does. Each caller keeps its own test. */
+  function byAcctNow() { return byAcct; }
+  function acctLand(job) { acctWarm = null; byAcct = job.map; for (const k of job.touched) acctPlace(k); acctStats.sliced++; if (job.resolve) job.resolve(); }
+  /** An ASYNC reader WAITS for the per-account keys being built (a synchronous keysOf finishes them in its turn). */
+  const keysReady = () => (acctWarm ? acctWarm.ready : Promise.resolve());
+  function acctFinish() { const job = acctWarm; for (let i = job.i; i < job.keys.length; i++) acctPlace(job.keys[i], job.map); acctLand(job); }
+  function acctWarmStart() {
+    if (byAcct || acctWarm || closed || !plainRows(ix.conversations)) return;
+    const keys = Object.keys(ix.conversations);
+    if (keys.length <= LAYOUT_SYNC_ROWS) return;   // a small index: built at its first read, as before
+    acctOfKey.clear(); oddKeys.clear(); acctStats.builds++;
+    const job = acctWarm = { map: new Map(), keys, i: 0, touched: new Set(), resolve: null };
+    job.ready = new Promise((r) => { job.resolve = r; });
+    walkSliced(keys, (k, i) => { acctPlace(k, job.map); job.i = i + 1; }, { what: 'account-keys', sliceMs: LAYOUT_SLICE_MS, onSlice: layoutSeam, alive: () => acctWarm === job && !closed })
+      .then((r) => { if (r.done && acctWarm === job) acctLand(job); else job.resolve(); }, (e) => { job.resolve(); if (acctWarm === job) acctWarm = null; warn('[channels] the per-account keys build failed:', (e && e.message) || e, '— the next read builds them whole'); });
+  }
   function rowsOf(adapterId) {
     const out = [];
     for (const k of keysOf(adapterId)) { const en = ix.conversations[k]; if (en) out.push(en); }
     return out;
   }
   const fire = (key) => {
+    if (acctWarm) { if (key === null) acctWarm = null; else acctWarm.touched.add(key); }   // B-dfa4 cut 3: placed at its landing / void (byAcct is null until it lands)
     if (byAcct) { if (key === null) byAcct = null; else acctPlace(key); }   // B-dfa4 U2: before the hooks (a hook may walk an account)
     for (const h of touchHooks) { try { h(key); } catch (e) { warn('[channels] index touch hook threw:', (e && e.message) || e); } }
   };
@@ -603,7 +677,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     if (curTouch) { if (curTouch.before && !curTouch.before.has(key)) curTouch.before.set(key, hasOwn(ix.conversations, key) ? JSON.stringify(ix.conversations[key], INDEX_KEYS) : null); curTouch.add(key); }
     else fire(key);
   }
-  function touchAll(why) { if (!allDirty) flushStats.lastFull = why; allDirty = true; if (curTouch) curTouch.all = true; else fire(null); }
+  function touchAll(why) { if (!allDirty) flushStats.lastFull = why; allDirty = true; if (warm) warm.stale = true; if (curTouch) curTouch.all = true; else fire(null); }
   // the view an update's fn receives: the live root, except that reaching `conversations` through it is a whole-map touch
   const touchView = new Proxy(ix, {
     get(t, p) { if (p === 'conversations') touchAll('update reached ix.conversations'); return t[p]; },
@@ -628,14 +702,15 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // writer's thread. A failed write keeps the index dirty and the writer retries (1 s … 60 s) — said, never thrown
   // (lane-dead-bridge: a server whose table was full died in this write's timer).
   let fullOwed = false, pendingTop = null;
-  function produceIndex() {
+  function produceIndex(o) {
     if (!dirty && !fullOwed) return null;
     // every refusal is said (r3: a once-only line went silent after the first)
     if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); dirty = false; return null; }
     const full = fullOwed; fullOwed = false;
     if (actSeq > 0 && ix.actsSeq !== actSeq) ix.actsSeq = actSeq;   // the last act this write holds (the load replays past it)
     pendingActsSeq = actSeq;
-    const p = prepareIndex(full);
+    const p = prepareIndex(full, !!(o && o.sync));
+    if (p === NOT_READY) { dirty = true; if (full) fullOwed = true; return LATER; }   // B-dfa4 cut 3: the layout is being built in slices — the index stays owed, its waiters wait (the landing re-marks it)
     dirty = false;   // handed to the writer — a failed write dirties it again (indexWritten)
     if (!p) return null;
     pendingTop = p.top;
@@ -680,10 +755,10 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // ── THE INCREMENTAL WRITE (B-f32b): the same bytes as `writeJsonAtomic(indexFile, ix)`, from cached chunks ──
   const plainRows = (c) => !!c && typeof c === 'object' && !Array.isArray(c);
   /** Re-serialize one chunk (each row healed of its own poll stamps first); returns whether its bytes changed. */
-  function serializeChunk(c, conv) {
+  function serializeChunk(c, conv, into = layout) {   // `into`: the layout the chunk belongs to (a sliced build's own, B-dfa4 cut 3)
     const lines = [], kept = [];
     for (const k of c.keys) {
-      if (!hasOwn(conv, k)) { if (layout && layout.chunkOf.get(k) === c) layout.chunkOf.delete(k); continue; }
+      if (!hasOwn(conv, k)) { if (into && into.chunkOf.get(k) === c) into.chunkOf.delete(k); continue; }
       kept.push(k);
       healRow(k, conv[k]);
       const line = rowLine(k, conv[k]);
@@ -692,6 +767,79 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     const old = c.buf;
     c.keys = kept; c.n = lines.length; c.buf = Buffer.from(lines.join(',\n'), 'utf8');
     return !old || !old.equals(c.buf);
+  }
+  /** B-dfa4 cut 3: the layout in slices (see LAYOUT_SYNC_ROWS) → a promise that lands it (or starts again on a whole touch). */
+  function warmLayout() {
+    if (warm && !warm.stale) return warm.promise;
+    const job = { stale: false, promise: null, restarts: 0 };
+    warm = job; layout = null; laterJobs++;
+    job.promise = (async () => {
+      for (;;) {
+        job.stale = false;
+        const conv = ix.conversations;
+        const keys = Object.keys(conv);   // THE STATED SNAPSHOT: the rows as they are now; a write after it is in dirtyKeys
+        allDirty = false; dirtyKeys.clear();
+        const next = { chunks: [], chunkOf: new Map() };
+        const spans = [];
+        for (let i = 0; i < keys.length; i += INDEX_CHUNK) spans.push(i);
+        const st = { slices: 0, maxSliceMs: 0 };
+        await walkSliced(spans, (i) => {
+          const c = { keys: keys.slice(i, i + INDEX_CHUNK), buf: null, n: 0 };
+          next.chunks.push(c);
+          for (const k of c.keys) next.chunkOf.set(k, c);
+          serializeChunk(c, conv, next);
+        }, { what: 'layout', sliceMs: LAYOUT_SLICE_MS, stats: st, onSlice: layoutSeam, alive: () => !closed && warm === job && !job.stale });
+        if (st.maxSliceMs > flushStats.layoutMaxSliceMs) flushStats.layoutMaxSliceMs = st.maxSliceMs;
+        flushStats.layoutSlices += st.slices;
+        if (closed || warm !== job) return;
+        if (job.stale) { flushStats.layoutRestarts++; if (++job.restarts >= LATER_MAX) { if (warm === job) warm = null; allDirty = true; laterOwed = true; markDirty(); return; } continue; }   // a whole touch during the build: it STARTS AGAIN from a new snapshot (LATER_MAX times, then the next write lays out in its turn)
+        layout = next; warm = null; bytesOwed = true; flushStats.full++; flushStats.layoutSliced++;
+        markDirty();   // the write owed since it began, now from the landed layout (+ the rows touched meanwhile)
+        return;
+      }
+    })().catch((e) => { if (warm === job) warm = null; allDirty = true; warmFailed = true; warn('[channels] the index layout build failed:', (e && e.message) || e, '— the next write lays it out whole'); markDirty(); });
+    return job.promise;
+  }
+  /** B-dfa4 cut 3: A MASS OF TOUCHED ROWS on a laid-out index (more than LAYOUT_SYNC_ROWS since the last write — a boot's
+   *  passes, a mass write) → their CHUNKS re-serialized in slices, the rest kept: the stated snapshot is the rows touched
+   *  until now (a row touched later is in dirtyKeys again, the next write takes it); a row born joins the last chunk, as
+   *  applyTouched; a whole touch makes it stale (the next write lays out whole); a synchronous write meanwhile takes its
+   *  rows back (never lost). The writer is answered LATER until it lands. */
+  /** Do the rows touched since the last write fall in more than `limit` chunks (a row born counts as the last one)? */
+  function touchedChunksOver(limit) {
+    const seen = new Set();
+    for (const k of dirtyKeys) { seen.add(layout.chunkOf.get(k) || null); if (seen.size > limit) return true; }
+    return false;
+  }
+  function warmApply() {
+    if (warm && !warm.stale) return warm.promise;
+    const job = { stale: false, promise: null, keys: [...dirtyKeys] };
+    warm = job; dirtyKeys.clear(); laterJobs++;
+    job.promise = (async () => {
+      const conv = ix.conversations;
+      const stale = new Set();
+      for (const k of job.keys) {
+        let c = layout.chunkOf.get(k);
+        if (!c) {
+          if (!hasOwn(conv, k)) continue;
+          c = layout.chunks[layout.chunks.length - 1];
+          if (!c || c.keys.length >= INDEX_CHUNK) { c = { keys: [], buf: null, n: 0 }; layout.chunks.push(c); }
+          c.keys.push(k); layout.chunkOf.set(k, c);
+        }
+        stale.add(c);
+      }
+      const st = { slices: 0, maxSliceMs: 0 };
+      // a chunk whose bytes changed owes them AT ONCE: a synchronous write taking the job over writes them
+      await walkSliced([...stale], (c) => { if (serializeChunk(c, conv)) bytesOwed = true; }, { what: 'layout', sliceMs: LAYOUT_SLICE_MS, stats: st, onSlice: layoutSeam, alive: () => !closed && warm === job && !job.stale });
+      if (st.maxSliceMs > flushStats.layoutMaxSliceMs) flushStats.layoutMaxSliceMs = st.maxSliceMs;
+      flushStats.layoutSlices += st.slices;
+      if (closed || warm !== job) return;
+      warm = null;
+      if (job.stale) { flushStats.layoutRestarts++; markDirty(); return; }   // a whole touch meanwhile: the next write lays out whole
+      flushStats.incremental++; flushStats.applySliced++;
+      markDirty();   // the write owed since it began (+ the rows touched meanwhile)
+    })().catch((e) => { if (warm === job) warm = null; for (const k of job.keys) dirtyKeys.add(k); allDirty = true; warmFailed = true; warn('[channels] the index chunks build failed:', (e && e.message) || e, '— the next write lays it out whole'); markDirty(); });
+    return job.promise;
   }
   function buildLayout(conv) {
     const keys = Object.keys(conv);
@@ -753,15 +901,23 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  `full`, after a touch of everything, or with no cache) — null when they equal the last write (QUIET IS FREE). The
    *  poll stamps' side file lands FIRST (a row's own stamps taken into the map reach it before the index that no longer
    *  holds them). → {parts, top} */
-  function prepareIndex(full) {
+  function prepareIndex(full, sync = false) {
     const conv = ix.conversations;
+    if (!sync && (laterOwed || laterJobs >= LATER_MAX)) { if (!laterOwed) warn(`[channels] the index's write waited for ${laterJobs} sliced builds (rows touched faster than they are laid out) — this write is made in one turn`); laterOwed = false; laterJobs = 0; sync = true; }
     if (!plainRows(conv)) { flushStats.fallback++; layout = null; allDirty = true; ix.updatedAt = now(); const s0 = JSON.stringify(ix, INDEX_KEYS, 1); allDirty = false; dirtyKeys.clear(); bytesOwed = true; lastTop = null; return { parts: [Buffer.from(s0, 'utf8')], top: null }; }
+    if (sync && warm) { if (warm.keys) for (const k of warm.keys) dirtyKeys.add(k); warm.stale = true; warm = null; }   // B-dfa4 cut 3: a synchronous write takes over a sliced build (its rows back in dirtyKeys)
     if (full || allDirty || !layout) {
+      if (!sync && !full && !warmFailed && Object.keys(conv).length > LAYOUT_SYNC_ROWS) { warmLayout(); return NOT_READY; }   // B-dfa4 cut 3
+      warmFailed = false;
+      if (warm) { warm.stale = true; warm = null; }   // the synchronous write lays out in its own turn (a warm in flight yields to it)
       const before = layout ? liveBufs() : null;
       buildLayout(conv); flushStats.full++;
       if (!before || !sameJoined(before, liveBufs())) bytesOwed = true;
+    } else if (!sync && !warmFailed && (warm || (layout.chunks.length * INDEX_CHUNK > LAYOUT_SYNC_ROWS && touchedChunksOver(APPLY_SYNC_CHUNKS)))) {   // B-dfa4 cut 3: a mass of touched rows (a boot's passes): their chunks in slices
+      warmApply(); return NOT_READY;
     } else { applyTouched(conv); flushStats.incremental++; }
     const wasFull = full || allDirty;
+    laterJobs = 0;   // a write made: the LATER run ends
     allDirty = false; dirtyKeys.clear();   // the cache now holds memory; a failed disk write stays owed (indexWritten)
     const top = topText();
     if (!bytesOwed && top === lastTop) { flushStats.skipped++; return null; }
@@ -784,7 +940,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  row changed OUTSIDE `update()`/`entry()` (the one-door rule broken somewhere): it is written, and said once per
    *  sweep with its first key. Returns the drifted chunk count. */
   function sweep(n = SWEEP_CHUNKS) {
-    if (!layout || allDirty || closed || !plainRows(ix.conversations)) return 0;
+    if (!layout || allDirty || closed || warm || !plainRows(ix.conversations)) return 0;   // B-dfa4 cut 3: a sliced build holds the touched rows (no false drift)
     const conv = ix.conversations;
     let drift = 0, firstKey = null;
     for (let i = 0; i < n && layout.chunks.length; i++) {
@@ -2350,6 +2506,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     return { logs: gone(path.join(msgsDir, seg)), files: gone(path.join(attRoot, seg)) };
   }
 
+  acctWarmStart();   // B-dfa4 cut 3: a big index's per-account keys, in slices from the load (keysOf finishes them if it asks first)
   return {
     rootClosed,   // the root closed to other accounts: resolves true once it is (or already was), false when the filesystem refused (said once)
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount,
@@ -2357,7 +2514,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     index: {
       update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixBlocked || null,
       // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
-      keysOf, rowsOf, keysStats: () => ({ ...acctStats, kept: !!byAcct, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
+      keysOf, rowsOf, keysReady, keysStats: () => ({ ...acctStats, kept: !!byAcct, warming: !!acctWarm, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
       // engine's kept unread total); `sweep()` / `flushStats()` for the gates
       onTouch: (fn) => { if (typeof fn === 'function') touchHooks.push(fn); }, sweep, flushStats: () => ({ ...flushStats, chunks: layout ? layout.chunks.length : 0 }),
@@ -2386,7 +2543,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
 }
 
 module.exports = {
-  createChannelStore, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, STAMP_KEYS, STAMPS_FLUSH_MS,
+  createChannelStore, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, WALK_SYNC_ROWS, WALK_SLICE_MS, walkSliced, STAMP_KEYS, STAMPS_FLUSH_MS,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
   SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES, PLACE_CACHE_MAX, PLACE_KEEP_MAX,
 };
