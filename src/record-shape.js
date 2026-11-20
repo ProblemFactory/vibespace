@@ -29,7 +29,7 @@
 // the design's census; since 2.1.281 the minifier spells it `d({type:R(…)`, so the extractor reads the
 // helper names off an anchor instead of spelling them); the fields 2.1.280 and 2.1.281 added sit in each
 // shape's `ignored` map with a reason (a shape NEW in a later build carries that build's declaration as
-// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312 / FIELDS_319 / FIELDS_321; 2.1.314 added none), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
+// `known`; 2.1.288's / 2.1.296's / 2.1.306's / 2.1.307's / 2.1.312's fields sit in FIELDS_288 / FIELDS_296 / FIELDS_306 / FIELDS_307 / FIELDS_312 / FIELDS_319 / FIELDS_321 / FIELDS_328; 2.1.314 added none), and the oracle runs STRICT against the pinned builds (SCHEMA_CLI_VERSIONS); `uuid`/`session_id` ride
 // the stream envelope and are omitted per row. Corpus-
 // only fields (seen live, undeclared upstream) are appended in CORPUS_KNOWN with a note.
 
@@ -80,6 +80,7 @@ const RATE_LIMIT_INFO = sh(['status', 'resetsAt', 'rateLimitType', 'utilization'
     limitScope: NESTED_NOTE('≤2.1.287', 'which spend limit blocked the request when it is not the member\'s own cap (service | channel | group_pool) — a team / Slack budget; the pool reads the account\'s own windows'),
     errorCode: NESTED_NOTE('≤2.1.287', 'credits_required: the request needs purchased credits (no describe) — the limit card reads status / resetsAt'),
     canUserPurchaseCredits: NESTED_NOTE('≤2.1.287', 'whether the person may buy usage credits (no describe) — VibeSpace offers no purchase'),
+    memberSpendLimit: NESTED_NOTE('2.1.328', 'the spend limit set for this MEMBER of a team or organization, by its name (the runner\'s build: no describe read) — the limit card reads status / resetsAt'),
     dailyCapPaused: NESTED_NOTE('2.1.319', '@internal true while usage is paused for the ORGANIZATION (overageDisabledReason then reads as at its monthly cap; this tells the two apart) — the limit card reads status / resetsAt'),
     hasChargeableSavedPaymentMethod: NESTED_NOTE('≤2.1.287', 'whether the account has a saved payment method to charge (no describe) — VibeSpace offers no purchase'),
     usageCreditOffer: OFFER_NOTE('2.1.306', 'a limited-time usage-credit offer for the IDE extension\'s limit banner {kind, headlinePct, daysLeft, label}'),
@@ -208,6 +209,16 @@ const SHAPES = {
   // before showing its words (message-manager KNOWN_IGNORED — a door would be a For-you / push surface, not built)
   "claude:stream:system/ui_notify": sh(['plugin', 'source', 'title', 'text', 'key', 'delay_ms', 'at', 'until_back', 'rewritten']),
   "claude:stream:system/ui_notify_cancel": sh(['plugin', 'source', 'key']),
+  // NEW in 2.1.328 (B-9ff2 step 2, lane bl-ci) — VERBATIM from the 2.1.328 union (scripts/fixtures/claude-cli/2.1.328.json, `zod` holds each
+  // literal with its .describe() words): the hosted runner's build, read through its dump alone. All three card-less (message-manager
+  // KNOWN_IGNORED). late_allow_not_run: «Why no late Allow runs the call» (reason turn_running | card_open | call_gone | invalid_answer |
+  // limited | stopped | declined | asked_again | withdrawn | expired | not_run, «Treat any other word as "did not run" too») — the answer to an
+  // Allow that came after the approval request was parked; VibeSpace's card does not read it yet (a door that tells a person their late Allow
+  // did not run is B-9ff2's remainder). shell_cwd: the folder a PostToolUse hook on the call is given («treat it as data»). task_list_statuses:
+  // the task list's statuses {id, status: pending | in_progress | completed}.
+  "claude:stream:system/late_allow_not_run": sh(['request_id', 'tool_use_id', 'reason']),
+  "claude:stream:system/shell_cwd": sh(['cwd']),
+  "claude:stream:system/task_list_statuses": sh(['statuses']),
   "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': LATENCY_UNREAD, 'first_stream_post_queued_behind': LATENCY_UNREAD, 'frame_received_wall_ms': LATENCY_UNREAD, 'frame_enqueued_wall_ms': LATENCY_UNREAD, 'turn_started_wall_ms': LATENCY_UNREAD, 'first_text_post_ms': LATENCY_UNREAD, 'first_text_post_wall_ms': LATENCY_UNREAD } }),
   "claude:stream:user": sh(['message', 'parent_tool_use_id', 'isSynthetic', 'tool_use_result', 'priority', 'origin', 'client_platform', 'inbound_origin', 'historical', 'shouldQuery', 'timestamp', 'is_meta', 'seeded_summon', 'client_composed', 'is_visible_in_transcript_only', 'is_virtual', 'is_compact_summary', 'summarize_metadata', 'mcp_meta', 'tool_result_meta', 'source_tool_use_id', 'source_tool_assistant_uuid', 'image_paste_ids', 'plan_content', 'permission_mode', 'interrupted_message_id'], { ignored: { 'initiator': 'who started the turn (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
   "claude:stream:bash_command": sh(['command', 'cwd']),
@@ -410,6 +421,73 @@ const FIELDS_321 = Object.freeze({
 const FIELDS_321_ELSEWHERE = Object.freeze({
   'sdk.autoModeVerdictTools': 'ignored — (2.1.321) an optional list on an MCP server CONFIG of type sdk (the SDK host\'s, not a record): the tools whose calls the auto-mode verdict judges; VibeSpace writes no such config',
 });
+// The fields 2.1.328 added to shapes 2.1.322 already declared (2026-11-20, B-9ff2 step 2, lane bl-ci: the hosted runner's build, its dump
+// taken by the tree's dump script on the runner — ci.yml's fast part 1 — and handed over by the integrator; minus the 2.1.322 dump). The
+// binary is on no machine of ours, so no `.describe()` text was read for these: each note says what the NAME says and that nothing reads it.
+// A grep of src/ server.js data/bin found NO reader for any of them: each is an `ignored` row (move it to known with its consumer).
+const NEW_328 = (what) => what + ' (2.1.328; by its name — no describe read) — no consumer yet (declared so no drift is recorded; move to known with the consumer)';
+const FIELDS_328 = Object.freeze({
+  'claude:stream:assistant': {
+    api_error_type: NEW_328('the kind of API error an assistant error message stands for — the chat draws an error turn from its text'),
+  },
+  'claude:stream:control_cancel_request': {
+    takes_late_allow: NEW_328('whether the CLI still runs the call if an Allow arrives after this cancel (2.1.328\'s late Allow: system/late_allow_not_run says when one did not) — the card closes on the cancel'),
+    tool_use_id: NEW_328('the call the cancelled approval request was for — the card ties a cancel to its request by request_id'),
+  },
+  'claude:stream:result': {
+    message_undelivered: NEW_328('a message the turn did not deliver — the delivery marks a bubble wears are the wrapper\'s'),
+    invalid_config_file: NEW_328('a settings or config file the CLI could not read'),
+    memory_check_detail: NEW_328('@internal the detail of a memory check'),
+    policy_answer: NEW_328('the answer of a policy check'),
+    policy_answer_reason: NEW_328('the reason given with policy_answer'),
+    tool_pool_build_lapsed_count: NEW_328('@internal tool-list build telemetry beside tool_pool_build_count (FIELDS_321)'),
+    tool_pool_moved_at_lapse_count: NEW_328('@internal tool-list build telemetry beside tool_pool_build_count (FIELDS_321)'),
+    tool_pool_limit_ms: NEW_328('@internal tool-list build telemetry beside tool_pool_build_count (FIELDS_321)'),
+    api_error_type: NEW_328('the kind of API error that ended the turn — the result card reads is_error / subtype / the text'),
+    restored_rewind: NEW_328('the turn restored a rewind — the rewind door reads its own records'),
+  },
+  'claude:stream:stream_event': {
+    owed_rows: NEW_328('@internal rows a stream event still owes — the live renderer reads the event itself'),
+  },
+  'claude:stream:system/hook_progress': {
+    backgrounded: NEW_328('the hook went on in the background — a hook\'s progress draws no card'),
+  },
+  'claude:stream:system/hook_started': {
+    origin: NEW_328('where the hook came from — hook_started is card-less (KNOWN_IGNORED)'),
+    label: NEW_328('the hook\'s label — hook_started is card-less (KNOWN_IGNORED)'),
+    plugin_name: NEW_328('the plugin the hook belongs to — hook_started is card-less (KNOWN_IGNORED)'),
+  },
+  'claude:stream:system/informational': {
+    hook_no_verdict: NEW_328('a hook gave no verdict — the notice draws its content'),
+    saved_files: NEW_328('the files the CLI saved — the notice draws its content'),
+  },
+  'claude:stream:system/init': {
+    host_dropped_env: NEW_328('environment variables the host dropped before the CLI started — the init reader takes model / tools / version'),
+  },
+  'claude:stream:system/peer_message_hold': {
+    reason: NEW_328('why a peer message was held, beside cause / outcome'),
+  },
+  'claude:stream:system/task_notification': {
+    summary_is_report: NEW_328('the notification\'s summary is a report — the task card reads the summary as text'),
+  },
+  'claude:stream:system/turn_handoff_available': {
+    comparison_fork: NEW_328('@internal a comparison fork offered with the hand-off'),
+  },
+  'claude:stream:user': {
+    keeps_request_id: NEW_328('the user record keeps the request id'),
+    retracted_message_uuids: NEW_328('the message uuids this record retracts (system/model_refusal_fallback carries a list of the same name) — the chat still draws a retracted message'),
+  },
+});
+// …and what the diff grew OFF a stream shape (a config or a message body the CLI parses, never a record): named, never a stream row.
+// resource lost `annotations` and `_meta` (an MCP resource body): nothing declared them, nothing to retire.
+const FIELDS_328_ELSEWHERE = Object.freeze({
+  'local.requiredByOrganization': 'ignored — (2.1.328) on a plugin or marketplace source of type local {path, skipMcpDiscovery} (a settings entry, not a record), by its name: the organization requires it; VibeSpace writes no such entry',
+  'mcp_tool.onFailure': 'ignored — (2.1.328) on a hook of type mcp_tool {server, tool, input, if, timeout, statusMessage, once} (a settings entry, not a record), by its name: what the hook does when the tool call fails; VibeSpace writes no such hook',
+  'not_forwarded.reason': 'ignored — (2.1.328) on the MCP proxy\'s not_forwarded error body (ZOD_NON_RECORDS.not_forwarded), by its name: why it was not forwarded; the CLI lifts the message into its own error text',
+  'plan_approval_response.planDigest': 'ignored — (2.1.328) on a plan approval response {requestId, approved, feedback, timestamp, permissionMode} (a team member\'s message body, not a stream record), by its name: a digest of the plan answered',
+  'sdk.dataFlowServer': 'ignored — (2.1.328) on an MCP server CONFIG of type sdk (the SDK host\'s, not a record), by its name; VibeSpace writes no such config',
+  'sdk.onPersonsMachine': 'ignored — (2.1.328) on an MCP server CONFIG of type sdk (the SDK host\'s, not a record), by its name: the server runs on the person\'s machine; VibeSpace writes no such config',
+});
 // (filled BEFORE the CORPUS_KNOWN line: test-record-shape §5's control clears every ignored map at that line)
 for (const [key, fields] of Object.entries(FIELDS_288)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_296)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
@@ -418,6 +496,7 @@ for (const [key, fields] of Object.entries(FIELDS_307)) for (const [f, note] of 
 for (const [key, fields] of Object.entries(FIELDS_312)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_319)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(FIELDS_321)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
+for (const [key, fields] of Object.entries(FIELDS_328)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 for (const [key, fields] of Object.entries(CORPUS_KNOWN)) for (const [f, note] of Object.entries(fields)) if (!SHAPES[key].known.has(f)) SHAPES[key].ignored.set(f, note);
 
 
@@ -592,6 +671,9 @@ const SHAPE_SINCE = Object.freeze({
   'system/session_writes_lost': '2.1.319', // lane cli-2-1-319-records — the 2.1.319 dump (scripts/fixtures/claude-cli/2.1.319.json)
   'system/ui_notify': '2.1.321', // lane fable-52-cli-321 — the 2.1.321 dump (scripts/fixtures/claude-cli/2.1.321.json)
   'system/ui_notify_cancel': '2.1.321',
+  'system/late_allow_not_run': '2.1.328', // B-9ff2 step 2 — the 2.1.328 dump (scripts/fixtures/claude-cli/2.1.328.json, the hosted runner's build)
+  'system/shell_cwd': '2.1.328',
+  'system/task_list_statuses': '2.1.328',
 });
 // Names the corpus carries that are NOT in the SDK union (the REPL's own rows): the oracle's reverse
 // check excuses them so a handled/ignored list entry is never called dead by mistake.
@@ -613,6 +695,7 @@ const ATTACHMENT_PAYLOADS = Object.freeze({
   async_hook_response: 'ignored — an ASYNC hook\'s protocol JSON (response / command / exitCode); _processAttachment has no branch, so nothing renders and no card is made; the CLI reads only its systemMessage + additionalContext, to rebuild session-start context',
   projects_thread_ask: 'ignored — (2.1.307) a Claude Code Projects thread\'s ask to its coordinator session (call {name, id, input}, after, deliveredAt, messageId), written at a compaction so auto mode still knows the ask was delivered (only a Projects thread session writes it); _processAttachment has no branch, so nothing renders and no card is made',
   message_pdf_reads: 'ignored — (2.1.319) the PDF pages a message read, {reads: [{path, pages, result}]}, kept beside the transcript so a later request can replay them; base64 bytes for the model, nothing for a person: _processAttachment has no branch, so nothing renders and no card is made',
+  queued_command: 'known — (2.1.328: the CLI now parses it, {prompt, origin, commandMode: prompt | bash, isMeta}) message-manager _processAttachment: a message the CLI took INTO its running turn marks the bubble it delivered (the mid-turn queue); a peer\'s message (origin kind peer) draws as the peer\'s',
 });
 // The `workflow_progress` ITEMS a pinned dump's `zod` names (2.1.306: the CLI now PARSES the list a task_progress record carries — a
 // `type`-discriminated union over these two, its remote-session adapter's reader; 2.1.296 built the same items with no schema). They are
@@ -633,6 +716,17 @@ const ZOD_NON_RECORDS = Object.freeze({
   source_revision_not_on_remote_error: 'ignored — (2.1.312) an error body a remote-session start answers when the local revision is not on the remote: the CLI words its own message from it; VibeSpace starts no remote session, and it is never a stream record',
   not_forwarded: 'ignored — (2.1.319) an error body an MCP proxy answers ({error: {type: "not_forwarded", message}}) inside its «Error POSTing to endpoint: …» failure: the CLI lifts the message into its own error text; never a stream record',
   source_revision_stale_on_remote_error: 'ignored — (2.1.312) the same answer when the remote is behind (unpushed_commit_count, is_dirty, mid_operation): the CLI words its own message from it ("Anything you haven\'t pushed stays on this computer."); never a stream record',
+  // 2.1.328 (B-9ff2 step 2, lane bl-ci): nine more, each read on its literal in the 2.1.328 dump's `zod` (the hosted runner's build — its
+  // call sites not read: the binary is on no machine of ours). None carries uuid / session_id, so none is a stream record.
+  anthropic: 'ignored — (2.1.328) {type: anthropic, id}: one of three `type` variants with claude_ai_connector and client_configured — by its literal where a connector or MCP server comes from; a config fact, never a stream record',
+  claude_ai_connector: 'ignored — (2.1.328) {type: claude_ai_connector, id, directory_id | null}: the second of the three (a connector from the claude.ai directory, by its literal); never a stream record',
+  client_configured: 'ignored — (2.1.328) {type: client_configured, transport: stdio | http | in_process, plugin_id_hash?}: the third (a server the client configured itself, by its literal); never a stream record',
+  failed: 'ignored — (2.1.328) {type: failed, message}: a failure variant of a body the CLI parses (by its literal alone); never a stream record',
+  not_found_error: 'ignored — (2.1.328) {type: not_found_error, resource_type: session | ""}: an error body (a session not found, by its literal); the CLI words its own message from it; never a stream record',
+  reply: 'ignored — (2.1.328) {type: reply, blocks}: a reply body of content blocks (by its literal alone); never a stream record',
+  resource_link: 'ignored — (2.1.328) {type: resource_link, name, uri, description?, title?, mimeType?, size?, annotations?}: an MCP tool result\'s link to a resource (the MCP content type); content inside a tool result, which the chat draws as the result\'s text; never a stream record',
+  server_tool_use: 'known — (2.1.328, parsed with no field) the API\'s server-tool content block: CONTENT_BLOCK_TYPES, the renderer folds it under its search card; content inside a message, never a stream record',
+  web_search_tool_result: 'known — (2.1.328) {type: web_search_tool_result, tool_use_id, content: [{title, url}] | {error_code}}: the API\'s web-search result block, CONTENT_BLOCK_TYPES — the renderer folds it under its search card; never a stream record',
 });
 
 // ── carrier + shape key ──────────────────────────────────────────────────────────────────────────
@@ -796,12 +890,16 @@ function unknownFieldsSample(record) {
 // npm's newest that day, and the box's claude from 12:54 PT (the owner installed it; the hotfix .387): two new subtypes (ui_notify, ui_notify_cancel, the plugin
 // UI host's, card-less), 2 fields on result: FIELDS_321; one field off a stream shape: FIELDS_321_ELSEWHERE; the 16 sentences renamed) + 2.1.322
 // (the box's claude by 2026-11-13, B-9ff2; dumped 2026-11-17 by lane bl-tests-e, the file READ, never run: its dump equals 2.1.321's in
-// every key, field, nested object and sentence text — only the minified names moved — so nothing is declared for it, no FIELDS_322). Each
+// every key, field, nested object and sentence text — only the minified names moved — so nothing is declared for it, no FIELDS_322) + 2.1.328
+// (2026-11-20, B-9ff2 step 2, lane bl-ci — the hosted runner's build, npm's newest on 2026-11-19, dumped ON the runner by ci.yml's fast part 1;
+// on no machine of ours: three new subtypes (late_allow_not_run, shell_cwd, task_list_statuses), card-less; 26 fields on twelve shapes:
+// FIELDS_328; six off a stream shape: FIELDS_328_ELSEWHERE; one nested key (rate_limit_info.memberSpendLimit); nine zod non-records +
+// queued_command, an attachment payload message-manager already reads; five more sentences, src/permission-outcome.js). Each
 // pinned build has its TRACKED dump in scripts/fixtures/claude-cli/<version>.json, judged with no binary at all;
 // test-record-shape's binary oracle runs on whichever claude is installed and expects the rows of THAT build
 // (SHAPE_SINCE excuses a newer row on an older build). STRICT on any developer box; on the Actions mirror (which
 // installs whatever npm serves today) an UNPINNED build's drift is printed and skipped, never a red gate nobody reads.
-const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314', '2.1.319', '2.1.321', '2.1.322']);
+const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312', '2.1.314', '2.1.319', '2.1.321', '2.1.322', '2.1.328']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
-module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, FIELDS_319, FIELDS_319_ELSEWHERE, FIELDS_321, FIELDS_321_ELSEWHERE, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, FIELDS_319, FIELDS_319_ELSEWHERE, FIELDS_321, FIELDS_321_ELSEWHERE, FIELDS_328, FIELDS_328_ELSEWHERE, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

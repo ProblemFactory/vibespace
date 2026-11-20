@@ -107,16 +107,19 @@ console.log('C · the hub\'s judgment: the span is the FLOOR (src/conversation-f
   const K = { keeps: { background: true, timers: true, lastRecordAt: true }, turn: 'idle' };
   const st = (v, more = []) => { const s = CF.factsFresh(); CF.factsStep(s, { type: 'system', subtype: 'init', claude_code_version: v }, 1); for (const r of more) CF.factsStep(s, r, 2); return s; };
   const t = (s, d) => CF.trackedFacts(s, { ...K, levelDeclared: d });
-  ok(Array.isArray(t(st('2.1.323'), () => true).background) && t(st('2.1.323'), () => true).background.length === 0, 'a build outside the span whose binary DECLARES the signal: a never-published set is known-empty');
-  ok(t(st('2.1.323'), () => false).background === null && /does not declare the background signal/.test(t(st('2.1.323'), () => false).backgroundWhy), 'a build whose binary does not declare it: unknown, said');
-  ok(t(st('2.1.323'), () => 'partial').background === null && /not found in the bytes read/.test(t(st('2.1.323'), () => 'partial').backgroundWhy) && !/does not declare/.test(t(st('2.1.323'), () => 'partial').backgroundWhy),
+  // the first build ABOVE the span, READ from the module (B-9ff2 step 2: a pinned dump moves the span — 2.1.322 → 2.1.328 — so a typed
+  // «2.1.323» fell inside it; the cure the tree already holds for its stand-ins: the span's own top, never typed)
+  const ABOVE = CF.LEVEL_MEASURED_TO.split('.').map((x, i) => (i === 2 ? Number(x) + 1 : x)).join('.');
+  ok(Array.isArray(t(st(ABOVE), () => true).background) && t(st(ABOVE), () => true).background.length === 0, 'a build outside the span whose binary DECLARES the signal: a never-published set is known-empty');
+  ok(t(st(ABOVE), () => false).background === null && /does not declare the background signal/.test(t(st(ABOVE), () => false).backgroundWhy), 'a build whose binary does not declare it: unknown, said');
+  ok(t(st(ABOVE), () => 'partial').background === null && /not found in the bytes read/.test(t(st(ABOVE), () => 'partial').backgroundWhy) && !/does not declare/.test(t(st(ABOVE), () => 'partial').backgroundWhy),
     '«could not look» is not «does not declare»: a binary read only in part reads unknown, «not found in the bytes read»');
   ok(t(st('2.1.200'), () => true).background === null && /2\.1\.200 is not measured for background tasks/.test(t(st('2.1.200'), () => true).backgroundWhy) && t(st('2.1.280'), () => true).background === null,
     'MUST (主开发 14:26Z) BELOW THE FLOOR STAYS UNKNOWN: an older build whose binary declares the signal is never asked — nothing ever measured it');
-  ok(t(st('2.1.323'), () => null).background === null && /above the measured span .* has not been read for the background signal yet/.test(t(st('2.1.323'), () => null).backgroundWhy)
-    && t(st('2.1.323'), () => { throw new Error('x'); }).background === null && t(st('2.1.323')).background === null, 'not read yet, a reader that throws, or no reader: unknown, said');
+  ok(t(st(ABOVE), () => null).background === null && /above the measured span .* has not been read for the background signal yet/.test(t(st(ABOVE), () => null).backgroundWhy)
+    && t(st(ABOVE), () => { throw new Error('x'); }).background === null && t(st(ABOVE)).background === null, 'not read yet, a reader that throws, or no reader: unknown, said');
   ok(Array.isArray(t(st('2.1.312'), () => false).background), 'inside the span the tracked dumps decide (the floor)');
-  const open = st('2.1.323', [{ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_bash', is_backgrounded: true }]);
+  const open = st(ABOVE, [{ type: 'system', subtype: 'task_started', task_id: 't1', task_type: 'local_bash', is_backgrounded: true }]);
   ok(t(open, () => true).background === null && /the CLI's set omits a task it started and has not ended/.test(t(open, () => true).backgroundWhy), 'the doubts come first: a declared build with a started task the set does not name (and no ending record) still reads unknown');
   // the list wired to the catalog's in-memory answer
   const d4 = path.join(dir, 'data4');
@@ -134,7 +137,7 @@ console.log('C · the hub\'s judgment: the span is the FLOOR (src/conversation-f
   const N = '    if (d === true) out.background = [];\n    else {';
   if (src.split(N).length !== 2) throw new Error('anchor missing: the floor');
   const mC = mutantCopies('level-signal-c', REPO).load('src/conversation-facts.js', anchored(src, N, '    {', 'span-only'), 'span-only');
-  ok(mC.trackedFacts(st('2.1.323'), { ...K, levelDeclared: () => true }).background === null, 'RED: the span alone reads a declaring 2.1.323 «unknown» — the feature off from the first build above the span');
+  ok(mC.trackedFacts(st(ABOVE), { ...K, levelDeclared: () => true }).background === null, `RED: the span alone reads a declaring ${ABOVE} «unknown» — the feature off from the first build above the span`);
   const NF = "  else if (!(/^\\d+(\\.\\d+)*/.test(st.cli) && versionCmp(st.cli, LEVEL_MEASURED_TO) > 0)) { out.background = null; out.backgroundWhy = `its CLI version ${st.cli} is not measured for background tasks (measured ${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO})`; }   // BELOW the floor: nothing ever measured it — never asked\n";
   if (src.split(NF).length !== 2) throw new Error('anchor missing: below the floor');
   const mF = mutantCopies('level-signal-floor', REPO).load('src/conversation-facts.js', anchored(src, NF, '', 'below-floor-asked'), 'below-floor-asked');

@@ -524,7 +524,7 @@
    "road": "SHAPE_SINCE / the per-field notes name the build each shape was read on — labels; a field a new build adds is passed through quietly",
    "suite": "test-record-shape",
    "match": "version-literal",
-   "sites": 23
+   "sites": 27
   },
   {
    "id": "record-kind-count",
@@ -564,7 +564,7 @@
    "road": "each row names the build its sentence was read on (a label); matching is by text, never by build",
    "suite": "test-helper-ask",
    "match": "version-literal",
-   "sites": 8
+   "sites": 13
   },
   {
    "id": "safety-stop-pin",
