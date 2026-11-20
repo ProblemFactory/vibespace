@@ -794,10 +794,10 @@ console.log('㉑ a wake WAITING for the settle is never dropped by the park\'s h
     '(a) the turn end lands past the hour with the conversation gone again: the waiting wake is NOT dropped (still owed, no answer) — at the settle ONE resume, ONE frame', a);
   ok(b.atTurnEnd === 'running' && b.owed === 0 && b.reopens === 0 && b.after === 'running',
     '(b) the conversation runs again: the waiting wake ends «running» at its turn end (its next turn carries the words) — nothing resumes it at the settle', b);
-  const cutBound = MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, BOUND, "!isOwed(x) && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's", 'readopt-bound-cut'), 'readopt-bound-cut');
+  const cutBound = MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, BOUND, "!isOwed(x) && clock.now() - Number(x.firstAt || 0) > RETRY_MAX_MS)) fellRetry(e, 'not-reachable', `the retry schedule's", 'readopt-bound-cut'), 'readopt-bound-cut');   // stale-pins: kept (the control plants the release's text in a copy)
   const ax = await scene(cutBound, false);
   ok(ax.atTurnEnd === 'dropped' && ax.owed === 0 && ax.reopens === 0, 'CONTROL (the hour bound over every ended wake again, in a copy): (a)\'s waiting wake is DROPPED at the turn end — its producer told «dropped», nothing wakes the conversation at the settle — RED', ax);
-  const cutRuns = MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, RUNS, "for (const e of ends) endEnded(e, { outcome: 'running',", 'readopt-runs-cut'), 'readopt-runs-cut');
+  const cutRuns = MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, RUNS, "for (const e of ends) endEnded(e, { outcome: 'running',", 'readopt-runs-cut'), 'readopt-runs-cut');   // stale-pins: kept (the control plants the release's text in a copy)
   const bx = await scene(cutRuns, true);
   ok(bx.atTurnEnd === 'none' && bx.owed === 1, 'CONTROL (the running end without the waiting wake, in a copy): (b)\'s wake stays owed while its conversation runs — kept to the settle for nothing — RED', bx);
 }
