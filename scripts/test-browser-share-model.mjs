@@ -2346,6 +2346,12 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
   console.log('— ④k verify r8: the fleet\'s other order (the .199 boot first), the witness\'s clock, a retire never mints, the ledger\'s tail, a Forget carries its lineage; the seeded walk; five controls');
   {
     const TABLE8 = [];
+    // r284 (主开发: placed by reading — the walk's lock-out was this stand-in's): A CRASH RUNS NOTHING AFTER IT. Every step riding the
+    // registry's landing is asked under its file's GENERATION; crashI ends that generation, so a step that rode a write the crash
+    // dropped never runs (the writer's forget lands its steps as «gone»: here they do nothing). Half a removal — its grant row gone,
+    // its record back on disk — is no crash a process can make. Restored at this block's end
+    const W8 = require('../src/store-writer.js').storeWriter(), gen8 = new Map(), afterLanding8 = W8.afterLanding;
+    W8.afterLanding = function (file, step, ...rest) { const g = gen8.get(file) || 0; return afterLanding8.call(this, file, () => ((gen8.get(file) || 0) === g ? step() : undefined), ...rest); };
     const judge8 = (id, who, truth, got) => { const diffs = []; for (const [k2, want] of Object.entries(truth)) { const g = got[k2]; let pass2; if (want instanceof RegExp) pass2 = typeof g === 'string' && want.test(g); else pass2 = JSON.stringify(g) === JSON.stringify(want); if (!pass2) diffs.push(`${k2}: truth ${String(want).slice(0, 90)} | product ${JSON.stringify(g === undefined ? null : g).slice(0, 200)}`); } TABLE8.push({ id, who, agree: !diffs.length, diffs }); if (diffs.length) console.log(`    DISAGREE ${id} — ${diffs.join(' / ')}`); return !diffs.length; };
     const MK8 = B.LINEAGE_MARKER; const tokOf8 = (dir) => { try { return fs.readFileSync(path.join(dir, MK8), 'utf8').trim(); } catch { return null; } };
     const entry8 = (kk, dir) => (kk._reg().dirHosts || {})[dir] || null;
@@ -2364,6 +2370,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
       const before = at(), inflight0 = !!(before && before.inflight);
       try { kDead.shutdown(); } catch { /* its own */ }
       const s1 = at(), owed = !!(s1 && (s1.dirty || s1.inflight));
+      gen8.set(f, (gen8.get(f) || 0) + 1);   // r284: what the dead keeper asked to ride its writes ends with it
       if (s1 && s1.dirty && !s1.inflight) W.forget(f);
       return { owed, clean: !inflight0 && !(s1 && s1.inflight) };
     };
@@ -2561,6 +2568,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
       ok(noSave !== ksrc8, '④k control setup: the move\'s save is where the control cuts');
       const c19 = await runR8(M.load('src/server/browser-keeper.js', noSave, 'move-never-saves'), 'ctl19', ['S76']);
       ok(c19.S76.crashClean === true && c19.S76.diskNamesNew === false && c19.S76.bootPruned === true && c19.S76.err === 'profile_locked' && (isRoot || (c19.S76b.refusedCode === null && c19.S76b.stillThere === false)), '④k CONTROL 19 (verify r9): a keeper whose move re-keys in memory only (r8) loses the lineage at a crash after a Forget — pruned at the next boot, the adopted-back directory refused by name — and an unwritable data/ refuses nothing (moved, the disk names the old path): S76 / S76b catch it', { d: c19.S76.diskNamesNew, p: c19.S76.bootPruned, e: c19.S76.err, o: c19.S76.owedAtCrash, c: c19.S76.crashClean, b: isRoot ? null : [c19.S76b.refusedCode, c19.S76b.stillThere] }); }
+    W8.afterLanding = afterLanding8;   // (r284: the writer as it was — the generations end with this block)
     // (verify r9 (⑤): the lineage ledger has no product reader — a git grep over src/, data/bin, server.js and a pin of src/server/browser-keeper.js: MOVED to the fast scripts/test-browser-share-model-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
   }
 }

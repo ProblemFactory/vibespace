@@ -2008,5 +2008,56 @@ console.log('⑤ U6 — the readings folder: every raw read in the hub outside t
   ok(c5.bad.some((x) => /^UNNAMED: src\/usage-routes\.js /.test(x)), 'NEGATIVE CONTROL: a raw read put back in usage-routes (U6.1 moved them all) is red by name', c5.bad);
 }
 
+// ── ⑫ THE WRITER'S forget IS THE FILE OWNER'S REMOVAL, NEVER A DROP (主开发 r286) ──────────────────────────────────────────────
+// A step riding a write runs ONLY once that write LANDED, or when the file's OWNER removes the file (forget, then its unlink — its
+// riding steps are told «landed»: the record they waited for is the removal). A suite's crash stand-in that used forget as a drop
+// ran half a removal (r284); the census names the product's callers of the writer's forget — ONE today, the conversation's stdout
+// file unlinked next (src/server/session-stdout.js) — and a second caller is red by name
+console.log('⑫ the writer\'s forget is the file owner\'s removal — a step riding a write runs only once that write landed, or the owner removes the file');
+{
+  const { scratchDir } = await import('./scratch.mjs');
+  const W = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+  const d = scratchDir('swc-forget-law'); const F = path.join(d, 'law.json');
+  let v = 1; const ran = [];
+  const mark = () => W.dirty(F, { name: 'law.write', rank: 0, urgent: true, produce: () => JSON.stringify({ v }) });
+  mark(); W.afterLanding(F, () => { let onDisk = null; try { onDisk = JSON.parse(fs.readFileSync(F, 'utf8')).v; } catch { } ran.push({ step: 'landed', onDisk }); });
+  const before = ran.length;
+  W.flushSync([F]);
+  const afterLanding = ran.slice();
+  v = 2; mark(); W.afterLanding(F, () => ran.push({ step: 'removed' }));
+  const beforeForget = ran.length;
+  W.forget(F);
+  ok(before === 0 && afterLanding.length === 1 && afterLanding[0].onDisk === 1 && beforeForget === 1 && ran.length === 2 && ran[1].step === 'removed',
+    '⑫ a step riding a write runs ONLY once that write landed (the file holds it when the step runs), or when the file\'s owner removes the file (forget) — never before', ran);
+  fs.rmSync(d, { recursive: true, force: true });
+  // THE CENSUS: every call of the WRITER's forget in the product — a receiver that IS the writer (storeWriter(), writerOf(),
+  // this._writer(), _writer()) or a name bound to one in the same file
+  const files = new Map();
+  const walkJs = (rel) => { for (const e of fs.readdirSync(path.join(REPO, rel), { withFileTypes: true })) { const r = path.posix.join(rel, e.name); if (e.isDirectory()) walkJs(r); else if (e.name.endsWith('.js')) files.set(r, fs.readFileSync(path.join(REPO, r), 'utf8')); } };
+  walkJs('src'); files.set('server.js', fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'));
+  const forgetCensus = (map) => {
+    const out = {};
+    for (const [f, text] of map) {
+      const bound = [...text.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:require\([^)]*\)\.)?(?:storeWriter|writerOf|this\._writer|_writer)\(\)/g)].map((m) => m[1]);
+      const re = new RegExp(`(?:\\b(?:storeWriter|writerOf|_writer)\\(\\)${bound.length ? `|\\b(?:${[...new Set(bound)].join('|')})` : ''})\\.forget\\(`, 'g');
+      const n = (text.match(re) || []).length;
+      if (n) out[f] = n;
+    }
+    return out;
+  };
+  // the conversation's stdout file: its pending write dropped, then the file unlinked (the owner's removal); and the usage cursors'
+  // settle (lane hub-loop-stalls) — a DROP before the boot's migrations read the file, safe ONLY while nothing rides that file's
+  // landing (pinned below: its forget would run such a step as «landed» over bytes never written)
+  const FORGET_CALLERS = { 'src/server/session-stdout.js': 1, 'src/usage-history.js': 1 };
+  const fc = forgetCensus(files);
+  ok(JSON.stringify(fc) === JSON.stringify(FORGET_CALLERS), `⑫ the census: the product calls the writer's forget ONLY where a file's owner removes the file (${Object.entries(fc).map(([f, n]) => `${f} ${n}`).join(', ') || 'none'}) — never as a drop`, fc);
+  const UH = files.get('src/usage-history.js') || '';
+  const durables = (UH.match(/\.durable\(this\.cursorsFile\)/g) || []).length, caughtOnly = (UH.match(/\.durable\(this\.cursorsFile\)\.catch\(\(\) => \{ \}\)/g) || []).length;
+  ok(!/afterLanding\(|\bride\(|whenDurable\(/.test(UH) && durables === caughtOnly, '⑫ …the usage cursors\' drop (settleCursors) is safe by construction: NOTHING rides _cursors.json\'s landing — no step, no wait whose answer is read (its one durable() is only caught) — a step there would run as «landed» over bytes the drop never wrote', { durables, caughtOnly });
+  const planted = new Map(files); planted.set('src/server/browser-keeper.js', files.get('src/server/browser-keeper.js') + '\nfunction zzDrop() { const W = writerOf(); W.forget(storeKey); }\n');
+  const pc = forgetCensus(planted);
+  ok(pc['src/server/browser-keeper.js'] === 1 && JSON.stringify(pc) !== JSON.stringify(FORGET_CALLERS), 'CONTROL (planted in a copy\'s text): a SECOND caller of the writer\'s forget — a drop of the registry\'s owed write — is red by name', pc);
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
