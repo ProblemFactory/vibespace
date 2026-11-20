@@ -2420,6 +2420,59 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       try { await XG.call('post', '/api/config/import', IMP({ settings: { 'appearance.theme': 'an imported one' }, layouts: { current: null, autoSave: null, saved: {}, customGrids: [] } })); } catch { /* the held layouts' own refusal, thrown after the settings landed */ }
       ok(fs.readFileSync(XG.f('settings.json'), 'utf8') !== SET, 'CONTROL (the import\'s first ask cut, in a copy): the settings section lands while the desktops are held — a PART of the import, the rest refused (red)');
     }
+    // (h) THE ONE CHOKE (cut 7 — R1): every write site of src/routes/persistence.js, read on acorn's tree. A held store's file is
+    // written ONLY through its hold's ONE write (the desktops, the bookmarks, the custom themes, the settings: one site each; the
+    // conversation list: its write and its flush) — the exit flush and the read path's own rewrites go through them; a store's bytes
+    // move only by the damaged door's ONE setAside. Every direct fs write names what it writes, and none is a store's file: the data
+    // folder (ensureDir), the rollback points (writeJsonAtomic under HISTORY_DIR — its pid temp then the rename — their folder, their
+    // prune's unlinks), the agent CLIs' credentials of a config import. CONTROLS (planted, the census over a copy's text): a direct
+    // write of a store's file, a second write door of a store, the atomic writer aimed at a store's file — each red by name.
+    {
+      const ACH = require(path.join(REPO, 'node_modules/acorn'));
+      const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+      const HOLD_WRITES = { layoutsHold: 1, bookmarksHold: 1, themesHold: 1, userStateHold: 2, settingsHold: 1 };
+      const FS_WRITE = /^(write|append|rename|unlink|rm|copy|cp|truncate|symlink|link|mkdir|chmod|chown|utimes|open|createWriteStream)/;
+      const DIRECT_OK = { mkdirSync: [/^dir$/, /^HISTORY_DIR$/], writeFileSync: [/^tmp$/, /^CLAUDE_CREDS$/, /^CODEX_CREDS$/], renameSync: [/^tmp$/], 'promises.unlink': [/^path\.join\(HISTORY_DIR, /] };
+      const chokeCensus = (src) => {
+        const ast = ACH.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true });
+        const text = (n) => src.slice(n.start, n.end);
+        const out = { holdWrites: {}, setAside: 0, direct: [], atomic: [], bad: [] };
+        const fsName = (c) => {
+          if (c.type !== 'MemberExpression' || c.computed || c.property.type !== 'Identifier') return null;
+          if (c.object.type === 'Identifier' && c.object.name === 'fs') return c.property.name;
+          if (c.object.type === 'MemberExpression' && !c.object.computed && c.object.object.type === 'Identifier' && c.object.object.name === 'fs' && c.object.property.name === 'promises') return 'promises.' + c.property.name;
+          return null;
+        };
+        const walk = (n) => {
+          if (!n || typeof n.type !== 'string') return;
+          if (n.type === 'CallExpression') {
+            const c = n.callee, a0 = n.arguments[0] ? text(n.arguments[0]) : '', f = fsName(c);
+            if (f && FS_WRITE.test(f.replace(/^promises\./, ''))) {
+              out.direct.push(`${f}(${a0})`);
+              if (!(DIRECT_OK[f] || []).some((re) => re.test(a0))) out.bad.push(`fs.${f}(${a0}) — a direct write of ${a0}`);
+            }
+            if (c.type === 'Identifier' && c.name === 'writeJsonAtomic') { out.atomic.push(a0); if (!/^path\.join\(HISTORY_DIR, /.test(a0)) out.bad.push(`writeJsonAtomic(${a0}) — the atomic writer aimed outside the rollback points`); }
+            if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'write' && c.object.type === 'Identifier' && /Hold$/.test(c.object.name)) out.holdWrites[c.object.name] = (out.holdWrites[c.object.name] || 0) + 1;
+            if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'setAside') out.setAside++;
+          }
+          for (const k of Object.keys(n)) { if (k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object' && typeof v.type === 'string') walk(v); }
+        };
+        walk(ast);
+        for (const [h, want] of Object.entries(HOLD_WRITES)) if ((out.holdWrites[h] || 0) !== want) out.bad.push(`${h}.write × ${out.holdWrites[h] || 0} (want ${want}) — ${(out.holdWrites[h] || 0) > want ? 'a second write door' : 'its write left the hold'}`);
+        for (const h of Object.keys(out.holdWrites)) if (!(h in HOLD_WRITES)) out.bad.push(`${h}.write — a hold this census does not know`);
+        if (out.setAside !== 1) out.bad.push(`setAside × ${out.setAside} (want 1 — the damaged door's)`);
+        return out;
+      };
+      const real = chokeCensus(PSRC);
+      ok(real.bad.length === 0 && real.direct.length === 8 && real.atomic.length === 2,
+        `⑪ (h) THE ONE CHOKE: every write of a held store's file is its hold's ONE write (${Object.entries(real.holdWrites).map(([h, n]) => `${h} ${n}`).join(', ')}) or the damaged door's setAside; the ${real.direct.length} direct fs writes are the data and rollback folders, the rollback points (pid temp + rename, the prune's unlinks) and the agent CLIs' credentials — none a store's file`, real);
+      const plant = (add, name) => chokeCensus(anchored(PSRC, '  function flushLayouts() {\n', '  function flushLayouts() {\n' + add, name)).bad;
+      const p1 = plant('    fs.writeFileSync(LAYOUTS_FILE, JSON.stringify(_layoutsCache));\n', 'swc-h-direct');
+      const p2 = plant('    layoutsHold.write(_layoutsCache);\n', 'swc-h-second');
+      const p3 = plant('    writeJsonAtomic(SETTINGS_FILE, {});\n', 'swc-h-atomic');
+      ok(p1.some((b) => /fs\.writeFileSync\(LAYOUTS_FILE\)/.test(b)) && p2.some((b) => /layoutsHold\.write × 2/.test(b)) && p3.some((b) => /writeJsonAtomic\(SETTINGS_FILE\)/.test(b)),
+        '⑪ (h) CONTROLS (planted in a copy\'s text): a direct write of layouts.json, a SECOND write door of the desktops, the atomic writer aimed at settings.json — each red by name', { p1, p2, p3 });
+    }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
 
