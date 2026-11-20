@@ -211,6 +211,23 @@ function findOurHookIn(list) {
   }
   return null;
 }
+/** B-b83c (主开发 r320): THE STABLE SPELLING of the node a hook command names. A node in a VERSIONED runtime folder
+ *  (<…>/runtime/node-v<ver>/bin/node, src/node-runtime.js — pruned after two switches) that the runtime's `current` link points
+ *  at is named THROUGH the link (<…>/runtime/current/bin/node), which survives a switch; any other path as it is. */
+function stableNodePath(exe) {
+  const m = /^(.*\/runtime)\/(node-v[^/]+)\/bin\/node$/.exec(String(exe || ''));
+  if (!m) return exe;
+  try { return fs.readlinkSync(m[1] + '/current') === m[2] ? `${m[1]}/current/bin/node` : exe; } catch { return exe; }
+}
+/** «already registered» (r320): a stored command that names the SAME node (one real file) in its stable spelling, with the same
+ *  hook, is KEPT — so no two runners rewrite a config back and forth; a stored versioned spelling meets the stable one and is
+ *  rewritten once. */
+function keepsHookCommand(stored, want) {
+  const split = (c) => { const m = /^("(?:[^"\\]|\\.)*") (.*)$/.exec(String(c || '')); try { return m ? [JSON.parse(m[1]), m[2]] : null; } catch { return null; } };
+  const s = split(stored), w = split(want);
+  if (!s || !w || s[1] !== w[1] || stableNodePath(s[0]) !== s[0]) return false;
+  try { return fs.realpathSync(s[0]) === fs.realpathSync(w[0]); } catch { return false; }
+}
 /** Idempotent, NON-DESTRUCTIVE: add/update ONLY our entry under each event. Returns changed. */
 function registerHookEntries(root, events, hookCmd) {
   if (!root.hooks || typeof root.hooks !== 'object' || Array.isArray(root.hooks)) root.hooks = {};
@@ -218,7 +235,7 @@ function registerHookEntries(root, events, hookCmd) {
   for (const ev of events || []) {
     if (!Array.isArray(root.hooks[ev])) root.hooks[ev] = [];
     const ours = findOurHookIn(root.hooks[ev]);
-    if (ours) { if (ours.command !== hookCmd) { ours.command = hookCmd; changed = true; } }
+    if (ours) { if (ours.command !== hookCmd && !keepsHookCommand(ours.command, hookCmd)) { ours.command = hookCmd; changed = true; } }
     else { root.hooks[ev].push({ hooks: [{ type: 'command', command: hookCmd, timeout: 10 }] }); changed = true; }
   }
   return changed;
@@ -667,7 +684,7 @@ function decodePlan(b64) {
 
 module.exports = {
   HOOK_MARKER, RECEIPT_STATES, CREATE_RULES, cliConfigFile, createRule, missingKind, checkRel,
-  getJsonPath, setJsonPath, writeJsonManaged, findOurHookIn, registerHookEntries, stripHookEntries,
+  getJsonPath, setJsonPath, writeJsonManaged, findOurHookIn, registerHookEntries, stripHookEntries, stableNodePath, keepsHookCommand,
   tomlTokenize, tomlGet, tomlSet, formatTomlValue, writeTomlManaged,
   applyConfigPlan, readConfigPlan, ensureCliConfig, formatReceiptLines, parseReceiptLines, encodePlan, decodePlan,
 };
@@ -678,7 +695,7 @@ const DEFAULT_PLAN = {"v":1,"files":[{"harness":"claude","id":"settings","rel":[
 const UNINSTALL = process.argv.includes('--uninstall');
 const STATUS = process.argv.includes('--status');
 const plan = __applier.decodePlan(process.env.VIBESPACE_CLI_CONFIG) || DEFAULT_PLAN;
-const hookCmd = JSON.stringify(process.execPath) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
+const hookCmd = JSON.stringify(__applier.stableNodePath(process.execPath)) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');
 const home = homedir();
 try {
   const receipts = STATUS ? __applier.readConfigPlan(plan, { home }) : __applier.applyConfigPlan(plan, { home, hookCmd, uninstall: UNINSTALL }).receipts;

@@ -336,7 +336,8 @@ setTimeout(() => { say('the hook stopped at its 8 s limit (the CLI did not take 
     // PATH — hosts with nvm-style node installs (and claude as a native binary)
     // have NO node on that PATH. The register itself runs under node, so its own
     // process.execPath is an interpreter that provably exists on this machine.
-    + "const hookCmd = JSON.stringify(process.execPath) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');\n"
+    // B-b83c (r320): a versioned runtime folder's node is persisted through its `current` link (it survives a runtime switch)
+    + "const hookCmd = JSON.stringify(__applier.stableNodePath(process.execPath)) + ' ' + join(dirname(fileURLToPath(import.meta.url)), 'vibespace-hook.mjs');\n"
     + 'const home = homedir();\n'
     + 'try {\n'
     + "  const receipts = STATUS ? __applier.readConfigPlan(plan, { home }) : __applier.applyConfigPlan(plan, { home, hookCmd, uninstall: UNINSTALL }).receipts;\n"

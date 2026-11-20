@@ -8946,7 +8946,10 @@ reads `VS_AGENT_NODE` — a FILE that runs; where the shell has cygpath, a drive
 PATH step reads it whole for that run only — handed by spawn/dial.js's hook step and hosts.js's tools status, from a link already
 up; the path is never typed into the shell text); none handed (an older agent, the ssh road, a device not connected) ⇒ the finder's
 text is byte for byte the release's. The usage scanner's fallback (an older daemon, or a failed op) runs `agentNodeOf(info) || 'node'`.
-The hub's greeting judge only requires a nodePath to be a string (a long real path never locks a device out). The agent's TOOLS on Windows still run
+The hub's greeting judge only requires a nodePath to be a string (a long real path never locks a device out). The hook register persists its node in its STABLE spelling
+(src/harness-config.js stableNodePath: a versioned runtime folder through its `current` link — a runtime switch never strands a
+hook), and its «already registered» compare (keepsHookCommand) keeps a stored stable spelling of the same node, so no two runners
+rewrite a config back and forth. The agent's TOOLS on Windows still run
 through their `#!/usr/bin/env node` (the person's node) — row B-965e, waiting for one measured run on a Windows machine. READ BY THE
 CODE, NOT MEASURED on a real Windows machine.
 

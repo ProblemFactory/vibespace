@@ -55,7 +55,7 @@ export const ROWS = [
   ['src/exit-proxy.js', 'user-path', 9, 'DOOR\\.blocked\\(', 'an exit-run transfer’s local side: refused by name (transfer_failed)'],
   ['src/fixture-ledger-purge.js', 'own-tree', 6, null, CLI],
   ['src/gmail-sync.js', 'own-tree', 2, null, DATA],
-  ['src/harness-config.js', 'own-tree', 9, null, CLI],
+  ['src/harness-config.js', 'own-tree', 11, null, `${CLI}; +2 B-b83c: the hook's node in its stable spelling — a readlink of the runtime's own \`current\` link (<root>/runtime, the agent's or the hub's own tree) and the realpath of a hook's node binary`],
   ['src/hosts.js', 'own-tree', 31, null, DATA],   // the B-f276 moved chain's cure (主开发 04:33Z (4)): +1 — the legacy data/agentd/dial-tokens.json read async at hosts.json's read (_migrateDialTokensAtRead), the data dir's own file · lane lg-remote-hardening +1: + the host-key scan's scratch known_hosts (its own tmp)
   //   (ui-needs-a-button: publicKeyOf's .pub is NOT read here — its path is the PERSON's (POST /api/hosts keyPath; it may sit on a mount), so a 5 s child reads it (spawn-env-census 'head'))
   ['src/incident.js', 'own-tree', 19, null, DATA],

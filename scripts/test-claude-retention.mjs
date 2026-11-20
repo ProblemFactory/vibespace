@@ -392,6 +392,24 @@ process.env.HOME = ENV_HOME;
 }
 fs.rmSync(HKC, { recursive: true, force: true });
 
+console.log('§B-b83c THE HOOK\'S NODE IN ITS STABLE SPELLING (主开发 r320): a versioned runtime folder through its `current` link');
+{
+  const rt = path.join(root, 'b83c', 'runtime'), V = 'node-v24.22.1', W2 = 'node-v24.30.0';
+  for (const v of [V, W2]) { fs.mkdirSync(path.join(rt, v, 'bin'), { recursive: true }); fs.writeFileSync(path.join(rt, v, 'bin', 'node'), '#!/bin/sh\n', { mode: 0o755 }); }
+  fs.symlinkSync(V, path.join(rt, 'current'));
+  const vNode = path.join(rt, V, 'bin', 'node'), wNode = path.join(rt, W2, 'bin', 'node'), cNode = path.join(rt, 'current', 'bin', 'node');
+  ok('stableNodePath: a versioned runtime folder the link points at ⇒ the link\'s spelling; one it does not point at, and any other path ⇒ as it is',
+    HC.stableNodePath(vNode) === cNode && HC.stableNodePath(wNode) === wNode && HC.stableNodePath('/usr/bin/node') === '/usr/bin/node' && HC.stableNodePath(cNode) === cNode, { v: HC.stableNodePath(vNode), w: HC.stableNodePath(wNode) });
+  const HOOK = '/x/vibespace-hook.mjs', cmd = (n) => `${JSON.stringify(n)} ${HOOK}`;
+  const run = (stored, want) => { const r = { hooks: { Stop: [{ hooks: [{ type: 'command', command: stored, timeout: 10 }] }] } }; const ch = HC.registerHookEntries(r, ['Stop'], want); return { ch, now: r.hooks.Stop[0].hooks[0].command }; };
+  const once = run(cmd(vNode), cmd(cNode)), again = run(once.now, cmd(cNode)), older = run(cmd(cNode), cmd(vNode)), other = run(cmd(cNode), cmd(wNode)), plain = run(cmd('/usr/bin/node'), cmd(cNode));
+  ok('the «already registered» compare: a stored VERSIONED spelling is rewritten ONCE to the stable one; the stable one stays (a runner that still names the versioned folder of the SAME node rewrites nothing — no back and forth); another node, or a node outside the runtime, is rewritten',
+    once.ch && once.now === cmd(cNode) && !again.ch && !older.ch && older.now === cmd(cNode) && other.ch && other.now === cmd(wNode) && plain.ch, { once, again, older, other, plain });
+  const REG = fs.readFileSync(path.join(repo, 'data/bin/vibespace-hook-register.mjs'), 'utf8'), GEN = fs.readFileSync(path.join(repo, 'src/server/agent-tool-generators.js'), 'utf8');
+  ok('WIRING: the register (generated, and its tracked copy) persists the stable spelling and embeds today\'s applier text',
+    REG.includes("const hookCmd = JSON.stringify(__applier.stableNodePath(process.execPath)) + ' '") && GEN.includes(`const hookCmd = JSON.stringify(__applier.stableNodePath(process.execPath)) + ' '`) && REG.includes(fs.readFileSync(path.join(repo, 'src/harness-config.js'), 'utf8')));
+}
+
 fs.rmSync(root, { recursive: true, force: true });
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
