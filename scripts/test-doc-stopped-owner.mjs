@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { scratchDir } from './scratch.mjs';
+import { scratchDir, anchored } from './scratch.mjs';
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -42,14 +42,15 @@ function patched(edit) {
   return m.exports;
 }
 let worlds = 0;
-function world({ dir = scratchDir('doc-stopped-owner-' + (++worlds)), engine = DE, sessions = null, registry = null, typing = true } = {}) {
+function world({ dir = scratchDir('doc-stopped-owner-' + (++worlds)), engine = DE, sessions = null, registry = null, typing = true, real = false } = {}) {   // real: the REAL registry (ownerOf with prefer, holdersOf)
   const activeSessions = sessions || new Map([['w1', { mode: 'chat', backend: 'claude', claudeSessionId: CID }]]);
   const deliver = CD.create({ dataDir: dir, activeSessions, serverSetting: () => undefined, log: () => { } });
   const sent = [];
   // THE typing sender's contract (src/server/user-input.js): no live session ⇒ no_session; a live one without a pty ⇒ not_chat
   const sendUserInput = (sid, text) => { if (!activeSessions.has(sid)) return { ok: false, code: 'no_session' }; if (!typing) return { ok: false, code: 'not_chat' }; sent.push({ sid, text }); return { ok: true, msgId: 'm' + sent.length }; };
   const mine = () => AR.configure({ activeSessions: () => activeSessions, deliver, sessionMeta: null, log: quiet }); // the registry is a module: each world re-points it before a call
-  const artifacts = { ownerOf: (a) => (registry ? registry(a) : null), noteEdit: (a) => (mine(), AR.noteEdit(a)), touch: (a) => (mine(), AR.touch(a)) };
+  const artifacts = real ? { ownerOf: (a) => (mine(), AR.ownerOf(a)), holdersOf: (a) => (mine(), AR.holdersOf(a)), noteEdit: (a) => (mine(), AR.noteEdit(a)), touch: (a) => (mine(), AR.touch(a)) }
+    : { ownerOf: (a) => (registry ? registry(a) : null), noteEdit: (a) => (mine(), AR.noteEdit(a)), touch: (a) => (mine(), AR.touch(a)) };
   const doc = engine.create({ activeSessions, getDeliver: () => deliver, sendUserInput, artifacts, dataDir: dir, now: () => 7 });
   return { dir, activeSessions, deliver, doc, sent };
 }
@@ -122,6 +123,38 @@ console.log('⑧ RED controls');
   d.doc.ownerOf({ path: DOC, from: 'w1' }); stop(d, 'w1');
   const after = world({ engine: noDisk, dir: d.dir, sessions: new Map() });
   ok(!fs.existsSync(path.join(d.dir, 'doc-owners.json')) && after.doc.ownerOf({ path: DOC, from: 'w1' }) === null, 'CONTROL: a memo that never reaches disk forgets the owner across a restart (② would be red)');
+}
+
+console.log('⑨ B-b0e3\'s remainder ACROSS A RESTART (the readers\' should, round wterhpymy): the holders a stopped window\'s conversation was seen with come back from data/doc-owners.json; its comment AND its save go to it, never to the live holder');
+{
+  const AF = require('../src/artifacts.js');
+  const rowsOf = (p, at, id) => AF.apply({}, { path: p, op: 'write', by: 'agent', at, id }).rows;
+  const PLAN = '/w/PLAN.md', KEY = 'local\u0001' + PLAN;
+  const scene = (engine) => {
+    const sessions = new Map([['w1', { mode: 'chat', backend: 'claude', claudeSessionId: CID, _artifacts: rowsOf(PLAN, 5, 'a1') }], ['w2', { mode: 'chat', backend: 'claude', claudeSessionId: CID2, _artifacts: rowsOf(PLAN, 9, 'b1') }]]);
+    const w = world({ engine, sessions, real: true });
+    const seen = w.doc.ownerOf({ path: PLAN, from: 'w1' });   // the window opened while A lived (GET /api/doc/owner): A and B seen holding it
+    stop(w, 'w1');
+    const r = world({ engine, dir: w.dir, sessions: new Map([['w2', sessions.get('w2')]]), real: true });   // THE RESTART: a new engine on the same data dir; only B lives
+    const memo = JSON.parse(fs.readFileSync(path.join(w.dir, 'doc-owners.json'), 'utf8'));
+    const o = r.doc.ownerOf({ path: PLAN, from: 'w1' });
+    const c = r.doc.comments({ path: PLAN, from: 'w1', items: items(1, 'after the restart') });
+    const e = r.doc.edited({ path: PLAN, from: 'w1', summary: '+1 −0 lines' });
+    const qA = r.deliver.stashPeek(CID), qB = r.deliver.stashPeek(CID2);
+    return { seen: seen && [seen.sessionId, seen.via], holdersOnDisk: memo.h && memo.h[KEY] ? Object.keys(memo.h[KEY].c || {}).sort() : null, owner: o && [o.sessionId, o.conversationId === CID ? 'A' : o.conversationId === CID2 ? 'B' : o.conversationId, o.via], comments: c && [c.ok, c.delivered], edit: e && [e.ok, e.delivered], stashA: qA.map((x) => x.source), stashB: qB.map((x) => x.source), typedInto: r.sent.map((x) => x.sid) };
+  };
+  const f = scene(DE);
+  console.log('    facts: ' + JSON.stringify(f));   // every fact the leg judges, printed green or red (主开发 r185)
+  ok(!!f.seen && f.seen[0] === 'w1' && JSON.stringify(f.holdersOnDisk) === JSON.stringify([CID, CID2].sort()) && !!f.owner && f.owner[1] === 'A' && f.owner[2] === 'stopped'
+    && f.comments[0] === true && f.comments[1] === 'stashed' && f.edit[0] === true && f.stashA.includes('doc-comment') && f.stashA.includes('doc-edit') && f.stashB.length === 0 && f.typedInto.length === 0,
+    'B-b0e3 remainder across a restart: A and B were seen holding the file (both in data/doc-owners.json\'s h), A stopped, the hub restarted with only B — A\'s window comments AND saves into A\'s stash (via stopped), nothing to B, nothing typed', f);
+  // RED CONTROL — an engine whose load FORGETS the holders (h read back as empty), built with anchored() (its anchor proven once, by name)
+  let noH = null, why = null;
+  try { noH = patched((src) => anchored(src, "h: j.h && typeof j.h === 'object' ? j.h : {}", 'h: {}', 'b0e3-restart-no-h')); } catch (e) { why = e.message; }
+  const g = noH ? scene(noH) : null;
+  console.log('    RED copy: ' + JSON.stringify(g && { owner: g.owner, stashA: g.stashA, stashB: g.stashB }));
+  ok(!!g && !!g.owner && g.owner[0] === 'w2' && g.typedInto.includes('w2') && !g.stashA.includes('doc-comment'),   // a registry answer names the SESSION (its conversation id is not on the row)
+      'RED CONTROL: an engine whose load forgets the holders sends a stopped A\'s window to the live holder B after a restart', g || why);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

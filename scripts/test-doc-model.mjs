@@ -257,14 +257,17 @@ const { addressableId } = require('../src/claude-lock-capture.js');
     // RED CONTROLS — each proves its plant first (the line stands once, the copy lacks it)
     const MC = mutantCopies('docmodel-b0e3', REPO);
     const DESRC = fs.readFileSync(path.join(REPO, 'src/server/doc-engine.js'), 'utf8'), PL1 = ', prefer: from ? String(from) : null';
-    const de0 = DESRC.split(PL1).length === 2 ? DESRC.replace(PL1, '') : null;
-    ok(!!de0 && !de0.includes(PL1), 'CONTROL plant: the engine hands the window\'s `from` to the registry at ONE site, and the copy does not');
+    // EVERY PLANT'S ANCHOR CHECKED BY HAND (主开发 r240: no module with a side effect at import): found exactly ONCE, else red BY NAME —
+    // the copy is the text before the anchor, the replacement, the text after it
+    const plant = (src, anchor, to, name) => { const i = src.indexOf(anchor); if (i < 0) return { why: `ANCHOR GONE «${name}»` }; if (src.indexOf(anchor, i + 1) >= 0) return { why: `ANCHOR NOT UNIQUE «${name}»` }; return { text: src.slice(0, i) + to + src.slice(i + anchor.length) }; };
+    const p0 = plant(DESRC, PL1, '', 'b0e3-engine-no-prefer'), de0 = p0.text || null;
+    ok(!!de0 && !de0.includes(PL1), 'CONTROL plant: the engine hands the window\'s `from` to the registry at ONE site, and the copy does not', p0.why);
     const R0 = de0 ? two(MC.load('src/server/doc-engine.js', de0, 'no-prefer')) : null;
     const o0 = R0 ? R0.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }) : null;
     ok(!!o0 && o0.sessionId === 'w2', 'RED CONTROL: an engine that drops the window\'s `from` sends A\'s comment to the newest holder B (the release)', o0);
     const AFSRC = fs.readFileSync(path.join(REPO, 'src/artifacts.js'), 'utf8'), PL2 = "    if (prefer != null && prefer !== '' && String(r.sessionId) === String(prefer)) return { sessionId: r.sessionId, row };\n";
-    const af0 = AFSRC.split(PL2).length === 2 ? AFSRC.replace(PL2, '') : null;
-    ok(!!af0 && !af0.includes(PL2), 'CONTROL plant: ownerOfIn\'s `prefer` line stands once in artifacts.js, and the copy lacks it');
+    const p2 = plant(AFSRC, PL2, '', 'b0e3-pick-no-prefer'), af0 = p2.text || null;
+    ok(!!af0 && !af0.includes(PL2), 'CONTROL plant: ownerOfIn\'s `prefer` line stands once in artifacts.js, and the copy lacks it', p2.why);
     ok(!!af0 && pick(MC.load('src/artifacts.js', af0, 'no-prefer-pick'), 'a') === 'b', 'RED CONTROL: a pick without `prefer` answers the newest holder (b) for a window opened from a');
     // B-b0e3's REMAINDER (2.369.414): the window's OWN conversation STOPPED. A window from A is seen once while A lives (GET /api/doc/owner:
     // A and B both seen holding the file); A stops (its session and its registry rows gone, as session-stdout's exit does); A's window
@@ -283,8 +286,8 @@ const { addressableId } = require('../src/claude-lock-capture.js');
       { seen, oSt, oNever, cSt: cSt && { ok: cSt.ok, delivered: cSt.delivered }, stashed: St.rec.stashed.map((x) => [x.cid, x.source]), sent: St.rec.sent.map((x) => x.sid) });
     // RED CONTROL: an engine without the held check sends A's comment to the live holder B (the 2.369.412 bound); its plant proven first
     const PL3 = "      if (cid && memo.held(docKey, cid)) return { sessionId: String(from), conversationId: cid, via: 'stopped' };\n";
-    const de3 = DESRC.split(PL3).length === 2 ? DESRC.replace(PL3, '') : null;
-    ok(!!de3 && !de3.includes(PL3), 'CONTROL plant: the engine\'s held check stands once, and the copy lacks it');
+    const p3 = plant(DESRC, PL3, '', 'b0e3-engine-no-held'), de3 = p3.text || null;
+    ok(!!de3 && !de3.includes(PL3), 'CONTROL plant: the engine\'s held check stands once, and the copy lacks it', p3.why);
     const R3 = de3 ? two(MC.load('src/server/doc-engine.js', de3, 'no-held'), { strict: true }) : null;
     if (R3) { R3.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }); R3.act.delete('w1'); }
     const o3 = R3 ? R3.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }) : null;
