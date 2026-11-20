@@ -262,8 +262,8 @@ export function runLeftWords(run, t, stamp = null) {
   const esc = l.escaped > 0 ? t('{n} left its group — not stopped; run it as a service job', { n: l.escaped }) : '';
   if (!(l.n > 0)) return esc;
   // round 7: the advice once — beside what left its group, the stopped ones are said plain
-  if (esc) return `${l.force ? t('left {n} running — stopped by force', { n: l.n }) : t('left {n} running — stopped', { n: l.n })}${sh} · ${esc}`;
   const out = l.outside > 0 ? ` · ${t('{n} of them outside its group', { n: l.outside })}` : '';   // B-7ca1: a task's stop ended what left its group too
+  if (esc) return `${l.force ? t('left {n} running — stopped by force', { n: l.n }) : t('left {n} running — stopped', { n: l.n })}${out}${sh} · ${esc}`;
   return (l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n })) + out + sh;
 }
 /** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */

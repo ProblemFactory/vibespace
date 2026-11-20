@@ -874,15 +874,20 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
         const job = [...jm.jobs.values()][0], ownGroup = PI.pgidOf(pid) === pid, inTree = tree.some((m) => m.pid === pid);   // read BEFORE the stop (its read's NIT)
         // its read's MUST: a STRANGER carrying the job's mark but ANOTHER run's (an earlier run's leftover forks it during this run) —
         // started after the wrapper, outside its group: a stop of THIS run never ends it
-        const st = spawn('sleep', ['320'], { env: { ...process.env, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:1` }, stdio: 'ignore', detached: true }); st.unref();   // detached: its own session and group (setsid)
-        const sid = PI.identityOf(st.pid); mine.push(sid);
+        // its read r2 (MUST): the stranger is NOT the hub's child (this suite is the hub: the keep-out would spare it by its parent chain,
+        // and the run's mark would go untested) — a subshell that exits re-parents it, as an earlier run's leftover's fork is
+        const STR = path.join(D, tag, 'stranger.pid');
+        spawnSync('sh', ['-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(STR)}; exec sleep 320' &)`], { env: { ...process.env, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_RUN: `${job.id}:1` }, stdio: 'ignore' });
+        let spid = 0; for (let k = 0; k < 100 && !(spid > 1); k++) { try { spid = Number(fs.readFileSync(STR, 'utf8').trim()); } catch { } if (!(spid > 1)) spawnSync('sleep', ['0.02']); }
+        const sid = PI.identityOf(spid); mine.push(sid);
+        const strangerOwn = PI.ppidOf(spid) !== process.pid && PI.pgidOf(spid) === spid;   // re-parented, its own group
         return { after: async () => {
           await until(() => PI.aliveIdentity(id) === false, 1500);
           const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
           if (alive) PI.signalIdentity(id, 'SIGKILL');
           if (stranger) PI.signalIdentity(sid, 'SIGKILL');
           let view = null; try { view = ((jm.snapshot(job) || {}).run || {}).left || null; } catch (e) { view = { threw: String(e && e.message) }; }   // the API's view (the card's row reads it)
-          return { pid, alive, stranger, inTree, ownGroup, left: (run && run.left) || null, view };
+          return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view };
         } };
       } });
   };
@@ -890,7 +895,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   const sa = await escScene(WRAP, 'esc-stop');
   ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside === 1,
     'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried THIS run\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
-  ok(sa.after && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
+  ok(sa.after && sa.after.strangerOwn && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
   ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
   const VW = 'escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {})';
   const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)
@@ -917,6 +922,30 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   const jobMark = MJ.load('src/jobs.js', anchored(JSRC, RM, 'mark: `VIBESPACE_JOB_ID=${job.id}`', 'b7ca1-engine-runmark-cut'), 'b7ca1-engine-runmark-cut');
   const fj = await escScene(WRAP, 'esc-force-jobmark', { force: true, jobsMod: jobMark });
   ok(fj.after && !fj.after.stranger, 'CONTROL (the engine by the job\'s mark, in a copy): the force stop kills the STRANGER — another run\'s — RED', fj.after);
+  // (c) its read r2 (S1): a task that restarted the hub with a LAUNCHER — `(setsid sh -c '<the hub> & echo $! > server.pid; wait' &)`:
+  // the launcher carries this run's mark, sits in its own group, re-parented, and is the hub's PARENT (never under it): a stop of
+  // this run never ends it (the engine's _hubAncestors; the wrapper's keptAncestors)
+  const launchScene = async (wrapperText, tag) => {
+    const dd = path.join(D, tag), LP = path.join(dd, 'launcher.pid'), SP = path.join(dd, 'server.pid');
+    const hub = `node -e "require('child_process').spawn('sleep', ['322'], { stdio: 'ignore' }); setInterval(() => { }, 1e9)"`;
+    const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(LP)}; ${hub.replace(/'/g, `'\\''`)} & echo $! > ${JSON.stringify(SP)}; wait' &); timeout 323 sleep 323 & wait`];
+    return jobScene(wrapperText, tag, { argv, signalAlone: true,
+      ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(LP) && fs.existsSync(SP) && Number(fs.readFileSync(SP, 'utf8').trim()) > 1,
+      before: () => {
+        const lid = PI.identityOf(Number(fs.readFileSync(LP, 'utf8').trim())), hid = PI.identityOf(Number(fs.readFileSync(SP, 'utf8').trim())); mine.push(lid, hid);
+        return { after: async () => { await sleep(300); const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true }; for (const x of [lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };
+      } });
+  };
+  const la = await launchScene(WRAP, 'esc-launcher');
+  ok(la.after && la.after.launcher && la.after.hub && la.state === 'interrupted', 'B-7ca1 (its read r2, S1): a task\'s stop never ends the hub\'s LAUNCHER (it carries this run\'s mark, re-parented, its own group — the hub\'s parent) nor the hub', la.after);
+  const KA = "    if ((kept && kept(e)) || anc.has(Number(e))) continue;";
+  const lx = await launchScene(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), 'esc-launcher-mut');
+  ok(lx.after && !lx.after.launcher, 'CONTROL (the hub\'s ancestors not kept, in a copy): the stop ends the hub\'s launcher — RED', lx.after);
+  // a hub started INSIDE a job never hands that run's mark to what it starts (its env loses it at the engine's construction)
+  const envOf = (Mod, tag) => { const d = path.join(D, tag); fs.mkdirSync(d, { recursive: true }); process.env.VIBESPACE_JOB_RUN = 'jb-0000aaaa:1'; try { new Mod.JobManager({ dataDir: d, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, memoryRungs: [] }); } catch { } const had = 'VIBESPACE_JOB_RUN' in process.env; delete process.env.VIBESPACE_JOB_RUN; return had; };
+  const STRIP = "    delete process.env.VIBESPACE_JOB_RUN;";
+  ok(envOf(require(path.join(ROOT, 'src/jobs.js')), 'env-strip') === false && envOf(MJ.load('src/jobs.js', anchored(JSRC, STRIP, '    /* MUTANT: the mark kept */', 'b7ca1-env-strip-cut'), 'b7ca1-env-strip-cut'), 'env-strip-mut') === true,
+    'B-7ca1 (its read r2, S1): the hub drops an inherited VIBESPACE_JOB_RUN (a hub started inside a job: its double-forked daemons never read as that run\'s escapees); CONTROL (the drop cut, in a copy): kept — RED');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

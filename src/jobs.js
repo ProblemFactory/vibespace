@@ -192,6 +192,9 @@ class JobManager {
    *          deliverToConversation?(cid,text)→Promise<{ok,peerName?,reason?}>,   // 2.344.0 peer-message lane
    *          groupNotifyFor?(job)→true|false|null, notifyGlobal?()→bool }        // toggle resolution */
   constructor(deps) {
+    // B-7ca1 (its read r2, S1): a hub started INSIDE a job inherited that job's run mark — it never hands it on (a daemon the hub
+    // double-forks, re-parented outside the job's group, would read as that run's escapee and end with the job's stop)
+    delete process.env.VIBESPACE_JOB_RUN;
     // THE ONE FOR-YOU DOOR, at run time too (lane job-notify-user r4, accept-r3 unverified 0): the For-you store's dep is held
     // HERE and reached through _forYou alone; `this.d.notifyUser` is the STRAY door — a filing that skipped _forYou (a merge
     // that kept an older direct call) still reaches the store with its own shape, and the store's verdict is JOURNALED on

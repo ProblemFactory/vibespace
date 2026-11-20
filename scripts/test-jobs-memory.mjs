@@ -180,6 +180,8 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
     && lw(stoF) === 'the job left 3 processes running — they were stopped by force (2 outside its group) (1 process got less than the full grace); to keep a daemon, run it as a service job'
     && [sto, stoF].every((l) => WF('leftWords')(l) === lw(l))
     && rlw({ left: sto }, t) === 'left 2 running — stopped; to keep a daemon, run it as a service job · 1 of them outside its group'
+    && rlw({ left: { n: 2, outside: 1, escaped: 1 } }, t) === 'left 2 running — stopped · 1 of them outside its group · 1 left its group — not stopped; run it as a service job'
+    && lw({ n: 2, outside: 1, escaped: 1 }) === 'the job left 2 processes running — they were stopped (1 outside its group); 1 process left its group — not stopped; run it as a service job'
     && JSON.stringify(lr({ n: 2, outside: 1 })) === '{"n":2,"outside":1}' && JSON.stringify(lr({ n: 1, outside: 5 })) === '{"n":1,"outside":1}' && !('outside' in (lr({ n: 2, kept: true, outside: 1 }) || {})) && lr({ n: 0, outside: 1 }) === null,
     'B-7ca1 words: a task\'s stop says what it stopped outside its group — «they were stopped (1 outside its group)» in the log and show / poll (the wrapper\'s twin the same), «· 1 of them outside its group» on the card; the record keeps `outside` ≤ n, never on a kept record, never alone', [lw(sto), rlw({ left: sto }, t), lr({ n: 1, outside: 5 })]);
   for (const lang of ['zh', 'ja']) ok(fs.readFileSync(path.join(REPO, `src/lib/i18n-${lang}.js`), 'utf8').includes(JSON.stringify('{n} of them outside its group') + ':'), `B-7ca1: the card\'s new words have their ${lang} row`);
