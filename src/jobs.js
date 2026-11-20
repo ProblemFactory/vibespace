@@ -3660,6 +3660,8 @@ class JobManager {
       // lane job-notify-user: the For-you copy is the PARENT's setting (`run --every/--cron/--at … --notify-user` sends it
       // top-level, like notify-cron) — handed to the child at every fire, so the run's end tells the user what `show` says
       child.notifyUser = M.notifyUserOf(job);
+      // B-3992: the run's token reads what its CRON was given at create (the parent's grant, handed at every fire like notifyUser)
+      if (M.mayReadOf(job)) child.mayRead = M.mayReadOf(job); else delete child.mayRead;
       delete child._untilCursor; delete child._untilHit; // fresh run, fresh scan
       this._spawn(child, trigger);
     }
@@ -3992,6 +3994,11 @@ class JobManager {
     if (!vp.ok) return { error: `refused: ${vp.words}${vp.at ? ` (the --vault value #${vp.at})` : ''}`, code: vp.code };
     for (const r of vp.refs) { const f = VJ.familyOf(r.ref, VJ.ownerOf({ owner: spec.owner })); if (!f.ok) return { error: `refused: ${f.words} (--vault ${r.name})`, code: f.code }; }
     if (task) { if (vp.refs.length) task.vault = vp.refs; else delete task.vault; }
+    // B-3992: `--may-read <job>,<job>` / `--may-read siblings` — THE GRANT, written on the record now: resolved against the jobs the
+    // new job's OWNER record owns (the same predicate every read judges by, M.jobMayRead), never another conversation's; a notify
+    // cron runs no command and is refused. A scheduled job keeps it on the cron; each fire hands it to the run (below)
+    const mr = M.mayReadVerdict(spec.mayRead, [...this.jobs.values()].filter((j) => M.isOwner(j, M.ownerAsCaller({ owner: spec.owner }))), { runsCommand: !(spec.kind === 'cron' && !task) });
+    if (!mr.ok) return { error: mr.error, code: 'may-read' };
     const visNames = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.name));
     const { name, renamed } = M.resolveName(spec.name, visNames, { mask: (t) => this._nameWords(t, { typed: true }) });   // r7: the belt on the WHOLE name, then the cut — r9: THE NAME RULE once, as typed
     const job = {
@@ -4010,6 +4017,7 @@ class JobManager {
       runs: [], createdAt: now(),
       ...(memMb !== null && !task ? { memoryMb: memMb } : {}),
       ...(vp.refs.length && !task ? { vault: vp.refs } : {}),
+      ...(mr.grant ? { mayRead: mr.grant } : {}),   // B-3992: what this job's token may READ beside itself (read only)
     };
     this.jobs.set(job.id, job);
     if (job.kind !== 'cron') {
@@ -4378,6 +4386,7 @@ class JobManager {
       // full creation parameters (2.347.0, owner ask: agents must be able to
       // re-inspect what they registered) — env VALUES stay out (names only)
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
+      mayRead: M.mayReadOf(job),   // B-3992: the jobs this job's token may READ beside itself (null: only itself)
       vault: VJ.refsOf(job).map((r) => ({ name: r.name, ref: r.ref })), waitFor: job.state === 'waiting' ? job.waitFor || null : null, waitWords: job.state === 'waiting' ? VJ.waitWords(job.waitFor) : null, // lane vault-job-road: REFERENCES only, never a value
       // a cron's action TYPE (an enum: 'notify' | 'spawn-task' | null) — the panel words what --notify-user does per kind
       // (lane job-notify-user r2: the snapshot carried no action, so a notify cron read «when each run ends»)

@@ -116,6 +116,90 @@ function addressedTo(job, caller, parent = null) {
   return subs.some((s) => s && s.conversationId === cid) ? 'subscriber' : '';
 }
 
+// ── B-3992: A JOB READS ITS SIBLING JOBS ONLY BY OPT-IN AT CREATE (the owner's ruling of 2026-11-01, option C) ──────────────
+// A job's process holds a jbt_ token that acts on ITSELF only (src/agent-routes.js jobAuth); inside a job, a poll of another job
+// answered «no job … visible to this session», which misled (fb-be61906274, fb-1253de8d82). Now `vibespace-job run … --may-read
+// <job>,<job>` (or `--may-read siblings`) writes a GRANT on the new job's record at create: the jobs it may poll, list and read
+// the logs of. READ ONLY — stop / start / restart / rm and every other verb on another job stay its owner conversation's; NEVER
+// another conversation's jobs: the grant is resolved against the creating conversation's own jobs at create, and judged again at
+// every read against the reading job's own owner (one predicate, isOwner). A job created without the word reads only itself.
+const MAY_READ_MAX = 32;
+const MAY_READ_RECIPE = 'vibespace-job run "CMD" --name NAME --may-read <job>,<job> (or --may-read siblings: every job of the conversation that creates it)';
+/** the grant a job's record holds (`mayRead`, written at create): { siblings: true } | { ids: [...] } | null (reads only itself) */
+function mayReadOf(job) {
+  const g = job && job.mayRead;
+  if (!g || typeof g !== 'object') return null;
+  if (g.siblings === true) return { siblings: true };
+  const ids = Array.isArray(g.ids) ? g.ids.filter((x) => typeof x === 'string' && x) : [];
+  return ids.length ? { ids } : null;
+}
+/** the reading job's OWN owner as a caller — the one owner predicate (isOwner) answers which jobs are its conversation's */
+const ownerAsCaller = (job) => { const o = (job && job.owner) || {}; return { conversationId: (o.conversation && o.conversation.id) || null, sessionId: o.sessionId || null, sessionCreatedAt: o.sessionCreatedAt, groups: new Set() }; };
+function sameOwner(self, target) {
+  const o = (self && self.owner) || {};
+  if (!(o.conversation && o.conversation.id) && !o.sessionId) return false;   // no owner conversation: nobody's sibling
+  return !!target && isOwner(target, ownerAsCaller(self));
+}
+/** THE JOB'S OWN VERDICT: may the job `self` (its token) READ `target`? Itself always; another job only by its grant AND only a job
+ *  of its own owner conversation — another conversation's never, whatever a record says */
+function jobMayRead(self, target) {
+  if (!self || !target) return false;
+  if (target === self || (self.id && target.id === self.id)) return true;
+  const g = mayReadOf(self);
+  if (!g || !sameOwner(self, target)) return false;
+  return g.siblings ? true : g.ids.includes(target.id);
+}
+/** the jobs among `all` the job `self` may read, itself first */
+const jobsReadableBy = (all, self) => (self ? [self, ...all.filter((j) => j && j !== self && j.id !== self.id && jobMayRead(self, j))] : []);
+/** a ref the job token names: itself (id or name), else a job it may read (an id first, then a name) — null when none */
+function jobReadableRef(all, self, ref) {
+  if (!self) return null;
+  if (self.id === ref || self.name === ref) return self;
+  const r = jobsReadableBy(all, self).slice(1);
+  return r.find((j) => j.id === ref) || r.find((j) => j.name === ref) || null;
+}
+const JOB_READ_VERBS = Object.freeze(['list', 'show', 'poll', 'logs', 'answers']);
+const JOB_SELF_ACTS = Object.freeze(['progress', 'ask', 'withdraw', 'announce']);   // B-8bd5: a job withdraws ITS OWN panel
+const JOB_SELF_ACTS_WORDS = 'a job token may only report progress, ask (or withdraw its ask), or announce';
+const refWord = (ref) => JSON.stringify(clip(String(ref == null ? '' : ref), 80));
+/** the refusal a job meets for a job it may not read — the SAME words whether that job exists or not (no existence oracle) */
+function mayReadRefusal(self, ref) {
+  const g = mayReadOf(self);
+  if (g && g.siblings) return `${refWord(ref)}: this job may read only itself and the other jobs of its own conversation (given at create: --may-read siblings) — ${refWord(ref)} is none of them; another conversation's jobs are never readable`;
+  if (g) return `${refWord(ref)}: this job may read only itself and the jobs it was given at create (${g.ids.slice(0, 8).join(', ')}${g.ids.length > 8 ? ', …' : ''}) — ${refWord(ref)} is none of them; to read another, give it at create: ${MAY_READ_RECIPE}`;
+  return `${refWord(ref)}: this job may read only itself — give it the other jobs at create: ${MAY_READ_RECIPE}. Read only: poll, list and logs; stop, start and rm stay its conversation's`;
+}
+/** PER VERB, for a job token: what it may do with `target` (null = no job by `ref` among what it may read). A read verb on itself
+ *  or a granted job answers; a granted job is READ ONLY; any other ref is refused with the recipe */
+function jobTokenVerdict(self, target, verb, ref) {
+  const read = JOB_READ_VERBS.includes(verb);
+  if (self && target && (target === self || target.id === self.id)) return read || JOB_SELF_ACTS.includes(verb) ? { ok: true, self: true } : { ok: false, status: 403, code: 'job-token-self', error: JOB_SELF_ACTS_WORDS };
+  if (self && target && jobMayRead(self, target)) {
+    return read ? { ok: true, granted: true } : { ok: false, status: 403, code: 'job-read-only', error: `${refWord(ref)} is READ ONLY for this job (given at create with --may-read): it may poll, list and read the logs of it — ${clip(String(verb), 40)} on another job stays its owner conversation's (stop, start, restart and rm are never a job's on another job)` };
+  }
+  return { ok: false, status: 404, code: 'job-reads-itself', error: mayReadRefusal(self, ref) };
+}
+/** AT CREATE: the `--may-read` value → the grant to store. Resolved against `ownJobs` — the creating conversation's OWN jobs
+ *  (an id first, then a name); a word naming anything else is refused by name, the same words for another conversation's job
+ *  and for none. `runsCommand` false (a notify cron) ⇒ refused: such a job runs nothing that could read */
+function mayReadVerdict(raw, ownJobs, { runsCommand = true } = {}) {
+  if (raw === undefined || raw === null) return { ok: true, grant: null };
+  if (!runsCommand) return { ok: false, error: '--may-read is for a job that runs a command — a notify cron runs none; nothing was created' };
+  if (typeof raw !== 'string' && !(Array.isArray(raw) && raw.every((w) => typeof w === 'string'))) return { ok: false, error: '--may-read takes job ids or names, comma-separated (or the word siblings) — nothing was created' };
+  const words = [...new Set((Array.isArray(raw) ? raw : raw.split(',')).map((w) => w.trim()).filter(Boolean))];
+  if (!words.length) return { ok: false, error: `--may-read needs the jobs this job may read: ${MAY_READ_RECIPE} — nothing was created` };
+  if (words.includes('siblings')) return words.length === 1 ? { ok: true, grant: { siblings: true } } : { ok: false, error: '--may-read siblings already gives every job of this conversation — give it alone; nothing was created' };
+  if (words.length > MAY_READ_MAX) return { ok: false, error: `--may-read names ${words.length} jobs — at most ${MAY_READ_MAX} (or --may-read siblings); nothing was created` };
+  const own = Array.isArray(ownJobs) ? ownJobs : [];
+  const ids = [];
+  for (const w of words) {
+    const j = own.find((x) => x && x.id === w) || own.find((x) => x && x.name === w);
+    if (!j) return { ok: false, error: `--may-read: ${refWord(w)} is no job of this conversation (vibespace-job list --mine names them) — a job may be given only its own conversation's jobs, never another's; nothing was created` };
+    if (!ids.includes(j.id)) ids.push(j.id);
+  }
+  return { ok: true, grant: { ids } };
+}
+
 // ── credential-read vet (§ban-safety reminder; friction, not a sandbox) ──────
 // owner decision 2026-10-03 (lane job-vendor-ban verify r3): a job is refused ONLY when its command obviously reads a
 // subscription sign-in — calling any API with your own key is ordinary pay-as-you-go use and runs; the vendor-host, whole-domain
@@ -1145,6 +1229,7 @@ function jobWhereVerdict({ hubMachine = null, sessionMachine = null, cwd = null,
 }
 module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY, RECORDS_ERROR_WORDS, RECORDS_ERROR_OTHER, RECORDS_WHEN_UNKNOWN,
   addressedTo, ownerLineage, ownerConversationOf, NOT_ADDRESSED, SUB_MARK, inertMarks,
+  MAY_READ_MAX, MAY_READ_RECIPE, mayReadOf, ownerAsCaller, jobMayRead, jobsReadableBy, jobReadableRef, JOB_READ_VERBS, JOB_SELF_ACTS, JOB_SELF_ACTS_WORDS, mayReadRefusal, jobTokenVerdict, mayReadVerdict,   // B-3992
   ownedJobsView, STATE_WORDS,
   isTerminal, isOwner, canView, canControl, canEdit, visibleJobs,
   validateFilter, filterMatches,

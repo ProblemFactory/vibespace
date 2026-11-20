@@ -6046,6 +6046,8 @@ await section(async () => {
     ['src/jobs.js', "('service: ' + o.name === rec.label || 'service: ' + this.labelOf(o) === rec.label)", 'Clear content: a forward\'s label matched in both spellings'],
     ['src/job-model.js', 'const name = String((job && (job.name || job.id)) || \'job\');', 'forYouCopy: a For-you copy\'s FIELD — the store belts each param on its own (r3)'],
     ['src/agent-routes.js', 'vis.find((j) => j.name === ref)', 'a lookup by the caller\'s ref — an identity, never shown'],
+    ['src/job-model.js', 'r.find((j) => j.name === ref)', 'B-3992 jobReadableRef: a lookup by a job token\'s ref among the jobs its grant reads — an identity, never shown'],
+    ['src/job-model.js', 'own.find((x) => x && x.name === w)', 'B-3992 mayReadVerdict: a --may-read word resolved among the creating conversation\'s own jobs — an identity, never shown (the grant stores ids)'],
     ['src/job-model.js', "(job && job.name && own ? String(own.labelOf(job)) : '')", 'labelVia: whether there IS a name — the words are the accessor\'s'],
   ];
   // THE RENDERER ROWS (r6, accept-r5 confirmed 0): every render* / *Line / *Row a job record reaches — the census names one it

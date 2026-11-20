@@ -208,7 +208,7 @@ const readFlags = (src) => new Set([...branchOf(src).matchAll(/flags\.([a-z][a-z
 const INV = {
   svc: ['run', 'sleep 60', '--name', 'census-svc', '--note', 'a note', '--context', 'ctx words', '--cwd', CWD, '--until', 'READY', '--timeout', '6h', '--stdin-open', '--notify', 'on',
     '--view', 'all', '--control', 'group', '--keep-up', '--restart', 'always', '--port', '8123', '--publish', '--memory', '8G'],
-  task: ['run', 'true', '--name', 'census-task', '--notify-user', '--vault', 'TOK=vault://agent:conv-census/tok', '--propose-wake', 'census why'],
+  task: ['run', 'true', '--name', 'census-task', '--notify-user', '--vault', 'TOK=vault://agent:conv-census/tok', '--propose-wake', 'census why', '--may-read', 'siblings'],
   every: ['run', 'echo hi', '--name', 'census-every', '--every', '30m', '--jitter', '5', '--notify-ok', '--notify-user'],
   cron: ['run', 'true', '--name', 'census-cron', '--cron', '41 9 * * *'],
   nc: ['notify-cron', '--name', 'census-nc', '--at', '+5m', '--text', 'census reminder', '--urgency', 'high', '--notify-user'],
@@ -220,7 +220,8 @@ const PINS = {
   '--cwd': [['svc', 'cmd.cwd', CWD]], '--until': [['svc', 'untilOutput', 'READY']], '--timeout': [['svc', 'timeoutMs', 6 * 3600e3]],
   '--stdin-open': [['svc', 'stdinOpen', true]],
   '--memory': [['svc', 'memoryMb', '8G']],   // the seam with jobs-memory-bound: the CLI sends the flag's own string
-  '--vault': [['task', 'vault', ['TOK=vault://agent:conv-census/tok']]],   // lane vault-job-road: the REFERENCES as typed (repeatable — a list); the engine judges them
+  '--vault': [['task', 'vault', ['TOK=vault://agent:conv-census/tok']]],
+  '--may-read': [['task', 'mayRead', 'siblings']],   // B-3992: the jobs the new job may READ beside itself — the CLI's own string, the engine resolves it (test-job-may-read)   // lane vault-job-road: the REFERENCES as typed (repeatable — a list); the engine judges them
   // every shape that tells the user (a plain task, a scheduled run, notify-cron) — top-level; a scheduled run ALSO carries
   // the compatibility copy in its task (an engine ≤ 2.369.360 reads only that); a service refuses the flag (leg (1))
   '--notify-user': [['task', 'notifyUser', true], ['every', 'notifyUser', true], ['every', 'action.task.notifyUser', true], ['nc', 'notifyUser', true]],

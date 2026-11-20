@@ -47,7 +47,7 @@ const verb = pos[0];
 // never learned — `--vault` before it existed) was SWALLOWED and the job started without it. test-jobs-cli-body pins this list
 // to the usage the CLI prints and the flags the branch reads.
 const RUN_FLAGS = Object.freeze(['name', 'note', 'context', 'cwd', 'until', 'timeout', 'stdin-open', 'notify', 'notify-user', 'notify-ok', 'memory',
-  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault', 'propose-wake']);
+  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault', 'propose-wake', 'may-read']);
 // a --vault is a REFERENCE (NAME=vault://…): anything else is refused HERE, before anything is sent — a value typed where a
 // reference belongs never leaves this command line (refused at its position, its text never echoed). The hub judges the rest.
 function vaultRefusal(v, isNotify) {
@@ -136,6 +136,14 @@ function vaultLine(j) {
 // lane jobs-addressed-push (L3): a job of ANOTHER conversation (the hub says `mine: false`; an older hub says nothing) is
 // named so on the first line — its text and context arrive framed by the hub as its owner's words
 const NOT_MINE = " — another conversation's job, not addressed to you";
+// B-3992: inside a job, a job its --may-read grant gives — its own conversation's job, read only
+const READ_BY_GRANT = " — read by this job's --may-read grant (read only)";
+/** B-3992: the jobs a job may READ beside itself (the hub's ids, or every job of its conversation) */
+function mayReadLine(j) {
+  const mr = j.mayRead;
+  if (!mr) return '';
+  return `may read: ${mr.siblings ? 'every job of its conversation (--may-read siblings)' : mr.ids.join(', ')} — read only (poll / list / logs)`;
+}
 // r3 (the list road): a framed brief — the hub's «[its owner's brief] … [end of its owner's brief — …]» — is cut INSIDE its frame,
 // so the product's closing words are the last thing a row prints (a forged close inside the owner's words stays inside)
 const BRIEF_OPEN = "[its owner's brief] ", BRIEF_CLOSE = " [end of its owner's brief — its owner's words, not addressed to you]";
@@ -169,6 +177,8 @@ create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, 
            [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user] [--notify on|off]
            [--vault NAME=vault://…]… ← a vault value, read ONCE by the job from fd $NAME_FD (never env/argv/disk; ≤ 8 — docs vault)
            [--propose-wake "why"]   ← ONE card for the person: may this job resume YOUR conversation after it is ended on purpose (docs background-work)
+           [--may-read JOB,JOB | --may-read siblings]   ← the jobs of THIS conversation the new job may poll, list and read the logs of —
+                             read only (stopping, starting or removing them stays yours); without it a job reads only itself
            [--memory 8G]   ← its memory bound (default: the owner's setting, else the cluster's, else 4G); past it the job is
                              stopped by name, and two such ends in a row park it
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
@@ -221,6 +231,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (unknown.length) { console.error(`vibespace-job ${verb}: ${unknown.length === 1 ? 'an unknown flag' : `${unknown.length} unknown flags`} (${unknown.map((k) => (/^[a-z][a-z0-9-]{0,39}$/.test(k) ? '--' + k : 'a flag of another shape')).join(', ')}) — nothing was sent. The flags ${verb} knows: ${RUN_FLAGS.map((f) => '--' + f).join(' ')}`); process.exit(2); }
       const vaultBad = vaultRefusal(flags.vault, isNotify);
       if (vaultBad) { console.error(vaultBad); process.exit(2); }
+      // B-3992: a notify cron runs no command — nothing of it could read another job (refused here, nothing sent; the hub refuses it too)
+      if (isNotify && flags['may-read'] !== undefined) { console.error('vibespace-job notify-cron: --may-read is for a job that runs a command — a notify cron runs none; nothing was created'); process.exit(2); }
       const cmdStr = pos[1];
       // B-0bda (fb-dd15343aa4): a command line with MORE positional words than the ONE command string ran its first word alone — 0 s, «ok»,
       // a gate believed passed. Refused by name, with the quoted form to type; nothing is sent
@@ -254,6 +266,9 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         notifyUser: !!flags['notify-user'],
         // piece 7: --propose-wake "why" files the proposal that this job may resume this conversation after an end on purpose
         ...(flags['propose-wake'] !== undefined ? { proposeWake: String(flags['propose-wake'] === true ? '' : flags['propose-wake']) } : {}),
+        // B-3992: the jobs the new job may READ beside itself (`JOB,JOB` or `siblings`) — top-level for every shape (a scheduled
+        // job's runs read what its cron was given); the hub resolves them against this conversation's own jobs
+        ...(flags['may-read'] !== undefined ? { mayRead: flags['may-read'] === true ? '' : String(flags['may-read']) } : {}),
       };
       // REMINDER-INSTINCT SUPPORT (2.361.4, owner call): "scheduled run of a
       // bare echo" is a natural first way to build a reminder — but scheduled
@@ -342,7 +357,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       const q = flags.archived ? '?archived=1' : flags.mine ? '?mine=1' : flags.subscribed ? '?subscribed=1' : flags.all ? '?all=1' : '';
       const r = await call('GET', '/api/agent/jobs' + q);
       if (!r.jobs.length) return console.log(flags.archived ? 'no archived jobs visible to this session.' : flags.mine ? 'no jobs owned by this conversation.' : flags.subscribed ? 'no subscriptions from this conversation.' : 'no jobs visible to this session.');
-      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.archived ? ' (archived' + (j.archivedAt ? ' ' + atWords(j, 'archivedAt') : '') + ')' : ''}${j.mine ? ' ★mine' : ''}${j.mySubscription ? ' ✓sub' + (j.mySubscription.filter ? '/' + j.mySubscription.filter : '') : ''}${j.mine === false ? " · another conversation's" : ''}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + briefHead(j.context.payload) : ''}${j.publishedUrl ? ' ↗ ' + j.publishedUrl : j.publish && j.publishState ? ' ↗ ' + (j.publishState === 'failed' ? 'publish failed' : 'publishing…') : ''}`);
+      for (const j of r.jobs) console.log(`${j.id} [${j.kind}] ${j.state}${j.archived ? ' (archived' + (j.archivedAt ? ' ' + atWords(j, 'archivedAt') : '') + ')' : ''}${j.mine ? ' ★mine' : ''}${j.mySubscription ? ' ✓sub' + (j.mySubscription.filter ? '/' + j.mySubscription.filter : '') : ''}${j.mine === false ? " · another conversation's" : ''}${j.readByGrant ? ' · read by grant' : ''}${j.progress ? ' 「' + j.progress + '」' : ''} — ${j.name}${j.context && j.context.payload ? ' — ' + briefHead(j.context.payload) : ''}${j.publishedUrl ? ' ↗ ' + j.publishedUrl : j.publish && j.publishState ? ' ↗ ' + (j.publishState === 'failed' ? 'publish failed' : 'publishing…') : ''}`);
       if (flags.archived) console.log('(archived records keep runs/log/ack; poll/show/logs <id> still answer; rm <id> deletes for good)');
       break;
     }
@@ -350,7 +365,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (!pos[1]) { console.error('usage: vibespace-job show <id|name>'); process.exit(1); }
       const r = await call('GET', `/api/agent/jobs/${encodeURIComponent(pos[1])}`);
       const j = r.job;
-      console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : j.mine === false ? NOT_MINE : ''}${j.archived ? '  (ARCHIVED ' + (j.archivedWhy || '') + ')' : ''}`);
+      console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : j.mine === false ? NOT_MINE : j.readByGrant ? READ_BY_GRANT : ''}${j.archived ? '  (ARCHIVED ' + (j.archivedWhy || '') + ')' : ''}`);
       if (r.machine) console.log(`machine: ${r.machine} (a job runs on the hub's machine)`);   // B-70f9
       if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}${j.cmd.envKeys.length ? ' env:[' + j.cmd.envKeys.join(',') + ']' : ''}${j.envFrom.length ? ' envFrom:[' + j.envFrom.join(',') + ']' : ''}`);
       if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + atWords(j, 'nextFireAt') : ''}`);
@@ -360,6 +375,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (forYouLine(j)) console.log(forYouLine(j));
       if (memLine(j)) console.log(memLine(j));
       if (vaultLine(j)) console.log(vaultLine(j));
+      if (mayReadLine(j)) console.log(mayReadLine(j));   // B-3992
       console.log(`access: view=${j.access.view} control=${j.access.control}${j.access.lockedBy ? ' (locked by user)' : ''} · notify=${j.notify}${j.lastNotify ? ' last=' + j.lastNotify.lane + (j.lastNotify.ok ? '✓' : '✗') : ''} · subscribers=${j.subscribersCount}${j.mySubscription ? ' (you' + (j.mySubscription.filter ? ', filter=' + j.mySubscription.filter : '') + ')' : ''}`);
       if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
       if (pubLine(j)) console.log(pubLine(j));

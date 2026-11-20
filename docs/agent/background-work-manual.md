@@ -423,6 +423,27 @@ conversation's browser trace as the job's. Concretely:
   created it stopped; when the run ends its window closes and its lease is
   released. A finished job's token is refused `job_not_running`.
 
+### A job that reads its sibling jobs — `--may-read JOB,JOB` / `--may-read siblings`
+
+Inside a job, `vibespace-job list / poll / show / logs` reach ONLY that job — unless you gave it other jobs
+when you created it:
+
+```
+vibespace-job run "./watch.sh" --name watcher --may-read api-server,nightly-build   # these two (ids or names)
+vibespace-job run "./report.sh" --name report --may-read siblings                   # every job of this conversation
+```
+
+- **Read only.** The job may list them, `poll` / `show` them and read their `logs`; stopping, starting,
+  restarting or removing them (and every other verb on them) stays yours — refused by name inside the job.
+- **Only this conversation's jobs, never another conversation's.** The names are resolved against this
+  conversation's own jobs at create (a word that names none is refused, nothing created); `siblings` is
+  judged at every read: the jobs this conversation owns then, those created later included.
+- **Written at create, for good.** The grant is part of the job's record (`show` prints `may read: …`); to
+  change it, remove the job and create it again. A scheduled job's runs read what the schedule was given. A
+  notify cron runs no command and takes no `--may-read`.
+- **Without it nothing changes:** the job reads only itself. A poll of any other job answers, by name,
+  «this job may read only itself — give it the other jobs at create» and the command to type.
+
 ## 10. Picking the right tool (negative space)
 
 - Turn-scoped waits (a build, a test run) → your harness's background Bash/Monitor
