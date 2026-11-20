@@ -1178,7 +1178,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
   // it stands down for an open app dialog or for the person's act elsewhere); its body must still end in `view.focus()` (ChatView.focus →
   // ChatInput.focus, where the takeover guard is), never a focus of its own
   const SL = src('src/lib/session-lifecycle.js');
-  const lateFocusReaches = /export function lateFocus\(view, \{ win = null, since = PAGE_START \} = \{\}\) \{\n  if \(!view \|\| typeof view\.focus !== 'function' \|\| !mayTakeKeys\(\{ win, since \}\)\) return false;\n  view\.focus\(\);/.test(src('src/lib/late-focus.js')) && /import \{ lateFocus, openClock, PAGE_START \} from '\.\/late-focus\.js';/.test(SL);
+  const lateFocusReaches = /export function lateFocus\(view, \{ win = null, since = PAGE_START \} = \{\}\) \{\n  if \(!view \|\| typeof view\.focus !== 'function' \|\| !mayTakeKeys\(\{ win, since \}\)\) return false;\n  view\.focus\(\);/.test(src('src/lib/late-focus.js')) && /import \{ lateFocus, openClock, PAGE_START, unattendedOpen \} from '\.\/late-focus\.js';/.test(SL);
   ok((/chatView\.focus\(\)/.test(SL) || (/lateFocus\(chatView, \{ win: winInfo, since: openAt \}\)/.test(SL) && lateFocusReaches)) && /focus\(\) \{\n    if \(this\._chatInput\) this\._chatInput\.focus\(\);/.test(src('src/lib/chat-view.js')), '…and the two attach sites the study named (session-lifecycle chatView.focus, or its lateFocus wrapper whose body still calls view.focus()) reach the guard through ChatView.focus → ChatInput.focus (never a per-site patch)');
   const LW = src('src/lib/browser-live-window.js');
   // each document listener's registration = the text from its `document.addEventListener('<ev>'` to the next one

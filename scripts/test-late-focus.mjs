@@ -5,14 +5,18 @@
 // (src/lib/late-focus.js lateFocus / mayTakeKeys), and the person's acts are the page's own stamps (src/lib/utils.js lastPersonAct —
 // the two capture listeners, no listener of the door's own). A late focus that lost the race is DROPPED, never queued.
 //   §1 the verdict's table — and the base's rule (every late focus taken) refused by it
-//   §2 where an act lands: insideWindow over a stand-in frame (its own content, its chrome, another tab's content in the same frame)
+//   §2 where an act lands: insideWindow over a stand-in frame (its own content, its chrome, its own taskbar item; another tab's
+//      content in the same frame is elsewhere)
 //   §3 THE DOOR, driven: the page's two capture listeners caught on a stand-in window, the REAL door over stand-in views: the common
-//      road (the act that started the open), the race lost (a press, a key elsewhere), a press inside the opening window, a boot
-//      restore, a replay, the predicate form
-//   §4 THE CENSUS: every focus after an await in the page's code (src/lib, read by acorn: after an await in its own function, or in a
-//      callback handed to then / finally / catch / setTimeout / requestAnimationFrame / queueMicrotask / a ws request) is through the
-//      door or NAMED with its why; every door site stands by its words; a RED CONTROL per site kind (its door call planted back to a
-//      bare focus — red at its file and line, or its pin red)
+//      road (the act that started the open — a pressed resume too, whatever ids it reuses), the race lost (a press, a key typed into a
+//      box elsewhere), what is NO act (a modifier alone, a key on the page's body, a synthetic event), a press inside the opening window
+//      or on its own taskbar item, an embedded page holding the keys, the open's fact (a boot, another device's record, a quiet open),
+//      the predicate form
+//   §4 THE CENSUS (r364 MUST 2): every focus after an await, a timer or a reply in the page's code (src/lib, read by acorn: after an
+//      await in its function, in a callback handed to then / finally / catch / setTimeout / rAF / queueMicrotask / a ws request /
+//      onGlobal, or inside a function CALLED from such a place or registered by name — followed within its file) is through the door,
+//      or NAMED: file by file with its count, and in the window, chat and terminal code by its words with how many times; a new one, a
+//      changed count or a row no call carries is red BY NAME; the door's sites stand by their words; RED CONTROLS plant each kind
 // The heavy twin: scripts/test-late-focus-chrome.mjs (a real page: a window opened, another clicked while it opens, typed).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,6 +36,7 @@ const HANDLERS = {};
 globalThis.window = { addEventListener: (type, fn) => { (HANDLERS[type] ||= []).push(fn); } };
 const KY = await import('../src/lib/keyboard-yield.js');
 const LF = await import('../src/lib/late-focus.js');
+const UT = await import('../src/lib/utils.js');
 // …and a stand-in document only AFTER the imports (utils.js installs its tooltip at import when a document exists); the door reads
 // it when it is called: no app dialog open, nothing focused
 globalThis.document = { querySelectorAll: () => [], activeElement: null };
@@ -56,174 +61,312 @@ ok(baseFails.length === 3, `CONTROL: the base's rule (every late focus taken) is
 
 console.log('§2 where an act lands (late-focus.js insideWindow)');
 class N {
-  constructor(cls = '') { this.cls = cls; this.kids = []; this.parent = null; }
+  constructor(cls = '', tag = 'DIV') { this.cls = cls; this.tagName = tag; this.kids = []; this.parent = null; this.dataset = {}; }
   add(...ks) { for (const k of ks) { k.parent = this; this.kids.push(k); } return this; }
   contains(x) { for (let n = x; n; n = n.parent) if (n === this) return true; return false; }
-  querySelectorAll(sel) { const want = sel.replace(/^\./, ''), out = []; const walk = (n) => { for (const k of n.kids) { if (k.cls === want) out.push(k); walk(k); } }; walk(this); return out; }
+  matches(sel) { if (sel === '[data-win-id]') return this.dataset.winId != null; return sel.split(',').map((x) => x.trim().replace(/^\./, '')).includes(this.cls); }
+  closest(sel) { for (let n = this; n; n = n.parent) if (n.matches(sel)) return n; return null; }
+  querySelectorAll(sel) { const out = []; const walk = (n) => { for (const k of n.kids) { if (k.matches(sel)) out.push(k); walk(k); } }; walk(this); return out; }
 }
 const frame = new N('window'), title = new N('window-titlebar'), contA = new N('window-content'), contB = new N('window-content');
-const inA = new N('chat-input'), inB = new N('chat-input'), outside = new N('sidebar');
+const inA = new N('chat-input', 'TEXTAREA'), inB = new N('chat-input', 'TEXTAREA'), outside = new N('sidebar');
 frame.add(title, contA.add(inA), contB.add(inB));
-const WA = { element: frame, content: contA }, WB = { element: frame, content: contB };
+const taskbar = new N('taskbar'), itemA = new N('taskbar-item'), itemOther = new N('taskbar-item');
+itemA.dataset.winId = 'wA'; itemOther.dataset.winId = 'wZ'; taskbar.add(itemA, itemOther);
+const WA = { id: 'wA', element: frame, content: contA }, WB = { id: 'wB', element: frame, content: contB };
 const where = [
   ['a press in its own content', LF.insideWindow(WA, inA), true],
   ['a press on its frame\'s title bar', LF.insideWindow(WA, title), true],
   ['a press in ANOTHER tab\'s content of the same frame', LF.insideWindow(WA, inB), false],
   ['…which is inside that other tab', LF.insideWindow(WB, inB), true],
+  ['a press on its OWN taskbar item (raising it while it opens)', LF.insideWindow(WA, itemA), true],
+  ['a press on ANOTHER window\'s taskbar item', LF.insideWindow(WA, itemOther), false],
   ['a press outside the frame (the sidebar)', LF.insideWindow(WA, outside), false],
   ['a part of a window given as { content }', LF.insideWindow({ content: contA }, inA), true],
   ['no window: nothing is inside', LF.insideWindow(null, inA), false],
 ];
 const badWhere = where.filter(([, g, w]) => g !== w).map(([n, g]) => `${n}: ${g}`);
-ok(badWhere.length === 0, `insideWindow's ${where.length} rows: a window's own content and chrome are inside; another tab's content in the same frame is elsewhere`, badWhere);
+ok(badWhere.length === 0, `insideWindow's ${where.length} rows: a window's own content, its chrome and its own taskbar item are inside; another tab's content in the same frame, another window's item, the sidebar are elsewhere`, badWhere);
 
 console.log('§3 THE DOOR, driven (the page\'s capture listeners on a stand-in window, the real door)');
 ok((HANDLERS.pointerdown || []).length === 1 && (HANDLERS.keydown || []).length === 1, `the person's acts ride the page's two capture listeners (pointerdown ${(HANDLERS.pointerdown || []).length}, keydown ${(HANDLERS.keydown || []).length}) — the door adds none`);
-const pressAt = (target) => HANDLERS.pointerdown.forEach((h) => h({ target }));
-const keyAt = (target, key = 'x') => HANDLERS.keydown.forEach((h) => h({ target, key }));
+const pressAt = (target, extra = {}) => HANDLERS.pointerdown.forEach((h) => h({ target, ...extra }));
+const keyAt = (target, key = 'x', extra = {}) => HANDLERS.keydown.forEach((h) => h({ target, key, ...extra }));
 const view = () => ({ n: 0, focus() { this.n++; } });
-const sidebar = new N('session-row'), frameC = new N('window'), contC = new N('window-content'), composerC = new N('chat-input');
+const sidebar = new N('session-row'), frameC = new N('window'), contC = new N('window-content'), composerC = new N('chat-input', 'TEXTAREA');
 frameC.add(contC.add(composerC));
-const WC = { element: frameC, content: contC };
+const WC = { id: 'wC', element: frameC, content: contC };
 const boot = view();
 ok(LF.lateFocus(boot, { win: WC, since: LF.PAGE_START }) === true && boot.n === 1, 'a boot restore before the person acted on the page takes the keys (the start is the page\'s)');
 pressAt(sidebar); await tick();
 const t1 = LF.openClock(); const v1 = view(); await tick();
 ok(LF.lateFocus(v1, { win: WC, since: t1 }) === true && v1.n === 1, 'THE COMMON ROAD: the press that started the open (a sidebar row), then nothing else — the new window gets the keys, as before');
+// MUST 1 (r364): a PRESSED RESUME reuses its row's id — its start is still NOW (the fact, not the id): the press on the old window's
+// Resume button (detached by the reopen) lies before it, so the resumed composer takes the keys
+const oldWin = new N('window'), resumeBtn = new N('resume-bar'); oldWin.add(resumeBtn);
+pressAt(resumeBtn); oldWin.kids.length = 0; resumeBtn.parent = null; await tick();
+const resumeAt = LF.unattendedOpen({ layoutManager: { _booting: false, _applying: false } }, false) ? LF.PAGE_START : LF.openClock(); const vR = view(); await tick();
+ok(resumeAt > 0 && LF.lateFocus(vR, { win: WC, since: resumeAt }) === true && vR.n === 1, 'MUST 1: a PRESSED RESUME (it reuses its row\'s id) starts NOW — the press on the old window\'s Resume button counts as inside it, the resumed composer takes the keys');
+const facts = [
+  ['a pressed open (no boot, no other device\'s record, not quiet)', LF.unattendedOpen({ layoutManager: {} }, false), false],
+  ['the layout\'s boot restore while it runs (the splash over the page)', LF.unattendedOpen({ layoutManager: { _booting: true, _bootRestoring: true } }, false), true],
+  // the boot's 5 s AUTOSAVE tail: the restore ended, the splash is gone — a person's press opens windows there, and it is theirs
+  ['a pressed open in the boot\'s 5 s autosave tail (the restore ended)', LF.unattendedOpen({ layoutManager: { _booting: true, _bootRestoring: false } }, false), false],
+  ['a record from another device being applied', LF.unattendedOpen({ layoutManager: { _applying: true } }, false), true],
+  ['an open nobody pressed (quiet)', LF.unattendedOpen({ layoutManager: {} }, true), true],
+];
+const badFacts = facts.filter(([, g, w]) => g !== w).map(([n, g]) => `${n}: ${g}`);
+ok(badFacts.length === 0, `«nobody on this page started it» is a FACT of the page (${facts.length} rows: the boot restore, its tail, another device's record, quiet) — never the id an open reuses`, badFacts);
+// RED CONTROL: the round's first shape (the whole `_booting` span — the heavy page's ④ opened inside its tail and lost its keys)
+// misjudges the person's own open in the tail
+const firstShape = (app, quiet = false) => !!quiet || !!app?.layoutManager?._booting || !!app?.layoutManager?._applying;
+const tailRow = facts.find(([n]) => /autosave tail/.test(n));
+ok(firstShape({ layoutManager: { _booting: true, _bootRestoring: false } }, false) === true && !!tailRow && tailRow[1] === false,
+  'RED CONTROL: the whole `_booting` span calls a person\'s own open in the boot\'s tail «nobody\'s» (its start the page\'s: the press that opened it counts as elsewhere) — the tail row refuses it');
+// …and the page holds the fact where the restore runs: layout.js raises `_bootRestoring` with `_booting` before loadAutoSave's first
+// await and lowers it when the restore ends (where the resume-all collector is disarmed), BEFORE the 5 s autosave timer
+{
+  const L = read('src/lib/layout.js'), a = L.indexOf('  async loadAutoSave() {'), b = L.indexOf('\n  }\n', a), body = a < 0 || b < 0 ? '' : L.slice(a, b);
+  const up = body.indexOf('this._bootRestoring = true;'), firstAwait = body.indexOf('await '), down = body.indexOf('this._bootStoppedSessions = null; this._bootRestoring = false;'), tail = body.indexOf('setTimeout(() => { this._restoring = false; this._booting = false; }, 5000);');
+  ok(!!body && up > 0 && firstAwait > up && down > firstAwait && tail > down && /this\._booting = false; this\._bootRestoring = false;/.test(L.slice(0, a)),
+    'layout.js: the boot restore\'s own span — raised before loadAutoSave\'s first await, lowered when the restore ends and before the 5 s autosave tail; born false', { up, firstAwait, down, tail });
+}
 const t2 = LF.openClock(); await tick(); pressAt(inA); const v2 = view();
 ok(LF.lateFocus(v2, { win: WC, since: t2 }) === false && v2.n === 0, 'B-c87d: the open began, then the person PRESSED into another window\'s composer — the late focus is dropped, the keys stay there');
 await tick();
 ok(v2.n === 0, '…dropped, never queued: nothing focuses it later (the door keeps nothing)');
 const t3 = LF.openClock(); await tick(); keyAt(inA); const v3 = view();
-ok(LF.lateFocus(v3, { win: WC, since: t3 }) === false && v3.n === 0, 'the open began, then the person TYPED in another window — dropped');
-const t4 = LF.openClock(); await tick(); pressAt(composerC); const v4 = view();
-ok(LF.lateFocus(v4, { win: WC, since: t4 }) === true && v4.n === 1, 'the open began, then the person pressed INTO the opening window itself — taken');
-const v5 = view();
-ok(LF.lateFocus(v5, { win: WC, since: LF.PAGE_START }) === true && v5.n === 1, 'a replay whose last act was inside the window it focuses — taken');
-pressAt(inA); const v6 = view();
-ok(LF.lateFocus(v6, { win: WC, since: LF.PAGE_START }) === false && v6.n === 0, 'a replay (a remote apply, a boot restore) after the person acted elsewhere on the page — dropped');
-const t7 = LF.openClock(); await tick(); pressAt(inA);
-ok(LF.mayTakeKeys({ win: WC, since: t7 }) === false && LF.mayTakeKeys({ win: { element: frame, content: contA }, since: t7 }) === true, 'the predicate form (a view asking before it focuses itself, xpra-view\'s mayFocus): the same verdict');
+ok(LF.lateFocus(v3, { win: WC, since: t3 }) === false && v3.n === 0, 'the open began, then the person TYPED into another window\'s box — dropped');
+// THE RULING (r364): a key that lands nowhere is no act elsewhere
+const t4a = LF.openClock(); await tick(); keyAt(inA, 'Alt'); keyAt(inA, 'Meta'); keyAt(inA, 'Shift'); const v4a = view();
+ok(LF.lateFocus(v4a, { win: WC, since: t4a }) === true && v4a.n === 1, 'THE RULING: a modifier alone (Alt / Meta / Shift — switching programs while a slow attach runs) is no act: taken');
+globalThis.document.body = new N('body', 'BODY');
+const t4b = LF.openClock(); await tick(); keyAt(globalThis.document.body, 'h'); const v4b = view();
+ok(LF.lateFocus(v4b, { win: WC, since: t4b }) === true && v4b.n === 1, 'THE RULING: keys typed onto the page\'s body (typing straight after a row\'s press, before the window is there) are no act: taken');
+const t4c = LF.openClock(); await tick(); keyAt(inA, 'x', { isTrusted: false }); pressAt(inA, { isTrusted: false }); const v4c = view();
+ok(LF.lateFocus(v4c, { win: WC, since: t4c }) === true && v4c.n === 1, 'a SYNTHETIC key or press (isTrusted false) is no act of the person: taken');
+const keyRows = [['a letter into a box', UT.keyIsAct({ key: 'x', target: inA }), true], ['a modifier alone', UT.keyIsAct({ key: 'Control', target: inA }), false], ['onto the body', UT.keyIsAct({ key: 'x', target: globalThis.document.body }), false], ['onto a window\'s content', UT.keyIsAct({ key: 'Enter', target: contA }), true], ['untrusted', UT.keyIsAct({ key: 'x', target: inA, isTrusted: false }), false]];
+const badKeys = keyRows.filter(([, g, w]) => g !== w).map(([n, g]) => `${n}: ${g}`);
+ok(badKeys.length === 0, `keyIsAct's ${keyRows.length} rows: a key is an act only when it puts the keyboard somewhere`, badKeys);
+const t5 = LF.openClock(); await tick(); pressAt(composerC); const v5 = view();
+ok(LF.lateFocus(v5, { win: WC, since: t5 }) === true && v5.n === 1, 'the open began, then the person pressed INTO the opening window itself — taken');
+const itemC = new N('taskbar-item'); itemC.dataset.winId = 'wC'; taskbar.add(itemC);
+const t6 = LF.openClock(); await tick(); pressAt(itemC); const v6 = view();
+ok(LF.lateFocus(v6, { win: WC, since: t6 }) === true && v6.n === 1, 'the open began, then the person pressed its OWN taskbar item (raising it while it opens) — taken');
+const frameEl = new N('browser-frame', 'IFRAME'); outside.add(frameEl);
+globalThis.document.activeElement = frameEl; const t7 = LF.openClock(); await tick(); const v7 = view();
+ok(LF.lateFocus(v7, { win: WC, since: t7 }) === false && v7.n === 0, 'an EMBEDDED PAGE outside the opening window holds the keys (a press into a frame the page\'s listeners never see) — dropped');
+globalThis.document.activeElement = null;
+pressAt(inA); await tick();   // the person's last act: a press ELSEWHERE (the rows above ended inside C: its own taskbar item)
+const v8 = view();
+ok(LF.lateFocus(v8, { win: WC, since: LF.PAGE_START }) === false && v8.n === 0, 'a boot restore or another device\'s record (since = the page start) after the person acted elsewhere on the page — dropped');
+const t9 = LF.openClock(); await tick(); pressAt(inA);
+ok(LF.mayTakeKeys({ win: WC, since: t9 }) === false && LF.mayTakeKeys({ win: { element: frame, content: contA }, since: t9 }) === true, 'the predicate form (a view asking before it focuses itself, xpra-view\'s mayFocus): the same verdict');
 ok(LF.lateFocus(null, { win: WC, since: 0 }) === false, 'no view: nothing focused, nothing thrown');
 
-console.log('§4 THE CENSUS: every focus after an await in the page\'s code');
+console.log('§4 THE CENSUS: every focus after an await, a timer or a reply in the page\'s code — by file, by words, by count');
 const LATE_CB = new Set(['then', 'finally', 'catch', 'setTimeout', 'requestAnimationFrame', 'queueMicrotask', 'request', 'onGlobal']);
-const PARSED = new Map();   // file → { src, out }: a plant re-reads only the file it changes (the census runs once per control)
-const lateFocusesOf = (file, src) => {
-  const hit = PARSED.get(file); if (hit && hit.src === src) return hit.out;
-  const out = lateFocusesRead(src); PARSED.set(file, { src, out }); return out;
-};
-const lateFocusesRead = (src) => {
+const PARSED = new Map();   // file → { src, out }: a plant re-reads only the file it changes
+const lateFocusesOf = (file, src) => { const hit = PARSED.get(file); if (hit && hit.src === src) return hit.out; const out = lateFocusesRead(src); PARSED.set(file, { src, out }); return out; };
+// a focus is LATE when it runs after an await in its own function, inside a callback handed to a late registration, or inside a
+// function that is CALLED from such a place or registered BY NAME (`ws.onGlobal(this._handler)`) — followed within its file to a
+// fixpoint (the upload's insert after the upload's await; a reply's dispatch). A call inside the door's own arguments
+// (`lateFocus({ focus: () => … })`) is through the door; the name `focus` itself is never followed (every focus call is one).
+function lateFocusesRead(src) {
   let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true }); } catch (e) { return { parseError: e.message, calls: [] }; }
-  const calls = [];
-  const walk = (node, ctx) => {
+  const fns = [], byName = new Set();
+  const nameOf = (node, parent) => {
+    if (parent && (parent.type === 'MethodDefinition' || parent.type === 'Property') && parent.key) return parent.key.name || parent.key.value || null;
+    if (parent && parent.type === 'VariableDeclarator' && parent.id && parent.id.type === 'Identifier') return parent.id.name;
+    if (parent && parent.type === 'AssignmentExpression' && parent.left) { const l = parent.left; return l.type === 'MemberExpression' ? (l.property && l.property.name) : l.name; }
+    return (node.id && node.id.name) || null;
+  };
+  const walk = (node, ctx, parent) => {
     if (!node || typeof node.type !== 'string') return;
     let c = ctx;
-    if (/Function/.test(node.type)) c = { awaitAt: -1, lateCb: !!ctx.passLate, passLate: false };
-    if (node.type === 'AwaitExpression' && (c.awaitAt < 0 || node.start < c.awaitAt)) c.awaitAt = node.start;
+    if (/Function/.test(node.type)) { const f = { name: nameOf(node, parent), lateRoot: !!ctx.passLate, calls: [], focuses: [] }; fns.push(f); c = { fn: f, awaitAt: -1, lateCb: !!ctx.passLate, passLate: false, door: !!ctx.door }; }
+    if (node.type === 'AwaitExpression' && c.fn && (c.awaitAt < 0 || node.start < c.awaitAt)) c.awaitAt = node.start;
     if (node.type === 'CallExpression') {
       const ce = node.callee, name = ce.type === 'MemberExpression' ? ce.property && ce.property.name : ce.name;
-      if (name === 'focus' && ce.type === 'MemberExpression' && (c.lateCb || (c.awaitAt >= 0 && c.awaitAt < node.start))) calls.push({ line: node.loc.start.line, text: src.slice(node.start, node.end).replace(/\s+/g, ' ') });
-      walk(ce, c);
-      for (const a of node.arguments) walk(a, { ...c, passLate: LATE_CB.has(name) && /Function/.test(a.type) });
+      const lexLate = c.lateCb || (c.awaitAt >= 0 && c.awaitAt < node.start);
+      if (c.fn && name && name !== 'focus') c.fn.calls.push({ name, late: lexLate });
+      if (name === 'focus' && ce.type === 'MemberExpression' && c.fn && !c.door) c.fn.focuses.push({ line: node.loc.start.line, text: src.slice(node.start, node.end).replace(/\s+/g, ' '), lexLate });
+      if (LATE_CB.has(name)) for (const a of node.arguments) { if (a.type === 'MemberExpression' && a.property) byName.add(a.property.name); else if (a.type === 'Identifier') byName.add(a.name); }
+      walk(ce, c, node);
+      const door = c.door || name === 'lateFocus' || name === 'mayTakeKeys';
+      for (const a of node.arguments) walk(a, { ...c, door, passLate: LATE_CB.has(name) && /Function/.test(a.type) }, node);
       return;
     }
-    for (const k of Object.keys(node)) { if (k === 'loc') continue; const v = node[k]; if (Array.isArray(v)) v.forEach((x) => walk(x, c)); else if (v && typeof v.type === 'string') walk(v, c); }
+    for (const k of Object.keys(node)) { if (k === 'loc') continue; const v = node[k]; if (Array.isArray(v)) v.forEach((x) => walk(x, c, node)); else if (v && typeof v.type === 'string') walk(v, c, node); }
   };
-  walk(ast, { awaitAt: -1, lateCb: false, passLate: false });
+  walk(ast, { fn: null, awaitAt: -1, lateCb: false, passLate: false, door: false }, null);
+  const late = new Set(); for (const f of fns) if (f.name && (f.lateRoot || byName.has(f.name))) late.add(f.name);
+  for (let changed = true, i = 0; changed && i < 30; i++) { changed = false;
+    for (const f of fns) { const fnLate = f.lateRoot || (f.name && late.has(f.name)); for (const k of f.calls) if ((k.late || fnLate) && !late.has(k.name) && fns.some((g) => g.name === k.name)) { late.add(k.name); changed = true; } } }
+  const calls = [];
+  for (const f of fns) { const fnLate = f.lateRoot || (f.name && late.has(f.name)); for (const x of f.focuses) if (x.lexLate || fnLate) calls.push({ line: x.line, text: x.text }); }
   return { calls };
-};
-// the files where a composer, a terminal or a view that takes typing lives, or a window opens: each late focus there is named BY ITS
-// WORDS with its why; anywhere else a late focus is a dialog's, a form's or a panel's own field, named BY ITS FILE with its why
-const CLASS_FILES = new Set(['src/lib/session-lifecycle.js', 'src/lib/app.js', 'src/lib/chat-view.js', 'src/lib/chat-input.js', 'src/lib/chat-renderers.js', 'src/lib/chat-status-bar.js', 'src/lib/chat-minimap.js',
-  'src/lib/terminal.js', 'src/lib/external-editor.js', 'src/lib/desktop-app-window.js', 'src/lib/xpra-view.js', 'src/lib/vnc-view.js', 'src/lib/internal-link-ui.js', 'src/lib/taskbar.js', 'src/lib/command-mode.js',
-  'src/lib/window.js', 'src/lib/tab-group.js', 'src/lib/desktop-manager.js', 'src/lib/layout.js', 'src/lib/design-window.js', 'src/lib/channel-thread-pane.js', 'src/lib/doc-window-ui.js',
-  'src/lib/browser-live-window.js', 'src/lib/browser-replay-window.js', 'src/lib/machine-desktop.js', 'src/lib/search-window.js', 'src/lib/inbox-window.js']);
-const NAMED = [   // [file, the call's words, why]
-  ['src/lib/chat-renderers.js', 'input.focus()', 'the language picker\'s own search box, in the next task of the person\'s open'],
-  ['src/lib/chat-status-bar.js', 'ta.focus()', 'the design-list popover\'s own box, in the next task of the person\'s open'],
-  ['src/lib/chat-status-bar.js', 'input.focus()', 'the goal popover\'s own field, in the next task of the person\'s open'],
-  ['src/lib/chat-minimap.js', 'filter.focus()', 'the minimap search\'s own filter, a frame after the person\'s open'],
-  ['src/lib/taskbar.js', "rows[0])?.focus()", 'the group chooser\'s own rows (a popover), a frame after the person\'s open'],
-  ['src/lib/design-window.js', 'name.focus()', 'the design window\'s own name field (its form), in the next task of the person\'s act'],
-  ['src/lib/design-window.js', 'composer.ta.focus()', 'the comment box the person\'s pick just drew, in the next task of that pick'],
-  ['src/lib/session-lifecycle.js', 'ta.focus()', 'the fork dialog\'s first-message box, in the next task of the person\'s open'],
-  ['src/lib/doc-window-ui.js', 'S.ed.commands.focus()', 'the document editor taking back the keys its own link dialog borrowed (the person\'s answer in that dialog)'],
-  ['src/lib/doc-window-ui.js', 'S.ed.chain().focus()', 'the same, for the link and the image the person\'s answer inserts'],
-  ['src/lib/doc-window-ui.js', 'hrefIn.focus()', 'the link bar\'s own address field, in the next task of the person\'s open'],
-  ['src/lib/doc-window-ui.js', 'f.contentWindow.focus()', 'the hidden print frame, for the print dialog the person asked for — not a typing target'],
-  ['src/lib/doc-window-ui.js', 'ta.focus()', 'the comment box the person\'s press opened, in the next task of that press'],
-  ['src/lib/machine-desktop.js', '(user || pass).focus()', 'the desktop\'s own sign-in form field, in the next task of the form\'s draw'],
-  ['src/lib/browser-replay-window.js', 'root.focus(', 'the replay\'s own root for its playback keys, after its own load — not a typing target'],
-  ['src/lib/search-window.js', 'box.focus()', 'the search window\'s own query box after its own act — a field of the window the person is in'],
-  ['src/lib/inbox-window.js', 'list.focus(', 'the For-you window\'s own list after its load — a list takes no typing'],
+}
+const CLASS_FILES = new Set(["src/lib/session-lifecycle.js", "src/lib/app.js", "src/lib/chat-view.js", "src/lib/chat-input.js", "src/lib/chat-renderers.js", "src/lib/chat-status-bar.js", "src/lib/chat-minimap.js", "src/lib/terminal.js", "src/lib/external-editor.js", "src/lib/desktop-app-window.js", "src/lib/xpra-view.js", "src/lib/vnc-view.js", "src/lib/internal-link-ui.js", "src/lib/taskbar.js", "src/lib/command-mode.js", "src/lib/window.js", "src/lib/tab-group.js", "src/lib/desktop-manager.js", "src/lib/layout.js", "src/lib/design-window.js", "src/lib/channel-thread-pane.js", "src/lib/doc-window-ui.js", "src/lib/browser-live-window.js", "src/lib/browser-replay-window.js", "src/lib/machine-desktop.js", "src/lib/search-window.js", "src/lib/inbox-window.js"]);
+const NAMED = [   // [file, the call's words, how many times, why] — the window, chat and terminal code (measured: r364)
+  ["src/lib/browser-live-window.js", "addrInput.focus({ preventScroll: true })", 1, "the live view's own address field, redrawn by its own mode change — the live view's keyboard model (keyboard-yield's ky.yielded) owns its keys"],
+  ["src/lib/browser-live-window.js", "sk.focus({ preventScroll: true })", 1, "the live view's own key sink, taken back only by its own keyboard model (ky.yielded gives the keys back on the person's press elsewhere)"],
+  ["src/lib/browser-live-window.js", "tgt.focus({ preventScroll: true })", 1, "the live view's own page dialog box (its own focusDialog), inside the live view's keyboard model"],
+  ["src/lib/browser-replay-window.js", "root.focus({ preventScroll: true })", 1, "the replay's own root for its playback keys, after its own load — not a typing target"],
+  ["src/lib/channel-thread-pane.js", "ta.focus()", 1, "the thread pane's composer redrawn by drawFoot: it focuses only when keepFocus is passed, by pick() — the person's own press, in the same task"],
+  ["src/lib/chat-minimap.js", "filter.focus()", 1, "the minimap search's own filter, a frame after the person's open of it"],
+  ["src/lib/chat-renderers.js", "input.focus()", 1, "the language picker's own search box, in the next task of the person's open"],
+  ["src/lib/chat-status-bar.js", "ta.focus()", 1, "the design-list popover's own box, in the next task of the person's open"],
+  ["src/lib/chat-status-bar.js", "input.focus()", 1, "the goal popover's own field, in the next task of the person's open"],
+  ["src/lib/chat-view.js", "needsFocus.focus({ preventScroll: true })", 1, "the needs card's reply box giving the focus BACK to the box that held it when its record was re-drawn — where the person put it"],
+  ["src/lib/design-window.js", "name.focus()", 1, "the design window's own name field (its form), in the next task of the person's act"],
+  ["src/lib/design-window.js", "composer.ta.focus()", 1, "the comment box the person's pick just drew, in the next task of that pick"],
+  ["src/lib/doc-window-ui.js", "ta.focus()", 2, "the document's own comment boxes the person's press opened (the next task of that press)"],
+  ["src/lib/doc-window-ui.js", "S.ed.chain().focus()", 3, "the document editor taking back the keys its own dialogs and its own run borrowed (the link, the image, a command the person's answer runs)"],
+  ["src/lib/doc-window-ui.js", "hrefIn.focus()", 1, "the link bar's own address field, in the next task of the person's open"],
+  ["src/lib/doc-window-ui.js", "S.ed.commands.focus()", 1, "the document editor taking back the keys its own link dialog borrowed (the person's answer in that dialog)"],
+  ["src/lib/doc-window-ui.js", "f.contentWindow.focus()", 1, "the hidden print frame, for the print dialog the person asked for — not a typing target"],
+  ["src/lib/inbox-window.js", "pane.focus({ preventScroll: true })", 1, "the For-you window's own pane (its focusHome), a list or a pane — no typing target"],
+  ["src/lib/inbox-window.js", "list.focus({ preventScroll: true })", 2, "the For-you window's own list after its load or its focusHome — a list takes no typing"],
+  ["src/lib/machine-desktop.js", "(user || pass).focus()", 1, "the desktop's own sign-in form field, once the form queue shows it (visible; the person's own open)"],
+  ["src/lib/search-window.js", "box.focus()", 2, "the search window's own query box after its own act — a field of the window the person is in"],
+  ["src/lib/session-lifecycle.js", "ta.focus()", 1, "the fork dialog's first-message box, in the next task of the person's open"],
+  ["src/lib/taskbar.js", "(rows.find((r) => r.classList.contains('active')) || rows[0])?.focus()", 1, "the group chooser's own rows (a popover), a frame after the person's open"],
 ];
+const BY_FILE = {   // file → [how many late focuses, why] — everywhere else in src/lib (measured: r364)
+  "src/lib/app-install-dialog.js": [4, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/browser-exit-dialog.js": [3, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page; the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/browser-new-profile.js": [4, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page; its own field in a callback of its own open; the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/browser-proxy-dialog.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page; the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/browser-proxy-field.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/browser-who-dialog.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field in a callback of its own open; the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/bulk-resume.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/channel-filter-editor.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/channel-group-dialogs.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/channel-outbox.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/channel-webhook.js": [3, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): the form's own field once the form queue shows the form (visible; the person's own open); its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/channels-panel.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/design-ask.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/design-home.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/desktop-app-launcher.js": [4, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page; a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in); its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/desktop-picker.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/form-window.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/gear-menu.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/learn-card.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field in a callback of its own open"],
+  "src/lib/manage-agents.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/mounts-dialog.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page"],
+  "src/lib/open-with.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/path-field.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page"],
+  "src/lib/picture-shell.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/plugins-ui.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/principal-picker.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/provider-wizard.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/reaction-picker.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/record-clear-ui.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/refresh-live.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/session-palette.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/settings-ui.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field in a callback of its own open; a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/setup-flows.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page"],
+  "src/lib/sidebar-mounts.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field in a callback of its own open; the form's own field once the form queue shows the form (visible; the person's own open)"],
+  "src/lib/task-detail.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/task-log.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in)"],
+  "src/lib/utils.js": [6, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field in a callback of its own open; its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/vault-automation.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/vault-login-row.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/vault-paste-box.js": [4, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): a field or a row of the panel itself, in a method its own render or answer runs (the panel the person is in); the form's own field once the form queue shows the form (visible; the person's own open); its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/vault-reveal.js": [2, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page; its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/vault-totp-row.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/vault-unlock.js": [4, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field after its own answer (a check or a read the person's act asked for), the dialog standing over the page; its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/voice-teach-ui.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): its own field or row, a timer or a frame after the person's own open of it"],
+  "src/lib/window-share.js": [1, "a dialog's, a form's or a panel's own field (not a composer, a terminal or a view that takes typing): the form's own field once the form queue shows the form (visible; the person's own open)"],
+};
 const PAGE = new Map((function walk(d) { const out = []; for (const e of fs.readdirSync(path.join(repo, d), { withFileTypes: true })) { const r = `${d}/${e.name}`; if (e.isDirectory()) out.push(...walk(r)); else if (e.name.endsWith('.js') && !/^i18n-/.test(e.name)) out.push(r); } return out; })('src/lib').map((f) => [f, read(f)]));
-const DIALOG_FILE_WHY = 'a dialog\'s, a form\'s or a panel\'s own field, focused in the next task of the person\'s own open of it (not a composer, a terminal or a view that takes typing)';
 const census = (files) => {
-  const r = { files: 0, late: 0, named: 0, byFile: 0, unnamed: [], parse: [] };
+  const r = { files: 0, late: 0, unnamed: [], miscount: [], stale: [], parse: [] }, seenNamed = new Set(), seenFile = new Set();
   for (const [f, s] of files) {
     if (f === 'src/lib/late-focus.js') continue;   // THE door's own focus
     const { calls, parseError } = lateFocusesOf(f, s);
     if (parseError) { r.parse.push(`${f}: ${parseError}`); continue; }
     if (!calls.length) continue;
-    r.files++;
-    for (const c of calls) {
-      r.late++;
-      if (CLASS_FILES.has(f)) { if (NAMED.some(([nf, words]) => nf === f && c.text.includes(words))) r.named++; else r.unnamed.push(`${f}:${c.line} ${c.text.slice(0, 70)}`); }
-      else r.byFile++;
+    r.files++; r.late += calls.length;
+    if (CLASS_FILES.has(f)) {
+      const by = new Map(); for (const c of calls) { if (!by.has(c.text)) by.set(c.text, []); by.get(c.text).push(c.line); }
+      for (const [text, lines] of by) { const row = NAMED.find(([nf, w]) => nf === f && w === text);
+        if (!row) for (const ln of lines) r.unnamed.push(`${f}:${ln} ${text.slice(0, 70)}`);
+        else { seenNamed.add(row); if (row[2] !== lines.length) r.miscount.push(`${f} «${text.slice(0, 50)}» ×${lines.length} (named ×${row[2]}: lines ${lines.join(', ')})`); } }
+    } else {
+      const row = BY_FILE[f];
+      if (!row) for (const c of calls) r.unnamed.push(`${f}:${c.line} ${c.text.slice(0, 70)}`);
+      else { seenFile.add(f); if (row[0] !== calls.length) r.miscount.push(`${f} ×${calls.length} (named ×${row[0]}: lines ${calls.map((c) => c.line).join(', ')})`); }
     }
   }
+  for (const row of NAMED) if (!seenNamed.has(row) && files.has(row[0])) r.stale.push(`${row[0]} «${row[1].slice(0, 50)}» (named, no late call carries it)`);
+  for (const f of Object.keys(BY_FILE)) if (!seenFile.has(f) && files.has(f)) r.stale.push(`${f} (named, no late call in it)`);
   return r;
 };
 const C0 = census(PAGE);
+const total = NAMED.reduce((n, x) => n + x[2], 0) + Object.values(BY_FILE).reduce((n, x) => n + x[0], 0);
 ok(C0.parse.length === 0, `the census reads every file of src/lib (${PAGE.size} files)`, C0.parse);
-ok(C0.late > 50 && C0.unnamed.length === 0, `every focus after an await in the page's code is through the door or named: ${C0.late} late focuses in ${C0.files} files — ${C0.named} named by their words in the window, chat and terminal code, ${C0.byFile} elsewhere (${DIALOG_FILE_WHY})${C0.unnamed.length ? ` — NOT NAMED: ${C0.unnamed.join(' · ')}` : ''}`, C0.unnamed);
-// THE DOOR'S SITES, each by its words (a site that loses its door call is red here even where the census cannot see it late)
+ok(C0.unnamed.length === 0 && C0.miscount.length === 0 && C0.stale.length === 0 && C0.late === total,
+  `every late focus in the page's code is through the door or NAMED: ${C0.late} in ${C0.files} files — ${NAMED.reduce((n, x) => n + x[2], 0)} in the window, chat and terminal code by their words (${NAMED.length} rows, each with its count), ${Object.values(BY_FILE).reduce((n, x) => n + x[0], 0)} in ${Object.keys(BY_FILE).length} other files by file and count${C0.unnamed.length ? ` — NOT NAMED: ${C0.unnamed.join(' · ')}` : ''}${C0.miscount.length ? ` — COUNT MOVED: ${C0.miscount.join(' · ')}` : ''}${C0.stale.length ? ` — STALE: ${C0.stale.join(' · ')}` : ''}`, { unnamed: C0.unnamed, miscount: C0.miscount, stale: C0.stale });
+ok(!/(syncId|replay)(\s*\|\|\s*machine)?\)?\s*\?\s*PAGE_START/.test(read('src/lib/session-lifecycle.js') + read('src/lib/desktop-app-window.js')), 'MUST 1: no open reads «nobody started it» off an id — session-lifecycle and desktop-app-window ask unattendedOpen (the boot, another device\'s record, quiet)');
+// THE DOOR'S SITES, each by its words (a site that loses its door call is red here even where the census cannot see it)
 const SITES = [   // [file, the words, how many, the kind]
-  ['src/lib/session-lifecycle.js', 'lateFocus(chatView, { win: winInfo, since: openAt })', 2, 'a session answer (create, attach) — chat'],
-  ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: winInfo, since: openAt })', 3, 'a session answer (create, attach, the tmux view) — terminal'],
-  ['src/lib/session-lifecycle.js', 'const openAt = syncId ? PAGE_START : openClock();', 1, 'the create\'s start (a replay: the page\'s)'],
-  ['src/lib/session-lifecycle.js', 'const openAt = (syncId || machine) ? PAGE_START : openClock();', 1, 'the attach\'s start (a replay or a machine\'s restore: the page\'s)'],
-  ['src/lib/session-lifecycle.js', 'const openAt = replay ? PAGE_START : openClock();', 1, 'the tmux view\'s start'],
-  ['src/lib/session-lifecycle.js', 'if (replay) lateFocus(term, { win: this.wm.windows.get(winId), since: PAGE_START });', 1, 'a replay\'s focus of a standing window'],
+  ['src/lib/session-lifecycle.js', 'lateFocus(chatView, { win: winInfo, since: openAt })', 1, 'the create\'s answer — chat'],
+  ['src/lib/session-lifecycle.js', 'lateFocus(chatView, { win: winInfo, since: winInfo._lateFocusSince ?? openAt })', 1, 'the attach\'s answer — chat (its start renewed by a re-press)'],
+  ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: winInfo, since: openAt })', 2, 'the create\'s answer and the tmux view\'s — terminal'],
+  ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: winInfo, since: winInfo._lateFocusSince ?? openAt })', 1, 'the attach\'s answer — terminal'],
+  ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : openClock() })', 1, 'a standing window\'s focus (a person\'s open: now; nobody\'s: the page\'s start)'],
+  ['src/lib/session-lifecycle.js', 'if (!unattended) w._lateFocusSince = openClock();', 1, 'a re-press while it attaches renews the start'],
+  ['src/lib/session-lifecycle.js', 'unattendedOpen(this, quiet) ? PAGE_START : openClock()', 1, 'the create\'s start: the fact, never the id'],
   ['src/lib/chat-input.js', 'since: this._picAddAt });', 1, 'the composer after a picture\'s read'],
+  ['src/lib/chat-input.js', "{ win: { content: ta.closest('.window-content, .window') || ta.parentElement }, since });", 1, 'the composer after an upload (r364 MUST 3)'],
+  ['src/lib/chat-view.js', 'const focusBack = () => lateFocus(this._chatInput, { win: this.winInfo, since: Number.isFinite(bound.at) ? bound.at : PAGE_START });', 1, 'the rewind answer\'s restored words (r364)'],
+  ['src/lib/chat-view.js', "if (put === 'restored') focusBack();", 3, 'the rewind answer\'s three roads'],
   ['src/lib/terminal.js', 'lateFocus({ focus: () => this.terminal.focus() }, { win: this.winInfo, since: at })', 3, 'the terminal after a paste\'s upload or clipboard read'],
+  ['src/lib/terminal.js', 'const take = (el) => lateFocus({ focus: () => el.focus() }, { win: this.winInfo, since: since ?? openClock() });', 1, 'the paste pad after the clipboard refused'],
   ['src/lib/external-editor.js', 'lateFocus({ focus: () => termSession.terminal.focus() }, { win: targetWinInfo, since: at })', 2, 'the terminal after the editor\'s close'],
   ['src/lib/external-editor.js', 'lateFocus(editorView, { win: targetWinInfo, since: openAt })', 1, 'the editor pane after its open'],
   ['src/lib/desktop-app-window.js', 'lateFocus(view, { win: winInfo, since: at })', 2, 'the app\'s view after a take-over\'s lease'],
-  ['src/lib/desktop-app-window.js', 'mayTakeKeys({ win: winInfo, since: openAt })', 1, 'the app\'s picture on connect (xpra-view\'s mayFocus)'],
+  ['src/lib/desktop-app-window.js', '(!first || mayTakeKeys({ win: winInfo, since: openAt }))', 1, 'the app\'s picture on its FIRST connect'],
   ['src/lib/desktop-app-window.js', 'lateFocus(handle, { win: winInfo, since: satAt })', 1, 'a satellite window bound late'],
   ['src/lib/app.js', 'if (session && since !== undefined) lateFocus(session, { win, since });', 1, 'a go-to that lands after an await'],
   ['src/lib/internal-link-ui.js', 'app.goToWinId(w, { since: at })', 1, 'the link door\'s other-desktop go-to'],
   ['src/lib/channel-thread-pane.js', '{ win: { content: pane }, since: openAt }', 1, 'the thread pane\'s composer after its render'],
 ];
 const siteCount = (files, [f, words]) => (files.get(f) || '').split(words).length - 1;
-const badSites = SITES.filter((s) => siteCount(PAGE, s) !== s[2]).map((s) => `${s[0]} «${s[1].slice(0, 50)}» ×${siteCount(PAGE, s)} (want ${s[2]})`);
-ok(badSites.length === 0, `the door's ${SITES.reduce((n, s) => n + s[2], 0)} sites in ${new Set(SITES.map((s) => s[0])).size} files, each by its words (${SITES.map((s) => s[3]).join(' · ')})`, badSites);
-// RED CONTROLS, one per site kind: the door's call planted back to the base's bare focus
+const badSites = SITES.filter((s) => siteCount(PAGE, s) !== s[2]).map((s) => `${s[0]} «${s[1].slice(0, 60)}» ×${siteCount(PAGE, s)} (want ${s[2]})`);
+ok(badSites.length === 0, `the door's sites, each by its words (${SITES.reduce((n, s) => n + s[2], 0)} pins in ${new Set(SITES.map((s) => s[0])).size} files: ${SITES.map((s) => s[3]).join(' · ')})`, badSites);
+// RED CONTROLS: each site kind's door call planted back to the base's bare focus is red BY NAME; a new late focus in a file the table
+// does not name, a second one with the same words in the class code, one more in a named file — each red by file (and line / count)
 const plant = (f, from, to) => { const s = PAGE.get(f) || ''; if (s.split(from).length !== 2) return null; const m = new Map(PAGE); m.set(f, s.replace(from, to)); return { m, line: s.slice(0, s.indexOf(from)).split('\n').length }; };
 const KINDS = [
-  ['a session answer (the attach, chat)', 'src/lib/session-lifecycle.js', "lateFocus(chatView, { win: winInfo, since: openAt }); // B-c87d: the person's act elsewhere", "chatView.focus(); // B-c87d: the person's act elsewhere"],   // stale-pins: kept (the base's text, planted)
+  ['a session answer (the attach, chat)', 'src/lib/session-lifecycle.js', 'lateFocus(chatView, { win: winInfo, since: winInfo._lateFocusSince ?? openAt });', 'chatView.focus();'],   // stale-pins: kept (the base's text, planted)
   ['the terminal after a paste\'s upload', 'src/lib/terminal.js', "lateFocus({ focus: () => this.terminal.focus() }, { win: this.winInfo, since: at });\n            setTimeout(() => { _pasteInFlight = false; }, 1000);", "this.terminal.focus();\n            setTimeout(() => { _pasteInFlight = false; }, 1000);"],   // stale-pins: kept (the base's text, planted)
   ['the terminal after the editor\'s close', 'src/lib/external-editor.js', "if (termSession) setTimeout(() => { termSession.fit(); lateFocus({ focus: () => termSession.terminal.focus() }, { win: targetWinInfo, since: at }); }, 150);", "if (termSession) setTimeout(() => { termSession.fit(); termSession.terminal.focus(); }, 150);"],   // stale-pins: kept (the base's text, planted)
   ['the app\'s view after a take-over', 'src/lib/desktop-app-window.js', "applyLease(r.lease); lateFocus(view, { win: winInfo, since: at });", "applyLease(r.lease); view?.focus();"],   // stale-pins: kept (the base's text, planted)
   ['the thread pane\'s composer after its render', 'src/lib/channel-thread-pane.js', "if (ta) lateFocus({ focus: () => ta.focus({ preventScroll: true }) }, { win: { content: pane }, since: openAt });", "if (ta) ta.focus({ preventScroll: true });"],   // stale-pins: kept (the base's text, planted)
+  ['the composer after an upload (the insert called after the upload\'s await)', 'src/lib/chat-input.js', "lateFocus({ focus: () => ta.focus() }, { win: { content: ta.closest('.window-content, .window') || ta.parentElement }, since });", 'ta.focus();'],   // stale-pins: kept (the base's text, planted)
+  ['the rewind answer (a reply\'s dispatch)', 'src/lib/chat-view.js', "\n    if (put === 'restored') focusBack();", "\n    if (put === 'restored') this._chatInput?.focus?.();"],   // stale-pins: kept (the base's text, planted)
 ];
-const kindOut = KINDS.map(([kind, f, from, to]) => { const p = plant(f, from, to); if (!p) return { kind, gone: true }; const c = census(p.m); return { kind, f, line: p.line, red: c.unnamed.some((u) => u.startsWith(`${f}:${p.line} `)), unnamed: c.unnamed }; });
-ok(kindOut.every((k) => !k.gone && k.red), `CONTROL: each site kind's door call planted back to a bare focus is red at its file and line — ${kindOut.map((k) => k.gone ? `${k.kind}: ITS ANCHOR IS GONE` : `${k.kind} (${k.f}:${k.line} ${k.red ? 'red' : 'NOT red'})`).join(' · ')}`, kindOut);
-// the kinds the census cannot see late (a callback handed to a factory, a predicate, a go-to whose focus lies in app.js): their pins
+const kindOut = KINDS.map(([kind, f, from, to]) => { const p = plant(f, from, to); if (!p) return { kind, gone: true }; const c = census(p.m); return { kind, f, line: p.line, red: c.unnamed.some((u) => u.startsWith(`${f}:`)) }; });
+ok(kindOut.every((k) => !k.gone && k.red), `CONTROL: each site kind's door call planted back to a bare focus is red BY NAME — ${kindOut.map((k) => k.gone ? `${k.kind}: ITS ANCHOR IS GONE` : `${k.kind} (${k.f}:${k.line} ${k.red ? 'red' : 'NOT red'})`).join(' · ')}`, kindOut);
 const PIN_KINDS = [
   ['the composer after a picture\'s read', 'src/lib/chat-input.js', 'since: this._picAddAt });', 'this._textarea.focus(); },'],   // stale-pins: kept (the base's text, planted)
-  ['the app\'s picture on connect', 'src/lib/desktop-app-window.js', ' && mayTakeKeys({ win: winInfo, since: openAt })', ''],   // stale-pins: kept (the base's text, planted)
-  ['a replay\'s focus of a standing window', 'src/lib/session-lifecycle.js', 'if (replay) lateFocus(term, { win: this.wm.windows.get(winId), since: PAGE_START }); else term.focus();', 'term.focus();'],   // stale-pins: kept (the base's text, planted)
+  ['the app\'s picture on its first connect', 'src/lib/desktop-app-window.js', '(!first || mayTakeKeys({ win: winInfo, since: openAt }))', 'true'],   // stale-pins: kept (the base's text, planted)
+  ['a standing window\'s focus', 'src/lib/session-lifecycle.js', 'lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : openClock() });', 'term.focus();'],   // stale-pins: kept (the base's text, planted)
   ['the link door\'s other-desktop go-to', 'src/lib/internal-link-ui.js', 'app.goToWinId(w, { since: at })', 'app.goToWinId(w)'],   // stale-pins: kept (the base's text, planted)
+  ['the re-press renewal', 'src/lib/session-lifecycle.js', 'if (!unattended) w._lateFocusSince = openClock();', ''],   // stale-pins: kept (the base's text, planted)
 ];
-const pinOut = PIN_KINDS.map(([kind, f, from, to]) => { const p = plant(f, from, to); if (!p) return { kind, gone: true }; const bad = SITES.filter((s) => siteCount(p.m, s) !== s[2]); return { kind, red: bad.length > 0 }; });
-ok(pinOut.every((k) => !k.gone && k.red), `CONTROL: each kind the census cannot see late, its door call planted away — its site pin is red: ${pinOut.map((k) => `${k.kind} ${k.gone ? 'ITS ANCHOR IS GONE' : k.red ? 'red' : 'NOT red'}`).join(' · ')}`, pinOut);
-// …and a NEW late focus of a composer in the chat code, not named — red by its file and line
-const p9 = plant('src/lib/chat-input.js', '  _addImageAttachment(files) {\n', '  _addImageAttachment(files) {\n    Promise.resolve().then(() => this._textarea.focus());\n');
-const c9 = p9 ? census(p9.m) : null;
-ok(!!c9 && c9.unnamed.join() === `src/lib/chat-input.js:${p9.line + 1} this._textarea.focus()`, `CONTROL: a NEW late focus of the composer, unnamed — red at ${c9 ? c9.unnamed.join(' · ') : 'ITS ANCHOR IS GONE'}`, c9 && c9.unnamed);
+const pinOut = PIN_KINDS.map(([kind, f, from, to]) => { const p = plant(f, from, to); if (!p) return { kind, gone: true }; return { kind, red: SITES.some((s) => siteCount(p.m, s) !== s[2]) }; });
+ok(pinOut.every((k) => !k.gone && k.red), `CONTROL: each kind whose call the census cannot see late, its door call planted away — its site pin is red: ${pinOut.map((k) => `${k.kind} ${k.gone ? 'ITS ANCHOR IS GONE' : k.red ? 'red' : 'NOT red'}`).join(' · ')}`, pinOut);
+const NEW_FILE = 'src/lib/zz-late-focus-plant.js', m1 = new Map(PAGE); m1.set(NEW_FILE, 'export function open(box) { fetch(\'/x\').then(() => box.focus()); }\n');
+const c1 = census(m1);
+const p2 = plant('src/lib/session-lifecycle.js', '  _closeSidebarOnMobile() {\n', '  _closeSidebarOnMobile() {\n    setTimeout(() => ta.focus(), 0);\n');
+const c2 = p2 ? census(p2.m) : null;
+const m3 = new Map(PAGE); m3.set('src/lib/window-share.js', 'export function zzPlant(el) { Promise.resolve().then(() => el.focus()); }\n' + (PAGE.get('src/lib/window-share.js') || ''));
+const c3 = census(m3);
+ok(c1.unnamed.join() === `${NEW_FILE}:1 box.focus()` && !!c2 && c2.miscount.some((x) => x.startsWith('src/lib/session-lifecycle.js «ta.focus()» ×2')) && !!c3 && c3.miscount.some((x) => x.startsWith('src/lib/window-share.js ×2')),
+  `CONTROL: a NEW late focus in a file the table does not name is red by file and line (${c1.unnamed.join(' · ')}); a second one with the SAME WORDS in the class code is red by its count (${c2 && c2.miscount.join(' · ')}); one more in a NAMED file is red by its count (${c3 && c3.miscount.join(' · ')})`, { c1: c1.unnamed, c2: c2 && c2.miscount, c3: c3 && c3.miscount });
 
 report();

@@ -20,11 +20,20 @@ import { lastPersonAct, pageClock } from './utils.js';
 export const PAGE_START = 0;
 /** the moment an open begins, on the page's clock (read it where the person's act starts the open, BEFORE any await) */
 export const openClock = () => pageClock();
+/** B-c87d (r364 MUST 1): «NOBODY ON THIS PAGE STARTED IT» is a FACT of the page, never read off an id an open reuses (a pressed resume
+ *  carries its row's id; a preset the person loads carries `machine`): the layout's boot restore while it runs (`_bootRestoring` — the
+ *  splash covers the page; never `_booting`, whose 5 s autosave tail follows the splash, when the person's own presses open windows), a record from another
+ *  device being applied (`_applying`), or an open nobody pressed (`quiet` — an unattended resume, a page following it, an agent's
+ *  open). Such an open starts at PAGE_START; every other one starts NOW, so the person's act that started it counts as inside it. */
+export const unattendedOpen = (app, quiet = false) => !!quiet || !!app?.layoutManager?._bootRestoring || !!app?.layoutManager?._applying;
 
 /** is `target` inside the opening window `win` itself — its own content or its frame's chrome, never another tab's content in the
  *  same frame (a tab group's host element holds every member's content) */
 export function insideWindow(win, target) {
   if (!win || !target || typeof target !== 'object') return false;
+  // its OWN taskbar item is inside it (raising the window while it opens is no act elsewhere — r364); a group's item names its tabs
+  const item = typeof target.closest === 'function' ? target.closest('[data-win-id]') : null;
+  if (item && win.id != null && item.dataset && (item.dataset.winId === String(win.id) || String(item.dataset.groupTabs || '').split(',').includes(String(win.id)))) return true;
   const el = win.element || null, content = win.content || null;
   if (content && typeof content.contains === 'function' && content.contains(target)) return true;
   if (!el || typeof el.contains !== 'function' || !el.contains(target)) return false;
@@ -36,6 +45,10 @@ export function insideWindow(win, target) {
  *  focuses itself (xpra-view's `mayFocus` on connect): the same verdict, the same stamps, the same dialog rule */
 export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {
   try { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) !== 'take') return false; } catch { return false; }
+  // a press INTO an embedded page (the browser window, a plugin's panel, a viewer) is never stamped by the page's listeners: the keys
+  // stand in that frame — if it lies outside the opening window, the late focus drops (r364)
+  const ae = document.activeElement;
+  if (ae && String(ae.tagName || '').toUpperCase() === 'IFRAME' && !insideWindow(win, ae)) return false;
   const a = lastPersonAct();
   return lateFocusTakes({ since, act: a ? { at: a.at, inside: insideWindow(win, a.target) } : null }) === 'take';
 }

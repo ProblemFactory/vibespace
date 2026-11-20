@@ -184,7 +184,7 @@ import { openShareDialog, openAskDialog, shareChipText } from './window-share.js
 import { appSecretsKeyWords } from './key-file-words.js'; // lane key-file-law-stores: the stored logins' key file, said
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { deskDoorAct } from '../browser-picture.js'; // lane desktop-x-seat-browser r2: the Watch door's ONE act (PURE)
-import { lateFocus, mayTakeKeys, openClock, PAGE_START } from './late-focus.js'; // B-c87d: a focus after an await goes through THE door (the keyboard stays where the person last put it)
+import { lateFocus, mayTakeKeys, openClock, PAGE_START, unattendedOpen } from './late-focus.js'; // B-c87d: a focus after an await goes through THE door (the keyboard stays where the person last put it)
 /** int267 seam: how long the outer ✕ waits for the hub's `close-asked` stamp before it sends close-window anyway. */
 const CLOSE_STAMP_WAIT_MS = 1500;
 
@@ -426,7 +426,8 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     if (win._desktopAppId === id && !win._desktopSatelliteWid) { if (!quiet) app.wm.revealWindow(winId, { replay: !!syncId }); return win; } // quiet (an agent's open): it stays where it is
   }
   app._hideWelcome();
-  const openAt = syncId ? PAGE_START : openClock();   // B-c87d: the app window's open began NOW (its picture connects later); a replay: the page's start
+  const openAt = unattendedOpen(app, quiet) ? PAGE_START : openClock();   // B-c87d (r364): the app window's open began NOW (its picture connects later); nobody on this page started it (an agent's quiet open, a boot, another device's record): the page's start
+  let connectedOnce = false;   // B-c87d: only the first connect is the open's (a reconnect keeps the release's rule: the active window)
   const winInfo = app.wm.createWindow({
     title: t('Desktop app'), type: 'desktop-app', syncId, width: 900, height: 620,
     openSpec: { action: 'openDesktopApp', id }, ...(intoChain ? { intoChain } : {}), // lane e2a: the agent's browser beside its chat (app.linkPlacement)
@@ -509,7 +510,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     onStatus: (s) => { viewConnected = s === 'connected'; if (s === 'connected') { applyViewOnly(); askBrowserSeat(); } else if (bseat.seat || bseat.failed) { Object.assign(bseat, { seat: null, why: null, failed: false, refused: 0, acts: 0 }); bseat.asked++; } applySeamless(); }, // lane desktop-x-seat-browser: each socket asks its own seat
     onSeat: (v) => applyBrowserSeat(v), // r2: the bridge's own word to THIS socket (its seat, why, a refused act) — never silent
     onRefused: (v) => sayClientRefusal(v), // r6: an act the client refused itself (his wheel where a raise would take his focus) — said too
-    mayFocus: () => app.wm.activeWindowId === winInfo.id && mayTakeKeys({ win: winInfo, since: openAt }), // B-c87d: nor after the person acted elsewhere since the open began · lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
+    mayFocus: () => { const first = !connectedOnce; connectedOnce = true; return app.wm.activeWindowId === winInfo.id && (!first || mayTakeKeys({ win: winInfo, since: openAt })); }, // B-c87d: the FIRST connect (the open) asks the door; a reconnect is no open (r364) · lane agent-window-no-steal: a picture that connects behind the person's work never takes the caret
   });
   const setAppIcon = (dataUrl) => {
     if (!dataUrl || !/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) return;
@@ -1365,7 +1366,7 @@ function openSatelliteWindow(app, id, wid, { syncId, title = '', beside = null, 
   const paneCss = x0 ? { w: Math.max(Math.ceil(x0.w / r0 - 1e-9), m0 ? m0.w : 0), h: Math.max(Math.ceil(x0.h / r0 - 1e-9), m0 ? m0.h : 0) } : { w: 640, h: 480 };
   const ws = app.wm.workspace, key = main && typeof main._desktopAppKey === 'function' ? main._desktopAppKey() : null;
   const at = !syncId && main && ws ? satellitePlacement({ x: main.element.offsetLeft, y: main.element.offsetTop, w: main.element.offsetWidth, h: main.element.offsetHeight }, { w: paneCss.w, h: paneCss.h + 32 }, { w: ws.clientWidth, h: ws.clientHeight }, key ? appPrefs(SATELLITE_PREF_KEY)[key] : null) : null;
-  const satAt = syncId ? PAGE_START : openClock();   // B-c87d: the satellite's open began NOW; it binds when the main view stands
+  const satAt = unattendedOpen(app) ? PAGE_START : openClock();   // B-c87d (r364): the satellite's open began NOW (the app showed a window — the person's key in it often did); a boot or another device's record: the page's start
   const winInfo = app.wm.createWindow({ title: title || t('Desktop app'), type: 'desktop-app', syncId, width: paneCss.w, height: paneCss.h + 32, ...(at || {}), openSpec: { action: 'openDesktopApp', id, wid, title: String(title || '') }, ...(quiet ? { quiet: true } : {}) });
   winInfo._desktopAppId = id;
   winInfo._desktopSatelliteWid = wid;

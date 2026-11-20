@@ -550,16 +550,28 @@ const _editable = (el) => !!(el && (el.isContentEditable || /^(INPUT|TEXTAREA|SE
 // ITS OWN (the block checkpoint's red: test-needs-doors' move-mode legs count the document's keydown listeners — a page-long one
 // added at module load stood there after every Esc)
 let _menuKeyAt = 0, _menuOwnKeyAt = 0;
-// B-c87d: the person's LAST ACT on the page — a press or ANY key, where it landed, on the page's own clock — rides the same two
-// listeners (the late-focus door, src/lib/late-focus.js, asks whether the person acted elsewhere since a window's open began)
+// B-c87d: the person's LAST ACT on the page — where it landed, on the page's own clock — rides the same two listeners (the late-focus
+// door, src/lib/late-focus.js, asks whether the person acted elsewhere since a window's open began). The coordinator's ruling (r364):
+// an act is one that PUTS THE KEYBOARD SOMEWHERE — a press, or a key typed INTO an editable target or a window; a modifier alone and
+// a key that lands on the page's body never; only the person's own (trusted) events. The target is held by a WeakRef: a closed
+// window's page tree is never kept alive by the stamp.
 let _personAct = null;
+const _MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'AltGraph', 'Meta', 'OS', 'Super', 'Hyper', 'Fn', 'FnLock', 'CapsLock', 'NumLock', 'ScrollLock']);
+/** B-c87d: does this keydown put the keyboard somewhere (an act a late focus must not override)? */
+export function keyIsAct(e) {
+  if (!e || e.isTrusted === false || _MODIFIER_KEYS.has(e.key)) return false;
+  const t = e.target;
+  if (!t || (typeof document !== 'undefined' && (t === document.body || t === document.documentElement))) return false;
+  return _editable(t) || !!(typeof t.closest === 'function' && t.closest('.window'));
+}
+const _actRef = (t) => (t && typeof WeakRef === 'function' ? new WeakRef(t) : { deref: () => t || null });
 const _now = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('pointerdown', (e) => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; _personAct = { at: _now(), target: e.target || null }; }, true);
-  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); _personAct = { at: _now(), target: e.target || null }; }, true);
+  window.addEventListener('pointerdown', (e) => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; if (e.isTrusted !== false) _personAct = { at: _now(), ref: _actRef(e.target) }; }, true);
+  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); if (keyIsAct(e)) _personAct = { at: _now(), ref: _actRef(e.target) }; }, true);
 }
-/** B-c87d: the person's last act on the page ({ at, target } on the page's clock), or null before the first one */
-export function lastPersonAct() { return _personAct; }
+/** B-c87d: the person's last act on the page ({ at, target } on the page's clock — target null once its tree is gone), or null before the first */
+export function lastPersonAct() { return _personAct ? { at: _personAct.at, target: _personAct.ref.deref() || null } : null; }
 /** B-c87d: the page's clock the late-focus door compares on (an open's start is read from it) */
 export function pageClock() { return _now(); }
 /** A gesture neither listener above sees — the phone's back swipe (lane mobile-back-guard) — is the person's own act too:

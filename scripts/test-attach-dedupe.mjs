@@ -21,7 +21,8 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const esbuild = (await import(pathToFileURL(path.join(REPO, 'node_modules/esbuild/lib/main.js')).href)).default;
 const SRC = fs.readFileSync(path.join(LIB, 'session-lifecycle.js'), 'utf8');
 
-// every relative import of the module → a stub exporting the names it imports (functions that do nothing)
+// every relative import of the module → a stub exporting the names it imports (functions that do nothing; B-c87d: the late-focus door's
+// stand-in takes the keys — the door's own gate is test-late-focus)
 function stubsFor(src) {
   const map = {};
   for (const m of src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'([^']+)';/gm)) {
@@ -30,7 +31,7 @@ function stubsFor(src) {
     for (const n of names) map[m[2]].add(n);
   }
   const out = {};
-  for (const [p, names] of Object.entries(map)) out[p] = [...names].map((n) => n === 't' ? 'export const t = (s) => s;' : n === 'stripCwdHostLabel' ? 'export const stripCwdHostLabel = (c) => c;' : n === 'attachSlab' ? "export const attachSlab = () => 'floor';" : `export const ${n} = function () { return null; };`).join('\n') + '\nexport class ChatView {}\nexport class TerminalSession {}';
+  for (const [p, names] of Object.entries(map)) out[p] = [...names].map((n) => n === 't' ? 'export const t = (s) => s;' : n === 'stripCwdHostLabel' ? 'export const stripCwdHostLabel = (c) => c;' : n === 'attachSlab' ? "export const attachSlab = () => 'floor';" : n === 'lateFocus' ? "export const lateFocus = (v) => { if (v && typeof v.focus === 'function') v.focus(); return true; };" : `export const ${n} = function () { return null; };`).join('\n') + '\nexport class ChatView {}\nexport class TerminalSession {}';
   return out;
 }
 let gen = 0;

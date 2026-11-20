@@ -630,11 +630,13 @@ class TerminalSession {
         if (text) { this.terminal.paste(text); back(); return; } // paste() respects the app's bracketed-paste mode
       }
     } catch {} // permission denied / HTTP — fall through to the paste pad
-    this._showPastePad();
+    this._showPastePad({ since: at });   // B-c87d: the pad comes after the clipboard's answer — it takes the keys only through the door
   }
 
-  _showPastePad() {
-    if (this._pastePad?.isConnected) { this._pastePad.focus(); return; }
+  _showPastePad({ since } = {}) {
+    // B-c87d: shown after an await (the clipboard API refused): its focus asks the door from the paste's start; a press-made pad takes it now
+    const take = (el) => lateFocus({ focus: () => el.focus() }, { win: this.winInfo, since: since ?? openClock() });
+    if (this._pastePad?.isConnected) { take(this._pastePad); return; }
     const pad = document.createElement('div');
     pad.className = 'term-paste-pad';
     pad.contentEditable = 'true';
@@ -662,7 +664,7 @@ class TerminalSession {
     pad.addEventListener('blur', () => setTimeout(() => { if (this._pastePad === pad) hide(); }, 8000));
     this.winInfo.content.appendChild(pad);
     this._pastePad = pad;
-    pad.focus();
+    take(pad);
   }
 
   _getGlobalFontSize() { return parseInt(localStorage.getItem('termFontSize')) || 14; }

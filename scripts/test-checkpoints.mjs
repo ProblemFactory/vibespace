@@ -830,6 +830,9 @@ say('— §9 the page\'s door');
   const V = lift('src/lib/chat-view.js', '  _rewindFromMessage(msg) {', '  // Fork a new session from a specific assistant message (the chat fork button).',
     { backendFeatureCaps: metaCaps, rewindPointOf: door.rewindPointOf, rewindPlanOf: door.rewindPlanOf, rewindAnswerOf: door.rewindAnswerOf, t: T,
       REWIND_LIFE_MS: door.REWIND_LIFE_MS, POINT_FIELDS: door.POINT_FIELDS, REWIND_REQUEST_PREFIX: door.REWIND_REQUEST_PREFIX, textOf: door.textOf, setTimeout: stubSet, clearTimeout: stubClear, sessionStorage: store,
+      // B-c87d: chat-view's rewind answer focuses the composer through the late-focus door (its own gate: test-late-focus); here a
+      // stand-in door that takes the keys, over the scene's clock
+      openClock: () => clock.now, PAGE_START: 0, lateFocus: (v) => { if (v && typeof v.focus === 'function') v.focus(); return true; },
       showToast: (m, o) => said.push([m, o && o.type]),
       showConfirmDialog: (o) => { said.push(['confirm', o]); return view._yes === 'hold' ? new Promise((res) => { held = res; }) : Promise.resolve(view._yes); } });
   const reqs = [];

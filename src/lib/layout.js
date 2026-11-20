@@ -180,9 +180,9 @@ class LayoutManager {
     //   the record's; one made in the 1 s cooldown after it (`_restoring`) is the USER's (verify r3 ③: noteClosed and
     //   the dirty desks refused every close under `_restoring`, and scheduleAutoSave dropped every user act under it —
     //   a drop, a close, a drag in the second after another client's record landed waited for the next act; a reload
-    //   in between undid it). _booting: the boot restore (its 5 s).
+    //   in between undid it). _booting: the boot restore (its 5 s). _bootRestoring: the restore's OWN span (B-c87d — the splash covers the page).
     this._applying = false;
-    this._booting = false;
+    this._booting = false; this._bootRestoring = false;
     this._lastSentJson = null;
     // THE ACK's ledger (verify r5 ⑤): the saves answered by nothing yet ({sentAt, desks, pending, refused, at: when it left on
     // an open socket}); `_carried` desktop → the sentAt of the last save the server READ for it (actHeld's release);
@@ -1972,7 +1972,7 @@ class LayoutManager {
 
   async loadAutoSave() {
     this._restoring = true;
-    this._booting = true;
+    this._booting = true; this._bootRestoring = true;   // B-c87d: the restore's own opens are nobody's on this page (the splash takes every press)
     this._bootStoppedSessions = []; // arm the resume-all collector (see restoreState)
     try {
       const data = await this._bootJson('/api/layouts');
@@ -2024,7 +2024,7 @@ class LayoutManager {
     // Offer a bulk resume for the sessions that came back stopped, then disarm
     // the collector so later desktop-switch replays don't re-prompt.
     const stopped = this._bootStoppedSessions || [];
-    this._bootStoppedSessions = null;
+    this._bootStoppedSessions = null; this._bootRestoring = false;   // B-c87d: the restore ended — the splash goes now; an open from here is the person's (the 5 s below is the autosave's)
     if (stopped.length >= 2) setTimeout(() => this._offerResumeAll(stopped), 1200);
     // Allow autosave after restore is complete (with extra delay for windows to attach)
     setTimeout(() => { this._restoring = false; this._booting = false; }, 5000);

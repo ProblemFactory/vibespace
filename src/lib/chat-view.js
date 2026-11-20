@@ -58,6 +58,7 @@ import { stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat
 import { fineScrollEntry, pushFine, FINE_SCROLL_MS } from './scroll-forensics.js'; // lane run-open-jump (B-a7a9): the FINE scroll trace after a run toggle / the ↓ (PURE)
 import { NeedsCards, hiddenRecord } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
 import { badgeTail } from './account-tails.js'; // B-ba7d: the badge carries no key tail — the person's read does (by account id)
+import { lateFocus, openClock, PAGE_START } from './late-focus.js'; // B-c87d: the rewind answer's focus goes through THE door (the keyboard stays where the person last put it)
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
 // session declared them, the per-backend BACKEND_META regexes otherwise
@@ -2188,7 +2189,7 @@ class ChatView {
       // the hub's mark and the stated expires_at read): none by then is SAID, and an answer after it still binds
       const bind = (id) => {
         if (!this._rewindBound) this._rewindBound = new Map();
-        const entry = { text: (now.ok ? now : plan).prefillText || '', granularity: row && row.granularity };
+        const entry = { text: (now.ok ? now : plan).prefillText || '', granularity: row && row.granularity, at: openClock() };   // B-c87d: the press's own moment
         this._rewindBound.set(id, entry);
         this._keepRewind(id, { msgId: msg.id, granularity: entry.granularity });   // the tab keeps its ids: a page reloaded before the answer binds it
         this._rewindLive = id;
@@ -2223,6 +2224,9 @@ class ChatView {
     const bound = d && (this._rewindBound?.get(d.requestId) || this._keptRewind(d.requestId)); // THIS tab's press — early, late, or from before a reload
     if (!bound) return;
     this._rewindBound?.delete(d.requestId);
+    // B-c87d (r364): the restored words take the keys only if the person did nothing elsewhere since the press — a press bound from
+    // before a reload is judged from this page's start
+    const focusBack = () => lateFocus(this._chatInput, { win: this.winInfo, since: Number.isFinite(bound.at) ? bound.at : PAGE_START });
     this._keepRewind(d.requestId, null);
     if (this._rewindLive === d.requestId) { this._rewindLive = null; this._rewindInFlight = false; clearTimeout(this._rewindAnswerTimer); }
     const a = rewindAnswerOf(bound.granularity, d.answer); // the CLI's reply as it came, read by the row's granularity
@@ -2236,14 +2240,14 @@ class ChatView {
       showToast(put === 'restored' ? t('Rewound to before your message. Your words are back in the box.')
         : put === 'kept' ? t('Rewound to before your message. The box already had text, so your earlier words were not put back.')
           : t('Rewound to before your message.'));
-      if (put === 'restored') this._chatInput?.focus?.();
+      if (put === 'restored') focusBack();
       return;
     }
     if (!n) {
       showToast(put === 'restored' ? t('Rewound to before your message. This window could not mark what was taken back; it is marked after VibeSpace restarts or this conversation is resumed. Your words are back in the box.')
         : put === 'kept' ? t('Rewound to before your message. This window could not mark what was taken back; it is marked after VibeSpace restarts or this conversation is resumed. The box already had text, so your earlier words were not put back.')
           : t('Rewound to before your message. This window could not mark what was taken back; it is marked after VibeSpace restarts or this conversation is resumed.'));
-      if (put === 'restored') this._chatInput?.focus?.();
+      if (put === 'restored') focusBack();
       return;
     }
     showToast(put === 'restored'
@@ -2251,7 +2255,7 @@ class ChatView {
       : put === 'kept'
         ? (n === 1 ? t('Rewound — 1 message taken back. The box already had text, so your earlier words were not put back.') : t('Rewound — {n} messages taken back. The box already had text, so your earlier words were not put back.', { n }))
         : (n === 1 ? t('Rewound — 1 message taken back.') : t('Rewound — {n} messages taken back.', { n })));
-    if (put === 'restored') this._chatInput?.focus?.();
+    if (put === 'restored') focusBack();
   }
 
   /** A send refused while a rewind is out (B-437e): what happened to the words and the door (the answer, at most `left` s — then

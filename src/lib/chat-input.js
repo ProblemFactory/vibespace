@@ -598,6 +598,7 @@ export class ChatInput {
   async uploadFiles(files) {
     files = (files || []).filter(Boolean);
     if (!files.length) return;
+    const upAt = openClock();   // B-c87d (r364 MUST 3): the upload began NOW (the person's drop or pick); its paths land after the network
     const cwd = this._getCwd();
     if (!cwd) { this._uploadToast(t('No working directory for this session'), true); return; }
     // Destination: the session cwd by default, or a fixed folder from
@@ -614,7 +615,7 @@ export class ChatInput {
         uploadDirSet: !!(this._getUploadDir() || '').trim(), // lane chat-attachments-persist: a chosen folder is never moved
         onProgress: (d, total) => this._uploadToast(t('Uploading {d}/{total}…', { d, total })),
       });
-      if (uploaded.length) this._insertUploadedPaths(destDir, uploaded);
+      if (uploaded.length) this._insertUploadedPaths(destDir, uploaded, upAt);
       const kept = uploaded.find((f) => f && f.keptDir);   // lane chat-attachments-persist: said, never silent
       if (kept) showToast(t('Kept with this conversation in {dir} — {from} is a temporary folder', { dir: kept.keptDir, from: kept.keptFrom }), { duration: 8000 });
       // B-3767: nothing landed — the server's own reason, by name; B-3b03 follow-up (a MUST of its round's point 5): a failure the hub
@@ -637,7 +638,7 @@ export class ChatInput {
     return cwd.replace(/\/+$/, '') + '/' + d.replace(/^\/+/, '');
   }
 
-  _insertUploadedPaths(cwd, uploaded) {
+  _insertUploadedPaths(cwd, uploaded, since) {
     const base = cwd.replace(/\/+$/, '');
     // One entry per top-level item: a file → its own path; a folder → the folder
     // root (deduped across all its uploaded files).
@@ -674,7 +675,8 @@ export class ChatInput {
     const inserted = sep + text + ' ';
     ta.value = before + inserted + after;
     const pos = (before + inserted).length;
-    ta.focus();
+    // B-c87d (r364 MUST 3): the box takes the keys back after the upload only if the person did nothing elsewhere since it began
+    lateFocus({ focus: () => ta.focus() }, { win: { content: ta.closest('.window-content, .window') || ta.parentElement }, since });
     try { ta.setSelectionRange(pos, pos); } catch {}
     ta.dispatchEvent(new Event('input', { bubbles: true })); // resize + draft save
   }
