@@ -685,8 +685,8 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   'THE MAIN DOOR (engine): its parent is the run\'s wrapper by its stamp — the stop, a forced stop and rm --stop answer «this job is the running VibeSpace: it is not stopped here» (hub-is-main) before anything changes (no intent, no kill door, the service not marked down, the record kept); the term, group and scope doors and the time limit refuse too; said in the run\'s log AND on the row (its readers\' should: a refused limit left the row silent), a refused limit leaving no «timed out» (its end never reads «timeout»); NOTHING signalled', g);
   ok(!g.x.stop.answer.error && g.x.stop.desiredUp === false && g.x.term.intent && g.x.term.doors.includes('_killGroup') && g.x.group.answer === true && g.x.escalate.doors.includes('_killGroup') && g.x.timeout.termAt === true && g.x.rm.listed === false && /SIGKILL/.test(g.sentCut),
   'CONTROLS (each guard cut ALONE, in a copy): the press is taken (the service marked down); the term door writes the intent and calls the group door; the group door SIGKILLs; the scope door calls the group door; the time limit arms its kill step; rm --stop removes the running record — each RED', g.x);
-  ok(/if \(this\._hubIsMain\(job, run\)\) \{ this\._hubMainRefusal\(job, run, 'its until-marker'\); return; \} this\._termRun\(job, run\);/.test(JSRC10) && /if \(this\._hubIsMain\(job, run\)\) \{ this\._hubMainRefusal\(job, run, 'its until-marker'\); return; \}[^\n]*\n\s+job\._untilHit = true;\n\s+this\._event\(job, 'until-marker hit/.test(JSRC10) && /const seam = Number\(this\.d\.hubParentPid\);/.test(JSRC10),
-  'WIRING: the until-marker asks the main door at its hit, BEFORE it is marked hit (never said «completing», its end never «until-output») and again at its timer; the engine\'s parent chain is the process\'s own (a suite\'s stand-in only by `hubParentPid`)');
+  ok(/if \(this\._hubIsMain\(job, run\)\) \{ this\._hubMainRefusal\(job, run, 'its until-marker'\); return; \} this\._termRun\(job, run\);/.test(JSRC10) && /if \(this\._hubIsMain\(job, run\)\) \{ run\._untilRefused = true; this\._hubMainRefusal\(job, run, 'its until-marker'\); return; \}[^\n]*\n\s+job\._untilHit = true;\n\s+this\._event\(job, 'until-marker hit/.test(JSRC10) && /const seam = Number\(this\.d\.hubParentPid\);/.test(JSRC10) && /job\.untilOutput && run && !job\._untilHit && !run\._untilRefused\) this\._untilScan\(job, run\);/.test(JSRC10),
+  'WIRING: the until-marker asks the main door at its hit, BEFORE it is marked hit (a refused marker marks the RUN: its scan of the hub\'s own log stops) (never said «completing», its end never «until-output») and again at its timer; the engine\'s parent chain is the process\'s own (a suite\'s stand-in only by `hubParentPid`)');
   // its read (SHOULD 8 + 2 + 3): the engine's proof itself — FALSE for the right pid with another start and for a parent that is not the
   // stamp's; the REAL road (no stand-in): this process's own parent chain — the suite's parent stamped as the wrapper (the hub IS the
   // main) and its grandparent (the hub runs UNDER the main: `./run.sh`, `npm start`) are proven, a child of ours is not; once proven,
@@ -719,7 +719,6 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // 主开发 01:57Z (the hosted run's red, 44652784592): the END measured through the REAL procsOrNull and its errno classes, compiled from
   // the source over a stub fs — a list that EXISTS and cannot be read (EACCES) is unread, named; a list that no longer exists (ENOENT
   // by its path, ENODEV through an fd opened while the scope lived — seen on a real user scope) is an EMPTY scope: the plain end
-  const GONE_SRC = W.slice(W.indexOf('const GONE_LIST = new Set('), W.indexOf('\n', W.indexOf('const GONE_LIST = new Set(')));
   const drainOf = async (src, err) => {
     const fsx = { readFileSync: () => { if (err) throw Object.assign(new Error(err), { code: err }); return ''; } };
     const env = { fs: fsx, path, keptTest: () => (p) => String(p) === '4100', procsOf: () => [], rung: { policy: true }, keeperSaid: null, keeper: null, child: null, nap: async () => { }, isKeeper: () => false,
@@ -733,7 +732,7 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   const dr = await drainOf(W, 'EACCES'), drGone = await drainOf(W, 'ENOENT'), drDev = await drainOf(W, 'ENODEV');
   const drx = await drainOf(anchored(W, FIN, "  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !own().length };\n", 'drain-unread-cut'), 'EACCES');   // stale-pins: kept — the control plants the older form in a copy
   const BLANKET = 'if (e && GONE_LIST.has(e.code)) return []; ';
-  const drB = await drainOf(anchored(W, BLANKET, '', 'gone-list-blanket', { count: 2 }), 'ENOENT');
+  const WB = anchored(W, BLANKET, '', 'gone-list-blanket', { count: 2 }), drB = await drainOf(WB, 'ENOENT'), rowsB = rowsOf(WB, 'ENOENT');
   const rowsGone = rowsOf(W, 'ENOENT'), rowsUnread = rowsOf(W, 'EACCES');
   const sayOf = (src) => { const out = []; const f = new Function('fs', 'logFd', `let keptSaid = false; ${fnOf(src, 'function sayKept(n, what, unread = false) {')}\nreturn sayKept;`)({ writeSync: (fd, b) => out.push(String(b)) }, 9); return (n, w, u) => { f(n, w, u); return out.join(''); }; };   // eslint-disable-line no-new-func
   const wordsU = sayOf(W)(1, 'its kill', true), wordsK = sayOf(W)(1, 'its kill', false);
@@ -742,7 +741,8 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   'small 2: a scope list that EXISTS and cannot be read (EACCES) ends nothing — the end is NOT «empty» (the engine reaps it), the job\'s log says «could not be read (EACCES): … may still run» — its errno named —, never «ended one by one»', { dr, wordsU });
   ok(drGone.scopeEmpty === true && drGone.scopeUnread === undefined && drDev.scopeEmpty === true && drDev.scopeUnread === undefined && Array.isArray(rowsGone) && rowsGone.length === 0 && rowsUnread === null,
     '主开发 01:57Z: a scope whose list no longer EXISTS — systemd removed the emptied scope: its path reads ENOENT, a list opened while it lived ENODEV — is an EMPTY scope: the plain end, no warning; the stop\'s rows of a gone list are none (an unread one: null, as before)', { drGone, drDev, rowsGone, rowsUnread });
-  ok(drx.scopeEmpty === true && drB.scopeEmpty === false && drB.scopeUnread === 'ENOENT', 'CONTROLS (each in a copy): the end measured as before — an unread list reads as an EMPTY scope (RED); the blanket catch back — a list that is simply GONE reads as «could not be read (ENOENT)», the hosted run\'s words on a clean stop (RED)', { drx, drB });
+  ok(drx.scopeEmpty === true && drB.scopeEmpty === false && drB.scopeUnread === 'ENOENT' && rowsB === null, 'CONTROLS (each in a copy): the end measured as before — an unread list reads as an EMPTY scope (RED); the blanket catch back — a list that is simply GONE reads as «could not be read (ENOENT)», the hosted run\'s words on a clean stop, and the stop\'s rows as unread (RED)', { drx, drB, rowsB });
+  ok(W.includes("...(drained.scopeUnread ? { scopeUnread: drained.scopeUnread } : {})"), 'the end record carries the unread list\'s errno (exit.json scopeUnread), as the end line does');
   // its read (round wwa7r2uc1, MUST): the forced end says what was DONE — around a hub, the job's own processes one by one (never «its
   // scope was killed»); its list unread, nothing (no «stopped by force» at all: the end says «could not be read: may still run»)
   const forcedOf = async (src, scope) => {
@@ -751,12 +751,15 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
     const o = new Function(...Object.keys(env), `let forced = ''; ${fnOf(src, 'async function forceScope(why) {')}\nreturn { f: forceScope, forced: () => forced };`)(...Object.values(env));   // eslint-disable-line no-new-func
     await o.f('it did not end on SIGTERM in 10 s — its scope was killed'); return o.forced();
   };
-  const fAround = await forcedOf(W, { hub: true, procs: ['4100', '4200'] }), fBlind = await forcedOf(W, { hub: true, unread: true, inside: 1, procs: [] }), fWhole = await forcedOf(W, { hub: false, procs: ['4200'] });
+  const fAround = await forcedOf(W, { hub: true, procs: ['4100', '4200'] }), fBlind = await forcedOf(W, { hub: true, unread: true, inside: 1, procs: [] }), fWhole = await forcedOf(W, { hub: false, procs: ['4200'] }), fGone = await forcedOf(W, { hub: false, procs: [] });
+  const FGONE = "  if (list !== null && !list.length) return;   // its fresh read (SHOULD 3): the list GONE or empty — nothing of the job is left: no kill, never «its scope was killed»\n";
+  const fGoneX = await forcedOf(anchored(W, FGONE, '', 'force-gone-cut'), { hub: false, procs: [] });
   const FSET = "  if (!forced) forced = why; // the first kill's why — and every call kills (round 5: a label is never the guard)\n  await scopeKill('SIGKILL');";
   const fAroundX = await forcedOf(anchored(W, "  // its read (round wwa7r2uc1, MUST): the end says what was DONE", "  if (!forced) forced = why;\n  // its read (round wwa7r2uc1, MUST): the end says what was DONE", 'forced-before-hold'), { hub: true, procs: ['4100', '4200'] });
   ok(fAround === 'it did not end on SIGTERM in 10 s — its own processes were killed one by one (the VibeSpace hub in its scope left alone)' && fBlind === '' && fWhole === 'it did not end on SIGTERM in 10 s — its scope was killed' && W.split(FSET).length === 2,
     'MUST (its read): a forced end around the hub says the job\'s own processes were killed one by one; its list unread, no «stopped by force» (nothing was killed); a scope without the hub, «its scope was killed» as before', { fAround, fBlind, fWhole });
   ok(fAroundX === 'it did not end on SIGTERM in 10 s — its scope was killed', 'CONTROL (the words set before the hold, as before, in a copy): «its scope was killed» for a scope never killed whole — RED', fAroundX);
+  ok(fGone === '' && fGoneX === 'it did not end on SIGTERM in 10 s — its scope was killed', 'a forced end whose list is GONE or empty (the job ended meanwhile): nothing killed, no «stopped by force»; CONTROL (the early answer cut, in a copy): «its scope was killed» for a scope that was gone — RED', { fGone, fGoneX });
   // its read (SHOULD 8): onStop's refusal as BEHAVIOUR — compiled from its source with the main the hub: nothing is marked stopping;
   // CONTROL (the refusal cut, in a copy): the stop goes on (marked — the stub stops the rest there)
   const onStopOf = (src, kept) => {
@@ -780,17 +783,21 @@ console.log('§10 B-2c5c — the job\'s stop never ends a hub that runs inside i
   // (i) 主开发 01:57Z — THE ENGINE reads a scope's list by the same law: a list that no longer EXISTS is EMPTY (the reap of an end written
   // «not empty» reads the gone scope as empty and stops: nothing killed, nothing said); one that exists and cannot be read is null (unread:
   // retried, said) — every error read as «empty» before. Over a stand-in scope folder (no cgroup: cgroup.procs a plain file / a folder)
-  const SP0 = "(e) => (e && GONE_LIST.has(e.code) ? [] : null));";
+  const SP0 = "(e) => { if (e && GONE_LIST.has(e.code)) return []; (this._listErr || (this._listErr = new Map())).set(scope.dir, (e && e.code) || 'an error'); return null; });";
   ok(JSRC10.split(SP0).length === 2, 'control setup: the engine\'s list read\'s errno law is found once');
-  const procsOf10 = async (Mod, dir) => { const self = Object.create(Mod.JobManager.prototype); self.d = { reapReadMs: 2000 }; return self._scopeProcs({ dir, unit: 'x.scope' }); };
+  const procsOf10 = async (Mod, dir, words = null) => { const self = Object.create(Mod.JobManager.prototype); self.d = { reapReadMs: 2000 }; const r = await self._scopeProcs({ dir, unit: 'x.scope' }); if (words) words.push(self._listWords({ dir }, '2 s')); return r; };
   const SD = path.join(D, 'scope10'), SDok = path.join(SD, 'ok'), SDdir = path.join(SD, 'unreadable');
   fs.mkdirSync(SDok, { recursive: true }); fs.writeFileSync(path.join(SDok, 'cgroup.procs'), '4242\n4243\n');
   fs.mkdirSync(path.join(SDdir, 'cgroup.procs'), { recursive: true });   // it EXISTS and cannot be read as a list (EISDIR) — no chmod, root-proof
-  const sp = { listed: await procsOf10(JM10, SDok), gone: await procsOf10(JM10, path.join(SD, 'gone')), unread: await procsOf10(JM10, SDdir) };
+  const SDfile = path.join(SD, 'not-a-folder'); fs.writeFileSync(SDfile, 'x');   // a component of the path no folder: ENOTDIR
+  const said10 = [];
+  const sp = { listed: await procsOf10(JM10, SDok), gone: await procsOf10(JM10, path.join(SD, 'gone')), notdir: await procsOf10(JM10, SDfile), unread: await procsOf10(JM10, SDdir, said10) };
+  const W10 = fs.readFileSync(path.join(ROOT, 'data/bin/job-wrapper.js'), 'utf8'), setOf = (src) => { const m = /const GONE_LIST = new Set\((\[[^\]]*\])\);/.exec(src); return m ? JSON.stringify(JSON.parse(m[1].replace(/'/g, '"')).sort()) : null; };
   const JMsp = cut(SP0, '() => []);', 'engine-list-blanket');
   const spx = { unread: await procsOf10(JMsp, SDdir) };
-  ok(JSON.stringify(sp.listed) === '[4242,4243]' && Array.isArray(sp.gone) && sp.gone.length === 0 && sp.unread === null,
-    'the engine\'s read of a scope\'s list: a list that no longer exists (ENOENT) is EMPTY — the reap of an end written «not empty» reads the gone scope as empty and stops (nothing killed, nothing said); one that exists and cannot be read is UNREAD (null: retried, said)', sp);
+  ok(JSON.stringify(sp.listed) === '[4242,4243]' && Array.isArray(sp.gone) && sp.gone.length === 0 && Array.isArray(sp.notdir) && sp.notdir.length === 0 && sp.unread === null && said10[0] === 'could not be read (EISDIR)'
+    && setOf(JSRC10) === '["ENODEV","ENOENT","ENOTDIR"]' && setOf(W10) === setOf(JSRC10),
+    'the engine\'s read of a scope\'s list: a list that no longer exists (ENOENT) is EMPTY — the reap of an end written «not empty» reads the gone scope as empty and stops (nothing killed, nothing said); one that exists and cannot be read is UNREAD (null: retried, said by its errno — «could not be read (EISDIR)»); the wrapper and the engine hold ONE set of «gone» errnos', { sp, said10 });
   ok(Array.isArray(spx.unread) && spx.unread.length === 0, 'CONTROL (every error as «empty», as before, in a copy): a list that exists and cannot be read reads as an empty scope — the reap stops while what the run left may still run — RED', spx);
   // (j) its readers' should: the hub's own ANCESTORS (a launcher — ./run.sh, npm start — and what started it) are the hub's: a reap after a
   // killed wrapper never kills them one by one. The REAL chain: this suite's parent stands for the launcher; a child of ours is not one

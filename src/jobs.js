@@ -1703,7 +1703,7 @@ class JobManager {
     let killed = 0, kept = 0, left = 0;
     for (let pass = 0; pass < 3; pass++) {
       const pids = await this._scopeProcs(scope);
-      if (pids === null) { out.hub = { killed, kept, unread: true }; out.code = 'its list did not answer'; return pass ? 'refused' : 'unread'; }
+      if (pids === null) { out.hub = { killed, kept, unread: true }; out.code = `its list ${this._listWords(scope)}`; return pass ? 'refused' : 'unread'; }
       const hubs = this._hubTest(wrapper), own = pids.filter((p) => !hubs(p));   // small 4: one memo a pass
       kept = pids.length - own.length; left = own.length;
       if (!own.length || pass === 2) break;
@@ -1748,7 +1748,7 @@ class JobManager {
     if (!p) {
       // B-2c5c (主开发 01:57Z): the errno decides, by name — a list that no longer EXISTS (ENOENT, ENOTDIR, ENODEV: the emptied scope
       // systemd removed) is EMPTY; one that exists and cannot be read is null (unread: retried, said) — every error read as «empty» before
-      p = fs.promises.readFile(path.join(scope.dir, 'cgroup.procs'), 'utf8').then((t) => t.split('\n').filter((l) => /^\d+$/.test(l)).map(Number), (e) => (e && GONE_LIST.has(e.code) ? [] : null));
+      p = fs.promises.readFile(path.join(scope.dir, 'cgroup.procs'), 'utf8').then((t) => { if (this._listErr) this._listErr.delete(scope.dir); return t.split('\n').filter((l) => /^\d+$/.test(l)).map(Number); }, (e) => { if (e && GONE_LIST.has(e.code)) return []; (this._listErr || (this._listErr = new Map())).set(scope.dir, (e && e.code) || 'an error'); return null; });
       reads.set(scope.dir, p);
       p.then(() => { if (reads.get(scope.dir) === p) reads.delete(scope.dir); });
     }
@@ -1899,12 +1899,15 @@ class JobManager {
     if (last.why === 'unproven') return '';
     if (last.why === 'refused') return `its wrapper was gone and its scope ${n ? `still held ${n} process${es(n)}` : 'held processes'} — its kill was refused (${last.code}) in ${tries} tries — ${cmd}`;
     if (last.why === 'survived') return `its wrapper was gone and ${last.n} process${es(last.n)} survived its kill in ${tries} tries — ${cmd}`;
-    return `its wrapper was gone and its scope did not answer a read in ${tries} tries — ${cmd}`;
+    return `its wrapper was gone and its scope ${this._listWords(scope, `${tries} tries`)} — ${cmd}`;
   }
   /** the reap's words, once, on the run and its journal — what it read (or that no read answered), and what was done */
+  /** its fresh read (SHOULD 1): what a scope's list read answered when it gave no list — its errno when it was refused (EACCES, EIO …),
+   *  else the bound it did not answer in */
+  _listWords(scope, bound) { const e = scope && this._listErr && this._listErr.get(scope.dir); return e ? `could not be read (${e})` : `did not answer a read${bound ? ` in ${bound}` : ''}`; }
   _reapSaid(job, run, scope, r, out = null) {
     const n = run._reap && run._reap.n, bound = this.d.reapReadMs ?? REAP_READ_MS;
-    const held = n ? `its wrapper was gone and its scope still held ${n} process${n === 1 ? '' : 'es'}` : `its wrapper was gone and its scope did not answer a read in ${bound / 1000} s`;
+    const held = n ? `its wrapper was gone and its scope still held ${n} process${n === 1 ? '' : 'es'}` : `its wrapper was gone and its scope ${this._listWords(scope, `${bound / 1000} s`)}`;
     const words = r === 'killed' ? `stopped by force: ${held} — its scope was killed` : r === 'hub' ? `stopped by force: ${held} — ${this._hubScopeWords(out)}` : `${held} — not killed: this kernel has no cgroup.kill — systemctl --user kill --signal=KILL ${scope.unit}`;
     delete run._reap;
     run.forced = run.forced || words;
@@ -2013,7 +2016,7 @@ class JobManager {
       return;
     }
     l.cleared = now();
-    const how = !force ? '' : blind && !sent.size ? ` — by force: its scope did not answer a read in ${grace / 1000} s, so no SIGTERM could reach it` : blind ? ` — by force, ${grace / 1000} s after its SIGTERM (sent to what it recorded: its scope did not answer a read)` : ` — by force, ${grace / 1000} s after its SIGTERM`;
+    const how = !force ? '' : blind && !sent.size ? ` — by force: its scope ${this._listWords(scope, `${grace / 1000} s`)}, so no SIGTERM could reach it` : blind ? ` — by force, ${grace / 1000} s after its SIGTERM (sent to what it recorded: its scope did not answer a read)` : ` — by force, ${grace / 1000} s after its SIGTERM`;
     const what = `stopped what its last run left running (${n} process${n === 1 ? '' : 'es'})${how}${scanned}`;
     this.d.log(`[jobs] ${job.id} ${what}`);
     this._touch(job, { what });
@@ -2999,7 +3002,7 @@ class JobManager {
         if (now() - job._termAt >= this._killStepMs(scope)) this._escalate(job, scope, this._graceWords(), run);
       }
       // untilOutput: incremental literal scan, bounded per tick
-      if (job.kind === 'task' && job.untilOutput && run && !job._untilHit) this._untilScan(job, run);
+      if (job.kind === 'task' && job.untilOutput && run && !job._untilHit && !run._untilRefused) this._untilScan(job, run);   // B-2c5c: a refused marker stops the scan (its fresh read: 64 KB of the hub's own log a tick)
       // panel timeout
       const p = job.interaction && job.interaction.pending;
       if (p && p.timeoutS && now() - p.postedAt > p.timeoutS * 1000) {
@@ -3067,7 +3070,7 @@ class JobManager {
       job._untilCursor += len;
       // literal substring on capped-length text (no agent regex on the main loop)
       if (buf.toString('utf-8').split('\n').some((l) => l.slice(0, 4096).includes(job.untilOutput))) {
-        if (this._hubIsMain(job, run)) { this._hubMainRefusal(job, run, 'its until-marker'); return; }   // B-2c5c: THE MAIN DOOR — never said «completing», never marked hit (its end would read «until-output»)
+        if (this._hubIsMain(job, run)) { run._untilRefused = true; this._hubMainRefusal(job, run, 'its until-marker'); return; }   // B-2c5c: THE MAIN DOOR — never said «completing», never marked hit (its end would read «until-output»); the run marked: no scan again
         job._untilHit = true;
         this._event(job, 'until-marker hit — completing after grace');
         const grace = Number(process.env.VIBESPACE_JOBS_GRACE_MS) || 30_000; // env knob: tests shrink the until-grace

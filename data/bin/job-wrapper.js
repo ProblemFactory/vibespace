@@ -622,6 +622,7 @@ async function forceScope(why) {
   // its read (round wwa7r2uc1, MUST): the end says what was DONE — the job's own processes killed one by one (the hub's left alone), or,
   // its list unread, nothing (the end says «could not be read: may still run») — never «its scope was killed»
   if (held) { sayKept(held, 'its kill', list === null); if (list !== null && !forced) forced = why.replace(/its scope was killed$/, 'its own processes were killed one by one (the VibeSpace hub in its scope left alone)'); for (const p of scopeRows() || []) killNow(p); return; }
+  if (list !== null && !list.length) return;   // its fresh read (SHOULD 3): the list GONE or empty — nothing of the job is left: no kill, never «its scope was killed»
   if (!forced) forced = why; // the first kill's why — and every call kills (round 5: a label is never the guard)
   await scopeKill('SIGKILL');
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
@@ -1014,7 +1015,7 @@ async function ended(code, signal) {
   const end = (drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '') + (drained.scopeUnread ? ` — its scope's list could not be read${typeof drained.scopeUnread === 'string' ? ` (${drained.scopeUnread})` : ''}: what it started may still run` : '');
   if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // …and what came on the pipes after the exit event, masked
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
-  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: true } : {}) } : {}) });
+  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty, ...(drained.scopeUnread ? { scopeUnread: drained.scopeUnread } : {}) } : {}) });
   process.exit(code === null ? 143 : code);
 }
 // THE START (protocol 3): the values first — drained from OUR fd 3 (a socket the hub wrote and ended) on a non-blocking handle
