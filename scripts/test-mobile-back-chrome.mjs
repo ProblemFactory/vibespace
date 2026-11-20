@@ -54,7 +54,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
-import { loadPage } from './cdp-page-load.mjs';
+import { loadPage, afterNavigation } from './cdp-page-load.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -202,7 +202,13 @@ const state = () => evalJs('JSON.stringify(history.state)');
 const DROP_GO1 = "try { if (sessionStorage.getItem('vs-test-drop-go1')) { const g = history.go.bind(history); history.go = (n) => (n === 1 ? undefined : g(n)); } } catch {}"; // the hypothesis-2 mutant, armed per tab by a flag
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: DROP_GO1 });
 const diary = () => evalJs(`JSON.parse(sessionStorage.getItem('vibespace.navLog') || '[]')`);
-const settle = async () => { await waitFor('!!(window.app && app.ready)', 25000); await evalJs('app.ready.then(() => true)'); await waitFor('!app.layoutManager._restoring', 15000); await sleep(900); };
+// B-1217 (13) unit 2: settle() is for a page this suite has SEEN land, or one that may stay the same document: backAndSee /
+// discardAndShow counted its load, a new tab's first entry, a history step that may restore the same document from the cache, a
+// freshness check whose reload may be HELD (the same document answers, rightly). Its boot wait is CHECKED: a timeout is a named
+// red, never a later ReferenceError. A navigation the suite STARTS and settles at once goes through loadPage / afterNavigation
+// (scripts/cdp-page-load.mjs: the old document is marked; the wait is the new one's), then afterBoot().
+const afterBoot = async () => { await waitFor('!app.layoutManager._restoring', 15000); await sleep(900); };
+const settle = async () => { if (!(await waitFor('!!(window.app && app.ready)', 25000))) throw new Error('settle: the app never booted in 25 s on the page this suite saw land'); await evalJs('app.ready.then(() => true)'); await afterBoot(); };
 const touch382 = () => tapAt(191, 300); // the 382×580 phone's empty window area
 const atHome = async () => { await evalJs('document.querySelectorAll("[data-popover]").forEach((e) => e.remove()); if (!app.sidebar.isOpen) app.sidebar.toggle(true); true'); await sleep(300); };
 /** A browser-level CDP socket (Target.* across tabs). */
@@ -367,7 +373,7 @@ try {
   check('B1 never touched: one browser back either leaves (Chrome\'s skip) or closes one layer and stands on the sentinel — never stranded', bs === '{"vs":1}' && (n.url.startsWith('data:') || stood), { bs, n });
   await boot(); await touchOnce();
   const nb = await nav();
-  await cdp('Page.reload'); await waitFor('!!(window.app && app.ready)', 20000); await evalJs('app.ready.then(() => true)'); await sleep(1500);
+  await afterNavigation(cdp, () => cdp('Page.reload'), { bootMs: 20000, what: 'after Page.reload' }); await sleep(1500);
   const nr = await nav(); const sr = await state();
   check('B2 a reload ON the sentinel keeps ONE sentinel (no second entry)', sr === '{"vs":1}' && nr.len === nb.len && nr.index === nb.index, { nb, nr, sr });
   await longPress('#mobile-nav-new');
@@ -496,7 +502,7 @@ try {
     }
     console.log(`  · ${tag}: the second-load road (a \`?\` link over an older document of the tab)`);
     await boot(); await touch382();
-    await evalJs(`location.href = '/?session=back-reload'; true`); await sleep(600); await settle();
+    await afterNavigation(cdp, () => evalJs(`location.href = '/?session=back-reload'; true`), { bootMs: 25000, what: 'after location.href = /?session=back-reload' }); await afterBoot();
     await atHome(); const s1 = await backAndSee(300); const sToast = (await toasts().catch(() => [])).includes('Press back again to exit');
     const s2 = await backAndSee(1500); if (s2.loaded && s2.onApp) await settle();
     R.second = { armed: sToast && s1.onApp && !s1.loaded, exit: s2 };
@@ -529,11 +535,11 @@ try {
       await evalJs(`(() => { const f = document.createElement('iframe'); f.src = ${JSON.stringify(OTHER + 'link')}; f.style.cssText = 'position:fixed;left:0;top:0;width:380px;height:220px;z-index:2147483647;border:0'; document.body.appendChild(f); return true; })()`);
       await sleep(1500); await tapAt(150, 100); await sleep(1200); // a tap on its link: a joint step
       const step = (await cdp('Page.getNavigationHistory')).entries.length - j0;
-      await evalJs(`location.href = '/?session=back-reload-3'; true`); await sleep(600); await settle();
+      await afterNavigation(cdp, () => evalJs(`location.href = '/?session=back-reload-3'; true`), { bootMs: 25000, what: 'after location.href = /?session=back-reload-3' }); await afterBoot();
       const t0 = Date.now();
       await atHome(); const a = await backAndSee(300); const armed = (await toasts().catch(() => [])).includes('Press back again to exit') && a.onApp && !a.loaded;
       const l0 = appLoads; const x = await backAndSee(3500); const loads = appLoads - l0;
-      if (x.onApp) await settle(); else { await cdp('Page.navigate', { url: ORIGIN + '/' }); await settle(); } // the diary is read on a VibeSpace page
+      if (x.onApp) await settle(); else { await loadPage(cdp, ORIGIN + '/', { bootMs: 25000 }); await afterBoot(); } // the diary is read on a VibeSpace page
       const rows = (await diary()).filter((r) => r.t >= t0), d0 = rows[0]?.d;
       const hops = rows.filter((r) => r.k === 'hop' && r.d !== d0 && !r.drop), hopDoc = hops[0]?.d;
       return { step, armed, exit: x, loads, hops, booted: !!hopDoc && rows.some((r) => r.k === 'boot' && r.d === hopDoc), stayBoot: rows.filter((r) => r.k === 'boot' && r.d !== d0).map((r) => `${r.type}/${r.step}`).slice(0, 2) };
@@ -559,9 +565,9 @@ try {
     check('G8 the shipped wiring: the same forward press files nothing — the boot row says came other (from another site\'s page)', G8.left && G8.back && G8.cost === 0 && G8.incidents === 0 && G8.boot?.came === 'other', G8);
   }
   { // the reload roads + a cross-site previous entry (shipped wiring): location.reload() (the stale-tab path) then two browser reloads
-    await cdp('Page.navigate', { url: OTHER }); await sleep(500); await cdp('Page.navigate', { url: ORIGIN + '/' }); await settle(); await touch382();
-    await evalJs('location.reload(); true'); await sleep(500); await settle();
-    await cdp('Page.reload'); await sleep(300); await settle(); await cdp('Page.reload'); await sleep(300); await settle();
+    await cdp('Page.navigate', { url: OTHER }); await sleep(500); await loadPage(cdp, ORIGIN + '/', { bootMs: 25000 }); await afterBoot(); await touch382();
+    await afterNavigation(cdp, () => evalJs('location.reload(); true'), { bootMs: 25000, what: 'after location.reload()' }); await afterBoot();
+    await afterNavigation(cdp, () => cdp('Page.reload'), { bootMs: 25000, what: 'after Page.reload (1 of 2)' }); await afterBoot(); await afterNavigation(cdp, () => cdp('Page.reload'), { bootMs: 25000, what: 'after Page.reload (2 of 2)' }); await afterBoot();
     const boots = (await diary()).filter((r) => r.k === 'boot').slice(-3);
     await evalJs('if (app.sidebar.isOpen) app.sidebar.toggle(false); app.openFileExplorer(); true'); await sleep(900);
     const r1 = await backAndSee(); await atHome(); const r2 = await backAndSee(300); const r3 = await backAndSee(1500);
@@ -573,7 +579,7 @@ try {
     await boot(); await touch382(); await evalJs('if (app.sidebar.isOpen) app.sidebar.toggle(false); app.openFileExplorer(); true'); await sleep(900);
     await backAndSee(900);
     const okRows = (await diary()).filter((r) => r.k === 'go1').slice(-1);
-    await evalJs("sessionStorage.setItem('vs-test-drop-go1', '1'); true"); await cdp('Page.reload'); await settle();
+    await evalJs("sessionStorage.setItem('vs-test-drop-go1', '1'); true"); await afterNavigation(cdp, () => cdp('Page.reload'), { bootMs: 25000, what: 'after Page.reload (the drop-go1 mutant armed)' }); await afterBoot();
     await evalJs('if (app.sidebar.isOpen) app.sidebar.toggle(false); app.openFileExplorer(); true'); await sleep(900);
     await backAndSee(1200);
     const mutRows = (await diary()).filter((r) => r.k === 'go1').slice(-1);
@@ -588,7 +594,7 @@ try {
     await B.call('Target.activateTarget', { targetId: t3.targetId }); // in front: a background tab never boots the app here
     await attachTo(t3.targetId); await phone(...DIMS);
     await settle(); await touch382();
-    await evalJs(`location.href = '/?session=back-reload-2'; true`); await sleep(600); await settle();
+    await afterNavigation(cdp, () => evalJs(`location.href = '/?session=back-reload-2'; true`), { bootMs: 25000, what: 'after location.href = /?session=back-reload-2' }); await afterBoot();
     const i0 = (await incidents()).length;
     await atHome(); await backAndSee(300); const w2 = await backAndSee(1500); if (w2.loaded) await settle();
     await sleep(1200);

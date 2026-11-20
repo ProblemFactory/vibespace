@@ -13,6 +13,7 @@
 // failed navigation (`errorText`) is a named red at once.
 //
 //   loadPage(call, url, { boot, settle, bootMs = 30000, everyMs = 150, fatal, who, sleep, now }) → { ms, asks, loaderId }
+//   afterNavigation(call, act, { …the same, what }) → the same, for a navigation the PAGE makes (act starts it; the mark ties the wait)
 //     call(method, params) → the CDP RESULT object (it throws on a protocol error) — the suite's own sender (one whose sender
 //       answers the whole message passes a two-line adapter); boot = the boot test (APP_BOOTED); settle = what it awaits once the
 //       boot test holds (APP_READY, awaitPromise); fatal(e) → true for an error that must end the wait at once (a dead page);
@@ -61,14 +62,33 @@ async function untilBooted(call, { mark, loaderId, boot, settle, bootMs, everyMs
   }
 }
 
+const DEFAULTS = { boot: APP_BOOTED, settle: APP_READY, bootMs: 30000, everyMs: 150, fatal: () => false, sleep: realSleep, now: Date.now };
+/** Mark the document that answers now: a property only it carries, so no answer from it ever counts as the new one's. */
+async function markOld(call, o) {
+  const mark = `vs-load-${process.pid}-${++marks}-${o.now().toString(36)}`;
+  try { await call('Runtime.evaluate', { expression: `(() => { window.${LOAD_MARK} = ${JSON.stringify(mark)}; return true; })()`, returnByValue: true }); } catch (e) { if (o.fatal(e)) throw e; }   // no document yet: nothing old can answer
+  return mark;
+}
+
 /** Navigate to `url` and wait for THAT navigation's document to boot (see the head). */
 export async function loadPage(call, url, opts = {}) {
-  const { boot = APP_BOOTED, settle = APP_READY, bootMs = 30000, everyMs = 150, fatal = () => false, who = 'loadPage', sleep = realSleep, now = Date.now } = opts;
-  const mark = `vs-load-${process.pid}-${++marks}-${now().toString(36)}`;
-  try { await call('Runtime.evaluate', { expression: `(() => { window.${LOAD_MARK} = ${JSON.stringify(mark)}; return true; })()`, returnByValue: true }); } catch (e) { if (fatal(e)) throw e; }   // no document yet: nothing old can answer
+  const o = { ...DEFAULTS, who: 'loadPage', ...opts };
+  const mark = await markOld(call, o);
   const nav = (await call('Page.navigate', { url })) || {};
-  if (nav.errorText) throw named(`${who}: the navigation to ${url} failed (${nav.errorText}) — the app never booted`);
-  return untilBooted(call, { mark, loaderId: nav.loaderId || null, boot, settle, bootMs, everyMs, fatal, sleep, now, who, what: `after the navigation to ${url}` });
+  if (nav.errorText) throw named(`${o.who}: the navigation to ${url} failed (${nav.errorText}) — the app never booted`);
+  return untilBooted(call, { ...o, mark, loaderId: nav.loaderId || null, what: `after the navigation to ${url}` });
+}
+
+/** A navigation the PAGE makes (unit 2, 2026-11-20): `act()` starts it — a `location.href =` evaluate, `Page.reload`, a
+ *  `location.reload()`, a history step — and the wait is for the NEW document it makes: the old one is marked BEFORE the act,
+ *  so no answer from it counts (no loader is known: the mark alone ties the wait). A wait that runs out is the same named red;
+ *  an act that makes no new document (a hash, pushState, a cache restore of the same document) keeps the marked one and is
+ *  named at its bound — such a site keeps its own wait, and the census's debt says why. */
+export async function afterNavigation(call, act, opts = {}) {
+  const o = { ...DEFAULTS, who: 'afterNavigation', what: 'after the page\'s own navigation', ...opts };
+  const mark = await markOld(call, o);
+  await act();
+  return untilBooted(call, { ...o, mark, loaderId: null });
 }
 
 /** test-ci-gate §2m: every OLD LOAD SHAPE in `src` — a statement `await <wait>(<text naming window.app>, …)` whose result is

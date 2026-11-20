@@ -1327,24 +1327,21 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
 {
   const acorn = createRequire(import.meta.url)('acorn');
   const vm = await import('node:vm');
-  const { loadPage, oldAppWaits, APP_BOOTED, LOAD_MARK } = await import('./cdp-page-load.mjs');
+  const { loadPage, afterNavigation, oldAppWaits, APP_BOOTED, LOAD_MARK } = await import('./cdp-page-load.mjs');
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
   const files = walk(path.join(REPO, 'scripts')), found = new Map(), unread = [];
   for (const f of files) for (const h of oldAppWaits(fs.readFileSync(f, 'utf8'), acorn)) { const k = path.relative(REPO, f); if (h.error) unread.push(`${k} ${h.error.slice(0, 60)}`); else found.set(k, [...(found.get(k) || []), h.line]); }
-  // THE NAMED DEBT — unit 2 (afterNavigation): each a wait after a navigation the PAGE makes, or after a reload, never a navigate
-  // call's; each site is read before it is cured (a navigation within the document keeps its own wait, and its row says why)
-  const DEBT = {
-    'scripts/test-exit-hop-chrome.mjs': [1, 'settle(): the boot after a navigation the page makes (the exit hop) — afterNavigation, unit 2'],
-    'scripts/test-exit-late-chrome.mjs': [1, 'settle(): the boot after a navigation the page makes — afterNavigation, unit 2'],
-    'scripts/test-exit-slow-chrome.mjs': [1, 'settle(): the boot after a navigation the page makes — afterNavigation, unit 2'],
-    'scripts/test-mobile-back-chrome.mjs': [2, 'settle() after a navigation the page makes, and the boot after Page.reload — afterNavigation, unit 2'],
-  };
+  // THE NAMED DEBT: 0 since unit 2 (B-1217 (13), 2026-11-20). Each site was READ: a navigation the suite starts goes through
+  // loadPage / afterNavigation; a page the suite has SEEN land, or one that may stay the same document (a cache restore, a HELD
+  // reload), keeps its own wait CHECKED (test-mobile-back-chrome settle(): a timeout is a named red) — said in that suite, no row
+  // here. A new old shape needs a row with its count and why, or the cure.
+  const DEBT = {};
   const sites = [...found.values()].reduce((a, l) => a + l.length, 0), owed = Object.values(DEBT).reduce((a, [n]) => a + n, 0);
   const over = [...found].filter(([f, l]) => !DEBT[f] || l.length !== DEBT[f][0]).map(([f, l]) => `${f} line ${l.join(', ')} (its debt row: ${DEBT[f] ? DEBT[f][0] : 'none'})`);
   const stale = Object.keys(DEBT).filter((f) => !found.has(f));
   ok(files.length > 300 && over.length === 0 && stale.length === 0,
     `no script carries the old load shape beyond its named debt — ${files.length} scripts walked, ${sites} site(s): ${[...found].map(([f, l]) => `${path.basename(f)} ${l.join('/')}`).join(' · ') || 'none'}; debt ${owed} in ${Object.keys(DEBT).length} file(s)${over.length ? ' — RED: ' + over.join('; ') : ''}${stale.length ? ' — a debt row whose file is cured (lower it): ' + stale.join(', ') : ''}`);
-  ok(Object.values(DEBT).every(([n, why]) => n > 0 && why.length > 20), `…each debt row names its count and why (${Object.entries(DEBT).map(([f, [n]]) => `${path.basename(f)} ${n}`).join(' · ')})`);
+  ok(Object.values(DEBT).every(([n, why]) => n > 0 && why.length > 20), `…each debt row names its count and why (${Object.keys(DEBT).length ? Object.entries(DEBT).map(([f, [n]]) => `${path.basename(f)} ${n}`).join(' · ') : 'none left: unit 2 cured the five sites in four files'})`);
   ok(unread.length === 0, `…and every script that names window.app parsed (an unparsable one would hide the shape): ${unread.length ? unread.slice(0, 4).join(', ') : 'all'}`);
   const OLD = {
     'the copied load': "const load = async () => { await cdp('Page.navigate', { url: U }); await waitFor('!!(window.app && app.ready)', 30000); await evalJs('app.ready.then(() => true)'); };",
@@ -1412,6 +1409,21 @@ console.log('\n§2m one page load: a suite waits for the NEW document\'s app, ti
   // (5) a dead page ends the wait at once through the caller's own rule (test-phone-titlebar-ui's deadPage)
   const f5 = fakePage({ neverCommit: true, deadAt: 4 }), r5 = await tryLoad(f5, { fatal: (e) => /no answer in/.test(e.message) });
   ok(!!r5.err && /^cdp Page\.getFrameTree: no answer in/.test(r5.err.message) && f5.ticks() === 4, `a dead page ends the wait at once through the caller's fatal rule («${r5.err ? r5.err.message : 'no error'}», ${f5.ticks()} asks)`);
+  // (6) afterNavigation — a navigation the PAGE makes (unit 2): the act starts it, the old document is marked BEFORE the act, and
+  // only the new one's boot counts (no loader is known: the mark alone ties the wait)
+  const tryAfter = async (fake, opts = {}) => { const c = clock(); try { return { ok: await afterNavigation(fake.call, () => fake.call('Page.navigate', { url: U }), { ...c, ...opts }), tookMs: c.now() }; } catch (e) { return { err: e, tookMs: c.now() }; } };
+  const f6 = fakePage({ commitAfter: 4, bootAfter: 3 }), r6 = await tryAfter(f6, { what: 'after location.href (a fake)' });
+  ok(r6.ok && f6.doc().loader.startsWith('L-new') && !!f6.doc().ctx.app && f6.doc().ctx[LOAD_MARK] === undefined && r6.ok.loaderId === null,
+    `afterNavigation: the old document's answer is never taken — it returned once the act's new document booted (${r6.ok ? r6.ok.asks : '?'} ask(s), by the mark alone: no loader)${r6.err ? ' — threw: ' + r6.err.message : ''}`);
+  const r7 = await tryAfter(fakePage({ sameDoc: true }), { bootMs: 1500, what: 'after a hash change (a fake)' });
+  ok(!!r7.err && /^afterNavigation: the app never booted in 2 s after a hash change \(a fake\) — last seen: no new document has booted yet \(the old one carries the mark\)/.test(r7.err.message),
+    `…an act that makes no new document (a hash, a cache restore) is NAMED at its bound, never taken from the marked one («${r7.err ? r7.err.message.slice(0, 170) : 'no error'}») — such a site keeps its own wait`);
+  // RED CONTROL (unit 2): the old settle's own steps after a page-led navigation (the act, an unchecked wait, a bare evaluate)
+  const fc2 = fakePage({ commitAfter: 2, bootAfter: 3 }), cc2 = clock();
+  let red2 = null; try { await fc2.call('Page.navigate', { url: U }); const e1 = await fc2.call('Runtime.evaluate', { expression: APP_BOOTED, returnByValue: true }); const e2 = await fc2.call('Runtime.evaluate', { expression: 'app.ready.then(() => true)', awaitPromise: true, returnByValue: true }); if (e2.exceptionDetails) throw new Error('page threw: ' + e2.exceptionDetails.exception.description); red2 = e1; } catch (e) { red2 = e; }
+  const r8 = await tryAfter(fakePage({ commitAfter: 2, bootAfter: 3 }));
+  ok(red2 instanceof Error && red2.message === 'page threw: ReferenceError: app is not defined' && !!r8.ok && cc2.now() === 0,
+    `RED CONTROL (unit 2): the old settle after a page-led navigation throws the same red over the same fake («${red2 instanceof Error ? red2.message : 'it did not throw'}»: the old document answered, the bare evaluate met the new one before its boot); afterNavigation over it is green (${r8.ok ? r8.ok.asks + ' ask(s)' : r8.err.message})`);
   // RED CONTROL: the copied helper's own steps (navigate, an unchecked wait, a bare evaluate) over the same fake as (1)
   const copied = async (call, url, { now, sleep }) => {
     const evalJs = async (expr) => { const r = await call('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };

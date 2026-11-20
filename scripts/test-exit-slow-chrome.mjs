@@ -36,6 +36,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { loadPage, afterNavigation } from './cdp-page-load.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
@@ -167,7 +168,9 @@ const phone = async () => {
   await cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: 'none' }, { name: 'pointer', value: 'coarse' }] });
 };
-const settle = async () => { await waitFor('!!(window.app && app.ready)', 25000); await evalJs('app.ready.then(() => true)'); await waitFor('!app.layoutManager._restoring', 15000); await sleep(900); };
+// B-1217 (13) unit 2: the boot is the navigation's own (loadPage for a navigate call, afterNavigation for one the PAGE makes —
+// scripts/cdp-page-load.mjs: the old document is marked, a timeout is a named red); afterBoot() is what follows the boot
+const afterBoot = async () => { await waitFor('!app.layoutManager._restoring', 15000); await sleep(900); };
 const atHome = async () => { await evalJs('document.querySelectorAll("[data-popover]").forEach((e) => e.remove()); if (!app.sidebar.isOpen) app.sidebar.toggle(true); true'); await sleep(300); };
 const toasts = () => evalJs(`[...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent)`).catch(() => []);
 const TOAST = 'Press back again to exit';
@@ -217,10 +220,10 @@ let nth = 0;
 const iframeRoad = async (prev, tag) => {
   await phone();
   await cdp('Page.navigate', { url: prev }); await sleep(600);
-  await cdp('Page.navigate', { url: ORIGIN + '/' }); await settle(); await tapAt(191, 300);
+  await loadPage(cdp, ORIGIN + '/', { bootMs: 25000 }); await afterBoot(); await tapAt(191, 300);
   await evalJs(`(() => { const f = document.createElement('iframe'); f.src = ${JSON.stringify(AUX + '/link')}; f.style.cssText = 'position:fixed;left:0;top:0;width:380px;height:220px;z-index:2147483647;border:0'; document.body.appendChild(f); return true; })()`);
   await sleep(1500); await tapAt(150, 100); await sleep(1200); // a tap on its link: a joint step
-  await evalJs(`location.href = '/?session=exit-slow-${tag}'; true`); await sleep(600); await settle(); await tapAt(191, 300);
+  await afterNavigation(cdp, () => evalJs(`location.href = '/?session=exit-slow-${tag}'; true`), { bootMs: 25000, what: 'after location.href = /?session=exit-slow-…' }); await afterBoot(); await tapAt(191, 300);
   await atHome(); await browserBack(300);
   return (await toasts()).includes(TOAST);
 };
@@ -248,8 +251,8 @@ const cancelBackRoad = async () => {
   const prev = `${AUX}/p204-${++nth}`;
   await phone();
   await cdp('Page.navigate', { url: prev }); await sleep(600);
-  await cdp('Page.navigate', { url: ORIGIN + '/' }); await settle(); await tapAt(191, 300);
-  await evalJs(`location.href = '/?session=exit-slow-cancel'; true`); await sleep(600); await settle(); await tapAt(191, 300);
+  await loadPage(cdp, ORIGIN + '/', { bootMs: 25000 }); await afterBoot(); await tapAt(191, 300);
+  await afterNavigation(cdp, () => evalJs(`location.href = '/?session=exit-slow-cancel'; true`), { bootMs: 25000, what: 'after location.href = /?session=exit-slow-cancel…' }); await afterBoot(); await tapAt(191, 300);
   await atHome(); await browserBack(300);
   const armed = (await toasts()).includes(TOAST);
   const t0 = Date.now();
