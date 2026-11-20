@@ -61,6 +61,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A sign-in form inside a frame from another site: the agent now says whose frame it is and asks you to sign in there in the live view, not a dead-end tip.
 - On a paired machine, a key helper named in the project's Claude settings or in your own settings file is now seen at a start, as on this machine.
 - Storage and machine-folder errors (a failed connect, a refused folder, a stalled mount, a storage dialog's refusal) now show in your language, not English.
+- A file request made while the file readers restart after a storage stopped answering is refused with a message, instead of freezing VibeSpace.
+- When the record of your paired machines cannot be read, they are kept and read again, and the Machines list says why it is empty; they used to be lost.
+- When the record of your mounts briefly cannot be read, the mounts and their access are kept and read again; they used to be lost at the next change.
+- When the Background Work notices waiting for your conversations briefly cannot be read, they are kept and delivered later; they used to be lost.
 
 ### Security
 - A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.
