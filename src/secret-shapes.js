@@ -752,6 +752,10 @@ function coreOf(r) { let a = 0, b = r.length; while (a < b && WRAP_OPEN.includes
 function randomRun(run) {
   const core = coreOf(run);   // r10 M1: the wrapping punctuation trimmed FIRST — length, classes and the six exemptions are the core's alone
   if (core.length < 20 || classesOf(core) < 3 || core.includes('/') || core.includes('\\')) return false;   // a path (a URL too) is never hidden
+  // r253: a plain word between its joiners is a label (the output belt's own run test, keyMaterial: `deploy-EU-west2-canary`) — unless
+  // a PART is itself key-shaped (12+ characters, three classes): `deploy-<a random key>` typed as one run is still hidden whole
+  const parts = core.split(/[/_\-+=]+/);
+  if (parts.some((w) => /^[a-z]{4,}$/.test(w)) && !parts.some((w) => w.length >= 12 && classesOf(w) >= 3)) return false;
   return !(core.length <= 512 && READABLE.some((re) => re.test(core)));
 }
 // r10 (a minor of the r9 verdict): the version exemption is the version TOKEN's — a random run glued to N.N.N (`v1.2.3-<run>`,
@@ -783,21 +787,32 @@ const QUOTED_TOKEN_MAX = 256;   // a quoted value is ONE token when it closes wi
 // (the review of r10: a thin space, an em space, a narrow no-break space passed too — the blank class is every blank of a line, and a
 // value inside « » is a value: at a name `(?!«)` goes — wordValue refuses the mask itself)
 const NAME_BLANK_CLASS = '[ \\t\\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000]';
-const NAME_BLANK_Y = new RegExp(NAME_BLANK_CLASS + '{0,16}', 'y');
+const NAME_BLANK_Y = new RegExp(NAME_BLANK_CLASS + '{0,16}', 'y'), NAME_BLANK_Y_TEST = new RegExp('^' + NAME_BLANK_CLASS + '$');
+/** after an ASSIGNMENT, a holder query parameter or the header word (bearer / basic): ANY value is hidden — never the mask itself */
+const anyValue = (t) => !!t && !String(t).includes(REDACTED);
 function nameBlanksEnd(text, i) { NAME_BLANK_Y.lastIndex = i; NAME_BLANK_Y.exec(text); return NAME_BLANK_Y.lastIndex; }
 const NAME_BLANKS = (re) => { const src = re.source.replace('([ \\t]{1,3})', '(' + NAME_BLANK_CLASS + '{1,16})'); if (src === re.source) throw new Error('secret-shapes: a word row lost its blank run'); return new RegExp(src.replace('(?!«)', ''), re.flags); };
 const WORD_NEXT_NAME_RE = NAME_BLANKS(WORD_NEXT_RE), WORD_RUN_NAME_RE = NAME_BLANKS(WORD_RUN_RE);
 const HTTP_NAME_RE = (() => { const src = HTTP_RE.source.split('[ \\t]+').join(NAME_BLANK_CLASS + '{1,16}'); if (src === HTTP_RE.source) throw new Error('secret-shapes: the bearer row lost its blank run'); return new RegExp(src, HTTP_RE.flags); })();   // `bearer`␣(any blank)…
 const NAME_QUERY_HEAD_RE = new RegExp(QUERY_HEAD_RE.source.replace('(?!«)', ''), 'g');
 function nameQuery(text) {
-  let n = 0, out = '', last = 0, m;
+  let n = 0, out = '', last = 0, m, judgedTo = 0;
   NAME_QUERY_HEAD_RE.lastIndex = 0;
   while ((m = NAME_QUERY_HEAD_RE.exec(text))) {
-    if (!holderName(m[2])) continue;                                   // the head first: a public head's value is never read (linear)
-    const vs = NAME_QUERY_HEAD_RE.lastIndex;
+    const vs = NAME_QUERY_HEAD_RE.lastIndex, holds = holderName(m[2]);
+    // a PUBLIC head's value is read ONCE (judgedTo — the release's own bound: a head inside a value already read is not read again;
+    // r10's first form read every head's value, 1.25 s at 64 KiB) and hidden whole when it hides a holder (the release's hidesHolder:
+    // a nested holder or a password-carrying userinfo, once decoded); the walk goes ON inside it, so a raw nested holder is still found
+    if (!holds) {
+      if (vs < judgedTo) continue;
+      QUERY_VALUE_RE.lastIndex = vs; const pv = QUERY_VALUE_RE.exec(text); if (!pv) continue;
+      judgedTo = vs + pv[0].length;
+      if (!hidesHolder(pv[0])) continue;
+      n++; out += text.slice(last, vs) + REDACTED; last = judgedTo; NAME_QUERY_HEAD_RE.lastIndex = last; continue;
+    }
     QUERY_VALUE_RE.lastIndex = vs;
     const v = QUERY_VALUE_RE.exec(text);
-    if (!v || !wordValue(v[0])) continue;
+    if (!v || !anyValue(v[0])) continue;                               // r253: a holder parameter's value is hidden whatever its shape (the release's R7)
     n++; out += text.slice(last, vs) + REDACTED; last = vs + v[0].length; NAME_QUERY_HEAD_RE.lastIndex = last;
   }
   return { text: out + text.slice(last), n };
@@ -818,8 +833,15 @@ function nameKv(text) {
     // `password_policy`); a head that holds nothing gives its separator back, so the next key can open on it (`fix: password=…`,
     // the release's B-be02 rule — r9 swallowed it and kept the value)
     if (!holderName(m[4])) { KV_HEAD.lastIndex = m.index + m[0].length - m[5].length; continue; }
-    let s = nameBlanksEnd(text, headEnd);                                        // a no-break / thin / ideographic space after `:` / `=`
-    if (text[s] === '=' && /[:=][ \t]*$/.test(m[5])) s = nameBlanksEnd(text, s + 1);   // `password := …` — the second sign is the head's
+    // THE ASSIGNMENT (主开发 r253, round wlc6blvqo — the law): the holder, then `=` or `:=` with NO blank (`DB_PASSWORD=…`,
+    // `--password=…`, `api_key:=…`) is a command's own assignment, never prose: ANY non-empty value is hidden, as the release's R2
+    // did (its value floor is the law's violation: r1 kept API_KEY=changeme). The value FLOOR (wordValue) is for PROSE only — a blank
+    // after the head (`password: …`, `auth: fix login flow`), where a person's word stands
+    const sep = m[5], colonEq = sep === ':' && text[headEnd] === '=';
+    const assign = (sep === '=' || colonEq) && !NAME_BLANK_Y_TEST.test(text[headEnd + (colonEq ? 1 : 0)] || '');
+    let s = nameBlanksEnd(text, headEnd + (colonEq ? 1 : 0));                     // a no-break / thin / ideographic space after `:` / `=`
+    if (!assign && text[s] === '=' && /[:=][ \t]*$/.test(sep)) s = nameBlanksEnd(text, s + 1);   // `password := …` (spaced) — the second sign is the head's
+    if (assign && (s >= text.length || text[s] === '\n' || text[s] === '\r')) { KV_HEAD.lastIndex = headEnd; continue; }   // `KEY=` empty: nothing to hide
     if (text[s] === '\n' || text[s] === '\r') s = blanksEnd(text, s);
     let tok = tokenAt(text, s);
     if (BLOCK_VAL.test(tok)) { s = blanksEnd(text, s + tok.length); tok = tokenAt(text, s); }
@@ -829,20 +851,20 @@ function nameKv(text) {
       const close = nextClose(seg, 1, tok[0], seg.length);
       if (close > 0) { q = tok[0]; inner = seg.slice(1, close); end = s + close + 1; }
     }
-    if (!wordValue(inner)) { KV_HEAD.lastIndex = Math.max(headEnd, s); continue; }
+    if (!(assign ? anyValue(inner) : wordValue(inner))) { KV_HEAD.lastIndex = Math.max(headEnd, s); continue; }
     n++; out += text.slice(last, s) + (q ? q + REDACTED + q : REDACTED); last = end; KV_HEAD.lastIndex = end;
   }
   return { text: out + text.slice(last), n };
 }
 // (b) every other word row: the row's own regex finds the head, `startOf` says where its ONE token starts (-1: no secret name)
-function nameWord(text, re, startOf) {
+function nameWord(text, re, startOf, { any = false } = {}) {
   let n = 0, out = '', last = 0, m;
   re.lastIndex = 0;
   while ((m = re.exec(text))) {
     const s = startOf(m);
     if (s < 0) continue;
     const tok = tokenAt(text, s), qv = quotedAt(text, s, tok);   // r10 (the review): a quoted value closed on its line is ONE token, as at a KEY
-    if (!wordValue(qv ? qv.inner : tok)) { re.lastIndex = Math.max(s, m.index + 1); continue; }   // the token may itself be the next head (`password password <value>`)
+    if (!(any ? anyValue(qv ? qv.inner : tok) : wordValue(qv ? qv.inner : tok))) { re.lastIndex = Math.max(s, m.index + 1); continue; }   // the token may itself be the next head (`password password <value>`)
     n++; out += text.slice(last, s) + (qv ? qv.q + REDACTED + qv.q : REDACTED); last = qv ? qv.end : s + tok.length; re.lastIndex = last;
   }
   return { text: out + text.slice(last), n };
@@ -866,7 +888,7 @@ function redactByValue(raw, { typed = false } = {}) {
     // (b) the word rows — the ONE token after the word, only a value
     row(nameKv(text));
     row(nameWord(text, REG_RE, (m) => (REG_NAME_RE.test(m[2]) ? m.index + m[1].length + m[2].length + m[3].length : -1)));
-    row(nameWord(text, HTTP_NAME_RE, (m) => m.index + (m[1] || m[2]).length));   // r10: any blank of a line after bearer / basic
+    row(nameWord(text, HTTP_NAME_RE, (m) => m.index + (m[1] || m[2]).length, { any: true }));   // r253: the header word's value is hidden whatever its shape (the release's R3)   // r10: any blank of a line after bearer / basic
     row(nameWord(text, WORD_NEXT_NAME_RE, (m) => m.index + m[1].length + m[2].length));   // r10: the name's own blank run (up to 16, a no-break space too)
     row(nameWord(text, WORD_RUN_NAME_RE, (m) => m.index + m[1].length + m[2].length));
     row(nameQuery(text));   // r10 (B-a3fe, on 2.369.413): R7 at a name — the release's linear walk and its name grammar

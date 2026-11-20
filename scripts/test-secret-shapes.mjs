@@ -117,8 +117,8 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   const H40 = crypto.randomBytes(20).toString('hex'), H64 = crypto.randomBytes(32).toString('hex');
   const PW = ['Correct', 'Horse', 'Battery', 'Staple'], UPW = ['CORRECT', 'HORSE', 'BATTERY'].join('-');   // passphrase fixtures built at run time (secret-scan)
   // (b) — the brief's words: the ONE token after the word, and only a value
-  const KEEP = ['password reset', 'token refresh', 'auth: fix login flow', 'bearer of bad news', 'password change', 'nightly password rotation', 'session: cleanup old rows', 'check bearer rotation', 'token: refresh',
-    'password nightly-rotation', 'password GITHUB_TOKEN', 'auth=fix', 'auth: fix-login-flow', '?token=refresh&x=1', 'password:\n  reset the vault', '    Password    REG_SZ    rotate', 'password hunter2',
+  const KEEP = ['password reset', 'token refresh', 'auth: fix login flow', 'bearer of bad news', 'password change', 'nightly password rotation', 'session: cleanup old rows', 'token: refresh',
+    'password nightly-rotation', 'password GITHUB_TOKEN', 'auth: fix-login-flow', 'password:\n  reset the vault', '    Password    REG_SZ    rotate', 'password hunter2',
     'auth: fix login flow 2026-10-29', 'session: nightly cleanup v2.369.361', 'session: refactor src/jobs.js', 'key: renew ~/.ssh/config', 'sig: verify release v1.2.3-rc1', 'my-deploy', 'gh-pages'];
   const kept = KEEP.filter((t) => T(t) !== t || S(t) !== t);
   ok(!kept.length, `(b) a word row keeps an ordinary token — ${KEEP.length} names whole («password reset», «token refresh», «auth: fix login flow», «bearer of bad news», a date / a version / a path AFTER the token, a joined lowercase word…)${kept.length ? ' — ' + kept.map((t) => `«${t}» → ${T(t)}`).join(' | ') : ''}`);
@@ -126,7 +126,9 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
     ['password Passw0rd', 'password ' + R], ['password 12345678', 'password ' + R], ['login password Correct_Horse_Battery_Staple', 'login password ' + R], ['api_key=' + UPW, 'api_key=' + R],
     ['token: 1234-5678-9012', 'token: ' + R], ['ticket: PROJ-1234 rollout', 'ticket: ' + R + ' rollout'], ['password ' + V + ' rotation', 'password ' + R + ' rotation'], ['rotate Bearer ' + V, 'rotate Bearer ' + R],
     ['?token=' + V.slice(0, 14) + '&x=1', '?token=' + R + '&x=1'], ['password:\n  ' + V, 'password:\n  ' + R], ['token: |\n  ' + V, 'token: |\n  ' + R], ['    Password    REG_SZ    ' + V, '    Password    REG_SZ    ' + R],
-    ['token ' + AN(30), 'token ' + R], ['password: "' + V + ' x"', 'password: "' + R + '"'], ['password password ' + V, 'password password ' + R]];
+    ['token ' + AN(30), 'token ' + R], ['password: "' + V + ' x"', 'password: "' + R + '"'], ['password password ' + V, 'password password ' + R],
+    // r253 (主开发, round wlc6blvqo): an ASSIGNMENT, a holder query parameter and the header word hide ANY value (the release's R2 / R7 / R3)
+    ['auth=fix', 'auth=' + R], ['?token=refresh&x=1', '?token=' + R + '&x=1'], ['check bearer rotation', 'check bearer ' + R]];
   const hBad = HIDE.filter(([t, want]) => T(t) !== want || S(t) !== want).map(([t, want]) => `«${t.slice(0, 34)}» → ${T(t)} (want ${want})`);
   ok(!hBad.length, `(b) a VALUE after every word row is hidden — the token only, the word and the words after it stay (R2 \`password:\` / \`DB_PASSWORD=\` / \`ticket:\`, its next line, a YAML block, R3, R5 both, R6, R7; a Capitalized / UPPER / digit passphrase joined by \`- _ .\`; Summer1! with its !; 8+ digits)${hBad.length ? ' — ' + hBad.join(' | ') : ''}`);
   const J = { 'Summer1!': true, 'hunter2!': true, 'Passw0rd': true, '12345678': true, 'Correct-Horse-Battery-Staple': true, 'CORRECT-HORSE-BATTERY': true, '1234-5678-9012': true, 'reset-v2': true, 'ResetFlow': true,
@@ -146,8 +148,8 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
     `(a) the six a person reads are NEVER hidden by the run row — a date, a time, a version, a uuid, a path, a URL, an email (each a 20+ run of three classes); short words, a sha joined by \`-\`, an md5, a run of two classes, a run under 20${nBad.length ? ' — ' + nBad.map((t) => `«${t}» → ${T(t)}`).join(' | ') : ''}`);
   // the run row NEVER on a stored slug (labelOf, a scheduled run's record): an older record of short words reads whole; a family still goes
   const SLUGS = ['GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', 'deploy-EU-west2-canary', 'deploy-' + AN(36)];
-  ok(SLUGS.every((t) => S(t) === t) && T('deploy-EU-west2-canary') === R && S('deploy-' + FAMV) === 'deploy-ghp_' + R && randomRun('A1b2C3d4E5f6G7h8I9j0') && !randomRun('A1b2C3d4E5f6G7h8I9j') && !randomRun('550e8400-e29b-41d4-a716-446655440000'),
-    '(a) the run row never runs on a STORED name — a slug reads whole (a name of short words, a kebab name, even a run), a family is still hidden; typed, a kebab name of three classes is one 20+ run (hidden — the rule\'s, said)', SLUGS.map(S));
+  ok(SLUGS.every((t) => S(t) === t) && T('deploy-EU-west2-canary') === 'deploy-EU-west2-canary' && T(['Q7w8E9', 'r0T1y2', 'U3i4O5', 'p6A7s8'].join('-')) === R && S('deploy-' + FAMV) === 'deploy-ghp_' + R && randomRun('A1b2C3d4E5f6G7h8I9j0') && !randomRun('A1b2C3d4E5f6G7h8I9j') && !randomRun('550e8400-e29b-41d4-a716-446655440000'),
+    '(a) the run row never runs on a STORED name — a slug reads whole (a name of short words, a kebab name, even a run), a family is still hidden; typed, a kebab name with a plain word between its joiners is a label (r253: the output belt\'s own run test), one with none is one 20+ run (hidden)', SLUGS.map(S));
   // idempotent and bounded (its linearity is counted, never clocked: test-exit-run's r9 name-rule legs, by the work meter)
   ok([...KEEP, ...HIDE.map(([t]) => t), ...SHAPE.map(([t]) => t), ...NEVER].every((t) => T(T(t)) === T(t) && S(S(t)) === S(t)) && T('a'.repeat(INPUT_MAX + 99)).length <= INPUT_MAX,
     'the name rule is idempotent (a hidden name hides to itself), as typed and stored, and bounded at INPUT_MAX');
@@ -178,8 +180,10 @@ console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lan
   fs.copyFileSync(path.join(REPO, 'src/credential-words.js'), path.join(mdir, 'credential-words.js'));
   const WV = "  if (t.includes(REDACTED) || [...t].length < 8) return false;", mutA = anchored(ssrc, WV, WV + " if (t.split(/[-_.']+/).every((w) => !w || /^(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)$/.test(w))) return false;", 'r8 plain-words exemption');
   fs.writeFileSync(path.join(mdir, 'secret-shapes.js'), mutA); const MA = require(path.join(mdir, 'secret-shapes.js'));
-  const aRed = ['rotate password: ' + PW.join('-'), 'set DB_PASSWORD=' + PW.join('.'), 'api_key=' + UPW].filter((t) => MA.redactByValue(t, { typed: true }).text !== T(t));
-  ok(mutA !== ssrc && aRed.length === 3 && MA.redactByValue(aRed[0], { typed: true }).text === aRed[0], `MUTANT — r8's plain-words exemption: a Capitalized passphrase kept, RED by name — ${aRed.map((t) => `«${t}» → ${MA.redactByValue(t, { typed: true }).text}`).join(', ')}`);
+  // r253: an ASSIGNMENT hides any value (anyValue) — the word test this mutant loosens is the PROSE forms' only; the assignment forms stay hidden under it
+  const aRed = ['rotate password: ' + PW.join('-'), 'login password ' + PW.join('_'), 'passphrase ' + PW.join('.')].filter((t) => MA.redactByValue(t, { typed: true }).text !== T(t));
+  const aHeld = ['set DB_PASSWORD=' + PW.join('.'), 'api_key=' + UPW].every((t) => MA.redactByValue(t, { typed: true }).text === T(t) && T(t).includes(R));
+  ok(mutA !== ssrc && aRed.length === 3 && MA.redactByValue(aRed[0], { typed: true }).text === aRed[0] && aHeld, `MUTANT — r8's plain-words exemption: a Capitalized passphrase in PROSE kept, RED by name — ${aRed.map((t) => `«${t}» → ${MA.redactByValue(t, { typed: true }).text}`).join(', ')}; the assignments stay hidden under it (r253)`);
   const mdir2 = scratch('ss-name-mut2'); fs.mkdirSync(mdir2, { recursive: true }); fs.copyFileSync(path.join(REPO, 'src/credential-words.js'), path.join(mdir2, 'credential-words.js'));
   const mutB = anchored(ssrc, '    if (typed) text = text.replace(NAME_RUN_RE,', '    if (true) text = text.replace(NAME_RUN_RE,', 'the run row on a stored slug');
   fs.writeFileSync(path.join(mdir2, 'secret-shapes.js'), mutB); const MB = require(path.join(mdir2, 'secret-shapes.js'));

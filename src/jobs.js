@@ -3006,7 +3006,10 @@ class JobManager {
    *  without it a STORED name, a slug (labelOf, a scheduled run's `<name> run`) — the run row never runs on a slug (r8 erased
    *  «GitHub CI on macOS 15 …» whole there, and labelOf every older record of that shape) */
   _nameWords(s, { typed = false } = {}) {
-    try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir, byValue: true, typed }); } catch { return String(s == null ? '' : s); }
+    // r253 (round wlc6blvqo): a name the rule could not judge is RECORDED (one journal line, by name); a belt that cannot even be
+    // loaded answers the MARK, never the raw name (the law: when in doubt the rule hides)
+    const failed = () => { try { this.d.log(`[jobs] the name rule could not judge a job's name — it was judged by the output belt and the run row instead`); } catch { } };
+    try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir, byValue: true, typed, onFailed: failed }); } catch { return '«redacted»'; }
   }
   /** THE ONE ACCESSOR of a job's PERSON-FACING NAME (lane job-notify-user r5, accept-r4 confirmed 0 + refuted 0): the name
    *  belted on its own — every message-road copy (r3: the header, the chat card's label, the stash, the retry meta), and

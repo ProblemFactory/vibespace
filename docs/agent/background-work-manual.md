@@ -139,9 +139,12 @@ separate setting — not audience 1's auto-notify:
   or 3+ parts joined by `-` `_` `.` with a capital or a digit. So
   `password reset`, `auth: fix login flow` and `token refresh` are
   stored as typed, and `password: Summer1!` is stored
-  `password-«redacted»`. A name typed as one long run of mixed case and
-  digits (`TestHandlerReturns404WhenMissing`, `deploy-EU-west2-canary`)
-  is hidden whole — use spaces. A secret goes in the vault
+  `password-«redacted»`. An ASSIGNMENT hides ANY value: a `KEY=`,
+  `--key=` or `KEY:=` with no blank whose name says secret, a query
+  parameter like `?token=`, and the value after `bearer` / `basic` —
+  whatever its length or shape. A name typed as one long run of mixed
+  case and digits with no plain word in it
+  (`TestHandlerReturns404WhenMissing`) is hidden whole — use spaces. A secret goes in the vault
   (`vibespace-vault`), never in a name.
 - `--urgency` takes the For you tray's own set, `low|normal|high|urgent`.
   With `--notify-user`, anything else is refused when you create the job;

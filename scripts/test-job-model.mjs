@@ -329,7 +329,7 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
   // ordinary words from the record («password reset» → `password-«redacted»`, «password change» collided into `-2`); a word rule
   // hides what follows its word only when that is value-shaped, a shape hides wherever it sits
   const WHOLE = { 'password reset': 'password-reset', 'auth: fix login flow': 'auth-fix-login-flow', 'bearer of bad news': 'bearer-of-bad-news', 'token refresh': 'token-refresh',
-    'password change': 'password-change', 'nightly password rotation': 'nightly-password-rotation', 'session: cleanup old rows': 'session-cleanup-old-rows', 'check bearer rotation': 'check-bearer-rotation', 'token: refresh': 'token-refresh', 'passwd nightly-rotation': 'passwd-nightly-rotation' };
+    'password change': 'password-change', 'nightly password rotation': 'nightly-password-rotation', 'session: cleanup old rows': 'session-cleanup-old-rows', 'token: refresh': 'token-refresh', 'passwd nightly-rotation': 'passwd-nightly-rotation' };
   const lost = Object.entries(WHOLE).filter(([w, want]) => rn(w) !== want).map(([w]) => `«${w}» → ${rn(w)}`);
   const taken = new Set([rn('password reset')]), second = M.resolveName('password change', taken);
   ok(!lost.length && second.name === 'password-change' && !second.renamed, 'r8 resolveName BY THE VALUE: a name with no secret keeps its words at the record — «password reset», «auth: fix login flow», «bearer of bad news», «token refresh» (and six more) stored whole; «password change» beside «password reset» is no collision', lost.join(' | ') || second);
@@ -350,6 +350,9 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
   const H40 = hexOf(40), H64 = hexOf(64, 11), UUID = '550e8400-e29b-41d4-a716-446655440000', V = mat(12, 5) + '!x', V2 = mat(10, 13);
   const JWT = ['ey', 'J', 'a'.repeat(20), '.', 'ey', 'J', 'b'.repeat(20), '.', 'c'.repeat(20)].join(''), GHU = ['GH', 'P_'].join('') + mat(36), AK = ['AK', 'IA'].join('') + 'ABCDEFGH23456789';
   const PW = 'Correct-Horse-Battery-Staple', SV = mat(12, 5) + '-x';
+  // r253 (round wlc6blvqo): the assignment forms' values and the fresh read's values, built at run time by joining pieces
+  const H7 = ['hun', 'ter2'].join(''), LM = ['let', 'mein'].join(''), FB = ['foo', 'bared'].join(''), L16 = ['abcdefgh', 'ijklmnop'].join(''), L26 = L16 + ['qrstuvw', 'xyz'].join('');
+  const S1 = ['Sum', 'mer1!'].join(''), AB = ['Ab3d', 'Ef9hXy'].join(''), KQ = ['Kq8$wZ3!pL0', '@vN6#tR2^'].join(''), UP = ['Pa', 'ss9x'].join('');
   const TABLE = [   // [why, asked, stored-as]
     ['brief: an ordinary word after password', 'password reset', 'password-reset'], ['brief', 'token refresh', 'token-refresh'], ['brief', 'auth: fix login flow', 'auth-fix-login-flow'],
     ['brief', 'bearer of bad news', 'bearer-of-bad-news'], ['brief: a Capitalized passphrase after password: (r8 kept it)', 'rotate password: ' + PW, 'rotate-password-' + R],
@@ -369,7 +372,7 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
     ['skeptic: sha256:<64 hex> (one run, three classes)', 'verify sha256:' + H64, 'verify-' + R], ['a 64-hex digest standing alone', 'pull ' + H64 + ' now', 'pull-' + R + '-now'],
     ['skeptic: a uuid alone is never hidden', 'cleanup ' + UUID, 'cleanup-' + UUID], ['skeptic: a uuid IS the token after session:', 'session: ' + UUID, 'session-' + R],
     ['skeptic r8v-negatives', 'login password Correct_Horse_Battery_Staple', 'login-password-' + R], ['skeptic r8v-negatives', 'api_key=' + PW + '-Zebra', 'api_key-' + R],
-    ['skeptic: hunter2! (8 with its !)', 'password: hunter2!', 'password-' + R], ['hunter2 (7: under the 8 — kept)', 'password: hunter2', 'password-hunter2'],
+    ['skeptic: hunter2! (8 with its !)', 'password: hunter2!', 'password-' + R], ['r253: a 7-letter value in its ASSIGNMENT form is hidden (the floor is for prose only)', 'password=' + H7, 'password-' + R], ['r253: …its PROSE form (a blank after the colon) keeps the word test: 7 is under the 8', 'password: ' + H7, 'password-' + H7],
     ['skeptic: fix-login-flow-2 (two classes)', 'auth: fix-login-flow-2', 'auth-' + R], ['joined lowercase words (the joiners are no class)', 'auth: fix-login-flow', 'auth-fix-login-flow'],
     ['skeptic: bearer <JWT>', 'bearer ' + JWT, 'bearer-eyJ' + R], ['skeptic: deploy_<JWT>', 'deploy_' + JWT, 'deploy_eyJ' + R], ['skeptic: a family between CJK words', '部署 ' + GH + ' 到生产', '部署-ghp_' + R + '-到生产'],
     ['skeptic: password reset for <family>', 'password reset for ' + GH, 'password-reset-for-ghp_' + R], ['skeptic: UPPER GHP_ (no family — a 40-char run)', 'deploy ' + GHU, 'deploy-' + R],
@@ -385,7 +388,7 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
     ['a semver with a build', 'tag v1.2.3-RC.1+Build.20261029', 'tag-v1.2.3-RC.1-Build.20261029'], ['a path (never hidden)', 'tail /var/log/VibeSpace/Server-2026.log', 'tail-var-log-VibeSpace-Server-2026.log'],
     ['a Windows path', 'build C:\\Users\\Dev\\Project2026\\out', 'build-C-Users-Dev-Project2026-out'], ['an UPPER uuid', 'restore 550E8400-E29B-41D4-A716-446655440000', 'restore-550E8400-E29B-41D4-A716-446655440000'],
     ['an email (never hidden)', 'notify John.Doe2026@Example.com weekly', 'notify-John.Doe2026-Example.com-weekly'], ['a URL (never hidden)', 'mirror https://Example.com/Repo2026/archive', 'mirror-https-Example.com-Repo2026-archive'],
-    ['kebab-case typed, three classes: one 20+ run — the rule hides it', 'deploy-EU-west2-canary', R], ['kebab-case, two classes', 'nightly-db-backup-2026-10-29', 'nightly-db-backup-2026-10-29'],
+    ['r253: kebab-case with a plain word between its joiners is a label (the output belt\'s own run test)', 'deploy-EU-west2-canary', 'deploy-EU-west2-canary'], ['r253: …a run with no plain word between its joiners is still hidden', 'deploy ' + [mat(6), mat(6, 11), mat(6, 13)].join('-'), 'deploy-' + R], ['kebab-case, two classes', 'nightly-db-backup-2026-10-29', 'nightly-db-backup-2026-10-29'],
     ['a random 36 standing alone', 'deploy ' + mat(36), 'deploy-' + R], ['a random 14 standing alone (under 20 — kept)', 'deploy ' + V, 'deploy-' + SV],
     ['a value two words after the word (the ONE token is «fix»)', 'auth: fix ' + V, 'auth-fix-' + SV], ['the words after the token stay', 'password ' + V + ' rotation', 'password-' + R + '-rotation'],
     ['password: ⏎ a value (the token on the next line)', 'password:\n  Summer1!', 'password-' + R], ['a quoted value is ONE token', 'password: "Summer1! now"', 'password-' + R],
@@ -396,6 +399,9 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
     // version stays); R7 at a name by the release's query walk and its name grammar
     ['r10 M1: a kebab id and its comma (the comma is no class)', 'Rerun nightly-db-backup-2026-10-29, then report', 'Rerun-nightly-db-backup-2026-10-29-then-report'],
     ['r10 M1: …its colon', 'see nightly-db-backup-2026-10-29: done', 'see-nightly-db-backup-2026-10-29-done'],
+    ['r10 M1: an upper-case id and its comma (no plain word: only the core decides)', 'Rerun BUILD-2026-10-29-RC1-FINAL, then report', 'Rerun-BUILD-2026-10-29-RC1-FINAL-then-report'],
+    ['r10 M1: …in parens', 'run (PROJ-2026-10-29-RC1-HOTFIX) now', 'run-PROJ-2026-10-29-RC1-HOTFIX-now'], ['r10 M1: …in quotes', 'check "REL-2026-10-29-V2-CANDIDATE" today', 'check-REL-2026-10-29-V2-CANDIDATE-today'],
+    ['r253: a plain word beside a key-shaped part does not spare the run', 'deploy-' + mat(36), R],
     ['r10 M1: …in parens', 'run (nightly-db-backup-2026-10-29) now', 'run-nightly-db-backup-2026-10-29-now'],
     ['r10 M1: …in quotes', 'check "build-2026-10-29-release-candidate" today', 'check-build-2026-10-29-release-candidate-today'],
     ['r10 M1: …in brackets', 'tag [release-2026-10-29-hotfix-build] now', 'tag-release-2026-10-29-hotfix-build-now'],
@@ -405,26 +411,37 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
     ['r10 M1: a random run in parens is still hidden', 'deploy (' + mat(36) + '),', 'deploy-' + R],
     ['r10: 8 digits joined by -', 'password 1234-5678', 'password-' + R], ['r10: …by .', 'password 1234.5678', 'password-' + R], ['r10: …by _', 'password 1234_5678', 'password-' + R],
     ['r10: 7 digits joined (under 8 — kept)', 'password 1234-567', 'password-1234-567'],
-    ['r10: four spaces after password (the output belt reads 1–3)', 'password    Summer1!x', 'password-' + R], ['r10: a no-break space after password', 'password\u00a0Summer1!x', 'password-' + R],
-    ['r10: an ideographic space after password', 'password\u3000Summer1!x', 'password-' + R], ['r10: an ordinary word after four spaces stays', 'password    reset', 'password-reset'],
+    ['r10: four spaces after password (the output belt reads 1–3)', 'password    ' + S1 + 'x', 'password-' + R], ['r10: a no-break space after password', 'password\u00a0' + S1 + 'x', 'password-' + R],
+    ['r10: an ideographic space after password', 'password\u3000' + S1 + 'x', 'password-' + R], ['r10: an ordinary word after four spaces stays', 'password    reset', 'password-reset'],
     ['r10: a random run glued after a version — only it is hidden', 'ship v1.2.3-' + mat(24) + ' now', 'ship-v1.2.3-' + R + '-now'],
     ['r10: …glued before it', 'ship ' + mat(24) + '@1.2.3 now', 'ship-' + R + '-1.2.3-now'],
     ['r10: …after a + build', 'tag 1.2.3+' + mat(24), 'tag-1.2.3-' + R],
     ['r10: a PUBLIC query name stays (the release\'s name grammar: a descriptor head)', 'check https://x.test/cb?token_usage=Remote2026x', 'check-https-x.test-cb-token_usage-Remote2026x'],
     // r10's fresh read (a reviewer given the code): the leaks and over-hides it found in the port, each now a row
-    ['review L1: a no-break space after KEY:', 'password:\u00a0Summer1!', 'password-' + R], ['review L1: …after KEY=', 'DB_PASSWORD=\u00a0Summer1!', 'DB_PASSWORD-' + R],
-    ['review L1: an ideographic space after KEY=', 'API_KEY=\u3000Ab3dEf9hXy', 'API_KEY-' + R], ['review L1: a thin space after the word', 'password\u2009Summer1!', 'password-' + R],
-    ['review L1: a narrow no-break space', 'password\u202fSummer1!', 'password-' + R], ['review L1: a no-break space after bearer', 'bearer\u00a0Ab3dEf9hXy12', 'bearer-' + R],
-    ['review L2: a public KEY gives its separator back (the release\'s B-be02)', 'fix: password=Summer1!', 'fix-password-' + R], ['review L2', 'deploy: PASSWORD=Summer1!', 'deploy-PASSWORD-' + R],
-    ['review L2', 'ci= DB_PASS=Summer1!x', 'ci-DB_PASS-' + R], ['review L2: an := assignment', 'password := Summer1!', 'password-' + R],
-    ['review L3: a value in « » after the word', 'password «Summer1!»', 'password-' + R], ['review L3: …after a query head', 'check https://x.test/?password=«Summer1!»', 'check-https-x.test-password-' + R],
+    ['review L1: a no-break space after KEY:', 'password:\u00a0' + S1, 'password-' + R], ['review L1: …after KEY=', 'DB_PASSWORD=\u00a0' + S1, 'DB_PASSWORD-' + R],
+    ['review L1: an ideographic space after KEY=', 'API_KEY=\u3000' + AB, 'API_KEY-' + R], ['review L1: a thin space after the word', 'password\u2009' + S1, 'password-' + R],
+    ['review L1: a narrow no-break space', 'password\u202f' + S1, 'password-' + R], ['review L1: a no-break space after bearer', 'bearer\u00a0' + AB + '12', 'bearer-' + R],
+    ['review L2: a public KEY gives its separator back (the release\'s B-be02)', 'fix: password=' + S1, 'fix-password-' + R], ['review L2', 'deploy: PASSWORD=' + S1, 'deploy-PASSWORD-' + R],
+    ['review L2', 'ci= DB_PASS=' + S1 + 'x', 'ci-DB_PASS-' + R], ['review L2: an := assignment', 'password := ' + S1, 'password-' + R],
+    ['review L3: a value in « » after the word', 'password «' + S1 + '»', 'password-' + R], ['review L3: …after a query head', 'check https://x.test/?password=«' + S1 + '»', 'check-https-x.test-password-' + R],
     ['review L4: a quoted value after the bare word is ONE token', 'password "Summer 1!x"', 'password-' + R],
     ['review O3: the release\'s name grammar (a descriptor head is public)', 'password_policy: MinLength12', 'password_policy-MinLength12'],
-    ['review O4: a punctuated run glued after a version — the version stays', 'ship v1.2.3-Kq8$wZ3!pL0@vN6#tR2^ now', 'ship-v1.2.3-' + R + '-now'], ['review O4: …glued before it', 'ship Kq8$wZ3!pL0@vN6#tR2^@1.2.3 now', 'ship-' + R + '-1.2.3-now'],
+    ['review O4: a punctuated run glued after a version — the version stays', 'ship v1.2.3-' + KQ + ' now', 'ship-v1.2.3-' + R + '-now'], ['review O4: …glued before it', 'ship ' + KQ + '@1.2.3 now', 'ship-' + R + '-1.2.3-now'],
+    // r253 (主开发, round wlc6blvqo — THE MUST): after an ASSIGNMENT (the holder, then `=` or `:=` with no blank), a holder query parameter
+    // and the header word, ANY non-empty value is hidden, as the release did; the prose forms keep the word test
+    ['r253: a credential assignment with a 7-letter value', 'migrate DB_PASSWORD=' + H7, 'migrate-DB_PASSWORD-' + R], ['r253: the flag form', 'run --password=' + H7, 'run---password-' + R],
+    ['r253: a short value', 'API_KEY=' + LM, 'API_KEY-' + R], ['r253: a value of one class', 'REDIS_AUTH=' + FB, 'REDIS_AUTH-' + R], ['r253: := with no blank', 'api_key:=' + H7, 'api_key-' + R],
+    ['r253: a long value of one class (an app password\'s shape)', 'SMTP_PASSWORD=' + L16 + ' mail', 'SMTP_PASSWORD-' + R + '-mail'],
+    ['r253: a holder query parameter', 'curl https://h.test/cb?token=' + ['abc', '1234'].join(''), 'curl-https-h.test-cb-token-' + R],
+    ['r253: the header word with a lowercase run', 'bearer ' + L26, 'bearer-' + R], ['r253: the header word\'s value whatever it is', 'check bearer rotation', 'check-bearer-' + R],
+    ['r253: a PUBLIC query value that hides a userinfo (the release\'s hidesHolder)', 'x ?next=https://admin:' + UP + '@db.example/', 'x-next-' + R],
+    ['r253: a spaced `=` is prose (a blank — the word test)', 'DB_PASSWORD = ' + H7, 'DB_PASSWORD-' + H7],
+    ['r253: a run with plain words between its joiners', 'build-iOS17-sim-tests', 'build-iOS17-sim-tests'], ['r253: …and a version', 'Node22-Ubuntu24.04-build', 'Node22-Ubuntu24.04-build'],
   ];
+  const TABLE_ROWS = 137;   // r253: the table's EXACT size — a row deleted is red by name
   const tableBad = TABLE.filter(([, asked, want]) => rn(asked) !== want).map(([why, asked, want]) => `«${asked.slice(0, 48)}» (${why}) → ${rn(asked)} (want ${want})`);
   for (const [why, asked] of TABLE) console.log(`      ${JSON.stringify(asked.length > 52 ? asked.slice(0, 44) + '…' : asked).padEnd(56)} → ${rn(asked)}   (${why})`);
-  ok(TABLE.length >= 60 && !tableBad.length, `r9 THE NAME RULE: a ${TABLE.length}-name table — every row's stored-as (the brief's examples, the skeptics' names, camelCase / PascalCase / brand names / dates / times / versions / paths / uuids / emails / URLs)${tableBad.length ? ' — ' + tableBad.join(' | ') : ''}`);
+  ok(TABLE.length === TABLE_ROWS && !tableBad.length, `r9 THE NAME RULE: a ${TABLE.length}-name table — every row's stored-as (the brief's examples, the skeptics' names, camelCase / PascalCase / brand names / dates / times / versions / paths / uuids / emails / URLs)${tableBad.length ? ' — ' + tableBad.join(' | ') : ''}`);
   const leakT = TABLE.filter(([, asked, want]) => want.includes(R) && [mat(36), mat(36).toUpperCase(), 'Correct-Horse', 'Correct.Horse', 'Correct_Horse', 'Summer1', 'Passw0rd', '12345678', 'hunter2', H40, H64, UUID, 'a'.repeat(20) + '.', 'PROJ-1234'].some((x) => asked.includes(x) && rn(asked).includes(x.slice(0, 7))));
   ok(!leakT.length, `r9 …no row that hides keeps a piece of what it hid (${TABLE.filter(([, , w]) => w.includes(R)).length} rows hide: a family, a passphrase, a digest, a JWT, a random run, a uuid after its word)`, leakT.map(([, a]) => rn(a)));
   // (c) the collision law: two names differing only in a hidden token are -2, renamed; a kept word is no collision
@@ -457,6 +474,12 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
   const mCore = anchored(ssSrc9, CORE_FIRST, "  if (run.length < 20 || classesOf(run) < 3 ||", 'r10 M1 classes on the untrimmed run'), MC10 = MC9.load('src/secret-shapes.js', mCore, 'untrimmed');
   const coreRed = TABLE.filter(([why, asked, want]) => why.startsWith('r10 M1') && M.resolveName(asked, new Set(), { mask: (t) => MC10.redactByValue(t, { typed: true }).text }).name !== want);
   ok(mCore !== ssSrc9 && coreRed.length >= 3, `r10 MUTANT — the run's classes counted on the UNTRIMMED run (r9's M1): RED by name — ${coreRed.length} rows: ${coreRed.slice(0, 4).map(([, a]) => `«${a.slice(0, 40)}» → ${M.resolveName(a, new Set(), { mask: (t) => MC10.redactByValue(t, { typed: true }).text }).name}`).join(', ')}`);
+  // r253 RED CONTROL — the tip's FLOOR on ASSIGNMENTS (1851a3446): the assignment rows keep their short or one-class values
+  const ASSIGN_AT = '    if (!(assign ? anyValue(inner) : wordValue(inner))) { KV_HEAD.lastIndex = Math.max(headEnd, s); continue; }';
+  const QHOLD_AT = '    if (!v || !anyValue(v[0])) continue;';
+  const mFloor = anchored(anchored(ssSrc9, ASSIGN_AT, '    if (!wordValue(inner)) { KV_HEAD.lastIndex = Math.max(headEnd, s); continue; }', 'r253 the floor on assignments'), QHOLD_AT, '    if (!v || !wordValue(v[0])) continue;', 'r253 the floor on a holder parameter'), MF253 = MC9.load('src/secret-shapes.js', mFloor, 'floor');   // stale-pins: kept — the PLANT a red control writes in (the tip's floor, on purpose)
+  const floorRed = TABLE.filter(([why, asked, want]) => why.startsWith('r253: a') && want.includes(R) && M.resolveName(asked, new Set(), { mask: (t) => MF253.redactByValue(t, { typed: true }).text }).name !== want);
+  ok(floorRed.length >= 5, `r253 RED CONTROL — the tip's value floor on assignments and holder parameters: RED by name — ${floorRed.length} rows keep their value: ${floorRed.slice(0, 5).map(([, a]) => `«${a.slice(0, 32)}» → ${M.resolveName(a, new Set(), { mask: (t) => MF253.redactByValue(t, { typed: true }).text }).name}`).join(', ')}`);
   // r10 FAIL CLOSED: the name rule never returns a name «as far as it got». ON THE PORT onto 2.369.413 its query row named a regex the
   // release had renamed: every name threw after the word rows and passed with NO run row — the suite's table went red on it. Now a
   // name the rule cannot judge is judged by the OUTPUT belt AND the name's own run row (the output belt alone keeps a random run
@@ -472,6 +495,14 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
   const mOld = anchored(mThrow, OLD_CATCH, '  } catch { /* a text that cannot be judged is returned as far as it got */ }\n  return { text, redacted: n };', 'r9 catch'), MO10 = MC9.load('src/secret-shapes.js', mOld, 'farasitgot');
   const oldOut = MO10.redactByValue(RUN36, { typed: true });
   console.log(`      the same throw with r9's catch: ${JSON.stringify(RUN36)} → ${JSON.stringify(oldOut.text)}`);
+  // r253: a fallback is RECORDED — the belt tells its caller (jobs.js _nameWords journals it by name); the name road's own catch is the MARK
+  const SS_THROWS = MC9.write('src/secret-shapes.js', mThrow, 'throws-belt'), aobSrc = fs.readFileSync(path.join(__dirname_jm, '../src/agent-output-belt.js'), 'utf8');
+  const AOB = MC9.load('src/agent-output-belt.js', anchored(aobSrc, "require('./secret-shapes.js')", `require(${JSON.stringify(SS_THROWS)})`, 'r253 the belt on a throwing rule'), 'aob-throws');
+  let told = 0; const toldOut = AOB.maskForSink(RUN36, { byValue: true, typed: true, onFailed: () => { told++; } });
+  console.log(`      the belt on the throwing rule: ${JSON.stringify(RUN36)} → ${JSON.stringify(toldOut)}, the caller told ${told}×`);
+  ok(told === 1 && !toldOut.includes(mat(36)), 'r253 a name the rule could not judge is RECORDED — maskForSink tells its caller once, the name still hidden', { told, toldOut });
+  const jbSrc253 = fs.readFileSync(path.join(__dirname_jm, '../src/jobs.js'), 'utf8'), nwAt = jbSrc253.indexOf('  _nameWords(s, { typed = false } = {}) {'), nw253 = jbSrc253.slice(nwAt, jbSrc253.indexOf('\n  }\n', nwAt));
+  ok(nwAt > 0 && /onFailed: failed \}\); \} catch \{ return '«redacted»'; \}/.test(nw253) && /this\.d\.log\(`\[jobs\] the name rule could not judge a job's name/.test(nw253), 'r253 jobs.js _nameWords journals a fallback by name, and a belt that cannot load answers the MARK, never the raw name', nw253.slice(0, 400));
   ok(mOld !== mThrow && oldOut.text.includes(mat(36)), 'r10 CONTROL — r9\'s catch («as far as it got») with the same throw passes the 36-run WHOLE (the run row never ran): the fallback is what hides it', oldOut);
 }
 

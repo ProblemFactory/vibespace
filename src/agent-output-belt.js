@@ -102,7 +102,7 @@ function compiledFor(v, vr) {
  * anywhere, a word row's ONE token only when it is a value — «password reset» keeps its words); `typed` (r9): the name AS TYPED
  * (resolveName's belt — the run row runs), never a stored slug; ① is by value already.
  */
-function maskForSink(text, { dataDir, message = false, said = null, mentions = null, byValue = false, typed = false } = {}) {
+function maskForSink(text, { dataDir, message = false, said = null, mentions = null, byValue = false, typed = false, onFailed = null } = {}) {
   let s = String(text == null ? '' : text);
   if (!s) return s;
   const vr = vaultRun();
@@ -112,7 +112,11 @@ function maskForSink(text, { dataDir, message = false, said = null, mentions = n
       if (forms && forms.size) { const was = s.split('[vault:').length; s = vr.maskText(s, forms); if (Array.isArray(said) && s.split('[vault:').length > was && !said.includes('a vault value')) said.push('a vault value'); }
     } catch { /* the shape census below still runs — the belt never loses the write */ }
   }
-  try { s = (byValue ? redactByValue(s, { typed }) : redactSecrets(s, { message: !!message, said, mentions })).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
+  try {
+    const r = byValue ? redactByValue(s, { typed }) : redactSecrets(s, { message: !!message, said, mentions });
+    if (r.failed && typeof onFailed === 'function') { try { onFailed(); } catch { } }   // r253: a name the rule could not judge is RECORDED by its caller
+    s = r.text;
+  } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
   return s;
 }
 
