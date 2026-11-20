@@ -464,5 +464,55 @@ console.log('⑧ round 3 — smaller 4 and 7');
 }
 // @@ROUND3@@
 
+// ── ⑨ B-dfa4 cut 3b — A PRODUCER'S «LATER» (a store whose bytes are not ready: the channels index's sliced layout) ──────────
+console.log('⑨ B-dfa4 cut 3b — a producer answering LATER: nothing written, nothing settled, no busy loop; its store asks again; a synchronous flush and the exit ask produce({sync: true})');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const T9 = fs.mkdtempSync(path.join(os.tmpdir(), 'store-writer-later-'));
+  const quiet9 = { log() { }, warn() { }, error() { } };
+  const sleep9 = (ms) => new Promise((r) => setTimeout(r, ms));
+  const turns9 = async (n) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };   // the writer's own timer turns
+  const until9 = async (cond, what, ms = 5000) => { const t0 = Date.now(); while (!cond()) { if (Date.now() - t0 > ms) throw new Error(`waited ${ms} ms for ${what} — it never happened`); await sleep9(2); } };
+  const leg9 = async (SW9) => {
+    const w = SW9.create({ log: quiet9 });
+    const f = path.join(T9, `later-${Math.random().toString(36).slice(2)}.json`), asks = [];
+    let ready = false;
+    const produce = (o) => { asks.push(o && o.sync ? 'sync' : 'paced'); return ready || (o && o.sync) ? '{"v":1}' : SW9.LATER; };
+    w.dirty(f, { name: 'later.write', produce, debounceMs: 0 });
+    let settled = null; const d = w.durable(f, { timeoutMs: 5000 }); d.then((v) => { settled = v; });
+    await until9(() => asks.length >= 1, 'the writer to ask the store once');
+    await turns9(25);   // a store answered LATER is not asked again until its store dirties it (no busy loop) — 25 of its timer turns
+    const out = { asked: asks.length, pending: w.pending(f), early: settled, onDisk: fs.existsSync(f) };
+    ready = true; w.dirty(f, { name: 'later.write', produce, debounceMs: 0 });   // its bytes ready: the store asks again
+    out.landed = await d; out.bytes = fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : null;
+    // a synchronous flush asks produce({sync: true}): the bytes in that turn
+    const f2 = path.join(T9, `sync-${Math.random().toString(36).slice(2)}.json`); const asks2 = [];
+    w.dirty(f2, { name: 'sync.write', produce: (o) => { asks2.push(o && o.sync ? 'sync' : 'paced'); return o && o.sync ? '{"s":1}' : SW9.LATER; }, debounceMs: 0 });
+    const r2 = w.flushSync([f2]);
+    out.syncWritten = r2.written.includes('sync.write') && fs.readFileSync(f2, 'utf8') === '{"s":1}'; out.syncAsks = asks2.join(',');
+    // the exit's flush writes a store answered LATER (still owed, never forgotten)
+    const f3 = path.join(T9, `exit-${Math.random().toString(36).slice(2)}.json`); const asks3 = [];
+    w.dirty(f3, { name: 'exit.write', produce: (o) => { asks3.push(o && o.sync ? 'sync' : 'paced'); return o && o.sync ? '{"x":1}' : SW9.LATER; }, debounceMs: 0 });
+    await until9(() => asks3.length >= 1, 'the writer to ask the exit store once');   // its first ask answered LATER
+    const ex = w.exitFlush();
+    out.exitWritten = fs.existsSync(f3) && fs.readFileSync(f3, 'utf8') === '{"x":1}'; out.exitAsks = asks3.join(','); out.exitLeft = (ex && ex.left || []).map((x) => x.name);
+    try { w.stop(); } catch { }
+    return out;
+  };
+  const SW = require(path.join(REPO, 'src/store-writer.js'));
+  let r = null, spin = null;
+  try {
+  r = await leg9(SW);
+  ok(r.asked === 1 && r.pending === true && r.early === null && r.onDisk === false && r.landed === true && r.bytes === '{"v":1}',
+    `⑨ LATER: asked ONCE in 25 of the writer's timer turns (${r.asked}) — nothing written, the file still owed (pending ${r.pending}), its durable() waiter WAITING (${r.early}); its store asks again: written, the waiter resolved (${r.landed})`, r);
+  ok(r.syncWritten && /sync/.test(r.syncAsks) && r.exitWritten && /sync/.test(r.exitAsks), `⑨ a synchronous flush asks produce({sync: true}) and writes (${r.syncAsks}); the exit's flush writes a store answered LATER (${r.exitAsks})`, r);
+  const src9 = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8');
+  const M9 = mutantCopies('store-writer-later', REPO);
+  spin = await leg9(M9.load('src/store-writer.js', anchored(src9, '(s) => s.dirty && !s.later && s.produce', '(s) => s.dirty && s.produce', 'the queue asks a LATER store again at once'), 'later-spin'));
+  ok(spin.asked > 1, `⑨ RED CONTROL: a queue that asks a store answered LATER again at once spins (${spin.asked} asks in 25 timer turns) — the leg above would go red`, { asked: spin.asked });
+  } finally { try { fs.rmSync(T9, { recursive: true, force: true }); } catch { } }
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

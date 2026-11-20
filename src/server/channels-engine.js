@@ -1288,6 +1288,11 @@ function create(deps = {}) {
   const DUE_TURN_MAX = 2000;
   const dueBuilding = new Map();   // adapterId -> { ix, promise }
   const dueFailed = new Set();     // accounts whose sliced build threw: built in one turn next (a throw there fails the pass, as before — never a loop of builds)
+  // B-dfa4 cut 3b: THE DUE BUILD'S RESTART BOUND, as the layout's and the sweep's: an account whose sliced build was made stale
+  // (a whole-map write) or landed with more rows touched meanwhile than the rebuild line, DUE_RESTARTS times in a row, is
+  // built in one turn next, said once in the journal
+  const DUE_RESTARTS = 3;
+  const dueRestarts = new Map();   // adapterId -> sliced builds made stale in a row
   function dueWarm(rec, sig, lane, T, keys) {
     if (stopped) return null;   // a stopped engine builds nothing (its readers are ending)
     const cur = dueBuilding.get(rec.id);
@@ -1306,11 +1311,14 @@ function create(deps = {}) {
         if (d.owed) ix.marks.add(en.key);
         if (d.at !== Infinity) { ix.at.set(en.key, d.at); ix.keys.push({ key: en.key, at: d.at }); }
       }, { what: 'due', sliceMs: WALK.sliceMs, stats: dueStats, onSlice: WALK.onSlice, alive: () => !stopped && !ix.stale && dueBuilding.get(rec.id) === job });
-      if (!r.done) return;
+      if (!r.done) { if (!stopped && ix.stale) dueRestarts.set(rec.id, (dueRestarts.get(rec.id) || 0) + 1); return; }
       const s1 = Date.now();
       ix.keys.sort((a, b) => dueCmp(a, b.at, b.key));
       { const sortMs = Date.now() - s1; if (sortMs > dueStats.maxSortMs) dueStats.maxSortMs = sortMs; }
-      if (dueBuilding.get(rec.id) !== job || ix.stale) return;
+      if (dueBuilding.get(rec.id) !== job || ix.stale) { if (ix.stale) dueRestarts.set(rec.id, (dueRestarts.get(rec.id) || 0) + 1); return; }
+      // a landing whose rows touched meanwhile already pass the rebuild line (dueIndex) is built again at once: it counts as a
+      // restart too (an authoritative feed's account keys most rows to Infinity, so a few hundred touches pass it)
+      if (ix.dirty.size > (ix.at.size >> 3) + 256) dueRestarts.set(rec.id, (dueRestarts.get(rec.id) || 0) + 1); else dueRestarts.delete(rec.id);
       dueIx.set(rec.id, ix);
       dueStats.builds++; dueStats.sliced++; dueStats.lastBuildMs = Date.now() - t0;
     })().catch((err) => { dueFailed.add(rec.id); log.warn(`[channels] ${rec.id}: the due index build failed: ${(err && err.message) || err} — the next build is made in one turn (its error reaches the pass)`); })
@@ -1328,7 +1336,7 @@ function create(deps = {}) {
   }
   /** The due build in flight for this account (the pass awaits it before its due turn), or null. */
   const dueBuildOf = (adapterId) => { const b = dueBuilding.get(adapterId); return b ? b.promise : null; };
-  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0, sliced: 0, slices: 0, maxSliceMs: 0, maxSortMs: 0 };
+  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0, sliced: 0, slices: 0, maxSliceMs: 0, maxSortMs: 0, whole: 0 };
   // lane scheduler-census-index: the scheduler card's CENSUS INDEX (`clockIndexed`, beside `schedulerScan`) is re-judged
   // at the same writes as the due index
   const censusIx = new Map();   // adapterId -> { sig, t, kept, rows: Map<key, judgement>, order: [judgement], dirty: Set<key>, stale }
@@ -1383,7 +1391,9 @@ function create(deps = {}) {
     // a mass write (a boot's stamps, a big discovery page run) is one O(rows) build, never thousands of O(rows) splices
     if (!ix || ix.stale || ix.sig !== sig || ix.dirty.size > (ix.at.size >> 3) + 256) {
       const ks = store.index.keysOf(rec.id);
-      if (!sync && ks.length > DUE_SYNC_ROWS && !dueFailed.has(rec.id)) {   // B-dfa4 cut 3: in slices — NOT READY until it lands (never an empty index taken as truth)
+      const restarts = dueRestarts.get(rec.id) || 0;
+      if (!sync && ks.length > DUE_SYNC_ROWS && restarts >= DUE_RESTARTS) { dueRestarts.delete(rec.id); dueStats.whole++; log.warn(`[channels] ${rec.id}: its due index was made stale during ${restarts} sliced builds in a row (whole-map writes) — built in one turn (${ks.length} rows)`); }
+      else if (!sync && ks.length > DUE_SYNC_ROWS && !dueFailed.has(rec.id)) {   // B-dfa4 cut 3: in slices — NOT READY until it lands (never an empty index taken as truth)
         dueWarm(rec, sig, lane, T, ks);
         return null;
       }
@@ -2475,6 +2485,7 @@ function create(deps = {}) {
     const wasInBackoff = inBackoff(e);
     const backoff = !force && wasInBackoff;
     if (backoff && !Drain.hasRequests(e.dq)) return { ok: false, why: 'backoff' };   // the timer waits; requests are judged (refused by name, or the owner's one press)
+    e.dueBeyond = 0;   // B-dfa4 cut 3b: the rows past a due turn are this pass's to count (its timer turn or discovery sets them), never an older pass's
     e.passing = (async () => {
       // YIELD FIRST (2026-09-26): a pass that returned before its first
       // `await` ran its `finally` (e.passing = null) BEFORE this assignment
@@ -2692,7 +2703,7 @@ function create(deps = {}) {
           let result;
           try {
             if (act.type === 'fetch') result = await fetchOne(act);
-            else if (act.type === 'discover') { e.chargeBy = 'timer'; await discover(rec, e); result = { due: await dueListReady(rec, e, { all: e.dq.pass.force, turnMax: DUE_TURN_MAX }) }; }
+            else if (act.type === 'discover') { e.chargeBy = 'timer'; await discover(rec, e); const dd = await dueListReady(rec, e, { all: e.dq.pass.force, turnMax: DUE_TURN_MAX }); e.dueBeyond = dd.more ? Math.max(0, (dd.lateTotal || 0) - DUE_TURN_MAX) : 0; result = { due: dd }; }
             else if (act.type === 'feed') { e.chargeBy = 'timer'; result = await feedPage(rec, e); }   // lane lark-search-poll: ONE change-feed page (rule 21)
             else if (act.type === 'recheck') { e.chargeBy = 'timer'; result = await recheckOne(rec, e, idOf(act.key), { by: 'timer' }); }   // lane lark-threads: ONE recent-roots page (rule 22a)
             else if (act.type === 'scanHost') {
@@ -9411,11 +9422,35 @@ function create(deps = {}) {
       const dl = otherDue ? null : dueList(rec, e, t, { turnMax: DUE_TURN_MAX });
       if (dl && dl.notReady) continue;   // B-dfa4 cut 3: its due index is being built in slices (NOT READY, by name) — a later tick reads it
       const due = otherDue || dl.length > 0;
-      if (!due) continue;
+      if (!due) { if (dl && dl.more) dueRecheck(rec); continue; }   // B-dfa4 cut 3b: the turn's heads all re-keyed, more behind them
       if (e.passing) { e.timerDue = true; continue; }   // r5 verify: busy while due — the pass in flight (or the next drain) does the timer's work, a request storm cannot starve the due list
       if (!affordable(rec, e)) { const w = dl || dueList(rec, e, t, { turnMax: DUE_TURN_MAX }); if (!w.notReady) e.waiting = w.more ? w.lateTotal : w.length; continue; }
       pass(rec.id).catch((err) => console.warn('[channels] pass failed:', err && err.message));
     }
+  }
+
+  // B-dfa4 cut 3b: THE TURN'S HEADS ALL RE-KEYED, MORE BEHIND THEM. The due turn takes the DUE_TURN_MAX most overdue keys;
+  // each key is a LOWER bound (a tier only relaxes), so all of them can turn out not due after all (re-keyed to their true
+  // instant, they leave the head) while truly due rows wait past them: the list is empty though `more`. The account is then
+  // asked again on the NEXT turn of the loop — one more turn of re-keys each, never a 5 s tick each — until a due row comes
+  // out (a pass is started, as the tick would) or none waits: the release found it in one pass.
+  const dueRechecking = new Set();
+  function dueRecheck(rec) {
+    if (stopped || dueRechecking.has(rec.id)) return;
+    dueRechecking.add(rec.id);
+    setImmediate(() => {
+      dueRechecking.delete(rec.id);
+      const r0 = adapterRecords().adapters.find((r) => r.id === rec.id);
+      const e = r0 && live.get(r0.id), t = now();
+      if (stopped || !r0 || r0.enabled === false || !e) return;   // removed or disabled meanwhile: nothing to ask
+      rec = r0;
+      if (e.passing) { e.timerDue = true; return; }
+      const dl = dueList(rec, e, t, { turnMax: DUE_TURN_MAX });
+      if (dl.notReady) return;   // its index is being built: a later tick reads it
+      if (!dl.length) { if (dl.more) dueRecheck(rec); return; }
+      if (!affordable(rec, e)) { e.waiting = dl.more ? dl.lateTotal : dl.length; return; }
+      pass(rec.id).catch((err) => console.warn('[channels] pass failed:', err && err.message));
+    });
   }
 
   /**
@@ -9591,7 +9626,9 @@ function create(deps = {}) {
   /** THE BOOT'S SWEEP → { sync: result } for a small store (this turn), else { promise } of the result (null once stopped).
    *  result = { receipt, capZero, orphans } as deprecatedReceiptWakes / capZeroDigests / orphanWatchers say them, and
    *  selfAtPlan (healSelfAt's). `syncRows` / `sliceMs` / `onSlice`: a suite's (WALK's by default). */
+  let bootSweeping = null;   // the sliced sweep in flight: a second call joins it (one sweep at a time — bootJob is one)
   function bootSweep({ syncRows = WALK.syncRows, sliceMs = WALK.sliceMs, onSlice = WALK.onSlice } = {}) {
+    if (bootSweeping) return { promise: bootSweeping };
     let err0 = null;
     const visitor = (per, rows, t) => (k) => {
       const en = rows[k];
@@ -9619,7 +9656,7 @@ function create(deps = {}) {
         bootJob = job;
         const visit = visitor(per, rows, t);
         let done;
-        if (attempt >= BOOT_SWEEP_RESTARTS) { const s0 = Date.now(); keys.forEach(visit); done = true; bootSweepStats.whole++; bootSweepStats.slices++; bootSweepStats.maxSliceMs = Math.max(bootSweepStats.maxSliceMs, Date.now() - s0); }
+        if (attempt >= BOOT_SWEEP_RESTARTS) { log.warn(`[channels] the boot sweep was started again ${attempt} times (whole-map writes or grants changes) — swept in one turn (${keys.length} rows)`); const s0 = Date.now(); keys.forEach(visit); done = true; bootSweepStats.whole++; bootSweepStats.slices++; bootSweepStats.maxSliceMs = Math.max(bootSweepStats.maxSliceMs, Date.now() - s0); }
         else done = (await walkSliced(keys, visit, { what: 'boot-sweep', sliceMs, onSlice, stats: bootSweepStats, alive: () => !stopped && !job.stale && CG.generation() === job.gen })).done;
         if (bootJob === job) bootJob = null;
         if (stopped) return null;
@@ -9633,6 +9670,8 @@ function create(deps = {}) {
         return said(out);
       }
     })();
+    bootSweeping = promise;
+    promise.then(() => { if (bootSweeping === promise) bootSweeping = null; }, () => { if (bootSweeping === promise) bootSweeping = null; });
     return { promise };
   }
   function start() {

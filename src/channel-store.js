@@ -792,7 +792,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
         if (st.maxSliceMs > flushStats.layoutMaxSliceMs) flushStats.layoutMaxSliceMs = st.maxSliceMs;
         flushStats.layoutSlices += st.slices;
         if (closed || warm !== job) return;
-        if (job.stale) { flushStats.layoutRestarts++; if (++job.restarts >= LATER_MAX) { if (warm === job) warm = null; allDirty = true; laterOwed = true; markDirty(); return; } continue; }   // a whole touch during the build: it STARTS AGAIN from a new snapshot (LATER_MAX times, then the next write lays out in its turn)
+        if (job.stale) { flushStats.layoutRestarts++; if (++job.restarts >= LATER_MAX) { if (warm === job) warm = null; allDirty = true; laterOwed = true; warn(`[channels] the index layout was started again ${job.restarts} times by whole-map writes — the next write lays it out in one turn`); markDirty(); return; } continue; }   // a whole touch during the build: it STARTS AGAIN from a new snapshot (LATER_MAX times, then the next write lays out in its turn)
         layout = next; warm = null; bytesOwed = true; flushStats.full++; flushStats.layoutSliced++;
         markDirty();   // the write owed since it began, now from the landed layout (+ the rows touched meanwhile)
         return;
@@ -800,8 +800,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     })().catch((e) => { if (warm === job) warm = null; allDirty = true; warmFailed = true; warn('[channels] the index layout build failed:', (e && e.message) || e, '— the next write lays it out whole'); markDirty(); });
     return job.promise;
   }
-  /** B-dfa4 cut 3: A MASS OF TOUCHED ROWS on a laid-out index (more than LAYOUT_SYNC_ROWS since the last write — a boot's
-   *  passes, a mass write) → their CHUNKS re-serialized in slices, the rest kept: the stated snapshot is the rows touched
+  /** B-dfa4 cut 3: A MASS OF TOUCHED ROWS on a laid-out index (their chunks more than APPLY_SYNC_CHUNKS since the last write —
+   *  a boot's passes, a complete discovery, any ordinary write that reaches that many chunks) → their CHUNKS re-serialized in slices, the rest kept: the stated snapshot is the rows touched
    *  until now (a row touched later is in dirtyKeys again, the next write takes it); a row born joins the last chunk, as
    *  applyTouched; a whole touch makes it stale (the next write lays out whole); a synchronous write meanwhile takes its
    *  rows back (never lost). The writer is answered LATER until it lands. */

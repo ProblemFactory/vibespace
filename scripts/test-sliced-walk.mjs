@@ -5,7 +5,7 @@
 // numbers, WALK_SYNC_ROWS / WALK_SLICE_MS; sliceMs 0 = one item a slice, so a placed write always falls between two
 // slices whatever the machine's speed; onSlice places that write, awaited):
 //   (a) THE HELPER — every item once, in order; the loop answers between two slices; alive() false stops it; the
-//       longest slice by its own clock is printed (law 4: at most 50 ms).
+//       longest slice by its own clock is printed (law 4: printed, never asserted — no wall-clock bound in a fast suite).
 //   (b) THE INDEX'S LAYOUT (the first write after a boot) — (1) PARITY: the sliced write equals the whole-file
 //       serialization byte for byte; (2) A CHANGE DURING THE WALK: a row changed after its chunk was laid out, a row changed
 //       before it, a row born — placed between two slices: the write equals the whole serialization of its instant (a
@@ -26,10 +26,16 @@
 //   (e) THE RE-JUDGE (every row's verdict against the account's credential — the boot's, a re-authorization's) — (1) PARITY:
 //       the sliced re-judge persists the whole one's verdicts, row for row; (2) a fresh verdict written behind the walk and
 //       ahead of it between two slices: equal to a whole re-judge after the same write.
-//   RED CONTROLS (mutant copies, each edit by scripts/scratch.mjs anchored): the layout's landing forgetting the rows
+//   cut 3b (主开发's round wdhpbbudn): (b6) the layout's bound — three whole touches during sliced layouts, the next write in
+//       one turn, said once; (b7) a synchronous flush during the first sliced layout (the exit's case); (c4) the due build's
+//       bound; (d5) the boot sweep's bound — three grants changes, one turn, said once; (f) the due turn's cap — heads that all
+//       turn out not due, the due rows behind them polled on the same tick; (g) the release of a dead boot's reservations
+//       touches the one row holding it.
+//   RED CONTROLS (mutant copies, each edit by scripts/scratch.mjs anchored; nine): the layout's landing forgetting the rows
 //   touched during it → (b2) red; the store answering the writer null while it builds → (b3) red; a re-made chunk owing
 //   its bytes only at its landing → (b4) red; the per-account keys' landing forgetting the touched keys → (b5) red; the due list answering [] while it is built → (c1) red; the sweep's landing not reading
-//   the touched rows again → (d2) red; the sweep blind to a grants change → (d3) red.
+//   the touched rows again → (d2) red; the sweep blind to a grants change → (d3) red; a tick that does not ask again →
+//   (f) red; the release's old whole-map walk → (g) red.
 // Run: node scripts/test-sliced-walk.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -180,6 +186,27 @@ async function applyLeg(tag, mid = null, mass = null, SM = S) {
   ok(rto.placed && rto.rows['lark/thr_0'].title !== 'changed in the first chunk', `(b4) RED CONTROL: a chunk apply whose re-made chunk owes its bytes only at its landing — the takeover's write says «equal to the disk» and the changed row is NOT on disk (${rto.rows['lark/thr_0'].title}) — the leg above would go red`, rto.stats);
 }
 
+// (b6) THE BOUND ON LATER — a whole-map touch during each of three sliced layouts: the next write is laid out in ONE turn,
+// said once, and durable() resolves with the rows on disk (never a wait of 60 s)
+{
+  const dir = copyOf(TPL_B, 'b6'), warns = [];
+  let s = null, touched = 0;
+  s = S.createChannelStore({ dir, log: { log() { }, warn: (...a) => warns.push(a.join(' ')), error() { } }, walk: { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
+    if (what === 'layout' && i === 1 && touched < 3) { touched++; await s.index.update((x) => { x.conversations; }); }   // reaching the map: a whole touch
+  } } });
+  await s.index.update(() => { s.index.entry('gmail', 'thr_1', { create: false }).unread = 9; });
+  const landed = await s.index.durable();
+  const disk = fs.readFileSync(s.indexFile, 'utf8'), st = s.index.flushStats();
+  const said = warns.filter((w) => /started again 3 times by whole-map writes/.test(w)).length;
+  s.close();
+  ok(touched === 3 && landed === true && JSON.parse(disk).conversations['gmail/thr_1'].unread === 9 && st.layoutRestarts === 3 && said === 1, `(b6) THE BOUND: three whole-map touches, each during a sliced layout (restarts ${st.layoutRestarts}) — the next write laid out in one turn, said ONCE (${said}), durable() true with the row on disk`, { st, warns: warns.slice(0, 3) });
+}
+// (b7) A SYNCHRONOUS FLUSH DURING THE FIRST SLICED LAYOUT (the exit's case on a stop): it lays out whole in its own turn
+{
+  const r = await layoutLeg(S, 'b7', async (s) => { s.index.flush(); });
+  ok(r.landed === true && r.same && r.rows['gmail/thr_1'].unread === 9 && r.stats.layoutSliced === 0 && r.seen.placedAt !== null, `(b7) a synchronous flush between two slices of the first layout takes it over — laid out whole in its turn (sliced layouts landed: ${r.stats.layoutSliced}), the file the whole serialization, the row on disk`, r.stats);
+}
+
 // (b5) THE PER-ACCOUNT KEYS — built in slices from the load; a key touched meanwhile placed at the landing; a reader first finishes them
 async function keysLeg(SM, tag, place = null, readFirst = false) {
   const dir = copyOf(TPL_B, `b5-${tag}`);
@@ -214,7 +241,7 @@ const placeKeys = async (s) => { await s.index.update(() => { mkRow(s, 'gmail', 
 // ═══ the engine's stand-in (c, d) ═══
 const AGENT = { kind: 'agent', id: 'agent-1', name: 'Worker' }, AGENT2 = { kind: 'agent', id: 'agent-2', name: 'Other' };
 const A = 'mail';
-const mkEng = (EM, dataDir, walk, log = quiet) => EM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now: () => T, log, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }], censusTimer: () => ({ cancel() {} }), walk });
+const mkEng = (EM, dataDir, walk, log = quiet, clock = null) => EM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now: clock ? () => clock.t : () => T, log, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }], censusTimer: () => ({ cancel() {} }), walk });
 const rowShape = (i) => ({ title: `Thread ${i}`, kind: 'dm', lastAt: T - (i % 200) * H, unread: 0, readAt: T - 86400e3, listedAt: T - 86400e3, lane: { via: 'poll', lastPollAt: T - (i % 48) * 1800e3 - 40 * H, firstSeenByPoll: 1, firstSeenTotal: 1 } });
 const VERDICT = (at) => ({ at, read: 'yes', sendAs: ['user'], why: null });
 async function standInEngine(name, n, { census = false, rejudge = false } = {}) {
@@ -264,6 +291,7 @@ async function dueLeg(EM, tag, place = null) {
   return { firstSaid, list, whole, stats, placedAt };
 }
 const placeDue = async (e) => {
+  e.store.stamps.set(`${A}/m-0`, { lastPollAt: T });   // a row BEHIND the walk polled now: no longer due (re-keyed at the landing)
   e.store.stamps.set(`${A}/m-5`, { lastPollAt: T });   // a row polled now: no longer due
   await e.store.index.update(() => { Object.assign(e.store.index.entry(A, 'm-born'), rowShape(7)); });   // a row born, overdue
 };
@@ -277,12 +305,30 @@ const placeDue = async (e) => {
 {
   const r = await dueLeg(ENG, 'c3', placeDue);
   const has = (l, k) => l.some((d) => d.key === k);
-  ok(r.placedAt !== null && dueRows(r.list) === dueRows(r.whole) && !has(r.list, `${A}/m-5`) && has(r.list, `${A}/m-born`), `(c3) A CHANGE DURING THE WALK (placed after ${r.placedAt} of ${NC} rows: a poll stamp, a row born): equal to a whole build after the same writes — the stamped row not due, the born row due`, { placedAt: r.placedAt, sliced: r.list.length, whole: r.whole.length });
+  ok(r.placedAt !== null && dueRows(r.list) === dueRows(r.whole) && !has(r.list, `${A}/m-0`) && !has(r.list, `${A}/m-5`) && has(r.list, `${A}/m-born`), `(c3) A CHANGE DURING THE WALK (placed after ${r.placedAt} of ${NC} rows: a poll stamp behind the walk and one ahead of it, a row born): equal to a whole build after the same writes — the stamped row not due, the born row due`, { placedAt: r.placedAt, sliced: r.list.length, whole: r.whole.length });
 }
 {
   const EM = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), 'if (!ix) return dueNotReady();', 'if (!ix) return [];', 'the due list answers [] while it is built'), 'due-empty');
   const r = await dueLeg(EM, 'c1-red');
   ok(!r.firstSaid.notReady && r.firstSaid.n === 0, '(c1) RED CONTROL: a due list answering [] while its index is built reads as «nothing due» (no notReady) — the leg above would go red', r.firstSaid);
+}
+
+{
+  // (c4) THE DUE BUILD'S RESTART BOUND (cut 3b): a whole-map touch during each of three sliced builds of one account — the
+  // next build is made in ONE turn, said once in the journal, and answers what a whole build answers
+  const D = copyOf(TPL_C, 'c4'), warns = [];
+  const logc = { log() { }, info() { }, warn: (x) => warns.push(String(x)), error() { } };
+  let e = null, touched = 0;
+  e = mkEng(ENG, D, { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => { if (what === 'due' && i === 1 && touched < 3) { touched++; await e.store.index.update((x) => { x.conversations; }); } } }, logc);
+  let list = null, asked = 0;
+  await until('the due index to answer', () => { asked++; const l = e.dueListOf(A, { sync: false }); if (!l.notReady) { list = l; return true; } return false; });
+  const stats = e.dueIndexStats();
+  e.stop();
+  const w = mkEng(ENG, copyOf(TPL_C, 'c4-whole'), { syncRows: 1e9 });
+  const whole = w.dueListOf(A);
+  w.stop();
+  const said = warns.filter((x) => /made stale during 3 sliced builds in a row/.test(x)).length;
+  ok(touched === 3 && stats.whole === 1 && said === 1 && dueRows(list) === dueRows(whole) && whole.length > 0, `(c4) THE BOUND: three sliced builds made stale (whole-map touches) — the next built in one turn (${stats.whole}), said ONCE (${said}), answering the whole build's ${whole.length} due rows (asked ${asked}×)`, { stats, warns: warns.slice(0, 3) });
 }
 
 // ═══ (d) THE BOOT'S SWEEP ═══
@@ -348,6 +394,21 @@ const placeGrant = async (e) => { const x = await e.setAccess(A, { kind: 'accoun
   ok(!eq(r2.got, r2.whole) && r2.stats.restarts === 0, '(d3) RED CONTROL: a sweep blind to a grants change lands the rows it read before the change (not the whole walks\') — the leg above would go red', { got: sizes(r2.got), whole: sizes(r2.whole) });
 }
 {
+  // (d5) THE BOOT SWEEP'S BOUND (cut 3b): a grants change during each of three sliced sweeps — the fourth walks in ONE turn,
+  // said once in the journal, and still answers the whole walks
+  const warns = [];
+  const logd = { log() { }, info() { }, warn: (x) => warns.push(String(x)), error() { } };
+  const e = mkEng(ENG, copyOf(TPL_D, 'd5'), { syncRows: 1e9 }, logd);
+  let changes = 0;
+  const sw = e.bootSweep({ syncRows: 0, sliceMs: 0, onSlice: async (i, what) => { if (what === 'boot-sweep' && i === 1 && changes < 3) { changes++; await e.setAccess(A, { kind: 'account' }, changes % 2 ? [] : [{ principal: AGENT }]); } } });
+  const r0 = await sw.promise;
+  const got = r0 && { receipt: r0.receipt, capZero: r0.capZero, orphans: r0.orphans, selfAtPlan: r0.selfAtPlan };
+  const st = e.bootSweepStats(), whole = wholeWalks(e);
+  e.stop();
+  const said = warns.filter((x) => /the boot sweep was started again 3 times/.test(x)).length;
+  ok(changes === 3 && st.restarts === 3 && st.whole === 1 && said === 1 && eq(got, whole), `(d5) THE BOUND: three grants changes, each during a sliced sweep (restarts ${st.restarts}) — the fourth swept in one turn (${st.whole}), said ONCE (${said}), its answer the whole walks'`, { st, warns: warns.slice(0, 3) });
+}
+{
   const D = copyOf(TPL_D, 'd4');
   const lines = [];
   const log = { log: (x) => lines.push(String(x)), info: (x) => lines.push(String(x)), warn: (x) => lines.push(String(x)), error: (x) => lines.push(String(x)) };
@@ -391,6 +452,69 @@ async function rejudgeLeg(tag, place = null) {
   const fresh = async (e) => { await e.store.index.update(() => { for (const c of ['m-0', `m-${NE - 1}`]) e.store.index.entry(A, c, { create: false }).convCaps = VERDICT(T + 1); }); };
   const r = await rejudgeLeg('e2', fresh);
   ok(r.placedAt !== null && r.placedAt < NE - 1 && r.got === r.whole && r.got.includes(`"${A}/m-0",{"at":${T + 1}`) && r.got.includes(`"${A}/m-${NE - 1}",{"at":${T + 1}`), `(e2) A CHANGE DURING THE WALK (placed after ${r.placedAt} of ${NE} rows: a fresh verdict on a row behind the walk and one ahead of it): the rows equal a whole re-judge after the same write — both fresh verdicts kept`, { placedAt: r.placedAt });
+}
+
+// ═══ (f) THE DUE TURN'S CAP (cut 3b): its heads all re-keyed, more behind them ═══
+console.log('(f) the due turn takes 2000 heads: when they all turn out not due, the account is asked again — the due rows past them are polled');
+const NF = 2500;
+const TPL_F = path.join(ROOT, 'tpl-f');
+{
+  fs.mkdirSync(path.join(TPL_F, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(TPL_F, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ id: A, kind: 'fake-poll', label: A, enabled: true, options: {}, state: {}, auth: { tokenEnc: null, expiresAt: null, scopes: [] }, lastPass: null, consecutiveFailures: 0, discovery: { cursor: null, at: T, complete: true, completeAt: T } }] }));
+  const e0 = mkEng(ENG, TPL_F, { syncRows: 1e9 });
+  const ix = e0.store.index;
+  const row = (lastAt, lastPollAt) => ({ title: 'Thread', kind: 'dm', lastAt, unread: 0, readAt: T - 86400e3, listedAt: T, lane: { via: 'poll', lastPollAt, firstSeenByPoll: 1, firstSeenTotal: 1 } });
+  await ix.update(() => {
+    // 2500 heads: active 59.5 min ago (HOT at T: due 30 s after their poll — keyed T+10 s), WARM a minute later (due T+280 s)
+    for (let i = 0; i < NF; i++) Object.assign(ix.entry(A, `s-${i}`), row(T - 59.5 * 60e3, T - 20e3));
+    // five truly due: cold (900 s), polled 905 s before T+60 s — keyed T+55 s, past every head
+    for (let i = 0; i < 5; i++) Object.assign(ix.entry(A, `d-${i}`), row(T - 30 * H, T + 60e3 - 905e3));
+  });
+  ix.flush();
+  try { await e0.store.close?.(); } catch { }
+  try { e0.stop(); } catch { }
+}
+async function turnLeg(EM, tag) {
+  const clock = { t: T };
+  const e = mkEng(EM, copyOf(TPL_F, `f-${tag}`), { syncRows: 1e9 }, quiet, clock);   // the index built in one turn: this leg is the TURN's
+  const before = e.dueListOf(A).length;   // at T: nothing due
+  clock.t = T + 60e3;
+  const r0 = e.dueIndexStats().rekeys;
+  e.tick();
+  for (let i = 0; i < 60; i++) await new Promise((z) => setImmediate(z));   // the loop's next turns (the re-asks), then the pass
+  await e.idle(A);
+  const polled = [0, 1, 2, 3, 4].filter((i) => Number(e.store.stamps.lane(e.store.index.peek(`${A}/d-${i}`)).lastPollAt) === T + 60e3).length;
+  const rekeyed = e.dueIndexStats().rekeys - r0;
+  e.stop();
+  return { before, polled, rekeyed };
+}
+{
+  const r = await turnLeg(ENG, 'turn');
+  ok(r.before === 0 && r.polled === 5 && r.rekeyed >= NF, `(f) ${NF} heads turned out not due after all (re-keyed ${r.rekeyed}: the turn's 2000, then the rest on the loop's next turn) — the five due rows behind them POLLED (${r.polled}) on the same tick, never a 5 s tick per 2000 heads`, r);
+  const EMf = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '      if (!due) { if (dl && dl.more) dueRecheck(rec); continue; }', '      if (!due) continue;', 'the tick does not ask again'), 'turn-no-recheck');   // stale-pins: kept (the control restores the release's line)
+  const rc = await turnLeg(EMf, 'turn-red');
+  ok(rc.polled === 0 && rc.rekeyed === 2000, `(f) RED CONTROL: a tick that does not ask again polls none of the five (${rc.polled}; re-keyed ${rc.rekeyed}) — they wait for the next tick, and the next — the leg above would go red`, rc);
+}
+
+// ═══ (g) THE FIND (cut 3, named): the stale reservations' release touches only the rows it changes ═══
+console.log('(g) the release of a dead boot\'s reservations touches the row holding one — never the whole map');
+async function releaseLeg(EM, tag) {
+  const e = mkEng(EM, copyOf(TPL_C, `g-${tag}`), { syncRows: 1e9 });
+  await e.store.index.update(() => { e.store.index.entry(A, 'm-7', { create: false }).watchers = [{ principal: { kind: 'agent', id: 'agent-1', name: 'Worker' }, notify: 'wake', mode: 'all', stats: { wakes: [{ id: 'r-dead', at: T - H, reserved: true, bootId: 'a-dead-boot' }] } }]; });
+  const touched = [];
+  e.store.index.onTouch((k) => touched.push(k));
+  const released = await e.releaseStaleReservations();
+  const left = (e.store.index.peek(`${A}/m-7`).watchers[0].stats.wakes || []).length;
+  e.stop();
+  return { released, left, whole: touched.filter((k) => k === null).length, rows: touched.filter((k) => k !== null) };
+}
+{
+  const r = await releaseLeg(ENG, 'release');
+  ok(r.released === 1 && r.left === 0 && r.whole === 0 && r.rows.length === 1 && r.rows[0] === `${A}/m-7`, `(g) the dead boot's reservation released (${r.released}) — the ONE row holding it touched (${r.rows.join(', ')}), the whole map never (${r.whole})`, r);
+  const RELEASE_NOW = '      for (const k of staleKeys) { const en = rows[k]; if (!en) continue; store.index.touch(k); sweep(en.watchers); }';
+  const EMg = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '      const rows = store.index.rows();\n' + RELEASE_NOW, '      for (const en of Object.values(ix.conversations || {})) if (en) sweep(en.watchers);', 'the release reaches the whole map (the release before cut 3)'), 'release-whole');
+  const rg = await releaseLeg(EMg, 'release-red');
+  ok(rg.released === 1 && rg.whole >= 1, `(g) RED CONTROL: the release's old walk (ix.conversations inside its update) is a WHOLE-MAP touch at every boot (${rg.whole}) — the leg above would go red`, rg);
 }
 
 report();
