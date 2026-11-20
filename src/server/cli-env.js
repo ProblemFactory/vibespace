@@ -459,8 +459,12 @@ function refreshAvailableModels() {
   // the SAME opt-in. Default OFF → the dropdown falls back to the hardcoded CLI
   // aliases (fable/opus/sonnet/haiku[+1m]); only full model IDs are missed, and
   // "Custom…" still lets you type one. An API KEY (sanctioned) is always used.
+  // B-9dd0: a hub a SUITE boots (VS_NO_REAL_CLI=1 — the test machines' runner, a suite's scratch hub) asks no vendor: an
+  // inherited ANTHROPIC_API_KEY never sends it to api.anthropic.com (the dropdown keeps the CLI aliases; the harness lists stand)
   const apiKey = process.env.ANTHROPIC_API_KEY || null;
-  if (apiKey) {
+  if (process.env.VS_NO_REAL_CLI === '1') {
+    // nothing from the vendor under a suite
+  } else if (apiKey) {
     fetchModels(apiKey, false);
   } else if (usagePollingEnabled()) {
     getOAuthToken((oauthToken) => { if (oauthToken) fetchModels(oauthToken, true); });

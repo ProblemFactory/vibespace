@@ -2599,6 +2599,7 @@ export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = fa
 export function fastRetryRefusal(s, r, { noRetry = FAST_NO_RETRY } = {}) {
   const row = noRetry.find((x) => x.name === (s && s.name));
   if (row) return row.why;
+  if (r && Array.isArray(r.egress) && r.egress.length) return 'it opened sockets past the loopback (B-9dd0) — a green second try proves nothing about the first';
   if (r && r.killedFromOutside) return 'it died of a signal this runner did not send — the run is being torn down, not a flake';
   if (r && (r.hangReport || (r.error && r.error.code === 'ETIMEDOUT'))) return 'it hung — to its budget or to its own watchdog — and a second hang would cost the gate as much again (its hang report names the threads)';
   // …and a red that ran most of its budget (batch 24's reader: a hang by another road, a suite ending itself near its clock) — a second
@@ -2733,7 +2734,41 @@ export function writeSkipLog(dir, sha, s, r, attempt, { tag = '[ci]', log = cons
 export const skipCount = (legs) => (legs && legs.length ? ` · SKIP ${legs.reduce((a, x) => a + x.n, 0)} leg(s) in ${legs.length} suite(s): ${legs.map((x) => `${x.name} (${x.n})`).join(', ')}` : '');
 export const skippedLegsSaid = (tag, legs) => (legs || []).map((x) => `[${tag}] SKIPPED LEG(S) ${x.name} (${x.n}): ${x.first}${x.file ? ` — its whole output: ${x.file}` : ''}`);
 const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
-export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null } = {}) {
+// B-9dd0 — THE FAST TIER'S SOCKETS, COUNTED BY HOST: every FAST suite runs with scripts/egress-sampler.cjs loaded by `--require`
+// in its OWN argv (never NODE_OPTIONS — the fast tier's rule), its file in $VIBESPACE_SUITE_EGRESS_FILE; any host past the
+// loopback in that file when the suite ends is a RED row naming each host and its count (the law: a suite reaches the loopback
+// or a stand-in of its own, never a vendor's host), and a file WITHOUT the sampler's sentinel line is red too (the reader did
+// not load — never a silent green). The runner's own sampler (this tree's), so a planted root is judged too; a spawned child
+// (a hub) is not sampled (fork / Worker inherit the argv). The heavy tier's Chrome is its own unit (scratch.mjs CHROME_QUIET).
+export const EGRESS_SAMPLER = path.join(path.dirname(HERE), 'egress-sampler.cjs');
+export const egressArgv = () => (fs.existsSync(EGRESS_SAMPLER) ? ['--require', EGRESS_SAMPLER] : []);
+/** A suite's egress file → [{host, port, n}] by count (an unreadable line is a row of its own); `.loaded` = the sampler's
+ *  sentinel line is there (a file without it: the reader did not load in that suite). */
+export function egressOf(file) {
+  let text = '';
+  const rows = [];
+  try { text = fs.readFileSync(file, 'utf8'); } catch { rows.loaded = false; return rows; }
+  const by = new Map();
+  let loaded = false;
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let r = null; try { r = JSON.parse(line); } catch { r = { host: '(an unreadable line)', port: 0 }; }
+    if (r && r.sentinel === 'egress-sampler') { loaded = true; continue; }
+    const k = `${r.host}:${r.port}`;
+    by.set(k, { host: String(r.host), port: Number(r.port) || 0, n: ((by.get(k) || {}).n || 0) + 1 });
+  }
+  rows.push(...[...by.values()].sort((a, b) => b.n - a.n || a.host.localeCompare(b.host)));
+  rows.loaded = loaded;
+  return rows;
+}
+export const egressWords = (rows) => rows.map((r) => `${r.host}:${r.port} ×${r.n}`).join(', ');
+// ONE private folder per runner process (mkdtemp: never a predictable name another user could hold), removed at its exit
+let EGRESS_DIR = null;
+const egressFileFor = (name, lane) => {
+  if (!EGRESS_DIR) { EGRESS_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-egress-')); process.once('exit', () => { try { fs.rmSync(EGRESS_DIR, { recursive: true, force: true }); } catch { } }); }
+  const f = path.join(EGRESS_DIR, `${name}.${lane}.ndjson`); try { fs.rmSync(f, { force: true }); } catch { } return f;
+};
+export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null, egress = true } = {}) {
   return new Promise((resolve) => {
     if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {
       resolve({ ok: true, ms: 0, absent: true, lines: [`  ⊘ ${s.name} — SKIPPED: not present at ${shortSha(sha)} (this gate's table names it; the commit being gated does not contain it, so this run says nothing about it)`] });
@@ -2744,10 +2779,13 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
     const hangFile = hang && hang.dir ? hangReportName(shortSha(sha), s.name, hang.attempt) : '';
     const hr = hangFile ? { dir: hang.dir, file: path.join(hang.dir, hangFile), ...hangReportArgv({ dir: hang.dir, filename: hangFile, flags: hang.flags }) } : { argv: [], armed: false };
     let child;
+    let egressOn = false, egressFile = '';   // B-9dd0: made inside the guard below — a folder that cannot be made is this row's red, never the runner's crash
     try {
+      egressOn = !!egress && s.tier === 'fast' && egressArgv().length > 0; egressFile = egressOn ? egressFileFor(s.name, lane) : '';
       const env = { ...laneEnv(lane), VIBESPACE_SUITE_BUDGET_MS: String(budgetFor(s)) };
       if (hr.armed) env.VIBESPACE_SUITE_HANG_REPORT = hr.file; else delete env.VIBESPACE_SUITE_HANG_REPORT; // never an outer run's file
-      child = spawn(process.execPath, [...hr.argv, path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
+      if (egressOn) env.VIBESPACE_SUITE_EGRESS_FILE = egressFile; else delete env.VIBESPACE_SUITE_EGRESS_FILE;
+      child = spawn(process.execPath, [...hr.argv, ...(egressOn ? egressArgv() : []), path.join(root, 'scripts', s.name + '.mjs')], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env });
     } catch (e) {
       resolve({ ok: false, ms: 0, killedFromOutside: false, lines: [`\n✗ ${s.name} FAILED (0ms, ${e.code || e.message}) ${tag}`] });
       return;
@@ -2771,6 +2809,16 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // a green suite whose LAST line begins «SKIP» skipped ITSELF (the tree's convention — `SKIP: no chrome …`): it ran nothing (B-479e (1))
       // (the tree's endings: «SKIP: …», «SKIPPED (…)», and a stated passed count of ZERO — «ALL PASS (0)», «ALL PASS (0, 1 skipped)», «0 passed, …» — B-737b)
       const last = (stdout.trim().split('\n').pop() || '').trim(), selfSkip = wholeSkipOf(stdout); // B-737b: zero legs passed, in any wording
+      // B-9dd0: the sockets the suite opened past the loopback — a green suite with any is RED by name, a red one says them too
+      const opened = egressOn ? egressOf(egressFile) : [];
+      if (egressOn) { try { fs.rmSync(egressFile, { force: true }); } catch { } }
+      const unloaded = egressOn && !opened.loaded;
+      const egressNote = opened.length ? ` — it opened sockets past the loopback (B-9dd0: a suite reaches the loopback or its own stand-in only): ${egressWords(opened)}`
+        : unloaded ? ' — its egress reader did not load (B-9dd0: the sampler\'s sentinel line is missing — its sockets were not counted)' : '';
+      if (status === 0 && (opened.length || unloaded)) {
+        resolve({ ok: false, ms, load, egress: opened.length ? opened : [{ host: '(the reader did not load)', port: 0, n: 1 }], full: stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [`\n✗ ${s.name} FAILED (${ms}ms) ${tag} ${ld}${egressNote}`, stdout.split('\n').slice(-40).join('\n'), stderr || ''] });
+        return;
+      }
       if (status === 0) {
         const sk = skipsOf(stdout, stderr); // B-4829: a SKIP said anywhere in the output is counted on the row, never only the last line (selfSkip: B-479e's whole-suite skip, beside it)
         resolve({ ok: true, ms, load, selfSkip, ...(sk ? { skips: sk, full: stdout + (stderr ? '\n── stderr ──\n' + stderr : '') } : {}), lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(last || 'ok').slice(0, 80)}${skipTail(sk)}`] });
@@ -2782,7 +2830,7 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
       resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };

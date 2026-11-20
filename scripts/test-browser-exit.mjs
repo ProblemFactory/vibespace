@@ -89,7 +89,7 @@ console.log('② THE ONE REQUEST — through the forwarder to the set address, t
     'ONE request: the profile\'s proxy sees «CONNECT check.example.test:443» (the NAME — resolved by the proxy, never here), the check server ONE GET of the set path', { connects: seen.connects, n: seen.requests.length });
   ok(JSON.stringify(names) === '["Host","Accept","User-Agent","Connection"]' && seen.requests[0].raw[5] === 'exit-check' && !names.some((n) => /cookie|authorization/i.test(n)),
     'the request carries exactly the fixed short header list — Host, Accept, a generic client name, Connection: nothing naming the instance, the person, the profile or a version; no cookie, no login', seen.requests[0] && seen.requests[0].raw);
-  const ECd = mutant('src/server/browser-exit-check.js', 'sock = net.connect({ host: fw.hostname, port: Number(fw.port) });', 'sock = net.connect({ host, port });   // RED: dialled directly');
+  const ECd = mutant('src/server/browser-exit-check.js', 'sock = net.connect({ host: fw.hostname, port: Number(fw.port) });', 'sock = net.connect({ host, port, lookup: (h, o, cb) => (o && o.all ? cb(null, [{ address: "127.0.0.1", family: 4 }]) : cb(null, "127.0.0.1", 4)) });   // RED: dialled directly (B-9dd0: through a stand-in resolver — the name maps to the loopback, no DNS leaves the box)');
   seen.connects.length = 0; seen.requests.length = 0;
   const rd = await ECd.requestThrough({ url: CHECK_URL, forwarder: `http://127.0.0.1:${port}`, tlsConnect: PLAIN, deadlineMs: 3000 });
   ok(!rd.ok && seen.connects.length === 0 && seen.requests.length === 0, 'RED: a copy that dials the check address directly — it never reaches the profile\'s proxy (and the name is never the hub\'s to resolve: it fails)', rd);

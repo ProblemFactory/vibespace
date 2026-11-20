@@ -7939,7 +7939,7 @@ await section(async () => {
     ["src/server/memory-pressure-watch.js", "tmpfsOf('/tmp'), tmpRoots('/tmp')", "read", "the same"],
     ["src/server/oat-mint.js", "tmpRoot = os.tmpdir(), ttlMs", "unique", "its scratch is a mkdtemp under it"],
     ["src/server/ops-routes.js", "tmpRoots = [require('os').tmpdir(), '/tmp', '/var/tmp']", "read", "B-9dd0: the update check's «under a temp root» judgment (server-root rule 3) — the roots it compares a hub's root with; nothing is made"],
-    ["src/server/runtime-boot.js", "const throwaway = [os.tmpdir(),", "read", "a judgment"],
+    ["src/server/runtime-boot.js", "const throwaway = env.VS_NO_REAL_CLI === '1' || [os.tmpdir(),", "read", "a judgment (B-9dd0: + the suites' switch and /var/tmp — the runtime check asks nodejs.org)"],
     ["src/server/vault-run-door.js", "runRoot = () => process.env.XDG_RUNTIME_DIR || os.tmpdir()", "unique", "its run dir is a mkdtemp under it"],
     ["src/sock-path.js", "const TMP_BASE = '/tmp';", "per-user", "vs-dev-<uid>"],
     ["src/spawn/ssh.js", "'vs-tok-'", "unique", "mkdtemp"],

@@ -2,7 +2,8 @@
 // THE LARK READ ADAPTER OVER RECORDED FIXTURES (docs/design-communication-panel.zh.md
 // §6.3, §12.1, §13; gate row `test-channels-lark-shape`).
 //
-// No vendor call anywhere: `fetch` is injected and answers from
+// No vendor call anywhere: `fetch` is injected and answers from (B-9dd0: and ENFORCED — a fetch past the loopback is counted,
+// refused and red by name at the end; leg ⑩'s two consent creates had no stand-in and reached open.feishu.cn)
 // scripts/fixtures/lark/recorded.json (vendor SHAPES, neutral ids, instants
 // RELATIVE to this suite's clock — nothing pins a calendar date). Legs:
 //   · auth.state()'s ladder: needs-credentials FIRST (the §14 resolver's
@@ -51,6 +52,17 @@ const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const threw = async (fn) => { try { await fn(); return null; } catch (e) { return e; } };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// B-9dd0 — THE SUITE'S OWN LAW, ENFORCED: an adapter created without its stand-in `fetch` falls back to the runtime's
+// (src/channels/lark.js deps.fetch || globalThis.fetch) and reaches the vendor. Every fetch past the loopback is RECORDED and
+// REFUSED here (installed before the first create binds it), and the count is a leg at the end — never a socket to the vendor
+const STRAY = [];
+const realFetch = globalThis.fetch;
+const loopbackUrl = (u) => { try { const h = new URL(String(u && u.url ? u.url : u)).hostname; return h === '127.0.0.1' || h === 'localhost' || h === '[::1]' || h === '::1'; } catch { return false; } };
+globalThis.fetch = (url, init) => {
+  if (loopbackUrl(url)) return realFetch(url, init);
+  STRAY.push(String(url && url.url ? url.url : url).slice(0, 200));
+  return Promise.reject(new Error(`B-9dd0: a vendor call with no stand-in fetch (${String(url && url.url ? url.url : url).slice(0, 120)})`));
+};
 const lark = require(path.join(REPO, 'src/channels/lark.js'));
 const CH = require(path.join(REPO, 'src/channels/index.js'));
 const OL = require(path.join(REPO, 'src/oauth-loopback.js'));
@@ -1133,8 +1145,8 @@ console.log('\n⑩ lane channel-threads: the thread walk, reactions list / add /
   const cc = await a.convCaps(C);
   ok(cc.threads && cc.threads.mode === 'thread' && cc.threads.replyInto === true && cc.reactions.add === true && cc.reactions.read === false && cc.reactions.why === 'reactions-scope-not-granted', 'convCaps (L11): group_message_type thread ⇒ mode thread, reply-into offered; reactions: add yes (im:message), read NOT granted (by name)', JSON.stringify(cc));
   // the consent asks for the reactions READ scope only when the owner turned it on (OPTIONS)
-  const url0 = await (async () => { let u = null; const oauth = { begin: async (o) => { u = o.buildConsentUrl({ redirectUri: 'http://127.0.0.1:1/cb', state: 's' }); return { flowId: 'f' }; } }; const x = lark.create({ id: 'l2', options: {} }, { oauth, resolveIntegration: () => CRED, tokens: mkTokens() }); await x.auth.begin(); return u; })();
-  const url1 = await (async () => { let u = null; const oauth = { begin: async (o) => { u = o.buildConsentUrl({ redirectUri: 'http://127.0.0.1:1/cb', state: 's' }); return { flowId: 'f' }; } }; const x = lark.create({ id: 'l3', options: { reactions: 'read' } }, { oauth, resolveIntegration: () => CRED, tokens: mkTokens() }); await x.auth.begin(); return u; })();
+  const url0 = await (async () => { let u = null; const oauth = { begin: async (o) => { u = o.buildConsentUrl({ redirectUri: 'http://127.0.0.1:1/cb', state: 's' }); return { flowId: 'f' }; } }; const x = lark.create({ id: 'l2', options: {} }, { oauth, resolveIntegration: () => CRED, tokens: mkTokens(), fetch: fetchFn, log: { warn() {} } }); await x.auth.begin(); return u; })();
+  const url1 = await (async () => { let u = null; const oauth = { begin: async (o) => { u = o.buildConsentUrl({ redirectUri: 'http://127.0.0.1:1/cb', state: 's' }); return { flowId: 'f' }; } }; const x = lark.create({ id: 'l3', options: { reactions: 'read' } }, { oauth, resolveIntegration: () => CRED, tokens: mkTokens(), fetch: fetchFn, log: { warn() {} } }); await x.auth.begin(); return u; })();
   ok(new URL(url0).searchParams.get('scope').split(' ').includes('im:message.reactions:read') && new URL(url1).searchParams.get('scope').split(' ').includes('im:message.reactions:read'), 'owner ruling (2026-09-28): the DEFAULT consent names im:message.reactions:read (the option is on by default; ⑪ pins on / off and the narrowing retry)');
   // THE THREAD WALK: container_id_type=thread, no time window, paged to the anchor
   calls.length = 0; paced = 0; metered = 0;
@@ -3132,6 +3144,17 @@ console.log('\nattention-rule-at-you: Lark carries mentions (the first screen\'s
   const pr = lark.toRecord('lark', 'oc_at', pushed, { selfId: 'ou_self' });
   ok(pr.mentions.length === 1 && pr.mentions[0].id === 'ou_self' && FO.mentionsSelf(pr, 'ou_self'), 'the push event: the mention\'s object id resolves to its open_id ⇒ the same 「@ 我」', JSON.stringify(pr.mentions));
 }
+
+// B-9dd0: the count, and its control (a create WITHOUT its stand-in is counted — then set aside, so the leg can go red by itself)
+{
+  const before = STRAY.length;
+  const x = lark.create({ id: 'l-stray', options: {} }, { oauth: { begin: async () => ({ flowId: 'f' }) }, resolveIntegration: () => CRED, tokens: mkTokens(), log: { warn() {} } });
+  await x.auth.begin().catch(() => {});
+  const planted = STRAY.slice(before);
+  STRAY.length = before;
+  ok(planted.length >= 1 && planted.every((u) => !loopbackUrl(u)), `CONTROL: a create WITHOUT its stand-in fetch is counted (${planted.length} stray: ${planted.join(' · ')}) — set aside after`, planted);
+}
+ok(STRAY.length === 0, `no VENDOR call from the suite: every adapter answered from its stand-in (stray fetches: ${STRAY.length}${STRAY.length ? ' — ' + STRAY.join(' · ') : ''})`, STRAY);
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

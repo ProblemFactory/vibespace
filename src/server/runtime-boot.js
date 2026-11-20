@@ -77,7 +77,9 @@ function boot({ rootDir, env = process.env, log = (l) => console.log(l) } = {}) 
   booted = create({ rootDir, switched, log });
   setImmediate(() => log(booted.line()));
   const os = require('os');
-  const throwaway = [os.tmpdir(), '/tmp'].some((t) => (path.resolve(rootDir) + path.sep).startsWith(path.resolve(t) + path.sep));
+  // B-9dd0: a suite's hub (VS_NO_REAL_CLI=1) or a root under any temp folder (the lanes' /var/tmp worktrees too, as ops-routes'
+  // version check judges it) never runs the runtime check — it would ask nodejs.org
+  const throwaway = env.VS_NO_REAL_CLI === '1' || [os.tmpdir(), '/tmp', '/var/tmp'].some((t) => (path.resolve(rootDir) + path.sep).startsWith(path.resolve(t) + path.sep));
   if (!env.NO_AUTO_UPDATE && !throwaway) { const t = setTimeout(() => booted.afterListen({ autoUpdate: true }), 20000); if (t.unref) t.unref(); }
   return booted;
 }

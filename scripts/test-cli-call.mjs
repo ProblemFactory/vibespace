@@ -12,6 +12,7 @@ import { createRequire } from 'node:module';
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -81,8 +82,18 @@ CC.configure({ override: 300 });
   ok(s && s.phase === 'step' && s.step === 'folder-write' && /the hub answered the request but the shared folder write did not return in 0\.3 s/.test(s.line), '② a hub whose 103 named its step: the line names THAT step', s && s.line);
   const p = await T(PARTIAL + '/x').then(() => null, (x) => x);
   ok(p && p.phase === 'body' && /the hub answered \(HTTP 200\) but the rest of its answer did not arrive in 0\.3 s/.test(p.line) && !/may still take effect/.test(p.line), '② a hub that answered half: the BODY words (a read says no more)', p && p.line);
+  // B-9dd0: an address that never TAKES the connection, on the loopback — a listener with a one-slot backlog whose process never
+  // accepts (its loop blocked), its queue filled first: the kernel drops the dial's SYN, so the connect hangs. It used to be a SYN
+  // to a blackhole address off the box (10.255.255.1 — on a hosted runner, its network's own range)
+  const deaf = spawn(process.execPath, ['-e', "const s=require('net').createServer();s.listen({port:0,host:'127.0.0.1',backlog:1},()=>{process.stdout.write(s.address().port+'\\n');Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,20000);process.exit(0)})"], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const deafPort = await new Promise((r) => { let b = ''; deaf.stdout.on('data', (d) => { b += d; if (b.includes('\n')) r(Number(b.trim())); }); });
+  const fillers = Array.from({ length: 4 }, () => { const f = net.connect(deafPort, '127.0.0.1'); f.on('error', () => { }); return f; });
+  // the kernel's accept queue (backlog 1 holds two, Node reads 0 as its default 511) is full once two fillers have connected
+  await Promise.all(fillers.slice(0, 2).map((f) => new Promise((r) => { f.once('connect', r); setTimeout(r, 2000); })));   // each with its own bound
   const c0 = Date.now();
-  const k = await T('http://10.255.255.1:9/x').then(() => null, (x) => x);
+  const k = await T(`http://127.0.0.1:${deafPort}/x`).then(() => null, (x) => x);
+  for (const f of fillers) f.destroy();
+  try { deaf.kill('SIGKILL'); } catch { }
   ok(k && ((k.code === 'CLI_CALL_EXPIRED' && k.phase === 'connect' && /did not take the connection in 0\.3 s — nothing was sent/.test(k.line)) || /ENETUNREACH|EHOSTUNREACH|ECONNREFUSED/.test(String(k.code))), `② an address that never takes the connection: the CONNECT words, by the budget (${k && (k.phase || k.code)}, ${Date.now() - c0} ms)`, k && (k.line || k.message));
 }
 CC.configure({ override: null });

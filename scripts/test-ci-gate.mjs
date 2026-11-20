@@ -959,6 +959,42 @@ console.log('\n§2i a red names its legs: every ✗ line before the tail; the fa
     missed.map((r) => `${r.label}: ${r.applied ? 'GREEN — ' + JSON.stringify(r.bad) : 'the edit did not apply'}`).join('\n'));
 }
 
+console.log('\n§2n B-9dd0: a fast suite\'s sockets past the loopback are a red row naming each host (the runner\'s egress reader)');
+{
+  const CI = await import('./ci.mjs');
+  const root = mktmp('egress'), sha = 'c0ffee0123456789';
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  // a planted suite that connects to a vendor's NAME with a lookup that fails (nothing leaves the box) and passes; one that
+  // connects only to the loopback (a closed port) and passes — every fact the legs judge is printed
+  const dial = (host, extra = '') => `import net from 'node:net';\nconst s = net.connect({ host: ${JSON.stringify(host)}, port: 443${extra} });\ns.on('error', () => { console.log('ALL PASS (1)'); process.exit(0); });\ns.on('connect', () => { s.destroy(); console.log('ALL PASS (1)'); process.exit(0); });\n`;
+  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-egress.mjs'), dial('vendor.example', ", lookup: (h, o, cb) => cb(Object.assign(new Error('planted: no lookup'), { code: 'ENOTFOUND' }))"));
+  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-loopback.mjs'), dial('127.0.0.1').replace('port: 443', 'port: 9'));
+  const [vend, loop, off, heavy] = await Promise.all([
+    CI.runSuiteAsync({ name: 'test-planted-egress', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 1 }),
+    CI.runSuiteAsync({ name: 'test-planted-loopback', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 2 }),
+    CI.runSuiteAsync({ name: 'test-planted-egress', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 3, egress: false }),
+    CI.runSuiteAsync({ name: 'test-planted-egress', tier: 'heavy', budgetMs: 8000 }, { root, sha, lane: 4 }),
+  ]);
+  okd(fs.existsSync(CI.EGRESS_SAMPLER) && CI.egressArgv().join(' ') === `--require ${CI.EGRESS_SAMPLER}`, 'the reader rides the suite\'s OWN argv (`--require` scripts/egress-sampler.cjs) — never NODE_OPTIONS', CI.egressArgv().join(' '));
+  okd(!vend.ok && /it opened sockets past the loopback .*: vendor\.example:443 ×1/.test(vend.lines[0]) && Array.isArray(vend.egress) && vend.egress[0].host === 'vendor.example', 'a GREEN suite that dialed a vendor\'s name (its lookup failed: nothing left the box) is a RED row naming the host and its count', vend.lines[0]);
+  okd(loop.ok && !loop.egress, 'a suite that reached only the loopback stays green', loop.lines[0]);
+  okd(off.ok && heavy.ok, 'CONTROL: the same planted suite WITHOUT the reader (egress: false), and as a heavy row (the heavy tier is unit 2\'s), stays green — the red is the reader\'s', `${off.lines[0]} | ${heavy.lines[0]}`);
+  const rows = CI.egressOf((() => { const f = path.join(root, 'egress.ndjson'); fs.writeFileSync(f, '{"host":"a.example","port":443}\n{"host":"a.example","port":443}\nnot json\n{"host":"b.example","port":80}\n'); return f; })());
+  okd(CI.egressWords(rows) === 'a.example:443 ×2, (an unreadable line):0 ×1, b.example:80 ×1', 'the count by host: two sockets to one host are ×2, an unreadable line is a row of its own (never dropped)', CI.egressWords(rows));
+  // the suite's OWN stand-in resolver mapping the vendor's name to the loopback is no egress (it is judged by the address its
+  // lookup answers); a suite whose egress file lost the sampler's sentinel is red (the reader did not load — never a silent green)
+  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-standin.mjs'), dial('vendor.example', ", lookup: (h, o, cb) => (o && o.all ? cb(null, [{ address: '127.0.0.1', family: 4 }]) : cb(null, '127.0.0.1', 4))").replace('port: 443', 'port: 9'));
+  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-unloaded.mjs'), "import fs from 'node:fs';\nfs.writeFileSync(process.env.VIBESPACE_SUITE_EGRESS_FILE, '');\nconsole.log('ALL PASS (1)');\n");
+  const [stand, unl] = await Promise.all([
+    CI.runSuiteAsync({ name: 'test-planted-standin', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 5 }),
+    CI.runSuiteAsync({ name: 'test-planted-unloaded', tier: 'fast', budgetMs: 8000 }, { root, sha, lane: 6 }),
+  ]);
+  okd(stand.ok && !stand.egress, 'a vendor\'s NAME the suite\'s own lookup maps to the loopback (its stand-in) stays green — the address the lookup answers is judged', stand.lines[0]);
+  okd(!unl.ok && /its egress reader did not load/.test(unl.lines[0]), 'a suite whose egress file lost the sampler\'s sentinel is RED by name (the reader did not load: its sockets were never counted)', unl.lines[0]);
+  const why = CI.fastRetryRefusal({ name: 'test-planted-egress', tier: 'fast' }, vend);
+  okd(typeof why === 'string' && /sockets past the loopback/.test(why), 'an egress red is never retried as a flake (fastRetryRefusal names it)', why);
+}
+
 // ── §2j A SUITE READS NO HISTORY MASTER DOES NOT HAVE (B-4291, lane int361, 2.369.369: test-stash-strip's r5 leg read
 // `git show 280ccd2e:…` — a LANE-BRANCH commit only the production repo had — so the push gate alone ran the leg, red at four
 // pushes in a row and called a flake, while every lane, the runner (depth 1) and each by-hand rerun SKIPPED it and said green) ──
