@@ -64,11 +64,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When the computer's clock was set during a stopped turn, the list of what it left running could name an earlier turn's process, or miss one of its own.
 - A Background Work job that fails while its conversation is not running now shows in For you by name, once per job, with its count.
 - When a helper agent or a workflow's agents finish, VibeSpace no longer pauses while it reads the files they wrote.
-- A helper agent that worked for a long time now has its early files in Artifacts too.
 - On a phone, the Agents dialog's account list heading starts at the list's left edge instead of sitting off to the side.
 - A weekly or Fable limit read hours ago no longer shows as just read after a short status update; it keeps its «read … ago» mark, also after VibeSpace restarts.
 - A newer reading of your weekly limit that reaches VibeSpace a little late is no longer dropped for an older number.
 - A second VibeSpace on the same machine no longer has its old pasted images deleted by another one; each cleans up only its own.
+- A helper agent that worked for a long time now has its early files in Artifacts too, which can push the oldest out past its 500 files.
 
 ## 2.369.413 — 2026-11-20
 
