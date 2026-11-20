@@ -721,7 +721,7 @@ console.log('㉑b a claim taken is ALWAYS ended; a delivery reopens only a kind 
 console.log('㉒ a floored delivery to an ENDED owner still owes its wake (place-8: the box\'s P and A at their second fire)');
 {
   const JSRC = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf8');
-  const OWE = '      if (!(this.d.peerReachable && this.d.peerReachable(cid))) this._oweWake(cid, job, ev, { subscriber });\n';
+  const OWE = '      if (!(liveOf && liveOf(cid))) this._oweWake(cid, job, ev, { subscriber });\n';
   const floorRig = (name, X, JM) => rig(name, { kept: { [X]: PERSON }, jobs: (Rg) => {
     const jdir = path.join(Rg.dataDir, 'jobs'); fs.mkdirSync(jdir, { recursive: true });
     const jm = new JM({ dataDir: jdir, broadcast() { }, log() { }, notifyUser: () => ({ ok: true }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: (cid) => Rg.live.has(cid),

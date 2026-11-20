@@ -18,6 +18,9 @@
 //   ⑧ THE RACE (the stall in its window: the record comes only after the post left the hub): ONE frame, one authorization, one
 //      charge — RED CONTROL: no wait («no live inbox»); a wait that runs out charges nothing
 //   ⑨ the wake's hand-over hands its bound to a remote session and says the machine's miss; the words keep waiting
+//   ROUND w00h341sv: ⑤ a LOCAL conversation under a held list is still parked (RED: the hold for every cid); ⑩ the agent runs THESE
+//      bodies (RED: its wait removed), an unreadable registry is an error the hub keeps unknown (RED: read as empty); ⑪ the ten-minute
+//      memory cleared by a landed post and expired (RED: kept); ⑫ peer-state alone counts as older (RED: asked), its word leaves on update
 import path from 'node:path';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -58,18 +61,19 @@ console.log('① the shared lookup: a CLI still starting');
 }
 
 /** the rig: the REAL ladder + park; a stand-in machine (its peerPost misses, its peerState says what it says) and machines list */
-function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null } = {}) {
+function rig(name, { state = { live: false, inbox: false }, held = () => false, mod = DELIVER, post = null, owner = () => 'h-1', hello = null } = {}) {
   const dataDir = path.join(ROOT, name); fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: 1_790_000_000_000, timers: [] };
   const retryClock = { now: () => c.now, setTimeout: (fn, ms) => { const t = { at: c.now + Math.max(0, ms), fn }; c.timers.push(t); return t; }, clearTimeout: (t) => { const i = c.timers.indexOf(t); if (i >= 0) c.timers.splice(i, 1); } };
   const R = { c, asked: 0, posts: 0, wakes: [], logs: [], hooked: [], spend: { auth: 0, note: 0, release: 0 }, sent: [] };
   const dm = { peerPost: async (a) => { R.posts++; R.sent.push(a); return post ? post(a) : { ok: false, reason: NO_INBOX }; }, peerState: typeof state === 'function' ? state : async () => { R.asked++; return state; } };
+  if (hello) dm.helloInfo = () => ({ capabilities: hello });
   const hosts = { deviceBounded: async () => dm, device: async () => dm, get: () => ({ id: 'h-1', name: 'box-p' }), held };
   const sessions = new Map();
   R.deliver = mod.create({
     dataDir, activeSessions: sessions, serverSetting: () => undefined, retryClock, log: (...a) => R.logs.push(a.join(' ')), renderBatch: AR.renderMsgStash,
     peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) },
-    getHosts: () => hosts, getConvIndex: () => ({ ownerHost: () => 'h-1' }), emitPeerCard: () => true,
+    getHosts: () => hosts, getConvIndex: () => ({ ownerHost: (cid) => owner(cid) }), emitPeerCard: () => true,
     authorizeSpend: () => { R.spend.auth++; return { ok: true, identity: { key: 'slot-1', name: 'Personal' }, hold: { id: 'h' } }; }, noteSpend: () => { R.spend.note++; }, releaseSpend: () => { R.spend.release++; },
   });
   R.deliver.onRetry?.((ev, cid, e, extra) => { if (ev === 'wake') R.wakes.push({ cid, ...extra }); });
@@ -151,27 +155,33 @@ console.log('⑤ a HELD machines list: nothing parked, nothing ended');
   const g = await run(DELIVER);
   ok(g.owed === 1 && g.parkedHeld.parked === false && g.parkedHeld.held === true && g.after === 1 && g.running === 0,
     'while the machines list is HELD: a new wake is not parked (unknown), and the owed one is NOT ended — it waits for the read', g);
-  const NOHOLD = mutantCopies('peer-state-held-ends', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    if (hostsHeld() && !localSessionFor(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3;", "    if (false) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3;", 'held-ends'), 'held-ends');
+  const NOHOLD = mutantCopies('peer-state-held-ends', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3;", "    if (false) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3;", 'held-ends'), 'held-ends');
   const gr = await run(NOHOLD);
   ok(gr.after === 0 && gr.running === 1, '⑤ RED CONTROL: a held list taken for «reachable» — the owed wake ENDS «running» with nobody to carry the words (bl-jobs\' sentence)', gr);
+  // round w00h341sv MUST 1: the hold makes only a REMOTE owner unknown — a conversation THIS machine's index calls local is parked as
+  // before under a held list (at the release the owner reader answered «none» for it) — RED CONTROL: the held branch for every cid
+  const L = CID(17);
+  const RL = rig('held-local', { held: () => true, owner: () => 'local' });
+  const pl = RL.deliver.parkEndedWake(L, { producer: 'jobs', spendReason: 'job-notification', kind: 'notification', reason: 'done', meta: { jobId: 'jb-l' } });
+  ok(pl.parked === true && pl.held !== true && RL.deliver.endedEntries(L).length === 1, 'a held machines list: a LOCAL ended conversation (the index calls it local) is still owed its wake — parked as at the release', pl);
+  const PARK = "    if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) return { parked: false, live: true, held: true };";
+  const ALLHELD = mutantCopies('peer-state-held-local', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, PARK, "    if (hostsHeld() && !localSessionFor(cid)) return { parked: false, live: true, held: true };", 'held-for-every-cid'), 'held-for-every-cid');
+  const RR = rig('held-local-red', { held: () => true, owner: () => 'local', mod: ALLHELD });
+  const pr = RR.deliver.parkEndedWake(L, { producer: 'jobs', spendReason: 'job-notification', kind: 'notification', reason: 'done', meta: { jobId: 'jb-l' } });
+  ok(pr.parked === false && pr.held === true && RR.deliver.endedEntries(L).length === 0, '⑤ RED CONTROL: the held branch for every conversation — a LOCAL ended conversation\'s wake is never parked (its words sit in the stash for good)', pr);
 }
 
 // ── U2: THE HAND-OVER WAITS THERE (peer-post inboxWaitMs, capability «peer-post-wait») ─────────────────────────────────────────
 const MSRC = fs.readFileSync(path.join(REPO, 'src/peer-messaging.js'), 'utf8');
 const st0 = fs.readFileSync('/proc/self/stat', 'utf8'), PROC_START = st0.slice(st0.lastIndexOf(')') + 2).split(' ')[19];
 const recordOf = (reg, cid, sock) => fs.writeFileSync(path.join(reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: cid, messagingSocketPath: sock, procStart: PROC_START, startedAt: Date.now() }));
-/** a stand-in MACHINE over a planted registry: the device agent's own glue (src/agentd/agentd.js peer-post) around the SHARED wait and
- *  post — its record is written only at `plantAt` (the wait's nth nap: AFTER the post left the hub) */
-function machine(reg, sock, cid, { plantAt = 2 } = {}) {
+/** a stand-in MACHINE over a planted registry that runs THE DEVICE AGENT'S OWN peer-post body (src/peer-messaging.js peerPostAnswer —
+ *  src/agentd/agentd.js calls the same function, pinned below), the client's `waitMs` handed on as the agent's `inboxWaitMs` — its
+ *  record is written only at `plantAt` (the wait's nth nap: AFTER the post left the hub) */
+function machine(reg, sock, cid, { plantAt = 2, mod = PM } = {}) {
   const M = { naps: [] };
   M.sleep = async (ms) => { M.naps.push(ms); if (M.naps.length === plantAt) recordOf(reg, cid, sock); };
-  M.post = async ({ cid: c, text, waitMs = 0 }) => {
-    const w = waitMs ? await PM.waitForPeer(c, { waitMs, dir: reg, sleep: M.sleep }) : { peer: PM.findPeer(c, reg), waited: 0 };
-    if (!w.peer && waitMs) return { ok: false, code: 'inbox_not_open', waited: w.waited, reason: `its inbox did not open on this machine within ${Math.round(w.waited / 1000)} s` };
-    if (!w.peer) return { ok: false, reason: NO_INBOX };
-    const r = await PM.postToPeer(w.peer, text);
-    return { ok: !!r.ok, reason: r.reason || null, peerName: w.peer.name || null, ...(waitMs ? { waited: w.waited } : {}) };
-  };
+  M.post = async ({ cid: c, text, waitMs = 0 }) => mod.peerPostAnswer({ cid: c, text, inboxWaitMs: waitMs }, { dir: reg, sleep: M.sleep });
   return M;
 }
 /** an inbox socket that counts the frames carrying `needle` */
@@ -274,6 +284,92 @@ console.log('⑨ the wake\'s hand-over carries the wait for a session on a paire
   const WSRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
   ok(WSRC.includes('...(inbox.remote ? { inboxWaitMs: INBOX_WAIT_MS } : {})') && WSRC.includes("if (ho && ho.code === 'inbox_not_open') {"), 'the wake line passes its own bound (INBOX_WAIT_MS) to a remote hand-over and words the machine\'s miss as its own (source pin)');
   I.srv.close();
+}
+
+console.log('⑩ the device agent runs THESE bodies; an unreadable registry is unknown, never «nothing lives» (round w00h341sv)');
+{
+  const ASRC = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
+  ok(ASRC.includes("require('./../peer-messaging.js').peerStateOf(msg.cid)") && ASRC.includes("require('./../peer-messaging.js').peerPostAnswer({ cid: msg.cid, text: msg.text, inboxWaitMs: msg.inboxWaitMs }, { alive: () => !mux._dead })"),
+    'the agent\'s peer-state and peer-post handlers call the SHARED bodies these legs run — never a copy (source pin)');
+  // RED: the wait taken out of the agent's own body — ⑧'s race is lost on the machine itself
+  const X = CID(40);
+  const NW = mutantCopies('peer-post-answer-no-wait', REPO).load('src/peer-messaging.js', anchored(MSRC, "  const waitMs = Number.isFinite(inboxWaitMs) && inboxWaitMs > 0 ? inboxWaitMs : 0;\n", "  const waitMs = 0;\n", 'answer-without-wait'), 'answer-without-wait');
+  const reg = path.join(ROOT, 'reg10'); fs.mkdirSync(reg, { recursive: true });
+  const I = await inbox('w10', 'the nightly report');
+  const R = rig('agent-no-wait', { post: machine(reg, I.sock, X, { mod: NW }).post });
+  const r = await R.deliver.deliverToConversation(X, 'the nightly report', { kind: 'notification', spendReason: 'job-notification', fromName: 'Background Work · nightly', inboxWaitMs: 60000 });
+  ok(r.ok !== true && I.count() === 0 && R.spend.note === 0, '⑩ RED CONTROL: the agent\'s own body without its wait — «no live inbox», nothing delivered (the race ⑧ wins is lost)', r);
+  I.srv.close();
+  // an unreadable registry folder: an ERROR (the hub keeps unknown), a missing one: nothing lives
+  const notDir = path.join(ROOT, 'reg10-a-file'); fs.writeFileSync(notDir, 'x');
+  let threw = null; try { PM.peerStateOf(CID(41), { dir: notDir }); } catch (e) { threw = String(e.message); }
+  const missing = PM.peerStateOf(CID(41), { dir: path.join(ROOT, 'no-such-registry') });
+  ok(/its registry folder could not be read \(ENOTDIR\)/.test(threw || '') && missing.live === false && missing.inbox === false, 'a registry folder that cannot be READ answers an error (unknown); one that does not exist answers «nothing lives»', { threw, missing });
+  const UNREAD = "    if (e && e.code !== 'ENOENT') return { peer: null, candidates: 0, stale: 0, unread: String(e.code || 'EIO'), why: `candidates: 0, stale: 0 (the registry could not be read: ${e.code || 'EIO'})` };\n";
+  const EMPTY = mutantCopies('peer-state-unread-empty', REPO).load('src/peer-messaging.js', anchored(MSRC, UNREAD, '', 'unread-as-empty'), 'unread-as-empty');
+  let redThrew = null, red = null; try { red = EMPTY.peerStateOf(CID(41), { dir: notDir }); } catch (e) { redThrew = e.message; }
+  ok(redThrew === null && red && red.live === false, '⑩ RED CONTROL: an unreadable folder read as empty — «not running», the miss typed ended on a machine that could not look', red);
+  // the hub over a machine whose answer is an error: unknown — no «not running», no wake
+  const Y = CID(42);
+  const H = rig('unread-hub', { state: async () => { throw new Error('its registry folder could not be read (EACCES)'); } });
+  const h = await H.result(Y, 'nightly report finished');
+  ok(h.r.notRunning !== true && h.p === null && H.deliver.endedEntries(Y).length === 0, '…and the hub reads that error as UNKNOWN: today\'s road (stashed, no wake), never «not running»', h.r);
+}
+
+console.log('⑪ the ten-minute memory of «ended there»: a post that lands clears it, and it expires');
+{
+  const X = CID(43), Y = CID(44);
+  let landing = false;
+  const meta2 = { producer: 'jobs', spendReason: 'job-notification', kind: 'notification', reason: 'done', meta: { jobId: 'jb-2' } };
+  const life = async (mod) => {
+    landing = false;
+    const R = rig('memory-' + (mod === DELIVER ? 'a' : 'b'), { mod, post: async () => landing ? { ok: true, peerName: 'p' } : { ok: false, reason: NO_INBOX } });
+    await R.result(X, 'first');   // its machine said it ended there: remembered, a wake owed
+    landing = true; await R.deliver.deliverToConversation(X, 'a later message', { kind: 'notification', spendReason: 'job-notification' });   // …then a post LANDS
+    const afterPost = R.deliver.parkEndedWake(X, meta2);
+    landing = false; await R.result(Y, 'second');
+    const before = R.deliver.parkEndedWake(Y, meta2);
+    R.c.now += 10 * 60e3 + 1;   // past REMOTE_ENDED_MS
+    const afterTtl = R.deliver.parkEndedWake(Y, { ...meta2, meta: { jobId: 'jb-3' } });
+    return { afterPost, before, afterTtl };
+  };
+  const g = await life(DELIVER);
+  ok(g.afterPost.live === true && g.afterPost.parked === false && g.before.parked === true && g.afterTtl.live === true && g.afterTtl.parked === false,
+    'a post that LANDS clears «ended there» (it runs again: live); unlanded, the memory parks a wake, and past ten minutes it is forgotten (live again — the machine is asked anew)', g);
+  const KEEP = mutantCopies('peer-state-memory-kept', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "          if (r && r.ok) remoteEnded.delete(cid);   // B-95fc U1: it runs there again\n", '', 'landed-post-keeps-ended'), 'landed-post-keeps-ended');
+  const gr = await life(KEEP);
+  ok(gr.afterPost.live !== true, '⑪ RED CONTROL: a landed post that does not clear the memory — a conversation running again there still reads «ended»', gr.afterPost);
+}
+
+console.log('⑫ an agent with peer-state but NOT peer-post-wait counts as older (its hand-over could not wait); updated, its word leaves');
+{
+  const X = CID(45);
+  const half = rig('half-agent', { hello: ['peer-post', 'peer-state'] });
+  const a = await half.result(X, 'x');
+  const wa = half.view.waitingAll()[X];
+  ok(half.asked === 0 && a.r.notRunning !== true && a.p === null && wa && wa.code === 'agent_older', 'an agent with peer-state alone is never asked and keeps today\'s road (no resume whose hand-over would race) — the row says «older»', { asked: half.asked, wa });
+  const NOCAPS = mutantCopies('peer-state-half-asked', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "Array.isArray(caps) && !caps.includes('peer-post-wait') ? null : ", '', 'half-agent-asked'), 'half-agent-asked');
+  const red = rig('half-agent-red', { hello: ['peer-post', 'peer-state'], mod: NOCAPS });
+  const b = await red.result(X, 'x');
+  ok(red.asked === 1 && b.r.notRunning === true && !!b.p, '⑫ RED CONTROL: the half agent asked — a wake owed whose hand-over cannot wait on that machine', { asked: red.asked });
+  const full = rig('agent-updated', { hello: ['peer-post', 'peer-state', 'peer-post-wait'] });
+  const both = await full.result(CID(46), 'y');
+  ok(full.asked === 1 && both.r.notRunning === true && !!both.p, 'an agent with both is asked (the road of ②)', { asked: full.asked });
+  // the «older» word LEAVES when the agent is updated (the same conversation; the agent now answers)
+  const updated = async (mod) => {
+    let answer = null;
+    const U = rig('older-then-updated-' + (mod === DELIVER ? 'a' : 'b'), { mod, state: async () => answer });
+    await U.result(CID(47), 'z');
+    const was = (U.view.waitingAll()[CID(47)] || {}).code;
+    answer = { live: false, inbox: false };
+    await U.result(CID(47), 'z again');
+    return { was, now: (U.view.waitingAll()[CID(47)] || {}).code || null };
+  };
+  const u = await updated(DELIVER);
+  ok(u.was === 'agent_older' && u.now !== 'agent_older', 'once the agent answers peer-state (updated), the row no longer says «its device agent is older»', u);
+  const STAY = mutantCopies('peer-state-older-stays', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    else if (st) { const a = endedAnswers.get(cid); if (a && a.code === 'agent_older') endedAnswers.delete(cid); }", '', 'older-word-stays'), 'older-word-stays');
+  const us = await updated(STAY);
+  ok(us.now === 'agent_older', '⑫ RED CONTROL: the word never cleared — an updated agent\'s row still says it is older', us);
 }
 
 report();

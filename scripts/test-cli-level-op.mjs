@@ -94,14 +94,15 @@ ok(again && again.state === 'read' && again.declared === true, '…asked again: 
   const sock = path.join(home, 'late.sock'); let frames = '';
   const srv = (await import('node:net')).createServer((c) => { c.on('data', (d) => { frames += d.toString('utf8'); }); });
   await new Promise((r) => srv.listen(sock, r));
-  const posting = dm.peerPost({ cid: LATE, text: 'the hand-over after the resume', inboxWaitMs: 20000 });   // the post has LEFT the hub
+  const BY = require(path.join(REPO, 'src/device-acts.js')).bySystem('job-notification');   // peer-post is an ACT: the client refuses one with no `by` before anything is sent
+  const posting = dm.peerPost({ cid: LATE, text: 'the hand-over after the resume', by: BY, waitMs: 20000 });   // the post has LEFT the hub (the client's own word for the wait: waitMs)
   await new Promise((r) => setTimeout(r, 600));   // the stall IN THE RACE'S WINDOW: the record comes only now
   fs.writeFileSync(path.join(reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: LATE, messagingSocketPath: sock, procStart, startedAt: Date.now() }));
   const got = await posting;
   for (let i = 0; i < 100 && !frames.includes('the hand-over after the resume'); i++) await new Promise((r) => setTimeout(r, 20));
   console.log(`    the machine waited ${got && got.waited} ms for its own record, then posted`);
   ok(got && got.ok === true && got.waited >= 500 && (frames.match(/the hand-over after the resume/g) || []).length === 1, '…the machine waited for ITS OWN record of the resumed conversation, then posted ONCE (one frame on its inbox)', { got, frames: frames.length });
-  const none = await dm.peerPost({ cid: NEVER, text: 'never', inboxWaitMs: 300 });
+  const none = await dm.peerPost({ cid: NEVER, text: 'never', by: BY, waitMs: 300 });
   ok(none && none.ok === false && none.code === 'inbox_not_open' && !frames.includes('never'), '…a wait that runs out with no record: inbox_not_open, nothing posted', none);
   srv.close();
 }

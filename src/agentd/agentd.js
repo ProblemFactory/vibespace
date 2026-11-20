@@ -2446,8 +2446,9 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         // shared lookup the hub's local rung reads (src/peer-messaging.js lookupPeer): a record that passes ⇒ live with its inbox; a
         // record whose pid lives but whose socket is not served yet ⇒ live, a CLI still starting; none ⇒ not running here
         try {
-          const look = require('./../peer-messaging.js').lookupPeer(String(msg.cid || ''));
-          mux.control({ op: 'peer-state-result', id: msg.id, live: !!look.peer || look.starting > 0, inbox: !!look.peer });
+          // ONE body with the fast suite (peerStateOf); a registry folder that cannot be read answers an ERROR — unknown, never «not running»
+          const st = require('./../peer-messaging.js').peerStateOf(msg.cid);
+          mux.control({ op: 'peer-state-result', id: msg.id, live: st.live, inbox: st.inbox });
         } catch (e) { mux.control({ op: 'peer-state-result', id: msg.id, error: String((e && e.message) || e) }); }
         return;
       }
@@ -2462,16 +2463,11 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         // link is destroyed — nobody to answer, nothing posted) and then posts ONCE; past the bound it answers inbox_not_open.
         (async () => {
           try {
-            const pm = require('./../peer-messaging.js');
-            const cid = String(msg.cid || '');
-            const waitMs = Number.isFinite(msg.inboxWaitMs) && msg.inboxWaitMs > 0 ? msg.inboxWaitMs : 0;   // named apart from a request's own `waitMs` (the client's bound reads that first)
-            const w = waitMs ? await pm.waitForPeer(cid, { waitMs, alive: () => !mux._dead }) : { peer: pm.findPeer(cid), waited: 0, cut: false };
-            if (w.cut) return;
-            const peer = w.peer;
-            if (!peer && waitMs) { mux.control({ op: 'peer-post-result', id: msg.id, ok: false, code: 'inbox_not_open', waited: w.waited, reason: `its inbox did not open on this machine within ${Math.round(w.waited / 1000)} s` }); return; }
-            if (!peer) { mux.control({ op: 'peer-post-result', id: msg.id, ok: false, reason: 'no live inbox for this conversation on this machine' }); return; }
-            const r = await pm.postToPeer(peer, String(msg.text || ''));
-            mux.control({ op: 'peer-post-result', id: msg.id, ok: !!r.ok, reason: r.reason || null, peerName: peer.name || null, ...(waitMs ? { waited: w.waited } : {}) });
+            // ONE body with the fast suite (src/peer-messaging.js peerPostAnswer): the wait is named `inboxWaitMs`, apart from a
+            // request's own `waitMs` (the client's bound reads that first); a destroyed link ends the wait — nothing posted, no answer
+            const a = await require('./../peer-messaging.js').peerPostAnswer({ cid: msg.cid, text: msg.text, inboxWaitMs: msg.inboxWaitMs }, { alive: () => !mux._dead });
+            if (!a) return;
+            mux.control({ op: 'peer-post-result', id: msg.id, ...a });
           } catch (e) { mux.control({ op: 'peer-post-result', id: msg.id, error: String(e.message || e) }); }
         })();
         return;

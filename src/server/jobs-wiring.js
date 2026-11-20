@@ -151,6 +151,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // we never bypass a hold. Any miss (no registry entry, dead pid, socket
     // error) reports {ok:false} so the engine stashes for resume injection.
     peerReachable: (cid) => { try { return deliver.peerReachable(cid); } catch { return false; } },
+    liveForWake: (cid) => { try { return deliver.liveForWake(cid); } catch { return false; } },   // B-95fc (round w00h341sv): the park's own «live» — a conversation its machine said ended is not live
     // lane jobs-addressed-push r2/r3 (law C — PUSH ⊆ VIEW on every road): a conversation as a jobs caller NOW, judged by what
     // the server knows of it NOW. A LIVE record (the one claude-lock-capture addressableId names as its own) ⇒ its Task Groups
     // by THE membership function (the hook routes' jobsCaller reads the same) — `live: true`. No live record ⇒ what the group

@@ -99,7 +99,11 @@ function liveProbe() {
 function lookupPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
   if (!backendSessionId) return { peer: null, candidates: 0, stale: 0, why: 'candidates: 0, stale: 0' };
   let entries;
-  try { entries = fs.readdirSync(dir); } catch { return { peer: null, candidates: 0, stale: 0, why: 'candidates: 0, stale: 0 (no registry)' }; }
+  try { entries = fs.readdirSync(dir); } catch (e) {
+    // B-95fc (round w00h341sv): a folder that does not exist is «no registry»; one that cannot be READ is unknown (`unread`), never «nothing lives»
+    if (e && e.code !== 'ENOENT') return { peer: null, candidates: 0, stale: 0, unread: String(e.code || 'EIO'), why: `candidates: 0, stale: 0 (the registry could not be read: ${e.code || 'EIO'})` };
+    return { peer: null, candidates: 0, stale: 0, why: 'candidates: 0, stale: 0 (no registry)' };
+  }
   const pr = probe || liveProbe();
   const counts = { 'pid-gone': 0, 'pid-reused': 0, 'socket-absent': 0 };
   let candidates = 0, stale = 0, starting = 0, best = null;   // starting (B-95fc U1): its pid lives, its socket is not served yet — a CLI still starting
@@ -234,4 +238,25 @@ function postToPeer(peer, text, { timeoutMs = POST_TIMEOUT_MS } = {}) {
   });
 }
 
-module.exports = { findPeer, lookupPeer, waitForPeer, PEER_WAIT_MAX_MS, registryIdentityOk, postToPeer, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };
+/** B-95fc — THE DEVICE AGENT'S peer-state ANSWER, ONE body (src/agentd/agentd.js calls it; test-peer-state loads it): {live, inbox}
+ *  from the shared lookup — live = a record that passes or one still `starting`. A registry folder that cannot be read (anything but
+ *  «no such folder») THROWS: the hub keeps unknown as unknown (an error reply), never «nothing lives there». */
+function peerStateOf(cid, { dir = REGISTRY_DIR, probe = null } = {}) {
+  const look = lookupPeer(String(cid || ''), dir, probe);
+  if (look.unread) throw new Error(`its registry folder could not be read (${look.unread})`);
+  return { live: !!look.peer || look.starting > 0, inbox: !!look.peer };
+}
+/** B-95fc — THE DEVICE AGENT'S peer-post ANSWER, ONE body (the agent's and the fast suite's): with `inboxWaitMs` the bounded wait for
+ *  this machine's OWN record of the conversation first (waitForPeer), then ONE post. → the reply's fields, or null when the asker went
+ *  mid-wait (a destroyed link: nothing posted, nobody to answer). */
+async function peerPostAnswer({ cid, text, inboxWaitMs } = {}, { alive = () => true, dir = REGISTRY_DIR, probe = null, sleep = null } = {}) {
+  const c = String(cid || '');
+  const waitMs = Number.isFinite(inboxWaitMs) && inboxWaitMs > 0 ? inboxWaitMs : 0;
+  const w = waitMs ? await waitForPeer(c, { waitMs, alive, dir, probe, ...(sleep ? { sleep } : {}) }) : { peer: findPeer(c, dir, probe), waited: 0, cut: false };
+  if (w.cut) return null;
+  if (!w.peer && waitMs) return { ok: false, code: 'inbox_not_open', waited: w.waited, reason: `its inbox did not open on this machine within ${Math.round(w.waited / 1000)} s` };
+  if (!w.peer) return { ok: false, reason: 'no live inbox for this conversation on this machine' };
+  const r = await postToPeer(w.peer, String(text || ''));
+  return { ok: !!r.ok, reason: r.reason || null, peerName: w.peer.name || null, ...(waitMs ? { waited: w.waited } : {}) };
+}
+module.exports = { findPeer, lookupPeer, waitForPeer, PEER_WAIT_MAX_MS, peerStateOf, peerPostAnswer, registryIdentityOk, postToPeer, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };

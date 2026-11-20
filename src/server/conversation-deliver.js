@@ -898,7 +898,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
    *  stash; `cardText` = the message that woke it, for that card). → {parked, id, merged?, live?} */
   function parkEndedWake(cid, { producer, spendReason, kind = 'notification', fromName = null, cardText = null, sender = null, reason = '', meta = null } = {}) {
     if (!cid || !producer || !spendReason) return { parked: false, why: 'no conversation, producer or reason' };
-    if (hostsHeld() && !localSessionFor(cid)) return { parked: false, live: true, held: true };   // B-95fc U1: a held list is «unknown» — nothing parked
+    if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) return { parked: false, live: true, held: true };   // B-95fc U1: a held list makes only a REMOTE owner «unknown» — nothing parked for it (round w00h341sv: a conversation the index calls LOCAL is parked as before)
     if (liveForWake(cid)) return { parked: false, live: true };   // B-95fc U1: a remote conversation its machine said ended is not «live»
     const same = (retry[cid] || []).find(isEnded);
     if (same) {
@@ -933,7 +933,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && !x.waitsReadopt);   // a wake that waits for the re-adoption runs at its settle (readoptSettled)
     const waiting = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && x.waitsReadopt);   // …unless it runs again first (a person resumed it): then that is its answer too
     if (!ends.length && !waiting.length) return;
-    if (hostsHeld() && !localSessionFor(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3; writeRetrySoon(); scheduleRetry(); return; }   // B-95fc U1: a held list ENDS NOTHING (bl-jobs: never «running» with nobody to carry it) — asked again after the read
+    if (hostsHeld() && !localSessionFor(cid) && ownerHostOf(cid)) { for (const e of [...ends, ...waiting]) e.nextAt = clock.now() + 30e3; writeRetrySoon(); scheduleRetry(); return; }   // B-95fc U1: a held list ENDS NOTHING (bl-jobs: never «running» with nobody to carry it) — asked again after the read
     if (liveForWake(cid)) { for (const e of [...ends, ...waiting]) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
     if (!ends.length) return;
     if (!endedHook) return;   // the line is not wired yet (the boot): registerEndedWake schedules the attempt again
@@ -1543,6 +1543,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       if (!saidOlder.has(hid)) { saidOlder.add(hid); if (saidOlder.size > 200) saidOlder.delete(saidOlder.values().next().value); log(`[deliver] ${hid}: its device agent is older — it cannot say whether a conversation ended there; the words wait for its next turn (update the agent)`); }
       if (!endedAnswers.has(cid)) endedAnswers.set(cid, { outcome: 'refused', code: 'agent_older', why: 'its device agent is older: update it — the words wait for its next turn', until: null, at: clock.now() });
     }
+    else if (st) { const a = endedAnswers.get(cid); if (a && a.code === 'agent_older') endedAnswers.delete(cid); }   // round w00h341sv: the agent was updated — its «older» word leaves
     return st;
   }
   /** a HELD machines list (hosts.json not read): who owns a remote conversation is unknown — nothing is parked, nothing is ended */
@@ -2002,7 +2003,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           // unknown op hangs; its road stays as today, said once); the miss is «not running» ONLY on its reply that the conversation
           // runs nowhere there — never a machine that could not be reached, never a CLI still starting
           const there = r && /no live inbox/.test(String(r.reason || '')) ? await remoteStateOf(dm, cid, hid) : undefined;
-          if (there && there.live === false) { remoteEnded.set(cid, { at: clock.now(), hostId: hid }); return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true }; }
+          if (there && there.live === false) { remoteEnded.delete(cid); remoteEnded.set(cid, { at: clock.now(), hostId: hid }); if (remoteEnded.size > 500) remoteEnded.delete(remoteEnded.keys().next().value); return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'no live inbox for this conversation on that machine', notRunning: true, remoteEnded: true }; }
           return { ok: false, lane: 'remote-message', hostId: hid, reason: (r && r.reason) || 'remote daemon could not reach the inbox' };
         } catch (e) {
           if (undo2) undo2();
@@ -2067,7 +2068,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   }
 
   return {
-    deliverToConversation, peerReachable, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
+    deliverToConversation, peerReachable, liveForWake, stashFor, stashSlot, slotHolders, drainStash, stashCount, stashPeek, stashHealth, onStash,   // stashPeek: COPIES (the engine's boot reconcile); stashHealth: is the file current (withdraw r5); onStash: the ref'd entries' events (stashed / drained / evicted / unwritten)
     stashEntries, claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush, capUnclaimed, redactStash, registerRedactor, registerStashJudge,   // stashEntries: the SAME objects; claimStash / claimedCount: the hand-over's claim (a full drain leaves a claimed entry in place; the `ho` stamp is on disk); restoreStash / restoreFrame: a frame that came back is its original entries
     registerStashGate,   // verify r3 (lane channel-threads): a producer re-asks, at every read, whether an entry's `about` still reaches its conversation
     settleRpcDelivery,   // the wrapper's own peer_message_result settles a predicted-free steer
