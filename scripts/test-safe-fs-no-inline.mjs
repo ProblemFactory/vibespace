@@ -78,8 +78,8 @@ ok(!!g.after && !g.after.error, `a worker back (after its backoff): the pool ans
 console.log('③ the census: no pool keeps an inline road; a missing pool refuses too; the refusal is worded');
 {
   const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
-  // comment LINES out (a why may name the old road) — never a /*…*/ match across lines: a '/*' inside a string (server.js has one) ate
-  // real code, and the census read 7 builders of 8 (its first gate)
+  // comment LINES out (a why may name the old road) — never a /*…*/ match across lines: a '/*' inside a line comment (server.js has one: a route
+  // pattern) ate real code, and the census read 7 builders of 8 (its first gate)
   const code = (src) => src.replace(/^\s*(?:\/\/|\/\*|\*).*$/gm, '');
   const srcFiles = ['server.js']; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = d + '/' + e.name; if (e.isDirectory()) walk(r); else if (e.name.endsWith('.js')) srcFiles.push(r); } };
   walk('src');

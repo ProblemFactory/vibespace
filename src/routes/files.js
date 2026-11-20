@@ -105,7 +105,7 @@ router.use((req, res, next) => {
 // Files window, a file's view, the chat's link-open and the downloads word storage_no_worker in the reader's language
 // (fsErrorText); the folder field shows `error` after «The machine did not answer:» — never the pool's inside words, never cut.
 const FILE_POOL_REFUSED = require('../safe-fs').noWorkerRefusal('the file pool').message.split(' is running')[0];   // «no worker of the file pool» — another pool's refusal keeps its own words
-const STORAGE_NO_WORKER = 'the file readers are restarting — try again in a moment';   // true for every cause: a deadline kill, a crash, a worker that could not start (it is retried)
+const STORAGE_NO_WORKER = 'the file readers are restarting — try again in a moment';   // a deadline kill, a crash, a worker that could not start — each is retried (no pool at all: server.js's boot line)
 router.use((req, res, next) => {
   const json = res.json;
   res.json = function (body) {
