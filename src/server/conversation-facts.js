@@ -248,8 +248,12 @@ function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, per
       if (d === true || d === false || !host || !hosts) return d;
       const R = require('./cli-level-reported.js');
       const nameOf = (h) => { try { const x = hosts.get(h); return (x && x.name) || null; } catch { return null; } };   // B-24e2: the machine's name for the words
+      // THE DOOR IS JUDGED FIRST (round wiqep65pr, the must): a machine whose link is DOWN is said «not connected» from the first read and
+      // nothing is asked; an agent without the capability is said «older» from the first read — never «being read» for either
+      const machine = nameOf(host) || host, link = R.linkOf(hosts, host);
+      if (link !== 'ok') { R.sayDoor(v, host, link, machine); return { pending: link, machine }; }
       R.want(v, host, (h, ver) => hosts.cliLevelOf(h, ver), { nameOf });   // the facts read IS the trigger (the manager's list reads it first); the CONVERSATION's build
-      const machine = nameOf(host) || host, e = R.asking(v, host) ? { kind: 'reading' } : R.endOf(v, host);
+      const e = R.asking(v, host) ? { kind: 'reading' } : R.endOf(v, host);
       return e && e.kind !== 'read' && e.kind !== 'failed' ? { pending: e.kind, machine, retryAt: e.retryAt || null } : d;   // (5) the refused end names its door
     },
     keyOf: (s) => { const cid = idOf(s); return cid ? `${s.backend || 'claude'}:${cid}` : null; },

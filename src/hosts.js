@@ -1748,8 +1748,8 @@ class HostManager {
   async cliLevelOf(id, version = null) {
     const dm = this.connectedDevice(id);   // round wwf11hqbh (2): A LIST NEVER STARTS A CONNECT — a machine not connected is a quiet skip
     if (!dm) return { state: 'offline' };
-    const conn = await dm.connect();   // the link is up: answered at once (no connect ladder)
-    const caps = conn && conn.info && Array.isArray(conn.info.capabilities) ? conn.info.capabilities : [];
+    const info = typeof dm.status === 'function' ? dm.status().info : null;   // (wiqep65pr (6)) the hello the link already holds — no connect() can start in a gap
+    const caps = info && Array.isArray(info.capabilities) ? info.capabilities : [];
     if (!caps.includes('cli-level')) return null;   // (3) an OLDER agent (it may not even answer the op): asked nothing, never a 9 s wait
     const r = await dm.probeCli(null, { level: true, version });
     const lv = r && r.facts && r.facts.claude ? r.facts.claude.level : null;

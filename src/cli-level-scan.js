@@ -32,6 +32,7 @@ async function scanLevel(file, { timeoutMs = SCAN_TIMEOUT_MS, open = null, now =
       fh = await (open || ((f) => fs.promises.open(f, fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0))))(file);
       const st = await fh.stat();
       if (!st.isFile()) return { error: 'not-a-file', retry: true };
+      const identity = `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}`;   // the opened handle's own (the file the bytes come from)
       const size = st.size, buf = Buffer.alloc(CHUNK + OVERLAP);
       let pos = 0, carry = 0, at = -1, ident = null, maxStepMs = 0;
       while (pos < size && (at < 0 || !ident) && !abandoned) {   // round wwf11hqbh (1): read on until the build's identity is found too
@@ -48,7 +49,7 @@ async function scanLevel(file, { timeoutMs = SCAN_TIMEOUT_MS, open = null, now =
         maxStepMs = Math.max(maxStepMs, now() - s0);
       }
       if (abandoned) return { error: 'timeout', retry: true, cut: true };
-      return { declared: at >= 0, whole: at >= 0 || pos >= size, at: at >= 0 ? at : null, version: (ident && ident.version) || null, builtAt: (ident && ident.builtAt) || null, size, maxStepMs };
+      return { declared: at >= 0, whole: at >= 0 || pos >= size, at: at >= 0 ? at : null, version: (ident && ident.version) || null, builtAt: (ident && ident.builtAt) || null, size, maxStepMs, identity };
     } catch (e) {
       return { error: (e && e.code) || 'read-failed', retry: true };
     } finally {

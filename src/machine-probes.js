@@ -226,7 +226,7 @@ async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = nul
   Object.assign(out.claude, login);
   if (out.claude.machineLoginState === null) delete out.claude.machineLoginState;
   if (startP) out.claude.startHelper = await startP;   // B-77ed: asked for a start (its cwd and own file)
-  if (level === true && out.claude.cmdPath) out.claude.level = await cliLevel(claudeCmd, { version: typeof version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(version) ? version : null });   // B-24e2: the CONVERSATION's build (asked only above the hub's span)
+  if (level === true) out.claude.level = await cliLevel(claudeCmd, { version: typeof version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(version) ? version : null });   // B-24e2: the CONVERSATION's build (asked only above the hub's span)
   out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json'));
   return out;
 }
@@ -348,7 +348,8 @@ async function levelFileFor(cmd, version, { procRoot = '/proc', platform = proce
       if (!/^\d+$/.test(pid)) continue;
       let t = null; try { t = await fs.promises.readlink(path.join(procRoot, pid, 'exe')); } catch { continue; }
       const file = t.replace(/ \(deleted\)$/, '');
-      if (path.basename(file) === version && (!vdir || path.dirname(file) === vdir)) return { path: path.join(procRoot, pid, 'exe'), via: 'process' };
+      // (wiqep65pr (4)) the installer's layout: <its versions folder>/<version> — the PATH program's own folder, else a folder named «versions»
+      if (path.basename(file) === version && (vdir ? path.dirname(file) === vdir : path.basename(path.dirname(file)) === 'versions')) return { path: path.join(procRoot, pid, 'exe'), via: 'process' };
     }
   }
   if (version && vdir) { const f = path.join(vdir, version); try { if ((await fs.promises.stat(f)).isFile()) return { path: f, via: 'versions' }; } catch { } }   // ② its own file
@@ -356,7 +357,8 @@ async function levelFileFor(cmd, version, { procRoot = '/proc', platform = proce
 }
 const levelAnswer = (m, version, via) => {
   if (m.state !== 'read') return { ...m, ...(version ? { version } : {}) };
-  if (version && m.version !== version) return { state: 'gone', version, read: m.version || null, via, why: m.version ? `this machine's program is ${m.version} now; ${version}'s own file is no longer on it` : 'the file read names no build' };
+  if (version && !m.version) return { state: 'gone', version, read: null, unnamed: true, via, why: 'the file read names no build' };   // (wiqep65pr (2))
+  if (version && m.version !== version) return { state: 'gone', version, read: m.version, via, why: `this machine's program is ${m.version} now; ${version}'s own file is no longer on it` };
   return { ...m, via };
 };
 async function cliLevel(cmd, { version = null, scan = (p) => require('./cli-level-scan.js').scanLevel(p), now = () => Date.now(), procRoot = '/proc', platform = process.platform } = {}) {   // the scan required here: a suite loads a COPY of this file
@@ -371,7 +373,11 @@ async function cliLevel(cmd, { version = null, scan = (p) => require('./cli-leve
   _levelMemo.set(identity, { state: 'reading' });
   _levelScan = Promise.resolve().then(() => scan(c.path)).then((r) => {
     const t = now();
-    _levelMemo.set(identity, r && !r.error && r.whole === true ? { state: 'read', declared: r.declared === true, whole: true, version: r.version || null, size: r.size, maxStepMs: r.maxStepMs, ms: r.ms }
+    // (wiqep65pr (3)) filed under the identity of the file the SCAN opened (one handle): a link that changed in between never files
+    // another file's verdict under this one
+    const key = r && typeof r.identity === 'string' ? r.identity : identity;
+    if (key !== identity) _levelMemo.delete(identity);
+    _levelMemo.set(key, r && !r.error && r.whole === true ? { state: 'read', declared: r.declared === true, whole: true, version: r.version || null, size: r.size, maxStepMs: r.maxStepMs, ms: r.ms }
       : { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (r && r.error) || 'not read whole' });
     while (_levelMemo.size > LEVEL_MEMO_MAX) _levelMemo.delete(_levelMemo.keys().next().value);
   }, (e) => { const t = now(); _levelMemo.set(identity, { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (e && e.code) || 'read-failed' }); })

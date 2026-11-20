@@ -249,6 +249,8 @@ function levelPending(d) {
   if (d.pending === 'cut') return ` — the read on ${m} was cut; it is read again ${Number(d.retryAt) ? 'after ' + new Date(Number(d.retryAt)).toISOString() : 'later'}`;
   if (d.pending === 'gone') return ` — that build is no longer on ${m}; its background stays unknown`;
   if (d.pending === 'offline') return ` — its machine ${m} is not connected`;
+  if (d.pending === 'unnamed') return ` — the file read on ${m} names no build; its background stays unknown`;
+  if (d.pending === 'none') return ` — no Claude Code program was found on ${m} for it; its background stays unknown`;
   return '';
 }
 function trackedFacts(st, { keeps = null, turn = null, levelDeclared = null } = {}) {

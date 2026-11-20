@@ -58,6 +58,8 @@ function save() {
     if (r && r.failed) return;   // still held: said once at boot
     st.reported = { ...((r && r.versions) || {}), ...st.reported }; st.held = null;   // the file read at last: what it kept, then what came since
   }
+  const ks = Object.keys(st.reported);   // ≤ KEEP versions, the oldest leaving — the held store's merge too (round wiqep65pr (5))
+  if (ks.length > KEEP) for (const k of ks.sort((a, b) => st.reported[a].at.localeCompare(st.reported[b].at)).slice(0, ks.length - KEEP)) delete st.reported[k];
   const w = st.writer || require('../store-writer.js').storeWriter();
   try { w.dirty(path.join(st.dataDir, FILE), { name: 'cli-level-reported.write', produce: () => JSON.stringify({ schema: 1, versions: st.reported }) }); }
   catch (e) { st.log(`[cli-level] the reported verdicts could not be written (${(e && (e.code || e.message)) || e}) — they stay in force until the next start`); }
@@ -67,8 +69,6 @@ function note(version, level, by = null) {
   if (typeof version !== 'string' || !VERSION.test(version) || !level || typeof level !== 'object') return false;
   if (!(level.declared === true || (level.declared === false && level.whole === true))) return false;   // a «not found» in bytes not all read says nothing
   st.reported[version] = { declared: level.declared === true, by: by && typeof by === 'object' ? { host: by.host || null, name: by.name || null } : null, at: new Date(st.clock.now()).toISOString() };
-  const ks = Object.keys(st.reported);
-  if (ks.length > KEEP) for (const k of ks.sort((a, b) => st.reported[a].at.localeCompare(st.reported[b].at)).slice(0, ks.length - KEEP)) delete st.reported[k];
   save();
   return true;
 }
@@ -105,6 +105,8 @@ function want(version, hostId, ask, { nameOf = () => null } = {}) {
       }
       // NEVER A VERDICT UNDER A VERSION THE MACHINE DID NOT READ FOR THAT CONVERSATION (round wwf11hqbh, the must): a read that names
       // another build (an older agent reads its PATH's program), or none, or the build's own file gone — ended BY NAME, the hour's pause
+      if (lv.unnamed === true) return end(k, 'unnamed', `[cli-level] ${who()}: the file read for its Claude Code ${version} names no build — its background stays unknown`, PAUSE_MS.old);   // (2)
+      if (lv.state === 'none') return end(k, 'none', `[cli-level] ${who()}: no Claude Code program was found there for ${version} (none on its agent's PATH, no process started from it) — its background stays unknown`, PAUSE_MS.old);   // (1)
       if (lv.state === 'read' || lv.state === 'gone') return end(k, 'gone', `[cli-level] ${who()}: that build (${version}) is no longer on the machine${lv.read || (lv.state === 'read' && lv.version) ? ` (its program reads ${lv.read || lv.version})` : ''} — its background stays unknown`, PAUSE_MS.old, { read: lv.read || lv.version || null });
       if (lv.state === 'cut') return end(k, 'cut', `[cli-level] ${who()}: its Claude Code ${version} could not be read whole for the background signal (${String(lv.why || 'cut').slice(0, 80)}) — it is read again ${Number(lv.retryAt) ? 'after ' + new Date(Number(lv.retryAt)).toISOString() : 'later'}`, Math.max(PAUSE_MS.failed, (Number(lv.retryAt) || 0) - st.clock.now()), { retryAt: Number(lv.retryAt) || null });
       if (lv.state === 'reading' && a.step < ASK_STEPS_MS.length) { a.timer = st.clock.setTimeout(once, ASK_STEPS_MS[a.step++]); return; }
@@ -117,7 +119,20 @@ function want(version, hostId, ask, { nameOf = () => null } = {}) {
   };
   once();
 }
+/** THE DOOR, judged before any ask (round wiqep65pr): `hosts`'s machine `hostId` → 'ok' | 'offline' (its link is down: a list never
+ *  connects) | 'old' (its agent does not advertise «cli-level» in the hello it sent — read off the link, no call). Synchronous. */
+function linkOf(hosts, hostId) {
+  let dm = null; try { dm = hosts && typeof hosts.connectedDevice === 'function' ? hosts.connectedDevice(hostId) : null; } catch { dm = null; }
+  if (!dm) return 'offline';
+  let caps = []; try { const i = typeof dm.status === 'function' ? dm.status().info : null; caps = i && Array.isArray(i.capabilities) ? i.capabilities : []; } catch { caps = []; }
+  return caps.includes('cli-level') ? 'ok' : 'old';
+}
+/** the door's state said ONCE in the journal by name (the words carry it at every read) */
+function sayDoor(version, hostId, link, name) {
+  const who = name ? `«${name}»` : hostId;
+  if (link === 'old') sayOnce(`${keyOf(version, hostId)}|old`, `[cli-level] ${who}: its device agent is older — it cannot read its own Claude Code for the background signal; ${version}'s background stays unknown there until the agent is updated`);
+}
 /** tests only: a fresh process (the store stays on disk) */
 function _reset() { for (const a of st.asks.values()) if (a.timer) st.clock.clearTimeout(a.timer); st.asks.clear(); st.paused.clear(); st.said.clear(); st.ends.clear(); st.reported = {}; st.held = null; st.dataDir = null; st.writer = null; }
 
-module.exports = { boot, levelOf, note, want, asking, endOf, FILE, KEEP, ASK_STEPS_MS, PAUSE_MS, _reset };
+module.exports = { boot, levelOf, note, want, asking, endOf, linkOf, sayDoor, FILE, KEEP, ASK_STEPS_MS, PAUSE_MS, _reset };
