@@ -7717,11 +7717,13 @@ await section(async () => {
   const strips107 = /--outfile=data\/bin\/\.vibespace-agentd\.raw\.js && node scripts\/agentd-bundle-strip\.mjs data\/bin\/\.vibespace-agentd\.raw\.js data\/bin\/vibespace-agentd\.js && /.test(script107)   // B-315a: esbuild writes a SIDE name, the strip renames into the final one
     && script107.indexOf('agentd-bundle-strip.mjs') < script107.indexOf('scripts/agentd-release.mjs');
   const shipped107 = (r) => (strips107 ? strip107(r.outputFiles[0].text, undefined, { check: false }) : r.outputFiles[0].text);   // a size reading (the build's own step checks)
-  // RESTATED at 2.369.412's second checkpoint (lane bl-loop-a, the restack-411 chain moved onto 8f96c01eb): the size this leg printed
-  // there (run a463f5ecb-20261118231403-both) — the checkpoint's 4944081 + this chain's DEVICE code: B-91aa's belt in desktop-display.js
-  // (a starter seam, the X env names), B-299b A2's warm road in session-store.js, the usage walker's yields, proc-identity's statOf.
-  // Was the 2.369.407 sources' 4866886 (as build:agentd ships it, stripped); + 2 % for this tree's own code
-  const RELEASE_BUNDLE_BYTES = 4965563, DEVICE_BUNDLE_MARGIN = 0.02;
+  // THE LAW (the coordinator's, 2026-11-20): the base is the LAST RELEASE's SIGNED device bundle size, restated at each cut to the size
+  // that cut signs. Restated by int361 on the 2.369.414 train: 2.369.413's signed bundle, 5042938 bytes (its manifest's sha256 5bc9302d…);
+  // the 2 % margin holds this block's DEVICE code over it: list lines 6 (B-77ed's remainder, the login shell's read), 8 (B-3d06, the
+  // spawn PATH by the platform's separator), 19 (B-24e2, the machine's own Claude Code level read), 23 (B-9ff2 step 3, message-manager.js)
+  // and 24 (B-b0e3, artifacts.js) — measured: 5064413 bytes at line 19's tip, 5064675 at line 27's. Was 4965563, restated by hand at
+  // 2.369.412's second checkpoint and not at the 2.369.413 cut.
+  const RELEASE_BUNDLE_BYTES = 5042938, DEVICE_BUNDLE_MARGIN = 0.02;
   ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
   const got107 = libs107(r107), extra107 = got107.filter((l) => !Object.hasOwn(DEVICE_LIBS, l));
