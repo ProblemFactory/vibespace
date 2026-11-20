@@ -1074,6 +1074,7 @@ export const SUITES = [
   { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
   { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.7 s (B-18eb, restated 2026-11-18: + the re-run attempt legs and their §5 mutants — alone on the test machine, alternated with the release\'s own suite file, 6 pairs over both zones: 7.47 s against 7.27 s, the medians — ×1.03 over 4.6 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
   { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.9 s (measured under the box\'s thermal cap, 2026-11-10: 8.61–8.87 s alone — not restated at full speed yet) — lane ci-heavy-queue (+ THE BUILD STAMP: a claim does not rebuild a tree built at its commit; a red build writes no verdict): the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
+  { name: 'test-ci-heavy-queue-window', tier: 'fast', why: 'LAW architecture · 2.4 s (measured alone on the test machine, 2026-11-20: 2.40 s, run 9611618f3-20261120181951-box, node v24.22.1) — lane bl-ci (r406): the heavy lock\'s FRESH LOOK after the take (a waiter frozen between its head decision and its take gives a lock an older live ticket is owed back at once) and each ticket judged by the clock around its own stat (a reader frozen after its folder read reaps no live ticket «in the future») — both freezes PLACED by a copy, each with its red control; real processes, three mutant copies' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-ledger-boot-load', tier: 'fast', why: 'in-process · 4.4 s measured in a depth-1 clone, three runs 4.37–4.42 s at a box load of ~5 (ledger-boot-load, 2.369.397: a 9 876-row real-shape ledger, 16 worker loads incl. 7 planted failures, three planted copies; the failing load\'s road in test-ledger-boot-fail)' }, // THE LEDGER'S FIRST LOAD OFF THE LOOP: «loading» until the worker's cache is swapped in; rows once; a dead worker said once, never a sync fallback
   { name: 'test-ledger-boot-fail', tier: 'fast', why: 'in-process · 6.0 s measured in a depth-1 clone, three runs 5.94–6.00 s at a box load of ~5 (ledger-boot-load round 2 + its follow-up, 2.369.397 — split from test-ledger-boot-load under the 10 s: a real-shape ledger, throwing and hung first loads, transcripts walked by the real scan through the real route handler on a fake app, eight planted copies)' }, // NOTHING WAITS ON A LOAD THAT IS FAILING: bounded by the try, a person\'s Retry tries now, LOADING a state
@@ -3722,15 +3723,22 @@ const LOCK_CMD = path.basename(process.argv[1] || '') || 'ci.mjs';   // the CLI:
 export const ticketDirOf = (lockPath) => lockPath + '.q';
 /** the queue in order — [{ name, file, rec }] oldest first; dead tickets (and unreadable ones) are REAPED on the way. */
 export const TICKET_STALE_MS = 15000;
-export function machineQueue(lockPath, { reap = true, staleMs = TICKET_STALE_MS, now = Date.now() } = {}) {
+export function machineQueue(lockPath, { reap = true, staleMs = TICKET_STALE_MS, now = null } = {}) {
   const dir = ticketDirOf(lockPath);
   let names = [];
   try { names = fs.readdirSync(dir).filter((n) => /^\d{15}-\d+$/.test(n)).sort(); } catch { return []; }
   const out = [];
   for (const name of names) {
     const file = path.join(dir, name), rec = readJson(file);
+    // EACH TICKET AGAINST THE CLOCK AROUND ITS OWN STAT (lane bl-ci, .414 — found beside the coordinator's r406): ONE `now` taken at
+    // the call's start made a reader frozen after its folder read judge every ticket touched during its freeze «in the future» and REAP
+    // it — a live waiter lost its place, and a taker's fresh look (below) could reap the true head's ticket and keep the lock. Read
+    // BEFORE the stat the clock bounds the age, read AFTER it bounds the future: a freeze at any one point of the look misjudges no live
+    // ticket. A caller's `now` is both readings (the old judgment exactly: |now − seen| ≤ staleMs).
+    const before = now ?? Date.now();
     let seen = 0; try { seen = fs.statSync(file).mtimeMs; } catch { }
-    if (rec && pidStillRunning(rec) && Math.abs(now - seen) <= staleMs) { out.push({ name, file, rec }); continue; }   // alive AND polling (a time in the future is no sign of life either)
+    const after = now ?? Date.now();
+    if (rec && pidStillRunning(rec) && before - seen <= staleMs && seen - after <= staleMs) { out.push({ name, file, rec }); continue; }   // alive AND polling (a time in the future is no sign of life either)
     if (reap) { try { fs.unlinkSync(file); } catch { } }
   }
   return out;
@@ -3763,7 +3771,7 @@ export function lockWaitLine(lockPath, h, waitMs, place, free = false) {
  * (read-only tmp) — the caller then runs UNLOCKED and says so in the marker,
  * because a lock that cannot be taken must never be able to stop the gate.
  */
-export function acquireMachineLock(lockPath, { waitMs, sha, onWait, headPollMs = 200, pollMs = 3000, staleMs = TICKET_STALE_MS } = {}) {
+export function acquireMachineLock(lockPath, { waitMs, sha, onWait, onGiveBack, headPollMs = 200, pollMs = 3000, staleMs = TICKET_STALE_MS } = {}) {
   const deadline = Date.now() + Math.max(0, waitMs || 0);
   let ticket = takeTicket(lockPath, sha);
   const drop = () => { if (ticket) { try { fs.unlinkSync(ticket.file); } catch { } } };
@@ -3781,6 +3789,24 @@ export function acquireMachineLock(lockPath, { waitMs, sha, onWait, headPollMs =
           const fd = fs.openSync(lockPath, 'wx');
           fs.writeSync(fd, JSON.stringify({ pid: process.pid, sha, root: repo, cmd: LOCK_CMD, ticket: ticket ? ticket.name : null, startedAt: Date.now() }) + '\n');
           fs.closeSync(fd);
+          // THE FRESH LOOK AFTER THE TAKE (the coordinator's r406, 2026-11-20 — placed by lane bl-ci from test-ci-heavy-queue's order red at
+          // 65ac68d30): the head above was decided on a SNAPSHOT (machineQueue: one read of the folder, each ticket judged against the
+          // `now` of that call). A waiter frozen between that look and this take — longer than a ticket lives — holds a lock an older LIVE
+          // ticket is owed: exclusion held (`wx`), the ORDER broke. So the queue is judged AGAIN, now, BEFORE our own ticket is dropped.
+          // Our ticket counts as any other: on disk, by its time, alive and polling. One reaped while we were frozen is simply absent, so
+          // we are not the head. Not the head of the FRESH queue ⇒ the lock goes back at once (only a record that is ours is removed),
+          // said through onGiveBack, and we wait again (a ticket of ours that is gone is taken anew, at the BACK, by the loop's own rule).
+          // Who is head is ONE fact for every waiter — the oldest live ticket — so two takers never hand it back and forth: the head keeps
+          // what it takes. A waiter behind sees a LIVE holder for that moment and waits, as for any holder.
+          if (ticket) {
+            const fresh = machineQueue(lockPath, { staleMs });
+            if (!fresh.length || fresh[0].name !== ticket.name) {
+              try { const cur = readJson(lockPath); if (cur && cur.pid === process.pid) fs.unlinkSync(lockPath); } catch { }
+              if (onGiveBack) { try { onGiveBack({ ours: ticket.name, head: fresh[0] ? fresh[0].name : null, oursOnDisk: fresh.some((t) => t.name === ticket.name) }); } catch { } }
+              sleepSync(headPollMs);
+              continue;
+            }
+          }
           drop();
           return {
             ok: true,
@@ -4678,6 +4704,8 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
   const held = acquireMachineLock(lockPath, {
     waitMs, sha,
     onWait: (h, place, free) => console.log(lockWaitLine(lockPath, h, waitMs, place, free)),   // a line per new holder, its cmd uncut (the fair queue)
+    // the fresh look after a take (r406): a take on a stale look is given back at once, and SAID
+    onGiveBack: (g) => console.log(`[ci:heavy] took the machine lock on a stale look and gave it back at once — ${g.oursOnDisk ? `an older live ticket is ahead (${g.head})` : 'our ticket was reaped while this waiter was frozen (it lost its turn)'}; back in line`),
   });
   if (!held.ok && held.timedOut) {
     // NOT a verdict. Nothing ran, so nothing is claimed — the note exists so

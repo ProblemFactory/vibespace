@@ -251,9 +251,13 @@ const M = mutantCopies('ci-heavy-queue', REPO);
 const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
 { const HEAD_LINE = '      const head = !ticket || at === 0;\n';
   ok(SRC.split(HEAD_LINE).length === 2, 'the queue check is ONE line (the mutant makes every waiter the head)');
-  const r = await lateSniper(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(HEAD_LINE, '      const head = true;\n'), 'noqueue')).href);
-  ok(r.w3won, 'CONTROL: without the queue check the late 10-ms poller TAKES the freed lock — §1\'s leg is the one that reds'); }
-{ const REAP = '    if (rec && pidStillRunning(rec) && Math.abs(now - seen) <= staleMs) { out.push({ name, file, rec }); continue; }   // alive AND polling (a time in the future is no sign of life either)\n';
+  // the queue checks a taker TWICE since r406 (bl-ci): the head decision before the take, and the fresh look after it (a taker that is
+  // not the fresh head gives the lock back) — the control cuts both, or the fresh look alone would keep the order
+  const FRESH = /( {10}fs\.closeSync\(fd\);\n)[ \t]*\/\/ THE FRESH LOOK AFTER THE TAKE[\s\S]*?\n {10}if \(ticket\) \{\n {12}const fresh = machineQueue\(lockPath, \{ staleMs \}\);\n[\s\S]*?\n {10}\}\n( {10}drop\(\);\n)/;
+  ok(FRESH.test(SRC) && SRC.match(new RegExp(FRESH.source, 'g')).length === 1, 'the fresh look after the take is ONE block (the mutant cuts it with the head decision)');
+  const r = await lateSniper(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(HEAD_LINE, '      const head = true;\n').replace(FRESH, '$1$2'), 'noqueue')).href);
+  ok(r.w3won, 'CONTROL: without the queue checks (the head decision AND the fresh look after the take) the late 10-ms poller TAKES the freed lock — §1\'s leg is the one that reds'); }
+{ const REAP = '    if (rec && pidStillRunning(rec) && before - seen <= staleMs && seen - after <= staleMs) { out.push({ name, file, rec }); continue; }   // alive AND polling (a time in the future is no sign of life either)\n';
   ok(SRC.split(REAP).length === 2, 'the liveness test of a ticket is ONE line (the mutant keeps every ticket)');
   const url = pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(REAP, '    if (rec) { out.push({ name, file, rec }); continue; }\n'), 'noreap')).href;
   const d = scratch('mut-reap'), lock = path.join(d, 'lock'), log = path.join(d, 'log');
@@ -264,7 +268,7 @@ const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
   const served = await until(() => has(log, 'W', 'got'), 600);
   try { process.kill(W.pid, 'SIGKILL'); } catch { }
   ok(!served, 'CONTROL: without the reaper a dead ticket blocks the line for good — §2\'s legs are the ones that red'); }
-{ const LIVE = '    if (rec && pidStillRunning(rec) && Math.abs(now - seen) <= staleMs) { out.push({ name, file, rec }); continue; }   // alive AND polling (a time in the future is no sign of life either)\n';
+{ const LIVE = '    if (rec && pidStillRunning(rec) && before - seen <= staleMs && seen - after <= staleMs) { out.push({ name, file, rec }); continue; }   // alive AND polling (a time in the future is no sign of life either)\n';
   ok(SRC.split(LIVE).length === 2, 'the alive-AND-polling test of a ticket is ONE line (the mutant asks only «alive»)');
   const r = await frozenHead(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(LIVE, '    if (rec && pidStillRunning(rec)) { out.push({ name, file, rec }); continue; }\n'), 'nolife')).href);
   ok(!r.served, `CONTROL: without the polling test a frozen head blocks the free lock for everyone (the next waiter not served in ${BOUND} ms) — §2's leg is the one that reds`); }
