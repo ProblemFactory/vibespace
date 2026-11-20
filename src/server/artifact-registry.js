@@ -129,19 +129,22 @@ function noteOps(session, ops) {
 // B-299b (MEASURED on the test machine: a workflow's end read its 10 agents' transcripts in ONE call, 304 ms of the main loop; 30 —
 // 662 ms): NO helper transcript is read or parsed on the hub's main thread. The transcript pool's pager (src/adapters/codex.js
 // readJsonlBoundedParsedPagedAsync, called as it stands) reads and parses it in the `history` worker and hands its records back in
-// pages; here they become ops HELPER_SLICE records a loop turn. `tailOnly: false` = the pager's head+tail road: a file ≤ 34 MB is
+// pages; here they become ops, and the ops rows, HELPER_TURN_MS of work a loop turn (the history conversion's own rule). `tailOnly: false` = the pager's head+tail road: a file ≤ 34 MB is
 // read whole (today's 8 MB cap read a file under 8 MB whole too — the same records); a longer one gives its first 2 MB and its last
 // 32 MB; and that road never prints the chat window's «tail-only display» line (only the tailOnly road says it). No pool, or a read
 // that failed ⇒ NO main-thread read: that helper's rows are not derived, said once a process. A file's ops are kept by its size +
 // mtime (HELPER_OPS_MAX ops in all, oldest dropped) — a rebuild, or a background agent's end after its launch, re-reads a file that
 // changed only. The live door folds after the record's own ops; the rebuild reads every helper its records name BEFORE it derives
 // (helperPrefetch — the normalizers' helper seam), so its fold reads none.
-const HELPER_SLICE = 2000, HELPER_NOTE_SLICE = 500, HELPER_OPS_MAX = 50000;
+const HELPER_TURN_MS = 20, HELPER_NOTE_CHUNK = 16, HELPER_OPS_MAX = 50000;
 const _helperOps = new Map(); // file → {size, mtimeMs, ops: [{o, cwd}]} (oldest first)
 let _helperOpsN = 0;
 const _helperStats = { read: 0, kept: 0, unread: 0, said: false };
 const helperReadStats = () => ({ read: _helperStats.read, kept: _helperStats.kept, unread: _helperStats.unread });
 const loopTurn = () => new Promise((r) => setImmediate(r));
+/** `due()` once HELPER_TURN_MS of work ran since the last loop turn; `turn()` gives the loop one (MEASURED: past the rows' 500 cap a
+ *  helper's write costs ~1.1 ms to fold — a count-sliced 500 held the loop 0.7 s a turn). */
+function pacer() { let t0 = Date.now(); return { due: () => Date.now() - t0 >= HELPER_TURN_MS, turn: async () => { await loopTurn(); t0 = Date.now(); } }; }
 function harnessHooks(session) {
   let h = null;
   try { h = require('../harnesses').harnessOf(session.backend || 'claude'); } catch { h = null; }
@@ -168,9 +171,9 @@ async function helperFileOps(of, file) {
     return null;
   }
   _helperStats.read++;
-  const out = [];
+  const out = [], pace = pacer();
   for (let i = 0; i < recs.length; i++) {
-    if (i && i % HELPER_SLICE === 0) await loopTurn();
+    if (pace.due()) await pace.turn();
     const rec = recs[i];
     let ops = [];
     try { ops = of(rec) || []; } catch { ops = []; }
@@ -194,7 +197,7 @@ function helperTagged(session, list, via, state, at = null) {
   return out;
 }
 /** THE LIVE DOOR: the helpers a record ends, read off the loop one after another; each one's rows land when its read has (stamped
- *  with the record's own instant), HELPER_NOTE_SLICE ops a loop turn. */
+ *  with the record's own instant), HELPER_NOTE_CHUNK ops at a time, a loop turn when HELPER_TURN_MS of work ran. */
 function foldHelpers(session, record, state) {
   const files = helperFilesOf(session, record, state);
   if (!files.length) return;
@@ -202,21 +205,21 @@ function foldHelpers(session, record, state) {
   state.chain = Promise.resolve(state.chain).then(async () => {
     for (const { file, via } of files) {
       const list = await helperFileOps(h.artifactsOf, file);
-      const ops = list && list.length ? helperTagged(session, list, via, state, at) : [];
-      for (let i = 0; i < ops.length; i += HELPER_NOTE_SLICE) { if (i) await loopTurn(); noteOps(session, ops.slice(i, i + HELPER_NOTE_SLICE)); } // a helper of thousands of writes: HELPER_NOTE_SLICE rows a turn
+      const ops = list && list.length ? helperTagged(session, list, via, state, at) : [], pace = pacer();
+      for (let i = 0; i < ops.length; i += HELPER_NOTE_CHUNK) { if (pace.due()) await pace.turn(); noteOps(session, ops.slice(i, i + HELPER_NOTE_CHUNK)); }
     }
   }).catch((e) => { deps.log.warn?.(`[artifacts] a helper's rows failed: ${e.message}`); });
 }
 /** → a promise that settles when every live helper fold of the session has (tests; a reader that must see them). */
 const helperSettled = (session) => Promise.resolve(session && session._helperArtifacts && session._helperArtifacts.chain);
 /** THE REBUILD'S READ (the normalizers' helper seam, before the derivation runs): every helper the records name, read off the loop →
- *  {ops: Map file → [{o, cwd}] | null}. The walk asks the hook as the fold will (its own `runs`), a loop turn every 4096 records. */
+ *  {ops: Map file → [{o, cwd}] | null}. The walk asks the hook as the fold will (its own `runs`), paced as the reads are. */
 async function helperPrefetch(session, records) {
   const h = session && harnessHooks(session);
   if (!h || !Array.isArray(records) || (session.host && session.host !== 'local')) return null;
-  const state = { runs: new Map() }, ops = new Map();
+  const state = { runs: new Map() }, ops = new Map(), pace = pacer();
   for (let i = 0; i < records.length; i++) {
-    if (i && i % 4096 === 0) await loopTurn();
+    if (pace.due()) await pace.turn();
     for (const { file } of helperFilesOf(session, records[i], state)) if (!ops.has(file)) ops.set(file, null);
   }
   for (const file of ops.keys()) ops.set(file, await helperFileOps(h.artifactsOf, file));
