@@ -288,12 +288,22 @@ console.log('— B-3d06: the device agent\'s spawn PATH, by the platform\'s own 
   };
   const w = withSpawnPath({ Path: WIN_PATH, USERPROFILE: 'C:\\Users\\u' }, { platform: 'win32', agentDirs: WIN_DIRS, fallback: WIN_PATH });
   ok(!winBad(w).length && Object.keys(w).includes('Path'), 'win32: the PERSON\'S PATH first and whole (Git\'s usr\\bin among it, so the hello\'s sh probe finds it), the agent\'s node dir and ~\\.local\\bin AFTER it, on the key the env spells (Path)', { got: w.Path, bad: winBad(w) });
-  const rel = released({ Path: WIN_PATH }, WIN_DIRS, WIN_PATH), relFirst = String(rel.PATH).split(';')[0];
+  const REL_DIRS = [NODE, LBIN, '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];   // the release's SIX folders, as it ran on Windows
+  const rel = released({ Path: WIN_PATH }, REL_DIRS, WIN_PATH), relFirst = String(rel.PATH).split(';')[0];
   ok(winBad(rel).length > 0 && relFirst.includes(NODE) && relFirst.includes('Git\\usr\\bin'), 'RED CONTROL (the release\'s rule, run as it ran on Windows): the PATH split on its drive colons — the node dir, the local bin AND Git\'s usr\\bin glued into ONE garbled first entry, a second PATH key beside Path', { first: relFirst, bad: winBad(rel) });
   const w2 = withSpawnPath({ Path: 'C:\\Windows', PATH: WIN_PATH }, { platform: 'win32', agentDirs: WIN_DIRS });
   ok(Object.keys(w2).filter((k) => k.toUpperCase() === 'PATH').join() === 'PATH' && !winBad(w2).length, 'win32: two PATH keys that differ by case end as ONE — the later (an explicit extra) wins, never two in the child\'s env', w2);
   const held = `c:\\program files\\vibespace-agent\\node\;${WIN_PATH}`, w3 = withSpawnPath({ Path: held }, { platform: 'win32', agentDirs: WIN_DIRS });
-  ok(w3.Path === `${held};${LBIN}`, 'win32: an agent folder the PATH already holds (another case, a trailing backslash) is not added again, and the person\'s order is untouched — compared as Windows compares', w3.Path);
+  ok(w3.Path === `${held};${LBIN}`, 'win32: an agent folder the PATH already holds in another case is not added again, and the person\'s order is untouched — compared as Windows compares (the trailing backslash: the next leg)', w3.Path);
+  const heldTrail = `${WIN_PATH};c:\\users\\u\\.local\\bin\\`, w4 = withSpawnPath({ Path: heldTrail }, { platform: 'win32', agentDirs: WIN_DIRS });
+  ok(w4.Path === `${heldTrail};${NODE}`, 'win32: an agent folder the PATH holds WITH a trailing backslash (and in another case) is not added again — the backslash half of the rule', w4.Path);
+  // the ONE reader beside the writer (B-3d06's should): pathOf reads the key the writer kept
+  const { pathOf } = require(path.join(REPO, 'src/agent-env.js'));
+  ok(pathOf(w, 'win32') === w.Path && pathOf({ path: 'C:\\x' }, 'win32') === 'C:\\x' && pathOf({ Path: 'C:\\a', PATH: 'C:\\b' }, 'win32') === 'C:\\b' && pathOf({ PATH: '/u', path: '/x' }, 'linux') === '/u' && pathOf({ path: '/x' }, 'linux') === '' && pathOf({}, 'win32') === '',
+    'pathOf: on win32 the PATH key as the env spells it (the later of two, as withSpawnPath keeps); elsewhere PATH only; none ⇒ empty');
+  const SS = fs.readFileSync(path.join(REPO, 'src/agentd/stream-screen.js'), 'utf8'), SPT = fs.readFileSync(path.join(REPO, 'src/stream-plan.js'), 'utf8');
+  ok(SS.includes('const PATH = [pathOf(lookupEnv, platform), pathOf(env, platform)].filter(Boolean).join(path.delimiter);') && !/env\.PATH \|\| env\.Path/.test(SS) && !/env\.PATH \|\| env\.Path/.test(SPT),   // stale-pins: kept — a deliberate absence check (no reader of two fixed spellings)
+    'WIRING: stream-screen reads the spawn env\'s PATH through pathOf; no reader of two fixed spellings is left in the stream modules');
   ok(withSpawnPath({}, { platform: 'win32', agentDirs: WIN_DIRS, fallback: 'C:\\Windows' }).PATH === `C:\\Windows;${NODE};${LBIN}`, 'win32: an env with no PATH takes the fallback first, the agent\'s folders after, by the same separator');
   // POSIX: byte for byte the release's rule with the same agent folders, over shapes a machine has (an extra, a dup, empty entries,
   // none — the fallback), and the whole env object

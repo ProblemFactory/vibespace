@@ -43,6 +43,7 @@
  */
 const path = require('path');
 const SP = require('../stream-plan.js');
+const { pathOf } = require('../agent-env.js'); // B-3d06's should: the ONE reader of an env's PATH, beside its writer (withSpawnPath)
 const FF = require('../ffmpeg-install.js'); // lane machine-needs-at-pairing pick 2: the fetched copy's stamp + the pinned fingerprints (PURE)
 const AV1 = require('../stream-av1.js'); // lane stream-hdr-passthrough: the HDR road's IVF → temporal units
 
@@ -153,8 +154,8 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
   }
   async function findFfmpeg() {
     // PATH = this process's own and then the spawn env's (its ~/.local/bin) — the spawn env keeps the key as the env spells it
-    // (`Path` on Windows: B-3d06), both joined by the platform's own separator; the folders from this process's environment
-    const PATH = [lookupEnv.PATH, env.PATH || env.Path].filter(Boolean).join(path.delimiter);
+    // (`Path` on Windows: B-3d06), read by the ONE getter beside its writer; both joined by the platform's own separator
+    const PATH = [pathOf(lookupEnv, platform), pathOf(env, platform)].filter(Boolean).join(path.delimiter);
     const candidates = SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }, delim: path.delimiter, sep: path.sep });
     // lane machine-needs-at-pairing: the FIRST that PASSES (SP.firstPassingFfmpeg), in the same order — an old ffmpeg on PATH no
     // longer shadows a good one in %LOCALAPPDATA%\vibespace\ffmpeg\bin; the microphone and the sound ride this same pick

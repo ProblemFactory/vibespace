@@ -251,11 +251,12 @@ function pickEncoder(encoders, ladder = ENCODER_LADDER) {
 // ── FFMPEG ON THE MACHINE ────────────────────────────────────────────────────────────────────────────────────────────
 const FFMPEG_MIN_MAJOR = 7;
 /** Where the agent looks, in order: PATH, then %LOCALAPPDATA%\vibespace\ffmpeg\bin, then the P0 probe's folder (`delim` /
- *  `sep` = the running system's, from the caller's path module). */
+ *  `sep` = the running system's, from the caller's path module). `env.PATH` is the caller's own joined PATH (every caller builds
+ *  it; an env's PATH key is read by src/agent-env.js pathOf, beside its writer — B-3d06's should). */
 function ffmpegCandidates({ platform = 'win32', env = {}, delim = platform === 'win32' ? ';' : ':', sep = platform === 'win32' ? '\\' : '/' } = {}) {
   const win = platform === 'win32', exe = win ? 'ffmpeg.exe' : 'ffmpeg';
   const out = [];
-  for (const d of String(env.PATH || env.Path || '').split(delim)) if (d.trim()) out.push({ where: 'PATH', path: d.trim().replace(/[\\/]+$/, '') + sep + exe });
+  for (const d of String(env.PATH || '').split(delim)) if (d.trim()) out.push({ where: 'PATH', path: d.trim().replace(/[\\/]+$/, '') + sep + exe });
   if (win && env.LOCALAPPDATA) out.push({ where: '%LOCALAPPDATA%\\vibespace\\ffmpeg\\bin', path: [env.LOCALAPPDATA, 'vibespace', 'ffmpeg', 'bin', exe].join(sep) });
   if (win && env.USERPROFILE) out.push({ where: 'the probe folder', path: [env.USERPROFILE, 'vs-probe', 'ffmpeg', 'ffmpeg-master-latest-win64-gpl', 'bin', exe].join(sep) });
   return out;

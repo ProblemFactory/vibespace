@@ -110,6 +110,12 @@ function agentEnv(base, { keep = AGENT_ENV_KEEP, drop = [] } = {}) {
  *  spawn is merged over: the agent rule plus the daemon tier's own names. */
 function daemonEnv(base, { drop = [] } = {}) { return agentEnv(base, { keep: DAEMON_ENV_KEEP, drop }); }
 
+/** the env's PATH keys by the platform's own rule (win32: every spelling, in the env's order; elsewhere `PATH` only) — ONE rule for
+ *  the writer below and the reader (pathOf) */
+const pathKeysOf = (env, win) => Object.keys(env || {}).filter((k) => (win ? k.toUpperCase() === 'PATH' : k === 'PATH'));
+/** B-3d06's should (round wmhi1i2gr): THE one reader of an env's PATH beside its writer — on win32 the key as the env spells it (the
+ *  later of two spellings, as withSpawnPath keeps), elsewhere `PATH`. PURE. */
+function pathOf(env, platform) { const keys = pathKeysOf(env, platform === 'win32'); return keys.length ? String(env[keys[keys.length - 1]] || '') : ''; }
 /** B-3d06: the PATH a device child is born with — the agent's own folders (`agentDirs`: its node dir, ~/.local/bin, and on a POSIX
  *  machine its usual bin folders; src/agentd/agentd.js spawnEnv builds them with its own path module) joined to the env's PATH,
  *  split and joined by THE PLATFORM'S OWN separator (';' on win32, ':' elsewhere: a Windows PATH split on its drive colons became
@@ -123,7 +129,7 @@ function withSpawnPath(env, { platform, agentDirs = [], fallback = '' } = {}) {
   const win = platform === 'win32', sep = win ? ';' : ':';
   const same = win ? (x) => String(x).replace(/[\\/]+$/, '').toLowerCase() : (x) => x;
   const out = { ...env };
-  const keys = Object.keys(out).filter((k) => (win ? k.toUpperCase() === 'PATH' : k === 'PATH'));
+  const keys = pathKeysOf(out, win);
   const key = keys.length ? keys[keys.length - 1] : 'PATH';
   const cur = String(out[key] || fallback || '');
   for (const k of keys) if (k !== key) delete out[k];
@@ -176,4 +182,4 @@ function serviceEnv(base, { keep = [], add = {}, egress = false } = {}) {
   return out;
 }
 
-module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, SERVICE_ENV_KEEP, SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP, SECRET_SHAPE, agentEnv, daemonEnv, serviceEnv, withSpawnPath };
+module.exports = { AGENT_ENV_KEEP, AGENT_ENV_DROP, DAEMON_ENV_KEEP, SERVICE_ENV_KEEP, SSH_ENV_KEEP, EGRESS_ENV, RCLONE_ENV_KEEP, SECRET_SHAPE, agentEnv, daemonEnv, serviceEnv, withSpawnPath, pathOf };
