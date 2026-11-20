@@ -591,6 +591,8 @@ const I_RECV = {
   'src/ws-create.js|said': ['words', 'a PURE verdict\'s sentence (src/billing-pick.js helperNotice — unit «billing pick alive»: the conversation\'s name, the picked account\'s name, the machine — the helper-set-aside notice)'],   'src/ws-create.js|pin': ['browser profile', 'a pinned profile\'s label'], 'src/ws-create.js|session': ['session', 'a session\'s name'], 'src/ws-handler.js|session': ['session', 'a session\'s name'],
   // ── the .197 integration: the other lanes' receivers, each named by what it is ──
   'src/agentd/agentd.js|f': ['dial', 'the daemon\'s own dial attempt facts (a code + the network\'s detail) — lane-pairing, never a record'],
+  // B-4d71 (lane bl-machines-b): the device agent's own retire, read into its journal (src/agentd/agentd.js retireOwnStart)
+  'src/agentd/agentd.js|x': ['retire step', 'a step of the device agent\'s own retire in its journal line — `what` is the step\'s fixed word (src/agentd/self-retire.js retireSteps: «the dial config», «the systemd unit file»… — a string literal at every step, never a path, a unit name or a machine\'s name: those ride `file` / `args`); the same line\'s `why` (no census field) is an error code, a fixed phrase, the supervisor command\'s name, or an Error\'s own message when it has no code; never a record\'s words'],
   'src/server/dial-pairing.js|facts': ['dial', 'where a dial came from (an address) — lane-pairing'],
   'src/server/exit-routes.js|row': ['session', 'an exit-access row\'s conversation name — lane-pairing'],
   'src/server/mounts-plugins-wiring.js|h': ['host', 'a machine name (the dial pairing\'s offline sentence)'],
