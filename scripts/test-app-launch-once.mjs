@@ -308,15 +308,24 @@ await leg('⑨', async () => {
   const LAND_A = "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');\n";
   ok(DSRC.split(LAND_A).length === 2, 'control setup: the launch\'s wait for its record\'s landing is found once in desktop-serve.js');
   const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
-  const run = async (mod, tag) => {
+  const run = async (mod, tag, { stopDuringWait = false } = {}) => {
     const named = [];
-    const W = { dirty: (f, o) => { named.push(o && o.name); }, durable: async () => false, flushSync: () => ({ written: [], left: [] }), pending: () => true };
+    let release = null;
+    const W = { dirty: (f, o) => { named.push(o && o.name); }, durable: stopDuringWait ? () => new Promise((r) => { release = r; }) : async () => false, flushSync: () => ({ written: [], left: [] }), pending: () => true };
     const ds = mod.install({ dataDir: path.join(root, `ds-${tag}`), env, display: fakeDisplay, backends: BACKENDS, registryRows: [ROWS[0]], log, now, tickMs: 3600e3, apps: noApps, writer: W });
     const before = kids.length;
-    let err = null, id = null;
-    try { id = (await ds.launch({ appId: 'single' }, {})).id; } catch (e) { err = e && e.code; }
-    await sleep(300);
-    const out = { err, spawned: kids.length - before, records: Object.keys(ds._store().apps).length, named: [...new Set(named)] };
+    let err = null, id = null, state = null;
+    const p = ds.launch({ appId: 'single' }, {}).then((v) => { id = v && v.id; state = v && v.state; }, (e) => { err = e && e.code; });
+    if (stopDuringWait) {   // a Stop pressed while the record lands: the record is listed, its launch waits on the writer
+      await until(() => release && Object.keys(ds._store().apps).length === 1, 5000);
+      const sid = Object.keys(ds._store().apps)[0];
+      try { await ds.stop(sid, { why: 'user' }); } catch { /* said below */ }
+      release(true);
+    }
+    await p;
+    // a spawn comes from the bring-up after the launch's answer: waited for (bounded), never a bare sleep
+    await until(() => kids.length > before, 1500);
+    const out = { err, state, spawned: kids.length - before, records: Object.keys(ds._store().apps).length, named: [...new Set(named)] };
     if (id) { try { await ds.stop(id, { why: 'user', force: true }); } catch { /* the finally kills the kids */ } }
     ds.shutdown();
     return out;
@@ -326,6 +335,66 @@ await leg('⑨', async () => {
   const MX = mutantCopies('alo-land', repo).load('src/desktop-serve.js', anchored(DSRC, LAND_A, '    /* MUTANT: the parts spawn before the record lands */\n', 'alo-no-land'), 'alo-no-land');
   const x = await run(MX, 'land-cut');
   ok(!x.err && x.spawned >= 1, 'CONTROL (the wait cut, in a copy): the part SPAWNS for a record the disk does not hold — an orphan at a crash (red)', x);
+  // 主开发's read wf_3c7fc92a-819: a Stop pressed WHILE the record lands — the launch never starts the parts of an ended record
+  const ENDED_A = "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');\n    if (!M.isLiveState(rec.state) || stopping.has(id)) return view(rec);";
+  ok(DSRC.split(ENDED_A).length === 2, 'control setup: the launch tests its record\'s state after the wait (found once)');
+  const sw = await run(DS, 'stop-during-wait', { stopDuringWait: true });
+  ok(!sw.err && sw.spawned === 0 && sw.state !== 'starting', '⑨ a Stop pressed while the launch waits for its record to land: NOTHING is spawned for the ended record', sw);
+  const MS = mutantCopies('alo-ended', repo).load('src/desktop-serve.js', anchored(DSRC, ENDED_A, "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');\n    /* MUTANT: the state is not tested after the wait */", 'alo-no-ended-check'), 'alo-no-ended-check');
+  const swx = await run(MS, 'stop-during-wait-red', { stopDuringWait: true });
+  ok(swx.spawned >= 1, 'CONTROL (the state check cut, in a copy): the parts of an ENDED record are spawned (then reaped) — red', swx);
+  // the two other launch roads hold the same line BETWEEN their record's commit and their bring-up (a RemoteApp, a browser's display)
+  const roadPinned = (src, fn, label) => {
+    const at = src.indexOf(`  async function ${fn}(`); if (at < 0) return false;
+    const body = src.slice(at, src.indexOf('\n  async function ', at + 10) > 0 ? src.indexOf('\n  async function ', at + 10) : undefined);
+    const line = `    commit();\n    if (!(await landedBeforeSpawn())) refuseUnlanded(id, '${label}');\n    if (!M.isLiveState(rec.state) || stopping.has(id)) return view(rec);`;
+    const i = body.indexOf(line), b = body.indexOf('bringUp(rec, f)');
+    return i > 0 && b > i && body.split(line).length === 2;
+  };
+  ok(roadPinned(DSRC, 'launchRemoteApp', 'opening a RemoteApp') && roadPinned(DSRC, 'launchDisplay', "starting a browser\\'s display"), '⑨ the RemoteApp and the browser display roads each land their record, and test its state, BEFORE their bring-up (pinned)');
+  const RA_A = "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening a RemoteApp');\n", BD_A = "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'starting a browser\\'s display');\n";
+  ok(!roadPinned(anchored(DSRC, RA_A, '', 'alo-ra-cut'), 'launchRemoteApp', 'opening a RemoteApp') && !roadPinned(anchored(DSRC, BD_A, '', 'alo-bd-cut'), 'launchDisplay', "starting a browser\\'s display"), 'CONTROL (each road\'s line cut, in a copy of the text): its pin goes red');
+});
+await leg('⑩', async () => {
+  console.log('⑩ lane lg-store-writes (主开发 2026-11-20 04:33Z) — the adoption judges only what the PREVIOUS life left: a launch made after a lift is never a leftover');
+  // the scene: the record file held at the start, then read again — the hold lifts and the adoption starts, parked at its first await
+  // (the fresh facts); a person presses Open in that window. Its record is THIS life's: it is neither torn down nor marked failed, it
+  // starts. RED (anchored, in a copy): the adoption's own list cut — it judges the new record a dead hub's leftover.
+  const DSRC = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  const PRIOR_A = "      if (!prior.has(rec.id)) continue;   // made after the adoption took its list: this life's, judged by its own bring-up\n";
+  ok(DSRC.split(PRIOR_A).length === 2, 'control setup: the adoption skips a record it did not list (found once)');
+  const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
+  // an app that simply STAYS (the singleton of ①–③ hands over to a copy still running and exits 0 — its own exit, not this leg's verdict)
+  const STAY_ROW = { id: 'stay', label: 'Stay App', exec: script('stay-app', 'exec sleep 600'), args: [], category: 'app' };
+  const run = async (mod, tag) => {
+    const dataDir = path.join(root, `ds-${tag}`); fs.mkdirSync(dataDir, { recursive: true });
+    const F = path.join(dataDir, 'desktop-apps.json'); fs.writeFileSync(F, JSON.stringify({ apps: {} }));
+    let openGate = null; const parked = new Promise((r) => { openGate = r; });
+    let adoptionAsked = false;
+    const disp = { ...fakeDisplay, hostFacts: async (o) => { if (o && o.fresh) { adoptionAsked = true; await parked; } return fakeDisplay.hostFacts(o); } };   // only the adoption asks fresh
+    const W = { dirty() { }, durable: async () => true, flushSync: () => ({ written: [], left: [] }), pending: () => false };
+    const rf = fs.readFileSync;
+    fs.readFileSync = function (f, ...a) { if (String(f) === F) throw Object.assign(new Error('EIO: a stand-in i/o error'), { code: 'EIO' }); return rf.call(this, f, ...a); };
+    let ds; try { ds = mod.install({ dataDir, env, display: disp, backends: BACKENDS, registryRows: [STAY_ROW], log, now, tickMs: 3600e3, apps: noApps, writer: W, unreadRetry: { firstMs: 15, maxMs: 30 } }); } finally { fs.readFileSync = rf; }
+    const held0 = ds.held();
+    await until(() => !ds.held() && adoptionAsked, 5000);   // lifted; the adoption parked at its first await
+    const before = kids.length;
+    let v = null, err = null;
+    try { v = await ds.launch({ appId: 'stay' }, {}); } catch (e) { err = e && e.code; }
+    await until(() => kids.length > before, 3000);
+    openGate();   // the adoption goes on and looks at its list
+    await sleep(400);
+    const rec = (v && ds._store().apps[v.id]) || {};
+    const out = { held0, lifted: !ds.held(), err, state: rec.state || null, spawned: kids.length - before, lastError: rec.lastError || null };
+    if (v) { try { await ds.stop(v.id, { why: 'user', force: true }); } catch { /* the finally kills the kids */ } }
+    ds.shutdown();
+    return out;
+  };
+  const r = await run(DS, 'lift-launch');
+  ok(r.held0 && r.lifted && !r.err && r.spawned >= 1 && (r.state === 'launching' || r.state === 'ready'), '⑩ a launch made between the lift and the adoption\'s first look is THIS life\'s: neither torn down nor marked failed — it starts', r);
+  const MX = mutantCopies('alo-prior', repo).load('src/desktop-serve.js', anchored(DSRC, PRIOR_A, '      /* MUTANT: the adoption judges every live record */\n', 'alo-no-prior'), 'alo-no-prior');
+  const x = await run(MX, 'lift-launch-red');
+  ok(x.lifted && (x.state === 'failed' || x.state === 'exited'), 'CONTROL (the adoption\'s own list cut, in a copy): the person\'s new launch is judged a dead hub\'s leftover and ended (red)', x);
 });
 await leg('⑧', async () => {
   console.log('⑧ lane launch-picture-size — a launch with a PICTURE SIZE: born pinned, a keeper-fixed rung started AT the pin, an unpinnable rung refused by name');

@@ -1635,15 +1635,17 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
       const DSRC = readSrc('src/desktop-serve.js'), DD = require(path.join(REPO, 'src/desktop-display.js'));
       const quietDs = { log() { }, warn() { }, error() { } };
       const noApps = { catalogRows: () => [], refreshCatalog: async () => { }, witnessRows: () => [] };
-      const SEED = JSON.stringify({ apps: { 'da-1': { id: 'da-1', state: 'stopped', appId: 'x' } } });
+      const SEED = JSON.stringify({ apps: { 'da-1': { id: 'da-1', state: 'stopped', appId: 'x' }, 'da-2': { id: 'da-2', state: 'launching', appId: 'x', label: 'x', pids: {}, starts: {}, lastInputAt: 1, startedAt: 1 } } });   // da-2: a bring-up the last process died in
       const SAVE_G = "    if (held) { if (!heldSaveSaid) { heldSaveSaid = true; log.warn?.(`[desktop] a ${STORE_FILE} write was refused: ${heldWords()}`); } return false; }\n";
       const PROD_G = "const storeBytes = () => { if (held) throw";
       const HOLD_G = "    holdStore(a);   // unreadable, or bytes that are not the store: HELD (never started empty over it)\n";
       ok([SAVE_G, PROD_G, HOLD_G].every((x) => DSRC.split(x).length === 2), 'control setup: the record file\'s save guard, producer guard and hold are found once each in desktop-serve.js');
-      const install = (Mod, d, W) => Mod.install({ dataDir: d, env: () => ({ HOME: d, PATH: process.env.PATH }), display: { ...DD }, registryRows: [], log: quietDs, now: Date.now, tickMs: 3600e3, apps: noApps, writer: W, unreadRetry: { firstMs: 15, maxMs: 30 } });
+      const display0 = { ...DD, hostFacts: async () => ({ hostId: null, bins: {}, xpra: null, browsers: {}, office: { exec: null, path: null, program: null, confinement: null, modules: null }, at: Date.now() }) };   // no host probe
+      const install = (Mod, d, W) => Mod.install({ dataDir: d, env: () => ({ HOME: d, PATH: process.env.PATH }), display: display0, registryRows: [], log: quietDs, now: Date.now, tickMs: 3600e3, apps: noApps, writer: W, unreadRetry: { firstMs: 15, maxMs: 30 } });
       const scene = async (Mod, name, { lift = true } = {}) => {
         const d = scratchDir('ds-held-' + name); roots.push(d); const F = path.join(d, 'desktop-apps.json'); fs.writeFileSync(F, SEED);
         const { st, W } = recordingWriter();
+        const installedAt = Date.now();   // the record's clock in the file is 1: any clock at or after the install is the lift's
         const ds = failingRead(F, 'EIO', () => install(Mod, d, W));
         const out = { held0: ds.held() };
         if (out.held0) { try { await ds.launch({ appId: 'x' }); out.launch = 'ran'; } catch (e) { out.launch = e && e.code; } } else out.launch = 'not asked (not held: a launch would probe the machine)';
@@ -1655,18 +1657,46 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
         if (lift) {
           for (let i = 0; i < 200 && ds.held(); i++) await new Promise((r) => setTimeout(r, 10));
           out.lifted = !ds.held();
-          out.records = out.lifted ? ds.reshapeStore((s0) => Object.keys(s0.apps).join(',')) : null;
+          // THE LIFT GIVES WHAT THE BOOT GIVES (主开发's read wf_3c7fc92a-819): the record left in `starting` gets its verdict, and the
+          // live records' idle clocks start again at the lift (nobody could reach a window while held)
+          for (let i = 0; i < 300 && ds._store().apps['da-2'] && ds._store().apps['da-2'].state === 'launching'; i++) await new Promise((r) => setTimeout(r, 10));
+          const d2 = ds._store().apps['da-2'] || {};
+          out.adopted = d2.state; out.clockAtLift = Number(d2.lastInputAt) >= installedAt;
+          out.records = out.lifted ? ds.reshapeStore((s0) => Object.keys(s0.apps).sort().join(',')) : null;
           const last = st.dirty[st.dirty.length - 1];
           out.queued = last ? { name: last.o.name, rank: last.o.rank, urgent: last.o.urgent, bytes: JSON.parse(last.o.produce()) } : null;
           out.fileAtCall = fs.readFileSync(F, 'utf8') === SEED;   // the writer's, not the call's: nothing written here
         }
+        const nf = st.flushed.length;   // the reshape above flushed already: only what the STOP flushes counts
         ds.shutdown();
-        out.flushed = st.flushed.some((fl) => Array.isArray(fl) && fl.includes(F));
+        out.flushed = st.flushed.slice(nf).some((fl) => Array.isArray(fl) && fl.includes(F));
         return out;
       };
       const r = await scene(require(path.join(REPO, 'src/desktop-serve.js')), 'real');
       ok(r.held0 && r.launch === 'desktop_apps_unread' && r.reshape === 'desktop_apps_unread' && r.queuedWhileHeld === 0 && r.bytesKept, '⑩a desktop-apps.json that could not be read (EIO): HELD — a launch and a migration refused BY NAME, a commit writes nothing, the bytes untouched (the release started EMPTY and wrote that over the file)', r);
-      ok(r.lifted && r.records === 'da-1' && r.queued && r.queued.name === 'desktop-apps.write' && r.queued.rank === 0 && r.queued.urgent === true && r.queued.bytes.apps && r.queued.bytes.apps['da-1'] && r.fileAtCall && r.flushed, '⑩a …read again off the loop: the hold lifts, its records are back; a commit hands the bytes to the STORE WRITER (rank 0, urgent — nothing written at the call), and the stop lands what is owed', r);
+      ok(r.lifted && r.adopted !== 'launching' && r.clockAtLift && r.records === 'da-1,da-2' && r.queued && r.queued.name === 'desktop-apps.write' && r.queued.rank === 0 && r.queued.urgent === true && r.queued.bytes.apps && r.queued.bytes.apps['da-1'] && r.fileAtCall && r.flushed, '⑩a …read again off the loop: the hold lifts, its records are back — the record left in «launching» gets the boot\'s verdict, the idle clocks start again at the lift; a commit hands the bytes to the STORE WRITER (rank 0, urgent — nothing written at the call), and the STOP lands what is owed', r);
+      const ADOPT_A = "    adoptAll().catch((e) => log.warn?.(`[desktop] the adoption after the lift failed:";
+      const STOPF_A = "    if (writer && typeof writer.flushSync === 'function') { try { const r = writer.flushSync([storeFile]);";
+      ok([ADOPT_A, STOPF_A].every((x) => DSRC.split(x).length === 2), 'control setup: the lift\'s adoption and the stop\'s flush are found once each');
+      const xa = await scene(mutantCopies('swc-ds-noadopt', REPO).load('src/desktop-serve.js', anchored(DSRC, ADOPT_A, "    Promise.resolve().catch((e) => log.warn?.(`[desktop] the adoption after the lift failed:", 'ds-no-lift-adoption'), 'ds-no-lift-adoption'), 'no-lift-adoption');
+      ok(xa.lifted && xa.adopted === 'launching', 'CONTROL (the lift\'s adoption cut, in a copy): the record left in «launching» is never judged — no verdict, no teardown (red)', xa);
+      const xf = await scene(mutantCopies('swc-ds-nostopflush', REPO).load('src/desktop-serve.js', anchored(DSRC, STOPF_A, "    if (false) { try { const r = writer.flushSync([storeFile]);", 'ds-no-stop-flush'), 'ds-no-stop-flush'), 'no-stop-flush');
+      ok(xf.lifted && !xf.flushed, 'CONTROL (the stop\'s flush cut, in a copy): the stop lands nothing (red)', xf);
+      // a boot migration's reshape that does NOT land: the migration throws by name (EVSNOTONDISK) and runs again at the next boot
+      const RESH_A = "      if (miss) throw Object.assign(new Error(`the desktop app records' reshape is not on disk yet (${miss.why}) — tried again at the next boot`), { code: 'EVSNOTONDISK' });";
+      ok(DSRC.split(RESH_A).length === 2, 'control setup: the reshape\'s not-on-disk throw is found once');
+      const reshScene = async (Mod, name) => {
+        const d = scratchDir('ds-resh-' + name); roots.push(d); const F = path.join(d, 'desktop-apps.json'); fs.writeFileSync(F, SEED);
+        const W = { dirty() { }, pending: () => true, flushSync: (files) => ({ written: [], left: (files || []).map((f) => ({ file: f, why: 'held by the storage (a stand-in)' })) }) };
+        const ds = install(Mod, d, W);
+        let code = null; try { ds.reshapeStore(() => 1); } catch (e) { code = e && e.code; }
+        ds.shutdown();
+        return { code };
+      };
+      const rs = await reshScene(require(path.join(REPO, 'src/desktop-serve.js')), 'real');
+      ok(rs.code === 'EVSNOTONDISK', '⑩a a boot migration\'s reshape that does not land THROWS by name (EVSNOTONDISK): the runner never records a reshape the file never got', rs);
+      const rsx = await reshScene(mutantCopies('swc-ds-resh', REPO).load('src/desktop-serve.js', anchored(DSRC, RESH_A, '      /* MUTANT: an unlanded reshape returns */', 'ds-resh-no-throw'), 'ds-resh-no-throw'), 'no-throw');
+      ok(rsx.code === null, 'CONTROL (the throw cut, in a copy): the unlanded reshape returns — the migration would be recorded (red)', rsx);
       // the producer ALONE keeps the held file (the save's own guard cut, in a copy): the queued write refuses at its write (EHELD)
       const p1 = await scene(mutantCopies('swc-ds-save-cut', REPO).load('src/desktop-serve.js', anchored(DSRC, SAVE_G, '    /* MUTANT: no save guard */\n', 'ds-save-cut'), 'ds-save-cut'), 'save-cut', { lift: false });
       ok(p1.queuedWhileHeld > 0 && p1.heldBytes.every((b) => b === 'EHELD'), '⑩a the record file\'s PRODUCER refuses while held too: with the save\'s guard cut, a queued write makes no bytes (EHELD) — never the empty store', p1);
@@ -1732,9 +1762,23 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
         return { syncOpens, usd: month ? month.usd : null };
       };
       const r = await scene(require(path.join(REPO, 'src/server/decision-engine.js')), 'real');
-      ok(r.syncOpens === 0 && r.usd === 0.25, '⑩c the month so far: a status opens NO byte of the journal on the loop — the figure (0.25) arrives from a read OFF the loop', r);
+      ok(r.syncOpens === 0 && r.usd === 0.25, '⑩c the month so far: a status opens NO byte of the journal on the loop — the figure (0.25) is the off-loop reads\' (the start\'s own, then the refresh after the 60 s memo)', r);
       const x = await scene(mutantCopies('swc-de-tail', REPO).load('src/server/decision-engine.js', anchored(DESRC, OFF_A, "      monthP = Promise.resolve(journalTail())   // MUTANT: the release — the tail read at the call\n", 'de-sync-tail'), 'de-sync-tail'), 'sync-tail');
       ok(x.syncOpens >= 1, 'CONTROL (the release\'s read, in a copy): a status reads the journal\'s 2 MB tail ON the loop (red)', x);
+      // a journal that could not be READ is NO FIGURE (null), never a $0 month (主开发's read wf_3c7fc92a-819): the journal's path a folder
+      const ERR_A = "    } catch (e) { if (e && e.code === 'ENOENT') return []; return null; } finally { if (fh) await fh.close().catch(() => { }); }";
+      ok(DESRC.split(ERR_A).length === 2, 'control setup: the off-loop read\'s error answer is found once');
+      const errScene = async (Mod, name) => {
+        const d = scratchDir('de-err-' + name); roots.push(d); fs.mkdirSync(path.join(d, 'decision-journal.jsonl'));
+        const { W } = recordingWriter();
+        const eng = Mod.create({ dataDir: d, log: { log() { }, warn() { } }, writer: W });
+        await new Promise((r) => setTimeout(r, 200));
+        return { month: eng.status().month };
+      };
+      const er = await errScene(require(path.join(REPO, 'src/server/decision-engine.js')), 'real');
+      ok(er.month === null, '⑩c an UNREADABLE journal (EISDIR) answers NO figure (null), never a $0 month', er);
+      const erx = await errScene(mutantCopies('swc-de-err', REPO).load('src/server/decision-engine.js', anchored(DESRC, ERR_A, "    } catch { return []; } finally { if (fh) await fh.close().catch(() => { }); }   /* MUTANT: the release — any error is an empty journal */", 'de-err-empty'), 'de-err-empty'), 'err-empty');
+      ok(erx.month && erx.month.usd === 0, 'CONTROL (the release\'s answer, in a copy): the unreadable journal shows a $0 month (red)', erx);
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }

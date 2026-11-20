@@ -407,7 +407,13 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (heldT) { clearTimeout(heldT); heldT = null; }
     store = { apps: a.value.apps };
     log.warn?.(`[desktop] ${STORE_FILE} read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${Object.keys(store.apps).length} app record(s) — the hold is lifted`);
-    try { H.onCommit?.(); } catch { /* the view's own words */ }
+    // THE LIFT GIVES THE LIFTED RECORDS WHAT THE BOOT GIVES THEM (主开发's read wf_3c7fc92a-819): the boot's adoption ran over an EMPTY
+    // store — now each live record gets its verdict (its parts proven by pid AND starttime, a record left in `launching` judged and
+    // torn down), and the ended records' leftovers are reaped. AN IDLE CLOCK NEVER COUNTS TIME THE PERSON COULD NOT REACH THE WINDOW:
+    // while held nobody could open an app's window, so each live record's clock starts again at the lift
+    const t = now();
+    for (const rec of Object.values(store.apps)) if (rec && M.isLiveState(rec.state)) rec.lastInputAt = t;
+    adoptAll().catch((e) => log.warn?.(`[desktop] the adoption after the lift failed: ${(e && e.message) || e}`)).finally(() => { try { H.onCommit?.(); } catch { /* the view's own words */ } });
   }
   function load() {
     let read; try { read = { text: fs.readFileSync(storeFile, 'utf8') }; } catch (error) { read = { error }; }
@@ -849,6 +855,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     pruneHistory();
     commit();
     if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');
+    if (!M.isLiveState(rec.state) || stopping.has(id)) return view(rec);   // a Stop pressed while the record landed: nothing is started for an ended record
     const start = () => {
       const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
       inflight.set(id, p);
@@ -919,6 +926,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     pruneHistory();
     commit();
     if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening a RemoteApp');
+    if (!M.isLiveState(rec.state) || stopping.has(id)) return view(rec);   // a Stop pressed while the record landed: nothing is started for an ended record
     log.log?.(`[desktop] RemoteApp ${id}: ${rq.name} on ${rq.hostId} through 127.0.0.1:${fwd.port} (FreeRDP ${build.version}${build.h264 ? ', H.264' : ''})`);
     const start = () => {
       const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
@@ -1028,6 +1036,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     pruneHistory();
     commit();
     if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'starting a browser\'s display');
+    if (!M.isLiveState(rec.state) || stopping.has(id)) return view(rec);   // a Stop pressed while the record landed: nothing is started for an ended record
     const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
     inflight.set(id, p);
     p.finally(() => { if (inflight.get(id) === p) inflight.delete(id); }).catch(() => { });
@@ -1592,7 +1601,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   }
   async function stop(id, { why = 'user', force = false, held = false } = {}) {
     const rec = store.apps[id];
-    if (!rec) throw namedError('not-found', `no desktop app ${id}`);
+    if (!rec) { refuseIfHeld('stopping an app'); throw namedError('not-found', `no desktop app ${id}`); }   // the record file HELD: its records are not here — said by name
     if (!M.isLiveState(rec.state)) { if (held) stopping.delete(id); return view(rec); }
     if (stopping.has(id) && !held) return view(rec);
     stopping.add(id);
@@ -1913,11 +1922,16 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     return reaped;
   }
   async function adoptAll() {
+    // THE ADOPTION JUDGES ONLY WHAT THE PREVIOUS LIFE LEFT (主开发 2026-11-20 04:33Z): its list is taken HERE, before its first await —
+    // a launch made in THIS life while the adoption waits on the facts (at the boot: the routes and the keepers' timers are live before
+    // this loop runs; at a lift: the hold is already down) is never judged a leftover of a dead hub, torn down and marked failed
+    const prior = new Set(Object.keys(store.apps));
     const f = await facts({ fresh: true });
     void f;
     const shared = await singletonLive(); // rule 6: asked, not remembered
     for (const rec of Object.values(store.apps)) {
       if (!M.isLiveState(rec.state)) continue;
+      if (!prior.has(rec.id)) continue;   // made after the adoption took its list: this life's, judged by its own bring-up
       const own = M.capsOf(rec, backends).ownsDisplay;
       // rule 8: no child handles exist at boot, so every part is judged by
       // pid AND starttime — a record with none is not proven and is reaped

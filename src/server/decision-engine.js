@@ -402,12 +402,12 @@ function create({ dataDir, integrations = null, fetchImpl = (...a) => globalThis
       const size = (await fh.stat()).size, n = Math.min(size, 2 * 1024 * 1024), buf = Buffer.alloc(n);
       await fh.read(buf, 0, n, size - n);
       return buf.toString('utf8').split('\n').slice(n < size ? 1 : 0).map((l) => { try { return JSON.parse(l); } catch { return null; } });
-    } catch { return []; } finally { if (fh) await fh.close().catch(() => { }); }
+    } catch (e) { if (e && e.code === 'ENOENT') return []; return null; } finally { if (fh) await fh.close().catch(() => { }); }   // a journal never written is a $0 month; one that could not be READ is NO FIGURE (null), never $0
   }
   function monthSoFar() {
     if (now() - monthMemo.at >= 60000 && !monthP) {
       monthP = journalTailOffLoop()
-        .then((rows) => { monthMemo = { at: now(), v: M.monthSpend(rows, today().day.slice(0, 7), tzOffset) }; })
+        .then((rows) => { monthMemo = { at: now(), v: rows === null ? null : M.monthSpend(rows, today().day.slice(0, 7), tzOffset) }; })
         .catch((e) => { log?.warn?.(`[decision] the month's journal tail could not be read: ${(e && e.message) || e}`); })
         .finally(() => { monthP = null; });
     }
