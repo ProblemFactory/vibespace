@@ -59,7 +59,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -1023,7 +1023,7 @@ console.log('㉝ B-be21 (vault-use-grants r13 — the r12 verdict\'s two evictio
 {
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const MC = mutantCopies('vsr-be21', REPO), DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const mutant = (from, to, tag) => (DSRC.split(from).length === 2 ? MC.load('src/server/vault-run-door.js', DSRC.replace(from, to), tag) : null);
+  const mutant = (from, to, tag) => MC.load('src/server/vault-run-door.js', anchored(DSRC, from, to, `test-vault-standing-request ${tag}`), tag); // B-0d3e: a moved anchor fails BY NAME (it answered null in silence)
   const storeOf = (w) => JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
   const mk = (w, label) => { const nm = 'secret:' + crypto.randomBytes(5).toString('hex'); const r = w.vault.secretPut(nm, VALUE, { prov: 'owner', label, kind: 'api-key', hosts: [] }); if (!r.ok) throw new Error('secretPut ' + r.code); return `secrets:${nm}#secret`; };
   // (r12 minor 2) a run list of 3 (the door's entryMax seam): three ON, the clock steps back an hour, a fourth switched ON
@@ -1122,7 +1122,7 @@ console.log('㉞ r13 should (the readers of batch 52 — B-a14b × the standing 
     const plant = '      endedGrants.delete(q.quietPair);';
     const n = DSRC.split(plant).length - 1;
     ok(n === 1, '㉞ the RED control\'s plant is where it claims: the standing answer\'s delete by q.quietPair, once', n);
-    const mq = n === 1 ? MC.load('src/server/vault-run-door.js', DSRC.replace(plant, '      endedGrants.delete(pairOf(q.conv, q.id));'), 'r13-quiet') : null;   // stale-pins: kept — a RED control: the batch's delete by the conversation's id restored on purpose
+    const mq = MC.load('src/server/vault-run-door.js', anchored(DSRC, plant, '      endedGrants.delete(pairOf(q.conv, q.id));', 'test-vault-standing-request ㉞ r13-quiet'), 'r13-quiet');   // stale-pins: kept — a RED control: the batch's delete by the conversation's id restored on purpose
     const rq = mq ? await standingLeg(mq) : null;
     ok(!!(mq && rq && rq.standing && rq.endAfter), '㉞ RED control: the delete by the conversation\'s id (the batch\'s shape) ⇒ the old end outlives the standing answer', rq);
   });

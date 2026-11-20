@@ -424,15 +424,15 @@ console.log('②c B-bc3b — the owner SHARES an agent\'s own entry through its 
   ok(rv && rv.ok && after.code === 'use_not_granted', 'the owner\'s ✕ takes it back ⇒ conv-2 is refused again', { rv: rv && rv.ok, code: after.code });
   // RED CONTROLS — patched copies of the door
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const patch = (from, to, tag) => { const n = SRC.split(from).length - 1; return n === 1 ? M.load('src/server/vault-run-door.js', SRC.replace(from, to), tag) : null; };
+  const patch = (from, to, tag) => M.load('src/server/vault-run-door.js', anchored(SRC, from, to, `test-vault-run ② ${tag}`), tag); // B-0d3e: a moved anchor fails BY NAME (it answered null in silence)
   const oldEarly = patch('if (foreignRefs.length && !useGrants) {', 'if (foreignRefs.length) {', 'bc3b-early');
   let r1 = null;
   if (oldEarly) { const m = await shareWorld(oldEarly); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); r1 = await m.runAs('conv-2', TO('api.example.com')); }
   ok(!!oldEarly && r1 && r1.code === 'use_not_granted', 'RED — the door before B-bc3b (another conversation refused before its grant is read): the SHARED conv-2 is refused — the share leg above goes red there', r1 && r1.code);
   // an admit on ANY verdict alone is still refused there by the no-card rule (each guard alone refuses conv-3 — the restack's tb
   // run showed the one-guard copy refusing): this RED takes BOTH away; the mixed-run RED below shows the no-card rule's own
-  const SRC2 = SRC.replace('      if (!verdict.ok && verdict.ask && sharedIds.size) {', '      if (false) {');
-  const anyRow = SRC2 !== SRC && SRC2.split("if (!(v && v.ok === true)) { note('use_not_granted'").length === 2 ? M.load('src/server/vault-run-door.js', SRC2.replace("if (!(v && v.ok === true)) { note('use_not_granted'", "if (!v) { note('use_not_granted'"), 'bc3b-anyrow') : null;
+  const SRC2 = anchored(SRC, '      if (!verdict.ok && verdict.ask && sharedIds.size) {', '      if (false) {', 'test-vault-run ② bc3b-anyrow (no card)');
+  const anyRow = M.load('src/server/vault-run-door.js', anchored(SRC2, "if (!(v && v.ok === true)) { note('use_not_granted'", "if (!v) { note('use_not_granted'", 'test-vault-run ② bc3b-anyrow (any verdict)'), 'bc3b-anyrow');
   let r2 = null;
   if (anyRow) { const m = await shareWorld(anyRow); m.ug.addMember(ID, { kind: 'conversation', key: 'conv-2' }, { hosts: ['api.example.com'] }); r2 = await m.runAs('conv-3', TO('api.example.com')); r2 = { code: r2.code, ok: r2.ok, cards: cardsOf(m.w).length }; }
   ok(!!anyRow && r2 && !(r2.code === 'use_not_granted' && !r2.cards), 'RED — a door that admits on ANY verdict (the row exists for someone) AND draws cards for a shared entry: conv-3, whom the row does not name, reaches a card naming it — the «only as the row says» leg goes red there', r2);
@@ -939,7 +939,7 @@ console.log('⑥ THE TIMEOUT');
 console.log('⑦ MUTANTS — patched copies of the door, each RED on its leg');
 {
   const SRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const mutate = (from, to, tag) => { const n = SRC.split(from).length - 1; return { n, mod: n === 1 ? M.load('src/server/vault-run-door.js', SRC.replace(from, to), tag) : null }; };
+  const mutate = (from, to, tag) => { const n = SRC.split(from).length - 1; return { n, mod: M.load('src/server/vault-run-door.js', anchored(SRC, from, to, `test-vault-run ⑦ ${tag}`), tag) }; }; // B-0d3e: a moved anchor fails BY NAME (it built nothing in silence)
   const m1 = mutate('seen: seen.has(pair)', 'seen: true', 'nocard');
   const r1 = m1.mod ? await newShapeCards(m1.mod) : null;
   ok(m1.n === 1 && r1 && !r1.card && r1.ran, `MUTANT «a new shape without a card» (seen read as true): the patch hits once and the leg goes RED — it ran with NO card (${r1 && r1.by}); the shipped door draws one`, r1);
