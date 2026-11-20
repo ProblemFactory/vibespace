@@ -419,7 +419,7 @@ console.log('(5) CLI');
   check('`backlog-done` prints WHICH item it resolved (id + text)', dn.code === 0 && new RegExp(`^resolved \\[${stored.id}\\] cli high item; 2 still open`).test(dn.out.trim()), dn.out);
   const u = await run('--help');
   check('usage says a # is the number in the list you were last shown, and steers mutating verbs to ids', /a # is the number in the list YOU were last shown/.test(u.out) && /prefer the B-xxxx id/.test(u.out));
-  check('usage documents --priority on backlog-add and backlog-edit', /backlog-add "item" \[--detail "context"\] \[--priority high\|normal\|low\]/.test(u.out) && /backlog-edit <id\|#\|text> \[--text "new"\] \[--detail "new"\] \[--priority high\|normal\|low\]/.test(u.out));
+  check('usage documents --priority on backlog-add and backlog-edit', /backlog-add "item" \[--detail "context"\] \[--priority high\|normal\|low\]/.test(u.out) && /backlog-edit <id\|#\|text> \[--text "new"\] \[--detail "more"\] \[--replace-detail\] \[--priority high\|normal\|low\]/.test(u.out));
   server.close();
 }
 

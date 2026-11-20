@@ -1463,7 +1463,7 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
   try {
     const t = tasks.get(gid);
     const backlog = (t.backlog || []).map((b) => ({ ...b, claimedBy: [...(b.claimedBy || [])] }));
-    const { add, detail, done, drop, claim, unclaim, show, edit, text: newText, priority } = req.body || {};
+    const { add, detail, done, drop, claim, unclaim, show, edit, text: newText, priority, replaceDetail } = req.body || {};
     const key = sessionStatusKey(hit[0], hit[1]);
     // priority: a CLOSED set; absent = not given (add ⇒ 'normal'), anything
     // else outside the set is refused by name — never silently normalized
@@ -1510,6 +1510,7 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
       if (typeof r !== 'number') return res.status(404).json({ error: r.err });
       return res.json({ success: true, item: taskItemAnswer(backlog[r]) }); // read-only — no update; verify r4 F1: through the belt
     }
+    let detailEdit = null;   // B-6edc: what an edit did to the detail — { mode: added | set | replaced | cleared, was, now } (characters)
     let actedId = null;      // edit/claim/unclaim/done/drop → echo the item + co-claimants back (BY ID — the store may evict earlier items, so a position is not an identity)
     let added = null;        // add → the item as pushed; echoed back only once it is FOUND in the stored backlog
     let alreadyMine = false; // idempotent re-claim
@@ -1533,14 +1534,27 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
       if (!hasText && !hasDetail && !hasPriority) return res.status(400).json({ error: 'edit needs --text, --detail and/or --priority' });
       const tooLong = overCap(hasText ? newText : null, hasDetail ? detail : null, 'nothing changed');
       if (tooLong) return res.status(400).json({ error: tooLong });
-      if (hasText) {
-        if (!newText.trim()) return res.status(400).json({ error: 'item text cannot be empty' });
-        backlog[r].text = newText.trim();
-      }
+      if (hasText && !newText.trim()) return res.status(400).json({ error: 'item text cannot be empty' });
+      // B-6edc (agent feedback fb-f5f3c65a9d; 主开发's law): AN EDIT NEVER LOSES A DETAIL BY ACCIDENT. The plain --detail ADDS — the
+      // old text kept, the new paragraph below it; replacing (or clearing) the WHOLE detail is asked for by name (`replaceDetail`, the
+      // CLI's --replace-detail) and answered with how many characters it replaced. An older CLI that sends the plain form gets the
+      // safe add, never the lossy replace. Judged BEFORE anything is applied: a refusal changes nothing
+      let nextDetail;   // undefined = the detail is not touched; null = cleared
       if (hasDetail) {
-        const d = detail.trim();
-        if (d === '' || d === '-') delete backlog[r].detail; else backlog[r].detail = d;
+        const d = detail.trim(), old = typeof backlog[r].detail === 'string' ? backlog[r].detail : '', blank = d === '' || d === '-';
+        if (replaceDetail === true) {
+          nextDetail = blank ? null : d;
+          detailEdit = { mode: blank ? 'cleared' : 'replaced', was: cliText.chars(old), now: blank ? 0 : cliText.chars(d) };
+        } else {
+          if (blank) return res.status(400).json({ error: `nothing to add — a plain --detail ADDS to the detail and never clears it; to clear the whole detail (${cliText.chars(old)} characters) ask by name: --detail "" --replace-detail — nothing changed`, code: 'detail-clear-by-name' });
+          const joined = old ? `${old}\n${d}` : d;
+          if (joined.length > BACKLOG_CAPS.detail) return res.status(400).json({ error: `the detail would be ${joined.length} characters (${old.length} kept + ${joined.length - old.length} added) — a detail holds at most ${BACKLOG_CAPS.detail}; add less, or replace the whole detail by name (--replace-detail) — nothing changed`, code: 'detail-too-long' });
+          nextDetail = joined;
+          detailEdit = { mode: old ? 'added' : 'set', was: cliText.chars(old), now: cliText.chars(joined) };
+        }
       }
+      if (hasText) backlog[r].text = newText.trim();
+      if (nextDetail === null) delete backlog[r].detail; else if (nextDetail !== undefined) backlog[r].detail = nextDetail;
       if (hasPriority) backlog[r].priority = priority;
       actedId = backlog[r].id || null; // echo BY ID (was an undeclared `actedIdx` — the edit never echoed its item)
     } else if (claim !== undefined || unclaim !== undefined) {
@@ -1594,6 +1608,7 @@ app.post('/api/agent/task-backlog', function taskBacklogRoute(req, res) {
       backlog: sortBacklog(updated.backlog.filter((b) => b.status === 'open')).map(taskItemAnswer),   // verify r4 F1: through the belt
       ...(acted ? { item: taskItemAnswer(acted), others: (acted.claimedBy || []).filter((k) => k !== key), alreadyMine } : {}),
       ...(acted && (added || edit !== undefined) ? { chars: cliText.chars(acted.text), ...(acted.detail ? { detailChars: cliText.chars(acted.detail) } : {}) } : {}),   // lane cli-one-text-arg: the stored item, counted
+      ...(detailEdit ? { detailEdit } : {}),   // B-6edc: what the edit did to the detail, in characters (the CLI says it)
       ...(nudge ? { nudge } : {}),
     });
   } catch (e) { res.status(400).json({ error: e.message }); }

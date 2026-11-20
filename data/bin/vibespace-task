@@ -43,7 +43,8 @@ function strayGuard(tool, what, strays) {
 const rawArgs = DOORS.argv;
 let group = '';
 let detail = '';
-let hasDetailFlag = false; // distinguish "no --detail" from "--detail ''" (edit clears detail)
+let hasDetailFlag = false; // distinguish "no --detail" from "--detail ''"
+let replaceDetail = false; // B-6edc: backlog-edit's --detail REPLACES the whole detail only when asked by name (else it ADDS)
 let newText;               // undefined = no --text; '' = explicit empty (rejected for text)
 let priority;              // undefined = no --priority; the server refuses a value outside high|normal|low
 const gflags = {};         // group-admin verbs: --title/--objective/--context-dir/--color/--archived/--session
@@ -70,6 +71,7 @@ for (let i = 0; i < rawArgs.length; i++) {
   const mp = /^--priority=(.*)$/.exec(a);
   if (mp) { priority = mp[1]; continue; }
   if (a === '--full') { full = true; continue; }
+  if (a === '--replace-detail') { replaceDetail = true; continue; }
   argv.push(a);
 }
 const [cmd, ...rest] = argv;
@@ -105,8 +107,9 @@ const USAGE = [
   '  vibespace-task backlog-unclaim <id|#|text>   hand a claimed item back',
   '  vibespace-task backlog-done <id|#|text>      mark a parked item decided/finished',
   '  vibespace-task backlog-drop <id|#|text>      drop a parked item as obsolete',
-  '  vibespace-task backlog-edit <id|#|text> [--text "new"] [--detail "new"] [--priority high|normal|low]',
-  '      edit an item in place (id stays; --detail "" clears)',
+  '  vibespace-task backlog-edit <id|#|text> [--text "new"] [--detail "more"] [--replace-detail] [--priority high|normal|low]',
+  '      edit an item in place (id stays). --detail ADDS a paragraph below the old detail (the old text is kept);',
+  '      --replace-detail with --detail REPLACES the whole detail (--detail "" --replace-detail clears it) — the answer says how many characters',
   '  Group manager verbs (need the user-enabled setting + this session designated as Group manager;',
   '  a manager organizes ALL groups — not just the ones this session belongs to):',
   '  vibespace-task group-list                    id + title of every group (avoid duplicates before creating)',
@@ -288,17 +291,26 @@ async function main() {
       if (t.error) { console.error('vibespace-task backlog-edit: refused — ' + t.error.replace(/nothing was sent$/, 'nothing was recorded')); process.exit(TX.STRAY_EXIT); }
       newText = t.text;
     }
-    if (!arg) { console.error('vibespace-task: backlog-edit needs an item id/number/text, then --text, --detail and/or --priority\n   e.g. vibespace-task backlog-edit B-1a2b --text "new summary" --detail "updated context" --priority high\n   (--detail "" clears the detail; the item id stays, so references survive)'); process.exit(1); }
+    if (!arg) { console.error('vibespace-task: backlog-edit needs an item id/number/text, then --text, --detail and/or --priority\n   e.g. vibespace-task backlog-edit B-1a2b --text "new summary" --detail "updated context" --priority high\n   (--detail ADDS to the detail; --detail "…" --replace-detail replaces it, --detail "" --replace-detail clears it; the item id stays, so references survive)'); process.exit(1); }
+    if (replaceDetail && !hasDetailFlag) { console.error('vibespace-task: --replace-detail says how --detail is used — give --detail "the whole new detail" (or --detail "" to clear it); nothing was changed'); process.exit(1); }
     if (newText === undefined && !hasDetailFlag && priority === undefined) { console.error('vibespace-task: backlog-edit needs --text, --detail and/or --priority to change'); process.exit(1); }
     const body = { edit: arg };
     if (newText !== undefined) body.text = newText;
     if (hasDetailFlag) body.detail = detail;
+    if (hasDetailFlag && replaceDetail) body.replaceDetail = true;   // B-6edc: the whole-detail replace, asked by name
     if (priority !== undefined) body.priority = priority;
     const r = await call('POST', '/api/agent/task-backlog', body);
     const id = r.item && r.item.id ? '[' + r.item.id + '] ' : '';
     const changed = [];
     if (newText !== undefined) changed.push('text');
-    if (hasDetailFlag) changed.push(detail.trim() === '' || detail.trim() === '-' ? 'detail cleared' : 'detail');
+    if (hasDetailFlag) {   // B-6edc: what the edit did to the detail, said in characters (the server's own count)
+      const de = r.detailEdit;
+      if (de && de.mode === 'added') changed.push(`detail: ${de.now - de.was} characters added below the old ${de.was} (now ${de.now})`);
+      else if (de && de.mode === 'set') changed.push(`detail set (${de.now} characters)`);
+      else if (de && de.mode === 'replaced') changed.push(`detail REPLACED: ${de.was} characters replaced by ${de.now}`);
+      else if (de && de.mode === 'cleared') changed.push(`detail CLEARED (${de.was} characters removed)`);
+      else changed.push('detail REPLACED — this server is older than the add form and replaced the whole detail (its old text is gone unless your --detail carried it)');
+    }
     const prioOk = priorityRecorded(r.item); // the echoed item carries it, or the change is not claimed
     if (priority !== undefined && prioOk) changed.push('priority ' + priority);
     console.log('updated ' + id + changed.join(' + '));

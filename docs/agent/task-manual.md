@@ -51,6 +51,22 @@ vibespace-task --group <id> backlog-drop <B-id>     # will not do (say why in ch
   claim it, then work it.
 - Dated obligations do NOT belong here — use `vibespace-job run … --at`.
 
+### Editing an item: a detail is never lost by accident
+
+```
+vibespace-task --group <id> backlog-edit <B-id> --detail "one more line"                          # ADDS below the old detail
+vibespace-task --group <id> backlog-edit <B-id> --detail "the whole new detail" --replace-detail  # REPLACES it — by name
+vibespace-task --group <id> backlog-edit <B-id> --detail "" --replace-detail                      # clears it — by name
+```
+
+- A plain `--detail` ADDS: the old text is kept and your paragraph goes below
+  it. The answer says how many characters you added and how many the detail
+  holds now. A plain `--detail ""` is refused (there is nothing to add).
+- Replacing or clearing the WHOLE detail is asked for by name with
+  `--replace-detail`, and the answer says how many characters were replaced.
+- `--detail-file <path>` (or `--detail-file -` for stdin) gives a long detail
+  the same two ways. `--text` replaces the item's one-line text, as before.
+
 ### Priority and what you are reminded of
 
 ```
@@ -90,7 +106,7 @@ more:
 ```
 vibespace-task --group <id> backlog-done <B-id>                        # finished / decided
 vibespace-task --group <id> backlog-drop <B-id>                        # obsolete
-vibespace-task --group <id> backlog-edit <B-id> --detail "merged: …"   # merge same-topic items into one…
+vibespace-task --group <id> backlog-edit <B-id> --detail "merged: …"   # merge same-topic items into one (ADDS below its detail)…
 vibespace-task --group <id> backlog-drop <B-id2>                       # …and drop the rest
 ```
 

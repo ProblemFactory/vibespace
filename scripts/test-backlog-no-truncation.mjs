@@ -33,6 +33,8 @@ const check = (name, cond, extra) => {
   if (cond) { passed++; console.log(`  ✓ ${name}`); return; }
   failed++; console.error(`  ✗ ${name}${extra ? `\n    ${extra}` : ''}`);
 };
+// a leg that judges prints every fact it judges — on a pass too (B-6edc's legs)
+const checkP = (name, cond, facts) => { check(name, cond, facts); if (cond) console.log(`    ${facts}`); };
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-backlog-notrunc-'));
 // lane cli-one-text-arg: a CLI copy outside the checkout reads its ONE-text rule beside it (a host's layout: the boot-time copy)
@@ -154,6 +156,48 @@ check('a CLAIM is answered only once task-groups.json holds it (not in the route
   check('B-31d7: edit --detail past the cap is refused 400', rde.code === 400 && !tasks.get(g.id).backlog.find((b) => b.id === ra.out.item.id).detail, JSON.stringify(rde).slice(0, 200));
 }
 
+// (3b) B-6edc (agent feedback fb-f5f3c65a9d; 主开发's law): AN EDIT NEVER LOSES A DETAIL BY ACCIDENT — the plain --detail ADDS
+// (the old text kept, the new below it); replacing or clearing the WHOLE detail is asked for by name (replaceDetail); the answer
+// says the characters before and after; a refusal changes nothing; an older CLI's plain form gets the safe add
+{
+  const { anchored } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const drive = (setup) => {
+    const rt = {}, ap = { get: (p, h) => { rt[`GET ${p}`] = h; }, post: (p, h) => { rt[`POST ${p}`] = h; } };
+    setup({ app: ap, activeSessions, tasks, sessionStatus: { snapshot: () => ({}), get: () => null, consumeNotice: () => null, consumeNotices: () => [], pendingNotices: () => [], rekey: () => {}, clear: () => null, setByUser: () => {} }, SessionStatusManager: { renderNotice: () => '', renderNotices: () => '' }, userTodos: { rekey: () => {}, forSession: () => [], resolveByAgent: () => null, add: () => ({}) }, sessionStatusKey: (s, id) => `claude:${id}`, serverSetting: () => undefined, scheduleCtxSync: () => {}, remoteCtxBaseFor: () => null });
+    return (body) => { let out, code = 200; const req = { headers: { authorization: 'Bearer vsst_test' }, query: {}, body }; const res = { json: (o) => { out = o; }, status: (c) => { code = c; return res; } }; rt['POST /api/agent/task-backlog'](req, res); return { out, code }; };
+  };
+  const detailOf = (id) => (tasks.get(g.id).backlog.find((b) => b.id === id) || {}).detail;
+  const J = JSON.stringify;
+  const a = post({ add: 'B-6edc: a row with a detail', detail: 'the old evidence, dated' }), id = a.out.item.id;
+  const r1 = post({ edit: id, detail: 'one more line' });
+  checkP('B-6edc: a plain --detail ADDS — the old text kept, the new line below it; the answer says the characters before and after',
+    r1.code === 200 && detailOf(id) === 'the old evidence, dated\none more line' && J(r1.out.detailEdit) === J({ mode: 'added', was: 23, now: 37 }), J({ code: r1.code, d: detailOf(id), de: r1.out && r1.out.detailEdit }));
+  const r2 = post({ edit: id, detail: '' });
+  checkP('B-6edc: a plain --detail "" is REFUSED by name (it would clear) — the detail untouched, the recipe named (--replace-detail)',
+    r2.code === 400 && r2.out.code === 'detail-clear-by-name' && /--replace-detail/.test(r2.out.error) && /37 characters/.test(r2.out.error) && detailOf(id) === 'the old evidence, dated\none more line', J({ code: r2.code, out: r2.out, d: detailOf(id) }));
+  const r3 = post({ edit: id, detail: 'the whole new detail', replaceDetail: true });
+  checkP('B-6edc: replacing the WHOLE detail is asked for by name (replaceDetail) — done, and the answer says how many characters it replaced',
+    r3.code === 200 && detailOf(id) === 'the whole new detail' && J(r3.out.detailEdit) === J({ mode: 'replaced', was: 37, now: 20 }), J({ code: r3.code, d: detailOf(id), de: r3.out && r3.out.detailEdit }));
+  const r4 = post({ edit: id, detail: '', replaceDetail: true });
+  checkP('B-6edc: clearing is asked for by name too (--detail "" --replace-detail): the detail gone, «cleared» with the characters removed',
+    r4.code === 200 && detailOf(id) === undefined && J(r4.out.detailEdit) === J({ mode: 'cleared', was: 20, now: 0 }), J({ code: r4.code, d: detailOf(id) === undefined ? '(no detail)' : detailOf(id), de: r4.out && r4.out.detailEdit }));
+  const r5 = post({ edit: id, detail: 'first words' });
+  checkP('B-6edc: a plain --detail on an item with no detail SETS it («set»)', r5.code === 200 && detailOf(id) === 'first words' && J(r5.out.detailEdit) === J({ mode: 'set', was: 0, now: 11 }), J({ code: r5.code, d: detailOf(id), de: r5.out && r5.out.detailEdit }));
+  post({ edit: id, detail: 'z'.repeat(5990), replaceDetail: true });
+  const r6 = post({ edit: id, text: 'renamed in the same request', detail: 'a line past the cap' });
+  checkP('B-6edc: an add that would pass the cap is refused by name (the sizes, the replace recipe) — and NOTHING of the request is applied (the text either)',
+    r6.code === 400 && r6.out.code === 'detail-too-long' && /6010/.test(r6.out.error) && /6000/.test(r6.out.error) && detailOf(id) === 'z'.repeat(5990) && tasks.get(g.id).backlog.find((b) => b.id === id).text === 'B-6edc: a row with a detail',
+    J({ code: r6.code, out: r6.out, detailLength: (detailOf(id) || '').length, detailSame: detailOf(id) === 'z'.repeat(5990), text: tasks.get(g.id).backlog.find((b) => b.id === id).text }));
+  // RED CONTROL: the old replace compiled back into a copy of the route — the plain form loses the old text again
+  const AR = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+  const OLD = anchored(AR, '          nextDetail = joined;\n', '          nextDetail = d;\n', 'b6edc-old-replace');
+  const M = mutantCopies('backlog-6edc', REPO), oldPost = drive(M.load('src/agent-routes.js', OLD, 'b6edc-old-replace').setupAgentRoutes);
+  const b = post({ add: 'B-6edc control row', detail: 'kept evidence' }), bid = b.out.item.id;
+  oldPost({ edit: bid, detail: 'one more line' });
+  checkP('B-6edc CONTROL: with the old replace in a copy of the route, the plain --detail WIPES the old detail — RED (the add leg can go red)', detailOf(bid) === 'one more line', J({ d: detailOf(bid), was: 'kept evidence' }));
+}
+
 // (4) source pins
 const strip = (s) => s.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
 const tg = strip(fs.readFileSync(path.join(REPO, 'src/task-groups.js'), 'utf8'));
@@ -173,8 +217,8 @@ check('the CLI reads r.item FIRST for backlog-add, the older-server fallback mat
 // (5) the REAL CLI against an older server's answer shape
 const { execFile } = await import('node:child_process');
 const http = await import('node:http');
-let reply = null;
-const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(reply)); }); });
+let reply = null, sent = null;   // B-6edc: the body the CLI sent, read back
+const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { try { sent = JSON.parse(b || 'null'); } catch { sent = null; } res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify(reply)); }); });
 await new Promise((r) => srv.listen(0, '127.0.0.1', r));
 const apiUrl = `http://127.0.0.1:${srv.address().port}`;
 const runCli = (file, args) => new Promise((resolve) => execFile(process.execPath, [file, ...args], { env: { ...process.env, VIBESPACE_API: apiUrl, VIBESPACE_SESSION_TOKEN: 'vsst_test' }, timeout: 15000 }, (err, stdout, stderr) => resolve({ code: err ? (err.code ?? 1) : 0, out: String(stdout) + String(stderr) })));
@@ -214,6 +258,28 @@ const preFile = path.join(tmp, 'vibespace-task.pre'); fs.writeFileSync(preFile, 
 reply = OLD_SHAPE;
 c = await runCli(preFile, ['backlog-add', 'my parked item']);
 check('control: the r.item-only CLI reports "not stored" for an item the older server stored', preSrc !== fs.readFileSync(CLI, 'utf8') && c.code === 1 && /did not store/.test(c.out), c.out);
+// B-6edc: THE CLI — the plain --detail sends the add (no replaceDetail), --replace-detail asks for the replace by name, and the
+// answer's words say what happened to the detail, in characters; an older server that replaced is said as such
+{
+  reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open' }, backlog: [], detailEdit: { mode: 'added', was: 23, now: 37 } };
+  let e = await runCli(CLI, ['backlog-edit', 'B-1111', '--detail', 'one more line']);
+  checkP('B-6edc CLI: a plain --detail sends NO replaceDetail (the add) and says «14 characters added below the old 23 (now 37)»', e.code === 0 && sent && sent.edit === 'B-1111' && sent.detail === 'one more line' && !('replaceDetail' in sent) && /detail: 14 characters added below the old 23 \(now 37\)/.test(e.out), JSON.stringify({ code: e.code, sent, out: e.out }));
+  reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open' }, backlog: [], detailEdit: { mode: 'replaced', was: 37, now: 20 } };
+  e = await runCli(CLI, ['backlog-edit', 'B-1111', '--detail', 'the whole new detail', '--replace-detail']);
+  checkP('B-6edc CLI: --replace-detail sends replaceDetail: true and says «detail REPLACED: 37 characters replaced by 20»', e.code === 0 && sent && sent.replaceDetail === true && /detail REPLACED: 37 characters replaced by 20/.test(e.out), JSON.stringify({ code: e.code, sent, out: e.out }));
+  sent = null;
+  e = await runCli(CLI, ['backlog-edit', 'B-1111', '--replace-detail']);
+  checkP('B-6edc CLI: --replace-detail with no --detail is refused before anything is sent (exit 1)', e.code === 1 && sent === null && /--replace-detail says how --detail is used/.test(e.out), JSON.stringify({ code: e.code, sent, out: e.out }));
+  reply = { success: true, item: { id: 'B-1111', text: 'my parked item', status: 'open' }, backlog: [] };   // an older server: no detailEdit
+  e = await runCli(CLI, ['backlog-edit', 'B-1111', '--detail', 'x']);
+  checkP('B-6edc CLI: an older server (no detailEdit in its answer) — the CLI says it REPLACED the whole detail, never «added»', e.code === 0 && /detail REPLACED — this server is older than the add form/.test(e.out) && !/added below/.test(e.out), JSON.stringify({ code: e.code, out: e.out }));
+  const help = await runCli(CLI, []);
+  const man = fs.readFileSync(path.join(REPO, 'docs/agent/task-manual.md'), 'utf8');
+  checkP('B-6edc: the tool\'s help and the agents\' manual say BOTH forms (--detail adds; --replace-detail replaces, by name)',
+    /--detail ADDS a paragraph below the old detail/.test(help.out) && /--replace-detail with --detail REPLACES the whole detail/.test(help.out)
+      && /--detail "one more line" +# ADDS below the old detail/.test(man) && /--replace-detail +# REPLACES it — by name/.test(man) && /--detail "" --replace-detail +# clears it — by name/.test(man),
+    JSON.stringify({ help: help.out.split('\n').filter((l) => /--detail ADDS|--replace-detail with --detail/.test(l)), manual: man.split('\n').filter((l) => /# (ADDS below the old detail|REPLACES it — by name|clears it — by name)$/.test(l)) }));
+}
 srv.close();
 
 fs.rmSync(tmp, { recursive: true, force: true });
