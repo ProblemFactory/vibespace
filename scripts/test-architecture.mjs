@@ -7719,10 +7719,11 @@ await section(async () => {
   const shipped107 = (r) => (strips107 ? strip107(r.outputFiles[0].text, undefined, { check: false }) : r.outputFiles[0].text);   // a size reading (the build's own step checks)
   // THE LAW (the coordinator's, 2026-11-20): the base is the LAST RELEASE's SIGNED device bundle size, restated at each cut to the size
   // that cut signs. Restated by int361 on the 2.369.414 train: 2.369.413's signed bundle, 5042938 bytes (its manifest's sha256 5bc9302d…);
-  // the 2 % margin holds this block's DEVICE code over it: list lines 6 (B-77ed's remainder, the login shell's read), 8 (B-3d06, the
-  // spawn PATH by the platform's separator), 19 (B-24e2, the machine's own Claude Code level read), 23 (B-9ff2 step 3, message-manager.js)
-  // and 24 (B-b0e3, artifacts.js) — measured: 5064413 bytes at line 19's tip, 5064675 at line 27's. Was 4965563, restated by hand at
-  // 2.369.412's second checkpoint and not at the 2.369.413 cut.
+  // the 2 % margin holds this block's DEVICE code over it. WHICH lines of a block change the bundle is COMPUTED at the cut, never
+  // remembered: the files changed between the release and the tip that are in this build's own input list (the metafile below), each
+  // mapped to its list line — the bundle carries chat-pipeline files too (message-manager.js, record-shape.js, permission-outcome.js…).
+  // Measured at this seam: 5064413 bytes at line 19's tip, 5064675 at line 27's. Was 4965563, restated by hand at 2.369.412's second
+  // checkpoint and not at the 2.369.413 cut.
   const RELEASE_BUNDLE_BYTES = 5042938, DEVICE_BUNDLE_MARGIN = 0.02;
   ok(strips107, '§107 build:agentd strips the device bundle (scripts/agentd-bundle-strip.mjs) right after esbuild writes it to a side name, renaming it into data/bin/vibespace-agentd.js, and before agentd-release.mjs hashes it', script107);
   const r107 = await build107(ext107);
