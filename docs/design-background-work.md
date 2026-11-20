@@ -335,6 +335,19 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
   cross-session prompt/argv injection).
 - **User locks stick**: `lockedBy:'user'` refuses agent access-edits (teaching
   error) and survives rm+recreate via a (scope,name) tombstone (30 d).
+- **An agent's create writes only what its later verbs could** (B-9407): the
+  create keeps `access` as the view / control words within session|group|all (a
+  word not given stays missing — read as session, never widened) and refuses BY
+  NAME, nothing created: a lock (403 `lock_person_only` — the lock is the
+  person's alone), a word that is no scope (400 `bad-scope`), another key or
+  shape. A scheduled run is built from its task (`{ ...action.task }`), so the
+  task takes only the fields a task's create takes — `subscribers`,
+  `interaction`, `clearedAt` … planted there would ride every run (400
+  `unknown_field`; a wake grant 403 as at the top). PURE `agentJobAccessVerdict`
+  / `agentJobTaskVerdict` (src/agent-routes.js); the person's own create
+  (src/server/jobs-wiring.js) does not pass there. A panel (`ask`) is asked by
+  the job itself or its owner conversation only (403 `not-the-owner`), as the
+  mutation rule above says.
 - **Secrets, honest threat model**: same-UID processes can ultimately read
   anything — the defence is against ACCIDENT roads (a value shown in a
   transcript, a tool's output, a log, env, argv, a file, a card), not against a

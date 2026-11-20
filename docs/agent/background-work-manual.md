@@ -229,7 +229,9 @@ Its cause gone (the alarm cleared, the mirror fresh again)? `vibespace-job withd
 closes it and resolves its For-you item; `answers` then holds `{"withdrawn": true}`
 for that panel, as an unanswered one holds `{"expired": true}`. The job
 withdraws its own question from inside, or its owner conversation does — never another
-conversation (one that holds control included: it is refused, 403 `not-the-filer`). A
+conversation (one that holds control included: it is refused, 403 `not-the-filer`).
+`ask <id>` from outside the job is likewise its owner conversation's alone (another
+conversation that can see the job is refused, 403 `not-the-owner`). A
 `--stdin-open` job reads a withdraw BY ITS OWNER on its stdin as
 `{"withdrawn": true, "version": N}` (match the version to the panel you asked); its own
 withdraw is not echoed there.
@@ -301,7 +303,9 @@ URL — share the new one.
   the stop ends (a VibeSpace restart before then forgets it: start it again)» and does
   start then; a later `stop` cancels that start
 - `access <id> --view session|group|all --control session|group|all` —
-  owner-only; the user can lock access against agent edits
+  owner-only; the user can lock access against agent edits. At create `--view` /
+  `--control` take the same three words — any other is refused by name and nothing
+  is created; a job is never created locked (the lock is the user's alone)
 
 ## 7b. Memory bound — a job that eats the machine is stopped by name
 

@@ -2842,12 +2842,15 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   // by name, like every verb that records a principal; a session with no id yet keeps its lineage-less job
   if (a.caller.borrowed) return res.status(409).json({ error: a.caller.borrowed, code: 'bad-member' });
   const b = req.body || {};
+  // B-9407: the access an agent's create may write is what its later access verb could — view / control within
+  // session|group|all, never the person's lock (agentJobAccessVerdict below; refused by name after the field census)
+  const accessV = agentJobAccessVerdict(b.access);
   const spec = {
     kind: b.kind, name: b.name, note: b.note, cmd: b.cmd, envFrom: b.envFrom,
     restart: b.restart, health: b.health, ports: b.ports, publish: b.publish,
     singleInstance: b.singleInstance, timeoutMs: b.timeoutMs, untilOutput: b.untilOutput,
     stdinOpen: b.stdinOpen, notifyUser: b.notifyUser, schedule: b.schedule,
-    catchUp: b.catchUp, action: b.action, context: b.context, access: b.access,
+    catchUp: b.catchUp, action: b.action, context: b.context, access: accessV.access,   // B-9407: never b.access whole
     notify: b.notify, memoryMb: b.memoryMb, // lane jobs-memory-bound: `--memory 8G` (the engine judges it; 0 is the user's alone)
     vault: b.vault, // lane vault-job-road: `--vault NAME=vault://…` REFERENCES (the engine judges them; a value never rides this body)
     mayRead: b.mayRead, // B-3992: `--may-read <job>,<job>` / `siblings` — the jobs the new job may READ (the engine resolves them against this conversation's own)
@@ -2869,6 +2872,12 @@ app.post('/api/agent/jobs', answersEveryThrow(async function jobsCreateRoute(req
   if (b.stopWithOwner === true) return res.status(400).json({ error: '--stop-with-owner was retired: when a person ends or archives a conversation, a notice names the jobs it still runs and «Stop these too» stops them in one press — nothing was created', code: 'retired-flag' });
   const unknownFields = Object.keys(b).filter((k) => !known.has(k));
   if (unknownFields.length) return res.status(400).json({ error: `unknown field${unknownFields.length === 1 ? '' : 's'}: ${unknownFields.map((k) => (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) ? k : '(a field of another shape)')).join(', ')} — this hub does not read ${unknownFields.length === 1 ? 'it' : 'them'}; nothing was created (an older hub than the CLI? update VibeSpace)`, code: 'unknown_field', fields: unknownFields.filter((k) => /^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k)) });
+  if (!accessV.ok) return res.status(accessV.status).json({ error: accessV.error, code: accessV.code });
+  // B-9407, the class: a scheduled run is BUILT from its task (src/jobs.js: the child is `{ ...action.task }`), so a field no
+  // task create takes would land on every run's record — `subscribers` (the subscribe verb adds only its caller), `interaction`
+  // (the ask verb's judged panel), `clearedAt` (the person's Clear content)… The task takes the fields this create copies
+  const runV = agentJobTaskVerdict(b, new Set([...Object.keys(spec).filter((k) => k !== 'owner'), 'notifyOk']));
+  if (!runV.ok) return res.status(runV.status).json({ error: runV.error, code: runV.code });
   if (!spec.cmd && b.action && b.action.type === 'spawn-task') { /* notify-cron / cron shapes carry cmd inside action */ }
   else if (!spec.cmd && b.action && b.action.type === 'notify') { /* pure notify cron */ }
   else if (!spec.cmd) return res.status(400).json({ error: 'cmd required' });
@@ -2983,6 +2992,9 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   // B-8bd5 (its adversarial read r1): the panel is withdrawn only by the one that FILED it — the job itself (its jbt_) or its owner
   // conversation's lineage; a control grant (--control all) never closes the person's question
   if (!a.selfJob && act === 'withdraw' && !jobModel.canEdit(job, a.caller)) return jobModel.canView(job, a.caller) ? res.status(403).json({ error: `${job.id}'s question is withdrawn by the job itself or by its owner conversation — never by another conversation, one that holds control included`, code: 'not-the-filer' }) : res.status(404).json({ error: NOT_VISIBLE(ref) });   // 主开发 21:46Z: the refusal names its door
+  // B-9407 (ALSO CURED): a QUESTION is put to the person by the job itself or by its owner conversation — panel = mutation, owner
+  // or user only (docs/design-background-work.md §7); a conversation that can merely view the job (its Task Group's default) is refused
+  if (!a.selfJob && act === 'ask' && !jobModel.canEdit(job, a.caller)) return jobModel.canView(job, a.caller) ? res.status(403).json({ error: `${job.id}'s questions are asked by the job itself or by its owner conversation — never by another conversation, one that holds control included`, code: 'not-the-owner' }) : res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && needsControl.includes(act) && !jobModel.canControl(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
   if (!a.selfJob && (act === 'access' || act === 'notify' || act === 'memory')) {
     if (!jobModel.canEdit(job, a.caller)) return res.status(404).json({ error: NOT_VISIBLE(ref) });
@@ -3024,6 +3036,45 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
     a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true, ...(act === 'rm' ? { code: 'finishes-on-landing' } : {}) }) }); } catch { } });   // lane lg-store-writes U4: the act's answer waits for the store (the loop never does); a write not landed is SAID in the answer, the act stays applied in memory and the writer retries
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
+}
+
+// B-9407: AN AGENT'S JOB CREATE WRITES ONLY WHAT ITS LATER VERBS COULD. The create copied `access` whole: an agent could make a
+// job already `lockedBy: 'user'` — as if the person had locked it, which the person's lock law (docs/design-background-work.md
+// §7 «user locks stick») gives the person alone — or one with a scope that is no scope (stored, shown, read as owner-only).
+// PURE; the person's own create (src/server/jobs-wiring.js) does not pass here.
+const JOB_SCOPES = Object.freeze(['session', 'group', 'all']);
+const fieldWord = (k) => (/^[A-Za-z][A-Za-z0-9_]{0,39}$/.test(k) ? k : '(a field of another shape)');
+/** the access an agent's create keeps: absent ⇒ `access: undefined` (the engine's default, view group · control session);
+ *  else ONLY the view / control words given, each session|group|all (a missing word stays missing — read as session, as
+ *  before: never widened; `lockedBy` is never kept — a falsy one is no lock). Refused by name, nothing created: a lock (403
+ *  lock_person_only), a word that is no scope
+ *  (400 bad-scope), another key (400 unknown_field), another shape (400 bad-access) */
+function agentJobAccessVerdict(acc) {
+  if (acc === undefined || acc === null) return { ok: true, access: undefined };
+  const no = (status, code, error) => ({ ok: false, status, code, error: `${error} — nothing was created` });
+  if (typeof acc !== 'object' || Array.isArray(acc)) return no(400, 'bad-access', 'access is { view, control }, each session, group or all');
+  const odd = Object.keys(acc).filter((k) => k !== 'view' && k !== 'control' && k !== 'lockedBy');
+  if (odd.length) return no(400, 'unknown_field', `access holds only view and control, not ${odd.map(fieldWord).join(', ')}`);
+  if (acc.lockedBy) return no(403, 'lock_person_only', "a job's access is locked by the person alone (the lock on its row in Background Work) — an agent's job is never created locked");
+  for (const k of ['view', 'control']) {
+    const v = acc[k];
+    if (v !== undefined && v !== null && !JOB_SCOPES.includes(v)) return no(400, 'bad-scope', `access ${k} is session, group or all, not ${typeof v === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,39}$/.test(v) ? `«${v}»` : 'a value of another shape'}`);
+  }
+  const access = {};
+  for (const k of ['view', 'control']) if (JOB_SCOPES.includes(acc[k])) access[k] = acc[k];
+  return { ok: true, access };
+}
+/** the class (B-9407): a scheduled run's task takes only `runFields` — the fields the create copies (+ notifyOk). A wake grant
+ *  there is refused as at the top (403, piece 7's words); any other field by name (400 unknown_field), nothing created */
+function agentJobTaskVerdict(b, runFields) {
+  const a = b && b.action;
+  const t = a && typeof a === 'object' && a.type === 'spawn-task' ? a.task : undefined;
+  if (t === undefined || t === null) return { ok: true };
+  if (typeof t !== 'object' || Array.isArray(t)) return { ok: false, status: 400, code: 'bad-task', error: "a scheduled run's task is { cmd, … } — nothing was created" };
+  if (t.wakesEndedOwner !== undefined) return { ok: false, status: 403, code: 'wake_grant_person_only', error: require('./delivery-wake.js').GRANT_REFUSAL_CREATE };
+  const odd = Object.keys(t).filter((k) => !runFields.has(k));
+  if (odd.length) return { ok: false, status: 400, code: 'unknown_field', error: `the scheduled task's field${odd.length === 1 ? '' : 's'} ${odd.map(fieldWord).join(', ')}: a run carries only what a task's create takes — nothing was created` };
+  return { ok: true };
 }
 
 // Built per delivery since 2.211.0 — the per-feature Integration toggles are
@@ -3151,4 +3202,4 @@ module.exports = {
   turnIsUserInitiated, GROUP_REPORT_BUDGET, setupAgentRoutes, renderMsgStash, drainStashUnderCap, drainNotifsUnderCap, roomUnderCap, INLINE_CAP, INLINE_TAIL_MARGIN, JOBS_DIGEST_BUDGET, MSG_STASH_LINE_MAX, MSG_STASH_MAX_ENTRIES, MSG_STASH_MAX_BYTES, sessionToolsIntro, perTurnToolsLine, CHANNELS_REMINDER_SEG, fileToolsOf, browserIntroLine, AGENT_DOC_TOPICS, browserSetLine, stopNudgeReason, STOP_NUDGE_CLOSE, BROWSER_DIALOG_LINE,
   msgPeerRow, msgGroupsAnswer, msgReadAnswer, msgSendAnswer, msgGroupOpAnswer, msgRefusalAnswer, dispatchAnswer,   // lane peer-census verify r1 / r2: the msg answers' doors, the refusal's too (test-peer-text-census drives them)
   taskShowAnswer, taskItemAnswer, taskEntryAnswer, taskGroupBrief, contextIndexAnswer,   // verify r4 F1: the task answers' doors
-  jobWhen };   // lane agent-context-owner-facts (B-7960 a): a job view's instants as the hub's words (test-task-injection drives it)
+  jobWhen, agentJobAccessVerdict, agentJobTaskVerdict };   // B-9407: the create's two verdicts (test-jobs-addressed §0b: their table, and the routes that call them) · lane agent-context-owner-facts (B-7960 a): a job view's instants as the hub's words (test-task-injection drives it)

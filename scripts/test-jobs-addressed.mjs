@@ -212,6 +212,105 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     for (let i = 0; i < 50 && got === null; i++) await tick(20);   // the bound: one second for any reply
     ok(got === null && [...jm.jobs.values()].some((j) => j.name === 'reply-throws-x'), 'CONTROL (the moved tip\'s empty catch, in a copy): the same throw gets NO reply inside the bound — the job exists and the agent\'s command would wait out its 30 s', { got });
   }
+  // ── §0b B-9407: AN AGENT'S CREATE WRITES ONLY WHAT ITS LATER VERBS COULD. The create copied `access` whole: A could make a
+  // job already locked as if the PERSON had locked it (the lock law: docs/design-background-work.md §7) or with a scope that
+  // is no scope; and a scheduled run is built from its task (`{ ...action.task }`), so a field no task create takes rode every
+  // run — `subscribers` naming B addressed B with a job B never subscribed to. ALSO CURED: a panel is asked by the job itself
+  // or its owner — B (it can view A's job, the group's default) put a question to the person under A's job. The REAL routes
+  // over the loopback server; every refusal it judges is PRINTED; the RED controls are copies of the routes with the cure cut.
+  console.log('§0b B-9407 — an agent\'s create keeps only the access words of its later verb, never the lock; a run carries only a task\'s fields; a question is the owner\'s');
+  {
+    const post = async (who, p, body) => { const r = await fetch(API + p, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer vsst_' + who }, body: JSON.stringify(body) }); return { code: r.status, o: await r.json() }; };
+    const judged = (what, x) => console.log(`    judged (${what}): ${x.code} ${JSON.stringify(x.o).slice(0, 400)}`);
+    const NOTE = (name, extra = {}) => ({ kind: 'cron', name, schedule: { everyMs: 3600e3 }, action: { type: 'notify', text: 'standup' }, ...extra });
+    const RUN = (name, task, extra = {}) => ({ kind: 'cron', name, schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'], cwd: CWD }, ...task } }, ...extra });
+    const named = (n) => [...jm.jobs.values()].filter((j) => j.name === n);
+    const B_RT = { conversationId: CID.B, sessionId: 'B', sessionCreatedAt: 1, groups: new Set([GI]) };   // B as the route sees it (its real Task Group's id)
+    // the two verdicts' table (PURE, exported by the routes): what is kept, what is refused
+    const V = AR.agentJobAccessVerdict, TV = AR.agentJobTaskVerdict, RF = new Set(['cmd', 'kind', 'notifyOk', 'timeoutMs']);
+    const VT = [
+      ['absent ⇒ the engine\'s default', V(undefined), { ok: true, access: undefined }],
+      ['null ⇒ the engine\'s default', V(null), { ok: true, access: undefined }],
+      ['the two words kept', V({ view: 'all', control: 'group' }), { ok: true, access: { view: 'all', control: 'group' } }],
+      ['a falsy lock (a snapshot\'s echo) is no lock and is not kept', V({ view: 'session', lockedBy: null }), { ok: true, access: { view: 'session' } }],
+      ['…nor false', V({ control: 'all', lockedBy: false }), { ok: true, access: { control: 'all' } }],
+      ['an empty access keeps nothing (read as session, as before)', V({}), { ok: true, access: {} }],
+      ['a lock', V({ lockedBy: 'user' }).code, 'lock_person_only'],
+      ['any truthy lock', V({ view: 'all', lockedBy: 'agent' }).code, 'lock_person_only'],
+      ['a number for a word', V({ view: 2 }).code, 'bad-scope'],
+      ['an array access', V(['all']).code, 'bad-access'],
+      ['no task', TV({ action: { type: 'notify', text: 'x' } }, RF), { ok: true }],
+      ['a task of run fields', TV({ action: { type: 'spawn-task', task: { cmd: {}, kind: 'task', notifyOk: true } } }, RF), { ok: true }],
+      ['a task field of another shape is named as such', TV({ action: { type: 'spawn-task', task: { cmd: {}, 'x y': 1 } } }, RF).error, "the scheduled task's field (a field of another shape): a run carries only what a task's create takes — nothing was created"],
+      ['a task that is a string', TV({ action: { type: 'spawn-task', task: 'sh -c true' } }, RF).code, 'bad-task'],
+    ];
+    for (const [n, got, want] of VT) ok(JSON.stringify(got) === JSON.stringify(want), `B-9407 verdict: ${n}`, { got, want });
+    // the plant first: the route reaches the engine and keeps the words it is given
+    const okAll = await post('A', '/api/agent/jobs', NOTE('b9407-open', { access: { view: 'all', control: 'all' } }));
+    const open = named('b9407-open')[0];
+    ok(okAll.code === 200 && open && JSON.stringify(open.access) === JSON.stringify({ view: 'all', control: 'all' }), 'B-9407 (the plant): A\'s create with view all · control all is made and keeps exactly those two words', { code: okAll.code, access: open && open.access });
+    const half = await post('A', '/api/agent/jobs', NOTE('b9407-half', { access: { control: 'all' } }));
+    const hj = named('b9407-half')[0];
+    ok(half.code === 200 && hj && JSON.stringify(hj.access) === JSON.stringify({ control: 'all' }) && !M.canView(hj, B_RT) && M.canView({ ...hj, access: { view: 'group' } }, B_RT), 'B-9407: a word not given stays missing (read as session — never widened to the default «group»): B cannot view it', hj && hj.access);
+    // the refusals, each by name, nothing created
+    const REF = [
+      ['a lock', NOTE('b9407-lock', { access: { view: 'all', control: 'all', lockedBy: 'user' } }), 403, 'lock_person_only', /a job's access is locked by the person alone .* an agent's job is never created locked — nothing was created$/],
+      ['a scope that is no scope', NOTE('b9407-everyone', { access: { view: 'everyone', control: 'session' } }), 400, 'bad-scope', /^access view is session, group or all, not «everyone» — nothing was created$/],
+      ['a control word of another shape', NOTE('b9407-ctl', { access: { view: 'group', control: { all: true } } }), 400, 'bad-scope', /^access control is session, group or all, not a value of another shape — nothing was created$/],
+      ['another key in access', NOTE('b9407-key', { access: { view: 'group', owner: 'x' } }), 400, 'unknown_field', /^access holds only view and control, not owner — nothing was created$/],
+      ['access of another shape', NOTE('b9407-str', { access: 'all' }), 400, 'bad-access', /^access is \{ view, control \}, each session, group or all — nothing was created$/],
+      ['a run planted with B as a subscriber', RUN('b9407-subs', { subscribers: [{ conversationId: CID.B, sessionId: 's-B', ts: 1 }] }), 400, 'unknown_field', /^the scheduled task's field subscribers: a run carries only what a task's create takes — nothing was created$/],
+      ['a run planted with a panel and a clear', RUN('b9407-panel', { interaction: { pending: { panel: { title: 'x' }, version: 1 }, answers: [] }, clearedAt: 1 }), 400, 'unknown_field', /^the scheduled task's fields interaction, clearedAt: a run carries/],
+      ['a run planted with the person\'s wake grant', RUN('b9407-grant', { wakesEndedOwner: true }), 403, 'wake_grant_person_only', /^refused: an agent cannot set wakesEndedOwner when it registers a job/],
+    ];
+    for (const [what, body, code, c, re] of REF) {
+      const r = await post('A', '/api/agent/jobs', body);
+      judged(what, r);
+      ok(r.code === code && r.o.code === c && re.test(r.o.error || '') && named(body.name).length === 0, `B-9407: ${what} — refused BY NAME (${code} ${c}), nothing created`, r);
+    }
+    const kept = await post('A', '/api/agent/jobs', RUN('b9407-kind', { kind: 'task', notifyOk: true, timeoutMs: 60000 }));
+    ok(kept.code === 200 && named('b9407-kind').length === 1, 'B-9407: a run\'s task with the fields a task create takes (kind, notifyOk, timeoutMs — test-jobs-cli-body\'s shape) is still made', kept);
+    // the REAL CLI: a typo in --view is said, not stored
+    const typo = await cli('A', ['notify-cron', '--name', 'b9407-typo', '--every', '15m', '--text', 'ping', '--view', 'everyone']);
+    console.log(`    judged (the CLI's --view everyone): exit ${typo.code} · ${typo.err.trim().slice(0, 300)}`);
+    ok(typo.code === 1 && /^access view is session, group or all, not «everyone» — nothing was created$/m.test(typo.err) && named('b9407-typo').length === 0, 'B-9407: `vibespace-job notify-cron … --view everyone` (the real CLI) is refused with the words, nothing created — it was stored and shown as «view=everyone», read as owner-only', typo);
+    // ALSO CURED — who puts a question to the person under a job: its owner yes, a groupmate that only views it no
+    const PANEL_Q = { title: 'Q', blocks: [{ type: 'md', text: 'ship it?' }, { type: 'buttons', options: [{ id: 'y', label: 'Yes' }] }] };
+    const bAsk = await post('B', `/api/agent/jobs/${open.id}/ask`, { panel: PANEL_Q });
+    judged('B asks on A\'s job', bAsk);
+    ok(bAsk.code === 403 && bAsk.o.code === 'not-the-owner' && bAsk.o.error === `${open.id}'s questions are asked by the job itself or by its owner conversation — never by another conversation, one that holds control included` && !(open.interaction && open.interaction.pending), 'B-9407 ALSO CURED: B (a groupmate holding view AND control) cannot ask the person under A\'s job — refused by name, no panel', bAsk);
+    const aAsk = await post('A', `/api/agent/jobs/${open.id}/ask`, { panel: PANEL_Q });
+    ok(aAsk.code === 200 && open.interaction && open.interaction.pending && open.interaction.pending.panel.title === 'Q', 'B-9407: A (its owner) asks, as before', aAsk);
+    jm.withdrawAsk(open, { self: false });
+    // RED CONTROLS: copies of the routes with each cure cut (each anchor asserted once first); the harm each cut lets through
+    const AR0 = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+    const MJ9 = mutantCopies('jobs-addressed-b9407', REPO);
+    const CUT_ACCESS = anchored(anchored(AR0, 'access: accessV.access,   // B-9407: never b.access whole', 'access: b.access,   /* MUTANT: the base\'s copy, whole */', 'the create\'s access copy'),
+      "  if (!accessV.ok) return res.status(accessV.status).json({ error: accessV.error, code: accessV.code });\n", '', 'the access refusal');
+    const CUT_RUN = anchored(AR0, "  if (!runV.ok) return res.status(runV.status).json({ error: runV.error, code: runV.code });\n", '', 'the run-field refusal');
+    const CUT_ASK = anchored(AR0, "  if (!a.selfJob && act === 'ask' && !jobModel.canEdit(job, a.caller)) return", "  if (false && act === 'ask') return", 'the ask gate');
+    const mount = (src, tag) => { const R = {}; const X = MJ9.load('src/agent-routes.js', src, tag); hush(() => X.setupAgentRoutes({ ...AR_DEPS, app: { get: (p, h) => { R[`GET ${p}`] = h; }, post: (p, h) => { R[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } } })); return R; };
+    const callX = (R, key, who, params, body) => new Promise((resolve) => { let code = 200; const res = { headersSent: false, status(c) { code = c; return res; }, json(o) { res.headersSent = true; resolve({ code, o }); return res; } }; Promise.resolve(R[key]({ headers: { authorization: 'Bearer vsst_' + who }, body, query: {}, params }, res)).catch((e) => resolve({ code: 500, o: { error: e.message } })); });
+    const RA = mount(CUT_ACCESS, 'access-whole'), RR = mount(CUT_RUN, 'run-fields'), RQ = mount(CUT_ASK, 'ask-anyone');
+    const xl = await callX(RA, 'POST /api/agent/jobs', 'A', {}, NOTE('b9407-x-lock', { access: { view: 'all', control: 'all', lockedBy: 'user' } }));
+    const xj = named('b9407-x-lock')[0];
+    const xa = xj ? await callX(RA, 'POST /api/agent/jobs/:ref/:act', 'A', { ref: xj.id, act: 'access' }, { view: 'session' }) : null;
+    judged('CONTROL: A\'s own access verb on the job it made «locked»', xa || { code: 0, o: {} });
+    ok(xl.code === 200 && xj && xj.access.lockedBy === 'user' && xa && xa.code === 403 && /the user pinned this job's access/.test(xa.o.error), 'B-9407 CONTROL (the base\'s whole copy, in a copy): A makes a job «pinned by the user» — and its later verb is then refused as if the person had locked it', { xl, access: xj && xj.access, xa });
+    const xs = await callX(RA, 'POST /api/agent/jobs', 'A', {}, NOTE('b9407-x-scope', { access: { view: 'everyone' } }));
+    const xsj = named('b9407-x-scope')[0];
+    ok(xs.code === 200 && xsj && xsj.access.view === 'everyone', 'B-9407 CONTROL: the same copy stores a scope that is no scope', xsj && xsj.access);
+    const xr = await callX(RR, 'POST /api/agent/jobs', 'A', {}, RUN('b9407-x-subs', { subscribers: [{ conversationId: CID.B, sessionId: 's-B', ts: 1 }] }));
+    const xc = named('b9407-x-subs')[0];
+    const spawn0 = jm._spawn; jm._spawn = (j, trigger) => { j.runs = j.runs || []; j.runs.push({ startedAt: Date.now(), trigger }); j.state = 'up'; };
+    try { if (xc) jm._fireCron(xc, 'cron'); } finally { jm._spawn = spawn0; }
+    const xrun = xc && [...jm.jobs.values()].find((j) => j.cronParent === xc.id);
+    ok(xr.code === 200 && xrun && M.addressedTo(xrun, B_RT, xc) === 'subscriber' && !M.addressedTo(xc, B_RT) && !(xc.subscribers || []).length, 'B-9407 CONTROL (no run-field refusal, in a copy): the cron is made and its RUN carries B as a subscriber — B is addressed by a job it never subscribed to', { xr: xr.code, subs: xrun && xrun.subscribers, addressed: xrun && M.addressedTo(xrun, B_RT, xc) });
+    const xq = await callX(RQ, 'POST /api/agent/jobs/:ref/:act', 'B', { ref: open.id, act: 'ask' }, { panel: PANEL_Q });
+    ok(xq.code === 200 && open.interaction && open.interaction.pending, 'B-9407 CONTROL (no ask gate, in a copy): B puts a question to the person under A\'s job', { xq, pending: !!(open.interaction && open.interaction.pending) });
+    jm.withdrawAsk(open, { self: false });
+    for (const r of copiesCensus(MJ9.files, MJ9.dir, REPO, { minCopies: 3, label: 'B-9407 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+  }
   server.close();
 }
 
