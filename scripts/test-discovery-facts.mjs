@@ -10,7 +10,7 @@
 // for years. This test pins the now-single rules.
 import fs from 'node:fs';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const { extractTailIds, nameFromUserRecord, nameFromUserLine, pidLooksClaude } = require('../src/discovery-facts.js');
 const { readJsonlTailIds } = require('../src/session-store.js');
@@ -208,7 +208,7 @@ console.log('B-16d7 a remote conversation\'s real folder resolved by ITS OWN mac
   ok(TM.membershipCwds({ cwd: withR.cwd, hostRealCwd: withR.hostRealCwd, host: 'h-2' }).some((c) => TM.insideFolder(c, groupFolder)), 'the row\'s scene: a remote conversation at a symlink whose target is the group\'s folder is its member again (by its machine\'s own path)');
   // RED CONTROL: the page's rule as B-df5f left it (no machine-resolved field) — the same row is no member
   const tmSrc = fs.readFileSync(new URL('../src/task-membership.js', import.meta.url), 'utf8');
-  const TM0 = require(MUT.write('src/task-membership.js', tmSrc.replace('onOtherMachine(host) ? hostRealCwd : realCwd', 'onOtherMachine(host) ? null : realCwd'), 'no-host-real'));   // stale-pins: kept — the control plants the page's rule as released
+  const TM0 = require(MUT.write('src/task-membership.js', anchored(tmSrc, 'onOtherMachine(host) ? hostRealCwd : realCwd', 'onOtherMachine(host) ? null : realCwd', 'no-host-real'), 'no-host-real'));   // stale-pins: kept — the control plants the page's rule as released
   ok(!TM0.membershipCwds({ cwd: withR.cwd, hostRealCwd: withR.hostRealCwd, host: 'h-2' }).some((c) => TM0.insideFolder(c, groupFolder)), 'CONTROL (the page\'s rule without the machine\'s own path, as released): the remote conversation is no member ⇒ RED');
   // THE SSH ROAD: the script's own vs_real, in every shell here, over a scratch tree with a symlink
   const HS = fs.readFileSync(new URL('../src/hosts.js', import.meta.url), 'utf8');
@@ -242,7 +242,7 @@ console.log('B-16d7 a remote conversation\'s real folder resolved by ITS OWN mac
   ok(devP.length === 3 && JSON.stringify(devP) === JSON.stringify(scrP), `ONE tree, both roads, the same R lines (${devP.length}: the link (a lock's and a head's: once), the folder, the nested link; never the missing folder, the file, the relative path, the escaped spelling, the codex head)`, { device: devP, script: scrP });
   // RED CONTROL: the device road resolving codex heads too (as 60b02509b did) — a codex conversation's membership would flip with the transport
   const dfSrc = fs.readFileSync(new URL('../src/discovery-facts.js', import.meta.url), 'utf8');
-  const DFc = require(MUT.write('src/discovery-facts.js', dfSrc.replace("...(snap?.jsonls || []).map((j) => j && j.headCwd)]) {", "...(snap?.jsonls || []).map((j) => j && j.headCwd), ...(snap?.codexRollouts || []).map((r) => r && r.headCwd)]) {"), 'codex-on-device'));   // stale-pins: kept — the control plants the device road with codex heads (60b02509b)
+  const DFc = require(MUT.write('src/discovery-facts.js', anchored(dfSrc, "...(snap?.jsonls || []).map((j) => j && j.headCwd)]) {", "...(snap?.jsonls || []).map((j) => j && j.headCwd), ...(snap?.codexRollouts || []).map((r) => r && r.headCwd)]) {", 'codex-on-device'), 'codex-on-device'));   // stale-pins: kept — the control plants the device road with codex heads (60b02509b)
   const devC = await deviceLines(DFc);
   ok(JSON.stringify(devC) !== JSON.stringify(scrP) && devC.some((l) => l.startsWith(`R ${TP}/lc\t`)), 'CONTROL (the device road resolving codex heads, as 60b02509b did): the two roads disagree on one tree ⇒ RED', devC);
   fs.rmSync(TP, { recursive: true, force: true });

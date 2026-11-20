@@ -61,6 +61,7 @@ const EXCLUDED = Object.freeze({
   'vibespace-usage-scan': 'the remote usage ledger scanner — shipped over ssh stdin, run by the server',
   'vibespace-opencode-op': 'the remote OpenCode-serve op runner — the server runs it over ssh',
   'vibespace-agentd.js': 'the device agent bundle npm run build:agentd writes — shipped to devices, not a command',
+  '.vibespace-agentd.raw.js': 'the RAW device bundle esbuild writes in npm run build:agentd, at a side name (B-315a): scripts/agentd-bundle-strip.mjs renames its stripped text over vibespace-agentd.js and then deletes this file — gitignored, never tracked, shipped or run; a build that stops between the two steps (a strip that refuses, an interrupted build) leaves it here until a build passes the strip',
   'vibespace-agentd-attach.js': 'the device agent\'s attach bundle — shipped beside it, not a command',
   'vibespace-browser-verbs.js': 'a module vibespace-browser loads (the verb table), copied at boot',
   'vibespace-browser-stuck.js': 'a module vibespace-browser loads (the dialog words), copied at boot',

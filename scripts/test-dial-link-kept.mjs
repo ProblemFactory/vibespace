@@ -14,6 +14,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const { Mux, PROTO_VERSION } = require('../src/agentd/mux.js');
@@ -394,7 +395,7 @@ console.log('— B-4d71 an unpaired device: «retired» with the proof to its ow
   const dpSrc = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
   const anchorT = "  const tomb = deviceId && !(want && PT.tokenMatches(tok, want)) ? hosts.retiredDialFor?.(deviceId, tok, PT.tokenMatches) : null;\n";
   ok(dpSrc.includes(anchorT), 'the control\'s anchor is in the source');
-  const gm = mkGate(M.load('src/server/dial-pairing.js', dpSrc.replace(anchorT, '  const tomb = null;\n'), 'no-tomb'));
+  const gm = mkGate(M.load('src/server/dial-pairing.js', anchored(dpSrc, anchorT, '  const tomb = null;\n', 'no-tomb'), 'no-tomb'));
   const { dialToken: tokM } = gm.DP.agentdMintDialPair('mini', { host: 'hub:3456' });
   await unpair(gm, 'mini');
   ok(heard(dial(gm.DP, 'mini', tokM, nonce)).code === 'token-mismatch', 'CONTROL (the gate without the tombstone, as released): the unpaired device hears «token-mismatch» — its agent dials a refusing hub for ever ⇒ RED');
