@@ -472,7 +472,7 @@ ok(/try \{ cliSelfMeasure\.tick\(\)\.catch\(\(\) => \{\}\); \} catch \{\} \}, 60
 ok(/serverNotice\(nk, poolBlockedNotice\(d, [^\n]*\{ level: 'warn' \}\);\n\s*const ck = poolCheckingNotice\(d, \{ poolName: a\.name, servable: memberServable \}\);\n\s*if \(ck\) serverNotice\(`pool-checking-\$\{poolId\}-\$\{Math\.floor\(now \/ 3600000\)\}`, ck\.text, \{ level: 'info', i18n: ck\.i18n \}\);/.test(ENG) && /if \(!\(ck && ck\.promise\)\) poolBlockedTodo\(/.test(ENG), 'LAW G1/G2: the blocked warning always says everything it says; a running check is an ADDITION under its OWN hourly key (a FAIL in the same hour still raises the warning); the For-you item is filed unless the check is the whole story (R2)');
 const SCH = require(path.join(REPO, 'src/lib/settings-schema.js'));
 const row = (SCH.SETTINGS_SCHEMA || SCH.default || SCH)['accounts.cliSelfMeasure'];
-ok(!!row && row.type === 'boolean' && row.default === true && /OFF: those accounts wait for a VibeSpace update/.test(row.description), 'the switch `accounts.cliSelfMeasure` (default on); its help says what off means', row);
+ok(!!row && row.type === 'boolean' && row.default === true && /OFF: those accounts wait until you update VibeSpace to a release that has measured the version\./.test(row.description) && !/wait for a VibeSpace update/.test(row.description), 'the switch `accounts.cliSelfMeasure` (default on); its help says what off means — the person updates VibeSpace (B-3b5a: no update arrives by itself)', row);
 
 // ── §6 R8 ──
 console.log('§6 R8: an ordinary update is a quiet fact; a registered build\'s unknown record is the surprise');

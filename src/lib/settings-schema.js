@@ -1585,7 +1585,7 @@ const SETTINGS_SCHEMA = {
   'accounts.cliSelfMeasure': {
     type: 'boolean', default: true,
     label: t('Check a new Claude Code version on this machine'),
-    description: t('ON (recommended): when Claude Code updates to a version VibeSpace has no record of, the hub checks on this machine how the new version uses an account’s long-lived token — with a fake token and a local stand-in server, so nothing leaves the machine — and the accounts that hold only such a token rejoin the pool when it passes, about five minutes later. OFF: those accounts wait for a VibeSpace update that has measured the version. Linux hubs; the check needs strace.'),
+    description: t('ON (recommended): when Claude Code updates to a version VibeSpace has no record of, the hub checks on this machine how the new version uses an account’s long-lived token — with a fake token and a local stand-in server, so nothing leaves the machine — and the accounts that hold only such a token rejoin the pool when it passes, about five minutes later. OFF: those accounts wait until you update VibeSpace to a release that has measured the version. Linux hubs; the check needs strace.'),
     tier: 'advanced',
     category: t('Session'), liveApply: true,
   },

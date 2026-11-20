@@ -946,9 +946,16 @@ const LEGS = {
     const css = fs.readFileSync(path.join(T, 'public/style.css'), 'utf8').split('\n').filter((l) => /\.usage-claim-btn \{|\.usage-stat-stale \{|\.usage-age-badge, \.acct-donut-age \{/.test(l));
     const literal = css.filter((l) => /#[0-9a-fA-F]{3,6}\b|border-radius: \d/.test(l));
     rows.push({ ok: css.length === 3 && !literal.length, text: `the door's CSS: ${css.length} rules, ${literal.length} with a literal colour or radius` });
-    const lines = (src) => ['re-login these {n} accounts, or a VibeSpace update places them', 're-login {name}, or a VibeSpace update places it', 'those accounts wait for a VibeSpace update'].map((k) => { const i = src.indexOf(k + '": "'); return i < 0 ? '' : src.slice(i, src.indexOf('\n', i)); });
+    const lines = (src) => ['re-login these {n} accounts, or a VibeSpace update places them', 're-login {name}, or a VibeSpace update places it', 'those accounts wait until you update VibeSpace', 'to a release that has measured the version. Linux hubs; the check needs strace.'].map((k) => { const i = src.indexOf(k + '": "'); return i < 0 ? '' : src.slice(i, src.indexOf('\n', i)); });
     const named = [...lines(zh), ...lines(ja)], waits = named.filter((l) => /等 VibeSpace 更新|VibeSpace の更新を待/.test(l) || !l.includes('⚙'));
     rows.push({ ok: named.every(Boolean) && !waits.length, text: `zh / ja name ⚙ → Update: ${named.length - waits.length}/${named.length}` });
+    // B-3b5a: the English of the «turned off» line and of the setting's OFF sentence says the same fact — the person updates (since
+    // .397 no update arrives by itself) — and names no menu path (src/ui-needs.js: a sentence says the state, its line's door acts)
+    const enOf = (f) => fs.readFileSync(path.join(T, f), 'utf8');
+    const en = { toast: enOf('src/foryou-actions.js'), setting: enOf('src/lib/settings-schema.js') };
+    const enSays = /off: i18nKey\('Checking a new Claude Code is turned off — those accounts wait until you update VibeSpace'\)/.test(en.toast) && /OFF: those accounts wait until you update VibeSpace to a release that has measured the version\./.test(en.setting);
+    const passive = Object.keys(en).filter((k) => /wait for a VibeSpace update/.test(en[k]));
+    rows.push({ ok: enSays && !passive.length, text: `the English says the person updates: ${enSays ? 'both lines' : 'not both lines'}; the passive «wait for a VibeSpace update» left in ${passive.length ? passive.join(', ') : 'none'}` });
     const ci = fs.readFileSync(path.join(T, 'scripts/ci.mjs'), 'utf8');
     rows.push({ ok: /A PERSON'S RESET CLAIM \(2\.369\.397\)/.test(ci), text: `the row's stamp ${/A PERSON'S RESET CLAIM \(2\.369\.397\)/.test(ci) ? '2.369.397' : 'not the release it ships in'}` });
     return { ok: rows.every((x) => x.ok), detail: rows.map((x) => (x.ok ? '' : '✗ ') + x.text).join(' · ') };
