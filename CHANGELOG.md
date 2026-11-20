@@ -26,6 +26,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A browser tab that stops answering no longer shows another tab's page under its name: you see its own last picture, or none, with words saying so.
 - Bring it forward on a tab VibeSpace cannot bring forward now says so, and what to do, instead of doing nothing.
 - On a Duo's inner screen or a tablet, the bar's ⋯ shows only when the window's menu has something in it; on a Files window it opened an empty menu.
+- An agent's edit of a Task Group backlog item now adds to its detail instead of replacing it; replacing the whole detail is asked for by name.
 
 ## 2.369.413 — 2026-11-20
 
