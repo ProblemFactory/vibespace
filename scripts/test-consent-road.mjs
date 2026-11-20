@@ -394,11 +394,35 @@ const hostOf = (p) => Object.entries(HOSTS).find(([, pre]) => p.startsWith(pre +
 // the engine module (a RED control hands a mutant copy)
 // lane gmail-connect-wall: the world's company presets SAY their apps list this instance's own address (`instanceAddress:
 // "listed"`) — every route leg below pins the road of such a preset, unchanged; ⑬ walks the presets that say nothing
+// r356 (主开发 — r318's seed 380113, placed: THE ORACLE): a world's FIXED callback port was picked by freePort() — a bind to port
+// 0, then a close — so any LATER bind to port 0 in this process (a hub's server, another sign-in's ephemeral listener) could be
+// handed the same number, and ⑭'s law read that listener as a sign-in's. The fixed port is now taken OUTSIDE the range the
+// kernel hands a bind to port 0 (/proc/sys/net/ipv4/ip_local_port_range — read, never assumed), at or above the unprivileged
+// floor; a port in use there is retried, each by name, within a bound. No range to read (not Linux): a bind to port 0, said once
+let BIND0 = undefined, saidNoRange = false;
+const readNum = (f) => { try { return fs.readFileSync(f, 'utf8').trim().split(/\s+/).map(Number); } catch { return null; } };
+const bind0Range = () => { if (BIND0 === undefined) { const r = readNum('/proc/sys/net/ipv4/ip_local_port_range'); BIND0 = r && r.length === 2 && r[0] > 0 && r[1] >= r[0] ? r : null; } return BIND0; };
+const tryBind = (port) => new Promise((r) => { const s = http.createServer(); s.once('error', (e) => r((e && e.code) || 'error')); s.listen(port, '127.0.0.1', () => s.close(() => r(null))); });
+async function fixedPort({ tries = 24 } = {}) {
+  const range = bind0Range();
+  if (!range) { if (!saidNoRange) { saidNoRange = true; console.log('  (no /proc/sys/net/ipv4/ip_local_port_range to read: a world\'s fixed port is a bind to port 0, as before)'); } return freePort(); }
+  const [lo, hi] = range, floor = Math.max(1024, ((readNum('/proc/sys/net/ipv4/ip_unprivileged_port_start') || [])[0]) || 1024);
+  const spans = [[floor, lo - 1], [hi + 1, 65535]].filter(([a, b]) => b - a >= 64);
+  if (!spans.length) throw new Error(`a world's fixed callback port: no room outside the kernel's bind(0) range ${lo}-${hi} (floor ${floor})`);
+  const tried = [];
+  for (let i = 0; i < tries; i++) {
+    const [a, b] = spans[i % spans.length], port = a + Math.floor(Math.random() * (b - a + 1));
+    const why = await tryBind(port);
+    if (!why) return port;
+    tried.push(`${port} ${why}`);
+  }
+  throw new Error(`a world's fixed callback port: ${tries} ports outside the kernel's bind(0) range ${lo}-${hi} were all taken (${tried.join(', ')})`);
+}
 async function world(tag, { fixedPath = 'lark/cb', publicUrl = POD, larkPreset = { appId: 'cli_road0001', appSecret: 'dummy-road-secret-01', brand: 'lark', instanceAddress: 'listed' }, env = {}, presets = null, eng = ENG, serverSetting = () => undefined, drive = { key: 'org1', label: 'Org 1', clientId: '123-road.apps.googleusercontent.com', clientSecret: 'dummy-road-gsecret-1', instanceAddress: 'listed' } } = {}) {
   const dir = path.join(ROOT, tag);
   fs.mkdirSync(dir, { recursive: true });
   const integrations = STORE.create({ dataDir: path.join(dir, 'store'), env: { ...env, VIBESPACE_INTEGRATIONS: JSON.stringify([{ id: 'lark', key: 'co', label: 'Company app', values: larkPreset }]) }, presets, now: () => Date.now(), broadcast: () => {}, drivePresets: () => [drive], log: quiet });
-  const fixed = `http://127.0.0.1:${await freePort()}/${fixedPath}`;
+  const fixed = `http://127.0.0.1:${await fixedPort()}/${fixedPath}`;
   const oauth = OL.createOAuthLoopback({ log: quiet, fixedCallbackUrl: fixed });
   const e = eng.create({ dataDir: path.join(dir, 'eng'), env, serverSetting, broadcast: () => {}, integrations, log: quiet, fetch: fetchFn, oauth, publicUrl: () => publicUrl });
   RT.setup({ getEngine: () => e });
@@ -1486,8 +1510,14 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
     // a listener THIS process holds on the port (Linux: its socket inodes in /proc/self/fd, LISTEN rows of /proc/net/tcp[6]) — a TCP
     // connect alone also answers for ANOTHER process that took the recycled port on a busy box (sweep 3's one red, base 271828);
     // where /proc cannot be read, the connect is the witness
-    const ownListenPorts = () => { try { const ino = new Set(); for (const f of fs.readdirSync('/proc/self/fd')) { try { const m = /^socket:\[(\d+)\]$/.exec(fs.readlinkSync(`/proc/self/fd/${f}`)); if (m) ino.add(m[1]); } catch { /* closed meanwhile */ } } const ports = new Set(); for (const t of ['/proc/net/tcp', '/proc/net/tcp6']) { let txt = ''; try { txt = fs.readFileSync(t, 'utf8'); } catch { continue; } for (const line of txt.split('\n').slice(1)) { const c = line.trim().split(/\s+/); if (c.length > 9 && c[3] === '0A' && ino.has(c[9])) ports.add(parseInt(c[1].split(':')[1], 16)); } } return ports; } catch { return null; } };
-    const listens = async (port, own = ownListenPorts()) => { if (!port) return false; if (own) return own.has(port); return new Promise((r) => { const s = net.connect({ port, host: '127.0.0.1' }, () => { s.destroy(); r(true); }); s.on('error', () => r(false)); }); };
+    // the inodes of every socket this process holds (its own fds only — cheap: never the box's whole socket table), or null
+    const ownSocketInodes = () => { try { const ino = new Set(); for (const f of fs.readdirSync('/proc/self/fd')) { try { const m = /^socket:\[(\d+)\]$/.exec(fs.readlinkSync(`/proc/self/fd/${f}`)); if (m) ino.add(m[1]); } catch { /* closed meanwhile */ } } return ino; } catch { return null; } };
+    // → Map(port → Set of its LISTEN sockets' inodes), or null where /proc cannot be read
+    const ownListenPorts = () => { try { const ino = ownSocketInodes(); if (!ino) return null; const ports = new Map(); for (const t of ['/proc/net/tcp', '/proc/net/tcp6']) { let txt = ''; try { txt = fs.readFileSync(t, 'utf8'); } catch { continue; } for (const line of txt.split('\n').slice(1)) { const c = line.trim().split(/\s+/); if (c.length > 9 && c[3] === '0A' && ino.has(c[9])) { const p = parseInt(c[1].split(':')[1], 16); if (!ports.has(p)) ports.set(p, new Set()); ports.get(p).add(c[9]); } } } return ports; } catch { return null; } };
+    // r356 (主开发 — THE ORACLE of seed 380113): a port NUMBER is not a sign-in. A listener counts as a sign-in's only when it was
+    // BORN DURING the seed (its socket is not in the snapshot `before` of the process's own sockets, taken when the seed began): one the process held before
+    // (a hub's server, another listener handed a recycled number) is no sign-in's of this seed → 'born' | 'before' | null
+    const listensAs = async (port, own, before) => { if (!port) return null; if (own) { const s = own.get(port); if (!s || !s.size) return null; return before && [...s].every((i) => before.has(i)) ? 'before' : 'born'; } return new Promise((r) => { const s = net.connect({ port, host: '127.0.0.1' }, () => { s.destroy(); r('born'); }); s.on('error', () => r(null)); }); };
     // the dialog on the Gmail type alone (the other types' blocks would only add their own status reads to the interleavings), in
     // TAB `t` (a seed may open two: the second client — another browser tab on the same hub)
     // the record exists BEFORE the dialog opens: its attach asks while showConnectAccountDialog is still being awaited
@@ -1499,6 +1529,7 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
     const runSeed = async (w, kinds, seed, cfg = FULL, script = null) => {
       const rnd = rngOf(seed); const log = []; P.log = log;
       P.dialogs = []; P.dno = 0; P.opens = []; P.toasts = []; P.held = []; P.seen = new Set(); P.urlOwner = new Map(); P.hubChanges = 0; clock.timers.clear();
+      const before = ownSocketInodes();   // r356: the sockets the process holds as the seed begins — no listener among them is this seed's sign-in's
       const nTabs = script ? script.tabs : (rnd() < cfg.tabs ? 2 : 1);
       P.tabs = Array.from({ length: nTabs }, () => ({ d: null }));
       for (let t = 0; t < nTabs; t++) await openDialog(kinds, t);
@@ -1562,6 +1593,7 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
       const drain = async () => { for (let g = 0; g < 300 && P.held.length; g++) { const h = P.held.splice(rnd() < 0.5 ? P.held.length - 1 : Math.floor(rnd() * P.held.length), 1)[0]; log.push(h.tag); await h.go(false); await settle(); } };
       await drain();
       for (let k = 0; k < 2; k++) { await advance(1600); await drain(); }
+      if (cfg.atRest) await cfg.atRest(w);   // a named scene's own act, at rest, before the invariant is read
       // THE INVARIANT at rest
       const ids = [...P.seen];
       const stOf = (id) => { try { return w.e.oauthStatus(id); } catch { return null; } };   // the engine's own record (the route's)
@@ -1569,7 +1601,7 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
       const R = running.length === 1 ? running[0] : null;
       const portOf = (id) => ((stOf(id) || {}).flow || {}).port || null;
       const own = ownListenPorts();   // once per seed
-      const live = []; for (const p of [...new Set(ids.map(portOf).filter(Boolean))]) if (await listens(p, own)) live.push(p);
+      const live = [], heldBefore = []; for (const p of [...new Set(ids.map(portOf).filter(Boolean))]) { const v = await listensAs(p, own, before); if (v === 'born') live.push(p); else if (v === 'before') heldBefore.push(p); }
       const why = [];
       if (running.length > 1) why.push(`${running.length} sign-ins of the kind run`);
       const open = P.tabs.map((tb) => tb.d).filter((d) => d.ctx.body.isConnected);
@@ -1586,7 +1618,7 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
       if (live.some((p) => p !== portOf(R))) why.push('a listener runs without its sign-in running');
       if (live.length && !shownBy.length) why.push(open.length ? 'a listener runs with no sign-in shown' : 'a listener runs behind a closed dialog');
       if (P.opens.some((o) => o.by && o.by.closedAt != null && o.n >= o.by.closedAt)) why.push('a consent page opened after its dialog closed');
-      const rest = { running, hubChanges: P.hubChanges, tabs: P.tabs.map((tb) => { const b = blockOf(tb.d); return { open: tb.d.ctx.body.isConnected, knows: tb.d.knows, sweptAs: tb.d.sweptAs || 0, flow: b ? b.wrap.dataset.flow || null : null, cancel: !!(b && b.cancel), status: b ? b.status.slice(0, 120) : null }; }) };
+      const rest = { running, listen: { live, before: heldBefore, portR: portOf(R) }, hubChanges: P.hubChanges, tabs: P.tabs.map((tb) => { const b = blockOf(tb.d); return { open: tb.d.ctx.body.isConnected, knows: tb.d.knows, sweptAs: tb.d.sweptAs || 0, flow: b ? b.wrap.dataset.flow || null : null, cancel: !!(b && b.cancel), status: b ? b.status.slice(0, 120) : null }; }) };
       // clean: every dialog closed, every sign-in of the seed ended, nothing held
       for (const x of P.dialogs) x.ctx.close();
       await drain();
@@ -1644,6 +1676,29 @@ const stackHasFrame = (stack, re) => frameNames(stack).some((n) => re.test(n));
       // every red seed with its replay line (a reader re-runs exactly it)
       for (const x of bad) console.log(`      red: CR_SEED_ONLY=${x.seed} CR_WORLD=${worlds.findIndex((w) => w.name === x.world)} — ${x.why.join('; ')}`);
       if (bad.length) for (const [k, v] of shapes) console.log(`      ${v.n}× ${k}\n        first: [${v.first.world}] seed ${v.first.seed}: ${v.first.seq}`);
+      // ── r356 THE FIXED SCENE (主开发 r318: the seed the law found once in 80 runs, placed): seed 380113 in the listed-preset world
+      // (two tabs; it ends with NOTHING running, its newest sign-in a fixed one on the world's fixed port). Another listener of
+      // THIS process on that port, held BEFORE the seed (the shape of a hub's server or a stand-in handed the recycled number), is
+      // no sign-in's: the law holds. ITS RED CONTROL: a listener BORN DURING the seed on that port (a sign-in's listener that
+      // outlived it has this shape) is red by the same why. Each plant proves it bound first.
+      {
+        const wo = worlds.find((x) => x.name.startsWith('listed preset')); useWorld(wo);
+        const fx = Number(new URL(wo.w.fixed).port);
+        const bindAt = (port) => new Promise((r) => { const sv = http.createServer(); sv.once('error', (e) => r({ sv: null, why: (e && e.code) || 'error' })); sv.listen(port, '127.0.0.1', () => r({ sv, why: null })); });
+        const shut = (b) => (b && b.sv ? new Promise((r) => b.sv.close(() => r())) : null);
+        const sq = await bindAt(fx);
+        const held = await runSeed(wo.w, wo.kinds, 380113);
+        await shut(sq);
+        console.log(`      (the fixed scene: the world's fixed port ${fx} (the kernel's bind(0) range ${(bind0Range() || ['?', '?']).join('-')}); another listener ${sq.sv ? 'bound before the seed' : 'NOT bound: ' + sq.why}; at rest ${JSON.stringify({ running: held.rest.running, ...held.rest.listen })} — ${held.ok ? 'holds' : held.why.join('; ')})`);
+        ok(!!sq.sv && held.ok && held.rest.running.length === 0 && held.rest.listen.before.includes(fx) && !held.rest.listen.live.length, `⑭ THE FIXED SCENE (seed 380113, r318 / r356): another listener of this process on the world's fixed port ${fx}, held before the seed, is no sign-in's — at rest nothing runs and the law holds`, `bound ${!!sq.sv}; ${JSON.stringify(held.rest.listen)}; ${held.why.join('; ')}`);
+        let born = null;
+        const ctl = await runSeed(wo.w, wo.kinds, 380113, { ...FULL, atRest: async () => { born = await bindAt(fx); } });
+        await shut(born);
+        console.log(`      (its red control: a listener born during the seed on ${fx} — ${born && born.sv ? 'bound at rest' : 'NOT bound: ' + (born && born.why)}; at rest ${JSON.stringify({ running: ctl.rest.running, ...ctl.rest.listen })} — ${ctl.ok ? 'holds' : ctl.why.join('; ')})`);
+        ok(!!(born && born.sv) && !ctl.ok && ctl.why.includes('a listener runs with no sign-in shown') && ctl.rest.listen.live.includes(fx), '⑭ THE FIXED SCENE\'s RED CONTROL: a listener BORN DURING the seed on that port is red by the same why («a listener runs with no sign-in shown»)', `bound ${!!(born && born.sv)}; ${JSON.stringify(ctl.rest.listen)}; ${ctl.why.join('; ')}`);
+        const br = bind0Range();
+        ok(!br || fx < br[0] || fx > br[1], `⑭ the world's fixed port ${fx} lies outside the kernel's bind(0) range ${br ? br.join('-') : '(none to read: a bind to port 0, said above)'} (no bind to port 0 can be handed it)`);
+      }
       // RED CONTROLS: each r4 guard removed (a mutant bundle) — the same driver finds it by itself
       // each mutant = [from, to] edits of the tip's mounts-dialog.js; EVERY `from` must be there exactly once (a moved anchor is red
       // here, never a control that silently mutates less)
