@@ -531,7 +531,7 @@ console.log('§12 lane record-oracle-2-1-296 + lane drift-card-restore: claude 2
 
   // ⚙ DIAGNOSTICS: the ledger rows reach the report (the server route answers them on ?drift=1, the section draws one row each)
   const srv = read('server.js');
-  ok('server: GET /api/telemetry/summary answers driftLedger ONLY on ?drift=1 (the sidebar badge probe stays small)', /app\.get\('\/api\/telemetry\/summary'[\s\S]{0,300}req\.query\.drift === '1' \? \{ driftLedger: driftLedgerRows\(\) \} : \{\}/.test(srv) && /const \{ MessageManager, driftLedgerRows \} = require\('\.\/src\/message-manager'\);/.test(srv));
+  ok('server: GET /api/telemetry/summary answers driftLedger ONLY on ?drift=1 (the sidebar badge probe stays small; B-64c1\'s attended tally rides the same branch)', /app\.get\('\/api\/telemetry\/summary'[\s\S]{0,300}req\.query\.drift === '1' \? \{ driftLedger: driftLedgerRows\(\)(?:, attended: [^\n]*?)? \} : \{\}/.test(srv) && /const \{ MessageManager, driftLedgerRows \} = require\('\.\/src\/message-manager'\);/.test(srv));
   const sf = read('src/lib/setup-flows.js');
   ok('the Diagnostics report asks for the ledger (?drift=1)', sf.includes("fetchJson('/api/telemetry/summary?days=14&drift=1')"));
   const a = sf.indexOf('// THE DRIFT LEDGER (lane record-oracle-2-1-296'), a0 = sf.lastIndexOf('(() => {', a), a1 = sf.indexOf('})()', a) + 4;

@@ -5693,5 +5693,57 @@ console.log('\n§13 the bulk resume: one authorization for N turns (all or nothi
   }
 }
 
+// B-64c1 (主开发 r590/r599): THE ATTENDED TALLY HAS A READER — ⚙ Diagnostics report shows the turns a person pressed that the ceiling
+// neither refused nor counted, by reason, the last 24 hours: COUNTS only (no conversation, no message). The guard's verdict is not
+// touched: this is a read of snapshot().attended through the route the report already asks.
+console.log('§B-64c1 the attended tally, worded for the Diagnostics report (a read only)');
+{
+  const okP = (n, c, facts) => { ok(n, c, JSON.stringify(facts)); if (c) console.log('      ' + JSON.stringify(facts)); };
+  const W64 = await import(pathToFileURL(path.join(REPO, 'src/lib/attended-tally-words.js')).href);
+  const fill = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p && p[x] != null ? String(p[x]) : m));
+  const tEn = (k, p) => fill(k, p), esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const ZH = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, JA = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+  // THE REAL GUARD: a person's presses (attended) on a fresh ledger — the tally the snapshot carries, then its words
+  const dir64 = tmpdir('vs-spend-b64c1-');
+  const g64 = guardMod.create({ dataDir: dir64, serverSetting: () => undefined, getUserTodos: () => ({ add: (k, it) => it }), log: () => { } });
+  const who64 = { key: 'k64', name: 'Member Sixty-Four' }, t64 = Date.now();
+  const press = (reason, cid, k) => { const v = g64.authorize({ reason, identity: who64, cid, now: t64 + k }); g64.note({ reason, identity: v.identity, hold: v.hold || null, now: t64 + k + 1 }); return v; };
+  const vs = [press('owner-channel-send', 'conv-secret-a', 1), press('owner-channel-send', 'conv-secret-a', 2), press('owner-channel-send', 'conv-secret-b', 3), press('stash-handover', 'conv-secret-c', 4), press('stash-handover', 'conv-secret-c', 5)];
+  const att = g64.snapshot().attended, html = W64.attendedSection(att, { t: tEn, esc });
+  okP('B-64c1: five presses through the REAL guard are attended (no hold, never counted) and the snapshot tallies them by reason',
+    vs.every((v) => v.ok === true && v.attended === true && !v.hold) && att['owner-channel-send'] === 3 && att['stash-handover'] === 2, { attended: att });
+  okP('B-64c1: the section says the 24-hour count and a row per reason, largest first — COUNTS ONLY: no conversation id, no identity\'s name in the report',
+    html.startsWith('<h2>Turns a person pressed (not counted)</h2><p><b>5 in the last 24 hours</b></p>') && html.indexOf('Your message to an agent from Channels') < html.indexOf('Waiting notices handed to a conversation now')
+      && !/conv-secret|Sixty-Four|k64/.test(html) && /<td class="n">3<\/td>/.test(html) && /<td class="n">2<\/td>/.test(html),
+    { html: html.replace(/<p class="dim">.*$/, '…') });
+  const none = W64.attendedSection({}, { t: tEn, esc }), older = W64.attendedSection(undefined, { t: tEn, esc }), other = W64.attendedRows({ 'a-new-reason': 2, junk: 'x', zero: 0 }, tEn);
+  okP('B-64c1: an empty tally says «None in the last 24 hours.»; a server that sends no tally (an older one) adds no section; a reason this page does not know is «Other (…)»; a count that is not a positive number is no row',
+    /<b>None in the last 24 hours\.<\/b>/.test(none) && !/<table>/.test(none) && older === '' && other.length === 1 && other[0].words === 'Other (a-new-reason)' && other[0].n === 2, { none: none.slice(0, 90), older, other });
+  // every word in zh AND ja (the section rendered with each dictionary: no English left)
+  const allReasons = Object.fromEntries([...W64.ATTENDED_REASONS, 'a-new-reason'].map((r, i) => [r, i + 1]));
+  const tOf = (D) => (k, p) => fill(D[k] || `«MISSING ${k}»`, p);
+  const zh = W64.attendedSection(allReasons, { t: tOf(ZH), esc }), ja = W64.attendedSection(allReasons, { t: tOf(JA), esc }), zhNone = W64.attendedSection({}, { t: tOf(ZH), esc });
+  okP('B-64c1: every word of the section is in the zh and ja dictionaries (the nine reasons, «Other», the head, «None», the why)',
+    !/MISSING/.test(zh + ja + zhNone) && zh.includes('由人按下的轮次（不计入）') && zh.includes('过去 24 小时 55 次') && zh.includes('其他（a-new-reason）') && ja.includes('直近 24 時間で 55 回') && zhNone.includes('过去 24 小时没有。'),
+    { zhHead: zh.slice(0, 80), jaHead: ja.slice(0, 80), missing: (zh + ja + zhNone).match(/«MISSING [^»]*»/g) || [] });
+  // THE CENSUS: every reason the authorizer marks attended has its words here (a new attended reason is RED by name, never «Other»)
+  const judge64 = (reasons) => Object.keys(reasons).filter((r) => reasons[r] && reasons[r].attended === true && !W64.ATTENDED_REASONS.includes(r)).sort();
+  const planted = judge64({ ...A.SPEND_REASONS, 'a-planted-press': { turn: true, attended: true, what: 'x' } });
+  okP('B-64c1 CENSUS: the nine attended reasons of src/spend-authorizer.js each have words — RED CONTROL: a planted attended reason is named',
+    judge64(A.SPEND_REASONS).length === 0 && JSON.stringify([...W64.ATTENDED_REASONS].sort()) === JSON.stringify(ATT) && planted.length === 1 && planted[0] === 'a-planted-press', { reasons: ATT, planted });
+  // THE ROUTE AND THE PAGE (a read only, the owner's page): the field rides the report's own query, behind the cookie gate
+  const SRV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8'), SF = fs.readFileSync(path.join(REPO, 'src/lib/setup-flows.js'), 'utf8'), AU = fs.readFileSync(path.join(REPO, 'src/auth.js'), 'utf8');
+  const routeLine = SRV.split('\n').find((l) => l.includes("res.json({ ...telemetry.summary(")) || '';
+  const pins = {
+    onlyWithDrift: /\.\.\.\(req\.query\.drift === '1' \? \{ driftLedger: driftLedgerRows\(\), attended: \(\(\) => \{ try \{ return spendGuard\.snapshot\(\)\.attended; \} catch \{ return null; \} \}\)\(\) \} : \{\}\)/.test(routeLine),
+    behindTheCookieGate: !AU.includes("'/api/telemetry/summary'") && !/p\.startsWith\('\/api\/telemetry/.test(AU),
+    afterTheEventsTables: SF.includes("<h2>${esc(t('By version'))}</h2><table>${kv(d.byVersion)}</table>\n    ${attendedSection(d.attended, { t, esc })}"),
+    reportAsksDrift: SF.includes("fetchJson('/api/telemetry/summary?days=14&drift=1'),"),
+    guardVerdictUntouched: !/attendedSection|attended-tally-words/.test(fs.readFileSync(path.join(REPO, 'src/server/spend-guard.js'), 'utf8')),
+  };
+  okP('B-64c1: the route gives `attended` only on the report\'s own query (drift=1), a read of the guard\'s snapshot; the route stands behind src/auth.js\'s cookie gate (the owner\'s page — no agent door); the section follows the events tables',
+    Object.values(pins).every(Boolean), pins);
+}
+
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} (${pass})`);
 process.exit(fail ? 1 : 0);

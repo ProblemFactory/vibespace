@@ -7,6 +7,7 @@ import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5:
 import { techFoldHtml } from './plain-words.js'; // lane ui-plain-words: the report's instance and data folder fold
 import { sessionDisplayName } from '../session-name.js'; // THE name ladder — a drift-ledger row names its conversation (lane record-oracle-2-1-296)
 import * as chanCaps from '../channel-caps.js'; // lane channel-row-notices: a parked push lane's whole sentence (the row says one line)
+import { attendedSection } from './attended-tally-words.js'; // B-64c1: the turns a person pressed (not counted) — counts only
 import { diagnosticsSection } from './cli-registration-words.js'; // lane cli-2-1-308-records: a claude build this release has no record table for
 import { SIGN_IN, tourSteps, folderChips, firstFilesFolder } from '../day-one.js'; // lane door-day-one-landing: the tour's steps, its folder chips; a sign-in terminal is not a session row
 import { pathField } from './path-field.js'; // lane path-field: the first chat's folder is THE path field too
@@ -802,6 +803,7 @@ export function installSetupFlows(App) {
     })()}
     <h2>${esc(t('By event'))}</h2><table>${kv(d.byName)}</table>
     <h2>${esc(t('By version'))}</h2><table>${kv(d.byVersion)}</table>
+    ${attendedSection(d.attended, { t, esc })}
     ${(() => {
       // Heavy release-gate tier (2026-09-07): `npm run ci` gates the push with
       // the fast tier and the pre-push hook launches the heavy tier DETACHED,

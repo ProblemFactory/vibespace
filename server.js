@@ -831,7 +831,7 @@ app.post('/api/telemetry', (req, res) => {
 app.get('/api/telemetry/summary', (req, res) => {
   try {
     telemetry.flush();
-    res.json({ ...telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) }), ...(req.query.drift === '1' ? { driftLedger: driftLedgerRows() } : {}) }); // ?drift=1 = ⚙ Diagnostics: the drift ledger (lane record-oracle-2-1-296)
+    res.json({ ...telemetry.summary({ days: Math.min(parseInt(req.query.days) || 14, 90) }), ...(req.query.drift === '1' ? { driftLedger: driftLedgerRows(), attended: (() => { try { return spendGuard.snapshot().attended; } catch { return null; } })() } : {}) }); // ?drift=1 = ⚙ Diagnostics: the drift ledger (lane record-oracle-2-1-296)
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Account + usage routes (src/server/account-usage-routes.js, decomposition #9) ──
