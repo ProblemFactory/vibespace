@@ -201,6 +201,14 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// A MUTANT IS SERVED BY THE HUB ITSELF, on the real bundle's road (主开发 2026-11-20 08:18Z: minified, the two mutant boots
+// still took 8646 ms and 8912 ms on the box against 2478–2894 ms for the real bundle's cold boots). It was handed to Chrome
+// through the debugging door: Fetch.fulfillRequest carrying the whole 17 MB bundle as one base64 message, with headers of
+// the suite's own (no charset, no-store), never the server's. Now each mutant is a file in the throwaway tree's public/,
+// and the page's /bundle.js request is CONTINUED to it (Fetch.continueRequest's url — the page never sees it): the same
+// server, express.static's own headers, the same network road as the real bundle. Its name holds no «bundle.js», so the
+// door's pattern never pauses it a second time.
+const servedMutant = (key, bundle, name) => { const file = `/vs-mut-${key}.js`; fs.writeFileSync(path.join(wt, 'public', file.slice(1)), bundle); return { bundle, file, name }; };
 // ROUND 7 — THE SERVER HALF'S STAND-IN (until int-C): this tree's vault-run door files no `facts` (lane vault-agent-own r20's
 // cardFactsOf) and no `late` mark (its r20b): the SCRATCH COPY's door hands the run card the facts the suite wrote (R7_FACTS)
 // and, while R7_LATE exists, keeps a card nobody answered OPEN at its 60 s, marked `late` (its expiresAt + 24 h) — the agent's
@@ -256,17 +264,24 @@ async function connect(target, NAME = 'A') {
   await new Promise((r) => sock.on('open', r));
   const pend = new Map();
   let bundleReq = null, bundleState = 'not requested';   // this page's last /bundle.js request (requestWillBeSent → loadingFinished / loadingFailed)
+  // THE BOOT'S PHASES (主开发 08:18Z: where do a mutant boot's eight seconds go?) — each the suite's own clock at the event, from
+  // the navigate: the bundle requested, paused at the door, answered, its response, its body done, the DOMContentLoaded
+  let ph = {};
+  const phases = () => [['request', 'request'], ['paused', 'paused at the door'], ['answered', 'answered'], ['response', 'response'], ['body', 'body done'], ['dcl', 'DOMContentLoaded']].map(([k, w]) => `${w} ${ph[k] != null ? '+' + (ph[k] - ph.t0) : '-'}`).join(' · ');
   sock.on('message', (d) => {
     const m = JSON.parse(d);
     if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); return; }
     if (m.method === 'Network.webSocketFrameReceived' || m.method === 'Network.webSocketFrameSent') WS_SEEN.push(String((m.params.response && m.params.response.payloadData) || ''));
-    if (m.method === 'Network.requestWillBeSent' && /\/bundle\.js(\?|$)/.test(m.params.request?.url || '')) { bundleReq = m.params.requestId; bundleState = 'requested'; }
-    else if (m.method === 'Network.loadingFinished' && m.params.requestId === bundleReq) bundleState = `finished (${m.params.encodedDataLength} bytes)`;
+    if (m.method === 'Network.requestWillBeSent' && /\/bundle\.js(\?|$)/.test(m.params.request?.url || '')) { bundleReq = m.params.requestId; bundleState = 'requested'; ph.request ??= Date.now(); }
+    else if (m.method === 'Network.responseReceived' && m.params.requestId === bundleReq) ph.response ??= Date.now();
+    else if (m.method === 'Network.loadingFinished' && m.params.requestId === bundleReq) { bundleState = `finished (${m.params.encodedDataLength} bytes)`; ph.body ??= Date.now(); }
+    else if (m.method === 'Page.domContentEventFired') ph.dcl ??= Date.now();
     else if (m.method === 'Network.loadingFailed' && m.params.requestId === bundleReq) bundleState = `failed: ${m.params.errorText}`;
     if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
     if (m.method === 'Fetch.requestPaused') {
       const p = m.params, u = new URL(p.request.url);
-      if (mutant?.bundle && u.pathname === '/bundle.js') sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.fulfillRequest', params: { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: 'Content-Type', value: 'application/javascript' }, { name: 'Cache-Control', value: 'no-store' }], body: mutant.bundle.toString('base64') } }));
+      if (u.pathname === '/bundle.js') { ph.paused ??= Date.now(); ph.answered ??= Date.now(); }
+      if (mutant?.file && u.pathname === '/bundle.js') sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.continueRequest', params: { requestId: p.requestId, url: u.origin + mutant.file } }));
       else sock.send(JSON.stringify({ id: ++seq, method: 'Fetch.continueRequest', params: { requestId: p.requestId } }));
     }
   });
@@ -301,15 +316,15 @@ async function connect(target, NAME = 'A') {
   };
   const load = async ({ boundMs = 30000 } = {}) => {
     const served = mutant?.bundle ? (mutant.name || 'a mutant') : 'the real bundle', t0 = Date.now();
-    bundleReq = null; bundleState = 'not requested';
+    bundleReq = null; bundleState = 'not requested'; ph = { t0 };
     await cdp('Page.navigate', { url: ORIGIN + '/' });
     const booted = await waitFor('!!(window.app && app.ready)', boundMs);
-    if (!booted) { const sc = await scene(); console.log(`    boot ${NAME} (${served}): NO ready app within ${boundMs} ms — ${JSON.stringify(sc)}`); throw new Error(`boot did not finish in ${boundMs / 1000} s on page ${NAME}, bundle ${served} — ${JSON.stringify(sc)}`); }
+    if (!booted) { const sc = await scene(); console.log(`    boot ${NAME} (${served}): NO ready app within ${boundMs} ms — ${JSON.stringify(sc)} — phases (ms after the navigate): ${phases()}`); throw new Error(`boot did not finish in ${boundMs / 1000} s on page ${NAME}, bundle ${served} — ${JSON.stringify(sc)}`); }
     const readyMs = Date.now() - t0;
     await evalJs('app.ready.then(() => true)');
     const gone = await waitFor(`!document.getElementById('loading-screen')`, 15000);
     if (!gone) { const sc = await scene(); console.log(`    boot ${NAME} (${served}): the loading screen stayed 15 s after the app was ready — ${JSON.stringify(sc)}`); throw new Error(`the loading screen did not go within 15 s on page ${NAME}, bundle ${served} — ${JSON.stringify(sc)}`); }
-    console.log(`    boot ${NAME} (${served}): app ready in ${readyMs} ms, the loading screen gone at ${Date.now() - t0} ms`);
+    console.log(`    boot ${NAME} (${served}): app ready in ${readyMs} ms, the loading screen gone at ${Date.now() - t0} ms — phases (ms after the navigate): ${phases()} · app ready +${readyMs} · bundle ${bundleState}`);
     await sleep(900);
   };
   const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
@@ -380,7 +395,7 @@ try {
     // NAME with its scene (never a nameless error from the next expression); its planted throw is not one of the product's
     // (taken back out of «no page threw»); then the real bundle boots again
     const errs0 = pageErrors.length;
-    mutant = { bundle: Buffer.from("throw new Error('vs-boot-control: this bundle never boots');\n"), name: 'the NEVER-BOOTS control' };
+    mutant = servedMutant('never-boots', Buffer.from("throw new Error('vs-boot-control: this bundle never boots');\n"), 'the NEVER-BOOTS control');
     let msg = '';
     try { await A.load({ boundMs: 5000 }); } catch (e) { msg = String(e && e.message || e); } finally { mutant = null; }
     const planted = pageErrors.splice(errs0).filter((x) => !/vs-boot-control/.test(x));
@@ -427,7 +442,7 @@ try {
   if (!NO_CARD) check('⓪ the RED CONTROL bundle builds from this source (its anchor is the chain\'s line)', false, NO_CARD_ERR);
   else try {
     console.log('⓪ RED CONTROL FIRST — userW\'s chat (no needs cards): the agent files its wake request, the chat says nothing');
-    mutant = { bundle: NO_CARD, name: 'the NO_CARD mutant' };
+    mutant = servedMutant('no-card', NO_CARD, 'the NO_CARD mutant');
     await A.load(); await openChat(A);
     say('now do:watch2');   // ONE turn, two wake requests (both chats titled «Ops room»)
     await logHas(/### watch2 1 rc=/);
@@ -624,7 +639,7 @@ try {
   check('the agent never saw the card: what reached the conversation holds none of its words (its stdin: the owner\'s own lines only), and no hub frame carried them', !/approved by you|denied by you|Waiting for you|Approve|Deny/.test(seen) && leaked.length === 0, { seen: seen.trim().split('\n'), leaked: leaked.length });
   if (!NO_STAMP) check('⑥ the stamp\'s RED CONTROL bundle builds (its anchors are this lane\'s lines)', false, NO_STAMP_ERR);
   else try {
-    mutant = { bundle: NO_STAMP, name: 'the NO_STAMP mutant' };
+    mutant = servedMutant('no-stamp', NO_STAMP, 'the NO_STAMP mutant');
     await B.front(); await B.load(); await openChat(B);
     await B.waitFor(`document.querySelectorAll('.cn-card.cn-done').length >= 2`, 15000);
     const red = await B.evalJs(CARD(wrPush && wrPush.id));
