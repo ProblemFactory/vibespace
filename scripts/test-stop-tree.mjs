@@ -933,7 +933,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
       ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(LP) && fs.existsSync(SP) && Number(fs.readFileSync(SP, 'utf8').trim()) > 1,
       before: () => {
         const lid = PI.identityOf(Number(fs.readFileSync(LP, 'utf8').trim())), hid = PI.identityOf(Number(fs.readFileSync(SP, 'utf8').trim())); mine.push(lid, hid);
-        return { after: async () => { await sleep(300); const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true }; for (const x of [lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };
+        return { after: async () => { await sleep(300); const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true }; for (const x of [...PI.treeOf([hid.pid]), lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };   // the stand-in's own sleep too (its read r3: it outlived the scene)
       } });
   };
   const la = await launchScene(WRAP, 'esc-launcher');

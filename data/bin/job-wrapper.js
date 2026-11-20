@@ -995,7 +995,8 @@ async function drainGroup() {
   // its SIGTERM leaves no child behind), at most three passes
   if (!taskStop && !keeps && stopping) {   // a stop landed while this drain waited: its stop step SIGTERMed this run's escapees — they are a stop's now,
     taskStop = true;                        // with what is left of THE STOP's grace (its read r2, S2: one clock), never killed at once
-    let lv = runOut.filter(same); const dl = stopAt + stopMs;
+    const seenL = new Set(), lv0 = [...runOut, ...escapedOf().filter(ours), ...stopTree].filter((p) => !seenL.has(termKey(p)) && seenL.add(termKey(p)));   // its read r3: a FRESH scan too — what appeared since the first, and the stop's own tree
+    let lv = lv0.filter(same); const dl = stopAt + stopMs;
     while (lv.length && Date.now() < dl) { await nap(25); lv = lv.filter(same); }
   }
   const killed = new Set();
