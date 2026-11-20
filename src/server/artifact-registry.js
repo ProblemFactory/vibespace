@@ -213,22 +213,27 @@ function foldHelpers(session, record, state) {
 /** → a promise that settles when every live helper fold of the session has (tests; a reader that must see them). */
 const helperSettled = (session) => Promise.resolve(session && session._helperArtifacts && session._helperArtifacts.chain);
 /** THE REBUILD'S READ (the normalizers' helper seam, before the derivation runs): every helper the records name, read off the loop →
- *  {ops: Map file → [{o, cwd}] | null}. The walk asks the hook as the fold will (its own `runs`), paced as the reads are. */
+ *  {files: WeakMap record → [{file, via}], ops: Map file → [{o, cwd}] | null}. The walk asks the hook ONCE a record, as the fold
+ *  would (its own `runs`), paced as the reads are; the fold takes the hook's answer from `files` (a claude end record's hook may list
+ *  the projects folder — asked twice it would be twice). */
+const NO_FILES = Object.freeze([]);
 async function helperPrefetch(session, records) {
   const h = session && harnessHooks(session);
   if (!h || !Array.isArray(records) || (session.host && session.host !== 'local')) return null;
-  const state = { runs: new Map() }, ops = new Map(), pace = pacer();
+  const state = { runs: new Map() }, files = new WeakMap(), ops = new Map(), pace = pacer();
   for (let i = 0; i < records.length; i++) {
     if (pace.due()) await pace.turn();
-    for (const { file } of helperFilesOf(session, records[i], state)) if (!ops.has(file)) ops.set(file, null);
+    const rec = records[i], named = helperFilesOf(session, rec, state);
+    if (rec && typeof rec === 'object') files.set(rec, named.length ? named : NO_FILES);
+    for (const { file } of named) if (!ops.has(file)) ops.set(file, null);
   }
   for (const file of ops.keys()) ops.set(file, await helperFileOps(h.artifactsOf, file));
-  return { ops };
+  return { files, ops };
 }
 /** THE REBUILD'S FOLD (sync): the ops a record that ENDS a helper brings — from `read` (helperPrefetch's), never from the disk. */
 function helperOps(session, record, state = { runs: new Map(), seen: new Set() }, read = null) {
-  const out = [];
-  for (const { file, via } of helperFilesOf(session, record, state)) for (const o of helperTagged(session, read && read.ops && read.ops.get(file), via, state)) out.push(o);
+  const out = [], named = read && read.files && record && typeof record === 'object' && read.files.get(record);
+  for (const { file, via } of named || helperFilesOf(session, record, state)) for (const o of helperTagged(session, read && read.ops && read.ops.get(file), via, state)) out.push(o);
   return out;
 }
 

@@ -241,6 +241,8 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     try { await run(); } finally { for (const k of K) fs[k] = real[k]; }
     return seen;
   };
+  // the subagents folder listed on the main thread while `run` runs (the claude hook's agentsIn: one listing a record that ends a helper)
+  const dirReads = async (run) => { let n = 0; const real = fs.readdirSync; fs.readdirSync = function (p0, ...a) { if (p0 === SUB) n++; return real.call(this, p0, ...a); }; try { await run(); } finally { fs.readdirSync = real; } return n; };
   const liveOf = async (reg, id, recs) => { const s = mk(id); reg.configure({ activeSessions: () => new Map([[id, s]]), log: quiet }); for (const r of recs) reg.observe(s, r); await reg.helperSettled(s); return s; };
   const rows = (s) => s._artifacts || {};
 
@@ -257,6 +259,14 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const rbReads = await mainReads(async () => { await N.rebuildHistory(R5, 'B1r', T5); });
   const want5 = [0, 1, 2, 3, 4, 5].map((i) => D + `f${i}.md`).concat(D + 'padded.md');
   ok(liveReads.length === 0 && rbReads.length === 0, 'NO MAIN-THREAD READ of the helper transcript — live (the Task\'s end) and at a rebuild', { live: liveReads, rebuild: rbReads });
+  const R5b = mk('B1r2', { _normalizer: null, _artifacts: null });
+  const lists = await dirReads(async () => { await N.rebuildHistory(R5b, 'B1r2', T5); });
+  const MQ = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), 'for (const { file, via } of named || helperFilesOf(session, record, state))', 'for (const { file, via } of helperFilesOf(session, record, state))', 'the fold asks the hook again'), 'askstwice');
+  MQ.configure({ activeSessions: () => new Map(), log: quiet });
+  const R5c = mk('B1r3', { _normalizer: null, _artifacts: null });
+  const listsTwice = await dirReads(async () => { await N.rebuildHistory(R5c, 'B1r3', T5); });
+  REG.configure({ activeSessions: () => new Map(), log: quiet }); // the real seam again
+  ok(lists === 1 && listsTwice === 2 && shape(rows(R5b)) === shape(rows(R5c)), 'the rebuild asks the helper hook ONCE a record (the prefetch\'s answer is the fold\'s): one listing of the subagents folder for the one end record; CONTROL a fold that asks again lists it twice', { lists, listsTwice });
   ok(C.pagedReadStats().reads >= pagedBefore + 1 && REG.helperReadStats().read === readBefore + 1, 'the read went through the transcript pool\'s pager (its paged-read count), ONCE: the rebuild used the ops kept for the unchanged file', { paged: C.pagedReadStats().reads - pagedBefore, read: REG.helperReadStats().read - readBefore, kept: REG.helperReadStats().kept });
   let M5 = null;
   const mReads = await mainReads(async () => { M5 = await liveOf(MR, 'B1m', T5); }); REG.configure({ activeSessions: () => new Map(), log: quiet }); // the copy's configure pointed the rebuild's helper seam at itself — the real one again
