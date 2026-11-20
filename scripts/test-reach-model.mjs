@@ -54,6 +54,17 @@ console.log('§1 the token derivation (three real suites, their closures)');
   ok(rc.probe.has('api:home') && [...rc.probe].every((k) => k.startsWith('api:')), `the PROBE routes are derived (≥ ${RM.PROBE_MIN} booting suites spell them) and never a window or a module: ${[...rc.probe].join(' ')}`);
   ok(!heavy.some((s) => rc.suite(s).derived.has('api:home')), 'a probe route is no suite\'s reach (every boot waits on /api/home — the sentinel smokes it)');
   ok(['scripts/scratch.mjs', 'scripts/git-env.mjs'].every((f) => rc.harness.has(f)) && !rc.harness.has('scripts/reach-model.mjs'), `the harness is derived (≥ ${RM.HARNESS_MIN} heavy suites load it): ${[...rc.harness].join(' ')}`);
+  // THE HARNESS IMPORTS NOTHING OF THE GATE'S (主开发 r436, 2026-11-20: .414 line 46's dynamic import of ci.mjs in
+  // scripts/scratch-run.mjs put ci.mjs, reach-model.mjs and affected-model.mjs in the harness, so every ci.mjs change would have
+  // selected every heavy suite). By name, two ways: no file of RM.TOOLING is in the derived harness, and no harness file's code
+  // (comments stripped) quotes one as a module path — a static import, a dynamic one, a new URL. CONTROL: line 46's own spelling.
+  const toolNamed = (src) => { const code = RM.stripComments(src); return RM.TOOLING.filter((t) => new RegExp(`['"\`](?:\\.{1,2}/|[^'"\`\\s]*/)?${path.basename(t).replace(/\./g, '\\.')}['"\`]`).test(code)); };
+  const toolsIn = RM.TOOLING.filter((t) => rc.harness.has(t));
+  const naming = [...rc.harness].filter((f) => !RM.TOOLING.includes(f)).map((f) => { let src = ''; try { src = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { } return [f, toolNamed(src)]; }).filter(([, n]) => n.length);
+  ok(toolsIn.length === 0 && naming.length === 0, `the harness imports nothing of the gate's (${RM.TOOLING.join(' ')}) — in the harness: ${toolsIn.join(' ') || 'none'}; a harness file quoting one: ${naming.map(([f, n]) => `${f} → ${n.join(' ')}`).join(' · ') || 'none'} (${rc.harness.size} harness files read)`);
+  ok(toolNamed("export async function f() { const { scratchRootOf } = await import('./ci.mjs'); return scratchRootOf; }").join() === 'scripts/ci.mjs' && toolNamed("import { x } from '../scripts/reach-model.mjs';").join() === 'scripts/reach-model.mjs'
+    && toolNamed("const u = new URL('./affected-model.mjs', import.meta.url);").join() === 'scripts/affected-model.mjs' && toolNamed("// const { x } = await import('./ci.mjs');\nconsole.error('run node scripts/ci.mjs --reap');").length === 0,
+    'CONTROL: line 46\'s spelling (a dynamic import of ./ci.mjs), a static import of reach-model.mjs and a new URL of affected-model.mjs are named; a comment and a message naming a command are not');
   // the window-type literal rule: a transcript record's `type: 'system'` names no window; createWindow / a hyphenated type does
   const ctx = RM.tokenContext({ types: new Map([['system', {}], ['browser-live', {}]]), actionType: new Map([['openSystem', 'system']]) });
   const t1 = RM.suiteTokens("{ type: 'system', subtype: 'init' }", ctx), t2 = RM.suiteTokens("wm.createWindow({ id, type: 'system' }); w.type === 'browser-live'; app.openSystem();", ctx);

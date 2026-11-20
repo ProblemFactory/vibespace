@@ -195,7 +195,8 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { gitEnvFrom } from './git-env.mjs';
-import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwnerState, stampScratchRun } from './scratch-run.mjs';
+import { procStat, procBootMs, procBornMs, machineBootId, readRunRecord, runOwnerState, stampScratchRun, SCRATCH_ROOT_RE, SCRATCH_ROOTS_ENV, extraRootPatterns, extraRootRes, passwdHome, scratchRootOf } from './scratch-run.mjs';
+export { SCRATCH_ROOT_RE, SCRATCH_ROOTS_ENV, extraRootPatterns, passwdHome, scratchRootOf };   // the scratch roots' ONE implementation is scratch-run.mjs's (the reach cure)
 import { sweepScratchDirs, sweepDue, sweepPaceLine } from './scratch-sweep.mjs';
 import { hangReportName, hangReportArgv, askThenKill, readHangReport } from './hang-report.mjs';
 import { WORK_ROOT } from './scratch.mjs';
@@ -1818,66 +1819,16 @@ export const killedFromOutside = (r) => !!(r && r.signal && OUTSIDE_SIGNALS.incl
 // deleted dir, parented by its terminal, is owned and spared); the name
 // allowlist below survives ONLY for the not-gone/stale rule, where the dir
 // still exists and a name is the one extra fact that it is a suite's.
-export const SCRATCH_ROOT_RE = /^\/tmp\/vs-[A-Za-z0-9._-]+/;
+// SCRATCH_ROOT_RE (/tmp/vs-<name>, the built-in shape) is defined in scripts/scratch-run.mjs since the reach cure — imported above
 // LANE H VERIFY r2 (M2): THE PRODUCT'S OWN ROOT IS NEVER SCRATCH. src/browser-profiles.js socketDirDecision's
 // long-home remedy is `<base>/vs-ab-<uid>` (`vs-ab-u` when the uid is unknown) under the LITERAL /tmp — the scratch
 // shape exactly, and AGENT_BROWSER_SOCKET_DIR is a root, so a production daemon and its Chrome were candidates
 // ('scratch dir gone' after a tmp cleaner, 'orphaned' by name when not). That exact shape is excluded here, and
 // scripts/scratch.mjs refuses to mint it (`scratch('ab')`), so no suite can ever hide under it either.
 export const PRODUCT_ROOT_RE = /^\/tmp\/vs-ab-(?:\d+|u)$/;
-// B-f397 (lane bl-scratch, 2026-11-17): SCRATCH ROOTS OUTSIDE /tmp/vs-*, BY CONFIGURATION. An acceptance run on a lanes box boots
-// its scratch hubs and Chromes inside its own worktree (`…/wt-accept-<lane>/.rev-shell/`, `…/.chrome-<n>/`), never under /tmp/vs-*:
-// a dtach + chat-wrapper pair and a headless Chrome outlived their runs by hours there, and no census listed them. The box's gate
-// names those roots in VIBESPACE_CI_SCRATCH_ROOTS — ':'-separated absolute PATTERNS, `*` = one name ([A-Za-z0-9._-]+) inside one
-// path segment (`/srv/lanes/wt-accept-*/.rev-*`) — and the reaper judges a process naming one exactly as one naming /tmp/vs-*: its
-// run record, its owner (owner-gone), its directory (dir-gone) — never the record-less name rule: an acceptance in flight looks
-// exactly like its stray, so a configured root with no record is spared and said. Unset (the default, every runner): nothing changes.
-// Never the directory sweep's units (a root here is a worktree's folder, removed by whoever made it) and never a test seam's
-// table root (procRootSeam keeps /tmp/vs-*), never the deleted-cwd stat (a configured root may sit on a slow mount). A pattern that
-// is not absolute, has an empty, `.` or `..` segment, fewer than three segments, no `*` in its last segment, no two-character
-// name before that `*` or a character outside the name set is refused and said, once per value; a root that is, holds or lies
-// inside the home, the checkout or the gate's cwd is never a root.
-export const SCRATCH_ROOTS_ENV = 'VIBESPACE_CI_SCRATCH_ROOTS';
-/** The patterns of a VIBESPACE_CI_SCRATCH_ROOTS value: { ok: [{ pattern, re }], refused: [{ pattern, why }] } (PURE). */
-export function extraRootPatterns(v = process.env[SCRATCH_ROOTS_ENV]) {
-  const ok = [], refused = [];
-  for (const pattern of String(v || '').split(':').map((x) => x.trim()).filter(Boolean)) {
-    const segs = pattern.split('/');
-    const why = !pattern.startsWith('/') ? 'not absolute' : segs.slice(1).some((x) => !x) ? 'an empty segment'
-      : segs.some((x) => x === '.' || x === '..') ? 'a . or .. segment' : segs.length < 4 ? 'fewer than three segments'
-        : !segs[segs.length - 1].includes('*') ? 'no * in its last segment' : !/^[^*]{2,}\*/.test(segs[segs.length - 1]) ? 'no name of two characters before the * of its last segment (a bare * claims every folder there)'
-          : !segs.every((x) => /^[A-Za-z0-9._*-]*$/.test(x)) ? 'a character outside [A-Za-z0-9._-] and *' : null;
-    if (why) refused.push({ pattern, why });
-    else ok.push({ pattern, re: new RegExp('^' + segs.map((x) => x.replace(/\./g, '\\.').replace(/\*/g, '[A-Za-z0-9._-]+')).join('/')) });
-  }
-  return { ok, refused };
-}
-let extraRootsSeen = { v: null, res: [] };
-const extraRootRes = () => {
-  const v = process.env[SCRATCH_ROOTS_ENV] || '';
-  if (extraRootsSeen.v !== v) {
-    const p = extraRootPatterns(v);
-    for (const r of p.refused) console.error(`[ci] scratch reaper: ${SCRATCH_ROOTS_ENV} pattern «${r.pattern}» refused — ${r.why}`);
-    extraRootsSeen = { v, res: p.ok.map((x) => x.re) };
-  }
-  return extraRootsSeen.res;
-};
-/** The scratch root a (normalized) path begins with — `/tmp/vs-<name>`, else a VIBESPACE_CI_SCRATCH_ROOTS root — or null. A
- *  configured root that IS, holds or lies inside the account's home, this checkout or the gate's cwd is never one. */
-// batch 34 cure (主开发 09:32Z): THE REAL HOME IS NEVER A SCRATCH ROOT — the home is judged by the ACCOUNT'S REAL home (the passwd
-// entry) as well as by HOME, so a gate run under a scratch HOME still refuses a configured root that is, holds or lies inside the
-// real one (and the mount under it). A path compared, nothing read there (test-architecture §68's one reasoned scripts site). Read
-// once, and only once a pattern is configured (an import of ci.mjs — the pre-push hook — reads no passwd entry).
-let passwdHomeMemo;
-export const passwdHome = () => (passwdHomeMemo !== undefined ? passwdHomeMemo : (passwdHomeMemo = (() => { try { return os.userInfo().homedir || null; } catch { return null; } })()));
-export function scratchRootOf(s) {
-  const m = SCRATCH_ROOT_RE.exec(s); if (m) return m[0];
-  const extras = extraRootRes(); if (!extras.length) return null;
-  const near = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
-  const kept = [os.homedir(), process.env.HOME, passwdHome(), path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()].filter(Boolean).map((p) => path.resolve(p));
-  for (const re of extras) { const x = re.exec(s); if (x && !kept.some((k) => near(x[0], k))) return x[0]; }
-  return null;
-}
+// B-f397's CONFIGURED ROOTS — SCRATCH_ROOTS_ENV, extraRootPatterns, extraRootRes, passwdHome, scratchRootOf (and SCRATCH_ROOT_RE)
+// live in scripts/scratch-run.mjs since the reach cure (2026-11-20): ONE implementation in the harness's own file, which imports
+// nothing of the gate's; this file imports them (above) and re-exports the public ones, so every caller still asks ci.mjs.
 /** LANE H VERIFY r2 (L3): a Chrome that rewrote its process title has ONE space-joined /proc cmdline (a CfT build: no
  *  NUL at all, measured on this box) — the flag is read off the joined string too, both spellings. VERIFY r3 (MINOR 2):
  *  ONLY off such a cmdline — a NUL-separated argv is read exactly (the value is the whole element, a space in it

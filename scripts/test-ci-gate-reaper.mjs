@@ -13,6 +13,7 @@ import { fileURLToPath } from 'node:url';
 import { SUITES, EXCLUDED, censusFindings, listSuiteFiles, heavyBlocker, machineGlobalFixtures, defaultLockPath, killedFromOutside, OUTSIDE_SIGNALS, scratchOrphans, extraRootPatterns, scratchRootOf, judgeScratch, liveScratchPaths, SCRATCH_ROOT_RE, REAP_NAMES, reapReport, reapByHand, scratchRootsOf, ROOT_ENV, argvScratchRoots, PRODUCT_ROOT_RE, FAST_DISQUALIFIERS, FAST_MAX_MS, fastRuleFindings, FAST_SUM_CAP_MS , passwdHome } from './ci.mjs';
 import { pathToFileURL } from 'node:url';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // already loaded (ci.mjs and mutant-copy import it): the batch 34 controls' door
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { REPO, GIT_ENV, ok, tmpDirs, mktmp, git, makeRepo, commit, STUB_SLICE, stubGateRepo, writeMarker, report } from './ci-gate-kit.mjs'; // the shared kit (lane fast-tier-ratchet: the gate is seven ≤ 10 s parts)
 // batch 34 cure (the readers, 09:32Z): two fixtures here lie outside /tmp/vs-* on purpose (the configured-root leg's, the plain
@@ -635,12 +636,15 @@ console.log('\n§9d the directory sweep (B-60d2)');
         `train-410 gate cure (b): the cases a gate may put its checkout in, each answered as the law says — ${standIns.map((x) => `${x.p} → ${x.words}`).join(' | ')}`);
       // batch 34 cure (主开发 09:32Z, as if a must): THE GUARD THAT KEEPS THE HOME (and the workspace mount under it) FROM EVER BEING
       // A ROOT HAS ITS OWN RED CONTROL — the HOME variable, the account's REAL home under a scratch HOME, and the gate's cwd; each a
-      // mutant of ci.mjs that drops that guard from the kept list goes red (it names the folder a root). Pure: no folder is read.
+      // mutant of scripts/scratch-run.mjs (where scratchRootOf lives since the reach cure; ci.mjs re-exports it) that drops that guard
+      // from the kept list goes red (it names the folder a root). Pure: no folder is read. Built through anchored(): a moved line fails by name.
+      const RUNSRC = fs.readFileSync(path.join(REPO, 'scripts/scratch-run.mjs'), 'utf-8');
+      const mutantRun = async (tag, from, to) => import(pathToFileURL(M9d.write('scripts/scratch-run.mjs', anchored(RUNSRC, from, to, `test-ci-gate-reaper batch 34 ${tag}`), tag)).href);
       const KEPT = '[os.homedir(), process.env.HOME, passwdHome(), ';
-      const noVar = await mutant9('no-home-var', KEPT, '[passwdHome(), '), noReal = await mutant9('no-home-real', KEPT, '[os.homedir(), process.env.HOME, '), noCk = await mutant9('no-checkout', "passwdHome(), path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()]", 'passwdHome(), process.cwd()]'), noCwd = await mutant9('no-cwd', ', process.cwd()].filter(Boolean)', '].filter(Boolean)');
+      const noVar = await mutantRun('no-home-var', KEPT, '[passwdHome(), '), noReal = await mutantRun('no-home-real', KEPT, '[os.homedir(), process.env.HOME, '), noCk = await mutantRun('no-checkout', "passwdHome(), path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()]", 'passwdHome(), process.cwd()]'), noCwd = await mutantRun('no-cwd', ', process.cwd()].filter(Boolean)', '].filter(Boolean)');
       const homes = path.join(acc, 'hh-homes'), H = path.join(homes, 'hh-scratch-home'), C = path.join(acc, 'cc-cwds', 'cc-gate-cwd');
       for (const d of [H, C]) fs.mkdirSync(d, { recursive: true });
-      const prevHome = process.env.HOME, cwd0 = process.cwd(), realHome = passwdHome();   // ci.mjs's own read (§68's one reasoned site), never a second one
+      const prevHome = process.env.HOME, cwd0 = process.cwd(), realHome = passwdHome();   // the reader's own read (scratch-run.mjs, §68's one reasoned site), never a second one
       try {
         process.env.HOME = H;   // os.homedir() answers HOME while it is set: a scratch HOME
         process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${homes}/hh*`;
@@ -648,7 +652,7 @@ console.log('\n§9d the directory sweep (B-60d2)');
           `batch 34 cure: a configured root that IS the HOME is never a root; CONTROL — the HOME guard dropped, it is (${noVar.scratchRootOf ? noVar.scratchRootOf(path.join(H, 'x')) : JSON.stringify(noVar)})`);
         const inReal = realHome ? `${realHome}/zz-vs-never/zz-a-root` : null;   // made-up names inside the account's real home: the pattern is judged, nothing is read
         if (realHome) process.env.VIBESPACE_CI_SCRATCH_ROOTS = `${realHome}/zz-vs-never/zz-a*`;   // one level deeper: three segments even for a home of /root
-        if (!realHome || extraRootPatterns().ok.length !== 1) console.log(`  ○ SKIP batch 34 cure (b): ${!realHome ? 'this uid has no passwd entry — ci.mjs keeps no real home either, only the variable' : "the account's real home cannot be spelled as a pattern (/ or a character outside the pattern set), so no configured root can name a folder inside it"}`);
+        if (!realHome || extraRootPatterns().ok.length !== 1) console.log(`  ○ SKIP batch 34 cure (b): ${!realHome ? 'this uid has no passwd entry — the reader keeps no real home either, only the variable' : "the account's real home cannot be spelled as a pattern (/ or a character outside the pattern set), so no configured root can name a folder inside it"}`);
         else ok(scratchRootOf(path.join(inReal, 'x')) === null && noReal.scratchRootOf && noReal.scratchRootOf(path.join(inReal, 'x')) === inReal,
           `batch 34 cure: under a scratch HOME the account's REAL home still holds no root; CONTROL — judged by the variable alone, a pattern inside it names a root (${noReal.scratchRootOf ? (noReal.scratchRootOf(path.join(inReal, 'x')) === inReal ? 'it does' : 'it does not') : JSON.stringify(noReal)})`);
         if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;

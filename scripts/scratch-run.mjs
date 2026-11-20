@@ -24,6 +24,7 @@
 // DEAD — jobs.js `_verifyAlive` is the same identity rule). A process naming a
 // root whose owner is alive is never a candidate, whatever else it names.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -121,16 +122,76 @@ export function runOwnerState(rec, { procRoot = '/proc', bootId = machineBootId(
   return { alive: true, why: `${who} is alive` };
 }
 
+// ── THE SCRATCH ROOTS (moved here from scripts/ci.mjs, 2026-11-20 — the reach cure). THE HARNESS IMPORTS NOTHING OF THE GATE'S:
+// most heavy suites load this file, so the stamp door's dynamic import of ci.mjs (.414 line 46) put ci.mjs, reach-model.mjs
+// and affected-model.mjs in the harness the reach model derives — test-reach-model red, and every ci.mjs change (the fast cap's
+// arithmetic, nearly every pick) would have selected every heavy suite. ONE implementation, here; ci.mjs imports and re-exports
+// it; test-reach-model pins that no harness file names the gate's tooling.
+export const SCRATCH_ROOT_RE = /^\/tmp\/vs-[A-Za-z0-9._-]+/;   // the built-in shape /tmp/vs-<name> (ci.mjs's reaper essay: candidacy is evidence)
+// B-f397 (lane bl-scratch, 2026-11-17): SCRATCH ROOTS OUTSIDE /tmp/vs-*, BY CONFIGURATION. An acceptance run on a lanes box boots
+// its scratch hubs and Chromes inside its own worktree (`…/wt-accept-<lane>/.rev-shell/`, `…/.chrome-<n>/`), never under /tmp/vs-*:
+// a dtach + chat-wrapper pair and a headless Chrome outlived their runs by hours there, and no census listed them. The box's gate
+// names those roots in VIBESPACE_CI_SCRATCH_ROOTS — ':'-separated absolute PATTERNS, `*` = one name ([A-Za-z0-9._-]+) inside one
+// path segment (`/srv/lanes/wt-accept-*/.rev-*`) — and the reaper judges a process naming one exactly as one naming /tmp/vs-*: its
+// run record, its owner (owner-gone), its directory (dir-gone) — never the record-less name rule: an acceptance in flight looks
+// exactly like its stray, so a configured root with no record is spared and said. Unset (the default, every runner): nothing changes.
+// Never the directory sweep's units (a root here is a worktree's folder, removed by whoever made it) and never a test seam's
+// table root (procRootSeam keeps /tmp/vs-*), never the deleted-cwd stat (a configured root may sit on a slow mount). A pattern that
+// is not absolute, has an empty, `.` or `..` segment, fewer than three segments, no `*` in its last segment, no two-character
+// name before that `*` or a character outside the name set is refused and said, once per value; a root that is, holds or lies
+// inside the home, the checkout or the gate's cwd is never a root.
+export const SCRATCH_ROOTS_ENV = 'VIBESPACE_CI_SCRATCH_ROOTS';
+/** The patterns of a VIBESPACE_CI_SCRATCH_ROOTS value: { ok: [{ pattern, re }], refused: [{ pattern, why }] } (PURE). */
+export function extraRootPatterns(v = process.env[SCRATCH_ROOTS_ENV]) {
+  const ok = [], refused = [];
+  for (const pattern of String(v || '').split(':').map((x) => x.trim()).filter(Boolean)) {
+    const segs = pattern.split('/');
+    const why = !pattern.startsWith('/') ? 'not absolute' : segs.slice(1).some((x) => !x) ? 'an empty segment'
+      : segs.some((x) => x === '.' || x === '..') ? 'a . or .. segment' : segs.length < 4 ? 'fewer than three segments'
+        : !segs[segs.length - 1].includes('*') ? 'no * in its last segment' : !/^[^*]{2,}\*/.test(segs[segs.length - 1]) ? 'no name of two characters before the * of its last segment (a bare * claims every folder there)'
+          : !segs.every((x) => /^[A-Za-z0-9._*-]*$/.test(x)) ? 'a character outside [A-Za-z0-9._-] and *' : null;
+    if (why) refused.push({ pattern, why });
+    else ok.push({ pattern, re: new RegExp('^' + segs.map((x) => x.replace(/\./g, '\\.').replace(/\*/g, '[A-Za-z0-9._-]+')).join('/')) });
+  }
+  return { ok, refused };
+}
+let extraRootsSeen = { v: null, res: [] };
+export const extraRootRes = () => {
+  const v = process.env[SCRATCH_ROOTS_ENV] || '';
+  if (extraRootsSeen.v !== v) {
+    const p = extraRootPatterns(v);
+    for (const r of p.refused) console.error(`[ci] scratch reaper: ${SCRATCH_ROOTS_ENV} pattern «${r.pattern}» refused — ${r.why}`);
+    extraRootsSeen = { v, res: p.ok.map((x) => x.re) };
+  }
+  return extraRootsSeen.res;
+};
+/** The scratch root a (normalized) path begins with — `/tmp/vs-<name>`, else a VIBESPACE_CI_SCRATCH_ROOTS root — or null. A
+ *  configured root that IS, holds or lies inside the account's home, this checkout or the gate's cwd is never one. */
+// batch 34 cure (主开发 09:32Z): THE REAL HOME IS NEVER A SCRATCH ROOT — the home is judged by the ACCOUNT'S REAL home (the passwd
+// entry) as well as by HOME, so a gate run under a scratch HOME still refuses a configured root that is, holds or lies inside the
+// real one (and the mount under it). A path compared, nothing read there (test-architecture §68's one reasoned scripts site). Read
+// once, and only once a pattern is configured (an import of this file or of ci.mjs — every suite, the pre-push hook — reads no passwd entry).
+let passwdHomeMemo;
+export const passwdHome = () => (passwdHomeMemo !== undefined ? passwdHomeMemo : (passwdHomeMemo = (() => { try { return os.userInfo().homedir || null; } catch { return null; } })()));
+export function scratchRootOf(s) {
+  const m = SCRATCH_ROOT_RE.exec(s); if (m) return m[0];
+  const extras = extraRootRes(); if (!extras.length) return null;
+  const near = (a, b) => a === b || a.startsWith(b + '/') || b.startsWith(a + '/');
+  const kept = [os.homedir(), process.env.HOME, passwdHome(), path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), process.cwd()].filter(Boolean).map((p) => path.resolve(p));
+  for (const re of extras) { const x = re.exec(s); if (x && !kept.some((k) => near(x[0], k))) return x[0]; }
+  return null;
+}
+
 // B-f397: THE STAMP DOOR — a root made outside this tree's helpers (an acceptance's `.rev-shell/` or `.chrome-<n>/` under its own
 // worktree, named by the box gate's VIBESPACE_CI_SCRATCH_ROOTS) is stamped by whoever made it, at once:
 //   node scripts/scratch-run.mjs stamp <root> --owner <pid>
 // The OWNER is required: the root's own long-lived process — the scratch hub or the browser started in it, its pid — never this
 // command's own pid, which ends at once (its record would read the root's live processes as orphaned at the next sweep).
-// Refused by name, exit 2, nothing written: no root named or not a directory; a folder the reaper does not name as a root (ci.mjs
-// scratchRootOf: /tmp/vs-* or a configured pattern — the root itself, never a folder beneath one, never the home or the checkout);
+// Refused by name, exit 2, nothing written: no root named or not a directory; a folder the reaper does not name as a root
+// (scratchRootOf, above: /tmp/vs-* or a configured pattern — the root itself, never a folder beneath one, never the home or the checkout);
 // an owner that is no live process of this user, or a SERVICE MANAGER (pid 1, a `systemd` or `init` — it never ends, so the root would
 // never be judged: under env.sh a command's $PPID is the user manager). Then `ci.mjs --reap --dry-run` judges the root's processes by that owner, as it
-// judges every root's. ci.mjs is read only on this road (a dynamic import: ci.mjs itself imports this file).
+// judges every root's.
 export async function stampCli(argv = process.argv.slice(2), { procRoot = '/proc', out = (s) => process.stdout.write(s), err = (s) => process.stderr.write(s) } = {}) {
   const refuse = (why) => { err(`scratch-run stamp: refused — ${why}\n`); return 2; };
   if (argv[0] !== 'stamp') return refuse('usage: node scripts/scratch-run.mjs stamp <root> --owner <pid>');
@@ -141,7 +202,6 @@ export async function stampCli(argv = process.argv.slice(2), { procRoot = '/proc
   let st = null; try { st = fs.statSync(root); } catch { return refuse(`${root} does not exist`); }
   if (!st.isDirectory()) return refuse(`${root} is not a directory`);
   let real = root; try { real = fs.realpathSync(root); } catch { real = root; }
-  const { scratchRootOf } = await import('./ci.mjs');
   if (scratchRootOf(real) !== real) return refuse(`${real} is no scratch root the reaper names (/tmp/vs-* or a VIBESPACE_CI_SCRATCH_ROOTS pattern — the root itself, never a folder beneath one)`);
   const ps = procStat(owner, procRoot);
   if (!ps || ps.state === 'Z' || ps.state === 'X') return refuse(`the owner ${owner} is no live process`);
