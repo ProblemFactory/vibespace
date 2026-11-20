@@ -466,7 +466,7 @@ const paintHolderFailures = (src) => {
   console.log(`    judged (the settings paint, ${TD_REL}): ${JSON.stringify(hb)}`);
   ok(hb.length === 0, 'r600 (1): the Task Group settings paint holds no copy of another record\'s words between paints — no whole-group store; parents, the inherited rules and rows read the LIVE list at use; the parents\' row paths stay out of the paint\'s shared scope', hb);
   const LIVE = '    const groupNow = (id) => (sidebar._tasks || []).find((g) => g && g.id === id) || null;\n';
-  const redA = paintHolderFailures(anchored(TD_SRC, LIVE, LIVE + '    const byId = new Map((sidebar._tasks || []).map((g) => [g.id, g]));\n', 'paint-whole-group-store'));
+  const redA = paintHolderFailures(anchored(TD_SRC, LIVE, LIVE + '    const byId = new Map((sidebar._tasks || []).map((g) => [g.id, g]));\n', 'paint-whole-group-store'));   // stale-pins: kept (the RED plants U5a's byId back)
   const SEEN = '    const inhRows = ((seenAt) => ';
   const redB = paintHolderFailures(anchored(TD_SRC, SEEN, '    const seenAt = new Set();\n' + SEEN, 'paint-seen-set-in-scope'));
   console.log(`    judged (RED: U5a's byId planted back): ${JSON.stringify(redA)} · (RED: the seen set back in the paint): ${JSON.stringify(redB)}`);

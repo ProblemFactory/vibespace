@@ -342,11 +342,11 @@ console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry adm
   ok(fb.length === 0, 'r600 (3): on a finger device every control the grant picker draws (the «仅本组» switch, the chip and its ×, the kept ×, the input, the trigger, the rows, the doors) is a 44 px target, written ONCE on the picker\'s own classes and never undercut by a dialog', fb);
   const fr0 = css.indexOf('@media (pointer: coarse), (max-width: 480px) {\n  .pp-input, .pp-trigger, .pp-except-toggle, .pp-chip-door, .pp-row { min-height: 44px; }'), fr1 = css.indexOf('\n}\n', fr0) + 3;
   const noRule = fr0 > 0 ? anchored(css, css.slice(fr0, fr1), '', 'finger-rule-gone') : css;
-  const dlg = anchored(css, "  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", "  .exit-access-dialog .pp-chip { min-height: 36px; }\n  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", 'dialog-undercut');
+  const dlg = anchored(css, "  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", "  .exit-access-dialog .pp-chip { min-height: 36px; }\n  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", 'dialog-undercut');   // stale-pins: kept (the RED plants the dialog's old 36 px copy back)
   const rA = fingerFailures(noRule, i18n), rB = fingerFailures(dlg, i18n);
   console.log(`    judged (RED: the finger rule removed): ${JSON.stringify(rA.slice(0, 3))} · (RED: a dialog's 36 px copy planted back): ${JSON.stringify(rB)}`);
   ok(fr0 > 0 && rA.some((b) => /^\.pp-chip-only: no coarse-pointer rule/.test(b)), 'NEGATIVE CONTROL: the stylesheet without the finger rule fails — the «仅本组» switch has no 44 px target', rA);
-  ok(rB.some((b) => /exit-access-dialog \.pp-chip/.test(b)), 'NEGATIVE CONTROL: a dialog\'s own 36 px copy of the chip planted back fails — it outranks the picker\'s rule', rB);
+  ok(rB.some((b) => /exit-access-dialog \.pp-chip/.test(b)), 'NEGATIVE CONTROL: a dialog\'s own 36 px copy of the chip planted back fails — it outranks the picker\'s rule', rB);   // stale-pins: kept (the RED plants the dialog's old 36 px copy back)
 }
 
 console.log(`\n(${Date.now() - t0} ms)`);
