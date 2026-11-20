@@ -42,6 +42,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A paired machine's reply that is too large is now refused for that one request, with its size and the limit; it used to end the whole connection.
 - On a paired machine, VibeSpace's hooks keep working after VibeSpace updates the Node it runs on.
 - On a paired machine, VibeSpace's hooks are set up with the agent's own Node first, so a too old Node first on PATH no longer breaks them.
+- A job named «password reset» or «auth: fix login flow» keeps its words; a password or key typed in a job's name is still hidden, extra spaces too.
 
 ## 2.369.413 — 2026-11-20
 
