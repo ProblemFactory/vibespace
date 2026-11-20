@@ -501,7 +501,7 @@ class UserTodoManager {
     // interval — the store's OWN timer, because server.js has no shared sweep
     // cadence other stores hook into (each keeper runs its own).
     this._expiryTimer = null;
-    if (setAside) { this._fileSetAside(setAside); try { this.flush(); } catch { } this.whenWritten().then(() => this._dropIntentOff(), () => { }); }   // B-44f3: the notice naming the bytes on disk AT ONCE (a crash later in this boot keeps it); the intent goes after
+    if (setAside) { this._fileSetAside(setAside); if (this._writeTimer) { clearTimeout(this._writeTimer); this._writeTimer = null; } this._flushFromTimer(); this.whenWritten().then(() => this._dropIntentOff(), () => { }); }   // 主开发 r348 (2): at once, and a failed write takes the store's own road (reported, retried with its backoff)   // B-44f3: the notice naming the bytes on disk AT ONCE (a crash later in this boot keeps it); the intent goes after
     this.expireDue();
     if (expirySweepMs > 0) {
       this._expiryTimer = setInterval(() => { try { this.expireDue(); } catch { } }, expirySweepMs);
@@ -510,11 +510,15 @@ class UserTodoManager {
   }
 
   /** the set-aside's name beside the file (ONE spelling: the boot's set-aside and the read again's) */
-  _asideName() { return `user-todos.json.corrupt-${new Date(this._now()).toISOString().replace(/[:.]/g, '-')}`; }
+  _asideName(k = 0) { return `user-todos.json.corrupt-${new Date(this._now()).toISOString().replace(/[:.]/g, '-')}${k ? `-${k}` : ''}`; }
+  /** 主开发 r348 (3): the aside's name never REPLACES an earlier aside (a rename over it would be silent — it can be the only copy
+   *  of a person's items): the first free name, a counter after the stamp. Sync on the boot's road, off the loop on the read again's */
+  _freeAsideName() { const dir = path.dirname(this._file); let k = 0; while (k < 100 && fs.existsSync(path.join(dir, this._asideName(k)))) k++; return this._asideName(k); }
+  async _freeAsideNameOff() { const dir = path.dirname(this._file); let k = 0; while (k < 100 && await fs.promises.access(path.join(dir, this._asideName(k))).then(() => true, () => false)) k++; return this._asideName(k); }
   /** r9: the unreadable file RENAMED beside itself (a copy when the rename cannot be done) → {why, to | null}. */
   _setAside(why, { quiet = false } = {}) {   // B-44f3: `quiet` — a damaged hold's retry says its failure once (the hold said it)
     const dir = path.dirname(this._file);
-    const to = this._asideName();
+    const to = this._freeAsideName();
     try { fs.renameSync(this._file, path.join(dir, to)); }
     catch (e) {
       try { fs.copyFileSync(this._file, path.join(dir, to)); }
@@ -648,9 +652,14 @@ class UserTodoManager {
         const why0 = a.error ? `corrupt JSON (${String((a.error && a.error.message) || a.error).slice(0, 80)})` : 'not the expected shape';
         // B-44f3 remainder: the set-aside's INTENT first (off the loop) — a process that ends between the rename and the list's write
         // (the hub's exit runs no continuation) is named by the next boot from it (_bootIntent)
-        const to0 = this._asideName();
+        const to0 = await this._freeAsideNameOff();
+        if (this._unreadStopped || !this._unread) return !this._unread;
         this._heldIntent = null;   // a kept intent of the boot is replaced by this set-aside's own
-        try { await fs.promises.writeFile(this._intentPath(), JSON.stringify({ why: why0, to: to0 })); } catch (e) { console.warn(`[user-todos] the set-aside's intent could not be written (${(e && e.message) || e}) — set aside all the same`); }
+        // 主开发 r348 (1): the intent NOT written (a full disk) ⇒ nothing is set aside — the store STAYS held: the live file is the
+        // bytes' safe copy (a rename through without its intent would leave, after an exit, an empty For you and an aside nobody names)
+        let intentOk = true;
+        try { await fs.promises.writeFile(this._intentPath(), JSON.stringify({ why: why0, to: to0 })); } catch (e) { intentOk = false; console.warn(`[user-todos] the set-aside's intent could not be written (${(e && e.message) || e}) — nothing is set aside: the store stays held, its file kept as it is`); }
+        if (!intentOk) { if (!this._unreadStopped && this._unread) this._holdUnread(SR.afterSetAside(a, null)); return false; }
         if (this._unreadStopped || !this._unread) { this._dropIntentOff(); return !this._unread; }
         const s0 = await this._setAsideOff(why0, { quiet: wasDamaged, to: to0 });
         if (!s0 || !s0.to) this._dropIntentOff();   // nothing was set aside

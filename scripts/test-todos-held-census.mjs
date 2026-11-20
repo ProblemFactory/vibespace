@@ -265,6 +265,59 @@ console.log('① THE STORE — held on a failed read, every write refused by nam
     m.stop();
     return { reread, kept, r1, r2, n };
   };
+  // 主开发 r348 (4): A HEALTHY STORE FILE BESIDE A STALE INTENT (the common exit: the list landed, the intent's removal did not) — no
+  // notice, the intent dropped, nothing emptied
+  const staleBeside = async (UTm) => {
+    const d = dataDir(), f = path.join(d, 'user-todos.json'), to = 'user-todos.json.corrupt-2026-11-20T01-00-00-000Z';
+    fs.writeFileSync(path.join(d, to), '{"items": [ torn');
+    fs.writeFileSync(f, JSON.stringify({ items: [ITEM('h1', 'kept item')] }));
+    fs.writeFileSync(f + '.aside-intent', JSON.stringify({ why: 'corrupt JSON', to }));
+    const m = quiet(() => new UTm.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY }));
+    const open = m.snapshot().open || [];
+    const out = { kept: open.some((i) => i && i.id === 'h1'), notices: open.filter((i) => i && String(i.text || '').includes(to)).length, held: m.isHeldUnread() };
+    m.stop();
+    for (let k = 0; k < 80 && fs.existsSync(f + '.aside-intent'); k++) await new Promise((res) => setTimeout(res, 25));   // a bounded wait for the drop (an event)
+    return { ...out, intentGone: !fs.existsSync(f + '.aside-intent') };
+  };
+  const sb = await staleBeside(UT);
+  ok(sb.kept && sb.notices === 0 && !sb.held && sb.intentGone, 'a HEALTHY list beside a stale intent (the list landed, the intent\'s drop did not): its items kept, NO notice, the intent dropped', sb);
+  const Ub = MJ.load('src/user-todos.js', anchored(USRC, "    if (!it || a0.state !== 'missing' || !fs.existsSync(", "    if (!it || !fs.existsSync(", 'the stale intent judged whatever the live file'), 'stale-beside');
+  const sbx = await staleBeside(Ub);
+  ok(sbx.notices === 1, 'CONTROL (the stale intent judged whatever the live file): a «set aside» notice beside a healthy list — a false notice', sbx);
+  // 主开发 r348 (1): THE INTENT CANNOT BE WRITTEN (a full disk) ⇒ nothing is set aside — the store stays held, its torn file kept as it is
+  const noIntent = async (UTm) => {
+    const d = dataDir(), f = path.join(d, 'user-todos.json');
+    fs.mkdirSync(f);
+    const m = quiet(() => new UTm.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY }));
+    fs.rmdirSync(f); fs.writeFileSync(f, '{"items": [ torn');
+    const w0 = fs.promises.writeFile;
+    fs.promises.writeFile = async (file, ...rest) => { if (String(file).endsWith('.aside-intent')) throw Object.assign(new Error('ENOSPC: no space left on device'), { code: 'ENOSPC' }); return w0.call(fs.promises, file, ...rest); };
+    let r = null; try { r = await quiet(() => m.readAgain()); } finally { fs.promises.writeFile = w0; }
+    const out = { r, held: m.isHeldUnread(), torn: fs.existsSync(f) && fs.readFileSync(f, 'utf8').includes('torn'), aside: fs.readdirSync(d).filter((x) => x.startsWith('user-todos.json.corrupt-')).length };
+    m.stop();
+    return out;
+  };
+  const ni = await noIntent(UT);
+  ok(ni.r === false && ni.held && ni.torn && ni.aside === 0, 'the set-aside\'s INTENT refused (a full disk): nothing is set aside — the store stays HELD and its torn file stays where it is (the bytes\' safe copy)', ni);
+  const Un = MJ.load('src/user-todos.js', anchored(USRC, "        if (!intentOk) { if (!this._unreadStopped && this._unread) this._holdUnread(SR.afterSetAside(a, null)); return false; }", '', 'the set-aside without its intent'), 'no-intent-through');
+  const nix = await noIntent(Un);
+  ok(nix.aside === 1 && !nix.held, 'CONTROL (the set-aside going through without its intent): the bytes moved aside with no intent — after an exit nobody would name them', nix);
+  // 主开发 r348 (3): THE ASIDE'S NAME NEVER REPLACES AN EARLIER ASIDE (a frozen clock: the same stamp twice)
+  const sameStamp = async (UTm) => {
+    const d = dataDir(), f = path.join(d, 'user-todos.json'), T = Date.UTC(2026, 10, 20, 2, 0, 0);
+    const first = 'user-todos.json.corrupt-' + new Date(T).toISOString().replace(/[:.]/g, '-');
+    fs.writeFileSync(path.join(d, first), 'THE EARLIER ASIDE');   // an earlier episode's copy, same stamp
+    fs.writeFileSync(f, '{"items": [ torn again');
+    const m = quiet(() => new UTm.UserTodoManager({ dataDir: d, expirySweepMs: 0, unreadRetry: RETRY, now: () => T }));   // the boot's own set-aside on the frozen clock
+    m.stop();
+    const asides = fs.readdirSync(d).filter((x) => x.startsWith('user-todos.json.corrupt-')).sort();
+    return { asides, earlier: fs.readFileSync(path.join(d, first), 'utf8') };
+  };
+  const ss = await sameStamp(UT);
+  ok(ss.asides.length === 2 && ss.earlier === 'THE EARLIER ASIDE' && ss.asides.some((x) => x.endsWith('-1')), 'the same stamp twice (a frozen clock): the new aside takes the next FREE name — the earlier aside untouched', ss);
+  const Uf2 = MJ.load('src/user-todos.js', anchored(USRC, "    const to = this._freeAsideName();", "    const to = this._asideName();", 'the aside named over an earlier one'), 'aside-over');   // stale-pins: kept (the control plants the old name — by its stamp only)
+  const ssx = await sameStamp(Uf2);
+  ok(ssx.asides.length === 1 && ssx.earlier !== 'THE EARLIER ASIDE', 'CONTROL (the aside named by its stamp only): the earlier aside is REPLACED — its copy of the items gone', ssx);
   const hb = await heldBoot(UT), hr = await heldBoot(UT, true);
   ok(hb.kept && hb.r1 === false && hb.r2 === true && hb.n === 1, 'an UNREADABLE boot keeps the last run\'s set-aside intent; the hold\'s lift on the missing file names the bytes (ONE notice)', hb);
   ok(hr.kept && hr.r2 === true && hr.n === 1, '…an intent the boot could not READ either (the folder unreadable then) is read again at the lift, off the loop — named (ONE notice)', hr);

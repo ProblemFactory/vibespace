@@ -242,7 +242,7 @@ export const ROWS = [
   ['src/usage-origin-backfill.js', 'own-tree', 10, null, CLI],
   ['src/usage-routes.js', 'own-tree', 14, null, CLI],   // lane lg-store-writes U6.1 −9: its reads of the readings folder go through the cache module's readers // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
   ['src/usage-walker.js', 'user-path', 12, 'DOOR\\.blocked\\(', 'the usage walk: a blocked project folder skipped this pass, said once'],
-  ['src/user-todos.js', 'own-tree', 6, null, DATA], // B-44f3: +1 — a held store's read again (fs.promises.readFile of its own data/user-todos.json, off the loop); +4 (its remainder) — the boot's read of the set-aside intent and the existence of the aside it names, the held lift's off-loop re-read of that intent and check of its aside, all in data/
+  ['src/user-todos.js', 'own-tree', 8, null, DATA], // B-44f3: +1 — a held store's read again (fs.promises.readFile of its own data/user-todos.json, off the loop); +4 (its remainder) — the boot's read of the set-aside intent and the existence of the aside it names, the held lift's off-loop re-read of that intent and check of its aside; +2 (主开发 r348) — a free aside name looked for (sync at the boot, off the loop at the read again), all in data/
   ['src/vnc.js', 'own-tree', 3, null, PROC],
   ['src/webdav.js', 'user-path', 11, 'DOOR\\.blocked\\(', 'a WebDAV share root: 503 by name; lane hub-fuse-sync-guard: the /dav verbs are async fs (exists() = one fsp.access) — −5 sites'],
   ['src/weekly-lanes-unfold.js', 'own-tree', 7, null, CLI], // lane lg-store-writes U6.4 −1: the folder's listing through the cache module · lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)
