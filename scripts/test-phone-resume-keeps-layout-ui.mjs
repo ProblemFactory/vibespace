@@ -18,12 +18,18 @@
 //   ④ (r3 — the r2 acceptance's N1 + N2 doors) on that desktop page: c-1's session is stopped, its person presses «Resume this
 //      session», the hub's answer is the no-transcript breaker (the one answer this suite injects: a claude that never answers cannot
 //      say it), the rescued window shows «Try resuming anyway» and the person presses it — the retry re-opens row c-1 (live, same id,
-//      its box); b-2's session is stopped and its sidebar card is pressed TWICE while the hub is slow — ONE create, ONE window (b-2)
+//      its box); b-2's session is stopped and its sidebar card is pressed TWICE while the hub is slow — ONE create, ONE window (b-2).
+//      THE FOLLOWERS' LAW (主开发 r107): the desktop tab and the phone, still open, FOLLOW these resumes (the manager design's piece 4)
+//      and write their records; every «no refusal» leg of ②–④ PRINTS its refusing lines and admits only the followers' tie (the
+//      older-base kind, N → N); the PHONE FOLLOWER'S TIE IS MADE at b-2 (its first Desk B frame held until the hub kept a newer
+//      record): refused once, it adopts and sends once more, the row keeps its id and box, nothing shown, the layer gate silent —
+//      with two CONTROLS that are red; every open page's toasts judged
 //   ⑤ (lane bl-windows — B-46fc's own gate, the 2.369.410 close's remainder: «a chrome leg that opens a window and reloads at
 //      500 ms ⇒ the same window is on show») on that desktop page: the person's press on the top bar's Files button opens a
 //      window and the page RELOADS with that save still due — the save HELD in the page before the press (a stall, never the
 //      clock), so the leave's flush is its only road ⇒ after the reload the window is on show again and the hub's record holds
-//      it; RED CONTROL first (the release: no flush at the leave) ⇒ gone after the reload, no row
+//      it; RED CONTROL first (the release: no flush at the leave) ⇒ gone after the reload, no row. Each plant comes only after every
+//      record has gone QUIET and the page's two restoring gates are down (measured, never a clock)
 // Screenshots go to $PRK_SHOTS_DIR when set (the lane's report), else nowhere.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -155,6 +161,65 @@ else await (async () => {
   const P1 = await client(first.webSocketDebuggerUrl);
   const PREVIEW = (d) => `(() => { const p = document.querySelector('.desktop-preview[data-desktop-id="${d}"]'); if (!p) return null; const r = p.getBoundingClientRect(); return { box: { x: r.left - 2, y: r.top - 2, width: r.width + 4, height: r.height + 16 }, placeholders: p.querySelectorAll('.desktop-preview-win-unplaced').length, windows: p.querySelectorAll('.desktop-preview-win:not(.desktop-preview-win-unplaced)').length, badge: p.querySelector('.desktop-preview-unplaced')?.textContent || null, title: p.querySelector('.desktop-preview-unplaced')?.title || null, dashed: (() => { const x = p.querySelector('.desktop-preview-win-unplaced'); return x ? getComputedStyle(x).borderTopStyle : null; })() }; })()`;
   let PH = null, P2 = null;
+  // ── THE FOLLOWERS' LAW, read from the journal AND the pages (主开发 r107, 2026-11-20 — the cut tree's hosted run 44719731500: ④'s
+  //    «no refusal» red on its first try with no line printed, ⑤'s plant read «gate up»). The manager design's piece 4 makes every
+  //    OTHER open page that holds a resumed conversation's ENDED window turn that row live and owe the hub its record
+  //    (src/lib/session-lifecycle.js _followResumed): the desktop tab and the phone stay open here while another page resumes, so two
+  //    writers of one desktop's record from one base TIE, and the hub refuses the second from its older base ONCE (it adopts the
+  //    record kept and sends once more — scripts/test-resume-pages-follow-chrome.mjs followLaw, list line 155). So every «no refusal»
+  //    leg PRINTS each refusing line of its window, green or red, and admits ONLY that tie: the older-base kind, N → N windows, at most
+  //    one a follower a followed resume. The other four kinds the hub writes for a desktop record (src/ws-handler.js: no such desktop,
+  //    the shrink belt, a tab group's rows disagreeing, the layer gate of a phone record) stay RED by name.
+  const STALE = /\[layout-sync\] REFUSED a (?:phone |desktop )?record of desktop "[^"]*" \(([^)]+)\): written from an older base \([^)]*\) — (\d+) → (\d+) windows; the sender adopts the record kept/;
+  const refusedSince = (from) => journal.slice(from).split('\n').filter((l) => /REFUSED/.test(l));
+  const journalLaw = (lines, maxStale) => {
+    const why = []; let stale = 0;
+    for (const l of lines) { const m = STALE.exec(l); if (!m) why.push(`a refusal that is NOT the followers' tie: ${l.slice(Math.max(0, l.indexOf('REFUSED') - 14), 260)}`); else if (m[2] !== m[3]) why.push(`a stale refusal that changes the window count ${m[2]} → ${m[3]}`); else stale++; }
+    if (stale > maxStale) why.push(`${stale} stale refusals for at most ${maxStale} (one a follower a followed resume)`);
+    return { ok: !why.length, why, stale };
+  };
+  const printRefused = (tag, lines) => console.log(`    [${tag} the journal's refusing lines] ${lines.length ? lines.map((l) => l.slice(Math.max(0, l.indexOf('[layout-sync]')), 300)).join(' | ') : 'none'}`);
+  const warnsOf = async () => { const w = async (X) => (X ? ((await X.toasts()) || []).filter((t) => /warn/.test(t[0])).map((t) => t[1]) : []); return { P1: await w(P1), PH: await w(PH), P2: await w(P2) }; };
+  // THE SETTLE, MEASURED (law 3 — never a clock): the hub's records of every desktop unchanged and no new refusal for 2.5 s (bounded
+  // at 25 s), then this page's two restoring gates down (layout.js _restoring — up 1 s after every remote apply — and the desktop
+  // manager's). → { ok, quiet, gates, waitedMs }
+  const recStamp = async () => { const l = await api('/api/layouts'); return J(Object.fromEntries(Object.entries(l.desktops || {}).map(([d, x]) => [d, (x.autoSave || {}).updatedAt || null]))) + '|' + refusedSince(0).length; };
+  const settle = async (X = P2, still = 2500, ms = 25000) => {
+    const t0s = Date.now(); let last = null, since = Date.now(), quiet = false;
+    while (Date.now() - t0s < ms) { const f = await recStamp(); if (f !== last) { last = f; since = Date.now(); } else if (Date.now() - since >= still) { quiet = true; break; } await sleep(200); }
+    let gates = null;
+    const down = quiet && !!X && await until(async () => { gates = await X.ev('(() => { const lm = app.layoutManager, dm = app.desktopManager; return { layout: !!lm._restoring, desktops: !!(dm && dm._restoring) }; })()'); return !gates.layout && !gates.desktops; }, 5000, 100);
+    return { ok: quiet && !!down, quiet, gates, waitedMs: Date.now() - t0s };
+  };
+  // each page's own facts (law 1, 4): the layout-sync frames it SENT and the refusals it RECEIVED; a desktop whose FIRST frame it holds
+  // until `__releaseOut()` (the made tie). Installed on the page's current socket; a page that reloads is tapped again
+  const TAP = `(() => { window.__syncs = window.__syncs || []; window.__refused = window.__refused || []; window.__holdOut = null; window.__heldOut = [];
+    const ws = app.ws;
+    if (!ws.__vsSendTapped) { const s = ws.send.bind(ws); ws.send = function (m) { if (m && m.type === 'layout-sync') { if (window.__holdOut && m.desktopId === window.__holdOut && !window.__heldOut.length) { window.__heldOut.push(m); return; } window.__syncs.push([m.desktopId || null, Date.now(), m.viewport || null]); } return s(m); };
+      window.__releaseOut = () => { const q = window.__heldOut.splice(0); window.__holdOut = null; for (const m of q) { window.__syncs.push([m.desktopId || null, Date.now(), m.viewport || null]); s(m); } return q.length; }; ws.__vsSendTapped = true; }
+    window.__acks = window.__acks || [];
+    const raw = ws.ws; if (raw && !raw.__vsTapped) { const on = raw.onmessage; raw.onmessage = function (e) { let d = null; try { d = JSON.parse(e.data); } catch { } if (d && d.type === 'layout-sync-refused') window.__refused.push([d.desktopId || null, d.reason || null, Date.now()]); if (d && d.type === 'layout-sync-ack') window.__acks.push([d.desktopId || null, d.sentAt ?? null, Date.now()]); return on.call(this, e); }; raw.__vsTapped = true; }
+    return !!(raw && raw.__vsTapped); })()`;
+  const factsOf = async (X, desk, from) => ({ sends: (await X.ev('window.__syncs || []')).filter(([d, at]) => d === desk && at >= from).length, refused: (await X.ev('window.__refused || []')).filter(([d, , at]) => d === desk && at >= from).map((r) => r[1]), acks: (await X.ev('window.__acks || []')).filter(([d, , at]) => d === desk && at >= from).length, tapped: await X.ev('!!(app.ws.ws && app.ws.ws.__vsTapped)') });
+  // THE PHONE FOLLOWER'S TIE (law 4), PURE: the phone followed a resume and its record was refused once from an older base ⇒ it adopted
+  // the record kept and sent ONE more, accepted; then nothing; the row kept its id and box; the phone showed nothing; the layer gate
+  // refused nothing. → { ok, why }
+  const phoneTieLaw = ({ sends, refused, sendsLater, refusedLater, acks, tapped, lines, rowKept, shown }) => {
+    const why = [];
+    if (tapped === false) why.push("the phone's socket was replaced (a reconnect): its refusals and acks were no longer read");
+    if (!(acks >= 1)) why.push('no layout-sync-ack of the desktop reached the phone after its frame was refused — its ONE more frame was not accepted');
+    if (refused.length !== 1 || refused[0] !== 'stale') why.push(`the phone received ${J(refused)} — exactly ONE stale refusal is owed`);
+    if (sends !== 2) why.push(`the phone sent ${sends} frame(s) of the desktop — its first and ONE more from the record it adopted`);
+    if (sendsLater !== sends || refusedLater !== refused.length) why.push(`the phone sent ${sendsLater - sends} frame(s) / was refused ${refusedLater - refused.length} time(s) after the settle — its frames never ended`);
+    const gate = lines.filter((l) => /REFUSED a phone record of desktop .*: it changes /.test(l));
+    if (gate.length) why.push(`the layer gate refused the phone's record: ${gate[0].slice(gate[0].indexOf('REFUSED'), 220)}`);
+    const st = lines.filter((l) => STALE.test(l) && /REFUSED a phone record/.test(l));
+    if (st.length !== 1) why.push(`the journal holds ${st.length} stale phone line(s) — ONE is owed`);
+    else { const m = STALE.exec(st[0]); if (m[2] !== m[3]) why.push(`the phone's stale line reads ${m[2]} → ${m[3]} windows — a window lost`); }
+    if (!rowKept) why.push("the row did not keep its id and box in the hub's record");
+    if (shown.length) why.push(`the phone showed the person a toast at the tie: ${shown[0]}`);
+    return { ok: !why.length, why };
+  };
   try {
     // ① a desktop page on the first server: D previews its three rows with no position
     ok(await P1.boot(), '① the desktop page (1440×900) booted');
@@ -200,18 +265,21 @@ else await (async () => {
     ok(N === 6 && keptPlaced && keptD && !minted.length, '② after the phone\'s «Resume all»: every desktop\'s rows on the hub keep their window ids and boxes (A, B, C), D its three ids — nothing minted, nothing dropped (2.369.381: new window ids, no box)', { offered, afterPhone, minted });
     const said = (await PH.toasts()).map((t) => t[1]);
     ok(said.filter((t) => /Resumed 6 conversations where they were/.test(t)).length === 1 && !said.some((t) => /kept|disagree/.test(t)), '② the phone says it ONCE: «Resumed 6 conversations where they were» — no refusal toast', said);
-    ok(!/REFUSED/.test(journal.slice(j0)), '② the journal holds no refusal', journal.slice(j0).split('\n').filter((l) => /REFUSED/.test(l)).slice(0, 3));
+    const lines2 = refusedSince(j0), law2 = journalLaw(lines2, 3); printRefused('②', lines2);
+    ok(law2.ok, '② the journal holds no refusal but the followers\' tie (the desktop tab follows the phone\'s resumes of a-1 — it booted on Desk A — b-1 and b-2: the older-base kind, N → N windows, at most one a resume)', { why: law2.why, lines: lines2 });
     await PH.shot('phone-after-resume');
     // N2: the desktop tab open across the restart follows the phone's re-opened rows — its B windows are the live ones, same ids, same boxes
     await P1.click(`document.querySelector('.desktop-preview-wrapper .desktop-preview[data-desktop-id="desk-b"]')`);
     await until(async () => (await P1.ev(`[${['b-1', 'b-2'].map(VIEW).join(',')}]`)).every((x) => x && x.live && x.gb), 20000, 250); // the switch's replay places at +500 ms
     const bNow = await P1.ev(`[${['b-1', 'b-2'].map(VIEW).join(',')}]`);
     ok(bNow.every((v, k) => v && v.live && v.desk === 'desk-b' && v.gb === J(GB(k + 1))), '② N2 the desktop tab OPEN ACROSS THE RESTART: its B windows b-1, b-2 are the LIVE sessions under their own ids, at their boxes (461b41f78: dead views kept, the dead recipe written back)', bNow);
-    await sleep(1500);
+    const s2 = await settle(P1);   // what happened, not a clock: the records quiet, the tab's gates down
     const p1warn = (await P1.toasts()).filter((t) => /warn/.test(t[0])).map((t) => t[1]), midRows = await rows();
-    ok(!p1warn.length && J(midRows['desk-b']) === J(BEFORE['desk-b']) && !/REFUSED/.test(journal.slice(j0)), '② …the open tab warns of nothing, the hub\'s B rows keep their ids and boxes, the journal holds no refusal', { p1warn, b: midRows['desk-b'] });
+    const lines2b = refusedSince(j0), law2b = journalLaw(lines2b, 3); printRefused('② …', lines2b);
+    ok(s2.ok && !p1warn.length && J(midRows['desk-b']) === J(BEFORE['desk-b']) && law2b.ok, '② …the open tab warns of nothing, the hub\'s B rows keep their ids and boxes, the journal holds no refusal but the followers\' tie', { settled: s2, p1warn, b: midRows['desk-b'], why: law2b.why, lines: lines2b });
 
     // ③ a DESKTOP page connects and visits every desktop: windows where they were; D laid out and saved with positions
+    const s3 = await settle(P1), j3 = journal.length;   // ③'s window opens once ②'s followers have gone quiet
     P2 = await newPage({});
     ok(!!P2 && await P2.boot(), '③ a desktop page connected to the new server');
     const pv2 = await P2.ev(PREVIEW('desk-d'));
@@ -226,8 +294,8 @@ else await (async () => {
     const final = await rows();
     const dPlaced = final['desk-d'].length === 3 && final['desk-d'].every((r) => r[1]);
     ok(PLACED.every((id) => { const [d] = AT[id]; return J(final[d].find((r) => r[0] === id)) === J(BEFORE[d].find((r) => r[0] === id)); }) && dPlaced, '③ …the hub\'s records: A, B, C exactly as before the restart; D\'s rows saved WITH positions now (visiting lays them out)', final);
-    const said2 = (await P2.toasts()).filter((t) => /warn/.test(t[0])).map((t) => t[1]);
-    ok(!said2.length && !/REFUSED/.test(journal.slice(j0)), '③ no refusal on either page, no warn toast on the desktop page', { said2, refused: journal.slice(j0).split('\n').filter((l) => /REFUSED/.test(l)).slice(0, 3) });
+    const lines3 = refusedSince(j3), law3 = journalLaw(lines3, 0), warns3 = await warnsOf(); printRefused('③', lines3);
+    ok(s3.ok && law3.ok && !warns3.P1.length && !warns3.PH.length && !warns3.P2.length, '③ no refusal on any page (nothing is resumed here: no follower, no tie owed), no warn toast on ANY open page (the desktop tab, the phone, this page) — after ②\'s followers had gone quiet', { settled: s3, why: law3.why, lines: lines3, warns3 });
     const pv3 = await P2.ev(PREVIEW('desk-d'));
     ok(pv3 && pv3.placeholders === 0 && pv3.windows === 3 && !pv3.badge, '③ …and D previews its three windows where they now stand (no placeholder)', pv3);
     if (pv3) await P2.shot('preview-desk-d-after-visit', { x: Math.max(0, pv3.box.x - 170), y: pv3.box.y, width: pv3.box.width + 176, height: pv3.box.height });
@@ -236,6 +304,9 @@ else await (async () => {
     // ④ THE RETRY BAR (r3 N1) — c-1's session stopped, «Resume this session» answered by the no-transcript breaker, «Try resuming anyway»
     const live = async (id) => !!(await P2.ev(VIEW(id)))?.live;
     const winsOf = (cid) => P2.ev(`[...app.wm.windows.values()].filter((w) => (w._openSpec && w._openSpec.backendSessionId === ${J(cid)}) || (w._conversation && w._conversation.backendSessionId === ${J(cid)})).map((w) => w.id)`);
+    const tapped = []; for (const X of [P1, PH, P2]) tapped.push(await X.ev(TAP));
+    const s4 = await settle(P2), j4 = journal.length, t4 = Date.now();
+    ok(s4.ok && tapped.every(Boolean), '④ before the stops: ③\'s writes have gone quiet (no record written, no refusal, for 2.5 s), and every open page\'s sends and received refusals are tapped', { settled: s4, tapped });
     await P2.click(`document.querySelector('.desktop-preview-wrapper .desktop-preview[data-desktop-id="desk-c"]')`); await sleep(1800);
     const killConv = (cid) => P2.ev(`(() => { const e = [...app.sessions.entries()].find(([id, v]) => v && v.sessionId && !v._readOnly && app.wm.windows.get(id)?._openSpec?.backendSessionId === ${J(cid)}); if (e) app.killSession(e[1].sessionId, ${J(cid)}); return !!e; })()`); // the conversation's live window, whatever its id
     await killConv(CID(3));
@@ -259,15 +330,44 @@ else await (async () => {
     ok(await until(async () => !!(await P2.ev(`!!(${card})`)) && !!(await P2.ev(VIEW('b-2')))?.readOnly, 20000, 250), '④ b-2\'s session stopped: its sidebar card says so, its window is read-only');
     await P2.ev('(app.sidebar.isOpen || app.sidebar.toggle(true)), true'); await sleep(800); // the person opens the sidebar
     await P2.ev(`(() => { const ws = app.ws, send = ws.send.bind(ws); window.__sent = 0; ws.send = function (m) { if (m && m.type === 'create') { window.__sent++; setTimeout(() => send(m), 700); return; } return send(m); }; return true; })()`);
+    // THE PHONE FOLLOWER'S TIE IS MADE (law 4 — the one case list line 155's made tie does not cover): the phone holds b-2 (its own
+    // «Resume all» re-opened it in ②), so it FOLLOWS this resume and writes Desk B from the base it had; its FIRST Desk B frame is HELD
+    // until the hub has kept a NEWER record of Desk B (this page's, the desktop tab's), then released — refused from an older base, always
+    const sHold = await settle(P2);   // b-2's END and its records have gone quiet first: the frame held is the FOLLOW's, never the end's
+    ok(sHold.ok, '④ before the phone\'s tie: b-2\'s stop and every record it moved have gone quiet (measured), this page\'s gates down', sHold);
+    const phToasts0 = ((await PH.toasts()) || []).length;   // law 4 «nothing shown»: EVERY toast type the phone shows from here on
+    await PH.ev(`(window.__holdOut = 'desk-b', true)`);
+    const tTie = Date.now();
     const pc = await P2.ev(`(() => { const e = ${card}; if (!e) return null; e.scrollIntoView?.({ block: 'center' }); const r = e.getBoundingClientRect(), x = r.left + Math.min(r.width / 2, 40), y = r.top + Math.min(r.height / 2, 14), at = document.elementFromPoint(x, y); return { x, y, w: r.width, h: r.height, hit: at ? (at === e || e.contains(at)) : false, at: at ? at.className : null, open: !!app.sidebar.isOpen }; })()`);
     if (pc) for (const dt of [0, 150]) { await sleep(dt); for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await P2.send('Input.dispatchMouseEvent', { type, x: pc.x, y: pc.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 }); }
     await until(() => live('b-2'), 20000, 250);
+    let heldBase = null, keptB = null;
+    const heldPH = await until(async () => (await PH.ev('window.__heldOut.length')) === 1, 20000, 100);
+    if (heldPH) heldBase = await PH.ev('window.__heldOut[0].base ?? null');
+    const passed = !!heldPH && heldBase != null && await until(async () => { const l = await api('/api/layouts'); keptB = (((l.desktops || {})['desk-b'] || {}).autoSave || {}).updatedAt || null; return Number(keptB) > Number(heldBase); }, 20000, 200);
+    const relPH = await PH.ev('window.__releaseOut ? window.__releaseOut() : 0');
+    ok(!!heldPH && !!passed && relPH === 1, '④ THE PHONE FOLLOWER\'S TIE IS MADE: the phone followed b-2\'s resume and wrote Desk B\'s record from the base it had — that frame HELD until the hub kept a newer record of Desk B, then released (refused from an older base, always)', { heldPH, heldBase, keptB, relPH });
     await sleep(1500);
     const b2 = await P2.ev(VIEW('b-2')), b2w = await winsOf(CID(2)), sent = await P2.ev('window.__sent'), bRows = await rows();
     ok(!!pc && sent === 1 && !!b2 && b2.live && b2.desk === 'desk-b' && b2.gb === J(GB(2)) && J(b2w) === J(['b-2']) && J(bRows['desk-b']) === J(BEFORE['desk-b']),
       '④ N2 b-2\'s card pressed TWICE inside 200 ms while the hub is slow: ONE create, the conversation\'s ONE window is b-2 — live, at its box on B; the hub\'s B rows kept (d159c081b: the second press closed the first one\'s window in flight)', { pressed: pc, sent, b2, b2w, b: bRows['desk-b'] });
-    const said4 = (await P2.toasts()).filter((t) => /warn/.test(t[0])).map((t) => t[1]);
-    ok(!said4.length && !/REFUSED/.test(journal.slice(j0)), '④ no refusal, no warn toast', { said4 });
+    const sTie = await settle(P2), phF = await factsOf(PH, 'desk-b', tTie);
+    const sTie2 = await settle(P2), phF2 = await factsOf(PH, 'desk-b', tTie);   // a second look after a second quiet stretch: nothing more
+    const bAfter = await rows(), phLines = refusedSince(j4).filter((l) => /\(desk-b\)/.test(l)), phShown = ((await PH.toasts()) || []).slice(phToasts0).map((t) => `${t[0]}: ${t[1]}`);
+    const TF = { sends: phF.sends, refused: phF.refused, sendsLater: phF2.sends, refusedLater: phF2.refused.length, acks: phF2.acks, tapped: phF2.tapped, lines: phLines, rowKept: J(bAfter['desk-b']) === J(BEFORE['desk-b']), shown: phShown };
+    const LT = phoneTieLaw(TF);
+    console.log(`    [④ the phone follower's tie] ${J({ ...TF, lines: phLines.map((l) => l.slice(Math.max(0, l.indexOf('[layout-sync]')), 260)) })}`);
+    ok(sTie.ok && sTie2.ok && LT.ok, '④ …the hub REFUSED the phone\'s record ONCE from an older base (the stale line, N → N); the phone ADOPTED the record kept and sent ONE more frame, ACCEPTED (its ack read); then nothing; b-2\'s row keeps its id and box; the phone shows nothing; the layer gate refused nothing', { why: LT.why, settled: [sTie, sTie2] });
+    // CONTROLS — the law goes red where the harm is (copies of these very facts): the phone sending on and on; the layer gate refusing it
+    const cOn = phoneTieLaw({ ...TF, sendsLater: TF.sends + 2 });
+    const cGate = phoneTieLaw({ ...TF, lines: [...phLines, '[layout-sync] REFUSED a phone record of desktop "B" (desk-b): it changes zIndex (window b-2) — a phone writes the workspace only; the server keeps its record'] });
+    ok(!cOn.ok && cOn.why.some((w) => /after the settle/.test(w)), '④ CONTROL: a copy in which the phone sends on and on (no settle) is RED, by name', cOn.why);
+    ok(!cGate.ok && cGate.why.some((w) => /the layer gate refused/.test(w)), '④ CONTROL: a copy in which the layer gate refuses the phone\'s record is RED, by name', cGate.why);
+    const lines4 = refusedSince(j4), law4 = journalLaw(lines4, 3), warns4 = await warnsOf(); printRefused('④', lines4);
+    // …and per page (the read: a sum could hide one page refused twice): each open page refused at most ONCE a desktop in ④
+    const per4 = {}; for (const [k, X] of [['P1', P1], ['PH', PH], ['P2', P2]]) for (const d of ['desk-b', 'desk-c']) per4[`${k} ${d}`] = (await factsOf(X, d, t4)).refused;
+    const twice = Object.entries(per4).filter(([, r]) => r.length > 1);
+    ok(law4.ok && law4.stale >= 1 && !twice.length && !warns4.P1.length && !warns4.PH.length && !warns4.P2.length, '④ no refusal but the followers\' ties (the older-base kind, N → N windows, at most one a follower a followed resume: the desktop tab follows c-1 and b-2, the phone b-2 — it holds no c-1 — the made phone tie\'s one among them); no page refused twice for one desktop; no warn toast on ANY open page', { why: law4.why, twice, per4, lines: lines4, warns4 });
     await P2.shot('desktop-after-retry-and-double-press');
     // ⑤ B-46fc'S OWN GATE (lane bl-windows — the row: «a chrome leg that opens a window and reloads at 500 ms ⇒ the same window is
     //    on show»; the 2.369.410 close's remainder). A race is proven by a STALL, never by the clock: before the press the page's
@@ -306,10 +406,14 @@ else await (async () => {
       const mine = opened ? after.find((w) => w.id === opened.id) || null : null;
       return { press, opened, due, desk, booted, leave, mine, hub, inHub: !!opened && hub.includes(opened.id) };
     };
+    const s5 = await settle(P2);
+    ok(s5.ok, '⑤ before the plant: the followers\' frames have ENDED (no record of any desktop written, no refusal, for 2.5 s) and this page\'s two restoring gates are DOWN — the plant reads a page no remote apply is gating (law 3)', s5);
     const red = await reloadScene(true);
     ok(!!red.press && red.press.pressed, '⑤ (control) the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', red.press);
     ok(!!red.opened && red.due.due && red.due.dirty && !red.due.gate && red.due.held && red.due.leave === 'offAtLeave', '⑤ RED CONTROL proves its plant first: the person\'s press opened a files window, a person\'s save DUE and HELD, no gate up — and the page\'s leave is the planted one (it answers false, as the release sent nothing)', red.due);
     ok(red.booted && !!red.opened && !red.mine && !red.inHub && Array.isArray(red.leave) && red.leave.length >= 1 && red.leave.every((l) => l.sent === false), '⑤ RED CONTROL — the release\'s behaviour (no flush at the leave): the leave RAN (logged) and sent nothing ⇒ after the reload that window is GONE and the hub\'s record holds no row of it (the leg below goes red without B-46fc)', { leave: red.leave, mine: red.mine, inHub: red.inHub, booted: red.booted });
+    const s5b = await settle(P2);
+    ok(s5b.ok, '⑤ …and again before the second plant (the reloaded page booted, every record quiet, its gates down)', s5b);
     const fact = await reloadScene(false);
     ok(!!fact.press && fact.press.pressed, '⑤ the person\'s press on the Files button, through the still door — the element under the pointer at press time checked, the landing said', fact.press);
     ok(!!fact.opened && fact.due.due && fact.due.dirty && !fact.due.gate && fact.due.held && fact.due.leave === 'loggedLeave', '⑤ the person\'s press opened a files window; its save DUE and HELD in the page (no gate up) — the leave\'s flush its only road', fact.due);
