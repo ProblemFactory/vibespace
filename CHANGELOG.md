@@ -50,6 +50,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a phone, a deliverable card's kind word stays on one line beside a long title; the title is cut instead.
 - On a phone, the Agents dialog no longer runs past its right edge: Refresh all and every card sit inside it.
 - A menu opened near the screen's right edge keeps a small margin instead of touching the edge.
+- An enlarged artboard you zoomed or moved in the Design window now stays put when the agent changes a file or the window resizes; Fit puts it back as it opened.
 
 ## 2.369.413 — 2026-11-20
 
