@@ -189,7 +189,7 @@ function mutantBundle(dir, cuts) {
   execSync(`cp -r ${repo}/src ${dir}/src`);
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(dir, 'node_modules'));
   for (const [rel, from, to] of cuts) { const f = path.join(dir, rel); const s = fs.readFileSync(f, 'utf8'); if (s.split(from).length !== 2) throw new Error(`mutant anchor ${rel}: ${from.slice(0, 60)}`); fs.writeFileSync(f, s.replace(from, to)); }
-  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --log-level=error`, { cwd: dir });
+  execSync(`${path.join(repo, 'node_modules/.bin/esbuild')} src/client.js --bundle --outfile=bundle-mut.js --format=iife --platform=browser --target=es2020 --loader:.css=css --minify --log-level=error`, { cwd: dir });   // the PRODUCT's flags (package.json build): a minified mutant boots at the real bundle's cost (主开发 2026-11-20 08:02Z)
   return fs.readFileSync(path.join(dir, 'bundle-mut.js'));
 }
 let NO_CARD = null, NO_CARD_ERR = '', NO_STAMP = null, NO_STAMP_ERR = '';
@@ -251,14 +251,18 @@ const WebSocket = require('ws');
 let seq = 0; let mutant = null;
 const pageErrors = [];
 const WS_SEEN = [];   // round 3: every WebSocket frame a page saw, received AND sent (the wire assert of a pasted value)
-async function connect(target) {
+async function connect(target, NAME = 'A') {
   const sock = new WebSocket(target.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r) => sock.on('open', r));
   const pend = new Map();
+  let bundleReq = null, bundleState = 'not requested';   // this page's last /bundle.js request (requestWillBeSent → loadingFinished / loadingFailed)
   sock.on('message', (d) => {
     const m = JSON.parse(d);
     if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); PENDS.delete(m.id); return; }
     if (m.method === 'Network.webSocketFrameReceived' || m.method === 'Network.webSocketFrameSent') WS_SEEN.push(String((m.params.response && m.params.response.payloadData) || ''));
+    if (m.method === 'Network.requestWillBeSent' && /\/bundle\.js(\?|$)/.test(m.params.request?.url || '')) { bundleReq = m.params.requestId; bundleState = 'requested'; }
+    else if (m.method === 'Network.loadingFinished' && m.params.requestId === bundleReq) bundleState = `finished (${m.params.encodedDataLength} bytes)`;
+    else if (m.method === 'Network.loadingFailed' && m.params.requestId === bundleReq) bundleState = `failed: ${m.params.errorText}`;
     if (m.method === 'Runtime.exceptionThrown') pageErrors.push(m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown');
     if (m.method === 'Fetch.requestPaused') {
       const p = m.params, u = new URL(p.request.url);
@@ -285,10 +289,28 @@ async function connect(target) {
     await cdp('Emulation.setTouchEmulationEnabled', { enabled: !mouse, maxTouchPoints: mouse ? 1 : 5 });
     await cdp('Emulation.setEmulatedMedia', { features: [{ name: 'hover', value: mouse ? 'hover' : 'none' }, { name: 'pointer', value: mouse ? 'fine' : 'coarse' }] });
   };
-  const load = async () => {
+  // EVERY BOOT ENDS IN A CHECKED VERDICT (主开发 2026-11-20 08:02Z — 2.369.413's proof run 44693475022: the mutant boots of ⓪ and ⑥
+  // ran past the 30 s wait on a loaded shard; the wait's false was never looked at and the NEXT expression threw a nameless
+  // «app is not defined»). A boot that has no ready app within its bound, or keeps its loading screen, FAILS BY NAME: the
+  // page, the bundle it served (the real one or which mutant) and the page's scene (its readyState, the loading screen,
+  // whether window.app exists, the bundle request's fate). Every boot prints its time, real and mutant, every run: a bound
+  // is moved only on those times, never on a guess. `boundMs` is the control's own (a page that never boots).
+  const scene = async () => {
+    const page = await evalJs(`({ readyState: document.readyState, loadingScreen: !!document.getElementById('loading-screen'), app: typeof window.app === 'undefined' ? 'none' : (window.app && window.app.ready ? 'ready promise' : 'no ready') })`).catch((e) => ({ unread: String(e.message).slice(0, 80) }));
+    return { ...page, bundle: bundleState };
+  };
+  const load = async ({ boundMs = 30000 } = {}) => {
+    const served = mutant?.bundle ? (mutant.name || 'a mutant') : 'the real bundle', t0 = Date.now();
+    bundleReq = null; bundleState = 'not requested';
     await cdp('Page.navigate', { url: ORIGIN + '/' });
-    await waitFor('!!(window.app && app.ready)', 30000); await evalJs('app.ready.then(() => true)');
-    await waitFor(`!document.getElementById('loading-screen')`, 15000); await sleep(900);
+    const booted = await waitFor('!!(window.app && app.ready)', boundMs);
+    if (!booted) { const sc = await scene(); console.log(`    boot ${NAME} (${served}): NO ready app within ${boundMs} ms — ${JSON.stringify(sc)}`); throw new Error(`boot did not finish in ${boundMs / 1000} s on page ${NAME}, bundle ${served} — ${JSON.stringify(sc)}`); }
+    const readyMs = Date.now() - t0;
+    await evalJs('app.ready.then(() => true)');
+    const gone = await waitFor(`!document.getElementById('loading-screen')`, 15000);
+    if (!gone) { const sc = await scene(); console.log(`    boot ${NAME} (${served}): the loading screen stayed 15 s after the app was ready — ${JSON.stringify(sc)}`); throw new Error(`the loading screen did not go within 15 s on page ${NAME}, bundle ${served} — ${JSON.stringify(sc)}`); }
+    console.log(`    boot ${NAME} (${served}): app ready in ${readyMs} ms, the loading screen gone at ${Date.now() - t0} ms`);
+    await sleep(900);
   };
   const shot = async (name) => { try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
   // A REAL PRESS = measure and press as ONE act (scratch.mjs realClicker's shape — 2.369.358): the target measured WHERE IT
@@ -317,7 +339,7 @@ const targets = async () => (await (await fetch(`http://127.0.0.1:${CDP_PORT}/js
 let target = null;
 for (let i = 0; i < 120 && !target; i++) { try { target = (await targets())[0]; } catch { } if (!target) await sleep(250); }
 if (!target) { console.log('✗ chrome never exposed a CDP page target'); process.exit(1); }
-const A = await connect(target);
+const A = await connect(target, 'A');
 
 // ── the conversation (a stub claude behind the real chat-wrapper) and its turns ──
 const hubWs = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const frames = [];
@@ -353,6 +375,19 @@ try {
   await sleep(600); say('hello');
   const env = await until(() => { try { return JSON.parse(fs.readFileSync(path.join(stubDir, 'env.json'), 'utf8')); } catch { return null; } });
   await A.device(1280, 800, { mouse: true }); await A.load();
+  {
+    // (4) THE BOOT'S OWN CONTROL: a bundle that throws at its first line — the page truly never boots — is red BY THE BOOT'S
+    // NAME with its scene (never a nameless error from the next expression); its planted throw is not one of the product's
+    // (taken back out of «no page threw»); then the real bundle boots again
+    const errs0 = pageErrors.length;
+    mutant = { bundle: Buffer.from("throw new Error('vs-boot-control: this bundle never boots');\n"), name: 'the NEVER-BOOTS control' };
+    let msg = '';
+    try { await A.load({ boundMs: 5000 }); } catch (e) { msg = String(e && e.message || e); } finally { mutant = null; }
+    const planted = pageErrors.splice(errs0).filter((x) => !/vs-boot-control/.test(x));
+    pageErrors.push(...planted);
+    check(`CONTROL (the boot's verdict): a page that never boots is red BY NAME with its scene — «${msg.slice(0, 160)}»`, /^boot did not finish in 5 s on page A, bundle the NEVER-BOOTS control — /.test(msg) && /"readyState"/.test(msg) && /"loadingScreen":true/.test(msg) && /"app":"none"/.test(msg) && /"bundle":"/.test(msg), msg);
+    await A.load();
+  }
   for (const conv of [POLL, PUSH]) {
     let r = null;
     for (let i = 0; i < 80 && !(r && r.status === 200); i++) { r = await A.evalJs(`fetch('/api/channels/${conv}/reach', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ principal: { kind: 'agent', id: ${JSON.stringify(env && env.sid)} }, level: 'visible' }) }).then((r) => ({ status: r.status }))`); if (!r || r.status !== 200) await sleep(250); }
@@ -392,7 +427,7 @@ try {
   if (!NO_CARD) check('⓪ the RED CONTROL bundle builds from this source (its anchor is the chain\'s line)', false, NO_CARD_ERR);
   else try {
     console.log('⓪ RED CONTROL FIRST — userW\'s chat (no needs cards): the agent files its wake request, the chat says nothing');
-    mutant = { bundle: NO_CARD };
+    mutant = { bundle: NO_CARD, name: 'the NO_CARD mutant' };
     await A.load(); await openChat(A);
     say('now do:watch2');   // ONE turn, two wake requests (both chats titled «Ops room»)
     await logHas(/### watch2 1 rc=/);
@@ -415,7 +450,7 @@ try {
   await A.load(); await openChat(A);
   await A.cdp('Target.createTarget', { url: 'about:blank' }).catch(() => null);
   let tB = null; for (let i = 0; i < 40 && !tB; i++) { tB = (await targets()).find((x) => x.id !== target.id); if (!tB) await sleep(150); }
-  const B = await connect(tB); Bp = B;
+  const B = await connect(tB, 'B'); Bp = B;
   await B.device(1280, 800, { mouse: true }); await B.load(); await openChat(B);
   for (const P of [A, B]) await P.waitFor(`document.querySelectorAll('.cn-card[data-item="${wrPoll && wrPoll.id}"], .cn-card[data-item="${wrPush && wrPush.id}"]').length === 2`, 15000);
   const cA = { poll: await A.evalJs(CARD(wrPoll && wrPoll.id)), push: await A.evalJs(CARD(wrPush && wrPush.id)) };
@@ -589,7 +624,7 @@ try {
   check('the agent never saw the card: what reached the conversation holds none of its words (its stdin: the owner\'s own lines only), and no hub frame carried them', !/approved by you|denied by you|Waiting for you|Approve|Deny/.test(seen) && leaked.length === 0, { seen: seen.trim().split('\n'), leaked: leaked.length });
   if (!NO_STAMP) check('⑥ the stamp\'s RED CONTROL bundle builds (its anchors are this lane\'s lines)', false, NO_STAMP_ERR);
   else try {
-    mutant = { bundle: NO_STAMP };
+    mutant = { bundle: NO_STAMP, name: 'the NO_STAMP mutant' };
     await B.front(); await B.load(); await openChat(B);
     await B.waitFor(`document.querySelectorAll('.cn-card.cn-done').length >= 2`, 15000);
     const red = await B.evalJs(CARD(wrPush && wrPush.id));
