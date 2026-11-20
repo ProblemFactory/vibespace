@@ -253,7 +253,7 @@ const REAL8 = await (async () => {
     // B-7f97 (lane bl-tests-e): the program's folder reaches the shell as a PERSON's does — the person's rc puts it on PATH. A login
     // bash on Debian sources /etc/profile, which RESETS PATH (the second test machine: every «on PATH» shape read «bash refused»);
     // the inherited PATH alone judged the machine's profile, not the product. The rc line reads its folder from ~/.vs-on-path
-    // (written by envOf for an «on PATH» shape only): the shell is asked under serviceEnv's ALLOWLIST (src/server/cli-cmd.js),
+    // (planted once for an «on PATH» shape, before any ask — see below): the shell is asked under serviceEnv's ALLOWLIST (src/server/cli-cmd.js),
     // which keeps HOME and drops any other name. `reset` = a profile that resets PATH before the rc (Debian's /etc/profile);
     // `rcPath: false` = no such rc line (the leg as it was — the CONTROL shape). ~/.profile carries the same head (the checkpoint's
     // meeting with B-69ec ⑪, 2026-11-18): the remote twin's fallback rung asks a LOGIN sh (src/server/remote-cli.js `sh -lc`, the
@@ -269,10 +269,9 @@ const REAL8 = await (async () => {
     return h;
   };
   const SHELLS = [['zsh', ['/usr/bin/zsh', '/bin/zsh'].find((p) => fs.existsSync(p))], ['bash', ['/bin/bash', '/usr/bin/bash'].find((p) => fs.existsSync(p))]].filter(([, p]) => p);
-  const envOf = (h, onPath) => {
-    if (onPath) fs.writeFileSync(path.join(h, '.vs-on-path'), RB);   // B-7f97: the folder the person's rc line puts on PATH (HOME survives the allowlist)
-    return { HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' };
-  };
+  // envOf WRITES NOTHING (主开发 r205): a planted home is never changed while any shell can read it — ~/.vs-on-path is planted once,
+  // below, before any ask of any run set starts
+  const envOf = (h, onPath) => ({ HOME: h, PATH: `${onPath ? RB + ':' : ''}/usr/bin:/bin`, USER: process.env.USER || 'u', LOGNAME: process.env.LOGNAME || 'u', LANG: 'C.UTF-8' });
   const INST = `alias ${RN}="~/.local-cli/${RN}"`;
   // [label, home, PATH has the program dir, the want: { target | prog | refused: 'wrapper' | 'missing' | 'not-executable' | 'none' }]
   const SHAPES = [
@@ -290,6 +289,18 @@ const REAL8 = await (async () => {
     ['B-7f97: a plain program on PATH under a profile that RESETS PATH first (Debian\'s /etc/profile in a login bash) ⇒ that program — the person\'s rc line puts its folder back', home('reset', '', { reset: true }), true, { prog: null }],
     ['B-7f97 CONTROL: the same reset with NO rc line (the leg as it was: the inherited PATH alone) ⇒ refused, none — the machine\'s profile decided it (red)', home('reset-as-was', '', { reset: true, rcPath: false }), true, { refused: 'none' }],
   ];
+  // THE LAW (主开发 r205): every file a planted shell sources or reads is written WHOLE, ONCE, when its home is planted — here, before
+  // any ask of any run set starts. B-7f97's folder (the one the person's rc line puts on PATH: ~/.vs-on-path, read back with `cat`)
+  // was rewritten by envOf at EVERY call: the three run sets are built in one synchronous chain with some 78 shells already started,
+  // so a shell's `cat` could land between a later call's truncate and its write, read an empty file and hold no program (the leg's
+  // flake — always this home, the only shape whose answer hangs on that file's content)
+  // Then EVERY file a planted shell sources or reads is made read-only and kept as planted (its text and mtime): a later write by
+  // this suite fails BY NAME (EACCES), and a write that got through (a root runner) is seen by the leg below
+  for (const [, h, onPath] of SHAPES) if (onPath) fs.writeFileSync(path.join(h, '.vs-on-path'), RB);
+  const HOME_FILES = ['.zshenv', '.zshrc', '.bash_profile', '.profile', '.vs-on-path', path.join('.local-cli', RN)];
+  const plantOne = (f) => { fs.chmodSync(f, fs.statSync(f).mode & 0o555); return { f, text: fs.readFileSync(f, 'utf8'), mtimeMs: fs.statSync(f).mtimeMs }; };
+  const planted = SHAPES.flatMap(([, h]) => HOME_FILES.map((n) => path.join(h, n)).filter((f) => fs.existsSync(f)).map(plantOne));
+  const plantedChanged = (list = planted) => list.filter((x) => { try { return fs.readFileSync(x.f, 'utf8') !== x.text || fs.statSync(x.f).mtimeMs !== x.mtimeMs; } catch { return true; } }).map((x) => x.f);
   const runCli = (cmd, mark) => new Promise((res) => {
     const c = spawn(cmd, ['--stream', 'a b'], { env: { PATH: '/usr/bin:/bin', VS_MARK: mark }, stdio: 'ignore' });
     c.on('error', (e) => res({ err: e.message })); c.on('close', (code) => res({ code }));
@@ -307,7 +318,7 @@ const REAL8 = await (async () => {
     }
     return { label, sn, sp, h, want, got, cs, marks };
   })));
-  return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs };
+  return { RN, RB, PROG, SHAPES, SHELLS, envOf, runs, planted, plantedChanged, plantOne };
 })();
 // B-69ec ⑪: the remote twin's runs, started here beside ⑧ (the same planted homes, the machine's road: `sh -c <the script>`)
 const REM11 = (() => {
@@ -318,7 +329,10 @@ const REM11 = (() => {
   const runsOf = (mod, outerOf = () => '/bin/sh') => Promise.all(REAL8.SHAPES.flatMap(([label, h, onPath]) => REAL8.SHELLS.map(async ([sn, sp]) => {
     const rc = mod.createRemoteCli({ hostShell: shOf({ ...REAL8.envOf(h, onPath), SHELL: sp }, outerOf(sp)), log: () => { } });
     const got = await rc.forSpawn({ id: 'dev-11', name: 'DEV-11' }, 'claude', REAL8.RN).then((c) => ({ cmd: c }), (e) => ({ err: e }));
-    return { label, sn, got };
+    // the run's OWN facts (主开发 r205): the reply's kind, the prelude, why — printed by the parity leg green or red, so a red names
+    // its branch (an empty read of the home and a timed-out ask read alike from the outside)
+    let f = null; try { f = (rc.census('dev-11') || {}).claude || null; } catch { f = null; }
+    return { label, sn, got, facts: f ? { kind: f.answer, prelude: f.prelude || null, why: f.why || null } : null };
   })));
   const zsh = (REAL8.SHELLS.find(([n]) => n === 'zsh') || [])[1] || null;
   return { RC, LSM, runsOf, runs: runsOf(RC), zshRuns: zsh ? runsOf(RC, () => zsh) : Promise.resolve([]), zsh };
@@ -676,7 +690,8 @@ else {
     : !!m.got.err && m.got.err.code === 'cli-missing' && m.got.err.remote === true && !!l.got.err && (l.got.err.wrapper ? !!m.got.err.wrapper && m.got.err.wrapper.kind === l.got.err.wrapper.kind : !m.got.err.wrapper) && (l.got.err.dangling || null) === (m.got.err.dangling || null));
   for (const [label] of REAL8.SHAPES) {
     const ls = loc.filter((r) => r.label === label), ms = rem.filter((r) => r.label === label);
-    ok(`PARITY: ${label} — the remote ask reaches what the local road reaches (${ms.map((m) => `${m.sn} ${m.got.cmd ? 'the program' : `refused${m.got.err && m.got.err.dangling ? ` (${m.got.err.dangling})` : ''}`}`).join(' · ')})`, ls.length === REAL8.SHELLS.length && ms.length === ls.length && ls.every((l) => { const m = ms.find((x) => x.sn === l.sn); return !!m && same(l, m); }),
+    const factsOf = (m) => (m.facts ? ` [${m.facts.kind}${m.facts.prelude ? `, prelude ${m.facts.prelude}` : ''}${m.facts.why ? `, why ${m.facts.why}` : ''}]` : ' [no facts]');
+    ok(`PARITY: ${label} — the remote ask reaches what the local road reaches (${ms.map((m) => `${m.sn} ${m.got.cmd ? 'the program' : `refused${m.got.err && m.got.err.dangling ? ` (${m.got.err.dangling})` : ''}`}${factsOf(m)}`).join(' · ')})`, ls.length === REAL8.SHELLS.length && ms.length === ls.length && ls.every((l) => { const m = ms.find((x) => x.sn === l.sn); return !!m && same(l, m); }),
       JSON.stringify(ms.map((m) => ({ sh: m.sn, cmd: m.got.cmd, err: m.got.err && m.got.err.message, local: (ls.find((l) => l.sn === m.sn) || { got: {} }).got.cmd || 'refused' }))).slice(0, 900));
   }
   const zr = await REM11.zshRuns;
@@ -691,6 +706,19 @@ else {
   const redR = RM ? (await remoteLegs(RM, REM11.LSM)).filter((r) => !r.pass).map((r) => r.name) : [];
   const parR = RM ? (await REM11.runsOf(RM)).filter((m) => { const l = loc.find((x) => x.label === m.label && x.sn === m.sn); return l && !same(l, m); }).length : 0;
   ok(`MUTANT the answer ignored (the configured name, the pre-twin road) ⇒ the path leg RED (${redR.length}) and the parity RED on ${parR} runs`, redR.some((n) => /^THE REMOTE TWIN/.test(n)) && parR > 0, redR.join(' | ').slice(0, 300));
+  // THE LAW's own leg (主开发 r205), after the FOURTH run set (the mutant's) ended: no planted home changed while its shells read it
+  const changed = REAL8.plantedChanged(), onPathN = REAL8.SHAPES.filter(([, , o]) => o).length;
+  ok(`the planted homes were written ONCE, before any ask: every file their shells read is as planted after the four run sets (${REAL8.planted.length} files, ${REAL8.planted.filter((x) => x.f.endsWith('.vs-on-path')).length} ~/.vs-on-path of ${onPathN} «on PATH» homes)`,
+    REAL8.planted.filter((x) => x.f.endsWith('.vs-on-path')).length === onPathN && REAL8.planted.length >= REAL8.SHAPES.length * 4 && !changed.length, changed);
+  { // CONTROL (a real one): a file planted the same way, then written again with the SAME bytes and then truncated — refused by name
+    // (read-only), or, on a root runner where a chmod cannot refuse, seen by the leg's own judge
+    const cf = path.join(DIR, 'planted-control'); fs.writeFileSync(cf, REAL8.RB); const c = REAL8.plantOne(cf);
+    const tryIt = (fn) => { try { fn(); return 'written'; } catch (e) { return (e && e.code) || 'error'; } };
+    const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
+    const same = tryIt(() => fs.writeFileSync(cf, c.text)), cut = tryIt(() => fs.truncateSync(cf, 0));
+    ok(`CONTROL: a planted file written again (the same bytes: ${same}) or truncated (${cut}) is refused by name${asRoot ? ' — as root the truncate is seen by the judge instead' : ''}`,
+      asRoot ? (cut === 'written' && REAL8.plantedChanged([c]).length === 1) : (same === 'EACCES' && cut === 'EACCES'));
+  }
   // batch 63's cure — the program line and the ask's prelude, run in a REAL sh over a planted home: a CLI and the real browser
   // driver installed under ONE prefix (an nvm node's bin, no default alias, no nvm.sh), the VibeSpace shim in ~/.vibespace/bin,
   // a PATH of plain tools only (no node: the spawn's node finder is what reaches the nvm bin). The machine's LOGIN shell is a
