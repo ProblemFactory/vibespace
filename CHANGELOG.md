@@ -7,6 +7,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Added
 - A Task Group can now have parent groups (Settings → Parent groups): it uses what they are granted and is told the rows and rules they pass to child groups.
 - Every «Who can use it» now says whether a Task Group includes its child groups, and each picked group can be set to «this group only».
+- An agent can now let a Background Work job it starts read the other jobs of its conversation, read only; by default a job reads only itself.
 
 ### Fixed
 - A message you held behind a running turn, or a turn that just started or ended, no longer goes missing from the chat if VibeSpace restarts right then.
@@ -45,6 +46,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A job named «password reset» or «auth: fix login flow» keeps its words; a password or key typed in a job's name is still hidden, extra spaces too.
 - A job result or wake sent to an ended conversation on a paired machine now resumes it there and delivers once it is ready (after the device agent update).
 - On a phone, the account dialogs (Connect an account, Re-authorize, Edit, Duplicate, Cannot remove) now have finger-sized buttons, boxes and text.
+- Moving the old job secrets into the vault no longer keeps a copy it could not remove unsaid: For you names it, and each unlock tries again to remove it.
+- On a phone, a deliverable card's kind word stays on one line beside a long title; the title is cut instead.
+- On a phone, the Agents dialog no longer runs past its right edge: Refresh all and every card sit inside it.
+- A menu opened near the screen's right edge keeps a small margin instead of touching the edge.
 
 ## 2.369.413 — 2026-11-20
 
