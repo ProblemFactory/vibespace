@@ -873,7 +873,8 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
           await until(() => PI.aliveIdentity(id) === false, 1500);
           const alive = PI.aliveIdentity(id) === true, job = [...jm.jobs.values()][0], run = job && job.runs[job.runs.length - 1];
           if (alive) PI.signalIdentity(id, 'SIGKILL');
-          return { pid, alive, inTree: tree.some((m) => m.pid === pid), ownGroup: PI.pgidOf(pid) === pid || !alive, left: (run && run.left) || null };
+          let view = null; try { view = ((jm.snapshot(job) || {}).run || {}).left || null; } catch (e) { view = { threw: String(e && e.message) }; }   // the API's view (the card's row reads it)
+          return { pid, alive, inTree: tree.some((m) => m.pid === pid), ownGroup: PI.pgidOf(pid) === pid || !alive, left: (run && run.left) || null, view };
         } };
       } });
   };
@@ -883,6 +884,11 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
     'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried the job\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
   const TS = "  const taskStop = !keeps && !!stopping;\n", SS = "    for (const p of escapedOf()) termOnce(p);   // B-7ca1: a TASK's too — what carries its mark outside its group hears the stop with the main (its grace runs from the stop)\n";
   const relEsc = anchored(anchored(WRAP, TS, "  const taskStop = false;   // MUTANT: the release — a task's escapees are said, not stopped\n", 'b7ca1-taskstop-cut'), SS, "    if (keeps) for (const p of escapedOf()) termOnce(p);\n", 'b7ca1-stopstep-cut');   // stale-pins: kept (the control plants the release's text in a copy)
+  ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
+  const VW = 'escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {})';
+  const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)
+  const sv = await escScene(WRAP, 'esc-view-mut', { jobsMod: viewCut });
+  ok(sv.after && sv.after.left && sv.after.left.outside >= 1 && sv.after.view && !sv.after.view.outside, 'CONTROL (the view without `outside`, in a copy): the run records it but the card\'s row never sees it — RED', sv.after);
   const sx = await escScene(relEsc, 'esc-stop-mut');
   ok(sx.after && sx.after.alive && sx.after.left && sx.after.left.escaped >= 1 && !sx.after.left.outside, 'CONTROL (the release\'s wrapper, in a copy): the re-parented child is LEFT RUNNING — said «left its group — not stopped» — RED', sx.after);
   // (b) a FORCE stop: the wrapper is SIGKILLed (its stop step never runs) — the ENGINE ends what carries the mark, beside the tree
