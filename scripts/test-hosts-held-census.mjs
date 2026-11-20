@@ -542,7 +542,7 @@ console.log('§5b B-06de\'s machines-list readers take a held answer as unread')
     const r = await door.call({ _firstFolder: () => ({ cwd: '/srv/app', hostId: 'h-0001' }), app: { showNewSessionDialog: () => { io.opened++; return 'opened'; }, openTaskDetail() { } } }, { id: 'T-1' });
     return { r, opened: io.opened, said: io.said };
   };
-  const og = await openScene(STS), ogx = await openScene(anchored(STS, UR, 'const unread = !d || d.error || d.held || !Array.isArray(d.hosts);', 'hhc-5b1'));
+  const og = await openScene(STS), ogx = await openScene(anchored(STS, UR, 'const unread = !d || d.error || d.held || !Array.isArray(d.hosts);', 'hhc-5b1'));   // stale-pins: kept (the control plants the first read's text in a copy)
   ok(og.r === null && og.opened === 0 && JSON.stringify(og.said) === '["unread"]' && ogx.r === null && JSON.stringify(ogx.said) === '["not-paired"]',
     'B-06de\'s group door while the machines list is HELD: nothing is opened and the list is said as UNREAD («cannot be read right now»); CONTROL (the door\'s first read, `d.held` — a mark the hub never sends, in a copy): «not paired any more», a false word that sends the person to re-point the row — RED', { og, ogx });
   // (b) the group window's fresh read (task-detail freshHosts): the roster it holds, the list held
@@ -560,7 +560,7 @@ console.log('§5b B-06de\'s machines-list readers take a held answer as unread')
     fresh(); await new Promise((r) => setImmediate(r));
     return { kept: sidebar._hostsData === kept, painted };
   };
-  const fh = await freshScene(TDS), fhx = await freshScene(anchored(TDS, FU, 'if (closed || !d || !Array.isArray(d.hosts)) return;', 'hhc-5b2'));
+  const fh = await freshScene(TDS), fhx = await freshScene(anchored(TDS, FU, 'if (closed || !d || !Array.isArray(d.hosts)) return;', 'hhc-5b2'));   // stale-pins: kept (the control plants the first read's text in a copy)
   ok(fh.kept && fh.painted === 0 && !fhx.kept && fhx.painted === 1,
     'B-06de\'s group window re-reading the machines list while HELD: the roster it holds is KEPT and nothing repaints; CONTROL (the read\'s first line, in a copy): the held answer (no machines) becomes the roster and the Context table repaints with its machine rows as not paired — RED', { fh, fhx });
 }
