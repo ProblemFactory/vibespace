@@ -152,6 +152,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     file: LAYOUTS_FILE,
     valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
     onLift: () => layoutsAgain('its hold lifted'),
+    // B-225b's SECOND HALF (主开发 r662): a write the storage refused is OWED — kept, retried on the hold's own ladder; past the silent
+    // rungs EVERY page is told (one client's failing save is every client's fact), lifted when a write lands
+    onUnsaved: (u) => { console.warn(`[layouts] ${u.file} cannot be written (${u.code || u.why}) since ${new Date(u.since).toISOString()} — the desktops in memory are NOT on disk; written again by the ladder`); storeWord('store-unsaved', u); },
+    onSaved: (u) => { console.log(`[layouts] ${u.file} is written again — the desktops kept since ${new Date(u.since).toISOString()} are on disk`); storeWord('store-saved', { file: u.file }); },
+    onOwedRefused: (e) => { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); },
     onSaid: (h) => { console.warn(`[layouts] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the desktops are HELD: nothing is written over them, their doors refuse by name until it reads`); storeWord('store-held', h); },
   });
   /** the desktops read again WHOLE (the hold lifted, or a file appeared where the start found none): every page told */
@@ -184,13 +189,23 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // change from every client — a sync full-file write per message was a steady
   // event-loop hot path. The in-memory cache is authoritative between flushes.
   let _layoutsSaveTimer = null;
-  function flushLayouts() {
+  /** the restore door's answer when its write did not land (B-225b's second half): BY NAME — never «restored» over a write the storage
+   *  refused; the restore stands in memory (every page shows it) and is written by the hold's ladder */
+  const restoreUnsaved = () => { const o = layoutsHold.owed() || {}; return { error: `restored here, but NOT saved: layouts.json could not be written (${o.code || o.why || 'write failed'}) — the restore is kept in memory and written again by itself; a restart before it lands brings back the older desktops`, code: 'store_unsaved', unsaved: { file: 'layouts.json', code: o.code || null, since: o.since || null } }; };
+  /** the layout-restored broadcast with the unsaved fact riding it: the restoring page says the refusal, never «restored» */
+  const toldUnsaved = (told) => { const o = layoutsHold.owed() || {}; const w = JSON.parse(told); return JSON.stringify({ ...w, unsaved: { file: 'layouts.json', code: o.code || null, since: o.since || null } }); };
+  /** → true when the desktops are on disk. A write the storage refuses is OWED (the hold keeps trying, says it past the silent rungs,
+   *  lifts at the landing — B-225b's second half); `press` = a person's act (said at once); `stop` = the exit's last flush (a failure
+   *  there is the journal's line, by the store's name: the next start reads the older file) */
+  function flushLayouts({ press = false, stop = false } = {}) {
     if (_layoutsSaveTimer) { clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = null; }
     drainPoints();   // B-225b R10: a rollback point OWED lands BEFORE the layouts.json write that replaces its state (the exit flush too)
-    if (_layoutsCache) {
-      try { ensureDir(dataDir); layoutsHold.write(_layoutsCache); }
-      catch (e) { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); }   // (a refused flush otherwise: the second half of B-225b says it)
-    }
+    if (!_layoutsCache) return true;
+    let landed = false;
+    try { landed = layoutsHold.flush(() => { if (!_layoutsCache) return null; ensureDir(dataDir); return [_layoutsCache]; }, { press }); }
+    catch (e) { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); return false; }   // a refusal BY NAME (held, appeared): nothing written
+    if (!landed && stop) { const o = layoutsHold.owed(); console.error(`[layouts] layouts.json could NOT be written at the stop (${(o && (o.code || o.why)) || 'write failed'}) — the desktops changed since ${o ? new Date(o.since).toISOString() : 'this flush'} are not on disk: the next start reads the older file`); }
+    return landed;
   }
   // ── LAYOUT HISTORY (2.296.0, after a bug flattened a user's whole desktop
   // layout and the only good copy was gone). Layouts are the one piece of
@@ -561,10 +576,12 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       }
       noteLayout({ via: 'restore', from: id, desktop: only });
       writeLayouts(doc);
-      flushLayouts();
+      const landed = flushLayouts({ press: true });   // B-225b's second half: a restore that did not land never looks landed
       try {
-        wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(told); } catch {} } });
+        const word = landed ? told : toldUnsaved(told);
+        wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(word); } catch {} } });
       } catch {}
+      if (!landed) return res.status(503).json(restoreUnsaved());
       return res.json({ success: true, desktopId: only, windows: back.size, restoredFrom: saved.at });
     }
     // B-225b R5: the desktops DAMAGED (bytes that are not a layout) — the WHOLE restore is the person's whole replace: the damaged
@@ -598,7 +615,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // undoable, so a mis-click can never be the end of the story
     noteLayout({ via: 'restore', from: id }); // the restore's own write names it (its point's `writer`)
     writeLayouts(saved.layouts);
-    flushLayouts();
+    const landed = flushLayouts({ press: true });   // B-225b's second half: a restore that did not land never looks landed
     // BROADCAST (adversarial review): every other layout mutation broadcasts;
     // this one did not. Another open tab keeps its pre-restore state and the
     // next window change there writes that desktop's OLD window set straight
@@ -606,8 +623,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // seconds later, with nothing in any log. Tell every client to reload,
     // exactly what the restoring client does.
     try {
-      wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(told); } catch {} } });
+      const word = landed ? told : toldUnsaved(told);
+      wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(word); } catch {} } });
     } catch {}
+    if (!landed) return res.status(503).json(restoreUnsaved());
     res.json({ success: true, summary: saved.summary, restoredFrom: saved.at });
   });
 
@@ -1441,7 +1460,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   };
   // R7 — THE PAGE'S ONE FACE reads the holds here: the boot and every reconnect (a word said while a page was away never arrives)
   router.get('/api/stores/held', (req, res) => {
-    res.json({ held: heldSections(Object.keys(STORE_SECTIONS)) });   // [{ section, file, kind, code, since, rung }] — a page says only those past their silent rungs
+    // + B-225b's second half: the stores whose owed write is SAID (past its silent rungs, or a press) — `unsaved`, beside the holds
+    res.json({ held: heldSections(Object.keys(STORE_SECTIONS)), unsaved: Object.values(STORE_SECTIONS).map((s) => (typeof s.hold.owed === 'function' ? s.hold.owed() : null)).filter((u) => u && u.rung === 'said') });   // [{ section, file, kind, code, since, rung }] — a page says only those past their silent rungs
   });
   // the person's choice of an EMPTY store for a damaged one (R5, beside the rollback point and the import): set aside, then read again
   router.post('/api/stores/:file/empty', (req, res) => {

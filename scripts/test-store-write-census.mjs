@@ -2733,7 +2733,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
               if (!(DIRECT_OK[f] || []).some((re) => re.test(a0))) out.bad.push(`fs.${f}(${a0}) — a direct write of ${a0}`);
             }
             if (c.type === 'Identifier' && c.name === 'writeJsonAtomic') { out.atomic.push(a0); if (!/^path\.join\(HISTORY_DIR, /.test(a0)) out.bad.push(`writeJsonAtomic(${a0}) — the atomic writer aimed outside the rollback points`); }
-            if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'write' && c.object.type === 'Identifier' && /Hold$/.test(c.object.name)) out.holdWrites[c.object.name] = (out.holdWrites[c.object.name] || 0) + 1;
+            if (c.type === 'MemberExpression' && !c.computed && (c.property.name === 'write' || c.property.name === 'flush') && c.object.type === 'Identifier' && /Hold$/.test(c.object.name)) out.holdWrites[c.object.name] = (out.holdWrites[c.object.name] || 0) + 1;   // (B-225b's second half: a hold's FLUSH is its write door too — the owed write retried behind it)
             if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'setAside') out.setAside++;
           }
           for (const k of Object.keys(n)) { if (k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object' && typeof v.type === 'string') walk(v); }
@@ -2747,12 +2747,108 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const real = chokeCensus(PSRC);
       ok(real.bad.length === 0 && real.direct.length === 8 && real.atomic.length === 2,
         `⑪ (h) THE ONE CHOKE: every write of a held store's file is its hold's ONE write (${Object.entries(real.holdWrites).map(([h, n]) => `${h} ${n}`).join(', ')}) or the damaged door's setAside; the ${real.direct.length} direct fs writes are the data and rollback folders, the rollback points (pid temp + rename, the prune's unlinks) and the agent CLIs' credentials — none a store's file`, real);
-      const plant = (add, name) => chokeCensus(anchored(PSRC, '  function flushLayouts() {\n', '  function flushLayouts() {\n' + add, name)).bad;
+      const plant = (add, name) => chokeCensus(anchored(PSRC, '  function flushLayouts({ press = false, stop = false } = {}) {\n', '  function flushLayouts({ press = false, stop = false } = {}) {\n' + add, name)).bad;
       const p1 = plant('    fs.writeFileSync(LAYOUTS_FILE, JSON.stringify(_layoutsCache));\n', 'swc-h-direct');
       const p2 = plant('    layoutsHold.write(_layoutsCache);\n', 'swc-h-second');
       const p3 = plant('    writeJsonAtomic(SETTINGS_FILE, {});\n', 'swc-h-atomic');
       ok(p1.some((b) => /fs\.writeFileSync\(LAYOUTS_FILE\)/.test(b)) && p2.some((b) => /layoutsHold\.write × 2/.test(b)) && p3.some((b) => /writeJsonAtomic\(SETTINGS_FILE\)/.test(b)),
         '⑪ (h) CONTROLS (planted in a copy\'s text): a direct write of layouts.json, a SECOND write door of the desktops, the atomic writer aimed at settings.json — each red by name', { p1, p2, p3 });
+    }
+    // (m) B-225b's SECOND HALF (主开发 r662): a layouts write the storage REFUSES is OWED — kept (memory is the truth), retried on the
+    // hold's own ladder (src/store-hold.js flush), never dropped or swallowed; SAID once past the silent rungs on EVERY page
+    // (`store-unsaved`), at once for a person's press; LIFTED when a write lands (`store-saved`); the two restore doors answer a refused
+    // write BY NAME (503 store_unsaved) and their broadcast carries it (the restoring page never says «restored»); a stop's last flush
+    // that fails is the journal's line by the store's name. The failure is PLACED (fs.writeFileSync refused for the store's temp name),
+    // never a real mount. REDs (in a copy): the release's swallow — the restore answers success, nothing is said, nothing kept owed.
+    {
+      const SH = require(path.join(REPO, 'src/store-hold.js'));
+      const refusedWrite = () => Object.assign(new Error('EIO: a stand-in refused write'), { code: 'EIO' });
+      // THE HOLD ALONE: a stand-in scheduler (each rung fired by hand), a write that fails N times then lands
+      const ladderScene = (fails, { press = false } = {}) => {
+        const d = scratchDir('owed-' + fails + (press ? '-press' : '')); roots.push(d);
+        const F = path.join(d, 'store.json'); fs.writeFileSync(F, JSON.stringify({ v: 0 }));
+        const timers = [], said = [], saved = [];
+        const H = SH.create({ file: F, schedule: (fn, ms) => { timers.push({ fn, ms }); return {}; }, onUnsaved: (u) => said.push(u), onSaved: (u) => saved.push(u), log: { warn() { } } });
+        H.readAtStart();
+        let left = fails, v = 1;
+        const produce = () => { if (left > 0) { left--; throw refusedWrite(); } return [{ v }]; };
+        const first = H.flush(produce, { press });
+        const saidAtOnce = said.length;
+        const delays = [];
+        while (timers.length && delays.length < 12) { const t = timers.shift(); delays.push(t.ms); v++; t.fn(); }
+        return { first, saidAtOnce, said, saved, delays, owed: H.owed(), disk: JSON.parse(fs.readFileSync(F, 'utf8')), v };
+      };
+      const cured = ladderScene(2), long = ladderScene(6), press = ladderScene(1, { press: true });
+      ok(cured.first === false && cured.said.length === 0 && cured.saved.length === 0 && cured.owed === null && cured.disk.v === cured.v,
+        '⑪ (m) a refused write the next rungs cure is OWED and retried (1 s, 2 s) and lands — NOTHING said, nothing lifted; the bytes that land are memory\'s latest', cured);
+      ok(long.first === false && long.said.length === 1 && long.said[0].rung === 'said' && long.said[0].code === 'EIO' && long.said[0].file === 'store.json' && long.saved.length === 1 && long.owed === null && long.disk.v === long.v && JSON.stringify(long.delays.slice(0, 4)) === '[1000,2000,4000,8000]' && long.delays[4] >= 30000,
+        '⑪ (m) a write the storage KEEPS refusing is owed on the hold\'s own ladder (the silent rungs, then 30 s up), SAID ONCE past the silent rungs (store, code), LIFTED once when a write lands — never dropped', { said: long.said, saved: long.saved, delays: long.delays });
+      ok(press.first === false && press.saidAtOnce === 1 && press.saved.length === 1 && press.owed === null, '⑪ (m) a PRESS\'s refused write is said AT ONCE (a person\'s act never waits the silent rungs) and lifted when it lands', press);
+      { const d = scratchDir('owed-held'); roots.push(d); const F = path.join(d, 'store.json'); fs.writeFileSync(F, '{"torn');
+        const H = SH.create({ file: F, valid: (v) => !!v && typeof v === 'object', schedule: () => ({}), log: { warn() { } } }); H.readAtStart();
+        let code = null; try { H.flush(() => [{ v: 1 }]); } catch (e) { code = e.code; }
+        ok(code === 'store_unread' && H.owed() === null, '⑪ (m) a refusal BY NAME is no storage failure: a held store\'s flush throws store_unread and owes nothing', { code }); }
+      // THE DESKTOPS (src/routes/persistence.js): the autosave's flush, a press's, the stop's, and the two restore doors
+      const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+      const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
+      const refusing = async (fn) => { const wf = fs.writeFileSync; fs.writeFileSync = function (f, ...a) { if (/layouts\.json\.\d+\.tmp$/.test(String(f))) throw refusedWrite(); return wf.call(this, f, ...a); }; try { return await fn(); } finally { fs.writeFileSync = wf; } };
+      const tick = () => new Promise((r) => setImmediate(() => setImmediate(r)));
+      const lay = (spec) => ({ current: null, autoSave: null, saved: {}, customGrids: [], desktops: Object.fromEntries(Object.entries(spec).map(([k, ws]) => [k, { autoSave: { windows: ws.map((w) => ({ winId: w })) } }])), desktopMeta: Object.keys(spec).map((k) => ({ id: k, name: k.toUpperCase() })) });
+      const sceneM = async (P, tag) => {
+        const d = scratchDir('owed-lay-' + tag); roots.push(d);
+        const sent = []; const client = { readyState: 1, send: (x) => { try { sent.push(JSON.parse(x)); } catch { } } };
+        P.setup({ dataDir: d, wss: { clients: new Set([client]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        const R = P.router;
+        const handler = (method, p) => { const l = R.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
+        const call = async (method, p, body, params = {}) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; }, set() { return res; }, setHeader() { } }; await handler(method, p)({ body, query: {}, params, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
+        R.readLayouts(); R.writeLayouts(lay({ a: ['w1', 'w2'], b: ['w3'] })); R.flushLayouts(); await tick();
+        R.writeLayouts(lay({ a: ['w1', 'w2', 'w3'], b: [] })); R.flushLayouts(); await tick();   // a shape change: one rollback point
+        const F = path.join(d, 'layouts.json');
+        return { R, sent, call, F, disk: () => JSON.parse(fs.readFileSync(F, 'utf8')), point: () => R.listLayoutHistory()[0] };
+      };
+      const M = await sceneM(freshP(), 'real');
+      const W = (t) => M.sent.filter((x) => x.type === t);
+      // the autosave: a refused flush is kept, nothing said in its silent rungs
+      const before = fs.readFileSync(M.F, 'utf8');
+      const auto = await refusing(() => { M.R.writeLayouts(lay({ a: ['w1', 'w2', 'w3', 'w4'], b: [] })); return M.R.flushLayouts(); });
+      const heldAuto = await M.call('get', '/api/stores/held');
+      ok(auto === false && fs.readFileSync(M.F, 'utf8') === before && W('store-unsaved').length === 0 && Array.isArray(heldAuto.body.unsaved) && heldAuto.body.unsaved.length === 0,
+        '⑪ (m) the desktops: an autosave whose write the storage refuses is KEPT (the flush answers «not landed», the file holds the older desktops) and nothing is said in its silent rungs', { auto, words: W('store-unsaved'), unsaved: heldAuto.body.unsaved });
+      // a press's flush: said at once on every page, listed for a page that was away; a landing lifts it
+      const pr = await refusing(() => M.R.flushLayouts({ press: true }));
+      const heldNow = await M.call('get', '/api/stores/held');
+      const u = W('store-unsaved')[0];
+      const landedAfter = M.R.flushLayouts();
+      const heldAfter = await M.call('get', '/api/stores/held');
+      ok(pr === false && !!u && u.file === 'layouts.json' && u.code === 'EIO' && u.rung === 'said' && heldNow.body.unsaved.length === 1 && heldNow.body.unsaved[0].file === 'layouts.json'
+        && landedAfter === true && W('store-saved').length === 1 && W('store-saved')[0].file === 'layouts.json' && heldAfter.body.unsaved.length === 0 && (M.disk().desktops.a.autoSave.windows || []).length === 4,
+        '⑪ (m) the desktops: a press\'s refused flush is SAID to every page at once (store-unsaved: the file, its code) and listed for a page that was away (GET /api/stores/held → unsaved); the next landing LIFTS it (store-saved) with memory\'s desktops on disk', { u, unsaved: heldNow.body.unsaved, landedAfter, saved: W('store-saved') });
+      // the stop: a last flush that fails is the journal's line, by the store's name
+      const errs = []; const ce = console.error; console.error = (...a) => errs.push(a.join(' '));
+      let st; try { st = await refusing(() => { M.R.writeLayouts(lay({ a: ['w1'], b: ['w2', 'w3', 'w4'] })); return M.R.flushLayouts({ stop: true }); }); } finally { console.error = ce; }
+      ok(st === false && errs.some((l) => /\[layouts\] layouts\.json could NOT be written at the stop \(EIO\) — the desktops changed since .* are not on disk: the next start reads the older file/.test(l)),
+        '⑪ (m) the hub\'s stop: a last flush the storage refuses is said in the journal BY THE STORE\'S NAME (the next start reads the older file)', errs);
+      M.R.flushLayouts();   // (lands: the next scene starts clean)
+      // the two restore doors: a refused write is answered BY NAME, its broadcast carries it — never «restored»
+      const restoreScene = async (P, tag) => {
+        const S = await sceneM(P, tag); const pt = S.point();
+        const whole = await refusing(() => S.call('post', '/api/layout-history/:id/restore', { rid: 'r-whole' }, { id: pt.id }));
+        S.R.flushLayouts();
+        const one = await refusing(() => S.call('post', '/api/layout-history/:id/restore', { rid: 'r-one', desktopId: 'b' }, { id: pt.id }));
+        S.R.flushLayouts();
+        const told = S.sent.filter((x) => x.type === 'layout-restored');
+        return { whole, one, told, unsavedWords: S.sent.filter((x) => x.type === 'store-unsaved').length };
+      };
+      const RS = await restoreScene(freshP(), 'restore');
+      ok(RS.whole.status === 503 && RS.whole.body.code === 'store_unsaved' && /restored here, but NOT saved: layouts\.json could not be written \(EIO\)/.test(RS.whole.body.error) && RS.whole.body.unsaved.file === 'layouts.json'
+        && RS.one.status === 503 && RS.one.body.code === 'store_unsaved'
+        && RS.told.length === 2 && RS.told.every((x) => x.unsaved && x.unsaved.file === 'layouts.json' && x.unsaved.code === 'EIO') && RS.unsavedWords >= 2,
+        '⑪ (m) the two restore doors (the whole point, one desktop) answer a refused write BY NAME (503 store_unsaved, the file and its code) and their broadcast carries it — the restoring page never says «restored»; the strip is told at once (a press)', RS);
+      // RED: the release's swallow, in a copy — the restore answers success over a write that failed, nothing is said
+      const SWALLOW_A = /^ {4}try \{ landed = layoutsHold\.flush\([^\n]*\n {4}catch \(e\) \{ if \(e && e\.code === 'store_appeared'\) layoutsAgain\([^\n]*\n/m;
+      const XS = await restoreScene(mutantCopies('swc-owed-swallow', REPO).load(PREL, anchored(PSRC, SWALLOW_A, "    try { ensureDir(dataDir); layoutsHold.write(_layoutsCache); } catch (e) { /* MUTANT: the release's swallow */ }\n    landed = true;\n", 'owed-swallow'), 'owed-swallow'), 'restore-red');
+      ok(XS.whole.status === 200 && XS.whole.body.success === true && XS.unsavedWords === 0 && XS.told.every((x) => !x.unsaved),
+        'CONTROL (the release\'s swallow, in a copy): the restore answers SUCCESS over a write the storage refused and nothing is said — red', { whole: XS.whole, words: XS.unsavedWords });
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }

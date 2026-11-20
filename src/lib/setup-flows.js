@@ -1,4 +1,4 @@
-import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell } from './utils.js';
+import { escHtml, showToast, showConfirmDialog, fetchJson, createModalShell, storeRestoreUnsavedWords } from './utils.js';
 import { maybeNagVault } from './vault-unlock.js'; // lane vault-e2e-password: the tour ends ⇒ the second password (while not set up)
 import { TerminalSession } from './terminal.js';
 import { t, tc } from './i18n.js';
@@ -552,12 +552,16 @@ export function installSetupFlows(App) {
       b.textContent = t('Restoring…'); b.setAttribute('aria-busy', 'true'); if (list) list.inert = true; this._layoutRestoring = own;
       const end = (res) => {
         if (own.over) return true;
+        // B-225b's second half: the restore stands in the hub's memory but its write was refused (`store_unsaved`) — said BY NAME, never
+        // «restored»; the page reloads to show what memory holds (the strip says it is not being saved)
+        if (res?.code === 'store_unsaved') { own.over = true; if (this.layoutManager) this.layoutManager._restoreReload = true; close(); showToast(res.error || storeRestoreUnsavedWords(), { type: 'error', duration: 12000 }); setTimeout(() => location.reload(), 4000); return true; }
         if (res?.success) { own.over = true; if (this.layoutManager) this.layoutManager._restoreReload = true; close(); showToast(done); setTimeout(() => location.reload(), 800); return true; } // the restore armed the reload: nothing of this page's leaves (layout.js _restoreArmed)
         b.textContent = was; b.removeAttribute('aria-busy'); if (list) list.inert = false; this._layoutRestoring = null;
         showToast(res?.error || t('Restore failed'), { type: 'error' });
         return false;
       };
       own.landed = () => end({ success: true });
+      own.unsaved = () => end({ code: 'store_unsaved', error: storeRestoreUnsavedWords() });
       end.rid = own.rid;
       return end;
     };

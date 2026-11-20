@@ -323,12 +323,12 @@ console.log('§5 GET /api/stores/held names every store held NOW — each store 
   const emptied = await G.call('post', '/api/stores/:file/empty', { params: { file: 'layouts.json' }, headers: { 'sec-fetch-site': 'same-origin' } });   // the owner's page (the damaged door's one verdict)
   const h2 = await G.call('get', '/api/stores/held');
   ok(h1.status === 200 && one.length === 1 && one[0].section === 'layouts' && one[0].file === 'layouts.json' && one[0].kind === 'damaged' && typeof one[0].rung === 'string'
-    && !!emptied.body && emptied.body.success === true && J(h2.body) === J({ held: [] }),
+    && !!emptied.body && emptied.body.success === true && J(h2.body.held) === J([]) && J(h2.body.unsaved) === J([]),
     'a torn layouts.json at a FRESH start (nothing read yet): the list names it — damaged, with its rung — and the readable settings not; once the person starts it empty the list is empty', J({ h1: h1.body, h2: h2.body }));
-  const CTL = M.load(PREL, anchored(PSRC, '    res.json({ held: heldSections(Object.keys(STORE_SECTIONS)) });', '    res.json({ held: Object.keys(STORE_SECTIONS).map((n) => STORE_SECTIONS[n].hold.held()).filter(Boolean) });', 'the read first'), 'no-read-first');
+  const CTL = M.load(PREL, anchored(PSRC, '    res.json({ held: heldSections(Object.keys(STORE_SECTIONS)), unsaved: ', '    res.json({ held: Object.keys(STORE_SECTIONS).map((n) => STORE_SECTIONS[n].hold.held()).filter(Boolean), unsaved: ', 'the read first'), 'no-read-first');
   const R = setupP(CTL);
   const r1 = await R.call('get', '/api/stores/held');
-  ok(J(r1.body) === J({ held: [] }), 'CONTROL (the route asks no store its read first, in a copy): at a fresh start it answers «nothing held» over a torn file — a page opened first says nothing and shows an empty desktop (red)', J(r1.body));
+  ok(J(r1.body.held) === J([]), 'CONTROL (the route asks no store its read first, in a copy): at a fresh start it answers «nothing held» over a torn file — a page opened first says nothing and shows an empty desktop (red)', J(r1.body));
 }
 
 // §5b THE HUB'S WORD REACHES THE STRIP: a hold past its silent rungs is SAID with its FILE (store-hold.js onSaid → the `store-held`
@@ -588,6 +588,44 @@ const writerCensus = (files) => {
     && fe.includes("dropZone.textContent = this._bkHeld && !this._bkLanded ? storeHeldWords(this._bkHeld) : this._bookmarks.length === 0 ? t('Drop folders here') : '';")
     && app.includes("if (msg.type === 'store-held') noteStoreHeld(msg);") && app.includes("else if (msg.type === 'store-lifted') noteStoreLifted(msg.file);") && (app.match(/refreshStoreHolds\(\)/g) || []).length === 2,
     'the page\'s wiring: a held themes file is no list (the pending theme waits — R13), the theme editor and the Settings window show no rows for a held file (its words), a held bookmarks list says its hold (never «Drop folders here»), the frames feed the ONE strip, the hub\'s list is asked at the boot and at every reconnect');
+}
+
+// ── §8 B-225b's SECOND HALF (主开发 r662): a store whose WRITE the storage refused is said on the SAME strip on every page —
+// «changes are not being saved» — from the hub's word (store-unsaved) and from its list (a page that was away), off at store-saved;
+// nothing is refused for it; a restore whose write was refused is said BY NAME, never «restored». RED (in a copy): the strip's
+// unsaved sentence cut — the word arrives and the strip says nothing.
+console.log('§8 a write the storage refused: the strip says «not being saved» on every page, lifted at the landing; a restore that did not land is never «restored»');
+{
+  const UNS = (file, code = 'EIO') => ({ file, code, since: 1 });
+  SH.noteStoreUnsaved(UNS('layouts.json'));
+  const known = SH.storesUnsaved();
+  const m1 = SH.stripModel([], { unsaved: [UNS('layouts.json')] }), m2 = SH.stripModel([], { unsaved: [UNS('layouts.json'), UNS('bookmarks.json')] });
+  const both = SH.stripModel([HELD('layouts.json')], { unsaved: [UNS('layouts.json')] });
+  SH.noteStoreSaved('layouts.json');
+  ok(known.length === 1 && known[0].file === 'layouts.json' && /^Changes to your desktops are not being saved: the storage refused the write\. They are kept here and written again by themselves\.$/.test(m1.unsavedText)
+    && m1.rows.length === 1 && m1.rows[0].kind === 'unsaved' && /not being saved/.test(m1.rows[0].kindWords) && m1.rows[0].code === 'EIO' && J(m1.unsaved) === J(['layouts.json'])
+    && /^Changes to 2 of VibeSpace’s saved files are not being saved/.test(m2.unsavedText) && both.unsaved.length === 0 && both.rows.length === 1 && SH.storesUnsaved().length === 0,
+    'the strip\'s model: one unsaved store = its own sentence («changes are not being saved», the store named), several = how many (Details names each: file, code); a HELD store owes no write (the hold\'s words only); store-saved takes it off', J({ m1: m1.unsavedText, m2: m2.unsavedText, both: both.rows }));
+  // the hub's list (a page that was away): `unsaved` beside `held`
+  ROUTE = () => answer(200, { held: [], unsaved: [{ file: 'layouts.json', code: 'EIO', since: 1, rung: 'said' }] });
+  const took = await SH.refreshStoreHolds();
+  const fromList = SH.storesUnsaved();
+  ROUTE = () => answer(200, { held: [], unsaved: [] });
+  const took2 = await SH.refreshStoreHolds();
+  ok(took === true && fromList.length === 1 && fromList[0].file === 'layouts.json' && took2 === true && SH.storesUnsaved().length === 0, 'the hub\'s list at a boot or a reconnect carries the unsaved stores (a word said while the page was away still reaches it); the next list without it lets it go', J({ fromList }));
+  // a restore whose write the storage refused: the page's words BY NAME (fetchJson maps store_unsaved), the hub's kept as `said`
+  ROUTE = () => answer(503, { error: 'restored here, but NOT saved: layouts.json could not be written (EIO)', code: 'store_unsaved', unsaved: { file: 'layouts.json', code: 'EIO' } });
+  const rr = await U.fetchJson('/api/layout-history/layout-x.json/restore', { method: 'POST' });
+  ROUTE = () => ({ ok: false, status: 599, json: async () => ({}) });
+  ok(!!rr && rr.error === U.storeRestoreUnsavedWords() && /^Restored here, but not saved: the storage refused the write\./.test(rr.error) && /restored here, but NOT saved/.test(rr.said), 'a restore whose write was refused answers the page\'s own words (never «Layout restored»); the hub\'s English kept as `said`', J(rr));
+  const APP = read('src/lib/app.js'), SF = read('src/lib/setup-flows.js');
+  ok(APP.includes("else if (msg.type === 'store-unsaved') noteStoreUnsaved(msg);") && APP.includes("else if (msg.type === 'store-saved') noteStoreSaved(msg.file);")
+    && /if \(own && msg\.rid && msg\.rid === own\.rid\) \{ if \(msg\.unsaved\) \{ noteStoreUnsaved\(msg\.unsaved\); own\.unsaved\(\); \} else own\.landed\(\); return; \}/.test(APP)
+    && /if \(res\?\.code === 'store_unsaved'\) \{ own\.over = true;[^\n]*showToast\(res\.error \|\| storeRestoreUnsavedWords\(\), \{ type: 'error'/.test(SF) && /own\.unsaved = \(\) => end\(\{ code: 'store_unsaved', error: storeRestoreUnsavedWords\(\) \}\);/.test(SF),
+    'the page\'s wiring: the hub\'s two words reach the strip; the restoring page\'s own broadcast with the unsaved fact says the refusal (never «restored»), and so does its POST\'s 503 (pins)');
+  const CUT = await esmCopy('src/lib/store-held.js', anchored(read('src/lib/store-held.js'), "  const unsavedText = unsaved.length ? storeUnsavedWords(unsaved) : '';", "  const unsavedText = '';   // MUTANT: the unsaved sentence cut", 'unsaved-cut'), 'unsaved-cut');
+  const cm = CUT.stripModel([], { unsaved: [UNS('layouts.json')] });
+  ok(!!cm && cm.unsavedText === '', 'CONTROL (the strip\'s unsaved sentence cut, in a copy): the word arrives and the strip says nothing of it — red', J(cm && cm.unsavedText));
 }
 
 report();

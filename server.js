@@ -705,7 +705,7 @@ process.on('uncaughtException', (e) => { if (e && e.code === 'EVSMOUNTSYNC') { c
   // Same flush belt as the clean shutdown (2.219.0 audit) — a crash used to
   // drop up to 2s of debounced writes (layouts, session-status, user-todos).
   try { for (const store of Object.values(syncStores)) { try { store.flush(); } catch {} } } catch {}
-  try { flushLayouts(); } catch {}
+  try { flushLayouts({ stop: true }); } catch {}   // B-225b's second half: a last flush that fails is the journal's line, by name
   try { sessionStatus.flush(); } catch {}
   try { userTodos.flush(); } catch {}
   try { require('./src/server/writes-lost.js').installed()?.stop(); } catch {} // a lost write's warning still held after a failed write (lane cli-2-1-319-records r4)
@@ -1663,7 +1663,7 @@ function shutdownNow() {
   // SyncStores + layouts persist on a debounce — flush so changes made within
   // the last couple seconds aren't lost across a restart
   for (const store of Object.values(syncStores)) { try { store.flush(); } catch {} }
-  try { flushLayouts(); } catch {}
+  try { flushLayouts({ stop: true }); } catch {}   // B-225b's second half: a last flush that fails is the journal's line, by name
   try { sessionStatus.flush(); } catch {} // debounced session-status writes
   try { flushRequestStamps(); } catch {} // each conversation's last model request (lane cache-warmth-tiles r1a′) — read back by boot-restore
   try { userTodos.flush(); } catch {} // debounced user-todo writes

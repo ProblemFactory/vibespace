@@ -1930,8 +1930,16 @@ export function storeHeldWords(held) {
   if (kind === 'not-allowed') return t('VibeSpace is not allowed to read {what} — nothing is written over it. Check the permissions of the data folder.', { what });
   return t('VibeSpace cannot read {what} right now — nothing was changed and nothing is written over it. It reads it again by itself.', { what });
 }
+/** B-225b's second half: a store whose write the storage REFUSED (its change kept in memory, written again by the hold's ladder) — ONE
+ *  sentence by its file, in the page's words; several → the count. Said on the strip; a press's own refusal says `storeRestoreUnsavedWords` */
+export function storeUnsavedWords(u) {
+  if (Array.isArray(u)) return u.length === 1 ? storeUnsavedWords(u[0]) : t("Changes to {n} of VibeSpace’s saved files are not being saved: the storage refused the writes. They are kept here and written again by themselves (Details names them).", { n: u.length });
+  return t("Changes to {what} are not being saved: the storage refused the write. They are kept here and written again by themselves.", { what: storeWhatOf(u && u.file) });
+}
+export function storeRestoreUnsavedWords() { return t("Restored here, but not saved: the storage refused the write. The restore is kept and written again by itself — a restart before then brings back the older desktops."); }
 function refusalWords(body) {
   if (body && typeof body === 'object' && body.code === 'store_unread') return { ...body, said: body.error, error: storeHeldWords(body.held) };   // B-225b: a held store, in the page's words
+  if (body && typeof body === 'object' && body.code === 'store_unsaved') return { ...body, said: body.error, error: storeRestoreUnsavedWords() };   // B-225b's second half: a restore whose write the storage refused
   if (body && typeof body === 'object' && body.code === 'store_appeared') return { ...body, said: body.error, error: t('A saved file appeared since VibeSpace started — it was read and kept; this change was not made. Make it again.') };
   if (body && typeof body === 'object' && body.code === 'hosts-unread') return { ...body, said: body.error, error: hostsHeldWords() };   // the server's words kept as `said`
   if (body && typeof body === 'object' && body.code === 'mounts-unread') return { ...body, said: body.error, error: mountsHeldWords() };

@@ -12,6 +12,11 @@
 // refusal that uses anything up: the hold's `rung` is 'silent'), then 30 s doubling to 5 min; one read in flight; off the loop.
 // THE WRITE (R1, R10): one function, one flush, both refuse a store with no value BY NAME; every temp name carries the pid.
 // A hold begins only at a START (R12): a failed RE-read of a store that has its value never replaces it — there is no re-read here.
+// THE OWED WRITE (B-225b's second half, 主开发 r662): a write that FAILS while the store has its value (the storage refused it — never a
+// refusal by name) is OWED: the caller's memory holds the truth, its `produce` makes the bytes again at every try, retried on the
+// hold's OWN ladder (the silent rungs, then 30 s doubling to 5 min) — never dropped, never swallowed. SAID once past the silent rungs
+// (onUnsaved: every page told — nothing is said for a failure the next rung cures; a person's PRESS says it at once), LIFTED when a
+// write lands (onSaved, for a said one only). A flush at the stop that fails is the caller's journal line (owed() names it).
 
 const fs = require('fs');
 const path = require('path');
@@ -45,7 +50,7 @@ function unreadError(file, held, what) {
  *   onLift    (value, was) — the hold lifted: the caller's lift is a CHANGE (its hooks run, its pages are told «read again»)
  *   onSaid    (held) — the hold outlasted the silent rungs: the caller says it (the banner, an episode's notice)
  */
-function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, schedule = null } = {}) {
+function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, onUnsaved = null, onSaved = null, onOwedRefused = null, schedule = null } = {}) {
   if (!file) throw new Error('store-hold: file is required');
   let value;                 // the document (undefined: none — held, or not read yet)
   let text = null;           // the bytes the value was read from, until the caller takes them once (takeText: its normalizer compares)
@@ -157,10 +162,66 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     held = null; missing = true; value = undefined; text = null; tries = 0;
     return aside;
   }
-  function stop() { stopped = true; if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; } }
+  // ── THE OWED WRITE ──
+  let owed = null;           // { produce, code, why, since, rung, tries } — a write the storage refused, kept until one lands
+  let owedTimer = null;
+  const named = (e) => !!e && (e.code === 'store_unread' || e.code === 'store_appeared');   // a refusal BY NAME, never a storage failure
+  const owedFacts = () => (owed ? { file: path.basename(file), code: owed.code, why: owed.why, since: owed.since, rung: owed.rung } : null);
+  /** ONE try of what `produce()` makes ([next, bytes], or null: nothing to write) → { landed, error } */
+  function tryWrite(produce) {
+    try { const made = produce(); if (made) write(made[0], made[1]); return { landed: true }; }
+    catch (error) { return { landed: false, error }; }
+  }
+  function landed() {
+    if (!owed) return;
+    const was = owed; owed = null;
+    if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; }
+    log.warn?.(`[store-hold] ${path.basename(file)} is written again — the change kept since ${new Date(was.since).toISOString()} landed`);
+    if (was.rung === 'said') { try { onSaved?.({ file: path.basename(file), since: was.since }); } catch { /* said by the caller */ } }
+  }
+  function say() { owed.rung = 'said'; try { onUnsaved?.(owedFacts()); } catch { /* said by the caller */ } }
+  function armOwed() {
+    if (stopped || !owed || owedTimer) return;
+    const n = owed.tries;
+    const ms = n < silentMs.length ? silentMs[n] : SR.retryDelay(n - silentMs.length + 1, ladder);
+    owedTimer = later(() => { owedTimer = null; owedAgain(); }, ms);
+  }
+  /** a rung of the owed write's ladder → true when it landed */
+  function owedAgain() {
+    if (!owed || stopped) return false;
+    owed.tries++;
+    const r = tryWrite(owed.produce);
+    if (r.landed) { landed(); return true; }
+    if (named(r.error)) {   // the store is held or adopted now: no change of the caller's lands over it — the owed write ends, said by name
+      const was = owedFacts(); owed = null;
+      log.warn?.(`[store-hold] ${path.basename(file)}: the owed write ends — ${(r.error && r.error.message) || r.error}`);
+      try { onOwedRefused?.(r.error, was); } catch { /* the caller's */ }
+      return false;
+    }
+    owed.code = (r.error && r.error.code) || owed.code; owed.why = String((r.error && r.error.message) || r.error).slice(0, 200);
+    if (owed.rung === 'silent' && owed.tries >= silentMs.length) say();
+    armOwed();
+    return false;
+  }
+  /** THE FLUSH: the write of what `produce()` makes. A failure of the storage is OWED (kept, retried on the ladder — never thrown:
+   *  the caller's memory keeps the change); a refusal BY NAME (held, not read, a file that appeared) throws as before. `press`: a
+   *  person's act — its failure is said AT ONCE. → true when this write landed */
+  function flush(produce, { press = false } = {}) {
+    const r = tryWrite(produce);
+    if (r.landed) { landed(); return true; }
+    if (named(r.error)) throw r.error;
+    const code = (r.error && r.error.code) || null, why = String((r.error && r.error.message) || r.error).slice(0, 200);
+    if (!owed) { owed = { produce, code, why, since: now(), rung: 'silent', tries: 0 }; log.warn?.(`[store-hold] ${path.basename(file)} could not be written (${code || why}) — the change is kept in memory and written again`); }
+    else { owed.produce = produce; owed.code = code || owed.code; owed.why = why; }
+    if (press && owed.rung !== 'said') say();
+    armOwed();
+    return false;
+  }
+  function stop() { stopped = true; if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; } if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; } }
 
   return {
-    readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop,
+    readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop, flush, owedAgain,
+    owed: owedFacts,   // the owed write's facts ({ file, code, why, since, rung }), or null
     held: () => (held ? { file: path.basename(file), kind: held.kind, code: held.code, since: held.since, rung: held.rung } : null),
     isMissing: () => missing, file,
   };

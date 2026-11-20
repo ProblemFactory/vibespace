@@ -7,13 +7,18 @@
 // What the strip knows: the hub's `store-held` word (a hold past its silent rungs), `store-lifted` (read again), a held answer
 // any reader of this page met, and GET /api/stores/held — asked at the boot and at every reconnect (a word said while this page
 // was away never arrives). The lift is ONE word, «read again»: each store's own reader fetches (onStoreLift).
+// B-225b's SECOND HALF (主开发 r662): a store whose WRITE the storage refused is UNSAVED — its changes kept in the hub's memory and
+// written again by the hold's ladder; the hub's `store-unsaved` word (past the silent rungs, or at once for a press) puts it on the
+// same strip on EVERY page («changes are not being saved»), `store-saved` takes it off when a write lands; GET /api/stores/held
+// carries `unsaved` beside `held` (a page that was away). Nothing is refused for it: what the page shows is what memory holds.
 // A DAMAGED store has its one door here: a person's own whole replace — start it empty (POST /api/stores/<file>/empty: the bytes
 // are set aside under a dated name first), an import of a backup, or (the desktops) a rollback point.
 import { t } from './i18n.js';
-import { fetchJson, showToast, showConfirmDialog, storeHeldWords, storeWhatOf } from './utils.js';
+import { fetchJson, showToast, showConfirmDialog, storeHeldWords, storeWhatOf, storeUnsavedWords } from './utils.js';
 import { UI_ICONS } from './icons.js';
 
 const HELD = new Map();   // file → { file, kind, code, since, rung }
+const UNSAVED = new Map();   // file → { file, code, since } — a write the storage refused, said (B-225b's second half)
 const LIFTS = new Map();  // file → Set(fn): the store's own re-read at its lift
 let gen = 0;              // bumped by every word: a refresh asked before one is older than what this page knows
 let scratch = null;       // the desktops' scratch surface (a page opened during their hold): null | 'held' | 'lifted'
@@ -54,6 +59,18 @@ export function noteStoreLifted(file) {
   draw();
   for (const fn of [...(LIFTS.get(f) || [])]) { try { fn(); } catch (e) { console.warn(`[store-held] a reader of ${f} failed at its lift`, e); } }
 }
+/** the hub's word: `file`'s write is refused by the storage (its changes kept in memory) — on the strip until `store-saved` */
+export function noteStoreUnsaved(u) {
+  if (!u || typeof u !== 'object' || typeof u.file !== 'string' || !u.file) return false;
+  gen++;
+  UNSAVED.set(u.file, { file: u.file, code: u.code || null, since: u.since || null });
+  draw();
+  return true;
+}
+/** a write of `file` landed: the strip lets its «not being saved» go */
+export function noteStoreSaved(file) { const f = String(file || ''); if (!f || !UNSAVED.has(f)) return; gen++; UNSAVED.delete(f); draw(); }
+/** the stores this page says are not being saved (for a reader that asks) */
+export const storesUnsaved = () => [...UNSAVED.values()];
 /** a store's own re-read at its lift → the unsubscribe */
 export function onStoreLift(file, fn) {
   if (typeof fn !== 'function') return () => {};
@@ -70,6 +87,7 @@ export async function refreshStoreHolds() {
   if (!r || !Array.isArray(r.held) || asked !== gen) return false;
   const was = new Set(HELD.keys());
   HELD.clear(); QUIET.clear();
+  UNSAVED.clear(); for (const u of Array.isArray(r.unsaved) ? r.unsaved : []) if (u && typeof u.file === 'string' && u.file) UNSAVED.set(u.file, { file: u.file, code: u.code || null, since: u.since || null });   // the said owed writes
   for (const h of r.held) if (h && typeof h.file === 'string' && h.file) { if (saidRung(h) || was.has(h.file) || (scratch === 'held' && h.file === 'layouts.json')) HELD.set(h.file, { ...pick(h), rung: 'said' }); else QUIET.set(h.file, { ...pick(h), rung: 'silent' }); }
   draw();
   for (const f of was) if (!HELD.has(f)) for (const fn of [...(LIFTS.get(f) || [])]) { try { fn(); } catch (e) { console.warn(`[store-held] a reader of ${f} failed at its lift`, e); } }
@@ -82,12 +100,13 @@ export const scratchState = () => scratch;
 /** the app's dialogs a damaged store's door opens: { importBackup, rollback } */
 export function setStoreDoors(d) { doors = d && typeof d === 'object' ? d : {}; }
 
-const KIND_WORDS = { damaged: () => t('damaged — not what it should be'), 'not-allowed': () => t('not allowed to read it'), unreadable: () => t('cannot be read right now') };
+const KIND_WORDS = { unsaved: () => t('not being saved — the storage refused the write'), damaged: () => t('damaged — not what it should be'), 'not-allowed': () => t('not allowed to read it'), unreadable: () => t('cannot be read right now') };
 /** THE STRIP'S MODEL (PURE but for t): the holds → { text, rows, scratch } or null (nothing to say). Each row: what, file, kind
  *  in words, code, and the doors a damaged store has. */
-export function stripModel(list, { scratch: sc = null } = {}) {
+export function stripModel(list, { scratch: sc = null, unsaved: unsavedList = [] } = {}) {
   const held = (list || []).filter((h) => h && h.file);
-  if (!held.length && sc !== 'lifted' && sc !== 'held') return null;
+  const unsaved = (unsavedList || []).filter((u) => u && u.file && !held.some((h) => h.file === u.file));   // a held store has no write to owe
+  if (!held.length && !unsaved.length && sc !== 'lifted' && sc !== 'held') return null;
   const text = held.length === 1 ? storeHeldWords(held[0])
     : held.length > 1 ? t('VibeSpace cannot read {n} of its saved files right now — nothing is written over them (Details names them).', { n: held.length })
       : '';
@@ -97,7 +116,9 @@ export function stripModel(list, { scratch: sc = null } = {}) {
     file: h.file, what: storeWhatOf(h.file), kind: h.kind, kindWords: (KIND_WORDS[h.kind] || KIND_WORDS.unreadable)(), code: h.code || null,
     doors: h.kind === 'damaged' ? ['empty', 'import', ...(h.file === 'layouts.json' ? ['rollback'] : [])] : [],
   }));
-  return { text, scratchText, rows, scratch: sc, damaged: rows.some((r) => r.doors.length) };
+  for (const u of unsaved) rows.push({ file: u.file, what: storeWhatOf(u.file), kind: 'unsaved', kindWords: KIND_WORDS.unsaved(), code: u.code || null, doors: [] });
+  const unsavedText = unsaved.length ? storeUnsavedWords(unsaved) : '';
+  return { text, unsavedText, scratchText, rows, scratch: sc, damaged: rows.some((r) => r.doors.length), unsaved: unsaved.map((u) => u.file) };
 }
 
 const el = (tag, cls, text) => { const x = document.createElement(tag); if (cls) x.className = cls; if (text != null) x.textContent = text; return x; };
@@ -118,7 +139,7 @@ async function startEmpty(row) {
 
 function draw() {
   if (typeof document === 'undefined') return;
-  const m = stripModel([...HELD.values()], { scratch });
+  const m = stripModel([...HELD.values()], { scratch, unsaved: [...UNSAVED.values()] });
   let strip = document.getElementById('store-held-strip');
   if (!m) { strip?.remove(); detailsOpen = false; return; }
   const wrap = document.getElementById('main-wrapper');
@@ -131,12 +152,14 @@ function draw() {
     const after = [document.getElementById('vault-lock-strip'), document.getElementById('maintenance-banner')].find((x) => x && x.parentNode === wrap);
     wrap.insertBefore(strip, after ? after.nextSibling : wrap.firstChild);
   }
-  strip.dataset.held = m.rows.map((r) => r.file).join(' ');
+  strip.dataset.held = m.rows.filter((r) => r.kind !== 'unsaved').map((r) => r.file).join(' ');
+  strip.dataset.unsaved = m.unsaved.join(' ');
   strip.dataset.scratch = m.scratch || '';
   const line = el('div', 'shs-line');
   const ic = el('span', 'shs-ic'); ic.innerHTML = UI_ICONS.alert || '';
   line.append(ic);
   if (m.text) line.append(el('span', 'shs-text', m.text));
+  if (m.unsavedText) line.append(el('span', 'shs-text shs-unsaved', m.unsavedText));
   if (m.scratchText) line.append(el('span', 'shs-text shs-scratch', m.scratchText));
   if (m.scratch === 'lifted') line.append(button('shs-btn shs-load', t('Load my desktops'), () => location.reload()));
   if (m.rows.length) {

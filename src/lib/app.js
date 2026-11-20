@@ -77,7 +77,7 @@ import { openDesign as openDesignFn, openDesignPublishDialog, installDesignWindo
 import { openArtifacts as openArtifactsFn } from './artifacts-window.js'; // lane artifacts-list-scale: the Artifacts window (window type `artifacts`) — the chip's list at full size behind its ⤢
 import { openDoc as openDocFn } from './doc-window.js'; // lane doc-window: the Doc window (window type `doc`) — a markdown file read, edited and annotated in one rendered view; the editor itself is the lazy public/doc-editor.js
 import { DesktopManager } from './desktop-manager.js';
-import { noteStoreHeld, noteStoreLifted, onStoreLift, refreshStoreHolds, setStoreDoors } from './store-held.js'; // B-225b R7: the page's ONE strip for a held store
+import { noteStoreHeld, noteStoreLifted, noteStoreUnsaved, noteStoreSaved, onStoreLift, refreshStoreHolds, setStoreDoors } from './store-held.js'; // B-225b R7: the page's ONE strip for a held store
 import { StageManager, STAGE_ID } from './stage-manager.js';
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { CustomizeMode, applyArrangement } from './customize-mode.js';
@@ -379,6 +379,8 @@ class App {
     this.ws.onGlobal((msg) => {
       if (msg.type === 'store-held') noteStoreHeld(msg);
       else if (msg.type === 'store-lifted') noteStoreLifted(msg.file);
+      else if (msg.type === 'store-unsaved') noteStoreUnsaved(msg);   // B-225b's second half: a write the storage refused — kept, written again
+      else if (msg.type === 'store-saved') noteStoreSaved(msg.file);
     });
 
     // Sync settings from other clients via WebSocket
@@ -424,7 +426,7 @@ class App {
         // its POST); another during its press is another device's — said, the reload left to the press (a refused one keeps
         // its error on screen; the hub's staleness gate holds this page's next write)
         const own = this._layoutRestoring;
-        if (own && msg.rid && msg.rid === own.rid) { own.landed(); return; }
+        if (own && msg.rid && msg.rid === own.rid) { if (msg.unsaved) { noteStoreUnsaved(msg.unsaved); own.unsaved(); } else own.landed(); return; }   // B-225b's second half: a restore whose write the storage refused is never «restored»
         if (own) { showToast(t('Layout restored on another device')); return; }
         showToast(t('Layout restored on another device — reloading…'));
         if (this.layoutManager) this.layoutManager._restoreReload = true; // the restore armed the reload: nothing of this page's leaves (layout.js _restoreArmed)
