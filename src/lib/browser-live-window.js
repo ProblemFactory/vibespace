@@ -1627,10 +1627,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       const stuckId = String(st.bg.targetId || '').toUpperCase();
       const stuckRow = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === stuckId) || { targetId: stuckId, title: '' };   // its read 4 (N2): the button the sentence names is always drawn
       // its read (M1): a FRONT tab whose script loops is unresponsive too — the hub says when a tab was HIDDEN in its window as it hung
-      // (`polled`: a picture of it was polled while hidden — behind another tab, or its window minimized), and when the person brought it
-      // to the FRONT (`front`, its read 4 M1: no longer behind); every other hung tab on the drawn window is told in words true in both
-      // places (its read 4 S1; its read 5: `front` goes stale once the person presses another tab in the browser's own strip — the hub
-      // never sees that press — so «Reload it» alone is never said on the drawn window)
+      // (`polled`: a picture of it was polled while hidden — behind another tab, or its window minimized); brought to the front, the hub
+      // says `polled` false again (its read 4 M1). A hung tab on the drawn window the hub does not say is hidden — never polled, or
+      // brought forward — is told in words true in both places (its read 4 S1; its read 5: after a bring-forward the person may press
+      // another tab in the browser's own strip, which the hub never sees — so «Reload it» alone is never said on the drawn window)
       const drawn = driving && xOn() && xp.status === 'connected';
       const behind = drawn && st.bg.polled === true, unplaced = drawn && !behind;
       text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : unplaced ? t('This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab') : driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
@@ -2380,7 +2380,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'tab-background':
         // 主开发's law (1): the clear's moment is kept — the window returns only once it has held (BG_SETTLE_MS, no flap)
         if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && (st.bg.state === 'hidden' || st.bg.state === 'unresponsive')) { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
-        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true, front: m.front === true } : null; // B-d635: or a tab that never answers
+        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true } : null; // B-d635: or a tab that never answers
         renderWatchLine(); renderPicture(); // the owner's report 2026-11-19: the picture follows the verdict (the tab's own, while hidden)
         break;
       case 'tabs':

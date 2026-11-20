@@ -637,8 +637,8 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   { // pins: the hub says it (the act's ack → frontBackground; the switch's clear carries its cause); the page reads both
     const bs4 = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lv4 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     ok(bs4.includes('        if (r && WIN.broughtFrontVerdict({ state: relay.bg.state, id: relay.bg.targetId, ack: r })) frontBackground(relay);') && bs4.includes('    relay.lastBg = JSON.stringify({ ...was, polled: false, front: true });') && bs4.includes("clearBackground(relay, 'another tab is on show', 'switch');") && bs4.includes("broadcast(relay, { type: 'tab-background', targetId: null, why, ...(cause ? { cause } : {}) });")
-      && lv4.includes(', polled: m.polled === true, front: m.front === true } : null;') && lv4.includes('if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && ') && lv4.includes("import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js';"),
-      'PIN (its read 4): the hub re-says a hung tab brought forward as in front (replayed to a late viewer); a switch\'s clear says its cause; the page keeps `front` and skips the settle on a switch');
+      && lv4.includes(', polled: m.polled === true } : null;') && lv4.includes('if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && ') && lv4.includes("import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js';"),
+      'PIN (its read 4): the hub re-says a hung tab brought forward as in front (replayed to a late viewer); a switch\'s clear says its cause; the page reads the re-said `polled` and skips the settle on a switch');
   }
   // the watch line says the last picture, and 'hello' re-renders it on the new socket's verdict (pins)
   const live2 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
@@ -646,7 +646,7 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   // the hub's record says it, and the page keeps it (pins)
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   ok(bsrc.includes("const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });") && bsrc.includes("pollMs: 0, polled });") && bsrc.includes('b.frameTimes = []; b.shotOf = null;') && bsrc.includes('      b.shotOf = id;   // a picture OF this tab landed')
-    && fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true, front: m.front === true }"), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
+    && fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true }"), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
