@@ -2988,12 +2988,10 @@ await section(async () => {
     return n;
   };
   const bootsIn = Object.fromEntries(bootFiles.map((f) => [f, bootsOf(fs.readFileSync(path.join(REPO, 'scripts', f), 'utf8'))]).filter(([, n]) => n));
-  // CARRIED BY NAME (主开发 2026-11-18 09:00Z, the manager stack restacked onto the train): two heavy suites written before the
-  // helper — a restack changes no test; each re-pointed by backlog row B-cdb2, and a re-pointed one leaves this list (the leg below)
-  const BOOTS_NAMED = Object.freeze({
-    'test-deliveries-resume-hub.mjs': 'B-cdb2 — it restarts the hub in the middle of the suite (endHub hubOnly + a second startHub over the same root and data)',
-    'test-resume-pages-follow-chrome.mjs': 'B-cdb2 — its conversations\' folder must lie OUTSIDE the scratch root: session discovery skips scratch folders',
-  });
+  // CARRIED BY NAME (主开发 2026-11-18 09:00Z): a suite written before the helper, re-pointed by its backlog row; a re-pointed one
+  // leaves this list in the same commit (the leg below). EMPTY since B-cdb2 (2026-11-20) re-pointed the manager stack's two heavy
+  // suites (test-deliveries-resume-hub, test-resume-pages-follow-chrome) through startHub: a new name needs the coordinator's word
+  const BOOTS_NAMED = Object.freeze({});
   const nBoots = Object.entries(bootsIn).filter(([f]) => !BOOTS_NAMED[f]).reduce((a, [, n]) => a + n, 0);
   ok(Object.keys(BOOTS_NAMED).every((f) => bootsIn[f] === 1), `§57c a suite carried by name still boots once outside the helper — a re-pointed one leaves BOOTS_NAMED in the same commit (${Object.keys(BOOTS_NAMED).map((f) => `${f}: ${bootsIn[f] || 0}`).join(', ')})`);
   console.log(`    §57c hub boots outside the helper: ${nBoots} sites in ${Object.keys(bootsIn).length} files (${Object.keys(bootsIn).filter((f) => !/^test-/.test(f)).join(', ')} among them)`);

@@ -25,13 +25,17 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (§57c, B-cdb2): the tree, the home, the stub and the folder live in its root
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const VNC_ENV = await vncEnv();
 const [PORT] = await freePorts(1);
 const BASE = `http://127.0.0.1:${PORT}`;
-const wt = scratch('dr-wt'), stubDir = scratch('dr-stub'), fakeHome = scratch('dr-home'), CWD = scratch('dr-cwd');
+// ONE minted root (hub-boot rules 1, 9): at exit — or at a signal — the helper ends the hub and everything rooted here (every stub CLI
+// carries the root's HOME), removes the worktree through git, then the root; this suite ends nothing of its own
+const root = mintRoot('dr-hub');
+const wt = path.join(root, 'wt'), stubDir = path.join(root, 'stub'), fakeHome = path.join(root, 'home'), CWD = path.join(root, 'cwd');
 for (const d of [stubDir, fakeHome, CWD]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('check(): the leg name is not a string — a swapped call (scripts/lib/check.mjs)'); if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -39,7 +43,6 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const SECOND = 'deliveries resume leg second password';
 
 // ── a throwaway hub: the committed tree + this tree's src / public / data/bin (the CLI ships there) ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 execSync(`rm -rf ${wt}/data/bin && mkdir -p ${wt}/data && cp -r ${repo}/data/bin ${wt}/data/bin`);
@@ -71,24 +74,16 @@ let inBuf = '';
 process.stdin.on('data', (d) => { inBuf += d; let i; while ((i = inBuf.indexOf('\\n')) >= 0) { const line = inBuf.slice(0, i); inBuf = inBuf.slice(i + 1); if (line.trim()) fs.appendFileSync(${JSON.stringify(stubDir)} + '/stdin-' + sid + '.ndjson', line + '\\n'); } });
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
-let srv = null;
-const hubLog = path.join(stubDir, 'hub.log');
-/** (re)start the hub on the same tree and data — the restart road needs a second boot over the first one's records */
+let hub = null;
+/** (re)start the hub on the same tree and data — the restart road needs a second boot over the first one's records (the same root,
+ *  the same port; its log `<root>/hub.log` appended by each start) */
 async function boot() {
-  srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', VS_NO_REAL_CLI: '1' }, stdio: ['ignore', fs.openSync(hubLog, 'a'), fs.openSync(hubLog, 'a')] });
-  for (let i = 0; i < 120; i++) { try { await fetch(`${BASE}/api/home`); return true; } catch { await sleep(250); } }
-  return false;
+  hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', NO_AUTO_UPDATE: '1', VS_NO_REAL_CLI: '1' } });
+  return hub.ready({ ms: 30000 });
 }
-let cleaned = false;
-const cleanup = () => {
-  if (cleaned) return; cleaned = true;
-  try { srv.kill('SIGKILL'); } catch {}
-  for (const root of [wt, fakeHome, stubDir, CWD]) { try { endRootedProcesses(root); } catch {} }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, fakeHome, stubDir, CWD]) { try { fs.rmSync(d, { recursive: true, force: true, maxRetries: 5 }); } catch {} }
-};
-process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
+/** the suite's own end: its socket, then the hub by its identity (everything rooted, the root's files and the worktree go with the
+ *  helper's exit hook — no signal line of this suite's own: the helper armed the end at the mint) */
+const cleanup = () => { try { ws && ws.close(); } catch { } try { hub && hub.stop(); } catch { } };
 await boot();
 
 /** ONE request — a PERSON on the page (Sec-Fetch-Site same-origin: the person doors' rule) or an agent's Bearer. */
@@ -212,10 +207,12 @@ try {
 
   console.log('② the machine restarts: R by the restart; P by a person, A by an agent, K by a person (piece 3\'s record, stood in)');
   try { ws.close(); } catch { }
-  try { srv.kill('SIGKILL'); } catch { }
-  await sleep(400);
-  for (const root of [wt, CWD, fakeHome]) { try { endRootedProcesses(root); } catch { } }
-  await sleep(600);
+  // THE MACHINE RESTART: the hub AND everything it started (each stub CLI carries the root's HOME) ended by identity — the helper's
+  // stop, not hubOnly (no session outlives a machine restart); then a bounded wait for the first hub's own exit, red by name at its bound
+  const first = hub, ended = first.stop();
+  const gone = await until(() => (first.child.exitCode !== null || first.child.signalCode ? true : null), 10000);
+  console.log(`    the restart's stop: ${ended.signalled.length} ended by identity (${ended.signalled.map((x) => x.via).join(', ')}), ${ended.left.length} left${ended.left.length ? ' — ' + JSON.stringify(ended.left) : ''}`);
+  check('the restart ended the first hub (its process gone within 10 s) and everything it started', !!gone && ended.left.length === 0, { gone, ended });
   const kept = [endOnPurpose(P.sid, { kind: 'person', actorId: 'person', name: null }), endOnPurpose(A.sid, { kind: 'agent', actorId: `agent:${C.sid}`, name: 'coordinator' }), endOnPurpose(K.sid, { kind: 'person', actorId: 'person', name: null })];   // piece 3's endedBy {kind, actorId, name}
   check('the kept records of the three ended on purpose (stand-in for piece 3\'s writer)', kept.every(Boolean), kept);
   const booted = await boot();

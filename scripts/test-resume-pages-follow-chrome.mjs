@@ -28,7 +28,8 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, stillPresser } from './scratch.mjs';
+import { freePort, ONBOARDED_SOURCE, vncEnv, stillPresser } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';   // THE SUITES' ONE HUB BOOT (§57c, B-cdb2): the tree, the home, the stub and Chrome's profile live in its root
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -40,27 +41,28 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
 const J = JSON.stringify;
 const repo = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
-const ROOT = scratch('rpf-ui');
-fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
+// ONE minted root (hub-boot rules 1, 9), before anything of the suite exists: at exit — or at a signal — the helper ends the hub and
+// everything rooted here (the CLIs, the chat wrapper's dtach sessions and Chrome all carry the root's HOME), removes the worktree
+// through git, then the root
+const ROOT = mintRoot('rpf-ui');
 const SHOTS = process.env.RPF_SHOTS_DIR ? path.resolve(process.env.RPF_SHOTS_DIR) : null;
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
-const procs = new Set(); const worktrees = new Set(); let fakeHome = null; const sockets = new Set();
-// the conversations' folder: OUTSIDE /tmp/vs-* — session discovery skips every scratch() cwd (src/fixture-guard.js), and a resume
+const procs = new Set(); let fakeHome = null, hub = null; const sockets = new Set();
+// the conversations' folder: OUTSIDE /tmp/vs-* — session discovery skips every scratch() cwd and every minted root (src/fixture-guard.js),
+// and a resume needs its folder to exist. It is not a root the helper ends (rule 2: what runs in it carries the root's HOME — the
+// hub's CLIs are ended by it); the suite removes it itself, after the helper's end. (B-cdb2's second shape: nothing bent.) A resume
 // needs its folder to exist
 const CONV = fs.mkdtempSync(path.join(os.tmpdir(), 'rpf-conv-'));
+/** the suite's own end, registered AFTER the mint (so it runs after the helper's end, at exit and at a signal alike — no signal line of
+ *  this suite's own, hub-boot rule 3): its sockets, Chrome by its handle (a no-op by then), the hub by its identity, and the
+ *  conversations' folder outside the root */
 function cleanup() {
   for (const s of sockets) { try { s.close(); } catch { } }
   for (const p of procs) { try { p.kill('SIGKILL'); } catch { } }
-  try { endRootedProcesses(ROOT); } catch { }
-  if (fakeHome) { try { endRootedProcesses(fakeHome); } catch { } }
-  for (const wt of worktrees) { try { execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', wt], { stdio: 'ignore' }); } catch { } }
-  try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
-  try { endRootedProcesses(CONV); } catch { }
+  if (hub) { try { hub.stop(); } catch { } }
   try { fs.rmSync(CONV, { recursive: true, force: true }); } catch { }
-  if (fakeHome) { try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch { } }
 }
 process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 
 // ── the record (invented words and ids) ──
 const CID = 'c0ffee31-0000-4000-8000-000000000031';
@@ -111,7 +113,7 @@ let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'i
 if (!CHROME) skip('no chrome/chromium on this box — every leg needs one');
 else if (!dtachOk) ok(false, 'dtach is NOT installed — this suite cannot run its sessions here: a red, never a green skip');
 else await (async () => {
-  fakeHome = scratchHome('rpf-ui-home', fs);
+  fakeHome = path.join(ROOT, 'home'); for (const d of ['.claude/projects', '.claude/sessions', '.config', '.vibespace']) fs.mkdirSync(path.join(fakeHome, d), { recursive: true });   // the HOME in the root (rules 2, 9)
   const wt = path.join(ROOT, 'wt'); const BIN = path.join(ROOT, 'bin'), STUB = path.join(ROOT, 'stub'); for (const d of [BIN, STUB]) fs.mkdirSync(d, { recursive: true });
   // a stub claude behind the real chat wrapper: it announces ITS conversation id (a resumed run echoes --resume's id), records its
   // token, and logs every stdin line by id (the resume sends it nothing — test-conversation-resume proves that in process)
@@ -133,7 +135,7 @@ process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
   const PORT = await freePort();
   const BASE = `http://127.0.0.1:${PORT}`;
-  execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' }); worktrees.add(wt);
+  execFileSync('git', ['-C', repo, 'worktree', 'add', '--detach', wt, 'HEAD'], { stdio: 'ignore' });   // the root's ONE worktree (rule 1; the helper removes it through git)
   for (const f of ['src', 'public', 'server.js', 'package.json']) { execFileSync('rm', ['-rf', path.join(wt, f)]); execFileSync('cp', ['-r', path.join(repo, f), path.join(wt, f)]); }
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
   const version = JSON.parse(fs.readFileSync(path.join(wt, 'package.json'), 'utf8')).version;
@@ -159,10 +161,10 @@ process.stdin.on('end', () => process.exit(0));
   fs.rmSync(path.join(wt, 'data'), { recursive: true, force: true }); fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
   execFileSync('cp', ['-r', path.join(repo, 'data', 'bin'), path.join(wt, 'data', 'bin')]); // the tracked wrappers — without them every session dies at birth
   fs.writeFileSync(path.join(wt, 'data', 'layouts.json'), J(layouts, null, 1));
-  let journal = '';
-  const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), PORT: String(PORT), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VS_NO_REAL_CLI: '1', VIBESPACE_PASSWORD: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
-  procs.add(srv); srv.stdout.on('data', (d) => { journal += d; }); srv.stderr.on('data', (d) => { journal += d; });
-  if (!ok(await until(() => journal.includes('Ready.'), 60000, 100), 'the worktree server booted', journal.slice(-800))) return;
+  // the hub's journal = its log through the helper (hub.log(): what THIS start wrote, stdout and stderr in one file, as the pipes held it)
+  hub = startHub({ root: ROOT, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, PATH: BIN + ':' + (process.env.PATH || ''), CLAUDE_CMD: path.join(BIN, 'claude'), HOME: fakeHome, VIBESPACE_SKIP_AGENT_HOOKS: '1', VS_NO_REAL_CLI: '1', VIBESPACE_PASSWORD: '' } });
+  const journal = () => hub.log();
+  if (!ok(await until(() => journal().includes('Ready.'), 60000, 100), 'the worktree server booted', journal().slice(-800))) return;
 
   /** ONE request — a PERSON on the page (Sec-Fetch-Site same-origin) */
   const req = (method, p, body) => new Promise((resolve) => {
@@ -308,12 +310,12 @@ process.stdin.on('end', () => process.exit(0));
       return { settled, pages: { B: { sends: B1.sends, refused: B1.refused, sendsLater: B2.sends, refusedLater: B2.refused.length, tapped: B2.tapped }, C: { sends: C1.sends, refused: C1.refused, sendsLater: C2.sends, refusedLater: C2.refused.length, tapped: C2.tapped } }, A: await sendsOfA(from) };
     };
     const disagree = async () => { const n = (X) => X.ev(`[...document.querySelectorAll('#global-toasts .global-toast')].filter((t) => /disagree about desktop/.test(t.textContent)).length`); return { A: await n(PA), B: await n(PB), C: await n(PC) }; };
-    const refusedLines = (from) => journal.slice(from).split('\n').filter((l) => /REFUSED/.test(l));
+    const refusedLines = (from) => journal().slice(from).split('\n').filter((l) => /REFUSED/.test(l));
     // THE TIE IS MADE (place-14 — never left to luck): B's and C's FIRST frame for Desk 2 are held, then released in one step; both were
     // written on the same broadcast from the same base, so the hub keeps one and refuses the other, always
     const rec0 = await deskRec();
     await PB.ev(`(window.__holdOut = 'desk-2', true)`); await PC.ev(`(window.__holdOut = 'desk-2', true)`);
-    const jTie = journal.length;
+    const jTie = journal().length;
     const t0 = Date.now();
     const r2 = await cli(['conversations', 'resume', `claude:${CID}`], coord.token);
     ok(r2.code === 0 && r2.json && /^sess-/.test(String(r2.json.sessionId)) && r2.json.desktop && r2.json.desktop.id === 'desk-2' && r2.json.desktop.name === 'Desk 2' && /nothing was sent to it/.test(String(r2.json.note)), '② the key resumes it: exit 0, its sessionId, the desktop of its row (Desk 2), the note', r2.json || r2.err);
@@ -361,7 +363,7 @@ process.stdin.on('end', () => process.exit(0));
     ok(await quiet(tEnd - 20000), '②b …what the end itself wrote has gone quiet before the pass (the journal leg below judges every line)');
     const recU0 = await deskRec();
     await PC.ev('(window.__holdIn = true, true)');
-    const jU = journal.length, tU = Date.now();
+    const jU = journal().length, tU = Date.now();
     const rU = await cli(['conversations', 'resume', `claude:${CID}`], coord.token);
     let liveU = null; await until(async () => (liveU = (await liveOf())[0] || null), 20000, 250);   // its session READ from the live list, never assumed from the answer (until answers only true / false: the row is kept here)
     const sessU = liveU ? liveU.id : null;
@@ -419,7 +421,7 @@ process.stdin.on('end', () => process.exit(0));
     await PA.shot('a-after-reload');
     // THE JOURNAL (place-14's law): no refusal of any kind but «stale», each reading N → N windows; the made tie's ONE (judged in its pass
     // above), the untied pass's none; and none anywhere else, unless it is a lawful stale one of Desk 2 (an end's own records may tie)
-    const allRefused = journal.split('\n').filter((l) => /REFUSED/.test(l));
+    const allRefused = journal().split('\n').filter((l) => /REFUSED/.test(l));
     const badLines = allRefused.filter((l) => { const m = STALE_LINE.exec(l); return !m || m[1] !== m[2]; });
     ok(badLines.length === 0 && lines2.length === 1 && linesU.length === 0, 'the journal holds no refusal but STALE ones of Desk 2, each N → N windows: ONE in the made tie, NONE in the untied pass', { total: allRefused.length, bad: badLines.slice(0, 3), tie: lines2.length, untied: linesU.length });
   } catch (e) {
