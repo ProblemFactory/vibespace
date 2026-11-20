@@ -308,11 +308,12 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     const MJ9 = mutantCopies('jobs-addressed-b9407', REPO);
     const CUT_ACCESS = anchored(anchored(AR0, 'access: accessV.access,   // B-9407: never b.access whole', 'access: b.access,   /* MUTANT: the base\'s copy, whole */', 'the create\'s access copy'),
       "  if (!accessV.ok) return res.status(accessV.status).json({ error: accessV.error, code: accessV.code });\n", '', 'the access refusal');
-    const CUT_RUN = anchored(AR0, "  if (!runV.ok) return res.status(runV.status).json({ error: runV.error, code: runV.code });\n", '', 'the run-field refusal');
-    const CUT_ASK = anchored(AR0, "  if (!a.selfJob && act === 'ask' && !jobModel.canEdit(job, a.caller)) return", "  if (false && act === 'ask') return", 'the ask gate');
     const mount = (src, tag) => { const R = {}; const X = MJ9.load('src/agent-routes.js', src, tag); hush(() => X.setupAgentRoutes({ ...AR_DEPS, app: { get: (p, h) => { R[`GET ${p}`] = h; }, post: (p, h) => { R[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } } })); return R; };
     const callX = (R, key, who, params, body) => new Promise((resolve) => { let code = 200; const res = { headersSent: false, status(c) { code = c; return res; }, json(o) { res.headersSent = true; resolve({ code, o }); return res; } }; Promise.resolve(R[key]({ headers: { authorization: 'Bearer vsst_' + who }, body, query: {}, params }, res)).catch((e) => resolve({ code: 500, o: { error: e.message } })); });
-    const RA = mount(CUT_ACCESS, 'access-whole'), RR = mount(CUT_RUN, 'run-fields'), RQ = mount(CUT_ASK, 'ask-anyone');
+    // ONE copy carries the three cuts (one compile of the routes, not three): each control below drives only its own road
+    const CUT_ALL = anchored(anchored(CUT_ACCESS, "  if (!runV.ok) return res.status(runV.status).json({ error: runV.error, code: runV.code });\n", '', 'the run-field refusal (in the access copy)'),
+      "  if (!a.selfJob && act === 'ask' && !jobModel.canEdit(job, a.caller)) return", "  if (false && act === 'ask') return", 'the ask gate (in the access copy)');
+    const RA = mount(CUT_ALL, 'cure-cut'), RR = RA, RQ = RA;
     const xl = await callX(RA, 'POST /api/agent/jobs', 'A', {}, NOTE('b9407-x-lock', { access: { view: 'all', control: 'all', lockedBy: 'user' } }));
     const xj = named('b9407-x-lock')[0];
     const xa = xj ? await callX(RA, 'POST /api/agent/jobs/:ref/:act', 'A', { ref: xj.id, act: 'access' }, { view: 'session' }) : null;
@@ -334,7 +335,7 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
     const xq = await callX(RQ, 'POST /api/agent/jobs/:ref/:act', 'B', { ref: open.id, act: 'ask' }, { panel: PANEL_Q });
     ok(xq.code === 200 && open.interaction && open.interaction.pending, 'B-9407 CONTROL (no ask gate, in a copy): B puts a question to the person under A\'s job', { xq, pending: !!(open.interaction && open.interaction.pending) });
     jm.withdrawAsk(open, { self: false });
-    for (const r of copiesCensus(MJ9.files, MJ9.dir, REPO, { minCopies: 3, label: 'B-9407 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
+    for (const r of copiesCensus(MJ9.files, MJ9.dir, REPO, { minCopies: 1, label: 'B-9407 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   }
   server.close();
 }
