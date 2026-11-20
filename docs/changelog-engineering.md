@@ -511,6 +511,11 @@ This file is the engineers' record of every release: the lanes, the verification
   - only absolute temp spellings are resolved.
 - **Left, named:** a resolver / dead-proxy belt for the two named suites. test-https-hub-chrome drives the box's own LAN address and test-plugin-consent-chrome a scratch hub, so a MAP * ~NOTFOUND rule would cut their own targets. Both carry CHROME_QUIET. Also left: the hub's own attach launch (src/browser-attach.js, the product's argv).
 
+### bl-msg B-5527 — the paste sweep's legacy leg is retired (one release after B-3767; 主开发 r590)
+- THE HARM: src/routes/files.js sweepPasteTemps still swept the SHARED temp folder for `claude-paste-*` files older than a day. That was a delete by a name prefix over a shared folder, the place pastes lived before B-3767 moved them into the hub's own folder, and it reached a sibling scratch hub's files.
+- THE CURE: the local branch is gone. sweepPasteTemps sweeps only a REMOTE host's own `~/.vibespace/paste`, and THIS machine's pastes are swept with the hub's own root by HUB_TMP.sweepHubTmp (the paste route's `sweepOwnTmp()`, judged by age). test-architecture §110's row for `sweepDir(os.tmpdir());` goes with its line.
+- PINS: test-raw-filename ⑩. A paste through the REAL route lands in the hub's own paste folder, and an old paste-named file in the shared temp folder stays: the folder is not read at all, judged when the route's own write resolves. RED: a copy with the legacy leg back reads it and deletes the file.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)

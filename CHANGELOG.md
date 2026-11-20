@@ -68,6 +68,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a phone, the Agents dialog's account list heading starts at the list's left edge instead of sitting off to the side.
 - A weekly or Fable limit read hours ago no longer shows as just read after a short status update; it keeps its «read … ago» mark, also after VibeSpace restarts.
 - A newer reading of your weekly limit that reaches VibeSpace a little late is no longer dropped for an older number.
+- A second VibeSpace on the same machine no longer has its old pasted images deleted by another one; each cleans up only its own.
 
 ## 2.369.413 — 2026-11-20
 
