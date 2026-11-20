@@ -1347,7 +1347,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (b.pollTimer.unref) b.pollTimer.unref();
   }
   // the live-picture follow-up, its read 4 (M1): a hung tab the person brought forward is IN FRONT — its record says so at once
-  // (`polled` false, `front` true): the line offers the reload that now acts on THIS tab, and a watcher's view shows the window
+  // (`polled` false, `front` true): the line no longer says «behind», and a watcher's view shows the window
   function frontBackground(relay) {
     const b = relay.bg;
     if (b.state !== 'unresponsive' || !relay.lastBg) return;

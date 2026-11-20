@@ -453,8 +453,7 @@ function stuckPolledVerdict({ state = null, id = null, prevTargetId = null, shot
   return state === 'unresponsive' && !!id && prevTargetId === id && shotOf === id;
 }
 /** The live-picture follow-up, its read 4 (M1): a hung tab the person brought to the front of its window is IN FRONT now — the hub
- *  says it again with `polled` false and `front` true, so the line offers the reload that now acts on THIS tab and a watcher gets the
- *  window back. PURE: (state, id, ack) → boolean: the tab act's ack brought forward, or switched to, THIS unresponsive tab — never a
+ *  says it again with `polled` false and `front` true, so the line no longer says «behind» and a watcher gets the window back. PURE: (state, id, ack) → boolean: the tab act's ack brought forward, or switched to, THIS unresponsive tab — never a
  *  no-op (the keeper names the tab of a switch that ran nothing). */
 function broughtFrontVerdict({ state = null, id = null, ack = null } = {}) {
   const to = ack && !ack.noop && (ack.broughtForward || ack.switchedTo) ? String(ack.switchedTo || ack.targetId || '') : '';   // a no-op ran nothing (an ephemeral browser's own tab)
