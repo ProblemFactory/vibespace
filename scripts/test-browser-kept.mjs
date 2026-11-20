@@ -53,7 +53,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
@@ -1248,7 +1248,7 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
   const lines14 = [];
   const klog14 = { log: (...a) => lines14.push(a.join(' ')), warn: (...a) => lines14.push('WARN ' + a.join(' ')), error() { } };
   const live14 = new Set([KEY_A, KEY_B]);
-  const mk14 = (Kmod, dataDir) => { const kk = Kmod.create({ dataDir, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: F.createBrowserRuntime({ env: rtE }), facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readT }); keepers.push(kk); return kk; };
+  const mk14 = (Kmod, dataDir, readTargetsFn = readT) => { const kk = Kmod.create({ dataDir, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: F.createBrowserRuntime({ env: rtE }), facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readTargetsFn }); keepers.push(kk); return kk; };
   const sleep14 = (ms) => new Promise((r) => setTimeout(r, ms));
   const killDaemon = async (kk, id) => { const rec = kk._reg().browsers[id]; try { process.kill(rec.pid, 'SIGKILL'); } catch { } for (let i = 0; i < 30; i++) { try { process.kill(rec.pid, 0); await sleep14(50); } catch { break; } } };
   let kp = mk14(K, D14);
@@ -1289,16 +1289,27 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
     // CONTROL: a keeper copy whose rebind runs unserialized — the race lands both on the one page
     {
       const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-      const noSerial = ksrc.replace('const run = prev.then(fn, fn);', 'const run = fn(); /* CONTROL: unserialized */');
+      const noSerial = anchored(ksrc, 'const run = prev.then(fn, fn);', 'const run = fn(); /* CONTROL: unserialized */', '⑭b the per-profile chain');
       ok(noSerial !== ksrc, '⑭b control setup: the per-profile chain is where the control cuts');
       const DN = path.join(ROOT, 'k14-noserial'); fs.mkdirSync(DN, { recursive: true });
-      const kn = mk14(M14.load('src/server/browser-keeper.js', noSerial, 'no-serial-rebind'), DN);
+      // THE RACE PLACED (主开发 r351; the hosted runner's run 44774335413, load 2: the two first commands did not overlap, so the
+      // mutant did not lose the race and this control went red for the wrong reason): a hold IN THE WINDOW — each rebind's read
+      // of the page list waits until the OTHER session's read has arrived, then both bind — never load or luck. The hold has its
+      // own bound (5 s) and says by name when it was reached; it is armed for the two first commands only
+      const hold = { armed: false, arrived: 0, met: null, bound: false }; let releaseBoth; const bothRead = new Promise((r) => { releaseBoth = r; });
+      const readHeld = async (url) => { const got = await readT(url); if (!hold.armed) return got; hold.arrived++; if (hold.arrived >= 2) releaseBoth(true); const met = await Promise.race([bothRead, sleep14(5000).then(() => false)]); if (!met) hold.bound = true; hold.met = !!met; return got; };
+      const kn = mk14(M14.load('src/server/browser-keeper.js', noSerial, 'no-serial-rebind'), DN, readHeld);
       const pn = kn.createProfile({ label: 'Race' }); const nsn = 'vs-' + pn.id;
       await kn.attach({ profileId: pn.id, browserKey: KEY_A, sessionId: 'sess-a' });
       await kn.attach({ profileId: pn.id, browserKey: KEY_B, sessionId: 'sess-b' });
       await killDaemon(kn, pn.id);
+      hold.armed = true;
       const [d1, d2] = await Promise.all([kn.attach({ profileId: pn.id, browserKey: KEY_A, sessionId: 'sess-a' }), kn.attach({ profileId: pn.id, browserKey: KEY_B, sessionId: 'sess-b' })]);
-      ok(d1.rebound && d2.rebound && d1.rebound.targetId === d2.rebound.targetId && fakeTabs(nsn).length === 1, '⑭b CONTROL: an unserialized rebind binds BOTH concurrent sessions to the one page — the leg above catches it', { d1: d1.rebound, d2: d2.rebound, tabs: fakeTabs(nsn).length });
+      hold.armed = false;
+      const ctl14 = { hold: { reads: hold.arrived, bothRead: hold.met, boundReached: hold.bound }, d1: d1.rebound && { how: d1.rebound.how, targetId: d1.rebound.targetId }, d2: d2.rebound && { how: d2.rebound.how, targetId: d2.rebound.targetId }, tabs: fakeTabs(nsn).length };
+      console.log(`    ⑭b CONTROL's facts: ${JSON.stringify(ctl14)}`);
+      ok(hold.arrived >= 2 && hold.met === true && !hold.bound, `⑭b CONTROL setup: the hold placed the race — both first commands read the page list before either bound (${hold.arrived} reads held${hold.bound ? '; the 5 s bound was REACHED' : ''})`, ctl14);
+      ok(d1.rebound && d2.rebound && d1.rebound.targetId === d2.rebound.targetId && fakeTabs(nsn).length === 1, '⑭b CONTROL: an unserialized rebind binds BOTH concurrent sessions to the one page — the leg above catches it', ctl14);
       try { await kn.stop(pn.id, { why: 'user' }); } catch { /* none */ }
       kn.shutdown();
     }
