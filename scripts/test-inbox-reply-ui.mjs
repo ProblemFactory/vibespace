@@ -368,8 +368,15 @@ try {
 
   // ── ② reply to a live item ──
   console.log('② reply from the box: the typing path, quoted, resolved in place');
-  const dotSel = `#user-todos-popup .ut-live-dot[data-key=${JSON.stringify(liveKey)}]`;
-  check('the live session\'s group dot is idle (hollow green), titled "running, idle"', await waitFor(`document.querySelector(${JSON.stringify(dotSel)})?.dataset.state === 'idle'`, 8000), await evalJs(`(() => { const d = document.querySelector(${JSON.stringify(dotSel)}); return d ? { state: d.dataset.state, title: d.title } : null; })()`));
+  // 主开发 r208 (place-20, the suite's own fault): an item's surface is found by the key the item holds NOW — an item filed before the
+  // CLI reported its id is keyed webui:<sid> and the product re-keys it a moment later (claude:<id>), redrawing its row's dot under
+  // the NEW key; a key frozen at filing then matches nothing (the leg printed null). Each look reads the item's key FROM THE STORE at
+  // that moment and the dot must EXIST under it (never «under any of the known keys»); every fact judged is printed; bounds unchanged
+  const keyNow = async (id) => { try { const s = (await (await fetch(`http://127.0.0.1:${PORT}/api/user-todos`)).json()).todos || {}; const it = [...(s.open || []), ...(s.resolved || [])].find((x) => x && x.id === id); return it ? it.sessionKey : null; } catch { return null; } };
+  const dotOf = async (id) => { const key = await keyNow(id); const dot = key ? await evalJs(`(() => { const d = document.querySelector(${JSON.stringify('#user-todos-popup .ut-live-dot[data-key=')} + JSON.stringify(${JSON.stringify(key)}) + ']'); return d ? { state: d.dataset.state, title: d.title } : null; })()`) : null; return { id, key, dot }; };
+  const dotIs = async (id, state, ms) => { const t0 = Date.now(); let last = await dotOf(id); while (!(last.dot && last.dot.state === state) && Date.now() - t0 < ms) { await sleep(150); last = await dotOf(id); } return { ok: !!(last.dot && last.dot.state === state), ms: Date.now() - t0, ...last }; };
+  const d1 = await dotIs(plan.item.id, 'idle', 8000);
+  check('the live session\'s group dot is idle (hollow green), titled "running, idle" — under the plan row\'s key NOW', d1.ok, d1);   console.log(`    · the dot judged: ${JSON.stringify(d1)}`);
   const planSel = rowSel(plan.item.id);
   check('its reply button is ENABLED', await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}); return !!b && !b.disabled && b.getAttribute('aria-label') === 'Reply'; })()`));   // its NAME (lane ui-controls-and-bugs pick 6: a title that only repeated the drawn word is the aria-label now)
   await evalJs(`document.querySelector(${JSON.stringify(planSel + ' .ut-reply-btn')}).click(); true`);
@@ -389,13 +396,15 @@ try {
 
   // ── ⑧ the dot follows the turn through the broadcast ──
   console.log('⑧ the running dot: running after a chat-input, idle after the result, rows untouched');
-  check('(the stub answered the reply turn: the dot is idle again)', await waitFor(`document.querySelector(${JSON.stringify(dotSel)})?.dataset.state === 'idle'`, 8000));
+  const d2 = await dotIs(third.item.id, 'idle', 8000);   // the plan row is resolved now (a resolved row draws no dot): an open row of the same session carries it
+  check('(the stub answered the reply turn: the dot is idle again — under the open row\'s key NOW)', d2.ok, d2);   console.log(`    · the dot judged: ${JSON.stringify(d2)}`);
   await evalJs(`window.__rowsBefore = [...document.querySelectorAll('#user-todos-popup .ut-item')]; true`);
   await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'hello there', msgId: 'dot-1' }); true`);
   const t0 = Date.now();
-  const ran = await waitFor(`document.querySelector(${JSON.stringify(dotSel)})?.dataset.state === 'running'`, 2000);
-  check(`the dot flips to "running" within 2 s (${Date.now() - t0} ms) titled "running (mid-turn)"`, ran && await evalJs(`document.querySelector(${JSON.stringify(dotSel)}).title === 'running (mid-turn)'`));
-  check('…and back to "idle" after the stub\'s result', await waitFor(`document.querySelector(${JSON.stringify(dotSel)})?.dataset.state === 'idle'`, 8000));
+  const r8 = await dotIs(third.item.id, 'running', 2000);   // the 2 s bound stays
+  check(`the dot flips to "running" within 2 s (${Date.now() - t0} ms) titled "running (mid-turn)"`, r8.ok && r8.dot.title === 'running (mid-turn)', r8);   console.log(`    · the dot judged: ${JSON.stringify(r8)}`);
+  const d8 = await dotIs(third.item.id, 'idle', 8000);
+  check('…and back to "idle" after the stub\'s result', d8.ok, d8);   console.log(`    · the dot judged: ${JSON.stringify(d8)}`);
   check('…with every row the SAME node (a live-fact broadcast patches, never re-renders)', await evalJs(`(() => { const now = [...document.querySelectorAll('#user-todos-popup .ut-item')]; return now.length === window.__rowsBefore.length && now.every((r, i) => r === window.__rowsBefore[i]); })()`));
 
   // ── ④ a box being typed into survives a broadcast ──
