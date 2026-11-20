@@ -18,6 +18,7 @@
 //     run carries none of it); the box's measured GTK row against the tree's rows (match / no row / disagree / none)
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -83,8 +84,17 @@ try {
   ok(/'bundle', 'create', '-q', bf, 'HEAD', \.\.\.\(not\.length \? \['--not', \.\.\.not\]/.test(src) && /worktree add -q --detach \$\{sh\(snap \+ '\/tree'\)\} \$\{head\}/.test(src) && !/'--exclude=\/data/.test(src), '⑤ the box checks out a WORKTREE at the head (the commits it lacks as a bundle) — no node_modules / data/ ever shipped');
   // ⑥ for real: three marked processes + one bystander
   const snap = path.join(D, 'snap'); fs.mkdirSync(path.join(snap, 'tree'), { recursive: true });
+  // EVERY ID THE REAL TEARDOWN IS HANDED IS MINTED FOR THIS PROCESS (the coordinator's r626, lane bl-ci, 2026-11-20): the fixture's
+  // mark, the teardown's id and the control's other id. Fixed words met when two runs of the suite ran at once on one machine as one
+  // user (the integrator's readers at two tips, two seconds apart): one run's teardown ended the other run's marked process.
+  const mintRunId = (tag) => `${tag}-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+  const RUN_ID = mintRunId('ci-remote-run'), OTHER_ID = mintRunId('ci-remote-other');
+  const SELF = fs.readFileSync(new URL(import.meta.url), 'utf-8');
+  const fixedWords = [['RID', 'T'], ['RID', 'OTHER']].map((w) => `'${w.join('-')}'`);
+  ok(mintRunId('x') !== mintRunId('x') && RUN_ID !== OTHER_ID && new RegExp(`^ci-remote-run-${process.pid}-[0-9a-f]{12}$`).test(RUN_ID) && !fixedWords.some((w) => SELF.includes(w)),
+    `⑥ every id handed to the REAL teardown is minted for this process (its pid + random bytes; two calls differ: ${RUN_ID}) — no fixed run id stands in the suite, so two runs at once never end each other's processes`);
   const kids = [
-    spawn('sleep', ['300'], { env: { ...process.env, VIBESPACE_CI_REMOTE_RUN: 'RID-T' }, detached: true, stdio: 'ignore' }),
+    spawn('sleep', ['300'], { env: { ...process.env, VIBESPACE_CI_REMOTE_RUN: RUN_ID }, detached: true, stdio: 'ignore' }),
     spawn('sleep', ['301'], { cwd: path.join(snap, 'tree'), env: { PATH: process.env.PATH }, detached: true, stdio: 'ignore' }),
     spawn('bash', ['-c', 'sleep 302; : ' + snap + '/tree'], { env: { PATH: process.env.PATH }, detached: true, stdio: 'ignore' }),
   ];
@@ -96,9 +106,9 @@ try {
   const childrenOf = (pid) => { try { return fs.readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf-8').trim().split(/\s+/).filter(Boolean).map(Number); } catch { return []; } };
   { const end = Date.now() + 5000; while (!childrenOf(kids[2].pid).length && Date.now() < end) await new Promise((r) => setTimeout(r, 20)); }   // the condition, not a clock
   const sub = childrenOf(kids[2].pid);
-  const ctl = spawnSync('bash', ['-s'], { input: R.teardownScript(path.join(D, 'other'), 'RID-OTHER'), encoding: 'utf-8' });
+  const ctl = spawnSync('bash', ['-s'], { input: R.teardownScript(path.join(D, 'other'), OTHER_ID), encoding: 'utf-8' });
   ok(kids.every((k) => alive(k.pid)) && /no process of the run left/.test(ctl.stdout), 'CONTROL ⑥ a teardown for another run id + snap kills none of these');
-  const td = spawnSync('bash', ['-s'], { input: R.teardownScript(snap, 'RID-T', { graceS: 0.3 }), encoding: 'utf-8' });
+  const td = spawnSync('bash', ['-s'], { input: R.teardownScript(snap, RUN_ID, { graceS: 0.3 }), encoding: 'utf-8' });
   await new Promise((r) => setTimeout(r, 300));
   ok(kids.every((k) => !alive(k.pid)), '⑥ the run\'s processes are gone (by env, by cwd, by argv)', td.stdout.trim().slice(0, 300));
   ok(['env', 'cwd', 'argv'].every((w) => td.stdout.includes(`(by ${w})`)) && /3 process\(es\) TERMed/.test(td.stdout), '⑥ each one named with what tied it to the run');
