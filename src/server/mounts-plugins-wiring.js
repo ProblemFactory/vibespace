@@ -237,11 +237,20 @@ const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTo
 // sent — bound by server.js once it is built (`resumeRoad.reopen`); the line starts only once server.js says the boot ADOPTED the
 // live sessions (`resumeRoad.adopted()`, when the keepers' 8 s re-adoption settled — the cure round's must 5)
 let adoptedNow = null;
-const resumeRoad = { reopen: null, kept: null, adopted: () => { if (adoptedNow) adoptedNow(); } };   // kept: boot-restore's keptRecordOf (server.js binds it)
+const resumeRoad = { reopen: null, kept: null, adopted: () => { if (adoptedNow) adoptedNow(); }, adoptedRemote: () => { remoteSettled = true; } };   // kept: boot-restore's keptRecordOf (server.js binds it)
+// THE STORES CHAIN MEETS PIECE 4 (主开发 02:31Z, its ruling): TWO ROADS, each opened once. A LOCAL resume waits for nothing of the
+// hosts store (`adopted()`: the line opens). A REMOTE resume (an entry naming a machine) never runs before the boot's re-adoption of
+// the machines' left-running conversations has SETTLED (`adoptedRemote()`), on every road — never held, and held then read (the
+// re-adoption then runs at the read and takes seconds over ssh): until then it is refused by name, its place in the line freed (a
+// resume once ended a still-running remote agent the re-adoption would have adopted — boot-restore says so). ONE seam for both
+// roads that reopen: the resume verb's start and a delivery's wake
+let remoteSettled = false;
+const REMOTE_READOPT_WORDS = 'it runs on a paired machine, and the conversations left running on the paired machines are not re-adopted yet (VibeSpace could not read its record of them until now, or it is re-adopting them) — resuming it now could end an agent still running there; ask again in a moment';
+const reopenRoads = (item, o) => (item && item.hostId && !remoteSettled ? Promise.resolve({ ok: false, code: 'readopt-pending', why: REMOTE_READOPT_WORDS }) : resumeRoad.reopen(item, o));
 const RL = require('./resume-line.js'), RL_PURE = require('../resume-line.js');
 // THE MANAGER DESIGN'S PIECE 7: a delivery's owed wake rides the SAME line with its own start in the payload (src/server/delivery-wake.js:
 // the gate — limit, spend probe — then the claim, this road's reopen and ONE hand-over); every other entry starts through the road
-const startResume = RL.startThrough(resumeRoad);
+const startResume = RL.startThrough({ get reopen() { return typeof resumeRoad.reopen === 'function' ? reopenRoads : null; } });   // the two roads' one seam
 const resumeLine = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : startResume(e)), ready: new Promise((r) => { adoptedNow = r; }), log: (m) => console.log(m) });
 // an ENDED conversation's facts for the resume verb (src/server/resume-line.js factsReaderOver — the READER of the kept record; an end's
 // record is written by piece 3's writer, after the kill): its kept record and, for a boot's record, its wrapper's sidecar in
@@ -279,7 +288,7 @@ const deliveryWakeSeams = { keyOf: endedKeyOf, factsOf: (key) => resumeFactsOf(k
   markPosting: (cid) => (deliver && typeof deliver.markEndedPosting === 'function' ? deliver.markEndedPosting(cid) : false),
   // rule 3 (every wake is SEEN): the resumed session carries the line its window shows and the System panel's row repeats
   noteResumed: (sid, line) => { const s = activeSessions && activeSessions.get(sid); if (!s) return; s._resumedBy = line; if (typeof broadcastActiveSessions === 'function') broadcastActiveSessions(); },
-  isArchived: isArchivedKey, rowOf: resumeRowOf, reopen: (item, o) => (typeof resumeRoad.reopen === 'function' ? resumeRoad.reopen(item, o) : Promise.resolve({ ok: false, why: 'this server cannot resume conversations yet (still booting) — try again in a moment' })) };
+  isArchived: isArchivedKey, rowOf: resumeRowOf, reopen: (item, o) => (typeof resumeRoad.reopen === 'function' ? reopenRoads(item, o) : Promise.resolve({ ok: false, why: 'this server cannot resume conversations yet (still booting) — try again in a moment' })) };   // the two roads' one seam
 // THE MANAGER DESIGN'S PIECE 7 — DELIVERIES RESUME THEIR ADDRESSEE (the owner, narrowed 2026-11-17: a conversation a RESTART ended;
 // one ended on purpose only for the jobs and schedules the person kept at the ending). A wake owed to an ENDED conversation is a rung of the ladder's retry park; the park hands it here, and this puts it on the
 // ONE LINE above with its own start: the account's limit, the spend guard as a probe (under the delivery's own reason and the kept

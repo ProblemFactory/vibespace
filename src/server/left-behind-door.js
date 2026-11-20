@@ -59,7 +59,7 @@ async function afterStop(session, id, { broadcastToSession, hosts = null, read =
     try {
       const dm = hosts && typeof hosts.deviceBounded === 'function' ? await hosts.deviceBounded(session.host, 6000) : null;
       r = dm && typeof dm.leftBehind === 'function' ? await dm.leftBehind({ mark, ageMs, sid }) : { unread: 'no-agent-op' };
-    } catch (e) { r = { unread: /lacks left-behind/.test(String(e && e.message)) ? 'no-agent-op' : 'machine-unreachable' }; }
+    } catch (e) { r = { unread: /lacks left-behind/.test(String(e && e.message)) ? 'no-agent-op' : e && e.code === 'hosts-unread' ? 'hosts-unread' : 'machine-unreachable' }; }   // the B-f276 stores chain: a HELD machines list is its own reason — VibeSpace cannot read its record of the machine, never «unreachable»
   } else {
     const own = [...recordedOf(session), ...ptyOf(session)], file = recordFileOf(buffersDir, id);
     r = await read({ mark, ageMs: Math.max(0, now() - started), keep: PI.keptOut(own), own: ptyOf(session), recordPids: recordedOf(session), records: file ? [file] : [] });

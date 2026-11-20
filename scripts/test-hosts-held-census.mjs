@@ -121,7 +121,7 @@ console.log('§1 every caller of a lookup (get / list / findByDeviceId, and the 
     {"file": "src/exit-proxy.js", "at": "try { const h = this.hosts.get(hostId); lastRun = h ? (this.accessOf(h).lastRun || null) : null;", "n": 1, "cls": "harmless", "why": "_rowRecorded: needs a recorded run — unreachable while held (no run can start)", "bare": "a run's last-run stamp only — nothing judged on it"},
     {"file": "src/hosts.js", "at": "const known = () => { try { return !!this.get(id); } catch { return false; } };", "n": 1, "cls": "harmless", "why": "realCwdOf (B-16d7, the move onto the .413 tip): the live row's real-path field — the last-known list is noted only for a machine the list knows", "bare": "held: «not known yet» — the last-known list is not noted, the row carries no real path this payload; nothing written, asked again at the next payload"},
     {"file": "src/server/left-behind-door.js", "at": "const nameOfHost = (hosts, id) => { try { const h = hosts && typeof hosts.get === 'function' ? hosts.get(id) : null; return (h && h.name) || String(id); } catch { return String(id); } };", "n": 1, "cls": "harmless", "why": "the after-stop note's machine name (a display line): held, the machine's id stands for its name — nothing read from it, written or dropped"},
-    {"file": "src/server/left-behind-door.js", "at": "const dm = hosts && typeof hosts.deviceBounded === 'function' ? await hosts.deviceBounded(session.host, 6000) : null;", "n": 1, "cls": "harmless", "why": "after a stopped turn on another machine: what its command tool left running, read from that machine's agent — held, its catch names the check unread («machine-unreachable»): nothing is read, written or dropped; the next stop asks again"},
+    {"file": "src/server/left-behind-door.js", "at": "const dm = hosts && typeof hosts.deviceBounded === 'function' ? await hosts.deviceBounded(session.host, 6000) : null;", "n": 1, "cls": "harmless", "why": "after a stopped turn on another machine: what its command tool left running, read from that machine's agent — held, its catch names the check unread by the hold's own reason («hosts-unread», never «machine-unreachable»): nothing is read, written or dropped; the next stop asks again"},
     {"file": "src/hosts.js", "at": "const h = this.get(id);", "n": 29, "cls": "refuses", "why": "every method that opens with this.get(id): readRemotePassiveUsage (B-5e0d, its caller usage-routes catches to «no passive reading»), accountsStatus, renameHostSubDir, cliPrimaryKey, test, killRemotePid, reachable, refuseUnreachable, dirComplete, dirSlice, back"},
     {"file": "src/hosts.js", "at": "const h = this.findByDeviceId(deviceId);", "n": 2, "cls": "harmless", "why": "onDialIn / noteDial: a dialed-in device — unreachable while held (holdDial); findByDeviceId throws hosts-unread there by name"},
     {"file": "src/hosts.js", "at": "let h = this.findByDeviceId(deviceId);", "n": 1, "cls": "refuses", "why": "setDialToken: a writer — refused by name while held (_refuseIfUnread before it); findByDeviceId throws hosts-unread"},
@@ -528,8 +528,8 @@ console.log('§6 wiring: the re-adoption waits at its caller; the installers say
 {
   const SV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   const SH = fs.readFileSync(path.join(ROOT, 'scripts/vibespace-agentd-install.sh'), 'utf8'), PS = fs.readFileSync(path.join(ROOT, 'scripts/vibespace-agentd-install.ps1'), 'utf8');
-  ok(SV.includes("const held = !!(hosts.held && hosts.held() && hosts.whenRead); (held ? (hosts.whenRead(go, 'the re-adoption of remote sessions left running'), Promise.resolve()) : go()).finally(() => { if (resumeRoad) resumeRoad.adopted(); });"),
-    'server.js: the boot\'s re-adoption of remote sessions waits for the read while hosts.json is held (its get threw: the pass ended, a later resume killed the agent it would adopt) — and the resume line (piece 4) opens at once then, never waiting on a list that may stay held');
+  ok(SV.includes("const held = !!(hosts.held && hosts.held() && hosts.whenRead); (held ? (keep(), Promise.resolve()) : go()).finally(() => { if (resumeRoad) resumeRoad.adopted(); });") && SV.includes(".finally(() => { if (resumeRoad) resumeRoad.adoptedRemote(); });"),
+    'server.js: the boot\'s re-adoption of remote sessions waits for the read while hosts.json is held (its get threw: the pass ended, a later resume killed the agent it would adopt) — the LOCAL resume road opens at once then, the REMOTE one when the re-adoption settles (§10 drives it)');
   const i16 = SH.indexOf('if [ "$CHECK_RC" -eq 16 ]; then'), ine = SH.indexOf('if [ "$CHECK_RC" -ne 0 ]; then'), p16 = PS.indexOf('if ($checkRc -eq 16) {'), pne = PS.indexOf('if ($checkRc -ne 0) {');
   ok(i16 > 0 && ine > i16 && /run this same command again in a few minutes/.test(SH.slice(i16, ine)) && p16 > 0 && pne > p16 && /run this same command again in a few minutes/.test(PS.slice(p16, pne)),
     'both installers word the check\'s exit 16 (the hub holds its machines) as a wait BEFORE the generic «the device cannot dial» line', { i16, ine, p16, pne });
@@ -676,6 +676,68 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   const k9 = await call9(ESRC9), k9x = await call9(anchored(ESRC9, PKCATCH, '  catch (e) { res.status(400).json({ error: e.message }); }', 'public-key-held-cut'));
   ok(!!k9 && k9.status === 503 && k9.code === 'hosts-unread' && !!k9x && k9x.status === 400 && !k9x.code, 'a machine\'s public key while held: 503 with the hold\'s name (hosts-unread); CONTROL (the bare 400 put back, in a copy): «400» with no name — RED', { k9, k9x });
   if (!asRoot9) { try { fs.chmodSync(HF, 0o600); } catch { } }
+}
+
+// ── §10 主开发 02:31Z (the move check's ruling): THE TWO ROADS of the boot's resume line, DRIVEN on the held-then-read road. A LOCAL
+// resume waits for nothing of the hosts store; a REMOTE resume never runs before the boot's re-adoption of the machines' left-running
+// conversations has SETTLED — held, then read, then re-adopting over ssh (seconds) included. A REAL held HostManager; the server's
+// re-adoption line and the wiring's two-roads gate compiled from their sources; the re-adoption a stand-in that settles when told
+console.log('§10 the boot\'s two resume roads over a held-then-read hosts.json (the re-adoption window driven), and its wait never let go in silence');
+{
+  const D10 = scratch('hosts-held-census-10'); fs.rmSync(D10, { recursive: true, force: true }); fs.mkdirSync(D10, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(D10, { recursive: true, force: true }); } catch { } });
+  const asRoot10 = typeof process.getuid === 'function' && process.getuid() === 0;
+  const hb10 = JSON.stringify({ hosts: [{ id: 'h-0001', name: 'build-box', transport: 'dial', deviceId: 'build-box' }] });
+  const held10 = (name) => { const d = path.join(D10, name); fs.mkdirSync(d, { recursive: true }); const f = path.join(d, 'hosts.json'); if (asRoot10) fs.mkdirSync(f); else { fs.writeFileSync(f, hb10); fs.chmodSync(f, 0o000); }
+    return { d, f, read: () => { if (asRoot10) { fs.rmdirSync(f); fs.writeFileSync(f, hb10); } else fs.chmodSync(f, 0o600); } }; };
+  const HM10 = require(path.join(ROOT, 'src/hosts.js')).HostManager;
+  const SRV10 = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8'), WIRE10 = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  const lineOf = (src, head) => { const i = src.indexOf(head); if (i < 0) throw new Error('not found: ' + head); return src.slice(i, src.indexOf('\n', i)); };
+  const READOPT = "  setTimeout(() => { const go = () => Promise.resolve().then(() => readoptOrphanKeeperSessions())";
+  const bootOf = (srv) => { const ln = lineOf(srv, READOPT), a = ln.indexOf('setTimeout(() => { ') + 'setTimeout(() => { '.length, b = ln.lastIndexOf(' }, 8000);'); return new Function('hosts', 'resumeRoad', 'readoptOrphanKeeperSessions', 'console', ln.slice(a, b)); };   // eslint-disable-line no-new-func
+  const gateOf = (wire) => new Function(`let adoptedNow = null; ${lineOf(wire, 'let remoteSettled = false;')}\n${lineOf(wire, 'const REMOTE_READOPT_WORDS = ')}\n${lineOf(wire, 'const resumeRoad = { reopen: null, kept: null, adopted:')}\n${lineOf(wire, 'const reopenRoads = ')}\nreturn { resumeRoad, reopenRoads, openLocal: new Promise((r) => { adoptedNow = r; }) };`)();   // eslint-disable-line no-new-func
+  const quiet = { warn: () => { }, log: () => { } }, tick = () => new Promise((r) => setTimeout(r, 5));
+  const road = async (wire, srv) => {
+    const st = held10('road-' + Math.random().toString(36).slice(2, 8)), H = new HM10({ dataDir: st.d });
+    const g = gateOf(wire), calls = [];
+    g.resumeRoad.reopen = async (item) => { calls.push(item && item.hostId ? 'remote' : 'local'); return { ok: true }; };
+    let settle = null, started = 0; const readopt = () => { started++; return new Promise((r) => { settle = r; }); };
+    let localOpen = false; g.openLocal.then(() => { localOpen = true; });
+    bootOf(srv)(H, g.resumeRoad, readopt, quiet);
+    await tick();
+    const out = { held: H.held(), localOpen };
+    out.heldRemote = (await g.reopenRoads({ sessionKey: 'claude:r1', hostId: 'h-0001' })).code || 'ran';
+    out.heldLocal = (await g.reopenRoads({ sessionKey: 'claude:l1' })).ok === true;
+    st.read(); await H._unreadRetry(); await tick();   // the store reads again: the queued re-adoption starts (over ssh: seconds)
+    out.readoptStarted = started;
+    out.windowRemote = (await g.reopenRoads({ sessionKey: 'claude:r2', hostId: 'h-0001' })).code || 'ran';   // submitted IN the window
+    out.remoteBeforeSettle = calls.filter((c) => c === 'remote').length;
+    if (settle) settle(); await tick(); await tick();
+    out.afterRemote = (await g.reopenRoads({ sessionKey: 'claude:r3', hostId: 'h-0001' })).ok === true;
+    out.calls = calls.join();
+    return out;
+  };
+  const GATE = 'item && item.hostId && !remoteSettled ? ';
+  ok(WIRE10.split(GATE).length === 2 && SRV10.split(READOPT).length === 2, 'control setup: the two-roads gate and the boot\'s re-adoption line are found once');
+  const rd = await road(WIRE10, SRV10), rdx = await road(anchored(WIRE10, GATE, 'false ? ', 'two-roads-gate-cut'), SRV10);
+  ok(rd.held && rd.localOpen && rd.heldRemote === 'readopt-pending' && rd.heldLocal && rd.readoptStarted === 1 && rd.windowRemote === 'readopt-pending' && rd.remoteBeforeSettle === 0 && rd.afterRemote && rd.calls === 'local,remote',
+    'the boot over a HELD hosts.json: the LOCAL road opens at once (a local resume runs); a REMOTE resume is refused by name while held AND in the window after the read while the re-adoption runs — never run before it settles; once it settles the remote road opens', rd);
+  ok(rdx.windowRemote === 'ran' && rdx.remoteBeforeSettle > 0, 'CONTROL (the two-roads gate cut, in a copy of the wiring): a remote resume submitted in the window RUNS before the re-adoption settled — it could end the agent the re-adoption would adopt — RED', rdx);
+  // the re-adoption's wait is KEPT past the store's bound of waits (a wait let go was only a log line: the left-running remote
+  // conversations were never adopted until the next start, and the remote road never opened)
+  const LETGO = "{ onLetGo: () => { console.warn('[readopt] the re-adoption keeps its place in the waits for hosts.json (it runs at the read; remote resumes are refused until it settles)'); keep(); } }";
+  ok(SRV10.split(LETGO).length === 2, 'control setup: the re-adoption\'s let-go answer is found once');
+  const flood = async (srv) => {
+    const st = held10('flood-' + Math.random().toString(36).slice(2, 8)), H = new HM10({ dataDir: st.d }), g = gateOf(WIRE10);
+    g.resumeRoad.reopen = async () => ({ ok: true });
+    bootOf(srv)(H, g.resumeRoad, () => Promise.resolve(), quiet);
+    const warn = console.warn; console.warn = () => { };
+    try { for (let i = 0; i < 300; i++) H.whenRead(() => { }, `another wait ${i}`, `w${i}`); } finally { console.warn = warn; }
+    return { kept: !!(H._readWaits && H._readWaits.has('boot:readopt')), waits: H._readWaits ? H._readWaits.size : 0 };
+  };
+  const fl = await flood(SRV10), flx = await flood(anchored(SRV10, LETGO, '{}', 'readopt-let-go-cut'));
+  ok(fl.kept, 'the re-adoption\'s wait keeps its place past the store\'s bound of 256 waits (let go, it queues itself again, said) — it runs at the read, the remote road opens after it', fl);
+  ok(!flx.kept, 'CONTROL (its let-go answer cut, in a copy of server.js): 300 other waits let the re-adoption go — the left-running remote conversations are never adopted until the next start, the remote road never opens — RED', flx);
 }
 
 for (const r of copiesCensus(MJ.files, MJ.dir, ROOT, { minCopies: 1, label: 'hosts-held-census ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
