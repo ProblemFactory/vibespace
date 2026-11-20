@@ -44,7 +44,12 @@ const boot = (dir, sweep = {}, extra = {}) => {
 const settle = async (jm) => { if (typeof jm.logsSettled === 'function') await jm.logsSettled(); };
 // THE LAW's pass at a clock (the release has none: its hourly gc, which removes no dropped run, stands in — red by name)
 const sweepAt = async (jm, at) => { if (typeof jm.sweepLogs === 'function') await jm.sweepLogs({ now: at }); else await jm._gc({ now: at }); await settle(jm); };
-const gcAt = async (jm, at) => { await jm._gc({ now: at }); await settle(jm); };   // THE HOURLY ROAD with its clock
+// (主开发 r233: the gc's whole-dir removal of the records it removed RIDES their removal's LANDING — lane lg-store-writes, the moved2
+// cure 2: a kill first brings the record back WITH its logs. So the road waits for WHAT HAPPENED: the jobs store landed through its
+// door (the one synchronous flush runs the step that hands the remover the ids), THEN the remover's work settled — under load the
+// landing came after the old wait, which then waited on a removal not yet asked. A write left owed is said by name)
+const landJobs = (jm) => { if (jm.readOnly) return; const r = require('../src/store-writer.js').storeWriter().flushSync([jm.file, jm.notifsFile]); if (r.deferred || (r.left && r.left.length)) console.log(`    (the jobs store did not land here — a held store's write stays owed, as the product keeps it: ${JSON.stringify(r.left).slice(0, 300)})`); };   // (never a throw: a held store's gc must still never throw — H5d; the leg after it is the red by name)
+const gcAt = async (jm, at) => { await jm._gc({ now: at }); landJobs(jm); await settle(jm); };   // THE HOURLY ROAD with its clock
 const T0 = Date.now(); const lap = (name) => console.log(`${name}  (+${Date.now() - T0} ms)`);
 // the store's English fill (src/user-todos.js fillWords): an INSTANT param a UTC stamp, a WORDS param its own key filled (K10, .399)
 const fill = (w) => String(w.key).replace(/\{(\w+)\}/g, (m, k) => { const v = w.params ? w.params[k] : undefined; return v === undefined ? m : v && typeof v === 'object' ? (typeof v.key === 'string' ? fill(v) : Number.isFinite(v.at) ? new Date(v.at).toISOString().slice(0, 16).replace('T', ' ') + ' UTC' : m) : String(v); });
