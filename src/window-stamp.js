@@ -39,7 +39,16 @@ function writeWindowStamp(cacheDir, key, stamp, producer) {
   if (!key || !stamp || typeof stamp !== 'object' || Array.isArray(stamp)) throw new Error('a .window- stamp is an object on a key');
   const { producer: _p, login: _l, ...rest } = stamp;
   const carried = producer === 'login' ? null : identityCarry(readWindowStamp(cacheDir, key));
-  return require('./usage-cache-write.js').writeSidecar(cacheDir, windowSidecarName(key), { ...rest, producer, ...(carried ? { login: carried } : {}) });
+  const written = { ...rest, producer, ...(carried ? { login: carried } : {}) };
+  const ok = require('./usage-cache-write.js').writeSidecar(cacheDir, windowSidecarName(key), written);
+  if (ok) for (const fn of _hearers) { try { fn(cacheDir, key, written); } catch { } }
+  return ok;
 }
 
-module.exports = { readWindowStamp, writeWindowStamp, isWindowProducer };
+/** WHO KEEPS A STAMP IN MEMORY HEARS EVERY WRITE (B-6a92 r5, 主开发 r677): the engine holds a roster account's stamp it read
+ *  once (no cache file yet) and renews it here — `fn(cacheDir, key, stamp as written)` after each landed write, never before.
+ *  Bounded: the oldest hearer is dropped past 64 (each engine instance registers one). */
+const _hearers = [];
+function onStampWritten(fn) { if (typeof fn === 'function' && !_hearers.includes(fn)) { _hearers.push(fn); if (_hearers.length > 64) _hearers.shift(); } }
+
+module.exports = { readWindowStamp, writeWindowStamp, isWindowProducer, onStampWritten };

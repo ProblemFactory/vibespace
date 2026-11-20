@@ -620,7 +620,7 @@ function seedProbeConfigDir(credsDir, probeConfigDir) {
 /** The identity verdict on one parsed panel. `expected` = the account's own
  *  login identity, `before`/`after` = the isolated config dir's oauthAccount
  *  around the spawn, `apiWin` = the account's API-derived window. */
-function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, windows, ring = [], ringK = 3, sameIdentity = null }) {
+function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, windows, ring = [], ringK = 3, sameIdentity = null, held = null }) {
   const { windowOf, compareWindows, windowFingerprint, weeklyNear } = require('./reading-lag.js');
   const panelWindow = windowOf(cliPanel);
   const low = (v) => (v == null ? null : String(v).toLowerCase());
@@ -657,7 +657,11 @@ function panelIdentityVerdict({ key, cliPanel, expected, before, after, apiWin, 
   let why;
   if (org === 'differ') why = `the /usage panel for ${me} answered for ${foreign} (CLI-reported org ${panelIdent.orgUuid || panelIdent.email}), not ${me}'s own login (org ${expected.orgUuid || expected.email})`;
   else if (phase === 'differ') why = `the /usage panel for ${me} answered with ${foreign}'s weekly window (${windowFingerprint(panelWindow)}), not ${me}'s own API-derived window (${windowFingerprint(apiWin)} — rate-limit events on a verified slot)`
-    + (movedLikely ? ` — but ${ringAgree} of ${me}'s own last ${ring.length} API readings share the panel's window: ${me}'s weekly window may have MOVED; ${ringK} consecutive agreeing readings re-anchor it automatically (or run the identity repair)` : '');
+    // B-6a92 r5: WHILE A HOLD STANDS no run of readings re-anchors the row (they name another known account's window) — the
+    // sentence says the one road that does: the row's own read answering in a window
+    + (held && Array.isArray(held.names) && held.names.length
+      ? ` — ${me}'s own weekly window is unknown: its readings name ${held.names.map(acctNameOf).join(', ')}'s window, and no run of them re-anchors it; ${me}'s own /usage read proves its window when it answers in ${me}'s own window or in that one`
+      : movedLikely ? ` — but ${ringAgree} of ${me}'s own last ${ring.length} API readings share the panel's window: ${me}'s weekly window may have MOVED; ${ringK} consecutive agreeing readings re-anchor it automatically (or run the identity repair)` : '');
   else if (verified) why = org === 'agree' ? `panel org matches ${me}'s own login` : `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)})`;
   else if (shared) why = `panel weekly window matches ${me}'s API-derived window (${windowFingerprint(apiWin)}) but that phase is shared with ${matched.map(acctNameOf).join(', ')} — not identifying; the panel names no org`;
   else why = `no identity evidence to compare for ${me} (no API-derived window yet; the panel names no org)`;
@@ -798,12 +802,19 @@ async function refreshViaCliPanel(key) {
     idv = panelIdentityVerdict({ key, cliPanel, expected, before: probeRec.configOrgBefore, after: probeRec.configOrgAfter,
       apiWin, ring: (wit && Array.isArray(wit.ring)) ? wit.ring : [], ringK: (wit && wit.k) || 3,
       sameIdentity: (typeof app.locals.usageIdentityAccountIds === 'function') ? app.locals.usageIdentityAccountIds : null,
-      windows: (typeof establishedWindows === 'function') ? establishedWindows() : {} });
+      windows: (typeof establishedWindows === 'function') ? establishedWindows() : {}, held: (wit && wit.foreign) || null });
   } catch (e) { console.warn('[usage] panel identity check failed (writing as asked, unverified):', e.message); idv = { refused: false, verified: false, why: 'identity check failed: ' + e.message, panel: null, expected: expected || null, matched: [] }; }
   // A RENEWED SUBSCRIPTION (verify r1 ③): a lapsed member's panel refused on its PRE-LAPSE window alone (no other account
   // holds the panel's window, the org does not differ) re-anchors the window on this answer and is written as verified
   if (idv && idv.refused && !isGlobal && typeof app.locals.reanchorLapsedMember === 'function' && app.locals.reanchorLapsedMember(key, idv)) {
     idv = { ...idv, refused: false, verified: true, why: `${acctNameOf(key)} was lapsed and answered with a new weekly window no other account holds — re-anchored (a renewal)` };
+  }
+  // B-6a92 r5 (主开发 r677, ruled in 1): A HELD ROW'S OWN READ IS ITS DOOR — this panel is the row's OWN credential (isolated);
+  // answering in the window its readings were held on (an honest shared window) it is the row's proven read: the hold ends,
+  // the window is stamped there and the numbers below are written as verified; verified on its own window, the hold ends too
+  if (idv && !isGlobal && typeof app.locals.liftHeldWindow === 'function') {
+    const lift = app.locals.liftHeldWindow(key, idv);
+    if (lift && lift.onHeld) idv = { ...idv, refused: false, verified: true, verifiedBy: 'own-panel', why: `${acctNameOf(key)}'s own /usage read answered in the weekly window its readings were held on — its own read proves it: stamped there, the hold ended` };
   }
   probeRec.identity = { org: idv.org || null, phase: idv.phase || null, expected: idv.expected, panel: idv.panel, matched: idv.matched, shared: !!idv.shared, movedLikely: !!idv.movedLikely, apiWindow: idv.apiWindow || null };
   probeRec.identityVerified = idv.verified;
@@ -891,7 +902,7 @@ async function refreshViaCliPanel(key) {
       // folder could not be read: nobody can tell — the ONE writer then carries the row's identity, fix r3)
       const producer = (() => { try { const i = accounts.readSubCreds(key); return i && i.oatFile ? 'oat:' + (Number(i.oatFileGen) > 0 ? Number(i.oatFileGen) : '?') : 'login'; } catch { return null; } })();
       if (idv && idv.verified && (w.sevenDay || w.fiveHour || Object.keys(w.scoped).length)) {
-        windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: idv.org === 'agree' ? 'cli-org' : 'api-phase' }, producer);
+        windowStamp.writeWindowStamp(USAGE_CACHE_DIR, key, { ...w, at: Date.now(), source: 'on-demand', verifiedAt: Date.now(), verifiedBy: idv.org === 'agree' ? 'cli-org' : (idv.verifiedBy || 'api-phase') }, producer);
         probeRec.sidecar = 'stamped';
       } else if (w.sevenDay || Object.keys(w.scoped).length) {
         // …UNLESS THE ONLY ANCHOR IS A LEGACY STAMP (inc-mu6djxxt-8166): with no
@@ -1697,10 +1708,10 @@ app.get('/api/usage', (req, res) => {
   const accountsOut = {};
   for (const [id, a] of Object.entries(viewedAccounts)) accountsOut[id] = lanesAt[id] && a && typeof a === 'object' ? { ...a, lanesReadAt: lanesAt[id] } : a;
   // B-6a92 (主开发 r560): an account whose OWN weekly window is unknown because its readings name ANOTHER known account's window
-  // (the engine held the move: apiDerivedWindow's `foreign`, resolved against the row's own stamp) — the row says so by the other
-  // account's NAME as the person gave it, never an address; its numbers are never the other account's
+  // (the engine held the move: its held window, read from the ENGINE'S MEMORY — r5, 主开发 r677: no file is read on a poll) — the
+  // row says so by the other account's NAME as the person gave it, never an address; its numbers are never the other account's
   const nameOfOther = (k) => { try { const n = accounts.get(k)?.name; return typeof n === 'string' && n && !n.includes('@') ? n.slice(0, 80) : null; } catch { return null; } };
-  const unknownOf = (id) => { try { const f = typeof apiDerivedWindow === 'function' ? (apiDerivedWindow(id, { witness: true }) || {}).foreign : null; return f && Array.isArray(f.names) && f.names.length ? { others: f.names.slice(0, 4), otherNames: f.names.slice(0, 4).map(nameOfOther), phase: f.phase, at: f.at || null } : null; } catch { return null; } };
+  const unknownOf = (id) => { try { const f = typeof apiDerivedWindow === 'function' ? (apiDerivedWindow(id, { held: true }) || {}).foreign : null; return f && Array.isArray(f.names) && f.names.length ? { others: f.names.slice(0, 4), otherNames: f.names.slice(0, 4).map(nameOfOther), phase: f.phase, at: f.at || null } : null; } catch { return null; } };
   let subIds = []; try { subIds = (accounts.list().accounts || []).filter((x) => x && x.type === 'subscription').map((x) => x.id); } catch { subIds = []; }   // a row with no witness sidecar answers nothing
   for (const id of new Set([...Object.keys(viewedAccounts), ...subIds])) { const u = unknownOf(id); if (u) accountsOut[id] = { ...(accountsOut[id] && typeof accountsOut[id] === 'object' ? accountsOut[id] : {}), windowUnknown: u }; }
   const globalOut = lanesAt.__global__ && viewedGlobal && typeof viewedGlobal === 'object' ? { ...viewedGlobal, lanesReadAt: lanesAt.__global__ } : viewedGlobal;

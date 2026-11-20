@@ -1362,8 +1362,8 @@ console.log('§7 the REAL producer (usage-pool-engine recordRateLimitEvent) — 
     const rr = calls.filter((w) => w.f === 'src/reading-repair.js');
     ok(rr.length === 4 && rr.every((w) => w.via === 'windowStamp' && w.args[0] === 'cacheDir' && /^(key|acct)$/.test(w.args[1])) && ![...c.groups.keys()].some((k) => k.startsWith('src/reading-repair.js ›')),
       'fix r3 F-R2: reading-repair writes `.window-` ONLY through the ONE writer — the one-shot seed (null), the standing repair\'s stamp / re-stamp (null) and its confirm (repair:<the stamp\'s producer>)', rr);
-    ok(JSON.stringify([...new Set(calls.map((w) => w.f))].sort()) === JSON.stringify(['src/reading-repair.js', 'src/server/usage-pool-engine.js', 'src/usage-routes.js']) && calls.length === 8,
-      `the ONE writer's callers, derived: the engine (the ring, the renewal panel), the ⟳ panel (verified, isolated), the repair (seed, stamp, re-stamp, confirm) — ${calls.length} calls`, calls.map((w) => `${w.f}:${w.line} ${w.fn}`));
+    ok(JSON.stringify([...new Set(calls.map((w) => w.f))].sort()) === JSON.stringify(['src/reading-repair.js', 'src/server/usage-pool-engine.js', 'src/usage-routes.js']) && calls.length === 9 && calls.some((w) => w.f === 'src/server/usage-pool-engine.js' && w.fn === 'liftHeldWindow'),
+      `the ONE writer's callers, derived: the engine (the ring, the renewal panel, B-6a92's door — a held row's own ⟳ read), the ⟳ panel (verified, isolated), the repair (seed, stamp, re-stamp, confirm) — ${calls.length} calls`, calls.map((w) => `${w.f}:${w.line} ${w.fn}`));
   });
   // ── §9b THE ONE WRITER'S LAW (behaviour): the producer is mandatory, a stamp's own fields never trusted, the carry inside ──
   await guard9(async () => {

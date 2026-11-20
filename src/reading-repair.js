@@ -1268,12 +1268,21 @@ function _readNdjson(f) {
   for (const l of txt.split('\n')) { if (!l) continue; try { out.push(JSON.parse(l)); } catch { } }
   return out;
 }
+/** B-6a92 r5 (主开发 r677, THE MUST) — WHOM THE GUARD NAMED: the other known account(s) whose window an archived reading was
+ *  found to carry — the guard's own verdict on its copy (`entry.verdict.names`), else, for a reading archived before that field,
+ *  the `matched` list every archived row has carried since the release. No account is guessed. Such a reading is THAT account's
+ *  window, never this row's evidence: another known account's window reaches a row only by the row's own proven read. */
+function namedOthers(x, key) {
+  const v = x && x.entry && x.entry.verdict;
+  const list = v && Array.isArray(v.names) ? v.names : (Array.isArray(x && x.matched) ? x.matched : []);
+  return list.filter((k) => typeof k === 'string' && k && k !== key);
+}
 /** The API phase of ONE account from the three evidence sources, or `top: null`. */
 function apiPhaseFor({ key, anchorRows, mismatchRows, apiwin = null, now = Date.now(), horizonMs = API_PHASE_HORIZON_MS, minRows = API_PHASE_MIN_ROWS, dominance = API_PHASE_DOMINANCE }) {
   const hist = new Map();
   // `.apiwin-` is NOT a source (final verifier): it is the witness this repair
   // is judging, and counting it let one poisoned live entry vote for itself.
-  const sources = { changed: 0, archived: 0, skipped: 0 };
+  const sources = { changed: 0, archived: 0, skipped: 0, named: 0 };
   const mine = (anchorRows || []).filter((r) => r && (r.accountId || '__global__') === key).sort((a, b) => (a.fetchedAt || 0) - (b.fetchedAt || 0));
   let prev = null;
   for (const r of mine) {
@@ -1293,6 +1302,8 @@ function apiPhaseFor({ key, anchorRows, mismatchRows, apiwin = null, now = Date.
     // pin older than a re-point, OTel disagreeing) is not evidence here either;
     // a row written before the field existed is judged on `slotOk` as before
     if (wt && wt.ok === false) { sources.skipped++; continue; }
+    // B-6a92 r5: a reading the guard found to name ANOTHER known account's window is that account's, not this row's evidence
+    if (namedOthers(x, key).length) { sources.named++; continue; }
     _tallyPhase(hist, Number(ev.resetsAt), x.at); sources.archived++;
   }
   void apiwin;
@@ -1355,7 +1366,8 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     // …and c1's live witness, so the panel gate is armed from this boot on
     if (!apiwin || !(Number(apiwin.sevenDay) > 0) || weeklyNear(apiwin.sevenDay, api) === false) {
       // the live ring of candidates is carried (it is evidence the engine keeps, not a verdict)
-      _writeAtomic(apiwinPath, JSON.stringify({ sevenDay: api, scoped: {}, at: now, sessionId: null, source: 'repair', n: ev.top.n, of: ev.total, ring: Array.isArray(apiwin && apiwin.ring) ? apiwin.ring : [] }));
+      // …and a HOLD (B-6a92: the row's own window unknown, by the other account) is carried: nothing here is the row's own read
+      _writeAtomic(apiwinPath, JSON.stringify({ sevenDay: api, scoped: {}, at: now, sessionId: null, source: 'repair', n: ev.top.n, of: ev.total, ring: Array.isArray(apiwin && apiwin.ring) ? apiwin.ring : [], ...(apiwin && apiwin.foreign && typeof apiwin.foreign === 'object' ? { foreign: apiwin.foreign } : {}) }));
       row.apiwin = apiwin ? 'restamped' : 'stamped';
     }
     // ② THE CACHE SNAPSHOT — what the roster row and the pool read
@@ -1416,6 +1428,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
       .filter((x) => {
         const e = x.entry && x.entry.ev, sl = x.entry && x.entry.slot;
         if (!e || !sl || !sl.slotOk || e.status === 'rejected' || !(Number(e.resetsAt) > 0)) return false;
+        if (namedOthers(x, key).length) return false;   // B-6a92 r5: another known account's reading is never written back on this row
         if (e.kind === 'sevenDay' || (e.kind === 'scoped' && e.scopedName)) return weeklyNear(e.resetsAt, api) === true;
         return false;
       })
@@ -1432,4 +1445,4 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
   return report;
 }
 
-module.exports = { prefetchAnchorRows, repairReadings, deathMarkers, isForeign, backfillFromJournal, findJournal, repairUsageCaches, repairAnchors, repairAttribution, sessionKeysFor, _sessionKeyMap, repairByWindow, establishedWindows, identityCacheKeys, repairAnchorsByWindow, repairCachesByWindow, repairGlobalFile, _cacheFromAnchor, _recordAgreesWholly, _primaryDrops, MIN_OWN_READINGS, OWN_DOMINANCE, repairSidecarsByApiPhase, apiPhaseFor, API_PHASE_MIN_ROWS, API_PHASE_DOMINANCE, API_PHASE_HORIZON_MS, READMIT_HORIZON_MS, ORG_FIELDS };
+module.exports = { prefetchAnchorRows, repairReadings, deathMarkers, isForeign, backfillFromJournal, findJournal, repairUsageCaches, repairAnchors, repairAttribution, sessionKeysFor, _sessionKeyMap, repairByWindow, establishedWindows, identityCacheKeys, repairAnchorsByWindow, repairCachesByWindow, repairGlobalFile, _cacheFromAnchor, _recordAgreesWholly, _primaryDrops, MIN_OWN_READINGS, OWN_DOMINANCE, repairSidecarsByApiPhase, apiPhaseFor, namedOthers, API_PHASE_MIN_ROWS, API_PHASE_DOMINANCE, API_PHASE_HORIZON_MS, READMIT_HORIZON_MS, ORG_FIELDS };
