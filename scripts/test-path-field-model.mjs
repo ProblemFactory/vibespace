@@ -40,7 +40,7 @@ let bad = 0, n = 0;
 const ok = (name, cond, got) => { if (typeof name !== 'string') throw new TypeError('ok(name, cond, got): the leg\'s name first'); n++; if (!cond) bad++; console.log(`${cond ? 'ok ' : 'BAD'} ${name}${cond ? '' : '  got ' + String(JSON.stringify(got)).slice(0, 900)}`); };
 
 const K = (t, h = null) => P.keyOf(t, h);
-const RANKS = { missing: { missing: true, pathLike: true }, resolved: { resolved: true, pathLike: true }, search: { pathLike: false }, empty: { empty: true } };
+const RANKS = { missing: { missing: true, pathLike: true }, resolved: { resolved: true, pathLike: true, literal: true }, completion: { resolved: true, pathLike: true, literal: false, path: '~/payments' }, search: { pathLike: false }, empty: { empty: true } };
 const envOf = (cur, { rank = 'missing', homeKnown = true, tick = false, createMode = 'ask', folder = true, file = false, unreachable = false } = {}) =>
   ({ cur, rank: { ...RANKS[rank], file }, homeKnown, unreachable, tick, createMode, folder });
 
@@ -101,6 +101,70 @@ const ROWS = [
 console.log('── ① THE TABLE (each row a direct leg) ──');
 for (const r of ROWS) { let got; try { got = drive(P, r.start, r.evs); } catch (e) { got = { error: String(e && e.stack || e).slice(0, 300) }; } let pass = false; try { pass = !got.error && !!r.check(got); } catch (e) { got.thrown = String(e).slice(0, 200); } ok(`① ${r.row}`, pass, got.error || got.thrown || { state: got.s, effects: got.fx }); }
 
+/* B-d833, the fourth shape (the model's part): a skipped reply (a dead entrance's mark) is no answer — not counted in the run, its line
+   says when it is asked again, and ONE ask is armed for that time; L6 READ AT THE PRESS — an OWED press is served only by a LITERAL
+   resolution, a completion ends it with true words and a second press (the line now shows it) uses it; the key holds the BASES */
+{
+  const KB = (t, b) => P.keyOf(t, null, b);
+  ok('① keyOf: the same text on the same machine with OTHER bases is another key (a change of bases is a new question); textOf reads the text back', KB('./x', '["~/a"]') !== KB('./x', '["~/b"]') && P.textOf(KB('./x', '["~/a"]')) === './x' && P.textOf(K('~/a')) === '~/a');
+  const env = envOf(A);
+  let st = P.init(A); st = P.step(st, { type: 'set', commit: false, cur: A, now: 1, env }).state;
+  const r1 = P.step(st, { type: 'reply', key: A, kind: 'skipped', until: 30001, now: 2, env, verdict: { kind: 'skipped', until: 30001 } });
+  ok('① a skipped reply: NOT counted in the run, ONE ask armed for when the mark ends, the line says «skipped» with that time', r1.state.run.n === 0 && r1.effects.some((e) => e.do === 'arm' && e.which === 'retry' && e.ms === 29999) && P.view(r1.state, env).status === 'skipped' && P.view(r1.state, env).until === 30001, r1.effects);
+  const r2 = P.step(r1.state, { type: 'fired', which: 'retry', connected: true, cur: A, now: 30001, env });
+  ok('① …the armed time comes: asked ONCE (a new run)', r2.effects.filter((e) => e.do === 'ask').length === 1, r2.effects);
+  let s3 = P.init(A); s3 = P.step(s3, { type: 'commit', door: 1, how: 'enter', cur: A, now: 1, env: envOf(A) }).state;
+  const owedAsk = P.step(P.init(A), { type: 'commit', door: 1, how: 'enter', cur: A, now: 1, env: envOf(A) }).effects.find((e) => e.do === 'ask');
+  ok('① a press asks with `press` (R-i: the machine sends a dead entrance\'s call once inside its window for it)', !!owedAsk && owedAsk.press === true, owedAsk);
+  const comp = P.step(s3, { type: 'reply', key: A, kind: 'listing', now: 2, env: envOf(A, { rank: 'completion' }) });
+  ok('① L6 at the press: an OWED press served by a COMPLETION is refused with true words (the path it would take named) — nothing committed', comp.effects.some((e) => e.do === 'settle' && e.result === 'refused' && (e.doors || []).includes(1)) && !comp.effects.some((e) => e.do === 'commit') && comp.state.err && comp.state.err.why === 'literal' && comp.state.err.path === '~/payments', comp.effects);
+  const again = P.step(comp.state, { type: 'commit', door: 2, how: 'enter', cur: A, now: 3, env: envOf(A, { rank: 'completion' }) });
+  ok('① …a SECOND press, the line now showing it: committed', again.effects.some((e) => e.do === 'commit' && e.as === 'ok' && (e.doors || []).includes(2)), again.effects);
+  const lit = P.step(s3, { type: 'reply', key: A, kind: 'listing', now: 2, env: envOf(A, { rank: 'resolved' }) });
+  ok('① …an owed press served by a LITERAL resolution (the text\'s own first candidate): committed at once', lit.effects.some((e) => e.do === 'commit' && e.as === 'ok' && (e.doors || []).includes(1)), lit.effects);
+  let G0 = null; try { G0 = load(anchored(SRC, "        if (g === 'ok' && !rk.literal) {", "        if (false) {", 'L6 read at the commit')); } catch (e) { G0 = null; }
+  const c0 = G0 && G0.step(G0.step(G0.init(A), { type: 'commit', door: 1, how: 'enter', cur: A, now: 1, env: envOf(A) }).state, { type: 'reply', key: A, kind: 'listing', now: 2, env: envOf(A, { rank: 'completion' }) });
+  ok('① RED CONTROL: L6 read at the commit — the owed press COMMITS the completion the line never showed', !!c0 && c0.effects.some((e) => e.do === 'commit' && e.as === 'ok'), c0 && c0.effects);
+  // (the fresh read's N1) an owed press ended by a FAILED stat says the machine ANSWERED, with its error (L5) — never «did not answer».
+  // CONTROL: the plain end (the «did not answer» words)
+  const failedEnd = (M2) => M2.step(M2.step(M2.init(A), { type: 'commit', door: 1, how: 'enter', cur: A, now: 1, env: envOf(A) }).state, { type: 'reply', key: A, kind: 'failed', err: 'ELOOP: too many symbolic links', now: 2, env: envOf(A), verdict: { kind: 'failed', err: 'ELOOP: too many symbolic links' } }).state.err;
+  let G1 = null; try { G1 = load(anchored(SRC, " if (ev.verdict && ev.verdict.kind === 'failed') s.err = { kind: 'failed', err: String(ev.verdict.err || '') };", '', 'the failed end said as unanswered')); } catch (e) { G1 = null; }
+  const fe = failedEnd(P), feC = G1 && failedEnd(G1);
+  ok('① an owed press ended by a FAILED stat: the error is the machine\'s ANSWER (kind failed, its words) — CONTROL the plain end: «did not answer»', !!fe && fe.kind === 'failed' && /ELOOP/.test(fe.err) && !!feC && feC.kind === 'unanswered', { real: fe, control: feC });
+  // (the read of the fourth shape, should 4 — M1's law BY BEHAVIOUR) an owed press (a pick) whose env was built BEFORE the reply (no verdict
+  // then in hand: «missing») is judged on the verdict the reply carries — EXISTS ⇒ committed. CONTROL: the model reading the env alone
+  const staleEnv = { cur: A, rank: { empty: false, resolved: false, missing: { path: P.textOf(A) }, pathLike: true }, homeKnown: true, unreachable: false, tick: false, createMode: 'ask', folder: true };
+  const pickOn = (M2) => M2.step(M2.step(M2.init(A), { type: 'commit', door: 1, how: 'pick', cur: A, now: 1, env: staleEnv }).state, { type: 'reply', key: A, kind: 'listing', now: 2, env: staleEnv, verdict: { kind: 'exists', path: P.textOf(A), literal: true } }).effects;
+  let G2 = null; try { G2 = load(anchored(SRC, "        const env2 = ev.verdict ? { ...(ev.env || {}), rank: rankAt(ev.env, ev.verdict) } : (ev.env || {});", '        const env2 = ev.env || {};', 'the env alone at a reply')); } catch (e) { G2 = null; }
+  const pk = pickOn(P), pkC = G2 && pickOn(G2);
+  ok('① an owed PICK whose env predates the reply: the reply\'s EXISTS verdict commits it (the one resolver in the model) — CONTROL the env alone: refused, nothing committed', pk.some((e) => e.do === 'commit' && e.as === 'ok' && (e.doors || []).includes(1)) && !!pkC && !pkC.some((e) => e.do === 'commit' && e.as === 'ok'), { real: pk, control: pkC });
+  // (the box pre-runs r140/r142, the coordinator's r146) A BASES-ONLY MOVE IS A NEW QUESTION — ASKED at once, an owed press CARRIED (still
+  // served only by a literal resolution), and BOUNDED: it joins the run's count, then ends by name
+  const KB0 = P.keyOf('~/x', null, '["/h/g","~"]'), KB1 = P.keyOf('~/x', null, '["~/g","~"]');
+  const envB = (k, rank = { empty: false, resolved: false, missing: { path: '~/x' }, pathLike: true }) => ({ cur: k, rank, homeKnown: true, unreachable: false, tick: false, createMode: 'ask', folder: true });
+  const owedOn = (M2) => M2.step(M2.init(KB0), { type: 'commit', door: 1, how: 'pick', cur: KB0, now: 1, env: envB(KB0) }).state;
+  const moved = (M2, v2 = { kind: 'exists', path: '~/x', literal: true }) => { const a = M2.step(owedOn(M2), { type: 'reply', key: KB0, kind: 'listing', now: 2, cur: KB1, env: envB(KB1), verdict: v2 }); const b = M2.step(a.state, { type: 'reply', key: KB1, kind: 'listing', now: 3, cur: KB1, env: envB(KB1), verdict: v2 }); return { asks: a.effects.filter((e) => e.do === 'ask'), dropped: a.effects.some((e) => e.do === 'settle' && e.result === 'moved'), committed: b.effects.some((e) => e.do === 'commit' && e.as === 'ok' && (e.doors || []).includes(1)), refused: b.effects.some((e) => e.do === 'settle' && e.result === 'refused'), why: b.state.err && b.state.err.why }; };
+  let G3 = null; try { G3 = load(anchored(SRC, '    if (sameAsk(s.key, was)) {', '    if (false) {', 'the old drop on a bases-only move')); } catch (e) { G3 = null; }
+  const m1 = moved(P), m1c = G3 && moved(G3);
+  ok('① a bases-only move (the reply landed under the OLD spelling): ONE ask at once for the new spelling, the owed press CARRIED with it (press), committed by that ask\'s reply — CONTROL the old drop: the press dropped «moved», nothing committed, no ask', m1.asks.length === 1 && m1.asks[0].key === KB1 && m1.asks[0].press === true && !m1.dropped && m1.committed && !!m1c && m1c.dropped && !m1c.committed && m1c.asks.length === 0, { real: m1, control: m1c });
+  const l6 = moved(P, { kind: 'exists', path: '~/xy', completed: true, literal: false });
+  ok('① …a CARRIED press is still served only by a LITERAL resolution (L6): the moved question answered by a completion ⇒ refused (why literal), nothing committed', l6.refused && !l6.committed && l6.why === 'literal', l6);
+  const every = (M2, n = 12) => { const Kn = (i) => P.keyOf('~/x', null, `["b${i}"]`); let st = M2.step(M2.init(Kn(0)), { type: 'commit', door: 1, how: 'pick', cur: Kn(0), now: 1, env: envB(Kn(0)) }).state, asks = 1; for (let i = 1; i <= n; i++) { const r = M2.step(st, { type: 'reply', key: Kn(i - 1), kind: 'listing', now: 1 + i, cur: Kn(i), env: envB(Kn(i)), verdict: { kind: 'exists', path: '~/x', literal: true } }); st = r.state; const a = r.effects.filter((e) => e.do === 'ask').length; asks += a; if (!a) break; } return { asks, end: st.answer && st.answer.err, owed: !!st.owed, words: st.err && st.err.err, view: M2.view(st, envB(Kn(n))).status }; };
+  let G4 = null; try { G4 = load(anchored(SRC, '    if (s.run.n < PARTIAL_REPLIES) ask(', '    if (true) ask(', 'no bound on a rebase')); } catch (e) { G4 = null; }
+  const ev1 = every(P), ev1c = G4 && every(G4);
+  ok(`① EVERY reply moving the bases (the mutant world) ENDS by name inside the bound: ${ev1.asks} asks (PARTIAL_REPLIES ${P.PARTIAL_REPLIES}), the run «${ev1.end}», the press dropped with those words — CONTROL no bound: ${ev1c && ev1c.asks} asks in 12 replies, never ending`, ev1.asks === P.PARTIAL_REPLIES && ev1.end === P.UNSETTLED && !ev1.owed && ev1.words === P.UNSETTLED && !!ev1c && ev1c.asks > P.PARTIAL_REPLIES + 3, { ev1, ev1c });
+  const fix = (() => { let st = owedOn(P); let r = P.step(st, { type: 'reply', key: KB0, kind: 'listing', now: 2, cur: KB1, env: envB(KB1), verdict: { kind: 'exists', path: '~/x', literal: true } }); const a1 = r.effects.filter((e) => e.do === 'ask').length; r = P.step(r.state, { type: 'reply', key: KB1, kind: 'listing', now: 3, cur: KB1, env: envB(KB1), verdict: { kind: 'exists', path: '~/x', literal: true } }); return { a1, a2: r.effects.filter((e) => e.do === 'ask').length, committed: r.effects.some((e) => e.do === 'commit') }; })();
+  ok('① THE FIXPOINT: once the spelling is known, a reply no longer moves the key — one rebase ask, then the reply under the same spelling is JUDGED (no further ask)', fix.a1 === 1 && fix.a2 === 0 && fix.committed, fix);
+  // (the lane's heavy run at aa84c835c, ⑩: my-mac's reply TAKEN, its home in the world, the open list never redrawn) a key that moves
+  // on an EMPTY text (the list open on a paired machine, nothing to judge — no rebase, sameAsk is false there) is REDRAWN — painted,
+  // nothing asked. CONTROL: the paint only with the rebase's ask (the shape before): nothing painted, the rows keep the old spelling
+  const KE0 = P.keyOf('', 'h-mac', '["/Users/u/g","~"]'), KE1 = P.keyOf('', 'h-mac', '["~/g","~"]');
+  const emptyMove = (M2) => { const r = M2.step(M2.init(KE0), { type: 'reply', key: KE0, kind: 'listing', now: 2, cur: KE1, env: envB(KE1, { empty: true, resolved: false, missing: null, pathLike: false }) }); return { paint: r.effects.some((e) => e.do === 'paint'), asks: r.effects.filter((e) => e.do === 'ask').length, key: r.state.key === KE1 }; };
+  let G5 = null; try { G5 = load(anchored(SRC, "  if (moved && !s.destroyed) fx.push({ do: 'paint' });\n", '', 'the paint only with the rebase ask')); } catch (e) { G5 = null; }
+  const em = emptyMove(P), emc = G5 && emptyMove(G5);
+  ok('① a bases-only move on an EMPTY text (the list open on a paired machine, its home just landed) is REDRAWN — painted, nothing asked — CONTROL the paint only with the rebase ask: nothing painted', P.textOf(KE1) === '' && !P.sameAsk(KE0, KE1) && em.paint && em.asks === 0 && em.key && !!emc && !emc.paint, { real: em, control: emc });
+}
+
 /* ═══ ② THE LAW, SEEDED ═══ */
 const rng = (seed) => () => { seed |= 0; seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 const TEXTS = ['~/a', '~/b', '~/new', 'x', ''];
@@ -111,13 +175,14 @@ const EMITTED = new Set();   // every event type the seeded driver sent (the cen
 function lawRun(G, seed, steps = 60) {
   const R = rng(seed), pick = (a) => a[Math.floor(R() * a.length)];
   const listed = new Set(), homeKnown = { null: R() < 0.7, 'h-mac': R() < 0.7 }, unreachable = { null: false, 'h-mac': R() < 0.1 }, isFile = R() < 0.3;   // the alphabet: an unreachable machine, a file where a folder is asked
-  const d = { text: pick(TEXTS), h: null, open: false, tick: false, createMode: R() < 0.2 ? 'never' : 'ask', destroyed: false, touched: false, now: 0 };
-  let s = G.init(K(d.text, d.h));
+  const d = { text: pick(TEXTS), h: null, b: '', open: false, tick: false, createMode: R() < 0.2 ? 'never' : 'ask', destroyed: false, touched: false, now: 0 };
+  const KB = (t, h, b) => G.keyOf(t, h, b);   // the key with its BASES (B-d833: their spelling can move under the same text)
+  let s = G.init(KB(d.text, d.h, d.b));
   let net = null, owedRec = null, runReasks = 0, doorSeq = 0;
   const pending = new Map();   // door → the key its press was for (the page's waiting presses)
   const seq = [], why = [];
   const env = () => {
-    const cur = K(d.text, d.h);
+    const cur = KB(d.text, d.h, d.b);
     const rank = !d.text ? 'empty' : !/^[~/.]/.test(d.text) && !d.text.includes('/') ? 'search' : EXISTS[d.text] && listed.has(cur) ? 'resolved' : 'missing';
     return envOf(cur, { rank, homeKnown: homeKnown[d.h], tick: d.tick, createMode: d.createMode, file: isFile && d.text === '~/new', unreachable: unreachable[d.h] });
   };
@@ -125,16 +190,17 @@ function lawRun(G, seed, steps = 60) {
     d.now += Math.floor(R() * 4000);
     const roll = R();
     let ev = null;
-    if (d.destroyed && R() < 0.5) ev = { type: pick(['typed', 'set', 'commit', 'refresh', 'opened', 'fired', 'reply']), which: 'soon', key: K(d.text, d.h), kind: 'listing' };
+    if (d.destroyed && R() < 0.5) ev = { type: pick(['typed', 'set', 'commit', 'refresh', 'opened', 'fired', 'reply']), which: 'soon', key: KB(d.text, d.h, d.b), kind: 'listing' };
     else if (roll < 0.14) { d.text = pick(TEXTS); d.touched = true; ev = { type: 'typed', soon: R() < 0.8 }; }
     else if (roll < 0.22) { d.text = pick(TEXTS); d.touched = true; ev = { type: 'set', commit: R() < 0.4, how: 'set' }; if (ev.commit && !d.destroyed) ev.door = ++doorSeq; }
     else if (roll < 0.32) { d.touched = true; ev = { type: 'commit', how: pick(['blur', 'enter', 'api']) }; if (!d.destroyed) ev.door = ++doorSeq; }
-    else if (roll < 0.52 && net) { const k = pick(['listing', 'partial', 'partial', 'failed']); if (k === 'listing') { listed.add(net.key); homeKnown[net.key.slice(net.key.lastIndexOf('\n') + 1) || null] = true; } ev = { type: 'reply', key: net.key, kind: k, err: k === 'failed' ? 'boom' : '' }; net = null; }
+    else if (roll < 0.52 && net) { const k = pick(['listing', 'partial', 'partial', 'failed']); if (k === 'listing') { listed.add(net.key); homeKnown[net.key.split('\n')[1] || null] = true;   /* (the machine is the key's SECOND part — the bases may follow it) */ } ev = { type: 'reply', key: net.key, kind: k, err: k === 'failed' ? 'boom' : '' }; net = null; }
     else if (roll < 0.62 && (s.soon || s.reask)) ev = { type: 'fired', which: s.reask && (!s.soon || R() < 0.5) ? 'reask' : 'soon', connected: R() < 0.9 };
     else if (roll < 0.70) ev = { type: 'refresh' };
     else if (roll < 0.75) { d.open = R() < 0.5; if (d.open) d.touched = true; ev = { type: d.open ? 'opened' : 'closed' }; }
     else if (roll < 0.80) { d.h = d.h ? null : 'h-mac'; if (R() < 0.5) ev = { type: 'refresh' }; }   // the machine changed (with or without the door's refresh)
-    else if (roll < 0.85) { d.text = pick(TEXTS); }   // a door rewrote the box: no event
+    else if (roll < 0.83) { d.text = pick(TEXTS); }   // a door rewrote the box: no event
+    else if (roll < 0.85) { d.b = d.b ? '' : '["~/g"]'; if (R() < 0.6) ev = { type: 'rekey' }; }   // B-d833: only the BASES moved (a reply re-spelled them) — said by the page's «rekey», or by the next event
     else if (roll < 0.89) { const picked = R() < 0.5; if (!picked) d.touched = true; ev = { type: 'pickerClosed', picked }; }
     else if (roll < 0.94) d.tick = !d.tick;
     else if (roll < 0.96) ev = { type: 'ensureFailed', words: 'EACCES' };
@@ -154,6 +220,9 @@ function lawRun(G, seed, steps = 60) {
     if ((v.kind === 'missing' || v.tick) && !(s.answer && s.answer.key === e1.cur && s.answer.kind === 'complete' && e1.homeKnown)) fail('I1 «missing» / a create tick before a complete answer for the text');
     // I2 — the pending words true
     if (v.kind === 'pending' && !(s.out === e1.cur || s.soon === e1.cur || s.reask === e1.cur)) fail('I2 the pending words with no ask out or due');
+    // I2b (the coordinator's r146, law 3) — NO «ASKING» WITHOUT AN ASK OUT: an owed press's «Asking the machine…» words (shown while the
+    // field has not moved) stand only while an ask for that key is out or armed
+    if (v.status === 'unresolved' && v.err && v.err.kind === 'pending' && e1.cur === s.key && !(s.out === s.key || s.soon === s.key || s.reask === s.key || s.retry === s.key)) fail('I2b the owed press\'s asking words with no ask out or due');
     if (v.err && v.err.kind === 'pending' && !(s.owed && s.owed.key === e1.cur)) fail('I2 «未生效：正在问这台机器…» with no commit owed');
     // I3 / I4 — commits
     for (const c of r.effects.filter((x) => x.do === 'commit')) {
@@ -170,7 +239,7 @@ function lawRun(G, seed, steps = 60) {
     if (ev.type === 'reply' && s.answer && s.answer.key === ev.key && (s.answer.kind === 'failed' || s.answer.kind === 'gaveUp') && s.owed && s.owed.key === ev.key) fail('I4 an owed commit alive after its run ended (a failure or the stop)');
     // I5 — the bound; no ask without a starting event
     for (const a of r.effects.filter((x) => x.do === 'ask')) {
-      if (!STARTERS.has(ev.type)) fail(`I5 an ask on «${ev.type}», an event that starts none`);
+      if (!STARTERS.has(ev.type) && !(G.sameAsk && G.sameAsk(e0.cur, before.key) && e0.cur !== before.key)) fail(`I5 an ask on «${ev.type}», an event that starts none (and no rebase)`);
       if (a.reask) { if (++runReasks > P.PARTIAL_REPLIES - 1) fail('I5 more partial replies than PARTIAL_REPLIES in one run'); } else runReasks = 0;
       net = { key: a.key };
       // I7 — A1
@@ -181,8 +250,8 @@ function lawRun(G, seed, steps = 60) {
       for (const dd of x.doors || []) {
         if (!pending.has(dd)) { fail('I9 a press answered twice (or a door nobody pressed)'); continue; }
         const k = pending.get(dd);
-        if (x.do === 'commit' && x.key !== k) fail('I9 a press answered by a commit for another text or machine');
-        if (x.do === 'settle' && x.result === 'moved' && ev.type !== 'destroyed' && !(ev.type === 'fired' && ev.connected === false) && k === e0.cur) fail('I9 a press on the CURRENT text and machine dropped (it should have joined the owed commit)');
+        if (x.do === 'commit' && x.key !== k && !(G.sameAsk && G.sameAsk(x.key, k))) fail('I9 a press answered by a commit for another text or machine');   // (the same text and machine under re-spelled bases is the SAME question carried — r146 law 1)
+        if (x.do === 'settle' && x.result === 'moved' && ev.type !== 'destroyed' && !(ev.type === 'fired' && ev.connected === false) && (k === e0.cur || (G.sameAsk && G.sameAsk(k, e0.cur)))) fail('I9 a press on the CURRENT text and machine dropped (it should have joined the owed commit)');
         pending.delete(dd);
       }
     }
@@ -214,13 +283,14 @@ const CONTROLS = [
   ['I2', 'the pending words with nothing asked (the third commit\'s gate)', [["return sought ? 'pending' : 'quiet';", "return 'pending';"]]],
   ['I2', '«未生效：正在问…» left standing when the run moves on', [["  else if (s.err && s.err.kind === 'pending') s.err = null;\n", '']]],
   ['I3', 'a create committed on a partial reply', [["else if (run === 'reask') { if (s.owed.doors.length) { fx.push({ do: 'settle', result: 'owed', doors: s.owed.doors }); s.owed = { ...s.owed, doors: [] }; } s.err = { kind: 'pending' }; }", "else if (run === 'reask') { s.owed = null; fx.push({ do: 'commit', how: 'x', as: 'create' }); }"]]],
-  ['I4', 'an owed commit served on whatever text or machine answers (the fourth commit\'s)', [[/    if \(s\.owed && s\.owed\.key !== s\.key\) drop\(s, fx, false\);[^\n]*\n    if \(s\.errRun/, '    if (s.errRun'], ["    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);\n  }\n  disarm(s, fx, 'soon');", "  }\n  disarm(s, fx, 'soon');"], ['      if (s.owed && s.owed.key === s.key) {\n        const g', '      if (s.owed) {\n        const g']]],
-  ['I4', 'an owed commit kept past a run that ended unanswered (the ruling\'s drop removed)', [['        else { drop(s, fx, true, s.answer.err); s.errRun = s.key; }', '        else { s.errRun = s.key; }']]],
+  ['I4', 'an owed commit served on whatever text or machine answers (the fourth commit\'s)', [[/      if \(s\.owed && s\.owed\.key !== s\.key\) drop\(s, fx, false\);[^\n]*\n      if \(s\.errRun/, '      if (s.errRun'], ["    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);\n  }\n  disarm(s, fx, 'soon');", "  }\n  disarm(s, fx, 'soon');"], ['      if (s.owed && s.owed.key === s.key) {\n        const env2', '      if (s.owed) {\n        const env2']]],
+  ['I4', 'an owed commit kept past a run that ended unanswered (the ruling\'s drop removed)', [["        else { drop(s, fx, true, s.answer.err); if (ev.verdict && ev.verdict.kind === 'failed')", "        else { if (false && ev.verdict && ev.verdict.kind === 'failed')"]]],
   ['I5', 'the partial reply asked again for ever (the old loop)', [["run = s.run.n < PARTIAL_REPLIES ? 'reask' : 'stop';", "run = 'reask';"]]],
   ['I6', 'effects after «destroyed»', [['if (!s0 || s0.destroyed) return { state: s0, effects: [] };', 'if (!s0) return { state: s0, effects: [] };']]],
   ['I7', 'a closed refresh asks a field never asked (A1 broken)', [['if (!outOrDue && text && s.everAsked && (', 'if (!outOrDue && text && (']]],
   ['I9', 'a set that drops an owed commit silently (B-225c\'s first cure: its presses left hanging)', [["    case 'set':\n", "    case 'set':\n      if (s.owed) { s.owed = null; }\n"]]],
   ['I9', 'a press on the same text that does not JOIN the owed commit (the older press dropped)', [['  const doors = [...((s.owed && s.owed.key === s.key && s.owed.doors) || []), ...(ev.door != null ? [ev.door] : [])];\n  s.owed = null;\n', '  if (s.owed) drop(s, fx, false);\n  const doors = [...(ev.door != null ? [ev.door] : [])];\n']]],
+  ['I2b', 'a rebase that asks nothing (an owed press keeps «Asking the machine…» with no ask out — the box pre-runs\' fault)', [['    if (s.run.n < PARTIAL_REPLIES) ask(s, fx, now, { force: true, reask: true, press: !!s.owed });', '    if (false) ask(s, fx, now);'], ['    else { s.answer = { key: s.key, at: now, kind: \'gaveUp\', err: UNSETTLED', '    if (false) { s.answer = { key: s.key, at: now, kind: \'gaveUp\', err: UNSETTLED']]],
   ['I8', 'the view reads something besides the state', [["return { ...base, status: g === 'quiet' ? 'pending' : g };", "return { ...base, status: g === 'quiet' ? 'pending' : g, seen: Math.random() };"]]],
 ];
 for (const [inv, what, edits] of CONTROLS) {

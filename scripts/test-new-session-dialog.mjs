@@ -102,6 +102,8 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 try { execSync('command -v dtach', { stdio: 'ignore', shell: '/bin/bash' }); } catch { console.log('SKIP: dtach is not installed — a chat session cannot be created here'); process.exit(0); }
 const { claudeAllowRules } = require(path.join(repo, 'src/agent-tool-rules.js'));
+// the hub's listing reuse window (src/server/dir-slice.js — the design; A3's premise names it), read from the module's own line
+const LIST_FRESH_MS = Number((fs.readFileSync(path.join(repo, 'src/server/dir-slice.js'), 'utf8').match(/^const LIST_FRESH_MS = (\d+);/m) || [])[1]);
 
 const [PORT, CDP_PORT] = await freePorts(2);
 const root = mintRoot('new-session-dialog-wt'), wt = path.join(root, 't');
@@ -118,6 +120,11 @@ const sshLines = () => { try { return fs.readFileSync(SSH_CALLS, 'utf8').split('
 const sshCalls = () => sshLines().length; // each line = the remote command's first word (`true` = the reachability probe)
 const CWD = path.join(fakeHome, 'proj');
 fs.mkdirSync(CWD, { recursive: true });
+// A3's two folders, PLANTED BEFORE ANY DIALOG LISTS THEIR PARENT (主开发 r207 — the hosted K46 red, 44744546209): the hub reuses a
+// listing for LIST_FRESH_MS (src/server/dir-slice.js, the design: a folder made inside that window after a listing is not in the rows
+// until it passes — test-dir-complete states it by name); a plant made after a dialog listed ~/proj was hidden from A3's rows
+fs.mkdirSync(path.join(CWD, 'alpha'), { recursive: true });
+fs.mkdirSync(path.join(CWD, 'alps'), { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : ''}`); } return !!c; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -298,6 +305,18 @@ try {
     check('… after the name\u2019s own chip (the name typed above: ~/S12 first (example.com))', !!chips && chips[0].kind === 'name' && chips[0].path === path.join(fakeHome, 'S12 first (example.com)') && chips.filter((c) => c.kind === 'name').length === 1, chips && chips.slice(0, 2));
     await evalJs(`document.querySelector('#cwd-recent .cwd-recent-chip[data-path=' + JSON.stringify(${JSON.stringify(path.join(fakeHome, 'work'))}) + ']').click(); true`);
     check('a chip fills the field', (await evalJs(`document.getElementById('input-cwd').value`)) === path.join(fakeHome, 'work'));
+    // (B-d833, 主开发 r174: the one consumer that could lean on a blur commit) a REAL press on a chip after another folder was typed and judged:
+    // the dialog's folder is the CHIP's — the field's own chips row is not leaving it, so the old text is never committed first
+    await evalJs(`(() => { const i = document.getElementById('input-cwd'); i.focus(); i.value = ${JSON.stringify(path.join(fakeHome, 'proj'))}; i.dispatchEvent(new Event('input')); return true; })()`);
+    await waitFor(`/= ~\\/proj/.test((document.querySelector('#dialog-new-session .pf-under') || {}).innerText || '')`, 5000);
+    // typing opened the suggestion list, which floats over the chips row: a person closes it first (Escape — A3: it hides only the list,
+    // the field keeps its focus and text), then presses the chip; what lies under the press point is printed and must be that chip
+    await escape(); await waitFor(`(() => { const l = document.getElementById(document.getElementById('input-cwd').getAttribute('aria-controls')); return !l || l.hidden; })()`, 3000);
+    const chipSel = '#cwd-recent .cwd-recent-chip[data-path=' + JSON.stringify(path.join(fakeHome, 'work')) + ']';
+    console.log(`  · A1b the ~/work chip at the press: ${JSON.stringify(await evalJs(`(() => { const e = document.querySelector(${JSON.stringify(chipSel)}); if (!e) return null; const r = e.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y); return { x: Math.round(x), y: Math.round(y), under: hit && (hit.id || String(hit.className)), same: !!hit && (hit === e || e.contains(hit)), active: document.activeElement && (document.activeElement.id || String(document.activeElement.className)) }; })()`))}`);
+    await realClick(chipSel);
+    const afterChip = await waitFor(`document.getElementById('input-cwd').value === ${JSON.stringify(path.join(fakeHome, 'work'))} && /= ~\\/work/.test((document.querySelector('#dialog-new-session .pf-under') || {}).innerText || '')`, 5000);
+    check('a REAL press on a chip after another folder was typed: the dialog\'s folder is the chip\'s (the chips row is the field\'s own — no blur commit of the old folder first)', !!afterChip, { value: await evalJs(`document.getElementById('input-cwd').value`), line: await evalJs(`(document.querySelector('#dialog-new-session .pf-under') || {}).innerText || ''`) });
     await evalJs(`document.getElementById('input-cwd').value = ''; true`);
   }
 
@@ -337,8 +356,7 @@ try {
 
   console.log('A3 Escape with the cwd suggestions open hides the suggestions only');
   {
-    fs.mkdirSync(path.join(fakeHome, 'proj', 'alpha'), { recursive: true });
-    fs.mkdirSync(path.join(fakeHome, 'proj', 'alps'), { recursive: true });
+    // (its two folders are planted at the start, before any dialog listed ~/proj — see CWD above; the red's words say that premise)
     await evalJs(`app.showNewSessionDialog(); true`);
     await waitFor(dialogVisible, 5000);
     // THE LEG'S PREMISE (the coordinator, 2026-11-20 04:44Z — hosted run 44671418588 red then green): it proves typing opens the list on
@@ -355,7 +373,7 @@ try {
     const seen = shown ? null : await evalJs(`(() => { const rs = (window.__dcTap || []).filter((x) => x.path === ${JSON.stringify(TYPED)}); const w = document.getElementById('input-cwd').closest('.path-field'); const u = (w && w.querySelector('.pf-under')) || document.querySelector('.pf-under'); return { replies: rs.length, partial: rs.filter((x) => x.partial).length, whole: rs.filter((x) => !x.partial).length, last: rs.length ? rs[rs.length - 1] : null, line: u ? u.innerText.slice(0, 200) : '', pending: !!(w && w.dataset.pending) }; })()`);
     check('typing a path opens the suggestion list', shown, seen && (seen.whole === 0
       ? `PREMISE NOT MET — the machine did not answer in its budget: ${seen.partial} partial replies of ${seen.replies}, no whole reply (the field's bounded ask-again ended); the field's line: «${seen.line}»${seen.pending ? ' (pending)' : ''}; the last reply: ${JSON.stringify(seen.last)}`
-      : `a WHOLE reply came (${seen.whole} of ${seen.replies}) and the list did not open — the product's fault; the field's line: «${seen.line}»; the last reply: ${JSON.stringify(seen.last)}`));
+      : `a WHOLE reply came (${seen.whole} of ${seen.replies}) and the list did not open — the product's fault (its premise: ~/proj/alpha and ~/proj/alps were planted at the suite's start, before any dialog listed ~/proj, so no listing reused inside the hub's ${LIST_FRESH_MS} ms window predates them); the field's line: «${seen.line}»; the last reply: ${JSON.stringify(seen.last)}`));
     await escape();
     await sleep(250);
     check('THE FINDING: Escape hides the list …', await evalJs(`(() => { const l = ${LIST}; return !l || l.hidden; })()`));
@@ -762,7 +780,11 @@ try {
     await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);   // a folder: the footer shows the run's chips, not the refusal
     await realClick('#ns-kind-seg [data-kind="terminal"]');
     const k1 = await kind();
-    check('H2 one real click on Terminal ⇒ a login shell (v3: Terminal = no harness — the backing select holds the shell), mode terminal, the footer says «Terminal · login shell»', k1.mode === 'terminal' && k1.on.join() === 'terminal' && k1.backend === 'shell' && /Terminal · login shell/.test(await evalJs(`document.querySelector('#ns-foot-info [data-chip="backend"]')?.textContent || ''`)), k1);
+    // (B-d833's fourth shape: the footer shows the run's chips only once the machine's verdict for the typed folder has landed — waited for
+    // with its own bound, its words printed, never read in the input's own tick)
+    const h2t0 = Date.now(), h2foot = () => evalJs(`document.querySelector('#ns-foot-info [data-chip="backend"]')?.textContent || ''`);
+    const h2ok = await waitFor(`/Terminal · login shell/.test(document.querySelector('#ns-foot-info [data-chip="backend"]')?.textContent || '')`, 5000), h2ms = Date.now() - h2t0;
+    check('H2 one real click on Terminal ⇒ a login shell (v3: Terminal = no harness — the backing select holds the shell), mode terminal, the footer says «Terminal · login shell»', k1.mode === 'terminal' && k1.on.join() === 'terminal' && k1.backend === 'shell' && !!h2ok, { ...k1, footer: await h2foot(), footInfo: await evalJs(`document.getElementById('ns-foot-info').innerText`), msToFooter: h2ms });
     await realClick('#ns-kind-seg [data-kind="chat"]');
     check('H2 …and Agent brings the harness back (Claude)', (await kind()).backend === 'claude', await kind());
     // H3 the 可用工具 row per backend
@@ -842,7 +864,27 @@ try {
     await realClick('#dialog-new-session .btn-create'); await sleep(900);
     check('H8 an empty folder: the footer says «Cannot create yet: Choose a folder first», and Create sends nothing', /Cannot create yet: Choose a folder first/.test(refuse) && await evalJs('window.__nsCreated.length') === n1 && await evalJs(dialogVisible), refuse);
     await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);
-    check('H8 a folder typed ⇒ the refusal gives way to the run\'s chips', !/Cannot create yet/.test(await evalJs(`document.getElementById('ns-foot-info').innerText`)));
+    // (B-d833's fourth shape, the coordinator's r146: the footer refuses until the machine's verdict for the typed folder lands — what a person
+    // sees in that window is printed, with the time from the input to the verdict, and the wait has its own bound)
+    const h8t0 = Date.now(), h8during = await evalJs(`document.getElementById('ns-foot-info').innerText`);
+    const h8gave = await waitFor(`!/Cannot create yet/.test(document.getElementById('ns-foot-info').innerText)`, 5000), h8ms = Date.now() - h8t0;
+    const h8after = await evalJs(`document.getElementById('ns-foot-info').innerText`), h8line = await evalJs(`(document.querySelector('#dialog-new-session .pf-under') || {}).innerText || ''`);
+    console.log(`  · H8 the typed folder's verdict landed in ${h8ms} ms; the footer meanwhile «${String(h8during).slice(0, 120)}», the field's line «${String(h8line).slice(0, 80)}»`);
+    check('H8 a folder typed ⇒ the refusal gives way to the run\'s chips', !!h8gave, { during: h8during, after: h8after, line: h8line, msToVerdict: h8ms });
+    // H8b a Create pressed INSIDE that window (the folder typed, its verdict not yet landed) is OWED and SERVED — never lost
+    await escape(); await sleep(200); if (await evalJs(dialogVisible)) await escape();
+    await openNs(); await sleep(300);
+    const n8 = await evalJs('window.__nsCreated.length');
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);
+    const h8bDuring = await evalJs(`document.getElementById('ns-foot-info').innerText`);
+    await realClick('#dialog-new-session .btn-create');
+    const h8bServed = await waitFor(`window.__nsCreated.length > ${n8}`, 8000);
+    const h8bMade = await evalJs(`window.__nsCreated.slice(${n8}).map((o) => o.cwd || o.path || null)`);
+    check('H8b a Create pressed while the typed folder\'s verdict is still out is OWED and SERVED: one create, for that folder', !!h8bServed && h8bMade.length === 1 && String(h8bMade[0] || '').replace(/\/+$/, '') === String(CWD).replace(/\/+$/, ''), { footerWhenPressed: h8bDuring, made: h8bMade });
+    // (H9 goes on in the state H8 left: a fresh dialog with the folder typed — restored)
+    await openNs(); await sleep(300);
+    await evalJs(`document.getElementById('input-cwd').value = ${JSON.stringify(CWD)}; document.getElementById('input-cwd').dispatchEvent(new Event('input')); true`);
+    await waitFor(`!/Cannot create yet/.test(document.getElementById('ns-foot-info').innerText)`, 5000);
     // H9 a ticked account becomes ONE access row once the conversation's id exists (a REAL create through the stub claude)
     await evalJs('delete app.createSession; true');
     await waitFor(`!!document.querySelector('#ns-right input[data-acc="fake-poll"]')`, 8000);

@@ -11565,6 +11565,7 @@ export default {
   "home + the name": "主目录 + 名字",
   "A folder of that name already exists": "同名文件夹（已有）",
   "Not on {host} · create?": "在 {host} 上不存在 · 新建？",
+  "{host} did not answer for it": "{host} 没有回答这个文件夹",   // B-d833 (lane bl-tests-a)
   "Task Group name «{alias}»": "任务组名「{alias}」",
   "Alias «{alias}» · the system’s display name": "别名「{alias}」 · 系统显示名",
   "Alias «{alias}» · link {link}": "别名「{alias}」 · 链接 {link}",
@@ -11583,6 +11584,14 @@ export default {
   "the machine did not answer": "这台机器没有回答",
   "Not applied:": "未生效：",
   "Asking the machine…": "正在问这台机器…",
+  "{base} did not answer.": "{base} 没有回答。",   // B-d833 (lane bl-tests-a)
+  "The machine did not answer; asked again in {n} s": "这台机器没有回答；{n} 秒后再问",   // B-d833 (lane bl-tests-a)
+  "The machine answered with an error: {err}": "这台机器回答了一个错误：{err}",   // B-d833 (lane bl-tests-a)
+  "{path}: use it": "{path}：用它",   // B-d833 (lane bl-tests-a)
+  "{text} is not a folder. = {path} — press Enter again to use it": "{text} 不是一个文件夹。= {path} —— 再按一次回车使用它",   // B-d833 (lane bl-tests-a)
+  "Still looking — this machine has not finished": "还在找——这台机器还没找完",   // B-d833 (lane bl-tests-a)
+  "Some folders here could not be read — the machine did not answer for them": "这里有些文件夹读不出来——这台机器没有为它们回答",   // B-d833 (lane bl-tests-a)
+  "The machine's answer kept changing — type again, or press to ask once more": "这台机器的答复一直在变——再输入一下，或按一下再问一次",   // B-d833 (lane bl-tests-a)
   "{path} does not exist — create it?": "{path} 不存在 —— 创建？",
   "{path} does not exist, nor the folder above ({parent})": "{path} 不存在，上一级 {parent} 也不存在",
   "«{text}» is not a path yet — pick a folder from the list": "「{text}」还不是一个路径 —— 在候选里挑一个文件夹",

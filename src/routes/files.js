@@ -258,8 +258,9 @@ function dirSliceOf(req) {
     let mc = { at: 0, rows: [] };
     L._dirSlice = require('../server/dir-slice.js').create({
       call: (op, payload) => sfs(req).call(op, payload),
+      // (B-d833: a BLOCKED mount is no row, but the walk skips it: every mounted row is handed, `blocked` said)
       mounts: () => {
-        if (Date.now() - mc.at > 5000) { let rows = []; try { rows = (L.mounts?.list?.() || []).filter((m) => m && m.mounted && m.path && !L.mounts?.pathBlocked?.(m.path)); } catch { rows = []; } mc = { at: Date.now(), rows }; }
+        if (Date.now() - mc.at > 5000) { let rows = []; try { rows = (L.mounts?.list?.() || []).filter((m) => m && m.mounted && m.path).map((m) => ({ ...m, blocked: !!L.mounts?.pathBlocked?.(m.path) })); } catch { rows = []; } mc = { at: Date.now(), rows }; }
         return mc.rows;
       },
     });
@@ -290,7 +291,7 @@ router.get('/api/dir-complete', async (req, res) => {
   }
   if (!R && sliced) {
     try {
-      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), own: String(req.query.own || ''), q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450 });
+      const ans = await dirSliceOf(req).slice({ text: String(req.query.path || ''), bases: jsonList(req.query.bases), probe: jsonList(req.query.probe), press: req.query.press === '1', q: String(req.query.q || ''), kind: String(req.query.kind || 'folder'), budgetMs: 450 });
       return res.json({ suggestions: require('../path-candidates.js').legacySuggestions(ans.listing, String(req.query.path || '')), ...ans });
     } catch (e) { return res.json({ suggestions: [], error: String((e && e.message) || e).slice(0, 120) }); }
   }

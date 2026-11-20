@@ -11564,6 +11564,7 @@ export default {
   "home + the name": "ホーム + 名前",
   "A folder of that name already exists": "その名前のフォルダーはすでにあります",
   "Not on {host} · create?": "{host} にはありません · 作成しますか？",
+  "{host} did not answer for it": "{host} はこのフォルダに答えませんでした",   // B-d833 (lane bl-tests-a)
   "Task Group name «{alias}»": "タスクグループ名「{alias}」",
   "Alias «{alias}» · the system’s display name": "別名「{alias}」 · システムの表示名",
   "Alias «{alias}» · link {link}": "別名「{alias}」 · リンク {link}",
@@ -11582,6 +11583,14 @@ export default {
   "the machine did not answer": "このマシンが応答しませんでした",
   "Not applied:": "未反映：",
   "Asking the machine…": "マシンに問い合わせ中…",
+  "{base} did not answer.": "{base} が応答しませんでした。",   // B-d833 (lane bl-tests-a)
+  "The machine did not answer; asked again in {n} s": "このマシンは応答しませんでした。{n} 秒後にもう一度問い合わせます",   // B-d833 (lane bl-tests-a)
+  "The machine answered with an error: {err}": "このマシンはエラーを返しました：{err}",   // B-d833 (lane bl-tests-a)
+  "{path}: use it": "{path}：これを使う",   // B-d833 (lane bl-tests-a)
+  "{text} is not a folder. = {path} — press Enter again to use it": "{text} はフォルダではありません。= {path} —— もう一度 Enter でこれを使います",   // B-d833 (lane bl-tests-a)
+  "Still looking — this machine has not finished": "まだ探しています——このマシンはまだ終わっていません",   // B-d833 (lane bl-tests-a)
+  "Some folders here could not be read — the machine did not answer for them": "ここにある一部のフォルダーは読めませんでした——このマシンが応答しませんでした",   // B-d833 (lane bl-tests-a)
+  "The machine's answer kept changing — type again, or press to ask once more": "このマシンの答えが変わり続けました——もう一度入力するか、押してもう一度尋ねてください",   // B-d833 (lane bl-tests-a)
   "{path} does not exist — create it?": "{path} はありません —— 作成しますか？",
   "{path} does not exist, nor the folder above ({parent})": "{path} はなく、上のフォルダー（{parent}）もありません",
   "«{text}» is not a path yet — pick a folder from the list": "「{text}」はまだパスではありません —— 候補からフォルダーを選んでください",

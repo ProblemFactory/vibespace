@@ -50,7 +50,7 @@ const noWorkerRefusal = (pool = 'the file pool') => Object.assign(new Error(NO_W
 // { timeoutMs }.
 const DEFAULT_TIMEOUTS = {
   default: 15000,
-  stat: 15000, exists: 15000, access: 15000, listDir: 15000, readdirNames: 15000, fileInfo: 15000, folderCensus: 15000, dirSlice: 15000, dirIndex: 15000,
+  stat: 15000, exists: 15000, access: 15000, listDir: 15000, readdirNames: 15000, fileInfo: 15000, folderCensus: 15000, dirSlice: 15000, dirIndex: 15000, pathStat: 15000,
   readText: 20000, readChunk: 20000, csvRange: 30000,
   readFile: 30000, xlsxSheets: 60000, // lane file-preview-mount: a preview's ≤ 20 MB read; a workbook's read + parse (a deadline also ends a runaway parse)
   writeFile: 30000, mkdir: 15000, rename: 15000, remove: 20000, unlink: 20000,

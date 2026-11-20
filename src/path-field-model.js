@@ -40,6 +40,7 @@
    BOUNDED: three = the first reply and two re-asks REASK_MS apart, each reply its own budget (450 ms here, the 2.5 s guard for another
    machine): about 2.3 s here and 8.4 s for another machine before the line says so — never an ask loop on a page nobody touches */
 const PARTIAL_REPLIES = 3;
+const UNSETTLED = 'unsettled';   // the end of a run whose bases kept moving (the line says the machine's answer did not settle)
 const REASK_MS = 450;
 const DEBOUNCE_MS = 110;
 const DEDUPE_MS = 2000;   // an ask for a text with a fresh COMPLETE answer younger than this is not sent again (a failure always is)
@@ -48,8 +49,13 @@ const DEDUPE_MS = 2000;   // an ask for a text with a fresh COMPLETE answer youn
 const REFRESH_AFTER_STOP_MS = 30e3;
 const HOME_READ_FAILS = 3;
 
-const keyOf = (text, machine) => String(text == null ? '' : text) + '\n' + (machine || '');
-const textOf = (key) => { const k = String(key || '\n'); return k.slice(0, k.lastIndexOf('\n')); };
+// (B-d833, its fourth shape — R-e: the verdict in hand is for the text, the MACHINE and the BASES: a change of bases under a relative
+// text is a new key, asked like any other)
+const keyOf = (text, machine, bases = '') => String(text == null ? '' : text) + '\n' + (machine || '') + (bases ? '\n' + bases : '');
+const textOf = (key) => String(key || '').split('\n')[0];
+/* the SAME question but for its bases (B-d833, the box pre-runs r140/r142): the same text on the same machine — only the bases' spelling
+   (learned from a reply: this machine's home, a paired machine's home or listing) or their set moved */
+const sameAsk = (a, b) => { const x = String(a || '').split('\n'), y = String(b || '').split('\n'); return x[0] !== '' && x[0] === y[0] && (x[1] || '') === (y[1] || ''); };
 
 /* LAW 2 for this machine's HOME (PURE): read again after a read that failed — never a kept failure; one read in flight; bounded at
    HOME_READ_FAILS failed reads a page. → read(): a promise of the home ('' while unknown) */
@@ -75,7 +81,10 @@ function missingGate({ listed = false, homeKnown = false, asked = false, sought 
 
 /* B-0f3d: a reply names the AUXILIARY probes that ran out of the machine's budget (`probesLate`, the field's own strings; the text's own
    path is decided inside the listing's race and is never among them) */
-const lateOf = (d) => new Set(d && Array.isArray(d.probesLate) ? d.probesLate.map(String) : []);
+const lateOf = (d) => new Set([...(d && Array.isArray(d.probesLate) ? d.probesLate : []), ...(d && Array.isArray(d.probesFailed) ? d.probesFailed : [])].map(String));
+/* B-d833: the reply's kind for the model — SKIPPED (a dead entrance's mark: the time it ends rides `until`), FAILED (the machine's own
+   error about the text), a complete listing, a partial one (a source the verdict needs did not answer), or none */
+const replyKind = (d) => (d && d.verdict && d.verdict.kind === 'skipped' ? 'skipped' : d && d.verdict && d.verdict.kind === 'failed' ? 'failed' : d && d.listing && !d.partial ? 'listing' : d && d.partial ? 'partial' : 'failed');
 /* which of the probes SENT a reply may mark ASKED (the field calls an asked-and-not-a-folder path «known absent» — a 新建 chip): only on
    a complete listing, never a late one */
 function askedOf(sent, d) {
@@ -85,8 +94,13 @@ function askedOf(sent, d) {
 }
 
 function init(key = keyOf('', null)) {
-  return { key, answer: null, everAsked: false, out: null, soon: null, reask: null, run: { key: null, n: 0 }, owed: null, err: null, errRun: null, open: false, destroyed: false };
+  return { key, answer: null, everAsked: false, out: null, soon: null, reask: null, retry: null, run: { key: null, n: 0 }, owed: null, err: null, errRun: null, open: false, destroyed: false };
 }
+
+/* THE ONE RESOLVER, held by the model too (the read of the fourth shape, 2026-11-20 11:34Z, its should 4): at a reply an owed press
+   reads the text's resolution from the VERDICT THE REPLY CARRIES — an env built before it (the verdict then in hand was the older one)
+   can never refuse an existing folder */
+const rankAt = (env, v) => { const r = (env && env.rank) || {}; return v && v.kind === 'exists' ? { ...r, empty: false, resolved: true, literal: !!v.literal, path: String(v.path || r.path || ''), missing: null } : r; };
 
 const freshComplete = (s) => !!(s.answer && s.answer.key === s.key && s.answer.kind === 'complete' && !s.answer.stale);
 
@@ -97,6 +111,7 @@ function gateOf(s, env = {}) {
   if (r.resolved) return 'ok';
   if (!(r.missing && r.pathLike)) return 'searching';
   const a = s.answer, mine = !!(a && a.key === key);
+  if (mine && a.kind === 'skipped' && s.out !== key && s.soon !== key && s.reask !== key) return 'skipped';   // R-i: a dead entrance's mark, said with when it is asked again
   // SOUGHT is never stored: an ask for THIS key is out, or due by a timer — the pending words are true exactly then
   return missingGate({ listed: mine && a.kind === 'complete', homeKnown: !!env.homeKnown, asked: mine && a.kind !== 'partial', sought: s.out === key || s.soon === key || s.reask === key });
 }
@@ -104,7 +119,7 @@ function gateOf(s, env = {}) {
 /* what the line and the verdict say — a function of the state (and the ranking's verdict for the text) alone */
 function view(s, env = {}) {
   const g = gateOf(s, env);
-  const base = { kind: g, tick: g === 'missing', answerErr: g === 'unanswered' ? (s.answer && s.answer.err) || '' : '' };
+  const base = { kind: g, tick: g === 'missing', answerErr: g === 'unanswered' ? (s.answer && s.answer.err) || '' : '', ...(g === 'skipped' ? { until: s.answer.until } : {}) };
   const moved = env.cur !== undefined && env.cur !== s.key;   // the box was rewritten under the field: the old run's pending words are not its
   if (s.err && !(moved && s.err.kind === 'pending')) return { ...base, status: 'unresolved', err: s.err };   // the «not applied» words first, the text's row below them
   if (env.unreachable) return { ...base, status: 'unreachable' };
@@ -123,7 +138,7 @@ function drop(s, fx, ended, err = '') {
 }
 function disarm(s, fx, which) { if (s[which]) { s[which] = null; fx.push({ do: 'disarm', which }); } }
 function armSoon(s, fx) { s.everAsked = true; s.soon = s.key; fx.push({ do: 'arm', which: 'soon', ms: DEBOUNCE_MS }); }
-function ask(s, fx, now, { force = false, reask = false } = {}) {
+function ask(s, fx, now, { force = false, reask = false, press = false } = {}) {
   if (!force && freshComplete(s) && now - s.answer.at < DEDUPE_MS) return;
   if (!reask) {   // a new run (the bound); one for ANOTHER text or machine ends what the old run owed
     s.run = { key: s.key, n: 0 };
@@ -132,7 +147,7 @@ function ask(s, fx, now, { force = false, reask = false } = {}) {
   }
   disarm(s, fx, 'soon');   // an ask now supersedes the debounce
   s.everAsked = true; s.out = s.key;
-  fx.push({ do: 'ask', key: s.key, reask: !!reask });
+  fx.push({ do: 'ask', key: s.key, reask: !!reask, ...(press ? { press: true } : {}) });   // (B-d833 R-i: a press is attended — the machine sends a dead entrance's call once inside its window)
 }
 /* judge a commit on the answer the field holds (env = the ranking's verdict after the reply merged) */
 function judge(s, fx, how, env, doors = []) {
@@ -164,7 +179,7 @@ function commitFlow(s, fx, ev) {
   const env = ev.env || {};
   if (freshComplete(s) || (env.rank && env.rank.resolved)) { judge(s, fx, how, env, doors); return; }   // the machine's listing already shows it, or a fresh complete answer: judged now
   s.owed = { key: s.key, how, doors };
-  ask(s, fx, ev.now || 0, { force: true });
+  ask(s, fx, ev.now || 0, { force: true, press: true });
 }
 
 function step(s0, ev = {}) {
@@ -173,10 +188,22 @@ function step(s0, ev = {}) {
   const now = ev.now || 0;
   // the field's text or machine moved under the model (a door rewrote the box without set(), the machine changed with no refresh):
   // the run moves on — what the old one owed is dropped, its pending words go, its timers no longer ask
+  let rebased = false, rebasedFrom = null, moved = false;
   if (ev.cur !== undefined && ev.cur !== s.key) {
+    const was = s.key; moved = true;
     s.key = ev.cur;
-    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);   // its doors answered «moved» (B-225c: only ITS doors — a new press is not among them)
-    if (s.errRun && s.errRun !== s.key) s.errRun = null;
+    if (sameAsk(s.key, was)) {
+      // B-d833 (the box pre-runs): only the BASES moved under the same text — a NEW QUESTION, ASKED at once (below); an owed press is
+      // CARRIED to it, never dropped («asking this machine…» with no ask out was the fault: the reply for the old spelling was dropped
+      // as another text's and nothing asked again)
+      if (s.owed && s.owed.key === was) s.owed = { ...s.owed, key: s.key };
+      if (s.errRun === was) s.errRun = s.key;
+      if (s.run.key === was) s.run = { ...s.run, key: s.key };   // the run's count carried with the question (joined below)
+      rebased = true; rebasedFrom = s.key;
+    } else {
+      if (s.owed && s.owed.key !== s.key) drop(s, fx, false);   // its doors answered «moved» (B-225c: only ITS doors — a new press is not among them)
+      if (s.errRun && s.errRun !== s.key) s.errRun = null;
+    }
   }
   switch (ev.type) {
     case 'typed':
@@ -197,31 +224,41 @@ function step(s0, ev = {}) {
     case 'reply': {
       if (ev.key !== s.key) { if (s.out === ev.key) s.out = null; break; }   // an answer for another text or machine is not the field's
       s.out = null;
-      const kind = ev.kind === 'listing' ? 'listing' : ev.kind === 'partial' ? 'partial' : 'failed';
+      const kind = ev.kind === 'listing' ? 'listing' : ev.kind === 'partial' ? 'partial' : ev.kind === 'skipped' ? 'skipped' : 'failed';
       let run = 'done';
       if (kind === 'partial') { s.run = { key: s.key, n: (s.run.key === s.key ? s.run.n : 0) + 1 }; run = s.run.n < PARTIAL_REPLIES ? 'reask' : 'stop'; }
-      else s.run = { key: s.key, n: 0 };
-      s.answer = { key: s.key, at: now, kind: kind === 'listing' ? 'complete' : run === 'reask' ? 'partial' : run === 'stop' ? 'gaveUp' : 'failed', err: run === 'stop' ? '' : String(ev.err || ''), stale: false };
+      else if (kind !== 'skipped') s.run = { key: s.key, n: 0 };   // (B-d833 R-i: a SKIPPED reply is no answer — not counted, the run kept)
+      s.answer = { key: s.key, at: now, kind: kind === 'listing' ? 'complete' : kind === 'skipped' ? 'skipped' : run === 'reask' ? 'partial' : run === 'stop' ? 'gaveUp' : 'failed', err: run === 'stop' ? '' : String(ev.err || ''), stale: false , verdict: ev.verdict || null, until: Number(ev.until) || 0 };   // (B-d833 R-e: the verdict IN HAND for this key)
       if (s.owed && s.owed.key === s.key) {
-        const g = gateOf(s, ev.env || {});
-        if (g === 'ok' || g === 'missing' || g === 'empty' || g === 'searching') judge(s, fx, s.owed.how, ev.env || {}, s.owed.doors);   // the text is decided by this reply: served (or refused) once
+        const env2 = ev.verdict ? { ...(ev.env || {}), rank: rankAt(ev.env, ev.verdict) } : (ev.env || {});
+        const g = gateOf(s, env2), rk = env2.rank || {};
+        // L6 READ AT THE PRESS (the coordinator's word, 03:38Z): an OWED press was made before the line showed anything — it is served
+        // only by what the text names LITERALLY (its own first candidate, its link's target, an absolute text); a completion or a later
+        // base ends the press with true words, and a second Enter (the line now shows it) uses it
+        if (g === 'ok' && !rk.literal) { const d0 = s.owed.doors; s.owed = null; s.err = { kind: 'refused', why: 'literal', path: rk.path || '' }; fx.push({ do: 'settle', result: 'refused', doors: d0 }); }
+        else if (g === 'ok' || g === 'missing' || g === 'empty' || g === 'searching') judge(s, fx, s.owed.how, env2, s.owed.doors);
+        else if (kind === 'skipped') { drop(s, fx, true, ''); s.err = { kind: 'skipped', until: Number(ev.until) || 0 }; s.errRun = s.key; }   // a mark the press could not pass (its once is spent): said with when it is asked again   // the text is decided by this reply: served (or refused) once
         else if (run === 'reask') { if (s.owed.doors.length) { fx.push({ do: 'settle', result: 'owed', doors: s.owed.doors }); s.owed = { ...s.owed, doors: [] }; } s.err = { kind: 'pending' }; }   // still owed, inside its run (its door hears «nothing yet» once)
-        else { drop(s, fx, true, s.answer.err); s.errRun = s.key; }   // the run ended unanswered: the commit with it, the true words
+        else { drop(s, fx, true, s.answer.err); if (ev.verdict && ev.verdict.kind === 'failed') s.err = { kind: 'failed', err: String(ev.verdict.err || '') }; s.errRun = s.key; }   // the run ended unanswered (or the machine answered with an error — said so): the commit with it, the true words
       } else if (kind === 'listing' && s.errRun === s.key) { s.err = null; s.errRun = null; }   // a later complete reply repaints only
       if (run === 'reask') { s.reask = s.key; fx.push({ do: 'arm', which: 'reask', ms: REASK_MS }); }
+      if (kind === 'skipped' && ev.until) { s.retry = s.key; fx.push({ do: 'arm', which: 'retry', ms: Math.max(0, Number(ev.until) - now) }); }   // R-i: ONE ask when the mark ends (a mount that came back heals with no key)
       fx.push({ do: 'paint' });
       break;
     }
     case 'fired': {
-      const which = ev.which === 'reask' ? 'reask' : 'soon';
+      const which = ev.which === 'reask' ? 'reask' : ev.which === 'retry' ? 'retry' : 'soon';
       const k = s[which]; if (!k) break;
       s[which] = null;
       if (which === 'soon') { if (k === s.key && ev.connected !== false) ask(s, fx, now); }   // off the page: no ask, ever
+      else if (which === 'retry') { if (k === s.key && ev.connected !== false) ask(s, fx, now, { force: true }); }   // R-i: the mark ended — asked once, a new run
       else if (k === s.key && ev.connected !== false) ask(s, fx, now, { force: true, reask: true });
       else if (s.owed && s.owed.key === k) drop(s, fx, false);   // declined (moved, off the page): the run ends
       fx.push({ do: 'paint' });
       break;
     }
+    case 'rekey':   // the page saw the key move with no act of its own (a reply re-spelled the bases): the rebase above asks it
+      break;
     case 'refresh': {
       if (s.answer) s.answer = { ...s.answer, stale: true };
       if (s.open) ask(s, fx, now);
@@ -253,7 +290,20 @@ function step(s0, ev = {}) {
       break;
     default: break;
   }
+  // the rebased question is ASKED — once: not when an ask for it is already out or due, never on a destroyed field, never an empty text,
+  // never on a field that has not asked yet (A1); a press it carries rides the ask (R-i). IT ENDS (the coordinator's r146, law 2): a
+  // rebase JOINS the run's count (PARTIAL_REPLIES with the partial replies) — at the bound no ask: the run ends, said by name (UNSETTLED),
+  // an owed press with it; a complete reply resets the count as before
+  if (rebased && !s.destroyed && textOf(s.key) && s.everAsked && s.out !== s.key && s.soon !== s.key && s.reask !== s.key) {
+    s.run = { key: s.key, n: (s.run.key === rebasedFrom ? s.run.n : 0) + 1 };
+    if (s.run.n < PARTIAL_REPLIES) ask(s, fx, now, { force: true, reask: true, press: !!s.owed });   // (the SAME run: a re-ask)
+    else { s.answer = { key: s.key, at: now, kind: 'gaveUp', err: UNSETTLED, stale: false, verdict: null }; if (s.owed) drop(s, fx, true, UNSETTLED); s.errRun = s.key; }
+  }
+  // a key that MOVED under the model is REDRAWN, whatever is asked (B-d833, the lane's own heavy run at aa84c835c, ⑩'s trace: my-mac's
+  // reply was TAKEN and its home was in the world, but the text was EMPTY — the list open, nothing to judge, no rebase ask — so the reply
+  // that re-spelled the bases was dropped as another key's and nothing painted: the rows kept the spelling from before that home)
+  if (moved && !s.destroyed) fx.push({ do: 'paint' });
   return { state: s, effects: fx };
 }
 
-module.exports = { init, step, view, keyOf, textOf, missingGate, homeReader, askedOf, PARTIAL_REPLIES, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };
+module.exports = { init, step, view, keyOf, textOf, sameAsk, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };

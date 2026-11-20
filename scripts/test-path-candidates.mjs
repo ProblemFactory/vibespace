@@ -19,6 +19,9 @@
 //     checkout (the folder with the most files) is offered
 //   ⑥ resolveRelative's line + missingVerdict (parent there ⇒ create; parent missing ⇒ said) + groupOn here drops the
 //     folders declared for another machine + fuzzyFilter (the hub's side) keeps the field's order
+//   ⑦ B-d833's fourth shape: isPathText (the one predicate), textCandidates, lineAnswerOf, textVerdict as rows (exact beats a
+//     completion; skipped with its time), the law seeded over 1500 cases — RED CONTROLS: a late one called absent, a completion that
+//     stops the walk, a failed one called absent
 // Run: node scripts/test-path-candidates.mjs
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
@@ -268,6 +271,103 @@ console.log('\n── ⑥ the resolution line, missingVerdict, groupOn here, fuz
   ok('fuzzyFilter (the hub\'s side) keeps the field\'s best first', ff[0] === '~/work/investor-relations/Q3-董事会材料', ff.slice(0, 3));
   ok('fuzzyFilter: nothing typed = nothing', api.fuzzyFilter(Object.keys(L.dirs), '').length === 0, null);
   ok('joinPath normalises . and ..; toTilde / fromTilde round-trip', api.joinPath('~/work', '../code/./x') === '~/code/x' && api.joinPath('/a', 'b/../c') === '/a/c' && api.fromTilde('/home/me', api.toTilde('/home/me', '/home/me/work')) === '/home/me/work' && api.toTilde('/home/me', '/srv/x') === '/srv/x', null);
+}
+
+console.log('\n── ⑦ the text\'s VERDICT, its fourth shape (B-d833) ──');
+{
+  // the coordinator's ruling 2026-11-20 03:24Z / 03:38Z: candidates ONE AT A TIME in the bases' order, each from ONE bare stat (absent ⇒
+  // the names under the typed prefix in the same call); an exact hit wins, a completion never stops the walk; late / skipped / failed
+  // before an exact hit decide. Rows, the seeded law, RED CONTROLS (anchored edits of the shipped source)
+  const nfs = require('node:fs'), npath = require('node:path');
+  const SRC = nfs.readFileSync(npath.join(npath.dirname(new URL(import.meta.url).pathname), '..', 'src', 'path-candidates.js'), 'utf8');
+  const load = (src) => { const m = { exports: {} }; new Function('module', 'exports', 'require', src)(m, m.exports, require); return m.exports; };
+  const edit = (src, pairs) => pairs.reduce((s2, [a, b]) => { if (s2.split(a).length !== 2) throw new Error('anchor gone: ' + a.slice(0, 60)); return s2.replace(a, b); }, src);
+  const T = api.textCandidates, V = api.textVerdict, A = api.lineAnswerOf, B = [{ path: '~/a' }, { path: '~' }, { path: '~/a' }];
+  ok('⑦ isPathText — the ONE predicate (shared with resolveRelative): any text with no whitespace — an absolute or ~ text, a relative one, a BARE WORD (the POC\'s «草稿» resolves in two bases); a spaced text is a search',
+    [api.isPathText('/x'), api.isPathText('~'), api.isPathText('foo/bar'), api.isPathText('草稿'), api.isPathText('ir q3'), api.isPathText('')].join() === 'true,true,true,true,false,false');
+  ok('⑦ textCandidates: an absolute text itself, a ~ text in ~ form, a relative one or a BARE WORD per base in order (each once); a spaced text none',
+    JSON.stringify([T('/x/y/', B), T('~', B), T('foo/bar', B), T('草稿', B), T('ir q3', B)]) === JSON.stringify([['/x/y'], ['~'], ['~/a/foo/bar', '~/foo/bar'], ['~/a/草稿', '~/草稿'], []]), [T('草稿', B)]);
+  const rowsA = [
+    ['a folder ⇒ listed', A({ exists: true, isDir: true }), 'listed'],
+    ['a FILE where a folder is wanted ⇒ absent; where a file will do ⇒ listed', A({ exists: true, isDir: false }).answer + '/' + A({ exists: true, isDir: false }, { files: true }).answer, 'absent/listed'],
+    ['absent, ONE name under the prefix that is a folder ⇒ listed as its completion', JSON.stringify(A({ exists: false, names: ['payments'], one: { path: '/h/w/payments', exists: true, isDir: true } })), JSON.stringify({ answer: 'listed', completed: '/h/w/payments' })],
+    ['absent, several names (or none) ⇒ absent (the rows offer them)', A({ exists: false, names: ['pa', 'pb'] }).answer + '/' + A({ exists: false, names: [] }).answer, 'absent/absent'],
+    ['a stat that failed for another reason, or its names that could not be read ⇒ failed with the machine\'s words', A({ exists: false, err: 'EACCES: x' }).answer + '/' + A({ exists: false, namesErr: 'EIO: y' }).answer, 'failed/failed'],
+  ];
+  for (const [what, got, want] of rowsA) ok(`⑦ lineAnswerOf: ${what}`, (typeof got === 'string' ? got : got.answer) === want, got);
+  // (the coordinator's r146, law 2) THE BASES' FIXPOINT on a paired machine: its group view MOVES ONCE — when the machine's home and its
+  // listing are first learned (a declared folder spelled with its home, a local folder kept only once listed there) — and never again on a
+  // reply with the same facts (so the field's question is renamed at most once per fact learned, never by a repeated reply)
+  {
+    const gx = { id: 'g', name: 'G', selected: true, folders: ['~/work/a', '~/work/c', 'my-mac::/Users/u/Documents/b'] };
+    const L0 = { home: '', machine: 'my-mac', dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} };
+    const sl = api.sliceListing({ home: '/Users/u', machine: 'my-mac', dirs: [], probes: [{ path: '/Users/u/work/a', exists: true, isDir: true }] }); sl.machine = 'my-mac';
+    const L1 = api.mergeListing(JSON.parse(JSON.stringify(L0)), sl), L2 = api.mergeListing(JSON.parse(JSON.stringify(L1)), sl);
+    const fv = (L) => JSON.stringify(api.groupOn(gx, L).folders);
+    ok('⑦ THE BASES\' FIXPOINT: a paired machine\'s group view moves ONCE (its home and listing learned: «/Users/u/Documents/b» → «~/Documents/b», «~/work/a» kept once listed) and a reply with the same facts moves it no more', fv(L0) !== fv(L1) && fv(L1) === fv(L2) && fv(L1) === JSON.stringify(['~/Documents/b', '~/work/a']), { L0: fv(L0), L1: fv(L1), L2: fv(L2) });
+  }
+  // (the box pre-run r156, the coordinator's law) A ROW NEVER SAYS «DOES NOT EXIST» of a folder on a machine whose listing for it has not
+  // answered: the page splits a paired machine's absent folders into KNOWN absent (asked, or the parent listed in full) and UNKNOWN; an
+  // unknown one is a plain group row (no greyed «不存在 · 新建？»). CONTROL: the raw view (every unlisted folder absent at once) greys it
+  {
+    const Lm = { home: '/Users/u', machine: 'my-mac', dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} };
+    const gb = { id: 'g', name: 'G', selected: true, color: '', folders: [], declared: [] };
+    const inpU = (g) => ({ bases: [{ path: '~', label: 'home' }], groups: [g], recent: [], listing: Lm, name: '', self: { home: '/Users/u', roots: [] }, machine: 'my-mac' });
+    const ru = api.rankCandidates('', inpU({ ...gb, absent: [], unknown: ['~/work/a'] })).rows.find((r) => r.path === '~/work/a'), rc = api.rankCandidates('', inpU({ ...gb, absent: ['~/work/a'], unknown: [] })).rows.find((r) => r.path === '~/work/a');
+    ok('⑦ a group folder that machine has NOT YET answered for is a plain row — never «does not exist · create?» — CONTROL the raw view: greyed absent at once', !!ru && !ru.absent && !(ru.why && ru.why.key === 'absent') && !!rc && rc.absent === true && rc.why.key === 'absent', { unknown: ru, control: rc });
+    // (r174, the (b) law) one the machine was ASKED for and did not answer is said by its name: an «unsaid» row, never absent, never 新建
+    const rs = api.rankCandidates('', inpU({ ...gb, absent: [], unknown: ['~/work/a'], unsaid: ['~/work/a'] })).rows.find((r) => r.path === '~/work/a');
+    ok('⑦ an unknown folder the machine did not answer for says so by the machine\'s name (why «unsaid», host my-mac) — never absent, never new; CONTROL the unknown row not asked carries no word', !!rs && rs.unsaid === true && rs.why && rs.why.key === 'unsaid' && rs.why.params.host === 'my-mac' && !rs.absent && !rs.isNew && !ru.unsaid && !(ru.why && ru.why.key === 'unsaid'), { unsaid: rs, control: ru });
+  }
+  // (the fresh read's N8) a FILE keeps its flag through the verdict (a file field): exact, and the one name a prefix completes to — CONTROL: dropped
+  const fv = api.textVerdict([{ path: '~/n.txt', ...api.lineAnswerOf({ exists: true, isDir: false }, { files: true }) }]), fc = api.textVerdict([{ path: '~/n', ...api.lineAnswerOf({ exists: false, names: ['n.txt'], one: { path: '/h/n.txt', exists: true, isDir: false } }, { files: true }) }]);
+  const fvC = load(edit(SRC, [["    if (c.answer === 'listed' && !c.completed) return end() || { kind: 'exists', path: c.path, ...(c.file ? { file: true } : {}) };", "    if (c.answer === 'listed' && !c.completed) return end() || { kind: 'exists', path: c.path };"]])).textVerdict([{ path: '~/n.txt', ...api.lineAnswerOf({ exists: true, isDir: false }, { files: true }) }]);
+  ok('⑦ a FILE in a file field keeps its flag: «exists» with file — and the one name a prefix completes to — CONTROL dropped: no flag (Tab would write «~/n.txt/»)', fv.kind === 'exists' && fv.file === true && fc.kind === 'exists' && fc.completed && fc.file === true && !fvC.file, { fv, fc, fvC });
+  const SLk = { home: '/h', probes: [{ path: '/h/合同', exists: true, isDir: true, link: '/h/work/contracts' }] };
+  const sl = api.sliceListing(SLk), slc = load(edit(SRC, [["    if (p.link) { link(p.path, p.link); continue; }   // a stated symlink to a folder: a LINK, never a second row\n", '']])).sliceListing(SLk);
+  ok('⑦ sliceListing: the line\'s stat of a symlink to a folder (its `link`) is a LINK — ~/合同 → ~/work/contracts, the target kept, never a second row — CONTROL: without it the link is a folder row of its own', sl.links['~/合同'] === '~/work/contracts' && !sl.dirs['~/合同'] && !!sl.dirs['~/work/contracts'] && !!slc.dirs['~/合同'] && !slc.links['~/合同'], { sl, slc });
+  const C = (path, answer, x = {}) => ({ path, answer, ...x });
+  const rowsV = [
+    ['R1 the earlier ones absent, one EXACT ⇒ exists via it', [C('a', 'absent'), C('b', 'listed')], { kind: 'exists', path: 'b' }],
+    ['an exact hit in a LATER base beats a completion in an earlier one (as resolveRelative drops completions)', [C('a', 'listed', { completed: 'a/x1' }), C('b', 'listed')], { kind: 'exists', path: 'b' }],
+    ['a completion, nothing exact, every candidate answered ⇒ exists via the completion', [C('a', 'absent'), C('b', 'listed', { completed: 'b/x1' })], { kind: 'exists', path: 'b/x1', completed: true, from: 'b' }],
+    ['a completion, then a LATE base (an exact hit may be there) ⇒ late', [C('a', 'listed', { completed: 'a/x1' }), C('b', 'late')], { kind: 'late', path: 'b' }],
+    ['R2 every candidate absent ⇒ absent', [C('a', 'absent'), C('b', 'absent')], { kind: 'absent' }],
+    ['R3 a LATE one before any exact ⇒ late', [C('a', 'late'), C('b', 'listed')], { kind: 'late', path: 'a' }],
+    ['R-i a skipped one (a dead entrance\'s mark) ⇒ skipped, with when its mark ends', [C('a', 'skipped', { until: 9 }), C('b', 'listed')], { kind: 'skipped', path: 'a', until: 9 }],
+    ['R5 a FAILED one, nothing late, nothing exact before ⇒ failed with its error', [C('a', 'absent'), C('b', 'failed', { err: 'EIO' })], { kind: 'failed', path: 'b', err: 'EIO' }],
+  ];
+  for (const [what, cs, want] of rowsV) ok(`⑦ textVerdict ${what}`, JSON.stringify(V(cs)) === JSON.stringify(want), V(cs));
+  // THE LAW, seeded over 1500 cases of random answers (exact / completion / absent / late / skipped / failed) for 1..5 candidates
+  const KINDS = ['exact', 'comp', 'absent', 'late', 'skipped', 'failed'];
+  const law = (verdict) => {
+    for (let seed = 1; seed <= 1500; seed++) {
+      let x = (seed * 2654435761) >>> 0; const rnd = () => ((x = (Math.imul(x, 1103515245) + 12345) >>> 0) / 4294967296);
+      const cs = Array.from({ length: 1 + Math.floor(rnd() * 5) }, (_, i) => { const k = KINDS[Math.floor(rnd() * KINDS.length)]; return k === 'exact' ? C('c' + i, 'listed') : k === 'comp' ? C('c' + i, 'listed', { completed: 'c' + i + '/x' }) : C('c' + i, k, k === 'skipped' ? { until: i + 1 } : k === 'failed' ? { err: 'e' + i } : {}); });
+      const v = verdict(cs), ex = cs.findIndex((c) => c.answer === 'listed' && !c.completed), need = ex < 0 ? cs : cs.slice(0, ex);
+      const stop = need.find((c) => c.answer === 'late' || c.answer === 'skipped'), fail = need.find((c) => c.answer === 'failed'), comp = cs.find((c) => c.completed);
+      const holds = v.kind === 'absent' ? cs.every((c) => c.answer === 'absent')
+        : v.kind === 'late' || v.kind === 'skipped' ? !!stop && stop.path === v.path && stop.answer === v.kind
+          : v.kind === 'failed' ? !stop && !!fail && fail.path === v.path
+            : v.kind === 'exists' && !v.completed ? ex >= 0 && v.path === cs[ex].path && !stop && !fail
+              : v.kind === 'exists' && v.completed ? ex < 0 && !stop && !fail && !!comp && v.path === comp.completed
+                : false;
+      if (!holds) return { seed, cs: cs.map((c) => c.completed ? 'comp' : c.answer).join(','), v };
+    }
+    return null;
+  };
+  const broke = law(V);
+  ok('⑦ THE LAW over 1500 seeds: absent ⇒ every candidate absent · late / skipped ⇒ the FIRST such before the exact hit · failed ⇒ one before the exact hit, none late · exact ⇒ the first, nothing unanswered before it · a completion ⇒ no exact anywhere, nothing unanswered, the first one', !broke, broke);
+  const CONTROLS = [
+    ['a late candidate called absent', [["    if (c.answer === 'late' || c.answer === 'skipped') { if (!late) late = c; }", "    if (c.answer === 'skipped') { if (!late) late = c; }"]]],
+    ['a completion that STOPS the walk (an exact hit in a later base lost)', [["    if (c.answer === 'listed') { if (!comp) comp = c; continue; }", "    if (c.answer === 'listed') return end() || { kind: 'exists', path: c.completed, completed: true, from: c.path };"]]],
+    ['a failed candidate called absent', [["    else if (c.answer === 'failed') { if (!failed) failed = c; }", "    else if (c.answer === 'failed') { }"]]],
+  ];
+  for (const [what, pairs] of CONTROLS) {
+    let r = null, err = '';
+    try { r = law(load(edit(SRC, pairs)).textVerdict); } catch (e) { err = String(e.message || e).slice(0, 200); }
+    ok(`⑦ RED CONTROL: ${what} — the law finds it${r ? ` (seed ${r.seed}: ${r.cs} ⇒ ${r.v.kind})` : ''}`, !!r, r || err || 'not found');
+  }
 }
 
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);

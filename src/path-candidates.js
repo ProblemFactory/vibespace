@@ -61,6 +61,49 @@ function isExcludedPath(path, self) {
 
 const fileOf = (L, p) => { const par = parentOf(p); return par && L.dirs[par] ? (L.dirs[par].files || []).find((f) => f.name === baseName(p)) || null : null; };
 
+/* B-d833 (lane bl-tests-a; its FOURTH shape, the coordinator's ruling 2026-11-20 03:24Z / 03:38Z — the table work/b-d833-shape4-table.md):
+   the typed text's verdict is a PURE function over its candidates' answers, asked ONE AT A TIME in the bases' order.
+   isPathText — the ONE predicate «this text can mean a path», shared with resolveRelative: a text with no whitespace (an absolute or ~
+   text, a relative one, a single word — a bare word is judged over the bases AND searched for the rows; the POC's «草稿» resolves in two
+   bases). textCandidates — the paths it can mean, in resolveRelative's own order (absolute / ~: itself; else each base joined with it).
+   lineAnswerOf — one candidate from the worker's ONE bare stat (src/safe-fs-worker.js pathStat): 'listed' (a folder — or a file where a
+   file will do), 'listed' + completed (absent, and exactly ONE name in its parent starts with its last segment, a folder there),
+   'absent' (ENOENT; several names = no completion), 'failed' (the machine's own error about it). textVerdict — over the answers in
+   order: an EXACT hit wins unless something before it is late / skipped / failed; a completion never stops the walk (an exact hit in a
+   later base beats it, as in resolveRelative); nothing exact: late / skipped (with the time its mark ends) / failed, else the first
+   completion, else ABSENT. «absent» needs EVERY candidate answered absent. */
+function isPathText(text) { const q = String(text == null ? '' : text).trim(); return !!q && !/\s/.test(q); }
+function textCandidates(text, bases) {
+  const q = String(text == null ? '' : text).trim();
+  if (!isPathText(q)) return [];
+  if (q.startsWith('/')) return [stripSlash(q) || '/'];
+  if (q.startsWith('~')) return [joinPath('~', q.slice(1))];
+  const out = [];
+  for (const b of bases || []) if (b && b.path) { const c = joinPath(b.path, q); if (!out.includes(c)) out.push(c); }
+  return out;
+}
+function lineAnswerOf(stat, { files = false } = {}) {
+  const s = stat || {};
+  if (s.err) return { answer: 'failed', err: String(s.err) };
+  if (s.exists) return s.isDir !== false || files ? { answer: 'listed', ...(s.link ? { link: s.link } : {}), ...(s.isDir === false ? { file: true } : {}) } : { answer: 'absent', file: true };
+  if (s.namesErr) return { answer: 'failed', err: String(s.namesErr) };
+  const one = s.one;
+  if (one && one.exists && (one.isDir !== false || files) && !one.err) return { answer: 'listed', completed: one.path, ...(one.isDir === false ? { file: true } : {}) };
+  return { answer: 'absent' };
+}
+function textVerdict(cands = []) {
+  let late = null, failed = null, comp = null;
+  const end = () => (late ? (late.answer === 'skipped' ? { kind: 'skipped', path: late.path, until: late.until } : { kind: 'late', path: late.path }) : failed ? { kind: 'failed', path: failed.path, err: String(failed.err || '') } : null);
+  for (const c of cands || []) {
+    if (!c) continue;
+    if (c.answer === 'listed' && !c.completed) return end() || { kind: 'exists', path: c.path, ...(c.file ? { file: true } : {}) };
+    if (c.answer === 'listed') { if (!comp) comp = c; continue; }
+    if (c.answer === 'late' || c.answer === 'skipped') { if (!late) late = c; }
+    else if (c.answer === 'failed') { if (!failed) failed = c; }
+  }
+  return end() || (comp ? { kind: 'exists', path: comp.completed, completed: true, from: comp.path, ...(comp.file ? { file: true } : {}) } : { kind: 'absent' });
+}
+
 /** THE RESOLUTION alone. `bases` = [{ path, label }] in order (home last); `files` = a file is a valid answer too.
  *  → { resolved: [{ path, base, kind: 'exact'|'file'|'link'|'complete', relative, via? }], missing: { path, base } | null,
  *      line: { key, params } } */
@@ -86,7 +129,7 @@ function resolveRelative(input, bases, listing, { files = false } = {}) {
   const absLike = q.startsWith('/') || q.startsWith('~');
   const resolved = []; let missing = null;
   const bs = Array.isArray(bases) ? bases.filter((b) => b && b.path) : [];
-  if (q && !/\s/.test(q)) {
+  if (isPathText(q)) {   // (B-d833: the ONE predicate, shared with textCandidates)
     if (absLike) {
       const lit = q.startsWith('/') ? toTilde(L.home, q.replace(/\/+$/, '') || '/') : joinPath('~', q.slice(1));
       const r = resolveIn(lit, q.startsWith('/') ? 'abs' : 'home', false);
@@ -283,6 +326,10 @@ function rankCandidates(query, o) {
       if (g.context) push({ path: g.context, sec: SEC.GROUP, chip: chipFor(g.context, SEC.GROUP), ...meta(g.context), score: 0 });
       /* a group folder that is not on this machine: greyed, with the create road — never silently dropped */
       for (const f of g.absent || []) push({ path: f, sec: SEC.GROUP, chip: { key: 'group', params: { group: g.name, color: g.color || '', host, on: '' } }, absent: true, why: { key: 'absent', params: { host } }, ...meta(f), isNew: true, score: 0 });
+      /* B-d833 (the box pre-run r156): one that machine has NOT YET ANSWERED for (not listed, not asked) is a plain group row — it never says
+         «does not exist» before the machine's listing for it answered (the line's own rule for «missing»); one it was ASKED for and did not
+         answer (late, or its error — the page's `unsaid`) says so by the machine's name (r174, the (b) law) */
+      for (const f of g.unknown || []) push({ path: f, sec: SEC.GROUP, chip: { key: 'group', params: { group: g.name, color: g.color || '', host, on: '' } }, ...meta(f), ...((g.unsaid || []).includes(f) ? { unsaid: true, why: { key: 'unsaid', params: { host } } } : {}), score: 0 });
     }
     for (const n of nameRows) push({ path: n.path, sec: SEC.NAME, chip: n.chip, why: n.why, ...meta(n.path), isNew: !exists(n.path), score: 0 });
     for (const r of recent.slice(0, 5)) push({ path: r.path, sec: SEC.RECENT, chip: chipFor(r.path, SEC.RECENT), ...meta(r.path), score: 0 });
@@ -370,7 +417,7 @@ function fuzzyFilter(paths, q, { limit = 60, aliases = null } = {}) {
 /** THE SLICE: a machine's raw folder facts → the listing the field ranks over (one implementation for this machine's
  *  SafeFs answer and a remote machine's rung). Raw facts, absolute paths on that machine:
  *    dirs    — [{ path, exists, isDir, mtime, git, kids: [{ name, git, link? }], files?, fileCount, more }] (listed)
- *    probes  — [{ path, exists, isDir, mtime, git, fileCount }] (stated only)
+ *    probes  — [{ path, exists, isDir, mtime, git, fileCount, link? }] (stated only)
  *    index   — { dirs: [path], links: [{ from, to }] } the folder index the fuzzy `q` searches (best `limit` kept)
  *    mounts  — [{ path, label }] · localized — { path: display name } (the OS's names on a Mac)
  *  A symlink to a folder is a LINK (an alias of its target, which is kept), never a second row.
@@ -389,7 +436,7 @@ function sliceListing({ home, machine = null, dirs = [], probes = [], index = nu
     if (Array.isArray(d.files)) e.files = d.files.map((f) => ({ name: f.name, size: f.size, mtime: f.mtime }));
     for (const k of d.kids) {
       if (!k || !k.name) continue;
-      if (k.link) { link(kid(d.path, k.name), k.link); continue; }
+      if (k.link != null) { link(kid(d.path, k.name), k.link); continue; }   // a link (its target may come from its own stat): never a kid row
       e.kids.push(k.name);
       const s2 = stub(kid(tp, k.name)); if (k.git) s2.git = true;
     }
@@ -398,6 +445,7 @@ function sliceListing({ home, machine = null, dirs = [], probes = [], index = nu
   for (const p of probes || []) {
     if (p && p.exists && p.isDir === false) { out.nondirs[T(p.path)] = true; continue; }   // there, but a file
     if (!p || !p.exists) continue;
+    if (p.link) { link(p.path, p.link); continue; }   // a stated symlink to a folder: a LINK, never a second row
     const e = stub(T(p.path));
     if (p.git) e.git = true;
     if (p.fileCount != null) e.fileCount = p.fileCount;
@@ -500,5 +548,5 @@ module.exports = {
   SEC, TIER, HOST_ROW, SELF_PACKAGE,
   baseName, parentOf, under, joinPath, toTilde, fromTilde, isExcludedPath,
   resolveRelative, missingVerdict, groupOn, rankCandidates, fuzzyMatch, fuzzyFilter, fuzzyTokens, subseq,
-  sliceListing, mergeListing, sliceAsk, legacySuggestions, recentCounts, nameChips,
+  sliceListing, mergeListing, sliceAsk, legacySuggestions, recentCounts, nameChips, isPathText, textCandidates, lineAnswerOf, textVerdict,
 };

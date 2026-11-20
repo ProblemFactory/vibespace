@@ -38,8 +38,8 @@ import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
 // B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
 // its events and performs its effects; no verdict is decided here
-import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf } from '../path-field-model.js';
-import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips } from '../path-candidates.js';
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED } from '../path-field-model.js';
+import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips, textCandidates, isPathText } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
 const RECENT_TTL_MS = 30e3;
@@ -170,6 +170,7 @@ function whyText(w) {
     case 'name-home': return p.word ? t('home + the word you typed') : t('home + the name');
     case 'name-same': return t('A folder of that name already exists');
     case 'absent': return t('Not on {host} · create?', p);
+    case 'unsaid': return t('{host} did not answer for it', p);
     default: return '';
   }
 }
@@ -226,7 +227,7 @@ export function pathField(input, opts = {}) {
   // Browse… again raises its own.
   const pickKey = `${fid}#${++pickerSeq}`;
   const call = (fn, dflt) => { try { const v = typeof fn === 'function' ? fn() : fn; return v == null ? dflt : v; } catch { return dflt; } };
-  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, seq: 0, pctl: null, ctl: null, timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
+  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, seq: 0, pctl: null, ctl: null, ctls: new Map(), trace: [], timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
 
   /* ── DOM ── */
   const wrap = document.createElement('div');
@@ -272,11 +273,21 @@ export function pathField(input, opts = {}) {
       chips: typeof g.chips === 'function' ? g.chips : null,
     }));
   }
+  const knownAbsent = (W, p) => {
+    const L = W.L; if (L.dirs[p]) return false;
+    if (W.asked && W.asked.has(p)) return true;   // asked, and not answered as a folder
+    const up = L.dirs[parentOf(p)];
+    return !!(up && Array.isArray(up.kids) && !up.more && !up.kids.includes(baseName(p)));   // (B-0f3d: a listing cut at its 400 entries decides no absence)
+  };
   function inputsNow() {
     const h = hk(); const W = world(h); const L = W.L;
     if (!LOCAL.home && window.app?._localHome) LOCAL.home = window.app._localHome;
     if (!h && !L.home && LOCAL.home) L.home = LOCAL.home;
-    const view = groupsNow().map((g) => groupOn(g, L));
+    // B-d833 (r156): on a paired machine a group folder is ABSENT only once that machine answered for it (asked and not a folder, or its
+    // parent listed in full — knownAbsent); until then it is UNKNOWN: a plain row, never «does not exist»
+    const view = groupsNow().map((g) => { const v = groupOn(g, L); if (!h || !v.absent || !v.absent.length) return v; const known = v.absent.filter((f) => knownAbsent(W, f)); return { ...v, absent: known, unknown: v.absent.filter((f) => !known.includes(f)) }; });
+    // (r174, the (b) law) an unknown folder the machine was ASKED for and did not answer is said by its name («my-mac did not answer for it»)
+    for (const v of view) if (v.unknown && v.unknown.length) v.unsaid = v.unknown.filter((f) => !!(W.unsaid && W.unsaid.has(f)));
     const bases = [];
     for (const g of view.filter((x) => x.selected)) for (const f of g.folders) bases.push({ path: f, label: t('Task Group «{name}»', { name: g.name }) });
     for (const b of call(o.bases, []) || []) if (b && b.path) bases.push({ path: toTilde(h ? L.home : LOCAL.home, stripSlash(b.path)), label: String(b.label || '') });
@@ -313,8 +324,25 @@ export function pathField(input, opts = {}) {
     const dead = !!(hk() && world(hk()).unreachable); // a machine that cannot be reached is offered nothing (no «not on my-mac» guesses)
     const key = JSON.stringify([text, hk(), inp.name, inp.groups.map((g) => [g.id, g.selected, g.folders]), inp.bases.map((b) => b.path), Object.keys(inp.listing.dirs).length, inp.recent.length, !!inp.self, dead]);
     if (memo.key !== key) { const m = rankCandidates(text, inp); memo = { key, m: dead ? { ...m, rows: [], sections: [], best: null, nameRows: [] } : m, inp }; }
-    return memo.m;
+    // B-d833 (its fourth shape, R-e — the coordinator's ruling 03:24Z): THE ONE RESOLVER. The line, Tab, Enter, the tick and the form's
+    // state read the VERDICT IN HAND for (text, machine, bases): the model's answer for the field's key. The page's memory feeds the
+    // rows and a resolution's FACTS only — it never states that a folder exists. (Another machine answers through its own rung: B-99b9.)
+    const m = memo.m;
+    let MM = null; try { MM = M; } catch { MM = null; }   // (the model is built after the first paint's rows)
+    if (hk() || !MM) return m;
+    const kn = keyNow(text), a = incoming && incoming.key === kn ? incoming : MM.answer, v = a && a.key === kn ? a.verdict : null;   // (a reply being stepped: ITS verdict is the one in hand)
+    const bare = !(/^[~/.]/.test(text) || text.includes('/')) || !isPathText(text);   // a bare word, or a spaced text (a search — no verdict is ever asked for it)
+    if (v && v.kind === 'exists') {
+      const j = inp.bases.findIndex((b) => v.from ? joinPathOf(b.path, text) === v.from : joinPathOf(b.path, text) === v.path);
+      return { ...m, resolved: [{ path: v.path, base: /^[~/]/.test(text) ? (text.startsWith('/') ? 'abs' : 'home') : (j >= 0 ? inp.bases[j].label : ''), kind: v.completed ? 'complete' : v.file ? 'file' : 'exact', ...(v.file ? { file: true } : {}), relative: !/^[~/]/.test(text), literal: !!v.literal }], missing: null };
+    }
+    if (bare && (!v || v.kind === 'absent')) return { ...m, resolved: [], missing: null };   // a bare word that is no folder there: a search
+    if (v && v.kind === 'absent') return { ...m, resolved: [], missing: { path: (v.missing && v.missing.path) || (m.missing && m.missing.path) || text, base: (v.missing && v.missing.base) || '', parentExists: v.missing ? !!v.missing.parentExists : null } };
+    return { ...m, resolved: [], missing: m.missing || { path: text, base: '' }, held: v || null };   // no verdict in hand (or not answered): nothing resolved
   }
+  const basesKey = () => JSON.stringify(inputsNow().bases.map((b) => b.path));
+  const keyNow = (text = textNow()) => keyOf(text, hk(), basesKey());
+  const joinPathOf = (b, t) => { try { return textCandidates(t, [{ path: b }])[0] || ''; } catch { return ''; } };
   const abs = (p) => fromTilde(world(hk()).L.home || LOCAL.home, p);
   /* the door's derived text (setDerived), while it stands untouched — its note says where it came from */
   const derivedNow = () => (st.derived && st.derived.text === input.value ? st.derived : null);
@@ -322,23 +350,27 @@ export function pathField(input, opts = {}) {
 
   /* ── asking the machine: the MODEL decides (src/path-field-model.js, PURE) — this part turns what happens into its EVENTS and performs
      its EFFECTS (B-08d5, the coordinator's ruling 22:19Z). A1: a field BUILT over a saved text starts with nothing asked ── */
-  let M = pfInit(keyOf(textNow(), hk()));
-  const T = { soon: null, reask: null };
+  let M = pfInit(keyNow());
+  let incoming = null;   // B-d833 (its fresh read's M1): the reply being stepped — model() reads ITS verdict while the step's env is built
+  const T = { soon: null, reask: null, retry: null };
   const waiters = new Map();   // door → its press's promise (B-225c: the model names the doors each outcome answers)
   let doorSeq = 0;
-  const rankOf = (text) => { const m = model(text); return { empty: !text, resolved: m.resolved.length > 0, pathLike: /^[~/.]/.test(text) || text.includes('/'), missing: !!m.missing, file: !!(m.missing && (world(hk()).L.nondirs || {})[m.missing.path]) }; };
-  const envNow = () => ({ cur: keyOf(textNow(), hk()), rank: rankOf(textNow()), homeKnown: !!(world(hk()).L.home || (!hk() && LOCAL.home)), unreachable: !!(hk() && world(hk()).unreachable), tick: st.tick, createMode, folder: kind === 'folder' });
+  const rankOf = (text) => { const m = model(text); return { empty: !text, resolved: m.resolved.length > 0, literal: !!(m.resolved[0] && m.resolved[0].literal) || !!hk(), path: m.resolved[0] ? m.resolved[0].path : '', pathLike: /^[~/.]/.test(text) || text.includes('/') || !!m.held, missing: !!m.missing, file: !!(m.missing && (world(hk()).L.nondirs || {})[m.missing.path]) }; };
+  const envNow = () => ({ cur: keyNow(), rank: rankOf(textNow()), homeKnown: !!(world(hk()).L.home || (!hk() && LOCAL.home)), unreachable: !!(hk() && world(hk()).unreachable), tick: st.tick, createMode, folder: kind === 'folder' });
   const answer = (doors, v) => { for (const d of doors || []) { const res = waiters.get(d); if (!res) continue; waiters.delete(d); try { res(v); } catch { } } };
   function fire(ev) {
     if (st.destroyed && ev.type !== 'destroyed') return;
-    const env = envNow();
+    // a REPLY's own verdict is in hand while the env is built: an owed press is judged on what the machine just said, never on the
+    // verdict before it (the step writes the answer only inside itself)
+    if (ev.type === 'reply') incoming = { key: ev.key, verdict: ev.verdict || null };
+    let env; try { env = envNow(); } finally { incoming = null; }
     const r = pfStep(M, { ...ev, cur: env.cur, now: Date.now(), env });
     M = r.state;
     let painted = false;
     for (const e of r.effects) {
-      if (e.do === 'ask') sliceAsk(e.key);
+      if (e.do === 'ask') sliceAsk(e.key, !!e.press);
       else if (e.do === 'arm') { clearTimeout(T[e.which]); T[e.which] = setTimeout(() => { T[e.which] = null; fire({ type: 'fired', which: e.which, connected: input.isConnected }); }, e.ms); }
-      else if (e.do === 'disarm') { for (const w of e.which === 'all' ? ['soon', 'reask'] : [e.which]) { clearTimeout(T[w]); T[w] = null; } }
+      else if (e.do === 'disarm') { for (const w of e.which === 'all' ? ['soon', 'reask', 'retry'] : [e.which]) { clearTimeout(T[w]); T[w] = null; } }
       else if (e.do === 'abort') st.ctl?.abort?.();
       else if (e.do === 'commit') committed(e);
       else if (e.do === 'settle') answer(e.doors, null);   // nothing committed for those presses (B-225c: never an older path)
@@ -352,21 +384,24 @@ export function pathField(input, opts = {}) {
     }
   }
   /* the ask's URL (the probes the field needs: the groups' folders, the name rows, the recents, the missing path) */
-  function sliceUrl(text, h) {
+  function sliceUrl(text, h, press = false) {
     const inp = inputsNow();
     const m = rankCandidates(text, inp);
     const probe = new Set();
-    for (const g of inp.groups) { for (const f of g.folders) probe.add(f); for (const f of g.absent || []) probe.add(f); if (g.context) probe.add(g.context); }
+    for (const g of inp.groups) { for (const f of g.folders) probe.add(f); for (const f of g.absent || []) probe.add(f); for (const f of g.unknown || []) probe.add(f); if (g.context) probe.add(g.context); }
     for (const g of groupsNow()) for (const f of g.folders) if (!HOST_ROW.test(f)) probe.add(f);
     for (const n of m.nameRows) probe.add(n.path);
     for (const r of inp.recent.slice(0, 8)) probe.add(r.path);
     if (m.missing) probe.add(m.missing.path);
     const fuzzy = m.mode === 'fuzzy' ? text : '';
     const sent = [...probe].slice(0, 40);   // the probes SENT (only these may be marked asked)
-    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify(sent))}${m.missing ? `&own=${encodeURIComponent(m.missing.path)}` : ''}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;   // B-0f3d: the text's OWN path, decided inside the listing's race
-    return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe: sent };
+    const qs = `?path=${encodeURIComponent(text)}&bases=${encodeURIComponent(JSON.stringify(inp.bases.map((b) => b.path)))}&probe=${encodeURIComponent(JSON.stringify(sent))}${press ? '&press=1' : ''}&q=${encodeURIComponent(fuzzy)}&kind=${kind}`;   // (B-d833: the machine derives every candidate; a PRESS rides `press` — R-i)
+    return { url: (h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, probe: sent, bases: inp.bases };
   }
-  function mergeReply(W, h, d, probe) {
+  /* the field's last replies, bounded (a test reads them: pf.trace()): which machine, its number against the field's current one, how it was
+     taken, and the machine's world AFTER it (its home known, how many folders) */
+  function traceReply(h, my, d, how) { const W = world(h); st.trace.push({ h: h || null, my, cur: st.seq, how, listing: !!(d && d.listing), home: !!W.L.home, dirs: Object.keys(W.L.dirs || {}).length, at: Date.now() }); if (st.trace.length > 12) st.trace.shift(); }
+  function mergeReply(W, h, d, probe, key = null) {
     if (d && d.listing) {
       mergeListing(W.L, d.listing);
       W.L.machine = h || null;
@@ -375,24 +410,42 @@ export function pathField(input, opts = {}) {
       // B-0f3d: only the probes SENT and answered in time are marked asked — a late one (a hung mount) is never «known absent» (a 新建
       // chip for a folder that may well be there); it is asked again later
       W.asked = W.asked || new Map(); for (const p of askedOf(probe, d)) W.asked.set(p, Date.now());
+      // B-d833 (r174, the (b) law): a probe this reply SENT that the machine did not answer (late, or its error) is UNSAID — its row says
+      // so by the machine's name until a later reply answers it: never an unknown row with nothing out and nothing said
+      W.unsaid = W.unsaid || new Map(); const late = lateOf(d);
+      for (const p of probe || []) { if (late.has(p)) W.unsaid.set(p, Date.now()); else if (W.L.dirs[p] || W.asked.has(p)) W.unsaid.delete(p); }
     }
     W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
+    // B-d833 P8 + the ruling on M3: the rows' words (a source still out: «still looking»; one a dead folder's mark answered: «could not be
+    // read») answer ONE text — the field's own ask sets them, a chip's probe never; they are read only for the text the box holds
+    if (key != null) W.rows = { key, late: !!(d && d.rowsLate), unread: !!(d && d.rowsUnread) };
     W.unreachable = (d && d.unreachable) || null;
   }
   /* the model's ask: the field's OWN text on its machine (one in flight — a newer one supersedes); its reply becomes the model's event */
-  function sliceAsk(key) {
+  function sliceAsk(key, press = false) {
     const text = keyText(key), h = hk(), W = world(h);
     const go = () => {
       if (st.destroyed) return;
-      const { url, probe } = sliceUrl(text, h);
-      st.ctl?.abort?.(); st.ctl = new AbortController();
+      const { url, probe } = sliceUrl(text, h, press);
+      // B-d833 (主开发 r174): WHAT A MACHINE SENT FOR THE LIST IS NEVER DROPPED while nothing newer is out for THAT machine — a newer ask
+      // gives up only the older ask for the SAME machine; an ask for another machine lands in its own world (not the model's: not current)
+      const prev = st.ctls.get(h); if (prev) prev.abort();
+      const ctl = new AbortController(); st.ctls.set(h, ctl); st.ctl = ctl;
       const my = ++st.seq;
       wrap.dataset.pending = '1';
-      return fetchJson(url, { signal: st.ctl.signal }).then((d) => {
-        if (my !== st.seq || st.destroyed) return;
+      return fetchJson(url, { signal: ctl.signal }).then((d) => {
+        if (st.destroyed) return;
+        if (st.ctls.get(h) === ctl) st.ctls.delete(h);
+        if (my !== st.seq) {   // superseded by an ask for ANOTHER machine (one for this machine would have aborted it): kept in its world
+          if (d && d.listing && !st.ctls.has(h)) mergeReply(W, h, d, probe);
+          traceReply(h, my, d, 'superseded');
+          return;
+        }
         delete wrap.dataset.pending;
-        mergeReply(W, h, d, probe);
-        fire({ type: 'reply', key, kind: d && d.listing && !d.partial ? 'listing' : d && d.partial ? 'partial' : 'failed', err: (d && d.error) || '' });
+        mergeReply(W, h, d, probe, key);
+        traceReply(h, my, d, 'current');
+        const v = d && d.verdict;   // B-d833: the verdict rides the reply into the model (R-e); a SKIPPED one says when its mark ends, in OUR clock
+        fire({ type: 'reply', key, kind: replyKind(d), err: (v && v.err) || (d && d.error) || '', verdict: v || null, until: v && v.kind === 'skipped' && Number.isFinite(v.retryIn) ? Date.now() + Math.max(0, v.retryIn) : 0 });
       });
     };
     return !h && !LOCAL.home ? localHome().then(go) : go();
@@ -404,17 +457,22 @@ export function pathField(input, opts = {}) {
       if (st.destroyed) return;
       const { url, probe } = sliceUrl(q, h);
       st.pctl?.abort?.(); st.pctl = new AbortController();
-      return fetchJson(url, { signal: st.pctl.signal }).then((d) => { if (!st.destroyed) mergeReply(W, h, d, probe); });
+      // (B-d833, the box pre-runs: a chip's reply can re-spell the bases — the field's question moved under it with no act: it is said to the
+      // model, which asks the new question once, bounded)
+      return fetchJson(url, { signal: st.pctl.signal }).then((d) => { if (st.destroyed) return; mergeReply(W, h, d, probe); traceReply(h, null, d, 'chips'); if (keyNow() !== M.key) fire({ type: 'rekey' }); });
     };
     return !h && !LOCAL.home ? localHome().then(go) : go();
   }
   /* the «not applied» words (the model's err) and the words of an unanswered text */
   const errNow = () => pfView(M, envNow()).err || null;
-  const unansweredWords = (errText = '') => { const err = errText || '', plain = t('the machine did not answer'); return err && err !== plain ? t('The machine did not answer: {err}', { err }) : plain; };
+  const unansweredWords = (errText = '') => { if (errText === UNSETTLED) return t('The machine\'s answer kept changing — type again, or press to ask once more'); const err = errText || '', plain = t('the machine did not answer'); return err && err !== plain ? t('The machine did not answer: {err}', { err }) : plain; };
   function errWords(err) {
     if (!err) return '';
     if (err.kind === 'pending') return t('Asking the machine…');
     if (err.kind === 'unanswered') return unansweredWords(err.err);
+    if (err.kind === 'failed') return t('The machine answered with an error: {err}', { err: err.err || '' });   // it DID answer (L5)
+    if (err.kind === 'skipped') return t('The machine did not answer; asked again in {n} s', { n: Math.max(1, Math.ceil(((err.until || 0) - Date.now()) / 1000)) });
+    if (err.why === 'literal') return t('{text} is not a folder. = {path} — press Enter again to use it', { text: textNow(), path: err.path || '' });   // L6: Enter never commits what the line had not shown
     if (err.why === 'ensure') return err.words;
     const x = target(), path = x.path || textNow();
     if (err.why === 'file') return t('{path} is a file — this needs a folder.', { path });
@@ -423,6 +481,10 @@ export function pathField(input, opts = {}) {
     return t('«{text}» is not a path (a few letters search) — nothing was set.', { text: textNow() });
   }
   const bestNow = () => ((errNow() || {}).why === 'notpath' ? bestOf() : '');
+  /* R-j: the base that did not answer, by its label (a Task Group's folder by the group's name); what the page REMEMBERS answering in a
+     later base is offered as a press of its own (it sets that absolute text, whose own stat decides) — never Enter's target */
+  function baseWordOf(b) { const inp = inputsNow(); const hit = inp.bases.find((x) => x.path === b || abs(x.path) === b); return hit && hit.label ? `${hit.label} (${b})` : b; }
+  function offerOf(m) { const mem = (memo && memo.m && memo.m.resolved) || []; const r = mem.find((x) => x && x.path && (!m || !m.held || x.path !== m.held.path)); return r ? { offer: abs(r.path), offerText: t('{path}: use it', { path: r.path }) } : {}; }
   /* ── the verdict (what the line says; what a form's footer may say) ── */
   function target(text = textNow()) {
     const m = model(text);
@@ -431,8 +493,8 @@ export function pathField(input, opts = {}) {
     const pathLike = /^[~/.]/.test(text) || text.includes('/');
     if (m.missing && pathLike) {
       const gate = pfView(M, envNow()).kind;   // the MODEL's verdict for the text on this machine
-      if (gate !== 'missing') return gate === 'searching' ? { search: true, m } : { [gate]: true, answerErr: pfView(M, envNow()).answerErr, m };
-      const mv = missingVerdict(m.missing.path, world(hk()).L); return { missing: true, path: m.missing.path, base: m.missing.base, parentOk: mv.parentExists, parent: mv.parent, file: !!(world(hk()).L.nondirs || {})[m.missing.path], m }; }
+      if (gate !== 'missing') { const vw = pfView(M, envNow()); return gate === 'searching' ? { search: true, m } : { [gate]: true, answerErr: vw.answerErr, until: vw.until || 0, m }; }
+      const mv = missingVerdict(m.missing.path, world(hk()).L); return { missing: true, path: m.missing.path, base: m.missing.base, parentOk: m.missing.parentExists != null ? m.missing.parentExists : mv.parentExists, parent: mv.parent, file: !!(world(hk()).L.nondirs || {})[m.missing.path], m }; }
     return { search: true, m };
   }
   function verdictNow() {
@@ -443,7 +505,12 @@ export function pathField(input, opts = {}) {
     if (x.empty) return { status: 'empty', text: '' };
     if (x.ok) return { status: 'ok', text: '= ' + x.r.path, path: abs(x.r.path), alts: x.all.length - 1 };
     if (x.pending) return { status: 'pending', text: t('Asking the machine…') };
-    if (x.unanswered) return { status: 'unanswered', text: unansweredWords(x.answerErr) };
+    // B-d833 (its fourth shape): a held line NAMES the base that did not answer (R-j); a dead entrance's mark says when it is asked again
+    // (R-i); a stat that failed says the machine ANSWERED, with its error
+    const held = x.m && x.m.held, base = held && held.base ? baseWordOf(held.base) : '';
+    if (x.skipped) { const secs = Math.max(1, Math.ceil(((x.until || 0) - Date.now()) / 1000)); return { status: 'unanswered', text: (base ? t('{base} did not answer.', { base }) + ' ' : '') + t('The machine did not answer; asked again in {n} s', { n: secs }), ...offerOf(x.m) }; }
+    if (x.unanswered && held && held.kind === 'failed') return { status: 'unanswered', text: t('The machine answered with an error: {err}', { err: held.err || x.answerErr || '' }) };
+    if (x.unanswered) return { status: 'unanswered', text: (base ? t('{base} did not answer.', { base }) + ' ' : '') + unansweredWords(x.answerErr), ...offerOf(x.m) };
     if (x.quiet) return { status: 'pending', text: '' };   // A1: nothing asked yet — no words; a form still refuses
     if (x.missing) return { status: 'missing', text: x.parentOk ? t('{path} does not exist — create it?', { path: x.path }) : t('{path} does not exist, nor the folder above ({parent})', { path: x.path, parent: x.parent || '' }), path: abs(x.path), parentExists: !!x.parentOk };
     return { status: 'searching', text: t('«{text}» is not a path yet — pick a folder from the list', { text }) };
@@ -457,11 +524,12 @@ export function pathField(input, opts = {}) {
   }
 
   /* ── painting (never the input itself: IME, the caret) ── */
+  const rowsNow = () => { const r = world(hk()).rows; return r && r.key === keyNow() ? r : {}; };   // the rows' words of THIS text only
   function listHTML() {
     const m = model();
     if (!m.rows.length) {
       const W = world(hk());
-      return `<div class="pf-empty">${escHtml(W.unreachable && hk() ? unreachableWords(hk()) : W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : t('No matching folder.'))}</div>`;
+      return `<div class="pf-empty">${escHtml(W.unreachable && hk() ? unreachableWords(hk()) : W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('No matching folder.'))}</div>`;   // (B-d833 P8: rows not finished are never «no match»)
     }
     let i = 0;
     const body = m.sections.map((s) => `<div class="pf-sec">${escHtml(secTitle(s))}${s.more ? `<span class="pf-more">${escHtml(t('{n} more', { n: s.more }))}</span>` : ''}</div>` + s.rows.map((r) => {
@@ -471,6 +539,7 @@ export function pathField(input, opts = {}) {
       if (r.isNew && !r.absent) chips.push(`<span class="pf-chip new">${escHtml(t('New'))}</span>`);
       chips.push(`<span class="pf-chip${/group|notes|name-group/.test(r.chip.key) ? ' grp' : r.chip.key === 'mount' ? ' mnt' : ''}">${r.chip.params && r.chip.params.color ? `<span class="tvg-dot" style="--g-color:${escHtml(r.chip.params.color)}"></span>` : ''}${escHtml(chipText(r.chip))}</span>`);
       if (r.absent) chips.push(`<span class="pf-chip new">${escHtml(whyText(r.why))}</span>`);
+      if (r.unsaid) chips.push(`<span class="pf-chip unsaid">${escHtml(whyText(r.why))}</span>`);
       if (m.mode === 'fuzzy' && r.rule) chips.push(`<span class="pf-chip rule" title="${escHtml((r.why || []).map(whyText).join(', ') + (r.boost && r.boost.length ? '\n' + r.boost.map(boostText).join(' · ') : ''))}">${escHtml(ruleText(r.rule))}</span>`);
       if (r.alias) chips.push(`<span class="pf-chip rule">${escHtml(aliasText(r.alias))}</span>`);
       if (r.git) chips.push(`<span class="pf-chip" title="git">${UI_ICONS.forkBranch}</span>`);
@@ -501,8 +570,11 @@ export function pathField(input, opts = {}) {
       }
     } else if (x.quiet) {
       // A1 (主开发 21:51Z): a field built over a saved text, never asked — no words, no tick, until a person touches it, a commit, or a refresh with the list open
-    } else if (x.pending || x.unanswered) {
-      h += `<div class="pf-res pf-pending"><span class="pf-hint">${escHtml(x.pending ? t('Asking the machine…') : unansweredWords(x.answerErr))}</span>${fromHTML()}</div>`;   // (LAW 1 / 2: never «missing», no path, no tick)
+    } else if (x.pending || x.unanswered || x.skipped) {
+      // (LAW 1 / 2: never «missing», no path, no tick) — B-d833: the held line's own words (the base that did not answer, when it is asked
+      // again, an error the machine gave) and, as a press of its own, what the page remembers in a later base (never Enter's target)
+      const vn = verdictNow();
+      h += `<div class="pf-res pf-pending"><span class="pf-hint">${escHtml(vn.text || (x.pending ? t('Asking the machine…') : unansweredWords(x.answerErr)))}</span>${fromHTML()}${vn.offer ? `<button type="button" class="pf-link pf-use" data-act="use" data-path="${escHtml(vn.offer)}">${escHtml(vn.offerText)}</button>` : ''}</div>`;
     } else if (x.missing) {
       if (x.file && kind === 'folder') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} is a file — this needs a folder.', { path: x.path }))}</span></div>`;
       else if (createMode === 'never') h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('{path} does not exist.', { path: x.path }))}</span></div>`;
@@ -513,8 +585,8 @@ export function pathField(input, opts = {}) {
         + `<label class="pf-tickrow"><input type="checkbox" data-act="tick"${st.tick ? ' checked' : ''}> ${escHtml(o.createWhen || (x.parentOk ? t('Create this folder') : t('Create this folder and the missing folders above it')))}</label>` + '</div>';
     } else if (!ew && model().rows.length) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(isPhone() ? t('No path called «{text}» — press a suggestion above.', { text }) : t('No path called «{text}» — choose a suggestion with ↑↓, Enter picks it.', { text }))}</span></div>`;
-    } else if (!ew && M.answer && M.answer.key === keyOf(text, hk())) {
-      h += `<div class="pf-res"><span class="pf-hint">${escHtml(t('Nothing found — try other letters, or press the folder button.'))}</span></div>`;
+    } else if (!ew && M.answer && M.answer.key === keyNow(text)) {
+      h += `<div class="pf-res"><span class="pf-hint">${escHtml(rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('Nothing found — try other letters, or press the folder button.'))}</span></div>`;
     }
     return h;
   }
@@ -554,12 +626,6 @@ export function pathField(input, opts = {}) {
   /* ── the chips row (New Session): 由名字 per selected group + home (PURE nameChips), then the day-one folders (src/day-one.js
      folderChips) — painted on refresh() (never at construction: no fetch while the page boots), again when an answer moves a
      新建 mark; a chip is the person's pick ── */
-  const knownAbsent = (W, p) => {
-    const L = W.L; if (L.dirs[p]) return false;
-    if (W.asked && W.asked.has(p)) return true;   // asked, and not answered as a folder
-    const up = L.dirs[parentOf(p)];
-    return !!(up && Array.isArray(up.kids) && !up.more && !up.kids.includes(baseName(p)));   // (B-0f3d: a listing cut at its 400 entries decides no absence)
-  };
   function paintChips(force = false) {
     if (!chipsEl || st.destroyed) return;
     const h = hk(); const W = world(h);
@@ -726,6 +792,7 @@ export function pathField(input, opts = {}) {
   under.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     if (b.dataset.act === 'alt') { set(b.dataset.path, { commit: true, how: 'pick' }); return; }
+    if (b.dataset.act === 'use') { set(b.dataset.path, { commit: false }); return; }   // R-j: it sets that absolute text — its own stat decides; nothing is committed
     const best = b.dataset.act === 'best' ? bestNow() : '';
     if (best) { set(best, { commit: true, how: 'pick' }); return; }
   });
@@ -734,7 +801,7 @@ export function pathField(input, opts = {}) {
     st.tick = !!e.target.checked;
     if (st.tick && errNow()) commit('api'); else paint();
   });
-  /* LEAVING the field commits it (a press in its own list / line / picker is not leaving) */
+  /* LEAVING the field commits it (a press in its own list / line / picker is not leaving; its chips row sits inside its wrap) */
   const inside = (n) => !!n && (wrap.contains(n) || list.contains(n) || !!(n.closest && n.closest('.pf-picker')));
   wrap.addEventListener('focusout', () => {
     setTimeout(() => {
@@ -889,7 +956,7 @@ export function pathField(input, opts = {}) {
     st.chipsAt = ''; paintChips(true);
   }
   function destroy() {
-    st.destroyed = true; clearTimeout(st.timer); clearTimeout(st.probeTimer); st.ctl?.abort?.();
+    st.destroyed = true; clearTimeout(st.timer); clearTimeout(st.probeTimer); st.ctl?.abort?.(); for (const c of st.ctls.values()) c.abort(); st.ctls.clear();
     fire({ type: 'destroyed' }); st.pctl?.abort?.(); answer([...waiters.keys()], null);   // the model's timers disarmed: no ask after the page is gone; every press still waiting hears «nothing»
     // lane dialog-yield r5: ITS OPEN PICKER GOES WITH IT, said — a pick there would land in no field (37c1b566: a Task Detail row
     // removed while its picker was open kept the picker, and the pick was dropped in silence)
@@ -910,7 +977,7 @@ export function pathField(input, opts = {}) {
   // EMPTY box with its suggestion list open was rebuilt under the person and the list closed). `ae` = the active element as the
   // caller read it before it emptied its body (emptying it moves the focus out of the box)
   const inUse = (ae = document.activeElement) => !st.destroyed && !!(inside(ae) || st.open || input.value.trim() || picking());
-  const handle = { el: wrap, input, value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy, picking, inUse };
+  const handle = { el: wrap, input, trace: () => st.trace.slice(), value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy, picking, inUse };
   input._pathField = handle;
   return handle;
 }

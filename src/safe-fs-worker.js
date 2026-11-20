@@ -29,6 +29,10 @@ process.env.UV_THREADPOOL_SIZE = process.env.UV_THREADPOOL_SIZE || '8';
 // Quote-aware CSV field split — MIRRORS splitCsvLine in src/routes/files.js
 // (kept in lockstep so csvRange returns byte-identical rows). If you change one,
 // change the other.
+/* A stat's error as an ANSWER (B-d833, the coordinator's find 2026-11-20): only «no such file» (ENOENT, or ENOTDIR — a file where a
+   folder was) says the path is not there; any other error (EACCES, EIO, ELOOP, a dead mount's ESTALE) is NOT KNOWN, said as such */
+function goneOf(e) { return e && (e.code === 'ENOENT' || e.code === 'ENOTDIR') ? {} : { err: String((e && (e.message || e.code)) || e).slice(0, 200) }; }
+
 function splitCsvLine(line, sep) {
   const out = [];
   let cur = '', inQ = false, wasQuoted = false;
@@ -165,7 +169,9 @@ const OPS = {
   // counted), `git` (a .git inside), the folder's own mtime; a folder whose mtime equals `known` answers `same` (the hub's
   // listing cache keeps it). `probes` = paths stated only (a Task Group's folder, a recent one, a name-derived one):
   // exists / isDir / git / mtime / fileCount. Bounded: `maxKids` entries per folder (`more`). Never walks.
-  dirSlice({ dirs = [], probes = [], files = false, maxKids = 400, pkg = false }) {
+  dirSlice({ dirs = [], probes = [], files = false, maxKids = 400, pkg = false, skip = [] }) {
+    // `skip` (B-d833 R-c): a kid that is a known dead folder or a mount is NAMED, never stated inside (its .git, its package.json, a link's target)
+    const skipSet = new Set(Array.isArray(skip) ? skip : []);
     const gitOf = (d) => { try { fs.statSync(path.join(d, '.git')); return true; } catch { return false; } };
     // `pkg` (the home's listing): a folder's package.json name — the instance's own checkout is the one named vibespace
     const pkgOf = (d) => { try { const f = path.join(d, 'package.json'); if (fs.statSync(f).size > 65536) return {}; const n = JSON.parse(fs.readFileSync(f, 'utf8')).name; return typeof n === 'string' ? { pkg: n.slice(0, 80) } : {}; } catch { return {}; } };
@@ -174,7 +180,7 @@ const OPS = {
       const d = want && want.path;
       if (!d) continue;
       let st = null;
-      try { st = fs.statSync(d); } catch { out.push({ path: d, exists: false }); continue; }
+      try { st = fs.statSync(d); } catch (e) { out.push({ path: d, exists: false, ...goneOf(e) }); continue; }
       if (!st.isDirectory()) { out.push({ path: d, exists: true, isDir: false, size: st.size, mtime: st.mtimeMs }); continue; }
       if (want.known != null && want.known === st.mtimeMs) { out.push({ path: d, exists: true, isDir: true, same: true, mtime: st.mtimeMs }); continue; }
       let list = [];
@@ -184,6 +190,7 @@ const OPS = {
       for (const e of list) {
         if (++n > maxKids) { more = true; break; }
         const p = path.join(d, e.name);
+        if (skipSet.has(p)) { if (e.isDirectory()) kids.push({ name: e.name, git: false }); else if (e.isSymbolicLink()) kids.push({ name: e.name, git: false, link: '' }); continue; }   // (a link's target is its own call's)
         if (e.isDirectory()) { kids.push({ name: e.name, git: gitOf(p), ...(pkg ? pkgOf(p) : {}) }); continue; }
         if (e.isSymbolicLink()) {
           let t = null; try { t = fs.statSync(p); } catch { continue; }   // a dangling link
@@ -202,13 +209,32 @@ const OPS = {
     for (const p of probes) {
       if (!p) continue;
       let st = null;
-      try { st = fs.statSync(p); } catch { pr.push({ path: p, exists: false }); continue; }
+      try { st = fs.statSync(p); } catch (e) { pr.push({ path: p, exists: false, ...goneOf(e) }); continue; }
       if (!st.isDirectory()) { pr.push({ path: p, exists: true, isDir: false, size: st.size, mtime: st.mtimeMs }); continue; }
       let fileCount = 0;
       try { for (const e of fs.readdirSync(p, { withFileTypes: true })) if (e.isFile()) fileCount++; } catch { fileCount = null; }
       pr.push({ path: p, exists: true, isDir: true, mtime: st.mtimeMs, git: gitOf(p), fileCount });
     }
     return { result: { dirs: out, probes: pr } };
+  },
+
+  // THE FOLDER FIELD'S LINE (B-d833, its fourth shape — the coordinator's ruling 2026-11-20 03:24Z): ONE BARE STAT of `path` — is it
+  // there, is it a folder (no readdir count, no .git: a living folder that is merely large never times out), its link's target; a stat
+  // that failed for another reason than the path's absence says its error. When it is ABSENT and `names` is given (the typed last
+  // segment), the SAME call reads the NAMES in its parent that start with it (a readdir — never a stat of any kid: a dead sibling cannot
+  // hang it). NAMES ONLY: the one match is stated by the hub, under ITS OWN name, through the door every level uses (it joins a call
+  // already out, obeys the marks, the skip list and the pool's blocked check — the read of the fourth shape, 2026-11-20 11:34Z). `files`
+  // lets a file be the answer.
+  pathStat({ path: p, names = null, files = false }) {
+    const bare = (q) => { try { const st = fs.statSync(q); const o = { path: q, exists: true, isDir: st.isDirectory() }; if (o.isDir) { try { if (fs.lstatSync(q).isSymbolicLink()) o.link = fs.realpathSync(q); } catch { } } return o; } catch (e) { return { path: q, exists: false, ...goneOf(e) }; } };
+    const stat = bare(p);
+    if (names != null && !stat.exists && !stat.err) {
+      const pre = String(names).toLowerCase(), dir = path.dirname(p), hits = [];
+      try { for (const e of fs.readdirSync(dir, { withFileTypes: true })) { if (!e.name.toLowerCase().startsWith(pre)) continue; if (e.isDirectory() || e.isSymbolicLink() || (files && e.isFile())) { hits.push(e.name); if (hits.length > 20) break; } } }
+      catch (e) { const g = goneOf(e); if (g.err) stat.namesErr = g.err; }
+      stat.names = hits.slice(0, 20);
+    }
+    return { result: { stat } };
   },
 
   // THE PATH FIELD'S FOLDER INDEX (lane path-field — the whole-path fuzzy search): the folders under `roots`, breadth

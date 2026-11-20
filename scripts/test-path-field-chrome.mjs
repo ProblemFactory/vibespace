@@ -129,11 +129,14 @@ const host = document.getElementById('host'), name = document.getElementById('na
 window.pf = pathField(document.getElementById('cwd'), {
   groupsOf: () => appGroups(window.sel), host: () => host.value || null, name: () => name.value, kind: 'folder', chips: true, id: 'harness-cwd',
   createWhen: '创建会话时新建这个文件夹',
-  onCommit: (i) => window.__log.push({ ev: 'commit', path: i.path, display: i.display, how: i.how, create: i.create, exists: i.exists, base: i.via.base }),
+  onCommit: (i) => { window.__log.push({ ev: 'commit', path: i.path, display: i.display, how: i.how, create: i.create, exists: i.exists, base: i.via.base }); window.__tl.push({ t: Math.round(performance.now()), ev: 'commit', how: i.how, display: i.display }); },
 });
 host.onchange = () => window.pf.refresh();
 name.addEventListener('input', () => window.pf.refresh());
 document.getElementById('other').addEventListener('click', () => window.__log.push({ ev: 'click-other' }));
+// (B-d833, the lane's heavy run at aa84c835c) a TIMELINE the ⑨b chip leg prints, green or red: where focus went, the pointer, the commits
+window.__tl = []; const tlOf = (n) => (n && n.nodeType === 1 ? (n.id ? '#' + n.id : String(n.className || n.tagName).split(' ')[0]) : String(n));
+for (const t of ['focusin', 'focusout', 'pointerdown', 'pointerup', 'click']) document.addEventListener(t, (e) => window.__tl.push({ t: Math.round(performance.now()), ev: t, at: tlOf(e.target), to: t === 'focusout' || t === 'focusin' ? tlOf(e.relatedTarget) : undefined }), true);
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') window.__log.push({ ev: 'esc', prevented: e.defaultPrevented }); });
 // ⑨e (A1): a field BUILT over a saved text before it is attached (a form queued behind a dirty one), attached later
 window.mkQueued = (v) => { const box = document.createElement('div'); box.id = 'qbox'; const i = document.createElement('input'); i.id = 'queued'; i.type = 'text'; i.value = v; box.appendChild(i); window.qf = pathField(i, { kind: 'folder', id: 'harness-queued' }); window.qbox = box; return true; };
@@ -424,7 +427,7 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   held.open();
   const landed = await until(async () => (await dirReplies()) > before && !(await ev(`!!document.querySelector('.path-field')?.dataset.pending`)), 30000);
   const u1 = await under();
-  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）» with its facts — judged once the machine answered', (await cwd()) === IR && !!landed && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）') && u1.includes('个文件'), landed ? u1 : await pfState());
+  ok('setDerived fills the field and its line says «= ~/work/investor-relations（来自任务组「投资者关系」）» with its facts — judged once the machine answered', (await cwd()) === IR && !!landed && u1.includes('= ~/work/investor-relations（来自任务组「投资者关系」）') && u1.includes('个文件'), { line: u1, landed: !!landed, state: await pfState() });   // (B-d833: the field's state printed whole, green or red)
   ok('…the list did not pop, nothing was committed', !(await listOpen()) && !(await log()).some((x) => x.ev === 'commit'), await log());
   const c1 = await ev('window.pf.commit().then((i) => i && { path: i.path, derived: i.derived, how: i.how })');
   ok('a commit of that untouched text says derived: true', !!c1 && c1.derived === true && c1.path === IR, c1);
@@ -440,7 +443,7 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   // the 由名字 chips under the field follow the name as it is typed
   const nameChips = () => ev(`[...document.querySelectorAll('#cwd-recent .cwd-name-chip')].map((c) => ({ path: c.dataset.path, isNew: c.dataset.new === '1', text: c.textContent }))`);
   ok('the name empty ⇒ no 由名字 chip', (await nameChips()).length === 0, await nameChips());
-  await ev(`document.getElementById('name').focus(); true`);
+  await ev(`window.__tl.length = 0; window.__tl.push({ t: Math.round(performance.now()), ev: 'mark', what: 'the name field takes focus', box: document.getElementById('cwd').value, active: document.activeElement && (document.activeElement.id || document.activeElement.className) }); document.getElementById('name').focus(); true`);
   await type('测');
   const k1 = await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/测' ? c : null; }, 3000);
   ok('one keystroke of the name ⇒ the chips under the field: <IR>/测, ~/测 (no list opened)', !!k1 && k1[1].path === HOME + '/测' && !(await listOpen()), k1 || (await nameChips()));
@@ -455,9 +458,22 @@ console.log('\n── ⑨b setDerived + the live 由名字 chips (lane new-sessi
   await until(async () => { const c = await nameChips(); return c.length === 2 && c[0].path === IR + '/测试' && c[0].isNew; }, 4000);
   {
     await ev(`window.__log.length = 0; window.pf.setDerived(${JSON.stringify(IR)}, { note: 'n' }); true`);
+    // (B-d833, the box pre-run r156: the press is on what a PERSON sees — the field's ask landed and the chips row still for two reads; what
+    // lies under the click point is printed and must be the chip: a press read from a row still being redrawn landed on another chip)
+    await until(async () => !(await ev(`!!document.querySelector('.path-field')?.dataset.pending`)), 8000);
+    const chipAt = () => ev(`(() => { const e = document.querySelector('#cwd-recent .cwd-name-chip'); if (!e) return null; const r = e.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, hit = document.elementFromPoint(x, y); return { x: Math.round(x), y: Math.round(y), path: e.dataset.path, under: hit ? (String(hit.className || hit.tagName) + ' ' + ((hit.closest && hit.closest('[data-path]') || {}).dataset || {}).path) : null, same: !!hit && (hit === e || e.contains(hit)) }; })()`);
+    const steady = await until(async () => { const a = await chipAt(); await sleep(80); const b = await chipAt(); return a && b && a.x === b.x && a.y === b.y && a.same && b.same ? b : null; }, 5000);
+    console.log(`  · ⑨b the 新建 chip at the press: ${JSON.stringify(steady || (await chipAt()))}`);
+    const before = (await log()).filter((x) => x.ev === 'commit');   // commits logged since setDerived, BEFORE the press (not the press's)
+    await ev(`window.__tl.push({ t: Math.round(performance.now()), ev: 'mark', what: 'the press', active: document.activeElement && (document.activeElement.id || document.activeElement.className) }); true`);
     await press('#cwd-recent .cwd-name-chip');
-    const got = await until(async () => { const l = await log(); return l.find((x) => x.ev === 'commit') || null; }, 4000);
-    ok('a press on the 新建 chip fills the field and commits it as a pick with the tick (made at use — create: true)', !!got && got.how === 'pick' && got.create === true && got.path === IR + '/测试' && (await cwd()) === '~/work/investor-relations/测试', { got, cwd: await cwd() });
+    const got = await until(async () => { const l = (await log()).filter((x) => x.ev === 'commit'); return l.length > before.length ? l[before.length] : null; }, 4000);
+    await sleep(300);   // (a blur's commit waits 150 ms after its focusout: time for one to show)
+    console.log(`  · ⑨b the timeline from the name field's focus (ms; focus, pointer, commits): ${JSON.stringify(await ev('window.__tl'))}`);
+    console.log(`  · ⑨b commits before the press: ${JSON.stringify(before)}`);
+    const commits = (await log()).filter((x) => x.ev === 'commit').slice(before.length), tickOn = await ev(`!!document.querySelector('.pf-under input[data-act="tick"]')?.checked`);
+    ok('a press on the 新建 chip fills the field and commits it as a pick with the tick (made at use — create: true)', !!got && got.how === 'pick' && got.create === true && got.path === IR + '/测试' && (await cwd()) === '~/work/investor-relations/测试', { got, cwd: await cwd(), log: await log(), verdict: await ev('window.pf.verdict()'), line: await under() });
+    ok('…the PRESS makes ONE commit, the chip\'s own pick (no blur-commit of the box\'s old text at the press), and the line\'s create tick CHECKED (made at use)', commits.length === 1 && commits[0].how === 'pick' && tickOn, { commits, tickOn, line: await under() });
     ok('…it made nothing yet', !fs.existsSync(IR + '/测试'));
   }
   await shot('09b-derived-and-name-chips');
@@ -588,12 +604,28 @@ console.log('\n── ⑨c the home\'s first read FAILS once (B-ckpt61 LAW 2) �
 
 console.log('\n── ⑩ a remote machine (my-mac): the same recommendations, computed for it ──');
 {
+  // (B-d833, r156: my-mac's own replies are RECORDED — status, its listing's home, how many folders, an error, partial — so the rows are
+  // read again once a listing with its home has landed, and both moments are printed)
+  await ev(`(() => { if (!window.__macTap) { window.__macTap = []; const f0 = window.fetch; window.fetch = function (...a) { const p = f0.apply(this, a); try { const u = String((a[0] && a[0].url) || a[0] || ''); if (u.includes('/api/hosts/h-mac/dir-complete')) p.then((r) => r.clone().json().then((j) => window.__macTap.push({ status: r.status, home: (j && j.listing && j.listing.home) || null, dirs: j && j.listing ? Object.keys(j.listing.dirs || {}).length : null, error: (j && j.error) || null, partial: !!(j && j.partial), unreachable: !!(j && j.unreachable) }))).catch((e) => window.__macTap.push({ failed: String(e && e.message || e) })); } catch { } return p; }; } window.__macTap.length = 0; return true; })()`);
   await ev(`window.sel = ['g-ir', 'g-cd']; document.getElementById('host').value = 'h-mac'; window.pf.refresh(); true`);
+  const macAsks = () => ev(`performance.getEntriesByType('resource').filter((e) => e.name.includes('/api/hosts/h-mac/dir-complete')).length`), mac0 = await macAsks();
   await ev(`document.getElementById('cwd').focus(); true`); await key('ArrowDown');
   const r = await until(async () => { const x = await rows(); return x.some((y) => y.path === '~/work/compute-deal' && y.absent) && x.some((y) => y.path === '~/Documents/算力合同') ? x : null; }, 8000);
+  // (B-d833, the coordinator's r146: how many asks the field made to my-mac until its first full rows — printed, green or red)
+  console.log(`  · ⑩ my-mac's first open: ${(await macAsks()) - mac0} ask(s) after the list opened (the field's and its chips'; the chips' first is before it) until its rows${r ? '' : ' — NEVER'}; the line «${(await under()).slice(0, 80)}»`);
+  console.log(`  · ⑩ my-mac's replies: ${JSON.stringify(await ev('window.__macTap'))}`);
+  console.log(`  · ⑩ the field's own trace of its replies (number / current, how taken, the world after): ${JSON.stringify(await ev('window.pf.trace()'))}`);
+  const homed = await until(async () => ((await ev('window.__macTap')) || []).some((x) => x.home) ? true : null, 5000);
+  console.log(`  · ⑩ the rows ${homed ? 'once a listing WITH its home had landed' : '— no listing with its home ever landed'}: ${JSON.stringify((await rows()).map((x) => [x.path, x.chips.join(' | '), x.absent]))}`);
   const g1 = (r || []).filter((x) => /任务组 · /.test(x.chips.join(' ')) || x.absent);
-  ok('① on my-mac: the IR folder (my-mac 上有), 算力 declared (为 my-mac 声明), compute-deal greyed «在 my-mac 上不存在 · 新建？»', !!r && r.find((x) => x.path === '~/work/investor-relations')?.chips.some((c) => c.includes('my-mac 上') || c.includes('在 my-mac')) && r.find((x) => x.path === '~/Documents/算力合同')?.chips.some((c) => c.includes('为 my-mac 声明')) && r.find((x) => x.path === '~/work/compute-deal')?.chips.some((c) => c.includes('在 my-mac 上不存在 · 新建？')), g1);
-  ok('③ that machine\'s recents with counts (3 个会话)', (r || []).some((x) => x.path === '~/Projects/website' && x.chips.some((c) => /^3 个会话/.test(c))), r);
+  ok('① on my-mac: the IR folder (my-mac 上有), 算力 declared (为 my-mac 声明), compute-deal greyed «在 my-mac 上不存在 · 新建？»', !!r && r.find((x) => x.path === '~/work/investor-relations')?.chips.some((c) => c.includes('my-mac 上') || c.includes('在 my-mac')) && r.find((x) => x.path === '~/Documents/算力合同')?.chips.some((c) => c.includes('为 my-mac 声明')) && r.find((x) => x.path === '~/work/compute-deal')?.chips.some((c) => c.includes('在 my-mac 上不存在 · 新建？')), r ? g1 : { rows: await rows(), verdict: await ev('window.pf.verdict()') });   // (when it never came: what the list showed, and the field's own verdict)
+  ok('③ that machine\'s recents with counts (3 个会话)', (r || []).some((x) => x.path === '~/Projects/website' && x.chips.some((c) => /^3 个会话/.test(c))), r || { rows: await rows(), verdict: await ev('window.pf.verdict()') });
+  // (B-d833, r169: the PLACE of the rows' state — a SECOND open of the same list, printed: if that open's reply settles the rows, the first
+  // reply was received but never merged into the world the rows read; if not, the rows stay so after any reply)
+  await key('Escape'); await ev(`window.pf.refresh(); true`); await ev(`document.getElementById('cwd').focus(); true`); await key('ArrowDown');
+  const tap1 = ((await ev('window.__macTap')) || []).length;
+  await until(async () => (((await ev('window.__macTap')) || []).length > tap1 ? true : null), 5000); await sleep(300);
+  console.log(`  · ⑩ a SECOND open: my-mac's replies ${JSON.stringify(await ev('window.__macTap'))}; the field's trace ${JSON.stringify(await ev('window.pf.trace()'))}; the rows ${JSON.stringify((await rows()).map((x) => [x.path, x.chips.join(' | '), x.absent]))}`);
   await shot('10-remote');
   await key('Escape'); await reset();
 }

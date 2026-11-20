@@ -20,49 +20,205 @@ const INDEX_TTL_MS = 30e3;
 const SELF_TTL_MS = 60e3;
 const MAX_LIST = 14;
 const MAX_PROBES = 40;
-/* B-0f3d (lane bl-tests-a, after B-08d5): a PROBE (a recent conversation's folder, a Task Group's folder) that did not answer inside the
-   budget — a stale or hung storage mount — is not asked again for this long, nor any path UNDER it: the listing a person typed is never
-   held by it, and a hung mount is not asked (a file worker held up to its deadline) on every keystroke; a probe that answers late after
-   all is unmarked the moment it answers; a probe call that FAILS is late for that reply only. The reply names its late probes
-   (`probesLate`, in the field's own words). The field's OWN text's path (`own`) is never among them: it is decided inside the listing's race */
+/* B-d833 (lane bl-tests-a), ITS FOURTH SHAPE — the coordinator's ruling 2026-11-20 03:24Z / 03:38Z, the table work/b-d833-shape4-table.md
+   (three rounds of reads: the line borrowed the rows' calls; the page kept a second resolver). THE LINE AND THE ROWS NEVER SHARE A SLOT:
+   · THE LINE asks STATS ONLY, of the typed chain (R-a): per candidate ONE call (src/safe-fs-worker.js pathStat — a BARE stat; when
+     absent, in the same call, the NAMES in its parent that start with the typed last segment — names only: the one match is stated by
+     the hub under its own name, a level like any other). No listing,
+     walk, index or row call is ever a source of the verdict. CANDIDATES ONE AT A TIME in the bases' order (R-b): the next only when the
+     one before answered absent (or only completes); stop at the first exact hit or the first that does not answer.
+   · EVERY CALL GOES DOWN ITS CHAIN (R-c): a path is asked only when each level above it answered «a folder» within LIST_FRESH_MS (the
+     home and the root are given) — each path ONE bare stat under ONE key (`stat:<path>`), joined by every asker: the line's own call for
+     a candidate, a level of any chain, a row source's own folder (a listing, a probe and a walk state their folder first). The first level that does not
+     answer is the dead thing's ENTRANCE: one call; when the pool's DEADLINE ends it (`safeFsTimeout`) its mark speaks for everything
+     below it for PROBE_LATE_MS, and every source there answers SKIPPED with the time the mark ends (R-i) — never «late». A person's
+     PRESS sends the entrance's one call ONCE per window (it is attended: never answered from a mark alone). The walk and the row
+     listings take the known entrances (marked, or still out) and the hub's mounts as skips: a listing names such a kid, never states it.
+     At its GRANT a queued call is judged again: a mark set while it waited answers it, and a call queued past QUEUE_MAX_MS is dropped.
+   · TWO COUNTERS (R-d): the line has LINE_SLOTS of its own, the rows ROW_SLOTS. A call counts in its first asker's counter; a later
+     asker joins it only once it is SENT (a queued call is no call); at its grant a queued call joins one sent by then. No inline run
+     (the pool's own rule since B-3b03); no stall release (a hung call keeps its slot until the pool's deadline). The rows are best effort.
+   · the rows' own calls (a base's listing, an auxiliary probe, an index root) keep their OWN-KEY marks: a late one still out is JOINED,
+     one the pool's deadline ended is not sent again for PROBE_LATE_MS (answered «skipped»; the list says it is still looking). SLOW, NOT HUNG
+     (2.369.413's law, kept): a probe's fact is KEPT PROBE_LATE_MS when its call lands and remembers whether that call went LATE (past
+     the budget of the ask that sent it); it is USED while fresh (< LANDED_FRESH_MS), past that ONLY for a path whose last call went late
+     — answered with it, refreshed by ONE call behind it; a landing never writes over a fact sent later; only the pool's DEADLINE keeps a
+     mark (any other failure is no hang). The field's own path is a line candidate: it never reads a kept fact. */
 const PROBE_LATE_MS = 30e3;
-/* (2.369.413, the coordinator's law of 03:24Z: only a probe that is HUNG is skipped; a probe that was late is asked again on the next ask
-   and its result is USED when it lands; a row never claims a fact the machine has not given) a late probe's call is NEVER sent again while
-   it is out: the next ask JOINS it inside its own budget; when it lands, its facts are KEPT for the mark's whole window (PROBE_LATE_MS) and
-   the next ask USES them whatever the gap; a kept fact older than LANDED_FRESH_MS is answered WITH and refreshed by ONE call sent behind it
-   (marked out like any call: a second ask joins it, its landing replaces the old fact); a call is marked the moment it is SENT (asks inside
-   its first budget join it: one call a path); a probe the answer leaves out is late, never «answered»; a probe still unanswered after
-   PROBE_LATE_MS is asked anew (a hung one costs one call per window). The field's OWN path never reads a kept fact (a commit still asks) */
 const LANDED_FRESH_MS = 2000;
+const LINE_SLOTS = 2;
+const ROW_SLOTS = 1;
+const QUEUE_MAX_MS = 2000;   // a row call still queued this long after it was asked for is dropped (no burst of stale calls)
+const LATE = Object.freeze({ late: true });
 
 function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '..', '..'), dataDir = null, mounts = () => [], now = Date.now } = {}) {
-  const listCache = new Map();   // abs → { at, entry }
-  const indexCache = new Map();  // key → { at, dirs, links, p }
+  const listCache = new Map();   // abs → { at, entry, pkg }
+  const indexCache = new Map();  // root + skip → { at, dirs, links, partial, p }
   let selfCache = { at: 0, v: null, p: null };
-  const lateProbes = new Map();  // abs → { at, pw, budget, late }: a probe call still OUT, marked when SENT (joined by every ask, never sent again)
-  const landed = new Map();      // abs → { at, fact }: a probe's facts, kept PROBE_LATE_MS when its call lands — the next ask uses them
+  const known = new Map();       // abs → { at, stat }: a bare stat answered < LIST_FRESH_MS ago (a level's «a folder», a candidate's facts)
+  const landed = new Map();      // abs → { at, sentAt, late, fact }: a row probe's facts (kept PROBE_LATE_MS; `late` = its call went late)
+  const sent = new Map();        // key → { path, entrance, at, hungAt, p } — calls SENT, and the DEADLINE MARK of each that hung (30 s)
+  const pressed = new Map();     // entrance path → when a person's press last went through its mark (ONCE per window)
+  let mountPaths = [];           // the hub's mounted rows, as last read (a listing names them, never states inside them)
+  const queued = new Map();      // counter + key → its promise (a call waiting for its counter's slot)
   const dataRoot = dataDir || path.join(repoDir, 'data');
-
-  async function listDirs(abs, { files = false, pkg = false } = {}) {
-    const t = now();
-    const out = []; const ask = [];
-    for (const p of abs) {
-      const c = listCache.get(p);
-      if (c && t - c.at < LIST_FRESH_MS && (!files || c.entry.files) && (!pkg || c.pkg)) out.push(c.entry);
-      else ask.push({ path: p, known: c && (!files || c.entry.files) && (!pkg || c.pkg) ? c.entry.mtime : undefined });
+  const C = { line: { cap: LINE_SLOTS, busy: 0, q: [] }, rows: { cap: ROW_SLOTS, busy: 0, q: [] } };
+  const pump = (c) => { while (c.busy < c.cap && c.q.length) c.q.shift()(); };
+  const grant = (c) => new Promise((res) => { c.q.push(() => { c.busy++; let held = true; res(() => { if (!held) return; held = false; c.busy--; pump(c); }); }); pump(c); });
+  const under = (p, q) => p === q || p.startsWith(q === '/' ? '/' : q + '/');
+  const given = (p) => p === home || p === '/' || home.startsWith(p === '/' ? '/' : p + '/');   // the home, the root and the home's ancestors
+  const markEnd = (m) => m.hungAt + PROBE_LATE_MS;
+  /* the hung ENTRANCE at or above p (the pool's deadline ended its call) — its mark speaks for everything below it */
+  function entranceAbove(p, t, except = null) { for (const m of sent.values()) if (m !== except && m.entrance && m.hungAt != null && t - m.hungAt < PROBE_LATE_MS && under(p, m.path)) return m; return null; }
+  /* ONE CALL: joined while it is SENT; queued in its asker's counter otherwise; at the grant it joins a call sent by then */
+  function once(key, cn, p, run, { entrance = false, born = now(), through = null }) {
+    const t = now(), s0 = sent.get(key);
+    if (s0 && s0.hungAt == null && t - s0.at < PROBE_LATE_MS) return s0.p;
+    if (s0 && s0 !== through && s0.hungAt != null && t - s0.hungAt < PROBE_LATE_MS) return Promise.resolve({ skipped: markEnd(s0), at: p });   // its OWN deadline mark: never sent again inside the window
+    const qk = cn + '\n' + key;
+    if (queued.has(qk)) return queued.get(qk);
+    const qp = grant(C[cn]).then((free) => {
+      queued.delete(qk);
+      const t1 = now(), s1 = sent.get(key);
+      if (s1 && s1.hungAt == null) { free(); return s1.p; }   // sent by the other counter meanwhile: joined, the slot given back
+      // at its GRANT a call is judged again: a mark set while it waited (its own, or a dead entrance above it) and an age nobody waits for
+      if (s1 && s1 !== through && s1.hungAt != null && t1 - s1.hungAt < PROBE_LATE_MS) { free(); return { skipped: markEnd(s1), at: p }; }
+      const m = entranceAbove(p, t1, through); if (m) { free(); return { skipped: markEnd(m), at: m.path }; }
+      if (t1 - born > QUEUE_MAX_MS) { free(); return null; }
+      const e = { key, path: p, entrance, at: t1, hungAt: null, p: null };
+      e.p = Promise.resolve().then(run).then(
+        (r) => { free(); if (sent.get(key) === e) sent.delete(key); return { ok: r }; },
+        (err) => { free(); if (sent.get(key) === e) { if (err && err.safeFsTimeout) e.hungAt = now(); else sent.delete(key); } return { failed: String((err && (err.message || err.code)) || err || 'failed').slice(0, 200) }; });
+      sent.set(key, e);
+      return e.p;
+    });
+    queued.set(qk, qp);
+    return qp;
+  }
+  /* a source under a hung entrance: SKIPPED (with the time its mark ends) — but a PRESS sends the entrance's one call once in the window */
+  function skippedFor(p, t, press) {
+    const m = entranceAbove(p, t);
+    if (!m) return null;
+    const pa = pressed.get(m.path);
+    // the press goes through ONCE per window — its mark STAYS (a listing built meanwhile still skips the folder) until the press's own
+    // call is SENT and takes its place
+    if (press && m.path === p && !(pa != null && t - pa < PROBE_LATE_MS)) { pressed.set(m.path, t); return { through: m }; }
+    return { skipped: markEnd(m), at: m.path };
+  }
+  /* ONE LEVEL's bare stat → { ok: stat } | { skipped } | null (no answer in time) | { failed } (the pool failed: late) */
+  function levelStat(p, cn, o) {
+    const t = now(), k = known.get(p);
+    if (k && t - k.at < LIST_FRESH_MS) return Promise.resolve({ ok: k.stat });
+    const sk = skippedFor(p, t, o.press); if (sk && sk.skipped) return Promise.resolve(sk);
+    return once('stat:' + p, cn, p, () => call('pathStat', { path: p }).then((r) => { const st = r && r.stat; if (st && !st.err) noteKnown(p, st); return st; }), { ...o, entrance: true, through: sk && sk.through });
+  }
+  /* THE DESCENT: every level above `p` (to `p` itself when `self`) answered «a folder» — else where it stopped and why */
+  async function descend(p, cn, o, self) {
+    if (given(p)) return null;
+    const root = under(p, home) ? home : '/';
+    const segs = p.slice(root === '/' ? 1 : root.length + 1).split('/').filter(Boolean);
+    let cur = root;
+    for (let i = 0; i < segs.length - (self ? 0 : 1); i++) {
+      cur = cur === '/' ? '/' + segs[i] : cur + '/' + segs[i];
+      const r = await raceOf(levelStat(cur, cn, o), o.untilSoft);
+      if (r === LATE || !r) return { late: true, at: cur };
+      if (r.skipped) return { skipped: r.skipped, at: cur };
+      if (r.failed != null) return { late: true, at: cur };   // the pool failed the call: not an answer
+      const st = r.ok || {};
+      if (st.err) return { failed: st.err, at: cur };
+      if (!st.exists || st.isDir === false) return { absent: true, at: cur, st };
     }
-    if (ask.length) {
-      const r = await call('dirSlice', { dirs: ask, files, pkg });
-      for (const d of (r && r.dirs) || []) {
-        const c = listCache.get(d.path);
-        if (d.same && c) { c.at = now(); out.push(c.entry); continue; }
-        if (d.exists && d.isDir !== false && Array.isArray(d.kids)) listCache.set(d.path, { at: now(), entry: d, pkg });
-        else listCache.delete(d.path);
-        out.push(d);
+    return null;
+  }
+  const raceOf = (p, untilSoft) => Promise.race([Promise.resolve(p).then((r) => r || LATE), untilSoft]);
+  const noteKnown = (p, st) => { known.set(p, { at: now(), stat: st }); if (known.size > 2000) for (const k of [...known.keys()].slice(0, 500)) known.delete(k); };
+  /* what a LISTING must not state inside (the worker names such a kid, never stats it): every dead entrance marked or still out, the
+     hub's mounts, and the paths THIS ask states by their own calls (the typed candidates, the probes) — a listing never crosses a known
+     dead folder, and never races a path's own stat into it (R-c) */
+  const skipNow = (also = []) => [...new Set([...mountPaths, ...also, ...[...sent.values()].filter((m) => m.entrance).map((m) => m.path)])];
+  /* THE LINE: one candidate — its chain, then its ONE own call (the stat; absent ⇒ the names under the typed prefix), then the one match's
+     stat under the MATCH's own key */
+  async function lineAnswer(c, a, o) {
+    if (!given(a)) {
+      const d = await descend(a, 'line', o, false);
+      if (d) return { path: c, ...(d.absent ? { answer: 'absent', parentAbsent: d.at } : d.skipped ? { answer: 'skipped', until: d.skipped, at: d.at } : d.failed != null ? { answer: 'failed', err: d.failed } : { answer: 'late', at: d.at }) };
+    }
+    const t = now(), k = known.get(a);
+    let st = k && t - k.at < LIST_FRESH_MS && k.stat.exists ? k.stat : null;   // a fresh «it is there» stands; an absence is asked again (its names)
+    if (!st) {
+      const sk = skippedFor(a, t, o.press); if (sk && sk.skipped) return { path: c, answer: 'skipped', until: sk.skipped, at: sk.at };
+      // ONE KEY per path: the line's own call IS that path's level stat (joined either way); a level's bare stat joined (no names) that
+      // says absent is followed by the line's own, with the names — the folder answered, so it is no second call into a dead thing
+      const own = () => once('stat:' + a, 'line', a, () => call('pathStat', { path: a, names: path.basename(a), files: o.files }).then((x) => { const s1 = x && x.stat; if (s1 && s1.exists && !s1.err) noteKnown(a, s1); return s1; }), { ...o, entrance: true, through: sk && sk.through });
+      let r = await raceOf(own(), o.untilSoft);
+      if (r && r !== LATE && r.ok && !r.ok.exists && !r.ok.err && r.ok.names === undefined) r = await raceOf(own(), o.untilSoft);
+      if (r === LATE || !r) return { path: c, answer: 'late', at: a };
+      if (r.skipped) return { path: c, answer: 'skipped', until: r.skipped, at: r.at || a };
+      if (r.failed != null) return { path: c, answer: 'late', at: a };
+      st = r.ok || {};
+      // THE ONE MATCH is stated by the hub, under ITS OWN name, through the door every level uses (the worker answers names only): it
+      // joins a call already out, obeys the marks above it and its own, sits in every skip list, passes the pool's blocked check — one
+      // dead folder is one call whatever prefix of it is typed (R-c; the read of the fourth shape, 2026-11-20 11:34Z)
+      if (!st.exists && !st.err && Array.isArray(st.names) && st.names.length === 1) {
+        const mp = path.join(path.dirname(a), st.names[0]);
+        const mr = await raceOf(levelStat(mp, 'line', o), o.untilSoft);
+        if (mr === LATE || !mr || mr.failed != null) return { path: c, answer: 'late', at: mp };
+        if (mr.skipped) return { path: c, answer: 'skipped', until: mr.skipped, at: mr.at || mp };
+        st = { ...st, one: mr.ok };
       }
-      if (listCache.size > 2000) for (const k of [...listCache.keys()].slice(0, 500)) listCache.delete(k);
     }
-    return out;
+    const ans = PC.lineAnswerOf(st, { files: o.files });
+    return { path: c, ...ans, stat: st, ...(ans.completed ? { completed: PC.toTilde(home, ans.completed) } : {}) };
+  }
+
+  /* ── THE ROWS (best effort, their own slot): a folder listed / a path stated / a root walked — each down its chain first ── */
+  function listOne(a, { files = false, pkg = false, ...o }) {
+    const c = listCache.get(a);
+    if (c && (!files || c.entry.files) && (!pkg || c.pkg) && now() - c.at < LIST_FRESH_MS) return Promise.resolve({ ok: c.entry });
+    return once(`list:${files ? 'f' : ''}${pkg ? 'p' : ''}:${a}`, 'rows', a, () => {
+      const c0 = listCache.get(a), base = c0 && (!files || c0.entry.files) && (!pkg || c0.pkg) ? c0 : null;   // `same` answers THIS entry
+      return call('dirSlice', { path: a, dirs: [{ path: a, known: base ? base.entry.mtime : undefined }], files, pkg, skip: skipNow(o.skipAlso) }).then((r) => {
+        const d = ((r && r.dirs) || [])[0] || null;
+        if (!d) return null;
+        if (d.same) { if (!base) return null; listCache.set(a, { at: now(), entry: base.entry, pkg: base.pkg }); return base.entry; }
+        if (d.exists && d.isDir !== false && Array.isArray(d.kids)) listCache.set(a, { at: now(), entry: d, pkg });
+        else listCache.delete(a);
+        if (listCache.size > 2000) for (const k of [...listCache.keys()].slice(0, 500)) listCache.delete(k);
+        return d;
+      });
+    }, o);
+  }
+  function keptProbe(a, o) {
+    const t = now(), l = landed.get(a);
+    if (!l || t - l.at >= PROBE_LATE_MS || !(t - l.at < LANDED_FRESH_MS || l.late)) return null;
+    if (t - l.at >= LANDED_FRESH_MS) { const s0 = sent.get('probe:' + a); if (!(s0 && s0.hungAt == null)) rowSource(a, o, () => probeOne(a, o), true); }   // the refresh, behind (not waited for)
+    return Promise.resolve({ ok: l.fact });
+  }
+  function probeOne(a, o) {
+    return once('probe:' + a, 'rows', a, () => {
+      const at = now();
+      return call('dirSlice', { path: a, dirs: [], probes: [a] }).then((r) => {
+        const f = ((r && r.probes) || [])[0] || null, t2 = now();
+        if (f && !f.err) {
+          const cur = landed.get(a);
+          if (!cur || cur.sentAt <= at) landed.set(a, { at: t2, sentAt: at, late: t2 - at >= o.budget, fact: f });   // never over a newer fact
+          if (landed.size > 2000) for (const k of [...landed.keys()].slice(0, 500)) landed.delete(k);
+        }
+        return f;
+      });
+    }, o);
+  }
+  /* a row source: its chain first, TO ITSELF (a bare stat of the folder — the same key as the line's — before its probe, listing or walk:
+     a dead folder is met ONCE, by that stat, and everything under it joins it), then its own call: SKIPPED / late / null / { ok } */
+  async function rowSource(a, o, run, probe = false) {
+    const sk = skippedFor(a, now(), false); if (sk) return sk;
+    const d = await descend(a, 'rows', o, true);
+    // a PROBE's chain answers its facts itself: the path there but a file (its own stat), or the machine's own error on the way (NOT KNOWN,
+    // said as such — probesFailed); a listing or a walk there has no rows (never «still looking» about an error)
+    if (d && probe && d.failed != null) return { ok: { path: a, exists: false, err: d.failed } };
+    if (d && probe && d.absent && d.at === a && d.st && d.st.exists) return { ok: d.st };
+    if (d) return d.skipped ? { skipped: d.skipped } : d.absent || d.failed != null ? null : LATE;
+    return raceOf(run(), o.untilSoft);
   }
 
   /** The exclusion facts — never blocks on a fresh walk twice (one in flight). */
@@ -70,142 +226,141 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     const t = now();
     if (selfCache.v && t - selfCache.at < SELF_TTL_MS) return Promise.resolve(selfCache.v);
     if (selfCache.p) return selfCache.p;
-    selfCache.p = listDirs([home], { pkg: true }).then((ds) => {
+    selfCache.p = Promise.resolve(listOne(home, { pkg: true })).then((r) => {
+      const d = r && r.ok;
+      if (!d) { selfCache.p = null; return { home, roots: [repoDir, dataRoot] }; }
       const roots = [repoDir, dataRoot];
-      for (const d of ds) for (const k of d.kids || []) if (k.pkg === PC.SELF_PACKAGE) roots.push(path.join(home, k.name));
+      for (const k of d.kids || []) if (k.pkg === PC.SELF_PACKAGE) roots.push(path.join(home, k.name));
       selfCache = { at: now(), v: { home, roots: [...new Set(roots)] }, p: null };
       return selfCache.v;
-    }).catch(() => { selfCache.p = null; return { home, roots: [repoDir, dataRoot] }; });
+    });
     return selfCache.p;
   }
 
-  function index(roots, skip) {
-    const key = roots.join('\n');
-    const t = now();
+  /* ONE index root walked (a root on a dead mount is its own source — the home's walk still answers) */
+  function indexOne(root, skip, o) {
+    const key = root + '\n' + skip.join('\n');
     const c = indexCache.get(key);
     const walk = () => {
-      const p = call('dirIndex', { roots, depth: 4, max: 6000, budgetMs: 350, skip }).then((r) => {
-        indexCache.set(key, { at: now(), dirs: (r && r.dirs) || [], links: (r && r.links) || [], partial: !!(r && r.partial), p: null });
-        if (indexCache.size > 24) indexCache.delete(indexCache.keys().next().value);
-        return indexCache.get(key);
-      }).catch(() => { const e = indexCache.get(key); if (e) e.p = null; return e || null; });
+      const p = Promise.resolve(once('index:' + key, 'rows', root, () => call('dirIndex', { path: root, roots: [root], depth: 4, max: 6000, budgetMs: 350, skip }), o)).then((r) => {
+        if (r && r.ok) {
+          indexCache.set(key, { at: now(), dirs: r.ok.dirs || [], links: r.ok.links || [], partial: !!r.ok.partial, p: null });
+          if (indexCache.size > 48) indexCache.delete(indexCache.keys().next().value);
+          return indexCache.get(key);
+        }
+        const e = indexCache.get(key); if (e) e.p = null;
+        return e && e.dirs ? e : null;
+      });
       if (c) c.p = p; else indexCache.set(key, { at: 0, dirs: null, links: [], p });
       return p;
     };
-    if (c && c.dirs && t - c.at < INDEX_TTL_MS) return Promise.resolve(c);
-    if (c && c.dirs) { if (!c.p) walk(); return Promise.resolve(c); }   // stale: answer from it, refresh behind
+    if (c && c.dirs && now() - c.at < INDEX_TTL_MS) return Promise.resolve(c);
+    if (c && c.dirs) { if (!c.p) walk(); return Promise.resolve(c); }
     return c && c.p ? c.p : walk();
   }
 
-  /** One answer. `text` = what the field holds; `bases` / `probe` = paths (`~/…` or absolute); `q` = the fuzzy words.
-   *  `own` (B-0f3d) = the field's text's own path, decided inside the listing's race; the reply names the AUXILIARY probes that ran
-   *  out of the budget in `probesLate` (the field's own strings)
-   *  → { listing, self, took, partial, probesLate? } */
-  async function slice({ text = '', bases = [], probe = [], own = '', q = '', kind = 'folder', budgetMs = 450 } = {}) {
+  /** One answer. `text` = what the field holds; `bases` / `probe` = paths (`~/…` or absolute); `q` = the fuzzy words; `press` = a
+   *  person's press is waiting for it (R-i: the entrance's one call goes through its window once).
+   *  → { listing, self, took, partial, verdict?, rowsLate?, rowsUnread?, probesLate?, probesFailed?, sourcesLate?, sourcesUnread? } — `verdict` = the text's (PURE
+   *  textVerdict: { kind: 'exists' | 'absent' | 'late' | 'skipped' | 'failed', path?, completed?, until?, err?, base? }) */
+  async function slice({ text = '', bases = [], probe = [], q = '', kind = 'folder', budgetMs = 450, press = false } = {}) {
     const t0 = now();
     const files = kind === 'file';
     const abs = (p) => PC.fromTilde(home, String(p || '').trim()).replace(/(.)\/+$/, '$1');
-    const baseList = (Array.isArray(bases) ? bases : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~'))).slice(0, 12);
-    const ask = PC.sliceAsk(text, baseList.map((p) => ({ path: PC.toTilde(home, abs(p)) })));
-    const toList = [...new Set(ask.list.map(abs))].slice(0, MAX_LIST);
-    const probeIn = (Array.isArray(probe) ? probe : []).map(String).filter((p) => p.startsWith('/') || p.startsWith('~'));
-    const sentAs = new Map();   // abs → the strings the field sent for it (a late probe is named back in the field's own words)
-    for (const p of probeIn) { const a = abs(p); if (!sentAs.has(a)) sentAs.set(a, []); sentAs.get(a).push(p); }
-    // the field's OWN text's path (`own`): its existence is decided INSIDE the listing's race (a folder past the listing's 400 entries is
-    // known only by its probe) — never batched with the auxiliary probes, never «late» on its own
-    const ownAbs = own && (String(own).startsWith('/') || String(own).startsWith('~')) ? abs(own) : '';
-    const probes = [...sentAs.keys()].filter((a) => a !== ownAbs).slice(0, MAX_PROBES);
+    const allBases = (Array.isArray(bases) ? bases : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~')));
+    const tAll = allBases.map((p) => ({ path: PC.toTilde(home, abs(p)) }));
+    const baseList = allBases.slice(0, 12);
+    const ask = PC.sliceAsk(text, tAll.slice(0, 12));
+    // every base the field sent (asked ONE AT A TIME — no cut: an «absent» needs every candidate answered), in the ~ form under the home
+    const cands = PC.textCandidates(text, tAll).map((c) => { const a = abs(c); return { c: PC.toTilde(home, a), a }; });
+    const candAbs = new Set(cands.map((x) => x.a));
+    const rowsList = [...new Set(ask.list.map(abs))].slice(0, MAX_LIST);
+    const sentAs = new Map();
+    for (const p of (Array.isArray(probe) ? probe : []).map(String).filter((x) => x.startsWith('/') || x.startsWith('~'))) { const a = abs(p); if (!sentAs.has(a)) sentAs.set(a, []); sentAs.get(a).push(p); }
+    const probes = [...sentAs.keys()].filter((a) => !candAbs.has(a)).slice(0, MAX_PROBES);
     const fuzzy = String(q || '').trim();
     const mountRows = [];
-    try { for (const m of mounts() || []) if (m && m.path && m.mounted) mountRows.push({ path: m.path, label: m.label || m.source || m.name || '' }); } catch { }
-    let partial = false;
-    const deadline = new Promise((r) => setTimeout(() => r('late'), Math.max(50, budgetMs)));
-    const work = (async () => {
-      const me = await self();
-      const listed = await listDirs(toList, { files });
-      /* exactly one folder starts with the typed last segment → list it too (the field shows what is inside; Tab goes in) */
-      const last = /\s/.test(text) || !String(text).includes('/') ? '' : String(text).slice(String(text).lastIndexOf('/') + 1).toLowerCase();
-      if (last) {
-        const one = [];
-        for (const d of listed) { const hits = (d.kids || []).filter((k) => !k.link && k.name.toLowerCase().startsWith(last)); if (hits.length === 1) one.push(path.join(d.path, hits[0].name)); }
-        if (one.length) listed.push(...await listDirs([...new Set(one)].slice(0, 4), { files }));
+    try { for (const m of mounts() || []) if (m && m.path && m.mounted) mountRows.push({ path: m.path, label: m.label || m.source || m.name || '', blocked: !!m.blocked }); } catch { }
+    mountPaths = mountRows.map((m) => m.path);
+    for (const [ep, at] of pressed) if (now() - at >= PROBE_LATE_MS) pressed.delete(ep);
+    let tm = null;
+    const until = new Promise((r) => { tm = setTimeout(() => r(LATE), Math.max(50, budgetMs)); });
+    const untilSoft = until.then(() => new Promise((r) => setImmediate(() => r(LATE))));   // an answer already in hand beats the deadline
+    const okOf = (r) => (r && r !== LATE && r.ok ? r.ok : null);
+    const o = { until, untilSoft, files, press: !!press, budget: Math.max(50, budgetMs), skipAlso: [...candAbs, ...probes] };
+    for (const [k, m] of sent) if (m.hungAt != null && now() - m.hungAt >= PROBE_LATE_MS) sent.delete(k);   // a mark lives PROBE_LATE_MS
+    // THE LINE: the candidates ONE AT A TIME, in the bases' order — stop at the first exact hit or the first that does not answer
+    const lineP = (async () => {
+      const out = [];
+      for (const x of cands) {
+        const ans = await lineAnswer(x.c, x.a, o);
+        out.push(ans);
+        if ((ans.answer === 'listed' && !ans.completed) || ans.answer === 'late' || ans.answer === 'skipped' || ans.answer === 'failed') break;
       }
-      let idx = null;
-      if (fuzzy) {
-        const roots = [home, ...baseList.map(abs).filter((p) => !(p === home || p.startsWith(home + '/')))];
-        const skip = [...me.roots, ...mountRows.map((m) => m.path)];
-        idx = await index([...new Set(roots)], skip);
-      }
-      const ownPr = ownAbs ? (((await call('dirSlice', { dirs: [], probes: [ownAbs] })) || {}).probes || []) : [];
-      return { me, listed, idx, ownPr };
+      return out;
     })();
-    const got = await Promise.race([work, deadline]);
-    let me, listed = [], idx = null, pr = [], ownPr = [];
-    const late = new Set();   // abs paths whose probe ran out of the budget (or was skipped as late)
-    if (got === 'late') { partial = true; me = selfCache.v || { home, roots: [repoDir, dataRoot] }; work.catch(() => {}); }
-    else ({ me, listed, idx, ownPr } = got);
-    // B-0f3d: the PROBES race what is left of the SAME budget on their own — a probe that hangs (a stale mount) never throws the finished
-    // listing away (the reply was partial with nothing listed, so an existing healthy folder typed by hand read as not answered); the
-    // reply says `probesLate` (the field marks none of them asked), and a late probe is skipped for PROBE_LATE_MS
-    if (got !== 'late' && probes.length) {
-      const t1 = now();
-      for (const [lp, m] of lateProbes) if (t1 - m.at >= PROBE_LATE_MS) lateProbes.delete(lp);   // bounded: a mark lives PROBE_LATE_MS from its send
-      for (const [lp, l] of landed) if (t1 - l.at >= PROBE_LATE_MS) landed.delete(lp);
-      const isLate = (m) => m.late || t1 - m.at >= m.budget;   // a call past its own budget (still out)
-      // a probe UNDER a path whose call ran past its budget waits for it (named late here, asked once it lands) — never a call per keystroke
-      // into what may be a hung folder (the home and the root are never a late ANCESTOR)
-      const underLate = (p) => { for (const [lp, m] of lateProbes) if (p !== lp && isLate(m) && lp !== home && lp !== '/' && p.startsWith(lp.endsWith('/') ? lp : lp + '/')) return true; return false; };
-      const fromLanded = [], joins = new Map(), askNow = [], refresh = [];
-      for (const p of probes) {
-        const m = lateProbes.get(p);
-        const l = landed.get(p);
-        // a kept fact: USED while fresh (< 2 s); past that ONLY for a path whose last call went LATE (slow storage), refreshed behind — a
-        // path that answers inside its budget is asked afresh, as it always was (a fast path is never served stale)
-        if (l && (t1 - l.at < LANDED_FRESH_MS || l.late)) { fromLanded.push(l.fact); if (t1 - l.at >= LANDED_FRESH_MS && !m) refresh.push(p); continue; }
-        if (m) { if (!joins.has(m.pw)) joins.set(m.pw, []); joins.get(m.pw).push(p); continue; }   // still out: JOINED, never sent again
-        if (underLate(p)) { late.add(p); continue; }
-        askNow.push(p);
-      }
-      // ONE call for the paths this ask needs, ONE behind it for kept facts grown old — each MARKED the moment it is sent; whatever lands
-      // is kept (a mark answered goes), so the next ask has it whatever the gap
-      // (a failure inside the budget drops the mark: late for that reply only; one past it is the pool's deadline — a hung path keeps
-      // its mark for the window)
-      const send = (ps) => {
-        const at = now();
-        // a call that fails is late, never the listing's end; only the pool's OWN deadline (`safeFsTimeout`) is a hang — any other failure,
-        // whenever it comes (a worker that died under another op's deadline), is no hang: its mark goes
-        const pw = call('dirSlice', { dirs: [], probes: ps }).then((r) => (r && r.probes) || [], (e) => ({ failed: true, deadline: !!(e && e.safeFsTimeout) }));
-        for (const p of ps) lateProbes.set(p, { at, pw, budget: Math.max(50, budgetMs), late: false });
-        pw.then((r) => {
-          const ok = Array.isArray(r), t2 = now(), late = t2 - at >= Math.max(50, budgetMs);
-          for (const p of ps) { const m = lateProbes.get(p); if (m && m.pw === pw && !(r && r.deadline)) lateProbes.delete(p); }   // (the pool's deadline: a hung path keeps its mark for the window)
-          if (!ok) return;
-          // a landing writes its fact only when no NEWER fact for that path has landed since this call was SENT; it remembers whether the
-          // call went late (only such a path is served a kept fact past 2 s)
-          for (const f of r) if (f && ps.includes(f.path) && !f.err) { const cur = landed.get(f.path); if (!cur || cur.sentAt <= at) landed.set(f.path, { at: t2, sentAt: at, late, fact: f }); }
-          if (landed.size > 2000) for (const k of [...landed.keys()].slice(0, 500)) landed.delete(k);
-        });
-        return pw;
-      };
-      if (refresh.length) send(refresh);   // not waited for: this reply answers with the kept facts
-      const races = [];
-      if (askNow.length) races.push({ pw: send(askNow), ps: askNow });
-      for (const [pw, ps] of joins) races.push({ pw, ps });
-      const outs = await Promise.all(races.map((x) => Promise.race([x.pw, deadline])));
-      outs.forEach((pg, i) => {
-        const { ps } = races[i];
-        if (pg && !Array.isArray(pg) && pg.failed) for (const p of ps) late.add(p);   // the call FAILED: late for this reply only
-        else if (pg === 'late') { for (const p of ps) { late.add(p); const m = lateProbes.get(p); if (m) m.late = true; } }
-        else { const got2 = new Map(pg.filter(Boolean).map((f) => [f.path, f])); for (const p of ps) { if (got2.has(p)) pr.push(got2.get(p)); else late.add(p); } }   // a probe the answer left out is late, never «answered»
-      });
-      pr.push(...fromLanded);
+    // THE ROWS (their own slot): the exclusion facts, the bases and the text's folders listed, the auxiliary probes, the index roots
+    const selfP = raceOf(self().then((v) => ({ ok: v })), untilSoft);
+    const listP = rowsList.map((p) => rowSource(p, o, () => listOne(p, { files, ...o })));
+    const auxP = probes.map((a) => keptProbe(a, o) || rowSource(a, o, () => probeOne(a, o), true));
+    const meR = await selfP;
+    const me = okOf(meR) || selfCache.v || { home, roots: [repoDir, dataRoot] };
+    let roots = [], idxP = [];
+    if (fuzzy) {
+      roots = [...new Set([home, ...baseList.map(abs).filter((p) => !(p === home || p.startsWith(home + '/')))])];
+      // the WALK's skip — and so the index cache's NAME — holds only what is STABLE: the roots, the mounts, the entrances whose deadline mark is
+      // SET (the read of round wc9f6okda: a healthy stat still out made the name differ at each keystroke — the 30 s index missed, «still
+      // looking» while typing — and a walk taken meanwhile never entered that healthy folder, «no matching folder» kept 30 s). Calls still
+      // out stay in the LISTINGS' skip only.
+      const marked = [...sent.values()].filter((m) => m.entrance && m.hungAt != null).map((m) => m.path);
+      const skip = [...new Set([...me.roots, ...mountPaths, ...marked])];
+      idxP = roots.map((r) => rowSource(r, o, () => indexOne(r, skip, o).then((e) => (e && e.dirs ? { ok: e } : null))));
     }
-    const probesLate = [...late].flatMap((a) => sentAs.get(a) || [a]);
-    const listing = PC.sliceListing({ home, machine: null, dirs: listed, probes: [...(ownPr || []), ...pr], index: idx && idx.dirs ? idx : null, mounts: mountRows, q: fuzzy });
-    return { listing, self: me, took: now() - t0, partial: partial || !!(idx && idx.partial), ...(probesLate.length ? { probesLate } : {}) };
+    const [answers, listR, auxR, idxR] = await Promise.all([lineP, Promise.all(listP), Promise.all(auxP), Promise.all(idxP)]);
+    clearTimeout(tm);
+    const verdict = cands.length ? { ...PC.textVerdict(answers) } : null;
+    if (verdict) {
+      if (verdict.kind === 'skipped') verdict.retryIn = Math.max(0, verdict.until - now());   // relative: the page's clock is not ours
+      if (verdict.kind === 'exists') verdict.literal = !verdict.completed && verdict.path === cands[0].c;   // L6: the text's own first candidate (an absolute / ~ text has one)
+      if (verdict.kind === 'absent') { const fa = answers.find((x) => !x.parentAbsent) || answers[0]; if (fa) verdict.missing = { path: fa.path, parentExists: !fa.parentAbsent }; }   // where it would be, and whether the folder above is there
+    }
+    if (verdict && (verdict.kind === 'late' || verdict.kind === 'skipped' || verdict.kind === 'failed') && !/^[~/]/.test(String(text).trim())) { const j = tAll.findIndex((b) => PC.joinPath(b.path, String(text).trim()) === verdict.path); if (j >= 0) verdict.base = allBases[j]; }   // R-j: the base that did not answer, in the field's own words
+    const listed = listR.map(okOf).filter(Boolean);
+    /* exactly one folder starts with the typed last segment → list it too (rows: what is inside; Tab goes in) */
+    const lastSeg = /\s/.test(text) || !String(text).includes('/') ? '' : String(text).slice(String(text).lastIndexOf('/') + 1).toLowerCase();
+    if (lastSeg) {
+      const one = [];
+      for (const d of listed) { const hits = (d.kids || []).filter((k) => !k.link && k.name.toLowerCase().startsWith(lastSeg)); if (hits.length === 1) one.push(path.join(d.path, hits[0].name)); }
+      if (one.length) listed.push(...(await Promise.all([...new Set(one)].slice(0, 4).map((p) => rowSource(p, o, () => listOne(p, { files, ...o }))))).map(okOf).filter(Boolean));   // down its chain too (a dead kid is met by its one stat)
+    }
+    // the probes SENT that this reply does not answer (never marked asked by the field): late / skipped → probesLate, an error → probesFailed
+    const state = new Map();
+    probes.forEach((a, i) => { const r = auxR[i]; if (r === LATE || (r && r.skipped) || (r && r.failed != null) || (r && 'ok' in r && !r.ok)) state.set(a, 'late'); else { const f = okOf(r); if (f && f.err) state.set(a, 'failed'); } });   // (an answer that omits the probe: late)
+    for (const x of cands) if (sentAs.has(x.a)) { const an = answers.find((y) => y.path === x.c); if (!an || an.answer === 'late' || an.answer === 'skipped') state.set(x.a, 'late'); else if (an.answer === 'failed') state.set(x.a, 'failed'); }
+    for (const a of sentAs.keys()) if (!candAbs.has(a) && !probes.includes(a)) state.set(a, 'late');
+    const named = (st) => [...sentAs].filter(([a]) => state.get(a) === st).flatMap(([, ss]) => ss);
+    const probesLate = named('late'), probesFailed = named('failed');
+    // a row source still out is LATE (the list: still looking); one a dead folder's mark answered — the pool's deadline ended it, or a dead
+    // entrance above it — could NOT BE READ (the list says so; never «no folders»)
+    const sourcesLate = [...rowsList.filter((_, i) => listR[i] === LATE), ...roots.filter((_, i) => idxR[i] === LATE)];
+    const sourcesUnread = [...rowsList.filter((_, i) => listR[i] && listR[i].skipped), ...roots.filter((_, i) => idxR[i] && idxR[i].skipped)];
+    let idx = null, idxPartial = false;
+    if (fuzzy) {
+      const es = idxR.map(okOf);
+      idxPartial = es.some((e) => !e || e.partial);
+      if (es.some(Boolean)) { idx = { dirs: [], links: [] }; for (const e of es) if (e) { idx.dirs.push(...e.dirs); idx.links.push(...(e.links || [])); } }
+    }
+    // the line's own facts land in the listing too (a candidate's stat, a level's «a folder»): its resolution's facts
+    const facts = [...answers.flatMap((x) => [x.stat && x.stat.exists ? x.stat : null, x.stat && x.stat.one && x.stat.one.exists ? x.stat.one : null]).filter(Boolean), ...auxR.map(okOf).filter(Boolean)];
+    const listing = PC.sliceListing({ home, machine: null, dirs: listed, probes: facts, index: idx, mounts: mountRows.filter((m) => !m.blocked), q: fuzzy });
+    // `partial`: the verdict NEEDS a source that did not answer (asked again, bounded); a search's rows when an index root is late or cut.
+    // `rowsLate`: a source the rows for this text come from did not answer (the list says «still looking», never «no match» — P8)
+    const partial = verdict ? verdict.kind === 'late' : !!(fuzzy && idxPartial);
+    const rowsLate = sourcesLate.length > 0 || (fuzzy && idxPartial), rowsUnread = sourcesUnread.length > 0;
+    return { listing, self: me, took: now() - t0, partial, ...(verdict ? { verdict } : {}), ...(rowsLate ? { rowsLate: true } : {}), ...(rowsUnread ? { rowsUnread: true, sourcesUnread } : {}), ...(probesLate.length ? { probesLate } : {}), ...(probesFailed.length ? { probesFailed } : {}), ...(sourcesLate.length ? { sourcesLate } : {}) };
   }
 
-  return { slice, self, _caches: { listCache, indexCache } };
+  return { slice, self, _caches: { listCache, indexCache, known, landed }, _counters: C };
 }
 
-module.exports = { create, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS };
+module.exports = { create, LIST_FRESH_MS, INDEX_TTL_MS, SELF_TTL_MS, PROBE_LATE_MS, LANDED_FRESH_MS, LINE_SLOTS, ROW_SLOTS };
