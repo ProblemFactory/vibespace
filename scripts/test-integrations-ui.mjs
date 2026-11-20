@@ -1141,6 +1141,38 @@ const p2 = await newPage();
   // THE PHONE (the owner's rule on a finger device: 44 px targets, 16 px text) — the live block's own buttons and box
   await p1.cdp('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 5 });
   const touch = await p1.evaljs(`(() => { const b = ${BLK}; const m = (e) => e ? { h: Math.round(e.getBoundingClientRect().height), f: parseFloat(getComputedStyle(e).fontSize) } : null; return { coarse: matchMedia('(pointer: coarse)').matches, main: m(b.querySelector('button.mounts-btn-primary')), other: m(b.querySelector('.mounts-oauth-other')), cancel: m(b.querySelector('.mounts-oauth-cancel')), box: m(b.querySelector('.mounts-oauth-live > input')) }; })()`);
+  // B-081b: the WHOLE account dialog on a finger device, not only the live block — its ✕, every visible box / list / button / fold
+  // ≥ 44 px tall (the ✕ 44 px wide too), every visible element that holds text ≥ 16 px; each element judged is printed.
+  // THE WAIT (its first box run: the ✕ read 24 px mid-way): touch emulation turns on with the dialog OPEN, so a rule that comes with
+  // the coarse pointer reaches an element through its transition (the ✕ carries `transition: all`) — measured once the dialog's own
+  // transitions have ENDED, bounded (2 s), red by name at the bound. Its box runs: the transitions' own ends never came in 2 s (the
+  // Animation API's «finished» on this page is no fact to wait on) — so the wait is for WHAT HAPPENED: the measured elements' sizes
+  // and text sizes read the same twice, 100 ms apart (bounded 2 s, red by name); every animation in the dialog — the measured
+  // elements' own and any other — is PRINTED with its owner, state and timing, never waited for
+  const SETTLE = `(async (root, els) => { const tag = (e) => e ? e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(' ').filter(Boolean).join('.') : '') : null;
+    const desc = (a) => { const tm = a.effect && a.effect.getComputedTiming ? a.effect.getComputedTiming() : {}; return { kind: a.constructor.name, name: a.transitionProperty || a.animationName || '', el: tag(a.effect && a.effect.target), state: a.playState, t: a.currentTime == null ? null : Math.round(a.currentTime), dur: tm.duration, iterations: tm.iterations === Infinity ? 'infinite' : tm.iterations, progress: tm.progress == null ? null : Math.round(tm.progress * 100) / 100 }; };
+    const all = root.getAnimations({ subtree: true }), mine = all.filter((a) => a.effect && els.includes(a.effect.target));
+    const read = () => JSON.stringify(els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height), getComputedStyle(e).fontSize]; }));
+    let prev = read(), reads = 1, stable = false; const t0 = performance.now();
+    while (performance.now() - t0 < 2000) { await new Promise((r) => setTimeout(r, 100)); const cur = read(); reads++; if (cur === prev) { stable = true; break; } prev = cur; }
+    return { stable, reads, ms: Math.round(performance.now() - t0), visibility: document.visibilityState, own: mine.map(desc), others: all.filter((a) => !mine.includes(a)).map(desc) }; })`;
+  const whole = await p1.evaljs(`(async () => { const body = ${DLGC}; const dlg = body.closest('.dialog'); const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+    const tag = (e) => e.tagName.toLowerCase() + (typeof e.className === 'string' && e.className.trim() ? '.' + e.className.trim().split(' ').filter(Boolean).join('.') : '');
+    const box = (e) => { const r = e.getBoundingClientRect(); return { el: tag(e), h: Math.round(r.height), w: Math.round(r.width), f: parseFloat(getComputedStyle(e).fontSize) }; };
+    const tEls = [dlg.querySelector('.dialog-close'), ...body.querySelectorAll('input:not([type=checkbox]):not([type=radio]):not([type=hidden]), select, textarea, button, summary')].filter(vis);
+    const xEls = [dlg.querySelector('.dialog-header h3'), ...body.querySelectorAll('*')].filter((e) => vis(e) && [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim()));
+    const settle = await (${SETTLE})(dlg, [...tEls, ...xEls]);
+    const targets = tEls.map(box), texts = xEls.map((e) => ({ el: tag(e), f: parseFloat(getComputedStyle(e).fontSize) }));
+    return { coarse: matchMedia('(pointer: coarse)').matches, settle, close: box(dlg.querySelector('.dialog-close')), targets, texts }; })()`);
+  console.log('    B-081b, the facts judged: ' + JSON.stringify(whole));
+  const smallT = (whole.targets || []).filter((x) => x.h < 44), smallF = [...(whole.texts || []), ...(whole.targets || [])].filter((x) => x.f < 16);   // a box's own text too (a select's, an input's value)
+  ok(whole.coarse && whole.settle && whole.settle.stable && whole.close.h >= 44 && whole.close.w >= 44 && whole.targets.length >= 4 && whole.texts.length >= 4 && !smallT.length && !smallF.length,
+    `B-081b THE PHONE, the whole dialog: on a finger device the account dialog's ✕ (${whole.close && whole.close.w}×${whole.close && whole.close.h}), its ${(whole.targets || []).length} boxes / lists / buttons / folds are ≥ 44 px with 16 px text of their own, and its ${(whole.texts || []).length} texts ≥ 16 px (measured once the sizes read the same twice: ${whole.settle && whole.settle.stable ? `after ${whole.settle.ms} ms` : 'they did NOT settle in 2 s'}; ${whole.settle ? whole.settle.own.length + ' animation(s) of the measured elements and ' + whole.settle.others.length + ' other(s) printed' : '?'})${smallT.length || smallF.length ? ' — UNDER: ' + JSON.stringify({ smallT, smallF }) : ''}`);
+  // RED CONTROL: the stylesheet's rule lifted (through the page's own CSSOM, put back) — the ✕ falls under 44 px; each size read once
+  // the ✕'s size reads the same twice (the same bounded wait)
+  const lifted = await p1.evaljs(`(async () => { for (const sh of document.styleSheets) { let rules; try { rules = sh.cssRules; } catch { continue; } for (let i = 0; i < rules.length; i++) { const r = rules[i]; if (r.type === 4 && r.cssText.includes('#chan-account-connect') && r.cssText.includes('.dialog-close')) { const txt = r.cssText; const dlg = ${DLGC}.closest('.dialog'), x = dlg.querySelector('.dialog-close'); sh.deleteRule(i); const s1 = await (${SETTLE})(dlg, [x]); const h = Math.round(x.getBoundingClientRect().height); sh.insertRule(txt, i); const s2 = await (${SETTLE})(dlg, [x]); const back = Math.round(x.getBoundingClientRect().height); return { found: true, h, back, settled: s1.stable && s2.stable, waits: [s1.ms, s2.ms], own: [s1.own, s2.own] }; } } } return { found: false }; })()`);
+  console.log('    B-081b control, the facts judged: ' + JSON.stringify(lifted));
+  ok(lifted.found && lifted.settled && lifted.h < 44 && lifted.back >= 44, `CONTROL B-081b: the rule lifted, the ✕ is ${lifted.h} px (under 44 — the leg reads the rule), put back ${lifted.back} px`);
   await p1.cdp('Emulation.setTouchEmulationEnabled', { enabled: false });
   ok(touch.coarse && ['main', 'other', 'cancel', 'box'].every((k) => touch[k] && touch[k].h >= 44 && touch[k].f >= 16), `THE PHONE: on a finger device the live block's button, the other road, Cancel and the paste box are ≥ 44 px tall with 16 px text (${JSON.stringify(touch)})`);
   // LAW E1: Slack, a company app that neither relays nor lists this address — one truth: no «press Connect, then Allow»

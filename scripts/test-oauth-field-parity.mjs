@@ -65,6 +65,7 @@ export const MOUNTS = 'src/lib/sidebar-mounts.js';
 export const CHANNELS = 'src/lib/channels-panel.js';
 // the channel side = the panel (the account card) + its dialogs (chunk 3)
 export const CHANNEL_DIALOGS = 'src/lib/channel-account-dialogs.js';
+export const STYLE = 'public/style.css';   // B-081b: the account dialogs' finger-device rule
 export const CHANNEL_SIDE = [CHANNELS, CHANNEL_DIALOGS];
 
 // §1 what the shared module exports
@@ -478,6 +479,19 @@ export function census(texts) {
     ok: !!stopM && /stopPoll\(\);/.test(stopM) && /st = await statusOf\(\);/.test(stopM) && /if \(st\.token\) return finish\(st\.token\);/.test(stopM) && stopM.includes(`status.textContent = st.fail || tr('${TIMEOUT_KEY}');`) && /btn\.disabled = false;/.test(stopM) && !/setTimeout\(stopPoll, 10 \* 60 \* 1000\);/.test(reauthM),
     why: 'the stop is the pre-r5 `setTimeout(stopPoll, 10 min)` (silent, the button stays disabled), or it no longer reads the watcher / says the timeout / re-enables' });
   out.push({ rule: `§10 "${TIMEOUT_KEY}" — zh + ja`, ok: ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].every((f) => (texts[f] || '').includes(`"${TIMEOUT_KEY}":`)), why: 'a dictionary lacks the key' });
+  // §11 B-081b: the channel ACCOUNT dialogs at phone scale — the stylesheet's finger-device rule names the dialogs BY THEIR IDS; the
+  // list there and the dialogs' own ids (every `id:` of src/lib/channel-account-dialogs.js) are the SAME, so a dialog renamed or
+  // added never drops out of the rule unseen; and the rule holds the owner's sizes (44 px targets, 16 px text)
+  const css11 = String(texts[STYLE] || ''), blk11 = (/\/\* B-081b[\s\S]*?@media \(pointer: coarse\) \{\n([\s\S]*?)\n\}\n/.exec(css11) || [])[1] || '';
+  const lists11 = [...blk11.matchAll(/:is\((#[^)]*)\)/g)].map((m) => m[1]);
+  const cssIds11 = [...new Set([...(lists11[0] || '').matchAll(/#([a-z0-9-]+)/g)].map((m) => m[1]))].sort();
+  const dlgIds11 = [...new Set([...String(texts[CHANNEL_DIALOGS] || '').matchAll(/\bid: '([a-z0-9-]+)'/g)].map((m) => m[1]))].sort();
+  out.push({ rule: '§11 B-081b: the account dialogs\' finger-device rule names every dialog of src/lib/channel-account-dialogs.js by its id — no more, no fewer, one list on every line',
+    ok: cssIds11.length > 0 && cssIds11.join(' ') === dlgIds11.join(' ') && lists11.length >= 5 && lists11.every((l) => l === lists11[0]), why: `the stylesheet names ${cssIds11.join(' ') || 'none'} (${lists11.length} lines) · the dialogs are ${dlgIds11.join(' ')}` });
+  out.push({ rule: '§11 B-081b: the account dialogs on a finger device — 44 px targets and 16 px text: the ✕, the title and every text (an icon at its drawn size), the boxes / lists / buttons / folds, a textarea over its own inline size, the switch\'s touch area',
+    ok: blk11.includes(' .dialog-close { min-width: 44px; min-height: 44px; font-size: 16px; }') && blk11.includes(' .dialog-header h3, ') && blk11.includes(' .dialog-body :not(svg, svg *, .chan-ic) { font-size: 16px; }') && blk11.includes(' .dialog-body textarea { font-size: 16px !important; }')
+      && blk11.includes(' .dialog-body :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea, button, summary) { min-height: 44px; }') && blk11.includes(" .dialog-body .settings-toggle::after { content: ''; position: absolute; inset: -12px -4px; }"),
+    why: 'a size of the rule is gone or changed (the owner\'s rule: 44 px targets, 16 px text)' });
   return out;
 }
 
@@ -492,7 +506,7 @@ function loadTexts() {
   };
   walk('src/lib');
   walk(MOUNT_ROWS_DIR.slice(0, -1));
-  for (const rel of ['src/channels/gmail.js', 'src/channels/lark.js', DESIGN, EDIT_MOCKUP, MOUNTS_SERVER]) texts[rel] = read(rel);
+  for (const rel of ['src/channels/gmail.js', 'src/channels/lark.js', DESIGN, EDIT_MOCKUP, MOUNTS_SERVER, STYLE]) texts[rel] = read(rel);
   return texts;
 }
 
@@ -575,6 +589,11 @@ if (isMain) {
   // re-enable after the timeout line at any indent
   reddens('…or leaves the button disabled', '§10 the re-authorize dialog\'s client stop', (t) => { t[MODULE] = M(t).replace(/(status\.textContent = st\.fail \|\| tr\('The sign-in was not finished in time — sign in again'\);)\n\s*btn\.disabled = false;/, '$1'); });
   reddens('the timeout sentence loses its ja translation', '"The sign-in was not finished in time — sign in again" — zh + ja', (t) => { t['src/lib/i18n-ja.js'] = t['src/lib/i18n-ja.js'].replace('"The sign-in was not finished in time — sign in again":', '"The sign-in was not finished in time (x)":'); });
+
+  // §11 B-081b: a dialog renamed without the stylesheet, and a size of the rule lost
+  reddens('an account dialog renamed in src/lib/channel-account-dialogs.js (the finger-device rule no longer names it)', '§11 B-081b: the account dialogs\' finger-device rule names every dialog', (t) => { t[CHANNEL_DIALOGS] = String(t[CHANNEL_DIALOGS] || '').replace("id: 'chan-account-edit'", "id: 'chan-account-edit-2'"); });
+  reddens('the ✕ back to its desktop size on a finger device', '§11 B-081b: the account dialogs on a finger device — 44 px targets', (t) => { t[STYLE] = String(t[STYLE] || '').replace(' .dialog-close { min-width: 44px; min-height: 44px; font-size: 16px; }', ' .dialog-close { }'); });
+  reddens('one line of the rule names a dialog fewer', '§11 B-081b: the account dialogs\' finger-device rule names every dialog', (t) => { t[STYLE] = String(t[STYLE] || '').replace(', #chan-remove-refused) .dialog-body textarea {', ') .dialog-body textarea {'); });
 
   console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
   process.exit(fail ? 1 : 0);

@@ -8419,6 +8419,19 @@ label.chan-cap-row { cursor: default; }
   .mounts-oauth-live-btn, .mounts-oauth-live .mounts-btn { min-height: 44px; font-size: 16px; }
   .mounts-oauth-live > input, .mounts-oauth-live .mounts-oauth-paste input { min-height: 44px; font-size: 16px; }
 }
+/* B-081b (the acceptance of lane gmail-connect-wall r1, 2026-11-10): the channel ACCOUNT dialogs — connect, re-authorize, edit,
+   duplicate, «cannot remove» — on a finger device meet the owner's rule for the WHOLE dialog, not only the live consent block above:
+   every target 44 px (its ✕, every box and list, every button, a fold's summary, a guard's switch by its touch area) and 16 px text
+   (its title, labels, hints, notes, the error line, the boxes' own text). The overlays are named by their ids — the dialogs' own
+   (src/lib/channel-account-dialogs.js; test-oauth-field-parity pins the two lists equal). A storage dialog keeps its sizes (its
+   pixel baseline, test-mounts-dialog-extract, draws at a fine pointer). */
+@media (pointer: coarse) {
+  :is(#chan-account-connect, #chan-reauth-dialog, #chan-account-edit, #chan-account-duplicate, #chan-remove-refused) .dialog-close { min-width: 44px; min-height: 44px; font-size: 16px; }
+  :is(#chan-account-connect, #chan-reauth-dialog, #chan-account-edit, #chan-account-duplicate, #chan-remove-refused) .dialog-header h3, :is(#chan-account-connect, #chan-reauth-dialog, #chan-account-edit, #chan-account-duplicate, #chan-remove-refused) .dialog-body, :is(#chan-account-connect, #chan-reauth-dialog, #chan-account-edit, #chan-account-duplicate, #chan-remove-refused) .dialog-body :not(svg, svg *, .chan-ic) { font-size: 16px; }   /* an icon keeps its drawn size */
+  :is(#chan-account-connect, #chan-reauth-dialog, #chan-account-edit, #chan-account-duplicate, #chan-remove-refused) .dialog-body textarea { font-size: 16px !important; }   /* the field renderer sets 12 px on the element itself */
+  :is(#chan-account-connect, #chan-reauth-dialog, #chan-account-edit, #chan-account-duplicate, #chan-remove-refused) .dialog-body :is(input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"]), select, textarea, button, summary) { min-height: 44px; }
+  :is(#chan-account-connect, #chan-reauth-dialog, #chan-account-edit, #chan-account-duplicate, #chan-remove-refused) .dialog-body .settings-toggle::after { content: ''; position: absolute; inset: -12px -4px; }   /* the 36 × 20 switch keeps its look; its touch area is 44 × 44 */
+}
 .chat-channel-touch .cct-glyph { flex-shrink: 0; align-self: center; display: inline-flex; }
 .chat-channel-touch .cct-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); unicode-bidi: isolate; } /* isolate: a hostile title's RTL override stays inside the name */
 .chat-channel-touch:hover .cct-name { color: var(--accent); }
