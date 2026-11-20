@@ -452,7 +452,7 @@ function memoryMbOf(job, { setting, cluster, instanceMb, instanceOf } = {}) {
 // wins). A job that names none keeps TODAY's behaviour exactly (no flag: no default changed for every job without the owner's
 // word); its card says what Node's default is under that bound and how to use the bound. Unbounded (0): nothing is added.
 const NODE_HEAP = Object.freeze({ share: 0.75, bigMemoryMb: 15 * 1024, smallOldMb: 2048, bigOldMb: 4096 });
-const NODE_HEAP_FLAG = /(?:^|\s)--max[-_]old[-_]space[-_]size(?:=|\s+)(\d+)/;
+const NODE_HEAP_FLAG = /(?:^|\s)["']?--max[-_]old[-_]space[-_]size(?:=|\s+)(\d+)/;   // round wrpdo2eev 5: Node's quoted form («"--max-old-space-size=4096"») is the job's own too
 /** the heap a job's Node gets: { by: 'own' | 'bound' | 'node-default' | 'none', mb } — `own` = its NODE_OPTIONS name one;
  *  `bound` = it named its memory (75 % of it); `node-default` = V8's own default under the bound (half of it, at most 2 GB under
  *  15 GB of memory, 4 GB from 15 GB); `none` = unbounded (Node's default for the machine) */

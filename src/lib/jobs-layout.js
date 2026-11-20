@@ -249,9 +249,9 @@ export function nodeHeapWords(j, t) {
   const h = j && j.nodeHeap;
   if (!h || !h.mb) return '';
   const size = memoryWords(h.mb);
-  if (h.by === 'own') return t('Node heap {size} — set by the job’s own options', { size });
-  if (h.by === 'bound') return t('Node heap {size} — 75% of the memory this job names', { size });
-  if (h.by === 'node-default') return t('Node’s own default heap under this bound: about {size} — set the memory bound here to give Node 75% of it', { size });
+  if (h.by === 'own') return t('If this job runs a Node program, its heap is {size} — set by the job’s own options', { size });
+  if (h.by === 'bound') return t('If this job runs a Node program, its heap is {size} — 75% of the job’s bound', { size });
+  if (h.by === 'node-default') return t('If this job runs a Node program, Node’s own default heap under this bound is about {size} — set the memory bound here to give it 75% of the bound', { size });
   return '';
 }
 /** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by

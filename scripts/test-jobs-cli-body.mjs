@@ -562,6 +562,31 @@ console.log('(6) A JOB THAT WAITS IS NEVER «started» — its first line says i
   ok(!!vwr && vwr.state === 'up' && startR.code === 0 && first(startR) === 'started', 'CONTROL: `start` of a job that runs ⇒ «started»', `${startR.code}: ${first(startR) || startR.err} (state ${vwr && vwr.state})`);
 }
 
+// ── B-d73c (moved here from test-job-node-heap §4 — round wrpdo2eev 6: starting the real CLI is the heavy class): `show`'s
+// memory line says the heap a Node program in the job gets, CONDITIONAL in its own words; its door names the size the job HAS
+// (never a fixed one that could lower a bound), and the park's door asks MORE than the job has (ALSO CURED: it said 8G always) ──
+console.log('(B-d73c) the CLI\'s memory line: a Node program\'s heap, and doors that never lower a bound');
+{
+  const base = { kind: 'task', state: 'up', name: 'build', mine: true, cmd: { argv: ['sh', '-c', 'npm run build'], cwd: '/w', envKeys: [] }, envFrom: [], schedule: null, restart: 'on-failure', timeoutMs: null, untilOutput: null, singleInstance: true, notifyOk: false, notifyUser: false,
+    access: { view: 'group', control: 'session' }, notify: 'inherit', subscribersCount: 0, memorySource: 'job', memoryAskedMb: 8192, memoryMb: 8192, memoryCap: null };
+  const HJ = {
+    'jb-named': { ...base, id: 'jb-named', nodeHeap: { by: 'bound', mb: 6144 } },
+    'jb-plain': { ...base, id: 'jb-plain', memorySource: 'default', memoryMb: 4096, memoryAskedMb: 4096, nodeHeap: { by: 'node-default', mb: 2048 } },
+    'jb-big': { ...base, id: 'jb-big', memorySource: 'setting', memoryMb: 16384, memoryAskedMb: 16384, nodeHeap: { by: 'node-default', mb: 4096 } },
+    'jb-park': { ...base, id: 'jb-park', state: 'failed', memorySource: 'setting', memoryMb: 16384, memoryAskedMb: 16384, parkedFor: 'memory', nodeHeap: { by: 'node-default', mb: 4096 } },
+  };
+  const hs = http.createServer((req, res) => { const id = decodeURIComponent((/^\/api\/agent\/jobs\/([^/?]+)/.exec(req.url) || [])[1] || ''); res.writeHead(HJ[id] ? 200 : 404, { 'content-type': 'application/json' }); res.end(JSON.stringify(HJ[id] ? { success: true, job: HJ[id] } : { error: 'no job' })); });
+  await new Promise((r) => hs.listen(0, '127.0.0.1', r));
+  const show = (id) => new Promise((resolve) => { const p = spawn(process.execPath, [CLI, 'show', id], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: tmp, VIBESPACE_API: `http://127.0.0.1:${hs.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_heap' } }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => resolve({ code, out, err })); });
+  const [a, b, c, d] = await Promise.all(['jb-named', 'jb-plain', 'jb-big', 'jb-park'].map(show));
+  const memOf = (r) => r.out.split('\n').find((l) => l.startsWith('memory: ')) || '';
+  ok(a.code === 0 && memOf(a).endsWith(" · a Node program in this job: heap 6 GB (75 % of the job's bound — handed as --max-old-space-size beside its NODE_OPTIONS)"), '(B-d73c) a job that named 8G: the heap a Node program in it is handed — 75 % of the job\'s BOUND', memOf(a) || a.err);
+  ok(b.code === 0 && memOf(b).endsWith(" · a Node program in this job gets Node's own default heap under this bound: about 2 GB — name the memory it already has (vibespace-job memory jb-plain 4G) to give it 75 % of the bound, or set NODE_OPTIONS=--max-old-space-size=N"), '(B-d73c) a job that named none: B\'s sentence, its door naming the 4G it already has', memOf(b) || b.err);
+  ok(c.code === 0 && memOf(c).includes('(vibespace-job memory jb-big 16G)') && !memOf(c).includes(' 8G)'), '(B-d73c) a 16G bound from a setting: the door names 16G — typing it never LOWERS the bound (it said 8G)', memOf(c) || c.err);
+  ok(d.code === 0 && memOf(d).includes('raise it (vibespace-job memory jb-park 32G)'), '(B-d73c, ALSO CURED) a parked 16G job: «raise it» asks 32G, never 8G (a lower bound)', memOf(d) || d.err);
+  hs.close();
+}
+
 // ── teardown: the engines' stores flush synchronously; nothing outlives the scratch dir ──
 server.close();
 for (const E of [CENSUS, REAL, NOHAND, OLD, NOBELT, WIRED, VWL, VWU]) E.jm.shutdown();

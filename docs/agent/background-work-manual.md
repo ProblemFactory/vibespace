@@ -363,8 +363,11 @@ it, a limit on the user slice does (`show` names which).
   - A job that names its memory (`--memory 8G` at create, or `vibespace-job memory <id> 8G`) is handed
     `--max-old-space-size=<75 % of it>` beside its own `NODE_OPTIONS`: 8G gives Node 6 GB of heap.
   - A heap its own `NODE_OPTIONS` name wins, and nothing else in its environment changes.
-  - A job that names no memory keeps Node's own default. `show` says which: «Node heap 6 GB (75 % of the memory it
-    names …)», or «Node's own default heap under this bound: about 2 GB — name the memory … to give Node 75 % of it».
+  - EVERY Node program the job starts inherits that heap (npm, a bundler, each test worker): several running at once can
+    reach the job's bound together, and the bound then ends the job by name. Give such a job a bound that fits them all.
+  - A job that names no memory keeps Node's own default. `show` says which, for a Node program in the job if it runs one:
+    «a Node program in this job: heap 6 GB (75 % of the job's bound …)», or «… gets Node's own default heap under this
+    bound: about 2 GB — name the memory it already has (vibespace-job memory <id> 4G) to give it 75 % of the bound».
 
 ## 8. Permissions model (why you can't see some jobs)
 

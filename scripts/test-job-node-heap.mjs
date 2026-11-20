@@ -9,12 +9,12 @@
 //      a named bound hands the flag beside the job's own options; a job that names NO memory hands on NO heap flag (the control
 //      for «no default changed»); nothing else in the env changes; a schedule's run; the snapshot's fact — and a RED copy of
 //      src/jobs.js whose spawn hands nothing (the flag is the spawn line's)
-//   §3 the card's words (src/lib/jobs-layout.js nodeHeapWords) in en, zh and ja, the panel's row; §4 the CLI's line (`show`)
+//   §3 the card's words (src/lib/jobs-layout.js nodeHeapWords) in en, zh and ja — each CONDITIONAL on a Node program in the job —
+//      and the panel's row. The CLI's line (`show`) is driven in scripts/test-jobs-cli-body.mjs (heavy: it starts the real CLI —
+//      round wrpdo2eev 6). Round wrpdo2eev: a quoted own heap (§1), the card and the spawn read ONE number (§2)
 import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
-import http from 'node:http';
-import { spawn } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { checker } from './lib/check.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
@@ -27,7 +27,6 @@ const { JobManager } = require('../src/jobs.js');
 const L = await import(pathToFileURL(path.join(REPO, 'src/lib/jobs-layout.js')).href);
 const ZH = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default;
 const JA = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
-const CLI = path.join(REPO, 'data/bin/vibespace-job');
 const { ok, report } = checker();
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf-8');
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -47,6 +46,7 @@ function ruleRows(X) {
     ['a named 16G bound: 12288 MB (past Node\'s own 4 GB)', same(h({ boundMb: 16384, source: 'job' }), { by: 'bound', mb: 12288 })],
     ['the job\'s own NODE_OPTIONS name a heap: theirs wins (4096), whatever the bound', same(h({ boundMb: 8192, source: 'job', nodeOptions: '--enable-source-maps --max-old-space-size=4096' }), { by: 'own', mb: 4096 })],
     ['…in V8\'s other spellings too (underscores, a space)', same(h({ boundMb: 8192, source: 'job', nodeOptions: '--max_old_space_size 5000' }), { by: 'own', mb: 5000 })],
+    ['…and written INSIDE QUOTES (Node\'s quoted form) — still its own, never overridden (round wrpdo2eev 5)', same(h({ boundMb: 8192, source: 'job', nodeOptions: '--enable-source-maps "--max-old-space-size=4096"' }), { by: 'own', mb: 4096 }) && same(h({ boundMb: 8192, source: 'job', nodeOptions: "'--max-old-space-size=4096'" }), { by: 'own', mb: 4096 })],
     ['a bound the job did NOT name (the ladder\'s default 4 GB): Node\'s own default, about 2048 MB — nothing handed', same(h({ boundMb: 4096, source: 'default' }), { by: 'node-default', mb: 2048 })],
     ['…the owner\'s setting or the cluster\'s are no job\'s naming either', h({ boundMb: 8192, source: 'setting' }).by === 'node-default' && h({ boundMb: 8192, source: 'cluster' }).by === 'node-default'],
     ['Node\'s own default: half the bound, at most 2048 MB under 15 GB (8G: 2048), 4096 MB from 15 GB on (16G: 4096); 2G: 1024', h({ boundMb: 8192, source: 'default' }).mb === 2048 && h({ boundMb: 16384, source: 'setting' }).mb === 4096 && h({ boundMb: 15360, source: 'setting' }).mb === 4096 && h({ boundMb: 2048, source: 'default' }).mb === 1024],
@@ -69,7 +69,9 @@ const MJ = mutantCopies('job-node-heap', REPO);
 
 // ════════ §2 THE ENV THE REAL SPAWN HANDS THE WRAPPER ════════
 console.log('§2 the env the real spawn hands the wrapper (the real JobManager, a stand-in wrapper that keeps its spec)');
-const STANDIN = "const fs = require('fs'), path = require('path'); const [ctl, spec] = process.argv.slice(2); try { fs.copyFileSync(spec, path.join(ctl, 'spec-seen.json')); fs.unlinkSync(spec); } catch (e) { fs.writeFileSync(path.join(ctl, 'spec-seen.json'), JSON.stringify({ error: e.message })); }\n";
+// the copy lands under its final name WHOLE (a tmp name, then rename): a reader polling for the name never reads a half-written file
+// (the first cure gate's UTC red: copyFileSync creates the name before its bytes — the leg read an empty file as «null»)
+const STANDIN = "const fs = require('fs'), path = require('path'); const [ctl, spec] = process.argv.slice(2); const out = path.join(ctl, 'spec-seen.json'); try { fs.copyFileSync(spec, out + '.tmp'); fs.renameSync(out + '.tmp', out); fs.unlinkSync(spec); } catch (e) { fs.writeFileSync(out + '.tmp', JSON.stringify({ error: e.message })); fs.renameSync(out + '.tmp', out); }\n";
 const owner = { conversation: { id: 'conv-heap' }, sessionId: 'sess-heap', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
 const caller = { conversationId: 'conv-heap', sessionId: 'sess-heap', sessionCreatedAt: 1, groups: new Set() };
 function engine(name, JM = JobManager) {
@@ -100,6 +102,14 @@ const jm = engine('jobs');
   const child = [...jm.jobs.values()].find((j) => j.cronParent === cron.job.id);
   const sc = child && await specOf(jm, child);
   ok(!!sc && sc.env.NODE_OPTIONS === '--max-old-space-size=6144', 'a schedule whose task names 8G: each run is handed the flag too (6144)', sc && sc.env.NODE_OPTIONS);
+  // round wrpdo2eev 4: THE CARD AND THE SPAWN READ ONE NUMBER — on a host where the hub's own limit (the spawn's context) and the
+  // last cgroup proof's (the plain context) differ, the snapshot's heap is the flag the job was handed, never the other figure
+  const jc = engine('jobs-ctx');
+  jc._memoryCtx = ({ hub = false } = {}) => ({ instanceMb: hub ? 12288 : 65536, instanceOf: 'instance' });
+  const big = mk(jc, 'named-16g', { mem: '16G' }), sb = await specOf(jc, big);
+  const flagMb = Number((/--max-old-space-size=(\d+)/.exec((sb && sb.env.NODE_OPTIONS) || '') || [])[1]);
+  const card = jc.snapshot(big).nodeHeap, other = M.nodeHeapOf({ boundMb: M.memoryMbOf(big, jc._memoryCtx()).mb, source: 'job' }).mb;
+  ok(flagMb > 0 && card.mb === flagMb && other !== flagMb, `the card's heap is the flag the spawn handed (${flagMb} MB under the hub's 12 GB limit), never the other context's ${other} MB`, { flagMb, card, other });
 }
 console.log('§2b RED: a copy of src/jobs.js whose spawn hands the job\'s env as it was');
 {
@@ -115,31 +125,17 @@ console.log('§3 the card\'s words (jobs-layout nodeHeapWords) in en, zh and ja;
   const tFor = (dict) => (k, p = {}) => String((dict && dict[k]) || k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== undefined ? String(p[n]) : m));
   const en = tFor(null), zh = tFor(ZH), ja = tFor(JA);
   const J = (nodeHeap) => ({ id: 'jb-1', nodeHeap });
-  ok(L.nodeHeapWords(J({ by: 'bound', mb: 6144 }), en) === 'Node heap 6 GB — 75% of the memory this job names', 'a named bound: «Node heap 6 GB — 75% of the memory this job names»', L.nodeHeapWords(J({ by: 'bound', mb: 6144 }), en));
-  ok(L.nodeHeapWords(J({ by: 'own', mb: 4096 }), en) === 'Node heap 4 GB — set by the job’s own options', 'its own heap: «… set by the job’s own options» (a visible key names no env variable — test-plain-words)', L.nodeHeapWords(J({ by: 'own', mb: 4096 }), en));
-  ok(L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), en) === 'Node’s own default heap under this bound: about 2 GB — set the memory bound here to give Node 75% of it', 'B\'s sentence for a job that names none: what Node\'s default is and the door that changes it', L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), en));
+  ok(L.nodeHeapWords(J({ by: 'bound', mb: 6144 }), en) === 'If this job runs a Node program, its heap is 6 GB — 75% of the job’s bound', 'a named bound: «… its heap is 6 GB — 75% of the job’s bound» (the BOUND: true also where the instance capped what it named — round wrpdo2eev 3)', L.nodeHeapWords(J({ by: 'bound', mb: 6144 }), en));
+  ok(L.nodeHeapWords(J({ by: 'own', mb: 4096 }), en) === 'If this job runs a Node program, its heap is 4 GB — set by the job’s own options', 'its own heap: «… set by the job’s own options» (a visible key names no env variable — test-plain-words)', L.nodeHeapWords(J({ by: 'own', mb: 4096 }), en));
+  ok(L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), en) === 'If this job runs a Node program, Node’s own default heap under this bound is about 2 GB — set the memory bound here to give it 75% of the bound', 'B\'s sentence for a job that names none: what Node\'s default is and the door that changes it', L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), en));
+  ok(['bound', 'own', 'node-default'].every((by) => L.nodeHeapWords(J({ by, mb: 2048 }), en).startsWith('If this job runs a Node program, ')), 'EVERY sentence is conditional in its own words — a card of a job with no Node in it reads true (no guess from its command: round wrpdo2eev 1)');
   ok(L.nodeHeapWords(J({ by: 'none', mb: null }), en) === '' && L.nodeHeapWords({ id: 'x' }, en) === '', 'unbounded, or an older hub: nothing said');
-  const keys = ['Node heap {size} — 75% of the memory this job names', 'Node heap {size} — set by the job’s own options', 'Node’s own default heap under this bound: about {size} — set the memory bound here to give Node 75% of it'];
+  const keys = ['If this job runs a Node program, its heap is {size} — 75% of the job’s bound', 'If this job runs a Node program, its heap is {size} — set by the job’s own options', 'If this job runs a Node program, Node’s own default heap under this bound is about {size} — set the memory bound here to give it 75% of the bound'];
   ok(keys.every((k) => typeof ZH[k] === 'string' && ZH[k].includes('{size}') && typeof JA[k] === 'string' && JA[k].includes('{size}')), 'all three sentences have zh and ja words (each keeps {size})', keys.filter((k) => !ZH[k] || !JA[k]));
-  ok(L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), zh).startsWith('此上限下 Node 自带的默认堆：约 2 GB') && L.nodeHeapWords(J({ by: 'bound', mb: 3072 }), ja).startsWith('Node ヒープ 3 GB'), 'the words read in zh and ja with the size in them', { zh: L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), zh), ja: L.nodeHeapWords(J({ by: 'bound', mb: 3072 }), ja) });
+  ok(L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), zh).startsWith('若此任务运行 Node 程序，此上限下 Node 自带的默认堆约为 2 GB') && L.nodeHeapWords(J({ by: 'bound', mb: 3072 }), ja).startsWith('このジョブが Node プログラムを実行する場合、ヒープは 3 GB'), 'the words read in zh and ja with the size in them', { zh: L.nodeHeapWords(J({ by: 'node-default', mb: 2048 }), zh), ja: L.nodeHeapWords(J({ by: 'bound', mb: 3072 }), ja) });
   const panel = read('src/lib/jobs-panel.js');
   ok(panel.includes('memHeap.textContent = nodeHeapWords(job, t);') && panel.includes('memRow.append(memLbl, memIn, memSet, memFact, memEff, memHeap);'), 'WIRING: the panel\'s Memory bound row carries the sentence (jobs-panel memHeap)');
 }
 
-// ════════ §4 THE CLI'S LINE ════════
-console.log('§4 the CLI\'s memory line (`vibespace-job show`) over a loopback hub');
-{
-  const base = { kind: 'task', state: 'up', name: 'build', mine: true, cmd: { argv: ['sh', '-c', 'npm run build'], cwd: '/w', envKeys: [] }, envFrom: [], schedule: null, restart: 'on-failure', timeoutMs: null, untilOutput: null, singleInstance: true, notifyOk: false, notifyUser: false,
-    access: { view: 'group', control: 'session' }, notify: 'inherit', subscribersCount: 0, memorySource: 'job', memoryAskedMb: 8192, memoryMb: 8192, memoryCap: null };
-  const JOBS = { 'jb-named': { ...base, id: 'jb-named', nodeHeap: { by: 'bound', mb: 6144 } }, 'jb-plain': { ...base, id: 'jb-plain', memorySource: 'default', memoryMb: 4096, memoryAskedMb: 4096, nodeHeap: { by: 'node-default', mb: 2048 } } };
-  const server = http.createServer((req, res) => { const id = decodeURIComponent((/^\/api\/agent\/jobs\/([^/?]+)/.exec(req.url) || [])[1] || ''); res.writeHead(JOBS[id] ? 200 : 404, { 'content-type': 'application/json' }); res.end(JSON.stringify(JOBS[id] ? { success: true, job: JOBS[id] } : { error: 'no job' })); });
-  await new Promise((r) => server.listen(0, '127.0.0.1', r));
-  const cli = (argv) => new Promise((resolve) => { const p = spawn(process.execPath, [CLI, ...argv], { env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: TMP, VIBESPACE_API: `http://127.0.0.1:${server.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_heap' } }); let out = '', err = ''; p.stdout.on('data', (d) => { out += d; }); p.stderr.on('data', (d) => { err += d; }); p.on('close', (code) => resolve({ code, out, err })); });
-  const [a, b] = await Promise.all([cli(['show', 'jb-named']), cli(['show', 'jb-plain'])]);
-  const memOf = (r) => r.out.split('\n').find((l) => l.startsWith('memory: ')) || '';
-  ok(a.code === 0 && memOf(a).endsWith(' · Node heap 6 GB (75 % of the memory it names — handed as --max-old-space-size beside its NODE_OPTIONS)'), 'show of a job that named 8G: its memory line ends with the heap it hands Node', memOf(a) || a.err);
-  ok(b.code === 0 && memOf(b).endsWith(" · Node's own default heap under this bound: about 2 GB — name the memory (vibespace-job memory jb-plain 8G) to give Node 75 % of it, or set NODE_OPTIONS=--max-old-space-size=N"), 'show of a job that named none: B\'s sentence with the door to type', memOf(b) || b.err);
-  await new Promise((r) => server.close(r));
-}
 for (const r of copiesCensus(MJ.files, MJ.dir, REPO, { minCopies: 2, label: 'B-d73c ' })) ok(r.pass === true, r.name + (r.pass ? '' : ' — ' + r.detail));
 report();
