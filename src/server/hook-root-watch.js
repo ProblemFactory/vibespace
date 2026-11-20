@@ -27,14 +27,16 @@ const UNKNOWN_KEY = i18nKey('VibeSpace could not tell which folder it runs from 
 const REGISTERED_KEY = i18nKey('VibeSpace registered the agent hooks at {time} after an earlier read error ({error}) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction.');
 const MEMO_FILE = 'hook-root-notice.json';
 
-function create({ dataDir, ensureAgentHooks, rootRecovery, ownerWriteRefusal, integrationEnabled = () => true, serverNotice, setTimer = setTimeout, now = Date.now, log = console.warn } = {}) {
+function create({ dataDir, ensureAgentHooks, rootRecovery, ownerWriteRefusal, factsNow = null, integrationEnabled = () => true, serverNotice, setTimer = setTimeout, now = Date.now, log = console.warn } = {}) {
   const memoFile = path.join(dataDir, MEMO_FILE);
   const st = { timer: null, attempt: 0, said: false, delays: [] };
   function arm() {
     if (st.timer) return null;
     const delay = serverRoot.nextRejudgeDelay(st.attempt++);
     st.delays.push(delay);
-    st.timer = setTimer(() => { st.timer = null; try { sync(); } catch (e) { log('[integration] hook-root re-judge failed:', e && e.message); } }, delay);
+    // B-1425: a re-judge first AWAITS the root facts (off the loop, bounded — `factsNow`, server.js's rootFactsNow), never an empty cache
+    const run = () => { try { sync(); } catch (e) { log('[integration] hook-root re-judge failed:', e && e.message); } };
+    st.timer = setTimer(() => { st.timer = null; if (typeof factsNow === 'function') Promise.resolve().then(factsNow).then(run, run); else run(); }, delay);
     if (st.timer && typeof st.timer.unref === 'function') st.timer.unref();
     return delay;
   }

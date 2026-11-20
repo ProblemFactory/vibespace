@@ -8087,7 +8087,7 @@ await section(async () => {
     ["src/routes/files.js", "const TEMP_ROOTS = () =>", "read", "which cwd is temporary"],
     ["src/routes/files.js", "const rTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));", "unique", "mkdtemp"],
     ["src/routes/files.js", "const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));", "unique", "mkdtemp"],
-    ["src/server/agent-tool-generators.js", "tmpRoots: [realOr(os.tmpdir())", "read", "a judgment"],
+    ["src/server/agent-tool-generators.js", "const tmpSpellings = () => [os.tmpdir(), ...TMP_ROOTS];", "read", "a judgment (B-1425: their real paths read off the loop with the root facts)"],
     ["src/server/claude-signin.js", "tmpRoot = os.tmpdir(),", "unique", "its scratch is a mkdtemp under it"],
     ["src/server/cli-env.js", "fs.readdirSync('/tmp/.X11-unix')", "system", "reads the X server's socket dir"],
     ["src/server/cli-self-measure.js", "scratchBases = () =>", "unique", "its run root is a per-run name"],

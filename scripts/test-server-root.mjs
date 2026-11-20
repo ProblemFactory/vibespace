@@ -194,9 +194,10 @@ ok(unlisted.length === 0, 'no writer outside the table', unlisted);
 console.log('— ⑤ wiring + the words: the status surfaces say the refusal, never "registered"');
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const srv = read('server.js'), gen = read('src/server/agent-tool-generators.js'), sync = read('src/server/harness-config-sync.js');
-ok(/rootVerdict\(\{\s*\.\.\._rootFacts,\s*tmpRoots: \[realOr\(os\.tmpdir\(\)\), \.\.\.TMP_ROOTS\.map\(realOr\)\],\s*envOverride: process\.env\[serverRoot\.OVERRIDE_ENV\] === '1',\s*force: process\.env\[serverRoot\.FORCE_ENV\] === '1',\s*home: realOr\(os\.homedir\(\)\),/.test(gen),
-  "the ORCH reads os.tmpdir() + fixture-guard's TMP_ROOTS, both env flags as booleans, and the real HOME — all realpath'd");
-ok(/if \(st\.isDirectory\(\)\) \{ facts\.gitDir = facts\.gitCommonDir = realOr\(dotGit\); return facts; \}/.test(gen) && /path\.join\(facts\.gitDir, 'commondir'\)/.test(gen) && !/execFileSync\('git'/.test(gen.slice(gen.indexOf('function readRootFacts'), gen.indexOf('function rootVerdict'))),
+ok(/rootVerdict\(\{\s*\.\.\.f,\s*tmpRoots: f\.tmpRoots \|\| tmpSpellings\(\),\s*envOverride: process\.env\[serverRoot\.OVERRIDE_ENV\] === '1',\s*force: process\.env\[serverRoot\.FORCE_ENV\] === '1',\s*home: f\.home \|\| os\.homedir\(\),/.test(gen)
+  && /const tmpSpellings = \(\) => \[os\.tmpdir\(\), \.\.\.TMP_ROOTS\];/.test(gen) && /for \(const t of tmpSpellings\(\)\) tmp\.push\(await realOr\(t\)\);\n\s*facts\.tmpRoots = tmp; facts\.home = await realOr\(os\.homedir\(\)\);/.test(gen),
+  "the ORCH reads os.tmpdir() + fixture-guard's TMP_ROOTS, both env flags as booleans, and the real HOME — realpath'd in the facts' own read (B-1425: off the loop)");
+ok(/if \(st\.isDirectory\(\)\) \{ facts\.gitDir = facts\.gitCommonDir = await realOr\(dotGit\); return facts; \}/.test(gen) && /path\.join\(facts\.gitDir, 'commondir'\)/.test(gen) && !/execFileSync\('git'/.test(gen.slice(gen.indexOf('function readRootFacts'), gen.indexOf('function rootVerdict'))),
   'the facts come from fs: .git dir → checkout, .git file → gitdir + commondir (never a git child at boot)');
 ok(/if \(r && !_refusalSaid\) \{ _refusalSaid = true; console\.log\(r\.line\); \}/.test(gen), 'ONE journal line per boot: the first refused writer says it, the latch keeps the rest quiet');
 ok(/function hookRegistrationSafe\(\) \{ return rootVerdict\(\)\.ok; \}/.test(gen) && !/here\.startsWith\(tmp\)/.test(gen), 'hookRegistrationSafe() IS the verdict now (the old /tmp-only prefix test is gone)');
@@ -230,7 +231,7 @@ console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, s
   const d1 = SR.unknownNoticeDue(null, 'the server root could not be judged: /x/.git cannot be read (EIO)');
   ok(d1.post === true && d1.memo.cause.startsWith('the server root') && SR.unknownNoticeDue(d1.memo, d1.memo.cause).post === false && SR.unknownNoticeDue(d1.memo, 'another cause').post === true && SR.unknownNoticeDue({ cause: 'x' }, '').post === false && SR.unknownNoticeDue('garbage', 'c').post === true, 'PURE: the unknown notice is due once per CAUSE — the same cause again (the next boot) posts nothing, a new cause posts, no cause posts nothing, a garbage memo is no memo');
   ok(/^VibeSpace registered the agent hooks at 09:41 after an earlier read error \(EIO on \.git\) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction\.$/.test(SR.registeredAfterErrorLine({ time: '09:41', error: 'EIO on .git' })), 'PURE: the recovery sentence names the time and the earlier error');
-  ok(/if \(!v\.ok && v\.kind === 'unknown'\) _lastRootError = \{ at: t, error: _rootFacts\.error \|\| v\.why \};/.test(gen) && /if \(_lastRootError && !_registeredAfterError && Object\.values\(results\)\.some\(\(x\) => x && x\.ok\)\) _registeredAfterError = \{ at: Date\.now\(\), error: _lastRootError\.error, since: _lastRootError\.at \};/.test(gen) && /function rootRecovery\(\) \{ return \{ lastError: _lastRootError, registeredAfterError: _registeredAfterError \}; \}/.test(gen) && /readRootFacts, rootRecovery,/.test(gen), 'ORCH: the last unknown is remembered, a registration after it is the recovery fact (set once), rootRecovery() exports both');
+  ok(/if \(!v\.ok && v\.kind === 'unknown' && !f\.pending\) _lastRootError = \{ at: t, error: f\.error \|\| v\.why \};/.test(gen) && /if \(_lastRootError && !_registeredAfterError && Object\.values\(results\)\.some\(\(x\) => x && x\.ok\)\) _registeredAfterError = \{ at: Date\.now\(\), error: _lastRootError\.error, since: _lastRootError\.at \};/.test(gen) && /function rootRecovery\(\) \{ return \{ lastError: _lastRootError, registeredAfterError: _registeredAfterError \}; \}/.test(gen) && /readRootFacts, rootRecovery,/.test(gen), 'ORCH: the last unknown is remembered, a registration after it is the recovery fact (set once), rootRecovery() exports both');
   ok(/const due = serverRoot\.unknownNoticeDue\(memo, refused\.why \|\| refused\.line\);/.test(watchSrc) && /posted = Number\(seen\) > 0;\n\s*if \(posted\) \{ try \{ writeJsonAtomic\(memoFile, due\.memo\); \}/.test(watchSrc) && /const \{ writeJsonAtomic \} = require\('\.\.\/channel-store\.js'\);/.test(watchSrc), 'the watch: the unknown notice is posted once per cause — the memo persisted through THE atomic writer, written only when a client saw the toast');
   // THE REAL LEG: the watch over fake timers + a scripted ensureAgentHooks + a recording serverNotice + a scratch data dir
   const HW = require(path.join(REPO, 'src/server/hook-root-watch.js'));
@@ -282,9 +283,9 @@ console.log('— ⑦ verify r2: the unknown verdict is RE-JUDGED with backoff, s
   const restore = () => { fs.rmSync(path.join(ttlRoot, '.git'), { force: true }); fs.mkdirSync(path.join(ttlRoot, '.git', 'refs'), { recursive: true }); fs.writeFileSync(path.join(ttlRoot, '.git', 'HEAD'), 'ref: refs/heads/master\n'); };
   const origTtl = SR.ROOT_FACTS_TTL_MS; const quiet = console.warn; console.warn = () => {};
   try {
-    SR.ROOT_FACTS_TTL_MS = -1; const g = Gm.create({ rootDir: ttlRoot, port: 0 }); const k1 = g.rootVerdict().kind; convert(); const k2 = g.rootVerdict().kind;
+    SR.ROOT_FACTS_TTL_MS = -1; const g = Gm.create({ rootDir: ttlRoot, port: 0 }); await g.rootFactsNow(); const k1 = g.rootVerdict().kind; convert(); await g.rootFactsNow(); const k2 = g.rootVerdict().kind;   // B-1425: each read off the loop, awaited
     ok(k1 === 'tmp' && k2 === 'worktree', `③ the shipped ORCH re-reads aged facts: a .git converted in place moves the verdict (${k1} → ${k2}; under a tmp root the worktree rule outranks tmp)`, { k1, k2 });
-    restore(); SR.ROOT_FACTS_TTL_MS = Infinity; const g2 = Gm.create({ rootDir: ttlRoot, port: 0 }); const c1 = g2.rootVerdict().kind; convert(); const c2 = g2.rootVerdict().kind;
+    restore(); SR.ROOT_FACTS_TTL_MS = Infinity; const g2 = Gm.create({ rootDir: ttlRoot, port: 0 }); await g2.rootFactsNow(); const c1 = g2.rootVerdict().kind; convert(); await g2.rootFactsNow(); const c2 = g2.rootVerdict().kind;
     ok(c1 === 'tmp' && c2 === 'tmp', 'CONTROL: facts that never age keep the pre-conversion verdict (the r1 shape — stale until a restart)', { c1, c2 });
   } finally { SR.ROOT_FACTS_TTL_MS = origTtl; console.warn = quiet; }
 }
@@ -312,28 +313,28 @@ console.log('— ⑥ REAL filesystem shapes through the SHIPPED reader (verify r
     const readRootFacts = ATG.create({ rootDir: clone, port: 0 }).readRootFacts; // the scratch clone is the generator's rootDir (it makes data/ dirs there)
     ok(typeof readRootFacts === 'function', 'agent-tool-generators exports readRootFacts (the SHIPPED reader is what this leg judges)');
     const real = (p) => fs.realpathSync(p);
-    const judge = (d) => { const f = readRootFacts(d); return { f, v: SR.rootVerdict({ ...f, tmpRoots: [] }) }; }; // tmpRoots [] isolates the git rules (every shape sits under the tmp dir)
+    const judge = async (d) => { const f = await readRootFacts(d); return { f, v: SR.rootVerdict({ ...f, tmpRoots: [] }) }; };   // B-1425: the shipped reader runs off the loop // tmpRoots [] isolates the git rules (every shape sits under the tmp dir)
     const gitSays = (d) => execFileSync('git', ['-C', d, 'rev-parse', '--git-dir', '--git-common-dir'], { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim().split('\n').map((p) => real(path.resolve(d, p))).join(',');
-    let r = judge(clone); ok(r.v.kind === 'checkout' && r.f.gitDir === real(clone + '/.git') && gitSays(clone) === [r.f.gitDir, r.f.gitCommonDir].join(','), 'a. a plain clone (.git a directory) ⇒ checkout; the facts equal git rev-parse', r);
-    r = judge(path.join(S, 'wt')); ok(r.v.kind === 'worktree' && r.v.checkout === real(clone) && gitSays(path.join(S, 'wt')) === [r.f.gitDir, r.f.gitCommonDir].join(','), 'b. a linked worktree ⇒ worktree naming the clone; the facts equal git rev-parse', r);
-    r = judge(path.join(S, 'wt-gone')); ok(r.v.kind === 'worktree' && r.f.dangling === true && /clone2$/.test(r.v.checkout), "c. a worktree whose checkout is GONE (dangling gitdir) ⇒ still a worktree, the checkout inferred from git's layout (it shipped as a checkout: every writer wrote)", r);
-    r = judge(path.join(S, 'bare-wt')); ok(r.v.kind === 'worktree' && r.v.checkout === real(bare), 'd. a worktree of a bare repo ⇒ worktree naming the bare dir', r);
-    r = judge(path.join(sup, 'sub')); ok(r.v.kind === 'checkout' && r.f.gitDir === r.f.gitCommonDir && /\/\.git\/modules\/sub$/.test(r.f.gitDir), 'e. a submodule checkout (.git file, gitdir under .git/modules/, no commondir) ⇒ checkout', r);
-    r = judge(path.join(S, 'link')); ok(r.v.kind === 'checkout' && r.f.root === real(clone), 'f. a clone reached through a symlink ⇒ checkout, the root its real path', r);
-    r = judge(nogit); ok(r.v.kind === 'checkout' && !r.f.error, 'h. a tree with no .git (ENOENT is not an error: the docker image) ⇒ checkout', r);
+    let r = await judge(clone); ok(r.v.kind === 'checkout' && r.f.gitDir === real(clone + '/.git') && gitSays(clone) === [r.f.gitDir, r.f.gitCommonDir].join(','), 'a. a plain clone (.git a directory) ⇒ checkout; the facts equal git rev-parse', r);
+    r = await judge(path.join(S, 'wt')); ok(r.v.kind === 'worktree' && r.v.checkout === real(clone) && gitSays(path.join(S, 'wt')) === [r.f.gitDir, r.f.gitCommonDir].join(','), 'b. a linked worktree ⇒ worktree naming the clone; the facts equal git rev-parse', r);
+    r = await judge(path.join(S, 'wt-gone')); ok(r.v.kind === 'worktree' && r.f.dangling === true && /clone2$/.test(r.v.checkout), "c. a worktree whose checkout is GONE (dangling gitdir) ⇒ still a worktree, the checkout inferred from git's layout (it shipped as a checkout: every writer wrote)", r);
+    r = await judge(path.join(S, 'bare-wt')); ok(r.v.kind === 'worktree' && r.v.checkout === real(bare), 'd. a worktree of a bare repo ⇒ worktree naming the bare dir', r);
+    r = await judge(path.join(sup, 'sub')); ok(r.v.kind === 'checkout' && r.f.gitDir === r.f.gitCommonDir && /\/\.git\/modules\/sub$/.test(r.f.gitDir), 'e. a submodule checkout (.git file, gitdir under .git/modules/, no commondir) ⇒ checkout', r);
+    r = await judge(path.join(S, 'link')); ok(r.v.kind === 'checkout' && r.f.root === real(clone), 'f. a clone reached through a symlink ⇒ checkout, the root its real path', r);
+    r = await judge(nogit); ok(r.v.kind === 'checkout' && !r.f.error, 'h. a tree with no .git (ENOENT is not an error: the docker image) ⇒ checkout', r);
     if (typeof process.getuid === 'function' && process.getuid() === 0) console.log('  SKIP (LOUD): running as root — chmod 000 refuses no read, the EACCES cell did not run');
-    else { fs.chmodSync(path.join(eacces, '.git'), 0o000); r = judge(eacces); fs.chmodSync(path.join(eacces, '.git'), 0o644); ok(r.v.kind === 'unknown' && /cannot be read \(EACCES\)/.test(r.f.error || '') && /could not be judged/.test(r.v.why), 'g. an UNREADABLE .git (EACCES stands in for an NFS hiccup) ⇒ the error fact ⇒ unknown, refused by name (it shipped as a checkout)', r); }
+    else { fs.chmodSync(path.join(eacces, '.git'), 0o000); r = await judge(eacces); fs.chmodSync(path.join(eacces, '.git'), 0o644); ok(r.v.kind === 'unknown' && /cannot be read \(EACCES\)/.test(r.f.error || '') && /could not be judged/.test(r.v.why), 'g. an UNREADABLE .git (EACCES stands in for an NFS hiccup) ⇒ the error fact ⇒ unknown, refused by name (it shipped as a checkout)', r); }
     const gd = fs.readFileSync(path.join(eacces, '.git'), 'utf8'); fs.writeFileSync(path.join(eacces, '.git'), 'ref: nothing\n');
-    r = judge(eacces); ok(r.v.kind === 'unknown' && /without a gitdir: line/.test(r.f.error || ''), 'a .git FILE without a gitdir: line ⇒ unknown (never "no git")', r);
+    r = await judge(eacces); ok(r.v.kind === 'unknown' && /without a gitdir: line/.test(r.f.error || ''), 'a .git FILE without a gitdir: line ⇒ unknown (never "no git")', r);
     fs.writeFileSync(path.join(eacces, '.git'), gd);
     ok(SR.refusalLine(SR.rootVerdict({ root: '/x', error: 'boom', tmpRoots: TMP })).startsWith('hooks not registered: the server root could not be judged: boom — nothing is written until the root can be judged'), 'the unknown sentence: nothing is written until the root can be judged');
     fs.rmSync(S, { recursive: true, force: true });
   }
   // the ORCH: an erroring read is never cached (read again at the next writer), and the owner is told at boot
-  ok(/if \(!_rootFacts \|\| _rootFacts\.error \|\| t - _rootFactsAt > serverRoot\.ROOT_FACTS_TTL_MS\) \{ _rootFacts = readRootFacts\(rootDir\); _rootFactsAt = t; \}/.test(gen), 'wiring: the facts are cached only when read without error, and for ROOT_FACTS_TTL_MS at most — a transient error is judged again at the next writer, a changed .git within a minute (verify r2 ③)');
+  ok(/const rootStale = \(t = Date\.now\(\)\) => !_rootFacts \|\| !!_rootFacts\.error \|\| t - _rootFactsAt > serverRoot\.ROOT_FACTS_TTL_MS;/.test(gen) && /if \(rootStale\(t\)\) startRootRead\(\);/.test(gen) && /\.then\(\(f\) => \{ _rootFacts = f; _rootFactsAt = Date\.now\(\);/.test(gen), 'wiring (B-1425: the refresh runs off the loop, single-flight): the facts are cached only when read without error, and for ROOT_FACTS_TTL_MS at most — a transient error is judged again at the next writer, a changed .git within a minute (verify r2 ③)');
   ok(/if \(e && e\.code === 'ENOENT'\) return facts; facts\.error = /.test(gen) && /facts\.dangling = true; return facts;/.test(gen) && /if \(!\(e && e\.code === 'ENOENT'\)\) \{ facts\.error = /.test(gen), 'wiring: ENOENT on .git is "no git"; any other read error is the error fact; a gone gitdir of the worktrees layout is a dangling worktree; a missing commondir is a submodule');
   const watchSrc = read('src/server/hook-root-watch.js');
-ok(/if \(integrationEnabled\(\)\) hookRootWatch\.sync\(\);/.test(srv) && /if \(!hookRootWatch\.probeMayRun\(\) \|\| !integrationEnabled\(\) \|\| fs\.existsSync\(HOOK_OPTOUT_FILE\)\) return;/.test(srv) && / && !hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/.test(srv) && /require\('\.\/src\/server\/hook-root-watch\.js'\)\.create\(\{ dataDir: path\.join\(__dirname, 'data'\), ensureAgentHooks, rootRecovery, ownerWriteRefusal, integrationEnabled: \(\) => integrationEnabled\(\), serverNotice: \(\.\.\.a\) => serverNotice\(\.\.\.a\) \}\)/.test(srv), 'server.js: the boot / toggle sync, the probe\'s gate and the probe\'s words all go through THE hook-root watch (src/server/hook-root-watch.js) — verify r2 ①');
+ok(/if \(integrationEnabled\(\)\) hookRootWatch\.sync\(\);/.test(srv) && /if \(!hookRootWatch\.probeMayRun\(\) \|\| !integrationEnabled\(\) \|\| fs\.existsSync\(HOOK_OPTOUT_FILE\)\) return;/.test(srv) && / && !hookRootWatch\.saidRecoveryInstead\(info, scriptMissing\)\) serverNotice\(`hook-health-\$\{key\}`,/.test(srv) && /require\('\.\/src\/server\/hook-root-watch\.js'\)\.create\(\{ dataDir: path\.join\(__dirname, 'data'\), ensureAgentHooks, rootRecovery, ownerWriteRefusal, factsNow: rootFactsNow, integrationEnabled: \(\) => integrationEnabled\(\), serverNotice: \(\.\.\.a\) => serverNotice\(\.\.\.a\) \}\)/.test(srv), 'server.js: the boot / toggle sync, the probe\'s gate and the probe\'s words all go through THE hook-root watch (src/server/hook-root-watch.js) — verify r2 ①');
 }
 
 // B-9dd0 (主开发 r321): THE «under a temp root» verdict, one spelling (the update check, the boot's runtime check)
@@ -361,6 +362,71 @@ ok(/if \(integrationEnabled\(\)\) hookRootWatch\.sync\(\);/.test(srv) && /if \(!
   const ops = fs.readFileSync(path.join(REPO, 'src/server/ops-routes.js'), 'utf8'), rb = fs.readFileSync(path.join(REPO, 'src/server/runtime-boot.js'), 'utf8');
   ok(/tmpRootUnder\(\{ root: rootDir, realRoot: r, tmpRoots: absTmp\(\), realTmps: real \}\)/.test(ops) && /\.\.\.absTmp\(\)\.map\(realOr\)/.test(ops) && /SR\.tmpRootUnder\(\{ root: path\.resolve\(rootDir\), realRoot, tmpRoots: abs, realTmps \}\)/.test(rb) && /const abs = tmpRoots\.filter\(\(t\) => typeof t === 'string' && path\.isAbsolute\(t\)\);/.test(rb) && !/startsWith\(path\.resolve\(t\)/.test(rb),
     'B-9dd0: the update check and the boot\'s runtime check both ask tmpRootUnder (one verdict, no second spelling)');
+}
+
+// ── ⑧ B-1425 (主开发 r640 / r647): THE ROOT FACTS OFF THE HUB'S LOOP — LAW 1 (one read in flight, ever), LAW 2 (who waits) ──
+console.log('— ⑧ B-1425: the root facts are read off the loop — one read in flight, ever; a caller that can wait, waits');
+{
+  const Gm = require(path.join(REPO, 'src/server/agent-tool-generators.js'));
+  const R8 = fs.mkdtempSync(path.join('/tmp', 'vs-srvroot8-')); process.on('exit', () => { try { fs.rmSync(R8, { recursive: true, force: true }); } catch { } });
+  // a stand-in for the reader's file calls: its .git stat is HELD until released (the shape of a stat on a mount that does not answer)
+  let release = null; const held = new Promise((r) => { release = r; }); const asked = [];
+  const stand = { realpath: async (q) => q, stat: async (q) => { asked.push(q); await held; throw Object.assign(new Error('no .git'), { code: 'ENOENT' }); }, readFile: async () => { throw Object.assign(new Error('no'), { code: 'ENOENT' }); } };
+  // the reader's deadline timer is unref'd (it never keeps a hub alive); here a held stand-in read is the only thing out, so the
+  // section keeps the loop alive itself while it waits (a node with nothing pending would end with an unsettled await)
+  const keep8 = setInterval(() => { }, 1000);
+  const G = Gm.create({ rootDir: R8, port: 0 });
+  G._setRootFs(stand); G._setRootReadMs(30);
+  const v0 = G.rootVerdict();   // the cache is empty: it starts the ONE read and answers «not read yet» — no file call
+  const s0 = G.rootReadStats();
+  const f1 = await G.rootFactsNow();   // a caller that waits: bounded by the deadline counted from the read's start
+  // THREE BACKOFF STEPS PASS while the held read is still out: each asks again (the cache, and a caller that waits)
+  const steps = [];
+  for (let k = 0; k < 3; k++) { steps.push(G.rootVerdict().kind); steps.push((await G.rootFactsNow()).late === true); }
+  const s1 = G.rootReadStats(), vLate = G.rootVerdict(), rec = G.rootRecovery();
+  console.log(`  (at rest before the release: ${JSON.stringify(s0)} → ${JSON.stringify(s1)}; first verdict ${v0.kind} «${String(v0.why).slice(0, 90)}»; the waiting caller got late=${f1.late} «${String(f1.error).slice(0, 90)}»; the steps ${JSON.stringify(steps)}; .git stats asked ${asked.length})`);
+  ok(v0.kind === 'unknown' && /not judged yet/.test(v0.why) && s0.started === 1 && s0.inFlight === true, 'B-1425: the first verdict reads the cache only — it STARTS the read off the loop and answers «not judged yet» (no file call on the loop)', { v0, s0 });
+  ok(f1.late === true && /did not answer in 0\.03 s/.test(f1.error), 'B-1425: a caller that waits past the deadline gets a NAMED fact («… did not answer in N s»), never a hold', f1);
+  ok(s1.started === 1 && s1.ended === 0 && s1.inFlight === true && asked.length === 1, 'B-1425 LAW 1: the held read still out, THREE backoff steps pass — exactly ONE read was ever started (never a second beside it: a hung mount would take every file thread)', { s1, asked: asked.length });
+  ok(vLate.kind === 'unknown' && /did not answer in/.test(vLate.why) && rec.lastError && /did not answer in/.test(rec.lastError.error), 'B-1425: the cache verdict past the deadline is the NAMED late fact (the callers\' refusal road), and it is the recorded read error (the recovery words name it)', { vLate, rec });
+  release();   // the held stat comes back (an answer: no .git)
+  for (let i = 0; i < 500 && G.rootReadStats().ended < 1; i++) await new Promise((r) => setImmediate(r));   // the read's own end, bounded
+  const s2 = G.rootReadStats(), vBack = G.rootVerdict();
+  const origTtl = SR.ROOT_FACTS_TTL_MS; SR.ROOT_FACTS_TTL_MS = -1;
+  try { G.rootVerdict(); G.rootVerdict(); } finally { SR.ROOT_FACTS_TTL_MS = origTtl; }
+  const s3 = G.rootReadStats();
+  for (let i = 0; i < 500 && G.rootReadStats().ended < 2; i++) await new Promise((r) => setImmediate(r));
+  console.log(`  (after the release: ${JSON.stringify(s2)}, verdict ${vBack.kind}; then two aged asks: ${JSON.stringify(s3)})`);
+  ok(s2.ended === 1 && s2.inFlight === false && s2.cached === true && vBack.kind !== 'unknown', 'B-1425: once the read CAME BACK its facts are the verdict (here the scratch root: judged, not unknown)', { s2, vBack });
+  ok(s3.started === 2, 'B-1425 LAW 1: the NEXT read starts only after the last came back — two aged asks at once start ONE new read', s3);
+  // the watch's re-judge AWAITS the facts before its sync (a fake timer; the order recorded)
+  const HW = require(path.join(REPO, 'src/server/hook-root-watch.js'));
+  const order = []; let fire = null;
+  const w = HW.create({ dataDir: R8, ensureAgentHooks: () => { order.push('sync'); return { ok: true }; }, rootRecovery: () => null, ownerWriteRefusal: () => null, factsNow: () => { order.push('facts'); return Promise.resolve(); }, serverNotice: () => 0, setTimer: (fn) => { fire = fn; return { unref() { } }; }, log: () => { } });
+  w.arm(); fire();
+  for (let i = 0; i < 20 && order.length < 2; i++) await new Promise((r) => setImmediate(r));
+  ok(order.join(',') === 'facts,sync', `B-1425 LAW 2: the watch's re-judge awaits the root facts before it registers (${order.join(' → ')})`, order);
+  // LAW 2 — WHO WAITS (the roads that can await do): pinned at their sources
+  const srv8 = read('server.js'), dial8 = read('src/spawn/dial.js'), ssh8 = read('src/spawn/ssh.js'), hosts8 = read('src/hosts.js'), late8 = read('src/server/hooks-late.js'), watch8 = read('src/server/hook-root-watch.js');
+  const waits = [
+    ['the boot\'s hook registration', /\nrootFactsNow\(\)\.then\(syncHookRegistration\);/.test(srv8)],
+    ['the boot\'s cli-config sync', /rootFactsNow\(\)\.then\(\(\) => harnessConfig\.syncCliConfig\(\{ reason: 'boot' \}\)\)/.test(srv8)],
+    ['the integration switch\'s sync', /if \(was !== now\) rootFactsNow\(\)\.then\(syncHookRegistration\);/.test(srv8)],
+    ['the hook-health probe (60 s, then 6 h)', /setTimeout\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\), 60000\)/.test(srv8) && /setInterval\(\(\) => rootFactsNow\(\)\.then\(checkAgentHookHealth\), 6 \* 3600 \* 1000\)/.test(srv8)],
+    ['GET /api/agent-hooks', /app\.get\('\/api\/agent-hooks', async \(req, res\) => \(await rootFactsNow\(\), res\.json\(/.test(srv8)],
+    ['the install route', /app\.post\('\/api\/agent-hooks\/install', async \(req, res\) => \{[\s\S]{0,2000}?await rootFactsNow\(\); createHookHelper\(\);/.test(srv8)],
+    ['the uninstall route', /app\.post\('\/api\/agent-hooks\/uninstall', async \(req, res\) => \{\n\s*await rootFactsNow\(\); removeAgentHooks\(\);/.test(srv8)],
+    ['the Apply route (hooks-late)', /app\.post\('\/api\/cli-config\/apply', async \(req, res\) => \{\n\s*if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);/.test(late8) && /hookRegistrationSafe, rootFactsNow \}\);/.test(srv8)],
+    ['a paired machine\'s conversation start (spawn/dial.js)', /if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);[^\n]*\n\s*await dm\.runCmd\('sh', \['-c',/.test(dial8)],
+    ['an ssh machine\'s conversation start (spawn/ssh.js)', /if \(typeof rootFactsNow === 'function'\) await rootFactsNow\(\);[^\n]*\n\s*prelude \+= \(ownerWriteRefusal\(\)/.test(ssh8)],
+    ['a machine\'s agent-tools install (hosts.js)', /async installAgentTools\(id, toolDir\) \{\n\s*if \(typeof this\.rootFactsNow === 'function'\) await this\.rootFactsNow\(\);/.test(hosts8) && /hosts\.rootFactsNow = rootFactsNow;/.test(srv8)],
+    ['the watch\'s re-judge timer', /if \(typeof factsNow === 'function'\) Promise\.resolve\(\)\.then\(factsNow\)\.then\(run, run\);/.test(watch8) && /factsNow: rootFactsNow,/.test(srv8)],
+  ];
+  console.log(`  (the roads that wait: ${waits.map(([n, k]) => `${n} ${k ? '✓' : '✗'}`).join(' · ')})`);
+  ok(waits.every(([, k]) => k), 'B-1425 LAW 2: every road that can wait AWAITS the facts — the boot, the switch, the probe, the routes, both remote conversation starts, the tools install, the watch', waits.filter(([, k]) => !k).map(([n]) => n));
+  const gen8 = read('src/server/agent-tool-generators.js'), body8 = gen8.slice(gen8.indexOf('const realOr = async'), gen8.indexOf('function rootRecovery()'));
+  ok(body8.length > 500 && !/fs\.(statSync|readFileSync|realpathSync|existsSync|readdirSync)\(/.test(body8) && /if \(_rootRead\) return _rootRead;/.test(body8), 'B-1425: the root reader and the verdict hold NO synchronous file call, and the read is single-flight at its one door', body8.length);
+  clearInterval(keep8);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

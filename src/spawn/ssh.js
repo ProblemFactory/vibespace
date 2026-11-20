@@ -19,7 +19,7 @@ const { sweepWriters } = require('../writer-sweep');
 function sshLadder(c) {
   const { ctx, execFileAsync, ws, data, id, backend, sessionMode, session, cwd, spawnAccount, integrationOn,
     spawnBrowserPre, needsClaudeLoginHelper, sweepOpts, h, shq, rcmd, rargs } = c;
-  const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote } = ctx;
+  const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, rootFactsNow, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote } = ctx;
   let { spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = c;
   const answer = () => ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd });
           // Remote agent enablement (P3): a remote session can't reach the local
@@ -116,6 +116,7 @@ function sshLadder(c) {
                     // THE ROOT VERDICT (src/server-root.js): a worktree / temp
                     // server ships the tools but never runs the register helper —
                     // the host's CLI config belongs to the owner's instance.
+                    if (typeof rootFactsNow === 'function') await rootFactsNow();   // B-1425: the root's true facts first (off the loop, bounded)
                     prelude += (ownerWriteRefusal() ? '' : `[ -n "$VS_NODE" ] && VIBESPACE_CLI_CONFIG=${cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" >/dev/null 2>&1; `);
                     // EDITOR needs $HOME expansion → shell prefix assignment
                     // (envPairs are shq'd); PORT/SESSION_ID are static values.

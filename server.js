@@ -428,7 +428,7 @@ const memoryPressure = require('./src/server/memory-pressure-watch.js').create({
 const {
   AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
   createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
-  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery,
+  ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe, ownerWriteRefusal, refuseOwnerWrite, rootRecovery, rootFactsNow, // B-1425: the root facts a caller that can wait awaits
   agentHooksStatus, HOOK_OPTOUT_FILE,
 } = require('./src/server/agent-tool-generators.js').create({ rootDir: __dirname, port: PORT, onHookFileCreated: (ev) => hooksLate.noteCreated(ev) });
 // ── Harness settings (src/server/harness-config-sync.js; docs/design-harness-settings.zh.md) ──
@@ -563,7 +563,7 @@ function integrationEnabled() {
 // the master switch. ensureAgentHooks({auto:true}) still honors the manual
 // data/.agent-hooks-optout marker (Manage-Agents Remove) — the switch never
 // overrides that narrower explicit choice; Install there clears it.
-const hookRootWatch = require('./src/server/hook-root-watch.js').create({ dataDir: path.join(__dirname, 'data'), ensureAgentHooks, rootRecovery, ownerWriteRefusal, integrationEnabled: () => integrationEnabled(), serverNotice: (...a) => serverNotice(...a) });
+const hookRootWatch = require('./src/server/hook-root-watch.js').create({ dataDir: path.join(__dirname, 'data'), ensureAgentHooks, rootRecovery, ownerWriteRefusal, factsNow: rootFactsNow, integrationEnabled: () => integrationEnabled(), serverNotice: (...a) => serverNotice(...a) });
 function syncHookRegistration() {
   try {
     if (integrationEnabled()) hookRootWatch.sync(); // the unknown ⇒ the notice once per cause + the backoff re-judge; ok ⇒ the recovery said once // verify r1 (hook-root-guard): an UNJUDGEABLE root (a read error on .git) is said to the OWNER, not only the journal; every writer re-reads, the probe heals + notifies
@@ -585,7 +585,7 @@ setupPersistence({ dataDir: path.join(__dirname, 'data'), wss, WS_OPEN, getSyncS
   onSettingsWrite: (next, prev) => {
     const was = (prev || {})['agents.vibespaceIntegration'] !== false;
     const now = (next || {})['agents.vibespaceIntegration'] !== false;
-    if (was !== now) syncHookRegistration();
+    if (was !== now) rootFactsNow().then(syncHookRegistration);   // B-1425: the switch's sync waits for the root facts (off the loop)
     // Harness settings (design-harness-settings §5): a cli-config row changed ⇒
     // re-apply the plan on this machine; a spawn row with a `live` verb changed
     // (claude disableModelFallback → formatSetFallbackPolicy: apply_flag_settings
@@ -600,13 +600,13 @@ app.use(persistenceRouter);
 // ── Agent-hook boot registration (deferred from the hook-machinery block so
 // the Integration master switch is readable) — a toggle flipped just before a
 // restart, or an imported config bundle carrying it, converges here.
-syncHookRegistration();
+rootFactsNow().then(syncHookRegistration);   // B-1425: the boot's registration waits for the root's first read (off the loop, bounded) — never an empty cache
 // CLI-CONFIG PLAN AT BOOT (design-harness-settings §5): every cli-config row of every harness (claude transcriptRetentionDays → cleanupPeriodDays, codex historyPersistence → [history] persistence) is written on THIS machine through the CAS writers — guarded by hookRegistrationSafe() inside (a /tmp worktree server never writes the real HOME) and by the smoke belt here; remote machines get the same plan as VIBESPACE_CLI_CONFIG on install / spawn (hosts.js, ws-create.js)
-if (!process.env.VIBESPACE_SKIP_AGENT_HOOKS) harnessConfig.syncCliConfig({ reason: 'boot' });
+if (!process.env.VIBESPACE_SKIP_AGENT_HOOKS) rootFactsNow().then(() => harnessConfig.syncCliConfig({ reason: 'boot' }));   // B-1425: after the first read
 // Health probe: catches MID-RUN poisoning (the 2.225.1 incident class) that
 // boot-time registration can't — self-heals + notifies. 60s in, then 6h.
-setTimeout(checkAgentHookHealth, 60000).unref();
-setInterval(checkAgentHookHealth, 6 * 3600 * 1000).unref();
+setTimeout(() => rootFactsNow().then(checkAgentHookHealth), 60000).unref();   // B-1425: the probe awaits the facts
+setInterval(() => rootFactsNow().then(checkAgentHookHealth), 6 * 3600 * 1000).unref();
 
 const { tasks, taskFanout } = require('./src/server/task-groups-wiring.js').createStore({ app, wss, WS_OPEN, activeSessions, grants, persistenceRouter, serverSetting, sessionStatusKey, dataDir: path.join(__dirname, 'data'), exitProxy: () => exitProxy, channelsWiring: () => channelsWiring, sessionStatus: () => sessionStatus, mounts: () => mounts, userTodos: () => userTodos, hosts: () => hosts }); // ── Task Groups (岗位; docs/design-task-system.md): the store, its fan-out, its routes and the remote context sync live in src/server/task-groups-wiring.js, called at their three old places ──
 // System info + memory-pressure watch (2.216.0, userL's 32Gi OOM kill —
@@ -948,27 +948,27 @@ app.post('/api/sessions/:id/msg-reachability', (req, res) => {
 });
 require('./src/server/wait-watch.js').install({ activeSessions, getDeliver: () => deliver, getGroups: () => { try { return channelsWiring.groups; } catch { return null; } }, getUserTodos: () => userTodos, sessionKeyOf: (s, id) => sessionStatusKey(s, id), log: console }); const recordClear = require('./src/server/record-clear.js').create({ tasks, userTodos, sessionStatus, getJobs: jobsWiring.getJobs, getGroups: () => channelsWiring.groups, getChannels: () => channelsWiring.channels }); require('./src/routes/records-clear.js').registerRecordClearRoutes(app, { recordClear }); // "Clear content…" (2026-09-28): ONE entry point (PURE verdict, each store's door, the journal line); the owner's POST /api/records/clear[-many] here, an agent's own verbs through setupAgentRoutes
 setupAgentRoutes({ app, activeSessions, tasks, sessionStatus, SessionStatusManager, userTodos, sessionStatusKey, serverSetting, spendGuard, scheduleCtxSync, remoteCtxBaseFor, readUserState: () => persistenceRouter.readUserState(), getJobs: jobsWiring.getJobs, deliver, getPublishedPages: () => publishedPages, getChannels: () => channelsWiring.channels, getGroups: () => channelsWiring.groups, getTouches: () => channelsWiring.touches, getRecordClear: () => recordClear, getSendUserInput: () => sendUserInput, getSessionMetaStore: () => ({ readSessionMeta, writeSessionMeta }), carryDir: path.join(__dirname, 'data') }); // lane report-mark-on-ack r3: carryDir = the outstanding deliveries by conversation (a restart is said from it). B-86d3: the seen marks ride the session meta; lazy getters: all three are created further down (TDZ at boot otherwise); getChannels = the vibespace-channels routes' engine (P3); getSendUserInput = THE typing path for a dispatch's `/compact` (lane worker-dispatch — sendUserInput is declared further down)
-app.get('/api/agent-hooks', (req, res) => res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() })); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
-app.post('/api/agent-hooks/install', (req, res) => {
+app.get('/api/agent-hooks', async (req, res) => (await rootFactsNow(), res.json({ ...agentHooksStatus(), integrationOff: !integrationEnabled(), cliConfig: harnessConfig.cliConfigStatus() }))); // cliConfig = fresh per-key receipts for the managed CLI-config rows (Settings window chips + the Machines card; D2: never persisted)
+app.post('/api/agent-hooks/install', async (req, res) => {
   // The master switch outranks the button: boot/toggle would strip the entries
   // right back — refuse with guidance instead of silently contradicting.
   { const sh = typeof persistenceRouter.settingsHeld === 'function' ? persistenceRouter.settingsHeld() : null; if (sh) return res.status(503).json({ error: `the settings could not be read (${sh.kind}${sh.code ? ', ' + sh.code : ''}) — the hooks were not installed; nothing was written`, code: 'store_unread', held: sh }); } if (!integrationEnabled()) return res.status(400).json({ error: 'VibeSpace integration is disabled (Settings → Integration → master switch). Enable it first.' });   // B-225b r552: the HOLD answered by name first (its strict side reads the switch OFF)
-  createHookHelper(); // regenerate the script too (repair path)
+  await rootFactsNow(); createHookHelper(); // B-1425: the verdict on the root's true facts; regenerate the script too (repair path)
   const results = ensureAgentHooks({ auto: false }); // explicit → clears any opt-out
   // A worktree / temp server refuses BY NAME (src/server-root.js) — never "installed"
   if (results.refused) return res.status(409).json({ error: results.refused.line, refused: results.refused, status: agentHooksStatus() }); if (results.skipped && results.settingsHeld) return res.status(503).json({ error: 'the settings could not be read — the hooks were not installed; nothing was written', code: 'store_unread', held: { file: 'settings.json', kind: results.settingsHeld.kind, code: results.settingsHeld.code || null, since: null, rung: 'said' } });
   res.json({ success: true, results, status: agentHooksStatus() });
 });
-hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)
-app.post('/api/agent-hooks/uninstall', (req, res) => {
-  removeAgentHooks();
+hooksLate.registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow }); // POST /api/cli-config/apply — the missing-file chip's "Apply" (human-triggered): the boot registration + CLI-config plan on demand (lane hooks-create)
+app.post('/api/agent-hooks/uninstall', async (req, res) => {
+  await rootFactsNow(); removeAgentHooks();
   res.json({ success: true, status: agentHooksStatus() });
 });
 
 // ── Hosts (the MACHINE registry — ssh hosts AND dial-out devices, B-f3e8) ──
 const { HostManager } = require('./src/hosts');
 const hosts = new HostManager({ dataDir: path.join(__dirname, 'data') });
-hosts.ownerWriteRefusal = refuseOwnerWrite; // the root verdict (src/server-root.js): a worktree / temp server runs no register helper on another machine either
+hosts.ownerWriteRefusal = refuseOwnerWrite; hosts.rootFactsNow = rootFactsNow; // the root verdict (src/server-root.js): a worktree / temp server runs no register helper on another machine either
 hosts.cliConfigPlanB64 = cliConfigPlanB64; // the CLI-config plan rides every remote install + the gated --status probe as VIBESPACE_CLI_CONFIG (design-harness-settings §6)
 const bcastAll = (msg) => { const j = JSON.stringify(msg); wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } }); };
 // B-f3e8 one-time migration: dial-tokens.json (deviceId → sha256) folds into
@@ -1304,7 +1304,7 @@ const wsApi = registerWsHandler(wss, {
   activeSessions, WS_OPEN, broadcastActiveSessions, broadcastToSession, resizeSessionToMin,
   setupSessionPty, reattachLocalPty, ptyQuietSince, refreshWebuiPids, deleteSessionMeta, writeSessionMeta, readSessionMeta, autoResume,
   readLayouts, writeLayouts, getSyncStore, serverSetting, integrationEnabled,
-  harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal: refuseOwnerWrite, // harness settings (design-harness-settings §5/§6)
+  harnessSetting, harnessDeclares, harnessSpawnSettings, cliConfigPlanB64, ownerWriteRefusal: refuseOwnerWrite, rootFactsNow, // harness settings (design-harness-settings §5/§6)
   sessionCounterRef, createSessionMessages,
   SOCKETS_DIR, BUFFERS_DIR, PTY_WRAPPER, CHAT_WRAPPER,
   NODE_CMD, DTACH_CMD, CLAUDE_CMD, EDITOR_CMD, AGENT_BIN_DIR, PORT, X_ENV, cliCmds,

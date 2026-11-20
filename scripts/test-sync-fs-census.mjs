@@ -193,8 +193,6 @@ const ROWS = [
   ["src/server/local-index.js", "factsLocal", 1, "local-only", "r2: the rung law's lstat of the place folder itself, after the walk judged it local"],
   ["src/server/local-index.js", "stop", 2, "local-only", "r2: the shutdown's ONE synchronous write (tmp + rename) — the process ends next — in the folder the boot judged local, never over a write that is stuck"],
   ["src/server/local-index.js", "write", 2, "local-only", "r2: a write that landed after the stop re-writes the stop's word (tmp + rename) in the same folder; every other write is async (fs.promises)"],
-  ["src/server/agent-tool-generators.js", "create > realOr", 1, "local-only", "realpath of rootDir (the checkout), its .git / gitdir / commondir, os.tmpdir(), TMP_ROOTS and os.homedir()"],
-  ["src/server/agent-tool-generators.js", "create > readRootFacts", 4, "local-only", "only caller rootVerdict passes rootDir (the checkout): its .git, the gitdir it names and that dir's commondir (the checkout's own git store)"],
   ["src/server/apps-engine.js", "*", 3, "local-only", "file = <dataDir>/app-proposals.json (apps-wiring passes <checkout>/data)"],
   ["src/server/apps-ops-door.js", "create > close", 2, "local-only", "sock = os.homedir()/.vibespace/apps/operator/ops.sock (socketPath; apps-wiring.js:33 passes no home)."],
   ["src/server/auto-resume.js", "*", 3, "local-only", "file = <dataDir>/auto-resume.json (server.js passes <checkout>/data)"],

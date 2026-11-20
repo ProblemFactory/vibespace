@@ -58,8 +58,9 @@ function create({ activeSessions, getSessionStatus, getUserTodos, sessionStatusK
   function ready() { isReady = true; return flush(); }
 
   /** POST /api/cli-config/apply — the "Apply" a missing-file chip offers (human-triggered). */
-  function registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe }) {
-    app.post('/api/cli-config/apply', (req, res) => {
+  function registerApplyRoute(app, { ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow = null }) {
+    app.post('/api/cli-config/apply', async (req, res) => {
+      if (typeof rootFactsNow === 'function') await rootFactsNow();   // B-1425: the root's true facts first (off the loop, bounded)
       if (!hookRegistrationSafe()) return res.status(409).json({ error: 'This server runs from a temporary directory and never writes the real CLI config.', code: 'unsafe_root' });
       let hooks = null;
       try { if (integrationEnabled()) hooks = ensureAgentHooks({ auto: true }); } catch (e) { hooks = { error: e.message }; }

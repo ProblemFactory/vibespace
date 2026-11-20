@@ -22,7 +22,7 @@ const { withPriority } = require('./line.js'); // …and the SAME words in front
 function dialLadder(c) {
   const { ctx, execFileAsync, ws, data, id, backend, SP, sessionMode, session, cwd, spawnAccount, integrationOn,
     spawnBrowserPre, needsClaudeLoginHelper, sweepOpts, h, shq, rcmd, rargs } = c;
-  const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote, dialBridge } = ctx;
+  const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, rootFactsNow, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote, dialBridge } = ctx;
   let { spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = c;
   const answer = () => ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd });
   // B-460d's remainder: the device's OWN hello — from the link that is up (connectedDevice: memory only); a cached handle a re-dial
@@ -87,6 +87,7 @@ function dialLadder(c) {
               // chmod: tools executable, token 0600, then register the hook in
               // the device's OWN claude/codex configs (its local CLI fires it)
               const agentNode = agentNodeOf((() => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } })()); // B-b83c: the agent's own node (its hello said it) — read from memory (B-24e2's helloInfo)
+              if (typeof rootFactsNow === 'function') await rootFactsNow();   // B-1425: the register helper's verdict on the root's TRUE facts (off the loop, bounded) — never an empty cache
               await dm.runCmd('sh', ['-c',
                 `chmod +x "${bin}"/vibespace-* "${bin}/agent-browser" "${home}/.vibespace/editor/code" 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
                 // same POSIX node finder as the ssh prelude (2.244.4 — a bare

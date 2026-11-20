@@ -1915,7 +1915,8 @@ class HostManager {
     try { return typeof this.ownerWriteRefusal === 'function' ? this.ownerWriteRefusal() : null; } catch { return null; }
   }
 
-  installAgentTools(id, toolDir) {
+  async installAgentTools(id, toolDir) {
+    if (typeof this.rootFactsNow === 'function') await this.rootFactsNow();   // B-1425: the verdict on the root's true facts (server.js sets hosts.rootFactsNow)
     const refused = this._ownerWriteRefusal();
     const h = this.get(id);
     const present = HostManager.agentTools().filter((n) => { try { return fs.statSync(path.join(toolDir, n)).isFile(); } catch { return false; } });

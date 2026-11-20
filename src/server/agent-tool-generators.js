@@ -522,50 +522,109 @@ function agentHooksStatus() {
 // checkout was removed both shipped as `checkout` — every writer wrote).
 const serverRoot = require('../server-root');
 const { TMP_ROOTS } = require('../fixture-guard');
-const realOr = (p) => { try { return fs.realpathSync(p); } catch { return p; } };
-function readRootFacts(root) {
+// B-1425 (主开发 r640 / r647): THE ROOT FACTS ARE READ OFF THE HUB'S LOOP. On production the checkout sits on a network mount, and
+// the release read it with statSync / readFileSync / realpathSync on the loop — once a minute at most, but at EVERY call while the
+// last read erred, and the realpaths at every call — from every remote conversation start, the hooks routes and the timers: a
+// stat there that did not answer held every conversation of the hub. Now:
+//  · LAW 1 — ONE READ IN FLIGHT AT MOST, EVER: a file call that hangs holds one of the runtime's few file threads for as long as it
+//    hangs; a second read beside it would take another, and then every file call of the hub waits. The next read starts only after
+//    the last one CAME BACK (an answer or an error) — never on a timer, never beside it.
+//  · ITS DEADLINE (ROOT_READ_MS) only decides what a WAITING caller is told; the read itself is never abandoned or started again.
+//  · LAW 2 — A CALLER THAT CAN WAIT, WAITS: rootFactsNow() awaits the facts, bounded by the deadline counted from the read's own
+//    start. Past it, the caller gets the last read's facts when one exists (its verdict stands), else a NAMED fact (`late`: the
+//    verdict `unknown`, «… did not answer in 2 s»), which the callers' refusal road already handles.
+//  · rootVerdict() (the callers that cannot wait) reads the CACHE only, and starts a refresh when it is stale: never a file call.
+const ROOT_READ_MS_DEFAULT = 2000;
+let ROOT_READ_MS = ROOT_READ_MS_DEFAULT;
+let _rootFsp = fs.promises;   // the reader's file calls (a suite's stand-in through _setRootFs)
+const _rootReads = { started: 0, ended: 0 };   // how many reads were started / came back (the single-flight leg reads them)
+let _rootRead = null, _rootReadAt = 0;
+const tmpSpellings = () => [os.tmpdir(), ...TMP_ROOTS];   // the judgment's temp roots, as spelled (their real paths are read with the facts)
+const realOr = async (p) => { try { return await _rootFsp.realpath(p); } catch { return p; } };
+async function readRootFacts(root) {
   if (DOOR.blocked(path.resolve(root))) return { root: path.resolve(root), gitDir: null, gitCommonDir: null, error: DOOR.sentenceFor(path.resolve(root)) };   // B-afc4
-  const facts = { root: realOr(path.resolve(root)), gitDir: null, gitCommonDir: null };
+  const facts = { root: await realOr(path.resolve(root)), gitDir: null, gitCommonDir: null };
   const dotGit = path.join(facts.root, '.git');
   const errOf = (e) => (e && e.code) || (e && e.message) || String(e);
   let st = null;
-  try { st = fs.statSync(dotGit); } catch (e) { if (e && e.code === 'ENOENT') return facts; facts.error = `${dotGit} cannot be read (${errOf(e)})`; return facts; }
-  if (st.isDirectory()) { facts.gitDir = facts.gitCommonDir = realOr(dotGit); return facts; }
+  try { st = await _rootFsp.stat(dotGit); } catch (e) { if (e && e.code === 'ENOENT') return facts; facts.error = `${dotGit} cannot be read (${errOf(e)})`; return facts; }
+  if (st.isDirectory()) { facts.gitDir = facts.gitCommonDir = await realOr(dotGit); return facts; }
   let gd = null;
-  try { gd = serverRoot.parseGitFile(fs.readFileSync(dotGit, 'utf-8')); } catch (e) { facts.error = `${dotGit} cannot be read (${errOf(e)})`; return facts; }
+  try { gd = serverRoot.parseGitFile(await _rootFsp.readFile(dotGit, 'utf-8')); } catch (e) { facts.error = `${dotGit} cannot be read (${errOf(e)})`; return facts; }
   if (!gd) { facts.error = `${dotGit} is a file without a gitdir: line`; return facts; }
-  facts.gitDir = realOr(path.resolve(facts.root, gd));
+  facts.gitDir = await realOr(path.resolve(facts.root, gd));
   // the gitdir itself: GONE ⇒ a worktree whose checkout was removed — git's own layout (<common>/worktrees/<name>) still
   // names the checkout, so it stays a worktree (never "no git"); any other failure is the error fact
-  try { fs.statSync(facts.gitDir); } catch (e) {
+  try { await _rootFsp.stat(facts.gitDir); } catch (e) {
     const m = /^(.+)\/worktrees\/[^/]+$/.exec(facts.gitDir);
     if (e && e.code === 'ENOENT' && m) { facts.gitCommonDir = m[1]; facts.dangling = true; return facts; }
     facts.error = `the gitdir ${facts.gitDir} named by ${dotGit} cannot be read (${errOf(e)})`; return facts;
   }
   let common = facts.gitDir;
-  try { common = realOr(path.resolve(facts.gitDir, fs.readFileSync(path.join(facts.gitDir, 'commondir'), 'utf-8').trim())); }
+  try { common = await realOr(path.resolve(facts.gitDir, (await _rootFsp.readFile(path.join(facts.gitDir, 'commondir'), 'utf-8')).trim())); }
   catch (e) { if (!(e && e.code === 'ENOENT')) { facts.error = `${path.join(facts.gitDir, 'commondir')} cannot be read (${errOf(e)})`; return facts; } } // no commondir = a submodule / --separate-git-dir: the gitdir IS the common dir
   facts.gitCommonDir = common;
+  return facts;
+}
+// the judgment's own real paths (the temp roots, the home), read in the same flight, one call at a time
+async function readRootFactsAll(root) {
+  const facts = await readRootFacts(root);
+  const tmp = []; for (const t of tmpSpellings()) tmp.push(await realOr(t));
+  facts.tmpRoots = tmp; facts.home = await realOr(os.homedir());
   return facts;
 }
 let _rootFacts = null, _rootFactsAt = 0;
 let _lastRootError = null;          // verify r2 ①: the last `unknown` {at, error} — what a later registration happened AFTER
 let _registeredAfterError = null;   // verify r2 ①: {at, error, since} once the hooks registered after an earlier unknown (said once; the chip says it)
+/** LAW 1: the ONE read — started only when none is out; it stays out until it comes back, whatever any deadline said. */
+function startRootRead() {
+  if (_rootRead) return _rootRead;
+  _rootReads.started++; _rootReadAt = Date.now();
+  _rootRead = readRootFactsAll(rootDir)
+    .catch((e) => ({ root: path.resolve(rootDir), gitDir: null, gitCommonDir: null, error: `the server root could not be read (${(e && e.code) || (e && e.message) || e})` }))
+    .then((f) => { _rootFacts = f; _rootFactsAt = Date.now(); _rootReads.ended++; _rootRead = null; return f; });
+  return _rootRead;
+}
+const rootStale = (t = Date.now()) => !_rootFacts || !!_rootFacts.error || t - _rootFactsAt > serverRoot.ROOT_FACTS_TTL_MS;   // an erroring read is never kept (verify r1 F1)
+// a read still out past its deadline with nothing read before it: the NAMED fact (never a hold)
+const lateFacts = () => ({ root: path.resolve(rootDir), gitDir: null, gitCommonDir: null, late: true, error: `the checkout's .git did not answer in ${ROOT_READ_MS / 1000} s (a slow or hung mount) — read again once that read comes back` });
+// what is known NOW, with no file call: the last read; else the read out past its deadline (late); else not read yet (pending)
+const knownFacts = () => _rootFacts || (_rootRead && Date.now() - _rootReadAt >= ROOT_READ_MS ? lateFacts()
+  : { root: path.resolve(rootDir), gitDir: null, gitCommonDir: null, pending: true, error: 'the server root is being read (off the loop) — not judged yet' });
+/** LAW 2: the facts for a caller that CAN wait — fresh ones, or what is known once the read is out past its deadline. */
+async function rootFactsNow() {
+  if (!rootStale()) return _rootFacts;
+  const p = startRootRead();
+  const left = _rootReadAt + ROOT_READ_MS - Date.now();
+  if (left > 0) {
+    let timer = null;
+    const f = await Promise.race([p, new Promise((r) => { timer = setTimeout(() => r(null), left); if (timer.unref) timer.unref(); })]);
+    clearTimeout(timer);
+    if (f) return f;
+  }
+  return _rootFacts || lateFacts();
+}
 function rootVerdict() {
   const t = Date.now();
   // an erroring read is never cached (verify r1 F1); a good one is kept ROOT_FACTS_TTL_MS (verify r2 ③: a `.git` converted in
-  // place — a checkout turned into a worktree while the server runs — is seen within a minute, not at the next restart)
-  if (!_rootFacts || _rootFacts.error || t - _rootFactsAt > serverRoot.ROOT_FACTS_TTL_MS) { _rootFacts = readRootFacts(rootDir); _rootFactsAt = t; }
+  // place — a checkout turned into a worktree while the server runs — is seen within a minute, not at the next restart).
+  // B-1425: the refresh runs OFF the loop (law 1: never beside one still out); this call answers what is known — no file call
+  if (rootStale(t)) startRootRead();
+  const f = knownFacts();
   const v = serverRoot.rootVerdict({
-    ..._rootFacts,
-    tmpRoots: [realOr(os.tmpdir()), ...TMP_ROOTS.map(realOr)],
+    ...f,
+    tmpRoots: f.tmpRoots || tmpSpellings(),
     envOverride: process.env[serverRoot.OVERRIDE_ENV] === '1',
     force: process.env[serverRoot.FORCE_ENV] === '1',
-    home: realOr(os.homedir()),
+    home: f.home || os.homedir(),
   });
-  if (!v.ok && v.kind === 'unknown') _lastRootError = { at: t, error: _rootFacts.error || v.why };
+  if (!v.ok && v.kind === 'unknown' && !f.pending) _lastRootError = { at: t, error: f.error || v.why };   // «not read yet» is no read error
   return v;
 }
+/** B-1425 suite seams: the reader's file calls, its deadline, and what it started / finished. */
+const _setRootFs = (fsp) => { _rootFsp = fsp || fs.promises; };
+const _setRootReadMs = (ms) => { ROOT_READ_MS = Number(ms) > 0 ? Number(ms) : ROOT_READ_MS_DEFAULT; };
+const rootReadStats = () => ({ started: _rootReads.started, ended: _rootReads.ended, inFlight: !!_rootRead, cached: !!_rootFacts });
 /** verify r2 ①: what happened around an unjudgeable root — the last `unknown` and the registration that followed it. */
 function rootRecovery() { return { lastError: _lastRootError, registeredAfterError: _registeredAfterError }; }
 /** null = this server may write the owner's CLI config; else the refusal the
@@ -657,7 +716,7 @@ function removeAgentHooks() {
     AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
     createEditorHelper, createStatusHelper, createHookHelper, userStatuslineCmd,
     ensureAgentHooks, stripAgentHookEntries, removeAgentHooks, hookRegistrationSafe,
-    rootVerdict, ownerWriteRefusal, refuseOwnerWrite, readRootFacts, rootRecovery, // verify r1: the facts reader, for the gate's real-filesystem shapes; r2: the recovery fact
+    rootVerdict, ownerWriteRefusal, refuseOwnerWrite, readRootFacts, rootRecovery, rootFactsNow, rootReadStats, _setRootFs, _setRootReadMs, // B-1425: the facts a caller awaits; the single-flight's counts and the suite seams // verify r1: the facts reader, for the gate's real-filesystem shapes; r2: the recovery fact
     agentHooksStatus,
     HOOK_OPTOUT_FILE: typeof HOOK_OPTOUT_FILE !== 'undefined' ? HOOK_OPTOUT_FILE : undefined,
   };

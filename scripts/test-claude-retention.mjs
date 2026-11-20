@@ -133,7 +133,7 @@ console.log('§5 wiring pins (the 2.355.0 lesson: a pure fix without its call si
   const srv = read('server.js'), hosts = read('src/hosts.js'), wsc = read('src/ws-create.js') + read('src/spawn/ssh.js') + read('src/spawn/dial.js'), // + the transport ladders (lane dc-seams-server)
     sync = read('src/server/harness-config-sync.js');
   ok('the claude table declares transcriptRetentionDays as a cli-config row (number, default 36500 → cleanupPeriodDays, off 0)', (() => { const r = HARNESS_SETTINGS.claude.rows.find((x) => x.key === 'transcriptRetentionDays'); return r && r.type === 'number' && r.default === 36500 && r.apply.kind === 'cli-config' && r.apply.path.join('.') === 'cleanupPeriodDays' && r.apply.off === 0 && r.apply.onUninstall === 'keep'; })());
-  ok('server.js syncs the plan at boot (skipped under VIBESPACE_SKIP_AGENT_HOOKS, the worktree-smoke guard)', /if \(!process\.env\.VIBESPACE_SKIP_AGENT_HOOKS\) harnessConfig\.syncCliConfig\(\{ reason: 'boot' \}\);/.test(srv));
+  ok('server.js syncs the plan at boot, once the root facts are read (B-1425; skipped under VIBESPACE_SKIP_AGENT_HOOKS, the worktree-smoke guard)', /if \(!process\.env\.VIBESPACE_SKIP_AGENT_HOOKS\) rootFactsNow\(\)\.then\(\(\) => harnessConfig\.syncCliConfig\(\{ reason: 'boot' \}\)\);/.test(srv));
   ok('…and the sync itself asks THE ROOT VERDICT first (src/server-root.js — a worktree / temp server never writes the real HOME; lane hook-root-guard)', /const refused = refusalNow\(\);\n\s*if \(refused\) \{ if \(typeof refuseOwnerWrite === 'function'\) refuseOwnerWrite\(\); else log\(`\[cli-config\] skipped/.test(sync) && /hookRegistrationSafe\(\) \? null :/.test(sync));
   ok('server.js re-syncs on a settings write through the ONE diff hook', /harnessConfig\.onSettingsWrite\(next, prev\);/.test(srv) && /cliConfigKeys\(\)\.some\(\(k\) => n\[k\] !== p\[k\]\)\) syncCliConfig/.test(sync));
   ok('server.js exports no literal-key retention reader any more (claudeKeepDays gone)', !/claudeKeepDays|ensureClaudeRetention|syncClaudeRetention/.test(srv));
@@ -261,6 +261,7 @@ let GEN;
   ok('the scratch HOME is the one every write resolves (os.homedir() === /tmp/vs-hkc-<pid>/home-gen)', os.homedir() === process.env.HOME && process.env.HOME.startsWith(HKC + path.sep));
   const genRoot = path.join(HKC, 'gen-root'); fs.mkdirSync(path.join(genRoot, 'data'), { recursive: true });
   GEN = require(path.join(repo, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, onHookFileCreated: (ev) => created.push(ev) });
+  await GEN.rootFactsNow();   // B-1425: the root facts are read off the loop — awaited once, as the hub's boot does
   const origLog = console.log;
   const run = (fn) => { console.log = (...a) => { logs.push(a.join(' ')); }; try { return fn(); } finally { console.log = origLog; } };
   // the belt holds as before: VIBESPACE_SKIP_AGENT_HOOKS=1 (this suite's env) ⇒ nothing written
@@ -377,7 +378,7 @@ console.log('§9 wiring pins (a fix without its call site is dead)');
   ok("claude's settings.json is declared 'dir-exists'; codex's two files the same rule by name", /cliConfigFile\(HARNESS_SETTINGS\.claude\.files\.settings, \{ createIfMissing: 'dir-exists' \}\)/.test(read('src/harnesses/claude.js')) && (read('src/harnesses/codex.js').match(/createIfMissing: 'dir-exists'/g) || []).length === 2);
   ok('server.js constructs hooksLate BEFORE the generators and hands ensureAgentHooks its callback', srv.indexOf("require('./src/server/hooks-late.js').create(") > 0 && srv.indexOf("require('./src/server/hooks-late.js').create(") < srv.indexOf("require('./src/server/agent-tool-generators.js').create(") && /agent-tool-generators\.js'\)\.create\(\{ rootDir: __dirname, port: PORT, onHookFileCreated: \(ev\) => hooksLate\.noteCreated\(ev\) \}\);/.test(srv));
   ok('…calls hooksLate.ready() right after restoreSessions() — as CODE, before the line comment (§48)', /^\s*restoreSessions\(\);[^\n/]*hooksLate\.ready\(\); \/\//m.test(srv));
-  ok('…and registers the Apply route with the belt, the master switch and the plan', /hooksLate\.registerApplyRoute\(app, \{ ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe \}\);/.test(srv));
+  ok('…and registers the Apply route with the belt, the master switch and the plan', /hooksLate\.registerApplyRoute\(app, \{ ensureAgentHooks, agentHooksStatus, integrationEnabled, harnessConfig, hookRegistrationSafe, rootFactsNow \}\);/.test(srv));
   ok('the generator calls onHookFileCreated only on "created" and logs the journal line', /if \(w === 'created'\) \{/.test(gen) && /onHookFileCreated\(\{ harness: key, file: def\.file\(\), rel, at: Date\.now\(\) \}\)/.test(gen));
   const di = ar.indexOf('sessionStatus.dropNotices(k, (n) => hooksLateStale(n, id));'), pi = ar.indexOf('for (const k of keys) for (const n of (sessionStatus.pendingNotices(k)');
   ok('agent-routes drops a stale late-hooks note at the drain BEFORE the queue is peeked (both keys)', di > 0 && pi > di && ar.slice(di - 400, di).includes('const keys = [key, `webui:${id}`];'));
