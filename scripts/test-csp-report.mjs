@@ -1071,6 +1071,8 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   const adir = path.join(ROOT, 'fh8-auth'); fs.mkdirSync(adir, { recursive: true });
   const auth = new Auth(adir, {}); auth.setPassword('pw-fh8-81');
   const app = express(); app.use(auth.middleware()); auth.registerRoutes(app);
+  // B-3b03 (lane hub-loop-stalls): a REAL one-worker file pool, as server.js wires one — the frame host with no pool refuses by name
+  const fhPool = new (require(path.join(REPO, 'src/safe-fs.js')).SafeFs)({ poolSize: 1, name: 'test-csp-report' }); app.locals.safeFs = fhPool;
   new Function('app', 'require', hostLine)(app, (m) => require(m.startsWith('./') ? path.join(REPO, m) : m));
   const srv = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
   const port = srv.address().port;
@@ -1100,7 +1102,7 @@ console.log('⑧ foreign HTML in the frame host — the code editor\'s preview, 
   ok(refused.every((r) => r.status === 404 && !/SECRET/.test(r.text) && r.headers['access-control-allow-origin'] === '*'), 'never answered: .env (a dot name), key.pem (not a web file), a symlink OUT of the folder (file and folder), an encoded ../ out, a missing file, a folder — 404, never the bytes', refused.map((r) => r.status));
   const otherTok = await req(`/frame-host/f/${'Z'.repeat(24)}/a.css`), badTok = await req('/frame-host/f/short/a.css'), anonApi = await req('/frame-host/f/short/a.css', { headers: { accept: 'application/json' } }), post = await req(F + 'a.css', { method: 'POST', headers: { cookie: '' } });
   ok(otherTok.status === 404 && badTok.status === 302 && anonApi.status === 401 && [401, 403].includes(post.status), 'an unknown token ⇒ 404; a malformed one is no door (the gate: /login, 401); a POST to the folder ⇒ the gate — the door is GET only', { other: otherTok.status, bad: badTok.status, api: anonApi.status, post: post.status });
-  await new Promise((c) => srv.close(c));
+  await new Promise((c) => srv.close(c)); fhPool.close();
   ok(/if \(req\.method === 'GET' && \/\^\\\/frame-host\\\/f\\\/\[A-Za-z0-9_-\]\{24\}\\\/\/\.test\(p\)\) return next\(\);/.test(readRepo('src/auth.js')), 'src/auth.js: the folder door is GET + /frame-host/f/<24 token characters>/ exactly (no prefix, no other method)');
   // THE CENSUS — every frame src/lib makes for foreign HTML: no `allow-same-origin`, no srcdoc — a site only with a reason row
   const libFiles = fs.readdirSync(path.join(REPO, 'src/lib')).filter((f) => f.endsWith('.js')).map((f) => `src/lib/${f}`);
