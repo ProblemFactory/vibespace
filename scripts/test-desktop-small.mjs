@@ -495,28 +495,55 @@ console.log('§6 the wiring — every door asks its rule');
   const READS = (() => { const m = /export function showToast\(message, \{([^}]*)\} = \{\}\)/.exec(PAGE.get('src/lib/utils.js') || ''); return m ? new Set(m[1].split(',').map((x) => x.trim().split(/\s*=/)[0]).filter(Boolean)) : null; })();
   ok(!!READS && READS.has('type') && !READS.has('error'), `the toast census takes what showToast reads from its own signature: ${READS ? [...READS].join(', ') : 'NOT FOUND'}`);
   const toastCensus = (files, warns = WARN_ON_PURPOSE) => {
-    // a call's arguments, balanced over () [] {} — strings, templates and comments skipped
-    const argsOf = (s, open) => { const out = []; let d = 0, start = open + 1; for (let i = open; i < s.length; i++) { const c = s[i];
-      if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < s.length && s[i] !== q; i++) { if (s[i] === '\\') i++; else if (q === '`' && s[i] === '$' && s[i + 1] === '{') { let k = 1; i += 2; for (; i < s.length && k; i++) { if (s[i] === '{') k++; else if (s[i] === '}') k--; } i--; } } continue; }
-      if (c === '/' && s[i + 1] === '/') { while (i < s.length && s[i] !== '\n') i++; continue; }
-      if (c === '/' && s[i + 1] === '*') { i = s.indexOf('*/', i + 2) + 1; continue; }
-      if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) { d--; if (d === 0) { out.push(s.slice(start, i)); return out; } } else if (c === ',' && d === 1) { out.push(s.slice(start, i)); start = i + 1; } }
+    // THE READER (the coordinator's small, 03:01Z — bl-machines-a met it): ONE scan of a file marks each character as code, a comment,
+    // a string / a template's text, or a REGEX LITERAL (a slash where an expression can start opens one, skipped to its close: classes
+    // and escapes honoured, its flags after it); a template's ${…} is code again. The call finder, the argument split and the key split
+    // all read that mask — so a call is read WHOLE whatever a person may lawfully write in its arguments (two slashes or a quote in a
+    // regex were a line comment or a string to the reader before)
+    const KW_BEFORE_REGEX = /(?:^|[^\w$])(?:return|typeof|case|in|of|void|delete|new|throw|instanceof|else|do|await|yield)$/;
+    const maskOf = (s) => {
+      const m = new Uint8Array(s.length), tpl = []; let prev = '', depth = 0;   // 0 code · 1 comment · 2 string / template text · 3 regex
+      for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (c === '/' && s[i + 1] === '/') { const e = s.indexOf('\n', i), end = e < 0 ? s.length : e; m.fill(1, i, end); i = end - 1; continue; }
+        if (c === '/' && s[i + 1] === '*') { const e = s.indexOf('*/', i + 2), end = e < 0 ? s.length : e + 2; m.fill(1, i, end); i = end - 1; continue; }
+        if (c === '"' || c === "'") { let j = i + 1; for (; j < s.length && s[j] !== c && s[j] !== '\n'; j++) if (s[j] === '\\') j++; m.fill(2, i, j + 1); i = j; prev = c; continue; }
+        if (c === '`' || (c === '}' && tpl.length && tpl[tpl.length - 1] === depth)) {
+          if (c === '}') tpl.pop();
+          let j = i + 1; for (; j < s.length; j++) { if (s[j] === '\\') { j++; continue; } if (s[j] === '`' || (s[j] === '$' && s[j + 1] === '{')) break; }
+          if (s[j] === '$') { m.fill(2, i, j + 2); tpl.push(depth); i = j + 1; prev = '{'; continue; }
+          m.fill(2, i, j + 1); i = j; prev = '`'; continue;
+        }
+        if (c === '/' && (prev === '' || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev) || KW_BEFORE_REGEX.test(s.slice(Math.max(0, i - 12), i).trimEnd()))) {
+          let j = i + 1, cls = false; for (; j < s.length && s[j] !== '\n'; j++) { if (s[j] === '\\') { j++; continue; } if (s[j] === '[') cls = true; else if (s[j] === ']') cls = false; else if (s[j] === '/' && !cls) break; }
+          j++; while (j < s.length && /[a-z]/.test(s[j])) j++;
+          m.fill(3, i, j); i = j - 1; prev = 'a'; continue;
+        }
+        if (c === '{') depth++; else if (c === '}') depth--;
+        if (!/\s/.test(c)) prev = c;
+      }
+      return m;
+    };
+    // a call's arguments, balanced over () [] {} in CODE only → [{ text, from, to }]
+    const argsOf = (s, m, open) => { const out = []; let d = 0, start = open + 1; for (let i = open; i < s.length; i++) { if (m[i]) continue; const c = s[i];
+      if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) { d--; if (d === 0) { out.push({ text: s.slice(start, i), from: start, to: i }); return out; } } else if (c === ',' && d === 1) { out.push({ text: s.slice(start, i), from: start, to: i }); start = i + 1; } }
       return out; };
     // an object literal's own keys (a spread is said as «...»); null = the options are not written at the call (a name, a call)
-    const keysOf = (arg) => { const o = String(arg || '').trim(); if (!o.startsWith('{') || !o.endsWith('}')) return null; const inner = o.slice(1, -1), parts = []; let d = 0, start = 0;
-      for (let i = 0; i < inner.length; i++) { const c = inner[i]; if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < inner.length && inner[i] !== q; i++) if (inner[i] === '\\') i++; continue; } if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) d--; else if (c === ',' && !d) { parts.push(inner.slice(start, i)); start = i + 1; } }
-      parts.push(inner.slice(start));
+    const keysOf = (s, m, arg) => { if (!arg) return []; let a = arg.from, b = arg.to; while (a < b && /\s/.test(s[a])) a++; while (b > a && /\s/.test(s[b - 1])) b--;
+      if (s[a] !== '{' || s[b - 1] !== '}' || m[a] || m[b - 1]) return null; const parts = []; let d = 0, start = a + 1;
+      for (let i = a + 1; i < b - 1; i++) { if (m[i]) continue; const c = s[i]; if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) d--; else if (c === ',' && !d) { parts.push(s.slice(start, i)); start = i + 1; } }
+      parts.push(s.slice(start, b - 1));
       return parts.map((p) => p.trim()).filter(Boolean).map((p) => (p.startsWith('...') ? '...' : (/^([A-Za-z_$][\w$]*|'[^']*'|"[^"]*")\s*(?::|$|\()/.exec(p) || [null, '?' + p.slice(0, 16)])[1].replace(/['"]/g, ''))); };
-    // a match inside a comment is no call
-    const inComment = (s, at) => { const pre = s.slice(s.lastIndexOf('\n', at) + 1, at); if (/(^|[\s;{}(,])\/\//.test(pre)) return true; return s.lastIndexOf('/*', at) > s.lastIndexOf('*/', at); };
-    const r = { calls: 0, opaque: 0, unread: [], answers: 0, plain: [] }, namedSeen = new Set();
+    const r = { calls: 0, opaque: 0, regex: 0, unread: [], answers: 0, plain: [] }, namedSeen = new Set();
     for (const [f, s] of files) {
-      const alias = [...new Set([...s.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*showToast\b/g)].map((m) => m[1]))].filter((n) => n !== 'showToast');
+      const mask = maskOf(s);
+      const alias = [...new Set([...s.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*showToast\b/g)].filter((m) => !mask[m.index]).map((m) => m[1]))].filter((n) => n !== 'showToast');
       const re = new RegExp(`(?<![\\w$.])showToast\\s*\\(${alias.length ? `|(?<![\\w$])(?:[A-Za-z_$][\\w$]*\\.)?(?:${alias.join('|')})\\s*\\(` : ''}`, 'g');
       for (let m; (m = re.exec(s));) {
-        if (/function\s+$/.test(s.slice(Math.max(0, m.index - 12), m.index)) || inComment(s, m.index)) continue;   // its definition; a comment
-        const a = argsOf(s, m.index + m[0].length - 1), line = s.slice(0, m.index).split('\n').length; r.calls++;
-        const ks = a.length > 1 ? keysOf(a[1]) : [];
+        if (mask[m.index] || /function\s+$/.test(s.slice(Math.max(0, m.index - 12), m.index))) continue;   // in a comment, a string or a regex; its definition
+        const args = argsOf(s, mask, m.index + m[0].length - 1), a = args.map((x) => x.text), line = s.slice(0, m.index).split('\n').length; r.calls++;
+        if (args.length && mask.subarray(args[0].from, args[args.length - 1].to).includes(3)) r.regex++;
+        const ks = args.length > 1 ? keysOf(s, mask, args[1]) : [];
         if (ks === null) r.opaque++;
         for (const k of ks || []) if (k !== '...' && !READS.has(k)) r.unread.push(`${f}:${line} «${k}»`);
         if (/[\w$\])]\??\.error\b/.test(a[0] || '')) {
@@ -531,7 +558,7 @@ console.log('§6 the wiring — every door asks its rule');
     return r;
   };
   const tc = toastCensus(PAGE);
-  ok(tc.calls > 1000 && tc.unread.length === 0, `LAW 1 — the toast census: ${tc.calls} toast calls in the page's code (${tc.opaque} pass their options by a name, not written at the call); every option written is one showToast reads${tc.unread.length ? ` — NOT READ: ${tc.unread.join(' · ')}` : ''}`, tc.unread);
+  ok(tc.calls > 1000 && tc.unread.length === 0, `LAW 1 — the toast census: ${tc.calls} toast calls in the page's code (${tc.opaque} pass their options by a name, not written at the call; ${tc.regex} carry a regex literal in their arguments); every option written is one showToast reads${tc.unread.length ? ` — NOT READ: ${tc.unread.join(' · ')}` : ''}`, tc.unread);
   ok(tc.answers > 10 && tc.plain.length === 0, `LAW 2 — a failed act's toast is typed error: the page's ${tc.answers} toasts whose words are an answer's error all give their type — error, or computed from the answer — but the ${WARN_ON_PURPOSE.length} warns named on purpose (${WARN_ON_PURPOSE.map((w) => w[0].split('/').pop()).join(', ')})${tc.plain.length ? ` — NOT: ${tc.plain.join(' · ')}` : ''}`, tc.plain);
   // CONTROLS: the flag planted back where piece 7 wrote it (the wake grants' save) — both laws red BY FILE AND LINE; an unread option in a
   // file the leg never names (the tab group's toast) and in a call through a bound name (the link door's io.toast) — LAW 1 red there
@@ -553,6 +580,18 @@ console.log('§6 the wiring — every door asks its rule');
   const liveAt = (() => { const s = PAGE.get('src/lib/browser-live-window.js') || '', i = s.indexOf(WARN_ON_PURPOSE[0][1]); return i < 0 ? 0 : s.slice(0, s.lastIndexOf('showToast(', i)).split('\n').length; })();
   ok(!p4.gone && c4.plain.join() === `src/lib/chat-view.js:${p4.line} untyped` && c5.plain.join() === `src/lib/browser-live-window.js:${liveAt} typed 'warn'`,
     `CONTROL: chat-view's failed sub-agent fetch back to a plain toast — LAW 2 red at ${c4.plain.join(' · ') || p4.gone}; the live view's refusal struck from the named warns — red at ${c5.plain.join(' · ')}`, { c4: c4.plain, c5: c5.plain, liveAt });
+  // CONTROL of THE READER (the coordinator's small, 03:01Z): calls whose arguments hold a regex literal with two slashes side by side
+  // and a quote in a class — typed, untyped, and with an option written AFTER the regex — and a division that is no regex: each read
+  // right (the reader before this took the slashes for a line comment and the quote for a string)
+  const RX = [
+    String.raw`showToast(r.error.replace(/["']\/\//g, ''), { type: 'error' });`,
+    String.raw`showToast(r.error.replace(/["']\/\//g, ''));`,
+    String.raw`showToast(t('x'), { icon: /["']\/\//.source, sticky: true });`,
+    String.raw`showToast(r.error + String(n / 2 / 3), { type: 'error' });`,
+  ].join('\n');
+  const rx = toastCensus(new Map([['src/lib/zz-rx.js', RX]]), []);
+  ok(rx.calls === 4 && rx.regex === 3 && rx.plain.join() === 'src/lib/zz-rx.js:2 untyped' && rx.unread.join() === 'src/lib/zz-rx.js:3 «sticky»',
+    `CONTROL: the reader reads a regex literal in a call's arguments right — four calls (${rx.calls}), three with a regex (${rx.regex}): the typed one passes, the untyped one is red (${rx.plain.join(' · ')}), an option written after the regex is read (${rx.unread.join(' · ')}), a division is no regex`, rx);
   const C6 = [
     ['the base\'s yield (the whole stack hidden, every toast\'s time running)', sub(U, "      for (const t of stack.children) if (_toastYields(t)) _toastHold(t);", "      stack.style.visibility = 'hidden';")],
     ['every toast yields (an error, an Undo held too)', sub(U, "if (_toastYields(t)) _toastHold(t);", '_toastHold(t);')],
