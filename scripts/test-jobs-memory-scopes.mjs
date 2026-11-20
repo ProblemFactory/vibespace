@@ -822,25 +822,41 @@ leg('§3 REAL ㉒ A STOP DRAINS THE GROUP THE WAY AN END DOES — a pod\'s rung:
 
 leg('§3 REAL ㉓ THE RECORD SAYS WHAT IT COULD NOT SEE — a process that left the job\'s group (setsid) on a pod\'s rung: a task\'s said, not stopped; a service keeps it and its stop stops it', async (ok) => {
   if (!realOf('prlimit') || !realOf('setsid')) { skip++; ok.say('  - SKIP the setsid leg: no prlimit or setsid here'); return; }
-  const ESC = ['sh', '-c', 'setsid sleep 30 >/dev/null 2>&1 </dev/null & echo "left $!"'];
-  const one = async (kind) => {
+  // B-c865 (the .391 sighting: this pair red once, green on retry): the scene's main ended the moment it had STARTED its child, and
+  // `setsid` runs in that child — on a loaded runner the main could end while the child was still IN the job's group, which the end
+  // then rightly stops as a member (no escape to find, not alive at the end). The main now ends only once its child's session is
+  // its own (/proc/<pid>/stat field 6 = its pid: setsid has happened — a fact, bounded at 5 s) and echoes that session; the leg
+  // judges it. ESC_LATE is the stall IN the window (the child's setsid 0.4 s late): the old scene ends inside it, the new one after it
+  const SESSION_WAIT = 'c=$!; i=0; while [ "$(cut -d" " -f6 /proc/$c/stat 2>/dev/null)" != "$c" ] && [ $i -lt 500 ]; do sleep 0.01; i=$((i+1)); done; echo "left $c sid $(cut -d" " -f6 /proc/$c/stat 2>/dev/null)"';
+  const ESC = ['sh', '-c', 'setsid sleep 30 >/dev/null 2>&1 </dev/null & ' + SESSION_WAIT];
+  const ESC_LATE = ['sh', '-c', '(sleep 0.4; exec setsid sleep 30) >/dev/null 2>&1 </dev/null & ' + SESSION_WAIT];
+  const ESC_LATE_OLD = ['sh', '-c', '(sleep 0.4; exec setsid sleep 30) >/dev/null 2>&1 </dev/null & echo "left $!"']; // the scene as it was, the stall placed in its window
+  const sidOf = (j) => Number((/left \d+ sid (\d+)/.exec(fs.readFileSync(lastRun(j).log, 'utf8')) || [])[1] || 0);
+  const one = async (kind, argv = ESC, tag = '') => {
     const E = engineIn(scratch())({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 150 } });
-    const j = E.jobs.get(E.create({ kind, name: `escaped-${kind}`, cmd: { argv: ESC }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
+    const j = E.jobs.get(E.create({ kind, name: `escaped-${kind}${tag}`, cmd: { argv }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
     await settle(E, j);
-    const pid = leftPids(j)[0], ex = readJson(exitOf(j)) || {}, snap = E.snapshot(j), run = lastRun(j);
+    const pid = leftPids(j)[0], sid = sidOf(j), ex = readJson(exitOf(j)) || {}, snap = E.snapshot(j), run = lastRun(j);
     const aliveAtEnd = alive(pid);
     let stopped = null;
     if (kind === 'service') { E.stop(j); await (E._clearing && E._clearing.get(lastRun(j))); stopped = !alive(pid) && journal(E, j, /stopped what its last run left running \(1 process\)/); } // round 11: the stop's clear, awaited — never a 1.5 s window
     try { process.kill(pid, 'SIGKILL'); } catch { } // (the suite's own: never outlives it)
-    return { E, j, pid, ex, snap, run, aliveAtEnd, stopped };
+    return { E, j, pid, sid, ex, snap, run, aliveAtEnd, stopped };
   };
-  const [T, S] = await Promise.all([one('task'), one('service')]);
+  const [T, S, TL, TO] = await Promise.all([one('task'), one('service'), one('task', ESC_LATE, '-late'), one('task', ESC_LATE_OLD, '-late-old')]);
   const W = '1 process left its group — not stopped; run it as a service job';
-  ok(T.ex.left && T.ex.left.n === 0 && T.ex.left.escaped === 1 && T.aliveAtEnd && T.snap.run.endWords === W && (T.run.lastLine || '').endsWith(W) && journal(T.E, T.j, new RegExp(W)),
-    `a task: what left its group is found by the job's mark in its environ and SAID — «${T.snap.run.endWords}», left ${JSON.stringify(T.ex.left)} (ef0012b5: nothing — the record could not see it and said nothing)`, { left: T.ex.left, end: T.snap.run.endWords });
+  const taskGreen = (t) => !!(t.ex.left && t.ex.left.n === 0 && t.ex.left.escaped === 1 && t.aliveAtEnd && t.snap.run.endWords === W && (t.run.lastLine || '').endsWith(W) && journal(t.E, t.j, new RegExp(W)));
+  ok(T.sid === T.pid && S.sid === S.pid, `B-c865: the scene's child had LEFT the job's group before its main ended — its session is its own (task: pid ${T.pid}, session ${T.sid}; service: pid ${S.pid}, session ${S.sid})`, { T: [T.pid, T.sid], S: [S.pid, S.sid] });
+  ok(taskGreen(T),
+    `a task: what left its group is found by the job's mark in its environ and SAID — «${T.snap.run.endWords}», left ${JSON.stringify(T.ex.left)}, alive at the end ${T.aliveAtEnd} (ef0012b5: nothing — the record could not see it and said nothing)`, { left: T.ex.left, end: T.snap.run.endWords });
   ok(S.ex.left && S.ex.left.kept === true && S.ex.left.escaped === 1 && S.ex.left.pids && S.ex.left.pids.some((p) => p[0] === S.pid) && S.stopped,
-    `a service keeps it with the rest (by identity — «${S.snap.run && S.snap.run.endWords}») and its stop stops it, said (ef0012b5: never kept, its stop never reached it)`, { left: S.ex.left, stopped: S.stopped });
-  stopEngine(T.E); stopEngine(S.E);
+    `a service keeps it with the rest (by identity — «${S.snap.run && S.snap.run.endWords}», left ${JSON.stringify(S.ex.left)}) and its stop stops it, said ${S.stopped} (ef0012b5: never kept, its stop never reached it)`, { left: S.ex.left, stopped: S.stopped });
+  // B-c865: THE STALL IN THE WINDOW — the child's setsid 0.4 s late. The scene that waits for the session is green with it; the scene as
+  // it was (its main ends at once) ends INSIDE the window: its child is still a member, stopped with the group — the .391 red, by a
+  // stall, never by load
+  ok(TL.sid === TL.pid && taskGreen(TL), `B-c865: with the child's setsid 0.4 s late, the scene that waits for the session is still judged right — session ${TL.sid} of pid ${TL.pid}, left ${JSON.stringify(TL.ex.left)}, alive at the end ${TL.aliveAtEnd}`, { left: TL.ex.left, sid: TL.sid });
+  ok(!taskGreen(TO) && TO.ex.left && TO.ex.left.escaped !== 1, `CONTROL (B-c865): the scene as it was, the same 0.4 s late setsid — its main ended while the child was still in the group: left ${JSON.stringify(TO.ex.left)}, alive at the end ${TO.aliveAtEnd} (the runner's red, reproduced by a stall)`, { left: TO.ex.left, alive: TO.aliveAtEnd });
+  stopEngine(T.E); stopEngine(S.E); stopEngine(TL.E); stopEngine(TO.E);
 });
 
 leg('§3 REAL ㉔ THE CLEAR SCANS THE GROUP AT CLEAR TIME — a kept process that forks after its run\'s record: its stop stops the child too (a pod\'s rung)', async (ok) => {
