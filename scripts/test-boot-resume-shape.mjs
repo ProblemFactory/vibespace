@@ -4,6 +4,16 @@
 // 5 s while 164 agent processes started; the main thread was busy, not blocked; it recovered alone.
 // THE LAW: from the hub's first loop turn to the last resumed conversation, the sign-in page answers within 1 s at every
 // 500 ms sample, and no step holds the loop 250 ms or more (the boot law of the tree, test-boot-loop-hold).
+// THE PIN (unit 1 of the row: the restore's billing-source backfill read off the loop with no program, the survivors' restore in
+// bounded batches — src/server/boot-restore.js): judged on what that unit cures, at N = 80 —
+//   ① DEAD under the WHOLE law; ② SURVIVE's W1 (the restore alone: from the first loop turn until its backfill has written back
+//   every survivor's billing source, the page held back until then) under the whole law, and the restore's own line (every
+//   survivor; its registration pass and each batch under 250 ms). W2 (the page's re-attaches) is REPORTED, not judged here:
+//   hold 3 there (the claude transcript warm's one-shot reply) is the row's unit 2, then holds 4 and 5.
+//   RED CONTROLS — the release's one synchronous pass planted back into the scratch tree's copy: every survivor attached in ONE
+//   turn (W1 breaks; the restore says one batch); the release's forking backfill, verbatim (W1 breaks, the restore's batches
+//   still bounded); the same backfill under DEAD (it breaks). CD4B_PAGE=ready = the measure (the page back at ready, as in the
+//   field; every hold judged together; no controls).
 // The scratch hub: this tree's code in a scratch worktree over production-shaped stores (scripts/boot-shape.mjs), an EMPTY
 // scratch home, the tree's stand-in CLI (scripts/fixtures/claude-stand-in-cli.cjs — no vendor binary) as CLAUDE_CMD, and N
 // claude chat conversations over synthetic transcripts of a stated size mix ($CD4B_MIX: «count x MB», …).
@@ -17,10 +27,9 @@
 // Each measured boot: the hub's loop under a 10 ms preload clock (every gap ≥ 20 ms with its main-thread CPU and run-queue
 // wait) beside an idle same-box control clock; GET /login every 500 ms from a SEPARATE process (its own loop idle) from the
 // spawn to the end; the hub's own [loop-hold] lines (holds of a second or more, named) and its boot trace.
-// THIS PROBE ENDS ONLY WHAT IT STARTED (主开发 20:1xZ): a process rooted in this run's own minted scratch dirs (its cwd, HOME
-// or an argv token there — endRootedProcesses' rule, asked with signal 0 first) AND started after this probe — never a name
-// or a pattern. It refuses to start in a container (PID 1 not an init system: a pod hosts a person's hub) and below the
-// memory it needs.
+// THE ENDS: the hub boots through scripts/hub-boot.mjs (one minted root; the hub and everything carrying its HOME ended by
+// identity); this suite signals only its own two clocks. It refuses to start in a container (PID 1 not an init system: a pod
+// hosts a person's hub) and below the memory it needs.
 import { execSync, spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -28,7 +37,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, vncEnv } from './scratch.mjs';
+import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { writeBootShape } from './boot-shape.mjs';
 
 const require = createRequire(import.meta.url);
@@ -37,6 +47,10 @@ const N = Number(process.env.CD4B_N) || 80;
 const MIX = String(process.env.CD4B_MIX || '56x2,16x10,6x40,2x100');
 const SHAPES = String(process.env.CD4B_SHAPES || 'dead,survive').split(',').map((s) => s.trim()).filter(Boolean);
 const PAGES = Math.max(1, Number(process.env.CD4B_PAGES) || 1);
+// THE PAGE'S RETURN at the SURVIVE restart: «held» (the pin) — once the restore's last effect has landed, so the restore is
+// judged alone; «ready» (the field's, the measure) — at ready, every hold judged together
+const PAGE = process.env.CD4B_PAGE === 'ready' ? 'ready' : 'held';
+const REDS = PAGE === 'held' && process.env.CD4B_REDS !== '0';
 const SCALE = Number(process.env.BOOT_SHAPE_SCALE) || 1;
 const ANSWER_LAW_MS = 1000, SAMPLE_MS = 500, HOLD_LAW_MS = 250, PROBE_TIMEOUT_MS = 5000;
 const T_START = Date.now(), END_BY = T_START + (Number(process.env.CD4B_BUDGET_S) || 1080) * 1000;   // the runner's --one deadline is 20 min
@@ -50,39 +64,26 @@ const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } els
 const pid1 = (() => { try { return fs.readFileSync('/proc/1/comm', 'utf8').trim(); } catch { return '?'; } })();
 const memAvailGiB = (() => { try { return Number(/MemAvailable:\s+(\d+)/.exec(fs.readFileSync('/proc/meminfo', 'utf8'))[1]) / 1048576; } catch { return 0; } })();
 const NEED_GIB = 4 + N * 0.15;
+const memGiB = () => { try { return Number(/MemAvailable:\s+(\d+)/.exec(fs.readFileSync('/proc/meminfo', 'utf8'))[1]) / 1048576; } catch { return 0; } };
 console.log(`machine: ${os.cpus().length} cores (${(os.cpus()[0] || {}).model || '?'}), ${Math.round(os.totalmem() / 2 ** 30)} GiB, ${memAvailGiB.toFixed(1)} GiB available, load ${os.loadavg().map((x) => x.toFixed(1)).join(' ')}, PID 1 «${pid1}», node ${process.version}`);
 console.log(`N = ${N} · mix ${MIX} (count x MB of transcript) · shapes ${SHAPES.join(', ')} · pages ${PAGES} · boot-shape scale ${SCALE}`);
 if (!['systemd', 'init'].includes(pid1)) { console.log(`REFUSED — PID 1 is «${pid1}», not an init system: a container (a pod hosts a person's hub); this measure runs on the first test machine only`); process.exit(2); }
 if (memAvailGiB < NEED_GIB) { console.log(`REFUSED — ${memAvailGiB.toFixed(1)} GiB available, under the ${NEED_GIB.toFixed(1)} GiB this measure needs (4 + N × 0.15)`); process.exit(2); }
 
-// ── what this run started, and only that ──
-const statOf = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'latin1'); return st.slice(st.lastIndexOf(')') + 2).split(' '); } catch { return null; } };
-const startOf = (pid) => { const f = statOf(pid); return f ? Number(f[19]) : null; };   // field 22: start time, clock ticks since boot
-const MY_START = startOf(process.pid);
-const wt = scratch('cd4b-wt'), HOME = scratch('cd4b-home'), OUT = scratch('cd4b-out'), FIX = scratch('cd4b-canonical'), BIN = scratch('cd4b-bin');
+// ── ONE minted root (scripts/hub-boot.mjs, the suites' one hub boot): the scratch worktree, the HOME, the clocks' files. The hub
+// and everything it starts carry that HOME, and the helper ends them BY IDENTITY at each stop and at the exit; this suite signals
+// only its own two clocks, by their handles. The conversations' folders lie OUTSIDE the root (discovery and the usage walk skip a
+// «vs-» scratch folder — src/fixture-guard.js — and the boot would read less than the field's): removed by the exit listener
+// registered BEFORE the mint (the helper's rule 3) ──
+const WORK = path.join(os.tmpdir(), `cd4b-work-${process.pid}`);
+process.on('exit', () => { try { fs.rmSync(WORK, { recursive: true, force: true }); } catch { } });
+const root = mintRoot('cd4b');
+const wt = path.join(root, 'wt'), HOME = path.join(root, 'home'), OUT = path.join(root, 'out'), FIX = path.join(root, 'canonical'), BIN = path.join(root, 'bin');
 for (const d of [HOME, OUT, FIX, BIN]) fs.mkdirSync(d, { recursive: true });
-function mine() {
-  const seen = new Set([...endRootedProcesses(wt, { signal: 0 }), ...endRootedProcesses(HOME, { signal: 0 })]);
-  return [...seen].filter((p) => { const s = startOf(p); return s != null && MY_START != null && s >= MY_START; });
-}
-async function endMine(sig = 'SIGKILL') {
-  const pids = mine();
-  for (const p of pids) { try { process.kill(p, sig); } catch { } }
-  for (let i = 0; i < 50 && pids.some((p) => { const f = statOf(p); return f && f[0] !== 'Z'; }); i++) await sleep(100);
-  return pids.length;
-}
-let srv = null, ctl = null, smp = null, hubDied = null;
-const cleanup = () => {
-  for (const p of [srv, ctl, smp]) { try { p && p.kill('SIGKILL'); } catch { } }
-  try { for (const p of mine()) { try { process.kill(p, 'SIGKILL'); } catch { } } } catch { }
-  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  try { fs.rmSync(WORK, { recursive: true, force: true }); } catch { }
-};
-process.on('exit', cleanup);
-for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
+let hub = null, ctl = null, smp = null, hubDied = null;
+const hubs = {};   // each boot's hub by its tag: its own log (hub.log())
 
 // ── the scratch worktree: this tree's code (the built tree the runner prepared), the shape in its data/ ──
-try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
 for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) execSync(`rm -rf ${wt}/${f} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
@@ -111,9 +112,7 @@ function writeTranscript(file, sid, cwd, bytes) {
 const sizesMB = MIX.split(',').flatMap((p) => { const m = /^\s*(\d+)\s*x\s*([\d.]+)\s*$/.exec(p); return m ? Array(Number(m[1])).fill(Number(m[2])) : []; });
 while (sizesMB.length < N) sizesMB.push(sizesMB[0] || 1);
 sizesMB.length = N;
-// the conversations' folders live OUTSIDE the «vs-» scratch roots: src/fixture-guard.js isFixtureProjectDir takes a «vs-» folder
-// under a tmp root for a test fixture, and discovery and the usage walk skip it — the boot would read less than the field's
-const WORK = path.join(os.tmpdir(), `cd4b-work-${process.pid}`);
+// the conversations' folders: WORK, outside the root (above)
 const CWDS = Array.from({ length: 8 }, (_, i) => path.join(WORK, `project-${i}`));
 const convs = [];
 t0 = Date.now(); let tBytes = 0;
@@ -163,23 +162,32 @@ ask(); setInterval(ask, every); setInterval(save, 250); process.on('SIGTERM', ()
 
 const [PORT] = await freePorts(1);
 const VNC = await vncEnv();
-const logPath = path.join(OUT, 'server.log'), logFd = fs.openSync(logPath, 'a');
 const boot = (tag, clock) => {
-  const env = { ...process.env, ...VNC, HOME, PORT: String(PORT), CLAUDE_CMD: launcher, VS_NO_REAL_CLI: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANGELOG_FIXTURE_DIR: FIX, BOOT_GATE_OUT: path.join(OUT, `clock-${tag}.json`), ...(clock ? { VIBESPACE_BOOT_TRACE_CPU: '1', VIBESPACE_BOOT_TRACE: '1' } : {}) };   // the CPU sampler + the sync ops kept: each hold's sites (a read, a parse, a start)
-  fs.writeSync(logFd, `\n==== boot ${tag} ====\n`);
-  srv = spawn(process.execPath, [...(clock ? ['-r', PRELOAD] : []), 'server.js'], { cwd: wt, env, stdio: ['ignore', logFd, logFd] });
-  const me = srv; me.once('exit', (code, sig) => { if (srv === me && !me._stopping) { hubDied = { tag, code, sig, at: Date.now() }; console.log(`  THE HUB DIED (${tag}): exit ${code} signal ${sig}`); } });
-  return srv;
+  const env = { ...strippedEnv(), ...VNC, HOME, CLAUDE_CMD: launcher, VS_NO_REAL_CLI: '1', VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANGELOG_FIXTURE_DIR: FIX, BOOT_GATE_OUT: path.join(OUT, `clock-${tag}.json`), ...(clock ? { VIBESPACE_BOOT_TRACE_CPU: '1', VIBESPACE_BOOT_TRACE: '1' } : {}) };   // the CPU sampler + the sync ops kept: each hold's sites (a read, a parse, a start)
+  hub = hubs[tag] = startHub({ root, tree: wt, port: PORT, env, nodeArgs: clock ? ['-r', PRELOAD] : [], log: `hub-${tag}` });
+  const me = hub; me.child.once('exit', (code, sig) => { if (hub === me && !me._stopping) { hubDied = { tag, code, sig, at: Date.now() }; console.log(`  THE HUB DIED (${tag}): exit ${code} signal ${sig}`); } });
+  return hub;
 };
-const stopHub = async (sig) => { const p = srv; srv = null; if (!p) return; p._stopping = true; try { p.kill(sig); } catch { } await Promise.race([new Promise((r) => (p.exitCode !== null || p.signalCode ? r() : p.once('exit', r))), sleep(15000)]); };
+/** The hub stopped through the helper, BY IDENTITY: the hub alone (`hubOnly`, a restart whose conversations outlive it) or with
+ *  everything carrying its HOME; then a bounded wait until each signalled process is gone. → how many it signalled. */
+const gone = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'latin1'); return st.slice(st.lastIndexOf(')') + 2)[0] === 'Z'; } catch { return true; } };
+const stopHub = async (sig, { hubOnly = false } = {}) => {
+  const h = hub; hub = null; if (!h) return 0; h._stopping = true;
+  const r = h.stop({ signal: sig, hubOnly }) || {};
+  const pids = (r.signalled || []).map((x) => x.pid);
+  for (const tEnd = Date.now() + 15000; Date.now() < tEnd && pids.some((p) => !gone(p));) await sleep(100);
+  for (const x of r.left || []) console.log(`  left by the helper: pid ${x.pid} (${x.why})`);
+  return pids.length;
+};
 const getJson = async (u) => { try { const r = await fetch(`http://127.0.0.1:${PORT}${u}`, { signal: AbortSignal.timeout(30000) }); return r.ok ? await r.json() : null; } catch { return null; } };
 const until = async (fn, ms, step = 250) => { const tEnd = Date.now() + ms; for (;;) { const v = await fn(); if (v || Date.now() > tEnd || hubDied) return v; await sleep(step); } };
 const ready = (ms = 180000) => until(async () => { const b = await getJson('/api/boot'); return b && b.phase === 'ready' ? b : null; }, ms);
 const readJson = (f) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } };
-const logOf = (tag) => { const all = fs.readFileSync(logPath, 'utf8'); const i = all.lastIndexOf(`==== boot ${tag} ====`); return i < 0 ? '' : all.slice(i).split('\n==== boot ')[0]; };
+const logOf = (tag) => (hubs[tag] ? hubs[tag].log() : '');
 const startAux = (tag) => {
-  ctl = spawn(process.execPath, [CONTROL, path.join(OUT, `control-${tag}.json`)], { stdio: 'ignore' });
-  smp = spawn(process.execPath, [SAMPLER, String(PORT), path.join(OUT, `login-${tag}.json`), String(SAMPLE_MS)], { stdio: 'ignore' });
+  const env = { ...strippedEnv(), HOME };   // the helper's rule 9: a process this suite starts carries the HOME in the root
+  ctl = spawn(process.execPath, [CONTROL, path.join(OUT, `control-${tag}.json`)], { stdio: 'ignore', env });
+  smp = spawn(process.execPath, [SAMPLER, String(PORT), path.join(OUT, `login-${tag}.json`), String(SAMPLE_MS)], { stdio: 'ignore', env });
 };
 const stopAux = async () => { for (const p of [smp, ctl]) { if (!p) continue; try { p.kill('SIGTERM'); } catch { } await Promise.race([new Promise((r) => (p.exitCode !== null ? r() : p.once('exit', r))), sleep(5000)]); } smp = ctl = null; };
 
@@ -229,9 +237,9 @@ function holdsOver(clock, control, from, to) {
   return { ok: true, top, maxHeld: top.length ? top[0].held : 0, over: gaps.filter((g) => g.held >= HOLD_LAW_MS).length, sum: gaps.filter((g) => g.held >= HOLD_LAW_MS).reduce((s, g) => s + g.held, 0) };
 }
 const holdLines = (tag) => logOf(tag).split('\n').filter((l) => l.includes('[loop-hold]')).map((l) => l.slice(0, 420));
-async function report(tag, from, to, marks) {
+async function report(tag, from, to, marks, { label = tag, judge = 'law', fromFirst = true } = {}) {
   const clock = readJson(path.join(OUT, `clock-${tag}.json`)), control = readJson(path.join(OUT, `control-${tag}.json`)), rows = readJson(path.join(OUT, `login-${tag}.json`)) || [];
-  const first = clock && clock.first != null ? clock.origin + clock.first : from;
+  const first = fromFirst && clock && clock.first != null ? clock.origin + clock.first : from;   // a window from the first loop turn, or from `from`
   const firstAnswer = rows.find((r) => r.ms != null);
   const s = samplesOver(rows, first, to), h = holdsOver(clock, control, first, to);
   const trace = await getJson('/api/boot-trace?cpu=1');   // the CPU sampler's samples folded ONCE: every hold named by what ran in it
@@ -240,14 +248,19 @@ async function report(tag, from, to, marks) {
   // each hold with EVERY site the sampler saw in it, by its milliseconds (where a step's time went: a read, a parse, a fork)
   const siteWords = (h) => (h.sites || []).slice(0, 14).map((x) => `${x.ms != null ? x.ms + ' ms ' : ''}${x.what}`).join(' · ');
   const named = trace && Array.isArray(trace.holds) ? trace.holds.filter((h) => (h.ms || 0) >= 100).sort((x, y) => y.ms - x.ms).slice(0, 8).map((h) => `${h.ms} ms at +${((h.at || 0) / 1000).toFixed(1)} s: ${holdName(h)} — ${siteWords(h) || 'no site'}`) : [];
-  console.log(`  ${tag}: window ${((to - first) / 1000).toFixed(1)} s from the first loop turn (${marks}); the first /login answer at ${firstAnswer ? ((firstAnswer.at + firstAnswer.ms - first) / 1000).toFixed(1) + ' s' : 'never'}`);
-  console.log(`  ${tag}: /login — ${s.n} samples, ${s.preListen} refused before the listen, ${s.answered} answered, worst ${s.worst} ms (at +${s.worstAt != null ? (s.worstAt / 1000).toFixed(1) : '?'} s), ${s.overLaw} over ${ANSWER_LAW_MS} ms, ${s.overProbe} over the probe's ${PROBE_TIMEOUT_MS} ms; unanswered ${s.unansweredN} ${s.unansweredN ? S(s.unanswered) : ''}`);
-  console.log(`  ${tag}: loop — longest hold ${h.maxHeld} ms; ${h.over} gaps held ≥ ${HOLD_LAW_MS} ms (${h.sum} ms in all); the top: ${h.top.map((g) => `+${((g.abs - first) / 1000).toFixed(1)} s ${g.ms} ms (cpu ${g.cpu} · wait ${g.wait} · control ${g.ctl} ⇒ held ${g.held})`).join('; ')}`);
-  console.log(`  ${tag}: boot trace ≥ 100 ms: ${steps.join(' · ') || 'none'}`);
-  console.log(`  ${tag}: the boot trace's holds ≥ 100 ms, named: ${named.length ? '\n    ' + named.join('\n    ') : 'none'}`);
-  const hl = holdLines(tag); console.log(`  ${tag}: the hub's [loop-hold] lines: ${hl.length}${hl.length ? '\n    ' + hl.slice(0, 6).join('\n    ') : ''}`);
-  check(`${tag}: THE LAW — /login answered within ${ANSWER_LAW_MS} ms at every ${SAMPLE_MS} ms sample past the listen (worst ${s.worst} ms, N = ${N})`, s.overLaw === 0 && s.unansweredN === 0 && s.answered > 0, s);
-  check(`${tag}: THE LAW — no loop hold ≥ ${HOLD_LAW_MS} ms from the first loop turn (longest ${h.maxHeld} ms, N = ${N})`, h.ok && h.over === 0, h.top);
+  console.log(`  ${label}: window ${((to - first) / 1000).toFixed(1)} s from the first loop turn (${marks}); the first /login answer at ${firstAnswer ? ((firstAnswer.at + firstAnswer.ms - first) / 1000).toFixed(1) + ' s' : 'never'}`);
+  console.log(`  ${label}: /login — ${s.n} samples, ${s.preListen} refused before the listen, ${s.answered} answered, worst ${s.worst} ms (at +${s.worstAt != null ? (s.worstAt / 1000).toFixed(1) : '?'} s), ${s.overLaw} over ${ANSWER_LAW_MS} ms, ${s.overProbe} over the probe's ${PROBE_TIMEOUT_MS} ms; unanswered ${s.unansweredN} ${s.unansweredN ? S(s.unanswered) : ''}`);
+  console.log(`  ${label}: loop — longest hold ${h.maxHeld} ms; ${h.over} gaps held ≥ ${HOLD_LAW_MS} ms (${h.sum} ms in all); the top: ${h.top.map((g) => `+${((g.abs - first) / 1000).toFixed(1)} s ${g.ms} ms (cpu ${g.cpu} · wait ${g.wait} · control ${g.ctl} ⇒ held ${g.held})`).join('; ')}`);
+  console.log(`  ${label}: boot trace ≥ 100 ms: ${steps.join(' · ') || 'none'}`);
+  console.log(`  ${label}: the boot trace's holds ≥ 100 ms, named: ${named.length ? '\n    ' + named.join('\n    ') : 'none'}`);
+  const hl = holdLines(tag); console.log(`  ${label}: the hub's [loop-hold] lines: ${hl.length}${hl.length ? '\n    ' + hl.slice(0, 6).join('\n    ') : ''}`);
+  if (judge === 'law') {
+    check(`${label}: THE LAW — /login answered within ${ANSWER_LAW_MS} ms at every ${SAMPLE_MS} ms sample past the listen (worst ${s.worst} ms, N = ${N})`, s.overLaw === 0 && s.unansweredN === 0 && s.answered > 0, s);
+    check(`${label}: THE LAW — no loop hold ≥ ${HOLD_LAW_MS} ms from the first loop turn (longest ${h.maxHeld} ms, N = ${N})`, h.ok && h.over === 0, h.top);
+  } else if (judge === 'red') {
+    check(`${label}: RED as it must be — the law breaks in this window: a loop hold ≥ ${HOLD_LAW_MS} ms (longest ${h.maxHeld} ms, ${h.over} of them, N = ${N})`, h.ok && h.over > 0, h.top);
+  } else console.log(`  ${label}: reported, not judged in this unit (worst /login ${s.worst} ms, longest hold ${h.maxHeld} ms)`);
+  return { s, h };
 }
 
 // ── boot 0 (setup): N conversations resumed live, then the measured shapes ──
@@ -264,22 +277,59 @@ const live = new Map(), liveIds = new Set();   // liveIds: the server ids of the
   }
   console.log(`  ${live.size} of ${N} created in ${((Date.now() - t0) / 1000).toFixed(1)} s${refused.length ? '; not: ' + S(refused.slice(0, 3)) : ''}`);
   check(`all ${N} conversations created live (the stand-in behind the real chat wrapper)`, live.size === N, refused.slice(0, 3));
+  console.log(`  memory: ${memGiB().toFixed(1)} GiB available with the ${live.size} live (${memAvailGiB.toFixed(1)} at the start)`);
   c.ws.close();
 }
-await sleep(2000);
 
-if (SHAPES.includes('dead') && (left() <= 420000 || hubDied)) check(`DEAD skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
-else if (SHAPES.includes('dead')) {
-  console.log(`② DEAD — the pod rebuild: the hub and every process it started killed; the boot, then «Resume all» (${PAGES} page${PAGES > 1 ? 's' : ''}, one create in flight each)`);
-  await stopHub('SIGKILL');
-  const n = await endMine('SIGKILL');
+// ── the waits: each on a named effect, bounded ──
+const BUF = path.join(wt, 'data', 'session-buffers'), META = path.join(wt, 'data', 'session-meta');
+/** every live buffer's size read the same twice, 500 ms apart (nothing writes them any more) */
+const settled = async (ids, ms = 20000) => {
+  const sizes = () => [...ids].map((id) => { try { return fs.statSync(path.join(BUF, id + '.buf')).size; } catch { return -1; } }).join();
+  let prev = sizes();
+  for (const tEnd = Date.now() + ms; Date.now() < tEnd;) { await sleep(500); const now = sizes(); if (now === prev) return true; prev = now; }
+  return false;
+};
+/** both clocks of this boot have written their first file */
+const auxUp = (tag) => until(() => fs.existsSync(path.join(OUT, `control-${tag}.json`)) && fs.existsSync(path.join(OUT, `login-${tag}.json`)), 10000, 50);
+/** every sign-in ask made by `by` has its answer (or its error) in the sampler's file */
+const asksAnswered = (tag, by) => until(() => { const rows = readJson(path.join(OUT, `login-${tag}.json`)); return !!rows && rows.filter((r) => r.at <= by).every((r) => r.ms != null || r.err != null); }, 8000, 100);
+/** the survivors whose billing source the restore's backfill has written back (its one write: the meta's apiKeySource) */
+const billedN = () => { let n = 0; try { for (const f of fs.readdirSync(META)) { if (!f.endsWith('.json')) continue; const m = readJson(path.join(META, f)); if (m && m.apiKeySource === 'none') n++; } } catch { } return n; };
+/** every meta's billing source taken out (the hub stopped): a restart's backfill then reads each survivor's again */
+const unbill = () => { let n = 0; try { for (const f of fs.readdirSync(META)) { if (!f.endsWith('.json')) continue; const m = readJson(path.join(META, f)); if (m && 'apiKeySource' in m) { delete m.apiKeySource; fs.writeFileSync(path.join(META, f), S(m)); n++; } } } catch { } return n; };
+/** the restore's own words (src/server/boot-restore.js drainSurvivorAttaches): how many, the registration pass, the batches */
+const RESTORE_RE = /\[boot-restore\] (\d+) survivor\(s\): registered in (\d+) ms; attached in (\d+) batch\(es\) of ≤ (\S+) \((\d+) ms, the longest batch (\d+) ms\)/;
+const restoreLine = (log) => { const m = RESTORE_RE.exec(log); return m ? { line: m[0], n: +m[1], registered: +m[2], batches: +m[3], longest: +m[6] } : null; };
+
+// ── THE RED CONTROLS' PLANTS: the release's one synchronous pass, written into the scratch tree's copy of the restore (never
+// this tree): «one-pass-attach» = every survivor attached in the restore's one turn (the release's inline attach);
+// «forking-backfill» = the release's billing-source backfill, verbatim (scripts/fixtures/boot-restore-backfill-release.txt:
+// a `sh -c grep … | tail -1` started for every restored conversation in one synchronous loop). A plant whose anchor is gone
+// is said and its control is red: a control that cannot be planted proves nothing ──
+const RESTORE = path.join(wt, 'src', 'server', 'boot-restore.js');
+const GREEN_RESTORE = fs.readFileSync(RESTORE, 'utf8');
+const RELEASE_BACKFILL = fs.readFileSync(path.join(repo, 'scripts', 'fixtures', 'boot-restore-backfill-release.txt'), 'utf8');
+const BACKFILL_FROM = '  // Backfill billing identity for sessions restored WITHOUT a recorded\n', BACKFILL_TO = '\n  }, 3000);\n';
+const once = (t, x) => t.split(x).length === 2;
+const PLANTS = {
+  'one-pass-attach': (t) => (once(t, 'const ATTACH_BATCH = 8;') ? t.replace('const ATTACH_BATCH = 8;', 'const ATTACH_BATCH = Infinity;') : null),
+  'forking-backfill': (t) => { if (!once(t, BACKFILL_FROM)) return null; const i = t.indexOf(BACKFILL_FROM), j = t.indexOf(BACKFILL_TO, i); return j < 0 ? null : t.slice(0, i) + RELEASE_BACKFILL + t.slice(j + BACKFILL_TO.length); },
+};
+const plant = (name) => { const t = name ? PLANTS[name](GREEN_RESTORE) : GREEN_RESTORE; if (t == null) return false; fs.writeFileSync(RESTORE, t); return true; };
+
+// ── ② DEAD — the pod rebuild ──
+async function deadShape(tag, { red = null } = {}) {
+  const label = red ? `RED ${red} (${tag})` : tag;
+  console.log(`② ${label} — the pod rebuild: the hub and every process it started killed; the boot, then «Resume all» (${PAGES} page${PAGES > 1 ? 's' : ''}, one create in flight each)`);
+  const n = await stopHub('SIGKILL');
   liveIds.clear();   // every one of them died with its processes
-  console.log(`  ended ${n} processes this run started (dtach, wrappers, the stand-ins, the device daemon)`);
-  startAux('dead'); await sleep(300);
-  const tBoot = Date.now(); boot('dead', true);
+  console.log(`  ended ${n} processes (the hub and every process carrying its HOME: dtach, wrappers, the stand-ins, the device daemon — the helper, by identity)`);
+  startAux(tag); await auxUp(tag);
+  const tBoot = Date.now(); boot(tag, true);
   const b = await ready();
   const tReady = Date.now();
-  check('the measured boot answers ready', !!b);
+  check(`${label}: the measured boot answers ready`, !!b);
   // the press: each page resumes its share, one create in flight, the next when the previous one's create has ENDED
   const shares = Array.from({ length: PAGES }, (_, p) => convs.filter((v) => v.i % PAGES === p));
   const ends = [], attaches = [];
@@ -299,67 +349,115 @@ else if (SHAPES.includes('dead')) {
   const slow = [...ends].sort((a, b2) => b2.ms - a.ms).slice(0, 3);
   console.log(`  ready ${((tReady - tBoot) / 1000).toFixed(1)} s after the spawn; ${created} of ${N} created in ${((tLastCreate - tReady) / 1000).toFixed(1)} s (create ends: median ${ends.map((e) => e.ms).sort((a, b2) => a - b2)[Math.floor(ends.length / 2)]} ms, slowest ${slow.map((e) => `#${e.i} ${e.ms} ms ${e.type}`).join(', ')}); ${att ? att.length + ' attaches answered' : 'attaches NOT all answered'} ${((tLastAttach - tLastCreate) / 1000).toFixed(1)} s after the last create`);
   if (att) { const sa = [...att].sort((a, b2) => b2.ms - a.ms).slice(0, 3); console.log(`  slowest attaches: ${sa.map((a) => `#${a.i} (${convs[a.i].mb} MB) ${a.ms} ms ${a.type}`).join(', ')}`); }
-  check(`all ${N} resumed (created) through the paced road`, created === N, ends.filter((e) => e.type !== 'created').slice(0, 3));
-  await sleep(1500);
+  check(`${label}: all ${N} resumed (created) through the paced road`, created === N, ends.filter((e) => e.type !== 'created').slice(0, 3));
+  await asksAnswered(tag, Date.now());
   await stopAux();
-  await report('dead', tBoot, tLastAttach, `the spawn → ready → ${created} paced resumes → their attaches`);
+  await report(tag, tBoot, tLastAttach, `the spawn → ready → ${created} paced resumes → their attaches`, { label, judge: red ? 'red' : 'law' });
   for (const p of pages) p.ws.close();
 }
 
-if (SHAPES.includes('survive') && (left() <= 240000 || hubDied)) check(`SURVIVE skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
-else if (SHAPES.includes('survive')) {
-  console.log('③ SURVIVE — a hub restart where dtach lives: every buffer full, the boot re-attaches them all');
-  // every LIVE conversation's buffer (the ids created last: the setup's, or the paced resume's) filled to the chat
-  // wrapper's ring (500 KB): stream-json turns, each with its result line — written while its wrapper is idle (the
-  // stand-in says nothing until it is asked), so the file stays as written across the restart
-  await sleep(3000);
-  const BUF = path.join(wt, 'data', 'session-buffers');
-  // <id>.buf for EVERY live id — a wrapper the page never attached wrote none yet (the stand-in says nothing until asked), and the
-  // restore reads that name whether the wrapper made it or not
-  fs.mkdirSync(BUF, { recursive: true });
-  const bufs = [...liveIds].map((id) => id + '.buf');
-  check(`the live conversations to restore: ${bufs.length}`, liveIds.size > 0);
-  const turn = (sid) => [
-    S({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: sid }),
-    S({ type: 'system', subtype: 'init', session_id: sid, cwd: CWDS[0], model: 'claude-sonnet-4-5', tools: ['Read', 'Edit', 'Bash'] }),
-    S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'toolu_' + hex(24), name: 'Read', input: { file_path: '/src/a.js' } }], usage: { input_tokens: 9, output_tokens: 80 } }, session_id: sid }),
-    S({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_' + hex(24), content: words(5000) }] }, session_id: sid }),
-    S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: words(1200) }], usage: { input_tokens: 9, output_tokens: 300 } }, session_id: sid }),
-    S({ type: 'result', subtype: 'success', is_error: false, duration_ms: 8000 + Math.floor(Math.random() * 9000), num_turns: 2, result: words(400), session_id: sid, total_cost_usd: 0.05 + Math.random() / 10, usage: { input_tokens: 18, cache_read_input_tokens: 90000, output_tokens: 380 }, modelUsage: { 'claude-sonnet-4-5': { inputTokens: 18, outputTokens: 380, costUSD: 0.07 } } }),
-    S({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: sid }),
-  ].join('\n') + '\n';
-  let filled = 0;
-  for (const f of bufs) { let s = ''; while (s.length < 490000) s += turn(crypto.randomUUID()); fs.writeFileSync(path.join(BUF, f), s); filled += s.length; }
-  console.log(`  ${bufs.length} buffers filled: ${(filled / 1e6).toFixed(1)} MB`);
-  await stopHub('SIGKILL');
-  const alive = mine().length;
-  startAux('survive'); await sleep(300);
-  const tBoot = Date.now(); boot('survive', true);
+// ── ③ SURVIVE — a hub restart where dtach lives ──
+let filledOnce = false;
+async function surviveShape(tag, { red = null } = {}) {
+  const label = red ? `RED ${red} (${tag})` : tag;
+  console.log(`③ ${label} — a hub restart where dtach lives: every buffer full, the boot re-attaches them all; the page returns ${PAGE === 'held' ? 'once the restore\'s last effect landed (W1 = the restore alone)' : 'at ready (the field\'s order)'}`);
+  check(`${label}: the live conversations to restore: ${liveIds.size}`, liveIds.size > 0);
+  if (!filledOnce) {
+    // every LIVE conversation's buffer filled to the chat wrapper's ring (500 KB): stream-json turns, each init with its billing
+    // source and each turn with its result line — written once nothing writes them (the stand-in says nothing until it is asked),
+    // so the file stays as written across the restarts. <id>.buf for EVERY live id: a wrapper the page never attached wrote none
+    // yet, and the restore reads that name whether the wrapper made it or not
+    check(`${label}: the live buffers settled (each size read the same twice)`, await settled(liveIds));
+    fs.mkdirSync(BUF, { recursive: true });
+    const bufs = [...liveIds].map((id) => id + '.buf');
+    const turn = (sid) => [
+      S({ type: 'system', subtype: 'session_state_changed', state: 'running', session_id: sid }),
+      S({ type: 'system', subtype: 'init', session_id: sid, cwd: CWDS[0], model: 'claude-sonnet-4-5', tools: ['Read', 'Edit', 'Bash'], apiKeySource: 'none' }),
+      S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'tool_use', id: 'toolu_' + hex(24), name: 'Read', input: { file_path: '/src/a.js' } }], usage: { input_tokens: 9, output_tokens: 80 } }, session_id: sid }),
+      S({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_' + hex(24), content: words(5000) }] }, session_id: sid }),
+      S({ type: 'assistant', message: { id: 'msg_' + hex(24), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: words(1200) }], usage: { input_tokens: 9, output_tokens: 300 } }, session_id: sid }),
+      S({ type: 'result', subtype: 'success', is_error: false, duration_ms: 8000 + Math.floor(Math.random() * 9000), num_turns: 2, result: words(400), session_id: sid, total_cost_usd: 0.05 + Math.random() / 10, usage: { input_tokens: 18, cache_read_input_tokens: 90000, output_tokens: 380 }, modelUsage: { 'claude-sonnet-4-5': { inputTokens: 18, outputTokens: 380, costUSD: 0.07 } } }),
+      S({ type: 'system', subtype: 'session_state_changed', state: 'idle', session_id: sid }),
+    ].join('\n') + '\n';
+    let filled = 0;
+    for (const f of bufs) { let s = ''; while (s.length < 490000) s += turn(crypto.randomUUID()); fs.writeFileSync(path.join(BUF, f), s); filled += s.length; }
+    console.log(`  ${bufs.length} buffers filled: ${(filled / 1e6).toFixed(1)} MB`);
+    filledOnce = true;
+  }
+  await stopHub('SIGKILL', { hubOnly: true });
+  console.log(`  ${unbill()} meta(s) without their billing source (the restart's backfill reads each survivor's again)`);
+  startAux(tag); await auxUp(tag);
+  const tBoot = Date.now(); boot(tag, true);
   const b = await ready();
-  check('the measured boot answers ready', !!b);
+  check(`${label}: the measured boot answers ready`, !!b);
   const tReady = Date.now();
-  // restoreSessions runs in the listen callback (server.js), one synchronous pass — every survivor is re-attached before the hub
-  // answers anything. Then THE PAGE COMES BACK: an open page reconnects and re-attaches every window at once (the floor slab
-  // behind the first, src/lib/view-visibility.js attachSlab) — each one's history rebuilt from its buffer and transcript
+  let tW1 = null;
+  if (PAGE === 'held') {
+    // W1 — THE RESTORE ALONE: the restore (the listen callback's pass and its batches) and its backfill, until the backfill has
+    // written back every survivor's billing source — the page held back until then (the hub's [loop-hold] words and the boot
+    // trace name what ran in it)
+    const all = await until(() => billedN() >= liveIds.size, 60000, 100);
+    tW1 = Date.now();
+    check(`${label}: the backfill wrote back every survivor's billing source (${billedN()} of ${liveIds.size}, ${((tW1 - tReady) / 1000).toFixed(1)} s after ready) — W1 ends`, !!all);
+  }
+  const rl = restoreLine(logOf(tag));
+  console.log(`  the restore's own line: ${rl ? rl.line : 'NONE'}`);
+  if (red) {
+    await asksAnswered(tag, Date.now());
+    await stopAux();
+    await report(tag, tBoot, tW1 || Date.now(), `W1 — the spawn → ready → the restore and its backfill (${liveIds.size} survivors)`, { label, judge: 'red' });
+    return rl;
+  }
+  check(`${label}: the restore says every survivor, its registration pass and each batch under ${HOLD_LAW_MS} ms`, !!rl && rl.n === liveIds.size && rl.registered < HOLD_LAW_MS && rl.longest < HOLD_LAW_MS, rl);
+  // THE PAGE COMES BACK: an open page reconnects and re-attaches every window at once (the floor slab behind the first,
+  // src/lib/view-visibility.js attachSlab) — each one's history rebuilt from its buffer and transcript
   const pg = await socket();
   const tA = Date.now();
   const att = await Promise.race([Promise.all([...liveIds].map((id) => pg.attach(id).then((a) => ({ id, ms: Date.now() - tA, type: a.type })))), sleep(Math.max(30000, Math.min(240000, left() - 90000))).then(() => null)]);
   const tLastAttach = Date.now();
   if (att) { const sa = [...att].sort((x, y) => y.ms - x.ms).slice(0, 3); console.log(`  ${att.length} re-attaches answered in ${((tLastAttach - tA) / 1000).toFixed(1)} s (slowest ${sa.map((a) => `${a.ms} ms ${a.type}`).join(', ')})`); }
-  check(`every survivor re-attached by the returning page (${att ? att.filter((a) => a.type === 'attached').length : 0} of ${liveIds.size})`, !!att && att.every((a) => a.type === 'attached'));
-  // the window runs past the restore's own timers (the capture at +2 s, the keeper re-adopt at +8 s, the re-probe ladder's first at +10 s)
+  check(`${label}: every survivor re-attached by the returning page (${att ? att.filter((a) => a.type === 'attached').length : 0} of ${liveIds.size})`, !!att && att.every((a) => a.type === 'attached'));
+  // the window runs past the restore's own timers (the capture at +2 s, the keeper re-adopt at +8 s, the re-probe ladder's first at
+  // +10 s): a measured span, not a wait for an effect
   await sleep(Math.max(0, tReady + 25000 - Date.now()));
   pg.ws.close();
-  await sleep(1500);   // the sampler's last asks answered before it stops
   const tEnd = Date.now();
-  const restoredN = (logOf('survive').match(/✓ Reconnected: /g) || []).length;   // boot-restore.js says one line a survivor
-  console.log(`  ${alive} processes of this run alive across the restart; the hub reconnected ${restoredN} of ${bufs.length}`);
-  check(`the hub re-attached every survivor (${restoredN} of ${bufs.length})`, restoredN === bufs.length);
+  await asksAnswered(tag, tEnd);
+  const restoredN = (logOf(tag).match(/✓ Reconnected: /g) || []).length;   // boot-restore.js says one line a survivor
+  console.log(`  the hub reconnected ${restoredN} of ${liveIds.size}`);
+  check(`${label}: the hub re-attached every survivor (${restoredN} of ${liveIds.size})`, restoredN === liveIds.size);
   await stopAux();
-  await report('survive', tBoot, tEnd, `the spawn → ready (${bufs.length} survivors restored) → the page's ${liveIds.size} re-attaches → ready + 25 s`);
+  if (PAGE === 'held') {
+    await report(tag, tBoot, tW1, `W1 — the spawn → ready → the restore and its backfill (${liveIds.size} survivors), the page held`, { label: `${label} W1` });
+    // W2 — the page's re-attaches: REPORTED, NOT JUDGED in this unit — hold 3 (the claude transcript warm's one-shot reply,
+    // deserialized on the main thread) is unit 2 of this row, then the search index's live flush (hold 4) and the collections
+    // (hold 5): each judged here when its unit lands
+    await report(tag, tA, tEnd, `W2 — the page's ${liveIds.size} re-attaches → ready + 25 s (reported; judged from unit 2 on)`, { label: `${label} W2`, judge: 'none', fromFirst: false });
+  } else await report(tag, tBoot, tEnd, `the spawn → ready (${liveIds.size} survivors restored) → the page's ${liveIds.size} re-attaches → ready + 25 s`, { label });
+  return rl;
 }
 
+if (SHAPES.includes('dead') && (left() <= 420000 || hubDied)) check(`DEAD skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
+else if (SHAPES.includes('dead')) await deadShape('dead');
+if (SHAPES.includes('survive') && (left() <= 240000 || hubDied)) check(`SURVIVE skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
+else if (SHAPES.includes('survive')) await surviveShape('survive');
+console.log(`  memory: ${memGiB().toFixed(1)} GiB available now (${memAvailGiB.toFixed(1)} at the start; this measure asks ${NEED_GIB.toFixed(1)})`);
+
+// ── ④ THE RED CONTROLS (the pin's; CD4B_PAGE=held): the release's one synchronous pass planted back, each run judged on its window
+// alone — the law must BREAK there. Each control differs from the green run above by its plant only ──
+if (REDS && SHAPES.includes('survive') && !hubDied && left() > 200000) {
+  check('RED one-pass-attach: planted (the restore\'s ATTACH_BATCH = Infinity)', plant('one-pass-attach'));
+  const r1 = await surviveShape('red-attach', { red: 'one-pass-attach' });
+  check('RED one-pass-attach: the restore says it attached every survivor in ONE batch — the release\'s pass', !!r1 && r1.batches === 1 && r1.n === liveIds.size, r1);
+  check('RED forking-backfill: planted (the release\'s backfill, verbatim)', plant('forking-backfill'));
+  const r2 = await surviveShape('red-fork', { red: 'forking-backfill' });
+  check('RED forking-backfill: the restore\'s own batches stay under the bound — the break is the backfill\'s', !!r2 && r2.batches > 1 && r2.longest < HOLD_LAW_MS, r2);
+  if (SHAPES.includes('dead') && !hubDied && left() > 150000) await deadShape('red-dead', { red: 'forking-backfill' });
+  else check(`RED forking-backfill (red-dead) skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
+  plant(null);
+} else if (REDS) check(`the red controls skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
+else console.log(`  the red controls: not run (CD4B_PAGE=${PAGE}${process.env.CD4B_REDS === '0' ? ', CD4B_REDS=0' : ''}) — a measure, not the pin`);
+
 await stopHub('SIGTERM');
-await endMine('SIGKILL');
 console.log(`\n${passed} passed, ${failed} failed (${((Date.now() - T_START) / 1000).toFixed(0)} s)`);
 process.exit(failed ? 1 : 0);
