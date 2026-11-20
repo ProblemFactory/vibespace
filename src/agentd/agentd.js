@@ -895,13 +895,18 @@ function log(msg) {
 // (no node flock without deps; an exclusive lock file whose pid is verified
 // via /proc cmdline (linux) or ps (macOS) is equivalent for our scope)
 let blockingPid = null; // set when a live sibling daemon holds the lock
+let lockExitArmed = false;
 function acquireSingleton() {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const fd = fs.openSync(LOCK, 'wx');
       fs.writeSync(fd, String(process.pid));
       fs.closeSync(fd);
-      process.on('exit', () => { try { fs.unlinkSync(LOCK); } catch { } });
+      // B-147f (round w59hqoiqb, MUST 3): the exit removes the lock ONLY while it still names this process — an exit 75 of a stay that
+      // found another agent's lock never unlinks THAT agent's (a fourth start would run beside it). A pid names one live process: a
+      // lock naming this pid while it lives is its own (one naming it from before is removed above, before the write). Armed ONCE —
+      // a stay's re-acquire adds no second listener
+      if (!lockExitArmed) { lockExitArmed = true; process.on('exit', () => { try { if (fs.readFileSync(LOCK, 'utf-8').trim() === String(process.pid)) fs.unlinkSync(LOCK); } catch { } }); }
       return true;
     } catch {
       try {
@@ -1087,6 +1092,10 @@ if (process.platform === 'win32') {
 // `closed-before-hello` (streak 1 into dial-status.json, so the NEW daemon's first dial-in told the server
 // "1 attempt failed" after every healthy self-upgrade).
 let upgradeLanded = false;
+// B-147f (round w59hqoiqb, MUST 1): the dial a self-upgrade ended — set by the dial's close under upgradeLanded, called by a hand-over
+// that STAYS (the hub ends the link at upgrade-done: without a new dial a dialed machine would hold its lock with no link, and its
+// supervisor would see a live process — nothing to restart)
+let redialAfterStay = null;
 function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { dialed = false } = {}) {
   // the version names a DIRECTORY under the root: a version-shaped string or nothing (never a path out of it)
   if (typeof version !== 'string' || !SIG.VERSION_RE.test(version)) {
@@ -1145,10 +1154,29 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
           // lane win-upgrade-pipe: FREE THE ADDRESS, THEN START THE SUCCESSOR (src/agentd/reexec.js handOver) — on Windows
           // SOCK is a named pipe no unlink frees; the successor's listen died EADDRINUSE while this process still held it
           handOver({ server, log, exit: exitDaemon, stay: () => {
-            // B-147f: the successor did not start — THIS daemon stays: its lock and its socket taken again (the upgrade's files stay
-            // in place: `current` names the new bundle, so the next start of any kind runs it; the hub sees the old version and asks again)
-            if (!acquireSingleton()) throw new Error('the singleton lock is another agent\'s');
-            listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: (e) => { log('server error: ' + e.message); process.exit(1); }, onListening: () => { try { fs.chmodSync(SOCK, 0o600); } catch { } log(`upgrade hand-over: the successor did not start — listening again on ${SOCK}`); } });
+            // B-147f: the successor did not start — THIS daemon stays (the upgrade's files stay in place: `current` names the new
+            // bundle, so the next start of any kind runs it; the hub sees the old version and asks again). ONE ATTEMPT — its lock, then
+            // its socket — and ANY failure of it is ONE named exit, 75 (round w59hqoiqb MUST 2): the lock's is a throw (handOver says it
+            // and exits 75), the socket's is said below. The boot's listen handlers come off first: their «up» is true, so a re-listen's
+            // error went to the boot's fatal road (exit 1) and their retry never ran. WHAT IT SAVES: a successor that could not start for
+            // a missing program or a refused fork; on a FULL FILE TABLE the lock cannot be opened either — exit 75, the supervisor's
+            // restart. ONE attempt = listenWithRetry with no retry window (forMs 0). Once it listens: the upgrade's mark cleared and its hub
+            // DIALED again (MUST 1)
+            if (!acquireSingleton()) throw new Error('the singleton lock is another agent\'s, or it could not be opened');
+            server.removeAllListeners('error');
+            let stayUp = false;
+            listenWithRetry(server, SOCK, { log, lockIsOurs, forMs: 0, onFatal: (e) => {
+              if (stayUp) { serverFatal(e); return; }   // a listening server's error: the boot's own fatal road, as after its listen
+              log(`upgrade hand-over: it could not stay — ${SOCK} did not listen again (${(e && (e.code || e.message)) || e}) — exit 75`);
+              exitDaemon(75);
+            }, onListening: () => {
+              stayUp = true;
+              try { fs.chmodSync(SOCK, 0o600); } catch { }
+              upgradeLanded = false;
+              const redial = redialAfterStay; redialAfterStay = null;
+              log(`upgrade hand-over: the successor did not start — this daemon stays, listening again on ${SOCK}${redial ? '; its hub dialed again' : ''}`);
+              if (redial) redial();
+            } });
           }, spawnNext: () => {
             try { fs.unlinkSync(LOCK); } catch { }
             try { fs.unlinkSync(SOCK); } catch { }
@@ -3087,7 +3115,9 @@ if (SOCK_PICK && SOCK_PICK.via !== 'natural') {
 // lane win-upgrade-pipe: a busy address is RETRIED (250 ms, ≤ 15 s) while the singleton lock names this pid — the
 // previous daemon of a self-upgrade may still hold a Windows named pipe (src/agentd/reexec.js listenWithRetry)
 const lockIsOurs = () => { try { return fs.readFileSync(LOCK, 'utf-8').trim() === String(process.pid); } catch { return false; } };
-listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: (e) => { log('server error: ' + e.message); process.exit(1); }, onListening: () => {
+// a LISTENING server's error ends the daemon (the boot's road, and a stay's once it listens again — B-147f)
+function serverFatal(e) { log('server error: ' + e.message); process.exit(1); }
+listenWithRetry(server, SOCK, { log, lockIsOurs, onFatal: serverFatal, onListening: () => {
   try { fs.chmodSync(SOCK, 0o600); } catch { }
   posixShells(); amIElevated(); // verify-r2: the first measure starts at boot, so the first hello rarely waits for it (amIElevated too, so the first hello reports a known value)
   if (SOCK_PICK) {
@@ -3176,7 +3206,7 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
     ws.on('close', () => {
       // C3: a self-upgrade's re-exec ends the link on purpose — no failure recorded, no retry (this process exits;
       // the new daemon dials with a clean streak).
-      if (upgradeLanded) { log('dial-out ended — self-upgrade re-exec'); return; }
+      if (upgradeLanded) { log('dial-out ended — self-upgrade re-exec'); redialAfterStay = () => { attempts = 0; dial(); }; return; }   // B-147f: a hand-over that stays dials again (above)
       const delay = [1000, 2000, 5000, 15000, 30000][Math.min(4, attempts++)];
       const now = Date.now();
       const f = DF.dialFailureOf(lastErr, { up, upMs: up ? now - upAt : 0 });

@@ -227,7 +227,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     return new Promise((resolve) => {
       let c, done = false, n = 0;
       const chunks = [], tail = [];
-      const finish = (r) => { if (done) return; done = true; clearTimeout(timer); if (c && c.exitCode == null) { try { c.kill(); } catch { /* gone */ } } resolve(r); };
+      const finish = (r) => { if (done) return; done = true; clearTimeout(timer); if (c && c.exitCode == null && c.pid > 0) { try { c.kill(); } catch { /* gone */ } } resolve(r); };   // B-147f: a real pid only
       const timer = setTimeout(() => finish(named('still_timeout', `the display handed no picture within ${STILL_MS / 1000} s`)), STILL_MS);
       try { c = spawn(plan.ffmpeg, mapped ? SP.stillHalfArgv(plan) : SP.stillArgv(plan), { env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] }); } catch (e) { finish(named('still_failed', `the capture could not start (${(e && (e.code || e.message)) || e})`)); return; }
       c.on('error', (e) => finish(named('still_failed', `the capture could not start (${(e && (e.code || e.message)) || e})`)));   // B-147f: the listener first (a queued error is always heard)
@@ -258,7 +258,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     let onAu = null, onEnd = null, stopped = false, keyAskedAt = null, t0 = 0, lastTs = -1, capRetries = 0;
     const restartsAt = []; // GONE MEANS GONE: when the capture was started again in place
     const procs = new Set();
-    const end = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
+    const end = (c) => { if (c && c.exitCode == null && !c.killed && c.pid > 0) { try { c.kill(); } catch { /* gone */ } } };   // B-147f: a real pid only
     // WINDOWS POWER THROTTLING (lane stream-hdr-passthrough's opt-out — a hidden agent's mapper 250–700 ms a 4K frame, opted out 79 ms;
     // lane stream-sdr-ecoqos: EVERY road, the agent held for the stream's life — THE KEEPER above): this agent and each of its ffmpegs
     // out, once each (a restarted encoder / a re-asked capture: its new pid); `ecoqos` in the numbers: 'off' once every one answered ok
@@ -289,6 +289,9 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     function ffmpeg(args, role, { stdin = 'ignore' } = {}) {
       const c = spawn(plan.ffmpeg, args, { env, windowsHide: true, stdio: [stdin, 'pipe', 'pipe'] });
       c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('capture_failed', `${role}: ${e && (e.code || e.message)}`); });   // B-147f: the listener first — before anything reads a pipe
+      // B-147f: a start that failed (no pid: a full file table, no such program) is no child of the stream's — never in procs, never
+      // signalled (its kill went to whatever the pid slot held: 0 = this agent's own process group); its 'error' above ends the stream
+      if (!Number.isInteger(c.pid)) return c;
       const tail = [];
       c.asked = false;
       procs.add(c);
@@ -323,6 +326,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
     /** Access units out of an encoder's FLV (an H.264 road) or IVF (the HDR road's AV1 temporal units) → the host, in order, each once. */
     function readAus(c, clockOf) {
       const r = hdrRoad ? AV1.ivfReader() : SP.flvReader();
+      if (!c.stdout) return;   // B-147f: an encoder with no pipes (a full file table): its queued 'error' (ffmpeg above) ends the stream in its own words
       c.stdout.on('data', (d) => {
         if (stopped || c.asked) return; // a retired encoder's last pictures: the new one opens with a key frame
         for (const ev of r.push(d)) {
@@ -432,6 +436,7 @@ function createWindowsScreen({ platform = process.platform, spawn, execFile, env
       carry = null; paused = false;
       if (fill) { inFree.push(fill); fill = null; filled = 0; } // a dead capture's partial frame is dropped
       const c = cap = ffmpeg(SP.captureArgv(plan), 'capture');
+      if (!c.stdout) return;   // B-147f: a capture with no pipes: its queued 'error' (ffmpeg above) says «capture: EMFILE»
       c.stdout.on('data', (d) => { if (c !== cap) return; carry = carry ? Buffer.concat([carry, d]) : d; pump(); });
     }
 

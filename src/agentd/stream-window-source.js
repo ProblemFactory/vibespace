@@ -167,6 +167,7 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
     function startEncoder(w, h) {
       const c = spawn(plan.ffmpeg, SP.windowEncodeArgv(plan, { w, h, kbps: rate.kbps }), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('encoder_exited', `encoder: ${e && (e.code || e.message)}`); });   // B-147f: the listener first — before anything reads a pipe
+      if (!c.stdin || !c.stdout) return;   // B-147f: no pipes (a full file table): NO encoder — its queued 'error' above ends the stream in its own words; the frame road sees none
       const etail = [];
       c.asked = false; c.role = 'encoder'; procs.add(c); enc = c; encSize = { w, h }; encAus = 0; encAt = now();
       const clock = encClock = [];
@@ -225,7 +226,7 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
         retireEncoder(); startEncoder(head.w, head.h);
       }
       if (plan.fmt !== 'f16') { writeEnc(buf, at, () => releaseBuf(buf)); return; }
-      if (mapping || !worker || enc.stdin.writableLength > 0) { st.dropped++; releaseBuf(buf); return; }
+      if (mapping || !worker || !enc || enc.stdin.writableLength > 0) { st.dropped++; releaseBuf(buf); return; }   // B-147f: an encoder that did not start is none
       mapping = true;
       const input = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.length), output = new ArrayBuffer(SP.nv12Bytes(head.w, head.h));
       releaseBuf(buf);
@@ -265,6 +266,7 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
     function startHelper() {
       const c = spawn(plan.helper, SP.wgcCaptureArgv(plan), { env, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'] });
       c.on('error', (e) => { procs.delete(c); if (!c.asked) finish('helper_missing', `the window helper did not start (${e && (e.code || e.message)})`); });   // B-147f: the listener first
+      if (!c.stdin || !c.stdout || !c.stderr) return;   // B-147f: no pipes (a full file table): its queued 'error' above says «the window helper did not start»
       c.asked = false; c.role = 'helper'; procs.add(c); cap = c;
       let rest = '';
       c.stderr.on('data', (d) => {

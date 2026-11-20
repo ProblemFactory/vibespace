@@ -38,7 +38,7 @@ function createSound({ platform = process.platform, spawn, env, log = () => { },
       r.done = true;
       try { r.sock.close(); } catch { /* gone */ }
       for (const c of [r.helper, r.enc]) {
-        if (!c) continue;
+        if (!c || !(c.pid > 0)) continue;   // B-147f: a start that failed (no pid) is never signalled
         try { c.stdin.end(); } catch { /* gone */ }
         const t = setTimeout(() => { try { c.kill(); } catch { /* gone */ } }, SM.SOUND_LIMITS.stopGraceMs); t.unref?.();
         c.once('exit', () => clearTimeout(t));
@@ -72,6 +72,9 @@ function createSound({ platform = process.platform, spawn, env, log = () => { },
       const args = SM.soundEncoderArgs(port);
       const enc = r.enc = spawn(ff, args, { env, windowsHide: true, stdio: ['pipe', 'ignore', 'pipe'] });
       enc.on('error', (e) => { st.code = 'encoder_failed'; st.error = String((e && e.message) || e).slice(0, 200); });
+      // B-147f: an encoder with no pipes (a full file table) is refused in its OWN words — its queued 'error' (above) names the cause
+      // one tick on; never «cannot read properties of null» from a pipe read
+      if (!enc.stdin || !enc.stderr) { endRun(r); return new Promise((res) => setImmediate(() => res(named('encoder_failed', `the sound encoder did not start (${st.error || 'no pipes'})`)))); }
       enc.stdin.on('error', () => { });
       enc.stderr.on('data', (d) => { const l = String(d).trim().split(/\r?\n/).pop(); if (l) { tail.push(l.slice(0, 200)); if (tail.length > 3) tail.shift(); } });
       enc.stdin.write(Buffer.from(SM.soundWavHeader()));

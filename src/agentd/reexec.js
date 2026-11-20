@@ -58,7 +58,7 @@ function handOver({ server, spawnNext, exit, stay = null, log = () => {}, waitMs
     try { started = spawnNext() !== false; } catch (e) { log(`upgrade hand-over: the successor's start threw (${(e && e.message) || e})`); }
     if (started) { exit(0); return; }
     log('upgrade hand-over: the successor did not start — this daemon stays');
-    if (typeof stay === 'function') { try { stay(); return; } catch (e) { log(`upgrade hand-over: it could not stay (${(e && e.message) || e})`); } }
+    if (typeof stay === 'function') { try { stay(); return; } catch (e) { log(`upgrade hand-over: it could not stay (${(e && e.message) || e}) — exit 75`); } }
     exit(75);
   };
   const t = timers.setTimeout(() => go(`upgrade hand-over: the listener did not close within ${waitMs} ms — starting the successor anyway (it retries a busy address)`), waitMs);
