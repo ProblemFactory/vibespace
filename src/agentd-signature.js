@@ -72,6 +72,9 @@ const REFUSALS = Object.freeze(['malformed', 'version-mismatch', 'unknown-key', 
 const need = (o) => { if (!o || !o.crypto || typeof o.crypto.verify !== 'function') throw new Error('agentd-signature: hand in node crypto ({ crypto })'); return o.crypto; };
 const b64 = (s, len) => { if (typeof s !== 'string' || !B64_RE.test(s)) return null; const b = Buffer.from(s, 'base64'); return b.length === len ? b : null; };
 const fail = (code, why, extra = null) => ({ ok: false, code, why, ...(extra || {}) });
+/** THE agent version grammar (one copy — lane lg-remote-hardening, unit 4's cure): the hello's daemonVersion and the upgrade
+ *  watch's versions are judged by it → the version | null */
+const verOf = (v) => (typeof v === 'string' && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(v) ? v : null);
 /** Version order (x.y.z, numeric) — < 0 when a is older than b. */
 function compareVersions(a, b) {
   const pa = String(a).split('.').map(Number), pb = String(b).split('.').map(Number);
@@ -320,4 +323,4 @@ function floorText({ floor, honoured = [], at }) {
   return JSON.stringify({ v: 1, floor, honoured: honoured.slice(-32), at }, null, 2) + '\n';
 }
 
-module.exports = { verify, sign, signLink, signRetire, generateKeyPair, keyIdOf, publicKeyOf, manifestMatches, parseTrust, trustText, parseFloor, floorText, compareVersions, bundleMessage, linkMessage, retireMessage, helperMessage, helperLine, helperShape, REFUSALS, VERSION_RE, DOMAIN_BUNDLE, DOMAIN_LINK, DOMAIN_RETIRE, DOMAIN_HELPER };
+module.exports = { verify, sign, signLink, signRetire, generateKeyPair, keyIdOf, publicKeyOf, manifestMatches, parseTrust, trustText, parseFloor, floorText, compareVersions, verOf, bundleMessage, linkMessage, retireMessage, helperMessage, helperLine, helperShape, REFUSALS, VERSION_RE, DOMAIN_BUNDLE, DOMAIN_LINK, DOMAIN_RETIRE, DOMAIN_HELPER };

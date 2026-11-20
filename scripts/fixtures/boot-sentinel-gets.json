@@ -232,6 +232,7 @@
   "/api/hosts/:id/dir-complete",
   "/api/hosts/:id/exit-access",
   "/api/hosts/:id/exit-runs",
+  "/api/hosts/:id/host-keys",
   "/api/hosts/:id/ports",
   "/api/hosts/:id/public-key",
   "/api/hosts/:id/recent-cwds",

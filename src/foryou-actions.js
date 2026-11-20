@@ -51,6 +51,8 @@
  *             a pointer whose question lives in a window of its own: the Outbox): `opens` names the client's opener
  *             (src/lib/user-todos-actions.js ROW_DOORS), `verb` the button's words, `title` its hover; the tray row and the For-you
  *             window draw it and the jump opens it off this row (doorOf) — never a branch per type; absent = no such button
+ *   opens     the page's DIALOG the item opens for its subject (OPENS — 'host-key-dialog': that machine's Host key…; opensOf):
+ *             the jump's ONE declared-dialog door reads it (lane lg-remote-hardening, 主开发's verdict of 2026-11-18)
  * Every older table is DERIVED here (ACTION_IDENTITY · WAIT_ACTIONS · CARD_ACTION_TYPES · ANSWER_ACTION_TYPES);
  * scripts/test-foryou-actions-census.mjs fails on a type a producer files with no row, a row nobody files, a `handled` row
  * with no branch, a `card: 'row'` row the row does not draw, a `chat` row the card does not draw.
@@ -126,6 +128,14 @@ const ROWS = Object.freeze([
   // lane ledger-dedup-law F3 / r9: a background subject's ONE standing item — a NOTICE: no answer drawn (`answer: 'reply'`,
   // `card: 'none'` — ✓ ✕ and its door to Manage Agents → Machines), no `decide`; its 60 s cards stay hub-act-ask
   { type: 'hub-act-standing', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'reply', card: 'none', handled: false, chat: true, kind: 'check', scope: 'group' },
+  // lane lg-remote-hardening (B-7f0b, q-042 D6): a machine whose ssh host key changed — ONE urgent notice per machine and key
+  // shown; its door is DECLARED (`opens`): the item opens THAT machine's Host key… dialog (主开发's verdict of 2026-11-18 —
+  // the key control is the sidebar's Remote row, Manage Agents → Machines has none)
+  // identity `hostId` (主开发's ruling of 2026-11-18): two machines' items with the same words never merge (a rename never strands
+  // one: a pin, an unpin or a removal finds it by the record's id).
+  // Unit 3 (D3) files its DEVICE-kind item under the same type (action.kind 'device'): it opens the same dialog, which holds
+  // the machine's device-key section (Forget the device key) — one door for the machine's keys
+  { type: 'host-key', identity: 'hostId', producer: 'src/server/host-key-watch.js', waits: false, answer: 'reply', card: 'none', handled: true, chat: true, kind: 'check', scope: 'group', opens: 'host-key-dialog' },
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
   { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation', localizeDetail: true, decide: 'person', ends: ['allowed', 'always', 'denied', 'expired', 'ask-expired', 'ask-over', 'ask-changed', 'vault_locked', 'conversation-gone'], stamp: 'allow' },   // r7c (the owner's ruling «A»): past its 60 s the command is refused and the card stays answerable — an Allow then lets the agent's next run of that command through once (r8: the door marks it `action.late`; the client never infers it from its own clock)   // int361: + vault-agent-own r25's late-card end (conversation-gone) and vault-use-grants r7's localizeDetail (its plain detail lines through t())
@@ -1244,6 +1254,17 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
+/** THE DIALOG A ROW DECLARES IT OPENS (`opens`, lane lg-remote-hardening): the jump opens it for the item's subject — a
+ *  registry read, never a type-literal branch (§78). → {dialog, hostId, name} | null */
+const OPENS = Object.freeze(['host-key-dialog']);
+function opensOf(item) {
+  const a = item && item.action && typeof item.action === 'object' ? item.action : null;
+  const r = a ? ROW_OF[a.type] : null;
+  if (!r || !OPENS.includes(r.opens) || typeof a.hostId !== 'string' || !a.hostId) return null;
+  const p = item.i18n && item.i18n.text && item.i18n.text.params;
+  return { dialog: r.opens, hostId: a.hostId, name: (p && typeof p.machine === 'string' && p.machine) || a.hostId };
+}
+
 /** A row's OWN buttons (lane queued-is-not-woke): [{answer, label, title, door: 'jump'}] | null — and the one line drawn under
  *  them. Every surface draws and runs them from these fields (no branch on a type). */
 function buttonsOf(type) { const r = ROW_OF[type]; return r && Array.isArray(r.buttons) && r.buttons.length ? r.buttons : null; }
@@ -1283,5 +1304,5 @@ function headWordOf(name, t) { return typeof name === 'string' && Object.prototy
 
 module.exports = {
   arrivalWords,
-  PARKED_ASK_TYPES, isParkedAsk, FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf, doorOf, STORED_WORDS_LEGACY
+  PARKED_ASK_TYPES, isParkedAsk, FORYOU_HEADS, headWordOf, buttonsOf, buttonsNoteOf, OPENS, opensOf, endWordsOf, ROWS, ROW_OF, CHECK_AGAIN_TYPES, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, clockWordsPattern, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, runStripOf, RUN_STRIP_MAX, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf, doorOf, STORED_WORDS_LEGACY
 };

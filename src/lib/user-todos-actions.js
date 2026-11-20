@@ -23,7 +23,7 @@ import { i18nParams } from './stopped-why.js'; // B-a5a4 cure 2: a refusal's int
 import { settingsDoor } from './need-line.js'; // lane ui-needs-a-button pick 5: a check's switch
 import { isProposal } from '../end-proposal.js'; // PURE (CJS, lane login-request-card piece 3b): THE proposal card's type, spelled once
 import { wakeGrantRowsNode, loadWakeGrantRows } from './wake-grant-rows.js'; // piece 7's ONE helper — the proposal card's job rows (lane login-request-card piece 3b)
-import { ROW_OF as FORYOU_ROW_OF, buttonsOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
+import { ROW_OF as FORYOU_ROW_OF, buttonsOf, opensOf } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf, itemFoldLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
@@ -239,6 +239,10 @@ export function inboxModel(app) {
     if (item?.action?.type === 'vault-unlock') { close(); try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } return; }
     // lane vault-window-v2: a failed use / a rotate suggestion lands on ITS row in the Vault window (the window's 「需要你」 draws the same item)
     if (item?.action?.type === 'vault-use-failed' || item?.action?.type === 'vault-rotate' || item?.action?.type === 'vault-policy-approved' || item?.action?.type === 'vault-store-refused' || item?.action?.type === 'vault-grant-stale') { close(); app.replayOpenSpec?.({ action: 'openVault', focus: String(item.action.entry || '') }); return; }   // + vault-policy-approved (R4): the entry's row (its policy / Revoke); + vault-store-refused / vault-grant-stale (r3–r5): the Vault window, to switch each entry on again
+    // lane lg-remote-hardening (主开发's verdict of 2026-11-18): an item whose row DECLARES the dialog it opens (foryou-actions
+    // opensOf — a machine whose ssh host key changed) opens THAT machine's Host key… dialog; its 'machines' key alone would land
+    // on Manage Agents, which has no host-key control
+    { const op = opensOf(item); if (op && op.dialog === 'host-key-dialog') { close(); app.sidebar?._showHostKeyDialog?.({ id: op.hostId, name: op.name }); return; } }
     // lane device-upgrade-stuck: a machine-level item (a device agent whose update failed) lands on Manage Agents → Machines
     if (key === 'machines') { close(); try { localStorage.setItem('vibespace.agentsTab', 'machines'); } catch { } app._showAgentsDialog?.(); return; }
     const s = sessionFor(key);

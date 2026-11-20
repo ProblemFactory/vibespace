@@ -320,7 +320,40 @@ app.post('/api/hosts/key', async (req, res) => {
 });
 app.post('/api/hosts/:id/test', async (req, res) => {
   try { res.json({ success: true, ...(await hosts.test(req.params.id, { by: DAU.byOfReq(req) })) }); }
-  catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name
+  catch (e) { const held = !!e && e.status === 503; res.status(held ? 503 : 400).json({ error: e.message, ...(held && e.code ? { code: e.code } : e && e.code === 'host-key-changed' ? { code: e.code, fp: e.fp || null, pinned: !!e.pinned } : e && e.code === 'host-key-name' ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (bl-jobs, line 124); every other refusal 400 with its words — a changed key (or a pin that cannot be used) with its code and facts (lane lg-remote-hardening)
+});
+// lane lg-remote-hardening (B-7f0b, q-042 D6): a machine's ssh HOST-KEY PIN — read it (and, ?scan=1, what the machine shows
+// now), pin the keys the person confirmed, unpin. The person's act only: an agent that could unpin could reopen the
+// first-key trust, so any bearer is refused (human_only), as for «Who can use it».
+const HKR = require('../host-keys.js');
+const hostKeyHumanOnly = (req, res) => { if (!isAnyBearer(req)) return false; res.status(403).json({ error: 'the user pins a machine\'s host key — an agent token may not read or change it', code: 'human_only' }); return true; };
+const hostKeyFail = (res, e) => res.status(e && e.code === 'human_only' ? 403 : e && (e.code === 'host-key-not-durable' || e.code === 'hosts-unread') ? 503 : 400).json({ error: (e && e.message) || 'failed', code: (e && e.code) || null, params: (e && e.params) || undefined });
+app.get('/api/hosts/:id/host-keys', async (req, res) => {
+  if (hostKeyHumanOnly(req, res)) return;
+  try {
+    const h = hosts.get(req.params.id);
+    const seen = req.query.scan ? (await hosts.hostKeyScan(h.id)).map(({ type, fp }) => ({ type, fp })) : null;
+    const pin = HKR.pinView(h);
+    const match = seen && pin.hostKeys ? seen.some((k) => pin.hostKeys.some((p) => p.fp === k.fp)) : null;
+    res.json({ ...pin, seen, match });
+  } catch (e) { hostKeyFail(res, e); }
+});
+app.post('/api/hosts/:id/host-keys', async (req, res) => {
+  if (hostKeyHumanOnly(req, res)) return;
+  try { const v = await hosts.pinHostKeys(req.params.id, (req.body || {}).fps); bcastAll({ type: 'hosts-updated' }); res.json({ success: true, ...v }); }
+  catch (e) { hostKeyFail(res, e); }
+});
+// lane lg-remote-hardening (B-7f0b, q-042 D3): forget a machine's pinned DEVICE key (its agent proves a key at the next hello
+// and that one is pinned) — the person's act after a reinstall; an agent's bearer is refused like the ssh pin's
+app.delete('/api/hosts/:id/device-key', async (req, res) => {
+  if (hostKeyHumanOnly(req, res)) return;
+  try { const v = hosts.forgetDeviceKey(req.params.id, { unproven: String((req.query && req.query.unproven) || '') === '1' }); bcastAll({ type: 'hosts-updated' }); if (await notDurable(res)) return; res.json({ success: true, ...v }); } // ?unproven=1 = «Let in without a key» — 主开发's hunt: the not-durable guard its siblings carry
+  catch (e) { hostKeyFail(res, e); }
+});
+app.delete('/api/hosts/:id/host-keys', async (req, res) => {
+  if (hostKeyHumanOnly(req, res)) return;
+  try { const v = await hosts.unpinHostKeys(req.params.id); bcastAll({ type: 'hosts-updated' }); res.json({ success: true, ...v }); }
+  catch (e) { hostKeyFail(res, e); }
 });
 app.get('/api/hosts/:id/sessions', async (req, res) => {
   try { res.json({ sessions: await hosts.discoverSessions(req.params.id, req.query.fresh ? { ttlMs: 0 } : {}) }); }

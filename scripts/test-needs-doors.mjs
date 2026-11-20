@@ -1005,6 +1005,10 @@ if (CL) {
     sb3._hostsData = { key: { exists: true, path: '/k' }, hosts: [] };
     sb3._mountsDialog = (title, fields, submit, onSubmit, opts) => { seen.push({ title, fields, submit, onSubmit, opts }); return {}; };
     sb3._renderMounts = () => {};
+    // lane lg-remote-hardening (B-7f0b D6) meets this leg: a saved machine's first contact offers its host key for a pin and the
+    // Add waits for that dialog; the person here closes it without pinning (trusted on first use, as before)
+    const firstContact = [];
+    sb3._showHostKeyDialog = async (h, o) => { firstContact.push(h && h.id); if (o && o.done) o.done(); };
     const H3 = { id: 'h1', name: 'gpu-01', user: 'ubuntu', host: 'gpu-01.example', port: 2222 };
     FakeSidebar.prototype._showAddHostDialog.call(sb3, sb3._hostsData, H3);
     FakeSidebar.prototype._showAddHostDialog.call(sb3, sb3._hostsData);
@@ -1016,12 +1020,21 @@ if (CL) {
     if (dA) await dA.onSubmit({ name: val(dA, 'name'), user: val(dA, 'user'), host: val(dA, 'host'), port: val(dA, 'port'), keyChoice: 'default' }, { close() {}, err: { isConnected: true } }).catch(() => {});
     const sent = (posts.find(([u]) => u === '/api/hosts') || [])[1];
     ok(handed && handed.id === 'h1' && dA && ['name', 'user', 'host', 'port'].map((k) => val(dA, k)).join('|') === 'gpu-01|ubuntu|gpu-01.example|2222' && /replaces “gpu-01”/.test(note) && /replace/i.test(dA.submit)
-      && sent && sent.replaces === 'h1' && sent.name === 'gpu-01' && sent.port === '2222' && dP && ['name', 'user', 'host'].every((k) => !val(dP, k)) && !dP.fields.some((x) => x.type === 'note') && val(dP, 'port') === '' && (dP.fields.find((x) => x.key === 'port') || {}).placeholder === '22',   // B-2ca0: the port is EMPTY until typed (22, or the port the hub's ssh config gives an alias)
+      && sent && sent.replaces === 'h1' && sent.name === 'gpu-01' && sent.port === '2222' && firstContact.join() === 'h2' && dP && ['name', 'user', 'host'].every((k) => !val(dP, k)) && !dP.fields.some((x) => x.type === 'note') && val(dP, 'port') === '' && (dP.fields.find((x) => x.key === 'port') || {}).placeholder === '22',   // B-2ca0: the port is EMPTY until typed (22, or the port the hub's ssh config gives an alias)
       'machines-1 (verifier #3): «Add it again with a key…» opens THIS machine\'s form — filled from it (name, user, address, port), saying it REPLACES it, its submit naming the record it replaces; the plain Add machine stays blank, its port too: empty, 22 its placeholder (r.dcd495a1f: a blank form, the refusing row kept; B-2ca0: an empty port is 22 or the alias\'s own)', { handed: handed && handed.id, fields: dA && dA.fields.map((x) => [x.key, x.value]), submit: dA && dA.submit, sent });
     // the verifier's list for picks 1–2 (closure): the replaced machine's exit grants and port forwards go with its old entry (a new
     // record, a new id) — the note SAYS so, and says to set them again (never carried over)
     ok(/old entry is removed once the new one is saved/.test(note) && /Its exit grants and port forwards go with the old entry — set them again once the machine is added\./.test(note),
       '«Add and replace» (closure, picks 1–2): the form\'s note names what goes with the old entry — its exit grants and port forwards — and says to set them again', note);
+    // lane lg-remote-hardening (B-7f0b D6): a first-contact dialog that fails to open (it throws before its shell) never holds the
+    // Add — the wait ends and the connectivity test runs (it used to wait for a close that never came: the Add hung)
+    posts.length = 0;
+    sb3._showHostKeyDialog = async () => { throw new Error('no modal shell'); };
+    let addEnded = false;
+    if (dA) dA.onSubmit({ name: val(dA, 'name'), user: val(dA, 'user'), host: val(dA, 'host'), port: val(dA, 'port'), keyChoice: 'default' }, { close() {}, err: { isConnected: true } }).catch(() => {}).then(() => { addEnded = true; });
+    for (let i = 0; i < 50 && !addEnded; i++) await new Promise((r) => setImmediate(r));
+    ok(addEnded && posts.some(([u]) => u === '/api/hosts/h2/test'),
+      'lg-remote-hardening D6: a first-contact Host key dialog that fails to open ends the Add\'s wait — the saved machine is still tested (never an Add that hangs)', posts.map(([u]) => u).join(' '));
     FETCH = async () => { throw new Error('no fetch in this leg'); };
   }
   // machines-1 (verifier #2): the public-key door's answer is the PANEL's, per machine — a Machines re-render (the hosts-updated /

@@ -402,6 +402,422 @@ console.log('— B-4d71 an unpaired device: «retired» with the proof to its ow
   for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 1, label: 'mutant-copy: ' })) ok(x.pass, x.name, x.detail);
 }
 
+
+console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is remembered — N ops, ONE hello, ONE kept Mux that answers the heartbeat —');
+{
+  // THE HUB'S OWN ADAPTER (dial-pairing wsStream, which server.js hands every dial-in) over a fake ws, wired to a fake device
+  // whose greeting has the wrong shape (300 capabilities). The device's Mux asks a PING of the hub whenever the leg wants.
+  const { EventEmitter } = require('node:events');
+  const DPM = require('../src/server/dial-pairing.js');
+  let gHellos = 0;
+  const badAck = { op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '1.1.1', platform: 'linux', capabilities: Array.from({ length: 300 }, (_, i) => 'cap' + i) };
+  const wsPair = (ackOf = () => badAck) => {
+    const ws = new EventEmitter(), dev = new EventEmitter();
+    let closed = 0;
+    ws.send = (d) => { const b = Buffer.from(d); setImmediate(() => dev.emit('data', b)); };
+    ws.close = () => { closed++; if (closed === 1) setImmediate(() => ws.emit('close')); }; // a real ws says 'close' once its socket is gone
+    dev.write = (d) => { const b = Buffer.from(d); setImmediate(() => ws.emit('message', b)); return true; };
+    dev.destroy = () => {};
+    const devMux = new Mux(dev, { heartbeat: false, onControl: (m) => { if (m.op === 'hello') { gHellos++; devMux.control(ackOf()); } }, onData: () => {}, onDead: () => {} });
+    return { stream: DPM.wsStream(ws), devMux, closed: () => closed };
+  };
+  const counts = (st) => ['data', 'close', 'error'].map((e) => st.listenerCount(e)).join('/');
+  const { HostManager } = require('../src/hosts.js');
+  const dataDir = path.join(tmp, 'data-greet'); fs.mkdirSync(dataDir, { recursive: true });
+  const H = new HostManager({ dataDir });
+  const dpOpts = { rootDir: tmp, AGENTD_DIR: path.join(dataDir, 'agentd'), agentdHostToken: () => 'vsht_ok', getHosts: () => H, getMounts: () => null, getMachineMounts: () => ({ onMachineUnpaired() {} }), getPortForwards: () => ({ onMachineUnpaired() {} }), getExitProxy: () => ({ onMachineUnpaired() {} }), bcastAll: () => {} };
+  const DP = DPM.create(dpOpts);
+  H.dialOnline = (d) => DP.agentdDials.has(d);
+  H.setDialToken('devG', 'cd'.repeat(32));
+  const P = wsPair();
+  ok(typeof P.stream.removeListener === 'function' && counts(P.stream) === '0/0/0', 'the hub\'s own dial adapter can let a listener go, and starts empty', counts(P.stream));
+  DP.agentdDials.set('devG', P.stream);
+  DP.noteDialEvent('devG', 'accepted', { at: Date.now() });
+  const N = 5, errs = [];
+  for (let i = 0; i < N; i++) { try { await DP.deviceForDial('devG'); errs.push(null); } catch (e) { errs.push(e); } }
+  ok(errs.every((e) => e && e.code === 'hello-ack-shape') && gHellos === 1, `${N} ops on the refused stream: each refused BY NAME (hello-ack-shape), ONE hello in all (hellos=${gHellos}) — the stream is remembered for the re-greet interval`, errs.map((e) => e && e.code));
+  ok(counts(P.stream) === '1/1/1', `ONE kept Mux on the stream after ${N} ops: data/close/error listeners ${counts(P.stream)} (one each — the handshake's own error listener left with it)`);
+  ok(await P.devMux.ping(1000), 'the kept Mux answers the device\'s heartbeat (a PING gets its PONG) — the device keeps its link, so the next ask meets a live one');
+  ok(P.closed() === 0, 'the dialed stream is KEPT (no re-dial storm)');
+  ok(errs[1] && errs[1].stage === 'connect' && /update its agent, or rerun its install command/.test(String(errs[1].message)), 'the fast refusal has the first one\'s shape: its door named, stage connect', errs[1] && { m: errs[1].message, stage: errs[1].stage });
+  const DF = require('../src/dial-facts.js');
+  const row = () => H.list().find((h) => h.deviceId === 'devG');
+  ok(DF.dialRowState(row()).state === 'greeting-refused', `THE ROW reads greeting-refused while the device stays dialed in (${DF.dialRowState(row()).state}) — its words name the door`);
+  const realNow = Date.now;
+  Date.now = () => realNow() + DP.AUTH_FAIL_REHELLO_MS + 1;
+  try {
+    let e4 = null; try { await DP.deviceForDial('devG'); } catch (e) { e4 = e; }
+    ok(e4 && e4.code === 'hello-ack-shape' && gHellos === 2 && counts(P.stream) === '1/1/1', `after the re-greet interval the same stream is asked ONCE more (hellos ${gHellos}), and the new kept Mux took the old one's place (${counts(P.stream)})`);
+  } finally { Date.now = realNow; }
+  ok(await P.devMux.ping(1000), '…and that one answers the device\'s heartbeat too');
+  // the delta read's must: a newcomer that replaces the refused stream CLOSES it (left open, its kept Mux held the link for ever)
+  const admit = await DP.admitDial('devG', { boot: 'another-boot' }, { destroyed: false });
+  ok(admit === true && P.closed() === 0, 'a newcomer is admitted over a refused stream — nothing is closed yet: its upgrade may still fail, and its own greeting decides', { admit, closed: P.closed() });
+  const goodAck = () => ({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: require('../package.json').version, platform: 'linux', capabilities: [] });
+  const P2 = wsPair(goodAck);
+  DP.adoptDialStream('devG', P2.stream);
+  let eP2 = null; try { await DP.deviceForDial('devG'); } catch (e) { eP2 = e; }
+  ok(!eP2 && DP.agentdDials.get('devG') === P2.stream && P.closed() === 1 && P2.closed() === 0, 'a newcomer that PASSES its greeting takes the place, and the refused stream it replaced is CLOSED (its kept Mux no longer holds the link)', { e: eP2 && eP2.message, closed: P.closed() });
+  for (const d of DP.agentdDialDevices.values()) { try { d.stop(); } catch { } } DP.agentdDialDevices.clear();
+  DP.agentdDials.set('devG', P.stream);
+  await DP.unpairDialDevice('devG');
+  {
+    // a GOOD greeting after a refusal on the same stream: the kept Mux leaves, the live one is the only reader
+    let good = false;
+    const Q = wsPair(() => (good ? { op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '1.0.0', platform: 'linux', capabilities: [] } : badAck));
+    const dmQ = () => new (require('../src/agentd/client.js').DeviceManager)({ dataDir: tmp, bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_ok', getStream: () => Q.stream } });
+    let e1 = null; try { await dmQ().connect(); } catch (e) { e1 = e; }
+    good = true;
+    const live = dmQ(); let e2 = null; try { await live.connect(); } catch (e) { e2 = e; }
+    ok(e1 && e1.code === 'hello-ack-shape' && !e2 && Q.stream.listenerCount('data') === 1 && Q.stream.listenerCount('close') === 1 && await Q.devMux.ping(1000), 'a good greeting after a refusal on the same stream: the link opens and its Mux is the ONLY reader (the kept one left)', { e1: e1 && e1.code, e2: e2 && e2.message, data: Q.stream.listenerCount('data') });
+    // a live link's Mux that DIES over a stream still open (its heartbeat) is swapped out at the next handshake on it
+    const deadThenAgain = async (Cl) => { const R = wsPair(() => ({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '1.0.0', platform: 'linux', capabilities: [] })); const dm = new Cl.DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_ok', getStream: () => R.stream } }); await dm.connect(); dm._conn.mux._die('heartbeat: 3 missed pongs'); await dm.connect(); const n = R.stream.listenerCount('data'); try { dm.stop(); } catch { } return n; };
+    ok(await deadThenAgain(require('../src/agentd/client.js')) === 1, 'a live link\'s Mux that died over a still-open stream leaves it at the next handshake: ONE reader');
+    try { live.stop(); } catch { }
+  }
+  ok(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8').includes('      const stream = wsStream(ws);') && fs.readFileSync(path.join(REPO, 'server.js'), 'utf8').includes('      adoptDialStream(deviceId, stream);'), 'WIRING: server.js hands every dial-in to THIS adapter (wsStream), and adopts it through adoptDialStream (the replaced stream is closed)');
+  ok(fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8').includes("rs.state === 'greeting-refused' ? tr('GREETING REFUSED')") && fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8').includes("drs.state === 'greeting-refused' || drs.state === 'key-refused')"), 'the row\'s badge says GREETING REFUSED and the Machines dot is red for it');
+  {
+    // TWO copies of ONE pairing, both refused (a migrated home folder — the B9 class). The law: a refused copy is remembered and
+    // is no reason to close another refused copy's stream; the seat goes only to a copy that PASSES its greeting. The newcomer
+    // over a refused copy is greeted ON PROBATION: refused, the first copy keeps its seat, both stay open (no close, so no
+    // re-dial: no loop) and the row says each with its door; passing, it takes the seat. Beside the seat at most SPARES_MAX
+    // copies wait: at that cap a further copy is turned away BY NAME (its daemon backs off), one more is greeted per interval,
+    // a copy closed at the cap is known by its boot, and no copy is ever closed to make room.
+    // Each dial here is what server.js does: admitDial → adoptDialStream → noteDialEvent('accepted') with the daemon's own boot
+    // (16 hex, kept across its re-dials) → the greeting (deviceForDial). The accept is stamped a millisecond early: a real
+    // greeting is a network round trip, so its refusal never shares the accept's millisecond (the row orders by time).
+    const said = [];
+    const sock = () => ({ destroyed: false, end(t) { said.push(String(t)); }, destroy() { this.destroyed = true; } });
+    const goodAck2 = () => ({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: require('../package.json').version, platform: 'linux', capabilities: [] });
+    const hex16 = () => require('node:crypto').randomBytes(8).toString('hex');
+    const dialIn = async (DPx, id, pair, from = '', boot = hex16()) => { const facts = { boot, from }; const r = await DPx.admitDial(id, facts, sock()); if (r !== true) return { r }; DPx.adoptDialStream(id, pair.stream); DPx.noteDialEvent(id, 'accepted', { ...facts, at: Date.now() - 1 }); let e = null; try { await DPx.deviceForDial(id); } catch (x) { e = x; } return { r, e }; };
+    const seatIn = async (DPx, id, pair, boot = hex16()) => { DPx.adoptDialStream(id, pair.stream); DPx.noteDialEvent(id, 'accepted', { boot, at: Date.now() - 1 }); try { await DPx.deviceForDial(id); } catch { } };
+    const tick = () => new Promise((r) => setImmediate(r));
+    const rowOf = (id) => DF.dialRowState(H.list().find((h) => h.deviceId === id));
+    H.setDialToken('devD', 'ef'.repeat(32));
+    const A = wsPair(); let eA = null; DP.adoptDialStream('devD', A.stream); DP.noteDialEvent('devD', 'accepted', { boot: hex16(), at: Date.now() - 1 }); try { await DP.deviceForDial('devD'); } catch (e) { eA = e; }
+    const B = wsPair(), dB = await dialIn(DP, 'devD', B, 'copy-B');
+    ok(eA && eA.code === 'hello-ack-shape' && dB.r === true && dB.e && dB.e.code === 'hello-ack-shape' && DP.agentdDials.get('devD') === A.stream && A.closed() === 0 && B.closed() === 0, 'two REFUSED copies: the second is greeted on probation and refused — the first keeps its seat, and BOTH stay open (no close, so no re-dial: no loop)', { dB: dB.e && dB.e.code, closedA: A.closed(), closedB: B.closed() });
+    const rsD = rowOf('devD');
+    ok(rsD.state === 'greeting-refused' && rsD.dup && rsD.dup.from === 'copy-B', 'THE ROW SAYS EACH: the seat\'s refusal with its door (greeting refused — update its agent) and the second copy with its own (another device dials in as this one — pair it under its own name)', { state: rsD.state, dup: rsD.dup });
+    const hSeat = gHellos; let eSeat = null; try { await DP.deviceForDial('devD'); } catch (e) { eSeat = e; }
+    ok(eSeat && eSeat.code === 'hello-ack-shape' && gHellos === hSeat, 'the seat\'s refusal is remembered after the probation (ops are refused fast, by name, with no hello)', { e: eSeat && eSeat.code, hellos: gHellos - hSeat });
+    const C = wsPair(), dC = await dialIn(DP, 'devD', C, 'copy-C');
+    said.length = 0;
+    const D2 = wsPair(), dD = await dialIn(DP, 'devD', D2, 'copy-D');
+    await tick();
+    ok(dC.r === true && dD.r === null && said.some((t) => /duplicate-device/.test(t)) && [A, B, C, D2].every((x) => x.closed() === 0) && DP.agentdDials.get('devD') === A.stream, `at the cap (${DP.SPARES_MAX} copies beside the seat) a further refused copy is turned away BY NAME at admission — no copy is closed to make room, so none dials again`, { C: dC.r, D: dD.r, closed: [A, B, C, D2].map((x) => x.closed()) });
+    said.length = 0;
+    const G0 = wsPair(goodAck2), dG0 = await dialIn(DP, 'devD', G0, 'copy-G');
+    ok(dG0.r === null && said.some((t) => /asked again within a minute/.test(t)) && rowOf('devD').dup.from !== 'copy-G', 'a HEALTHY copy arriving inside the same interval at the cap is told to WAIT («asked again within a minute»), and the row does not call it a copy', { r: dG0.r, dup: rowOf('devD').dup });
+    const realNow2 = Date.now;
+    Date.now = () => realNow2() + DP.AUTH_FAIL_REHELLO_MS + 1;
+    let G, dG;
+    try { G = wsPair(goodAck2); dG = await dialIn(DP, 'devD', G); await tick(); } finally { Date.now = realNow2; }
+    ok(dG.r === true && !dG.e && DP.agentdDials.get('devD') === G.stream && [A, B, C].every((x) => x.closed() === 1), 'its next dial after the interval is greeted, PASSES and takes the seat — the refused seat AND the copies beside it are closed (they dial again, meet a seat that answers, and are told duplicate-device)', { e: dG.e && dG.e.message, closed: [A, B, C].map((x) => x.closed()) });
+    said.length = 0;
+    const R2 = wsPair(), dR = await dialIn(DP, 'devD', R2);
+    ok(dR.r === null && said.some((t) => /duplicate-device/.test(t)) && DP.agentdDials.get('devD') === G.stream, 'a refused copy dialing in while the healthy one holds the seat and answers is turned away by name (duplicate-device)', dR);
+    for (const d of DP.agentdDialDevices.values()) { try { d.stop(); } catch { } } DP.agentdDialDevices.clear();
+    {
+      // THE SEAT'S COPY GOES while a refused copy waits beside it: that copy takes the seat with ITS refusal (the row reads what
+      // IS dialed in, ops are refused fast by name — no hello), never «offline» while a copy is dialed in
+      H.setDialToken('devS', '5e'.repeat(32));
+      const S1 = wsPair(); await seatIn(DP, 'devS', S1);
+      const S2 = wsPair(), s2Boot = hex16(); await dialIn(DP, 'devS', S2, 'copy-S2', s2Boot);
+      S1.stream.destroy(); await tick();
+      const h0 = gHellos; let eS = null; try { await DP.deviceForDial('devS'); } catch (e) { eS = e; }
+      ok(DP.agentdDials.get('devS') === S2.stream && eS && eS.code === 'hello-ack-shape' && gHellos === h0 && rowOf('devS').state === 'greeting-refused', 'the seat\'s copy closes: the refused copy beside it takes the seat with its own refusal — the row reads greeting-refused and ops are refused at once by name (no hello)', { seat: DP.agentdDials.get('devS') === S2.stream, e: eS && eS.code, hellos: gHellos - h0, state: rowOf('devS').state });
+    }
+    {
+      // TWO NEWCOMERS IN ONE GREETING'S WINDOW (every copy re-dials together after a hub restart): one is admitted on probation,
+      // the other is turned away by name — the second can never close the first, nor the copy held back behind it
+      H.setDialToken('devR', '7c'.repeat(32));
+      const Q = wsPair(); DP.adoptDialStream('devR', Q.stream); DP.noteDialEvent('devR', 'accepted', { boot: hex16(), at: Date.now() - 1 });
+      const pend = DP.deviceForDial('devR').catch(() => { });
+      const [rX, rY] = await Promise.all([DP.admitDial('devR', { boot: hex16() }, sock()), DP.admitDial('devR', { boot: hex16() }, sock())]);
+      await pend;
+      ok([rX, rY].filter((r) => r === true).length === 1 && [rX, rY].includes(null) && Q.closed() === 0, 'two newcomers in one greeting\'s window (refused): ONE is admitted on probation, the other is turned away by name, nothing is closed', { rX, rY });
+    }
+    {
+      // A GREETING THAT NEVER DECIDES (a locked vault): after PROBATION_MAX the probation ends at the next dial-in — the copy held
+      // back takes its seat back, nothing is closed, and the next newcomer is judged against it
+      H.setDialToken('devP', '3d'.repeat(32));
+      const P1 = wsPair(); await seatIn(DP, 'devP', P1);
+      const admitP = await DP.admitDial('devP', { boot: hex16() }, sock());
+      const P2b = wsPair(); DP.adoptDialStream('devP', P2b.stream); // its greeting never runs
+      const realNow3 = Date.now; let rP;
+      Date.now = () => realNow3() + 31 * 1000;
+      try { rP = await DP.admitDial('devP', { boot: hex16() }, sock()); } finally { Date.now = realNow3; }
+      await tick();
+      ok(admitP === true && DP.agentdDials.get('devP') === P1.stream && rP === true && P1.closed() === 0 && P2b.closed() === 1, 'a probation whose greeting never decides ends after 30 s: the refused copy takes its seat back, the stalled copy is CLOSED (never kept unasked, never remembered: its re-dial is greeted afresh), and the next copy is greeted', { admitP, rP, seat: DP.agentdDials.get('devP') === P1.stream, closedP2: P2b.closed() });
+    }
+    {
+      // A LOCKED VAULT IS A WAIT: no greeting can be judged, so no probation is started (it could never decide); the newcomer
+      // is told to wait, by name, and the row does not call it a copy
+      let locked = false;
+      const DPV = DPM.create({ ...dpOpts, agentdHostToken: () => { if (locked) throw Object.assign(new Error('the vault is locked'), { code: 'vault_locked' }); return 'vsht_ok'; } });
+      H.setDialToken('devL', '1f'.repeat(32));
+      const L1 = wsPair(); await seatIn(DPV, 'devL', L1);
+      locked = true; said.length = 0;
+      const rL = await DPV.admitDial('devL', { boot: hex16(), from: 'copy-L2' }, sock());
+      ok(rL === null && said.some((t) => /asked again within a minute/.test(t)) && DPV.agentdDials.get('devL') === L1.stream && !(rowOf('devL').dup && rowOf('devL').dup.from === 'copy-L2'), 'a newcomer over a refused seat while the vault is locked is told to WAIT — no probation that could never decide, nothing closed, not called a copy', { rL });
+      for (const d of DPV.agentdDialDevices.values()) { try { d.stop(); } catch { } }
+    }
+    // a newcomer arriving while the incumbent's FIRST greeting is in flight, and refused: admitted on probation, nothing closed
+    H.setDialToken('devH', 'ab'.repeat(32));
+    const Q = wsPair(); DP.adoptDialStream('devH', Q.stream);
+    const pending = DP.deviceForDial('devH').catch(() => { });
+    const rH = await DP.admitDial('devH', { boot: 'copy-H' }, sock());
+    await pending;
+    ok(rH === true && Q.closed() === 0, 'a newcomer arriving while the incumbent\'s first greeting is in flight (and refused) is admitted on probation — the refusal it joined is judged, nothing is closed by it', rH);
+    // THE STORM, on a simulated clock: refused copies of one pairing, each a daemon with its OWN boot kept across its dials; a
+    // closed copy dials again 1 s later (agentd.js resets its back-off when a link opens), a turned-away one backs off
+    // 2 / 5 / 15 / 30 s. `rotate` = a copy that states a new boot at every dial. `healthyAt` = a healthy copy's first dial (s).
+    const storm = async (DPx, id, { minutes = 10, copies = ['b', 'c', 'd', 'e'], rotate = [], healthyAt = null } = {}) => {
+      H.setDialToken(id, '9a'.repeat(32));
+      const realNow = Date.now; let now = realNow(); const t0 = now;
+      Date.now = () => now;
+      try {
+        const S = wsPair(); await seatIn(DPx, id, S);
+        const cs = copies.map((n) => ({ n, boot: hex16(), at: now, back: 0, pair: null, good: false }));
+        if (healthyAt != null) cs.push({ n: 'healthy', boot: hex16(), at: t0 + healthyAt * 1000, at0: t0 + healthyAt * 1000, back: 0, pair: null, good: true });
+        let admitted = 0, closes = 0, turned = 0, dials = 0, healthyIn = null;
+        const LADDER = [2, 5, 15, 30];
+        while (now - t0 < minutes * 60000 && dials < 2000) {
+          for (const c of cs) {
+            if (c.pair || c.at > now) continue;
+            dials++;
+            const X = wsPair(c.good ? goodAck2 : undefined);
+            const d = await dialIn(DPx, id, X, 'copy-' + c.n, rotate.includes(c.n) ? hex16() : c.boot);
+            if (d.r !== true) { turned++; c.at = now + 1000 * LADDER[Math.min(c.back++, LADDER.length - 1)]; continue; }
+            admitted++; c.pair = X; c.back = 0;
+            if (c.good && !d.e && DPx.agentdDials.get(id) === X.stream && healthyIn == null) healthyIn = Math.round((now - c.at0) / 1000);
+          }
+          await tick();
+          for (const c of cs) if (c.pair && c.pair.closed() > 0) { closes++; c.pair = null; c.at = now + 1000; }
+          now += 1000;
+        }
+        for (const d of DPx.agentdDialDevices.values()) { try { d.stop(); } catch { } }
+        return { dials, admitted, closes, turned, healthyIn };
+      } finally { Date.now = realNow; }
+    };
+    const st = await storm(DP, 'devT', { minutes: 30 });
+    ok(st.closes <= 2 && st.admitted >= 2 && st.admitted <= 4, `THE STORM ENDS: five refused copies over THIRTY simulated minutes — ${st.admitted} greeted on probation, ${st.closes} closed at the cap (each once, then known), ${st.turned} turned away by name; ${st.dials} dials in all`, st);
+    const sr = await storm(DP, 'devT2', { copies: ['b', 'c', 'x'], rotate: ['x'] });
+    ok(sr.closes <= 12, `a copy that states a NEW boot at every dial is greeted at most once per interval at the cap: ${sr.closes} closes in ten simulated minutes (${sr.dials} dials)`, sr);
+    const sh = await storm(DP, 'devT3', { healthyAt: 180 });
+    ok(sh.healthyIn != null && sh.healthyIn <= 95, `a HEALTHY machine arriving at minute 3 among five refused copies takes the seat ${sh.healthyIn} s after its first dial (at most one interval and one back-off)`, sh);
+    const DSRC2 = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
+    const PROB = '  if ((af && af.stream === was) || (rf && rf.stream === was)) {\n';
+    const FENCED = '    else if (fenced()) { alive = false; given = facts || {}; } // a refused copy: the newcomer is greeted on probation\n';
+    const HELD = '  const held = () => pending() || (liveSpares(deviceId) >= SPARES_MAX && Date.now() - (lastProbationAt.get(deviceId) || 0) < AUTH_FAIL_REHELLO_MS);\n';
+    const ROOM = '    else if (liveSpares(deviceId) < SPARES_MAX) spare(deviceId, pb.stream, own);\n';
+    const PUSH = '  list.push(stream); // never one closed to make room: admitDial keeps the count (a close is a re-dial)\n';
+    const RULED = "  let v = ruledAtStart ? { action: 'probe', why: 'refused-seat' } : judge(null);\n";
+    const RESEAT = '  if (streamBoot.has(stream)) dialBootOf.set(deviceId, streamBoot.get(stream)); // the seat\'s own boot, never the last newcomer\'s\n';
+    const MEMO = '    if (ruled && refusedBoot()) {';
+    ok([PROB, FENCED, HELD, ROOM, PUSH, RULED, RESEAT, MEMO].every((a) => DSRC2.split(a).length === 2), 'control: the probation, the cap, the rules over a refused seat, the seat\'s own boot and the refused boots (the anchors, each once)');
+    const MD = mutantCopies('dial-dup-refused', REPO);
+    const twoRefused = async (DPx, id) => { H.setDialToken(id, 'fe'.repeat(32)); const A2 = wsPair(); await seatIn(DPx, id, A2); const B2 = wsPair(); await dialIn(DPx, id, B2); return { A2, B2 }; };
+    const closing = await twoRefused(MD.load('src/server/dial-pairing.js', DSRC2.replace(PROB, '  if (false) {\n'), 'replace-closes').create(dpOpts), 'devE');
+    ok(closing.A2.closed() === 1, 'RED CONTROL: a copy that closes the refused copy it replaces (no probation) closes the first copy at the second\'s arrival — its daemon dials again: the loop\'s first turn', closing.A2.closed());
+    const DPL = MD.load('src/server/dial-pairing.js', DSRC2.replace(FENCED, '    else if (fenced()) { alive = true; }\n'), 'refused-holds').create(dpOpts);
+    const lk = await twoRefused(DPL, 'devF');
+    const G2 = wsPair(goodAck2), dG2 = await dialIn(DPL, 'devF', G2);
+    ok(dG2.r === null && DPL.agentdDials.get('devF') === lk.A2.stream, 'RED CONTROL: a copy where a refused copy keeps its seat against every newcomer turns the HEALTHY device away — locked out behind the refused one', dG2);
+    for (const d of DPL.agentdDialDevices.values()) { try { d.stop(); } catch { } }
+    const ROOMX = ROOM + '    else { try { pb.stream.destroy(); } catch { } if (pb.facts) {';
+    const oldSrc = DSRC2.replace(HELD, '  const held = () => pending();\n').replace(ROOMX, '    else { spare(deviceId, pb.stream, own); }\n    if (false) { try { pb.stream.destroy(); } catch { } if (pb.facts) {').replace(PUSH, '  list.push(stream); while (list.length > SPARES_MAX) { const old = list.shift(); try { old.destroy(); } catch { } }\n');
+    ok(DSRC2.split(ROOMX).length === 2 && oldSrc.includes('const held = () => pending();') && oldSrc.includes('else { spare(deviceId, pb.stream, own); }') && oldSrc.includes('while (list.length > SPARES_MAX)'), 'control: round 3\'s form is rebuilt whole (each of its three patches applied — a patch that misses would test nothing)');
+    const oldForm = MD.load('src/server/dial-pairing.js', oldSrc, 'spare-closes-oldest').create(dpOpts);
+    const so = await storm(oldForm, 'devU');
+    ok(so.closes >= 50, `RED CONTROL: round 3's form (the oldest spare closed to make room) never ends the storm — ${so.closes} closes in ten simulated minutes`, so);
+    const round4 = MD.load('src/server/dial-pairing.js', DSRC2.replace(RULED, '  let v = judge(null);\n').replace(RESEAT, ''), 'same-boot-skips').create(dpOpts);
+    const s4 = await storm(round4, 'devV');
+    ok(s4.closes >= 50, `RED CONTROL: round 4's form (a copy closed at the cap dials again with its own boot, is taken for «the same daemon» and skips the rules) loops — ${s4.closes} closes in ten simulated minutes`, s4);
+    const noMemo = MD.load('src/server/dial-pairing.js', DSRC2.replace(MEMO, '    if (false) {'), 'no-boot-memory').create(dpOpts);
+    const sm = await storm(noMemo, 'devW', { minutes: 30 });
+    ok(sm.closes >= 15, `RED CONTROL: without the known copies, the copies beyond the cap are greeted and closed once per interval for ever — ${sm.closes} closes in thirty simulated minutes (the leg above: ${st.closes})`, sm);
+    const noIv = MD.load('src/server/dial-pairing.js', DSRC2.replace(HELD, '  const held = () => pending();\n'), 'no-interval').create(dpOpts);
+    const sn = await storm(noIv, 'devX', { copies: ['b', 'c', 'x'], rotate: ['x'] });
+    ok(sn.closes >= 50, `RED CONTROL: without the once-per-interval rule a copy stating a new boot at every dial is greeted and closed at every dial — ${sn.closes} closes in ten simulated minutes`, sn);
+    const RESERVE = '  const pending = () => probation.has(deviceId) || admitted.has(deviceId);\n';
+    const STALE = '  { const pb = probation.get(deviceId); if (pb && Date.now() - pb.at > PROBATION_MAX_MS) settleProbation(deviceId, false); }';
+    const UNASKED = '    if (!refused) { try { pb.stream.destroy(); } catch { } }';
+    ok([RESERVE, STALE, UNASKED].every((a) => DSRC2.split(a).length === 2), 'control: the reservation, the probation\'s 30 s end and the closing of a copy never greeted to the end (the anchors, each once)');
+    {
+      const DPN = MD.load('src/server/dial-pairing.js', DSRC2.replace(RESERVE, '  const pending = () => probation.has(deviceId);\n'), 'no-reservation').create(dpOpts);
+      H.setDialToken('devN', '6b'.repeat(32));
+      const N1 = wsPair(); DPN.adoptDialStream('devN', N1.stream); DPN.noteDialEvent('devN', 'accepted', { boot: hex16(), at: Date.now() - 1 });
+      const pendN = DPN.deviceForDial('devN').catch(() => { });
+      const two = await Promise.all([DPN.admitDial('devN', { boot: hex16() }, sock()), DPN.admitDial('devN', { boot: hex16() }, sock())]);
+      await pendN;
+      ok(two.every((r) => r === true), 'RED CONTROL: without the reservation both newcomers in one greeting\'s window are admitted (the second then replaces the first and closes it)', two);
+      for (const d of DPN.agentdDialDevices.values()) { try { d.stop(); } catch { } }
+    }
+    const RELEASE = "      try { socket.once?.('close', () => { if (admitted.get(deviceId) === r) admitted.delete(deviceId); }); } catch { }\n";
+    ok(DSRC2.split(RELEASE).length === 2, 'control: a reservation ends with its socket (the anchor)');
+    const upgradeDies = async (DPx, id) => { // the websocket upgrade never calls back: its socket closes, and the reservation goes with it
+      const { EventEmitter } = require('node:events');
+      H.setDialToken(id, '4a'.repeat(32)); const Y1 = wsPair(); await seatIn(DPx, id, Y1);
+      const so = Object.assign(new EventEmitter(), { destroyed: false, end() { }, destroy() { this.destroyed = true; } });
+      const r1 = await DPx.admitDial(id, { boot: hex16() }, so); so.destroyed = true; so.emit('close');
+      const r2 = await DPx.admitDial(id, { boot: hex16() }, sock());
+      return { r1, r2 };
+    };
+    const ud = await upgradeDies(DP, 'devU2');
+    ok(ud.r1 === true && ud.r2 === true, 'an upgrade that never calls back frees its reservation at its socket\'s close: the next copy is greeted at once', ud);
+    const udM = await upgradeDies(MD.load('src/server/dial-pairing.js', DSRC2.replace(RELEASE, ''), 'no-release').create(dpOpts), 'devU3');
+    ok(udM.r1 === true && udM.r2 === null, 'RED CONTROL: without the release a dead upgrade holds the reservation, and every copy is told to wait (for 10 s each time, renewed by a holder that knocks with broken upgrades)', udM);
+    // A TOKEN THAT CANNOT BE READ for another reason than a locked vault (a damaged entry, a failed mint) is a wait too
+    const UNREADABLE = '  const tokenUnreadable = () => { try { agentdHostToken(\'dial-\' + deviceId); return false; } catch { return true; } };';
+    const NOBOOT = "(k.startsWith('b:') ? REFUSED_BOOT_MS : AUTH_FAIL_REHELLO_MS)";
+    const CLEARS = 'function lockOutDialHolder(deviceId) {\n  refusedBoots.delete(deviceId); admitted.delete(deviceId);';
+    ok([UNREADABLE, NOBOOT, CLEARS].every((a) => DSRC2.split(a).length === 2), 'control: any unreadable token waits, a key with no boot is known for one interval, a rotation forgets the known copies and the reservation BEFORE it asks whether a link is up (the anchors, each once — the last is pinned by its line only)');
+    const eio = async (DPx, id) => { H.setDialToken(id, '8c'.repeat(32)); const E1 = wsPair(); await seatIn(DPx, id, E1); bad = true; said.length = 0; try { return await DPx.admitDial(id, { boot: hex16() }, sock()); } finally { bad = false; } };
+    let bad = false;
+    const eioOpts = { ...dpOpts, agentdHostToken: () => { if (bad) throw Object.assign(new Error('the link token entry is damaged'), { code: 'EIO' }); return 'vsht_ok'; } };
+    const rE = await eio(DPM.create(eioOpts), 'devE2');
+    ok(rE === null && said.some((t) => /asked again within a minute/.test(t)), 'a token that cannot be read for ANOTHER reason than a locked vault: the newcomer is told to wait too (no probation that could never decide)', rE);
+    const rEM = await eio(MD.load('src/server/dial-pairing.js', DSRC2.replace(UNREADABLE, "  const tokenUnreadable = () => { try { agentdHostToken('dial-' + deviceId); return false; } catch (e) { return !!(e && e.code === 'vault_locked'); } };"), 'locked-only').create(eioOpts), 'devE3');
+    ok(rEM === true, 'RED CONTROL: a copy that waits only for a locked vault starts a probation that could never decide', rEM);
+    // A COPY WITH NO BOOT (an agent before the boot header): closed at the cap, it is known by address + version for ONE interval
+    // and told to wait; after the interval it is greeted again (a healthy machine behind the same relay is never held longer)
+    const noBoot = async (DPx, id) => {
+      H.setDialToken(id, '9d'.repeat(32));
+      const rn = Date.now; let now = rn(); Date.now = () => now;
+      try {
+        const Z0 = wsPair(); await seatIn(DPx, id, Z0);
+        await dialIn(DPx, id, wsPair(), 'copy-1'); await dialIn(DPx, id, wsPair(), 'copy-2'); // the two spares
+        now += DPx.AUTH_FAIL_REHELLO_MS + 1000;
+        const Z = wsPair(); const zf = { from: 'relay', daemon: '0.9.0' };
+        const r0 = await DPx.admitDial(id, zf, sock()); if (r0 === true) { DPx.adoptDialStream(id, Z.stream); DPx.noteDialEvent(id, 'accepted', { ...zf, at: now - 1 }); try { await DPx.deviceForDial(id); } catch { } }
+        await tick();
+        now += 1000; said.length = 0;
+        const r1 = await DPx.admitDial(id, zf, sock()); const waited = said.some((t) => /asked again within a minute/.test(t));
+        now += DPx.AUTH_FAIL_REHELLO_MS + 1000;
+        const r2 = await DPx.admitDial(id, zf, sock());
+        return { r0, closed: Z.closed(), r1, waited, r2 };
+      } finally { Date.now = rn; for (const d of DPx.agentdDialDevices.values()) { try { d.stop(); } catch { } } }
+    };
+    const nb = await noBoot(DP, 'devZ');
+    ok(nb.r0 === true && nb.closed === 1 && nb.r1 === null && nb.waited && nb.r2 === true, 'a copy stating NO boot, refused and closed at the cap: inside the interval it is told to WAIT (never named a copy: a healthy machine behind the same relay may share its address and version); after the interval it is greeted again', nb);
+    const nbM = await noBoot(MD.load('src/server/dial-pairing.js', DSRC2.replace(NOBOOT, 'REFUSED_BOOT_MS'), 'noboot-long').create(dpOpts), 'devZ2');
+    ok(nbM.r2 === null, 'RED CONTROL: a copy that keeps a key with no boot as long as a boot (24 h) still turns that address and version away after the interval — a healthy bootless machine behind the same relay would be held for a day', nbM);
+    // ── unit 4's cure 2, its verdict's shoulds ──
+    const SAME = '  if (backOpen && newOpen && refused && nb && nb === hb) { try { pb.heldBack.destroy(); } catch { } reseat(deviceId, pb.stream, own); return; }\n';
+    const TWIN = '  const twin = refused && nb ? (sparesOf.get(deviceId) || []).find((x) => !closedStreams.has(x) && streamBoot.get(x) === nb) : null;\n';
+    const UNJ = ' if (alive) { copy = false; unjudged = true; } }';
+    const NOFACTS = "if (refused && pb.facts && !twin) noteDialEvent(deviceId, 'duplicate', { ...pb.facts, at: Date.now() });";
+    const KEYCAP = 'while (m.size > REFUSED_KEYS_MAX) m.delete(m.keys().next().value); ';
+    ok([SAME, TWIN, UNJ, NOFACTS, KEYCAP].every((a) => DSRC2.split(a).length === 2), 'control: the same daemon\'s re-dial, the rate rule\'s wait, a probation with no facts, the known copies\' count (the anchors, each once)');
+    // ONE REFUSED MACHINE THAT SLEEPS AND WAKES (not a copy): its daemon dials again with its own boot while its older stream is
+    // half-open — over the SEAT, and over a SPARE. The older stream goes, the live one keeps the place; never a copy, never known
+    const sameDaemon = async (DPx, id) => {
+      H.setDialToken(id, '5c'.repeat(32));
+      const rn = Date.now; let now = rn(); Date.now = () => now;
+      try {
+        const bootA = hex16(), A3 = wsPair(); await seatIn(DPx, id, A3, bootA);
+        const bootB = hex16(), B3 = wsPair(); await dialIn(DPx, id, B3, 'copy-B3', bootB);
+        const C3 = wsPair(); await dialIn(DPx, id, C3, 'copy-C3');
+        now += DPx.AUTH_FAIL_REHELLO_MS + 1000;
+        const A4 = wsPair(), dA = await dialIn(DPx, id, A4, 'laptop', bootA); await tick();
+        const seatIsNew = DPx.agentdDials.get(id) === A4.stream;
+        now += DPx.AUTH_FAIL_REHELLO_MS + 1000;
+        const B4 = wsPair(), dB = await dialIn(DPx, id, B4, 'copy-B3', bootB); await tick();
+        const rs = rowOf(id);
+        return { dA: dA.r, closedA3: A3.closed(), seatIsNew, A4open: A4.closed() === 0, dB: dB.r, closedB3: B3.closed(), B4open: B4.closed() === 0, C3open: C3.closed() === 0, known: DPx.knownCount(id), dupFrom: rs.dup && rs.dup.from, state: rs.state };
+      } finally { Date.now = rn; for (const d of DPx.agentdDialDevices.values()) { try { d.stop(); } catch { } } }
+    };
+    const sd = await sameDaemon(DP, 'devSD');
+    ok(sd.dA === true && sd.closedA3 === 1 && sd.seatIsNew && sd.A4open && sd.dB === true && sd.closedB3 === 1 && sd.B4open && sd.C3open && sd.known === 0 && sd.dupFrom === 'copy-C3' && sd.state === 'greeting-refused', 'ONE refused machine that sleeps and wakes, its daemon dialing again with its own boot: over the seat, its older (half-open) stream goes and the live one keeps the seat with its refusal; over a spare, the same in the spare\'s place — never noted as a copy, never known', sd);
+    const sdM = await sameDaemon(MD.load('src/server/dial-pairing.js', DSRC2.replace(SAME, '').replace(TWIN, '  const twin = null;\n'), 'same-daemon-copy').create(dpOpts), 'devSD2');
+    ok(sdM.closedA3 === 0 && sdM.known >= 1 && sdM.dupFrom === 'copy-B3', 'RED CONTROL: a copy that takes the same daemon\'s re-dial for a copy closes the live stream at the cap, remembers the machine\'s own boot (every later dial: «pair this machine under its own name») and notes it as another device', sdM);
+    // THE RATE RULE'S REFUSAL IS A WAIT (a probe that cannot judge: the vault locked at a hub start, a daemon restarting twice in a
+    // minute): the second dial-in inside the interval is told to wait, and the row does not call the machine its own copy
+    const unjudgedLeg = async (mk, id) => {
+      let locked = false;
+      const DPx = mk({ ...dpOpts, agentdHostToken: () => { if (locked) throw Object.assign(new Error('the vault is locked'), { code: 'vault_locked' }); return 'vsht_ok'; } });
+      H.setDialToken(id, '6e'.repeat(32));
+      const S = wsPair(); DPx.adoptDialStream(id, S.stream); DPx.noteDialEvent(id, 'accepted', { boot: hex16(), at: Date.now() - 1 });
+      locked = true;
+      const r1 = await DPx.admitDial(id, { boot: hex16(), from: 'restart-1' }, sock());
+      if (r1 === true) { const N1 = wsPair(); DPx.adoptDialStream(id, N1.stream); DPx.noteDialEvent(id, 'accepted', { boot: hex16(), from: 'restart-1', at: Date.now() - 1 }); }
+      said.length = 0;
+      const r2 = await DPx.admitDial(id, { boot: hex16(), from: 'restart-2' }, sock());
+      const rs = rowOf(id);
+      for (const d of DPx.agentdDialDevices.values()) { try { d.stop(); } catch { } }
+      return { r1, r2, waited: said.some((t) => /asked again within a minute/.test(t)), dup: rs.dup && rs.dup.from };
+    };
+    const uj = await unjudgedLeg((o) => DPM.create(o), 'devUJ');
+    ok(uj.r1 === true && uj.r2 === null && uj.waited && uj.dup !== 'restart-2', 'a probe that cannot judge replaces once per interval; the second dial-in inside it is told to WAIT, and the row does not call the machine its own copy', uj);
+    const ujM = await unjudgedLeg((o) => MD.load('src/server/dial-pairing.js', DSRC2.replace(UNJ, ' }'), 'unjudged-copy').create(o), 'devUJ2');
+    ok(ujM.r2 === null && !ujM.waited && ujM.dup === 'restart-2', 'RED CONTROL: a copy whose rate rule answers «duplicate» tells the restarting machine it is another device holding a copy, on its own row', ujM);
+    // A PROBATION WITH NO DIAL FACTS (adopted without admission — a seat refused between admission and the upgrade): refused, it
+    // writes no duplicate note (the row would read «from »)
+    const noFacts = async (DPx, id) => { H.setDialToken(id, '7d'.repeat(32)); const F1 = wsPair(); await seatIn(DPx, id, F1); const F2 = wsPair(); DPx.adoptDialStream(id, F2.stream); DPx.noteDialEvent(id, 'accepted', { boot: hex16(), at: Date.now() - 1 }); try { await DPx.deviceForDial(id); } catch { } const rs = rowOf(id); return { dup: rs.dup ? rs.dup.from : null, seat: DPx.agentdDials.get(id) === F1.stream }; };
+    const nf = await noFacts(DP, 'devNF');
+    ok(nf.dup === null && nf.seat, 'a probation with no dial facts, refused: the seat goes back and the row gets no «from »-less duplicate note', nf);
+    const nfM = await noFacts(MD.load('src/server/dial-pairing.js', DSRC2.replace(NOFACTS, "if (refused && !twin) noteDialEvent(deviceId, 'duplicate', { ...pb.facts, at: Date.now() });"), 'nofacts-note').create(dpOpts), 'devNF2');
+    ok(nfM.dup === '', 'RED CONTROL: without the guard the row reads «Another device … (from )»', nfM);
+    // THE KNOWN COPIES HAVE A COUNT: a holder stating a new boot at every dial adds one per interval; the oldest goes past 16
+    const kc = await storm(DP, 'devKC', { minutes: 30, copies: ['b', 'c', 'x'], rotate: ['x'] });
+    const kcN = DP.knownCount('devKC');
+    ok(kc.closes > 16 && kcN === 16, `the known copies are capped: ${kc.closes} rotating boots closed at the cap in thirty simulated minutes, ${kcN} kept (the oldest dropped first)`, { closes: kc.closes, known: kcN });
+    const DPKC = MD.load('src/server/dial-pairing.js', DSRC2.replace(KEYCAP, ''), 'keys-uncapped').create(dpOpts);
+    const kcM = await storm(DPKC, 'devKC2', { minutes: 30, copies: ['b', 'c', 'x'], rotate: ['x'] });
+    ok(DPKC.knownCount('devKC2') === kcM.closes && kcM.closes > 16, `RED CONTROL: without the count the map keeps every one (${DPKC.knownCount('devKC2')})`, { known: DPKC.knownCount('devKC2'), closes: kcM.closes });
+    const stall = async (DPx, id) => { H.setDialToken(id, '2e'.repeat(32)); const X1 = wsPair(); await seatIn(DPx, id, X1); await DPx.admitDial(id, { boot: hex16() }, sock()); const X2 = wsPair(); DPx.adoptDialStream(id, X2.stream); const rn = Date.now; let r; Date.now = () => rn() + 31 * 1000; try { r = await DPx.admitDial(id, { boot: hex16() }, sock()); } finally { Date.now = rn; } await tick(); return { r, X2 }; };
+    const noEnd = await stall(MD.load('src/server/dial-pairing.js', DSRC2.replace(STALE, ''), 'no-probation-end').create(dpOpts), 'devO');
+    ok(noEnd.r === null, 'RED CONTROL: without the 30 s end a probation that never decides turns every later copy away — the healthy one too, for ever', noEnd.r);
+    const kept = await stall(MD.load('src/server/dial-pairing.js', DSRC2.replace(UNASKED, '    if (false) { }'), 'unasked-kept').create(dpOpts), 'devK');
+    ok(kept.r === true && kept.X2.closed() === 0, 'RED CONTROL: a copy that keeps a never-greeted probationer as a spare leaves it open and unasked — nothing ever greets a spare, so a healthy machine stalled by a locked vault would wait beside a refused seat for as long as that link lives', kept.X2.closed());
+    for (const x of copiesCensus(MD.files, MD.dir, REPO, { minCopies: 16, label: 'mutant-copy (duplicate): ' })) ok(x.pass, x.name, x.detail);
+  }
+  // RED CONTROLS, each over the same adapter
+  const CSRC = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
+  const KEEP = "              if (this._transport.kind === 'stream') { keepStream = true; mux.onControl = () => {}; }";
+  const SWAP = "      { const was = this._transport.kind === 'stream' ? keptMuxOf.get(sock) : null; if (was) { keptMuxOf.delete(sock); was.detach(); } }\n";
+  ok(CSRC.includes(KEEP) && CSRC.includes(SWAP), 'control: the refused greeting keeps its Mux, and the next handshake swaps it out, in client.js (the anchors)');
+  const DEAD = "              if (this._transport.kind === 'stream') keptMuxOf.set(sock, mux); // unit 4's cure r3: a dead link's Mux leaves the stream at the next handshake on it\n";
+  ok(CSRC.includes(DEAD), 'control: a dead link\'s Mux is recorded for the swap (the anchor)');
+  const M = mutantCopies('dial-greeting-kept', REPO);
+  const dmOver = (Cl, st) => new Cl.DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_ok', getStream: () => st } });
+  {
+    const Det = M.load('src/agentd/client.js', CSRC.replace(KEEP, "              if (this._transport.kind === 'stream') { keepStream = true; mux.detach(); }"), 'detach-at-once'); // stale-pins: kept — the RED copy re-creates the cure's first form on purpose
+    const Q = wsPair(); try { await dmOver(Det, Q.stream).connect(); } catch { }
+    ok(!(await Q.devMux.ping(300)), 'RED CONTROL: a copy that lets go of the Mux at once (the first form) answers no PING — the device\'s heartbeat would end its link ~40 s later');
+  }
+  {
+    const NoSwap = M.load('src/agentd/client.js', CSRC.replace(SWAP, ''), 'no-swap');
+    const Q = wsPair(), R = wsPair();
+    for (let i = 0; i < N; i++) { try { await dmOver(NoSwap, Q.stream).connect(); } catch { } try { await dmOver(require('../src/agentd/client.js'), R.stream).connect(); } catch { } }
+    ok(counts(Q.stream) === `${N}/${N}/${N}` && counts(R.stream) === '1/1/1', `RED CONTROL: ${N} handshakes on one stream pile ${counts(Q.stream)} listeners without the swap; the real client keeps ${counts(R.stream)}`);
+  }
+  {
+    const DSRC = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
+    const FENCE = "  if (rf && rf.stream === curStream && Date.now() - rf.at < AUTH_FAIL_REHELLO_MS) throw Object.assign(new Error(rf.message), { code: rf.code, stage: 'connect' });\n";
+    ok(DSRC.includes(FENCE), 'control: deviceForDial\'s refused-stream fence (the anchor)');
+    const DPN = M.load('src/server/dial-pairing.js', DSRC.replace(FENCE, ''), 'no-fence').create(dpOpts);
+    const Q = wsPair(); DPN.agentdDials.set('devG', Q.stream);
+    const h0 = gHellos;
+    for (let i = 0; i < N; i++) { try { await DPN.deviceForDial('devG'); } catch { } }
+    ok(gHellos - h0 === N, `RED CONTROL: deviceForDial without the fence says hello on every op (${gHellos - h0} hellos for ${N} ops) — the leg above says ONE`);
+    await DPN.unpairDialDevice('devG');
+  }
+  {
+    const NoDead = M.load('src/agentd/client.js', CSRC.replace(DEAD, ''), 'no-dead-swap');
+    const R = wsPair(() => ({ op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '1.0.0', platform: 'linux', capabilities: [] }));
+    const dm = new NoDead.DeviceManager({ dataDir: tmp, bundlePath: path.join(tmp, 'none.js'), version: '1.0.0', log: () => {}, transport: { kind: 'stream', hostToken: 'vsht_ok', getStream: () => R.stream } });
+    await dm.connect(); dm._conn.mux._die('heartbeat: 3 missed pongs'); await dm.connect();
+    ok(R.stream.listenerCount('data') === 2, `RED CONTROL: a copy that does not record a dead link's Mux leaves TWO readers on the stream after it reconnects (${R.stream.listenerCount('data')})`);
+    try { dm.stop(); } catch { }
+  }
+  for (const x of copiesCensus(M.files, M.dir, REPO, { minCopies: 4, label: 'mutant-copy (greeting): ' })) ok(x.pass, x.name, x.detail);
+}
+
 // WIRING: server.js runs the hello on every dial-in through deviceForDial (where the refused stream is remembered)
 ok(/deviceForDial\(deviceId\)\.catch\(\(\) => \{ \}\); \/\/ the mux hello NOW/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')), 'WIRING: server.js hands every dial-in to deviceForDial (the refused-stream memo lives there)');
 ok(/authFailedStreams\.set\(deviceId, \{ stream: curStream, at: Date\.now\(\) \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8')), 'WIRING: deviceForDial remembers the refused stream');

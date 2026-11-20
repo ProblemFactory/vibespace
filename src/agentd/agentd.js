@@ -999,6 +999,58 @@ const tokenSha = () => {
   } catch { return null; }
 };
 
+// THIS DEVICE'S OWN KEY (lane lg-remote-hardening, B-7f0b — design q-042 D3, src/mutual-auth.js): minted ONCE (state/identity.pem,
+// 0600, through a temporary name) and proved in the hello-ack of every hub that sends a nonce — the hub pins the public half on
+// the machine's record and refuses another key, so a copied token alone is no longer this device. A key that cannot be
+// written is said and the answer goes without proof (a hub that pins this device then refuses it, by name).
+const MA = require('../mutual-auth.js');
+// .pem, never *.key, and a name that is no *_KEY_FILE: the vault and key-file laws read either as a hub store key (a
+// `*_KEY_FILE` variable makes every same-named `tmp` in this file a key path — the hub's own identity is .pem too)
+const DEVICE_IDENTITY_FILE = path.join(STATE, 'identity.pem');
+let devIdentity = null;
+function deviceIdentity() {
+  if (devIdentity) return devIdentity;
+  const crypto = require('crypto');
+  // unit 3's cure: a key is made ONLY when the file does not exist. Any other read error (no permission, an I/O error, a
+  // folder in its place) or an empty file means no proof, said — a new key over the old one would lock this machine out of
+  // every hub that pins it, and the old key would be gone
+  let pem = null; try { pem = fs.readFileSync(DEVICE_IDENTITY_FILE, 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') throw new Error(`state/identity.pem cannot be read (${(e && e.code) || 'error'}) — no new key is made over it; remove it on this machine to make a new one, then forget its key on the hub`); }
+  if (pem !== null && !pem.trim()) throw new Error('state/identity.pem is empty — no new key is made over it; remove it on this machine to make a new one, then forget its key on the hub');
+  if (pem === null) {
+    // ENOENT through a link that points nowhere is no «first start»: the link is there, and a key is never minted over it
+    let there = false; try { fs.lstatSync(DEVICE_IDENTITY_FILE); there = true; } catch { }
+    if (there) throw new Error('state/identity.pem is there but is no readable file (a link to nothing?) — no new key is made over it; remove it on this machine to make a new one, then forget its key on the hub');
+    pem = MA.generateKeyPair({ crypto }).privateKeyPem;
+    const tmp = DEVICE_IDENTITY_FILE + '.' + process.pid + '.tmp';
+    try { fs.unlinkSync(tmp); } catch { }
+    let fd = null;
+    try { fd = fs.openSync(tmp, 'wx', 0o600); fs.writeSync(fd, pem); fs.fsyncSync(fd); fs.closeSync(fd); fd = null; fs.renameSync(tmp, DEVICE_IDENTITY_FILE); }
+    catch (e) { if (fd !== null) { try { fs.closeSync(fd); } catch { } } try { fs.unlinkSync(tmp); } catch { } throw e; }
+    log('this device minted its identity key (state/identity.pem) — a hub pins its public half at the next hello');
+  }
+  devIdentity = { privateKeyPem: pem, publicKey: MA.publicKeyOf(pem, { crypto }) };
+  return devIdentity;
+}
+// THE HUB'S KEY THIS DEVICE PINS (D3 half b — 主开发's ruling 2026-11-18): state/hub.pub = «<hubPub> <the token's digest head>», learned
+// at the first hub ok whose signature verified under a token that admitted it; a NEW pairing (another token) voids it. Written
+// temp + rename, 0600. The pin binds the hub that paired this device: another hub key, or a hello with none, is refused by name.
+const HUB_PUB_FILE = path.join(STATE, 'hub.pub');
+function pinnedHub(tokenDigest) {
+  if (!tokenDigest) return null;
+  let t = ''; try { t = fs.readFileSync(HUB_PUB_FILE, 'utf8').trim(); } catch { return null; }
+  const [pub, bound] = t.split(/\s+/);
+  return MA.isPub(pub) && bound === String(tokenDigest).slice(0, 16) ? pub : null;
+}
+function pinHub(pub, tokenDigest) {
+  const tmp = HUB_PUB_FILE + '.' + process.pid + '.tmp';
+  fs.writeFileSync(tmp, `${pub} ${String(tokenDigest).slice(0, 16)}\n`, { mode: 0o600 }); fs.renameSync(tmp, HUB_PUB_FILE);
+  log('this device pinned the hub key it was paired with (state/hub.pub) — another hub key is refused from now on');
+}
+function deviceProof(nonceH) {
+  if (!MA.isNonce(nonceH)) return null; // an older hub sends no nonce: the old greeting
+  try { return MA.proofOf(deviceIdentity(), nonceH, { crypto: require('crypto') }); } catch (e) { log('the device key could not be used (' + (e && e.message) + ') — this answer carries no proof'); return null; }
+}
+
 log(`vibespace-device ${VERSION} starting (proto ${PROTO_VERSION}, pid ${process.pid})`);
 fs.writeFileSync(path.join(STATE, 'agentd.pid'), String(process.pid));
 // TOFU (design q-042 D2): the first start of an install pins the release keys shipped IN this bundle
@@ -1899,12 +1951,22 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         // reads `auth-fail` on the row and refuses ops until a new command lands here
         // verify-r3: THE ONE DOOR — a constant-time compare over the two digests (never `!==`)
         if (!want || !require('../pairing-token.js').tokenMatches(msg.hostToken, want)) { mux.control({ op: 'auth-fail' }); log('auth-fail from a connection' + (typeof sock.end === 'function' ? '' : ' (dial link kept)')); if (typeof sock.end === 'function') sock.end(); return; }
-        authed = true;
-        authedServers++;
-        this._countedServer = true;
-        if (dialed && typeof onAuthed === 'function') { try { onAuthed(msg); } catch { } } // lane mac-repair-retires-stale: the dial's hub, proved by the host token
+        // lane lg-remote-hardening (D3 half b): the hub's key — a hello under another hub key, or none once one is pinned (no
+        // downgrade), is refused BY NAME (the auth-fail carries the code; a dial link is kept, as above)
+        const hubPin = pinnedHub(want);
+        const hv = MA.helloVerdict({ hello: msg, pinned: hubPin }, { crypto: require('crypto') });
+        if (!hv.ok) { mux.control({ op: 'auth-fail', code: hv.code, error: hv.why }); log(`hub key refused (${hv.code}): ${hv.why}` + (typeof sock.end === 'function' ? '' : ' (dial link kept)')); if (typeof sock.end === 'function') sock.end(); return; }
+        const self = this;
+        const becomeAuthed = (hello) => { authed = true; authedServers++; self._countedServer = true; if (dialed && typeof onAuthed === 'function') { try { onAuthed(hello); } catch { } } }; // lane mac-repair-retires-stale: the dial's hub, proved by the host token
+        const ownProof = deviceProof(msg.nonceH);
+        if (hv.mutual && !ownProof && hubPin) { mux.control({ op: 'auth-fail', code: 'device-key-unusable', error: 'this device cannot use its own key (state/identity.pem) — it pins a hub and cannot check that hub without it' }); log('device key unusable — the hub that this device pins cannot be checked'); if (typeof sock.end === 'function') sock.end(); return; }
+        const nonceD = hv.mutual && ownProof ? MA.newNonce({ crypto: require('crypto') }) : null;
+        if (nonceD) this._pendingHub = { hubPub: msg.hubPub, nonceD, want, hello: msg, becomeAuthed }; // authed only once the hub's ok verifies
+        else becomeAuthed(msg);
         Promise.all([posixShells(), amIElevated()]).then(([shells, elevated]) => mux.control({ // verify-r2: measured now (≤ POSIX_PROBE_MS, async) — a shell installed since this agent started counts
           op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: VERSION,
+          ...(ownProof || {}), // lane lg-remote-hardening (D3): { devPub, sigD } over the hub's fresh nonce
+          ...(nonceD ? { nonceD, hubPinned: !!hubPin } : {}), // D3 half b: THIS device's fresh nonce — the hub's ok must sign it
           platform: process.platform, arch: process.arch, nodeVersion: process.version,
           openssl: process.versions.openssl, nodeOwn: nodeOwn(), // lane device-node-version: the runtime's TLS library + whether this node is the installer's own (<root>/node — re-running the installer replaces it; a system node it never touches)
           posixShells: shells, // lane windows-device-fs verify-r1 F1: the shells THIS machine starts (the hub's door keys on it)
@@ -1913,11 +1975,21 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
-      if (!authed) { sock.end(); return; }
+      // D3 half b: THE HUB'S OK — its signature over this device's key and fresh nonce, by the hello's hub key; only then authed
+      if (msg.op === 'ok' && this._pendingHub) {
+        const p = this._pendingHub; this._pendingHub = null;
+        let v;
+        try { v = MA.okVerdict({ hubPub: p.hubPub, devPub: deviceIdentity().publicKey, nonceD: p.nonceD, ok: msg }, { crypto: require('crypto') }); } catch (e) { v = { ok: false, code: 'hub-signature-bad', why: String((e && e.message) || e) }; }
+        if (!v.ok) { mux.control({ op: 'auth-fail', code: v.code, error: v.why }); log(`hub key refused (${v.code}): ${v.why}`); if (typeof sock.end === 'function') sock.end(); return; }
+        if (!pinnedHub(p.want)) { try { pinHub(p.hubPub, p.want); } catch (e) { log('the hub key could not be pinned (' + (e && e.message) + ')'); } }
+        p.becomeAuthed(p.hello);
+        return;
+      }
+      if (!authed) { if (typeof sock.end === 'function') sock.end(); return; }
       const pv = policyVerdict(msg); // lane device-allow-flags: judged BEFORE dispatch (the hub asked first; this machine decides)
       noteAct(msg, pv.ok ? null : pv.code); // lane device-act-audit: an act / code op from the hub = one line of state/acts.log (who asked, what)
       if (!pv.ok) { refuseOp(mux, msg, pv); return; }

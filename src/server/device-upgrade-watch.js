@@ -42,7 +42,7 @@ const RESOLVED_BY = 'system';
 const i18nKey = (s) => s;
 // a healthy device re-dials within seconds of its re-exec (the Linux box: 17 s); 5 min of silence is a dead agent
 const GONE_AFTER_MS = 5 * 60 * 1000;
-const verOf = (v) => (typeof v === 'string' && /^[0-9A-Za-z][0-9A-Za-z.+-]{0,39}$/.test(v) ? v : null);
+const { verOf } = require('../agentd-signature.js'); // THE version grammar (one copy: the hello's verdict judges by it too)
 const nameOf = (s) => String(s == null ? '' : s).replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ').trim().slice(0, 80) || 'a machine';
 
 /** What no longer works on the old agent, when it is KNOWN from its hello — 'commands' | null. */

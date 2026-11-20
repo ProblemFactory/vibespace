@@ -368,6 +368,9 @@ const page = async (install) => {
   install(S);
   const s = new S(); let dlg = null; const out = {};
   s._renderMounts = () => {}; s._offlineMountNeed = () => {};
+  // lane lg-remote-hardening (B-7f0b D6) meets this leg at the move onto 6ce6b8124: a saved machine's first contact offers its host key
+  // for a pin and the Add waits for that dialog — the person here closes it without pinning (trusted on first use, as before)
+  s._showHostKeyDialog = async (h, o) => { if (o && o.done) o.done(); };
   // the shell's own rule, modelled: a form of the same id and key that is open is RAISED (the same ctx back, nothing new drawn);
   // close() fires its onClose (createModalShell calls it on every path)
   const open = new Map();

@@ -30,7 +30,7 @@ const DIAL_FAIL_CODES = Object.freeze(['dns', 'tls', 'not-ws', 'refused-connect'
 /** The server's named refusals at the upgrade (the X-VibeSpace-Dial-Refusal header). */
 const DIAL_REFUSAL_CODES = Object.freeze(['token-mismatch', 'no-pairing', 'no-device-id', 'duplicate-device', 'retired']);   // retired: B-4d71 (an unpaired device's own token, with the proof)
 /** THE row's states (§4.6), in the order they are judged. */
-const DIAL_ROW_STATES = Object.freeze(['auth-fail', 'connected', 'refused', 'silent', 'never', 'unknown']);
+const DIAL_ROW_STATES = Object.freeze(['auth-fail', 'greeting-refused', 'key-refused', 'connected', 'refused', 'silent', 'never', 'unknown']);
 /** The closed reasons the row words (§11.2). */
 const DIAL_REASONS = Object.freeze(['token-mismatch', 'no-pairing', 'duplicate-device', 'dns', 'tls', 'refused-connect', 'timeout', 'unreachable', 'not-vibespace', 'held', 'other']);   // held: the B-f276 remainder's cure (its read N5)
 const DUP_NOTE_MS = 10 * 60 * 1000; // a duplicate seen within this long is still on the row
@@ -647,6 +647,9 @@ function duplicateDialVerdict({ current = null, incoming = {} } = {}) {
  * → `{state, at, n, reason, host, dup}` (+ `mintedAt` on `refused` — the current command's instant) — words are the client's; `dup` = `{at, from}` when another device was
  * refused as a duplicate of this one within the last 10 min (null otherwise). First match wins:
  *   auth-fail  online AND the device refused OUR host key after this connect
+ *   greeting-refused  online AND this hub refused the device's greeting after this connect (lane lg-remote-hardening, unit 4's cure)
+ *   key-refused  online AND a key was refused on the DIAL road after this connect — the device's key (`side` 'device') or this
+ *              hub's key by the device (`side` 'hub'): the refused stream stays dialed in, so «connected» was false (B-7f0b)
  *   connected  online (`n` = failed attempts before this connect, `reason` the last of them)
  *   refused    offline AND the last refusal is newer than both the last connect AND the current mint
  *              (a refusal of the token a Generate retired is no longer news)
@@ -675,6 +678,13 @@ function dialRowStateOf(d, h) {
   const host = authOf(d.lastAccept && d.lastAccept.dialed) || cmdHost;
   if (online) {
     if (d.lastAuthFail && num(d.lastAuthFail.at) > lastConnectAt) return { state: 'auth-fail', at: num(d.lastAuthFail.at), n: 0, reason: null, host };
+    // the third read: a refused greeting and a refused key can come from DIFFERENT streams (a copy's old agent, the seat's key) —
+    // of the two newer than the connect, the NEWEST is the row's state; at one instant the greeting (judged first on one stream)
+    const gr = d.lastGreetingRefused && num(d.lastGreetingRefused.at) > lastConnectAt ? num(d.lastGreetingRefused.at) : 0;
+    const kr = h && h.deviceKeyRefused && typeof h.deviceKeyRefused === 'object' ? h.deviceKeyRefused : null;
+    const ka = kr && (!kr.road || kr.road === 'dial') && num(kr.at) > lastConnectAt ? num(kr.at) : 0;
+    if (gr && gr >= ka) return { state: 'greeting-refused', at: gr, n: 0, reason: null, host };
+    if (ka) return { state: 'key-refused', side: /^hub[-_]/.test(String(kr.code || '')) ? 'hub' : 'device', code: String(kr.code || ''), pinned: !!h.deviceKey, door: pairingDoorOf(h), at: num(kr.at), n: 0, reason: null, host }; // the read's must 2: the words name a door THIS row has
     const acc = d.lastAccept || {};
     const n = num(acc.attempt);
     return { state: 'connected', at: lastConnectAt || num(acc.at) || null, n, reason: n > 0 ? dialReasonOf(acc.last && acc.last.code) : null, host };
@@ -699,11 +709,20 @@ function sshInstallInvocation({ args = '', installer = '' } = {}) {
   return { remote: 'bash -s', stdin: `set -- ${String(args)}\n${String(installer)}` };
 }
 
+/** THE door a machine's row draws for a NEW PAIRING (lane lg-remote-hardening, unit 3's cure) — the words that send a person
+ *  to it read THIS, as the row does (what the row draws decides, never the transport's name): 'pairing' (a dialed row:
+ *  «Pairing command…»), 'dial-out' (an ssh row upgraded to dial-out: Dial-out → Remove dial-out, then Upgrade to dial-out),
+ *  'none' (an ssh row: no pairing door). PURE. */
+function pairingDoorOf(h) {
+  if (!h || typeof h !== 'object') return 'none';
+  if (h.transport === 'dial') return 'pairing';
+  return h.deviceId || h.graduated ? 'dial-out' : 'none';
+}
 module.exports = {
   DIAL_PATH, CANDIDATE_KINDS, BASE_REFUSALS, DIAL_FAIL_CODES, DIAL_REFUSAL_CODES, DIAL_ROW_STATES, DIAL_REASONS,
   UP_LOST_MS, DETAIL_MAX, HEADER_MAX, HISTORY_MAX, CHECK_EXITS,
   hostOf, HUB_ID_RE, hubIdOf, dialUrlOf, dialBaseOfUrl, DIAL_BASE_MAX, dialAddressCandidates, dialBaseVerdict, ipv4Class, isLoopbackBase, isLoopbackAddress, bindAdmits, dialDefaultChoice, baseOfDialedHost, authorityOf,
   dialFailureOf, dialHeadersOf, parseDialHeaders, refusalSentence, nextDialStatus, dialLogLine,
   dialCheckLines, dialReasonOf, dialRowState, inPlacePushVerdict, duplicateDialVerdict, DUP_NOTE_MS, refusalBudget, refusalAddressKey, REFUSAL_BUDGET,
-  sshInstallInvocation, deviceIdOf, pairNameShown, pairNameVerdict, pairRequestVerdict, DAEMON_PLATFORMS, commandOsOf,
+  sshInstallInvocation, deviceIdOf, pairNameShown, pairNameVerdict, pairRequestVerdict, DAEMON_PLATFORMS, commandOsOf, pairingDoorOf,
 };

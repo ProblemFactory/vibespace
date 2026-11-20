@@ -664,6 +664,9 @@ const I_RECV = {
   'src/server/vault-run-door.js|shape': ['run reference', 'the TOOL\'s name (the basename argv[0] resolved to) on the run card\'s action — the agent\'s own command, never a record\'s words'],
   'src/lib/vault-window.js|r': ['run switch', 'the «Usable by agent runs» answer\'s `open` — a boolean choosing one of two fixed sentences, never a record\'s words'],
   'src/server/dial-health-watch.js|w': ['host', 'the second-dialer item\'s words — a machine name, an address, a time (itemOf), the machine\'s own record'],
+  'src/server/host-key-watch.js|w': ['host', 'the host-key item\'s words — a machine name and the fingerprint it showed (itemOf), the machine\'s own record (lane lg-remote-hardening)'],
+  'src/hosts.js|h0': ['host', 'the machine\'s own name in the pin\'s refusal (pinHostKeys: host-key-none-chosen / host-key-name / host-key-not-seen) — lane lg-remote-hardening'],
+  'src/host-keys.js|h': ['host', 'the machine\'s own name in the pin\'s refusal by name (pinRefusal: host-key-name — an address no pin line can name; its door) — lane lg-remote-hardening'],
   'src/server/dial-health-watch.js|v': ['host', 'the verdict\'s refusing address (secondDialerVerdict) in the journal line — the machine\'s own dial record'],
   // ── verify r9: the receivers of the one-level alias pass (a field copied into a local, then handed to a sink) ──
   'src/agent-routes/status.js|req.body||{}': ['status', 'the caller\'s OWN status write (the owner\'s route / the agent\'s vibespace-status), destructured — the record itself'],

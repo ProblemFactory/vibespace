@@ -46,7 +46,9 @@ const jumpArgsOf = (h) => {
   // would ask about its host key on no tty, with no BatchMode and no ConnectTimeout. The hop is OUR ssh, with the same options; each of
   // its words is plain host characters (jumpVerdict), `[%h]:%p` quoted for the shell ssh runs a ProxyCommand with
   const p = jumpParts(j.jump);
-  return ['-o', 'ProxyCommand=' + ['ssh', ...SSH_BASE_OPTS, ...(p.user ? ['-l', p.user] : []), ...(p.port ? ['-p', p.port] : []), '-W', "'[%h]:%p'", p.host].join(' ')];
+  // the move onto 6ce6b8124 (lane lg-remote-hardening): the host-key check left SSH_BASE_OPTS for HK.hostKeyOpts (per record) — the
+  // hop is no record, so it keeps the check it always had: accept-new into the hub user's own known_hosts
+  return ['-o', 'ProxyCommand=' + ['ssh', ...SSH_BASE_OPTS, '-o', 'StrictHostKeyChecking=accept-new', ...(p.user ? ['-l', p.user] : []), ...(p.port ? ['-p', p.port] : []), '-W', "'[%h]:%p'", p.host].join(' ')];
 };
 /** B-2ca0 follow-up (主开发 19:23Z): ONE VERDICT over an ssh machine record's words — the add asks it of a typed machine and the config
  *  import of EVERY record a bundle carries (an imported record is judged as the add judges a typed one: a user beginning with «-» would
@@ -121,6 +123,8 @@ const { fdScanShellFns, cliIdentityShellFns } = require('./writer-sweep');
 // sysinfo-wiring's signalProc embeds the same text, so there is no per-site
 // reason left to get wrong.
 const { pidAliveShellFn } = require('./cli-identity');
+// lane lg-remote-hardening (B-7f0b, q-042 D6): a machine's ssh host-key pin — its file, its options, its refusal by name
+const HK = require('./host-keys.js');
 
 /** B-5e0d: THE USAGE BEARER LAW at the host rungs (kb-design-lessons §9 addendum 2.369.361; the local ladder's usageBearerOk):
  *  only the CLI's own login token — a refresh token beside it — is handed to the usage read. A long-lived token (none beside it,
@@ -178,7 +182,8 @@ function cmUsable(hm) {   // a function of the manager, so a method borrowed ont
 const SSH_BASE_OPTS = [
   '-o', 'BatchMode=yes',
   '-o', 'ConnectTimeout=6',
-  '-o', 'StrictHostKeyChecking=accept-new',
+  // the host-key check is per record (lane lg-remote-hardening): HK.hostKeyOpts — accept-new for a record with no pin,
+  // StrictHostKeyChecking=yes over the record's own pin file for a pinned one
   // Keepalive (2.124.0, remote-stability pass): silent NAT drops / network
   // blips used to leave half-open ssh pipes lingering for the whole TCP
   // timeout — sessions looked alive but were dead, and nothing could react.
@@ -235,6 +240,10 @@ function unreachableError(h, line = '') {
 function sshRefusal(h, err, stderr, fed) {
   if (!err) return null; // the child succeeded: whatever the pipe said, the answer stands
   const line = String(stderr || '').trim().split('\n').filter(Boolean).pop() || '';
+  // lane lg-remote-hardening: a key ssh would not trust is no unreachable machine — judged on ssh's OWN exit (255) only, never
+  // a remote program's stderr (a dotfiles `git pull` printing «Host key verification failed» on the far side)
+  const hk = err && err.code === 255 ? HK.hostKeyRefusal(h, stderr) : null;
+  if (hk) return hk;
   if (err && (err.code === 255 || err.killed)) return unreachableError(h, line || (err.killed ? 'no answer in time' : ''));
   if (!(fed && fed.error && STDIN_GONE.has(fed.error.code))) return null;
   const name = (h && (h.name || h.id)) || 'the machine';
@@ -272,8 +281,13 @@ function installAgentdAnswer(out) {
 }
 
 const RETIRED_MAX = 512, RETIRED_DAYS = 180;   // B-4d71: the unpaired dial tokens' tombstones (noteRetiredDial)
+/** lane lg-remote-hardening (主开发 00:36Z small 7): a key refusal's code is a DEVICE's word too (hub-key-*) — bounded before it is
+ *  stored: letters, digits, - and _ only, 48 at most; anything else is the generic refusal. */
+const codeOf = (c) => { const x = String(c || ''); return /^[A-Za-z0-9_-]{1,48}$/.test(x) ? x : /^hub[-_]/.test(x) ? 'hub-key-mismatch' : 'device-key-mismatch'; }; // 主开发 01:11Z small (5): a hub-side word stays hub-side
 class HostManager {
   constructor({ dataDir }) {
+    this._seatFp = new Map(); // lane lg-remote-hardening (主开发 00:36Z small 2): `${id}|${road}|${code}` → the fingerprint that refusal was said with
+    this._upgrades = new Map(); // lane lg-remote-hardening (unit 3's cure, at the restack): id → the open upgrade attempt's mark
     this.convIndex = new (require('./conversation-index.js').ConversationIndex)({ dataDir });
     this.dataDir = dataDir;
     // lane device-act-audit: THE hub's record of every act / code op it sends a device (src/device-audit.js —
@@ -357,6 +371,8 @@ class HostManager {
     }
     this._state = a.state === 'data' ? a.value : { hosts: [] };
     if (!Array.isArray(this._state.hosts)) this._state.hosts = [];
+    // lane lg-remote-hardening: every pinned record's file, as its record says (a restored hosts.json, a deleted file)
+    for (const h of this._state.hosts) if (HK.pinned(h)) { try { HK.writePinFile(this._sshDir, h); } catch (e) { console.warn(`[hosts] the host-key pin file of ${h.name || h.id} was not written: ${e.message}`); } }
     if (a.state === 'data') this._reachChanged('hosts.json read');   // at boot nothing is wired yet (a no-op); a held store read again mid-life brings machines back — re-judged. Its read r3 (Y2): an EMPTY lift (torn bytes set aside, a gone file) re-judges nothing, as a boot does — a prune over the empty list cleared every machine's exit lists
   }
   _asideName() { return this._file + '.corrupt-' + Date.now(); }   // ONE set-aside name: the boot's and a read again's (the census counts the names)
@@ -483,7 +499,7 @@ class HostManager {
       ? { ...h, dialTokenHash: undefined, online: !!this.dialOnline?.(h.deviceId), ...up(h), ...dh(h), runtime: DR.runtimeRow(h) }
       // graduated ssh machine (B-6640): expose the upgrade + live-dial state
       // (hash stays redacted like pure-dial records)
-      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h), ...dh(h), runtime: DR.runtimeRow(h) }));
+      : { ...h, dialTokenHash: undefined, ...(h.deviceId ? { graduated: true, dialLive: !!this.dialOnline?.(h.deviceId) } : {}), ...up(h), ...dh(h), runtime: DR.runtimeRow(h), ...HK.pinView(h) }));
     // the B-f276 remainder's cure (主开发 23:20Z, (a)): a HELD list is empty because it is UNREAD — it carries the hold's words (`held`,
     // not enumerated: the JSON is unchanged); every caller is a row of scripts/test-hosts-held-census.mjs
     if (this._unread) Object.defineProperty(out, 'held', { value: this.unreadWords() });
@@ -523,20 +539,77 @@ class HostManager {
     this._refuseIfUnread('moving a machine');   // remainder of B-f276: a held hosts.json takes no change
     const h = this.get(id);
     if (h.transport === 'dial') throw new Error('already a dial device');
-    if (!h.deviceId) h.deviceId = ('grad-' + id).replace(/[^\w-]/g, '').slice(0, 32);
+    if (!h.deviceId) {
+      h.deviceId = ('grad-' + id).replace(/[^\w-]/g, '').slice(0, 32);
+      // lane lg-remote-hardening (unit 3's cure): the dial-out agent runs under its own root with its OWN key — a pin learned
+      // over ssh is not its key. From now on the device key is judged on the dial road, which starts with no pin.
+      this._dropDeviceKey(h, { setAside: true });
+    }
     if (dialRoot) h.dialRoot = String(dialRoot);
     try { require('./agentd/client.js').DeviceManager.dropHelloFolds('host:' + id); } catch {}   // B-0194: its ssh name's hello folds said and dropped (it folds under its device id now)
     this._save();
     return h;
   }
 
+  /** unit 3's cure (its verdict, and 主开发's «as if a must»): a machine that ALREADY dials out is refused BY NAME before an
+   *  upgrade runs anything — a re-press (a dialog left open, a second tab) would mint a new pairing over the working one (its
+   *  token rotated, its pin dropped, its link ended) and a failure after that mint could restore none of it. The door is the
+   *  one the row's words name: Remove dial-out, then Upgrade to dial-out (a new pairing). */
+  notDialOut(id) {
+    // 主开发 at the restack: WHILE an upgrade of this machine runs (its installer may take minutes), the recipe below would
+    // kill the agent and remove its root while the installer writes there — the words for that state are «wait for it»
+    if (this.upgradeRunning(id)) throw Object.assign(new Error('an upgrade of this machine is running — wait for it'), { code: 'upgrade-running' });
+    if (this.get(id).deviceId) throw Object.assign(new Error('this machine already dials out — Remove dial-out first, then Upgrade to dial-out (that makes a new pairing)'), { code: 'already-dial-out' });
+  }
+
+  /** the upgrade to dial-out as ONE attempt of THIS press: graduateDial, and its rollback — the record back to ssh with its own
+   *  pin. A machine already dialing out never gets this far (notDialOut). → { rollBack } */
+  beginGraduation(id, { dialRoot } = {}) {
+    this.notDialOut(id);
+    this.graduateDial(id, { dialRoot });
+    // THE ATTEMPT'S MARK (主开发 at the restack): a rollback touches the record only while ITS attempt is the open one — never a
+    // later upgrade's (an attempt that ended, a Remove and a new press in another tab). In memory: a hub restart ends every attempt.
+    const mark = {};
+    this._upgrades.set(id, mark);
+    const open = () => this._upgrades.get(id) === mark;
+    return {
+      rollBack: () => { if (!open()) return; this._upgrades.delete(id); this.ungraduateDial(id); },
+      finish: () => { if (open()) this._upgrades.delete(id); },
+    };
+  }
+  /** whether an upgrade of this machine is running now (its attempt open): Remove dial-out and a second Upgrade wait for it */
+  upgradeRunning(id) { return this._upgrades.has(id); }
+
   ungraduateDial(id) {
     this._refuseIfUnread('moving a machine back');   // remainder of B-f276: a held hosts.json takes no change
     const h = this.get(id);
+    if (!h.deviceId) return h; // nothing dials out (a second Remove from another tab, a rollback after one): the ssh road's own pin and ask are left alone
     try { if (h.deviceId) require('./agentd/client.js').DeviceManager.dropHelloFolds('dev:' + h.deviceId); } catch {}   // B-0194: its device name's hello folds said and dropped
     delete h.deviceId; delete h.dialTokenHash; delete h.dialRoot;
+    this._dropDeviceKey(h, { restore: true }); // the dial road's pin goes with it, and the ssh road's own comes back
     this._save();
     return h;
+  }
+
+  /** unit 3's cure: a road's device-key state goes when the road's agent changes (a graduation, its removal) — its items too */
+  _dropDeviceKey(h, { setAside = false, restore = false } = {}) {
+    const had = !!(h.deviceKey || h.deviceKeyRefused || h.deviceKeyForgotAt || h.deviceKeyUnprovenAt);
+    const aside = setAside && h.deviceKey ? h.deviceKey : null; // the ssh road's own pin, kept while the machine dials out
+    // a Forget asked while the machine dialed out cleared the set-aside ssh pin and left the SSH ROAD's own ask (sshKeyForgot —
+    // the dial agent's next proof clears only the dial road's): when dial-out goes, the ssh road still ASKS for a proof, and the
+    // key it learns is told (the notice), never pinned in silence
+    const asked = restore && h.sshKeyForgot ? h.sshKeyForgot : null;
+    // …and a Forget still PENDING on the ssh road when the machine is upgraded (no ssh agent has proved a key since: the upgrade
+    // runs raw ssh) is carried into that ssh road's own ask
+    // (and a pending «Let in without a key» the same way: 主开发 at the restack — a rollback used to leave no pin, no ask and no mark)
+    const pending = setAside && (h.deviceKeyForgotAt || h.deviceKeyUnprovenAt) ? { at: h.deviceKeyForgotAt || null, fp: h.deviceKeyForgotFp || null, unproven: h.deviceKeyUnprovenAt || null } : null;
+    if (restore || setAside) delete h.sshKeyForgot;
+    if (pending) h.sshKeyForgot = pending;
+    delete h.deviceKey; delete h.deviceKeyRefused; delete h.deviceKeyForgotAt; delete h.deviceKeyForgotFp; delete h.deviceKeyUnprovenAt;
+    if (aside) h.sshDeviceKey = aside;
+    if (restore) { if (h.sshDeviceKey) h.deviceKey = h.sshDeviceKey; delete h.sshDeviceKey; } // a failed install's rollback never pins anew in silence
+    if (asked) { if (asked.at) h.deviceKeyForgotAt = asked.at; if (asked.fp) h.deviceKeyForgotFp = asked.fp; if (asked.unproven) h.deviceKeyUnprovenAt = asked.unproven; }
+    if (had) { try { this.onHostKeyPinned?.(h, 'device', { notice: true }); } catch { } }
   }
 
   /** Dial-in hook for GRADUATED hosts (wired from the server's dial-in
@@ -565,6 +638,9 @@ class HostManager {
     // add() keys by the SANITIZED id — a different raw deviceId that sanitizes
     // to the same id collides and findByDeviceId (raw match) stays null
     if (!h) throw new Error(`device name "${deviceId}" collides with an existing pairing after sanitization — pick another name`);
+    // lane lg-remote-hardening (D3): a NEW pairing command is the person re-trusting this machine — the device key its
+    // record pinned is forgotten with the old token (the next hello pins the key the paired agent proves)
+    if (h.dialTokenHash && h.dialTokenHash !== String(sha256Hash) && (h.deviceKey || h.deviceKeyRefused || h.deviceKeyForgotAt || h.deviceKeyUnprovenAt || h.hubPinned || h.hubPinClearedAt)) { delete h.deviceKey; delete h.deviceKeyRefused; delete h.deviceKeyForgotAt; delete h.deviceKeyForgotFp; delete h.deviceKeyUnprovenAt; delete h.hubPinned; delete h.hubPinClearedAt; try { this.onHostKeyPinned?.(h, 'device', { notice: true }); } catch { } } // the device's hub pin is voided by the new token too
     h.dialTokenHash = String(sha256Hash);
     this._save();
     return h.id;
@@ -674,7 +750,7 @@ class HostManager {
   /**
    * THE DIAL FACTS (lane-pairing ③, §4.5): what the server observed of a device's dials, on its host record under
    * `dial` — `{generation, tokenMintedAt, mintedHost, mintedBase, lastProbeAt, firstConnectAt, lastConnectAt, lastDisconnectAt,
-   * lastRefusal, lastAccept, lastAuthFail, lastDuplicate}`. `event` ∈ minted | refused | accepted | disconnected | authFail |
+   * lastRefusal, lastAccept, lastAuthFail, lastDuplicate, lastGreetingRefused}`. `event` ∈ minted | refused | accepted | disconnected | authFail | greetingRefused |
    * probed | duplicate (verify-r1 B9: a second daemon refused as a copy of this pairing — `{at, from, boot}`, persisted at
    * once when the row's 10-min note is not already on, else throttled — verify-r2: r1 wrote at once for every NEW boot
    * id, so a copy sending a fresh id per knock wrote hosts.json per knock; the row carries it for 10 min).
@@ -717,6 +793,116 @@ class HostManager {
   /** lane device-node-version: the node a machine's device agent STATES it runs on (every hello-ack — src/device-runtime.js
    *  runtimeOf: `{node, openssl, own, platform}`) kept on its record as `deviceRuntime` with the instant it was first said;
    *  the row's `runtime` judges it (runtimeRow — the floor table), offline too. Persisted only when it moved. → true = moved. */
+  /** lane lg-remote-hardening (B-7f0b — q-042 D3): THE DEVICE KEY of a machine's record. `learned` (the first proof its
+   *  token admitted) ⇒ pinned (`deviceKey` {pub, fp, at}); `refused` (another key, a bad signature, no proof) ⇒ the row's
+   *  `deviceKeyRefused` {code, fp, at} and the For-you watch — the Machines card says it with its door (pair again /
+   *  forget the key). → true when the record moved. */
+  noteDeviceKey(hostId, event, facts = {}) {
+    let h = null; try { h = this.get(hostId); } catch { return false; }
+    if (!h) return false;
+    if (event === 'learned') {
+      if (typeof facts.pub !== 'string' || (h.deviceKey && h.deviceKey.pub === facts.pub)) return false;
+      const afterForget = !!(h.deviceKeyForgotAt || h.deviceKeyUnprovenAt) && !(h.deviceKeyForgotFp && facts.fp && h.deviceKeyForgotFp === facts.fp); // the SAME key again is nothing new
+      h.deviceKey = { pub: facts.pub, fp: facts.fp || null, at: Date.now() }; delete h.deviceKeyRefused; delete h.deviceKeyForgotAt; delete h.deviceKeyForgotFp; delete h.deviceKeyUnprovenAt;
+      try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+      console.log(`[hosts] ${h.name || h.id}: its device key is pinned (${facts.fp || '?'}) — from now on only that key is this machine`);
+      if (afterForget) { try { this.onDeviceKeyLearned?.(h, { fp: facts.fp || null }); } catch { } } // unit 3's cure: the person is told WHICH key the open pin took
+      return true;
+    }
+    if (event === 'proved') { // unit 3's cure: the pinned key proved again — the row's refusal (and its item) end
+      const rr = h.deviceKeyRefused;
+      if (!rr || (rr.road && facts.road && rr.road !== facts.road)) return false; // ONE road's proof never clears the other road's refusal
+      delete h.deviceKeyRefused;
+      try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+      try { this.onHostKeyPinned?.(h, 'device'); } catch { }
+      return true;
+    }
+    // a link that OPENED: an earlier refusal (either side's key) is resolved — the card's chip and its For-you item go
+    if (event === 'linked') {
+      const rl = h.deviceKeyRefused; // unit 5's cure 2: a link that opened on ONE road never clears the other road's refusal
+      if (!rl || (rl.road && facts.road && rl.road !== facts.road)) return false;
+      delete h.deviceKeyRefused;
+      try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+      try { this.onHostKeyPinned?.(h, 'device'); } catch { }
+      return true;
+    }
+    // must B (主开发's verdict of 2026-11-18): the person let an ssh machine pin this hub's key again — its pin and a hub-side
+    // refusal go (the For-you item with them); the next hello pins the current key
+    if (event === 'hub-pin-cleared') {
+      const hubSide = h.deviceKeyRefused && /^hub[-_]/.test(h.deviceKeyRefused.code || '');
+      if (!h.hubPinned && !hubSide) return false;
+      delete h.hubPinned; if (hubSide) delete h.deviceKeyRefused; h.hubPinClearedAt = Date.now(); // 主开发 00:36Z small (1): the act's time, for a put-back to be judged against
+      try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+      try { this.onHostKeyPinned?.(h, 'device'); } catch { }
+      return true;
+    }
+    // D3 half b: the device pins THIS hub's key (the signed ok pinned it) — kept (a hub that loses its identity must then say so, never re-mint)
+    if (event === 'hub-pinned') {
+      if (h.hubPinned) return false;
+      h.hubPinned = Date.now();
+      try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+      return true;
+    }
+    if (event === 'refused' || (event === 'refused-again' && facts.code)) facts = { ...facts, code: codeOf(facts.code) }; // 主开发 00:36Z small (7): a device's word, bounded
+    if (event === 'refused') {
+      if (facts.road && facts.code) this._seatFp.set(`${h.id}|${facts.road}|${facts.code}`, facts.fp || null); // small (2): the fingerprint a put-back of this code carries
+      const same = h.deviceKeyRefused && h.deviceKeyRefused.code === facts.code && h.deviceKeyRefused.fp === (facts.fp || null) && (h.deviceKeyRefused.road || null) === (facts.road || null); // one episode per road
+      // the read's must 1: the dial row shows a refusal only when it is NEWER than the last connect — every dial-in moves that
+      // connect, and its hello is refused the same way again, so a repeat on a NEW connect moves the refusal's time past it (at
+      // most one write per connect: a refused stream stays dialed in), or the row read «connected» again after a restart / a wake
+      const lca = Number(h.dial && h.dial.lastConnectAt) || 0, at = Math.max(Date.now(), lca + 1);
+      const again = same && !(Number(h.deviceKeyRefused.at) > lca);
+      if (!same) h.deviceKeyRefused = { code: String(facts.code || 'device-key-mismatch'), fp: facts.fp || null, at, ...(facts.road ? { road: String(facts.road) } : {}) };
+      else if (again) h.deviceKeyRefused.at = at;
+      if (!same || again) { try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); } }
+      try { this.onHostKeyRefused?.(h, { kind: 'device', code: facts.code, fp: facts.fp || null, pinned: !!h.deviceKey, road: facts.road || null }); } catch { }
+      return !same || again;
+    }
+    // the read's must 1 (the seat): a refused copy that takes the seat back after a newcomer's connect says its refusal AGAIN —
+    // the stored one, on its road, its time moved past that connect (dial-pairing reseat); nothing stored on that road ⇒ nothing
+    if (event === 'refused-again') {
+      const kr = h.deviceKeyRefused, lca = Number(h.dial && h.dial.lastConnectAt) || 0, code = String(facts.code || '');
+      // the second read: the seat's OWN refusal — a newcomer refused another way overwrote the record: it is put back to the seat's
+      // code (the fingerprint is not known here). The third read: a record that is GONE is never rebuilt — a person's act cleared it
+      // (Forget, Let in without a key, Let it pin this hub's key, a new hub key) and the seat's kept refusal predates that act
+      // 主开发 00:36Z small (1): never a refusal OLDER than a person's act on this machine (Forget, Let in without a key, Let it pin
+      // this hub's key) — inside one probation the seat's kept refusal can predate it; small (2): the seat's own fingerprint, so the
+      // For-you watch meets the same episode and files nothing again
+      const actAt = Math.max(Number(h.deviceKeyForgotAt) || 0, Number(h.deviceKeyUnprovenAt) || 0, Number(h.hubPinClearedAt) || 0);
+      if (code && kr && (kr.road || null) === (facts.road || null) && kr.code !== code && !(Number(facts.at) && Number(facts.at) < actAt)) { const fp = this._seatFp.get(`${h.id}|${facts.road || ''}|${code}`) || null; h.deviceKeyRefused = { code, fp, at: Math.max(Date.now(), lca + 1), ...(facts.road ? { road: String(facts.road) } : {}) }; try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); } try { this.onHostKeyRefused?.(h, { kind: 'device', code, fp, pinned: !!h.deviceKey, road: facts.road || null }); } catch { } return true; } // the third read: the item names the seat's code
+      if (!kr || (kr.road || null) !== (facts.road || null) || Number(kr.at) > lca) return false;
+      kr.at = Math.max(Date.now(), lca + 1);
+      try { this._save(); } catch (err) { console.warn('[hosts] save failed:', err.message); }
+      return true;
+    }
+    return false;
+  }
+  /** The person forgets a machine's device key (its card's door): the next hello pins the key its agent proves. Unit 3's
+   *  cure: the live link is dropped NOW (the next hello is the one judged), the record then ASKS for a proof (an answer that
+   *  proves nothing is refused, device-key-missing), and the key the next proof pins is told to the person (For you). */
+  forgetDeviceKey(hostId, { unproven = false } = {}) {
+    const h = this.get(hostId);
+    if (unproven) {
+      // «Let in without a key» — its OWN request, never a second Forget: only while the record asks for a proof and holds no
+      // key (an agent that cannot prove one: an empty or unreadable key file, an agent older than the key). The refusal it
+      // was held by ends, and a key it proves later is told (the notice), as after a Forget
+      if (h.deviceKey || !h.deviceKeyForgotAt) throw Object.assign(new Error('nothing to let in: this machine\'s record does not ask its agent for a proof'), { code: 'device-key-not-asked' });
+      delete h.deviceKeyForgotAt; h.deviceKeyUnprovenAt = Date.now(); delete h.deviceKeyRefused;
+      this._save();
+      try { this.onHostKeyPinned?.(h, 'device'); } catch { }
+      return { deviceKey: null, unproven: true };
+    }
+    // a key pinned ⇒ the record ASKS for a proof from now on. With none pinned there is nothing to forget: refused by name, so
+    // a stale dialog never clears a refusal nor flips a mark
+    if (!h.deviceKey) throw Object.assign(new Error('no device key is pinned for this machine — nothing to forget'), { code: 'device-key-none' });
+    h.deviceKeyForgotAt = Date.now(); h.deviceKeyForgotFp = h.deviceKey.fp || null;
+    if (h.transport !== 'dial' && h.deviceId && h.sshDeviceKey) h.sshKeyForgot = { at: h.deviceKeyForgotAt, fp: (h.sshDeviceKey && h.sshDeviceKey.fp) || null }; // the ssh road's own ask, kept until dial-out goes (the dial agent's next proof clears only the dial road's)
+    delete h.deviceKey; delete h.deviceKeyRefused; delete h.sshDeviceKey; // the person re-trusts the machine: the ssh road's set-aside pin goes too
+    this._save();
+    try { this.onHostKeyPinned?.(h, 'device', { notice: true }); } catch { }
+    try { this.invalidateDevice(hostId); } catch { } // the next use greets the device again and pins the key it proves
+    return { deviceKey: null };
+  }
   noteRuntime(hostId, rt) {
     const DR = require('./device-runtime.js');
     const r = DR.runtimeOf(rt);
@@ -790,6 +976,9 @@ class HostManager {
     } else if (event === 'authFail') {
       urgent = !(d.lastAuthFail && Number(d.lastAuthFail.at) > (Number(d.lastConnectAt) || 0));
       d.lastAuthFail = { at };
+    } else if (event === 'greetingRefused') { // unit 4's cure: the row says «greeting refused» (its door: update / reinstall the agent)
+      urgent = !(d.lastGreetingRefused && Number(d.lastGreetingRefused.at) > (Number(d.lastConnectAt) || 0));
+      d.lastGreetingRefused = { at };
     } else if (event === 'probed') {
       d.lastProbeAt = at;
     } else if (event === 'duplicate') {
@@ -940,6 +1129,8 @@ class HostManager {
     return this._whenRemovalLands(id).then((landed) => {
       if (!landed) { console.warn(`[hosts] ${id} is back in the machines list before its removal reached hosts.json — its key file, its transcript cache and the sign-ins kept for it stay`); return false; }
       if (uploadedKey) { try { fs.unlinkSync(uploadedKey); } catch {} }
+      try { HK.writePinFile(this._sshDir, { id }); } catch { } // lane lg-remote-hardening: its host-key pin goes (an unpinned record has no file)
+      try { this.onHostKeyPinned?.(h); this.onHostKeyPinned?.(h, 'device', { notice: true }); } catch { } // …and its host-key items (never an urgent item about a machine that is gone)
       // The host's remote-transcript cache is dead weight once the host is gone
       // (files up to 64MB each accumulated forever — audit round-3).
       try { fs.rmSync(path.join(this.dataDir, 'remote-jsonl', id), { recursive: true, force: true }); } catch {}
@@ -1063,9 +1254,23 @@ class HostManager {
       if (rec.transport !== 'dial') rec.keySource = rec.keyPath ? (rec.keyPath === path.join(this._sshDir, 'id_ed25519') ? 'app' : String(rec.keyPath).startsWith(this._sshDir) ? 'imported' : 'file') : 'default';
       hosts.push(rec);
     }
+    const before = Array.isArray(this._state.hosts) ? this._state.hosts : [];
     this._state.hosts = hosts;
     this._save();
-    this._reachChanged('import'); // verify-r3 A-r3a: an import can narrow a machine's lists or drop the machine
+    this._reachChanged('import'); // verify-r3 A-r3a: an import can narrow a machine's lists or drop the machine — on the line after the save (test-exit-proxy A-r3a); the pin files and the items below follow it
+    for (const r of hosts) { try { HK.writePinFile(this._sshDir, r); } catch (e) { warnings.push(`${r.name || r.id}: its host-key pin file was not written (${e.message})`); } } // lane lg-remote-hardening
+    // 主开发's verdict of 2026-11-18: a machine the import DROPS is a removal — its pin file goes and its host-key items are
+    // resolved (never a pin file, nor an urgent item, about a machine that is gone)
+    const kept = new Set(hosts.map((r) => r && r.id));
+    for (const old of before) {
+      if (!old || kept.has(old.id)) continue;
+      try { HK.writePinFile(this._sshDir, { id: old.id }); } catch { }
+      try { this.onHostKeyPinned?.(old); this.onHostKeyPinned?.(old, 'device', { notice: true }); } catch { }
+    }
+    // the reader of unit 3: a KEPT machine whose pin or address the import changed rides no connection made before it — its
+    // master is told to exit and its cached device link (which captured the old ssh options) is rebuilt
+    const prevById = new Map(before.filter(Boolean).map((x) => [x.id, x]));
+    for (const r of hosts) { const o = r && prevById.get(r.id); if (o && (o.host !== r.host || JSON.stringify(o.hostKeys || null) !== JSON.stringify(r.hostKeys || null) || JSON.stringify(o.deviceKey || null) !== JSON.stringify(r.deviceKey || null))) this._dropConnections(o); }
     return { warnings };
   }
 
@@ -1078,7 +1283,7 @@ class HostManager {
    *  unrelated sessions), and long-lived pipes pin the master forever. */
   sshArgs(h, { tty = false, reverse = null, multiplex = false } = {}) {
     if (h && h.transport === 'dial') throw new Error(`"${h.name}" is a dial-out device — it has no ssh; this operation must ride the device link`);
-    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
+    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     if (multiplex && cmUsable(this)) {
       args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, cmNameOf(h))}`, '-o', 'ControlPersist=600');
@@ -1103,7 +1308,7 @@ class HostManager {
   /** ssh option STRING for tools that take a transport command (rsync -e):
    *  everything sshArgs adds except the destination. */
   sshCmd(h) {
-    const args = [...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
+    const args = [...HK.hostKeyOpts(this._sshDir, h), ...SSH_BASE_OPTS, ...portArgsOf(h), ...this._tailnetOpts(h), ...jumpArgsOf(h)];
     if (h.keyPath) args.push('-i', h.keyPath, '-o', 'IdentitiesOnly=yes');
     // rsync transports are short-lived per-op — ride the shared master too (unless its folder was refused)
     if (cmUsable(this)) args.push('-o', 'ControlMaster=auto', '-o', `ControlPath=${path.join(this._cmDir, cmNameOf(h))}`, '-o', 'ControlPersist=600');
@@ -1324,7 +1529,11 @@ class HostManager {
   _ssh(h, remoteCmd, { timeoutMs = 15000, maxBuffer = 4 * 1024 * 1024, encoding, fresh = false, connectTimeoutS = 0 } = {}) {
     return new Promise((resolve, reject) => {
       execFile('ssh', [...(connectTimeoutS ? ['-o', `ConnectTimeout=${connectTimeoutS}`] : []), ...this.sshArgs(h, { multiplex: !fresh }), '--', remoteCmd], { env: this.sshEnv(), timeout: timeoutMs, maxBuffer, ...(encoding !== undefined ? { encoding } : {}) }, (err, stdout, stderr) => {
-        if (err) return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
+        if (err) {
+          const hk = err.code === 255 ? HK.hostKeyRefusal(h, stderr?.toString()) : null; // lane lg-remote-hardening: ssh's OWN refusal (exit 255) by name, and the For-you watch hears it
+          if (hk) { if (hk.code === 'host-key-changed') { try { this.onHostKeyRefused?.(h, hk); } catch { } } return reject(hk); } // a pin that cannot be used is said on its row, never as a changed key in For you
+          return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
+        }
         resolve(stdout);
       });
     });
@@ -1362,6 +1571,7 @@ class HostManager {
     try {
       out = await this._ssh(h, probe, { timeoutMs: 10000, fresh: true });
     } catch (freshErr) {
+      if (freshErr && (freshErr.code === 'host-key-changed' || freshErr.code === 'host-key-name')) throw freshErr; // lane lg-remote-hardening: never re-diagnosed over a live master (which checks no key)
       let muxAlive = false;
       // B-3767 unit 2: with sharing off there is no established channel to ask — a second fresh try would name a false cause
       if (cmUsable(this)) { try { muxAlive = String(await this._ssh(h, 'echo VS-MUX', { timeoutMs: 6000 })).includes('VS-MUX'); } catch {} }
@@ -1854,6 +2064,8 @@ class HostManager {
       onPolicy: (p) => this.notePolicy(id, p), onElevated: (e) => this.noteElevated(id, e), machine: () => h.name || id, // lane device-allow-flags: its stated allow list; lane win-input-elevated: its own token elevation; its name in a refusal
       onRuntime: (rt) => this.noteRuntime(id, rt), // lane device-node-version: the node its agent runs on (the Machines card judges it)
       actGate: this.actGateFor(id), // lane hub-act-ask: an act nobody clicked follows the machine's Hub automation list (asks on a cluster instance)
+      devicePin: () => { try { const k = this.get(id).deviceKey; return k == null ? null : (k && typeof k.pub === 'string' ? k.pub : ''); } catch { return null; } }, onDeviceKey: (ev, f) => this.noteDeviceKey(id, ev, { ...(f || {}), road: 'ssh' }), deviceProofRequired: () => { try { return !!this.get(id).deviceKeyForgotAt; } catch { return false; } }, deviceJudged: () => { try { return require('./dial-facts.js').pairingDoorOf(this.get(id)) !== 'dial-out'; } catch { return true; } }, // unit 3's cure: a machine upgraded to dial-out is judged on its dial road only // lane lg-remote-hardening (D3)
+      hubIdentity: this.agentdDeps.hubIdentity || null, // D3 half b: this hub's identity (the vault's entry; a lost one said by name)
     });
     await dm.connect();
     this._devices.set(id, dm);
@@ -2006,6 +2218,109 @@ class HostManager {
         resolve(this.keyInfo());
       });
     });
+  }
+
+  // ── THE SSH HOST-KEY PIN (lane lg-remote-hardening, B-7f0b — design q-042 D6): src/host-keys.js is the road; these are its
+  // three acts. A pin is the PERSON's act (the routes refuse an agent's token): they see what the machine shows and confirm. ──
+
+  /** The key the machine shows NOW: one fresh ssh over the record's own road (its port, key, tailnet name, the hub user's ssh
+   *  config) with a scratch known_hosts — ssh writes the host key there at key exchange, before any login, so a refused
+   *  login still shows it; no master is ridden. → [{type, key, fp}] | throws host-key-none-seen (with ssh's last line). */
+  async hostKeyScan(id, { timeoutMs = 15000 } = {}) {
+    const h = this.get(id);
+    if (h.transport === 'dial') throw Object.assign(new Error(`"${h.name}" is a dial-out device — it has no ssh host key`), { code: 'host-key-no-ssh' });
+    const bad0 = HK.nameWhy(h); // the cure's reader: Check the key now / the add flow scanned an address no pin can name
+    if (bad0) throw HK.pinRefusal(h, bad0);
+    const fsp = fs.promises;
+    const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'vs-hostkey-'));
+    const scratch = path.join(dir, 'known_hosts');
+    try {
+      // the move onto 6ce6b8124 meets B-2ca0: the scan asks the machine the dials reach — an alias's own Port and User, its jump host
+      const args = [...HK.scanOpts(scratch), ...SSH_BASE_OPTS, ...this._portArgs(h), ...this._tailnetOpts(h), ...jumpArgsOf(h), this.dest(h), 'true'];   // B-2ca0's own words (_portArgs / dest); a jump record's hop logs in to its bastion as the first dial would — the scan's own options stay on the destination
+      const said = await new Promise((resolve) => { execFile('ssh', args, { env: this.sshEnv(), timeout: timeoutMs }, (err, _out, stderr) => resolve(String(stderr || (err && err.message) || ''))); });
+      const keys = HK.keysOfScan(await fsp.readFile(scratch, 'utf8').catch(() => ''));
+      if (!keys.length) throw Object.assign(new Error(`${h.name} showed no ssh host key — ${(said.trim().split('\n').filter(Boolean).pop() || 'no answer').slice(0, 200)}`), { code: 'host-key-none-seen', hostId: h.id });
+      return keys;
+    } finally { await fsp.rm(dir, { recursive: true, force: true }).catch(() => {}); }
+  }
+
+  /** Pin what the person confirmed: the machine is asked AGAIN and only the keys it shows now whose fingerprints the person
+   *  chose are kept (a key nobody was shown is never pinned). → the record's pin view | throws host-key-not-seen. */
+  async pinHostKeys(id, fps) {
+    const want = new Set([].concat(fps || []).map((x) => String(x).trim()).filter(Boolean));
+    const h0 = this.get(id);
+    if (!want.size) throw Object.assign(new Error('choose the key to pin'), { code: 'host-key-none-chosen', hostId: h0.id });
+    // 主开发's verdict of 2026-11-18: an address no pin line can name is refused BEFORE anything is scanned or written
+    const bad = HK.nameWhy(h0);
+    if (bad) throw HK.pinRefusal(h0, bad);
+    const seen = await this.hostKeyScan(id);
+    const keep = seen.filter((k) => want.has(k.fp));
+    if (!keep.length) throw Object.assign(new Error(`${h0.name} does not show the key you chose any more (it shows ${seen.map((k) => k.fp).join(', ')}) — look again before pinning`), { code: 'host-key-not-seen', hostId: h0.id });
+    const h = this.get(id);
+    const was = { hostKeys: h.hostKeys, hostKeysAt: h.hostKeysAt };
+    h.hostKeys = keep.map(({ type, key, fp }) => ({ type, key, fp }));
+    h.hostKeysAt = Date.now();
+    this._save();
+    await this._landedOrUndo(h, was, 'pinned'); // 主开发's hunt (2.369.411's hosts store writes off the loop): told «pinned» only once it landed
+    // between the landed record and the pin file below, a start (a hub restart) rewrites the file FROM THE RECORD (_load's heal) —
+    // the record is the truth the file follows, so the window loses nothing (small 2)
+    HK.writePinFile(this._sshDir, h);
+    this._dropConnections(h);
+    try { this.onHostKeyPinned?.(h); } catch { }
+    return HK.pinView(h);
+  }
+
+  /** lane lg-remote-hardening (the reader's should 8): a pin decided ⇒ no connection accepted before it rides on — the record's
+   *  ControlMaster is told to exit (%C does not change with the alias) and its cached device link is rebuilt with the new options. */
+  _dropConnections(h) {
+    try { const a = this.sshArgs(h, { multiplex: true }); execFile('ssh', [...a.slice(0, -1), '-O', 'exit', a[a.length - 1]], { env: this.sshEnv(), timeout: 5000 }, () => { }); } catch { }
+    try { this.invalidateDevice(h.id); } catch { }
+  }
+
+  /** 主开发's hunt: the hosts store writes off the loop — an act that tells a person done waits for its record to land; when it did
+   *  not, the record is put back as it was (and saved so) and the act is refused BY NAME, nothing half done (no pin file, no item
+   *  resolved, no «done»). A hosts without a store (a suite's stand-in) answers at once. */
+  async _landedOrUndo(h, was, what) {
+    // 主开发 01:11Z small (1): two presses in flight on one machine (two pins, a pin and an unpin), both refused, must never leave
+    // memory on the first press's value. The machine keeps a BASE while acts are in flight: the newest value that LANDED (before
+    // any, the value from before the first act in flight). An act that lands moves the base to its own value; the LAST act in
+    // flight, refused, puts the base back — never a value from before an act that landed (the reader's must: an unpin landed,
+    // then a pin refused, ended pinned again under a person told «pin removed»). It holds because the store writer answers in
+    // CALL order (every durable() wait has the same bound from its call, and a failed write refuses every waiter at once): a
+    // later act is never refused while an earlier one still waits and then lands
+    const now = {}; for (const k of Object.keys(was)) now[k] = h[k]; // this act's own value (its caller set it just before, no await between)
+    if (!this._actBase) this._actBase = new Map();
+    let base = this._actBase.get(h.id); if (!base) { base = { was: {}, n: 0 }; this._actBase.set(h.id, base); }
+    for (const [k, v] of Object.entries(was)) if (!(k in base.was)) base.was[k] = v;
+    base.n++;
+    let landed = true;
+    try { landed = typeof this.persisted !== 'function' || await this.persisted(); if (landed) { Object.assign(base.was, now); base.landed = true; } } finally { base.n--; if (!base.n) this._actBase.delete(h.id); }
+    if (landed) return;
+    const w = (typeof this.whyNotDurable === 'function' && this.whyNotDurable()) || {};
+    if (!base.n) {
+      for (const [k, v] of Object.entries(base.was)) { if (v === undefined) delete h[k]; else h[k] = v; }
+      // an act that landed meanwhile wrote the pin file from the record as it stood (it may have held this act's value): the file
+      // follows the record put back, and a connection opened against it meanwhile is dropped (as a decided pin's tail does)
+      if (base.landed && 'hostKeys' in base.was) {
+        try { HK.writePinFile(this._sshDir, h); } catch (e) { console.warn(`[hosts] the host-key pin file of ${h.name || h.id} was not put back (${e.message})`); }
+        try { this._dropConnections(h); } catch { }
+      }
+    }
+    this._save();
+    throw Object.assign(new Error(`${h.name || h.id} is NOT ${what}: hosts.json is not on disk (${w.why === 'queued' ? `queued behind ${w.ahead || 'other'} write(s)` : w.code || w.why || 'the storage did not answer'}) — nothing changed; try again in a moment`), { code: 'host-key-not-durable', hostId: h.id });
+  }
+
+  /** The pin removed: the record is dialled as before (the first key ssh meets is trusted). → the pin view. */
+  async unpinHostKeys(id) {
+    const h = this.get(id);
+    const was = { hostKeys: h.hostKeys, hostKeysAt: h.hostKeysAt };
+    delete h.hostKeys; delete h.hostKeysAt;
+    this._save();
+    await this._landedOrUndo(h, was, 'unpinned');
+    HK.writePinFile(this._sshDir, h);
+    this._dropConnections(h);
+    try { this.onHostKeyPinned?.(h); } catch { }
+    return HK.pinView(h);
   }
 
   // ── Remote session transcripts (JSONL over ssh → local cache) ──

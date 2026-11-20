@@ -67,9 +67,15 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When the Background Work notices waiting for your conversations briefly cannot be read, they are kept and delivered later; they used to be lost.
 - If the desktop apps' record file can't be read, VibeSpace no longer overwrites it; opening or stopping an app says why until it reads again.
 - When For you cannot read its saved list, it now says so and changes nothing until the list reads again, instead of starting empty.
+- A paired machine that fails a key check, either way, no longer shows as connected: its dot and badge turn red and its line says what to do.
 
 ### Security
 - A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.
+- You can pin an ssh machine's host key (Remote → the machine → Host key…); a different key is refused, and For you says so.
+- A paired machine whose agent greets VibeSpace with a malformed or oversized hello is refused instead of believed.
+- A paired machine's agent now proves its own key; if another key answers, VibeSpace refuses it and the machine's card and For you say so.
+- A paired machine now pins this VibeSpace's own key too, and refuses a hub that cannot prove it; the machine's card says so and how to pair again.
+- A remote conversation's tools now reach only VibeSpace's agent routes through their tunnel; the sign-in page and every other page are out of its reach.
 
 ## 2.369.412 — 2026-11-19
 

@@ -127,6 +127,7 @@ const RANDOM32 = new Map([
   ['src/server/dropline-oauth.js', [2, 'a PKCE verifier + this boot\'s state key (memory only)']],
   ['src/server/channels-engine.js', [1, 'consentKey: this boot\'s HMAC key for consent state (memory only)']],
   ['src/server/desktop-webrtc.js', [1, 'a stream session\'s UDP-leg HMAC key (lane stream-relay-udp — memory only; handed to the daemon in stream-offer over the device link, never on UDP)']],
+  ['src/mutual-auth.js', [1, 'newNonce: a hello\'s fresh 32-byte NONCE (lane lg-remote-hardening, D3) — sent in the clear, signed over, never kept; never a key (the device\'s and the hub\'s keys are ed25519, generateKeyPair)']],
   ['src/agentd/client.js', [1, 'lane device-bundle-signing: the single-use LOCAL PROOF of an upgrade of this machine\'s own daemon (<root>/state/upgrade-proof, 0600; the daemon deletes it on any read) — a nonce, never a key']],
   ['src/server/sealed-json.js', [1, 'a sealed JSON file\'s key — minted INTO the vault as its `file:<name>` entry (secretPut), never a file (lane vault-e2e-password-fix-r2)']],
   ['src/server/feedback-forward.js', [1, 'the feedback ORIGIN KEY (fk_, lane feedback-forward): names this instance to the maintainer hub and opens only the marks on its own forwarded reports — data/feedback-outbox.json 0600, a named exception in src/vault.js SECRETS_AT_REST (never a store key); the hub keeps its sha256']],
@@ -707,6 +708,7 @@ BELT.paused++;
 try {
   const { startFakeKernel } = await import('./fixtures/fake-kernel.mjs');
   const SHA256_WRITERS_KFL = new Set([
+    'src/host-keys.js', // lane lg-remote-hardening: the sha256 is a PUBLIC host key's fingerprint (what a person compares) — no secret is digested or kept
     'src/agent-routes.js', 'src/agentd/agentd.js', 'src/agentd/client.js', 'src/agentd/stream-mac.js',
     'src/agentd/stream-window-source.js', 'src/app-serve.js', 'src/auth.js', 'src/channel-outbox-files.js',
     'src/claude-oat-probe.js', 'src/ctx-sync.js', 'src/desktop-mic.js', 'src/exit-proxy.js', 'src/incident.js', 'src/jobs.js',

@@ -99,7 +99,7 @@ const vault = require('./vault-engine.js').create({ dataDir: path.join(rootDir, 
 // lane vault-e2e-password-fix-r2: THE DEVICE LINK TOKENS (src/server/host-tokens.js — the vault's `host:<id>` entries): the ONE
 // road to a session is GET /api/agent/vault/link-token (the attach child asks with its session token); every attach config
 // an older build wrote loses its copy now, whatever the vault's state
-const hostTokens = require('./host-tokens.js').create({ dataDir: path.join(rootDir, 'data'), nameOf: (k) => { const h = vaultHostOf(k); return (h && h.name) || null; } });   // nameOf: a LOCKED refusal is noted by the machine's name (lane vault-locked-refusal-notice)
+const hostTokens = require('./host-tokens.js').create({ anyHubPin: () => (hosts.held() ? true : hosts.list().filter((h) => !!h.hubPinned).map((h) => h.name || h.id)), dataDir: path.join(rootDir, 'data'), nameOf: (k) => { const h = vaultHostOf(k); return (h && h.name) || null; } });   // nameOf: a LOCKED refusal is noted by the machine's name (lane vault-locked-refusal-notice)
 try { hostTokens.stripCopies(); } catch (e) { console.warn('[vault] the attach configs could not be swept:', e.message); }
 vault.onUnlock(() => { try { const jm = getJobs && getJobs(); if (jm && typeof jm.relayChanged === 'function') jm.relayChanged('the vault unlocked'); } catch (e) { console.error('[jobs] re-publish after the vault unlocked:', e.message); } }); // lane job-notice-dedupe (fb-666f37fd38): a published service the lock held down re-publishes NOW — not after the Ports heal backoff (above every route: a line in a route's span reads as that route's store)
 // lane account-reset-door: A FACT RECORDED WHILE LOCKED ENDS AT THE UNLOCK — the long-lived-token sweep's `vault_locked` facts go, and
@@ -211,7 +211,11 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
   proxyLogins: browserProxyLogins, proxyMove: (id) => { const k = require('./browser-keeper.js').keeper(); return k && typeof k.moveProxyPassword === 'function' ? k.moveProxyPassword(id) : { ok: false, code: 'unavailable', error: 'the browser keeper is not running on this server' }; },   // B-8b87
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)
   jobSecrets: vaultJobSecrets,   // B-ef1b: the retired job-secrets notice's buttons (a person's door)
-  linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who), onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
+  linkTokenFor: (hostKey, who) => hostTokens.tokenFor(hostKey, who),
+  // lane lg-remote-hardening (D3 half b): the attach child's hub signature — laws 1 + 2 in host-tokens.js signForMachine
+  linkSignFor: (hostKey, devPub, nonceD) => { const h = vaultHostOf(hostKey); const r = hostTokens.signForMachine(h, devPub, nonceD); try { if (h && hosts.noteDeviceKey(h.id, 'hub-pinned', {})) bcastAll({ type: 'hosts-updated' }); } catch { } return r; }, // this signature is what pins the hub on that device (law 3: recorded at once)
+  hubPubFor: () => hostTokens.identity().publicKey,
+  onVaultWait: () => { try { broadcastActiveSessions && broadcastActiveSessions(); } catch { } },
   // int317 (RED-3): the door's audit row → the device audit (the machine card's Activity…) — the session, its host key, the status
   auditLink: ({ sid, hostKey, status }) => { const h = vaultHostOf(hostKey); if (hosts && hosts.deviceAudit) hosts.deviceAudit.append(require('../device-acts.js').linkTokenLine({ at: Date.now(), sid, hostKey, hostId: h ? h.id : null, machine: h ? (h.name || h.id) : null, status })); } });
 // design q-046 (lane automation-keys-core): VIBESPACE'S OWN AUTOMATION KEYS — a key's value is the vault entry `apikey:<id>`
@@ -419,11 +423,64 @@ setTimeout(() => { try { plugins.bootReplay(); } catch (e) { console.warn('[plug
 try {
   hosts.agentdDeps = {
     ensureAgentdOnHost, agentdHostToken, deviceForDial,
+    hubIdentity: () => hostTokens.identity(), // lane lg-remote-hardening (D3 half b): this hub's own key on the ssh road
     bundlePath: path.join(rootDir, 'data', 'bin', 'vibespace-agentd.js'),
     version: require(require('path').join(rootDir, 'package.json')).version,
   };
   hosts.dataPlaneOn = () => true; // GRADUATED (agentd.dataPlane flag removed) — ssh per-op remains the per-path failure fallback
+  // lane lg-remote-hardening (B-7f0b — design q-042 D8b): THE AGENT DOOR — every reverse tunnel of a remote conversation ends
+  // at this listener (agent routes only), never the whole hub (src/server/agent-listener.js)
+  require('./agent-listener.js').start({ app, stateFile: path.join(rootDir, 'data', 'agent-door.json'), avoid: PORT }); // its port is kept across restarts (a remote session's -R is fixed in its argv)
 } catch (e) { console.warn('[device] data-plane deps wiring failed:', e.message); }
+// lane lg-remote-hardening (D3 half b), law 3: a NEW hub key is the person's act only (a lost one is never re-minted in silence) —
+// every machine that pinned the old key then refuses this hub until it pairs again (the records forget that they pinned it)
+// lane lg-remote-hardening (主开发's verdict of 2026-11-18, must B): A PIN ALWAYS HAS A DOOR ON ITS OWN ROAD. An ssh machine that
+// pins an older key of this hub is told, by the person, to pin this hub's key again: its state/hub.pub is removed over ssh (the
+// ssh key is full trust already), THEN its link is rebuilt — the next hello pins the current key. A dialed device's door is its
+// pairing command, run on the device.
+// unit 5's cure 2 (one machine, two agents): a machine upgraded to dial-out runs a second agent under its own root (dialRoot)
+// that pins the hub too — the door clears the pin under EVERY root of the machine, so it acts on the agent that refused,
+// whichever road it answered on. A dialRoot that is not the hub's OWN shape — `$HOME/.vibespace/device@<host>`, the one the
+// upgrade has written since dial-out began — is never put into a shell line (an imported `$HOME/.vibespace/..` would name the
+// home folder itself), and the answer says it was skipped.
+const DIAL_ROOT_RE = /^\$HOME\/\.vibespace\/device@[A-Za-z0-9][A-Za-z0-9.-]*$/;   // = src/hosts.js dialRootOk (B-2ca0's law, met at the move onto 6ce6b8124): the folder the graduation writes
+const skippedRootOf = (h) => (h && h.dialRoot && !DIAL_ROOT_RE.test(String(h.dialRoot)) ? String(h.dialRoot).slice(0, 120) : null);
+const hubPinRm = (h) => 'rm -f ' + ['$HOME/.vibespace/agentd', ...(h && DIAL_ROOT_RE.test(String(h.dialRoot || '')) ? [String(h.dialRoot)] : [])].map((r) => `"${r}/state/hub.pub"`).join(' ');
+app.delete('/api/hosts/:id/hub-pin', async (req, res) => {
+  if (/^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string') return res.status(403).json({ error: 'the user lets a machine pin this hub again — an agent token may not', code: 'human_only' });
+  let h = null; try { h = hosts.get(req.params.id); } catch (e) { if (e && e.code === 'hosts-unread') return res.status(503).json({ error: e.message, code: 'hosts-unread' }); h = null; }
+  if (!h) return res.status(404).json({ error: 'no such machine', code: 'not_found' });
+  if (h.transport === 'dial') return res.status(400).json({ error: 'a dialed device pins this hub again only by its pairing command, run on the device (Remote → the machine → Pairing command…)', code: 'hub-pin-dial' });
+  try { await hosts._ssh(h, hubPinRm(h), { timeoutMs: 15000, fresh: true }); }
+  catch (e) { return res.status(502).json({ error: `the machine's hub pin could not be removed over ssh — ${String((e && e.message) || e).slice(0, 200)}`, code: (e && e.code) || 'ssh-failed' }); }
+  hosts.noteDeviceKey(h.id, 'hub-pin-cleared');
+  try { hosts.invalidateDevice(h.id); } catch { }
+  try { bcastAll({ type: 'hosts-updated' }); } catch { }
+  const skipped = skippedRootOf(h);
+  if (skipped) console.warn(`[hosts] ${h.name || h.id}: its dial-out root is not this hub's shape — its hub pin was NOT cleared there`);
+  res.json({ success: true, ...(skipped ? { skipped } : {}) }); // a root of another shape is said, never claimed cleared
+});
+app.post('/api/hosts/hub-identity/renew', (req, res) => {
+  if (/^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string') return res.status(403).json({ error: 'the user makes a new hub key — an agent token may not', code: 'human_only' });
+  // the meeting with bl-jobs' held store: a new hub key while the machines are UNREAD would clear no pin (the list is empty) and
+  // could not be undone — refused by name before anything is made
+  if (hosts.held()) return res.status(503).json({ error: `making a new hub key: ${hosts.unreadWords()}`, code: 'hosts-unread' });
+  try {
+    hostTokens.renewIdentity();
+    const sshCleared = [];
+    for (const row of hosts.list()) {
+      const h = hosts.get(row.id);
+      const hubSide = h.deviceKeyRefused && /^hub[-_]/.test(h.deviceKeyRefused.code || '');
+      if (h.hubPinned || hubSide) { delete h.hubPinned; if (hubSide) delete h.deviceKeyRefused; try { hosts.onHostKeyPinned?.(h, 'device'); } catch { } }
+      // an ssh machine: the person's renew clears its pin over ssh (the ssh key is full trust already) — the next hello pins the new key;
+      // a DIALED device pins again only by its pairing command (run on the device: the person's act there)
+      if (h.transport !== 'dial') { const again = () => { try { hosts.invalidateDevice(h.id); } catch { } }; try { hosts._ssh(h, hubPinRm(h), { timeoutMs: 15000, fresh: true }).then(again, again); sshCleared.push(h.name || h.id); } catch { again(); } } else { try { hosts.invalidateDevice(h.id); } catch { } }
+    }
+    hosts._save(); try { bcastAll({ type: 'hosts-updated' }); } catch { }
+    res.json({ success: true, sshCleared });
+  }
+  catch (e) { res.status(e && e.code === 'vault_locked' ? 423 : 500).json({ error: (e && e.message) || 'failed', code: (e && e.code) || null }); }
+});
 // Transport B pairing: mint a device id + dial token + the one-liner the user
 // runs on the NAT'd device (no ssh needed). Cookie-authed (user action).
 // The pairing IS the machine registration — the dial host record carries the
@@ -444,6 +501,7 @@ try {
  *  BACK over ws. Throws with a user-readable reason; ssh always remains as the
  *  bootstrap + rescue channel. */
 async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduate', from = '' } = {}) {
+  hosts.notDialOut(h.id); // lane lg-remote-hardening (unit 3's cure): a machine that already dials out is refused by name before anything runs — a re-press would mint over its working pairing
   const sshRun = (script, timeout = 30000) => new Promise((resolve) => {
     const { execFile } = require('child_process');
     execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', script],
@@ -467,28 +525,36 @@ async function graduateHostToDial(h, { serverUrl, viaRelay, by = 'system:graduat
     // sed hostname-only + tr -cd 'A-Za-z0-9.-') or the removal path tears
     // down the wrong directory.
     const root = require('../hosts.js').dialRootOf(base);   // B-2ca0 follow-up (its delta read): the installer's own derivation (an IPv6 base named another folder)
-    hosts.graduateDial(h.id, { dialRoot: root });
-    const gradDevice = hosts.get(h.id).deviceId;
-    const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${gradDevice}`;
-    const pair = agentdMintDialPair(gradDevice, { host: require('../dial-facts.js').hostOf(dialUrl), base, by, from });
-    if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) throw Object.assign(new Error('the pairing is minted, but hosts.json is not on disk yet — the hub keeps trying; try the graduation again once it lands'), { code: 'not_durable' });   // B-48a4 cure: its dial token's hash on disk before the installer ships it
-    // ship + run the installer over ssh STDIN — the installer AND its arguments (verify-r3 B-grad): the tokens used to
-    // ride `ssh … -- 'bash -s -- … --dial-token vsdt_… --host-token vsht_…'`, i.e. the argv of the LOCAL ssh (readable
-    // by every user of this machine through /proc/<pid>/cmdline for the whole install, ≤ 300 s) and the remote shell's
-    // command line (the same on the machine). Now the remote command is the bare `bash -s` and the arguments are a
-    // `set -- …` line bash reads from stdin before the installer's own text — the installer parses "$@" unchanged.
-    const installer = fs.readFileSync(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
-    // lane device-allow-flags: the graduated machine's allow list = this instance kind's default (a cluster's: no socks / lan / input)
-    const allowDefault = require('../device-policy.js').defaultAllow({ cluster: !!process.env.VIBESPACE_INSTANCE_NAME });
-    const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken} --allow ${require('../device-policy.js').allowArg(allowDefault)}`;
-    const inv = require('../dial-facts.js').sshInstallInvocation({ args, installer });
-    const inst = await new Promise((resolve) => {
-      const { execFile } = require('child_process');
-      const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', inv.remote],
-        { env: hosts.sshEnv(), timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
-      if (child.stdin) { child.stdin.on('error', () => { }); child.stdin.end(inv.stdin); }   // ckpt61 cure 2: no stdin after a start that failed at once (execFile answers it)
-    });
-    if (!inst.ok) { hosts.ungraduateDial(h.id); bcastAll({ type: 'hosts-updated' }); throw new Error('installer failed on the host — rolled back: ' + (inst.err || inst.out).slice(-600)); }
+    // lane lg-remote-hardening (unit 3's cure + its verdict): ANY throw between the upgrade and the installer's answer (a refused
+    // mint — a locked vault —, a missing installer, the allow list) rolls the upgrade back, so the ssh road's pin comes back. The
+    // attempt is this press's own: a machine already dialing out was refused at the start
+    const attempt = hosts.beginGraduation(h.id, { dialRoot: root });
+    const rollBack = () => { attempt.rollBack(); bcastAll({ type: 'hosts-updated' }); };
+    let pair, inst;
+    try {
+      const gradDevice = hosts.get(h.id).deviceId;
+      const dialUrl = `${base.replace(/^http/, 'ws')}/api/device-dial?device=${gradDevice}`;
+      pair = agentdMintDialPair(gradDevice, { host: require('../dial-facts.js').hostOf(dialUrl), base, by, from });
+      if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) throw Object.assign(new Error('the pairing is minted, but hosts.json is not on disk yet — the hub keeps trying; try the graduation again once it lands'), { code: 'not_durable' });   // B-48a4 cure: its dial token's hash on disk before the installer ships it
+      // ship + run the installer over ssh STDIN — the installer AND its arguments (verify-r3 B-grad): the tokens used to
+      // ride `ssh … -- 'bash -s -- … --dial-token vsdt_… --host-token vsht_…'`, i.e. the argv of the LOCAL ssh (readable
+      // by every user of this machine through /proc/<pid>/cmdline for the whole install, ≤ 300 s) and the remote shell's
+      // command line (the same on the machine). Now the remote command is the bare `bash -s` and the arguments are a
+      // `set -- …` line bash reads from stdin before the installer's own text — the installer parses "$@" unchanged.
+      const installer = fs.readFileSync(path.join(rootDir, 'scripts', 'vibespace-agentd-install.sh'), 'utf-8');
+      // lane device-allow-flags: the graduated machine's allow list = this instance kind's default (a cluster's: no socks / lan / input)
+      const allowDefault = require('../device-policy.js').defaultAllow({ cluster: !!process.env.VIBESPACE_INSTANCE_NAME });
+      const args = `--bundle-url ${JSON.stringify(base + '/vibespace-device.js')} --dial ${JSON.stringify(dialUrl)} --dial-token ${pair.dialToken} --host-token ${pair.hostToken} --allow ${require('../device-policy.js').allowArg(allowDefault)}`;
+      const inv = require('../dial-facts.js').sshInstallInvocation({ args, installer });
+      inst = await new Promise((resolve) => {
+        const { execFile } = require('child_process');
+        const child = execFile('ssh', [...hosts.sshArgs(h, { multiplex: true }), '--', inv.remote],
+          { env: hosts.sshEnv(), timeout: 300000, maxBuffer: 8 * 1024 * 1024 }, (err, so, se) => resolve({ ok: !err, out: String(so || '').slice(-3000), err: String(se || err?.message || '').slice(-1500) }));
+        if (child.stdin) { child.stdin.on('error', () => { }); child.stdin.end(inv.stdin); }   // ckpt61 cure 2: no stdin after a start that failed at once (execFile answers it)
+      });
+    } catch (e) { rollBack(); throw e; }
+    if (!inst.ok) { rollBack(); throw new Error('installer failed on the host — rolled back: ' + (inst.err || inst.out).slice(-600)); }
+    attempt.finish(); // the attempt ends here: no later rollback of it
     // wait for the dial-in (installer verifies the daemon started; the dial
     // itself can lag a few seconds)
     let dialed = false;
@@ -508,6 +574,7 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       if (input != null && child.stdin) { child.stdin.on('error', () => { }); child.stdin.end(input); }   // B-8475: a script on stdin (`bash -s`); ckpt61 cure 2: none after a start that failed at once (execFile answers it)
       });
     if (req.body?.remove) {
+      if (hosts.upgradeRunning(h.id)) return res.status(409).json({ error: 'an upgrade of this machine is running — wait for it, then remove dial-out', code: 'upgrade-running' }); // 主开发 at the restack: never kill the agent or remove its root while its installer writes there
       // best-effort remote teardown, ALWAYS clear the record (dead host must
       // not hold the graduation hostage — the machine-mounts unmount lesson)
       const root = h.dialRoot || '';
@@ -536,14 +603,14 @@ app.post('/api/hosts/:id/graduate-dial', async (req, res) => {
       // 主开发 04:33Z (2a): «removed» only once hosts.json carries it — the record's save is QUEUED (the store writer's, B-48a4): the reply
       // waits for it, as the graduation road does, and says not-on-disk when it did not land (a restart before then brings the pairing back)
       if (typeof hosts.persisted === 'function' && !(await hosts.persisted())) return res.status(503).json({ error: 'the dial pairing is removed here, but hosts.json is not on disk yet — the hub keeps trying; a restart before it lands brings the pairing back: remove it again if it comes back', code: 'not_durable' });
-      return res.json({ success: true, removed: true });
+      return res.json({ success: true, removed: true, ...(root && !DIAL_ROOT_RE.test(root) ? { teardown: 'skipped', skipped: root.slice(0, 120) } : {}) }); // a root of another shape: the record is cleared, its agent was NOT torn down — said
     }
     // lane-pairing ①: the chosen address (the pairing dialog's list) — judged by the ONE verdict before anything runs
     let serverUrl = req.body?.base ?? req.body?.serverUrl;
     if (serverUrl && !req.body?.viaRelay) { const v = require('../dial-facts.js').dialBaseVerdict(serverUrl); if (!v.ok) return res.status(400).json({ error: `not an address the machine can dial (${v.code})`, code: 'bad_base', why: v.code }); serverUrl = v.base; }
     const out = await graduateHostToDial(h, { serverUrl, viaRelay: req.body?.viaRelay, by: require('../device-audit.js').byOfReq(req), from: (req.socket && req.socket.remoteAddress) || '' });
     res.json(out);
-  } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.status === 503 && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (the page words it)
+  } catch (e) { res.status(e && e.status === 503 ? 503 : 400).json({ error: e.message, ...(e && e.code ? { code: e.code } : {}) }); }   // a held machines list keeps its 503 and its name (the page words it); every other refusal 400 with its code as well as its words (lane lg-remote-hardening)
 });
 
 // ── PAIRING (lane-pairing ①②③, B-7007; the owner's MacBook 2026-09-27) ──

@@ -166,7 +166,7 @@ function slowLineOf(req, ms) {
   return `[vault] ${req.method} ${route} answered in ${Math.round(ms)} ms`;
 }
 
-function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null, jobSecrets = null,
+function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs = () => null, contents = null, who = () => null, linkTokenFor = null, linkSignFor = null, hubPubFor = null, onVaultWait = () => {}, auditLink = () => {}, run = null, paste = null, jobSecrets = null,
   totp = null, callerOf = () => null, runOf = () => null, grantLive = () => true, subjects = () => ({ sessions: [], groups: [] }), logins = null, proxyLogins = null /* B-8b87: src/server/browser-proxy-logins.js */, proxyMove = null /* B-8b87: the keeper's moveProxyPassword(profileId) */, log = (line) => console.log(line), slowMs = VAULT_SLOW_MS }) {
   app.use(['/api/vault', '/api/agent/vault'], (req, res, next) => {
     const t0 = process.hrtime.bigint();
@@ -415,6 +415,29 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   };
   const deviceAuditRow = auditLink;
   auditLink = (row) => { try { deviceAuditRow(row); } finally { linkUse(row); } };
+  // ── THE HUB'S SIGNATURE FOR AN ATTACH CHILD (lane lg-remote-hardening, B-7f0b — design q-042 D3 half b; 主开发's ruling
+  //    2026-11-18 00:00Z, its four laws). A remote session's attach child greets the device itself; a device that pins this
+  //    hub asks for the hub's signature over ITS key and fresh nonce. 1: the door signs ONE shape — it builds the message
+  //    itself (src/mutual-auth.js okMessage: the label, the machine's key, the device's nonce); nothing a caller hands it is
+  //    signed. 2: the asker is a conversation OF that machine — its own session token names the session, the session names
+  //    the machine, and the device key it brings must be the one that machine's record pins (a job token resolves no
+  //    session: refused). The private key never leaves the hub. ──
+  app.post('/api/agent/vault/link-sign', (req, res) => {
+    res.set('Cache-Control', 'no-store');
+    const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+    let s = null;
+    if (token.startsWith('vsst_')) for (const [, x] of activeSessions) if (x && sameToken(token, x.agentToken)) { s = x; break; }
+    const hostKey = s ? (s._dialDeviceId ? 'dial-' + s._dialDeviceId : s.host) : null;
+    if (!s || typeof linkSignFor !== 'function') return res.status(401).json({ ok: false, code: 'unauthorized' });
+    if (!s._agentdSession || !hostKey) return res.status(STATUS.no_link).json({ ok: false, code: 'no_link', error: WORDS.no_link });
+    const b = req.body || {};
+    try { const r = linkSignFor(hostKey, String(b.devPub || ''), String(b.nonceD || '')); return res.json({ ok: true, sigH: r.sigH }); }
+    catch (e) {
+      const code = (e && e.code) || 'error';
+      const status = { not_this_machine: 403, bad_request: 400, vault_locked: 423, hub_identity_lost: 409 }[code] || 500;
+      return res.status(status).json({ ok: false, code, error: (e && e.message) || code });
+    }
+  });
   // ── THE LINK TOKEN (lane vault-e2e-password-fix-r2) — THE ONE ROAD a device token reaches a session: a remote session's
   //    attach child (src/agentd/attach-cli.js) asks here at every (re)start, its own session token naming the session, and
   //    holds the answer in memory; no attach config, argv or env carries it. A local session, a job token, an unknown
@@ -434,7 +457,10 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     // 「等待保险库解锁」 (`_vaultWait`, a STATE, never an error); the first answer that is not the lock ends the wait
     const waiting = (on) => { if (!!s._vaultWait === on) return; if (on) s._vaultWait = Date.now(); else delete s._vaultWait; try { onVaultWait(s); } catch { } };
     // lane vault-locked-refusal-notice: a LOCKED refusal notes THIS conversation by name (the owner's For-you item names it)
-    try { const token = linkTokenFor(hostKey, { actor: s.name || s.webuiName || null }); waiting(false); return answerLink(200, { ok: true, token }); }
+    // lane lg-remote-hardening (D3 half b): + this hub's PUBLIC key (the attach child names it in its hello; a lost / locked
+    // identity simply leaves it out — the device then says, by name, what it pins)
+    let hubPub = null; try { hubPub = typeof hubPubFor === 'function' ? hubPubFor() : null; } catch { hubPub = null; }
+    try { const token = linkTokenFor(hostKey, { actor: s.name || s.webuiName || null }); waiting(false); return answerLink(200, { ok: true, token, ...(hubPub ? { hubPub } : {}) }); }
     catch (e) {
       const code = e && e.code === 'vault_locked' ? 'vault_locked' : 'error';
       const again = code === 'vault_locked' && !!s._vaultWait;

@@ -140,6 +140,17 @@ function knownHostName(host) {
   return m[2] && m[2] !== '22' ? `[${m[1]}]:${m[2]}` : m[1];
 }
 
+/** THE ONE JUDGE OF A PINNED KEY (主开发's verdict of 2026-11-18: unit 1's paste and a machine's record share it — no second
+ *  copy of the test): a known type, a base64 key, and a key whose own wire bytes name that type. → null when it is one, else
+ *  why not (the words a paste's refusal says). */
+function hostKeyWhy(type, key) {
+  if (!HOST_KEY_TYPES.includes(type)) return `no ssh key type (${HOST_KEY_TYPES.slice(0, 3).join(', ')} …) — one key per line, as ssh-keyscan prints it`;
+  if (typeof key !== 'string' || !/^[A-Za-z0-9+/]{16,}={0,3}$/.test(key)) return 'the key is not base64';
+  if (blobType(key) !== type) return `the key's own bytes are not a ${type} key — a cut or mixed-up paste`;
+  return null;
+}
+const isHostKey = (type, key) => hostKeyWhy(type, key) === null;
+
 /**
  * parseKnownHosts(text) → {ok: true, keys: [{names, hashed, type, key}]} | {ok: false, line, why}. Never throws.
  *   A line is `[names] type base64 [comment]` — what ssh-keyscan prints and what a git host publishes. `names` = a comma
@@ -161,8 +172,8 @@ function parseKnownHosts(text) {
     const at = HOST_KEY_TYPES.includes(f[0]) ? 0 : HOST_KEY_TYPES.includes(f[1]) ? 1 : -1;
     if (at < 0) return no(`no ssh key type (${HOST_KEY_TYPES.slice(0, 3).join(', ')} …) — one key per line, as ssh-keyscan prints it`);
     const type = f[at], key = f[at + 1] || '';
-    if (!/^[A-Za-z0-9+/]{16,}={0,3}$/.test(key)) return no('the key is not base64');
-    if (blobType(key) !== type) return no(`the key's own bytes are not a ${type} key — a cut or mixed-up paste`);
+    const bad = hostKeyWhy(type, key);
+    if (bad) return no(bad);
     // a second key on the same line (a lost line break) would be read as a comment and silently not pinned (unit 1's reader)
     if (f.slice(at + 2).some((x) => HOST_KEY_TYPES.includes(x))) return no('two keys on one line — one key per line');
     const names = [], hashed = [];
@@ -181,4 +192,4 @@ function parseKnownHosts(text) {
   return { ok: true, keys };
 }
 
-module.exports = { classifyPrivateKey, opensshV1Info, parseKnownHosts, knownHostName, blobType, HOST_KEY_TYPES, KNOWN_HOSTS_MAX };
+module.exports = { classifyPrivateKey, opensshV1Info, parseKnownHosts, hostKeyWhy, isHostKey, knownHostName, blobType, HOST_KEY_TYPES, KNOWN_HOSTS_MAX };

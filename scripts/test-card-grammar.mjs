@@ -454,6 +454,25 @@ if (B) {
   const vo = violations(fyRow(M, old), { titleSel: 'ut-text' });
   ok(vo.includes('url') && vo.includes('raw-id'), `CONTROL For you: the .270 item 「Odd jobs wants to call Lark · ops's API: DELETE /open-apis/docx/…」 is RED (${vo.join(', ')})`, vo);
 }
+// ── ⑥ lane lg-remote-hardening (B-7f0b — 主开发's ruling of 2026-11-18): THE REAL JUMP of a machine's key item. The watch files it
+// (src/server/host-key-watch.js); the bundled For-you model's jump, with a stand-in app, asks the sidebar for THAT machine's
+// Host key… dialog by its record id — never Manage Agents (which has no key control). A device-kind item (unit 3) opens the same
+// dialog (it holds the device-key section). RED: the release's item, its 'machines' key alone.
+console.log('⑥ the real jump: a machine key item opens its machine\'s Host key… dialog');
+if (B) {
+  const HKW = require(path.join(ROOT, 'src/server/host-key-watch.js')).create({ userTodos: todos });
+  HKW.refused({ id: 'host-cg1', name: 'build box' }, { fp: 'SHA256:cg1', pinned: true });
+  HKW.refused({ id: 'host-cg2', name: 'lab box' }, { kind: 'device', fp: 'SHA256:cg2', code: 'device-key-mismatch' });
+  const itemOf = (id) => todos._state.items.find((i) => i.status === 'open' && i.action && i.action.hostId === id);
+  const press = (item) => { const asked = [], agents = []; const app = { ws: { onGlobal() {}, on() {} }, sidebar: { _showHostKeyDialog: (h) => asked.push(h) }, _showAgentsDialog: () => agents.push(1) }; B.en.inboxModel(app).jump(item.sessionKey, item, { close() {} }); return { asked, agents: agents.length }; };
+  const s1 = itemOf('host-cg1'), d1 = itemOf('host-cg2');
+  const r1 = s1 ? press(s1) : null, r2 = d1 ? press(d1) : null;
+  ok(!!r1 && r1.asked.length === 1 && r1.asked[0].id === 'host-cg1' && r1.asked[0].name === 'build box' && r1.agents === 0, 'the REAL jump (the bundled For-you model, a stand-in app): the watch\'s «host key changed» item asks the sidebar for build box\'s Host key… dialog by its record id — Manage Agents is never opened', r1);
+  ok(!!r2 && r2.asked.length === 1 && r2.asked[0].id === 'host-cg2' && r2.agents === 0 && d1.action.kind === 'device', 'a device-kind item (unit 3) opens the same dialog of its machine by its id (the dialog reads the WHOLE record, so it shows the device-key section — pinned in test-host-key-pin)', r2);
+  const rel = s1 ? (() => { const x = { ...s1 }; delete x.action; return x; })() : null;
+  const rr = rel ? press(rel) : null;
+  ok(!!rr && rr.asked.length === 0 && rr.agents === 1, 'RED CONTROL: the release\'s item (its \'machines\' key alone, no action) lands on Manage Agents — the legs above open the dialog instead', rr);
+}
 for (const [k, d] of Object.entries(saved)) { if (d) Object.defineProperty(globalThis, k, d); else delete globalThis[k]; }
 
 try { fs.rmSync(tmp, { recursive: true, force: true }); } catch {}

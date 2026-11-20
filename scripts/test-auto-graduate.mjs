@@ -40,7 +40,7 @@ ok(/catch \(e\)[\s\S]{0,200}serverNotice/.test(block), 'a failed attempt is repo
 // the extracted function must keep the invariants the button path had
 const fn = srv.slice(srv.indexOf('async function graduateHostToDial'), srv.indexOf('app.post(\'/api/hosts/:id/graduate-dial\''));
 ok(/http_code[\s\S]{0,400}graduation aborted \(staying on ssh\)/.test(fn), 'machine is asked whether it can reach us BEFORE installing');
-ok(/ungraduateDial\(h\.id\)[\s\S]{0,120}installer failed/.test(fn), 'a failed installer rolls the record back');
+ok(/const attempt = hosts\.beginGraduation\(h\.id, \{ dialRoot: root \}\);[\s\S]{0,200}const rollBack = \(\) => \{ attempt\.rollBack\(\);/.test(fn) && /if \(!inst\.ok\) \{ rollBack\(\); throw new Error\('installer failed/.test(fn), 'a failed installer rolls the record back (an upgrade this press made; lane lg-remote-hardening, unit 3\'s cure)');
 ok(fn.includes("require('../hosts.js').dialRootOf(base)"), 'dialRoot mirrors the installer derivation (B-2ca0 follow-up: ONE derivation, src/hosts.js dialRootOf — test-ssh-config-block ⑧ drives it against the installer\'s own sed / tr, an IPv6 base included)');
 
 // ssh must remain reachable as the rescue channel

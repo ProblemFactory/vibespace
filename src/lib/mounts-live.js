@@ -143,7 +143,7 @@ export function patchHostFace(row, prev, next, { chipOf, badgeOf, errOf } = {}) 
     const nb = next.badge && badgeOf ? badgeOf(next.badge) : null;
     if (old && nb) old.replaceWith(nb); else if (old) old.remove(); else if (nb && name) name.after(nb);
   }
-  const oldChip = kid(top, 'host-state-chip');
+  const oldChip = top.children ? [...top.children].find((k) => hasClass(k, 'host-state-chip') && !hasClass(k, 'host-pin-chip')) : null; // the face's OWN chip — a key-pin chip beside it (lane lg-remote-hardening: device key, this hub's key) is never the face's to replace
   const chip = next.chip && chipOf ? chipOf(next.chip) : null;
   if (oldChip && chip) oldChip.replaceWith(chip);
   else if (oldChip) oldChip.remove();

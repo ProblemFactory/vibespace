@@ -48,6 +48,7 @@ const askFacts = (g) => (g && g.ask ? { ask: g.ask, ...(g.answeredBy ? { answere
 const BY_UPGRADE = 'system:device-upgrade'; // the hub's version-drift rule pushes a new agent (no person, no agent asked)
 const SIG = require('../agentd-signature.js'); // design q-042 D2: the release record a pushed bundle must carry
 const DP = require('../device-policy.js'); // lane device-allow-flags: the device's OWN allow list — asked here first, decided there
+const MA = require('../mutual-auth.js'); // lane lg-remote-hardening (B-7f0b, q-042 D3): the device proves its own key (PURE)
 const { MIC_CAPABILITY } = require('../mic-model.js'); // lane stream-mic-road: the hello-ack word the microphone's op + m-line are gated on (PURE)
 const { SOUND_CAPABILITY } = require('../sound-model.js'); // lane speaker-passthrough-v1: the hello-ack word the machine's sound (its track + `stream-audio`) is gated on (PURE)
 
@@ -109,7 +110,16 @@ class DeviceManager {
    *  version      release version (= daemonVersion expected)
    *  log          logger fn
    */
-  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, helloKey = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, onRuntime = null, machine = null, actGate = null, hub = '' } = {}) {
+  constructor({ dataDir, bundlePath, version, nodeModules, transport, log = console.log, upgradeLedger = null, helloKey = null, onUpgradeStuck = null, onVersionMatch = null, onUpgradeBegin = null, onAnswer = null, onAct = null, onUpgradeRefused = null, onUpgradeTrusted = null, onPolicy = null, onElevated = null, onRuntime = null, machine = null, actGate = null, hub = '', devicePin = null, onDeviceKey = null, hubIdentity = null, deviceProofRequired = null, deviceJudged = null } = {}) {
+    // lane lg-remote-hardening (D3 half b): THIS hub's identity (→ {privateKeyPem, publicKey}; throws `vault_locked` /
+    // `hub_identity_lost` by name) — its public half rides every hello, its signature answers a device's nonce
+    this._hubIdentity = typeof hubIdentity === 'function' ? hubIdentity : null;
+    // lane lg-remote-hardening (D3): the device key THIS machine's record pins (→ raw base64 | null) and who hears a key
+    // learned / refused (the record, the For-you watch, the row)
+    this._devicePin = typeof devicePin === 'function' ? devicePin : null;
+    this._onDeviceKey = typeof onDeviceKey === 'function' ? onDeviceKey : null;
+    this._deviceProofRequired = typeof deviceProofRequired === 'function' ? deviceProofRequired : null; // unit 3's cure: the key was forgotten
+    this._deviceJudged = typeof deviceJudged === 'function' ? deviceJudged : null; // unit 3's cure: is the device key judged on THIS road
     this._tokFile = path.join(dataDir, 'agentd-tokens.json');
     this._bundlePath = bundlePath;
     this._version = version;
@@ -379,13 +389,26 @@ class DeviceManager {
     const tok = this._transport.hostToken;
     const token = this._transport.kind === 'local' ? this._ensureLocalToken() : (typeof tok === 'function' ? tok() : tok);
     const backoffs = [500, 1000, 2000, 5000];
+    let clearedLocalPin = false;
     for (let attempt = 0; !this._stopped; attempt++) {
       let lastErr = null;
       const conn = await this._tryOnce(token).catch((e) => { lastErr = e; return null; });
       if (conn) return conn;
+      // unit 5's cure (its reader's must 2): THIS box's own agent shares its root and token with an ssh road (a row that is this
+      // box, or another hub that reaches this box over ssh) — that road pinned a hub key, and the local hello carries none (a
+      // same-user socket proves nothing a pin could add). The hub owns this root: it clears that pin ONCE and asks again, said
+      if (lastErr && this._transport.kind === 'local' && !this._hubIdentity && !clearedLocalPin && /^hub-key-(missing|mismatch)$/.test(String(lastErr.code || ''))) {
+        clearedLocalPin = true;
+        try { fs.unlinkSync(path.join(this._state, 'hub.pub')); } catch { }
+        this._log('[agentd] this box\'s own agent pinned a hub key (an ssh road to this same box) — the local road carries none, so that pin is cleared and the agent is asked again');
+        continue;
+      }
       // lane-pairing ③: a DIALED device that refused OUR host key (its state/token came from another command) is not
       // helped by retrying the same key for a minute — say it now, so the machine row reads `auth-fail`
       if (this._transport.kind === 'stream' && lastErr && /auth failed/.test(String(lastErr.message))) throw lastErr;
+      // lane lg-remote-hardening: a refusal BY NAME of what the device said is not helped by a retry on any road — said now (a
+      // retry over the dead stream waited out the handshake timer 14 times and lost the name: «cannot reach the local daemon»)
+      if (lastErr && TERMINAL_REFUSALS.has(lastErr.code)) throw lastErr;
       if (attempt === 0 && this._transport.kind === 'local') this._spawnLocal(); // local: bring the daemon up (ssh bridge self-spawns the remote one)
       const delay = backoffs[Math.min(attempt, backoffs.length - 1)];
       await new Promise((r) => setTimeout(r, delay));
@@ -441,15 +464,59 @@ class DeviceManager {
 
   _tryOnce(token) {
     return new Promise((resolve, reject) => {
+      // D3 half b: the hub's identity for THIS hello, read BEFORE the transport opens (none ⇒ the old greeting). A LOCKED vault
+      // refuses here, by name, as the host token does — never a plain hello a pinned device would read as an impostor
+      let ident = null, identErr = null; try { ident = this._hubIdentity ? this._hubIdentity() : null; } catch (e) { identErr = e; }
+      if (identErr && identErr.code === 'vault_locked') return reject(identErr);
       const sock = this._openTransport();
       let settled = false, keepStream = false;
-      const fail = (e) => { if (!settled) { settled = true; if (!keepStream) { try { sock.destroy(); } catch { } } reject(e || new Error('connect failed')); } };
+      const fail = (e) => { if (!settled) { settled = true; if (!keepStream) { try { sock.destroy(); } catch { } } else { keptMuxOf.set(sock, mux); try { sock.removeListener?.('error', fail); } catch { } } reject(e || new Error('connect failed')); } };
       sock.on('error', fail);
       const timer = setTimeout(() => fail(new Error('handshake timeout')), 8000);
+      // unit 4's cure r2: the Mux a refused handshake KEPT on this dialed stream (it answered the device's heartbeat) leaves
+      // before the next one is made, so a stream carries ONE kept Mux however often it is asked again
+      { const was = this._transport.kind === 'stream' ? keptMuxOf.get(sock) : null; if (was) { keptMuxOf.delete(sock); was.detach(); } }
+      const nonceH = MA.newNonce({ crypto }); // lane lg-remote-hardening (D3): fresh per hello — a recorded answer proves nothing to the next
       const mux = new Mux(sock, {
         onControl: (msg) => {
           if (msg.op === 'hello-ack') {
             clearTimeout(timer);
+            // lane lg-remote-hardening (D8a): a greeting of the wrong shape or size is refused BY NAME before any of it is used
+            const shape = helloAckVerdict(msg);
+            if (!shape.ok) {
+              this._log(`[agentd] the device's greeting was refused — ${shape.why}`);
+              // a dialed stream is KEPT, as on auth-fail (verify-r1 C2: closing it re-dials every second, each a hosts.json write)
+              // unit 4's cure: the refused handshake's Mux stays ONLY to answer the device's heartbeat (its handlers end here,
+              // so a second greeting in the same frame is never read); the next handshake on this stream takes its place, and
+              // dial-pairing.js remembers the stream (no op re-greets on it for the interval)
+              if (this._transport.kind === 'stream') { keepStream = true; mux.onControl = () => {}; }
+              return fail(Object.assign(new Error(`the device's greeting was refused — ${shape.why}; update its agent, or rerun its install command on that machine`), { code: 'hello-ack-shape' }));
+            }
+            // lane lg-remote-hardening (D3): the device's key — learned at the first proof (the token admitted it), then
+            // pinned: another key, a bad signature or no proof at all is refused BY NAME; an agent too old to prove anything
+            // is not judged until its record holds a key (it works as today). A dialed stream is KEPT on a refusal, as on
+            // auth-fail (verify-r1 C2: closing it re-dials every second)
+            // unit 3's cure: ONE PIN, ONE ROAD — a machine upgraded to dial-out runs a second agent under its own root, with its own
+            // key; its device key is judged on the DIAL road only (where a copied pairing is the threat), and its ssh road is
+            // guarded by ssh's own host key check. A road not judged pins nothing and refuses nothing.
+            let judged = true; try { judged = !this._deviceJudged || !!this._deviceJudged(); } catch { judged = true; }
+            let pinnedKey = null; if (judged) { try { pinnedKey = this._devicePin ? this._devicePin() : null; } catch { pinnedKey = null; } }
+            let required = false; if (judged) { try { required = !!(this._deviceProofRequired && this._deviceProofRequired()); } catch { required = false; } }
+            const kv = judged ? MA.hubVerdict({ nonceH, ack: msg, pinned: pinnedKey == null ? null : pinnedKey, required }, { crypto }) : { ok: true, judged: false }; // a malformed pin refuses
+            if (!kv.ok) {
+              this._log(`[agentd] the device's key was refused — ${kv.why}`);
+              try { this._onDeviceKey?.('refused', { code: kv.code, fp: MA.fingerprintOf(msg.devPub, { crypto }) }); } catch { }
+              if (this._transport.kind === 'stream') { keepStream = true; mux.onControl = () => {}; } // the dial stream kept (as on auth-fail)
+              return fail(Object.assign(new Error(`the device's key was refused — ${kv.why}`), { code: kv.code }));
+            }
+            if (kv.learn && kv.judged !== false) { try { this._onDeviceKey?.('learned', { pub: msg.devPub, fp: MA.fingerprintOf(msg.devPub, { crypto }) }); } catch { } }
+            else if (pinnedKey) { try { this._onDeviceKey?.('proved', {}); } catch { } } // the pinned key proved: a refusal said on the row ends
+            // D3 half b: a device that asked (its nonce) gets the hub's signature over ITS key and nonce FIRST — before any
+            // update push (it is authed only after this ok); it says whether it already pins this hub (the record keeps it)
+            if (ident && MA.isNonce(msg.nonceD)) {
+              const sigH = MA.hubProof(ident, msg.devPub, msg.nonceD, { crypto });
+              if (sigH) { mux.control({ op: 'ok', sigH }); try { this._onDeviceKey?.('hub-pinned', {}); } catch { } } // this ok is what pins it on the device
+            }
             const expected = this._expectedVersion();
             try { this._onAnswer?.(msg.daemonVersion); } catch { }
             const pol = DP.reportOf(msg.policy); // lane device-allow-flags: null = an agent older than the list (it judges nothing)
@@ -504,6 +571,7 @@ class DeviceManager {
             const sessions = new Map(); // chan → { onData, onExit }
             const pending = new Map();  // id → resolve (fs/discovery/cmd/tcp acks)
             this._conn = { mux, info: msg, sessions, pending, nextChan: 2, nextId: 1 };
+            try { this._onDeviceKey?.('linked', {}); } catch { } // lane lg-remote-hardening: a link that opened clears an earlier key refusal on the card
             // route byte-channel data + session control to the session handlers.
             // A handler may set manualCredit and credit as it truly consumes
             // (backpressure for socket-piping consumers).
@@ -547,6 +615,7 @@ class DeviceManager {
               prevControl(m);
             };
             mux.onDead = () => {
+              if (this._transport.kind === 'stream') keptMuxOf.set(sock, mux); // unit 4's cure r3: a dead link's Mux leaves the stream at the next handshake on it
               // Tear down local sockets we opened for reverse-forward accepts
               // (mirrors the daemon's own onDead). Without this, each accepted
               // /dav connection's socket + its listeners leak on every link
@@ -594,13 +663,25 @@ class DeviceManager {
             // machine row reads `auth-fail`, every op on it is refused fast (dial-pairing.js remembers the
             // refused stream), and this mux stays alive only to answer the daemon's heartbeat.
             if (this._transport.kind === 'stream') { keepStream = true; mux.onControl = () => { }; }
+            // D3 half b: the DEVICE refused this hub's key (another hub key, none, a bad signature) — by name, said on the card;
+            // a hub that LOST its identity says so as itself (never a silent new key every machine then refuses)
+            if (typeof msg.code === 'string' && /^hub-/.test(msg.code)) {
+              const own = msg.code === 'hub-key-missing' && identErr;
+              const code = own ? (identErr.code === 'hub_identity_lost' ? 'hub_identity_lost' : 'hub_identity_unavailable') : msg.code;
+              try { this._onDeviceKey?.('refused', { code }); } catch { }
+              const words = code === 'hub_identity_lost' ? `this hub lost its own key — the machine pins the hub it was paired with (${String(identErr.message || '').slice(0, 160)})`
+                : code === 'hub_identity_unavailable' ? `this hub could not use its own key (${String((identErr && identErr.message) || '').slice(0, 160)}) — the machine pins it and waits for its proof`
+                : `the machine refused this hub's key — ${String(msg.error || msg.code).slice(0, 200)}`;
+              if (settled) { this._log(`[agentd] after the link opened, ${words}`); try { this._conn = null; } catch { } try { sock.destroy?.(); } catch { } return; } // a refusal of the signed ok arrives after the settle: the link goes, nothing is muted
+              return fail(Object.assign(new Error(words), { code }));
+            }
             fail(Object.assign(new Error('agentd auth failed — token mismatch'), { code: 'auth_failed' }));
           }
           if (msg.op === 'proto-mismatch') fail(new Error('agentd protocol mismatch'));
         },
         onDead: () => fail(new Error('connection died during handshake')),
       });
-      const sayHello = () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: token, serverVersion: this._version, ...(this._hub ? { hub: this._hub } : {}) });
+      const sayHello = () => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken: token, serverVersion: this._version, nonceH, ...(ident && MA.isPub(ident.publicKey) ? { hubPub: ident.publicKey } : {}), ...(this._hub ? { hub: this._hub } : {}) });
       // ssh stdio + a dialed-in ws stream are already connected at open; a unix
       // socket needs its 'connect' event first.
       if (this._transport.kind === 'ssh' || this._transport.kind === 'stream') sayHello();
@@ -1730,4 +1811,33 @@ class DeviceManager {
   stop() { this._foldEndAll(); this._stopped = true; this._conn?.mux?.destroy(); this._conn = null; }   // B-c632: an open fold is said
 }
 
-module.exports = { posixShellRefusal, posixShellFailed, replyError, DeviceManager };
+// THE GREETING IS JUDGED BEFORE IT IS BELIEVED (lane lg-remote-hardening, B-7f0b — design q-042 D8a). A device's hello-ack
+// drives the hub's decisions (platform → the shell road, capabilities → which ops are asked, posixShells → the Windows door,
+// daemonVersion → the update) and is kept whole as the link's `info` for the link's life — a hostile or broken device could
+// send any shape, any size (a frame may carry 64 MiB). A field that is PRESENT must have its shape; an older agent that
+// never says a field is not judged on it — daemonVersion is the one exception: REQUIRED (every agent and the bridge say one).
+// → {ok} | {ok:false, why}. The link is refused by name (hello-ack-shape). A platform WORD Node.js does not name yet (a future
+// port) passes as it is — a lock-out that only a by-hand reinstall cures is no defence against a mistake (unit 4's cure).
+/** the handshake refusals a retry cannot cure (the connect loop throws them at once, on every road) */
+const TERMINAL_REFUSALS = new Set(['hello-ack-shape', 'device-key-mismatch', 'device-signature-bad', 'device-key-missing', 'device-key-shape', 'device-key-unusable', 'hub-key-mismatch', 'hub-key-missing', 'hub-key-shape', 'hub-signature-bad', 'hub_identity_lost', 'hub_identity_unavailable', 'vault_locked']); // + lane lg-remote-hardening D3's device-key refusals
+/** a dialed stream → the Mux its last refused handshake kept there (auth-fail or a terminal refusal): it answers the device's
+ *  heartbeat, so the kept link stays alive, and the next handshake on that stream detaches it first (unit 4's cure r2) */
+const keptMuxOf = new WeakMap();
+const HELLO_BOUNDS = Object.freeze({ bytes: 64 * 1024, capabilities: 256, posixShells: 16, text: 64 });
+function helloAckVerdict(msg) {
+  const no = (why) => ({ ok: false, why });
+  if (!msg || typeof msg !== 'object' || Array.isArray(msg)) return no('it is not an object');
+  let bytes = 0;
+  try { bytes = Buffer.byteLength(JSON.stringify(msg)); } catch { return no('it does not serialize'); }
+  if (bytes > HELLO_BOUNDS.bytes) return no(`it is ${bytes} bytes (at most ${HELLO_BOUNDS.bytes})`);
+  if (!SIG.verOf(msg.daemonVersion)) return no('its daemonVersion is not a version');
+  if (msg.platform !== undefined && !(typeof msg.platform === 'string' && /^[a-z0-9_-]{1,32}$/.test(msg.platform))) return no(`its platform is not a word (${JSON.stringify(msg.platform).slice(0, 24)})`);
+  if (msg.capabilities !== undefined && (!Array.isArray(msg.capabilities) || msg.capabilities.length > HELLO_BOUNDS.capabilities || !msg.capabilities.every((c) => typeof c === 'string' && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(c)))) return no(`its capabilities are not a list of at most ${HELLO_BOUNDS.capabilities} words`);
+  if (msg.posixShells !== undefined && (!Array.isArray(msg.posixShells) || msg.posixShells.length > HELLO_BOUNDS.posixShells || !msg.posixShells.every((c) => typeof c === 'string' && /^[A-Za-z0-9._-]{1,32}$/.test(c)))) return no(`its posixShells are not a list of at most ${HELLO_BOUNDS.posixShells} shell names`);
+  for (const k of ['arch', 'nodeVersion', 'openssl']) if (msg[k] != null && (typeof msg[k] !== 'string' || msg[k].length > HELLO_BOUNDS.text)) return no(`its ${k} is not a short string`);
+  if (msg.elevated !== undefined && typeof msg.elevated !== 'boolean') return no('its elevated is not true / false');
+  if (msg.nodeOwn !== undefined && msg.nodeOwn !== null && typeof msg.nodeOwn !== 'boolean') return no('its nodeOwn is not true / false');
+  return { ok: true };
+}
+
+module.exports = { posixShellRefusal, posixShellFailed, replyError, DeviceManager, helloAckVerdict, HELLO_BOUNDS, TERMINAL_REFUSALS };

@@ -140,6 +140,7 @@ const STAND_INS = {
   who: (req) => Auth.signInHandle(req),   // the real one (src/auth.js — the cookie's handle)
   runOf: () => null, grantLive: () => true, subjects: () => ({ sessions: [], groups: [] }),   // no live run, every grant live, no subjects
   linkTokenFor: () => 'link-token-stand-in',   // a function, as the hub's (a road gated on it mounts); no world session has a link
+  linkSignFor: () => ({ sigH: 'link-sign-stand-in' }), hubPubFor: () => null,   // lane lg-remote-hardening: the attach child's hub signature (no world session has a link)
   onVaultWait: () => {}, auditLink: () => {},
   // B-8b87: a browser proxy's logins (names only here) and the keeper's «Move the password to the vault» — objects/functions as the hub's, so their person-only roads mount
   proxyLogins: { names: () => [], save: () => ({ ok: false, code: 'vault_locked', error: 'the vault is locked' }), remove: () => ({ ok: true }) }, proxyMove: () => ({ ok: false, code: 'unavailable', error: 'no keeper in the world' }),
@@ -912,6 +913,7 @@ console.log('⑩c THE USER NAME REACHES THE ASKER ONLY WITH THE GRANT — every 
     'POST /api/agent/vault/mint': { carries: 'its own agent: entry — refused here (no name)', call: {} },
     'POST /api/agent/vault/put': { carries: 'its own agent: entry — refused here (no name, no value)', call: {} },
     'GET /api/agent/vault/link-token': { carries: 'a machine\'s link token — refused here (no host named)', call: {} },
+    'POST /api/agent/vault/link-sign': { carries: 'the hub\'s signature for its conversation\'s own machine — refused here (no machine)', call: {} },
     'POST /api/agent/vault/secret-request': { carries: 'the request\'s own status: a login\'s target is its SITE only ({login: origin})', call: { words: 'the census login', purpose: 'the census', kind: 'login', hosts: 'https://census-again.example.test' } },
     'POST /api/agent/vault/run': { carries: 'a run\'s refusal — a web-login is never runnable (class pairing)', call: {} },
     'GET /api/agent/vault/runnable': { carries: '`vibespace-vault list` — the runnable entries; a web-login is never one', call: {} },

@@ -235,7 +235,7 @@ let deviceMgr = null;
 // the setup the 0600 file as before) — src/server/host-tokens.js (lane vault-e2e-password-fix-r2); no attach config holds it.
 const AGENTD_DIR = path.join(__dirname, 'data', 'agentd');
 function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); }
-const hostTokens = require('./src/server/host-tokens.js').create({ dataDir: path.join(__dirname, 'data'), agentdDir: AGENTD_DIR, nameOf: (k) => { const h = String(k).startsWith('dial-') ? hosts.findByDeviceId(String(k).slice(5)) : hosts.get(k); return (h && h.name) || null; } });   // nameOf: a LOCKED refusal names the machine (lane vault-locked-refusal-notice)
+const hostTokens = require('./src/server/host-tokens.js').create({ dataDir: path.join(__dirname, 'data'), agentdDir: AGENTD_DIR, anyHubPin: () => (hosts.held() ? true : hosts.list().filter((h) => !!h.hubPinned).map((h) => h.name || h.id)), nameOf: (k) => { const h = String(k).startsWith('dial-') ? hosts.findByDeviceId(String(k).slice(5)) : hosts.get(k); return (h && h.name) || null; } });   // nameOf: a LOCKED refusal names the machine (lane vault-locked-refusal-notice)
 function agentdHostToken(hostId) { return hostTokens.tokenFor(hostId); }
 // Install/refresh the daemon on a host, throttled per boot+version: a marker
 // records the last version shipped; matching = skip (one ssh round trip saved
@@ -243,10 +243,10 @@ function agentdHostToken(hostId) { return hostTokens.tokenFor(hostId); }
 // ── Dial pairing primitives (src/server/dial-pairing.js, decomposition #13) ──
 const { CHAT_WRAPPER, agentdDialDevices, agentdDials,
   agentdMintDialPair, daemonPtyShim, deviceForDial, ensureAgentdOnHost,
-  unpairDialDevice, gateDialUpgrade, admitDial, noteDialEvent, lockOutDialHolder,
+  unpairDialDevice, gateDialUpgrade, admitDial, noteDialEvent, lockOutDialHolder, wsStream, adoptDialStream,
 } = require('./src/server/dial-pairing.js').create({
   rootDir: __dirname, AGENTD_DIR, bcastAll: (...a) => bcastAll(...a),
-  agentdHostToken: (...a) => agentdHostToken(...a), hostTokenLocked: (id) => hostTokens.lockedWhy(id), dropHostToken: (id) => hostTokens.drop(id),
+  agentdHostToken: (...a) => agentdHostToken(...a), hostTokenLocked: (id) => hostTokens.lockedWhy(id), dropHostToken: (id) => hostTokens.drop(id), hubIdentity: () => hostTokens.identity(), // + lane lg-remote-hardening D3b: this hub's own key
   getHosts: () => { try { return hosts; } catch { return null; } },
   getMounts: () => { try { return mounts; } catch { return null; } },
   getMachineMounts: () => { try { return machineMounts; } catch { return null; } },
@@ -1209,7 +1209,7 @@ app.post('/api/ports/kill-orphan', (req, res) => {
 const { ExitProxyManager } = require('./src/exit-proxy');
 // lane device-upgrade-stuck: an agent upgrade the hub gave up on reaches the user — ONE For-you item per (machine, version) + the row's line, gone at that version (every transport's door); lane host-stale-dialer (B-6136): a second agent with an old token — its row's line, ONE For-you item per episode, a 10-min journal line (src/server/dial-health-watch.js)
 const deviceAlerts = require('./src/server/device-alerts.js').create({ userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); hosts.onDeviceAlert = (kind, facts) => deviceAlerts.file(kind, facts); /* lane device-act-audit: a pairing minted, a first dial from a new address, a pushed update = URGENT For you */ const deviceUpgradeWatch = require('./src/server/device-upgrade-watch.js').create({ userTodos, held: () => !!(hosts.held && hosts.held()), dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } }, alerts: deviceAlerts });
-hosts.onAgentUpgrade = (event, facts) => deviceUpgradeWatch.onAgentUpgrade(event, facts); hosts.agentUpgradeOf = (id) => deviceUpgradeWatch.rowOf(id); const dialHealthWatch = require('./src/server/dial-health-watch.js').create({ userTodos, hosts, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } });
+hosts.onAgentUpgrade = (event, facts) => deviceUpgradeWatch.onAgentUpgrade(event, facts); hosts.agentUpgradeOf = (id) => deviceUpgradeWatch.rowOf(id); const dialHealthWatch = require('./src/server/dial-health-watch.js').create({ userTodos, hosts, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } }); require('./src/server/host-key-watch.js').create({ userTodos, hosts, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a), bcast: () => { try { bcastAll({ type: 'hosts-updated' }); } catch { } } }); // lane lg-remote-hardening: a changed ssh host key ⇒ For you
 const exitProxy = new ExitProxyManager({ hosts, grants, log: (m) => console.log('[exit]', m), dataDir: path.join(__dirname, 'data'), userTodos, settingOf: (k) => serverSetting(k), sessionsMap: () => activeSessions, bcastAll: (...a) => bcastAll(...a),
   emitCard: (s, card) => feedPeerCard(s, { ...card, belongsTo: require('./src/exit-call.js').cardMatcher(card) }), groupsOf: (s, id) => { const a = { sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }; return tasks.isHeldUnread() ? tasks.groupIdsForGrant(a, 'exit') : tasks.memberIds(a); } });
 hosts.onReachChange = (why) => exitProxy.rejudgeAll(`hosts-${why}`); require('./src/server/hub-act-ask.js').wire({ hosts, userTodos, exitProxy, settingOf: (k) => serverSetting(k), activeSessions }); // verify-r3 A-r3a: an import / a removal / a reshape of hosts.json re-judges every lent machine (the PATCH was the only writer that did); lane hub-act-ask (q-042 D4): on a cluster instance a hub act nobody clicked asks the owner first
@@ -1459,17 +1459,8 @@ hub.attachToServers('upgrade', (req, socket, head) => { // BOTH servers (http + 
     // (two daemons replaced each other once a second forever); the socket waits ≤ DUP_PROBE_MS for that verdict
     admitDial(deviceId, gate.facts, socket).then((admit) => { if (!admit) return;
     agentdDialWss.handleUpgrade(req, socket, head, (ws) => {
-      // adapt the ws to the duplex shape Mux consumes
-      const listeners = { data: [], close: [], error: [] };
-      ws.on('message', (d) => listeners.data.forEach((f) => f(Buffer.isBuffer(d) ? d : Buffer.from(d))));
-      ws.on('close', () => listeners.close.forEach((f) => f()));
-      ws.on('error', () => listeners.error.forEach((f) => f()));
-      const stream = {
-        write: (d) => { try { ws.send(d); return true; } catch { return false; } },
-        on: (ev, fn) => { listeners[ev]?.push(fn); },
-        destroy: () => { try { ws.close(); } catch { } },
-      };
-      agentdDials.set(deviceId, stream);
+      const stream = wsStream(ws); // the ws as the duplex shape a Mux consumes (src/server/dial-pairing.js: a kept Mux can leave it)
+      adoptDialStream(deviceId, stream); // the stream it replaces is closed only now, once this one is up (src/server/dial-pairing.js)
       noteDialEvent(deviceId, 'accepted', gate.facts); // the streak + previous failure the daemon reported, kept on the record
       deviceForDial(deviceId).catch(() => { }); // the mux hello NOW: a device holding another command's host key shows `auth-fail` at once, not at the first op
       // the device re-dialed with a FRESH stream — drop any cached
@@ -1496,7 +1487,7 @@ hub.attachToServers('upgrade', (req, socket, head) => { // BOTH servers (http + 
           if (s._dialDeviceId !== deviceId || !s._dialReversePort) continue;
           try {
             const dm = await deviceForDial(deviceId);
-            await dm.reverseForward({ port: s._dialReversePort, connectLocal: () => netR.connect(PORT, '127.0.0.1') });
+            await dm.reverseForward({ port: s._dialReversePort, connectLocal: () => netR.connect(require('./src/server/agent-listener.js').tunnelPort(PORT), '127.0.0.1') }); // lane lg-remote-hardening (D8b): the re-owned back-tunnel ends at the agent door too
           } catch (e) { console.warn(`[device] session back-tunnel re-own failed (${s._dialReversePort}):`, e.message); }
         }
       })().catch(() => { });
@@ -1569,7 +1560,7 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
         bundlePath: path.join(__dirname, 'data', 'bin', 'vibespace-agentd.js'),
         version: require('./package.json').version,
         nodeModules: path.join(__dirname, 'node_modules'),
-        log: console.log,
+        log: console.log, // lane lg-remote-hardening (主开发's verdict of 2026-11-18, must A): NO hub key on the LOCAL road — a same-user socket, where a pin proves nothing a reader of the same files could not forge; this box's agent never waits for the vault
         onUpgradeStuck: (from, to, info) => hosts.onAgentUpgrade?.('stuck', { ...(info || {}), hostKey: 'local', machine: os.hostname(), from, to }), onVersionMatch: (v) => hosts.onAgentUpgrade?.('matched', { hostKey: 'local', version: v }), onUpgradeRefused: (from, to, info) => hosts.onAgentUpgrade?.('refused', { ...(info || {}), hostKey: 'local', machine: os.hostname(), from, to }), onAct: (line) => hosts.noteAct('local', line), // lane device-upgrade-stuck (+ lane device-bundle-signing: `refused`): this machine's own daemon, the same door (no row); lane device-act-audit: its acts audited as `local`
       });
       // device #0 becomes reachable through hosts.device(null) — that is what

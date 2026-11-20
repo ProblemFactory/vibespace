@@ -2955,8 +2955,8 @@ export function installManageAgents(App, ctx = {}) {
           // lane-pairing ③: the dot + its words read THE one dial state (a refused dial is never just "not dialed in")
           const drs = h.transport === 'dial' || h.graduated ? dialRowState(h) : null;
           const live = drs ? drs.state === 'connected' : null;
-          const dialWords = drs ? dialStateText(drs) : '';
-          const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail') ? ' err' : ''}" data-tip="${escHtml([dialWords, dialHistoryText(drs)].filter(Boolean).join(' · '))}"></span>`;
+          const dialWords = drs ? dialStateText(drs) + (drs.state === 'key-refused' ? ' ' + t('(Its doors are in Remote → {machine}.)', { machine: h.name || h.id }) : '') : ''; // lane lg-remote-hardening (主开发 00:36Z small 3): this page draws none of them
+          const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail' || drs.state === 'greeting-refused' || drs.state === 'key-refused') ? ' err' : ''}" data-tip="${escHtml([dialWords, dialHistoryText(drs)].filter(Boolean).join(' · '))}"></span>`;
           const pill = hostQuotaPillHtml(this._hostOwnUsage?.[h.id]); // the tightest bucket, through bucketView (lane reset-unproven)
           const kept = signinChipHtml(Object.hasOwn(signins, h.id) ? signins[h.id] : null); // lane desktop-vnc-remember: 「登录已记住」
           sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user ? h.user + '@' : ''}${h.host}`)}</span>${kept}${pill}`;

@@ -401,6 +401,15 @@
     "test-ws-keepalive.mjs": 4,
     "test-xpra-client.mjs": 33
    }
+  },
+  "B-7f0b": {
+   "why": "lane lg-remote-hardening's chain (B-7f0b: ssh host-key pins, device keys both ways, the dial link kept) — its RED controls, written before the per-file list, counted in at its move onto 2.369.413's base ac70cf7ee; each falls when its file is next touched",
+   "files": {
+    "test-device-key-pin.mjs": 13,
+    "test-device-policy.mjs": 1,
+    "test-dial-link-kept.mjs": 34,
+    "test-host-key-pin.mjs": 1
+   }
   }
  }
 }

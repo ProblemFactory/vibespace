@@ -407,7 +407,7 @@ console.log('⑤ dialCheckLines');
 }
 
 // ── THE row state ──
-console.log('③ dialRowState (fake clock, the six states + the mint guard)');
+console.log('③ dialRowState (fake clock, the eight states + the mint guard)');
 {
   const T0 = 1790000000000;
   const row = (x) => ({ transport: 'dial', deviceId: 'Mac', ...x });
@@ -434,7 +434,36 @@ console.log('③ dialRowState (fake clock, the six states + the mint guard)');
   eq(S({ online: true, dial: { lastConnectAt: T0 + 50, lastAuthFail: { at: T0 + 60 } } }).state, 'auth-fail', 'online but the device refused our host key after this connect ⇒ auth-fail (attack 18)');
   eq(S({ online: true, dial: { lastConnectAt: T0 + 70, lastAuthFail: { at: T0 + 60 } } }).state, 'connected', 'an auth failure BEFORE the current connect is not the state now');
   eq(DF.dialRowState({ transport: 'ssh', graduated: true, dialLive: true, dial: { lastConnectAt: 5 } }).state, 'connected', 'a graduated ssh machine reads dialLive');
-  eq(DF.DIAL_ROW_STATES, ['auth-fail', 'connected', 'refused', 'silent', 'never', 'unknown'], 'the closed state set');
+  eq(S({ online: true, dial: { lastConnectAt: T0 + 50, lastGreetingRefused: { at: T0 + 60 } } }).state, 'greeting-refused', 'online but this hub refused the device\'s greeting after this connect ⇒ greeting-refused (lane lg-remote-hardening, unit 4\'s cure)');
+  eq(S({ online: true, dial: { lastConnectAt: T0 + 70, lastGreetingRefused: { at: T0 + 60 } } }).state, 'connected', 'a refused greeting BEFORE the current connect is not the state');
+  { const kr = (x, road = 'dial') => S({ online: true, deviceKeyRefused: { code: x, fp: 'SHA256:x', at: T0 + 60, road }, dial: { lastConnectAt: T0 + 50 } });
+    eq(kr('device-key-mismatch').state, 'key-refused', 'online, but the device\'s key was refused on the dial road after this connect ⇒ key-refused (never «connected»: the refused stream stays dialed in — B-7f0b)');
+    eq(kr('device-key-mismatch').side + '/' + kr('hub-key-mismatch').side + '/' + kr('hub_identity_lost').side, 'device/hub/hub', 'its side: the device\'s key, or this hub\'s key refused BY the device');
+    eq(kr('device-key-mismatch', 'ssh').state, 'connected', 'a refusal on the SSH road is not the dial row\'s state (one pin, one road)');
+    eq(S({ online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 40, road: 'dial' }, dial: { lastConnectAt: T0 + 50 } }).state, 'connected', 'a key refused BEFORE the current connect is not the state (its next hello says again)');
+    eq(S({ online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 60 }, dial: { lastConnectAt: T0 + 50, lastAuthFail: { at: T0 + 70 } } }).state, 'auth-fail', 'auth-fail (the device refuses our host token) comes first');
+    eq(S({ online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 60, road: 'dial' }, dial: { lastConnectAt: T0 + 50, lastGreetingRefused: { at: T0 + 70 } } }).state, 'greeting-refused', 'two refusals newer than the connect (they may come from two streams): the NEWEST is the state — here the greeting');
+    eq(S({ online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 80, road: 'dial' }, dial: { lastConnectAt: T0 + 50, lastGreetingRefused: { at: T0 + 70 } } }).state, 'key-refused', '…the mirror: a copy\'s refused greeting at T3, the seat\'s key refused again at T4 ⇒ key-refused (the seat\'s refusal is never hidden behind a copy\'s greeting)');
+    eq(S({ online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 70, road: 'dial' }, dial: { lastConnectAt: T0 + 50, lastGreetingRefused: { at: T0 + 70 } } }).state, 'greeting-refused', '…at one instant the greeting (judged first on one stream)');
+    const DSRC = fs.readFileSync(path.join(REPO, 'src/dial-facts.js'), 'utf8');
+    const KR = "    if (ka) return { state: 'key-refused',"; // the third read: the newest of greeting / key is judged above it
+    eq(DSRC.split(KR).length, 2, 'control: the key-refused state is one line of dialRowStateOf (the anchor, once)');
+    const MK = mutantCopies('dialkey', REPO);
+    const DFold = MK.load('src/dial-facts.js', anchored(DSRC, KR, '    if (false) return { state: \'key-refused\',', 'no-key-state'), 'no-key-state');
+    eq(DFold.dialRowState({ transport: 'dial', deviceId: 'Mac', online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 60, road: 'dial' }, dial: { lastConnectAt: T0 + 50 } }, { now: T0 + 999999 }).state, 'connected', 'RED CONTROL: without the state a dialed row whose device key is refused reads «connected» (the green row beside the red chip)');
+    // 主开发 00:36Z small (6): an anchored control for «the newest of greeting and key is the state»
+    const DFg = MK.load('src/dial-facts.js', anchored(DSRC, '    if (gr && gr >= ka) return', '    if (gr) return', 'greeting-always'), 'greeting-always');
+    eq(DFg.dialRowState({ transport: 'dial', deviceId: 'Mac', online: true, deviceKeyRefused: { code: 'device-key-mismatch', at: T0 + 80, road: 'dial' }, dial: { lastConnectAt: T0 + 50, lastGreetingRefused: { at: T0 + 70 } } }, { now: T0 + 999999 }).state, 'greeting-refused', 'RED CONTROL: a greeting judged first whatever its time hides the seat\'s NEWER key refusal behind a copy\'s greeting (the mirror leg refuses that)');
+    for (const r of copiesCensus(MK.files, MK.dir, REPO, { minCopies: 1, label: 'mutant-copy (key-refused): ' })) ok(r.pass, r.name, r.detail);
+    const SMx = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8'), MAx = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8'), DPx = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
+    eq([SMx.includes("rs.state === 'key-refused' ? (/-mismatch$/.test(rs.code || '') ? tr('KEY MISMATCH') : tr('KEY REFUSED'))"), /rs\.state === 'greeting-refused' \|\| rs\.state === 'key-refused' \|\| rs\.state === 'refused'\) \? 'err'/.test(SMx), MAx.includes("drs.state === 'key-refused') ? ' err'"), DPx.includes("case 'key-refused': return keyRefusedText(rs);")].join(), 'true,true,true,true', 'the row says it: a red dot and its badge in the sidebar (KEY MISMATCH for a key that differs, KEY REFUSED for any other refusal), a red Machines dot, and its sentence (below, driven)');
+    // the read's shoulds: a refusal from before roads were recorded (no `road`) is the dial row's; the state carries what its words need
+    const nr = S({ online: true, deviceKeyRefused: { code: 'device-key-mismatch', fp: 'SHA256:x', at: T0 + 60 }, dial: { lastConnectAt: T0 + 50 } });
+    eq([nr.state, nr.code, nr.door, nr.pinned].join(), 'key-refused,device-key-mismatch,pairing,false', 'a refusal recorded with NO road (before roads were) is the dial row\'s state; the state carries its code, the row\'s pairing door and whether a key is pinned');
+    const grad = DF.dialRowState({ transport: 'ssh', graduated: true, deviceId: 'Mac', dialLive: true, deviceKey: { pub: 'p', fp: 'f' }, deviceKeyRefused: { code: 'hub-key-mismatch', at: T0 + 60, road: 'dial' }, dial: { lastConnectAt: T0 + 50 } }, { now: T0 + 999999 });
+    eq([grad.state, grad.side, grad.door].join(), 'key-refused,hub,dial-out', 'a machine upgraded from ssh: its dial road\'s refusal is its state too, and its door is dial-out (no Pairing command… on its row)');
+  }
+  eq(DF.DIAL_ROW_STATES, ['auth-fail', 'greeting-refused', 'key-refused', 'connected', 'refused', 'silent', 'never', 'unknown'], 'the closed state set');
   eq(['token-mismatch', 'refused-token-mismatch', 'refused-no-pairing', 'dns', 'tls', 'refused-connect', 'timeout', 'unreachable', 'not-ws', 'http-502', 'reset', 'closed-before-hello', 'refused-unknown'].map(DF.dialReasonOf),
     ['token-mismatch', 'token-mismatch', 'no-pairing', 'dns', 'tls', 'refused-connect', 'timeout', 'unreachable', 'not-vibespace', 'not-vibespace', 'other', 'other', 'other'], 'every stored code maps to a closed reason');
   eq(DF.hostOf('wss://h.example.com/api/device-dial?device=x'), 'h.example.com:443', 'hostOf names the default port');
@@ -462,7 +491,7 @@ console.log('② inPlacePushVerdict (verify-r1 B8: the rotated token reaches the
   const iRef = route.indexOf('if (pushV.refuse) return res.status(409)'), iMint = route.indexOf('pair = agentdMintDialPair(deviceId,');
   ok(iRef > 0 && iMint > iRef, 'P1 WIRING: a refused push answers 409 by name BEFORE the mint (nothing rotated, nobody cut)');
   const dlg = fs.readFileSync(path.join(REPO, 'src/lib/sidebar-mounts.js'), 'utf8');
-  ok(/keepBox\.checked = false;/.test(dlg) && /const keep = !!\(keepBox && keepBox\.checked\);/.test(dlg) && /updateInPlace: keep, \.\.\.\(keep \? \{ keepLinkSince: keepSince \} : \{\}\)/.test(dlg) && /const keepSince = existing && h\.dial \? \(h\.dial\.lastConnectAt \?\? null\) : null;/.test(dlg) && /if \(existing && \(h\.online \|\| h\.dialLive\)\) \{/.test(dlg), 'WIRING: the pairing sheet offers the choice only while a device is connected, unchecked by default, and sends it as updateInPlace + the link it showed (verify-r6 P1: keepLinkSince)');
+  ok(/keepBox\.checked = false;/.test(dlg) && /const keep = !!\(keepBox && keepBox\.checked\);/.test(dlg) && /updateInPlace: keep, \.\.\.\(keep \? \{ keepLinkSince: keepSince \} : \{\}\)/.test(dlg) && /const keepSince = existing && h\.dial \? \(h\.dial\.lastConnectAt \?\? null\) : null;/.test(dlg) && /if \(existing && \(h\.online \|\| h\.dialLive\) && !dialLinkRefused\(h\)\) \{/.test(dlg), 'WIRING: the pairing sheet offers the choice only while a device is connected and its link is not refused (lane lg-remote-hardening, 主开发 00:36Z small 5), unchecked by default, and sends it as updateInPlace + the link it showed (verify-r6 P1: keepLinkSince)');
   ok(/e && e\.code === 'link_gone' \? tr\(/.test(dlg) && /e && e\.code === 'link_changed' \? tr\(/.test(dlg) && /if \(e && e\.code === 'link_gone' && keepLbl\) \{ keepBox\.checked = false; keepLbl\.style\.display = 'none';/.test(dlg), 'P1 WIRING: the sheet words link_gone / link_changed and, the device being gone, drops the keep-its-link choice (the next press is the plain rotation it just described)');
   // verify-r2 B8-r2: the mint ENDS the holder's link unless the push keeps it, and a push that did not land ends it too
   const dp = fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8');
@@ -601,6 +630,7 @@ const GRAD_ARGS = '--bundle-url "http://hub.example:3456/vibespace-device.js" --
   const EXEMPT = [
     { file: 'scripts/vibespace-agentd-install.sh', re: /"vsht_"\+require\("crypto"\)\.randomBytes\(24\)/, why: 'a STANDALONE install (no pairing) mints its own device key ON the device; it never leaves the machine' },
     { file: 'src/agentd/client.js', re: /this\._tokens\.local !== sha/, why: 'the hub\'s own record of device #0\'s hash: "changed ⇒ rewrite the file", not an authentication' },
+    { file: 'src/hosts.js', re: /if \(h\.dialTokenHash && h\.dialTokenHash !== String\(sha256Hash\) && \(h\.deviceKey/, why: 'lane lg-remote-hardening (D3): a NEW pairing command forgets the device key its record pinned — the record\'s hash against the one just minted: "changed ⇒ forget the pin", not an authentication' },
     // lane exit-transfer: the sha256 of a FILE's bytes (pull / push: each end hashes what it sent / received) — never a token
     { file: 'src/agentd/agentd.js', re: /const hash = msg\.sha256 \? require\('crypto'\)\.createHash\('sha256'\) : null;/, why: 'a pull window\'s content hash (read-range `sha256: true`) — the bytes of a file, not a token' },
     { file: 'src/agentd/agentd.js', re: /received: 0, hash: require\('crypto'\)\.createHash\('sha256'\), buf: \[\]/, why: 'a push\'s content hash (write-stream) — the bytes of a file, not a token' },
@@ -1074,6 +1104,61 @@ console.log('controls (patched copies)');
   // CONTROL: the pre-fix line (b924041f) is caught by the same rule
   const preFix = fixed.replace('can dial ${DHOST}…', 'can dial $DHOST…');
   ok(preFix !== fixed && offenders(preFix).length === 1 && /DHOST…/.test(offenders(preFix)[0]), 'CONTROL: the 2.369.197–.199 line `$DHOST…` is the one offender the rule names');
+}
+
+console.log('③k a refused key\'s sentence names a door ITS row has (lane lg-remote-hardening B-7f0b — the read\'s must 2)');
+{
+  const T0 = 1790000000000;
+  // the page clock (page-time) asks the language at EVERY call, and i18n.js decided at its FIRST import (under an earlier block's
+  // stand-in) that a DOM is there — so this block lends its own stand-in too, and hands the global back as it found it
+  const hadLSk = globalThis.localStorage;
+  globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+  try {
+  // the read's must 2 + shoulds: each sentence, by side, code and the row's own door — driven through the page's words
+  const { pathToFileURL } = await import('node:url');
+  const PKk = await import(pathToFileURL(path.join(REPO, 'src/lib/dial-address-picker.js')).href);
+  const I18 = await import(pathToFileURL(path.join(REPO, 'src/lib/i18n.js')).href); // the language the bundle resolved at its first import (an earlier block sets zh) — every sentence is compared through the SAME t()
+  const sayK = (o) => PKk.dialStateText({ state: 'key-refused', at: T0 + 60, n: 0, reason: null, host: '', ...o });
+  const W8 = {
+    hubPairing: "Connected, but it refuses this hub's key — it was paired with another hub, or this hub lost its key; pair it again (Pairing command…)",
+    hubDialOut: "Connected, but it refuses this hub's key — it was set up with another hub; Host key… lets it pin this hub's key again",
+    hubLost: 'Connected, but this hub lost the key this machine pins — Host key… says what to do',
+    hubUnread: 'Connected, but this hub could not read its own key to prove it — its link is refused until it can; its next greeting asks again',
+    hubProofDialOut: "Connected, but it refused this hub's proof of its key — make a new pairing: Dial-out → Remove dial-out, then Upgrade to dial-out",
+    hubProofPairing: "Connected, but it refuses this hub's key — it was paired with another hub, or this hub lost its key; pair it again (Pairing command…)",
+    hubShapeDialOut: "Connected, but it refused this hub's proof of its key — make a new pairing: Dial-out → Remove dial-out, then Upgrade to dial-out",
+    hubBadSigDialOut: "Connected, but it refused this hub's proof of its key — make a new pairing: Dial-out → Remove dial-out, then Upgrade to dial-out",
+    hubLostPairing: 'Connected, but this hub lost the key this machine pins — Host key… says what to do',
+    hubUnreadPairing: 'Connected, but this hub could not read its own key to prove it — its link is refused until it can; its next greeting asks again',
+    devShapeUnpinnedPairing: "Connected, but its agent's proof of its device key was refused, and no key is pinned — pair it again (Pairing command…)",
+    devBadSigUnpinnedDialOut: "Connected, but its agent's proof of its device key was refused, and no key is pinned — make a new pairing: Dial-out → Remove dial-out, then Upgrade to dial-out",
+    devPinned: 'Connected, but its agent did not prove the device key VibeSpace pinned — its link is refused; Host key… says what to do',
+    devAsked: "Connected, but its agent proved no device key, and this machine's record asks for one — its link is refused; Host key… says what to do",
+  };
+  const got8 = {
+    hubPairing: sayK({ side: 'hub', code: 'hub-key-mismatch', door: 'pairing' }), hubDialOut: sayK({ side: 'hub', code: 'hub-key-mismatch', door: 'dial-out' }),
+    hubLost: sayK({ side: 'hub', code: 'hub_identity_lost', door: 'dial-out' }), hubUnread: sayK({ side: 'hub', code: 'hub_identity_unavailable', door: 'dial-out' }),
+    hubProofDialOut: sayK({ side: 'hub', code: 'hub-key-missing', door: 'dial-out' }), hubProofPairing: sayK({ side: 'hub', code: 'hub-signature-bad', door: 'pairing' }),
+    hubShapeDialOut: sayK({ side: 'hub', code: 'hub-key-shape', door: 'dial-out' }), hubBadSigDialOut: sayK({ side: 'hub', code: 'hub-signature-bad', door: 'dial-out' }),
+    hubLostPairing: sayK({ side: 'hub', code: 'hub_identity_lost', door: 'pairing' }), hubUnreadPairing: sayK({ side: 'hub', code: 'hub_identity_unavailable', door: 'pairing' }),
+    devShapeUnpinnedPairing: sayK({ side: 'device', code: 'device-key-shape', pinned: false, door: 'pairing' }), devBadSigUnpinnedDialOut: sayK({ side: 'device', code: 'device-signature-bad', pinned: false, door: 'dial-out' }),
+    devPinned: sayK({ side: 'device', code: 'device-key-mismatch', pinned: true, door: 'pairing' }), devAsked: sayK({ side: 'device', code: 'device-key-missing', pinned: false, door: 'dial-out' }),
+  };
+  eq(Object.keys(W8).filter((k) => !got8[k].startsWith(I18.t(W8[k]))), [], 'the sentences: a dialed device pairs again; a machine upgraded from ssh is let pin this hub\'s key (Host key…), never «Pairing command…» it does not draw; a hub that lost or cannot read its own key sends to Host key… (a new hub key first, never «pair it again» alone); a forgotten pin whose agent proved nothing is said as that');
+  eq([sayK({ side: 'device', code: 'device-key-missing', pinned: true }).startsWith(I18.t(W8.devPinned)), ...['hubDialOut', 'hubLost', 'hubUnread', 'hubProofDialOut'].map((k) => !got8[k].startsWith(I18.t(W8.hubPairing)))].join(), 'true,true,true,true,true', '…a pinned key the agent did not prove is the pinned sentence; the dial-out row\'s words never name «Pairing command…»');
+  const ZHk = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, JAk = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+  eq(Object.values(W8).filter((k) => !ZHk[k] || !JAk[k]), [], 'every sentence has its zh and ja');
+  // RED copy: words chosen by the side alone (the commit before the read) name «Pairing command…» on a machine that has none
+  const DPsrc = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
+  const doorAnchor = "    if (rs.door === 'pairing') return t(";
+  if (!DPsrc.includes(doorAnchor)) ok(false, 'control: the anchor (the hub side\'s door choice) is not in this tree', doorAnchor);
+  else {
+    const MKw = mutantCopies('dialkey-words', REPO);
+    const PKm = await import(pathToFileURL(MKw.write('src/lib/dial-address-picker.js', anchored(DPsrc, doorAnchor, "    if (true) return t(", 'side-only'), 'side-only', { esm: true })).href);
+    ok(PKm.dialStateText({ state: 'key-refused', side: 'hub', code: 'hub-key-mismatch', door: 'dial-out', at: T0 + 60, n: 0, reason: null, host: '' }).startsWith(I18.t(W8.hubPairing)), 'RED CONTROL: words chosen by the side alone tell a machine upgraded from ssh to use «Pairing command…», a door its row does not draw (the leg above refuses that)');
+    for (const r of copiesCensus(MKw.files, MKw.dir, REPO, { minCopies: 1, label: 'mutant-copy (key-refused words): ' })) ok(r.pass, r.name, r.detail);
+  }
+  } finally { if (hadLSk === undefined) delete globalThis.localStorage; else globalThis.localStorage = hadLSk; }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

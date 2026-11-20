@@ -52,7 +52,7 @@ function askLinkToken() {
       res.on('data', (d) => { if (b.length < 65536) b += d; });
       res.on('end', () => {
         let j = null; try { j = JSON.parse(b); } catch { }
-        if (res.statusCode === 200 && j && typeof j.token === 'string' && j.token) resolve({ ok: true, token: j.token });
+        if (res.statusCode === 200 && j && typeof j.token === 'string' && j.token) resolve({ ok: true, token: j.token, hubPub: typeof j.hubPub === 'string' ? j.hubPub : null });
         else resolve({ ok: false, code: (j && j.code) || `http-${res.statusCode}`, why: (j && j.error) || `the hub answered ${res.statusCode}` });
       });
     });
@@ -63,10 +63,40 @@ function askLinkToken() {
 askLinkToken().then((r) => {
   // 7 = THE VAULT WAIT (data/bin/pty-wrapper.js never counts it toward its cap; the chat-wrapper retries every 30 s anyway)
   if (!r.ok) { log(`no link token (${r.code}): ${r.why}`); process.exit(r.code === 'vault_locked' ? 7 : 5); }
-  main(r.token);
+  main(r.token, r.hubPub);
 });
 
-function main(hostToken) {
+function main(hostToken, hubPub = null) {
+// lane lg-remote-hardening (B-7f0b — design q-042 D3 half b): THIS child holds no hub key. Its hello names the hub's PUBLIC key
+// (the link-token door's answer) with a fresh nonce; a device that pins this hub answers with its own nonce, and the hub's
+// SIGNING DOOR (POST /api/agent/vault/link-sign, this child's session token) signs THE ONE SHAPE over that device's key and
+// nonce — the `ok` carrying it goes before any op. A device too old to ask (no nonceD) is never asked for anything.
+const MA = require('../mutual-auth.js');
+const nonceH = MA.newNonce({ crypto: require('crypto') });
+const helloOf = () => ({ op: 'hello', protoVersion: PROTO_VERSION, hostToken, serverVersion: cfg.version || '0', nonceH, ...(hubPub ? { hubPub } : {}) });
+function proveHub(ack) {
+  return new Promise((resolve) => {
+    if (!hubPub || !MA.isNonce(ack && ack.nonceD)) return resolve({ ok: true });
+    const port = Number((cfg.hub && cfg.hub.port) || process.env.CLAUDE_WEBUI_PORT) || 0;
+    const session = String(process.env.VIBESPACE_SESSION_TOKEN || '');
+    const body = JSON.stringify({ devPub: ack.devPub, nonceD: ack.nonceD });
+    const req = require('http').request({ host: '127.0.0.1', port, method: 'POST', path: '/api/agent/vault/link-sign', headers: { Authorization: 'Bearer ' + session, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }, timeout: 15000 }, (res) => {
+      let b = ''; res.setEncoding('utf8');
+      res.on('data', (d) => { if (b.length < 65536) b += d; });
+      res.on('end', () => { let j = null; try { j = JSON.parse(b); } catch { } if (res.statusCode === 200 && j && typeof j.sigH === 'string') resolve({ ok: true, sigH: j.sigH }); else resolve({ ok: false, code: (j && j.code) || `http-${res.statusCode}`, why: (j && j.error) || `the hub answered ${res.statusCode}` }); });
+    });
+    req.on('timeout', () => req.destroy(new Error('timed out')));
+    req.on('error', (e) => resolve({ ok: false, code: 'hub-unreachable', why: e.message }));
+    req.end(body);
+  });
+}
+const afterProof = (mux, ack, go) => proveHub(ack).then((p) => {
+  if (!p.ok && p.code === 'vault_locked') { log(`the hub's signature waits for the vault (${p.code}): ${p.why}`); process.exit(7); } // the reader: the link-token branch's wait
+  if (!p.ok && p.code === 'not_this_machine') { log(`the hub has not learned this device's key yet — waiting for its own link to the machine (${p.code})`); process.exit(4); } // retried by the wrapper
+  if (!p.ok) { log(`the hub's signature for this device was refused (${p.code}): ${p.why}`); process.exit(4); }
+  if (p.sigH) mux.control({ op: 'ok', sigH: p.sigH });
+  go();
+});
 
 // ── transport: ssh stdio bridge to the standing remote daemon, OR a loopback
 // TCP bridge for DIAL devices (graduation B.2: the dialed-in ws link lives
@@ -126,8 +156,7 @@ if (cfg.pty) {
   const mux = new Mux(stream, {
     onControl(msg) {
       if (msg.op === 'hello-ack') {
-        const s = size();
-        mux.control({ op: 'open-session', chan: CHAN, cmd: cfg.pty.cmd, args: cfg.pty.args, cwd: cfg.pty.cwd, env: cfg.pty.env, cols: s.cols, rows: s.rows });
+        afterProof(mux, msg, () => { const s = size(); mux.control({ op: 'open-session', chan: CHAN, cmd: cfg.pty.cmd, args: cfg.pty.args, cwd: cfg.pty.cwd, env: cfg.pty.env, cols: s.cols, rows: s.rows }); });
         return;
       }
       if (msg.op === 'session-open') {
@@ -162,7 +191,7 @@ if (cfg.pty) {
     onDead(reason) { log('transport dead: ' + reason); process.exit(opened ? 1 : 5); },
   });
   roads = AR.attachRoads({ mux, chan: CHAN, stdin: process.stdin, stdout: process.stdout });
-  onTransportReady(() => mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken, serverVersion: cfg.version || '0' }));
+  onTransportReady(() => mux.control(helloOf()));
   process.stdin.on('data', (d) => { roads.in(d); });   // B-beaf: a held link pauses stdin (it never queues here without bound)
   process.stdin.resume();
   // DEFER the size read: on SIGWINCH, Node's OWN listener refreshes
@@ -177,13 +206,13 @@ if (cfg.pty) {
     onControl(msg) {
       if (msg.op === 'hello-ack') {
         const spawnSpec = cfg.spawn || null;
-        mux.control(spawnSpec
+        afterProof(mux, msg, () => mux.control(spawnSpec
           ? { op: 'open-pipe-session', chan: CHAN, sid: cfg.sid, cmd: spawnSpec.cmd, args: spawnSpec.args, cwd: spawnSpec.cwd, env: spawnSpec.env, offset }
-          : { op: 'attach-pipe-session', chan: CHAN, sid: cfg.sid, offset });
+          : { op: 'attach-pipe-session', chan: CHAN, sid: cfg.sid, offset }));
         return;
       }
       if (msg.op === 'pipe-session-open') { opened = true; log(`attached sid=${cfg.sid} pid=${msg.pid} existing=${!!msg.existing} offset=${offset}`); return; }
-      if (msg.op === 'auth-fail') { log('auth failed — host token mismatch'); process.exit(4); }
+      if (msg.op === 'auth-fail') { log(msg.code ? `refused by the device (${msg.code}): ${String(msg.error || '').slice(0, 200)}` : 'auth failed — host token mismatch'); process.exit(4); }
       if (msg.op === 'proto-mismatch') { log('protocol mismatch'); process.exit(4); }
       if (msg.op === 'session-error') { log('session error: ' + msg.error); process.exit(6); }
     },
@@ -208,7 +237,7 @@ if (cfg.pty) {
   });
   roads = AR.attachRoads({ mux, chan: CHAN, stdin: process.stdin, stdout: process.stdout });
   onTransportReady(() => {
-    mux.control({ op: 'hello', protoVersion: PROTO_VERSION, hostToken, serverVersion: cfg.version || '0' });
+    mux.control(helloOf());
   });
 
   process.stdin.on('data', (d) => { roads.in(d); });   // B-beaf: a held link pauses stdin

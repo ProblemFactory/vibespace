@@ -11,7 +11,10 @@ import { api, oauthLinkRow, mountsDialog, wireOAuthConnect, reauthDialog } from 
 import { revealHeaders, askRevealPassword } from './vault-reveal.js'; // lane vault-contents-window r2: a set-up vault prefills secrets only inside the reveal window of this page
 import { classifyPrivateKey } from '../ssh-key-format.js'; // shared with the server (CJS pulled into the bundle, like task-color-seq.js)
 import { readSshBlock, formOf, confirmRows, jumpVerdict, jumpTargetOk, MAX_CHARS as SSH_BLOCK_MAX, MAX_LINES as SSH_BLOCK_LINES } from '../ssh-config-block.js'; // B-2ca0 commit 2: a pasted ssh config block (PURE, bundled; the hub's add asks the same jump verdict)
-import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
+import { dialRowState, pairNameVerdict, pairNameShown, deviceIdOf, commandOsOf, pairingDoorOf } from '../dial-facts.js'; // lane-pairing ③: THE one dial state of a machine row (PURE, bundled); verify-r4 F6: the name rule + its collision verdict
+/** lane lg-remote-hardening (主开发 00:36Z smalls 4–5): the machine's dial link is IN but refused (its token, its greeting, a key) —
+ *  the one row state read where a surface would otherwise call it live. */
+const dialLinkRefused = (h) => { const r = dialRowState(h); return !!(r && /^(?:auth-fail|greeting-refused|key-refused)$/.test(r.state)); };
 import { dialAddressPicker, dialStateText, dialHistoryText, dialStateShort, generateConsequenceText } from './dial-address-picker.js'; // lane-pairing ①③: the address choice + the state's words
 import { openExitAccessDialog, exitSummaryText, exitGranted, lastRunText, agentUpgradeText } from './exit-access-dialog.js'; // lane-pairing ⑥: "Who can use it" 
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane exit-see-whole: the machine's command list, ONE click from its row (the icon + the last-run line)
@@ -40,6 +43,22 @@ export function pullErrorText(m) { return mountErrorText(m); }
  *  every toast and dialog line that shows err.message shows the reader's words */
 const mmApi = (url, opts) => api(url, opts).catch((e) => { throw Object.assign(new Error(thrownText(e, tr('Failed'))), { code: e && e.code, body: e && e.body, door: e && e.door }); });
 
+
+/** lane lg-remote-hardening (B-7f0b — the pictures' second take, 2026-11-18): a refused ssh host key, or a pin that cannot be
+ *  used, in the PAGE's words. The row's red line and the Test toast printed the server's English sentence as it came, on a
+ *  Chinese page; the test route hands its code + facts (fp, pinned) and the page words them here. Any other error = its own
+ *  message, as before. */
+function hostKeyErrorWords(h, e) { // lane lg-remote-hardening (unit 2; renamed at the move onto checkpoint 32: the train's hostErrorWords(raw, target) is the need line's)
+  const name = (h && h.name) || '';
+  if (e && e.code === 'hosts-unread') return hostsHeldWords(); // the meeting with bl-jobs' held store (B-f276 §8): worded by its code
+  if (e && e.code === 'host-key-name') return tr('{name}: its host-key pin cannot be used — its address is not one plain host name, so VibeSpace does not connect to it. Remove it and add it again with its plain address (Remote → {name} → Remove host, then Remote → Add machine)', { name });
+  if (!e || e.code !== 'host-key-changed') return (e && e.message) || '';
+  const b = e.body && typeof e.body === 'object' ? e.body : {};
+  const fp = typeof b.fp === 'string' && b.fp ? b.fp : '?';
+  return b.pinned === true
+    ? tr('{name} showed an ssh host key that is not the key pinned for it ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the machine and pin it again in Remote → {name} → Host key…', { name, fp })
+    : tr('{name} showed an ssh host key that is not the key this VibeSpace saw before ({fp}) — VibeSpace did not connect. If its key really changed, compare it on the machine and pin the key it shows now in Remote → {name} → Host key…', { name, fp });
+}
 
 // 16x16 stroke icons (project convention — no emoji in chrome)
 const MI = {
@@ -1016,7 +1035,7 @@ export function installSidebarMounts(Sidebar) {
         if (!st) this._patchHostFace(h, hlist);
         api(`/api/hosts/${h.id}/test`, { method: 'POST' })
           .then((r) => { this._hostStatus[h.id] = { ...r, at: Date.now() }; })
-          .catch((e) => { this._hostStatus[h.id] = { error: e.message, at: Date.now() }; })
+          .catch((e) => { this._hostStatus[h.id] = { error: hostKeyErrorWords(h, e), code: e.code || null, at: Date.now() }; })
           .finally(() => {
             this._hostTesting.delete(h.id);
             this._patchHostFace(h, hlist);
@@ -1033,7 +1052,7 @@ export function installSidebarMounts(Sidebar) {
         dot: (st ? (st.ok ? 'ok' : 'err') : 'off'),
         dotTip: (testing ? tr('Checking the connection…') : (st ? (st.ok ? `${st.latencyMs}ms` : (st.error || 'unreachable')) : 'Not tested yet')),
         badge: (st?.ok && st.tools ? `<span class="mounts-badge${st.tools.claude && st.tools.dtach ? '' : ' mounts-badge-red'}" title="Ready to run sessions — dtach ${st.tools.dtach ? '✓' : '✗ (missing)'}, Node ${st.tools.node ? '✓' : '✗ (missing)'}, Claude ${st.tools.claude ? '✓' : '✗ (missing)'}. Click Set up to install what’s missing.">${st.tools.claude && st.tools.dtach ? 'READY' : 'NEEDS SETUP'}</span>` : ''),
-        chip: testing ? { kind: 'pending', text: tr('testing…'), title: tr('Checking the connection…') } : (st && !st.ok ? { kind: 'error', text: tr('unreachable'), title: st.error || '' } : null),
+        chip: testing ? { kind: 'pending', text: tr('testing…'), title: tr('Checking the connection…') } : (st && !st.ok ? { kind: 'error', text: st.code === 'host-key-changed' ? tr('host key changed') : st.code === 'host-key-name' ? tr('pin cannot be used') : tr('unreachable'), title: st.error || '' } : null), // lane lg-remote-hardening units 2–3: a refused host key, an unusable pin, are named, never «unreachable»
         // a FAILED probe surfaced in the row itself (real report: the error lived only in the dot's hover tooltip)
         errline: st && !st.ok ? this._hostErrFacts(h, st) : null,   // + the need line's inputs (the meeting with ui-needs-a-button)
       };
@@ -1140,13 +1159,13 @@ export function installSidebarMounts(Sidebar) {
       const dialWords = rs ? dialStateText(rs) : '';
       const face = isDial ? null : this._hostFace(h); // B-a31a cure 2: the status face the probe patches in place
       row._face = face;
-      const dot = isDial ? (rs.state === 'connected' ? 'ok' : (rs.state === 'auth-fail' || rs.state === 'refused') ? 'err' : 'off') : face.dot;
+      const dot = isDial ? (rs.state === 'connected' ? 'ok' : (rs.state === 'auth-fail' || rs.state === 'greeting-refused' || rs.state === 'key-refused' || rs.state === 'refused') ? 'err' : 'off') : face.dot;
       const dotTip = isDial
         ? [dialWords, dialHistoryText(rs)].filter(Boolean).join(' · ') + (rs.state === 'refused' && h.dial?.lastRefusal?.from ? ` · ${tr('from {addr}', { addr: h.dial.lastRefusal.from })}` : '')
         : face.dotTip;
       const nameTip = isDial ? tr('Dial-out device — it connects TO this instance over a websocket (no ssh)') : `${h.user ? h.user + '@' : ''}${h.host}${h.port == null ? '' : ':' + h.port}`;   // B-2ca0: a port left to the ssh config is not said
       const badge = isDial
-        ? `<span class="mounts-badge${rs.state === 'connected' ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${escHtml(rs.state === 'connected' ? tr('DEVICE') : rs.state === 'auth-fail' ? tr('KEY REFUSED') : rs.state === 'refused' ? tr('REFUSED') : tr('OFFLINE'))}</span>`
+        ? `<span class="mounts-badge${rs.state === 'connected' ? '' : ' mounts-badge-red'}" title="${escHtml(tr('Dial-out device — it connects TO this instance over a websocket (no ssh)'))}">${escHtml(rs.state === 'connected' ? tr('DEVICE') : rs.state === 'auth-fail' ? tr('KEY REFUSED') : rs.state === 'refused' ? tr('REFUSED') : rs.state === 'greeting-refused' ? tr('GREETING REFUSED') : rs.state === 'key-refused' ? (/-mismatch$/.test(rs.code || '') ? tr('KEY MISMATCH') : tr('KEY REFUSED')) : tr('OFFLINE'))}</span>`
         : face.badge;
       // lane win-input-elevated: a Windows device agent the owner raised to run as administrator wears an ADMIN badge; a Windows
       // device at normal rights offers the 「Run as administrator…」 door (below). Elevation is Windows-only and the owner's choice.
@@ -1162,6 +1181,11 @@ export function installSidebarMounts(Sidebar) {
       // The auto-probe can take up to 10s (fresh ssh) — during it the grey dot
       // was indistinguishable from "never tested / dead machine". Say checking.
       if (face && face.chip) top.appendChild(hostStateChip(face.chip.kind, { text: face.chip.text, title: face.chip.title }));
+      const pinChip = (kind, o) => { const n = hostStateChip(kind, o); n.classList.add('host-pin-chip'); return n; }; // a key-pin chip: the probe's face patch (mounts-live patchHostFace) leaves it alone
+      if (h.deviceKeyRefused && /^hub[-_]/.test(h.deviceKeyRefused.code || '')) top.appendChild(pinChip('error', { text: h.deviceKeyRefused.code === 'hub_identity_lost' ? tr('this hub lost its key') : tr('refused this hub\'s key'), title: tr('This machine pins the key of the hub it was paired with and this hub did not prove it — Host key… says what to do.') })); // lane lg-remote-hardening (D3 half b)
+      else if (h.deviceKeyRefused) top.appendChild(pinChip('error', h.deviceKeyRefused.code === 'device-key-missing' && !h.deviceKey
+        ? { text: tr('no device key proved'), title: tr('Its agent proved no device key, and this machine\'s record asks for one — Host key… says what to do.') }
+        : { text: tr('device key changed'), title: pairingDoorOf(h) === 'pairing' ? tr('Its agent did not prove the device key VibeSpace pinned — this hub\'s link to its agent is refused until you pair it again or forget the key (Host key…).') : tr('Its agent did not prove the device key VibeSpace pinned — this hub\'s link to its agent is refused until you forget the key (Host key…).') })); // lane lg-remote-hardening (D3): the words by code and by the row's own door
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const ibtn = (svg, title, fn, cls = '') => {
@@ -1189,21 +1213,25 @@ export function installSidebarMounts(Sidebar) {
               const tools = ['dtach', 'node', 'claude', 'codex'].filter(k => t[k]);
               showToast(`${h.name} reachable · ${r.latencyMs}ms · ${tools.length ? tools.join(', ') : 'not set up yet — click Set up'}`);
             }
-          } catch (e) { this._hostStatus[h.id] = { ok: false, error: e.message }; throw e; }
+          } catch (e) { const said = hostKeyErrorWords(h, e); this._hostStatus[h.id] = { ok: false, error: said, code: e.code || null, at: Date.now() }; throw Object.assign(new Error(said), { code: e.code }); }
         }),
       );
       if (!isDial) actions.append(ibtn(MI.wrench, 'Set up (install the tools needed to run agents)', () => { this._showBootstrapDialog(h); }));
+      // lane lg-remote-hardening (B-7f0b): the ssh host-key pin's door — accent while the machine refuses a changed key
+      // lane lg-remote-hardening (D3): on a dial row the same door shows its DEVICE key (accent while it was refused)
+      actions.append(ibtn(MI.key, tr('Host key of "{name}"…', { name: h.name }), () => { this._showHostKeyDialog(h); }, (st && st.code === 'host-key-changed') || h.deviceKeyRefused ? 'mounts-icon-accent' : ''));
       // B-6640: graduate an ssh machine to dial-out (installs the daemon as a
       // persistent service so it dials back over ws — banner-hang/ControlMaster/
       // per-op-child taxes gone; ssh stays as the rescue channel). h.graduated
       // + h.dialLive come from hosts.list().
-      if (!isDial) actions.append(ibtn(MI.bolt, h.graduated
-        ? tr('Dial-out: {state} — click to manage (ssh stays as rescue)', { state: h.dialLive ? tr('LIVE') : tr('installed, not dialed in') })
+      const linkRefused = h.graduated && h.dialLive && dialLinkRefused(h); // lane lg-remote-hardening (主开发 00:36Z small 4): a refused link is no «LIVE»
+      if (pairingDoorOf(h) !== 'pairing') actions.append(ibtn(MI.bolt, h.graduated
+        ? tr('Dial-out: {state} — click to manage (ssh stays as rescue)', { state: h.dialLive ? (linkRefused ? tr('dialed in, but its link is refused') : tr('LIVE')) : tr('installed, not dialed in') })
         : tr('Upgrade "{name}" to dial-out (faster + self-healing over a flaky link; ssh kept as rescue)', { name: h.name }),
-        () => { this._showGraduateDialog(h); }, h.graduated ? (h.dialLive ? 'mounts-icon-accent' : '') : ''));
+        () => { this._showGraduateDialog(h); }, h.graduated ? (h.dialLive && !linkRefused ? 'mounts-icon-accent' : '') : ''));
       // lane-pairing ②: the pairing SHEET — opening it mints nothing; its head says whether the old command ever
       // worked, and only "Generate a new command" rotates the token (saying the old one stops working)
-      if (isDial) actions.append(ibtn(MI.retry, tr('Pairing command — see the dial state, pick an address, generate a new command (keeps the row)'), async () => {
+      if (pairingDoorOf(h) === 'pairing') actions.append(ibtn(MI.retry, tr('Pairing command — see the dial state, pick an address, generate a new command (keeps the row)'), async () => {
         this._showDevicePairDialog(h);
       }));
       // lane win-input-elevated: a Windows device at normal rights ⇒ the door to raise it (the owner runs the consent-prompted
@@ -1934,10 +1962,14 @@ export function installSidebarMounts(Sidebar) {
         if (r.key && r.key.fingerprint) {
           showToast(tr('Imported {type} key {fp}', { type: r.key.type || '', fp: r.key.fingerprint }));
         }
+        // lane lg-remote-hardening (B-7f0b, q-042 D6): a NEW machine's first connection is the window a pin closes — the key it
+        // shows (a scan into a scratch file: nothing trusted) is offered for a pin BEFORE the test below dials it; closing the
+        // dialog without pinning leaves it trusted on first use, as before; a dialog that fails to open ends the wait too
+        await new Promise((resolve) => { Promise.resolve(this._showHostKeyDialog({ id: r.id, name: v.name || v.host, transport: 'ssh' }, { scanNow: true, done: resolve })).catch(() => { resolve(); try { showToast(tr('The host key of "{name}" could not be shown for a pin — open Host key… on its row to check it.', { name: v.name || v.host }), { type: 'error' }); } catch { } }); });
         // immediate connectivity test so the row shows a real status
         this._hostStatus = this._hostStatus || {};
         try { this._hostStatus[r.id] = await api(`/api/hosts/${r.id}/test`, { method: 'POST' }); showToast(tr('Machine reachable')); }
-        catch (e) { this._hostStatus[r.id] = { ok: false, error: e.message }; showToast(tr('Added, but not reachable: {error}', { error: e.message }), { type: 'error' }); }
+        catch (e) { const said = hostKeyErrorWords({ name: v.name || v.host }, e); this._hostStatus[r.id] = { ok: false, error: said, code: e.code || null, at: Date.now() }; showToast(tr('Added, but not reachable: {error}', { error: said }), { type: 'error' }); }
         this._renderMounts();
        } catch (e) {
          if (!err.isConnected) { showToast(e.message || tr('Failed'), { type: 'error' }); return; }
@@ -2420,7 +2452,7 @@ export function installSidebarMounts(Sidebar) {
       // default — a rotation is also how a leaked command is retired)
       let keepBox = null, keepLbl = null, keepNote = null;
       const keepSince = existing && h.dial ? (h.dial.lastConnectAt ?? null) : null; // verify-r6 P1: the link this sheet shows
-      if (existing && (h.online || h.dialLive)) {
+      if (existing && (h.online || h.dialLive) && !dialLinkRefused(h)) { // lane lg-remote-hardening (主开发 00:36Z small 5): a refused link carries nothing
         keepLbl = document.createElement('label');
         keepLbl.className = 'device-pair-keep';
         keepBox = document.createElement('input'); keepBox.type = 'checkbox'; keepBox.checked = false;
@@ -2563,7 +2595,9 @@ export function installSidebarMounts(Sidebar) {
       if (raised) return;   // raised: the same subject's form, as it was
       if (h.graduated) {
         const st = document.createElement('div'); st.className = 'tiny'; st.style.marginBottom = '10px';
-        st.innerHTML = h.dialLive
+        st.innerHTML = h.dialLive && dialLinkRefused(h)
+          ? tr('The daemon on this machine is <b>dialed in, but its link is refused</b> — ops fall back to ssh until it is let in; the machine\'s row says why and what to do.') // small (4)
+          : h.dialLive
           ? tr('The daemon on this machine is <b>dialing in</b> — data-plane ops (files, discovery, transcripts) ride that ws link instead of ssh. ssh stays as the rescue channel.')
           : tr('The daemon is installed but <b>not currently dialed in</b> — ops fall back to ssh until it reconnects (it retries from the machine side).');
         body.appendChild(st);
@@ -2577,7 +2611,9 @@ export function installSidebarMounts(Sidebar) {
         const rm = document.createElement('button'); rm.className = h.dialLive ? 'btn-create danger' : 'btn-cancel danger'; rm.textContent = tr('Remove dial-out (keep the ssh machine)');
         rm.onclick = async () => {
           rm.disabled = true; rm.textContent = tr('Removing…');
-          try { const r = await api(`/api/hosts/${h.id}/graduate-dial`, { method: 'POST', body: JSON.stringify({ remove: true }) });
+          try { const r = await fetchJson(`/api/hosts/${h.id}/graduate-dial`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ remove: true }) }); // lane lg-remote-hardening (主开发 01:11Z small 3): its not-saved answer worded here, by its code
+            if (r && r.code === 'not_durable') { showToast(tr('Dial-out is removed from "{name}", but the change is not saved yet — VibeSpace keeps trying; if the hub restarts first, the machine shows its dial-out again.', { name: h.name }), { type: 'warn', duration: 12000 }); close(); this._refresh?.(); return; }
+            if (!r) throw new Error(tr('server unreachable'));
             if (r?.error) throw new Error(r.error);
             showToast(tr('Dial-out removed — "{name}" is a plain ssh machine again', { name: h.name })); close(); this._refresh?.();
           } catch (e) { rm.disabled = false; rm.textContent = tr('Remove dial-out (keep the ssh machine)'); showToast(e.message, { type: 'error' }); }
@@ -2613,6 +2649,61 @@ export function installSidebarMounts(Sidebar) {
         } catch (e) { go.disabled = false; go.textContent = tr('Upgrade to dial-out'); if (!err.isConnected) showToast(e.message, { type: 'error' }); else err.textContent = e.message; }
       };
       body.appendChild(go);
+    },
+
+    // lane lg-remote-hardening (B-7f0b, q-042 D6): THE HOST-KEY PIN of an ssh machine — what is pinned, what the machine
+    // shows now, pin it / remove the pin. The person compares the fingerprint with the machine's own (the recipe is shown);
+    // the hub pins only a key the machine shows again at that moment (src/hosts.js pinHostKeys).
+    async _showHostKeyDialog(h, { scanNow = false, done = null } = {}) {
+      // the reader of unit 3 (a must): an item's jump hands {id, name} — the dialog draws from the machine's WHOLE record (its
+      // transport, its device key, a refusal), so a partial one is read from the hosts route first (fresh, never this tab's cache)
+      if (h && h.id && h.transport === undefined) { try { h = ((await api('/api/hosts')).hosts || []).find((x) => x.id === h.id) || h; } catch { } }
+      const { body, close, raised } = createModalShell({ id: 'host-key-dialog', key: h.id, title: tr('Host key of "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form', minWidth: '420px', onClose: () => { try { done?.(); } catch { } } });
+      if (raised) { try { done?.(); } catch { } return; }   // raised: the same subject's form, as it was
+      const url = `/api/hosts/${encodeURIComponent(h.id)}/host-keys`;
+      const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
+      const typeWord = (t) => String(t || '').replace(/^ssh-|^ecdsa-sha2-|@openssh\.com$/g, '').toUpperCase();
+      const row = (k, mark) => { const d = el('div', 'host-key-row'); d.append(el('code', 'host-key-fp', `${typeWord(k.type)} ${k.fp}`)); if (mark) d.append(el('span', 'host-key-mark ' + mark.cls, mark.text)); return d; };
+      const btn = (text, cls, fn) => { const b = el('button', cls, text); b.onclick = async () => { b.disabled = true; try { await fn(); } catch (e) { showToast(hostKeyErrorWords(h, e) || tr('Failed'), { type: 'error' }); } finally { b.disabled = false; } }; return b; };
+      const isDialRow = h.transport === 'dial';
+      // lane lg-remote-hardening (D3): the DEVICE key its agent proves — pinned at its first proof, refused when it changed
+      const deviceSection = () => {
+        const dk = h.deviceKey, dr = h.deviceKeyRefused;
+        body.append(el('p', 'agents-note', dk && dk.fp ? tr('Device key: {fp}, pinned at its first connection.', { fp: dk.fp }) : tr('Device key: not pinned yet — its agent proves one at its next connection after it updates.')));
+        const hubSide = dr && /^hub[-_]/.test(dr.code || '');
+        if (dr && !hubSide) body.append(row({ type: '', fp: dr.fp || '—' }, { cls: 'host-key-diff', text: dr.code === 'device-key-missing' ? tr('Refused: its agent proved no key.') : tr('Refused: its agent showed another key.') }));
+        // D3 half b: the machine refused THIS hub's key — its door is pairing again; a hub that lost its key makes a new one first
+        // must B (主开发's verdict of 2026-11-18): the door is on THIS row's road — a dialed device pairs again; an ssh machine is let
+        // pin this hub's key again over ssh (DELETE /api/hosts/:id/hub-pin)
+        // lane lg-remote-hardening (the third read): «Let it pin this hub's key» for a mismatch on an ssh road, and for any of a plain ssh row's own pin refusals
+        if (hubSide && !isDialRow && (dr.code === 'hub-key-mismatch' || (/^hub-/.test(dr.code || '') && pairingDoorOf(h) === 'none'))) { body.append(el('p', 'agents-note host-key-diff', tr("This machine refused this hub's key: it pins the key of the hub it was set up with. If that is this hub, let it pin this hub's key again (VibeSpace removes the old pin over ssh)."))); const a = el('div', 'dialog-actions'); a.append(btn(tr("Let it pin this hub's key"), 'btn-create', async () => { if (!(await showConfirmDialog({ title: tr("Let {name} pin this hub's key?", { name: h.name }), message: tr("Do this only if {name} was set up with this hub. It then trusts this hub's current key.", { name: h.name }), confirmText: tr("Let it pin this hub's key") }))) return; await api(`/api/hosts/${encodeURIComponent(h.id)}/hub-pin`, { method: 'DELETE' }); showToast(tr("It pins this hub's key at its next connection")); h.deviceKeyRefused = null; h.hubPinned = null; this._renderMounts(); close(); })); body.append(a); }
+        else if (hubSide) body.append(el('p', 'agents-note host-key-diff', dr.code === 'hub_identity_lost' ? tr('This hub lost its own key, and this machine pins it. Make a new hub key, then pair every machine again.') : dr.code === 'hub_identity_unavailable' ? tr('This hub could not read its own key to prove it to this machine. Its link is refused until it can; its next greeting asks again.') : isDialRow ? tr('This machine refused this hub\'s key: it pins the hub it was paired with. If that is this hub, pair it again (Pairing command…).') : tr('This machine refused this hub\'s proof of its key. Make a new pairing: Dial-out → Remove dial-out, then Upgrade to dial-out.'))); // lane lg-remote-hardening (the third read): the doors THIS row draws
+        if (dr && dr.code === 'hub_identity_lost') { const a = el('div', 'dialog-actions'); a.append(btn(tr('Make a new hub key'), 'btn-create', async () => { if (!(await showConfirmDialog({ title: tr('Make a new hub key?'), message: tr('Every machine that pinned the old key refuses this hub until it is paired again.'), confirmText: tr('Make a new hub key'), danger: true }))) return; await api('/api/hosts/hub-identity/renew', { method: 'POST' }); showToast(tr('A new hub key was made — pair each machine again')); this._renderMounts(); close(); })); body.append(a); }
+        if (!dk && h.deviceKeyForgotAt) { body.append(el('p', 'agents-note', tr('Device key forgotten: the next agent that proves a key is pinned, and one that proves none is refused. An agent that cannot prove one can be let in without a key.'))); const a = el('div', 'dialog-actions'); a.append(btn(tr('Let in without a key'), 'btn-cancel', async () => { await api(`/api/hosts/${encodeURIComponent(h.id)}/device-key?unproven=1`, { method: 'DELETE' }); showToast(tr('Let in without a key')); h.deviceKeyForgotAt = null; h.deviceKeyRefused = null; this._renderMounts(); close(); })); body.append(a); }
+        if (dk) { const a = el('div', 'dialog-actions'); a.append(btn(tr('Forget the device key'), 'btn-cancel', async () => { await api(`/api/hosts/${encodeURIComponent(h.id)}/device-key`, { method: 'DELETE' }); showToast(tr('Device key forgotten')); h.deviceKey = null; h.deviceKeyRefused = null; this._renderMounts(); close(); })); body.append(a); }
+      };
+      if (isDialRow) { deviceSection(); const a = el('div', 'dialog-actions'); a.append(btn(tr('Close'), 'btn-cancel', async () => close())); body.append(a); return; }
+      const draw = (v) => {
+        body.textContent = '';
+        if (h.deviceKey || h.deviceKeyRefused || h.deviceKeyForgotAt) deviceSection(); // a forgotten key's ask and its «Let in without a key» show on every row
+        const pinned = !!(v.hostKeys && v.hostKeys.length);
+        const isPinned = (k) => pinned && v.hostKeys.some((p) => p.fp === k.fp);
+        body.append(el('p', 'agents-note', pinned ? tr('Pinned: VibeSpace connects to {name} only while it shows this key.', { name: h.name }) : tr('Not pinned: VibeSpace trusts the key {name} showed the first time it connected.', { name: h.name })));
+        if (pinned) for (const k of v.hostKeys) body.append(row(k));
+        if (v.seen) {
+          body.append(el('p', 'agents-note', tr('{name} shows now:', { name: h.name })));
+          for (const k of v.seen) body.append(row(k, pinned ? (isPinned(k) ? { cls: 'host-key-same', text: tr('the pinned key') } : { cls: 'host-key-diff', text: tr('not the pinned key') }) : null));
+          body.append(el('p', 'agents-note', tr('Compare it with the key on the machine itself (its command is below).')));
+          { const f = techFold([tr('On the machine: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub')], { mono: true }); if (f) body.append(f); }
+        }
+        const acts = el('div', 'dialog-actions');
+        acts.append(btn(tr('Close'), 'btn-cancel', async () => close()));
+        if (pinned) acts.append(btn(tr('Remove the pin'), 'btn-cancel', async () => { const r = await api(url, { method: 'DELETE' }); showToast(tr('Host key pin removed')); draw({ ...r, seen: v.seen }); this._renderMounts(); }));
+        if (!v.seen) acts.append(btn(tr('Check the key now'), 'btn-create', async () => draw(await api(url + '?scan=1'))));
+        else if (v.seen.length && !v.seen.every(isPinned)) acts.append(btn(pinned ? tr('Pin the key it shows now') : tr('Pin this key'), 'btn-create', async () => { const r = await api(url, { method: 'POST', body: JSON.stringify({ fps: v.seen.map((k) => k.fp) }) }); showToast(tr('Host key pinned')); draw({ ...r, seen: v.seen }); this._renderMounts(); }));
+        body.append(acts);
+      };
+      try { draw(await api(scanNow ? url + '?scan=1' : url)); } catch (e) { showToast(hostKeyErrorWords(h, e) || tr('Failed'), { type: 'error' }); close(); }
     },
 
     // Bootstrap: dedicated step-progress UI with an expandable live log

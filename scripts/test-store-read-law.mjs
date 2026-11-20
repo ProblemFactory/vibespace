@@ -412,7 +412,7 @@ console.log('§1b a removal on disk before it is said or torn down: the graduate
   ok(WSRC.split(GD0).length === 2 && WSRC.split(GDW).length === 2, 'control setup: the graduate-dial route and its removal\'s wait for the disk are found once');
   const routeOf = (src, landing) => {
     const i = src.indexOf(GD0), j = src.indexOf('\n});\n', i); let handler = null; const calls = [];
-    const hosts = { get: (id) => ({ id, name: 'old box', transport: 'ssh', dialRoot: '', deviceId: null }), sshArgs: () => [], sshEnv: () => ({}), ungraduateDial: (id) => calls.push(id), persisted: () => landing() };
+    const hosts = { get: (id) => ({ id, name: 'old box', transport: 'ssh', dialRoot: '', deviceId: null }), sshArgs: () => [], sshEnv: () => ({}), ungraduateDial: (id) => calls.push(id), persisted: () => landing(), upgradeRunning: () => false };   // lane lg-remote-hardening's meeting: Remove dial-out first asks whether an upgrade runs (none here)
     new Function('app', 'hosts', 'agentdDials', 'bcastAll', 'require', 'fs', 'path', 'rootDir', 'graduateHostToDial', src.slice(i, j + 4))(   // eslint-disable-line no-new-func
       { post: (p, fn) => { handler = fn; } }, hosts, new Map(), () => { }, (m) => { throw new Error(`the removal road loads nothing (${m})`); }, fs, path, ROOT, null);
     return { handler, calls };

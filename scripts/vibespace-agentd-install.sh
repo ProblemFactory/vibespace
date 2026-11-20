@@ -348,6 +348,9 @@ elif [ ! -f "$ROOT/state/token" ]; then
 fi
 chmod 600 "$ROOT/state/token"
 echo "→ host token at $ROOT/state/token"
+# lane lg-remote-hardening (design q-042 D3 half b): a pairing run here is the person re-trusting a hub — the hub key this
+# device pinned is forgotten; the next hub that proves its key under this token is pinned
+rm -f "$ROOT/state/hub.pub"
 # THE RELEASE-KEY PIN RESETS (design q-042 D2): a (re-)pair is the owner's own act — a new trust-on-first-use. The bundle
 # just landed pins ITS release keys at its first start (src/agentd/agentd.js) — when it carries none (a build before the
 # first signed release), the first validly signed update it is offered; a lost release key is recovered this way. The

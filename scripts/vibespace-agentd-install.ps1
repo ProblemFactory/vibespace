@@ -156,6 +156,9 @@ if ($Allow) {
 
 Set-Content -NoNewline -Path (Join-Path $root 'state\token') -Value $HostToken
 Write-Host "-> host token at $root\state\token"
+# lane lg-remote-hardening (design q-042 D3 half b): a pairing run here is the person re-trusting a hub -- the hub key this
+# device pinned is forgotten; the next hub that proves its key under this token is pinned
+Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $root 'state\hub.pub')
 # THE RELEASE-KEY PIN RESETS (design q-042 D2): a (re-)pair = a new trust-on-first-use; the new bundle pins ITS keys at its first start
 Remove-Item (Join-Path $root 'state\trusted-keys.json') -Force -ErrorAction SilentlyContinue
 # ...and the version floor with it (fix r2: the newest version this install ran — a re-pair may land an older hub's agent)

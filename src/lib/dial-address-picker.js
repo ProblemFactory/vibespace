@@ -208,6 +208,25 @@ export function dialStateText(rs) {
 export function dialHistoryText(rs) {
   return rs && rs.state === 'connected' && rs.n > 0 ? t('Before that, {n} attempts failed ({reason})', { n: rs.n, reason: dialReasonText(rs.reason) }) : '';
 }
+/** lane lg-remote-hardening (B-7f0b; the read's must 2): a refused key's row names a door THIS row has — by its side, its code and
+ *  the row's own pairing door (dial-facts pairingDoorOf): a dialed device pairs again (Pairing command…); a machine upgraded from
+ *  ssh is let pin this hub's key again (Host key…); a hub that lost its own key, or cannot read it now, sends to Host key… (a new
+ *  hub key comes first); a forgotten pin whose agent proved nothing is said as that, never as «the key VibeSpace pinned». */
+function keyRefusedText(rs) {
+  if (rs.side === 'hub') {
+    if (rs.code === 'hub_identity_lost') return t('Connected, but this hub lost the key this machine pins — Host key… says what to do');
+    // the second read's must: the Host key dialog draws «Let it pin this hub's key» for hub-key-mismatch on an ssh row ONLY — a
+    // missing / malformed / unsigned proof on a dial-out row is a new pairing (its own Dial-out doors); a key this hub cannot read
+    // now is the hub's to mend (no door on the row: its next greeting asks again)
+    if (rs.code === 'hub_identity_unavailable') return t('Connected, but this hub could not read its own key to prove it — its link is refused until it can; its next greeting asks again');
+    if (rs.door === 'pairing') return t('Connected, but it refuses this hub\'s key — it was paired with another hub, or this hub lost its key; pair it again (Pairing command…)');
+    return rs.code === 'hub-key-mismatch' ? t('Connected, but it refuses this hub\'s key — it was set up with another hub; Host key… lets it pin this hub\'s key again') : t('Connected, but it refused this hub\'s proof of its key — make a new pairing: Dial-out → Remove dial-out, then Upgrade to dial-out');
+  }
+  if (rs.code === 'device-key-missing' && !rs.pinned) return t('Connected, but its agent proved no device key, and this machine\'s record asks for one — its link is refused; Host key… says what to do');
+  // the third read: a malformed / unsigned proof while NO key is pinned — its door is a new pairing (the row's own)
+  if (!rs.pinned) return rs.door === 'pairing' ? t('Connected, but its agent\'s proof of its device key was refused, and no key is pinned — pair it again (Pairing command…)') : t('Connected, but its agent\'s proof of its device key was refused, and no key is pinned — make a new pairing: Dial-out → Remove dial-out, then Upgrade to dial-out');
+  return t('Connected, but its agent did not prove the device key VibeSpace pinned — its link is refused; Host key… says what to do');
+}
 function dialStateBase(rs) {
   const time = rs && rs.at ? hhmm(rs.at) : '';
   const host = (rs && rs.host) || t('this server');
@@ -216,6 +235,8 @@ function dialStateBase(rs) {
     // read on the dot's tooltip (dialHistoryText), never a second clause on the row
     case 'connected': return t('Connected since {time}', { time });
     case 'auth-fail': return t('Connected, but the device refuses this server\'s key — it was installed with a different command; generate a new one');
+    case 'key-refused': return keyRefusedText(rs); // lane lg-remote-hardening (B-7f0b): a refused key's row says so, with its door
+    case 'greeting-refused': return t('Connected, but its agent\'s greeting was refused — update its agent, or rerun its install command on it'); // lane lg-remote-hardening, unit 4's cure: its door named
     // naive-user N-refused: a refusal newer than the current command means the device still runs an OLDER one — and
     // the newest is usually in the user's hands (a Generate just made it): "generate a new one" sent the person round the
     // rotation loop the lane exists to end (each Generate retires the command the person was about to paste). Name the

@@ -127,6 +127,7 @@ const TABLE = {
   'src/agentd/agentd.js': 'daemon listen socket — daemonSocketPath + the witness; the --stdio bridge reads witnessOrRule',
   'src/agentd/client.js': 'hub local device #0 transport — witnessOrRule (the same function)',
   'src/hosts.js': 'ssh ControlPath masters — os.tmpdir()/vs-cm-<uid>, short by construction (existing)',
+  'src/host-keys.js': 'the pinned ssh road\'s options — `ControlPath=none` (with ControlMaster=no) turns the master socket OFF for a refused pin and the key scan: it builds no socket path (lane lg-remote-hardening, D6)',
   'src/browser-profiles.js': 'agent-browser session sockets — its own socketDirDecision (SOCKET_PATH_MAX = 103, existing)',
   'src/browser-attach.js': 'agent-browser session sockets on the attach road — the per-config root `<base>/vs-ab-<uid>/<profileId>` sized against the same 103 bytes (attachSocketDir `fits`; lane one-browser-b1)',
   'src/browser-facts.js': 'agent-browser — reads the CLI\'s own socketDir (browser-profiles\' rule)',

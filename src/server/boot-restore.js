@@ -1092,6 +1092,7 @@ try { restoreAgentdPipeSessions(); } catch (e) { console.warn('[restore] agentd 
 //    /proc/<pid>/environ and the new `ssh -R` binds the SAME port, so the
 //    agent tools' back-tunnel heals completely.
 async function readoptOrphanKeeperSessions() {
+  await require('./agent-listener.js').ready(); // lane lg-remote-hardening (D8b): a re-adopted session's -R ends at the door, never the hub's port for its life
   let files = [];
   try { files = fs.readdirSync(META_DIR).filter((f) => f.endsWith('.json.orphan')); } catch { return; }
   if (!files.length) return;
@@ -1136,7 +1137,7 @@ async function readoptOrphanKeeperSessions() {
     const metaFileW = path.join(BUFFERS_DIR, id + '.json');
     const inner = `export PATH="$HOME/.vibespace/bin:$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh" >/dev/null 2>&1; `
       + `exec node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${meta.keeperSid} __VS_OFFSET__`;
-    const sshArgs = [...hosts.sshArgs(h, rport ? { reverse: `${rport}:127.0.0.1:${PORT}` } : {}), '-T', '--', inner];
+    const sshArgs = [...hosts.sshArgs(h, rport ? { reverse: `${rport}:127.0.0.1:${require('./agent-listener.js').tunnelPort(PORT)}` } : {}), '-T', '--', inner]; // lane lg-remote-hardening (D8b): the agent door
     let ptyProc;
     try {
       // THE TRANSPORT'S ENV IS BUILT (lane spawn-env-debts, 2026-10-20): agentEnv() as ws-create's r6Env (the server's,

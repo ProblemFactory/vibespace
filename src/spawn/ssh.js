@@ -140,7 +140,7 @@ function sshLadder(c) {
             return {
               prelude,
               envPairs: [`VIBESPACE_API=http://127.0.0.1:${rport}`, `CLAUDE_WEBUI_PORT=${rport}`, `CLAUDE_WEBUI_SESSION_ID=${id}`],
-              tokenAssign, reverse: `${rport}:127.0.0.1:${PORT}`,
+              tokenAssign, reverse: `${rport}:127.0.0.1:${require('../server/agent-listener.js').tunnelPort(PORT)}`, // lane lg-remote-hardening (D8b): the tunnel ends at the agent door, never the whole hub
             };
           };
           // Remote account key distribution: the env-pair channel is OUT for

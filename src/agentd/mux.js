@@ -52,9 +52,8 @@ class Mux {
     this._dead = false;
     this._missedPongs = 0;
     this._pongWaiters = []; // ping(ms): resolved by the next PONG of any kind
-    stream.on('data', (d) => this._feed(d));
-    stream.on('close', () => this._die('stream closed'));
-    stream.on('error', () => this._die('stream error'));
+    this._on = [['data', (d) => { if (!this._detached) this._feed(d); }], ['close', () => { if (!this._detached) this._die('stream closed'); }], ['error', () => { if (!this._detached) this._die('stream error'); }]];
+    for (const [e, f] of this._on) stream.on(e, f);
     if (heartbeat) {
       this._hb = setInterval(() => {
         if (this._dead) return;
@@ -135,6 +134,15 @@ class Mux {
   closeChan(chan) { this._raw(T.CLOSE, chan); }
 
   destroy() { this._die('destroyed'); try { this.stream.destroy?.(); } catch { } }
+  /** let go of the stream, which stays open: its listeners leave (on a stream that cannot remove one, they turn inert), the
+   *  heartbeat ends, every handler becomes a no-op and the buffers are dropped, so no frame still in the loop is read; no onDead */
+  detach() {
+    this._detached = true; this._dead = true; if (this._hb) clearInterval(this._hb);
+    this.onControl = this.onData = this.onCloseChan = this.onDead = this.onWritable = () => {};
+    this._acc = Buffer.alloc(0); this._ctlAcc = Buffer.alloc(0);
+    for (const w of this._pongWaiters.splice(0)) { try { w(false); } catch { } }
+    for (const [e, f] of this._on) { try { if (typeof this.stream.removeListener === 'function') this.stream.removeListener(e, f); } catch { } }
+  }
 
   _die(reason) {
     if (this._dead) return;
@@ -145,8 +153,9 @@ class Mux {
   }
 
   _feed(d) {
+    if (this._detached) return;
     this._acc = this._acc.length ? Buffer.concat([this._acc, d]) : d;
-    while (this._acc.length >= 4) {
+    while (!this._detached && this._acc.length >= 4) {
       const len = this._acc.readUInt32BE(0);
       if (len < 5 || len > 64 * 1024 * 1024) return this._die('bad frame length ' + len);
       if (this._acc.length < 4 + len) return; // incomplete
@@ -164,7 +173,7 @@ class Mux {
         if (chan === 0) {
           this._ctlAcc = this._ctlAcc.length ? Buffer.concat([this._ctlAcc, payload]) : Buffer.from(payload);
           let i;
-          while ((i = this._ctlAcc.indexOf(10)) !== -1) {
+          while (!this._detached && (i = this._ctlAcc.indexOf(10)) !== -1) {
             const line = this._ctlAcc.subarray(0, i).toString('utf-8').trim();
             this._ctlAcc = this._ctlAcc.subarray(i + 1);
             if (!line) continue;

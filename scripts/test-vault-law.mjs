@@ -196,7 +196,7 @@ console.log('④ the agent side has no unlock');
   // is the request's id, never a value — the owner's paste goes to the one writer of its place through a person's door)
   // lane vault-agent-own: + the agent's OWN two-step seed and web login (`totp add` / `login add` — CREATE only: the answer names
   // the entry, never the seed or the password; its code answers through the two-step door, its login fills through the kernel)
-  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/totp,/api/agent/vault/login,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-token,/api/agent/vault/secret-request,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/words,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code (and its own seed's add), its own login's add, state, lock, mint, put, the session's own link token, the paste request, run and runnable, and (lane vault-entry-description) a proposal of an entry's words only (${agentDoors.join(', ')})`);
+  ok(agentDoors.join() === '/api/agent/vault/totp/:name,/api/agent/vault/totp,/api/agent/vault/login,/api/agent/vault/state,/api/agent/vault/lock,/api/agent/vault/mint,/api/agent/vault/put,/api/agent/vault/link-sign,/api/agent/vault/link-token,/api/agent/vault/secret-request,/api/agent/vault/run,/api/agent/vault/runnable,/api/agent/vault/words,/api/agent/vault/request,/api/agent/vault/uses', `the agent doors are the two-step code (and its own seed's add), its own login's add, state, lock, mint, put, the session's own link token, the paste request, run and runnable, and (lane vault-entry-description) a proposal of an entry's words only (${agentDoors.join(', ')})`);
   // design q-047 L1 (lane vault-totp): + the TWO-STEP CODE door — a GET answering a granted entry's CURRENT code (never the
   // seed: its answer is built from named fields only — test-vault-routes ⑨ plants a seed and ⑩'s mutant leaks it ⇒ RED)
   const codeDoor = (() => { const i = routes.indexOf("app.get('/api/agent/vault/totp/:name'"); const j = routes.indexOf('\n    });', i); return i > 0 && j > i ? routes.slice(i, j) : ''; })();
@@ -411,6 +411,9 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     'GET /api/agent/vault/state': ['receipt', 'the state, setUpAt, lockedSince and the key count — facts'],
     'POST /api/agent/vault/lock': ['purpose-door', 'the lock act; the answer is the facts'],
     'GET /api/agent/vault/totp/:name': ['receipt', 'the granted entry\'s current code + secondsLeft / period — named fields, never the seed (design q-047 L1, lane vault-totp)'],
+    // lane lg-remote-hardening (design q-042 D3 half b, 主开发's four laws): the hub's SIGNATURE for a conversation's OWN machine —
+    // one shape built by the door (a label, that machine's key, its nonce), never a value; the private key never leaves the hub
+    'POST /api/agent/vault/link-sign': ['receipt', 'the hub\'s signature over ITS conversation\'s machine\'s key and the device\'s nonce (one shape the door builds) — never the key, never a value'],
     'GET /api/agent/vault/link-token': ['exception', 'THE ONE NAMED EXCEPTION (int317): a remote conversation\'s attach child asks with its session token for ITS OWN machine\'s link token (memory only, never printed) — the device holds the same value; a session on no machine, a job or an unknown token is refused'],
     'POST /api/agent/vault/mint': ['purpose-door', 'mint: name + reference, never the value', SIB('vault-mint-put')],
     'POST /api/agent/vault/put': ['purpose-door', 'put: name + reference, never the value', SIB('vault-mint-put')],

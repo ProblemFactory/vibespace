@@ -89,7 +89,7 @@ function dialLadder(c) {
               // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
               // accepts ride the dial link back into our own server port.
               const net = require('net');
-              rf = await dm.reverseForward({ port: 0, connectLocal: () => net.connect(PORT, '127.0.0.1') });
+              rf = await dm.reverseForward({ port: 0, connectLocal: () => net.connect(require('../server/agent-listener.js').tunnelPort(PORT), '127.0.0.1') }); // lane lg-remote-hardening (D8b): the agent door, never the whole hub
               session._dialReversePort = rf.port;
             }
             // Account billing over the device link (B.3 tail, user directive

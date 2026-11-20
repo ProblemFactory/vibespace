@@ -212,6 +212,49 @@ console.log('— ⑤ the hello-ack: never push an upgrade the device\'s list lea
   ok(on.upgrades === 1, 'CONTROL: the same drift with upgrade on ⇒ the push is sent', on.upgrades);
 }
 
+console.log('— ⑤b the greeting is judged before it is believed (lane lg-remote-hardening, B-7f0b — design q-042 D8a)');
+{
+  const CL = require('../src/agentd/client.js');
+  const { Mux, PROTO_VERSION } = require('../src/agentd/mux.js');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const good = { op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '1.1.1', capabilities: ['probe', 'run-shell', 'usage-scan-hub-cursor'], platform: 'linux', posixShells: ['sh', 'bash'], arch: 'x64', nodeVersion: 'v22.1.0', openssl: '3.0.13', nodeOwn: true, elevated: false };
+  const older = { op: 'hello-ack', protoVersion: PROTO_VERSION, daemonVersion: '2.300.0' }; // an older agent: the fields it never said are not judged
+  const T = [[good, true], [older, true],
+    [{ ...good, platform: 'openharmony' }, true], [{ ...good, platform: 'evil os' }, false], [{ ...good, platform: 'x'.repeat(33) }, false], [{ ...good, capabilities: Array.from({ length: 257 }, (_, i) => 'c' + i) }, false], [{ ...good, capabilities: ['probe', 'has space'] }, false],
+    [{ ...good, capabilities: 'probe' }, false], [{ ...good, posixShells: ['/bin/sh; rm -rf ~'] }, false], [{ ...good, posixShells: Array.from({ length: 17 }, () => 'sh') }, false],
+    [{ ...good, daemonVersion: 'x'.repeat(41) }, false], [{ ...good, daemonVersion: 5 }, false], [{ ...good, nodeVersion: 'v'.repeat(65) }, false], [{ ...good, elevated: 'yes' }, false],
+    [{ ...good, pad: 'x'.repeat(70 * 1024) }, false]];
+  const wrong = T.filter(([m, want]) => CL.helloAckVerdict(m).ok !== want);
+  ok(!wrong.length && CL.HELLO_BOUNDS.capabilities === 256 && CL.HELLO_BOUNDS.bytes === 65536,
+    `PURE helloAckVerdict, ${T.length} rows: a well-formed greeting and an older agent's (fields it never said) pass (a platform WORD Node.js does not name yet passes — never a lock-out); a platform that is no word, 257 capabilities, a capability with a space, capabilities not a list, a shell that is no name, 17 shells, a long or non-string version, a long nodeVersion, a non-boolean elevated, a 70 KiB greeting — each refused`, wrong.map(([m]) => CL.helloAckVerdict(m)));
+  // this tree's own agent says a greeting the verdict passes (its literal capability list, measured from the source)
+  const capsLine = (read('src/agentd/agentd.js').match(/capabilities: \[([^\]]*)\]/) || [])[1] || '';
+  const ownCaps = [...capsLine.replace(/\/\*[\s\S]*?\*\//g, '').matchAll(/'([^']+)'/g)].map((m) => m[1]); // a comment in the list (B-beaf's «a pipe session's channel…») is no capability: its apostrophe would pair the quotes wrong
+  ok(ownCaps.length >= 20 && ownCaps.length <= CL.HELLO_BOUNDS.capabilities / 2 && CL.helloAckVerdict({ ...good, capabilities: ownCaps }).ok, `this tree's agent names ${ownCaps.length} capabilities — the verdict passes them, with room to grow (≤ half the bound)`, ownCaps.length);
+  const connectWith = async (DM, ack) => {
+    const srv = net.createServer((sock) => { const mux = new Mux(sock, { onControl: (m) => { if (m.op === 'hello') mux.control(ack); }, onData: (chan, buf) => mux.credit(chan, buf.length), onDead: () => { } }); });
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const s = await new Promise((res, rej) => { const c = net.connect(srv.address().port, '127.0.0.1'); c.on('connect', () => res(c)); c.on('error', rej); });
+    const logs = [];
+    const dm = new DM({ dataDir: tmp, bundlePath: path.join(tmp, 'no-bundle-here.js'), version: '1.1.1', log: (...a) => logs.push(a.join(' ')), transport: { kind: 'stream', hostToken: 'vsht_x', getStream: () => s } });
+    const out = await Promise.race([dm.connect().then(() => 'connected', (e) => e), sleep(2500).then(() => 'pending')]);
+    const info = dm._conn && dm._conn.info, kept = !s.destroyed;
+    try { dm.stop(); } catch { } try { s.destroy(); } catch { } srv.close();
+    return { out, info, logs, kept };
+  };
+  const huge = { ...good, capabilities: Array.from({ length: 300 }, (_, i) => 'cap' + i) };
+  const r1 = await connectWith(DeviceManager, good), r2 = await connectWith(DeviceManager, huge), r2b = await connectWith(DeviceManager, { ...good, platform: 'plan 9' });
+  ok(r1.out === 'connected' && r1.info && r1.info.platform === 'linux', 'over the REAL Mux + DeviceManager: a well-formed greeting opens the link', r1.out instanceof Error ? r1.out.message : r1.out);
+  ok(r2.out instanceof Error && r2.out.code === 'hello-ack-shape' && /capabilities are not a list of at most 256 words/.test(r2.out.message) && !r2.info && r2.logs.some((l) => /the device's greeting was refused/.test(l)) && r2b.out instanceof Error && r2b.out.code === 'hello-ack-shape' && /platform/.test(r2b.out.message) && r2.kept && r2.logs.filter((l) => /greeting was refused/.test(l)).length === 1,
+    'a greeting with 300 capabilities / a platform that is no word: the link is refused BY NAME at once (hello-ack-shape — no retry loses the name), nothing of it kept, ONE journal line, the dialed stream KEPT (no re-dial storm)', [r2, r2b].map((r) => (r.out instanceof Error ? `${r.out.code}: ${r.out.message}` : r.out)));
+  const SRC = read('src/agentd/client.js');
+  const anchor = '            if (!shape.ok) {';
+  ok(SRC.includes(anchor), 'control: the verdict guards the hello-ack in client.js (the anchor)', anchor);
+  const Mut = mutantCopies('device-policy-hello', REPO).load('src/agentd/client.js', SRC.replace(anchor, '            if (false) {'), 'no-shape');
+  const r3 = await connectWith(Mut.DeviceManager, huge);
+  ok(r3.out === 'connected' && r3.info && Array.isArray(r3.info.capabilities) && r3.info.capabilities.length === 300, 'RED CONTROL: a copy without the verdict opens the link on that greeting and keeps all 300 capabilities as the link\'s info — the leg above refuses that', r3.out instanceof Error ? r3.out.message : r3.out);
+}
+
 console.log('— ⑥ the DEVICE (a REAL local daemon)');
 {
   process.env.VIBESPACE_NODE_MODULES = path.join(REPO, 'node_modules');
