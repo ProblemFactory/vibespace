@@ -14,7 +14,8 @@
 //     src/agentd/version.js; for the daemon's entry the stamp MUST be in the bundle (a moved stamp module throws by name).
 //   buildPlan(scripts, entry) → { entry, options, outfile, strip, flags } — PURE; flagsOf(plan) re-spells the flags (test-architecture
 //     §51 holds the round trip equal to the build step's own).
-//   stampPlugin(version) → the plugin, for a suite's own esbuild.build (a mutant bundle stamped the same way).
+//   stampPlugin(version, { onHit }) → the plugin ({ name, setup } only — esbuild refuses any other key), for a suite's own
+//     esbuild.build (a mutant bundle stamped the same way).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -54,19 +55,18 @@ export function flagsOf(plan) {
   return [...(o.bundle ? ['--bundle'] : []), ...(o.platform ? [`--platform=${o.platform}`] : []), ...o.external.map((x) => `--external:${x}`), ...(o.preserveSymlinks ? ['--preserve-symlinks'] : []), `--outfile=${plan.outfile}`];
 }
 
-/** The esbuild plugin that answers the tree's own src/agentd/version.js with `{ VERSION: <version> }`. `hit()` says it answered. */
-export function stampPlugin(version, { repo = REPO } = {}) {
+/** The esbuild plugin that answers the tree's own src/agentd/version.js with `{ VERSION: <version> }` — a PLAIN plugin ({ name, setup }:
+ *  esbuild refuses any other key on it); `onHit` is called each time it answers. */
+export function stampPlugin(version, { repo = REPO, onHit = null } = {}) {
   const v = String(version == null ? '' : version);
   if (!/^\d+\.\d+\.\d+$/.test(v)) throw new Error(`agentd-bundle: a stamp is an x.y.z version — got ${JSON.stringify(version)}`);
   const stamp = real(path.join(repo, 'src', 'agentd', 'version.js'));
-  let answered = 0;
   return {
     name: 'agentd-version-stamp',
-    hit: () => answered,
     setup(b) {
       b.onLoad({ filter: /[\\/]agentd[\\/]version\.js$/ }, (args) => {
         if (real(args.path) !== stamp) return undefined;
-        answered++;
+        if (typeof onHit === 'function') onHit();
         return { contents: `module.exports = { VERSION: ${JSON.stringify(v)} };\n`, loader: 'js' };
       });
     },
@@ -80,11 +80,12 @@ export async function agentdBundle({ version, outfile, entry = DAEMON, repo = RE
   const out = path.resolve(String(outfile)), src = real(path.join(repo, 'src'));
   if (real(path.dirname(out)) === src || real(path.dirname(out)).startsWith(src + path.sep)) throw new Error(`agentd-bundle: the outfile ${out} lies under the tree's src/ — a bundle goes to the suite's scratch`);
   const plan = buildPlan(JSON.parse(fs.readFileSync(path.join(repo, 'package.json'), 'utf8')).scripts, entry);
-  const plugin = stampPlugin(version, { repo });
+  let hits = 0;
+  const plugin = stampPlugin(version, { repo, onHit: () => { hits++; } });
   const raw = plan.strip ? path.join(path.dirname(out), `.${path.basename(out, '.js')}.raw.js`) : out;   // the build's own side name, beside the outfile
   const esbuild = require('esbuild');
   await esbuild.build({ entryPoints: [path.join(repo, entry)], absWorkingDir: repo, outfile: raw, logLevel, plugins: [plugin], ...plan.options });
-  if (entry === DAEMON && !plugin.hit()) throw new Error(`agentd-bundle: the stamp module src/agentd/version.js is not in the bundle of ${entry} — the daemon would report another version (move the stamp with the module)`);
+  if (entry === DAEMON && !hits) throw new Error(`agentd-bundle: the stamp module src/agentd/version.js is not in the bundle of ${entry} — the daemon would report another version (move the stamp with the module)`);
   if (plan.strip) execFileSync(process.execPath, [path.join(repo, 'scripts', 'agentd-bundle-strip.mjs'), raw, out], { stdio: ['ignore', 'ignore', 'inherit'] });   // the build's own strip: written beside out, renamed over it, raw gone
   return out;
 }
