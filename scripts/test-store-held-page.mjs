@@ -78,6 +78,8 @@ console.log('§1 a held answer is said in the page\'s words by its KIND — neve
   const ap = await said({ error: 'x appeared', code: 'store_appeared' });
   ok(/appeared since VibeSpace started/.test(ap.error) && /x appeared/.test(ap.said), 'a file that appeared since the start (409 store_appeared) is said in the page\'s words too', J({ ap }));
   ok(U.heldWordsOf(un) === un.error && U.heldWordsOf({ code: 'other' }) === null, 'heldWordsOf names a held store as fetchJson words it (and nothing else)');
+  const one = U.storeHeldWords([HELD('settings.json')]), two = U.storeHeldWords([HELD('settings.json'), HELD('layouts.json', 'said', 'damaged')]);
+  ok(one === U.storeHeldWords(HELD('settings.json')) && /cannot read 2 of its saved files right now/.test(two), 'a refusal that names several holds (the export, the import: a LIST) is one true sentence — one hold its own words, several how many', J({ one, two }));
   ok(U.stateLanded({ starredSessions: [] }) === true && U.stateLanded({ error: { theme: 'an object under the key «error»' } }) === true && U.stateLanded(un) === false && U.stateLanded(null) === false && U.stateLanded([]) === false,
     'stateLanded: the server\'s state LANDED — a held list\'s refusal (its `error` words) and a failed fetch (null) are no map');
 }

@@ -1924,6 +1924,7 @@ export function storeWhatOf(file) {
     : f === 'custom-themes.json' ? t('your custom themes') : f === 'settings.json' ? t('your settings') : t('a saved list');
 }
 export function storeHeldWords(held) {
+  if (Array.isArray(held)) return held.length === 1 ? storeHeldWords(held[0]) : t('VibeSpace cannot read {n} of its saved files right now — nothing is written over them (Details names them).', { n: held.length });   // a refusal naming several holds (the export, the import)
   const what = storeWhatOf(held && held.file), kind = held && held.kind;
   if (kind === 'damaged') return t('VibeSpace could not read {what}: the file is not what it should be. Nothing is written over it — replace it from a backup, or start it empty.', { what });
   if (kind === 'not-allowed') return t('VibeSpace is not allowed to read {what} — nothing is written over it. Check the permissions of the data folder.', { what });
