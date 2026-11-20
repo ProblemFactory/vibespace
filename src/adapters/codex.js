@@ -638,12 +638,16 @@ function _noteParseOnLoop(threadId, fp, why) {
   console.warn(`[codex] parsed ${threadId} (${mb} MB rollout) ON THE MAIN LOOP — ${why || 'no reason given'}`);
 }
 
-let _transcriptPool = null;
+let _transcriptPool = null, _workerScript = null;
 // B-f64b cure (主开发 11:47Z): a pool whose construction failed is tried again — every POOL_RETRY_MS, POOL_RETRY_MAX times in all,
 // each failure said with its try — never «inline for good» after one failure (every codex row would read «still checking» until a restart)
 const POOL_RETRY_MS = 60000, POOL_RETRY_MAX = 5;
 let _poolFails = 0, _poolRetryAt = 0;
 function _transcriptPoolGet() {
+  // B-3b03: a bundle that ships no worker script (the device agent's single file) has no pool — its readers take their own sync
+  // road, as the release's inline runner did there; the hub's checkout always has the script
+  if (_workerScript === null) _workerScript = fs.existsSync(path.join(__dirname, '..', 'transcript-worker.js'));   // once a process
+  if (!_workerScript) return null;
   if (_transcriptPool === null || (_transcriptPool === false && _poolFails < POOL_RETRY_MAX && Date.now() >= _poolRetryAt)) {
     try {
       const { SafeFs } = require('../safe-fs');

@@ -83,6 +83,9 @@ console.log('③ the census: no pool keeps an inline road; a missing pool refuse
   const files = ['server.js', 'src/adapters/codex.js', 'src/transcript-service.js', 'src/server/fs-canary.js', 'src/server/incident-wiring.js', 'src/routes/sessions.js', 'src/agy-backfill.js', 'src/safe-fs.js'];
   const left = files.filter((f) => /inlineRun\s*[:,(]|_inlineRun\b|opts\.inlineRun/.test(read(f).replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')));
   ok(!left.length, `no SafeFs in src/ keeps an inline road (${files.length} files read; left: ${left.join(', ') || 'none'})`);
+  // a bundle with NO worker script (the device agent's single file) reads in place by its own named rule (agy-backfill's) — only there
+  const ts = read('src/transcript-service.js'), cx = read('src/adapters/codex.js');
+  ok(ts.includes('if (!fs.existsSync(PICTURE_WORKER)) return (_picturePool = { inPlace: true,') && cx.includes('if (!_workerScript) return null;'), 'the device bundle (no worker script) reads in place, named — the hub always has the script, so the hub never runs in-main');
   // the files router with no pool at all (server.js could not start it) refuses by name — never the op in-main
   const fr = read('src/routes/files.js');
   ok(fr.includes("call: async () => { throw require('../safe-fs').noWorkerRefusal(); },") && !fr.includes('_runOpInline'), 'the files router with no pool refuses by name (never the op in-main)');

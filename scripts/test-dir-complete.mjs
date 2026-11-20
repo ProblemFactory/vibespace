@@ -63,6 +63,9 @@ const { runOp } = require('../src/safe-fs-worker.js');
 const express = require('express');
 const app = express();
 app.use(express.json());
+// B-3b03 (lane hub-loop-stalls): the files router never runs an op in-main — a REAL one-worker pool, as server.js wires one
+const FILE_POOL = new (require('../src/safe-fs.js').SafeFs)({ poolSize: 1, name: 'test-dir-complete' });
+app.locals.safeFs = FILE_POOL;
 const files = require('../src/routes/files.js');
 const fsr0 = read('src/routes/files.js');
 app.use(files);
@@ -420,7 +423,7 @@ console.log('\n── ⑦ B-5ce7 cure: a PARKED storage\'s folder is refused wit
   const stand = { pathBlocked: (p) => (p === PARK || p.startsWith(PARK + '/')) ? PARK : (p === SLOW || p.startsWith(SLOW + '/')) ? SLOW : false,
     parkedAt: (p) => (p === PARK || p.startsWith(PARK + '/')) ? { id: 'od', name: 'OneDrive', mp: PARK } : null, shadowedBy: () => null };
   const askOn = async (router, p) => {
-    const app2 = express(); app2.use(express.json()); app2.locals.mounts = stand; app2.use(router);
+    const app2 = express(); app2.use(express.json()); app2.locals.mounts = stand; app2.locals.safeFs = FILE_POOL; app2.use(router);
     const srv = http.createServer(app2); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
     try { const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/files?path=${encodeURIComponent(p)}`); return { status: r.status, body: await r.json() }; }
     finally { srv.close(); }

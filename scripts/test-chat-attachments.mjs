@@ -272,6 +272,8 @@ console.log('⑥ many at once');
 console.log('⑦ files a person dropped');
 {
   const app = express();
+  // B-3b03 (lane hub-loop-stalls): the files router never runs an op in-main — a REAL one-worker pool, as server.js wires one
+  app.locals.safeFs = new (require(path.join(REPO, 'src/safe-fs.js')).SafeFs)({ poolSize: 1, name: 'test-chat-attachments' });
   const root = scratch('cap-attach-root'), notTmp = scratch('cap-work'), tmpCwd = scratch('cap-tmp-cwd');
   for (const x of [root, notTmp, tmpCwd]) fs.mkdirSync(x, { recursive: true });
   app.locals.chatAttachmentsRoot = root;

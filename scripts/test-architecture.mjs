@@ -7772,9 +7772,13 @@ await section(async () => {
   const before107 = { name: 'before-107', setup(b) { b.onLoad({ filter: /claude-quota\.js$/ }, (a) => (a.path === CQ107 ? { contents: cqSrc107.split(NAME107).join("predict: require('./claude-predict.js'),"), loader: 'js' } : undefined)); } };
   const rp107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107, preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [before107] });
   ok(cqSrc107.includes(NAME107) && pred107(rp107).length > 0, `§107 CONTROL: claude-quota.js requiring its adapter (the shape before) carries prediction code into the device bundle (${pred107(rp107).join(', ')}) — the leg above goes red on it`);
-  const rc107 = await build107(ext107.filter((x) => x !== 'xlsx'));
+  // B-3b03 (lane hub-loop-stalls): the device bundle no longer reaches the SafeFs worker at all (src/safe-fs.js stopped requiring it
+  // for its in-main fallback), so xlsx is out of it even when not external — the CONTROL plants that require back (an esbuild onLoad
+  // over safe-fs.js, the release's reach) and builds with xlsx NOT external: xlsx is inlined and both legs above go red on it
+  const plant107 = { name: 'plant-safe-fs-worker', setup(b) { b.onLoad({ filter: /[\\/]src[\\/]safe-fs\.js$/ }, (a) => ({ contents: fs.readFileSync(a.path, 'utf8') + "\nrequire('./safe-fs-worker');\n", loader: 'js', resolveDir: path.dirname(a.path) })); } };
+  const rc107 = await esbuild107.build({ entryPoints: [path.join(REPO, 'src/agentd/agentd.js')], absWorkingDir: REPO, bundle: true, platform: 'node', external: ext107.filter((x) => x !== 'xlsx'), preserveSymlinks: /--preserve-symlinks/.test(flags107), write: false, metafile: true, logLevel: 'silent', plugins: [plant107] });
   const rcSize107 = Buffer.byteLength(shipped107(rc107));
-  ok(libs107(rc107).includes('xlsx') && rcSize107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with xlsx NOT external inlines node_modules/xlsx (${rcSize107} bytes as shipped) — both legs above go red on it`);
+  ok(libs107(rc107).includes('xlsx') && rcSize107 > RELEASE_BUNDLE_BYTES * (1 + DEVICE_BUNDLE_MARGIN), `§107 CONTROL: the same build with the SafeFs worker's require planted back (the release's reach, B-3b03) and xlsx NOT external inlines node_modules/xlsx (${rcSize107} bytes as shipped) — both legs above go red on it`);
   ok(/try \{ XLSX = require\('xlsx'\); \} catch \{ throw Object\.assign\(new Error\('[^']*'\), \{ code: 'xlsx_hub_only' \}\); \}/.test(read('src/safe-fs-worker.js')), '§107 asked on a paired machine (no spreadsheet library there), the xlsxSheets op refuses by name — xlsx_hub_only');
   const code107 = (s) => s.replace(/\/\/[^\n]*/g, '');   // the CODE, never a comment that names the old words
   const files107 = read('src/routes/files.js'), sent107 = code107((files107.match(/function syncRefusedBody[\s\S]*?\n\}/) || [''])[0]);

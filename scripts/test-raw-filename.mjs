@@ -79,6 +79,7 @@ const oracle = require('content-disposition'); // express's own dependency — a
 const CD = require(path.join(REPO, 'src/file-disposition.js'));
 const { RemoteFs } = require(path.join(REPO, 'src/remote-fs.js'));
 const filesRouter = require(path.join(REPO, 'src/routes/files.js'));
+const FILE_POOL = new (require(path.join(REPO, 'src/safe-fs.js')).SafeFs)({ poolSize: 1, name: 'test-raw-filename' });
 const M = mutantCopies('rawname', REPO);
 
 const DIR = scratch('rawname');
@@ -166,6 +167,8 @@ async function serve(router, remoteFs, { json = false } = {}) {
   if (json) app.use(express.json({ limit: '5mb' }));   // B-3767 ⑩: a JSON route (the real server parses bodies globally)
   app.set('env', 'test'); // finalhandler: no stack traces on the console for the expected 404s
   app.locals.getRemoteFs = () => remoteFs;
+  // B-3b03 (lane hub-loop-stalls): the files router never runs an op in-main — a REAL one-worker pool, as server.js wires one
+  app.locals.safeFs = FILE_POOL;
   app.use(router);
   const srv = http.createServer(app);
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));

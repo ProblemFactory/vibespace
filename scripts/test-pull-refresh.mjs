@@ -887,6 +887,8 @@ try {
     // the REAL files route in-process (as test-dir-complete serves it), no cloud storage registered
     const express = require('express');
     const app = express(); app.use(express.json());
+    // B-3b03 (lane hub-loop-stalls): the files router never runs an op in-main — a REAL one-worker pool, as server.js wires one
+    app.locals.safeFs = new (require('../src/safe-fs.js').SafeFs)({ poolSize: 1, name: 'test-pull-refresh' });
     app.locals.mounts = { pathBlocked: () => false, shadowedBy: () => null };
     app.use(require('../src/routes/files.js'));
     const server = require('http').createServer(app); await new Promise((res) => server.listen(0, '127.0.0.1', res));

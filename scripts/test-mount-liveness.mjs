@@ -198,7 +198,7 @@ const MC = mutantCopies('mount-liveness', REPO);
   // CONTROL: no manager registered (a worker / a process with no mounts) ⇒ the same asks reach the reader
   DOOR.register(null);
   asked.length = 0;
-  sfs.call('listDir', { path: path.join(MP, 'Docs') });
+  sfs.call('listDir', { path: path.join(MP, 'Docs') }).catch(() => {});   // B-3b03: with no live worker the pool refuses by name — the PICK is what this control reads
   const dctl = await timed(() => DFS.run('read', { dir: path.join(MP, 'design') }));
   ok(picked === 1 && asked.includes(path.join(MP, 'design')), '⑥ CONTROL: with no blocked root the SafeFs pick and the design readdir ARE reached (the legs above prove the door, not a dead reader)');
   ok(dctl.inTurn === false, '⑥ CONTROL: …and that read is still unanswered when the loop turns (the fake FUSE never resolves) — "before the loop turned" separates a door from a read');

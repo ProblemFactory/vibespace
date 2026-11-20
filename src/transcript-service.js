@@ -34,10 +34,14 @@ const DEVICE_HANDLE = '\u0000device:'; // opaque to the route; never a real path
 // lane chat-attachments-persist (the cut): pictures are read in ONE transcript worker of their own (its indexes are kept
 // and extended there — one copy, never one per pool thread); inline (the pool down) the op answers «unavailable»
 let _picturePool = null;
+const PICTURE_WORKER = require('path').join(__dirname, 'transcript-worker.js');   // a checkout constant (the device bundle has no such file)
 function picturePool() {
   if (_picturePool) return _picturePool;
+  // B-3b03: a bundle that ships no worker script (the device agent's single file) reads its OWN transcripts in place, on its own
+  // loop, as the release did there (agy-backfill's rule) — the hub's checkout always has the script, so the hub never runs in-main
+  if (!fs.existsSync(PICTURE_WORKER)) return (_picturePool = { inPlace: true, call: async (op, q) => (await require('./transcript-worker').runOp(op, q)).result });
   const { SafeFs } = require('./safe-fs');
-  _picturePool = new SafeFs({ workerPath: require('path').join(__dirname, 'transcript-worker.js'), name: 'transcript-picture', poolSize: 1, timeouts: { default: 120000 } });
+  _picturePool = new SafeFs({ workerPath: PICTURE_WORKER, name: 'transcript-picture', poolSize: 1, timeouts: { default: 120000 } });
   return _picturePool;
 }
 const isDeviceHandle = (fp) => typeof fp === 'string' && fp.startsWith(DEVICE_HANDLE);
