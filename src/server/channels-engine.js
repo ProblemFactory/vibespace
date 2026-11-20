@@ -498,8 +498,9 @@ function create(deps = {}) {
     readMembership = null,
     // B-43bc third cure (L4): the kept deliveries' bound — `{convs, perConv}` (default 200 conversations × 50 each); past it a
     // kept delivery is dropped and SAID; and the hand-over mark's — `{handedPer, handedKeys}` (default 200 records a name,
-    // 2 000 names; it forgets only what nothing waits for, and says so), `sayMs` its line's window (default 30 s). A suite
-    // narrows them to reach a bound with a few records.
+    // 2 000 names; it forgets only what nothing waits for, and says so), `sayMs` its line's window (default 30 s), and
+    // `takeWaitMs` how long a second chain waits for a start in flight (B-1ca5, default 30 s). A suite narrows them to reach a
+    // bound with a few records.
     heldBound = null,
     // lane R5 (drain rule 18): the PER-SECOND bucket runs on a PHYSICAL clock —
     // the vendor meters requests in real time, whatever the engine's logical
@@ -5743,8 +5744,9 @@ function create(deps = {}) {
       const wait = waitingIds(adapterId, convId);
       while (m.size > HANDED_PER) {
         let victim = null;
-        for (const id of m.keys()) if (!wait.has(id)) { victim = id; break; }   // the oldest record nothing waits for
-        if (victim === null) { victim = m.keys().next().value; waiting++; } else routine++;
+        for (const id of m.keys()) if (!wait.has(id) && typeof m.get(id) !== 'object') { victim = id; break; }   // the oldest record nothing waits for
+        if (victim === null) { for (const id of m.keys()) if (typeof m.get(id) !== 'object') { victim = id; break; } if (victim !== null) waiting++; } else routine++;
+        if (victim === null) break;   // B-1ca5: what is left are starts in flight — a take is never forgotten
         m.delete(victim);
       }
     }
@@ -5757,9 +5759,10 @@ function create(deps = {}) {
         if (++tried > 16) break;
         const c0 = k0.slice(0, k0.indexOf('\u0000')), i0 = c0.indexOf('/');
         const wait0 = waitingIds(c0.slice(0, i0), c0.slice(i0 + 1));
-        if (![...m0.keys()].some((id) => wait0.has(id))) { vk = k0; break; }
+        if (![...m0.keys()].some((id) => wait0.has(id)) && ![...m0.values()].some((v) => typeof v === 'object')) { vk = k0; break; }
       }
-      if (vk === null) { const [k0, m0] = handed.entries().next().value; vk = k0; waiting += m0.size; } else routine += handed.get(vk).size;
+      if (vk === null) { for (const [k0, m0] of handed) if (k0 !== k && ![...m0.values()].some((v) => typeof v === 'object')) { vk = k0; waiting += m0.size; break; } } else routine += handed.get(vk).size;
+      if (vk === null) break;   // B-1ca5: every name left holds a start in flight
       handed.delete(vk);
     }
     if (routine) sayForgot('routine', routine);
@@ -5768,6 +5771,61 @@ function create(deps = {}) {
     for (const kind of Object.keys(forgot)) { const f = forgot[kind]; if (f.n && now() - f.at >= HANDED_SAY_MS) sayForgotNow(kind); }
   }
   function markHandedTo(adapterId, convId, cid, hits, t) { if (cid) markHanded(adapterId, convId, `→${cid}`, hits, t); }
+  // B-1ca5 (主开发 r199, 2026-11-20 — the race B-43bc left): ONE DELIVERY STARTS AT MOST ONE BILLED TURN, whatever two chains
+  // do across a ladder await. A billed site (wakeNow, flushScopeNow) TAKES the mark of what it is about to start — under the
+  // watcher's name and the receiver's — in the same synchronous step as its read, BEFORE its first await. A start that took
+  // (billed, or refused and stashed) writes the mark over its takes (markHanded) and is done (`tookIt`); every other end — a
+  // hold, a refusal, a failure, a throw — GIVES ITS TAKES BACK BY NAME (`giveBack` in a `finally`: its own takes only). A
+  // second chain that meets a take waits for that start to end (bounded: TAKE_WAIT_MS), then reads the mark again: handed ⇒
+  // it does nothing; given back ⇒ it may start. Past the bound the record stays out of its block with its row KEPT (never
+  // billed twice, never dropped). The spend guard is untouched: nothing here changes what it counts. The next-turn stash
+  // (stashHits) is free and reads and writes the mark with no await between, so it takes nothing; it waits like a reader.
+  const TAKE_WAIT_MS = Math.max(1, Math.floor(Number(heldBound && heldBound.takeWaitMs) || HELD_LOOK_MS));
+  /** The start in flight holding this record under `name` (null when handed, given back, or never taken). */
+  function takeOf(adapterId, convId, name, h) {
+    if (!name) return null;
+    const m = handed.get(`${adapterId}/${convId}\u0000${name}`);
+    const id = h && h.record ? h.record.id : null;
+    const v = m && id !== null && id !== undefined ? m.get(String(id)) : undefined;
+    return v && typeof v === 'object' && v.ticket && !v.ticket.done ? v.ticket : null;
+  }
+  const flyingOf = (adapterId, convId, names, h) => names.some((nm) => !!takeOf(adapterId, convId, nm, h));
+  /** THE TAKE (one step, no await): every record of `hits` not marked yet, under each name, into `ticket` (made when none). */
+  function takeHits(adapterId, convId, names, hits, ticket = null) {
+    let tk = ticket;
+    if (!tk) { tk = { ids: [], done: false, settle: null, settled: null }; tk.settled = new Promise((res) => { tk.settle = res; }); }
+    for (const name of names) {
+      if (!name) continue;
+      const k = `${adapterId}/${convId}\u0000${name}`;
+      const m = handed.get(k) || new Map();
+      for (const h of hits || []) { const id = h && h.record ? h.record.id : null; if (id === null || id === undefined || m.has(String(id))) continue; m.set(String(id), { ticket: tk, at: now() }); tk.ids.push([k, String(id)]); }
+      handed.delete(k); handed.set(k, m);
+    }
+    return tk;
+  }
+  /** GIVE BACK (a start that did not take): exactly this ticket's takes go, by name; its waiters read again. */
+  function giveBack(tk) {
+    if (!tk || tk.done) return;
+    tk.done = true;
+    for (const [k, id] of tk.ids) { const m = handed.get(k); const v = m ? m.get(id) : undefined; if (v && typeof v === 'object' && v.ticket === tk) m.delete(id); }
+    tk.settle();
+  }
+  /** The start took: its site wrote the mark over its takes (markHanded); its waiters read again. */
+  function tookIt(tk) { if (tk && !tk.done) { tk.done = true; tk.settle(); } }
+  /** A SECOND CHAIN: wait (bounded) while another start holds any of these records under any of these names. → none in flight. */
+  async function waitTaken(adapterId, convId, names, hits) {
+    const t0 = Date.now();
+    for (;;) {
+      const busy = new Set();
+      for (const h of hits || []) for (const nm of names) { const tk = takeOf(adapterId, convId, nm, h); if (tk) busy.add(tk); }
+      if (!busy.size) return true;
+      const left = TAKE_WAIT_MS - (Date.now() - t0);
+      if (left <= 0 || stopped) return false;
+      let tm = null;
+      await Promise.race([Promise.all([...busy].map((tk) => tk.settled)), new Promise((res) => { tm = setTimeout(res, left); })]);
+      if (tm) clearTimeout(tm);
+    }
+  }
   /** THE WAKE'S AUDIENCE STILL BEING READ (the cure's should): only the members THIS conversation's watchers can depend on —
    *  a via row names its member; a group row (or an exception anywhere) can name any member still being read. */
   function unreadAudience(en) {
@@ -8378,6 +8436,10 @@ function create(deps = {}) {
     const seen = batch && batch.got ? batch.got.get(target.cid) : null;
     // the carried rows first (oldest first, as a wake carries held hits); a fresh hit that is also parked rides once
     const all = parked ? [...parked.hits, ...hits.filter((h) => !(h.record && parked.ids.has(h.record.id)))] : hits;
+    // B-1ca5: a record another chain is starting for this receiver is waited for (bounded) before the mark is read
+    const names = [pk, target.cid ? `→${target.cid}` : null];
+    if (all.some((h) => flyingOf(rec.id, convId, names, h))) await waitTaken(rec.id, convId, names, all);
+    if (parked) for (const h of all) if (h && h.record && flyingOf(rec.id, convId, names, h)) parked.ids.delete(h.record.id);   // in flight past the bound: its row kept
     // B-43bc third cure — L1: the mark, read at the wake site — a record this watcher was already handed rides no stash
     const fresh = (seen ? all.filter((h) => !(h.record && seen.has(h.record.id))) : all).filter((h) => !wasHanded(rec.id, convId, pk, h) && !wasHandedTo(rec.id, convId, target.cid, h));
     const carriedNow = fromPending || parked;
@@ -8583,15 +8645,25 @@ function create(deps = {}) {
       }
       const item0 = { watcher: w, source, patternId };
       const target = groups.length ? resolveTarget(w, null, null, (cid, gs) => held.every((h) => h.admit(cid, gs))) : { cid: null, why: 'nothing-pending' };   // lane grants-unify: a member that may hear EVERY conversation of the digest
+      // B-1ca5: a record another chain is starting for this receiver is waited for (bounded), then the marks are read again
+      const names = [pk, target.cid ? `→${target.cid}` : null];
+      if (target.cid) for (const h of held) if (h.carried.hits.some((x) => flyingOf(rec.id, h.id, names, x))) await waitTaken(rec.id, h.id, names, h.carried.hits);
       // B-43bc fourth cure — L1: the RECEIVER's mark, read once the digest's target is resolved — a record this receiving
       // conversation was already handed (through any watcher) rides no digest; a conversation left with nothing leaves it
       if (target.cid) for (let i = groups.length - 1; i >= 0; i--) {
         const g = groups[i], h = held[i];
-        const keep = g.hits.filter((x) => !wasHandedTo(rec.id, h.id, target.cid, x));
+        const keep = g.hits.filter((x) => !wasHandedTo(rec.id, h.id, target.cid, x) && !flyingOf(rec.id, h.id, names, x));
         if (keep.length === g.hits.length) continue;
-        if (!keep.length && !g.elided) { spent.push({ id: h.id, eff: h.eff, carried: { ids: h.carried.ids, elidedTagged: 0, elidedUntagged: 0 } }); groups.splice(i, 1); held.splice(i, 1); continue; }
-        g.hits = keep; h.carried = { ...h.carried, hits: keep };
+        // B-1ca5: a record still in flight elsewhere past the bound keeps its row (never cleared with what was handed)
+        const ids = new Set([...h.carried.ids].filter((id) => !g.hits.some((x) => x && x.record && x.record.id === id && flyingOf(rec.id, h.id, names, x))));
+        if (!keep.length && !g.elided) { spent.push({ id: h.id, eff: h.eff, carried: { ids, elidedTagged: 0, elidedUntagged: 0 } }); groups.splice(i, 1); held.splice(i, 1); continue; }
+        g.hits = keep; h.carried = { ...h.carried, hits: keep, ids };
       }
+      // B-1ca5: THE TAKE — the digest's records, under both names, in the same step as the read above (no await between);
+      // given back by name in the `finally` at this block's end unless the digest took
+      let take = null;
+      if (target.cid) for (const h of held) take = takeHits(rec.id, h.id, names, h.carried.hits, take);
+      try {
       if (spent.length) await store.index.update(() => { for (const x of spent) { const e2 = store.index.entry(rec.id, x.id, { create: false }); if (!e2) continue; healP2(e2); clearCarried(e2, pk, x.eff, x.carried); } }, { durable: true });
       if (!groups.length) return { ok: false, why: 'nothing-pending' };
       const why = !target.cid ? target.why : null;
@@ -8647,10 +8719,11 @@ function create(deps = {}) {
           noteDelivered(e2, h.carried.hits, target.cid, t);   // THE LEDGER DOOR — the digest road (lane channel-recall-engine-leg): EVERY conversation the digest carried (was: single-conversation wakes only — a recall after a digest said nothing)
         }
       }, { durable: true }); } catch (err) { log.warn(`[channels] scope digest ${sKey}: the ledger could not take the outcome — the reservation stays counted: ${(err && err.message) || err}`); }
-      if (ok || stashed) for (const h of held) { markHanded(rec.id, h.id, pk, h.carried.hits, t); markHandedTo(rec.id, h.id, target.cid, h.carried.hits, t); }   // B-43bc — L1: the mark (both names), written at the wake site
+      if (ok || stashed) { for (const h of held) { markHanded(rec.id, h.id, pk, h.carried.hits, t); markHandedTo(rec.id, h.id, target.cid, h.carried.hits, t); } tookIt(take); }   // B-43bc — L1: the mark (both names), written at the wake site (B-1ca5: over its takes)
       log.log(`[channels] scope digest ${sKey} → ${target.name || target.cid}: ${groups.length} conversation(s), ${n} hit(s) — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
       notify(held.map((h) => h.key));
       return { ok, stashed, cid: target.cid, n, conversations: groups.length };
+      } finally { giveBack(take); }   // B-1ca5: a digest that did not take gives its takes back, by name
     }
   }
   /** Deliver everything pending on one conversation for ONE watcher (`pk`)
@@ -8931,18 +9004,29 @@ function create(deps = {}) {
       }
       hits.splice(0, hits.length, ...unseen);
     }
+    // B-1ca5: a record ANOTHER CHAIN is starting for this watcher or this receiver (taken before its ladder await, not yet
+    // handed) is waited for, bounded; then the mark is read again — handed ⇒ left out; given back ⇒ startable
+    const names = [pk, target.cid ? `→${target.cid}` : null];
+    if (hits.some((h) => flyingOf(rec.id, convId, names, h))) await waitTaken(rec.id, convId, names, hits);
     // B-43bc — L1, THE MARK, read HERE (the wake site), never by a caller, once the target is resolved: a record THIS
     // WATCHER was already handed on this conversation, or one THIS RECEIVING conversation was already handed here through
     // ANY watcher row or road (the fourth cure, 主开发 19:23Z) — or one this block would carry twice (its pending row and the
     // same record fresh) — goes once; nothing left ⇒ no wake, the carried rows done
+    const fresh0 = freshHits;
+    let flyFresh = [];
     {
       const once = new Set();
       const had = new Set(hits.filter((h) => { const id = h && h.record ? h.record.id : null; if (id === null || id === undefined) return false; if (once.has(String(id)) || wasHanded(rec.id, convId, pk, h) || wasHandedTo(rec.id, convId, target.cid, h)) return true; once.add(String(id)); return false; }));
       if (had.size) {
+        // B-1ca5: a record still in flight elsewhere past the bound is left out WITHOUT its row cleared (that start may yet fail)
+        const fly = [...had].filter((h) => h && h.record && flyingOf(rec.id, convId, names, h));
+        for (const h of fly) if (carried && carried.ids) carried.ids.delete(h.record.id);
+        flyFresh = fromPending ? [] : fly.filter((h) => fresh0.includes(h));
         freshHits = freshHits.filter((h) => !had.has(h) && !wasHanded(rec.id, convId, pk, h) && !wasHandedTo(rec.id, convId, target.cid, h));
         hits.splice(0, hits.length, ...hits.filter((h) => !had.has(h)));
         if (!hits.length && !allElided) {
           await store.index.update(() => { const e2 = store.index.entry(rec.id, convId, { create: false }); if (!e2) return; healP2(e2); clearCarried(e2, pk, eff, carried); }, { durable: true });
+          if (flyFresh.length) await keepPending(rec, convId, flyFresh, 0, pk);   // B-1ca5: still in flight elsewhere — kept, never dropped
           log.log(`[channels] ${rec.id}/${convId}: ${pk} — ${had.size} record(s) already handed to this watcher or to ${target.cid || 'its receiver'}; not handed twice`);
           return { ok: true, deduped: true, cid: target.cid || null, n: 0 };
         }
@@ -8954,6 +9038,11 @@ function create(deps = {}) {
       log.log(`[channels] ${rec.id}/${convId}: ${hits.length + allElided} hit(s) held for ${pk} — ${target.why}`);
       return { ok: false, why: target.why, held: true };
     }
+    // B-1ca5: THE TAKE — the mark of what this wake is about to start, under both names, in the same step as the read above
+    // (no await between); given back by name in the `finally` at this function's end unless the start took
+    const take = takeHits(rec.id, convId, names, hits);
+    try {
+    if (flyFresh.length) await keepPending(rec, convId, flyFresh, 0, pk);   // B-1ca5: still in flight elsewhere — kept, never dropped
     // lane webhook-l1-server: THE PER-PATH WAKE BUDGET (design-webhook §6) — a conversation whose options declare
     // `wakesPerHour` wakes at most that many times an hour across ALL its watchers, judged BEFORE the watcher's own pace.
     // A refusal is a HOLD like a paced one; its words name the path and whom it woke (the owner's panel and the agent's
@@ -9036,7 +9125,7 @@ function create(deps = {}) {
       try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid, wake: true }) }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
     }
     if ((ok || stashed) && batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of hits) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
-    if (ok || stashed) { markHanded(rec.id, convId, pk, hits, t); markHandedTo(rec.id, convId, target.cid, hits, t); }   // B-43bc — L1: the mark (the watcher's name and the receiver's), written at the wake site
+    if (ok || stashed) { markHanded(rec.id, convId, pk, hits, t); markHandedTo(rec.id, convId, target.cid, hits, t); tookIt(take); }   // B-43bc — L1: the mark (the watcher's name and the receiver's), written at the wake site (B-1ca5: over its takes)
     const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'wake');
     const wk = { ...wk0, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: words.why, refused: words.refused };
     try { await store.index.update((ix) => {
@@ -9064,6 +9153,7 @@ function create(deps = {}) {
     log.log(`[channels] wake ${rec.id}/${convId} → ${target.name || target.cid}: ${n} hit(s) (${F.whyText(whys)})${coalesced && coalesced.n > 1 ? `, ${coalesced.n} coalesced in ${Math.round(coalesced.seconds)} s` : ''}${digest ? ', digest' : ''} — ${ok ? `delivered via ${r.lane || 'message'}` : `${stashed ? 'stashed for the next turn' : 'held'}: ${(r && r.reason) || 'refused'}`}`);
     notify([convId]);
     return { ok, stashed, cid: target.cid, n, why: ok ? null : ((r && r.reason) || 'refused'), refused: ok ? null : refusalWords(still, r, 'wake').refused, held: targetGone || undefined };
+    } finally { giveBack(take); }   // B-1ca5: a start that did not take gives its takes back, by name (one that took is done already)
   }
   async function noteRefusal(rec, convId, why, t, item = null) {
     await store.index.update((ix) => {

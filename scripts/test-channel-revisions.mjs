@@ -119,15 +119,17 @@ const NOTE_FROM = 'Channels · recalls';
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
 /** One engine over `dataDir` (a restart = a second one over the same dir, the same clock): the fake answers a stored
  *  message by id from its revisions file; every by-id ask is counted; the stub ladder delivers, the stub stash keeps. */
-function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, roster = null, readMembership = null, log = null, heldBound = null } = {}) {
+function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, roster = null, readMembership = null, log = null, heldBound = null, gate = null, answer = null, stashThrows = null } = {}) {
   fs.mkdirSync(dataDir, { recursive: true });
   const REVS = path.join(dataDir, 'revisions.json');
   if (!fs.existsSync(REVS)) fs.writeFileSync(REVS, J({ revisions: {} }));
-  const delivered = [], stashed = [], asked = [], refused = [];
+  const delivered = [], stashed = [], asked = [], refused = [], starts = [];
   const deliver = {
     // `refuse`: the ladder says no (the spend cap) — the engine stashes the refused block for the next turn
-    deliverToConversation: async (cid, text, o) => { if (refuse) { refused.push({ cid, text, o }); return { ok: false, reason: 'the spend cap is reached', refused: 'cap' }; } delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
-    stashFor: (cid, e) => { stashed.push({ cid, ...e }); return { stored: true }; },
+    // B-1ca5: `starts` = every ladder call (a billed turn's START); `gate(k)` = a promise the k-th call waits on (a STALL placed in
+    // the window), `answer(k)` = a planted refusal for the k-th call, `stashThrows(cid, e)` = a planted stash failure
+    deliverToConversation: async (cid, text, o) => { const k = starts.length; starts.push({ cid, text }); const g = gate ? gate(k) : null; if (g) await g; const a = answer ? answer(k) : null; if (a) { refused.push({ cid, text, o }); return a; } if (refuse) { refused.push({ cid, text, o }); return { ok: false, reason: 'the spend cap is reached', refused: 'cap' }; } delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
+    stashFor: (cid, e) => { if (stashThrows && stashThrows(cid, e)) throw new Error('the stash refused (planted)'); stashed.push({ cid, ...e }); return { stored: true }; },
   };
   const registry = CH.createChannelRegistry();
   const fk = FAKE.makeFakeAdapter({ kind: 'fake-poll', receive: 'poll', sendAs: ['user'], now: clock, revisionsFile: REVS });
@@ -144,7 +146,7 @@ function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, rost
   const blocks = () => stashed.filter((x) => x.fromName !== NOTE_FROM);   // the message blocks themselves (a stashed refusal, the free stash)
   // the cadence is one by-id ask per message per hour: the next pass an hour on re-reads what a wake carried
   const hourLater = async () => { clock.advance(61 * 60e3); return eng.pass(A, { force: true }); };
-  return { eng, clock, delivered, refused, stashed, asked, recall, tail, recOf, woke, recalled, notes, blocks, hourLater };
+  return { eng, clock, delivered, refused, stashed, asked, starts, recall, tail, recOf, woke, recalled, notes, blocks, hourLater };
 }
 const iso = (ms) => new Date(ms).toISOString();
 
@@ -850,7 +852,7 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
     return out;
   }
   const wt = await waitingLeg(ENG, 'mark-waiting');
-  const OLDEST_FREE = '        for (const id of m.keys()) if (!wait.has(id)) { victim = id; break; }   // the oldest record nothing waits for\n';
+  const OLDEST_FREE = "        for (const id of m.keys()) if (!wait.has(id) && typeof m.get(id) !== 'object') { victim = id; break; }   // the oldest record nothing waits for\n";
   ok(src.split(OLDEST_FREE).length === 2, 'control setup: the mark\'s choice of what nothing waits for is present once');
   const wtR = await waitingLeg(MUT.load('src/server/channels-engine.js', src.replace(OLDEST_FREE, ''), 'oldest-forgotten'), 'mark-waiting-red');
   ok(wt.m8 === 1 && wt.m7 === 1 && wt.warned === 0, `a mark of ONE record a name forgets m7, never m8 the group's pending row still holds — m8 handed ONCE (${wt.m8}), nothing waiting forgotten`, J(wt));
@@ -934,6 +936,53 @@ console.log('⑧ B-43bc: a member still being read is read first — the wake an
   ok(src.split(DG_KEEP).length === 2 && src.split(DG_HOLD).length === 2, 'control setup: the digest\'s keep and hold are present once each');
   const dgR = await digestLeg(MUT.load('src/server/channels-engine.js', src.replace(DG_KEEP, '').replace(DG_HOLD, ''), 'no-digest-hold'), 'kept-digest-red');
   ok(dgR.then === 0 && dgR.after === 0 && dgR.said === 0, `RED CONTROL: the digest without its hold judges the unread answer — the lines DROPPED for good, nothing said (${dgR.after} after the read)`, J(dgR));
+  // ── B-1ca5 (主开发 r199): ONE DELIVERY STARTS AT MOST ONE BILLED TURN, across two chains and one ladder await. THE STALL IN
+  //    THE WINDOW (never load): the Task Group's wake hands m8 to agent-1 and is HELD inside its ladder await; the account
+  //    digest — the SECOND chain (the account's scope chain), carrying the same m8 for the same agent — arrives while it is
+  //    held. The cure: the first took the mark before its await; the second waits for that start, reads «handed», does
+  //    nothing. A FAILED first start (refused, its stash refused) gives its take back by name: the second then starts, once ──
+  async function raceLeg(ENGM, tag, { fail = false, waitMs = null } = {}) {
+    let open = () => {}, entered = () => {};
+    const gate1 = new Promise((r) => { open = r; }), in1 = new Promise((r) => { entered = r; });
+    const w = mkEngine(ENGM, path.join(ROOT, tag), {
+      roster: () => [{ cid: 'agent-1', name: 'Worker', groups: ['G'] }, { cid: 'agent-2', name: 'Other', groups: [] }],
+      gate: (k) => (k === 0 ? (entered(), gate1) : null),
+      answer: (k) => (fail && k === 0 ? { ok: false, reason: 'the spend cap is reached (planted)', refused: 'cap' } : null),
+      stashThrows: () => fail,
+      heldBound: waitMs ? { takeWaitMs: waitMs } : null,
+    });
+    await w.eng.pass(A, { force: true });
+    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, notify: 'digest', digestMinutes: 30 }] });
+    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
+    const m8 = w.tail(OPS).slice(-1)[0];
+    const fresh = w.eng.onFresh(w.recOf(), OPS, [m8], { origin: 'test' });   // the group's wake STARTS and is held in its ladder await; the account digest parks m8
+    await in1;
+    const second = w.eng.flushScope(A, 'account', null, 'agent:agent-1');   // the SECOND chain arrives inside the window
+    await pause(40);
+    open();   // the first start's await ends
+    const [, d] = await Promise.all([fresh, second]);
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    const out = { starts: w.starts.length, billed: w.delivered.length, refused: w.refused.length, toAgent1: w.starts.filter((x) => x.cid === 'agent-1').length, second: { ok: !!(d && d.ok), why: (d && d.why) || null }, rows: recs(w, 'agent-1', m8) };
+    await w.eng.stop();
+    return out;
+  }
+  const NO_TAKE = '    const take = takeHits(rec.id, convId, names, hits);\n';
+  const NO_GIVE = '    } finally { giveBack(take); }   // B-1ca5: a start that did not take gives its takes back, by name (one that took is done already)\n';
+  ok(src.split(NO_TAKE).length === 2 && src.split(NO_GIVE).length === 2, 'control setup: the wake\'s take and its give-back are present once each');
+  const rc = await raceLeg(ENG, 'race');
+  console.log(`    starts (ladder calls) — the race, cured: ${rc.starts} (billed ${rc.billed})`);
+  ok(rc.starts === 1 && rc.billed === 1 && rc.rows === 1 && !rc.second.ok,
+    `B-1ca5: two chains, one ladder await, ONE delivery — the second chain found the first's mark, waited, and did nothing: ${rc.starts} start (${rc.billed} billed; the digest: ${rc.second.why})`, J(rc));
+  const rcR = await raceLeg(MUT.load('src/server/channels-engine.js', src.replace(NO_TAKE, '    const take = null;\n'), 'mark-after-the-await'), 'race-red');
+  console.log(`    starts (ladder calls) — the release's order (the mark written only after the await): ${rcR.starts} (billed ${rcR.billed})`);
+  ok(rcR.starts === 2 && rcR.billed === 2, `RED CONTROL: the release's order (no take before the await) — the second chain read the mark empty: ${rcR.starts} starts, ${rcR.billed} billed for ONE delivery`, J(rcR));
+  const fl = await raceLeg(ENG, 'race-fail', { fail: true });
+  console.log(`    starts (ladder calls) — the first start refused, its take given back: ${fl.starts} (billed ${fl.billed}, refused ${fl.refused})`);
+  ok(fl.starts === 2 && fl.billed === 1 && fl.refused === 1 && fl.second.ok && fl.rows === 1,
+    `B-1ca5: the FIRST start refused (its stash refused too) GIVES ITS TAKE BACK by name — the second chain then starts the delivery, ONCE: ${fl.billed} billed (${fl.starts} starts, ${fl.refused} refused)`, J(fl));
+  const flR = await raceLeg(MUT.load('src/server/channels-engine.js', src.replace(NO_GIVE, '    } finally { }\n'), 'take-never-given-back'), 'race-fail-red', { fail: true, waitMs: 300 });
+  console.log(`    starts (ladder calls) — a take never given back: ${flR.starts} (billed ${flR.billed})`);
+  ok(flR.billed === 0 && !flR.second.ok, `RED CONTROL: a refused start that never gives its take back holds the delivery back — the second chain waited its bound and started nothing: ${flR.billed} billed`, J(flR));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
