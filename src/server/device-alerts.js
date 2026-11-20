@@ -23,6 +23,7 @@
  */
 const fs = require('fs');
 const path = require('path');
+const SR = require('../store-read.js'); // the store-read law: a ledger that cannot be read is HELD, never read as «first run»
 const DA = require('../device-acts.js');
 
 const INBOX_KEY = 'machines'; // the tray's jump lands on Manage Agents → Machines (the card's 「活动…」 is one click away)
@@ -82,15 +83,58 @@ function words(T, lines, p) {
   return { text: fill(T, p), detail: lines.map((l) => fill(l, p)).join('\n'), i18n: { text: { key: T, params: p }, detail: lines.map((l) => ({ key: l, params: p })) } };
 }
 
-function create({ userTodos = null, dataDir = null, log = () => {}, now = () => Date.now() } = {}) {
+// THE LEDGER OFF THE LOOP (lane lg-store-writes, 主开发 2026-11-20 03:10Z — its temp + rename held the owner's hub once in the
+// first hour of 2.369.412): the bytes go to the store writer by name (made at the write; mode 0600). THE HOLD (the store-read law):
+// the release read ANY failure as «first run» — an EMPTY ledger the next filing wrote over the file it could not read (every alert
+// it had told would be told again). A read that failed, or bytes that are not the ledger, HOLD: the file is never written over (the
+// save and its producer refuse), the alerts are STILL FILED (a security event is never kept from the person — deduped in memory
+// meanwhile), read again off the loop; at the lift the file's keys and the ones filed meanwhile are merged and written. The ledger
+// has no other reader; the hub's stop lands it with every store (the writer's exit flush). A crash between a filing and the
+// ledger's landing files that alert once more at the next event — told twice, never missed.
+const LEDGER_VALID = (j) => !!j && typeof j === 'object' && !Array.isArray(j) && !!j.seen && typeof j.seen === 'object' && !Array.isArray(j.seen);
+function create({ userTodos = null, dataDir = null, log = () => {}, now = () => Date.now(), writer = null, unreadRetry = null } = {}) {
   const ledgerFile = dataDir ? path.join(dataDir, 'device-alerts.json') : null;
   let seen = {}; // dedup key → at (filed)
-  if (ledgerFile) { try { const j = JSON.parse(fs.readFileSync(ledgerFile, 'utf-8')); if (j && j.seen && typeof j.seen === 'object') seen = j.seen; } catch { /* first run */ } }
+  let held = null, heldSaveSaid = false, heldT = null, heldTries = 0, heldP = null;
+  const W = () => writer || require('../store-writer.js').storeWriter();
+  function holdLedger(a) {
+    held = { code: a.code, why: a.why };
+    log(`[device-alerts] device-alerts.json could not be read (${a.code}: ${a.why}) — held: nothing is written over it, alerts are still filed, it is read again off the main loop`);
+    retrySoon();
+  }
+  function retrySoon() {
+    if (heldT || !held) return;
+    const t = heldT = setTimeout(() => { heldT = null; readAgain().catch((e) => { log(`[device-alerts] the ledger's read again failed: ${(e && e.message) || e}`); retrySoon(); }); }, SR.retryDelay(++heldTries, unreadRetry || undefined));
+    t.unref?.();
+  }
+  /** ONE read again of a held ledger, off the loop → lifted: the file's keys and the ones filed meanwhile, merged, written */
+  async function readAgain() {
+    if (!held || heldP) return;
+    retrySoon();
+    const p = heldP = fs.promises.readFile(ledgerFile, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+    const read = await p; heldP = null;
+    if (!held) return;
+    const a = SR.storeAnswer(read, { valid: LEDGER_VALID });
+    if (a.state !== 'data') { held.code = a.state === 'missing' ? 'ENOENT' : a.code; return; }   // a file GONE since the hold stays held
+    held = null; heldSaveSaid = false;
+    if (heldT) { clearTimeout(heldT); heldT = null; }
+    seen = { ...a.value.seen, ...seen };
+    log(`[device-alerts] device-alerts.json read again: ${Object.keys(seen).length} key(s) — the hold is lifted`);
+    save();
+  }
+  if (ledgerFile) {
+    let read; try { read = { text: fs.readFileSync(ledgerFile, 'utf-8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: LEDGER_VALID });
+    if (a.state === 'data') seen = a.value.seen;
+    else if (a.state !== 'missing') holdLedger(a);   // a missing file is the first run; anything else HOLDS
+  }
+  const produce = () => { if (held) throw Object.assign(new Error('device-alerts.json is held (its read failed) — nothing is written over it until it reads'), { code: 'EHELD' }); return JSON.stringify({ version: 1, seen }, null, 2); };
   const save = () => {
     if (!ledgerFile) return;
+    if (held) { if (!heldSaveSaid) { heldSaveSaid = true; log('[device-alerts] the ledger\'s write was refused: device-alerts.json could not be read, and nothing is written over it until it reads'); } return; }
     const keys = Object.keys(seen);
     if (keys.length > LEDGER_MAX) for (const k of keys.sort((a, b) => seen[a] - seen[b]).slice(0, keys.length - LEDGER_MAX)) delete seen[k];
-    try { const tmp = ledgerFile + '.' + process.pid + '.tmp'; fs.writeFileSync(tmp, JSON.stringify({ version: 1, seen }, null, 2), { mode: 0o600 }); fs.renameSync(tmp, ledgerFile); }
+    try { W().dirty(ledgerFile, { name: 'device-alerts.write', mode: 0o600, produce, onWritten: (ok, e) => { if (!ok) log(`[device-alerts] ledger not written: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } }); }
     catch (e) { log(`[device-alerts] ledger not written: ${e.message}`); }
   };
   /** File ONE item for an event (once per its key) — urgent, or a notice for a signed forward upgrade. → {filed, key, id} | null */
@@ -111,7 +155,7 @@ function create({ userTodos = null, dataDir = null, log = () => {}, now = () => 
     log(`[device-alerts] ${kind}: ${w.text} — told the owner (For you, ${w.notice ? 'a notice' : 'urgent'})`);
     return { filed: !!id, key: w.key, id };
   }
-  return { file, seen: () => ({ ...seen }), INBOX_KEY };
+  return { file, seen: () => ({ ...seen }), held: () => !!held, INBOX_KEY };
 }
 
 module.exports = { create, itemOf, upgradeIsNotice, KINDS, INBOX_KEY };

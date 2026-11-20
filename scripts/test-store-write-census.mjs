@@ -80,7 +80,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSess
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
 // B-48a4 (the exit door's cost; restacked on 2.369.410): the two audit rings onto the store writer through ONE appender — device-audit.js's
 // 3 and exit-proxy.js audit's 3 go to zero; every save of hosts.json through the store writer — hosts.js _save's 2 go to zero ⇒ 881 − 8 = 873
-const DEBT_MAX = 865;   // lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −3 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main) ⇒ 868 − 3; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
+const DEBT_MAX = 863;   // lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −3 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 5; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -212,7 +212,6 @@ const ROWS = [
   ["src/server/desktop-access.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/desktop-app-keeper.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/desktop-handover-engine.js","*",1,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/server/device-alerts.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/device-upgrade-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/dial-health-watch.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/server/dial-pairing.js","*",5,"durable","—","NOT idempotent: money / authority / a credential","a pairing secret (authority) — must be on disk before the answer"],
@@ -890,7 +889,8 @@ const STORE_READS = [
   // unreadable = empty, the next save overwrites → lane bl-jobs batch 12 (B-6721 holds that store)
   // the browser registry (lane bl-jobs, the B-f276 remainder, its read r1 N9): through the store-read law — a failed read and torn bytes HOLD
   { file: 'src/server/browser-keeper.js', store: 'browser-profiles.json', state: 'answer', mark: /if \(a\.state === 'data'\) \{ rawDoc = a\.value; reg = B\.normalizeRegistry\(rawDoc\); \}/ },   // its read r2 (N16): the LOAD's line (the read again's storeAnswer is a second, unrelated match)
-  // lane lg-store-writes (主开发 2026-11-20 03:10Z): the desktop app records — a failed read or torn bytes HOLD (never started empty)
+  // lane lg-store-writes (主开发 2026-11-20 03:10Z): the desktop app records and the device alerts' ledger — a failed read or torn bytes HOLD (never started empty)
+  { file: 'src/server/device-alerts.js', store: 'device-alerts.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: LEDGER_VALID \}\);\n    if \(a\.state === 'data'\) seen = a\.value\.seen;/ },
   { file: 'src/desktop-serve.js', store: 'desktop-apps.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: STORE_VALID \}\);\n    if \(a\.state === 'data'\) \{ store = \{ apps: a\.value\.apps \}; return; \}/ },
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'debt', why: '_loadNotifs: any failure is an empty map (catch { }) — the next save writes over it', mark: /_loadNotifs\(\) \{\s*try \{\s*const obj = JSON\.parse\(fs\.readFileSync\(this\.notifsFile, 'utf-8'\)\);/ },
 ];
@@ -1669,6 +1669,39 @@ console.log('⑩ the measured holds after 2.369.412: each site off the loop, wit
       ok(x2.held0 && x2.heldBytes.some((b) => typeof b === 'string' && !Object.keys(JSON.parse(b).apps).length), 'CONTROL (both guards cut, in a copy): a commit while held makes the EMPTY store\'s bytes for the writer — RED', x2);
       // the hub's keeper hands its writer in (the device agent hands none: it writes at the call, off the hub's loop)
       ok(/writer: writer === undefined \? require\('\.\.\/store-writer\.js'\)\.storeWriter\(\) : writer,/.test(readSrc('src/server/desktop-app-keeper.js')), '⑩a the hub\'s keeper hands the process\'s store writer to the machine half (a suite may hand its own)');
+    }
+    // (b) src/server/device-alerts.js — the device alerts' dedup ledger (data/device-alerts.json; 1 of the 23)
+    {
+      const DASRC = readSrc('src/server/device-alerts.js');
+      const HOLD_A = "    else if (a.state !== 'missing') holdLedger(a);   // a missing file is the first run; anything else HOLDS\n";
+      const PROD_A = "  const produce = () => { if (held) throw";
+      ok([HOLD_A, PROD_A].every((x) => DASRC.split(x).length === 2), 'control setup: the ledger\'s hold and its producer guard are found once each in device-alerts.js');
+      const SEEN = JSON.stringify({ version: 1, seen: { 'pair:dev-old:1': 1 } });
+      const scene = async (Mod, name, { lift = true } = {}) => {
+        const d = scratchDir('da-held-' + name); roots.push(d); const F = path.join(d, 'device-alerts.json'); fs.writeFileSync(F, SEEN);
+        const { st, W } = recordingWriter(); const filed = [];
+        const todos = { add: (k, it) => { filed.push(it.text); return { id: 'u' + filed.length }; } };
+        const da = failingRead(F, 'EIO', () => Mod.create({ userTodos: todos, dataDir: d, log: () => { }, writer: W, unreadRetry: { firstMs: 15, maxMs: 30 } }));
+        const out = { held0: da.held ? da.held() : false };
+        const r1 = da.file('pairing-minted', { machine: 'm1', deviceId: 'dev-new', generation: 1, by: 'userL', from: '10.0.0.9' });
+        out.filedWhileHeld = !!(r1 && r1.filed) && filed.length === 1;
+        out.queuedWhileHeld = st.dirty.length;
+        out.heldBytes = st.dirty.map((x) => { try { return JSON.parse(x.o.produce()); } catch (e) { return e.code; } });
+        out.bytesKept = fs.readFileSync(F, 'utf8') === SEEN;
+        if (lift) {
+          for (let i = 0; i < 200 && da.held(); i++) await new Promise((r) => setTimeout(r, 10));
+          out.lifted = !da.held();
+          const last = st.dirty[st.dirty.length - 1];
+          out.written = last ? { name: last.o.name, mode: last.o.mode, keys: Object.keys(JSON.parse(last.o.produce()).seen).sort().join(',') } : null;
+          out.fileAtCall = fs.readFileSync(F, 'utf8') === SEEN;
+        }
+        return out;
+      };
+      const r = await scene(require(path.join(REPO, 'src/server/device-alerts.js')), 'real');
+      ok(r.held0 && r.filedWhileHeld && r.queuedWhileHeld === 0 && r.bytesKept, '⑩b device-alerts.json that could not be read (EIO): HELD — an alert is STILL FILED (a security event is never kept from the person), the ledger written over by nothing (the release read it as «first run» and wrote an EMPTY ledger over it)', r);
+      ok(r.lifted && r.written && r.written.name === 'device-alerts.write' && r.written.mode === 0o600 && r.written.keys === 'pair:dev-new:1,pair:dev-old:1' && r.fileAtCall, '⑩b …read again off the loop: the file\'s keys and the one filed meanwhile MERGED and handed to the store writer (mode 0600 — nothing written at the call)', r);
+      const x = await scene(mutantCopies('swc-da-hold-cut', REPO).load('src/server/device-alerts.js', anchored(DASRC, HOLD_A, '    /* MUTANT: the release — a failed read is the first run */\n', 'da-hold-cut'), 'da-hold-cut'), 'hold-cut', { lift: false });
+      ok(!x.held0 && x.heldBytes.some((b) => b && b.seen && !b.seen['pair:dev-old:1']), 'CONTROL (the hold cut, in a copy — the release): the unreadable ledger starts EMPTY and the first filing hands that ledger to the writer, over the file — every alert it told is told again (red)', x);
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }

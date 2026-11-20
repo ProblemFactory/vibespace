@@ -155,7 +155,7 @@ export const ROWS = [
   ['src/server/desktop-app-keeper.js', 'own-tree', 1, null, DATA],
   ['src/server/desktop-webrtc.js', 'own-tree', 6, null, 'lane stream-p3m-build: the prebuilt Mac screen helper the hub pushes to a Mac with no compiler — data/bin/helpers/vibespace-screen (+ .version) in the checkout: its version, its size, its bytes; lane apple-signing +3: its .identity.json, the release record beside the bundle (data/bin/vibespace-agentd.manifest.json) and the prebuilt\'s digest over a stream — all in the checkout'],
   ['src/server/device-upgrade-watch.js', 'own-tree', 1, null, DATA],
-  ['src/server/device-alerts.js', 'own-tree', 1, null, DATA], // lane device-act-audit: the three urgent items' dedup ledger (data/device-alerts.json)
+  ['src/server/device-alerts.js', 'own-tree', 2, null, DATA], // lane lg-store-writes (主开发 2026-11-20 03:10Z) +1: the held ledger's read again (fs.promises, off the loop) // lane device-act-audit: the three urgent items' dedup ledger (data/device-alerts.json)
   ['src/server/dial-health-watch.js', 'own-tree', 1, null, DATA], // lane host-stale-dialer: data/dial-health.json (the For-you ledger)
   ['src/server/dial-pairing.js', 'own-tree', 2, null, DATA], // lane mac-repair-retires-stale +1: data/agentd/hub-id (this hub's id, read once)
   ['src/server/exit-hook.js', 'own-tree', 2, null, PROC], // lane usage-fold-worker-exit-hook: /proc/self/task (a worker's thread named at spawn, listed at the join)
