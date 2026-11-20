@@ -146,6 +146,7 @@ async function waitForPeer(backendSessionId, { waitMs = 0, alive = () => true, d
     if (!alive()) return { peer: null, waited, cut: true, why: 'the asker went' };
     const look = lookupPeer(backendSessionId, dir, probe);
     if (look.peer) return { peer: look.peer, waited, cut: false, why: look.why };
+    if (look.unread) return { peer: null, waited, cut: false, unread: look.unread, why: look.why };   // B-95fc follow-up: an unreadable registry ends the wait at once — said by name, never a minute of polling
     if (waited >= bound) return { peer: null, waited, cut: false, why: look.why };
     const d = Math.min(step, bound - waited);
     await sleep(d); waited += d; step = Math.min(step * 2, 1000);
@@ -248,12 +249,15 @@ function peerStateOf(cid, { dir = REGISTRY_DIR, probe = null } = {}) {
 }
 /** B-95fc — THE DEVICE AGENT'S peer-post ANSWER, ONE body (the agent's and the fast suite's): with `inboxWaitMs` the bounded wait for
  *  this machine's OWN record of the conversation first (waitForPeer), then ONE post. → the reply's fields, or null when the asker went
- *  mid-wait (a destroyed link: nothing posted, nobody to answer). */
+ *  mid-wait (a destroyed link: nothing posted, nobody to answer). A registry folder that cannot be READ ends the wait at its first
+ *  look and answers `registry_unread` with the reason (B-95fc follow-up). */
 async function peerPostAnswer({ cid, text, inboxWaitMs } = {}, { alive = () => true, dir = REGISTRY_DIR, probe = null, sleep = null } = {}) {
   const c = String(cid || '');
   const waitMs = Number.isFinite(inboxWaitMs) && inboxWaitMs > 0 ? inboxWaitMs : 0;
-  const w = waitMs ? await waitForPeer(c, { waitMs, alive, dir, probe, ...(sleep ? { sleep } : {}) }) : { peer: findPeer(c, dir, probe), waited: 0, cut: false };
+  const w = waitMs ? await waitForPeer(c, { waitMs, alive, dir, probe, ...(sleep ? { sleep } : {}) }) : (() => { const l = lookupPeer(c, dir, probe); return { peer: l.peer, waited: 0, cut: false, unread: l.unread }; })();
   if (w.cut) return null;
+  // B-95fc follow-up (主开发 r491): a registry folder this machine cannot READ is said BY NAME — never «its inbox did not open»
+  if (w.unread) return { ok: false, code: 'registry_unread', unread: w.unread, waited: w.waited, reason: `its machine could not read its conversations' registry (${w.unread})` };
   if (!w.peer && waitMs) return { ok: false, code: 'inbox_not_open', waited: w.waited, reason: `its inbox did not open on this machine within ${Math.round(w.waited / 1000)} s` };
   if (!w.peer) return { ok: false, reason: 'no live inbox for this conversation on this machine' };
   const r = await postToPeer(w.peer, String(text || ''));

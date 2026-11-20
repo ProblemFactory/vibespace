@@ -166,6 +166,12 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
       return { ok: true, outcome: 'delivered', sessionId: r.sessionId, delivered: ho.delivered || 0, rule: g.rule || null };
     }
     // the hand-over refused or failed AFTER the resume: the now-live conversation says why (the words wait for its next turn)
+    // B-95fc follow-up (主开发 r491): the paired machine could not READ its conversations' registry — said by name, not as a closed inbox
+    if (ho && ho.code === 'registry_unread') {
+      const why = `it was resumed as ${r.sessionId}, but its machine could not read its conversations' registry — the message waits for its next turn`;
+      try { if (typeof seams.noteResumed === 'function') seams.noteResumed(r.sessionId, D.resumedRefusedLine(namesOf(entry), now(), { code: 'registry_unread', why })); } catch { }
+      return { ok: false, outcome: 'failed', code: 'registry_unread', why, sessionId: r.sessionId };
+    }
     // B-95fc U2: the paired machine waited for the resumed CLI's inbox and it did not open — the same words as this machine's own wait
     if (ho && ho.code === 'inbox_not_open') {
       const why = `it was resumed as ${r.sessionId}, but its agent did not open its inbox within ${INBOX_WAIT_MS / 1000} s on its machine — the message waits for its next turn (sending anything starts it, or end and resume it)`;

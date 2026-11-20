@@ -371,7 +371,7 @@ console.log('\n§1 the pure decision (src/spend-authorizer.js)');
 const PRIMITIVES = [
   { id: 'user-frame', re: /formatChatInput\s*\(/g, why: 'composes a USER message frame for a live session' },
   { id: 'continue-send', re: /sendToSession\s*\(/g, why: 'hands a session a user turn it did not ask for (auto-resume\'s continue)' },
-  { id: 'cli-inbox', re: /\b(postToPeer|postChannelEvent|peerPost)\s*\(/g, why: "writes into the CLI's own cross-session inbox — idle ⇒ a billed turn" },
+  { id: 'cli-inbox', re: /\b(postToPeer|postChannelEvent|peerPost|peerPostAnswer)\s*\(/g, why: "writes into the CLI's own cross-session inbox — idle ⇒ a billed turn (peerPostAnswer: the device's peer-post op's ONE body, a second exported road into the same inbox — B-95fc follow-up)" },
   { id: 'rpc-peer-frame', re: /type:\s*'peer-message'/g, why: "hands the wrapper a peer message — idle ⇒ turn/start" },
   { id: 'deliver-ladder', re: /deliverToConversation\s*\(/g, why: 'the delivery ladder itself (jobs notifications, agent messages)' },
   { id: 'stop-nudge', re: /block:\s*true/g, why: 'the Stop hook arbiter — block+reason IS an extra billed mini-turn' },
@@ -424,7 +424,8 @@ const ALLOW = [
   { file: 'src/adapters/codex.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/adapters/acp.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/server/local-index.js', prim: 'user-frame', why: "lane human-cli: the person's index writer asks each adapter's formatChatInput ONCE with placeholders (src/local-index.js FRAME_TEXT) to write the row's frame TEMPLATE — it sends nothing; the frame the CLI fills later is the OWNER typing at the machine (data/bin/vibespace refuses inside an agent session — never counted, D6)" },
-  { file: 'src/peer-messaging.js', prim: 'cli-inbox', why: 'the PRIMITIVE (unix-socket write) — and, since B-95fc (round w00h341sv), the DEVICE half of a delivery the hub already authorized: the peer-post op\'s ONE body peerPostAnswer (src/agentd/agentd.js calls it; its own row left with its last call). Policy lives at the ladder that calls it — this file has no idea who asked' },
+  { file: 'src/peer-messaging.js', prim: 'cli-inbox', why: 'the PRIMITIVE (unix-socket write) — and, since B-95fc (round w00h341sv), the DEVICE half of a delivery the hub already authorized: the peer-post op\'s ONE body peerPostAnswer (src/agentd/agentd.js calls it). Policy lives at the ladder that calls it — this file has no idea who asked' },
+  { file: 'src/agentd/agentd.js', prim: 'cli-inbox', why: 'the DEVICE half of a delivery the hub already authorized: the peer-post op calls the shared body peerPostAnswer by its own name (B-95fc follow-up: the census names that road too)' },
   { file: 'src/agentd/client.js', prim: 'cli-inbox', why: 'the hub-side RPC stub for that same op' },
   { file: 'src/server/jobs-wiring.js', prim: 'deliver-ladder', why: 'a pass-through that forwards to the gated ladder' },
   { file: 'src/jobs.js', prim: 'deliver-ladder', why: 'the jobs engine calls the gated ladder and stashes what it refuses (its own 30s floor is pacing, not money)' },

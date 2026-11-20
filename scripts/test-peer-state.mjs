@@ -21,6 +21,8 @@
 //   ROUND w00h341sv: ⑤ a LOCAL conversation under a held list is still parked (RED: the hold for every cid); ⑩ the agent runs THESE
 //      bodies (RED: its wait removed), an unreadable registry is an error the hub keeps unknown (RED: read as empty); ⑪ the ten-minute
 //      memory cleared by a landed post and expired (RED: kept); ⑫ peer-state alone counts as older (RED: asked), its word leaves on update
+//   FOLLOW-UP (主开发 r491): ⑬ an unreadable registry is said BY NAME — the wait stops at its first read (RED: polls its bound), the
+//      hub's rung and hand-over carry registry_unread and its words, the journal says it once a machine (RED: at every delivery)
 import path from 'node:path';
 import fs from 'node:fs';
 import net from 'node:net';
@@ -370,6 +372,40 @@ console.log('⑫ an agent with peer-state but NOT peer-post-wait counts as older
   const STAY = mutantCopies('peer-state-older-stays', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    else if (st) { const a = endedAnswers.get(cid); if (a && a.code === 'agent_older') endedAnswers.delete(cid); }", '', 'older-word-stays'), 'older-word-stays');
   const us = await updated(STAY);
   ok(us.now === 'agent_older', '⑫ RED CONTROL: the word never cleared — an updated agent\'s row still says it is older', us);
+}
+
+console.log('⑬ an UNREADABLE registry is said BY NAME: the wait stops at its first read, the hub carries the words, said once a machine (主开发 r491)');
+{
+  const notDir = path.join(ROOT, 'reg13-a-file'); fs.writeFileSync(notDir, 'x');
+  const n1 = [];
+  const w = await PM.waitForPeer(CID(50), { waitMs: 60000, dir: notDir, sleep: async (ms) => { n1.push(ms); } });
+  ok(w.peer === null && w.unread === 'ENOTDIR' && w.waited === 0 && n1.length === 0, 'a registry folder that cannot be READ ends the wait at its FIRST look (no minute of polling), named by its error', w);
+  const STOP = "    if (look.unread) return { peer: null, waited, cut: false, unread: look.unread, why: look.why };   // B-95fc follow-up: an unreadable registry ends the wait at once — said by name, never a minute of polling\n";
+  const POLLS = mutantCopies('peer-wait-polls-unread', REPO).load('src/peer-messaging.js', anchored(MSRC, STOP, '', 'polls-the-unreadable'), 'polls-the-unreadable');
+  const n2 = []; const wr = await POLLS.waitForPeer(CID(50), { waitMs: 3000, dir: notDir, sleep: async (ms) => { n2.push(ms); } });
+  ok(wr.waited === 3000 && n2.length > 1, '⑬ RED CONTROL: without the stop the machine polls an unreadable folder for its whole bound', { waited: wr.waited, naps: n2.length });
+  const a = await PM.peerPostAnswer({ cid: CID(50), text: 't', inboxWaitMs: 60000 }, { dir: notDir, sleep: async () => { } });
+  const b = await PM.peerPostAnswer({ cid: CID(50), text: 't' }, { dir: notDir });
+  ok(a.ok === false && a.code === 'registry_unread' && /its machine could not read its conversations' registry \(ENOTDIR\)/.test(a.reason) && b.code === 'registry_unread',
+    'the agent\'s answer names it (registry_unread, the reason) — with a wait and without one; never «its inbox did not open», never «no live inbox»', { a, b });
+  // the hub: the rung and the wake's hand-over carry the words; the journal says it ONCE a machine
+  const X = CID(51), Y = CID(52);
+  const R = rig('unread-handover', { post: async ({ cid: c, text, waitMs = 0 }) => PM.peerPostAnswer({ cid: c, text, inboxWaitMs: waitMs }, { dir: notDir, sleep: async () => { } }) });
+  const r1 = await R.deliver.deliverToConversation(X, 'one', { kind: 'notification', spendReason: 'job-notification', inboxWaitMs: 60000 });
+  await R.deliver.deliverToConversation(Y, 'two', { kind: 'notification', spendReason: 'job-notification', inboxWaitMs: 60000 });
+  const said = R.logs.filter((l) => /its machine could not read its conversations' registry/.test(l));
+  ok(r1.ok === false && r1.code === 'registry_unread' && r1.notRunning !== true && /could not read its conversations' registry/.test(r1.reason) && said.length === 1 && R.spend.note === 0,
+    'the hub\'s rung carries the named code and its words (never «not running»), nothing charged — and the journal says it ONCE for that machine across two deliveries', { r1, said: said.length });
+  R.deliver.stashFor(X, { source: 'agent', kind: 'notification', fromName: 'Background Work · nightly', text: 'nightly report' });
+  const ho = await R.view.handOverWake(X, R.view.claimForWake(X), { reason: 'job-notification', inboxWaitMs: 60000 });
+  ok(ho.ok === false && ho.code === 'registry_unread' && /could not read its conversations' registry/.test(ho.error) && R.deliver.stashCount(X) >= 1, 'the wake\'s hand-over says it by name and the words keep waiting', ho);
+  const ONCE = mutantCopies('peer-unread-said-every-time', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "  const sayUnread = (hid, why) => { if (saidUnread.has(hid)) return; saidUnread.add(hid);", "  const sayUnread = (hid, why) => { saidUnread.add(hid);", 'said-every-time'), 'said-every-time');
+  const RR = rig('unread-red', { mod: ONCE, post: async ({ cid: c, text, waitMs = 0 }) => PM.peerPostAnswer({ cid: c, text, inboxWaitMs: waitMs }, { dir: notDir, sleep: async () => { } }) });
+  await RR.deliver.deliverToConversation(X, 'one', { kind: 'notification', spendReason: 'job-notification', inboxWaitMs: 60000 });
+  await RR.deliver.deliverToConversation(Y, 'two', { kind: 'notification', spendReason: 'job-notification', inboxWaitMs: 60000 });
+  ok(RR.logs.filter((l) => /could not read its conversations' registry/.test(l)).length === 2, '⑬ RED CONTROL: said at every delivery — the journal floods for one machine', {});
+  const WSRC = fs.readFileSync(path.join(REPO, 'src/server/delivery-wake.js'), 'utf8');
+  ok(WSRC.includes("if (ho && ho.code === 'registry_unread') {") && WSRC.includes("but its machine could not read its conversations' registry — the message waits for its next turn"), 'the wake line words the machine\'s unreadable registry as its own line (source pin)');
 }
 
 report();

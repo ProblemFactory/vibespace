@@ -112,7 +112,7 @@ if (!COST_SPEC) {
 // THE DOORS: the TRANSPORTS every path to an agent passes (the ladder, the stash, the notice queue, the wire, the
 // hook payload, the card door, the notice head) and the RENDERERS that compose what rides them. A door nobody
 // calls is red (a dead token is a lie about the tree); a site the table does not name is red by name.
-const DOORS = ['deliverToConversation(', 'stashFor(', 'stashSlot(', 'pushNotice(', 'postToPeer(', 'peerPost(', 'hookSpecificOutput', 'emitPeerCard(', 'vibespaceNoticeText(', 'renderNotices(',
+const DOORS = ['deliverToConversation(', 'stashFor(', 'stashSlot(', 'pushNotice(', 'postToPeer(', 'peerPost(', 'peerPostAnswer(', 'hookSpecificOutput', 'emitPeerCard(', 'vibespaceNoticeText(', 'renderNotices(',
   'composeReply(', 'reportFor(', 'reportsForTurn(', 'renderWakeBlock(', 'renderDigestBlock(', 'renderScopeDigestBlock(', 'renderOwnerNotify(', 'renderNotifStash(', 'renderJobsUpdate(', 'renderJobsDigest(', 'renderMsgStash(',
   'dialogText(', 'renderDialogNotice(', 'answeredNote(', 'answerDoneText(', 'stuckAgentText(', 'loadingText(', 'alertsNote(', 'pageText(', 'agentCopy(', 'readThreadFor(', 'searchFor(',
   // lane channel-attach-read (B-d6b9): the agent's ATTACHMENT answer — who sent it, where, the vendor's type (one header the CLI prints)
@@ -327,6 +327,8 @@ const TABLE = {
   'src/server/conversation-deliver.js :: vibespaceNoticeText(': { rules: ['declared:VibeSpace\'s own head on a notification — adds no peer text'], pin: null, why: 'the one head' },
   'src/notification-senders.js :: vibespaceNoticeText(': { rules: ['declared:the head\'s definition (VibeSpace\'s own words)'], pin: null, why: 'definition' },
   'src/peer-messaging.js :: postToPeer(': { rules: ['declared:the CLI\'s inbox socket — writes the frame the ladder handed it; and the device\'s peer-post op, whose ONE body peerPostAnswer posts here (B-95fc: src/agentd/agentd.js calls it — the same wire for a frame the hub judged)'], pin: null, why: 'the wire (on this machine and on a paired one)' },
+  'src/peer-messaging.js :: peerPostAnswer(': { rules: ['declared:the device\'s peer-post op\'s ONE body — it posts, through postToPeer, the frame the hub judged (B-95fc follow-up: named by its own name, a second exported road into the inbox)'], pin: null, why: 'the wire on a paired machine (its body)' },
+  'src/agentd/agentd.js :: peerPostAnswer(': { rules: ['declared:the device\'s peer-post op — calls the shared body with the frame the hub judged'], pin: null, why: 'the wire on a paired machine' },
   'src/agentd/client.js :: peerPost(': { rules: ['declared:the hub\'s request to the device op'], pin: null, why: 'transport' },
   'data/bin/vibespace-hook.mjs :: hookSpecificOutput': { rules: ['declared:the hook TRANSPORTS agent-routes\' composed payload verbatim — every peer part judged by its producer row'], pin: /additionalContext: data\.context/, why: 'the hook\'s injection payload' },
   'src/server/agent-tool-generators.js :: hookSpecificOutput': { rules: ['declared:the generated hook template — the same transport'], pin: null, why: 'the shipped hook' },

@@ -1532,13 +1532,16 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const remoteEnded = new Map();
   const isRemoteEnded = (cid) => { const e = remoteEnded.get(cid); if (!e) return false; if (clock.now() - e.at < REMOTE_ENDED_MS) return true; remoteEnded.delete(cid); return false; };
   const saidOlder = new Set();
+  // B-95fc follow-up (主开发 r491): a machine whose conversations' registry cannot be read is said ONCE a machine in the journal (unknown, by name)
+  const saidUnread = new Set();
+  const sayUnread = (hid, why) => { if (saidUnread.has(hid)) return; saidUnread.add(hid); if (saidUnread.size > 200) saidUnread.delete(saidUnread.values().next().value); log(`[deliver] ${hid}: its machine could not read its conversations' registry (${String(why || '').slice(0, 160)}) — what it runs there is unknown; the words wait (never «not running»)`); };
   async function remoteStateOf(dm, cid, hid) {
     if (!dm || typeof dm.peerState !== 'function') return null;
     let st;
     // U2: an owed wake is parked only for a machine that can ALSO wait for the resumed CLI's inbox (peer-post-wait) — else its
     // hand-over would post before that inbox opened; such an agent is an older one here (both ride the same agent update)
     const caps = typeof dm.helloInfo === 'function' ? (dm.helloInfo() || {}).capabilities : null;
-    try { st = Array.isArray(caps) && !caps.includes('peer-post-wait') ? null : await dm.peerState(cid); } catch (e) { return undefined; }   // the link dropped or the op failed: unknown (today's road)
+    try { st = Array.isArray(caps) && !caps.includes('peer-post-wait') ? null : await dm.peerState(cid); } catch (e) { if (/could not be read/.test(String((e && e.message) || ''))) sayUnread(hid, String(e.message)); return undefined; }   // the link dropped or the op failed: unknown (today's road); a registry the machine cannot read is SAID (follow-up)
     if (st === null) {   // an older agent: never asked — said once per machine, and the person reads why
       if (!saidOlder.has(hid)) { saidOlder.add(hid); if (saidOlder.size > 200) saidOlder.delete(saidOlder.values().next().value); log(`[deliver] ${hid}: its device agent is older — it cannot say whether a conversation ended there; the words wait for its next turn (update the agent)`); }
       if (!endedAnswers.has(cid)) endedAnswers.set(cid, { outcome: 'refused', code: 'agent_older', why: 'its device agent is older: update it — the words wait for its next turn', until: null, at: clock.now() });
@@ -1999,6 +2002,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid, ...(Number.isFinite(r.waited) ? { waited: r.waited } : {}) }; }
           undo2();
           if (r && r.code === 'inbox_not_open') return { ok: false, lane: 'remote-message', hostId: hid, code: 'inbox_not_open', reason: String(r.reason || 'its inbox did not open on that machine') };
+          if (r && r.code === 'registry_unread') { sayUnread(hid, r.reason); return { ok: false, lane: 'remote-message', hostId: hid, code: 'registry_unread', reason: String(r.reason || 'its machine could not read its conversations\' registry') }; }   // B-95fc follow-up: said by name — never «not running», never «its inbox did not open»
           // B-95fc U1: THE MACHINE ANSWERS FOR ITS OWN INBOX — asked only of an agent that advertises peer-state (an older one never: an
           // unknown op hangs; its road stays as today, said once); the miss is «not running» ONLY on its reply that the conversation
           // runs nowhere there — never a machine that could not be reached, never a CLI still starting

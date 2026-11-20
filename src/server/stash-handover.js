@@ -497,7 +497,8 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       if (!r || !r.ok) {
         if (r && r.refused === 'spend') return { ok: false, code: 'spend_refused', id, error: r.reason || 'the spend ceiling refused this turn', why: r.why || null, retryAfter: r.retryAfter || 0, identity: r.identity || null, cap: r.cap == null ? null : r.cap, ...(r.capUnset ? { capUnset: true } : {}) };
         if (r && (r.refused === 'wrapper-no-steer' || r.refused === 'no-wake')) return { ok: false, code: 'held_for_next_turn', id, error: r.reason || 'held for the conversation’s next prompt' };
-        if (r && r.code === 'inbox_not_open') return { ok: false, code: 'inbox_not_open', id, error: r.reason || 'its inbox did not open on its machine' };   // B-95fc U2: the machine's wait ran out (nothing posted, nothing charged)
+        if (r && r.code === 'inbox_not_open') return { ok: false, code: 'inbox_not_open', id, error: r.reason || 'its inbox did not open on its machine' };
+        if (r && r.code === 'registry_unread') return { ok: false, code: 'registry_unread', id, error: r.reason || 'its machine could not read its conversations\' registry' };   // B-95fc follow-up: said by name   // B-95fc U2: the machine's wait ran out (nothing posted, nothing charged)
         return { ok: false, code: 'unreachable', id, error: (r && r.reason) || 'the agent could not be reached — the notices keep waiting for its next turn', phase: (r && r.phase) || null, unanswered: !!(r && r.unanswered) };   // B-6721: a frame written before a timeout, or a device's post sent and never answered, may have landed
       }
       // DELIVERED: take exactly what went out; what arrived meanwhile keeps waiting
