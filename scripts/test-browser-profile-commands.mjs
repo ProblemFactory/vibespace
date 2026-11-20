@@ -71,6 +71,16 @@ for (const profileId of ['bp-0000dead', 'bp-NOTANID', '', undefined]) {
   ok(r === false && W1.opened.length === n && heard.length === 1 && heard[0] === 'cancelled' && W1.said.at(-1) === String(profileId || ''), `${JSON.stringify(profileId)}: no dialog, the person is told, the caller hears 'cancelled'`, { r, opened: W1.opened.length - n, heard, said: W1.said.at(-1) });
 }
 ok(!W1.asked.includes('bp-NOTANID') && !W1.asked.includes(''), '…a malformed id is never even asked of the profiles list');
+{
+  const long = 'x'.repeat(60), heard = [];
+  await C.runCommand('browser.profileProxy', { profileId: long, onDone: (w) => heard.push(w) });
+  ok(W1.said.at(-1) === 'x'.repeat(40) + '…' && heard[0] === 'cancelled', '…an over-long malformed id is cut to 40 characters in what the person is told', W1.said.at(-1));
+  // THE LIST COULD NOT BE READ (r226 should): the person hears the server did not answer — never that the profile is missing
+  const noReply = [], notFound = [], heardN = [];
+  const runN = P.profileDialogRun(() => { throw new Error('never opened'); }, { rowOf: async () => { throw new Error('503'); }, notFound: (id) => notFound.push(id), noReply: () => noReply.push(1) });
+  const rN = await runN({ profileId: ROW.id, onDone: (w) => heardN.push(w) });
+  ok(rN === false && noReply.length === 1 && notFound.length === 0 && heardN.length === 1 && heardN[0] === 'cancelled', 'a profiles list that could not be read: «the server did not answer» (never «missing»), no dialog, the caller hears cancelled', { noReply, notFound, heardN });
+}
 
 console.log('④ a caller\'s onDone that throws never breaks the run');
 {
@@ -79,20 +89,25 @@ console.log('④ a caller\'s onDone that throws never breaks the run');
   ok(threw === null, 'an onDone that throws is the caller\'s own: the run and the close go on', threw && threw.message);
 }
 
-console.log('⑤ the dialogs say done only after their own saves');
+console.log('⑤ the dialogs say done only after their own saves — the FORM\'s word, the same for a raised second caller');
 for (const [f, saves] of [['src/lib/browser-proxy-dialog.js', 2], ['src/lib/browser-exit-dialog.js', 2]]) {
   const s = read(f);
-  const sig = /export function open(Proxy|Exit)Dialog\(app, r, \{ onDone = null, onClose = null \} = \{\}\)/.test(s);
-  const shellClose = /onClose: \(\) => \{ try \{ onClose\?\.\(saved \? 'done' : 'cancelled'\); \} catch \{ \/\* the caller's own \*\/ \} \}/.test(s);
-  const before = (s.match(/saved = true;\n\s+shell\.close\(\);\n\s+try \{ onDone\?\.\(\); \}/g) || []).length;
-  const cancel = /const cancel = btn\(t\('Cancel'\), \(\) => shell\.close\(\), 'bnew-cancel'\);/.test(s);
-  ok(sig && shellClose && before === saves && (s.match(/saved = true;/g) || []).length === saves && cancel, `${f}: onClose('done' | 'cancelled') through the shell's own close; 'done' set at its ${saves} saves, right before their close — Cancel only closes`, { sig, shellClose, before, cancel });
+  const facts = {
+    set: /\nconst SAVED = new WeakSet\(\);\n/.test(s),
+    sig: /export function open(Proxy|Exit)Dialog\(app, r, \{ onDone = null, onClose = null \} = \{\}\) \{/.test(s),
+    hook: /onClose: \(\) => \{ try \{ onClose\?\.\(sh && SAVED\.has\(sh\.overlay\) \? 'done' : 'cancelled'\); \} catch \{ \/\* the caller's own \*\/ \} \}/.test(s),
+    handed: /\n  sh = shell;\n  if \(shell\.raised\) return shell;\n/.test(s),
+    saves: (s.match(/SAVED\.add\(shell\.overlay\);\n\s+shell\.close\(\);\n\s+try \{ onDone\?\.\(\); \}/g) || []).length,
+    noLocal: !/let saved\b|saved = true/.test(s),
+    cancel: /const cancel = btn\(t\('Cancel'\), \(\) => shell\.close\(\), 'bnew-cancel'\);/.test(s),
+  };
+  ok(facts.set && facts.sig && facts.hook && facts.handed && facts.saves === saves && facts.noLocal && facts.cancel, `${f}: the word is the FORM's (a WeakSet of overlays its ${saves} saves add to, right before their close), read through the handle a raise hands back — no local flag left; Cancel only closes`, facts);
 }
 
 console.log('⑥ the wiring');
 {
   const tv = read('src/lib/browser-trace-view.js');
-  ok(/import \{ registerBrowserProfileCommands \} from '\.\/browser-profile-commands\.js';/.test(tv) && /registerBrowserProfileCommands\(\{\n  openProxy: openProxyDialog, openExit: openExitDialog, titles: \{ proxy: \(\) => t\('Proxy…'\), exit: \(\) => t\('Check the exit…'\) \},\n  rowOf: async \(id\) => \{ const d = await fetchJson\('\/api\/browser\/profiles'\);/.test(tv),
+  ok(/import \{ registerBrowserProfileCommands \} from '\.\/browser-profile-commands\.js';/.test(tv) && /registerBrowserProfileCommands\(\{\n  openProxy: openProxyDialog, openExit: openExitDialog, titles: \{ proxy: \(\) => t\('Proxy…'\), exit: \(\) => t\('Check the exit…'\) \},\n  rowOf: async \(id\) => \{ const d = await fetchJson\('\/api\/browser\/profiles'\); if \(!d \|\| d\.error \|\| !Array\.isArray\(d\.profiles\)\) throw new Error/.test(tv) && /\n  noReply: \(\) => showToast\(t\('The browser profiles could not be read — the server did not answer; try again'\)/.test(tv),
     'the profiles panel registers them with the card\'s real dialogs and the profiles list (the row the card itself draws)');
   const docs = read('docs/plugins.md');
   ok(P.PROFILE_DIALOG_COMMANDS.every((id) => docs.includes(id)), 'docs/plugins.md names both commands for a plugin');

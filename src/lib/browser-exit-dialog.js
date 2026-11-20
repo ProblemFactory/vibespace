@@ -13,12 +13,16 @@ const post = (url, body) => fetchJson(url, { method: 'POST', headers: { 'Content
 // side said rides after it as data, never as the sentence
 const WORDS = (code, extra = {}) => exitSay(code, t, extra);
 
+// B-acb9 (r226): the forms ONE of their own saves ended, keyed by the form's overlay. A second open of the same profile RAISES the
+// live form and hands its caller that same overlay, so the word every caller hears is the FORM's — never one call's local.
+const SAVED = new WeakSet();
 export function openExitDialog(app, r, { onDone = null, onClose = null } = {}) {   // onClose('done' | 'cancelled'): a caller outside the card (B-acb9)
-  let saved = false;   // B-acb9: 'done' only after one of THIS dialog's own saves — a cancel, an Esc or a ✕ is 'cancelled'
+  let sh = null;   // B-acb9: this call's form, or the live one a raise hands back — 'done' only after one of ITS own saves
   const label = String((r && (r.label || r.id)) || '');
   let dirty = false;
-  const shell = createModalShell({ id: 'browser-exit-dialog', key: String(r.id), opener: 'person', title: t('The exit of {label}', { label }), dialogClass: 'bwho-dialog bexit-dialog', onClose: () => { try { onClose?.(saved ? 'done' : 'cancelled'); } catch { /* the caller's own */ } },
+  const shell = createModalShell({ id: 'browser-exit-dialog', key: String(r.id), opener: 'person', title: t('The exit of {label}', { label }), dialogClass: 'bwho-dialog bexit-dialog', onClose: () => { try { onClose?.(sh && SAVED.has(sh.overlay) ? 'done' : 'cancelled'); } catch { /* the caller's own */ } },
     unsaved: { isDirty: () => dirty, save: () => doKeep() }, kind: 'form' });
+  sh = shell;
   if (shell.raised) return shell;
   const body = shell.body;
   body.appendChild(el('div', 'bnew-hint', t('Checked only when you press Check — through this profile\'s own proxy, at the exit check address. Nothing is kept until you press Keep; an engine plugin reads what you keep when the browser starts.')));
@@ -87,7 +91,7 @@ export function openExitDialog(app, r, { onDone = null, onClose = null } = {}) {
     if (!res || !res.ok) { say(WORDS(res && res.code)); return; }
     dirty = false;
     showToast(t('{label}\'s kept exit is forgotten — an engine plugin gets none at the next start', { label }), { duration: 6000 });
-    saved = true;
+    SAVED.add(shell.overlay);
     shell.close();
     try { onDone?.(); } catch { /* the panel reloads on its own */ }
   }
@@ -98,7 +102,7 @@ export function openExitDialog(app, r, { onDone = null, onClose = null } = {}) {
     if (!res || !res.ok) { say(WORDS(res && res.code)); if (res && res.code === 'exit_timezone_invalid') zoneInput.focus(); return; }
     dirty = false;
     showToast(t('{label}\'s exit is kept — an engine plugin reads it when the browser starts', { label }), { duration: 6000 });
-    saved = true;
+    SAVED.add(shell.overlay);
     shell.close();
     try { onDone?.(); } catch { /* the panel reloads on its own */ }
   }

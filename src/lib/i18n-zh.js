@@ -14149,6 +14149,7 @@ export default {
   "Its exit: {ip} · {where} — {how}, {age}": "它的出口：{ip} · {where}——{how}，{age}", // the exit check (the owner 2026-11-17)
   "Check the exit…": "检查出口…", // the exit check (the owner 2026-11-17)
   "No browser profile {id} here": "这里没有浏览器配置 {id}", // B-acb9: a plugin asked for a profile this instance does not have
+  "The browser profiles could not be read — the server did not answer; try again": "读不到浏览器配置——服务器没有回应；请再试一次", // B-acb9 r226: the profiles list failed, never «missing»
   "Read this profile's public address, country and time zone through its own proxy — kept only when you press Keep": "经这个配置自己的代理读取它的公网地址、国家和时区——只有按「保留」才会保存", // the exit check (the owner 2026-11-17)
   "An https address that answers a browser profile's public address, country and time zone as JSON. It is asked only when you press «Check the exit…» on a profile, and only through that profile's own proxy. Empty: no check — type the exit by hand.": "一个以 JSON 回答浏览器配置的公网地址、国家和时区的 https 地址。只有你在某个配置上按「检查出口…」时才会访问，而且只经那个配置自己的代理。留空：不检查——手动填写出口。", // the exit check (the owner 2026-11-17)
   // lane ui-needs-a-button (pick 1): the need line, the seven majors

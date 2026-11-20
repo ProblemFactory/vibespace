@@ -1328,8 +1328,9 @@ export function openBrowserProfilesWindow(app, { syncId, focus = null, open = nu
 // hears onDone('done' | 'cancelled') and nothing else (src/lib/browser-profile-commands.js)
 registerBrowserProfileCommands({
   openProxy: openProxyDialog, openExit: openExitDialog, titles: { proxy: () => t('Proxy…'), exit: () => t('Check the exit…') },
-  rowOf: async (id) => { const d = await fetchJson('/api/browser/profiles'); return ((d && Array.isArray(d.profiles)) ? d.profiles : []).find((x) => x && x.id === id) || null; },
+  rowOf: async (id) => { const d = await fetchJson('/api/browser/profiles'); if (!d || d.error || !Array.isArray(d.profiles)) throw new Error((d && d.error) || 'no reply'); return d.profiles.find((x) => x && x.id === id) || null; },
   notFound: (id) => showToast(t('No browser profile {id} here', { id: id || '?' }), { type: 'error' }),
+  noReply: () => showToast(t('The browser profiles could not be read — the server did not answer; try again'), { type: 'error' }),
 });
 export function installBrowserTrace(App) {
   /** THE profiles panel, one window: `{syncId?, focus?: profileId}`. */

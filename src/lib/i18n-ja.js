@@ -14148,6 +14148,7 @@ export default {
   "Its exit: {ip} · {where} — {how}, {age}": "出口：{ip} · {where}——{how}、{age}", // the exit check (the owner 2026-11-17)
   "Check the exit…": "出口を確認…", // the exit check (the owner 2026-11-17)
   "No browser profile {id} here": "ここにはブラウザのプロファイル {id} がありません", // B-acb9: a plugin asked for a profile this instance does not have
+  "The browser profiles could not be read — the server did not answer; try again": "ブラウザのプロファイルを読み込めませんでした——サーバーが応答しません。もう一度お試しください", // B-acb9 r226: the profiles list failed, never «missing»
   "Read this profile's public address, country and time zone through its own proxy — kept only when you press Keep": "このプロファイル自身のプロキシ経由で公開アドレス・国・タイムゾーンを読み取ります——「保持」を押したときだけ保存されます", // the exit check (the owner 2026-11-17)
   "An https address that answers a browser profile's public address, country and time zone as JSON. It is asked only when you press «Check the exit…» on a profile, and only through that profile's own proxy. Empty: no check — type the exit by hand.": "ブラウザのプロファイルの公開アドレス・国・タイムゾーンを JSON で返す https アドレスです。プロファイルで「出口を確認…」を押したときだけ、そのプロファイル自身のプロキシ経由で問い合わせます。空欄：確認しない——出口を手入力します。", // the exit check (the owner 2026-11-17)
   // lane ui-needs-a-button (pick 1): the need line, the seven majors
