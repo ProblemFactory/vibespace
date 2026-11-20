@@ -187,10 +187,12 @@ try {
   const mk2 = await req('POST', '/api/automation/keys', { name: 'reader', scopes: ['conversations.status'], limits: { cwdRoots: [CWD], accounts: 'any', permissionModes: ['default'], models: 'any', modes: ['chat'] } });
   await req('POST', `/api/automation/keys/${mk2.json.key.id}/grants`, { subjects: [`session:${E.sid}`] });
   const viaKey = await cli(['call', 'jobs.wakeGrant', '--job', J['k-remind'].id, '--grant', 'on'], C.token);
-  const noVerb = await cli(['call', 'jobs.wakeGrant', '--job', J['k-remind'].id, '--grant', 'on'], E.token);
+  // E NAMES its own key (--key): a key WITHOUT the verb is refused BY NAME. With no --key, the ONE other live key that holds the verb
+  // would be ASKED for (pickKey's documented law: the owner's first-use card, the call waits for the owner) — not this leg's state
+  const noVerb = await cli(['call', 'jobs.wakeGrant', '--job', J['k-remind'].id, '--grant', 'on', '--key', mk2.json.key.id], E.token);
   const kj = await jobNamed('k-remind');
   check('a MANAGER KEY holding jobs.wakeGrant sets K\'s grant (the row records the key by name)', viaKey.code === 0 && !!widen && kj.wakesEndedOwner === true && kj.wakeGrantBy && kj.wakeGrantBy.kind === 'key' && kj.wakeGrantBy.name === 'dispatch', { viaKey, wg: kj && kj.wakeGrantBy });
-  check('…a key WITHOUT the verb is refused by name (verb_not_in_scope)', noVerb.code !== 0 && /verb_not_in_scope/.test(noVerb.err + noVerb.out), noVerb);
+  check('…a key WITHOUT the verb, named by its holder (--key), is refused by name (verb_not_in_scope) — and nothing written', noVerb.code !== 0 && /verb_not_in_scope/.test(noVerb.err + noVerb.out) && kj.wakeGrantBy && kj.wakeGrantBy.name === 'dispatch', noVerb);
 
   console.log('② the machine restarts: R by the restart; P by a person, A by an agent, K by a person (piece 3\'s record, stood in)');
   try { ws.close(); } catch { }
