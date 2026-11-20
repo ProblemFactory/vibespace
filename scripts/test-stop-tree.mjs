@@ -893,25 +893,25 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
         const sid = PI.identityOf(spid); mine.push(sid);
         const strangerOwn = PI.ppidOf(spid) !== process.pid && PI.pgidOf(spid) === spid;   // re-parented, its own group
         return { after: async () => {
-          await until(() => PI.aliveIdentity(id) === false, 500);   // the drain (or the engine's SIGKILL) ended it before the run's end: a short bound
+          await until(() => PI.aliveIdentity(id) === false, 200);   // the drain (or the engine's SIGKILL) ended it before the run's end — its reaping by the subreaper is what is left: milliseconds
           const alive = PI.aliveIdentity(id) === true, stranger = PI.aliveIdentity(sid) === true, run = job && job.runs[job.runs.length - 1];
           if (alive) PI.signalIdentity(id, 'SIGKILL');
           if (stranger) PI.signalIdentity(sid, 'SIGKILL');
           let view = null; try { view = ((jm.snapshot(job) || {}).run || {}).left || null; } catch (e) { view = { threw: String(e && e.message) }; }   // the API's view (the card's row reads it)
-          return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view };
+          let viewCut = null; if (opts.viewMod) { try { viewCut = ((opts.viewMod.JobManager.prototype.snapshot.call(jm, job) || {}).run || {}).left || null; } catch (e) { viewCut = { threw: String(e && e.message) }; } }   // the control's view, over THIS run (no scene of its own)
+          return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view, viewCut };
         } };
       } });
   });
   // (a) a stop through the wrapper (its stop step and its drain)
-  const sa = await escScene(WRAP, 'esc-stop');
+  const VW = 'escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {})';
+  const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)
+  const sa = await escScene(WRAP, 'esc-stop', { viewMod: viewCut });
   ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside === 1,
     'B-7ca1: a task\'s STOP on the group rung ends the child that left its group and was re-parented before the stop (it carried THIS run\'s mark) — counted as stopped outside its group, never «not stopped»', sa.after);
   ok(sa.after && sa.after.strangerOwn && sa.after.stranger && sa.after.left && sa.after.left.escaped === 1, 'B-7ca1 (its read\'s MUST): a process carrying the job\'s mark but ANOTHER run\'s (an earlier run\'s leftover\'s fork) is NOT ended by this run\'s stop — said «left its group — not stopped»', sa.after);
   ok(sa.after && sa.after.view && sa.after.view.outside === sa.after.left.outside, 'B-7ca1: the API\'s view of the run (the card\'s row) carries what was stopped outside its group — its walk found the view dropped it (a list of named fields)', sa.after && sa.after.view);
-  const VW = 'escaped: run.left.escaped || 0, outside: run.left.outside || 0, short: run.left.short || 0 } } : {})';
-  const viewCut = MJ.load('src/jobs.js', anchored(fs.readFileSync(path.join(ROOT, 'src/jobs.js'), 'utf8'), VW, 'escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {})', 'b7ca1-view-cut'), 'b7ca1-view-cut');   // stale-pins: kept (the control plants the release's text in a copy)
-  const sv = await escScene(WRAP, 'esc-view-mut', { jobsMod: viewCut });
-  ok(sv.after && sv.after.left && sv.after.left.outside >= 1 && sv.after.view && !sv.after.view.outside, 'CONTROL (the view without `outside`, in a copy): the run records it but the card\'s row never sees it — RED', sv.after);
+  ok(sa.after && sa.after.left && sa.after.left.outside >= 1 && sa.after.viewCut && !sa.after.viewCut.outside, 'CONTROL (the view without `outside`, in a copy — over the same run): the run records it but the card\'s row never sees it — RED', sa.after && sa.after.viewCut);
   const TS = "  let taskStop = !keeps && !!stopping;", SS = "    for (const p of escapedOf()) if (keeps || p[2]) { if (termOnce(p) && !keeps) stopEsc.set(termKey(p), p); }";
   const relEsc = anchored(anchored(WRAP, TS, "  let taskStop = false;   // MUTANT: the release — a task's escapees are said, not stopped", 'b7ca1-taskstop-cut'), SS, "    if (keeps) for (const p of escapedOf()) termOnce(p);", 'b7ca1-stopstep-cut');   // stale-pins: kept (the control plants the release's text in a copy)
   const sx = await escScene(relEsc, 'esc-stop-mut');
@@ -944,7 +944,8 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
       ready: (tree) => tree.some((m) => m.comm === 'timeout') && fs.existsSync(LP) && fs.existsSync(SP) && Number(fs.readFileSync(SP, 'utf8').trim()) > 1,
       before: () => {
         const lid = PI.identityOf(Number(fs.readFileSync(LP, 'utf8').trim())), hid = PI.identityOf(Number(fs.readFileSync(SP, 'utf8').trim())); mine.push(lid, hid);
-        return { after: async () => { await sleep(300); const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true }; for (const x of [...PI.treeOf([hid.pid]), lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };   // the stand-in's own sleep too (its read r3: it outlived the scene)
+        return { after: async () => { const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true };   // the run has ended: the stop's work is done (lesson (c): no fixed sleep)
+          for (const x of [...PI.treeOf([hid.pid]), lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };   // the stand-in's own sleep too (its read r3: it outlived the scene)
       } });
   });
   const la = await launchScene(WRAP, 'esc-launcher');
