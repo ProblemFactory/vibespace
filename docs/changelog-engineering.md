@@ -474,6 +474,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - THE CURE (tooling and tests; the wrapper untouched): scripts/codex-protocol-census.mjs `judge` takes `retired` rows (the name, `since` = the first measured version without it, the reason) and does not report the name on a table at or after `since`; `retiredRowVerdict` pins a row BOTH WAYS — `since` a measured version, every table before it has the name (at least one), none from it on, the wrapper still handles it.
 - LEGS: the row pinned both ways; CONTROLS — without the row the finding is reported on 0.171.0; a row naming 0.170.0, an unmeasured version, no reason, or the first measured version is red by name; a row for a name no table asks (the never-shipped alias) is red; a row the wrapper no longer handles is red. The three controls read the newest table's findings as they are with the row.
 
+### bl-browser-a B-e674 — the front is never folded by width (the coordinator's r608, after line 97's pictures)
+- THE FAULT: line 97's picture at 390 px (int361's box run of test-browser-resume-ui at 5ef679eb1) showed this view's own chip, then «▾+1»: the width fold had taken the very chip the unit exists to show, with nothing said. The line's «never folded» held for the blank fold only.
+- THE LAW: a foreign front chip is never folded by width. When the row cannot hold it whole beside this view's own chip, the own chip's name cuts shorter first; if even that cannot fit, the fold itself says it, in words. PURE `tabRowFit` (live-strip-layout.js) over `tabRowFold`, which now keeps `front` like the watched tab. The client measures the own chip's floor, applies the cut as a max-width (the title ellipsizes), and marks the pill «▾+N · In front» with the front's words in its tip and its row first in the menu (never a greyed row: its act, or its words said).
+- Gates: test-browser-front-tab ⑤ (6 cells: two roomy / two narrow / five / a long own name / too narrow / no front; a RED control: unmarked, the narrow row folds it unsaid; 8 client pins). Heavy test-browser-resume-ui ⑨ JUDGES the row at 390 and 1280 px (the chip whole, or the fold naming it), then writes the pictures again.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
