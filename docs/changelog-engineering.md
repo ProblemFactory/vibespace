@@ -469,6 +469,11 @@ This file is the engineers' record of every release: the lanes, the verification
 - RULING (i), r562: a tab the person opens from the agent's page in a takeover stays the agent's. It is named «opened by the person» in unit 2 (the birth stamp), together with the census of create roads. The real-driver roads (a raw create, the driver's own create, a takeover click) are at most a few legs appended to an existing fenced real-driver suite, written once, for the integrator's run.
 - Gate: test-browser-front-tab (fast, NEW): 13 PURE cells, a guessing-copy RED control, the row and groups; the REAL keeper over a stand-in driver (asked first, one line a change, nothing acted) with a keeper-copy RED control; the REAL bridge over a stand-in upstream; the zh / ja rows.
 
+### bl-ci — the codex drift gate knows a server request a new version RETIRED (the coordinator's r606: codex 0.171.0 no longer asks currentTime/read)
+- THE RED: with the 0.171.0 table (982659b30) test-codex-protocol-drift reported «[retired-server-request] the wrapper answers currentTime/read, which codex 0.171.0 never asks», and three controls that compare the newest table's exact findings followed it. The wrapper keeps its automatic reply RIGHTLY: every older version a person may still run asks it (0.153.4 to 0.170.0).
+- THE CURE (tooling and tests; the wrapper untouched): scripts/codex-protocol-census.mjs `judge` takes `retired` rows (the name, `since` = the first measured version without it, the reason) and does not report the name on a table at or after `since`; `retiredRowVerdict` pins a row BOTH WAYS — `since` a measured version, every table before it has the name (at least one), none from it on, the wrapper still handles it.
+- LEGS: the row pinned both ways; CONTROLS — without the row the finding is reported on 0.171.0; a row naming 0.170.0, an unmeasured version, no reason, or the first measured version is red by name; a row for a name no table asks (the never-shipped alias) is red; a row the wrapper no longer handles is red. The three controls read the newest table's findings as they are with the row.
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
