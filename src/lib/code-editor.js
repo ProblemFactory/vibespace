@@ -394,10 +394,10 @@ class CodeEditor {
     // cleanup + welcome check) BEFORE this async load completes — overwriting
     // it leaked temp files and never restored the welcome screen.
     const prevOnClose = this.winInfo.onClose;
-    // B-3b03 follow-up (a MUST of its round's point 5): a save-and-close window closes — and the CLI hears «done» — only after its
-    // save LANDED; a refused save keeps the window, the text and its unsaved mark (src/lib/refusal-doors.js)
+    // B-3b03 follow-up (a MUST of its round's point 5): a save-and-close window's ✕ saves first; a refused save asks before it
+    // closes — never a close or a «done» over a refused save the person did not choose (src/lib/refusal-doors.js)
     const doors = this.onSaveAndClose ? saveCloseDoors({ save: () => this.save(), text: () => this.editorView.state.doc.toString(), signal: () => this.onSaveAndClose(), close: () => this.app?.wm?.closeWindow?.(this.winInfo.id), ready: () => !!this.editorView,
-      confirmDiscard: () => showConfirmDialog({ title: t('Close without saving?'), message: t('Your edits were not saved: {msg}. Close the editor and discard them?', { msg: this._lastSaveError || t('Error') }), confirmText: t('Discard'), danger: true }) }) : null;
+      confirmDiscard: () => showConfirmDialog({ title: t('Close without saving?'), message: t('Your edits were not saved: {msg}. Close the editor and discard them?', { msg: this._lastSaveError || t('Error') }), confirmText: t('Discard'), danger: true, cancelDefault: true }) }) : null;
     if (doors) { const prevAsk = this.winInfo.onCloseRequest; this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest()); }
     this.winInfo.onClose = () => {
       if (this._themeObserver) this._themeObserver.disconnect();
@@ -567,6 +567,7 @@ class CodeEditor {
 
   async save() {
     const content = this.editorView.state.doc.toString();
+    const seq = this._saveSeq = (this._saveSeq || 0) + 1;   // an earlier save's late timer never wipes this one's words
     this.saveIndicator.textContent = t('Saving…'); this.saveIndicator.style.color = '';   // B-3b03 follow-up: a save that is out says so
     try {
       // fetch only rejects on network errors — server-side write failures
@@ -575,11 +576,13 @@ class CodeEditor {
       const res = await fetch('/api/file/write', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({path:this.filePath,content,host:this._host||undefined}) });
       const data = await res.json().catch(() => ({}));
       if (!res.ok || data.error) throw new Error(data.error ? fsErrorText(data) : `HTTP ${res.status}`);
-      this.modified = false; this.saveIndicator.textContent = '✓ ' + t('Saved'); this.saveIndicator.style.color = 'var(--green)';
+      // B-3b03 follow-up (its read's S1): text typed while the save was out is NOT saved — its unsaved mark stays
+      if (this.editorView.state.doc.toString() === content) { this.modified = false; this.saveIndicator.textContent = '✓ ' + t('Saved'); this.saveIndicator.style.color = 'var(--green)'; }
+      else this.saveIndicator.textContent = '';
       this._diskChip.style.display = 'none';
       this._noteArtifactSave(content);
       this._baselineMtime(); // our own write moved the disk mtime — re-baseline so the freshness watch doesn't see it as a foreign change
-      setTimeout(() => { if (!this.modified) this.saveIndicator.textContent = ''; }, 2000);
+      setTimeout(() => { if (!this.modified && this._saveSeq === seq) this.saveIndicator.textContent = ''; }, 2000);
       return true;
     } catch (err) {
       this.saveIndicator.textContent = `✕ ${err.message || t('Error')}`; this.saveIndicator.style.color = 'var(--red)';

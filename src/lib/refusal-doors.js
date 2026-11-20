@@ -4,32 +4,36 @@
 
 /** A SAVE-AND-CLOSE editor (the CLI's external editor opened by Ctrl+G) — ONE RULE, no state carried between presses (its third
  *  read: every state a round added, the next round found a fault in): EVERY ✕ SAVES FIRST. The save landed and the text on screen
- *  is the text it sent ⇒ the window closes and the CLI hears «done». The person typed while it was out ⇒ the window stays (the
- *  unsaved mark shows; the next ✕ saves again). The save was REFUSED ⇒ the person is ASKED «Close without saving?»: discard ⇒ it
- *  closes and the CLI reads the file as it is on disk (a quit without saving); keep (Esc, Cancel) ⇒ it stays. Never a window that
+ *  is the text it sent ⇒ the window closes and the CLI hears «done». The person typed while it was out ⇒ the window stays, never
+ *  asked (the unsaved mark shows; the next ✕ saves again). The save was REFUSED ⇒ the person is ASKED «Close without saving?»,
+ *  Keep editing focused and Enter keeping (a question that opens seconds late must not take a keystroke meant for the text):
+ *  discard (a press on the button) ⇒ it closes and the CLI reads the file as it is on disk (a quit without saving); keep ⇒ it stays. Never a window that
  *  cannot close, never a close or a «done» over a refused save the person did not choose. (The release closed at once and told
  *  the CLI «done» whatever the save answered: the edits were lost.) A programmatic close is never refused; its refused save tells
  *  the CLI nothing (the hub re-delivers the pending edit at the next attach).
  *  `ed` = { save(): Promise<boolean>, text(): string, signal(), close(), ready(): boolean, confirmDiscard(): Promise<boolean> }
  *  → { onCloseRequest(), onClose() } */
 export function saveCloseDoors(ed) {
-  let closing = false, pending = false;
+  let pending = false, closing = false, gone = false;
   return {
     onCloseRequest() {
-      if (closing || !ed.ready()) return true;   // closing by this door's own word, or nothing loaded yet
+      if (!ed.ready()) return true;              // nothing loaded yet: nothing to save
       if (pending) return false;                 // a save or the question is out: one at a time
       pending = true;
       const sent = ed.text();
+      const settle = (closeIt) => { pending = false; if (closeIt && !gone) { closing = true; ed.close(); } };
       Promise.resolve().then(() => ed.save()).then((ok) => !!ok, () => false).then(async (ok) => {
-        if (ok) { pending = false; if (ed.text() === sent) { closing = true; ed.close(); } return; }
+        if (gone) return settle(false);          // the window closed another way meanwhile: nothing to ask
+        if (ed.text() !== sent) return settle(false);   // typed while the save was out: stays — never asked over typing
+        if (ok) return settle(true);
         let yes = false;
         try { yes = !!(await ed.confirmDiscard()); } catch { yes = false; }
-        pending = false;
-        if (yes) { closing = true; ed.close(); }
-      });
+        return settle(yes && ed.text() === sent);
+      }).catch(() => { pending = false; });
       return false;                              // the window stays until its save landed, or the person chose
     },
     onClose() {
+      gone = true;
       if (closing) return ed.signal();           // saved (the text on screen), or discarded by the person
       return Promise.resolve().then(() => ed.save()).then((ok) => (ok ? ed.signal() : undefined), () => undefined);
     },

@@ -468,6 +468,7 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
   // A string first argument is read as that pair; the approval census (test-approval-census) also refuses the form
   if (typeof opts === 'string') opts = { title: opts, message: typeof legacyMessage === 'string' ? legacyMessage : '' };
   const { title = t('Confirm'), message = '', confirmText = t('OK'), danger = false, items = null } = opts || {};
+  const cancelDefault = !!(opts && opts.cancelDefault);   // B-3b03 follow-up: a question that may open while the person types — Enter and focus keep, only a press on the button confirms
   const extra = opts && opts.extra && opts.extra.nodeType === 1 ? opts.extra : null;   // a node of the CALLER's under the list (the Terminate confirm's job rows — the manager design's piece 7)
   const list = Array.isArray(items) ? items.map((x) => String(x)) : []; // B-a67c: what the confirm ends, one row each (a group close names every tab)
   return new Promise((resolve) => {
@@ -495,10 +496,11 @@ export function showConfirmDialog(opts = {}, legacyMessage) {
     overlay.addEventListener('mousedown', (e) => { if (e.target === overlay) done(false); });
     overlay.tabIndex = -1;
     overlay.addEventListener('keydown', (e) => {
+      if (cancelDefault && e.key === 'Enter') { e.preventDefault(); done(document.activeElement === okBtn); return; }
       if (e.key === 'Enter') { e.preventDefault(); done(true); }
       if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(false); }
     });
-    setTimeout(() => okBtn.focus(), 0);
+    setTimeout(() => (cancelDefault ? cancelBtn : okBtn).focus(), 0);
   });
 }
 

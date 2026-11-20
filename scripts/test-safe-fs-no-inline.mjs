@@ -211,7 +211,21 @@ console.log('⑥ a save-and-close editor closes — and the CLI hears «done» �
     const e = door([false], [new Error('dialog gone')]); await press(e); const dialogGone = { closes: e.st.closes, asked: e.st.asked };
     // (f) a programmatic close (layout sync) whose save is refused: never refused, the CLI hears nothing
     const f = door([false]); await f.d.onClose();
-    return { kept, discarded, trap, typed, landed, dialogGone, programmatic: f.st.signals };
+    // (g) a ✕ while the save is out: ONE save, never two (the door's one-at-a-time)
+    let release; const slow = new Promise((r) => { release = r; });
+    const g = { st: { saves: 0, closes: 0, signals: 0 } };
+    g.d = D.saveCloseDoors({ save: () => { g.st.saves++; return slow; }, text: () => 'v1', signal: () => { g.st.signals++; }, close: () => { g.st.closes++; }, ready: () => true, confirmDiscard: async () => false });
+    g.d.onCloseRequest(); await tick(); g.d.onCloseRequest(); g.d.onCloseRequest(); release(true); await tick(); if (g.st.closes) await g.d.onClose();
+    const oneAtATime = { saves: g.st.saves, closes: g.st.closes, signals: g.st.signals };
+    // (h) typed while a REFUSED save was out: the window stays and nothing is asked (a late question must not take a keystroke)
+    const h = door([false], [true], ['v2']); await press(h); const typedRefused = { asked: h.st.asked, closes: h.st.closes };
+    // (i) the window closed another way while the save was out: no question for a window already gone
+    let rel2; const slow2 = new Promise((r) => { rel2 = r; });
+    const i = { st: { asked: 0, closes: 0 } };
+    i.d = D.saveCloseDoors({ save: () => slow2, text: () => 'v1', signal() {}, close: () => { i.st.closes++; }, ready: () => true, confirmDiscard: async () => { i.st.asked++; return true; } });
+    i.d.onCloseRequest(); await tick(); i.d.onClose(); rel2(false); await tick();
+    const goneFirst = { asked: i.st.asked, closes: i.st.closes };
+    return { kept, discarded, trap, typed, landed, dialogGone, programmatic: f.st.signals, oneAtATime, typedRefused, goneFirst };
   };
   const now = await drive(await import(MC6.write('src/lib/refusal-doors.js', DOORS_SRC, 'now', { esm: true, same: true })));
   ok(now.kept.closes === 0 && now.kept.signals === 0 && now.kept.asked === 1 && now.kept.saves === 1, `a refused save ASKS; «keep» keeps the window (its text and unsaved mark) — the CLI hears nothing (${JSON.stringify(now.kept)})`, now);
@@ -221,6 +235,18 @@ console.log('⑥ a save-and-close editor closes — and the CLI hears «done» �
   ok(now.landed.closes === 1 && now.landed.signals === 1 && now.landed.asked === 0, `a save that lands at the first ✕: the window closes itself, «done» once, nothing asked (${JSON.stringify(now.landed)})`, now);
   ok(now.dialogGone.closes === 0 && now.dialogGone.asked === 1, `the question failing reads as «keep» — never a close (${JSON.stringify(now.dialogGone)})`, now);
   ok(now.programmatic === 0, `a programmatic close whose save is refused tells the CLI nothing (signals ${now.programmatic})`, now);
+  ok(now.oneAtATime.saves === 1 && now.oneAtATime.closes === 1 && now.oneAtATime.signals === 1, `a ✕ while the save is out sends no second save (${JSON.stringify(now.oneAtATime)})`, now);
+  ok(now.typedRefused.asked === 0 && now.typedRefused.closes === 0, `typed while a refused save was out: the window stays and NOTHING is asked — a late question never takes a keystroke (${JSON.stringify(now.typedRefused)})`, now);
+  ok(now.goneFirst.asked === 0 && now.goneFirst.closes === 0, `a window closed another way while its save was out: no question for it (${JSON.stringify(now.goneFirst)})`, now);
+  {   // RED CONTROL (the door without its one-at-a-time line): a ✕ while the save is out sends a second save
+    const NO_PENDING = anchored(DOORS_SRC, '      if (pending) return false;                 // a save or the question is out: one at a time\n', '', 'no-one-at-a-time');
+    const red2 = await drive(await import(MC6.write('src/lib/refusal-doors.js', NO_PENDING, 'no-pending', { esm: true })));
+    ok(red2.oneAtATime.saves > 1, `RED CONTROL (no one-at-a-time line): a ✕ while the save is out sends another save (${red2.oneAtATime.saves})`, red2.oneAtATime);
+  }
+  // the question: Keep editing focused, Enter keeping — a press on Discard is the only discard (src/lib/utils.js cancelDefault)
+  const UT = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8');
+  ok(UT.includes("if (cancelDefault && e.key === 'Enter') { e.preventDefault(); done(document.activeElement === okBtn); return; }") && UT.includes('setTimeout(() => (cancelDefault ? cancelBtn : okBtn).focus(), 0);') && fs.readFileSync(path.join(REPO, 'src/lib/code-editor.js'), 'utf8').includes("confirmText: t('Discard'), danger: true, cancelDefault: true })"),
+    'the question keeps by default: Keep editing focused and Enter keeping (cancelDefault) — only a press on Discard discards');
   // WIRED: the editor window asks the door at the person's ✕ and at its close; the composer words its upload through the other door
   const CE = fs.readFileSync(path.join(REPO, 'src/lib/code-editor.js'), 'utf8'), CI = fs.readFileSync(path.join(REPO, 'src/lib/chat-input.js'), 'utf8');
   ok(CE.includes("this.winInfo.onCloseRequest = (o) => (typeof prevAsk === 'function' && prevAsk(o) === false ? false : doors.onCloseRequest());") && CE.includes('      if (doors) doors.onClose();\n')
@@ -229,7 +255,7 @@ console.log('⑥ a save-and-close editor closes — and the CLI hears «done» �
     'WIRED: the editor window asks saveCloseDoors at the ✕ and at its close (the release\'s «save, then done» is gone); the composer words its upload through uploadOutcomeWords');
   // RED CONTROL: the release's close — no veto, and «done» after any save
   const REL6 = anchored(anchored(DOORS_SRC,
-    "      if (closing || !ed.ready()) return true;   // closing by this door's own word, or nothing loaded yet\n", "      return true;   // the release: the window closes at once\n", 'release-no-veto'),
+    "      if (!ed.ready()) return true;              // nothing loaded yet: nothing to save\n", "      return true;   // the release: the window closes at once\n", 'release-no-veto'),
     "      if (closing) return ed.signal();           // saved (the text on screen), or discarded by the person\n      return Promise.resolve().then(() => ed.save()).then((ok) => (ok ? ed.signal() : undefined), () => undefined);\n",
     "      return Promise.resolve(ed.save()).then(() => ed.signal());   // the release: «done» whatever the save answered\n", 'release-done-anyway');
   const red = await drive(await import(MC6.write('src/lib/refusal-doors.js', REL6, 'release', { esm: true })));
