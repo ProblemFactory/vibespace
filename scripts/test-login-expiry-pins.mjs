@@ -124,7 +124,7 @@ console.log('— §5 wiring');
   })());
 
   const ma = fs.readFileSync(path.join(REPO, 'src/lib/manage-agents.js'), 'utf8');
-  ck('the roster row renders the chip', /loginExpiryChipHtml\(a, \{ local: !selectedHost \}\)/.test(ma) && /<span class="acct-key-main">[^\n]*\$\{extrasTag\}<\/span>/.test(ma));
+  ck('the roster row renders the chip', /loginExpiryChipHtml\(a, \{ local: !selectedHost \}\)/.test(ma) && /<span class="acct-key-main">[^\n]*\$\{extrasTag\}(?:\$\{rowSnap && rowSnap\.u && rowSnap\.u\.windowUnknown \? windowUnknownHtml\(rowSnap\.u\.windowUnknown\) : ''\})?<\/span>/.test(ma));   // B-6a92: the row's «own window unknown» line may follow the extras inside the main cell
   // §5x THE EXTRAS ORDER (2.369.212, owner: "这个登陆过期提示会被备注抢占位置导致看不到" — the
   // extras line was ONE nowrap ellipsis line with the note first and the chip LAST,
   // so a note ate the warning and its re-login button). DOM-free: the REAL helper
