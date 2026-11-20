@@ -282,6 +282,73 @@ console.log('⑮ the chain\'s cure (B1): what a chip SAYS a Task Group entry adm
   ok(/const reach = PM\.entryReach\(r, \{ except: exceptChips, only: onlyOffered && onlySet\.has\(String\(r\.key\)\) \}\);/.test(ppSrc2) && /o\.textContent = reachWords\(reach\);/.test(ppSrc2) && /\} else if \(reach\) c\.appendChild\(el\('span', 'pp-chip-reach', reachWords\(reach\)\)\);/.test(ppSrc2) && /chipPrefix: t\('Except: '\), exceptChips: true,/.test(ppSrc2), 'the picker draws the reach words on every Task Group chip (the switch\'s face; an exception chip «and its child groups, always»)');
 }
 
+// r600 (3) — THE OWNER'S FINGER RULE (lane lg-group-parents, row B-91a7 U5b / cure C2; the hosted run 44818862371 placed test-channels-i18n's
+// THE LOOK on it: «button.pp-chip-only» 13–17 px tall in the channel access dialog's phone shot, zh / ja / en). On a finger device every
+// control the grant picker draws is a 44 px touch target that does not overlap its neighbours, written ONCE on the picker's own classes
+// (every surface that draws the picker) — never a dialog's own rule that undercuts it, never an exemption in the suite. A CSS census:
+// each control's coarse-pointer rule gives ≥ 44 px; no rule after it (and no higher-specificity rule anywhere) sets a picker control
+// below 44; the suite exempts no picker class. RED (anchored): the finger rule removed; a dialog's own 36 px copy planted back.
+{
+  const FINGER = ['.pp-chip-only', '.pp-chip-x', '.pp-kept-x', '.pp-input', '.pp-trigger', '.pp-except-toggle', '.pp-chip-door', '.pp-row', '.pp-chip', '.pp-kept-chip'];
+  const px = (v) => { const m = /^(\d+(?:\.\d+)?)px$/.exec(String(v || '').trim()); return m ? Number(m[1]) : null; };
+  const rulesOf = (css) => {
+    const s = css.replace(/\/\*[\s\S]*?\*\//g, ''), out = [];
+    const walk = (txt, media, base) => {
+      let i = 0;
+      while (i < txt.length) {
+        const ob = txt.indexOf('{', i); if (ob < 0) break;
+        const head = txt.slice(i, ob).trim();
+        let d = 1, j = ob + 1; while (j < txt.length && d) { if (txt[j] === '{') d++; else if (txt[j] === '}') d--; j++; }
+        const body = txt.slice(ob + 1, j - 1);
+        if (head.startsWith('@media')) walk(body, head, base + ob + 1);
+        else if (!head.startsWith('@')) out.push({ at: base + i, media, sels: head.split(',').map((x) => x.trim()), decl: Object.fromEntries(body.split(';').map((x) => x.split(':')).filter((p) => p.length >= 2).map(([k, ...v]) => [k.trim(), v.join(':').trim()])) });
+        i = j;
+      }
+    };
+    walk(s, null, 0);
+    return out;
+  };
+  const fingerFailures = (css, i18nSuite) => {
+    const R = rulesOf(css), bad = [];
+    const coarse = R.filter((r) => r.media && /pointer:\s*coarse/.test(r.media) && /max-width:\s*480px/.test(r.media));   // a finger device AND a phone-width window (an emulated phone has no touch)
+    let lastAt = -1;
+    for (const cls of FINGER) {
+      const own = coarse.filter((r) => r.sels.includes(cls));
+      const hit = own.find((r) => (px(r.decl['min-height']) || px(r.decl.height) || 0) >= 44);
+      if (!hit) { bad.push(`${cls}: no coarse-pointer rule of its own gives a 44 px target`); continue; }   // (the rule's media: a finger device or a phone-width window)
+      lastAt = Math.max(lastAt, hit.at);
+      if (cls === '.pp-chip-only' && !((px(hit.decl['min-width']) || 0) >= 44)) bad.push('.pp-chip-only: its coarse-pointer rule gives no 44 px width');
+      if ((cls === '.pp-chip-x' || cls === '.pp-kept-x') && !((px(hit.decl.width) || 0) >= 44)) bad.push(`${cls}: its coarse-pointer rule gives no 44 px width`);
+    }
+    for (const r of R) for (const sel of r.sels) {
+      const last = (sel.split(/[\s>+~]+/).pop() || '');
+      const cls = FINGER.find((c) => last === c);
+      if (!cls) continue;
+      const h = px(r.decl['min-height']) ?? px(r.decl.height);
+      const compound = sel !== cls;
+      if (h !== null && h < 44 && (compound || r.at > lastAt)) bad.push(`«${sel}» sets ${cls} to ${h} px${compound ? ' (a dialog\'s own rule outranks the picker\'s)' : ' (after the finger rule)'}`);
+    }
+    // the option list on a finger device: three 44 px rows (it scrolls) — the bigger targets never push a dialog's parts past its box
+    const listRule = coarse.find((r) => r.sels.includes('.pp-list') && r.sels.includes('.bwho-dialog .pp-list') && (px(r.decl['max-height']) || 999) <= 140);
+    if (!listRule) bad.push('the picker\'s option list keeps its desktop height on a finger device (its bigger rows push a dialog\'s parts past its box)');
+    else for (const r of R) if (r.at > listRule.at && r.sels.some((x) => /(^|\s)\.pp-list$/.test(x)) && (px(r.decl['max-height']) || 0) > 140) bad.push(`«${r.sels.join(', ')}» raises the option list past three rows after the finger rule`);
+    const ex = (/IM_TARGET_EXEMPT\s*=\s*([^;]+);/.exec(i18nSuite) || [])[1] || '';
+    if (/pp-chip|pp-row|pp-input|pp-trigger/.test(ex)) bad.push('test-channels-i18n exempts a picker control from the target census');
+    return bad;
+  };
+  const css = read('public/style.css'), i18n = read('scripts/test-channels-i18n.mjs');
+  const fb = fingerFailures(css, i18n);
+  console.log(`    judged (the finger rule over public/style.css): ${JSON.stringify(fb)}`);
+  ok(fb.length === 0, 'r600 (3): on a finger device every control the grant picker draws (the «仅本组» switch, the chip and its ×, the kept ×, the input, the trigger, the rows, the doors) is a 44 px target, written ONCE on the picker\'s own classes and never undercut by a dialog', fb);
+  const fr0 = css.indexOf('@media (pointer: coarse), (max-width: 480px) {\n  .pp-input, .pp-trigger, .pp-except-toggle, .pp-chip-door, .pp-row { min-height: 44px; }'), fr1 = css.indexOf('\n}\n', fr0) + 3;
+  const noRule = fr0 > 0 ? anchored(css, css.slice(fr0, fr1), '', 'finger-rule-gone') : css;
+  const dlg = anchored(css, "  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", "  .exit-access-dialog .pp-chip { min-height: 36px; }\n  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone", 'dialog-undercut');
+  const rA = fingerFailures(noRule, i18n), rB = fingerFailures(dlg, i18n);
+  console.log(`    judged (RED: the finger rule removed): ${JSON.stringify(rA.slice(0, 3))} · (RED: a dialog's 36 px copy planted back): ${JSON.stringify(rB)}`);
+  ok(fr0 > 0 && rA.some((b) => /^\.pp-chip-only: no coarse-pointer rule/.test(b)), 'NEGATIVE CONTROL: the stylesheet without the finger rule fails — the «仅本组» switch has no 44 px target', rA);
+  ok(rB.some((b) => /exit-access-dialog \.pp-chip/.test(b)), 'NEGATIVE CONTROL: a dialog\'s own 36 px copy of the chip planted back fails — it outranks the picker\'s rule', rB);
+}
+
 console.log(`\n(${Date.now() - t0} ms)`);
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

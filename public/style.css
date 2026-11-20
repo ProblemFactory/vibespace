@@ -8082,6 +8082,18 @@ label.chan-cap-row { cursor: default; }
   .chan-reach-row .chan-reach-note, .chan-reach-row .chan-reach-rm { grid-area: 2 / 2; justify-self: end; white-space: normal; }
   .chan-reach-add { grid-template-columns: 1fr; }
 }
+/* r600 (3) — THE OWNER'S FINGER RULE, written ONCE on the grant picker's own classes (lane lg-group-parents, row B-91a7): on a finger
+   device every control the picker draws is a 44 px touch target that does not overlap its neighbours — the «仅本组» switch (and the
+   reach editor's, which carries .pp-chip-only) beside the chip's ×, on EVERY surface that draws the picker (channel access, watcher,
+   reach, vault use, Share, the agent browser's «Who can use it»). A mis-tap between the switch and the × changes WHO MAY USE it.
+   Never a dialog's own id, never an exemption in a suite. A phone-width window counts as a finger device (the house rule: every
+   phone target ≥ 36 px — a phone emulated without touch matches no `pointer: coarse`). */
+@media (pointer: coarse), (max-width: 480px) {
+  .pp-input, .pp-trigger, .pp-except-toggle, .pp-chip-door, .pp-row { min-height: 44px; }
+  .pp-chip, .pp-kept-chip { min-height: 44px; }
+  .pp-chip-x, .pp-kept-x { width: 44px; height: 44px; }
+  .pp-chip-only { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 10px; margin-left: 4px; font-size: 12px; }
+}
 /* the ⋯ menu's checkable row (the Sender line switch): a 12px slot that holds
    the check glyph when on and stays empty when off, so labels align */
 .context-menu-item .chan-menu-check { display: inline-flex; align-items: center; justify-content: center; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; color: var(--accent); font-size: 12px; }
@@ -8747,6 +8759,12 @@ label.chan-cap-row { cursor: default; }
    that drew a 0 px line whose text overlapped the next one and ran off the phone); the two notes sit between the scrolling
    body and the footer, always on screen; every body part keeps its height and the body scrolls instead of squeezing */
 .bwho-body > * { flex-shrink: 0; }
+/* r600 (3) — the grant picker's OPTION LIST on a finger device or a phone-width window: three 44 px rows, and it scrolls — the bigger
+   targets of the finger rule never push a dialog's parts past its box (test-browser-who-ui ⑧ at 360 × 740). Every surface's list,
+   written once here, after each surface's own list height. */
+@media (pointer: coarse), (max-width: 480px) {
+  .pp-list, .pp-pop .pp-list, .pp-except-picker .pp-list, .bwho-dialog .pp-list { max-height: 140px; }
+}
 .bwho-notes { flex-shrink: 0; display: flex; flex-direction: column; gap: 4px; padding: 0 14px 8px; }
 .bwho-lose, .bwho-refusal, .bproxy-legacy { display: flex; align-items: flex-start; gap: 4px; font-size: 11px; line-height: 1.4; }   /* ONE rule for a dialog note's mark (主开发 18:36Z: the legacy note too) */
 .bwho-lose > .chan-ic, .bwho-refusal > .chan-ic, .bproxy-legacy > .chan-ic { margin-top: 2px; }
@@ -9233,8 +9251,7 @@ button.mounts-exit-door.mounts-exit-door-open { border-color: var(--accent); }
   .ut-setting-answer .ut-action-setting, .ut-action-setting { min-height: 36px; min-width: 72px; } /* lane setting-doors pick 2: the proposed change's one press — the grant's floor */
   .ut-ep-answer .ut-action-endprop, .ut-act.ut-action-endprop { min-height: 36px; min-width: 72px; }   /* lane login-request-card: the proposal card's buttons — a finger's target (the cure's law 13) */
   .ut-ep-answer { flex-wrap: wrap; }
-  .exit-access-dialog .pp-row { min-height: 40px; }
-  .exit-access-dialog .pp-chip { min-height: 36px; }
+  /* r600 (3): the exit dialog's own copies of the picker's phone targets are gone — the picker's rules hold them on every surface */
   .exit-access-actions { position: sticky; bottom: 0; background: var(--bg-dialog); padding-top: 6px; }
 }
 /* lane trace-fits (2026-10-01): the live view's own page-size changes fold into ONE dim row (the toggle expands them); the replay keeps a thin tick between steps */
