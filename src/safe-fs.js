@@ -38,6 +38,10 @@ const poolWords = (name) => (!name || name === 'safe-fs' ? 'the file pool' : 'th
 // B-3b03 follow-up (the round's should 2): a worker that cannot START (its module fails to load, it dies before it answers) is
 // SAID once a streak, after this many starts in a row with no answer (500 ms + 1 s + 2 s in), naming the pool and the cause
 const START_FAILS_SAID = 3;
+// B-d833's fourth shape (its H9, asked of lane hub-loop-stalls): a call asked `idleOnly` runs only on an IDLE live worker, else it is
+// refused at once by name — never sent to wait inside a busy worker (a worker held by a hung listing holds every call queued in it)
+const NO_IDLE = Object.freeze({ code: 'no-idle-worker', message: 'every worker of {pool} is busy — the call was not sent' });
+const noIdleRefusal = (pool = 'the file pool') => Object.assign(new Error(NO_IDLE.message.replace('{pool}', pool)), { status: 503, code: NO_IDLE.code });
 const noWorkerRefusal = (pool = 'the file pool') => Object.assign(new Error(NO_WORKER.message.replace('{pool}', pool)), { status: 503, code: NO_WORKER.code });   // its read (S4): no `noWorker` flag — in `_wait` that flag means «no worker ever took a call»
 
 // Per-op deadlines (ms). A deadline hit under a hung mount is exactly the case
@@ -246,6 +250,9 @@ class SafeFs {
       // (scripts/test-safe-fs-no-inline.mjs measured it: the loop lost 1.5 s to a 1.5 s stall). B-55dc's `noInline` is now the rule.
       return Promise.reject(noWorkerRefusal(this._words));   // the hub's file pool is the unnamed one: «the file pool»
     }
+    // `idleOnly` (B-d833 H9): the least busy live worker has a call in flight ⇒ no worker is idle ⇒ refused at once, never queued
+    // (a lane's op waits by its lane's own rule: serial lanes never take this option)
+    if (opts.idleOnly && rec.inflight.size) return Promise.reject(noIdleRefusal(this._words));
     return this._send(rec, op, payload, timeoutMs);
   }
 
@@ -371,4 +378,4 @@ class SafeFs {
   }
 }
 
-module.exports = { SafeFs, NO_WORKER, noWorkerRefusal };
+module.exports = { SafeFs, NO_WORKER, noWorkerRefusal, NO_IDLE, noIdleRefusal };

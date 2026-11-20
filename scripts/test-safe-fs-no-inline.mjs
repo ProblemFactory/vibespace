@@ -254,4 +254,33 @@ console.log('⑦ a chat upload the hub REFUSED by name is said in its words — 
   ok(red.partialRefused === "Uploaded 1, 1 couldn't be read (e.g. b.png)", `RED CONTROL (the release's words): the refused part reads as a file that «couldn't be read» (${red.partialRefused})`, red);
 }
 
+console.log('⑧ `idleOnly` (B-d833 H9): a call that must never wait inside a busy worker runs on an idle one, else it is refused at once');
+{
+  const run = async (Mod) => {
+    const P = new Mod.SafeFs({ poolSize: 2, name: 'idle', timeouts: { default: 15000, __sleep: 15000 } });
+    let sends = 0; const send = P._send.bind(P); P._send = (...a) => { sends++; return send(...a); };
+    try {
+      await P.call('__sleep', { ms: 1 });   // the worker script loaded (a first answer; both workers live since construction)
+      const held = [P.call('__sleep', { ms: 300 }), P.call('__sleep', { ms: 300 })];   // every worker busy
+      const s0 = sends;
+      const busy = await P.call('__sleep', { ms: 1 }, { idleOnly: true }).then(() => ({ sent: true }), (e) => ({ code: e && e.code, status: e && e.status, message: String(e && e.message) }));
+      const sentWhileBusy = sends - s0;
+      await Promise.all(held);
+      const one = P.call('__sleep', { ms: 200 });   // one busy, one idle
+      const idle = await P.call('__sleep', { ms: 1 }, { idleOnly: true }).then(() => 'answered', (e) => String(e && e.code));
+      await one;
+      return { busy, sentWhileBusy, idle };
+    } finally { P.close(); }
+  };
+  const now = await run(SF);
+  ok(now.busy.code === 'no-idle-worker' && now.busy.status === 503 && now.sentWhileBusy === 0 && /^every worker of the idle pool is busy — the call was not sent$/.test(now.busy.message),
+    `every worker busy: the idleOnly call is REFUSED at once by name (${now.busy.code}, ${now.busy.status}), never sent (${now.sentWhileBusy} sends)`, now);
+  ok(now.idle === 'answered', `one worker idle: the idleOnly call runs there (${now.idle})`, now);
+  const src = fs.readFileSync(path.join(REPO, 'src/safe-fs.js'), 'utf8');
+  const IDLE = '    if (opts.idleOnly && rec.inflight.size) return Promise.reject(noIdleRefusal(this._words));\n';
+  const Rel = src.split(IDLE).length === 2 ? mutantCopies('safe-fs-idle', REPO).load('src/safe-fs.js', anchored(src, IDLE, '', 'no-idle-option'), 'no-idle-option') : null;
+  const red = Rel ? await run(Rel) : null;
+  ok(!!red && red.busy.sent === true && red.sentWhileBusy === 1, `RED CONTROL (the pool without the option): the call is SENT into a busy worker and waits there (${red && red.sentWhileBusy} sends)`, red);
+}
+
 report();
