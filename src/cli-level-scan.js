@@ -12,7 +12,8 @@
  *
  * It streams the WHOLE file in CHUNK reads with an OVERLAP (the loop is free between reads), judging each occurrence of
  * CMC.LEVEL_NEEDLE by CMC.levelSignalAt — a mention in a description or a comparison is not a declaration — and reads the
- * build's identity (CMC.identityIn: VERSION … BUILD_TIME) on the way. It stops at the first declaration. `whole` = every byte
+ * build's identity (CMC.identityIn: VERSION … BUILD_TIME) on the way. It stops once it has BOTH (a declaration without the build's
+ * identity names no version: read on — round wwf11hqbh (1)). `whole` = every byte
  * was read: `declared: false` is a verdict about the whole file only then; a read cut by its bound answers `whole: false`
  * (unknown, never «does not declare»). An I/O failure (EACCES, a swapped file) is `{error, retry: true}`; the bound is that with `cut:
  * true`. `maxStepMs` = the longest single step on the loop (one chunk's search) — the device agent serves conversations on it.
@@ -33,7 +34,7 @@ async function scanLevel(file, { timeoutMs = SCAN_TIMEOUT_MS, open = null, now =
       if (!st.isFile()) return { error: 'not-a-file', retry: true };
       const size = st.size, buf = Buffer.alloc(CHUNK + OVERLAP);
       let pos = 0, carry = 0, at = -1, ident = null, maxStepMs = 0;
-      while (pos < size && at < 0 && !abandoned) {
+      while (pos < size && (at < 0 || !ident) && !abandoned) {   // round wwf11hqbh (1): read on until the build's identity is found too
         const { bytesRead } = await fh.read(buf, carry, CHUNK, pos);
         if (!bytesRead) break;
         const view = buf.subarray(0, carry + bytesRead), base = pos - carry, s0 = now();   // ONE step: this chunk's search (the loop is free between reads)

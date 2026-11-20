@@ -247,8 +247,10 @@ function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, per
       const d = require('./cli-model-catalog.js').levelSignalOf(v);
       if (d === true || d === false || !host || !hosts) return d;
       const R = require('./cli-level-reported.js');
-      R.want(v, host, (h) => hosts.cliLevelOf(h), { nameOf: (h) => { const x = hosts.get(h); return (x && x.name) || null; } });   // the facts read IS the trigger (the manager's list reads it first)
-      return R.asking(v, host) ? 'reading' : d;
+      const nameOf = (h) => { try { const x = hosts.get(h); return (x && x.name) || null; } catch { return null; } };   // B-24e2: the machine's name for the words
+      R.want(v, host, (h, ver) => hosts.cliLevelOf(h, ver), { nameOf });   // the facts read IS the trigger (the manager's list reads it first); the CONVERSATION's build
+      const machine = nameOf(host) || host, e = R.asking(v, host) ? { kind: 'reading' } : R.endOf(v, host);
+      return e && e.kind !== 'read' && e.kind !== 'failed' ? { pending: e.kind, machine, retryAt: e.retryAt || null } : d;   // (5) the refused end names its door
     },
     keyOf: (s) => { const cid = idOf(s); return cid ? `${s.backend || 'claude'}:${cid}` : null; },
     turnOf: require('./turn-facts.js').turnOf, turnKnown: require('./turn-facts.js').turnKnown,

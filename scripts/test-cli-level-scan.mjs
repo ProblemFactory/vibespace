@@ -20,6 +20,8 @@ import { createRequire } from 'node:module';
 import { scratchDir, anchored } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
 import { checker } from './lib/check.mjs';
+import { spawn } from 'node:child_process';
+import { monitorEventLoopDelay } from 'node:perf_hooks';
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -30,6 +32,7 @@ const R = require(path.join(REPO, 'src/server/cli-level-reported.js'));
 const CMCS = require(path.join(REPO, 'src/server/cli-model-catalog.js'));
 const CF = require(path.join(REPO, 'src/conversation-facts.js'));
 const CFX = require(path.join(REPO, 'src/server/conversation-facts.js'));
+const { HostManager } = require(path.join(REPO, 'src/hosts.js'));
 const ROOT = scratchDir('cli-level');
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 
@@ -64,6 +67,20 @@ console.log('① the shared scan');
   const e = await LS.scanLevel(E, { now: () => performance.now() });
   console.log(`    THE LOOP: the longest single step of a ${(e.size / 1048576).toFixed(1)} MiB scan = ${e.maxStepMs.toFixed(2)} ms (one ${LS.CHUNK >> 20} MiB chunk's search); the whole scan ${e.ms.toFixed(1)} ms`);
   ok(e.whole === true && e.maxStepMs < 50, 'THE DEVICE AGENT\'S LOOP IS NEVER HELD: reads are asynchronous, and the longest single step (one chunk\'s search) is under 50 ms — printed above', { maxStepMs: e.maxStepMs });
+  // …measured from OUTSIDE the scan too (round wwf11hqbh): the loop's own delay while the scan runs, by perf_hooks
+  const lag = async (mod) => { const h = monitorEventLoopDelay({ resolution: 5 }); h.enable(); await mod.scanLevel(E); h.disable(); return h.max / 1e6; };
+  const lagOk = await lag(LS);
+  const BUSY = mutantCopies('level-step-held', REPO).load('src/cli-level-scan.js', anchored(SRC, '        maxStepMs = Math.max(maxStepMs, now() - s0);', '        { const until = Date.now() + 80; while (Date.now() < until) { } } maxStepMs = Math.max(maxStepMs, now() - s0);', 'step-held'), 'step-held');
+  const lagRed = await lag(BUSY);
+  console.log(`    THE LOOP'S DELAY during the scan (perf_hooks, from outside it): ${lagOk.toFixed(1)} ms; with a step that holds the loop: ${lagRed.toFixed(1)} ms`);
+  ok(lagOk < 50 && lagRed >= 50, '…the loop\'s own delay during the scan, measured from outside it, stays under 50 ms — RED CONTROL: a step that holds the loop is seen there', { lagOk, lagRed });
+  // round wwf11hqbh (1): the declaration BEFORE the build's identity (in a later chunk): the scan reads on until it has both
+  const I = plant('ident-after', [SEP, DECL, filler(LS.CHUNK + 1000), IDENT('2.1.406')]);
+  const ia = await LS.scanLevel(I);
+  ok(ia.declared === true && ia.version === '2.1.406', 'a declaration found BEFORE the build\'s identity: the scan reads on until it names the build (never a verdict that names no version)', ia);
+  const STOP = mutantCopies('level-stop-at-decl', REPO).load('src/cli-level-scan.js', anchored(SRC, '      while (pos < size && (at < 0 || !ident) && !abandoned) {', '      while (pos < size && at < 0 && !abandoned) {', 'stop-at-decl'), 'stop-at-decl');
+  const ir = await STOP.scanLevel(I);
+  ok(ir.declared === true && ir.version === null, '① RED CONTROL: a scan that stops at the declaration names no build — a verdict the hub could file under the asked version', ir);
 }
 
 console.log('② the machine: one scan per binary, one at a time, a cut read remembered');
@@ -101,10 +118,42 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
     'A CUT READ IS REMEMBERED: the machine answers «cut» (when it is read again: an hour) and does NOT scan it again at every ask; past the hour it is read once more', cr);
   ok(cr.c4 === 'reading' && cr.after === cr.before + 1, '…and at once when the binary\'s identity changes (a new build is a new file)', cr);
   const MSRC = fs.readFileSync(path.join(REPO, 'src/machine-probes.js'), 'utf8');
-  const FORGET = mutantCopies('level-cut-forgotten', REPO).load('src/machine-probes.js', anchored(MSRC, "  if (m && !(m.state === 'cut' && now() >= m.retryAt)) return { ...m };", "  if (m && m.state !== 'cut') return { ...m };", 'cut-forgotten'), 'cut-forgotten');
+  const FORGET = mutantCopies('level-cut-forgotten', REPO).load('src/machine-probes.js', anchored(MSRC, "  if (m && !(m.state === 'cut' && now() >= m.retryAt)) return levelAnswer(m, version, c.via);", "  if (m && m.state !== 'cut') return levelAnswer(m, version, c.via);", 'cut-forgotten'), 'cut-forgotten');
   const fr = await runCut(FORGET);
   ok(fr.c2 === 'reading' && fr.k > cr.k, '② RED CONTROL: the cut not remembered — the same binary is scanned again at every ask (a slow disk read for a minute at every facts read)', fr);
   MP._levelReset();
+  // THE MUST (round wwf11hqbh): the build a CONVERSATION runs is read from ITS OWN program file, never the PATH's newer one
+  const V = path.join(ROOT, 'inst'), VD = path.join(V, 'versions'), VB = path.join(V, 'bin'); fs.mkdirSync(VD, { recursive: true }); fs.mkdirSync(VB, { recursive: true });
+  fs.writeFileSync(path.join(VD, '2.1.430'), Buffer.concat([filler(2000), Buffer.from(IDENT('2.1.430') + SEP + DECL, 'latin1')])); fs.chmodSync(path.join(VD, '2.1.430'), 0o755);
+  fs.writeFileSync(path.join(VD, '2.1.431'), Buffer.concat([filler(2000), Buffer.from(IDENT('2.1.431') + MENTION, 'latin1')])); fs.chmodSync(path.join(VD, '2.1.431'), 0o755);
+  fs.symlinkSync(path.join(VD, '2.1.431'), path.join(VB, 'claude'));   // the PATH holds the NEWER build (the program updated itself)
+  const ask = async (mod, version) => { const a = await mod.cliLevel(path.join(VB, 'claude'), { version, platform: 'darwin' }); if (a.state !== 'reading') return a; await mod._levelInFlight(); return mod.cliLevel(path.join(VB, 'claude'), { version, platform: 'darwin' }); };
+  const own = await ask(MP, '2.1.430');
+  ok(own.state === 'read' && own.version === '2.1.430' && own.declared === true && own.via === 'versions', 'a conversation on an OLDER build beside a newer one on the PATH gets ITS build\'s verdict — read from that build\'s own file', own);
+  const gone = await ask(MP, '2.1.429');
+  ok(gone.state === 'gone' && gone.version === '2.1.429' && gone.read === '2.1.431', 'a build that is no longer on the machine: «gone», naming what the PATH\'s program reads instead — never its verdict', gone);
+  const MSRC2 = fs.readFileSync(path.join(REPO, 'src/machine-probes.js'), 'utf8');
+  const PATHONLY = mutantCopies('level-path-only', REPO).load('src/machine-probes.js', anchored(MSRC2, "  if (version && platform === 'linux') {   // ① a process started from that build", "  if (false) {   // ① a process started from that build", 'path-only-a').replace("  if (version && vdir) { const f = path.join(vdir, version);", "  if (false) { const f = path.join(vdir, version);"), 'path-only');
+  PATHONLY._levelReset();
+  const po = await ask(PATHONLY, '2.1.430');
+  ok(po.state === 'gone' && po.read === '2.1.431', '② RED CONTROL: the PATH\'s file read for it — the conversation\'s build is never read (its end stays refused for good)', po);
+  MP._levelReset();
+  // …through the PROCESS itself (Linux): a running program whose file on disk was then replaced is read as it was started
+  if (process.platform === 'linux' && fs.existsSync('/bin/sleep')) {
+    const PD = path.join(ROOT, 'inst2'), PVD = path.join(PD, 'versions'), PB = path.join(PD, 'bin'); fs.mkdirSync(PVD, { recursive: true }); fs.mkdirSync(PB, { recursive: true });
+    const run = path.join(PVD, '2.1.440');
+    fs.writeFileSync(run, Buffer.concat([fs.readFileSync('/bin/sleep'), Buffer.from(IDENT('2.1.440') + SEP + DECL, 'latin1')])); fs.chmodSync(run, 0o755);   // an ELF runs with bytes appended
+    fs.writeFileSync(path.join(PVD, '2.1.441'), Buffer.concat([filler(1000), Buffer.from(IDENT('2.1.441'), 'latin1')])); fs.chmodSync(path.join(PVD, '2.1.441'), 0o755);
+    fs.symlinkSync(path.join(PVD, '2.1.441'), path.join(PB, 'claude'));
+    const child = spawn(run, ['30'], { stdio: 'ignore' });
+    await new Promise((r) => setTimeout(r, 150));
+    fs.unlinkSync(run); fs.writeFileSync(run, Buffer.concat([filler(1000), Buffer.from(IDENT('2.1.440'), 'latin1')]));   // replaced on disk: no declaration in the new bytes
+    const askP = async (version) => { const a = await MP.cliLevel(path.join(PB, 'claude'), { version }); if (a.state !== 'reading') return a; await MP._levelInFlight(); return MP.cliLevel(path.join(PB, 'claude'), { version }); };
+    const viaProc = await askP('2.1.440');
+    try { child.kill('SIGKILL'); } catch { }
+    ok(viaProc.state === 'read' && viaProc.via === 'process' && viaProc.declared === true && viaProc.version === '2.1.440', 'through the PROCESS itself: a running program whose file was replaced on disk is read AS IT WAS STARTED (/proc/<pid>/exe)', viaProc);
+    MP._levelReset();
+  } else console.log('    (the process road is Linux\'s — not on this machine)');
 }
 
 console.log('③ the hub keeps a machine\'s verdict by version');
@@ -130,6 +179,32 @@ console.log('③ the hub keeps a machine\'s verdict by version');
   const OWN = mutantCopies('level-own-only', REPO).load('src/server/cli-model-catalog.js', anchored(CSRC, "  return r ? r.declared : out;", "  return out;", 'own-only'), 'own-only');
   OWN._reset();
   ok(OWN.levelSignalOf('2.2.24') === null, '③ RED CONTROL: the hub\'s own read only (before B-24e2) — the machine-ahead build stays unknown for good', { r: OWN.levelSignalOf('2.2.24') });
+  // THE STORE-READ LAW (round wwf11hqbh (4)): a read that FAILED is held — nothing is written over it until a read succeeds
+  const held = async (mod) => {
+    const hd = path.join(ROOT, 'held-' + (mod === R ? 'a' : 'b')); fs.mkdirSync(hd, { recursive: true });
+    const f = path.join(hd, R.FILE), torn = '{"schema":1,"versions":{"2.1.450":{"declared":tr';
+    fs.writeFileSync(f, torn);
+    mod._reset(); mod.boot({ dataDir: hd, writer });
+    mod.note('2.1.451', { declared: true }, { host: 'h-3', name: 'box-e' });
+    const kept = fs.readFileSync(f, 'utf8') === torn;
+    fs.writeFileSync(f, JSON.stringify({ schema: 1, versions: { '2.1.450': { declared: true, by: { host: 'h-3', name: 'box-e' }, at: '2026-11-20T00:00:00.000Z' } } }));
+    mod.note('2.1.452', { declared: false, whole: true }, { host: 'h-3', name: 'box-e' });
+    const after = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).versions).sort();
+    mod._reset();
+    return { kept, after };
+  };
+  const hr = await held(R);
+  ok(hr.kept && JSON.stringify(hr.after) === JSON.stringify(['2.1.450', '2.1.451', '2.1.452']), 'a DAMAGED store is HELD: nothing is written over it; once it reads, what it kept and what came since are written together', hr);
+  const NOHOLD = mutantCopies('level-store-no-hold', REPO).load('src/server/cli-level-reported.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/cli-level-reported.js'), 'utf8'), "  if (r && r.failed) { st.held = r.failed;", "  if (r && r.failed) { st.reported = {}; return; } if (false) { st.held = r.failed;", 'no-hold'), 'no-hold');
+  const nr = await held(NOHOLD);
+  ok(!nr.kept, '③ RED CONTROL: a failed read taken for an empty store — the next verdict writes over what it kept', nr);
+  // …and through the REAL store writer (the production road: dirty → durable)
+  const rd = path.join(ROOT, 'real-writer'); fs.mkdirSync(rd, { recursive: true });
+  R._reset(); R.boot({ dataDir: rd });
+  R.note('2.1.453', { declared: true }, { host: 'h-4', name: 'box-f' });
+  const SW = require(path.join(REPO, 'src/store-writer.js')).storeWriter();
+  const landed = await SW.durable(path.join(rd, R.FILE));
+  ok(landed === true && JSON.parse(fs.readFileSync(path.join(rd, R.FILE), 'utf8')).versions['2.1.453'].declared === true, 'through the REAL store writer: the verdict is on disk once the writer says durable', { landed });
   R._reset();
 }
 
@@ -171,14 +246,47 @@ console.log('④ the hub\'s ask: its schedule, a cut, a dropped link, an older a
   const dr = await drop(R);
   ok(dr.ended && dr.said && dr.inPause === 1 && dr.after === 2, 'THE LINK DROPS MID-ASK: the ask ENDS, said; the next facts read after the pause asks again (none waits on a dead link, none is lost)', dr);
   const RSRC = fs.readFileSync(path.join(REPO, 'src/server/cli-level-reported.js'), 'utf8');
-  const STUCK = mutantCopies('level-ask-stuck', REPO).load('src/server/cli-level-reported.js', anchored(RSRC, "      if (st.asks.get(k) === a) end(k, `[cli-level] ${who()}: the ask for", "      if (false) end(k, `[cli-level] ${who()}: the ask for", 'ask-stuck'), 'ask-stuck');
+  const STUCK = mutantCopies('level-ask-stuck', REPO).load('src/server/cli-level-reported.js', anchored(RSRC, "      if (st.asks.get(k) === a) end(k, 'failed', `[cli-level] ${who()}: the ask for", "      if (false) end(k, 'failed', `[cli-level] ${who()}: the ask for", 'ask-stuck'), 'ask-stuck');
   const sr = await drop(STUCK);
   ok(!sr.ended && sr.after === 1, '④ RED CONTROL: a dropped ask that never ends — the conversation waits on a dead link for good, no later read asks again', sr);
   const O = await run(R, [null]);
   R.want('2.1.420', 'h-9', O.ask); await settle();
-  ok(O.asks.length === 1 && !R.asking('2.1.420', 'h-9') && O.logs.filter((l) => /predates the read of its own Claude Code/.test(l)).length === 1,
-    'an OLDER device agent (it ignores the flag: no level) is said once, never waited on, not asked again within the hour', O.logs);
+  ok(O.asks.length === 1 && !R.asking('2.1.420', 'h-9') && O.logs.filter((l) => /its device agent is older/.test(l)).length === 1,
+    'an OLDER device agent (no capability, or no level in its answer) is said once, never waited on, not asked again within the hour', O.logs);
+  // THE MUST, the hub's half: a read that names ANOTHER build is never kept, for either; ended by name, the hour's pause
+  const mis = async (mod) => {
+    const D = await run(mod, [{ state: 'read', declared: true, whole: true, version: '2.1.431' }]);
+    await D.c.advance(61e3); mod.want('2.1.420', 'h-9', D.ask); await settle();
+    const r = { asks: D.asks.length, keptAsked: mod.levelOf('2.1.420'), keptRead: mod.levelOf('2.1.431'), said: D.logs.filter((l) => /that build \(2\.1\.420\) is no longer on the machine \(its program reads 2\.1\.431\)/.test(l)).length, end: mod.endOf('2.1.420', 'h-9') };
+    mod._reset(); return r;
+  };
+  const mr = await mis(R);
+  ok(mr.asks === 1 && mr.keptAsked === null && mr.keptRead === null && mr.said === 1 && mr.end && mr.end.kind === 'gone',
+    'a read naming ANOTHER build (the machine\'s PATH moved on): NOTHING kept for either version, ended ONCE by name, not asked again inside the hour', mr);
+  const EVERYMIN = mutantCopies('level-mismatch-minute', REPO).load('src/server/cli-level-reported.js', anchored(RSRC, "PAUSE_MS.old, { read: lv.read || lv.version || null });", "PAUSE_MS.reading, { read: lv.read || lv.version || null });", 'mismatch-minute'), 'mismatch-minute');
+  const er = await mis(EVERYMIN);
+  ok(er.asks === 2, '④ RED CONTROL: the one-minute pause on a mismatch — the machine is asked again every minute, for ever (the round\'s must)', er);
+  const F2 = await run(R, [{ state: 'offline' }]);
+  ok(F2.asks.length === 1 && F2.logs.length === 0 && !R.asking('2.1.420', 'h-9'), 'a machine NOT CONNECTED is a quiet skip: no journal line, no connect (asked again after its short pause)', F2.logs);
   R._reset();
+}
+
+console.log('④b hosts.cliLevelOf: a list never starts a connect; an older agent is asked nothing');
+{
+  const calls = { bounded: 0, probe: [] };
+  const dmOf = (caps) => ({ connect: async () => ({ info: { capabilities: caps } }), probeCli: async (h, o) => { calls.probe.push(o); return { facts: { claude: { level: { state: 'read', declared: true, whole: true, version: o.version } } } }; } });
+  const stub = (dm) => ({ connectedDevice: () => dm, deviceBounded: async () => { calls.bounded++; return dm || dmOf(['cli-level']); } });
+  const down = await HostManager.prototype.cliLevelOf.call(stub(null), 'h-5', '2.1.460');
+  ok(down && down.state === 'offline' && calls.bounded === 0, 'a machine whose link is DOWN: «offline» at once — no connect is started', { down, calls });
+  const old = await HostManager.prototype.cliLevelOf.call(stub(dmOf(['probe'])), 'h-5', '2.1.460');
+  ok(old === null && calls.probe.length === 0, 'an agent without the capability is asked NOTHING (it may not answer the op at all — never a nine-second wait)', { old, calls });
+  const yes = await HostManager.prototype.cliLevelOf.call(stub(dmOf(['probe', 'cli-level'])), 'h-5', '2.1.460');
+  ok(yes && yes.state === 'read' && calls.probe.length === 1 && calls.probe[0].level === true && calls.probe[0].version === '2.1.460', 'a connected agent with the capability is asked for THE CONVERSATION\'S build (its version rides the ask)', { yes, calls });
+  const HSRC = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+  const CONNECTS = mutantCopies('level-list-connects', REPO).load('src/hosts.js', anchored(HSRC, "    const dm = this.connectedDevice(id);   // round wwf11hqbh (2)", "    const dm = await this.deviceBounded(id, 6000);   // round wwf11hqbh (2)", 'list-connects'), 'list-connects');
+  calls.bounded = 0;
+  await CONNECTS.HostManager.prototype.cliLevelOf.call(stub(null), 'h-5', '2.1.460');
+  ok(calls.bounded === 1, '④b RED CONTROL: the ask through deviceBounded — a list read starts the whole connect ladder of a machine that is down', calls);
 }
 
 console.log('⑤ the facts read is the trigger');
@@ -186,19 +294,25 @@ console.log('⑤ the facts read is the trigger');
   R._reset(); CMCS._reset();
   let answer = { state: 'reading' };
   const asked = [];
-  const hosts = { cliLevelOf: async (h) => { asked.push(h); return answer; }, get: () => ({ name: 'box-d' }) };
+  const hosts = { cliLevelOf: async (h, v) => { asked.push(`${h}|${v}`); return answer; }, get: () => ({ name: 'box-d' }) };
   const src = CFX.sourcesFrom({ hosts });
   const st = { fromStart: true, cli: '2.1.430', bg: null, tools: [], bgStarted: [], bgAsk: [], wake: null };
   const d1 = src.levelDeclared('2.1.430', 'h-4');
   for (let i = 0; i < 8; i++) await null;   // the ask leaves in the next turn
   const f1 = CF.trackedFacts(st, { keeps: { background: true }, levelDeclared: () => d1 });
-  ok(d1 === 'reading' && asked.length === 1 && f1.background === null && /being read on its machine now/.test(f1.backgroundWhy), 'a paired conversation above the span ASKS its machine at the facts read; while asked, its words say it is being read there', { d1, why: f1.backgroundWhy });
+  ok(!!d1 && d1.pending === 'reading' && asked.length === 1 && asked[0] === 'h-4|2.1.430' && f1.background === null && /being read on its machine «box-d» now/.test(f1.backgroundWhy),
+    'a paired conversation above the span ASKS its machine for ITS build at the facts read; while asked, the reason the manager reads names the machine', { d1, asked, why: f1.backgroundWhy });
   ok(src.levelDeclared('2.1.430', null) === null && asked.length === 1, '…a conversation on THIS hub asks no machine (its own read is the catalog\'s)', { asked });
   answer = { state: 'read', declared: true, whole: true, version: '2.1.430' };
   R._reset(); R.want('2.1.430', 'h-4', hosts.cliLevelOf); for (let i = 0; i < 8; i++) await null;
   const d2 = src.levelDeclared('2.1.430', 'h-4');
   const f2 = CF.trackedFacts(st, { keeps: { background: true }, levelDeclared: () => d2 });
   ok(d2 === true && Array.isArray(f2.background) && f2.background.length === 0, 'once the machine read it: the build declares the signal ⇒ its never-published background is KNOWN empty (the end can be judged)', { d2, f2: f2.background });
+  // THE WORDS (round wwf11hqbh (5)): a refused end names its door — an older agent, a cut read, a build gone, a machine not connected
+  const wordsOf = async (ans) => { R._reset(); answer = ans; src.levelDeclared('2.1.470', 'h-4'); for (let i = 0; i < 12; i++) await null; const d = src.levelDeclared('2.1.470', 'h-4'); return CF.trackedFacts({ ...st, cli: '2.1.470' }, { keeps: { background: true }, levelDeclared: () => d }).backgroundWhy; };
+  const wOld = await wordsOf(null), wCut = await wordsOf({ state: 'cut', retryAt: 1_900_000_000_000 }), wGone = await wordsOf({ state: 'gone', version: '2.1.470', read: '2.1.471' }), wOff = await wordsOf({ state: 'offline' });
+  ok(/the device agent on «box-d» is older and cannot read it: update the agent/.test(wOld) && /the read on «box-d» was cut; it is read again after 2030-/.test(wCut) && /that build is no longer on «box-d»; its background stays unknown/.test(wGone) && /its machine «box-d» is not connected/.test(wOff),
+    'the reason the manager reads names the door: «update the agent», «cut: read again at (time)», «that build is no longer on the machine», «not connected»', { wOld, wCut, wGone, wOff });
   R._reset();
 }
 

@@ -1973,7 +1973,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) */],
         }));
         return;
       }
@@ -2759,7 +2759,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       }
       if (msg.op === 'probe-cli') {
         (msg.level === true   // B-24e2: asked for the background signal of its own binary (an older hub never sends the flag)
-          ? machineProbes.cliFacts({ helper: msg.helper && typeof msg.helper === 'object' ? { cwd: msg.helper.cwd, ownFile: msg.helper.ownFile } : null, level: true })
+          ? machineProbes.cliFacts({ helper: msg.helper && typeof msg.helper === 'object' ? { cwd: msg.helper.cwd, ownFile: msg.helper.ownFile } : null, level: true, version: typeof msg.version === 'string' ? msg.version : null })
           : machineProbes.cliFacts({ helper: msg.helper && typeof msg.helper === 'object' ? { cwd: msg.helper.cwd, ownFile: msg.helper.ownFile } : null })).then(   // B-77ed: a start's files
           (facts) => mux.control({ op: 'probe-result', id: msg.id, facts }),
           (e) => mux.control({ op: 'probe-result', id: msg.id, error: e.message }));

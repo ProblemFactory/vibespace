@@ -1741,13 +1741,17 @@ class HostManager {
     return { suggestions: PC.legacySuggestions(listing, tx), listing, self, os: raw.os, took: Date.now() - t0, partial: !raw.done };
   }
 
-  /** B-24e2: does this machine's Claude Code DECLARE the background signal — read by the machine of its OWN binary (shared
+  /** B-24e2: does the build `version` a conversation runs on this machine DECLARE the background signal — read by the machine of its OWN program file (shared
    *  src/machine-probes.js cliLevel, behind probe-cli with `level: true` — no new op). → its answer ({state: 'read' | 'reading' | 'cut' |
    *  'none', …}) | null: an OLDER device agent ignores the flag and answers no level (the hub reads «unknown», as before — never a wait).
    *  A dropped link or the op's bound REJECTS (the asker ends its ask and asks again at a later facts read). */
-  async cliLevelOf(id) {
-    const dm = await this.deviceBounded(id, 6000);
-    const r = await dm.probeCli(null, { level: true });
+  async cliLevelOf(id, version = null) {
+    const dm = this.connectedDevice(id);   // round wwf11hqbh (2): A LIST NEVER STARTS A CONNECT — a machine not connected is a quiet skip
+    if (!dm) return { state: 'offline' };
+    const conn = await dm.connect();   // the link is up: answered at once (no connect ladder)
+    const caps = conn && conn.info && Array.isArray(conn.info.capabilities) ? conn.info.capabilities : [];
+    if (!caps.includes('cli-level')) return null;   // (3) an OLDER agent (it may not even answer the op): asked nothing, never a 9 s wait
+    const r = await dm.probeCli(null, { level: true, version });
     const lv = r && r.facts && r.facts.claude ? r.facts.claude.level : null;
     return lv && typeof lv === 'object' && typeof lv.state === 'string' ? lv : null;
   }

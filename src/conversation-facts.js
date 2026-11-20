@@ -239,6 +239,18 @@ function bgDoubt(st) {
  * THE HUB'S JUDGMENT of the observations → the row's three facts. `keeps` = the harness row's `sidecarFacts` ({background,
  * timers, lastRecordAt}); a harness whose wrapper keeps none of them says so (never a harness id here). `turn` decides idleSince.
  */
+/** B-24e2 (round wwf11hqbh (5)): the ask of a PAIRED conversation's machine for ITS build, said in the reason the manager reads —
+ *  `d` = {pending, machine, retryAt} from the hub's facts reader (src/server/conversation-facts.js levelDeclared); '' otherwise */
+function levelPending(d) {
+  if (!d || typeof d !== 'object' || !d.pending) return '';
+  const m = `«${String(d.machine || 'its machine').slice(0, 80)}»`;
+  if (d.pending === 'reading') return ` — it is being read on its machine ${m} now`;
+  if (d.pending === 'old') return ` — the device agent on ${m} is older and cannot read it: update the agent`;
+  if (d.pending === 'cut') return ` — the read on ${m} was cut; it is read again ${Number(d.retryAt) ? 'after ' + new Date(Number(d.retryAt)).toISOString() : 'later'}`;
+  if (d.pending === 'gone') return ` — that build is no longer on ${m}; its background stays unknown`;
+  if (d.pending === 'offline') return ` — its machine ${m} is not connected`;
+  return '';
+}
 function trackedFacts(st, { keeps = null, turn = null, levelDeclared = null } = {}) {
   const k = keeps && typeof keeps === 'object' ? keeps : {};
   const out = {};
@@ -268,7 +280,7 @@ function trackedFacts(st, { keeps = null, turn = null, levelDeclared = null } = 
       out.background = null;
       out.backgroundWhy = d === false ? `its CLI ${st.cli} does not declare the background signal in its own record union`
         : d === 'partial' ? `its CLI ${st.cli}: the background signal was not found in the bytes read (the read stops 64 MiB past the model catalog) — whether it has it is unknown`
-        : `its CLI version ${st.cli} is above the measured span (${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO}) and its binary has not been read for the background signal yet${d === 'reading' ? ' — it is being read on its machine now' : ''}`;
+        : `its CLI version ${st.cli} is above the measured span (${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO}) and its binary has not been read for the background signal yet${levelPending(d)}`;
     }
   }
   const tools = st && Array.isArray(st.tools) ? st.tools : [];

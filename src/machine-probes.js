@@ -207,7 +207,7 @@ function finishLoginLadder(r) {
  * @param {object} [o] {claudeCmd, codexCmd} resolved command overrides (the
  *   server passes its boot-resolved absolute paths; the daemon resolves PATH).
  */
-async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = null, level = false } = {}) {
+async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = null, level = false, version = null } = {}) {
   const out = { platform: process.platform, claude: {}, codex: {} };
   const startP = helper && typeof helper === 'object' ? startHelperFact(helper) : null;   // B-77ed: begun at once, beside the --version runs (the hub's bound is 8 s)
   for (const [key, cmd] of [['claude', claudeCmd], ['codex', codexCmd]]) {
@@ -226,7 +226,7 @@ async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = nul
   Object.assign(out.claude, login);
   if (out.claude.machineLoginState === null) delete out.claude.machineLoginState;
   if (startP) out.claude.startHelper = await startP;   // B-77ed: asked for a start (its cwd and own file)
-  if (level === true && out.claude.cmdPath) out.claude.level = await cliLevel(claudeCmd);   // B-24e2: asked only for a build above the hub's span
+  if (level === true && out.claude.cmdPath) out.claude.level = await cliLevel(claudeCmd, { version: typeof version === 'string' && /^\d{1,4}\.\d{1,4}\.\d{1,6}$/.test(version) ? version : null });   // B-24e2: the CONVERSATION's build (asked only above the hub's span)
   out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json'));
   return out;
 }
@@ -323,30 +323,60 @@ async function cliBinary(cmd) {
   _binMemo.identity = id.identity; _binMemo.out = out;
   return { ...out };
 }
-/** B-24e2 — DOES THIS MACHINE'S CLAUDE CODE DECLARE THE BACKGROUND SIGNAL (row B-24e2: a fact about a machine is read where it lives).
- *  ONE scan per binary identity (path + stat identity), kept in memory; at most ONE scan at a time; the ask never waits for a scan
- *  (the hub's probe-cli bound is 9 s): → {state: 'read', declared, whole, version, size, maxStepMs} | {state: 'reading'} |
- *  {state: 'cut', at, retryAt} — A CUT READ IS REMEMBERED (主开发 2026-11-20 12:22Z): a scan the bound cut, or an I/O failure, is not
- *  read again before retryAt (an hour), unless the binary's identity changes — a slow disk is never read for a minute at every ask |
- *  {state: 'none'} (no binary). Reading a file starts nothing: no CLI runs for it. */
+/** B-24e2 — DOES A CLAUDE CODE BUILD ON THIS MACHINE DECLARE THE BACKGROUND SIGNAL (a fact about a machine is read where it lives).
+ *  THE BUILD A CONVERSATION RUNS is read from THAT conversation's own program file (round wwf11hqbh, the must: a long-idle
+ *  conversation runs the build it STARTED on, while the program on the PATH may have updated itself since): `version` = the build
+ *  the hub asks for. levelFileFor finds, in order: ① a RUNNING process started from that build's file — read through the process
+ *  itself (/proc/<pid>/exe opens the file it was started from, even after the file on disk was replaced); ② that build's own file
+ *  by its version where the installer keeps it (the PATH program's own `versions` folder); ③ the PATH's program — whose read
+ *  DECIDES whether it is that build (its identity checked). No version asked = the PATH's program.
+ *  ONE scan per file identity, kept in memory; at most ONE scan at a time; the ask never waits (the hub's probe-cli bound is 9 s):
+ *  → {state: 'read', declared, whole, version, size, maxStepMs, ms, via} | {state: 'reading'} | {state: 'cut', at, retryAt} — A CUT
+ *  READ IS REMEMBERED (主开发 2026-11-20 12:22Z): not read again before retryAt (an hour) unless the file's identity changes |
+ *  {state: 'gone', version, read?} — the asked build's own file is no longer here (or the file read names another build) |
+ *  {state: 'none'} (no program). Reading a file starts nothing. */
 const LEVEL_RETRY_MS = 3600e3, LEVEL_MEMO_MAX = 8;
-const _levelMemo = new Map();   // identity → answer
+const _levelMemo = new Map();   // file identity → answer
 let _levelScan = null;          // the one scan in flight
-async function cliLevel(cmd, { scan = (p) => require('./cli-level-scan.js').scanLevel(p), now = () => Date.now() } = {}) {   // the scan required here: a suite loads a COPY of this file
-  const id = await cliBinaryIdentity(cmd);
-  if (!id) return { state: 'none' };
-  const m = _levelMemo.get(id.identity);
-  if (m && !(m.state === 'cut' && now() >= m.retryAt)) return { ...m };
-  if (_levelScan) return { state: 'reading' };
-  _levelMemo.set(id.identity, { state: 'reading' });
-  _levelScan = Promise.resolve().then(() => scan(id.path)).then((r) => {
+async function levelFileFor(cmd, version, { procRoot = '/proc', platform = process.platform } = {}) {
+  const p = which(cmd);
+  let real = null; if (p) { try { real = await fs.promises.realpath(p); } catch { real = null; } }
+  const vdir = real && path.basename(path.dirname(real)) === 'versions' ? path.dirname(real) : null;
+  if (version && platform === 'linux') {   // ① a process started from that build (the file may since have been replaced)
+    let pids = []; try { pids = await fs.promises.readdir(procRoot); } catch { pids = []; }
+    for (const pid of pids) {
+      if (!/^\d+$/.test(pid)) continue;
+      let t = null; try { t = await fs.promises.readlink(path.join(procRoot, pid, 'exe')); } catch { continue; }
+      const file = t.replace(/ \(deleted\)$/, '');
+      if (path.basename(file) === version && (!vdir || path.dirname(file) === vdir)) return { path: path.join(procRoot, pid, 'exe'), via: 'process' };
+    }
+  }
+  if (version && vdir) { const f = path.join(vdir, version); try { if ((await fs.promises.stat(f)).isFile()) return { path: f, via: 'versions' }; } catch { } }   // ② its own file
+  return real ? { path: real, via: 'path' } : null;   // ③ the PATH's program (its read decides whether it is that build)
+}
+const levelAnswer = (m, version, via) => {
+  if (m.state !== 'read') return { ...m, ...(version ? { version } : {}) };
+  if (version && m.version !== version) return { state: 'gone', version, read: m.version || null, via, why: m.version ? `this machine's program is ${m.version} now; ${version}'s own file is no longer on it` : 'the file read names no build' };
+  return { ...m, via };
+};
+async function cliLevel(cmd, { version = null, scan = (p) => require('./cli-level-scan.js').scanLevel(p), now = () => Date.now(), procRoot = '/proc', platform = process.platform } = {}) {   // the scan required here: a suite loads a COPY of this file
+  const c = await levelFileFor(cmd, version, { procRoot, platform });
+  if (!c) return { state: 'none' };
+  let st = null; try { st = await fs.promises.stat(c.path); } catch { st = null; }
+  if (!st || !st.isFile()) return version ? { state: 'gone', version, why: `${version}'s own file is no longer on this machine` } : { state: 'none' };
+  const identity = `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}`;
+  const m = _levelMemo.get(identity);
+  if (m && !(m.state === 'cut' && now() >= m.retryAt)) return levelAnswer(m, version, c.via);
+  if (_levelScan) return { state: 'reading', ...(version ? { version } : {}) };
+  _levelMemo.set(identity, { state: 'reading' });
+  _levelScan = Promise.resolve().then(() => scan(c.path)).then((r) => {
     const t = now();
-    _levelMemo.set(id.identity, r && !r.error && r.whole === true ? { state: 'read', declared: r.declared === true, whole: true, version: r.version || null, size: r.size, maxStepMs: r.maxStepMs, ms: r.ms }
+    _levelMemo.set(identity, r && !r.error && r.whole === true ? { state: 'read', declared: r.declared === true, whole: true, version: r.version || null, size: r.size, maxStepMs: r.maxStepMs, ms: r.ms }
       : { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (r && r.error) || 'not read whole' });
     while (_levelMemo.size > LEVEL_MEMO_MAX) _levelMemo.delete(_levelMemo.keys().next().value);
-  }, (e) => { const t = now(); _levelMemo.set(id.identity, { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (e && e.code) || 'read-failed' }); })
+  }, (e) => { const t = now(); _levelMemo.set(identity, { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (e && e.code) || 'read-failed' }); })
     .finally(() => { _levelScan = null; });
-  return { state: 'reading' };
+  return { state: 'reading', ...(version ? { version } : {}) };
 }
 /** tests only: forget the scans (a «restart» of the device agent) / the scan in flight, to await */
 function _levelReset() { _levelMemo.clear(); _levelScan = null; }

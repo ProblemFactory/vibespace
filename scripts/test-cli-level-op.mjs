@@ -34,9 +34,9 @@ const SIZE = 342 << 20;   // a real build's size (2.1.322: 342 MB)
   fs.writeSync(fd, '#!/bin/sh\necho "2.1.399 (Claude Code)"\nexit 0\n');
   const block = Buffer.alloc(8 << 20); for (let i = 0; i < block.length; i++) block[i] = 97 + (i * 7919 % 26);
   let w = 64; while (w < SIZE - (9 << 20)) { fs.writeSync(fd, block); w += block.length; }
-  fs.writeSync(fd, ',VERSION:"2.1.399",PACKAGE_URL:"x",BUILD_TIME:"2026-11-19T10:00:00Z",');
-  fs.writeSync(fd, block.subarray(0, 1 << 20));
   fs.writeSync(fd, ';u({type:T("system"),subtype:T("background_tasks_changed"),tasks:C(u({task_id:o()');
+  fs.writeSync(fd, block.subarray(0, 1 << 20));
+  fs.writeSync(fd, ',VERSION:"2.1.399",PACKAGE_URL:"x",BUILD_TIME:"2026-11-19T10:00:00Z",');   // the identity AFTER the declaration (round wwf11hqbh): read on
   fs.writeSync(fd, block.subarray(0, 4096));
   fs.closeSync(fd);
 }
@@ -47,24 +47,27 @@ const { DeviceManager } = require(REPO + '/src/agentd/client.js');
 const dm = new DeviceManager({ dataDir, bundlePath: path.join(REPO, 'data/bin/vibespace-agentd.js'), version: '0.0.0-t', nodeModules: path.join(REPO, 'node_modules'), log: () => { } });
 let daemonEnded = false;
 process.on('exit', () => { if (!daemonEnded) try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { } try { fs.rmSync(home, { recursive: true, force: true }); fs.rmSync(dataDir, { recursive: true, force: true }); } catch { } });
-await dm.connect();
+const conn = await dm.connect();
+ok(!!conn && !!conn.info && Array.isArray(conn.info.capabilities) && conn.info.capabilities.includes('cli-level'), 'the agent advertises «cli-level» in its hello (a hub asks only an agent that has it)', conn && conn.info && conn.info.capabilities);
 
 const plain = await dm.probeCli();
 ok(!!plain.facts && !!plain.facts.claude && plain.facts.claude.level === undefined, '① probe-cli WITHOUT the flag answers no level — the shape every asker had (an older agent answers so even when asked)', plain.facts && plain.facts.claude);
 const t0 = Date.now();
-const first = await dm.probeCli(null, { level: true });
+const first = await dm.probeCli(null, { level: true, version: '2.1.399' });
 const firstMs = Date.now() - t0;
 const lv0 = first.facts && first.facts.claude && first.facts.claude.level;
 ok(!!lv0 && lv0.state === 'reading' && firstMs < 9000, `② WITH the flag the first answer is «reading», at once (${firstMs} ms — the op's bound is 9 s: the ask never waits for the scan)`, lv0);
 // ③ WAIT FOR WHAT HAPPENED: the machine's answer turning «read» — bounded (the scan's own bound is 60 s), a red by name at the bound
 let lv = lv0, asks = 1;
 const until = Date.now() + 90e3;
-while (lv && lv.state === 'reading' && Date.now() < until) { await new Promise((r) => setTimeout(r, 500)); lv = ((await dm.probeCli(null, { level: true })).facts.claude || {}).level; asks++; }
+while (lv && lv.state === 'reading' && Date.now() < until) { await new Promise((r) => setTimeout(r, 500)); lv = ((await dm.probeCli(null, { level: true, version: '2.1.399' })).facts.claude || {}).level; asks++; }
 console.log(`    THE WHOLE SCAN on this machine: ${(Number(lv && lv.size) / 1048576).toFixed(1)} MiB in ${lv && lv.ms} ms; the longest single step on the daemon's loop ${lv && Number(lv.maxStepMs).toFixed(2)} ms; answered after ${asks} asks`);
 ok(!!lv && lv.state === 'read', `③ the machine's own memory answers «read» inside the bound (${lv && lv.state})`, lv);
-ok(!!lv && lv.declared === true && lv.whole === true && lv.version === '2.1.399' && lv.size >= SIZE - (9 << 20), '…declared, every byte read, the build named by its own identity — the planted file of a real build\'s size', lv);
+ok(!!lv && lv.declared === true && lv.whole === true && lv.version === '2.1.399' && lv.size >= SIZE - (9 << 20), '…declared, every byte read, the build named by its own identity (found AFTER the declaration) — the planted file of a real build\'s size', lv);
+const other = (await dm.probeCli(null, { level: true, version: '2.1.398' })).facts.claude.level;
+ok(!!other && other.state === 'gone' && other.read === '2.1.399', '…asked for ANOTHER build (a conversation on an older one, gone from this machine): «gone», naming what its program reads — never its verdict', other);
 ok(!!lv && Number.isFinite(lv.maxStepMs) && lv.maxStepMs < 50, `…THE DAEMON'S LOOP WAS NEVER HELD: its longest single step ${lv && lv.maxStepMs} ms < 50 ms (printed above)`, lv);
-const again = (await dm.probeCli(null, { level: true })).facts.claude.level;
+const again = (await dm.probeCli(null, { level: true, version: '2.1.399' })).facts.claude.level;
 ok(again && again.state === 'read' && again.declared === true, '…asked again: answered from its memory (no second scan)', again);
 
 try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { }

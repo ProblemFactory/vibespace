@@ -25,25 +25,39 @@ const path = require('path');
 const FILE = 'cli-level-reported.json';
 const KEEP = 20;
 const ASK_STEPS_MS = [5e3, 15e3, 45e3];   // while the machine answers «reading»: asked again after each, then ended by name
-const PAUSE_MS = { failed: 10e3, reading: 60e3, old: 3600e3 };   // after an end: no ask for (machine, version) before this
+const PAUSE_MS = { failed: 10e3, reading: 60e3, old: 3600e3, offline: 10e3 };   // after an end: no ask for (machine, version) before this
 const VERSION = /^\d{1,4}\.\d{1,4}\.\d{1,6}$/;
 
-const st = { dataDir: null, reported: {}, writer: null, log: () => { }, asks: new Map(), paused: new Map(), said: new Set(),
+const st = { dataDir: null, reported: {}, held: null, writer: null, log: () => { }, asks: new Map(), paused: new Map(), said: new Set(), ends: new Map(),
   clock: { now: () => Date.now(), setTimeout: (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, clearTimeout: (t) => clearTimeout(t) } };
 
 const isRow = (r) => !!r && typeof r === 'object' && !Array.isArray(r) && typeof r.declared === 'boolean' && (r.by === null || typeof r.by === 'object') && typeof r.at === 'string';
+function readStore() {   // → {versions} | null (no such file) | {failed: code}
+  let text;
+  try { text = fs.readFileSync(path.join(st.dataDir, FILE), 'utf8'); } catch (e) { return e && e.code === 'ENOENT' ? null : { failed: (e && e.code) || 'read-failed' }; }   // own data, a few hundred bytes
+  let j = null; try { j = JSON.parse(text); } catch { return { failed: 'damaged' }; }
+  if (!j || typeof j !== 'object' || Array.isArray(j) || j.schema !== 1 || !j.versions || typeof j.versions !== 'object') return { failed: 'damaged' };
+  const out = {};
+  for (const [v, r] of Object.entries(j.versions)) if (v !== '__proto__' && VERSION.test(v) && isRow(r)) out[v] = { declared: r.declared, by: r.by || null, at: r.at };
+  return { versions: out };
+}
 function boot({ dataDir = null, log = null, writer = null, clock = null } = {}) {
   st.dataDir = dataDir; st.writer = writer; if (log) st.log = log; if (clock) st.clock = { ...st.clock, ...clock };
-  st.reported = {};
+  st.reported = {}; st.held = null;
   if (!dataDir) return;
-  let j = null;
-  try { j = JSON.parse(fs.readFileSync(path.join(dataDir, FILE), 'utf8')); } catch { j = null; }   // own data, a few hundred bytes
-  if (j && typeof j === 'object' && !Array.isArray(j) && j.schema === 1 && j.versions && typeof j.versions === 'object') {
-    for (const [v, r] of Object.entries(j.versions)) if (v !== '__proto__' && VERSION.test(v) && isRow(r)) st.reported[v] = { declared: r.declared, by: r.by || null, at: r.at };
-  }
+  const r = readStore();
+  // THE STORE-READ LAW (round wwf11hqbh (4)): a read that FAILED (not «no such file») is HELD — nothing is written over it until a
+  // read succeeds (the save asks again); what was kept there is never lost to an empty start
+  if (r && r.failed) { st.held = r.failed; st.log(`[cli-level] data/${FILE} could not be read (${r.failed}) — it is held, nothing is written over it until a read succeeds`); return; }
+  if (r) st.reported = r.versions;
 }
 function save() {
   if (!st.dataDir) return;
+  if (st.held) {
+    const r = readStore();
+    if (r && r.failed) return;   // still held: said once at boot
+    st.reported = { ...((r && r.versions) || {}), ...st.reported }; st.held = null;   // the file read at last: what it kept, then what came since
+  }
   const w = st.writer || require('../store-writer.js').storeWriter();
   try { w.dirty(path.join(st.dataDir, FILE), { name: 'cli-level-reported.write', produce: () => JSON.stringify({ schema: 1, versions: st.reported }) }); }
   catch (e) { st.log(`[cli-level] the reported verdicts could not be written (${(e && (e.code || e.message)) || e}) — they stay in force until the next start`); }
@@ -60,38 +74,50 @@ function note(version, level, by = null) {
 }
 const keyOf = (version, hostId) => `${hostId}|${version}`;
 function asking(version, hostId) { return st.asks.has(keyOf(version, hostId)); }
+/** the last END of an ask for (machine, version), while its pause lasts — the words a refused end says (round wwf11hqbh (5)):
+ *  → {kind: 'old' | 'cut' | 'gone' | 'offline' | 'reading' | 'failed', retryAt?, read?} | null */
+function endOf(version, hostId) { const k = keyOf(version, hostId), e = st.ends.get(k); return e && (st.paused.get(k) || 0) > st.clock.now() ? { ...e } : null; }
 function sayOnce(k, line) { if (st.said.has(k)) return; st.said.add(k); if (st.said.size > 200) st.said.delete(st.said.values().next().value); st.log(line); }
-/** an ask's END: said by name, and a pause before (machine, version) is asked again */
-function end(k, line, pause) { const a = st.asks.get(k); if (a && a.timer) st.clock.clearTimeout(a.timer); st.asks.delete(k); if (line) st.log(line); if (pause) st.paused.set(k, st.clock.now() + pause); }
+/** an ask's END: said ONCE by name per (machine, version, kind), and a pause before (machine, version) is asked again */
+function end(k, kind, line, pause, extra = {}) {
+  const a = st.asks.get(k); if (a && a.timer) st.clock.clearTimeout(a.timer); st.asks.delete(k);
+  if (line) sayOnce(`${k}|${kind}`, line);
+  if (pause) { st.paused.set(k, st.clock.now() + pause); st.ends.set(k, { kind, ...extra }); } else st.ends.delete(k);
+  if (st.ends.size > 400) st.ends.delete(st.ends.keys().next().value);
+}
 function want(version, hostId, ask, { nameOf = () => null } = {}) {
   if (typeof version !== 'string' || !VERSION.test(version) || !hostId || typeof ask !== 'function') return;
   if (st.reported[version]) return;
   const k = keyOf(version, hostId);
   if (st.asks.has(k) || (st.paused.get(k) || 0) > st.clock.now()) return;
-  const who = () => { let n = null; try { n = nameOf(hostId); } catch { n = null; } return n ? `«${n}»` : hostId; };
+  const name = () => { let n = null; try { n = nameOf(hostId); } catch { n = null; } return n || null; };
+  const who = () => (name() ? `«${name()}»` : hostId);
   const a = { step: 0, timer: null };
   st.asks.set(k, a);
   const once = () => {
-    Promise.resolve().then(() => ask(hostId)).then((lv) => {
+    Promise.resolve().then(() => ask(hostId, version)).then((lv) => {
       if (st.asks.get(k) !== a) return;   // ended meanwhile
-      if (!lv || typeof lv !== 'object') return end(k, null, PAUSE_MS.old) || sayOnce(`old|${hostId}`, `[cli-level] ${who()}: its device agent predates the read of its own Claude Code for the background signal — ${version}'s background stays unknown there until the agent is updated`);
-      if (lv.state === 'read') {
-        const v = lv.version && VERSION.test(lv.version) ? lv.version : version;
-        const kept = note(v, lv, { host: hostId, name: (() => { try { return nameOf(hostId) || null; } catch { return null; } })() });
-        return end(k, `[cli-level] ${who()}: its Claude Code ${v} ${lv.declared ? 'DECLARES' : 'does not declare'} the background signal (read on that machine${kept ? '' : ' — not kept: the read was not whole'})`, v === version ? 0 : PAUSE_MS.reading);
+      if (!lv || typeof lv !== 'object') return end(k, 'old', `[cli-level] ${who()}: its device agent is older — it cannot read its own Claude Code for the background signal; ${version}'s background stays unknown there until the agent is updated`, PAUSE_MS.old);
+      if (lv.state === 'offline') return end(k, 'offline', null, PAUSE_MS.offline);   // a quiet skip until its next connect (a list never connects)
+      if (lv.state === 'read' && lv.version === version) {
+        const kept = note(version, lv, { host: hostId, name: name() });
+        return end(k, 'read', `[cli-level] ${who()}: its Claude Code ${version} ${lv.declared ? 'DECLARES' : 'does not declare'} the background signal (read on that machine${kept ? '' : ' — not kept: the read was not whole'})`, 0);
       }
-      if (lv.state === 'cut') return end(k, `[cli-level] ${who()}: its Claude Code ${version} could not be read whole for the background signal (${String(lv.why || 'cut').slice(0, 80)}) — it is read again ${Number(lv.retryAt) ? 'after ' + new Date(Number(lv.retryAt)).toISOString() : 'later'}`, Math.max(PAUSE_MS.failed, (Number(lv.retryAt) || 0) - st.clock.now()));
+      // NEVER A VERDICT UNDER A VERSION THE MACHINE DID NOT READ FOR THAT CONVERSATION (round wwf11hqbh, the must): a read that names
+      // another build (an older agent reads its PATH's program), or none, or the build's own file gone — ended BY NAME, the hour's pause
+      if (lv.state === 'read' || lv.state === 'gone') return end(k, 'gone', `[cli-level] ${who()}: that build (${version}) is no longer on the machine${lv.read || (lv.state === 'read' && lv.version) ? ` (its program reads ${lv.read || lv.version})` : ''} — its background stays unknown`, PAUSE_MS.old, { read: lv.read || lv.version || null });
+      if (lv.state === 'cut') return end(k, 'cut', `[cli-level] ${who()}: its Claude Code ${version} could not be read whole for the background signal (${String(lv.why || 'cut').slice(0, 80)}) — it is read again ${Number(lv.retryAt) ? 'after ' + new Date(Number(lv.retryAt)).toISOString() : 'later'}`, Math.max(PAUSE_MS.failed, (Number(lv.retryAt) || 0) - st.clock.now()), { retryAt: Number(lv.retryAt) || null });
       if (lv.state === 'reading' && a.step < ASK_STEPS_MS.length) { a.timer = st.clock.setTimeout(once, ASK_STEPS_MS[a.step++]); return; }
-      if (lv.state === 'reading') return end(k, `[cli-level] ${who()}: its Claude Code ${version} was still being read for the background signal after ${ASK_STEPS_MS.reduce((x, y) => x + y, 0) / 1000} s — asked again at a later facts read`, PAUSE_MS.reading);
-      return end(k, `[cli-level] ${who()}: its Claude Code ${version} has no binary to read (${String(lv.state).slice(0, 40)})`, PAUSE_MS.old);
+      if (lv.state === 'reading') return end(k, 'reading', `[cli-level] ${who()}: its Claude Code ${version} was still being read for the background signal after ${ASK_STEPS_MS.reduce((x, y) => x + y, 0) / 1000} s — asked again at a later facts read`, PAUSE_MS.reading);
+      return end(k, 'gone', `[cli-level] ${who()}: its Claude Code ${version} has no program to read (${String(lv.state).slice(0, 40)})`, PAUSE_MS.old);
     }, (e) => {
       // THE LINK DROPPED (or the ask failed): the ask ends — the next facts read after the pause asks again, never a wait on a dead link
-      if (st.asks.get(k) === a) end(k, `[cli-level] ${who()}: the ask for its Claude Code ${version}'s background signal ended (${String((e && (e.code || e.message)) || e).slice(0, 120)}) — asked again at the next facts read`, PAUSE_MS.failed);
+      if (st.asks.get(k) === a) end(k, 'failed', `[cli-level] ${who()}: the ask for its Claude Code ${version}'s background signal ended (${String((e && (e.code || e.message)) || e).slice(0, 120)}) — asked again at the next facts read`, PAUSE_MS.failed);
     });
   };
   once();
 }
 /** tests only: a fresh process (the store stays on disk) */
-function _reset() { for (const a of st.asks.values()) if (a.timer) st.clock.clearTimeout(a.timer); st.asks.clear(); st.paused.clear(); st.said.clear(); st.reported = {}; st.dataDir = null; st.writer = null; }
+function _reset() { for (const a of st.asks.values()) if (a.timer) st.clock.clearTimeout(a.timer); st.asks.clear(); st.paused.clear(); st.said.clear(); st.ends.clear(); st.reported = {}; st.held = null; st.dataDir = null; st.writer = null; }
 
-module.exports = { boot, levelOf, note, want, asking, FILE, KEEP, ASK_STEPS_MS, PAUSE_MS, _reset };
+module.exports = { boot, levelOf, note, want, asking, endOf, FILE, KEEP, ASK_STEPS_MS, PAUSE_MS, _reset };
