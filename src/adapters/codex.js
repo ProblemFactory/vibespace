@@ -707,9 +707,10 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  MAIN loop ~100 ms at its deserialize): the worker reads the tail once and hands its records back a page at a time (≤ PAGE_LINES
  *  lines and ≤ PAGE_BYTES of their text) from one snapshot in the `history` lane's one worker, the loop free between pages. A
  *  snapshot gone (another read replaced it) ⇒ asked once more; again ⇒ the one-shot worker read. A page refused by the lane's heap
- *  bound (`heap_bound`) skips the one-shot read (it would hold more). `onFail(why)` hears why the paged road gave up.
+ *  bound (`heap_bound`) skips the one-shot read (it would hold more). `onFail(why)` hears why the paged road gave up. `slot` (B-299b):
+ *  the worker's snapshot slot — '' the history reads' (default), 'helper' the artifact door's (a helper's page 0 never cuts a history read).
  *  → the records, or null (the caller parses on the loop, said) */
-async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null } = {}) {
+async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '' } = {}) {
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why); } catch { } return null; };
   const pool = _transcriptPoolGet();
   if (!pool) return said('no transcript pool on this process');
@@ -719,7 +720,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       const out = [];
       let token = null, total = Infinity, start = 0, gone = false;
       while (start < total) {
-        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}) });
+        const r = await pool.call('boundedParsedPage', { fp, tailOnly, start, count: page, maxBytes: PAGE_BYTES, capMb: HISTORY_SOFT_CHECK ? HISTORY_HEAP_MB : 0, ...(token ? { token } : {}), ...(slot ? { slot } : {}) });
         if (!r || r.gone) { gone = true; _pagedStats.gone++; why = 'its snapshot was gone twice (another read replaced it)'; break; }
         _pagedStats.pages++;
         token = r.token; total = r.total;

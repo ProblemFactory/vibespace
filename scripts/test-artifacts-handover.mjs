@@ -215,7 +215,7 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
     return out;
   };
   const RELEASE_READ = "((f) => { const fs = require('fs'); let text = ''; try { const st = fs.statSync(f); const fd = fs.openSync(f, 'r'); const n = Math.min(st.size, 8 * 1024 * 1024); const buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, st.size - n); fs.closeSync(fd); text = buf.toString('utf8'); } catch { return []; } const out = []; for (const line of text.split('\\n')) { if (!line.trim()) continue; try { out.push(JSON.parse(line)); } catch { } } return out; })(file)";
-  const PAGER = "await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, onFail: (w) => { why = w; } })";
+  const PAGER = "await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } })";
   const MR = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), PAGER, RELEASE_READ, 'the release\'s main-thread reader'), 'releaseread');
   const PAD = 'p'.repeat(3900), MB = 1048576;
   // a helper transcript of `mb` MB: padding records, a Write at each `writes[i].atMb` (Infinity = after the last padding), `extra` lines verbatim
@@ -311,6 +311,63 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const notDerived = warns.filter((w) => /a helper's rows were not derived/.test(w));
   ok(!Object.keys(rows(S8)).length && nReads.length === 0 && REG.helperReadStats().unread === unreadBefore + 2 && notDerived.length === 1 && /heap bound/.test(notDerived[0]) && /none is read on it/.test(notDerived[0]),
     'the history worker refusing (its heap bound): the two helpers\' rows are NOT derived, nothing is read on the main thread, and the log says why ONCE', { rows: Object.keys(rows(S8)), reads: nReads, warns });
+  const agentUse = (tuid, desc, s0) => use(tuid, 'Agent', { description: desc, prompt: 'go', subagent_type: 'general-purpose' }, s0);
+  // (d2) a read that failed is read AGAIN at the next rebuild (a null is never kept as «nothing found»)
+  const R8 = mk('B4r', { _normalizer: null, _artifacts: null });
+  await N.rebuildHistory(R8, 'B4r', [agentUse('toolu_T8', 'Refused one', 66), ends('toolu_T8', 'a08', 67), agentUse('toolu_T9', 'Refused two', 68), ends('toolu_T9', 'a09', 69)]);
+  ok(rows(R8)[':' + DN + 'one.md'] && rows(R8)[':' + DN + 'two.md'], 'the two refused helpers are read again at the next rebuild, the worker answering now: their rows', shape(rows(R8)));
+
+  // (e) 主开发 r604 ①: a person's PAGED history read keeps its pages while a helper is read beside it (the worker's own «helper» slot)
+  const PF = path.join(HOME, 'person-history.jsonl');
+  fs.writeFileSync(PF, Array.from({ length: 3000 }, (_, i) => JSON.stringify({ type: 'assistant', uuid: 'h' + i, message: { role: 'assistant', content: [{ type: 'text', text: 'line ' + i }] } })).join('\n') + '\n');
+  const beside = async (reg, aid) => {
+    const tuid = 'toolu_P' + aid, desc = 'Beside ' + aid;
+    helper(aid, tuid, desc, { mb: 0.05, writes: [{ atMb: 0.01, file: CWD + '/beside/' + aid + '.md' }] });
+    const st0 = C.pagedReadStats();
+    const person = C.readJsonlBoundedParsedPagedAsync(PF, { page: 10 }); // 300 pages, the history slot
+    for (let k = 0; k < 100000 && C.pagedReadStats().pages < st0.pages + 3; k++) await new Promise((r) => setImmediate(r)); // the person's read is under way
+    const s = await liveOf(reg, 'P' + aid, [agentUse(tuid, desc, 70), ends(tuid, aid, 71)]);
+    const recs = await person, st1 = C.pagedReadStats();
+    return { records: recs && recs.length, gone: st1.gone - st0.gone, oneShot: st1.oneShot - st0.oneShot, row: !!rows(s)[':' + CWD + '/beside/' + aid + '.md'] };
+  };
+  const MP = M.load('src/server/artifact-registry.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8'), "{ tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } }", "{ tailOnly: false, onFail: (w) => { why = w; } }", 'a helper read without its slot'), 'noslot');
+  const bOwn = await beside(REG, 'a10'), bShared = await beside(MP, 'a11');
+  REG.configure({ activeSessions: () => new Map(), log: quiet }); // the copy's configure pointed the rebuild's helper seam at itself — the real one again
+  ok(bOwn.records === 3000 && bOwn.gone === 0 && bOwn.oneShot === 0 && bOwn.row && bShared.gone >= 1 && bShared.row,
+    'a person\'s 300-page history read beside a helper\'s read keeps every page (no snapshot gone, no one-shot read); CONTROL a helper read in the history slot cuts it (gone)', { own: bOwn, shared: bShared });
+
+  // (f) 主开发 r604 ②: a conversation killed while its helper is read gets NO rows and NO save (its meta would come back holding only the rows)
+  const killed = async (kill) => {
+    const aid = kill ? 'a12' : 'a13', tuid = 'toolu_K' + aid, desc = 'Killed ' + aid;
+    helper(aid, tuid, desc, { mb: 0.05, writes: [{ atMb: 0.01, file: CWD + '/killed/' + aid + '.md' }] });
+    const s = mk('K' + aid, { sockName: 'cw-k' + aid }), live = new Map([['sess-k' + aid, s]]), writes = [];
+    REG.configure({ activeSessions: () => live, sessionMeta: () => ({ readSessionMeta: () => null, writeSessionMeta: (n) => writes.push(n) }), log: quiet });
+    for (const r of [agentUse(tuid, desc, 72), ends(tuid, aid, 73)]) REG.observe(s, r);
+    if (kill) setImmediate(() => live.delete('sess-k' + aid)); // killed while its read is in flight
+    await REG.helperSettled(s);
+    const timer = !!s._artifactsTimer; clearTimeout(s._artifactsTimer);
+    REG.configure({ activeSessions: () => new Map(), sessionMeta: null, log: quiet });
+    return { rows: Object.keys(rows(s)).length, saveDue: timer, writes: writes.length };
+  };
+  const kOn = await killed(true), kOff = await killed(false);
+  ok(kOn.rows === 0 && !kOn.saveDue && kOn.writes === 0 && kOff.rows === 1 && kOff.saveDue, 'a conversation killed while its helper\'s read is in flight: no row, no save due; CONTROL the one still standing gets its row and its save', { killed: kOn, standing: kOff });
+
+  // (g) 主开发 r604 ③: the rebuild's prefetch is BOUNDED — the history opens, what it left is said and read on; the next open folds it
+  for (const [aid, nm] of [['a14', 'one'], ['a15', 'two']]) helper(aid, 'toolu_B' + aid, 'Bounded ' + nm, { mb: 0.05, writes: [{ atMb: 0.01, file: CWD + '/bounded/' + nm + '.md' }] });
+  const TB = [agentUse('toolu_Ba14', 'Bounded one', 74), ends('toolu_Ba14', 'a14', 75), agentUse('toolu_Ba15', 'Bounded two', 76), ends('toolu_Ba15', 'a15', 77)];
+  const told = [], s0 = REG.helperReadStats();
+  REG.configure({ activeSessions: () => new Map(), log: { log: (m) => told.push(String(m)), warn() {} } });
+  REG._setHelperPrefetchMsForTest(0);
+  const RB1 = mk('BB1', { _normalizer: null, _artifacts: null });
+  await N.rebuildHistory(RB1, 'BB1', TB);
+  REG._setHelperPrefetchMsForTest(2000);
+  const RB2 = mk('BB2', { _normalizer: null, _artifacts: null });
+  await N.rebuildHistory(RB2, 'BB2', TB);
+  const s1 = REG.helperReadStats();
+  REG.configure({ activeSessions: () => new Map(), log: quiet });
+  const B1 = CWD + '/bounded/';
+  ok(!rows(RB1)[':' + B1 + 'one.md'] && !rows(RB1)[':' + B1 + 'two.md'] && s1.left - s0.left === 2 && told.some((m) => /the history opened before 2 of 2 helper transcripts were read/.test(m)) && rows(RB2)[':' + B1 + 'one.md'] && rows(RB2)[':' + B1 + 'two.md'] && s1.read - s0.read === 2,
+    'a rebuild whose prefetch wait is spent opens without the two helpers\' rows and SAYS it; their reads go on — the next open folds both, each file read once', { first: shape(rows(RB1)), second: shape(rows(RB2)), left: s1.left - s0.left, reads: s1.read - s0.read, told });
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

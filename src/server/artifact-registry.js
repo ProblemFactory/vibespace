@@ -135,12 +135,22 @@ function noteOps(session, ops) {
 // that failed ⇒ NO main-thread read: that helper's rows are not derived, said once a process. A file's ops are kept by its size +
 // mtime (HELPER_OPS_MAX ops in all, oldest dropped) — a rebuild, or a background agent's end after its launch, re-reads a file that
 // changed only. The live door folds after the record's own ops; the rebuild reads every helper its records name BEFORE it derives
-// (helperPrefetch — the normalizers' helper seam), so its fold reads none.
+// (helperPrefetch — the normalizers' helper seam), so its fold reads none. 主开发 r604: the helper reads take the worker's 'helper'
+// page-snapshot slot, ONE at a time across every conversation (a helper's page 0 never cuts a person's paged history read, nor
+// another helper's); a late fold notes nothing for a conversation that no longer stands (its delayed save would bring back a meta
+// file holding only the rows); the rebuild's prefetch waits HELPER_PREFETCH_MS at most — the history opens, what it left is said
+// and read on (kept for the next open; the rows a conversation already kept stand meanwhile).
 const HELPER_TURN_MS = 20, HELPER_NOTE_CHUNK = 16, HELPER_OPS_MAX = 50000;
+let HELPER_PREFETCH_MS = 2000;
+/** tests only: the rebuild prefetch's wait */
+function _setHelperPrefetchMsForTest(ms) { HELPER_PREFETCH_MS = ms; }
 const _helperOps = new Map(); // file → {size, mtimeMs, ops: [{o, cwd}]} (oldest first)
 let _helperOpsN = 0;
-const _helperStats = { read: 0, kept: 0, unread: 0, said: false };
-const helperReadStats = () => ({ read: _helperStats.read, kept: _helperStats.kept, unread: _helperStats.unread });
+const _helperStats = { read: 0, kept: 0, unread: 0, left: 0, said: false };
+const helperReadStats = () => ({ read: _helperStats.read, kept: _helperStats.kept, unread: _helperStats.unread, left: _helperStats.left });
+let _helperReadTail = Promise.resolve();
+/** ONE helper read at a time, every conversation's (the worker keeps one 'helper' snapshot). */
+const oneHelperRead = (fn) => { const p = _helperReadTail.then(fn, fn); _helperReadTail = p.catch(() => { }); return p; };
 const loopTurn = () => new Promise((r) => setImmediate(r));
 /** `due()` once HELPER_TURN_MS of work ran since the last loop turn; `turn()` gives the loop one (MEASURED: past the rows' 500 cap a
  *  helper's write costs ~1.1 ms to fold — a count-sliced 500 held the loop 0.7 s a turn). */
@@ -159,12 +169,20 @@ function helperFilesOf(session, record, state) {
 }
 /** ONE helper transcript → its ops [{o, cwd}] (the hook's own ops of each record, untagged), read off the loop; null = not read. */
 async function helperFileOps(of, file) {
-  let st = null;
-  try { st = await require('fs').promises.stat(file); } catch { return []; } // gone: nothing to fold (the release's reader read nothing either)
-  const kept = _helperOps.get(file);
-  if (kept && kept.size === st.size && kept.mtimeMs === st.mtimeMs) { _helperOps.delete(file); _helperOps.set(file, kept); _helperStats.kept++; return kept.ops; }
+  const keptOf = async () => {
+    let st = null;
+    try { st = await require('fs').promises.stat(file); } catch { return { st: null, ops: [] }; } // gone: nothing to fold (the release's reader read nothing either)
+    const kept = _helperOps.get(file);
+    if (kept && kept.size === st.size && kept.mtimeMs === st.mtimeMs) { _helperOps.delete(file); _helperOps.set(file, kept); _helperStats.kept++; return { st, ops: kept.ops }; }
+    return { st, ops: null };
+  };
+  const first = await keptOf();
+  if (first.ops) return first.ops;
+  return oneHelperRead(async () => { const k = await keptOf(); return k.ops || helperFileRead(of, file, k.st); }); // asked again in its turn: a read ahead of it may have kept it
+}
+async function helperFileRead(of, file, st) {
   let why = null;
-  const recs = await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, onFail: (w) => { why = w; } });
+  const recs = await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } });
   if (!recs) {
     _helperStats.unread++;
     if (!_helperStats.said) { _helperStats.said = true; deps.log.warn?.(`[artifacts] a helper's rows were not derived — its transcript was not read off the main loop (${why || 'no reason given'}); none is read on it (B-299b). Said once a process.`); }
@@ -196,24 +214,36 @@ function helperTagged(session, list, via, state, at = null) {
   }
   return out;
 }
+/** Does the conversation still stand here? A late fold notes nothing for one killed or removed meanwhile (主开发 r604: its delayed
+ *  save would bring back a meta file holding only the rows). A registry with no session store, or a session with no socket name,
+ *  saves nothing — it stands. */
+function stands(session) {
+  if (!deps.sessionMeta || !session || !session.sockName) return true;
+  for (const s of sessions().values()) if (s === session) return true;
+  return false;
+}
 /** THE LIVE DOOR: the helpers a record ends, read off the loop one after another; each one's rows land when its read has (stamped
- *  with the record's own instant), HELPER_NOTE_CHUNK ops at a time, a loop turn when HELPER_TURN_MS of work ran. */
+ *  with the record's own instant), HELPER_NOTE_CHUNK ops at a time, a loop turn when HELPER_TURN_MS of work ran — while the
+ *  conversation stands. */
 function foldHelpers(session, record, state) {
   const files = helperFilesOf(session, record, state);
   if (!files.length) return;
   const h = harnessHooks(session), at = Date.now();
   state.chain = Promise.resolve(state.chain).then(async () => {
     for (const { file, via } of files) {
+      if (!stands(session)) return;
       const list = await helperFileOps(h.artifactsOf, file);
       const ops = list && list.length ? helperTagged(session, list, via, state, at) : [], pace = pacer();
-      for (let i = 0; i < ops.length; i += HELPER_NOTE_CHUNK) { if (pace.due()) await pace.turn(); noteOps(session, ops.slice(i, i + HELPER_NOTE_CHUNK)); }
+      for (let i = 0; i < ops.length; i += HELPER_NOTE_CHUNK) { if (pace.due()) await pace.turn(); if (!stands(session)) return; noteOps(session, ops.slice(i, i + HELPER_NOTE_CHUNK)); }
     }
   }).catch((e) => { deps.log.warn?.(`[artifacts] a helper's rows failed: ${e.message}`); });
 }
 /** → a promise that settles when every live helper fold of the session has (tests; a reader that must see them). */
 const helperSettled = (session) => Promise.resolve(session && session._helperArtifacts && session._helperArtifacts.chain);
-/** THE REBUILD'S READ (the normalizers' helper seam, before the derivation runs): every helper the records name, read off the loop →
- *  {files: WeakMap record → [{file, via}], ops: Map file → [{o, cwd}] | null}. The walk asks the hook ONCE a record, as the fold
+/** THE REBUILD'S READ (the normalizers' helper seam, before the derivation runs): every helper the records name, read off the loop —
+ *  waited for HELPER_PREFETCH_MS at most (主开发 r604: the history opens then; the reads go on and are kept for the next open, `done`;
+ *  what was left is said once a rebuild) → {files: WeakMap record → [{file, via}], ops: Map file → [{o, cwd}] | null (the reads done
+ *  by then), left, done}. The walk asks the hook ONCE a record, as the fold
  *  would (its own `runs`), paced as the reads are; the fold takes the hook's answer from `files` (a claude end record's hook may list
  *  the projects folder — asked twice it would be twice). */
 const NO_FILES = Object.freeze([]);
@@ -227,8 +257,18 @@ async function helperPrefetch(session, records) {
     if (rec && typeof rec === 'object') files.set(rec, named.length ? named : NO_FILES);
     for (const { file } of named) if (!ops.has(file)) ops.set(file, null);
   }
-  for (const file of ops.keys()) ops.set(file, await helperFileOps(h.artifactsOf, file));
-  return { files, ops };
+  const names = [...ops.keys()], got = new Map();
+  if (!names.length) return { files, ops: got, left: 0, done: Promise.resolve() };
+  const done = (async () => { for (const file of names) got.set(file, await helperFileOps(h.artifactsOf, file)); })().catch(() => { });
+  let timer = null;
+  const late = await Promise.race([done.then(() => false), new Promise((r) => { timer = setTimeout(() => r(true), HELPER_PREFETCH_MS); })]);
+  clearTimeout(timer);
+  const now = late ? new Map(got) : got, left = names.length - now.size;
+  if (left) {
+    _helperStats.left += left;
+    deps.log.log?.(`[artifacts] ${session.claudeSessionId || session.backendSessionId || '?'}: the history opened before ${left} of ${names.length} helper transcripts were read (${HELPER_PREFETCH_MS} ms) — the rows the conversation kept stand; the next open folds them (they are read on)`);
+  }
+  return { files, ops: now, left, done };
 }
 /** THE REBUILD'S FOLD (sync): the ops a record that ENDS a helper brings — from `read` (helperPrefetch's), never from the disk. */
 function helperOps(session, record, state = { runs: new Map(), seen: new Set() }, read = null) {
@@ -516,5 +556,5 @@ function hostNamesOf(ids) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, helperOps, helperPrefetch, helperSettled, helperReadStats, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, helperOps, helperPrefetch, helperSettled, helperReadStats, _setHelperPrefetchMsForTest, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
 module.exports = api;

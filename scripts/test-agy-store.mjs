@@ -313,6 +313,7 @@ console.log('— ⑪ A SUB THAT ALREADY RAN (the cards\' addendum): the hub draw
   try {
     onData(JOURNAL);
     for (let k = 0; k < 500 && !frames.some((f) => f.type === 'subagent-message' && f.subId === S); k++) await new Promise((r) => setTimeout(r, 10)); // B-299b A1: the turn end's read answers off the loop
+    await require(path.join(REPO, 'src/server/artifact-registry.js')).helperSettled(s4); // B-299b A6 (its round): the artifact door's fold ends INSIDE the window
   } finally { for (const k of RS) fs[k] = realRS[k]; }
   ok(helperReads.length === 0, `the turn end's main-thread reads under the store: NONE — the artifact door's read of the finished sub's transcript_full left the loop too (B-299b: the transcript pool's pager)`, [...new Set(helperReads)].map((x) => path.relative(home, x)));
   const cardFrame = frames.find((f) => f.type === 'msg' && ((f.op === 'edit' && f.fields?.taskInfo?.subId === S) || (f.op === 'create' && f.message?.taskInfo?.subId === S)));

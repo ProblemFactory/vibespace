@@ -32,11 +32,15 @@ function _codex() { return require('./adapters/codex'); }
 // — a snapshot named by a token, dropped at its last page or 30 s after its last ask (an abandoned read never stays). L3: the
 // snapshot holds the tail's LINES, never its parsed records — each page parses its own lines (measured on a 32 MB tail: the lines
 // 35 MB with the string, the records 71 MB — their strings keep slices of it; one worker after four tails: heap 82 MB, not 155).
-let _pageSnap = null;
+// B-299b (主开发 r604): ONE snapshot per SLOT — '' (the history reads, as before) and 'helper' (the artifact door's helper transcripts,
+// read one at a time by the registry): a helper's first page never replaces the snapshot a person's paged read is reading
+const PAGE_SLOTS = new Set(['', 'helper']);
+const _pageSnaps = new Map();   // slot → snapshot
+const slotOf = (payload) => (payload && PAGE_SLOTS.has(payload.slot) ? payload.slot : '');
 // B-f3f9: the merged history of ONE conversation, kept for its pages (codexHistoryMergedPage) — its own snapshot beside the lines'
 let _mergedSnap = null;
 function _dropMergedSnapLater(snap) { clearTimeout(snap.timer); snap.timer = setTimeout(() => { if (_mergedSnap === snap) _mergedSnap = null; }, 30000); if (snap.timer.unref) snap.timer.unref(); }
-function _dropPageSnapLater(snap) { clearTimeout(snap.timer); snap.timer = setTimeout(() => { if (_pageSnap === snap) _pageSnap = null; }, 30000); if (snap.timer.unref) snap.timer.unref(); }
+function _dropPageSnapLater(snap) { clearTimeout(snap.timer); snap.timer = setTimeout(() => { if (_pageSnaps.get(snap.slot) === snap) _pageSnaps.delete(snap.slot); }, 30000); if (snap.timer.unref) snap.timer.unref(); }
 
 /** one line of a bounded tail → its record, or undefined (blank, unparsable, or a subagent's record when `dropSub`) — boundedParsed's
  *  rule, shared by its pages (JSON.parse never answers undefined; a line `null` is a record unless `dropSub`, as it always was) */
@@ -62,18 +66,19 @@ function runOp(op, payload = {}) {
       // THE HEAP BOUND (L3 cure): `capMb` — this worker checks its own heap after the tail's read and after each page, and refuses
       // past it by name (`heap_bound`), the snapshot dropped; a parent --max-old-space-size replaces the worker's resourceLimits,
       // this check binds under every start of the hub (usage-cold-worker.js's rule)
-      const capBytes = (Number(payload.capMb) || 0) * 1048576;
+      const capBytes = (Number(payload.capMb) || 0) * 1048576, slot = slotOf(payload);
       const overCap = (where) => {
         if (!capBytes) return;
         const used = require('v8').getHeapStatistics().used_heap_size;
         if (used <= capBytes) return;
-        if (_pageSnap) { clearTimeout(_pageSnap.timer); _pageSnap = null; }
+        const held = _pageSnaps.get(slot); if (held) { clearTimeout(held.timer); _pageSnaps.delete(slot); }
         throw Object.assign(new Error(`this history needs more memory than the history worker's ${payload.capMb} MB bound (${Math.round(used / 1048576)} MB ${where})`), { code: 'heap_bound' });
       };
-      let snap = _pageSnap;
+      let snap = _pageSnaps.get(slot);
       if (!payload.token) {
         const content = _codex().readJsonlBounded(payload.fp, { tailOnly: payload.tailOnly !== false });
-        snap = _pageSnap = { token: `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`, fp: payload.fp, lines: content.split('\n'), timer: null };
+        snap = { token: `${process.pid}:${Date.now()}:${Math.random().toString(36).slice(2)}`, fp: payload.fp, slot, lines: content.split('\n'), timer: null };
+        _pageSnaps.set(slot, snap);
         overCap('after the tail was read');
       } else if (!snap || snap.token !== payload.token) {
         return { result: { gone: true } };
@@ -88,7 +93,7 @@ function runOp(op, payload = {}) {
         const msg = parseTailLine(line, !!payload.dropSubagent); if (msg !== undefined) records.push(msg);
       }
       overCap('after a page');
-      if (i >= total) { clearTimeout(snap.timer); if (_pageSnap === snap) _pageSnap = null; } else _dropPageSnapLater(snap);
+      if (i >= total) { clearTimeout(snap.timer); if (_pageSnaps.get(slot) === snap) _pageSnaps.delete(slot); } else _dropPageSnapLater(snap);
       return { result: { token: snap.token, total, next: i, records } };
     }
     case 'codexHistoryMergedPage': {
