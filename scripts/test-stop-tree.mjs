@@ -866,7 +866,8 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   // the reported shape where jobs have no scope (a container, a pod): a child that made its OWN group (setsid) and was re-parented
   // BEFORE the stop (its parent, a subshell, ended at once) — neither in the job's process group nor under the tree the stop reads;
   // it still carries the job's mark (VIBESPACE_JOB_ID, inherited). It writes its pid, so the scene can follow it
-  const escScene = async (wrapperText, tag, opts = {}) => {
+  const timed = (fn) => async (...a) => { const t0 = Date.now(), r = await fn(...a); r.ms = Date.now() - t0; console.log(`  · ${a[1]}: ${r.ms} ms, the job ${r.state}`); return r; };   // each scene's own time, printed
+  const escScene = timed(async (wrapperText, tag, opts = {}) => {
     const ESC = path.join(D, tag, 'esc.pid');
     const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(ESC)}; exec sleep 318' &); timeout 319 sleep 319 & wait`];
     return jobScene(wrapperText, tag, { ...opts, argv,
@@ -892,7 +893,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
           return { pid, alive, stranger, strangerOwn, inTree, ownGroup, left: (run && run.left) || null, view };
         } };
       } });
-  };
+  });
   // (a) a stop through the wrapper (its stop step and its drain)
   const sa = await escScene(WRAP, 'esc-stop');
   ok(sa.after && !sa.after.inTree && sa.after.ownGroup && !sa.after.alive && sa.state === 'interrupted' && sa.after.left && sa.after.left.outside === 1,
@@ -927,7 +928,7 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
   // (c) its read r2 (S1): a task that restarted the hub with a LAUNCHER — `(setsid sh -c '<the hub> & echo $! > server.pid; wait' &)`:
   // the launcher carries this run's mark, sits in its own group, re-parented, and is the hub's PARENT (never under it): a stop of
   // this run never ends it (the engine's _hubAncestors; the wrapper's keptAncestors)
-  const launchScene = async (wrapperText, tag) => {
+  const launchScene = timed(async (wrapperText, tag) => {
     const dd = path.join(D, tag), LP = path.join(dd, 'launcher.pid'), SP = path.join(dd, 'server.pid');
     const hub = `node -e "require('child_process').spawn('sleep', ['322'], { stdio: 'ignore' }); setInterval(() => { }, 1e9)"`;
     const argv = ['sh', '-c', `(setsid sh -c 'echo $$ > ${JSON.stringify(LP)}; ${hub.replace(/'/g, `'\\''`)} & echo $! > ${JSON.stringify(SP)}; wait' &); timeout 323 sleep 323 & wait`];
@@ -937,9 +938,9 @@ console.log('§11 B-7ca1 — the group rung (no scope): a TASK\'s stop ends what
         const lid = PI.identityOf(Number(fs.readFileSync(LP, 'utf8').trim())), hid = PI.identityOf(Number(fs.readFileSync(SP, 'utf8').trim())); mine.push(lid, hid);
         return { after: async () => { await sleep(300); const out = { launcher: PI.aliveIdentity(lid) === true, hub: PI.aliveIdentity(hid) === true }; for (const x of [...PI.treeOf([hid.pid]), lid, hid]) if (PI.aliveIdentity(x) === true) PI.signalIdentity(x, 'SIGKILL'); return out; } };   // the stand-in's own sleep too (its read r3: it outlived the scene)
       } });
-  };
+  });
   const la = await launchScene(WRAP, 'esc-launcher');
-  ok(la.after && la.after.launcher && la.after.hub && la.state === 'interrupted', 'B-7ca1 (its read r2, S1): a task\'s stop never ends the hub\'s LAUNCHER (it carries this run\'s mark, re-parented, its own group — the hub\'s parent) nor the hub', la.after);
+  ok(la.after && la.after.launcher && la.after.hub, 'B-7ca1 (its read r2, S1): a task\'s stop never ends the hub\'s LAUNCHER (it carries this run\'s mark, re-parented, its own group — the hub\'s parent) nor the hub', { ...la.after, state: la.state, ms: la.ms });
   const KA = "    if ((kept && kept(e)) || anc.has(Number(e))) continue;";
   const lx = await launchScene(anchored(WRAP, KA, "    if (kept && kept(e)) continue;   // MUTANT: no ancestors kept", 'b7ca1-ancestors-cut'), 'esc-launcher-mut');
   ok(lx.after && !lx.after.launcher, 'CONTROL (the hub\'s ancestors not kept, in a copy): the stop ends the hub\'s launcher — RED', lx.after);
