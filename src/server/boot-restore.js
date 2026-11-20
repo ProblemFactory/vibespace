@@ -655,20 +655,27 @@ const ATTACH_BATCH = 8, ATTACH_RETRY_MS = [2000, 10000, 30000];
 function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
   const total = queue.length;
   if (!total) return;
-  let batches = 0, longest = 0, attachMs = 0, used = 0;
+  let batches = 0, longest = 0, attachMs = 0, used = 0, caught = 0;
   const release = (entry) => { entry.done = true; if (entry[2]._attachPending === entry.pend) entry[2]._attachPending = null; };
   const attach = (entry, { use = false } = {}) => {
     const [id, socketPath, session] = entry;
     if (entry.done) return;
     if (activeSessions.get(id) !== session || session.pty) { release(entry); return; }   // ended or replaced, or attached by another road
+    const cu = restoreCatchUp(session._restoreBuf);   // the SAME turn as the attach below (the round's law: one turn, as at the release)
+    if (cu && cu.skipped) console.warn(`[boot-restore] ${session.name || id}: what it wrote since the restore's read is not caught up — ${cu.skipped}`);
     try {
-      attachToDtach(id, socketPath, session, { restore: true });
+      attachToDtach(id, socketPath, session, { restore: true, catchUp: cu && cu.text ? cu : null });
       release(entry);
+      session._restoreBuf = null; session._attachFailed = null;
+      if (cu && cu.text) caught++;
       if (use) used++;
     } catch (e) {
-      const wait = ATTACH_RETRY_MS[entry.tries++];
-      console.warn(`[boot-restore] ${session.name || id}: the attach failed (${(e && e.message) || e}) — it stays pending: its next use attaches it${wait ? `, or a retry in ${wait / 1000} s` : ''}`);
-      if (wait) { const t = setTimeout(() => attach(entry), wait); if (t.unref) t.unref(); }
+      const why = String((e && e.message) || e).slice(0, 200), wait = ATTACH_RETRY_MS[entry.tries++];
+      session._attachFailed = why;   // the next chat send says it in these words (src/server/user-input.js), never «not a live chat session»
+      console.warn(`[boot-restore] ${session.name || id}: the attach failed (${why}) — it stays pending: its next use attaches it${wait ? `, or a retry in ${wait / 1000} s` : ''}`);
+      if (wait) { const t = setTimeout(() => attach(entry), wait); if (t.unref) t.unref(); return; }
+      // the retries spent: the PERSON is told at the conversation (the card road a dead bridge's catch-up already has), once
+      try { require('../normalizers').feedPeerCard(session, { fromName: 'VibeSpace', kind: 'notification', text: `This conversation could not be reconnected after the restart (${why}). It keeps running; sending a message tries again.` }); } catch { }
     }
   };
   for (const entry of queue) { entry.tries = 0; entry.done = false; entry.pend = () => attach(entry, { use: true }); entry[2]._attachPending = entry.pend; }
@@ -677,7 +684,7 @@ function drainSurvivorAttaches(queue, { tRestore, tBuilt }) {
     for (const entry of queue.splice(0, ATTACH_BATCH)) attach(entry);
     const ms = performance.now() - t0; batches++; attachMs += ms; if (ms > longest) longest = ms;
     if (queue.length) { setImmediate(one); return; }
-    console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)${used ? `; ${used} attached at their first use` : ''}`);
+    console.log(`[boot-restore] ${total} survivor(s): registered in ${Math.round(tBuilt - tRestore)} ms; attached in ${batches} batch(es) of ≤ ${ATTACH_BATCH} (${Math.round(attachMs)} ms, the longest batch ${Math.round(longest)} ms)${used ? `; ${used} attached at their first use` : ''}${caught ? `; ${caught} caught up what they wrote since the read` : ''}`);
   };
   one();
 }
@@ -849,8 +856,9 @@ function restoreSessions() {
       }
     } catch {}
 
-    let savedBuffer = '';
-    try { savedBuffer = fs.readFileSync(wrapperFiles.buf, 'utf-8'); } catch {}
+    let savedBuffer = '', restoreBuf = null;
+    // B-cd4b (round wzvgb5033): where this read ENDS — the attach that follows in a later batch catches up from it (restoreCatchUp)
+    try { const raw = fs.readFileSync(wrapperFiles.buf); savedBuffer = raw.toString('utf-8'); restoreBuf = restoreBufOf(wrapperFiles.buf, raw); } catch {}
 
     const session = sessionFromMeta(meta, { // transport-only + per-path facts (win over the shared ones)
       mode: sessionMode,
@@ -937,6 +945,7 @@ function restoreSessions() {
         broadcastToSession(session, id, { type: 'msg', sessionId: id, ...op });
       });
     }
+    session._restoreBuf = restoreBuf;   // B-cd4b: the read's end, for its attach's catch-up (cleared once attached)
     activeSessions.set(id, session);
     session._webuiId = id; // per-session pool link key (plan C) — the id the session is registered under
     session._spawnModel = meta.spawnModel || null; session._pickedModel = meta.pickedModel || null; session._pickedModelAt = meta.pickedModelAt || 0; Object.assign(session, require('./model-ask.js').hydratedFacts(meta)); session._servedViaFallback = restoredFallback(meta); // plan C model ladder survives restarts — and so does the classifier reroute (r3 §7)
@@ -973,8 +982,8 @@ function restoreSessions() {
   // times that memory, and restarts at every update). A buffer is the wrapper's ≤ 500 KB ring: its lastIndexOf is well under a
   // millisecond. Until a session's value arrives, its one reader (src/harnesses/claude.js billingIdentity → the page's billing
   // chip) shows the spawn-time guess marked `guessed`, or «unknown» — never a confirmed source it did not read
-  const API_KEY_SOURCE = 'apiKeySource":"';
-  const lastApiKeySource = (text) => { const k = text.lastIndexOf(API_KEY_SOURCE); if (k < 0) return null; const m = /^apiKeySource":"([^"]*)"/.exec(text.slice(k, k + 200)); return m ? m[1] : null; };
+  // ONE EXCEPTION (the round's): a conversation restored with an EMPTY buffer (an R6 pipe re-open, a re-adopted remote keeper
+  // session) has no copy to read — it stays unset until its live stream says its init (the chip: guessed / unknown meanwhile)
   setTimeout(() => {
     let changed = false;
     for (const [, s] of activeSessions) {
@@ -1252,4 +1261,44 @@ async function readoptOrphanKeeperSessions() {
     stoppedSessions, keptRecordOf, // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js); one conversation's record (the resume verb — piece 4 reads it)
     consumeKeptOf }; // B-a5a4 (2): a turn ended on a live session — its conversation's kept copy goes at once (server.js noteTurnEnd)
 }
-module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+// B-cd4b (round wzvgb5033, the MUST): WHAT A SURVIVOR WROTE BETWEEN THE RESTORE'S READ AND ITS ATTACH. A dtach master DROPS what it
+// reads while no client is attached (bridge-watch.js, measured): the wrapper's tee to the buffer file is the only copy. At the
+// release the read and the attach ran in ONE turn; with the batches a survivor waits up to its batch (~200 ms at 80 on the first
+// test machine, longer under load), and a permission request, a turn's result or its idle state written then never reached the
+// conversation. So EVERY attach of the restore (a batch, a retry, a first use) reads, IN THE SAME TURN, the file from where the
+// registration's read ended — from the start of that read's last partial line, so the conversation receives whole records — and
+// feeds it before the pty's first byte (session-stdout setupSessionPty `catchUp`). A file the wrapper REWROTE meanwhile (its ring
+// trimmed: shorter, or its bytes before that point changed) is searched for the read's last whole-line end (a ≤ 256 B guard);
+// not found ⇒ nothing fed, said. Bounded: at most RESTORE_CATCHUP_MAX bytes are read (a chat ring is ≤ 500 KB).
+const RESTORE_CATCHUP_MAX = 2 * 1024 * 1024, RESTORE_GUARD = 256;
+function restoreBufOf(file, raw) {
+  const lineAt = raw.lastIndexOf(10) + 1;   // the byte after the read's last '\n' (0: no whole line yet)
+  return { file, len: raw.length, lineAt, guard: Buffer.from(raw.subarray(Math.max(0, lineAt - RESTORE_GUARD), lineAt)), partial: raw.subarray(lineAt).toString('utf-8') };
+}
+/** → null (nothing written since the read), { text, drop } (feed `text`; it begins with `drop`, the read's partial last line,
+ *  which leaves the session's buffer first), or { skipped: why }. */
+function restoreCatchUp(rb, { max = RESTORE_CATCHUP_MAX } = {}) {
+  if (!rb || !rb.file) return null;
+  let fd = null;
+  try {
+    fd = fs.openSync(rb.file, 'r');
+    const size = fs.fstatSync(fd).size;
+    if (size === rb.len) return null;
+    const read = (at, n) => { const b = Buffer.alloc(Math.max(0, n)); const got = n > 0 ? fs.readSync(fd, b, 0, n, at) : 0; return b.subarray(0, got); };
+    let start = -1;
+    if (size > rb.len && read(rb.lineAt - rb.guard.length, rb.guard.length).equals(rb.guard) && read(rb.lineAt, rb.len - rb.lineAt).toString('utf-8') === rb.partial) start = rb.lineAt;   // appended: the plain case
+    else if (rb.guard.length) {   // rewritten (the ring trimmed): find where the read's whole lines ended
+      const all = read(Math.max(0, size - max), Math.min(size, max)), k = all.lastIndexOf(rb.guard);
+      if (k >= 0) start = Math.max(0, size - max) + k + rb.guard.length;
+    }
+    if (start < 0) return { skipped: `its buffer was rewritten (${rb.len} → ${size} bytes) and the read's end is not in it` };
+    if (size - start > max) return { skipped: `${size - start} bytes since the read — over the ${max}-byte bound` };
+    const text = read(start, size - start).toString('utf-8');
+    return text.length > rb.partial.length ? { text, drop: text.startsWith(rb.partial) ? rb.partial : '' } : null;
+  } catch (e) { return { skipped: `its buffer could not be read (${(e && e.code) || (e && e.message) || e})` }; }
+  finally { if (fd !== null) { try { fs.closeSync(fd); } catch { } } }
+}
+// B-cd4b: the LAST billing source a buffer holds (the restore's backfill reads the copy the restore already holds) — PURE
+const API_KEY_SOURCE = 'apiKeySource":"';
+function lastApiKeySource(text) { const k = text.lastIndexOf(API_KEY_SOURCE); if (k < 0) return null; const m = /^apiKeySource":"([^"]*)"/.exec(text.slice(k, k + 200)); return m ? m[1] : null; }
+module.exports = { create, lastApiKeySource, restoreBufOf, restoreCatchUp, heldOriginOf, persistNoStart, resumeIdOf, turnRan, pairedSession, STOP_DEAD_SOCKET, STOP_ENDED }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

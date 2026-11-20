@@ -19,6 +19,8 @@
  * openers, test-spend-paths §2).
  */
 function answerPermission(session, data, { adapterRegistry, feedLive } = {}) {
+  if (session && !session.pty && typeof session._attachPending === 'function') session._attachPending();   // B-cd4b: a restored survivor whose batched attach still waits is attached at its first use
+  if (session && !session.pty && session._attachFailed) return { ok: false, why: `this conversation could not be reconnected after the restart (${session._attachFailed})` };
   if (!session || !session.pty || session.mode !== 'chat') return { ok: false, why: 'not a live chat session' };
   const adapter = adapterRegistry && typeof adapterRegistry.get === 'function' ? adapterRegistry.get(session.backend) : null;
   if (!adapter || typeof adapter.formatPermissionResponse !== 'function') return { ok: false, why: `no adapter answers permissions for "${session.backend}"` };

@@ -236,13 +236,17 @@ try {
     // away ⇒ the used one waits for its batch; the door's ask taken away ⇒ «not a live chat session», nothing written
     const BATCH = 'const ATTACH_BATCH = 8,';
     const run = async (BRm, tag) => {
-      const opts = [], threw = new Set(); let throwId = null;
-      const X = instance(BRm, dataDir(tag), { onAttach: (id, s, o) => { opts.push(o || null); if (id === throwId && !threw.has(id)) { threw.add(id); throw new Error('spawn EAGAIN (planted)'); } } });
+      const opts = [], byId = new Map(), threw = new Set(); let throwId = null;
+      const X = instance(BRm, dataDir(tag), { onAttach: (id, s, o) => { opts.push(o || null); if (id === throwId && !threw.has(id)) { threw.add(id); throw new Error('spawn EAGAIN (planted)'); } byId.set(id, o || null); } });
       const socks = Array.from({ length: 20 }, (_, i) => X.add(300 + i));
       throwId = socks[15].id;
       const t = await logged(async () => X.api.restoreSessions());
       const pending = () => [...X.activeSessions.values()].filter((v) => typeof v._attachPending === 'function').length;
       const atReturn = { live: X.activeSessions.size, attached: X.attached.length, pending: pending() };
+      // THE ROUND'S MUST (wzvgb5033): two survivors WRITE after the restore read their buffers — one waits for a later batch, one is
+      // used first; each attach must hand what was written meanwhile (whole records: the read's partial last line «$ » with it)
+      const GROWN = 'line written after the read\n{"type":"result","subtype":"success"}\n';
+      fs.appendFileSync(socks[18].buf, GROWN); fs.appendFileSync(socks[12].buf, GROWN);
       const usedId = socks[12].id, used = X.activeSessions.get(usedId);
       const usedPend = !!used && typeof used._attachPending === 'function';
       if (usedPend) used._attachPending();   // a door's ask, before the survivor's batch
@@ -256,12 +260,18 @@ try {
       if (stillPending) thrown._attachPending();   // its next use
       return { atReturn, usedPend, usedAtOnce, usedOnce: X.attached.filter((x) => x === usedId).length, after, goneAttached: gone ? X.attached.includes(gone.id) : null,
         stillPending, thrownAttached: X.attached.includes(throwId), allLocal: opts.length > 0 && opts.every((o) => !!o && o.restore === true),
+        cuBatched: (byId.get(socks[18].id) || {}).catchUp || null, cuUsed: (byId.get(usedId) || {}).catchUp || null, cuOther: (byId.get(socks[17].id) || {}).catchUp || null, GROWN,
         warned: lines.find((l) => /the attach failed \(spawn EAGAIN \(planted\)\) — it stays pending: its next use attaches it, or a retry in 2 s/.test(l)) || null,
-        said: lines.concat(t.lines).find((l) => /^\[boot-restore\] 20 survivor\(s\): registered in \d+ ms; attached in \d+ batch\(es\) of ≤ 8 \(\d+ ms, the longest batch \d+ ms\); 1 attached at their first use$/.test(l)) || null };
+        said: lines.concat(t.lines).find((l) => /^\[boot-restore\] 20 survivor\(s\): registered in \d+ ms; attached in \d+ batch\(es\) of ≤ 8 \(\d+ ms, the longest batch \d+ ms\); 1 attached at their first use; 2 caught up what they wrote since the read$/.test(l)) || null };
     };
     const g = await run(BR, 'batches');
     const r1 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, BATCH, 'const ATTACH_BATCH = Infinity,', 'b-cd4b-one-pass'), 'cd4b-one-pass')), 'batches-red');
     const r2 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, ' entry[2]._attachPending = entry.pend; }', ' }', 'b-cd4b-no-first-use'), 'cd4b-no-first-use')), 'batches-red2');
+    const r3 = await run(require(M.write('src/server/boot-restore.js', anchored(brSrc, 'catchUp: cu && cu.text ? cu : null', 'catchUp: null', 'b-cd4b-no-catchup'), 'cd4b-no-catchup')), 'batches-red3');
+    const cuOk = (c, G) => !!c && c.text === '$ ' + G && c.drop === '$ ';
+    ok(cuOk(g.cuBatched, g.GROWN) && cuOk(g.cuUsed, g.GROWN) && g.cuOther === null,
+      `THE ROUND'S MUST: a survivor that WROTE after the restore's read hands it to its attach, in the attach's turn — waiting for a later batch (${JSON.stringify(g.cuBatched)}) and used first; its read's partial last line moves with it (whole records); one that wrote nothing hands nothing`, { batched: g.cuBatched, used: g.cuUsed, other: g.cuOther });
+    ok(r3.cuBatched === null && r3.cuUsed === null, 'RED: the catch-up dropped ⇒ the two attaches hand nothing — what was written in the window never reaches the conversation');
     ok(g.atReturn.live === 20 && g.atReturn.attached === 8 && g.atReturn.pending === 12 && g.usedPend && g.usedAtOnce && g.usedOnce === 1 && g.after === 18 && g.goneAttached === false
       && g.stillPending && g.thrownAttached && g.allLocal && !!g.warned && !!g.said,
       `20 survivors: all 20 in the live set when restoreSessions returns, ${g.atReturn.attached} attached in that turn (the first batch), ${g.atReturn.pending} waiting with their attach-at-first-use; one USED before its batch attached at once (and once: ${g.usedOnce}); then the batches, the one that ended never, the one whose attach threw said and kept pending — its next use attached it; every attach on the local road; said: ${g.said}`, g);
@@ -287,6 +297,59 @@ try {
     ok(!dr.attached && dr.written.length === 0 && !!dr.r && dr.r.code === 'not_chat', `RED the door's ask taken away: «${dr.r && dr.r.error}», nothing written — the message lost`, dr);
     ok(/async function handleMessage\(data\) \{\n(?:\s*\/\/[^\n]*\n)*\s*if \(data && typeof data\.sessionId === 'string' && activeSessions\) \{ const s = activeSessions\.get\(data\.sessionId\); if \(s && !s\.pty && typeof s\._attachPending === 'function'\) s\._attachPending\(\); \}\n\s*switch \(data\.type\) \{/.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8')),
       'the page\'s socket (src/ws-handler.js): every message naming a session asks its attach-at-first-use BEFORE the switch (its input, an interrupt, a resize, an attach) — pinned by text: the handler is not loaded here');
+  }
+  console.log('⑥ B-cd4b (round wzvgb5033): what a survivor wrote between the restore\'s read and its attach reaches the conversation');
+  {
+    // restoreCatchUp over real files: nothing new; appended (the plain case); the ring REWRITTEN (trimmed, a new file); another file
+    const d6 = dataDir('catchup'), f6 = path.join(d6, 'buffers', 'cu.buf');
+    const lines6 = Array.from({ length: 30 }, (_, i) => `{"type":"x","n":${i},"pad":"${'p'.repeat(24)}"}`);
+    const partial6 = '{"type":"res', more6 = 'ult","subtype":"success"}\n{"type":"system","subtype":"session_state_changed","state":"idle"}\n';
+    fs.writeFileSync(f6, lines6.join('\n') + '\n' + partial6);
+    const rb6 = BR.restoreBufOf(f6, fs.readFileSync(f6));
+    const none6 = BR.restoreCatchUp(rb6);
+    fs.appendFileSync(f6, more6);
+    const app6 = BR.restoreCatchUp(rb6);
+    fs.writeFileSync(f6 + '.tmp', lines6.slice(10).join('\n') + '\n' + partial6 + more6); fs.renameSync(f6 + '.tmp', f6);
+    const rew6 = BR.restoreCatchUp(rb6);
+    fs.writeFileSync(f6, '{"type":"another conversation"}\n');
+    const lost6 = BR.restoreCatchUp(rb6);
+    ok(none6 === null && !!app6 && app6.text === partial6 + more6 && app6.drop === partial6 && !!rew6 && rew6.text === app6.text && rew6.drop === partial6 && !!lost6 && /rewritten/.test(lost6.skipped || ''),
+      `restoreCatchUp: nothing new ⇒ nothing; appended ⇒ the read's partial last line + what followed (whole records); the ring rewritten ⇒ found after the read's last whole line, the same text; another file ⇒ said, nothing fed («${lost6 && lost6.skipped}»)`, { none6, app6, rew6, lost6 });
+    // the backfill (PURE): the LAST source a buffer holds; none ⇒ unset; it reads the restore's own copy, never `<id>.buf` by name
+    ok(BR.lastApiKeySource('{"apiKeySource":"none"}\n{"apiKeySource":"ANTHROPIC_API_KEY"}\n') === 'ANTHROPIC_API_KEY' && BR.lastApiKeySource('{"apiKeySource":"ANTHROPIC_API_KEY"}\n{"apiKeySource":"none"}\n') === 'none' && BR.lastApiKeySource('{"type":"system","subtype":"init"}\n') === null && BR.lastApiKeySource('') === null,
+      'the backfill: the LATER of two billing sources wins (both orders); a buffer with none ⇒ unset (no meta write follows a null)');
+    ok(/const src = lastApiKeySource\(typeof s\.buffer === 'string' \? s\.buffer : ''\);/.test(brSrc) && /if \(src\) \{\n\s*s\._apiKeySource = src;/.test(brSrc),
+      'the backfill reads the copy the restore holds (`s.buffer`: the file resolveWrapperFiles named, a counter collision included) and writes only for a source it found — pinned by text');
+    // THE CONSUMER SIDE (src/server/session-stdout.js setupSessionPty `catchUp`, the REAL claude consumer): the caught-up records are
+    // parsed before the pty's first byte, the buffer holds them once (the partial line not doubled). RED: the feed taken away
+    const anyFn = () => new Proxy(function () { }, { get: (t, k) => (k === 'then' || typeof k === 'symbol' ? undefined : anyFn()), apply: () => undefined });
+    const soOf = (mod, tag) => { const dd = dataDir(tag); const engine = new Proxy({ _vsuPending: new Map() }, { get: (t, k) => (k in t ? t[k] : anyFn()), has: () => true });
+      return mod.create({ rootDir: dd, BUFFERS_DIR: path.join(dd, 'buffers'), META_DIR: path.join(dd, 'meta'), DTACH_CMD: 'dtach', USAGE_SCANNER_PATH: path.join(dd, 'none'), CLAUDE_STREAM_TYPES: new Set(), _seenStreamTypes: new Set(), activeSessions: new Map(), engine,
+        checkClaudeGoalStatus() { }, broadcastToSession() { }, broadcastActiveSessions() { }, noteModelSeen() { }, noteHarnessModels() { }, recordUsageAttribution() { }, daemonPtyShim: (h) => h, sbSeenFirst: () => true, getDeviceMgr: () => null, getHosts: () => null,
+        getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), getTelemetry: () => null, getNoConvoRef: () => ({ map: new Map() }), getDeliver: () => ({ stashFor: () => ({}) }), getBrain: () => anyFn(), getPages: () => null, getPermissionRules: () => null, agentEnv: () => ({}) }); };
+    const { ptyListeners } = require(path.join(REPO, 'src/pty-duck.js'));
+    const { createMessageManager } = require(path.join(REPO, 'src/normalizers'));
+    const fed = (so) => {
+      const Ld = ptyListeners(), Le = ptyListeners();
+      const duck = { pid: 0, onData: (cb) => Ld.on(cb), onExit: (cb) => Le.on(cb), write() { }, resize() { }, kill() { } };
+      const sid = 'w-cu6', drop = '{"type":"sys';
+      const text = drop + 'tem","subtype":"status","status":"x"}\n{"type":"system","subtype":"init","session_id":"cu6","apiKeySource":"caught-up"}\n';
+      const sess = { mode: 'chat', backend: 'claude', buffer: '{"type":"old"}\n' + drop, sockName: null, clients: new Set(), _normalizer: createMessageManager('claude', sid) };
+      let threw = null; try { so.setupSessionPty(sess, sid, duck, { catchUp: { text, drop } }); } catch (e) { threw = String((e && e.message) || e); }
+      return { threw, apiKeySource: sess._apiKeySource || null, buffer: sess.buffer, want: '{"type":"old"}\n' + text };
+    };
+    const soSrc = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8');
+    const fg = fed(soOf(require(path.join(REPO, 'src/server/session-stdout.js')), 'cu-so'));
+    const fr = fed(soOf(require(M.write('src/server/session-stdout.js', anchored(soSrc, '      for (const cb of caught) { try { cb(catchUp.text); }', '      for (const cb of []) { try { cb(catchUp.text); }', 'b-cd4b-no-feed'), 'cd4b-no-feed')), 'cu-so-red'));
+    ok(!fg.threw && fg.apiKeySource === 'caught-up' && fg.buffer === fg.want,
+      `the consumer side: the caught-up records reach the REAL claude consumer before the pty's first byte (its init parsed: apiKeySource «${fg.apiKeySource}») and the buffer holds them once, the partial line not doubled`, fg);
+    ok(!fr.threw && fr.apiKeySource === null, 'RED: the feed taken away ⇒ the consumer never sees the caught-up init (apiKeySource unset): what the CLI said in the window is lost to the conversation', fr);
+    // an attach that keeps failing is said AT THE CONVERSATION (the card road) and in the send's own words, never «not a live chat session»
+    ok(/require\('\.\.\/normalizers'\)\.feedPeerCard\(session, \{ fromName: 'VibeSpace', kind: 'notification', text: `This conversation could not be reconnected after the restart \(\$\{why\}\)/.test(brSrc)
+      && /if \(!session\.pty && session\._attachFailed\) return \{ ok: false, code: 'attach_failed'/.test(fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8'))
+      && /if \(session && !session\.pty && typeof session\._attachPending === 'function'\) session\._attachPending\(\);/.test(fs.readFileSync(path.join(REPO, 'src/server/permission-answer.js'), 'utf8'))
+      && /return s && \(s\.pty !== null \|\| typeof s\._attachPending === 'function'\) \? null : \{ cause: 'not-running'/.test(fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8')),
+      'a survivor whose attach spent its retries: ONE card at the conversation, and a send answers «could not be reconnected after the restart (its words)»; the permission answer asks the attach first; the deliverer\'s wake gate counts a waiting survivor as running (r587) — pinned by text');
   }
 } catch (e) { fail++; console.error('  ✗ threw: ' + (e && e.stack || e)); }
 

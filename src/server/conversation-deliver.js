@@ -2062,7 +2062,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
       const live = liveStateOf(cid);
       if (live) return live;
       const s = localSessionFor(cid);
-      return s && s.pty !== null ? null : { cause: 'not-running', why: 'not running' };
+      // B-cd4b (主开发 r587): a restored survivor whose batched attach still waits (`_attachPending`, src/server/boot-restore.js) is
+      // RUNNING — counted live here, never «not running»; the send the wake leads to attaches it (or names why it could not)
+      return s && (s.pty !== null || typeof s._attachPending === 'function') ? null : { cause: 'not-running', why: 'not running' };
     } catch { return null; }
   }
   function peerReachable(cid) {

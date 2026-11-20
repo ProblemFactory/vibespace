@@ -324,9 +324,17 @@ const PLANTS = {
 // forking backfill's callback is the planted code in the restore file
 const PLANT_NAMES = {
   'one-pass-attach': { re: /^listen\b|session-stdout\.js/, what: 'the listen step (the attaches\' localAttach)' },
-  'forking-backfill': { re: /boot-restore\.js/, what: 'the restore file (the planted backfill)' },
+  'forking-backfill': { re: null, what: 'the planted backfill\'s own lines in the restore file' },   // its line range is set at the plant (below)
 };
-const plant = (name) => { const t = name ? PLANTS[name](GREEN_RESTORE) : GREEN_RESTORE; if (t == null) return false; fs.writeFileSync(RESTORE, t); return true; };
+const plant = (name) => {
+  const t = name ? PLANTS[name](GREEN_RESTORE) : GREEN_RESTORE; if (t == null) return false;
+  if (name === 'forking-backfill') {   // the planted block's lines in the copy: a hold is the plant's only if the sampler stood IN them
+    const lo = t.slice(0, t.indexOf(BACKFILL_FROM)).split('\n').length, hi = lo + RELEASE_BACKFILL.split('\n').length;
+    PLANT_NAMES[name].re = { test: (x) => [...String(x).matchAll(/boot-restore\.js:(\d+)/g)].some((m) => Number(m[1]) >= lo && Number(m[1]) <= hi) };
+    PLANT_NAMES[name].what = `the planted backfill's own lines (boot-restore.js:${lo}–${hi} of the copy)`;
+  }
+  fs.writeFileSync(RESTORE, t); return true;
+};
 
 // ── ② DEAD — the pod rebuild ──
 async function deadShape(tag, { red = null } = {}) {
@@ -433,7 +441,7 @@ async function surviveShape(tag, { red = null } = {}) {
   await asksAnswered(tag, tEnd);
   const restoredN = (logOf(tag).match(/✓ Reconnected: /g) || []).length;   // boot-restore.js says one line a survivor
   console.log(`  the hub reconnected ${restoredN} of ${liveIds.size}`);
-  check(`${label}: the hub re-attached every survivor (${restoredN} of ${liveIds.size})`, restoredN === liveIds.size);
+  check(`${label}: the hub REGISTERED every survivor (its «✓ Reconnected» line, said at registration: ${restoredN} of ${liveIds.size}) — the attaches' end is the restore's own line, above`, restoredN === liveIds.size);
   await stopAux();
   if (PAGE === 'held') {
     await report(tag, tBoot, tW1, `W1 — the spawn → ready → the restore and its backfill (${liveIds.size} survivors), the page held`, { label: `${label} W1` });
@@ -459,7 +467,7 @@ if (REDS && SHAPES.includes('survive') && !hubDied && left() > 200000) {
   check('RED one-pass-attach: the restore says it attached every survivor in ONE batch — the release\'s pass', !!r1 && r1.batches === 1 && r1.n === liveIds.size, r1);
   check('RED forking-backfill: planted (the release\'s backfill, verbatim)', plant('forking-backfill'));
   const r2 = await surviveShape('red-fork', { red: 'forking-backfill' });
-  check('RED forking-backfill: the restore\'s own batches stay under the bound — the break is the backfill\'s', !!r2 && r2.batches > 1 && r2.longest < HOLD_LAW_MS, r2);
+  check('RED forking-backfill: the restore\'s own registration and batches stay under the bound — the break is the backfill\'s', !!r2 && r2.batches > 1 && r2.longest < HOLD_LAW_MS && r2.registered < HOLD_LAW_MS, r2);
   plant(null);
 } else if (REDS) check(`the red controls skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
 else console.log(`  the red controls: not run (CD4B_PAGE=${PAGE}${process.env.CD4B_REDS === '0' ? ', CD4B_REDS=0' : ''}) — a measure, not the pin`);

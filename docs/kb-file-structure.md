@@ -1714,6 +1714,7 @@ scripts/test-browser-ephemeral-life.mjs — B-346d's MEASURING leg (heavy, ≈ 2
 scripts/test-window-drag-ui.mjs — releases over panes the page cannot hear (heavy, ~2.5 min): each gesture's premise (press on its target, follow drawn, release off the dragged window) waited on the page's rAF frames, never a fixed sleep; C/C2 = the pre-fix / tab-capture controls (B-1542)
 src/server/boot-trace.js — THE BOOT HOLDS (B-1319): the boot's loop clock from server.js line 3 — gaps ≥ 100 ms named by step/span, mainMs apart; data/boot-trace.json + GET /api/boot-trace (⚙ Diagnostics); …TRACE=1 names each call's site, one hold at a time; …_SYNC=1 = RED; note() ⇒
 src/server/boot-restore.js — BOOT RESTORE (decomposition #7): restoreSessions, R6 pipe re-open, keeper re-adoption; B-1319: probeSockets() asks fuser / pgrep / fd scan as children BEFORE listen, capped; B-92a4: restoreSessions never asks — no answer ⇒ probe-pending + the re-probe ladder ⇒
+src/server/boot-restore.js survivors in bounded batches (B-cd4b): attach 8 a turn, local road; `_attachPending` asked by the doors; each attach catches up what was written since the read; the backfill reads s.buffer ⇒ essay «boot-restore.js survivors in bounded batches»
 src/server/boot-restore.js retireDeadSocket + keptStopped / stoppedSessions (lane dead-socket-keeps-chat-meta, .366) — a dead LOCAL session with a resumable id (store.resumeIdOf) is kept STOPPED with its reason and READ BACK as an /api/sessions row; the boot's facts line ⇒ essay
 src/agy-discover.js + data/bin/agy-summaries.js — antigravity's store.discover (lane dead-socket-keeps-chat-meta): each account root's index conversation_summaries.db, read by a child only when it changed — title, last write, folder, account ⇒ essay
 src/lib/stopped-why.js — PURE but for t() (lane dead-socket-keeps-chat-meta): the one «Its process ended while the server was down.» of every door; keptAccountOf = resumeSession's fallback account ⇒ essay
@@ -1981,6 +1982,11 @@ src/browser-exit.js — PURE the exit check's rules: checkUrlVerdict (https, no 
 | `broadcastActiveSessions()` | server.js | Pushes session list to all WebSocket clients |
 
 ## ESSAYS (one `### path` section per file)
+
+### src/server/boot-restore.js survivors in bounded batches + src/server/session-stdout.js setupSessionPty `catchUp` (B-cd4b unit 1, lane bl-loop-a, 2026-11-20)
+
+a restart with N survivors: each is in the live set when restoreSessions returns, its pty attach runs 8 a turn with a yield (`drainSurvivorAttaches`, the first 8 in the listen turn), ALWAYS the local road (`attachToDtach(…, {restore:true})`). A waiting survivor carries `_attachPending`: the page's socket (ws-handler handleMessage, before the switch), every chat send (user-input `send`) and the permission answer ask it first — a survivor used before its batch is attached at once. The deliverer's wake gate (conversation-deliver `wakeBlock`) counts a waiting survivor as running, never «not running». EVERY restore attach catches up IN ITS OWN TURN what the survivor wrote since the registration's read (`restoreCatchUp` from `_restoreBuf`, fed to the pty's own listeners by setupSessionPty `catchUp` before its first byte; the read's partial last line moves with it; a rewritten ring is searched for the read's last whole line, else said) — dtach drops what it reads with no client attached. An attach that throws stays pending (its next use, retries 2/10/30 s), says its words to the next send (`_attachFailed`, code attach_failed) and, its retries spent, ONE card at the conversation. The billing-source backfill reads `s.buffer` (`lastApiKeySource`, no read, no program). Gated by test-boot-probes ⑤⑥ (fast) and the heavy pin test-boot-resume-shape (SERIAL).
+
 
 
 ### src/lib/browser-profile-commands.js

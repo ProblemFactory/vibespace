@@ -98,7 +98,7 @@ function updateSessionTodos(session, todos) {
   } catch { }
 }
 
-function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {}) {
+function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true, catchUp = null } = {}) {
   session.pty = ptyProcess;
 
   // LIVENESS STAMP — the ONE place every pty (local node-pty, daemonPtyShim,
@@ -116,6 +116,13 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
   ptyProcess.onData(() => { session._lastPtyDataAt = Date.now(); });
   if (session._bridgeHeldInputs && session._bridgeHeldInputs.pty === null) replayHeldInputs(session, ptyProcess, session._bridgeHeldInputs.lines);   // the onExit ladder's carry (B-c20d verify r1)
 
+  // B-cd4b (round wzvgb5033): a RESTORE's attach hands what the survivor wrote between the restore's read and this attach
+  // (`catchUp` {text, drop} — boot-restore restoreCatchUp, read in THIS turn): fed to this pty's own listeners, in THIS turn,
+  // before its first byte — the stream consumer parses it as the records it would have relayed (a permission request, a
+  // result, an idle state), whole lines: the read's partial last line (`drop`) leaves the buffer first and comes back once
+  const caught = catchUp && catchUp.text ? [] : null;
+  const onDataOwn = caught ? Object.getOwnPropertyDescriptor(ptyProcess, 'onData') : null;
+  if (caught) { const realOn = ptyProcess.onData; Object.defineProperty(ptyProcess, 'onData', { configurable: true, writable: true, value: (cb) => { caught.push(cb); return realOn.call(ptyProcess, cb); } }); }
   if (session.mode === 'chat') {
     // Dispatch by DECLARED protocol (P4 → S5): the harness descriptor's caps
     // row NAMES the stream protocol (capsOf() IS that row — harness-contract
@@ -146,6 +153,12 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     }
   } else {
     // Terminal mode: raw PTY output.
+    if (caught) {   // B-cd4b: a terminal's catch-up goes to its buffer and its clients (never through the preamble strip below)
+      if (catchUp.drop && session.buffer.endsWith(catchUp.drop)) session.buffer = session.buffer.slice(0, session.buffer.length - catchUp.drop.length);
+      session.buffer += catchUp.text;
+      if (session.buffer.length > 75000) session.buffer = session.buffer.slice(-50000);
+      broadcastToSession(session, id, { type: 'output', sessionId: id, data: catchUp.text.slice(catchUp.drop ? catchUp.drop.length : 0) });
+    }
     // dtach sends the attaching client a clear-screen preamble (\e[H\e[J) as
     // its redraw kickoff. A TUI then repaints fully (SIGWINCH), but a plain
     // SHELL repaints NOTHING — the preamble wiped attached clients live AND
@@ -171,6 +184,15 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
     });
   }
 
+  if (caught) {
+    if (onDataOwn) Object.defineProperty(ptyProcess, 'onData', onDataOwn); else delete ptyProcess.onData;
+    if (session.mode === 'chat') {
+      if (catchUp.drop && session.buffer.endsWith(catchUp.drop)) session.buffer = session.buffer.slice(0, session.buffer.length - catchUp.drop.length);
+      const lastAt = session._lastPtyDataAt;
+      for (const cb of caught) { try { cb(catchUp.text); } catch (e) { console.warn(`[${id}] the restore's catch-up: a consumer threw (${e && e.message})`); } }
+      session._lastPtyDataAt = lastAt;   // the catch-up is the FILE's, not a byte of this bridge: the liveness probe judges the bridge alone
+    }
+  }
   ptyProcess.onExit(() => {
     // Session already torn down (e.g. this is a stale PTY exiting after kill) — nothing to do
     if (!activeSessions.has(id)) return;
@@ -705,7 +727,7 @@ function repaintFromBuf(id, session) {
 
 // Attach a PTY to an existing dtach socket for I/O.
 // opts.repaint (the RE-attach path): repaintFromBuf above.
-function attachToDtach(id, socketPath, session, { repaint = false, restore = false } = {}) {
+function attachToDtach(id, socketPath, session, { repaint = false, restore = false, catchUp = null } = {}) {
   const repaintClients = () => { if (repaint) repaintFromBuf(id, session); };
   // Arm the liveness probe for THIS attach: if the bridge produced no byte at
   // all, heal it locally. The confirm stage exists because a blocked event
@@ -752,7 +774,7 @@ function attachToDtach(id, socketPath, session, { repaint = false, restore = fal
       name: 'xterm-256color', cols: 120, rows: 30,
       env: { ...agentEnv(), TERM: 'xterm-256color', COLORTERM: 'truecolor' },
     });
-    setupSessionPty(session, id, attachPty);
+    setupSessionPty(session, id, attachPty, { catchUp });   // B-cd4b: a restore's catch-up (the local road only: a restore takes it)
     repaintClients();
     armProbe(attachPty, 'local');
   };
