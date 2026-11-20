@@ -119,7 +119,7 @@ function writeJsonAtomic(file, obj) {
  */
 function create({ dataDir, env, broadcast, serverSetting = () => undefined, getTelemetry = () => null, serverNotice = null, singleton = null, getUserTodos = () => null,
   display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = DS.TICK_MS, guardSampleMs = null, geometry, hostId = null, fitSlowBeltMs = DS.FIT_SLOW_BELT_MS, viewerGraceMs = VIEWER_GRACE_MS, relaunchSeatMs = RELAUNCH_SEAT_MS,
-  access = null, hostLabel = (h) => h, remoteHosts = () => [] } = {}) {
+  access = null, hostLabel = (h) => h, remoteHosts = () => [], writer = undefined } = {}) {
   if (!dataDir) throw new Error('desktop-app-keeper: dataDir is required');
   if (typeof env !== 'function') throw new Error('desktop-app-keeper: env must be a function returning the sanitised base env');
 
@@ -140,7 +140,10 @@ function create({ dataDir, env, broadcast, serverSetting = () => undefined, getT
   const displayStopListeners = new Set(); // ({ profileId, displayId, by }) => void — a person stopping a browser's display
 
   // THE MACHINE KEEPER of device #0 — in-process, ONE store shared with this registry; the policy is handed in as hooks
+  // lane lg-store-writes (主开发 2026-11-20 03:10Z): the hub's record file is written by the process's store writer (off the loop;
+  // a suite may hand its own, or null for the release's write at the call) — the device agent hands none
   const machine = DS.install({ dataDir, env, serverSetting, singleton, display, limits, registryRows, backends, log, now, tickMs, guardSampleMs, geometry, hostId, fitSlowBeltMs,
+    writer: writer === undefined ? require('../store-writer.js').storeWriter() : writer,
     hooks: { view, onCommit: () => { dirty = false; notify(); }, idle: idleVerdict, readyTick, onSample: reportSample, onTeardown, onWitness: notifyWitness, onNotify, onQuickExit },
     remoteapp: { setup: (h) => acc().remoteappSetup(h), forward: (h) => acc().remoteappForward(h), signin: (h) => acc().remoteappSignin(h) } }); // lane remoteapp-r1a: a RemoteApp's way to its machine (late-bound); r1b: + the first connection's sign-in
   /** The shared store, read through the machine (it owns load/save). */

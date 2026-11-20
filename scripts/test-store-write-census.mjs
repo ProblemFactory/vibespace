@@ -62,7 +62,7 @@ const opensForWrite = (call) => { const fl = call.arguments[1]; if (!fl) return 
 const HELPER = /\b(writeJsonAtomic|writeBuffersAtomic|_writeAtomic|writePrivateFile)\s*\(/g;
 const CLASSES = new Set(['durable', 'not-main', 'not-a-store', 'exit', 'debt']);
 // a file whose rows are by SCOPE (its other sites fall to '*')
-const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSessionMeta'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'],
+const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSessionMeta'], 'src/desktop-serve.js': ['writeJsonAtomic', 'save'], 'src/jobs.js': ['JobManager._logsHeldFile', 'JobManager._logsNoteAtExit'],
   // channel-store-off-loop (commit 1): the channel store's doors BY NAME — the moved ones (adapters, groups, the outbox, the
   // aliases, people, the poll-stamps snapshot) have no synchronous call left (no row); the journal is the named exception;
   // every other door is LISTED as its own row, rows that only fall
@@ -80,7 +80,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSess
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
 // B-48a4 (the exit door's cost; restacked on 2.369.410): the two audit rings onto the store writer through ONE appender — device-audit.js's
 // 3 and exit-proxy.js audit's 3 go to zero; every save of hosts.json through the store writer — hosts.js _save's 2 go to zero ⇒ 881 − 8 = 873
-const DEBT_MAX = 868;   // usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
+const DEBT_MAX = 865;   // lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −3 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main) ⇒ 868 − 3; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -148,7 +148,9 @@ const ROWS = [
   ["src/codex-fork-ledger-purge.js","*",5,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
   ["src/conversation-index.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/desktop-display.js","*",5,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
-  ["src/desktop-serve.js","*",14,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
+  ["src/desktop-serve.js","*",11,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (lane lg-store-writes, 主开发 2026-11-20 03:10Z: the record file's save moved onto the writer on the hub, 14 → 11 — the device road is its own row)"],
+  ["src/desktop-serve.js","writeJsonAtomic",2,"not-main","—","—","the record file written at the call ONLY by a paired device's agent (the daemon bundles this module; the hub's keeper hands its store writer — src/server/desktop-app-keeper.js)"],
+  ["src/desktop-serve.js","save",1,"not-main","—","—","its folder made at the call ONLY on the device agent's road (the hub's save hands the bytes to the writer, makeDir: true)"],
   ["src/exit-proxy.js","*",4,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/fixture-ledger-purge.js","*",14,"debt","—","—","one-shot migration (once in the data dir's life, in the listen callback — after the first turn, so not «boot»): debt"],
   ["src/gmail-sync.js","*",6,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
@@ -888,6 +890,8 @@ const STORE_READS = [
   // unreadable = empty, the next save overwrites → lane bl-jobs batch 12 (B-6721 holds that store)
   // the browser registry (lane bl-jobs, the B-f276 remainder, its read r1 N9): through the store-read law — a failed read and torn bytes HOLD
   { file: 'src/server/browser-keeper.js', store: 'browser-profiles.json', state: 'answer', mark: /if \(a\.state === 'data'\) \{ rawDoc = a\.value; reg = B\.normalizeRegistry\(rawDoc\); \}/ },   // its read r2 (N16): the LOAD's line (the read again's storeAnswer is a second, unrelated match)
+  // lane lg-store-writes (主开发 2026-11-20 03:10Z): the desktop app records — a failed read or torn bytes HOLD (never started empty)
+  { file: 'src/desktop-serve.js', store: 'desktop-apps.json', state: 'answer', mark: /const a = SR\.storeAnswer\(read, \{ valid: STORE_VALID \}\);\n    if \(a\.state === 'data'\) \{ store = \{ apps: a\.value\.apps \}; return; \}/ },
   { file: 'src/jobs.js', store: 'job-notifications.json', state: 'debt', why: '_loadNotifs: any failure is an empty map (catch { }) — the next save writes over it', mark: /_loadNotifs\(\) \{\s*try \{\s*const obj = JSON\.parse\(fs\.readFileSync\(this\.notifsFile, 'utf-8'\)\);/ },
 ];
 const READ_DEBT_CAP = 8;     // lower it as each debt row flips to `answer` — never raise it
@@ -1601,6 +1605,70 @@ console.log('⑨ the Task Groups store: a store that could not be read is never 
       const TGM0 = mut ? M.load('src/task-groups.js', mut, 'r0').TaskGroupManager : null;
       const after = TGM0 ? (failing(w.file, 'EIO', () => make(TGM0, w.dd)), bytes(w.file)) : null;
       ok(!!after && Buffer.compare(after, seed) !== 0 && JS(Object.keys(JSON.parse(after.toString('utf8')).tasks)) === '[]', '⑨ RED CONTROL — the release\'s own catch: a read that failed at the boot WROTE AN EMPTY STORE OVER task-groups.json (the defect itself; the legs above go red)', after ? after.toString('utf8').slice(0, 80) : null);
+    }
+  } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
+}
+
+// ── ⑩ THE MEASURED HOLDS AFTER 2.369.412 (主开发 2026-11-20 03:10Z — the owner's hub, the first hour of the new build: 23 holds of
+// 1–3 s, the main thread asleep on the storage in a temp + rename): each site off the loop through the store writer, with what the
+// family requires — the HOLD of a store that cannot be read (never written over), the FLUSH at the stop, and the READERS of the file
+// that must see a write that has not landed yet. Stand-ins for the storage (an fs error thrown for that one file, a writer that
+// records), the real modules; bytes compared, no clock.
+console.log('⑩ the measured holds after 2.369.412: each site off the loop, with its hold, its flush and its readers');
+{
+  const { scratchDir, anchored } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const readSrc = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+  const roots = [];
+  const failingRead = (file, code, fn) => { const rf = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (String(f) === file) throw Object.assign(new Error(`${code}: a stand-in i/o error`), { code }); return rf.call(this, f, ...a); }; try { return fn(); } finally { fs.readFileSync = rf; } };
+  const recordingWriter = () => { const st = { dirty: [], flushed: [] }; return { st, W: { dirty: (f, o) => { st.dirty.push({ f, o }); }, flushSync: (files) => { st.flushed.push(files); return { written: [], left: [] }; }, pending: () => false } }; };
+  try {
+    // (a) src/desktop-serve.js — the desktop app records (data/desktop-apps.json; 3 of the 23)
+    {
+      const DSRC = readSrc('src/desktop-serve.js'), DD = require(path.join(REPO, 'src/desktop-display.js'));
+      const quietDs = { log() { }, warn() { }, error() { } };
+      const noApps = { catalogRows: () => [], refreshCatalog: async () => { }, witnessRows: () => [] };
+      const SEED = JSON.stringify({ apps: { 'da-1': { id: 'da-1', state: 'stopped', appId: 'x' } } });
+      const SAVE_G = "    if (held) { if (!heldSaveSaid) { heldSaveSaid = true; log.warn?.(`[desktop] a ${STORE_FILE} write was refused: ${heldWords()}`); } return false; }\n";
+      const PROD_G = "const storeBytes = () => { if (held) throw";
+      const HOLD_G = "    holdStore(a);   // unreadable, or bytes that are not the store: HELD (never started empty over it)\n";
+      ok([SAVE_G, PROD_G, HOLD_G].every((x) => DSRC.split(x).length === 2), 'control setup: the record file\'s save guard, producer guard and hold are found once each in desktop-serve.js');
+      const install = (Mod, d, W) => Mod.install({ dataDir: d, env: () => ({ HOME: d, PATH: process.env.PATH }), display: { ...DD }, registryRows: [], log: quietDs, now: Date.now, tickMs: 3600e3, apps: noApps, writer: W, unreadRetry: { firstMs: 15, maxMs: 30 } });
+      const scene = async (Mod, name, { lift = true } = {}) => {
+        const d = scratchDir('ds-held-' + name); roots.push(d); const F = path.join(d, 'desktop-apps.json'); fs.writeFileSync(F, SEED);
+        const { st, W } = recordingWriter();
+        const ds = failingRead(F, 'EIO', () => install(Mod, d, W));
+        const out = { held0: ds.held() };
+        if (out.held0) { try { await ds.launch({ appId: 'x' }); out.launch = 'ran'; } catch (e) { out.launch = e && e.code; } } else out.launch = 'not asked (not held: a launch would probe the machine)';
+        try { ds.reshapeStore(() => 1); out.reshape = 'ran'; } catch (e) { out.reshape = e && e.code; }
+        ds.markDirty(); ds.commit();   // a tick's commit while held (the hub marks rows it owns)
+        out.queuedWhileHeld = st.dirty.length;
+        out.heldBytes = st.dirty.map((x) => { try { return x.o.produce(); } catch (e) { return e.code; } });
+        out.bytesKept = fs.readFileSync(F, 'utf8') === SEED;
+        if (lift) {
+          for (let i = 0; i < 200 && ds.held(); i++) await new Promise((r) => setTimeout(r, 10));
+          out.lifted = !ds.held();
+          out.records = out.lifted ? ds.reshapeStore((s0) => Object.keys(s0.apps).join(',')) : null;
+          const last = st.dirty[st.dirty.length - 1];
+          out.queued = last ? { name: last.o.name, rank: last.o.rank, urgent: last.o.urgent, bytes: JSON.parse(last.o.produce()) } : null;
+          out.fileAtCall = fs.readFileSync(F, 'utf8') === SEED;   // the writer's, not the call's: nothing written here
+        }
+        ds.shutdown();
+        out.flushed = st.flushed.some((fl) => Array.isArray(fl) && fl.includes(F));
+        return out;
+      };
+      const r = await scene(require(path.join(REPO, 'src/desktop-serve.js')), 'real');
+      ok(r.held0 && r.launch === 'desktop_apps_unread' && r.reshape === 'desktop_apps_unread' && r.queuedWhileHeld === 0 && r.bytesKept, '⑩a desktop-apps.json that could not be read (EIO): HELD — a launch and a migration refused BY NAME, a commit writes nothing, the bytes untouched (the release started EMPTY and wrote that over the file)', r);
+      ok(r.lifted && r.records === 'da-1' && r.queued && r.queued.name === 'desktop-apps.write' && r.queued.rank === 0 && r.queued.urgent === true && r.queued.bytes.apps && r.queued.bytes.apps['da-1'] && r.fileAtCall && r.flushed, '⑩a …read again off the loop: the hold lifts, its records are back; a commit hands the bytes to the STORE WRITER (rank 0, urgent — nothing written at the call), and the stop lands what is owed', r);
+      // the producer ALONE keeps the held file (the save's own guard cut, in a copy): the queued write refuses at its write (EHELD)
+      const p1 = await scene(mutantCopies('swc-ds-save-cut', REPO).load('src/desktop-serve.js', anchored(DSRC, SAVE_G, '    /* MUTANT: no save guard */\n', 'ds-save-cut'), 'ds-save-cut'), 'save-cut', { lift: false });
+      ok(p1.queuedWhileHeld > 0 && p1.heldBytes.every((b) => b === 'EHELD'), '⑩a the record file\'s PRODUCER refuses while held too: with the save\'s guard cut, a queued write makes no bytes (EHELD) — never the empty store', p1);
+      const x1 = await scene(mutantCopies('swc-ds-hold-cut', REPO).load('src/desktop-serve.js', anchored(DSRC, HOLD_G, '    /* MUTANT: the release — an unreadable file starts EMPTY */\n', 'ds-hold-cut'), 'ds-hold-cut'), 'hold-cut', { lift: false });
+      ok(!x1.held0 && x1.heldBytes.some((b) => typeof b === 'string' && JSON.parse(b).apps && !Object.keys(JSON.parse(b).apps).length), 'CONTROL (the hold cut, in a copy — the release): the unreadable file starts EMPTY and its first commit hands the EMPTY store to the writer, over the file — RED', x1);
+      const x2 = await scene(mutantCopies('swc-ds-guards-cut', REPO).load('src/desktop-serve.js', anchored(anchored(DSRC, SAVE_G, '    /* MUTANT: no save guard */\n', 'ds-save-cut2'), PROD_G, 'const storeBytes = () => { if (false) throw', 'ds-prod-cut'), 'ds-guards-cut'), 'guards-cut', { lift: false });
+      ok(x2.held0 && x2.heldBytes.some((b) => typeof b === 'string' && !Object.keys(JSON.parse(b).apps).length), 'CONTROL (both guards cut, in a copy): a commit while held makes the EMPTY store\'s bytes for the writer — RED', x2);
+      // the hub's keeper hands its writer in (the device agent hands none: it writes at the call, off the hub's loop)
+      ok(/writer: writer === undefined \? require\('\.\.\/store-writer\.js'\)\.storeWriter\(\) : writer,/.test(readSrc('src/server/desktop-app-keeper.js')), '⑩a the hub\'s keeper hands the process\'s store writer to the machine half (a suite may hand its own)');
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }

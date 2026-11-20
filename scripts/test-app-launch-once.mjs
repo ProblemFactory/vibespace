@@ -43,7 +43,8 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
+import { mutantCopies } from './mutant-copy.mjs';   // mutant-copy imports scratch.mjs already: no new side effect
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const D = require(path.join(repo, 'src/desktop-display.js'));
@@ -297,6 +298,34 @@ await leg('⑦', async () => {
   });
   const bFirst = b.casts.find((c) => c.state === 'exited');
   ok(bFirst && bFirst.at - b.rec.endedAt >= DS.STOP_GRACE_MS && bFirst.memberAlive === false, `CONTROL: its exited commit came only after the grace ran out (${bFirst && bFirst.at - b.rec.endedAt} ms on the keeper's clock ≥ STOP_GRACE_MS) — the window closed that late`, bFirst);
+});
+await leg('⑨', async () => {
+  console.log('⑨ lane lg-store-writes (主开发 2026-11-20 03:10Z) — on the hub the record file is the store writer\'s: a launch\'s record LANDS before its parts spawn');
+  // the next start's marker census looks for the ids the FILE names: a part started for a record the disk never held is an orphan
+  // nothing reaps (the release wrote the record at the call, before the spawn). A writer that does not land (a held storage): the
+  // launch is refused by name, its record removed, NOTHING spawned. RED (anchored, in a copy): the wait cut — the part spawns.
+  const DSRC = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
+  const LAND_A = "    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');\n";
+  ok(DSRC.split(LAND_A).length === 2, 'control setup: the launch\'s wait for its record\'s landing is found once in desktop-serve.js');
+  const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
+  const run = async (mod, tag) => {
+    const named = [];
+    const W = { dirty: (f, o) => { named.push(o && o.name); }, durable: async () => false, flushSync: () => ({ written: [], left: [] }), pending: () => true };
+    const ds = mod.install({ dataDir: path.join(root, `ds-${tag}`), env, display: fakeDisplay, backends: BACKENDS, registryRows: [ROWS[0]], log, now, tickMs: 3600e3, apps: noApps, writer: W });
+    const before = kids.length;
+    let err = null, id = null;
+    try { id = (await ds.launch({ appId: 'single' }, {})).id; } catch (e) { err = e && e.code; }
+    await sleep(300);
+    const out = { err, spawned: kids.length - before, records: Object.keys(ds._store().apps).length, named: [...new Set(named)] };
+    if (id) { try { await ds.stop(id, { why: 'user', force: true }); } catch { /* the finally kills the kids */ } }
+    ds.shutdown();
+    return out;
+  };
+  const r = await run(DS, 'land-refused');
+  ok(r.err === 'desktop_apps_not_on_disk' && r.spawned === 0 && r.records === 0 && r.named.includes('desktop-apps.write'), '⑨ a launch whose record the writer has NOT landed is refused BY NAME — nothing spawned, the record removed (it went to the store writer, never written at the call)', r);
+  const MX = mutantCopies('alo-land', repo).load('src/desktop-serve.js', anchored(DSRC, LAND_A, '    /* MUTANT: the parts spawn before the record lands */\n', 'alo-no-land'), 'alo-no-land');
+  const x = await run(MX, 'land-cut');
+  ok(!x.err && x.spawned >= 1, 'CONTROL (the wait cut, in a copy): the part SPAWNS for a record the disk does not hold — an orphan at a crash (red)', x);
 });
 await leg('⑧', async () => {
   console.log('⑧ lane launch-picture-size — a launch with a PICTURE SIZE: born pinned, a keeper-fixed rung started AT the pin, an unpinnable rung refused by name');

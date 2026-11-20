@@ -216,6 +216,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const SP = require('./storage-path.js'); // lane hub-fuse-sync-guard: the witness's storage roots
+const SR = require('./store-read.js'); // lane lg-store-writes (主开发 2026-11-20 03:10Z): THE STORE-READ LAW — a record file that cannot be read is HELD, never read as empty
 const M = require('./desktop-apps');
 const { parsePin, pinOf, pinSupportVerdict } = require('./desktop-pin'); // lane e2b (§E2.2): the record's fact `pin` (PURE); lane launch-picture-size: which rungs can be born pinned
 const O = require('./office-open'); // §7.9: the LibreOffice rows as a machine serves them, the open-with verdict, the argv
@@ -334,7 +335,7 @@ const settingsReader = (obj) => (key) => (obj && typeof obj === 'object' && SETT
  *                    needs no pin — it takes one); absent on a daemon, where RemoteApp is refused `remoteapp_unwired`
  */
 function install({ dataDir, env, serverSetting = () => undefined, singleton = null,
-  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, askCloseMs = ASK_CLOSE_MS, hooks = {}, apps = null, appsHome = null, remoteapp = null } = {}) {
+  display = displayFacts, limits = LIMITS, registryRows = M.DEFAULT_REGISTRY, backends = M.DISPLAY_BACKENDS, log = console, now = Date.now, tickMs = TICK_MS, guardSampleMs = null, geometry = DEFAULT_GEOMETRY, hostId = null, fitSlowBeltMs = FIT_SLOW_BELT_MS, askCloseMs = ASK_CLOSE_MS, hooks = {}, apps = null, appsHome = null, remoteapp = null, writer = null, unreadRetry = null } = {}) {
   if (!dataDir) throw new Error('desktop-serve: dataDir is required');
   if (env && typeof env === 'object') { const e0 = env; env = () => e0; }
   if (typeof env !== 'function') throw new Error('desktop-serve: env must be a function returning the sanitised base env');
@@ -369,15 +370,75 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   let factsCache = null;        // { at, facts }
   let timer = null;
 
-  function load() {
-    try {
-      const j = JSON.parse(fs.readFileSync(storeFile, 'utf8'));
-      if (j && typeof j === 'object' && j.apps && typeof j.apps === 'object') store = { apps: j.apps };
-    } catch (e) { if (e.code !== 'ENOENT') log.warn?.(`[desktop] ${STORE_FILE} unreadable (${e.message}) — starting empty; the old file is left in place`); }
+  // ── THE RECORD FILE (lane lg-store-writes, 主开发 2026-11-20 03:10Z: measured on the owner's hub after 2.369.412 — this file's
+  // temp + rename held the loop 1–3 s three times in the first hour, the main thread asleep on the storage) ──
+  // THE HOLD (the store-read law): the release read ANY failure as «no records» and started EMPTY — the next save wrote that empty
+  // store over a file it could not read (every live session's record gone: its app orphaned, its picture port unknown). A read that
+  // FAILED, or bytes that do not parse / are not the store's shape: HELD — the bytes untouched by every save, every record-making
+  // act refused BY NAME, said once, read again off the loop on a backoff; its hold lifts when the file reads.
+  // THE WRITE: on the hub (the keeper hands its `writer` in) the bytes go to the store writer, made at the write (a burst of
+  // commits is one write), an ACT (rank 0, urgent); the producer refuses while held (EHELD); the stop lands what is owed. A
+  // paired device's agent (the daemon bundles this module, no writer handed) writes at the call as before — off the hub's loop.
+  const STORE_VALID = (j) => !!j && typeof j === 'object' && !Array.isArray(j) && !!j.apps && typeof j.apps === 'object' && !Array.isArray(j.apps);
+  let held = null, heldSaid = false, heldSaveSaid = false, heldT = null, heldTries = 0, heldP = null, heldStopped = false;
+  const heldWords = () => (held ? `${STORE_FILE} could not be read (${held.code}: ${held.why}) — nothing is written over it until it reads` : null);
+  function refuseIfHeld(what) { if (held) throw namedError('desktop_apps_unread', `${what} was refused: ${heldWords()}`); }
+  function holdStore(a) {
+    held = { code: a.code, why: a.why, at: (held && held.at) || now() };
+    if (!heldSaid) { heldSaid = true; log.warn?.(`[desktop] ${STORE_FILE} could not be read (${a.code}: ${a.why}) — held: the app records in it are kept, nothing is written over it, a launch is refused by name, and it is read again off the main loop`); }
+    heldRetrySoon();
   }
+  function heldRetrySoon() {
+    if (heldT || heldStopped || !held) return;
+    const t = heldT = setTimeout(() => { heldT = null; heldRetry().catch((e) => { log.warn?.(`[desktop] ${STORE_FILE}: a read again failed: ${(e && e.message) || e}`); heldRetrySoon(); }); }, SR.retryDelay(++heldTries, unreadRetry || undefined));
+    t.unref?.();
+  }
+  /** ONE read again of a held record file, OFF the loop (fs.promises), one in flight → the hold lifts when it reads (a file GONE
+   *  since the hold stays held: the next start judges a truly absent file) */
+  async function heldRetry() {
+    if (!held || heldP) return;
+    heldRetrySoon();
+    const p = heldP = fs.promises.readFile(storeFile, 'utf8').then((text) => ({ text }), (error) => ({ error }));
+    const read = await p; heldP = null;
+    if (!held || heldStopped) return;
+    const a = SR.storeAnswer(read, { valid: STORE_VALID });
+    if (a.state !== 'data') { held.code = a.state === 'missing' ? 'ENOENT' : a.code; return; }
+    const was = held; held = null; heldSaveSaid = false;
+    if (heldT) { clearTimeout(heldT); heldT = null; }
+    store = { apps: a.value.apps };
+    log.warn?.(`[desktop] ${STORE_FILE} read again (held since ${new Date(was.at).toISOString()}, ${was.code}): ${Object.keys(store.apps).length} app record(s) — the hold is lifted`);
+    try { H.onCommit?.(); } catch { /* the view's own words */ }
+  }
+  function load() {
+    let read; try { read = { text: fs.readFileSync(storeFile, 'utf8') }; } catch (error) { read = { error }; }
+    const a = SR.storeAnswer(read, { valid: STORE_VALID });
+    if (a.state === 'data') { store = { apps: a.value.apps }; return; }
+    if (a.state === 'missing') return;
+    holdStore(a);   // unreadable, or bytes that are not the store: HELD (never started empty over it)
+  }
+  const storeBytes = () => { if (held) throw Object.assign(new Error(`${STORE_FILE} is held (its read failed) — nothing is written over it until it reads`), { code: 'EHELD' }); return JSON.stringify(store, null, 2); };
   function save() {
-    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, store); dirty = false; }
-    catch (e) { log.warn?.(`[desktop] could not write ${STORE_FILE}: ${e.message}`); }
+    if (held) { if (!heldSaveSaid) { heldSaveSaid = true; log.warn?.(`[desktop] a ${STORE_FILE} write was refused: ${heldWords()}`); } return false; }
+    if (writer) {
+      try { writer.dirty(storeFile, { name: 'desktop-apps.write', rank: 0, urgent: true, makeDir: true, produce: storeBytes, onWritten: (ok, e) => { if (!ok) log.warn?.(`[desktop] could not write ${STORE_FILE}: ${(e && (e.code || e.message)) || 'an error'} — kept in memory, the store writer retries`); } }); dirty = false; return true; }
+      catch (e) { log.warn?.(`[desktop] could not write ${STORE_FILE}: ${e.message}`); return false; }
+    }
+    try { fs.mkdirSync(dataDir, { recursive: true }); writeJsonAtomic(storeFile, store); dirty = false; return true; }
+    catch (e) { log.warn?.(`[desktop] could not write ${STORE_FILE}: ${e.message}`); return false; }
+  }
+  /** A RECORD LANDS BEFORE ITS PARTS SPAWN: the next start's marker census looks for the ids the FILE names — a part started for a
+   *  record the disk never held is an orphan nothing reaps (the release wrote the record at the call, before the spawn). The loop
+   *  never waits: the launch's own promise waits for the writer, bounded; not on disk ⇒ refused by name, the record removed,
+   *  nothing started. A part's pid committed after its spawn rides as before (the census finds the part by its marker). */
+  const LAND_BEFORE_SPAWN_MS = 20000;
+  async function landedBeforeSpawn() {
+    if (!writer || typeof writer.durable !== 'function') return true;   // the device road: written at the call
+    try { return !!(await writer.durable(storeFile, { timeoutMs: LAND_BEFORE_SPAWN_MS })); } catch { return false; }
+  }
+  function refuseUnlanded(id, what) {
+    const seat = rdpSeats.get(id); if (seat) { rdpSeats.delete(id); try { seat.close?.(); } catch { /* its own words */ } }
+    delete store.apps[id]; commit();
+    throw namedError('desktop_apps_not_on_disk', `${what} was refused: its record is not on disk yet (the storage is slow or failing) — nothing was started`);
   }
   /** The machine's own view of a record: the stored facts + the rung's TABLE facts. The hub lays its policy rows
    *  (the resource report's live row, the idle verdict) over it through `hooks.view`. */
@@ -642,6 +703,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  settings when the call arrived as an op (in-process the hub's own reader). The cap is THIS MACHINE's: a
    *  bound on its own resources, counted over its own live sessions. */
   async function launch(body, opts = {}) {
+    refuseIfHeld('opening an app');   // the record file HELD: a launch would make a record nothing can write
     // lane remoteapp-r1a: an app of a PAIRED Windows machine — ONLY through its own door (design §1.6 fence 4: a person's click,
     // desktop-access.launchRemoteApp, or the relaunch of such a session); the generic launch (POST /api/desktop/apps — an agent's
     // token reaches it —, `vibespace-window open`, the `launch` op) can never set `remoteappDoor`, so a `remoteapp` body there is refused
@@ -781,6 +843,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     store.apps[id] = rec;
     pruneHistory();
     commit();
+    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening an app');
     const start = () => {
       const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
       inflight.set(id, p);
@@ -802,6 +865,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  spawn for xfreerdp's stdin. A relaunch (Scale ▸) comes back here through relaunchBodyOf: a new forward reference, the
    *  setup read again. xfreerdp ignores GDK_SCALE, so the session is recorded at 1× (a relaunch reconnects at 1×). */
   async function launchRemoteApp(body, opts = {}) {
+    refuseIfHeld('opening a RemoteApp');
     const serverSetting = opts.settings ? settingsReader(opts.settings) : serverSetting0;
     const rq = RA.remoteappRequestVerdict(body.remoteapp);
     if (!rq.ok) throw namedError(rq.code, rq.error);
@@ -849,6 +913,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     store.apps[id] = rec;
     pruneHistory();
     commit();
+    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'opening a RemoteApp');
     log.log?.(`[desktop] RemoteApp ${id}: ${rq.name} on ${rq.hostId} through 127.0.0.1:${fwd.port} (FreeRDP ${build.version}${build.h264 ? ', H.264' : ''})`);
     const start = () => {
       const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
@@ -945,6 +1010,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    * → the record's view once its bring-up settled (`ready`, or `failed` with its lastError); no xpra ⇒ refused `no-xpra`.
    */
   async function launchDisplay(body = {}) {
+    refuseIfHeld('starting a browser\'s display');
     const forBrowser = body && typeof body.forBrowser === 'string' && /^[a-z0-9][a-z0-9-]{0,40}$/i.test(body.forBrowser) ? body.forBrowser : null;
     if (!forBrowser) throw namedError('bad-request', 'forBrowser must name a browser profile id');
     const f = await facts();
@@ -956,6 +1022,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     store.apps[id] = rec;
     pruneHistory();
     commit();
+    if (!(await landedBeforeSpawn())) refuseUnlanded(id, 'starting a browser\'s display');
     const p = bringUp(rec, f).catch((e) => log.warn?.(`[desktop] ${id} bring-up crashed: ${e.stack || e.message}`));
     inflight.set(id, p);
     p.finally(() => { if (inflight.get(id) === p) inflight.delete(id); }).catch(() => { });
@@ -975,6 +1042,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
    *  successor up on that profile. The seat carries exactly as for any other app.
    *  → { app, replaced } */
   async function relaunch(id, body, { settings = null, onSuccessor = null } = {}) {
+    refuseIfHeld('a relaunch');
     const rec = store.apps[id];
     if (!rec) throw namedError('not-found', `no desktop app ${id}`);
     const rv = M.validateRelaunchRequest(body || {});
@@ -1946,11 +2014,16 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
     if (timer.unref) timer.unref();
   }
   /** Timers only — the apps SURVIVE a VibeSpace (or daemon) exit by design. */
-  function shutdown() { if (timer) clearInterval(timer); timer = null; for (const id of [...fits.keys()]) clearFit(id); if (dirty) save(); }
+  function shutdown() {
+    if (timer) clearInterval(timer); timer = null; for (const id of [...fits.keys()]) clearFit(id); if (dirty) save();
+    heldStopped = true; if (heldT) { clearTimeout(heldT); heldT = null; }
+    // the stop LANDS what the writer owes this file (bounded; a held storage is said, never waited out — the hub's exit flush is the last pass)
+    if (writer && typeof writer.flushSync === 'function') { try { const r = writer.flushSync([storeFile]); const m = r && !r.deferred && (r.left || []).find((x) => x.file === storeFile); if (m) log.warn?.(`[desktop] ${STORE_FILE} not on disk at the stop: ${m.why}`); } catch (e) { log.warn?.(`[desktop] ${STORE_FILE} at the stop: ${e.message}`); } }
+  }
 
   /** MIGRATIONS ONLY (src/server/migrations.js, 2026-09-runaway-parks-void): reshape the IN-MEMORY store and commit
    *  (atomic save + broadcast) — a file edit beside a loaded keeper is overwritten by its next save. */
-  function reshapeStore(fn) { const r = fn(store); commit(); return r; }
+  function reshapeStore(fn) { refuseIfHeld('a migration of the desktop app records'); const r = fn(store); commit(); return r; }
   /** lane launch-picture-size: the pin's ONE stamp — the launch (a record born pinned) and setPin write the fact here only. */
   function stampPin(rec, pin) { const p = pinOf(pin); if (p) rec.pin = p; else delete rec.pin; return p; }
   /** lane launch-picture-size: the X server's first size — a pinned window on the Xvfb+x11vnc rung (fit 'fixed': its
@@ -1975,7 +2048,7 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
   const isStopping = (id) => stopping.has(id);
 
   load();
-  return { notifications, launch, launchDisplay, relaunch, trustRemoteApp, startDeferred, stop, reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
+  return { held: () => !!held, heldWords, notifications, launch, launchDisplay, relaunch, trustRemoteApp, startDeferred, stop, reshapeStore, setPin, keepAlive, closeAsked, noteInput, noteDesktopSize, setWatchProbe, fitApp, get, list, listApps, liveRecords, streamTarget, x11EnvFor, windows, xpraWww, instancePrefs, facts, installFacts, installState, registry, adoptAll, start, shutdown, tick, sessionPids, apps,
     machineView, commit, markDirty, latestSample, isStopping, backends,
     storeFile, logRoot, STORE_FILE, LOG_DIR, SESSION_ENV, _store: () => store };
 }
