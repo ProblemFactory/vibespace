@@ -1904,7 +1904,15 @@ console.log('⑫ ROUND 15 (lane wake-approve-card) — the ONE block HOLDS every
 // while (a) the account's own window flush (what queueScopeWindow's timer calls — Announcements woken through the account) or (b)
 // Announcements' own conversation flush (woken by its own row) runs ⇒ that flush WAITS for the block's chain and finds nothing; ONE
 // billed call carries each row set (3928de8bd: the block held only the rule's chain — two calls both carrying Announcements' 30)
-async function raceLeg15(ENGM, name, road) {
+// r504 (lane lg-text-legs-3): a promise awaited for what HAPPENED, bounded — true once it settled, a red BY NAME at the bound
+async function settledWithin15(p, ms, name) {
+  let tm = null;
+  const r = await Promise.race([p.then(() => true, () => true), new Promise((res) => { tm = setTimeout(() => res(false), ms); })]);
+  clearTimeout(tm);
+  if (!r) ok(false, name);
+  return r;
+}
+async function raceLeg15(ENGM, name, road, { placed = false } = {}) {
   const live = [];
   const { pid } = await digestWorld13(ENGM, name, { live, account: road === 'account' });
   let open = () => {}, inLadder = () => {};
@@ -1919,20 +1927,32 @@ async function raceLeg15(ENGM, name, road) {
     await entered;   // the press's ONE block is inside the ladder now
     let done = false;
     const other = (road === 'account' ? m2.eng.flushScope(A, 'account', null, 'agent:agent-1') : m2.eng.flushPending(A, C2_13, { pk: 'agent:agent-1' })).then((x) => { done = true; return x; });
-    await new Promise((r) => setTimeout(r, 25));
+    // r504 (lane lg-text-legs-3): a CONTROL's second flush is PLACED, never timed. With round 15's chain hold cut it does not wait
+    // for the block's chain, so its read runs while the block is held in the ladder and it settles there (nothing pending, or its
+    // own billed call): the control waits for exactly that, bounded, a red by name at the bound (the train's engine has no seam
+    // for «a chain reached its read»). `readInFlight` = it settled while the block was still held.
+    let readInFlight = null;
+    if (placed) readInFlight = await settledWithin15(other, 5000, `${name}: the second flush did not settle while the block was held in the ladder (the cut did not free it)`);
+    else await new Promise((r) => setTimeout(r, 25));
     const waited = !done;
     open();
     const d = await press, o = await other;
     if (m2.eng.settleWakes) await m2.eng.settleWakes();
     const calls = m2.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text), spend: x.o && x.o.spendReason }));
-    return { press: PRESS10(d), other: { ok: !!(o && o.ok), why: (o && o.why) || null }, waited, calls, after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
+    return { press: PRESS10(d), other: { ok: !!(o && o.ok), why: (o && o.why) || null }, waited, readInFlight, calls, after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
   } finally { open(); m2.eng.stop(); }
 }
 // THE MUTANT «one chain» (3928de8bd's block: the held scope's chain only, every `also` conversation read whatever chain owns it)
 function oneChainMutant15() {
   const src = engineSource(REPO);
   const A15 = '    if (opts.also && opts.also.size) {   // r15:', H15 = "if (!ownRoad && (!holds || (road && !holds.has(road)))) continue;";
-  return { src, cut: src.split(A15).length === 2 && src.split(H15).length === 2 ? src.replace(A15, '    if (false) {   // r15:').replace(H15, 'if (false) continue;') : src };
+  return { src, cut: cutOrFail(cutOrFail(src, A15, '    if (false) {   // r15:', 'one chain: the chain hold (A15)'), H15, 'if (false) continue;', 'one chain: the chain read (H15)') };   // r504: each cut fails BY NAME when its anchor moved
+}
+// r504 (lane lg-text-legs-3): THE MUTANT «one chain, no take» — round 15's chain hold AND B-1ca5's take (the scope digest's, taken
+// before its ladder await) cut, each through cutOrFail: the release's order before B-1ca5, with the chain hold gone
+function bothCutsMutant15() {
+  const T15 = '      if (target.cid) for (const h of held) take = takeHits(rec.id, h.id, names, h.carried.hits, take);\n';
+  return cutOrFail(oneChainMutant15().cut, T15, '', 'one chain, no take: the digest take (B-1ca5)');
 }
 for (const road of ['account', 'conversation']) {
   const L15 = road === 'account' ? '(a)' : '(b)';
@@ -1942,10 +1962,22 @@ for (const road of ['account', 'conversation']) {
       && J2s(g.calls) === J2s([{ ops: true, ann: true, spend: 'channel-message' }]) && J2s(g.pend) === J2s({ ops: 0, ann: 0 }) && g.after.card === 'delivered',
       `${L15} THE RACE on ${road === 'account' ? "the ACCOUNT's chain (its window flush while the block waits on the ladder)" : "Announcements' OWN chain (its conversation flush while the block waits)"} ⇒ the flush waited for the block's chain and found ${g.other.why}; ONE billed call (${g.calls.length}, ${g.calls.filter((x) => x.spend === 'channel-message').length} channel-message) carries Ops + Announcements, n ${g.press.n} (3928de8bd: 2 calls, Announcements' 30 billed twice)`, J2s(g));
     if (road === 'account') {
+      // r504 (lane lg-text-legs-3): since B-1ca5 (edcf0bc63) a SECOND guard stands between this race and the double bill — the
+      // scope digest TAKES its records before its ladder await, and the second flush's first read counts the take as handed. A
+      // control removes every guard between the race and the harm, or says what it now proves: A cuts round 15's chain hold alone
+      // and PROVES THE TAKE HOLDS THE LAW BY ITSELF (one call, the second flush finding nothing pending); B cuts the chain hold AND
+      // the take and sees the double bill again. Each second flush is PLACED: it settles while the block is held in the ladder.
       const m = oneChainMutant15();
-      const r = await raceLeg15(MUT.load('src/server/channels-engine.js', m.cut, 'held-one-chain'), 'e15-race-red', road);
-      ok(m.cut !== m.src && r.calls.filter((x) => x.ann).length === 2 && !r.waited,
-        `CONTROL «one chain» (3928de8bd's block: the held scope's chain only): the same race ⇒ ${r.calls.length} calls, Announcements carried by ${r.calls.filter((x) => x.ann).length} — the same held messages billed twice`, J2s({ calls: r.calls, waited: r.waited, other: r.other }));
+      const r = await raceLeg15(MUT.load('src/server/channels-engine.js', m.cut, 'held-one-chain'), 'e15-race-red', road, { placed: true });
+      const annA = r.calls.filter((x) => x.ann).length;
+      console.log(`    CONTROL A — guards removed: round 15's chain hold (A15 + H15; B-1ca5's take stands) ⇒ ${r.calls.length} call(s), Announcements carried by ${annA}; the second flush settled while the block was in the ladder: ${r.readInFlight}, its answer: ${r.other.why}`);
+      ok(m.cut !== m.src && r.readInFlight === true && r.calls.length === 1 && annA === 1 && !r.other.ok && r.other.why === 'nothing-pending',
+        `CONTROL A «one chain» (3928de8bd's block, the take standing): the same race, the second flush read while the block was in flight ⇒ ${r.calls.length} call, Announcements carried ONCE — the second flush found ${r.other.why}: the take alone holds the law`, J2s({ calls: r.calls, readInFlight: r.readInFlight, other: r.other }));
+      const rb = await raceLeg15(MUT.load('src/server/channels-engine.js', bothCutsMutant15(), 'held-one-chain-no-take'), 'e15-race-red-b', road, { placed: true });
+      const annB = rb.calls.filter((x) => x.ann).length;
+      console.log(`    CONTROL B — guards removed: round 15's chain hold (A15 + H15) AND B-1ca5's take (the scope digest's) ⇒ ${rb.calls.length} call(s), Announcements carried by ${annB}; the second flush settled while the block was in the ladder: ${rb.readInFlight}, its answer: ${rb.other.ok ? 'delivered' : rb.other.why}`);
+      ok(rb.readInFlight === true && annB === 2,
+        `CONTROL B «one chain, no take» (the chain hold and the take both cut): the same race, the second flush read while the block was in flight ⇒ ${rb.calls.length} calls, Announcements carried by ${annB} — the same held messages billed twice`, J2s({ calls: rb.calls, readInFlight: rb.readInFlight, other: rb.other }));
     }
   } catch (e) { ok(false, `⑫ ${L15} threw on this tree: ` + ((e && e.stack) || e)); }
 }
