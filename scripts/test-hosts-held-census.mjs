@@ -525,8 +525,8 @@ console.log('§6 wiring: the re-adoption waits at its caller; the installers say
 {
   const SV = fs.readFileSync(path.join(ROOT, 'server.js'), 'utf8');
   const SH = fs.readFileSync(path.join(ROOT, 'scripts/vibespace-agentd-install.sh'), 'utf8'), PS = fs.readFileSync(path.join(ROOT, 'scripts/vibespace-agentd-install.ps1'), 'utf8');
-  ok(SV.includes("if (hosts.held && hosts.held() && hosts.whenRead) hosts.whenRead(go, 'the re-adoption of remote sessions left running'); else go();"),
-    'server.js: the boot\'s re-adoption of remote sessions waits for the read while hosts.json is held (its get threw: the pass ended, a later resume killed the agent it would adopt)');
+  ok(SV.includes("const held = !!(hosts.held && hosts.held() && hosts.whenRead); (held ? (hosts.whenRead(go, 'the re-adoption of remote sessions left running'), Promise.resolve()) : go()).finally(() => { if (resumeRoad) resumeRoad.adopted(); });"),
+    'server.js: the boot\'s re-adoption of remote sessions waits for the read while hosts.json is held (its get threw: the pass ended, a later resume killed the agent it would adopt) — and the resume line (piece 4) opens at once then, never waiting on a list that may stay held');
   const i16 = SH.indexOf('if [ "$CHECK_RC" -eq 16 ]; then'), ine = SH.indexOf('if [ "$CHECK_RC" -ne 0 ]; then'), p16 = PS.indexOf('if ($checkRc -eq 16) {'), pne = PS.indexOf('if ($checkRc -ne 0) {');
   ok(i16 > 0 && ine > i16 && /run this same command again in a few minutes/.test(SH.slice(i16, ine)) && p16 > 0 && pne > p16 && /run this same command again in a few minutes/.test(PS.slice(p16, pne)),
     'both installers word the check\'s exit 16 (the hub holds its machines) as a wait BEFORE the generic «the device cannot dial» line', { i16, ine, p16, pne });
@@ -601,7 +601,7 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   const bodyOf = (src) => { const i = src.indexOf('function pullShadowBody(s) {'), j = src.indexOf('\n}\n', i); return new Function(`${src.slice(i, j + 2)}\nreturn pullShadowBody;`)(); };   // eslint-disable-line no-new-func
   const MP9 = path.join(D9, 'mnt', 'box');
   // the product's own _online over the held store (its read N2: no stub)
-  const shadow = (Mod) => { const M = Object.create(Mod.MachineMounts.prototype); Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-p1', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _held: new Map(), _bare: new Map([['mm-p1', 'empty']]) }); return M.shadowedBy(path.join(MP9, 'notes.md'), { writer: true }); };
+  const shadow = (Mod) => { const M = Object.create(Mod.MachineMounts.prototype); Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-p1', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _realMp: new Map(), _held: new Map(), _bare: new Map([['mm-p1', 'empty']]) }); return M.shadowedBy(path.join(MP9, 'notes.md'), { writer: true }); };
   const s9 = shadow(require(path.join(ROOT, 'src/machine-mounts.js'))), b9 = bodyOf(MSRC9)(s9);
   ok(!!s9 && s9.hostsHeld === true && !s9.offline && /could not be read/.test(s9.hostsHeldWords) && /pullShadowBody = \(s\) => require\('\.\.\/machine-mounts\.js'\)\.pullShadowBody\(s\)/.test(FSRC9) && b9.code === 'hosts-unread' && /could not be read/.test(b9.error), 'a pull mount\'s bare folder while the machines are held: the shadow carries the HOLD (its words), the files route answers it by name (hosts-unread) — never «is offline»', { s9, b9 });
   const s9x = shadow(MJ.load('src/machine-mounts.js', anchored(MSRC9, HELDRET, '    if (false) return { id: best.m.id, hostId: best.m.hostId, machine, name: machine, mountpoint: best.mp, hostsHeld: true,', 'shadow-held-cut'), 'shadow-held-cut'));
@@ -614,7 +614,7 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   ok(MSRC9.split(PAIRSKIP).length === 2, 'control setup: the shadow\'s pair-held skip is found once');
   const pairShadow = (Mod) => {
     const M = Object.create(Mod.MachineMounts.prototype);
-    Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-pb', dir: 'pull', hostId: 'h-0002', mountpoint: MP9 }, { id: 'mm-pa', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _held: new Map([['mm-pb', { kind: 'same', otherId: 'mm-pa', words: 'held' }]]), _bare: new Map() });
+    Object.assign(M, { hosts: H, _state: { mounts: [{ id: 'mm-pb', dir: 'pull', hostId: 'h-0002', mountpoint: MP9 }, { id: 'mm-pa', dir: 'pull', hostId: 'h-0001', mountpoint: MP9 }] }, _live: new Map(), _realMp: new Map(), _held: new Map([['mm-pb', { kind: 'same', otherId: 'mm-pa', words: 'held' }]]), _bare: new Map() });
     return M.shadowedBy(path.join(MP9, 'notes.md'), { writer: true });
   };
   const ps = pairShadow(require(path.join(ROOT, 'src/machine-mounts.js')));
@@ -647,7 +647,7 @@ console.log('§9 a REAL held HostManager behind a pull mount\'s shadow and the f
   const DR9 = fs.realpathSync(path.dirname(MP9)), DMP9 = path.join(DR9, 'box');   // the share's root as WebDAV's chroot sees it (a scratch dir under a link)
   const MM9 = require(path.join(ROOT, 'src/machine-mounts.js'));
   const davM = Object.create(MM9.MachineMounts.prototype);
-  Object.assign(davM, { hosts: H, _state: { mounts: [{ id: 'mm-p1', dir: 'pull', hostId: 'h-0001', mountpoint: DMP9 }] }, _live: new Map(), _held: new Map(), _bare: new Map() });
+  Object.assign(davM, { hosts: H, _state: { mounts: [{ id: 'mm-p1', dir: 'pull', hostId: 'h-0001', mountpoint: DMP9 }] }, _live: new Map(), _realMp: new Map(), _held: new Map(), _bare: new Map() });
   const dav = async (Mod, method, rel) => {
     let h = null; Mod.registerWebdav({ use: (at, fn) => { if (at === '/dav') h = fn; } }, { tokens: { resolve: () => ({ root: DR9, mode: 'rw' }) } });
     const res = { code: 0, body: '', set() { return this; }, type() { return this; }, status(c) { this.code = c; return this; }, send(b) { this.body = String(b); return this; }, json(b) { this.body = JSON.stringify(b); return this; }, end() { return this; } };
