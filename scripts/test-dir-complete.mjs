@@ -187,7 +187,8 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
   await sleep(100);   // the slow probe's answer lands (no budget waits on it)
   seen.length = 0;
   const c2 = await ds2.slice({ ...ASK, own: '', probe: ['~/work/weekly-admin'], budgetMs: 450 });
-  ok('③b a SLOW probe (late, then answered): unmarked when it answers — the next ask probes it again and gets it in time', (c1.probesLate || []).includes('~/work/weekly-admin') && seen.includes(path.join(HOME, 'work', 'weekly-admin')) && !c2.probesLate, { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
+  const waFacts = (r) => !!(r.listing.dirs['~/work/weekly-admin'] && r.listing.dirs['~/work/weekly-admin'].fileCount != null);
+  ok('③b a SLOW probe (late, then answered): its mark goes when it answers and its facts are KEPT — the next ask has them in time (the late call\'s own result used, no second call)', (c1.probesLate || []).includes('~/work/weekly-admin') && !c2.probesLate && waFacts(c2) && !seen.includes(path.join(HOME, 'work', 'weekly-admin')), { c1: c1.probesLate, seen: [...seen], c2: c2.probesLate });
   // SLOW STORAGE, NOT HUNG (the coordinator's law, 2026-11-20 03:24Z, for 2.369.413): a Task Group's folder whose stat takes 600 ms EVERY
   // time (a network mount; the budget is 450 ms). THE LAW: only a probe that is HUNG is skipped; a probe that was late is asked again on
   // the next ask and its result is USED when it lands; a row never claims a fact the machine has not given. Asked at 0, at 0.5 s (the late
@@ -219,6 +220,13 @@ console.log('\n── ③b a hung PROBE (B-0f3d) ──');
     ok('③b …asked again 0.5 s later, while the late call is still out: NOT skipped — the call still out is waited for inside this budget, and its facts are in the reply (only a HUNG probe is skipped)', got.at05.facts, got);
     ok('③b …at 1 s: its facts are in the reply — the late probe\'s own result USED when it landed', got.at1.facts, got);
     ok('③b …at 5 s (the landed facts no longer fresh): asked AGAIN — a call is sent — and its facts used when they land, never a row that claims what the machine has not given', got.at5.sends >= 1 && (got.at5.facts || (got.at5.late.includes('~/work/investor-relations') && !PFMs.askedOf(['~/work/investor-relations'], r5).length)), got);
+    // RED CONTROLS (a shorter clock: a 300 ms stat, a 150 ms budget): each rule removed from a copy of the shipped dir-slice.js
+    const M2 = mutantCopies('dir-complete-slow-413', REPO), src0 = read('src/server/dir-slice.js');
+    const step = async (D2, wait) => { let c2 = Date.now(); const d2 = D2.create({ home: HOME, repoDir: REPO, now: () => c2, call: async (op, p) => { if (op === 'dirSlice' && (p.probes || []).includes(SLOWG)) await sleep(300); return (await runOp(op, p)).result; } }); const q = { ...SL, budgetMs: 150 }; const a = Date.now(); await d2.slice(q); await sleep(Math.max(0, wait - (Date.now() - a))); c2 += wait; return factsOf(await d2.slice(q)); };
+    const NOLAND = M2.load('src/server/dir-slice.js', anchored(src0, '        const l = landed.get(p); if (l) { fromLanded.push(l.fact); continue; }', '', 'the landed facts never used'), 'noland');
+    const NOJOIN = M2.load('src/server/dir-slice.js', anchored(src0, '        const m = lateProbes.get(p); if (m) { if (!joins.has(m.pw)) joins.set(m.pw, []); joins.get(m.pw).push(p); continue; }', '', 'a late call still out sent again'), 'nojoin');
+    const ctl = { noLanded: await step(NOLAND, 400), noJoin: await step(NOJOIN, 170) };
+    ok('③b RED CONTROLS on a shorter clock: without the LANDED facts the next ask (after it landed) has none; without the JOIN the ask while the late call is out has none (the shipped code has both: the legs above)', !ctl.noLanded && !ctl.noJoin, ctl);
   }
   // a probe call that FAILS at once (the worker ended under it): late for this reply only — the listing answers, nothing is marked
   failing = true;

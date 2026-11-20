@@ -26,12 +26,18 @@ const MAX_PROBES = 40;
    all is unmarked the moment it answers; a probe call that FAILS is late for that reply only. The reply names its late probes
    (`probesLate`, in the field's own words). The field's OWN text's path (`own`) is never among them: it is decided inside the listing's race */
 const PROBE_LATE_MS = 30e3;
+/* (2.369.413, the coordinator's law of 03:24Z: only a probe that is HUNG is skipped; a probe that was late is asked again on the next ask
+   and its result is USED when it lands; a row never claims a fact the machine has not given) a late probe's call is NEVER sent again while
+   it is out: the next ask JOINS it inside its own budget; when it lands, its facts are kept LANDED_MS and the next ask uses them; a probe
+   still unanswered after PROBE_LATE_MS is asked anew (a hung one costs one call per window) */
+const LANDED_MS = 2000;
 
 function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '..', '..'), dataDir = null, mounts = () => [], now = Date.now } = {}) {
   const listCache = new Map();   // abs → { at, entry }
   const indexCache = new Map();  // key → { at, dirs, links, p }
   let selfCache = { at: 0, v: null, p: null };
-  const lateProbes = new Map();  // abs → when its probe ran out of the budget (PROBE_LATE_MS)
+  const lateProbes = new Map();  // abs → { at, pw }: a probe that ran out of its budget and is still OUT (joined by the next asks, never sent again)
+  const landed = new Map();      // abs → { at, fact }: a late probe's facts, kept when its call lands (LANDED_MS) — the next ask uses them
   const dataRoot = dataDir || path.join(repoDir, 'data');
 
   async function listDirs(abs, { files = false, pkg = false } = {}) {
@@ -140,22 +146,34 @@ function create({ call, home = os.homedir(), repoDir = path.resolve(__dirname, '
     // reply says `probesLate` (the field marks none of them asked), and a late probe is skipped for PROBE_LATE_MS
     if (got !== 'late' && probes.length) {
       const t1 = now();
-      for (const [lp, at] of lateProbes) if (t1 - at >= PROBE_LATE_MS) lateProbes.delete(lp);   // bounded: a mark lives PROBE_LATE_MS
-      // a probe AT or UNDER a path marked late is skipped (the name rows under a hung Task Group folder change with every keystroke)
-      // (the home and the root are never a late ANCESTOR: a recent conversation started in ~ that rode a hung batch skips nothing under it)
-      const underLate = (p) => { for (const lp of lateProbes.keys()) if (p === lp || (lp !== home && lp !== '/' && p.startsWith(lp.endsWith('/') ? lp : lp + '/'))) return true; return false; };
-      const askNow = probes.filter((p) => { if (underLate(p)) { late.add(p); return false; } return true; });
+      for (const [lp, m] of lateProbes) if (t1 - m.at >= PROBE_LATE_MS) lateProbes.delete(lp);   // bounded: a mark lives PROBE_LATE_MS
+      for (const [lp, l] of landed) if (t1 - l.at >= LANDED_MS) landed.delete(lp);
+      // a probe UNDER a path whose probe is still out waits for that one (named late in this reply, asked once it lands) — never a call per
+      // keystroke into what may be a hung folder (the home and the root are never a late ANCESTOR)
+      const underLate = (p) => { for (const lp of lateProbes.keys()) if (p !== lp && lp !== home && lp !== '/' && p.startsWith(lp.endsWith('/') ? lp : lp + '/')) return true; return false; };
+      const fromLanded = [], joins = new Map(), askNow = [];
+      for (const p of probes) {
+        const l = landed.get(p); if (l) { fromLanded.push(l.fact); continue; }   // its late result, landed: USED
+        const m = lateProbes.get(p); if (m) { if (!joins.has(m.pw)) joins.set(m.pw, []); joins.get(m.pw).push(p); continue; }   // still out: JOINED, never sent again
+        if (underLate(p)) { late.add(p); continue; }
+        askNow.push(p);
+      }
+      const races = [];
       if (askNow.length) {
         const pw = call('dirSlice', { dirs: [], probes: askNow }).then((r) => (r && r.probes) || [], () => null);   // a call that fails is late, never the listing's end
-        const pg = await Promise.race([pw, deadline]);
-        if (pg === null) for (const p of askNow) late.add(p);   // the call FAILED: late for this reply only (a failure is no hang — no mark)
-        else if (pg === 'late') {
-          const at = now();
-          for (const p of askNow) { late.add(p); lateProbes.set(p, at); }
-          // slow, not hung: the moment it answers, its marks go — the next ask probes it again (never 30 s of a healthy probe called late)
-          pw.then((r) => { if (r) for (const p of askNow) if (lateProbes.get(p) === at) lateProbes.delete(p); });
-        } else { pr = pg; for (const p of askNow) lateProbes.delete(p); }
+        // when a LATE call lands, its marks go and its facts are kept for the next ask (slow, not hung: never 30 s of a healthy probe unread)
+        pw.then((r) => { if (!r) return; const at = now(); for (const f of r) { const m = f && lateProbes.get(f.path); if (m && m.pw === pw) { lateProbes.delete(f.path); landed.set(f.path, { at, fact: f }); } } });
+        races.push({ pw, ps: askNow, mine: true });
       }
+      for (const [pw, ps] of joins) races.push({ pw, ps, mine: false });
+      const outs = await Promise.all(races.map((x) => Promise.race([x.pw, deadline])));
+      outs.forEach((pg, i) => {
+        const { pw, ps, mine } = races[i];
+        if (pg === null) for (const p of ps) late.add(p);   // the call FAILED: late for this reply only (a failure is no hang — no mark)
+        else if (pg === 'late') { const at = now(); for (const p of ps) { late.add(p); if (mine) lateProbes.set(p, { at, pw }); } }
+        else { const want = new Set(ps); for (const f of pg) if (f && want.has(f.path)) pr.push(f); for (const p of ps) { const m = lateProbes.get(p); if (m && m.pw === pw) lateProbes.delete(p); } }
+      });
+      pr.push(...fromLanded);
     }
     const probesLate = [...late].flatMap((a) => sentAs.get(a) || [a]);
     const listing = PC.sliceListing({ home, machine: null, dirs: listed, probes: [...(ownPr || []), ...pr], index: idx && idx.dirs ? idx : null, mounts: mountRows, q: fuzzy });
