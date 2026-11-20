@@ -341,12 +341,21 @@ try {
     fs.mkdirSync(path.join(fakeHome, 'proj', 'alps'), { recursive: true });
     await evalJs(`app.showNewSessionDialog(); true`);
     await waitFor(dialogVisible, 5000);
+    // THE LEG'S PREMISE (the coordinator, 2026-11-20 04:44Z — hosted run 44671418588 red then green): it proves typing opens the list on
+    // a machine that answers INSIDE its budget. A tap on the page's fetch records each dir-complete reply for the typed text and its
+    // `partial` mark; when the list does not open, the red SAYS the premise it saw — no whole reply (the 450 ms budget missed, the field's
+    // bounded ask-again gave up) or a whole reply and still no list (the product's fault). Never a bare false; nothing loosened.
+    const TYPED = path.join(fakeHome, 'proj', 'al');
+    await evalJs(`(() => { if (!window.__dcTap) { window.__dcTap = []; const f0 = window.fetch; window.fetch = function (...a) { const p = f0.apply(this, a); try { const u = String((a[0] && a[0].url) || a[0] || ''); if (u.includes('/dir-complete')) p.then((r) => r.clone().json()).then((j) => window.__dcTap.push({ path: new URL(u, location.href).searchParams.get('path'), partial: !!(j && j.partial), took: j && j.took }), () => {}); } catch { } return p; }; } window.__dcTap.length = 0; return true; })()`);
     await evalJs(`(() => { const i = document.getElementById('input-cwd'); i.value = ''; i.focus(); return true; })()`);
-    await cdp('Input.insertText', { text: path.join(fakeHome, 'proj', 'al') });
+    await cdp('Input.insertText', { text: TYPED });
     // lane path-field: the list is THE path field's (src/lib/path-field.js) — the input names it (aria-controls)
     const LIST = `document.getElementById(document.getElementById('input-cwd').getAttribute('aria-controls'))`;
     const shown = await waitFor(`(() => { const l = ${LIST}; return !!l && !l.hidden && l.querySelectorAll('.pf-item').length > 0; })()`, 5000);
-    check('typing a path opens the suggestion list', shown);
+    const seen = shown ? null : await evalJs(`(() => { const rs = (window.__dcTap || []).filter((x) => x.path === ${JSON.stringify(TYPED)}); const w = document.getElementById('input-cwd').closest('.path-field'); const u = (w && w.querySelector('.pf-under')) || document.querySelector('.pf-under'); return { replies: rs.length, partial: rs.filter((x) => x.partial).length, whole: rs.filter((x) => !x.partial).length, last: rs.length ? rs[rs.length - 1] : null, line: u ? u.innerText.slice(0, 200) : '', pending: !!(w && w.dataset.pending) }; })()`);
+    check('typing a path opens the suggestion list', shown, seen && (seen.whole === 0
+      ? `PREMISE NOT MET — the machine did not answer in its budget: ${seen.partial} partial replies of ${seen.replies}, no whole reply (the field's bounded ask-again ended); the field's line: «${seen.line}»${seen.pending ? ' (pending)' : ''}; the last reply: ${JSON.stringify(seen.last)}`
+      : `a WHOLE reply came (${seen.whole} of ${seen.replies}) and the list did not open — the product's fault; the field's line: «${seen.line}»; the last reply: ${JSON.stringify(seen.last)}`));
     await escape();
     await sleep(250);
     check('THE FINDING: Escape hides the list …', await evalJs(`(() => { const l = ${LIST}; return !l || l.hidden; })()`));
