@@ -953,29 +953,47 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
     const wOf9 = (m) => ({ principal: { kind: 'agent', id: m.cid, name: m.name }, notify: 'wake', mode: 'all', dailyWakeCap: 50 });
     // ONE scene: the rows written, the PAGE's judgement (the conversation view's own rows + rows above, as the editor hands them),
     // the SAVE, two passes (the WAKE) → what each said
-    const scene = async (eng, { m, grant = P9, access = null, accountUser = null, grain = null, after = null }) => {
-      const seed = accountUser ? (gs) => gs.set('channel-reach', 'account:gsx#user', { to: [accountUser], except: [] }, 'user') : null;
+    // round wg5m3njdx: `rowExcept` = the GRANT ROW's OWN «除了» written at once, `rowExceptLater` = after the save (the wake's
+    // road), `rule` = the save on a new RULE grain (a title rule that matches this chat) instead of the conversation
+    const REACH9 = 'conversation:gsx/ops#user';
+    const scene = async (eng, { m, grant = P9, access = null, accountUser = null, grain = null, after = null, rowExcept = null, rowExceptLater = null, rule = false }) => {
+      let gs9 = null;
+      const seed = (accountUser || rowExcept || rowExceptLater) ? (gs) => { gs9 = gs; if (accountUser) gs.set('channel-reach', 'account:gsx#user', { to: [accountUser], except: [] }, 'user'); } : null;
+      const withExcept = (ex) => { const [r] = gs9.rowsFor('channel-reach', REACH9); return gs9.set('channel-reach', REACH9, { to: r.to, except: ex }, 'user'); };
       const w = await world({ live: [m], eng, seed });
       const a = access ? await w.e.setAccess(w.A, w.C, access.rows, { except: access.except }) : { ok: true };
-      const g = grant ? await w.e.setReach(w.A, 'ops', { principal: grant, level: 'visible' }) : { ok: true };
+      const g0 = grant ? await w.e.setReach(w.A, 'ops', { principal: grant, level: 'visible' }) : { ok: true };
+      const g = g0 && g0.ok === true && rowExcept ? withExcept(rowExcept) : g0;
       const v = w.e.conversationView(w.A, 'ops') || {}, own = v.own || {};
       const page = CF9.validateWatchers([wOf9(m)], own.access || [], { inherited: v.eligibleAbove || [], members: [{ cid: m.cid, groups: m.groups, inherited: m.inherited }], except: own.except || [] });
-      const save = await w.e.setWatchers(w.A, grain || w.C, [wOf9(m)]);
+      const save = rule ? await w.e.setGrain(w.A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [{ principal: { kind: 'group', id: 'tg-z', name: 'Other' }, authority: 'draft' }], watchers: [wOf9(m)] }) : await w.e.setWatchers(w.A, grain || w.C, [wOf9(m)]);   // a new rule names an access row of its own (another group's): the member's admission is the account's grant rows'
       if (after) await after(w);   // a write between the save and the passes (the wake judges what is there THEN)
+      const later = rowExceptLater ? withExcept(rowExceptLater) : null;
       await w.ingest(2);
-      const out = { wrote: !!a && a.ok === true && !!g && g.ok === true, page: page.ok === true ? (page.watchers[0].via || 'own') : 'refused', save: save && save.ok === true ? 'ok' : String((save && save.error) || 'refused'), woke: w.ladder.calls.includes(m.cid) };
+      const out = { refusedWrites: [a, g, later].filter((x) => x && x.ok === false).map((x) => x.code || x.error), wrote: !!a && a.ok === true && !!g && g.ok === true && (!later || later.ok === true), page: page.ok === true ? (page.watchers[0].via || 'own') : 'refused', save: save && save.ok === true ? 'ok' : String((save && save.error) || 'refused'), woke: w.ladder.calls.includes(m.cid) };
       try { w.e.stop(); } catch { }
       return out;
     };
     const ACC_A = { rows: [{ principal: { kind: 'group', id: 'tg-z', name: 'Other' }, authority: 'draft' }], except: [{ kind: 'conversation', key: 'kd' }] };
     const S_LIN = { m: KIDY }, S_OWNEX = { m: DIRECT, access: ACC_A }, S_ONLY = { m: KIDY, grant: { ...P9, only: true } }, S_ACCT = { m: KIDY, grant: null, accountUser: { kind: 'group', id: 'tg-p' }, grain: { kind: 'account' } };
     const S_ONLY_LATER = { m: KIDY, after: (w) => w.e.setReach(w.A, 'ops', { principal: { ...P9, only: true }, level: 'visible' }) };   // saved through the plain grant; the grant then marked «仅本组»
+    // round wg5m3njdx 1: the GRANT ROW'S OWN «除了» REFUSES — the member it names (a session of the granted group; a child group
+    // under the granted parent) refused on the page, at the save, and at the wake (saved through the plain row, the «除了» written after)
+    const EX_DIRECT = [{ kind: 'conversation', key: 'kd', name: 'Direct' }], EX_KID = [{ kind: 'group', id: 'tg-y', name: 'Kid' }];
+    const S_EXC_CONV = { m: DIRECT, rowExcept: EX_DIRECT }, S_EXC_KID = { m: KIDY, rowExcept: EX_KID }, S_EXC_LATER = { m: KIDY, rowExceptLater: EX_KID };
+    // round wg5m3njdx 2: THE RULE GRAIN — a rule's save reads the account's grants as ROWS (siteInheritedOf's rule branch)
+    const S_RULE = { m: KIDY, grant: null, accountUser: { kind: 'group', id: 'tg-p' }, rule: true };
     const lin = await scene(ENG, S_LIN), ownEx = await scene(ENG, S_OWNEX), only = await scene(ENG, S_ONLY), acct = await scene(ENG, S_ACCT), onlyLater = await scene(ENG, S_ONLY_LATER);
     ok(lin.wrote && lin.page === 'tg-p' && lin.save === 'ok' && lin.woke, 'B-1e96: a parent\'s visible grant here — a member of its CHILD group is admitted on the page (via the parent), at the SAVE and at the WAKE: one shape of grant row, judged with the lineage', lin);
     ok(ownEx.wrote && ownEx.page === 'tg-p' && ownEx.save === 'ok' && ownEx.woke, 'B-1e96 (a) (a regression of the chain\'s cure (D), cured before release): a session of the granted group is not refused because THIS chat\'s access row leaves it out of ANOTHER group — a grant row is judged by its own «除了», as the read door judges it', ownEx);
     ok(only.wrote && only.page === 'refused' && /has no access here|left out/.test(only.save) && !only.woke, 'B-1e96 (b): the parent\'s grant marked «仅本组» — its child group\'s member refused on the page and at the save (the flag rides the row)', only);
     ok(onlyLater.wrote && onlyLater.save === 'ok' && !onlyLater.woke, 'B-1e96 (b) at the WAKE: saved through the parent\'s plain grant, the grant then marked «仅本组» — the wake re-judges the row and does not wake the child\'s member', onlyLater);
     ok(acct.wrote && acct.save === 'ok' && acct.woke, 'B-1e96: an ACCOUNT save reads the account\'s grants as rows too — a pre-unify account grant to the parent: its child\'s member saved on the account and woken', acct);
+    const exConv = await scene(ENG, S_EXC_CONV), exKid = await scene(ENG, S_EXC_KID), exLater = await scene(ENG, S_EXC_LATER), ruleS = await scene(ENG, S_RULE);
+    ok(exConv.wrote && exConv.page === 'refused' && /has no access here|left out/.test(exConv.save) && !exConv.woke, `B-1e96 (round wg5m3njdx 1): the grant row's OWN «除了» names a session of the granted group — refused on the page (${exConv.page}), at the save (${exConv.save.slice(0, 80)}), not woken (${exConv.woke})`, exConv);
+    ok(exKid.wrote && exKid.page === 'refused' && /has no access here|left out/.test(exKid.save) && !exKid.woke, `B-1e96 (round wg5m3njdx 1): the grant row's OWN «除了» names a CHILD group under the granted parent — its member refused on the page (${exKid.page}), at the save (${exKid.save.slice(0, 80)}), not woken (${exKid.woke})`, exKid);
+    ok(exLater.wrote && exLater.save === 'ok' && !exLater.woke, `B-1e96 (round wg5m3njdx 1) at the WAKE: saved through the parent's plain grant row, the row's own «除了» then naming the child group — the wake re-judges the row and does not wake (save ${exLater.save}, woken ${exLater.woke})`, exLater);
+    ok(ruleS.wrote && ruleS.save === 'ok', `B-1e96 (round wg5m3njdx 2): a RULE save reads the account's grants as ROWS — a pre-unify account grant to the parent admits its child's member on a new title rule (save ${ruleS.save}; woken ${ruleS.woke})`, ruleS);
     // RED CONTROLS
     const M9 = mutantCopies('b1e96-grant-rows', REPO);
     try {
@@ -993,6 +1011,16 @@ console.log('⑪ lane lg-group-parents: every wired door — a parent\'s grant a
       ok(only9.save === 'ok' && only9.woke, 'B-1e96 RED CONTROL (b): a grant row that drops its «仅本组» — the child\'s member is saved and woken through a parent that reaches its own members only', only9);
       const acct9 = await scene(copy('    if (site.kind === \'account\') return acctRows(true);', "    if (site.kind === 'account') return accountGrantKeys(aid, { skipAccess: true });", 'B-1e96 the account save reads keys'), S_ACCT);   // stale-pins: kept (the control restores the release's line)
       ok(/has no access here|left out/.test(acct9.save) && !acct9.woke, 'B-1e96 RED CONTROL: the account save reading the account\'s grants as KEYS (the release) — the child\'s member refused there', acct9);
+      // THE WAKE READS THE ROW'S «除了» TWICE — two guards, each refusing alone: the via judge's grant rows (visibleRowsOf) and,
+      // with an «除了» anywhere, the named watcher's read re-judge (wakeAdmitOf: may it still SEE this conversation). The copy
+      // takes BOTH out (the rows read without their own «除了», the re-judge skipped); in this scene the save ran BEFORE the
+      // «除了» was written, so only the wake differs
+      const ESX = anchored(anchored(ES9, ", except: Array.isArray(g.except) ? g.except : [] });", ' });', 'B-1e96 the wake: grant rows without their own except'),
+        '    if (anyExcept) e = { ...e, watchers: e.watchers.filter((it) => {', '    if (false) e = { ...e, watchers: e.watchers.filter((it) => {', 'B-1e96 the wake: the named watcher\'s read re-judge skipped');
+      const exWake9 = await scene(M9.load('src/server/channels-engine.js', ESX, 'b1e96-wake-without-except'), S_EXC_LATER);
+      ok(exWake9.save === 'ok' && exWake9.woke, `B-1e96 RED CONTROL (round wg5m3njdx 1): the WAKE's two reads of the row's «除了» taken out (its grant rows read without it, the named watcher's read re-judge skipped; the save ran before it was written) — the child's member is woken through a row that leaves its group out (woken ${exWake9.woke})`, exWake9);
+      const rule9 = await scene(copy('    return [...CG.accessOf(CG.RES.account(aid)), ...acctRows(false)];', '    return [...CG.accessOf(CG.RES.account(aid)), ...accountGrantKeys(aid)];', 'B-1e96 the rule save reads keys'), S_RULE);   // stale-pins: kept (the control restores the release's line)
+      ok(rule9.save !== 'ok' && /agent|access|left out/i.test(rule9.save), `B-1e96 RED CONTROL (round wg5m3njdx 2): the RULE save reading the account's grants as KEYS (the release) — the child's member refused there («${rule9.save.slice(0, 100)}»)`, rule9);
     } finally { try { fs.rmSync(M9.dir, { recursive: true, force: true }); } catch { } }
     // (c) the Notify… editor offers a member only where the SAVE admits it — F.memberVia over the save's keys, rows and «除了»,
     // the facts the server's (own groups + the copy's `ancestors`, the store's own walk), a child labelled under its parent
