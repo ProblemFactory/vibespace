@@ -7415,7 +7415,7 @@ export default {
   "Your tab": "你的标签页",
   // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
   "opened in your takeover": "你接管时打开",
-  "Opened during your takeover — it stays with the page that opened it": "在你接管期间打开——它仍属于打开它的页面",
+  "Opened during your takeover — it stays this conversation’s tab": "在你接管期间打开——它仍是这个对话的标签页",
   "Your tab — opened while you drove this window": "你的标签页——在你操作这个窗口时打开",
   "In front": "最前面",
   "Another tab is in front of this window": "另一个标签页在此窗口最前面",

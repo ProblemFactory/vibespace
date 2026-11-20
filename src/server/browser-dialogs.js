@@ -497,7 +497,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     // back through `tabsOf`; before, in memory per watch, the restart made the conversation's own tab nobody's again
     // B-e674 unit 2: THE BIRTH STAMP — the keeper is told of every page tab born while this watch is open (with its opener and
     // the agent's verb this witness saw in flight): who drove the browser at that instant is the keeper's fact to stamp
-    if (e.seenAt && keeper && typeof keeper.noteTabBorn === 'function') { try { keeper.noteTabBorn(w.profileId, tid, { opener: e.opener, witness: !e.opener ? e.owner : null }); } catch (err) { say('tab-born:' + (err && err.message), `${w.profileId}: a new tab's birth was not stamped — ${err && err.message}`); } }
+    if (e.seenAt && keeper && typeof keeper.noteTabBorn === 'function') { try { keeper.noteTabBorn(w.profileId, tid, { opener: e.opener, witness: !e.opener ? e.owner : null, unclear: !e.opener && !e.owner && verbsInFlight(w) > 1 }); } catch (err) { say('tab-born:' + (err && err.message), `${w.profileId}: a new tab's birth was not stamped — ${err && err.message}`); } }
     if (e.owner && keeper && typeof keeper.noteOwnTab === 'function') { try { keeper.noteOwnTab(w.profileId, e.owner, tid); } catch (err) { say('note-tab:' + (err && err.message), `${w.profileId}: a witnessed tab was not recorded on its lease — ${err && err.message}`); } }
     w.targets.set(tid, e);
     e.enabling = (async () => {
@@ -658,6 +658,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
    *  tab out of its scope (measured: its `snapshot` answered "(empty page)" with no loop word, its `stop` was refused
    *  `not_watched`). Two verbs in flight, or the user driving ⇒ null (never a guess); the keeper's own naming of a tab for
    *  another holder wins over this witness at every read (scopeFor / ownsTab). */
+  /** B-e674 unit 2's cure (r683 (c)): how many conversations' verbs are in flight on this browser now (a birth with no opener while
+   *  two are is UNCLEAR — never read as nobody's, never as the person's) — the same reading as createdOwner's. */
+  function verbsInFlight(w) {
+    const t = now(); const parents = new Set();
+    for (const [bk, r] of running) { const o = r && r.on ? r.on[w.profileId] : null; if (!o || !(o.n > 0) || t - (o.at || 0) > WITNESS_MS) continue; parents.add(parentKey(bk)); }
+    return parents.size;
+  }
   function createdOwner(w) {
     // verify r3 #1: the user's driving no longer unattributes it — the user's input reaches a PAGE (the live view's CDP input,
     // the user's own browsing tab), and a page's new tab has an opener (judged by openerOwner); the keeper's own opener-less

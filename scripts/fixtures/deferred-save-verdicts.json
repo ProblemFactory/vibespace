@@ -888,6 +888,11 @@
   "why": "item id; worst case duplicate item"
  },
  {
+  "key": "browser-keeper · src/server/browser-keeper.js · create > keeperMakes · commit()",
+  "verdict": "none",
+  "why": "drops a stamp the keeper owns"
+ },
+ {
   "key": "browser-keeper · src/server/browser-keeper.js · create > noteTabBorn · commit()",
   "verdict": "none",
   "why": "birth stamp; pruned at reads"

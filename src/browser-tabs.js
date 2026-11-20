@@ -460,14 +460,15 @@ function frontVerdict({ windowId = null, windows = {}, visible = [], owners = {}
   return { state: word === (human ? 'you' : 'agent') ? 'own' : 'foreign', windowId: w, targetId: vis[0], owner: word, mates: mates.length };
 }
 /** A FOREIGN front tab's words: its chip's short line (`mark`) and its tip (whose it is, then what this view does about it). */
-/** B-e674 unit 2: a tab's BIRTH STAMP in words. RULING (i): a tab a page opened during the person's takeover stays that page's
- *  holder's — NAMED (its mark: «opened in your takeover»); a tab no page opened, made while the person drove, is the person's
- *  own (`you`) — its tip says why. → {mark, tip} ('' when there is nothing to say). */
+/** B-e674 unit 2: a tab's BIRTH STAMP in words. RULING (i) (r683): a tab born in the person's takeover of a conversation's view is
+ *  that conversation's — NAMED on ITS view only (`mine`: «opened in your takeover»); a tab no page opened, made while the person drove
+ *  THEIR OWN window, is the person's own (`you`) — its tip says why. → {mark, tip} ('' when there is nothing to say). */
 function madeText(m, owner, tIn) {
   const t = tOf(tIn);
   if (!isObj(m)) return { mark: '', tip: '' };
   if (m.person && owner === 'you') return { mark: '', tip: t('Your tab — opened while you drove this window') };
-  if (!m.person && m.made === 'takeover' && owner !== 'you') return { mark: t('opened in your takeover'), tip: t('Opened during your takeover — it stays with the page that opened it') };
+  // r683: named only on the view of the conversation that was taken over, on its own tab (`mine`: the stamp's conversation is this view's)
+  if (!m.person && m.made === 'takeover' && m.mine === true && owner === 'agent') return { mark: t('opened in your takeover'), tip: t('Opened during your takeover — it stays this conversation’s tab') };
   return { mark: '', tip: '' };
 }
 /** A FOREIGN front this view does NOT list (the bridge sends its state alone — no id, no name, no title): one general line. */

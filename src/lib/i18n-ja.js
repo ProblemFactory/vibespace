@@ -7414,7 +7414,7 @@ export default {
   "Your tab": "あなたのタブ",
   // B-e674 unit 1: the front of this view's window (src/browser-tabs.js frontText)
   "opened in your takeover": "あなたの操作中に開いた",
-  "Opened during your takeover — it stays with the page that opened it": "あなたの操作中に開いたタブです — 開いたページの持ち主のままです",
+  "Opened during your takeover — it stays this conversation’s tab": "あなたの操作中に開いたタブです — この会話のタブのままです",
   "Your tab — opened while you drove this window": "あなたのタブ — このウィンドウを操作していたときに開いたもの",
   "In front": "最前面",
   "Another tab is in front of this window": "別のタブがこのウィンドウの最前面にあります",

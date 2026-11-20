@@ -3899,11 +3899,13 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   function tabHoldersOf(profileId, activeFor = {}) {
     const out = [];
     const h = humans.get(profileId);
-    const mine = personRootsOf(profileId); // B-e674 unit 2: the tabs the person's own input made (the birth stamp) — theirs, never an orphan
-    if (h) out.push({ key: h.key, roots: [h.ownTab, ...(Array.isArray(h.adopted) ? h.adopted : []), ...mine].filter(Boolean) });
-    else if (mine.length) out.push({ key: HM.humanKeyFor(profileId), roots: mine });
+    if (h) out.push({ key: h.key, roots: [h.ownTab, ...(Array.isArray(h.adopted) ? h.adopted : [])].filter(Boolean) });
     const ls = reg.leases.filter((l) => l.profileId === profileId).sort((a, b) => (Number(a.since) || 0) - (Number(b.since) || 0));
     for (const l of ls) out.push({ key: l.browserKey, roots: [...(l.targetId ? [l.targetId] : []), ...(Array.isArray(l.tabRoots) ? l.tabRoots : [])], active: activeFor[l.browserKey] || null });
+    // B-e674 unit 2's cure (r683 (b)): the tabs the person's own input made (the birth stamp) claim AFTER every lease's roots — a
+    // stamp never outranks a holder's provable claim; theirs still, never an orphan, when no holder roots them
+    const mine = personRootsOf(profileId);
+    if (mine.length) out.push({ key: h ? h.key : HM.humanKeyFor(profileId), roots: mine });
     return out;
   }
   /** A lease's tabs are STICKY: what it holds now becomes its roots (a popup whose opener closes stays its own) — written
@@ -4015,6 +4017,24 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
    * agent's own CDP; it cannot inject the opener rule without corrupting the agent's target map — its safety property, never
    * ANOTHER holder's window, still holds).
    */
+  // B-e674 unit 2's cure (r683 (a)): A TAB THE KEEPER CREATES FOR A HOLDER IS THAT HOLDER'S by the keeper's own word — while one of
+  // its creates is in flight on a browser (and for the tab it reports), the watch's birth stamp names nothing; a stamp a fast
+  // event already wrote on that tab is taken back
+  const keeperCreating = new Map(); // profileId → creates in flight
+  const keeperMade = new Set(); // `${profileId}|${TARGETID}` the keeper created (bounded)
+  async function keeperMakes(profileId, fn, idOf = (r) => (r && r.targetId) || null) {
+    const k = String(profileId || '');
+    keeperCreating.set(k, (keeperCreating.get(k) || 0) + 1);
+    let r;
+    try { r = await fn(); } finally { const n = (keeperCreating.get(k) || 1) - 1; if (n > 0) keeperCreating.set(k, n); else keeperCreating.delete(k); }
+    const id = String(idOf(r) || '').toUpperCase();
+    if (id) {
+      keeperMade.add(`${k}|${id}`); if (keeperMade.size > 256) keeperMade.delete(keeperMade.values().next().value);
+      const rec = reg.browsers[k]; if (rec && rec.bornBy && rec.bornBy[id]) { delete rec.bornBy[id]; commit(); }
+    }
+    return r;
+  }
+  function openOwnTabMarked(p, holderKey, o = {}) { return keeperMakes(p && p.id, () => openOwnTab(p, holderKey, o)); } // every caller outside the body goes through the mark
   async function openOwnTab(p, holderKey, { url = '', ns = null, opts = {}, pin = [], fallback = true, json = false, timeout = 30000, _again = false } = {}) {
     const rec = p ? reg.browsers[p.id] : null;
     const VP = () => require('./browser-viewport.js');
@@ -4203,7 +4223,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // lane browser-windows (U1): the new tab opens in a WINDOW OF ITS OWN (measured: the binary's `tab new` lands in
       // Chrome's last focused window — often another conversation's, hiding its page); its session is bound there and
       // navigates itself; a label is the lease's (the binary labels only the tabs it creates)
-      const made = await openOwnTab(p, bk, { url: w.url || '', ns, opts: o, pin, json: true });
+      const made = await openOwnTabMarked(p, bk, { url: w.url || '', ns, opts: o, pin, json: true });
       if (!made.ok) throw namedError(made.code === 'window_busy' ? 'window_busy' : 'tab_failed', made.error || 'the tab could not be opened', made.code === 'window_busy' && made.why ? { why: made.why } : {}); // verify r2 T1: window_busy by name (the window lives; nothing opened); verify r5 ⑤: the refusal carries WHY (user_driving / bind_failed / ladder) to the route and the CLI's JSON
       const id = made.targetId;
       const l = B.findLease(reg.leases, p.id, bk);
@@ -4316,7 +4336,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const windows = await tabWindowsOf(rec, targets); // lane browser-tabs-by-window: every tab's window + the holders' windows
     const leases = holderWindowsOf(p, rec, windows, bk, h);
     const front = await frontOfView(p, rec, { windows, words, act, bk, h, leases, whose }); // B-e674 unit 1
-    const made = {}; for (const [id, s] of Object.entries(bornOf(p.id))) if (s && words[id] !== undefined) made[id] = { made: s.made === 'browse' ? 'browse' : 'takeover', person: !!s.person }; // B-e674 unit 2
+    const made = {}; for (const [id, s] of Object.entries(bornOf(p.id))) if (s && words[id] !== undefined) made[id] = { made: s.made === 'browse' ? 'browse' : 'takeover', person: !!s.person, mine: !!(s.made === 'takeover' && bk && s.of === bk && words[id] === 'agent') }; // B-e674 unit 2 (+ r683: named only on the taken-over conversation's view, on its own tab)
     return { ok: true, owners: words, whose, windows, leases, front, made, mediated: false, adoptable: target.kind === 'human' && !reg.leases.some((l) => l.profileId === p.id), ...titled(targets) };
   }
   // ── B-e674 unit 2 (the coordinator's r548 / r562 / r605): THE BIRTH STAMP — who drove this browser when a tab appeared ──
@@ -4329,26 +4349,39 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   // never an act. Kept on the browser's record (persisted with it, gone with its run), ≤ BORN_KEEP, pruned at every read.
   const BORN_KEEP = 64;
   function personDriving(p) {
+    const drives = [];
     const h = humans.get(p.id);
-    if (h && h.state === 'driving') return { made: 'browse', of: null };
+    if (h && h.state === 'driving') drives.push({ made: 'browse', of: null });
     for (const l of reg.leases.filter((x) => x.profileId === p.id)) {
-      for (const pid of [p.id, null]) { const st = inputStateFor(l.browserKey, pid); if (st && st.input === 'user') return { made: 'takeover', of: String(l.browserKey) }; }
+      if ([p.id, null].some((pid) => { const st = inputStateFor(l.browserKey, pid); return st && st.input === 'user'; })) drives.push({ made: 'takeover', of: String(l.browserKey) });
     }
-    return null;
+    return drives.length === 1 ? drives[0] : null; // r683: «unclear» is not «nobody» — two drives at once stamp nothing
   }
-  function noteTabBorn(profileId, targetId, { opener = null, witness = null } = {}) {
+  function noteTabBorn(profileId, targetId, { opener = null, witness = null, unclear = false } = {}) {
     ensureLoaded();
     const p = profile(String(profileId || '')); const rec = p ? reg.browsers[p.id] : null;
     const tid = String(targetId || '').toUpperCase();
     if (!p || isEph(p) || isMediated(p) || !rec || !B.isLiveBrowser(rec) || !TBS.TARGET_ID_RE.test(tid)) return null;
+    // r683 (a): the keeper's own create (in flight, or one it reported) is its holder's by the keeper's word — no stamp over it
+    if ((keeperCreating.get(p.id) || 0) > 0 || keeperMade.has(`${p.id}|${tid}`)) return null;
+    // r683 (c): no opener while two agents' verbs were in flight — the witness is unclear, and unclear is not nobody: no stamp
+    if (!opener && !witness && unclear) return null;
     const d = personDriving(p);
-    if (!d) return null; // nobody drove it: no stamp (the ownership rules as before)
-    const person = !opener && !witness;
+    if (!d) return null; // nobody drove it (or two drives at once): no stamp — the ownership rules as before
+    if (d.made === 'browse' && (opener || witness)) return null; // a page's or an agent's tab while the person browses: the rules as before
+    // RULING (i), said again (r683): ANY tab born in a takeover of A's view with no opener is A'S — rooted to A, NAMED; a page's tab
+    // follows its opener (the popup rule) and is named only where its owner is the conversation taken over. The person's OWN tab is
+    // one born while they drive THEIR OWN window, with no opener and no agent's verb.
+    const person = d.made === 'browse';
+    if (d.made === 'takeover' && !opener && !witness) {
+      const l = B.findLease(reg.leases, p.id, d.of);
+      if (l) l.tabRoots = TBS.addRoot(Array.isArray(l.tabRoots) ? l.tabRoots : [], tid);
+    }
     const stamps = { ...bornOf(p.id) };
     stamps[tid] = { made: d.made, ...(d.of ? { of: d.of } : {}), person, at: now() };
     const keys = Object.keys(stamps); if (keys.length > BORN_KEEP) for (const k of keys.slice(0, keys.length - BORN_KEEP)) delete stamps[k];
     rec.bornBy = stamps; commit();
-    log.log?.(`[browser] "${p.label}": tab ${tid.slice(0, 8)} born while the person drove (${d.made === 'browse' ? 'their browsing window' : 'a takeover of ' + d.of}) — ${person ? 'the person\'s own tab' : 'its opener\'s, named «opened in your takeover»'}`);
+    log.log?.(`[browser] "${p.label}": tab ${tid.slice(0, 8)} born while the person drove (${d.made === 'browse' ? 'their browsing window' : 'a takeover of ' + d.of}) — ${person ? 'the person\'s own tab' : opener ? 'its opener\'s, named «opened in your takeover» on that conversation\'s view' : 'rooted to ' + d.of + ', named «opened in your takeover» on its view'}`);
     return stamps[tid];
   }
   function bornOf(profileId) { const rec = reg.browsers[String(profileId || '')]; return rec && rec.bornBy && typeof rec.bornBy === 'object' && !Array.isArray(rec.bornBy) ? rec.bornBy : {}; }
@@ -5422,7 +5455,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const o = await leaseCliOpts(p.id, browserKey);
     if (!o) return null;
     const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
-    const r = await openOwnTab(p, browserKey, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [], fallback: false });
+    const r = await openOwnTabMarked(p, browserKey, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [], fallback: false });
     if (!(r && r.ok && r.targetId)) return null;
     const l2 = B.findLease(reg.leases, p.id, browserKey);
     if (!l2) return null;
@@ -5551,7 +5584,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         const pick = o ? TBS.rebindPick({ targets: await tabTargetsOf(rawCdpOf(p.id, o)), holders: tabHoldersOf(p.id), key: browserKey }) : null;
         let r = o && pick ? await rt.exec(nsOf(p.id), [...pin, 'tab', pick.targetId, '--json'], o) : null;
         let how = r && r.ok ? 'switched' : null;
-        if (!how) { r = o ? await rt.exec(nsOf(p.id), [...pin, 'tab', 'new'], o) : null; how = r && r.ok ? 'new' : null; }
+        if (!how) { r = o ? await keeperMakes(p.id, () => rt.exec(nsOf(p.id), [...pin, 'tab', 'new'], o), (x) => (x && x.ok ? KB.targetIdOf(x.stdout) : null)) : null; how = r && r.ok ? 'new' : null; } // B-e674 unit 2's cure: the keeper's own create
         if (r && r.ok) {
           bound = true; clearTabLost(p.id, browserKey);
           const nid = how === 'switched' ? pick.targetId : KB.targetIdOf(r.stdout);
@@ -5746,7 +5779,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       if (!h) {
         const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
         // lane browser-windows (U1): HIS OWN WINDOW — never a tab beside an agent's in a window it shows (no takeover needed)
-        const made = await openOwnTab(p, v.key, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [] });
+        const made = await openOwnTabMarked(p, v.key, { ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [] });
         const r = { ok: !!made.ok, json: made.ok && made.targetId ? { data: { targetId: made.targetId } } : made.json || null, error: made.error || null };
         if (!(r && r.ok)) {
           const why = String((r && (r.stderr || r.error)) || 'no answer').trim().slice(0, 200);
@@ -7736,7 +7769,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         // `tab_gone` ("bound tab is gone … Run `tab new <url>`") and every later verb of the lease did too; `tab new` is
         // the binary's own recovery: it opens the tab in the NEW browser and binds the session to it
         // lane browser-windows (U1): …in a WINDOW OF ITS OWN in the new browser (the old one's windows are gone with it)
-        const r = await openOwnTab(p, l.browserKey, { url, ns, opts: o, pin: pinTab ? ['--pin-tab'] : [] });
+        const r = await openOwnTabMarked(p, l.browserKey, { url, ns, opts: o, pin: pinTab ? ['--pin-tab'] : [] });
         ok = !!r.ok;
         targetId = r.targetId || null;
         if (ok && r.window === 'own') { l.windowIn = WIN.instanceOf(reg.browsers[p.id]); if (WIN.windowIdOf(r.windowId) != null) l.windowId = WIN.windowIdOf(r.windowId); } // T2 ⑧: the new browser's one window of this holder
@@ -8105,7 +8138,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (!o) return { ok: false, error: noCdpError(p) };
     const pinTab = !!(bf.lastVersion() !== undefined && B.floorVerdict(bf.lastVersion()).sharedProfiles);
     // lane browser-windows (U1): in a WINDOW OF ITS OWN (openOwnTab admits a mediated lease's tab before its session binds it)
-    const r = await openOwnTab(p, l.browserKey, { url: String(url || ''), ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [] });
+    const r = await openOwnTabMarked(p, l.browserKey, { url: String(url || ''), ns: nsOf(p.id), opts: o, pin: pinTab ? ['--pin-tab'] : [] });
     const targetId = r.targetId || null;
     if (r.ok && targetId) { l.targetId = String(targetId); l.lastUrl = String(url || ''); if (r.window === 'own') { l.windowIn = WIN.instanceOf(reg.browsers[p.id]); if (WIN.windowIdOf(r.windowId) != null) l.windowId = WIN.windowIdOf(r.windowId); } if (mediator && isMediated(p)) mediator.admitTarget(p.id, l.browserKey, l.targetId); commit(); } // T2 ⑧: in the holder's one window (re-minted only when it was lost)
     return { ok: !!r.ok, targetId: targetId ? String(targetId) : null, error: r.ok ? null : (String(r.error || '').trim().slice(0, 200) || 'open failed') };

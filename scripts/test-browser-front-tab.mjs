@@ -101,9 +101,11 @@ console.log('— ① PURE: frontVerdict over every cell, its words, the row draw
   ok(!!(mNote.frontNote && mNote.frontNote.text === 'Another tab is in front of this window' && /does not list/.test(mNote.frontNote.tip) && mNote2.frontNote && !m1.frontNote && !mOwn.frontNote && !mUn.frontNote && !m0.frontNote),
     'the row says «Another tab is in front of this window» for a foreign front it cannot mark (no id, or a tab it does not list) — and never beside a marked chip, its own front, an unread one or none');
   // B-e674 unit 2: the birth stamp in words — ruling (i): a tab a page opened in the person's takeover stays its opener's, NAMED
-  const mMade = TT.tabRowModel({ tabs: [{ targetId: A, url: 'https://a.example/', title: 'A', active: true }, { targetId: E, url: 'https://consent.example/', title: 'Consent' }, { targetId: C, url: 'https://c.example/', title: 'Mine' }], owners: { [A]: 'agent', [E]: 'agent', [C]: 'you' }, windows: {}, leases: [], made: { [E]: { made: 'takeover', person: false }, [C]: { made: 'takeover', person: true } } });
+  const mMade = TT.tabRowModel({ tabs: [{ targetId: A, url: 'https://a.example/', title: 'A', active: true }, { targetId: E, url: 'https://consent.example/', title: 'Consent' }, { targetId: C, url: 'https://c.example/', title: 'Mine' }], owners: { [A]: 'agent', [E]: 'agent', [C]: 'you' }, windows: {}, leases: [], made: { [E]: { made: 'takeover', person: false, mine: true }, [C]: { made: 'browse', person: true } } });
   const rE = mMade.rows.find((r) => r.targetId === E), rC = mMade.rows.find((r) => r.targetId === C), rA = mMade.rows.find((r) => r.targetId === A);
-  ok(!!(rE && rE.mark === 'The agent’s · opened in your takeover' && rE.markTip.startsWith('Opened during your takeover — it stays with the page that opened it') && rC && rC.mark === 'Yours' && rC.markTip.startsWith('Your tab — opened while you drove this window') && rA && rA.mark === 'The agent’s' && !/takeover/.test(rA.markTip)),
+  const mNot = TT.tabRowModel({ tabs: [{ targetId: E, url: 'https://consent.example/', title: 'Consent' }], owners: { [E]: 'agent' }, windows: {}, leases: [], made: { [E]: { made: 'takeover', person: false, mine: false } } }).rows[0];
+  ok(!!(mNot && mNot.mark === 'The agent’s' && !/takeover/.test(mNot.markTip)), 'CONTROL (r683): the same stamp on a view that is NOT the conversation taken over says nothing (`mine` false)', mNot && [mNot.mark, mNot.markTip]);
+  ok(!!(rE && rE.mark === 'The agent’s · opened in your takeover' && rE.markTip.startsWith('Opened during your takeover — it stays this conversation’s tab') && rC && rC.mark === 'Yours' && rC.markTip.startsWith('Your tab — opened while you drove this window') && rA && rA.mark === 'The agent’s' && !/takeover/.test(rA.markTip)),
     'the birth stamp in words: A\'s tab opened in the person\'s takeover is still «The agent’s», NAMED «opened in your takeover»; the person\'s own says why it is theirs; an unstamped tab says nothing new', { E: rE && [rE.mark, rE.markTip], C: rC && [rC.mark, rC.markTip] });
   const gt = [{ targetId: A, url: 'https://a.example/', active: true, windowId: 1 }, { targetId: D, url: 'about:blank', windowId: 1 }, { targetId: E, url: 'about:blank', windowId: 1 }];
   const g1 = TT.tabGroups({ tabs: gt, front: D }), g0 = TT.tabGroups({ tabs: gt });
@@ -177,7 +179,8 @@ done({ success: true, data: { ok: true } });
   const fails = { throws: new Set(), notOk: new Set() }; // B-e674 unit 2: a read that throws / answers no `ok`
   const visibilityOf = async (url, id, o) => { reads.vis.push(id); reads.opts = o || null; if (fails.throws.has(id)) throw new Error('the gate: this page never answered'); if (fails.notOk.has(id)) return { ok: false, error: 'the gate: no answer' }; return { ok: true, visibility: vis.has(id) ? 'visible' : 'hidden' }; };
   // every seam that ACTS on a window or a tab is a spy: the front is said, never acted on
-  const spy = (name) => async () => { acted.push(name); return { ok: false, error: 'the gate opens no window' }; };
+  const hooks = {}; // B-e674 unit 2's cure: a leg may act INSIDE the keeper's own create (its openWindow seam)
+  const spy = (name) => async (...a) => { acted.push(name); if (hooks[name]) { try { const r = await hooks[name](...a); if (r) return r; } catch { /* the leg reads its own result */ } } return { ok: false, error: 'the gate opens no window' }; };
   const journal = [];
   const jlog = { log: (x) => journal.push(String(x)), warn: (x) => journal.push(String(x)), error() { }, info() { } };
   const k = Kmod.create({ dataDir: DATA, homeDir: HOME, env: () => env, serverSetting: () => undefined, liveKeys: () => new Set([KA, KB]), runtime: F.createBrowserRuntime({ env }), facts: F.createBrowserFacts({ env }), log: jlog, install: false, tickMs: 3600e3,
@@ -198,7 +201,7 @@ done({ success: true, data: { ok: true } });
     for (const [bk, tab, win] of [[KA, aTab, 1], [KB, bTab, 2]]) { const l = reg.leases.find((x) => x.profileId === p.id && String(x.browserKey) === bk); if (!l) return false; l.windowIn = WIN.instanceOf(rec); l.windowId = win; l.tabRoots = [tab]; }
     return true;
   });
-  return { k, p, NS, HUK, aTab, bTab, hisTab, stamped, run, winOf, vis, fails, reads, acted, journal, cmds, edit, nsState };
+  return { k, p, NS, HUK, aTab, bTab, hisTab, stamped, run, winOf, vis, fails, reads, acted, journal, cmds, edit, nsState, hooks, DATA, HOME, env };
 }
 const W = await world(K, 'k');
 const TA = { kind: 'attachment', profileId: W.p.id, sessionName: 'vs-' + KA, ns: W.NS }, TB = { kind: 'attachment', profileId: W.p.id, sessionName: 'vs-' + KB, ns: W.NS };
@@ -269,41 +272,127 @@ const id8 = (x) => String(x).slice(0, 8);
   const back = await owners(TA, W.aTab);
   ok(!!(back.r.front && back.r.front.state === 'foreign' && back.r.front.targetId === mates10[2] && back.r.front.owner === 'orphan' && back.said.length === 1), 'CONTROL: a mate that did not move and answers visible is named in front again (one line)', { front: back.r.front, said: back.said });
   // ── B-e674 unit 2: THE BIRTH STAMP (the watch tells the keeper of each tab at its birth; here its call is made as the watch makes it) ──
+  // r683's law: a stamp never outranks a holder's provable claim; «unclear» is not «nobody»; RULING (i): a takeover's birth is the
+  // conversation's taken over (rooted to it, named on ITS view); the person's own tab is born while they drive THEIR OWN window
   W.vis.clear();
   const tk = W.k.takeover({ browserKey: KA, profileId: W.p.id, viewerId: 7, sessionId: 'sess-a' });
   const popT = (await W.run(KA, ['popup', 'https://a.example/consent'])).json.data.targetId; // A's page opens a sign-in / consent window while the person drives A's view
   const sPop = W.k.noteTabBorn(W.p.id, popT, { opener: W.aTab });
   const PT = F2(0xB7); W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tb7', targetId: PT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
-  const sPer = W.k.noteTabBorn(W.p.id, PT, {}); // no opener, no agent's verb: the person's own input made it
+  const sTk = W.k.noteTabBorn(W.p.id, PT, {}); // no opener, no agent's verb, in A's takeover (a link, the keyboard): A's
   const WT = F2(0xB8); W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tb8', targetId: WT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
   const sWit = W.k.noteTabBorn(W.p.id, WT, { witness: KB }); // B's verb was in flight: its witness's, never the person's
-  W.winOf.set(popT, 1); W.winOf.set(PT, 1); W.winOf.set(WT, 1);
+  const UT = F2(0xBA); W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tba', targetId: UT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+  const sUnc = W.k.noteTabBorn(W.p.id, UT, { unclear: true }); // two agents' verbs were in flight: unclear — no stamp
+  W.winOf.set(popT, 1); W.winOf.set(PT, 1); W.winOf.set(WT, 1); W.winOf.set(UT, 1);
   const st1 = await owners(TA, W.aTab);
-  const sth = await owners(TH, W.hisTab);
-  console.log(`  · stamps: popup ${JSON.stringify(sPop)} · no-opener ${JSON.stringify(sPer)} · witnessed ${JSON.stringify(sWit)} · A's words ${JSON.stringify({ pop: st1.r.owners[popT], per: st1.r.owners[PT], wit: st1.r.owners[WT] })} · made ${JSON.stringify(st1.r.made)}`);
-  ok(!!(tk && tk.ok && sPop && sPop.made === 'takeover' && sPop.of === KA && sPop.person === false && st1.r.owners[popT] === 'agent' && st1.r.made[popT] && st1.r.made[popT].made === 'takeover'),
-    'RULING (i): a tab A\'s page opened while the person took over A\'s view STAYS A\'s (the popup rule) — stamped «opened in your takeover» for both views (born in the person\'s takeover)');
-  ok(!!(sPer && sPer.person === true && st1.r.owners[PT] === 'you' && sth.r.owners[PT] === 'you' && st1.r.made[PT] && st1.r.made[PT].person === true),
-    'a tab NO page opened and no agent\'s verb made, born while the person drives, is THE PERSON\'S — «yours» on A\'s view and on their own window, never an orphan');
-  ok(!!(sWit && sWit.person === false && st1.r.owners[WT] !== 'you'), 'CONTROL: a tab an agent\'s verb was witnessed making is never the person\'s, even while they drive', { sWit, word: st1.r.owners[WT] });
-  const agentView = await W.run(KA, ['tab', 'list', '--json']); void agentView;
+  const stB = await owners(TB, W.bTab);
+  const rootsA = (W.k._reg().leases.find((l) => l.profileId === W.p.id && l.browserKey === KA) || {}).tabRoots || [];
+  console.log(`  · stamps: popup ${JSON.stringify(sPop)} · no-opener ${JSON.stringify(sTk)} · witnessed ${JSON.stringify(sWit)} · unclear ${JSON.stringify(sUnc)} · A's words ${JSON.stringify({ pop: st1.r.owners[popT], tk: st1.r.owners[PT], wit: st1.r.owners[WT], unc: st1.r.owners[UT] })} · made on A ${JSON.stringify(st1.r.made)}`);
+  ok(!!(tk && tk.ok && sPop && sPop.made === 'takeover' && sPop.of === KA && sPop.person === false && st1.r.owners[popT] === 'agent' && st1.r.made[popT] && st1.r.made[popT].mine === true),
+    'RULING (i): a tab A\'s page opened while the person took over A\'s view STAYS A\'s (the popup rule) — named «opened in your takeover» on A\'s view (born in the person\'s takeover)');
+  ok(!!(sTk && sTk.person === false && sTk.of === KA && st1.r.owners[PT] === 'agent' && rootsA.map((x) => String(x).toUpperCase()).includes(PT) && st1.r.made[PT] && st1.r.made[PT].mine === true && !(stB.r.made[PT] && stB.r.made[PT].mine)),
+    'RULING (i), r683: a tab with NO opener born in A\'s takeover (a link, the keyboard) is A\'S — rooted to A, named on A\'s view only (never on B\'s)');
+  ok(!!(sWit && sWit.person === false && st1.r.owners[WT] !== 'you' && sUnc === null && st1.r.owners[UT] !== 'you'), 'r683 (c): a tab an agent\'s verb was witnessed making is never the person\'s, and one born while TWO verbs were in flight gets no stamp — unclear is not nobody', { sWit, sUnc, wit: st1.r.owners[WT], unc: st1.r.owners[UT] });
   const hb = W.k.handback({ browserKey: KA, profileId: W.p.id, viewerId: 7, cause: 'explicit' });
   const AT = F2(0xB9); W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tb9', targetId: AT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
   const sAfter = W.k.noteTabBorn(W.p.id, AT, {});
   ok(!!(hb && sAfter === null), 'CONTROL: after the handback nobody drives — a tab born then gets no stamp (the ownership rules as before)', { hb: !!hb, sAfter });
+  // THE PERSON'S OWN TAB: born while they drive THEIR OWN window (Browse yourself), no opener, no agent's verb — theirs, never an orphan
+  const ht = W.k.humanTake({ key: W.HUK, viewerId: 5 });
+  const OT = F2(0xBB); W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tbb', targetId: OT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+  const sOwn = W.k.noteTabBorn(W.p.id, OT, {});
+  // THE MUST (r683): a tab the keeper rooted to B (B's lease's own claim) born while the person drives — the person's stamp NEVER outranks it
+  const XT = F2(0xBC); W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tbc', targetId: XT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+  W.k.reshapeStore((reg) => { const l = reg.leases.find((x) => x.profileId === W.p.id && x.browserKey === KB); if (l) l.tabRoots = [...(Array.isArray(l.tabRoots) ? l.tabRoots : []), XT]; return true; });
+  const sX = W.k.noteTabBorn(W.p.id, XT, {});
+  W.winOf.set(OT, 3); W.winOf.set(XT, 2);
+  const sh = await owners(TH, W.hisTab), sb = await owners(TB, W.bTab), sa = await owners(TA, W.aTab);
+  const rowH = TT.tabRowModel({ tabs: [{ targetId: W.hisTab, url: 'https://h.example/', title: 'H', active: true }, { targetId: XT, url: 'https://b.example/x', title: 'B page' }, { targetId: OT, url: 'https://h.example/o', title: 'Mine' }], owners: sh.r.owners, viewer: { human: true }, windows: {}, leases: [], made: sh.r.made }).rows;
+  const rx = rowH.find((r) => r.targetId === XT), ro = rowH.find((r) => r.targetId === OT);
+  console.log(`  · the person drives their own window: own ${JSON.stringify(sOwn)} → ${sh.r.owners[OT]} · B's rooted tab stamped ${JSON.stringify(sX)} → on B's view ${sb.r.owners[XT]}, A's ${sa.r.owners[XT]}, theirs ${sh.r.owners[XT]}`);
+  ok(!!(ht && ht.ok && sOwn && sOwn.person === true && sh.r.owners[OT] === 'you' && sa.r.owners[OT] === 'you' && ro && ro.markTip.startsWith('Your tab — opened while you drove this window')),
+    'a tab NO page opened and no agent made, born while the person drives THEIR OWN window, is THE PERSON\'S — «yours» on every view, never an orphan');
+  ok(!!(sb.r.owners[XT] === 'agent' && sa.r.owners[XT] === 'other' && sh.r.owners[XT] === 'other' && rx && !rx.canSwitch && !rx.canClose),
+    'THE MUST (r683): a tab B\'s lease ROOTS stays B\'s though the person drove at its birth — B\'s own on B\'s view, another conversation\'s on A\'s and on the person\'s; the person\'s row offers no switch and no close on it', { b: sb.r.owners[XT], a: sa.r.owners[XT], h: sh.r.owners[XT], row: rx && { canSwitch: rx.canSwitch, canClose: rx.canClose } });
+  W.k.humanRelease({ key: W.HUK, viewerId: 5 });
   // the stamp lives as long as its tab; ≤ 64 are kept
-  W.edit(W.NS, (s) => { s.tabs = s.tabs.filter((x) => x.targetId !== PT); });
+  W.edit(W.NS, (s) => { s.tabs = s.tabs.filter((x) => x.targetId !== OT); });
   await owners(TA, W.aTab);
   const rec1 = W.k._reg().browsers[W.p.id] || {};
-  ok(!!(rec1.bornBy && !rec1.bornBy[PT] && rec1.bornBy[popT]), 'its tab closed, its stamp is gone at the next read (the others stay)', Object.keys(rec1.bornBy || {}).map((x) => x.slice(0, 4)));
+  ok(!!(rec1.bornBy && !rec1.bornBy[OT] && rec1.bornBy[popT]), 'its tab closed, its stamp is gone at the next read (the others stay)', Object.keys(rec1.bornBy || {}).map((x) => x.slice(0, 4)));
   const tk2 = W.k.takeover({ browserKey: KA, profileId: W.p.id, viewerId: 7, sessionId: 'sess-a' });
   for (let i = 0; i < 70; i++) W.k.noteTabBorn(W.p.id, F2(0xC000 + i), {});
   const rec2 = W.k._reg().browsers[W.p.id] || {};
   ok(!!(tk2 && tk2.ok && Object.keys(rec2.bornBy || {}).length === 64), `the stamps are BOUNDED: 70 births keep the newest 64 (${Object.keys(rec2.bornBy || {}).length})`);
   W.k.handback({ browserKey: KA, profileId: W.p.id, viewerId: 7, cause: 'explicit' });
   const lines = W.journal.filter((l) => /born while the person drove/.test(l));
-  ok(lines.some((l) => l.includes(`tab ${id8(popT)} born while the person drove (a takeover of ${KA}) — its opener's, named «opened in your takeover»`)) && lines.some((l) => l.includes(`tab ${id8(PT)} born while the person drove (a takeover of ${KA}) — the person's own tab`)), 'each stamp is ONE journal line: who drove, and whose the tab reads');
+  ok(lines.some((l) => l.includes(`tab ${id8(popT)} born while the person drove (a takeover of ${KA}) — its opener's, named «opened in your takeover» on that conversation's view`)) && lines.some((l) => l.includes(`tab ${id8(PT)} born while the person drove (a takeover of ${KA}) — rooted to ${KA}`)) && lines.some((l) => l.includes(`tab ${id8(OT)} born while the person drove (their browsing window) — the person's own tab`)), 'each stamp is ONE journal line: who drove, and whose the tab reads');
   ok(W.acted.length === acted0 && driverDuring === 0, `NOTHING ACTED for any front: no window opened, no tab closed or activated (${W.acted.length - acted0} acting calls), no driver command (${driverDuring}) — reads only`);
+}
+// ── B-e674 unit 2's cure (r683): the legs that ACT (after «nothing acted» above) ──
+{
+  // (a) A TAB THE KEEPER CREATES for a holder is that holder's — a birth while its create is in flight gets no stamp, nor the tab it reports
+  const htA = W.k.humanTake({ key: W.HUK, viewerId: 5 }); // the person drives their own window meanwhile
+  let inFlight = 'not asked';
+  // B holds a window of its own (window 2), so the keeper opens B's later tab IN it (openTabInWindow) — the stand-in makes that tab
+  // (Chrome's targetCreated would reach the watch now: the stamp is asked while the keeper's create is in flight) and answers it
+  const KT = F2(0xBD);
+  W.hooks.openTabInWindow = async () => {
+    W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tbd', targetId: KT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+    W.winOf.set(KT, 2);
+    inFlight = W.k.noteTabBorn(W.p.id, KT, {});
+    return { ok: true, targetId: KT, windowId: 2 };
+  };
+  let made1 = null; try { made1 = await W.k.agentTabAct({ browserKey: KB, argv: ['tab', 'new', 'https://b.example/kc'] }); } catch (e) { made1 = { threw: String(e && e.message) }; }
+  W.hooks.openTabInWindow = null;
+  const newId = made1 && made1.opened && made1.opened.targetId ? made1.opened.targetId : null;
+  const late = newId ? W.k.noteTabBorn(W.p.id, newId, {}) : 'no id';
+  W.k.humanRelease({ key: W.HUK, viewerId: 5 });
+  console.log(`  · the keeper's own create for B while the person drove: in flight → ${JSON.stringify(inFlight)}; the tab it reported ${newId ? id8(newId) : '(none)'} → ${JSON.stringify(late)}`);
+  ok(!!(htA && htA.ok && inFlight === null && newId && late === null), 'r683 (a): a tab THE KEEPER creates for B is B\'s by its own word — a birth while its create is in flight gets no stamp, nor the tab it reports (a late event)', { inFlight, late, made1 });
+  // the stamps across a keeper reload (they ride the browser's record), and gone with a new browser run
+  const tkR = W.k.takeover({ browserKey: KA, profileId: W.p.id, viewerId: 7, sessionId: 'sess-a' });
+  const RT = F2(0xBE); W.edit(W.NS, (s) => { s.tabs.push({ tabId: 'tbe', targetId: RT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+  const sR = W.k.noteTabBorn(W.p.id, RT, {});
+  W.k.handback({ browserKey: KA, profileId: W.p.id, viewerId: 7, cause: 'explicit' });
+  try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { /* the store's own writer */ }
+  const k2 = K.create({ dataDir: W.DATA, homeDir: W.HOME, env: () => W.env, serverSetting: () => undefined, liveKeys: () => new Set([KA, KB]), runtime: F.createBrowserRuntime({ env: W.env }), facts: F.createBrowserFacts({ env: W.env }), log: quiet, install: false, tickMs: 3600e3 });
+  k2.list();
+  const reloaded = ((k2._reg().browsers[W.p.id] || {}).bornBy || {})[RT] || null;
+  k2.shutdown();
+  await W.k.stop(W.p.id, { why: 'user' }).catch(() => { });
+  await W.k.start(W.p.id, { why: 'the gate: a new browser run' }).catch(() => { });
+  const fresh = (W.k._reg().browsers[W.p.id] || {}).bornBy || {};
+  ok(!!(tkR && tkR.ok && sR && reloaded && reloaded.made === 'takeover' && !fresh[RT]), 'the stamps ride the browser\'s record: a keeper RELOADED from the store still reads them; a NEW browser run starts with none', { sR, reloaded, fresh: Object.keys(fresh).length });
+}
+// the person with NO Browse-yourself window (the world's option): a takeover's birth is the conversation's; nothing is ever «yours»
+{
+  const N = await world(K, 'nb', { browse: false });
+  const TAn = { kind: 'attachment', profileId: N.p.id, sessionName: 'vs-' + KA, ns: N.NS };
+  const tkN = N.k.takeover({ browserKey: KA, profileId: N.p.id, viewerId: 7, sessionId: 'sess-a' });
+  const NT = F2(0x9E); N.edit(N.NS, (s) => { s.tabs.push({ tabId: 't9e', targetId: NT, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+  const sN = N.k.noteTabBorn(N.p.id, NT, {});
+  N.winOf.set(N.aTab, 1); N.winOf.set(NT, 1);
+  const oN = await N.k.tabOwnersFor(TAn, { activeTarget: N.aTab });
+  N.k.handback({ browserKey: KA, profileId: N.p.id, viewerId: 7, cause: 'explicit' });
+  ok(!!(tkN && tkN.ok && sN && sN.person === false && oN.owners[NT] === 'agent' && oN.made[NT] && oN.made[NT].mine === true && !Object.values(oN.owners).includes('you')), 'the person with NO Browse-yourself window: a birth in their takeover of A is A\'s (rooted, named) — no tab on that browser ever reads «yours»', { sN, owner: oN.owners[NT], made: oN.made[NT] });
+  N.k.shutdown();
+}
+// RED CONTROL OF THE MUST: the unit's first order (the person's stamped roots FIRST, before every lease) — B's rooted tab reads «yours»
+{
+  let ks = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
+  ks = anchored(ks, '    if (h) out.push({ key: h.key, roots: [h.ownTab, ...(Array.isArray(h.adopted) ? h.adopted : [])].filter(Boolean) });\n', "    if (h) out.push({ key: h.key, roots: [h.ownTab, ...(Array.isArray(h.adopted) ? h.adopted : []), ...personRootsOf(profileId)].filter(Boolean) });\n", 'the person\'s stamps first');
+  const kf2 = path.join(ROOT, 'keeper-stamp-first.js'); fs.writeFileSync(kf2, absReq(ks, path.join(REPO, 'src/server')));
+  const Q = await world(require(kf2), 'q');
+  const QX = F2(0xBC); Q.edit(Q.NS, (s) => { s.tabs.push({ tabId: 'tbc', targetId: QX, url: 'about:blank', title: 'Page blank', label: null, opener: null }); });
+  Q.k.reshapeStore((reg) => { const l = reg.leases.find((x) => x.profileId === Q.p.id && x.browserKey === KB); if (l) l.tabRoots = [...(Array.isArray(l.tabRoots) ? l.tabRoots : []), QX]; return true; });
+  Q.k.humanTake({ key: Q.HUK, viewerId: 5 });
+  Q.k.noteTabBorn(Q.p.id, QX, {});
+  Q.winOf.set(Q.bTab, 2); Q.winOf.set(QX, 2);
+  const qb = await Q.k.tabOwnersFor({ kind: 'attachment', profileId: Q.p.id, sessionName: 'vs-' + KB, ns: Q.NS }, { activeTarget: Q.bTab });
+  ok(qb.owners[QX] === 'you', 'RED CONTROL: with the person\'s stamps claiming FIRST (the unit\'s order), B\'s own rooted tab reads «yours» on B\'s view — the must\'s leg above can go red', { owner: qb.owners[QX] });
+  Q.k.shutdown();
 }
 // RED CONTROL: the keeper without the unit (its tabOwnersFor reads no front)
 {
@@ -451,10 +540,11 @@ console.log('— ⑦ the census of create roads: every create site named by a ro
   console.log(`  · ${sites.length} create sites in ${WN.CREATE_SITE_FILES.length} files, ${WN.CREATE_ROADS.length} roads (${WN.CREATE_ROADS.filter((r) => r.notOnBox).length} not on the box)`);
   ok(sites.length >= 12 && unnamed.length === 0 && stale.length === 0, `every create site in the agent browser's code is named by a road (${sites.length} sites), and every road's needle is still there`, { unnamed, stale });
   const unproved = WN.CREATE_ROADS.filter((r) => {
-    if (r.notOnBox) return !(typeof r.notOnBox === 'string' && r.notOnBox.length > 20) || !!r.proof;
-    if (!Array.isArray(r.proof) || r.proof.length !== 2) return true;
-    const f = path.join(REPO, 'scripts', r.proof[0] + '.mjs');
-    return !fs.existsSync(f) || !fs.readFileSync(f, 'utf8').includes(r.proof[1]);
+    if (r.notOnBox) return !(typeof r.notOnBox === 'string' && r.notOnBox.length > 20) || !!r.proof || !!r.measure;
+    const pm = r.proof || r.measure; // r683: a printed MEASURE is said as one (its words name it so), never counted as a proof
+    if (!Array.isArray(pm) || pm.length !== 2 || (r.proof && r.measure) || (r.measure && !/^MEASURE /.test(r.measure[1]))) return true;
+    const f = path.join(REPO, 'scripts', pm[0] + '.mjs');
+    return !fs.existsSync(f) || !fs.readFileSync(f, 'utf8').includes(pm[1]);
   }).map((r) => r.id);
   ok(unproved.length === 0 && WN.CREATE_ROADS.every((r) => r.id && r.road && r.lands && r.whose), 'every road says where its tab lands and whose it reads — and is PROVED by a leg its suite carries (the words named are in it) or says why it is NOT ON THE BOX', unproved);
   // RED CONTROL: a copy of a create file with one more create no road names
@@ -463,8 +553,8 @@ console.log('— ⑦ the census of create roads: every create site named by a ro
   // the wiring of the stamp: the watch tells the keeper at a tab's birth; the client hands the stamps to the row
   const DL = read('src/server/browser-dialogs.js'), LW = read('src/lib/browser-live-window.js'), BS = read('src/server/browser-stream.js');
   const n = (txt, x) => txt.split(x).length - 1;
-  const PINS = [[DL, 'keeper.noteTabBorn(w.profileId, tid, { opener: e.opener, witness: !e.opener ? e.owner : null })'], [LW, 'front: st.tabFront, made: st.tabMade }, t);'], [LW, "st.tabMade = m.made && typeof m.made === 'object' ? { ...m.made } : {};"], [BS, 'front, made, mediated: !!r.mediated']];
-  ok(PINS.every(([txt, x]) => n(txt, x) === 1), 'the stamp\'s wiring, each line ONCE: the watch\'s birth call, the bridge\'s record, the client\'s state and its hand-over to the row', PINS.filter(([txt, x]) => n(txt, x) !== 1).map(([, x]) => x));
+  const PINS = [[DL, 'keeper.noteTabBorn(w.profileId, tid, { opener: e.opener, witness: !e.opener ? e.owner : null, unclear: !e.opener && !e.owner && verbsInFlight(w) > 1 })'], [LW, 'st.tabOwners = {}; st.tabFront = null; st.tabMade = {};'], [LW, 'front: st.tabFront, made: st.tabMade }, t);'], [LW, "st.tabMade = m.made && typeof m.made === 'object' ? { ...m.made } : {};"], [BS, 'front, made, mediated: !!r.mediated']];
+  ok(PINS.every(([txt, x]) => n(txt, x) === 1), 'the stamp\'s wiring, each line ONCE: the watch\'s birth call (with «unclear», r683), the bridge\'s record, the client\'s state, its hand-over to the row, and the pane switch clearing it', PINS.filter(([txt, x]) => n(txt, x) !== 1).map(([, x]) => x));
 }
 
 // ═══ ④ THE WORDS ═════════════════════════════════════════════════════════════
@@ -474,7 +564,7 @@ console.log('— ④ the words: every key frontText asks t() for has a zh and a 
   const keys = []; const t = (s) => { keys.push(s); return s; };
   for (const owner of ['other', 'you', 'orphan']) { TT.frontText({ state: 'foreign', owner }, { name: 'N' }, t); TT.frontText({ state: 'foreign', owner }, {}, t); }
   TT.frontNoteText(t); // B-e674 unit 2
-  TT.madeText({ made: 'takeover', person: false }, 'agent', t); TT.madeText({ made: 'takeover', person: true }, 'you', t); // B-e674 unit 2: the stamp's words
+  TT.madeText({ made: 'takeover', person: false, mine: true }, 'agent', t); TT.madeText({ made: 'browse', person: true }, 'you', t); // B-e674 unit 2: the stamp's words (r683: named where `mine`)
   const lit = (s) => JSON.stringify(s).replace(/\\u([0-9a-f]{4})/g, (m, h) => String.fromCharCode(parseInt(h, 16)));
   const has = (dict, k) => dict.includes(lit(k) + ':');
   const uniq = [...new Set(keys)];

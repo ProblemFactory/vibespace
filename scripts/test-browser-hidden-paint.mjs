@@ -18,10 +18,11 @@
 //      during A's thaws, its window read at birth — the red cell), no stray afterwards (Chrome's targets, both
 //      conversations' own `tab list`), B's next verb runs on B's page, one window per holder (windowCensus);
 //   f  CONTROL — the switch turned OFF on the same browser: 60 s with nobody ⇒ never frozen, the GPU still draws.
-//   B-e674 (the coordinator's r562 / r605, written once by a lane that runs no real driver): a1 a raw client's plain create
-//      lands in A's window and is named «a tab nobody holds» in front of it; a2 the session's own `tab new` is never named A's
-//      own; b1 a tab A's page opens while the person drives A's view stays A's and carries the birth stamp «opened in your
-//      takeover» (the real watch tells the keeper); c1 MEASURED: the profile's own «continue where you left off» at a relaunch.
+//   B-e674 (the coordinator's r562 / r605 / r683, written once by a lane that runs no real driver) — PROOFS: a1 a raw client's
+//      plain create lands in A's window and is named «a tab nobody holds» in front of it; b1 a tab A's page opens while the person
+//      drives A's view stays A's and carries the birth stamp «opened in your takeover» on A's view (the real watch tells the
+//      keeper). MEASURES, printed and never a ✓ (no outcome of theirs can go red): a2 where the session's own `tab new` lands and
+//      what the keeper names in front; c1 what Chrome restores with the profile's own «continue where you left off».
 // SKIPs with evidence without the binary / Xvfb / Chrome. Zero vendor calls; ends every process this run's root started.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -293,8 +294,8 @@ try {
   //    (which runs no real driver), run on the box by the integrator. Each leg reads what the KEEPER says (tabOwnersFor: its
   //    front, owners, birth stamps) and Chrome's own targets; the only acts are each leg's own setup (an activation, a create,
   //    the close of what it created) — the keeper moves, closes and activates nothing for a front.
-  //    a1 a raw client's plain create · a2 the session's own `tab new` (the driver's plain create) · b1 a page's tab while the
-  //    person drives A's view (ruling (i)) · c1 MEASURED: this scratch profile's own «continue where you left off» at a relaunch
+  //    PROOFS: a1 a raw client's plain create · b1 a page's tab while the person drives A's view (ruling (i)). MEASURES, never a ✓
+  //    (r683): a2 the session's own `tab new` (the driver's plain create) · c1 the profile's own «continue where you left off»
   SET['browser.idlePaintFreeze'] = false;
   const VA = { kind: 'attachment', profileId: prof.id, sessionName: 'vs-' + KA };
   const pagesE = await pagesNow(rec); const tAe = pagesE.find((t) => /HP-A/.test(t.title));
@@ -323,8 +324,8 @@ try {
   const win2 = new2 ? await VP.windowOf(rec.cdpUrl, new2.targetId) : null;
   const o2 = new2 ? (await until(async () => { const r = await ownersA(); return r && r.front && r.front.targetId === String(new2.targetId).toUpperCase() ? r : null; }, 8000, 250) || await ownersA()) : null;
   console.log(`    (a2: B's driver made ${new2 ? String(new2.targetId).slice(0, 8) : 'nothing'} (exec ok ${!!(ex2 && ex2.ok)}) in window ${win2}; the keeper's front for A ${JSON.stringify(o2 && o2.front)})`);
-  ok(!!(new2 && (win2 !== winA || (o2 && o2.front && o2.front.state === 'foreign' && o2.front.owner !== 'agent'))),
-    'B-e674 a2: a tab B\'s own driver made with a plain create either stays out of A\'s window or, landed there in front, is named as NOT A\'s — never as A\'s own', { new2: new2 && new2.targetId, win2, winA, front: o2 && o2.front });
+  // r683: a leg that accepts either outcome proves nothing — it is a MEASURE, said as one (never a ✓)
+  console.log(`    MEASURE B-e674 a2 (not a proof): B's own driver's plain create ${new2 ? (win2 === winA ? `landed in A's window ${win2}, and the keeper named its front ${JSON.stringify(o2 && o2.front)}` : `landed in window ${win2}, not A's (${winA})`) : 'made no tab'}`);
   await closeOwn(new2 && new2.targetId);
   // b1
   console.log('— B-e674 b1: the person drives A\'s view and A\'s page opens a tab (a sign-in / consent window) — it stays A\'s, named «opened in your takeover»');
@@ -334,7 +335,7 @@ try {
   const o3 = pop1 ? (await until(async () => { const r = await ownersA(); return r && r.made && r.made[pop1] ? r : null; }, 8000, 250) || await ownersA()) : null;
   try { kk.handback({ browserKey: KA, profileId: prof.id, viewerId: 9, cause: 'explicit' }); } catch { /* not taken */ }
   console.log(`    (b1: takeover ${!!(tk1 && tk1.ok)}; A's page opened ${pop1 ? pop1.slice(0, 8) : 'nothing'} (${JSON.stringify(op1 && { ok: op1.ok, code: op1.code })}); owner ${o3 && pop1 ? o3.owners[pop1] : '?'}; stamp ${JSON.stringify(o3 && pop1 ? o3.made[pop1] : null)})`);
-  ok(!!(tk1 && tk1.ok && pop1 && o3 && o3.owners[pop1] === 'agent' && o3.made[pop1] && o3.made[pop1].made === 'takeover' && o3.made[pop1].person === false),
+  ok(!!(tk1 && tk1.ok && pop1 && o3 && o3.owners[pop1] === 'agent' && o3.made[pop1] && o3.made[pop1].made === 'takeover' && o3.made[pop1].person === false && o3.made[pop1].mine === true),
     'B-e674 b1: a tab A\'s page opened while the person drove A\'s view is still A\'s (the popup rule) and carries the birth stamp «opened in your takeover» — the real watch told the keeper at its birth', { pop1, owner: o3 && pop1 && o3.owners[pop1], made: o3 && pop1 && o3.made[pop1] });
   await closeOwn(pop1);
   // c1
@@ -356,7 +357,8 @@ try {
     c1 = { measured: true, prefsOk, dir: !!dir, relaunched: ra.code === 0, before: urls0.length, after: pages2.length, restored: restored.map((t) => ({ id: String(t.targetId).slice(0, 8), url: t.url.replace(U(''), ''), owner: o4 && o4.owners ? o4.owners[String(t.targetId).toUpperCase()] : '?', stamped: !!(o4 && o4.made && o4.made[String(t.targetId).toUpperCase()]) })) };
   } catch (e) { c1 = { measured: false, threw: String(e && e.message).slice(0, 200) }; }
   console.log(`    (c1: ${JSON.stringify(c1)})`);
-  ok(!!(c1.measured && c1.restored.every((x) => x.owner !== 'you' && !x.stamped)), `B-e674 c1: MEASURED at a relaunch with the profile's own restore setting (${c1.measured ? `${c1.restored.length} tab(s) restored of ${c1.before}` : 'not measured'}) — a restored tab is never stamped as the person's (nobody drove at its birth): nobody's unless a holder's root names it`, c1);
+  // r683: with nobody driving, «never stamped as the person's» cannot go red — c1 is a MEASURE of what Chrome restores, said as one
+  console.log(`    MEASURE B-e674 c1 (not a proof): a relaunch with the profile's own restore setting — ${c1.measured ? `${c1.restored.length} tab(s) restored of ${c1.before}; their owners ${JSON.stringify(c1.restored.map((x) => x.owner))}` : 'not measured (' + (c1.threw || 'no relaunch') + ')'}`);
 } catch (e) { if (!/^no browser$/.test(String(e && e.message))) ok(false, 'the run threw', String(e && e.stack)); }
 finally { try { spy?.close(); } catch { /* */ } try { dialogs.shutdown(); kk.shutdown(); } catch { /* */ } srv.close(); pages.close(); cleanup(); }
 done();
