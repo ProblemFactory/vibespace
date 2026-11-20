@@ -32,6 +32,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A channel message that reached the same agent through two notifications at the same moment could start two paid turns; now it starts one.
 - After a restart, a conversation still running could show its background work and timers as «unknown» with a wrong reason, so a key could not end it.
 - In Settings, a choice with a long option no longer pushes its row past a phone's screen: the closed list cuts its words, the open list shows them whole.
+- A file or folder on storage that stopped answering is no longer asked again and again; VibeSpace says it did not answer and when it will try again.
+- Refresh in the Files window tries such a folder again at once, and a path that answers again is used again right away.
 
 ## 2.369.413 — 2026-11-20
 
