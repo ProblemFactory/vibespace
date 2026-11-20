@@ -35,21 +35,22 @@ process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true 
 
 // a planted build: filler bytes, the build's identity, and what it says of the signal (never a real vendor file)
 const IDENT = (v) => `,VERSION:"${v}",PACKAGE_URL:"x",BUILD_TIME:"2026-11-19T10:00:00Z",`;
-const DECL = 'u({type:T("system"),subtype:T("background_tasks_changed"),tasks:C(u({task_id:o()';
+const DECL = 'u({type:T("system"),subtype:T("background_tasks_changed"),tasks:C(u({task_id:o()';   // as 2.1.322's record union spells it
+const SEP = ';';   // a real build's statements are delimited: the identifier before «({type:» starts after it, never inside filler letters
 const MENTION = 'if(e.subtype==="background_tasks_changed")log("background_tasks_changed");';
 const filler = (n) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = 97 + (i * 7919 % 26); return b; };
 function plant(name, parts) { const f = path.join(ROOT, name); fs.writeFileSync(f, Buffer.concat(parts.map((p) => (Buffer.isBuffer(p) ? p : Buffer.from(p, 'latin1'))))); fs.chmodSync(f, 0o755); return f; }
 
 console.log('① the shared scan');
 {
-  const A = plant('declares', [filler(300000), IDENT('2.1.399'), filler(500000), DECL, filler(1000)]);
+  const A = plant('declares', [filler(300000), IDENT('2.1.399'), filler(500000), SEP, DECL, filler(1000)]);
   const a = await LS.scanLevel(A);
   ok(a.declared === true && a.whole === true && a.version === '2.1.399' && Number.isInteger(a.at), 'a build whose record union DECLARES the signal: declared, read whole, its build named by its own identity', a);
   const B = plant('mentions', [filler(200000), IDENT('2.1.400'), MENTION, filler(200000)]);
   const b = await LS.scanLevel(B);
   ok(b.declared === false && b.whole === true && b.version === '2.1.400', 'a MENTION (a comparison, a log line) is no declaration — and «does not declare» is said only after EVERY byte was read', b);
   const edge = LS.CHUNK - 20;
-  const C = plant('edge', [filler(edge), DECL, filler(1 << 20), IDENT('2.1.401')]);
+  const C = plant('edge', [filler(edge - 1), SEP, DECL, filler(1 << 20), IDENT('2.1.401')]);
   const c = await LS.scanLevel(C);
   ok(c.declared === true && c.at === edge, 'a declaration ACROSS the 8 MiB chunk edge is found (the overlap carries its head into the next read)', c);
   const SRC = fs.readFileSync(path.join(REPO, 'src/cli-level-scan.js'), 'utf8');
@@ -67,14 +68,14 @@ console.log('① the shared scan');
 
 console.log('② the machine: one scan per binary, one at a time, a cut read remembered');
 {
-  const F = plant('claude-a', [filler(1000), IDENT('2.1.403'), DECL]);
+  const F = plant('claude-a', [filler(1000), IDENT('2.1.403'), SEP, DECL]);
   let n = 0, release = null;
   const gated = () => { n++; return new Promise((r) => { release = r; }); };
   MP._levelReset();
   const a1 = await MP.cliLevel(F, { scan: gated });
   const a2 = await MP.cliLevel(F, { scan: gated });
   ok(a1.state === 'reading' && a2.state === 'reading' && n === 1, 'the first ask STARTS the scan and is answered «reading» at once (never waited for); a second ask meanwhile starts none', { a1, a2, n });
-  const G = plant('claude-b', [filler(1000), IDENT('2.1.404'), DECL]);
+  const G = plant('claude-b', [filler(1000), IDENT('2.1.404'), SEP, DECL]);
   const g1 = await MP.cliLevel(G, { scan: gated });
   ok(g1.state === 'reading' && n === 1, 'ONE scan at a time: another binary asked meanwhile is «reading», its scan not started', { g1, n });
   release({ declared: true, whole: true, version: '2.1.403', size: 1000, maxStepMs: 1 }); await MP._levelInFlight();

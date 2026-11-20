@@ -7,7 +7,7 @@
 // catalog's streamed read, src/server/cli-model-catalog.js: off the loop, bounded, one at a time, kept per build in its ledger),
 // never by the person's record-draft tool and never into its file. Measured once on the installed 2.1.322 (342 MB): the declaration
 // sits inside the window the catalog already reads (285.8 MB; the read stops at 293.6 MB), the read 414–445 ms → 459–462 ms.
-//   A  the PURE finder (src/claude-model-catalog.js levelSignalAt): the declaration found; a mention, a reader's comparison, a
+//   A  the PURE finder (src/claude-level-signal.js levelSignalAt, re-exported by the catalog): the declaration found; a mention, a reader's comparison, a
 //      different literal helper are not declarations. RED: a finder that takes any mention.
 //   B  the catalog's read: declared / not declared / the window bound / a read cut short says nothing; the ledger keeps it across a
 //      restart and refuses a malformed one; an older reader's entry is read once more.
@@ -36,7 +36,7 @@ const MENTION = 'var ls="Id of one run of the task: equal on every task_* event,
 let nCli = 0;
 const cli = (version, extra = '') => { const f = writeStandIn(path.join(dir, `claude-${++nCli}`), { version, builtAt: '2026-11-17T00:00:00Z', catalog: BASE }); if (extra) fs.appendFileSync(f, extra); return f; };
 
-console.log('A · the PURE finder (src/claude-model-catalog.js levelSignalAt)');
+console.log('A · the PURE finder (src/claude-level-signal.js levelSignalAt, re-exported by the catalog)');
 {
   ok(CMC.levelSignalAt(DECL) === DECL.indexOf('u({type:'), 'the record union\'s own object for the signal is found (the shape the dump recipe reads)');
   ok(CMC.levelSignalAt(MENTION) === -1, 'a description that names it, a reader\'s comparison and a call with it as an argument are not declarations');
@@ -44,10 +44,10 @@ console.log('A · the PURE finder (src/claude-model-catalog.js levelSignalAt)');
     && CMC.levelSignalAt('u({type:T("result"),subtype:T("background_tasks_changed")') === -1 && CMC.levelSignalAt(null) === -1,
     'dotted helpers are found; a different literal helper, another record type, or no text is not a declaration');
   ok(CMC.levelSignalAt(MENTION + DECL) === MENTION.length + DECL.indexOf('u({type:'), 'mentions before it do not hide the declaration');
-  const src = fs.readFileSync(path.join(REPO, 'src/claude-model-catalog.js'), 'utf8');
+  const src = fs.readFileSync(path.join(REPO, 'src/claude-level-signal.js'), 'utf8');   // B-24e2: the finder moved verbatim out of the catalog
   const N = '    if (m) return from + m.index;\n';
   if (src.split(N).length !== 2) throw new Error('anchor missing: the finder');
-  const mA = mutantCopies('level-signal-a', REPO).load('src/claude-model-catalog.js', anchored(src, N, '    return i;\n', 'any-mention'), 'any-mention');
+  const mA = mutantCopies('level-signal-a', REPO).load('src/claude-level-signal.js', anchored(src, N, '    return i;\n', 'any-mention'), 'any-mention');
   ok(mA.levelSignalAt(MENTION) >= 0, 'RED: a finder that takes any mention calls a build that merely names the signal «declared»');
 }
 

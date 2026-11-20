@@ -25,6 +25,7 @@ const fs = require('fs');
 const path = require('path');
 const CMC = require('../claude-model-catalog.js');
 const CPC = require('../claude-plan-catalog.js');
+const LEVEL_REPORTED = require('./cli-level-reported.js');   // B-24e2: what the paired machines read of their own binaries (in memory)
 
 const LEDGER = 'cli-model-catalog.json';
 const KEEP = 20;
@@ -345,7 +346,7 @@ function levelSignalOf(version) {
     if (e.level.whole === true) out = false; else if (out === null) out = 'partial';
   }
   if (out === false) return out;
-  const r = require('./cli-level-reported.js').levelOf(version);   // B-24e2: a PAIRED machine's read of its own binary, by version (after ours)
+  const r = LEVEL_REPORTED.levelOf(version);   // B-24e2: a PAIRED machine's read of its own binary, by version (after ours)
   return r ? r.declared : out;
 }
 /** THE CLI'S OWN SUBSCRIPTION VALUES (lane oat-add-door): the binary in use's plan values as its bytes state them →

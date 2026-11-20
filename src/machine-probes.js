@@ -23,7 +23,6 @@ const path = require('path');
 const { execFile } = require('child_process');
 const crypto = require('crypto'); // lane cli-self-measure: the CLI binary's sha256 (cliBinary)
 const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
-const LS = require('./cli-level-scan.js'); // B-24e2: the background signal, read on the machine that runs the binary
 const { helperFactOfText, SETTINGS_READ_MAX, combinedFact, startFilesOf, nodeAt } = require('./helper-fact.js'); // PURE: a settings file's key-helper fact — the hub's own rule (B-bc9f)
 
 // windowsHide (lane win-run-hide-console): `claude --version` on a Windows device is a console program the console-less
@@ -333,7 +332,7 @@ async function cliBinary(cmd) {
 const LEVEL_RETRY_MS = 3600e3, LEVEL_MEMO_MAX = 8;
 const _levelMemo = new Map();   // identity → answer
 let _levelScan = null;          // the one scan in flight
-async function cliLevel(cmd, { scan = LS.scanLevel, now = () => Date.now() } = {}) {
+async function cliLevel(cmd, { scan = (p) => require('./cli-level-scan.js').scanLevel(p), now = () => Date.now() } = {}) {   // the scan required here: a suite loads a COPY of this file
   const id = await cliBinaryIdentity(cmd);
   if (!id) return { state: 'none' };
   const m = _levelMemo.get(id.identity);
@@ -342,7 +341,7 @@ async function cliLevel(cmd, { scan = LS.scanLevel, now = () => Date.now() } = {
   _levelMemo.set(id.identity, { state: 'reading' });
   _levelScan = Promise.resolve().then(() => scan(id.path)).then((r) => {
     const t = now();
-    _levelMemo.set(id.identity, r && !r.error && r.whole === true ? { state: 'read', declared: r.declared === true, whole: true, version: r.version || null, size: r.size, maxStepMs: r.maxStepMs }
+    _levelMemo.set(id.identity, r && !r.error && r.whole === true ? { state: 'read', declared: r.declared === true, whole: true, version: r.version || null, size: r.size, maxStepMs: r.maxStepMs, ms: r.ms }
       : { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (r && r.error) || 'not read whole' });
     while (_levelMemo.size > LEVEL_MEMO_MAX) _levelMemo.delete(_levelMemo.keys().next().value);
   }, (e) => { const t = now(); _levelMemo.set(id.identity, { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (e && e.code) || 'read-failed' }); })

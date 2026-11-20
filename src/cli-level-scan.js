@@ -1,6 +1,6 @@
 'use strict';
 /**
- * src/cli-level-scan.js — SHARED (fs + the PURE src/claude-model-catalog.js): DOES A CLAUDE CODE BINARY DECLARE THE BACKGROUND
+ * src/cli-level-scan.js — SHARED (fs + the PURE src/claude-level-signal.js): DOES A CLAUDE CODE BINARY DECLARE THE BACKGROUND
  * SIGNAL, read on the machine that runs it (row B-24e2, lane login-request-card, 2026-11-20 — the law: a fact about a machine is
  * read where the fact lives). The hub reads its OWN binary for the signal inside its catalog read (src/server/cli-model-catalog.js
  * readBinary, a 64 MiB window past the catalog); a PAIRED machine whose Claude Code is newer than any binary the hub has read had no
@@ -18,7 +18,7 @@
  * true`. `maxStepMs` = the longest single step on the loop (one chunk's search) — the device agent serves conversations on it.
  */
 const fs = require('fs');
-const CMC = require('./claude-model-catalog.js');
+const CMC = require('./claude-level-signal.js');   // PURE: the declaration's judge and the build's identity (not the whole catalog)
 
 const CHUNK = 8 << 20, OVERLAP = 4096;
 const SCAN_TIMEOUT_MS = 60e3;   // as the hub's READ_TIMEOUT_MS: one read never runs longer than this
