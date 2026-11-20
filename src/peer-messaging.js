@@ -130,6 +130,23 @@ function lookupPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
 function findPeer(backendSessionId, dir = REGISTRY_DIR, probe = null) {
   return lookupPeer(backendSessionId, dir, probe).peer;
 }
+/** B-95fc U2 — THE RECORD WAITED FOR, ON THE MACHINE THAT OWNS IT: a bounded POLL of this machine's own registry folder (never a
+ *  watch held open) — the shared lookupPeer at a doubling step from 100 ms to 1 s, until a record of `backendSessionId` passes,
+ *  `waitMs` (at most PEER_WAIT_MAX_MS) has been waited, or `alive()` says the asker went (a destroyed link: nobody to answer, so
+ *  nothing is posted). → { peer, waited, cut, why }: `cut` = the asker went; `why` = the last lookup's (no record). */
+const PEER_WAIT_MAX_MS = 60000;
+async function waitForPeer(backendSessionId, { waitMs = 0, alive = () => true, dir = REGISTRY_DIR, probe = null, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = {}) {
+  const bound = Math.max(0, Math.min(PEER_WAIT_MAX_MS, Math.floor(Number(waitMs) || 0)));
+  let waited = 0, step = 100;
+  for (;;) {
+    if (!alive()) return { peer: null, waited, cut: true, why: 'the asker went' };
+    const look = lookupPeer(backendSessionId, dir, probe);
+    if (look.peer) return { peer: look.peer, waited, cut: false, why: look.why };
+    if (waited >= bound) return { peer: null, waited, cut: false, why: look.why };
+    const d = Math.min(step, bound - waited);
+    await sleep(d); waited += d; step = Math.min(step * 2, 1000);
+  }
+}
 
 // Post one text message to a peer's inbox socket. Resolves {ok, reason?, phase, elapsedMs, transient?, late?, code?, closeError?}.
 // Auth frame is sent when a key was published (the binary marks auth REQUIRED
@@ -217,4 +234,4 @@ function postToPeer(peer, text, { timeoutMs = POST_TIMEOUT_MS } = {}) {
   });
 }
 
-module.exports = { findPeer, lookupPeer, registryIdentityOk, postToPeer, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };
+module.exports = { findPeer, lookupPeer, waitForPeer, PEER_WAIT_MAX_MS, registryIdentityOk, postToPeer, REGISTRY_DIR, TRANSIENT_CODES, pidAlive, POST_BOUND_MS };

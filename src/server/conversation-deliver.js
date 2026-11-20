@@ -1535,7 +1535,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   async function remoteStateOf(dm, cid, hid) {
     if (!dm || typeof dm.peerState !== 'function') return null;
     let st;
-    try { st = await dm.peerState(cid); } catch (e) { return undefined; }   // the link dropped or the op failed: unknown (today's road)
+    // U2: an owed wake is parked only for a machine that can ALSO wait for the resumed CLI's inbox (peer-post-wait) — else its
+    // hand-over would post before that inbox opened; such an agent is an older one here (both ride the same agent update)
+    const caps = typeof dm.helloInfo === 'function' ? (dm.helloInfo() || {}).capabilities : null;
+    try { st = Array.isArray(caps) && !caps.includes('peer-post-wait') ? null : await dm.peerState(cid); } catch (e) { return undefined; }   // the link dropped or the op failed: unknown (today's road)
     if (st === null) {   // an older agent: never asked — said once per machine, and the person reads why
       if (!saidOlder.has(hid)) { saidOlder.add(hid); if (saidOlder.size > 200) saidOlder.delete(saidOlder.values().next().value); log(`[deliver] ${hid}: its device agent is older — it cannot say whether a conversation ended there; the words wait for its next turn (update the agent)`); }
       if (!endedAnswers.has(cid)) endedAnswers.set(cid, { outcome: 'refused', code: 'agent_older', why: 'its device agent is older: update it — the words wait for its next turn', until: null, at: clock.now() });
@@ -1987,10 +1990,14 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
           const dm = await (hosts.deviceBounded ? hosts.deviceBounded(hid, 6000) : hosts.device(hid));
           undo2 = armTurn();
           // lane device-act-audit: the sender when the caller names it (vibespace-msg: agent:<cid>), else the delivery's own reason
-          const r = await dm.peerPost({ cid, text, by: require('../device-acts.js').validBy(opts.by) ? opts.by : require('../device-acts.js').bySystem(spendReason) });
+          // B-95fc U2: a hand-over to a conversation just resumed THERE (opts.inboxWaitMs) — the machine waits for its own inbox, then
+          // posts once; one authorization and one charge either way, and a wait that ran out charges nothing (undo2, the ladder's finally)
+          const waitMs = Number.isFinite(opts.inboxWaitMs) && opts.inboxWaitMs > 0 ? opts.inboxWaitMs : 0;
+          const r = await dm.peerPost({ cid, text, by: require('../device-acts.js').validBy(opts.by) ? opts.by : require('../device-acts.js').bySystem(spendReason), ...(waitMs ? { waitMs } : {}) });
           if (r && r.ok) remoteEnded.delete(cid);   // B-95fc U1: it runs there again
-          if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid }; }
+          if (r && r.ok) { spent(); cardOk(); return { ok: true, lane: 'remote-message', kind, peerName: r.peerName || null, hostId: hid, ...(Number.isFinite(r.waited) ? { waited: r.waited } : {}) }; }
           undo2();
+          if (r && r.code === 'inbox_not_open') return { ok: false, lane: 'remote-message', hostId: hid, code: 'inbox_not_open', reason: String(r.reason || 'its inbox did not open on that machine') };
           // B-95fc U1: THE MACHINE ANSWERS FOR ITS OWN INBOX — asked only of an agent that advertises peer-state (an older one never: an
           // unknown op hangs; its road stays as today, said once); the miss is «not running» ONLY on its reply that the conversation
           // runs nowhere there — never a machine that could not be reached, never a CLI still starting

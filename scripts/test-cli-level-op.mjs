@@ -83,5 +83,28 @@ ok(again && again.state === 'read' && again.declared === true, '…asked again: 
   ok(!!s2 && s2.live === false && s2.inbox === false, '…a conversation with no record there: not running (the hub may owe it a wake)', s2);
 }
 
+// B-95fc U2 — THE HAND-OVER WAITS THERE (peer-post inboxWaitMs, capability «peer-post-wait»), on the same real agent: the post leaves the
+// hub FIRST, and only then does the resumed CLI's record appear (its socket served) — the machine's own bounded poll finds it and posts
+// ONCE; a short wait with no record answers inbox_not_open, nothing posted
+{
+  ok(Array.isArray(conn.info.capabilities) && conn.info.capabilities.includes('peer-post-wait'), 'B-95fc U2: the agent advertises «peer-post-wait» in its hello (a hub sends the wait only to an agent that has it)', conn.info.capabilities);
+  const reg = path.join(home, '.claude', 'sessions'); fs.mkdirSync(reg, { recursive: true });
+  const stat = fs.readFileSync('/proc/self/stat', 'utf8'), procStart = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+  const LATE = 'dddddddd-0000-4000-8000-000000000003', NEVER = 'dddddddd-0000-4000-8000-000000000004';
+  const sock = path.join(home, 'late.sock'); let frames = '';
+  const srv = (await import('node:net')).createServer((c) => { c.on('data', (d) => { frames += d.toString('utf8'); }); });
+  await new Promise((r) => srv.listen(sock, r));
+  const posting = dm.peerPost({ cid: LATE, text: 'the hand-over after the resume', inboxWaitMs: 20000 });   // the post has LEFT the hub
+  await new Promise((r) => setTimeout(r, 600));   // the stall IN THE RACE'S WINDOW: the record comes only now
+  fs.writeFileSync(path.join(reg, `${process.pid}.json`), JSON.stringify({ pid: process.pid, sessionId: LATE, messagingSocketPath: sock, procStart, startedAt: Date.now() }));
+  const got = await posting;
+  for (let i = 0; i < 100 && !frames.includes('the hand-over after the resume'); i++) await new Promise((r) => setTimeout(r, 20));
+  console.log(`    the machine waited ${got && got.waited} ms for its own record, then posted`);
+  ok(got && got.ok === true && got.waited >= 500 && (frames.match(/the hand-over after the resume/g) || []).length === 1, '…the machine waited for ITS OWN record of the resumed conversation, then posted ONCE (one frame on its inbox)', { got, frames: frames.length });
+  const none = await dm.peerPost({ cid: NEVER, text: 'never', inboxWaitMs: 300 });
+  ok(none && none.ok === false && none.code === 'inbox_not_open' && !frames.includes('never'), '…a wait that runs out with no record: inbox_not_open, nothing posted', none);
+  srv.close();
+}
+
 try { daemonEnded = true; endDaemonsAndWait(process.env.VIBESPACE_AGENTD_ROOT); } catch { }
 report();

@@ -1726,10 +1726,14 @@ class DeviceManager {
 
   /** Post one message into a conversation whose CLI runs on THIS device
    *  (2.362.0 cross-machine delivery rung). */
-  async peerPost({ cid, text, by }) {
+  async peerPost({ cid, text, by, waitMs = 0 }) {
     const conn = await this.connect();
     if (!conn.info?.capabilities?.includes?.('peer-post')) throw new Error('daemon lacks peer-post (capabilities gate)');
-    const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000, by });
+    // B-95fc U2: a hand-over to a conversation just resumed THERE asks the machine to wait for its own inbox (bounded there, 60 s);
+    // sent only to an agent whose hello advertises peer-post-wait (an older one posts at once, as today), and the request's own
+    // timer covers the wait — never «unanswered» for a wait the machine is still keeping
+    const wait = waitMs > 0 && conn.info?.capabilities?.includes?.('peer-post-wait') ? Math.min(60000, Math.floor(waitMs)) : 0;
+    const r = await this._request({ op: 'peer-post', cid, text, timeoutMs: 15000 + wait, by, ...(wait ? { inboxWaitMs: wait } : {}) });   // never `waitMs`: _request's bound reads it first
     if (r.error) throw new Error(r.error);
     const { id, op, ...rest } = r;
     return rest;

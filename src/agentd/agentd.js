@@ -1974,7 +1974,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'transcript-picture', 'pipe-detach' /* B-beaf: a CLOSE on a pipe session's channel ends its tail */, 'device-key', 'hub-key', 'answer-bounds' /* lane lg-remote-hardening (q-042 D8): an over-long answer or push is refused by name, the link kept */, 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'quota-refresh-bearer-law' /* B-5e0d: this agent's quota-refresh never sends a long-lived token */, 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'left-behind' /* B-69a7: a READ of what a stopped turn's tool left (pid, name, start only) */, 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'cli-level' /* B-24e2: probe-cli answers `level` for the build a conversation runs (an agent without it is asked nothing) — placed before the stream run: suites pin the list's head, its last twelve and its tail */, 'peer-state' /* B-95fc U1: is a conversation running here and its inbox open (an agent without it is asked nothing) */, 'peer-post-wait' /* B-95fc U2: peer-post's waitMs — the machine waits for its own registry record, then posts */, 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2457,13 +2457,21 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
         // here — same shared findPeer+postToPeer as the hub's local rung, run
         // where the inbox socket actually lives. The CLI applies its own
         // inbound controls; we never bypass a hold.
+        // B-95fc U2 (capability 'peer-post-wait'): a hand-over to a conversation the hub just RESUMED here carries `inboxWaitMs` — this
+        // machine waits for ITS OWN registry record of that conversation (the shared bounded poll, never a watch; it ends when this
+        // link is destroyed — nobody to answer, nothing posted) and then posts ONCE; past the bound it answers inbox_not_open.
         (async () => {
           try {
             const pm = require('./../peer-messaging.js');
-            const peer = pm.findPeer(String(msg.cid || ''));
+            const cid = String(msg.cid || '');
+            const waitMs = Number.isFinite(msg.inboxWaitMs) && msg.inboxWaitMs > 0 ? msg.inboxWaitMs : 0;   // named apart from a request's own `waitMs` (the client's bound reads that first)
+            const w = waitMs ? await pm.waitForPeer(cid, { waitMs, alive: () => !mux._dead }) : { peer: pm.findPeer(cid), waited: 0, cut: false };
+            if (w.cut) return;
+            const peer = w.peer;
+            if (!peer && waitMs) { mux.control({ op: 'peer-post-result', id: msg.id, ok: false, code: 'inbox_not_open', waited: w.waited, reason: `its inbox did not open on this machine within ${Math.round(w.waited / 1000)} s` }); return; }
             if (!peer) { mux.control({ op: 'peer-post-result', id: msg.id, ok: false, reason: 'no live inbox for this conversation on this machine' }); return; }
             const r = await pm.postToPeer(peer, String(msg.text || ''));
-            mux.control({ op: 'peer-post-result', id: msg.id, ok: !!r.ok, reason: r.reason || null, peerName: peer.name || null });
+            mux.control({ op: 'peer-post-result', id: msg.id, ok: !!r.ok, reason: r.reason || null, peerName: peer.name || null, ...(waitMs ? { waited: w.waited } : {}) });
           } catch (e) { mux.control({ op: 'peer-post-result', id: msg.id, error: String(e.message || e) }); }
         })();
         return;

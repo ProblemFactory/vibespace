@@ -497,6 +497,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       if (!r || !r.ok) {
         if (r && r.refused === 'spend') return { ok: false, code: 'spend_refused', id, error: r.reason || 'the spend ceiling refused this turn', why: r.why || null, retryAfter: r.retryAfter || 0, identity: r.identity || null, cap: r.cap == null ? null : r.cap, ...(r.capUnset ? { capUnset: true } : {}) };
         if (r && (r.refused === 'wrapper-no-steer' || r.refused === 'no-wake')) return { ok: false, code: 'held_for_next_turn', id, error: r.reason || 'held for the conversation’s next prompt' };
+        if (r && r.code === 'inbox_not_open') return { ok: false, code: 'inbox_not_open', id, error: r.reason || 'its inbox did not open on its machine' };   // B-95fc U2: the machine's wait ran out (nothing posted, nothing charged)
         return { ok: false, code: 'unreachable', id, error: (r && r.reason) || 'the agent could not be reached — the notices keep waiting for its next turn', phase: (r && r.phase) || null, unanswered: !!(r && r.unanswered) };   // B-6721: a frame written before a timeout, or a device's post sent and never answered, may have landed
       }
       // DELIVERED: take exactly what went out; what arrived meanwhile keeps waiting
@@ -598,7 +599,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   /** After the resume: the claimed frame, under the delivery's reason ('job-notification' | 'peer-message' — each spelled as a
    *  literal for the spend census), with the design's last sentence. → handOver's own answers. */
-  async function handOverWake(cid, claimed, { reason, tail = '', lead = '', from = null, card = null } = {}) {
+  async function handOverWake(cid, claimed, { reason, tail = '', lead = '', from = null, card = null, inboxWaitMs = 0 } = {}) {
     if (!claimed || !claimed.ok) return { ok: false, code: 'no_claim', error: 'nothing was claimed' };
     const { id, prep } = claimed;
     let doneP = null;
@@ -615,9 +616,10 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       const cardText = prep.bare ? String(card || lead || '') : S.handoverCardText(prep.n, prep.text, { why: prep.why });
       const fromName = (prep.bare && from) || FROM_NAME;   // a bare wake's card is the message that woke it (the design: «shows the … message card that woke it»)
       try {
+        const wait = Number.isFinite(inboxWaitMs) && inboxWaitMs > 0 ? { inboxWaitMs } : {};   // B-95fc U2: a conversation resumed on a paired machine — that machine waits for its inbox
         r = reason === 'peer-message'
-          ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'peer-message', fromName, cardText })
-          : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'job-notification', fromName, cardText });
+          ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'peer-message', fromName, cardText, ...wait })
+          : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'job-notification', fromName, cardText, ...wait });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
       return await finishHandOver(cid, id, prep, frame, r);   // awaited INSIDE the try: the claims are released only after the drain's landing wait
     } finally {

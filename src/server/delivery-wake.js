@@ -62,7 +62,7 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     for (;;) {
       let v = null;
       try { v = seams.inboxOf(cid, sessionId); } catch (e) { v = null; if (!unread) { unread = String((e && e.message) || e).slice(0, 120); log(`[delivery-wake] ${cid}: its inbox could not be looked up (${unread}) — asked again until the bound`); } }
-      if (v && v.open) return { ok: true, waited };
+      if (v && v.open) return { ok: true, waited, remote: v.remote === true };
       if (v && v.gone) return { ok: false, code: 'inbox_gone', why: 'it ended before its agent opened its inbox' };
       if (v && v.never) return { ok: false, code: 'no_mid_session', why: String(v.why || 'its agent takes no message mid-session') };
       if (waited >= INBOX_WAIT_MS) return { ok: false, code: 'inbox_not_open', why: `its agent did not open its inbox within ${INBOX_WAIT_MS / 1000} s${unread ? ` (its inbox could not be looked up: ${unread})` : ''}` };
@@ -157,7 +157,7 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     }
     // the POSTING mark goes on the entry, durably, before the frame can land (a hard kill now ⇒ «maybe delivered» at the boot)
     try { if (typeof seams.markPosting === 'function') seams.markPosting(cid); } catch (e) { log(`[delivery-wake] ${cid}: the posting mark could not be written — ${(e && e.message) || e}`); }
-    const ho = await sh.handOverWake(cid, claim, { reason: entry.spendReason, tail: D.FRAME_TAIL, lead: peer ? D.peerLead(entry.fromName) : '', from: entry.fromName || null, card: entry.cardText || null });
+    const ho = await sh.handOverWake(cid, claim, { reason: entry.spendReason, tail: D.FRAME_TAIL, lead: peer ? D.peerLead(entry.fromName) : '', from: entry.fromName || null, card: entry.cardText || null, ...(inbox.remote ? { inboxWaitMs: INBOX_WAIT_MS } : {}) });
     if (ho && ho.ok) {
       // RULE 3: the wake is SEEN — the window's line and the System panel's row read this fact (no For-you item per wake)
       const grantBy = g.rule === 'granted' ? ((deliveries.find((d) => d && d.granted && ended.jobs.includes(String(d.jobId))) || {}).grantBy || null) : null;
@@ -166,6 +166,14 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
       return { ok: true, outcome: 'delivered', sessionId: r.sessionId, delivered: ho.delivered || 0, rule: g.rule || null };
     }
     // the hand-over refused or failed AFTER the resume: the now-live conversation says why (the words wait for its next turn)
+    // B-95fc U2: the paired machine waited for the resumed CLI's inbox and it did not open — the same words as this machine's own wait
+    if (ho && ho.code === 'inbox_not_open') {
+      const why = `it was resumed as ${r.sessionId}, but its agent did not open its inbox within ${INBOX_WAIT_MS / 1000} s on its machine — the message waits for its next turn (sending anything starts it, or end and resume it)`;
+      const line = D.resumedRefusedLine(namesOf(entry), now(), { code: 'inbox_not_open', why });
+      line.params.seconds = INBOX_WAIT_MS / 1000;
+      try { if (typeof seams.noteResumed === 'function') seams.noteResumed(r.sessionId, line); } catch { }
+      return { ok: false, outcome: 'failed', code: 'inbox_not_open', why, sessionId: r.sessionId };
+    }
     const code = ho && ho.code === 'spend_refused' ? 'spend' : 'handover_failed';
     const why = (ho && ho.error) || 'the hand-over did not land';
     try { if (typeof seams.noteResumed === 'function') seams.noteResumed(r.sessionId, D.resumedRefusedLine(namesOf(entry), now(), { code, why })); } catch { }
@@ -227,6 +235,9 @@ function inboxOfOver({ deliver = () => null, activeSessions = null, isSocket = s
     // a LOCAL session of a kind whose inbox is the CLI's registry: not listed in this tick's shared read ⇒ not yet (no full lookup)
     let listed = true;
     try { if (s && !s.host && require('../backend-caps.js').capsOf(s.backend).peerDelivery === 'cli-inbox') { const ids = registryIds(); listed = !ids || ids.has(String(cid)); } } catch { listed = true; }
+    // B-95fc U2: a session on a PAIRED machine — the hub never polls that machine's registry over the link: its machine waits for
+    // its own inbox inside the hand-over's post (peer-post waitMs), so the inbox is «open» here and the wait is the machine's
+    if (s && s.host && d.peerReachable(cid)) return { open: true, remote: true };
     if (listed && d.peerReachable(cid)) return { open: true };
     if (gone) return { gone: true, why: 'its agent ended before it opened its inbox' };
     const b = typeof d.wakeBlock === 'function' ? d.wakeBlock(cid) : null;
