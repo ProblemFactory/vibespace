@@ -1881,6 +1881,7 @@ function helloAckVerdict(msg) {
   for (const k of ['arch', 'nodeVersion', 'openssl']) if (msg[k] != null && (typeof msg[k] !== 'string' || msg[k].length > HELLO_BOUNDS.text)) return no(`its ${k} is not a short string`);
   if (msg.elevated !== undefined && typeof msg.elevated !== 'boolean') return no('its elevated is not true / false');
   if (msg.nodeOwn !== undefined && msg.nodeOwn !== null && typeof msg.nodeOwn !== 'boolean') return no('its nodeOwn is not true / false');
+  if (msg.nodePath != null && typeof msg.nodePath !== 'string') return no('its nodePath is not a string'); // B-b83c (the hello's own bound covers its size; the hub reads only an absolute path: remote-shell.js agentNodeOf)
   return { ok: true };
 }
 

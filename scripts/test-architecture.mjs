@@ -5538,7 +5538,7 @@ await section(async () => {
   ok(r91.calls.length >= 60 && files91.length >= 14 && r91.missing.length === 0, `§91 ${r91.calls.length} act calls in ${files91.length} files, each with its \`by\`${r91.missing.length ? ' — RED: ' + r91.missing.map((c) => `${c.file}:${c.line} ${c.method}`).join(' | ') : ''}`);
   // the MUTANT the brief names: `by` dropped from the run-cmd of hosts.js's _hostShell ⇒ RED at that line
   const h91 = read('src/hosts.js');
-  const cut91 = h91.replace("const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });", "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });");
+  const cut91 = h91.replace("const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, ...(env ? { env } : {}) });", "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, ...(env ? { env } : {}) });");
   const m91 = cut91 !== h91 ? C91.censusActCalls({ root: REPO, files: ['src/hosts.js'], override: { 'src/hosts.js': cut91 } }) : { missing: [] };
   ok(cut91 !== h91 && m91.missing.length === 1 && m91.missing[0].method === 'runCmd', `§91 MUTANT: hosts.js _hostShell's runCmd without \`by\` ⇒ RED (${m91.missing.map((c) => c.file + ':' + c.line).join(', ') || 'quiet — WRONG'})`);
   const ctl91 = [

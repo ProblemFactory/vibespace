@@ -21,7 +21,10 @@ const READ_WAITS_MAX = 256;   // 主开发 01:20Z (4): the waits for a held host
 const READ_MS = 60_000;   // the B-f276 remainder's cure: a read again that does not answer in this long is let go (the next try reads afresh)
 const crypto = require('crypto');
 const SOCK = require('./sock-path.js');   // B-3767 unit 2: THE folder verdict (ensureSocketDir) for the ssh control folder
-const { REMOTE_PRELUDE, nodeFinder } = require('./remote-shell.js');
+const { REMOTE_PRELUDE, nodeFinder, agentNodeOf } = require('./remote-shell.js');
+// the hello a device's link holds, read from MEMORY (B-24e2's follow-up door helloInfo: status() also reads the socket's witness on
+// the loop); an older DeviceManager without it ⇒ status().info. B-b83c reads the agent's own node through it
+const helloOf = (dm) => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } };
 const { parseReceiptLines } = require('./harness-config'); // CFG| receipt lines from the shipped helper (design-harness-settings §6)
 const { usageBearerOk, usageBearerRefusal } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW (B-5e0d — the host rungs follow the local ladder's rule)
 const { execFile } = require('child_process');
@@ -1366,21 +1369,33 @@ class HostManager {
     return hit && hit.ip ? ['-o', `HostName=${hit.ip}`, '-o', `HostKeyAlias=${h.host}`] : [];
   }
 
+  /** B-b83c: the usage scanner's fallback runs the agent's OWN node first (the first argv word, no shell), else `node` */
+  static scannerNodeOf(dm) { return agentNodeOf(helloOf(dm)) || 'node'; }
+
+  /** B-b83c: a DIAL device's own node, as its hello said it (src/remote-shell.js agentNodeOf) — read from a link that is ALREADY up
+   *  (connectedDevice never starts a connect: no second wait before the probe's own); an ssh host, an older agent, a device not
+   *  connected now ⇒ null (the release's text) */
+  async _agentNodeOf(h) {
+    if (!h || h.transport !== 'dial') return null;
+    try { const dm = this.connectedDevice(h.id); return dm ? agentNodeOf(helloOf(dm)) : null; } catch { return null; }
+  }
+
   /** Run a read-only shell probe on ANY machine — ssh hosts via _ssh, dial
    *  devices via the device daemon's run-cmd (2.188.0: the Manage-Agents
    *  status probes were ssh-only, so a selected dial device showed everything
    *  as not-installed/unreachable while the same probes worked over ssh). */
   /** `by` (lane device-act-audit): who asked — a caller that knows (a person's route, an agent) names it; the hub's own
    *  probes are `system:hosts`. */
-  async _hostShell(h, script, { timeoutMs = 15000, by = 'system:hosts', consent = false } = {}) { // `consent` (B-69ec): a person's own press carries it
+
+  async _hostShell(h, script, { timeoutMs = 15000, by = 'system:hosts', consent = false, env = null } = {}) { // `consent` (B-69ec): a person's own press carries it; `env` (B-b83c): the dial run's env (the ssh road has none to hand)
     try {
       if (h.transport === 'dial') {
         // 15s, not the 6s default (review catch): accountsStatus rides this
         // inside session CREATE (linked/host-held rescue) — a tight bound
         // failed creates a slow-but-healthy link would have served.
         const dm = await this.deviceBounded(h.id, 15000);
-        if (consent) { const rc = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, consent: true }); return String(rc.stdout || ''); } // B-69ec: a person's create carries its consent
-        const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });
+        if (consent) { const rc = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, consent: true, ...(env ? { env } : {}) }); return String(rc.stdout || ''); } // B-69ec: a person's create carries its consent
+        const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, ...(env ? { env } : {}) });
         return String(r.stdout || '');
       }
       return String(await this._ssh(h, script, { timeoutMs }));
@@ -1849,6 +1864,7 @@ class HostManager {
    *  files. Read-only probe. */
   async agentToolsStatus(id) {
     const h = this.get(id);
+    const agentNode = await this._agentNodeOf(h);   // B-b83c: a dial device's own node (its hello said it); none ⇒ the release's text
     const probe = REMOTE_PRELUDE
       + `for f in ${HostManager.agentTools().join(' ')}; do `
       + 'p="$HOME/.vibespace/bin/$f"; if [ -f "$p" ]; then s=$( (sha256sum "$p" 2>/dev/null || shasum -a 256 "$p" 2>/dev/null) | cut -d" " -f1 ); echo "T|$f|$s"; else echo "T|$f|"; fi; done; '
@@ -1861,10 +1877,10 @@ class HostManager {
       // asked `--status` — an older helper would treat it as an ordinary
       // REGISTRATION RUN (a write inside a read-only probe). Otherwise the UI
       // says "not checked — reinstall the tools".
-      + 'if grep -q VIBESPACE_CLI_CONFIG "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; then ' + nodeFinder()
+      + 'if grep -q VIBESPACE_CLI_CONFIG "$HOME/.vibespace/bin/vibespace-hook-register.mjs" 2>/dev/null; then ' + nodeFinder({ agentNode: !!agentNode })
       + `if [ -n "$VS_NODE" ]; then VIBESPACE_CLI_CONFIG=${this._cliConfigPlanB64()} "$VS_NODE" "$HOME/.vibespace/bin/vibespace-hook-register.mjs" --status 2>/dev/null; else echo "CFG|*|*|no-node"; fi; `
       + 'else echo "CFG|*|*|unknown"; fi';
-    const out = await this._hostShell(h, probe, { timeoutMs: 12000 });
+    const out = await this._hostShell(h, probe, { timeoutMs: 12000, ...(agentNode ? { env: { VS_AGENT_NODE: agentNode } } : {}) });
     const st = { tools: {}, node: false, hooks: {}, keeperSessions: 0, cliConfig: parseReceiptLines(out), refused: this._ownerWriteRefusal() };
     for (const line of out.split('\n')) {
       const p = line.trim().split('|');
@@ -3288,7 +3304,8 @@ class HostManager {
           const scanPath = home + '/.vibespace/bin/vibespace-usage-scan';
           await dm.fsWrite(scanPath, script, { by: 'system:usage-harvest' }); // fsWrite mkdirs the parent
           const chunks = [];
-          const { code, error } = await dm.runStream('node', [scanPath], { onData: (b) => chunks.push(b), by: 'system:usage-harvest' });
+          // B-b83c: the agent's own node first (this fallback is reached by an older daemon — it says no nodePath — or by a failed op)
+          const { code, error } = await dm.runStream(HostManager.scannerNodeOf(dm), [scanPath], { onData: (b) => chunks.push(b), by: 'system:usage-harvest' });
           if (error) throw new Error(error);
           if (code !== 0) throw new Error('scanner exit ' + code);
           got = { text: Buffer.concat(chunks).toString('utf-8') };

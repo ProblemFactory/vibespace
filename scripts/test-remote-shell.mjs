@@ -204,5 +204,52 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
 
+// B-b83c: THE AGENT'S OWN NODE FIRST on the dial road — the hello says it (nodePath), the hub reads only a PATH (agentNodeOf), and
+// the node finder takes it from the run's env (VS_AGENT_NODE: never spliced into the text); none handed ⇒ the release's text
+{
+  const { agentNodeOf } = require('../src/remote-shell.js');
+  const { execFileSync } = await import('node:child_process');
+  const RELEASED_NF = 'VS_NODE="$(command -v node 2>/dev/null)"; '
+    + '[ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; '
+    + 'if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; '
+    + '[ -n "$VS_NODE" ] && export PATH="$(dirname "$VS_NODE"):$PATH"; ';
+  ok(nodeFinder() === RELEASED_NF && nodeFinder({}) === RELEASED_NF && nodeFinder({ agentNode: false }) === RELEASED_NF, 'B-b83c: with no agent node handed, the node finder is byte for byte the release\'s text (an older agent, the ssh road: asked nothing new)');
+  ok(nodeFinder({ agentNode: true }).endsWith(RELEASED_NF) && nodeFinder({ agentNode: true }).includes('"$VS_AGENT_NODE"') && !/VS_AGENT_NODE=[^"]/.test(nodeFinder({ agentNode: true })), 'B-b83c: handed, the finder reads the agent\'s node from the run\'s env first (VS_AGENT_NODE, quoted), then the release\'s rungs — the path is never typed into the text');
+  ok(agentNodeOf({ nodePath: '/opt/agent/node/bin/node' }) === '/opt/agent/node/bin/node' && agentNodeOf({ nodePath: 'C:\\Program Files\\vibespace\\node.exe', platform: 'win32' }) === 'C:/Program Files/vibespace/node.exe' && agentNodeOf({ nodePath: 'd:/n/node.exe', platform: 'win32' }) === 'd:/n/node.exe'
+    && agentNodeOf({ nodePath: 'C:/x/node', platform: 'linux' }) === null && agentNodeOf({ nodePath: '/' + 'x'.repeat(1024) }) === null && agentNodeOf({ nodePath: '/' + 'x'.repeat(1023) }) === '/' + 'x'.repeat(1023)
+    && [undefined, null, '', 'node', 'bin/node', '/a\nb', '/a\u0000b', 42, '\u202e/node', '/opt/\u202enode', '/opt/\u2066x\u2069/node', '/opt/\u200fnode', '/opt/\u061cnode'].every((v) => agentNodeOf({ nodePath: v }) === null) && agentNodeOf(null) === null && agentNodeOf({}) === null,
+    'B-b83c: the hub reads the hello\'s nodePath only as a PATH (absolute POSIX; a drive path from a Windows agent, given forward slashes); a name, a relative path, a control character, over 1024 characters, a drive path from another platform, not a string, absent ⇒ none');
+  // the finder in a REAL sh: the agent's node (a planted executable) wins over the PATH's; not executable / not handed ⇒ the release's rungs
+  const os = await import('node:os'), pth = await import('node:path');
+  const root = fs.mkdtempSync(pth.join(os.tmpdir(), 'vs-b83c-'));
+  try {
+    const agentNode = pth.join(root, 'agent node', 'node'), pathNode = pth.join(root, 'bin', 'node'), notExec = pth.join(root, 'plain', 'node');
+    for (const f of [agentNode, pathNode, notExec]) fs.mkdirSync(pth.dirname(f), { recursive: true });
+    fs.writeFileSync(agentNode, '#!/bin/sh\nexit 0\n', { mode: 0o755 }); fs.writeFileSync(pathNode, '#!/bin/sh\nexit 0\n', { mode: 0o755 }); fs.writeFileSync(notExec, 'x\n', { mode: 0o644 });
+    const run = (text, vsAgent) => execFileSync('/bin/sh', ['-c', `${text}printf %s "$VS_NODE"`], { encoding: 'utf8', timeout: 10000, env: { PATH: `${pth.dirname(pathNode)}:/usr/bin:/bin`, HOME: root, ...(vsAgent ? { VS_AGENT_NODE: vsAgent } : {}) } });
+    const got = { handed: run(nodeFinder({ agentNode: true }), agentNode), notExec: run(nodeFinder({ agentNode: true }), notExec), dir: run(nodeFinder({ agentNode: true }), pth.dirname(agentNode)), unset: run(nodeFinder({ agentNode: true })), control: run(nodeFinder(), agentNode) };
+    ok(got.handed === agentNode && got.notExec === pathNode && got.dir === pathNode && got.unset === pathNode, `B-b83c: in a real sh the agent's node (a folder with a space) wins over the PATH's; one that is not executable, a FOLDER, or none handed falls to the release's rungs (${JSON.stringify(got)})`);
+    ok(got.control === pathNode, 'RED CONTROL (the finder without the agent\'s rung, as released): the PATH\'s node answers though the agent handed its own');
+    // THE GIT BASH LINES, proven here (主开发 r317 (1)): a planted cygpath on the scratch PATH. One that maps the Windows drive path
+    // to a scratch file ⇒ the agent's node wins; one that exits 1 ⇒ the handed value is tried AS IT STANDS (no such file here) ⇒
+    // the release's rungs. NOT MEASURED in Git Bash itself (no Windows machine in our gates)
+    const cyg = pth.join(root, 'cyg-ok'), cygBad = pth.join(root, 'cyg-bad'), WINP = 'C:/Program Files/vibespace/node.exe';
+    for (const d of [cyg, cygBad]) fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(pth.join(cyg, 'cygpath'), `#!/bin/sh\n[ "$1" = "-u" ] && [ "$2" = ${JSON.stringify(WINP)} ] && printf '%s' ${JSON.stringify(agentNode)} && exit 0\nexit 1\n`, { mode: 0o755 });
+    fs.writeFileSync(pth.join(cygBad, 'cygpath'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const runIn = (extra, text, vsAgent) => execFileSync('/bin/sh', ['-c', `${text}printf %s "$VS_NODE"`], { encoding: 'utf8', timeout: 10000, env: { PATH: `${extra}:${pth.dirname(pathNode)}:/usr/bin:/bin`, HOME: root, VS_AGENT_NODE: vsAgent } });
+    const viaCyg = runIn(cyg, nodeFinder({ agentNode: true }), WINP), cygFails = runIn(cygBad, nodeFinder({ agentNode: true }), WINP), cygBadButFile = runIn(cygBad, nodeFinder({ agentNode: true }), agentNode);
+    ok(viaCyg === agentNode && cygFails === pathNode && cygBadButFile === agentNode, `B-b83c: the Git Bash lines with a planted cygpath — a drive path it maps to the agent's node wins; a cygpath that fails leaves the value as it stands (not a file here ⇒ the release's rungs; a real file ⇒ it) (${JSON.stringify({ viaCyg, cygFails, cygBadButFile })})`);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  // the wiring: the hello says it, the hub judges its shape, the dial road's two finder sites and the scanner's fallback take it
+  const rd = (f) => fs.readFileSync(new URL('../' + f, import.meta.url), 'utf8');
+  const AG = rd('src/agentd/agentd.js'), CL = rd('src/agentd/client.js'), DL = rd('src/spawn/dial.js'), HS = rd('src/hosts.js');
+  ok(AG.includes('          nodePath: process.execPath, //') && CL.includes("if (msg.nodePath != null && typeof msg.nodePath !== 'string') return no('its nodePath is not a string');"),
+    'WIRING: the agent\'s hello-ack says nodePath (process.execPath); the hub\'s greeting judge refuses a nodePath that is no string (its size is the hello\'s own bound: a long real path never locks a device out)');
+  ok(DL.includes('+ nodeFinder({ agentNode: !!agentNode })') && DL.includes('...(agentNode ? { VS_AGENT_NODE: agentNode } : {})') && HS.includes("nodeFinder({ agentNode: !!agentNode })") && HS.includes('...(agentNode ? { env: { VS_AGENT_NODE: agentNode } } : {})')
+    && HS.includes('await dm.runStream(HostManager.scannerNodeOf(dm), [scanPath]') && HS.includes("static scannerNodeOf(dm) { return agentNodeOf(helloOf(dm)) || 'node'; }") && HS.includes("const helloOf = (dm) => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } };") && (HS.match(/\.\.\.\(env \? \{ env \} : \{\}\)/g) || []).length === 2,
+    'WIRING: the dial road\'s hook register (spawn/dial.js) and the tools status (hosts.js) hand VS_AGENT_NODE in the run\'s env with the agent\'s rung; the dial run carries that env; the scanner\'s fallback runs the agent\'s node first');
+}
+
 console.log(fail ? `FAIL (${fail})` : `ALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

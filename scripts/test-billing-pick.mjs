@@ -919,6 +919,20 @@ console.log('— ⑨b B-77ed: a paired machine reads the START\'s files — the 
   const LOST_OLD = M.load('src/machine-probes.js', anchored(PROBES_SRC, 'return shSaidOnce ? null : \'\';', 'return \'\';', 'lost-sh-reads-none'), 'lost-sh-reads-none');
   const lostOld = await lostOf(LOST_OLD);
   ok(lostOld.then === 'none', `RED CONTROL (a lost sh read as the empty word): «none» while an earlier link may still start under that shell (${lostOld.then})`, lostOld);
+  // B-b83c (主开发 r317 (2)): two BEHAVIOUR legs where only source pins stood — a stand-in device handle each
+  {
+    const linkOf = (info, { memory = true } = {}) => ({ ...(memory ? { helloInfo: () => info, isLinked: () => true } : {}), status: () => ({ connected: true, info }) });
+    const AGENT = '/opt/agent/node/bin/node';
+    ok(HostManager.scannerNodeOf(linkOf({ nodePath: AGENT })) === AGENT && HostManager.scannerNodeOf(linkOf({})) === 'node' && HostManager.scannerNodeOf(linkOf({ nodePath: AGENT }, { memory: false })) === AGENT && HostManager.scannerNodeOf(linkOf({ nodePath: 'node' })) === 'node' && HostManager.scannerNodeOf({}) === 'node',
+      'B-b83c: the usage scanner\'s fallback runs the agent\'s own node as its first word when the hello said one (read from memory, or status() on an older link), else `node`');
+    let connects = 0, asked = 0;
+    const host = (transport, dm) => ({ connectedDevice: () => { asked++; return dm; }, deviceBounded: async () => { connects++; return dm; } });
+    const ssh = await HostManager.prototype._agentNodeOf.call(host('ssh', linkOf({ nodePath: AGENT })), { id: 'h-ssh', transport: 'ssh' });
+    const askedSsh = asked;
+    const dialUp = await HostManager.prototype._agentNodeOf.call(host('dial', linkOf({ nodePath: AGENT })), { id: 'h-dial', transport: 'dial' });
+    const dialDown = await HostManager.prototype._agentNodeOf.call(host('dial', null), { id: 'h-dial', transport: 'dial' });
+    ok(ssh === null && askedSsh === 0 && dialUp === AGENT && dialDown === null && connects === 0, `B-b83c: the host's reader answers nothing for an ssh host (nothing asked), the agent's node for a dial link already up, nothing for one that is not — and never opens a connect (${connects})`, { ssh, dialUp, dialDown, connects, asked });
+  }
   // WHICH READ answered (its read's S1): a CLAUDE_CONFIG_DIR the profile sets but does NOT export is the shell's variable, never a
   // child's — the native child (as the CLI, a child of that shell) does not see it, today's printf on a POSIX machine does
   fs.writeFileSync(PROF, `echo x >> ${JSON.stringify(LCOUNT)}\nCLAUDE_CONFIG_DIR=${LCCD}\n`); fs.rmSync(LCOUNT, { force: true });

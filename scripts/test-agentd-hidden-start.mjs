@@ -304,6 +304,10 @@ console.log('— B-3d06: the device agent\'s spawn PATH, by the platform\'s own 
   const SS = fs.readFileSync(path.join(REPO, 'src/agentd/stream-screen.js'), 'utf8'), SPT = fs.readFileSync(path.join(REPO, 'src/stream-plan.js'), 'utf8');
   ok(SS.includes('const PATH = [pathOf(lookupEnv, platform), pathOf(env, platform)].filter(Boolean).join(path.delimiter);') && !/env\.PATH \|\| env\.Path/.test(SS) && !/env\.PATH \|\| env\.Path/.test(SPT),   // stale-pins: kept — a deliberate absence check (no reader of two fixed spellings)
     'WIRING: stream-screen reads the spawn env\'s PATH through pathOf; no reader of two fixed spellings is left in the stream modules');
+  const DM = fs.readFileSync(path.join(REPO, 'src/desktop-mic.js'), 'utf8');
+  ok(SS.includes('SP.ffmpegCandidates({ platform, env: { PATH, LOCALAPPDATA: lookupEnv.LOCALAPPDATA, USERPROFILE: lookupEnv.USERPROFILE }') && DM.includes("SP.ffmpegCandidates({ platform: platform === 'win32' ? 'win32' : 'linux', env: { PATH: lookupEnv.PATH || lookupEnv.Path || ''")
+    && (SS + DM).split('SP.ffmpegCandidates(').length === 3,
+    'PIN: both callers of ffmpegCandidates hand it a PATH word (stream-plan reads that one spelling: the second was dropped)');
   ok(withSpawnPath({}, { platform: 'win32', agentDirs: WIN_DIRS, fallback: 'C:\\Windows' }).PATH === `C:\\Windows;${NODE};${LBIN}`, 'win32: an env with no PATH takes the fallback first, the agent\'s folders after, by the same separator');
   // POSIX: byte for byte the release's rule with the same agent folders, over shapes a machine has (an extra, a dup, empty entries,
   // none — the fallback), and the whole env object

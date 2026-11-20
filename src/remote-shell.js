@@ -30,8 +30,13 @@ const REMOTE_PRELUDE = 'export PATH="$HOME/.local/bin:$PATH"; [ -s "$HOME/.nvm/n
  * every `#!/usr/bin/env node` agent tool on a dash host. Emit this BEFORE any
  * command that needs node when the shell may not be bash.
  */
-function nodeFinder() {
-  return 'VS_NODE="$(command -v node 2>/dev/null)"; '
+function nodeFinder({ agentNode = false } = {}) {
+  // B-b83c: on the DIAL road the agent's own node comes FIRST — handed in the run's env as VS_AGENT_NODE (an argv-safe value,
+  // never spliced into this text), a FILE that runs; where the shell has cygpath (Git Bash, MSYS2) a drive path is turned into the
+  // shell's own spelling (/c/…), so the release's last step (its folder on PATH, for THIS run only: the agent's own program — the
+  // hook register — nothing of the person's) reads it whole. None handed ⇒ this text is byte for byte the release's
+  return (agentNode ? 'VS_NODE=""; if [ -n "$VS_AGENT_NODE" ]; then vs_a="$VS_AGENT_NODE"; command -v cygpath >/dev/null 2>&1 && vs_a="$(cygpath -u "$vs_a" 2>/dev/null || printf %s "$vs_a")"; [ -f "$vs_a" ] && [ -x "$vs_a" ] && VS_NODE="$vs_a"; fi; [ -z "$VS_NODE" ] && ' : '')
+    + 'VS_NODE="$(command -v node 2>/dev/null)"; '
     + '[ -z "$VS_NODE" ] && VS_NODE="$(ls -1 "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort | tail -1)"; '
     + 'if [ -z "$VS_NODE" ]; then for vs_c in /usr/local/bin/node /usr/bin/node /opt/homebrew/bin/node "$HOME/.local/bin/node"; do [ -x "$vs_c" ] && VS_NODE="$vs_c" && break; done; fi; '
     + '[ -n "$VS_NODE" ] && export PATH="$(dirname "$VS_NODE"):$PATH"; ';
@@ -108,4 +113,14 @@ function sessionCwdExport(cwd, shq) {
   return `VIBESPACE_SESSION_CWD=${shq(cwd)}; export VIBESPACE_SESSION_CWD; `;
 }
 
-module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET, sessionCwdExport };
+/** B-b83c: the agent's OWN node as the hub read it from the hello (`nodePath`) — a PATH, never a display string: absolute (POSIX
+ *  `/…`, or a drive `X:\…` / `X:/…`), no control or direction-changing format character, at most 1024 characters; a drive path given forward slashes (a word
+ *  the device's sh runs as a path, never a name it searches PATH for). Anything else — an older agent says none — ⇒ null. PURE. */
+function agentNodeOf(info) {
+  const p = info && typeof info.nodePath === 'string' ? info.nodePath : '';
+  if (!p || p.length > 1024 || /[\u0000-\u001f\u007f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/.test(p)) return null;   // control + direction-changing format characters
+  if (/^[A-Za-z]:[\\/]/.test(p)) return info.platform === 'win32' ? p.replace(/\\/g, '/') : null;   // a drive path only from a Windows agent
+  return p.startsWith('/') ? p : null;
+}
+
+module.exports = { REMOTE_PRELUDE, TOOLS_ON_PATH, nodeFinder, agentNodeOf, buildRemoteShellPrelude, buildRemoteExec, AMBIENT_OAT_UNSET, sessionCwdExport };

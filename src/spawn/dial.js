@@ -13,7 +13,7 @@
  * ended the create — ws-create returns on it). No `break;` crosses the seam (a stray one would be a
  * SyntaxError here, not a silent change of the do{}while(0) exit).
  */
-const { buildRemoteExec, nodeFinder, buildRemoteShellPrelude } = require('../remote-shell');
+const { buildRemoteExec, nodeFinder, agentNodeOf, buildRemoteShellPrelude } = require('../remote-shell');
 const { sweepWriters } = require('../writer-sweep');
 const { S0_SH } = require('../login-shell'); // the login-shell ladder, spelled once (lane cli-shell-truth)
 
@@ -75,17 +75,18 @@ function dialLadder(c) {
               catch { await dm.fsWrite(`${bin}/${tokName}`, Buffer.from(session.agentToken), { by }); }
               // chmod: tools executable, token 0600, then register the hook in
               // the device's OWN claude/codex configs (its local CLI fires it)
+              const agentNode = agentNodeOf((() => { try { return typeof dm.helloInfo === 'function' ? dm.helloInfo() : dm.status().info; } catch { return null; } })()); // B-b83c: the agent's own node (its hello said it) — read from memory (B-24e2's helloInfo)
               await dm.runCmd('sh', ['-c',
                 `chmod +x "${bin}"/vibespace-* "${bin}/agent-browser" "${home}/.vibespace/editor/code" 2>/dev/null; chmod 600 "${bin}/${tokName}"; `
                 // same POSIX node finder as the ssh prelude (2.244.4 — a bare
-                // `node` is unresolvable in dash/non-login shells on nvm hosts)
-                + nodeFinder()
+                // `node` is unresolvable in dash/non-login shells on nvm hosts); the agent's own node FIRST when its hello said it
+                + nodeFinder({ agentNode: !!agentNode })
                 // the root verdict (src/server-root.js): no register on a refused root
                 + (ownerWriteRefusal() ? 'true' : `[ -n "$VS_NODE" ] && "$VS_NODE" "${bin}/vibespace-hook-register.mjs" 2>/dev/null || true`)],
                 // VIBESPACE_CLI_CONFIG rides the daemon's run-cmd env merge (no new
                 // op, no capability bit — run-cmd predates this): the device's own
                 // claude/codex configs get the managed keys too (design §6).
-                { env: { VIBESPACE_CLI_CONFIG: cliConfigPlanB64() }, timeoutMs: 12000, by }).catch(() => {});
+                { env: { VIBESPACE_CLI_CONFIG: cliConfigPlanB64(), ...(agentNode ? { VS_AGENT_NODE: agentNode } : {}) }, timeoutMs: 12000, by }).catch(() => {});
               // VIBESPACE_API back-tunnel: a loopback port ON THE DEVICE whose
               // accepts ride the dial link back into our own server port.
               const net = require('net');

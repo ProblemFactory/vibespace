@@ -364,7 +364,7 @@ console.log('— ⑧ the census: every hub act call names who asked');
   const r = censusActCalls({ root: REPO });
   ok(r.missing.length === 0 && r.calls.length >= 60, `${r.calls.length} act calls in ${new Set(r.calls.map((c) => c.file)).size} files, each with its by`, r.missing);
   const h = read('src/hosts.js');
-  const cut = h.replace("const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });", "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs });");
+  const cut = h.replace("const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, ...(env ? { env } : {}) });", "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, ...(env ? { env } : {}) });");
   const m = censusActCalls({ root: REPO, files: ['src/hosts.js'], override: { 'src/hosts.js': cut } });
   ok(cut !== h && m.missing.length === 1 && m.missing[0].method === 'runCmd', 'MUTANT: hosts.js _hostShell run-cmd without by ⇒ RED', m.missing);
 }

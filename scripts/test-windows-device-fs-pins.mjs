@@ -26,10 +26,10 @@ const TABLE = [
   { file: 'src/remote-fs.js', has: "const r = await dm.runStream('sh', ['-c', cmd], { onData:", verdict: 'win32', how: 'fetchToLocal: _winFetchToLocal over read-range; an archive entry refused by name (WIN_REFUSED[archive-entry])' },
   { file: 'src/exit-proxy.js', has: "await dm.runCmd(XS.POSIX_SHELL, ['-lc', cmd], { ...opts, by: opts.by });", verdict: 'win32', how: 'run-shell: the agent picks cmd.exe; a Windows agent without run-shell is refused by name (canRunLine ⇒ device_agent_outdated) before this rung' },
   { file: 'src/ctx-sync.js', has: "const inv = await dm.runCmd('sh', ['-c',", verdict: 'refused', how: DOOR },
-  { file: 'src/hosts.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by });", verdict: 'refused', how: DOOR },
+  { file: 'src/hosts.js', has: "const r = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, ...(env ? { env } : {}) });", verdict: 'refused', how: DOOR },
   // B-69ec: the remote CLI ask of a person's create (src/server/remote-cli.js) carries its consent — the consent rides the request
   // only: runCmd (src/agentd/client.js) asks THE DOOR before it, so a Windows machine with no `sh` refuses it by name, as the plain probe on the next line of `_hostShell`
-  { file: 'src/hosts.js', has: "if (consent) { const rc = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, consent: true });", verdict: 'refused', how: DOOR },
+  { file: 'src/hosts.js', has: "if (consent) { const rc = await dm.runCmd('sh', ['-c', script], { timeoutMs, by, consent: true, ...(env ? { env } : {}) });", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:hosts' })).stdout", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "for c in dtach node claude codex", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "out = String((await dm.runCmd('sh', ['-c', cmd], { timeoutMs: 10000, by })).stdout", verdict: 'refused', how: DOOR },
@@ -38,7 +38,7 @@ const TABLE = [
   { file: 'src/hosts.js', has: "else if (base.startsWith('~/')) base = String((await dm.runCmd('sh'", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "const find = await dm.runCmd('sh', ['-c', `find ${root}", verdict: 'refused', how: DOOR },
   { file: 'src/hosts.js', has: "const home = (await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:usage-harvest' })).stdout.trim();", verdict: 'refused', how: DOOR },
-  { file: 'src/hosts.js', has: "await dm.runStream('node', [scanPath]", verdict: 'refused', how: 'reached only past the `echo $HOME` line above it, which the door refuses on Windows', argv: true, guard: { has: "const home = (await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:usage-harvest' })).stdout.trim();", within: 5 } },
+  { file: 'src/hosts.js', has: "await dm.runStream(HostManager.scannerNodeOf(dm), [scanPath]", verdict: 'refused', how: 'reached only past the `echo $HOME` line above it, which the door refuses on Windows', argv: true, guard: { has: "const home = (await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { by: 'system:usage-harvest' })).stdout.trim();", within: 6 } },
   { file: 'src/machine-mounts.js', has: 'const r = await dm.runCmd(cmd, args, { stdin: input, timeoutMs: 60000, by: \'system:machine-mounts\' });', verdict: 'refused', how: 'argv carrier: its `sh` argvs hit the door; detectOS\'s `uname` answers nothing on Windows ⇒ \'windows\' (the mount refuses the OS)', argv: true },
   { file: 'src/machine-mounts.js', has: "const r = await dm.runStream('sh', ['-c', script]", verdict: 'refused', how: DOOR },
   { file: 'src/machine-mounts.js', has: "const home = String((await dm.runCmd('sh', ['-c', 'echo \"$HOME\"'], { timeoutMs: 8000, by: 'system:machine-mounts' })).stdout", verdict: 'refused', how: DOOR },
