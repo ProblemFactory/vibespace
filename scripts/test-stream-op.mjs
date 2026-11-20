@@ -747,20 +747,37 @@ console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): n
   const offOk = (x) => x.off && x.off.length === 1 && x.off[0].mode === 'off' && x.off[0].pids.length === 3 && x.off[0].pids.includes(process.pid) && x.eco === 'off';
   const real = await lifetime(SS);
   ok(offOk(real.stop) && real.stop.back && offOk(real.crash) && real.crash.ended === 'encoder_exited' && real.crash.back, 'THE MODULE: one opt-out at each start (this process + both ffmpegs, ecoqos off); given back at the stop AND after the encoder crashed (encoder_exited, no stop asked)', real);
-  // MUTANTS: a copy of the module with one line changed, required from the scratch dir (its own requires pointed at the tree)
+  // MUTANTS: a copy of the module with one line changed, required from the scratch dir. EVERY relative require of the copy is
+  // resolved by ONE rule against the module's own folder (src/agentd), never a list of names, so the next sibling the module
+  // requires cannot break the copy (主开发 r593: B-3d06's `../agent-env.js` was not on the old list of four ⇒ the copy could not
+  // load, the suite crashed, and §9b's mutant rows and everything from §10 on never ran on the candidate). A copy that still
+  // cannot load is a NAMED red row of its mutant, never a crash that hides the rows behind it.
   const ssText = fs.readFileSync(path.join(REPO, 'src/agentd/stream-screen.js'), 'utf8');
+  const SS_DIR = path.join(REPO, 'src/agentd');
+  const relReqs = (t) => [...t.matchAll(/require\((['"])(\.\.?\/[^'"]+)\1\)/g)].map((m) => m[2]);
+  const pointAtTree = (t) => t.replace(/require\((['"])(\.\.?\/[^'"]+)\1\)/g, (m, q, rel) => `require(${JSON.stringify(path.resolve(SS_DIR, rel))})`);
+  // the release's chain (four names), kept only as the RED control below
+  const byNames = (t) => t.replace("require('../stream-plan.js')", 'require("/t/stream-plan.js")').replace("require('../stream-av1.js')", 'require("/t/stream-av1.js")')
+    .replace("require('../ffmpeg-install.js')", 'require("/t/ffmpeg-install.js")').replace("require('./stream-mac.js')", 'require("/t/stream-mac.js")');
+  const relsHere = relReqs(ssText);
+  const plantedSib = ssText.replace("const path = require('path');\n", "const path = require('path');\nconst SIB = require('./watch-guard.js');\n");
+  ok(relsHere.length >= 5 && relReqs(pointAtTree(ssText)).length === 0 && relsHere.every((r) => fs.existsSync(path.resolve(SS_DIR, r)))
+    && plantedSib !== ssText && relReqs(pointAtTree(plantedSib)).length === 0 && relReqs(byNames(plantedSib)).includes('./watch-guard.js'),
+    `the mutant copy's requires: all ${relsHere.length} relative ones resolved against src/agentd by ONE rule (each a file of the tree), none left; RED control: a NEW sibling require planted in the text is resolved by the rule, while the release's name list leaves it (${JSON.stringify(relReqs(byNames(plantedSib)))})`, { relsHere });
+  const notLoaded = {};
   const mutant = (name, from, to) => {
     if (ssText.split(from).length !== 2) return null; // the anchor moved: the mutant is not made (and its row is RED)
     const f = path.join(copyDir, `mut-${name}`, 'stream-screen.js'); fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, ssText.replace(from, to).replace("require('../stream-plan.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-plan.js'))})`).replace("require('../stream-av1.js')", `require(${JSON.stringify(path.join(REPO, 'src/stream-av1.js'))})`).replace("require('../ffmpeg-install.js')", `require(${JSON.stringify(path.join(REPO, 'src/ffmpeg-install.js'))})`) /* lane machine-needs-at-pairing pick 2: the stamp's PURE row */.replace("require('./stream-mac.js')", `require(${JSON.stringify(path.join(REPO, 'src/agentd/stream-mac.js'))})`));
-    return require(f);
+    fs.writeFileSync(f, pointAtTree(ssText.replace(from, to)));
+    try { return require(f); } catch (e) { notLoaded[name] = String((e && e.message) || e).split('\n')[0]; return null; }   // a NAMED red row, never a crash
   };
+  const why = (name, m) => (m ? '' : notLoaded[name] ? ` — THE COPY DID NOT LOAD: ${notLoaded[name]}` : ' — its anchor moved: no mutant made');
   const m1 = mutant('no-give-back', '    qosScript([process.pid], true);\n', '\n');
   const r1 = m1 && await lifetime(m1);
-  ok(r1 && offOk(r1.stop) && !r1.stop.back && !r1.crash.back, 'MUTANT — the keeper forgets the give-back: this process stays opted out after the stop and after the crash ⇒ both lifetime rows are RED', r1 && { stop: r1.stop.after, crash: r1.crash.after });
+  ok(r1 && offOk(r1.stop) && !r1.stop.back && !r1.crash.back, 'MUTANT — the keeper forgets the give-back: this process stays opted out after the stop and after the crash ⇒ both lifetime rows are RED' + why('no-give-back', m1), r1 && { stop: r1.stop.after, crash: r1.crash.after });
   const m2 = mutant('crash-keeps-it', '      stopped = true;\n      close(false);\n', '      stopped = true;\n      for (const c of procs) end(c); teardownMapper();\n');
   const r2 = m2 && await lifetime(m2);
-  ok(r2 && r2.stop.back && r2.crash.ended === 'encoder_exited' && !r2.crash.back, 'MUTANT — an ending by name skips the give-back (only a stop gives it back): the crash row is RED — an encoder crash would leave the agent opted out for ever', r2 && { stop: r2.stop.after, crash: r2.crash.after });
+  ok(r2 && r2.stop.back && r2.crash.ended === 'encoder_exited' && !r2.crash.back, 'MUTANT — an ending by name skips the give-back (only a stop gives it back): the crash row is RED — an encoder crash would leave the agent opted out for ever' + why('crash-keeps-it', m2), r2 && { stop: r2.stop.after, crash: r2.crash.after });
 }
 
 console.log('§10 THE UDP LEG: the daemon\'s own datagrams to the hub relay — the picture past a slow device link');
