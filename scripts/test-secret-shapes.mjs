@@ -36,10 +36,10 @@ const spellingsOf = (v) => {
 let pass = 0, fail = 0;
 const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
 
-const { redactSecrets, REDACTED, INPUT_MAX } = r('src/secret-shapes.js');
+const { redactSecrets, redactByValue, wordValue, randomRun, REDACTED, INPUT_MAX } = r('src/secret-shapes.js');
 const belt = r('src/agent-output-belt.js');
 const SB = r('src/secret-box.js');
-const { scratch } = await import('./scratch.mjs');
+const { scratch, anchored } = await import('./scratch.mjs');
 
 // values built at runtime (secret-scan safe)
 const MAT = crypto.randomBytes(20).toString('hex');
@@ -87,12 +87,13 @@ console.log('§1 redactSecrets — the shared masker’s contract (R1–R8 exhau
     const tok = pre + mat, probe = mat.slice(-12);
     for (const [tail, kept] of [['-deploy', !dash], ['_prod', !under], ['x', fixed], ['', false]]) {
       const out = redactSecrets('job ' + tok + tail).text;
+      for (const typed of [false, true]) if (redactByValue('job ' + tok + tail, { typed }).text !== out) famBad.push(`${fam} + «${tail}»: the name rule (r9 redactByValue${typed ? ', typed' : ''}) differs → ${redactByValue('job ' + tok + tail, { typed }).text}`);
       if (out.includes(probe) || !out.includes(REDACTED)) famBad.push(`${fam} + «${tail}» → ${out}`);
       else if (kept && !out.endsWith(REDACTED + tail)) famBad.push(`${fam} + «${tail}»: the tail its class does not hold is not kept → ${out}`);
     }
-    for (const lead of ['ci_', '-', ' ']) { const out = redactSecrets(lead + tok).text; if (out.includes(probe)) famBad.push(`«${lead}» + ${fam} → ${out}`); }
+    for (const lead of ['ci_', '-', ' ']) { const out = redactSecrets(lead + tok).text; if (out.includes(probe) || redactByValue(lead + tok).text !== out || redactByValue(lead + tok, { typed: true }).text !== out) famBad.push(`«${lead}» + ${fam} → ${out}`); }
   }
-  ok(!famBad.length, `EVERY family its own tail: ${FAM.length} families × {-, _, a word character, the end} and after \`_\` / \`-\` / a blank — the material hidden, a tail its class does not hold kept in clear${famBad.length ? ' — ' + famBad.join(' | ') : ''}`);
+  ok(!famBad.length, `EVERY family its own tail: ${FAM.length} families × {-, _, a word character, the end} and after \`_\` / \`-\` / a blank — the material hidden, a tail its class does not hold kept in clear; the name rule (r9, as typed and stored) the same text${famBad.length ? ' — ' + famBad.join(' | ') : ''}`);
   const FP = ['my-deploy', 'gh-pages', 'npm-run-all', 'npm_config_cache', 'sk-learn', 'hf_hub_download', 'xoxo-gossip', 'AKIA-docs', 'ASIAN_FOOD', 'glpat-x', 'jbt_x', 'deploy-2'];
   ok(FP.every((t) => redactSecrets('run ' + t + ' now').text === 'run ' + t + ' now'), 'the false-positive controls stay in clear (my-deploy, gh-pages, npm-run-all, npm_config_cache, sk-learn, …)', FP.map((t) => redactSecrets(t).text));
   const shp = redactSecrets('x');
@@ -100,6 +101,93 @@ console.log('§1 redactSecrets — the shared masker’s contract (R1–R8 exhau
   ok(redactSecrets('').text === '' && redactSecrets(null).text === '', 'empty / null is handled');
   const huge = 'a'.repeat(INPUT_MAX + 5000);
   ok(redactSecrets(huge).text.length <= INPUT_MAX, 'bounded at INPUT_MAX (never parsed whole past it)');
+}
+
+console.log('§1b THE NAME RULE — a job\'s NAME is a label a person reads (lane job-notify-user r9, the rule fixed by the acceptance owner)');
+{
+  // accept-r8 (confirmed 0 + 2): r8 ran R8's random run on the SLUG (a name of short words became one run, erased whole) and judged a
+  // word row's value by `valueShaped` (plain Capitalized words joined by `- _ .` were no value — a passphrase after `password:` stored
+  // in clear; a trailing `!` stripped — «password: Summer1!» kept 7 of 8). THE RULE: (a) the shape rows anywhere — and the run row
+  // (20+, three classes, none of the six readable shapes) on the name AS TYPED only; (b) a word row hides ONLY the one token after its
+  // word, and only a value (8+ counting its punctuation AND two classes, or 8+ digits, or `- _ .` joining 3+ parts with a capital / digit)
+  const AN = (n) => { let o = ''; while (o.length < n) o += crypto.randomBytes(24).toString('base64').replace(/[^A-Za-z0-9]/g, ''); return o.slice(0, n); };
+  const T = (t) => redactByValue(t, { typed: true }).text, S = (t) => redactByValue(t).text, R = REDACTED;
+  let V = AN(13) + '9!'; while (!/[a-z]/.test(V) || !/[A-Z]/.test(V)) V = AN(13) + '9!';   // a 15-character value with every class
+  const FAMV = ['gh', 'p_'].join('') + AN(36), JW = ['ey', 'J'].join('') + AN(20) + '.' + ['ey', 'J'].join('') + AN(20) + '.' + AN(24), EY = ['ey', 'J'].join('');
+  const H40 = crypto.randomBytes(20).toString('hex'), H64 = crypto.randomBytes(32).toString('hex');
+  const PW = ['Correct', 'Horse', 'Battery', 'Staple'], UPW = ['CORRECT', 'HORSE', 'BATTERY'].join('-');   // passphrase fixtures built at run time (secret-scan)
+  // (b) — the brief's words: the ONE token after the word, and only a value
+  const KEEP = ['password reset', 'token refresh', 'auth: fix login flow', 'bearer of bad news', 'password change', 'nightly password rotation', 'session: cleanup old rows', 'check bearer rotation', 'token: refresh',
+    'password nightly-rotation', 'password GITHUB_TOKEN', 'auth=fix', 'auth: fix-login-flow', '?token=refresh&x=1', 'password:\n  reset the vault', '    Password    REG_SZ    rotate', 'password hunter2',
+    'auth: fix login flow 2026-10-29', 'session: nightly cleanup v2.369.361', 'session: refactor src/jobs.js', 'key: renew ~/.ssh/config', 'sig: verify release v1.2.3-rc1', 'my-deploy', 'gh-pages'];
+  const kept = KEEP.filter((t) => T(t) !== t || S(t) !== t);
+  ok(!kept.length, `(b) a word row keeps an ordinary token — ${KEEP.length} names whole («password reset», «token refresh», «auth: fix login flow», «bearer of bad news», a date / a version / a path AFTER the token, a joined lowercase word…)${kept.length ? ' — ' + kept.map((t) => `«${t}» → ${T(t)}`).join(' | ') : ''}`);
+  const HIDE = [['rotate password: ' + PW.join('-'), 'rotate password: ' + R], ['set DB_PASSWORD=Correct.Horse.Battery.Staple', 'set DB_PASSWORD=' + R], ['password: Summer1!', 'password: ' + R],
+    ['password Passw0rd', 'password ' + R], ['password 12345678', 'password ' + R], ['login password Correct_Horse_Battery_Staple', 'login password ' + R], ['api_key=' + UPW, 'api_key=' + R],
+    ['token: 1234-5678-9012', 'token: ' + R], ['ticket: PROJ-1234 rollout', 'ticket: ' + R + ' rollout'], ['password ' + V + ' rotation', 'password ' + R + ' rotation'], ['rotate Bearer ' + V, 'rotate Bearer ' + R],
+    ['?token=' + V.slice(0, 14) + '&x=1', '?token=' + R + '&x=1'], ['password:\n  ' + V, 'password:\n  ' + R], ['token: |\n  ' + V, 'token: |\n  ' + R], ['    Password    REG_SZ    ' + V, '    Password    REG_SZ    ' + R],
+    ['token ' + AN(30), 'token ' + R], ['password: "' + V + ' x"', 'password: "' + R + '"'], ['password password ' + V, 'password password ' + R]];
+  const hBad = HIDE.filter(([t, want]) => T(t) !== want || S(t) !== want).map(([t, want]) => `«${t.slice(0, 34)}» → ${T(t)} (want ${want})`);
+  ok(!hBad.length, `(b) a VALUE after every word row is hidden — the token only, the word and the words after it stay (R2 \`password:\` / \`DB_PASSWORD=\` / \`ticket:\`, its next line, a YAML block, R3, R5 both, R6, R7; a Capitalized / UPPER / digit passphrase joined by \`- _ .\`; Summer1! with its !; 8+ digits)${hBad.length ? ' — ' + hBad.join(' | ') : ''}`);
+  const J = { 'Summer1!': true, 'hunter2!': true, 'Passw0rd': true, '12345678': true, 'Correct-Horse-Battery-Staple': true, 'CORRECT-HORSE-BATTERY': true, '1234-5678-9012': true, 'reset-v2': true, 'ResetFlow': true,
+    hunter2: false, reset: false, refresh: false, rotation: false, 'fix-login-flow': false, 'CORRECT-HORSE': false, 'nightly-rotation': false, 'GITHUB_TOKEN': false, ['ghp_' + R]: false };
+  const jBad = Object.entries(J).filter(([t, want]) => wordValue(t) !== want);
+  ok(!jBad.length, `(b) wordValue, the judge, by its clauses: 8+ counting punctuation; two classes (\`- _ .\` are joiners, no class); 8+ digits; 3+ joined parts with a capital or a digit${jBad.length ? ' — ' + jBad.map(([t]) => t).join(', ') : ''}`);
+  // (a) the shape rows anywhere — a family (its head kept), a JWT (after `_` too), a 40 / 64-hex digest standing alone, a random run AS TYPED
+  const SHAPE = [['deploy ' + H40, 'deploy ' + R], ['pull (' + H64 + ') now', 'pull (' + R + ') now'], ['ci_' + JW, 'ci_' + EY + R], ['x ' + FAMV + ' now', 'x ghp_' + R + ' now'], ['token=' + FAMV, 'token=ghp_' + R],
+    ['deploy ' + AN(36), 'deploy ' + R], ['deploy ' + AN(12) + '!x' + AN(8), 'deploy ' + R]];
+  const sBad = SHAPE.filter(([t, want]) => T(t) !== want).map(([t, want]) => `«${t.slice(0, 30)}…» → ${T(t)} (want ${want})`);
+  ok(!sBad.length, `(a) a SHAPE is hidden wherever it sits — a family (its head kept, before a word row judges what is left), a JWT after \`_\`, a 40 / 64-hex digest standing alone, a 20+ run of three classes${sBad.length ? ' — ' + sBad.join(' | ') : ''}`);
+  const NEVER = ['backup 2026-10-29T03:26:00Z', 'at T03:26:00.123456789Z', 'ship VibeSpace-2.369.362-Linux-x64', 'tag v1.2.3-RC.1+Build.20261029', 'restore 550E8400-e29b-41D4-a716-446655440000',
+    'tail /var/log/VibeSpace/Server-2026.log', 'build C:\\Users\\Dev\\Project2026\\out', 'mirror https://Example.com/Repo2026/archive', 'notify John.Doe2026@Example.com weekly', 'GitHub CI on macOS 15 and iOS 18 for PR 42',
+    'bisect-' + H40, 'deploy ' + H40.slice(0, 32), 'rerun TestHandlerReturnsNotFound', 'nightly-db-backup-2026-10-29', 'deploy ' + AN(12) + '9'];
+  const nBad = NEVER.filter((t) => T(t) !== t);
+  ok(!nBad.length && NEVER.slice(0, 9).every((t) => t.split(' ').some((w) => w.length >= 20 && [/[a-z]/, /[A-Z]/, /[0-9]/, /[!-,\/:-@\[-^`{-~]/].filter((re) => re.test(w)).length >= 3)),
+    `(a) the six a person reads are NEVER hidden by the run row — a date, a time, a version, a uuid, a path, a URL, an email (each a 20+ run of three classes); short words, a sha joined by \`-\`, an md5, a run of two classes, a run under 20${nBad.length ? ' — ' + nBad.map((t) => `«${t}» → ${T(t)}`).join(' | ') : ''}`);
+  // the run row NEVER on a stored slug (labelOf, a scheduled run's record): an older record of short words reads whole; a family still goes
+  const SLUGS = ['GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', 'deploy-EU-west2-canary', 'deploy-' + AN(36)];
+  ok(SLUGS.every((t) => S(t) === t) && T('deploy-EU-west2-canary') === R && S('deploy-' + FAMV) === 'deploy-ghp_' + R && randomRun('A1b2C3d4E5f6G7h8I9j0') && !randomRun('A1b2C3d4E5f6G7h8I9j') && !randomRun('550e8400-e29b-41d4-a716-446655440000'),
+    '(a) the run row never runs on a STORED name — a slug reads whole (a name of short words, a kebab name, even a run), a family is still hidden; typed, a kebab name of three classes is one 20+ run (hidden — the rule\'s, said)', SLUGS.map(S));
+  // idempotent and bounded (its linearity is counted, never clocked: test-exit-run's r9 name-rule legs, by the work meter)
+  ok([...KEEP, ...HIDE.map(([t]) => t), ...SHAPE.map(([t]) => t), ...NEVER].every((t) => T(T(t)) === T(t) && S(S(t)) === S(t)) && T('a'.repeat(INPUT_MAX + 99)).length <= INPUT_MAX,
+    'the name rule is idempotent (a hidden name hides to itself), as typed and stored, and bounded at INPUT_MAX');
+  // (e) ONE SOURCE for the shape rows: the name rule calls the very rows redactSecrets calls, and every row of redactSecrets is answered
+  const ssrc = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
+  const body = (fn) => { const i = ssrc.indexOf(`function ${fn}(`); return ssrc.slice(i, ssrc.indexOf('\n}\n', i)); };
+  const bS = body('redactSecrets'), bV = body('redactByValue'), bK = body('nameKv');
+  // r10 (lane lg-recovery, on 2.369.413): the rows are compared AS ROWS — the release's redactSecrets hands each its reporter
+  // (`redactPem(text, say)`, `if (say) say(…)`, the message mode), so an exact call no longer reads the same in both bodies
+  const SHAPE_ROWS = [/\bredactPem\(text\b/, /\bredactJwt\(text\)/, /text\.replace\(PREFIX_RE, \(m\) => \{ n\+\+; const h = PREFIX_HEAD\.exec\(m\);/];
+  const once = (re) => (ssrc.match(re) || []).length === 1;
+  ok(SHAPE_ROWS.every((re) => re.test(bS) && re.test(bV)) && once(/\nconst PREFIX_RE = /g) && once(/\nfunction redactJwt\(/g) && once(/\nfunction redactPem\(/g) && once(/\nconst PREFIX_HEAD = /g),
+    '(e) the SHAPE rows are ONE source — R1, the JWT scan and R4 (with its head) are the very calls redactSecrets makes, each spelled once in the file');
+  const ANSWER = { JOINER_IN_WORD_RE: bV, redactPem: bV, redactJwt: bV, PREFIX_RE: bV, redactKv: bK.includes('KV_HEAD') && bV.includes('nameKv(text)') ? bV : '', redactContinuations: bK.includes('blanksEnd(text, s)') && bK.includes('BLOCK_VAL') ? bV : '',
+    REG_RE: bV, REG_NAME_RE: bV, RUN_RE: bV.includes('NAME_RUN_RE') ? bV : '',
+    HTTP_RE: /\bHTTP_NAME_RE = \(\(\) => \{ const src = HTTP_RE\.source/.test(ssrc) && bV.includes('nameWord(text, HTTP_NAME_RE,') ? bV : '',
+    // r10: at a name the two word rows are built FROM the output belt's own (only their blank run widened — NAME_BLANKS), and R7 is
+    // the release's own query walk with its name grammar (nameQuery over QUERY_HEAD_RE, holderName)
+    WORD_NEXT_RE: /\bWORD_NEXT_NAME_RE = NAME_BLANKS\(WORD_NEXT_RE\)/.test(ssrc) && bV.includes('nameWord(text, WORD_NEXT_NAME_RE,') ? bV : '',
+    WORD_RUN_RE: /\bWORD_RUN_NAME_RE = NAME_BLANKS\(WORD_RUN_RE\)/.test(ssrc) && bV.includes('nameWord(text, WORD_RUN_NAME_RE,') ? bV : '',
+    redactQuery: bV.includes('row(nameQuery(text))') && body('nameQuery').includes('QUERY_HEAD_RE') && body('nameQuery').includes('holderName(m[2])') ? bV : '' };
+  const sRows = [...new Set([...bS.matchAll(/\b(redact[A-Z]\w*|[A-Z][A-Z_]*_RE)\b/g)].map((m) => m[1]))].filter((k) => k !== 'redactSecrets');
+  const MAPPED = new Set(['redactKv', 'redactContinuations', 'RUN_RE', 'WORD_NEXT_RE', 'WORD_RUN_RE', 'HTTP_RE', 'redactQuery']);   // answered by the name's own row
+  const unanswered = sRows.filter((k) => !(k in ANSWER) || !ANSWER[k] || (!MAPPED.has(k) && !bV.includes(k)));
+  ok(sRows.length >= 12 && !unanswered.length, `(e) every row of redactSecrets is answered by the name rule (${sRows.length}: the same row, or — R2 / R2b — nameKv over the same KV_HEAD with the next-line and block rules, R8 — the name's run row)${unanswered.length ? ' — a row the name rule does not answer: ' + unanswered.join(', ') : ''}`);
+  // THE MUTANTS, each RED by name: r8's plain-words exemption (a Capitalized passphrase kept) / the run row on a stored slug
+  const mdir = scratch('ss-name-mut'); fs.mkdirSync(mdir, { recursive: true });
+  fs.copyFileSync(path.join(REPO, 'src/credential-words.js'), path.join(mdir, 'credential-words.js'));
+  const WV = "  if (t.includes(REDACTED) || [...t].length < 8) return false;", mutA = anchored(ssrc, WV, WV + " if (t.split(/[-_.']+/).every((w) => !w || /^(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)$/.test(w))) return false;", 'r8 plain-words exemption');
+  fs.writeFileSync(path.join(mdir, 'secret-shapes.js'), mutA); const MA = require(path.join(mdir, 'secret-shapes.js'));
+  const aRed = ['rotate password: ' + PW.join('-'), 'set DB_PASSWORD=' + PW.join('.'), 'api_key=' + UPW].filter((t) => MA.redactByValue(t, { typed: true }).text !== T(t));
+  ok(mutA !== ssrc && aRed.length === 3 && MA.redactByValue(aRed[0], { typed: true }).text === aRed[0], `MUTANT — r8's plain-words exemption: a Capitalized passphrase kept, RED by name — ${aRed.map((t) => `«${t}» → ${MA.redactByValue(t, { typed: true }).text}`).join(', ')}`);
+  const mdir2 = scratch('ss-name-mut2'); fs.mkdirSync(mdir2, { recursive: true }); fs.copyFileSync(path.join(REPO, 'src/credential-words.js'), path.join(mdir2, 'credential-words.js'));
+  const mutB = anchored(ssrc, '    if (typed) text = text.replace(NAME_RUN_RE,', '    if (true) text = text.replace(NAME_RUN_RE,', 'the run row on a stored slug');
+  fs.writeFileSync(path.join(mdir2, 'secret-shapes.js'), mutB); const MB = require(path.join(mdir2, 'secret-shapes.js'));
+  const bRed = SLUGS.filter((t) => MB.redactByValue(t).text !== t);
+  ok(mutB !== ssrc && bRed.length >= 3, `MUTANT — the run row on a stored slug (r8's labelOf): RED by name — ${bRed.map((t) => `«${t.slice(0, 30)}» → ${MB.redactByValue(t).text}`).join(', ')}`);
+  ok(belt.maskForSink('password reset', { byValue: true }) === 'password reset' && belt.maskForSink('password reset', {}) === 'password ' + REDACTED && belt.maskForSink('ship ' + PAT, { byValue: true }).includes(REDACTED)
+    && belt.maskForSink('deploy ' + AN(36), { byValue: true, typed: true }) === 'deploy ' + REDACTED && belt.maskForSink('GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', { byValue: true }) === 'GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42',
+    'the output belt carries the name rule (`maskForSink(t, { byValue, typed })` — typed: the run row; a stored name: never; a sink text keeps the narrow table\'s hide-more rule)');
 }
 
 console.log('§2 THE OUTPUT BELT’S LEG — maskForSink applies the shape rule (and never throws)');

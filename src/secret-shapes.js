@@ -72,6 +72,11 @@
  *   identity (`ssh://git@github.com`) and public; the decoded value is read WHOLE (a userinfo one redirect deeper, raw or encoded,
  *   masks it). ONE decode: a doubly-encoded value (`%253Ftoken%253D…`) is read as the text one decode leaves — no head opens in it.
  *   R2b (a multi-line block), R5 and R6 keep the plain word test.
+ * `redactByValue(text, { typed })` is THE NAME RULE (lane job-notify-user r9 — the rule fixed by the acceptance owner): a job's
+ * NAME is a label a person reads. The SHAPE rows are this table's own (R1, the JWT scan, R4 — one source) plus a 40 / 64-hex
+ * digest standing alone and, on the name AS TYPED only (never a stored slug), a random RUN (20+, 3 classes, none of the six
+ * readable shapes); a WORD row (R2, R3, R5, R6, R7 — this table's own heads) hides only the ONE token after its word, and only
+ * a value (wordValue). See the rule's own block below
  * Every quantifier is bounded at the input bound and every run is consumed WHOLE (verify r2 F2: a cut inside a value kept
  * the value's tail past 4096 characters — a 6 KB bearer, an RSA-4096 `client-key-data`); no pass throws (a text that
  * cannot be judged is returned unchanged — never a stall, never a crash, and the caller's belt still runs).
@@ -451,12 +456,15 @@ const PREFIX_HEAD = /^(github_pat_|gh[pousr]_|sk-|(?:sk|rk)_(?:live|test)_|xoxe[
 // A scan in code now, before the prefixes: the three runs walked once each; every `eyJ` inside a failed start's first run ends at the same
 // character and fails the same way, so the scan resumes at that run's end; a start that succeeds is the leftmost one, as the regex's
 const isWordCode = (c) => (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95;   // [A-Za-z0-9_]: `\b`'s word
+// lane job-notify-user r8 (accept-r7, the JWT start): a JWT STARTS after any character that is no letter or digit — PREFIX_RE's r7
+// rule; `\b` kept `ci_<JWT>` / `deploy_<JWT>` whole in a stored head, a label and a job's record (`_` is a word character)
+const isAlnumCode = (c) => c !== 95 && isWordCode(c);
 const isB64urlCode = (c) => isWordCode(c) || c === 45;                                                          // [A-Za-z0-9_-]
 function b64urlEnd(text, i) { while (i < text.length && isB64urlCode(text.charCodeAt(i))) i++; return i; }
 function redactJwt(text) {
   let out = '', last = 0, n = 0, i = text.indexOf('eyJ');
   while (i >= 0) {
-    if (i > 0 && isWordCode(text.charCodeAt(i - 1))) { i = text.indexOf('eyJ', i + 1); continue; }   // no `\b` before it
+    if (i > 0 && isAlnumCode(text.charCodeAt(i - 1))) { i = text.indexOf('eyJ', i + 1); continue; }   // a letter or a digit before it (r8: `_` opens one)
     const e1 = b64urlEnd(text, i + 3);
     let e3 = -1;
     if (e1 - i - 3 >= 8 && text.charCodeAt(e1) === 46 && text.startsWith('eyJ', e1 + 1)) {
@@ -699,4 +707,183 @@ function hasTokenShape(raw) {
   return false;
 }
 
-module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, KNOWN_FLAG_VALUES, secretName, holderName, maskedLink, redactSecrets, hasTokenShape };
+// THE NAME RULE (lane job-notify-user r9 — accept-r8: the rule is FIXED by the acceptance owner; kb-bugfix-invariants «不变量 (r9)»).
+// A job NAME is a label a person reads. At the record (resolveName, labelOf, a scheduled run's record) it passes ONE rule, ONCE,
+// on the name before the slug:
+//  (a) THE SHAPE ROWS, anywhere in the name — this table's own R1 (redactPem), the JWT scan and R4 (PREFIX_RE: every key family
+//      the belt knows), a 40 / 64-hex digest only when it stands alone as a token (DIGEST_RE) and — on the name AS TYPED only
+//      (`typed`), NEVER on a stored slug — a RUN of 20+ ASCII characters with 3+ classes that is no date / time / version
+//      (N.N.N) / uuid / path (a `/` or `\`) / URL / email: those six are never hidden (randomRun);
+//  (b) THE WORD ROWS — this table's own heads (R2 a secret-named `KEY:` / `KEY=`, R6 a reg row, R3 bearer / basic, R5 password /
+//      passwd / passphrase and the 24+ run after token / auth / key…, R7 a secret-named query parameter) — hide ONLY THE ONE
+//      TOKEN after the word, and only a VALUE (wordValue): 8+ characters counting its punctuation AND (2+ classes, or 8+ digits,
+//      or `- _ .` joining 3+ parts with a capital or a digit in one). «password reset», «token refresh», «auth: fix login flow»
+//      stay whole; a Capitalized passphrase (Correct-Horse-Battery-Staple) after `password:` or `DB_PASSWORD=`, «password: Summer1!»,
+//      «password Passw0rd» and «password 12345678» are hidden.
+// THE CLASSES (one table for (a) and (b)): upper, lower, digit, punctuation — `- _ .` are the JOINERS (b)'s parts clause reads,
+// never a class (`fix-login-flow`, `nightly-db-backup-2026-10-29` are words); a character outside ASCII is none.
+// r8 judged every word row by `valueShaped` (plain Capitalized words joined by `- _ .` were no value: «password:
+// Correct-Horse-Battery-Staple» was stored in clear; a trailing `!` was stripped: «password: Summer1!» kept `Summer1`), hid the
+// whole rest of a `KEY: value` line for one value-looking word, and ran R8's random run on the SLUG too — a name of short words
+// became one run («GitHub CI on macOS 15 and iOS 18 for PR 42» → «redacted», the next one «redacted»-2, renamed)
+const PUNCT = /[!-,\/:-@\[-^`{-~]/;   // ASCII punctuation but the joiners `-` `.` `_`
+function classesOf(t) { return /[a-z]/.test(t) + /[A-Z]/.test(t) + /[0-9]/.test(t) + PUNCT.test(t); }
+/** (b) Is the ONE token after a secret word a VALUE? */
+function wordValue(tok) {
+  const t = String(tok == null ? '' : tok);
+  if (t.includes(REDACTED) || [...t].length < 8) return false;   // the length counts the token's punctuation; a token a shape row hid is no value left
+  if (classesOf(t) >= 2 || /^[0-9]+$/.test(t)) return true;      // 8+ digits after a secret word is a value
+  if (/^[0-9][0-9._-]*[0-9]$/.test(t) && t.replace(/[-_.]/g, '').length >= 8) return true;   // r10: …counted across `- _ .` (1234-5678, 1234.5678)
+  const parts = t.split(/[-_.]+/).filter(Boolean);
+  return parts.length >= 3 && parts.some((p) => /[A-Z0-9]/.test(p));
+}
+// (a) the six a person reads — NEVER hidden by the run row (each anchored, judged on a run's core of ≤ 512 characters)
+const READABLE = [
+  /^\d{4}-\d{2}-\d{2}(?:[Tt ]\d{2}:\d{2}(?::\d{2}(?:[.,]\d{1,9})?)?)?(?:[Zz]|[+-]\d{2}(?::?\d{2})?)?$/,               // a date (ISO 8601, its time and zone)
+  /^[Tt]?\d{1,2}:\d{2}(?::\d{2}(?:[.,]\d{1,9})?)?(?:[Zz]|[+-]\d{2}(?::?\d{2})?)?$/,                               // a time (ISO 8601's `T` before it)
+  /^(?:[A-Za-z][A-Za-z0-9]*(?:[-_][A-Za-z][A-Za-z0-9]*)*[-_@])?[vV]?\d+(?:\.\d+){2,}(?:[-+_.~][0-9A-Za-z.+_~-]*)?$/,  // a version N.N.N (a name before it, a pre-release / build after)
+  /^(?:urn:uuid:)?[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,                      // a uuid
+  /^[A-Za-z][A-Za-z0-9+.-]*:\/\//,                                                                                     // a URL
+  /^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}$/,                                            // an email
+];
+const WRAP_OPEN = '("\'`[{<', WRAP_CLOSE = ')"\'`]}>,;:!?.';
+function coreOf(r) { let a = 0, b = r.length; while (a < b && WRAP_OPEN.includes(r[a])) a++; while (b > a && WRAP_CLOSE.includes(r[b - 1])) b--; return r.slice(a, b); }   // a scan, never a `[…]+$` (verify r4 F1)
+/** (a) the RUN row: a run of 20+ ASCII characters with 3+ classes that is none of the six */
+function randomRun(run) {
+  const core = coreOf(run);   // r10 M1: the wrapping punctuation trimmed FIRST — length, classes and the six exemptions are the core's alone
+  if (core.length < 20 || classesOf(core) < 3 || core.includes('/') || core.includes('\\')) return false;   // a path (a URL too) is never hidden
+  return !(core.length <= 512 && READABLE.some((re) => re.test(core)));
+}
+// r10 (a minor of the r9 verdict): the version exemption is the version TOKEN's — a random run glued to N.N.N (`v1.2.3-<run>`,
+// `<run>@1.2.3`, `1.2.3+<run>`) is judged on its own, and only it is hidden (the version stays)
+const VERSION_GLUED = /^(?:([!-~]{1,511}?)([-_@]))?([vV]?\d+(?:\.\d+){2,})(?:([-+_.~])([!-~]{1,512}))?$/;   // judged on a core of ≤ 512
+const gluedRandom = (p) => !!p && randomRun(p);
+function versionGlued(run) {
+  const core = coreOf(run);
+  if (core.length > 512) return null;
+  const m = VERSION_GLUED.exec(core);
+  if (!m || !(gluedRandom(m[1]) || gluedRandom(m[5]))) return null;
+  const at = run.indexOf(core);
+  return run.slice(0, at) + (m[1] ? (gluedRandom(m[1]) ? REDACTED : m[1]) + m[2] : '') + m[3] + (m[4] ? m[4] + (gluedRandom(m[5]) ? REDACTED : m[5]) : '') + run.slice(at + core.length);
+}
+const NAME_RUN_RE = /[!-~]{20,65536}/g;   // a maximal run of ASCII non-blank characters (a blank, a character outside ASCII — `«` too — ends it)
+const DIGEST_RE = /(^|\s)([("'`\[{<]{0,8})([0-9a-fA-F]{64}|[0-9a-fA-F]{40})(?=[)"'`\]}>,;:!?.]{0,8}(?:\s|$))/g;   // a sha / a sha256 standing alone
+const TOKEN_Y = /\S{1,65536}/y, BLANKS_Y = /\s{0,65536}/y;
+function tokenAt(text, i) { TOKEN_Y.lastIndex = i; const m = TOKEN_Y.exec(text); return m ? m[0] : ''; }
+function blanksEnd(text, i) { BLANKS_Y.lastIndex = i; BLANKS_Y.exec(text); return BLANKS_Y.lastIndex; }
+const QUOTED_TOKEN_MAX = 256;   // a quoted value is ONE token when it closes within this many characters on its line (a bounded scan per head)
+// (b) R2 at a name: a secret-named `KEY:` / `KEY=` (this table's KV_HEAD) — the ONE token after it: a quoted value closed on its
+// line, else the next blank-delimited token; nothing on the head's line ⇒ the token on the next one (`password:` ⏎ a value — R2b's
+// shape); a YAML block indicator (`token: |`) ⇒ the token under it
+// r10 (B-a3fe): R7 at a name — the release's query walk (QUERY_HEAD_RE, the value read by QUERY_VALUE_RE) and its name grammar
+// (holderName); the ONE value after a holder's `=` is hidden only when it is a VALUE (wordValue), like every word row of a name
+// r10 (B-a3fe — 主开发's law: a notice a job sends never carries a credential's bytes): at a NAME the word rows read the value after
+// up to 16 blanks, a no-break space and an ideographic space included (`password␣␣␣␣<value>`, `password\u00a0<value>` passed whole
+// with the output belt's 1–3); the OUTPUT belt's own rows keep their 1–3 (a message's words — kb-bugfix-invariants names the limit)
+// (the review of r10: a thin space, an em space, a narrow no-break space passed too — the blank class is every blank of a line, and a
+// value inside « » is a value: at a name `(?!«)` goes — wordValue refuses the mask itself)
+const NAME_BLANK_CLASS = '[ \\t\\u00a0\\u1680\\u2000-\\u200a\\u202f\\u205f\\u3000]';
+const NAME_BLANK_Y = new RegExp(NAME_BLANK_CLASS + '{0,16}', 'y');
+function nameBlanksEnd(text, i) { NAME_BLANK_Y.lastIndex = i; NAME_BLANK_Y.exec(text); return NAME_BLANK_Y.lastIndex; }
+const NAME_BLANKS = (re) => { const src = re.source.replace('([ \\t]{1,3})', '(' + NAME_BLANK_CLASS + '{1,16})'); if (src === re.source) throw new Error('secret-shapes: a word row lost its blank run'); return new RegExp(src.replace('(?!«)', ''), re.flags); };
+const WORD_NEXT_NAME_RE = NAME_BLANKS(WORD_NEXT_RE), WORD_RUN_NAME_RE = NAME_BLANKS(WORD_RUN_RE);
+const HTTP_NAME_RE = (() => { const src = HTTP_RE.source.split('[ \\t]+').join(NAME_BLANK_CLASS + '{1,16}'); if (src === HTTP_RE.source) throw new Error('secret-shapes: the bearer row lost its blank run'); return new RegExp(src, HTTP_RE.flags); })();   // `bearer`␣(any blank)…
+const NAME_QUERY_HEAD_RE = new RegExp(QUERY_HEAD_RE.source.replace('(?!«)', ''), 'g');
+function nameQuery(text) {
+  let n = 0, out = '', last = 0, m;
+  NAME_QUERY_HEAD_RE.lastIndex = 0;
+  while ((m = NAME_QUERY_HEAD_RE.exec(text))) {
+    if (!holderName(m[2])) continue;                                   // the head first: a public head's value is never read (linear)
+    const vs = NAME_QUERY_HEAD_RE.lastIndex;
+    QUERY_VALUE_RE.lastIndex = vs;
+    const v = QUERY_VALUE_RE.exec(text);
+    if (!v || !wordValue(v[0])) continue;
+    n++; out += text.slice(last, vs) + REDACTED; last = vs + v[0].length; NAME_QUERY_HEAD_RE.lastIndex = last;
+  }
+  return { text: out + text.slice(last), n };
+}
+/** a quoted value starting at `s` and closed on its line within QUOTED_TOKEN_MAX — { q, inner, end } or null */
+function quotedAt(text, s, tok) {
+  if (tok[0] !== '"' && tok[0] !== "'") return null;
+  let seg = text.slice(s, s + QUOTED_TOKEN_MAX + 2); const nl = seg.indexOf('\n'); if (nl >= 0) seg = seg.slice(0, nl);
+  const close = nextClose(seg, 1, tok[0], seg.length);
+  return close > 0 ? { q: tok[0], inner: seg.slice(1, close), end: s + close + 1 } : null;
+}
+function nameKv(text) {
+  let n = 0, out = '', last = 0, m;
+  KV_HEAD.lastIndex = 0;
+  while ((m = KV_HEAD.exec(text))) {
+    const headEnd = KV_HEAD.lastIndex;
+    // r10 (the review): THE RELEASE'S NAME GRAMMAR (holderName — a credential word that only modifies a descriptor head is public:
+    // `password_policy`); a head that holds nothing gives its separator back, so the next key can open on it (`fix: password=…`,
+    // the release's B-be02 rule — r9 swallowed it and kept the value)
+    if (!holderName(m[4])) { KV_HEAD.lastIndex = m.index + m[0].length - m[5].length; continue; }
+    let s = nameBlanksEnd(text, headEnd);                                        // a no-break / thin / ideographic space after `:` / `=`
+    if (text[s] === '=' && /[:=][ \t]*$/.test(m[5])) s = nameBlanksEnd(text, s + 1);   // `password := …` — the second sign is the head's
+    if (text[s] === '\n' || text[s] === '\r') s = blanksEnd(text, s);
+    let tok = tokenAt(text, s);
+    if (BLOCK_VAL.test(tok)) { s = blanksEnd(text, s + tok.length); tok = tokenAt(text, s); }
+    let end = s + tok.length, inner = tok, q = '';
+    if (tok[0] === '"' || tok[0] === "'") {
+      let seg = text.slice(s, s + QUOTED_TOKEN_MAX + 2); const nl = seg.indexOf('\n'); if (nl >= 0) seg = seg.slice(0, nl);
+      const close = nextClose(seg, 1, tok[0], seg.length);
+      if (close > 0) { q = tok[0]; inner = seg.slice(1, close); end = s + close + 1; }
+    }
+    if (!wordValue(inner)) { KV_HEAD.lastIndex = Math.max(headEnd, s); continue; }
+    n++; out += text.slice(last, s) + (q ? q + REDACTED + q : REDACTED); last = end; KV_HEAD.lastIndex = end;
+  }
+  return { text: out + text.slice(last), n };
+}
+// (b) every other word row: the row's own regex finds the head, `startOf` says where its ONE token starts (-1: no secret name)
+function nameWord(text, re, startOf) {
+  let n = 0, out = '', last = 0, m;
+  re.lastIndex = 0;
+  while ((m = re.exec(text))) {
+    const s = startOf(m);
+    if (s < 0) continue;
+    const tok = tokenAt(text, s), qv = quotedAt(text, s, tok);   // r10 (the review): a quoted value closed on its line is ONE token, as at a KEY
+    if (!wordValue(qv ? qv.inner : tok)) { re.lastIndex = Math.max(s, m.index + 1); continue; }   // the token may itself be the next head (`password password <value>`)
+    n++; out += text.slice(last, s) + (qv ? qv.q + REDACTED + qv.q : REDACTED); last = qv ? qv.end : s + tok.length; re.lastIndex = last;
+  }
+  return { text: out + text.slice(last), n };
+}
+/** THE NAME RULE (r9): `redactByValue(text, { typed })` → `{text, redacted}` — `typed`: the name as a person typed it (resolveName's
+ *  belt — the run row runs); without it a STORED name (labelOf, a scheduled run's record — a slug: the run row never runs). The
+ *  shape rows are this table's own (test-secret-shapes reads both bodies); bounded, linear, idempotent, never throws. */
+function redactByValue(raw, { typed = false } = {}) {
+  let text = String(raw == null ? '' : raw);
+  if (text.length > INPUT_MAX) text = text.slice(0, INPUT_MAX);
+  if (!text) return { text, redacted: 0 };
+  if (text.includes('\u200C') || text.includes('\u200D')) text = text.replace(JOINER_IN_WORD_RE, '');
+  let n = 0;
+  const row = (r) => { text = r.text; n += r.n; };
+  try {
+    // (a) the shape rows — redactSecrets' own
+    row(redactPem(text));
+    row(redactJwt(text));
+    text = text.replace(PREFIX_RE, (m) => { n++; const h = PREFIX_HEAD.exec(m); return `${h ? h[1] : ''}${REDACTED}`; });
+    text = text.replace(DIGEST_RE, (m, sp, open) => { n++; return `${sp}${open}${REDACTED}`; });
+    // (b) the word rows — the ONE token after the word, only a value
+    row(nameKv(text));
+    row(nameWord(text, REG_RE, (m) => (REG_NAME_RE.test(m[2]) ? m.index + m[1].length + m[2].length + m[3].length : -1)));
+    row(nameWord(text, HTTP_NAME_RE, (m) => m.index + (m[1] || m[2]).length));   // r10: any blank of a line after bearer / basic
+    row(nameWord(text, WORD_NEXT_NAME_RE, (m) => m.index + m[1].length + m[2].length));   // r10: the name's own blank run (up to 16, a no-break space too)
+    row(nameWord(text, WORD_RUN_NAME_RE, (m) => m.index + m[1].length + m[2].length));
+    row(nameQuery(text));   // r10 (B-a3fe, on 2.369.413): R7 at a name — the release's linear walk and its name grammar
+    // (a) the run row — the name as typed, never a slug
+    if (typed) text = text.replace(NAME_RUN_RE, (m) => { const g = versionGlued(m); if (g !== null) { n++; return g; } if (!randomRun(m)) return m; n++; const core = coreOf(m), at = m.indexOf(core); return m.slice(0, at) + REDACTED + m.slice(at + core.length); });   // r10: the punctuation around a hidden run stays
+  } catch {
+    // r10 (B-a3fe): a name this rule cannot judge is judged by the OUTPUT belt (redactSecrets — its word rows hide the rest of a
+    // value's line) AND the name's own run row (the output belt keeps a random run standing alone: its R8 is key MATERIAL only) —
+    // never returned as far as it got; if that throws too, the name is hidden whole. On the port onto 2.369.413 the query row named
+    // a regex the release had renamed: EVERY name threw here after the word rows and passed with no run row at all
+    try {
+      const r = redactSecrets(String(raw == null ? '' : raw)); let t = r.text, k = r.redacted;
+      if (typed) t = t.replace(NAME_RUN_RE, (m) => { if (!randomRun(m)) return m; k++; return REDACTED; });
+      return { text: t, redacted: k, failed: true };
+    } catch { return { text: REDACTED, redacted: 1, failed: true }; }
+  }
+  return { text, redacted: n };
+}
+
+module.exports = { REDACTED, INPUT_MAX, VALUE_MAX, SECRET_WORDS, CONTAINER_HEADS, DESCRIPTOR_HEADS, KNOWN_FLAG_VALUES, secretName, holderName, maskedLink, redactSecrets, hasTokenShape, redactByValue, wordValue, randomRun };

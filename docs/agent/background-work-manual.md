@@ -125,7 +125,24 @@ separate setting — not audience 1's auto-notify:
   the name is hidden when the job is CREATED — the whole name is checked
   before it is cut to 64 characters — so the job is stored with
   `«redacted»` in its place, and your own `list` / `show` / `poll` and the
-  create output print that stored name (the rest as you typed it).
+  create output print that stored name (the rest as you typed it; the
+  create output says so in a line of its own when a part was hidden).
+  The name is judged ONCE, as you typed it, before it is slugged: a key
+  VibeSpace knows (`ghp_…`, `sk-…`, `AKIA…` and the rest), a JWT, a
+  40- or 64-hex digest standing alone, and a run of 20+ characters
+  mixing three of upper case, lower case, digits and symbols are hidden
+  wherever they sit — but never a date, a time, a version (`2.369.364`),
+  a uuid, a path, a URL or an email. A word like `password`, `token:`,
+  `auth:`, `bearer` or a `KEY=` whose name says secret hides only the ONE
+  token right after it, and only when that token is a value: 8+
+  characters (its punctuation counts) that mix two kinds, or 8+ digits,
+  or 3+ parts joined by `-` `_` `.` with a capital or a digit. So
+  `password reset`, `auth: fix login flow` and `token refresh` are
+  stored as typed, and `password: Summer1!` is stored
+  `password-«redacted»`. A name typed as one long run of mixed case and
+  digits (`TestHandlerReturns404WhenMissing`, `deploy-EU-west2-canary`)
+  is hidden whole — use spaces. A secret goes in the vault
+  (`vibespace-vault`), never in a name.
 - `--urgency` takes the For you tray's own set, `low|normal|high|urgent`.
   With `--notify-user`, anything else is refused when you create the job;
   without it the urgency is never read.

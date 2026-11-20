@@ -121,7 +121,7 @@ const todos = new UserTodoManager({ dataDir: WDIR, expirySweepMs: 0 });
 const WTOLD = [];
 
 // ── the sessions (one conversation per leg: the engine's 30 s per-conversation floor never joins two legs) ──
-const LEGS = ['census', 'nc1', 'nc0', 'at1', 'at0', 'ev1', 'tk1', 'tk0', 'ctl', 'old1', 'oldm', 'mask', 'nobelt', 'urg', 'full', 'svc0', 'svc1', 'sub', 'urgu', 'urgn', 'named', 'vwl', 'vwm', 'vws', 'vwc', 'vwr'];
+const LEGS = ['census', 'nc1', 'nc0', 'at1', 'at0', 'ev1', 'tk1', 'tk0', 'ctl', 'old1', 'oldm', 'mask', 'nobelt', 'urg', 'full', 'svc0', 'svc1', 'sub', 'urgu', 'urgn', 'named', 'vwl', 'vwm', 'vws', 'vwc', 'vwr', 'hidn', 'pwr'];
 const cidOf = (leg) => `c0ffee00-0000-4000-8000-${String(LEGS.indexOf(leg)).padStart(12, '0')}`;
 const SESS = new Map(LEGS.map((leg) => [`w-${leg}`, { claudeSessionId: cidOf(leg), backend: 'claude', name: leg, mode: 'chat', cwd: CWD, agentToken: `vsst_${leg}`, createdAt: 1 }]));
 const wiring = JW.create({
@@ -145,7 +145,7 @@ function vaultEngine(name, state) {
   return E;
 }
 const VWL = vaultEngine('vault-locked', 'locked'), VWU = vaultEngine('vault-unlocked', 'unlocked');
-const ENGINE_OF = { census: CENSUS, ctl: NOHAND, old1: OLD, oldm: OLD, mask: WIRED, urg: WIRED, full: WIRED, nobelt: NOBELT, urgu: WIRED, named: WIRED, vwl: VWL, vwm: VWU, vws: VWU, vwc: VWU };
+const ENGINE_OF = { census: CENSUS, ctl: NOHAND, old1: OLD, oldm: OLD, mask: WIRED, urg: WIRED, full: WIRED, nobelt: NOBELT, urgu: WIRED, named: WIRED, vwl: VWL, vwm: VWU, vws: VWU, vwc: VWU, hidn: WIRED, pwr: WIRED };
 for (let i = 0; i < 20; i++) todos.add(`claude:${cidOf('full')}`, { text: `an earlier ask ${i}`, origin: 'agent' });   // the conversation at its open cap
 const rts = {};
 const ap = { get: (p, h) => { rts[`GET ${p}`] = h; }, post: (p, h) => { rts[`POST ${p}`] = h; }, put() { }, delete() { }, use() { } };
@@ -285,6 +285,8 @@ const R = await all({
   svc0: cli(['run', 'sleep 60', '--name', 'svc0', '--keep-up'], { leg: 'svc0' }),
   unk: cli(['run', './bot.sh', '--name', 'unk', '--vualt', 'API_KEY=x'], { leg: 'unk' }),   // lane vault-job-road: an unknown flag
   pv: cli(['run', './bot.sh', '--name', 'pv', '--vault', 'API_KEY=' + PASTED], { leg: 'pv' }),   // …and a VALUE where a reference belongs
+  hidn: cli(['run', 'sleep 60', '--name', 'deploy ' + ['gh', 'p', '_'].join('') + SHAPEMAT.slice(0, 36), '--keep-up'], { leg: 'hidn' }),   // r8: the stored name said
+  pwr: cli(['run', 'sleep 60', '--name', 'password reset', '--keep-up'], { leg: 'pwr' }),
   askc: cli(['renew the cert?', '--urgency', 'critical'], { bin: ASK }),
   asku: cli(['renew the cert now?', '--urgency', 'urgent'], { bin: ASK }),
 });
@@ -318,6 +320,10 @@ ok(bodyOf('tk1') && bodyOf('tk1').notifyUser === true && bodyOf('tk0') && bodyOf
   ok(/URGENCIES = \(TX && TX\.FOR_YOU_URGENCIES\) \|\| null;/.test(ASKSRC) && !/\['low', 'normal', 'high'/.test(ASKSRC) && [...usageSet(SRC), ...usageSet(ASKSRC)].length >= 2 && [...usageSet(SRC), ...usageSet(ASKSRC)].every((u) => u === URGENCIES.join('|')),
     'BOTH agent CLIs offer the store\'s ONE set (r4: vibespace-ask kept its own list) — vibespace-ask reads FOR_YOU_URGENCIES off agent-cli-text, and each usage line prints exactly that set', JSON.stringify([...usageSet(SRC), ...usageSet(ASKSRC)]));
   ok(/^vibespace-ask: unknown urgency "critical" \(valid: low\/normal\/high\/urgent\)$/m.test(R.askc.err) && askWire.length === 1 && askWire[0].add && askWire[0].add.urgency === 'urgent' && R.asku.code === 0, '…and at the prompt: vibespace-ask --urgency critical is refused naming the set, --urgency urgent is filed', `${R.askc.err} | ${JSON.stringify(askWire)}`);
+  // r8 (accept-r7 confirmed 0 — the brief: «the create echo shows the stored name so the author sees the loss at once»): a name a part of
+  // which was hidden is SAID, in a line of its own; a name with no value («password reset» — e6d6299e6 stored `password-«redacted»`) is echoed as typed
+  ok(/^name stored as "deploy-ghp_«redacted»": a part of it looked like a secret and is hidden for every reader, you included/m.test(R.hidn.out) && !R.hidn.out.includes(SHAPEMAT.slice(0, 12))
+    && /^started \S+ \(service password-reset\)$/m.test(R.pwr.out) && !/name stored as/.test(R.pwr.out), 'r8 the create output says the STORED name when a part of it was hidden (a token in the name); «password reset» is stored and echoed as typed, no such line', JSON.stringify([R.hidn.out, R.pwr.out]));
   ok(/^--notify-user is refused with --keep-up/.test(R.svcn.err) && !bodyOf('svcn'), 'run --keep-up --notify-user is refused by name, nothing sent: a service never tells the user at its end', R.svcn.err);
   const dead = wire.filter((w) => 'env' in w.body || 'cwd' in w.body).map((w) => w.body.name);
   ok(!dead.length && !/flags\.env\b/.test(SRC), 'no body carries the dead `env` / top-level `cwd` (the route maps neither) and the CLI reads no --env', dead.join(','));

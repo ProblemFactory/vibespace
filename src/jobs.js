@@ -1149,7 +1149,7 @@ class JobManager {
     // Found BY ITS LABEL, never by the runtime-only `_pfId` (lane-redact verify r8, reproduced): the forward is persisted and
     // restored at boot while `_pfId` is set again only by the next publish (an adopted service's +8 s re-publish, a respawn,
     // the await inside _ensurePublish) — a clear in that window kept `service: <name>` on the Ports panel and on disk
-    const svcLabels = new Set([...gone].map((id) => nameBefore.get(id)).filter((n) => n && n !== CLEARED_TEXT).flatMap((n) => ['service: ' + n, 'service: ' + this._agentWords(n)]));   // r4: a forward labelled since .361 carries the BELTED name — an older one the raw
+    const svcLabels = new Set([...gone].map((id) => nameBefore.get(id)).filter((n) => n && n !== CLEARED_TEXT).flatMap((n) => ['service: ' + n, 'service: ' + this._agentWords(n), 'service: ' + this._nameWords(n)]));   // r4: a forward labelled since .361 carries the BELTED name — an older one the raw
     // …and never ANOTHER job's (lane-redact verify r9): names are not unique — a live service NOT cleared that bears the same
     // name and publishes that forward's port owns it (its Ports row read the sentence until its next publish); an orphan
     // forward with the cleared name (no live owner) still goes — fail closed
@@ -3000,6 +3000,14 @@ class JobManager {
   _agentWords(s) {
     try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir }); } catch { return String(s == null ? '' : s); }
   }
+  /** A job's NAME through THE NAME RULE (lane job-notify-user r8 → r9, the rule fixed by the acceptance owner): the vault's live
+   *  values, every shape wherever it sits, a word row's ONE token only when it is a value — a name keeps its words («password
+   *  reset», «auth: fix login flow»). `typed`: the name AS TYPED (resolveName's mask — the run row runs, ONCE, before the slug);
+   *  without it a STORED name, a slug (labelOf, a scheduled run's `<name> run`) — the run row never runs on a slug (r8 erased
+   *  «GitHub CI on macOS 15 …» whole there, and labelOf every older record of that shape) */
+  _nameWords(s, { typed = false } = {}) {
+    try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir, byValue: true, typed }); } catch { return String(s == null ? '' : s); }
+  }
   /** THE ONE ACCESSOR of a job's PERSON-FACING NAME (lane job-notify-user r5, accept-r4 confirmed 0 + refuted 0): the name
    *  belted on its own — every message-road copy (r3: the header, the chat card's label, the stash, the retry meta), and
    *  (r4) wherever a PERSON or ANOTHER conversation reads it: the snapshot a non-author reads (the Jobs panel's card title,
@@ -3009,7 +3017,9 @@ class JobManager {
    *  session, the memory-pressure roots, the live view's tab); r4 belted the forward label and left its scan row one line
    *  away raw. The RECORD keeps the name resolveName BELTED (r7: the belt on the whole name as asked, then the slug and the
    *  cut — r6 cut first and a token the cut split was no shape; data/jobs.json, the archive, the author's echo); a record an
-   *  older engine wrote keeps what it stored, whole to its author.
+   *  older engine wrote keeps what it stored, whole to its author. r8: the name judged BY ITS VALUE (_nameWords) here and at the
+   *  record — r7's output belt erased «reset» from «password reset»; a record r7 wrote keeps what it stored (nothing restores a word).
+   *  r9: a STORED name (a slug) — THE NAME RULE without its run row (r8 ran it here and every older record of short words read `«redacted»`).
    *  test-architecture §93 THE NAME CENSUS names any reader of a record's name that skips this accessor.
    *  Memoised 30 s per name (the belt reads the vault; a list snapshot asks for every name). */
   labelOf(job) {
@@ -3017,7 +3027,7 @@ class JobManager {
     const memo = this._labelMemo || (this._labelMemo = new Map());   // (a manager built without the constructor — a suite's mutant — still names)
     const hit = memo.get(raw), t = now();
     if (hit && t - hit.at < 30e3) return hit.out;
-    const out = this._agentWords(raw);
+    const out = this._nameWords(raw);
     if (memo.size >= 500) memo.clear();
     memo.set(raw, { out, at: t });
     return out;
@@ -3035,13 +3045,17 @@ class JobManager {
     // r5: the ONE line that reaches the dep. r6: a copy is the engine's words + its fact, nothing else — a SHAPED copy (a
     // hand-built one handed through M.forYouCopy) is refused by name and said in the log with its caller, like a stray
     // r7 (accept-r6 unverified 2): a copy forYouCopy MINTED for THIS job (M.mintedFor) — a hand-built {words, fact}, however it
-    // was handed in (`.call`, an alias), or a copy minted for another job is refused by name and said in the log with its caller
+    // was handed in (`.call`, an alias), or a copy minted for another job is refused by name and said in the log with its caller.
+    // r8 (accept-r7 confirmed 1): THIS job is its ID — the same record read twice is the same job; another id is refused.
+    // r9 (accept-r8 unverified 2 + 6): the ID is a non-empty string (M.jobIdOf) — a job with no id gets no copy, refused by name
+    // (r8 compared `undefined === undefined` and filed a hand-built copy handed with an id-less job)
     if (!c || !c.words || !c.fact) {
       if (c && c.refused && (c.copy === 'stray' || c.copy === 'shaped')) this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${callerOf(JobManager.prototype._forYou)}${job ? ' — job ' + job.id : ''}: ${c.refused}`);
       return this._forYouVerdict(job, { ok: false, why: (c && c.refused) || 'no such For-you copy' }, (c && c.copy) || 'unknown');
     }
-    if (M.mintedFor(c) !== (job || null)) {
-      const why = M.mintedFor(c) === undefined ? 'a For-you copy is one forYouCopy minted — a hand-built copy is refused' : 'a For-you copy minted for another job is refused';
+    const minted = M.mintedFor(c), jobId = job ? M.jobIdOf(job) : null;
+    if ((job && !jobId) || minted === undefined || minted !== jobId) {
+      const why = job && !jobId ? 'a job with no id gets no For-you copy — refused' : minted === undefined ? 'a For-you copy is one forYouCopy minted — a hand-built copy is refused' : 'a For-you copy minted for another job is refused';
       this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${callerOf(JobManager.prototype._forYou)}${job ? ' — job ' + job.id : ''}: ${why}`);
       return this._forYouVerdict(job, { ok: false, why }, 'hand-built');
     }
@@ -3612,7 +3626,7 @@ class JobManager {
         return; // maxConcurrent:1 — previous run still alive; silent skip (visible in the cron's nextFireAt drift)
       }
       if (!child) {
-        child = { ...a.task, id: rid(), kind: 'task', name: `${job.name} run`, owner: job.owner, access: job.access, state: 'starting', runs: [], createdAt: now(), cronParent: job.id };
+        child = { ...a.task, id: rid(), kind: 'task', name: this._nameWords(`${job.name} run`), owner: job.owner, access: job.access, state: 'starting', runs: [], createdAt: now(), cronParent: job.id };   // r8: a NEW record is belted (a cron an older engine wrote keeps its raw name — its run's record does not); r9: the cron's name is a stored slug — no run row
         this.jobs.set(child.id, child);
       }
       // lane job-notify-user: the For-you copy is the PARENT's setting (`run --every/--cron/--at … --notify-user` sends it
@@ -3951,7 +3965,7 @@ class JobManager {
     for (const r of vp.refs) { const f = VJ.familyOf(r.ref, VJ.ownerOf({ owner: spec.owner })); if (!f.ok) return { error: `refused: ${f.words} (--vault ${r.name})`, code: f.code }; }
     if (task) { if (vp.refs.length) task.vault = vp.refs; else delete task.vault; }
     const visNames = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.name));
-    const { name, renamed } = M.resolveName(spec.name, visNames, { mask: (t) => this._agentWords(t) });   // r7: the belt on the WHOLE name, then the cut
+    const { name, renamed } = M.resolveName(spec.name, visNames, { mask: (t) => this._nameWords(t, { typed: true }) });   // r7: the belt on the WHOLE name, then the cut — r9: THE NAME RULE once, as typed
     const job = {
       id: rid(), kind: spec.kind || 'task', name, note: spec.note || '',
       cmd: spec.cmd, envFrom: spec.envFrom || [], restart: spec.restart || 'on-failure',

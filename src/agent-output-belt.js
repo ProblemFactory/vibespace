@@ -43,7 +43,7 @@
  */
 const SB = require('./secret-box.js');
 const VI = require('./vault-inventory.js');
-const { redactSecrets } = require('./secret-shapes.js');
+const { redactSecrets, redactByValue } = require('./secret-shapes.js');
 
 let VR = null, vrTried = false;
 /** The sibling's PURE scrubber, required once, lazily — absent on this base (the seam above), present after the rebase. */
@@ -98,8 +98,11 @@ function compiledFor(v, vr) {
  * `mentions` = the members' names / ids — a member's @ alone is never a value; `said: []` collects what triggered each mask (the
  * gap filter's too), so the sender's answer names it instead of reading a shorter count as a cut ⇒ kb-file-structure.md
  * («src/secret-shapes.js», THE MESSAGE MODE).
+ * `byValue` (lane job-notify-user r8): a job's NAME — ② is THE NAME RULE (secret-shapes redactByValue, r9: the shape rows
+ * anywhere, a word row's ONE token only when it is a value — «password reset» keeps its words); `typed` (r9): the name AS TYPED
+ * (resolveName's belt — the run row runs), never a stored slug; ① is by value already.
  */
-function maskForSink(text, { dataDir, message = false, said = null, mentions = null } = {}) {
+function maskForSink(text, { dataDir, message = false, said = null, mentions = null, byValue = false, typed = false } = {}) {
   let s = String(text == null ? '' : text);
   if (!s) return s;
   const vr = vaultRun();
@@ -109,7 +112,7 @@ function maskForSink(text, { dataDir, message = false, said = null, mentions = n
       if (forms && forms.size) { const was = s.split('[vault:').length; s = vr.maskText(s, forms); if (Array.isArray(said) && s.split('[vault:').length > was && !said.includes('a vault value')) said.push('a vault value'); }
     } catch { /* the shape census below still runs — the belt never loses the write */ }
   }
-  try { s = redactSecrets(s, { message: !!message, said, mentions }).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
+  try { s = (byValue ? redactByValue(s, { typed }) : redactSecrets(s, { message: !!message, said, mentions })).text; } catch { /* redactSecrets is internally guarded; this is belt-and-braces */ }
   return s;
 }
 

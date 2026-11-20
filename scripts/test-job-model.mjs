@@ -318,13 +318,161 @@ ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes w
   const at58 = rn('a'.repeat(58) + ' ' + GH + ' tail'), xox = rn('a'.repeat(50) + ' ' + ['xo', 'xb-'].join('') + '1234567890-' + mat(20));
   ok(cut41 === 'nightly-build-of-the-whole-staging-stack-ghp_' + R && cut31 === 'publish-the-package-to-the-reg-npm_' + R && !cut41.includes(mat(36).slice(0, 8)) && !cut31.includes(mat(36, 17).slice(0, 8)),
     'r7 resolveName: a token past the 64th character is belted WHOLE before the cut (the record keeps `ghp_«redacted»`, never 19 of its characters)', [cut41, cut31]);
-  ok(kv === 'deploy-TOKEN-' + R && !kv.includes(mat(20, 11)), 'r7 resolveName: the belt runs on the name AS ASKED — a `TOKEN=value` the slug would turn into `TOKEN-value` (no shape) is belted first', kv);
+  ok(kv === 'deploy-TOKEN-' + R + '-now' && !kv.includes(mat(20, 11)), 'r7 resolveName: the belt runs on the name AS ASKED — a `TOKEN=value` the slug would turn into `TOKEN-value` (no shape) is belted first (r9: the ONE token after the word — `now` stays)', kv);
   ok(at58 === 'a'.repeat(58) && xox === 'a'.repeat(50) && [at58, xox].every((n) => n.length <= 64 && !n.includes('«')),
     'r7 resolveName: the cut never splits a masked run — a cut inside `«redacted»` moves to the run\'s start, its kept head (`ghp_`, `xoxb-`) with it', [at58, xox]);
   ok(rn('dev server!') === 'dev-server' && rn('a'.repeat(70)) === 'a'.repeat(64) && rn('') === 'job' && rn('  --x--  ') === 'x' && rn(['gh', 'p_'].join('') + mat(36) + ' deploy') === 'ghp_' + R + '-deploy',
     'r7 resolveName: a name with no secret is slugged and cut as before; a token first keeps its head and the words after');
   const seen = []; const viaEngine = M.resolveName('x ' + GH, new Set(), { mask: (t) => { seen.push(t); return t.split(GH).join('[vault:gh]'); } }).name;
   ok(seen[0] === 'x ' + GH && viaEngine === 'x-vault-gh' && !viaEngine.includes(mat(36).slice(0, 8)), 'r7 resolveName: the engine\'s belt (`mask` — the vault\'s values too) runs on the WHOLE text as asked, before the slug', [seen, viaEngine]);
+  // r8 (accept-r7 confirmed 0 — skeptic-name-falsepos.cjs): BY THE VALUE — r7's belt on the raw name let the WORD rules erase
+  // ordinary words from the record («password reset» → `password-«redacted»`, «password change» collided into `-2`); a word rule
+  // hides what follows its word only when that is value-shaped, a shape hides wherever it sits
+  const WHOLE = { 'password reset': 'password-reset', 'auth: fix login flow': 'auth-fix-login-flow', 'bearer of bad news': 'bearer-of-bad-news', 'token refresh': 'token-refresh',
+    'password change': 'password-change', 'nightly password rotation': 'nightly-password-rotation', 'session: cleanup old rows': 'session-cleanup-old-rows', 'check bearer rotation': 'check-bearer-rotation', 'token: refresh': 'token-refresh', 'passwd nightly-rotation': 'passwd-nightly-rotation' };
+  const lost = Object.entries(WHOLE).filter(([w, want]) => rn(w) !== want).map(([w]) => `«${w}» → ${rn(w)}`);
+  const taken = new Set([rn('password reset')]), second = M.resolveName('password change', taken);
+  ok(!lost.length && second.name === 'password-change' && !second.renamed, 'r8 resolveName BY THE VALUE: a name with no secret keeps its words at the record — «password reset», «auth: fix login flow», «bearer of bad news», «token refresh» (and six more) stored whole; «password change» beside «password reset» is no collision', lost.join(' | ') || second);
+  const VAL = mat(12, 5) + '!x', hid = { pw: rn('password: ' + VAL), tok: rn('token=' + GH), bearer: rn('rotate Bearer ' + mat(16, 5)), next: rn('password ' + VAL + ' rotation') };
+  ok(hid.pw === 'password-' + R && hid.tok === 'token-ghp_' + R && hid.bearer === 'rotate-Bearer-' + R && hid.next === 'password-' + R + '-rotation' && !Object.values(hid).some((n) => n.includes(VAL.slice(0, 8)) || n.includes(mat(36).slice(0, 8)) || n.includes(mat(16, 5).slice(0, 8))),
+    'r8 resolveName BY THE VALUE: a value-shaped value after a secret word is hidden — `password: <value>`, `token=<family>`, `Bearer <value>`, `password <value>` (the word stays, the words after it too)', hid);
+  // RED CONTROL (the old word rules): the output belt as the record's belt (r7's) erases those words — each by name
+  const SS = require('../src/secret-shapes.js'), old = (w) => M.resolveName(w, new Set(), { mask: (t) => SS.redactSecrets(t).text }).name;
+  const oldLost = ['password reset', 'auth: fix login flow', 'token: refresh', 'check bearer rotation'].filter((w) => old(w) !== WHOLE[w]);
+  ok(oldLost.length === 4, `r8 RED CONTROL: the old word rules (the output belt at the record, e6d6299e6) erase ${oldLost.map((w) => `«${w}» → ${old(w)}`).join(', ')}`, oldLost);
+
+  // r9 THE NAME RULE (accept-r8 — the rule FIXED by the acceptance owner; kb-bugfix-invariants «不变量 (r9)»): ONCE, before the slug —
+  // (a) the shape rows anywhere (a family, a JWT, a 40/64-hex digest standing alone, a 20+ run of three classes that is no date /
+  // time / version / uuid / path / URL / email — never on the slug), (b) a word row hides ONLY the one token after its word and only
+  // a value (8+ counting its punctuation AND two classes, or 8+ digits, or `- _ .` joining 3+ parts with a capital or a digit);
+  // (c) the slug never changes what was hidden, the cut never splits it, a collision is `-2` renamed. EVERY ROW SAYS WHAT IS STORED
+  const hexOf = (n, k = 7) => { let o = ''; for (let i = 0; i < n; i++) o += '0123456789abcdef'[(i * k + 5) % 16]; return o; };
+  const H40 = hexOf(40), H64 = hexOf(64, 11), UUID = '550e8400-e29b-41d4-a716-446655440000', V = mat(12, 5) + '!x', V2 = mat(10, 13);
+  const JWT = ['ey', 'J', 'a'.repeat(20), '.', 'ey', 'J', 'b'.repeat(20), '.', 'c'.repeat(20)].join(''), GHU = ['GH', 'P_'].join('') + mat(36), AK = ['AK', 'IA'].join('') + 'ABCDEFGH23456789';
+  const PW = 'Correct-Horse-Battery-Staple', SV = mat(12, 5) + '-x';
+  const TABLE = [   // [why, asked, stored-as]
+    ['brief: an ordinary word after password', 'password reset', 'password-reset'], ['brief', 'token refresh', 'token-refresh'], ['brief', 'auth: fix login flow', 'auth-fix-login-flow'],
+    ['brief', 'bearer of bad news', 'bearer-of-bad-news'], ['brief: a Capitalized passphrase after password: (r8 kept it)', 'rotate password: ' + PW, 'rotate-password-' + R],
+    ['brief: KEY= a passphrase (r8 kept it)', 'set DB_PASSWORD=Correct.Horse.Battery.Staple', 'set-DB_PASSWORD-' + R], ['brief: 8 with its ! (r8 kept 7)', 'password: Summer1!', 'password-' + R],
+    ['brief', 'password Passw0rd', 'password-' + R], ['brief: 8+ digits after a secret word is a value', 'password 12345678', 'password-' + R],
+    ['brief: short brand-style words (r8 erased it whole)', 'GitHub CI on macOS 15 and iOS 18 for PR 42', 'GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42'],
+    ['skeptic r8v-engine', 'Run e2e for PR 1234 on iOS 17 and M2 Max', 'Run-e2e-for-PR-1234-on-iOS-17-and-M2-Max'], ['skeptic r8v-runs', 'QA run 3 for PR 482 on iOS 17 and M2 Mac', 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac'],
+    ['skeptic r8v-names', 'Fix DB 42 on VM 7 in EU AZ 3 for QA 9', 'Fix-DB-42-on-VM-7-in-EU-AZ-3-for-QA-9'], ['skeptic r8v-runs', 'CI for PR 1234 on GH v2 API EU W1 to US E2', 'CI-for-PR-1234-on-GH-v2-API-EU-W1-to-US-E2'],
+    ['skeptic attack40 #41', 'R2D2 C3PO BB8 K2SO v2 Q3 x9 A1 B2', 'R2D2-C3PO-BB8-K2SO-v2-Q3-x9-A1-B2'], ['skeptic edges', 'Q3 R2 v2 K8 B2 x9 A1 C3 D4 E5 F6 G7', 'Q3-R2-v2-K8-B2-x9-A1-C3-D4-E5-F6-G7'],
+    ['skeptic byvalue-fp', 'QA run for PR 1234 on M2 Max and CI box', 'QA-run-for-PR-1234-on-M2-Max-and-CI-box'],
+    ['skeptic: a date after the words (r7 / r8 hid the rest of the line)', 'auth: fix login flow 2026-10-29', 'auth-fix-login-flow-2026-10-29'], ['skeptic', 'token: rotate before 2026-10-30', 'token-rotate-before-2026-10-30'],
+    ['skeptic: a version after the words', 'session: nightly cleanup v2.369.361', 'session-nightly-cleanup-v2.369.361'], ['skeptic: the ticket id IS the token after ticket:', 'ticket: PROJ-1234 rollout', 'ticket-' + R + '-rollout'],
+    ['skeptic: a path after the words', 'key: renew ~/.ssh/config', 'key-renew-.ssh-config'], ['skeptic', 'session: refactor src/jobs.js', 'session-refactor-src-jobs.js'],
+    ['skeptic: reset-v2 (8, two classes)', 'password reset-v2', 'password-' + R], ['skeptic: a date IS the token (3 parts with digits)', 'password 2026-10-29 rotation', 'password-' + R + '-rotation'],
+    ['skeptic', 'auth: migrate users_v2 table', 'auth-migrate-users_v2-table'], ['skeptic', 'Bearer token-refresh-2026', 'Bearer-' + R], ['skeptic', 'sig: verify release v1.2.3-rc1', 'sig-verify-release-v1.2.3-rc1'],
+    ['skeptic', 'otp: resend for user-1234', 'otp-resend-for-user-1234'], ['skeptic: a 40-hex sha standing alone', 'bisect ' + H40, 'bisect-' + R], ['skeptic: a sha joined by - (not alone; two classes)', 'bisect-' + H40, 'bisect-' + H40],
+    ['skeptic: sha256:<64 hex> (one run, three classes)', 'verify sha256:' + H64, 'verify-' + R], ['a 64-hex digest standing alone', 'pull ' + H64 + ' now', 'pull-' + R + '-now'],
+    ['skeptic: a uuid alone is never hidden', 'cleanup ' + UUID, 'cleanup-' + UUID], ['skeptic: a uuid IS the token after session:', 'session: ' + UUID, 'session-' + R],
+    ['skeptic r8v-negatives', 'login password Correct_Horse_Battery_Staple', 'login-password-' + R], ['skeptic r8v-negatives', 'api_key=' + PW + '-Zebra', 'api_key-' + R],
+    ['skeptic: hunter2! (8 with its !)', 'password: hunter2!', 'password-' + R], ['hunter2 (7: under the 8 — kept)', 'password: hunter2', 'password-hunter2'],
+    ['skeptic: fix-login-flow-2 (two classes)', 'auth: fix-login-flow-2', 'auth-' + R], ['joined lowercase words (the joiners are no class)', 'auth: fix-login-flow', 'auth-fix-login-flow'],
+    ['skeptic: bearer <JWT>', 'bearer ' + JWT, 'bearer-eyJ' + R], ['skeptic: deploy_<JWT>', 'deploy_' + JWT, 'deploy_eyJ' + R], ['skeptic: a family between CJK words', '部署 ' + GH + ' 到生产', '部署-ghp_' + R + '-到生产'],
+    ['skeptic: password reset for <family>', 'password reset for ' + GH, 'password-reset-for-ghp_' + R], ['skeptic: UPPER GHP_ (no family — a 40-char run)', 'deploy ' + GHU, 'deploy-' + R],
+    ['skeptic: AKIA', 'rotate ' + AK, 'rotate-AKIA' + R], ['skeptic: an email IS the token after auth:', 'auth: user@example.com login', 'auth-' + R + '-login'],
+    ['skeptic: a URL IS the token after session:', 'session: https://example.com/login', 'session-' + R], ['skeptic: ?token=<value>', 'check https://x.test/cb?token=' + V2, 'check-https-x.test-cb-token-' + R],
+    ['skeptic: PascalCase after passphrase', 'passphrase CorrectHorseBatteryStaple', 'passphrase-' + R], ['skeptic: PascalCase after password (9, two classes)', 'password ResetFlow', 'password-' + R],
+    ['skeptic', 'token: ' + ['refresh', 'v2', 'daily'].join('_'), 'token-' + R], ['camelCase, no digit (two classes)', 'rerun TestHandlerReturnsNotFound', 'rerun-TestHandlerReturnsNotFound'],
+    ['camelCase with a digit: 20+, three classes — the rule hides it', 'rerun TestHandlerReturns404WhenMissing', 'rerun-' + R], ['PascalCase, no digit', 'deploy DeployServerProductionCluster', 'deploy-DeployServerProductionCluster'],
+    ['PascalCase with digits — the rule hides it', 'deploy DeployServer2024ProductionCluster', 'deploy-' + R], ['camelCase words', 'fix getUserById in authService', 'fix-getUserById-in-authService'],
+    ['brand names', 'deploy to PostgreSQL on AWS EKS for iPhone', 'deploy-to-PostgreSQL-on-AWS-EKS-for-iPhone'], ['brand names', 'OAuth2 login for GitHub and GitLab', 'OAuth2-login-for-GitHub-and-GitLab'],
+    ['a date-time (20, three classes — never hidden)', 'backup 2026-10-29T03:26:00Z', 'backup-2026-10-29T03-26-00Z'], ['a time with its zone', 'report at 03:26:00.123+08:00 daily', 'report-at-03-26-00.123-08-00-daily'],
+    ['a version', 'release 2.369.362', 'release-2.369.362'], ['a named version (three classes — never hidden)', 'ship VibeSpace-2.369.362-Linux-x64', 'ship-VibeSpace-2.369.362-Linux-x64'],
+    ['a semver with a build', 'tag v1.2.3-RC.1+Build.20261029', 'tag-v1.2.3-RC.1-Build.20261029'], ['a path (never hidden)', 'tail /var/log/VibeSpace/Server-2026.log', 'tail-var-log-VibeSpace-Server-2026.log'],
+    ['a Windows path', 'build C:\\Users\\Dev\\Project2026\\out', 'build-C-Users-Dev-Project2026-out'], ['an UPPER uuid', 'restore 550E8400-E29B-41D4-A716-446655440000', 'restore-550E8400-E29B-41D4-A716-446655440000'],
+    ['an email (never hidden)', 'notify John.Doe2026@Example.com weekly', 'notify-John.Doe2026-Example.com-weekly'], ['a URL (never hidden)', 'mirror https://Example.com/Repo2026/archive', 'mirror-https-Example.com-Repo2026-archive'],
+    ['kebab-case typed, three classes: one 20+ run — the rule hides it', 'deploy-EU-west2-canary', R], ['kebab-case, two classes', 'nightly-db-backup-2026-10-29', 'nightly-db-backup-2026-10-29'],
+    ['a random 36 standing alone', 'deploy ' + mat(36), 'deploy-' + R], ['a random 14 standing alone (under 20 — kept)', 'deploy ' + V, 'deploy-' + SV],
+    ['a value two words after the word (the ONE token is «fix»)', 'auth: fix ' + V, 'auth-fix-' + SV], ['the words after the token stay', 'password ' + V + ' rotation', 'password-' + R + '-rotation'],
+    ['password: ⏎ a value (the token on the next line)', 'password:\n  Summer1!', 'password-' + R], ['a quoted value is ONE token', 'password: "Summer1! now"', 'password-' + R],
+    ['spaced lowercase words in quotes (one class — words)', 'password: "correct horse battery staple"', 'password-correct-horse-battery-staple'], ['a reg row', '    Password    REG_SZ    rotate', 'Password-REG_SZ-rotate'],
+    ['CJK words around ASCII', '每晚把生产数据库备份到AWS的S3存储桶', '每晚把生产数据库备份到AWS的S3存储桶'],
+    // r10 (lane lg-recovery, B-a3fe — the r9 verdict's M1 and minors, on 2.369.413): the run is judged on its CORE (the punctuation
+    // around it is no class); 8+ digits across `- _ .` after a secret word; a random run glued to a version judged on its own (the
+    // version stays); R7 at a name by the release's query walk and its name grammar
+    ['r10 M1: a kebab id and its comma (the comma is no class)', 'Rerun nightly-db-backup-2026-10-29, then report', 'Rerun-nightly-db-backup-2026-10-29-then-report'],
+    ['r10 M1: …its colon', 'see nightly-db-backup-2026-10-29: done', 'see-nightly-db-backup-2026-10-29-done'],
+    ['r10 M1: …in parens', 'run (nightly-db-backup-2026-10-29) now', 'run-nightly-db-backup-2026-10-29-now'],
+    ['r10 M1: …in quotes', 'check "build-2026-10-29-release-candidate" today', 'check-build-2026-10-29-release-candidate-today'],
+    ['r10 M1: …in brackets', 'tag [release-2026-10-29-hotfix-build] now', 'tag-release-2026-10-29-hotfix-build-now'],
+    ['r10 M1: a date-time in parens and a comma', 'backup (2026-10-29T03:26:00Z), done', 'backup-2026-10-29T03-26-00Z-done'],
+    ['r10 M1: a named version in quotes', 'ship "VibeSpace-2.369.362-Linux-x64"', 'ship-VibeSpace-2.369.362-Linux-x64'],
+    ['r10 M1: a path in parens', 'tail (/var/log/VibeSpace/Server-2026.log)', 'tail-var-log-VibeSpace-Server-2026.log'],
+    ['r10 M1: a random run in parens is still hidden', 'deploy (' + mat(36) + '),', 'deploy-' + R],
+    ['r10: 8 digits joined by -', 'password 1234-5678', 'password-' + R], ['r10: …by .', 'password 1234.5678', 'password-' + R], ['r10: …by _', 'password 1234_5678', 'password-' + R],
+    ['r10: 7 digits joined (under 8 — kept)', 'password 1234-567', 'password-1234-567'],
+    ['r10: four spaces after password (the output belt reads 1–3)', 'password    Summer1!x', 'password-' + R], ['r10: a no-break space after password', 'password\u00a0Summer1!x', 'password-' + R],
+    ['r10: an ideographic space after password', 'password\u3000Summer1!x', 'password-' + R], ['r10: an ordinary word after four spaces stays', 'password    reset', 'password-reset'],
+    ['r10: a random run glued after a version — only it is hidden', 'ship v1.2.3-' + mat(24) + ' now', 'ship-v1.2.3-' + R + '-now'],
+    ['r10: …glued before it', 'ship ' + mat(24) + '@1.2.3 now', 'ship-' + R + '-1.2.3-now'],
+    ['r10: …after a + build', 'tag 1.2.3+' + mat(24), 'tag-1.2.3-' + R],
+    ['r10: a PUBLIC query name stays (the release\'s name grammar: a descriptor head)', 'check https://x.test/cb?token_usage=Remote2026x', 'check-https-x.test-cb-token_usage-Remote2026x'],
+    // r10's fresh read (a reviewer given the code): the leaks and over-hides it found in the port, each now a row
+    ['review L1: a no-break space after KEY:', 'password:\u00a0Summer1!', 'password-' + R], ['review L1: …after KEY=', 'DB_PASSWORD=\u00a0Summer1!', 'DB_PASSWORD-' + R],
+    ['review L1: an ideographic space after KEY=', 'API_KEY=\u3000Ab3dEf9hXy', 'API_KEY-' + R], ['review L1: a thin space after the word', 'password\u2009Summer1!', 'password-' + R],
+    ['review L1: a narrow no-break space', 'password\u202fSummer1!', 'password-' + R], ['review L1: a no-break space after bearer', 'bearer\u00a0Ab3dEf9hXy12', 'bearer-' + R],
+    ['review L2: a public KEY gives its separator back (the release\'s B-be02)', 'fix: password=Summer1!', 'fix-password-' + R], ['review L2', 'deploy: PASSWORD=Summer1!', 'deploy-PASSWORD-' + R],
+    ['review L2', 'ci= DB_PASS=Summer1!x', 'ci-DB_PASS-' + R], ['review L2: an := assignment', 'password := Summer1!', 'password-' + R],
+    ['review L3: a value in « » after the word', 'password «Summer1!»', 'password-' + R], ['review L3: …after a query head', 'check https://x.test/?password=«Summer1!»', 'check-https-x.test-password-' + R],
+    ['review L4: a quoted value after the bare word is ONE token', 'password "Summer 1!x"', 'password-' + R],
+    ['review O3: the release\'s name grammar (a descriptor head is public)', 'password_policy: MinLength12', 'password_policy-MinLength12'],
+    ['review O4: a punctuated run glued after a version — the version stays', 'ship v1.2.3-Kq8$wZ3!pL0@vN6#tR2^ now', 'ship-v1.2.3-' + R + '-now'], ['review O4: …glued before it', 'ship Kq8$wZ3!pL0@vN6#tR2^@1.2.3 now', 'ship-' + R + '-1.2.3-now'],
+  ];
+  const tableBad = TABLE.filter(([, asked, want]) => rn(asked) !== want).map(([why, asked, want]) => `«${asked.slice(0, 48)}» (${why}) → ${rn(asked)} (want ${want})`);
+  for (const [why, asked] of TABLE) console.log(`      ${JSON.stringify(asked.length > 52 ? asked.slice(0, 44) + '…' : asked).padEnd(56)} → ${rn(asked)}   (${why})`);
+  ok(TABLE.length >= 60 && !tableBad.length, `r9 THE NAME RULE: a ${TABLE.length}-name table — every row's stored-as (the brief's examples, the skeptics' names, camelCase / PascalCase / brand names / dates / times / versions / paths / uuids / emails / URLs)${tableBad.length ? ' — ' + tableBad.join(' | ') : ''}`);
+  const leakT = TABLE.filter(([, asked, want]) => want.includes(R) && [mat(36), mat(36).toUpperCase(), 'Correct-Horse', 'Correct.Horse', 'Correct_Horse', 'Summer1', 'Passw0rd', '12345678', 'hunter2', H40, H64, UUID, 'a'.repeat(20) + '.', 'PROJ-1234'].some((x) => asked.includes(x) && rn(asked).includes(x.slice(0, 7))));
+  ok(!leakT.length, `r9 …no row that hides keeps a piece of what it hid (${TABLE.filter(([, , w]) => w.includes(R)).length} rows hide: a family, a passphrase, a digest, a JWT, a random run, a uuid after its word)`, leakT.map(([, a]) => rn(a)));
+  // (c) the collision law: two names differing only in a hidden token are -2, renamed; a kept word is no collision
+  const seen9 = new Set(), add9 = (w) => { const r = M.resolveName(w, seen9); seen9.add(r.name); return r; };
+  const c9 = [add9('rotate password: ' + mat(12, 5) + '!'), add9('rotate password: ' + mat(12, 7) + '?'), add9('password reset'), add9('password change'), add9('GitHub CI on macOS 15 and iOS 18 for PR 42'), add9('QA run for PR 1234 on M2 Max and CI box')];
+  ok(c9[0].name === 'rotate-password-' + R && c9[1].name === 'rotate-password-' + R + '-2' && c9[1].renamed === true && c9.slice(2).every((r) => !r.renamed) && c9[3].name === 'password-change',
+    'r9 (c) the collision law: two names differing only in a hidden token — the second `-2`, renamed: true; «password change» beside «password reset» and two short-word names are no collision', c9.map((r) => r.name + (r.renamed ? ' (renamed)' : '')));
+  // a STORED name (labelOf, a scheduled run's record — a slug): the rule without its run row — an older record of short words reads whole
+  const stored9 = ['GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42', 'Run-e2e-for-PR-1234-on-iOS-17-and-M2-Max', 'deploy-EU-west2-canary', 'deploy-' + mat(36)];
+  ok(stored9.every((t) => SS.redactByValue(t).text === t) && SS.redactByValue('deploy-' + GH).text === 'deploy-ghp_' + R, 'r9 a STORED name (a slug) is never judged by the run row — an older record of short words, a kebab name, even a run reads whole; a family is still hidden', stored9.map((t) => SS.redactByValue(t).text));
+  // THE MUTANTS — each RED by name
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MC9 = mutantCopies('jm-r9', path.join(__dirname_jm, '..'));
+  const jmSrc = fs.readFileSync(path.join(__dirname_jm, '../src/job-model.js'), 'utf8'), ssSrc9 = fs.readFileSync(path.join(__dirname_jm, '../src/secret-shapes.js'), 'utf8');
+  const SLUG_ONCE = "  const s = whole.split(R).map(slug).join(R).replace(/^-+|-+$/g, '');";
+  const mSlug = jmSrc.replace(SLUG_ONCE, "  const s = mask(whole.split(R).map(slug).join(R)).replace(/^-+|-+$/g, '');"), MJ = MC9.load('src/job-model.js', mSlug, 'slug2');   // stale-pins: kept — the PLANT a red control writes in (the old form, on purpose)
+  const slugRed = TABLE.filter(([, asked, want]) => MJ.resolveName(asked, new Set()).name !== want);
+  ok(mSlug !== jmSrc && slugRed.length >= 7 && slugRed.some(([, a]) => a.startsWith('GitHub CI')), `r9 MUTANT — the run row on the SLUG (r8's second mask): RED by name — ${slugRed.length} rows: ${slugRed.slice(0, 4).map(([, a]) => `«${a.slice(0, 32)}» → ${MJ.resolveName(a, new Set()).name}`).join(', ')}`);
+  const WV = "  if (t.includes(REDACTED) || [...t].length < 8) return false;   // the length counts the token's punctuation; a token a shape row hid is no value left\n";
+  const mPass = ssSrc9.replace(WV, WV + "  if (t.split(/[-_.']+/).every((w) => !w || /^(?:[a-z]+|[A-Z]+|[A-Z][a-z]+)$/.test(w))) return false;   // MUTANT: r8's plain-words exemption\n"), MS9 = MC9.load('src/secret-shapes.js', mPass, 'wordish');
+  const passRed = TABLE.filter(([, asked, want]) => M.resolveName(asked, new Set(), { mask: (t) => MS9.redactByValue(t, { typed: true }).text }).name !== want);
+  ok(mPass !== ssSrc9 && passRed.some(([, a]) => a === 'rotate password: ' + PW), `r9 MUTANT — a Capitalized passphrase kept (r8's plain-words exemption): RED by name — ${passRed.map(([, a]) => `«${a.slice(0, 40)}» → ${M.resolveName(a, new Set(), { mask: (t) => MS9.redactByValue(t, { typed: true }).text }).name}`).join(', ')}`);
+  const RUNGATE = "    if (typed) text = text.replace(NAME_RUN_RE,";
+  const mRun = ssSrc9.replace(RUNGATE, "    if (true) text = text.replace(NAME_RUN_RE,"), MR9 = MC9.load('src/secret-shapes.js', mRun, 'runstored');
+  const runRed = stored9.filter((t) => MR9.redactByValue(t).text !== t);
+  ok(mRun !== ssSrc9 && runRed.length >= 3, `r9 MUTANT — the run row on a STORED name (labelOf): RED by name — ${runRed.map((t) => `«${t.slice(0, 32)}» → ${MR9.redactByValue(t).text}`).join(', ')}`);
+  // r10 M1 MUTANT — the run's length and classes judged on the UNTRIMMED run (r9): the punctuation around a kebab id becomes a class
+  const CORE_FIRST = "  if (core.length < 20 || classesOf(core) < 3 ||";
+  const { anchored } = await import('./scratch.mjs');
+  const mCore = anchored(ssSrc9, CORE_FIRST, "  if (run.length < 20 || classesOf(run) < 3 ||", 'r10 M1 classes on the untrimmed run'), MC10 = MC9.load('src/secret-shapes.js', mCore, 'untrimmed');
+  const coreRed = TABLE.filter(([why, asked, want]) => why.startsWith('r10 M1') && M.resolveName(asked, new Set(), { mask: (t) => MC10.redactByValue(t, { typed: true }).text }).name !== want);
+  ok(mCore !== ssSrc9 && coreRed.length >= 3, `r10 MUTANT — the run's classes counted on the UNTRIMMED run (r9's M1): RED by name — ${coreRed.length} rows: ${coreRed.slice(0, 4).map(([, a]) => `«${a.slice(0, 40)}» → ${M.resolveName(a, new Set(), { mask: (t) => MC10.redactByValue(t, { typed: true }).text }).name}`).join(', ')}`);
+  // r10 FAIL CLOSED: the name rule never returns a name «as far as it got». ON THE PORT onto 2.369.413 its query row named a regex the
+  // release had renamed: every name threw after the word rows and passed with NO run row — the suite's table went red on it. Now a
+  // name the rule cannot judge is judged by the OUTPUT belt AND the name's own run row (the output belt alone keeps a random run
+  // standing alone — its R8 is key material only: measured by this leg's first form), said `failed`
+  const fellBack = TABLE.filter(([, asked]) => SS.redactByValue(asked, { typed: true }).failed);
+  ok(!fellBack.length, `r10 …no row of the ${TABLE.length}-name table is judged by the fallback (the name rule judges every one itself)`, fellBack.map(([, a]) => a.slice(0, 40)).join(' | '));
+  const QROW = '    row(nameQuery(text));';
+  const mThrow = anchored(ssSrc9, QROW, '    row(nameQueryGone(text));', 'r10 a planted throw'), MT10 = MC9.load('src/secret-shapes.js', mThrow, 'throws');
+  const RUN36 = 'deploy ' + mat(36), thrown = MT10.redactByValue(RUN36, { typed: true });
+  console.log(`      a planted throw (the query row renamed away): ${JSON.stringify(RUN36)} → ${JSON.stringify(thrown.text)} failed=${thrown.failed}`);
+  ok(mThrow !== ssSrc9 && thrown.failed === true && !thrown.text.includes(mat(36)), 'r10 a planted throw in the name rule: the name falls back to the OUTPUT belt and the name\'s run row — a random 36-run standing alone stays hidden, and the answer says failed', thrown);
+  const OLD_CATCH = /  \} catch \{\n    \/\/ r10 \(B-a3fe\)[\s\S]*?\n  \}\n  return \{ text, redacted: n \};/;
+  const mOld = anchored(mThrow, OLD_CATCH, '  } catch { /* a text that cannot be judged is returned as far as it got */ }\n  return { text, redacted: n };', 'r9 catch'), MO10 = MC9.load('src/secret-shapes.js', mOld, 'farasitgot');
+  const oldOut = MO10.redactByValue(RUN36, { typed: true });
+  console.log(`      the same throw with r9's catch: ${JSON.stringify(RUN36)} → ${JSON.stringify(oldOut.text)}`);
+  ok(mOld !== mThrow && oldOut.text.includes(mat(36)), 'r10 CONTROL — r9\'s catch («as far as it got») with the same throw passes the 36-run WHOLE (the run row never ran): the fallback is what hides it', oldOut);
 }
 
 // ── renderers (budget + no-wrap laws) ──
@@ -412,9 +560,20 @@ ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, n
   {
     const jb = { ...j, name: 'mint-me' }, c = M.forYouCopy(jb, 'ask'), n0 = M.forYouCopy(null, 'store-corrupt'), hb = { fact: 'ask', words: { key: '{name} needs your input', params: { name: 'HAND-BUILT' } } };
     let threw = false; try { 'use strict'; c.words.params.name = 'HAND-BUILT'; } catch { threw = true; }
-    ok(M.mintedFor(c) === jb && M.mintedFor(n0) === null && M.mintedFor(hb) === undefined && M.mintedFor(M.forYouCopy(jb, 'nope')) === undefined && M.mintedFor(null) === undefined && M.mintedFor('x') === undefined
+    ok(M.mintedFor(c) === jb.id && M.mintedFor(M.forYouCopy({ ...jb }, 'ask')) === jb.id && M.mintedFor(M.forYouCopy({ ...jb, id: 'jb-other00' }, 'ask')) === 'jb-other00' && M.mintedFor(n0) === null && M.mintedFor(hb) === undefined && M.mintedFor(M.forYouCopy(jb, 'nope')) === undefined && M.mintedFor(null) === undefined && M.mintedFor('x') === undefined
       && Object.isFrozen(c) && Object.isFrozen(c.words) && Object.isFrozen(c.words.params) && c.words.params.name === 'mint-me' && M.mintedFor({ ...c }) === undefined,
-      'r7 forYouCopy MINTS each copy for its job (frozen whole — a minted copy re-worded stays the engine\'s words); a hand-built copy, a spread of a minted one and a refusal are not minted', threw);
+      'r7 forYouCopy MINTS each copy for its job (frozen whole — a minted copy re-worded stays the engine\'s words); a hand-built copy, a spread of a minted one and a refusal are not minted — r8: mintedFor answers the job\'s ID (the same record read twice is one job)', threw);
+
+    // r9 (accept-r8 unverified 2 + 6): the ID is a NON-EMPTY STRING — a copy minted for a job with no id (an event row's {jobId}, a
+    // record without one, id '') is minted NO_ID: equal to no job's id, to no notice's null, to no hand-built copy's undefined
+    const idless = [{ jobId: 'jb-0000beef', kind: 'task', name: 'x', state: 'awaiting-user' }, { ...jb, id: '' }, { ...jb, id: 42 }].map((x) => M.mintedFor(M.forYouCopy(x, 'ask')));
+    ok(idless.every((v) => v === M.NO_ID && v !== undefined && v !== null) && typeof M.NO_ID === 'symbol' && M.jobIdOf(jb) === jb.id && [null, {}, { id: '' }, { id: 7 }, { jobId: 'jb-x' }].every((x) => M.jobIdOf(x) === null),
+      'r9 a copy minted for a job with NO id (none, \'\', a number) is minted NO_ID — never `undefined` (r8: the door read undefined === undefined and filed a hand-built copy), never null (an engine notice)', idless.map(String));
+    const MINT_AT = "  Object.freeze(c.words); MINTED.set(Object.freeze(c), job ? jobIdOf(job) || NO_ID : null);";
+    const { mutantCopies: mc9 } = await import('./mutant-copy.mjs'), jmSrc9 = fs.readFileSync(path.join(__dirname_jm, '../src/job-model.js'), 'utf8');
+    const MM9 = mc9('jm-r9-mint', path.join(__dirname_jm, '..')).load('src/job-model.js', jmSrc9.replace(MINT_AT, "  Object.freeze(c.words); MINTED.set(Object.freeze(c), job ? job.id : null);"), 'mintr8');
+    const mIdless = MM9.mintedFor(MM9.forYouCopy({ jobId: 'jb-0000beef', kind: 'task', name: 'x', state: 'awaiting-user' }, 'ask'));
+    ok(jmSrc9.includes(MINT_AT) && mIdless === undefined, 'r9 MUTANT — r8\'s mint (`job ? job.id : null`): RED by name — the id-less job\'s copy reads `undefined`, the hand-built copy\'s own answer (the door could not tell them apart)', String(mIdless));
   }
   const ef = M.forYouCopy(null, 'engine-failed', { error: 'EACCES' }), sc = M.forYouCopy(null, 'store-corrupt', { file: '/data/jobs.json.corrupt-1' }), rh = M.forYouCopy(null, 'records-held', { file: '/data/jobs-archive.json.corrupt-2' });
   ok(ef.fact === 'engine-failed' && fill(ef.words) === 'Background Work engine failed to start: EACCES' && ef.urgency === 'high' && sc.fact === 'store-corrupt' && /Its bytes were kept in \/data\/jobs\.json\.corrupt-1; old job logs are not cleaned up until that file is moved or deleted\. Once it is, the logs of the jobs only that file lists are removed 14 days after their newest file\.$/.test(fill(sc.words)) && rh.fact === 'records-held' && /^Job records in \/data\/jobs-archive\.json\.corrupt-2 could not be read\./.test(fill(rh.words)) && rh.urgency === 'high', 'forYouCopy: the engine\'s own notices (no job — r4: through the same door)', JSON.stringify([ef, sc]));

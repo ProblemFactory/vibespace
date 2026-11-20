@@ -457,12 +457,20 @@ function bootEndCause(sample, now, { share = 0.5 } = {}) {
 // npm token's) reached every viewer. The belt (`mask` — the engine's, with the vault's values; the shapes census by default)
 // runs on the WHOLE text as it was asked, the slug keeps each masked run (`«redacted»`) as it is, the belt runs again on the
 // slug, and the cut never splits a masked run (a cut inside one moves to its start, its kept head with it). The record keeps
-// the belted name (the author's own echo included — no reader of the record sees a token's piece)
-const shapesBelt = (t) => require('./secret-shapes.js').redactSecrets(t).text;
+// the belted name (the author's own echo included — no reader of the record sees a token's piece). BY THE VALUE (r8, accept-r7
+// confirmed 0): the belt on a name as typed is the table judged by the VALUE (secret-shapes redactByValue; the engine's mask is
+// its name belt, _nameWords) — r7 handed the raw name to the output belt and its word rules erased ordinary words from the record
+// («password reset» stored `password-«redacted»`, «password change» `password-«redacted»-2`); an ordinary word after «password» stays.
+// THE NAME RULE, ONCE, BEFORE THE SLUG (r9, accept-r8 confirmed 0 + 2 — the rule fixed by the acceptance owner): the mask runs on
+// the name AS TYPED (`typed`: the run row with it) and NEVER again on the slug — r8 masked the slug a second time and the slug's
+// `-` joined a name of short words into one random-looking run («GitHub CI on macOS 15 and iOS 18 for PR 42» stored `«redacted»`,
+// the next such name `«redacted»-2`, renamed). The slug never changes what was hidden (a `«redacted»` passes it whole); the cut
+// never splits it; a collision is `-2`, renamed: true
+const shapesBelt = (t) => require('./secret-shapes.js').redactByValue(t, { typed: true }).text;
 function resolveName(wanted, visibleNames, { mask = shapesBelt } = {}) {
   const R = '«redacted»', slug = (t) => t.replace(/[^\w.一-鿿-]+/g, '-');
   const whole = mask(String(wanted || 'job'));   // the belt bounds its own input (secret-shapes INPUT_MAX)
-  const s = mask(whole.split(R).map(slug).join(R)).replace(/^-+|-+$/g, '');
+  const s = whole.split(R).map(slug).join(R).replace(/^-+|-+$/g, '');
   let cut = 64;
   for (let i = s.indexOf(R); i >= 0 && i < cut; i = s.indexOf(R, i + R.length)) if (i + R.length > cut) { cut = i - /\w*[-.]?$/.exec(s.slice(0, i))[0].length; break; }   // with the head it keeps (`ghp_`, `xoxb-`, `TOKEN-`)
   const base = (cut < 64 ? s.slice(0, cut).replace(/-+$/, '') : s.slice(0, cut)) || 'job';
@@ -760,8 +768,15 @@ const FOR_YOU_WORDS = Object.freeze({
 // merely has {words, fact} (a hand-built one handed to `_forYou` through `.call` or an alias was filed and journaled as a real
 // copy, the census reading only the direct call's spelling). A module WeakMap keyed by the copy, valued by the job it was
 // minted for (null: an engine notice); the copy, its words and its params are frozen (a minted copy re-worded is no copy).
-// `mintedFor(c)` answers that job — `undefined` for anything forYouCopy did not mint
+// `mintedFor(c)` answers that job's ID — `undefined` for anything forYouCopy did not mint. r8 (accept-r7 confirmed 1): the ID,
+// never the object — r7 compared objects, so a record read twice (a reload, a snapshot, a suite's two builds of one job) was
+// "another job" and test-jobs-engine leg (4)'s legacy re-files were all refused while its count stayed green. r9 (accept-r8
+// unverified 2 + 6): the ID is a NON-EMPTY STRING (jobIdOf) — r8 compared `undefined === undefined`, so a hand-built copy handed
+// with a job that has no id (a record without one, an event row's {jobId}) was filed. A copy minted for a job with no id is
+// minted NO_ID (equal to nothing: neither a job nor an engine notice); the door refuses a job with no id by name
 const MINTED = new WeakMap();
+const NO_ID = Symbol('a job with no id');
+function jobIdOf(job) { return job && typeof job.id === 'string' && job.id ? job.id : null; }
 function mintedFor(c) { return c && typeof c === 'object' ? MINTED.get(c) : undefined; }
 // .399 K7 (主开发's merged-tip read, 2026-11-13): a REWORDED template never strands an item already filed under the old one — the
 // For-you store keeps an open item's key, and a 2.369.398 hub filed these notices once («said»: heldSaid), so after the update the open
@@ -796,7 +811,7 @@ function forYouCopy(job, kind, opts = {}) {
   const c = forYouWords(job, kind, opts);
   if (!c.words) return c;
   if (c.words.params) Object.freeze(c.words.params);
-  Object.freeze(c.words); MINTED.set(Object.freeze(c), job || null);
+  Object.freeze(c.words); MINTED.set(Object.freeze(c), job ? jobIdOf(job) || NO_ID : null);
   return c;
 }
 function forYouWords(job, kind, opts) {
@@ -1137,6 +1152,6 @@ module.exports = { jobWhereVerdict, endNotice, OWNED_LIVE, FOR_YOU_WORDS_LEGACY,
   MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftRecordFault, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
-  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, mintedFor, legacyCopyFact, labelVia,
+  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, mintedFor, jobIdOf, NO_ID, legacyCopyFact, labelVia,
   agentJobView,
 };

@@ -989,12 +989,20 @@ setInterval(() => { }, 1000);
       ok(facts['ut-legacy0001'] === 'end:failed:error' && facts['ut-legacy0002'] === 'parked' && facts['ut-legacy0003'] === 'missed' && facts['ut-legacy0004'] === 'fire' && facts['ut-legacy0005'] === 'ask' && facts['ut-legacy0006'] === 'ask' && facts['ut-legacy0007'] === null,
         'r4 THE LEGACY RUNG: every open ≤ .360 job copy takes the fact its own template implies at load (end:<state>:<cause>, parked, missed, fire, ask — a pre-B-328d ask too); an agent\'s item none', JSON.stringify(facts));
       const job = (id, name, state, extra = {}) => ({ id, kind: 'task', name, state, owner: own, access: { view: 'session', control: 'session' }, runs: [], notifyUser: true, ...extra });
-      X.jm._forYou(job(L.end, 'nightly run', 'failed'), M.forYouCopy(job(L.end, 'nightly run', 'failed'), 'end', { cause: 'error' }));
-      X.jm._forYou(job(L.park, 'db', 'failed', { kind: 'service' }), M.forYouCopy(job(L.park, 'db', 'failed'), 'parked'));
-      X.jm._forYou(job(L.missed, 'standup', 'missed', { kind: 'cron' }), M.forYouCopy(job(L.missed, 'standup', 'missed'), 'missed'));
-      X.jm._forYou(job(L.fire, 'cert', 'up', { kind: 'cron' }), M.forYouCopy(job(L.fire, 'cert', 'up'), 'fire', { text: 'renew the cert today' }));
+      const LEG4 = ['ut-legacy0001', 'ut-legacy0002', 'ut-legacy0003', 'ut-legacy0004'], filed4 = () => X.items().filter((i) => LEG4.includes(i.id) && i.i18n).length, f0 = filed4();
+      const v4 = [   // each job built twice — the mint's copy and the filing's record are two objects of ONE job (r8: the mint is the job's ID)
+        X.jm._forYou(job(L.end, 'nightly run', 'failed'), M.forYouCopy(job(L.end, 'nightly run', 'failed'), 'end', { cause: 'error' })),
+        X.jm._forYou(job(L.park, 'db', 'failed', { kind: 'service' }), M.forYouCopy(job(L.park, 'db', 'failed'), 'parked')),
+        X.jm._forYou(job(L.missed, 'standup', 'missed', { kind: 'cron' }), M.forYouCopy(job(L.missed, 'standup', 'missed'), 'missed')),
+        X.jm._forYou(job(L.fire, 'cert', 'up', { kind: 'cron' }), M.forYouCopy(job(L.fire, 'cert', 'up'), 'fire', { text: 'renew the cert today' })),
+      ];
       const per = Object.fromEntries(Object.entries(L).map(([k, id]) => [k, X.items().filter((i) => i.jobId === id && i.status === 'open').length]));
       ok(per.end === 1 && per.park === 1 && per.missed === 1 && per.fire === 1, 'r4 …and the next copy of each re-files INTO the legacy item — ONE item per job and copy (r3: two identical items after the upgrade)', JSON.stringify(per));
+      // r8 (accept-r7 confirmed 1 — skeptic-leg4-vacuous.cjs): the re-file HAPPENED — r7's mint compared job OBJECTS, so every filing
+      // above was refused «minted for another job» and the count still read the seeded 1 (green whether the store re-filed, refused or duplicated)
+      ok(v4.every((v, k) => v && v.ok === true && v.id === LEG4[k]) && f0 === 0 && filed4() === 4, 'r8 …each re-file HAPPENED: every verdict ✓ names its legacy item, and the re-filed items (the template they now carry) move 0 → 4 — the mint is the job\'s ID, one record read twice is one job', JSON.stringify({ v4, f0, f1: filed4() }));
+      const n4 = X.items().length, cross = X.jm._forYou(job(L.end, 'nightly run', 'failed'), M.forYouCopy(job(L.park, 'db', 'failed'), 'parked'));
+      ok(cross && cross.ok === false && /minted for another job/.test(cross.why) && X.items().length === n4 && X.items().filter((i) => i.jobId === L.end && i.jobFact === 'parked').length === 0, 'r8 …and a copy minted for ANOTHER job\'s id is refused by name — nothing filed under the job it was handed', JSON.stringify(cross));
       ok(X.todos.resolveByJob(L.old) === 1 && X.todos.resolveByJob(L.fire) === 0, 'r4 …a pre-B-328d ask (no stored origin) closes when its panel is answered; a fire copy never does', JSON.stringify(X.items().filter((i) => i.jobId === L.old || i.jobId === L.fire).map((i) => [i.jobFact, i.status])));
       X.end();
     }
@@ -1139,6 +1147,47 @@ setInterval(() => { }, 1000);
         const seen16 = [cj.name, X.jm.labelOf(cj), X.jm.snapshot(cj).name, X.jm.snapshot(cj, { author: true }).name, txt(X.jm.digestFor(other, 0))].join('\n');
         let leak16 = 0; for (let i = 0; i + 8 <= body16.length; i++) if (seen16.includes(body16.slice(i, i + 8))) leak16++;
         ok(cj.name === 'nightly-build-of-the-whole-staging-stack-ghp_«redacted»' && !leak16, 'r7 THE RECORD\'S NAME: belted WHOLE, then cut — no piece of a token the 64-char cut would split reaches the record, the author\'s echo, a viewer\'s snapshot or digest', JSON.stringify({ name: cj.name, leak16 })); }
+      // (17) r8 THE NAME BY ITS VALUE (accept-r7 confirmed 0 — skeptic-name-falsepos.cjs, refuter-name-falsepos-engine.cjs): e6d6299e6 stored
+      // «password reset» as `password-«redacted»` and «password change» as `password-«redacted»-2` (renamed) for every reader, the author too
+      { const mk = (nm) => X.jm.create({ kind: 'service', name: nm, cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own, access: { view: 'all' } }, who);
+        const W17 = { 'password reset': 'password-reset', 'auth: fix login flow': 'auth-fix-login-flow', 'bearer of bad news': 'bearer-of-bad-news', 'token refresh': 'token-refresh', 'password change': 'password-change' };
+        const made17 = Object.keys(W17).map((nm) => mk(nm)), disk17 = JSON.parse(fs.readFileSync(X.jm.file, 'utf-8')).map((j) => j.name);
+        const read17 = made17.map((r) => { const j = X.jm.jobs.get(r.job.id); return [r.job.name, j.name, X.jm.labelOf(j), X.jm.snapshot(j).name, r.renamed ? 'renamed' : '']; });
+        ok(read17.every((row, k) => row.slice(0, 4).every((n) => n === Object.values(W17)[k]) && !row[4] && disk17.includes(Object.values(W17)[k])),
+          'r8 THE NAME BY ITS VALUE: «password reset», «auth: fix login flow», «bearer of bad news», «token refresh» stored WHOLE — the record, jobs.json, the create echo, the label another conversation reads; «password change» beside «password reset» is no collision', JSON.stringify(read17));
+        const v17 = mk('password: Q7w8E9r0T1y2!x rotation'), j17 = X.jm.jobs.get(v17.job.id);
+        ok(v17.job.name === 'password-«redacted»-rotation' && X.jm.labelOf(j17) === v17.job.name && !JSON.stringify(JSON.parse(fs.readFileSync(X.jm.file, 'utf-8'))).includes('Q7w8E9r0'), 'r8 …a VALUE after the word is hidden at the record (`password: <value>` — the word stays; r9: the ONE token, the words after it too)', v17.job.name);
+        // a scheduled run's NEW record (accept-r7 residual e): the child of a cron an older engine wrote with a raw name was `${name} run` raw
+        const old17 = { id: 'jb-0000c7c7', kind: 'cron', name: 'nightly-' + MAT, schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'] } } }, owner: own, access: { view: 'session', control: 'session' }, desiredUp: true, state: 'scheduled', runs: [], createdAt: Date.now() };
+        X.jm.jobs.set(old17.id, old17); X.jm._fireCron(old17, 'cron');
+        const kid17 = [...X.jm.jobs.values()].find((x) => x.cronParent === old17.id);
+        ok(kid17 && kid17.name === 'nightly-ghp_«redacted» run' && !kid17.name.includes(MAT.slice(4, 16)), 'r8 …a scheduled run\'s NEW record is belted too — the run of a cron an older engine stored raw (the cron keeps what it stored; its run\'s record does not)', kid17 && kid17.name);
+        // r9 THE NAME RULE through the real engine (accept-r8 confirmed 0 + 2 — skeptic-r8v-engine.cjs, skeptic-r8v-negatives.cjs): 4cc7f037a
+        // stored «Run e2e for PR 1234 on iOS 17 and M2 Max» as `«redacted»` (the next `«redacted»-2`, renamed), labelled a .360 record
+        // of that shape `«redacted»`, and stored «rotate password: Correct-Horse-Battery-Staple» in clear
+        const W9 = { 'Run e2e for PR 1234 on iOS 17 and M2 Max': 'Run-e2e-for-PR-1234-on-iOS-17-and-M2-Max', 'Run e2e for PR 1235 on iOS 17 and M2 Max': 'Run-e2e-for-PR-1235-on-iOS-17-and-M2-Max', 'GitHub CI on macOS 15 and iOS 18 for PR 42': 'GitHub-CI-on-macOS-15-and-iOS-18-for-PR-42',
+          'rotate password: Correct-Horse-Battery-Staple': 'rotate-password-«redacted»', 'password: Summer1!': 'password-«redacted»', 'auth: fix login flow 2026-10-29': 'auth-fix-login-flow-2026-10-29' };
+        const made9 = Object.keys(W9).map((nm) => mk(nm)), disk9 = JSON.stringify(JSON.parse(fs.readFileSync(X.jm.file, 'utf-8')));
+        const read9 = made9.map((r) => { const j = X.jm.jobs.get(r.job.id); return [r.job.name, j.name, X.jm.labelOf(j), X.jm.snapshot(j).name, r.renamed ? 'renamed' : '']; });
+        const legacy9 = { id: 'jb-0000c9c9', kind: 'task', name: 'QA-run-3-for-PR-482-on-iOS-17-and-M2-Mac', owner: own, access: { view: 'all' }, state: 'done', runs: [], createdAt: Date.now() };
+        X.jm.jobs.set(legacy9.id, legacy9);
+        ok(read9.every((row, k) => row.slice(0, 4).every((n) => n === Object.values(W9)[k]) && !row[4]) && !/Correct-Horse|Summer1/.test(disk9) && X.jm.labelOf(legacy9) === legacy9.name && X.jm.snapshot(legacy9).name === legacy9.name,
+          'r9 THE NAME RULE: names of short words stored WHOLE and never renamed (the record, jobs.json, the echo, the label), a Capitalized passphrase and Summer1! hidden, a date after the words kept; a .360 record of that shape labelled whole (never the run row on a stored slug)', JSON.stringify(read9)); }
+      // (18) r9 THE MINT'S ID IS A NON-EMPTY STRING (accept-r8 unverified 2 + 6 — skeptic-r8v-mint-idless.cjs, skeptic-mint-noid.cjs): 4cc7f037a
+      // read `undefined === undefined` and FILED a hand-built copy handed with a job that has no id («HAND-BUILT words needs your input»)
+      { const n18 = X.items().length, l18 = X.logs.length;
+        const idless = { jobId: 'jb-0000beef', kind: 'task', name: 'x', state: 'awaiting-user', owner: own }, hb = { fact: 'ask', words: { key: '{name} needs your input', params: { name: 'HAND-BUILT words' } } };
+        const v18 = [X.jm._forYou(idless, hb), X.jm._forYou(idless, M.forYouCopy(idless, 'ask')), X.jm._forYou({ ...idless, id: '' }, M.forYouCopy({ ...idless, id: '' }, 'ask')), X.jm._forYou(null, M.forYouCopy(idless, 'ask'))];
+        ok(v18.slice(0, 3).every((v) => v && v.ok === false && /a job with no id gets no For-you copy/.test(v.why)) && v18[3] && v18[3].ok === false && /minted for another job/.test(v18[3].why)
+          && X.items().length === n18 && !X.items().some((i) => /HAND-BUILT/.test(i.text)) && X.logs.slice(l18).filter((l) => /a job with no id gets no For-you copy/.test(l)).length === 3,
+          'r9 THE MINT: a job with NO id (none, \'\') gets no For-you copy — a hand-built one and even a minted one refused BY NAME, said in the log; its minted copy is no engine notice either — nothing filed', JSON.stringify(v18));
+        // MUTANT: r8's door (`minted !== (job ? job.id : null)`) over the same hand-built copy — FILED: RED by name
+        const { mutantCopies } = await import('./mutant-copy.mjs');
+        const JS18 = fs.readFileSync(new URL('../src/jobs.js', import.meta.url), 'utf8'), DOOR18 = 'if ((job && !jobId) || minted === undefined || minted !== jobId) {';
+        const JM18 = mutantCopies('jobs-r9-door', path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')).load('src/jobs.js', JS18.replace(DOOR18, 'if (minted !== (job ? job.id : null)) {'), 'door-r8').JobManager;
+        const d18 = path.join(R4, 'mut18'); fs.mkdirSync(d18, { recursive: true }); const filed18 = [];
+        const mv = new JM18({ dataDir: d18, broadcast() { }, notifyUser: (n) => { filed18.push(n); return { ok: true, id: 'ut-mut18' }; }, log() { } })._forYou(idless, hb);
+        ok(JS18.includes(DOOR18) && mv && mv.ok === true && filed18.length === 1 && filed18[0].words.params.name === 'HAND-BUILT words', 'r9 MUTANT — r8\'s door (the id compared as it is): RED by name — the hand-built copy handed with an id-less job is FILED', JSON.stringify({ mv, filed18 })); }
       X.end();
     }
   }

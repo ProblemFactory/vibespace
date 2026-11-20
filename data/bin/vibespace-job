@@ -298,6 +298,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       else if (r.vaultWait && r.vaultWait.words) console.log(`scheduled: ${j.id} (${j.kind} ${j.name})${renamed} — but each fire's run WAITS and is NOT started: ${r.vaultWait.words}`);
       else console.log(`started ${j.id} (${j.kind} ${j.name})${renamed}`);
       if (r.where) console.log(`where: ${r.where}`);   // B-70f9: a job runs on the hub's machine — said with the path
+      // lane job-notify-user r8: the name as STORED, said at once when part of it was hidden (a secret goes in the vault, never a name)
+      if (/«redacted»/.test(j.name || '')) console.log(`name stored as "${j.name}": a part of it looked like a secret and is hidden for every reader, you included — a secret goes in the vault (vibespace-vault), never in a name`);
       // RESOLVED-TIME ECHO: always show WHEN it actually fires, absolute (the
       // owner's zone, named — B-7960) + countdown — a timezone mis-parse (bare
       // datetimes are server-local) must be visible the second the job is created.
