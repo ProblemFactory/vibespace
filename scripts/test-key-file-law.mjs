@@ -833,7 +833,15 @@ try {
     const p = path.join(dir, e.name);
     return e.isDirectory() ? walkDataFiles5(p) : e.isFile() ? [p] : [];
   });
-  const sweep5 = (dir) => {
+  // A SWEEP READS WHAT HAS LANDED (B-1217 member 15, 主开发 r493, 2026-11-20): a store's write lands by tmp + rename on the
+  // writer's thread, so a sweep that LISTS while one flies can meet the tmp file and lose it to the rename before its read
+  // (ENOENT on browser-profiles.json.tmp-<pid>-w at the M4 sweep: test-key-file-law@UTC in two lanes' gates that day). The
+  // writer is flushed through its OWN door first (flushSync: the write in flight lands, then every owed store), so no tmp file
+  // exists to meet; a write left owed is red BY NAME. No catch around the read: a real file vanishing stays a throw.
+  const SW5 = require(path.join(REPO, 'src/store-writer.js')).storeWriter();   // the one writer every store here (and the mutant copies' requires) reach
+  const sweep5 = (dir, tag) => {
+    const fl = SW5.flushSync(null);
+    ok(fl.left.length === 0, `RULE 5′ ${tag}: the sweep reads what has landed — the store writer flushed through its own door before listing (${fl.written.length} written now${fl.written.length ? ': ' + fl.written.map((x) => path.basename(String(x))).join(', ') : ''}; ${fl.left.length} left${fl.left.length ? ': ' + fl.left.map((x) => `${path.basename(String(x.file || x.name))} — ${x.why}`).join('; ') : ''})`);
     const hits = [];
     for (const f of walkDataFiles5(dir)) {
       const txt = realRead(f, 'utf8');
@@ -847,7 +855,7 @@ try {
     }
     return hits;
   };
-  const sweepHits0 = sweep5(d5);
+  const sweepHits0 = sweep5(d5, '(the live run)');
   ok(fillCur5.ok && fillNew5.ok && Boolean(p15) && walkDataFiles5(d5).length >= 3 && sweepHits0.length === 0,
     'RULE 5′ runtime data/ sweep (live browser-dialogs fillVaultField): store keys, vault password, account secret and typed web-login P0/P1 leave 0 raw/sha256/sha1/sha512 traces across all files under data/',
     sweepHits0.join(' | '));
@@ -882,7 +890,7 @@ try {
     fs.writeFileSync(path.join(d5M4, 'profiles', 'bp-00000001', 'leak.json'), JSON.stringify({ h: crypto.createHash('sha1').update(p05, 'utf8').digest('hex') }), { mode: 0o600 });
     fs.mkdirSync(path.join(d5M4, 'run'), { recursive: true });
     fs.writeFileSync(path.join(d5M4, 'run', 'leak.json'), JSON.stringify({ h: crypto.createHash('sha256').update(p05, 'utf8').digest('base64url') }), { mode: 0o600 });
-    sweepHitsM4 = sweep5(d5M4);
+    sweepHitsM4 = sweep5(d5M4, '(the M4 red control)');
     w5M4.shutdown();
   }
   ok(Boolean(Dm5M4)
