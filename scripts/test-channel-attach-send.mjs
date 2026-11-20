@@ -343,10 +343,18 @@ for (const [n, p, d] of gmailLegs(GM.buildMime)) ok(p, n, d);
 console.log('⑦ the CLI: --attach reads here, checks first, sends the bytes');
 async function cliLegs(cliPath) {
   const r = [];
-  const seen = [];
-  const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { seen.push({ url: req.url, body: b ? JSON.parse(b) : null }); const body = seen[seen.length - 1].body || {}; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, proposal: { id: 'p-1-1', state: 'awaiting-approval', policy: { reasons: ['attachments'] }, attachments: (body.attachments || []).map((a, n) => ({ n, name: a.name, bytes: Buffer.from(a.data, 'base64').length, sha256: sha(Buffer.from(a.data, 'base64')), mime: 'image/png' })) } })); }); });
+  // THE RUN'S OWN MARK (主开发 r559, B-1217 member 18): the stand-in listens on a loopback port ANY process of the box can reach — a
+  // stray request under the whole tier's load once made «no request at all» and «the first request» red. The CLI is pointed at a path
+  // minted for this run; the legs judge ONLY the requests under it, and every url the stand-in saw is printed (a stray: printed, never judged)
+  const MARK = '/run-' + crypto.randomBytes(8).toString('hex');
+  const seen = [];   // EVERY request the stand-in saw, in order
+  const ours = () => seen.filter((x) => x.url.startsWith(MARK + '/')), strays = () => seen.filter((x) => !x.url.startsWith(MARK + '/'));
+  const saw = () => seen.map((x) => (x.url.startsWith(MARK + '/') ? '<run>' + x.url.slice(MARK.length) : 'STRAY ' + x.url));
+  const srv = http.createServer((req, res) => { let b = ''; req.on('data', (c) => { b += c; }); req.on('end', () => { let j = null; try { j = b ? JSON.parse(b) : null; } catch { j = { unparsed: b.length }; } seen.push({ url: req.url, body: j }); if (!req.url.startsWith(MARK + '/')) { res.statusCode = 404; return res.end('{}'); } const body = j || {}; res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ ok: true, proposal: { id: 'p-1-1', state: 'awaiting-approval', policy: { reasons: ['attachments'] }, attachments: (body.attachments || []).map((a, n) => ({ n, name: a.name, bytes: Buffer.from(a.data, 'base64').length, sha256: sha(Buffer.from(a.data, 'base64')), mime: 'image/png' })) } })); }); });
   await new Promise((res) => srv.listen(0, '127.0.0.1', res));
-  const env = { PATH: process.env.PATH, HOME: ROOT, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}`, VIBESPACE_SESSION_TOKEN: 'vst_x' };
+  const env = { PATH: process.env.PATH, HOME: ROOT, VIBESPACE_API: `http://127.0.0.1:${srv.address().port}${MARK}`, VIBESPACE_SESSION_TOKEN: 'vst_x' };
+  // CONTROL (a stray, sent as the load once did): a request of another process reaches the port before the legs run
+  await new Promise((res) => { const q = http.request({ host: '127.0.0.1', port: srv.address().port, path: '/api/agent/channels/acc/c1/reply', method: 'POST', headers: { 'Content-Type': 'application/json' } }, (a) => { a.resume(); a.on('end', res); }); q.on('error', res); q.end(JSON.stringify({ text: 'a stray', attachments: [] })); });
   const run = (args) => new Promise((resolve) => { const ch = spawn(process.execPath, [cliPath, ...args], { env }); let out = '', err = ''; ch.stdout.on('data', (d) => { out += d; }); ch.stderr.on('data', (d) => { err += d; }); ch.on('close', (code) => resolve({ code, out, err })); });
   const dir = path.join(ROOT, 'cli');
   fs.mkdirSync(path.join(dir, 'folder'), { recursive: true });
@@ -358,12 +366,17 @@ async function cliLegs(cliPath) {
   const e = await run(['reply', 'acc/c1', 'hi', '--attach', path.join(dir, 'empty.txt')]);
   const h = await run(['reply', 'acc/c1', 'hi', '--attach', huge]);
   const many = await run(['reply', 'acc/c1', 'hi', ...Array.from({ length: 11 }, () => ['--attach', path.join(dir, 'shot.png')]).flat()]);
-  r.push(['a directory, an empty file, 26 MB together, 11 files ⇒ refused before any request (exit 1, said)', [d, e, h, many].every((x) => x.code === 1) && /is a directory/.test(d.err) && /has no bytes/.test(e.err) && /26\.0 MB together/.test(h.err) && /at most 10 attachments/.test(many.err) && seen.length === 0, JSON.stringify([d.err, e.err, h.err, many.err, seen.length])]);
+  r.push(['a directory, an empty file, 26 MB together, 11 files ⇒ refused before any request (exit 1, said)', [d, e, h, many].every((x) => x.code === 1) && /is a directory/.test(d.err) && /has no bytes/.test(e.err) && /26\.0 MB together/.test(h.err) && /at most 10 attachments/.test(many.err) && ours().length === 0, JSON.stringify([d.err, e.err, h.err, many.err, saw()])]);
   const g = await run(['reply', 'acc/c1', 'hi there', '--attach', path.join(dir, 'shot.png'), '--why', 'asked']);
-  const sb = seen[0] && seen[0].body;
-  r.push(['a file: the request carries {name: its basename, data: base64 of its bytes}; the answer\'s list is printed', g.code === 0 && sb && sb.text === 'hi there' && sb.attachments.length === 1 && sb.attachments[0].name === 'shot.png' && Buffer.from(sb.attachments[0].data, 'base64').equals(PNG) && /with 1 attachment: shot\.png \(image\/png, \d+ bytes, sha256 [0-9a-f]{12}\)/.test(g.out), JSON.stringify([g.code, g.out, g.err])]);
+  const sb = ours()[0] && ours()[0].body;
+  r.push(['a file: the request carries {name: its basename, data: base64 of its bytes}; the answer\'s list is printed', g.code === 0 && sb && sb.text === 'hi there' && sb.attachments.length === 1 && sb.attachments[0].name === 'shot.png' && Buffer.from(sb.attachments[0].data, 'base64').equals(PNG) && /with 1 attachment: shot\.png \(image\/png, \d+ bytes, sha256 [0-9a-f]{12}\)/.test(g.out), JSON.stringify([g.code, g.out, g.err, saw()])]);
   const u = await run(['reply', 'acc/c1', '--attach']);
   r.push(['usage names --attach', u.code === 1 && /--attach <path>/.test(u.err), u.err]);
+  // the stray is printed, never judged: over EVERY request (the old judgement) both legs above would be red — over the run's own, green
+  const mine = strays().find((x) => x.body && x.body.text === 'a stray'), first = ours()[0];
+  const old = { refusedSaw: first ? seen.indexOf(first) : seen.length, firstWasStray: !!first && seen.indexOf(mine) < seen.indexOf(first) };
+  r.push(['CONTROL (a stray request on the stand-in\'s port, as the whole tier\'s load sent): it is printed, never judged — the old judgement over EVERY request is red («no request at all» saw it, «the first request» was the stray\'s)', !!mine && old.refusedSaw >= 1 && old.firstWasStray && ours().length >= 1, JSON.stringify({ saw: saw(), old })]);
+  console.log(`  the stand-in saw ${seen.length} request(s): ${saw().join(', ')}`);
   srv.close();
   return r;
 }
