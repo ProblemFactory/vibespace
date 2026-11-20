@@ -8,6 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A Task Group can now have parent groups (Settings → Parent groups): it uses what they are granted and is told the rows and rules they pass to child groups.
 - Every «Who can use it» now says whether a Task Group includes its child groups, and each picked group can be set to «this group only».
 - An agent can now let a Background Work job it starts read the other jobs of its conversation, read only; by default a job reads only itself.
+- When a tab that is not this conversation's is in front of its browser window, the live view now marks it «In front of this window» and moves or closes nothing.
 
 ### Fixed
 - A message you held behind a running turn, or a turn that just started or ended, no longer goes missing from the chat if VibeSpace restarts right then.
