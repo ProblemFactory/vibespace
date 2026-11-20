@@ -603,6 +603,7 @@ This file is the engineers' record of every release: the lanes, the verification
 ### bl-tests-a — B-0f3d (.413): one hung PROBE no longer makes every folder-field reply partial
 - SLOW, NOT HUNG (2.369.413, the coordinator's law 03:24Z / 03:57Z; list line 118 — its changelog words are the block's): a probe's facts are kept for the mark's window and used by the next ask whatever the gap, refreshed by one call behind; calls are marked when SENT; a probe the answer leaves out is late. THE FOLLOW-UP (the coordinator 04:14Z, round wf_28a86eb8-04a's shoulds): a FAST path is never served stale — a kept fact past 2 s is served only for a path whose last call went LATE, one that answers inside its budget is asked afresh as it always was (a folder made in a terminal between two asks is seen); only the pool's OWN deadline keeps a mark — any other failure, whenever it comes, drops it (a failure is no hang); a landing writes its fact only when no newer fact for that path landed since it was sent. Leg: a folder made between two asks 2.5 s apart is seen — RED CONTROL: every kept fact served for the window. The row restated from readings, 8.5 → 8.0 s (8074 / 7931 and 7955 / 7952 ms); the cap stays 1495 s (the stated sum 1493.587 s).
 
+
 ## 2.369.412 — 2026-11-19
 
 ### bl-tests-a — ckpt61 hosted red of test-path-field-chrome, tests only for .412 (主开发 21:37Z: the product cure rides .413 as its own unit, B-08d5): no product byte
