@@ -471,15 +471,69 @@ console.log('§6 the wiring — every door asks its rule');
     && /\n#global-toasts > \.global-toast\.global-toast-held \{ display: none; \}/.test(css);
   ok(yields(U, PANEL, CSS), 'B-7a51 + its round\'s MUST: a stack still meeting the OPEN For-you panel rises above it when there is room, else stands beside it (left, else right) and off what stands there, else its PLAIN toasts are HELD (not drawn, their time stopped) while an error / an action toast / a pinned notice stays (placed clear when the smaller stack fits); every placement measures the whole stack and draws again — time WHOLE — what it no longer holds; a toast held at its birth loses `seen` and is judged when first drawn; the panel\'s open / close / growth re-place it; the panel is no obstacle in the general list; a toast press is no press outside the panel');
   const sub = (src, from, to) => { if (src.split(from).length !== 2) throw new Error('§6 control anchor: ' + from.slice(0, 70)); return src.replace(from, to); };
-  // round 3's smalls: every refusal of a press in the panel is warn (the setting card's seventh too), the toast that names a time says
-  // so, the jobs panel's failed acts are errors (the flag `error: true` showToast never read)
-  const UA = strip(read('src/lib/user-todos-actions.js')), DA = strip(read('src/lib/desktop-app-window.js')), JP = strip(read('src/lib/jobs-panel.js'));
-  const typed = (ua, da, jp) => /showToast\(t\('It changed meanwhile — look again'\), \{ type: 'warn', duration: 9000 \}\); return false; \}/.test(ua)
-    && /n: Math\.round\(OUTER_CLOSE_AGAIN_MS \/ 1000\) \}\), \{ duration: OUTER_CLOSE_AGAIN_MS, timed: true \}\);/.test(da)
-    && (jp.match(/showToast\(r2?\.error, \{ type: 'error' \}\)/g) || []).length === 5 && !/\{ error: true \}/.test(jp);   // stale-pins: kept (an absence check: the flag showToast never read)
-  ok(typed(UA, DA, JP), 'B-7a51 round 3: the setting card\'s «It changed meanwhile» is warn like the six; the app window\'s «press ✕ again within n s» is timed; the jobs panel\'s five failed acts are errors — none of them yields');
-  ok(!typed(UA.replace("{ type: 'warn', duration: 9000 }", '{ duration: 9000 }'), DA, JP) && !typed(UA, DA.replace(', timed: true });', ' });'), JP) && !typed(UA, DA, JP.replace("{ type: 'error' })", '{ error: true })')),   // stale-pins: kept (the base's text, planted)
-    'CONTROL: the seventh refusal untyped, the timed toast unmarked, one jobs error back to its unread flag — each is refused');
+  // round 3's smalls: every refusal of a press in the panel is warn (the setting card's seventh too), the toast that names a time says so
+  const UA = strip(read('src/lib/user-todos-actions.js')), DA = strip(read('src/lib/desktop-app-window.js'));
+  const typed = (ua, da) => /showToast\(t\('It changed meanwhile — look again'\), \{ type: 'warn', duration: 9000 \}\); return false; \}/.test(ua)
+    && /n: Math\.round\(OUTER_CLOSE_AGAIN_MS \/ 1000\) \}\), \{ duration: OUTER_CLOSE_AGAIN_MS, timed: true \}\);/.test(da);
+  ok(typed(UA, DA), 'B-7a51 round 3: the setting card\'s «It changed meanwhile» is warn like the six; the app window\'s «press ✕ again within n s» is timed — neither yields');
+  ok(!typed(UA.replace("{ type: 'warn', duration: 9000 }", '{ duration: 9000 }'), DA) && !typed(UA, DA.replace(', timed: true });', ' });')),   // stale-pins: kept (the base's text, planted)
+    'CONTROL: the seventh refusal untyped, the timed toast unmarked — each is refused');
+  // THE TOAST CENSUS (2.369.413 checkpoint 2, the coordinator's law): round 3 counted ONE spelling of the jobs panel's failed acts in ONE
+  // file; piece 7 then wrote two more failed-act toasts with the flag `error: true` that showToast never reads — one in that file, one in
+  // src/lib/wake-grant-rows.js, which the leg never read — both drawn as plain toasts that yield to the open For-you panel. Now EVERY
+  // call in the page's code (each .js under src/) of showToast — or of a name a file binds to it (`toast: showToast`) — is read whole:
+  //  LAW 1: every option a call writes is one showToast READS (the reads taken from showToast's own signature in src/lib/utils.js):
+  //         the flag nothing reads appears nowhere, whatever its file;
+  //  LAW 2: a failed act's toast is typed error: in the jobs panel and its wake grants (src/lib/jobs-panel.js, src/lib/wake-grant-rows.js)
+  //         every toast whose words are an answer's error (`….error`) is `type: 'error'` — found by what it says, never counted.
+  const PAGE = new Map((function walk(d) { const out = []; for (const e of fs.readdirSync(path.join(repo, d), { withFileTypes: true })) { const r = `${d}/${e.name}`; if (e.isDirectory()) out.push(...walk(r)); else if (e.name.endsWith('.js') && !/^i18n-/.test(e.name)) out.push(r); } return out; })('src').map((f) => [f, read(f)]));
+  const READS = (() => { const m = /export function showToast\(message, \{([^}]*)\} = \{\}\)/.exec(PAGE.get('src/lib/utils.js') || ''); return m ? new Set(m[1].split(',').map((x) => x.trim().split(/\s*=/)[0]).filter(Boolean)) : null; })();
+  ok(!!READS && READS.has('type') && !READS.has('error'), `the toast census takes what showToast reads from its own signature: ${READS ? [...READS].join(', ') : 'NOT FOUND'}`);
+  const toastCensus = (files) => {
+    // a call's arguments, balanced over () [] {} — strings, templates and comments skipped
+    const argsOf = (s, open) => { const out = []; let d = 0, start = open + 1; for (let i = open; i < s.length; i++) { const c = s[i];
+      if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < s.length && s[i] !== q; i++) { if (s[i] === '\\') i++; else if (q === '`' && s[i] === '$' && s[i + 1] === '{') { let k = 1; i += 2; for (; i < s.length && k; i++) { if (s[i] === '{') k++; else if (s[i] === '}') k--; } i--; } } continue; }
+      if (c === '/' && s[i + 1] === '/') { while (i < s.length && s[i] !== '\n') i++; continue; }
+      if (c === '/' && s[i + 1] === '*') { i = s.indexOf('*/', i + 2) + 1; continue; }
+      if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) { d--; if (d === 0) { out.push(s.slice(start, i)); return out; } } else if (c === ',' && d === 1) { out.push(s.slice(start, i)); start = i + 1; } }
+      return out; };
+    // an object literal's own keys (a spread is said as «...»); null = the options are not written at the call (a name, a call)
+    const keysOf = (arg) => { const o = String(arg || '').trim(); if (!o.startsWith('{') || !o.endsWith('}')) return null; const inner = o.slice(1, -1), parts = []; let d = 0, start = 0;
+      for (let i = 0; i < inner.length; i++) { const c = inner[i]; if (c === '"' || c === "'" || c === '`') { const q = c; for (i++; i < inner.length && inner[i] !== q; i++) if (inner[i] === '\\') i++; continue; } if ('([{'.includes(c)) d++; else if (')]}'.includes(c)) d--; else if (c === ',' && !d) { parts.push(inner.slice(start, i)); start = i + 1; } }
+      parts.push(inner.slice(start));
+      return parts.map((p) => p.trim()).filter(Boolean).map((p) => (p.startsWith('...') ? '...' : (/^([A-Za-z_$][\w$]*|'[^']*'|"[^"]*")\s*(?::|$|\()/.exec(p) || [null, '?' + p.slice(0, 16)])[1].replace(/['"]/g, ''))); };
+    // a match inside a comment is no call
+    const inComment = (s, at) => { const pre = s.slice(s.lastIndexOf('\n', at) + 1, at); if (/(^|[\s;{}(,])\/\//.test(pre)) return true; return s.lastIndexOf('/*', at) > s.lastIndexOf('*/', at); };
+    const r = { calls: 0, opaque: 0, unread: [], jobs: 0, jobsNotError: [] };
+    for (const [f, s] of files) {
+      const alias = [...new Set([...s.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*showToast\b/g)].map((m) => m[1]))].filter((n) => n !== 'showToast');
+      const re = new RegExp(`(?<![\\w$.])showToast\\s*\\(${alias.length ? `|(?<![\\w$])(?:[A-Za-z_$][\\w$]*\\.)?(?:${alias.join('|')})\\s*\\(` : ''}`, 'g');
+      for (let m; (m = re.exec(s));) {
+        if (/function\s+$/.test(s.slice(Math.max(0, m.index - 12), m.index)) || inComment(s, m.index)) continue;   // its definition; a comment
+        const a = argsOf(s, m.index + m[0].length - 1), line = s.slice(0, m.index).split('\n').length; r.calls++;
+        const ks = a.length > 1 ? keysOf(a[1]) : [];
+        if (ks === null) r.opaque++;
+        for (const k of ks || []) if (k !== '...' && !READS.has(k)) r.unread.push(`${f}:${line} «${k}»`);
+        if ((f === 'src/lib/jobs-panel.js' || f === 'src/lib/wake-grant-rows.js') && /[\w$\])]\??\.error\b/.test(a[0] || '')) { r.jobs++; if (!/\btype\s*:\s*'error'/.test(a[1] || '')) r.jobsNotError.push(`${f}:${line}`); }
+      }
+    }
+    return r;
+  };
+  const tc = toastCensus(PAGE);
+  ok(tc.calls > 1000 && tc.unread.length === 0, `LAW 1 — the toast census: ${tc.calls} toast calls in the page's code (${tc.opaque} pass their options by a name, not written at the call); every option written is one showToast reads${tc.unread.length ? ` — NOT READ: ${tc.unread.join(' · ')}` : ''}`, tc.unread);
+  ok(tc.jobs > 0 && tc.jobsNotError.length === 0, `LAW 2 — a failed act's toast is typed error: the jobs panel's and its wake grants' ${tc.jobs} toasts whose words are an answer's error are all type 'error'${tc.jobsNotError.length ? ` — NOT: ${tc.jobsNotError.join(' · ')}` : ''}`, tc.jobsNotError);
+  // CONTROLS: the flag planted back where piece 7 wrote it (the wake grants' save) — both laws red BY FILE AND LINE; an unread option in a
+  // file the leg never names (the tab group's toast) and in a call through a bound name (the link door's io.toast) — LAW 1 red there
+  // (a plant whose anchor is gone is a named red of the control, never a throw that stops the suite)
+  const plant = (f, from, to) => { const s = PAGE.get(f); if (!s || s.split(from).length !== 2) return { gone: `${f}: «${from.slice(0, 50)}»` }; const m = new Map(PAGE); m.set(f, s.replace(from, to)); return { m, line: s.slice(0, s.indexOf(from)).split('\n').length }; };
+  const p1 = plant('src/lib/wake-grant-rows.js', "showToast((r && r.error) || t('Save failed'), { type: 'error' });", "showToast((r && r.error) || t('Save failed'), { error: true });");   // stale-pins: kept (piece 7's text, planted)
+  const p2 = plant('src/lib/tab-group.js', "showToast(t('Grouped as tabs'), { action:", "showToast(t('Grouped as tabs'), { sticky: true, action:");
+  const p3 = plant('src/lib/internal-link-ui.js', "io.toast(t('This session is running outside VibeSpace'), { type: 'error' });", "io.toast(t('This session is running outside VibeSpace'), { error: true });");
+  const none = { unread: [], jobsNotError: [] }, gone = [p1, p2, p3].filter((p) => p.gone).map((p) => p.gone);
+  const c1 = p1.m ? toastCensus(p1.m) : none, c2 = p2.m ? toastCensus(p2.m) : none, c3 = p3.m ? toastCensus(p3.m) : none;
+  ok(!gone.length && c1.unread.join() === `src/lib/wake-grant-rows.js:${p1.line} «error»` && c1.jobsNotError.join() === `src/lib/wake-grant-rows.js:${p1.line}`
+    && c2.unread.join() === `src/lib/tab-group.js:${p2.line} «sticky»` && c3.unread.join() === `src/lib/internal-link-ui.js:${p3.line} «error»`,
+    `CONTROL: the flag planted back in the wake grants' save — LAW 1 and LAW 2 red at ${c1.unread.join(' · ')}; an unread option planted in the tab group's toast (${c2.unread.join(' · ')}) and in the link door's io.toast (${c3.unread.join(' · ')}) — each red by file and line${gone.length ? ` — A PLANT'S ANCHOR IS GONE: ${gone.join(' · ')}` : ''}`, { gone, c1: [c1.unread, c1.jobsNotError], c2: c2.unread, c3: c3.unread });
   const C6 = [
     ['the base\'s yield (the whole stack hidden, every toast\'s time running)', sub(U, "      for (const t of stack.children) if (_toastYields(t)) _toastHold(t);", "      stack.style.visibility = 'hidden';")],
     ['every toast yields (an error, an Undo held too)', sub(U, "if (_toastYields(t)) _toastHold(t);", '_toastHold(t);')],

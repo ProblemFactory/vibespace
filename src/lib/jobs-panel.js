@@ -428,7 +428,7 @@ async function expandDetail(app, el, j, refresh) {
     const gl = document.createElement('span'); gl.textContent = t('May resume its conversation after that conversation was ended on purpose');
     gcb.onchange = async () => {
       const r2 = await fetchJson(`/api/jobs/${j.id}/wake-grant`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant: gcb.checked }) });
-      if (!r2 || r2.error) { showToast((r2 && r2.error) || t('Save failed'), { error: true }); gcb.checked = !gcb.checked; }
+      if (!r2 || r2.error) { showToast((r2 && r2.error) || t('Save failed'), { type: 'error' }); gcb.checked = !gcb.checked; }
     };
     gr.append(gcb, gl);
     const gw = grantByWords(job.wakesEndedOwner === true ? job.wakeGrantBy : null);   // who allowed it, and when

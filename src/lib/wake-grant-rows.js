@@ -58,7 +58,7 @@ export async function saveWakeGrants(changes) {
   let n = 0;
   for (const c of changes || []) {
     const r = await fetchJson(`/api/jobs/${encodeURIComponent(c.id)}/wake-grant`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ grant: c.grant === true }) });
-    if (!r || r.error) showToast((r && r.error) || t('Save failed'), { error: true });
+    if (!r || r.error) showToast((r && r.error) || t('Save failed'), { type: 'error' });
     else n++;
   }
   return n;
