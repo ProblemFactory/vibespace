@@ -25,6 +25,10 @@
 //      three sites (a settle with «nothing», a commit with its info BEFORE onCommit, destroy() with the doors left), no door made on
 //      a destroyed field — four RED CONTROLS (the old settle, a commit with no door, set() unguarded, onCommit first)
 //   ③ this machine's home (LAW 2: a failed read is read again, bounded) and New Session's footer (createRefusal lists «unanswered»)
+//   ④ THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1): PURE tickHolds over every road that moves the field's key — typing, a set
+//      from outside, a refresh after a Task Group change (the bases), another machine, a chip that is not a «new» chip — each with its
+//      RED CONTROL (the key check taken out: the tick carries); the consent made at use holds; the page's WIRING (every read through
+//      tickNow, every give through giveTick with the path it is for); a refresh after a Task Group change asks again
 // Run: node scripts/test-path-field-model.mjs   (PFM_SEED_ONLY=<seed> replays one seed of the law with its whole sequence)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -392,6 +396,45 @@ console.log('\n── ③ the home read · New Session\'s footer ──');
   const rf = refusalOf(NSM)({ cwd: said });
   ok('③ New Session: a folder the machine did not answer for refuses Create with the line\'s words', !!rf && rf.row === 'cwd' && rf.text === said.text, rf);
   ok('③ CONTROL: without «unanswered» the footer lets Create run', refusalOf(anchored(NSM, " || st === 'unanswered'", '', 'the footer without unanswered'))({ cwd: said }) === null);
+}
+
+/* ═══ ④ THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1) ═══ */
+{
+  const TK = (t, h = null, b = '') => P.tickKey(t, h, b);
+  const B0 = '["~/work/investor-relations"]', B1 = '["~/work/weekly-admin"]';
+  const given = (key) => ({ on: true, key });
+  const ROADS = [
+    ['typing another text', TK('~/work/新项目'), TK('~/work/新项目2')],
+    ['a set from outside (another path)', TK('~/work/新项目'), TK('~/work/另一个')],
+    ['a refresh after a Task Group change under a RELATIVE text (the same words, another folder)', TK('./新文件夹', null, B0), TK('./新文件夹', null, B1)],
+    ['another machine (the same text)', TK('~/work/新项目'), TK('~/work/新项目', 'h-mac')],
+    ['a chip that is not a «new» chip (an existing folder)', TK('~/work/新项目'), TK('~/work/payments')],
+  ];
+  const carries = load(anchored(SRC, 'return !!(tick && tick.on && tick.key === cur);', 'return !!(tick && tick.on);', 'the tick read with no key'));
+  for (const [road, k0, k1] of ROADS) {
+    ok(`④ ${road}: the tick given for the old path no longer holds — the person is asked again`, P.tickHolds(given(k0), k0) === true && P.tickHolds(given(k0), k1) === false, { road });
+    ok(`④ CONTROL (${road}): the key check taken out — the tick CARRIES to the other path`, carries.tickHolds(given(k0), k1) === true);
+  }
+  // an ABSOLUTE («~») text names the same folder under any Task Group: a group picked after its tick leaves the tick (New Session J5:
+  // a «new» name chip ticked, then another group picked — Create makes the folder)
+  const abs0 = TK('~/workspace/studio/测试2', null, B0), abs1 = TK('~/workspace/studio/测试2', null, B1);
+  const overReach = load(anchored(SRC, "ABS_PATH_RE.test(t) ? '' : bases", 'bases', 'the bases in every key'));
+  ok('④ an absolute («~») text keeps its tick across a Task Group change — the same path (the consent stands)', abs0 === abs1 && P.tickHolds(given(abs0), abs1) === true);
+  ok('④ CONTROL: the bases in an absolute text\'s key too — a group picked drops a tick for the SAME folder (New Session J5 made nothing)', overReach.tickHolds(given(overReach.tickKey('~/workspace/studio/测试2', null, B0)), overReach.tickKey('~/workspace/studio/测试2', null, B1)) === false);
+  ok('④ the consent made at use holds: a «new» chip / a «new» row picked gives the tick FOR the path it picks (its key)', P.tickHolds(given(TK('~/work/由名字新建')), TK('~/work/由名字新建')) === true);
+  ok('④ no tick, or a tick turned off: nothing holds', P.tickHolds(null, A) === false && P.tickHolds({ on: false, key: A }, A) === false);
+  // the page's WIRING (src/lib/path-field.js): every read through tickNow(), every give through giveTick() — with the path it is for
+  const CL = fs.readFileSync(path.join(REPO, 'src', 'lib', 'path-field.js'), 'utf8');
+  const assigns = CL.split('\n').filter((l) => /st\.tick\s*=(?!=)/.test(l) && !/const (giveTick|tickNow) = /.test(l));
+  ok('④ WIRED: the tick is set only inside giveTick / tickNow (no bare `st.tick =` left)', assigns.length === 0, assigns);
+  ok('④ WIRED: the model\'s env and the checkbox read tickNow(), which judges by the PATH\'s key (tickKey over the field\'s text, machine and bases)', /tick: tickNow\(\), createMode/.test(CL) && /data-act="tick"\$\{tickNow\(\) \? ' checked' : ''\}/.test(CL) && /tickHolds\(\{ on: st\.tick, key: st\.tickKey \}, tickKeyNow\(\)\)/.test(CL) && /const tickKeyNow = \(text = textNow\(\)\) => tickKey\(text, hk\(\), basesKey\(\)\);/.test(CL));
+  ok('④ WIRED: the consent made at use is given FOR the path it picks (a «new» chip: giveTick(…, n.path); a «new» row: giveTick(!!r.isNew, r.path))', /giveTick\(!world\(hk\(\)\)\.L\.dirs\[n\.path\], n\.path\); set\(n\.path/.test(CL) && /giveTick\(!!r\.isNew, r\.path\);/.test(CL));
+  // the small beside it: a relative text after a Task Group change ASKS AGAIN on refresh (the field asked before) — the model's rebase
+  const KB0 = P.keyOf('./新文件夹', null, B0), KB1 = P.keyOf('./新文件夹', null, B1);
+  let st = P.init(KB0); st = P.step(st, { type: 'set', commit: false, cur: KB0, now: 1, env: envOf(KB0) }).state;
+  st = P.step(st, { type: 'reply', key: KB0, kind: 'listing', now: 2, cur: KB0, env: envOf(KB0) }).state;
+  const rf = P.step(st, { type: 'refresh', cur: KB1, now: 3, env: envOf(KB1) });
+  ok('④ a relative text after a Task Group change, asked before: the refresh ASKS AGAIN for the new bases (an ask or one armed)', rf.effects.some((e) => e.do === 'ask' && e.key === KB1) || rf.effects.some((e) => e.do === 'arm' && e.which === 'soon'), rf.effects);
 }
 
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);

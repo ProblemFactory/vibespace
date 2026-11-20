@@ -14,6 +14,9 @@
 //   ⑦ the commit waits past pointer-up: a press on another button — ITS click lands first, then the commit
 //   ⑧ «不存在 — 创建？»: a missing folder says so and is NOT taken until ticked; ticked ⇒ committed, ensure() makes it on
 //      disk; its parent missing ⇒ said AND its tick offered, the create makes both levels (read back from the disk)
+//   ⑧c THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1; the law and its RED CONTROLS: test-path-field-model ④): a tick given to
+//      one missing folder is GONE when the text moves — a set from outside (a commit then takes nothing), typing more and back, a
+//      refresh after a Task Group change (a relative text, other bases), a chip that is not «new» (committed, no create)
 //   ⑨ two Task Groups + a name ⇒ ② = one <group folder>/<name> per group in selection order + ~/<name>; the chips row too
 //   ⑨b setDerived with a STALL PLACED in the listing's reply (B-ckpt61 LAW 1): while held, «正在问这台机器…» — no 不存在, no
 //      raw path, no tick; released, the folder with its facts · ⑨c the home's first read fails once (LAW 2): never «missing»,
@@ -316,8 +319,8 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   await reset();
   // B-ckpt61 (leg 8 as ruled — the ui-needs-a-button chain gave a missing PARENT its create tick, b2f2399c7): the missing parent is
   // SAID and the tick is OFFERED, and the create then makes BOTH levels (read back from the disk); the line waited for, never a sleep.
-  // Typed as a person types: a letter that is no path first ends the first half's tick (the field keeps it across set('') — the
-  // release's own row B-f3a1), then the path
+  // Typed as a person types: a letter that is no path first, then the path (before B-f3a1 the field kept the first half's tick across
+  // set(''): this letter ended it — ⑧c below now proves the tick never carries)
   await press('#cwd'); await type('x'); await clear(); await type('~/nope/x');
   const u2 = await until(async () => { const t = await under(); return /上一级 ~\/nope 也不存在/.test(t) ? t : null; }, 4000);
   ok('its parent missing ⇒ said, AND the create tick offered (not ticked)', !!u2 && (await ev(`!!document.querySelector('.pf-under input[data-act="tick"]') && !document.querySelector('.pf-under input[data-act="tick"]').checked`)), u2 || (await under()));
@@ -329,6 +332,57 @@ console.log('\n── ⑧ «不存在 — 创建？» ──');
   const cn = await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000);
   const madeBoth = !!cn && cn.create === true && cn.path === HOME + '/nope/x' && (await ev('window.pf.ensure()')) === true && fs.existsSync(path.join(HOME, 'nope', 'x')) && fs.statSync(path.join(HOME, 'nope')).isDirectory();
   ok('ticked ⇒ committed with create, and ensure() makes BOTH levels on the disk (read back)', madeBoth, { cn, nope: fs.existsSync(path.join(HOME, 'nope')), x: fs.existsSync(path.join(HOME, 'nope', 'x')) });
+  await reset();
+}
+
+console.log('\n── ⑧c THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1): a road that moves the path drops it — the person is asked again ──');
+{
+  const BOX = `(() => { const b = document.querySelector('.pf-under input[data-act="tick"]'); return b ? (b.checked ? 'checked' : 'unchecked') : 'none'; })()`;
+  // the scene's own start, as ⑧ proves it: a missing folder typed, left (未生效), its «create» TICKED — committed with create (the
+  // tick TAKEN); the log cleared after, so a road's own commit is the only one read
+  const tickOn = async (text, sel = []) => {
+    await reset(); await ev(`window.sel = ${JSON.stringify(sel)}; window.pf.refresh(); true`);
+    await press('#cwd'); await type(text);
+    const said = await until(async () => /不存在 — 创建？/.test(await under()), 4000);
+    await press('#other');
+    await until(async () => /未生效/.test(await under()), 4000);
+    await press('.pf-under input[data-act="tick"]');
+    const taken = await until(async () => (await log()).find((x) => x.ev === 'commit' && x.create === true), 4000);
+    await ev('window.__log.length = 0; true');
+    return !!said && !!taken;
+  };
+  const boxOnce = async (re) => { await until(async () => re.test(await under()) && (await ev(BOX)) !== 'none', 4000); return { box: await ev(BOX), line: await under() }; };
+  const takes = () => ev(`window.pf.commit().then((i) => (i ? { create: !!i.create, display: i.display } : null))`);
+  // road 1 — a set from outside to another missing path: the box unchecked, and a commit takes nothing (the tick did not carry)
+  const g1 = await tickOn('~/work/勾选甲');
+  await ev(`window.pf.set('~/work/另一个乙', { commit: false }); true`);
+  const r1 = await boxOnce(/另一个乙/), c1 = await takes();
+  ok('⑧c a set from outside to another missing path: the tick given for «勾选甲» is GONE — the box unchecked, a commit takes nothing', g1 && r1.box === 'unchecked' && c1 === null, { g1, r1, c1 });
+  // road 2 — typing more, then back to the SAME text: gone for good (asked again), never brought back
+  const g2 = await tickOn('~/work/勾选丙');
+  await ev(`(() => { const i = document.getElementById('cwd'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); return true; })()`);
+  await type('丁');
+  const r2a = await boxOnce(/勾选丙丁/);
+  await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Backspace', code: 'Backspace', windowsVirtualKeyCode: 8 });
+  await until(async () => (await ev(`document.getElementById('cwd').value`)) === '~/work/勾选丙', 3000);
+  const r2b = await boxOnce(/勾选丙(?!丁)/);
+  ok('⑧c typing another text drops the tick, and typing back to the ticked text does NOT bring it back — the person is asked again', g2 && r2a.box === 'unchecked' && r2b.box === 'unchecked', { g2, r2a, r2b });
+  // road 3 — a RELATIVE text, then a Task Group change and the door's refresh: the same words, another folder — the tick is gone
+  const g3 = await tickOn('./勾选新文件夹', ['g-ir']);
+  await ev(`window.sel = ['g-wk']; window.pf.refresh(); true`);
+  const r3 = await boxOnce(/weekly-admin|周报与行政/);
+  ok('⑧c a relative text ticked under «投资者关系», then the Task Group changed (a refresh): another folder under the same words — the tick is GONE', g3 && r3.box === 'unchecked', { g3, r3 });
+  // road 3b — an ABSOLUTE text ticked, then a Task Group picked: the SAME folder — the tick STAYS (New Session J5's shape)
+  const g3b = await tickOn('~/work/勾选己');
+  await ev(`window.sel = ['g-ir']; window.pf.refresh(); true`);
+  const r3b = await boxOnce(/勾选己/), c3b = await takes();
+  ok('⑧c an absolute («~») text ticked, then a Task Group picked: the same folder — the tick STAYS and a commit takes it with create', g3b && r3b.box === 'checked' && !!c3b && c3b.create === true, { g3b, r3b, c3b });
+  // road 4 — a chip that is not «new» (an existing folder): committed as itself, never with the create the other path was given
+  const g4 = await tickOn('~/work/勾选戊', ['g-ir']);
+  const chip = await ev(`(() => { const c = [...document.querySelectorAll('#cwd-recent button.cwd-recent-chip')].find((b) => !b.dataset.new && !b.classList.contains('cwd-name-chip')); if (!c) return null; c.id = 'f3a1-chip'; return c.dataset.path || c.textContent; })()`);
+  if (chip) await press('#f3a1-chip');
+  const c4 = chip ? await until(async () => (await log()).find((x) => x.ev === 'commit'), 4000) : null;
+  ok('⑧c a chip that is not «new» picked after the tick: committed as that folder with NO create (the tick was another path\'s)', g4 && !!chip && !!c4 && c4.create !== true && (await ev(BOX)) !== 'checked', { g4, chip, c4 });
   await reset();
 }
 

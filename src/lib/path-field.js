@@ -22,7 +22,8 @@
 //     re-rendered), the list never pops by itself (a press, typing, ↓ or a Tab INTO the field opens it)
 //   · BLUR COMMITS: leaving the field (or Enter) makes a value that resolves take effect; one that does not keeps its text
 //     and says 「未生效：…」 — never dropped silently; the commit waits past pointer-up so a re-render never eats the click
-//   · «Does not exist — create it?» with the door's tick (a 新建 row picked IS that consent); its parent missing ⇒ said
+//   · «Does not exist — create it?» with the door's tick (a 新建 row picked IS that consent); its parent missing ⇒ said; THE TICK
+//     BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1, PURE tickHolds): the text moved by any road ⇒ it is gone, the person asked again
 //   · the folder button → THE PICKER (a dialog over the dialog): home + mounts as a tree with the groups' folders pinned
 //     and badges, a preview with files / sizes / dates, the same fuzzy search, «New folder» inline, «Choose this folder»;
 //     it remembers its last folder per field
@@ -38,7 +39,7 @@ import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
 // B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
 // its events and performs its effects; no verdict is decided here
-import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED } from '../path-field-model.js';
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED, tickKey, tickHolds } from '../path-field-model.js';
 import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips, textCandidates, isPathText } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
@@ -227,7 +228,7 @@ export function pathField(input, opts = {}) {
   // Browse… again raises its own.
   const pickKey = `${fid}#${++pickerSeq}`;
   const call = (fn, dflt) => { try { const v = typeof fn === 'function' ? fn() : fn; return v == null ? dflt : v; } catch { return dflt; } };
-  const st = { open: false, active: -1, err: '', errBest: '', tick: false, flash: false, committed: null, seq: 0, pctl: null, ctl: null, ctls: new Map(), trace: [], timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
+  const st = { open: false, active: -1, err: '', errBest: '', tick: false, tickKey: '', flash: false, committed: null, seq: 0, pctl: null, ctl: null, ctls: new Map(), trace: [], timer: null, verdict: null, destroyed: false, chipsAt: '', derived: null, probeTimer: null };
 
   /* ── DOM ── */
   const wrap = document.createElement('div');
@@ -342,6 +343,12 @@ export function pathField(input, opts = {}) {
   }
   const basesKey = () => JSON.stringify(inputsNow().bases.map((b) => b.path));
   const keyNow = (text = textNow()) => keyOf(text, hk(), basesKey());
+  // B-f3a1: THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (PURE tickKey / tickHolds) — given WITH the path's key (a relative text's
+  // bases in it, an absolute one's not); every read goes through tickNow(), which drops it for good the moment that path is another
+  // (back to the same text later: asked again)
+  const tickKeyNow = (text = textNow()) => tickKey(text, hk(), basesKey());
+  const giveTick = (on, text = textNow()) => { st.tick = !!on; st.tickKey = st.tick ? tickKeyNow(text) : ''; };
+  const tickNow = () => { if (st.tick && !tickHolds({ on: st.tick, key: st.tickKey }, tickKeyNow())) { st.tick = false; st.tickKey = ''; } return st.tick; };
   const joinPathOf = (b, t) => { try { return textCandidates(t, [{ path: b }])[0] || ''; } catch { return ''; } };
   const abs = (p) => fromTilde(world(hk()).L.home || LOCAL.home, p);
   /* the door's derived text (setDerived), while it stands untouched — its note says where it came from */
@@ -356,7 +363,7 @@ export function pathField(input, opts = {}) {
   const waiters = new Map();   // door → its press's promise (B-225c: the model names the doors each outcome answers)
   let doorSeq = 0;
   const rankOf = (text) => { const m = model(text); return { empty: !text, resolved: m.resolved.length > 0, literal: !!(m.resolved[0] && m.resolved[0].literal) || !!hk(), path: m.resolved[0] ? m.resolved[0].path : '', pathLike: /^[~/.]/.test(text) || text.includes('/') || !!m.held, missing: !!m.missing, file: !!(m.missing && (world(hk()).L.nondirs || {})[m.missing.path]) }; };
-  const envNow = () => ({ cur: keyNow(), rank: rankOf(textNow()), homeKnown: !!(world(hk()).L.home || (!hk() && LOCAL.home)), unreachable: !!(hk() && world(hk()).unreachable), tick: st.tick, createMode, folder: kind === 'folder' });
+  const envNow = () => ({ cur: keyNow(), rank: rankOf(textNow()), homeKnown: !!(world(hk()).L.home || (!hk() && LOCAL.home)), unreachable: !!(hk() && world(hk()).unreachable), tick: tickNow(), createMode, folder: kind === 'folder' });
   const answer = (doors, v) => { for (const d of doors || []) { const res = waiters.get(d); if (!res) continue; waiters.delete(d); try { res(v); } catch { } } };
   function fire(ev) {
     if (st.destroyed && ev.type !== 'destroyed') return;
@@ -582,7 +589,7 @@ export function pathField(input, opts = {}) {
         // lane ui-needs-a-button (the owner's walk, sidebar-sessions-4): «create it?» ALWAYS has its door on the line — a missing
         // parent too (the create at use is mkdir -p: /api/mkdir makes the folders above); the words say what it will make
         + (x.parentOk ? '' : `<span class="pf-meta pf-parents">${escHtml(t('The folder above, {parent}, does not exist either.', { parent: x.parent || '' }))}</span>`)
-        + `<label class="pf-tickrow"><input type="checkbox" data-act="tick"${st.tick ? ' checked' : ''}> ${escHtml(o.createWhen || (x.parentOk ? t('Create this folder') : t('Create this folder and the missing folders above it')))}</label>` + '</div>';
+        + `<label class="pf-tickrow"><input type="checkbox" data-act="tick"${tickNow() ? ' checked' : ''}> ${escHtml(o.createWhen || (x.parentOk ? t('Create this folder') : t('Create this folder and the missing folders above it')))}</label>` + '</div>';
     } else if (!ew && model().rows.length) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(isPhone() ? t('No path called «{text}» — press a suggestion above.', { text }) : t('No path called «{text}» — choose a suggestion with ↑↓, Enter picks it.', { text }))}</span></div>`;
     } else if (!ew && M.answer && M.answer.key === keyNow(text)) {
@@ -652,7 +659,7 @@ export function pathField(input, opts = {}) {
         if (n.group && n.group.color) { const dot = document.createElement('span'); dot.className = 'tvg-dot'; dot.style.setProperty('--g-color', n.group.color); b.appendChild(dot); }
         if (n.isNew) b.appendChild(Object.assign(document.createElement('span'), { className: 'cwd-chip-new', textContent: t('New') }));
         b.appendChild(document.createTextNode(n.path));
-        b.onclick = () => { st.tick = !world(hk()).L.dirs[n.path]; set(n.path, { commit: true, how: 'pick' }); };   // a 新建 chip picked IS the consent (made at use)
+        b.onclick = () => { giveTick(!world(hk()).L.dirs[n.path], n.path); set(n.path, { commit: true, how: 'pick' }); };   // a 新建 chip picked IS the consent (made at use) — given FOR its path
         chipsEl.insertBefore(b, first);
       }
       sectionChips(chipsEl);
@@ -726,7 +733,7 @@ export function pathField(input, opts = {}) {
       st.active = -1; fire({ type: 'typed', soon: false });   // asked at once
       return;
     }
-    st.tick = !!r.isNew;
+    giveTick(!!r.isNew, r.path);   // a 新建 row picked IS the consent (made at use) — given FOR its path
     st.flash = !!r.isNew;
     input.value = r.path;
     close();
@@ -753,7 +760,7 @@ export function pathField(input, opts = {}) {
     if (!st.open) st.open = true;
     st.active = -1;
     fire({ type: 'typed' });   // asked, debounced: the pending words from the first paint
-    const x = target(); if (!x.missing && !x.pending && !x.unanswered && !x.quiet) st.tick = false;   // (a tick stands while the machine's answer for the text is owed)
+    const x = target(); if (!x.missing && !x.pending && !x.unanswered && !x.quiet) giveTick(false);   // (a tick stands while the machine's answer for the text is owed — for ITS text: tickNow())
   };
   input.addEventListener('input', onInput);
   input.addEventListener('compositionstart', () => { input._pfComposing = true; });
@@ -798,7 +805,7 @@ export function pathField(input, opts = {}) {
   });
   under.addEventListener('change', (e) => {
     if (e.target.dataset.act !== 'tick') return;
-    st.tick = !!e.target.checked;
+    giveTick(!!e.target.checked);
     if (st.tick && errNow()) commit('api'); else paint();
   });
   /* LEAVING the field commits it (a press in its own list / line / picker is not leaving; its chips row sits inside its wrap) */
@@ -934,7 +941,7 @@ export function pathField(input, opts = {}) {
       st.picking = false;
       picked = true;
       shell.close();
-      st.tick = false;
+      giveTick(false);
       set(p, { commit: true, how: 'picker' });
     }
     draw();

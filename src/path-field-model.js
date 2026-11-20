@@ -306,4 +306,14 @@ function step(s0, ev = {}) {
   return { state: s, effects: fx };
 }
 
-module.exports = { init, step, view, keyOf, textOf, sameAsk, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };
+/** THE TICK BELONGS TO THE PATH IT WAS GIVEN FOR (B-f3a1). `tick` = { on, key }: the «create» consent the person gave, with the PATH
+ *  the text named at that moment — tickKey: its text on its machine, and its bases only when the text is RELATIVE (an absolute or «~»
+ *  text names the same folder under any Task Group; a relative one names another). It holds only while the field's tickKey IS that key:
+ *  any road that moves the path — typing, a set from outside, a refresh after a Task Group change under a relative text, another
+ *  machine, a chip that is not a «new» chip — drops it, and the person is asked again. The consent made at use (a «new» chip or a «new»
+ *  row picked) is given FOR the path it picks, so it holds — and a Task Group picked after it leaves an absolute path's tick alone. */
+const ABS_PATH_RE = /^(?:[~/]|[A-Za-z]:[\\/])/;
+function tickKey(text, machine, bases = '') { const t = String(text == null ? '' : text).trim(); return keyOf(t, machine, ABS_PATH_RE.test(t) ? '' : bases); }
+function tickHolds(tick, cur) { return !!(tick && tick.on && tick.key === cur); }
+
+module.exports = { init, step, view, keyOf, textOf, sameAsk, tickKey, tickHolds, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };
