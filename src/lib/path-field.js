@@ -322,10 +322,11 @@ export function pathField(input, opts = {}) {
      its EFFECTS (B-08d5, the coordinator's ruling 22:19Z). A1: a field BUILT over a saved text starts with nothing asked ── */
   let M = pfInit(keyOf(textNow(), hk()));
   const T = { soon: null, reask: null };
-  const waiters = [];   // commit() promises: the model settles them (a commit, a refusal, owed, dropped)
+  const waiters = new Map();   // door → its press's promise (B-225c: the model names the doors each outcome answers)
+  let doorSeq = 0;
   const rankOf = (text) => { const m = model(text); return { empty: !text, resolved: m.resolved.length > 0, pathLike: /^[~/.]/.test(text) || text.includes('/'), missing: !!m.missing, file: !!(m.missing && (world(hk()).L.nondirs || {})[m.missing.path]) }; };
   const envNow = () => ({ cur: keyOf(textNow(), hk()), rank: rankOf(textNow()), homeKnown: !!(world(hk()).L.home || (!hk() && LOCAL.home)), unreachable: !!(hk() && world(hk()).unreachable), tick: st.tick, createMode, folder: kind === 'folder' });
-  const settle = (v) => { while (waiters.length) { try { waiters.shift()(v); } catch { } } };
+  const answer = (doors, v) => { for (const d of doors || []) { const res = waiters.get(d); if (!res) continue; waiters.delete(d); try { res(v); } catch { } } };
   function fire(ev) {
     if (st.destroyed && ev.type !== 'destroyed') return;
     const env = envNow();
@@ -338,7 +339,7 @@ export function pathField(input, opts = {}) {
       else if (e.do === 'disarm') { for (const w of e.which === 'all' ? ['soon', 'reask'] : [e.which]) { clearTimeout(T[w]); T[w] = null; } }
       else if (e.do === 'abort') st.ctl?.abort?.();
       else if (e.do === 'commit') committed(e);
-      else if (e.do === 'settle') settle(e.result === 'moved' ? st.committed : null);
+      else if (e.do === 'settle') answer(e.doors, null);   // nothing committed for those presses (B-225c: never an older path)
       else if (e.do === 'paint') painted = true;
     }
     if (painted && !st.destroyed) {
@@ -623,8 +624,8 @@ export function pathField(input, opts = {}) {
      hears «nothing yet»; it is served at most once, inside its run, by a complete reply for its own text on its own machine) */
   function commit(how = 'api') {
     if (st.destroyed) return Promise.resolve(null);
-    settle(st.committed);   // an older commit still waiting is answered first: this one is the person's now
-    return new Promise((res) => { waiters.push(res); fire({ type: 'commit', how }); });
+    const door = ++doorSeq;   // B-225c: its own door — answered once, by this press's own outcome (a press on the same text joins an owed one)
+    return new Promise((res) => { waiters.set(door, res); fire({ type: 'commit', how, door }); });
   }
   /* the model said «commit»: the info from the ranking's verdict for the text */
   function committed(e) {
@@ -636,15 +637,15 @@ export function pathField(input, opts = {}) {
       else if (e.as === 'create' && x.missing) info = infoOf(x.path, { exists: false, create: true, isFile: kind === 'file', via: { base: x.base, relative: !!(x.base && x.base !== 'home' && x.base !== 'abs'), kind: how === 'pick' ? 'pick' : 'exact', alias: '' }, how });
     }
     if (info) { st.committed = info; paint(); try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); } }
-    settle(info);
+    answer(e.doors, info);
   }
   function set(text, { commit: c = true, how = 'set', derived = null } = {}) {
     input.value = String(text == null ? '' : text);
     st.derived = derived && input.value.trim() ? { text: input.value, note: String(derived.note || '') } : null;   // setDerived: the door's, not the person's
     if (st.open) close();
     if (!c) { fire({ type: 'set', how }); return Promise.resolve(null); }   // asked at once (LAW 1: the pending words from the first paint)
-    settle(st.committed);
-    return new Promise((res) => { waiters.push(res); fire({ type: 'set', commit: true, how }); });
+    const door = ++doorSeq;
+    return new Promise((res) => { waiters.set(door, res); fire({ type: 'set', commit: true, how, door }); });
   }
   function pickRow(r, how) {
     if (!r) return;
@@ -885,7 +886,7 @@ export function pathField(input, opts = {}) {
   }
   function destroy() {
     st.destroyed = true; clearTimeout(st.timer); clearTimeout(st.probeTimer); st.ctl?.abort?.();
-    fire({ type: 'destroyed' }); st.pctl?.abort?.(); settle(null);   // the model's timers disarmed: no ask after the page is gone
+    fire({ type: 'destroyed' }); st.pctl?.abort?.(); answer([...waiters.keys()], null);   // the model's timers disarmed: no ask after the page is gone; every press still waiting hears «nothing»
     // lane dialog-yield r5: ITS OPEN PICKER GOES WITH IT, said — a pick there would land in no field (37c1b566: a Task Detail row
     // removed while its picker was open kept the picker, and the pick was dropped in silence)
     if (st.picker && st.picker.live()) { const pk = st.picker; st.picker = null; st.picking = false; pk.close(); showToast(t('The field this picker was for is gone — the picker closed and nothing was written')); }

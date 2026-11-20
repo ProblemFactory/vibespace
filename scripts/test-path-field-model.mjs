@@ -16,6 +16,8 @@
 //        I6 after «destroyed», no effect at all
 //        I7 A1 — a field built over a saved text and never touched asks nothing (a closed refresh included)
 //        I8 the words are a function of the state alone (the view of a copy is the view)
+//        I9 THE DOORS (B-225c): every press is answered ONCE, by its own outcome — never by a commit for another text or machine, never
+//           dropped while its text and machine are the field's, never left hanging (an owed commit holds every door still waiting)
 //      each invariant with its RED CONTROL: the rule removed in a copy of the model (an anchored edit of the shipped source) — the
 //      same driver finds the scene by itself and prints its seed
 //   ③ this machine's home (LAW 2: a failed read is read again, bounded) and New Session's footer (createRefusal lists «unanswered»)
@@ -66,11 +68,14 @@ const ROWS = [
   { row: 'the debounce fires OFF the page (a field a repaint replaced): no ask, ever', start: A, evs: [[{ type: 'typed' }], [{ type: 'fired', which: 'soon', connected: false }]], check: ({ fx }) => does(fx, 'ask').length === 0 },
   { row: 'the re-ask fires OFF the page: no ask; an owed commit dropped (moved)', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'partial' }], [{ type: 'fired', which: 'reask', connected: false }]], check: ({ s, fx }) => does(fx, 'ask').length === 0 && !s.owed && does(fx, 'settle')[0]?.result === 'moved' && !viewOf(s).err },
   { row: 'the box rewritten by a door mid-run (no event): the next event drops the owed commit, its pending words go', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'partial' }], [{ type: 'fired', which: 'reask', cur: B }]], check: ({ s, fx }) => !s.owed && does(fx, 'ask').length === 0 && !viewOf(s, { cur: B }).err && viewOf(s, { cur: B }).kind === 'quiet' },
+  { row: 'B-225c: a press after a door rewrote the box under an OWED commit: the OLD press answered «moved» (nothing), the new one owed with its own door', start: A, evs: [[{ type: 'commit', door: 1 }], [{ type: 'commit', cur: B, door: 2 }]], check: ({ s, fx }) => does(fx, 'settle').some((e) => e.result === 'moved' && e.doors.join() === '1') && s.owed?.key === B && s.owed.doors.join() === '2' && does(fx, 'ask')[0]?.key === B },
+  { row: 'B-225c: a second press on the SAME text while the first is owed JOINS it — the complete reply answers BOTH with one commit', start: A, evs: [[{ type: 'commit', door: 1 }], [{ type: 'commit', door: 2 }], [{ type: 'reply', key: A, kind: 'listing' }, { tick: true }]], check: ({ s, fx }) => does(fx, 'commit').length === 1 && does(fx, 'commit')[0].doors.join() === '1,2' && !s.owed },
+  { row: 'B-225c: a set WITHOUT commit to another text while a press is owed answers that press «moved» (never left hanging)', start: A, evs: [[{ type: 'commit', door: 1 }], [{ type: 'set', cur: B }]], check: ({ s, fx }) => does(fx, 'settle').some((e) => e.result === 'moved' && e.doors.join() === '1') && !s.owed },
   { row: 'commit on a text the listing shows: committed at once (ok), nothing asked', start: A, evs: [[{ type: 'commit' }, { rank: 'resolved' }]], check: ({ fx }) => does(fx, 'commit')[0]?.as === 'ok' && does(fx, 'ask').length === 0 },
   { row: 'commit on a text not answered: OWED, asked at once (forced)', start: A, evs: [[{ type: 'commit', how: 'blur' }]], check: ({ s, fx }) => s.owed?.key === A && does(fx, 'ask').length === 1 && viewOf(s).kind === 'pending' },
   { row: 'owed + its complete reply + the tick: served ONCE as a create', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'listing' }, { tick: true }]], check: ({ s, fx }) => does(fx, 'commit').length === 1 && does(fx, 'commit')[0].as === 'create' && !s.owed },
   { row: 'owed + its complete reply, no tick: refused — «未生效：… tick …» (V1), the create row offered', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'listing' }]], check: ({ s, fx }) => does(fx, 'commit').length === 0 && s.err?.why === 'tick' && viewOf(s).status === 'unresolved' && viewOf(s).tick },
-  { row: 'owed + a partial reply: still owed — «未生效：正在问这台机器…» (V1), its door hears «nothing yet»', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'partial' }]], check: ({ s, fx }) => s.owed?.key === A && s.err?.kind === 'pending' && does(fx, 'settle')[0]?.result === 'owed' },
+  { row: 'owed + a partial reply: still owed — «未生效：正在问这台机器…» (V1), its door hears «nothing yet»', start: A, evs: [[{ type: 'commit', door: 1 }], [{ type: 'reply', key: A, kind: 'partial' }]], check: ({ s, fx }) => s.owed?.key === A && s.err?.kind === 'pending' && does(fx, 'settle')[0]?.result === 'owed' && does(fx, 'settle')[0]?.doors.join() === '1' },
   { row: 'owed + the run STOPS: dropped — «未生效：这台机器没有回答» (V1), its door settled', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'partial' }], [{ type: 'fired', which: 'reask' }], [{ type: 'reply', key: A, kind: 'partial' }], [{ type: 'fired', which: 'reask' }], [{ type: 'reply', key: A, kind: 'partial' }]], check: ({ s, fx }) => !s.owed && s.err?.kind === 'unanswered' && s.errRun === A && does(fx, 'settle')[0]?.result === 'dropped' },
   { row: 'owed + a plain FAILURE: dropped with the run\'s words (its error)', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'partial' }], [{ type: 'fired', which: 'reask' }], [{ type: 'reply', key: A, kind: 'failed', err: 'gone' }]], check: ({ s }) => !s.owed && s.err?.kind === 'unanswered' && s.err.err === 'gone' },
   { row: 'after the run ended unanswered, a later COMPLETE reply repaints only: the words go, nothing committed', start: A, evs: [[{ type: 'commit' }], [{ type: 'reply', key: A, kind: 'failed' }], [{ type: 'opened' }], [{ type: 'reply', key: A, kind: 'listing' }]], check: ({ s, fx }) => !s.err && does(fx, 'commit').length === 0 && viewOf(s).kind === 'missing' },
@@ -104,7 +109,8 @@ function lawRun(G, seed, steps = 60) {
   const listed = new Set(), homeKnown = { null: R() < 0.7, 'h-mac': R() < 0.7 }, unreachable = { null: false, 'h-mac': R() < 0.1 }, isFile = R() < 0.3;   // the alphabet: an unreachable machine, a file where a folder is asked
   const d = { text: pick(TEXTS), h: null, open: false, tick: false, createMode: R() < 0.2 ? 'never' : 'ask', destroyed: false, touched: false, now: 0 };
   let s = G.init(K(d.text, d.h));
-  let net = null, owedRec = null, runReasks = 0;
+  let net = null, owedRec = null, runReasks = 0, doorSeq = 0;
+  const pending = new Map();   // door → the key its press was for (the page's waiting presses)
   const seq = [], why = [];
   const env = () => {
     const cur = K(d.text, d.h);
@@ -117,8 +123,8 @@ function lawRun(G, seed, steps = 60) {
     let ev = null;
     if (d.destroyed && R() < 0.5) ev = { type: pick(['typed', 'set', 'commit', 'refresh', 'opened', 'fired', 'reply']), which: 'soon', key: K(d.text, d.h), kind: 'listing' };
     else if (roll < 0.14) { d.text = pick(TEXTS); d.touched = true; ev = { type: 'typed', soon: R() < 0.8 }; }
-    else if (roll < 0.22) { d.text = pick(TEXTS); d.touched = true; ev = { type: 'set', commit: R() < 0.4, how: 'set' }; }
-    else if (roll < 0.32) { d.touched = true; ev = { type: 'commit', how: pick(['blur', 'enter', 'api']) }; }
+    else if (roll < 0.22) { d.text = pick(TEXTS); d.touched = true; ev = { type: 'set', commit: R() < 0.4, how: 'set' }; if (ev.commit && !d.destroyed) ev.door = ++doorSeq; }
+    else if (roll < 0.32) { d.touched = true; ev = { type: 'commit', how: pick(['blur', 'enter', 'api']) }; if (!d.destroyed) ev.door = ++doorSeq; }
     else if (roll < 0.52 && net) { const k = pick(['listing', 'partial', 'partial', 'failed']); if (k === 'listing') { listed.add(net.key); homeKnown[net.key.slice(net.key.lastIndexOf('\n') + 1) || null] = true; } ev = { type: 'reply', key: net.key, kind: k, err: k === 'failed' ? 'boom' : '' }; net = null; }
     else if (roll < 0.62 && (s.soon || s.reask)) ev = { type: 'fired', which: s.reask && (!s.soon || R() < 0.5) ? 'reask' : 'soon', connected: R() < 0.9 };
     else if (roll < 0.70) ev = { type: 'refresh' };
@@ -132,6 +138,7 @@ function lawRun(G, seed, steps = 60) {
     if (!ev) continue;
     const e0 = env(), before = s, owedBefore = s.owed;
     EMITTED.add(ev.type);
+    if (ev.door != null) pending.set(ev.door, e0.cur);
     const r = G.step(s, { ...ev, cur: e0.cur, now: d.now, env: e0 });
     s = r.state;
     seq.push(`${ev.type}${ev.kind ? ':' + ev.kind : ''}${ev.which ? ':' + ev.which : ''}@${JSON.stringify(e0.cur)}`);
@@ -165,6 +172,17 @@ function lawRun(G, seed, steps = 60) {
       // I7 — A1
       if (!d.touched) fail('I7 a field built over a saved text, never touched, asked');
     }
+    // I9 — THE DOORS (B-225c): each press answered once, by its own outcome; none hanging
+    for (const x of r.effects.filter((y) => y.do === 'commit' || y.do === 'settle')) {
+      for (const dd of x.doors || []) {
+        if (!pending.has(dd)) { fail('I9 a press answered twice (or a door nobody pressed)'); continue; }
+        const k = pending.get(dd);
+        if (x.do === 'commit' && x.key !== k) fail('I9 a press answered by a commit for another text or machine');
+        if (x.do === 'settle' && x.result === 'moved' && ev.type !== 'destroyed' && !(ev.type === 'fired' && ev.connected === false) && k === e0.cur) fail('I9 a press on the CURRENT text and machine dropped (it should have joined the owed commit)');
+        pending.delete(dd);
+      }
+    }
+    for (const [dd] of pending) if (!(s.owed && (s.owed.doors || []).includes(dd))) { fail('I9 a press left hanging (no owed commit holds its door)'); break; }
     // I8 — the words are a function of the state
     if (JSON.stringify(G.view(JSON.parse(JSON.stringify(s)), e1)) !== JSON.stringify(v)) fail('I8 the view of a copy of the state differs');
     if (why.length) break;
@@ -181,7 +199,7 @@ console.log('\n── ② THE LAW, SEEDED ──');
 {
   const t0 = Date.now(), reds = [];
   for (let k = 0; k < SEEDS; k++) { const seed = SEED0 + k * 7919; const r = lawRun(P, seed); if (!r.ok) reds.push({ seed, ...r }); }
-  ok(`② THE LAW over ${SEEDS} seeds × 60 steps: I1–I8 hold after every step`, reds.length === 0, reds.slice(0, 2).map((r) => ({ seed: r.seed, why: r.why, seq: r.seq.join(' ') })));
+  ok(`② THE LAW over ${SEEDS} seeds × 60 steps: I1–I9 hold after every step`, reds.length === 0, reds.slice(0, 2).map((r) => ({ seed: r.seed, why: r.why, seq: r.seq.join(' ') })));
   for (const r of reds.slice(0, 3)) console.log(`      red: PFM_SEED_ONLY=${r.seed} — ${r.why.join('; ')}`);
   console.log(`      (the law: ${SEEDS} seeds in ${Date.now() - t0} ms)`);
 }
@@ -191,12 +209,14 @@ const CONTROLS = [
   ['I1', '«missing» on any answer, complete or not', [["listed: mine && a.kind === 'complete'", 'listed: mine']]],
   ['I2', 'the pending words with nothing asked (the third commit\'s gate)', [["return sought ? 'pending' : 'quiet';", "return 'pending';"]]],
   ['I2', '«未生效：正在问…» left standing when the run moves on', [["  else if (s.err && s.err.kind === 'pending') s.err = null;\n", '']]],
-  ['I3', 'a create committed on a partial reply', [["else if (run === 'reask') { if (!(s.err && s.err.kind === 'pending')) fx.push({ do: 'settle', result: 'owed' }); s.err = { kind: 'pending' }; }", "else if (run === 'reask') { s.owed = null; fx.push({ do: 'commit', how: 'x', as: 'create' }); }"]]],
-  ['I4', 'an owed commit served on whatever text or machine answers (the fourth commit\'s)', [['    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);\n    if (s.errRun', '    if (s.errRun'], ["    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);\n  }\n  disarm(s, fx, 'soon');", "  }\n  disarm(s, fx, 'soon');"], ['      if (s.owed && s.owed.key === s.key) {\n        const g', '      if (s.owed) {\n        const g']]],
+  ['I3', 'a create committed on a partial reply', [["else if (run === 'reask') { if (s.owed.doors.length) { fx.push({ do: 'settle', result: 'owed', doors: s.owed.doors }); s.owed = { ...s.owed, doors: [] }; } s.err = { kind: 'pending' }; }", "else if (run === 'reask') { s.owed = null; fx.push({ do: 'commit', how: 'x', as: 'create' }); }"]]],
+  ['I4', 'an owed commit served on whatever text or machine answers (the fourth commit\'s)', [['    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);   // its doors answered «moved» (B-225c: only ITS doors — a new press is not among them)\n    if (s.errRun', '    if (s.errRun'], ["    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);\n  }\n  disarm(s, fx, 'soon');", "  }\n  disarm(s, fx, 'soon');"], ['      if (s.owed && s.owed.key === s.key) {\n        const g', '      if (s.owed) {\n        const g']]],
   ['I4', 'an owed commit kept past a run that ended unanswered (the ruling\'s drop removed)', [['        else { drop(s, fx, true, s.answer.err); s.errRun = s.key; }', '        else { s.errRun = s.key; }']]],
   ['I5', 'the partial reply asked again for ever (the old loop)', [["run = s.run.n < PARTIAL_REPLIES ? 'reask' : 'stop';", "run = 'reask';"]]],
   ['I6', 'effects after «destroyed»', [['if (!s0 || s0.destroyed) return { state: s0, effects: [] };', 'if (!s0) return { state: s0, effects: [] };']]],
   ['I7', 'a closed refresh asks a field never asked (A1 broken)', [['if (!outOrDue && text && s.everAsked && (', 'if (!outOrDue && text && (']]],
+  ['I9', 'a set that drops an owed commit silently (B-225c\'s first cure: its presses left hanging)', [["    case 'set':\n", "    case 'set':\n      if (s.owed) { s.owed = null; }\n"]]],
+  ['I9', 'a press on the same text that does not JOIN the owed commit (the older press dropped)', [['  const doors = [...((s.owed && s.owed.key === s.key && s.owed.doors) || []), ...(ev.door != null ? [ev.door] : [])];\n  s.owed = null;\n', '  if (s.owed) drop(s, fx, false);\n  const doors = [...(ev.door != null ? [ev.door] : [])];\n']]],
   ['I8', 'the view reads something besides the state', [["return { ...base, status: g === 'quiet' ? 'pending' : g };", "return { ...base, status: g === 'quiet' ? 'pending' : g, seen: Math.random() };"]]],
 ];
 for (const [inv, what, edits] of CONTROLS) {

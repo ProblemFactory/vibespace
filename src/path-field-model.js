@@ -21,7 +21,9 @@
 //   ensureFailed {words}     the create at use failed
 //   destroyed            the field is gone: no effect ever after
 // The effects: {do:'ask', key, reask} · {do:'arm', which, ms} · {do:'disarm', which} · {do:'paint'} · {do:'abort'} ·
-//   {do:'commit', how, as: 'ok'|'create'|'empty'} · {do:'settle', result: 'refused'|'dropped'|'moved'} (a commit ended with no commit)
+//   {do:'commit', how, as: 'ok'|'create'|'empty', key, doors} · {do:'settle', result: 'refused'|'dropped'|'moved'|'quiet'|'owed', doors}
+//   B-225c: every press (a commit, a set that commits) carries its DOOR; an owed commit holds the doors of every press on its text and
+//   machine (a second press JOINS); each outcome names exactly the doors it answers — a press is answered once, by its own outcome
 // The rules (each a law of the coordinator's; the table and the seeded law in scripts/test-path-field-model.mjs hold them):
 //   LAW 1 — a text the machine has not answered for says the pending words ONLY while an ask for it is out or due; never «missing»,
 //     a raw path or a create tick before a COMPLETE answer for (text, machine) with the home known. A1 — a field built over a saved
@@ -112,10 +114,11 @@ function view(s, env = {}) {
 /* an owed commit ENDS. ended (its run stopped or failed): the line says it was not applied, with the run's true words (its error when it
    gave one). moved (another text or machine, off the page): its «Asking the machine…» words go, nothing is said */
 function drop(s, fx, ended, err = '') {
+  const doors = (s.owed && s.owed.doors) || [];
   s.owed = null;
   if (ended) s.err = { kind: 'unanswered', err: String(err || '') };
   else if (s.err && s.err.kind === 'pending') s.err = null;
-  fx.push({ do: 'settle', result: ended ? 'dropped' : 'moved' });
+  fx.push({ do: 'settle', result: ended ? 'dropped' : 'moved', doors });
 }
 function disarm(s, fx, which) { if (s[which]) { s[which] = null; fx.push({ do: 'disarm', which }); } }
 function armSoon(s, fx) { s.everAsked = true; s.soon = s.key; fx.push({ do: 'arm', which: 'soon', ms: DEBOUNCE_MS }); }
@@ -131,30 +134,33 @@ function ask(s, fx, now, { force = false, reask = false } = {}) {
   fx.push({ do: 'ask', key: s.key, reask: !!reask });
 }
 /* judge a commit on the answer the field holds (env = the ranking's verdict after the reply merged) */
-function judge(s, fx, how, env) {
+function judge(s, fx, how, env, doors = []) {
   const g = gateOf(s, env), r = env.rank || {};
   if (s.err && s.err.kind === 'pending') s.err = null;   // the commit is decided now: its «Asking the machine…» words go (the law found it, seed 455625)
-  if (g === 'empty') { s.owed = null; fx.push({ do: 'commit', how, as: 'empty' }); return; }
-  if (g === 'ok') { s.owed = null; fx.push({ do: 'commit', how, as: 'ok' }); return; }
+  if (g === 'empty') { s.owed = null; fx.push({ do: 'commit', how, as: 'empty', key: s.key, doors }); return; }
+  if (g === 'ok') { s.owed = null; fx.push({ do: 'commit', how, as: 'ok', key: s.key, doors }); return; }
   if (g === 'missing') {
     s.owed = null;
     const why = r.file && env.folder ? 'file' : env.createMode === 'never' ? 'never' : !env.tick ? 'tick' : null;
-    if (why) { s.err = { kind: 'refused', why }; fx.push({ do: 'settle', result: 'refused' }); return; }
-    fx.push({ do: 'commit', how, as: 'create' }); return;
+    if (why) { s.err = { kind: 'refused', why }; fx.push({ do: 'settle', result: 'refused', doors }); return; }
+    fx.push({ do: 'commit', how, as: 'create', key: s.key, doors }); return;
   }
-  if (g === 'pending') { s.err = { kind: 'pending' }; s.owed = { key: s.key, how }; fx.push({ do: 'settle', result: 'owed' }); return; }   // its door hears «nothing yet»; judged again when its answer lands, inside its run
-  if (g === 'unanswered') { s.owed = null; s.err = { kind: 'unanswered', err: (s.answer && s.answer.err) || '' }; fx.push({ do: 'settle', result: 'refused' }); return; }
-  if (g === 'quiet') { s.owed = null; fx.push({ do: 'settle', result: 'moved' }); return; }   // nothing asked for this text on this machine: nothing said
-  s.owed = null; s.err = { kind: 'refused', why: 'notpath' }; fx.push({ do: 'settle', result: 'refused' });
+  if (g === 'pending') { s.err = { kind: 'pending' }; s.owed = { key: s.key, how, doors: [] }; fx.push({ do: 'settle', result: 'owed', doors }); return; }   // its door hears «nothing yet»; judged again when its answer lands, inside its run
+  if (g === 'unanswered') { s.owed = null; s.err = { kind: 'unanswered', err: (s.answer && s.answer.err) || '' }; fx.push({ do: 'settle', result: 'refused', doors }); return; }
+  if (g === 'quiet') { s.owed = null; fx.push({ do: 'settle', result: 'quiet', doors }); return; }   // nothing asked for this text on this machine: nothing said
+  s.owed = null; s.err = { kind: 'refused', why: 'notpath' }; fx.push({ do: 'settle', result: 'refused', doors });
 }
 function commitFlow(s, fx, ev) {
   const how = ev.how || 'api';
-  if (s.owed) { s.owed = null; if (s.err && s.err.kind === 'pending') s.err = null; }   // an owed commit is this one now (onCommit never twice; its door was answered when it was owed)
+  // B-225c: a press on the SAME text and machine as an owed commit JOINS it (its doors answered by the one outcome — onCommit once); an
+  // owed commit on another text or machine was already ended by the move (its doors answered «moved»: nothing, never an old path)
+  const doors = [...((s.owed && s.owed.key === s.key && s.owed.doors) || []), ...(ev.door != null ? [ev.door] : [])];
+  s.owed = null;
   s.err = null; s.errRun = null;
-  if (!textOf(s.key)) { fx.push({ do: 'commit', how, as: 'empty' }); return; }
+  if (!textOf(s.key)) { fx.push({ do: 'commit', how, as: 'empty', key: s.key, doors }); return; }
   const env = ev.env || {};
-  if (freshComplete(s) || (env.rank && env.rank.resolved)) { judge(s, fx, how, env); return; }   // the machine's listing already shows it, or a fresh complete answer: judged now
-  s.owed = { key: s.key, how };
+  if (freshComplete(s) || (env.rank && env.rank.resolved)) { judge(s, fx, how, env, doors); return; }   // the machine's listing already shows it, or a fresh complete answer: judged now
+  s.owed = { key: s.key, how, doors };
   ask(s, fx, ev.now || 0, { force: true });
 }
 
@@ -166,18 +172,16 @@ function step(s0, ev = {}) {
   // the run moves on — what the old one owed is dropped, its pending words go, its timers no longer ask
   if (ev.cur !== undefined && ev.cur !== s.key) {
     s.key = ev.cur;
-    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);
+    if (s.owed && s.owed.key !== s.key) drop(s, fx, false);   // its doors answered «moved» (B-225c: only ITS doors — a new press is not among them)
     if (s.errRun && s.errRun !== s.key) s.errRun = null;
   }
   switch (ev.type) {
     case 'typed':
-      if (s.owed) drop(s, fx, false);
       s.err = null; s.errRun = null; s.open = true;
       if (ev.soon === false) ask(s, fx, now); else { disarm(s, fx, 'soon'); armSoon(s, fx); }
       fx.push({ do: 'paint' });
       break;
     case 'set':
-      if (s.owed) drop(s, fx, false);
       s.answer = null; s.err = null; s.errRun = null;
       disarm(s, fx, 'soon');
       if (ev.commit) commitFlow(s, fx, ev); else ask(s, fx, now);
@@ -197,8 +201,8 @@ function step(s0, ev = {}) {
       s.answer = { key: s.key, at: now, kind: kind === 'listing' ? 'complete' : run === 'reask' ? 'partial' : run === 'stop' ? 'gaveUp' : 'failed', err: run === 'stop' ? '' : String(ev.err || ''), stale: false };
       if (s.owed && s.owed.key === s.key) {
         const g = gateOf(s, ev.env || {});
-        if (g === 'ok' || g === 'missing' || g === 'empty' || g === 'searching') judge(s, fx, s.owed.how, ev.env || {});   // the text is decided by this reply: served (or refused) once
-        else if (run === 'reask') { if (!(s.err && s.err.kind === 'pending')) fx.push({ do: 'settle', result: 'owed' }); s.err = { kind: 'pending' }; }   // still owed, inside its run (its door hears «nothing yet» once)
+        if (g === 'ok' || g === 'missing' || g === 'empty' || g === 'searching') judge(s, fx, s.owed.how, ev.env || {}, s.owed.doors);   // the text is decided by this reply: served (or refused) once
+        else if (run === 'reask') { if (s.owed.doors.length) { fx.push({ do: 'settle', result: 'owed', doors: s.owed.doors }); s.owed = { ...s.owed, doors: [] }; } s.err = { kind: 'pending' }; }   // still owed, inside its run (its door hears «nothing yet» once)
         else { drop(s, fx, true, s.answer.err); s.errRun = s.key; }   // the run ended unanswered: the commit with it, the true words
       } else if (kind === 'listing' && s.errRun === s.key) { s.err = null; s.errRun = null; }   // a later complete reply repaints only
       if (run === 'reask') { s.reask = s.key; fx.push({ do: 'arm', which: 'reask', ms: REASK_MS }); }
