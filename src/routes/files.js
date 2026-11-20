@@ -58,15 +58,13 @@ function remoteStream(res, fn) {
 // tactical canary/watchdog/circuit-breaker. path.resolve / safePath / traversal
 // checks stay HERE in the main process; the worker only executes the already-
 // resolved absolute path. app.locals.safeFs is wired in server.js; if the pool
-// couldn't start, sfs() falls back to the SAME op implementation run in-main
-// (no isolation, but file browsing keeps working). Timeouts surface as
+// couldn't start, sfs() REFUSES by name (B-3b03: a path op never runs on the main thread). Timeouts surface as
 // err.status===503 → the routes map that to a "storage not responding" reply.
-const { runOp: _runOpInline } = require('../safe-fs-worker');
 const { parseArchiveListing, fsErrorBody } = require('../remote-fs'); // verify-r2: a Files refusal travels as a code the client words
 const { contentDisposition, fileNameOf } = require('../file-disposition');
 function sfs(req) {
   return req.app.locals.safeFs || {
-    call: async (op, payload) => (await _runOpInline(op, payload)).result,
+    call: async () => { throw require('../safe-fs').noWorkerRefusal(); },   // B-3b03: no pool ⇒ refused by name, never an in-main run
   };
 }
 
@@ -337,7 +335,7 @@ router.get('/api/files', async (req, res) => {
       return a.name.localeCompare(b.name);
     });
     res.json({ path: dirPath, items });
-  } catch (err) { res.status(err.status || 400).json({ error: err.message }); }
+  } catch (err) { res.status(err.status || 400).json({ error: err.message, ...(err.code === 'no-worker' ? { code: 'storage_no_worker' } : {}) }); }   // B-3b03: the Files window words the pool's refusal
 });
 
 // File info (size + binary detection) without reading full content

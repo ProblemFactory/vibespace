@@ -116,7 +116,7 @@ function _incidentTargets(clientSnapshot) {
  *  while a scene with gigabyte transcripts is copied and hashed. → the worker's {ms, pruned, where}. */
 function freezeOffLoop(payload) {
   const { SafeFs } = require('../safe-fs.js');
-  const pool = new SafeFs({ workerPath: path.join(__dirname, 'incident-freeze-worker.js'), name: 'incident-freeze', inlineRun: require('./incident-freeze-worker.js').runOp, poolSize: 1, timeouts: { freeze: 10 * 60 * 1000 } });
+  const pool = new SafeFs({ workerPath: path.join(__dirname, 'incident-freeze-worker.js'), name: 'incident-freeze', poolSize: 1,   /* B-3b03: no inline road — a worker that cannot start refuses the freeze by name */ timeouts: { freeze: 10 * 60 * 1000 } });
   return pool.call('freeze', payload).finally(() => { try { pool.close(); } catch { } });
 }
 app.post('/api/incident', async (req, res) => {

@@ -336,7 +336,7 @@ fs.realpathSync.native = real.native;
 }
 
 // ── ⑨ THE NO-INLINE FORM ITSELF (cure r2): a REAL SafeFs whose worker never starts (no live worker, ever) refuses a
-//      `noInline` call by name and never runs its inline door; the CONTROL — the same pool asked plainly — runs inline;
+//      `noInline` call by name and never runs its inline door; the CONTROL — the same pool asked plainly — is refused too (B-3b03);
 //      and a store whose mirror is that pool reads membership through it: UNKNOWN, flagged, said, the inline door untouched ──
 {
   const { SafeFs } = require(path.join(REPO, 'src/safe-fs.js'));
@@ -346,8 +346,9 @@ fs.realpathSync.native = real.native;
   let refused = null;
   try { await sf.call('stat', { path: P('A') }, { noInline: true }); } catch (e) { refused = e; }
   ok(refused && refused.code === 'no-worker' && inl === 0, `SafeFs.call(…, { noInline: true }) with no live worker is refused by name (${refused && refused.code}), the inline door never run (${inl})`);
-  const plain = await sf.call('stat', { path: P('A') });
-  ok(inl === 1 && plain && plain.isDirectory === true, `CONTROL: the same pool asked without noInline runs the op inline on the main thread (${inl}) — the rig really has no worker`);
+  // B-3b03 (lane hub-loop-stalls): the pool's OWN rule now — asked without noInline, the same pool refuses too (the release ran it inline)
+  let plainRefused = null; try { await sf.call('stat', { path: P('A') }); } catch (e) { plainRefused = e; }
+  ok(inl === 0 && plainRefused && plainRefused.code === 'no-worker' && plainRefused.status === 503, `CONTROL: the same pool asked without noInline is refused by name too (${plainRefused && plainRefused.code}) — the pool never runs an op on the main thread (B-3b03), the inline runner never entered (${inl}); the rig really has no worker`);
   inl = 0;
   const said = [], keep = console.log;
   console.log = (...a) => { if (String(a[0]).startsWith('[task-groups]')) said.push(a.join(' ')); else keep(...a); };

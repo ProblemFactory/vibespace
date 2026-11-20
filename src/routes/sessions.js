@@ -862,12 +862,9 @@ function sweepRoadSaid(road, rows, err = null) {
 function sweepPool() {
   if (_sweepPool) return _sweepPool;
   const { SafeFs } = require('../safe-fs');
-  const { runOp } = require('../sessions-sweep-worker');
-  // the serial lane never runs a job inline (a job with no live worker waits for one, then fails at its own wait) — this is
-  // the belt: a SWEEP is refused here (the route serves the last list, or runs the old road once when it has none), never
-  // SafeFs's inline walk on the loop at every poll of a respawn's backoff
-  const inlineRun = (op, payload) => { if (op === 'sessionsSweep') throw Object.assign(new Error('the sessions sweep worker is not running'), { code: 'sweep-pool-down' }); return runOp(op, payload); };
-  _sweepPool = new SafeFs({ workerPath: path.join(__dirname, '..', 'sessions-sweep-worker.js'), name: 'sessions-sweep', poolSize: 1, inlineRun, timeouts: { default: SWEEP_TIMEOUT_MS },
+  // the serial lane never runs a job inline (a job with no live worker waits for one, then fails at its own wait); B-3b03: no
+  // pool runs an op inline at all, so the belt that refused a sweep here (`sweep-pool-down`) is gone with the inline road
+  _sweepPool = new SafeFs({ workerPath: path.join(__dirname, '..', 'sessions-sweep-worker.js'), name: 'sessions-sweep', poolSize: 1, timeouts: { default: SWEEP_TIMEOUT_MS },
     serial: { busy: { message: 'the session list is being rebuilt — try again in a moment', code: 'sweep_busy' } }, ...(_sweepTest.workerFile ? { workerPath: _sweepTest.workerFile } : {}) });
   return _sweepPool;
 }

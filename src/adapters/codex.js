@@ -647,7 +647,6 @@ function _transcriptPoolGet() {
   if (_transcriptPool === null || (_transcriptPool === false && _poolFails < POOL_RETRY_MAX && Date.now() >= _poolRetryAt)) {
     try {
       const { SafeFs } = require('../safe-fs');
-      const { runOp } = require('../transcript-worker');
       // THE HISTORY LANE'S HEAP IS BOUNDED, and only its (lane resume-all-paced L3 cure, 主开发 23:16Z): the bound was measured
       // for the codex history read alone — the pool's two workers also serve Claude's history reads, the line index and the turn
       // scans, unmeasured under a cap, so they keep the runtime's limit as before. Twice: the worker's resourceLimits (a hard
@@ -658,7 +657,7 @@ function _transcriptPoolGet() {
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'), name: 'transcript',
         poolSize: 2,
         laneOpts: { history: { resourceLimits: { maxOldGenerationSizeMb: HISTORY_HEAP_MB } } },
-        inlineRun: runOp,
+        // B-3b03: no inlineRun — the pool never runs an op on the main thread (its callers keep their own sync road, below)
         timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, taskLines: 120000, boundedParsed: 60000, boundedParsedPage: 60000, codexHistoryMergedPage: 120000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
       if (_poolFails) console.log(`[transcript-worker] the pool is up (try ${_poolFails + 1})`);

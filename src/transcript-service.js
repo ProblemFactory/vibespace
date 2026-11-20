@@ -37,8 +37,7 @@ let _picturePool = null;
 function picturePool() {
   if (_picturePool) return _picturePool;
   const { SafeFs } = require('./safe-fs');
-  const { runOp } = require('./transcript-worker');
-  _picturePool = new SafeFs({ workerPath: require('path').join(__dirname, 'transcript-worker.js'), name: 'transcript-picture', poolSize: 1, inlineRun: runOp, timeouts: { default: 120000 } });
+  _picturePool = new SafeFs({ workerPath: require('path').join(__dirname, 'transcript-worker.js'), name: 'transcript-picture', poolSize: 1, timeouts: { default: 120000 } });
   return _picturePool;
 }
 const isDeviceHandle = (fp) => typeof fp === 'string' && fp.startsWith(DEVICE_HANDLE);

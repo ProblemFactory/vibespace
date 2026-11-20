@@ -41,8 +41,7 @@ const cardsPool = () => {
   if (!fs.existsSync(path.join(__dirname, 'agy-cards-worker.js'))) return (_pool = { inPlace: true, call: async (op, x) => snapshotsOf(x) });
   const { SafeFs } = require('./safe-fs.js');
   return (_pool = new SafeFs({ workerPath: path.join(__dirname, 'agy-cards-worker.js'), name: 'agy-cards', poolSize: 1,
-    serial: { busy: { message: 'the subagent cards are still being read', code: 'agy_cards_busy' } },
-    inlineRun: () => { throw Object.assign(new Error('the agy-cards worker is not answering — no store read on the main thread'), { code: 'agy-cards-down' }); } }));
+    serial: { busy: { message: 'the subagent cards are still being read', code: 'agy_cards_busy' } } }));   // B-3b03: no pool runs an op inline — its belt is gone
 };
 const CARD_CHUNK = 8;          // rows a call: each answer lands when it is read (a long queue's partial progress is kept)
 const CARDS_WAIT_MS = 10000;   // a LIVE conversation's warm waits this long for its cards (the release held the WHOLE hub 8 to 11 s there); the rest land late

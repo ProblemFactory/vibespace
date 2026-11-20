@@ -26,12 +26,14 @@
 const path = require('path');
 const { Worker } = require('worker_threads');
 const { trackWorker } = require('./worker-memory');
-// Shared op implementation — also used as an in-main last-resort fallback if the
-// whole pool is unavailable (worker construction failing outright).
-const { runOp: _runOpInline } = require('./safe-fs-worker');
+// B-3b03 (lane hub-loop-stalls): NO in-main fallback — a path op never runs on the main thread (see `call`, NO_WORKER).
 const DOOR = require('./mount-door');
 // The payload keys that name a path (src/safe-fs-worker.js OPS).
 const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
+
+/** B-3b03: the refusal of a call that found no live worker (the words a route answers when it has no code of its own). */
+const NO_WORKER = Object.freeze({ code: 'no-worker', message: 'The storage did not answer in time and its file readers are restarting — try again in a moment.' });
+const noWorkerRefusal = () => Object.assign(new Error(NO_WORKER.message), { status: 503, code: NO_WORKER.code, noWorker: true });
 
 // Per-op deadlines (ms). A deadline hit under a hung mount is exactly the case
 // we defend — generous enough for a real large read/copy on healthy storage,
@@ -72,9 +74,7 @@ class SafeFs {
   constructor(opts = {}) {
     this.workerPath = opts.workerPath || path.join(__dirname, 'safe-fs-worker.js');
     this.name = opts.name || 'safe-fs'; // the memory census names slot k `<name>#k` (src/worker-memory.js)
-    // Inline fallback when the pool is down — defaults to the fs op set; other
-    // worker scripts (transcript-worker) pass their own runOp (2.235.0).
-    this._inlineRun = opts.inlineRun || _runOpInline;
+    // B-3b03: `opts.inlineRun` (the release's in-main fallback, 2.235.0) is no longer read — the pool never runs an op inline
     this._blockedOf = opts.blocked || DOOR.blocked;   // B-afc4: (path) → blocked mount root | false
     this.poolSize = Math.max(1, opts.poolSize || 4);
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...(opts.timeouts || {}) };
@@ -219,13 +219,11 @@ class SafeFs {
     if (this._serial && opts.signal?.aborted) return Promise.reject(gone());
     if (this._serial && (!rec || rec.inflight.size || this._waiting.length)) return this._wait(op, payload, timeoutMs, opts);
     if (!rec) {
-      // B-55dc: a caller that must never read on the main thread (the membership facts) asks `noInline` — refused by
-      // name, and it reads again later
-      if (opts.noInline) return Promise.reject(Object.assign(new Error('no live SafeFs worker'), { code: 'no-worker' }));
-      // No live worker at all — run inline in the main thread as a last resort
-      // (no isolation, but keeps file browsing alive if the pool can't start).
-      try { return Promise.resolve(this._inlineRun(op, payload)).then(r => r.result); }
-      catch (e) { return Promise.reject(e); }
+      // B-3b03 (lane hub-loop-stalls, the coordinator's law): THE POOL NEVER RUNS A PATH OP ON THE MAIN THREAD. With no live worker
+      // (every one between a deadline kill and its respawn backoff, or none could start) the call is REFUSED BY NAME — 503,
+      // `no-worker` — and its caller says so. The release ran it inline «as a last resort»: a hung path then held the whole hub
+      // (scripts/test-safe-fs-no-inline.mjs measured it: the loop lost 1.5 s to a 1.5 s stall). B-55dc's `noInline` is now the rule.
+      return Promise.reject(noWorkerRefusal());
     }
     return this._send(rec, op, payload, timeoutMs);
   }
@@ -348,4 +346,4 @@ class SafeFs {
   }
 }
 
-module.exports = { SafeFs };
+module.exports = { SafeFs, NO_WORKER, noWorkerRefusal };
