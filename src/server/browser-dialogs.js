@@ -5384,15 +5384,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       return null;
     });
   }
-  // r221 (主开发 14:20Z): a removed profile's login values in MEMORY go at the PRESS (the keeper's onProfileDropNow — never behind the
-  // registry's write); a keeper without it (an older stand-in) still drops them at the removal
-  const dropNowOf = keeper && typeof keeper.onProfileDropNow === 'function' ? keeper.onProfileDropNow : keeper && typeof keeper.onProfileDrop === 'function' ? keeper.onProfileDrop : null;
-  if (dropNowOf) {
-    unsubProfileDrop = dropNowOf((profileId) => {
-      const pid = String(profileId || '');
-      if (pid) clearProfileLoginFencesOnStop(pid, watches.get(pid));
-    });
-  }
+  // THE CLEAR OF A PROFILE'S LOGIN VALUES IN MEMORY hangs on BOTH of the keeper's doors (主开发 r221 + r346 — the law: every road that
+  // cleared it at the release still clears it; the removal clears it at the press, never behind a write):
+  //  · onProfileDropNow — the removal, AT THE PRESS (a stalled storage never keeps a removed profile's login values alive);
+  //  · onProfileDrop — the lease-tabs drop (a profile's browser READY AGAIN and not adopted: a fresh Chrome after a crash; a browser
+  //    REPLACED), where the keeper deletes the persisted fence state — and the removal's landing once more (the clear is safe twice)
+  const clearLoginMemory = (profileId) => { const pid = String(profileId || ''); if (pid) clearProfileLoginFencesOnStop(pid, watches.get(pid)); };
+  const unsubDrops = [];
+  if (keeper && typeof keeper.onProfileDropNow === 'function') unsubDrops.push(keeper.onProfileDropNow(clearLoginMemory));
+  if (keeper && typeof keeper.onProfileDrop === 'function') unsubDrops.push(keeper.onProfileDrop(clearLoginMemory));
+  if (unsubDrops.length) unsubProfileDrop = () => { for (const u of unsubDrops) { try { u(); } catch { /* its own */ } } };
 
   // B-44f3 (the first read's MUST): the two sweeps of a PAST hub life's items below run at For you's read when it is held unread (the
   // held list is empty — a sweep now closes nothing, and never runs again); no item of THIS life can be filed before that read
