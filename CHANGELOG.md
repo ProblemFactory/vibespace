@@ -61,6 +61,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When the samples of such a hold split evenly between JavaScript and native code, Diagnostics says both, with their counts.
 - A paired machine with a long usage history now sends its usage within seconds; a whole-history walk used to fail each time, leaving the slower harvest.
 - When the computer's clock was set during a stopped turn, the list of what it left running could name an earlier turn's process, or miss one of its own.
+- A Background Work job that fails while its conversation is not running now shows in For you by name, once per job, with its count.
 
 ## 2.369.413 — 2026-11-20
 
