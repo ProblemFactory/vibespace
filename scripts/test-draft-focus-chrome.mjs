@@ -73,11 +73,17 @@ async function connect(wsUrl, name) {
   const sock = new WebSocket(wsUrl, { maxPayload: 64 * 1024 * 1024 });
   await new Promise((r, j) => { sock.on('open', r); sock.on('error', j); });
   let seq = 0; const pend = new Map(); const sent = [];
+  // r350 (the hosted red-then-green 44774335413): the layout frames this page SENT, the ones it RECEIVED, and the server's acks of
+  // its own (an ack carries the seq the server gave this page's save — so a received frame's seq names the page that sent it)
+  const layoutOut = [], layoutIn = [], acks = [];
+  const ring = (a, x) => { a.push(x); if (a.length > 30) a.shift(); };
+  const sidsOf = (st) => (st && Array.isArray(st.windows) ? st.windows : []).map((w) => (w && w.openSpec && (w.openSpec.serverId || w.openSpec.sessionId)) || (w && w.type) || '?');
   sock.on('message', (d) => {
     const m = JSON.parse(d);
     if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); }
     if (m.method === 'Runtime.exceptionThrown') { try { pageErrors.push(name + ': ' + (m.params.exceptionDetails?.exception?.description || m.params.exceptionDetails?.text || 'unknown')); } catch {} }
-    if (m.method === 'Network.webSocketFrameSent') { try { const f = JSON.parse(m.params.response.payloadData); if (f && f.type === 'state-set' && f.store === 'drafts') sent.push({ key: f.key, value: f.value }); } catch {} }
+    if (m.method === 'Network.webSocketFrameSent') { try { const f = JSON.parse(m.params.response.payloadData); if (f && f.type === 'state-set' && f.store === 'drafts') sent.push({ key: f.key, value: f.value }); if (f && f.type === 'layout-sync') ring(layoutOut, { at: Date.now(), desktopId: f.desktopId || null, sentAt: f.sentAt ?? null, windows: sidsOf(f.state) }); } catch {} }
+    if (m.method === 'Network.webSocketFrameReceived') { try { const f = JSON.parse(m.params.response.payloadData); if (f && f.type === 'layout-sync') ring(layoutIn, { at: Date.now(), seq: f.seq ?? null, desktopId: f.desktopId || null, windows: sidsOf(f.state) }); else if (f && f.type === 'layout-sync-ack') ring(acks, { at: Date.now(), seq: f.seq ?? null, sentAt: f.sentAt ?? null, desktopId: f.desktopId || null }); } catch {} }
   });
   const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => m.error ? rej(new Error(method + ': ' + m.error.message)) : res(m.result)); sock.send(JSON.stringify({ id, method, params })); });
   const evalJs = async (expr) => {
@@ -86,7 +92,7 @@ async function connect(wsUrl, name) {
     return r.result.value;
   };
   const waitFor = async (expr, ms = 15000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await evalJs(expr)) return true; await sleep(150); } return evalJs(expr); };
-  return { name, sock, cdp, evalJs, waitFor, sent };
+  return { name, sock, cdp, evalJs, waitFor, sent, layoutOut, layoutIn, acks };
 }
 let firstTarget = null;
 for (let i = 0; i < 120 && !firstTarget; i++) {
@@ -107,7 +113,39 @@ const CI = (sid) => `(${V(sid)})._chatInput`;
 // THE VIEW FIRST (the hosted run 44141280569, heavy 2/7: «B page threw … reading '_chatInput'» 16.8 s in — page B's session view was
 // replaced for a moment by a re-render, so V(sid) was undefined): every read through CI(sid) first polls — bounded, on a named effect —
 // for THAT page's view carrying its chat input, instead of dereferencing a view that is not there yet
-const viewReady = async (P, sid) => { if (!(await P.waitFor(`!!(${V(sid)})?._chatInput?._textarea`, 15000))) throw new Error(`${P.name || 'a'} page: the chat view of ${sid} never carried its chat input`); };
+// r350: AT THE BOUND the leg PRINTS what the pages can read of the cause (never a re-attach inside the wait: a second device's open chat
+// window that vanishes after the other device acts is a person's lost composer and draft — a test that opened it again would hide it)
+const viewReady = async (P, sid) => {
+  if (await P.waitFor(`!!(${V(sid)})?._chatInput?._textarea`, 15000)) return;
+  try { console.error(`  [viewReady] ${P.name} page: the chat view of ${sid} is not there at the bound — the cause, as the two pages read it:\n    ` + JSON.stringify(await causeOf(sid))); } catch (e) { console.error(`  [viewReady] the cause could not be read: ${e && e.message}`); }
+  throw new Error(`${P.name || 'a'} page: the chat view of ${sid} never carried its chat input`);
+};
+// installed once a page's app is ready: the window closes, the views leaving, the layout records applied — each with its caller's frames
+const CAUSE_WATCH = `(() => { if (window.__dfCause) return true; const W = window.__dfCause = { closes: [], gone: [], applied: [] };
+  const ring = (a, x) => { a.push(x); if (a.length > 30) a.shift(); }, by = () => String(new Error().stack || '').split('\\n').slice(3, 8).map((l) => l.trim());
+  const wm = app.wm, close = wm.closeWindow.bind(wm);
+  wm.closeWindow = function (id) { const w = wm.windows.get(id); ring(W.closes, { at: Date.now(), id, type: w && w.type, srv: (w && w._openSpec && (w._openSpec.serverId || w._openSpec.sessionId)) || null, by: by() }); return close(id); };
+  const S = app.sessions, del = S.delete.bind(S), set = S.set.bind(S);
+  S.delete = (k) => { const v = S.get(k); ring(W.gone, { at: Date.now(), win: k, sid: (v && v.sessionId) || null, how: 'deleted', by: by() }); return del(k); };
+  S.set = (k, v) => { const was = S.get(k); if (was && was !== v) ring(W.gone, { at: Date.now(), win: k, sid: was.sessionId || null, how: 'replaced', by: by() }); return set(k, v); };
+  const lm = app.layoutManager, apply = lm._handleRemoteSync.bind(lm);
+  lm._handleRemoteSync = function (msg) { const ws = (msg && msg.state && Array.isArray(msg.state.windows)) ? msg.state.windows : []; ring(W.applied, { at: Date.now(), seq: (msg && msg.seq) || null, desktopId: (msg && msg.desktopId) || null, resync: !!(msg && msg.resync), windows: ws.map((x) => (x && x.openSpec && (x.openSpec.serverId || x.openSpec.sessionId)) || (x && x.type) || '?') }); return apply(msg); };
+  return true; })()`;
+// the cause, read off both pages at the bound: each page's windows and view, its closes / views gone / records applied (with the SENDER
+// of each record named by the seq the server acked to that page), and the layout guards' state (seq, user-dirty, the gates)
+async function causeOf(sid) {
+  const pageFacts = (P) => P.evalJs(`(() => { const W = window.__dfCause || {}, lm = app.layoutManager || {};
+    return { windows: [...app.wm.windows.values()].map((w) => ({ id: w.id, type: w.type, srv: (w._openSpec && (w._openSpec.serverId || w._openSpec.sessionId)) || null, desktop: w._desktopId || null, hidden: !!w._hiddenByDesktop })),
+      view: !!(${V(sid)}), closes: W.closes || [], gone: W.gone || [], applied: W.applied || [],
+      guards: { lastRemoteSeq: lm._lastRemoteSeq ?? null, userDirty: lm._userDirty ?? null, lastUserInputAt: lm._lastUserInputAt ?? null, restoring: lm._restoring ?? null, pointerDown: lm._pointerDown ?? null, pendingRemote: lm._pendingRemote ? lm._pendingRemote.size : null } }; })()`);
+  const senderOf = (seq) => seq == null ? null : (A.acks.some((a) => a.seq === seq) ? 'A' : B.acks.some((a) => a.seq === seq) ? 'B' : 'another client');
+  const out = { now: Date.now(), sid };
+  for (const P of [A, B]) {
+    out[P.name] = { ...(await pageFacts(P)), received: P.layoutIn.map((f) => ({ ...f, from: senderOf(f.seq), carriesSid: f.windows.includes(sid) })), sentSaves: P.layoutOut.slice(-8).map((f) => ({ ...f, carriesSid: f.windows.includes(sid) })) };
+    out[P.name].applied = out[P.name].applied.map((f) => ({ ...f, from: senderOf(f.seq), carriesSid: f.windows.includes(sid) }));
+  }
+  return out;
+}
 const box = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._textarea.value`); };
 const held = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`${CI(sid)}._heldDraft`); };
 const activeIsBox = async (P, sid) => { await viewReady(P, sid); return P.evalJs(`document.activeElement === ${CI(sid)}._textarea && document.hasFocus()`); };
@@ -185,11 +223,18 @@ async function legTyping(sid, name, { base = [] } = {}) {
 
 try {
   await setup(A); await setup(B);
+  for (const P of [A, B]) await P.evalJs(CAUSE_WATCH);   // r350: what closes a window or takes a view away is kept, for the bound to print
   await sleep(600);
 
   console.log('① A focused and typing while B saves a draft: A\'s box keeps A\'s text, and A\'s text is what is sent');
   const sid = await openChat('draft-focus');
   check('one Antigravity chat open on BOTH pages (two windows, both focus-emulated), the fake agy started behind the real wrapper', !!sid && agyStarted(sid) && !!(await B.evalJs(`!!(${V(sid)})?._chatInput`)), { sid });
+  // r350: the bound's cause print is READ here once, in a healthy moment — it must come back from BOTH pages with their windows, the
+  // conversation's view, the layout guards and the wire (a print that cannot read is no placement when the red comes)
+  { const c0 = await causeOf(sid).catch((e) => ({ error: String(e && e.message) }));
+    check('r350: the cause the bound prints reads both pages — each page\'s windows and the conversation\'s view, its closes / views gone / records applied, the layout guards, the frames off the wire',
+      !!c0.A && !!c0.B && c0.A.view === true && c0.B.view === true && Array.isArray(c0.A.windows) && c0.A.windows.some((w) => w.srv === sid) && !!c0.B.guards && 'lastRemoteSeq' in c0.B.guards && Array.isArray(c0.B.received) && Array.isArray(c0.A.gone),
+      c0.error ? c0 : { A: { windows: c0.A.windows.length, guards: c0.A.guards }, B: { windows: c0.B.windows.length, guards: c0.B.guards, received: c0.B.received.length } }); }
   const r1 = await legTyping(sid, 'draft-focus');
   check(`A's box holds exactly what A typed (B's «oko» then «k» both saved while A typed: B sent ${JSON.stringify(r1.bSaves)})`, r1.focusedBoth && r1.a === A_TEXT && r1.b === 'okok' && Array.isArray(r1.bSaves) && r1.bSaves.includes('oko') && r1.bSaves.includes('okok'), r1);
   check('…and every drafts set A sent is a prefix of what A typed (A never saved B\'s characters)', r1.aSent.length > 0 && r1.aSent.every((v) => v === '' || A_TEXT.startsWith(v)), r1.aSent);
