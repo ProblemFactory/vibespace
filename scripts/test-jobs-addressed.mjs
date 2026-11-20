@@ -201,8 +201,9 @@ console.log('§0 the incident: two conversations, one Task Group, A\'s notify cr
       'the U4 move (B-70f9 kept): a throw while the create\'s reply is built inside the store\'s callback is ANSWERED 500 create-failed by name — the CLI is told at once (the job exists; «vibespace-job list --mine» says so)', { code: thr.code, err: thr.err.slice(0, 300), out: thr.out.slice(0, 200), made });
     // RED: a copy with the moved tip's EMPTY catch — the same throw gets NO reply inside the bound (its plant asserted first)
     const AR_SRC = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-    const CATCH = "} catch (e) { answerCreateFailed(res, e); } });   // lane lg-store-writes U4";
-    const ARx = mutantCopies('jobs-addressed-reply', REPO).load('src/agent-routes.js', anchored(AR_SRC, CATCH, "} catch { } });   // lane lg-store-writes U4", 'the create reply\'s catch is one place'), 'reply-throw-dropped');
+    // (the move onto 598d4ba7c: the reply waits inside piece 7's --propose-wake promise — the same catch, one place, closing that promise too)
+    const CATCH = "} catch (e) { answerCreateFailed(res, e); } }));   // a throw while it is built";
+    const ARx = mutantCopies('jobs-addressed-reply', REPO).load('src/agent-routes.js', anchored(AR_SRC, CATCH, "} catch { } }));   // a throw while it is built", 'the create reply\'s catch is one place'), 'reply-throw-dropped');
     const routesX = {};
     ARx.setupAgentRoutes({ ...AR_DEPS, app: { get: (p, h) => { routesX[`GET ${p}`] = h; }, post: (p, h) => { routesX[`POST ${p}`] = h; }, put() { }, patch() { }, delete() { }, use() { } } });
     let got = null; const resX = { headersSent: false, status() { return resX; }, json(o) { got = o; resX.headersSent = true; return resX; } };

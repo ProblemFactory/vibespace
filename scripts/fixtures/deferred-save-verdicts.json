@@ -67,6 +67,11 @@
   "why": "a failed delivery's only copy, urgent"
  },
  {
+  "key": "jobs · src/jobs.js · JobManager._wakeAnswered · _dirty = true",
+  "verdict": "none",
+  "why": "a wake's journal line; re-derived"
+ },
+ {
   "key": "jobs · src/jobs.js · JobManager._onRetryEvent · _dirty = true",
   "verdict": "none",
   "why": "journal lines; delivery already happened"
@@ -251,9 +256,17 @@
   "key": "jobs · src/jobs.js · JobManager.create · _save()",
   "verdict": "waits",
   "why": "The child is spawned only after _spawn's _onDisk; the create answer goes through persisted() on both doors.",
-  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(saved ? {} : { notOnDisk: true }) }); } catch (e) { answerCreateFailed(res, e); } });   // lane lg-store-writes U4: the answer waits for the store, never the loop; a throw while it is built is answered 500 create-failed by the wrapper's own helper (B-70f9: every throw answered)   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values",
+  "at": "src/agent-routes.js:a.jm.persisted((saved) => { try { require('./store-writer.js').identityAtExit(res); res.json({ machine: hubMachine, where: where.words,  success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}), ...(pw ? { wakeProposal: pw.body } : {}), ...(saved ? {} : { notOnDisk: true })",
   "branch": "(saved ? {} : { notOnDisk: true",
   "stops": "the agent's «done»: it says not on disk"
+ },
+ {
+  "key": "jobs · src/jobs.js · JobManager.setWakeGrant · _save()",
+  "verdict": "waits",
+  "why": "The person's door answers through persisted() (the act route); the key's verb and the proposals' card answer at once — piece 7's residual, said in the line.",
+  "at": "src/server/jobs-wiring.js:jm.persisted((saved) => { try { require('../store-writer.js').identityAtExit(res); res.json({ success: true, ...r, ...(saved ? {} : { notOnDisk: true",
+  "branch": "(saved ? {} : { notOnDisk: true",
+  "stops": "the person's «changed»: past the bound it says not on disk"
  },
  {
   "key": "jobs · src/jobs.js · JobManager.stop · _save()",
