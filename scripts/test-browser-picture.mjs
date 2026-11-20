@@ -72,7 +72,7 @@ console.log('§1 the source verdict (PURE pictureSourceOf)');
   for (const [name, rec, why, words, ctx] of rows) { const r = PIC.pictureSourceOf(rec, ctx); ok(r.source === 'screencast' && r.why === why && (words === null || r.words === words) && r.displaySession === null, `${name} ⇒ the screencast (${r.why}${words ? `, "${r.words}"` : ''})`, r); }
   ok(PIC.pictureSourceOf({ ...attach, host: 'some-other-name' }).source === 'x', "MEASURED TRAP: a record's `host` names the machine that LAUNCHED it (this one) — never \"another machine\" (only `hostId` is)");
   ok(AT.HIDDEN_WINDOW_WHY.startsWith(PIC.NO_XPRA_WHY_HEAD), `the no-display why is browser-attach's own sentence head ("${PIC.NO_XPRA_WHY_HEAD}")`);
-  ok(Object.keys(PIC.SOURCE_WORDS).length === 9 && Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10), 'one phrase per why (9)');
+  ok(Object.keys(PIC.SOURCE_WORDS).length === 11 && Object.values(PIC.SOURCE_WORDS).every((w) => typeof w === 'string' && w.length > 10), 'one phrase per why (11)');
 }
 
 // ═══ §2 THE DISPLAY'S ROWS ═══
@@ -156,7 +156,7 @@ console.log("§4 the bar's words — literal t() keys with zh + ja");
   const keys = [...Object.values(PIC.SOURCE_WORDS), "the page's picture — this conversation's window could not be told apart on the display", 'Connecting to the browser window…', 'The browser window is not available'];
   const missing = keys.filter((k) => !live.includes(`t(${JSON.stringify(k)})`) && !live.includes(`t('${k.replace(/'/g, "\\'")}')`));
   ok(!missing.length, `every source phrase is a LITERAL t() in the live view (${keys.length})`, missing);
-  const untranslated = [...keys, 'Chrome asks you to sign in — in its window below', 'Take over and type the username and password into Chrome’s sheet — the agent never sees them', 'This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward', 'This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward', 'This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab', 'The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers'].filter((k) => !zh[k] || !ja[k]);
+  const untranslated = [...keys, 'Chrome asks you to sign in — in its window below', 'Take over and type the username and password into Chrome’s sheet — the agent never sees them', 'This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward', 'This tab is behind another tab in its window: press this tab in the browser’s own tab strip, or Bring it forward', 'This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab', 'Brought this tab to the front of its window', 'Nothing ran: this is the conversation’s own browser, and VibeSpace does not bring its tabs forward — press the tab in the browser’s own tab strip', 'The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers'].filter((k) => !zh[k] || !ja[k]);
   ok(!untranslated.length, 'every one has zh + ja', untranslated);
   ok(/\{ const pw = pictureWords\(\); if \(pw\) modeBadge\.title = `\$\{modeBadge\.title\} · \$\{pw\}`; \}/.test(live), "the badge's tooltip carries the source (the bar itself unchanged)");
 }
@@ -565,8 +565,8 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const hid = { targetId: 'TAB-A', state: 'hidden' };
   const a = PIC.pictureForView(X, { bg: hid }), b = PIC.pictureForView(X, { bg: hid, driving: true }), c = PIC.pictureForView(X, { bg: { targetId: 'TAB-A', state: 'unresponsive' } });
   const d = PIC.pictureForView(X, { bg: null }), e = PIC.pictureForView(S0, { bg: hid }), f = PIC.pictureForView(X, { bg: { state: 'hidden' } });
-  ok(X.source === PIC.PICTURE_X && a.source === PIC.PICTURE_SCREENCAST && a.why === 'background-tab' && a.displaySession === null && a.words === PIC.SOURCE_WORDS['background-tab'] && b === X && c === X && d === X && e === S0 && f === X,
-    `the tab on show hidden in its window: its own picture (${a.source}, ${a.why}); a takeover keeps the window (${b.source}); a tab that never answers keeps it (${c.source}); no verdict keeps it (${d.source}); a page picture stays one (${e.source})`);
+  ok(X.source === PIC.PICTURE_X && a.source === PIC.PICTURE_SCREENCAST && a.why === 'background-tab' && a.displaySession === null && a.words === PIC.SOURCE_WORDS['background-tab'] && b === X && c.why === 'unresponsive-none' && c.source === PIC.PICTURE_SCREENCAST && d === X && e === S0 && f === X,
+    `the tab on show hidden in its window: its own picture (${a.source}, ${a.why}); a takeover keeps the window (${b.source}); a tab that never answers, of which the hub has no picture: no window, none (${c.why} — 主开发's r178); no verdict keeps it (${d.source}); a page picture stays one (${e.source})`);
   const psrc = fs.readFileSync(path.join(REPO, 'src/browser-picture.js'), 'utf8'), RULE = "  if (bg && bg.state === 'hidden' && bg.targetId) return { source: PICTURE_SCREENCAST, why: 'background-tab', words: SOURCE_WORDS['background-tab'], displaySession: null };\n";
   const MCp = mutantCopies('picture-one-window', REPO);
   const PICr = MCp.load('src/browser-picture.js', anchored(psrc, RULE, '', 'no-background-rule'), 'no-background-rule');
@@ -580,10 +580,10 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const WINm = require('../src/browser-windows.js');   // its read (M2): the settle outlasts the hub's own re-hide (2 s silence + its 1 s tick, twice)
   ok(set === 4000 && set >= WINm.BACKGROUND_SILENCE_MS + 2000 && s1.why === 'background-settle' && s1.source === PIC.PICTURE_SCREENCAST && s2 === X && s3 === X && s4 === X,
     `the clear holds ${set} ms (≥ the hub's re-hide: ${WINm.BACKGROUND_SILENCE_MS} ms silence + two 1 s ticks) before the window returns (at ${set - 1} ms: ${s1.why}; at ${set} ms: ${s2.source}); a view on the window all along stays (${s3.source}); a takeover returns it at once (${s4.source})`);
-  const SETTLE = "  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };   // a stuck tab's clear settles too (its read's M3)\n";
+  const SETTLE = "  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck' || shownWhy === 'unresponsive-own' || shownWhy === 'unresponsive-none') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };   // a stuck tab's clear settles too (its read's M3)\n";
   // its read (M3): a clear OUT of the STUCK state settles like a clear out of a hidden one — never the window at once (a stuck tab that flaps)
   const sk = PIC.pictureForView(X, { bg: null, shownWhy: 'background-stuck', clearedAt: T0, now: T0 + 1 });
-  const STUCK_SETTLE = "shownWhy === 'background-settle' || shownWhy === 'background-stuck')";
+  const STUCK_SETTLE = "shownWhy === 'background-settle' || shownWhy === 'background-stuck' || shownWhy === 'unresponsive-own' || shownWhy === 'unresponsive-none')";
   const PICk = MCp.load('src/browser-picture.js', anchored(psrc, STUCK_SETTLE, "shownWhy === 'background-settle')", 'no-stuck-settle'), 'no-stuck-settle');
   const rk = PICk.pictureForView(PICk.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: null, shownWhy: 'background-stuck', clearedAt: T0, now: T0 + 1 });
   ok(sk.why === 'background-settle' && psrc.split(STUCK_SETTLE).length === 2 && rk.source === PIC.PICTURE_X, `a clear out of the STUCK state settles (${sk.why}); RED (the copy without it): the window at once (${rk.source})`);
@@ -597,8 +597,8 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   const STUCK = "  if (bg && bg.state === 'unresponsive' && bg.targetId && bg.polled === true) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };\n";
   const PICu = MCp.load('src/browser-picture.js', anchored(psrc, STUCK, '', 'no-stuck'), 'no-stuck');
   const ur = PICu.pictureForView(PICu.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg: stuckBg, shownWhy: 'attach' });
-  ok(u1.why === 'background-stuck' && u0.why === 'background-stuck' && u2 === X && u3 === X && psrc.split(STUCK).length === 2 && ur.source === PIC.PICTURE_X,
-    `a polled tab that stops answering keeps its last own picture after a hand back (${u1.why}) and on a new pane (${u0.why}); never polled keeps the window (${u2.source}); a takeover drives the window (${u3.source}); RED (the copy without the rule): the window — its front tab under the stuck tab's name (${ur.source})`);
+  ok(u1.why === 'background-stuck' && u0.why === 'background-stuck' && u2.why === 'unresponsive-none' && u3 === X && psrc.split(STUCK).length === 2 && ur.why !== 'background-stuck',
+    `a polled tab that stops answering keeps its last own picture after a hand back (${u1.why}) and on a new pane (${u0.why}); never polled and no picture of it: none, never the window (${u2.why}); a takeover drives the window (${u3.source}); RED (the copy without the rule): its last own picture lost (${ur.why} — since r178 a watcher is never given the window, so the copy shows none)`);
   // the hub's `polled`, PURE over its roads (its read's S1/S3): only a picture OF that tab that landed while it stayed on show
   const WINw = require('../src/browser-windows.js'), SV = WINw.stuckPolledVerdict;
   const roads = [
@@ -634,19 +634,42 @@ console.log('§10 the picture the view says it shows, in ONE window (the owner\'
   ok(PIC.settlesOnClear({ type: 'tab-background', targetId: null, why: 'another tab is on show', cause: 'switch' }) === false && PIC.settlesOnClear({ type: 'tab-background', targetId: null, why: 'it paints again' }) === true && PIC.settlesOnClear({ type: 'tab-background', targetId: null, why: 'it is on show' }) === true
     && psrc.split(SOC).length === 2 && PICc.settlesOnClear({ targetId: null, cause: 'switch' }) === true,
     `its read 4 (S2): a switch's clear returns the window at once; a clear of the same tab settles; RED (the copy where every clear settles): the switch's clear settles — the old tab's picture under the new tab's name`);
+  // 主开发's r178: A VIEW THAT DOES NOT DRIVE NEVER SHOWS THE WINDOW'S PICTURE FOR A TAB THAT DOES NOT RESPOND — over every unresponsive record
+  // (polled or not, front or not, a picture of it or not): its own last picture if the hub has one, else none; the driver's cases unchanged
+  const recs = [];
+  for (const polled of [false, true]) for (const front of [false, true]) for (const own of [false, true]) recs.push({ targetId: 'TAB-A', state: 'unresponsive', polled, front, own });
+  const watchWrong = recs.filter((bg) => { const w = PIC.pictureForView(X, { bg, shownWhy: 'attach' }); return w.source === PIC.PICTURE_X || (bg.polled ? w.why !== 'background-stuck' : bg.own ? w.why !== 'unresponsive-own' : w.why !== 'unresponsive-none'); });
+  const driveWrong = recs.filter((bg) => PIC.pictureForView(X, { bg, driving: true }) !== X);
+  const R178 = "  if (bg && bg.state === 'unresponsive' && bg.targetId) return bg.own === true ?";
+  const R178_LINE = psrc.split('\n').find((l) => l.startsWith(R178)) || R178;
+  const PICt = psrc.split(R178).length === 2 ? MCp.load('src/browser-picture.js', anchored(psrc, R178_LINE + '\n', '', 'tip-verdict'), 'tip-verdict') : null;
+  const tipX = PICt ? recs.filter((bg) => PICt.pictureForView(PICt.pictureSourceOf({ launch: 'attach', state: 'ready', displaySession: { id: 'ds-1' } }), { bg, shownWhy: 'attach' }).source === PIC.PICTURE_X).length : null;
+  ok(!watchWrong.length && !driveWrong.length && tipX === 4,
+    `r178: over ${recs.length} unresponsive records a view that does not drive never shows the window (its own last picture, or none: ${watchWrong.length ? 'WRONG ' + JSON.stringify(watchWrong) : 'all right'}); the driver keeps the window in all ${recs.length}; RED (the tip's verdict, 434847bd7): ${tipX} of them show a watcher the window — every one not polled`, { watchWrong, driveWrong, tipX });
+  // the hub's «a picture OF this tab» — PURE over its roads
+  const OV = WINw.ownPictureVerdict, ovRoads = [[{ id: 'a1b2', lastFrameOf: 'A1B2' }, true], [{ id: 'A1B2', lastFrameOf: 'C3D4' }, false], [{ id: 'A1B2', lastFrameOf: null }, false], [{ id: null, lastFrameOf: 'A1B2' }, false]];
+  ok(ovRoads.every(([a, want]) => OV(a) === want), `the hub's own-picture verdict over ${ovRoads.length} roads: its last frame showed this tab (ids in either case) — never another tab's, never none`);
   { // pins: the hub says it (the act's ack → frontBackground; the switch's clear carries its cause); the page reads both
     const bs4 = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lv4 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     ok(bs4.includes('        if (r && WIN.broughtFrontVerdict({ state: relay.bg.state, id: relay.bg.targetId, ack: r })) frontBackground(relay);') && bs4.includes('    relay.lastBg = JSON.stringify({ ...was, polled: false, front: true });') && bs4.includes("clearBackground(relay, 'another tab is on show', 'switch');") && bs4.includes("broadcast(relay, { type: 'tab-background', targetId: null, why, ...(cause ? { cause } : {}) });")
-      && lv4.includes(', polled: m.polled === true } : null;') && lv4.includes('if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && ') && lv4.includes("import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js';"),
+      && lv4.includes(', polled: m.polled === true, own: m.own === true } : null;') && lv4.includes('if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && ') && lv4.includes("import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js';"),
       'PIN (its read 4): the hub re-says a hung tab brought forward as in front (replayed to a late viewer); a switch\'s clear says its cause; the page reads the re-said `polled` and skips the settle on a switch');
   }
   // the watch line says the last picture, and 'hello' re-renders it on the new socket's verdict (pins)
   const live2 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(live2.includes(": st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers')") && live2.includes("renderWatchLine(); // its read (N1): a page-picture view mounts no X"), 'PIN: the stuck tab\'s line says its last picture is shown; hello re-renders the line');
+  ok(live2.includes(": st.bg.polled || st.bg.own ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers')") && live2.includes("renderWatchLine(); // its read (N1): a page-picture view mounts no X"), 'PIN: the stuck tab\'s line says its last picture is shown; hello re-renders the line');
   // the hub's record says it, and the page keeps it (pins)
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-  ok(bsrc.includes("const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });") && bsrc.includes("pollMs: 0, polled });") && bsrc.includes('b.frameTimes = []; b.shotOf = null;') && bsrc.includes('      b.shotOf = id;   // a picture OF this tab landed')
-    && fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true }"), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
+  ok(bsrc.includes("const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });") && bsrc.includes("pollMs: 0, polled, own });") && bsrc.includes('b.frameTimes = []; b.shotOf = null;') && bsrc.includes('      b.shotOf = id;   // a picture OF this tab landed')
+    && fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8').includes(", polled: m.polled === true, own: m.own === true }"), 'PIN: the hub\'s unresponsive record says `polled` (a hidden tab that hung), replayed to a late viewer; the view keeps it on its verdict');
+  { // r178 pins: the hub notes which tab its last picture shows and says `own`; the page hides a picture it does not have, words the
+    // watcher's line by it, names a tab with no title «this tab», and says a press that ran nothing
+    const bs5 = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lv5 = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    ok(bs5.split('relay.lastFrame = text; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;').length === 3 && bs5.includes('relay.lastFrame = text; relay.lastFrameOf = id; relay.stats.frames++;') && bs5.includes('const own = WIN.ownPictureVerdict({ id, lastFrameOf: relay.lastFrameOf });') && bs5.includes('pollMs: 0, polled, own });')
+      && lv5.includes("{ const vis = v.why === 'unresponsive-none' ? 'hidden' : ''; if (canvas.style.visibility !== vis) canvas.style.visibility = vis; }") && lv5.includes(": st.bg.polled || st.bg.own ? t('The agent’s tab is not responding — its last picture is shown;")
+      && lv5.includes("showToast(pend && pend.title ? t('Brought “{title}” to the front of its window', { title: pend.title }) : t('Brought this tab to the front of its window'), { duration: 3000 });") && lv5.includes("else if (act === 'switch' && m.noop) showToast(t('Nothing ran: this is the conversation’s own browser, and VibeSpace does not bring its tabs forward — press the tab in the browser’s own tab strip'), { duration: 4500 });"),
+      'PIN (r178): the hub says whether its last picture is the hung tab\'s own (three frame sites, the record); the page shows none when it has none, says the last picture when it has one, names an untitled tab «this tab», and says a press that ran nothing');
+  }
   // the live view's wiring (pins): the picture reads the hub's verdict; the verdict and a takeover / handback re-judge it; a
   // one-window row says the blanks it folds
   const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');

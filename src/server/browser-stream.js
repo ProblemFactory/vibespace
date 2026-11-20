@@ -596,7 +596,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     for (const fn of relay.taps) { try { fn(msg, text, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
     if (cls !== 'frame') onOrderedForKeeper(relay, msg);
     if (cls === 'frame') {
-      relay.lastFrame = text; relay.stats.frames++;
+      relay.lastFrame = text; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;   // r178: the tab this picture shows
       fanOutFrame(relay, text, t);
     } else {
       relay.stats.ordered++;
@@ -826,7 +826,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       notePicture(relay, rec, 'frame');
       relay.frameSeq++; relay.lastUpFrameAt = t; relay.stats.fresh++;
       for (const fn of relay.taps) { try { fn(rec, text, relay); } catch (e) { log.warn?.(`[browser-live] ${relay.key}: tap failed — ${e && e.message}`); } }
-      relay.lastFrame = text; relay.stats.frames++;
+      relay.lastFrame = text; relay.lastFrameOf = relay.activeTarget || null; relay.stats.frames++;   // r178: the tab this picture shows
       fanOutFrame(relay, text, t);
     });
   }
@@ -1331,12 +1331,13 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     // the owner's live-picture unit, its read (M1): the HUB says whether this tab's own picture was polled before it stopped
     // answering (a hidden tab that hung) — the view keeps that last picture on every road (a hand back, a reconnect, a new pane)
     const polled = WIN.stuckPolledVerdict({ state, id, prevTargetId: b.targetId, shotOf: b.shotOf });   // its read (S1): a picture OF this tab landed
+    const own = WIN.ownPictureVerdict({ id, lastFrameOf: relay.lastFrameOf });   // r178: the hub's last picture is THIS tab's (a view that does not drive shows it, or none)
     if (b.targetId !== id) b.shotOf = null;
     b.state = state; b.targetId = id; b.since = now();
     if (b.pollTimer) { clearInterval(b.pollTimer); b.pollTimer = null; }
     if (state === 'unresponsive') {
       log.log?.(`[browser-live] ${relay.key}: the tab on show (${String(id).slice(0, 8)}) sends no picture and does not answer (${String(why).slice(0, 80)}) — a busy or hung page; said on the view, asked again every ${Math.max(5000, bgSilenceMs) / 1000} s`);
-      relay.lastBg = JSON.stringify({ type: 'tab-background', targetId: id, since: b.since, state, pollMs: 0, polled });
+      relay.lastBg = JSON.stringify({ type: 'tab-background', targetId: id, since: b.since, state, pollMs: 0, polled, own });
       broadcast(relay, relay.lastBg);
       return;
     }
@@ -1386,7 +1387,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       const text = JSON.stringify(rec);
       notePicture(relay, rec, 'frame');
       relay.frameSeq++; relay.stats.fresh++; // never lastUpFrameAt: the stream itself is still silent
-      relay.lastFrame = text; relay.stats.frames++;
+      relay.lastFrame = text; relay.lastFrameOf = id; relay.stats.frames++;   // r178: a picture OF the polled tab
       fanOutFrame(relay, text, now());
     });
   }

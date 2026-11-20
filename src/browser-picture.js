@@ -50,6 +50,8 @@ const SOURCE_WORDS = Object.freeze({
   'background-tab': "the tab's own picture, a new one every half second — its window shows another tab in front",
   'background-settle': "the tab's own picture — its window's picture again in a moment",
   'background-stuck': "the tab's last own picture — it does not answer, and its window shows another tab in front",
+  'unresponsive-own': "the tab's last own picture — it does not answer",
+  'unresponsive-none': "no picture of this tab — it does not answer",
 });
 const RUNNING = new Set(['ready']);
 
@@ -88,7 +90,11 @@ function pictureForView(v, { bg = null, driving = false, shownWhy = null, cleare
   // its read (M1): the HUB says it (`polled`: this tab's own picture was polled before it stopped answering) — never the view's own
   // memory, which a hand back, a reconnect or a new pane loses
   if (bg && bg.state === 'unresponsive' && bg.targetId && bg.polled === true) return { source: PICTURE_SCREENCAST, why: 'background-stuck', words: SOURCE_WORDS['background-stuck'], displaySession: null };
-  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };   // a stuck tab's clear settles too (its read's M3)
+  // 主开发's r178: a view that does NOT drive never shows the window's picture for a tab that does not respond — the hub cannot know
+  // which tab is in front of a hung one (a press in the browser's own strip is seen by nothing), so the window may be ANOTHER tab's page
+  // under this tab's name, and a watcher may be another person. It shows this tab's own last picture if the hub has one, else none
+  if (bg && bg.state === 'unresponsive' && bg.targetId) return bg.own === true ? { source: PICTURE_SCREENCAST, why: 'unresponsive-own', words: SOURCE_WORDS['unresponsive-own'], displaySession: null } : { source: PICTURE_SCREENCAST, why: 'unresponsive-none', words: SOURCE_WORDS['unresponsive-none'], displaySession: null };
+  if ((shownWhy === 'background-tab' || shownWhy === 'background-settle' || shownWhy === 'background-stuck' || shownWhy === 'unresponsive-own' || shownWhy === 'unresponsive-none') && clearedAt > 0 && now - clearedAt < settleMs) return { source: PICTURE_SCREENCAST, why: 'background-settle', words: SOURCE_WORDS['background-settle'], displaySession: null };   // a stuck tab's clear settles too (its read's M3)
   return v;
 }
 

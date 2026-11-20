@@ -634,6 +634,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     'background-tab': () => t("the tab's own picture, a new one every half second — its window shows another tab in front"),
     'background-settle': () => t("the tab's own picture — its window's picture again in a moment"),
     'background-stuck': () => t("the tab's last own picture — it does not answer, and its window shows another tab in front"),
+    'unresponsive-own': () => t("the tab's last own picture — it does not answer"),
+    'unresponsive-none': () => t("no picture of this tab — it does not answer"),
     untold: () => t("the page's picture — this conversation's window could not be told apart on the display"),
   };
   const xOn = () => !!xp.view;
@@ -728,6 +730,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     const v = pictureNow();
     const was = st.pictureSource && st.pictureSource.source;
     st.pictureSource = v;
+    // 主开发's r178: a view that does not drive, on a tab that does not respond and of which the hub has no picture, shows NONE — never
+    // the last frame it holds (another tab's, after a switch)
+    { const vis = v.why === 'unresponsive-none' ? 'hidden' : ''; if (canvas.style.visibility !== vis) canvas.style.visibility = vis; }
     if (v.source !== 'x') { xp.ticket = null; xp.failed = null; unmountX(); if (was !== v.source) { renderMode(); renderWatchLine(); } return; }
     if (xp.view && xp.ds !== v.displaySession) { xp.ticket = null; unmountX(); } // a new display session (the browser started again)
     const failedHere = xp.failed && xp.failed.ds === v.displaySession && Date.now() - xp.failed.at < X_RETRY_MS;
@@ -1633,7 +1638,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       // another tab in the browser's own strip, which the hub never sees — so «Reload it» alone is never said on the drawn window)
       const drawn = driving && xOn() && xp.status === 'connected';
       const behind = drawn && st.bg.polled === true, unplaced = drawn && !behind;
-      text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : unplaced ? t('This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab') : driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
+      text = behind ? t('This tab is behind another tab in its window and does not answer: press this tab in the browser’s own tab strip, or Bring it forward') : unplaced ? t('This tab does not answer (a busy or hung page) — Bring it forward, then reload it in the browser, or switch to another tab') : driving ? t('This tab is not responding — no picture, and it did not answer when asked (a busy or hung page). Reload it, or switch to another tab') : st.bg.polled || st.bg.own ? t('The agent’s tab is not responding — its last picture is shown; it did not answer when asked (a busy or hung page). This view updates as soon as it answers') : t('The agent’s tab is not responding — no picture, and it did not answer when asked (a busy or hung page). This view updates as soon as it answers');
       if (behind || unplaced) { btn = t('Bring it forward'); act = () => tabAct('switch', stuckRow); }
     } else if (st.bg) {
       const row = (st.tabRow && st.tabRow.rows || []).find((x) => x.targetId === String(st.bg.targetId || '').toUpperCase() || x.active);
@@ -1669,7 +1674,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     } else if (act === 'stop') { showToast(t('Stopped loading “{title}”', { title: (pend && pend.title) || '' }), { duration: 3000 });
     } else if (act === 'close' && pend && pend.owner === 'agent') showToast(t('Closed “{title}” — the agent is told when you hand back', { title: pend.title }), { duration: 3500 });
     // lane browser-windows (U0b): a chip click that RAN is said (userW's clicks changed nothing visible and said nothing)
-    else if (act === 'switch' && m.broughtForward) showToast(t('Brought “{title}” to the front of its window', { title: (pend && pend.title) || '' }), { duration: 3000 });
+    // 主开发's r178 smalls: the toast names the tab by its title, or says «this tab»; a press that ran nothing says so, with why
+    else if (act === 'switch' && m.broughtForward) showToast(pend && pend.title ? t('Brought “{title}” to the front of its window', { title: pend.title }) : t('Brought this tab to the front of its window'), { duration: 3000 });
+    else if (act === 'switch' && m.noop) showToast(t('Nothing ran: this is the conversation’s own browser, and VibeSpace does not bring its tabs forward — press the tab in the browser’s own tab strip'), { duration: 4500 });
     else if (act === 'switch' && !m.noop && pend && pend.owner === 'agent') showToast(t('Switched the agent’s tab to “{title}” — the agent is told when you hand back', { title: pend.title }), { duration: 3500 });
     renderTabRow();
   }
@@ -2380,7 +2387,7 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'tab-background':
         // 主开发's law (1): the clear's moment is kept — the window returns only once it has held (BG_SETTLE_MS, no flap)
         if (m.targetId) st.bgClearedAt = 0; else if (!settlesOnClear(m)) st.bgClearedAt = 0; else if (st.bg && (st.bg.state === 'hidden' || st.bg.state === 'unresponsive')) { st.bgClearedAt = Date.now(); clearTimeout(st.bgSettleTimer); st.bgSettleTimer = setTimeout(() => renderPicture(), BG_SETTLE_MS + 50); }
-        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true } : null; // B-d635: or a tab that never answers
+        st.bg = m.targetId ? { targetId: String(m.targetId), since: Number(m.since) || Date.now(), state: m.state === 'unresponsive' ? 'unresponsive' : 'hidden', polled: m.polled === true, own: m.own === true } : null; // B-d635: or a tab that never answers
         renderWatchLine(); renderPicture(); // the owner's report 2026-11-19: the picture follows the verdict (the tab's own, while hidden)
         break;
       case 'tabs':
