@@ -1074,7 +1074,7 @@ export const SUITES = [
   { name: 'test-ci-gate-watchdog', tier: 'fast', why: 'LAW architecture · 4.1 s — the gate\'s own gate, part 7/7: §12 a suite\'s own clock fires before the gate\'s and names its leg (two planted suites under a 4 s row, at once)' },
   { name: 'test-ci-heavy-verdict', tier: 'fast', why: 'LAW architecture · 4.7 s (B-18eb, restated 2026-11-18: + the re-run attempt legs and their §5 mutants — alone on the test machine, alternated with the release\'s own suite file, 6 pairs over both zones: 7.47 s against 7.27 s, the medians — ×1.03 over 4.6 s) (B-a2c9, restated 2026-11-18 in the box\'s scale: 5.46 s alone on the test machine × 0.843, the median stated/read ratio of 20 untouched reference rows read in the same gate (quartiles ×0.70–×0.99 ⇒ 3.8–5.4 s); read on a run with legs red that this stack cures — the time of a whole run; was 3.6 s) (measured under the box\'s thermal cap, 2026-11-10: 3.64 s alone — not restated at full speed yet) — B-e381, lane ci-heavy-verdict r4: the CI mirror\'s verified run written as the HOSTED half\'s listed green (never full, the list read from the commit), the union reader (a red clears when every failed suite has run green since), LAW A (a marker that cannot be read never opens the gate; the writer, status and already-green see it too), LAW B (a list-scoped `absent` covers nothing; a FULL green clears), pruning by commits, five mutant controls, the parity over production\'s 30 markers; every refusal writes nothing' },
   { name: 'test-ci-heavy-queue', tier: 'fast', why: 'LAW architecture · 8.9 s (measured under the box\'s thermal cap, 2026-11-10: 8.61–8.87 s alone — not restated at full speed yet) — lane ci-heavy-queue (+ THE BUILD STAMP: a claim does not rebuild a tree built at its commit; a red build writes no verdict): the machine\'s heavy lock serves its waiters oldest first (a ticket each in <lock>.q, held only while its waiter is alive AND polling — dead, recycled and silent tickets reaped, the head at 200 ms), the wait line names the holder uncut, ONE door (only ci.mjs names the lock); real processes, three mutant controls' },
-  { name: 'test-ci-heavy-queue-window', tier: 'fast', why: 'LAW architecture · 2.4 s (measured alone on the test machine, 2026-11-20: 2.40 s, run 9611618f3-20261120181951-box, node v24.22.1) — lane bl-ci (r406): the heavy lock\'s FRESH LOOK after the take (a waiter frozen between its head decision and its take gives a lock an older live ticket is owed back at once) and each ticket judged by the clock around its own stat (a reader frozen after its folder read reaps no live ticket «in the future») — both freezes PLACED by a copy, each with its red control; real processes, three mutant copies' },
+  { name: 'test-ci-heavy-queue-window', tier: 'fast', why: 'LAW architecture · 4.1 s (measured alone on the test machine, 2026-11-20: 4.08 s, run 966e33dbf-20261120210633-box, node v24.22.1 — its ten scenes side by side; the r406 form was 2.40 s) — lane bl-ci (r406): the heavy lock\'s FRESH LOOK after the take (a waiter frozen between its head decision and its take gives back a lock an older live ticket is owed, and at its deadline times out by name), each ticket judged by the clock around its own stat, and the lock taken in ONE step (never empty: r518) — every window PLACED by a copy and said when reached, the staleness the queue\'s own 15 s (load decides nothing), each with its red control; real processes, six mutant copies, an exit guard' },
   { name: 'test-usage-ledger-perf', tier: 'fast', why: 'in-process · 4.7 s (restated 2026-10-20, was 551 ms)' }, // inc-mtox23xw: the estimator's per-pair ledger walk is O(log n + k) + interval-memoized (it blocked the loop 10-59s); parity vs brute force + timing pins
   { name: 'test-ledger-boot-load', tier: 'fast', why: 'in-process · 4.4 s measured in a depth-1 clone, three runs 4.37–4.42 s at a box load of ~5 (ledger-boot-load, 2.369.397: a 9 876-row real-shape ledger, 16 worker loads incl. 7 planted failures, three planted copies; the failing load\'s road in test-ledger-boot-fail)' }, // THE LEDGER'S FIRST LOAD OFF THE LOOP: «loading» until the worker's cache is swapped in; rows once; a dead worker said once, never a sync fallback
   { name: 'test-ledger-boot-fail', tier: 'fast', why: 'in-process · 6.0 s measured in a depth-1 clone, three runs 5.94–6.00 s at a box load of ~5 (ledger-boot-load round 2 + its follow-up, 2.369.397 — split from test-ledger-boot-load under the 10 s: a real-shape ledger, throwing and hung first loads, transcripts walked by the real scan through the real route handler on a fake app, eight planted copies)' }, // NOTHING WAITS ON A LOAD THAT IS FAILING: bounded by the try, a person\'s Retry tries now, LOADING a state
@@ -3764,6 +3764,19 @@ export function lockWaitLine(lockPath, h, waitMs, place, free = false) {
   return `[ci:heavy] another heavy run holds ${lockPath} (${who})${around} — waiting up to ${Math.round(waitMs / 60000)} min for the machine (the suites share ports and /tmp checkouts)${place ? `; ${place}` : ''}`;
 }
 
+// THE TAKE IN ONE STEP (the coordinator's r518 point 5, 2026-11-20 — lane bl-ci; the gap is older than the queue). The lock used to be
+// CREATED (`wx`) and then WRITTEN: a head that read it in between read nothing, judged its holder dead and removed a LIVE holder's lock —
+// two heavy runs at once on the box (and each give-back opened the gap once more). Now the record is written ASIDE and put in place by a
+// hard link, which never replaces (EEXIST while held): the lock never exists empty. A filesystem without hard links keeps the old
+// create-and-write, in one call (the kernel's own two steps remain there), and the aside file never outlives the take.
+const LINK_UNSUPPORTED = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS']);
+function takeLock(lockPath, rec) {
+  const aside = `${lockPath}.${process.pid}.take`;
+  fs.writeFileSync(aside, rec);
+  try { fs.linkSync(aside, lockPath); }
+  catch (e) { if (!LINK_UNSUPPORTED.has(e.code)) throw e; fs.writeFileSync(lockPath, rec, { flag: 'wx' }); }
+  finally { try { fs.unlinkSync(aside); } catch { } }
+}
 /**
  * Take the machine's heavy-tier lock, waiting up to `waitMs` for the current
  * holder — in the FAIR QUEUE above. Returns {ok:true, release()} · {ok:false,
@@ -3786,9 +3799,7 @@ export function acquireMachineLock(lockPath, { waitMs, sha, onWait, onGiveBack, 
       let holder = null;
       if (head) {
         try {
-          const fd = fs.openSync(lockPath, 'wx');
-          fs.writeSync(fd, JSON.stringify({ pid: process.pid, sha, root: repo, cmd: LOCK_CMD, ticket: ticket ? ticket.name : null, startedAt: Date.now() }) + '\n');
-          fs.closeSync(fd);
+          takeLock(lockPath, JSON.stringify({ pid: process.pid, sha, root: repo, cmd: LOCK_CMD, ticket: ticket ? ticket.name : null, startedAt: Date.now() }) + '\n');   // ONE step: never an empty lock (r518)
           // THE FRESH LOOK AFTER THE TAKE (the coordinator's r406, 2026-11-20 — placed by lane bl-ci from test-ci-heavy-queue's order red at
           // 65ac68d30): the head above was decided on a SNAPSHOT (machineQueue: one read of the folder, each ticket judged against the
           // `now` of that call). A waiter frozen between that look and this take — longer than a ticket lives — holds a lock an older LIVE
@@ -3803,6 +3814,8 @@ export function acquireMachineLock(lockPath, { waitMs, sha, onWait, onGiveBack, 
             if (!fresh.length || fresh[0].name !== ticket.name) {
               try { const cur = readJson(lockPath); if (cur && cur.pid === process.pid) fs.unlinkSync(lockPath); } catch { }
               if (onGiveBack) { try { onGiveBack({ ours: ticket.name, head: fresh[0] ? fresh[0].name : null, oursOnDisk: fresh.some((t) => t.name === ticket.name) }); } catch { } }
+              // the deadline is judged HERE, before the next turn (r518 point 3): a waiter that gives back at its deadline times out BY NAME
+              if (Date.now() >= deadline) return { ok: false, timedOut: true, gaveBack: true, holder: readJson(lockPath) };
               sleepSync(headPollMs);
               continue;
             }
@@ -4713,9 +4726,9 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
     // looking identical to "nobody has pushed lately".
     try {
       fs.mkdirSync(d, { recursive: true });
-      fs.writeFileSync(path.join(d, `${sha}.skipped`), JSON.stringify({ sha, result: 'skipped', reason: 'machine lock held by another heavy run', holder: held.holder || null, endedAt: Date.now(), ms: Date.now() - t0 }, null, 2) + '\n');
+      fs.writeFileSync(path.join(d, `${sha}.skipped`), JSON.stringify({ sha, result: 'skipped', reason: held.gaveBack ? 'gave the machine lock back at its deadline (taken on a stale look: an older live ticket was ahead)' : 'machine lock held by another heavy run', holder: held.holder || null, endedAt: Date.now(), ms: Date.now() - t0 }, null, 2) + '\n');
     } catch { }
-    console.error(`\nHEAVY TIER SKIPPED for ${shortSha(sha)} — never got the machine lock (${lockPath}) within ${Math.round(waitMs / 60000)} min. NO VERDICT WRITTEN.`);
+    console.error(`\nHEAVY TIER SKIPPED for ${shortSha(sha)} — never got the machine lock (${lockPath}) within ${Math.round(waitMs / 60000)} min${held.gaveBack ? ' (at its deadline it took the lock on a stale look and gave it back)' : ''}. NO VERDICT WRITTEN.`);
     return 3;
   }
   if (!held.ok) console.log(`[ci:heavy] running WITHOUT the machine lock (${held.error && held.error.code}) — the marker will say so`);

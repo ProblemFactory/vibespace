@@ -253,7 +253,7 @@ const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
   ok(SRC.split(HEAD_LINE).length === 2, 'the queue check is ONE line (the mutant makes every waiter the head)');
   // the queue checks a taker TWICE since r406 (bl-ci): the head decision before the take, and the fresh look after it (a taker that is
   // not the fresh head gives the lock back) — the control cuts both, or the fresh look alone would keep the order
-  const FRESH = /( {10}fs\.closeSync\(fd\);\n)[ \t]*\/\/ THE FRESH LOOK AFTER THE TAKE[\s\S]*?\n {10}if \(ticket\) \{\n {12}const fresh = machineQueue\(lockPath, \{ staleMs \}\);\n[\s\S]*?\n {10}\}\n( {10}drop\(\);\n)/;
+  const FRESH = /( {10}takeLock\(lockPath, [^\n]*\n)[ \t]*\/\/ THE FRESH LOOK AFTER THE TAKE[\s\S]*?\n {10}if \(ticket\) \{\n {12}const fresh = machineQueue\(lockPath, \{ staleMs \}\);\n[\s\S]*?\n {10}\}\n( {10}drop\(\);\n)/;
   ok(FRESH.test(SRC) && SRC.match(new RegExp(FRESH.source, 'g')).length === 1, 'the fresh look after the take is ONE block (the mutant cuts it with the head decision)');
   const r = await lateSniper(pathToFileURL(M.write('scripts/ci.mjs', SRC.replace(HEAD_LINE, '      const head = true;\n').replace(FRESH, '$1$2'), 'noqueue')).href);
   ok(r.w3won, 'CONTROL: without the queue checks (the head decision AND the fresh look after the take) the late 10-ms poller TAKES the freed lock — §1\'s leg is the one that reds'); }
