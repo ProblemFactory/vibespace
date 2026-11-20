@@ -373,6 +373,11 @@ function feedArtifactCard(session, block) {
 }
 /** The rebuild's / history read's derivation: the harness hook over every record, folded AFTER the record (the hook
  *  has no afterRecord — the PREVIOUS record folds before the next one), its cards placed/patched silently. */
+// B-299b (the row's member after A6, 主开发 r604 / r648): a record bringing more than DERIVE_PACED ops folds them PACED — a loop turn once
+// DERIVE_TURN_MS of work ran (the live door's rule). MEASURED: past the rows' 500 cap each new row costs ~1 ms (one Task end with
+// 3 000 helper writes held the rebuild's loop 2.5–2.8 s in one fold). The conversion awaits that fold before it feeds the next record
+// (message-window convertHistoryAsync), so the rows and the cards are the unpaced fold's, in the same order and the same places.
+const DERIVE_PACED = 64, DERIVE_TURN_MS = 20;
 function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null, quoted = undefined }) {
   let rows = {};
   let prev = null;
@@ -385,15 +390,18 @@ function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null, 
     if (raw && (raw.parent_tool_use_id || raw.isSidechain)) ops = []; // a helper's own record: the helper door folds it at the Task's end
     if (helper && artifactHelperSource && raw) { try { ops = ops.concat(artifactHelperSource(who, raw, hstate, read) || []); } catch { } }
     ops = AF.quotedOps(ops, quoted); // r10: a tray answer's quote is the agent's only when it quotes the conversation's ask (no source: nobody's)
-    for (const o of ops) {
-      const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: AF.opAuthor(o) }); // the person's own page link stays theirs (lane artifacts-by-intent)
-      if (r.skipped || !r.row) continue;
-      rows = r.rows;
-      if (AF.cardWorthy(r.row)) { const b = AF.cardBlock(r.row); if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b); }
-    }
+    if (ops.length <= DERIVE_PACED) { for (const o of ops) applyOp(raw, o); return null; }
+    return (async () => { let t0 = Date.now(); for (const o of ops) { if (Date.now() - t0 >= DERIVE_TURN_MS) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); } applyOp(raw, o); } })();
   };
+  function applyOp(raw, o) {
+    const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: AF.opAuthor(o) }); // the person's own page link stays theirs (lane artifacts-by-intent)
+    if (r.skipped || !r.row) return;
+    rows = r.rows;
+    if (AF.cardWorthy(r.row)) { const b = AF.cardBlock(r.row); if (!patchArtifactCard(mm, b, { emit: false })) placeArtifactCard(mm, b); }
+  }
   const prefetch = async (records) => { if (who && artifactHelperPrefetch) { try { read = await artifactHelperPrefetch(who, records); } catch { read = null; } } };
-  return { prefetch, before: (raw) => { if (prev) fold(prev); prev = raw; }, end: () => { if (prev) fold(prev); prev = null; return rows; } };
+  // `before` answers the previous record's fold — a promise when it is paced (the conversion awaits it); `end` is awaited
+  return { prefetch, before: (raw) => { const p = prev ? fold(prev) : null; prev = raw; return p; }, end: async () => { if (prev) await fold(prev); prev = null; return rows; } };
 }
 // lane artifacts-registries: the pages / designs rows a rebuild reads from THEIR stores (src/server/artifact-registry.js
 // storeRowsOf, set by its configure) — the third merge input beside the transcript's derivation and the persisted rows
@@ -479,10 +487,11 @@ async function convertWithCards(mm, records, cards, opts = {}) {
   const due = (cards || []).filter((c) => GC.isGroupCard(c) || isProposalBlock(c) || isWritesLostCard(c) || browserCardBlock(c)).slice().sort((a, b) => cardPlaceAt(a) - cardPlaceAt(b));
   if (!due.length && !derive) return mm.convertHistoryAsync(records, rest);
   let i = 0;
-  const beforeRecord = (raw) => { if (derive) derive.before(raw); const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
+  const placeDue = (raw) => { const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
+  const beforeRecord = (raw) => { const p = derive ? derive.before(raw) : null; if (p) return p.then(() => placeDue(raw)); placeDue(raw); return null; }; // a paced fold first, the due cards after it
   if (derive) await derive.prefetch(records);
   await mm.convertHistoryAsync(records, { ...rest, beforeRecord });
-  if (derive) mm.derivedArtifacts = derive.end();
+  if (derive) mm.derivedArtifacts = await derive.end();
   while (i < due.length) placeAnyCard(mm, due[i++]);
   return mm.messages;
 }

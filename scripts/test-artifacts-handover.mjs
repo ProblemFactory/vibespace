@@ -373,6 +373,29 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const B1 = CWD + '/bounded/';
   ok(!rows(RB1)[':' + B1 + 'one.md'] && !rows(RB1)[':' + B1 + 'two.md'] && s1.left - s0.left === 2 && told.some((m) => /the history opened before 2 of 2 helper transcripts were read/.test(m)) && rows(RB2)[':' + B1 + 'one.md'] && rows(RB2)[':' + B1 + 'two.md'] && s1.read - s0.read === 3,
     'a rebuild whose prefetch wait is spent (behind a long helper read) opens without the two helpers\' rows and SAYS it; their reads go on — the next open folds both, each file read once (three reads with the long one)', { first: shape(rows(RB1)), second: shape(rows(RB2)), left: s1.left - s0.left, reads: s1.read - s0.read, told });
+
+  // (h) THE REBUILD'S FOLD, PACED (B-299b, the member after A6 — 主开发 r604 / r648): ONE Task end bringing 560 helper writes (past the
+  // 500-row cap, ~1 ms a new row there) folds in loop turns, then the parent's own Edit of one of them; the rows, the cards and every
+  // message's place are the UNPACED fold's (a copy with the pacing off); the paced fold answered the conversion a promise, the copy none
+  const DH = CWD + '/heavy/', HW = 560;
+  fs.writeFileSync(path.join(SUB, 'agent-a16.jsonl'), Array.from({ length: HW }, (_, i) => JSON.stringify(side('a16', `toolu_H16_${i}`, 'Write', { file_path: DH + `f${i}.md`, content: 'x' }, 2))).join('\n') + '\n');
+  fs.writeFileSync(path.join(SUB, 'agent-a16.meta.json'), JSON.stringify({ agentType: 'general-purpose', description: 'Heavy writer', toolUseId: 'toolu_T16' }));
+  const TH = [agentUse('toolu_T16', 'Heavy writer', 80), ends('toolu_T16', 'a16', 81), use('toolu_E16', 'Edit', { file_path: DH + 'f559.md', old_string: 'x', new_string: 'y' }, 82)];
+  const MWP = require(path.join(REPO, 'src/message-window.js')).MessageWindow.prototype, realConvert = MWP.convertHistoryAsync;
+  let thenables = 0;
+  MWP.convertHistoryAsync = function (records, opts = {}) { const br = opts && opts.beforeRecord; return realConvert.call(this, records, br ? { ...opts, beforeRecord: (r) => { const p = br(r); if (p && typeof p.then === 'function') thenables++; return p; } } : opts); };
+  const factsOf = (sx) => ({ rows: JSON.stringify(Object.values(rows(sx)).sort((x, y) => String(x.key).localeCompare(String(y.key)))), order: sx._normalizer.messages.map((m) => m.id).join(), cards: sx._normalizer.messages.filter((m) => m.noticeKind === 'artifact').length });
+  let paced = null, unpaced = null, tPaced = -1, tUnpaced = -1;
+  try {
+    const RP = mk('BH', { _normalizer: null, _artifacts: null }); thenables = 0; await N.rebuildHistory(RP, 'BH', TH); tPaced = thenables; paced = factsOf(RP);
+    const MU = M.load('src/normalizers.js', anchored(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8'), 'const DERIVE_PACED = 64,', 'const DERIVE_PACED = Infinity,', 'the derivation unpaced'), 'unpaced');
+    MU.setArtifactHelperSource(REG.helperOps, REG.helperPrefetch);
+    const RU = mk('BH', { _normalizer: null, _artifacts: null }); thenables = 0; await MU.rebuildHistory(RU, 'BH', TH); tUnpaced = thenables; unpaced = factsOf(RU);
+  } finally { MWP.convertHistoryAsync = realConvert; }
+  const heavyRows = paced ? JSON.parse(paced.rows) : [];
+  ok(tPaced >= 1 && tUnpaced === 0 && paced.rows === unpaced.rows && paced.order === unpaced.order && heavyRows.length === 500 && heavyRows.some((r) => r.path === DH + 'f559.md' && r.writes === 1 && r.edits === 1 && r.lastOp === 'edit'),
+    'a rebuild of ONE end bringing 560 helper writes folds them PACED (it answered the conversion a promise; CONTROL the unpaced copy none): every row field, every card and every message\'s place = the unpaced fold\'s — 500 rows (the cap), the parent\'s later Edit on its row',
+    { thenables: { paced: tPaced, unpaced: tUnpaced }, rows: heavyRows.length, cards: paced && paced.cards, sameRows: paced && unpaced && paced.rows === unpaced.rows, sameOrder: paced && unpaced && paced.order === unpaced.order });
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

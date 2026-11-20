@@ -341,14 +341,16 @@ class MessageWindow {
    * Callers MUST hold live records back (session._rebuildQueue) while this
    * runs and replay them after. Per-record isolation: one bad record is
    * skipped, never the whole rebuild. `beforeRecord` (2026-09-27): the
-   * browser-session cards interleave by time (normalizers.convertWithCards).
+   * browser-session cards interleave by time (normalizers.convertWithCards);
+   * a promise it answers (B-299b: the artifact derivation's PACED fold of a
+   * record bringing many rows) is awaited before the record is fed.
    */
   async convertHistoryAsync(records, { budgetMs = 25, onSlice, beforeRecord } = {}) {
     let sliceStart = Date.now(), done = 0;
     const wasLive = this._live;
     this._live = false; // a history conversion says no op (a move included)
     try { for (const record of records || []) {
-      if (beforeRecord) { try { beforeRecord(record); } catch { } }
+      if (beforeRecord) { try { const p = beforeRecord(record); if (p && typeof p.then === 'function') await p; } catch { } }
       try { this._feedRecord(record, false); }
       catch (e) { console.error(`[${this._logTag}] record skipped during history rebuild:`, e.message); }
       done++;
