@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.413 — 2026-11-19
+## 2.369.413 — 2026-11-20
 
 ### Added
 - When VibeSpace cannot read its record of messages waiting behind running turns, For you says so, with Set it aside to rename the file and write it again.

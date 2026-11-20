@@ -4,7 +4,7 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
-## 2.369.413 — 2026-11-19
+## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)
 - S1: a watch-limit item still open after a restart is ADOPTED (the store's openItems() by its key): the limit taken as met from then, its filing time the item's own createdAt, the probe armed, the item lifted by the same rule — never a second item beside it, never one left open for good. At configure() when the store answers, else at the next turns (tries 0 / 1 / 6 / 36 s after it, unref'd): its fresh reader found the hub's boot configures the door (memory-pressure-watch) BEFORE the store exists — its getter throws until then — so the first form adopted nothing in production.
