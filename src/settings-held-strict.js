@@ -36,8 +36,9 @@ const NO_WRITE_WHILE_HELD = Object.freeze({
   'agents.vibespaceIntegration': 'the hooks are neither registered nor stripped (src/server/agent-tool-generators.js); replayed at the lift',
   'cli-config': "every harness row written into a CLI's own config (apply.kind cli-config — claude.transcriptRetentionDays …): syncCliConfig writes nothing (src/server/harness-config-sync.js); the lift's settings change runs it",
 });
-// the OWNER'S rows: refused BY NAME while held (settings_unread) — what they gate does not start (cut 4, R3)
-const OWNER_ROW = /^spend\./;
+// the OWNER'S rows: refused BY NAME while held (settings_unread) — what they gate does not start (cut 4, R3): the spending rows and
+// the judge's daily dollar cap (persistence.js SPEND_OWNER_ROWS)
+const OWNER_ROW = /^(?:spend\.|plugin\.llm\.dailyBudgetUsd$)/;
 // rows the net catches that are of none of the four kinds
 const NOT_OF_THESE_KINDS = Object.freeze({
   'layout.shakeBypassSnap': "a window's drag (no money, ask, vendor or file)",
@@ -49,17 +50,24 @@ const NOT_OF_THESE_KINDS = Object.freeze({
   'channels.attachmentBudgetMB': 'a disk bound for attachments',
   'pool.reserveFloorPct': "the share of a pool kept free (its default is the shipped floor; no account is billed by it)",
 });
+// rows of the same no-kind, BY THEIR SHAPE (a row per connected channel vendor, derived from its table)
+const NOT_OF_THESE_KINDS_SHAPES = Object.freeze([
+  [/^channels\.budget[A-Z][A-Za-z]*PerMin$/, "a connected channel's own API rate per minute (its vendor's safe default; no money billed, nothing read the person did not connect)"],
+]);
 const NET = /spend|budget|overage|pool|bypass|permission|allow|usage(Reads|Polling)|quota|hook|integration|ship|graduate|policyJudge|retention/i;
 function strictValues() { const o = {}; for (const [k, r] of Object.entries(STRICT_WHILE_HELD)) o[k] = r.strict; return o; }
 /** the census's verdict over a list of rows [{ key, cliConfig }] → { caught, unnamed } (a caught row with no strict side, by key) */
 function census(rows) {
   const caught = [], unnamed = [];
-  for (const r of rows || []) {
-    if (!r || !NET.test(r.key)) continue;
-    caught.push(r.key);
-    const named = STRICT_WHILE_HELD[r.key] || NO_WRITE_WHILE_HELD[r.key] || (r.cliConfig && NO_WRITE_WHILE_HELD['cli-config']) || OWNER_ROW.test(r.key) || NOT_OF_THESE_KINDS[r.key];
-    if (!named) unnamed.push(r.key);
+  // a key listed twice (the schema registers a harness row under its own path too): one row, a cli-config row if any listing says so
+  const byKey = new Map();
+  for (const r of rows || []) if (r && r.key) byKey.set(r.key, (byKey.get(r.key) || false) || !!r.cliConfig);
+  for (const [key, cliConfig] of byKey) {
+    if (!NET.test(key)) continue;
+    caught.push(key);
+    const named = STRICT_WHILE_HELD[key] || NO_WRITE_WHILE_HELD[key] || (cliConfig && NO_WRITE_WHILE_HELD['cli-config']) || OWNER_ROW.test(key) || NOT_OF_THESE_KINDS[key] || NOT_OF_THESE_KINDS_SHAPES.some(([re]) => re.test(key));
+    if (!named) unnamed.push(key);
   }
   return { caught, unnamed };
 }
-module.exports = { STRICT_WHILE_HELD, NO_WRITE_WHILE_HELD, NOT_OF_THESE_KINDS, OWNER_ROW, NET, strictValues, census };
+module.exports = { STRICT_WHILE_HELD, NO_WRITE_WHILE_HELD, NOT_OF_THESE_KINDS, NOT_OF_THESE_KINDS_SHAPES, OWNER_ROW, NET, strictValues, census };

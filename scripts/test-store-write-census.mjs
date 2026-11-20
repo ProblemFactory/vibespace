@@ -2520,7 +2520,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
         fs.existsSync = function (q, ...a) { if (String(q) === d) return false; return ex.call(this, q, ...a); };
         fs.mkdirSync = function (q, ...a) { if (String(q) === d) throw Object.assign(new Error('ESTALE: a stand-in stale data mount'), { code: 'ESTALE' }); return mk.call(this, q, ...a); };
         let g, w;
-        try { g = await call('get', '/api/settings'); w = await call('post', '/api/settings', { 'spend.unattendedPerIdentityHour': 999 }); }
+        try { g = await call('get', '/api/settings'); w = await call('post', '/api/settings', { 'appearance.theme': 'a save while held' }); }
         finally { fs.existsSync = ex; fs.mkdirSync = mk; }
         const h = P.router.settingsHeld();
         return { g, w, guard: h ? { kind: h.kind, code: h.code } : null, bytesKept: fs.readFileSync(F, 'utf8') === SETI };
