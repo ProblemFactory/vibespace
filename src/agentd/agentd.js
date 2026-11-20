@@ -1096,6 +1096,12 @@ let upgradeLanded = false;
 // that STAYS (the hub ends the link at upgrade-done: without a new dial a dialed machine would hold its lock with no link, and its
 // supervisor would see a live process — nothing to restart)
 let redialAfterStay = null;
+// B-147f (round wd1ue59pc): a stay that listened again while its dial link was still open — the hub's close of THAT link is the
+// upgrade's end, never a failed dial (no failure streak written, no failed-dial line): ONE mark, consumed by the next close
+let closeAfterStay = false;
+// …and the stay's failure lines go to the ERROR STREAM too: on a full file table its log file cannot be appended, so the
+// supervisor's journal carries «it could not stay … exit 75» beside the status
+const handOverLog = (line) => { log(line); try { process.stderr.write(`vibespace-device: ${line}\n`); } catch { } };
 function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { dialed = false } = {}) {
   // the version names a DIRECTORY under the root: a version-shaped string or nothing (never a path out of it)
   if (typeof version !== 'string' || !SIG.VERSION_RE.test(version)) {
@@ -1162,12 +1168,12 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
             // a missing program or a refused fork; on a FULL FILE TABLE the lock cannot be opened either — exit 75, the supervisor's
             // restart. ONE attempt = listenWithRetry with no retry window (forMs 0). Once it listens: the upgrade's mark cleared and its hub
             // DIALED again (MUST 1)
-            if (!acquireSingleton()) throw new Error('the singleton lock is another agent\'s, or it could not be opened');
+            if (!acquireSingleton()) { handOverLog('upgrade hand-over: it could not stay (the singleton lock is another agent\'s, or it could not be opened) — exit 75'); exitDaemon(75); return; }
             server.removeAllListeners('error');
             let stayUp = false;
             const stayFatal = (e) => {
               if (stayUp) { serverFatal(e); return; }   // a listening server's error: the boot's own fatal road, as after its listen
-              log(`upgrade hand-over: it could not stay — ${SOCK} did not listen again (${(e && (e.code || e.message)) || e}) — exit 75`);
+              handOverLog(`upgrade hand-over: it could not stay — ${SOCK} did not listen again (${(e && (e.code || e.message)) || e}) — exit 75`);
               exitDaemon(75);
             };
             const stayListening = () => {
@@ -1175,6 +1181,7 @@ function beginUpgrade(mux, { version, size, sig = null, localProof = null }, { d
               try { fs.chmodSync(SOCK, 0o600); } catch { }
               upgradeLanded = false;
               const redial = redialAfterStay; redialAfterStay = null;
+              if (!redial) closeAfterStay = true;   // the dial link is still open (or there is none): its close is the upgrade's end
               log(`upgrade hand-over: the successor did not start — this daemon stays, listening again on ${SOCK}${redial ? '; its hub dialed again' : ''}`);
               if (redial) redial();
             };
@@ -3209,6 +3216,7 @@ const DIAL_FILE = path.join(STATE, 'dial.json');
       // C3: a self-upgrade's re-exec ends the link on purpose — no failure recorded, no retry (this process exits;
       // the new daemon dials with a clean streak).
       if (upgradeLanded) { log('dial-out ended — self-upgrade re-exec'); redialAfterStay = () => { attempts = 0; dial(); }; return; }   // B-147f: a hand-over that stays dials again (above)
+      if (closeAfterStay) { closeAfterStay = false; log('dial-out ended after the upgrade\'s stay — dialing again'); attempts = 0; dial(); return; }   // B-147f (round wd1ue59pc): no failed dial written
       const delay = [1000, 2000, 5000, 15000, 30000][Math.min(4, attempts++)];
       const now = Date.now();
       const f = DF.dialFailureOf(lastErr, { up, upMs: up ? now - upAt : 0 });

@@ -9,6 +9,8 @@
 //    upgrade-done BEFORE the stay (the dial the upgrade ended is re-armed) or AFTER it (the close takes the dial's own road) — and
 //    its next drop is dialed again too (the upgrade's mark is cleared). RED the stay without its re-dial (the shape before this
 //    cure): the dial stays dead; RED the mark left set: the next drop, and a close after the stay, are never dialed again.
+//    A close that comes AFTER the stay is the upgrade's end, never a failed dial (the next dial reports none); RED the mark taken
+//    away: the next dial reports one.
 //  ② a stay whose socket cannot listen again (its folder made read-only: the old socket file cannot go) EXITS 75 BY NAME and its
 //    own lock goes; RED the boot's listen handler left on: the boot's fatal road, exit 1.
 //  ③ the exit removes the lock ONLY while it names this process: a lock another agent now holds survives the exit; RED the old
@@ -58,12 +60,17 @@ const muts = {
   noRedial: bsrc.replace(/(redialAfterStay\d*) = \(\) => \{\s*\w+ = 0;\s*\w+\(\);\s*\};/, '/* the stay before this cure: no re-dial */'),
   keepsLanded: bsrc.replace(/(\n\s*)upgradeLanded\d* = false;/, '$1/* the upgrade\'s mark left set */'),
   bootHandler: bsrc.replace(/(\w+)\.removeAllListeners\("error"\);(\s*let \w+ = false;)/, '$2'),
+  noCloseMark: bsrc.replace(/if \(!\w+\)\s*closeAfterStay\d* = true;/, '/* no mark for the close after the stay */'),
   oldLockExit: bsrc.replace(/if \((\w+)\.readFileSync\((\w+), "utf-8"\)\.trim\(\) === String\(process\.pid\)\)\s*(\w+)\.unlinkSync\(\2\);/, '$3.unlinkSync($2);'),
 };
-ok(!!realVersion && Object.values(muts).every((m) => m !== bsrc), `(the base: the built bundle ${realVersion}, its release keys emptied; four RED copies, each with one edit applied: ${Object.entries(muts).map(([k, m]) => `${k} ${m !== bsrc ? 'applied' : 'NOT applied'}`).join(', ')})`);
-// the node they run from: a link (or a copy) that goes after their boot
+ok(!!realVersion && Object.values(muts).every((m) => m !== bsrc), `(the base: the built bundle ${realVersion}, its release keys emptied; five RED copies, each with one edit applied: ${Object.entries(muts).map(([k, m]) => `${k} ${m !== bsrc ? 'applied' : 'NOT applied'}`).join(', ')})`);
+// the node they run from: a HARD LINK that goes after their boot. Never a copy (~100 MB a run), and a symlink cannot stand in: a
+// daemon's process.execPath is the RESOLVED binary (/proc/self/exe), so removing a symlink leaves its successor startable. A
+// scratch on another file system than node (no hard link there) refuses the stay's legs BY NAME, red
 const NODE = path.join(T, 'node-gone');
-try { fs.linkSync(process.execPath, NODE); } catch { fs.copyFileSync(process.execPath, NODE); fs.chmodSync(NODE, 0o755); }
+let nodeLinked = null; try { fs.linkSync(process.execPath, NODE); nodeLinked = true; } catch (e) { nodeLinked = (e && e.code) || String(e); }
+if (nodeLinked !== true) { ok(false, `NOT RUN — the node binary cannot be hard-linked into the scratch (${nodeLinked}: ${process.execPath} → ${T}); a symlink cannot stand in (process.execPath is the resolved binary) and a copy is ~100 MB a run`); console.log(`\n${fail} FAILED (${pass} passed)`); process.exit(1); }
+console.log(`  (the node the daemons run from: a hard link of ${process.execPath}, removed after their boot)`);
 const HOMEN = path.join(T, 'home'); fs.mkdirSync(HOMEN, { recursive: true });   // never the person's HOME: its desktop apps, its keepers
 const XB = path.join(T, 'x'); fs.mkdirSync(XB, { recursive: true, mode: 0o700 });   // ②'s runtime folders, this suite's own
 const tok = (p) => [p, '_'].join('') + crypto.randomBytes(12).toString('hex');   // built at run time (no token-shaped literal)
@@ -97,6 +104,7 @@ hs.on('upgrade', (req, socket, head) => wss.handleUpgrade(req, socket, head, (ws
   ws.on('close', () => Ls.close.forEach((f) => f()));
   ws.on('error', () => Ls.error.forEach((f) => f()));
   const stream = { write: (d) => { try { ws.send(d); return true; } catch { return false; } }, on: (ev, fn) => { Ls[ev]?.push(fn); }, destroy: () => { try { ws.close(); } catch { } } };
+  stream.attempt = req.headers['x-vibespace-dial-attempt'] || null; stream.last = req.headers['x-vibespace-dial-last'] || null;   // what the device reports of its failed dials
   if (!dials.has(dev)) dials.set(dev, []);
   dials.get(dev).push(stream);
 }));
@@ -117,16 +125,17 @@ const sockLink = async (d) => { const p = await sockOf(d); if (!p) return null; 
 const NEXT = '9.9.7', next = Buffer.from(`/* the next release: never started (the node it would run on is gone) */\n/* module.exports = { VERSION: "${NEXT}" }; */\n`);
 const push = async (L) => { L.mux.control({ op: 'upgrade', version: NEXT, size: next.length, sig: SIG.sign(K.privateKeyPem, next, NEXT, C) }); L.mux.data(1, next); return L.wait((m) => m.op === 'upgrade-done' || m.op === 'upgrade-failed', 15000); };
 const stayed = (d) => /upgrade hand-over: the successor did not start — this daemon stays, listening again on /.test(d.log());
-const BACKOFF_MS = 1000, MARGIN_MS = 1500;   // the dial's first backoff (agentd.js: [1000, 2000, …]) and the bound past it
+const BACKOFF_MS = 1000, MARGIN_MS = 1500;
+const readOnly = [];   // ②'s folders made read-only — restored in the finally   // the dial's first backoff (agentd.js: [1000, 2000, …]) and the bound past it
 
 try {
   console.log('the stay, run for real: a dialed device dials again (both orders); a stay that cannot listen exits 75; the exit keeps another\'s lock');
   // the dialed ones: D1 / M1 / M4 — the hub ends the link at upgrade-done (before the stay); D5 / M5 — the hub ends it after
   const D1 = install('stay-dial', bsrc), M1 = install('stay-dial-red', muts.noRedial), M4 = install('stay-dial-mark-red', muts.keepsLanded);
-  const D5 = install('stay-dial-late', bsrc), M5 = install('stay-dial-late-red', muts.keepsLanded);
+  const D5 = install('stay-dial-late', bsrc), M5 = install('stay-dial-late-red', muts.keepsLanded), M6 = install('stay-dial-late-mark-red', muts.noCloseMark);
   const D2 = install('stay-nolisten', bsrc, { longRoot: true }), M2 = install('stay-nolisten-red', muts.bootHandler, { longRoot: true });
   const D3 = install('lock-kept', bsrc), M3 = install('lock-kept-red', muts.oldLockExit);
-  const DIALED = [D1, M1, M4, D5, M5], SOCKED = [D2, M2, D3, M3];
+  const DIALED = [D1, M1, M4, D5, M5, M6], SOCKED = [D2, M2, D3, M3];
   for (const d of DIALED) dialTo(d);
   const xdg = (d) => { const x = path.join(XB, d === D2 ? 'g' : 'r'); fs.mkdirSync(x, { recursive: true, mode: 0o700 }); return x; };
   for (const d of DIALED) start(d);
@@ -139,17 +148,17 @@ try {
     ...SOCKED.map(async (d) => { sl[d.name] = await sockLink(d); }),
   ]);
   const up = !!first && DIALED.every((d) => dl[d.name] && dl[d.name].ack.op === 'hello-ack') && SOCKED.every((d) => sl[d.name] && sl[d.name].ack.op === 'hello-ack');
-  ok(up, `(nine real daemons up: five dialed the stand-in hub, four answer hello on their sockets — ${realVersion})`, { dials: [...dials].map(([k, v]) => `${k}:${v.length}`), socks: Object.fromEntries(Object.entries(sl).map(([k, v]) => [k, v ? v.ack.op : null])) });
+  ok(up, `(ten real daemons up: six dialed the stand-in hub, four answer hello on their sockets — ${realVersion})`, { dials: [...dials].map(([k, v]) => `${k}:${v.length}`), socks: Object.fromEntries(Object.entries(sl).map(([k, v]) => [k, v ? v.ack.op : null])) });
   fs.unlinkSync(NODE);   // the node they run from is gone: a successor started from it cannot start
   // ② first: the folder holding each socket made read-only (ONLY a folder this suite made), so the old socket file cannot go
   const own2 = {};
-  for (const d of [D2, M2]) { const L = sl[d.name]; own2[d.name] = !!L && L.p.startsWith(XB + path.sep); if (own2[d.name]) fs.chmodSync(path.dirname(L.p), 0o500); }
+  for (const d of [D2, M2]) { const L = sl[d.name]; own2[d.name] = !!L && L.p.startsWith(XB + path.sep); if (own2[d.name]) { readOnly.push(path.dirname(L.p)); fs.chmodSync(path.dirname(L.p), 0o500); } }
   ok(own2[D2.name] && own2[M2.name], `(② the two sockets took the runtime folder's rung in a folder this suite made: ${[D2, M2].map((d) => sl[d.name] && sl[d.name].p).join(', ')})`);
   // EVERY upgrade at once: over each dial, and over each socket of ②. D1 / M1 / M4: the hub ends the link at upgrade-done (as the
   // hub does) — BEFORE the stay; ②'s links end at upgrade-done (the hand-over's close waits for open ones)
   const r = {};
   await Promise.all([
-    ...DIALED.map(async (d) => { const m = dl[d.name] ? await push(dl[d.name].L) : { op: 'NO LINK' }; r[d.name] = m.op; if (![D5, M5].includes(d)) { try { dials.get(d.name)[0].destroy(); } catch { } } }),
+    ...DIALED.map(async (d) => { const m = dl[d.name] ? await push(dl[d.name].L) : { op: 'NO LINK' }; r[d.name] = m.op; if (![D5, M5, M6].includes(d)) { try { dials.get(d.name)[0].destroy(); } catch { } } }),
     ...[D2, M2].map(async (d) => { const L = sl[d.name]; if (!own2[d.name]) { r[d.name] = 'NOT OWN'; return; } r[d.name] = (await push(L.L)).op; try { L.s.destroy(); } catch { } }),
   ]);
   // ③ at once too: each lock rewritten to name another process, then the agent told to end
@@ -172,6 +181,10 @@ try {
       road.m5stayed = await until(() => stayed(M5), 8000); try { dials.get(M5.name)[0].destroy(); } catch { }
       await until(() => nDials(M5) >= 2, BACKOFF_MS + MARGIN_MS);
     })(),
+    (async () => {   // M6: the mark taken away — its late close is written as a failed dial (the next dial reports one)
+      road.m6stayed = await until(() => stayed(M6), 8000); try { dials.get(M6.name)[0].destroy(); } catch { }
+      road.m6late = await until(() => nDials(M6) >= 2, BACKOFF_MS + MARGIN_MS);
+    })(),
     (async () => {   // M1: its stay said, then the green's at-once re-dial plus the margin
       road.m1stayed = await until(() => stayed(M1), 8000);
       await until(() => nDials(M1) >= 2, MARGIN_MS);
@@ -183,13 +196,15 @@ try {
     })(),
     until(() => D2.exited && M2.exited && D3.exited && M3.exited, 10000),
   ]);
-  for (const d of [D2, M2]) { const L = sl[d.name]; if (L && own2[d.name]) { try { fs.chmodSync(path.dirname(L.p), 0o700); } catch { } } }
   ok(r[D1.name] === 'upgrade-done' && stayed(D1) && !!road.d1ack && road.d1ack.op === 'hello-ack' && road.d1ack.daemonVersion === realVersion && !!road.d1back && road.d1back.ack.op === 'hello-ack' && D1.exited === null && D1.lockPid() === String(D1.child.pid) && /its hub dialed again/.test(D1.log()),
     `① a DIALED device whose successor cannot start STAYS: its lock (pid ${D1.lockPid()}), its socket answers hello again, and its hub is DIALED AGAIN at once — the second dial's hello says the old version ${road.d1ack && road.d1ack.daemonVersion}`,
     { upgrade: r[D1.name], log: D1.log().split('\n').filter((l) => /hand-over|dial|successor/.test(l)).slice(-8) });
   ok(!!road.d1third, `① …and when the hub drops that link, the device dials a THIRD time on the dial's own road (dials ${nDials(D1)}): the upgrade's mark is cleared`);
-  ok(r[D5.name] === 'upgrade-done' && !!road.d5stayed && !!road.d5late && D5.exited === null && !/its hub dialed again/.test(D5.log()),
-    `① the OTHER order — the hub ends the link after the stay listened again: the close takes the dial's road and the hub is dialed again (dials ${nDials(D5)})`);
+  const d5two = (dials.get(D5.name) || [])[1] || {}, m6two = (dials.get(M6.name) || [])[1] || {};
+  ok(r[D5.name] === 'upgrade-done' && !!road.d5stayed && !!road.d5late && D5.exited === null && !/its hub dialed again/.test(D5.log()) && d5two.attempt === '0' && !d5two.last && /dial-out ended after the upgrade's stay — dialing again/.test(D5.log()),
+    `① the OTHER order — the hub ends the link after the stay listened again: that close is the upgrade's end, never a failed dial — the hub is dialed again at once and the new dial reports no failure (attempt ${d5two.attempt}, last ${d5two.last || 'none'})`);
+  ok(r[M6.name] === 'upgrade-done' && !!road.m6stayed && !!road.m6late && m6two.attempt === '1',
+    `RED ① the close after the stay without its mark: written as a failed dial — the next dial reports one (attempt ${m6two.attempt}, last ${m6two.last || 'none'})`);
   ok(r[M1.name] === 'upgrade-done' && !!road.m1stayed && nDials(M1) === 1 && M1.exited === null,
     `RED ① the stay WITHOUT its re-dial (the shape before this cure): it stays and listens, but its hub is NEVER dialed again (dials ${nDials(M1)}) — a live process, its lock held, no link`);
   ok(!!road.m4two && nDials(M4) === 2 && !!road.m5stayed && nDials(M5) === 1,
@@ -204,6 +219,7 @@ try {
 } catch (e) {
   fail++; console.error('  ✗ threw: ' + ((e && e.stack) || e));
 } finally {
+  for (const x of readOnly) { try { fs.chmodSync(x, 0o700); } catch { } }   // ②'s folders writable again on EVERY road (a scene that threw included)
   try { hs.close(); } catch { }
   endKids('SIGTERM');
   await until(() => kids.every((c) => c.exitCode !== null || c.signalCode !== null), 5000);

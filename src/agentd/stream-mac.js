@@ -356,7 +356,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       if (stopped) return;
       stopped = true;
       if (lock) { clearTimeout(lock.timer); lock = null; }
-      if (child && child.exitCode == null) { try { child.kill(); } catch { /* gone */ } }
+      if (child && child.exitCode == null && child.pid > 0) { try { child.kill(); } catch { /* gone */ } }   // B-147f: a real pid only (a start that failed has none)
       log(`[stream] mac screen source ended: ${code}${why ? ` (${why})` : ''}`);
       try { onEnd && onEnd(code); } catch { /* the host's */ }
     }

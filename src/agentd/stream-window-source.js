@@ -153,7 +153,7 @@ function createWindowSource({ platform = process.platform, spawn, execFile, env 
     let cap = null, enc = null, encSize = null, encClock = [], encAus = 0, encAt = 0;
     const procs = new Set();
     const tail = [];
-    const kill = (c) => { if (c && c.exitCode == null && !c.killed) { try { c.kill(); } catch { /* gone */ } } };
+    const kill = (c) => { if (c && c.exitCode == null && !c.killed && c.pid > 0) { try { c.kill(); } catch { /* gone */ } } };   // B-147f: a real pid only (a start that failed has none)
     function finish(code, why) {
       if (stopped) return;
       stopped = true;
