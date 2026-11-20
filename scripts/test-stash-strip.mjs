@@ -1991,13 +1991,23 @@ console.log('⑥ wiring pins');
   const cd = read('src/server/conversation-deliver.js'), jb = read('src/jobs.js');
   // the jobs stash BY SITE (the stores chain's hosted red, 主开发 05:26Z — never loosened): each of the four says once in its own method —
   // the write (_stashNotif), the drain (drainNotifs), the restore (restoreNotifs), the merge at the lift (_notifsRetry: each
-  // waiting conversation's strip follows a read again of job-notifications.json) and the records' read again (_unreadRetry: the notices
-  // that waited for jobs.json / the archive show — 主开发 05:36Z) — and the file says nowhere else
+  // waiting conversation's strip follows a read again of job-notifications.json), the records' read again (_unreadRetry: the notices
+  // that waited for jobs.json / the archive show — 主开发 05:36Z) and the boot's announce (announceOwedWakes — B-6721, met at line 148's
+  // side pick: the boot's FIRST read of job-notifications.json says nothing to any strip; a conversation it left OWED A WAKE is said
+  // once there, so a live restored session's strip shows the notices the boot read, and the stash view arms that conversation's wake
+  // chain) — and the file says nowhere else
   const SAY = /this\.d\.onStash\?\.\(cid\)/g;
-  const SAYS = { write: '  _stashNotif(cid, job, ev, reason, {', drain: '  drainNotifs(cid, only = null) {', restore: '  restoreNotifs(cid, items) {', merge: '  async _notifsRetry() {', records: '  async _unreadRetry(which) {' };
-  const sayIn = Object.fromEntries(Object.entries(SAYS).map(([k, head]) => { const i = jb.indexOf(head), j = i < 0 ? -1 : jb.indexOf('\n  }\n', i); return [k, i < 0 || j < 0 ? -1 : (jb.slice(i, j).match(SAY) || []).length]; }));
-  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && Object.values(sayIn).every((n) => n === 1) && (jb.match(SAY) || []).length === 5 && /peekNotifs\(cid\)/.test(jb),
-    'the ladder\'s stash and the jobs stash each say every write, every drain and every restore — the jobs stash by site: the write, the drain, the restore, the merge at the lift and the records\' read again, once each, five in all', { sayIn, all: (jb.match(SAY) || []).length });
+  const SAYS = { write: '  _stashNotif(cid, job, ev, reason, {', drain: '  drainNotifs(cid, only = null) {', restore: '  restoreNotifs(cid, items) {', merge: '  async _notifsRetry() {', records: '  async _unreadRetry(which) {', announce: '  announceOwedWakes() {' };
+  const ONE_LINE = new Set(['announce']);   // a method written on its own line: its site is that line
+  const sayIn = Object.fromEntries(Object.entries(SAYS).map(([k, head]) => { const i = jb.indexOf(head), j = i < 0 ? -1 : jb.indexOf(ONE_LINE.has(k) ? '\n' : '\n  }\n', i); return [k, i < 0 || j < 0 ? -1 : (jb.slice(i, j).match(SAY) || []).length]; }));
+  ok((cd.match(/stashChanged\(cid\)/g) || []).length >= 3 && /stashEntries,/.test(cd) && Object.values(sayIn).every((n) => n === 1) && (jb.match(SAY) || []).length === 6 && /peekNotifs\(cid\)/.test(jb),
+    'the ladder\'s stash and the jobs stash each say every write, every drain and every restore — the jobs stash by site: the write, the drain, the restore, the merge at the lift, the records\' read again and the boot\'s announce of the conversations owed a wake (their strips show what the boot read), once each, six in all', { sayIn, all: (jb.match(SAY) || []).length });
+  {
+    // CONTROL (line 148's side cure): the by-site count refuses a say the table does not name — a seventh one in any method is red
+    const sitesOk = (src) => Object.entries(SAYS).every(([k, head]) => { const i = src.indexOf(head), j = i < 0 ? -1 : src.indexOf(ONE_LINE.has(k) ? '\n' : '\n  }\n', i); return i >= 0 && j >= 0 && (src.slice(i, j).match(SAY) || []).length === 1; }) && (src.match(SAY) || []).length === 6;
+    const seventh = anchored(jb, '  noteHandedOver(cid, text) { ', '  noteHandedOver(cid, text) { try { this.d.onStash?.(cid); } catch { } ', 'line 148: a seventh say');
+    ok(sitesOk(jb) && !sitesOk(seventh), 'CONTROL: a seventh jobs-stash say the table does not name (here in noteHandedOver) is red — the pin names every site');
+  }
   const sh = read('src/server/stash-handover.js');
   ok(/claimStash, claimedCount, restoreStash, registerFrameRestorer, restoreFrame, releasedAtBoot, flush,/.test(cd) && /claimNotifs\(cid, entries, id = null\) \{/.test(jb) && /releases\.push\(d\.claimStash\(cid, shownStashed, id\)\)/.test(sh) && /releases\.push\(d\.claimRetry\(cid, shownParked, id\)\)/.test(sh) && /releases\.push\(jm\.claimNotifs\(cid, jobs, id\)\)/.test(sh),
     'verify: every store exposes the claim door and the hand-over claims through each, BY ID (released in its finally) — the ladder\'s stash, its retry park (lane notify-retry) and the jobs stash');
