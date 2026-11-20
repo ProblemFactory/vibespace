@@ -969,16 +969,24 @@ class HostManager {
         try { this.onDeviceAlert?.('new-address', { hostKey: h.id, machine: h.name || h.id, deviceId, address: from.slice(0, 64), addressKey: key, at, first: !d.firstConnectAt }); } catch (e) { console.warn('[hosts] new-address alert not filed:', e.message); }
       }
       d.lastAccept = { at, ...hint() };
-      d.lastConnectAt = at; if (!d.firstConnectAt) d.firstConnectAt = at;
+      // THE LAW (主开发 2026-11-20, list line 144's cure): between a connect and a refusal of the same machine, the row reads THE ORDER
+      // THE HUB RECORDED THEM, never the luck of the clock. A refusal recorded after a connect reads after it; a connect recorded
+      // after a refusal reads after it — a tie of the clock and a clock that stepped back, both directions. So a connect's stamp is
+      // never before a refusal stamp it was recorded after (a tie reads connected: the row's compare is strict), and a refusal's is
+      // never at or before the connect it was recorded after (below, and noteDeviceKey's dial road)
+      const kr0 = h.deviceKeyRefused && typeof h.deviceKeyRefused === 'object' && (!h.deviceKeyRefused.road || h.deviceKeyRefused.road === 'dial') ? h.deviceKeyRefused : null;
+      // …and above the connect before it (the reader's M1): a connect's stamp is the link's identity (the keep box's liveSince /
+      // keepSince), so two connects never share one, even while a refusal's stamp stands above a clock that stepped back
+      d.lastConnectAt = Math.max(at, Number(d.lastAuthFail && d.lastAuthFail.at) || 0, Number(d.lastGreetingRefused && d.lastGreetingRefused.at) || 0, Number(kr0 && kr0.at) || 0, d.lastConnectAt ? Number(d.lastConnectAt) + 1 : 0); if (!d.firstConnectAt) d.firstConnectAt = at;
       urgent = true;
     } else if (event === 'disconnected') {
       d.lastDisconnectAt = at;
     } else if (event === 'authFail') {
       urgent = !(d.lastAuthFail && Number(d.lastAuthFail.at) > (Number(d.lastConnectAt) || 0));
-      d.lastAuthFail = { at };
+      d.lastAuthFail = { at: Math.max(at, (Number(d.lastConnectAt) || 0) + 1) };   // THE LAW above: recorded after the connect, it reads after it
     } else if (event === 'greetingRefused') { // unit 4's cure: the row says «greeting refused» (its door: update / reinstall the agent)
       urgent = !(d.lastGreetingRefused && Number(d.lastGreetingRefused.at) > (Number(d.lastConnectAt) || 0));
-      d.lastGreetingRefused = { at };
+      d.lastGreetingRefused = { at: Math.max(at, (Number(d.lastConnectAt) || 0) + 1) };   // THE LAW above: recorded after the connect, it reads after it
     } else if (event === 'probed') {
       d.lastProbeAt = at;
     } else if (event === 'duplicate') {

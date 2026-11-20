@@ -442,7 +442,10 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
   ok(errs[1] && errs[1].stage === 'connect' && /update its agent, or rerun its install command/.test(String(errs[1].message)), 'the fast refusal has the first one\'s shape: its door named, stage connect', errs[1] && { m: errs[1].message, stage: errs[1].stage });
   const DF = require('../src/dial-facts.js');
   const row = () => H.list().find((h) => h.deviceId === 'devG');
-  ok(DF.dialRowState(row()).state === 'greeting-refused', `THE ROW reads greeting-refused while the device stays dialed in (${DF.dialRowState(row()).state}) — its words name the door`);
+  // list line 144's cure: the leg prints the two stamps it read (the accept and the refusals can share one millisecond here —
+  // the row reads the order the hub recorded them, never the luck of the clock)
+  { const r0 = row(), st0 = DF.dialRowState(r0).state, dd = (r0 && r0.dial) || {};
+    ok(st0 === 'greeting-refused', `THE ROW reads greeting-refused while the device stays dialed in (${st0}; the connect stamped ${dd.lastConnectAt}, the greeting refusal ${dd.lastGreetingRefused && dd.lastGreetingRefused.at}) — its words name the door`); }
   const realNow = Date.now;
   Date.now = () => realNow() + DP.AUTH_FAIL_REHELLO_MS + 1;
   try {
@@ -821,6 +824,55 @@ console.log('— unit 4\'s cure: a refused GREETING on a dialed stream is rememb
 // WIRING: server.js runs the hello on every dial-in through deviceForDial (where the refused stream is remembered)
 ok(/deviceForDial\(deviceId\)\.catch\(\(\) => \{ \}\); \/\/ the mux hello NOW/.test(fs.readFileSync(path.join(REPO, 'server.js'), 'utf8')), 'WIRING: server.js hands every dial-in to deviceForDial (the refused-stream memo lives there)');
 ok(/authFailedStreams\.set\(deviceId, \{ stream: curStream, at: Date\.now\(\) \}\)/.test(fs.readFileSync(path.join(REPO, 'src/server/dial-pairing.js'), 'utf8')), 'WIRING: deviceForDial remembers the refused stream');
+
+console.log('— THE ORDER THE HUB RECORDED (list line 144\'s cure): between a connect and a refusal of the same machine the row reads the order recorded, never the luck of the clock — a tie and a clock that stepped back, both directions, for each kind of refusal —');
+{
+  const DFo = require('../src/dial-facts.js');
+  const HSRC = fs.readFileSync(path.join(REPO, 'src/hosts.js'), 'utf8');
+  // THE PARENT'S CODE (7a260a506), in a copy: noteDial's connect and its two refusals stamped by the clock alone (noteDeviceKey's
+  // dial road already stamped `max(now, lastConnectAt + 1)` there — so its key kind is red only in (d), the other direction)
+  let rel = anchored(HSRC, "      d.lastConnectAt = Math.max(at, Number(d.lastAuthFail && d.lastAuthFail.at) || 0, Number(d.lastGreetingRefused && d.lastGreetingRefused.at) || 0, Number(kr0 && kr0.at) || 0, d.lastConnectAt ? Number(d.lastConnectAt) + 1 : 0); if (!d.firstConnectAt) d.firstConnectAt = at;", "      d.lastConnectAt = at; if (!d.firstConnectAt) d.firstConnectAt = at;", 'order-connect');   // stale-pins: kept — the RED copy rebuilds the release's stamping on purpose
+  rel = anchored(rel, "      d.lastAuthFail = { at: Math.max(at, (Number(d.lastConnectAt) || 0) + 1) };", "      d.lastAuthFail = { at };", 'order-authfail');   // stale-pins: kept — the RED copy rebuilds the release's stamping on purpose
+  rel = anchored(rel, "      d.lastGreetingRefused = { at: Math.max(at, (Number(d.lastConnectAt) || 0) + 1) };", "      d.lastGreetingRefused = { at };", 'order-greeting');   // stale-pins: kept — the RED copy rebuilds the release's stamping on purpose
+  const MO = mutantCopies('dialorder', REPO);
+  const REL = MO.load('src/hosts.js', rel, 'order-parent');
+  // the cure WITHOUT the connect's own order (the reader's M1): a connect stamped only above the refusals
+  const NOSEQ = MO.load('src/hosts.js', anchored(HSRC, ", d.lastConnectAt ? Number(d.lastConnectAt) + 1 : 0); if (!d.firstConnectAt)", "); if (!d.firstConnectAt)", 'order-noseq'), 'order-noseq');
+  const CUR = require('../src/hosts.js');
+  const T = 1795150000000;
+  let n = 0;
+  // the noting functions themselves, with a clock handed to them: noteDial takes its stamp from facts.at, noteDeviceKey from Date.now
+  const scene = (Mod, kind, first, dt) => {
+    const dir = path.join(tmp, `order-${++n}`); fs.mkdirSync(dir, { recursive: true });
+    const hm = new Mod.HostManager({ dataDir: dir }); hm.dialOnline = () => true;
+    hm.setDialToken('devO', 'ef'.repeat(32), { name: 'devO' });
+    const id = hm.list().find((x) => x.deviceId === 'devO').id;
+    const realNow = Date.now;
+    const refuse = (t) => { if (kind === 'key') { Date.now = () => t; try { hm.noteDeviceKey(id, 'refused', { code: 'device-key-mismatch', fp: 'SHA256:order', road: 'dial' }); } finally { Date.now = realNow; } } else hm.noteDial('devO', kind, { at: t }); };
+    const connect = (t) => hm.noteDial('devO', 'accepted', { at: t, from: '127.0.0.1' });
+    if (first === 'connect') { connect(T); refuse(T + dt); } else { refuse(T); connect(T + dt); }
+    return DFo.dialRowState({ ...hm.list().find((x) => x.deviceId === 'devO'), online: true }).state;
+  };
+  const KINDS = [['greetingRefused', 'greeting-refused'], ['authFail', 'auth-fail'], ['key', 'key-refused']];
+  const LAWS = [['a', 'connect', 0, true], ['b', 'refusal', 0, false], ['c', 'connect', -5, true], ['d', 'refusal', -5, false]];   // [leg, recorded first, the clock's step, reads refused]
+  const read = (Mod) => KINDS.flatMap(([k, st]) => LAWS.map(([leg, first, dt, refused]) => { const got = scene(Mod, k, first, dt); return { kind: k, leg, want: refused ? st : 'connected', got }; }));
+  const cur = read(CUR), old = read(REL);
+  ok(cur.every((r) => r.got === r.want), 'THE ORDER RECORDED, for each kind (greeting refusal, sign-in failure, the dial road\'s device-key refusal): (a) a connect then a refusal in the SAME millisecond reads refused; (b) a refusal then a connect in the same millisecond reads connected; (c) a connect, the clock steps back 5 ms, a refusal: refused; (d) a refusal, the clock steps back 5 ms, a connect: connected', cur.filter((r) => r.got !== r.want));
+  const redOf = (leg) => old.filter((r) => r.leg === leg && r.got !== r.want).map((r) => r.kind).join();
+  ok(redOf('a') === 'greetingRefused,authFail' && redOf('c') === 'greetingRefused,authFail' && redOf('d') === 'greetingRefused,authFail,key' && redOf('b') === '',
+    'CONTROL (the parent\'s code in a copy): (a) and (c) RED for the greeting refusal and the sign-in failure — the row read «connected» over a refusal recorded after the connect (the dial road\'s key refusal was already ordered there); (d) RED for all three — «refused» over a connect recorded after the refusal; (b) holds there too (the row\'s strict compare)', { a: redOf('a'), b: redOf('b'), c: redOf('c'), d: redOf('d') });
+  // the reader's M1: a connect's stamp is the link's identity — two connects with no refusal between them never share one, even
+  // while a refusal's stamp stands above a clock that stepped back (connect T, refused T+100, the clock back at T: connect, connect)
+  const ids = (Mod) => { const dir = path.join(tmp, `order-${++n}`); fs.mkdirSync(dir, { recursive: true }); const hm = new Mod.HostManager({ dataDir: dir }); hm.dialOnline = () => true; hm.setDialToken('devO', 'ef'.repeat(32), { name: 'devO' });
+    const lc = () => hm.list().find((x) => x.deviceId === 'devO').dial.lastConnectAt;
+    hm.noteDial('devO', 'accepted', { at: T, from: '127.0.0.1' }); hm.noteDial('devO', 'greetingRefused', { at: T + 100 });
+    hm.noteDial('devO', 'accepted', { at: T, from: '127.0.0.1' }); const c1 = lc(); hm.noteDial('devO', 'accepted', { at: T + 1, from: '127.0.0.1' }); const c2 = lc();
+    return { c1, c2, row: DFo.dialRowState({ ...hm.list().find((x) => x.deviceId === 'devO'), online: true }).state }; };
+  const idCur = ids(CUR), idNo = ids(NOSEQ);
+  ok(idCur.c2 > idCur.c1 && idCur.c1 >= T + 100 && idCur.row === 'connected', 'two connects with no refusal between them never share a stamp (the link\'s identity), even while a refusal stamped above the stepped-back clock stands — both read connected', idCur);
+  ok(idNo.c2 === idNo.c1, 'CONTROL (the cure without the connect\'s own order, in a copy): the two connects share one stamp — a second device would pass for the first at the keep box (RED)', idNo);
+  for (const x of copiesCensus(MO.files, MO.dir, REPO, { minCopies: 1, label: 'mutant-copy (order): ' })) ok(x.pass, x.name, x.detail);
+}
 
 srv.close();
 fs.rmSync(tmp, { recursive: true, force: true });
