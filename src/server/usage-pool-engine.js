@@ -1380,9 +1380,14 @@ function establishedWindows() {
   if (_ownWin && now - _ownWinAt < OWN_WINDOW_TTL_MS) return _ownWin;
   const out = {};
   let files = [];
-  try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR).filter((f) => f.endsWith('.json') && !f.startsWith('__models__')); } catch { }
-  for (const fn of files) {
-    const key = fn.slice(0, -5);
+  try { files = usageWrite.listCacheDir(USAGE_CACHE_DIR); } catch { }
+  // every member with a cache file — AND (B-6a92) every account of the roster, so one known only by its window STAMP (no reading
+  // yet) has its established window too: without it the guard had no evidence for that member and WROTE another account's numbers
+  // on it (the stamp is read through its ONE reader; no name is built here)
+  const keys = new Set();
+  for (const fn of files) if (fn.endsWith('.json') && !fn.startsWith('__models__') && !fn.startsWith('.')) keys.add(fn.slice(0, -5));
+  try { for (const a of (accounts.list().accounts || [])) if (a && typeof a.id === 'string' && a.id) keys.add(a.id); } catch { }
+  for (const key of keys) {
     try {
       const w = windowStamp.readWindowStamp(USAGE_CACHE_DIR, key);
       if (w && (w.sevenDay || w.fiveHour || (w.scoped && Object.keys(w.scoped).length))) out[key] = w;
@@ -1494,7 +1499,11 @@ function noteApiDerivedWindow(key, ev, session, { outcome = 'write', producer = 
       // the row's own window is UNKNOWN, by name, until a proven read of this slot's OWN credential stamps it through its own road
       // (the panel's /usage read, the approved usage read on its own schedule, a captured login) — nothing here starts a read.
       // Honest sharing converges there: once the row's own stamp names that phase, its readings agree and write.
-      const heldBy = moved ? [...new Set(agreeing.flatMap((e) => (Array.isArray(e.names) ? e.names : [])))].filter((k) => k && k !== key) : [];
+      // A run the row's own long-lived TOKEN produced (oat:<gen>) keeps today's road: the stamp carries the row's identity and the
+      // token's identity check (B-3102) marks a token that is another account's, by name — the hold is for a run whose producer is
+      // the row's sign-in folder (whose credential may be another account's) or unknown
+      const byToken = agreeing.some((e) => (typeof e.producer === 'string' && e.producer.startsWith('oat:')) || e.oat === true);
+      const heldBy = moved && !byToken ? [...new Set(agreeing.flatMap((e) => (Array.isArray(e.names) ? e.names : [])))].filter((k) => k && k !== key) : [];
       if (moved && heldBy.length) {
         const was = raw.foreign && Array.isArray(raw.foreign.names) ? raw.foreign.names.join(',') + '@' + raw.foreign.phase : null;
         next.foreign = { names: heldBy.slice(0, 4), phase: entry.resetsAt, at: entry.at, n: run };
@@ -3890,8 +3899,8 @@ function recordRateLimitEventNow(session, msg) {
     // runs AFTER the guard and the witness ring (lane oat-identity-fix-r2, verify r2 F-C): a K-run that re-anchors the
     // row's window is seen by the check of the same reading — ONE call, three exits (archived, re-filed, written)
     const postCheck = () => { if (win) { try { oatIdentity.onReading(slotKey, { window: win, at: Date.now() - (Number(liveFactVerdict(session, msg).lateMs) || 0), viaToken: () => road().viaToken, gen: () => road().gen, eligible: witness, sid: session._webuiId || null }); } catch { } } };
+    const gEntry = { ev, slot, witness };   // B-6a92: the guard hands its verdict back on it (whose window it named)
     if (win) {
-      const gEntry = { ev, slot, witness };
       const target = guardReadingTarget(key, win, { session, what: 'rate-limit-event:' + ev.kind, entry: gEntry, noRefile: !!(slot && slot.slotReason === 'request-stamped') });
       const names = (gEntry.verdict && gEntry.verdict.names) || [];   // B-6a92: whose window the guard found this reading to name
       if (!target) {                             // archived with a reason — never written where it provably does not belong

@@ -1701,8 +1701,8 @@ app.get('/api/usage', (req, res) => {
   // account's NAME as the person gave it, never an address; its numbers are never the other account's
   const nameOfOther = (k) => { try { const n = accounts.get(k)?.name; return typeof n === 'string' && n && !n.includes('@') ? n.slice(0, 80) : null; } catch { return null; } };
   const unknownOf = (id) => { try { const f = typeof apiDerivedWindow === 'function' ? (apiDerivedWindow(id, { witness: true }) || {}).foreign : null; return f && Array.isArray(f.names) && f.names.length ? { others: f.names.slice(0, 4), otherNames: f.names.slice(0, 4).map(nameOfOther), phase: f.phase, at: f.at || null } : null; } catch { return null; } };
-  let claudeIds = []; try { claudeIds = (accounts.list().accounts || []).filter((x) => x && x.type === 'subscription' && (x.backend || 'claude') === 'claude').map((x) => x.id); } catch { claudeIds = []; }
-  for (const id of new Set([...Object.keys(viewedAccounts), ...claudeIds])) { const u = unknownOf(id); if (u) accountsOut[id] = { ...(accountsOut[id] && typeof accountsOut[id] === 'object' ? accountsOut[id] : {}), windowUnknown: u }; }
+  let subIds = []; try { subIds = (accounts.list().accounts || []).filter((x) => x && x.type === 'subscription').map((x) => x.id); } catch { subIds = []; }   // a row with no witness sidecar answers nothing
+  for (const id of new Set([...Object.keys(viewedAccounts), ...subIds])) { const u = unknownOf(id); if (u) accountsOut[id] = { ...(accountsOut[id] && typeof accountsOut[id] === 'object' ? accountsOut[id] : {}), windowUnknown: u }; }
   const globalOut = lanesAt.__global__ && viewedGlobal && typeof viewedGlobal === 'object' ? { ...viewedGlobal, lanesReadAt: lanesAt.__global__ } : viewedGlobal;
   res.json({
     rateLimit: globalOut, codexRateLimit: codexRl.overall, resetClaims: claimsForClients, lanesReadAt: lanesAt,
