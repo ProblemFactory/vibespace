@@ -37,7 +37,9 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const A = require('../spend-authorizer.js');
-const PI = require('../proc-identity.js');   // B-ef83: a pid is never an identity — the lock's holder is proven by its start tick
+// B-ef83: a pid is never an identity — the lock's holder is proven by its start tick. Bound under names of their OWN: in this file
+// «identityOf» is a BILLING resolver (the engine's answer, handed in), and the billing-slot census (B-87fd) reads names
+const { identityOf: procIdentityOf, aliveIdentity: procAliveIdentity } = require('../proc-identity.js');
 
 function writeJsonAtomic(file, obj) {
   fs.writeFileSync(file + '.tmp', JSON.stringify(obj));
@@ -133,13 +135,13 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // recycled / a zombie (false), unprovable (null). Another machine or another pid space: only its heartbeat can say it lives
     const here = (!h.host || h.host === os.hostname()) && !!h.ns && !!myNs && h.ns === myNs;
     if (!here) return !silent;
-    const alive = PI.aliveIdentity(h.ident && typeof h.ident === 'object' ? { ...h.ident, pid } : { pid });
+    const alive = procAliveIdentity(h.ident && typeof h.ident === 'object' ? { ...h.ident, pid } : { pid });
     if (alive === null) return !silent;
     if (alive && pid === process.pid) return false;                  // this very process, another guard of it (its token differs): taken
     return alive;
   };
   const takeLock = (now = Date.now()) => {
-    const mine = JSON.stringify({ pid: process.pid, host: os.hostname(), ns: myNs, token: myToken, ident: PI.identityOf(process.pid), at: now });
+    const mine = JSON.stringify({ pid: process.pid, host: os.hostname(), ns: myNs, token: myToken, ident: procIdentityOf(process.pid), at: now });
     for (let i = 0; i < 3; i++) {
       const tmp = `${lockFile}.${process.pid}-${myToken}-${i}.tmp`;
       try {
