@@ -13,6 +13,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // B-0d3e: a red control's edit through THE anchored door — an anchor gone or found twice fails by name
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -829,17 +830,17 @@ console.log('㉓ THE HOLD IS SAID, WITH ITS DOOR (B-e3fe follow-up, 主开发 04
   const qsrc = read('src/server/queued-wakes.js'), fsrc = read('src/server/queued-file-for-you.js');
   const REN = "    try { await ren(file, dest); moved = true; }", SUB = "  if (deliver && typeof deliver.onQueuedFileState === 'function') deliver.onQueuedFileState((ev) => { if (ev && ev.unread === false) settled(ev.how); });";
   ok('㉓ setup: the rename and the item\'s resolve are each in their module once', qsrc.split(REN).length === 2 && fsrc.split(SUB).length === 2);
-  const NoRen = MH.load('src/server/queued-wakes.js', qsrc.replace(REN, '    try { /* no rename */ moved = true; }'), 'no-rename');
+  const NoRen = MH.load('src/server/queued-wakes.js', anchored(qsrc, REN, '    try { /* no rename */ moved = true; }', 'no-rename'), 'no-rename');
   const ar = hub(NoRen); await ar.q.setAside();
   ok('㉓ CONTROL: without the rename the torn file stays where it was, under its own name — nothing is set aside (㉓ B can go red)', fs.readdirSync(ar.dir).filter((f) => f.includes('.unreadable-')).length === 0 && fs.readFileSync(path.join(ar.dir, 'msg-queued.json'), 'utf8') === TORN_QW);
-  const NoSub = MH.load('src/server/queued-file-for-you.js', fsrc.replace(SUB, ''), 'no-resolve');
+  const NoSub = MH.load('src/server/queued-file-for-you.js', anchored(fsrc, SUB, '', 'no-resolve'), 'no-resolve');
   const as = hub(QW, NoSub); await as.q.setAside();
   ok('㉓ CONTROL: without the producer\'s listener the item stays open after the file is set aside (㉓ B can go red)', as.open().length === 1);
   const BOOT = "else if (st) settled('boot'); }", NONE = "    if (!unread) { fileSettled('none'); return { ok: true, state: 'none' }; }";
   ok('㉓ setup: the boot\'s close and the no-hold press\'s close are each in their module once', fsrc.split(BOOT).length === 2 && qsrc.split(NONE).length === 2);
-  const NoBoot = MH.load('src/server/queued-file-for-you.js', fsrc.replace(BOOT, '}'), 'no-boot-close');
+  const NoBoot = MH.load('src/server/queued-file-for-you.js', anchored(fsrc, BOOT, '}', 'no-boot-close'), 'no-boot-close');
   ok('㉓ CONTROL: without the boot\'s close an earlier run\'s item stays open at a boot that reads the file (㉓ F can go red)', hub(QW, NoBoot, OLD_QW, { ut: earlier() }).open().length === 1);
-  const NoNone = MH.load('src/server/queued-wakes.js', qsrc.replace(NONE, "    if (!unread) return { ok: true, state: 'none' };"), 'no-none-close');
+  const NoNone = MH.load('src/server/queued-wakes.js', anchored(qsrc, NONE, "    if (!unread) return { ok: true, state: 'none' };", 'no-none-close'), 'no-none-close');
   const gn = hub(NoNone, QF, OLD_QW); gn.ut.add('queued-wakes', { origin: 'server', kind: 'action', text: 'x', action: { type: 'queued-file-unread' }, itemKey: 'queued-file-unread' }); await gn.q.setAside();
   ok('㉓ CONTROL: a no-hold press that only answers «none» leaves the item open — its button closes nothing (㉓ G can go red)', gn.open().length === 1);
 }
