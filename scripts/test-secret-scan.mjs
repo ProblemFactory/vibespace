@@ -30,13 +30,19 @@
 //      checkout that pushes, so the allow rows are its WORKING TREE's — for a release pushed from production, the running
 //      release's, never the range's. The production-cwd case (a row added inside the range counts in the lane's own
 //      checkout and NOT in a checkout at the release), and therefore the pin: the tree's allow file gains no row over the
-//      77 it held at 2.369.407 (by hash; a dead row may go) — a text that needs a row is fixed instead
+//      77 it held at 2.369.407 (by hash; a dead row may go) — a text that needs a row is fixed instead; the lane's own
+//      range scan now names that row too (⑧), so the lane's gate no longer says clean there
+//   ⑧ B-ecc4 part 1 — THE ALLOW-ROW CENSUS over a range (what the push hook and the test kit's build-check:secret-scan
+//      run): every row a commit adds that the BASE's allow file lacks is a finding by commit and line, a row a merge
+//      brought by its line in the tip's file; a comment, a blank, a moved / taken-out / put-back base row are not; a
+//      lone tip is not judged and says so; the report names the cure. RED CONTROL: the scanner with the census cut out
+//      answers the same range clean
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -324,8 +330,13 @@ console.log('\n⑦ B-ecc4: the PUSHING checkout\'s allow file judges what a push
   git(ROOT, ['clone', '-q', pc, prod]);
   git(prod, ['checkout', '-q', '--detach', P0]);
   const atRelease = cli(prod, [`--range=${P0}..${P1}`, '--json', '--quiet'], path.join(prod, 'scripts', 'secret-scan.mjs'));
-  ok(own.status === 0 && atRelease.status === 1 && atRelease.json.some((f) => f.file === 'src/g.js' && f.line === 1 && f.rule === 'generic-secret-assign'),
-    `THE PRODUCTION-CWD CASE: one range, one allow row added in it — the lane's checkout (at the range's tip) says clean (rc ${own.status}), the pushing checkout at the release says RED at src/g.js:1 (rc ${atRelease.status}): the row never counts at the push`, { own: own.out, atRelease: atRelease.json });
+  const genAt = (r) => (r.json || []).some((f) => f.file === 'src/g.js' && f.line === 1 && f.rule === 'generic-secret-assign');
+  const valLine = fs.readFileSync(path.join(pc, '.repo-guard-allow'), 'utf8').split('\n').findIndex((l) => l.trim() === VAL) + 1;
+  const rowAt = (r) => (r.json || []).filter((f) => f.rule === S.ALLOW_ROW_RULE).map((f) => `${f.file}:${f.line}@${String(f.commit).slice(0, 9)}`);
+  ok(!genAt(own) && genAt(atRelease) && atRelease.status === 1,
+    `THE PRODUCTION-CWD CASE: one range, one allow row added in it — in the lane's checkout (at the range's tip) the row counts: src/g.js:1 is not a finding (its findings: ${JSON.stringify((own.json || []).map((f) => `${f.rule} ${f.file}:${f.line}`))}); in the pushing checkout at the release it does not: RED at src/g.js:1 (rc ${atRelease.status}) — the row never counts at the push`, { own: own.json, atRelease: atRelease.json });
+  ok(valLine > 0 && own.status === 1 && rowAt(own).join() === `.repo-guard-allow:${valLine}@${P1.slice(0, 9)}` && rowAt(atRelease).join() === rowAt(own).join(),
+    `…and the lane's own gate is no longer clean there (before part 1 it said rc 0): the allow-row census names the row in both checkouts — ${rowAt(own).join()} (rc ${own.status}); see ⑧`, { own: own.json, valLine });
   // …and the hook asks exactly that checkout: its scan runs `node scripts/secret-scan.mjs` from the pushing checkout's root
   const hookText = fs.readFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), 'utf8');
   ok(/^\s*node scripts\/secret-scan\.mjs --range="\$\(range_for_sha "\$sha"\)" --quiet$/m.test(hookText) && !/--allow[\s=]/.test(hookText) && fs.readFileSync(SCAN, 'utf8').includes("fs.existsSync(ALLOW_FILE) ? [ALLOW_FILE] : []"),
@@ -340,6 +351,62 @@ console.log('\n⑦ B-ecc4: the PUSHING checkout\'s allow file judges what a push
     `PICK 1: .repo-guard-allow gains no row — ${rowsOf(treeAllow).length} row(s), each one of the 77 of 2.369.407 (a row added in a pick takes effect only after production moves; fix the text: ${S.FIXTURE_RULE})`, newRows(treeAllow).map((r) => r.slice(0, 40)));
   ok(newRows(treeAllow + VAL + '\n').length === 1 && newRows(treeAllow.split('\n').slice(1).join('\n')).length === 0 && newRows('# a comment\n\n').length === 0,
     'PICK 1 CONTROL: a planted row is named; a row taken away, a comment and a blank line are not');
+}
+
+console.log('\n⑧ B-ecc4 part 1: THE ALLOW-ROW CENSUS — no commit of a range adds a row to the allow file (red by name: the commit and the line)');
+{
+  const ar = path.join(ROOT, 'allowrows');
+  fs.mkdirSync(ar, { recursive: true });
+  git(ar, ['init', '-q']);
+  const AF = '.repo-guard-allow', BASE_ROWS = ['# the release\'s rows', 'row-alpha', 'row-beta', 'row-gamma'];
+  const file = (rows) => rows.join('\n') + '\n';
+  const NEW1 = 'row-new-' + rnd(ALNUM, 8), GAMMA2 = 'row-gamma-' + rnd(ALNUM, 8), BYMERGE = 'row-merge-' + rnd(ALNUM, 8);
+  const B0 = commit(ar, { [AF]: file(BASE_ROWS), 'notes.txt': 'one\n' }, 'B0: the base');
+  const B1 = commit(ar, { [AF]: file([...BASE_ROWS, NEW1]), 'notes.txt': 'one\ntwo\n' }, 'B1: a new row (RED)');
+  const B2 = commit(ar, { [AF]: file([...BASE_ROWS, NEW1, '# a comment', '']) }, 'B2: a comment and a blank line');
+  const B3 = commit(ar, { [AF]: file(['# the release\'s rows', 'row-beta', 'row-gamma', NEW1, '# a comment', '', 'row-alpha']) }, 'B3: a base row moved');
+  const B4 = commit(ar, { [AF]: file(['# the release\'s rows', 'row-beta', 'row-gamma', '# a comment', '', 'row-alpha']) }, 'B4: the new row taken out again');
+  const B5 = commit(ar, { [AF]: file(['# the release\'s rows', 'row-gamma', '# a comment', '', 'row-alpha']) }, 'B5: a base row taken out');
+  const B6 = commit(ar, { [AF]: file(['# the release\'s rows', 'row-gamma', '# a comment', '', 'row-alpha', 'row-beta']) }, 'B6: …and put back');
+  const B7 = commit(ar, { [AF]: file(['# the release\'s rows', GAMMA2, '# a comment', '', 'row-alpha', 'row-beta']) }, 'B7: a base row edited (RED)');
+  // sorted: `git log` reads newest first, the order is no part of the verdict
+  const rows = (r) => (r.json || []).filter((f) => f.rule === S.ALLOW_ROW_RULE).map((f) => `${f.file}:${f.line}@${f.commit ? f.commit.slice(0, 9) : 'none'}`).sort();
+  const want = [`${AF}:5@${B1.slice(0, 9)}`, `${AF}:2@${B7.slice(0, 9)}`].sort();
+  const c1 = cli(ar, [`--range=${B0}..${B7}`, '--json', '--quiet']);
+  ok(c1.status === 1 && JSON.stringify(rows(c1)) === JSON.stringify(want),
+    `over B0..B7 the census names exactly the two new rows, each by its commit and line: ${JSON.stringify(rows(c1))} (B1's row is RED though B4 took it out again — a range scan reads every commit; B7's edited row is a new row) (rc ${c1.status})`, { got: c1.json, want });
+  ok(!c1.json.some((f) => f.rule === S.ALLOW_ROW_RULE && [B2, B3, B4, B5, B6].includes(f.commit)) && c1.json.every((f) => f.rule === S.ALLOW_ROW_RULE),
+    `CONTROLS: a comment and a blank (B2), a base row moved (B3), a row taken out (B4, B5) and a base row put back (B6) are not named; the range has no other finding (${c1.json.length} finding(s), all the census's)`, c1.json);
+  ok(c1.json.every((f) => f.rule !== S.ALLOW_ROW_RULE || (!f.snippet.includes(NEW1) && !f.snippet.includes(GAMMA2))), '…and no finding prints a row whole (its snippet is redacted, as every finding\'s is)', c1.json.map((f) => f.snippet));
+  const c2 = cli(ar, [`--range=${B0}..${B7}`, '--quiet']);
+  const said = c2.out.replace(/\x1b\[[0-9;]*m/g, '');
+  ok(c2.status === 1 && said.includes(`allow-row-added ${AF}:5 (commit ${B1.slice(0, 9)})`) && said.includes('never counts when the release is pushed') && said.includes('Fold the cure INTO that commit') && !said.includes('If a non-partner match is a false positive'),
+    `the report says it by name — «allow-row-added ${AF}:5 (commit ${B1.slice(0, 9)})», why the row never counts, and the cure (fold it into that commit); not the false-positive advice`, said);
+  const c3 = cli(ar, [`--range=${B1}..${B7}`, '--json', '--quiet']);
+  ok(JSON.stringify(rows(c3)) === JSON.stringify([`${AF}:2@${B7.slice(0, 9)}`]), `the floor is the range's BASE: over B1..B7 (a base that holds B1's row) only B7's row is named — ${JSON.stringify(rows(c3))}`, c3.json);
+  // a merge whose resolution adds a row: no commit's patch shows it (the scan reads --no-merges), so it is named at its line in the tip's file
+  git(ar, ['checkout', '-q', '--detach', B0]);
+  const S1 = commit(ar, { 'side.txt': 'side\n' }, 'S1: a side line');
+  git(ar, ['checkout', '-q', '--detach', B7]);
+  git(ar, ['merge', '-q', '--no-ff', '--no-commit', S1]);
+  const M = commit(ar, { [AF]: file(['# the release\'s rows', GAMMA2, '# a comment', '', 'row-alpha', 'row-beta', BYMERGE]) }, 'M: a merge that adds a row');
+  const c4 = cli(ar, [`--range=${B0}..${M}`, '--json', '--quiet']);
+  ok(git(ar, ['rev-list', '--parents', '-n', '1', M]).split(' ').length === 3 && JSON.stringify(rows(c4)) === JSON.stringify([...want, `${AF}:7@none`].sort()),
+    `a row a MERGE brought (no commit's patch adds it) is named at its line in the tip's file, with no commit (the kit's scan check blames such a line): ${JSON.stringify(rows(c4))}`, c4.json);
+  // a lone tip (a first publication: no base, no remote-tracking ref) is not judged by the census, and that is said
+  const c5 = cli(ar, [`--range=${B7}`, '--json']);
+  ok(c5.status === 0 && rows(c5).length === 0 && /the allow-row census \(B-ecc4\) needs the range's base: a lone tip/.test(c5.out),
+    `a lone tip is not judged by the census and the scan says so («${(c5.out.match(/the allow-row census[^\n]*/) || [''])[0].slice(0, 110)}») (rc ${c5.status})`, c5.out);
+  // PURE: what a row is
+  ok(JSON.stringify(S.allowRowsOf('# c\n\n  x  \ny\n')) === '["x","y"]' && S.allowRowsAdded(`\x01c1\ndiff --git a/${AF} b/${AF}\n--- a/${AF}\n+++ b/${AF}\n@@ -0,0 +3,2 @@\n+keep\n+fresh\n`, new Set(['keep'])).map((a) => `${a.commit}:${a.line}:${a.row}`).join() === 'c1:4:fresh'
+    && S.allowRowsAdded(`\x01c1\ndiff --git a/x/${AF} b/x/${AF}\n--- a/x/${AF}\n+++ b/x/${AF}\n@@ -0,0 +1 @@\n+fresh\n`).length === 0,
+    'PURE allowRowsAdded: a row the floor holds is not new; the new row is at its new line, by its commit; a file named like it below the root is not the allow file (the scanner reads the root\'s)');
+  // RED CONTROL: the scanner with the census cut out answers the same range CLEAN — the census is what names the rows
+  const cutAt = path.join(ROOT, 'secret-scan.nocensus.mjs');
+  fs.writeFileSync(cutAt, anchored(scanSrc, 'const census = allowRowCensus(cwd, m ? m[1] : null, tip, logText);', 'const census = { findings: [], note: null };', 'test-secret-scan ⑧ nocensus'));
+  const cut = cli(ar, [`--range=${B0}..${B7}`, '--json', '--quiet'], cutAt);
+  ok(cut.status === 0 && cut.json.length === 0 && c1.status === 1,
+    `RED CONTROL: the scanner with the census cut out says CLEAN over B0..B7 (rc ${cut.status}) where the shipped one names ${rows(c1).length} row(s) (rc ${c1.status}) — the gate's scan was this blind before part 1`, cut.out);
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -30,6 +30,9 @@
  *   --range=<a>..<b>     what a push publishes: every commit's added lines (git log -p) + the combined diff, AND
  *   --range=<b>          the full text at <b> of every file the range touches (a lone <b> = what no
  *                        remote-tracking ref has yet)
+ *                        A two-ended range also runs THE ALLOW-ROW CENSUS (B-ecc4): a row a commit adds to
+ *                        .repo-guard-allow that the base's file lacks is a finding (`allow-row-added`, by commit and
+ *                        line) — the push reads the PUSHING checkout's allow file, so such a row never counts there
  * Allowlist: --allow <file> (regex or literal per line) suppresses non-partner matches; a repo may also carry
  * `.repo-guard-allow`. --json prints the findings on stdout.
  *
@@ -233,6 +236,48 @@ function blobsAt(cwd, rev, paths) {
   return map;
 }
 
+// ── THE ALLOW-ROW CENSUS (B-ecc4 part 1) ──
+// The push reads the PUSHING checkout's allow file (its working tree's). For a release pushed from production that is the
+// running release's file, so a row added inside the pushed range never counts there: the 2026-11-15 release was refused
+// after two cuts with every gate green. A row is what the scanner reads as one: trimmed, not blank, not a `#` comment.
+export const ALLOW_ROW_RULE = 'allow-row-added';
+export const allowRowsOf = (text) => String(text || '').split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
+/**
+ * PURE. Over `git log -p --format=%x01%H -U0` text: every row a commit's patch adds to the ROOT allow file that the
+ * `floor` (a Set of rows: the file at the range's base) does not hold, as { commit, line, row }. A row moved within the
+ * file, or put back after an earlier commit took it out, is one the base held: not new.
+ */
+export function allowRowsAdded(logText, floor = new Set()) {
+  const out = [];
+  let commit = null, file = null, newLine = 0, inHeader = false;
+  for (const raw of String(logText || '').split('\n')) {
+    if (raw.startsWith('\x01')) { commit = raw.slice(1).trim() || null; file = null; inHeader = false; continue; }
+    if (raw.startsWith('diff --git ')) { inHeader = true; file = null; continue; }
+    const h = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (h) { newLine = Number(h[1]); inHeader = false; continue; }
+    if (inHeader) { if (raw.startsWith('+++ ')) { const p = unquotePath(raw.slice(4).trim()); file = p === '/dev/null' ? null : p.replace(/^b\//, ''); } continue; }
+    if (raw.startsWith('+')) {
+      const row = raw.slice(1).trim();
+      if (file === ALLOW_FILE && row && !row.startsWith('#') && !floor.has(row)) out.push({ commit, line: newLine, row });
+      newLine++;
+    } else if (raw.startsWith(' ')) newLine++;
+  }
+  return out;
+}
+// The census over a two-ended range: each new row by its commit and line; a row the tip's file holds that no commit's patch
+// shows added (a merge brought it, or a rename into the file) at its line in the tip's file, with no commit (the kit's scan
+// check blames such a line to its commit). A lone tip (a first publication: no base) is not judged, and that is said.
+function allowRowCensus(cwd, base, tip, logText) {
+  if (!base) return { findings: [], note: `the allow-row census (B-ecc4) needs the range's base: a lone tip ${String(tip).slice(0, 12)} (a first publication) is not judged by it` };
+  const floor = new Set(allowRowsOf((blobsAt(cwd, base, [ALLOW_FILE]).get(ALLOW_FILE) || '').toString('utf8')));
+  const added = allowRowsAdded(logText, floor), named = new Set(added.map((a) => a.row));
+  const tipText = (blobsAt(cwd, tip, [ALLOW_FILE]).get(ALLOW_FILE) || '').toString('utf8');
+  const unnamed = [];
+  tipText.split('\n').forEach((l, i) => { const r = l.trim(); if (r && !r.startsWith('#') && !floor.has(r) && !named.has(r)) unnamed.push({ commit: null, line: i + 1, row: r }); });
+  const d = `an allow row added inside the range: it never counts when the release is pushed (the push reads the PUSHING checkout's ${ALLOW_FILE})`;
+  return { findings: [...added, ...unnamed].map((a) => ({ rule: ALLOW_ROW_RULE, partner: false, d, snippet: redact(a.row), file: ALLOW_FILE, line: a.line, commit: a.commit })), note: null };
+}
+
 /**
  * What a push publishes: `a..b` (an existing ref) or a lone `b` (a new branch — what no remote-tracking ref has).
  * Every commit's added lines + the combined diff + the full text at the tip of every file the range touches. EITHER END
@@ -252,11 +297,13 @@ export function scanRange(range, { cwd = process.cwd(), ...opts } = {}) {
   const diffFlags = ['--no-color', '--no-ext-diff', '--no-textconv', '-U0'];
   const sel = m ? [`${m[1]}..${m[2]}`] : [tip, '--not', '--remotes'];
   const touched = new Set();
-  const findings = scanText(gitBuf(cwd, ['log', '-p', '--no-merges', '--format=%x01%H', ...diffFlags, ...sel]).toString('utf8'), '<range>', { ...opts, touched });
+  const logText = gitBuf(cwd, ['log', '-p', '--no-merges', '--format=%x01%H', ...diffFlags, ...sel]).toString('utf8');
+  const findings = scanText(logText, '<range>', { ...opts, touched });
   if (m) findings.push(...scanText(gitBuf(cwd, ['diff', ...diffFlags, m[1], m[2]]).toString('utf8'), '<range>', { ...opts, touched }));
   const blobs = blobsAt(cwd, tip, [...touched]);
   for (const [p, buf] of blobs) if (!isBinary(buf)) findings.push(...scanText(buf.toString('utf8'), p, { ...opts, plain: true }));
-  return { findings: dedupe(findings), files: touched.size, note };
+  const census = allowRowCensus(cwd, m ? m[1] : null, tip, logText);   // after dedupe: each row keeps its own commit
+  return { findings: [...dedupe(findings), ...census.findings], files: touched.size, note: [note, census.note].filter(Boolean).join(' · ') || null };
 }
 
 // one finding per file:line:rule — the full-text copy (no commit) wins over a commit's added line
@@ -275,7 +322,8 @@ export function formatFindings(findings) {
   for (const f of findings.slice(0, 40)) lines.push(`  \x1b[33m${f.rule}\x1b[0m ${f.file}:${f.line}${f.commit ? ` (commit ${f.commit.slice(0, 9)})` : ''}  ${f.d} → ${f.snippet}`);
   if (findings.length > 40) lines.push(`  … and ${findings.length - 40} more`);
   if (findings.some((f) => f.partner)) lines.push(`\nA \x1b[33mpartner\x1b[0m shape is what GitHub push protection refuses (GH013), and ${ALLOW_FILE} cannot allow it — ${FIXTURE_RULE}.`);
-  if (findings.some((f) => !f.partner)) lines.push(`\nIf a non-partner match is a false positive, change the text so it no longer matches (${FIXTURE_RULE}). A row added to \x1b[36m${ALLOW_FILE}\x1b[0m in a pick never counts when the release is pushed: the push reads the PUSHING checkout's file (B-ecc4). A new row is the owner's to add.`);
+  if (findings.some((f) => f.rule === ALLOW_ROW_RULE)) lines.push(`\nAn \x1b[33m${ALLOW_ROW_RULE}\x1b[0m row never counts when the release is pushed: the push reads the PUSHING checkout's ${ALLOW_FILE}, the running release's (B-ecc4). Fold the cure INTO that commit: take the row out and change the text it was for (${FIXTURE_RULE}).`);
+  if (findings.some((f) => !f.partner && f.rule !== ALLOW_ROW_RULE)) lines.push(`\nIf a non-partner match is a false positive, change the text so it no longer matches (${FIXTURE_RULE}). A row added to \x1b[36m${ALLOW_FILE}\x1b[0m in a pick never counts when the release is pushed: the push reads the PUSHING checkout's file (B-ecc4). A new row is the owner's to add.`);
   return lines.join('\n') + '\n';
 }
 
