@@ -196,10 +196,14 @@ async function cameraLeg(p) {
   ok('390: the shot is sent WITH the message — one image block (image/jpeg) + the words; the chip row clears', sent.images && sent.images.length === 1 && /^image\/jpeg:\d+$/.test(sent.images[0]) && sent.text === 'the label on the switch' && sent.chips === 0, sent);
 }
 
+/** piece 7's resumed line (16c64ec4d): {hidden, display, h} of #frame's .chat-resumed-line, or null when the composer has none */
+const RESUMED_LINE = "(() => { const rl = document.querySelector('#frame .chat-resumed-line'); if (!rl) return null; const b = rl.getBoundingClientRect(); return { hidden: rl.hidden, display: getComputedStyle(rl).display, h: Math.round(b.height * 10) / 10 }; })()";
 async function phoneLeg(w, minRatio) {
   console.log(`① phone ${w} (DPR 3, Android UA, touch, dark) — the field owns the row, one + door, the mic in the field, one 40-px bar`);
   const p = await page(w, 860, { phone: true });
   await p.shot(`${TAG}-${w}.png`);
+  const rl = await p.ev(`${RESUMED_LINE}`);
+  ok(`${w}: with no delivery resume the resumed line (piece 7) is in the composer, hidden, and takes no room (display none, height 0)`, !!rl && rl.hidden === true && rl.display === 'none' && rl.h === 0, rl);
   const m = await p.ev(`(() => {
     const area = document.querySelector('#frame .chat-input-area'), cs = getComputedStyle(area);
     const row = area.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
@@ -294,6 +298,10 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   const sig = await d.ev(SIG_JS);
   const deskCam = await d.ev(`document.querySelectorAll('#frame input[capture]').length`); // lane phone-take-photo
   const real = await d.shot('desk-1100.png', 260);
+  // piece 7's resumed line with NO delivery resume: in the composer, hidden, no box (display none, height 0) — then the CONTROL
+  // proves the measure sees a shown line (unhidden with words ⇒ a height), and puts it back hidden (after the picture above)
+  const rlDesk = await d.ev(`${RESUMED_LINE}`);
+  const rlShown = await d.ev(`(() => { const rl = document.querySelector('#frame .chat-resumed-line'); if (!rl) return null; rl.textContent = 'Resumed just now to deliver a message'; rl.hidden = false; const h = rl.getBoundingClientRect().height; rl.hidden = true; rl.textContent = ''; return Math.round(h * 10) / 10; })()`);
   d.close();
   const s = await page(1100, 760, { phone: false, css: 'stripped' }); const stripped = await s.shot(null, 260); s.close();
   const k = await page(1100, 760, { phone: false, css: 'leak' }); const leak = await k.shot(null, 260); const leakSig = await k.ev(SIG_JS); k.close();
@@ -311,13 +319,20 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   // to 7eb3a7d04bc1, and + exactly button.chat-stash-go.chat-stash-groups-go(span.chat-stash-go-label,span.chat-stash-cost)
   // right after span.chat-stash-nobutton hashes to 98f87f3662f7, the hash the block's first checkpoint 8cef0006a printed) —
   // the stash strip's hidden group press, drawn only mid-turn where Enter steers
-  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '98f87f3662f7';
+  // re-pinned .413 for the manager stack's piece 7 (16c64ec4d «deliveries resume their addressee»: div.chat-resumed-line, the
+  // line that says a delivery resumed the conversation, built in every composer and hidden until one did) by lane
+  // bl-tests-chrome (98f87f3662f7 → a91b527c602d, the hash the second hosted run 44661171878 measured at 3a207bf23; by
+  // arithmetic: the .412 signature + exactly div.chat-resumed-line right after div.chat-agent-cards hashes to a91b527c602d).
+  // That the hidden line takes no room is a law the pin cannot give: the leg below the pin
+  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || 'a91b527c602d';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
   // ALSO (lane bl-tests-chrome, .412): a missed pin prints the WHOLE signature, in pieces a log keeps whole (ok() cuts a detail at
   // 700 chars and the signature is ~1650), so the next re-pin is placed by a diff against the last one, not by arithmetic
   if (crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) !== DESK_SIG) for (let i = 0, n = Math.ceil(sig.length / 180); i < n; i++) console.log(`    desk sig whole [${i + 1}/${n}]: ${sig.slice(i * 180, (i + 1) * 180)}`);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
   ok('desk: no camera input on the desk (lane phone-take-photo)', deskCam === 0, deskCam);
+  ok('desk: with no delivery resume the resumed line (piece 7) is in the composer, hidden, and takes no room (display none, height 0)', !!rlDesk && rlDesk.hidden === true && rlDesk.display === 'none' && rlDesk.h === 0, rlDesk);
+  ok(`desk CONTROL: the same measure sees a SHOWN resumed line (${rlShown} px high) — the zero above is the line's own, not a blind probe`, typeof rlShown === 'number' && rlShown > 0, rlShown);
   ok('RED control: the phone block un-gated changes the desk PNG', leak !== real && leakSig === sig, { leak, real });
 }
 
