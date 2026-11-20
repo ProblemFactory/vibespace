@@ -78,7 +78,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
 const { WebSocket } = require('ws');
@@ -263,7 +263,7 @@ else await (async () => {
     return idsOpen;
   };
   const r6Legs = async () => {
-    const vaultR6 = (on) => evalJs(`fetch('/api/vault/state').then((r) => r.json()).then((st) => { const msg = { ...st, type: 'vault-state', state: '${on ? 'locked' : 'unlocked'}' }; for (const h of [...app.ws.globalHandlers]) { try { h(msg); } catch { } } return true; })`);
+    const vaultR6 = (on) => evalJs(`fetch('/api/vault/state').then((r) => r.json()).then((st) => { const msg = { ...st, type: 'vault-state', state: '${on ? 'locked' : 'unlocked'}' }; ${relayBroadcastJs(`msg`, "app.ws.globalHandlers")} return true; })`);
     const NEW_SESSION = `(!document.getElementById('dialog-new-session').classList.contains('hidden') && !document.getElementById('dialog-overlay').classList.contains('hidden'))`;
     const IS_FILES = `app.wm.windows.get(app.wm.activeWindowId)?.type === 'files'`;
     // every popover / sheet / dialog / drawer shut, every explorer closed, the web view on show
@@ -559,7 +559,7 @@ else await (async () => {
   // dialog: the real chip beside For you, ⚙'s red mark, the strip. The scratch hub has no vault to lock; the state is the one a lock
   // broadcasts. `on` false = an unlock from another client.
   const vault = (on) => evalJs(`fetch('/api/vault/state').then((r) => r.json()).then((st) => { const msg = { ...st, type: 'vault-state', state: '${on ? 'locked' : 'unlocked'}' };
-    for (const h of [...app.ws.globalHandlers]) { try { h(msg); } catch { } } return !!document.getElementById('mobile-nav-vault') === ${on ? 'true' : 'false'}; })`);
+    ${relayBroadcastJs(`msg`, "app.ws.globalHandlers")} return !!document.getElementById('mobile-nav-vault') === ${on ? 'true' : 'false'}; })`);
   await device(600, 900); await sleep(500); await settle();
   await dress({ title: '游戏' });
   ok(await vault(true) && await evalJs(`!!document.querySelector('#mobile-nav-gear.vault-locked > .vault-gear-mark')`), '⑧ the lock\'s broadcast (the road another client\'s lock takes) draws the real lock chip beside For you and ⚙\'s red mark');

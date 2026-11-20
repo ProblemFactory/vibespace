@@ -26,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, deadPort, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, deadPort, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop names for the server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -417,7 +417,7 @@ out({ success: false, error: 'fake: unknown verb ' + argv.join(' ') }); process.
       const list = w.content.querySelector('.brp-actions'); const first = list.firstElementChild, last = list.lastElementChild, n0 = list.childElementCount;
       const fetched = () => performance.getEntriesByType('resource').filter((r) => r.name.includes('/api/browser/sessions?')).length;
       const f0 = fetched();
-      for (const h of (window.app.ws.globalHandlers || [])) { try { h({ type: 'browser-trace-appended', browserKey: ${J(KC)}, profileId: ${J(PW)}, entry: { id: 'tr-000000000000', at: Date.now() } }); } catch {} }
+      ${relayBroadcastJs(`{ type: 'browser-trace-appended', browserKey: ${J(KC)}, profileId: ${J(PW)}, entry: { id: 'tr-000000000000', at: Date.now() } }`, "(window.app.ws.globalHandlers || [])")}
       const t0 = performance.now(); while (performance.now() - t0 < 4000 && fetched() === f0) await new Promise((r) => setTimeout(r, 50));
       await new Promise((r) => setTimeout(r, 300));
       return { reloaded: fetched() > f0, firstSame: list.firstElementChild === first, lastSame: list.lastElementChild === last, n: list.childElementCount, n0, activeKept: !!list.querySelector('.brp-action.active') };

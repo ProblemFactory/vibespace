@@ -30,7 +30,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -321,7 +321,7 @@ try {
   await shot(D.S, 'desk-session-props.png');
   // the window re-renders on every broadcast (a working session ⇒ every few seconds): the reader keeps their place
   const spKept = await D.ev(`(async () => { const b = ${SPB}; b.scrollTop = 400; const i = document.createElement('i'); i.id = 'sp-body-sentinel'; b.appendChild(i);
-    [...app.ws.globalHandlers].forEach((h) => { try { h({ type: 'tasks-updated' }); } catch { } });
+    ${relayBroadcastJs(`{ type: 'tasks-updated' }`, "app.ws.globalHandlers")}
     await new Promise((r) => setTimeout(r, 900));
     const at = b.scrollTop; await new Promise((r) => setTimeout(r, 1200));
     return { rebuilt: !document.getElementById('sp-body-sentinel'), at, later: b.scrollTop, same: b === ${SPB} }; })()`);
@@ -337,7 +337,7 @@ try {
     try {
       b.scrollTop = 400; await frames();
       const before = mark(), h0 = histH();
-      [...app.ws.globalHandlers].forEach((h) => { try { h({ type: 'tasks-updated' }); } catch { } });
+      ${relayBroadcastJs(`{ type: 'tasks-updated' }`, "app.ws.globalHandlers")}
       await new Promise((r) => setTimeout(r, 650)); await frames();
       const mid = mark(), hMid = histH(), loading = /Loading|加载|読み込み/.test(b.querySelector('.session-history-list').textContent);
       await new Promise((r) => setTimeout(r, 1200)); await frames();

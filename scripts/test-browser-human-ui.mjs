@@ -48,7 +48,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { scratch, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, relayBroadcastJs } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const F = require('../src/browser-facts.js');
@@ -300,7 +300,7 @@ const shareGeom = 'const n = L.el().querySelector(".browser-live-share-line"), a
 const share = await until(() => E.h(`if (!L) return null; ${shareGeom}`).then((x) => (x && x.text ? x : null)).catch(() => null), 10000, 150);
 ok(share && share.text === SHARE_EN && share.shown && share.top >= share.addrBottom - 0.5 && share.bottom <= share.canvasTop + 0.5 && share.h > 0 && share.h <= 24 && share.display === 'flex' && !/^(transparent|rgba\(0, 0, 0, 0\))$/.test(share.bg) && share.iconW > 0 && share.iconW <= 13, /* verify r3 (revert table): its OWN rule styles it — a tinted flex line, a 12 px icon (the rule removed stayed green before) */
   `option A: on a shared-tabs profile his window shows ONE line at its top, under the address row, above the page — "${share && share.text}"`, JSON.stringify(share));
-const digestWith = (mediated) => `(() => { const d = window.app._browserProfiles; const msg = { ...d, type: 'browser-profiles-updated', profiles: d.profiles.map((p) => (p.id === ${JSON.stringify(PID)} ? { ...p, mediated: ${mediated} } : p)) }; window.app._onBrowserProfilesUpdated(msg); for (const h of [...window.app.ws.globalHandlers]) { try { h(msg); } catch { } } return true; })()`;
+const digestWith = (mediated) => `(() => { const d = window.app._browserProfiles; const msg = { ...d, type: 'browser-profiles-updated', profiles: d.profiles.map((p) => (p.id === ${JSON.stringify(PID)} ? { ...p, mediated: ${mediated} } : p)) }; window.app._onBrowserProfilesUpdated(msg); ${relayBroadcastJs(`msg`, "window.app.ws.globalHandlers")} return true; })()`;
 await E.h('L.el().querySelector(".browser-live-share-line").__r2 = 1; return true;');
 await E.ev(digestWith(true));
 const hidden = await until(() => E.h(`if (!L) return null; ${shareGeom}`).then((x) => (x && !x.shown ? x : null)).catch(() => null), 5000, 100);

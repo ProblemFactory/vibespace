@@ -34,7 +34,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -383,7 +383,7 @@ async function openSurfaces(P, r) {
   const folded = await P.evalJs(`(async () => { const part = ${J(PARTS[r][1])}; const pick = () => [...document.querySelectorAll('.jobs-win .jobs-group')].find((b) => (b.textContent || '').includes(part)); const g = pick(); if (!g) return false; g.click(); await new Promise((res) => setTimeout(res, 800)); const g2 = pick(); if (g2) g2.click(); await new Promise((res) => setTimeout(res, 800)); return true; })()`);
   check(`round ${r}: the owner folded and re-opened the job's family (the fold map is persisted in the server's user state)`, folded && !!(await api('/api/user-state')).jobsPanelFolds);
   // the For-you item's ARRIVAL, through the model's own broadcast handler (a snapshot without it, then the real one): the live toast + the device history
-  await P.evalJs(`(async () => { const d = await (await fetch('/api/user-todos')).json(); const T = d.todos; const without = { ...T, open: T.open.filter((i) => i.id !== ${J(TODO[r])} && i.id !== ${J(JTODO[r])}) }; for (const h of app.ws.globalHandlers.slice()) { try { h({ type: 'user-todos-updated', todos: without }); } catch {} } await new Promise((res) => setTimeout(res, 150)); for (const h of app.ws.globalHandlers.slice()) { try { h({ type: 'user-todos-updated', todos: T }); } catch {} } return true; })()`);
+  await P.evalJs(`(async () => { const d = await (await fetch('/api/user-todos')).json(); const T = d.todos; const without = { ...T, open: T.open.filter((i) => i.id !== ${J(TODO[r])} && i.id !== ${J(JTODO[r])}) }; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: without }`, "app.ws.globalHandlers")} await new Promise((res) => setTimeout(res, 150)); ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: T }`, "app.ws.globalHandlers")} return true; })()`);
   // the For-you popup open
   await P.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`);
   await sleep(600);
@@ -434,7 +434,7 @@ const clearAll = async (r, label = '') => {
   await P1.evalJs(HOLD_SRC);
   await P1.evalJs(`(async () => { window.__rcSt = (await (await window.fetch('/api/session-status')).json()).statuses; return true; })()`); // read with the hold OFF: the probe never hands the product a stale frame itself
   await P1.evalJs(`window.__rcHold.q = []; window.__rcHold.on = true; true`);
-  await P1.evalJs(`(() => { const st = window.__rcSt; delete window.__rcSt; for (const h of app.ws.globalHandlers.slice()) { try { h({ type: 'jobs-updated', id: ${J(JOB[r])} }); } catch {} try { h({ type: 'session-status-updated', statuses: st }); } catch {} } const w = [...app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.action === 'openChannel'); if (w) app.wm.closeWindow(w.id); app.openChannel('groups', ${J(GID)}); return true; })()`);
+  await P1.evalJs(`(() => { const st = window.__rcSt; delete window.__rcSt; ${relayBroadcastJs(`{ type: 'jobs-updated', id: ${J(JOB[r])} }`, "app.ws.globalHandlers")} ${relayBroadcastJs(`{ type: 'session-status-updated', statuses: st }`, "app.ws.globalHandlers")} const w = [...app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.action === 'openChannel'); if (w) app.wm.closeWindow(w.id); app.openChannel('groups', ${J(GID)}); return true; })()`);
   await sleep(400);
   await P1.evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._sessionPropsKey); const s = w && w.element.querySelector('select'); if (s) s.focus(); app.ws.ws.close(); return true; })()`);
   const want = ['/api/session-status', '/api/session-status/history', '/api/channel-groups', `/api/channel-groups/${GID}/messages`, '/api/user-todos', '/api/tasks', '/api/jobs', `/api/jobs/${JOB[r]}`];

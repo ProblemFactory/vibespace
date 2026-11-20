@@ -39,7 +39,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, evalInBlankTab, CHROME_STORE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, evalInBlankTab, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -431,7 +431,7 @@ try {
   // verify r4 (reproduced before the fix): an item ARRIVING while a page is open raises its arrival toast — and every toast is
   // kept in this device's localStorage for the popup's Notifications tab, so the item's words outlived its clear there. The
   // arrival is driven through the model's own broadcast handler: a snapshot without the item, then the real one.
-  const arrived = await P1.evalJs(`(async () => { const d = await (await fetch('/api/user-todos')).json(); const T = d.todos; const without = { ...T, open: T.open.filter((i) => i.id !== ${J(OPEN_ID)}) }; for (const h of app.ws.globalHandlers.slice()) { try { h({ type: 'user-todos-updated', todos: without }); } catch {} } await new Promise((r) => setTimeout(r, 150)); for (const h of app.ws.globalHandlers.slice()) { try { h({ type: 'user-todos-updated', todos: T }); } catch {} } await new Promise((r) => setTimeout(r, 300)); return [...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent); })()`);
+  const arrived = await P1.evalJs(`(async () => { const d = await (await fetch('/api/user-todos')).json(); const T = d.todos; const without = { ...T, open: T.open.filter((i) => i.id !== ${J(OPEN_ID)}) }; ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: without }`, "app.ws.globalHandlers")} await new Promise((r) => setTimeout(r, 150)); ${relayBroadcastJs(`{ type: 'user-todos-updated', todos: T }`, "app.ws.globalHandlers")} await new Promise((r) => setTimeout(r, 300)); return [...document.querySelectorAll('#global-toasts .global-toast-body')].map((e) => e.textContent); })()`);
   check('setup: the item arriving while the page is open raises its toast WITH its words (the live toast is the item\'s own announcement)', arrived.some((x) => x.includes(MARK)), arrived);
   await P1.evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => el.remove()); true`);
   await P1.evalJs(`document.getElementById('taskbar-user-todos').click(); true`);

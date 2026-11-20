@@ -73,7 +73,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, fontLegs, runnerFontEnv, boxSans } from './scratch.mjs';
+import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, fontLegs, runnerFontEnv, boxSans, relayBroadcastJs } from './scratch.mjs';
 import { armWatchdog } from './suite-watchdog.mjs';
 
 const require = createRequire(import.meta.url);
@@ -202,7 +202,7 @@ const step = async (name, fn) => { if (ONLY.length && !ONLY.includes(name)) retu
 // leg's window. Before EVERY reading, ONE synthetic message of a type no handler knows is handed to every global handler over
 // a copy, as src/lib/ws.js dispatches: each listener already due to leave leaves, a live one (its body on the page) stays.
 // Deterministic — no sleep, no retry. Every reading and every wait on the count goes through it (21 in this suite).
-const SETTLED_FN = `() => { const m = { type: 'vs-test-settle' }; for (const h of app.ws.globalHandlers.slice()) { try { h(m); } catch { } } return app.ws.globalHandlers.length; }`;
+const SETTLED_FN = `() => { const m = { type: 'vs-test-settle' }; ${relayBroadcastJs(`m`, "app.ws.globalHandlers")} return app.ws.globalHandlers.length; }`;
 const HANDLERS = `(${SETTLED_FN})()`;
 
 await cdp('Runtime.enable'); await cdp('Page.enable');
@@ -485,7 +485,7 @@ await step('⑬', async () => {
   await evalJs(`(() => { app._oatDialog('acc-dy', { name: 'Work Max' }, () => {}); return true; })()`);
   await waitFor(`!!document.getElementById('oat-dialog')`, 10000);
   await sleep(600);
-  await evalJs(`(() => { for (const h of app.ws.globalHandlers.slice()) { try { h({ type: 'oat-mint', mint: { id: 'mint-dy', accountId: 'acc-dy', phase: 'waiting-code', rev: 9, url: 'https://example.invalid/oauth/authorize' } }); } catch (e) { } } return true; })()`);
+  await evalJs(`(() => { ${relayBroadcastJs(`{ type: 'oat-mint', mint: { id: 'mint-dy', accountId: 'acc-dy', phase: 'waiting-code', rev: 9, url: 'https://example.invalid/oauth/authorize' } }`, "app.ws.globalHandlers")} return true; })()`);
   const live = await waitFor(`document.querySelector('#oat-mint')?.dataset.phase === 'waiting-code'`, 8000);
   await evalJs(`(() => { const r = document.getElementById('oat-dialog'); const i = r.querySelector('#oat-code') || r.querySelector('input:not([type=hidden]), button') || r; i.focus(); return true; })()`);
   await ESC();

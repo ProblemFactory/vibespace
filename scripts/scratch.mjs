@@ -52,10 +52,11 @@ export const CHROME_STORE = Object.freeze(['--password-store=basic', '--use-mock
  *  test-channel-window-render ⑫c walked the page's LIVE handler list and skipped the open picker's handler, right after a stale
  *  one that took itself out). Page-side JS source that hands ONE message object to every global handler over a SNAPSHOT of the
  *  list, each handler isolated — src/lib/ws.js's own dispatch (`[...this.globalHandlers].forEach(call)`): a handler that
- *  removes itself while handling (offGlobal splices the live list) never hides the next. `msg` = page-side JS source of the
+ *  removes itself while handling (offGlobal splices the live list) never hides the next, and a handler that throws is SAID as
+ *  the product says it (console.error('[ws] handler error', err)). `msg` = page-side JS source of the
  *  message; `list` = the page expression of the handler list. test-ci-gate §2l: its control, and the census that makes any
  *  suite still walking the live list red. */
-export const relayBroadcastJs = (msg, list = 'window.app.ws.globalHandlers') => `{ const __msg = (${msg}); for (const __h of [...${list}]) { try { __h(__msg); } catch (__e) {} } }`;
+export const relayBroadcastJs = (msg, list = 'window.app.ws.globalHandlers') => `{ const __msg = (${msg}); for (const __h of [...${list}]) { try { __h(__msg); } catch (__e) { console.error('[ws] handler error', __e); } } }`;
 
 /** `/tmp/vs-<name>-<pid>` — unique per process, cleaned by the owning suite. */
 // B-d8e3: name → the path this PROCESS decided for it (below) — one map for every copy of this module in the process (a mutant)

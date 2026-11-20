@@ -23,7 +23,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn, execSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 import { gitEnvFrom } from './git-env.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -1166,7 +1166,7 @@ if (!CHROME) {
         sentinel.id = 'pr-rerender-sentinel';
         w.content.querySelector('.session-props > .task-detail-body').appendChild(sentinel);   // the body is what a render rebuilds (lane session-props-scroll)
         // byte-identical to WsManager's own dispatch (src/lib/ws.js onmessage)
-        [...window.app.ws.globalHandlers].forEach((h) => { try { h({ type: 'active-sessions', sessions: [] }); } catch (e) { } });
+        ${relayBroadcastJs(`{ type: 'active-sessions', sessions: [] }`, "window.app.ws.globalHandlers")}
         await sleep(900);                                   // past the 300ms trailing-edge debounce
         out.sentinelSurvived = !!w.content.querySelector('#pr-rerender-sentinel');
         out.layersAfterBroadcast = w.content.querySelectorAll('.perm-rules .perm-layer').length;
@@ -1178,7 +1178,7 @@ if (!CHROME) {
         // session's cwd underneath and the held tree must be DROPPED, not
         // relabelled onto a different question.
         s.cwd = '/tmp/somewhere-else';
-        [...window.app.ws.globalHandlers].forEach((h) => { try { h({ type: 'active-sessions', sessions: [] }); } catch (e) { } });
+        ${relayBroadcastJs(`{ type: 'active-sessions', sessions: [] }`, "window.app.ws.globalHandlers")}
         await sleep(900);
         out.layersAfterCwdChange = w.content.querySelectorAll('.perm-rules .perm-layer').length;
         out.labelAfterCwdChange = (btnOf() || {}).textContent || '';
@@ -1227,7 +1227,7 @@ if (!CHROME) {
         if (!btn) return { error: 'no rules button' };
         btn.click();
         await sleep(150);                                   // still reading
-        [...window.app.ws.globalHandlers].forEach((h) => { try { h({ type: 'active-sessions', sessions: [] }); } catch (e) { } });
+        ${relayBroadcastJs(`{ type: 'active-sessions', sessions: [] }`, "window.app.ws.globalHandlers")}
         await sleep(500);                                   // the rebuild happened mid-flight
         out.detachedMidFlight = w.content.querySelectorAll('.perm-rules .perm-layer').length === 0;
         for (let i = 0; i < 80; i++) { if (w.content.querySelector('.perm-rules .perm-layer')) break; await sleep(150); }

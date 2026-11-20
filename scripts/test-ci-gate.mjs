@@ -1184,28 +1184,50 @@ console.log('\n§2k one page-target waiter: no loop under scripts/ waits for a p
 // test-channel-window-render ⑫c walked the page's LIVE handler list; a stale handler that took itself out shifted the list and
 // the open access picker's handler right after it was skipped — eight legs red, the product right: src/lib/ws.js dispatches over
 // a snapshot). A suite plays a server broadcast through scratch.mjs relayBroadcastJs ONLY: one message, a snapshot, each
-// handler isolated. THE CONTROL (once, here): the helper's own page code run against a stand-in list reaches the handler after
-// a self-removing one; the LIVE walk over the same plant skips it (the plant is real). THE CENSUS: no script under scripts/
-// walks a page's global handler list live (a for…of over it, or its .forEach). The shapes are built here from pieces, so this
-// file carries none itself.
-console.log('\n§2l one relay of a broadcast: every suite hands a server message to the page over a snapshot of its handlers');
+// handler isolated, a throw SAID as ws.js says it. THE CONTROL (once, here): the helper's own page code run against a stand-in
+// list reaches the handler after a self-removing one; the LIVE walk over the same plant skips it (the plant is real). TWO
+// CENSUSES over every script under scripts/: LIVE (the bug: a for…of over the list or a forEach / some / every / map on it,
+// the list written plain, in parentheses, with an «|| []» / «?? []» fallback, with ?. on its path; a .map only when its callback
+// CALLS the handler — a .map that wraps each handler into a new list is no relay) and COPY (the law's second
+// half: a relay over the suite's own spread or slice of the list instead of the one helper). Every spelling is a planted
+// control. KNOWN BLIND SPOTS (said, not hidden): an alias of the list (const hs = app.ws.globalHandlers; for (… of hs)), an
+// index loop (for (let i = 0; i < …globalHandlers.length; i++)) and a while loop — a person writing those meets the review,
+// not this census. The shapes are built from pieces, so this file carries none itself.
+console.log('\n§2l one relay of a broadcast: every suite hands a server message to the page through ONE helper, over a snapshot');
 {
-  const relayRun = (code) => { const hs = []; let reached = 0, seen = [], self = null; self = () => { const i = hs.indexOf(self); if (i >= 0) hs.splice(i, 1); }; hs.push(self, (m) => { reached++; seen.push(m); }, () => { throw new Error('a throwing handler'); }, (m) => { seen.push(m); }); new Function('window', code)({ app: { ws: { globalHandlers: hs } } }); return { reached, sameMsg: seen.length === 2 && seen[0] === seen[1], selfGone: !hs.includes(self) }; };
+  const t0 = Date.now();
+  const relayRun = (code) => { const hs = []; let reached = 0, seen = [], said = 0, self = null; self = () => { const i = hs.indexOf(self); if (i >= 0) hs.splice(i, 1); }; hs.push(self, (m) => { reached++; seen.push(m); }, () => { throw new Error('a throwing handler'); }, (m) => { seen.push(m); }); const console = { error: (...a) => { if (String(a[0]).includes('handler error')) said++; } }; new Function('window', 'console', code)({ app: { ws: { globalHandlers: hs } } }, console); return { reached, sameMsg: seen.length === 2 && seen[0] === seen[1], selfGone: !hs.includes(self), said }; };
   const viaHelper = relayRun(relayBroadcastJs("{ type: 'vs-relay-probe' }"));
-  ok(viaHelper.reached === 1 && viaHelper.sameMsg && viaHelper.selfGone, `relayBroadcastJs reaches the handler after one that takes itself out, hands ONE message to all, and a throwing handler stops nothing (${JSON.stringify(viaHelper)})`);
-  const G = ['window', 'app', 'ws', 'globalHandlers'].join('.');
+  ok(viaHelper.reached === 1 && viaHelper.sameMsg && viaHelper.selfGone && viaHelper.said === 1, `relayBroadcastJs reaches the handler after one that takes itself out, hands ONE message to all, and a throwing handler stops nothing and is SAID like ws.js says it (${JSON.stringify(viaHelper)})`);
+  const G = ['window', 'app', 'ws', 'globalHandlers'].join('.'), GO = ['window', 'app?', 'ws?', 'globalHandlers'].join('.'), GA = ['app', 'ws', 'globalHandlers'].join('.');
   const liveWalk = 'for (const fn of ' + G + ') { try { fn({ type: "vs-relay-probe" }); } catch (e) {} }';
   const viaLive = relayRun(liveWalk);
   ok(viaLive.reached === 0, `CONTROL: the LIVE walk over the same plant SKIPS that handler (reached ${viaLive.reached}) — the plant is real`);
-  const LIVE_WALK = new RegExp('for\\s*\\(\\s*(?:const|let|var)\\s+[\\w$]+\\s+of\\s+(?:window\\.)?app\\.ws\\.' + 'globalHandlers\\s*\\)|(?:window\\.)?app\\.ws\\.' + 'globalHandlers\\s*\\.forEach\\s*\\(', 'g');
-  const planted = { 'a for…of': liveWalk, 'app without window, let': liveWalk.replace('window.', '').replace('const fn', 'let h'), 'its .forEach': G + '.forEach((h) => h({ type: "x" }))' };
-  const cured = { 'the helper': relayBroadcastJs("{ type: 'x' }"), 'a spread copy': 'for (const h of [...' + G + ']) h(m);', 'a slice copy': 'for (const h of ' + G + '.slice()) h(m);' };
-  const nPlanted = Object.entries(planted).map(([k, v]) => [k, (v.match(LIVE_WALK) || []).length]), nCured = Object.entries(cured).map(([k, v]) => [k, (v.match(LIVE_WALK) || []).length]);
-  ok(nPlanted.every(([, n]) => n === 1) && nCured.every(([, n]) => n === 0), `CONTROLS: the census FINDS each live shape (${nPlanted.map(([k, n]) => `${k} ${n}`).join(' · ')}) and NOT a copied list (${nCured.map(([k, n]) => `${k} ${n}`).join(' · ')})`);
+  const PATH = '(?:window\\??\\.)?app\\??\\.ws\\??\\.' + 'globalHandlers';
+  const LIST = '\\(?\\s*' + PATH + '\\s*(?:(?:\\|\\||\\?\\?)\\s*\\[\\s*\\])?\\s*\\)?';
+  const CALLS = '\\(\\s*\\(?\\s*([\\w$]+)\\s*\\)?\\s*=>\\s*(?:\\{\\s*(?:try\\s*\\{\\s*)?)?\\1\\s*\\(';   // a callback that calls its handler at once
+  const LIVE_WALK = new RegExp('for\\s*\\(\\s*(?:const|let|var)\\s+[\\w$]+\\s+of\\s+' + LIST + '\\s*\\)|' + LIST + '\\s*\\??\\.\\s*(?:forEach|some|every)\\s*\\(|' + LIST + '\\s*\\??\\.\\s*map\\s*' + CALLS, 'g');
+  const COPY_WALK = new RegExp('for\\s*\\(\\s*(?:const|let|var)\\s+[\\w$]+\\s+of\\s+(?:\\[\\s*\\.\\.\\.\\s*' + LIST + '\\s*\\]|' + LIST + '\\s*\\.slice\\(\\s*\\))\\s*\\)|(?:\\[\\s*\\.\\.\\.\\s*' + LIST + '\\s*\\]|' + LIST + '\\s*\\.slice\\(\\s*\\))\\s*\\.\\s*(?:forEach|some|every|map)\\s*\\(', 'g');
+  const count = (re, t) => (t.match(re) || []).length;
+  const LIVE_PLANTS = { 'a for…of': liveWalk, 'without window, let': 'for (let h of ' + GA + ') h(m);', 'in parentheses with || []': 'for (const h of (' + G + ' || [])) h(m);', 'with ?? []': 'for (const h of (' + G + ' ?? [])) h(m);', 'optional chaining': 'for (const h of ' + GO + ') h(m);', 'its .forEach': G + '.forEach((h) => h(m));', 'its .some': G + '.some((h) => { h(m); return false; });', 'its .every': '(' + G + ' || []).every((h) => (h(m), true));', 'its .map': G + '?.map((h) => h(m));' };
+  const COPY_PLANTS = { 'a spread for…of': 'for (const h of [...' + G + ']) h(m);', 'a slice for…of': 'for (const h of ' + GA + '.slice()) h(m);', 'a spread .forEach': '[...' + G + '].forEach((h) => h(m));', 'a slice .forEach': G + '.slice().forEach((h) => h(m));' };
+  const CLEAN = { 'the helper, as a suite writes it': '${' + 'relayBroadcastJs(`m`, ' + "'" + G + "'" + ')}', 'a .map that wraps each handler': GA + ' = ' + GA + '.map((h) => (m) => h(m));', 'a handler count': 'return ' + G + '.length;', 'a set of the handlers': 'new Set(' + G + ')', 'a filter for the new ones': G + '.filter((h) => !old.has(h))' };
+  const seen = (plants) => Object.entries(plants).map(([k, v]) => [k, count(LIVE_WALK, v), count(COPY_WALK, v)]);
+  const L = seen(LIVE_PLANTS), C = seen(COPY_PLANTS), K = seen(CLEAN);
+  ok(L.every(([, l, c]) => l === 1 && c === 0), `CONTROLS: the LIVE census finds each live spelling, once, and the COPY census none of them (${L.map(([k, l]) => `${k} ${l}`).join(' · ')})`);
+  ok(C.every(([, l, c]) => l === 0 && c === 1), `CONTROLS: the COPY census finds each per-site copy, once, and the LIVE census none of them (${C.map(([k, , c]) => `${k} ${c}`).join(' · ')})`);
+  ok(K.every(([, l, c]) => l === 0 && c === 0), `CONTROLS: neither finds the helper or a read that relays nothing (${K.map(([k, l, c]) => `${k} ${l}/${c}`).join(' · ')})`);
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((x) => (x.isDirectory() ? (x.name === 'node_modules' ? [] : walk(path.join(d, x.name))) : /\.(mjs|js|cjs)$/.test(x.name) ? [path.join(d, x.name)] : []));
-  const files = walk(path.join(REPO, 'scripts')), found = [];
-  for (const f of files) { const t = fs.readFileSync(f, 'utf8'); for (const m of t.matchAll(LIVE_WALK)) found.push(`${path.relative(REPO, f)}:${t.slice(0, m.index).split('\n').length}`); }
-  ok(files.length > 300 && found.length === 0, `no script under scripts/ walks a page's global handler list LIVE — ${files.length} scripts read, ${found.length} walk it${found.length ? ': ' + found.slice(0, 8).join(', ') : ''} (relay through scratch.mjs relayBroadcastJs)`);
+  const files = walk(path.join(REPO, 'scripts')), live = [], copy = [];
+  for (const f of files) {
+    const t = fs.readFileSync(f, 'utf8'), at = (m) => `${path.relative(REPO, f)}:${t.slice(0, m.index).split('\n').length}`;
+    if (!t.includes('globalHandlers')) continue;   // only a file that names the list can walk it
+    for (const m of t.matchAll(LIVE_WALK)) live.push(at(m));
+    if (path.basename(f) !== 'scratch.mjs') for (const m of t.matchAll(COPY_WALK)) copy.push(at(m));
+  }
+  ok(files.length > 300 && live.length === 0, `no script under scripts/ walks a page's global handler list LIVE — ${files.length} scripts read, ${live.length} walk it${live.length ? ': ' + live.slice(0, 8).join(', ') : ''} (relay through scratch.mjs relayBroadcastJs)`);
+  ok(copy.length === 0, `…and none relays over a COPY of its own at the call site (the one helper holds the snapshot) — ${copy.length}${copy.length ? ': ' + copy.slice(0, 8).join(', ') : ''}`);
+  console.log(`  (§2l read ${files.length} scripts in ${Date.now() - t0} ms)`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

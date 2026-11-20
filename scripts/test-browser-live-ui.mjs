@@ -45,7 +45,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE } from './scratch.mjs';
+import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, deadPort, CHROME_STORE, relayBroadcastJs } from './scratch.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (never the machine-global :7/5901 — test-architecture §57)
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const DEAD_CDP = await deadPort(); // the fake's cdp-url: a port the kernel just released, never a fixed one (§81)
@@ -531,7 +531,7 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
           const closeD = () => evaluate(`(() => { const d = document.getElementById('browser-switcher-dialog'); if (d) d.querySelector('.dialog-footer .btn-cancel').click(); return !document.getElementById('browser-switcher-dialog'); })()`);
           // W2 by a broadcast: another browser named for this profile
           const W2_ID = 'fixture-browser';
-          await evaluate(`(() => { const d = window.app._browserProfiles; const msg = { type: 'browser-profiles-updated', ...d, backends: { ...(d.backends || {}), [${JSON.stringify(pid)}]: { id: 'chromium', major: 151, plan: null, choices: [${JSON.stringify(W2_ID)}] } } }; [...window.app.ws.globalHandlers].forEach((h) => { try { h(msg); } catch { } }); return true; })()`);
+          await evaluate(`(() => { const d = window.app._browserProfiles; const msg = { type: 'browser-profiles-updated', ...d, backends: { ...(d.backends || {}), [${JSON.stringify(pid)}]: { id: 'chromium', major: 151, plan: null, choices: [${JSON.stringify(W2_ID)}] } } }; ${relayBroadcastJs(`msg`, "window.app.ws.globalHandlers")} return true; })()`);
           const x2 = await until(async () => { const x = await look(); return x.button && !x.label && x.rows.length && x.rows[0].btns.length === 3 ? x : null; }, 4000);
           ok(!!x2 && x2.words === 'Chromium' && x2.isButton === true && /^Switch to .+…$/.test(x2.rows[0].btns[0]) && x2.rows[0].btns[1] === 'Hide details' && x2.rows[0].btns[2] === 'Dismiss' && x2.rows[0].text === 'Your agent reports shop.example blocked it: “captcha”.', `②b W2 (another browser named, by a broadcast): the name is a BUTTON and the banner offers the switch beside Details (still open across the rebuild) and Dismiss (${JSON.stringify(x2 && x2.rows)})`);
           await evaluate(`(${LIVE})._browserLive.el().querySelector('.browser-live-bar .browser-live-backend').click()`);
