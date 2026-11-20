@@ -108,6 +108,12 @@ const cli = (args, token) => new Promise((resolve) => {
 const stubs = () => fs.readdirSync(stubDir).filter((x) => x.startsWith('env-')).map((f) => { try { return JSON.parse(fs.readFileSync(path.join(stubDir, f), 'utf8')); } catch { return null; } }).filter(Boolean);
 const active = async () => ((await req('GET', '/api/active')).json || {}).sessions || [];
 const until = async (fn, ms = 15000) => { const t0 = Date.now(); for (;;) { const v = await fn(); if (v) return v; if (Date.now() - t0 > ms) return null; await sleep(250); } };
+/** THE WINDOW'S LINE WHERE THE PAGE READS IT (place-8, 主开发 2026-11-20 04:56Z): the newest `active-sessions` frame on this suite's own
+ *  WebSocket — the hub sends it at connect and at every change (server.js activeSessionsPayload, the page's chat-view reads its
+ *  row.resumedBy); GET /api/active keeps its own, smaller field list and never carried resumedBy. The conversation's row, waited for
+ *  until it carries the resumed line (bounded), else the newest row as it is. */
+const liveRowOf = (sid) => { for (let i = frames.length - 1; i >= 0; i--) { const m = frames[i]; if (!m || m.type !== 'active-sessions') continue; const r = (m.sessions || []).find((x) => x && (x.backendSessionId === sid || x.claudeSessionId === sid || String(x.sessionKey || '').endsWith(`:${sid}`))); if (r) return r; } return null; };
+const resumedRowOf = async (sid) => (await until(() => { const r = liveRowOf(sid); return r && r.resumedBy ? r : null; }, 10000)) || liveRowOf(sid);
 
 const WebSocket = require('ws');
 let ws = null;
@@ -223,7 +229,7 @@ try {
   const rf = userFrames(R.sid);
   check('R (ended by the restart, NO grant) is resumed: its CLI started with --resume, ONE user frame — the reminder and the design\'s sentence',
     !!rBack && resumedRun(R.sid).length === 1 && rf.length === 1 && /the R reminder/.test(frameText(rf[0])) && /resumed to hand you this/.test(frameText(rf[0])), { runs: resumedRun(R.sid).length, frames: rf.map(frameText) });
-  const rRow = (await active()).find((s) => s.backendSessionId === R.sid || s.claudeSessionId === R.sid);
+  const rRow = await resumedRowOf(R.sid);   // the page's own door (the ws frame), never GET /api/active
   check('…its window\'s line says what resumed it and when (the session\'s resumedBy)', !!rRow && rRow.resumedBy && rRow.resumedBy.params && /r-remind/.test(rRow.resumedBy.params.what) && Number(rRow.resumedBy.at) > 0, rRow && rRow.resumedBy);
   const wakeLine = (j) => (j.notifyLog || []).find((l) => l && l.lane === 'wake' && l.ok === false);
   const jobOf = async (n) => ((await req('GET', `/api/jobs/${J[n].id}`)).json || {}).job || {};
@@ -240,7 +246,7 @@ try {
   check('the person grants P\'s second reminder between the two fires', pressP.status === 200 && pressP.json.wakesEndedOwner === true, pressP);
   const ledger1 = ledgerRows();
   const pBack = await until(() => (userFrames(P.sid).length && userFrames(A.sid).length && userFrames(K.sid).length && ledgerRows() >= ledger1 + 3 ? true : null), 150000);   // waits on the ledger's rows
-  const rowOf = async (sid) => (await active()).find((s) => s.backendSessionId === sid || s.claudeSessionId === sid);
+  const rowOf = resumedRowOf;   // the page's own door (the ws frame), never GET /api/active
   const pRow = await rowOf(P.sid), kRow = await rowOf(K.sid), aRow = await rowOf(A.sid);
   check('the same schedule WITH the grant resumes P ONCE (one run, one frame) — and the window says what resumed it and that the person allowed it',
     !!pBack && resumedRun(P.sid).length === 1 && userFrames(P.sid).length === 1 && /the P second reminder/.test(frameText(userFrames(P.sid)[0])) && /the P reminder/.test(frameText(userFrames(P.sid)[0])) && pRow && pRow.resumedBy && /you allowed it/.test(pRow.resumedBy.key), { runs: resumedRun(P.sid).length, line: pRow && pRow.resumedBy });
