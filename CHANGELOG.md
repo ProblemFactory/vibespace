@@ -25,6 +25,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - While you drive a browser whose tab sits behind another tab in its window, the view says to press it in the browser's own tab strip, or Bring it forward.
 - A browser tab that stops answering no longer shows another tab's page under its name: you see its own last picture, or none, with words saying so.
 - Bring it forward on a tab VibeSpace cannot bring forward now says so, and what to do, instead of doing nothing.
+- On a Duo's inner screen or a tablet, the bar's ⋯ shows only when the window's menu has something in it; on a Files window it opened an empty menu.
 
 ## 2.369.413 — 2026-11-20
 
