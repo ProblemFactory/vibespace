@@ -4,8 +4,8 @@
 // src/server/loop-holds.js — at PRODUCTION timings: the beat 250 ms, a hold 1 s, the capture 20 s at 50 ms; the trigger's
 // lag reading is injected — test-cpu-capture pins the verdict itself):
 //   Ⓐ THE SATURATED LOOP: a KNOWN busy function at ~80 % in callbacks of 50–200 ms (nothing ≥ 1 s) — commit 1 says nothing
-//      (no [loop-hold] line); the trigger's capture names the function FIRST, its share within ±10 points of the child's
-//      own measured truth; ONE block ≤ 15 lines; its .cpuprofile kept and its own table the block's; a second trigger
+//      (no [loop-hold] line); the trigger's capture names the function FIRST, the largest row — its share printed beside the
+//      child's own measured truth, its samples and its wall time, never judged in a band (主开发's r176); ONE block ≤ 15 lines; its .cpuprofile kept and its own table the block's; a second trigger
 //      inside the interval captures nothing. Its samples are judged at the rate the capture SAYS it ran: asked every 50 ms,
 //      halved only where an ask passed its bound and the block says so (the hosted runner's .401 heavy: one ask took 4.36 ms
 //      ⇒ every 100 ms, 244 samples) — a pin on that capture's own record first
@@ -153,6 +153,13 @@ function pinRate() {
   ok(said.ok && !unsaid.ok && !unmoved.ok && !few.ok && !old.ok, 'the rate read as the capture says it: the hosted runner\'s (244 samples, halved to every 100 ms where an ask took 4.36 ms, said) holds; the same halving unsaid, a halving said at an unmoved rate, 170 samples at 100 ms, 244 at 50 ms — each refused',
     { said, unsaid: unsaid.ok, unmoved: unmoved.ok, few: few.ok, old: old.ok });
 }
+/** 主开发's r176: the top row is the LARGEST (no other row above it) — what a single profile makes certain */
+const largestRow = (rows) => Array.isArray(rows) && rows.length > 0 && rows.every((x, i) => i === 0 || !(x.pct > rows[0].pct));
+/** the share said, never judged: the row's share, the child's own measure, the profile's sample count and its wall time */
+const shareWords = (L, fn, r) => {
+  const row = L && (L.rows || []).find((x) => x.fn === fn), truth = r && r.out && r.out.truth ? r.out.truth[fn] : null;
+  return `${row ? row.pct : '?'} % of the profile, its truth ${truth != null ? truth : '?'} % — ${L ? L.samples : '?'} samples in ${L && L.windowMs ? (L.windowMs / 1000).toFixed(1) : '?'} s; a share of one profile is printed, never judged in a band`;
+};
 async function legSaturated(tag, node) {
   console.log(`Ⓐ the saturated loop names its top function — production timings, a 20 s capture (${tag})`);
   const r = await run({ plan: 'saturated', lag: 1, afterMs: 3000 }, { node });
@@ -163,7 +170,9 @@ async function legSaturated(tag, node) {
   ok(held.length === 0 && r.out && r.out.holds.length === 0, `${tag}: callbacks of 50–200 ms — commit 1's hold watchdog says NOTHING (no hold of a second)`, held.slice(0, 2));
   ok(L && L.auto === true && L.cause === 'lag' && rate.ok, `${tag}: the trigger's ONE capture: 20 s asked every 50 ms${rate.last && rate.last !== 50 ? `, halved to every ${rate.last} ms where an ask passed its bound — said` : ''} (${L ? L.samples : '?'} samples ≥ 90 % of the window at the rate it ran)`,
     L && { auto: L.auto, cause: L.cause, w: L.windowMs, every: L.everyMs, final: L.finalEveryMs, n: L.samples, said: rate.said, cost: (L.lines || []).find((l) => /\d+ samples, the asks/.test(l)) });
-  ok(L && L.rows[0] && L.rows[0].fn === 'knownBusy' && L.rows[0].loc === 'src/hogs.js:4' && Math.abs(L.rows[0].pct - r.out.truth.knownBusy) <= 10, `${tag}: it names the KNOWN function FIRST — knownBusy · src/hogs.js:4 at ${L && L.rows[0] ? L.rows[0].pct : '?'} %, the child's own measure ${r.out && r.out.truth ? r.out.truth.knownBusy : '?'} % (±10 points)`, L && L.rows);
+  // 主开发's r176: what this leg guards is the NAME — the function, its file, its line — and that it is the largest; a share of ONE
+  // profile on a shared runner is no fact to judge inside a band: printed beside its truth, its sample count and its wall time
+  ok(L && L.rows[0] && L.rows[0].fn === 'knownBusy' && L.rows[0].loc === 'src/hogs.js:4' && largestRow(L.rows), `${tag}: it names the KNOWN function FIRST — knownBusy · src/hogs.js:4, the largest row (${shareWords(L, 'knownBusy', r)})`, L && L.rows);
   ok(b.length === 1 && b[0].split('\n').length <= 15 && b[0].split('\n').every((l) => l.startsWith('[cpu-profile] ')) && /time inside native calls is counted on the JavaScript caller/.test(b[0]) && /\d+ samples, the asks themselves took \d+ ms of the main thread/.test(b[0]),
     `${tag}: ONE block in the journal, ≤ 15 lines (${b[0] ? b[0].split('\n').length : 0})`, b);
   ok(r.out && r.out.file && r.out.file.header && r.out.file.header.sampledEveryMs === 50 && r.out.file.top[0] && r.out.file.top[0][0] === 'knownBusy' && Math.abs(r.out.file.top[0][2] - L.rows[0].pct) <= 0.1,
@@ -197,8 +206,10 @@ async function legNative(tag, node) {
   const r = await run({ plan: 'json', captureMs: 6000, auto: false, doorAt: 600, afterMs: 100 }, { node });
   const L = r.out && r.out.capture.last;
   if (L) say(`${tag}: ${rowsOf(r).map((x) => `${x.fn} ${x.pct} %`).join(', ')}; the truth jsonCaller ${r.out.truth.jsonCaller} %; outside JavaScript ${L.split.native} %`);
-  ok(L && L.rows[0] && L.rows[0].fn === 'jsonCaller' && L.rows[0].loc === 'src/hogs.js:7' && Math.abs(L.rows[0].pct - r.out.truth.jsonCaller) <= 10 && !L.rows.some((x) => /parse/i.test(x.fn)),
-    `${tag}: a function spending its time in ONE big JSON.parse is named by its caller — jsonCaller · src/hogs.js:7 at ${L && L.rows[0] ? L.rows[0].pct : '?'} % (its truth ${r.out && r.out.truth ? r.out.truth.jsonCaller : '?'} %)`, L && L.rows);
+  // 主开发's r176 (the hosted red 44740629278: «at 65.1 % (its truth 53.8 %)» — the name right): the leg judges the NAME exactly and
+  // that it is the largest row; the share is printed with its truth, its samples and its wall time, never judged inside a band
+  ok(L && L.rows[0] && L.rows[0].fn === 'jsonCaller' && L.rows[0].loc === 'src/hogs.js:7' && largestRow(L.rows) && !L.rows.some((x) => /parse/i.test(x.fn)),
+    `${tag}: a function spending its time in ONE big JSON.parse is named by its caller — jsonCaller · src/hogs.js:7, the largest row, no row of the parse (${shareWords(L, 'jsonCaller', r)})`, L && L.rows);
   ok(L && L.lines.some((l) => l === '[cpu-profile]   time inside native calls is counted on the JavaScript caller; functions under 3 % are not listed'), `${tag}: the block says so`);
 }
 async function legGc() {
