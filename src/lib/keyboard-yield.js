@@ -110,11 +110,29 @@ export function lateFocusVerdict(overlays, active = null) { try { return Array.f
  *  opening — re-attaching, restoring, an upload or a lease answered — take the keys now? `since` = when its open began (the page's
  *  clock; a missing one is the page's start); `act` = the person's last act on the page ({ at, inside }: `inside` = in the opening
  *  window itself). 'take' unless the person pressed or typed ELSEWHERE after the open began — then 'drop': a late focus that lost
- *  that race is dropped, never queued (the window is drawn; the person's next press into it gives it the keys). */
-export function lateFocusTakes({ since, act } = {}) {
+ *  that race is dropped, never queued (the window is drawn; the person's next press into it gives it the keys). `handed` = the start
+ *  was handed (by a road from the person's press, or by the act the open is made in); `field` = a typing field or a frame outside the
+ *  opening window holds the focus. */
+export function lateFocusTakes({ since, act, handed = false, field = false } = {}) {
   const from = Number.isFinite(since) ? since : 0;
-  if (!act || !Number.isFinite(act.at) || !(act.at > from)) return 'take';
-  return act.inside ? 'take' : 'drop';
+  if (act && Number.isFinite(act.at) && act.at > from && !act.inside) return 'drop';
+  // r671 + r673, THE DEFAULT IS SAFE: an open whose start nobody HANDED it (neither a road from the person's press nor the person's
+  // act it is made in) never takes the keys out of a field the person is in (`field`: the page's focused element is a typing field
+  // or an embedded frame outside the opening window), whatever the clock says. A handed start keeps the clock rule above, exactly.
+  if (!handed && field) return 'drop';
+  return 'take';
+}
+/** B-c87d r673 — THE ACT A PERSON IS DOING RIGHT NOW: the kinds of the page's current event that are a person's own input (a press,
+ *  a click, a key, a submit, a change of a control; a paste and a drop are a key's and a press's own events). A CLOSED list: a hub
+ *  message, a load, a timer, a transition or animation, a focus or visibility change are NOT acts, nor is anything a script
+ *  dispatched (untrusted). */
+export const ACT_EVENT_KINDS = Object.freeze(['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'auxclick', 'touchstart', 'touchend', 'keydown', 'keyup', 'submit', 'change', 'paste', 'drop']);
+/** PURE: an open made inside the event `ev` (the page's current event) — is it made in the person's own act? → its start
+ *  { at: the act's own instant on the page's clock (its timeStamp; `now` when that is not on the page's clock), by: 'act' }, or null */
+export function actOpenStart(ev, now) {
+  if (!ev || typeof ev !== 'object' || ev.isTrusted !== true || !ACT_EVENT_KINDS.includes(ev.type)) return null;
+  const n = Number.isFinite(now) ? now : 0, ts = ev.timeStamp;
+  return { at: Number.isFinite(ts) && ts >= 0 && ts <= n ? ts : n, by: 'act' };
 }
 /** lane dialog-keys: where a dialog that TOOK the keys but focuses nothing itself gets them (the brief: "its first
  *  focusable / its input") — its first text box, else the overlay (a keydown there bubbles through the dialog's own

@@ -327,7 +327,7 @@ console.log('⑦ wiring pins — the window really calls every rule; the doors; 
     'an ended conversation\'s send READS "Reopen and send" (its visible label), the note says the fact or the last refusal, a chip\'s title says it reopens');
   ok(/reply\.append\(why, voiceField\(ta, attachDictation\(ta\)\)\);/.test(w) && /c\.reply\.prepend\(c\.why\)/.test(w), 'the note sits ABOVE the box (built first, moved back to the front)');
   const actsSrc = read('src/lib/user-todos-actions.js');
-  ok(/const replyBox = \(i\) => replyBoxView\(replyState\(i\), replyFailures\.get\(i\.id\) \|\| null\);/.test(actsSrc) && /if \(r\.reopened\) \{ showToast\(t\('Reopened the conversation and sent your reply'\)\); openReopened\(r\); \}/.test(actsSrc) && /replyFailures\.set\(id, \{ code: \(r && r\.code\) \|\| 'unreachable', why \}\);/.test(actsSrc),
+  ok(/const replyBox = \(i\) => replyBoxView\(replyState\(i\), replyFailures\.get\(i\.id\) \|\| null\);/.test(actsSrc) && /if \(r\.reopened\) \{ showToast\(t\('Reopened the conversation and sent your reply'\)\); openReopened\(r, at\); \}/.test(actsSrc) && /replyFailures\.set\(id, \{ code: \(r && r\.code\) \|\| 'unreachable', why \}\);/.test(actsSrc),
     'THE model: replyBox = the PURE replyBoxView over the verdict + this page\'s last refusal; a reopened reply toasts and OPENS the conversation\'s window; a refusal is kept for the note');
   const rowSrc = read('src/lib/user-todos-row.js');
   const apply = (rowSrc.match(/export function applyLive\(el, item, ctx\) \{[\s\S]*?\n\}\n/) || [''])[0];

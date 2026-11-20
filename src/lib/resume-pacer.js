@@ -28,7 +28,9 @@ const LIST_MAX = 3;               // the names a failure line lists before «and
  *  create has ended (its promise settled), so two bulk roads never have two creates in flight. → fn's promise */
 let lane = Promise.resolve();
 export function inTurn(fn) {
-  const run = lane.then(() => fn());
+  // B-c87d r673: every turn starts in a task of its own (a 0 ms timer), never inside the dispatch of the press that ended the turn
+  // before it (a window's close settling the previous create): an open made inside that press would take it as its start
+  const run = lane.then(() => new Promise((r) => setTimeout(r, 0))).then(() => fn());
   lane = run.then(() => { }, () => { });
   return run;
 }

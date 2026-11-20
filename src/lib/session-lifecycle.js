@@ -20,7 +20,7 @@ import * as quotaModel from '../quota-model.js'; // PURE: the display verdict (w
 import { resumeSpawnPick } from '../resume-continuity.js';
 import { locateVerdict, LOCATE_WORDS } from '../locate-verdict.js'; // lane think-tools-phone: «not visible» only when true, with its door
 const LOCATE_WAIT_MS = 3000; // the bounded wait for the row (the list's next frame draws it; a folder's lazy cards are built on the way)
-import { lateFocus, openClock, PAGE_START, unattendedOpen } from './late-focus.js'; // B-c87d: THE ONE late-focus door (the keyboard stays where the person last put it; an open dialog keeps the keys first)
+import { lateFocus, openStart, PAGE_START, unattendedOpen } from './late-focus.js'; // B-c87d: THE ONE late-focus door (the keyboard stays where the person last put it; an open dialog keeps the keys first)
 // B-c87d (r364 MUST 1): «nobody on this page started it» is a FACT of the page (late-focus.js unattendedOpen), never an id an open reuses
 import { forkGroupPlan } from './fork-groups.js'; // a fork lands in its source's Task Groups (2026-09-25)
 import { carriedGeometry } from './stage-rules.js'; // the geometry a replaced window carries: a borrowed hero's HOME, never the Stage's slot (verify r1 of inc-munl8jkl-gaih)
@@ -72,10 +72,10 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   /** B-c87d r558: THE START OF A PERSON'S OPEN, read now — for a road outside this file that reads it where the person's act starts
    *  the open, before its own awaits, and hands it on as `openAt` (layout.js: a desktop switch's replay, a preset the person loads) */
-  _openStartNow() { return unattendedOpen(this) ? PAGE_START : openClock(); },
+  _openStartNow() { return openStart(this); },   // B-c87d r673: the ONE fact { at, by } — the person's act now, else unhanded
 
   createSession({ cwd, name, model, permission, extraArgs, resumeId, mode, syncId, effort, outputStyle, autoResume, worktree, fork, hostId, keeperSid, backend = 'claude', backendSessionId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, initialMessage, initialCommand, forkAtUuid, forkTitle, taskId, taskIds, tools, extraTaskBinds, accountId, modelLock, lockModel, lockContext, poolPin, ephemeral = false, purpose = null, winBounds, recreateCwd = false, ignoreNoConvo = false, opencodePty = false, onCreateResult, onCreateEnd, browserProfileId, browserProfileOrigin, quiet = false, bulk = false, openAt: pressAt = null }) {
-    const openAt = unattendedOpen(this, quiet) ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock());   // B-c87d: the open began at the person's act — the press a road hands on (r558), else NOW; nobody on this page started it: the page's start
+    const openAt = openStart(this, { quiet, given: pressAt });   // B-c87d: the open began at the person's act — the press a road hands on (r558), else NOW; nobody on this page started it: the page's start
     const createArgs = arguments[0] || {}; // B-864f: the create as it was asked — a window that waits for the vault replays it whole
     try { track('event', `session-create:${backend || 'claude'}:${mode || 'default'}`); } catch {}
     // FIRST USE of a harness whose history lives behind an opt-in background
@@ -308,6 +308,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           if (re) { re.place = winBounds ? { ...re.place, ...winBounds } : re.place; this._attachInRow(re, msg.existingId, msg.existingName || sessionName, msg.existingCwd || cwd, {
             mode: msg.existingMode || sessionMode, backend,
             backendSessionId: resumeId || undefined, hostId: hostId || undefined,
+            openAt, ...(quiet ? { quiet: true } : {}),   // B-c87d r671: the create's own start and its quiet
           }); }
           return true;
         }
@@ -770,7 +771,8 @@ export function installSessionLifecycle(App, ctx = {}) {
     const webuiId = live.webuiId || sessLike.webuiId || null;
     const name = this.sidebar?.getCustomName?.({ backend: live.backend, backendSessionId: cid }) || live.name || '';
     const mode = live.webuiMode || 'chat';
-    const finish = () => this.resumeSession(cid, live.cwd || '', name, { mode, backend: live.backend || 'claude', backendSessionId: cid, hostId: live.host || undefined, excludeWebuiId: webuiId || undefined });
+    const at = this._openStartNow();   // B-c87d r671: the restart's start is its press, read before the kill and its exit's wait (up to 15 s)
+    const finish = () => this.resumeSession(cid, live.cwd || '', name, { mode, backend: live.backend || 'claude', backendSessionId: cid, hostId: live.host || undefined, excludeWebuiId: webuiId || undefined, openAt: at });
     if (!webuiId || live.status === 'stopped') { finish(); return; }  // already dead — just resume
     showToast(t('Restarting the session…'));
     let done = false;
@@ -887,7 +889,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         // B-c87d: the person's own open of a standing window takes its keys at once (the same task — whatever ids it reuses, r364);
         // one NOBODY ON THIS PAGE STARTED (a boot restore, a record from another device, an unattended open) goes through the door from
         // the page's start — it takes the keys only while the person has not acted on the page since it loaded
-        if (!off) lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : (Number.isFinite(at) ? at : openClock()) });   // through THE door either way (an open dialog keeps the keys; this road is reached late too, after an attach's await)
+        if (!off) lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : openStart(this, { given: at }) });   // through THE door either way (an open dialog keeps the keys; this road is reached late too, after an attach's await)
         return true;
       }
     }
@@ -907,7 +909,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     if (!w || !sent || Date.now() - sent >= 15000 || !this.wm.windows.has(w.id)) { if (w) this._attachWins.delete(serverId); return false; }
     if (!replay) this.desktopManager?.keepInFront?.(w.id); // a person's open: it stands — revealed now, in front of a group still forming around it (r5 O)
     this.wm.revealWindow(w.id, { replay });
-    if (!unattended) w._lateFocusSince = Number.isFinite(at) ? at : openClock();   // B-c87d: the person pressed it AGAIN while it attaches — the open starts again at that press (an impatient re-press keeps its keys)
+    if (!unattended) w._lateFocusSince = openStart(this, { given: at });   // B-c87d: the person pressed it AGAIN while it attaches — the open starts again at that press (an impatient re-press keeps its keys)
     return true;
   },
 
@@ -944,7 +946,7 @@ export function installSessionLifecycle(App, ctx = {}) {
 
   attachSession(serverId, name, cwd, { mode, syncId, backend = 'claude', backendSessionId, hostId, agentKind, agentRole, agentNickname, sourceKind, parentThreadId, machine = false, quiet = false, openAt: pressAt = null } = {}) {
     const unattended = unattendedOpen(this, quiet);   // B-c87d (r364): a fact of the page, never the syncId or `machine` an open reuses
-    const openAt = unattended ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock());   // B-c87d: the open began at the person's act (the press a road hands on — r558 — else NOW); nobody on this page started it: the page's start
+    const openAt = openStart(this, { quiet, given: pressAt });   // B-c87d: the open began at the person's act (the press a road hands on — r558 — else NOW); nobody on this page started it: the page's start
     cwd = stripCwdHostLabel(cwd); // keep openSpec.cwd a REAL path — it persists into layouts and feeds later resumes
     if (!quiet) this._closeSidebarOnMobile();   // a QUIET attach (a page following a resume nobody pressed) leaves a phone's open sidebar as it is
     // If we already have a window for this session, show it (a replay / restore — `syncId` or `machine` — only raises it)
@@ -953,7 +955,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // here — not yet in this.sessions, filled at 'attached' — the open went to another desktop that listed it, nothing was built
     // there and the page said its window did not appear): the window shown (above), then the window still attaching, only then a
     // held window on another desktop — never a copy of the one this page has (desktop-manager revealHeldSession)
-    if (unattended && this._focusPendingAttach(serverId, { replay: !!(syncId || machine), unattended })) return null;   // B-c87d r558: an open nobody pressed (quiet) while a pressed attach is in flight renews nothing
+    if ((unattended || pressAt != null) && this._focusPendingAttach(serverId, { replay: !!(syncId || machine), unattended, at: openAt })) return null;   // B-c87d r558/r671: an open nobody pressed (quiet) renews nothing; a start a road handed renews to it
     if (this._focusPendingAttach(serverId, { replay: !!(syncId || machine) })) return null; // B-0cc8: the attach in flight IS the answer — no second frame
     // ONE CONVERSATION, ONE WINDOW (userW inc-mw1ogdno-5jny — the writer of the triple): the shortcut above sees only the windows
     // this page BUILT; a conversation whose window waits in the record of a desktop not visited since the page loaded got a SECOND
@@ -1105,7 +1107,7 @@ export function installSessionLifecycle(App, ctx = {}) {
   },
 
   attachTmuxSession(tmuxTarget, name, cwd, { replay = false } = {}) {
-    const openAt = unattendedOpen(this) ? PAGE_START : openClock();   // B-c87d (r364): the fact, not the spec replay's flag
+    const openAt = openStart(this);   // B-c87d (r364): the fact, not the spec replay's flag; r673: the ONE start fact
     this._closeSidebarOnMobile();
     // Check if already viewing this tmux target
     for (const [winId, term] of this.sessions) {
@@ -1386,7 +1388,7 @@ export function installSessionLifecycle(App, ctx = {}) {
         const match = (sidebar._allSessions || []).find(s => (s.backendSessionId || s.sessionId) === targetBackendId && (s.backend || 'claude') === backend && s.webuiId);
         if (match && term.sessionId === match.webuiId && match.webuiId !== gone) {
           if (from) this._closeSecondView(from, { backend, cid: targetBackendId }); // the window pressed in shows a conversation this page shows live — a second view
-          this._focusExistingSession(match.webuiId, { replay: !!syncId, unattended: unattended || stay, at: openAt });   // B-c87d r558: the resume's own fact and start
+          this._focusExistingSession(match.webuiId, { replay: !!syncId, unattended: unattended || stay || unattendedOpen(this), at: openAt });   // B-c87d r558/r671: the resume's own fact (and the page's) and start
           return;
         }
       }
@@ -1718,7 +1720,8 @@ export function installSessionLifecycle(App, ctx = {}) {
       // loop-blocked instance the active-sessions refresh lagged 10-30s, the
       // killed session still matched as "live", and the switch silently
       // ended at _focusExistingSession on the dead window).
-      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds, excludeWebuiId: live?.webuiId, onCreateResult: persistOnSuccess });
+      const at = this._openStartNow();   // B-c87d r671: the switch's start is its press, read before the kill and its exit's wait (about 9 s remote)
+      const finish = () => this.resumeSession(backendSessionId, cwd, name, { mode, backend, backendSessionId, accountId: acctVal, hostId, winBounds, excludeWebuiId: live?.webuiId, onCreateResult: persistOnSuccess, openAt: at });
       if (live?.webuiId) {
         // backendSessionId lets the server resolve the session even when the
         // webui id went stale across a restart (2.179.0 — a no-op'd kill here

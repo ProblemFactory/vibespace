@@ -5104,13 +5104,14 @@ class ChatView {
     const name = this.app.sidebar?.getCustomName?.({ backend, backendSessionId }) || this.winInfo?.name || t('Session');
     const winId = this.winInfo?.id, killed = this.sessionId;
     const winBounds = winId ? this.app._snapshotWinBounds?.(this.app.wm.windows.get(winId)) : undefined;
+    const at = this.app?._openStartNow?.();   // B-c87d r671: the restart's start is its press, read before the kill and the flush's wait
     this.app.killSession(this.sessionId, backendSessionId);
     setTimeout(() => {
       if (!this._ownsWindow()) return; // its window went (or was re-made) during the flush — a disposed view never acts (r3 N4)
       // the window is the row: resumeSession re-opens it as itself (r2 N1) — the killed session is the one it replaces
       this.app.resumeSession(backendSessionId, cwd, name, {
         mode: 'chat', backend, backendSessionId, fromWin: winId, excludeWebuiId: killed || undefined,
-        hostId: ids.host || undefined, winBounds, permission: mode,
+        hostId: ids.host || undefined, winBounds, permission: mode, openAt: at,
       });
     }, 900); // let the CLI flush its transcript before --resume
   }
@@ -7543,8 +7544,9 @@ class ChatView {
   // ONE press: resume this conversation with the waiting message as its first
   // message (createSession's initialMessage, forwarded through resumeSession).
   // lane signin-card-real-screen: a LIVE wall's CLI is stopped first (resuming beside it = two writers).
-  _resendWaiting() {
-    if (this._signinLive) { this._signinLive = false; this._afterLiveCli(() => { if (!this._disposed) this._resendWaiting(); }); return; } // after the wait: a disposed view never acts (r3 N4)
+  _resendWaiting(at) {   // B-c87d r671: `at` = the start of the press that asked (a sign-in landing presses nothing: unhanded)
+    if (at === undefined) at = this.app?._openStartNow?.();
+    if (this._signinLive) { this._signinLive = false; this._afterLiveCli(() => { if (!this._disposed) this._resendWaiting(at); }); return; } // after the wait: a disposed view never acts (r3 N4)
     const ids = this._getSessionIds();
     const backend = ids.backend || 'claude';
     const backendSessionId = ids.backendSessionId || this.winInfo?.backendSessionId || null;
@@ -7558,7 +7560,7 @@ class ChatView {
       mode: 'chat', backend, backendSessionId, hostId: ids.host || undefined,
       agentKind: this.winInfo?.titleMeta?.agentKind, agentRole: this.winInfo?.titleMeta?.agentRole,
       agentNickname: this.winInfo?.titleMeta?.agentNickname, sourceKind: this.winInfo?.titleMeta?.sourceKind,
-      ...(text ? { initialMessage: text } : {}),
+      ...(text ? { initialMessage: text } : {}), openAt: at,
     });
   }
 

@@ -16,7 +16,7 @@ import { landDraft, PUTBACK_SEP } from '../queue-putback.js'; // PURE (lane stop
 import { createAgentCards } from './agent-card.js'; // lane agent-window-no-pop: the card an agent's window leaves where nothing opened
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // lane duo-build-1: the phone paths' ONE media list (compact ∪ regular)
 import { createImageDoor, refusalText, heldOf } from './image-attach.js'; // B-c9ed: THE picture door — every picture judged by THE rule when it is handed
-import { lateFocus, openClock } from './late-focus.js'; // B-c87d: a focus after an await goes through THE door (the keyboard stays where the person last put it)
+import { lateFocus, startNow } from './late-focus.js'; // B-c87d: a focus after an await goes through THE door (the keyboard stays where the person last put it)
 import { imageLimitsOf } from '../backend-caps.js'; // batch 20 cure: the numbers a picture is judged by are its conversation's HARNESS row
 
 /** THE CAMERA DOOR (lane phone-take-photo, owner 2026-11-09 «为啥我在手机上添加图片的时候不能拍照»): Android Chrome opens an
@@ -598,7 +598,7 @@ export class ChatInput {
   async uploadFiles(files) {
     files = (files || []).filter(Boolean);
     if (!files.length) return;
-    const upAt = openClock();   // B-c87d (r364 MUST 3): the upload began NOW (the person's drop or pick); its paths land after the network
+    const upAt = startNow();   // B-c87d (r364 MUST 3): the upload began NOW (the person's drop or pick — r673: inside that act, its start is handed); its paths land after the network
     const cwd = this._getCwd();
     if (!cwd) { this._uploadToast(t('No working directory for this session'), true); return; }
     // Destination: the session cwd by default, or a fixed folder from
@@ -1619,7 +1619,7 @@ export class ChatInput {
    *  message's total — claude: the model API's; none stated: none) or past VibeSpace's own ceiling becomes no chip, and ONE toast names each refused file and why; a
    *  taken picture carries the type its bytes say */
   _addImageAttachment(files) {
-    this._picAddAt = openClock();   // B-c87d: the add began NOW (the person's paste, pick or shot); the picture lands after its read
+    this._picAddAt = startNow();   // B-c87d: the add began NOW (the person's paste, pick or shot — r673: inside that act, handed); the picture lands after its read
     if (!this._imageDoor) this._imageDoor = createImageDoor({
       held: () => heldOf(this._attachments),
       // B-c87d: the composer takes the keys back after the read only if the person did nothing elsewhere since the add began

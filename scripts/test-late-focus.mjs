@@ -59,6 +59,38 @@ const BASE_RULE = () => 'take';   // the base: a late focus took the keys whatev
 const baseFails = ROWS.filter(([, a, w]) => BASE_RULE(a) !== w).map(([n]) => n);
 ok(baseFails.length === 3, `CONTROL: the base's rule (every late focus taken) is refused by the table — ${baseFails.length} rows: ${baseFails.join(' · ')}`, baseFails);
 
+console.log('§1b THE DEFAULT IS SAFE (r671 + r673): a start nobody handed never takes the keys out of a field the person is in');
+const LAW = [
+  ['an UNHANDED start, a field elsewhere holds the focus, no act since: dropped', { since: 100, act: { at: 90, inside: false }, handed: false, field: true }, 'drop'],
+  ['a HANDED start (by the act or a road), the same focus, no act since: taken — the clock rule, exactly', { since: 100, act: { at: 90, inside: false }, handed: true, field: true }, 'take'],
+  ['an unhanded start, the focus on the page body: taken', { since: 100, act: { at: 90, inside: false }, handed: false, field: false }, 'take'],
+  ['a handed start, an act elsewhere after it: dropped — the clock rule kept', { since: 100, act: { at: 120, inside: false }, handed: true, field: false }, 'drop'],
+  ['an unhanded start from the page\'s start, nothing pressed yet, a field elsewhere: dropped', { since: 0, act: null, handed: false, field: true }, 'drop'],
+  ['the PURE default is safe: no `handed` said ⇒ unhanded', { since: 100, act: null, field: true }, 'drop'],
+];
+const badLaw = LAW.filter(([, a, w]) => KY.lateFocusTakes(a) !== w).map(([n, a, w]) => `${n}: ${KY.lateFocusTakes(a)} (want ${w})`);
+ok(badLaw.length === 0, `the law's ${LAW.length} rows: an unhanded start never takes the keys from a field the person is in; a handed one keeps the clock rule`, badLaw);
+const CLOCK_ALONE = (a) => KY.lateFocusTakes({ since: a.since, act: a.act, handed: true });   // the round before: the clock alone (the law taken out)
+const lawFails = LAW.filter(([, a, w]) => CLOCK_ALONE(a) !== w).map(([n]) => n);
+ok(lawFails.length === 3, `CONTROL: the clock alone (the law taken out) is refused by the law's rows — ${lawFails.length}: ${lawFails.join(' · ')}`, lawFails);
+
+console.log('§1c THE ACT A PERSON IS DOING RIGHT NOW (r673): the page\'s current event, a closed list of a person\'s input kinds, trusted only');
+const evOf = (type, o = {}) => ({ type, isTrusted: true, timeStamp: 50, ...o });
+const KIND_ROWS = [
+  ...['pointerdown', 'pointerup', 'mousedown', 'mouseup', 'click', 'dblclick', 'touchend', 'keydown', 'keyup', 'submit', 'change', 'paste', 'drop'].map((k) => [`a ${k} the browser dispatched: a person's input`, evOf(k), true]),
+  ...['message', 'load', 'transitionend', 'animationend', 'focus', 'focusin', 'blur', 'visibilitychange', 'scroll', 'input', 'popstate', 'resize', 'error'].map((k) => [`a ${k} (a hub message, a load, a transition, a focus or visibility change…): no act`, evOf(k), false]),
+  ['a click a SCRIPT dispatched (untrusted): no act', evOf('click', { isTrusted: false }), false],
+  ['no current event (outside any dispatch — across an await or a timer — or a browser that does not expose it): no act', undefined, false],
+];
+const badKinds = KIND_ROWS.filter(([, e, w]) => !!KY.actOpenStart(e, 100) !== w).map(([n]) => n);
+ok(badKinds.length === 0, `bound 1: ${KIND_ROWS.filter((r) => r[2]).length} kinds count as the person's act, ${KIND_ROWS.filter((r) => !r[2]).length} rows do not`, badKinds);
+const widened = (e) => (e && e.isTrusted === true && [...KY.ACT_EVENT_KINDS, 'message'].includes(e.type) ? { at: 1, by: 'act' } : null);
+const wideFails = KIND_ROWS.filter(([, e, w]) => !!widened(e) !== w).map(([n]) => n);
+ok(wideFails.length === 1 && /^a message/.test(wideFails[0]), 'CONTROL: the list widened by ONE kind (a hub message counted as an act) is red by that row', wideFails);
+ok(Object.isFrozen(KY.ACT_EVENT_KINDS) && KY.ACT_EVENT_KINDS.length === 15, `the list is CLOSED: frozen, ${KY.ACT_EVENT_KINDS.length} kinds (${KY.ACT_EVENT_KINDS.join(', ')})`);
+const i1 = KY.actOpenStart(evOf('keydown', { timeStamp: 42 }), 100), i2 = KY.actOpenStart(evOf('keydown', { timeStamp: 1.7e12 }), 100);
+ok(!!i1 && i1.at === 42 && i1.by === 'act' && !!i2 && i2.at === 100, 'bound 2: the start is the act\'s OWN instant on the page\'s clock (its timeStamp), not the moment the maker runs; a timeStamp off this clock (an epoch) falls to now', { i1, i2 });
+
 console.log('§2 where an act lands (late-focus.js insideWindow)');
 class N {
   constructor(cls = '', tag = 'DIV') { this.cls = cls; this.tagName = tag; this.kids = []; this.parent = null; this.dataset = {}; }
@@ -142,32 +174,44 @@ ok(firstShape({ layoutManager: { _booting: true, _bootRestoring: false } }, fals
   ok(LF.lateFocus(vP, { win: WC, since: atPress }) === false && vP.n === 0, 'r558 MUST: THE START IS THE PRESS — Resume pressed, then (during the account check\'s wait) a press into another composer and typing: the resumed composer\'s late focus is DROPPED, the keys stay there');
   ok(LF.lateFocus(vQ, { win: WC, since: atCreate }) === true && vQ.n === 1, 'RED CONTROL: the start read at the create (after the wait) — the resumed composer takes the keys from the box the person typed in');
 }
-// …and every pressed road HANDS ITS PRESS ON as the open's start (the Resume bar, the resume's three roads, the create and the attach,
-// a desktop switch's replay, a preset the person loads); the quiet attach during a pressed one hands its fact on
-const pressRoads = (cv, sl, lj) => {
+// …and every pressed road HANDS ITS PRESS ON as the open's start (the Resume bar, the resume's roads, the makers, a desktop switch's
+// replay, a preset, the four roads that wait for a kill or a live CLI, the For-you reply); r673: the makers open at ONE start fact
+const pressRoads = ({ cv, sl, lj, ut }) => {
   const body = (src, head) => { const a = src.indexOf(head); if (a < 0) return ''; const b = src.indexOf('\n  }', a + head.length); return b < 0 ? '' : src.slice(a, b); };
+  const arrow = (src, head) => { const a = src.indexOf(head); if (a < 0) return ''; const b = src.indexOf('\n  };', a); return b < 0 ? '' : src.slice(a, b); };
   const beforeAwait = (b, decl) => { const d = b.indexOf(decl), w = b.indexOf('await '); return d > 0 && (w < 0 || d < w); };
   const rac = body(cv, '  _resumeAndClose({'), rs = body(sl, '  resumeSession(sessionId, cwd, sessionName, {'), rst = body(lj, '  async restoreState(state) {'), lp = body(lj, '  async loadPreset(name) {');
+  const rcip = body(sl, '  restartConversationInPlace(sessLike = {}) {'), rwp = body(cv, '  _restartWithPermission(mode) {'), rsw = body(cv, '  _resendWaiting(');
+  const pr = arrow(ut, '  const postReply = async ('), orp = arrow(ut, '  const openReopened = (');
   return [
     ['the Resume bar reads its start AT THE PRESS, before the account check', /^  _resumeAndClose\(\{ accountId, asked = false, at = this\.app\?\._openStartNow\?\.\(\) \} = \{\}\) \{/.test(rac) && rac.indexOf('resumeAccountCheck(') > 0],
     ['…hands it through the account check\'s answer', rac.includes('this._resumeAndClose({ asked: true, at })')],
     ['…and into the resume', /this\.app\.resumeSession\(backendSessionId, cwd, name, \{[\s\S]*\n      fromWin: this\.winInfo\?\.id,\n      backendSessionId, openAt: at,/.test(rac)],
-    ['the resume hands it to the create, the live row\'s attach and a standing window (with its own fact)', /\n\s+openAt, \/\/ B-c87d r558/.test(rs) && rs.includes('hostId, openAt });') && rs.includes('{ replay: !!syncId, unattended: unattended || stay, at: openAt })')],
-    ['the create and the attach start at a start handed on, else the replay\'s, else now', sl.includes('unattendedOpen(this, quiet) ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock())') && sl.includes('const openAt = unattended ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock());')],
-    ['a desktop switch\'s replay reads its start before its reads; its opens\' loop carries it (a synchronous span, cleared in its finally)', beforeAwait(rst, 'const replayAt = this.app._openStartNow?.()') && rst.indexOf('this.app._replayStart = Number.isFinite(replayAt) ? replayAt : null;') > 0 && rst.indexOf('this.app._replayStart = Number.isFinite(replayAt)') < rst.indexOf('for (const ws of state.windows)') && /\} finally \{\n\s+this\.app\.wm\._restoring = false; this\.app\._replayStart = null;/.test(rst)],
+    ['the resume hands it to the create, the live row\'s attach and a standing window (with its own fact and the page\'s)', /\n\s+openAt, \/\/ B-c87d r558/.test(rs) && rs.includes('hostId, openAt });') && rs.includes('{ replay: !!syncId, unattended: unattended || stay || unattendedOpen(this), at: openAt })')],
+    ['the create and the attach open at THE ONE START FACT (the act now, a road\'s start, the replay\'s, else unhanded)', (sl.match(/const openAt = openStart\(this, \{ quiet, given: pressAt \}\);/g) || []).length === 2],
+    ['a desktop switch\'s replay reads its start before its reads; its opens\' loop carries it (a synchronous span, cleared in its finally)', beforeAwait(rst, 'const replayAt = this.app._openStartNow?.()') && rst.indexOf("this.app._replayStart = replayAt && typeof replayAt === 'object' ? replayAt : null;") > 0 && rst.indexOf('this.app._replayStart = replayAt &&') < rst.indexOf('for (const ws of state.windows)') && /\} finally \{\n\s+this\.app\.wm\._restoring = false; this\.app\._replayStart = null;/.test(rst)],
     ['a preset the person loads, likewise (two attaches, one resume)', beforeAwait(lp, 'const presetAt = this.app._openStartNow?.()') && (lp.match(/openAt: presetAt/g) || []).length === 3],
-    ['a quiet attach while a pressed one is in flight hands its fact on (no renewal)', sl.includes('    if (unattended && this._focusPendingAttach(serverId, { replay: !!(syncId || machine), unattended })) return null;')],
+    ['an attach meeting one in flight: a quiet one renews nothing, a road\'s start renews to it', sl.includes('    if ((unattended || pressAt != null) && this._focusPendingAttach(serverId, { replay: !!(syncId || machine), unattended, at: openAt })) return null;')],
+    ['r671: the billing switch reads its start at its press, before the kill, and hands it to its finish', /\n      const at = this\._openStartNow\(\);[^\n]*\n      const finish = \(\) => this\.resumeSession\(backendSessionId, cwd, name, \{[^\n]*openAt: at \}\);/.test(sl)],
+    ['r671: the in-place restart, likewise', /\n    const at = this\._openStartNow\(\);[^\n]*\n    const finish = \(\) => this\.resumeSession\(cid, [^\n]*openAt: at \}\);/.test(rcip)],
+    ['r671: the restart with a permission change reads it before its kill and hands it through its timer', rwp.indexOf('const at = this.app?._openStartNow?.();') > 0 && rwp.indexOf('const at = this.app?._openStartNow?.();') < rwp.indexOf('this.app.killSession(') && rwp.includes('permission: mode, openAt: at,')],
+    ['r671: the re-send reads it at its press and carries it through the live CLI\'s wait', /^  _resendWaiting\(at\) \{[^\n]*\n    if \(at === undefined\) at = this\.app\?\._openStartNow\?\.\(\);/.test(rsw) && rsw.includes('this._resendWaiting(at); }); return; }') && rsw.includes('openAt: at,')],
+    ['r671: the For-you reply reads it before its network wait and hands it to the reopened conversation', beforeAwait(pr, 'const at = app._openStartNow?.();') && (pr.match(/openReopened\(r, at\)/g) || []).length === 2 && orp.includes('openAt: at };')],
+    ['r671: the «already live» answer attaches with the create\'s start and its quiet', sl.includes('            openAt, ...(quiet ? { quiet: true } : {}),')],
   ];
 };
 {
-  const CV = read('src/lib/chat-view.js'), SL = read('src/lib/session-lifecycle.js'), LJ = read('src/lib/layout.js');
-  const R0 = pressRoads(CV, SL, LJ);
-  ok(R0.every(([, g]) => g), `r558: every pressed road hands its PRESS on as the open's start (${R0.length} rows)`, R0.filter(([, g]) => !g).map(([n]) => n));
-  // CONTROL: the round's shape planted back (the Resume bar with no start of its own; the switch's replay reading after its reads)
-  const cv1 = CV.replace('  _resumeAndClose({ accountId, asked = false, at = this.app?._openStartNow?.() } = {}) {', '  _resumeAndClose({ accountId, asked = false } = {}) {');   // stale-pins: kept (the base's text, planted)
-  const lj1 = LJ.replace('this.app._replayStart = Number.isFinite(replayAt) ? replayAt : null; ', '');
-  const R1 = pressRoads(cv1, SL, LJ), R2 = pressRoads(CV, SL, lj1);
-  ok(cv1 !== CV && lj1 !== LJ && !R1[0][1] && R1.slice(1).every(([, g]) => g) && !R2[5][1], 'CONTROL: the Resume bar without its own start, and a switch\'s replay without its start, are each red by their row (the rest stays green)');
+  const S = { cv: read('src/lib/chat-view.js'), sl: read('src/lib/session-lifecycle.js'), lj: read('src/lib/layout.js'), ut: read('src/lib/user-todos-actions.js') };
+  const R0 = pressRoads(S);
+  ok(R0.every(([, g]) => g), `every pressed road hands its PRESS on as the open's start (${R0.length} rows)`, R0.filter(([, g]) => !g).map(([n]) => n));
+  // CONTROLS: a road planted to hand NOTHING is red by its row, the rest green — the Resume bar, a switch's replay, the billing switch
+  const plants = [
+    ['the Resume bar', 0, { ...S, cv: S.cv.replace('  _resumeAndClose({ accountId, asked = false, at = this.app?._openStartNow?.() } = {}) {', '  _resumeAndClose({ accountId, asked = false } = {}) {') }],   // stale-pins: kept (the base's text, planted)
+    ['a switch\'s replay', 5, { ...S, lj: S.lj.replace("this.app._replayStart = replayAt && typeof replayAt === 'object' ? replayAt : null; ", '') }],
+    ['the billing switch', 8, { ...S, sl: S.sl.replace(', onCreateResult: persistOnSuccess, openAt: at });', ', onCreateResult: persistOnSuccess });') }],   // stale-pins: kept (the base's text, planted)
+  ];
+  const plantOut = plants.map(([n, i, P]) => { const R = pressRoads(P); return { n, red: !R[i][1], restGreen: R.every(([, g], j) => j === i || g), changed: P !== S && JSON.stringify(P) !== JSON.stringify(S) }; });
+  ok(plantOut.every((x) => x.red && x.restGreen && x.changed), `CONTROL: a road planted to hand nothing is red by its own row, the rest green — ${plantOut.map((x) => `${x.n}: ${x.red ? 'red' : 'GREEN'}`).join(' · ')}`, plantOut);
 }
 // r558 (ruled in): a press INTO the opening window's own «Connecting…» body — removed by its answer before the door is asked — lies
 // inside that window: the stamp keeps the window part it landed in
@@ -182,6 +226,49 @@ const pressRoads = (cv, sl, lj) => {
   const t8 = LF.openClock(); await tick(); pressAt(pendingA); contA.kids = contA.kids.filter((k) => k !== pendingA); pendingA.parent = null;
   const v8 = view();
   ok(LF.lateFocus(v8, { win: WC, since: t8 }) === false && v8.n === 0, 'r558: a press into ANOTHER window\'s removed body is still an act elsewhere — dropped');
+}
+// r671 + r673 — THE DEFAULT IS SAFE, driven: the real door, the page's stamps, the page's current event (window.event), its focus
+{
+  const box = new N('search-box', 'INPUT'); box.type = 'text';
+  const searchWin = new N('window'), searchCont = new N('window-content'); searchWin.add(searchCont.add(box));
+  const app0 = { layoutManager: {} };
+  // (a) THE CLASS: a road that hands NO start — the person typed into another composer, then an open began (its start read where the
+  // open is made), the person still in that composer, the answer lands
+  keyAt(inA, 'a'); await tick();
+  const late = LF.openStart(app0); globalThis.document.activeElement = inA; await tick();
+  const vS = view();
+  ok(late.by === null && LF.lateFocus(vS, { win: WC, since: late }) === false && vS.n === 0, 'THE DEFAULT IS SAFE: an open nobody handed a start, the person still in another composer, no act since: DROPPED — the keys stay in the field');
+  const vS2 = view();
+  ok(LF.lateFocus(vS2, { win: WC, since: { at: late.at, by: 'road' } }) === true && vS2.n === 1, 'RED CONTROL: the same moment with the start vouched for (the clock alone, the law taken out): the opening window takes the keys from the field');
+  const vS5 = view();
+  ok(LF.lateFocus(vS5, { win: WC, since: late.at }) === false, '…and a BARE number is a start nobody vouches for: the safe default too');
+  // (b) the focus on the page body, (c) a field inside the opening window: taken
+  globalThis.document.activeElement = globalThis.document.body; const vS3 = view();
+  ok(LF.lateFocus(vS3, { win: WC, since: LF.openStart(app0) }) === true, 'an unhanded start with the focus on the page body: taken (no field holds the keys)');
+  globalThis.document.activeElement = composerC; const vS4 = view();
+  ok(LF.lateFocus(vS4, { win: WC, since: LF.openStart(app0) }) === true, '…and with a field INSIDE the opening window focused: taken');
+  // (d) bound 3 — THE ACT: Enter in the Search box opens a hit inside that key (its start the key's instant), and nothing more
+  const enter = { type: 'keydown', key: 'Enter', isTrusted: true, timeStamp: LF.openClock(), target: box };
+  HANDLERS.keydown.forEach((h) => h(enter));                       // the page's own stamp of that key
+  globalThis.window.event = enter; const fromAct = LF.openStart(app0); globalThis.window.event = undefined;
+  globalThis.document.activeElement = box; await tick(); const vA = view();
+  ok(fromAct.by === 'act' && fromAct.at === enter.timeStamp && LF.lateFocus(vA, { win: WC, since: fromAct }) === true && vA.n === 1, 'bound 3: Enter in the Search box opens a hit (made inside that key: its start is the key\'s own instant) and nothing more — the opened conversation takes the keys from the box');
+  // (e) …Enter, then more typing in the box: the keys stay in the box
+  const enter2 = { ...enter, timeStamp: LF.openClock() }; HANDLERS.keydown.forEach((h) => h(enter2));
+  globalThis.window.event = enter2; const fromAct2 = LF.openStart(app0); globalThis.window.event = undefined;
+  await tick(); keyAt(box, 'm'); const vB = view();
+  ok(LF.lateFocus(vB, { win: WC, since: fromAct2 }) === false && vB.n === 0, '…Enter and then more typing in the box: the keys stay in the box (a start handed by the act obeys the clock exactly)');
+  // (f) bound 5 — no current event: the open is unhanded (the safe default)
+  ok(LF.openStart(app0).by === null && LF.startNow().by === null, 'bound 5: where the page\'s current event is not to be had, the open\'s start is unhanded — the safe default');
+  // (g) bound 4 — THE RESIDUE: a road waiting on a confirm continues inside the confirm's press: that press is its start
+  const confirm = { type: 'click', isTrusted: true, timeStamp: LF.openClock(), target: new N('dialog-ok', 'BUTTON') };
+  globalThis.window.event = confirm; const viaConfirm = LF.openStart(app0, { given: { at: 1, by: 'act' } }); globalThis.window.event = undefined;
+  ok(viaConfirm.by === 'act' && viaConfirm.at === confirm.timeStamp, 'bound 4: a road\'s open made inside a person\'s LATER press (a confirm: «Resume anyway») takes that press as its start, not the road\'s older one');
+  globalThis.window.event = { type: 'message', isTrusted: true, timeStamp: LF.openClock() }; const viaMsg = LF.openStart(app0, { given: { at: 7, by: 'act' } }); globalThis.window.event = undefined;
+  ok(viaMsg.by === 'road' && viaMsg.at === 7, '…while an open made inside a hub message\'s dispatch keeps the start its road handed (by the road)');
+  globalThis.window.event = { type: 'keydown', isTrusted: true, timeStamp: 5 }; const quietOpen = LF.openStart(app0, { quiet: true }); globalThis.window.event = undefined;
+  ok(quietOpen.by === null && quietOpen.at === LF.PAGE_START, '…and an open nobody pressed (quiet) is the page\'s and unhanded, whatever event it is made in');
+  globalThis.document.activeElement = null;
 }
 const t2 = LF.openClock(); await tick(); pressAt(inA); const v2 = view();
 ok(LF.lateFocus(v2, { win: WC, since: t2 }) === false && v2.n === 0, 'B-c87d: the open began, then the person PRESSED into another window\'s composer — the late focus is dropped, the keys stay there');
@@ -368,10 +455,9 @@ const SITES = [   // [file, the words, how many, the kind]
   ['src/lib/session-lifecycle.js', 'lateFocus(chatView, { win: winInfo, since: winInfo._lateFocusSince ?? openAt })', 1, 'the attach\'s answer — chat (its start renewed by a re-press)'],
   ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: winInfo, since: openAt })', 2, 'the create\'s answer and the tmux view\'s — terminal'],
   ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: winInfo, since: winInfo._lateFocusSince ?? openAt })', 1, 'the attach\'s answer — terminal'],
-  ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : (Number.isFinite(at) ? at : openClock()) })', 1, 'a standing window\'s focus (a person\'s open: the start handed on, else now; nobody\'s: the page\'s start)'],
-  ['src/lib/session-lifecycle.js', 'if (!unattended) w._lateFocusSince = Number.isFinite(at) ? at : openClock();', 1, 'a re-press while it attaches renews the start (at that press)'],
-  ['src/lib/session-lifecycle.js', 'unattendedOpen(this, quiet) ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock())', 1, 'the create\'s start: the fact, never the id; a press handed on, or the replay\'s (r558)'],
-  ['src/lib/session-lifecycle.js', 'const openAt = unattended ? PAGE_START : (Number.isFinite(pressAt) ? pressAt : Number.isFinite(this._replayStart) ? this._replayStart : openClock());', 1, 'the attach\'s start: the same'],
+  ['src/lib/session-lifecycle.js', 'lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : openStart(this, { given: at }) })', 1, 'a standing window\'s focus (a person\'s open: the one start fact; nobody\'s: the page\'s start)'],
+  ['src/lib/session-lifecycle.js', 'if (!unattended) w._lateFocusSince = openStart(this, { given: at });', 1, 'a re-press while it attaches renews the start (at that press)'],
+  ['src/lib/session-lifecycle.js', 'const openAt = openStart(this, { quiet, given: pressAt });', 2, 'the create\'s and the attach\'s start: the ONE fact (r673) — never the id'],
   ['src/lib/chat-input.js', 'since: this._picAddAt });', 1, 'the composer after a picture\'s read'],
   ['src/lib/chat-input.js', "{ win: { content: ta.closest('.window-content, .window') || ta.parentElement }, since });", 1, 'the composer after an upload (r364 MUST 3)'],
   ['src/lib/chat-view.js', 'const focusBack = () => lateFocus(this._chatInput, { win: this.winInfo, since: Number.isFinite(bound.at) ? bound.at : PAGE_START });', 1, 'the rewind answer\'s restored words (r364)'],
@@ -407,9 +493,9 @@ ok(kindOut.every((k) => !k.gone && k.red), `CONTROL: each site kind's door call 
 const PIN_KINDS = [
   ['the composer after a picture\'s read', 'src/lib/chat-input.js', 'since: this._picAddAt });', 'this._textarea.focus(); },'],   // stale-pins: kept (the base's text, planted)
   ['the app\'s picture on its first connect', 'src/lib/desktop-app-window.js', '(!first || mayTakeKeys({ win: winInfo, since: openAt }))', 'true'],   // stale-pins: kept (the base's text, planted)
-  ['a standing window\'s focus', 'src/lib/session-lifecycle.js', 'lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : (Number.isFinite(at) ? at : openClock()) });', 'term.focus();'],   // stale-pins: kept (the base's text, planted)
+  ['a standing window\'s focus', 'src/lib/session-lifecycle.js', 'lateFocus(term, { win: this.wm.windows.get(winId), since: unattended ? PAGE_START : openStart(this, { given: at }) });', 'term.focus();'],   // stale-pins: kept (the base's text, planted)
   ['the link door\'s other-desktop go-to', 'src/lib/internal-link-ui.js', 'app.goToWinId(w, { since: at })', 'app.goToWinId(w)'],   // stale-pins: kept (the base's text, planted)
-  ['the re-press renewal', 'src/lib/session-lifecycle.js', 'if (!unattended) w._lateFocusSince = Number.isFinite(at) ? at : openClock();', ''],   // stale-pins: kept (the base's text, planted)
+  ['the re-press renewal', 'src/lib/session-lifecycle.js', 'if (!unattended) w._lateFocusSince = openStart(this, { given: at });', ''],   // stale-pins: kept (the base's text, planted)
 ];
 const pinOut = PIN_KINDS.map(([kind, f, from, to]) => { const p = plant(f, from, to); if (!p) return { kind, gone: true }; return { kind, red: SITES.some((s) => siteCount(p.m, s) !== s[2]) }; });
 ok(pinOut.every((k) => !k.gone && k.red), `CONTROL: each kind whose call the census cannot see late, its door call planted away — its site pin is red: ${pinOut.map((k) => `${k.kind} ${k.gone ? 'ITS ANCHOR IS GONE' : k.red ? 'red' : 'NOT red'}`).join(' · ')}`, pinOut);

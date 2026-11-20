@@ -256,7 +256,7 @@ await leg('⑪', async () => {
   const notes = [U('do x'), A('done'), { role: 'user', originKind: 'task-notification', content: [{ type: 'text', text: '<task-notification>…' }] }, { role: 'user', imageAttachment: true, synthetic: true, content: [{ type: 'image', data: 'B' }] }];
   ok(W(notes) === '', '⑪ a notification / the CLI’s page images after an answer are no waiting turn', W(notes));
   ok(W([A('hello')]) === '', '⑪ CONTROL: no user turn → nothing');
-  ok(/_resendWaiting\(\) \{[\s\S]{0,700}this\._waitingText = ''/.test(CV), '⑪ the chat consumes the waiting text when it re-sends (sent once)');
+  ok(/_resendWaiting\(at\) \{[\s\S]{0,900}this\._waitingText = ''/.test(CV), '⑪ the chat consumes the waiting text when it re-sends (sent once)');
 });
 
 // ⑫ claim 8: which wall a chat's «not logged in» gets — chat-view's own branch, run over a stub view

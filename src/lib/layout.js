@@ -1623,7 +1623,7 @@ class LayoutManager {
       }, 2000);
     };
 
-    this.app.wm._restoring = true; this.app._replayStart = Number.isFinite(replayAt) ? replayAt : null; // batch mode: suppress per-window O(all-windows) bookkeeping (see window.js _notify) · B-c87d r558: this loop's opens start at the replay's act
+    this.app.wm._restoring = true; this.app._replayStart = replayAt && typeof replayAt === 'object' ? replayAt : null; // batch mode: suppress per-window O(all-windows) bookkeeping (see window.js _notify) · B-c87d r558: this loop's opens start at the replay's act
     try {
     for (const ws of state.windows) {
       // A WINDOW IS NEVER BUILT TWICE FOR ONE ENTRY (lane layout-stopped-window r2): every caller hands entries this page has

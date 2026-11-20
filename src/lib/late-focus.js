@@ -10,9 +10,19 @@
 // a replay (nobody on this page started it) passes `since: PAGE_START`: it takes the keys only while the person has not acted on the
 // page since it loaded. The decision is PURE (keyboard-yield.js lateFocusTakes); the person's acts are the page's own stamps (utils.js
 // lastPersonAct — the two capture listeners, no listener of this door's own); an open app dialog keeps the keys first (lateFocusVerdict).
+//
+// THE DEFAULT IS SAFE (r671 + r673): an open whose start nobody HANDED it never takes the keys out of a field the person is in (a
+// typing field, an editable region, a terminal's input, an embedded frame — outside the opening window), whatever the clock says. A
+// start is ONE fact, { at, by }: by 'act' — the open is made inside the act a person is doing right now (the page's current event, a
+// person's input kind, trusted: its own instant is the start), by 'road' — a road read the start at the person's press and carried
+// it across its wait, or by null — nobody handed one (read where the open is made, or a bare number: the safe default). A handed start
+// keeps the clock rule exactly: a press or a key elsewhere after it drops the late focus. THE RESIDUE, in plain words: a road that
+// waits on something a person's LATER press settles (a confirm) continues inside that press and takes it as its start — right for a
+// confirm (so «Resume anyway» comes out right), wrong only for a road whose wait an unrelated press settles; none is known. Where
+// the page's current event is not to be had (a browser that does not expose window.event), the open falls to the safe default.
 // Gate: scripts/test-late-focus.mjs (the verdict's table, the census of every focus after an await, a red control per site kind) and
 // the heavy test-late-focus-chrome (a window opened, another window clicked while it opens, typed: where the text went).
-import { lateFocusVerdict, lateFocusTakes } from './keyboard-yield.js';
+import { lateFocusVerdict, lateFocusTakes, actOpenStart } from './keyboard-yield.js';
 import { DIALOG_ROOTS } from './form-yield.js';
 import { lastPersonAct, pageClock } from './utils.js';
 
@@ -26,6 +36,25 @@ export const openClock = () => pageClock();
  *  device being applied (`_applying`), or an open nobody pressed (`quiet` — an unattended resume, a page following it, an agent's
  *  open). Such an open starts at PAGE_START; every other one starts NOW, so the person's act that started it counts as inside it. */
 export const unattendedOpen = (app, quiet = false) => !!quiet || !!app?.layoutManager?._bootRestoring || !!app?.layoutManager?._applying;
+
+/** the page's current event — the one the browser dispatches right now (window.event: none across an await or a timer; none at all in
+ *  a browser that does not expose it — such an open falls to the safe default) */
+const currentEvent = () => { try { return typeof window !== 'undefined' ? window.event : undefined; } catch { return undefined; } };
+/** a start as the ONE fact { at, by } (by 'act' | 'road' | null); a bare number is a start nobody vouches for (by null) */
+export const asStart = (s) => (s && typeof s === 'object' && Number.isFinite(s.at) ? { at: s.at, by: s.by === 'act' || s.by === 'road' ? s.by : null } : Number.isFinite(s) ? { at: s, by: null } : null);
+/** B-c87d r673: a start read NOW — the person's act being dispatched (its instant, by 'act'), else the clock with nobody's hand on it */
+export function startNow() { return actOpenStart(currentEvent(), pageClock()) || { at: openClock(), by: null }; }
+/** B-c87d r673 — THE START A MAKER (the create, the attach) OPENS AT: nobody on this page started it ⇒ the page's start, unhanded;
+ *  made inside a person's act now ⇒ that act's instant (a confirm's press continues its road — the residue above); else the start a
+ *  road handed (`given`, carried from the person's press: by 'road'), else a desktop switch's replay span's; else the clock, unhanded */
+export function openStart(app, { quiet = false, given = null } = {}) {
+  if (unattendedOpen(app, quiet)) return { at: PAGE_START, by: null };
+  const act = actOpenStart(currentEvent(), pageClock());
+  if (act) return act;
+  const g = asStart(given) || asStart(app?._replayStart);
+  if (g) return { at: g.at, by: g.by ? 'road' : null };
+  return { at: openClock(), by: null };
+}
 
 /** is `target` inside the opening window `win` itself — its own content or its frame's chrome, never another tab's content in the
  *  same frame (a tab group's host element holds every member's content) */
@@ -52,18 +81,29 @@ export function actInside(win, a) {
 
 /** the door's question alone — may a late focus of `win` (opened at `since`) take the keys now? — for a view that asks before it
  *  focuses itself (xpra-view's `mayFocus` on connect): the same verdict, the same stamps, the same dialog rule */
+/** a field a person TYPES into (its keys are theirs): a text box, a text area, an editable region (a terminal's input is a text area),
+ *  or an embedded frame */
+export function isTypingField(el) {
+  if (!el || typeof el !== 'object') return false;
+  const tag = String(el.tagName || '').toUpperCase();
+  if (tag === 'TEXTAREA' || tag === 'IFRAME' || el.isContentEditable === true) return true;
+  return tag === 'INPUT' && !/^(button|checkbox|radio|range|file|submit|reset|image|color|hidden)$/i.test(String(el.type || 'text'));
+}
+
 export function mayTakeKeys({ win = null, since = PAGE_START } = {}) {
   try { if (lateFocusVerdict(document.querySelectorAll(DIALOG_ROOTS), document.activeElement) !== 'take') return false; } catch { return false; }
   // a press INTO an embedded page (the browser window, a plugin's panel, a viewer) is never stamped by the page's listeners: the keys
   // stand in that frame — if it lies outside the opening window, the late focus drops (r364)
   const ae = document.activeElement;
   if (ae && String(ae.tagName || '').toUpperCase() === 'IFRAME' && !insideWindow(win, ae)) return false;
-  const a = lastPersonAct();
-  return lateFocusTakes({ since, act: a ? { at: a.at, inside: actInside(win, a) } : null }) === 'take';
+  const s = asStart(since) || { at: PAGE_START, by: null }, a = lastPersonAct();
+  const field = !!ae && isTypingField(ae) && !insideWindow(win, ae);   // the field the person is in, outside the opening window
+  return lateFocusTakes({ since: s.at, handed: !!s.by, field, act: a ? { at: a.at, inside: actInside(win, a) } : null }) === 'take';
 }
 
 /** THE DOOR. `view` = what takes the keys (a ChatView, a TerminalSession, a box — anything with focus()); `win` = the opening window
- *  (a winInfo, or { content: <element> } for a part of one); `since` = when its open began. → true when it took the keys. */
+ *  (a winInfo, or { content: <element> } for a part of one); `since` = when its open began — the ONE fact { at, by } a maker passes
+ *  (openStart / startNow), or a bare number nobody vouches for (the safe default). → true when it took the keys. */
 export function lateFocus(view, { win = null, since = PAGE_START } = {}) {
   if (!view || typeof view.focus !== 'function' || !mayTakeKeys({ win, since })) return false;
   view.focus();

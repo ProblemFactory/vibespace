@@ -11,13 +11,18 @@
 // ⑤ A PRESSED RESUME (r364 MUST 1): a stopped conversation's window (its transcript on disk), a real press on its «Resume this
 // session», the resume's «created» held, let go, typed — the text is in the resumed composer. At a red the suite prints what
 // happened: the page's presses, keys and focus calls with their callers, the open's requests and answers, each toast and dialog.
+// ⑥ THE CLASS (r671): a road that hands NO start, its answer held, the person paused in another composer: every character stays
+// there; its RED CONTROL is the law taken out (a second scratch hub of this tree, the default-is-safe line removed: the keys move).
+// ⑦ THE ACT (r673): Enter in the Search box opens a hit and nothing more — the opened conversation takes the keys; Enter and then
+// more typing in the box — the keys stay in the box. ⑧ the browser's fact the residue leans on: a confirm's continuation runs inside
+// its press (window.event), a timer's never.
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE, fixtureSid } from './scratch.mjs';
+import { freePorts, ONBOARDED_SOURCE, vncEnv, stillPresser, CHROME_STORE, CHROME_QUIET, fixtureSid } from './scratch.mjs';
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';   // THE suites' one hub boot (test-architecture §57c)
 import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
@@ -28,9 +33,9 @@ const REAL_PROJECTS = path.join(os.homedir(), '.claude', 'projects');
 const realBefore = (() => { try { return new Set(fs.readdirSync(REAL_PROJECTS)); } catch { return new Set(); } })();
 const CHROME = [process.env.VS_CHROME, '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => p && fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
-const VNC_ENV = await vncEnv();
-const [PORT, CDP_PORT] = await freePorts(2);
-const BASE = `http://127.0.0.1:${PORT}`;
+const VNC_ENV = await vncEnv(), VNC_ENV2 = await vncEnv();
+const [PORT, CDP_PORT, PORT2] = await freePorts(3);
+const BASE = `http://127.0.0.1:${PORT}`, BASE2 = `http://127.0.0.1:${PORT2}`;
 const root = mintRoot('late-focus-chrome'), wt = path.join(root, 't');
 const chromeHome = path.join(root, 'chrome-home'); fs.mkdirSync(chromeHome, { recursive: true });   // the suite's own browser carries a HOME in the root (hub-boot ends it before the root goes)
 const fakeHome = path.join(root, 'home'), stubDir = path.join(root, 'stub');
@@ -57,6 +62,26 @@ execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' })
 for (const f of ['src', 'public', 'package.json', 'data/bin', 'docs/agent', 'server.js']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// ⑥'s RED CONTROL tree (r671): this tree with THE LAW taken out of the PURE verdict (its default-is-safe line), its own hub and home
+const wt2 = path.join(root, 't2'), fakeHome2 = path.join(root, 'home2'), CWD2 = path.join(fakeHome2, 'project');
+fs.mkdirSync(CWD2, { recursive: true });
+execSync(`git worktree add --detach ${wt2} HEAD`, { cwd: repo, stdio: 'ignore' });
+for (const f of ['src', 'public', 'package.json', 'data/bin', 'docs/agent', 'server.js']) execSync(`rm -rf ${wt2}/${f} && mkdir -p ${path.dirname(`${wt2}/${f}`)} && cp -r ${repo}/${f} ${wt2}/${f}`);
+fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt2, 'node_modules'));
+fs.mkdirSync(path.join(wt2, 'data'), { recursive: true });
+const LAW_LINE = "  if (!handed && field) return 'drop';\n", KY2 = path.join(wt2, 'src/lib/keyboard-yield.js'), ky2 = fs.readFileSync(KY2, 'utf8');
+const LAW_OUT = ky2.split(LAW_LINE).length === 2;   // the plant applied (its anchor once)
+if (LAW_OUT) fs.writeFileSync(KY2, ky2.replace(LAW_LINE, ''));
+// …and ITS OWN BUNDLE: the page runs the built public/bundle.js (the gate's build), never src — the plant reaches the page only
+// through a bundle built from the planted tree (the build's own entry and format)
+let LAW_BUILT = false;
+if (LAW_OUT) {
+  try {
+    require(path.join(repo, 'node_modules/esbuild')).buildSync({ entryPoints: [path.join(wt2, 'src/client.js')], bundle: true, outfile: path.join(wt2, 'public/bundle.js'), format: 'iife', platform: 'browser', target: 'es2020', loader: { '.css': 'css' }, logLevel: 'silent' });
+    const built = fs.readFileSync(path.join(wt2, 'public/bundle.js'), 'utf8');
+    LAW_BUILT = built.includes('lateFocusTakes') && !built.includes('!handed && field');
+  } catch (e) { console.error(`  · the law-out bundle did not build: ${String(e.message || e).slice(0, 300)}`); }
+}
 // a stub claude: each process its own id, beside its pid; it answers nothing (the scenes only open windows and type)
 const stubPath = path.join(stubDir, 'claude');
 fs.writeFileSync(stubPath, `#!${process.execPath}
@@ -72,10 +97,11 @@ process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 const stubRuns = () => fs.readdirSync(stubDir).filter((x) => x.startsWith('env-')).map((f) => JSON.parse(fs.readFileSync(path.join(stubDir, f), 'utf8')));
 const hub = startHub({ root, tree: wt, port: PORT, env: { ...strippedEnv(), ...VNC_ENV, HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' } });
-const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+const hub2 = startHub({ root, tree: wt2, port: PORT2, env: { ...strippedEnv(), ...VNC_ENV2, HOME: fakeHome2, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, log: 'hub2' });
+const chrome = spawn(CHROME, [...CHROME_QUIET, ...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
   '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${path.join(root, 'chrome-profile')}`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, HOME: chromeHome } });
 let cleaned = false;
-const cleanup = () => { if (cleaned) return; cleaned = true; try { chrome.kill('SIGKILL'); } catch { } try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { } };
+const cleanup = () => { if (cleaned) return; cleaned = true; try { chrome.kill('SIGKILL'); } catch { } try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { } try { execSync(`git worktree remove --force ${wt2}`, { cwd: repo, stdio: 'ignore' }); } catch { } };
 process.on('exit', cleanup);
 if (!(await hub.ready())) { console.error('  ✗ boot: the scratch hub never answered'); process.exit(1); }
 
@@ -98,6 +124,9 @@ const COMPOSER = (srvId) => `(() => { const k = ${winOf(srvId)}; const cv = k &&
 const TEXTS = (a, b) => evalJs(`(() => { const ta = ${COMPOSER(a)}, tb = ${COMPOSER(b)}; return { a: ta ? ta.value : null, b: tb ? tb.value : null, inA: !!ta && document.activeElement === ta, inB: !!tb && document.activeElement === tb, active: document.activeElement ? document.activeElement.tagName.toLowerCase() + '.' + String(document.activeElement.className || '').split(' ')[0] : null }; })()`);
 const DRAWN = (srvId) => `(() => { const k = ${winOf(srvId)}; const el = k && app.wm.windows.get(k)?.element; return !!el && !!el.querySelector('.chat-message-list') && new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => r(true)))); })()`;
 const type = (text) => cdp('Input.insertText', { text });
+// REAL keys (trusted keydowns: the page stamps each as the person's act), and a real Enter
+const keys = async (text) => { for (const ch of text) { await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: ch, text: ch, unmodifiedText: ch }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: ch }); } };
+const pressEnter = async () => { for (const type of ['keyDown', 'keyUp']) await cdp('Input.dispatchKeyEvent', { type, key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 }); };
 const clear = (...ids) => evalJs(`(() => { for (const id of ${J(ids)}) { const k = [...app.sessions.keys()].find((w) => app.sessions.get(w)?.sessionId === id); const ta = k && app.sessions.get(k)._chatInput && app.sessions.get(k)._chatInput._textarea; if (ta) ta.value = ''; } return true; })()`);
 
 try {
@@ -120,6 +149,7 @@ try {
   const A = await create('Focus A', 'a'), B = await create('Focus B', 'b'), C = await create('Focus C', 'c');
   ok(!!(A && B && C) && new Set([A, B, C]).size === 3, 'three live conversations through the real spawn path, each with its own server id', { A, B, C });
   // the page's door, held for ONE conversation's attach answer (app.ws.request: the reply is kept until the scene lets it go)
+  const installTaps = async () => {
   await evalJs(`(() => { window.__lfHold = { srv: null, held: null, create: false, createdSid: null }; const orig = app.ws.request.bind(app.ws);
     app.ws.request = function (msg, cb, ...rest) {
       if (msg && msg.type === 'attach' && msg.sessionId === window.__lfHold.srv) return orig(msg, (m) => { if (m && m.type === 'attached' && window.__lfHold.srv === msg.sessionId) { window.__lfHold.held = () => cb(m); return true; } return cb(m); }, ...rest);
@@ -131,7 +161,7 @@ try {
   // with the frames that called it), every request the page sends and the answers of its attach / create — read-only taps
   await evalJs(`(() => { const L = window.__lfLog = []; const T = () => Math.round(performance.now());
     const desc = (el) => { if (!el || !el.tagName) return String(el); const w = el.closest && el.closest('.window'); return el.tagName.toLowerCase() + '.' + String(el.className || '').split(' ')[0] + (w ? '@' + (w.dataset.winId || w.id || '?') : ''); };
-    for (const ty of ['pointerdown', 'keydown', 'focusin']) window.addEventListener(ty, (e) => { L.push([T(), ty, desc(e.target), e.isTrusted]); }, true);
+    for (const ty of ['pointerdown', 'keydown', 'focusin']) window.addEventListener(ty, (e) => { L.push([T(), ty, desc(e.target), e.isTrusted, 'ts ' + Math.round(e.timeStamp)]); }, true);
     const f0 = HTMLElement.prototype.focus; HTMLElement.prototype.focus = function (...a) { L.push([T(), 'focus()', desc(this), String(new Error().stack || '').split('\\n').slice(2, 7).map((x) => x.trim()).join(' < ')]); return f0.apply(this, a); };
     const r0 = app.ws.request.bind(app.ws);
     app.ws.request = function (msg, cb, ...rest) { L.push([T(), 'request', msg && msg.type, msg && (msg.sessionId || msg.resumeId || '')]);
@@ -151,6 +181,8 @@ try {
       if (/toast|dialog|overlay|modal|confirm/i.test(c) && !/toast-(body|x)/.test(c)) L.push([T(), 'shown', c.split(' ')[0], String(n.textContent || '').trim().slice(0, 200)]); } })
       .observe(document.body, { childList: true, subtree: true });
     return true; })()`);
+  };
+  await installTaps();
   const mark = () => evalJs('Math.round(performance.now())');
   const diag = async (label, from) => {
     const d = await evalJs(`(() => ({ log: (window.__lfLog || []).filter((x) => x[0] >= ${Number(from) || 0}).slice(-40),
@@ -192,12 +224,18 @@ try {
 
   console.log('④ THE COMMON ROAD: a person opens a conversation and does nothing else — its composer gets the keys');
   const t4 = await mark();
-  await still(`JS:${COMPOSER(A)}`, { timeoutMs: 4000 });   // the person's last act lies BEFORE the open begins (the act that starts it)
+  // r673: the common road is an open made INSIDE the person's press (a sidebar row's click) — here a button whose click opens C;
+  // an open a script makes outside any press is the class the law keeps from a field (⑥)
+  await evalJs(`(() => { const b = document.createElement('button'); b.id = 'lf-open-c'; b.textContent = 'open C'; Object.assign(b.style, { position: 'fixed', left: '1180px', top: '60px', zIndex: 2147483647 });
+    b.onclick = () => { window.__lfHold.srv = ${J(C)}; window.__lfHold.held = null; app.attachSession(${J(C)}, 'Focus C', ${J(CWD)}, { mode: 'chat', backend: 'claude' }); };
+    document.body.appendChild(b); return true; })()`);
   // the page's boot facts at C's open, said on every run (r364 round: this leg, run seconds after the page loaded, opened C inside the
   // layout's 5 s autosave tail — a person's own open there must start NOW, never at the page's start)
   const flags4 = await evalJs(`(() => { const lm = app.layoutManager || {}; const f = { at: Math.round(performance.now()), booting: !!lm._booting, bootRestoring: !!lm._bootRestoring, applying: !!lm._applying }; window.__lfLog.push([f.at, 'scene', 'C opened (attachSession)', f]); return f; })()`);
   console.log(`  · ④ C opens at ${flags4.at} ms of the page — the layout's boot tail ${flags4.booting ? 'still running' : 'over'}, its restore ${flags4.bootRestoring ? 'RUNNING' : 'ended'}, a remote apply ${flags4.applying ? 'RUNNING' : 'none'}`);
-  await evalJs(`(() => { window.__lfHold.srv = ${J(C)}; window.__lfHold.held = null; app.attachSession(${J(C)}, 'Focus C', ${J(CWD)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
+  const pressedOpen = await still("JS:document.getElementById('lf-open-c')", { timeoutMs: 4000 });
+  ok(pressedOpen === true, 'the person PRESSES the control that opens C — a real press (the open is made inside it)');
+  await evalJs(`(document.getElementById('lf-open-c')?.remove(), true)`);
   ok(!!(await waitFor('C\'s attach answer reached the page and is HELD', `typeof window.__lfHold.held === 'function'`, 15000)), 'C\'s attach answer reached the page and is held at its door (nothing pressed meanwhile)');
   await evalJs(`(() => { const h = window.__lfHold.held; window.__lfHold.srv = null; window.__lfHold.held = null; h(); return true; })()`);
   ok(!!(await waitFor('C\'s open FINISHED after its answer', DRAWN(C))), 'C\'s answer let go: C\'s window opens');
@@ -227,7 +265,124 @@ try {
   await type('keys-stay-4');
   const resumed = await evalJs(`(() => { const ta = ${COMPOSER(rSrv)}; return { value: ta ? ta.value : null, focused: !!ta && document.activeElement === ta, active: document.activeElement ? document.activeElement.tagName.toLowerCase() + '.' + String(document.activeElement.className || '').split(' ')[0] : null }; })()`);
   if (!ok(resumed.value === 'keys-stay-4' && resumed.focused, `MUST 1: the person's own Resume — the text typed after the answer is in the RESUMED composer («${resumed.value}»): the press that started the open counts as inside it, whatever ids the open reuses`, resumed)) await diag('⑤ MUST 1', t5);
+
+  console.log('⑥ THE CLASS (r671): a road that hands NO start, its answer held, the person paused in another composer — every character stays there');
+  // one scene, run on this tree (the law in) and on the RED CONTROL's tree (the law out) — `who` names the page, `base` its hub
+  const classScene = async (who, a, e, cwd) => {
+    // the views' own focus doors, tapped through a live view's prototypes (did the door ask the view; did the composer's guards let it)
+    await evalJs(`(() => { const v = [...app.sessions.values()].find((x) => x && x._chatInput); if (!v || window.__lfProtoWrapped) return false; window.__lfProtoWrapped = true;
+      const P = Object.getPrototypeOf(v), f0 = P.focus; P.focus = function (...x) { window.__lfLog.push([Math.round(performance.now()), 'ChatView.focus', this.sessionId]); return f0.apply(this, x); };
+      const Q = Object.getPrototypeOf(v._chatInput), g0 = Q.focus; Q.focus = function (...x) { window.__lfLog.push([Math.round(performance.now()), 'ChatInput.focus']); return g0.apply(this, x); };
+      return true; })()`);
+    await evalJs(`(() => { const k = ${winOf(a)}; const ta = app.sessions.get(k)?._chatInput?._textarea; if (ta) ta.value = ''; return true; })()`);
+    const pressed = await still(`JS:${COMPOSER(a)}`, { timeoutMs: 4000 });
+    await keys('one');                                                          // the person types into the composer: acts BEFORE the open
+    await sleep(80);
+    await evalJs(`(() => { window.__lfHold.srv = ${J(e)}; window.__lfHold.held = null; app.attachSession(${J(e)}, 'Focus E', ${J(cwd)}, { mode: 'chat', backend: 'claude' }); return true; })()`);   // a road with NO start: opened outside any press (nobody handed it one)
+    const held = !!(await waitFor(`${who}: E's attach answer reached the page and is HELD`, `typeof window.__lfHold.held === 'function'`, 15000));
+    await sleep(150);                                                           // the person reads; presses nothing
+    await evalJs(`(() => { const h = window.__lfHold.held; window.__lfHold.srv = null; window.__lfHold.held = null; if (typeof h === 'function') h(); return true; })()`);
+    const drawn = !!(await waitFor(`${who}: E's open FINISHED (its chat drawn)`, DRAWN(e)));
+    const st = await evalJs(`(() => { const w = [...app.wm.windows.values()].find((x) => x._openSpec && x._openSpec.serverId === ${J(e)}); return { start: w ? w._lateFocusSince : null, now: Math.round(performance.now()), active: document.activeElement ? document.activeElement.tagName.toLowerCase() + '.' + String(document.activeElement.className || '').split(' ')[0] : null }; })()`);
+    console.log(`  · ${who}: E's start ${JSON.stringify(st.start)} · the page now ${st.now} · the focus ${st.active}`);
+    await type('two');
+    return { pressed, held, drawn, ...(await TEXTS(a, e)) };
+  };
+  const E = await create('Focus E', 'e');
+  await evalJs(`(() => { const kA = ${winOf(A)}; for (const [k, w] of app.wm.windows) if (k !== kA && w.element) Object.assign(w.element.style, { left: '700px', top: '430px' }); app.wm.focusWindow(kA); return true; })()`);   // A in front: ⑤'s window stood over it
+  const t6 = await mark();
+  const cls = await classScene('this tree', A, E, CWD);
+  await diag('⑥ (always said)', t6);
+  ok(cls.pressed === true && cls.held && cls.drawn, 'the person pressed into A\'s composer and typed; then E opened by a road that handed no start, its answer held and let go: E drawn', cls);
+  if (!ok(cls.a === 'onetwo' && cls.b === '' && cls.inA === true, `THE DEFAULT IS SAFE: every character the person typed stays in A's composer («${cls.a}»), none in E's («${cls.b}»): an open nobody handed a start never takes the keys out of the field the person is in`, cls)) await diag('⑥', t6);
+
+  console.log('⑦ THE ACT (r673 bound 3): Enter in the Search box opens a hit — the open is made inside that key, its start is the key');
+  const F = await create('Focus F', 'f'), G = await create('Focus G', 'g');
+  // the page's search answers, stood in: a query names the ONE conversation its one hit is in (the index is not what the scene tests)
+  await evalJs(`(() => { window.__lfSearch = {}; const f0 = window.fetch.bind(window);
+    window.fetch = (u, o) => { const url = String((u && u.url) || u); if (url.startsWith('/api/search?')) { const q = new URL(url, location.href).searchParams.get('q') || ''; const sid = window.__lfSearch[q];
+      const hits = sid ? [{ kind: 'message', sid, host: '', uuid: 'u-' + q, ts: Date.now(), role: 'user', snippet: { text: 'a line of ' + q, ranges: [] } }] : [];
+      return Promise.resolve(new Response(JSON.stringify({ hits, total: hits.length, took: 1, index: { state: 'ready', lastBuild: Date.now() } }), { status: 200, headers: { 'Content-Type': 'application/json' } })); }
+      return f0(u, o); };
+    return true; })()`);
+  // the hit's conversation, as the Search window resolves it (its row in the sidebar's list; a stand-in row when the list has none)
+  const keyOf = (id) => evalJs(`(() => { const all = (app.sidebar && app.sidebar._allSessions) || []; let s = all.find((x) => x.webuiId === ${J(id)});
+    if (!s) { s = { webuiId: ${J(id)}, sessionId: 'lf-' + ${J(id)}, backend: 'claude', status: 'live', cwd: ${J(CWD)}, webuiMode: 'chat', name: 'lf' }; all.push(s); }
+    return s.backendSessionId || s.claudeSessionId || s.sessionId; })()`);
+  const SBOX = `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'search'); const b = w && w.element.querySelector('input.search-input'); return b && b.getClientRects().length ? b : null; })()`;
+  const searchFor = async (q, id) => {
+    await evalJs(`(window.__lfSearch[${J(q)}] = ${J(await keyOf(id))}, true)`);
+    await evalJs(`(() => { app.openSearch({ q: ${J(q)} }); const w = [...app.wm.windows.values()].find((x) => x.type === 'search'); if (w) Object.assign(w.element.style, { left: '640px', top: '300px', width: '600px', height: '380px' }); return true; })()`);
+    return !!(await waitFor(`the Search window shows the hit for «${q}» (and only it)`, `(() => { const rows = [...document.querySelectorAll('.search-hit')]; return !!${SBOX} && rows.length === 1 && String(rows[0]._key || '').endsWith('|u-' + ${J(q)}); })()`, 10000));
+  };
+  // ⑦a — Enter and nothing more
+  const shown7 = await searchFor('ff', F);
+  const t7 = await mark();
+  await evalJs(`(() => { window.__lfHold.srv = ${J(F)}; window.__lfHold.held = null; return true; })()`);
+  const inBox7 = await still(`JS:${SBOX}`, { timeoutMs: 4000 });
+  await pressEnter();
+  const held7 = !!(await waitFor('F\'s attach answer reached the page and is HELD', `typeof window.__lfHold.held === 'function'`, 15000));
+  const during7 = await evalJs(`(() => ({ inBox: document.activeElement === ${SBOX}, active: document.activeElement ? document.activeElement.tagName.toLowerCase() + '.' + String(document.activeElement.className || '').split(' ')[0] : null }))()`);
+  console.log(`  · ⑦ while F opens, the focus is ${during7.active} (the search box: ${during7.inBox}) — the field the open's own key was typed in`);
+  await evalJs(`(() => { const h = window.__lfHold.held; window.__lfHold.srv = null; window.__lfHold.held = null; if (typeof h === 'function') h(); return true; })()`);
+  const drawn7 = !!(await waitFor('F\'s open FINISHED (its chat drawn)', DRAWN(F)));
+  await type('act-1');
+  const r7 = await evalJs(`(() => { const ta = ${COMPOSER(F)}, b = ${SBOX}; return { f: ta ? ta.value : null, box: b ? b.value : null, inF: !!ta && document.activeElement === ta }; })()`);
+  ok(shown7 && inBox7 === true && held7 && drawn7 && during7.inBox === true, 'the person pressed into the Search box and pressed Enter on its hit: F opened (its answer held, let go), the focus in the box meanwhile', { shown7, inBox7, held7, drawn7, during7 });
+  if (!ok(r7.f === 'act-1' && r7.inF === true && r7.box === 'ff', `bound 3: Enter in the Search box and nothing more — the opened conversation takes the keys («${r7.f}» in F's composer; the box keeps «${r7.box}»): the open was made inside that key, its start the key's`, r7)) await diag('⑦a', t7);
+  // ⑦b — Enter, then more typing in the box
+  const shown7b = await searchFor('gg', G);
+  const t7b = await mark();
+  await evalJs(`(() => { window.__lfHold.srv = ${J(G)}; window.__lfHold.held = null; return true; })()`);
+  const inBox7b = await still(`JS:${SBOX}`, { timeoutMs: 4000 });
+  await pressEnter();
+  const held7b = !!(await waitFor('G\'s attach answer reached the page and is HELD', `typeof window.__lfHold.held === 'function'`, 15000));
+  await keys('more');                                                           // the person goes on typing in the box (acts after the key's start)
+  await evalJs(`(() => { const h = window.__lfHold.held; window.__lfHold.srv = null; window.__lfHold.held = null; if (typeof h === 'function') h(); return true; })()`);
+  const drawn7b = !!(await waitFor('G\'s open FINISHED (its chat drawn)', DRAWN(G)));
+  const r7b = await evalJs(`(() => { const ta = ${COMPOSER(G)}, b = ${SBOX}; return { g: ta ? ta.value : null, box: b ? b.value : null, inBox: !!b && document.activeElement === b }; })()`);
+  ok(shown7b && inBox7b === true && held7b && drawn7b, 'the person pressed Enter on G\'s hit and went on typing in the box while G opened', { shown7b, inBox7b, held7b, drawn7b });
+  if (!ok(r7b.g === '' && r7b.box === 'ggmore' && r7b.inBox === true, `bound 3: Enter and then more typing — the keys stay in the box («${r7b.box}»), G's composer empty («${r7b.g}»): a start handed by the act obeys the clock exactly`, r7b)) await diag('⑦b', t7b);
+
+  console.log('⑧ THE BROWSER\'S FACT (r673 bounds 4, 5): a confirm\'s continuation runs inside its press; a timer never does');
+  await evalJs(`(() => { const b = document.createElement('button'); b.id = 'lf-fact'; b.textContent = 'fact'; Object.assign(b.style, { position: 'fixed', left: '1200px', top: '8px', zIndex: 2147483647 });
+    b.onclick = () => { Promise.resolve().then(() => { window.__lfFact = { inThen: window.event ? window.event.type + ':' + window.event.isTrusted : null }; setTimeout(() => { window.__lfFact.inTimer = window.event ? window.event.type : null; }, 0); }); };
+    document.body.appendChild(b); return true; })()`);
+  const pressedFact = await still("JS:document.getElementById('lf-fact')", { timeoutMs: 4000 });
+  const fact = await waitFor('the press\'s two readings', `window.__lfFact && 'inTimer' in window.__lfFact ? window.__lfFact : null`, 5000);
+  const ua = await evalJs('navigator.userAgent');
+  console.log(`  · ⑧ ${(String(ua).match(/(?:Headless)?Chrome\/[\d.]+/) || [ua])[0]}: in the press's promise continuation window.event = ${fact && fact.inThen}; in a timer it set = ${fact && fact.inTimer}`);
+  ok(pressedFact === true && !!fact && fact.inThen === 'click:true' && fact.inTimer === null, 'bound 4: on this browser a continuation of a press (a confirm resolving its road) runs with that press as the page\'s current event, a timer with none — so «Resume anyway» opens inside its own press, and a turn handed to a timer is no one\'s', fact);
+  await evalJs(`(document.getElementById('lf-fact')?.remove(), true)`);
   ok(PAGE_ERRORS.length === 0, 'the page threw nothing', PAGE_ERRORS.slice(-3));
+  try {
+  console.log('⑥ RED CONTROL: the same scene on this tree with THE LAW taken out (a second scratch hub) — the keys move to E');
+  ok(LAW_OUT && LAW_BUILT, 'the plant applied: the default-is-safe line taken out of the PURE verdict, once — and the law-out page\'s OWN bundle built from that tree (the page runs the built bundle, never src)', { LAW_OUT, LAW_BUILT });
+  if (!(await hub2.ready())) throw new Error('the red control\'s scratch hub never answered');
+  await cdp('Page.navigate', { url: BASE2 });
+  ok(!!(await waitFor('the law-out page loads', `!!(window.app && app.wm && app.desktopManager && app.ws && typeof app.ws.request === 'function')`, 40000)), 'the law-out page loads');
+  await waitFor('its loading screen goes', `!document.getElementById('loading-screen')`, 30000);
+  await installTaps();
+  const wsR = new WebSocket(`ws://127.0.0.1:${PORT2}/ws`, { headers: { Origin: BASE2 } });
+  await new Promise((r, j) => { wsR.on('open', r); wsR.on('error', j); });
+  const framesR = []; wsR.on('message', (d) => { try { framesR.push(JSON.parse(String(d))); } catch { } });
+  const createR = async (name, reqId) => {
+    const before = stubRuns().length;
+    wsR.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD2, reqId, sessionName: name }));
+    for (let i = 0; i < 120 && stubRuns().length === before; i++) await sleep(250);
+    for (let i = 0; i < 80 && !framesR.find((m) => m && m.type === 'created' && m.reqId === reqId); i++) await sleep(100);
+    return (framesR.find((m) => m && m.type === 'created' && m.reqId === reqId) || {}).sessionId || null;
+  };
+  const A2 = await createR('Focus A', 'a2'), E2 = await createR('Focus E', 'e2');
+  await evalJs(`(() => { app.attachSession(${J(A2)}, 'Focus A', ${J(CWD2)}, { mode: 'chat', backend: 'claude' }); return true; })()`);
+  ok(!!(await waitFor('the law-out page: A\'s window opens', DRAWN(A2))), 'the law-out page: A\'s window opens');
+  await evalJs(`(() => { const k = ${winOf(A2)}; Object.assign(app.wm.windows.get(k).element.style, { left: '8px', top: '8px', width: '600px', height: '440px' }); return true; })()`);
+  ok(!!(await waitFor('the law-out page\'s boot restore has ended', '!app.layoutManager?._bootRestoring', 10000)), 'the law-out page\'s boot restore has ended (an open there is no boot\'s)');
+  const tR = await mark();
+  const red6 = await classScene('the law-out page', A2, E2, CWD2);
+  await diag('⑥ red (always said)', tR);
+  if (!ok(red6.drawn && red6.b === 'two' && red6.a === 'one', `RED CONTROL: with the law taken out the same scene loses the person's keys — E's composer took them («${red6.b}» in E, A keeps «${red6.a}»): the leg reads where the text went and can fail`, red6)) await diag('⑥ red', tR);
+  } catch (e) { ok(false, 'the red control ran to its end', String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); }
 } catch (e) { ok(false, 'the suite ran to its end', String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); }
 {
   const after = (() => { try { return fs.readdirSync(REAL_PROJECTS, { withFileTypes: true }); } catch { return []; } })();

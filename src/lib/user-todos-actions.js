@@ -360,11 +360,11 @@ export function inboxModel(app) {
   /** A reply REOPENED its ended conversation (lane inbox-reply-dead-session): that conversation's window opens on THIS
    *  page — a window still showing it ended (a read-only / view-only one) is its ROW, re-opened as itself with the reopened session
    *  (lane phone-resume-keeps-layout r2: session-lifecycle _reopenWin / _attachInRow — same id, same place); a second one closes. */
-  const openReopened = (r) => {
+  const openReopened = (r, at = null) => {   // B-c87d r671: `at` = the reply's start, read at its press (before the reply's wait)
     const c = (r && r.conversation) || {};
     let row = null;
     try { row = app._reopenRowOf(c, r.sessionId); } catch { }   // THE ROW LOOP, shared with the pages that follow a resume nobody pressed (session-lifecycle)
-    const opts = { mode: 'chat', backend: c.backend || 'claude', backendSessionId: c.backendSessionId || undefined, hostId: c.hostId || undefined };
+    const opts = { mode: 'chat', backend: c.backend || 'claude', backendSessionId: c.backendSessionId || undefined, hostId: c.hostId || undefined, openAt: at };
     try { if (row) app._attachInRow(row, r.sessionId, c.name || '', c.cwd || '', opts); else app.attachSession(r.sessionId, c.name || '', c.cwd || '', opts); }
     catch (e) { showToast(t('Could not open the conversation: {why}', { why: e.message }), { type: 'error' }); }
   };
@@ -378,10 +378,11 @@ export function inboxModel(app) {
     // fetchJson never throws — a null (network) or an {error, code} body is a
     // FAILURE the user must see (no silent failures); the box keeps its text (and its pictures)
     const images = Array.isArray(pics) && pics.length ? pics.map((p) => ({ mediaType: p.mediaType, base64: p.base64, name: p.name })) : null;
+    const at = app._openStartNow?.();   // B-c87d r671: a reopen's start is THIS press, read before the reply's network wait
     const r = await fetchJson(`/api/user-todos/${encodeURIComponent(id)}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(images ? { text, images } : { text }) });
     if (r && r.ok) {
       replyFailures.delete(id); drafts.delete(id); if (images) dropSentPictures(pictures, id, pics);
-      if (r.reopened) { showToast(t('Reopened the conversation and sent your reply')); openReopened(r); }
+      if (r.reopened) { showToast(t('Reopened the conversation and sent your reply')); openReopened(r, at); }
       else showToast(sentToast || t('Reply sent'));
       return true;
     }
@@ -389,7 +390,7 @@ export function inboxModel(app) {
     // just-reopened conversation cannot take yet carries its words as a key (`words`) — said in the page's language (batch 20 cure)
     const why = r && r.code === 'bad_image' && r.picture ? pictureRefusalText([r.picture], t) : r && r.words && r.words.key ? t(r.words.key, r.words.params || {}) : r && r.i18n && r.i18n.key ? t(r.i18n.key, i18nParams(r.i18n)) : r && r.error ? t(r.error) : t('server unreachable');   // B-a5a4 follow-up r2: a refusal naming an account (its i18n); batch 20's: a picture by its harness's numbers, a reopen's words
     replyFailures.set(id, { code: (r && r.code) || 'unreachable', why });
-    if (r && r.reopened && r.sessionId) openReopened(r); // reopened, but the reply did not go: the conversation is open — show it
+    if (r && r.reopened && r.sessionId) openReopened(r, at); // reopened, but the reply did not go: the conversation is open — show it
     showToast(r && r.code === 'resume_failed' ? t('Could not reopen the conversation: {why}', { why }) : failWords ? failWords(why) : t('Could not reply: {why}', { why }), { type: 'error' });
     return false;
   };

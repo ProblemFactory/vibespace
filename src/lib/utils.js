@@ -570,9 +570,12 @@ const _weak = (t) => (t && typeof WeakRef === 'function' ? new WeakRef(t) : { de
 const _partOf = (t) => (t && typeof t.closest === 'function' ? t.closest('.window-content') || t.closest('.window') : null);
 const _actRef = (t) => { const r = _weak(t), p = _weak(_partOf(t)); return { deref: () => r.deref(), part: () => p.deref() || null }; };
 const _now = () => (typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now());
+// B-c87d r673: an act's time is its OWN instant on the page's clock (the event's timeStamp; now when that is not on this clock) — the
+// same instant an open made inside that act starts at (late-focus.js startNow), so the act that starts an open lies at its start
+const _actAt = (e) => { const n = _now(), ts = e && e.timeStamp; return Number.isFinite(ts) && ts >= 0 && ts <= n ? ts : n; };
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
-  window.addEventListener('pointerdown', (e) => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; if (e.isTrusted !== false) _personAct = { at: _now(), ref: _actRef(e.target) }; }, true);
-  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); if (keyIsAct(e)) _personAct = { at: _now(), ref: _actRef(e.target) }; }, true);
+  window.addEventListener('pointerdown', (e) => { _gestureAt = Date.now(); _menuKeyAt = _menuOwnKeyAt = 0; if (e.isTrusted !== false) _personAct = { at: _actAt(e), ref: _actRef(e.target) }; }, true);
+  window.addEventListener('keydown', (e) => { if (isGestureKey(e, _editable(e.target))) _gestureAt = _menuKeyAt = Date.now(); if (isMenuKey(e)) _menuOwnKeyAt = Date.now(); if (keyIsAct(e)) _personAct = { at: _actAt(e), ref: _actRef(e.target) }; }, true);
 }
 /** B-c87d: the person's last act on the page ({ at, target, part } on the page's clock — target null once its tree is gone; part = the
  *  window content or frame it landed in, kept while that window stands), or null before the first */
