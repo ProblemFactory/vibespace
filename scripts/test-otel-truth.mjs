@@ -301,7 +301,11 @@ const PAYLOAD = (recs) => ({
       // post is sent while the replay is held between two slices, and the replay is released after. A setup line says the hold was reached
       const SLICE = '    while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) await nextTurn();';
       const src8 = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
-      const hold8 = src8.split(SLICE).length === 2 ? src8.replace(SLICE, () => '    while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) { if (globalThis.__u4SliceHold) await globalThis.__u4SliceHold(); await nextTurn(); }') : null;
+      // (主开发 r584 — the candidate's box zone, Node 24: the CONTROL's first 20 ms slice read all 40 000 rows, so its replay never
+      // entered the loop's body and never reached the hold; the leg's own slice had read 38399 of them in the same run) THE SEAM HOLDS AT
+      // A ROW COUNT, never at the clock: while the hold is armed a slice is bounded by -Infinity, so it ends at its first check (255
+      // lines) and the hold is reached after one slice on any machine — the leg and its control alike
+      const hold8 = src8.split(SLICE).length === 2 ? src8.replace(SLICE, () => '    while (!replay.done && !replayTake(globalThis.__u4SliceHold ? -Infinity : performance.now() + REPLAY_SLICE_MS)) { if (globalThis.__u4SliceHold) await globalThis.__u4SliceHold(); await nextTurn(); }') : null;
       const sliced = async (src, tag) => {
         const M8 = mutantCopies(`otel-truth-u4-${tag}`, REPO).load('src/server/otel-ingest.js', src, tag);
         let o8 = null, reached = null, open = null; const gate = new Promise((r) => { open = r; });
@@ -317,14 +321,15 @@ const PAYLOAD = (recs) => ({
         return res;
       };
       const s8 = hold8 ? await sliced(hold8, 'hold') : null;
-      ok(!!s8 && !!s8.reached && s8.reached.rids > 0 && s8.reached.rids < 40000, `U4 setup: the replay HELD between two slices (${s8 && s8.reached ? s8.reached.rids : 'never reached'} of 40 000 rows replayed) — a seam of the suite: a copy of the ingest whose replay, after a slice that did not end the stash, waits on this leg's hold`, s8);
+      ok(!!s8 && !!s8.reached && s8.reached.rids > 0 && s8.reached.rids < 40000, `U4 setup: the replay HELD between two slices (${s8 && s8.reached ? s8.reached.rids : 'never reached'} of 40 000 rows replayed) — a seam of the suite: a copy of the ingest whose replay, after a slice that did not end the stash, waits on this leg's hold`, JSON.stringify(s8));
       const mid = s8 ? s8.mid : -1, right = s8 ? s8.right : -1;
-      ok(!!s8 && mid > 0 && mid < 40000 && right === mid && s8.bytes === 0 && s8.waits && s8.kept === 1 && s8.org === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`, s8);
+      ok(!!s8 && mid > 0 && mid < 40000 && right === mid && s8.bytes === 0 && s8.waits && s8.kept === 1 && s8.org === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`, JSON.stringify(s8));
       // CONTROL, red for its own reason: the same placed race over the release's finishReplay at the top of the ingest — the post finishes
       // the replay in its own tick (the map moves in the post's tick) and does not wait
       const FIN = '    if (replay.done) return take(records, seen);';
       const c8 = hold8 && hold8.split(FIN).length === 2 ? await sliced(hold8.replace(FIN, () => '    finishReplay(); return take(records, seen);'), 'fin') : null;
-      ok(!!c8 && !!c8.reached && c8.reached.rids > 0 && c8.right > c8.mid && !c8.waits, `CONTROL: the same placed race over the release's finishReplay at the top of the ingest — the post finished the held replay in its own tick (the map ${c8 && c8.mid} → ${c8 && c8.right}) and did not wait ⇒ RED`, c8);
+      ok(!!c8 && !!c8.reached && c8.reached.rids > 0 && c8.reached.rids < 40000, `CONTROL setup: the copy's replay HELD between two slices too (${c8 && c8.reached ? c8.reached.rids : 'never reached'} of 40 000 rows replayed) — the same seam as the leg`, JSON.stringify(c8));
+      ok(!!c8 && !!c8.reached && c8.mid > 0 && c8.mid < 40000 && c8.right > c8.mid && !c8.waits, `CONTROL: the same placed race over the release's finishReplay at the top of the ingest — the post finished the held replay in its own tick (the map ${c8 && c8.mid} → ${c8 && c8.right}) and did not wait ⇒ RED`, JSON.stringify(c8));
     }
     { // a write the writer never confirmed (its thread restarted and asked again) is OFFERED AGAIN, on a new line
       const d9 = mkDir4('f'), o9 = mk4(d9); await o9.replayed;
