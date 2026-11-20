@@ -261,35 +261,62 @@ console.log('④ the wiring — the tick, the drift card, the routes, the client
   ok('…MUTANT: the same child with no env (it would inherit the hub\'s whole env, secrets included) ⇒ §94 RED, naming the site', cr.includes('{ env: serviceEnv(process.env), timeout') && mut.red.length === 1 && /UNLISTED raw/.test(mut.red[0]), mut);
 }
 
-console.log('\n⑤ THE HOSTED RUNNER\'S BUILD (B-9ff2, the coordinator\'s road (a), 2026-11-19): ci.yml\'s fast job drafts it — read, never run');
+console.log('\n⑤ THE HOSTED RUNNER\'S CLAUDE CODE (B-28b1, the coordinator\'s r238, 2026-11-20 — K44): the tree\'s PINNED build installed; the registry\'s newest a look-ahead that never gates');
 {
-  // the box and the test machine never hold the build a hosted runner installs (ci.yml: `npm install -g @anthropic-ai/claude-code`, the
-  // NEWEST); one hosted step runs THIS tree's --auto road over the runner's own file and keeps the draft as an artifact (no lane downloads
-  // a vendor package: the coordinator's rule on fetched binaries)
-  const DUMP_RUN = 'node scripts/claude-cli-dump.mjs --auto --force --data "$RUNNER_TEMP/cli-dump"';
+  // the registry's newest moves almost daily: run 44748179665 installed 2.1.329 the day the tree pinned 2.1.328, and the record oracle ran
+  // LENIENT. Law 1: every job that installs claude installs `@<the tree's pin>`, read by scripts/ci-claude.mjs from SCHEMA_CLI_VERSION —
+  // never typed in the workflow, never bare. Law 2: the newest is installed BESIDE it (its own npm prefix), READ by the tree's --auto road
+  // (strings, never run), kept as the artifact, said in one line; never a gate, never a turn. (B-9ff2 step 1's dump of the installed build
+  // is that look-ahead now: the installed build IS the pin.)
+  const PIN = 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)\n';
+  const LOOK = '        run: node scripts/ci-claude.mjs look-ahead --bin "$RUNNER_TEMP/claude-newest/bin/claude" --data "$RUNNER_TEMP/cli-dump"\n';
+  const NEWEST = '        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@latest\n';
   const fastOf = (yml) => { const at = yml.indexOf('\n  fast:\n'), end = yml.indexOf('\n  heavy-shards:\n', at); return at < 0 ? '' : yml.slice(at, end < 0 ? undefined : end); };
+  const heavyOf = (yml) => { const at = yml.indexOf('\n  heavy-shards:\n'), end = yml.indexOf('\n  heavy:\n', at); return at < 0 ? '' : yml.slice(at, end < 0 ? undefined : end); };
   const wiring = (yml) => {
-    const f = fastOf(yml), bad = [];
-    const dump = /( {6}- name: Dump the runner's claude build[^\n]*\n(?: {8}.*\n)+)/.exec(f), up = /( {6}- name: Upload the runner's claude dump[^\n]*\n(?: {8}.*\n)+)/.exec(f);
-    const install = f.indexOf('run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code\n');
-    if (!dump) bad.push('the fast job drafts no runner build');
+    const f = fastOf(yml), h = heavyOf(yml), bad = [];
+    // every install of claude in the workflow is the pin: none typed, none bare (the look-ahead's @latest, in its own step, is the one other)
+    const installs = [...yml.matchAll(/^\s*(?:- )?(?:run: )?bash scripts\/ci-npm\.sh install -g (@anthropic-ai\/claude-code[^\n]*?)\s*$/gm)].map((m) => m[1]);
+    const other = installs.filter((x) => x !== '@anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)' && x !== '@anthropic-ai/claude-code@latest');
+    if (!f.includes(PIN)) bad.push('the fast job does not install the tree\'s pinned build');
+    if (!h.includes(PIN)) bad.push('the heavy shards do not install the tree\'s pinned build');
+    for (const x of other) bad.push(`an install of claude that is not the pin: ${x}`);
+    if (installs.filter((x) => x === '@anthropic-ai/claude-code@latest').length !== 1) bad.push(`the registry's newest is installed ${installs.filter((x) => x === '@anthropic-ai/claude-code@latest').length} time(s), not once (the look-ahead)`);
+    // two steps, each ONE plain line (test-ci-gate §2g): the newest installed beside the pin, then read
+    const inst = /( {6}- name: Look ahead — install the registry's newest claude beside the pin[^\n]*\n(?: {8}.*\n)+)/.exec(f);
+    const look = /( {6}- name: Look ahead — read the newest beside the pin[^\n]*\n(?: {8}.*\n)+)/.exec(f), up = /( {6}- name: Upload the runner's claude dump[^\n]*\n(?: {8}.*\n)+)/.exec(f);
+    if (!inst || !look) bad.push('the fast job keeps no look-ahead');
     else {
-      const d = dump[1];
-      if (!d.includes(`        run: ${DUMP_RUN}\n`)) bad.push('the dump step is not the tree\'s --auto road over the installed file');
-      if (!d.includes('        continue-on-error: true\n')) bad.push('the dump step can fail the job (no continue-on-error)');
-      if (!d.includes('        if: matrix.part == 1\n')) bad.push('the dump step runs in every part');
-      if (install < 0 || f.indexOf(d) < install) bad.push('the dump step runs before the claude install');
+      const i = inst[1], d = look[1];
+      if (!i.includes(NEWEST) || !d.includes(LOOK)) bad.push('the look-ahead is not the newest, installed beside the pin, read by the tree\'s road');
+      if (!i.includes('          NPM_CONFIG_PREFIX: ${{ runner.temp }}/claude-newest\n')) bad.push('the look-ahead installs over the pin (no prefix of its own)');
+      if (!i.includes('        continue-on-error: true\n') || !d.includes('        continue-on-error: true\n')) bad.push('the look-ahead can fail the job (no continue-on-error)');
+      if (!i.includes('        if: matrix.part == 1 && matrix.node == 22\n') || !d.includes('        if: matrix.part == 1 && matrix.node == 22\n')) bad.push('the look-ahead runs in more than ONE job (part 1 on the image\'s Node — one artifact name a run)');
+      if (f.indexOf(PIN) < 0 || f.indexOf(i) < f.indexOf(PIN) || f.indexOf(d) < f.indexOf(i)) bad.push('the look-ahead runs before the pinned install, or reads before it installs');
     }
-    if (!up) bad.push('the draft is not kept (no upload)');
+    if (!up) bad.push('the look-ahead\'s dump is not kept (no upload)');
     else if (!up[1].includes('          path: ${{ runner.temp }}/cli-dump/claude-cli-dumps/\n') || !up[1].includes('          name: claude-cli-dump-${{ github.sha }}\n')) bad.push('the upload is not the draft dir, by the sha');
+    else if (!up[1].includes('        if: matrix.part == 1 && matrix.node == 22 && always()\n')) bad.push('the upload runs in more than ONE job');
     return bad;
   };
   const yml = read('.github/workflows/ci.yml'), w = wiring(yml);
-  ok(`ci.yml's fast job (part 1) drafts the runner's own claude build AFTER installing it — \`${DUMP_RUN}\`: the tree's read (strings), never a run, never a gate — and keeps the draft as the artifact claude-cli-dump-<sha>`, w.length === 0, w);
-  const noStep = yml.replace(/ {6}- name: Dump the runner's claude build[^\n]*\n(?: {8}.*\n)+/, '');
-  const asGate = yml.replace(/( {6}- name: Dump the runner's claude build[^\n]*\n(?: {8}(?!continue-on-error).*\n)*) {8}continue-on-error: true\n/, '$1');
-  ok('CONTROL: a ci.yml without the step, or with the step able to fail the job, is RED by name', noStep !== yml && asGate !== yml
-    && wiring(noStep).includes('the fast job drafts no runner build') && wiring(asGate).includes('the dump step can fail the job (no continue-on-error)'), { noStep: wiring(noStep), asGate: wiring(asGate) });
+  ok('ci.yml installs the TREE\'S PINNED claude in the fast job AND the heavy shards (`@$(node scripts/ci-claude.mjs pin)` — never typed, never bare) and keeps the registry\'s newest as a LOOK-AHEAD beside it: its own prefix, read by the tree\'s road, never a gate, part 1 on Node 22, its dump the artifact claude-cli-dump-<sha>', w.length === 0, w);
+  // the pin's one reader prints the tree's constant (a real child: what the workflow's $(…) reads)
+  const pinOut = execFileSync(process.execPath, [path.join(REPO, 'scripts/ci-claude.mjs'), 'pin'], { encoding: 'utf8' }).trim();
+  ok(`scripts/ci-claude.mjs pin prints the tree's pinned build — «${pinOut}» = SCHEMA_CLI_VERSION ${R.SCHEMA_CLI_VERSION}`, pinOut === R.SCHEMA_CLI_VERSION && /^\d+\.\d+\.\d+$/.test(pinOut), pinOut);
+  const CC = await import('./ci-claude.mjs');
+  const P0 = R.SCHEMA_CLI_VERSION, LA = (r) => CC.lookAheadLine(P0, r);
+  const lines = { same: LA({ version: P0, registered: true, file: '/x/' + P0 + '.json', changes: 0 }), ahead: LA({ version: '9.9.999', registered: false, file: '/x/9.9.999.json', changes: 54 }), older: LA({ version: '0.0.1', registered: false }), broken: LA({ error: 'no claude binary' }) };
+  ok('the look-ahead\'s ONE line says how far ahead: «' + lines.ahead + '» · the same build «nothing ahead» · an older one said · a failed read said — every one naming the pin, none a gate', /newest is 9\.9\.999, ahead of the pinned/.test(lines.ahead) && /54 change\(s\)/.test(lines.ahead) && /nothing registers itself/.test(lines.ahead) && /IS the pinned .* nothing ahead/.test(lines.same) && /OLDER than the pinned/.test(lines.older) && /could not be read — no claude binary/.test(lines.broken) && Object.values(lines).every((l) => l.includes(P0)), lines);
+  // CONTROLS — each planted fault named
+  const typed = yml.replace(PIN, 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@' + P0 + '\n');
+  const bare = yml.replace(PIN, 'run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code\n');
+  const asGate = yml.replace(/( {6}- name: Look ahead — read the newest beside the pin[^\n]*\n(?: {8}(?!continue-on-error).*\n)*) {8}continue-on-error: true\n/, '$1');
+  const overPin = yml.replace('          NPM_CONFIG_PREFIX: ${{ runner.temp }}/claude-newest\n', '');
+  const noLook = yml.replace(/ {6}- name: Look ahead — install the registry's newest claude beside the pin[^\n]*\n(?: {8}.*\n)+/, '').replace(/ {6}- name: Look ahead — read the newest beside the pin[^\n]*\n(?: {8}.*\n)+/, '');
+  const CTL = { typed: [typed, /an install of claude that is not the pin: @anthropic-ai\/claude-code@\d/], bare: [bare, /an install of claude that is not the pin: @anthropic-ai\/claude-code$/], asGate: [asGate, /the look-ahead can fail the job/], overPin: [overPin, /installs over the pin/], noLook: [noLook, /keeps no look-ahead/] };
+  const seen = Object.fromEntries(Object.entries(CTL).map(([k, [t, re]]) => [k, t !== yml && wiring(t).some((x) => re.test(x))]));
+  ok('CONTROL: a typed version, a bare install, a look-ahead that can fail the job, one that installs over the pin, and none at all — each RED by name', Object.values(seen).every(Boolean), seen);
 }
 
 console.log(fail ? `\n✗ (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

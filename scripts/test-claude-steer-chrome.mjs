@@ -679,7 +679,14 @@ try { fs.rmSync(scratchRoot, { recursive: true, force: true }); } catch { }
 console.log('§A the real claude CLI behind the real wrapper, a local mock of the messages API (no vendor traffic)');
 // B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 (every acceptance run, every lane env, the test machine) means the
 // REAL CLI is not run here — SKIP by name, whatever the PATH holds (a claude on it ran this leg under the flag before)
-const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
+// B-ec25 (r117 part 4, 2026-11-20): the hosted heavy job runs EVERY suite under VS_NO_REAL_CLI=1 and names THIS leg among the legs
+// sanctioned BY NAME (VS_REAL_CLI_SANCTIONED, a `;` list; test-ci-gate §2r: only the named suites read it) — honoured on the Actions
+// runner only (GITHUB_ACTIONS): a lane env or a test machine that carries the word still skips. §A runs the installed claude
+// only through its own fence: a scratch HOME and the LOCAL mock below — no vendor traffic. Without the sanction the flag skips it.
+const REAL_CLI_SANCTION = 'test-claude-steer-chrome §A';
+const REAL_CLI_SANCTIONED = String(process.env.VS_REAL_CLI_SANCTIONED || '').split(';').map((x) => x.trim()).includes(REAL_CLI_SANCTION) && process.env.GITHUB_ACTIONS === 'true';
+const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1' && !REAL_CLI_SANCTIONED;
+if (process.env.VS_NO_REAL_CLI === '1' && REAL_CLI_SANCTIONED) console.log(`  (VS_NO_REAL_CLI=1 with the hosted heavy job's sanction «${REAL_CLI_SANCTION}»: §A runs the installed claude through its fence — every other leg stays under the flag)`);
 // B-ba47 pick B: the HANDED env's candidates — this suite is a row of scratch.mjs REAL_CLI_ALLOW (a suite handed a non-temp
 // home runs re-homed, so its own PATH / HOME no longer name the person's CLI; test-architecture §113)
 const claudeCands = NO_REAL_CLI ? [] : handedCliCandidates('claude');

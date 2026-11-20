@@ -48,7 +48,13 @@ const S = JSON.stringify;
 console.log('§A the real claude CLI behind the real wrapper, a local mock of the messages API (no vendor traffic)');
 // B-ddb9 (lane bl-scratch, 2026-11-17): VS_NO_REAL_CLI=1 (every acceptance run, every lane env, the test machine) means the
 // REAL CLI is not run here — SKIP by name, whatever the PATH holds (a claude on it ran this leg under the flag before)
-const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1';
+// B-ec25 (r117, the coordinator's ruling r140, 2026-11-20): on the Actions runner the hosted heavy job sanctions THIS leg by name
+// (VS_REAL_CLI_SANCTIONED, a `;` list; test-ci-gate §2r): §A runs the installed claude only against the loopback mock below with a
+// made-up key (real-cli-env: an env built from nothing) — no vendor traffic. A lane env or a test machine that carries the word skips.
+const REAL_CLI_SANCTION = 'test-claude-wrapper-queue §A';
+const REAL_CLI_SANCTIONED = String(process.env.VS_REAL_CLI_SANCTIONED || '').split(';').map((x) => x.trim()).includes(REAL_CLI_SANCTION) && process.env.GITHUB_ACTIONS === 'true';
+const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1' && !REAL_CLI_SANCTIONED;
+if (process.env.VS_NO_REAL_CLI === '1' && REAL_CLI_SANCTIONED) console.log(`  (VS_NO_REAL_CLI=1 with the hosted heavy job's sanction «${REAL_CLI_SANCTION}»: §A runs the installed claude against its loopback mock — every other leg stays under the flag)`);
 // B-ba47 pick B (主开发 r1083 cure 2): the HANDED env's candidates — this suite is a row of scratch.mjs REAL_CLI_ALLOW (a suite
 // handed a non-temp home runs re-homed, so its own PATH / HOME no longer name the person's CLI; test-architecture §113)
 const claudeCands = NO_REAL_CLI ? [] : handedCliCandidates('claude');

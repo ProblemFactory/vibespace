@@ -44,7 +44,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
-import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync, passedCountOf, wholeSkipOf, heavyVerdictSaid, markerCommitsOf, resolveShortNames } from './ci.mjs';
+import { tableTiersOf, launchPath, launchEnvOf, judgeMirrorRun, heavyVerdict, ghApiJson, workflowShardsAt, workflowFastPartsAt, workflowHeavyNodesAt, heavyNodesFor, repoSlugOf, hostedHeavyNamesAt, heavyBlocker, checkHeavy, pruneMarkers, markerShapeWhy, existingVerdictOf, heavyAlreadyGreen, hostPlan, SUITES, MIRROR_WORKFLOW, settleHeavyMarker, SELF_SKIP_TITLE, SELF_SKIP_TAG, selfSkipBody, selfSkippedInNotes, heavyTableOf, runSuiteAsync, passedCountOf, wholeSkipOf, heavyVerdictSaid, markerCommitsOf, resolveShortNames } from './ci.mjs';
 import { REPO, ok, git, writeMarker, report, GIT_ENV } from './ci-gate-kit.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { anchored } from './scratch.mjs';
@@ -62,10 +62,11 @@ const WF = fs.readFileSync(path.join(REPO, MIRROR_WORKFLOW), 'utf-8');
 const SH = workflowShardsAt(WF);
 const SHA = 'a'.repeat(40);
 const HOSTED = ['test-hosted-a', 'test-hosted-b'];
-const runOf = (over = {}) => ({ id: 42745258349, run_attempt: 1, name: 'ci', path: MIRROR_WORKFLOW, event: 'push', head_branch: 'ci/cut388', head_sha: SHA,
+const runOf = (over = {}) => ({ id: 42745258349, run_attempt: 1, name: 'ci', path: MIRROR_WORKFLOW, event: 'push', head_branch: 'ci/prep388', head_sha: SHA,
   status: 'completed', conclusion: 'success', run_started_at: '2026-11-10T02:52:00Z', repository: { full_name: SLUG }, head_repository: { full_name: SLUG }, ...over });
-const FP = workflowFastPartsAt(WF), FAST_JOBS = ['fast 1/2', 'fast 2/2'];   // B-7353: the fast tier as its parts — the names written out, never read back from the parser under test
-const jobsOf = (n = SH ? SH.n : 6, over = {}, fastJobs = FAST_JOBS) => [...fastJobs, ...Array.from({ length: n }, (_, k) => `heavy ${k + 1}/${n}`), 'heavy']
+const FP = workflowFastPartsAt(WF), FAST_JOBS = ['fast 1/2', 'fast 1/2 node 24', 'fast 2/2', 'fast 2/2 node 24'];   // B-7353: the fast tier as its parts — the names written out, never read back from the parser under test; r117: × Node 22 (bare) / 24
+// the default run is a DAILY PREP branch (ci/prep…): its heavy shards are Node 22's alone (r140); `heavyNodes` adds a major's shards by name
+const jobsOf = (n = SH ? SH.n : 6, over = {}, fastJobs = FAST_JOBS, heavyNodes = [null]) => [...fastJobs, ...Array.from({ length: n }, (_, k) => heavyNodes.map((nd) => `heavy ${k + 1}/${n}${nd ? ` node ${nd}` : ''}`)).flat(), 'heavy']
   .map((name) => ({ name, status: 'completed', conclusion: over[name] === undefined ? 'success' : over[name] }))
   .filter((j) => j.conclusion !== null);
 const judge = (o = {}) => judgeMirrorRun({ sha: SHA, slug: SLUG, run: runOf(o.run), jobs: o.jobs || jobsOf(), totalJobs: o.total, workflow: o.workflow || WF });
@@ -92,15 +93,65 @@ ok(refused(judge({ jobs: jobsOf(undefined, { [hj(N)]: null }) }), new RegExp(`no
 ok(refused(judge({ jobs: jobsOf(undefined, { heavy: null }) }), /no job «heavy»/), 'a missing heavy GATE is refused');
 ok(refused(judge({ jobs: jobsOf(undefined, { [FAST_JOBS[FAST_JOBS.length - 1]]: 'failure' }) }), new RegExp(`«${FAST_JOBS[FAST_JOBS.length - 1]}» is failure`)), `a failed fast job is refused (${FAST_JOBS[FAST_JOBS.length - 1]})`);
 ok(refused(judge({ jobs: jobsOf(undefined, { [FAST_JOBS[0]]: 'failure' }) }), new RegExp(`«${FAST_JOBS[0]}» is failure`)), `…and so is the FIRST part failed alone (${FAST_JOBS[0]})`);
+// r117 (part 3): the verdict reads EVERY job of the node axis by its name — production's major is a gate like the image's
+ok(refused(judge({ jobs: jobsOf(undefined, { 'fast 2/2 node 24': 'failure' }) }), /«fast 2\/2 node 24» is failure, not success/) && refused(judge({ jobs: jobsOf(undefined, { 'fast 1/2 node 24': null }) }), /no job «fast 1\/2 node 24»/)
+  && judge({ jobs: jobsOf(undefined, { 'fast 1/2 node 24': null, 'fast 2/2 node 24': null }), workflow: WF.replace(/\n {8}node: \[22, 24\]\n/, '\n        node: [22]\n').replace(/\$\{\{ matrix\.node != 22 && format\(' node \{0\}', matrix\.node\) \|\| '' \}\}/, '') }).ok,
+  'r117: a Node 24 fast job that failed, or one MISSING, is refused by its name; a commit whose workflow runs Node 22 alone needs only the bare names (the axis is read at the sha)');
 // B-7353 THE FAST TIER IN PARTS: the verdict reads the fast jobs from the workflow AT THE SHA — a part missing is refused; a
 // workflow of ONE fast job (every commit before the split) still needs exactly «fast»
-ok(FP && FP.n === 2 && FP.slots.join() === '1,2', `the workflow in this tree runs the fast tier as the jobs fast 1/2 and fast 2/2 (its parser reads ${JSON.stringify(FP)})`);
+ok(FP && FP.n === 2 && FP.slots.join() === '1,2' && JSON.stringify(FP.nodes) === '[22,24]' && FP.primary === 22,
+  `the workflow in this tree runs the fast tier as the jobs fast 1/2 and fast 2/2 on Node 22, and fast 1/2 node 24 and fast 2/2 node 24 (r117: production's major) — its parser reads ${JSON.stringify(FP)}`);
 { const job = (name, parts, next = '  heavy-shards:\n    runs-on: x\n') => `jobs:\n  fast:\n    name: ${name}\n    runs-on: ubuntu-24.04\n    strategy:\n      fail-fast: false\n      matrix:\n        part: [${parts}]\n    steps:\n      - run: x\n${next}`;
   const three = workflowFastPartsAt(job('fast ${{ matrix.part }}/3', '1, 2, 3')), gap = workflowFastPartsAt(job('fast ${{ matrix.part }}/3', '1, 3')), off = workflowFastPartsAt(job('fast ${{ matrix.part }}/2', '1, 2, 3')), other = workflowFastPartsAt(job('quick ${{ matrix.part }}/2', '1, 2'));
   ok(three && three.n === 3 && three.slots.join() === '1,2,3' && gap === null && off === null && other === null,
-    `the parser over fixtures: a 3-part matrix is read (${JSON.stringify(three)}); slots that are not 1..n, a name whose n disagrees, another job name — none`); }
+    `the parser over fixtures: a 3-part matrix is read (${JSON.stringify(three)}); slots that are not 1..n, a name whose n disagrees, another job name — none`);
+  // r117: THE NODE AXIS — the primary major's jobs keep the bare name, every other major's carries « node <major>» by the name's expression
+  const SUF = (p) => `$${'{'}{ matrix.node != ${p} && format(' node {0}', matrix.node) || '' }}`;
+  const axis = (name, nodes) => job(name, '1, 2').replace('        part: [1, 2]\n', `        part: [1, 2]\n        node: [${nodes}]\n`);
+  const two = workflowFastPartsAt(axis('fast ${{ matrix.part }}/2' + SUF(22), '22, 24')), bare = workflowFastPartsAt(axis('fast ${{ matrix.part }}/2', '22, 24'));
+  const stray = workflowFastPartsAt(axis('fast ${{ matrix.part }}/2' + SUF(20), '22, 24')), noAxis = workflowFastPartsAt(job('fast ${{ matrix.part }}/2' + SUF(22), '1, 2'));
+  const one = workflowFastPartsAt(axis('fast ${{ matrix.part }}/2', '24')), dup = workflowFastPartsAt(axis('fast ${{ matrix.part }}/2' + SUF(22), '22, 22'));
+  ok(two && JSON.stringify(two.nodes) === '[22,24]' && two.primary === 22 && two.n === 2 && bare === null && stray === null && noAxis === null && one && one.primary === 24 && dup === null,
+    `the node axis over fixtures: 2 parts × [22, 24] with the name's suffix is read (${JSON.stringify(two)}); the same axis with a BARE name (two jobs of one name), a suffix naming a major the axis lacks, a suffix with no axis, a duplicate major — none; a one-major axis needs no suffix (${JSON.stringify(one)})`); }
 ok(refused(judge({ jobs: jobsOf(undefined, { [FAST_JOBS[0]]: null }) }), new RegExp(`no job «${FAST_JOBS[0]}»`)), 'a MISSING fast part is refused by name');
-{ const ONE = WF.replace(/\n    name: fast \$\{\{ matrix\.part \}\}\/2\n/, '\n'), CUT = ONE.replace(/\n    strategy:\n      fail-fast: false\n      matrix:\n        part: \[1, 2\]\n/, '\n');
+// r117, THE RULING r140: the heavy shards run on Node 24 as well ONLY on a release's mirror (ci/cut…) and the block's proof run (ci/proof…)
+{ const HN = workflowHeavyNodesAt(WF), N7 = SH ? SH.n : 7;
+  ok(!!HN && HN.prefixes.join() === 'ci/cut,ci/proof' && JSON.stringify(HN.all) === '[22,24]' && JSON.stringify(HN.base) === '[22]' && HN.primary === 22,
+    `the workflow in this tree runs the heavy shards on Node 22, and on 24 as well on a branch named ci/cut… or ci/proof… — its parser reads ${JSON.stringify(HN)}`);
+  const majors = ['ci/cut414', 'ci/proof414', 'ci/prep414', 'master', 'ci/cutter', 'xci/cut414', ''].map((b) => [b, JSON.stringify(heavyNodesFor(HN, b))]);
+  ok(majors.map(([, m]) => m).join(' ') === '[22,24] [22,24] [22] [22] [22,24] [22] [22]', `the majors by branch (a prefix of the NAME, as the workflow's startsWith): ${majors.map(([b, m]) => `${b || '(none)'} → ${m}`).join(' · ')}`);
+  const cut = { head_branch: 'ci/cut414' }, ALL = [null, 24];
+  const vCut = judge({ run: cut, jobs: jobsOf(undefined, {}, FAST_JOBS, ALL) }), vProof = judge({ run: { head_branch: 'ci/proof414' }, jobs: jobsOf(undefined, {}, FAST_JOBS, ALL) });
+  ok(vCut.ok && vCut.jobs.length === FAST_JOBS.length + 2 * N7 + 1 && vCut.jobs.includes(`heavy ${N7}/${N7} node 24`) && vProof.ok,
+    `a release mirror's run needs every shard on both majors — ${vCut.ok ? vCut.jobs.filter((x) => x.startsWith('heavy')).join(', ') : vCut.why} (the proof run's too: ${vProof.ok ? 'accepted' : vProof.why})`);
+  ok(refused(judge({ run: cut }), new RegExp(`no job «heavy 1/${N7} node 24»`)) && refused(judge({ run: cut, jobs: jobsOf(undefined, { [`heavy 3/${N7} node 24`]: 'failure' }, FAST_JOBS, ALL) }), new RegExp(`«heavy 3/${N7} node 24» is failure`)),
+    'a release mirror\'s run with its Node 24 shards MISSING, or one of them failed, is refused by the job\'s name');
+  ok(judge({ jobs: jobsOf(undefined, {}, FAST_JOBS, ALL) }).ok && judge().ok, 'a daily prep run needs only the Node 22 shards (extra Node 24 jobs, had a run held them, are not asked for)');
+  // the parser over fixtures (a heavy-shards job alone)
+  const hj7 = (name, nodeLine) => `jobs:\n  heavy-shards:\n    name: ${name}\n    strategy:\n      matrix:\n        shard: [1, 2, 3, 4, 5, 6, 7]\n${nodeLine ? `        node: ${nodeLine}\n` : ''}    steps:\n      - run: x\n  heavy:\n    runs-on: x\n`;
+  const SUF = (p) => `$${'{'}{ matrix.node != ${p} && format(' node {0}', matrix.node) || '' }}`, NAME = 'heavy ${{ matrix.shard }}/7';
+  const EXPR = (pre, all, base) => `$${'{'}{ fromJSON((${pre.map((p) => `startsWith(github.ref_name, '${p}')`).join(' || ')}) && '[${all}]' || '[${base}]') }}`;
+  const F = {
+    'the tree\'s shape': [NAME + SUF(22), EXPR(['ci/cut', 'ci/proof'], '22, 24', '22')],
+    'one prefix': [NAME + SUF(22), EXPR(['ci/cut'], '22, 24', '22')],
+    'no axis, a bare name (every commit before r140)': [NAME, null],
+    'a plain list of two majors (every branch)': [NAME + SUF(22), '[22, 24]'],
+    'a suffix with no axis': [NAME + SUF(22), null],
+    'a bare name over the axis (two jobs of one name)': [NAME, EXPR(['ci/cut'], '22, 24', '22')],
+    'the suffix names another primary': [NAME + SUF(20), EXPR(['ci/cut'], '22, 24', '22')],
+    'a base of two majors': [NAME + SUF(22), EXPR(['ci/cut'], '22, 24', '22, 24')],
+    'a base major the full list lacks': [NAME + SUF(22), EXPR(['ci/cut'], '24, 26', '22')],
+  };
+  const read = Object.fromEntries(Object.entries(F).map(([k, [n, l]]) => [k, workflowHeavyNodesAt(hj7(n, l))]));
+  const want = { 'the tree\'s shape': '{"prefixes":["ci/cut","ci/proof"],"all":[22,24],"base":[22],"primary":22}', 'one prefix': '{"prefixes":["ci/cut"],"all":[22,24],"base":[22],"primary":22}', 'no axis, a bare name (every commit before r140)': '{"prefixes":[],"all":null,"base":null,"primary":null}' };
+  const wrong = Object.entries(read).filter(([k, v]) => JSON.stringify(v) !== (want[k] || 'null'));
+  ok(wrong.length === 0, `the heavy axis parser over ${Object.keys(F).length} fixtures: the tree's shape, one prefix and the bare matrix are read; a plain two-major list, a suffix with no axis, a bare name over the axis, another primary, a base of two, a base the list lacks — none${wrong.length ? ' — WRONG: ' + wrong.map(([k, v]) => `${k} → ${JSON.stringify(v)}`).join(' · ') : ''}`);
+  const OLD = WF.replace(/\n {8}node: \$\{\{ fromJSON[^\n]*\n/, '\n').replace(/(\n {4}name: heavy \$\{\{ matrix\.shard \}\}\/\d+)\$\{\{[^\n]*\}\}\n/, '$1\n');
+  ok(OLD !== WF && JSON.stringify(workflowHeavyNodesAt(OLD)) === want['no axis, a bare name (every commit before r140)'] && judgeMirrorRun({ sha: SHA, slug: SLUG, run: runOf(cut), jobs: jobsOf(), workflow: OLD }).ok,
+    'a commit whose workflow has no heavy axis (every commit before r140) needs only the bare shards, on a release mirror too');
+  const BAD = WF.replace(/(\n {8}node: )\$\{\{ fromJSON[^\n]*\n/, '$1[22, 24]\n');
+  ok(BAD !== WF && refused(judge({ workflow: BAD, jobs: jobsOf(undefined, {}, FAST_JOBS, ALL) }), /heavy Node axis the verdict cannot read/), 'an axis the parser cannot read is REFUSED by the judge, never read as Node 22 alone'); }
+{ const ONE = WF.replace(/\n    name: fast \$\{\{ matrix\.part \}\}\/2[^\n]*\n/, '\n'), CUT = ONE.replace(/\n    strategy:\n      fail-fast: false\n      matrix:\n        part: \[1, 2\]\n/, '\n');
   ok(ONE !== WF && CUT !== ONE && workflowFastPartsAt(CUT) === null && workflowFastPartsAt(ONE) === null, 'fixture: the workflow of ONE fast job (the shape before the split) defines no fast parts');
   ok(judgeMirrorRun({ sha: SHA, slug: SLUG, run: runOf(), jobs: jobsOf(undefined, {}, ['fast']), workflow: CUT }).ok
     && refused(judgeMirrorRun({ sha: SHA, slug: SLUG, run: runOf(), jobs: jobsOf(), workflow: CUT }), /no job «fast»/),

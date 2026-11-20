@@ -21,7 +21,7 @@ on:
   pull_request:
 jobs:
   fast:
-    name: fast ${{ matrix.part }}/2
+    name: fast ${{ matrix.part }}/2${{ matrix.node != 22 && format(' node {0}', matrix.node) || '' }}
     runs-on: ubuntu-24.04
     # TWO PARTS (B-7353, lane bl-ci 2026-11-17 — the structural cure the int407 seam below named): `ci.mjs --fast-part i/2`
     # runs one part of the tier, packed by the rows' stated times (fastPartPlan, the heavy shards' LPT; the serial group whole
@@ -33,6 +33,14 @@ jobs:
       fail-fast: false
       matrix:
         part: [1, 2]
+        # THE NODE MAJORS THE PRODUCT RUNS ON (r117, the coordinator 2026-11-20): 22 = the image's (Dockerfile) and the heavy
+        # shards' — its jobs keep their names, «fast i/2»; 24 = production's (the owner's hub runs 24.22.1) — «fast i/2 node 24».
+        # The first cut of 2.369.413 stopped on the hub on a thread name Node 24 says differently; no gate ran 24 before. Cost:
+        # the two parts are ≈ 14 runner-minutes a run (7.6 + 6.4 on checkpoint 61's prep run), so the axis adds ≈ 14. The
+        # mirror verdict reads every job of the axis by its name (judgeMirrorRun over workflowFastPartsAt's nodes). The CI sign-in
+        # and test-chat-e2e's real turn stay on the Node 22 jobs (the suite step's env below, r144); the heavy shards add 24 on
+        # ci/cut… and ci/proof… branches only (r140, the heavy-shards matrix).
+        node: [22, 24]
     # 25 (2026-11-17, the int407 seam). The whole fast tier ran in this one job. On 2026-10-04 it took about
     # 4 min here, and 15 was a wide bound. It is 599 suites now: the gate step took 550 s at this runner's 0.97×
     # (2.369.406's release mirror), 645 s at 1.15×, and 837 s at 1.48× (2.369.407's prep mirror, job
@@ -54,7 +62,7 @@ jobs:
       - uses: actions/setup-node@v4
         timeout-minutes: 3
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: Install dtach (session persistence layer the boot smoke needs)
         run: bash scripts/ci-apt.sh dtach
         # 6 (B-4a3b, B-3f60): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), the install and its one more try (80 s each)
@@ -101,22 +109,32 @@ jobs:
           [ "$("$d/bin/gh" --version | sed -n 's/^gh version \([^ ]*\).*/\1/p')" = "$GH_PIN_VERSION" ] || { echo "::error::the unpacked gh is not ${GH_PIN_VERSION}"; exit 1; }
           echo "$d/bin" >> "$GITHUB_PATH"
           echo "gh pinned ${GH_PIN_VERSION} (runner had ${had:-none})"
-      - name: Install claude CLI (chat E2E; subscription oat auth is the
+      # THE TREE'S PINNED BUILD (B-28b1, the coordinator's r238, 2026-11-20 — Known K44): the version is the tree's own
+      # SCHEMA_CLI_VERSION, printed by scripts/ci-claude.mjs (it requires nothing: this runs before npm ci) — never typed here, so
+      # the record oracle is STRICT on every hosted run and the one real turn runs on a build the tree registered.
+      - name: Install claude CLI, the tree's pinned build (chat E2E; subscription oat auth is the
           officially documented CI channel — docs/en/github-actions)
-        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
+        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)
         timeout-minutes: 5
-      # THE RUNNER'S OWN CLAUDE BUILD, DRAFTED (B-9ff2, lane bl-ci, the coordinator's road (a), 2026-11-19): the box and
-      # the test machine never hold the build this runner installs (the step above: the NEWEST). The tree's dump script
-      # READS the installed file (strings, never run) and names the build by its own stamp; the draft (the dump + its diff
-      # against the newest pinned build) is kept as an artifact for the lane that pins it in test-record-shape. It needs no
-      # node_modules (src/record-shape.js requires nothing). Part 1 only; never a gate. test-cli-registration ⑤ holds it.
-      - name: Dump the runner's claude build (read, never run)
-        if: matrix.part == 1
+      # THE NEWEST AS A LOOK-AHEAD (B-28b1 law 2; it replaces B-9ff2 step 1's dump of the installed build — that is the pin now): the
+      # registry's newest is installed BESIDE the pin (its own npm prefix, through the one npm door), the tree's --auto road READS it
+      # (strings, never run), and its dump + draft are kept as the artifact claude-cli-dump-<sha> — the next registration's input. ONE
+      # line says how far ahead it is, in the run's summary. Never a gate (continue-on-error; the script exits 0), never a turn; nothing
+      # registers itself. Part 1 on the image's Node only (one artifact name a run). test-cli-registration ⑤ holds it.
+      - name: Look ahead — install the registry's newest claude beside the pin (its own prefix; never a gate)
+        if: matrix.part == 1 && matrix.node == 22
         continue-on-error: true
-        run: node scripts/claude-cli-dump.mjs --auto --force --data "$RUNNER_TEMP/cli-dump"
+        env:
+          NPM_CONFIG_PREFIX: ${{ runner.temp }}/claude-newest
+        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@latest
+        timeout-minutes: 5
+      - name: Look ahead — read the newest beside the pin (read, never run, never a gate)
+        if: matrix.part == 1 && matrix.node == 22
+        continue-on-error: true
+        run: node scripts/ci-claude.mjs look-ahead --bin "$RUNNER_TEMP/claude-newest/bin/claude" --data "$RUNNER_TEMP/cli-dump"
         timeout-minutes: 3
-      - name: Upload the runner's claude dump
-        if: matrix.part == 1 && always()
+      - name: Upload the runner's claude dump (the look-ahead's)
+        if: matrix.part == 1 && matrix.node == 22 && always()
         continue-on-error: true
         timeout-minutes: 2
         uses: actions/upload-artifact@v4
@@ -136,8 +154,11 @@ jobs:
         timeout-minutes: 6
       - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2 --keep-going
         env:
-          # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
-          VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
+          # claude setup-token secret; absent on fork PRs → chat E2E SKIPs. THE ONE REAL TURN OF THE FAST TIER (test-chat-e2e) runs
+          # ONCE a hosted run (r140): the sign-in is handed to the Node 22 jobs alone, and every other major's job runs under
+          # VS_NO_REAL_CLI=1 (ci.mjs skips test-chat-e2e by name there; nothing in it starts a real agent CLI). test-ci-gate §2r.
+          VIBESPACE_CI_OAT: ${{ matrix.node == 22 && secrets.VIBESPACE_CI_OAT || '' }}
+          VS_NO_REAL_CLI: ${{ matrix.node != 22 && '1' || '' }}
       # (the step above) KEEP GOING (B-d24c (3), the coordinator's 2026-11-18 word): a red part runs to its end and its closing lines name EVERY
       # red (`[ci] --keep-going: N red of M suites that ran — a, b, c`, then `✗ a, b, c — release gate is RED`) — fail-fast hid
       # every red after the first. Its price: a red part no longer stops at its first red — it runs whole, about half of the
@@ -155,7 +176,7 @@ jobs:
         uses: actions/upload-artifact@v4
         timeout-minutes: 5
         with:
-          name: ci-fast-fail-logs-${{ github.sha }}-${{ matrix.part }}
+          name: ci-fast-fail-logs-${{ github.sha }}-${{ matrix.part }}-node${{ matrix.node }}
           path: data/ci-fast/fail-logs/*.log
           if-no-files-found: ignore
           retention-days: 7
@@ -193,12 +214,18 @@ jobs:
   # must not cancel the others (the tier reports ALL the damage). `heavy`
   # below is the ONE status that reads green/red for the whole tier.
   heavy-shards:
-    name: heavy ${{ matrix.shard }}/7
+    name: heavy ${{ matrix.shard }}/7${{ matrix.node != 22 && format(' node {0}', matrix.node) || '' }}
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4, 5, 6, 7]
+        # THE HEAVY TIER ON PRODUCTION'S MAJOR BEFORE EVERY PUSH (r117, the coordinator's ruling r140, 2026-11-20): Node 24 as well ONLY
+        # on a branch named ci/cut… (a release's mirror) or ci/proof… (the block's proof run) — ≈ +263 runner-minutes such a run; every
+        # other branch (the daily prep runs, master) keeps the seven Node 22 shards. The Node 22 jobs keep their names (heavy i/7), the
+        # others say their major (heavy i/7 node 24); the mirror verdict reads the axis from this line and the run's branch
+        # (scripts/ci.mjs workflowHeavyNodesAt, judgeMirrorRun).
+        node: ${{ fromJSON((startsWith(github.ref_name, 'ci/cut') || startsWith(github.ref_name, 'ci/proof')) && '[22, 24]' || '[22]') }}
     # 60 (2026-11-17, the UI train's seam, the coordinator's word). Green shards on 2.369.407's release mirror took 2006 to
     # 2396 s of suites — 33 to 40 min before setup — so 45 left no room for one red suite retried in place: on the UI train's
     # prep mirror heavy 3/7 was cancelled by this limit at 45 min 16 s, its suite step at 43 min 53 s with two red tries of
@@ -212,7 +239,7 @@ jobs:
       - uses: actions/setup-node@v4
         timeout-minutes: 3
         with:
-          node-version: 22
+          node-version: ${{ matrix.node }}
       - name: Install dtach (session persistence layer the boot smokes need)
         run: bash scripts/ci-apt.sh dtach
         # 6 (B-4a3b, B-3f60): the worst path fits — a stalled first update (40 s), the second mirror's (80 s), the install and its one more try (80 s each)
@@ -244,8 +271,8 @@ jobs:
       - name: Install CJK fonts (the runner measures zh / ja text as users see it)
         run: bash scripts/ci-fonts.sh --system
         timeout-minutes: 6
-      - name: Install claude CLI
-        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
+      - name: Install claude CLI, the tree's pinned build (B-28b1: scripts/ci-claude.mjs pin, as the fast job)
+        run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)
         timeout-minutes: 5
       # B-ba47 pick B (the coordinator's r1139): the run NAMES the claude it installed, by the handed VS_CLAUDE_BIN — the fenced
       # legs (test-claude-steer-chrome §A, test-claude-wrapper-queue §A) that do not find a NAMED program are RED, never a skip
@@ -278,10 +305,22 @@ jobs:
         timeout-minutes: 1
       - run: node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/7
         env:
-          VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
+          # THE CI SIGN-IN TO ONE MAJOR'S JOBS IN EACH TIER (the coordinator's law, r144): the Node 22 shards alone (no heavy suite reads
+          # it today — test-chat-e2e, the fast tier's, is its one reader); a run hands it to 9 jobs: fast 2, heavy 7 (test-ci-gate §2r).
+          VIBESPACE_CI_OAT: ${{ matrix.node == 22 && secrets.VIBESPACE_CI_OAT || '' }}
           # /tmp, never ${{ runner.temp }} (/home/runner/work/_temp): a suite handed the account home runs re-homed
           # (B-ba47) and drops every value naming a path under it — this one too
           VS_UI_SHOTS_DIR: /tmp/ci-ui-shots
+          # NO REAL AGENT CLI ON THE RUNNER BUT THE LEGS SANCTIONED BY NAME (B-ec25, r117 part 4 + the rulings r140 / r144, the
+          # coordinator 2026-11-20): every hosted heavy suite runs under VS_NO_REAL_CLI=1, as on the test machines — a scratch hub's boot
+          # probes (claude --help, --version, the oat tick) and a self-found claude are refused by name (src/machine-probes.js
+          # realCliRefusal: only a NAMED stand-in runs). THE SANCTIONS, BY NAME (each named suite reads the list, on the Actions runner
+          # only): the two legs that run the installed claude ONLY against a loopback mock of the messages API with a made-up key
+          # (test-claude-steer-chrome §A, test-claude-wrapper-queue §A), on every major, and test-stdout-registry's wire leg ⓕ — one of
+          # the TWO rows the tree lets reach the vendor (test-chat-e2e is the other, in the fast job) — on the Node 22 shard alone, so it
+          # runs once a hosted run. No row joins the list but by the owner's word. test-ci-gate §2r holds all of it.
+          VS_NO_REAL_CLI: '1'
+          VS_REAL_CLI_SANCTIONED: ${{ matrix.node == 22 && 'test-claude-steer-chrome §A; test-claude-wrapper-queue §A; test-stdout-registry ⓕ' || 'test-claude-steer-chrome §A; test-claude-wrapper-queue §A' }}
       # A chrome suite that goes red HERE and green locally (2.369.125's
       # test-gear-menu Esc legs) leaves its screenshots on a runner nobody can
       # log into; ship them as an artifact so the failure can be read instead
@@ -295,7 +334,7 @@ jobs:
         uses: actions/upload-artifact@v4
         timeout-minutes: 5
         with:
-          name: chrome-suite-shots-${{ github.sha }}-${{ matrix.shard }}
+          name: chrome-suite-shots-${{ github.sha }}-${{ matrix.shard }}${{ matrix.node != 22 && format('-node{0}', matrix.node) || '' }}
           path: |
             data/ci-heavy/fail-logs/*.log
             /tmp/ci-ui-shots/

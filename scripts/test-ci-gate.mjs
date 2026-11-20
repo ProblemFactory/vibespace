@@ -304,8 +304,10 @@ console.log('\n§2 tier hygiene');
   // THE FAST TIER IN PARTS (B-7353): the hosted fast job is a matrix of parts, each a cut of the tier by the rows' stated times
   { const C = await import('./ci.mjs');
     const fp = C.workflowFastPartsAt(wf), tierRows = fast;
-    ok(fp && fp.n === 2 && fp.slots.join() === '1,2' && /name: fast \$\{\{ matrix\.part \}\}\/2/.test(wf) && /ci-fast-fail-logs-\$\{\{ github\.sha \}\}-\$\{\{ matrix\.part \}\}/.test(wf),
-      `ci.yml's fast job is a matrix of ${fp ? fp.n : '?'} parts, named fast i/n, its fail logs one artifact per part (two jobs cannot share an artifact name)`);
+    // r117: with a node axis the fail-log artifact carries the major too — four jobs, four names
+    const perJob = fp && fp.nodes && fp.nodes.length > 1 ? /ci-fast-fail-logs-\$\{\{ github\.sha \}\}-\$\{\{ matrix\.part \}\}-node\$\{\{ matrix\.node \}\}/ : /ci-fast-fail-logs-\$\{\{ github\.sha \}\}-\$\{\{ matrix\.part \}\}/;
+    ok(fp && fp.n === 2 && fp.slots.join() === '1,2' && /name: fast \$\{\{ matrix\.part \}\}\/2/.test(wf) && perJob.test(wf),
+      `ci.yml's fast job is a matrix of ${fp ? fp.n : '?'} parts${fp && fp.nodes ? ` × Node ${fp.nodes.join(' / ')}` : ''}, named fast i/n (another major: fast i/n node <major>), its fail logs one artifact per job (two jobs cannot share an artifact name)`);
     const srcOf = (n) => { try { return fs.readFileSync(path.join(REPO, 'scripts', n + '.mjs'), 'utf-8'); } catch { return ''; } };
     const plan = C.fastPartPlan(tierRows, 2, { sourceOf: srcOf });
     const lastRows = C.FAST_SERIAL.filter((r) => r.last).map((r) => r.name), all = plan.parts.flat().map((x) => x.name).filter((n) => !lastRows.includes(n));
@@ -688,7 +690,9 @@ console.log('\n§2f ci.yml installs through scripts/ci-apt.sh (a repository we d
 console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never');
 {
   const WF_DIR = path.join(REPO, '.github', 'workflows');
-  const DOOR = /^bash scripts\/ci-npm\.sh (?:ci|install -g(?: [@\w./-]+)+)$/;
+  // B-28b1: the claude install names the tree's pin by its ONE reader, `@anthropic-ai/claude-code@$(node scripts/ci-claude.mjs pin)` —
+  // the door's one form with a command in it (no other `$(…)` passes: a step that runs anything else is no door step)
+  const DOOR = /^bash scripts\/ci-npm\.sh (?:ci|install -g(?: (?:[@\w./-]+|@anthropic-ai\/claude-code@\$\(node scripts\/ci-claude\.mjs pin\)))+)$/;
   const INSTALL = /\bnpm\s+(?:ci|i|install|add)\b/;
   const SUITE_LINE = /^node scripts\/ci\.mjs(?: [^;&|<>`()\n]*)?$/;
   const verdictOf = (files) => {
@@ -714,8 +718,8 @@ console.log('\n§2g an install may be retried (scripts/ci-npm.sh), a suite never
   const files = fs.readdirSync(WF_DIR).filter((f) => /\.ya?ml$/.test(f)).sort().map((f) => [f, fs.readFileSync(path.join(WF_DIR, f), 'utf-8')]);
   const v = verdictOf(files);
   ok(files.length >= 3 && files.reduce((n, [, t]) => n + jobsOf(t).length, 0) >= 4, `the walk reads every workflow (${files.map(([f]) => f).join(', ')}) and every job's steps`);
-  okd(!v.bad.length && v.doorSteps === 4 && v.suiteSteps === 2,
-    `every npm install goes through scripts/ci-npm.sh (${v.doorSteps} steps: the claude CLI + npm ci in fast and heavy) and both scripts/ci.mjs steps are one plain line, once per job, after the door's npm ci (${v.suiteSteps})`, v.bad.join('\n'));
+  okd(!v.bad.length && v.doorSteps === 5 && v.suiteSteps === 2,
+    `every npm install goes through scripts/ci-npm.sh (${v.doorSteps} steps: the pinned claude CLI + npm ci in fast and heavy, and the look-ahead's newest — B-28b1) and both scripts/ci.mjs steps are one plain line, once per job, after the door's npm ci (${v.suiteSteps})`, v.bad.join('\n'));
   // the controls: mutant copies of ci.yml, each RED for its own reason
   const ci = files.find(([f]) => f === 'ci.yml')[1];
   const FAST_RUN = '      - run: node scripts/ci.mjs --fast-part=${{ matrix.part }}/2 --keep-going\n', HEAVY_RUN = /( {6}- run: )(node scripts\/ci\.mjs --heavy [^\n]*)/;
@@ -1815,6 +1819,123 @@ console.log('\n§2p a wait that runs out says so: no suite returns its last read
       `the ONE mark (scripts/lib/timed-out.mjs): each read keeps its truthiness and carries the mark where it can — ${got.map(([k, y]) => `${k} ${y ? 'kept' : 'BROKEN'}`).join(' · ')}; every one said on its own line; never() names it`, { got, said });
   }
   console.log(`  (§2p read ${heavy.length} suites, every tier, in ${Date.now() - t0} ms)`);
+}
+console.log('\n§2r no real agent CLI on the hosted runner but the legs sanctioned BY NAME; the real turns once a hosted run (B-ec25 remainder, r117 + r140)');
+{
+  // THE RULINGS (the coordinator, 2026-11-20: r117 part 4, r140 (b)): every hosted heavy suite runs with VS_NO_REAL_CLI=1 (a scratch hub's
+  // boot probes and a self-found claude are refused by name — src/machine-probes.js realCliRefusal). Sanctioned BY NAME on the Actions
+  // runner only (VS_REAL_CLI_SANCTIONED, a `;` list): the two legs that run the installed claude against a LOOPBACK stand-in with a made-up
+  // key, on every major, and test-stdout-registry's wire leg — one of the TWO rows the tree lets reach the vendor — on the Node 22 shard
+  // alone (once a hosted run). The other row, test-chat-e2e (fast), runs its real turn once too: the CI sign-in goes to the fast job's
+  // Node 22 jobs alone and every other major's job runs under the flag. No row joins the list but by the owner's word. PURE judge over the
+  // workflow text + the files that read the sanction; the mutants below go through the SAME judge.
+  const C = await import('./ci.mjs');
+  const SANCTIONS = { 'test-claude-steer-chrome §A': 'scripts/test-claude-steer-chrome.mjs', 'test-claude-wrapper-queue §A': 'scripts/test-claude-wrapper-queue.mjs', 'test-stdout-registry ⓕ': 'scripts/test-stdout-registry.mjs' };
+  const VENDOR = ['test-stdout-registry ⓕ'];   // reaches the vendor: the primary major's shard alone
+  const SANC_LINE = "const REAL_CLI_SANCTIONED = String(process.env.VS_REAL_CLI_SANCTIONED || '').split(';').map((x) => x.trim()).includes(REAL_CLI_SANCTION) && process.env.GITHUB_ACTIONS === 'true';";
+  const FENCE = { 'scripts/test-claude-steer-chrome.mjs': "const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1' && !REAL_CLI_SANCTIONED;", 'scripts/test-claude-wrapper-queue.mjs': "const NO_REAL_CLI = process.env.VS_NO_REAL_CLI === '1' && !REAL_CLI_SANCTIONED;", 'scripts/test-stdout-registry.mjs': "const noRealCli = process.env.VS_NO_REAL_CLI === '1' && !REAL_CLI_SANCTIONED;" };
+  /** every step whose run line runs suites (`node scripts/ci.mjs --heavy …` / `--fast…`) → { kind, line, env: Map } */
+  const suiteSteps = (text) => {
+    const lines = text.split('\n'), out = [];
+    lines.forEach((l, i) => {
+      const m = /^(\s*)- run: node scripts\/ci\.mjs (--heavy(?=\s)|--fast)/.exec(l);
+      if (!m) return;
+      const env = new Map(); let j = i + 1;
+      const ind = m[1].length + 2;
+      if (j < lines.length && new RegExp(`^ {${ind}}env:\\s*$`).test(lines[j])) {
+        for (j++; j < lines.length; j++) {
+          const e = lines[j];
+          if (/^\s*#/.test(e) || !e.trim()) continue;
+          const kv = new RegExp(`^ {${ind + 2}}([A-Z_][A-Z0-9_]*):\\s*(.*)$`).exec(e);
+          if (!kv) break;
+          env.set(kv[1], kv[2].replace(/\s+#.*$/, '').replace(/^'(.*)'$|^"(.*)"$/, (_, x, y) => x ?? y));
+        }
+      }
+      out.push({ kind: m[2] === '--fast' ? 'fast' : 'heavy', line: i + 1, env });
+    });
+    return out;
+  };
+  /** a value by major: `${{ matrix.node == P && 'X' || 'Y' }}` → { primary: P, on: X, off: Y }; a plain value → { primary: null, on: v, off: v } */
+  /** the sign-in's expression names exactly ONE major, the primary: `${{ matrix.node == P && secrets.VIBESPACE_CI_OAT || '' }}` */
+  const byMajorOat = (v, P) => v === '${{ matrix.node == ' + P + ' && secrets.VIBESPACE_CI_OAT || \'\' }}';
+  const byMajor = (v) => { const m = /^\$\{\{ matrix\.node == (\d+) && '([^']*)' \|\| '([^']*)' \}\}$/.exec(String(v ?? '')); return m ? { primary: Number(m[1]), on: m[2], off: m[3] } : { primary: null, on: v, off: v }; };
+  const names = (x) => String(x ?? '').split(';').map((y) => y.trim()).filter(Boolean).sort();
+  const same = (a, b) => JSON.stringify([...a].sort()) === JSON.stringify([...b].sort());
+  /** → the problems (none = the rules hold): the workflow text, and { file → text } of every file that names the sanction */
+  const judge = (yml, readers) => {
+    const steps = suiteSteps(yml), heavy = steps.filter((x) => x.kind === 'heavy'), probs = [];
+    const hn = C.workflowHeavyNodesAt(yml), fp = C.workflowFastPartsAt(yml);
+    if (!heavy.length) probs.push('no heavy suite step found (`- run: node scripts/ci.mjs --heavy …`)');
+    const ALL = Object.keys(SANCTIONS), LOOP = ALL.filter((n) => !VENDOR.includes(n));
+    for (const h of heavy) {
+      if (h.env.get('VS_NO_REAL_CLI') !== '1') probs.push(`the heavy step at line ${h.line} sets no VS_NO_REAL_CLI '1' (${h.env.has('VS_NO_REAL_CLI') ? `'${h.env.get('VS_NO_REAL_CLI')}'` : 'absent'})`);
+      const v = byMajor(h.env.get('VS_REAL_CLI_SANCTIONED'));
+      if (!h.env.has('VS_REAL_CLI_SANCTIONED')) { probs.push(`the heavy step at line ${h.line} sanctions nothing`); continue; }
+      const multi = !!(hn && hn.all && hn.all.length > 1);
+      if (multi && v.primary !== hn.primary) probs.push(`the heavy step at line ${h.line} names its sanction by no major (${v.primary === null ? 'one list for every major' : `major ${v.primary}`}), the shards' primary is ${hn.primary} — the vendor leg would run on every major`);
+      if (!same(names(v.on), ALL)) probs.push(`the sanction list on the primary major is «${names(v.on).join('; ')}», not exactly «${ALL.join('; ')}»`);
+      if (multi && !same(names(v.off), LOOP)) probs.push(`the sanction list on the other majors is «${names(v.off).join('; ')}», not exactly the loopback legs «${LOOP.join('; ')}» (the vendor leg runs once a hosted run)`);
+    }
+    for (const f of steps.filter((x) => x.kind === 'fast')) {
+      if (f.env.has('VS_REAL_CLI_SANCTIONED')) probs.push(`the fast step at line ${f.line} carries a sanction (the heavy job's alone)`);
+      if (fp && fp.nodes && fp.nodes.length > 1) {
+        const P = fp.primary, oat = '${{ matrix.node == ' + P + ' && secrets.VIBESPACE_CI_OAT || \'\' }}', flag = '${{ matrix.node != ' + P + ' && \'1\' || \'\' }}';
+        if (f.env.get('VIBESPACE_CI_OAT') !== oat) probs.push(`the fast step at line ${f.line} hands the CI sign-in as «${f.env.get('VIBESPACE_CI_OAT')}», not to the Node ${P} jobs alone («${oat}») — test-chat-e2e's real turn would run once per major`);
+        if (f.env.get('VS_NO_REAL_CLI') !== flag) probs.push(`the fast step at line ${f.line} sets VS_NO_REAL_CLI «${f.env.get('VS_NO_REAL_CLI')}», not «${flag}» on every other major`);
+      }
+    }
+    // every line that runs ci.mjs's tiers is a step this judge reads (a `run: |` block or another argument order would be unread)
+    const runs = yml.split('\n').filter((l) => !/^\s*#/.test(l) && /scripts\/ci\.mjs\b[^\n]*\s--(?:heavy(?=\s|$)|fast)/.test(l)).length;
+    if (runs !== steps.length) probs.push(`${runs} lines run ci.mjs --heavy / --fast, the judge reads ${steps.length} suite steps — a step in another shape (a run: | block, another argument order) is unread`);
+    for (const h of heavy) if (hn && hn.all && hn.all.length > 1 && h.env.has('VIBESPACE_CI_OAT') && h.env.get('VIBESPACE_CI_OAT') !== '${{ matrix.node == ' + hn.primary + ' && secrets.VIBESPACE_CI_OAT || \'\' }}') probs.push(`the heavy step at line ${h.line} hands the CI sign-in as «${h.env.get('VIBESPACE_CI_OAT')}» on an axis job — not to the Node ${hn.primary} shards alone`);
+    const named = yml.split('VS_REAL_CLI_SANCTIONED:').length - 1;
+    if (named !== heavy.length) probs.push(`the workflow names VS_REAL_CLI_SANCTIONED ${named} time(s), its heavy suite steps are ${heavy.length}`);
+    const others = Object.keys(readers).filter((f) => !Object.values(SANCTIONS).includes(f)).sort();
+    if (others.length) probs.push(`the sanction is read by ${others.join(', ')} — only the sanctioned suites may`);
+    for (const [name, file] of Object.entries(SANCTIONS)) {
+      const own = readers[file];
+      if (own === undefined) { probs.push(`${file} reads no sanction (its leg «${name}» would skip on the runner)`); continue; }
+      if (!own.includes(`const REAL_CLI_SANCTION = '${name}';`) || !own.includes(SANC_LINE) || !own.includes(FENCE[file])) probs.push(`${file}'s fence is not «const REAL_CLI_SANCTION = '${name}';» + the list line (on the Actions runner only) + «${FENCE[file]}»`);
+    }
+    return probs;
+  };
+  const yml = fs.readFileSync(path.join(REPO, '.github/workflows/ci.yml'), 'utf8');
+  // the readers: ONE fixed-string git grep over every tracked file of the code (scripts/ with its fixtures, src/, data/bin/,
+  // server.js — 2 600 files, 116 MB: a walk in JS would add ~0.3 s to an over row); 1 = none found, anything else is a failure
+  const gg = spawnSync('git', ['-C', REPO, 'grep', '-l', '-F', 'VS_REAL_CLI_SANCTIONED', '--', 'scripts', 'src', 'data/bin', 'server.js'], { env: GIT_ENV, encoding: 'utf8' });
+  ok(gg.status === 0 || gg.status === 1, `the readers' search ran (git grep exit ${gg.status}${gg.stderr ? ': ' + String(gg.stderr).trim().slice(0, 120) : ''})`);
+  const found = String(gg.stdout || '').split('\n').filter(Boolean).filter((rel) => rel !== 'scripts/test-ci-gate.mjs');
+  const readers = Object.fromEntries(found.map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')]));
+  const steps = suiteSteps(yml);
+  const real = judge(yml, readers);
+  const hv = steps.find((x) => x.kind === 'heavy'), hs = hv && byMajor(hv.env.get('VS_REAL_CLI_SANCTIONED'));
+  ok(real.length === 0, `the hosted heavy step runs under VS_NO_REAL_CLI '1' and sanctions BY NAME «${hs ? names(hs.on).join('; ') : '?'}» on Node ${hs && hs.primary}, «${hs ? names(hs.off).join('; ') : '?'}» on its other majors; the fast job's sign-in and real turn on its Node 22 jobs alone; the sanction read by ${Object.keys(readers).join(', ') || 'none'} — ${steps.map((x) => `${x.kind}@${x.line} {${[...x.env.keys()].join(', ')}}`).join(' · ')}${real.length ? ' — ' + real.join(' · ') : ''}`);
+  // THE COUNT, STATED (r144): how many jobs of a run carry the CI sign-in — the fast parts and the heavy shards of ONE major each
+  { const fpC = C.workflowFastPartsAt(yml), shC = C.workflowShardsAt(yml), hnC = C.workflowHeavyNodesAt(yml), fs1 = steps.find((x) => x.kind === 'fast'), hs1 = steps.find((x) => x.kind === 'heavy');
+    const carry = (st, slots, majors, primary) => (!st || !st.env.has('VIBESPACE_CI_OAT') ? 0 : slots * (byMajorOat(st.env.get('VIBESPACE_CI_OAT'), primary) ? 1 : majors));
+    const fastN = carry(fs1, fpC ? fpC.n : 1, fpC && fpC.nodes ? fpC.nodes.length : 1, fpC && fpC.primary), heavyN = carry(hs1, shC ? shC.n : 0, hnC && hnC.all ? hnC.all.length : 1, hnC && hnC.primary);
+    ok(fastN === 2 && heavyN === 7, `the CI sign-in reaches ${fastN + heavyN} jobs of a run: fast ${fastN} of ${fpC && fpC.nodes ? fpC.n * fpC.nodes.length : '?'} (the Node 22 parts), heavy ${heavyN} of ${shC ? shC.n : '?'} — of ${shC && hnC && hnC.all ? shC.n * hnC.all.length : '?'} on a ci/cut… or ci/proof… run (the Node 22 shards); its one reader is test-chat-e2e (fast): ONE real turn a run, and test-stdout-registry's wire leg starts the installed claude once, on the Node 22 shard`); }
+  // CONTROLS — each planted fault, through the same judge, is named (the anchors are this tree's own lines)
+  const FLAG = "          VS_NO_REAL_CLI: '1'\n", SANC = /( {10}VS_REAL_CLI_SANCTIONED: \$\{\{ matrix\.node == 22 && ')([^']*)(' \|\| ')([^']*)(' \}\}\n)/;
+  const FAST_OAT = "          VIBESPACE_CI_OAT: ${{ matrix.node == 22 && secrets.VIBESPACE_CI_OAT || '' }}\n", FAST_FLAG = "          VS_NO_REAL_CLI: ${{ matrix.node != 22 && '1' || '' }}\n";
+  const steerSrc = readers['scripts/test-claude-steer-chrome.mjs'] || '', wqSrc = readers['scripts/test-claude-wrapper-queue.mjs'] || '';
+  const CONTROLS = [
+    ['the flag removed', () => judge(anchored(yml, FLAG, '', 'heavy-flag'), readers), /sets no VS_NO_REAL_CLI '1' \(absent\)/],
+    ['the flag set to 0', () => judge(anchored(yml, FLAG, "          VS_NO_REAL_CLI: '0'\n", 'heavy-flag-0'), readers), /sets no VS_NO_REAL_CLI '1' \('0'\)/],
+    ['a fourth leg sanctioned', () => judge(anchored(yml, SANC, '$1$2; test-chat-attachments-chrome §A$3$4$5', 'heavy-sanction-4th'), readers), /primary major is «.*test-chat-attachments-chrome §A.*», not exactly/],
+    ['the vendor leg on every major', () => judge(anchored(yml, SANC, '$1$2$3$4; test-stdout-registry ⓕ$5', 'heavy-vendor-twice'), readers), /other majors is «.*test-stdout-registry ⓕ.*», not exactly the loopback legs/],
+    ['one list for every major', () => judge(anchored(yml, SANC, "          VS_REAL_CLI_SANCTIONED: '$2'\n", 'heavy-one-list'), readers), /names its sanction by no major \(one list for every major\)/],
+    ['the sanction on the fast step too', () => judge(anchored(yml, FAST_FLAG, FAST_FLAG + "          VS_REAL_CLI_SANCTIONED: 'test-chat-e2e'\n", 'fast-sanction'), readers), /the fast step at line \d+ carries a sanction/],
+    ['the fast sign-in to every major', () => judge(anchored(yml, FAST_OAT + FAST_FLAG, '          VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}\n' + FAST_FLAG, 'fast-oat-all'), readers), /hands the CI sign-in as «\$\{\{ secrets\.VIBESPACE_CI_OAT \}\}», not to the Node 22 jobs alone/],
+    ['the fast job\'s other majors without the flag', () => judge(anchored(yml, FAST_FLAG, '', 'fast-flag'), readers), /sets VS_NO_REAL_CLI «undefined», not/],
+    ['the heavy sign-in handed plainly on the axis job', () => judge(anchored(yml, "          VIBESPACE_CI_OAT: ${{ matrix.node == 22 && secrets.VIBESPACE_CI_OAT || '' }}\n          VS_UI_SHOTS_DIR", '          VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}\n          VS_UI_SHOTS_DIR', 'heavy-oat-plain'), readers), /heavy step at line \d+ hands the CI sign-in as «\$\{\{ secrets\.VIBESPACE_CI_OAT \}\}» on an axis job/],
+    ['a second heavy step in a run: | block, no flag', () => judge(anchored(yml, '      - name: Upload the failed suites\' whole logs + chrome-suite screenshots (failure only)\n', '      - run: |\n          node scripts/ci.mjs --heavy --dirty-ok --host=hosted --shard ${{ matrix.shard }}/7\n      - name: Upload the failed suites\' whole logs + chrome-suite screenshots (failure only)\n', 'heavy-block-step'), readers), /3 lines run ci\.mjs --heavy \/ --fast, the judge reads 2 suite steps/],
+    ['a second reader (a product file)', () => judge(yml, { ...readers, 'src/server/cli-env.js': "if (process.env.VS_REAL_CLI_SANCTIONED) run();" }), /read by src\/server\/cli-env\.js/],
+    ['the fence dropped from the steer suite', () => judge(yml, { ...readers, 'scripts/test-claude-steer-chrome.mjs': anchored(steerSrc, FENCE['scripts/test-claude-steer-chrome.mjs'], 'const NO_REAL_CLI = false;', 'steer-fence') }), /test-claude-steer-chrome\.mjs's fence is not/],
+    ['the sanction honoured off the runner', () => judge(yml, { ...readers, 'scripts/test-claude-wrapper-queue.mjs': anchored(wqSrc, " && process.env.GITHUB_ACTIONS === 'true';", ';', 'wq-actions-only') }), /test-claude-wrapper-queue\.mjs's fence is not/],
+  ];
+  const seen = CONTROLS.map(([k, run, want]) => { const p = run(); return [k, p.length > 0 && p.some((x) => want.test(x)), p.join(' · ').slice(0, 160)]; });
+  ok(seen.every(([, hit]) => hit), `CONTROLS: each planted fault is named — ${seen.map(([k, hit, p]) => `${k}: ${hit ? 'named' : 'MISSED'} («${p}»)`).join(' · ')}`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

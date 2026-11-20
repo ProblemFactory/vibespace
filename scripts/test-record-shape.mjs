@@ -40,6 +40,7 @@ import { anchored } from './scratch.mjs'; // B-9ff2 step 2: the 2.1.328 controls
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0, skipped = 0;
+let ORACLE_MODE = 'not read (the binary oracle did not run)';   // B-28b1: said in the closing line
 const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
 // anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
@@ -402,6 +403,8 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
   // pinned PER CLI VERSION (lane cli-2-1-288-records): any build in R.SCHEMA_CLI_VERSIONS is strict everywhere
   const lenient = !!process.env.GITHUB_ACTIONS && installed !== pinned && !R.SCHEMA_CLI_VERSIONS.includes(installed);
   console.log(`  installed claude ${installed || '(unknown)'} vs pinned schema ${pinned} — ${lenient ? 'INFORMATIONAL (mirror, newer build): drift is printed, not red' : 'STRICT'}`);
+  // B-28b1 (the coordinator's r238): the oracle's MODE rides the suite's CLOSING line too — the line a run's summary shows
+  ORACLE_MODE = !bin || size < 4 * 1024 * 1024 ? 'no binary (the binary oracle did not run)' : lenient ? `LENIENT on ${installed || '(unknown)'} (≠ the pinned ${pinned}: drift printed, not red)` : `STRICT on ${installed || '(unknown)'} (pinned ${pinned})`;
   const oracleOk = lenient ? (n, c, e) => { if (c) ok(n, c, e); else skip(n, 'informational on the mirror (installed ' + installed + ' ≠ pinned ' + pinned + '): ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 600)); } : ok;
   if (!bin || size < 4 * 1024 * 1024) {
     skip('binary oracle', bin ? `${bin} is ${size} bytes — a launcher/shim, not the CLI binary (install the native build to run this leg)` : 'no claude binary on PATH / ~/.local/bin / ~/.claude/local');
@@ -1267,5 +1270,5 @@ console.log('§5 negative control — a scratch copy with every `ignored` map em
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
-console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''}`);
+console.log(`\n${pass} passed, ${fail} failed${skipped ? `, ${skipped} skipped` : ''} · record oracle ${ORACLE_MODE}`);
 process.exit(fail ? 1 : 0);
