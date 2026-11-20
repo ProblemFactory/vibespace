@@ -1028,7 +1028,7 @@ console.log('§5 job-notifications.json (src/jobs.js) — every job notice still
     // records are held: it WAITS), B a subscriber's with no record (undecided while the groups are held), C a subscriber's too, but CLAIMED
     // (a hand-over owns it: only its claim lets it past the held groups). The peek is the INTERSECTION (C); the drain of the peeked set
     // takes exactly it (its claim gone) and keeps A and B. Three controls, each anchor first
-    const PEEK_REC = "    const q = (this.pendingNotifs.get(cid) || []).filter((n) => !this._waitsForRecords(n));\n";
+    const PEEK_REC = "    const q = (this.pendingNotifs.get(cid) || []).filter((n) => !this._waitsForRecords(n) && !this._waitsForLanding(n));\n";   // B-54b7: the peek's records filter beside the taken copies' (the cut below cuts both — this scene takes none)
     const PEEK_VIEW = "    return v && v.held ? q.filter((n) => n && (n.ho || this.printableNow(cid, n.jobId, v, { sub: n.sub === true }))) : q;";
     ok(JSRC.split(PEEK_REC).length === 2 && JSRC.split(PEEK_VIEW).length === 2, 'control setup: the peek\'s two filters are each found once');
     const twoHolds = async (Mod, name) => {

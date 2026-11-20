@@ -80,7 +80,7 @@
   "key": "jobs · src/jobs.js · JobManager._onRetryEvent · _save()",
   "verdict": "rides",
   "why": "the park's copy leaves msg-retry.json at the notifications' landing (_taken)",
-  "at": "src/jobs.js:_taken() { return { taken: true, ride: (step) => this._ride(this.notifsFile",
+  "at": "src/jobs.js:this._ride(this.notifsFile, 'a parked notification the jobs store took', go)",
   "crash": "the entry stays parked in msg-retry.json until the landing",
   "readers": "none: the listener answers taken, read at the landing"
  },

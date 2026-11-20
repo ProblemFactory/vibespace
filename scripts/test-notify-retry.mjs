@@ -961,7 +961,7 @@ await (async () => {
   const f1 = await fallScene({ JobManager }, 'ride-fall');
   ok(f1.before.parked && f1.before.park === 0 && f1.before.stashed === 1 && f1.before.inFile, '(hunt 2) a fallen jobs entry is the jobs store\'s now — gone from the park in memory, but STILL in msg-retry.json while the jobs notifications holding it are not on disk (a kill keeps it parked, never lost)', f1.before);
   ok(!f1.afterInFile, '…and it leaves msg-retry.json when they LAND (the park\'s write rides the jobs landing)', f1);
-  const TAKEN_A = "      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }\n      return this._taken();";
+  const TAKEN_A = "      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }\n      return this._taken(this._parkCopyIn(cid, entry.id));";   // B-54b7: the take names its copy
   const JR = mutantCopies('ntr-ride', REPO).load('src/jobs.js', anchored(JSRC_R, TAKEN_A, "      try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }\n      return true;   // MUTANT: taken, no landing to ride", 'a fall rides the jobs landing'), 'fell-no-ride');
   const f2 = await fallScene(JR, 'ride-fall-red');
   ok(f2.before.stashed === 1 && !f2.before.inFile, 'CONTROL (a copy answering a plain «taken»): the park\'s copy is written OFF msg-retry.json while the jobs store holding it is not on disk — a kill now loses it (red)', f2.before);
@@ -2007,7 +2007,7 @@ console.log('\n§W wiring pins');
   ok(optIns.length === 1 && optIns[0].startsWith('src/jobs.js:') && /spendReason: 'job-notification', retry \}\)/.test(optIns[0]), 'the ONE retry opt-in site is the jobs engine\'s first attempt (grep census)', optIns.join(' | '));
   const sh = fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf-8');
   ok((sh.match(/d\.deliverToConversation\(cid, frame, \{ kind: 'notification', spendReason: 'stash-(retry|handover)', fromName: FROM_NAME, cardText \}\)/g) || []).length === 2 && !/deliverToConversation\([^)]*[{,] *retry *[:}]/.test(sh), 'the hand-over\'s two posts (auto + pressed) carry no retry: a miss re-stashes, never parks');
-  const fellBody = jobs.slice(jobs.indexOf("if (ev === 'fell') {"), jobs.indexOf("return this._taken();", jobs.indexOf("if (ev === 'fell') {")));   // lane lg-store-writes (the moved2 cure 2): it answers «taken» with the jobs landing to ride
+  const fellBody = jobs.slice(jobs.indexOf("if (ev === 'fell') {"), jobs.indexOf("return this._taken(this._parkCopyIn(cid, entry.id));", jobs.indexOf("if (ev === 'fell') {")));   // lane lg-store-writes (the moved2 cure 2): it answers «taken» with the jobs landing to ride
   ok(/this\._stashNotif\(cid, target/.test(fellBody) && !/deliverToConversation|_notifyOwner\(/.test(fellBody), 'the jobs engine\'s fell listener stashes in its own store and posts nothing');
 }
 
@@ -2410,6 +2410,232 @@ console.log('\n§B-6721 a notice stashed while its conversation was not running:
     ok(cr.closedWhileClaimed === true, 'RED control: the settle that ignores a claim closes «notices wait» while the notices are only claimed (a failed resume then leaves For you silent for the episode)', JSON.stringify(cr));
   }
 }
+
+// ── B-54b7 (主开发 r519, shape B — THE WAIT AT THE TAKE) ──────────────────────────────────────────────────────────────────────────
+// While job-notifications.json was HELD (its read failed) the jobs store took a parked copy off the ladder (the judge's held line, a
+// fall) into a stash line in MEMORY, and the ladder wrote its own copy off msg-retry.json at once (the writer owes nothing for a held
+// file: the ride answered «landed»): a crash lost the notice. Now the ladder's copy stays in its file until the copy's OWN landing (the
+// lift's save) and the stash copy is invisible to every delivery door until then. THE REAL ladder and THE REAL jobs engine; the hold
+// PLACED (the storage answers EISDIR for the file — the engine's own read fails), the lift PLACED (the file back, the engine's read again
+// awaited), every landing PLACED (a writer stand-in: it writes the engine's own bytes on a flush, as the real one, and what is merely
+// owed when the test lands it); a «crash» = a new ladder + engine over the same files, nothing closed, nothing flushed. Waits are for
+// what happened (bounded turns of the loop), never a clock. RED controls (anchored, in copies), each printing its facts.
+console.log('\n§B-54b7 the notices file HELD: a copy the jobs store takes keeps the park\'s copy on disk until it lands — never lost, never twice, no turn, the park bounded');
+await (async () => {
+  const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
+  const JSRC = fs.readFileSync(path.join(REPO, 'src/jobs.js'), 'utf-8');
+  const MB = mutantCopies('ntr-b54b7', REPO);
+  const noDoor = (d) => !d.peek && !d.wake && !d.drain && !d.entries && !d.waiting && !d.park;
+  const until = async (pred, n = 400) => { for (let i = 0; i < n && !pred(); i++) await new Promise((r) => setImmediate(r)); return !!pred(); };
+  const placedWriter = () => {
+    const owed = new Map(), steps = []; let slow = false;
+    const write = (file) => { const o = owed.get(file); owed.delete(file); let b = null; try { b = o && o.produce ? o.produce() : null; } catch { b = null; } if (b != null) { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, b); } };
+    const run = () => { for (let i = 0; i < steps.length;) { if (owed.has(steps[i].file)) { i++; continue; } const s = steps.splice(i, 1)[0]; let v; try { v = s.step(); } catch { } s.res({ landed: true, value: v }); } };
+    const W = { pending: (f) => (f ? owed.has(f) : owed.size > 0), dirty(file, o) { owed.set(file, o || {}); }, durable: () => Promise.resolve(owed.size === 0), whenDurable: () => Promise.resolve(owed.size === 0), exitStartedAt: () => null, stats: () => [],
+      // `slow`: the disk does not answer inside the flush (what is owed stays owed, said by the writer) — the failure branch of every synchronous landing
+      flushSync: (names) => { const wanted = (names || []).filter((f) => owed.has(f)); if (slow) return { written: [], left: wanted.map((f) => ({ file: f, name: 'a store', why: 'the disk did not answer (a stand-in)' })), ms: 0 }; for (const f of wanted) write(f); run(); return { written: wanted, left: [], ms: 0 }; },
+      afterLanding: (file, step) => { if (!owed.has(file)) { const v = step(); return Promise.resolve({ landed: true, value: v }); } return new Promise((res) => steps.push({ file, step, res })); } };
+    return { W, land: () => { for (const f of [...owed.keys()]) write(f); run(); }, setSlow: (b) => { slow = !!b; } };
+  };
+  const OWN = 'c0ffee00-0000-4000-8000-0000000005b7';   // the watched job's owner (never running here: its copies stash, never parked)
+  const MISS = async () => ({ ok: false, reason: 'timeout', phase: 'connect', transient: true, elapsedMs: 5003 });
+  const TAKES = async () => ({ ok: true, phase: 'written', elapsedMs: 40 });
+  const mkRig = (name) => {
+    const dir = path.join(scratchDir('ntr'), 'b54b7-' + name); fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+    const reg = path.join(dir, 'registry'); fs.mkdirSync(reg, { recursive: true });
+    const cid = 'c0ffee00-0000-4000-8000-00000000' + String(seq++).padStart(4, '0');
+    const sockPath = path.join(dir, 'inbox.sock'), regFile = path.join(reg, `${process.pid}.json`);
+    const R = { dir, cid, regFile, posts: [], logs: [], authorized: [], view: { live: null, byKey: new Set(['T-g']), held: false } };
+    R.register = () => fs.writeFileSync(regFile, JSON.stringify({ pid: process.pid, sessionId: cid, messagingSocketPath: sockPath, name: 'Sub', version: '2.1.281' }));
+    R.register(); serveSock(sockPath);
+    R.session = { claudeSessionId: cid, backendSessionId: cid, mode: 'chat', backend: 'claude', name: 'Sub', _isStreaming: true, _turnStateSeen: true };
+    R.sessions = new Map([['w1', R.session]]);
+    let now = Date.now(); const timers = [];
+    R.clock = { now: () => now, setTimeout: (fn, ms) => { const t = { at: now + ms, fn }; timers.push(t); return t; }, clearTimeout: (t) => { if (t) t.dead = true; } };
+    R.advance = async (ms) => { const end = now + ms; for (;;) { const due = timers.filter((t) => !t.dead && !t.fired && t.at <= end).sort((a, b) => a.at - b.at)[0]; if (!due) break; now = Math.max(now, due.at); due.fired = true; await due.fn(); await new Promise((r) => setImmediate(r)); } now = end; };
+    let answer = MISS;
+    R.setAnswer = (fn) => { answer = fn; };
+    R.jdir = path.join(dir, 'jobs'); fs.mkdirSync(R.jdir, { recursive: true });
+    R.notifsFile = path.join(R.jdir, 'job-notifications.json'); R.parkFile = path.join(dir, 'msg-retry.json');
+    R.hold = () => { fs.rmSync(R.notifsFile, { recursive: true, force: true }); fs.mkdirSync(R.notifsFile); };   // the storage answers EISDIR: the engine's own read FAILS — held
+    R.lift = (body = '{}') => { fs.rmSync(R.notifsFile, { recursive: true, force: true }); fs.writeFileSync(R.notifsFile, body); };
+    R.parkIds = () => { try { return (JSON.parse(fs.readFileSync(R.parkFile, 'utf-8'))[cid] || []).map((e) => e.id); } catch { return []; } };
+    R.onDisk = () => { try { return (JSON.parse(fs.readFileSync(R.notifsFile, 'utf-8'))[cid] || []).map((n) => n.rt || null); } catch { return []; } };
+    R.mem = () => (R.jm.pendingNotifs.get(cid) || []).map((n) => n.rt || null);
+    R.boot = (Mod) => {
+      for (const t of timers) t.dead = true;   // the previous process is gone: nothing closed, nothing flushed (a crash)
+      if (R.jm) { R.jm._unreadStopped = true; if (R.jm._notifsT) { clearTimeout(R.jm._notifsT); R.jm._notifsT = null; } }
+      const P = placedWriter(); R.W = P.W; R.land = P.land; R.setSlow = P.setSlow;
+      R.deliver = CD.create({ dataDir: dir, activeSessions: R.sessions, serverSetting: () => undefined,
+        peerMsg: { findPeer: (c) => PM.findPeer(c, reg), postToPeer: async (p, text) => { const r = await answer(p, text); if (r.ok) R.posts.push(text); return r; }, postChannelEvent: async () => ({ ok: false }) },
+        authorizeSpend: (req) => { R.authorized.push(req.reason); return { ok: true, identity: { key: 'acct', name: 'Work' }, hold: 'h' + R.authorized.length, reason: req.reason }; }, noteSpend: () => { }, releaseSpend: () => { },
+        emitPeerCard: () => { }, log: (...a) => R.logs.push(a.join(' ')), retryClock: R.clock, renderBatch: renderMsgStash });
+      R.jm = new Mod.JobManager({ dataDir: R.jdir, writer: R.W, broadcast() { }, log: (...a) => R.logs.push(a.join(' ')), notifyUser() { return { ok: true }; }, resolveNotice() { }, unreadRetry: { firstMs: 3600e3 },
+        deliverToConversation: (c, text, o) => R.deliver.deliverToConversation(c, text, o), onRetry: (fn) => R.deliver.onRetry(fn), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true,
+        viewerOf: (c) => (c !== cid ? null : R.view.held ? { held: true, live: false, conversationId: c } : R.view.live ? { live: true, conversationId: c, sessionId: 'w1', sessionCreatedAt: 1, groups: R.view.live } : { live: false, conversationId: c, groups: R.view.byKey }) });
+      R.jm.init(); for (const t of R.jm._timers || []) clearInterval(t);
+      R.jm._spawn = (job) => { job.runs = [{ startedAt: Date.now() }]; job.state = 'up'; };
+      R.deliver.registerRetryJudge('jobs', (c, e) => R.jm.retryOwed(c, e));
+      return R;
+    };
+    R.turnEnd = async () => { R.session._isStreaming = false; await R.deliver.noteTurnEnd(R.session); R.session._isStreaming = true; };
+    // every door that could deliver or start a turn for it: the engine's peek / wake list / drain, the ladder's prompt view / waiting count / park
+    R.doors = () => ({ peek: R.jm.peekNotifs(cid).length, wake: R.jm.wakeOwed(cid).length, drain: R.jm.drainNotifs(cid).length, entries: R.deliver.retryEntries(cid).length, waiting: R.deliver.retryWaitingCount(cid), park: R.deliver.retryCount(cid) });
+    R.quiet = noDoor;
+    return R;
+  };
+  // a subscriber's copy of a watched job's event, parked (the push proved view by key; the CLI missed it, transient, mid-turn)
+  const subJob = (R) => {
+    const owner = { conversation: { id: OWN }, sessionId: 's-own', sessionCreatedAt: 1, groupsSnapshot: ['T-g'] };
+    const j = R.jm.jobs.get(R.jm.create({ kind: 'task', name: 'watched', cmd: { argv: ['true'] }, owner, access: { view: 'group', control: 'session' } }, { conversationId: OWN, sessionId: 's-own', sessionCreatedAt: 1, groups: new Set(['T-g']) }).job.id);
+    j.subscribers = [{ conversationId: R.cid, sessionId: 'w1', ts: Date.now(), filter: null }];
+    R.jm._save(); R.land();   // the record on disk: a restart reads it
+    return j;
+  };
+  const parkOne = async (R, j, what) => {
+    R.setAnswer(MISS); R.view.byKey = new Set(['T-g']); R.view.held = false; R.jm._notifyRate.delete(R.cid); R.jm._notifyRate.delete(OWN);
+    const n0 = R.deliver.retryCount(R.cid);
+    R.jm.announce(j, what);
+    return (await until(() => R.deliver.retryCount(R.cid) === n0 + 1)) ? R.deliver.retryPeek(R.cid).slice(-1)[0].id : null;
+  };
+  const unjudged = (R, how) => { if (how === 'groups-unread') R.view.held = true; else R.view.byKey = new Set(); };
+  const handOver = async (R) => SH.create({ handoverLandMs: 30, activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => R.jm, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, dataDir: R.dir, log: { log() { }, warn() { } } }).handOver('w1', { pressed: PRESS });
+  // THE JUDGE ROAD (and r519 (3) + (4)): the judge cannot place the copy while held — taken, kept on disk, nothing posted, two boots while held
+  const judgeScene = async (Mod, name, how) => {
+    const R = mkRig(name); R.hold(); R.boot(Mod);
+    const premise = { held: !!R.jm._notifsUnread, code: R.jm._notifsUnread ? R.jm._notifsUnread.code : null };
+    const j = subJob(R);
+    const id = await parkOne(R, j, 'found news');
+    unjudged(R, how); R.setAnswer(TAKES); await R.turnEnd();
+    const took = { park: R.parkIds(), mem: R.mem(), disk: R.onDisk() };
+    const doors = R.doors(); let drained = doors.drain;
+    const auth0 = R.authorized.length, posts0 = R.posts.length;
+    await R.advance(70 * 60 * 1000); await R.turnEnd();   // a retry tick past the ladder's hour, and a turn end
+    const ho = await handOver(R);                          // a person's hand-over press
+    const quiet = { posts: R.posts.length - posts0, auth: R.authorized.length - auth0, park: R.parkIds(), ho: !!(ho && ho.ok) };
+    const boots = [];
+    for (let b = 0; b < 2; b++) {   // a crash, then a boot still held: the park's entry is back and judged again into the same state
+      R.boot(Mod); const back = R.deliver.retryCount(R.cid), held = !!R.jm._notifsUnread;
+      unjudged(R, how); R.setAnswer(TAKES); await R.turnEnd();
+      const d = R.doors(); drained += d.drain;
+      boots.push({ held, back, park: R.parkIds(), mem: R.mem(), quiet: R.quiet(d), posts: R.posts.length });
+    }
+    R.lift('{}'); await R.jm._notifsRetry();
+    const lifted = { held: !!R.jm._notifsUnread, park: R.parkIds(), disk: R.onDisk(), mem: R.mem() };
+    R.view.held = false; R.view.live = new Set(['T-g']);   // it comes back, able to view: printed once
+    const d1 = R.jm.drainNotifs(R.cid).length, d2 = R.jm.drainNotifs(R.cid).length; drained += d1 + d2;
+    R.boot(Mod); const after = { park: R.deliver.retryCount(R.cid), mem: R.mem().length };
+    if (R.jm._notifsT) clearTimeout(R.jm._notifsT);
+    return { premise, id, took, doors, quiet, boots, lifted, d1, d2, drained, after, posts: R.posts.length };
+  };
+  const judgeOk = (x) => x.premise.held && x.premise.code && !!x.id && JSON.stringify(x.took.park) === JSON.stringify([x.id]) && JSON.stringify(x.took.mem) === JSON.stringify([x.id]) && !x.took.disk.length && JSON.stringify(x.doors) === JSON.stringify({ peek: 0, wake: 0, drain: 0, entries: 0, waiting: 0, park: 0 });
+  const quietOk = (x) => x.quiet.posts === 0 && x.quiet.auth === 0 && !x.quiet.ho && JSON.stringify(x.quiet.park) === JSON.stringify([x.id]);
+  const bootsOk = (x) => x.boots.length === 2 && x.boots.every((b) => b.held && b.back === 1 && JSON.stringify(b.park) === JSON.stringify([x.id]) && JSON.stringify(b.mem) === JSON.stringify([x.id]) && b.quiet && b.posts === 0);
+  const liftOk = (x) => !x.lifted.held && !x.lifted.park.length && JSON.stringify(x.lifted.disk) === JSON.stringify([x.id]) && x.d1 === 1 && x.d2 === 0 && x.drained === 1 && !x.after.park && !x.after.mem && x.posts === 0;
+  for (const how of ['unknown', 'groups-unread']) {
+    const x = await judgeScene({ JobManager }, 'judge-' + how, how);
+    console.log(`    facts (${how}) ` + JSON.stringify(x));
+    ok(judgeOk(x), `B-54b7 L1 (${how}): while job-notifications.json is held (${x.premise.code}) the judge's held line is TAKEN — the park's copy stays in msg-retry.json, the stash copy waits in memory carrying its id, and no door (peek, wake list, drain, the ladder's prompt view, its waiting count, its park) offers it`, JSON.stringify({ took: x.took, doors: x.doors }));
+    ok(quietOk(x), `B-54b7 L1 (${how}) r519 (3): a retry tick past the ladder's hour, a turn end and a person's hand-over press during the hold post nothing and start no turn (no authorization)`, JSON.stringify(x.quiet));
+    ok(bootsOk(x), `B-54b7 L1 (${how}) r519 (4): a crash, then a boot still held — twice: the park's entry comes back and is judged again into the SAME bounded state (one copy each, nothing posted)`, JSON.stringify(x.boots));
+    ok(liftOk(x), `B-54b7 L1 (${how}): the file reads again — the copy lands in job-notifications.json ONCE, the park's copy leaves at that landing, one drain prints it once, a restart brings nothing back`, JSON.stringify({ lifted: x.lifted, d1: x.d1, d2: x.d2, drained: x.drained, after: x.after }));
+  }
+  // CONTROL (a): the take's plain ride (the release's) — while held it answers «landed» at once: the park's copy is gone, a crash loses the notice
+  const TAKE_A = '  _taken(item = null) { return { taken: true, ride: (step) => this._rideTaken(item, step) }; }';
+  const xa = await judgeScene(MB.load('src/jobs.js', anchored(JSRC, TAKE_A, "  _taken(item = null) { return { taken: true, ride: (step) => this._ride(this.notifsFile, 'a parked notification the jobs store took', step) }; }   // MUTANT: the plain ride", 'b54b7 the take rides its own landing'), 'b54b7-plain-ride'), 'judge-plain-ride', 'unknown');
+  console.log('    facts (control a) ' + JSON.stringify({ took: xa.took, boots: xa.boots, lifted: xa.lifted }));
+  ok(!xa.took.park.length && xa.boots[0].back === 0 && !xa.boots[0].mem.length && !xa.lifted.disk.length, 'CONTROL (a) (the plain ride, in a copy): while held the park\'s copy leaves msg-retry.json at once — after the crash neither file holds the notice: LOST (red)', JSON.stringify({ took: xa.took, boot: xa.boots[0], lifted: xa.lifted }));
+  // CONTROL (b): the taken copy visible while held — a drain delivers it from memory, a crash brings the park's copy back: TWICE
+  const WAIT_A = '  _waitsForLanding(n) { return !!n && !!this._notifsUnread && this._unlanded.has(n); }';
+  const xb = await judgeScene(MB.load('src/jobs.js', anchored(JSRC, WAIT_A, '  _waitsForLanding(n) { return false; }   // MUTANT: visible while held', 'b54b7 a taken copy waits for its landing'), 'b54b7-visible'), 'judge-visible', 'unknown');
+  console.log('    facts (control b) ' + JSON.stringify({ doors: xb.doors, drained: xb.drained }));
+  ok(xb.doors.drain === 1 && xb.drained >= 2, 'CONTROL (b) (the copy visible while held, in a copy): a drain delivers it from memory while its park copy is still on disk — the crash brings that copy back and it is delivered AGAIN (red)', JSON.stringify({ doors: xb.doors, drained: xb.drained }));
+  // THE FALL ROAD: an OWNER's copy falls «not running» while held — the same law
+  const fallScene = async (Mod, name) => {
+    const R = mkRig(name); R.hold(); R.boot(Mod);
+    const job = { id: 'jb-5b7f0001', kind: 'task', name: 'nightly', state: 'done', owner: { conversation: { id: R.cid } }, access: { view: 'all', control: 'session' }, runs: [] };
+    R.jm.jobs.set(job.id, job); R.jm._save(); R.land();
+    R.setAnswer(MISS); R.jm._notifyOwner(job, { what: 'finished: the nightly report' });
+    const id = (await until(() => R.deliver.retryCount(R.cid) === 1)) ? R.deliver.retryPeek(R.cid)[0].id : null;
+    fs.rmSync(R.regFile, { force: true });   // the conversation left this machine: its next attempt FALLS «not running»
+    await R.advance(31 * 1000);
+    const fell = R.logs.some((l) => l.includes(`${id} falls to the stash`));
+    const took = { park: R.parkIds(), mem: R.mem(), disk: R.onDisk() };
+    const doors = R.doors(); let drained = doors.drain;
+    const boots = [];
+    for (let b = 0; b < 2; b++) {
+      R.boot(Mod); const back = R.deliver.retryCount(R.cid);
+      await R.advance(1000);   // its due attempt: it falls again
+      const d = R.doors(); drained += d.drain;
+      boots.push({ held: !!R.jm._notifsUnread, back, park: R.parkIds(), mem: R.mem(), quiet: R.quiet(d) });
+    }
+    R.lift('{}'); await R.jm._notifsRetry();
+    const lifted = { park: R.parkIds(), disk: R.onDisk() };
+    const d1 = R.jm.drainNotifs(R.cid).length; drained += d1;
+    if (R.jm._notifsT) clearTimeout(R.jm._notifsT);
+    return { id, fell, took, doors, boots, lifted, d1, drained, posts: R.posts.length };
+  };
+  {
+    const f = await fallScene({ JobManager }, 'fall');
+    console.log('    facts (fall) ' + JSON.stringify(f));
+    ok(!!f.id && f.fell && JSON.stringify(f.took.park) === JSON.stringify([f.id]) && JSON.stringify(f.took.mem) === JSON.stringify([f.id]) && !f.took.disk.length && noDoor(f.doors), 'B-54b7 L2 (the fall road): an owner\'s copy that falls «not running» while held keeps its park copy in msg-retry.json; the stash copy waits, offered by no door', JSON.stringify({ fell: f.fell, took: f.took, doors: f.doors }));
+    ok(f.boots.every((b) => b.held && b.back === 1 && JSON.stringify(b.park) === JSON.stringify([f.id]) && JSON.stringify(b.mem) === JSON.stringify([f.id]) && b.quiet) && !f.lifted.park.length && JSON.stringify(f.lifted.disk) === JSON.stringify([f.id]) && f.d1 === 1 && f.drained === 1 && f.posts === 0, 'B-54b7 L2: two crashes while held, each boot falls it again into one copy; at the read again it lands ONCE and is drained once', JSON.stringify({ boots: f.boots, lifted: f.lifted, d1: f.d1, drained: f.drained }));
+    const fa = await fallScene(MB.load('src/jobs.js', anchored(JSRC, TAKE_A, "  _taken(item = null) { return { taken: true, ride: (step) => this._ride(this.notifsFile, 'a parked notification the jobs store took', step) }; }   // MUTANT: the plain ride", 'b54b7 the take rides its own landing'), 'b54b7-plain-ride'), 'fall-plain-ride');
+    ok(!fa.took.park.length && fa.boots[0].back === 0 && !fa.boots[0].mem.length, 'CONTROL (a) on the fall road: the plain ride drops the park\'s copy while held — the crash loses the owner\'s notice (red)', JSON.stringify({ took: fa.took, boot: fa.boots[0] }));
+  }
+  // r519 (2) THE PARK BOUNDED: one conversation, one watched job, every event through a held file, far past the stash's cap of 30
+  const capScene = async (Mod, name, N = 80) => {
+    const R = mkRig(name); R.hold(); R.boot(Mod);
+    const j = subJob(R), ids = [];
+    for (let i = 0; i < N; i++) { const id = await parkOne(R, j, `event ${i}`); if (!id) break; ids.push(id); unjudged(R, 'unknown'); R.setAnswer(TAKES); await R.turnEnd(); }
+    const park = R.parkIds();
+    if (R.jm._notifsT) clearTimeout(R.jm._notifsT);
+    return { n: ids.length, park: park.length, mem: R.mem().length, newest: park.includes(ids[ids.length - 1]), said: R.logs.some((l) => l.includes('fell off the 30-entry cap')), posts: R.posts.length };
+  };
+  {
+    const c = await capScene({ JobManager }, 'cap');
+    console.log('    facts (cap) ' + JSON.stringify(c));
+    ok(c.n === 80 && c.park === 30 && c.mem === 30 && c.newest && c.said && c.posts === 0, 'B-54b7 r519 (2): eighty events through a held file — msg-retry.json holds at most the cap (30) for the conversation: an evicted copy\'s park entry leaves at its eviction (said by name)', JSON.stringify(c));
+    const EVICT_A = '    for (const d of dropped) this._letParkGo(d);';
+    const cx = await capScene(MB.load('src/jobs.js', anchored(JSRC, EVICT_A, '    for (const d of dropped) void d;   // MUTANT: the evicted copy\'s park entry stays', 'b54b7 an eviction lets the park copy go'), 'b54b7-evict'), 'cap-evict');
+    console.log('    facts (cap control) ' + JSON.stringify(cx));
+    ok(cx.n === 80 && cx.park === 80, 'CONTROL (the eviction\'s let-go cut, in a copy): the park keeps every evicted copy until the lift — msg-retry.json grows with every event of the hold (red)', JSON.stringify(cx));
+  }
+  // ALSO CURED (control c): a HELD VIEW's line (groups-unread) rides its own landing — with the file READABLE and a disk that does not answer
+  // inside the flush (the failure branch): the park's copy stays until that landing
+  const viewScene = async (Mod, name) => {
+    const R = mkRig(name); R.lift('{}'); R.boot(Mod);
+    const j = subJob(R); const id = await parkOne(R, j, 'found news');
+    R.setSlow(true);   // from here the disk does not answer inside a flush
+    unjudged(R, 'groups-unread'); R.setAnswer(TAKES); await R.turnEnd();
+    const before = { park: R.parkIds(), disk: R.onDisk(), mem: R.mem() };
+    R.land();
+    return { id, before, after: { park: R.parkIds(), disk: R.onDisk() } };
+  };
+  {
+    const v = await viewScene({ JobManager }, 'view');
+    ok(!!v.id && JSON.stringify(v.before.park) === JSON.stringify([v.id]) && !v.before.disk.length && JSON.stringify(v.before.mem) === JSON.stringify([v.id]) && !v.after.park.length && JSON.stringify(v.after.disk) === JSON.stringify([v.id]), 'B-54b7 ALSO CURED: a held view\'s line (groups-unread) keeps the park\'s copy until the notices holding it land — never only in memory', JSON.stringify(v));
+    const VIEW_A = "      if (verdict === 'unknown' || verdict === 'groups-unread') { this._save(); return this._taken(this._parkCopyIn(cid, entry.id)); }";
+    const vx = await viewScene(MB.load('src/jobs.js', anchored(JSRC, VIEW_A, "      if (verdict === 'unknown') { this._save(); return this._taken(this._parkCopyIn(cid, entry.id)); }   // MUTANT: groups-unread answers a plain «taken»", 'b54b7 a held view rides the landing'), 'b54b7-view'), 'view-plain');
+    ok(!vx.before.park.length && !vx.before.disk.length, 'CONTROL (c) (groups-unread back to a plain «taken», in a copy): its park copy leaves msg-retry.json before the notices holding it are on disk (red)', JSON.stringify(vx));
+  }
+  // (iv) THE INSTANT BOTH ARE ON DISK (a kill between the notices' landing and the park's own rewrite): the boot judges the park entry — never a second copy
+  const bothScene = async (Mod, name) => {
+    const R = mkRig(name); R.lift('{}'); R.boot(Mod);
+    const j = subJob(R); const id = await parkOne(R, j, 'found news');
+    fs.writeFileSync(R.notifsFile, JSON.stringify({ [R.cid]: [{ jobId: j.id, jobName: 'watched', text: 'found news', ts: Date.now(), urgency: 'low', held: { kind: 'not-running' }, sub: true, rt: id }] }));
+    R.boot(Mod); const back = R.deliver.retryCount(R.cid);
+    unjudged(R, 'unknown'); R.setAnswer(TAKES); await R.turnEnd(); R.land();
+    return { id, back, park: R.parkIds(), mem: R.mem(), disk: R.onDisk(), posts: R.posts.length };
+  };
+  {
+    const b = await bothScene({ JobManager }, 'both');
+    ok(!!b.id && b.back === 1 && !b.park.length && JSON.stringify(b.mem) === JSON.stringify([b.id]) && JSON.stringify(b.disk) === JSON.stringify([b.id]) && b.posts === 0, 'B-54b7 (iv): a boot that finds BOTH copies (the park entry and the landed notice carrying its id) keeps ONE — the park\'s leaves, nothing is stashed again', JSON.stringify(b));
+    const BOTH_A = '    if (entry && this._parkOnDisk && this._parkOnDisk.has(entry.id)) {';
+    const bx = await bothScene(MB.load('src/jobs.js', anchored(JSRC, BOTH_A, '    if (false) {   // MUTANT: no look at what the file holds', 'b54b7 a park entry already on disk'), 'b54b7-both'), 'both-twice');
+    ok(bx.mem.length === 2, 'CONTROL (d) (the id check cut, in a copy): the boot stashes the park entry AGAIN beside the landed notice — two copies of one event (red)', JSON.stringify(bx));
+  }
+})();
 
 console.log(`\n${pass} passed, ${fail} failed${skipped ? ` (${skipped} skipped, each named above)` : ''}`);
 process.exit(fail ? 1 : 0);

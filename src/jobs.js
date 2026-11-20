@@ -249,6 +249,11 @@ class JobManager {
     // the B-f276 remainder, store (5) cure (主开发 02:33Z (2)): notices the file gave while the job records were HELD (none to judge a clear
     // by) — they wait for the records' first whole read (never delivered with a cleared job's old words); in memory, never in the file
     this._unjudged = new WeakSet();
+    // B-54b7 (主开发 r519, shape B): a stash copy this store TOOK from the delivery ladder (a fall, the judge's held line) → the step that
+    // lets the ladder's copy leave msg-retry.json (null until the ladder hands it). While job-notifications.json is HELD the copy is
+    // invisible to every delivery door until its OWN landing runs that step — one deliverable copy at any instant (a door's own write
+    // lands it first when the file reads); its leaving the stash (the cap, a drop) runs the step at once
+    this._unlanded = new Map();
     this.waiters = new Map();    // jobId → [{resolve, timer}] (poll --wait)
     this.ansWaiters = new Map(); // jobId → [{resolve, timer}]
     this._timers = [];
@@ -766,7 +771,7 @@ class JobManager {
         const list = Array.isArray(list0) ? list0.filter((n) => n && typeof n === 'object' && !Array.isArray(n)) : [];   // its read r1 (N2): a torn entry never breaks the merge
         if (!list.length) continue;
         // its read r2 (N1): a crafted field never throws here (a throw at boot ended the whole engine): a stamp is a string, a time a number
-        for (const n of list) { if (n.ho != null && typeof n.ho !== 'string') delete n.ho; if (n.ts != null && typeof n.ts !== 'number') n.ts = typeof n.ts === 'string' ? (Number(n.ts) || 0) : 0; }
+        for (const n of list) { if (n.rt != null && typeof n.rt !== 'string') delete n.rt; else if (n.rt) (this._parkOnDisk || (this._parkOnDisk = new Set())).add(n.rt); if (n.ho != null && typeof n.ho !== 'string') delete n.ho; if (n.ts != null && typeof n.ts !== 'number') n.ts = typeof n.ts === 'string' ? (Number(n.ts) || 0) : 0; }
         // its read r1 (M1): at a read again, an entry of a job CLEARED after it was filed takes the clear's words (as clearJobs and
         // _stashNotif hold them) — the clear ran while the file was held and could not rewrite it
         // its read r2 (M1): at EVERY read — the boot's too: a clear made while the file was held, then a restart, kept the old words (the
@@ -782,6 +787,7 @@ class JobManager {
         for (const n of list) if (n && n.ho) { ids.add(n.ho); delete n.ho; }
         if (ids.size) { this.releasedAtBoot.push({ cid, ids: [...ids], n: list.length }); const ho = [...ids].filter((x) => x !== 'carry'), both = ids.has('carry') && ho.length > 0; this.d.log(`[jobs] ${cid}: ${[ids.has('carry') ? 'an unconfirmed answer\'s claim (carry)' : '', ho.length ? `a hand-over (${ho.join(', ')})` : ''].filter(Boolean).join(' and ')} ${both ? 'were' : 'was'} in flight when the previous server stopped — ${both ? 'their' : 'its'} job results wait again`); }   // lane report-mark-on-ack: a carry claim is an unconfirmed answer's, named apart from a hand-over
         const mine = merge ? (this.pendingNotifs.get(cid) || []).filter((n) => !list.includes(n)) : [];
+        if (merge) { const onDisk = new Set(list.map((n) => n && n.rt).filter(Boolean)); for (let i = mine.length - 1; i >= 0; i--) if (mine[i] && mine[i].rt && onDisk.has(mine[i].rt)) mine.splice(i, 1); }   // B-54b7 (iv): memory's copy of a park entry the file already holds leaves the merge (its park step still runs at the lift)
         if (!list.length && !mine.length) continue;
         this.pendingNotifs.set(cid, mine.length ? [...list, ...mine].sort((a, b) => (Number(a.ts) || 0) - (Number(b.ts) || 0)) : list);   // a read again: what waited here joins the file's (no cap — the file's are the oldest, as a restore's)
       }
@@ -1473,6 +1479,7 @@ class JobManager {
     if (ev === 'dropped') {   // r4/r5: the ladder dropped a subscriber's parked copy — the parked line closes, saying what happened
       const verdict = this._retryVerdicts && this._retryVerdicts.get(entry.id);
       if (this._retryVerdicts) this._retryVerdicts.delete(entry.id);
+      if (verdict === 'held-copy') return true;   // B-54b7 (iv): the copy is already on disk here — nothing to close, nothing stashed again
       const why = extra.threw ? 'the delivery check failed — not delivered (withheld)'
         : verdict === 'groups-unread' ? 'the Task Groups store cannot be read — held until it reads, judged then'
         : verdict === 'unknown' ? 'no live record proves its view — held for its next turn, judged there'
@@ -1481,7 +1488,9 @@ class JobManager {
       if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; line.dropped = true; line.reason = why; } this._dirty = true; }
       // the judge's HELD line (verdict unknown — retryOwed stashed it): the park's copy leaves its file only once the line it became
       // is on disk here (the moved2 cure 2's hunt (3) — the ladder rides this landing)
-      if (verdict === 'unknown') { this._save(); return this._taken(); }
+      // B-54b7 (ALSO CURED): a HELD VIEW's line (groups-unread) is a held line too — it answered a plain «taken» and the park's copy left
+      // before the line was on disk; both ride the copy's own landing now
+      if (verdict === 'unknown' || verdict === 'groups-unread') { this._save(); return this._taken(this._parkCopyIn(cid, entry.id)); }
       return true;
     }
     if (ev === 'fell') {
@@ -1491,18 +1500,45 @@ class JobManager {
       // failure IS the fall: no `attempt` event follows it) — the line is closed here with the attempts as counted
       const held = { kind: extra.kind || 'not-reachable', ...(extra.why ? { why: String(extra.why) } : {}), ...(extra.maybeDelivered === true ? { maybeDelivered: true } : {}), ...(extra.evicted === true ? { evicted: true } : {}), ...(extra.expired === true ? { expired: true } : {}), ...(extra.identity ? { identity: String(extra.identity) } : {}), ...(Number.isFinite(Number(extra.cap)) && extra.cap != null ? { cap: Number(extra.cap) } : {}), ...(Number(extra.retryAfter) > 0 ? { retryAfter: Number(extra.retryAfter) } : {}), attempts: Number(extra.attempts) || entry.attempts.length, ...(extra.phase ? { phase: String(extra.phase) } : {}), ...(extra.busy === true || extra.busy === false ? { busy: extra.busy } : {}) };
       if (job) { const line = [...(job.notifyLog || [])].reverse().find((l) => l && l.parked && l.id === entry.id); if (line) { line.retries = retries; line.nextAt = null; } }
+      if (this._parkOnDisk && this._parkOnDisk.has(entry.id)) return true;   // B-54b7 (iv): its copy is already on disk here — never stashed twice
       const target = job || { id: meta.jobId, name: meta.jobName || meta.jobId };   // the record is gone: the stash still names it
-      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held, mark: !!meta.sub });
+      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || entry.firstAt }, extra.reason || held.kind, { stampLast: !subscriber && !!job, held, mark: !!meta.sub, park: entry.id });
       if (job && !subscriber && meta.ev && meta.ev.away && held.kind === 'not-running') this._awayFailure(cid, job, { wake: 'result', away: meta.ev.away }, this._lastStashed(cid, job));   // B-2566: a failure parked for a live owner that ENDED before it landed — its OWN run's facts
       this._save();   // the fallen entry's ONE copy is now this store's: an act, urgent (the 2 s tick was the only save — the hunt (2))
       try { this.d.broadcast('jobs-updated', { id: meta.jobId }); } catch { }
-      return this._taken();
+      return this._taken(this._parkCopyIn(cid, entry.id));
     }
     return false;
   }
   /** A PARKED ENTRY THIS STORE TOOK (a fall, the judge's held line): the ladder (src/server/conversation-deliver.js) removes its
-   *  park copy from msg-retry.json only once the notifications holding it are on disk — `ride(step)` (the moved2 cure 2) */
-  _taken() { return { taken: true, ride: (step) => this._ride(this.notifsFile, 'a parked notification the jobs store took', step) }; }
+   *  park copy from msg-retry.json only once the notifications holding it are on disk — `ride(step)` (the moved2 cure 2).
+   *  B-54b7 (主开发 r519, shape B — THE WAIT AT THE TAKE): while job-notifications.json is HELD the writer owes nothing for it, and a plain
+   *  ride ran the step AT ONCE — the park's one durable copy left for a stash line in memory only, and a crash lost that notice. The step
+   *  now rides the copy's OWN landing: the writer's, or — while held — the lift's save (ONE wait for every taken copy, never one each).
+   *  While held the copy (`item`) is invisible to every delivery door until then (_waitsForLanding); its leaving the stash first lets the
+   *  park's copy go. A file that reads needs no wait: each door (drain, claim) lands its own write first, and that landing lets the park's go. */
+  _taken(item = null) { return { taken: true, ride: (step) => this._rideTaken(item, step) }; }
+  _rideTaken(item, step) {
+    let ran = false;
+    const go = () => { if (ran) return; ran = true; if (item && this._unlanded.get(item) === go) this._unlanded.delete(item); step(); };
+    if (item && !this._unlanded.has(item)) { go(); return; }   // its copy already left the stash (the cap, a drop): the park's copy leaves now
+    if (item) this._unlanded.set(item, go);
+    if (item && this._notifsUnread && !this.readOnly) { this._takenLift(); return; }
+    this._ride(this.notifsFile, 'a parked notification the jobs store took', go);
+  }
+  /** while held: ONE step on the lift's own save runs every taken copy's (they are all in that save — the merge keeps memory's) */
+  _takenLift() {
+    if (this._takenLiftArmed) return;
+    this._takenLiftArmed = true;
+    this._afterNotifsLift('the parked notifications the jobs store took', () => { this._takenLiftArmed = false; for (const go of [...this._unlanded.values()]) if (go) go(); });
+  }
+  /** the stash copy taken for park entry `id` (the newest — `_stashNotif` just pushed it) */
+  _parkCopyIn(cid, id) { const q = this.pendingNotifs.get(cid) || []; for (let i = q.length - 1; i >= 0; i--) if (q[i] && q[i].rt === id && this._unlanded.has(q[i])) return q[i]; return null; }
+  /** a taken copy left the stash before its landing (the cap, a drop): the park's copy leaves now — what it held is said by that road */
+  _letParkGo(n) { if (!n || !this._unlanded.has(n)) return; const go = this._unlanded.get(n); this._unlanded.delete(n); if (go) go(); }
+  /** B-54b7: while job-notifications.json is HELD a copy taken from the ladder waits for its own landing — no door delivers it before
+   *  (its park copy is still on disk: delivered from memory, then a crash, the park's copy came back — twice) */
+  _waitsForLanding(n) { return !!n && !!this._notifsUnread && this._unlanded.has(n); }
   /** bounded per-job delivery journal (2.361.5, owner ask: "投递细节我好监控")
    *  — one entry per delivery ATTEMPT outcome, any lane. Rides the registry
    *  record; the panel renders it under the Auto-notify row. */
@@ -1594,13 +1630,16 @@ class JobManager {
     if (this.readOnly || this._notifsUnread) return;
     try { this._writer().dirty(this.notifsFile, { name: 'jobs-notifs.write', rank: 0, urgent: true, produce: () => this._notifsBytes() }); } catch (e) { this.d.log('[jobs] notifs save failed:', e.message); }
   }
-  _stashNotif(cid, job, ev, reason, { stampLast = true, held = null, mark = false } = {}) {
+  _stashNotif(cid, job, ev, reason, { stampLast = true, held = null, mark = false, park = null } = {}) {
     const q = this.pendingNotifs.get(cid) || [];
     // a delivery that was IN FLIGHT when the owner cleared the job stashes here afterwards with the words it
     // captured before the clear (verify r3): an event born before the clear is held as the sentence
     const stale = job.clearedAt && !((ev && ev.at) > Math.max(job.clearedAt, job.reclearedAt || 0));   // …born before the LATEST clear (verify r4: a second clear of an `already` record keeps the first clearedAt)
-    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this.labelOf(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason), ...(mark ? { sub: true } : {}) });   // `sub`: a subscriber's held copy — its stash line says so (lane jobs-addressed-push L4; an older item reads unmarked)
+    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this.labelOf(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason), ...(mark ? { sub: true } : {}), ...(park ? { rt: String(park) } : {}) });   // `sub`: a subscriber's held copy — its stash line says so (lane jobs-addressed-push L4; an older item reads unmarked)
+    const item = q[q.length - 1];
+    if (park) this._unlanded.set(item, null);   // B-54b7: taken from the ladder — its park copy leaves at its landing (_rideTaken)
     const dropped = capUnclaimedNotifs(q); // per-conversation cap; a may-have-landed copy first, then the oldest UNCLAIMED (a claimed one is being handed over — verify r4)
+    for (const d of dropped) this._letParkGo(d);   // B-54b7 (r519 (2)): an evicted copy's park entry leaves at the eviction (said by name below) — the park holds at most the cap a conversation, through a hold of any length
     const n = dropped.length;
     if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
     if (n) this._sayDropped(cid, n, dropped);
@@ -1612,6 +1651,7 @@ class JobManager {
     this._notifyLogPush(job, { lane: 'stash', ok: false, reason: reason || 'not reachable', to: String(cid).slice(0, 8) });
     this.d.log(`[jobs] notify → stashed for ${cid} (${reason || 'not reachable'})`);
     try { this.d.onStash?.(cid); } catch { } // the conversation's `stash` session fact (the strip above its composer) follows
+    return item;
   }
   /** THE EVICTION IS SAID TO THE OWNER (B-dfb4, 2026-10-01 decision): the journal line above was the only trace — the
    *  panel shows the 30 still waiting, never the ones that fell off. One For-you notice (origin jobs, kind notice) per
@@ -1735,8 +1775,9 @@ class JobManager {
     if (!cid) return [];
     this._judgeHeldView(cid);
     // BOTH LAWS (the restack onto 875a42411, 主开发 08:55Z): a notice the held job records cannot judge waits (store (5) cure (2)) — and
-    // while the Task Groups store is held an undecided line stays queued (the release's cure)
-    const q = (this.pendingNotifs.get(cid) || []).filter((n) => !this._waitsForRecords(n));
+    // while the Task Groups store is held an undecided line stays queued (the release's cure) — and (B-54b7) while job-notifications.json is
+    // held a copy taken from the ladder waits for its own landing
+    const q = (this.pendingNotifs.get(cid) || []).filter((n) => !this._waitsForRecords(n) && !this._waitsForLanding(n));
     const v = typeof this.d.viewerOf === 'function' ? this.d.viewerOf(cid) : undefined;
     return v && v.held ? q.filter((n) => n && (n.ho || this.printableNow(cid, n.jobId, v, { sub: n.sub === true }))) : q;   // THE STORE HELD UNREAD: an undecided line stays queued
   }
@@ -1753,6 +1794,7 @@ class JobManager {
     if (!gone.length) return;
     const keep = q.filter((n) => !gone.includes(n));
     if (keep.length) this.pendingNotifs.set(cid, keep); else this.pendingNotifs.delete(cid);
+    for (const n of gone) this._letParkGo(n);   // B-54b7: a taken copy dropped here is not owed — its park copy is not either
     this._saveNotifs(); this._dirty = true;
     this.d.log(`[jobs] ${cid}: ${gone.length} held notification(s) of job(s) it can no longer view — dropped at the drain, never printed (${[...new Set(gone.map((n) => n.jobId))].join(', ')})`);
     try { this.d.broadcast('jobs-updated', { drained: cid }); } catch { }
@@ -1814,6 +1856,9 @@ class JobManager {
    *  same rule as its held line. The owner lane's copy is owed as before. */
   retryOwed(cid, entry) {
     const meta = (entry && entry.meta) || {};
+    // B-54b7 (iv): a park entry whose copy job-notifications.json ALREADY holds (read at the boot or the merge: a kill between that landing
+    // and the park's own rewrite left both on disk) is never delivered or stashed a second time — the park's copy leaves
+    if (entry && this._parkOnDisk && this._parkOnDisk.has(entry.id)) { (this._retryVerdicts || (this._retryVerdicts = new Map())).set(entry.id, 'held-copy'); return false; }
     if (!meta.subscriber) return true;
     const verdict = this.viewVerdict(cid, meta.jobId, { sub: !!meta.sub });
     if (JobManager.owed(verdict)) return true;   // r6: an owed copy leaves no memo (the ladder delivers or fells it — the memo is for a drop's journal line)
@@ -1821,7 +1866,7 @@ class JobManager {
     (this._retryVerdicts || (this._retryVerdicts = new Map())).set(entry && entry.id, verdict);
     if (verdict === 'unknown' || heldView) {
       const target = this.jobs.get(meta.jobId) || this.archivedById(meta.jobId) || { id: meta.jobId, name: meta.jobName || meta.jobId };
-      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || (entry && entry.firstAt) }, heldView ? 'held: the Task Groups store cannot be read — judged when it reads' : 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: heldView ? 'groups-unread' : 'not-running' }, mark: !!meta.sub });
+      this._stashNotif(cid, target, { what: (meta.ev && meta.ev.what) || meta.jobName, at: (meta.ev && meta.ev.at) || (entry && entry.firstAt) }, heldView ? 'held: the Task Groups store cannot be read — judged when it reads' : 'held: no live record proves its view — judged at the turn that would print it', { stampLast: false, held: { kind: heldView ? 'groups-unread' : 'not-running' }, mark: !!meta.sub, park: entry && entry.id });
       // 主开发 04:33Z (2c): the ladder drops its parked copy on this answer and writes its file NOW — the stash is written at once too (a
       // crash before the next tick lost it for good); while job-notifications.json is HELD that write is refused: the stash waits in memory
       // and joins the file at the read (the merge)
@@ -1900,8 +1945,8 @@ class JobManager {
     let q = this.pendingNotifs.get(cid);
     if (!q || !q.length) return [];
     const byId = only instanceof Set;
-    if (byId || q.some((n) => n && (n.ho || this._waitsForRecords(n)))) {   // store (5) cure (2): a notice that waits for the records stays
-      const mine = byId ? (n) => only.has(n) && !this._waitsForRecords(n) : (n) => !(n && n.ho) && !this._waitsForRecords(n);
+    if (byId || q.some((n) => n && (n.ho || this._waitsForRecords(n) || this._waitsForLanding(n)))) {   // store (5) cure (2): a notice that waits for the records stays
+      const mine = byId ? (n) => only.has(n) && !this._waitsForRecords(n) && !this._waitsForLanding(n) : (n) => !(n && n.ho) && !this._waitsForRecords(n) && !this._waitsForLanding(n);   // B-54b7: a taken copy waits for its landing
       const keep = q.filter((n) => !mine(n));
       q = q.filter(mine);
       if (!q.length) return [];
@@ -1944,7 +1989,7 @@ class JobManager {
   wakeOwed(cid) {
     if (!cid || !this.pendingNotifs.get(cid)) return [];
     // the queue read as it is (never peekNotifs: its held-view judge can stash, and this is asked from the stash hooks)
-    return (this.pendingNotifs.get(cid) || []).filter((n) => n && !n.ho && n.held && WAKE_OWED_KINDS.includes(n.held.kind) && !n.held.maybeDelivered && !this._waitsForRecords(n));
+    return (this.pendingNotifs.get(cid) || []).filter((n) => n && !n.ho && n.held && WAKE_OWED_KINDS.includes(n.held.kind) && !n.held.maybeDelivered && !this._waitsForRecords(n) && !this._waitsForLanding(n));
   }
   /** B-6721: For you was told for this conversation (now, or at For you's read — the wiring's deferred filing): its close asks the store */
   noteWakeSaid(cid) { if (cid) (this._wakeSaid || (this._wakeSaid = new Set())).add(cid); }
