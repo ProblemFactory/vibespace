@@ -532,6 +532,9 @@ This file is the engineers' record of every release: the lanes, the verification
 
 
 
+### bl-tests-e — the one click door presses an ARMED approval as a person's press (the 2.369.413 checkpoint's hosted red, 主开发 2026-11-20 02:02Z)
+- THE FOLLOW-UP (主开发 02:32Z, two smalls that each made a FALSE red possible): the «re-armed at the press» check reads the target's own stamp at the INSTANT of the press (the door's capture listener, before any handler) and right after the click's dispatch — never a round trip later, where a later row pass that moved the same element read as a re-arm of a press that counted; a stale stamp's refusal says «no pass of the product read it again» (a person would press, be told, press again — it agrees with the product, so it stays a red by name). ④'s counted leg carries the row's text. test-wake-approve-card-chrome read again against the probe: its centre scroll re-stamps the button (the product re-stamps its armed set on the next frame after a scroll), its 1500 ms rest ages it past the arm, the card's open is old by then — safe.
+
 ## 2.369.412 — 2026-11-19
 
 ### bl-tests-a — ckpt61 hosted red of test-path-field-chrome, tests only for .412 (主开发 21:37Z: the product cure rides .413 as its own unit, B-08d5): no product byte
