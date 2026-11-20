@@ -68,6 +68,8 @@ function starttimeOf(pid, opts) {
 function stateOf(pid, opts) { const r = statRest(pid, opts); return r ? r[0] : null; }
 /** B-2c5c: /proc/<pid>/stat field 5 (its process group) or null — the same one read */
 function pgidOf(pid, opts) { const r = statRest(pid, opts); return r && Number(r[2]) > 0 ? Number(r[2]) : null; }
+/** B-2c5c (主开发 02:46Z): /proc/<pid>/stat field 4 (its parent) or null — the same one read */
+function ppidOf(pid, opts) { const r = statRest(pid, opts); return r && Number(r[1]) > 0 ? Number(r[1]) : null; }
 /** B-91aa (met at 2.369.412's second checkpoint: src/mounts.js keeps no /proc read of its own — B-e783's law): ONE process's
  *  [state, starttime] from the same one read, SYNC (a libuv pool thread may be held by the very mount a probe watches) —
  *  null when it is gone (ENOENT / ESRCH), undefined when /proc cannot be read (never «gone» on an unreadable /proc). */
@@ -451,7 +453,7 @@ function legacyOnce(door, pid, say) {
 module.exports = {
   childTreeOf, keptByChain, treeOf, endTree, treeLine, treeNotice, TREE_NOTICE, keepOut, keptOut,
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
-  hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
+  hasProc, bootIdOf, starttimeOf, stateOf, pgidOf, ppidOf, statOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

@@ -384,7 +384,7 @@ function procsOf(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.proc
 // read (EACCES, EPERM, EIO, EMFILE, ENFILE, …) is unread — named by its errno (`listUnread`), never a blanket catch
 const GONE_LIST = new Set(['ENOENT', 'ENOTDIR', 'ENODEV']);
 let listUnread = '';
-function procsOrNull(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch (e) { if (e && GONE_LIST.has(e.code)) return []; listUnread = (e && e.code) || 'an error'; return null; } }   // B-2c5c r1: unread ≠ empty; gone = empty
+function procsOrNull(dir) { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter((l) => /^\d+$/.test(l)); } catch (e) { if (e && GONE_LIST.has(e.code)) return []; listUnread = (e && e.code) || true; return null; } }   // B-2c5c r1: unread ≠ empty; gone = empty
 /** the keeper (< 253) is ours, never something the job left — known by the PID its gate said, and its start (round 6) */
 const isKeeper = (pid) => !!keeper && Number(pid) === keeper.pid && Number((statOf(pid) || [])[19]) === keeper.start;
 
@@ -621,11 +621,12 @@ async function forceScope(why) {
   const held = list === null ? keptInScope() : kept ? list.filter((p) => kept(p)).length : 0;   // its read r1 (S1): a list unread is no proof the hub is not there
   // its read (round wwa7r2uc1, MUST): the end says what was DONE — the job's own processes killed one by one (the hub's left alone), or,
   // its list unread, nothing (the end says «could not be read: may still run») — never «its scope was killed»
-  if (held) { sayKept(held, 'its kill', list === null); if (list !== null && !forced) forced = why.replace(/its scope was killed$/, 'its own processes were killed one by one (the VibeSpace hub in its scope left alone)'); for (const p of scopeRows() || []) killNow(p); return; }
-  if (list !== null && !list.length) return;   // its fresh read (SHOULD 3): the list GONE or empty — nothing of the job is left: no kill, never «its scope was killed»
+  if (held) { sayKept(held, 'its kill', list === null); let n = 0; for (const p of scopeRows() || []) if (killNow(p)) n++; if (n && !forced) forced = why.replace(/its scope was killed$/, 'its own processes were killed one by one (the VibeSpace hub in its scope left alone)'); return n > 0; }   // the end says what was DONE: «by force» only when one was killed
+  if (list !== null && !list.length) return false;   // its fresh read (SHOULD 3): the list GONE or empty — nothing of the job is left: no kill, never «its scope was killed»
   if (!forced) forced = why; // the first kill's why — and every call kills (round 5: a label is never the guard)
   await scopeKill('SIGKILL');
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
+  return true;
 }
 // round 7: what OUR SIGTERM reached and when (`pid:start` → ms) — each process's grace runs from its own SIGTERM; a row of a fresh
 // /proc scan, its start re-read at the act (same). Round 9: ONE SIGNAL PER PID PER STOP STEP — EVERY delivery of the stop goes
@@ -797,7 +798,7 @@ function onStop(sig, at, by) {
 /** round 9: the scope's processes as rows ([pid, start, pgid]) — never the keeper; null when its list cannot be read */
 function scopeRows() {
   let t;
-  try { t = fs.readFileSync(path.join(scopeDir, 'cgroup.procs'), 'utf8'); } catch (e) { if (e && GONE_LIST.has(e.code)) return []; listUnread = (e && e.code) || 'an error'; return null; }   // a gone list: no rows (the scope emptied); unread: null
+  try { t = fs.readFileSync(path.join(scopeDir, 'cgroup.procs'), 'utf8'); } catch (e) { if (e && GONE_LIST.has(e.code)) return []; listUnread = (e && e.code) || true; return null; }   // a gone list: no rows (the scope emptied); unread: null
   const kept = keptTest();   // B-2c5c: the hub's processes are never the stop's rows
   return t.split('\n').filter((l) => /^\d+$/.test(l) && Number(l) !== process.pid && !isKeeper(l) && !(kept && kept(l))).map(rowOf).filter(Boolean);
 }
@@ -898,7 +899,7 @@ async function drainScope() {
   const deadline = (stopping ? stopAt : Date.now()) + stopMs;
   while (own().length && Date.now() < deadline) await nap(25);
   const still = own().length, s = still === 1 ? '' : 'es', was = still === 1 ? 'was' : 'were';
-  if (still) await forceScope(left ? `${still} process${s} it left ${was} still running ${stopMs / 1000} s after its SIGTERM — its scope was killed` : `${still} process${s} ${was} still in its scope ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its end'} — its scope was killed`);
+  const forcedNow = still ? await forceScope(left ? `${still} process${s} it left ${was} still running ${stopMs / 1000} s after its SIGTERM — its scope was killed` : `${still} process${s} ${was} still in its scope ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its end'} — its scope was killed`) : false;   // 主开发 02:46Z: the force answers whether it acted — the last processes may end between the count and its own read
   for (let i = 0; i < 80 && own().length; i++) await nap(25);
   // B-c134: a STOP's tree outside the scope (a child that moved to a scope of its own — `systemd-run --scope`) — heard at the stop
   // step (the table), waited on to the stop's one clock, then by force; never counted as the scope's
@@ -907,7 +908,7 @@ async function drainScope() {
   // small 2: the END measured on a list that READS — an unread one is no «empty»: the job reads ended, said «could not be read: may
   // still run», and the engine reaps the scope (scopeEmpty false)
   const fin = procsOrNull(scopeDir), unread = fin === null;
-  return { ...(left ? { left: { n: left, ...(still ? { force: true } : {}) } } : {}), scopeEmpty: !unread && !fin.filter((p) => !(kept && kept(p))).length, ...(unread ? { scopeUnread: listUnread || true } : {}) };
+  return { ...(left ? { left: { n: left, ...(still && forcedNow ? { force: true } : {}) } } : {}), scopeEmpty: !unread && !fin.filter((p) => !(kept && kept(p))).length, ...(unread ? { scopeUnread: listUnread || true } : {}) };
 }
 // A RUNG WITHOUT A SCOPE (rlimit-data, none — a fleet pod): what the job left is what still runs in OUR process group (the job
 // is our child in it; what it put in the background stays there) — a task's stopped and said, a service's kept and named by

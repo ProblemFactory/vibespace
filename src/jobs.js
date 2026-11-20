@@ -1680,11 +1680,11 @@ class JobManager {
   }
   /** B-2c5c (主开发's small 4): the hub test for ONE pass — memoised per pid, as the wrapper's keptTest is (a pass asks it of every
    *  process of a scope or of the job's mark: each walk read the same chain again) */
-  _hubTest(wrapper = 0) { const memo = new Map(); return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, this._hubsOwn(p, wrapper) || this._hubAncestor(p)); return memo.get(p); }; }
+  _hubTest(wrapper = 0) { const memo = new Map(); let anc = null; return (pid) => { const p = Number(pid); if (!memo.has(p)) memo.set(p, this._hubsOwn(p, wrapper) || (anc || (anc = this._hubAncestors())).has(p)); return memo.get(p); }; }
   /** B-2c5c, its readers' should (round wwa7r2uc1): a process UP this hub's own parent chain — its launcher (`./run.sh`, `npm start`)
    *  and what started it — is the hub's too: a reap after a killed wrapper SIGKILLed the launcher one by one (the hub left with no
-   *  supervisor). Read up from our parent, the same chain walk (a live ancestor's pid is that process now) */
-  _hubAncestor(pid) { const p = Number(pid); return p > 1 && p !== process.pid && PI.keptByChain(process.ppid, new Map([[p, 0]])); }
+   *  supervisor). Read up from our parent ONCE a pass (a live ancestor's pid is that process now) */
+  _hubAncestors() { const out = new Set(); for (let p = process.ppid, hop = 0; p > 1 && hop < 64 && !out.has(p); hop++) { out.add(p); p = PI.ppidOf(p) || 0; } return out; }   // 主开发 02:46Z: read ONCE a pass (it is the main loop), checked by membership
   /** B-2c5c: does this hub live in `scope`? Its OWN cgroup (/proc/self/cgroup, read once a life — a process never changes its cgroup
    *  by itself; `d.hubCgroup` = a fast suite's) is the scope's or under it */
   async _hubInScope(scope) {
@@ -1748,11 +1748,12 @@ class JobManager {
     if (!p) {
       // B-2c5c (主开发 01:57Z): the errno decides, by name — a list that no longer EXISTS (ENOENT, ENOTDIR, ENODEV: the emptied scope
       // systemd removed) is EMPTY; one that exists and cannot be read is null (unread: retried, said) — every error read as «empty» before
-      p = fs.promises.readFile(path.join(scope.dir, 'cgroup.procs'), 'utf8').then((t) => { if (this._listErr) this._listErr.delete(scope.dir); return t.split('\n').filter((l) => /^\d+$/.test(l)).map(Number); }, (e) => { if (e && GONE_LIST.has(e.code)) return []; (this._listErr || (this._listErr = new Map())).set(scope.dir, (e && e.code) || 'an error'); return null; });
+      p = fs.promises.readFile(path.join(scope.dir, 'cgroup.procs'), 'utf8').then((t) => { if (this._listErr) this._listErr.delete(scope.dir); return t.split('\n').filter((l) => /^\d+$/.test(l)).map(Number); }, (e) => { if (e && GONE_LIST.has(e.code)) { if (this._listErr) this._listErr.delete(scope.dir); return []; } (this._listErr || (this._listErr = new Map())).set(scope.dir, (e && e.code) || ''); return null; });
       reads.set(scope.dir, p);
       p.then(() => { if (reads.get(scope.dir) === p) reads.delete(scope.dir); });
     }
-    return this._within(p, Math.max(0, ms));
+    let settled = false; p.then(() => { settled = true; });
+    return this._within(p, Math.max(0, ms)).then((r) => { if (r === null && !settled && this._listErr) this._listErr.delete(scope.dir); return r; });   // 主开发 02:46Z: a time-out says a time-out, never an older read's errno
   }
   /** THE KILL STEP of a stop / a timeout: the cgroup rung's scope — its wrapper, alive, writes the end once the scope is empty;
    *  a wrapper still there a step later (wedged) is killed with its group; any other rung: the group, as before. `why`
@@ -1904,7 +1905,7 @@ class JobManager {
   /** the reap's words, once, on the run and its journal — what it read (or that no read answered), and what was done */
   /** its fresh read (SHOULD 1): what a scope's list read answered when it gave no list — its errno when it was refused (EACCES, EIO …),
    *  else the bound it did not answer in */
-  _listWords(scope, bound) { const e = scope && this._listErr && this._listErr.get(scope.dir); return e ? `could not be read (${e})` : `did not answer a read${bound ? ` in ${bound}` : ''}`; }
+  _listWords(scope, bound) { const has = !!(scope && this._listErr && this._listErr.has(scope.dir)), e = has ? this._listErr.get(scope.dir) : ''; return has ? `could not be read${e ? ` (${e})` : ''}` : `did not answer a read${bound ? ` in ${bound}` : ''}`; }
   _reapSaid(job, run, scope, r, out = null) {
     const n = run._reap && run._reap.n, bound = this.d.reapReadMs ?? REAP_READ_MS;
     const held = n ? `its wrapper was gone and its scope still held ${n} process${n === 1 ? '' : 'es'}` : `its wrapper was gone and its scope ${this._listWords(scope, `${bound / 1000} s`)}`;
