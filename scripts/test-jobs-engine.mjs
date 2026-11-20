@@ -245,6 +245,9 @@ try {
 
   // 7e. subscriptions (2.345.0): a second conversation opts into a visible job
   const cids = [];
+  // (lane lg-store-writes, the heavy-own read 16:05Z: an EARLIER leg's run end rides its record's landing — landed after this reset it
+  // spent the owner's rate floor and messaged conv-T without this job's context) every earlier ride LANDS first, through the door
+  { const r = require('../src/store-writer.js').storeWriter().flushSync([C.file, C.notifsFile]); if (r.deferred || (r.left && r.left.length)) throw new Error(`the jobs store did not land before the subscriptions leg: ${JSON.stringify(r.left)}`); }
   C._notifyRate.clear(); C.pendingNotifs.clear();
   C.d.deliverToConversation = async (cid, text) => { cids.push({ cid, hasCtx: text.includes('订阅测试context') }); return { ok: true, lane: 'message' }; };
   const rs1 = C.create({ kind: 'task', name: 'sub-test', cmd: { argv: ['sh', '-c', 'exit 1'] }, context: { payload: '订阅测试context说明' }, owner }, caller);
