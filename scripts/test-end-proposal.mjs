@@ -499,7 +499,7 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
     let rr = null; try { rr = await routeRun(require(path.join(REPO, 'src/server/jobs-wiring.js'))); } catch (e) { rr = { error: (e && e.message) || String(e) }; }
     ok(rr && rr.ps && rr.ps.status === 503 && rr.ps.body.code === 'not_now' && rr.pl.status === 200 && rr.pl.body.changed === true && rr.pw.status === 503 && rr.pw.body.code === 'not_now' && rr.pwl.status === 200 && rr.held === false,
       'THE PERSON\'S ACT ROUTE through the one door: not landed ⇒ 503 not_now by name, nothing changed; landed ⇒ done — a set, then a withdrawal', rr);
-    const ROUTE_A = "          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : (w.code || a.code) === 'busy' ? 409 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code });   // busy: an earlier change of this grant still waits (the door's order)";
+    const ROUTE_A = "          if (!a.ok || !w.ok) return res.status(a.code === 'wake_grant_person_only' ? 403 : (w.code || a.code) === 'not_now' ? 503 : (w.code || a.code) === 'busy' ? 409 : 400).json({ error: w.error || a.error || a.why, code: w.code || a.code, ...(w.behind || a.behind ? { behind: true } : {}) });   // busy: an earlier change of this grant still waits (the door's order); behind: nothing was tried";
     let rx = null; try { rx = await routeRun(loadMutated('src/server/jobs-wiring.js', (s0) => anchored(s0, ROUTE_A, '', 'route-ignores-door'))); } catch (e) { rx = { error: (e && e.message) || String(e) }; }
     ok(rx && rx.ps && rx.ps.status === 200, 'RED CONTROL (the route\'s refusal cut, in a copy): the person is told the grant is set for a change that did not land', rx && rx.ps);
     // (4) THE PROPOSALS' CARD — 20 rows are ONE act (ONE landing); not landed ⇒ every row refused not_now, the card OPEN showing what is
@@ -550,7 +550,7 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
     // (st.hold: each landing answered by the leg). RED (anchored, in a copy): the busy refusal cut — each scene ends at a value no act
     // landed, or an END over a grant that is then put back
     const BUSY_A = "      if (this._grantActs.has(job.id)) { refuse(job, 'busy', WAKE_GRANT_BUSY); continue; }";
-    const BEHIND_A = "      if (behind) { refuse(job, 'not_now', WAKE_GRANT_BEHIND); continue; }";
+    const BEHIND_A = "        if (behind) { refuse(job, 'not_now', WAKE_GRANT_BEHIND, { behind: true }); continue; }";
     const nextTurn = () => new Promise((r) => setImmediate(r));
     const diskJob = async (eng, id) => {
       st.hold = false; st.landing = true;
@@ -659,11 +659,49 @@ console.log('④b THE BOUND DOOR — piece 7\'s REAL jobs engine (scratch): its 
     const o4x = await behindRun(E4x);
     ok(o4x.asked === 1, 'RED CONTROL (the behind refusal cut, in a copy): the act is applied and enters the waiting window on a storage already behind', o4x);
     E4x.stop();
+    // (6g) THE NO-OP WHILE BEHIND (主开发 10:05Z): the behind refusal sits ABOVE the no-op — while the writer reports the file behind, the
+    // value in memory may be a put-back that has not landed, so not even «already as asked» is said from it
+    const NOOP_A = "        if ((job[G] === true) === on) { rows.push({ id: job.id, ok: true, changed: false, [G]: on, wakeGrantBy: job.wakeGrantBy || null }); continue; }";
+    const noopBehind = async (E) => {
+      const J5 = E.mkj('order noop behind');
+      st.hold = false; st.landing = true;
+      await E.eng.changeWakeGrants([{ job: J5, grant: true }], { by: PERSON });   // granted, landed
+      st.behind = { why: 'queued', ahead: 1, lastMs: 21000 };
+      const r = await E.eng.changeWakeGrants([{ job: J5, grant: true }], { by: PERSON });   // a press of what memory already says
+      st.behind = null;
+      return { ok: r.ok, code: r.code, behind: r.behind === true, row: r.rows[0] && { ok: r.rows[0].ok, code: r.rows[0].code, behind: r.rows[0].behind === true } };
+    };
+    const o5 = await noopBehind(engineOf(null));
+    ok(o5.ok === false && o5.code === 'not_now' && o5.behind === true && o5.row.code === 'not_now' && o5.row.behind === true, 'THE NO-OP WHILE BEHIND: a press of what memory already says, while the writer reports the jobs file behind, is refused not_now BY NAME (behind) — never «already as asked» from a value that may not have landed', o5);
+    const E5x = engineOf((s0) => { const s1 = anchored(s0, BEHIND_A + '\n', '', 'noop-behind-cut'); return anchored(s1, NOOP_A, NOOP_A + '\n' + BEHIND_A + '   //', 'noop-behind-below'); });   // (the no-op line's own trailing comment follows the «//»)
+    const o5x = await noopBehind(E5x);
+    ok(o5x.ok === true && o5x.row.ok === true, 'RED CONTROL (the behind refusal below the no-op, in a copy — the earlier order): «already as asked» is said while the writer is behind', o5x);
+    E5x.stop();
+    // (6h) A THROW INSIDE THE APPLY LOOP: the try opens BEFORE the loop — a later row's throw puts back what the act applied and lets its
+    // marks go (never a mark left set until a restart: the job's next act would be refused busy for ever)
+    const TRY_A = "    try {\n      for (const c of Array.isArray(changes) ? changes : []) {", TRY_B = "      if (!acted.length) return { ok: rows.every((r) => r.ok), ...refusedCode(), rows };";
+    const throwRun = async (E) => {
+      const J6 = E.mkj('order throw');
+      st.hold = false; st.landing = true;
+      const frozen = Object.freeze({ id: 'jb-frozen-row' });   // a row the apply cannot write: a throw on a LATER row of the act
+      let threw = null;
+      try { await E.eng.changeWakeGrants([{ job: J6, grant: true }, { job: frozen, grant: true }], { by: PERSON }); } catch (e) { threw = (e && e.name) || 'thrown'; }
+      const after = { field: J6[G] === true, judge: E.eng.wakeGrantOf(J6.id).granted };
+      const next = await E.eng.changeWakeGrants([{ job: J6, grant: true }], { by: PERSON });
+      return { threw, after, next: { ok: next.ok, code: next.code || null }, field: J6[G] === true };
+    };
+    const o6 = await throwRun(engineOf(null));
+    ok(o6.threw === 'TypeError' && o6.after.field === false && o6.after.judge === false && o6.next.ok === true && o6.field === true, 'A THROW ON A LATER ROW: the act throws, what it applied is put back (the job not granted, for the judge too) and its mark is let go — the job\'s next act lands', o6);
+    const E6x = engineOf((s0) => anchored(anchored(s0, TRY_A, "    for (const c of Array.isArray(changes) ? changes : []) {", 'try-after-loop-1'), TRY_B, "    try {\n" + TRY_B, 'try-after-loop-2'));
+    const o6x = await throwRun(E6x);
+    ok(o6x.threw === 'TypeError' && o6x.next.code === 'busy', 'RED CONTROL (the try opened after the loop, in a copy — the earlier shape): the earlier row\'s mark stays set after the throw — the job\'s next act is refused busy (until a restart)', o6x);
+    E6x.stop();
     // (6e) THE PANEL: its tick is not pressable while its own request is out; the door's refusals are said in the page's words
     const JP = read('src/lib/jobs-panel.js');
     const tickAt = JP.indexOf('      gcb.disabled = true;'), fetchAt = JP.indexOf("r2 = await fetchJson(`/api/jobs/${j.id}/wake-grant`");
-    ok(tickAt > 0 && fetchAt > tickAt && JP.includes('} finally { gcb.disabled = false; }') && JP.includes("if (r && r.code === 'not_now') return t(") && JP.includes("if (r && r.code === 'busy') return t("),
-      'THE PANEL: the grant\'s tick is disabled before its request leaves and enabled once it answers (a second press inside the window cannot be made there); not_now and busy are said in the page\'s words (zh, ja)');
+    ok(tickAt > 0 && fetchAt > tickAt && JP.includes('} finally { gcb.disabled = false; }') && JP.includes("if (r && r.code === 'not_now' && r.behind) return t('Not made: the storage has not taken the last change of the jobs yet, so this change was not tried") && JP.includes("if (r && r.code === 'not_now') return t('Not saved in time: the storage did not answer, so the change was put back. If the storage takes it late") && JP.includes("if (r && r.code === 'busy') return t(")
+      && /\.json\(\{ error: w\.error \|\| a\.error \|\| a\.why, code: w\.code \|\| a\.code, \.\.\.\(w\.behind \|\| a\.behind \? \{ behind: true \} : \{\}\) \}\)/.test(read('src/server/jobs-wiring.js')),
+      'THE PANEL: the grant\'s tick is disabled before its request leaves and enabled once it answers; its refusals are TWO TRUE SENTENCES in the page\'s words (zh, ja) — not landed (tried, put back, the storage may still take it late) and behind (nothing was tried, the act route says `behind`) — and busy');
     // (6f) THE FIELD'S WRITES: the grant field and its stamp are written ONLY inside the door (the apply, the put-back) — anywhere else red
     const FIELD_W = /\[(?:DW\.|D\.)?GRANT_FIELD\] ?=[^=]|\[G\] ?=[^=]|\.wakesEndedOwner ?=[^=]|\.wakeGrantBy ?=[^=]|delete [\w.]+\[(?:DW\.|D\.)?GRANT_FIELD\]|delete [\w.]+\.wakeGrantBy|delete \w+\[G\]|delete [\w.]+\.wakesEndedOwner/;
     const fieldWrites = (files) => { const out = []; for (const [f, t] of files) t.split('\n').forEach((l, i) => { if (FIELD_W.test(l)) out.push(`${f}:${l.trim().slice(0, 90)}`); }); return out; };

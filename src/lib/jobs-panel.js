@@ -356,7 +356,8 @@ function rmButton(app, j, refresh) { const b = document.createElement('button');
 
 /** the wake grant door's refusals in the page's words, by code (the hub's are English) — null: its own words stand */
 function grantRefusalWords(r) {
-  if (r && r.code === 'not_now') return t('Not saved: the storage did not take the change in time — nothing was changed. Ask again once it answers.');
+  if (r && r.code === 'not_now' && r.behind) return t('Not made: the storage has not taken the last change of the jobs yet, so this change was not tried — nothing was changed. Ask again once it answers.');   // nothing was tried
+  if (r && r.code === 'not_now') return t('Not saved in time: the storage did not answer, so the change was put back. If the storage takes it late, this row shows what holds after the next read. Ask again once it answers.');   // tried, not landed in time, put back — the storage may still take it late
   if (r && r.code === 'busy') return t('Not saved: an earlier change of this is still waiting for the storage — this one was not made. Ask again once that one answers.');
   return (r && r.error) || null;
 }
