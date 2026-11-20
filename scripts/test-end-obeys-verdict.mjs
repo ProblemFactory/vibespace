@@ -430,7 +430,7 @@ console.log('⑩ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05
   const MH = mutantCopies('store-held', REPO);
   const dropped = (anchor, tag) => MH.load('src/server/conversation-ops.js', anchored(OPS_SRC, anchor, anchor.replace(FACT, ''), tag), tag);   // the RED: that site's fact dropped
   const END_AT = "groups: gl, ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(gl)));   // + the hub's hold";   // lane lg-group-parents (restack 415): the reach takes the target's ancestors beside its groups (targetOf)
-  const LIST_AT = "webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }, lineageOfIds(";
+  const LIST_AT = "webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }, r.groupsUnreadable === true ? null : lineageOfIds(";   // lane lg-group-parents (restack 416): a row still being read is unreadable before its ancestors
   const LIVE_AT = "groups: glr || [], ...require('./groups-hold.js').fact() }, glr === null ? null : lineageOfIds(glr)));   // the hold's fact (as the end verb's)";
   const DEAD_AT = "groups: Array.isArray(d.groups) ? d.groups : [], ...require('./groups-hold.js').fact() }, d.inherited";
   const OLD = 'e2e00000-0000-4000-8000-0000000000f1';

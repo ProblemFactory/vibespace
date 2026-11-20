@@ -71,10 +71,13 @@ function create({
     const chat = !!call(turnKnown, s);
     const turn = chat ? (call(turnOf, s) || null) : null;
     const caps = call(capsOf, backend) || {};
+    // restack 416 (lane lg-group-parents, 主开发 r311 (a)): a reader that THROWS (the strict read: the membership still being read) is
+    // marked on the row — the list's and the proposal card's reach refuse it by name, never «in no group»
+    const gRead = (() => { if (typeof groupsOf !== 'function') return []; try { const g = groupsOf(s, id); return Array.isArray(g) ? g : []; } catch { return null; } })();
     const r = {
       key, ...(key ? {} : { keyWhy: 'the conversation has not reported its id yet' }),
       id, name: s.name || null, cwd: s.cwd || null, host: s.host || null, backend, mode: s.mode || 'terminal',
-      groups: (() => { const g = call(groupsOf, s, id); return Array.isArray(g) ? g : []; })(),
+      groups: gRead || [], ...(gRead === null ? { groupsUnreadable: true } : {}),
       state: 'running',
       turn, ...(chat ? (turn ? {} : { turnWhy: WHY.notCollected }) : { turnWhy: WHY.terminal }),
     };

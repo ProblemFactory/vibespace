@@ -1139,7 +1139,7 @@ console.log('⑧ THE STORE HELD UNREAD (the hold\'s law, 主开发 2026-11-19 05
   const EXC = [{ door: 'automation-key-reach', resource: 'K-1', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-G' }] }];
   const reachExc = (t) => AK.reachVerdict({ keyId: 'K-1', caller: CALLER.conversationId, target: t, reach: 'instance', reachRows: EXC });
   const FACT = ", ...require('./groups-hold.js').fact()";
-  const AT = "webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...lineageFacts(Array.isArray(r.groups) ? r.groups : [])" + FACT + " })";   // lane lg-group-parents (restack 415): the row's ancestors ride before the fact
+  const AT = "webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...lineageFacts(r.groupsUnreadable === true ? null : (Array.isArray(r.groups) ? r.groups : []))" + FACT + " })";   // lane lg-group-parents (restack 415): the row's ancestors ride before the fact
   const w = world(), wr = world({}, (src) => anchored(src, AT, AT.replace(FACT, ''), 'propose-fact-dropped'));   // the RED: the fact dropped
   for (const x of [w, wr]) x.rows.set('claude:aaaa', raw('claude:aaaa'));
   GH.setHeld(() => true);

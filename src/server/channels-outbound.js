@@ -262,7 +262,7 @@ function create(engineCtx) {
     // be read through the live rule — groupsOfSession answers [] for it); live, its live groups judge
     const groups = live ? (Array.isArray(live.groups) ? live.groups.slice() : []) : (Array.isArray(p.drafterGroups) ? p.drafterGroups.slice() : []);
     const inheritedGroups = live ? (Array.isArray(live.inherited) ? live.inherited.slice() : []) : (Array.isArray(p.drafterInherited) ? p.drafterInherited.slice() : []);   // lane lg-group-parents U3c
-    return stillSees({ kind: 'agent', id: String(d.id), name: d.name || null, groups, inheritedGroups, ...(!live && p.drafterGroupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, p.adapterId, scopeConvOf(p));   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3): an ended drafter's recorded groups were refused while held at the base)
+    return stillSees({ kind: 'agent', id: String(d.id), name: d.name || null, groups, inheritedGroups, ...((!live && p.drafterGroupsUnreadable === true) || (live && (live.inherited === null || live.groupsUnread === true)) ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' }, p.adapterId, scopeConvOf(p));   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3): an ended drafter's recorded groups were refused while held at the base)
   }
   /**
    * WHAT WAITS IN AN AGENT'S NEXT-TURN STASH IS RE-JUDGED WHEN IT IS READ (lane channel-threads verify r3, IDENTITY —
@@ -306,7 +306,7 @@ function create(engineCtx) {
       // a list recorded while held keeps its mark while the recipient is STOPPED (no live membership to read); live, its live groups judge
       const groups = live ? (Array.isArray(live.groups) ? live.groups.slice() : []) : (Array.isArray(a.groups) ? a.groups.map(String) : []);
       const inheritedGroups = live ? (Array.isArray(live.inherited) ? live.inherited.slice() : []) : (Array.isArray(a.inherited) ? a.inherited.map(String) : []);   // lane lg-group-parents U3c
-      const ctx = { kind: 'agent', id: String(cid), name: null, groups, inheritedGroups, ...(!live && a.groupsUnreadable === true ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3))
+      const ctx = { kind: 'agent', id: String(cid), name: null, groups, inheritedGroups, ...((!live && a.groupsUnreadable === true) || (live && (live.inherited === null || live.groupsUnread === true)) ? { groupsUnreadable: true } : {}), ...require('./groups-hold.js').fact(), msgLevelFor: () => 'none' };   // the hold rides EVERY group list — read now or recorded (主开发 05:42Z (3))
       const gk = `${ctx.groupsUnreadable === true ? '?' : ''}${groups.join('\u0000')}` + '\u0002' + inheritedGroups.join('\u0000');   // the mark is part of the answer (the delta read: a marked and an unmarked entry shared a verdict)
       const seesKey = (adapterId, convId) => {
         const mk = `${gk}\u0001${adapterId}\u0001${convId === null ? '' : convId}`;

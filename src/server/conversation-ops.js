@@ -496,8 +496,9 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
     return { ...r, ended: { ...r.ended, by: mine ? { kind: 'agent', actorId: by.actorId, name: by.name ? beltRow({ name: by.name }).name : null, ...(by.forced ? { forced: true } : {}) } : { kind: by.kind === 'agent' ? 'agent' : 'person' } } };
   };
   const groupsOfLive = (s, id) => { try { return groupsOf(s, id) || []; } catch { return null; } };   // the chain's cure (the U3d should): null = could not be read (unreadable, never «no groups»)
-  // lane lg-group-parents U3d: the ONE reader's ancestors; a read that throws (or answers no list) is null = UNREADABLE (its read, 2)
-  const lineageOfIds = (ids) => { if (typeof lineageOf !== 'function') return []; try { const l = lineageOf(ids); return Array.isArray(l) ? l : null; } catch { return null; } };
+  // lane lg-group-parents U3d: the ONE reader's ancestors; a read that throws (or answers no list) is null = UNREADABLE (its read, 2);
+  // restack 416 (r311 (b)): the ancestors of no group are none — groups with NO reader wired are unknown (a forgotten wiring fails closed)
+  const lineageOfIds = (ids) => { if (Array.isArray(ids) && !ids.length) return []; if (typeof lineageOf !== 'function') return null; try { const l = lineageOf(ids); return Array.isArray(l) ? l : null; } catch { return null; } };
   const targetOf = (base, inh) => ({ ...base, inherited: Array.isArray(inh) ? inh : [], ...(Array.isArray(inh) ? {} : { groupsUnreadable: true }) });
   /** The target, if the key reaches it → [s, id] | a named refusal (carrying the target's name for the owner's notice). */
   function reached(target, { caller, reach }) {
@@ -620,7 +621,7 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
         const self = !!r.key && r.key === selfKey;
         const cid = r.key ? r.key.slice(r.key.indexOf(':') + 1) : null;
         let v = null;
-        if (!self) { try { v = reach(targetOf({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }, lineageOfIds(Array.isArray(r.groups) ? r.groups : []))); } catch { v = null; } }   // the hold's fact: while the store is held a row's groups are UNKNOWN (a grant «… except G» never lists it)   // lane lg-group-parents (restack 415): + the row's ancestors — a grant naming a parent group lists its child's conversation, «… except P» never does; a lineage that cannot be read is unreadable (said in beyondWhy)
+        if (!self) { try { v = reach(targetOf({ conversationId: cid, webuiId: r.id || null, groups: Array.isArray(r.groups) ? r.groups : [], ...require('./groups-hold.js').fact() }, r.groupsUnreadable === true ? null : lineageOfIds(Array.isArray(r.groups) ? r.groups : []))); } catch { v = null; } }   // the hold's fact: while the store is held a row's groups are UNKNOWN (a grant «… except G» never lists it)   // lane lg-group-parents (restack 415): + the row's ancestors — a grant naming a parent group lists its child's conversation, «… except P» never does; a lineage that cannot be read is unreadable (said in beyondWhy)
         if (self || (v && v.ok)) rows.push(self ? { ...r, self: true } : beltRow(r)); else beyond++;
         if (!self && v && v.code === 'groups_unreadable') heldOut++;   // a held refusal is SAID in the answer (beyondWhy), never a silent «beyond reach»
       }

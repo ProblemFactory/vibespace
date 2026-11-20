@@ -225,7 +225,6 @@ require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, 
 // lane key-grant-everyone r2: a read that failed is SAID (`unreadable`) — the caller's groups judge a Task Group «除了», and []
 // would admit the conversation the owner left out of All agents (the engine refuses groups_unreadable instead)
 const automationGroupsRead = (s, id) => { const tasks = getTasks && getTasks(); if (!tasks || !sessionStatusKey) return { ids: [], unreadable: true }; try { const ids = grantMemberIds(tasks, { sessionKey: sessionStatusKey(s, id), cwd: s.cwd, hostId: s.host || null, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }); const gg = tasks.grantGroupsOf(ids); return { ids: gg.ids, inherited: gg.inherited, unreadable: !!ids.unread }; } catch { return { ids: [], unreadable: true }; } };   // held ⇒ throws: unreadable; B-55dc ⇒ unreadable (lane bl-windows seam) · lane lg-group-parents U3d: + the lineage over the same ids (the ONE reader)
-const automationGroupsOf = (s, id) => automationGroupsRead(s, id).ids;
 // the chain's cure (the U3d read's should): a REACH target whose Task Groups could not be read throws — conversation-ops reads it
 // UNREADABLE (it was «in no group»: a parent's or its own group's «除了» was not applied to it)
 const automationGroupsStrict = (s, id) => { const g = automationGroupsRead(s, id); if (g.unreadable) throw new Error('the Task Groups could not be read'); return g.ids; };
@@ -283,7 +282,7 @@ function endedKeyOf(target) {
   let groups = [];
   try { groups = tasks ? tasks.groupsForSession({ sessionKey }).map((g) => g.id) : []; } catch { groups = []; }
   let inherited = [];   // lane lg-group-parents U3d: a stopped target's lineage too (restack 415: deadOf's body moved here)
-  try { inherited = tasks ? tasks.grantGroupsOf(groups).inherited : []; } catch { inherited = null; }   // null = could not be read (the reach refuses by name)
+  try { inherited = tasks ? tasks.grantGroupsOf(groups).inherited : null; } catch { inherited = null; }   // null = could not be read (the reach refuses by name); restack 416 (r311 (d)): no store ready ⇒ unknown, as the two hooks beside it
   return { conversationId: cid, sessionKey, name, groups, inherited };
 }
 const isArchivedKey = (key) => !!(persistenceRouter && typeof persistenceRouter.isArchived === 'function' && persistenceRouter.isArchived(key));   // persistence's ONE reader (in memory; a bare-id entry answers too)
@@ -313,7 +312,7 @@ const deliveryWake = require('./delivery-wake.js').create({ resumeLine, seams: d
 if (deliver && typeof deliver.registerEndedWake === 'function') deliver.registerEndedWake((cid, entry) => deliveryWake.onEndedWake(cid, entry));
 // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder — hoisted (lane login-request-card, majordomo piece
 // 3b): the proposal card's rows come from the SAME builder as the list
-const listFacts = (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsOf, ...CFX.sourcesFrom({
+const listFacts = (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsStrict /* restack 416 (r311 (a)): a membership still being read THROWS — the row says so */, ...CFX.sourcesFrom({
       hosts,   // B-24e2: a paired machine is asked for its own binary's background signal
       getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
       autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
@@ -360,7 +359,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder over the hub's in-memory facts
     listFacts, proposals: endProposals }),
     // the manager design's piece 7: jobs.wakeGrant — a key holding it sets a job's grant to resume an on-purpose-ended conversation
-    ...require('./delivery-wake.js').automationVerbs({ jobs: () => (deliveryWakeDeps().jobs || (() => null))(), groupsOf: (cid) => { const k = endedKeyOf(cid); return (k && Array.isArray(k.groups)) ? k.groups : []; }, lineageOf: (cid) => { const k = endedKeyOf(cid); return k ? k.inherited : []; }, keyNameOf: (id) => { const L = automation.list(); const arr = Array.isArray(L) ? L : (L && L.keys) || []; const k = arr.find((x) => x && x.id === id); return (k && k.name) || null; } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
+    ...require('./delivery-wake.js').automationVerbs({ jobs: () => (deliveryWakeDeps().jobs || (() => null))(), ownerFactsOf: (cid) => { const k = endedKeyOf(cid); return k ? { groups: Array.isArray(k.groups) ? k.groups : [], inherited: k.inherited, ...(k.inherited === null ? { groupsUnreadable: true } : {}) } : null; }, keyNameOf: (id) => { const L = automation.list(); const arr = Array.isArray(L) ? L : (L && L.keys) || []; const k = arr.find((x) => x && x.id === id); return (k && k.name) || null; } }), ...require('./feedback-store.js').automationVerbs({ store: feedback }) },
   openFacts: { defaults: (backend) => require('./conversation-ops.js').openDefaults(backend, { accounts: getAccounts(), ...automationSettings }),
     // lane automation-open-permission-resolve (q-049 M2): the CLI's own permission mode for the judged folder (its project layer follows it)
     permissionDefault: (cwd, backend) => require('./permission-rules.js').resolveDefaultMode({ backend, cwd }),
