@@ -65,6 +65,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When the record of your paired machines cannot be read, they are kept and read again, and the Machines list says why it is empty; they used to be lost.
 - When the record of your mounts briefly cannot be read, the mounts and their access are kept and read again; they used to be lost at the next change.
 - When the Background Work notices waiting for your conversations briefly cannot be read, they are kept and delivered later; they used to be lost.
+- If the desktop apps' record file can't be read, VibeSpace no longer overwrites it; opening or stopping an app says why until it reads again.
+- When For you cannot read its saved list, it now says so and changes nothing until the list reads again, instead of starting empty.
 
 ### Security
 - A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.
