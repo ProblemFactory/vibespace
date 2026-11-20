@@ -20,7 +20,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser, realClickMeasureSource, realClicker, armProbeSource, armStep, lostWords, pageSceneSource, sceneWords } from './scratch.mjs';
+import { STILL_MOVERS, stillVerdict, landingVerdict, stillLookSource, stillPresser, realClickMeasureSource, realClicker, armProbeSource, armStep, lostWords, pageSceneSource, sceneWords, SCENE_BOUNDS } from './scratch.mjs';
 import vm from 'node:vm';
 import { SUITES } from './ci.mjs';
 const t0 = Date.now();
@@ -378,6 +378,15 @@ console.log('⑧ the door says what it saw — a cover by its element, a zero bo
     && sw[5] === 'window win-6 chat «proj6» conversation sid-6 (a tab of win-5) — ON SHOW [850,90 400×270] · nothing over its middle'
     && sw[6] === 'open over the page: div#user-todos-popup.ut-popup [100,280 420×300] · div.global-toast [900,700 360×60]',
     'the PAGE AS IT STANDS: which conversation each chat window shows (a tab by its group), which are on show (or every reason not), what stands over a shown one — the popup itself, never #main-wrapper that holds it — and what is open over the page', sw);
+  // the words are BOUNDED (the coordinator's 04:30Z follow-up — any suite may print a scene): a title, each named element, the windows, the open list
+  const B = SCENE_BOUNDS, longT = 'T'.repeat(300), el = (i) => `div.x${i} [0,0 10×10]`;
+  const big = { page: 'visible, focused', size: '1280×820', desktop: 'd-1', open: Array.from({ length: 20 }, (_, i) => el(i)),
+    windows: Array.from({ length: 15 }, (_, i) => ({ id: 'w' + i, type: 'chat', title: longT, conv: null, onShow: true, box: '[0,0 1×1]', active: false, why: [], over: Array.from({ length: 6 }, (_, j) => el(j)) })) };
+  const bw = sceneWords(big), w0 = bw[1];
+  ok(bw.length === 1 + B.windows + 1 + 1 && w0.includes('«' + 'T'.repeat(B.title - 1) + '…»') && !w0.includes('T'.repeat(B.title)) && w0.endsWith(`${el(3)} · 2 more`)
+    && bw[1 + B.windows] === `${15 - B.windows} more window(s)` && bw[bw.length - 1] === `open over the page: ${Array.from({ length: B.open }, (_, i) => el(i)).join(' · ')} · ${20 - B.open} more`
+    && /«T{79}…»/.test(lostWords({ laid: false, size: '0×0', hiddenBy: null, win: { id: 'w', type: 'chat', title: longT, onShow: true, why: [] } })),
+    `a scene's words are BOUNDED: a title at ${B.title} characters (the cut said «…»), ${B.windows} windows, ${B.over} elements over one, ${B.open} open things — the rest counted, never printed (the door's own sentence too)`, bw.map((l) => l.length));
   ok(sceneWords({ error: 'x' })[0] === '(the page could not be read: x)' && W8.run(pageSceneSource(), { stack: [], open: [] }).windows.length === 5, 'a page that cannot be read says so; the scene reads the window manager\'s windows');
 }
 {

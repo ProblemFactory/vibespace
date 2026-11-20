@@ -130,7 +130,7 @@ process.stdin.on('end', () => process.exit(0));
      *  made (a press made that MISSED), why (the door's last words), front (the door brought the page to the front), scene (the page
      *  as it stood at the call's FIRST miss, after that try's own uncover and front — scratch.mjs pageSceneSource) }, null after
      *  a press that was made; nothing is printed here (a suite prints it at its first red leg — `scene(names)` reads the page now). */
-    const SETTLE_MS = 4000;
+    const SETTLE_MS = 4000, SCENE_MS = 1000;
     const RC = realClicker({ evalJs, cdp });
     const clearToasts = () => evalJs(`document.querySelectorAll('#global-toasts > .global-toast').forEach((el) => { if (!el.contains(window.__vsRealClickEl)) el.remove(); }); true`);   // a toast that HOLDS the target (an Undo) stays
     const scene = (names = {}) => evalJs(pageSceneSource({ names })).catch((x) => ({ error: String((x && x.message) || x) }));
@@ -142,7 +142,9 @@ process.stdin.on('end', () => process.exit(0));
         const pressed = await RC(sel, { scroll: 'nearest', aimLeft: 40, stillMs: SETTLE_MS, uncover: clearToasts }); front = front || !!RC.front;
         if (pressed) { await sleep(150); return true; }
         const miss = RC.lastMiss;
-        if (!firstMiss) firstMiss = await scene();   // the page as it stood at this call's FIRST miss (read only)
+        // the page as it stood at this call's FIRST miss (read only) — never for «no such element» (nothing to place: a caller that polls
+        // until an element appears pays nothing), and bounded: SCENE_MS or what is left of the call's budget, whichever is less
+        if (!firstMiss && miss !== null) { const left = Math.min(SCENE_MS, ms - (Date.now() - t0)); if (left > 0) firstMiss = await Promise.race([scene(), sleep(left).then(() => ({ error: `the page did not answer in ${left} ms` }))]); }
         if (RC.landed || miss === null || /never held still/.test((miss && miss.why) || '') || Date.now() - t0 > ms) {
           realClick.lastGiveUp = { sel: String(sel), tries, ms: Date.now() - t0, made: !!RC.landed, why: miss === null ? 'no such element on the page' : (miss && miss.why) || 'no reason given', front, scene: firstMiss };
           return false;

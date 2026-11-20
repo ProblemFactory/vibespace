@@ -200,7 +200,7 @@ export function lostWords(m) {
   if (m.gone) return m.gone === 'no target' ? 'no target' : `it left the page (${m.gone})`;
   const w = m.win;
   if (m.sayErr && m.laid !== false) return `the page could not say why (${m.sayErr}); under its point: ${m.hit || 'nothing'}`;
-  const where = w ? `in window ${w.id || '(no id)'} (${[w.type, w.title ? `«${w.title}»` : null, w.conv ? `conversation ${w.conv}` : null, w.tabOf ? `a tab of ${w.tabOf}` : null].filter(Boolean).join(', ') || 'no window record'}${w.box ? ' ' + w.box : ''}), on show: ${w.onShow ? 'yes' : `no — ${(w.why || []).join(', ')}`}` : 'in no window';
+  const where = w ? `in window ${w.id || '(no id)'} (${[w.type, w.title ? `«${clipWords(w.title, SCENE_BOUNDS.title)}»` : null, w.conv ? `conversation ${w.conv}` : null, w.tabOf ? `a tab of ${w.tabOf}` : null].filter(Boolean).join(', ') || 'no window record'}${w.box ? ' ' + w.box : ''}), on show: ${w.onShow ? 'yes' : `no — ${(w.why || []).join(', ')}`}` : 'in no window';
   if (m.laid === false) return `NOT LAID OUT (${m.size}) — ${m.hiddenBy ? `hidden by ${m.hiddenBy}` : m.sayErr ? `the page could not say what hides it (${m.sayErr})` : 'no ancestor hides it (an empty box)'} — ${where}`;
   if (m.hiddenBy) return `HIDDEN by ${m.hiddenBy} — ${where}; under its point: ${m.hit || 'nothing'}`;
   return `covered by ${m.hit || 'nothing'} — ${where}`;
@@ -223,19 +223,27 @@ export function pageSceneSource({ names = {} } = {}) {
       if (s.onShow && frame && typeof document.elementsFromPoint === 'function') { const c = (w.content || frame).getBoundingClientRect(); const l = Math.max(c.left, 0), r = Math.min(c.left + c.width, innerWidth), t = Math.max(c.top, 0), b = Math.min(c.top + c.height, innerHeight); if (!(r > l && b > t)) s.over.push('(its middle is off the page)'); else { const seen = new Set(); for (const n of document.elementsFromPoint((l + r) / 2, (t + b) / 2)) { if (frame.contains(n)) break; const k = top(n, frame); if (!seen.has(k)) { seen.add(k); s.over.push(desc(k)); } if (s.over.length >= 4) break; } } }
       out.windows.push(s);
     }
-    for (const n of document.querySelectorAll('#user-todos-popup, .dialog-overlay, [data-popover], .context-menu, .taskbar-context-menu, #global-toasts > .global-toast')) { const q = n.getBoundingClientRect(); if (q.width > 0 && q.height > 0 && !hider(n)) out.open.push(desc(n)); }
+    for (const n of document.querySelectorAll('#user-todos-popup, .dialog-overlay, [data-popover], .context-menu, .taskbar-context-menu, #global-toasts > .global-toast')) { const q = n.getBoundingClientRect(); if (out.open.length < 40 && q.width > 0 && q.height > 0 && !hider(n)) out.open.push(desc(n)); }
     return out; } catch (x) { return { error: String((x && x.message) || x) }; } })()`;
 }
-/** PURE: a scene (pageSceneSource's answer) → lines a log reads. */
+/** PURE: a string cut to `n` characters, the cut said («…») — every page-made word a log prints goes through it */
+export const clipWords = (s, n = 80) => { const t = String(s == null ? '' : s); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
+export const SCENE_BOUNDS = Object.freeze({ title: 80, item: 160, windows: 12, open: 6, over: 4 });
+/** PURE: a scene (pageSceneSource's answer) → lines a log reads, BOUNDED (SCENE_BOUNDS: a title, each named element, the windows, the
+ *  open list — a cut list says how many more). */
 export function sceneWords(sc) {
+  const B = SCENE_BOUNDS, more = (list, n) => (list.length > n ? [...list.slice(0, n), `${list.length - n} more`] : list);
   if (!sc) return ['(no scene was read)'];
-  if (sc.error) return [`(the page could not be read: ${sc.error})`];
-  const lines = [`page: ${sc.page} · ${sc.size}${sc.desktop ? ` · desktop ${sc.desktop}` : ''} · ${sc.windows.length} window(s)`];
-  for (const w of sc.windows) {
-    const what = [w.type, w.title ? `«${w.title}»` : null, w.conv ? `conversation ${w.conv}${w.name ? ` (${w.name})` : ''}` : null, w.tabOf ? `(a tab of ${w.tabOf})` : null].filter(Boolean).join(' ');
-    lines.push(`window ${w.id} ${what} — ${w.onShow ? `ON SHOW ${w.box}${w.active ? ', active' : ''}${w.over && w.over.length ? ` · over its middle: ${w.over.join(' · ')}` : ' · nothing over its middle'}` : `NOT on show: ${(w.why || []).join(', ')}`}`);
+  if (sc.error) return [`(the page could not be read: ${clipWords(sc.error, B.item)})`];
+  const wins = Array.isArray(sc.windows) ? sc.windows : [];
+  const lines = [`page: ${clipWords(sc.page, B.item)} · ${clipWords(sc.size, 20)}${sc.desktop ? ` · desktop ${clipWords(sc.desktop, B.title)}` : ''} · ${wins.length} window(s)`];
+  for (const w of wins.slice(0, B.windows)) {
+    const what = [w.type, w.title ? `«${clipWords(w.title, B.title)}»` : null, w.conv ? `conversation ${w.conv}${w.name ? ` (${w.name})` : ''}` : null, w.tabOf ? `(a tab of ${w.tabOf})` : null].filter(Boolean).join(' ');
+    lines.push(clipWords(`window ${w.id} ${what} — ${w.onShow ? `ON SHOW ${w.box}${w.active ? ', active' : ''}${w.over && w.over.length ? ` · over its middle: ${more(w.over.map((x) => clipWords(x, B.item)), B.over).join(' · ')}` : ' · nothing over its middle'}` : `NOT on show: ${(w.why || []).map((x) => clipWords(x, B.item)).join(', ')}`}`, 4 * B.item));
   }
-  lines.push(sc.open && sc.open.length ? `open over the page: ${sc.open.join(' · ')}` : 'open over the page: nothing');
+  if (wins.length > B.windows) lines.push(`${wins.length - B.windows} more window(s)`);
+  const open = Array.isArray(sc.open) ? sc.open : [];
+  lines.push(open.length ? `open over the page: ${more(open.map((x) => clipWords(x, B.item)), B.open).join(' · ')}` : 'open over the page: nothing');
   return lines;
 }
 

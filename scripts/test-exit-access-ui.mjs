@@ -40,7 +40,7 @@ let pass = 0, fail = 0;
 // hosted tries and could not be placed: the door said «covered … by DIV.» and nothing of the page). At the first red leg the suite
 // prints, for page P: the last press NOT made (the door's own words — a cover by its tag, id, classes and box; a zero box NOT LAID OUT
 // with what hides it and the window it sits in), whether the door brought P to the front for it, the page as it stood at that press's
-// first miss, and the page now — which conversation each chat window shows, which are on show (or every reason not), what stands
+// first miss, and the page soon after the red — which conversation each chat window shows, which are on show (or every reason not), what stands
 // over each and what is open over the page (the For-you popup, a dialog, a popover, a toast). Once — the first red AFTER P opens (an
 // earlier red there takes it; the door's own line still prints at every press); read only — no leg changes.
 let PAGE = null, NAMES = {}, firstRedSaid = null;
@@ -52,7 +52,8 @@ const sayFirstRed = async (leg) => {
       lines.push(`the last press ${g.made ? 'MADE AND MISSED' : 'NOT made'}: ${g.sel.length > 200 ? g.sel.slice(0, 200) + '…' : g.sel}`, `  ${g.tries} tries in ${g.ms} ms${g.front ? ' — the door brought P to the front for it' : ''} — ${g.why}`);
       lines.push(...sceneWords(g.scene).map((l) => `  at its first miss (after that try's own uncover and front): ${l}`));
     } else lines.push('the last press on P was made (or none was asked since)');
-    lines.push(...sceneWords(await PAGE.scene(NAMES)).map((l) => `  now: ${l}`));
+    // asked inside the red leg's own ok() — before the next leg's first request — and answered while the next legs start: «soon after the red»
+    lines.push(...sceneWords(await PAGE.scene(NAMES)).map((l) => `  soon after the red: ${l}`));
     console.log(lines.map((l) => '    ' + l).join('\n'));
   } catch (x) { console.log(`    [the first red leg on page P: ${leg}] — the page could not be read: ${(x && x.message) || x}`); }
 };
