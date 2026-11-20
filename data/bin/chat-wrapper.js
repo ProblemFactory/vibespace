@@ -221,7 +221,11 @@ let lineBufB = Buffer.alloc(0); // accumulator for partial lines (Buffer — byt
 
 function persistBuffer() {
   writeTimer = null;
-  try { fs.writeFileSync(bufferFile, buffer); } catch {}
+  // B-5a4d (its reader): tmp + rename, as the sidecar — a hub that restarts reads this file once, and a person's CLI follows it by
+  // its path: a reader sees the whole old file or the whole new one, never a truncated one mid-write (write-through made it often)
+  const tmp = `${bufferFile}.${process.pid}.tmp`;
+  try { fs.writeFileSync(tmp, buffer); fs.renameSync(tmp, bufferFile); }
+  catch (e) { try { fs.unlinkSync(tmp); } catch {} if (!persistBuffer.said) { persistBuffer.said = true; log(`history buffer write failed: ${e.message}`); } }
 }
 
 function schedulePersist() {
@@ -278,11 +282,35 @@ function sendChild(line) { // line WITHOUT trailing \n
 // A record THIS wrapper says: a top-level JSON line into the history buffer AND
 // onto stdout, exactly like a CLI line (the server's claude consumer passes it
 // to the normalizer; the put-back door reads `queue_dropped` at its gate).
+// B-5a4d (the coordinator's law 2026-11-20, the stores' own): WHAT THE NEXT LIFE NEEDS TO DRAW A PERSON'S HELD MESSAGE IS ON DISK
+// BEFORE THE PAGE IS TOLD. A hub that restarts reads this file ONCE (src/server/boot-restore.js) and a held copy never rides stdout
+// (recordPersonFrame), so the queue's own records — a hold, an edit, a removal, a hand-over, a drain, Stop's drop — are written
+// THROUGH (the copy beside them with them) before they are said; every other line keeps the 2 s timer.
+const DURABLE_RECORDS = new Set(['queue_changed', 'queued_input', 'queue_op_result', 'queue_dropped', 'input_handover', 'queue_settle', 'rewind_out']);
+function persistNow() {
+  if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+  persistBuffer();
+}
+// ONE WRITE PER INPUT (its readers): a chunk of the CLI's stdout, or a chunk of stdin, is handled whole — every interrupt it owes
+// the CLI goes out INSIDE it, as before — then the file is written ONCE if a line in it changes what the conversation is, and only
+// then are its lines said upward, in their order. On disk before said; never N full rewrites before a Stop reaches the CLI, nor one
+// between an interrupted result and the follow-up's init that is interrupted in the same tick.
+let batchDepth = 0, batchOut = [], durableDue = false;
+function say(line) { if (batchDepth) batchOut.push(line); else { try { process.stdout.write(line + '\n'); } catch {} } }
+function beginBatch() { batchDepth++; }
+function endBatch() {
+  if (--batchDepth > 0) return;
+  if (durableDue) { durableDue = false; trimBuffer(); persistNow(); }
+  const out = batchOut; batchOut = [];
+  if (out.length) { try { process.stdout.write(out.join('\n') + '\n'); } catch {} }
+}
+/** the line just appended changes what the conversation is: in the file before it is said (at the batch's end, or now) */
+function durable() { if (batchDepth) durableDue = true; else { trimBuffer(); persistNow(); } }
 function record(type, fields = {}) {
   const line = JSON.stringify({ type, ...fields });
   buffer += line + '\n';
-  schedulePersist();
-  try { process.stdout.write(line + '\n'); } catch {}
+  if (DURABLE_RECORDS.has(type)) durable(); else schedulePersist();
+  say(line);
 }
 
 // THE TURN GATE — the predicate that decides held vs forwarded (every number measured on 2.1.308, a local mock; the rows
@@ -1188,9 +1216,14 @@ function processLine(line) {
     }
   }
 
-  // Append to buffer and tee to stdout
+  // Append to buffer and tee to stdout. B-5a4d (the coordinator's law 2026-11-20 08:14Z): A LINE THAT CHANGES WHAT THE CONVERSATION
+  // IS is in the file before it is said — a turn that STARTED (its init, a state word), a turn that ENDED (its result, a compaction's
+  // boundary): a hub that restarts in the timer's window drew a turn with no end (the page «still working») or a running turn as
+  // idle (a state word lost; a text-only turn sends nothing that says it runs until its end). The lines that only fill a turn (its
+  // text, a tool's output) keep the timer: the stream brings the next ones and the file catches up.
   buffer += line + '\n';
-  try { process.stdout.write(line + '\n'); } catch {}
+  if (msg && (msg.type === 'result' || (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'session_state_changed' || msg.subtype === 'compact_boundary')))) durable();
+  say(line);
   // …and only THEN the next held frame: the turn end is on the wire before the queue that follows it (not while the CLI
   // still owes a turn for frames handed to the one that just ended — drainPromptQueue waits for that turn)
   if (turnEnded) drainPromptQueue();
@@ -1227,6 +1260,8 @@ function startChild() {
   // Buffer-based splitting: offsets must be BYTE-exact across reconnects, and
   // a chunk boundary may split a multibyte char — only complete lines decode.
   child.stdout.on('data', (chunk) => {
+    beginBatch();
+    try {
     if (OFFSET_MODE) {
       remoteOffset += chunk.length;
       if (meta.remote?.state !== 'connected') {
@@ -1248,6 +1283,7 @@ function startChild() {
     // Trim buffer if too large (keep last MAX_BUFFER chars, aligned to line boundary)
     trimBuffer();
     schedulePersist();
+    } finally { endBatch(); }
   });
 
   // Child stderr → log + kept as the LAST ERROR the UI can show. "host
@@ -1420,13 +1456,13 @@ const looksLikeFrame = (line) => line[0] === '{' || line.endsWith('}') || /"[\w-
 function ackLine(id, receipt) {
   const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(id ? { msg_id: String(id) } : {}) };
   if (receipt) writeReceipt(ack);
-  try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
+  say(JSON.stringify(ack));
 }
 function nackTorn(line) {
   log(`stdin line unparseable (${line.length} bytes, starts ${JSON.stringify(line.slice(0, 48).replace(/\s+/g, ' '))}) — refused, NOT sent to claude`);
   const nack = { type: '_stdin_nack', timestamp: Date.now(), reason: 'torn', bytes: line.length };
   writeReceipt(nack);                                                        // the sender's receipt — never a replayed record
-  try { process.stdout.write(JSON.stringify(nack) + '\n'); } catch {}       // the pipe is alive (the server's detector)
+  say(JSON.stringify(nack));       // the pipe is alive (the server's detector)
   record('system', { subtype: 'informational', level: 'warning', content: `A message did not reach Claude: its line arrived corrupted (${line.length} bytes, unparseable — two senders at once, or a dropped byte). Please send it again.` });
 }
 let stdinLineBuf = '';
@@ -1435,6 +1471,8 @@ try {
   process.stdin.resume();
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (data) => {
+    beginBatch();
+    try {
     stdinLineBuf += data;
     let nlIdx;
     while ((nlIdx = stdinLineBuf.indexOf('\n')) !== -1) {
@@ -1465,7 +1503,7 @@ try {
         // restart-rebuilt history keeps the resolution.
         if (parsed.type === 'control_response') {
           buffer += line + '\n';
-          schedulePersist();
+          durable();   // B-5a4d: an answered permission changes what the conversation is — in the file before anything follows it
         }
         // Large-frame FILE BYPASS (2.360.0, the 79928a2b 38MB poisoning): a
         // multi-MB single line does NOT survive the pty/dtach stdin channel
@@ -1517,6 +1555,7 @@ try {
         log(`stdin frame not handled (${e && e.message}) — a parsed frame is never re-sent as text`);
       }
     }
+    } finally { endBatch(); }
   });
 } catch (err) {
   log(`stdin setup failed: ${err.message}`);

@@ -1143,14 +1143,14 @@ else {
     srv.stdout.on('data', (d) => { journal = (journal + d).slice(-8000); }); srv.stderr.on('data', (d) => { journal = (journal + d).slice(-8000); });
   };
   // ⑧ a server restart: SIGTERM (its sessions live on in their own processes — the product's promise), its exit awaited
-  const restartServer = async () => {
+  const stopServer = async () => {
     const s = srv; const exited = new Promise((r) => s.once('exit', r));
     try { s.kill('SIGTERM'); } catch { }
     const t = setTimeout(() => { try { s.kill('SIGKILL'); } catch { } }, 8000);
     await exited; clearTimeout(t); procs.delete(s);
-    startServer();
-    return until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 200);
   };
+  const serverBack = () => until(async () => (await fetch(`http://127.0.0.1:${PORT}/api/home`)).ok, 60000, 200);
+  const restartServer = async () => { await stopServer(); startServer(); return serverBack(); };
   startServer();
   const fontEnv = runnerFontEnv(scratchDir('cst-fonts'));
   const chrome = spawn(CHROME, [...CHROME_STORE, '--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--window-size=1400,950', '--disable-background-timer-throttling', `--user-data-dir=${chromeDir}`, 'about:blank'], { stdio: 'ignore', env: { ...envNoBus, ...fontEnv } });
@@ -1210,10 +1210,15 @@ else {
   const capFrames = () => (fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
   const cliGot = (t) => capFrames().some((f) => f.type === 'user' && S(f).includes(t));
   const delivered = () => (fs.existsSync(dlv) ? fs.readFileSync(dlv, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }) : []);
+  /** the wrapper's history FILE of the session whose lines name `t` — read at a made restart's instant (B-5a4d: what a hub
+   *  restarting then reads; the page alone cannot tell the cure from the base — the old hub's exit and the boot outlast the timer) */
+  const wrapperFile = (t) => { const d = path.join(wt, 'data', 'session-buffers'); let names = []; try { names = fs.readdirSync(d).filter((f) => f.endsWith('.buf')); } catch { }
+    for (const f of names) { let text = ''; try { text = fs.readFileSync(path.join(d, f), 'utf8'); } catch { } if (text.includes(t)) return text.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } }); }
+    return []; };
   /** ⑧'s evidence on a red: the wrapper's queue records of a message, from every session buffer of the scratch server */
   const queueRecs = (t) => { const d = path.join(wt, 'data', 'session-buffers'), out = []; let names = []; try { names = fs.readdirSync(d).filter((f) => f.endsWith('.buf')); } catch { }
     for (const f of names) { let lines = []; try { lines = fs.readFileSync(path.join(d, f), 'utf8').split('\n'); } catch { }
-      for (const l of lines) { if (!l.includes(t)) continue; let x = null; try { x = JSON.parse(l); } catch { continue; } if (/^(queued_input|queue_changed|queue_dropped|queue_settle|input_handover|user)$/.test(x.type)) out.push({ buf: f, type: x.type, state: x.state || null, msgId: x.msg_id || x.webui_msg_id || null, items: Array.isArray(x.items) ? x.items.length : undefined }); } }
+      for (const l of lines) { if (!l.includes(t)) continue; let x = null; try { x = JSON.parse(l); } catch { continue; } if (/^(queued_input|queue_changed|queue_dropped|queue_settle|input_handover|user)$/.test(x.type)) out.push({ buf: f, type: x.type, state: x.state || null, msgId: x.msgId || x.msg_id || x.webui_msg_id || null, ...(x.webui_copy ? { webui_copy: true, handNo: x.handNo } : {}), items: Array.isArray(x.items) ? x.items.length : undefined }); } }
     return out; };
   const focus = (key) => ev(`(() => { const t = window.__${key}._chatInput._textarea; t.focus(); return document.activeElement === t; })()`);
   const key = async (k, modifiers = 0) => {
@@ -1425,6 +1430,85 @@ else {
     await sleep(600);
     const eAfter = await bubbles('v1', 'PHONE-E');
     ok(S(eAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), '⑧ …and when the turn ended it ran — still one bubble', { eAfter, ...ev8() });
+    // ⑧c (B-5a4d — the coordinator's law 2026-11-20, THE MADE RESTART): a hub that restarts 50 ms after a hold is SAID (its strip row
+    // shows) reads the wrapper's file once — the held copy and its queue record must already be in it. The page then draws the held
+    // message «Queued» with its strip row, and once the turn ends it ran: ONE bubble, no chip, the page idle. Placed by the leg's own
+    // stall (the LONGER turn held by its release), never by load; the page is left as it was found (idle, no phone metrics)
+    await waitTurnEnd('v1', 20000);
+    fs.rmSync(release8, { force: true });   // the next LONGER turn waits for the leg again
+    await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+    await sleep(800);
+    await focus('v1'); await cdp('Input.insertText', { text: 'TOOL-4 LONGER- a turn the hub restarts inside' });
+    await realClick('[data-steer-leg="v1"] .chat-send-btn');
+    await until(() => streaming('v1'), 10000, 100);
+    await sleep(400);
+    await focus('v1'); await cdp('Input.insertText', { text: 'PHONE-H held, then the hub restarts at +50 ms' });
+    const heldH = await realClick('[data-steer-leg="v1"] .chat-hold-btn');
+    const saidH = await until(async () => (await ev(STRIP('v1'))).visible, 6000, 10);   // the hold SAID: the wrapper's queue record reached the page
+    await sleep(50);
+    const fileH = wrapperFile('PHONE-H held, then the hub restarts'), atStopH = { copy: fileH.some((x) => x.type === 'user' && x.webui_copy && S(x.message).includes('PHONE-H held')), queueRecord: fileH.some((x) => x.type === 'queue_changed' && S(x.items || []).includes('PHONE-H held')) };
+    await stopServer();
+    await cdp('Emulation.clearDeviceMetricsOverride');
+    startServer();
+    const backH = await serverBack();
+    await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?cb=${Date.now()}-made-restart` });
+    await until(() => ev('!!(window.app && window.app.ready)'), 45000, 250);
+    await ev('window.app.ready.then(() => true)');
+    const oH = await reopen(s1, 'v1', 'steer new');
+    await until(async () => (await bubbles('v1', 'PHONE-H')).some((b) => b.chip === 'queued'), 8000, 150);
+    const isH = (d) => d.text === 'PHONE-H held, then the hub restarts at +50 ms';
+    const hHeld = await bubbles('v1', 'PHONE-H'), stripH = await ev(STRIP('v1'));
+    const evH = () => ({ delivered: delivered().filter(isH), queue: queueRecs('PHONE-H') });
+    ok(heldH && saidH && backH && oH && oH.ok && !delivered().some(isH), '§B ⑧c PREMISE: PHONE-H was HELD and its hold said (the strip row), the hub stopped 50 ms later and came back, the page reopened — the LONGER turn still runs (PHONE-H unread)', { heldH, saidH, backH, oH, ...evH() });
+    ok(atStopH.copy && atStopH.queueRecord, '§B ⑧c THE CURE\'S FACT at the made instant (+50 ms, the moment the hub was stopped): the wrapper\'s file ALREADY holds the held copy and its queue record (the base\'s 2 s timer had written neither — B-5a4d\'s placement)', atStopH);
+    ok(S(hHeld.map((b) => b.chip)) === S(['queued']) && stripH.visible && /PHONE-H held, then the hub restarts/.test(stripH.text), '§B ⑧c THE MADE RESTART (+50 ms after the hold was said): the held message is back ONCE, «Queued», with its strip row — drawn from the wrapper\'s file (B-5a4d: none of it was there before the cure)', { hHeld, stripH, ...evH() });
+    fs.writeFileSync(release8, 'released after the made restart\n');
+    await waitTurnEnd('v1', 40000);
+    await until(() => delivered().some((d) => d.how === 'turn' && isH(d)), 8000, 100);
+    await sleep(600);
+    const hAfter = await bubbles('v1', 'PHONE-H'), idleH = !(await streaming('v1'));
+    ok(S(hAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && isH(d)) && idleH, '§B ⑧c …and when the turn ended it ran: ONE bubble, no chip, and the page IDLE (never left «streaming»)', { hAfter, idleH, ...evH() });
+    // ⑧d (the coordinator's law 08:14Z — A TURN THAT ENDED): a hub restarted 50 ms after a turn's END was said comes back IDLE: the
+    // turn has its end and nothing is drawn twice (the wrapper's file held the result before it was said)
+    const madeRestart = async (tag, atInstant = () => null) => {
+      await sleep(50);
+      const atStop = atInstant();   // the wrapper's file as it stands the moment the hub is stopped
+      await stopServer();
+      startServer();
+      const back = await serverBack();
+      await cdp('Page.navigate', { url: `http://127.0.0.1:${PORT}/?cb=${Date.now()}-${tag}` });
+      await until(() => ev('!!(window.app && window.app.ready)'), 45000, 250);
+      await ev('window.app.ready.then(() => true)');
+      const o = await reopen(s1, 'v1', 'steer new');
+      return { back, ok: !!(o && o.ok), atStop };
+    };
+    const replies = (t) => ev(`(window.__v1._messages || []).filter((x) => x.role === 'assistant' && JSON.stringify(x.content).includes(${S(t)})).length`);
+    await focus('v1'); await cdp('Input.insertText', { text: 'ENDS-I a turn that ends just before the hub restarts' });
+    await realClick('[data-steer-leg="v1"] .chat-send-btn');
+    const endedI = await until(() => delivered().some((d) => d.how === 'turn' && /ENDS-I/.test(d.text)), 10000, 50) && await waitTurnEnd('v1', 15000);   // the turn's end SAID: the page went idle
+    const rI = await madeRestart('turn-end', () => { const f = wrapperFile('ENDS-I'); const i = f.findIndex((x) => x.type === 'assistant' && S(x.message || {}).includes('ENDS-I'));
+      return { reply: i >= 0, endAfter: i >= 0 && f.slice(i + 1).some((x) => x.type === 'result'), idleAfter: i >= 0 && f.slice(i + 1).some((x) => x.type === 'system' && x.subtype === 'session_state_changed' && x.state === 'idle') }; });
+    await sleep(1500);   // the reopened page settles; a turn with no end would show its Stop
+    const iBubbles = await bubbles('v1', 'ENDS-I'), iReplies = await replies('ENDS-I'), idleI = !(await streaming('v1'));
+    ok(!!rI.atStop && rI.atStop.reply && rI.atStop.endAfter && rI.atStop.idleAfter, '§B ⑧d THE CURE\'S FACT at the made instant: the wrapper\'s file already holds the turn\'s answer, its result and its «idle» after it (the base\'s timer had not written them)', rI.atStop);
+    // the prompt was sent at IDLE: the wrapper records it nowhere (the hub's record is in its memory, the stand-in writes no
+    // transcript — a real CLI's transcript holds it), so after the restart it is drawn at most once: never twice
+    ok(endedI && rI.back && rI.ok && idleI && iBubbles.length <= 1 && iReplies === 1, '§B ⑧d A TURN THAT ENDED: a hub restarted 50 ms after its end was said comes back IDLE — the turn has its end, its answer ONCE, nothing drawn twice (B-5a4d: the page stayed «still working»)', { endedI, rI, idleI, iBubbles, iReplies });
+    // ⑧e (the coordinator's question — A TURN'S START in the same window): a hub restarted 50 ms after a turn's START was said (the
+    // page showed it running) comes back showing it RUNNING while the CLI works — a text-free tool wait sends nothing that says it
+    // runs until its end, so the file must hold the start — then idle once it ends
+    fs.rmSync(release8, { force: true });
+    await focus('v1'); await cdp('Input.insertText', { text: 'TOOL-4 LONGER- a turn the hub restarts at its start' });
+    await realClick('[data-steer-leg="v1"] .chat-send-btn');
+    // the turn's start SAID: the stand-in CLI took it as a turn (the page's Stop button is drawn optimistically at send)
+    const startedJ = await until(() => delivered().some((d) => d.how === 'turn' && /a turn the hub restarts at its start/.test(d.text)), 10000, 10);
+    const rJ = await madeRestart('turn-start', () => { const f = wrapperFile('PHONE-H held, then the hub restarts'); const st = f.filter((x) => x.type === 'system' && x.subtype === 'session_state_changed');
+      return { lastState: st.length ? st[st.length - 1].state : null, init: f.some((x) => x.type === 'system' && x.subtype === 'init') }; });
+    const runningJ = await until(() => streaming('v1'), 5000, 100);
+    fs.writeFileSync(release8, 'released after the start restart\n');
+    const endJ = await waitTurnEnd('v1', 40000);
+    ok(!!rJ.atStop && rJ.atStop.lastState === 'running' && rJ.atStop.init, '§B ⑧e THE CURE\'S FACT at the made instant: the wrapper\'s file already holds the turn\'s init and its last state word is «running»', rJ.atStop);
+    ok(startedJ && rJ.back && rJ.ok && runningJ && endJ, '§B ⑧e A TURN\'S START: a hub restarted 50 ms after it was said comes back showing the turn RUNNING while the CLI works (its tool still held), and idle once it ends', { startedJ, rJ, runningJ, endJ });
     // ⑨ (r5) THE IDLE CHORD ON THE PRODUCT'S COMPOSER — at idle, where Enter is a newline (the expanded editor; chat.enterSends
     // off), Alt+Enter TYPES one at the caret, nothing is sent. Chrome inserts nothing for the chord itself: 6334e9a8 left it to
     // the textarea's default, and the key was dead (the reviewers' bare textarea, here on the real composer)

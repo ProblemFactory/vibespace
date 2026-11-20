@@ -32,6 +32,7 @@
 import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
+import { anchored } from './scratch.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -532,6 +533,120 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
   fs.writeFileSync(path.join(anyInitDir, 'data', 'bin', 'chat-wrapper.js'), anyInitSrc);
   ok(anyInitSrc !== cwSrc && !(await bootOne(path.join(anyInitDir, 'data', 'bin', 'chat-wrapper.js'))), '§6 CONTROL: a gate that starts a turn on ANY init holds that first message for ever — the leg above can say no');
   fs.rmSync(anyInitDir, { recursive: true, force: true });
+}
+
+// ── §6b THE NEXT LIFE'S FILE (B-5a4d — the coordinator's law 2026-11-20: what the next life needs to draw a person's held message
+// is ON DISK before the page is told) ──
+console.log('§6b claude, live — a held message, its edit, removal and hand-over are IN THE WRAPPER\'S FILE before they are said (a hub restarting at any instant draws them)');
+{
+  const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const until = async (fn, ms = 6000) => { const end = Date.now() + ms; while (Date.now() < end) { if (fn()) return true; await sleep(10); } return fn(); };
+  const { ClaudeCodeAdapter } = require('../src/adapters/claude-code.js');
+  const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
+  const SS = require('../src/session-store.js');
+  const { createMessageManager } = require('../src/normalizers.js');
+  const readFile = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+  const linesOf = (t) => t.split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return {}; } });
+  /** what a hub restarting NOW draws from the file: its own restore road (SessionMessages → the claude normalizer) */
+  const rebuild = (dir, text) => { let sid = null; for (const x of linesOf(text)) if (x.type === 'system' && x.subtype === 'init' && x.session_id) { sid = x.session_id; break; }
+    const mm = createMessageManager('claude', 'next-life'); mm.convertHistory(new SS.SessionMessages({ buffer: text, cwd: dir, claudeSessionId: sid, backend: 'claude' }, 'next-life', { buffersDir: dir }).raw());
+    return { bubbles: mm.messages.filter((m) => m.role === 'user').map((m) => ({ text: (m.content || []).filter((b) => b.type === 'text').map((b) => b.text).join(' ').slice(0, 60), chip: m.queueState || null })), queue: (mm._queue || []).map((it) => it.msgId) }; };
+  const lifeOf = async (wrapperPath) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-next-life-'));
+    const buf = path.join(dir, 's.buf');
+    // the turn's tool ends only when its release file exists — never here: the turn outlives every step by construction, never a clock
+    const w = spawn(process.execPath, [wrapperPath, buf, path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STAND_IN_RELEASE_FILE: path.join(dir, 'never-released'), VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
+    const recs = []; let lb = '';
+    // THE WITNESS: the file AS IT STANDS the moment a queue record is SAID — read in the same handler, before any other tick
+    w.stdout.setEncoding('utf8');
+    w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); let r = null; try { r = JSON.parse(l); } catch { continue; }
+      if (/^(queued_input|queue_changed|queue_op_result|input_handover)$/.test(r.type)) r.__file = readFile(buf); recs.push(r); } });
+    const say = (text, msgId) => w.stdin.write(ad.formatChatInput(text, msgId).stdinPayload + '\n');
+    const op = (o) => w.stdin.write(JSON.stringify({ type: 'queue-op', ...o }) + '\n');
+    const rowOf = (msgId) => { for (let k = recs.length - 1; k >= 0; k--) if (recs[k].type === 'queue_changed') { const it = (recs[k].items || []).find((x) => x.msgId === msgId); if (it) return it.id; } return null; };
+    const fileHas = (text, pred) => linesOf(text).some(pred);
+    await until(() => fs.existsSync(path.join(dir, 's.json')));
+    say('TOOL-1 LONGER- a turn whose tool runs until the leg ends', 'm-a');
+    await until(() => recs.some((r) => r.type === 'system' && r.state === 'running'));
+    say('HELD-F the person held this', 'm-f'); say('HELD-G held, then removed', 'm-g');
+    await until(() => recs.some((r) => r.type === 'queued_input' && r.msg_id === 'm-g'));
+    const qiF = recs.find((r) => r.type === 'queued_input' && r.msg_id === 'm-f');
+    const said = { copy: fileHas(qiF.__file, (x) => x.type === 'user' && x.webui_copy && x.msgId === 'm-f'), queueRecord: fileHas(qiF.__file, (x) => x.type === 'queue_changed' && (x.items || []).some((it) => it.msgId === 'm-f')) };
+    await sleep(50);   // THE MADE RESTART: a hub that comes back 50 ms after the hold was said reads the file as it stands
+    const at50 = rebuild(dir, readFile(buf));
+    const nE = recs.length; op({ op: 'edit', id: rowOf('m-f'), text: 'HELD-F the person held this, then EDITED it' });
+    await until(() => recs.slice(nE).some((r) => r.type === 'queue_op_result' && r.op === 'edit'));
+    const edit = recs.slice(nE).find((r) => r.type === 'queue_op_result' && r.op === 'edit');
+    const edited = !!edit && edit.ok && fileHas(edit.__file, (x) => x.type === 'user' && x.webui_copy && x.msgId === 'm-f' && JSON.stringify(x.message).includes('then EDITED it'));
+    const editFacts = { result: edit ? { ok: edit.ok, reason: edit.reason || null, id: edit.id } : null, row: rowOf('m-f'),
+      copiesInFile: edit ? linesOf(edit.__file).filter((x) => x.type === 'user' && x.webui_copy && x.msgId === 'm-f').map((x) => JSON.stringify(x.message).slice(0, 160)) : null };
+    const nR = recs.length; op({ op: 'remove', id: rowOf('m-g') });
+    await until(() => recs.slice(nR).some((r) => r.type === 'queue_changed' && !(r.items || []).some((it) => it.msgId === 'm-g')));
+    const rem = recs.slice(nR).find((r) => r.type === 'queue_changed' && !(r.items || []).some((it) => it.msgId === 'm-g'));
+    const lastQueue = rem ? linesOf(rem.__file).filter((y) => y.type === 'queue_changed').pop() : null;
+    const removed = !!rem && fileHas(rem.__file, (x) => x.type === 'queue_op_result' && x.op === 'remove' && x.msg_id === 'm-g') && !!lastQueue && !(lastQueue.items || []).some((it) => it.msgId === 'm-g');
+    const nH = recs.length; op({ op: 'steer', id: rowOf('m-f') });
+    await until(() => recs.slice(nH).some((r) => r.type === 'input_handover' && r.state === 'handed'));
+    const hand = recs.slice(nH).find((r) => r.type === 'input_handover' && r.state === 'handed');
+    const handed = !!hand && fileHas(hand.__file, (x) => x.type === 'input_handover' && x.state === 'handed' && (x.msg_ids || []).includes('m-f'));
+    try { w.kill('SIGKILL'); } catch { }
+    fs.rmSync(dir, { recursive: true, force: true });
+    return { said, at50, edited, editFacts, removed, handed };
+  };
+  const L = await lifeOf(path.join(REPO, 'data/bin/chat-wrapper.js'));
+  ok(L.said.copy && L.said.queueRecord, '§6b the moment the HOLD is said (queued_input on stdout), the wrapper\'s FILE already holds the held copy AND the queue record naming it — the next life reads both', L.said);
+  ok(L.at50.bubbles.some((b) => /HELD-F/.test(b.text) && b.chip === 'queued') && L.at50.queue.includes('m-f'), '§6b THE MADE RESTART at +50 ms after the hold: the restore\'s own rebuild of the file draws the held message ONCE, «Queued», and its strip row', L.at50);
+  ok(L.edited && L.removed && L.handed, '§6b …and its EDIT (the copy\'s new words), a REMOVAL (the removal result and the queue without it) and its HAND-OVER (input_handover handed) are each in the file before they are said', { edited: L.edited, editFacts: L.editFacts, removed: L.removed, handed: L.handed });
+  // RED CONTROL — its plant proven first: the one write-through set, spelled once; a wrapper whose queue records wait for the 2 s
+  // timer (the base) says the hold with NOTHING of it in the file — the leg above can say no
+  const cwSrc6b = read('data/bin/chat-wrapper.js');
+  const PLANT = "const DURABLE_RECORDS = new Set(['queue_changed', 'queued_input', 'queue_op_result', 'queue_dropped', 'input_handover', 'queue_settle', 'rewind_out']);";
+  ok(cwSrc6b.split(PLANT).length === 2, '§6b ANCHOR: the write-through set, spelled once (the control below plants there)');
+  if (cwSrc6b.split(PLANT).length === 2) {
+    const ctlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-next-life-ctl-'));
+    fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
+    fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
+    const TEE6 = "  if (msg && (msg.type === 'result' || (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'session_state_changed' || msg.subtype === 'compact_boundary')))) durable();\n";
+    fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), anchored(anchored(cwSrc6b, PLANT, 'const DURABLE_RECORDS = new Set();', 'the queue records wait for the 2 s timer'), TEE6, '', 'a turn\'s start and end wait for the 2 s timer'));
+    const C = await lifeOf(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'));
+    ok(!C.said.copy && !C.said.queueRecord && !C.at50.bubbles.some((b) => /HELD-F/.test(b.text)), 'MUTANT RED (the base\'s 2 s timer): the hold is said with neither the copy nor its queue record in the file — a hub restarting at +50 ms draws NO bubble and no strip row', { said: C.said, at50: C.at50 });
+    fs.rmSync(ctlDir, { recursive: true, force: true });
+  }
+  // A TURN THAT STARTED OR ENDED (the coordinator's law 08:14Z): its init, its state words and its result are in the file the moment
+  // they are said — a hub restarting then draws a running turn as running and an ended one as ended
+  const turnOf = async (wrapperPath) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-turn-life-'));
+    const buf = path.join(dir, 's.buf');
+    const w = spawn(process.execPath, [wrapperPath, buf, path.join(dir, 's.json'), process.execPath, STAND_IN], { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, VIBESPACE_SKIP_AGENT_HOOKS: '1' } });
+    const said = []; let lb = '';
+    w.stdout.setEncoding('utf8');
+    w.stdout.on('data', (d) => { lb += d; let i; while ((i = lb.indexOf('\n')) >= 0) { const l = lb.slice(0, i); lb = lb.slice(i + 1); let r = null; try { r = JSON.parse(l); } catch { continue; }
+      const kind = r.type === 'result' ? 'result' : r.type === 'system' && r.subtype === 'init' ? 'init' : r.type === 'system' && r.subtype === 'session_state_changed' ? 'state:' + r.state : null;
+      if (kind) said.push({ kind, inFile: readFile(buf).includes(l) }); } });
+    await until(() => fs.existsSync(path.join(dir, 's.json')));
+    w.stdin.write(ad.formatChatInput('QUICK-T a turn that starts and ends', 'm-t').stdinPayload + '\n');
+    await until(() => said.some((s) => s.kind === 'result'));
+    await sleep(30);
+    try { w.kill('SIGKILL'); } catch { }
+    fs.rmSync(dir, { recursive: true, force: true });
+    return said;
+  };
+  const T1 = await turnOf(path.join(REPO, 'data/bin/chat-wrapper.js'));
+  ok(T1.some((s) => s.kind === 'init') && T1.some((s) => s.kind === 'state:running') && T1.some((s) => s.kind === 'result') && T1.every((s) => s.inFile),
+    '§6b a turn\'s START (its init, its «running» state word) and its END (its result) are each in the wrapper\'s file the moment they are said — the lines that only fill a turn keep the timer', T1);
+  const cwT = read('data/bin/chat-wrapper.js');
+  const TEE = "  if (msg && (msg.type === 'result' || (msg.type === 'system' && (msg.subtype === 'init' || msg.subtype === 'session_state_changed' || msg.subtype === 'compact_boundary')))) durable();\n";
+  ok(cwT.split(TEE).length === 2, '§6b ANCHOR: the tee\'s write-through of a turn\'s start and end, spelled once (the control below plants there)');
+  if (cwT.split(TEE).length === 2) {
+    const ctlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-turn-life-ctl-'));
+    fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
+    fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
+    fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), anchored(anchored(cwT, TEE, '', 'a turn\'s start and end wait for the 2 s timer'), PLANT, 'const DURABLE_RECORDS = new Set();', 'the queue records wait for the 2 s timer'));
+    const T0 = await turnOf(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'));
+    ok(T0.some((s) => s.kind === 'result' && !s.inFile), 'MUTANT RED (the timer alone): the turn\'s result is said with nothing of it in the file — a hub restarting then draws a turn with no end, the page «still working»', T0);
+    fs.rmSync(ctlDir, { recursive: true, force: true });
+  }
 }
 
 // ── §7 THE STARTED ROW (lane codex-interrupted-putback) ──

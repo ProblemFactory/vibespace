@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.414 — 2026-11-20
+
+### Fixed
+- A message you held behind a running turn, or a turn that just started or ended, no longer goes missing from the chat if VibeSpace restarts right then.
+
 ## 2.369.413 — 2026-11-20
 
 ### Added
