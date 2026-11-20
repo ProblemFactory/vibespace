@@ -1345,36 +1345,51 @@ console.log('— ⑭ lane profile-lock-roll L2: the first command after a replac
     // a blank tab nobody rooted was left in the browser, its mark spent) and keeps its mark for its next attach
     {
       const D14e = path.join(ROOT, 'k14e'); fs.mkdirSync(D14e, { recursive: true });
-      const slowFor = new Set();
+      // THE RACE PLACED (主开发 r386, the same shape as ⑭b): A's `tab` command is HELD — not slept for a fixed time — and says
+      // when it has begun; B's attach then waits until B is QUEUED behind A's rebind (the journal's own line, or for the
+      // control that silences it the mutant's own hook); only then is B detached and A released. Each wait has its own
+      // bound (10 s) and is said by name when reached — never load or luck, never a fixed sleep between the steps
+      const holdFor = new Map(); // session name → { entered, go }
       const realRt = F.createBrowserRuntime({ env: rtE });
-      const slowRt = new Proxy(realRt, { get(t, k) { if (k !== 'exec') return t[k]; return async (ns, argv, o) => { if (argv.includes('tab') && o && o.session && slowFor.has(o.session)) await sleep14(1500); return t.exec(ns, argv, o); }; } });
+      const slowRt = new Proxy(realRt, { get(t, k) { if (k !== 'exec') return t[k]; return async (ns, argv, o) => { const h = argv.includes('tab') && o && o.session ? holdFor.get(o.session) : null; if (h) { holdFor.delete(o.session); h.entered(); h.released = await Promise.race([h.go.then(() => true), sleep14(10000).then(() => false)]); } return t.exec(ns, argv, o); }; } });
       const mkE = (Kmod, dd) => { const kk = Kmod.create({ dataDir: dd, homeDir: HOME, env: () => rtE, liveKeys: () => live14, runtime: slowRt, facts: F.createBrowserFacts({ env: rtE }), limits: { ...LIMITS }, log: klog14, tickMs: 3600e3, install: false, readTargets: readT }); keepers.push(kk); return kk; };
-      const runE = async (Kmod, tag) => {
+      const runE = async (Kmod, tag, { queuedBy = 'journal' } = {}) => {
         const dd = path.join(D14e, tag); fs.mkdirSync(dd, { recursive: true });
         const kk = mkE(Kmod, dd); const p = kk.createProfile({ label: 'Queue ' + tag }); const ns = 'vs-' + p.id;
         await kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); await kk.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' });
         await kk.stop(p.id, { why: 'user' }); // both leases marked: each rebinds at its next attach
-        slowFor.add(B.sessionNameFor(KEY_A)); const l0 = lines14.length;
-        const a1 = kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' }); await sleep14(400);
+        const l0 = lines14.length;
+        let entered, go; const inHold = new Promise((res) => { entered = res; }), goP = new Promise((res) => { go = res; });
+        const hold = { entered, go: goP, released: null }; holdFor.set(B.sessionNameFor(KEY_A), hold);
+        let hooked = false; globalThis.__vsK14eQueued = () => { hooked = true; };
+        const a1 = kk.attach({ profileId: p.id, browserKey: KEY_A, sessionId: 'sess-a' });
+        const aHeld = await Promise.race([inHold.then(() => true), sleep14(10000).then(() => false)]); // A's tab command has BEGUN
         const before = fakeTabs(ns).length;
-        const b1 = kk.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' }); await sleep14(100);
+        const b1 = kk.attach({ profileId: p.id, browserKey: KEY_B, sessionId: 'sess-b' });
+        const bQueued = await until(() => (queuedBy === 'hook' ? hooked : lines14.slice(l0).some((l) => /a tab bind waits for the one in flight/.test(l))), 10000, 20); // B is QUEUED behind A
         let dErr = null; try { kk.detach({ profileId: p.id, browserKey: KEY_B }); } catch (e) { dErr = e.code; }
-        await Promise.allSettled([a1, b1]); slowFor.clear();
+        go(); // A goes on only now
+        await Promise.allSettled([a1, b1]); holdFor.clear(); delete globalThis.__vsK14eQueued;
         const said = lines14.slice(l0);
-        const r = { before, after: fakeTabs(ns).length, dErr, mark: !!kk._reg().tabClosed[`${p.id}|${KEY_B}`], lease: !!B.findLease(kk._reg().leases, p.id, KEY_B), waits: said.filter((l) => /a tab bind waits for the one in flight/.test(l)).length, noTab: said.filter((l) => /detached while waiting to bind a tab/.test(l)).length };
+        const r = { aHeld, bQueued, aReleased: hold.released, before, after: fakeTabs(ns).length, dErr, mark: !!kk._reg().tabClosed[`${p.id}|${KEY_B}`], lease: !!B.findLease(kk._reg().leases, p.id, KEY_B), waits: said.filter((l) => /a tab bind waits for the one in flight/.test(l)).length, noTab: said.filter((l) => /detached while waiting to bind a tab/.test(l)).length };
+        console.log(`    ⑭e ${tag}: ${JSON.stringify(r)}`);
         try { await kk.stop(p.id); } catch { /* none */ } kk.shutdown();
         return r;
       };
       const r = await runE(K, 'product');
+      ok(r.aHeld && r.bQueued && r.aReleased === true, `⑭e setup: the race placed — A's tab command held from its start, B queued behind it (the journal's line), then B detached and A released (${r.aHeld ? '' : 'A never reached its hold in 10 s · '}${r.bQueued ? '' : 'B never queued in 10 s · '}${r.aReleased === true ? 'held, then released' : 'A\'s hold reached its bound'})`, r);
       ok(r.before === 1 && r.after === 1 && !r.dErr && r.mark && !r.lease && r.noTab === 1, '⑭e a session that detaches while queued behind another\'s rebind opens NO tab, keeps its mark, holds no lease', r);
       ok(r.waits === 1, '⑭e …and the queued wait is said in the journal (bounded by the CLI\'s own timeouts)', r);
       const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-      const noReask = ksrcE.replace("if (!B.findLease(reg.leases, p.id, browserKey)) { log.log?.(`[browser] ${browserKey}: detached while waiting to bind a tab in ${p.id} \"${p.label}\" — no tab opened`); return; }", '/* CONTROL: the lease is not asked again after the wait */');
-      const noSay = ksrcE.replace("if (rebinding.has(profileId)) log.log?.(`[browser] ${profileId}: a tab bind waits for the one in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`);", '/* CONTROL: the wait is not said */');
+      const noReask = anchored(ksrcE, "if (!B.findLease(reg.leases, p.id, browserKey)) { log.log?.(`[browser] ${browserKey}: detached while waiting to bind a tab in ${p.id} \"${p.label}\" — no tab opened`); return; }", '/* CONTROL: the lease is not asked again after the wait */', '⑭e the re-ask');
+      // the silent control's mutant still SIGNALS the queue to this leg (a hook, never the journal), so its run is placed too
+      const noSay = anchored(ksrcE, "if (rebinding.has(profileId)) log.log?.(`[browser] ${profileId}: a tab bind waits for the one in flight (bounded by the browser CLI's own timeouts, ~30 s at most)`);", "if (rebinding.has(profileId) && globalThis.__vsK14eQueued) globalThis.__vsK14eQueued(); /* CONTROL: the wait is not said */", '⑭e the wait said');
       ok(noReask !== ksrcE && noSay !== ksrcE, '⑭e control setup: the re-ask and the word are where the controls cut');
       const c1 = await runE(M14.load('src/server/browser-keeper.js', noReask, 'no-reask-after-wait'), 'ctl-reask');
+      ok(c1.aHeld && c1.bQueued, '⑭e control setup (no re-ask): its race placed the same way', c1);
       ok(c1.after === 2 && !c1.mark, '⑭e CONTROL: without the re-ask the detached session\'s queued rebind opens a blank tab nobody roots and spends its mark — the ⑭e leg catches it', c1);
-      const c2 = await runE(M14.load('src/server/browser-keeper.js', noSay, 'no-wait-said'), 'ctl-say');
+      const c2 = await runE(M14.load('src/server/browser-keeper.js', noSay, 'no-wait-said'), 'ctl-say', { queuedBy: 'hook' });
+      ok(c2.aHeld && c2.bQueued, '⑭e control setup (the wait unsaid): its race placed by the mutant\'s own hook', c2);
       ok(c2.waits === 0 && c2.after === 1, '⑭e CONTROL: a keeper that queues in silence — the ⑭e journal leg catches it', c2);
     }
     // (f) verify r3 (F4): the rebound note is SAID ONCE, in an answer that is DELIVERED — THE REAL ROUTES. Two conversations'
