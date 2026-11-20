@@ -80,7 +80,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSess
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
 // B-48a4 (the exit door's cost; restacked on 2.369.410): the two audit rings onto the store writer through ONE appender — device-audit.js's
 // 3 and exit-proxy.js audit's 3 go to zero; every save of hosts.json through the store writer — hosts.js _save's 2 go to zero ⇒ 881 − 8 = 873
-const DEBT_MAX = 853;   // lane lg-store-writes (B-225b, the persistence holds — cut 2): −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 855 -2 = 853]
+const DEBT_MAX = 850;   // lane lg-store-writes (B-225b, the persistence holds — cut 3): −3 — the desktops (layouts.json), the bookmarks and the custom themes onto src/store-hold.js's one write; cut 2: −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 853 -3 = 850]
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -177,7 +177,7 @@ const ROWS = [
   ["src/remote-fs.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/routes/editor.js","*",2,"not-a-store","—","—","a person's own file (the editor's save)"],
   ["src/routes/files.js","*",21,"not-a-store","—","—","a person's own files (the file explorer); ckpt61 cure 3: + the archive entry's temp folder removed on its two new refusals (a reader that never started, a write that failed)"],
-  ["src/routes/persistence.js","*",24,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26)"],
+  ["src/routes/persistence.js","*",21,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26)"],
   ["src/safe-fs-worker.js","*",15,"not-main","—","—","the SafeFs worker thread"],
   ["src/search-index-worker.js","*",3,"not-main","—","—","the search index worker thread"],
   ["src/secret-box.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
@@ -2234,6 +2234,68 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       const X = listScene(mutantCopies('swc-list-cut', REPO).load(PREL, anchored(PSRC, ANS_A, "    let parsed; try { parsed = userStateHold.answer(); } catch { parsed = undefined; }   /* MUTANT: the release — a list it could not read is served as the defaults */\n", 'list-cut'), 'list-cut'), 'eio-red');
       const xg = X.call('get', '/api/user-state');
       ok(xg.status === 200 && Array.isArray(xg.body.archivedSessions) && xg.body.archivedSessions.length === 0 && X.P.router.isArchived(KEY) === false, 'CONTROL (the hold\'s answer cut, in a copy — the release): the list it could not read is served as the DEFAULTS (an empty sidebar) and the archived conversation answers «not archived» — a delivery would wake it (red)', { get: xg.status, n: xg.body && xg.body.archivedSessions && xg.body.archivedSessions.length });
+    }
+    // (e) THE DESKTOPS, THE BOOKMARKS, THE CUSTOM THEMES ON THE HOLD (cut 3 — R1, R2, R10, R12): a store the START could not read
+    // answers its doors 503 store_unread BY NAME and nothing is written over it (the release served the EMPTY layout, the four
+    // default bookmarks, «no themes» — and the next save wrote them over the person's); the bookmarks are read ONCE (a cache); a
+    // rollback point owed lands BEFORE the layouts.json write that replaces its state; every temp name carries the pid.
+    // REDs (anchored, in copies): the layouts' answer cut (the empty layout served) · the flush's drain cut (layouts.json first).
+    {
+      const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+      const freshP = () => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return require(path.join(REPO, PREL)); };
+      const LAY = { current: null, autoSave: null, saved: {}, customGrids: [{ rows: 2, cols: 3 }], desktops: { d1: { autoSave: { windows: [{ winId: 'w1' }, { winId: 'w2' }] } } }, desktopMeta: [{ id: 'd1', name: 'the person\'s desktop' }] };
+      const BMK = [{ label: 'the person\'s folder', path: '/srv/kept' }], THM = { mine: { css: { '--bg-window': '#101018' } } };
+      const sceneE = (P, tag, held) => {
+        const d = scratchDir('hold-e-' + tag); roots.push(d);
+        const files = { layouts: path.join(d, 'layouts.json'), bookmarks: path.join(d, 'bookmarks.json'), themes: path.join(d, 'custom-themes.json') };
+        fs.writeFileSync(files.layouts, JSON.stringify(LAY)); fs.writeFileSync(files.bookmarks, JSON.stringify(BMK)); fs.writeFileSync(files.themes, JSON.stringify(THM));
+        const bytes = Object.fromEntries(Object.entries(files).map(([k, f]) => [k, fs.readFileSync(f, 'utf8')]));
+        P.setup({ dataDir: d, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { } });
+        const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
+        const call = (method, p, body, params = {}) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params, headers: {} }, res, (e) => { status = 500; o = { error: String(e) }; }); return { status, body: o }; };
+        const first = (method, p, body, params) => (held ? Object.values(files).reduceRight((fn, f) => () => failing(f, 'EIO', fn), () => call(method, p, body, params))() : call(method, p, body, params));
+        return { d, files, bytes, call, first, P };
+      };
+      const E = sceneE(freshP(), 'eio', true);
+      const lg = E.first('get', '/api/layouts'), bg = E.first('get', '/api/bookmarks'), tg = E.first('get', '/api/custom-themes');
+      const la = E.call('post', '/api/layouts-autosave', { windows: [] }), lc = E.call('post', '/api/custom-grids', { rows: 1, cols: 1 }), bp = E.call('post', '/api/bookmarks', []), tp = E.call('post', '/api/custom-themes', { name: 'other', css: { '--bg-window': '#000000' } });
+      let wl = null; try { E.P.router.writeLayouts({ current: null, autoSave: null, saved: {}, customGrids: [] }); } catch (e) { wl = e.code; }
+      E.P.router.flushLayouts();
+      const kept = Object.keys(E.files).every((k) => fs.readFileSync(E.files[k], 'utf8') === E.bytes[k]);
+      ok([lg, bg, tg, la, lc, bp, tp].every((x) => x.status === 503 && x.body && x.body.code === 'store_unread') && lg.body.held.file === 'layouts.json' && bg.body.held.file === 'bookmarks.json' && tg.body.held.file === 'custom-themes.json' && wl === 'store_unread' && E.P.router.layoutsCached() === null && kept,
+        '⑪ (e) the desktops, the bookmarks and the custom themes the start could NOT read: every door answers 503 store_unread BY NAME (the reads, the saves, a preset write), the flush writes nothing — the three files untouched', { lg: lg.status, bg: bg.status, tg: tg.status, la: la.status, lc: lc.status, bp: bp.status, tp: tp.status, wl, kept });
+      // R12 — the bookmarks READ ONCE (a cache): a second GET reads no file
+      const B = sceneE(freshP(), 'once', false);
+      const b1 = B.call('get', '/api/bookmarks');
+      let bookReads = 0; const rf = fs.readFileSync; fs.readFileSync = function (f, ...a) { if (String(f) === B.files.bookmarks) bookReads++; return rf.call(this, f, ...a); };
+      let b2; try { b2 = B.call('get', '/api/bookmarks'); } finally { fs.readFileSync = rf; }
+      ok(b1.status === 200 && b1.body[0].path === '/srv/kept' && b2.status === 200 && bookReads === 0, '⑪ (e) the bookmarks are read ONCE at the start and kept — a later GET reads no file (a read that fails mid-run can never serve the defaults)', { bookReads });
+      // R10 — the rollback point owed lands BEFORE the layouts.json write that replaces its state; every temp carries the pid
+      const order = (P2, tag) => {
+        const S = sceneE(P2, tag, false);
+        S.call('get', '/api/layouts');
+        const next = JSON.parse(JSON.stringify(LAY)); next.desktops.d1.autoSave.windows = [{ winId: 'w1' }];   // a SHAPE change (a window gone)
+        const renames = [], temps = [], rn = fs.renameSync, wf = fs.writeFileSync;
+        fs.renameSync = function (a, b) { renames.push(path.basename(String(b))); return rn.call(this, a, b); };
+        fs.writeFileSync = function (f, ...x) { if (String(f).endsWith('.tmp')) temps.push(path.basename(String(f))); return wf.call(this, f, ...x); };
+        try { S.P.router.writeLayouts(next); S.P.router.flushLayouts(); } finally { fs.renameSync = rn; fs.writeFileSync = wf; }
+        return { renames, temps };
+      };
+      const o = order(freshP(), 'order');
+      const iPoint = o.renames.findIndex((n) => /^layout-.*\.json$/.test(n) && !n.endsWith('.meta.json')), iLay = o.renames.indexOf('layouts.json');
+      ok(iPoint >= 0 && iLay > iPoint && o.temps.length >= 3 && o.temps.every((t) => t.includes(`.${process.pid}.tmp`)), '⑪ (e) R10: the rollback point owed lands BEFORE the layouts.json write that replaces its state (in the flush, never «usually»), and every temp name carries the PID', o);
+      // the ws layout doors (src/ws-handler.js — layout-sync and the four desktop doors) read through ONE guard: held ⇒ `layout-held`
+      const WSRC = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+      ok(WSRC.split("const layoutData = layoutsOrHeld(ws, data); if (!layoutData) break;").length === 6 && !/\n {10}const layoutData = readLayouts\(\);/.test(WSRC) && /type: 'layout-held', op: /.test(WSRC), '⑪ (e) the five ws layout doors (layout-sync, desktop-create / -delete / -rename / -reorder) read the desktops through ONE guard: held ⇒ `layout-held` by name to the sender, nothing applied (a pin)');
+      // REDs
+      const ANS_L = "    const doc = layoutsHold.answer();", DRAIN_A = "    drainPoints();   // B-225b R10";
+      ok([ANS_L, DRAIN_A].every((x) => PSRC.split(x).length === 2), 'control setup: the layouts\' answer and the flush\'s drain are found once each in src/routes/persistence.js');
+      const XE = sceneE(mutantCopies('swc-lay-cut', REPO).load(PREL, anchored(PSRC, ANS_L, "    let doc; try { doc = layoutsHold.answer(); } catch { doc = undefined; }   /* MUTANT: the release — the desktops it could not read are the EMPTY layout */", 'lay-cut'), 'lay-cut'), 'eio-red', true);
+      const xl = XE.first('get', '/api/layouts');
+      ok(xl.status === 200 && xl.body && Array.isArray(xl.body.customGrids) && xl.body.customGrids.length === 0 && !xl.body.desktops, 'CONTROL (the layouts\' answer cut, in a copy — the release): the desktops it could not read are served as the EMPTY layout (a page makes «Desktop 1» over them) (red)', xl.body);
+      const xo = order(mutantCopies('swc-drain-cut', REPO).load(PREL, anchored(PSRC, DRAIN_A, "    /* MUTANT: no drain */ (() => {})();   // B-225b R10", 'drain-cut'), 'drain-cut'), 'order-red');
+      const xp = xo.renames.findIndex((n) => /^layout-.*\.json$/.test(n) && !n.endsWith('.meta.json'));
+      ok(xp === -1 || xp > xo.renames.indexOf('layouts.json'), 'CONTROL (the flush\'s drain cut, in a copy): layouts.json is written while its rollback point is still owed (red)', xo.renames);
     }
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }

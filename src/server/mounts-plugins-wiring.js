@@ -355,7 +355,7 @@ const automation = require('./automation-engine.js').create({ dataDir: path.join
     isArchived: isArchivedKey,
     resumeRowOf,
     // the desktop's NAME is a person's words reaching an agent: ONE call of the belt, as a line (the peer-text census row of vibespace-api)
-    rowDesktopOf: (key) => { const d = RL_PURE.rowDesktopOf(persistenceRouter && typeof persistenceRouter.readLayouts === 'function' ? persistenceRouter.readLayouts() : null, key); return d ? { id: d.id, name: d.name == null ? null : require('../peer-text.js').toAgentText(d.name, { kind: 'line', max: 200 }) } : null; },
+    rowDesktopOf: (key) => { let lay = null; try { lay = persistenceRouter && typeof persistenceRouter.readLayouts === 'function' ? persistenceRouter.readLayouts() : null; } catch (e) { if (!(e && e.code === 'store_unread')) throw e; }   /* B-225b: the desktops held ⇒ no desktop named */ const d = RL_PURE.rowDesktopOf(lay, key); return d ? { id: d.id, name: d.name == null ? null : require('../peer-text.js').toAgentText(d.name, { kind: 'line', max: 200 }) } : null; },
     deadOf: endedKeyOf,
     // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder over the hub's in-memory facts
     listFacts, proposals: endProposals }),

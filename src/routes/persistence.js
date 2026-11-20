@@ -35,7 +35,7 @@ function ensureDir(dir) { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive
 // census counts call sites
 const TEXT_PARTS = Symbol('a text in parts');
 function writeJsonAtomic(file, data) {
-  const tmp = `${file}.tmp`;
+  const tmp = `${file}.${process.pid}.tmp`;   // B-225b R10: every temp name carries the pid (two processes never share one)
   const parts = data && data[TEXT_PARTS] ? data[TEXT_PARTS] : [typeof data === 'string' ? data : JSON.stringify(data, null, 2)];
   for (let i = 0; i < parts.length; i++) fs.writeFileSync(tmp, parts[i], { flag: i ? 'a' : 'w' });
   fs.renameSync(tmp, file);
@@ -120,17 +120,56 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     });
   };
 
+  /** B-225b: a store's refusal BY NAME — held ⇒ 503 store_unread {held: file, kind, code, since, rung} (R2: never a 200 with the
+   *  defaults); a file that appeared since the start ⇒ 409 store_appeared. → true when answered */
+  const storeRefused = (res, e) => {
+    if (!e || (e.code !== 'store_unread' && e.code !== 'store_appeared')) return false;
+    res.status(e.status || 503).json({ error: e.message, code: e.code, ...(e.held ? { held: e.held } : {}) });
+    return true;
+  };
+  /** a route whose store may be held: its refusal answered by name, anything else thrown as before */
+  const guarded = (fn) => function (req, res, next) {
+    let r;
+    try { r = fn.call(this, req, res, next); } catch (e) { if (storeRefused(res, e)) return undefined; throw e; }
+    if (r && typeof r.then === 'function') return r.catch((e) => { if (!storeRefused(res, e)) throw e; });
+    return r;
+  };
+  /** the stores' word to every page (R7 — the page's ONE banner reads it): a hold SAID past its silent rungs, and its LIFT */
+  const storeWord = (type, facts) => broadcastText(() => JSON.stringify({ type, ...facts }));
+
   // ── Layout/Preset Persistence (cached in memory) ──
   const LAYOUTS_FILE = path.join(dataDir, 'layouts.json');
   let _layoutsCache = null;
+  // B-225b (cut 3 — R1, R2, R6, R10, R12): THE DESKTOPS' HOLD. A layouts.json the START could not read (a read that failed, bytes that
+  // are not a layout) is HELD and has NO VALUE: GET /api/layouts and every layout door answer 503 store_unread by name, the ws doors
+  // answer `layout-held`, and nothing writes over it (writeLayouts and the flush refuse). The release read it as the EMPTY layout:
+  // a page then made «Desktop 1», and the hub wrote it over the person's desktops. NOT THERE writes nothing at the read; the first
+  // change creates it exclusively. A failed RE-read never replaces the copy in memory (there is no re-read: the copy is the truth).
+  let _layoutsRead = false;
+  const LAYOUTS_EMPTY = () => ({ current: null, autoSave: null, saved: {}, customGrids: [] });
+  const layoutsHold = SH.create({
+    file: LAYOUTS_FILE,
+    valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
+    onLift: () => layoutsAgain('its hold lifted'),
+    onSaid: (h) => { console.warn(`[layouts] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the desktops are HELD: nothing is written over them, their doors refuse by name until it reads`); storeWord('store-held', h); },
+  });
+  /** the desktops read again WHOLE (the hold lifted, or a file appeared where the start found none): every page told */
+  function layoutsAgain(why) {
+    if (_layoutsSaveTimer) { clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = null; }
+    _layoutsCache = null; _lastGood = null; _lastShape = null;
+    try { readLayouts(); } catch (e) { console.warn(`[layouts] the desktops could not be read again (${why}): ${(e && e.message) || e}`); return; }
+    console.log(`[layouts] the desktops are read again (${why})`);
+    storeWord('store-lifted', { file: 'layouts.json', why });
+  }
 
   // lane conversation-facts: `preread` = the file's text the list read OFF the loop (layoutsAsync) — the same parse and checks,
   // no sync read and no mkdir; '' (a file that could not be read) parses to the empty record as before
   function readLayouts(preread) {
     if (_layoutsCache) return _layoutsCache;
-    if (preread === undefined) ensureDir(dataDir);
-    try { _layoutsCache = JSON.parse(preread !== undefined ? preread : fs.readFileSync(LAYOUTS_FILE, 'utf-8')); }
-    catch { _layoutsCache = { current: null, autoSave: null, saved: {}, customGrids: [] }; }
+    if (!_layoutsRead) { _layoutsRead = true; if (preread === undefined) ensureDir(dataDir); layoutsHold.readAtStart(preread); }   // (B-225b: ONE start read, through the hold)
+    const doc = layoutsHold.answer();   // R2: HELD ⇒ store_unread by name — never the empty layout under its name
+    layoutsHold.takeText();
+    _layoutsCache = doc === undefined ? LAYOUTS_EMPTY() : doc;   // NOT THERE (R6): the empty layout in memory, nothing written
     // what an older build wrote: a Job input window's title naming its job (the next flush writes the generic title)
     if (wordlessTitles(_layoutsCache)) { if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = setTimeout(flushLayouts, 500); }
     // …and a dedup trace naming a window its desktop's record lists (r4 K — tracesTrue below)
@@ -144,7 +183,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   let _layoutsSaveTimer = null;
   function flushLayouts() {
     if (_layoutsSaveTimer) { clearTimeout(_layoutsSaveTimer); _layoutsSaveTimer = null; }
-    if (_layoutsCache) { try { ensureDir(dataDir); writeJsonAtomic(LAYOUTS_FILE, _layoutsCache); } catch {} }
+    drainPoints();   // B-225b R10: a rollback point OWED lands BEFORE the layouts.json write that replaces its state (the exit flush too)
+    if (_layoutsCache) {
+      try { ensureDir(dataDir); layoutsHold.write(_layoutsCache); }
+      catch (e) { if (e && e.code === 'store_appeared') layoutsAgain('a file appeared where the start found none'); }   // (a refused flush otherwise: the second half of B-225b says it)
+    }
   }
   // ── LAYOUT HISTORY (2.296.0, after a bug flattened a user's whole desktop
   // layout and the only good copy was gone). Layouts are the one piece of
@@ -261,7 +304,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (notes && notes.writer) seen.writer = notes.writer;
       if (notes && Array.isArray(notes.refused) && notes.refused.length) seen.refused = notes.refused.splice(0);
       wordlessTitles(snap); // a rollback point is a layout record too (the disk belt above may read what an older build wrote)
-      setImmediate(() => {
+      // B-225b R10: OWED, in order — off the write path at the next turn, or by the layouts.json flush BEFORE it writes (whichever first)
+      _pointsOwed.push(() => {
         try {
           fs.mkdirSync(HISTORY_DIR, { recursive: true });
           const before = layoutSummary(snap);
@@ -286,8 +330,12 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
           if (!_histWarned) { _histWarned = true; console.warn('[layout-history] snapshot FAILED — rollback points are not being written:', e.message); }
         }
       });
+      setImmediate(drainPoints);
     } catch {}
   }
+  /** the owed rollback points, written in the order they were made (each its own try — one that fails never holds the next) */
+  const _pointsOwed = [];
+  function drainPoints() { while (_pointsOwed.length) { const job = _pointsOwed.shift(); try { job(); } catch { /* said by the job */ } } }
   // TIERED retention (adversarial review): a flat newest-40 ring is exactly
   // wrong for this feature's motivating case — a mass-resume storm produces
   // dozens of shape changes in seconds and would evict every PRE-storm point,
@@ -327,6 +375,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return n;
   }
   function writeLayouts(data) {
+    layoutsHold.refuseIfHeld('this layout change');   // B-225b R1: the desktops HELD — nothing replaces them (a preset, a restore, an import)
     // THE CHOKE POINT keeps no record's words in a window title (above) — IN PLACE: the ws layout-sync handler relays
     // the SAME window objects it hands here, so the frame other clients receive carries the generic title too
     tracesTrue(data);
@@ -568,8 +617,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (!_layoutsLoading) {
       // ONLY «no such file» is the empty layout; any other error leaves the cache UNTOUCHED (a page opened later must never receive
       // an empty layout its autosave would write over the person's desktops) and rejects — the list says it could not be read, with the code
-      _layoutsLoading = fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((t) => t, (e) => { if (e && e.code === 'ENOENT') return ''; _layoutsErr = (e && e.code) || 'unreadable'; throw e; })
-        .then((t) => { _layoutsErr = null; return readLayouts(t); })   // readLayouts' own parse and checks, fed the text read off the loop
+      // B-225b: the read off the loop is the hold's START read (its three answers) — held ⇒ rejected by name, the cache untouched.
+      // While HELD, an ask reads again NOW (the hold's one read off the loop): a read that lands lifts it and the cache is the file's
+      const read = _layoutsRead && layoutsHold.held() ? layoutsHold.readAgain().then(() => undefined)
+        : fs.promises.readFile(LAYOUTS_FILE, 'utf-8').then((text) => ({ text }), (error) => ({ error }));
+      _layoutsLoading = read
+        .then((r) => { const v = readLayouts(r); _layoutsErr = null; return v; })
+        .catch((e) => { _layoutsErr = (e && e.held && (e.held.code || e.held.kind)) || (e && e.code) || 'unreadable'; throw e; })
         .finally(() => { _layoutsLoading = null; });
     }
     return _layoutsLoading;
@@ -623,42 +677,69 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
 
   // ── Bookmarks ──
   const BOOKMARKS_FILE = path.join(dataDir, 'bookmarks.json');
+  // B-225b (cut 3 — R1, R2, R6, R12): the bookmarks are READ ONCE at the start, through the hold, and kept (the release read the file
+  // at every GET — a read that failed mid-run served the four defaults, and the next save wrote them over the person's list); HELD ⇒
+  // no value: the GET and the save answer 503 store_unread by name. NOT THERE ⇒ the four defaults in memory, nothing written
+  let _bookmarksCache = null, _bookmarksRead = false;
+  const bookmarksHold = SH.create({
+    file: BOOKMARKS_FILE,
+    valid: (v) => Array.isArray(v),
+    onLift: (v) => { _bookmarksCache = v; console.log('[bookmarks] the bookmarks are read again (its hold lifted)'); storeWord('store-lifted', { file: 'bookmarks.json', why: 'its hold lifted' }); broadcast({ type: 'bookmarks-updated', bookmarks: v }); },
+    onSaid: (h) => { console.warn(`[bookmarks] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the bookmarks are HELD: nothing is written over them`); storeWord('store-held', h); },
+  });
+  const BOOKMARKS_DEFAULT = () => {
+    const home = os.homedir();
+    return [
+      { label: 'Home', path: home },
+      { label: 'Desktop', path: path.join(home, 'Desktop') },
+      { label: 'Downloads', path: path.join(home, 'Downloads') },
+      { label: 'Documents', path: path.join(home, 'Documents') },
+    ];
+  };
   function readBookmarks() {
-    ensureDir(dataDir);
-    try { return JSON.parse(fs.readFileSync(BOOKMARKS_FILE, 'utf-8')); }
-    catch {
-      const home = os.homedir();
-      return [
-        { label: 'Home', path: home },
-        { label: 'Desktop', path: path.join(home, 'Desktop') },
-        { label: 'Downloads', path: path.join(home, 'Downloads') },
-        { label: 'Documents', path: path.join(home, 'Documents') },
-      ];
-    }
+    if (_bookmarksCache) return _bookmarksCache;
+    if (!_bookmarksRead) { _bookmarksRead = true; ensureDir(dataDir); bookmarksHold.readAtStart(); }
+    const v = bookmarksHold.answer();   // R2: HELD ⇒ store_unread by name
+    bookmarksHold.takeText();
+    _bookmarksCache = v === undefined ? BOOKMARKS_DEFAULT() : v;
+    return _bookmarksCache;
   }
   function writeBookmarks(data) {
     ensureDir(dataDir);
-    writeJsonAtomic(BOOKMARKS_FILE, data);
+    try { bookmarksHold.write(data); }   // R1: refuses a held list by name; NOT THERE ⇒ created exclusively
+    catch (e) { if (e && e.code === 'store_appeared') { _bookmarksCache = null; try { broadcast({ type: 'bookmarks-updated', bookmarks: readBookmarks() }); } catch { /* said by the read */ } } throw e; }
+    _bookmarksCache = data;
   }
 
-  router.get('/api/bookmarks', (req, res) => res.json(readBookmarks()));
+  router.get('/api/bookmarks', guarded((req, res) => res.json(readBookmarks())));
 
-  router.post('/api/bookmarks', (req, res) => {
+  router.post('/api/bookmarks', guarded((req, res) => {
     const bookmarks = req.body;
     if (!Array.isArray(bookmarks)) return res.status(400).json({ error: 'Expected array' });
     writeBookmarks(bookmarks);
     broadcast({ type: 'bookmarks-updated', bookmarks });
     res.json({ success: true });
-  });
+  }));
 
   // ── Custom Themes ──
   const CUSTOM_THEMES_FILE = path.join(dataDir, 'custom-themes.json');
-  let _customThemesCache = null;
+  let _customThemesCache = null, _customThemesRead = false;
+  // B-225b (cut 3 — R1, R2, R6): a custom-themes.json the START could not read is HELD — no value: the GET and every save answer 503
+  // store_unread by name, nothing is written over it (the release served «no themes», and the next save wrote the one theme over the
+  // person's set). NOT THERE ⇒ no themes in memory, nothing written
+  const themesHold = SH.create({
+    file: CUSTOM_THEMES_FILE,
+    valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
+    onLift: (v) => { _customThemesCache = v; console.log('[themes] the custom themes are read again (its hold lifted)'); storeWord('store-lifted', { file: 'custom-themes.json', why: 'its hold lifted' }); broadcast({ type: 'custom-themes-updated', themes: v }); },
+    onSaid: (h) => { console.warn(`[themes] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the custom themes are HELD: nothing is written over them`); storeWord('store-held', h); },
+  });
 
   function readCustomThemes() {
     if (_customThemesCache) return _customThemesCache;
-    try { _customThemesCache = JSON.parse(fs.readFileSync(CUSTOM_THEMES_FILE, 'utf-8')); }
-    catch { _customThemesCache = {}; }
+    if (!_customThemesRead) { _customThemesRead = true; themesHold.readAtStart(); }
+    const v = themesHold.answer();   // R2: HELD ⇒ store_unread by name
+    themesHold.takeText();
+    _customThemesCache = v === undefined ? {} : v;
     return _customThemesCache;
   }
 
@@ -668,8 +749,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // value the warmth derivation SUPERSEDED (a bundle exported on .374, an old tab's save) with the same PURE rule the one-shot
     // boot migration ran over what was already on disk
     data = normalizeCustomThemes(data).doc;
+    try { themesHold.write(data); }   // R1: refuses a held set by name; NOT THERE ⇒ created exclusively (a file that appeared: adopted)
+    catch (e) { if (e && e.code === 'store_appeared') { _customThemesCache = null; try { broadcast({ type: 'custom-themes-updated', themes: readCustomThemes() }); } catch { /* said by the read */ } } throw e; }
     _customThemesCache = data;
-    writeJsonAtomic(CUSTOM_THEMES_FILE, data);
     broadcast({ type: 'custom-themes-updated', themes: data });
   }
 
@@ -725,7 +807,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     file: USER_STATE_FILE,
     valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
     onLift: () => userStateAgain('its hold lifted'),
-    onSaid: (h) => console.warn(`[user-state] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the conversation list is HELD: nothing is written over it, its doors refuse by name until it reads`),
+    onSaid: (h) => { console.warn(`[user-state] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the conversation list is HELD: nothing is written over it, its doors refuse by name until it reads`); storeWord('store-held', h); },
   });
   // lane sidebar-echo-order (inc-mwbn2xp8-ks0b): user state BY ITEM, IN THE SERVER'S ORDER — the ops (src/user-state-ops.js, PURE,
   // shared with the page), the write counter `stateRev` and the server's LIFE `stateEpoch` (round 2, law 3: one id per process
@@ -949,6 +1031,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     let st;
     try { st = readUserState(); } catch (e) { console.warn(`[user-state] the list could not be read again (${why}): ${(e && e.message) || e}`); return; }
     console.log(`[user-state] the conversation list is read again (${why})`);
+    storeWord('store-lifted', { file: 'user-state.json', why });
     broadcastText(() => `{"type":"user-state-updated","state":${JSON.stringify(wireOf(st))}}`);
     try { onUserStateWrite(st); } catch (e) { console.warn('[user-state] write hook failed:', e && e.message); }
   }
@@ -996,13 +1079,6 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }); };
   router.use('/api/user-state/batches', userStateBody(UO.MAX_BODY_BYTES));
   { const layer = router.stack[router.stack.length - 1]; router.ownsBody = (p) => layer.regexp.test(p); }   // (the parser's own layer: ONE match)
-  /** B-225b: a store's refusal BY NAME — held ⇒ 503 store_unread {held: file, kind, code, since, rung} (R2: never a 200 with the
-   *  defaults); a file that appeared since the start ⇒ 409 store_appeared. → true when answered */
-  const storeRefused = (res, e) => {
-    if (!e || (e.code !== 'store_unread' && e.code !== 'store_appeared')) return false;
-    res.status(e.status || 503).json({ error: e.message, code: e.code, ...(e.held ? { held: e.held } : {}) });
-    return true;
-  };
   router.get('/api/user-state', (req, res) => {   // lane sidebar-echo-order: + stateEpoch, − stateBatches
     let st; try { st = readUserState(); } catch (e) { if (storeRefused(res, e)) return; throw e; }
     res.json(wireOf(st));
@@ -1470,6 +1546,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}) });
   });
 
+  // B-225b: EVERY door of the desktops and the custom themes answers a held store BY NAME (503 store_unread) — its handlers wrapped
+  // once, here, by path (the conversation list's and the bookmarks' doors say it in their own handlers)
+  for (const layer of router.stack) if (layer.route && /^\/api\/(layouts|layouts-active|layouts-autosave|custom-grids|layout-history|custom-themes)(\/|$)/.test(layer.route.path)) for (const l of layer.route.stack) l.handle = guarded(l.handle);
   return router;
 }
 

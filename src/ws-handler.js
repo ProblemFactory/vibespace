@@ -363,6 +363,16 @@ function registerWsHandler(wss, ctx) {
   // lost its entry, and the page that showed it closed it; a session the hub had not adopted yet after a restart would have lost its
   // entry too): only the conversation's END takes it out of the dedup trace — this hub's end seam (endSessionBody: the ws kill, the
   // routes, an automation key), at once, on every desktop. An absence the hub has not confirmed never shrinks the trace.
+  /** B-225b (cut 3): the desktops HELD (layouts.json could not be read at the start — no value): a ws layout door answers
+   *  `layout-held` BY NAME to its sender — nothing applied, nothing relayed, nothing written; the page keeps its change (R4) */
+  const layoutsOrHeld = (ws, data) => {
+    try { return readLayouts(); }
+    catch (e) {
+      if (!(e && e.code === 'store_unread')) throw e;
+      try { ws.send(JSON.stringify({ type: 'layout-held', op: (data && data.type) || null, desktopId: (data && data.desktopId) || null, held: e.held || null, sentAt: (data && data.sentAt) ?? null })); } catch { }
+      return null;
+    }
+  };
   const endedConvs = new Map(); // sid → at, this hub's life (capped: a forgotten end only lets a later dedup of its copy be traced)
   const endTraces = (sid) => {
     if (!sid) return;
@@ -1820,7 +1830,7 @@ function registerWsHandler(wss, ctx) {
           // drop anything <= the last seq they applied, so a delayed/stale
           // broadcast can never "undo" a newer one (the ping-pong bug where an
           // operation on one client got reverted and replayed several times).
-          const layoutData = readLayouts();
+          const layoutData = layoutsOrHeld(ws, data); if (!layoutData) break;   // B-225b: held ⇒ `layout-held` by name
           const desktopId = data.desktopId;
           // The Stage is NOT a desktop — its state lives in the 'stage'
           // SyncStore. A '__stage__' record here is the pre-2.209.0 poisoning
@@ -2000,7 +2010,7 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'desktop-create': {
-          const layoutData = readLayouts();
+          const layoutData = layoutsOrHeld(ws, data); if (!layoutData) break;   // B-225b: held ⇒ `layout-held` by name
           if (!layoutData.desktopMeta) layoutData.desktopMeta = [];
           if (!layoutData.desktops) layoutData.desktops = {};
           const newId = data.id || ('desk-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 5));
@@ -2017,7 +2027,7 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'desktop-delete': {
-          const layoutData = readLayouts();
+          const layoutData = layoutsOrHeld(ws, data); if (!layoutData) break;   // B-225b: held ⇒ `layout-held` by name
           if (layoutData.desktopMeta) {
             layoutData.desktopMeta = layoutData.desktopMeta.filter(d => d.id !== data.desktopId);
           }
@@ -2031,7 +2041,7 @@ function registerWsHandler(wss, ctx) {
         }
 
         case 'desktop-rename': {
-          const layoutData = readLayouts();
+          const layoutData = layoutsOrHeld(ws, data); if (!layoutData) break;   // B-225b: held ⇒ `layout-held` by name
           const meta = (layoutData.desktopMeta || []).find(d => d.id === data.desktopId);
           if (meta) meta.name = data.name;
           writeLayouts(layoutData);
@@ -2045,7 +2055,7 @@ function registerWsHandler(wss, ctx) {
           // 2.250.0). Reconcile against the stored set so a stale client can't
           // drop or invent a desktop: keep only known ids in the given order,
           // then append any stored ids the client omitted.
-          const layoutData = readLayouts();
+          const layoutData = layoutsOrHeld(ws, data); if (!layoutData) break;   // B-225b: held ⇒ `layout-held` by name
           const cur = layoutData.desktopMeta || [];
           const byId = new Map(cur.map(d => [d.id, d]));
           const seen = new Set();

@@ -1177,11 +1177,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
    *  archive (the values are the five constants). */
   function dropWarmthDerived(file) {
     const none = (store) => ({ store, themes: 0, dropped: {}, kept: 0, skipped: [] });
-    let text;
-    try { text = fs.readFileSync(file, 'utf-8'); } catch (e) { if (e && e.code === 'ENOENT') return none('absent'); throw e; }
-    let doc;
-    try { doc = JSON.parse(text); } catch { return none('unparseable'); }   // never rewrite what we cannot read
-    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return none('not-an-object');
+    // B-225b R9: through the store's three answers — not there ⇒ nothing to do; HELD (a read that failed, bytes that are not the set)
+    // ⇒ THROWN by name: never rewritten, and the runner runs it again at the next start (the release recorded «unparseable» as done)
+    const doc = require('../store-hold.js').readNow(file, { valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v), what: 'this migration' });
+    if (doc === undefined) return none('absent');
     const n = normalizeCustomThemes(doc);
     const rep = { store: 'untouched', themes: n.themes, dropped: n.dropped, kept: n.kept, skipped: n.skipped };
     if (!n.changed) return rep;   // nothing dropped ⇒ never written (test-migrations pins it by inode + mtime)

@@ -2988,8 +2988,10 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       '…and a run whose write landed but whose ledger stamp did not: the next boot finds nothing left to drop and records it', lateRes);
     const ra = rootOf('absent'), ru = rootOf('unparseable', '{ not json');
     let absent = null, unp = null; try { absent = boot(ra); unp = boot(ru); } catch (e) { absent = absent || { status: 'threw', error: e.message }; }
-    ok(absent && absent.status === 'ran' && absent.report.store === 'absent' && !fs.existsSync(fileOf(ra)) && unp && unp.status === 'ran' && unp.report.store === 'unparseable' && fs.readFileSync(fileOf(ru), 'utf8') === '{ not json',
-      'no store ⇒ none made; an unparseable store ⇒ never rewritten (both recorded)', { absent, unp });
+    // B-225b R9 (the persistence holds): a store that is not the set is HELD — the migration THROWS by name, never rewrites it, and is
+    // NOT recorded: it runs again at the next start (the release recorded «unparseable» as done, for good, over a file it never read)
+    ok(absent && absent.status === 'ran' && absent.report.store === 'absent' && !fs.existsSync(fileOf(ra)) && unp && unp.status === 'failed' && /custom-themes\.json could not be read \(damaged/.test(unp.error || '') && fs.readFileSync(fileOf(ru), 'utf8') === '{ not json',
+      'no store ⇒ none made (recorded); a store that is not the set ⇒ never rewritten, the migration fails BY NAME and is not recorded (it runs again at the next start)', { absent, unp });
 
     // r3 (the acceptance of 3ba074455): ① a by-name map is PROTOTYPE-LESS — themes named `constructor`, `__proto__` and
     // `toString` beside an ordinary one are rewritten like any other (an Object accumulator threw on `constructor` before the

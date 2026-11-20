@@ -459,9 +459,10 @@ console.log('D · the musts of the acceptance, each with its red control');
   const r7 = await COL.create({ activeSessions: new Map([['sess-1', fakeChat('A')]]), keyOf: () => KEY_A, ...known, prepare: S7.prepare, desktopOf: S7.desktopOf, desktops: S7.desktops }).list();
   ok(r7.desktops === null && /could not be read \(EISDIR\)/.test(r7.desktopsWhy) && P7.router.layoutsCached() === null, 'MUST 7 a placed read error: the desktops say it could not be read (its code) and the cache stays EMPTY (no page can receive an empty layout)', { why: r7.desktopsWhy, cached: P7.router.layoutsCached() });
   const srcP = fs.readFileSync(PFILE, 'utf8');
-  const N7 = "(e) => { if (e && e.code === 'ENOENT') return ''; _layoutsErr = (e && e.code) || 'unreadable'; throw e; }";
-  ok(srcP.split(N7).length === 2, 'MUST 7 the «no such file only» rule is in the read once (the mutation anchor)');
-  const PM = mutantCopies('conversation-facts-m7', REPO).load('src/routes/persistence.js', srcP.replace(N7, "() => ''"), 'any-error-empty');
+  // (B-225b: the «no such file only» rule is the hold's own — src/store-hold.js; the mutation cuts the hold's answer in the read)
+  const N7 = "    const doc = layoutsHold.answer();";
+  ok(srcP.split(N7).length === 2, 'MUST 7 the read takes the hold\'s answer once (the mutation anchor)');
+  const PM = mutantCopies('conversation-facts-m7', REPO).load('src/routes/persistence.js', anchored(srcP, N7, "    let doc; try { doc = layoutsHold.answer(); } catch { doc = undefined; }", 'any-error-empty'), 'any-error-empty');
   PM.setup({ dataDir: dd7, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
   await PM.router.layoutsAsync().catch(() => null);
   ok(PM.router.layoutsCached() && Array.isArray(PM.router.layoutsCached().customGrids), 'MUST 7 RED: today\'s read turns the error into the empty layout AND caches it (a page opened later would receive it)');
@@ -753,9 +754,8 @@ console.log('E · round two: the boot proof, the set as seen, owned jobs, the fi
   ok(PX.router.layoutsError() === null && Array.isArray(SX.desktops()), 'a read that lands clears the reason', SX.desktops());
   fs.rmSync(path.join(dd, 'layouts.json'), { force: true }); fs.mkdirSync(path.join(dd, 'layouts.json'));
   const srcP = fs.readFileSync(PFILE, 'utf8');
-  const NE = " _layoutsErr = (e && e.code) || 'unreadable'; throw e; }";
-  if (srcP.split(NE).length !== 2) throw new Error('anchor missing: the kept error code');
-  const { r: rm } = await run(mutantCopies('conversation-facts-r2-lay', REPO).load('src/routes/persistence.js', srcP.replace(NE, ' throw e; }'), 'code-lost'));
+  const NE = " _layoutsErr = (e && e.held && (e.held.code || e.held.kind)) || (e && e.code) || 'unreadable'; throw e; }";
+  const { r: rm } = await run(mutantCopies('conversation-facts-r2-lay', REPO).load('src/routes/persistence.js', anchored(srcP, NE, ' throw e; }', 'code-lost'), 'code-lost'));
   ok(/still being read — ask again/.test(rm.desktopsWhy), 'RED: without the kept code the list says «still being read — ask again» for an error that lasts', rm.desktopsWhy);
   fs.rmSync(dd, { recursive: true, force: true });
   fresh();

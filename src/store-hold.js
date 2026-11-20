@@ -55,9 +55,10 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   const later = schedule || ((fn, ms) => { const t = setTimeout(fn, ms); t.unref?.(); return t; });
   const answerOf = (read) => SR.storeAnswer(read, { parse, valid });
 
-  /** THE READ AT THE START (sync — a start reads its stores before it serves). → 'data' | 'missing' | 'held' */
-  function readAtStart() {
-    const read = readSync(file);
+  /** THE READ AT THE START (sync — a start reads its stores before it serves; `pre` = the same read made off the loop by the caller,
+   *  { text } | { error }). → 'data' | 'missing' | 'held' */
+  function readAtStart(pre) {
+    const read = pre && (typeof pre.text === 'string' || pre.error) ? pre : readSync(file);
     const a = answerOf(read);
     if (a.state === 'data') { value = a.value; text = read.text; missing = false; return 'data'; }
     if (a.state === 'missing') { missing = true; return 'missing'; }
