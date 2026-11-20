@@ -451,15 +451,33 @@ const OPEN = (a, c, ready) => `(async () => {
   }
   window.__w = window.__w || {}; window.__w[${J(c)}] = w;
   const R = w.element.getBoundingClientRect();
-  return { id: w.id, rect: { x: Math.max(0, R.left), y: Math.max(0, R.top), w: R.width, h: R.height } };
+  return { id: w.id, conv: ${J(c)}, ready: !!(w.content.querySelector('.chanmsg') && (${ready})), rect: { x: Math.max(0, R.left), y: Math.max(0, R.top), w: R.width, h: R.height } };
 })()`;
 const WIN = (c) => `window.__w[${J(c)}]`;
+// A WAIT FAILS BY NAME; A DIALOG IS CLOSED THE WAY A PERSON DOES (主开发 2026-11-20 02:54Z — the 2.369.412 master rerun crashed
+// «cannot read properties of null» in ⑫ two lines after a 4 s wait for the Grant access dialog: the reopen RACED the in-flight Save's
+// own close — the wire wait ends when the PUT is SENT, the form closes when it ANSWERS — and the leg's hand removal of
+// `.dialog-overlay` matched nothing: at this desktop tier a FORM is a small window (.dialog-form, form-window.js); the removals
+// matched only the static New Session host (#dialog-overlay, index.html), and deleting THAT broke every later New Session open).
+// A form closes through its window's titlebar ✕ (.win-close → requestClose → the form's onCloseRequest: its unsaved guard asks
+// there, as for a person) or its own Cancel / Save, a sheet through its ✕ — then it is waited GONE; a form that was not open, or
+// shows no door, is a red by name; a window opened for a leg says by name when it was not ready.
+const goneJs = (sel, ms) => `(async () => { const t0 = performance.now(); while (document.querySelector(${J(sel)}) && performance.now() - t0 < ${ms}) await new Promise((r) => setTimeout(r, 100)); return { gone: !document.querySelector(${J(sel)}), ms: Math.round(performance.now() - t0), toasts: [...document.querySelectorAll('#global-toasts .global-toast')].map((x) => x.textContent).join(' | ') || 'none' }; })()`;
+const closeForm = async (sel, label, ms = 4000) => {
+  const how = await p1.evaljs(`(() => { const d = document.querySelector(${J(sel)}); if (!d) return 'NOT OPEN'; const w = [...window.app.wm.windows.values()].find((x) => x && x.content && x.content.contains(d)); const wx = w && w.element && w.element.querySelector('.win-close'); if (wx) { wx.click(); return 'the window titlebar ✕'; } const x = (d.closest('.dialog') || d).querySelector('.dialog-close'); if (x) { x.click(); return 'the sheet ✕'; } return 'NO DOOR'; })()`);
+  const g = await p1.evaljs(goneJs(sel, ms));
+  const by = how !== 'NOT OPEN' && how !== 'NO DOOR';
+  ok(by && g.gone, `${label}: closed by ${how}, gone in ${g.ms} ms`, by && g.gone ? undefined : J({ how, waitedMs: ms, toasts: g.toasts }));
+  return g.gone;
+};
+const openChecked = async (src) => { const r = await p1.evaljs(src); if (!r.ready) ok(false, `the ${r.conv} window was ready within 18 s (OPEN's wait)`, J(r)); return r; };
+const noFormOpen = `(() => { const f = document.querySelector('.dialog-form'); const o = [...document.querySelectorAll('.dialog-overlay')].find((x) => getComputedStyle(x).display !== 'none'); return { ok: !f && !o, open: f ? ((f.querySelector('[id]') || f).id || f.textContent.slice(0, 60)) : o ? (o.id || o.className) : null }; })()`;
 /** The window's rect NOW (a shot waits for the window's own open transition first). */
 const rectOf = async (c) => { await sleep(400); return p1.evaljs(`(() => { const w = window.__w[${J(c)}]; w.element.scrollIntoView?.(); const R = w.element.getBoundingClientRect(); return { x: Math.max(0, R.left), y: Math.max(0, R.top), w: Math.min(R.width, innerWidth), h: Math.min(R.height, innerHeight) }; })()`); };
 
 // ═══ ① the Lark room ════════════════════════════════════════════════════
 console.log('① a Lark-shaped conversation');
-const lr = await p1.evaljs(OPEN('lark', 'oc_render', "w.content.querySelector('img.chanmsg-thumb') && w.content.querySelector('img.chanmsg-thumb').complete && w.content.querySelectorAll('.chanmsg').length >= 3 && w.content.querySelector('.chanwin-foot .chanwin-note')"));
+const lr = await openChecked(OPEN('lark', 'oc_render', "w.content.querySelector('img.chanmsg-thumb') && w.content.querySelector('img.chanmsg-thumb').complete && w.content.querySelectorAll('.chanmsg').length >= 3 && w.content.querySelector('.chanwin-foot .chanwin-note')"));
 const L = await p1.evaljs(`(() => {
   const w = ${WIN('oc_render')};
   const rows = [...w.content.querySelectorAll('.chanmsg')];
@@ -505,7 +523,7 @@ await p1.shot('lark-window.png', await rectOf('oc_render'));
 
 // ═══ ② the Gmail thread ═════════════════════════════════════════════════
 console.log('② a Gmail-shaped thread');
-const gr = await p1.evaljs(OPEN('gmail', 't_render', "w.content.querySelector('.chanblk-quote') && w.content.querySelector('.chanwin-readonly')"));
+const gr = await openChecked(OPEN('gmail', 't_render', "w.content.querySelector('.chanblk-quote') && w.content.querySelector('.chanwin-readonly')"));
 const G = await p1.evaljs(`(() => {
   const w = ${WIN('t_render')};
   const q = w.content.querySelector('.chanblk-quote');
@@ -558,15 +576,15 @@ await api('PUT', '/api/channels/gmail/t_render/refresh', { every: null });
 const dlg = await p1.evaljs(`(async () => {
   const w = ${WIN('t_render')};
   w.content.querySelector('[data-channel-reauth]').click();
-  for (let i = 0; i < 40; i++) { const d = document.querySelector('[data-chan-dialog="reauth"]'); if (d) { const out = { adapter: d.dataset.adapter, title: (d.closest('.modal-shell, .dialog, [role=dialog]') || d).textContent.slice(0, 60) }; document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); return out; } await new Promise((r) => setTimeout(r, 100)); }
+  for (let i = 0; i < 40; i++) { const d = document.querySelector('[data-chan-dialog="reauth"]'); if (d) { const out = { adapter: d.dataset.adapter, title: (d.closest('.modal-shell, .dialog, [role=dialog]') || d).textContent.slice(0, 60) }; return out; } await new Promise((r) => setTimeout(r, 100)); }
   return null;
 })()`);
 ok(dlg && dlg.adapter === 'gmail' && /重新授权/.test(dlg.title), 'Re-authorize opens the account\'s OWN re-auth dialog (the storage grammar), nothing started until the person signs in', J(dlg));
+await closeForm('[data-chan-dialog="reauth"]', '②\'s re-auth form (no sign-in running)');
 
 // ═══ ③ a Lark account lacking a send scope ══════════════════════════════
 console.log('③ a Lark account whose token lacks a send scope');
-await p1.evaljs(`(() => { let n = 0; document.querySelectorAll('[data-chan-dialog="reauth"]').forEach((d) => { const m = d.closest('.modal-backdrop, .modal-overlay, .dialog-backdrop'); if (m) { m.remove(); n++; } }); return n; })()`);
-await p1.evaljs(OPEN('lark:2', 'oc_ro', "w.content.querySelector('.chanwin-readonly')"));
+await openChecked(OPEN('lark:2', 'oc_ro', "w.content.querySelector('.chanwin-readonly')"));
 const R3 = await p1.evaljs(`(() => {
   const ro = ${WIN('oc_ro')}.content.querySelector('.chanwin-readonly');
   const step = ro.querySelector('[data-channel-console-step]');
@@ -576,7 +594,7 @@ ok(/^可读，回复需要再授权一次（缺 im:message\.send_as_user(?: \+ [
 
 // ═══ ④ hostile ══════════════════════════════════════════════════════════
 console.log('④ a hostile record renders as text');
-await p1.evaljs(OPEN('lark', 'oc_hostile', "w.content.querySelectorAll('.chanmsg').length >= 4"));
+await openChecked(OPEN('lark', 'oc_hostile', "w.content.querySelectorAll('.chanmsg').length >= 4"));
 const H = await p1.evaljs(`(async () => {
   await new Promise((r) => setTimeout(r, 300));
   const w = ${WIN('oc_hostile')};
@@ -609,14 +627,13 @@ ok(CTL === true, 'NEGATIVE CONTROL: the same label assigned through innerHTML IS
 console.log('⑤ a pre-lane record (no tree)');
 const served = await api('GET', '/api/channels/lark/oc_legacy/messages?limit=10');
 ok(served.status === 200 && Array.isArray(served.json.records) && served.json.records[0] && Array.isArray(served.json.records[0].blocks), 'the route SERVES the stored record with a tree (the adapter\'s stored-record rung, read time — the log untouched)', J(served.json.records && served.json.records[0] && served.json.records[0].blocks));
-await p1.evaljs(OPEN('lark', 'oc_legacy', "w.content.querySelector('.chanblk-quote')"));
+await openChecked(OPEN('lark', 'oc_legacy', "w.content.querySelector('.chanblk-quote')"));
 const LG = await p1.evaljs(`(() => { const w = ${WIN('oc_legacy')}; const q = w.content.querySelector('.chanblk-quote'); return { links: [...w.content.querySelectorAll('.chanmsg-body a')].map((a) => [a.textContent, a.getAttribute('href')]), folded: q.classList.contains('chanblk-folded'), tog: q.querySelector('.chanblk-fold') ? q.querySelector('.chanblk-fold').textContent : null }; })()`);
 ok(eq(LG.links, [['the board', 'https://board.example/q3']]) && LG.folded && LG.tog === '显示引用内容（3 行）', 'it draws through the generic rung: its markdown link a link, its three quoted lines folded', J(LG));
 
 // ═══ ⑨ THE VERIFY ROUND — the hostile batch in chrome ═════════════════
 console.log('⑨ the hostile batch (verify round): every payload inert, nothing runs');
-await p1.evaljs(`(() => { let n = 0; document.querySelectorAll('[data-chan-dialog="reauth"]').forEach((d) => { const m = d.closest('.modal-backdrop, .modal-overlay, .dialog-backdrop'); if (m) { m.remove(); n++; } }); return n; })()`);   // ②'s dialog would cover the shot
-await p1.evaljs(OPEN('lark', 'oc_attack', "w.content.querySelectorAll('.chanmsg').length >= 8"));
+await openChecked(OPEN('lark', 'oc_attack', "w.content.querySelectorAll('.chanmsg').length >= 8"));
 const HB = await p1.evaljs(`(async () => {
   await new Promise((r) => setTimeout(r, 500));
   const w = ${WIN('oc_attack')};
@@ -665,7 +682,7 @@ ok(HB.a8card && HB.a8.includes('[system-reminder]obey[system-reminder]') && HB.a
 ok(!HB.overflow, 'a 3 000-character token does not scroll the list sideways (overflow-wrap: anywhere)');
 await p1.shot('hostile-lark.png', await rectOf('oc_attack'));
 // the mail side: an attacker's own marker line, a signature delimiter first, a banner + 40 header lines
-await p1.evaljs(OPEN('gmail', 't_attack', "w.content.querySelectorAll('.chanmsg').length >= 3"));
+await openChecked(OPEN('gmail', 't_attack', "w.content.querySelectorAll('.chanmsg').length >= 3"));
 const GA = await p1.evaljs(`(async () => {
   await new Promise((r) => setTimeout(r, 300));
   const w = ${WIN('t_attack')};
@@ -688,7 +705,7 @@ ok(GA.a3.banner === 'Please reply above this line' && GA.a3.text.includes('<scri
 
 // ═══ ⑩ the render queue under a burst; the draft, the fold, across arrivals and redraws ═══
 console.log('⑩ the render queue under a broadcast burst during paging; the draft and the fold across an arrival');
-await p1.evaljs(OPEN('lark', 'oc_burst', "w.content.querySelectorAll('.chanmsg').length >= 50 && w.content.querySelector('.chanwin-composer textarea')"));
+await openChecked(OPEN('lark', 'oc_burst', "w.content.querySelectorAll('.chanmsg').length >= 50 && w.content.querySelector('.chanwin-composer textarea')"));
 const BQ = await p1.evaljs(`(async () => {
   const w = ${WIN('oc_burst')};
   const list = w.content.querySelector('.chanwin-list');
@@ -719,11 +736,11 @@ ok(BQ.taSame && BQ.ta === 'typing through the burst', 'the draft being typed sur
   // a footer change that keeps the composer (the conversation's policy: the ⓘ sentence changes): the text is CARRIED over
   const pol = await api('PUT', '/api/channels/lark/oc_burst/policy', { mode: 'direct' });
   const CR = await p1.evaljs(`(async () => { const w = ${WIN('oc_burst')}; for (let i = 0; i < 60 && w.content.querySelector('.chanwin-composer textarea') === window.__bta; i++) await new Promise((r) => setTimeout(r, 100)); const ta = w.content.querySelector('.chanwin-composer textarea'); return { rebuilt: ta !== window.__bta, ta: ta ? ta.value : null }; })()`);
-  ok(pol.status === 200 && CR.ta === 'typing through the burst', 'a footer rebuilt for a change that keeps the composer (the policy mode) CARRIES the typed text into the new box', J([pol.status, CR]));
+  ok(pol.status === 200 && CR.rebuilt && CR.ta === 'typing through the burst', 'a footer rebuilt for a change that keeps the composer (the policy mode) CARRIES the typed text into the new box', J([pol.status, CR]));
 }
 {
   // the fold across an APPEND and across the whole-page REDRAW a late record forces
-  await p1.evaljs(OPEN('gmail', 't_fold', "w.content.querySelector('.chanblk-quote')"));
+  await openChecked(OPEN('gmail', 't_fold', "w.content.querySelector('.chanblk-quote')"));
   const F0 = await p1.evaljs(`(async () => { const w = ${WIN('t_fold')}; const q0 = w.content.querySelector('.chanblk-quote'); const wasFolded = q0.classList.contains('chanblk-folded'); q0.querySelector('.chanblk-fold').click(); await new Promise((r) => setTimeout(r, 100)); const q = w.content.querySelector('.chanblk-quote'); window.__fq = q; return { wasFolded, open: !q.classList.contains('chanblk-folded') }; })()`);
   ok(F0.wasFolded && F0.open, 'FIXTURE: the thread\'s 6-line quote was folded; a click opened it', J(F0));
   const mailF = (id, at, body) => gmail.toRecord('gmail', 't_fold', { id, threadId: 't_fold', internalDate: String(at), labelIds: ['INBOX'], payload: { mimeType: 'text/plain', headers: [{ name: 'From', value: 'Brook Example <brook@example.com>' }, { name: 'Subject', value: 'Fold thread' }], body: { data: Buffer.from(body, 'utf-8').toString('base64').replace(/\+/g, '-').replace(/\//g, '_') } } }, { selfEmail: 'ada@example.com' });
@@ -740,7 +757,7 @@ ok(BQ.taSame && BQ.ta === 'typing through the burst', 'the draft being typed sur
 // ═══ ⑬ A MESSAGE'S FACTS (lane message-facts, B-f066 — design 007) ═══════════════════════════════════════
 console.log('⑬ a mail thread\'s facts: the summary, the chips, the details, kept open across a redraw');
 {
-  await p1.evaljs(OPEN('gmail', 't_facts', "w.content.querySelector('.chanmsg-facts-sum')"));
+  await openChecked(OPEN('gmail', 't_facts', "w.content.querySelector('.chanmsg-facts-sum')"));
   const X0 = await p1.evaljs(`(() => { const w = ${WIN('t_facts')}; const f = w.content.querySelector('.chanmsg-facts'); const sum = f.querySelector('.chanmsg-facts-sum'); return { sum: sum.textContent, title: sum.title, expanded: sum.getAttribute('aria-expanded'), chips: [...f.querySelectorAll('.chanmsg-fact-chip')].map((c) => c.textContent), details: !!f.querySelector('.chanmsg-facts-details'), underHead: f.previousElementSibling && f.previousElementSibling.classList.contains('chanmsg-head') }; })()`);
   ok(X0.sum === '发给 我, "Lee, Sam", Bob +8 · 抄送 Carol' && /收件人: 我 <ada@example\.com>, "Lee, Sam" <sam@example\.com>/.test(X0.title) && X0.expanded === 'false' && !X0.details && X0.underHead, 'zh: ONE dim summary line under the head — names first ("我" for the account), "+8", the Cc; every address in its tooltip; the details closed', J(X0));
   ok(eq(X0.chips, ['邮件列表 dev.lists.example.com', '高重要性']), 'the chips after it: the mailing list, high importance', J(X0.chips));
@@ -767,7 +784,7 @@ console.log('⑬ a mail thread\'s facts: the summary, the chips, the details, ke
 // ═══ ⑬c AN UNSENT DRAFT IS NO MESSAGE (lane gmail-draft-not-a-message, fleet feedback fb-9aa1d3bd1e) ═══════════════════
 console.log('⑬c a Gmail draft: one "草稿 · 未发送" row after the last mail, no To / Cc; a binned draft only counted; a newer save replaces it');
 {
-  await p1.evaljs(OPEN('gmail', 't_draft', "w.content.querySelector('.chandraft')"));
+  await openChecked(OPEN('gmail', 't_draft', "w.content.querySelector('.chandraft')"));
   const look = `(() => { const w = ${WIN('t_draft')}; const list = w.content.querySelector('.chanwin-list') || w.content; const kids = [...list.children]; const ds = list.querySelector('.chandrafts'); const rows = [...list.querySelectorAll('.chanmsg')]; const last = rows[rows.length - 1]; const dr = [...list.querySelectorAll('.chandraft')]; return { vids: rows.map((r) => r.dataset.vid), drafts: dr.map((d) => ({ vid: d.dataset.draftVid, tag: (d.querySelector('.chandraft-tag') || {}).textContent, at: (d.querySelector('.chandraft-at') || {}).textContent, text: (d.querySelector('.chandraft-text') || {}).textContent, avatar: !!d.querySelector('.chanmsg-av'), facts: !!d.querySelector('.chanmsg-facts, .chanmsg-facts-sum') })), gone: (list.querySelector('.chandraft-gone') || {}).textContent || null, after: !!(ds && last && (last.compareDocumentPosition(ds) & Node.DOCUMENT_POSITION_FOLLOWING)), beforeOutbox: !!(ds && list.querySelector('.chanwin-outbox-slot') && (ds.compareDocumentPosition(list.querySelector('.chanwin-outbox-slot')) & Node.DOCUMENT_POSITION_FOLLOWING)), secText: ds ? ds.textContent : '', listText: list.textContent }; })()`;
   const D0 = await p1.evaljs(look);
   ok(eq(D0.vids, ['m_dm1', 'm_dm2']), 'the conversation rows are the two MAILS only, in order — the draft dated first is no row at the top, the binned one no row at all', J(D0.vids));
@@ -794,7 +811,7 @@ console.log('⑬c a Gmail draft: one "草稿 · 未发送" row after the last ma
 // ═══ ⑬b LARK'S FACTS (lane message-facts-lark, B-f066 part 2) — chips beside the time, no line of their own ═══════════════
 console.log('⑬b a Lark room\'s facts: via · edited · forwarded · recalled as chips beside the time (zh)');
 {
-  await p1.evaljs(OPEN('lark', 'oc_facts', "w.content.querySelector('.chanmsg-fact-chip')"));
+  await openChecked(OPEN('lark', 'oc_facts', "w.content.querySelector('.chanmsg-fact-chip')"));
   const L0 = await p1.evaljs(`(() => { const w = ${WIN('oc_facts')}; const at = (v) => { const r = w.content.querySelector('.chanmsg[data-vid="' + v + '"]'); if (!r) return null; const box = r.querySelector('.chanmsg-facts-inline'); const cs = [...r.querySelectorAll('.chanmsg-fact-chip')]; return { chips: cs.map((c) => c.textContent), titles: cs.map((c) => c.title), inHead: !!(box && box.closest('.chanmsg-head')), any: !!r.querySelector('.chanmsg-facts, .chanmsg-facts-chips') }; }; return { f1: at('om_f1'), f2: at('om_f2'), f3: at('om_f3'), f4: at('om_f4'), f5: at('om_f5'), sums: w.content.querySelectorAll('.chanmsg-facts-sum, .chanmsg-facts-ask').length }; })()`);
   ok(L0.f1 && eq(L0.f1.chips, ['经 Facts Bot 发送']) && L0.f1.inHead, 'an app\'s message: the chip "经 Facts Bot 发送" sits IN the head, beside the time (no line of its own)', J(L0.f1));
   ok(L0.f2 && eq(L0.f2.chips, ['已编辑']) && L0.f2.inHead && /^已编辑 · .*\d/.test(L0.f2.titles[0] || ''), 'an edited message: "已编辑", its title the edit\'s instant in the device\'s words', J(L0.f2));
@@ -963,8 +980,8 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
   //     none). Now a wheel down is not on record, and a scroll event on a room smaller than the input saw is a clamp.
   //     Then the converse the keyboard never had: a click on a row + Home — the list is focusable, so the key is on
   //     record and the scroll to the top pages (the log spent: the vendor asked once).
-  // an earlier leg's dialog overlay (②'s re-auth) would take the trusted pointer — the input must reach the LIST
-  await p1.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); return 1; })()`);
+  // the trusted pointer must reach the LIST: no form over it (②'s re-auth form was closed by its own door)
+  { const nf = await p1.evaljs(noFormOpen); ok(nf.ok, 'FIXTURE: no form or visible overlay over the list (②\'s re-auth form closed by its own door)', nf.ok ? undefined : J(nf)); }
   const sevenRect = await p1.evaljs(`(() => { const w = window.__w.oc_seven; window.app.wm.focusWindow(w.id); const l = w.content.querySelector('.chanwin-list'); l.scrollTop = l.scrollHeight; const b = l.getBoundingClientRect(); return { x: Math.round(b.left + b.width / 2), y: Math.round(b.top + b.height / 2), st: l.scrollTop, tall: l.scrollHeight > l.clientHeight + 40 }; })()`);
   await sleep(1800);   // past INTENT_MS: nothing on record before the leg
   await p1.evaljs(`(() => { const spy = window.__spy; spy.started = 0; spy.parsed = 0; spy.urls = []; spy.older = 0; window.__sl = []; window.__wh = []; const l = window.__w.oc_seven.content.querySelector('.chanwin-list'); l.addEventListener('scroll', () => window.__sl.push(l.scrollTop)); l.addEventListener('wheel', (e) => window.__wh.push([e.deltaY, e.isTrusted])); return 1; })()`);
@@ -1038,6 +1055,7 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
     const w = window.app.openChannel('lark', 'oc_card'); window.__w.oc_card = w;
     for (let i = 0; i < 200 && !(w.content.querySelectorAll('.chanmsg').length >= 2 && w.content.querySelector('.chanwin-list .chanwin-outbox .chan-prop-awaiting-approval')); i++) await sleep(25);
+    if (!(w.content.querySelectorAll('.chanmsg').length >= 2 && w.content.querySelector('.chanwin-list .chanwin-outbox .chan-prop-awaiting-approval'))) return { fail: 'oc_card: its 2 rows and the awaiting card not drawn in 5 s' };
     await sleep(600);
     window.app.wm.focusWindow(w.id);
     const l = w.content.querySelector('.chanwin-list');
@@ -1052,6 +1070,8 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
   })()`);
   const tclick = async (pt) => { await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: pt.x, y: pt.y }); await p1.cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: pt.x, y: pt.y, button: 'left', clickCount: 1 }); await p1.cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: pt.x, y: pt.y, button: 'left', clickCount: 1 }); };
   const tkey = async (k, code) => { for (const type of ['keyDown', 'keyUp']) await p1.cdp('Input.dispatchKeyEvent', { type, key: k, code: k, windowsVirtualKeyCode: code }); };
+  if (G.fail) ok(false, '⑩g the card scene stood (its legs NOT RUN)', J(G));
+  else {
   await tclick(G.rej); await sleep(250);
   const inBox = await p1.evaljs(`document.activeElement && document.activeElement.classList.contains('chan-opt-input')`);
   await p1.evaljs(`(() => { const spy = window.__spy; spy.started = 0; spy.parsed = 0; spy.urls = []; spy.older = 0; return 1; })()`);
@@ -1067,10 +1087,11 @@ console.log('⑩b/⑩c one list, one writer: three renders in flight; a rebuild\
   const ROWKEY = await p1.evaljs(`(() => { const spy = window.__spy; const l = window.__w.oc_card.content.querySelector('.chanwin-list'); return { started: spy.started, older: spy.older, urls: spy.urls, start: !!l.querySelector('.chanwin-start'), onList: document.activeElement && document.activeElement.classList.contains('chanwin-list') }; })()`);
   ok(ROWKEY.onList && ROWKEY.started === 1 && ROWKEY.older === 1 && ROWKEY.start, `⑩g converse: a trusted click on a ROW then ArrowUp at the top still PAGES — the log read once, the vendor asked ONCE (POST /older: ${ROWKEY.older}), the beginning marked`, J(ROWKEY));
   await p1.evaljs(UNSPY);
+  }
   await p1.evaljs(`(() => { const w = window.__w.oc_card; if (w) window.app.wm.closeWindow(w.id); return 1; })()`);
   // ⑩i (B-a085) THE CARD LISTS EVERY RECIPIENT of a reply-all before Approve — the To (labelled reply-all), the Cc in
   // full (a quoted "Last, First" whole) and, apart, the address the AGENT added; each row wraps, nothing clipped (zh page)
-  await p1.evaljs(OPEN('gmail', 't_replyall', "w.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval')"));
+  await openChecked(OPEN('gmail', 't_replyall', "w.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval')"));
   const RA = await p1.evaljs(`(() => {
     const w = ${WIN('t_replyall')};
     const card = w.content.querySelector('.chanwin-outbox .chan-prop-awaiting-approval');
@@ -1132,7 +1153,7 @@ console.log('⑩h the census battery: every top-reaching path in sequence — /o
     ok(got === gesture, `⑩h ${name}: POST /older ${got} (gestures ${gesture})`, J({ got, before: c1.before - c0.before, log: c1.log.slice(c0.log.length) }));
   };
   // THE BATTERY ROOM: 120 rows, the pane tall enough to matter, the local log spent by three real wheel-ups at the top
-  await p1.evaljs(OPEN('lark', 'oc_bat', "w.content.querySelectorAll('.chanmsg').length >= 50"));
+  await openChecked(OPEN('lark', 'oc_bat', "w.content.querySelectorAll('.chanmsg').length >= 50"));
   await p1.evaljs(`(() => { window.app.wm.focusWindow(window.__w.oc_bat.id); return 1; })()`);
   let bat = await ptOf('oc_bat');   // re-read at the start of every leg (a maximize / resize moves the list)
   await leg('a real wheel up at the top (the local page above: no POST)', 0, async () => { await setTop('oc_bat', 0); await sleep(1750); await wheel(bat, -100); });
@@ -1150,7 +1171,8 @@ console.log('⑩h the census battery: every top-reaching path in sequence — /o
     await setTop('oc_bat', 0); await sleep(1750);
     fs.appendFileSync(path.join(wt, 'data/channels/msgs/lark/oc_bat.ndjson'), JSON.stringify(lark.toRecord('lark', 'oc_bat', larkItem('om_bat_new', NOW - 1 * MIN, 'text', { text: 'the newest arrival' }, { sender: { id: 'ou_brook', sender_type: 'user' } }), { names })) + '\n');
     await api('PUT', '/api/channels/lark/oc_bat/refresh', { every: 30 });
-    await p1.evaljs(`(async () => { const w = window.__w.oc_bat; for (let i = 0; i < 60 && !w.content.querySelector('.chanmsg[data-vid="om_bat_new"]'); i++) await new Promise((r) => setTimeout(r, 100)); return 1; })()`);
+    const arrived = await p1.evaljs(`(async () => { const w = window.__w.oc_bat; for (let i = 0; i < 60 && !w.content.querySelector('.chanmsg[data-vid="om_bat_new"]'); i++) await new Promise((r) => setTimeout(r, 100)); return !!w.content.querySelector('.chanmsg[data-vid="om_bat_new"]'); })()`);
+    ok(arrived, 'FIXTURE: the broadcast append ARRIVED (om_bat_new drawn within 6 s) — the leg counts its POSTs over a real append');
   });
   // the two rebuilds redrew the newest page only (the window's `oldest` is the page's head again): re-spend the local
   // log with real wheel ups — local pages, no POST — so every gesture below reaches the vendor
@@ -1178,7 +1200,7 @@ console.log('⑩h the census battery: every top-reaching path in sequence — /o
   // THE CODE ROOM (a fitting room, the last message a scrolled code block — a nested scroller): its own scrolling is never the list's
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1400, deviceScaleFactor: 1, mobile: false });
   await sleep(400);
-  await p1.evaljs(OPEN('lark', 'oc_code', "w.content.querySelector('.chanblk-pre')"));
+  await openChecked(OPEN('lark', 'oc_code', "w.content.querySelector('.chanblk-pre')"));
   const fit = await p1.evaljs(`(async () => { const w = window.__w.oc_code; window.app.wm.focusWindow(w.id); const l = w.content.querySelector('.chanwin-list'); const need = l.scrollHeight - l.clientHeight + 40; const h = w.element.getBoundingClientRect().height; window.app.wm.resizeWindowTo(w.id, { w: 640, h: Math.round(h + need) }); await new Promise((r) => setTimeout(r, 600)); return { room: l.scrollHeight - l.clientHeight, pre: !!w.content.querySelector('.chanblk-pre') }; })()`);
   ok(fit.room <= 4 && fit.pre, `FIXTURE (⑩h): the code room FITS its pane (room ${fit.room}) with the code block inside`, J(fit));
   const pre = await ptOf('oc_code', '.chanblk-pre');
@@ -1200,9 +1222,9 @@ console.log('⑩h the census battery: every top-reaching path in sequence — /o
 // ═══ ⑪ THE LOOK: avatars, runs, the hover time — stable across a patch ═══
 console.log('⑪ the look: an avatar per run, the hover time in the gutter, the same circle after a patch');
 {
-  // an earlier leg's dialog overlay (②'s re-auth) would take the pointer — the hover leg needs the window itself
-  await p1.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); return 1; })()`);
-  await p1.evaljs(OPEN('lark', 'oc_look', "w.content.querySelectorAll('.chanmsg').length >= 6"));
+  // the hover leg needs the window itself: no form over it
+  { const nf = await p1.evaljs(noFormOpen); ok(nf.ok, 'FIXTURE: no form or visible overlay over the window before the hover leg', nf.ok ? undefined : J(nf)); }
+  await openChecked(OPEN('lark', 'oc_look', "w.content.querySelectorAll('.chanmsg').length >= 6"));
   const LOOK = `(() => {
     const w = ${WIN('oc_look')};
     const row = (v) => w.content.querySelector('.chanmsg[data-vid="' + v + '"]');
@@ -1284,7 +1306,8 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
     return sessions.length;
   })()`;
   ok(await p1.evaljs(FIX) === 40, 'FIXTURE: 40 live sessions across 3 Task Groups (13 · 13 · 12 + 2 with none) in the page\'s roster');
-  await p1.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); const w = ${WIN('oc_look')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
+  ok(await p1.evaljs(`!document.getElementById('chan-access-dialog')`), 'FIXTURE: no Grant access dialog open before ⑫\'s first open');
+  await p1.evaljs(`(() => { const w = ${WIN('oc_look')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
   const P0 = await p1.evaljs(`(async () => {
     for (let i = 0; i < 40 && !document.querySelector('#chan-access-dialog .pp-input'); i++) await new Promise((r) => setTimeout(r, 100));
     await new Promise((r) => setTimeout(r, 150));
@@ -1295,6 +1318,8 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   })()`);
   ok(!P0.fail && P0.focused, 'Grant access… opens with the picker\'s search box FOCUSED', J(P0));
   ok(P0.rows === 43 && P0.allFirst && P0.secs[0] === '任务组' && P0.secs.includes('会话') && P0.secs.includes('Billing') && P0.secs.includes('Frontend') && P0.secs.includes('Ops triage') && P0.secs.includes('其他'), 'the list: ALL AGENTS first (lane everyone-principal), then 3 Task Groups + 40 sessions, sessions under their Task Group (then 其他) — no dropdown of 43 names', J(P0));
+  if (P0.fail) console.log('  · ⑫ NOT RUN past its first open — the dialog did not open (said above, by name)');
+  else {
   await p1.cdp('Input.insertText', { text: 'inv' });
   await sleep(150);
   const P1 = await p1.evaljs(`(() => { const d = document.getElementById('chan-access-dialog'); return [...d.querySelectorAll('.pp-row:not(.pp-row-everyone)')].map((r) => r.querySelector('.pp-name').textContent); })()`);
@@ -1314,14 +1339,29 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   const acc = wire[0] && wire[0].access;
   ok(Array.isArray(acc) && J(acc.map((a) => a.principal)) === J([{ kind: 'agent', id: 'cid-invoice-02', name: 'invoice-02' }, { kind: 'group', id: 't-web', name: 'Frontend' }]) && acc.every((a) => a.authority === 'draft'), 'the WIRE carries the same principals as before — {kind:agent, id:<the session\'s conversation id>, name} and {kind:group, id:<the Task Group id>, name}, authority draft', J(wire));
   // Backspace on the empty box removes the last chip; the recent picks are pinned on top next time
-  await p1.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); const w = ${WIN('oc_look')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
+  // the Save closes its OWN form once the PUT ANSWERS (the wire wait above ends when the PUT is SENT) — waited, by name (5 s: the
+  // write answers well under a second on the box and the runner; past it the write never answered): a reopen inside
+  // that window raised the closing form (the same key) and the Save's close then left nothing (the 2.369.412 master rerun's crash)
+  const S0 = await p1.evaljs(goneJs('#chan-access-dialog', 5000));
+  ok(S0.gone, `保存 closes the Grant access dialog itself once the write answered (${S0.ms} ms)`, S0.gone ? undefined : J(S0));
+  // reopened the person's way: the chip — Grant access… itself, or Notify… once the conversation's own access reached the bar
+  // (showAssignFilterDialog), then Notify's own «Grant access…»
+  await p1.evaljs(`(() => { const w = ${WIN('oc_look')}; w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
   const P3 = await p1.evaljs(`(async () => {
-    for (let i = 0; i < 40 && !document.querySelector('#chan-access-dialog .pp-input'); i++) await new Promise((r) => setTimeout(r, 100));
+    let via = 'the chip';
+    for (let i = 0; i < 50 && !document.querySelector('#chan-access-dialog .pp-input'); i++) {
+      const n = document.getElementById('chan-notify-dialog');
+      if (n && via === 'the chip') { const g = [...n.querySelectorAll('.chan-flow-actions button')].find((b) => b.textContent.trim() === '授权访问…'); if (g) { g.click(); via = 'the chip → Notify… → its Grant access…'; } }
+      await new Promise((r) => setTimeout(r, 100));
+    }
     await new Promise((r) => setTimeout(r, 150));
     const d = document.getElementById('chan-access-dialog');
-    return { secs: [...d.querySelectorAll('.pp-sec')].map((x) => x.textContent).slice(0, 2), first: [...d.querySelectorAll('.pp-row:not(.pp-row-everyone) .pp-name')].slice(0, 2).map((x) => x.textContent) };
+    if (!d) return { fail: 'no Grant access dialog 5 s after ' + via, toasts: [...document.querySelectorAll('#global-toasts .global-toast')].map((x) => x.textContent).join(' | ') || 'none' };
+    return { via, secs: [...d.querySelectorAll('.pp-sec')].map((x) => x.textContent).slice(0, 2), first: [...d.querySelectorAll('.pp-row:not(.pp-row-everyone) .pp-name')].slice(0, 2).map((x) => x.textContent) };
   })()`);
-  ok(P3.secs[0] === '最近' && J(P3.first) === J(['Frontend', 'invoice-02']), 'the next open pins this device\'s RECENT picks on top (newest first)', J(P3));
+  ok(!P3.fail && P3.secs[0] === '最近' && J(P3.first) === J(['Frontend', 'invoice-02']), 'the next open pins this device\'s RECENT picks on top (newest first)', J(P3));
+  if (!S0.gone || P3.fail) console.log('  · ⑫ the legs on the reopened dialog NOT RUN — ' + (!S0.gone ? 'the Save never closed the first one' : 'it did not open') + ' (said above, by name)');
+  else {
   await p1.evaljs(`(async () => { const d = document.getElementById('chan-access-dialog'); const b = d.querySelector('.pp-input'); b.focus(); b.value = ''; return 1; })()`);
   await p1.cdp('Input.insertText', { text: 'pager-07' });
   await sleep(100);
@@ -1413,7 +1453,10 @@ console.log('⑫ the principal picker: 40 sessions, 3 Task Groups — type, Ente
   // skipped the dialog's onClose, so the picker's roster listener lingered until the next broadcast it heard with
   // its root gone — the access PUT's own — and under CPU starvation that broadcast landed AFTER ⑫b had counted the
   // page's handlers: ⑫b read "0 listeners" / "−1 at close" (2/2 on one core). The judge below is by identity now.)
-  await p1.evaljs(`(async () => { const d = document.getElementById('chan-access-dialog'); const c = d && [...d.querySelectorAll('button')].find((b) => b.textContent.trim() === '取消'); if (c) { c.click(); for (let i = 0; i < 40 && document.getElementById('chan-access-dialog'); i++) await new Promise((r) => setTimeout(r, 50)); } for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); const sb = window.app.sidebar; delete sb._webuiSessions; delete sb._tasks; sb._webuiSessions = window.__rosterSaved.s; sb._tasks = window.__rosterSaved.t; window.fetch = window.__ofetch; return 1; })()`);
+  }
+  }
+  const CX = await p1.evaljs(`(async () => { const d = document.getElementById('chan-access-dialog'); const c = d && [...d.querySelectorAll('button')].find((b) => b.textContent.trim() === '取消'); if (c) { c.click(); for (let i = 0; i < 40 && document.getElementById('chan-access-dialog'); i++) await new Promise((r) => setTimeout(r, 50)); } const sb = window.app.sidebar; delete sb._webuiSessions; delete sb._tasks; sb._webuiSessions = window.__rosterSaved.s; sb._tasks = window.__rosterSaved.t; window.fetch = window.__ofetch; return { cancelled: !!c, closed: !document.getElementById('chan-access-dialog') }; })()`);
+  ok(CX.closed, `⑫ ends: the Grant access dialog closed by its own 取消 (${CX.cancelled ? 'pressed' : 'none open'})`, J(CX));
   await api('PUT', '/api/channels/lark/oc_look/access', { access: [] });
 }
 
@@ -1442,13 +1485,13 @@ console.log('⑫b the picker at 500 sessions and 50 Task Groups: build, keystrok
     return sessions.length + groups.length;
   })()`;
   ok(await p1.evaljs(FIX500) === 550, 'FIXTURE: 500 live sessions across 50 Task Groups in the page\'s roster');
-  await p1.evaljs(OPEN('lark', 'oc_look', "w.content.querySelectorAll('.chanmsg').length >= 6"));
+  await openChecked(OPEN('lark', 'oc_look', "w.content.querySelectorAll('.chanmsg').length >= 6"));
   const B0 = await p1.evaljs(`(async () => {
     const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-    for (const o of document.querySelectorAll('.dialog-overlay')) o.remove();
     const w = ${WIN('oc_look')};
     // the chip is the VERB once ⑫'s reset reached the bar (a conversation with its own access opens Notify… instead)
     for (let i = 0; i < 100 && (w.content.querySelector('[data-channel-assign]') || {}).textContent !== '授权访问…'; i++) await sleep(50);
+    if ((w.content.querySelector('[data-channel-assign]') || {}).textContent !== '授权访问…') return { fail: 'the chip is not 授权访问… 5 s after ⑫’s reset (' + ((w.content.querySelector('[data-channel-assign]') || {}).textContent || 'no chip') + ')' };
     const t0 = performance.now();
     w.content.querySelector('[data-channel-assign]').click();
     for (let i = 0; i < 4000 && !(document.querySelectorAll('#chan-access-dialog .pp-row').length >= 550); i++) await sleep(5);
@@ -1509,7 +1552,7 @@ console.log('⑫b the picker at 500 sessions and 50 Task Groups: build, keystrok
     return { closed: !document.getElementById('chan-access-dialog'), atClose, after: window.__hnew().length };
   })()`);
   ok(B1.closed && B1.atClose === 0 && B1.after === 0, `closing the dialog removes its roster listener AT the close (${B1.atClose} left), not at the next broadcast`, J(B1));
-  await p1.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); const sb = window.app.sidebar; delete sb._webuiSessions; delete sb._tasks; sb._webuiSessions = window.__rosterSaved.s; sb._tasks = window.__rosterSaved.t; return 1; })()`);
+  await p1.evaljs(`(() => { const sb = window.app.sidebar; delete sb._webuiSessions; delete sb._tasks; sb._webuiSessions = window.__rosterSaved.s; sb._tasks = window.__rosterSaved.t; return 1; })()`);
 }
 
 // ═══ ⑦ a credential change reaches the windows already open (inc-muk9jj0j-rel3) ═══
@@ -1557,7 +1600,7 @@ console.log('⑦ a credential change reaches the open windows (inc-muk9jj0j-rel3
     return { open: document.body.contains(w.element), composer: !!w.content.querySelector('[data-channel-send]'), note: note ? note.textContent : null, ro: !!w.content.querySelector('.chanwin-readonly') };
   })()`);
   ok(flipped.open && flipped.composer && !flipped.ro && flipped.note === '以你的身份起草并发送', 'the window OPEN during the re-authorization flips to the composer without reopening — "以你的身份起草并发送" (Gmail drafts, then sends)', JSON.stringify(flipped));
-  await p1.evaljs(OPEN('gmail', 't_render2', "w.content.querySelector('.chanwin-foot > *')"));
+  await openChecked(OPEN('gmail', 't_render2', "w.content.querySelector('.chanwin-foot > *')"));
   const fresh = await p1.evaljs(`(() => { const w = ${WIN('t_render2')}; return { composer: !!w.content.querySelector('[data-channel-send]'), ro: w.content.querySelector('.chanwin-readonly') ? w.content.querySelector('.chanwin-readonly').textContent : null }; })()`);
   const view = await api('GET', '/api/channels/gmail/t_render2');
   ok(fresh.composer && !fresh.ro && view.json.conversation && view.json.conversation.offers.sendAsUser.offered === true, 'a thread opened AFTER it — judged read-only before the consent, untouched since — is writable at once (the read route re-judges a verdict older than the credential)', JSON.stringify([fresh, view.json.conversation && view.json.conversation.offers.sendAsUser]));
@@ -1580,11 +1623,12 @@ console.log('⑧ the Push… dialog says what push is');
     item.click();
     let d = null;
     for (let i = 0; i < 40 && !d; i++) { d = document.querySelector('.chan-push-intro'); if (!d) await new Promise((r) => setTimeout(r, 100)); }
+    if (!d) return { fail: 'no .chan-push-intro 4 s after 推送…', tip };
     const box = d && d.parentElement;
     const out = { tip, first: box ? box.firstElementChild.textContent : null, intro: d ? d.textContent : null, excl: box && box.querySelector('.chan-push-exclusive-help') ? box.querySelector('.chan-push-exclusive-help').textContent : null };
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
     return out;
   })()`);
+  if (!P8.fail) await closeForm('.chan-push-intro', '⑧ the Push… form');
   // lane channel-vendor-one-file (int236): the line is what push is + THIS account's DECLARED transport (gmail: pubsub-pull); the panel names no vendor
   ok(!P8.fail && P8.first === P8.intro && /几秒/.test(P8.intro || '') && /轮询/.test(P8.intro || '') && /Pub\/Sub/.test(P8.intro || '') && !/Lark|飞书|长连接/.test(P8.intro || ''), 'the Push… dialog OPENS with what push is — seconds vs polling — and THIS account\'s own requirement from its declared transport (Gmail\'s pubsub-pull: a Pub/Sub topic + this instance\'s subscription), no other vendor named', JSON.stringify(P8));
   ok(!P8.fail && /独占/.test(P8.excl || '') && /共享/.test(P8.excl || '') && /游标/.test(P8.excl || ''), 'the exclusivity select says what exclusive and shared mean', P8.excl);
@@ -1602,7 +1646,7 @@ console.log('④b a person\'s own tags (TTS control) are words in the window, as
   for (const [tag, m] of [['desk', { width: 1100, height: 760, deviceScaleFactor: 1, mobile: false }], ['phone', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }]]) {
     await p1.cdp('Emulation.setDeviceMetricsOverride', m);
     await p1.load();
-    await p1.evaljs(OPEN('lark', 'oc_tts', "w.content.querySelectorAll('.chanmsg').length >= 3"));
+    await openChecked(OPEN('lark', 'oc_tts', "w.content.querySelectorAll('.chanmsg').length >= 3"));
     await sleep(600);
     shots[tag] = await p1.shot(`lark-tags-${tag}.png`, null);
   }
@@ -1632,7 +1676,7 @@ console.log('⑭ outbox-attachment-preview: a draft\'s picture opens the overlay
     await p1.cdp('Emulation.setDeviceMetricsOverride', metrics);
     await p1.load(); // a fresh page: no dialog or window an earlier section left open covers the card
     await p1.cdp('Page.setDownloadBehavior', { behavior: 'allow', downloadPath: DL });
-    await p1.evaljs(OPEN('lark', 'oc_files', "w.content.querySelectorAll('.chan-prop-file').length >= 2"));
+    await openChecked(OPEN('lark', 'oc_files', "w.content.querySelectorAll('.chan-prop-file').length >= 2"));
     await p1.evaljs(`(() => { window.__oapWins = []; const wm = window.app.wm; if (!wm.__oapSpy) { const orig = wm.createWindow.bind(wm); wm.createWindow = (o) => { const w = orig(o); window.__oapWins.push({ title: o.title, type: o.type, id: w && w.id }); return w; }; wm.__oapSpy = 1; } return 1; })()`);
     await sleep(600);
     const thumb = await ptOf('.chan-prop-file-thumb');
@@ -1642,7 +1686,8 @@ console.log('⑭ outbox-attachment-preview: a draft\'s picture opens the overlay
     await sleep(700);
     const ov = await p1.evaljs(`(() => { const i = document.querySelector('.chat-img-overlay img'); return { src: i ? i.getAttribute('src') : null, drawn: !!(i && i.naturalWidth > 0) }; })()`);
     ok(!!thumb && new RegExp('/api/channels/outbox/' + OAP.id + '/attachment/0\\?inline=1$').test(ov.src || '') && ov.drawn, `⑭ ${tag}: a click on the draft's PICTURE opens THE image overlay over its ?inline=1 URL — drawn`, JSON.stringify(ov));
-    await p1.evaljs(`(() => { document.querySelectorAll('.chat-img-overlay').forEach((o) => o.remove()); return 1; })()`);
+    for (const type of ['keyDown', 'keyUp']) await p1.cdp('Input.dispatchKeyEvent', { type, key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+    { const g = await p1.evaljs(goneJs('.chat-img-overlay', 3000)); ok(g.gone, `⑭ ${tag}: the image overlay closed by Escape (${g.ms} ms)`, g.gone ? undefined : J(g)); }
     const name = await ptOf('.chan-prop-file-open[data-open="viewer"]');
     if (name) await click(await ptOf('.chan-prop-file-open[data-open="viewer"]'));
     let view = null;
@@ -1685,11 +1730,11 @@ console.log('⑭ outbox-attachment-preview: a draft\'s picture opens the overlay
 console.log('⑥ the phone width');
 await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
 await p1.load();
-await p1.evaljs(OPEN('gmail', 't_render', "w.content.querySelector('.chanblk-fold') && w.content.querySelector('.chanwin-foot > *')"));
+await openChecked(OPEN('gmail', 't_render', "w.content.querySelector('.chanblk-fold') && w.content.querySelector('.chanwin-foot > *')"));
 const P = await p1.evaljs(`(() => { const w = ${WIN('t_render')}; const f = w.content.querySelector('.chanblk-fold').getBoundingClientRect(); const R = w.element.getBoundingClientRect(); return { fold: Math.round(f.height), winW: Math.round(R.width), overflow: w.content.querySelector('.chanwin-list').scrollWidth > w.content.querySelector('.chanwin-list').clientWidth + 1 }; })()`);
 await sleep(400);
 await p1.shot('phone-gmail.png', null);
-await p1.evaljs(OPEN('lark:2', 'oc_ro', "w.content.querySelector('[data-channel-reauth]')"));
+await openChecked(OPEN('lark:2', 'oc_ro', "w.content.querySelector('[data-channel-reauth]')"));
 const P2 = await p1.evaljs(`(() => { const w = ${WIN('oc_ro')}; const b = w.content.querySelector('[data-channel-reauth]').getBoundingClientRect(); return { reauth: Math.round(b.height), overflow: w.content.querySelector('.chanwin-foot').scrollWidth > w.content.querySelector('.chanwin-foot').clientWidth + 1 }; })()`);
 ok(P.fold >= 36 && P2.reauth >= 36 && !P.overflow && !P2.overflow, 'on a phone the fold toggle and Re-authorize are ≥ 36 px tall, and nothing scrolls sideways', J([P, P2]));
 await sleep(400);
@@ -1698,7 +1743,7 @@ await p1.shot('phone-readonly.png', null);
 // ═══ ⑥b lane channel-window-tidy (the owner, 2026-10-03): decided proposals fold to lines; a mail's sender address ═══
 console.log('⑥b 1 waiting + 4 decided proposals: the card, the fold, a line opened in place, the jump; From · To · Cc as "名字 · 地址" (zh, 390 px)');
 {
-  await p1.evaljs(OPEN('gmail', 't_tidy', "w.content.querySelector('.chanwin-outbox .chanwin-outbox-fold')"));
+  await openChecked(OPEN('gmail', 't_tidy', "w.content.querySelector('.chanwin-outbox .chanwin-outbox-fold')"));
   const VIS = 'const vis = (e) => !!e && e.getClientRects().length > 0;';
   const T1 = await p1.evaljs(`(() => {
     ${VIS} const w = ${WIN('t_tidy')}; const sec = w.content.querySelector('.chanwin-outbox');
@@ -1752,12 +1797,14 @@ console.log('⑥b 1 waiting + 4 decided proposals: the card, the fold, a line op
     w.content.querySelector('.chanwin-outbox .chan-prop-sent button[data-jump]').click();
     let row = null;
     for (let i = 0; i < 40 && !(row = list.querySelector('.chanmsg[data-vid="m_td_sent"].chanmsg-flash')); i++) await new Promise((r) => setTimeout(r, 50));
+    const flashed = !!row;   // judged where it was waited (the row looked up again below carries no flash)
     await new Promise((r) => setTimeout(r, 400));
     row = list.querySelector('.chanmsg[data-vid="m_td_sent"]');
+    if (!row) return { fail: 'm_td_sent not in the list after the jump', flashed };
     const R = row.getBoundingClientRect(), L = list.getBoundingClientRect();
-    return { flashed: !!row, inView: R.top >= L.top - 1 && R.bottom <= L.bottom + 1, body: row.querySelector('.chanmsg-body') ? row.querySelector('.chanmsg-body').textContent.trim().slice(0, 40) : row.textContent.slice(0, 80) };
+    return { flashed, inView: R.top >= L.top - 1 && R.bottom <= L.bottom + 1, body: row.querySelector('.chanmsg-body') ? row.querySelector('.chanmsg-body').textContent.trim().slice(0, 40) : row.textContent.slice(0, 80) };
   })()`);
-  ok(T5.flashed && T5.inView && /Replaced the PDU/.test(T5.body), '"跳到这条消息" lands on the SENT message in the thread (in view, flashed)', J(T5));
+  ok(!T5.fail && T5.flashed && T5.inView && /Replaced the PDU/.test(T5.body), '"跳到这条消息" lands on the SENT message in the thread (in view, flashed)', J(T5));
   await p1.shot('tidy-jump.png', null);
   // a Gmail message's details at 390 px: From / To / Cc each "名字 · 地址" — no address only in a tooltip
   const T6 = await p1.evaljs(`(async () => {
