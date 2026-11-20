@@ -405,6 +405,7 @@ await leg('⑪', async () => {
   const DSRC = fs.readFileSync(path.join(repo, 'src/desktop-serve.js'), 'utf8');
   const READY_A = "      if (!(await landedForReady(id))) return;\n";
   ok(DSRC.split(READY_A).length === 2, 'control setup: the bring-up waits for its record\'s landing before «ready» (found once)');
+  ok(DSRC.split("      commit();\n" + READY_A).length === 2, '⑪ the record is COMMITTED right before that wait (主开发 05:21Z): the record whose landing is awaited is the record as it stands then, by construction (a pin)');
   const noApps = { catalogRows: () => [], refreshCatalog: async () => {}, witnessRows: () => [] };
   const STAY2 = { id: 'stay2', label: 'Stay App 2', exec: script('stay-app-2', 'exec sleep 600'), args: [], category: 'app' };
   const run = async (mod, tag) => {

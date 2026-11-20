@@ -299,8 +299,13 @@ console.log('§4 after editing: the file-changed signal');
     const foreign = ',someone,elsewhere,27.09.2026 12:00,file:///home/someone/.config/libreoffice/4;\n';
     if (lockUp) fs.writeFileSync(lock, foreign);
     const s2 = id2 && await j('POST', `/api/desktop/apps/${id2}/stop`, {});
-    await sleep(2500);
-    const rec2 = recordedApps().find((a) => a.id === id2);
+    // the stop's record as it LANDED (data/desktop-apps.json is written off the loop since B-0248 — a once-read after a sleep judged
+    // whatever had landed by then): its end facts, the lock's verdict and then the profile's retire (the stop's last step), waited on
+    // the file, bounded, failing by name with what it holds
+    let rec2 = null;
+    const ended2 = await until(() => { rec2 = recordedApps().find((a) => a.id === id2) || null; return rec2 && (rec2.fileLockDone || rec2.fileLockKept) && (rec2.profileRemovedAt || rec2.profileKept) ? rec2 : null; }, 10000, 150);
+    check('the stop\'s end facts land on disk within 10 s (the lock\'s verdict, then the profile\'s retire)', !!ended2, rec2 && { state: rec2.state, fileChanged: rec2.fileChanged, fileLockDone: rec2.fileLockDone, fileLockKept: rec2.fileLockKept, profileRemovedAt: rec2.profileRemovedAt, profileKept: rec2.profileKept });
+    await until(() => wsMsgs.some((m) => m.appId === id2), 2500, 100);   // a file-changed for THIS session must not come: a quiet window, ended early by one
     check('CONTROL: a session stopped with its file untouched ⇒ fileChanged false and NO file-changed', !!ready2 && s2 && s2.status === 200 && rec2 && rec2.fileChanged === false && !wsMsgs.some((m) => m.appId === id2), { ready: !!ready2, stop: s2 && { status: s2.status, code: s2.body && s2.body.code, error: s2.body && s2.body.error }, fileChanged: rec2 && rec2.fileChanged, msgs: wsMsgs.filter((m) => m.appId === id2) });
     check('CONTROL: a lock naming another LibreOffice is KEPT (never removed on a guess) and the record says why', fs.existsSync(lock) && fs.readFileSync(lock, 'utf8') === foreign && rec2 && !rec2.fileLockRemovedAt && /another LibreOffice/.test(rec2.fileLockKept || ''), { exists: fs.existsSync(lock), kept: rec2 && rec2.fileLockKept });
     try { fs.unlinkSync(lock); } catch {}

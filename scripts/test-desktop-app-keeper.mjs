@@ -53,6 +53,9 @@ const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); 
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000, step = 100) => { const t = Date.now() + ms; while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
+/** ONE record as data/desktop-apps.json holds it NOW (read whole, at once — the store writer lands it off the loop since B-0248, so an
+ *  act's record is on disk only once it LANDED: a leg reads it at a named moment or waits for it, bounded) — null: no such record */
+const diskRecOf = (k, id) => { try { return JSON.parse(fs.readFileSync(k.storeFile, 'utf8')).apps[id] || null; } catch (e) { return { unread: (e && e.code) || String(e) }; } };
 
 const D = require('../src/desktop-display.js');
 const K = require('../src/server/desktop-app-keeper.js');
@@ -232,14 +235,20 @@ console.log('§1 launch → listening → handshake → record → stop clean');
   const t0 = Date.now();
   const rec = await k.launch({ exec: appBin, args: appArgs, label: 'first' });
   ok(rec.state === 'launching' && rec.backend === 'vnc-display' && rec.via === 'Xvfb+x11vnc' && rec.fallbackWhy === XPRA_WHY, `launch answers a launching record on vnc-display via Xvfb+x11vnc with fallbackWhy "${XPRA_WHY}" (this box)`, rec);
-  const ready = await until(() => { const r = k.get(rec.id); return r.state === 'ready' ? r : r.state === 'failed' ? r : null; });
+  let atReady;   // the file AT THE MOMENT «ready» is seen — read in the same turn as the look, no wait between (list line 133's law)
+  const ready = await until(() => { const r = k.get(rec.id); if (r.state === 'ready') { atReady = diskRecOf(k, rec.id); return r; } return r.state === 'failed' ? r : null; });
   ok(ready && ready.state === 'ready', `ready in ${Date.now() - t0} ms`, ready && ready.lastError);
   ok(/^:\d+$/.test(ready.display) && ready.port > 0 && ready.pids.x > 0 && ready.pids.server > 0 && ready.pids.app > 0 && ready.starts.x > 0 && ready.starts.server > 0 && ready.starts.app > 0, 'the record carries display, port, three pids AND three starttimes (facts only)', ready);
   ok(ready.pids.x !== ready.pids.server && ready.pids.server !== ready.pids.app, 'X, picture server and app are three processes');
   const hs = await rfbHandshake(ready.port);
   ok(hs.banner === 'RFB 003.008\n' && Array.isArray(hs.security) && hs.security.includes(1), `a real RFB client completes the version handshake and is offered security type None (${JSON.stringify(hs)})`);
-  const disk = JSON.parse(fs.readFileSync(k.storeFile, 'utf8'));
-  ok(disk.apps[rec.id] && disk.apps[rec.id].state === 'ready' && disk.apps[rec.id].pids.app === ready.pids.app, 'the record is on disk (writeJsonAtomic) with the same pids');
+  // THE RECORD ON DISK, two halves (主开发 05:38Z): (a) AT THE MOMENT «ready» is seen the file ALREADY holds what the next life adopts —
+  // the same three pids and start times, the display and the port (read at once above, NO wait: a hub killed right after «ready»
+  // adopts it); (b) the state «ready» itself is written right after it, off the loop: it lands within a bound, waited on the file
+  ok(!!ready && !!atReady && M.isLiveState(atReady.state) && ['x', 'server', 'app'].every((p) => atReady.pids && atReady.pids[p] === ready.pids[p] && atReady.starts && atReady.starts[p] === ready.starts[p]) && atReady.display === ready.display && atReady.port === ready.port, 'AT THE MOMENT «ready» is seen the record is ALREADY on disk: the same three pids and start times, the display and the port (read at once, no wait)', atReady && { state: atReady.state, pids: atReady.pids, starts: atReady.starts, display: atReady.display, port: atReady.port, unread: atReady.unread });
+  let found = null;
+  const landed = await until(() => { found = diskRecOf(k, rec.id); return found && found.state === 'ready' ? found : null; }, 10000, 50);
+  ok(!!landed && landed.pids.app === ready.pids.app && landed.readyAt === ready.readyAt, `the state «ready» lands on disk within 10 s (the file says: ${landed ? 'ready' : found ? (found.state || `unread, ${found.unread}`) : 'no record'})`, found && { state: found.state, readyAt: found.readyAt, unread: found.unread });
   ok(fs.existsSync(path.join(k.logRoot, rec.id, 'app.log')) && fs.existsSync(path.join(k.logRoot, rec.id, 'Xauthority')), 'per-app dir holds app.log + the Xauthority cookie file');
   ok((fs.statSync(path.join(k.logRoot, rec.id, 'Xauthority')).mode & 0o777) === 0o600, 'the cookie file is 0600');
   const casts = k._events.filter((e) => e.type !== 'desktop-apps-witness'); // lane apps-dialog-fast: a witness listing that lands has its own broadcast
@@ -492,7 +501,12 @@ setInterval(() => {}, 1000); // stay alive until SIGKILLed — the apps must out
   ok(adopted && adopted.state === 'ready' && adopted.adoptedAt > 0 && adopted.pids.app === first.pids.app && adopted.starts.app === first.starts.app, 'the new keeper ADOPTS it: ready, same pids, same starttimes, adoptedAt stamped', adopted);
   ok(k.streamTarget(first.id) && k.streamTarget(first.id).port === first.port && (await D.rfbBanner(first.port, 3000)), 'the adopted session still streams (banner on the recorded port)');
   k.start();
-  // a record whose pids are recycled/dead is exited-with-reason, never adopted
+  // a record whose pids are recycled/dead is exited-with-reason, never adopted. The file is read for the ghosts once the adoption's
+  // OWN record landed (written off the loop — read at once, the file could still hold the child's record, and the adoption's
+  // landing would then write over the ghosts below): a bounded wait on the file, failing by name with what it holds
+  let adoptedOnDisk = null;
+  const adoptLanded = await until(() => { adoptedOnDisk = diskRecOf(k, first.id); return adoptedOnDisk && adoptedOnDisk.adoptedAt > 0 ? adoptedOnDisk : null; }, 10000, 50);
+  ok(!!adoptLanded, `the adoption's record lands on disk within 10 s before the ghosts are written beside it (the file says: ${adoptedOnDisk ? `${adoptedOnDisk.state}, adoptedAt ${adoptedOnDisk.adoptedAt}` : 'no record'})`, adoptedOnDisk);
   const store = JSON.parse(fs.readFileSync(k.storeFile, 'utf8'));
   store.apps['da-ghost'] = { ...M.newRecord({ id: 'da-ghost', label: 'ghost', exec: appBin, args: [], cwd: null, source: 'adhoc', backend: 'vnc-display', via: 'Xvfb+x11vnc', fallbackWhy: null, idleTimeoutMs: 0, now: Date.now() - 60000 }), state: 'ready', display: ':999', port: 1, pids: { x: 999999, app: 999998, server: 999997, wm: null }, starts: { x: 1, app: 1, server: 1, wm: null } };
   // a record whose APP pid is RECYCLED — pid alive (a throwaway `sleep` this suite owns; r2: NEVER this process — the
@@ -507,7 +521,9 @@ setInterval(() => {}, 1000); // stay alive until SIGKILLed — the apps must out
   ok(ghost && ghost.state === 'exited' && /X display gone/.test(ghost.lastError), 'a record whose X pid is dead ⇒ exited, lastError says the display is gone', ghost);
   ok(recycled && recycled.state === 'exited' && recycled.lastError === 'kept-from-before', 'a dead record\'s earlier lastError is KEPT through adoption', recycled);
   ok(alive(recycledProc.pid) && !D.sameProcess(recycledProc.pid, 12345) && M.adoptVerdict({ state: 'ready' }, { x: true, server: true, app: D.sameProcess(recycledProc.pid, 12345) }, true).state === 'exited', 'a RECYCLED app pid (alive, starttime differs — a throwaway sleep) is not "alive" to the adoption verdict, and the reap never signalled it (it is still running)');
-  ok(!sweepTargets(JSON.parse(fs.readFileSync(k.storeFile, 'utf8')).apps).includes(recycledProc.pid), 'the exit sweep\'s rule does not target the recycled pid either (pid+starttime, never a bare pid)');
+  // (judged on the document the suite WROTE — the recycled pid on a «ready» record, the case the rule exists for — and on the file as
+  // it stands, whichever of the two the adoption's off-loop write has reached)
+  ok([store.apps, JSON.parse(fs.readFileSync(k.storeFile, 'utf8')).apps].every((apps) => !sweepTargets(apps).includes(recycledProc.pid)), 'the exit sweep\'s rule does not target the recycled pid either (pid+starttime, never a bare pid)');
   recycledProc.kill('SIGKILL');
   ok(alive(first.pids.app) && alive(first.pids.x), 'reaping the ghost/recycled records did NOT touch the real survivor (pid+starttime identity, never a bare pid)');
   ok(k4.get(first.id).state === 'ready', 'the real survivor is adopted again by the second keeper');

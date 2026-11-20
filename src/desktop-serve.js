@@ -1363,7 +1363,10 @@ function install({ dataDir, env, serverSetting = () => undefined, singleton = nu
       // times, its display, its port, all committed above — is ON DISK before the launch is told ready, so a hub that dies hard after
       // «ready» always adopts it (the release wrote each commit at the call). The wait is the bring-up's own, off the loop; it never
       // ends the app: past each bound it is said and waited again, the record still «launching» (a hub that dies first has an app that
-      // was never told ready); a stop meanwhile ends it as any stop does
+      // was never told ready); a stop meanwhile ends it as any stop does. COMMITTED RIGHT BEFORE THE WAIT (主开发 05:21Z): the record
+      // whose landing is awaited is the record as it stands NOW, BY CONSTRUCTION — today every fact above is committed where it is set
+      // (each part, the recipe's display / port / probe, the portal, the a11y bus); a step added later between them and here is kept too
+      commit();
       if (!(await landedForReady(id))) return;
       rec.state = M.transition(rec.state, 'server-listening') || rec.state;
       rec.readyAt = now();
