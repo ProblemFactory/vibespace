@@ -410,6 +410,12 @@
     "test-dial-link-kept.mjs": 34,
     "test-host-key-pin.mjs": 1
    }
+  },
+  "B-b0e3": {
+   "why": "lane bl-proposals, B-b0e3 (2.369.412 two-writer cure, 2.369.414 remainder): test-doc-model §6's RED controls of the Doc owner pick — the engine without prefer, the pick without prefer, the engine without the held check — plants proven before each copy",
+   "files": {
+    "test-doc-model.mjs": 4
+   }
   }
  }
 }

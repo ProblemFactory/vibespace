@@ -366,6 +366,8 @@ function registries() {
 /** THE CONTRACT (doc-window): the conversation `prefer` names (the window's own `from`) when its registry holds {host, path},
  *  else the newest conversation whose registry holds it (B-b0e3). */
 function ownerOf({ host, path, prefer = null } = {}) { return AF.ownerOfIn(registries(), { host, path, prefer }); }
+/** Every live conversation whose registry holds {host, path} → [sessionId] (the doc engine remembers them — B-b0e3's remainder). */
+function holdersOf({ host, path } = {}) { return AF.holdersIn(registries(), { host, path }); }
 /** THE CONTRACT (doc-window): ONE next-turn note to the conversation through the stash — free, never a billed wake. */
 function noteEdit({ sessionId, conversationId = null, host, path, summary } = {}) {
   require('./search-index.js').noteArtifact({ sessionId, host, path }); // lane global-search: the saved file is re-read into the index
@@ -422,5 +424,5 @@ function hostNamesOf(ids) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, helperOps, handover, judgeAsk, presentAsk, ownerOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, helperOps, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
 module.exports = api;

@@ -312,6 +312,12 @@ const autoOpenVerdict = ({ born, row } = {}) => !!(born && row && row.kind === '
  *  the path, else the newest conversation whose registry holds it. B-b0e3: with two writers, the newest alone sent a
  *  comment made in a window opened from the OLDER one's card to the other conversation, and the one it was about never
  *  heard it. `registries` = [{sessionId, rows}]. */
+/** Every conversation whose registry holds {host, path} → [sessionId] (B-b0e3's remainder: the doc engine remembers them, so a
+ *  window whose own conversation STOPPED still finds that it held the document). */
+function holdersIn(registries, { host, path } = {}) {
+  const key = keyOf(host, String(path || ''));
+  return (registries || []).filter((r) => r && r.rows && r.rows[key]).map((r) => r.sessionId);
+}
 function ownerOfIn(registries, { host, path, prefer = null } = {}) {
   const key = keyOf(host, String(path || ''));
   let best = null;
@@ -593,7 +599,7 @@ const intentWord = (band, lang = 'en') => (INTENT_WORDS[band] || INTENT_WORDS.to
 module.exports = { KINDS, VIEW_ORDER, OPS, REG_OPS, KIND_RANK, BY, MAX_ROWS, CATEGORY_KIND, KIND_WORDS, kindOf, absPath, normDots, keyOf, apply, fold, merge, view,
   INTENTS, SHOWN_OPS, INTENT_WORDS, intentOf, intentWord, opAuthor, quotedOps, wasShown,
   DELIVERABLE_ORDER, DELIVERABLE_WORDS, deliverableKind, deliverableWord,
-  cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, editNoteText, lineDelta, kindWord, baseName,
+  cardWorthy, cardBlock, cardPlacement, timeSlot, cardFacts, autoOpenVerdict, ownerOfIn, holdersIn, editNoteText, lineDelta, kindWord, baseName,
   pageOp, designOp, uploadOp, storeRows, stampsGained,
   MAX_PRESENTED, PAGE_LINK, pageLinksIn, presentOp, askOp, askOps, resolvePresented,
   SERVICE_KEEP_MS, jobOwnerCid, forwardFor, serviceLink, serviceRow, serviceRows,

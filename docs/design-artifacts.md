@@ -32,7 +32,7 @@ Every descriptor declares `artifactsOf(record) → [{path, op: 'write'|'edit', b
 - **The setting** `artifacts.autoOpenDocs` (Chat, default ON): when the agent WRITES a new doc row while the chat is on screen it opens beside the chat; an Edit never re-opens; OFF = the card only.
 
 ## The contract toward doc-window (the sibling lane)
-- `ownerOf({host, path, prefer}) → {sessionId, row} | null` — the conversation `prefer` names (the Doc window's own `from`) when its registry holds the path, else the newest conversation whose registry holds it (B-b0e3: with two writers, a comment reaches the conversation its window was opened from).
+- `ownerOf({host, path, prefer}) → {sessionId, row} | null` — the conversation `prefer` names (the Doc window's own `from`) when its registry holds the path, else the newest conversation whose registry holds it (B-b0e3: with two writers, a comment reaches the conversation its window was opened from; and when that conversation has STOPPED, the doc engine still answers it if it saw it holding the file — its stash, never the live holder).
 - `noteEdit({sessionId, host, path, summary})` — ONE next-turn note to that conversation through the stash: "[Doc edit] <path>: <summary>".
 Both live in src/server/artifact-registry.js; their PURE halves in src/artifacts.js (ownerOfIn, editNoteText, lineDelta). The Doc window (lane doc-window, wired in lane artifacts-e2e — the stub deleted) opens `.md` and calls both: a save on a registry-owned row is `touch` (by: user, edits+1, the card patched, the note), a `from`-owned file gets the note alone; the note goes through the peer-text belt (the summary names the file's section headings). Other files' raw code editor save still sends `artifact-touch` with "+a −b lines".
 

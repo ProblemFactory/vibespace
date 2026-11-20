@@ -230,13 +230,15 @@ const { addressableId } = require('../src/claude-lock-capture.js');
   // /w/PLAN.md. A window opened from A's card speaks to A, never to the newest holder; no `from` (or a `from` holding nothing) ⇒ the
   // newest, as before. On the release the newest alone decided: A never heard a comment made in ITS window.
   {
-    const two = (DEm) => {
+    const two = (DEm, { strict = false } = {}) => {   // strict: the typing sender refuses a session that is not live (a stopped chat)
       const rec = { sent: [], stashed: [] };
       const act = new Map([['w1', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-1' }], ['w2', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-2' }], ['w3', { mode: 'chat', backend: 'claude', claudeSessionId: 'conv-3' }]]);
       act.get('w1')._artifacts = AF.apply({}, { path: '/w/PLAN.md', op: 'write', by: 'agent', at: 5, id: 'a1' }).rows;
-      act.get('w2')._artifacts = AF.apply({}, { path: '/w/PLAN.md', op: 'write', by: 'agent', at: 9, id: 'b1' }).rows;
-      AR.configure({ activeSessions: () => act, deliver: { stashFor: (cid, e) => { rec.stashed.push({ cid, ...e }); return { stored: true }; } }, sessionMeta: null, log: quiet });
-      const doc = DEm.create({ activeSessions: act, getDeliver: () => null, sendUserInput: (sid, text, opts) => { rec.sent.push({ sid, text, opts }); return { ok: true, msgId: 'm' + rec.sent.length }; }, artifacts: AR, now: () => 7 });
+      act.get('w2')._artifacts = AF.apply(AF.apply({}, { path: '/w/PLAN.md', op: 'write', by: 'agent', at: 9, id: 'b1' }).rows, { path: '/w/OTHER.md', op: 'write', by: 'agent', at: 10, id: 'b2' }).rows;   // B alone holds OTHER.md
+      const deliver = { stashFor: (cid, e) => { rec.stashed.push({ cid, ...e }); return { stored: true }; } };
+      AR.configure({ activeSessions: () => act, deliver, sessionMeta: null, log: quiet });
+      const send = (sid, text, opts) => { if (strict && !act.has(sid)) return { ok: false, code: 'no_session' }; rec.sent.push({ sid, text, opts }); return { ok: true, msgId: 'm' + rec.sent.length }; };
+      const doc = DEm.create({ activeSessions: act, getDeliver: () => deliver, sendUserInput: send, artifacts: AR, now: () => 7 });
       return { rec, act, doc };
     };
     const T = two(DE);
@@ -264,6 +266,30 @@ const { addressableId } = require('../src/claude-lock-capture.js');
     const af0 = AFSRC.split(PL2).length === 2 ? AFSRC.replace(PL2, '') : null;
     ok(!!af0 && !af0.includes(PL2), 'CONTROL plant: ownerOfIn\'s `prefer` line stands once in artifacts.js, and the copy lacks it');
     ok(!!af0 && pick(MC.load('src/artifacts.js', af0, 'no-prefer-pick'), 'a') === 'b', 'RED CONTROL: a pick without `prefer` answers the newest holder (b) for a window opened from a');
+    // B-b0e3's REMAINDER (2.369.414): the window's OWN conversation STOPPED. A window from A is seen once while A lives (GET /api/doc/owner:
+    // A and B both seen holding the file); A stops (its session and its registry rows gone, as session-stdout's exit does); A's window
+    // comments ⇒ A's conversation (its stash), never the live holder B. A document A never held still goes to B, as before.
+    const St = two(DE, { strict: true });
+    const seen = St.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' });
+    St.act.delete('w1');
+    const oSt = St.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }), oNever = St.doc.ownerOf({ path: '/w/OTHER.md', from: 'w1' });
+    const cSt = St.doc.comments({ path: '/w/PLAN.md', from: 'w1', items: [{ note: 'about A, stopped' }] });
+    const stA = St.rec.stashed.filter((x) => x.source === 'doc-comment');
+    // every fact the leg judges, printed green or red (主开发 r185: a judging leg prints what it judged)
+    console.log('    facts: ' + JSON.stringify({ seen: seen && [seen.sessionId, seen.via], stopped: oSt && [oSt.sessionId, oSt.conversationId, oSt.via], never: oNever && [oNever.sessionId, oNever.via], comments: cSt && [cSt.ok, cSt.delivered], stashed: St.rec.stashed.map((x) => [x.cid, x.source]), sent: St.rec.sent.map((x) => x.sid) }));
+    ok(!!(seen && seen.sessionId === 'w1' && oSt && oSt.via === 'stopped' && oSt.conversationId === 'conv-1' && oNever && oNever.sessionId === 'w2'
+      && cSt.ok && cSt.delivered === 'stashed' && stA.length === 1 && stA[0].cid === 'conv-1' && St.rec.sent.length === 0),
+      'B-b0e3 remainder: A (seen holding the file while it lived) STOPPED, B live and holding it — A\'s window comments into A\'s stash (via stopped), never to B; a document A never held still goes to the live holder B',
+      { seen, oSt, oNever, cSt: cSt && { ok: cSt.ok, delivered: cSt.delivered }, stashed: St.rec.stashed.map((x) => [x.cid, x.source]), sent: St.rec.sent.map((x) => x.sid) });
+    // RED CONTROL: an engine without the held check sends A's comment to the live holder B (the 2.369.412 bound); its plant proven first
+    const PL3 = "      if (cid && memo.held(docKey, cid)) return { sessionId: String(from), conversationId: cid, via: 'stopped' };\n";
+    const de3 = DESRC.split(PL3).length === 2 ? DESRC.replace(PL3, '') : null;
+    ok(!!de3 && !de3.includes(PL3), 'CONTROL plant: the engine\'s held check stands once, and the copy lacks it');
+    const R3 = de3 ? two(MC.load('src/server/doc-engine.js', de3, 'no-held'), { strict: true }) : null;
+    if (R3) { R3.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }); R3.act.delete('w1'); }
+    const o3 = R3 ? R3.doc.ownerOf({ path: '/w/PLAN.md', from: 'w1' }) : null;
+    console.log('    RED copy answered: ' + JSON.stringify(o3 && [o3.sessionId, o3.conversationId, o3.via]));
+    ok(!!o3 && o3.conversationId !== 'conv-1' && o3.sessionId === 'w2', 'RED CONTROL: an engine without the held check sends a stopped A\'s window to the live holder B', o3);
     for (const r of copiesCensus(MC.files, MC.dir, REPO, { minCopies: 2, label: 'B-b0e3 ' })) ok(r.pass, r.name, r.detail);
   }
   ok(w.doc.edited({ path: '/w/x.txt', from: 'w1', summary: 's' }).code === 'bad_path' && w.doc.edited({ path: '/w/a.md', from: 'w1', summary: ' ' }).code === 'bad_summary' && w.doc.edited({ path: '/w/a.md', from: '', summary: 's' }).code === 'no_owner', 'the edit note refuses a non-markdown path, an empty summary, no owner — by name');

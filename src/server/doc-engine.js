@@ -31,6 +31,7 @@ const hostOf = (h) => (h && h !== 'local' ? String(h) : null);
 const docPath = (p) => typeof p === 'string' && p.startsWith('/') && M.isDocPath(p);
 const NO_OWNER = 'no conversation goes with this document — open it from a chat to comment';
 const MEMO_CAP = 500;
+const HOLDERS_CAP = 20;   // B-b0e3's remainder: the conversations remembered holding one document
 
 /** THE OWNERS A STOP OUTLIVES (lane doc-comments-stopped-owner, B-b51a — measured: an exit takes the session out of
  *  activeSessions AND unlinks its data/session-meta file, src/server/session-stdout.js onExit, so a window opened from a
@@ -44,8 +45,8 @@ function ownerMemo({ dataDir = null, log = () => { } } = {}) {
   let m = null;
   const load = () => {
     if (m) return m;
-    m = { s: {}, d: {} };
-    if (file) try { const j = JSON.parse(fs.readFileSync(file, 'utf-8')); if (j && typeof j === 'object') m = { s: j.s && typeof j.s === 'object' ? j.s : {}, d: j.d && typeof j.d === 'object' ? j.d : {} }; } catch (e) { if (e.code !== 'ENOENT') log('[doc] doc-owners.json unreadable:', e.message); }
+    m = { s: {}, d: {}, h: {} };
+    if (file) try { const j = JSON.parse(fs.readFileSync(file, 'utf-8')); if (j && typeof j === 'object') m = { s: j.s && typeof j.s === 'object' ? j.s : {}, d: j.d && typeof j.d === 'object' ? j.d : {}, h: j.h && typeof j.h === 'object' ? j.h : {} }; } catch (e) { if (e.code !== 'ENOENT') log('[doc] doc-owners.json unreadable:', e.message); }
     return m;
   };
   const trim = (o) => { const k = Object.keys(o); if (k.length > MEMO_CAP) k.sort((a, b) => (o[a].at || 0) - (o[b].at || 0)).slice(0, k.length - MEMO_CAP).forEach((x) => delete o[x]); };
@@ -71,7 +72,23 @@ function ownerMemo({ dataDir = null, log = () => { } } = {}) {
     const s = from && m.s[from];
     return s && s.cid ? { sessionId: String(from), conversationId: s.cid } : null;
   }
-  return { note, of, file };
+  /** B-b0e3's remainder: every conversation SEEN holding a document while it lived (docKey → {at, c: {cid: at}}), so a window whose
+   *  own conversation stopped still reaches it when that conversation held the file. Bounded: MEMO_CAP documents, HOLDERS_CAP each. */
+  function noteHolders(docKey, cids = [], at = Date.now()) {
+    const list = (cids || []).filter(Boolean).map(String);
+    if (!docKey || !list.length) return;
+    load();
+    const e = m.h[docKey] || (m.h[docKey] = { at, c: {} });
+    let moved = false;
+    for (const c of list) if (!e.c[c]) { e.c[c] = at; moved = true; }
+    const ks = Object.keys(e.c);
+    if (ks.length > HOLDERS_CAP) { ks.sort((a, b) => e.c[a] - e.c[b]).slice(0, ks.length - HOLDERS_CAP).forEach((k) => delete e.c[k]); moved = true; }
+    if (moved) { e.at = at; trim(m.h); save(); }
+  }
+  /** The conversation a session id named while it lived (a window's `from`), if this memo saw it. */
+  const convOf = (sid) => { load(); const s = sid && m.s[sid]; return s && s.cid ? s.cid : null; };
+  const held = (docKey, cid) => { load(); const e = docKey && m.h[docKey]; return !!(e && cid && e.c[cid]); };
+  return { note, of, noteHolders, convOf, held, file };
 }
 
 function create({ activeSessions = new Map(), getDeliver = () => null, sendUserInput = null, artifacts = null, dataDir = null, now = () => Date.now(), log = () => { } } = {}) {
@@ -80,6 +97,17 @@ function create({ activeSessions = new Map(), getDeliver = () => null, sendUserI
   /** The conversation that owns the file: the registry's row, else the window's `from` chat, else (stopped) the one
    *  either of those named while it lived. → {sessionId, conversationId, via: 'registry'|'from'|'stopped'} | null */
   function ownerOf({ host = null, path, from = '' } = {}) {
+    const docKey = docKeyOf(host, path);
+    // B-b0e3's remainder: every LIVE holder of the document is remembered by its conversation, so a window whose own conversation
+    // STOPPED reaches it (its stash, or its resumed session) when that conversation held the file — before the newest live holder
+    try {
+      const sids = artifacts && typeof artifacts.holdersOf === 'function' ? artifacts.holdersOf({ host: hostOf(host), path }) || [] : [];
+      memo.noteHolders(docKey, sids.map((sid) => addressableId(activeSessions.get(String(sid)))).filter(Boolean), now());
+    } catch (e) { log('[doc] holdersOf failed:', e.message); }
+    if (from && !activeSessions.has(String(from))) {
+      const cid = memo.convOf(String(from));
+      if (cid && memo.held(docKey, cid)) return { sessionId: String(from), conversationId: cid, via: 'stopped' };
+    }
     let row = null;
     try { row = artifacts && typeof artifacts.ownerOf === 'function' ? artifacts.ownerOf({ host: hostOf(host), path, prefer: from ? String(from) : null }) : null; } catch (e) { log('[doc] ownerOf failed:', e.message); }
     if (row && (row.sessionId || row.conversationId)) {
