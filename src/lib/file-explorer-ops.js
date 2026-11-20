@@ -22,6 +22,10 @@ const WIN_UNSUPPORTED = {
 };
 /** B-bd27 X1: a refusal that says the machine's agent is too old carries its door as the toast's action (undefined otherwise). */
 export const fsErrorAction = (d, host = null) => (d && isAgentOld(d.code) ? agentUpdateAction(host || (d.params && d.params.machine) || null) : undefined);
+/** B-23e5, 主开发's r275 / r316 / r336: the header a person's own press carries — ONE door today, the Files window's Refresh (its
+ *  toolbar button, its folded toolbar menu, its context menu; the door census in test-safe-fs-path-memory names each); the hub asks
+ *  such a call once even when it remembers the path as dead */
+export const ATTENDED_HEADERS = Object.freeze({ 'X-VibeSpace-Attended': '1' });
 export function fsErrorText(d) {
   const p = (d && d.params) || {};
   if (d && d.code === 'device_agent_outdated') return t("this machine's agent is {version}, too old to browse files on Windows — rerun the device's install command (Remote → {machine} → Pairing command)", { version: p.version || t('an older version'), machine: p.machine || '?' });
@@ -32,6 +36,7 @@ export function fsErrorText(d) {
   if (d && d.code === 'parse_busy') return t('another document is being parsed — try again in a moment'); // the parse lane's turn never came (src/safe-fs.js LANES)
   // B-3b03: the file pool had no live worker (its readers restart after a storage that did not answer) — refused, never run on the hub's loop
   if (d && d.code === 'storage_no_worker') return t('the file readers are restarting — try again in a moment');
+  if (d && d.code === 'storage_path_hung') return t('this folder or file did not answer in time — try again in {s} s', { s: (d.params && d.params.s) || 30 });   // B-23e5
   // B-5ce7's cure: a PARKED storage's folder — its name and its doors, in the reader's language (src/routes/files.js storage_parked)
   if (d && d.code === 'storage_parked') return t('“{name}” is kept disconnected (its listing kept hanging) — press Connect on its row, or Reconnect in For you.', { name: p.name || '' });
   // B-fcc7: a pull mount's folder while it is not mounted (src/routes/files.js pullShadowBody) — the row's state, never an empty folder
@@ -216,7 +221,7 @@ export function installExplorerOps(FileExplorer) {
     items.push({ sep: true });
     if (this.app.isTouch && !this._selectMode) items.push({ label: t('Select\u2026'), action: () => this._enterSelectMode(null) });
     items.push({ label: t('Select All'), action: () => { this._selection = new Set(this._renderOrder); this._applySelectionClasses(); if (this._selectMode) this._renderSelectBar(); } });
-    items.push({ label: t('Refresh'), action: () => this.refresh() });
+    items.push({ label: t('Refresh'), action: () => this.refresh({ attended: true }) });   // B-23e5 r336: the context menu's Refresh is the same press as the toolbar's
     items.push({ label: t('Copy Path'), action: () => copyText(this.currentPath) });
     if (!this._host) items.push({ label: t('Share this folder…'), submenu: () => this._shareFolderSubmenu(this.currentPath) });
     items.push({ label: t('Properties'), action: () => this._showProperties(null) });

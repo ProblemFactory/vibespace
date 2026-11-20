@@ -114,7 +114,7 @@ console.log('③ the census: no pool keeps an inline road; a missing pool refuse
   ok(reqRe.test(plant) && reqRe.test(plant2) && /inlineRun\s*[:,(]/.test('new SafeFs({ inlineRun: runOp })'), 'CONTROL: a planted require of a worker op set (literal and path.join) and a planted inline runner are seen');
   // (c) the files router with no pool at all (server.js could not start it) refuses by name — never the op in-main
   const fr = read('src/routes/files.js');
-  ok(fr.includes("call: async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); },") && !fr.includes('_runOpInline'), 'the files router with no pool refuses by name (never the op in-main)');
+  ok(fr.includes("return req.app.locals.safeFs || { call: async () => { throw require('../safe-fs').noWorkerRefusal('the file pool'); } };") && !fr.includes('_runOpInline'), 'the files router with no pool refuses by name (never the op in-main)');
   // (d) the words: the router says the refusal in a person's words with its code on EVERY local answer (the Files window, a file's view,
   // the folder field) — the page words the code in the reader's language
   const ops = read('src/lib/file-explorer-ops.js');

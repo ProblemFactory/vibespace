@@ -15,7 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 
-export const SITE = /\b(?:fs|fsp|fsP|fsPromises)\.(?:promises\.)?(?:readdir|stat|lstat|readFile|opendir|access|exists|realpath|createReadStream|open)(?:Sync)?\(|\bsfs\(req\)\.call\(|safeFs\.call\(/g;
+export const SITE = /\b(?:fs|fsp|fsP|fsPromises)\.(?:promises\.)?(?:readdir|stat|lstat|readFile|opendir|access|exists|realpath|createReadStream|open)(?:Sync)?\(|\bsfs(?:Plain)?\(req\)\.call\(|safeFs\.call\(/g;   // B-23e5 r336: sfsPlain(req) — the unmarked pool, a reader site all the same
 const COMMENT = /^\s*(\/\/|\*|\/\*)/;
 export const DIRS = ['src', 'src/server', 'src/routes'];
 const PROC = 'procfs / sysfs + its own record files';
@@ -87,6 +87,7 @@ export const ROWS = [
   ['src/routes/sessions.js', 'own-tree', 26, null, `${CLI}; B-891e: its one user-path read (a session cwd's realpath) moved to src/sessions-assemble.js with its door`],
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
   ['src/run-reads.js', 'own-tree', 8, null, `${CLI}; B-403e: THE ONE place the pool pass, a record and a broadcast ask the mount — one ask per file per synchronous run (a reading, a link, a folder, a credential file\'s stat + text in one open; the watch\'s realpath of each folder once at construction; cure +1: a failed descriptor stat asks the path\'s stat once, so the error carries it)`],
+  ['src/safe-fs.js', 'own-tree', 1, null, `${PROC}; B-23e5 (lane hub-loop-stalls): /proc/self/mountinfo, read off the loop (fs.promises) only when a second dead sibling ends — whether a folder and its two dead children lie on ONE storage (a dead mount point never names the healthy folder that holds it); every path op of the pool runs in its workers`],
   ['src/safe-fs-worker.js', 'exempt', 48, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked); B-d833 +4: pathStat — the folder field line\'s bare stat, its link, the names under the typed prefix; lane hub-fuse-sync-guard +4: the Task Group context table\'s walk + text read of a row on a storage mount (contextFiles / textHead); lane file-preview-mount +1: a document preview\'s capped whole-file read (readCapped: ONE fd opened — r2: the stat and a read of at most cap + 1 bytes on it, for readFile / xlsxSheets)'],
   ['src/search-index-worker.js', 'own-tree', 5, null, CLI],
   ['src/job-logs-sweep-worker.js', 'own-tree', 15, null, 'lane job-logs-sweep: THE JOB-LOGS REMOVER\'s CHILD (a child process since round 2; never the hub\'s process) — r4 +1: a listed record-store NOTE (<dataDir>/<store>.corrupt-unread, ≤ 4 KB, lstat first) read for its {at, error}; r3 §5: /proc and its <pid>/cmdline (the kernel\'s — which process names a run dir; no clock), /proc/stat no more; r2 note 1 +2: the data dir\'s listing and reads of an orphaned remover\'s count files (jobs-remover-orphan-*.json); r2 +1: /proc/stat btime, the kernel\'s boot instant (a stamp written before it names no live process) — lstat / readdir of <dataDir>/job-logs/<jb-…>/<runTs>/ (workerData.logsDir), a run\'s own pid.json, the catch-up\'s record <dataDir>/jobs-logs-sweep.json (the state op), <dataDir>/jobs-archive.json when the hub has not loaded it, <dataDir>/jobs.json when its load failed with no set-aside, and r2 the data dir\'s own listing for set-aside record stores — all the instance\'s own data dir'],

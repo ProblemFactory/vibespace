@@ -1,7 +1,8 @@
 import { hostParam } from './file-download.js';
 import { formatSize, attachPopoverClose, createPopover, createModalShell, showContextMenu, getStateSync, copyText, escHtml, frontTruncate, uploadFilesBatched, showInputDialog, showConfirmDialog, showToast, collectDroppedFiles, uiScale } from './utils.js';
 import { installExplorerUploads } from './file-explorer-uploads.js';
-import { installExplorerOps, fsErrorText } from './file-explorer-ops.js';
+import { installExplorerOps, fsErrorText, ATTENDED_HEADERS } from './file-explorer-ops.js';
+import { listingAndProbe } from './explorer-listing.js'; // B-23e5 r336: the listing, then its probe only when owed (never after a storage refusal)
 import { agentUpdateDoor, isAgentOld } from './agent-update-door.js'; // B-bd27 X1: the listing's old-agent refusal keeps its door
 import { pathField } from './path-field.js'; // lane path-field: THE path field (the path bar)
 import { startPointerDrag } from './drag-feed.js'; // THE feed for every drag door (lane-drag-release verify r2 census)
@@ -79,7 +80,7 @@ class FileExplorer {
     this._refreshHostOptions();
     this.pathInput = document.createElement('input'); this.pathInput.className = 'file-path-input';
     this._setupPathAutocomplete();
-    const btnRefresh = this._btn('\u21BB', t('Refresh')); btnRefresh.onclick = () => this.refresh();
+    const btnRefresh = this._btn('\u21BB', t('Refresh')); btnRefresh.onclick = () => this.refresh({ attended: true });   // THE door a person presses (B-23e5 r316)
 
     // View menu button
     const btnView = this._btn('', t('View options'));
@@ -118,7 +119,7 @@ class FileExplorer {
     // (View first, Upload last); Go up, the machine and the path never fold. The phone keeps the icons (its own layout).
     // each tool's ACT takes the place it was pressed from: its own button, or the ⋯ when it is folded (a View / Upload popover
     // opens there — never against a hidden button at the viewport's corner)
-    const tools = { up: { el: btnUp, word: t('Go up'), act: () => this.navigateUp() }, refresh: { el: btnRefresh, word: t('Refresh'), act: () => this.refresh() },
+    const tools = { up: { el: btnUp, word: t('Go up'), act: () => this.navigateUp() }, refresh: { el: btnRefresh, word: t('Refresh'), act: () => this.refresh({ attended: true }) },
       view: { el: btnView, word: t('View'), act: (a) => this._showViewMenu(a) }, newFile: { el: btnNewFile, word: t('New file'), act: () => this.createFile() },
       newDir: { el: btnNewDir, word: t('New folder'), act: () => this.createDir() }, upload: { el: btnUpload, word: t('Upload'), act: (a) => this._triggerUpload(a) } };
     for (const { el: b, word, act } of Object.values(tools)) { b.onclick = () => act(b); const w = document.createElement('span'); w.className = 'ftw-word'; w.textContent = word; b.appendChild(w); b.classList.add('file-tool-word'); if (app.isMobile) b.classList.add('ftw-compact'); }
@@ -709,22 +710,20 @@ class FileExplorer {
     };
   }
 
-  async navigate(dirPath) {
+  /** `attended`: the person's own Refresh (B-23e5 r275 / r316 / r336: the ONE marked door) — the hub tries the listing once even when
+   *  it remembers the folder as dead; after a STORAGE refusal no probe is asked at all, after any other it is asked unmarked */
+  async navigate(dirPath, { attended = false } = {}) {
     const seq = ++this._navSeq;
+    const init = attended ? { headers: ATTENDED_HEADERS } : undefined;
     const donePending = this._navPending(dirPath, seq);
     try {
       this._renderLimit = 100; // reset batch on navigation
-      const res = await fetch(`/api/files?path=${encodeURIComponent(dirPath)}${this._hp()}`);
-      const data = await res.json();
+      // r336: the probe («is it a file?») runs only after a refusal that is not the storage's — one press, one worker
+      const { data, info } = await listingAndProbe(fetch, `/api/files?path=${encodeURIComponent(dirPath)}${this._hp()}`, `/api/file/info?path=${encodeURIComponent(dirPath)}${this._hp()}`, init);
       if (seq !== this._navSeq) return; // a newer navigation superseded this one
       if (data.error) {
         // If path is a file (not a directory), open it in a viewer
-        const infoRes = await fetch(`/api/file/info?path=${encodeURIComponent(dirPath)}${this._hp()}`);
-        if (seq !== this._navSeq) return;
-        if (infoRes.ok) {
-          const info = await infoRes.json();
-          if (!info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined }); return; }
-        }
+        if (info && !info.isDirectory) { this.app.openFile(dirPath, dirPath.split('/').pop(), { host: this._host || undefined }); return; }
         throw Object.assign(new Error(fsErrorText(data)), { agentOld: isAgentOld(data.code) }); // verify-r2: a refusal in the reader's language; B-bd27 X1: an old agent's refusal keeps its door
       }
       if (this.currentPath !== data.path) { this._selection.clear(); this._selAnchor = null; if (this._selectMode) this._exitSelectMode(); }
@@ -1094,7 +1093,7 @@ class FileExplorer {
   }
 
   navigateUp() { this.navigate(this.currentPath.replace(/\/[^/]+\/?$/, '') || '/'); }
-  refresh() { this.navigate(this.currentPath); }
+  refresh({ attended = false } = {}) { this.navigate(this.currentPath, { attended }); }   // the Refresh button's press passes attended; a refresh after a delete, a host change: none
 
   
   

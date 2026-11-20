@@ -23,6 +23,7 @@
 
 'use strict';
 
+const fs = require('fs');   // B-23e5: the mount table only (fs.promises, off the loop) — every path op runs in a worker
 const path = require('path');
 const { Worker } = require('worker_threads');
 const { trackWorker } = require('./worker-memory');
@@ -30,6 +31,83 @@ const { trackWorker } = require('./worker-memory');
 const DOOR = require('./mount-door');
 // The payload keys that name a path (src/safe-fs-worker.js OPS).
 const PATH_KEYS = ['path', 'oldPath', 'newPath', 'src', 'dest'];
+// B-23e5 (lane hub-loop-stalls, the coordinator's ruling 2026-11-20): ONE DEAD THING, ONE CALL. A path whose call ended a worker AT
+// ITS DEADLINE is remembered for HUNG_MS; a call naming that path or one under it is REFUSED BY NAME at the pool's door, without
+// a worker — never sent to a fresh worker that the same hung syscall would end again (each end parks one thread a real hung mount
+// never gives back: about 930 an hour across 4 slots on a path the mount door does not know). The bound releases it: the first
+// call after it is asked again. The pool and its lanes keep ONE memory, at most HUNG_KEEP paths (the oldest leaves first).
+const HUNG_MS = 30000, HUNG_KEEP = 256, HUNG_CAP_X = 16;   // r275: a path that ends a worker AGAIN is kept twice as long each time, at most 16 × (8 min)
+// an op that reads a folder's CHILDREN (a listing, a walk, a recursive copy / move / remove) can hang on ONE dead child: a listing's path is
+// remembered EXACTLY (the same call is not asked again) — never everything under it; an op on one target is remembered AT OR UNDER
+const WIDE_OPS = new Set(['listDir', 'readdirNames', 'folderCensus', 'contextFiles', 'remove', 'unlink', 'copy', 'move']);
+// never remembered AT OR UNDER, never named by two dead children: the root, the home and every folder above it — each spelling the
+// process knows ($HOME, os.homedir(); a trailing slash cut — never the passwd home, test-architecture §68). One dead child there never
+// refuses the person's whole tree. (A home reached by another spelling — a symlinked home's real path — is not known here: such a path
+// is remembered at its own spelling only.)
+const homesOf = () => {
+  const os = require('os'), out = new Set();
+  for (const h of [process.env.HOME, (() => { try { return os.homedir(); } catch { return ''; } })()]) {
+    const x = String(h || '').startsWith('/') ? path.resolve(String(h)).replace(/\/+$/, '') : '';   // `/home//u`, `/home/u/.` read as /home/u
+    if (x) out.add(x);
+  }
+  return out;
+};
+const guardedPath = (p) => {
+  const x = String(p || '').replace(/\/+$/, '') || '/';
+  if (x === '/') return true;
+  for (const h of homesOf()) if (h === x || h.startsWith(x + '/')) return true;
+  return false;
+};
+// TWO SIBLINGS ⇒ THEIR FOLDER only on ONE storage: the folder and both siblings on the same mount (/proc/self/mountinfo, read OFF the
+// loop when a second sibling ends) — a dead mount POINT never names the healthy folder that holds it; no table, no climb
+const MOUNTINFO = '/proc/self/mountinfo';
+/** PURE: the mount point a path lives on (the longest mount-point prefix in /proc/self/mountinfo text), or null — the same reading as
+ *  src/local-index.js mountOf (parity-pinned in test-safe-fs-path-memory; that module is not required here: the device bundle carries
+ *  this pool, and its size budget, test-architecture §107). */
+function mountTargetOf(p, text) { const m = mountFactsOf(p, text); return m ? m.target : null; }
+/** PURE: {target, fstype} of the mount a path lives on (the same longest-prefix reading), or null. */
+function mountFactsOf(p, text) {
+  const file = String(p || '');
+  if (!file.startsWith('/')) return null;
+  let best = null;
+  for (const t of mountRowsOf(text)) {
+    if (!(t.target === '/' || file === t.target || file.startsWith(t.target + '/'))) continue;
+    if (best == null || t.target.length >= best.target.length) best = t;
+  }
+  return best;
+}
+const mountRowsOf = (text) => {
+  const out = [];
+  for (const line of String(text || '').split('\n')) {
+    const dash = line.indexOf(' - ');
+    if (dash < 0) continue;
+    const target = (line.slice(0, dash).split(' ')[4] || '').replace(/\\040/g, ' ');
+    if (target) out.push({ target, fstype: line.slice(dash + 3).split(' ')[0] || '' });
+  }
+  return out;
+};
+// an op whose deadline end can come from SIZE on a healthy storage (a long copy, a big tree removed, a deep walk) proves no dead path:
+// never noted (it still asks the memory before it runs)
+const SIZE_OPS = new Set(['copy', 'move', 'remove', 'unlink', 'contextFiles', 'folderCensus']);
+// an exact entry refuses the same op again — a stat with entryCount (Properties) is its own op, never a plain stat
+const opKeyOf = (op, payload) => (op === 'stat' && payload && payload.entryCount ? 'stat+entryCount' : String(op || ''));
+/** an exact entry's ops → whether it refuses this call: the same op within its own bound; a listing within the largest listing's bound */
+const selfRefuses = (self, wide, key, timeoutMs) => {
+  if (!self) return false;
+  if (self[key] != null && timeoutMs <= self[key]) return true;
+  if (!wide) return false;
+  for (const [k, b] of Object.entries(self)) if (WIDE_OPS.has(k) && timeoutMs <= b) return true;
+  return false;
+};
+const monoNow = () => performance.now();   // a wall-clock step never keeps a path refused for hours, nor frees it early
+const PATH_HUNG = Object.freeze({ code: 'path-hung', message: 'this folder or file did not answer in time and is not asked again for {s} s: {path}' });
+// r275: the refusal's words fit the 120 characters the folder field shows — a long path is cut in its middle (`hungPath` keeps it whole)
+const REFUSAL_MAX = 120;
+const fitPath = (p, room) => { const x = String(p); if (x.length <= room) return x; const keep = Math.max(2, room - 1), head = Math.ceil(keep / 2), tail = keep - head; return x.slice(0, head) + '…' + x.slice(x.length - tail); };
+const pathHungRefusal = (p, ms) => {
+  const head = PATH_HUNG.message.replace('{s}', String(Math.max(1, Math.ceil(ms / 1000))));
+  return Object.assign(new Error(head.replace('{path}', () => fitPath(p, REFUSAL_MAX - (head.length - '{path}'.length)))), { status: 503, code: PATH_HUNG.code, hungPath: p, retryMs: Math.max(0, ms) });
+};
 
 /** B-3b03: the refusal of a call that found no live worker (the words a route answers when it has no code of its own). */
 const NO_WORKER = Object.freeze({ code: 'no-worker', message: 'no worker of {pool} is running — one did not answer in time and is restarting, or none could start' });   // nothing ran on the main thread; ≤ 120 characters (the folder field cuts there)
@@ -73,7 +151,8 @@ const DEFAULT_TIMEOUTS = {
 // again and then fell back to the one-shot read (every record in one message: the main thread's ~100 ms deserialize, clone buffers
 // the size of the records). One worker, one page at a time: every page reaches its snapshot.
 const LANES = {
-  parse: { poolSize: 1, busy: { message: 'another document is being parsed — try again in a moment', code: 'parse_busy' } },
+  // B-23e5: a parse's deadline end is a runaway CPU parse, never a dead path — the lane asks the memory, it never adds to it
+  parse: { poolSize: 1, noteHung: false, busy: { message: 'another document is being parsed — try again in a moment', code: 'parse_busy' } },
   history: { poolSize: 1, busy: { message: "another conversation's history is being read — try again in a moment", code: 'history_busy' } },
 };
 const OP_LANE = { xlsxSheets: 'parse', boundedParsedPage: 'history', codexHistoryMergedPage: 'history' };   // the ops that always run in a lane (a caller may name one: call(op, p, { lane }))
@@ -87,6 +166,12 @@ class SafeFs {
     this._downSaid = false;               // B-3b03 follow-up: a streak of failed starts was said (cleared at the next answer)
     // B-3b03: `opts.inlineRun` (the release's in-main fallback, 2.235.0) is no longer read — the pool never runs an op inline
     this._blockedOf = opts.blocked || DOOR.blocked;   // B-afc4: (path) → blocked mount root | false
+    this._hungMs = opts.hungMs === 0 ? 0 : opts.hungMs > 0 ? opts.hungMs : HUNG_MS;   // B-23e5: how long a path that ended a worker at its deadline is not asked (0 = no memory: a pool that must keep asking)
+    this._hung = new Map();                                  // B-23e5: path → { until, exact, op, bound } (one memory with the lanes)
+    this._mountsText = typeof opts.mountsText === 'function' ? opts.mountsText : () => fs.promises.readFile(MOUNTINFO, 'utf8');   // B-23e5: the mount table, read off the loop
+    this._clock = typeof opts.clock === 'function' ? opts.clock : monoNow;   // r275: the memory's clock (a suite advances its own)
+    this._strikes = new Map();                               // r275: path → { n, at } — a repeat end of the same path doubles its time
+    this._pressing = new Map();                              // r316: a person's presses in flight, by op and payload — two at once are one call
     this.poolSize = Math.max(1, opts.poolSize || 4);
     this.timeouts = { ...DEFAULT_TIMEOUTS, ...(opts.timeouts || {}) };
     this._opts = opts;
@@ -149,6 +234,7 @@ class SafeFs {
     const call = rec.inflight.get(msg.id);
     if (!call) return; // already timed out & rejected + worker being replaced
     rec.inflight.delete(msg.id);
+    this._forgive(call.payload, call.op);   // r275 / r316: the path answered — what its entry's kind lets this reply clear leaves
     if (rec.inflight.size === 0) rec.worker?.unref?.();
     clearTimeout(call.timer);
     if (msg.ok) return call.resolve(msg.result);
@@ -216,6 +302,106 @@ class SafeFs {
     return false;
   }
 
+  /** B-23e5: the remembered path that refuses this call (and the ms until it may be asked again), or null. An entry refuses a call
+   *  only if the call would wait NO LONGER than its `bound`: 1.5 × the deadline that path ran out, or — for an op ended EARLY by a
+   *  call queued behind it — the time it had run, at least that call's deadline (a caller that waits longer is asked again: a slow but alive storage that
+   *  missed a 5 s read is still listed in 15 s). AT OR UNDER (`under`: a one-target end, a named folder) refuses that path and what is
+   *  under it; THE PATH ITSELF (`self`: a listing, a Properties stat, the root / the home) refuses the op that hung within its own
+   *  bound and, a listing's, every listing of that exact path. The bound passed ⇒ it leaves. */
+  _hungOf(payload, op = null, timeoutMs = Infinity) {
+    if (!this._hung || !this._hung.size || !payload) return null;   // a pool built without its constructor (a suite's stand-in) has no memory
+    const now = this._clock(), wide = WIDE_OPS.has(op), key = opKeyOf(op, payload);
+    for (const k of PATH_KEYS) {
+      const p = payload[k];
+      if (typeof p !== 'string' || !p) continue;
+      for (const [h, m] of this._hung) {
+        if (now >= m.until) { this._hung.delete(h); continue; }
+        // AT OR UNDER (a one-target end, a named folder): this path and what is under it, for a caller no more patient than `under`
+        const under = m.under != null && timeoutMs <= m.under && (p === h || p.startsWith(h.endsWith('/') ? h : h + '/'));
+        // THE PATH ITSELF (a listing, a Properties stat, the root / the home): the op that hung — and, a listing's, every listing
+        const self = p === h && selfRefuses(m.self, wide, key, timeoutMs);
+        if (under || self) return { path: h, ms: m.until - now };
+      }
+    }
+    return null;
+  }
+  /** B-23e5: remember the paths of the op that ended its worker at its deadline (`ms` = that deadline, or with `early` the time it
+   *  had run when a call queued behind it ended the worker; the oldest leaves past HUNG_KEEP). TWO SIBLINGS DEAD ⇒ THEIR FOLDER: a
+   *  second one-target end under the same folder within the bound — from ANOTHER call — remembers the folder, at or under (a dead
+   *  share browsed file by file costs two ends, not one a file), only when the folder and both lie on ONE storage (the mount table,
+   *  read off the loop: a dead mount POINT never names the healthy folder that holds it) and never the root, the home or above.
+   *  Returns the climb's promise (callers ignore it; a suite waits on it). */
+  _noteHung(payload, op, ms = Infinity, { early = false } = {}) {
+    if (!payload || !this._hungMs || !this._hung || SIZE_OPS.has(op)) return Promise.resolve();
+    const now0 = this._clock(), bound = Number.isFinite(ms) ? (early ? 1 : 1.5) * ms : Infinity, key = opKeyOf(op, payload);
+    const mine = new Set(PATH_KEYS.map((k) => payload[k]).filter((p) => typeof p === 'string' && p));   // one call's two paths (a rename) are one sibling
+    const climbs = [];
+    for (const p of mine) {
+      const until = now0 + this._spanOf(p, now0);   // r275: the time doubles on a repeat end of this path (capped)
+      const exact = WIDE_OPS.has(op) || key === 'stat+entryCount' || guardedPath(p);
+      this._putHung(p, exact ? { until, under: null, self: { [key]: bound }, ...(early ? { early: true } : {}) } : { until, under: bound, self: {}, ...(early ? { early: true } : {}) });
+      const dir = path.dirname(p), was = this._hung.get(dir), now = this._clock();
+      if (!exact && !early && dir && dir !== p && !guardedPath(dir) && (!was || was.under == null || was.until <= now)) {   // a folder whose LISTING hung may still be named; an EARLY end never names one
+        for (const [q, m] of this._hung) if (q !== p && !mine.has(q) && m.under != null && !m.early && m.until > now && path.dirname(q) === dir) { climbs.push(this._climb(dir, p, q, { until: now0 + this._hungMs, under: bound, self: {} })); break; }
+      }
+    }
+    return Promise.all(climbs);
+  }
+  /** r275 (THE TOTAL BOUNDED, not only the rate): a path that ends a worker again within twice its last span is kept twice as long —
+   *  30 s, 60 s, 2 min … at most HUNG_CAP_X × hungMs; a reply from it (forgiven) starts it over. */
+  _spanOf(p, now) {
+    const st = this._strikes && this._strikes.get(p);
+    const n = st && now - st.at <= 2 * st.span ? st.n + 1 : 1;
+    const span = Math.min(this._hungMs * HUNG_CAP_X, this._hungMs * Math.pow(2, n - 1));
+    if (this._strikes) { this._strikes.delete(p); this._strikes.set(p, { n, at: now, span }); while (this._strikes.size > HUNG_KEEP) this._strikes.delete(this._strikes.keys().next().value); }
+    return span;
+  }
+  /** r275 / r316 (A PATH THAT REPLIES IS FORGIVEN — by the entry's own kind): any answer of a worker (a result, or the file system's
+   *  own error) clears AT OR UNDER for a reply at or under its path (a folder named above it too); THE PATH ITSELF leaves only on a
+   *  reply at exactly that path from an op it refuses (a listing forgives a listing — a folder's own stat never forgives its listing,
+   *  which hangs on one dead child while the folder is alive). An entry with nothing left leaves, its repeat count with it. */
+  _forgive(payload, op) {
+    if (!payload || !this._hung || !this._hung.size) return;
+    const wide = WIDE_OPS.has(op), key = opKeyOf(op, payload);
+    for (const k of PATH_KEYS) {
+      const p = payload[k];
+      if (typeof p !== 'string' || !p) continue;
+      for (const [h, m] of [...this._hung]) {
+        let changed = false;
+        if (m.under != null && (p === h || p.startsWith(h.endsWith('/') ? h : h + '/'))) { m.under = null; changed = true; }
+        if (p === h && m.self) for (const sk of Object.keys(m.self)) if (sk === key || (wide && WIDE_OPS.has(sk))) { delete m.self[sk]; changed = true; }
+        if (changed && m.under == null && !Object.keys(m.self || {}).length) { this._hung.delete(h); if (this._strikes) this._strikes.delete(h); }
+      }
+    }
+  }
+  /** B-23e5: one memory entry — a later observation of a live entry never shrinks what is known: AT OR UNDER takes the larger bound of
+   *  the one-target ends (a listing's proof never reaches what is under the folder); THE PATH ITSELF keeps every op that hung, each
+   *  with its own larger bound (a folder named by its children keeps its own listing's proof); early only if both were. */
+  _putHung(key, m) {
+    const was = this._hung.get(key), live = was && was.until > this._clock();
+    this._hung.delete(key);
+    let next = m;
+    if (live) {
+      const self = { ...(was.self || {}) };
+      for (const [k, b] of Object.entries(m.self || {})) self[k] = self[k] != null ? Math.max(self[k], b) : b;
+      const under = was.under != null && m.under != null ? Math.max(was.under, m.under) : was.under != null ? was.under : m.under;
+      next = { until: Math.max(was.until, m.until), under, self, ...(was.early && m.early ? { early: true } : {}) };
+    }
+    this._hung.set(key, next);
+    while (this._hung.size > HUNG_KEEP) this._hung.delete(this._hung.keys().next().value);
+  }
+  /** B-23e5: name the folder of two dead siblings only on ONE storage — the mount table read off the loop, by path text; an automounter's
+   *  folder never; unreadable ⇒ no climb. What is under a named folder is refused with it, other mounts too: they are reached through it. */
+  _climb(dir, p, q, m) {
+    return Promise.resolve().then(() => this._mountsText()).then((text) => {
+      const a = mountFactsOf(dir, text), b = mountTargetOf(p, text), c = mountTargetOf(q, text);
+      if (!a || !b || !c || a.target !== b || b !== c) return;   // a mount point of its own (or two storages): the folder stays asked
+      if (a.fstype === 'autofs') return;   // an automounter's folder: a dead key has no line yet (its mount is what hangs) — never named
+      if (!this._hung || this._clock() >= m.until) return;
+      this._putHung(dir, m);
+    }, () => {});
+  }
+
   /** The lane `name` (LANES) — a SafeFs of its own beside this pool, the same worker script / door / deadlines. */
   lane(name) {
     let l = this._lanes.get(name);
@@ -226,6 +412,8 @@ class SafeFs {
       // and only that lane's: lane resume-all-paced L3 cure); never the parent's laneOpts again
       const { laneOpts, ...parent } = this._opts;
       l = new SafeFs({ ...parent, ...((laneOpts && laneOpts[name]) || {}), name: `${this.name}-${name}`, poolSize: L.poolSize, serial: L, timeouts: this.timeouts });
+      l._hung = this._hung; l._strikes = this._strikes; l._clock = this._clock;   // B-23e5: one dead thing is one dead thing for the pool and its lanes
+      if (L.noteHung === false) l._hungMs = 0;   // B-23e5: a parse lane's end is its own runaway parse — asked, never added to
       this._lanes.set(name, l);
     }
     return l;
@@ -233,13 +421,26 @@ class SafeFs {
 
   call(op, payload = {}, opts = {}) {
     if (this._closed) return Promise.reject(Object.assign(new Error('safeFs closed'), { status: 503 }));
+    // r316's should: two presses of the same thing at once JOIN one call in flight — never two workers for one person's hand; the
+    // joined caller rides the FIRST caller's deadline and signal (harmless with this door: the same listing, the same route)
+    if (opts.attended && !opts.joined && this._pressing) {
+      const k = op + '\u0000' + JSON.stringify(payload), j = this._pressing.get(k);
+      if (j) return j;
+      const p = this.call(op, payload, { ...opts, joined: true }), off = () => { if (this._pressing.get(k) === p) this._pressing.delete(k); };
+      this._pressing.set(k, p); p.then(off, off);
+      return p;
+    }
     const lane = !this._serial && (opts.lane || OP_LANE[op]);
-    if (lane) return this.lane(lane).call(op, payload, { timeoutMs: opts.timeoutMs, waitMs: opts.waitMs, signal: opts.signal });
+    if (lane) return this.lane(lane).call(op, payload, { timeoutMs: opts.timeoutMs, waitMs: opts.waitMs, signal: opts.signal, attended: opts.attended });
     // B-afc4 (lane mount-readers-blocked): a path under a BLOCKED mount is refused at the pool's door, in ms — never
     // queued into a worker that would hang inside a dead FUSE (a hung worker is not killable either).
     const mp = this._blocked(payload);
     if (mp) return Promise.reject(DOOR.refusal(mp));
     const timeoutMs = opts.timeoutMs || this.timeouts[op] || this.timeouts.default;
+    // B-23e5: a path that ended a worker at its deadline is not asked again until its bound — r275 / r316: A PERSON'S OWN PRESS IS
+    // TRIED (`attended`: the files router's mark of the Files window's Refresh, pressed — the one door): asked ONCE despite the memory
+    const hp = opts.attended ? null : this._hungOf(payload, op, timeoutMs);
+    if (hp) return Promise.reject(pathHungRefusal(hp.path, hp.ms));
     const rec = this._pick();
     if (this._serial && opts.signal?.aborted) return Promise.reject(gone());
     if (this._serial && (!rec || rec.inflight.size || this._waiting.length)) return this._wait(op, payload, timeoutMs, opts);
@@ -253,7 +454,7 @@ class SafeFs {
     // `idleOnly` (B-d833 H9): the least busy live worker has a call in flight ⇒ no worker is idle ⇒ refused at once, never queued
     // (a lane's op waits by its lane's own rule: serial lanes never take this option)
     if (opts.idleOnly && rec.inflight.size) return Promise.reject(noIdleRefusal(this._words));
-    return this._send(rec, op, payload, timeoutMs);
+    return this._send(rec, op, payload, timeoutMs, !!opts.attended);
   }
 
   // A lane's op while one runs (or while its worker respawns): it waits in main (never in the worker). r3: TWO clocks —
@@ -264,7 +465,7 @@ class SafeFs {
   // the route's response closed before its answer) leaves the queue, never sent; a RUNNING one finishes (one worker).
   _wait(op, payload, timeoutMs, opts = {}) {
     return new Promise((resolve, reject) => {
-      const job = { op, payload, timeoutMs, resolve, reject, signal: opts.signal || null };
+      const job = { op, payload, timeoutMs, resolve, reject, signal: opts.signal || null, attended: !!opts.attended };
       const leave = (e) => {
         const i = this._waiting.indexOf(job);
         if (i < 0) return;
@@ -297,17 +498,19 @@ class SafeFs {
       // a worker that would hang inside it
       const mp = this._blocked(job.payload);
       if (mp) { job.reject(DOOR.refusal(mp)); continue; }
-      this._send(rec, job.op, job.payload, job.timeoutMs).then(job.resolve, job.reject);
+      const hp = job.attended ? null : this._hungOf(job.payload, job.op, job.timeoutMs);   // B-23e5: a path that ended a worker while the job waited is refused the same way (a person's press is tried)
+      if (hp) { job.reject(pathHungRefusal(hp.path, hp.ms)); continue; }
+      this._send(rec, job.op, job.payload, job.timeoutMs, job.attended).then(job.resolve, job.reject);
     }
   }
 
-  _send(rec, op, payload, timeoutMs) {
+  _send(rec, op, payload, timeoutMs, attended = false) {
     const id = this._seq++;
     this._ran = true;   // a worker of this pool TOOK a call — sticky: a killed worker's respawn wait is never «no worker» (the sessions sweep's -cure, its read's M1)
     const p = new Promise((resolve, reject) => {
       const timer = setTimeout(() => this._onTimeout(rec, id), timeoutMs);
       timer.unref?.();
-      rec.inflight.set(id, { resolve, reject, timer, op });
+      rec.inflight.set(id, { resolve, reject, timer, op, payload, timeoutMs, sentAt: monoNow(), attended });   // B-23e5: its paths are remembered if it ends at its deadline
       try {
         rec.worker.postMessage({ id, op, payload });
         // Hold the event loop open while work is in flight — workers are
@@ -329,6 +532,7 @@ class SafeFs {
   // call (503), reject its siblings on the same worker, terminate + respawn.
   _onTimeout(rec, id) {
     const call = rec.inflight.get(id);
+    const running = rec.inflight.size ? rec.inflight.values().next().value : null;   // B-23e5: the op the worker is RUNNING — the oldest it took
     if (!call) return;
     rec.inflight.delete(id);
     this._timeouts++;
@@ -337,7 +541,12 @@ class SafeFs {
     e.status = 503;
     e.safeFsTimeout = true;
     e.deadline = true;   // the call RAN in a worker and overran its deadline (never a missing worker)
-    call.reject(e);
+    // B-23e5: ONE DEAD THING, ONE CALL — the op the worker was RUNNING is the one that hung (a call queued behind it ran out its own,
+    // shorter, deadline while it waited: its path is not the dead one); its paths are not asked again until their bound
+    if (running) this._noteHung(running.payload, running.op, running !== call ? Math.max(call.timeoutMs || 0, monoNow() - (running.sentAt || monoNow())) : Math.min(running.timeoutMs || Infinity, monoNow() - (running.sentAt || monoNow())), { early: running !== call });   // the time since it was sent without an answer; ended EARLY by a queued call ⇒ only that long
+    // r275: a person's press (attended) that ends its worker too hears the renewed memory's own words — tried, and not asked again for N s
+    const told = call.attended && running === call ? this._hungOf(call.payload, call.op, 0) : null;
+    call.reject(told ? Object.assign(pathHungRefusal(told.path, told.ms), { deadline: true, tried: true }) : e);
 
     const w = rec.worker;
     rec.alive = false;
@@ -378,4 +587,4 @@ class SafeFs {
   }
 }
 
-module.exports = { SafeFs, NO_WORKER, noWorkerRefusal, NO_IDLE, noIdleRefusal };
+module.exports = { SafeFs, NO_WORKER, noWorkerRefusal, NO_IDLE, noIdleRefusal, PATH_HUNG, pathHungRefusal, HUNG_MS, WIDE_OPS, SIZE_OPS, mountTargetOf, mountFactsOf };

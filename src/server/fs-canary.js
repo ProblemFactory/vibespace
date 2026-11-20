@@ -40,6 +40,7 @@ function createFsCanary({ file, record = () => {}, log = (...a) => console.error
     // B-3b03: no inlineRun — a probe with no live worker is refused (counted «lost», never a strike, never a healthy mount)
     poolSize: 1,
     timeouts: { probe: deadlineMs * 3 },
+    hungMs: 0,   // B-23e5: the canary MEASURES — its probe is asked every time, never refused by the pool's dead-path memory
   });
   let strikes = 0, busy = false;
   const counts = { probes: 0, slowFs: 0, slowLoop: 0, timedOut: 0, lost: 0, wedged: 0, held: 0, heldOnMount: 0 };
