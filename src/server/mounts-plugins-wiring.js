@@ -308,6 +308,7 @@ if (deliver && typeof deliver.registerEndedWake === 'function') deliver.register
 // lane conversation-facts (majordomo piece 2): conversations.list's ONE builder — hoisted (lane login-request-card, majordomo piece
 // 3b): the proposal card's rows come from the SAME builder as the list
 const listFacts = (() => { const CFX = require('./conversation-facts.js'); const src = () => listSources() || {}; return CFX.create({ activeSessions, groupsOf: automationGroupsOf, ...CFX.sourcesFrom({
+      hosts,   // B-24e2: a paired machine is asked for its own binary's background signal
       getJobs: () => (getJobs ? getJobs() : null), userTodos, persistenceRouter, keeper: () => browserKeeper, browserStream: () => browserStream,
       autoResume: () => src().autoResume || null, stashView: () => src().stashView || null, deliver: () => deliver, sysinfo: { history: (ms) => { const si = src().sysinfo; return si && typeof si.history === 'function' ? si.history(ms) : null; } },
       stoppedSessions: () => { const f = src().stoppedSessions; return typeof f === 'function' ? f() : []; }, treeUsage: require('../browser-facts.js').treeUsage, buffersDir: BUFFERS_DIR }) }); })();

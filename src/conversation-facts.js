@@ -268,7 +268,7 @@ function trackedFacts(st, { keeps = null, turn = null, levelDeclared = null } = 
       out.background = null;
       out.backgroundWhy = d === false ? `its CLI ${st.cli} does not declare the background signal in its own record union`
         : d === 'partial' ? `its CLI ${st.cli}: the background signal was not found in the bytes read (the read stops 64 MiB past the model catalog) — whether it has it is unknown`
-        : `its CLI version ${st.cli} is above the measured span (${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO}) and its binary has not been read for the background signal yet`;
+        : `its CLI version ${st.cli} is above the measured span (${LEVEL_MEASURED_FROM}–${LEVEL_MEASURED_TO}) and its binary has not been read for the background signal yet${d === 'reading' ? ' — it is being read on its machine now' : ''}`;
     }
   }
   const tools = st && Array.isArray(st.tools) ? st.tools : [];

@@ -1213,7 +1213,7 @@ class DeviceManager {
   /** R1 machine facts (shared src/machine-probes.js runs daemon-side).
    *  Old daemons don't know these ops — callers bound with a timeout and
    *  fall back to the legacy ssh scripts. */
-  probeCli(helper = null) { return this._request({ op: 'probe-cli', timeoutMs: 9000, ...(helper ? { helper } : {}) }); }   // B-77ed: a start's cwd and own file
+  probeCli(helper = null, { level = false } = {}) { return this._request({ op: 'probe-cli', timeoutMs: 9000, ...(helper ? { helper } : {}), ...(level ? { level: true } : {}) }); }   // B-77ed: a start's cwd and own file; B-24e2: `level` — an older agent ignores it (no new op)
   probeCreds() { return this._request({ op: 'probe-creds', timeoutMs: 9000 }); }
   /** R3 transcript.* — run one transcript-service method ON the device and
    *  return the parsed JSON result. The result streams on a byte channel with

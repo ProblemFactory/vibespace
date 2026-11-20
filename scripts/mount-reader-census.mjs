@@ -40,6 +40,7 @@ export const ROWS = [
   ['src/channel-outbox-files.js', 'own-tree', 5, null, DATA],
   ['src/channel-store.js', 'own-tree', 34, null, DATA],   // lane mask-value-shape (the store closed to the owning account, 2026-11-17; carried onto 2.369.410 by bl-mail): + the root's ONE async stat at the open (its mode, before the chmod that takes group / other bits away — the store's own <dataDir>/channels, never a person's path); channel-store-off-loop commit 1: −1, writeBuffersAtomic's temp open gone with its last caller (the stamps snapshot is the writer thread's); lane queued-is-not-woke laws 2 + 3: + readTailAsync (the log's async twin, its FileHandle open — the wait reading); lane webhook-l1-server: + rewriteRecords (record-clear's channel-webhook door); lane lark-search-miss: + feedMissRead (<account>/feed-misses.json); lane hub-loop-stalls commit 2: + the acts journal (index-acts.ndjson) read once at the store's start
   ['src/claude-lock-capture.js', 'own-tree', 3, null, CLI],
+  ['src/cli-level-scan.js', 'own-tree', 1, null, `${CLI}; B-24e2: the claude binary a machine spawns — its bytes read for the background signal, never run (machine-probes cliLevel hands the realpath)`],
   ['src/cli-identity.js', 'own-tree', 18, null, PROC],
   ['src/codex-fork-ledger-purge.js', 'own-tree', 6, null, CLI],
   ['src/codex-session-store.js', 'own-tree', 4, null, `${CLI}; B-952b smalls +1: loadWrapperMeta — the side file <buffers dir>/<webui id>.json under data/, read with fs.promises off the loop (the Properties status road), unreadable = null`],
@@ -100,6 +101,7 @@ export const ROWS = [
   ['src/server/apps-engine.js', 'own-tree', 1, null, DATA],
   ['src/server/apps-ops-door.js', 'own-tree', 4, null, 'its own socket under ~/.vibespace/apps/operator (lane app-persist-layer1: lstat of that directory, of the socket path before listen + after it, and at close) — VibeSpace’s own state, never a path anyone names'],
   ['src/server/automation-engine.js', 'user-path', 5, 'realpathAsync\\(p\\), bound', `2.369.359 (userW's agent, fb-ac40a458d8): the folder judge's real path of a cwd / a key root is read OFF the main thread and BOUNDED (the wiring hands the SafeFs worker's realpath; fs.promises by default) before the PURE judge — a path that does not answer is the named refusal realpath_unreadable, never «does not exist»; the other 4 reads are ${DATA}`],
+  ['src/server/cli-level-reported.js', 'own-tree', 1, null, DATA + ' (B-24e2: data/cli-level-reported.json — the paired machines\' own-binary verdicts, read once at boot)'],
   ['src/server/cli-model-catalog.js', 'own-tree', 5, null, CLI + ' (lane cli-update-needs-nothing: the installed claude binary the sessions spawn — its bytes read, never run — data/cli-model-catalog.json, and data/\'s listing for the ledger\'s own tmp files a kill left)'],
   ['src/server/cli-registration.js', 'own-tree', 2, null, DATA + ' (lane cli-2-1-308-records: data/cli-registration.json — the builds said once — and a record draft under data/claude-cli-dumps/)'],
   ['src/server/cli-unmeasured-notice.js', 'own-tree', 1, null, DATA],

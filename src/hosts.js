@@ -1741,6 +1741,17 @@ class HostManager {
     return { suggestions: PC.legacySuggestions(listing, tx), listing, self, os: raw.os, took: Date.now() - t0, partial: !raw.done };
   }
 
+  /** B-24e2: does this machine's Claude Code DECLARE the background signal — read by the machine of its OWN binary (shared
+   *  src/machine-probes.js cliLevel, behind probe-cli with `level: true` — no new op). → its answer ({state: 'read' | 'reading' | 'cut' |
+   *  'none', …}) | null: an OLDER device agent ignores the flag and answers no level (the hub reads «unknown», as before — never a wait).
+   *  A dropped link or the op's bound REJECTS (the asker ends its ask and asks again at a later facts read). */
+  async cliLevelOf(id) {
+    const dm = await this.deviceBounded(id, 6000);
+    const r = await dm.probeCli(null, { level: true });
+    const lv = r && r.facts && r.facts.claude ? r.facts.claude.level : null;
+    return lv && typeof lv === 'object' && typeof lv.state === 'string' ? lv : null;
+  }
+
   /** Backend status on a host (mirrors local /api/backend-status shape). */
   async backendStatus(id, { helper = null } = {}) {   // B-77ed: `helper` = a start's { cwd, ownFile } — its files read by the one rule
     const h = this.get(id);

@@ -23,6 +23,7 @@ const path = require('path');
 const { execFile } = require('child_process');
 const crypto = require('crypto'); // lane cli-self-measure: the CLI binary's sha256 (cliBinary)
 const { cliVersionOf } = require('./cli-caps.js'); // PURE: the one version spelling the long-lived-token gate reads
+const LS = require('./cli-level-scan.js'); // B-24e2: the background signal, read on the machine that runs the binary
 const { helperFactOfText, SETTINGS_READ_MAX, combinedFact, startFilesOf, nodeAt } = require('./helper-fact.js'); // PURE: a settings file's key-helper fact — the hub's own rule (B-bc9f)
 
 // windowsHide (lane win-run-hide-console): `claude --version` on a Windows device is a console program the console-less
@@ -207,7 +208,7 @@ function finishLoginLadder(r) {
  * @param {object} [o] {claudeCmd, codexCmd} resolved command overrides (the
  *   server passes its boot-resolved absolute paths; the daemon resolves PATH).
  */
-async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = null } = {}) {
+async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = null, level = false } = {}) {
   const out = { platform: process.platform, claude: {}, codex: {} };
   const startP = helper && typeof helper === 'object' ? startHelperFact(helper) : null;   // B-77ed: begun at once, beside the --version runs (the hub's bound is 8 s)
   for (const [key, cmd] of [['claude', claudeCmd], ['codex', codexCmd]]) {
@@ -226,6 +227,7 @@ async function cliFacts({ claudeCmd = 'claude', codexCmd = 'codex', helper = nul
   Object.assign(out.claude, login);
   if (out.claude.machineLoginState === null) delete out.claude.machineLoginState;
   if (startP) out.claude.startHelper = await startP;   // B-77ed: asked for a start (its cwd and own file)
+  if (level === true && out.claude.cmdPath) out.claude.level = await cliLevel(claudeCmd);   // B-24e2: asked only for a build above the hub's span
   out.codex.loggedIn = fs.existsSync(path.join(os.homedir(), '.codex', 'auth.json'));
   return out;
 }
@@ -322,6 +324,34 @@ async function cliBinary(cmd) {
   _binMemo.identity = id.identity; _binMemo.out = out;
   return { ...out };
 }
+/** B-24e2 — DOES THIS MACHINE'S CLAUDE CODE DECLARE THE BACKGROUND SIGNAL (row B-24e2: a fact about a machine is read where it lives).
+ *  ONE scan per binary identity (path + stat identity), kept in memory; at most ONE scan at a time; the ask never waits for a scan
+ *  (the hub's probe-cli bound is 9 s): → {state: 'read', declared, whole, version, size, maxStepMs} | {state: 'reading'} |
+ *  {state: 'cut', at, retryAt} — A CUT READ IS REMEMBERED (主开发 2026-11-20 12:22Z): a scan the bound cut, or an I/O failure, is not
+ *  read again before retryAt (an hour), unless the binary's identity changes — a slow disk is never read for a minute at every ask |
+ *  {state: 'none'} (no binary). Reading a file starts nothing: no CLI runs for it. */
+const LEVEL_RETRY_MS = 3600e3, LEVEL_MEMO_MAX = 8;
+const _levelMemo = new Map();   // identity → answer
+let _levelScan = null;          // the one scan in flight
+async function cliLevel(cmd, { scan = LS.scanLevel, now = () => Date.now() } = {}) {
+  const id = await cliBinaryIdentity(cmd);
+  if (!id) return { state: 'none' };
+  const m = _levelMemo.get(id.identity);
+  if (m && !(m.state === 'cut' && now() >= m.retryAt)) return { ...m };
+  if (_levelScan) return { state: 'reading' };
+  _levelMemo.set(id.identity, { state: 'reading' });
+  _levelScan = Promise.resolve().then(() => scan(id.path)).then((r) => {
+    const t = now();
+    _levelMemo.set(id.identity, r && !r.error && r.whole === true ? { state: 'read', declared: r.declared === true, whole: true, version: r.version || null, size: r.size, maxStepMs: r.maxStepMs }
+      : { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (r && r.error) || 'not read whole' });
+    while (_levelMemo.size > LEVEL_MEMO_MAX) _levelMemo.delete(_levelMemo.keys().next().value);
+  }, (e) => { const t = now(); _levelMemo.set(id.identity, { state: 'cut', at: t, retryAt: t + LEVEL_RETRY_MS, why: (e && e.code) || 'read-failed' }); })
+    .finally(() => { _levelScan = null; });
+  return { state: 'reading' };
+}
+/** tests only: forget the scans (a «restart» of the device agent) / the scan in flight, to await */
+function _levelReset() { _levelMemo.clear(); _levelScan = null; }
+function _levelInFlight() { return _levelScan; }
 /** …the cheap half (no hash): {path, cmd, size, identity} — the hub's 60 s check that the file the sessions spawn is the same */
 async function cliBinaryIdentity(cmd) {
   const p = which(cmd);
@@ -329,4 +359,4 @@ async function cliBinaryIdentity(cmd) {
   try { const real = await fs.promises.realpath(p); const st = await fs.promises.stat(real); return { path: real, cmd: p, size: st.size, identity: `${st.dev}:${st.ino}:${st.size}:${Math.round(st.mtimeMs)}:${Math.round(st.ctimeMs)}` }; } catch { return null; }
 }
 
-module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };
+module.exports = { cliFacts, credsFacts, classifyInstall, which, cliVersion, cliBinary, cliBinaryIdentity, cliLevel, _levelReset, _levelInFlight, realCliRefusal, sayNotRun, startHelperFact, forgetLoginDir, useShellsSaid };

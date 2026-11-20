@@ -414,6 +414,7 @@ CMCS.onView((view) => {
 // LAW A (acceptance r1): what the hub read is in force from the first answer after a restart — the ledger is loaded here,
 // at create, before any --version tick (no re-read)
 try { CMCS.boot({ dataDir: path.join(rootDir, 'data') }); } catch { }
+try { require('./cli-level-reported.js').boot({ dataDir: path.join(rootDir, 'data'), log: (m) => console.log(m) }); } catch { }   // B-24e2: what the paired machines read of their own binaries
 function refreshAvailableModels() {
   // /v1/models accepts both auth schemes now (OAuth needs Bearer + the oauth
   // beta header — it used to 401, fixed server-side ~2026-06). The old

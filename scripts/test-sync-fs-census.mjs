@@ -252,6 +252,7 @@ const ROWS = [
   ["src/server/claude-signin.js", "*", 11, "local-only", "accounts.subDir(id) = data/subs/<id> (CLI config dir) and the 0700 scratch vs-signin-* the hub mkdtemps under tmpRoot = os.tmpdir()"],
   ["src/server/cli-cmd.js", "*", 1, "local-only", "boot-only: fixed bin dirs + PATH entries + a command name (xset/xauth/claude/codex)"],
   ["src/server/cli-env.js", "*", 2, "local-only", "rd = /run/user/<uid>; p = $XAUTHORITY, /run/user/<uid>/*auth*, ~/.Xauthority"],
+  ["src/server/cli-level-reported.js", "*", 1, "local-only", "data/cli-level-reported.json under dataDir=<checkout>/data (B-24e2: the paired machines' own-binary verdicts — one small read at boot; the writes go through the store writer)"],
   ["src/server/cli-model-catalog.js", "*", 5, "local-only", "data/cli-model-catalog.json under dataDir=<checkout>/data (the model-catalog ledger: tmp + rename, and the sweep of its own tmp files a kill left — readdir + unlink; lane cli-update-needs-nothing)"],
   ["src/server/cli-registration.js", "*", 3, "local-only", "stateFile = data/cli-registration.json and data/claude-cli-dumps/<semver>.json under dataDir=<checkout>/data"],
   ["src/server/cli-self-measure.js", "*", 2, "local-only", "lane cli-self-measure: the folder of ONE check at the start of a run — its root (a NON-recursive mkdir: it refuses anything already there) and the child\'s HOME and TMPDIR inside it, under the runtime dir / the system temp since 2.369.395 (the incident of 2026-11-11: never under the data dir) — the ledger itself is writeJsonAtomic"],

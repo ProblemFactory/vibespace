@@ -336,15 +336,17 @@ function view() { const l = st.ledger; return l && l.current ? viewOf(l.binaries
  *  loaded and the ticks keep — no file is read here (src/server/conversation-facts.js asks it per row). */
 function levelSignalOf(version) {
   const l = st.ledger;
-  if (!l || typeof version !== 'string' || !version) return null;
+  if (typeof version !== 'string' || !version) return null;
   let out = null;
-  for (const e of Object.values(l.binaries)) {
+  for (const e of Object.values((l && l.binaries) || {})) {   // B-24e2: no ledger of our own still reads what a machine reported
     if (!e || e.reader !== CMC.READER_VERSION || e.retry || !isLevel(e.level)) continue;
     if (((e.evidence && e.evidence.versionString) || e.cli) !== version) continue;
     if (e.level.declared) return true;
     if (e.level.whole === true) out = false; else if (out === null) out = 'partial';
   }
-  return out;
+  if (out === false) return out;
+  const r = require('./cli-level-reported.js').levelOf(version);   // B-24e2: a PAIRED machine's read of its own binary, by version (after ours)
+  return r ? r.declared : out;
 }
 /** THE CLI'S OWN SUBSCRIPTION VALUES (lane oat-add-door): the binary in use's plan values as its bytes state them →
  *  {cli, types, orgTypes, tiers, withheld, anchor} or null (no binary read yet, or one read before the reader knew them) */

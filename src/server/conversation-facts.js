@@ -78,7 +78,7 @@ function create({
       state: 'running',
       turn, ...(chat ? (turn ? {} : { turnWhy: WHY.notCollected }) : { turnWhy: WHY.terminal }),
     };
-    if (chat) Object.assign(r, CF.trackedFacts(s._convFacts || null, { keeps: caps.sidecarFacts, turn, levelDeclared }));
+    if (chat) Object.assign(r, CF.trackedFacts(s._convFacts || null, { keeps: caps.sidecarFacts, turn, levelDeclared: (v) => levelDeclared(v, s.host || null) }));   // B-24e2: the machine it runs on
     else Object.assign(r, { background: null, backgroundWhy: WHY.terminalNone, timers: null, timersWhy: WHY.terminalNone, idleSince: null, idleSinceWhy: WHY.terminalNone });
     const held = call(heldOf, s, id);
     if (isCount(held)) r.heldPrompts = held; else { r.heldPrompts = null; r.heldPromptsWhy = WHY.noWrapper; }
@@ -186,7 +186,7 @@ function create({
  * or read a file and they are NOT called here: the stash summary (its gate may write), the keeper's published browser fact
  * and its ephemerals() rows (a stat per kept store), the first layouts read, the machine memory reader).
  */
-function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter = null, keeper = () => null, browserStream = () => null,
+function sourcesFrom({ hosts = null, getJobs = () => null, userTodos = null, persistenceRouter = null, keeper = () => null, browserStream = () => null,
   autoResume = () => null, stashView = () => null, deliver = () => null, sysinfo = null, stoppedSessions = null, treeUsage = null, buffersDir = null,
   // the person's grant «may wake its conversation» on one job or schedule (the owner's rule, 2026-11-17 — piece 7 owns the field):
   // true | false | null (unknown). Until piece 7 names it, every grant reads unknown — the safe side (unknown refuses).
@@ -243,7 +243,13 @@ function sourcesFrom({ getJobs = () => null, userTodos = null, persistenceRouter
   const cidOfKey = (key) => (key ? String(key).slice(String(key).indexOf(':') + 1) : null);
   return {
     capsOf: (b) => require('../backend-caps.js').capsOf(b),
-    levelDeclared: (v) => require('./cli-model-catalog.js').levelSignalOf(v),   // piece 2b: in memory (the catalog's ledger)
+    levelDeclared: (v, host = null) => {   // piece 2b: in memory (the catalog's ledger); B-24e2: a PAIRED machine reads its own binary
+      const d = require('./cli-model-catalog.js').levelSignalOf(v);
+      if (d === true || d === false || !host || !hosts) return d;
+      const R = require('./cli-level-reported.js');
+      R.want(v, host, (h) => hosts.cliLevelOf(h), { nameOf: (h) => { const x = hosts.get(h); return (x && x.name) || null; } });   // the facts read IS the trigger (the manager's list reads it first)
+      return R.asking(v, host) ? 'reading' : d;
+    },
     keyOf: (s) => { const cid = idOf(s); return cid ? `${s.backend || 'claude'}:${cid}` : null; },
     turnOf: require('./turn-facts.js').turnOf, turnKnown: require('./turn-facts.js').turnKnown,
     heldOf: (s) => {
