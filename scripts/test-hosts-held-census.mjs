@@ -695,7 +695,7 @@ console.log('§10 the boot\'s two resume roads over a held-then-read hosts.json 
   const lineOf = (src, head) => { const i = src.indexOf(head); if (i < 0) throw new Error('not found: ' + head); return src.slice(i, src.indexOf('\n', i)); };
   const READOPT = "  setTimeout(() => { const go = () => Promise.resolve().then(() => readoptOrphanKeeperSessions())";
   const bootOf = (srv) => { const ln = lineOf(srv, READOPT), a = ln.indexOf('setTimeout(() => { ') + 'setTimeout(() => { '.length, b = ln.lastIndexOf(' }, 8000);'); return new Function('hosts', 'resumeRoad', 'readoptOrphanKeeperSessions', 'console', ln.slice(a, b)); };   // eslint-disable-line no-new-func
-  const gateOf = (wire) => new Function(`let adoptedNow = null; ${lineOf(wire, 'let remoteSettled = false;')}\n${lineOf(wire, 'const REMOTE_READOPT_WORDS = ')}\n${lineOf(wire, 'const resumeRoad = { reopen: null, kept: null, adopted:')}\n${lineOf(wire, 'const reopenRoads = ')}\nreturn { resumeRoad, reopenRoads, openLocal: new Promise((r) => { adoptedNow = r; }) };`)();   // eslint-disable-line no-new-func
+  const gateOf = (wire, deliver = null) => new Function('deliver', `let adoptedNow = null; ${lineOf(wire, 'let remoteSettled = false;')}\n${lineOf(wire, 'const REMOTE_READOPT_WORDS = ')}\n${lineOf(wire, 'const resumeRoad = { reopen: null, kept: null, adopted:')}\n${lineOf(wire, 'const reopenRoads = ')}\nreturn { resumeRoad, reopenRoads, openLocal: new Promise((r) => { adoptedNow = r; }) };`)(deliver);   // eslint-disable-line no-new-func
   const quiet = { warn: () => { }, log: () => { } }, tick = () => new Promise((r) => setTimeout(r, 5));
   const road = async (wire, srv) => {
     const st = held10('road-' + Math.random().toString(36).slice(2, 8)), H = new HM10({ dataDir: st.d });
@@ -723,6 +723,23 @@ console.log('§10 the boot\'s two resume roads over a held-then-read hosts.json 
   ok(rd.held && rd.localOpen && rd.heldRemote === 'readopt-pending' && rd.heldLocal && rd.readoptStarted === 1 && rd.windowRemote === 'readopt-pending' && rd.remoteBeforeSettle === 0 && rd.afterRemote && rd.calls === 'local,remote',
     'the boot over a HELD hosts.json: the LOCAL road opens at once (a local resume runs); a REMOTE resume is refused by name while held AND in the window after the read while the re-adoption runs — never run before it settles; once it settles the remote road opens', rd);
   ok(rdx.windowRemote === 'ran' && rdx.remoteBeforeSettle > 0, 'CONTROL (the two-roads gate cut, in a copy of the wiring): a remote resume submitted in the window RUNS before the re-adoption settled — it could end the agent the re-adoption would adopt — RED', rdx);
+  // its readers' should: the NEVER-HELD road run too (a boot whose hosts.json reads at once): both roads open only in the re-adoption's
+  // finally — a local resume waits for it as before (piece 4's must 5), a remote one too; once it settles both run
+  const never = async () => {
+    const d = path.join(D10, 'never'); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'hosts.json'), hb10);
+    const H = new HM10({ dataDir: d }), g = gateOf(WIRE10), calls = [];
+    g.resumeRoad.reopen = async (item) => { calls.push(item && item.hostId ? 'remote' : 'local'); return { ok: true }; };
+    let settle = null; const readopt = () => new Promise((r) => { settle = r; });
+    let localOpen = false; g.openLocal.then(() => { localOpen = true; });
+    bootOf(SRV10)(H, g.resumeRoad, readopt, quiet); await tick();
+    const out = { held: H.held(), localOpenBefore: localOpen, remoteBefore: (await g.reopenRoads({ sessionKey: 'claude:n1', hostId: 'h-0001' })).code || 'ran' };
+    if (settle) settle(); await tick(); await tick();
+    out.localOpenAfter = localOpen; out.remoteAfter = (await g.reopenRoads({ sessionKey: 'claude:n2', hostId: 'h-0001' })).ok === true; out.calls = calls.join();
+    return out;
+  };
+  const nv = await never();
+  ok(nv.held === false && nv.localOpenBefore === false && nv.remoteBefore === 'readopt-pending' && nv.localOpenAfter === true && nv.remoteAfter && nv.calls === 'remote',
+    'the NEVER-HELD road: both roads stay shut while the re-adoption runs (the local line opens in its finally, as piece 4 made it; a remote resume refused by name) and open once it settles', nv);
   // the re-adoption's wait is KEPT past the store's bound of waits (a wait let go was only a log line: the left-running remote
   // conversations were never adopted until the next start, and the remote road never opened)
   const LETGO = "{ onLetGo: () => { console.warn('[readopt] the re-adoption keeps its place in the waits for hosts.json (it runs at the read; remote resumes are refused until it settles)'); keep(); } }";

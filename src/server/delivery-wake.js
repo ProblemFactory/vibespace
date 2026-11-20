@@ -96,6 +96,9 @@ function create({ resumeLine, seams, getStashHandover, spendGuard = null, identi
     let r = null;
     try { r = await seams.reopen({ sessionKey: key, cwd: (facts && facts.cwd) || '', hostId: (facts && facts.hostId) || undefined }, { by: BY, accountId: payer._accountId || null }); }   // VibeSpace by itself — never a person's press; on the judged account
     catch (e) { r = { ok: false, why: (e && e.message) || String(e) }; }
+    // the stores chain's two roads (主开发 02:59Z): a wake refused ONLY because the re-adoption of the machines' left-running conversations
+    // has not settled STAYS OWED (outcome 'waits'): the park keeps it and runs it once the re-adoption settles — never ended, never on a timer
+    if (r && r.ok === false && r.code === 'readopt-pending') { sh.releaseWake(cid, claim); return { ok: false, outcome: 'waits', code: 'readopt-pending', why: 'it runs on a paired machine and waits for VibeSpace to re-adopt the conversations left running there (its record of the paired machines could not be read until now) — it goes by itself then' }; }
     if (!r || !r.ok) { sh.releaseWake(cid, claim); return { ok: false, outcome: 'failed', why: (r && r.why) || 'the conversation did not start' }; }
     // MUST 3 (主开发 12:46Z): it was ALREADY running (a page resumed it under another id) — no hand-over, no «had been ended»
     // sentence into a live agent, no resumed mark: the claim goes back and the words ride the live roads

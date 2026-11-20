@@ -48,12 +48,17 @@ process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true 
 const T0 = 1_790_000_000_000;
 const cidOf = (n) => `bbbbbbbb-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const RESTART = { stopReason: 'dead-socket-at-boot', stoppedAt: T0 - 60e3 };
+// the stores chain's two roads (主开发 02:59Z): the wiring's gate both reopening roads pass, compiled from its source (its lines whole)
+const WIRE_SRC = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'), DELIVER_SRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf8');
+const MJ_DWL = mutantCopies('dwl-readopt', REPO);
+const lineOfSrc = (src, head) => { const i = src.indexOf(head); if (i < 0) throw new Error('not found: ' + head); return src.slice(i, src.indexOf('\n', i)); };
+const gateOf = (wire, deliver) => new Function('deliver', `let adoptedNow = null; ${lineOfSrc(wire, 'let remoteSettled = false;')}\n${lineOfSrc(wire, 'const REMOTE_READOPT_WORDS = ')}\n${lineOfSrc(wire, 'const resumeRoad = { reopen: null, kept: null, adopted:')}\n${lineOfSrc(wire, 'const reopenRoads = ')}\nreturn { resumeRoad, reopenRoads };`)(deliver);   // eslint-disable-line no-new-func
 const PERSON = { stopReason: 'ended', stoppedAt: T0 - 60e3, endedBy: { kind: 'person', by: 'person' } };
 const AGENT = { stopReason: 'ended', stoppedAt: T0 - 60e3, endedBy: { kind: 'agent', by: 'agent:c0', name: 'coordinator' } };
 let seq = 0;
 
 /** the rig: the REAL ladder + park + hand-over + line + start; ONE manual clock for the park; `live` = the conversations running */
-function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, mod = DWO, postHook = null, backendOf = {}, rows = null, held = {} } = {}) {
+function rig(name, { hosts = null, gateWire = null, deliverMod = DELIVER, dir = null, kept = {}, grants = {}, archived = new Set(), cap = null, limit = null, reopenHold = null, facts = {}, stated = {}, limitOf = null, refuseHandOver = false, already = new Set(), jobs = null, mod = DWO, postHook = null, backendOf = {}, rows = null, held = {} } = {}) {
   const dataDir = dir || path.join(ROOT, name + '-' + (++seq));
   fs.mkdirSync(dataDir, { recursive: true });
   const c = { now: T0, timers: [] };
@@ -61,7 +66,7 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
   const sessions = new Map(), live = new Set();
   const R = { c, dataDir, sessions, live, posts: [], notes: [], auths: [], probes: [], calls: [], reopens: [], lines: [], wakes: [], logs: [], inReopen: 0, maxInReopen: 0, kept, grants, archived };
   const log = (...a) => R.logs.push(a.join(' '));
-  R.deliver = DELIVER.create({
+  R.deliver = deliverMod.create({
     dataDir, activeSessions: sessions, serverSetting: () => undefined, retryClock, log, renderBatch: AR.renderMsgStash,
     peerMsg: {
       findPeer: (cid) => (live.has(cid) ? { name: cid, socketPath: '/dev/null' } : null),
@@ -76,28 +81,31 @@ function rig(name, { dir = null, kept = {}, grants = {}, archived = new Set(), c
   R.jm = typeof jobs === 'function' ? jobs(R) : null;
   R.view = SH.create({ activeSessions: sessions, getDeliver: () => R.deliver, getJobs: () => R.jm, broadcastSessions: () => { }, renderMsgStash: AR.renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } }, now: () => c.now, dataDir });
   R.line = RL.createResumeLine({ start: (e) => (e.payload && typeof e.payload.run === 'function' ? e.payload.run(e) : { ok: false, why: 'no start' }), log: () => { } });
+  R.reopenRoad = async (item, o) => {
+    const cid = item.sessionKey.slice(item.sessionKey.indexOf(':') + 1);
+    R.calls.push('reopen'); R.reopens.push({ cid, by: o && o.by, accountId: (o && o.accountId) || null });
+    if (already.has(cid)) { live.add(cid); sessions.set('w-' + cid, { claudeSessionId: cid, backendSessionId: cid, name: 'running', mode: 'chat', backend: 'claude' }); return { ok: true, sessionId: 'w-' + cid, already: true }; }
+    R.inReopen++; R.maxInReopen = Math.max(R.maxInReopen, R.inReopen);
+    try { if (reopenHold) await reopenHold(cid); else await sleep(5); } finally { R.inReopen--; }
+    live.add(cid);
+    sessions.set('w-' + cid, { claudeSessionId: cid, backendSessionId: cid, name: 'resumed', mode: 'chat', backend: 'claude' });
+    return { ok: true, sessionId: 'w-' + cid };
+  };
+  // the stores chain's two roads (主开发 02:59Z): the wiring's ONE gate both reopening roads pass, compiled from its source over this park
+  if (gateWire) { R.gate = gateOf(gateWire, R.deliver); R.gate.resumeRoad.reopen = (item, o) => R.reopenRoad(item, o); }
   R.orch = mod.create({
     resumeLine: R.line, getStashHandover: () => R.view, now: () => c.now,
     seams: {
       keyOf: (cid) => ({ sessionKey: `${backendOf[cid] || 'claude'}:${cid}` }),
       // piece 4's reader's shape: the record's facts AND how it ended / who pays (the ORCH reads the kept record only through it)
-      factsOf: async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('kept'); const k = R.kept[c] || null; return { goal: 'none', timerMark: null, queue: 0, mode: 'chat', cwd: '/w', hostId: null, kept: !!k, stopReason: (k && k.stopReason) || null, stoppedAt: (k && k.stoppedAt) || null, endedBy: (k && k.endedBy) || null, accountId: (k && k.accountId) || null, ...(facts[c] || {}) }; },
+      factsOf: async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('kept'); const k = R.kept[c] || null; return { goal: 'none', timerMark: null, queue: 0, mode: 'chat', cwd: '/w', hostId: (hosts && hosts[c]) || null, kept: !!k, stopReason: (k && k.stopReason) || null, stoppedAt: (k && k.stoppedAt) || null, endedBy: (k && k.endedBy) || null, accountId: (k && k.accountId) || null, ...(facts[c] || {}) }; },
       heldAccountOf: (key) => held[key.slice(key.indexOf(':') + 1)] || null,
       configAccountOf: (key) => stated[key.slice(key.indexOf(':') + 1)] || null,
       // no real wake drops a kept record since 主开发's 2026-11-19 03:25Z ruling: this seam only SEES ⑧'s RED (the drop put back)
       dropKept: async (key) => { const c = key.slice(key.indexOf(':') + 1); R.calls.push('dropKept'); const had = c in R.kept; delete R.kept[c]; return had; },
       isArchived: (key) => R.archived.has(key.slice(key.indexOf(':') + 1)),
       rowOf: (backend) => (rows && Object.hasOwn(rows, backend) ? rows[backend] : { headless: true, resumeContinues: 'goal' }),
-      reopen: async (item, o) => {
-        const cid = item.sessionKey.slice(item.sessionKey.indexOf(':') + 1);
-        R.calls.push('reopen'); R.reopens.push({ cid, by: o && o.by, accountId: (o && o.accountId) || null });
-        if (already.has(cid)) { live.add(cid); sessions.set('w-' + cid, { claudeSessionId: cid, backendSessionId: cid, name: 'running', mode: 'chat', backend: 'claude' }); return { ok: true, sessionId: 'w-' + cid, already: true }; }
-        R.inReopen++; R.maxInReopen = Math.max(R.maxInReopen, R.inReopen);
-        try { if (reopenHold) await reopenHold(cid); else await sleep(5); } finally { R.inReopen--; }
-        live.add(cid);
-        sessions.set('w-' + cid, { claudeSessionId: cid, backendSessionId: cid, name: 'resumed', mode: 'chat', backend: 'claude' });
-        return { ok: true, sessionId: 'w-' + cid };
-      },
+      reopen: async (item, o) => (R.gate ? R.gate.reopenRoads(item, o) : R.reopenRoad(item, o)),
       noteResumed: (sid, line) => R.lines.push({ sid, line }),
       markPosting: (cid) => R.deliver.markEndedPosting(cid),
     },
@@ -504,6 +512,35 @@ console.log('⑲ a graceful stop waits for a wake hand-over in flight');
   release();
   await st;
   ok(R.posts.length === 1 && before === null && settled === 1, 'the stash hand-over\'s settle (a graceful stop) waits for the wake\'s hand-over in flight — it answers only once that post ended', { before, settled });
+}
+
+console.log('⑳ a wake for a conversation on a paired machine, due before the re-adoption settled, STAYS OWED and runs once at the settle (the stores chain\'s two roads, 主开发 02:59Z)');
+{
+  // through the delivery wake's OWN seam: the park, the line, the wake's start and its reopen THROUGH the wiring's one gate (compiled
+  // from its source), the boot held (the remote road shut). Refused only because the re-adoption has not settled: the wake is neither
+  // ended nor retried on a timer — its row says it goes by itself — and it runs ONCE when the wiring says the re-adoption settled
+  const KEEP = "        if (r && r.outcome === 'waits') { e.waitsReadopt = true;";
+  ok(DELIVER_SRC.split(KEEP).length === 2 && WIRE_SRC.includes("reopen: (item, o) => (typeof resumeRoad.reopen === 'function' ? reopenRoads(item, o) :"),
+    'control setup: the park\'s keep of a waiting wake is found once; the delivery wake\'s seam reopens THROUGH the two roads\' gate (a pin: the seam back to resumeRoad.reopen is red here)');
+  const scene = async (deliverMod) => {
+    const X = cidOf(90);
+    const R = rig('readopt-wait', { kept: { [X]: RESTART }, hosts: { [X]: 'h-0001' }, gateWire: WIRE_SRC, deliverMod });
+    R.result(X, 'jb-r', 'nightly report', 'done');
+    await R.at(10);
+    const out = { refusedReopens: R.reopens.length, owedAtRefusal: R.deliver.endedEntries(X).length, ended: R.wakes.filter((w) => w.cid === X).map((w) => w.outcome).join() };
+    const a = R.deliver.endedAnswerOf(X); out.row = a && a.outcome === 'waits' ? a.code : (a && a.outcome) || null;
+    await R.at(60 * 60e3);   // an hour later: nothing retries it on a timer
+    out.reopensAfterHour = R.reopens.length; out.owedAfterHour = R.deliver.endedEntries(X).length;
+    R.gate.resumeRoad.adoptedRemote();   // the boot's re-adoption of the machines' left-running conversations settled
+    await R.at(60 * 60e3 + 50);
+    out.reopensAtSettle = R.reopens.length; out.framesAtSettle = R.framesTo(X).length; out.owedAtSettle = R.deliver.endedEntries(X).length;
+    return out;
+  };
+  const w = await scene(DELIVER);
+  ok(w.refusedReopens === 0 && w.owedAtRefusal === 1 && w.ended === '' && w.row === 'readopt-pending' && w.reopensAfterHour === 0 && w.owedAfterHour === 1 && w.reopensAtSettle === 1 && w.framesAtSettle === 1 && w.owedAtSettle === 0,
+    'a remote wake due while the re-adoption has not settled: refused at the gate (no reopen), STILL OWED (not ended; its row: «they go by themselves once …»), not retried on a timer for an hour — and at the settle it runs ONCE: one resume, one frame, the wake ended', w);
+  const wx = await scene(MJ_DWL.load('src/server/conversation-deliver.js', anchored(DELIVER_SRC, KEEP, "        if (false) { e.waitsReadopt = true;", 'readopt-keep-cut'), 'readopt-keep-cut'));
+  ok(wx.owedAtRefusal === 0 && wx.reopensAtSettle === 0, 'CONTROL (the park\'s keep cut, in a copy): the waiting wake is ENDED at the refusal — the settle wakes nobody, the addressee waits for some other delivery — RED', wx);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

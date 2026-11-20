@@ -237,7 +237,7 @@ const vaultAttention = require('./vault-hooks.js').createVaultAttention({ userTo
 // sent — bound by server.js once it is built (`resumeRoad.reopen`); the line starts only once server.js says the boot ADOPTED the
 // live sessions (`resumeRoad.adopted()`, when the keepers' 8 s re-adoption settled — the cure round's must 5)
 let adoptedNow = null;
-const resumeRoad = { reopen: null, kept: null, adopted: () => { if (adoptedNow) adoptedNow(); }, adoptedRemote: () => { remoteSettled = true; } };   // kept: boot-restore's keptRecordOf (server.js binds it)
+const resumeRoad = { reopen: null, kept: null, adopted: () => { if (adoptedNow) adoptedNow(); }, adoptedRemote: () => { remoteSettled = true; try { if (deliver && typeof deliver.readoptSettled === 'function') deliver.readoptSettled(); } catch (e) { console.warn('[resume] the waiting wakes could not be told the re-adoption settled:', e && e.message); } } };   // the wakes that waited for it go now, once   // kept: boot-restore's keptRecordOf (server.js binds it)
 // THE STORES CHAIN MEETS PIECE 4 (主开发 02:31Z, its ruling): TWO ROADS, each opened once. A LOCAL resume waits for nothing of the
 // hosts store (`adopted()`: the line opens). A REMOTE resume (an entry naming a machine) never runs before the boot's re-adoption of
 // the machines' left-running conversations has SETTLED (`adoptedRemote()`), on every road — never held, and held then read (the
@@ -245,7 +245,7 @@ const resumeRoad = { reopen: null, kept: null, adopted: () => { if (adoptedNow) 
 // resume once ended a still-running remote agent the re-adoption would have adopted — boot-restore says so). ONE seam for both
 // roads that reopen: the resume verb's start and a delivery's wake
 let remoteSettled = false;
-const REMOTE_READOPT_WORDS = 'it runs on a paired machine, and the conversations left running on the paired machines are not re-adopted yet (VibeSpace could not read its record of them until now, or it is re-adopting them) — resuming it now could end an agent still running there; ask again in a moment';
+const REMOTE_READOPT_WORDS = 'it runs on a paired machine, and the conversations left running on the paired machines are not re-adopted yet (VibeSpace could not read its record of them until now, or it is re-adopting them) — resuming it now could end an agent still running there; ask again once VibeSpace has re-adopted them';
 const reopenRoads = (item, o) => (item && item.hostId && !remoteSettled ? Promise.resolve({ ok: false, code: 'readopt-pending', why: REMOTE_READOPT_WORDS }) : resumeRoad.reopen(item, o));
 const RL = require('./resume-line.js'), RL_PURE = require('../resume-line.js');
 // THE MANAGER DESIGN'S PIECE 7: a delivery's owed wake rides the SAME line with its own start in the payload (src/server/delivery-wake.js:

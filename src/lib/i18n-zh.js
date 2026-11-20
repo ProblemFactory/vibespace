@@ -469,6 +469,7 @@ export default {
   "Dismiss every open row of this band (↺ reopens)": "把这一段所有未处理的项标为已看（↺ 可重开）",
   "Show the notices": "展开通知",
   "Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted": "把这里所有已结束、你还没看过的任务标为已看——红色计数会降下来，不会删除任何东西",
+  "{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines": "{n} 条通知在等待——VibeSpace 重新接管其配对机器上仍在运行的对话后，它们会自行送达",
   "Could not mark them seen": "无法标为已看",
   "This job is the running VibeSpace: it is not stopped here": "这个任务就是正在运行的 VibeSpace：不在这里停止它",
   "Unknown event": "未知事件",

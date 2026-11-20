@@ -469,6 +469,7 @@ export default {
   "Dismiss every open row of this band (↺ reopens)": "この段の未処理の項目をすべて既読にする（↺ で戻せます）",
   "Show the notices": "お知らせを表示",
   "Acknowledge every finished job here that you have not looked at yet — the red count drops, nothing is deleted": "ここにある、まだ見ていない終了済みジョブをすべて既読にします — 赤い件数が減るだけで、何も削除されません",
+  "{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines": "{n} 件の通知が待機中です——VibeSpace がペアリング済みマシンで動き続けている会話を引き継ぎ直した後、自動で届きます",
   "Could not mark them seen": "既読にできませんでした",
   "This job is the running VibeSpace: it is not stopped here": "このジョブは実行中の VibeSpace そのものです。ここでは停止しません",
   "Unknown event": "不明なイベント",

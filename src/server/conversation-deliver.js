@@ -764,7 +764,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const q of Object.values(retry)) for (const e of q) {
       if (!e || e.inflight) continue;   // an in-flight entry arms nothing (its hold is the post's; a due hold on it re-armed the timer at 0 ms)
       if (holdDueAt(e) < due) due = holdDueAt(e);
-      if (!e.ho && Number(e.nextAt) < due) due = Number(e.nextAt);
+      if (!e.ho && !e.waitsReadopt && Number(e.nextAt) < due) due = Number(e.nextAt);   // a wake waiting for the re-adoption arms no timer
     }
     if (!Number.isFinite(due)) return;
     parkTimer = clock.setTimeout(() => { parkTimer = null; runDueRetries().catch((e) => log('[deliver] retry sweep failed:', e && e.message)); }, Math.max(0, due - clock.now()));
@@ -776,12 +776,12 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     for (const q of Object.values(retry)) for (const e of q) if (e && !e.inflight && holdDueAt(e) <= now) { releaseHoldOf(e); changed = true; }   // never an in-flight entry's (verify r1): the post's own outcome converts or keeps it within seconds
     if (changed) writeRetryNow();
     const due = [];
-    for (const [cid, q] of Object.entries(retry)) if (q.some((e) => e && !e.inflight && !e.ho && Number(e.nextAt) <= now)) due.push(cid);
+    for (const [cid, q] of Object.entries(retry)) if (q.some((e) => e && !e.inflight && !e.ho && !e.waitsReadopt && Number(e.nextAt) <= now)) due.push(cid);
     for (const cid of due) await runAttempt(cid, 'timer');   // one frame per conversation: a due entry carries the not-yet-due ones along
     // THE BELT (verify r1): an entry still due after its conversation's pass was not moved by anything above — it is
     // paced to the first step, never left to re-arm the timer at 0 ms (a hot loop is the one failure a park must not have)
     let belted = 0;
-    for (const cid of due) for (const e of (retry[cid] || [])) if (e && !e.inflight && !e.ho && Number(e.nextAt) <= clock.now()) { e.nextAt = clock.now() + RETRY_STEPS_MS[0]; belted++; }
+    for (const cid of due) for (const e of (retry[cid] || [])) if (e && !e.inflight && !e.ho && !e.waitsReadopt && Number(e.nextAt) <= clock.now()) { e.nextAt = clock.now() + RETRY_STEPS_MS[0]; belted++; }
     if (belted) { writeRetryNow(); log(`[deliver] ${belted} parked entr${belted === 1 ? 'y was' : 'ies were'} still due after the sweep — paced to ${RETRY_STEPS_MS[0] / 1000} s (a sweep that moves nothing must not re-arm at once)`); }
     scheduleRetry();
   }
@@ -849,6 +849,10 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   let endedHook = null;   // (cid, entry) → Promise<{outcome: 'delivered' | 'refused' | 'failed', why?, code?, until?}> — the hub's resume line (server.js)
   /** The hub wires its ONE LINE here; an entry parked before it (the boot) waits for it. */
   function registerEndedWake(fn) { if (typeof fn === 'function') { endedHook = fn; scheduleRetry(); } }
+  /** the stores chain's two roads (主开发 02:59Z): the boot's re-adoption of the machines' left-running conversations SETTLED (the wiring's
+   *  adoptedRemote) — every wake that waited for it runs now, ONCE (a later refusal is that attempt's own answer) */
+  let readoptDone = false;
+  function readoptSettled() { readoptDone = true; let n = 0; for (const q of Object.values(retry)) for (const e of q) if (e && e.waitsReadopt) { delete e.waitsReadopt; e.nextAt = clock.now(); n++; } if (n) { log(`[deliver] the re-adoption settled — ${n} wake(s) that waited for it go now`); writeRetryNow(); scheduleRetry(); } return n; }
   /** The owed wakes of a conversation (COPIES): the row's «not resumed» line reads the last answer off the producers, not here. */
   function endedEntries(cid) { return (retry[cid] || []).filter(isEnded).map((e) => ({ ...e })); }
   /** A producer whose delivery found the conversation ENDED, after it stashed the words (they are durable before this): the
@@ -890,7 +894,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   /** The attempt's first rung: a conversation that runs again leaves its owed wake (the next turn carries the words); else the
    *  oldest owed entry goes to the line (twins merge into it — ONE wake per conversation), marked in flight while there. */
   function attemptEnded(cid) {
-    const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho);
+    const ends = (retry[cid] || []).filter((x) => isEnded(x) && !x.inflight && !x.ho && !x.waitsReadopt);   // a wake that waits for the re-adoption runs at its settle (readoptSettled)
     if (!ends.length) return;
     if (peerReachable(cid) || localSessionFor(cid)) { for (const e of ends) endEnded(e, { outcome: 'running', why: 'it runs again — its next turn carries the words' }); return; }
     if (!endedHook) return;   // the line is not wired yet (the boot): registerEndedWake schedules the attempt again
@@ -907,6 +911,9 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
         // LOOK AGAIN (主开发 12:46Z): the wake joined a resume already in the line (a key's) — its answer was no delivery's; the
         // next attempt finds it running (the words ride its next turn) or puts it on the line anew. Bounded: the third ends it.
         if (r && r.outcome === 'again' && (e.agains = (Number(e.agains) || 0) + 1) < 3) { e.nextAt = clock.now(); writeRetryNow(); scheduleRetry(); return; }
+        // the stores chain's two roads (主开发 02:59Z): refused ONLY because the boot's re-adoption of the machines' left-running conversations has
+        // not settled — the wake STAYS OWED (kept on disk, marked), runs ONCE at the settle (readoptSettled), never on a timer; the row says so
+        if (r && r.outcome === 'waits') { e.waitsReadopt = true; endedAnswers.set(e.cid, { outcome: 'waits', code: r.code || 'readopt-pending', why: r.why || null, until: null, at: clock.now() }); if (readoptDone) { delete e.waitsReadopt; e.nextAt = clock.now(); } writeRetryNow(); stashChanged(e.cid); scheduleRetry(); return; }
         endEnded(e, r && r.outcome === 'again' ? { outcome: 'failed', why: r.why } : r);
       });
     retryInFlight.add(done);
@@ -1979,7 +1986,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     queuedFileState: () => queued.fileState(), onQueuedFileState: (fn) => queued.onFileState(fn), queuedSetAside: () => queued.setAside(),   // B-e3fe follow-up: an unread msg-queued.json is said in For you, with the person's «set it aside»
     noteProcessGone, noteAttached, sweepQueued,   // round 2: the wrapper gone ⇒ the HUB hands back; a (re)attach ⇒ the hub ASKS for the queue
     parkOwedWake, registerOwedWake, registerWakePacer, owedEntries, wakeBlock, fellOwed, fellOwedPart,
-    parkEndedWake, registerEndedWake, endedEntries, endedAnswerOf, stashCids, retryWaitingCount, markEndedPosting,   // piece 7: a wake owed to an ENDED conversation — a rung of the park, handed to the hub's resume line
+    parkEndedWake, registerEndedWake, readoptSettled, endedEntries, endedAnswerOf, stashCids, retryWaitingCount, markEndedPosting,   // piece 7: a wake owed to an ENDED conversation — a rung of the park, handed to the hub's resume line
       // lane paced-wake-retry: a wake the pace refused is owed — parked for the window's end
     onRetry, onTurnEnd, noteTurnEnd, retryPeek, retryEntries, retryTake, registerRetryJudge, claimRetry, retryCount, RETRY_STEPS_MS, RETRY_MAX_MS, RETRY_MAX_ATTEMPTS, RETRY_FLOOR_MS, RETRY_CAP, closeRetries, settleRetries, retryInFlightCount, armStashHandover, handoverArmed, takeArmedHandover, sincePost,   // R3: the hand-over a turn end runs for what the prompt could not carry   // THE RETRY PARK (lane notify-retry): a transient local miss on a live pid, retried at the turn end + on the backoff, ONE authorization
     _unsettledCount: (cid) => (unsettled.get(cid) || []).length,

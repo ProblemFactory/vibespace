@@ -84,6 +84,7 @@ export function waitingWords(w, fmt) {
   const code = w.code || null;
   if (!code) return t('{n} notices are waiting for it', { n });
   if (code === 'limit' && w.until && typeof fmt === 'function') return t('{n} notices are waiting — not resumed: its account is at its limit until {when}', { n, when: fmt(w.until) });
+  if (code === 'readopt-pending') return t('{n} notices are waiting — they go by themselves once VibeSpace has re-adopted the conversations left running on its paired machines', { n });   // the stores chain's two roads: a wake that WAITS (it goes by itself), never «not resumed»
   return t('{n} notices are waiting — not resumed: {why}', { n, why: refusalWords(code) });
 }
 /** a refusal's code in the person's words (the ended row's «— not resumed: {why}», the resumed window's «— but …») */
