@@ -18,7 +18,8 @@
 //     (PURE), the verdict (the setting, a remote conversation, a machine with no nice program — said once), BOTH local roads
 //     of the real ws-create (dtach and the daemon pipe) and the real JobManager's wrapper spawn carry `nice -n 5`; the
 //     setting off = the release's spawn byte for byte (the RED control: a copy with the priority cut); REAL processes —
-//     the line started, its child and the child's child report the suite's niceness + 5; the fact rides the session and
+//     the line started, its child and the child's child report min(19, base + 5) from the suite's own niceness, from 15 and
+//     from 19 (a judged premise there; r598: never a red for the niceness the suite runs at); the fact rides the session and
 //     its meta, and its words are Session Properties' row; the job wrapper's 'error' listener runs (a late exec failure is
 //     ONE journal line, never a throw — RED: a copy without the listener throws).
 // Run: node scripts/test-session-spawn-line.mjs
@@ -258,11 +259,31 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   fs.writeFileSync(stand, "const os = require('os'), { spawnSync } = require('child_process');\n"
     + "if (process.argv[2] === 'child') { const g = spawnSync(process.execPath, ['-e', 'process.stdout.write(String(require(\"os\").getPriority()))'], { encoding: 'utf8' }); process.stdout.write(os.getPriority() + ' ' + g.stdout); }\n"
     + "else { const c = spawnSync(process.execPath, [__filename, 'child'], { encoding: 'utf8' }); process.stdout.write(os.getPriority() + ' ' + c.stdout); }\n");
-  const mine = os.getPriority(), want = Math.min(19, mine + 5);
-  const run = (priority) => { const l = L.sessionSpawnLine({ node: process.execPath, wrapper: stand, bufFile: 'b', metaFile: 'm', exe: '/bin/true', priority }); const r = spawnSync(l.argv[0], l.argv.slice(1), { encoding: 'utf8', timeout: 20000 }); return String(r.stdout || '').trim().split(/\s+/).map(Number); };
-  const lowered = run(SPRI.priorityFor({ log: quiet }).priority), plainRun = run(SPRI.priorityFor({ serverSetting: OFF, log: quiet }).priority);
-  ok(mine <= 14 && lowered.length === 3 && lowered.every((n) => n === want) && plainRun.length === 3 && plainRun.every((n) => n === mine),
-    `REAL processes: the line's first process, its child and the child's child run at niceness ${want} (this suite's ${mine} + 5) — born with it, inherited; the setting off ⇒ all three at ${mine}`, { lowered, plainRun });
+  const mine = os.getPriority();
+  // run(priority, from): THE line started as the roads start it, from a parent at niceness `from` — the suite's own, or raised to
+  // it by the REAL nice program in front (its own name, never a copy: a multi-call program decides what it is by its file name)
+  const run = (priority, from = mine) => {
+    const l = L.sessionSpawnLine({ node: process.execPath, wrapper: stand, bufFile: 'b', metaFile: 'm', exe: '/bin/true', priority });
+    const argv = from > mine ? [NICE, '-n', String(from - mine), ...l.argv] : l.argv;
+    const r = spawnSync(argv[0], argv.slice(1), { encoding: 'utf8', timeout: 20000 }); return String(r.stdout || '').trim().split(/\s+/).map(Number);
+  };
+  // THE JUDGE, one for EVERY niceness it can meet (主开发 r598: the box's tier runs at 15 since the hub starts its jobs lowered):
+  // lowered = min(19, base + 5) and ABOVE plain, plain = base. At 19 itself no step can be shown: a judged PREMISE (all six read
+  // 19), said by name — never a silent pass and never a red for the place it runs in
+  const judge = (base, low, plain) => (base >= 19
+    ? { premise: true, ok: low.length === 3 && plain.length === 3 && [...low, ...plain].every((n) => n === 19) }
+    : { premise: false, ok: low.length === 3 && plain.length === 3 && low.every((n) => n === Math.min(19, base + 5)) && plain.every((n) => n === base) && Math.min(19, base + 5) > base });
+  const LOW = SPRI.priorityFor({ log: quiet }).priority, PLAIN = SPRI.priorityFor({ serverSetting: OFF, log: quiet }).priority;
+  // from this suite's own niceness, from 15 (the box's tier today) and from 19 (the cap) — each one this suite can reach (a niceness
+  // is never lowered without privilege, so a base under the suite's own is not made, and that is said)
+  for (const base of [...new Set([mine, 15, 19])].sort((a, b) => a - b)) {
+    if (base < mine) { console.log(`  · from niceness ${base}: not made — this suite already runs at ${mine}`); continue; }
+    const low = run(LOW, base), plain = run(PLAIN, base), j = judge(base, low, plain);
+    ok(j.ok, j.premise
+      ? `PREMISE (judged) from niceness ${base}, the cap: no step below it can be shown — all three processes read 19, lowered and plain alike`
+      : `REAL processes from niceness ${base}${base === mine ? ' (this suite\'s own)' : ''}: the line's first process, its child and the child's child run at ${Math.min(19, base + 5)} (${base} + 5, at most 19) — born with it, inherited; the setting off ⇒ all three at ${base}`, { low, plain });
+    if (!j.premise) ok(!judge(base, plain, plain).ok, `CONTROL from niceness ${base}: the same judge on a start NOT lowered (the plain run in the lowered place) is RED`, { plain });
+  }
   // THE SPAWN CENSUS reads each road's ONE place (scripts/spawn-env-census.mjs PRIORITY_ROADS — test-architecture §94b)
   const C = await import(path.join(REPO, 'scripts/spawn-env-census.mjs'));
   const FILES = C.filesOf(REPO), rd = (patch) => (f) => (f in patch ? patch[f] : (() => { try { return read(f); } catch { return ''; } })());
