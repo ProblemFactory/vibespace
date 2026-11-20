@@ -31,6 +31,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent with an automation key can end idle conversations on a paired machine whose Claude Code is newer than this server's: that machine now reads its own.
 - A channel message that reached the same agent through two notifications at the same moment could start two paid turns; now it starts one.
 - After a restart, a conversation still running could show its background work and timers as «unknown» with a wrong reason, so a key could not end it.
+- In Settings, a choice with a long option no longer pushes its row past a phone's screen: the closed list cuts its words, the open list shows them whole.
 
 ## 2.369.413 — 2026-11-20
 
