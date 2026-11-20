@@ -1,12 +1,15 @@
 #!/usr/bin/env node
-// B-5f2e (the coordinator's ruling 2026-11-19 20:18Z, LINE 2) — A FRAME OF ANOTHER SITE, SAID BY NAME. MEASURED 2026-11-18 (the
-// real driver 0.38.2 on a stand-in page that frames a sign-in form from another site): the driver sees nothing inside a frame the
-// browser runs in its own process — snapshot «Iframe [ref=eN]» and no field, «✗ Element not found», «✗ Frame not found», the vault
-// fill «no element matched … in the top-level document». Stand-ins only: fake CDP sockets on the loopback; no browser, no site.
+// B-5f2e (the coordinator's ruling 2026-11-19 20:18Z, LINE 2; r150 2026-11-20) — A FRAME OF ANOTHER SITE, SAID AS IT IS. MEASURED on
+// the box (the real driver 0.38.2 on Chrome 151, the stand-in page framing a sign-in form from another site, int361's run at 8fad800e1):
+// the driver's snapshot LISTS the frame's fields under its Iframe and a fill / a click BY REF lands in it; a page selector («✗ Element not
+// found») and `frame <css>` («✗ Frame not found») stay in the top document; the vault's fill does not go into another site's frame.
+// (2.369.413 told the agent the driver «cannot see or type into it»: false — its round 1 frame had never loaded.) Stand-ins only:
+// fake CDP sockets on the loopback; no browser, no site.
 //   ① PURE (src/browser-stuck.js): tabFrameTargets — the parent chain (a frame of the tab, a frame inside it), never another tab's
 //      or an unplaced one; otherSiteFrameOrigins — web origins, the tab's own left out, each once; otherSiteFrameText — one / several
-//      in en / zh / ja: whose frame, that the driver cannot see or type into it, the user in the live view; frameMissText — the
-//      driver's measured «not found» words, another failure never
+//      in en / zh / ja, by KIND (listed · unlisted · selector · vault): what is true of that reply, never that the driver cannot reach
+//      the frame; frameFieldsListed — the reply's listing holds fields under an Iframe (text and --json), RED a copy blind to the
+//      nesting; frameMissText — the driver's measured «not found» words, another failure never
 //   ② THE REAL WATCH over a fake CDP: an `iframe` target heard from Target.targetCreated is kept and said for ITS tab only, at ZERO
 //      calls of the watch; its targetInfoChanged moves the origin; targetDestroyed ends it (and an orphaned child with it).
 //      RED: a copy of the watch without the iframe branch says nothing
@@ -57,13 +60,39 @@ console.log('— ① PURE: the tab\'s frames, their origins, the sentence, the d
     'tabFrameTargets: a frame with no parent is the tab\'s only when its page attached it; an in-process frame the page attached places the frame inside it');
   const origins = ST.otherSiteFrameOrigins({ tabUrl: 'http://127.0.0.1:9/login', frames: ST.tabFrameTargets(kept, 'T1').concat([{ url: 'about:blank' }, { url: 'data:text/html,x' }, { url: 'http://127.0.0.1:9/same' }]) });
   ok(JSON.stringify(origins) === '["https://idp.example.net","https://deep.example.com"]', 'otherSiteFrameOrigins: web origins in the order heard, each once; about:/data: and the tab\'s own origin left out', origins);
-  const one = ST.otherSiteFrameText(['https://idp.example.net']), two = ST.otherSiteFrameText(origins);
+  const KINDS = ['listed', 'unlisted', 'selector', 'vault'];
+  const say = (kind, o = ['https://idp.example.net'], t = null) => ST.otherSiteFrameText(o, t, { kind });
+  const one = say('selector'), two = ST.otherSiteFrameText(origins);
   const five = ST.otherSiteFrameText(['https://a.example', 'https://b.example', 'https://c.example', 'https://d.example', 'https://e.example']);
-  ok(one === 'This page holds a frame from https://idp.example.net (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view',
-    'the sentence (one frame): whose frame, that the driver cannot see or type into it, and for a sign-in the user in the live view (an ad or a captcha frame is no sign-in)', one);
-  ok(/frames from https:\/\/idp\.example\.net, https:\/\/deep\.example\.com \(other sites\)/.test(two) && /cannot see or type into them/.test(two) && /a\.example, https:\/\/b\.example, https:\/\/c\.example, …/.test(five) && !/d\.example/.test(five),
+  // r150: each kind says what is TRUE of its reply (measured on the box): fields listed ⇒ by their refs; none listed ⇒ not listed; a page
+  // selector's miss ⇒ use the field's ref; the vault ⇒ it does not fill into another site's frame — and every kind names whose frame
+  ok(/frame from https:\/\/idp\.example\.net \(another site\)/.test(say('listed')) && /the fields listed above under an Iframe are inside the page's frames — fill and press them by their refs/.test(say('listed')),
+    'LISTED (a snapshot whose listing holds fields under an Iframe): whose frame, and fill and press them BY THEIR REFS', say('listed'));
+  ok(/its fields are not listed \(the frame is empty, or has not loaded yet: take the snapshot again\)/.test(say('unlisted')) && !/by their refs/.test(say('unlisted')),
+    'UNLISTED (a snapshot that lists no field inside a frame): its fields are NOT LISTED — never «fill them by ref»', say('unlisted'));
+  ok(/a page selector and `frame <css>` do not reach into it — use the field's ref from `snapshot -i` \(fill and press by ref\)/.test(one),
+    'SELECTOR (the driver\'s «not found» of a page selector / frame <css>): the recipe that works — the field\'s ref from the snapshot', one);
+  ok(/the vault does not fill into another site's frame — if it holds a sign-in, ask the user to sign in there in the live view/.test(say('vault')) && !/ref/.test(say('vault')),
+    'VAULT (its refusal): only what is true of the vault — it does not fill into another site\'s frame', say('vault'));
+  const every = KINDS.flatMap((k) => [say(k), say(k, origins)]).concat(['zh', 'ja'].flatMap((l) => KINDS.flatMap((k) => [say(k, ['https://idp.example.net'], tFor(l === 'zh' ? zhD : jaD)), say(k, origins, tFor(l === 'zh' ? zhD : jaD))])));
+  ok(every.length === 24 && every.every((x) => x.includes('https://idp.example.net') && !/cannot see|cannot reach|cannot (see or )?type/.test(x)) && KINDS.every((k) => say(k) !== say(k, origins)) && KINDS.slice(0, 3).every((k) => /the vault does not fill into another site's frame/.test(say(k))),
+    'EVERY kind, one frame and several, en / zh / ja: whose frame in each, NEVER that the driver cannot see or reach it (it can, by ref); the vault\'s word in every agent kind', every.filter((x) => /cannot/.test(x)));
+  ok(/frames from https:\/\/idp\.example\.net, https:\/\/deep\.example\.com \(other sites\)/.test(two) && /a\.example, https:\/\/b\.example, https:\/\/c\.example, …/.test(five) && !/d\.example/.test(five),
     'the sentence (several): every origin up to three, then «…»', { two, five });
   ok(ST.otherSiteFrameText([]) === '' && ST.otherSiteFrameText(null) === '', 'no frame ⇒ no sentence');
+  // frameFieldsListed — BY OBSERVATION of the reply's own listing (the measured box listing first)
+  const BOX = '- heading "Sign in with your account" [level=1, ref=e18]\n- Iframe [ref=e19]\n  - textbox "Account" [ref=e21]\n  - textbox "Password" [ref=e22]\n  - button "Continue" [ref=e20]\n';
+  const EMPTY = '- heading "Sign in with your account" [level=1, ref=e18]\n- Iframe [ref=e19]\n';
+  const TOPONLY = '- Iframe [ref=e19]\n- textbox "Search" [ref=e2]\n- group "box"\n  - button "Go" [ref=e3]\n';
+  const NESTED = '- Iframe [ref=e1]\n  - Iframe [ref=e2]\n  - textbox "Outer" [ref=e3]\n';
+  const ATTR = '- Iframe [ref=e19]\n  - checkbox "Remember me" [checked=false, ref=e23]\n';   // a field whose ref follows its state
+  const listedCases = [[BOX, true], [EMPTY, false], [TOPONLY, false], [NESTED, true], [ATTR, true], [JSON.stringify({ success: true, data: { snapshot: BOX } }), true], [JSON.stringify({ success: true, data: { snapshot: EMPTY } }), false], ['', false], [null, false]];
+  const got = listedCases.map(([l]) => ST.frameFieldsListed(l));
+  ok(got.every((g, i) => g === listedCases[i][1]), 'frameFieldsListed: the box\'s own listing ⇒ listed; an Iframe with nothing under it, fields only in the top page (a group\'s child is no frame\'s), nothing ⇒ not; a frame inside a frame and an outer frame\'s field after it ⇒ listed; the --json form read the same', got);
+  {
+    const blind = (() => { const file = path.join(REPO, 'src/browser-stuck.js'); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(anchored(read('src/browser-stuck.js'), "      if (frames.length && /\\[[^\\]]*\\bref=e?\\d+/.test(m[2])) return true;", "      if (/\\[[^\\]]*\\bref=e?\\d+/.test(m[2]) && /- Iframe\\b/.test(one)) return true;", 'r150-listing-blind-to-nesting'), file); return m.exports; })();
+    ok(blind.frameFieldsListed(EMPTY) === true && blind.frameFieldsListed(TOPONLY) === true, 'CONTROL (a check blind to the nesting — any ref on a page with an Iframe): an empty frame and fields of the top page read as «listed», so the note would tell the agent to fill a frame that shows nothing — RED');
+  }
   const all = [one, two].concat(['zh', 'ja'].flatMap((l) => { const d = l === 'zh' ? zhD : jaD; return [ST.otherSiteFrameText(['https://idp.example.net'], tFor(d)), ST.otherSiteFrameText(origins, tFor(d))]; }));
   ok(all.every((x) => x.includes('https://idp.example.net')) && new Set(all).size === all.length && all.every((x) => !/top-level tab|frame's own address/.test(x)),   // stale-pins: kept — an absence check (the stale advice must not come back)
     'en / zh / ja: each sentence its own words, the origin in each, never the top-level-tab advice', all);
@@ -212,11 +241,14 @@ console.log('— ④ the doors: the audit, the CLI, the vault fill, the stale ad
   const audit = (route.match(/router\.post\('\/api\/agent\/browser\/audit'[\s\S]*?\n\}\);\n/) || [''])[0];
   ok(/\(req\.body\?\.verb === 'snapshot' \|\| req\.body\?\.ok === false\)/.test(audit) && /otherSiteFrame = ctx\.dialogs\.otherSiteFramesFor\(tF\)/.test(audit) && /\.\.\.\(otherSiteFrame \? \{ otherSiteFrame \} : \{\}\)/.test(audit),
     'the audit answers otherSiteFrame after a snapshot or a failed verb, from the watch (the conversation\'s own tab)');
-  ok(/au\.otherSiteFrame && au\.otherSiteFrame\.text && \(\(words\[0\] === 'snapshot' && code === 0\) \|\| \(code !== 0 && DS && typeof DS\.frameMissText === 'function' && DS\.frameMissText\(outText \+ '\\n' \+ errText\)\)\)\) console\.error\(`note: \$\{au\.otherSiteFrame\.text\} \[frame_other_site\]`\)/.test(cli),
-    'the CLI prints it after a snapshot, or after the driver\'s own «not found» — [frame_other_site]');
+  ok(cli.includes("const kind = snapNote ? (DS && typeof DS.frameFieldsListed === 'function' && DS.frameFieldsListed(outText) ? 'listed' : 'unlisted') : 'selector';")
+    && cli.includes("const said = DS && typeof DS.otherSiteFrameText === 'function' ? DS.otherSiteFrameText(au.otherSiteFrame.origins, null, { kind }) : (kind === 'selector' ? au.otherSiteFrame.text : '');")
+    && cli.includes("if (said) console.error(`note: ${said} [frame_other_site]`);") && !cli.includes('console.error(`note: ${au.otherSiteFrame.text} [frame_other_site]`)'),   // stale-pins: kept — an absence check (the false sentence must not come back)
+    'the CLI words the note BY THE REPLY: a snapshot by its own listing (listed / unlisted), a «not found» the selector\'s recipe — never the hub\'s one sentence for every reply');
   const fv = (route.match(/router\.post\('\/api\/agent\/browser\/fill-vault'[\s\S]*?\n\}\);\n/) || [''])[0];
   ok(/\(r\.code === 'login_in_frame' \|\| r\.code === 'target_not_found'\) && typeof D\.otherSiteFramesFor === 'function'/.test(fv) && /error: framed && framed\.text \? `\$\{text\} — \$\{framed\.text\}` : text/.test(fv),
     'the vault fill: a login_in_frame or target_not_found on a tab with a frame of another site carries the sentence');
+  ok(/framed = D\.otherSiteFramesFor\(t, \{ targetId: word\(body\.targetId, 64\) \|\| null, kind: 'vault' \}\)/.test(fv), 'r150: the vault\'s refusal carries the VAULT kind — only what is true of the vault');
   const walkFiles = (rel) => fs.readdirSync(path.join(REPO, rel), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? walkFiles(path.join(rel, d.name)) : (/\.(m?js|md)$/.test(d.name) ? [path.join(rel, d.name)] : [])));
   const stale = walkFiles('src').concat(walkFiles('docs/agent')).filter((f) => /\bopen the frame's own address in a top-level tab/.test(read(f)));   // stale-pins: kept — an absence check (the stale advice must not come back)
   ok(stale.length === 0, 'the stale advice «open the frame\'s own address in a top-level tab» is gone (the ticket cannot come back to the page)', stale);

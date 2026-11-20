@@ -186,6 +186,8 @@ document.getElementById('c-run').addEventListener('click', async () => {
     return page('Cross-site framed sign-in', `<h1>Sign in with your account</h1><iframe id="xidp" src="${src}" width="420" height="260"></iframe><div id="got"></div>`,
       `window.addEventListener('message', (e) => { document.getElementById('got').textContent = JSON.stringify({ origin: e.origin, data: e.data }); });`);
   },
+  // r150: a frame of another site with NO field (a note only) — its Iframe lists nothing under it
+  '/xnote': () => page('A note (frame)', `<p id="xn">Nothing to fill here.</p>`, `parent.postMessage({ hello: location.origin }, '*');`),
   '/xsignin': () => page('Account sign-in (frame)', `<form id="xf"><label>Account <input id="xu" name="accountName" autocomplete="username"></label><label>Password <input id="xp" type="password" name="password" autocomplete="current-password"></label><button type="button" class="btn" id="xgo">Continue</button></form>`,
     `parent.postMessage({ hello: location.origin }, '*'); document.getElementById('xgo').addEventListener('click', () => { parent.postMessage({ ticket: 't-' + document.getElementById('xu').value.length + '-' + document.getElementById('xp').value.length }, '*'); });`),
   '/exfil': (url) => {

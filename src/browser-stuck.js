@@ -1036,14 +1036,54 @@ function otherSiteFrameOrigins({ tabUrl = '', frames = [] } = {}) {
   }
   return out;
 }
-/** THE SENTENCE: whose frame, that the driver cannot see or type into it, and the way that works (the user, in the live view). */
-function otherSiteFrameText(origins, tIn) {
+/** THE SENTENCE, TRUE FOR THE REPLY IT RIDES (B-5f2e, the coordinator's r150 — MEASURED on the box, agent-browser 0.38.2 on Chrome 151:
+ *  the driver's snapshot LISTS a frame of another site's fields under its Iframe, and a fill / a click BY REF lands in that frame; a page
+ *  selector and `frame <css>` stay in the top document; the vault's fill does not go into another site's frame). `kind`:
+ *    listed   — a snapshot whose listing holds fields under an Iframe: fill and press them by their refs
+ *    unlisted — a snapshot that lists no field inside a frame: the frame is empty, or has not loaded yet
+ *    selector — the driver's «not found» of a page selector / `frame <css>`: use the field's ref from the snapshot
+ *    vault    — the vault's refusal: it does not fill into another site's frame
+ *  Every kind: whose frame (its web origin) and, for a sign-in, the user in the live view. Never that the driver cannot reach the
+ *  frame: by ref it can (2.369.413 said otherwise). */
+const OTHER_SITE_FRAME_WORDS = Object.freeze({
+  listed: ['This page holds a frame from {origin} (another site): the fields listed above under an Iframe are inside the page\'s frames — fill and press them by their refs; the vault does not fill into another site\'s frame: if it holds a sign-in, ask the user to sign in there in the live view',
+    'This page holds frames from {origins} (other sites): the fields listed above under an Iframe are inside the page\'s frames — fill and press them by their refs; the vault does not fill into another site\'s frame: if one holds a sign-in, ask the user to sign in there in the live view'],
+  unlisted: ['This page holds a frame from {origin} (another site): its fields are not listed (the frame is empty, or has not loaded yet: take the snapshot again); the vault does not fill into another site\'s frame: if it holds a sign-in, ask the user to sign in there in the live view',
+    'This page holds frames from {origins} (other sites): their fields are not listed (a frame is empty, or has not loaded yet: take the snapshot again); the vault does not fill into another site\'s frame: if one holds a sign-in, ask the user to sign in there in the live view'],
+  selector: ['This page holds a frame from {origin} (another site): a page selector and `frame <css>` do not reach into it — use the field\'s ref from `snapshot -i` (fill and press by ref); the vault does not fill into another site\'s frame: if it holds a sign-in, ask the user to sign in there in the live view',
+    'This page holds frames from {origins} (other sites): a page selector and `frame <css>` do not reach into them — use the field\'s ref from `snapshot -i` (fill and press by ref); the vault does not fill into another site\'s frame: if one holds a sign-in, ask the user to sign in there in the live view'],
+  vault: ['This page holds a frame from {origin} (another site): the vault does not fill into another site\'s frame — if it holds a sign-in, ask the user to sign in there in the live view',
+    'This page holds frames from {origins} (other sites): the vault does not fill into another site\'s frame — if one holds a sign-in, ask the user to sign in there in the live view'],
+});
+function otherSiteFrameText(origins, tIn, { kind = 'selector' } = {}) {
   const t = typeof tIn === 'function' ? (s, q) => tIn(s, q) : fill;
   const list = (Array.isArray(origins) ? origins : []).map((o) => pageText(o, URL_MAX)).filter(Boolean);
   if (!list.length) return '';
-  if (list.length === 1) return t('This page holds a frame from {origin} (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view', { origin: list[0] });
-  const origins2 = list.slice(0, OTHER_SITE_FRAMES_SHOWN).join(', ') + (list.length > OTHER_SITE_FRAMES_SHOWN ? ', …' : '');
-  return t('This page holds frames from {origins} (other sites): the browser driver cannot see or type into them — if one holds a sign-in, ask the user to sign in there in the live view', { origins: origins2 });
+  const w = OTHER_SITE_FRAME_WORDS[kind] || OTHER_SITE_FRAME_WORDS.selector;
+  if (list.length === 1) return t(w[0], { origin: list[0] });
+  return t(w[1], { origins: list.slice(0, OTHER_SITE_FRAMES_SHOWN).join(', ') + (list.length > OTHER_SITE_FRAMES_SHOWN ? ', …' : '') });
+}
+/** B-5f2e (r150): does a snapshot's listing hold FIELDS inside a frame — a line with a ref nested (deeper) under an `Iframe` line? The
+ *  driver's text form (`- Iframe [ref=e19]` then indented `- textbox "Account" [ref=e21]`), or its --json form (the listing inside a
+ *  string). PURE, by observation of the reply itself — the hub never sees the listing. */
+function frameFieldsListed(listing) {
+  const text = str(listing).slice(0, 8 * 1048576);
+  const listings = [];
+  if (/^\s*[{[]/.test(text)) {
+    try { const walk = (v) => { if (typeof v === 'string') { if (/- Iframe\b/.test(v)) listings.push(v); } else if (v && typeof v === 'object') for (const x of Object.values(v)) walk(x); }; walk(JSON.parse(text)); } catch { listings.push(text); }
+  } else listings.push(text);
+  for (const one of listings) {
+    const frames = [];   // the indents of the Iframe lines whose children we are inside
+    for (const l of one.split('\n')) {
+      const m = /^(\s*)- (.*)$/.exec(l);
+      if (!m) continue;
+      const ind = m[1].length;
+      while (frames.length && frames[frames.length - 1] >= ind) frames.pop();
+      if (/^Iframe\b/i.test(m[2])) { frames.push(ind); continue; }
+      if (frames.length && /\[[^\]]*\bref=e?\d+/.test(m[2])) return true;   // a ref anywhere in the bracket («[checked=false, ref=e5]»)
+    }
+  }
+  return false;
 }
 /** The driver's own «not found» words (measured: «✗ Element not found: #sel…», «✗ Frame not found») — a miss a frame of
  *  another site may explain; any other failure says nothing of frames. PURE. */
@@ -1132,7 +1172,7 @@ module.exports = {
   restartedCardText, unresponsiveLine, answeredAgainLine, unresponsiveNotice, unresponsiveWords,
   // lane browser-ui-prompts: the browser's own prompts (a file chooser, an HTTP sign-in) — one record, one sentence, one bar
   PROMPT_TYPES, PROMPT_ASK_MS, AUTH_HOLD_MAX_MS, promptFromCdp, promptText, promptBlock, promptAnsweredNote, promptWords, personPromptLines /* B-b56d */, nativeSheetText /* lane browser-x-in-window */,
-  OTHER_SITE_FRAMES_SHOWN, tabFrameTargets, otherSiteFrameOrigins, otherSiteFrameText, frameMissText, // B-5f2e (line 2): a frame of another site, said by name
+  OTHER_SITE_FRAMES_SHOWN, OTHER_SITE_FRAME_WORDS, tabFrameTargets, otherSiteFrameOrigins, otherSiteFrameText, frameMissText, frameFieldsListed, // B-5f2e (line 2 + r150): a frame of another site, said as it is
   // lane browser-ui-prompts-r2: permissions decided ahead (the agent's per-origin flip) + the print preview released and told
   PERMISSION_KINDS, PERMISSION_DEFAULT, permissionPlan, permissionVerdict, permissionNote, permissionWords, PRINT_PREVIEW_RE, printTargetVerdict, PRINT_RELEASE_EXPR, PRINT_TEXT, printNote, printWords,
 };

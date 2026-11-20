@@ -2427,7 +2427,7 @@ router.post('/api/agent/browser/fill-vault', async (req, res) => {
     }
     // B-5f2e (line 2): a field the fill could not reach on a tab that holds a frame of another site — whose frame, by name
     let framed = null;
-    if (!r.ok && (r.code === 'login_in_frame' || r.code === 'target_not_found') && typeof D.otherSiteFramesFor === 'function') { try { framed = D.otherSiteFramesFor(t, { targetId: word(body.targetId, 64) || null }); } catch { framed = null; } }
+    if (!r.ok && (r.code === 'login_in_frame' || r.code === 'target_not_found') && typeof D.otherSiteFramesFor === 'function') { try { framed = D.otherSiteFramesFor(t, { targetId: word(body.targetId, 64) || null, kind: 'vault' }); /* r150: the vault's refusal says only what is true of the vault */ } catch { framed = null; } }
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: framed && framed.text ? `${text} — ${framed.text}` : text, code: r.code, ...(r.grant ? { grant: r.grant } : {}), ...(framed ? { otherSiteFrame: framed } : {}) });
     try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'fill-vault', dialog: { type: 'fill-vault', message: `${r.origin || ''} (${r.field || ''})` } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
     res.json({

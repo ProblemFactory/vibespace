@@ -1273,7 +1273,18 @@ async function runPage(c) {
     if (au && !au._failed && au.egressRefused && au.egressRefused.text) console.error(`note: ${au.egressRefused.text} [egress_refused]`);
     // B-5f2e (line 2): a snapshot, or the driver's own «not found» (an element, a frame), on a tab that holds a frame of another
     // site — whose frame, that the driver cannot reach into it, and the way that works (the hub's words, from its kept targets)
-    if (au && !au._failed && au.otherSiteFrame && au.otherSiteFrame.text && ((words[0] === 'snapshot' && code === 0) || (code !== 0 && DS && typeof DS.frameMissText === 'function' && DS.frameMissText(outText + '\n' + errText)))) console.error(`note: ${au.otherSiteFrame.text} [frame_other_site]`);
+    // r150 (MEASURED on the box: the driver's snapshot lists a frame of another site's fields, and a fill / a click by ref lands there):
+    // the note says what is TRUE FOR THIS REPLY — a snapshot whose listing holds fields under an Iframe: fill and press them by their
+    // refs; one that lists none: they are not listed; a page selector's / `frame <css>`'s «not found»: use the field's ref
+    if (au && !au._failed && au.otherSiteFrame && Array.isArray(au.otherSiteFrame.origins) && au.otherSiteFrame.origins.length) {
+      const snapNote = words[0] === 'snapshot' && code === 0;
+      const missNote = code !== 0 && DS && typeof DS.frameMissText === 'function' && DS.frameMissText(outText + '\n' + errText);
+      if (snapNote || missNote) {
+        const kind = snapNote ? (DS && typeof DS.frameFieldsListed === 'function' && DS.frameFieldsListed(outText) ? 'listed' : 'unlisted') : 'selector';
+        const said = DS && typeof DS.otherSiteFrameText === 'function' ? DS.otherSiteFrameText(au.otherSiteFrame.origins, null, { kind }) : (kind === 'selector' ? au.otherSiteFrame.text : '');
+        if (said) console.error(`note: ${said} [frame_other_site]`);
+      }
+    }
     // lane tailnet-names (LAW 2): a navigation that failed on a tailnet host — why, through Tailscale, by name
     if (navVerb && au && !au._failed && au.tailnet && au.tailnet.text) console.error(`note: ${au.tailnet.text} [tailnet]`);
     // lane browser-resume C: the tab this session was bound to is GONE (closed — by the user while he drove, by you, or with the

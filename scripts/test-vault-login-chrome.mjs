@@ -558,17 +558,42 @@ try {
         console.log('B-5f2e ROUND 2 ' + JSON.stringify(heard.slice(0, 4).map((x) => x.frame)));
         ok(heard.length > 0 && heard.some((x) => typeof x.frame.parent === 'string' && x.frame.parent.length > 0),
           'B-5f2e ROUND 2: the watch HEARD the frame\'s target (Target.targetCreated, type iframe) WITH ITS PARENT (parentFrameId) on this Chrome — no call of ours', heard.slice(0, 4).map((x) => x.frame));
-        const said = (r) => r.err.includes(`note: This page holds a frame from ${XO} (another site): the browser driver cannot see or type into it — if it holds a sign-in, ask the user to sign in there in the live view [frame_other_site]`);
+        // r150 (2026-11-20) — MEASURED on this box (agent-browser 0.38.2, Chrome 151): the driver's snapshot LISTS this frame's fields under
+        // its Iframe, and a fill / a click BY REF lands in it. The note must say what is TRUE FOR THE REPLY it rides — the words are
+        // browser-stuck's own, by kind; never that the driver cannot see or type into the frame (2.369.413 said so: false)
+        const STK = require(path.join(REPO, 'src/browser-stuck.js'));
+        const said = (r, kind) => r.err.includes(`note: ${STK.otherSiteFrameText([XO], null, { kind })} [frame_other_site]`);
+        const never = (r) => !/cannot see or type|cannot see|cannot reach/.test(r.err);   // stale-pins: kept — an absence check (the false sentence must not come back)
         const snapX = await run(['snapshot', '-i']);
-        ok(snapX.code === 0 && said(snapX) && !findRef(snapX.out, /Account/i),
-          'B-5f2e: snapshot -i on the page — the driver lists no field of the frame, and the answer SAYS whose frame it is, that the driver cannot reach it, the user in the live view [frame_other_site]', { err: snapX.err.trim().slice(0, 600), out: snapX.out.slice(0, 300) });
+        const uR = findRef(snapX.out, /Account/i), pR = findRef(snapX.out, /Password/i), gR = findRef(snapX.out, /Continue/i);
+        ok(snapX.code === 0 && !!uR && !!pR && !!gR && said(snapX, 'listed') && !said(snapX, 'unlisted') && never(snapX),
+          'B-5f2e (r150): snapshot -i on the page — the driver LISTS the frame\'s fields (Account, the secret box, Continue, each with its ref), and the note says so: fill and press them BY THEIR REFS, the vault does not fill there [frame_other_site]', { err: snapX.err.trim().slice(0, 700), out: snapX.out.slice(0, 400) });
         const fillX = await run(['fill', '#xu', 'alice-x']);
-        ok(fillX.code !== 0 && /Element not found/.test(fillX.out + fillX.err) && said(fillX), 'B-5f2e: a plain fill of the frame\'s field — the driver\'s «Element not found», then the sentence', { err: fillX.err.trim().slice(0, 600) });
+        ok(fillX.code !== 0 && /Element not found/.test(fillX.out + fillX.err) && said(fillX, 'selector') && never(fillX), 'B-5f2e (r150): a fill by a PAGE SELECTOR of the frame\'s field — the driver\'s «Element not found», then the recipe: the field\'s ref from snapshot -i', { err: fillX.err.trim().slice(0, 600) });
         const frameX = await run(['frame', '#xidp']);
-        ok(frameX.code !== 0 && /Frame not found/.test(frameX.out + frameX.err) && said(frameX), 'B-5f2e: the driver\'s `frame` verb — «Frame not found», then the sentence', { err: frameX.err.trim().slice(0, 600) });
+        ok(frameX.code !== 0 && /Frame not found/.test(frameX.out + frameX.err) && said(frameX, 'selector') && never(frameX), 'B-5f2e (r150): the driver\'s `frame <css>` — «Frame not found», then the recipe: the field\'s ref', { err: frameX.err.trim().slice(0, 600) });
+        // THE THREE ACTS BY REF LAND IN THE STAND-IN FRAME (measure 3 made a judging leg): the frame answers itself — on its button's click it
+        // posts the LENGTHS of the two values to the page (never the values)
+        const fillR = uR ? await run(['fill', uR, 'alice-ref']) : { code: 1, out: '', err: 'no ref' };
+        const valR = uR ? await run(['get', 'value', uR]) : { code: 1, out: '', err: 'no ref' };
+        const fillS = pR ? await run(['fill', pR, 'stand-pw']) : { code: 1, out: '', err: 'no ref' };   // a stand-in word (8 characters), never a credential
+        const click = gR ? await run(['click', gR]) : { code: 1, out: '', err: 'no ref' };
+        const ticket = (await until(async () => { const r = await run(['eval', "(document.getElementById('got') || {}).textContent || ''"]); return /t-9-8/.test(r.out) ? r : null; }, 10000, 300))
+          || await run(['eval', "(document.getElementById('got') || {}).textContent || ''"]);
+        ok(fillR.code === 0 && valR.code === 0 && /^alice-ref\s*$/.test(valR.out) && fillS.code === 0 && click.code === 0 && /t-9-8/.test(ticket.out),
+          'B-5f2e (r150): BY REF the agent types into the frame of another site and presses its button — the Account box reads «alice-ref», and the frame\'s own ticket carries both lengths (9, 8)', { fillR: fillR.code, val: valR.out.trim(), fillS: fillS.code, click: click.code, ticket: ticket.out.trim() });
         const vaultX = await run(['fill', '#xp', '--vault', `${SITE}#${USER}/password`]);
-        ok(vaultX.code !== 0 && /\[(target_not_found|login_in_frame)\]/.test(vaultX.err) && vaultX.err.includes(`a frame from ${XO} (another site)`) && !/top-level tab/.test(vaultX.err),
-          'B-5f2e: the vault fill by CSS — refused as before, now naming the frame of another site and the way that works (never the top-level-tab advice)', { err: vaultX.err.trim().slice(0, 600) });
+        ok(vaultX.code !== 0 && /\[(target_not_found|login_in_frame)\]/.test(vaultX.err) && vaultX.err.includes(STK.otherSiteFrameText([XO], null, { kind: 'vault' })) && !/top-level tab/.test(vaultX.err) && never(vaultX),
+          'B-5f2e (r150): the vault fill by CSS — refused as before, saying only what is true of the vault: it does not fill into another site\'s frame', { err: vaultX.err.trim().slice(0, 600) });
+        const vaultR = pR ? await run(['fill', pR, '--vault', `${SITE}#${USER}/password`]) : { code: 1, err: '[login_in_frame]' };
+        ok(vaultR.code !== 0 && /\[login_in_frame\]/.test(vaultR.err) && vaultR.err.includes(STK.otherSiteFrameText([XO], null, { kind: 'vault' })) && never(vaultR),
+          'B-5f2e (r150): the vault fill BY REF of the frame\'s secret box — refused [login_in_frame], the vault\'s own words (nothing of the vault\'s fill into such a frame is built: the owner\'s decision)', { err: String(vaultR.err).trim().slice(0, 600) });
+        // THE OTHER CASE: a frame of another site whose page has NO field — the listing shows the Iframe and nothing under it ⇒ «not listed»
+        await run(['open', `${SITE}/xframed?src=${encodeURIComponent(XS + '/xnote')}`]);
+        await until(async () => { const r = await run(['eval', "(document.getElementById('got') || {}).textContent || ''"]); return /idp\.example\.com/.test(r.out) ? r : null; }, 20000, 300);
+        const snapN = await run(['snapshot', '-i']);
+        ok(snapN.code === 0 && !findRef(snapN.out, /Account/i) && said(snapN, 'unlisted') && !said(snapN, 'listed') && never(snapN),
+          'B-5f2e (r150): a frame of another site with NO field — its listing holds nothing under the Iframe, and the note says its fields are NOT listed (never «fill them by ref»)', { err: snapN.err.trim().slice(0, 600), out: snapN.out.slice(0, 300) });
         await run(['frame', 'main']);
         await run(['open', `${SITE}/plain`]);
         const snapP = await run(['snapshot', '-i']);

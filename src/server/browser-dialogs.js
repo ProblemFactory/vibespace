@@ -4741,13 +4741,13 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (w.frameTargets && w.frameTargets.size) for (const f of ST.tabFrameTargets(w.frameTargets, e.targetId, e.childFrames || null)) w.frameTargets.delete(f.targetId);
     e.childFrames = null;
   }
-  function otherSiteFramesFor(target, { targetId = null } = {}) {
+  function otherSiteFramesFor(target, { targetId = null, kind = 'selector' } = {}) {   // r150: `kind` = which true sentence (browser-stuck otherSiteFrameText)
     const w = watches.get(String((target && target.profileId) || ''));
     if (!w || w.state !== 'open' || !w.frameTargets || !w.frameTargets.size) return null;
     const e = pickScopedTabFor(w, target, { targetId });
     if (!e) return null;
     const origins = ST.otherSiteFrameOrigins({ tabUrl: e.url, frames: ST.tabFrameTargets(w.frameTargets, e.targetId, e.childFrames || null) });
-    return origins.length ? { origins, text: ST.otherSiteFrameText(origins) } : null;
+    return origins.length ? { origins, text: ST.otherSiteFrameText(origins, null, { kind }) } : null;
   }
 
   async function inspectOopIframes(w, treeFrameIds, visit) {
