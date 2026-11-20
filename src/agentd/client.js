@@ -207,6 +207,11 @@ class DeviceManager {
   }
   set _sock(v) { this._sockOverride = v || null; }
 
+  /** B-24e2 follow-up (round wr3vak19m (1)): the link's state and the hello it holds — MEMORY ONLY (status() also evaluates the
+   *  socket path's witness: a synchronous read and a stat on the loop) */
+  isLinked() { return !!this._conn; }
+  helloInfo() { return (this._conn && this._conn.info) || null; }
+
   status() {
     return {
       connected: !!this._conn,

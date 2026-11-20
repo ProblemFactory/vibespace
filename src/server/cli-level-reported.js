@@ -51,15 +51,19 @@ function boot({ dataDir = null, log = null, writer = null, clock = null } = {}) 
   if (r && r.failed) { st.held = r.failed; st.log(`[cli-level] data/${FILE} could not be read (${r.failed}) — it is held, nothing is written over it until a read succeeds`); return; }
   if (r) st.reported = r.versions;
 }
+function trim() {   // ≤ KEEP versions, the oldest leaving — in memory too, whatever the save then does (wr3vak19m (2))
+  const ks = Object.keys(st.reported);
+  if (ks.length > KEEP) for (const k of ks.sort((a, b) => st.reported[a].at.localeCompare(st.reported[b].at)).slice(0, ks.length - KEEP)) delete st.reported[k];
+}
 function save() {
+  trim();
   if (!st.dataDir) return;
   if (st.held) {
     const r = readStore();
     if (r && r.failed) return;   // still held: said once at boot
     st.reported = { ...((r && r.versions) || {}), ...st.reported }; st.held = null;   // the file read at last: what it kept, then what came since
   }
-  const ks = Object.keys(st.reported);   // ≤ KEEP versions, the oldest leaving — the held store's merge too (round wiqep65pr (5))
-  if (ks.length > KEEP) for (const k of ks.sort((a, b) => st.reported[a].at.localeCompare(st.reported[b].at)).slice(0, ks.length - KEEP)) delete st.reported[k];
+  trim();   // the held store's merge too (round wiqep65pr (5))
   const w = st.writer || require('../store-writer.js').storeWriter();
   try { w.dirty(path.join(st.dataDir, FILE), { name: 'cli-level-reported.write', produce: () => JSON.stringify({ schema: 1, versions: st.reported }) }); }
   catch (e) { st.log(`[cli-level] the reported verdicts could not be written (${(e && (e.code || e.message)) || e}) — they stay in force until the next start`); }
@@ -119,12 +123,18 @@ function want(version, hostId, ask, { nameOf = () => null } = {}) {
   };
   once();
 }
-/** THE DOOR, judged before any ask (round wiqep65pr): `hosts`'s machine `hostId` → 'ok' | 'offline' (its link is down: a list never
- *  connects) | 'old' (its agent does not advertise «cli-level» in the hello it sent — read off the link, no call). Synchronous. */
+/** THE DOOR, judged before any ask (round wiqep65pr): `hosts`'s machine `hostId` → 'ok' | 'unpaired' (no longer in the list) |
+ *  'offline' (its link is down: a list never connects) | 'old' (its agent does not advertise «cli-level» in the hello it sent — read
+ *  off the link in memory, no call). Synchronous. */
 function linkOf(hosts, hostId) {
+  // (wr3vak19m (6)) a machine that is no longer in the list is said as that — never «not connected» by its raw id (a HELD list throws:
+  // unknown, read as not connected until it reads)
+  let known = true; try { known = !(hosts && typeof hosts.get === 'function') || !!hosts.get(hostId); } catch { known = true; }
+  if (!known) return 'unpaired';
   let dm = null; try { dm = hosts && typeof hosts.connectedDevice === 'function' ? hosts.connectedDevice(hostId) : null; } catch { dm = null; }
   if (!dm) return 'offline';
-  let caps = []; try { const i = typeof dm.status === 'function' ? dm.status().info : null; caps = i && Array.isArray(i.capabilities) ? i.capabilities : []; } catch { caps = []; }
+  // (wr3vak19m (1)) the hello off the link — memory only, never status() (it evaluates the socket path's witness on the loop)
+  let caps = []; try { const i = typeof dm.helloInfo === 'function' ? dm.helloInfo() : null; caps = i && Array.isArray(i.capabilities) ? i.capabilities : []; } catch { caps = []; }
   return caps.includes('cli-level') ? 'ok' : 'old';
 }
 /** the door's state said ONCE in the journal by name (the words carry it at every read) */

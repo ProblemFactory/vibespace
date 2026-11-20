@@ -41,6 +41,7 @@ const IDENT = (v) => `,VERSION:"${v}",PACKAGE_URL:"x",BUILD_TIME:"2026-11-19T10:
 const DECL = 'u({type:T("system"),subtype:T("background_tasks_changed"),tasks:C(u({task_id:o()';   // as 2.1.322's record union spells it
 const SEP = ';';   // a real build's statements are delimited: the identifier before «({type:» starts after it, never inside filler letters
 const MENTION = 'if(e.subtype==="background_tasks_changed")log("background_tasks_changed");';
+const execd = async (child, file) => { for (let i = 0; i < 300; i++) { try { if (fs.readlinkSync(`/proc/${child.pid}/exe`) === file) return true; } catch { } await new Promise((r) => setTimeout(r, 10)); } return false; };   // (wr3vak19m (3)) bounded 3 s
 const filler = (n) => { const b = Buffer.alloc(n); for (let i = 0; i < n; i++) b[i] = 97 + (i * 7919 % 26); return b; };
 function plant(name, parts) { const f = path.join(ROOT, name); fs.writeFileSync(f, Buffer.concat(parts.map((p) => (Buffer.isBuffer(p) ? p : Buffer.from(p, 'latin1'))))); fs.chmodSync(f, 0o755); return f; }
 
@@ -146,7 +147,7 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
     fs.writeFileSync(path.join(PVD, '2.1.441'), Buffer.concat([filler(1000), Buffer.from(IDENT('2.1.441'), 'latin1')])); fs.chmodSync(path.join(PVD, '2.1.441'), 0o755);
     fs.symlinkSync(path.join(PVD, '2.1.441'), path.join(PB, 'claude'));
     const child = spawn(run, ['30'], { stdio: 'ignore' });
-    await new Promise((r) => setTimeout(r, 150));
+    ok(await execd(child, run), 'the planted program RUNS (its exe link names the planted file) — waited for what happened, bounded at 3 s');
     fs.unlinkSync(run); fs.writeFileSync(run, Buffer.concat([filler(1000), Buffer.from(IDENT('2.1.440'), 'latin1')]));   // replaced on disk: no declaration in the new bytes
     const askP = async (version) => { const a = await MP.cliLevel(path.join(PB, 'claude'), { version }); if (a.state !== 'reading') return a; await MP._levelInFlight(); return MP.cliLevel(path.join(PB, 'claude'), { version }); };
     const viaProc = await askP('2.1.440');
@@ -168,6 +169,10 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
   const ni = await askNI();
   ok(ni.state === 'gone' && ni.unnamed === true && ni.read === null, '(2) a whole read that names NO build: answered as that (unnamed) — never «that build is no longer on the machine»', ni);
   MP._levelReset();
+  const UNN = mutantCopies('level-unnamed-gone', REPO).load('src/machine-probes.js', anchored(MSRC3, "  if (version && !m.version) return { state: 'gone', version, read: null, unnamed: true, via, why: 'the file read names no build' };   // (wiqep65pr (2))", "  // (unnamed removed)", 'unnamed-gone'), 'unnamed-gone');
+  const un = await (async () => { const a = await UNN.cliLevel(NI, { version: '2.1.481', platform: 'darwin' }); if (a.state !== 'reading') return a; await UNN._levelInFlight(); return UNN.cliLevel(NI, { version: '2.1.481', platform: 'darwin' }); })();
+  ok(un.state === 'gone' && un.unnamed !== true, '(2) RED CONTROL: an unnamed read taken for a gone build — the hub would say «that build is no longer on the machine» (false)', un);
+  UNN._levelReset();
   // (3) the verdict filed under the identity of the file the SCAN opened (one handle)
   const ID3 = plant('ident-3', [filler(500), IDENT('2.1.482'), SEP, DECL]);
   const id3 = async (mod) => {
@@ -189,7 +194,7 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
     fs.writeFileSync(loose, Buffer.concat([fs.readFileSync('/bin/sleep'), Buffer.from(IDENT('2.1.483') + SEP + DECL, 'latin1')])); fs.chmodSync(loose, 0o755);
     const pathProg = path.join(OB, 'claude'); fs.writeFileSync(pathProg, Buffer.concat([filler(800), Buffer.from(IDENT('2.1.484'), 'latin1')])); fs.chmodSync(pathProg, 0o755);
     const child = spawn(loose, ['30'], { stdio: 'ignore' });
-    await new Promise((r) => setTimeout(r, 150));
+    ok(await execd(child, loose), 'the planted program outside a versions folder RUNS (its exe link names it) — waited for, bounded at 3 s');
     const viaOf = async (mod) => { mod._levelReset(); const a = await mod.cliLevel(pathProg, { version: '2.1.483' }); if (a.state === 'reading') { await mod._levelInFlight(); return mod.cliLevel(pathProg, { version: '2.1.483' }); } return a; };
     const tight = await viaOf(MP);
     const BARE = mutantCopies('level-bare-name', REPO).load('src/machine-probes.js', anchored(MSRC3, "      if (path.basename(file) === version && (vdir ? path.dirname(file) === vdir : path.basename(path.dirname(file)) === 'versions')) return", "      if (path.basename(file) === version && (!vdir || path.dirname(file) === vdir)) return", 'bare-name'), 'bare-name');
@@ -197,7 +202,7 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
     try { child.kill('SIGKILL'); } catch { }
     ok(tight.via !== 'process' && bare.via === 'process', '(4) a process whose file is NOT in a versions folder is not taken for that build by its bare name (the PATH program outside one) — RED CONTROL: the bare name equal to the version', { tight, bare });
     MP._levelReset(); BARE._levelReset();
-  }
+  } else console.log('    (4) skipped: the process road is Linux\'s — not on this machine (no /proc or no /bin/sleep)');
 }
 
 console.log('③ the hub keeps a machine\'s verdict by version');
@@ -247,10 +252,31 @@ console.log('③ the hub keeps a machine\'s verdict by version');
     const fifteen = {}; for (let i = 0; i < 15; i++) fifteen[`2.4.${i}`] = { declared: true, by: { host: 'h-6', name: 'box-g' }, at: new Date(1_700_000_000_000 + i * 1000).toISOString() };
     fs.writeFileSync(f, JSON.stringify({ schema: 1, versions: fifteen }));
     R.note('2.3.10', { declared: true }, { host: 'h-6', name: 'box-g' });
-    const n5 = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).versions).length;
-    ok(n5 === R.KEEP, `(5) a HELD store's merge (15 on disk + 11 since) is trimmed to its ${R.KEEP} before it writes, the oldest leaving`, { n5 });
+    const kept5 = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).versions).sort();
+    const want5 = [...Array.from({ length: 11 }, (_, i) => `2.3.${i}`), ...Array.from({ length: 9 }, (_, i) => `2.4.${i + 6}`)].sort();
+    ok(JSON.stringify(kept5) === JSON.stringify(want5), `(5) a HELD store's merge (15 on disk + 11 since) is trimmed to its ${R.KEEP} before it writes — the NEWEST ${R.KEEP} kept (the 11 since + the 9 newest on disk), the oldest leaving`, { kept5 });
     R._reset();
   }
+  {
+    const RSRC5 = fs.readFileSync(path.join(REPO, 'src/server/cli-level-reported.js'), 'utf8');
+    const NOTRIM = mutantCopies('level-merge-untrimmed', REPO).load('src/server/cli-level-reported.js', anchored(RSRC5, "  trim();   // the held store's merge too (round wiqep65pr (5))", "  // (the merge's trim removed)", 'merge-untrimmed'), 'merge-untrimmed');
+    const hd = path.join(ROOT, 'held-trim-red'); fs.mkdirSync(hd, { recursive: true });
+    const f = path.join(hd, R.FILE); fs.writeFileSync(f, '{"schema":1,"versions":{');
+    let t5 = 1_800_000_000_000;
+    NOTRIM._reset(); NOTRIM.boot({ dataDir: hd, writer, clock: { now: () => (t5 += 1000) } });
+    for (let i = 0; i < 10; i++) NOTRIM.note(`2.3.${i}`, { declared: true }, { host: 'h-6', name: 'box-g' });
+    const fifteen = {}; for (let i = 0; i < 15; i++) fifteen[`2.4.${i}`] = { declared: true, by: { host: 'h-6', name: 'box-g' }, at: new Date(1_700_000_000_000 + i * 1000).toISOString() };
+    fs.writeFileSync(f, JSON.stringify({ schema: 1, versions: fifteen }));
+    NOTRIM.note('2.3.10', { declared: true }, { host: 'h-6', name: 'box-g' });
+    ok(Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).versions).length === 26, '(5) RED CONTROL: the merge\'s trim removed — 26 versions written', {});
+    NOTRIM._reset();
+  }
+  // (wr3vak19m (2)) the trim BEFORE the save's early returns: with no data folder the list in memory stays bounded too
+  const memBound = (mod) => { mod._reset(); mod.boot({ dataDir: null }); for (let i = 0; i < 25; i++) mod.note(`2.5.${i}`, { declared: true }, null); const n = Array.from({ length: 25 }, (_, i) => `2.5.${i}`).filter((v) => mod.levelOf(v)).length; mod._reset(); return n; };
+  const RSRC6 = fs.readFileSync(path.join(REPO, 'src/server/cli-level-reported.js'), 'utf8');
+  const LATETRIM = mutantCopies('level-trim-late', REPO).load('src/server/cli-level-reported.js', anchored(RSRC6, "function save() {\n  trim();\n", "function save() {\n", 'trim-late'), 'trim-late');
+  const mb = memBound(R), mbRed = memBound(LATETRIM);
+  ok(mb === R.KEEP && mbRed === 25, `(2) with NO data folder (or a store held) the list in memory stays at its ${R.KEEP} — RED CONTROL: the trim after the save\'s early returns (25 kept, no bound)`, { mb, mbRed });
   const hr = await held(R);
   ok(hr.kept && JSON.stringify(hr.after) === JSON.stringify(['2.1.450', '2.1.451', '2.1.452']), 'a DAMAGED store is HELD: nothing is written over it; once it reads, what it kept and what came since are written together', hr);
   const NOHOLD = mutantCopies('level-store-no-hold', REPO).load('src/server/cli-level-reported.js', anchored(fs.readFileSync(path.join(REPO, 'src/server/cli-level-reported.js'), 'utf8'), "  if (r && r.failed) { st.held = r.failed;", "  if (r && r.failed) { st.reported = {}; return; } if (false) { st.held = r.failed;", 'no-hold'), 'no-hold');
@@ -352,8 +378,11 @@ console.log('⑤ the facts read is the trigger');
   R._reset(); CMCS._reset();
   let answer = { state: 'reading' };
   const asked = [];
-  let link = { status: () => ({ connected: true, info: { capabilities: ['probe', 'cli-level'] } }) };
-  const hosts = { cliLevelOf: async (h, v) => { asked.push(`${h}|${v}`); return answer; }, get: () => ({ name: 'box-d' }), connectedDevice: () => link };
+  let statusCalls = 0;
+  const linkWith = (caps) => ({ isLinked: () => true, helloInfo: () => ({ capabilities: caps }), status: () => { statusCalls++; return { connected: true, info: { capabilities: caps } }; } });
+  let link = linkWith(['probe', 'cli-level']);
+  let known = { name: 'box-d' };
+  const hosts = { cliLevelOf: async (h, v) => { asked.push(`${h}|${v}`); return answer; }, get: () => { if (known instanceof Error) throw known; return known; }, connectedDevice: () => link };
   const UP = (k) => CF.LEVEL_MEASURED_TO.split('.').map((x, i) => (i === 2 ? Number(x) + k : x)).join('.');   // builds ABOVE the span, read from the module (line 14's law)
   const V1 = UP(102), V2 = UP(142);
   const src = CFX.sourcesFrom({ hosts });
@@ -389,13 +418,37 @@ console.log('⑤ the facts read is the trigger');
   const off = await door(CFX, null);
   ok(/its machine «box-d» is not connected/.test(off.w1) && /its machine «box-d» is not connected/.test(off.w2) && off.asked === 0 && !/being read/.test(off.w1),
     'a machine whose link is DOWN: «not connected» from the FIRST read and at every read after — nothing is put on the ask list', off);
-  const older = await door(CFX, { status: () => ({ connected: true, info: { capabilities: ['probe'] } }) });
+  const older = await door(CFX, linkWith(['probe']));
   ok(/is older and cannot read it: update the agent/.test(older.w1) && older.asked === 0, 'an agent without the capability: «update the agent» from its FIRST read — never «being read» once', older);
   const CFSRC = fs.readFileSync(path.join(REPO, 'src/server/conversation-facts.js'), 'utf8');
   const LATE = mutantCopies('level-door-late', REPO).load('src/server/conversation-facts.js', anchored(CFSRC, "      if (link !== 'ok') { R.sayDoor(v, host, link, machine); return { pending: link, machine }; }", "      if (false) { R.sayDoor(v, host, link, machine); return { pending: link, machine }; }", 'door-late'), 'door-late');
   const lr = await door(LATE, null);
   ok(/being read on its machine/.test(lr.w1) && lr.asked >= 1, '⑤ RED CONTROL: the door judged after the ask — an offline machine is said «being read» (the round\'s must)', lr);
-  link = { status: () => ({ connected: true, info: { capabilities: ['probe', 'cli-level'] } }) };
+  // the older agent's door: its red control
+  const RSRC7 = fs.readFileSync(path.join(REPO, 'src/server/cli-level-reported.js'), 'utf8');
+  const NOOLD = mutantCopies('level-old-door-gone', REPO).load('src/server/cli-level-reported.js', anchored(RSRC7, "  return caps.includes('cli-level') ? 'ok' : 'old';", "  return 'ok';", 'old-door-gone'), 'old-door-gone');
+  const RQ = require.cache[require.resolve(path.join(REPO, 'src/server/cli-level-reported.js'))];
+  const keep = RQ.exports; RQ.exports = NOOLD;   // the facts reader requires the store lazily: it takes the mutant for this read
+  const oldRed = await door(CFX, linkWith(['probe']));
+  RQ.exports = keep;
+  ok(!/update the agent/.test(oldRed.w1) && oldRed.asked >= 1, '⑤ RED CONTROL: the capability not judged at the door — the older agent is ASKED and its first read says «being read», not «update the agent»', oldRed);
+  // (wr3vak19m (1)) THE DOOR READS MEMORY ONLY: the hello off the link, never status() (it evaluates the socket path's witness)
+  statusCalls = 0; link = linkWith(['probe', 'cli-level']);
+  const lk = R.linkOf(hosts, 'h-4');
+  const HM = HostManager.prototype.connectedDevice.call({ isLocal: () => false, _devices: new Map([['h-4', link]]) }, 'h-4');
+  ok(lk === 'ok' && HM === link && statusCalls === 0, '(1) the door and hosts.connectedDevice read the link\'s hello in MEMORY — no status() call (no socket-path witness read on the loop)', { lk, statusCalls });
+  const STAT = mutantCopies('level-door-status', REPO).load('src/server/cli-level-reported.js', anchored(RSRC7, "  let caps = []; try { const i = typeof dm.helloInfo === 'function' ? dm.helloInfo() : null;", "  let caps = []; try { const i = typeof dm.status === 'function' ? dm.status().info : null;", 'door-status'), 'door-status');
+  statusCalls = 0; STAT.linkOf(hosts, 'h-4');
+  ok(statusCalls === 1, '(1) RED CONTROL: the door through status() — the socket path\'s witness read at every facts read', { statusCalls });
+  // (wr3vak19m (6)) a machine no longer in the list: «no longer paired», never «not connected» by its raw id
+  known = null;
+  const gone6 = await door(CFX, null);
+  known = Object.assign(new Error('held'), { code: 'hosts-unread' });
+  const held6 = await door(CFX, null);
+  known = { name: 'box-d' };
+  ok(/its machine «h-4» is no longer paired with this server/.test(gone6.w1) && !/no longer paired/.test(held6.w1) && /not connected/.test(held6.w1) && gone6.asked === 0,
+    '(6) a machine that is NO LONGER in the list is said «no longer paired»; a HELD list (it cannot say) is not taken for that', { gone6: gone6.w1, held6: held6.w1 });
+  link = linkWith(['probe', 'cli-level']);
   R._reset();
 }
 

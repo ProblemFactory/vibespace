@@ -1748,7 +1748,7 @@ class HostManager {
   async cliLevelOf(id, version = null) {
     const dm = this.connectedDevice(id);   // round wwf11hqbh (2): A LIST NEVER STARTS A CONNECT — a machine not connected is a quiet skip
     if (!dm) return { state: 'offline' };
-    const info = typeof dm.status === 'function' ? dm.status().info : null;   // (wiqep65pr (6)) the hello the link already holds — no connect() can start in a gap
+    const info = typeof dm.helloInfo === 'function' ? dm.helloInfo() : typeof dm.status === 'function' ? dm.status().info : null;   // (wiqep65pr (6)) the hello the link already holds — no connect() can start in a gap; memory only (wr3vak19m (1))
     const caps = info && Array.isArray(info.capabilities) ? info.capabilities : [];
     if (!caps.includes('cli-level')) return null;   // (3) an OLDER agent (it may not even answer the op): asked nothing, never a 9 s wait
     const r = await dm.probeCli(null, { level: true, version });
@@ -1969,7 +1969,7 @@ class HostManager {
   connectedDevice(id) {
     if (this.isLocal(id)) return this._localDevice || null;
     const dm = this._devices?.get(id);
-    try { return dm && dm.status().connected ? dm : null; } catch { return null; }
+    try { return dm && (typeof dm.isLinked === 'function' ? dm.isLinked() : dm.status().connected) ? dm : null; } catch { return null; }   // B-24e2 follow-up: memory only (status() reads the socket's witness)
   }
   setLocalDevice(dm) { this._localDevice = dm; }
   isLocal(id) { return !id || id === 'local'; }
