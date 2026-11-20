@@ -60,6 +60,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - After you stop a Claude turn, the chat says which processes its command tool left running, with «End them» to end them on this machine.
 - A sign-in form inside a frame from another site: the agent now says whose frame it is and asks you to sign in there in the live view, not a dead-end tip.
 - On a paired machine, a key helper named in the project's Claude settings or in your own settings file is now seen at a start, as on this machine.
+- Storage and machine-folder errors (a failed connect, a refused folder, a stalled mount, a storage dialog's refusal) now show in your language, not English.
 
 ### Security
 - A machine on SSH now switches to its own connection by itself only through an address you set or published, never one VibeSpace put on the relay by itself.
