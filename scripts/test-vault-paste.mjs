@@ -1067,7 +1067,7 @@ const itemOf = (w) => { const sn = w.userTodos.snapshot() || {}; return [...(sn.
   const l11 = await lockBetween(JSD_REAL);
   okF(l11.code === 'vault_locked' && l11.leftover === 1 && l11.lockedNow === 'locked', 'B-ef1b L11: a lock landing between the press\'s state check and its sweep ⇒ vault_locked (the locked word, never «copies left») WITH the count of the copies left (the page says it)', l11);
   const L11LINE = "    if (sw.locked) return named('vault_locked', sw.left ? { leftover: sw.left } : {});";
-  const l11c = await lockBetween(jsdCopy(L11LINE, "    if (sw.locked) return named('vault_locked');", 'B-ef1b: the locked road without its count').mod);
+  const l11c = await lockBetween(jsdCopy(L11LINE, "    if (sw.locked) return named('vault_locked');", 'B-ef1b: the locked road without its count').mod);   // stale-pins: kept — a RED control: the locked road's shape before its count, restored on purpose
   okF(l11c.code === 'vault_locked' && l11c.leftover === 0, 'RED control: the locked road without its count ⇒ vault_locked with no leftover — the page says nothing about the copies left', l11c);
   const l11r = await lockBetween(jsdCopy(L11LINE, '', 'B-ef1b: the locked sweep read as copies left').mod);
   okF(l11r.code === 'job_secrets_leftover', 'RED control: the move that reads the sweep\'s locked answer as copies left ⇒ job_secrets_leftover while the vault is locked', l11r);
