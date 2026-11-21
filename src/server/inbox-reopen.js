@@ -55,7 +55,7 @@ function create({ getOpenConversation, activeSessions, discover = async () => nu
     // conversation exists, in the folder the ask was filed from — never a remote copy cached here (that one resumes on its host)
     if (!entry && !item.hostId && typeof item.cwd === 'string' && item.cwd) {
       let fp = null;
-      try { fp = locate(conv.backend, conv.id, item.cwd); } catch { }
+      try { fp = await locate(conv.backend, conv.id, item.cwd); } catch { }   // B-a60e remainder: awaited (codex: the rollout index)
       if (fp && !/[\\/]remote-jsonl[\\/]/.test(String(fp))) entry = { cwd: item.cwd, located: true };
     }
     let us = {};

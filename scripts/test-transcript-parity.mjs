@@ -237,6 +237,22 @@ await parity('fullTurnmap (streaming scan)', (async () => ({ turns: await svc.fu
 
 // codex leg — different parser, same contract
 const cref = { backend: 'codex', sessionId: TID, cwd: CWD };
+// B-a60e remainder: THE ROLLOUT INDEX, one implementation on both sides — the hub and the agent find a codex rollout by the SAME
+// code (src/adapters/codex.js, which the agent bundles; the machine is the walk's root: both read this HOME), never a walk on
+// either's thread. The FIRST codex call of each side (a fresh index) answers the rollout, byte-identical; the hub's side by ONE walk
+{
+  const AD = require(REPO + '/src/adapters/codex.js');
+  AD._resetRolloutIndexForTests();
+  const { inproc } = await parity('codex status from a FRESH rollout index on both sides (B-a60e remainder)', svc.status(cref), ['status', cref, {}]);
+  const st = AD.rolloutIndexStats();
+  // the machine is a PARAMETER, never a second implementation (主开发 r1465): the agent this suite runs carries the hub's own
+  // index — its one shared walk, the bound an asker waits, the stuck-walk guard — bundled from the same src/adapters/codex.js
+  const bundle = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd.js'), 'utf8');
+  const carried = { walk: /function requestRolloutWalk\d*\(/.test(bundle), bound: /CODEX_ASK_BOUND_MS\d* = /.test(bundle), stuck: /CODEX_WALKS_OUT\d*\.has\(/.test(bundle), lookup: /function codexRolloutLookup\d*\(/.test(bundle) };
+  ok(Object.values(carried).every(Boolean), `the agent bundle carries the rollout index's own walk, bound and stuck-walk guard (${JSON.stringify(carried)})`);
+  ok(!!inproc && !!inproc.chatStatus && inproc.chatStatus.model === 'gpt-5.6' && st.walks === 1 && st.last && st.last.ok,
+    `…the hub's side read the rollout (model «${inproc && inproc.chatStatus && inproc.chatStatus.model}») after ONE walk of its index (${st.walks}; ${st.last && st.last.rollouts} rollouts)`);
+}
 await parity('codex page', svc.page(cref, {}), ['page', cref, {}]);
 const cg = await svc.gapInfo(cref);
 await parity('codex gapInfo', Promise.resolve({ gap: cg.gap, hasFile: !!cg.fp }), ['gapInfo', cref, {}]);

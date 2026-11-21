@@ -531,6 +531,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
   process.env.HOME = home;
   let ST;
   try { ST = require(REPO + '/src/codex-session-store.js'); } finally { process.env.HOME = realHome; }
+  // B-a60e remainder: this thread's finder answers from the rollout index — refreshed once the rollouts above are written (a hub's walk)
+  await require(REPO + '/src/adapters/codex.js').refreshCodexRolloutIndex();
   const { runUsageWalk } = require(REPO + '/src/usage-walker.js');
   const walkRids = new Map(); // sid → Set(rid)
   for (const l of runUsageWalk({ home, codexSessionsDir: path.join(home, '.codex', 'sessions'), cursorFile: path.join(home, 'cursor.json') }).events) {

@@ -4,7 +4,7 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
 const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file objects over the table's `files`
 const { CodexAdapter } = require('../adapters/codex');
-const { findCodexSessionJsonlPath, extractCodexThreadMeta, lastCodexTurnContextAsync } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, findCodexSessionJsonlPathAsync, codexRolloutLookupAsync, extractCodexThreadMeta, lastCodexTurnContextAsync } = require('../adapters/codex');
 const { CodexMessageManager } = require('../codex-message-manager');
 const codexStore = require('../codex-session-store');
 const codexThreadRead = require('../codex-thread-read');
@@ -173,8 +173,9 @@ module.exports = {
   // wrapper merges on resume.
   store: {
     discover: ({ activeSessions } = {}) => codexStore.listCodexThreadsAsync({ activeSessions }),
-    locate: (id) => findCodexSessionJsonlPath(id),   // (threadId) → rollout path|null (cwd irrelevant)
-    locateIsProof: true, // a null PROVES no rollout is here (the walk + the remote cache) — the transcript worker's `locate` op
+    locate: (id) => findCodexSessionJsonlPath(id),   // (threadId) → rollout path|null (cwd irrelevant) — on the hub's thread never a walk (B-a60e remainder: the rollout index; null = «none» or «not known yet»)
+    locateAsync: (id) => findCodexSessionJsonlPathAsync(id),   // B-a60e remainder: the same, AWAITED in the rollout index (an asynchronous caller's road)
+    locateIsProof: true, // a null PROVES no rollout is here (the walk + the remote cache) — the transcript worker's `locate` op (a worker's thread walks)
     // lane chat-attachments-persist (the cut): WHERE A PICTURE SITS IN A ROLLOUT LINE — a function output's input_image data
     // URL (a view_image); the key = the output's call_id; no sub-agent files (a Codex sub-agent is a thread of its own)
     pictures: {
@@ -195,6 +196,7 @@ module.exports = {
     resumeIdOf: (meta) => (meta && typeof meta.backendSessionId === 'string' && meta.backendSessionId) || null, // THE RESUMABLE ID (boot-restore): the thread id
     createReader: (session, sessionId, opts) => new codexStore.CodexSessionMessages(session, sessionId, opts || {}),
     forkChain: (id) => { const p = findCodexSessionJsonlPath(id); return p ? (extractCodexThreadMeta(p).forkedFrom || []) : []; },
+    forkChainAsync: async (id) => { const p = await findCodexSessionJsonlPathAsync(id); return p ? (extractCodexThreadMeta(p).forkedFrom || []) : []; },   // B-a60e remainder: the resume's road
     forkChainEnv: 'CODEX_WEBUI_FORKED_FROM',       // where codex-chat-wrapper reads the chain (src/resume-store.js forkChainEnv)
     // RESUME CONTINUITY (B-6b6d): what this CONVERSATION last ran at, for a
     // resume/fork carrying no explicit pick (src/resume-continuity.js states
@@ -212,7 +214,14 @@ module.exports = {
     // machine is read once from a bounded `codex app-server` child and served by
     // parseCodexSessionJsonl from the cache (B-21e4 item 5; local only — the local
     // app-server knows no remote thread; a present rollout is always authoritative).
-    warmTranscript: (id, cwd, opts) => codexThreadRead.warmMissingThread(id, { locate: findCodexSessionJsonlPath, remote: !!(opts && opts.remote) }),
+    // B-a60e remainder: the rollout is AWAITED in the rollout index first — a thread/read only for a KNOWN «none» (a rollout
+    // «not known yet» may be there: no app-server is started for it; the next view asks again)
+    warmTranscript: async (id, cwd, opts) => {
+      if (opts && opts.remote) return codexThreadRead.warmMissingThread(id, { remote: true });
+      const got = await codexRolloutLookupAsync(id);
+      if (got.fp || !got.known) return false;
+      return codexThreadRead.warmMissingThread(id, { locate: () => null, remote: false });
+    },
     writerSweep: codexWriterSweep,                 // (rid, shq, {protectSids}) → POSIX sweep script
     scene: { process: 'codex', listings: [['codex sessions', '.codex/sessions', 10]], version: 'codex' },   // the incident scene (src/incident.js)
     remoteFind: (id) => ({

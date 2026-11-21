@@ -7457,6 +7457,7 @@ class ChatView {
       // only when the rebuild itself ran through (a throw above keeps it poisoned)
       this._seqPoisoned = false;
       if (msg && msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });   // row B-422c: the reset removed the line — said again over the new slab, after the heal (test-hidden-view-suspend: nothing between the rebuild and it)
+      if (msg.findUnknown) this._renderers.appendSystem(t('Its saved history is not known yet — it is read again the next time this conversation opens.'));   // B-a60e remainder: its rollout is «not known yet» (a find that failed or came late) — SAID, never «no messages»
     } catch (e) { this._seqPoisoned = true; throw e; }
     this._drainResetQueue(held, msg);
     if (this._connNoticeOwed) { this._connNoticeOwed = false; this._connNotice?.answered(true); }
@@ -7737,8 +7738,9 @@ class ChatView {
       // _getSessionIds/openSpec — nothing addresses the dead server id anymore.
       this.sessionId = viewId;
       if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
-      else if (!msg.historyNotLoaded) this._renderers.appendSystem(t("No messages in this session's transcript yet."));
+      else if (!msg.historyNotLoaded && !msg.findUnknown) this._renderers.appendSystem(t("No messages in this session's transcript yet."));
       if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: never «no messages» for a history the reader refused
+      if (msg.findUnknown) this._renderers.appendSystem(t('Its saved history is not known yet — it is read again the next time this conversation opens.'));   // B-a60e remainder: its rollout is «not known yet» (a find that failed or came late) — SAID, never «no messages»
       this._renderers.appendSystem(t('The session is no longer running — showing saved history.')); this._rescueNoteSaid = true;   // row B-422c: said again when a re-ask replaces the slab
       this._setReadOnly();
     };

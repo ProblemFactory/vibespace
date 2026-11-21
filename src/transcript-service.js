@@ -348,6 +348,12 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const r = norm(ref);
     return localTranscriptPath(r);
   }
+  /** B-a60e remainder: the same, AWAITED where the harness declares it (codex: the rollout index — never a walk on this thread) */
+  async function localTranscriptPathAsync(r) {
+    const h = harnessOf(r.backend || 'claude');
+    if (h.store && typeof h.store.locateAsync === 'function') return (await h.store.locateAsync(r.sessionId, r.cwd)) || null;
+    return localTranscriptPath(r);
+  }
 
   /** Huge-file seek family — switched to the device AS ONE UNIT (2.293.0,
    *  once the daemon gained a searchFull op). This family speaks in FILE LINE
@@ -366,7 +372,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (viaDev && viaDev.hasFile) return { gap: viaDev.gap, fp: DEVICE_HANDLE + r.host, hostFetchError: null };
     if (viaDev && viaDev.hasFile === false) return { gap: null, fp: null, hostFetchError: null };
     const hostFetchError = await refreshRemote(r, { throttled: true });
-    const fp = filePath(ref);
+    const fp = await localTranscriptPathAsync(r);
     if (!fp || !fs.existsSync(fp)) return { gap: null, fp: null, hostFetchError };
     let gap = null, refused = null;
     try { gap = await jsonlGapInfoAsync(fp); } catch (e) { if (e && e.code === 'transcript_reader_restarting') refused = e; }   // row B-422c: the reader's refusal carried to the route, never «no gap»
@@ -428,7 +434,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   async function rescue(ref, { maxLineBytes = 1024 * 1024 } = {}) {
     const r = norm(ref);
     if (r.hostId || r.host) throw new Error('rescue is local-only for now — copy the transcript here or run it on that machine');
-    const fp = localTranscriptPath(r);
+    const fp = await localTranscriptPathAsync(r);
     if (!fp || isDeviceHandle(fp) || !fs.existsSync(fp)) throw new Error('transcript not found on this machine');
     try {
       require('child_process').execFileSync('fuser', [fp], { timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
@@ -500,7 +506,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
   async function pictureHere(ref, params = {}) {
     const r = norm(ref);
     const TP = require('./transcript-picture.js');
-    const fp = await TP.placeFile({ backend: r.backend, tx: r.sessionId, cwd: r.cwd, agent: params.agent || null }, { locate: async (id, cwd) => localTranscriptPath({ ...r, sessionId: id, cwd }) });
+    const fp = await TP.placeFile({ backend: r.backend, tx: r.sessionId, cwd: r.cwd, agent: params.agent || null }, { locate: async (id, cwd) => localTranscriptPathAsync({ ...r, sessionId: id, cwd }) });
     if (!fp) return { unknown: true };
     const out = await TP.reader().find({ fp, backend: r.backend, key: params.key, n: Number(params.n), withText: true });
     return out.ok ? { ok: true, mediaType: out.mediaType, b64: out.b64 } : out;

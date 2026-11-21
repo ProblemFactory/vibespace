@@ -29,6 +29,8 @@ fs.writeFileSync(path.join(dir, `rollout-2026-09-05T10-34-43-${TID}.jsonl`), [
   rec({ timestamp: '2026-09-05T19:51:00.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok "model":"gpt-5.6-sol" mentioned in prose' }] } }),
 ].join(''));
 const CX = require(path.join(REPO, 'src/adapters/codex.js'));
+// B-a60e remainder: this thread's finder answers from the rollout index — refreshed once the rollouts above are written (a hub's walk)
+await CX.refreshCodexRolloutIndex();
 const lastModel = async (id) => ((await CX.lastCodexTurnContextAsync(id)) || {}).model || null;   // B-80cb: the async twin (the sync pair is gone)
 ok(await lastModel(TID) === 'gpt-6-astra', 'the last turn\'s model = the LAST turn_context model (prose mentions of other models are ignored)');
 ok(await lastModel('00000000-0000-4000-8000-000000000000') === null, 'unknown thread → null (resume falls back to the default)');

@@ -27,7 +27,7 @@ const { remoteCmdFor, remoteRefusal } = require('./server/remote-cli'); // B-69e
 const { sessionSpawnLine } = require('./spawn/line'); // PURE (lane antigravity-spawn-argv): THE local session line — node <wrapper> <buf> <meta> <ONE executable> …args + the env
 const SPRI = require('./server/spawn-priority.js'); // B-460d: the start's CPU priority — a local conversation starts below the hub (nice +5 on the line itself)
 const { pipePtyShim } = require('./pty-duck'); // B-ae4b: the R6 pipe duck holds a listener SET (the liveness stamp + the consumer)
-const { writerSweepOpts, forkChainEnv } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
+const { writerSweepOpts, forkChainEnvAsync } = require('./resume-store'); // descriptor store hooks (writerSweep / forkChain), no id branch
 const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adoptCapturedId, forkSourceOf } = require('./claude-lock-capture'); // the ONE local lock capture (create + boot re-arm; a terminal fork included; the witness is the wrapper's pid, 2026-09-25)
 const { readPpid } = require('./cli-identity');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
@@ -1182,7 +1182,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
           // only ever fire when the client sent nothing, and the client sent
           // the instance default on every resume (B-6b6d), so the fallback the
           // env test was guarding was unreachable exactly when it was needed.
-          if (data.resumeId && sessionSpec.env) Object.assign(sessionSpec.env, forkChainEnv(backend, data.resumeId));
+          if (data.resumeId && sessionSpec.env) Object.assign(sessionSpec.env, await forkChainEnvAsync(backend, data.resumeId));   // B-a60e remainder: codex's rollout awaited in the rollout index, never walked here
 
           // THE MEMBER THIS PROCESS WILL HOLD (design-reset-credits r2): a pool on
           // a backend that cannot hot-switch (caps row, never an id — codex's

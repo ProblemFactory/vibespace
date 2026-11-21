@@ -79,6 +79,8 @@ function storeCopy(anchor, to, name) {
 }
 
 console.log('— ① the same records: the worker\'s merge, the sync road, the old async road');
+// B-a60e remainder: this thread's finder answers from the rollout index — refreshed once the rollouts above are written (a hub's walk)
+await codex.refreshCodexRolloutIndex();
 const syncRecs = new S.CodexSessionMessages(sess('sync'), 'w-sync', { buffersDir }).raw();
 const ancestry = S.resolveCodexForkAncestry(C, [W]);
 ok(JSON.stringify(ancestry) === JSON.stringify([{ id: P, untilOrdinal: K }, { id: W, untilOrdinal: null }]), 'the stand-in\'s ancestry: the native parent cut at its fork ordinal, then the wrapper-chain parent', ancestry);
@@ -156,6 +158,8 @@ console.log('— ⑦ every file of a long chain: no cap');
   const chain = [];
   for (let k = 0; k < 34; k++) { const id = `019a6e00-0000-7000-8000-0000000c${String(k).padStart(4, '0')}`; rollout(id, { from: 5000 + k * 10, turns: 1, word: 'ch' + k }); chain.push(id); }
   const longSess = (n) => sess(n, { forkedFrom: [W, ...chain] });
+  // B-a60e remainder: the rollout(s) just written seen by the index (a hub's walk) before this thread's finder is asked
+  await codex.refreshCodexRolloutIndex();
   const longSync = new S.CodexSessionMessages(longSess('long-sync'), 'w-long-sync', { buffersDir }).raw();
   const r0 = codex.mergedReadStats();
   const longAsync = await new S.CodexSessionMessages(longSess('long'), 'w-long', { buffersDir }).rawAsync();

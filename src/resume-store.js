@@ -39,4 +39,14 @@ function forkChainEnv(backend, resumeId) {
   return { [st.forkChainEnv]: chain.join(',') };
 }
 
-module.exports = { hasWriterSweep, writerSweepOpts, forkChainEnv };
+/** B-a60e remainder: the same on the resume's (asynchronous) road — a harness's awaited chain when it declares one (codex: its
+ *  rollout awaited in the rollout index, never a walk on the hub's thread), else its synchronous one */
+async function forkChainEnvAsync(backend, resumeId) {
+  const st = storeOf(backend);
+  if (!resumeId || !st.forkChainEnv || (typeof st.forkChainAsync !== 'function' && typeof st.forkChain !== 'function')) return {};
+  const chain = [...((typeof st.forkChainAsync === 'function' ? await st.forkChainAsync(resumeId) : st.forkChain(resumeId)) || [])];
+  if (!chain.includes(resumeId)) chain.push(resumeId);
+  return { [st.forkChainEnv]: chain.join(',') };
+}
+
+module.exports = { hasWriterSweep, writerSweepOpts, forkChainEnv, forkChainEnvAsync };

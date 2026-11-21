@@ -246,6 +246,17 @@ async function world(A, spec = {}) {
   const tasks = new A.TGM({ dataDir, homeDir: HOME });
   tasks._state.tasks = clone(spec.tasks || TASKS);
   const sessions = new Map((spec.sessions || SESSIONS).map(([id, s]) => [id, clone(s)]));
+  // B-a60e remainder: this tree's codex finder answers from its rollout index — a thread's FIRST synchronous ask is «not known
+  // yet» (never «gone»: the law), «none» only from a walk begun after it. A world read against the base's is a hub whose index
+  // has walked since the ids were first asked: every id of the world asked once, then a walk begun after (twice: one may run)
+  if (!spec.io && typeof A.req === 'function') {
+    let AD = null; try { AD = A.req('./src/adapters/codex.js'); } catch { AD = null; }
+    if (AD && typeof AD.codexRolloutLookup === 'function') {
+      const ids = [...new Set(JSON.stringify([CORPUS_CIDS, spec, SESSIONS, METAS, TASKS, USER_STATE, corpusGroups()]).match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g) || [])];
+      for (let r = 0; r < 2; r++) { ids.forEach((x) => AD.codexRolloutLookup(x)); await AD.refreshCodexRolloutIndex(); }
+      if (!world.saidPrimed) { world.saidPrimed = true; const got = ids.map((x) => AD.codexRolloutLookup(x)); say(`  · this tree's codex rollout index, primed over ${ids.length} ids: ${got.filter((g) => g.fp).length} found, ${got.filter((g) => !g.fp && g.known).length} «none», ${got.filter((g) => !g.known).length} «not known yet» — ${JSON.stringify(AD.rolloutIndexStats())}`); }
+    }
+  }
   const R = A.rosterOf(sessions, tasks);
   const counter = { builds: 0 };
   const build = () => { counter.builds++; return R.build(); };

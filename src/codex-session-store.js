@@ -4,6 +4,7 @@ const {
   CODEX_SESSIONS_DIR,
   extractCodexThreadMeta,
   findCodexSessionJsonlPath,
+  codexRolloutLookup, codexRolloutLookupAsync, findCodexSessionJsonlPathAsync, rolloutIndexEpoch,   // B-a60e remainder: the rollout index (never a walk on this thread)
   parseCodexSessionJsonl,
   transcriptWorkerCall,
 } = require('./adapters/codex');
@@ -194,7 +195,20 @@ function assembleCodexThreads({ metas, mergedThreadIds }, { activeSessions, open
  *  `subagent_history_start_ordinal` is child-numbered and its rollout already
  *  copies the inherited context, so it never adds an ancestor here. Depth-
  *  capped (8), cycle-safe, a missing rollout ends the walk. */
-function resolveCodexForkAncestry(threadId, wrapperChain = []) {
+function resolveCodexForkAncestry(threadId, wrapperChain = [], { partial = null } = {}) {
+  const w = ancestryWalk(threadId, wrapperChain);
+  while (!w.done()) { const got = codexRolloutLookup(w.cur()); if (!got.known && partial) partial.unknown = true; w.step(got.fp); }
+  return w.result();
+}
+/** B-a60e remainder: the same, each rollout AWAITED in the rollout index (an asynchronous road: never a walk on this thread);
+ *  `partial.unknown` = a rollout of the chain was «not known yet» after the bounded wait */
+async function resolveCodexForkAncestryAsync(threadId, wrapperChain = [], { partial = null } = {}) {
+  const w = ancestryWalk(threadId, wrapperChain);
+  while (!w.done()) { const got = await codexRolloutLookupAsync(w.cur()); if (!got.known && partial) partial.unknown = true; w.step(got.fp); }
+  return w.result();
+}
+/** The ancestry's one rule, a step a rollout (its path, or null: the walk ends) — the two roads above share it */
+function ancestryWalk(threadId, wrapperChain) {
   const entries = [];
   const seen = new Set(threadId ? [threadId] : []);
   for (const id of Array.isArray(wrapperChain) ? wrapperChain : []) {
@@ -204,20 +218,24 @@ function resolveCodexForkAncestry(threadId, wrapperChain = []) {
   }
   const native = [];
   let cur = threadId, depth = 0;
-  while (cur && depth++ < 8) {
-    const fp = findCodexSessionJsonlPath(cur);
-    if (!fp) break;
-    const m = extractCodexThreadMeta(fp);
-    const until = Number.isInteger(m.forkedFromOrdinal) ? m.forkedFromOrdinal : null;
-    if (!m.forkedFromId || until === null) break;
-    const parent = m.forkedFromId;
-    const existing = entries.find((e) => e.id === parent);
-    if (existing) existing.untilOrdinal = existing.untilOrdinal === null ? until : Math.min(existing.untilOrdinal, until);
-    else if (!seen.has(parent)) { seen.add(parent); native.unshift({ id: parent, untilOrdinal: until }); }
-    else break;
-    cur = parent;
-  }
-  return [...native, ...entries];
+  return {
+    done: () => !cur || depth >= 8,
+    cur: () => cur,
+    step: (fp) => {
+      depth++;
+      if (!fp) { cur = null; return; }
+      const m = extractCodexThreadMeta(fp);
+      const until = Number.isInteger(m.forkedFromOrdinal) ? m.forkedFromOrdinal : null;
+      if (!m.forkedFromId || until === null) { cur = null; return; }
+      const parent = m.forkedFromId;
+      const existing = entries.find((e) => e.id === parent);
+      if (existing) existing.untilOrdinal = existing.untilOrdinal === null ? until : Math.min(existing.untilOrdinal, until);
+      else if (!seen.has(parent)) { seen.add(parent); native.unshift({ id: parent, untilOrdinal: until }); }
+      else { cur = null; return; }
+      cur = parent;
+    },
+    result: () => [...native, ...entries],
+  };
 }
 
 /** Keep only the records below a parent-numbered boundary. Records without a
@@ -693,7 +711,7 @@ function noteNotLoadedOnce(threadId, why) {
 async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
   let fp = null;
   if (known !== undefined) fp = known || null;   // B-f3f9: a path this read already looked up (null = not on disk) — never a second walk
-  else { try { fp = findCodexSessionJsonlPath(threadId); } catch { fp = null; } }
+  else { try { fp = await findCodexSessionJsonlPathAsync(threadId); } catch { fp = null; } }   // B-a60e remainder: awaited in the rollout index
   let why = 'its rollout was not found (the thread/read copy is read)';
   if (fp) {
     let refusal = null;
@@ -799,28 +817,37 @@ class CodexSessionMessages {
   }
 
   _ensureParsed() {
-    if (this._all) return;
+    // B-a60e remainder: this road never walks — a rollout the index does not know YET gives what is known (the live buffer at
+    // least), and that read is never final: it is read again once the index has MOVED (a walk ended since — rolloutIndexEpoch),
+    // so it corrects itself with no press, and a caller asking in a loop meanwhile does no work and asks no walk
+    if (this._all && (!this._partial || this._partialEpoch === rolloutIndexEpoch())) return;
+    const partial = { unknown: false };
+    const fpOf = (id) => { const got = codexRolloutLookup(id); if (!got.known) partial.unknown = true; return got.fp; };
     const threadId = getCodexHistorySessionId(this._session);
     // Fork ancestry first (oldest → newest; the wrapper chain whole, codex's
     // own 0.153 fork parents cut at their boundary ordinal), then the current
     // thread. NOTE: parseCodexSessionJsonl is tail-bounded (32MB) — a
     // Referenced fork off a parent larger than that reads the parent's TAIL,
     // which the boundary then (correctly) rejects: bounded, never wrong records.
-    const ancestry = resolveCodexForkAncestry(threadId, this._session?.forkedFrom || []);
+    const ancestry = resolveCodexForkAncestry(threadId, this._session?.forkedFrom || [], { partial });
     let history = [];
     // Every file's records are tagged with THAT file's thread id (tagRecordThread)
     // — the normalizer keys each response's ledger meta by the record's own
     // file, exactly as the walker does; the reader's id is only the default
     // for provenance-less records (the live buffer below).
     for (const { id: forkId, untilOrdinal } of ancestry) {
-      const forkHistory = tagRecordThread(cutRecordsAtOrdinal(parseCodexSessionJsonl(forkId, { why: SYNC_ROAD }), untilOrdinal), forkId);
+      const forkHistory = tagRecordThread(cutRecordsAtOrdinal(parseCodexSessionJsonl(forkId, { why: SYNC_ROAD, fp: fpOf(forkId) }), untilOrdinal), forkId);
       if (forkHistory.length) history = mergeCodexRecords(history, forkHistory);
     }
-    const currentHistory = threadId ? tagRecordThread(parseCodexSessionJsonl(threadId, { why: SYNC_ROAD }), threadId) : [];
+    const currentHistory = threadId ? tagRecordThread(parseCodexSessionJsonl(threadId, { why: SYNC_ROAD, fp: fpOf(threadId) }), threadId) : [];
     if (currentHistory.length) history = mergeCodexRecords(history, currentHistory);
     const live = parseBufferRecords(this._session?.buffer || '');
     this._all = mergeCodexRecords(history, live);
+    this._partial = partial.unknown; this._partialEpoch = rolloutIndexEpoch();
   }
+
+  /** B-a60e remainder: true while a rollout of this conversation was «not known yet» at its last read (nothing of it kept) */
+  get findUnknown() { return !!this._partial; }
 
   /** The attach's records off the loop — kb-file-structure «src/codex-session-store.js» (lane resume-all-paced L2). */
   rawAsync({ bulk = false, wanted = null } = {}) {
@@ -830,15 +857,20 @@ class CodexSessionMessages {
     // the POOL refuses, the sync one for a missing rollout, an op's own error or the device's in-place road) and every merge in slices. ws-handler's live attach and its read-only view, and the transcript service's
     // view and status, await it before they read raw(). NOT named prepare(): a reader with prepare() is «serve-backed» to the search
     // index (src/search-index-worker.js), which then skips it — codex conversations must stay searchable.
-    if (this._all) return Promise.resolve(this._all);
+    if (this._all && !this._partial) return Promise.resolve(this._all);
     if (this._rawAsync) return this._rawAsync;
     const job = oneReadAtATime(async () => {
-      if (this._all) return this._all;   // the sync road filled it while this one waited its turn
+      if (this._all && !this._partial) return this._all;   // the sync road filled it while this one waited its turn
       // A READ NOBODY WILL USE IS DROPPED BEFORE IT STARTS (主开发 02:22Z, the restack's follow-up): `wanted` is asked when this read's
       // turn comes — a socket closed while it waited (a reload storm queues reads nobody will use) frees the line at once, unread
       if (typeof wanted === 'function' && !wanted()) return null;
       const threadId = getCodexHistorySessionId(this._session);
-      const ancestry = resolveCodexForkAncestry(threadId, this._session?.forkedFrom || []);
+      // B-a60e remainder: every rollout of the read AWAITED in the rollout index first (one walk shared by every asker, off this
+      // thread) — the files below are then the index's answers, and status, the view and the attach are exact from the first call
+      const partial = { unknown: false };
+      const ancestry = await resolveCodexForkAncestryAsync(threadId, this._session?.forkedFrom || [], { partial });
+      if (threadId) { const got = await codexRolloutLookupAsync(threadId); if (!got.known) partial.unknown = true; }
+      if (this._all && this._partial && partial.unknown && this._partialEpoch === rolloutIndexEpoch()) return this._all;   // nothing moved since the last «not known yet» read: the same answer, no second read
       // B-f3f9: THE WHOLE READ IN THE WORKER — every file of the ancestry and the thread's own read, parsed, cut, tagged and merged,
       // then the live buffer merged, in the transcript worker's history lane; only the FINAL records cross (in pages), each re-tagged
       // here with its file's thread. A file it cannot name (a missing rollout: the thread/read copy), a pool that is down, or a refusal
@@ -847,9 +879,9 @@ class CodexSessionMessages {
       if (files) {
         const got = await require('./adapters/codex').codexHistoryMergedPagedAsync({ files, liveBuffer: () => this._session?.buffer || '' }, { onFail: noteMergedFallback });
         if (got && Array.isArray(got.records)) {
-          if (this._all) return this._all;   // the sync road filled it meanwhile
+          if (this._all && !this._partial) return this._all;   // the sync road filled it meanwhile
           for (let i = 0; i < got.records.length; i++) if (got.threads[i]) tagOne(got.records[i], got.threads[i]);
-          this._all = got.records;
+          this._all = got.records; this._partial = partial.unknown; this._partialEpoch = rolloutIndexEpoch();
           noteHistoryMark('noteReadable', threadId);   // r1461 (2): loaded — a window waiting on it is told
           return this._all;
         }
@@ -873,7 +905,7 @@ class CodexSessionMessages {
       if (currentHistory.length) history = await mergeCodexRecordsAsync(history, currentHistory);
       const live = parseBufferRecords(this._session?.buffer || '');
       const all = await mergeCodexRecordsAsync(history, live);
-      if (!this._all) this._all = all;
+      if (!this._all || this._partial) { this._all = all; this._partial = partial.unknown; this._partialEpoch = rolloutIndexEpoch(); }
       return this._all;
     }, { bulk });
     // A READ THAT MAY BE DROPPED IS NEVER THE READER'S SHARED MEMO (主开发 03:16Z, the follow-up's third item): a job carrying `wanted` can
@@ -1087,7 +1119,7 @@ module.exports = {
   retractionIdOf,
   USER_RETRACTION_EVENT,
   parseCodexSessionJsonl,
-  resolveCodexForkAncestry,
+  resolveCodexForkAncestry, resolveCodexForkAncestryAsync,
   cutRecordsAtOrdinal,
   tagRecordThread,
   recordThreadOf,

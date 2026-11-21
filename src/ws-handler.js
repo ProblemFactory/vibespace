@@ -1932,7 +1932,11 @@ function registerWsHandler(wss, ctx) {
               })();
               // ONE builder for every live fact; the slab (messages + turnMap) is
               // the only thing the held rung leaves out.
-              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
+              // B-a60e remainder: a history read that met «not known yet» is never the session's loaded history (the next attach
+              // reads again) and the page SAYS it — never an empty conversation for a find that came late
+              const findUnknown = !!(sm && sm.findUnknown);
+              if (findUnknown) session._historyLoaded = false;
+              const livePayload = { type: 'attached', sessionId: data.sessionId, name: session.name, cwd: session.cwd, mode: 'chat', ...(findUnknown ? { findUnknown: true } : {}), historyNotLoaded: session._historyLoaded ? null : (session._historyNotLoaded || null), historyNotLoadedInfo: session._historyLoaded ? null : withRetryIn(session._historyNotLoadedInfo),   // row B-422c: the page says the history waits on the reader
                 totalCount, chatStatus, isStreaming, streamingLabel, streamingKind: isStreaming ? (session._streamingKind || null) : null, autoResume: autoResume?.statusFor?.(data.sessionId) || null, outputStyle: session._outputStyle || null, worktree: !!session._worktree, worktreePath: session._worktreePath || null, spawnOrigin: { model: session._modelOrigin || null, effort: session._effortOrigin || null }, taskState: sm.taskState(), pendingPermissions: pendingPerms,
                 // The input queue as the normalizer knows it (the wrapper's
                 // queue_changed replays through the buffer on a rebuild) —
@@ -2089,7 +2093,7 @@ function registerWsHandler(wss, ctx) {
             try { if (typeof mm.endLateAllows === 'function') mm.endLateAllows(false); } catch { }   // B-9ff2's remainder (r1296 (2)): a STOPPED conversation's waiting late Allows — the agent never said
             if (sm.notLoaded) _viewWaiters.note(SSH.getHistorySessionId({ backendSessionId, claudeSessionId: data.claudeSessionId || backendSessionId }), ws, data.sessionId);   // r1461 (2): this view waits on it — told at its readable
             ws.send(JSON.stringify({ type: 'attached', sessionId: data.sessionId, name: data.name || '', cwd: data.cwd || '', mode: 'chat',
-              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
+              messages: mm.tailWindow(attachWindowOpts(data.slab)), totalCount: mm.total, chatStatus: sm.chatStatus(), isStreaming: false, viewOnly: true, ...(sm.findUnknown ? { findUnknown: true } : {}), historyNotLoaded: sm.notLoaded || null, historyNotLoadedInfo: sm.notLoaded ? withRetryIn({ storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null }) : null }));   // row B-422c // the slab asked for, as the live attach (perf r1)
             if (ws.readyState === WS_OPEN && !sm.notLoaded) for (const [, s] of activeSessions) if (addressableId(s) === backendSessionId && (s.host || null) === (data.host || null)) BULK.replied(s);   // B-cd4b r1093, THE DOOR: View History replied the history of the live conversation it names (its own address: a pending fork carrying the id is not it)
           } else {
             // Include sessionId so the requesting ChatView can correlate the

@@ -1074,6 +1074,7 @@ export function installSessionLifecycle(App, ctx = {}) {
             chatView._applyLiveMeta?.(msg); // zero messages still has live state
           }
           if (msg.historyNotLoaded) chatView._sayHistoryNotLoaded?.(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: the first attach of a history that waits on the reader
+          if (msg.findUnknown) chatView._renderers.appendSystem(t('Its saved history is not known yet — it is read again the next time this conversation opens.'));   // B-a60e remainder: its rollout is «not known yet» (a find that failed or came late) — SAID, never «no messages»
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
             const shouldKill = !msg.viewOnly && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
@@ -2291,7 +2292,10 @@ export function installSessionLifecycle(App, ctx = {}) {
       }
       if (msg.type === 'attached' && msg.sessionId === viewId) {
         loadingEl?.remove();
-        if (msg.messages?.length) {
+        if (msg.findUnknown) {   // B-a60e remainder: its rollout is «not known yet» (a find that failed or came late) — SAID, never «no messages»
+          if (msg.messages?.length) chatView.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
+          chatView._renderers.appendSystem(t('Its saved history is not known yet — it is read again the next time this conversation opens.'));
+        } else if (msg.messages?.length) {
           chatView.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
         } else if (!msg.historyNotLoaded) {
           // Zero messages (empty/aborted transcript, or a brand-new session

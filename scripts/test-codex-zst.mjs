@@ -154,6 +154,8 @@ const TID3 = '77777777-6666-4555-8444-333333333333';
   fs.rmSync(bigPath); fs.rmSync(corruptPath);
 }
 
+// B-a60e remainder: this thread's finder answers from the rollout index — refreshed once the rollouts above are written (a hub's walk)
+await CX.refreshCodexRolloutIndex();
 ok(CX.findCodexSessionJsonlPath(TID2) === zstPath && CX.findCodexSessionJsonlPath(TID) === plainPath, 'findCodexSessionJsonlPath locates a .jsonl.zst rollout (plain wins when both exist)');
 const twin = CX.plainJsonlPath(zstPath);
 ok(twin !== zstPath && fs.readFileSync(twin, 'utf8') === zstText && CX.plainJsonlPath(plainPath) === plainPath, 'plainJsonlPath materializes a compressed rollout ONCE into the per-user temp cache; plain files return themselves');

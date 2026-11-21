@@ -271,10 +271,10 @@ async function captureLocal(dir, { dataDir, cids, terminalIds = [] }) {
     const harnessOfPath = new Map();
     try {
       for (const h of listHarnesses()) {
-        const locate = h.store && typeof h.store.locate === 'function' ? h.store.locate : null;
+        const locate = h.store && typeof h.store.locateAsync === 'function' ? h.store.locateAsync : h.store && typeof h.store.locate === 'function' ? h.store.locate : null;   // B-a60e remainder: codex's awaited (the rollout index)
         if (!locate) continue;
         let fp = null;
-        try { fp = locate(cid) || null; } catch { fp = null; }
+        try { fp = (await locate(cid)) || null; } catch { fp = null; }
         // A NUL-prefixed "path" is an opaque HANDLE, never a real file
         // (transcript-service's DEVICE_HANDLE convention). Spelled as an
         // escape rather than the raw byte it used to be: one control

@@ -80,6 +80,8 @@ console.log('— ① fork ordinal: meta, ancestry, the read-only merge, listing'
 const CX = require(path.join(REPO, 'src/adapters/codex.js'));
 const ST = require(path.join(REPO, 'src/codex-session-store.js'));
 const fp = (tid) => CX.findCodexSessionJsonlPath(tid);
+// B-a60e remainder: this thread's finder answers from the rollout index — refreshed once the rollouts above are written (a hub's walk)
+await CX.refreshCodexRolloutIndex();
 const mC = CX.extractCodexThreadMeta(fp(C)), mG = CX.extractCodexThreadMeta(fp(G)), mS = CX.extractCodexThreadMeta(fp(S)), mP = CX.extractCodexThreadMeta(fp(P));
 ok(mC.forkedFromId === P && mC.forkedFromOrdinal === 5 && mC.historyMode === 'paginated', 'history_base {thread_id, end_ordinal_exclusive} → forkedFromId + forkedFromOrdinal (parent-numbered)', { forkedFromId: mC.forkedFromId, forkedFromOrdinal: mC.forkedFromOrdinal, historyMode: mC.historyMode });
 ok(mG.forkedFromId === C && mG.forkedFromOrdinal === 4, 'forked_from_ordinal_exclusive is read as the boundary too', { forkedFromId: mG.forkedFromId, forkedFromOrdinal: mG.forkedFromOrdinal });
@@ -109,6 +111,8 @@ ok(eC && eC.forkedFromId === P && eC.forkedFromOrdinal === 5 && eC.historyMode =
   // the wrapper chain still hides its superseded ids (zero behaviour change)
   const W = '01a07000-0000-7000-8000-000000000009';
   rollout(W, [line(0, 'session_meta', { id: W, cwd: '/w', forked_from: [S] }, 50), line(1, 'response_item', user('resumed incarnation'), 51)]);
+  // B-a60e remainder: the rollout(s) just written seen by the index (a hub's walk) before this thread's finder is asked
+  await CX.refreshCodexRolloutIndex();
   const l2 = ST.assembleCodexThreads(ST.collectCodexThreadMetas(), { activeSessions: new Map(), openThreadIds: new Set() }).map((e) => e.backendSessionId);
   ok(l2.includes(W) && !l2.includes(S), 'a wrapper forked_from chain still hides the superseded id (unchanged)', l2);
   fs.unlinkSync(fp(W));

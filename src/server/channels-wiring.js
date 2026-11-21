@@ -27,7 +27,7 @@ const SEARCH = require('./search-index.js');   // B-b291: the search index answe
 function livenessReader({ liveSessions = () => [], readUserState = () => ({}), convIndex = () => null, metaDir = null, transcriptDirs = null, findTranscript = null, transcriptIndex = null, now = () => Date.now() } = {}) {
   const fs = require('fs'), path = require('path'), os = require('os'), G = require('../channel-groups.js');
   const dirs = transcriptDirs || (() => [path.join(os.homedir(), '.claude', 'projects')]);
-  const found = findTranscript || ((cid) => !!(require('../session-store.js').findSessionJsonlPath(cid) || require('../adapters/codex.js').findCodexSessionJsonlPath(cid)));
+  const found = findTranscript || ((cid) => { if (require('../session-store.js').findSessionJsonlPath(cid)) return true; const cx = require('../adapters/codex.js').codexRolloutLookup(cid); return !!cx.fp || !cx.known; });   // B-a60e remainder: a codex rollout «not known yet» is never «gone» (this reader's rule for a store it cannot read)
   let archOf = null, archSet = null; // B-1319: the set is rebuilt only when the user state is (a write replaces the array) — once per member was 123 ms of the listen tick (6 291 archived)
   const archivedCids = () => { try { const st = readUserState() || {}; const arr = st.archivedSessions || []; if (arr === archOf && archSet) return archSet; archOf = arr; return (archSet = new Set(arr.map((k) => { const v = String(k); return v.includes(':') ? v.slice(v.indexOf(':') + 1) : v; }))); } catch { return new Set(); } };
   const transcriptOf = (cid) => { try { return !!found(cid); } catch { return true; } };
