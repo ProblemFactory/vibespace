@@ -38,6 +38,8 @@
 //   (f) red; the release's old whole-map walk → (g) red; cut 3c: cut 3b's road for a mass of touched rows (the fourth build
 //   in one turn) → (c5) red; a merge whose touched rows are not judged meanwhile → (c5) red; cut 3d: the merge asked only
 //   past the rebuild line (cut 3c's) → (c6) red; one budget for the touched-since and the pending rows (cut 3c's) → (c7) red.
+//   r829 (after cut 4): (h8) THE BOUND — the route's reader and a broadcast asked during a held warm-up answered at the bound,
+//       whole; (h9) a slice that throws — waiters released, a broadcast at once, the first read whole; three red controls.
 //   cut 3d: (c7) the turn's cap during a merge (more said, the three budgets held — a pending row served while the rows
 //       touched since spend theirs — nothing not due served; the waiting count printed) and a deletion (a whole touch) during a merge — rebuilt in slices, then the whole build's;
 //       (c5) now judges every phase of each merge and the landing, with a row touched again, one unlisted and one born.
@@ -747,6 +749,81 @@ const placeWarm = async (e) => { await e.store.index.update(() => { e.store.inde
   const EMt = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '    markDueTaps.add(tap);\n', '', 'the warm-up deaf to markDue'), 'warm-deaf');
   const rt = await warmLeg(EMt, 'stamp-red', { place: stampWarm, at: 'census' });
   ok(rt.warmed === true && rt.placed !== null && !rt.same, `(h7) RED CONTROL: the warm-up deaf to markDue — the landed census counts the stamped row as before the stamp: the digest is NOT the whole build's — the leg above would go red`, { stats: rt.stats });
+}
+
+// (h8) THE BOUND (r829): a warm-up HELD past the bound — the bound's passing PLACED through the engine's timer seam
+// (`walk.digestTimer`, as censusTimer: the leg fires it, never waits it out): the reader the route is answers at the bound
+// (digestReady() → false) and the digest it then reads is a whole build's; a broadcast asked meanwhile goes out AT the bound
+// (one), never only at the landing; the landing then sends none for asks already made. RED CONTROLS: the bound ignored (the
+// reader waits as long as the warm-up); a broadcast whose bound never arms (it waits for the landing)
+async function boundLeg(EM, tag, { only = null } = {}) {   // `only`: 'ready' / 'bcast' — a red control runs the half it proves
+  const bc = [], timers = [];
+  const turns = async (n = 5) => { for (let i = 0; i < n; i++) await new Promise((z) => setImmediate(z)); };
+  let release = null;
+  const gate = new Promise((r) => { release = r; });
+  const e = mkEng(EM, copyOf(TPL_D, `h8-${tag}`), { syncRows: 500, sliceMs: 0, digestTimer: (fn) => { const h = { fn, live: true }; timers.push(h); return { cancel: () => { h.live = false; } }; }, onSlice: async (i, what) => { if (what === 'row-facts' && i === 1) await gate; } }, quiet, null, (m) => bc.push(m));
+  const warm = e.digestWarm();
+  await turns();
+  if (only !== 'ready') e.notify(['m-1'], { full: false });   // the first deferred ask arms the broadcast's bound
+  let ready = 'waiting';
+  if (only !== 'bcast') e.digestReady().then((v) => { ready = v; });   // the route's reader: its bound armed
+  await turns();
+  const armed = timers.filter((h) => h.live).length;
+  for (const h of timers.splice(0)) if (h.live) h.fn();   // THE BOUND PASSES — placed
+  await turns();
+  const readyAtBound = ready;   // read NOW: the landing below would answer a waiter that ignored the bound
+  const sent = () => bc.filter((m) => m && m.type === 'channels-updated').length;
+  const before = sent();
+  const got = digestOf(e);
+  release();
+  await warm;
+  await turns();
+  const after = sent();
+  const stats = e.digestWarmStats();
+  e.stop();
+  const w = mkEng(ENG, copyOf(TPL_D, `h8-${tag}-whole`), { syncRows: 1e9 });
+  const whole = digestOf(w);
+  w.stop();
+  return { ready: readyAtBound, armed, before, after, same: got === whole, stats };
+}
+{
+  const r = await boundLeg(ENG, 'bound');
+  ok(r.armed === 2 && r.ready === false && r.before === 1 && r.after === 1 && r.same, `(h8) THE BOUND: the warm-up held, the bound's passing placed (${r.armed} timers armed: the route's reader's and the broadcast's) — the reader answered at it (${r.ready}), the digest it read is a whole build's; the broadcast asked meanwhile went out at it (${r.before}), none again at the landing (${r.after})`, r);
+  const EMr = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '    if (!Number.isFinite(boundMs)) return landed;', '    return landed;', 'the bound ignored'), 'bound-ignored');
+  const rr = await boundLeg(EMr, 'bound-red', { only: 'ready' });
+  ok(rr.ready === 'waiting', `(h8) RED CONTROL: the bound ignored — the reader still waits after the bound passed (${rr.ready}) — the leg above would go red`, rr);
+  const EMn = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '        job.boundTimer = digestTimer(() => {', '        job.boundTimer = ((f) => ({ cancel() {} }))(() => {', 'a broadcast whose bound never arms'), 'broadcast-unbound');
+  const rn = await boundLeg(EMn, 'bcast-red', { only: 'bcast' });
+  ok(rn.before === 0, `(h8) RED CONTROL: a broadcast whose bound never arms — it waits for the landing (${rn.before} at the bound) — the leg above would go red`, rn);
+}
+
+// (h9) A SLICE THAT THROWS (r829): the warm-up ends at its throw — every waiter released (digestReady resolves), a broadcast
+// asked after it goes out at once, the first read builds whole and answers a whole build's. RED CONTROL: the warm-up left in
+// place after its throw (the broadcast then waits forever)
+async function throwLeg(EM, tag) {
+  const bc = [];
+  const e = mkEng(EM, copyOf(TPL_D, `h9-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => { if (what === 'first-read' && i === 1) throw new Error('a slice that throws (placed)'); } }, quiet, null, (m) => bc.push(m));
+  const warmP = e.digestWarm();
+  const waiter = e.digestReady({ boundMs: Infinity });   // a reader that started BEFORE the throw (no bound: only the warm-up's end releases it)
+  const end = await warmP.then(() => 'landed', (x) => `threw: ${(x && x.message) || x}`);
+  const ready = await Promise.race([waiter, new Promise((z) => setTimeout(() => z('deadline'), 3000))]);
+  const n0 = bc.length;
+  e.notify([]);
+  await new Promise((z) => setTimeout(z, 50));
+  const sent = bc.filter((m) => m && m.type === 'channels-updated').length - bc.slice(0, n0).filter((m) => m && m.type === 'channels-updated').length;
+  const got = digestOf(e), stats = e.digestWarmStats();
+  e.stop();
+  const w = mkEng(ENG, copyOf(TPL_D, `h9-${tag}-whole`), { syncRows: 1e9 });
+  const whole = digestOf(w);
+  w.stop();
+  return { end, ready, sent, same: got === whole, stats };
+}
+{
+  const r = await throwLeg(ENG, 'throw');
+  ok(/^threw: a slice that throws/.test(r.end) && r.ready === true && r.sent === 1 && r.same && r.stats.sliced === 0, `(h9) A SLICE THAT THROWS: the warm-up ended at it (${r.end}) — its waiters released (${r.ready}), a broadcast after it went out at once (${r.sent}), the first read built whole: the digest a whole build's`, r);
+  const EMw = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '        if (digestWarm === job) digestWarm = null;', '        if (false) digestWarm = null;', 'the warm-up left in place after its throw'), 'warm-left');
+  const rw = await throwLeg(EMw, 'throw-red');
+  ok(rw.sent === 0, `(h9) RED CONTROL: the warm-up left in place after its throw — a broadcast after it waits (${rw.sent}) — the leg above would go red`, rw);
 }
 
 // (h6) AFTER THE WARM-UP, MANY ROWS AT ONCE: 300 rows touched between two digests (their order, their unread, their poll

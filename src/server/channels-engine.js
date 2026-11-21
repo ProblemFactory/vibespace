@@ -1342,7 +1342,9 @@ function create(deps = {}) {
         const budget = () => { let left = turnMax; return (k) => { if (cand.has(k)) return true; if (left <= 0) { out.more = true; return false; } cand.add(k); left--; return true; }; };
         const takeDirty = budget(), takePending = budget();
         // the rows touched since the merge began from a cursor that moves each turn (r764): a pass's 2000 stamps ahead of a row
-        // touched later never hold it to the landing; `dirty` only grows during a merge (its order is the touches' order)
+        // touched later never hold it to the landing; `dirty` only grows during a merge (its order is the touches' order). ITS
+        // BOUND (r829): a row appended while the set grows may wait up to one full cycle of the set (its size / turnMax turns) —
+        // never past the merge's landing (the landing hands every touched row to the next read's re-key)
         { const dn = ix.dirty.size, d0 = dn && Number.isFinite(turnMax) ? (job.dirtyCursor || 0) % dn : 0; let pos = 0, full = false;
           for (const k of ix.dirty) { if (pos++ < d0) continue; if (!takeDirty(k)) { full = true; break; } }
           if (!full && d0) { pos = 0; for (const k of ix.dirty) { if (pos++ >= d0) break; if (!takeDirty(k)) break; } }
@@ -4783,18 +4785,34 @@ function create(deps = {}) {
   // /api/channels awaits digestReady() (bounded); a broadcast asked meanwhile is made ONCE at the landing (the changed keys
   // merged); a synchronous digest() before the landing builds whole — the release's road, never a partial answer.
   const DIGEST_WARM_RESTARTS = 3;
-  const digestWarmStats = { sliced: 0, slices: 0, maxSliceMs: 0, walkMs: 0, restarts: 0, gaveUp: 0, deferred: 0, reread: 0, landMs: 0, notifyMs: 0 };   // landMs / notifyMs: the landing turn's own cost (its sorts; the deferred broadcast)
+  const digestWarmStats = { sliced: 0, slices: 0, maxSliceMs: 0, walkMs: 0, restarts: 0, gaveUp: 0, deferred: 0, reread: 0, landMs: 0, notifyMs: 0, boundPassed: 0 };   // landMs / notifyMs: the landing turn's own cost (its sorts; the deferred broadcast)
   let digestWarm = null;   // { touched: Set<key>, whole, promise, pending: {changed: Set, full} }
   store.index.onTouch((k) => { if (!digestWarm) return; if (k === null) digestWarm.whole = true; else digestWarm.touched.add(String(k)); });
   /** Resolves when the first digest's indexes are warm (at once when no warm-up runs). */
-  const digestReady = () => (digestWarm ? digestWarm.promise.then(() => true, () => true) : Promise.resolve(true));
+  // r829 (1): ONE BOUND for every reader that waits on it — GET /api/channels (digestReady's `boundMs`) and a broadcast asked
+  // meanwhile (made at the bound, whole, if the landing has not come): DIGEST_WAIT_MS (a suite's `walk.digestWaitMs`)
+  const DIGEST_WAIT_MS = (walk && Number.isFinite(walk.digestWaitMs)) ? walk.digestWaitMs : 5000;
+  // the bound's TIMER (a suite's `walk.digestTimer(fn, ms) → {cancel}`, as censusTimer: a leg PLACES the bound's passing, never
+  // waits it out on the wall clock); the default an unref'd setTimeout
+  const digestTimer = (walk && typeof walk.digestTimer === 'function') ? walk.digestTimer : (fn, ms) => { const tm = setTimeout(fn, ms); if (tm.unref) tm.unref(); return { cancel: () => clearTimeout(tm) }; };
+  /** Resolves true when the first digest's indexes are warm (at once when no warm-up runs), false at `boundMs` (the reader
+   *  then builds whole — the release's road, never a partial answer). */
+  const digestReady = ({ boundMs = null } = {}) => {
+    if (!digestWarm) return Promise.resolve(true);
+    if (digestWarm.boundPassed) return Promise.resolve(false);   // the bound has passed: the readers build whole now
+    const landed = digestWarm.promise.then(() => true, () => true);
+    if (boundMs === null) boundMs = Math.max(0, digestWarm.startedAt + DIGEST_WAIT_MS - Date.now());   // ONE deadline: the warm-up's start + the bound
+    if (!Number.isFinite(boundMs)) return landed;
+    let tm = null;
+    return Promise.race([landed, new Promise((r) => { tm = digestTimer(() => r(false), boundMs); })]).finally(() => { if (tm) tm.cancel(); });
+  };
   function digestWarmStart({ syncRows = WALK.syncRows, sliceMs = WALK.sliceMs, onSlice = WALK.onSlice } = {}) {
     if (digestWarm) return digestWarm.promise;
     let n = 0; for (const k in store.index.rows()) if (++n > syncRows) break;
     if (n <= syncRows) return Promise.resolve(false);   // a small index: its first read builds in its own turn, as before
-    const job = { touched: new Set(), whole: false, pending: null, promise: null };
+    const job = { touched: new Set(), dueOnly: new Set(), whole: false, pending: null, promise: null, boundTimer: null, boundPassed: false, startedAt: Date.now() };
     digestWarm = job;
-    const tap = (k) => { if (digestWarm !== job) return; if (k === null) job.whole = true; else job.touched.add(k); };
+    const tap = (k) => { if (digestWarm !== job) return; if (k === null) job.whole = true; else job.dueOnly.add(k); };   // r829 (2): the census's alone (a stamp, a watch: nothing the row facts or the first read reads)
     markDueTaps.add(tap);
     job.promise = (async () => {
       try {
@@ -4802,7 +4820,7 @@ function create(deps = {}) {
         for (let attempt = 0; ; attempt++) {
           if (stopped || digestWarm !== job) return false;
           if (attempt >= DIGEST_WARM_RESTARTS) { digestWarmStats.gaveUp++; log.warn(`[channels] the first digest's warm-up was started again ${attempt} times by whole-map writes — the first read builds its indexes whole`); return false; }
-          job.whole = false; job.touched = new Set();
+          job.whole = false; job.touched = new Set(); job.dueOnly = new Set();   // each attempt walks a fresh snapshot
           const t0 = now(), ctx = viewCtx(t0), T = tiers();
           const rows = store.index.rows(), keys = Object.keys(rows);
           const alive = () => !stopped && digestWarm === job && !job.whole;
@@ -4813,20 +4831,17 @@ function create(deps = {}) {
           // (2) the first read's kept facts (firstFacts' build)
           const fk2 = { facts: new Set(), heads: new Map(), at: new Map(), odd: new Set() };
           if (done) done = (await walkSliced(keys, (mk) => fkPlace(fk2, mk, rows[mk], ctx, t0), opts('first-read'))).done;
-          // (3) each account's census index (clockIndexed's build), the account's own keys
-          const cxs = new Map();
-          for (const rec of adapterRecords().adapters) {
-            if (!done) break;
-            const lane = laneOrScan(rec, {});
-            const cx = { sig: censusSig(T, lane), t: t0, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false };
-            done = (await walkSliced(store.index.keysOf(rec.id), (k) => censusAdd(rec, cx, rows[k], t0, T), opts('census'))).done;
-            if (done) cxs.set(rec.id, cx);
-          }
+          // (3) each account's census index (clockIndexed's build): ONE walk over this attempt's own snapshot, each row to its
+          // account's index (the round wv9avukxt (15) + its fresh read: never the store's keysOf — before its per-account keys
+          // land, or after a whole touch voided them, a synchronous keysOf builds every account's keys in its own turn)
+          const cxs = new Map(), recOf = new Map();
+          if (done) for (const rec of adapterRecords().adapters) { const lane = laneOrScan(rec, {}); cxs.set(rec.id, { sig: censusSig(T, lane), t: t0, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false }); recOf.set(rec.id, rec); }
+          if (done) done = (await walkSliced(keys, (k) => { const en = rows[k]; const cx = en && cxs.get(en.adapterId); if (cx) censusAdd(recOf.get(en.adapterId), cx, en, t0, T); }, opts('census'))).done;
           if (!done) { if (stopped || digestWarm !== job) return false; digestWarmStats.restarts++; continue; }   // a whole touch: AGAIN
           // THE LANDING, one turn: each index installed unless a reader built it whole meanwhile; the rows touched since the
           // snapshot are each index's dirty rows (re-read at its first read)
-          const l0 = Date.now(), touched = job.touched;
-          digestWarmStats.reread += touched.size;
+          const l0 = Date.now(), touched = job.touched, dueOnly = job.dueOnly;
+          digestWarmStats.reread += touched.size + [...dueOnly].filter((k) => !touched.has(k)).length;
           if (rowKept.stale === null) { rowKept.rows = rf; rowKept.by = by; rowKept.at = t0; rowKept.stale = new Set(touched); }
           if (!firstKept.built) {
             for (const arr of fk2.heads.values()) arr.sort(headCmp);
@@ -4839,6 +4854,7 @@ function create(deps = {}) {
             if (cur && !cur.stale) continue;   // a reader built it meanwhile
             cx.order.sort(Census.untilCmp);
             for (const k of touched) if (k.startsWith(id + '/')) cx.dirty.add(k);
+            for (const k of dueOnly) if (k.startsWith(id + '/')) cx.dirty.add(k);   // r829 (2): the due signals — the census's alone
             censusIx.set(id, cx); censusIxStats.builds++;
           }
           digestWarmStats.sliced++; digestWarmStats.walkMs = Date.now() - w0; digestWarmStats.landMs = Date.now() - l0;
@@ -4846,6 +4862,7 @@ function create(deps = {}) {
         }
       } finally {
         markDueTaps.delete(tap);
+        if (job.boundTimer) { job.boundTimer.cancel(); job.boundTimer = null; }
         if (digestWarm === job) digestWarm = null;
         const p = job.pending; job.pending = null;
         if (p && !stopped) { const n0 = Date.now(); notify([...p.changed], { full: p.full ? true : (p.asked || !p.changed.size ? null : false) }); digestWarmStats.notifyMs = Date.now() - n0; }   // the broadcasts asked meanwhile: ONE, now
@@ -4856,7 +4873,11 @@ function create(deps = {}) {
   function notify(changed = [], { full = null, extra = null } = {}) {
     // B-dfa4 cut 4: during the first digest's warm-up a broadcast waits for its landing (merged: the changed keys, full if any
     // asked full) — never a whole build of its indexes in this turn; one carrying side patches (`extra`) goes now
-    if (digestWarm && !extra) {
+    if (digestWarm && !extra && !digestWarm.boundPassed) {
+      if (!digestWarm.pending) {   // r829 (1): the first deferred ask arms the bound — past it the asks go out now (whole), the rest unwaited
+        const job = digestWarm;
+        job.boundTimer = digestTimer(() => { if (digestWarm !== job) return; job.boundPassed = true; digestWarmStats.boundPassed++; const q = job.pending; job.pending = null; if (q && !stopped) notify([...q.changed], { full: q.full ? true : (q.asked || !q.changed.size ? null : false) }); }, Math.max(0, job.startedAt + DIGEST_WAIT_MS - Date.now()));
+      }
       const p = digestWarm.pending || (digestWarm.pending = { changed: new Set(), full: false, asked: false });
       for (const c of Array.isArray(changed) ? changed : []) if (c) p.changed.add(String(c));
       if (full === true || (full === null && !(Array.isArray(changed) && changed.length))) p.full = true;
@@ -10752,7 +10773,7 @@ function create(deps = {}) {
     // suite drives it by hand — it also runs in `start()`)
     releaseStaleReservations, capZeroDigests,
     bootSweep, bootSweepStats: () => ({ ...bootSweepStats }), rejudgeConvCaps, rejudgeStats: () => ({ ...rejudgeStats }),   // B-dfa4 cut 3: the boot's one sweep (its legs: parity, a write between two slices)
-    digestReady, digestWarm: digestWarmStart, digestWarmStats: () => ({ ...digestWarmStats }),   // B-dfa4 cut 4: the first digest's warm-up (its legs: test-sliced-walk (h))
+    digestReady, digestWaitMs: DIGEST_WAIT_MS, digestWarm: digestWarmStart, digestWarmStats: () => ({ ...digestWarmStats }),   // B-dfa4 cut 4: the first digest's warm-up (its legs: test-sliced-walk (h))
     pendingWindows: () => [...wakeTimers.entries()].map(([k, w]) => { const i = k.lastIndexOf('|'); return { key: i > 0 ? k.slice(0, i) : k, principal: i > 0 ? k.slice(i + 1) : null, kind: w.kind, startedAt: w.startedAt }; }),
     REQUESTS_PER_MINUTE, RECONCILE_SECONDS, PAGE, MAX_PAGES, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PENDING_CAP, ESTIMATE_CAP,
     DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS,

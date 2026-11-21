@@ -747,8 +747,8 @@ router.post('/api/channels/decision/learn', async (req, res) => {
  *  lists through /api/agent/channels (its reach), never this. */
 const CHANNELS_LIST_IS_OWNERS = 'the channels list is the owner\'s — an agent lists conversations through vibespace-channels';
 // B-dfa4 cut 4: the first read after a boot WAITS for the digest's warm-up (its indexes built in slices), at most
-// DIGEST_WAIT_MS — then reads (a digest past the bound builds whole, the release's road)
-const DIGEST_WAIT_MS = 5000;
+// the engine's bound (r829: one bound for the route and a deferred broadcast — the engine's DIGEST_WAIT_MS) — then reads (a
+// digest past the bound builds whole, the release's road)
 router.get('/api/channels', async (req, res) => {
   try {
     forHost(req);
@@ -756,7 +756,7 @@ router.get('/api/channels', async (req, res) => {
     const scope = req.query.scope == null || req.query.scope === '' ? 'first' : String(req.query.scope);
     if (!['first', 'accounts', 'totals'].includes(scope)) return bad(res, 400, 'scope must be first, accounts or totals', { code: 'bad-request' });
     const eng = engine();
-    if (typeof eng.digestReady === 'function') { let tm = null; await Promise.race([eng.digestReady(), new Promise((r) => { tm = setTimeout(r, DIGEST_WAIT_MS); })]); clearTimeout(tm); }
+    if (typeof eng.digestReady === 'function') await eng.digestReady();   // the engine's one deadline (the warm-up's start + its bound)
     res.json(eng.digest({ scope }));
   } catch (e) { fail(res, e); }
 });
