@@ -122,6 +122,12 @@ ok(/Re-authorize/.test(SR.statusText({ state: 'refused', code: 'needs-scope' }))
   const late = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3 }), lateLook = get(s, { query: 'budget plan', now: T0 + 365 * 86400e3, look: true });
   const back1 = get(s, { query: 'budget plan', now: T0 - 1000 });
   ok(SR.SEARCH_MEMO_LIFE_MS === 10 * 60e3 && L10.answer && L10.answer.ageMs === SR.SEARCH_MEMO_LIFE_MS && L10.answer.lifeMs === SR.SEARCH_MEMO_LIFE_MS && !L10.answer.past && L11.answer === null && late.answer === null && back1.answer === null, 'memo (B-5b32): an ask is answered only inside the life — at 10 min yes; at 11 min, a year later, or with the clock gone back past the answer: null (the account is asked again)', JSON.stringify({ L10: L10.answer && L10.answer.ageMs, L11: !!L11.answer, late: !!late.answer, back1: !!back1.answer }));
+  // B-5b32 follow (r1115): a LOOK prefers the YOUNGEST page among its scopes (the agent's page first in the order, a fresher
+  // whole-view page under 'all'); an ASK keeps the caller's order
+  const yo = SR.searchMemo(put(undefined, { scope: 'set:1:ab', query: 'youngest', now: T0, next: null }).state, { op: 'put', scope: 'all', query: 'youngest', page: null, now: T0 + 5000, hits: [], next: null }).state;
+  const yLook = get(yo, { query: 'youngest', scopes: ['set:1:ab', 'all'], now: T0 + 60000, look: true }).answer, yAsk = get(yo, { query: 'youngest', scopes: ['set:1:ab', 'all'], now: T0 + 60000 }).answer;
+  const yTie = get(put(put(undefined, { scope: 'set:1:ab', query: 'tie', next: null }).state, { scope: 'all', query: 'tie', next: null }).state, { query: 'tie', scopes: ['set:1:ab', 'all'], look: true }).answer;
+  ok(yLook && yLook.scope === 'all' && yLook.ageMs === 55000 && yAsk && yAsk.scope === 'set:1:ab' && yTie && yTie.scope === 'set:1:ab', 'memo (B-5b32 follow): a LOOK shows the youngest page among its scopes (the whole view\'s, 55 s, over the agent\'s, 60 s); an ASK keeps the caller\'s order; a tie keeps the first', JSON.stringify({ look: yLook && yLook.scope, ask: yAsk && yAsk.scope, tie: yTie && yTie.scope }));
   ok(lateLook.answer && lateLook.answer.past === true && lateLook.answer.ageMs === 365 * 86400e3 && lateLook.state.entries.size === 2 && late.state.entries.size === 2, 'memo (B-5b32 + lane search-card-open): a LOOK still reads a page past its life, with its true age and `past` — no age drops an entry', JSON.stringify(lateLook.answer && { past: lateLook.answer.past, ageMs: lateLook.answer.ageMs }));
   s = SR.searchMemo(s, { op: 'put', scope: 'all', query: 'budget plan', page: 'p:10', now: T0 + 60000, hits: [{ convId: 'c', vendorId: 'w', at: 0 }], next: null }).state;
   const pg = get(s, { query: 'budget plan', page: 'p:10', now: T0 + 61000 });
@@ -542,6 +548,9 @@ const lifeLegs = async (name, ENGmod) => {
   const PL = patched('src/channel-search.js', 'if (past && !ev.look) continue;', 'if (false) continue;', 'pure-no-life');
   const pl = PL.searchMemo(undefined, { op: 'put', scope: 'all', query: 'q', page: null, now: 1e6, hits: [], next: null }).state;
   const plGet = (M, st) => M.searchMemo(st, { op: 'get', scopes: ['all'], query: 'q', page: null, now: 1e6 + 11 * 60e3 }).answer;
+  const PY = patched('src/channel-search.js', '(ev.look && Number(x.askedAt) > Number(best.x.askedAt))', 'false', 'look-first-scope');
+  const pyS = PY.searchMemo(PY.searchMemo(undefined, { op: 'put', scope: 'set:1:ab', query: 'y', page: null, now: 1e6, hits: [], next: null }).state, { op: 'put', scope: 'all', query: 'y', page: null, now: 1e6 + 5000, hits: [], next: null }).state;
+  ok(PY.searchMemo(pyS, { op: 'get', scopes: ['set:1:ab', 'all'], query: 'y', page: null, now: 1e6 + 60000, look: true }).answer.scope === 'set:1:ab', 'CONTROL: a look that takes the first scope shows the agent\'s older page over the fresher whole-view one — the youngest leg would be RED');
   ok(plGet(PL, pl) && plGet(SR, SR.searchMemo(undefined, { op: 'put', scope: 'all', query: 'q', page: null, now: 1e6, hits: [], next: null }).state) === null, 'CONTROL: the memo without its life row answers an 11-minute ask — the PURE leg would be RED');
 }
 

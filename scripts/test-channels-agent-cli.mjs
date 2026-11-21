@@ -927,6 +927,13 @@ console.log('\n㉒ lane channels-search-says-hidden: --full prints the saved hit
   clock += 11 * 60e3;
   const f5 = await run(['search', 'quarterly', '--full', '--account', A]);
   ok(f4.code === 0 && /^\(the account's own search answered these less than a minute ago — remembered for 10 min, not asked again until then\)$/m.test(f4.out) && f5.code === 0 && !/answered these/.test(f5.out) && /^\(asked the account's own search/m.test(f5.out) && /\(not saved here\): .*[Qq]uarterly/.test(f5.out), 'B-5b32: --full inside the life prints the remembered note with its true age and the life the hub sent; 11 minutes later the account is asked again', JSON.stringify([f4.out, f5.out]));
+  // …and the life it words is the REPLY's: an answer that says 300 s prints «5 min» (a literal «10 min» typed back is RED here)
+  clock += 21000;
+  const realAnswer = searchAnswer;
+  searchAnswer = async (url) => { const a = await realAnswer(url); if (a && a.remembered) a.remembered.lifeSec = 300; return a; };
+  const f6 = await run(['search', 'quarterly', '--full', '--account', A]);
+  searchAnswer = realAnswer;
+  ok(f6.code === 0 && /^\(the account's own search answered these less than a minute ago — remembered for 5 min, not asked again until then\)$/m.test(f6.out), 'B-5b32 follow: the note\'s life is the one the reply states (300 s ⇒ «5 min»), never a literal', f6.out);
   // CONTROL: the base's --full — no plain search first — prints no saved hit for the words the plain search finds
   const CLI_SRC = fs.readFileSync(CLI, 'utf-8');
   const PLAIN = "    const r = await call('GET', '/api/agent/channels/search?' + qs);\n";

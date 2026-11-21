@@ -10590,6 +10590,8 @@ Found by reading during the 2.369.412 release red of test-internal-links-chrome 
   - Past it, or with the clock gone back past that instant, the scope is passed, so the caller's own ask reaches the account again under today's table. Nothing is asked by a timer.
   - A LOOK (the dialog opening, which never asks) still reads an older page, with its true age and `past`.
   - The agent's answer carries `remembered: {ageSec, lifeSec}`, and the CLI's note states both from it, never from a literal.
+  - A LOOK that may read several scopes shows the YOUNGEST page among them; an ask keeps the caller's order (the follow, r1115).
+  - LEFT AS IT IS, by the round's word: an ask past the life that is refused or fails shows the refusal alone (the press: «waits N s» / «did not answer — the saved results are shown»; the agent: the named error). The old page stays in the memo for a look and is never offered beside the refusal.
 - **不变量** = a remembered vendor answer is served to an ask only inside the life it states, counted from the vendor's answer. The words about a memory's life are read from the code that enforces it.
 - **Gates.**
   - test-channel-search:

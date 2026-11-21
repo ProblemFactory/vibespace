@@ -7648,7 +7648,8 @@ function create(deps = {}) {
    * and FANNED per conversation (+ 'all' when an agent's scope `covers` the account); a press, a reopen (`peek`) or an
    * agent's repeat (it reads the owner's 'all' first, then its own conversation set's) is answered from it — 0 vendor
    * calls, no floor stamped, `memo: {askedAt, ageMs, by}` said. The OWNER reads `memoScopes` (the card's exact agent
-   * scope, then 'all', then the dialog's conversation); an answer from any scope but his own 'all' carries no page
+   * scope, then 'all', then the dialog's conversation; its look takes the youngest of them, B-5b32); an answer from any
+   * scope but the owner's own 'all' carries no page
    * token (it belongs to the searcher who asked). `again` (the owner's "Search again", a press) forgets every scope it
    * would read, then asks under today's table. `peek` with nothing remembered asks nothing (`unasked`). A refusal, a
    * failure or a partial answer is never remembered.

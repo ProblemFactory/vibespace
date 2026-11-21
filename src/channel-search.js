@@ -213,7 +213,8 @@ function unshownOf(v) {
  *   { op: 'get', scopes, query, page, now, look }  → answer `{ scope, askedAt, ageMs, lifeMs, past?, hits, next, by, derived,
  *        unshown }` of the first scope holding an entry with that page (a hit moves it to the newest); none ⇒ null.
  *        B-5b32: for an ask, an entry outside its life (older than SEARCH_MEMO_LIFE_MS, or answered after `now`) is passed;
- *        `look: true` reads it (`past: true`). No age drops an entry.
+ *        `look: true` reads it (`past: true`), and takes the YOUNGEST page among the scopes (the first on a tie; r1115).
+ *        No age drops an entry.
  *   { op: 'put', scope, query, page, now, hits, next, by, covers, unshown } → page null: the entry (re)born; a token: appended to
  *        the entry whose last page's `next` is that token (else nothing). Then THE FAN (above). An entry over the byte
  *        cap is not kept; the oldest leave first past SEARCH_MEMO_MAX entries or SEARCH_MEMO_BYTES (the one just put
@@ -230,6 +231,7 @@ function searchMemo(state, ev = {}) {
   const page = ev.page === null || ev.page === undefined || ev.page === '' ? null : String(ev.page);
   const by = ev.by === 'agent' ? 'agent' : 'owner';
   if (ev.op === 'get') {
+    let best = null;
     for (const scope of Array.isArray(ev.scopes) && ev.scopes.length ? ev.scopes : [MEMO_ALL]) {
       const k = memoKey(scope, ev.query), x = entries.get(k);
       if (!x) continue;
@@ -237,6 +239,13 @@ function searchMemo(state, ev = {}) {
       if (!p) continue;
       const age = now - Number(x.askedAt), past = !(age >= 0 && age <= SEARCH_MEMO_LIFE_MS);   // B-5b32: NaN or a clock gone back = outside
       if (past && !ev.look) continue;   // B-5b32: an ask past the life is not answered from memory — the account is asked again
+      // B-5b32 follow (r1115): an ASK takes the first scope in the caller's order; a LOOK takes the YOUNGEST page among
+      // the scopes it may read (the first on a tie), so a dialog opened from an agent's row shows a fresher whole-view page
+      if (!best || (ev.look && Number(x.askedAt) > Number(best.x.askedAt))) best = { scope, k, x, p, age, past };
+      if (!ev.look) break;
+    }
+    if (best) {
+      const { scope, k, x, p, age, past } = best;
       entries.delete(k); entries.set(k, x);
       return done({ scope: scope || MEMO_ALL, askedAt: x.askedAt, ageMs: Math.max(0, age) || 0, lifeMs: SEARCH_MEMO_LIFE_MS, ...(past ? { past: true } : {}), hits: p.hits, next: p.next, by: x.by || 'owner', derived: !!x.from, unshown: unshownOf(p.unshown) });
     }
