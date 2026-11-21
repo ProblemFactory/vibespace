@@ -304,7 +304,8 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const sentWs = [], attrib = [], sent = [];
     const wsClients = new Set(); for (let i = 0; i < clients; i++) wsClients.add({ readyState: 1, send: (x) => sentWs.push(JSON.parse(x)) });
     let arRef = null;
-    const stubAr = { armIfEnabled: (sid, s2, until, why) => arms.push({ sid, until, why }), noteRecovered() { }, noteFireOutcome() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } };
+    const recovered = [];   // B-87fd: the idle-wake feed an unknown holder's fresh reading still reaches
+    const stubAr = { armIfEnabled: (sid, s2, until, why) => arms.push({ sid, until, why }), noteRecovered: (id, why) => recovered.push({ id, why }), noteFireOutcome() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } };
     const todos = { add: (key, item) => { const it = { id: 'ut-' + (inbox.length + 1), key, status: 'open', ...item }; inbox.push(it); return it; }, snapshot: () => ({ open: inbox.filter((x) => x.status === 'open'), resolved: [] }), setStatus: (id, st, by) => { const it = inbox.find((x) => x.id === id); if (it) { it.status = st; it.resolvedBy = by; } return it; } };
     const deps = {
       app, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
@@ -377,7 +378,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const charges = () => { const id = eng.spendGuard.snapshot().budget.identities || {}; return { A: (id[A] || []).length, B: (id[B] || []).length }; };
     const reading = (s = s1, usedPct = 60, resetsAt = nowS + 3 * 86400) => eng.recordCodexQuotaSignal(s, { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: usedPct, window_minutes: 10080, resets_at: resetsAt }, secondary: null } });
     const cacheOf = (k) => { try { return JSON.parse(fs.readFileSync(path.join(cacheDir, k + '.json'), 'utf8')); } catch { return null; } };
-    return { root, wam, eng, newEngine, ar: arRef, P, A, B, s1, ss, mk, wall, reading, verbs, charges, notices, inbox, cards, arms, sentWs, attrib, sent, cacheOf, current: () => wam.poolCurrent(P), settings, cacheDir, nowS, sessions };
+    return { root, wam, eng, newEngine, ar: arRef, P, A, B, s1, ss, mk, wall, reading, verbs, charges, notices, inbox, cards, arms, recovered, sentWs, attrib, sent, cacheOf, current: () => wam.poolCurrent(P), settings, cacheDir, nowS, sessions };
   };
   const quietly = (fn) => { const o = console.log, w = console.warn; const lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' ')); try { fn(); } finally { console.log = o; console.warn = w; } return lines; };
 
@@ -1048,27 +1049,103 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     const wu = world({ mode: 'off', held: 'unknown' });
     const snapOf = (w) => JSON.stringify([w.cacheOf(w.A), w.cacheOf(w.B), w.cacheOf(w.P)]);
     const before = snapOf(wu);
+    const wakesOf = (w, s) => w.recovered.filter((x) => x.id === s._webuiId && x.why === 'fresh non-limited codex reading').length;
+    const wakeBefore = wakesOf(wu, wu.s1);
     const l1 = quietly(() => wu.reading(wu.s1, 88));
     const l2 = quietly(() => wu.reading(wu.s1, 91));
-    const said = (ls) => ls.filter((x) => /filed nowhere — this process's held member cannot be named/.test(x));
+    const said = (ls) => ls.filter((x) => /filed nowhere \(\d+ so far\) — this process's held member cannot be named/.test(x));
     console.log(`  · the journal said: ${said(l1).concat(said(l2)).join(' | ') || '(nothing)'}`);
     ok('B-87fd an UNKNOWN holder\'s readings (88 %, then 91 %) are filed NOWHERE — A\'s, B\'s and the pool\'s files unchanged',
       snapOf(wu) === before && Math.round(wu.cacheOf(wu.A)?.sevenDay?.usedPercent) !== 88 && Math.round(wu.cacheOf(wu.A)?.sevenDay?.usedPercent) !== 91, JSON.stringify({ A: wu.cacheOf(wu.A)?.sevenDay?.usedPercent, B: wu.cacheOf(wu.B)?.sevenDay?.usedPercent, P: !!wu.cacheOf(wu.P) }));
-    ok('B-87fd …said ONCE per conversation in the journal (the first reading only)', said(l1).length === 1 && said(l2).length === 0, JSON.stringify({ first: said(l1).length, second: said(l2).length }));
+    ok('B-87fd …said with its COUNT at the 1st, 10th, 100th … dropped reading (the first here: «1 so far»; the second silent)', said(l1).length === 1 && /\(1 so far\)/.test(said(l1)[0]) && said(l2).length === 0, JSON.stringify({ first: said(l1), second: said(l2).length }));
     const seenBefore = JSON.stringify(wu.s1._resetCreditsSeen || null);
     quietly(() => wu.eng.recordCodexQuotaSignal(wu.s1, { type: 'rate_limits_updated', resetCredits: { availableCount: 7 }, rateLimits: { primary: { used_percent: 40, window_minutes: 10080, resets_at: wu.nowS + 3 * 86400 }, secondary: null } }));
     ok('B-87fd …and its credit count (7) is counted for NO member — the conversation\'s seen count stays the one a named read keyed',
       JSON.stringify(wu.s1._resetCreditsSeen || null) === seenBefore && !(wu.s1._resetCreditsSeen && wu.s1._resetCreditsSeen.count === 7), JSON.stringify({ before: seenBefore, now: wu.s1._resetCreditsSeen }));
-    const lw = quietly(() => wu.wall());
-    ok('B-87fd …a WALL (the limit banner, a refusal) keeps its own road: never «filed nowhere»', !lw.some((x) => /codex:limit-banner reading is filed nowhere/.test(x)), lw.filter((x) => /filed nowhere|\[wall\]/.test(x)).join(' | ').slice(0, 300));
+    // the idle wake: an unknown holder's fresh, non-limited reading still judges its OWN conversation's wait (the feed is reached —
+    // through the codex producer's ONE call of the shared edge, the filed road's own)
+    const wakeAfter = wakesOf(wu, wu.s1);
+    ok('B-87fd …its fresh, non-limited readings (88, 91, the credits push) still feed the conversation\'s own idle wake, once each — through the producer\'s one edge call (never a member\'s file)',
+      wakeAfter - wakeBefore === 3, JSON.stringify({ before: wakeBefore, after: wakeAfter }));
+    const preWake = patchedEngine('unknownNoWake', [["if (sig.kind !== 'exhausted' && w.snap) { try { codexReadingEdge(); } catch { } }", 'void 0;']]);
+    ok('B-87fd NEGATIVE CONTROL (the idle wake): the patch hit the product source', !!preWake);
+    if (preWake) {
+      const wn = world({ mode: 'off', held: 'unknown', engineModule: preWake });
+      const n0 = wakesOf(wn, wn.s1);
+      quietly(() => wn.reading(wn.s1, 88));
+      ok('B-87fd NEGATIVE CONTROL: without the feed the unknown holder\'s reading wakes nothing — the leg sees it', wakesOf(wn, wn.s1) === n0, String(wakesOf(wn, wn.s1) - n0));
+    }
+    // a person's refresh on such a conversation: refused by its OWN name before any read (never «archived»)
+    wu.s1.pty = { write() { } };
+    let rr = null; try { rr = await wu.eng.refreshCodexForPerson({ sessionId: wu.s1._webuiId, timeoutMs: 500 }); } catch (e) { rr = { threw: e.message }; }
+    // …and its ROUTE answers that refusal as a state the person can change (409, the no_live_session family), never a 400 bad request
+    const { registerResetCreditRoutes } = require(path.join(REPO, 'src/routes/reset-credit.js'));
+    const routeRes = await new Promise((resolve) => {
+      const routes = {};
+      registerResetCreditRoutes({ get() { }, post: (p, h) => { routes[p] = h; } }, { engine: wu.eng });
+      const res = { code: 200, body: null, status(c) { this.code = c; return this; }, json(o) { this.body = o; resolve(this); return this; } };
+      routes['/api/usage/codex-refresh']({ body: { sessionId: wu.s1._webuiId }, headers: {} }, res);
+    });
+    // …and a ⟳ by the member's KEY never takes it as the carrier (its answer would be filed nowhere): no live session to ask
+    const byKey = async (eng) => { try { return await eng.refreshCodexForPerson({ key: wu.A, timeoutMs: 500 }); } catch (e) { return { threw: e.message }; } };
+    const rk = await byKey(wu.eng);
+    delete wu.s1.pty;
+    ok('B-87fd …a ⟳ by the member\'s KEY never takes the unknown holder as its carrier (no_live_session, nothing read)', !!rk && rk.code === 'no_live_session', JSON.stringify(rk));
+    const preCarrier = patchedEngine('unknownCarrier', [["  const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host && !heldPoolUnknown(s));", "  const live = (s) => !!(s && s.pty && liveReadSource(s.backend) && s.mode === 'chat' && !s.host);"]]); // stale-pins: kept — the RED plants the release's carrier test without the skip
+    ok('B-87fd NEGATIVE CONTROL (the carrier): the patch hit the product source', !!preCarrier);
+    if (preCarrier) {
+      const wc = world({ mode: 'off', held: 'unknown', engineModule: preCarrier });
+      wc.s1.pty = { write() { } };
+      const rc = await (async () => { try { return await wc.eng.refreshCodexForPerson({ key: wc.A, timeoutMs: 500 }); } catch (e) { return { threw: e.message }; } })();
+      delete wc.s1.pty;
+      ok('B-87fd NEGATIVE CONTROL: without the skip the unknown holder IS taken as the carrier (a read is spent on it) — the leg sees it', !!rc && rc.code !== 'no_live_session', JSON.stringify(rc));
+    }
+    ok('B-87fd …a person\'s ⟳ on that conversation is refused by its own name — holder_unknown, before any read (never «archived»)', !!rr && rr.ok === false && rr.code === 'holder_unknown', JSON.stringify(rr));
+    ok('B-87fd …and the ⟳ ROUTE answers it 409 holder_unknown (like no_live_session), never a 400', routeRes.code === 409 && !!routeRes.body && routeRes.body.code === 'holder_unknown', JSON.stringify({ code: routeRes.code, body: routeRes.body }));
+    // THE ROUND'S SCENE (wr6849r96, the MUST): a REFUSAL keeps the release's road WHOLE — the member the request went out on. The
+    // unknown holder sends while the default is A; ANOTHER conversation's wall moves the default to B; then this one's turn fails on
+    // its limit: the wall marks A (where its request went), never healthy B; an EXHAUSTED push of it before that signals nothing
+    const wallScene = (engineModule = engMod) => {
+      const w2 = world({ mode: 'off', sessions: 2, held: 'unknown', engineModule });
+      const [sA, sOther] = w2.ss;
+      sA._lastRequestOutAt = Date.now() - 50;   // its request went out on A
+      spin();
+      quietly(() => w2.wall(sOther));          // another conversation's wall: the default moves A → B
+      spin();
+      const movedTo = w2.current();
+      const bBefore = JSON.stringify(w2.cacheOf(w2.B));
+      const wakeBeforePush = wakesOf(w2, sA);
+      // an EXHAUSTED push by the harness's own rule: the window the reply names as reached (rate_limit_reached_type) — a 100 % reading
+      // without that marker is an ordinary reading (codex-quota trippedWindow)
+      const exhausted = quietly(() => w2.eng.recordCodexQuotaSignal(sA, { type: 'rate_limits_updated', rateLimits: { primary: { used_percent: 100, window_minutes: 10080, resets_at: w2.nowS + 3 * 86400 }, secondary: null, rate_limit_reached_type: 'primary' } }));
+      const bAfterPush = JSON.stringify(w2.cacheOf(w2.B));
+      const pushWoke = wakesOf(w2, sA) - wakeBeforePush;
+      const t0 = Date.now();
+      const lw = quietly(() => w2.wall(sA));
+      // the wall SIGNAL's own key: noteWallSignal rings the account it names (noteWallOnAccount — the turn's own signal list dies
+      // at the turn end the banner closes with)
+      const sigOn = (k) => ((w2.eng._wallRing && w2.eng._wallRing.get(k)) || []).some((e) => e.sid === sA._webuiId && e.at >= t0);
+      return { w2, movedTo, bBefore, bAfterPush, pushWoke, bAfter: JSON.stringify(w2.cacheOf(w2.B)), aCache: w2.cacheOf(w2.A), exhausted, lw, sigOnA: sigOn(w2.A), sigOnB: sigOn(w2.B) };
+    };
+    const sc = wallScene();
+    console.log(`  · the wall scene: default ${sc.movedTo === sc.w2.B ? 'B' : sc.movedTo === sc.w2.A ? 'A' : '?'} after the other's wall; the push said «${(sc.exhausted.find((x) => /filed nowhere/.test(x)) || '').slice(0, 90)}»; the wall's lines: ${sc.lw.filter((x) => /\[wall\]|\[pool\]/.test(x)).join(' | ').slice(0, 240)}`);
+    ok('B-87fd THE ROUND\'S SCENE: another conversation\'s wall moved the default to B (the premise)', sc.movedTo === sc.w2.B, String(sc.movedTo));
+    ok('B-87fd …an EXHAUSTED push from the unknown holder files nothing, marks no member and feeds no wake — B untouched (the wall rides the failed turn)', sc.bAfterPush === sc.bBefore && sc.pushWoke === 0, JSON.stringify({ B: sc.bAfterPush.slice(0, 160), woke: sc.pushWoke }));
+    const preExh = patchedEngine('unknownExhaustedWakes', [["if (sig.kind !== 'exhausted' && w.snap) { try { codexReadingEdge(); } catch { } }", 'if (w.snap) { try { codexReadingEdge(); } catch { } }']]);
+    ok('B-87fd NEGATIVE CONTROL (the exhausted push): the patch hit the product source', !!preExh);
+    if (preExh) { const se = wallScene(preExh); ok('B-87fd NEGATIVE CONTROL: without the exhausted check the spent push is fed to the wake as a fresh one — the leg sees it', se.pushWoke > 0, String(se.pushWoke)); }
+    ok('B-87fd …its failed turn\'s wall (a REFUSAL) marks A, where its request went out — never healthy B', sc.bAfter === sc.bBefore && Math.round(Number(sc.aCache?.sevenDay?.usedPercent ?? sc.aCache?.fiveHour?.usedPercent ?? 0)) >= 99, JSON.stringify({ A: sc.aCache?.fiveHour, B: sc.bAfter.slice(0, 200) }));
+    ok('B-87fd …and the wall SIGNAL names the same member: A, never B', sc.sigOnA === true && sc.sigOnB === false, JSON.stringify({ onA: sc.sigOnA, onB: sc.sigOnB }));
+    const preSlot = patchedEngine('unknownSlot', [["function readingSlotFor(session, at = Date.now(), opts = {}) {\n", "function readingSlotFor(session, at = Date.now(), opts = {}) {\n  try { if (session && heldPoolUnknown(session)) return { key: null, slotOk: false, slotReason: 'holder-unknown', at }; } catch { }\n"]]); // stale-pins: kept — the RED plants the first cut's early answer (the round's MUST)
+    ok('B-87fd NEGATIVE CONTROL (the round\'s MUST): the patch hit the product source (readingSlotFor answering nothing for an unknown holder)', !!preSlot);
+    if (preSlot) { const sr = wallScene(preSlot); ok('B-87fd NEGATIVE CONTROL: with that early answer the refusal falls to the link — the wall marks healthy B and its signal names B (the legs see both)', sr.bAfter !== sr.bBefore && sr.sigOnB === true && sr.sigOnA === false, JSON.stringify({ B: sr.bAfter.slice(0, 200), onA: sr.sigOnA, onB: sr.sigOnB })); }
     const wk = world({ mode: 'off', held: true });
     quietly(() => wk.reading(wk.s1, 88));
     ok('B-87fd …a STAMPED holder\'s reading still lands on its member (A, 88 %)', Math.round(wk.cacheOf(wk.A)?.sevenDay?.usedPercent) === 88, JSON.stringify(wk.cacheOf(wk.A)?.sevenDay));
     const pre = patchedEngine('unknownFiled', [
-      ["  try { if (session && heldPoolUnknown(session)) return { key: null, slotOk: false, slotReason: 'holder-unknown', at }; } catch { }\n", ''],
       ["  if (!forKey && source !== 'limit-banner' && session && heldPoolUnknown(session)) { saidUnknownHolderReading(session, 'codex:' + source); return { key: null, snap, archived: true, why: 'holder-unknown' }; }\n", ''],
     ]);
-    ok('B-87fd NEGATIVE CONTROL: the patch hit the product source (both refusals)', !!pre);
+    ok('B-87fd NEGATIVE CONTROL: the patch hit the product source (the codex writer\'s refusal — the one reading road of a non-hot holder)', !!pre);
     if (pre) {
       const wr = world({ mode: 'off', held: 'unknown', engineModule: pre });
       quietly(() => wr.reading(wr.s1, 88));

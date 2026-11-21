@@ -73,14 +73,15 @@ function registerResetCreditRoutes(app, { engine }) {
   // lane reset-path R4: THE USAGE MENU'S CODEX ⟳, ANSWERED — POST /api/usage/codex-refresh {key?, sessionId?}
   // → 200 {ok, key, name, reading: {fiveHour, sevenDay, fetchedAt, source}, resetCredits} once the session's own
   // app-server answered (the reading already written through the one cache writer), or {ok:false, code, error}:
-  // no_live_session 409 · refused 502 · archived 502 · timeout 504. A person's press (agent tokens refused).
+  // no_live_session 409 · holder_unknown 409 (B-87fd: the conversation's held pool member cannot be named — its reading would be
+  // filed nowhere, so none is read) · refused 502 · archived 502 · timeout 504. A person's press (agent tokens refused).
   app.post('/api/usage/codex-refresh', async (req, res) => {
     try {
       if (isAgentBearer(req)) return res.status(403).json({ error: 'human-triggered only', code: 'agent_forbidden' });
       if (typeof engine.refreshCodexForPerson !== 'function') return res.status(503).json({ error: 'codex refresh unavailable', code: 'no_engine' });
       const key = req.body && typeof req.body.key === 'string' && /^[\w.:@-]{1,120}$/.test(req.body.key) ? req.body.key : null;
       const r = await engine.refreshCodexForPerson({ key, sessionId: sid(req.body && req.body.sessionId) });
-      if (!r || !r.ok) return res.status({ no_live_session: 409, refused: 502, archived: 502, timeout: 504 }[r && r.code] || 400).json(r || { ok: false, code: 'refused', error: 'no answer' });
+      if (!r || !r.ok) return res.status({ no_live_session: 409, holder_unknown: 409, refused: 502, archived: 502, timeout: 504 }[r && r.code] || 400).json(r || { ok: false, code: 'refused', error: 'no answer' });
       res.json(r);
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
   });
