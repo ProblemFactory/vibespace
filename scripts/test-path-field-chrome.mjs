@@ -31,6 +31,8 @@
 //   ⑭ the phone: the list sits in the flow (not floating)
 //   ⑯ (B-5736's follow) the REAL mounts dialog's Save while a field is edited: B's text held (only it), A edited meanwhile — the Save
 //      asks A again once and saves what A's box shows (RED: the tip before the follow, 3ee1ed432, saved A's earlier folder)
+//   ⑰ (B-f3a1, ruled r1279) THE PAGE'S ONE GATE drawn: twelve fields set at once, every check held — the doors never hold more than
+//      three; the person's Enter reaches the machine at once (the kept slot); never more than four (RED: the release had no gate)
 //   ⑮ 0 page errors
 // Run: node scripts/test-path-field-chrome.mjs   (SKIPs without chrome)
 import fs from 'node:fs';
@@ -84,6 +86,9 @@ app.use(express.json());
 // listing's reply — never load), and can FAIL the home's next read (a 500 with no home)
 const HOLD = new Map();
 let homeFailsLeft = 0;
+// ⑰ (B-f3a1): the page's folder checks AS THE MACHINE SEES THEM — how many are in flight at once (the most), and the order they arrive
+const DIRQ = { on: false, now: 0, max: 0, order: [] };
+app.use((req, res, next) => { if (DIRQ.on && req.path === '/api/dir-complete') { DIRQ.now++; DIRQ.max = Math.max(DIRQ.max, DIRQ.now); DIRQ.order.push(String(req.query.path || '')); res.on('close', () => { DIRQ.now--; }); } next(); });
 const partialFor = { path: '', left: 0, failLeft: 0 };   // ⑨d: this path's next dir-complete replies are PARTIAL (the machine's budget ran out, nothing listed), then FAILED (a 500, no listing)
 app.use((req, res, next) => {
   if (req.path === '/api/dir-complete' && partialFor.left > 0 && String(req.query.path || '') === partialFor.path) { partialFor.left--; res.json({ listing: { home: HOME, machine: null, dirs: {}, links: {}, localized: {}, mounts: [], nondirs: {} }, partial: true, took: 0 }); return; }
@@ -149,6 +154,8 @@ window.mkQueued = (v) => { const box = document.createElement('div'); box.id = '
 window.attachQueued = () => { document.getElementById('dlg').appendChild(window.qbox); return true; };
 // ⑯ (B-5736's follow, 主开发 r1218 5): the REAL mounts dialog with two folder fields on this machine; its Save hands what it took here
 window.mkMounts = () => { window.__saved = null; mountsDialog('B-5736', [{ key: 'a', label: 'A', autocomplete: 'local' }, { key: 'b', label: 'B', autocomplete: 'local' }], 'Save', async (vals) => { window.__saved = vals; }, { id: 'b5736-dlg', key: 'b5736' }); return true; };
+// ⑰ (B-f3a1): a page that builds many folder fields at once
+window.mkMany = (n) => { const box = document.createElement('div'); box.id = 'many'; document.getElementById('dlg').appendChild(box); window.many = []; for (let k = 0; k < n; k++) { const i = document.createElement('input'); i.id = 'many-' + k; i.type = 'text'; box.appendChild(i); window.many.push(pathField(i, { kind: 'folder', id: 'many-' + k })); } return true; };
 window.__ready = true;
 `);
 try { execFileSync(path.join(REPO, 'node_modules/.bin/esbuild'), [path.join(TMP, 'entry.js'), '--bundle', `--outfile=${path.join(D, 'b.js')}`, '--format=iife', '--platform=browser', '--target=es2020', '--log-level=error'], { cwd: REPO, stdio: ['ignore', 'pipe', 'pipe'] }); }
@@ -789,6 +796,33 @@ console.log('\n── ⑯ the mounts dialog\'s Save while a field is edited (B-5
   console.log('  · ⑯ the Save (the facts judged): ' + JSON.stringify({ saved, boxA: await ev(`${inA}.value`), err: await ev(`document.querySelector('#b5736-dlg .cfg-err')?.textContent || ''`) }));
   ok('⑯ the Save saves what A\'s box SHOWS when it took (~/work/compute-deal, asked again once), never the folder of A\'s earlier press', !!saved && saved.a === path.join(HOME, 'work/compute-deal') && saved.b === path.join(HOME, 'work/contracts'), saved);
   await ev(`document.getElementById('b5736-dlg')?.remove(); true`);
+}
+
+console.log('\n── ⑰ the page\'s one gate: twelve folder fields set at once (B-f3a1, ruled r1279) ──');
+{
+  // A page builds twelve folder fields and a DOOR sets all twelve at once; every check the machine gets is HELD (a stall placed in the
+  // listing's reply — a machine that does not reply). The page's ONE gate (four in flight, one kept for a person's asks): the machine
+  // never has more than THREE of the doors' checks; the PERSON then types in the twelfth field (its door ask still queued) and that
+  // check reaches the machine AT ONCE, while the three are still held; released, the doors' follow, never more than four at once.
+  // (RED: the release before this unit — no gate: the browser's own six at once, the person's behind them)
+  await load();
+  await ev('window.mkMany(12)');
+  DIRQ.on = true; DIRQ.now = 0; DIRQ.max = 0; DIRQ.order.length = 0;
+  const held = holdPath('/api/dir-complete');
+  await ev(`(() => { window.many.forEach((pf, k) => pf.set('~/work/door-' + k, { commit: false })); return true; })()`);   // a door sets all twelve
+  const three = await until(() => (DIRQ.order.length >= 3 ? DIRQ.order.slice() : null), 8000);
+  await ev(`(() => { const i = document.getElementById('many-11'); i.focus(); i.select(); return true; })()`);
+  await type('~/work/payments');   // the PERSON types: the debounced ask is the person's — it takes the kept slot (no press: nothing aborted and sent again)
+  const personArrived = await until(() => (DIRQ.order.includes('~/work/payments') ? DIRQ.order.slice() : null), 8000);
+  const whileHeld = { arrived: DIRQ.order.length, now: DIRQ.now, max: DIRQ.max };
+  held.open();
+  const all = await until(() => (DIRQ.order.length >= 12 && DIRQ.now === 0 ? DIRQ.order.slice() : null), 15000);
+  DIRQ.on = false;
+  console.log('  · ⑰ the machine\'s view (the facts judged): ' + JSON.stringify({ firstThree: three, whileHeld, max: DIRQ.max, order: all || DIRQ.order.slice() }));
+  ok(`⑰ the doors never have more than THREE checks in flight — the fourth slot is kept for a person (held: ${three ? three.length : 0} arrived, none more)`, !!three && !!personArrived && personArrived.indexOf('~/work/payments') === 3 && personArrived.slice(0, 3).every((t) => t.startsWith('~/work/door-')), { three, personArrived });
+  ok(`⑰ the PERSON's check reaches the machine AT ONCE, while the doors' three are still held (4th arrival; in flight then: ${whileHeld.now})`, !!personArrived && whileHeld.arrived === 4 && whileHeld.now === 4, whileHeld);
+  ok(`⑰ the page never has more than four checks in flight (most at once: ${DIRQ.max}); field 11's door ask, superseded by the person's, never reaches the machine`, DIRQ.max === 4 && !!all && all.filter((t) => t === '~/work/door-11').length === 0, { max: DIRQ.max, all });
+  await ev(`document.getElementById('many')?.remove(); true`);
 }
 
 ok(`⑮ 0 page errors`, errors.length === 0, errors);

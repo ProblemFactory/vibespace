@@ -3,7 +3,7 @@
 // app launcher, the Files path bar, the first chat, the session palette's /path) — it replaces setupDirAutocomplete.
 // The contract the other lanes embed is frozen:
 //   pathField(input, { bases, groupsOf, host, kind: 'folder'|'file', onCommit, name, onState, create, createWhen, picker,
-//                      chips, id, suggests }) → { el, input, value, verdict, commit, set, refresh, open, close, ensure, destroy,
+//                      chips, id, suggests }) → { el, input, value, verdict, commit, set(text, { commit, how, by }), refresh, open, close, ensure, destroy,
 //                      setDerived }
 // ADDED (lane new-session-group-folder-link — additive, nothing renamed): `pf.setDerived(text, { note, commit = false })`
 //   fills the field FOR the door (a value derived from something else — New Session: the first picked Task Group's folder)
@@ -39,7 +39,7 @@ import { folderChips } from '../day-one.js';
 import { loadHomeFolders, paintFolderChips } from './folder-chips.js';
 // B-08d5 (the coordinator's ruling 2026-11-19 22:19Z): the field's ask-and-answer logic is a PURE MODEL — this file turns what happens into
 // its events and performs its effects; no verdict is decided here
-import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED, tickKey, tickHolds, valueFor, valueAtAfter } from '../path-field-model.js';
+import { init as pfInit, step as pfStep, view as pfView, keyOf, textOf as keyText, homeReader, askedOf, lateOf, replyKind, UNSETTLED, tickKey, tickHolds, valueFor, valueAtAfter, gateInit, gateStep } from '../path-field-model.js';
 import { rankCandidates, groupOn, mergeListing, missingVerdict, isExcludedPath, toTilde, fromTilde, parentOf, baseName, HOST_ROW, nameChips, textCandidates, isPathText } from '../path-candidates.js';
 
 const DEBOUNCE_MS = 110;
@@ -62,6 +62,38 @@ function sectionChips(el) {
     line.append(lab, ...items);
     return line;
   }).filter(Boolean));
+}
+
+/* ── THE PAGE'S ONE GATE (B-f3a1's remainder; ruled r1279): every folder check any field of the page sends — its own ask, the picker's,
+   the picker tree's, the chips' probe, the palette's — passes PURE gateStep (src/path-field-model.js): ONE count for the page, at most
+   PAGE_ASKS (4) in flight, one of them kept for a person's asks; a person's own first, then a door's, the late (facts still coming) last;
+   a queued ask its asker superseded or aborted leaves unsent (it answers null, as an aborted fetch does); a late one whose field's text
+   moved before it starts is dropped unsent (`stillWanted`) ── */
+let GATE = gateInit();
+const GATE_RUNS = new Map();   // id → { run, done } — queued (not yet started) asks only
+let gateSeq = 0;
+const GATE_DROPPED = Object.freeze({ dropped: true });   // what a late ask dropped unsent answers — not a reply, never merged
+const gateFire = (ev) => {
+  const r = gateStep(GATE, ev); GATE = r.gate;
+  for (const id of r.dropped) { const g = GATE_RUNS.get(id); GATE_RUNS.delete(id); if (g) g.done(null); }
+  for (const id of r.start) { const g = GATE_RUNS.get(id); GATE_RUNS.delete(id); if (g) g.run(); }
+};
+/** fetchJson through the page's gate: `field` = the asker's own id (a newer ask with the same id supersedes a queued one), `by` = 'person' |
+ *  'door' | 'late', `stillWanted` = checked when the gate starts it (false: dropped unsent, its slot back at once) */
+function gatedFetch(url, opts = {}, { field = '', by = 'door', stillWanted = null } = {}) {
+  return new Promise((resolve) => {
+    const sig = opts.signal;
+    if (sig && sig.aborted) { resolve(null); return; }
+    const id = ++gateSeq;
+    const done = (d) => { resolve(d); };
+    const run = () => {
+      if (stillWanted && !stillWanted()) { gateFire({ type: 'done', id }); done(GATE_DROPPED); return; }   // dropped unsent: NO reply (never «the machine did not answer»)
+      fetchJson(url, opts).then((d) => { gateFire({ type: 'done', id }); done(d); }, () => { gateFire({ type: 'done', id }); done(null); });
+    };
+    GATE_RUNS.set(id, { run, done });
+    if (sig) sig.addEventListener('abort', () => { if (GATE_RUNS.has(id)) gateFire({ type: 'drop', id }); }, { once: true });
+    gateFire({ type: 'want', id, field: String(field), by });
+  });
 }
 
 /* ── the machines as far as the fields have seen them (shared by every field of the page) ── */
@@ -376,7 +408,7 @@ export function pathField(input, opts = {}) {
     if (r.effects.some((e) => e.do === 'settle')) st.valueAt = { ...(st.valueAt || {}), voided: true };   // B-5736: a press answered «nothing» — the field's value is nothing too (never an older folder)
     let painted = false;
     for (const e of r.effects) {
-      if (e.do === 'ask') sliceAsk(e.key, !!e.press);
+      if (e.do === 'ask') sliceAsk(e.key, !!e.press, e.by);
       else if (e.do === 'arm') { clearTimeout(T[e.which]); T[e.which] = setTimeout(() => { T[e.which] = null; fire({ type: 'fired', which: e.which, connected: input.isConnected }); }, e.ms); }
       else if (e.do === 'disarm') { for (const w of e.which === 'all' ? ['soon', 'reask', 'retry'] : [e.which]) { clearTimeout(T[w]); T[w] = null; } }
       else if (e.do === 'abort') st.ctl?.abort?.();
@@ -430,7 +462,7 @@ export function pathField(input, opts = {}) {
     W.unreachable = (d && d.unreachable) || null;
   }
   /* the model's ask: the field's OWN text on its machine (one in flight — a newer one supersedes); its reply becomes the model's event */
-  function sliceAsk(key, press = false) {
+  function sliceAsk(key, press = false, by = 'door') {
     const text = keyText(key), h = hk(), W = world(h);
     const go = () => {
       if (st.destroyed) return;
@@ -441,19 +473,20 @@ export function pathField(input, opts = {}) {
       const ctl = new AbortController(); st.ctls.set(h, ctl); st.ctl = ctl;
       const my = ++st.seq;
       wrap.dataset.pending = '1';
-      return fetchJson(url, { signal: ctl.signal }).then((d) => {
+      return gatedFetch(url, { signal: ctl.signal }, { field: pickKey, by, stillWanted: by === 'late' ? () => keyNow() === key : null }).then((d) => {
         if (st.destroyed) return;
         if (st.ctls.get(h) === ctl) st.ctls.delete(h);
+        if (d === GATE_DROPPED) { traceReply(h, my, null, 'dropped'); return; }   // the late ask was dropped unsent (its text moved): nothing was answered
         if (my !== st.seq) {   // superseded by an ask for ANOTHER machine (one for this machine would have aborted it): kept in its world
           if (d && d.listing && !st.ctls.has(h)) mergeReply(W, h, d, probe);
           traceReply(h, my, d, 'superseded');
           return;
         }
         delete wrap.dataset.pending;
-        mergeReply(W, h, d, probe, key);
+        if (by !== 'late' || replyKind(d) === 'listing') mergeReply(W, h, d, probe, key);   // a late re-ask counts only if complete — in the page's world as in the model
         traceReply(h, my, d, 'current');
         const v = d && d.verdict;   // B-d833: the verdict rides the reply into the model (R-e); a SKIPPED one says when its mark ends, in OUR clock
-        fire({ type: 'reply', key, kind: replyKind(d), err: (v && v.err) || (d && d.error) || '', verdict: v || null, until: v && v.kind === 'skipped' && Number.isFinite(v.retryIn) ? Date.now() + Math.max(0, v.retryIn) : 0 });
+        fire({ type: 'reply', key, kind: replyKind(d), err: (v && v.err) || (d && d.error) || '', verdict: v || null, until: v && v.kind === 'skipped' && Number.isFinite(v.retryIn) ? Date.now() + Math.max(0, v.retryIn) : 0, factsLate: !!(d && d.factsLate) });   // (r1204: bl-chat-b's B-5561 says a listing's kids' facts were still out)
       });
     };
     return !h && !LOCAL.home ? localHome().then(go) : go();
@@ -467,7 +500,7 @@ export function pathField(input, opts = {}) {
       st.pctl?.abort?.(); st.pctl = new AbortController();
       // (B-d833, the box pre-runs: a chip's reply can re-spell the bases — the field's question moved under it with no act: it is said to the
       // model, which asks the new question once, bounded)
-      return fetchJson(url, { signal: st.pctl.signal }).then((d) => { if (st.destroyed) return; mergeReply(W, h, d, probe); traceReply(h, null, d, 'chips'); if (keyNow() !== M.key) fire({ type: 'rekey' }); });
+      return gatedFetch(url, { signal: st.pctl.signal }, { field: pickKey + ':picker', by: 'person' }).then((d) => { if (st.destroyed) return; mergeReply(W, h, d, probe); traceReply(h, null, d, 'chips'); if (keyNow() !== M.key) fire({ type: 'rekey' }); });
     };
     return !h && !LOCAL.home ? localHome().then(go) : go();
   }
@@ -650,7 +683,7 @@ export function pathField(input, opts = {}) {
     const recent = inp.recent.map((r) => fromTilde(home, r.path));
     const draw = (folders) => {
       if (!chipsEl.isConnected && !wrap.isConnected) return;
-      paintFolderChips(chipsEl, folderChips({ folders, recent, task }), { onPick: (c) => set(c.path, { commit: true, how: 'set' }) });
+      paintFolderChips(chipsEl, folderChips({ folders, recent, task }), { onPick: (c) => set(c.path, { commit: true, how: 'set', by: 'person' }) });
       const first = chipsEl.firstChild;
       for (const n of names) {
         const b = document.createElement('button');
@@ -678,7 +711,7 @@ export function pathField(input, opts = {}) {
     if (!want.length || W.unreachable) return;
     st.probeTimer = setTimeout(() => {
       if (st.destroyed || hk() !== h) return;
-      const go = () => fetchJson((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + `?path=&bases=${encodeURIComponent('[]')}&probe=${encodeURIComponent(JSON.stringify(want))}&q=&kind=folder`).then((d) => {
+      const go = () => gatedFetch((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + `?path=&bases=${encodeURIComponent('[]')}&probe=${encodeURIComponent(JSON.stringify(want))}&q=&kind=folder`, {}, { field: pickKey + ':chips', by: 'door' }).then((d) => {
         if (!d || !d.listing || st.destroyed) return;
         mergeListing(W.L, d.listing);
         if (d.listing.nondirs) Object.assign(W.L.nondirs = W.L.nondirs || {}, d.listing.nondirs);
@@ -718,14 +751,15 @@ export function pathField(input, opts = {}) {
     if (info) try { o.onCommit?.(info); } catch (err) { console.warn('[path-field] onCommit', err); }
     if (info && st.committed === info) st.valueAt = valueAtAfter(st.valueAt, { info, keys: [tickKeyNow(keyText(e.key)), tickKeyNow()] });   // B-5736: the PATH's key of the press, and of the box as its door's onCommit left it (an absolute text's bases are not in it: the same folder under any Task Group)
   }
-  function set(text, { commit: c = true, how = 'set', derived = null } = {}) {
+  function set(text, { commit: c = true, how = 'set', derived = null, by = null } = {}) {
     if (st.destroyed) return Promise.resolve(null);   // B-225c: a dead field takes no text and makes no door (the model hears nothing after «destroyed»: it would never be answered)
+    const cause = by === 'person' || by === 'door' ? by : (how === 'pick' || how === 'picker' || how === 'tab' ? 'person' : 'door');   // B-f3a1: whose ask the set makes
     input.value = String(text == null ? '' : text);
     st.derived = derived && input.value.trim() ? { text: input.value, note: String(derived.note || '') } : null;   // setDerived: the door's, not the person's
     if (st.open) close();
-    if (!c) { fire({ type: 'set', how }); return Promise.resolve(null); }   // asked at once (LAW 1: the pending words from the first paint)
+    if (!c) { fire({ type: 'set', how, by: cause }); return Promise.resolve(null); }   // asked at once (LAW 1: the pending words from the first paint)
     const door = ++doorSeq;
-    return new Promise((res) => { waiters.set(door, res); fire({ type: 'set', commit: true, how, door }); });
+    return new Promise((res) => { waiters.set(door, res); fire({ type: 'set', commit: true, how, by: cause, door }); });
   }
   function pickRow(r, how) {
     if (!r) return;
@@ -802,7 +836,7 @@ export function pathField(input, opts = {}) {
   under.addEventListener('click', (e) => {
     const b = e.target.closest('[data-act]'); if (!b) return;
     if (b.dataset.act === 'alt') { set(b.dataset.path, { commit: true, how: 'pick' }); return; }
-    if (b.dataset.act === 'use') { set(b.dataset.path, { commit: false }); return; }   // R-j: it sets that absolute text — its own stat decides; nothing is committed
+    if (b.dataset.act === 'use') { set(b.dataset.path, { commit: false, by: 'person' }); return; }   // R-j: it sets that absolute text — its own stat decides; nothing is committed
     const best = b.dataset.act === 'best' ? bestNow() : '';
     if (best) { set(best, { commit: true, how: 'pick' }); return; }
   });
@@ -828,7 +862,7 @@ export function pathField(input, opts = {}) {
   async function listNode(p) {
     const h = hk(); const W = world(h);
     const qs = `?path=${encodeURIComponent(p === '~' ? '~/' : p + '/')}&bases=${encodeURIComponent('[]')}&kind=file`;
-    const d = await fetchJson((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs);
+    const d = await gatedFetch((h ? `/api/hosts/${encodeURIComponent(h)}/dir-complete` : '/api/dir-complete') + qs, { signal: st.treeCtl ? st.treeCtl.signal : undefined }, { field: `${pickKey}:tree:${h || ''}:${p}`, by: 'person' });   // its listings end with the picker (a closed picker's queued ones never jump the field's next ask)   // ONE id a folder of the tree: two folders' listings never supersede each other
     if (d && d.listing) { mergeListing(W.L, d.listing); W.L.machine = h || null; if (d.self) W.self = d.self; }
   }
   async function openPicker() {
@@ -849,9 +883,9 @@ export function pathField(input, opts = {}) {
     for (let q = K.sel; q && q.includes('/'); q = parentOf(q)) K.open.add(q);
     K.open.add(K.sel);
     let picked = false;   // B-ckpt61: closed WITHOUT a pick, the field's own text is asked again if the picker's asks (they share its sequence) left it no answer
-    const shell = createModalShell({ id: 'path-picker', key: pickKey, beside: true, from, title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; st.picker = null; if (!st.destroyed) input.focus(); fire({ type: 'pickerClosed', picked }); }, kind: 'form' });
+    const shell = createModalShell({ id: 'path-picker', key: pickKey, beside: true, from, title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.treeCtl?.abort(); st.treeCtl = null; st.picking = false; st.picker = null; if (!st.destroyed) input.focus(); fire({ type: 'pickerClosed', picked }); }, kind: 'form' });
     if (shell.raised) { st.picking = false; return; }   // (this field's picker opened meanwhile: it is raised, its tree as it was)
-    st.picker = shell;
+    st.picker = shell; st.treeCtl = new AbortController();
     if (shell.placed === 'behind') st.picking = false;   // not where the person can reach it: the latch never leaves a dead Browse… (a press raises it)
     const { body, dialog } = shell;
     if (h) dialog.querySelector('.dialog-header h3').append(Object.assign(document.createElement('span'), { className: 'pf-pk-sub', textContent: ' · ' + hostName(h) }));
@@ -1009,7 +1043,7 @@ export async function pathSuggest(text, { limit = 8 } = {}) {
   const recent = [...by.values()].sort((a, b) => b.last - a.last).map((r) => ({ path: r.path, count: r.count, when: whenWords(r.last) }));
   const inp = () => ({ bases: [{ path: '~', label: t('home') }], groups: groups.map((g) => groupOn(g, W.L)), recent, listing: W.L, name: '', machine: '', files: false, self: W.self });
   const q = String(text || '').trim();
-  const d = await fetchJson(`/api/dir-complete?path=${encodeURIComponent(q)}&bases=${encodeURIComponent('["~"]')}&probe=${encodeURIComponent('[]')}&q=&kind=folder`);
+  const d = await gatedFetch(`/api/dir-complete?path=${encodeURIComponent(q)}&bases=${encodeURIComponent('["~"]')}&probe=${encodeURIComponent('[]')}&q=&kind=folder`, {}, { field: 'palette', by: 'person' });   // the palette's /path: the person typing
   if (d && d.listing) { mergeListing(W.L, d.listing); if (d.self) W.self = d.self; }
   const m = rankCandidates(q, inp());
   const rows = m.resolved.map((r) => ({ path: r.path, chip: { key: 'dir', params: {} } })).concat(m.rows);

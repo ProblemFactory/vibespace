@@ -448,7 +448,7 @@ export function installSetupFlows(App) {
           const chips = folderChips({ folders, recent: recentLocalCwds(this) });
           const first = cwdInput.value.trim() ? null : firstFilesFolder(chips);
           if (first) cwdPf.set(first, { commit: false });
-          paintFolderChips(chipsEl, chips, { selected: first, onPick: (c) => { cwdPf.set(c.path, { commit: false }); } });
+          paintFolderChips(chipsEl, chips, { selected: first, onPick: (c) => { cwdPf.set(c.path, { commit: false, by: 'person' }); } });
         });
         const go = async (mode) => {
           const openAt = this._openStartNow?.();   // B-c87d r871: the start is this press, read before the folder's commit and ensure

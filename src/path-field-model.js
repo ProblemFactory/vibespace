@@ -14,14 +14,15 @@
 //   set {commit, how, door}  a text SET from outside (a pick, a chip, set(), setDerived): asked at once (LAW 1)
 //   commit {how, door}   a commit pressed (leave, Enter, Create): judged now on a fresh complete answer, else OWED to its run
 //                        (`door` = the press's own, B-225c: its outcome names it)
-//   reply {key, kind, err}   an answer: kind 'listing' (complete) | 'partial' (the machine's budget ran out) | 'failed' (none)
+//   reply {key, kind, err, factsLate}   an answer: kind 'listing' (complete) | 'partial' (the machine's budget ran out) | 'failed' (none);
+//                        factsLate: a complete listing whose kids' own facts were still out (asked ONCE more, quiet, a LATE ask)
 //   fired {which, connected} a timer fired: 'soon' (the debounce) or 'reask' (the bounded run's)
 //   refresh {}           the door's inputs moved (a group, the name, the machine)
 //   opened / closed      the list opened or closed (opening asks)
 //   pickerClosed {picked}    the picker closed (without a pick ⇒ the field's own text is asked again if it has no answer)
 //   ensureFailed {words}     the create at use failed
 //   destroyed            the field is gone: no effect ever after
-// The effects: {do:'ask', key, reask} · {do:'arm', which, ms} · {do:'disarm', which} · {do:'paint'} · {do:'abort'} ·
+// The effects: {do:'ask', key, reask, by: 'person'|'door'|'late', quiet?} · {do:'arm', which, ms} · {do:'disarm', which} · {do:'paint'} · {do:'abort'} ·
 //   {do:'commit', how, as: 'ok'|'create'|'empty', key, doors} · {do:'settle', result: 'refused'|'dropped'|'moved'|'quiet'|'owed', doors}
 //   B-225c: every press (a commit, a set that commits) carries its DOOR; an owed commit holds the doors of every press on its text and
 //   machine (a second press JOINS); each outcome names exactly the doors it answers — a press is answered once, by its own outcome
@@ -94,7 +95,7 @@ function askedOf(sent, d) {
 }
 
 function init(key = keyOf('', null)) {
-  return { key, answer: null, everAsked: false, out: null, soon: null, reask: null, retry: null, run: { key: null, n: 0 }, owed: null, err: null, errRun: null, open: false, destroyed: false };
+  return { key, answer: null, everAsked: false, out: null, soon: null, reask: null, retry: null, run: { key: null, n: 0 }, owed: null, err: null, errRun: null, open: false, destroyed: false, personal: false, lateAsked: [], lateOut: null };
 }
 
 /* THE ONE RESOLVER, held by the model too (the read of the fourth shape, 2026-11-20 11:34Z, its should 4): at a reply an owed press
@@ -138,7 +139,7 @@ function drop(s, fx, ended, err = '') {
 }
 function disarm(s, fx, which) { if (s[which]) { s[which] = null; fx.push({ do: 'disarm', which }); } }
 function armSoon(s, fx) { s.everAsked = true; s.soon = s.key; fx.push({ do: 'arm', which: 'soon', ms: DEBOUNCE_MS }); }
-function ask(s, fx, now, { force = false, reask = false, press = false } = {}) {
+function ask(s, fx, now, { force = false, reask = false, press = false, quiet = false } = {}) {
   if (!force && freshComplete(s) && now - s.answer.at < DEDUPE_MS) return;
   if (!reask) {   // a new run (the bound); one for ANOTHER text or machine ends what the old run owed
     s.run = { key: s.key, n: 0 };
@@ -147,7 +148,10 @@ function ask(s, fx, now, { force = false, reask = false, press = false } = {}) {
   }
   disarm(s, fx, 'soon');   // an ask now supersedes the debounce
   s.everAsked = true; s.out = s.key;
-  fx.push({ do: 'ask', key: s.key, reask: !!reask, ...(press ? { press: true } : {}) });   // (B-d833 R-i: a press is attended — the machine sends a dead entrance's call once inside its window)
+  s.lateOut = quiet ? s.key : null;   // the LATE mark is the late re-ask's alone: any other ask on the key clears it (its reply is a real one)
+  // B-f3a1: every ask names its CAUSE — the person's (the field a person typed in, pressed, opened, picked in), a door's (a text set from
+  // outside, a derived one, a refresh) or LATE (the facts still coming, quiet) — the page's ONE gate sends them in that order
+  fx.push({ do: 'ask', key: s.key, reask: !!reask, by: quiet ? 'late' : s.personal ? 'person' : 'door', ...(press ? { press: true } : {}), ...(quiet ? { quiet: true } : {}) });   // (B-d833 R-i: a press is attended — the machine sends a dead entrance's call once inside its window)
 }
 /* judge a commit on the answer the field holds (env = the ranking's verdict after the reply merged) */
 function judge(s, fx, how, env, doors = []) {
@@ -191,7 +195,7 @@ function step(s0, ev = {}) {
   let rebased = false, rebasedFrom = null, moved = false;
   if (ev.cur !== undefined && ev.cur !== s.key) {
     const was = s.key; moved = true;
-    s.key = ev.cur;
+    s.key = ev.cur; s.lateOut = null;   // B-f3a1: a late re-ask out for the old key is no longer the field's
     if (sameAsk(s.key, was)) {
       // B-d833 (the box pre-runs): only the BASES moved under the same text — a NEW QUESTION, ASKED at once (below); an owed press is
       // CARRIED to it, never dropped («asking this machine…» with no ask out was the fault: the reply for the old spelling was dropped
@@ -207,17 +211,20 @@ function step(s0, ev = {}) {
   }
   switch (ev.type) {
     case 'typed':
+      s.personal = true;
       s.err = null; s.errRun = null; s.open = true;
       if (ev.soon === false) ask(s, fx, now); else { disarm(s, fx, 'soon'); armSoon(s, fx); }
       fx.push({ do: 'paint' });
       break;
     case 'set':
+      s.personal = ev.by === 'person';   // B-f3a1: a person's pick (a chip, a row, the picker, Tab) is the person's; set() from outside is a door's
       s.answer = null; s.err = null; s.errRun = null;
       disarm(s, fx, 'soon');
       if (ev.commit) commitFlow(s, fx, ev); else ask(s, fx, now);
       fx.push({ do: 'paint' });
       break;
     case 'commit':
+      s.personal = true;   // a press (leave, Enter, Create, a door's Save / Run / Export)
       commitFlow(s, fx, ev);
       fx.push({ do: 'paint' });
       break;
@@ -225,6 +232,7 @@ function step(s0, ev = {}) {
       if (ev.key !== s.key) { if (s.out === ev.key) s.out = null; break; }   // an answer for another text or machine is not the field's
       s.out = null;
       const kind = ev.kind === 'listing' ? 'listing' : ev.kind === 'partial' ? 'partial' : ev.kind === 'skipped' ? 'skipped' : 'failed';
+      if (s.lateOut === s.key) { s.lateOut = null; if (kind !== 'listing') { fx.push({ do: 'paint' }); break; } }   // the LATE re-ask's reply: only a complete one counts (the answer stands)
       let run = 'done';
       if (kind === 'partial') { s.run = { key: s.key, n: (s.run.key === s.key ? s.run.n : 0) + 1 }; run = s.run.n < PARTIAL_REPLIES ? 'reask' : 'stop'; }
       else if (kind !== 'skipped') s.run = { key: s.key, n: 0 };   // (B-d833 R-i: a SKIPPED reply is no answer — not counted, the run kept)
@@ -243,6 +251,10 @@ function step(s0, ev = {}) {
       } else if (kind === 'listing' && s.errRun === s.key) { s.err = null; s.errRun = null; }   // a later complete reply repaints only
       if (run === 'reask') { s.reask = s.key; fx.push({ do: 'arm', which: 'reask', ms: REASK_MS }); }
       if (kind === 'skipped' && ev.until) { s.retry = s.key; fx.push({ do: 'arm', which: 'retry', ms: Math.max(0, Number(ev.until) - now) }); }   // R-i: ONE ask when the mark ends (a mount that came back heals with no key)
+      // r1204's seam (bl-chat-b's B-5561: a listing whose kids' own facts — a git badge, a link's row, an excluded checkout — were still out
+      // when it was built says `factsLate`): ONCE more for this text and machine, QUIET (a complete answer stands: no pending words), a
+      // LATE ask — behind every other at the page's gate; the page drops it unsent if the field's text moved before it starts
+      if (kind === 'listing' && ev.factsLate && !(s.lateAsked || []).includes(s.key)) { s.lateAsked = [...(s.lateAsked || []), s.key].slice(-16); ask(s, fx, now, { force: true, quiet: true }); }
       fx.push({ do: 'paint' });
       break;
     }
@@ -261,23 +273,24 @@ function step(s0, ev = {}) {
       break;
     case 'refresh': {
       if (s.answer) s.answer = { ...s.answer, stale: true };
-      if (s.open) ask(s, fx, now);
+      if (s.open) { if (!(s.personal && (s.out === s.key || s.soon === s.key || s.reask === s.key))) s.personal = false; ask(s, fx, now); }   // B-f3a1: a refresh's ask is a door's — but never one that takes the person's own ask out or due for this key to the doors' end
       else {
         const text = textOf(s.key), a = s.answer, mine = !!(a && a.key === s.key);
         const outOrDue = s.out === s.key || s.soon === s.key || s.reask === s.key;
         const ended = mine && (a.kind === 'failed' || a.kind === 'gaveUp');
-        if (!outOrDue && text && s.everAsked && (!mine || (ended && now - a.at >= REFRESH_AFTER_STOP_MS))) armSoon(s, fx);   // A1: a field never asked stays quiet
+        if (!outOrDue && text && s.everAsked && (!mine || (ended && now - a.at >= REFRESH_AFTER_STOP_MS))) { s.personal = false; armSoon(s, fx); }   // A1: a field never asked stays quiet (B-f3a1: a door's ask)
       }
       fx.push({ do: 'paint' });
       break;
     }
     case 'opened':
-      s.open = true; ask(s, fx, now); fx.push({ do: 'paint' });
+      s.personal = true; s.open = true; ask(s, fx, now); fx.push({ do: 'paint' });
       break;
     case 'closed':
       s.open = false; fx.push({ do: 'paint' });
       break;
     case 'pickerClosed':
+      s.personal = true;
       if (!ev.picked && textOf(s.key) && !freshComplete(s) && s.out !== s.key) { disarm(s, fx, 'soon'); armSoon(s, fx); }
       break;
     case 'ensureFailed':
@@ -315,11 +328,42 @@ function step(s0, ev = {}) {
 const ABS_PATH_RE = /^(?:[~/]|[A-Za-z]:[\\/])/;
 function tickKey(text, machine, bases = '') { const t = String(text == null ? '' : text).trim(); return keyOf(t, machine, ABS_PATH_RE.test(t) ? '' : bases); }
 function tickHolds(tick, cur) { return !!(tick && tick.on && tick.key === cur); }
-/* THE FIELD'S VALUE (B-5736): the committed folder only while the PATH's key now (tickKey: its text, its machine and, for a relative
-   text, its bases) is the key the folder came from (the press's own, or the box as its door's onCommit left it: a door may write the folder's path
-   into the box), and nothing since took it back: a press ended with nothing (refused, owed, dropped, moved, quiet), a create that failed,
-   the «create» consent taken off. A box, a machine or a Task Group moved by any road answers nothing: never the last folder under another
-   key. `at` = { keys: [the press's key, the key right after its onCommit], voided } */
+/* THE PAGE'S GATE (B-f3a1's remainder; the coordinator's ruling r1279): every folder check the fields of ONE page send passes ONE gate —
+   PAGE-WIDE (one count for the page, whatever the machine: a slow machine's asks are bounded by the page's cap anyway), at most PAGE_ASKS
+   (4) in flight, and the priority in THREE classes: a person's own ask first; then the asks a door queued (a text set from outside, a
+   page's build, a refresh); LAST the asks no person caused about a text already answered (the facts still coming, r1204). First come first
+   inside each class. One of the four is KEPT for a person's asks alone (PERSON_KEPT — the lane's call r1279 asked for: with all four out to
+   a machine that does not reply, a person's ask would wait a whole bound — the paired-machine rung's 2.5 s guard, this machine's 450 ms
+   budget — behind them). A queued ask its field superseded (a newer ask of the same field) or aborted leaves the queue unsent; a slot
+   frees at the reply or the abort. PURE: { gate, start: [ids], dropped: [ids] } a step */
+const PAGE_ASKS = 4;
+const PERSON_KEPT = 1;
+const GATE_RANK = { person: 0, door: 1, late: 2 };
+function gateInit(cap = PAGE_ASKS, kept = PERSON_KEPT) { return { cap, kept, out: 0, queue: [], seq: 0, running: {} }; }
+function gateStep(g0, ev = {}) {
+  const g = { ...g0, queue: g0.queue.slice(), running: { ...g0.running } }; const start = [], dropped = [];
+  const fill = () => {
+    for (;;) {
+      if (!g.queue.length) break;
+      const next = g.queue.reduce((x, q) => (GATE_RANK[q.by] < GATE_RANK[x.by] || (GATE_RANK[q.by] === GATE_RANK[x.by] && q.seq < x.seq) ? q : x));   // the person's first, then a door's, then the late; first come first inside each
+      const doorsOut = Object.values(g.running).filter((b) => b !== 'person').length;
+      if (g.out >= g.cap || (next.by !== 'person' && doorsOut >= g.cap - g.kept)) break;   // the kept slot is a person's alone: the doors' and the late hold at most cap − kept
+      g.queue.splice(g.queue.indexOf(next), 1);
+      g.out += 1; g.running[next.id] = next.by; start.push(next.id);
+    }
+  };
+  if (ev.type === 'want') {
+    if (g.running[ev.id] || g.queue.some((q) => q.id === ev.id)) return { gate: g0, start, dropped };   // an id already taken: nothing (a slot never counted twice)
+    for (const q of g.queue.filter((x) => x.field === ev.field)) { g.queue.splice(g.queue.indexOf(q), 1); dropped.push(q.id); }   // superseded
+    g.queue.push({ id: ev.id, field: ev.field, by: ev.by in GATE_RANK ? ev.by : 'door', seq: ++g.seq });
+    fill();
+  } else if (ev.type === 'done' || ev.type === 'drop') {
+    const qi = g.queue.findIndex((q) => q.id === ev.id);
+    if (qi >= 0) { g.queue.splice(qi, 1); if (ev.type === 'drop') dropped.push(ev.id); }
+    else if (g.running[ev.id]) { delete g.running[ev.id]; g.out = Math.max(0, g.out - 1); fill(); }
+  }
+  return { gate: g, start, dropped };
+}
 /* what the value's mark becomes at the model's «commit» effect (PURE, r1279 b): a commit that took gives it its keys back; an empty box
    has no value; a commit the model called fine whose target no longer takes (the press heard nothing) takes it back */
 function valueAtAfter(at, { info = null, as = 'ok', keys = [] } = {}) {
@@ -332,4 +376,4 @@ function valueFor(committed, cur, at = null) {
   return Array.isArray(at.keys) && at.keys.includes(String(cur == null ? '' : cur)) ? committed : null;
 }
 
-module.exports = { init, step, view, keyOf, textOf, sameAsk, tickKey, tickHolds, valueFor, valueAtAfter, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };
+module.exports = { init, step, view, keyOf, textOf, sameAsk, tickKey, tickHolds, valueFor, valueAtAfter, gateInit, gateStep, PAGE_ASKS, PERSON_KEPT, missingGate, homeReader, askedOf, lateOf, replyKind, PARTIAL_REPLIES, UNSETTLED, REASK_MS, DEBOUNCE_MS, DEDUPE_MS, REFRESH_AFTER_STOP_MS, HOME_READ_FAILS };

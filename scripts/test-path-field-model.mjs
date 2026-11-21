@@ -18,6 +18,8 @@
 //        I8 the words are a function of the state alone (the view of a copy is the view)
 //        I9 THE DOORS (B-225c): every press is answered ONCE, by its own outcome — never by a commit for another text or machine, never
 //           dropped while its text and machine are the field's, never left hanging (an owed commit holds every door still waiting)
+//        I10 (B-f3a1 / r1204) the facts still coming: ONE re-ask a key, quiet and in the late class, started only by a complete listing that
+//           says its kids' facts were still out; its reply that is not complete never replaces the complete answer
 //      each invariant with its RED CONTROL: the rule removed in a copy of the model (an anchored edit of the shipped source) — the
 //      same driver finds the scene by itself and prints its seed
 //   ②b THE EVENT CENSUS (every event handled is fired at a named site, every fire( names its event, the list closes in one place)
@@ -32,6 +34,10 @@
 //   ⑤ THE FIELD'S VALUE ANSWERS WHAT THE BOX AND THE LINE SHOW, OR NOTHING (B-5736): PURE valueFor (the box's text, a press ended with
 //      nothing) with REDs; the page's wiring + RED; THE DOORS take the folder from their press's own answer (a source pin a door, a
 //      planted raw read named) and every page that builds a field is a door of the table
+//   ⑥ THE PAGE'S ONE GATE (B-f3a1's remainder, ruled r1279): PURE gateStep — one count a page, four, one kept for a person; the person's
+//      first, a door's, the late last; superseded / aborted unsent — each with its RED; each ask's CAUSE (a refresh a door's) + REDs;
+//      r1204's facts still coming once a key, quiet, late (its partial reply never unsays) + RED; the page's wiring — a census over every
+//      fetchJson( of the file, a late ask dropped if its text moved, one id a folder of the picker tree — + REDs
 // Run: node scripts/test-path-field-model.mjs   (PFM_SEED_ONLY=<seed> replays one seed of the law with its whole sequence)
 import fs from 'node:fs';
 import path from 'node:path';
@@ -185,7 +191,7 @@ function lawRun(G, seed, steps = 60) {
   const d = { text: pick(TEXTS), h: null, b: '', open: false, tick: false, createMode: R() < 0.2 ? 'never' : 'ask', destroyed: false, touched: false, now: 0 };
   const KB = (t, h, b) => G.keyOf(t, h, b);   // the key with its BASES (B-d833: their spelling can move under the same text)
   let s = G.init(KB(d.text, d.h, d.b));
-  let net = null, owedRec = null, runReasks = 0, doorSeq = 0;
+  let net = null, owedRec = null, runReasks = 0, doorSeq = 0; const lateKeys = new Set();
   const pending = new Map();   // door → the key its press was for (the page's waiting presses)
   const seq = [], why = [];
   const env = () => {
@@ -201,7 +207,7 @@ function lawRun(G, seed, steps = 60) {
     else if (roll < 0.14) { d.text = pick(TEXTS); d.touched = true; ev = { type: 'typed', soon: R() < 0.8 }; }
     else if (roll < 0.22) { d.text = pick(TEXTS); d.touched = true; ev = { type: 'set', commit: R() < 0.4, how: 'set' }; if (ev.commit && !d.destroyed) ev.door = ++doorSeq; }
     else if (roll < 0.32) { d.touched = true; ev = { type: 'commit', how: pick(['blur', 'enter', 'api']) }; if (!d.destroyed) ev.door = ++doorSeq; }
-    else if (roll < 0.52 && net) { const k = pick(['listing', 'partial', 'partial', 'failed']); if (k === 'listing') { listed.add(net.key); homeKnown[net.key.split('\n')[1] || null] = true;   /* (the machine is the key's SECOND part — the bases may follow it) */ } ev = { type: 'reply', key: net.key, kind: k, err: k === 'failed' ? 'boom' : '' }; net = null; }
+    else if (roll < 0.52 && net) { const k = pick(['listing', 'partial', 'partial', 'failed']); if (k === 'listing') { listed.add(net.key); homeKnown[net.key.split('\n')[1] || null] = true;   /* (the machine is the key's SECOND part — the bases may follow it) */ } ev = { type: 'reply', key: net.key, kind: k, err: k === 'failed' ? 'boom' : '', ...(k === 'listing' && i % 3 === 0 ? { factsLate: true } : {}) }; net = null; }   // (B-f3a1 / r1204: a third of the listings say a kid's facts were still out — no draw of the seed spent on it)
     else if (roll < 0.62 && (s.soon || s.reask)) ev = { type: 'fired', which: s.reask && (!s.soon || R() < 0.5) ? 'reask' : 'soon', connected: R() < 0.9 };
     else if (roll < 0.70) ev = { type: 'refresh' };
     else if (roll < 0.75) { d.open = R() < 0.5; if (d.open) d.touched = true; ev = { type: d.open ? 'opened' : 'closed' }; }
@@ -244,9 +250,14 @@ function lawRun(G, seed, steps = 60) {
     // I4, RUN-AWARE (an owed commit ENDS WHEN ITS RUN ENDS): a reply that ended its run — a failure, or the bound's stop — leaves no owed
     // commit for that text on that machine alive
     if (ev.type === 'reply' && s.answer && s.answer.key === ev.key && (s.answer.kind === 'failed' || s.answer.kind === 'gaveUp') && s.owed && s.owed.key === ev.key) fail('I4 an owed commit alive after its run ended (a failure or the stop)');
+    // I10 (r1204's quiet rule): the late re-ask's reply that is not a complete listing never replaces the complete answer the field holds
+    if (ev.type === 'reply' && before.lateOut && before.lateOut === ev.key && ev.kind !== 'listing' && s.answer !== before.answer) fail('I10 a late re-ask\'s partial or failed reply replaced the complete answer');
     // I5 — the bound; no ask without a starting event
     for (const a of r.effects.filter((x) => x.do === 'ask')) {
-      if (!STARTERS.has(ev.type) && !(G.sameAsk && G.sameAsk(e0.cur, before.key) && e0.cur !== before.key)) fail(`I5 an ask on «${ev.type}», an event that starts none (and no rebase)`);
+      const lateOk = ev.type === 'reply' && ev.factsLate && ev.kind === 'listing' && a.quiet === true && a.by === 'late' && a.key === ev.key;   // r1204: the ONE quiet re-ask a complete listing with its facts still out starts
+      if (!STARTERS.has(ev.type) && !lateOk && !(G.sameAsk && G.sameAsk(e0.cur, before.key) && e0.cur !== before.key)) fail(`I5 an ask on «${ev.type}», an event that starts none (and no rebase)`);
+      // I10 (B-f3a1 / r1204) — the late re-ask: quiet, the LAST class, at most once a key in a run; and its reply never unsays a complete answer
+      if (a.by === 'late' || a.quiet) { if (!(a.quiet && a.by === 'late')) fail('I10 a quiet ask not in the late class (or a late one with words)'); if (lateKeys.has(a.key)) fail('I10 the facts still coming asked twice for one key'); lateKeys.add(a.key); }
       if (a.reask) { if (++runReasks > P.PARTIAL_REPLIES - 1) fail('I5 more partial replies than PARTIAL_REPLIES in one run'); } else runReasks = 0;
       net = { key: a.key };
       // I7 — A1
@@ -298,6 +309,8 @@ const CONTROLS = [
   ['I9', 'a set that drops an owed commit silently (B-225c\'s first cure: its presses left hanging)', [["    case 'set':\n", "    case 'set':\n      if (s.owed) { s.owed = null; }\n"]]],
   ['I9', 'a press on the same text that does not JOIN the owed commit (the older press dropped)', [['  const doors = [...((s.owed && s.owed.key === s.key && s.owed.doors) || []), ...(ev.door != null ? [ev.door] : [])];\n  s.owed = null;\n', '  if (s.owed) drop(s, fx, false);\n  const doors = [...(ev.door != null ? [ev.door] : [])];\n']]],
   ['I2b', 'a rebase that asks nothing (an owed press keeps «Asking the machine…» with no ask out — the box pre-runs\' fault)', [['    if (s.run.n < PARTIAL_REPLIES) ask(s, fx, now, { force: true, reask: true, press: !!s.owed });', '    if (false) ask(s, fx, now);'], ['    else { s.answer = { key: s.key, at: now, kind: \'gaveUp\', err: UNSETTLED', '    if (false) { s.answer = { key: s.key, at: now, kind: \'gaveUp\', err: UNSETTLED']]],
+  ['I10', 'the facts still coming asked at every reply (r1204: a loop of asks)', [[" && !(s.lateAsked || []).includes(s.key)) {", ') {']]],
+  ['I10', 'the late re-ask\'s partial reply taken as the answer (the complete one unsaid)', [["if (s.lateOut === s.key) { s.lateOut = null; if (kind !== 'listing') { fx.push({ do: 'paint' }); break; } }", 'if (s.lateOut === s.key) { s.lateOut = null; }']]],
   ['I8', 'the view reads something besides the state', [["return { ...base, status: g === 'quiet' ? 'pending' : g };", "return { ...base, status: g === 'quiet' ? 'pending' : g, seen: Math.random() };"]]],
 ];
 for (const [inv, what, edits] of CONTROLS) {
@@ -363,7 +376,7 @@ const doorWiring = (w) => {
   const reds = [
     ['the old settle — a «moved» press answered with the last committed path', ["else if (e.do === 'settle') answer(e.doors, null);", "else if (e.do === 'settle') answer(e.doors, e.result === 'moved' ? st.committed : null);"]],
     ['commit() hands the model no door (its press would never be answered)', ["fire({ type: 'commit', how, door })", "fire({ type: 'commit', how })"]],
-    ['set() without its destroyed guard (a press on a dead field hangs)', ["  function set(text, { commit: c = true, how = 'set', derived = null } = {}) {\n    if (st.destroyed) return Promise.resolve(null);", "  function set(text, { commit: c = true, how = 'set', derived = null } = {}) {"]],
+    ['set() without its destroyed guard (a press on a dead field hangs)', ["  function set(text, { commit: c = true, how = 'set', derived = null, by = null } = {}) {\n    if (st.destroyed) return Promise.resolve(null);", "  function set(text, { commit: c = true, how = 'set', derived = null, by = null } = {}) {"]],
     ['onCommit before the answer (an onCommit that destroys the field turns the taken press into «nothing»)', ["    answer(e.doors, info);", "    if (info) try { o.onCommit?.(info); } catch { }\n    answer(e.doors, info);"]],
   ];
   for (const [what, [from, to]] of reds) {
@@ -548,6 +561,94 @@ console.log('\n── ⑤ the field\'s value · the doors take the press\'s answ
   ok(`⑤ the walk over src/ finds every door of the table (${found.length} files build a field) and no file that builds one is missing from it`, DOORS.every(([f]) => found.includes(f)) && notDoors.length === 0, { found, notDoors });
   const planted2 = walkSrc({ 'src/lib/zz-new-door.js': "import { pathField } from './path-field.js';\nconst pf = pathField(input, { kind: 'folder' });\n" }).filter((f) => !DOORS.some(([g]) => g === f));
   ok('⑤ RED CONTROL: a planted new page that builds a field (its import line stripped, its call read) is named', planted2.join() === 'src/lib/zz-new-door.js', planted2);
+}
+
+/* ═══ ⑥ THE PAGE'S ONE GATE (B-f3a1's remainder, ruled r1279) — PURE gateStep: ONE count for the page, at most PAGE_ASKS (4) folder
+   checks in flight, one KEPT for a person's asks; the person's first, then a door's, the late (facts still coming) last; first come first
+   inside each class; a superseded or aborted queued ask leaves unsent — each rule with its RED. THE MODEL names each ask's cause; the
+   facts still coming are asked ONCE a key, quiet, late. THE PAGE: every folder check goes through the gate (a census over every
+   fetchJson( of the file), a late ask dropped unsent if its text moved, the picker tree's folders never supersede each other ═══ */
+console.log('\n── ⑥ the page\'s one gate · each ask\'s cause · the facts still coming ──');
+{
+  const drive = (G, evs, cap, kept) => { let g = cap == null ? G.gateInit() : G.gateInit(cap, kept); const started = [], dropped = []; for (const e of evs) { const r = G.gateStep(g, e); g = r.gate; started.push(...r.start); dropped.push(...r.dropped); } return { started, dropped, out: g.out, queued: g.queue.map((q) => q.id) }; };
+  const W = (id, field, by = 'door') => ({ type: 'want', id, field, by });
+  const page = [W(1, 'a'), W(2, 'b'), W(3, 'c'), W(4, 'd'), W(5, 'e'), W(6, 'f')];   // a page's build: six fields set from outside at once
+  const r1 = drive(P, page);
+  ok(`⑥ the cap (ruled: page-wide, four): a build's six door asks start THREE — the fourth slot is KEPT for a person (started ${r1.started.join(',')}, queued ${r1.queued.join(',')})`, P.PAGE_ASKS === 4 && P.PERSON_KEPT === 1 && r1.started.join() === '1,2,3' && r1.queued.join() === '4,5,6' && r1.out === 3, r1);
+  const r2 = drive(P, [...page, W(7, 'g', 'person')]);
+  ok(`⑥ the KEPT slot: a person's ask starts AT ONCE while three door asks hang on a machine that does not reply (started ${r2.started.join(',')})`, r2.started.join() === '1,2,3,7' && r2.out === 4, r2);
+  const r3 = drive(P, [...page, W(7, 'g', 'person'), W(8, 'h', 'person'), { type: 'done', id: 1 }, { type: 'done', id: 7 }]);
+  ok(`⑥ THE PRIORITY: a freed slot starts a PERSON's queued ask before the doors' queued earlier (started ${r3.started.join(',')})`, r3.started.join() === '1,2,3,7,8,4', r3);
+  const r4 = drive(P, [W(1, 'a'), W(2, 'b'), W(3, 'c'), W(4, 'x', 'late'), W(5, 'd'), { type: 'done', id: 1 }, { type: 'done', id: 2 }]);
+  ok(`⑥ the LATE class (the facts still coming) goes behind every door's ask, even one queued after it (started ${r4.started.join(',')})`, r4.started.join() === '1,2,3,5,4', r4);
+  const r5 = drive(P, [W(1, 'a', 'door'), W(2, 'b', 'door'), W(3, 'c', 'door'), W(4, 'd', 'door'), W(5, 'd', 'person'), { type: 'drop', id: 2 }]);
+  ok(`⑥ a field's newer ask SUPERSEDES its queued one (dropped unsent: ${r5.dropped.join(',')}); an aborted running ask frees its slot (started ${r5.started.join(',')})`, r5.dropped.join() === '4' && r5.started.join() === '1,2,3,5', r5);
+  const r6 = drive(P, [W(1, 'a'), W(2, 'b'), W(3, 'c'), W(4, 'd'), { type: 'drop', id: 4 }, { type: 'done', id: 1 }]);
+  ok('⑥ an aborted QUEUED ask leaves unsent; nothing starts in its place', r6.dropped.join() === '4' && r6.started.join() === '1,2,3' && r6.queued.length === 0 && r6.out === 2, r6);
+  const r7 = drive(P, [W(1, 'a'), W(1, 'b'), { type: 'done', id: 1 }]);
+  ok('⑥ an id already taken is not taken twice (no slot counted twice)', r7.started.join() === '1' && r7.out === 0, r7);
+  const fifo = load(anchored(SRC, '(GATE_RANK[q.by] < GATE_RANK[x.by] || (GATE_RANK[q.by] === GATE_RANK[x.by] && q.seq < x.seq) ? q : x)', '(q.seq < x.seq ? q : x)', 'B-f3a1 the priority'));
+  ok('⑥ RED CONTROL: the gate without its priority starts the doors\' earlier asks before the person\'s', drive(fifo, [...page, W(7, 'g', 'person'), W(8, 'h', 'person'), { type: 'done', id: 1 }, { type: 'done', id: 7 }]).started.join() !== '1,2,3,7,8,4');
+  const noCap = load(anchored(SRC, "      if (g.out >= g.cap || (next.by !== 'person' && doorsOut >= g.cap - g.kept)) break;", '', 'B-f3a1 the cap'));
+  ok('⑥ RED CONTROL: the gate without its cap sends all six at once', drive(noCap, page).started.length === 6);
+  const noKept = load(anchored(SRC, "(next.by !== 'person' && doorsOut >= g.cap - g.kept)", 'false', 'B-f3a1 the kept slot'));
+  ok('⑥ RED CONTROL: no slot kept for a person — four door asks hang and the person\'s waits behind them a whole bound', drive(noKept, [W(1, 'a'), W(2, 'b'), W(3, 'c'), W(4, 'd'), W(5, 'e', 'person')]).started.join() === '1,2,3,4');
+  const lateFirst = load(anchored(SRC, 'const GATE_RANK = { person: 0, door: 1, late: 2 };', 'const GATE_RANK = { person: 0, door: 1, late: 1 };', 'B-f3a1 the late class'));
+  ok('⑥ RED CONTROL: the facts still coming ranked with the doors — they jump the door asks queued after them', drive(lateFirst, [W(1, 'a'), W(2, 'b'), W(3, 'c'), W(4, 'x', 'late'), W(5, 'd'), { type: 'done', id: 1 }]).started.join() === '1,2,3,4');
+  const noSupersede = load(anchored(SRC, "    for (const q of g.queue.filter((x) => x.field === ev.field)) { g.queue.splice(g.queue.indexOf(q), 1); dropped.push(q.id); }   // superseded\n", '', 'B-f3a1 superseded'));
+  ok('⑥ RED CONTROL: the gate without the supersede keeps a field\'s stale queued ask', drive(noSupersede, [W(1, 'a'), W(2, 'b'), W(3, 'c'), W(4, 'd'), W(5, 'd', 'person')]).queued.join() === '4');
+  // THE MODEL: each ask's cause
+  const askBy = (M, evs) => { let st = M.init(A); let last = null; for (const [e, o] of evs) { const r = M.step(st, { ...e, cur: A, now: 1, env: envOf(A, o || {}) }); st = r.state; const x = r.effects.filter((y) => y.do === 'ask').pop(); if (x) last = x; } return last && last.by; };
+  ok('⑥ the cause: a text SET from outside asks as a door', askBy(P, [[{ type: 'set' }]]) === 'door');
+  ok('⑥ the cause: typing (Tab), a press, the list opened, a person\'s pick each ask as the person', askBy(P, [[{ type: 'typed', soon: false }]]) === 'person' && askBy(P, [[{ type: 'commit' }]]) === 'person' && askBy(P, [[{ type: 'opened' }]]) === 'person' && askBy(P, [[{ type: 'set', by: 'person' }]]) === 'person');
+  ok('⑥ the cause: a field the person typed in, then set from outside, asks as a door again', askBy(P, [[{ type: 'typed', soon: false }], [{ type: 'set' }]]) === 'door');
+  ok('⑥ the cause: a REFRESH asks as a door even in a field the person touched (a broadcast never jumps the page\'s queue)', askBy(P, [[{ type: 'opened' }], [{ type: 'reply', key: A, kind: 'listing' }], [{ type: 'refresh' }]]) === 'door');
+  const noCause = load(anchored(SRC, "      s.personal = ev.by === 'person';", '      s.personal = true;', 'B-f3a1 a door\'s set'));
+  ok('⑥ RED CONTROL: the model that calls every set the person\'s — a page\'s build would jump the person\'s queue', askBy(noCause, [[{ type: 'set' }]]) === 'person');
+  ok('⑥ the cause: a refresh while the PERSON\'s own ask for the key is out keeps it the person\'s (a broadcast never sends the person\'s check to the doors\' end)', askBy(P, [[{ type: 'typed', soon: false }], [{ type: 'refresh' }]]) === 'person');
+  const refreshTakes = load(anchored(SRC, '      if (s.open) { if (!(s.personal && (s.out === s.key || s.soon === s.key || s.reask === s.key))) s.personal = false; ask(s, fx, now); }', '      if (s.open) { s.personal = false; ask(s, fx, now); }', 'B-f3a1 the person\'s ask kept'));
+  ok('⑥ RED CONTROL: the refresh that takes the person\'s own ask to the doors — the pin goes red', askBy(refreshTakes, [[{ type: 'typed', soon: false }], [{ type: 'refresh' }]]) === 'door');
+  const refreshPersonal = load(anchored(SRC, '      if (s.open) { if (!(s.personal && (s.out === s.key || s.soon === s.key || s.reask === s.key))) s.personal = false; ask(s, fx, now); }', '      if (s.open) ask(s, fx, now);', 'B-f3a1 a refresh is a door\'s'));   // stale-pins: kept (the old line, planted by its RED)
+  ok('⑥ RED CONTROL: the refresh that keeps the person\'s cause — a broadcast jumps the queue', askBy(refreshPersonal, [[{ type: 'opened' }], [{ type: 'reply', key: A, kind: 'listing' }], [{ type: 'refresh' }]]) === 'person');
+  // r1204's seam: the facts still coming — ONCE a key, quiet, late; its partial reply never unsays the complete answer
+  const late = (M, second = 'listing') => { let st = M.init(A); const go = (e) => { const r = M.step(st, { ...e, cur: A, now: 5, env: envOf(A, { rank: 'resolved' }) }); st = r.state; return r.effects.filter((x) => x.do === 'ask'); };
+    go({ type: 'typed', soon: false }); const a1 = go({ type: 'reply', key: A, kind: 'listing', factsLate: true }); const kept = st.answer; const a2 = go({ type: 'reply', key: A, kind: second, factsLate: second === 'listing' }); return { a1, a2, kept: st.answer === kept, kind: st.answer && st.answer.kind }; };
+  const lt = late(P);
+  ok(`⑥ r1204: a complete listing with its facts still out is asked ONCE more — quiet, LATE (${JSON.stringify(lt.a1.map((x) => ({ by: x.by, quiet: x.quiet })))}); a second such reply asks nothing`, lt.a1.length === 1 && lt.a1[0].by === 'late' && lt.a1[0].quiet === true && lt.a2.length === 0, lt);
+  const lp = late(P, 'partial');
+  ok(`⑥ r1204: the late re-ask's PARTIAL reply never unsays the complete answer (kept: ${lp.kept}, ${lp.kind}) and asks nothing more`, lp.kept && lp.kind === 'complete' && lp.a2.length === 0, lp);
+  // the late mark is the late ask's ALONE: a person's press after it is asked for real — its partial reply re-asks, the press stays owed WITH an ask due
+  const lateThenPress = (M) => { let st = M.init(A); const go = (e, o) => { const r = M.step(st, { ...e, cur: A, now: 5, env: envOf(A, o || {}) }); st = r.state; return r.effects; };
+    go({ type: 'typed', soon: false }); go({ type: 'reply', key: A, kind: 'listing', factsLate: true }); go({ type: 'refresh' }); go({ type: 'commit', door: 1 });
+    const fx = go({ type: 'reply', key: A, kind: 'partial' }); return { owed: !!st.owed, reaskArmed: fx.some((x) => x.do === 'arm' && x.which === 'reask'), lateOut: st.lateOut }; };
+  const lpm = lateThenPress(P);
+  ok(`⑥ the LATE mark is the late ask's alone: a person's press asked after it gets its partial reply for real — re-asked, the press owed with an ask due (${JSON.stringify(lpm)})`, lpm.owed && lpm.reaskArmed && lpm.lateOut === null, lpm);
+  const sticky = load(anchored(SRC, '  s.lateOut = quiet ? s.key : null;   // the LATE mark', '  if (quiet) s.lateOut = s.key;   // the LATE mark', 'B-f3a1 the late mark cleared'));
+  const lpm0 = lateThenPress(sticky);
+  ok('⑥ RED CONTROL: the late mark left on the key — the person\'s partial reply is swallowed, the press hangs with nothing out or due', !lpm0.reaskArmed, lpm0);
+  const lt0 = late(load(anchored(SRC, " && !(s.lateAsked || []).includes(s.key)) {", ') {', 'r1204 once')));
+  ok('⑥ RED CONTROL (r1204): the copy that asks again at every «facts still coming» — a loop of asks', lt0.a2.length === 1, lt0);
+  // THE PAGE: every fetchJson( of the file is one of the named non-folder reads or the gate's own (a new folder check past the gate is named)
+  const ALLOWED = [/^fetchJson\(url, opts\)/, /^fetchJson\('\/api\/home'\)/, /^fetchJson\('\/api\/hosts'\)/, /^fetchJson\(`\/api\/hosts\/\$\{encodeURIComponent\(h\)\}\/recent-cwds`\)/, /^fetchJson\('\/api\/mkdir'/];
+  const gateWiring = (w) => ({
+    past: [...w.matchAll(/fetchJson\([^\n]{0,80}/g)].map((m) => m[0]).filter((c) => !ALLOWED.some((re) => re.test(c))),
+    gated: (w.match(/gatedFetch\(/g) || []).length,
+    cause: w.includes("if (e.do === 'ask') sliceAsk(e.key, !!e.press, e.by);") && w.includes("{ field: pickKey, by, stillWanted: by === 'late' ? () => keyNow() === key : null }"),
+    late: w.includes('if (stillWanted && !stillWanted()) { gateFire({ type: \'done\', id }); done(GATE_DROPPED); return; }'),
+    tree: w.includes('{ field: `${pickKey}:tree:${h || \'\'}:${p}`, by: \'person\' }'),
+    facts: w.includes('factsLate: !!(d && d.factsLate) });'),
+    dropped: w.includes('done(GATE_DROPPED); return; }') && w.includes("if (d === GATE_DROPPED) { traceReply(h, my, null, 'dropped'); return; }"),
+    lateWorld: w.includes("if (by !== 'late' || replyKind(d) === 'listing') mergeReply(W, h, d, probe, key);"),
+    treeEnds: w.includes('{ signal: st.treeCtl ? st.treeCtl.signal : undefined }') && w.includes('onClose: () => { st.treeCtl?.abort(); st.treeCtl = null;'),
+  });
+  const gw = gateWiring(WIRE);
+  ok(`⑥ WIRED: no folder check past the gate (${gw.gated - 1} gated sites + its definition); the field's ask carries its cause, a late one dropped unsent if its text moved — no reply then; a late reply that is not complete never touches the page's world; each folder of the picker tree its own id, its listings ending with the picker; the reply carries the facts flag`, gw.past.length === 0 && gw.gated === 6 && gw.cause && gw.late && gw.tree && gw.facts && gw.dropped && gw.lateWorld && gw.treeEnds, gw);
+  const gw0 = gateWiring(anchored(WIRE, "      return gatedFetch(url, { signal: ctl.signal }, { field: pickKey, by, stillWanted: by === 'late' ? () => keyNow() === key : null }).then((d) => {", '      return fetchJson(url, { signal: ctl.signal }).then((d) => {', 'B-f3a1 the field\'s ask past the gate'));   // stale-pins: kept (the old ask past the gate, planted by its RED)
+  ok('⑥ RED CONTROL: the field\'s own ask past the gate (the ordinary way: fetchJson(url, { signal })) is named', gw0.past.some((c) => c.startsWith('fetchJson(url, { signal')), gw0.past);   // stale-pins: kept (the planted ask past the gate, named by its RED)
+  const gw1 = gateWiring(anchored(WIRE, "{ field: `${pickKey}:tree:${h || ''}:${p}`, by: 'person' }", "{ field: pickKey + ':tree', by: 'person' }", 'B-f3a1 the tree\'s one id'));
+  ok('⑥ RED CONTROL: one id for the whole picker tree (its folders\' listings would supersede each other) — the pin goes red', !gw1.tree, gw1);
+  const gw2 = gateWiring(anchored(WIRE, "        if (by !== 'late' || replyKind(d) === 'listing') mergeReply(W, h, d, probe, key);", '        mergeReply(W, h, d, probe, key);', 'B-f3a1 the late reply in the world'));   // stale-pins: kept (the old merge, planted by its RED)
+  ok('⑥ RED CONTROL: the page that merges a failed late reply (the list says «did not answer» while the answer stands) — the pin goes red', !gw2.lateWorld, gw2);
 }
 
 console.log(`\n${n - bad}/${n} ok${bad ? ` — ${bad} BAD` : ''}`);
