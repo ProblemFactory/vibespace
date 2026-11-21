@@ -145,4 +145,35 @@ console.log('⑥ the faces');
   ok(undeclared.length === 0, 'every mode a harness lists has its face declared beside it', undeclared);
 }
 
+console.log('⑦ the thinking level on the model chip — read at the chip\'s own contrast (主开发 r1267)');
+{
+  // A GAUGE, pure arithmetic over the two style files: the words of the thinking level inside the model's chip, on the chip's own
+  // fill, in each of style.css's six themes, at the contrast the tree states for words (WCAG AA 4.5 : 1 — test-channels-i18n's
+  // census of names, docs/terminal.md). The colours are READ from the files: the chip's base rule (its fill and its words'
+  // colour) and the strip's rule for the effort words; a theme without a variable takes the default theme's.
+  const CHAT = fs.readFileSync(path.join(REPO, 'public/chat.css'), 'utf8'), STYLE = fs.readFileSync(path.join(REPO, 'public/style.css'), 'utf8');
+  const decl = (body, prop) => { const m = new RegExp(`(?:^|[;{\\s])${prop}:\\s*([^;}]+)`).exec(body || ''); return m ? m[1].trim() : null; };
+  const chipBody = (/\n\.chat-status-model \{([^}]*)\}/.exec(CHAT) || [])[1];
+  const effortBody = (/\n\.chat-status-bar \.chat-status-model \.chat-status-effort, [^{]*\{([^}]*)\}/.exec(CHAT) || [])[1];
+  const THEMES = [...STYLE.matchAll(/\n(?::root, )?\[data-theme="([a-z]+)"\] \{([^}]*)\}/g)].map((m) => ({ name: m[1], body: m[2] }));
+  const base = THEMES.find((x) => x.name === 'dark');
+  const val = (theme, v) => { const m = /^var\(--([a-z0-9-]+)\)$/.exec(v || ''); if (!m) return v; return decl(theme.body, `--${m[1]}`) || decl(base && base.body, `--${m[1]}`); };
+  const rgb = (c) => { const h = /^#([0-9a-f]{6})$/i.exec(c || ''); return h ? [0, 2, 4].map((i) => parseInt(h[1].slice(i, i + 2), 16)) : null; };
+  const lum = (c) => { const [r, g, b] = c.map((x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; }); return 0.2126 * r + 0.7152 * g + 0.0722 * b; };
+  const ratio = (a, b) => { const [hi, lo] = [lum(a), lum(b)].sort((x, y) => y - x); return (hi + 0.05) / (lo + 0.05); };
+  const gauge = (effortColour) => THEMES.map((th) => {
+    const fill = rgb(val(th, decl(chipBody, 'background'))), chipWords = val(th, decl(chipBody, 'color'));
+    const words = rgb(effortColour === 'inherit' ? chipWords : val(th, effortColour));
+    return { theme: th.name, ratio: fill && words ? Math.round(ratio(words, fill) * 100) / 100 : null };
+  });
+  const effortColour = decl(effortBody, 'color');
+  const now = gauge(effortColour);
+  console.log(`  · the effort words' colour «${effortColour}» on the chip's fill «${decl(chipBody, 'background')}»: ${now.map((g) => `${g.theme} ${g.ratio} : 1`).join(' · ')}`);
+  ok(THEMES.length === 6 && !!chipBody && !!effortBody, 'the gauge read its inputs: the chip\'s base rule, the effort words\' rule, six themes', { themes: THEMES.map((x) => x.name), chip: !!chipBody, effort: !!effortBody });
+  ok(now.every((g) => g.ratio !== null && g.ratio >= 4.5), 'the thinking level\'s words on the model chip read at ≥ 4.5 : 1 in every theme (a mark is for knowing)', now);
+  // CONTROL: the rule as P2 wrote it (--text-secondary, a colour for words on the page's dark surfaces, not on the accent fill) is RED by name
+  const was = gauge('var(--text-secondary)');
+  ok(was.some((g) => g.ratio !== null && g.ratio < 4.5), `CONTROL: the effort words in --text-secondary on the chip go RED (${was.map((g) => `${g.theme} ${g.ratio}`).join(' · ')})`, was);
+}
+
 report();

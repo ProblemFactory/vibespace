@@ -165,7 +165,10 @@
 .chat-status-bar > .chat-status-clickable:is(.chat-status-ctx, .chat-status-browser, .chat-status-channels, .chat-status-tasks, .chat-status-turnstate)::after { content: '\203A'; content: '\203A' / ""; margin-left: 4px; opacity: 0.7; }
 .chat-status-bar > .chat-status-model.chat-status-clickable { border-color: var(--border-active); }
 .chat-status-bar > .chat-status-turnstate.chat-status-needs-action { border-color: var(--yellow); }
-.chat-status-bar .chat-status-model .chat-status-effort, .chat-status-bar .chat-status-model .chat-status-door-sep { color: var(--text-secondary); }
+/* the thinking level inside the model's chip is read in the CHIP'S OWN colour (主开发 r1267, from the 669 picture: «推理强度：未报告» in
+   --text-secondary on the accent fill read 1.19–1.48 : 1 over the six themes); it is told apart by weight, never by a faint colour */
+.chat-status-bar .chat-status-model .chat-status-effort, .chat-status-bar .chat-status-model .chat-status-door-sep { color: inherit; font-weight: 500; }
+.chat-status-bar .chat-status-model .chat-status-door-sep { margin: 0 0.3em; }   /* its « · » spaced as the strip's other chips' (a flex chip drops the spaces of its markup) */
 /* a door's word and its short form (≤ 360 px: «⚙ 设置», «⟳ 1», «38%»); a long title is cut INSIDE its own chip, never a row */
 .chat-status-bar .chat-status-door-short { display: none; }
 .chat-status-bar.chat-status-short .chat-status-door-word { display: none; }
