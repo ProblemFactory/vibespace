@@ -692,6 +692,12 @@ This file is the engineers' record of every release: the lanes, the verification
 - HOW IT REACHES THEM: the hub requires it; the wrappers (all on the hub — the local chat-wrapper spawns attach-cli toward a device; jobs run the hub's job-wrapper) require it eagerly as kept-copies.js, with a one-line fallback in the SAME words (admitted in test-exit-forensics-pins); the channels CLI on the cli-call road (the checkout's copy, else data/bin/fd-close.js copied at boot, in AGENT_TOOLS, gitignored; neither: the same words inline). No device bundle input changes (a static walk of agentd.js's requires: 180 files, none of these).
 - LEGS: test-fd-close-census ⑤ (the helper, ONE SPELLING — every fallback built from its own text says the helper's words, a drifted copy red — the sites' pins, the hosts delta driven with a placed close failure + its red copy); the ratchet's rows restated (101 held by file).
 
+### bl-browser-a B-dbb4 unit 1 — the app's windows a pixel image does not show are named (the coordinator's r756 / r772)
+- userW's report (fb-43b1db9bb4): a sign-in popup a desktop-app Chromium opened was «not followed». Its record lives on another person's instance and was not read past its cut (r756: no act there); this unit is built from the tree.
+- From the tree: the image is pixelPlan's union of MAPPED named top-levels right / below the main window's origin or over it, cut to a pin; an unmapped corral is mapped already (window-dialog-member). A popup up-left of the main, an unmapped one the corral map does not reach, or one beyond a pinned size was left out SILENTLY, and vibespace-window has no verb for another window of the app.
+- PURE `unshownOf` / `unshownText` in a NEW module src/window-unshown.js (never src/window-reach.js: that one rides the device agent's bundle): every named top-level ≥ 100×100 the image leaves out or cuts, with why and how it can be reached today. The engine's plan carries it; the screenshot answer has `unshown` + `note`; X-Window-Shot carries them ASCII-escaped; the CLI prints the note under the image line. No window is moved by a read (r772).
+- Gate: test-desktop-pin §DBB4 (PURE cells, the real engine over a fake xpra keeper with its control, the real route + the shipped CLI with an en-dash title). Unit 2 (owed): the handle as the call's subject; the stand-in heavy leg (a real chromium's window.open popup at the origin and one far outside).
+
 ## 2.369.413 — 2026-11-20
 
 ### bl-loop-b — the watch door's block follow (its readers' S1 / S3 / S4 + N4 / N8 / N9 / N10, after the hotfix 2.369.411's push)

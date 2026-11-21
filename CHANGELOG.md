@@ -88,6 +88,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An agent can no longer create a Background Work job that looks locked by you, or whose view or control is not session, group or all; it is told why.
 - A question in For you under a Background Work job's name now comes only from that job or the conversation that owns it, not from another that can see it.
 - On a slow data folder, VibeSpace no longer stops answering for a second or more each hour while it clears out finished background jobs.
+- An agent that drives a desktop app by its pictures is now told about a window the app opened that its picture does not show, such as a sign-in popup.
 
 ## 2.369.413 — 2026-11-20
 
