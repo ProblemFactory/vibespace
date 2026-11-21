@@ -871,8 +871,8 @@ function noteFileRefusal(fp, refusal) {
   return rec;
 }
 const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
-/** does the pool's refusal of this file still STAND (its storage's, or refused within the stated gap)? — memory only */
-function fileRefused(fp) { const r = fp && _fileRefusals.get(fp); return !!r && (r.storageHung || Date.now() - r.lastAt <= STAND_GAP_MS); }
+/** has the pool refused this file with no answer for it since (any pool answer for it forgives the record)? — memory only */
+function fileRefused(fp) { return !!(fp && _fileRefusals.get(fp)); }
 /** the storage's, as far as memory knows (its record, the mount door) — never a file call */
 function fileStorageHung(fp) { const r = fp && _fileRefusals.get(fp); if (r && r.storageHung) return true; try { return !!require('../mount-door').blocked(fp); } catch { return false; } }
 /** May this file's history be read on the main process now? → { ok, why } (never a file call: memory only) */

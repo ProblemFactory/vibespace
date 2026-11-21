@@ -157,7 +157,7 @@ console.log('① the Claude history, the pool closed for good');
   // grown PAST the warm's inline append (4 MB — a bounded read the warm folds in with the pool up too): the pool's work
   fs.appendFileSync(fp, Array.from({ length: 80000 }, (_, k) => `{"type":"user","uuid":"g${k}","message":{"role":"user","content":"q"}}`).join('\n') + '\n');
   const Rp = await road('① a parse of the grown file, no warm (the pool still refusing)', () => { const l = SS.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
-  ok(Rp.out && Rp.out.notLoaded === 'transcript_reader_restarting' && Rp.out.n === kept.length && content(Rp).length === 0, `${Rp.name}: nothing read on the loop (${content(Rp).length} reads) — the loaded copy answered, tagged, the warm asked again`, { out: Rp.out, reads: Rp.reads.slice(0, 4) });
+  ok(Rp.out && !Rp.out.notLoaded && Rp.out.n === kept.length && content(Rp).length === 0, `${Rp.name}: nothing read on the loop (${content(Rp).length} reads) — the copy the main process read answered (as of that read), the warm asked again`, { out: Rp.out, reads: Rp.reads.slice(0, 4) });
   await SS.warmSessionJsonlAsync(sid, cwd);   // the warm the parse asked for (or joins it): sliced again, the grown file loaded
   const Rq = await road('① a parse after the grown file was read again', () => { const l = SS.parseSessionJsonl(sid, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   const grownN = C.readJsonlTail(fp, null, { dropSubagent: true, warnLarge: false }).entry.messages.length;
@@ -228,9 +228,13 @@ console.log('⑤b the read note\'s two ends');
   C._setTranscriptPoolForTest(hungP); try { await C.jsonlGapInfoAsync(fa); } catch { }   // another road: a hung path
   fs.appendFileSync(fa, '{"type":"user","uuid":"later","message":{"role":"user","content":"q"}}\n');
   C._setTranscriptPoolForTest(fail); fail.calls.length = 0;
-  const Ra = await road('⑤b(a) a parse of the grown file after the memory called it the storage\'s', () => { const l = SS.parseSessionJsonl(sa, cwd); return { notLoaded: l.notLoaded || null }; });
+  // a WARM first (the attach, a page — the hot roads warm before they parse): the pool alone, no find, no stat
+  const Rw1 = await road('⑤b(a) a warm after the memory called the file the storage\'s', () => SS.warmSessionJsonlAsync(sa, cwd));
+  ok(Rw1.reads.length === 0 && fail.calls.filter((o) => o === 'jsonlTail').length === 1 && Rw1.out === false, `${Rw1.name}: no call of any kind on the transcript (${Rw1.reads.length}) — the pool alone asked (${fail.calls.filter((o) => o === 'jsonlTail').length})`, { reads: Rw1.reads.slice(0, 4), calls: fail.calls });
+  fail.calls.length = 0;
+  const Ra = await road('⑤b(a) a parse of the grown file then', () => { const l = SS.parseSessionJsonl(sa, cwd); return { n: l.length, notLoaded: l.notLoaded || null }; });
   await new Promise((res) => setImmediate(res));
-  ok(Ra.reads.length === 0 && fail.calls.filter((o) => o === 'jsonlTail').length === 0 && Ra.out && Ra.out.notLoaded, `${Ra.name}: no call of any kind on the transcript (${Ra.reads.length}), no warm asked (${fail.calls.length} pool calls) — «not loaded»`, { reads: Ra.reads.slice(0, 4), calls: fail.calls });
+  ok(Ra.reads.length === 0 && fail.calls.filter((o) => o === 'jsonlTail').length === 0, `${Ra.name}: no call of any kind on the transcript (${Ra.reads.length}), no warm asked (${fail.calls.length} pool calls) — the copy last read answered (${Ra.out && Ra.out.n} records)`, { reads: Ra.reads.slice(0, 4), calls: fail.calls, out: Ra.out });
   // (b) THE POOL'S WORD ENDS IT: the pool answers again (the warm's task scan reaches it) — the note ends, the next parse of the
   // grown file is the old road's (RED: the note kept, the stale copy answered «not loaded» on a healthy hub)
   const sb = sids[5], fb = claudeFp(sb);
