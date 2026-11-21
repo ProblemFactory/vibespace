@@ -28,6 +28,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A slow paired machine's list now comes back in seconds, its last list marked old, instead of that machine being walked a second time.
 - Pasting a picture into a terminal conversation no longer holds up the other windows, and a paste the clipboard does not take now says why.
 - In Channels, an account's own search repeated after ten minutes now asks the account again, and an agent is told how old a remembered result is.
+- The tab row of an agent browser's live view now fits itself again when the font or font size changes, so a tab in front is no longer cut off at its edge.
 
 ## 2.369.415 — 2026-11-21
 
