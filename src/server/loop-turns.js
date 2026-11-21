@@ -19,7 +19,8 @@ function next() {
 }
 
 /** Run `fn` in a loop turn of its own, after every job asked before it — or, `first`, AHEAD of them (B-cd4b unit 3: the restore's
- *  registration batches, each asked by the one before, all run before the listen step's rest that was asked after the first). */
+ *  registration batches, each asked by the one before, all run before the listen step's rest that was asked after the first). Jobs
+ *  asked `first` run LAST-asked first (each goes to the head of the line). */
 function turn(fn, { first = false } = {}) {
   if (typeof fn !== 'function') throw new TypeError('loop-turns: turn(fn) takes a function');
   if (first) queue.unshift(fn); else queue.push(fn);

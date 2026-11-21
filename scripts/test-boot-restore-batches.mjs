@@ -73,7 +73,7 @@ try {
   const g = await run(BR, 'g80');
   ok(g.atReturn === 32 && g.atStep === 80 && g.live === 80 && /; registered in 3 turns of ≤ 32 \(the longest \d+ ms\)$/.test(g.turnsSaid || '') && g.firstAttachAfterStep && g.attached === 80,
     `80 survivors: ${g.atReturn} in the live set when restoreSessions returns, ${g.atStep} when the step asked after it runs; «${g.said}»; the first attach after the step, all ${g.attached} attached`, g);
-  const back = anchored(brSrc, 'if (done) finish(); else loopTurn(oneBatch, { first: true });', 'if (done) finish(); else loopTurn(oneBatch);', 'b-cd4b-reg-back');
+  const back = anchored(brSrc, "loopTurn(() => step('restore-batch', oneBatch), { first: true });", "loopTurn(() => step('restore-batch', oneBatch));", 'b-cd4b-reg-back');
   const r1 = await run(require(M.write('src/server/boot-restore.js', back, 'cd4b-reg-back')), 'r80back');
   ok(r1.atStep !== null && r1.atStep < 80, `RED: the batches asked at the back of the queue ⇒ the step runs with ${r1.atStep} of 80 in the live set`, r1);
   const all = anchored(brSrc, 'const REGISTER_BATCH = 32;', 'const REGISTER_BATCH = Infinity;', 'b-cd4b-reg-one-pass');
@@ -89,6 +89,52 @@ try {
   const q1 = await seq(LT);
   const q1r = await seq(require(M.write('src/server/loop-turns.js', anchored(ltSrc, '  if (first) queue.unshift(fn); else queue.push(fn);', '  queue.push(fn);', 'b-cd4b-turn-first-ignored'), 'cd4b-turn-first-ignored')));
   ok(q1 === 'A,C,B' && q1r === 'A,B,C', `asked first from inside A, C runs before B, queued earlier (${q1}); RED \`first\` ignored ⇒ ${q1r}`, { q1, q1r });
+
+  console.log('④ an EXACT multiple of 32 (its follow, r1050): 64 survivors — all registered before the step, all attached, the line said');
+  const m64 = await run(BR, 'g64', 64);
+  ok(m64.atReturn === 32 && m64.atStep === 64 && m64.live === 64 && m64.attached === 64 && /; registered in \d+ turns of ≤ 32 \(the longest \d+ ms\)$/.test(m64.turnsSaid || ''),
+    `64 survivors: ${m64.atReturn} at the return, ${m64.atStep} when the step runs, all ${m64.attached} attached — «${m64.said}» (the last turn finds the end: near empty)`, m64);
+
+  console.log('⑤ THE TODO PILL (its follow, r1050): a survivor whose sidecar holds no todos shows none — never the previous survivor\'s');
+  {
+    // 20 survivors (one turn), half with todos in their sidecar: every one WITHOUT shows none, whatever the folder's order. RED: the
+    // function-wide `var` back ⇒ a survivor without todos carries the one read before it (20 interleaved: certain but 1 in 184 756)
+    const todosRun = async (BRm, tag) => {
+      const X = instance(BRm, dataDir(tag)); const ids = [];
+      for (let i = 0; i < 20; i++) { const a = X.add(700 + i); ids.push(a.id); if (i % 2 === 0) fs.writeFileSync(path.join(ROOT, tag, 'buffers', a.id + '.json'), JSON.stringify({ mode: 'terminal', todos: [{ status: 'completed', content: 'one' }, { status: 'in_progress', content: `step ${i}` }] })); }
+      await logged(async () => X.api.restoreSessions());
+      return ids.map((id, i) => ({ i, todos: (X.activeSessions.get(id) || {})._todos || null }));
+    };
+    const g5 = await todosRun(BR, 'todo-g');
+    const carry = anchored(anchored(brSrc, "    let wrapperTodos = null;   // unit 3's follow (r1050): block-scoped — a sidecar with no todos shows none, never the PREVIOUS survivor's (a `var` carried it)\n", '', 'b-cd4b-todos-let'), '        wrapperTodos = { done, total: wrapperMeta.todos.length,', '        var wrapperTodos = { done, total: wrapperMeta.todos.length,', 'b-cd4b-todos-var');   // stale-pins: kept (the red plants the old shape)
+    const fixedRead = anchored(carry, '      _todos: wrapperTodos || null,', "      _todos: (typeof wrapperTodos !== 'undefined' && wrapperTodos) || null,", 'b-cd4b-todos-read');   // stale-pins: kept (the red plants the old shape)
+    const r5 = await todosRun(require(M.write('src/server/boot-restore.js', fixedRead, 'cd4b-todos-var')), 'todo-r');
+    ok(g5.every((x) => (x.i % 2 === 0) === !!x.todos) && g5.filter((x) => x.todos).every((x) => x.todos.current === `step ${x.i}`), 'every survivor shows its OWN todos — none where its sidecar holds none', g5);
+    ok(r5.some((x) => x.i % 2 === 1 && !!x.todos), `RED: the function-wide \`var\` back ⇒ a survivor without todos shows another's (${r5.filter((x) => x.i % 2 === 1 && x.todos).length} of 10)`, r5);
+  }
+
+  console.log('⑥ A RETIRE IS COUNTED (its follow, r1050): 40 dead sockets (a machine restart) — 32 retired in the restore\'s turn, the rest after');
+  {
+    // every socket dead: a fake fuser and pgrep that find no process (exit 1), the probes answer dead; each retire unlinks its socket
+    // (a sync meta write and a rename for a remote one) — real work, counted in its batch. RED: a retire not counted ⇒ all 40 in one turn
+    const BIN = path.join(ROOT, 'bin'); fs.mkdirSync(BIN, { recursive: true });
+    for (const b of ['fuser', 'pgrep']) fs.writeFileSync(path.join(BIN, b), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+    const PATH0 = process.env.PATH; process.env.PATH = BIN + ':' + PATH0;
+    try {
+      const deadRun = async (BRm, tag) => {
+        const X = instance(BRm, dataDir(tag)); for (let i = 0; i < 40; i++) X.add(800 + i);
+        const SOCK = path.join(ROOT, tag, 'sockets'), left = () => fs.readdirSync(SOCK).filter((f) => f.startsWith('cw-')).length;
+        const t = await logged(async () => { await X.api.probeSockets(); X.api.restoreSessions(); return left(); });
+        await logged(async () => { const tEnd = Date.now() + 5000; while (left() > 0 && Date.now() < tEnd) await new Promise((r) => setTimeout(r, 5)); });   // the later batches' retire lines («✗ Dead socket») kept out of the suite's own output
+        return { atReturn: t.r, after: left(), live: X.activeSessions.size };
+      };
+      const g6 = await deadRun(BR, 'dead-g');
+      const uncounted = anchored(brSrc, '    if (!socketAlive) { retireDeadSocket(sockFile, socketPath); yield; continue; }', '    if (!socketAlive) { retireDeadSocket(sockFile, socketPath); continue; }', 'b-cd4b-retire-uncounted');   // stale-pins: kept (the red plants the old shape)
+      const r6 = await deadRun(require(M.write('src/server/boot-restore.js', uncounted, 'cd4b-retire-uncounted')), 'dead-r');
+      ok(g6.atReturn === 8 && g6.after === 0 && g6.live === 0, `40 dead sockets: ${40 - g6.atReturn} retired in the restore's turn (${g6.atReturn} left at its return), all after its turns`, g6);
+      ok(r6.atReturn === 0, `RED: a retire not counted ⇒ all 40 retired in the restore's one turn (${r6.atReturn} left)`, r6);
+    } finally { process.env.PATH = PATH0; }
+  }
 } catch (e) { fail++; console.error('  ✗ threw: ' + ((e && e.stack) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

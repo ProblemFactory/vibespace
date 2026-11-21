@@ -115,7 +115,7 @@ function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
   deleteSessionMeta, broadcastToSession, broadcastActiveSessions,
-  refreshWebuiPids, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, agentEnv }) {
+  refreshWebuiPids, getHosts, getDialBridge, getExitProxy = () => null, note = () => { }, step = (name, fn) => fn(), agentEnv }) {
   const hosts = mk(getHosts);
   const dialBridge = mk(getDialBridge);
   const exitProxyRef = mk(getExitProxy); // B-92a4: a session the re-probe un-adopts ends its exit pairs + waiting asks like any ended one
@@ -810,7 +810,7 @@ function restoreSessions() {
     let socketAlive = P.alive.get(sockFile);
     if (socketAlive == null) { open.add('alive'); socketAlive = true; }
 
-    if (!socketAlive) { retireDeadSocket(sockFile, socketPath); continue; }
+    if (!socketAlive) { retireDeadSocket(sockFile, socketPath); yield; continue; }   // unit 3's follow (r1050): a retire is real work (a sync meta write, a rename) — counted in its batch
 
     const meta = readSessionMeta(sockFile);
     const id = meta.webuiSessionId || ('sess-' + (++sessionCounterRef.value) + '-' + Date.now());
@@ -821,7 +821,7 @@ function restoreSessions() {
     // B-92a4: never on a non-answer — an undecided set, or an unanswered socket the dedup would retire, waits probe-pending.
     const dk = ownsItsId(meta) ? dedupKey(meta) : null;
     if (dk && (undecided.has(dk) || (open.size && retireSockets.has(sockFile)))) { open.add('dedup'); pendingGroups.set(dk, groupOf.get(dk) || [sockFile]); }
-    else if (retireSockets.has(sockFile)) { retireDuplicate(sockFile, socketPath, id, meta.claudeSessionId); continue; }
+    else if (retireSockets.has(sockFile)) { retireDuplicate(sockFile, socketPath, id, meta.claudeSessionId); yield; continue; }   // counted, as a dead socket's retire
 
     // Detect mode and streaming state from wrapper metadata
     let sessionMode = meta.mode || 'terminal';
@@ -832,6 +832,7 @@ function restoreSessions() {
     let wrapperAgentTasks = null;
     let wrapperObs = null; // lane conversation-facts: the wrapper's sidecar as read (its observations + its pid), judged at adoption
     let wrapperHeld = null;
+    let wrapperTodos = null;   // unit 3's follow (r1050): block-scoped — a sidecar with no todos shows none, never the PREVIOUS survivor's (a `var` carried it)
     const wrapperFiles = require('./wrapper-files.js').resolveWrapperFiles(BUFFERS_DIR, id, path.join(SOCKETS_DIR, sockFile));
     restoredSidecars.set(id, wrapperFiles.sidecar); // the lock capture's pid witness (the wrapper's own pid)
     try {
@@ -846,7 +847,7 @@ function restoreSessions() {
       if (Array.isArray(wrapperMeta.todos) && wrapperMeta.todos.length) {
         const done = wrapperMeta.todos.filter((t) => t?.status === 'completed').length;
         const cur = wrapperMeta.todos.find((t) => t?.status === 'in_progress');
-        var wrapperTodos = { done, total: wrapperMeta.todos.length, current: cur ? String(cur.content || cur.activeForm || cur.step || '').slice(0, 140) : null };
+        wrapperTodos = { done, total: wrapperMeta.todos.length, current: cur ? String(cur.content || cur.activeForm || cur.step || '').slice(0, 140) : null };
       }
       // Agents still RUNNING per the wrapper's task map (chat-wrapper keeps
       // them until task_notification) need their JSONL watchers re-armed —
@@ -881,7 +882,7 @@ function restoreSessions() {
       _agentdSession: !!meta.agentdSession, // transport mechanism (2.219.0 — kill branch correctness)
       _cwdRecreated: !!meta.cwdRecreated, // B-7812: undelivered recreated-cwd agent notice survives restarts
       _remoteState: restoredRemote,
-      _todos: (typeof wrapperTodos !== 'undefined' && wrapperTodos) || null,
+      _todos: wrapperTodos || null,
       _restoreAgentTasks: wrapperAgentTasks, // re-armed post-attach (setupSessionPty defines the watcher)
       _pendingEditor: meta.pendingEditor || null, // Ctrl+G edit in flight — re-broadcast on attach
       _prevGoal: meta.prevGoal || null, // /goal resume works across restarts
@@ -1106,14 +1107,19 @@ function restoreSessions() {
   // turn, as it always did; a bigger one registers REGISTER_BATCH a turn, each batch AHEAD of every other queued turn
   // (src/server/loop-turns.js `first`): the listen step's rest ('listen-rest', asked by server.js right after this returns) runs only
   // after the LAST batch, and the front holds every new connection until it has run (src/server/tls.js turn) — nothing asks for a
-  // survivor before the live set is whole. The attaches, the said lines and the timers follow the last batch (finish).
+  // survivor before the live set is whole. The attaches, the said lines and the timers follow the last batch (finish). Only the
+  // FIRST batch is in the live set when restoreSessions returns; the rest arrive before the listen step's rest. A batch counts every
+  // survivor that did real work — a retired dead or duplicate socket too. Between two batches the hub's one-second digest may
+  // broadcast a partial roster: nothing reads it (the front holds every page until the step's last turn). Past the front's 5 s
+  // bound (thousands of survivors: about 3 800 at 32 a turn of ~42 ms) the hold lets go between two batches — the live set is
+  // not yet whole then (src/server/tls.js says the same).
   const it = registerEach();
   if (sockets.length <= REGISTER_BATCH) { while (!it.next().done) { } regTurns.n = 1; finish(); return; }
   const oneBatch = () => {
     const t0 = performance.now(); let n = 0, done = false;
     while (n < REGISTER_BATCH) { if (it.next().done) { done = true; break; } n++; }
     const ms = performance.now() - t0; regTurns.n++; if (ms > regTurns.longest) regTurns.longest = ms;
-    if (done) finish(); else loopTurn(oneBatch, { first: true });
+    if (done) finish(); else loopTurn(() => step('restore-batch', oneBatch), { first: true });   // the later batches named in the boot trace
   };
   oneBatch();
 }

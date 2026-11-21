@@ -417,7 +417,7 @@ const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
   broadcastActiveSessions: (...a) => broadcastActiveSessions(...a),
   refreshWebuiPids: (...a) => refreshWebuiPids(...a),
   getHosts: () => { try { return hosts; } catch { return null; } },
-  getDialBridge: () => { try { return dialBridge; } catch { return null; } }, getExitProxy: () => { try { return exitProxy; } catch { return null; } }, note: (line) => bootTrace.note(line), // B-92a4: the re-probe un-adopts through the exit proxy's onSessionEnd; its lines ride the boot trace (⚙ Diagnostics)
+  getDialBridge: () => { try { return dialBridge; } catch { return null; } }, getExitProxy: () => { try { return exitProxy; } catch { return null; } }, note: (line) => bootTrace.note(line), step: (name, fn) => bootTrace.step(name, fn), // B-cd4b unit 3: the later registration batches named in the boot trace · B-92a4: the re-probe un-adopts through the exit proxy's onSessionEnd; its lines ride the boot trace (⚙ Diagnostics)
   agentEnv: (...a) => require('./src/ws-handler').agentEnv(...a), // lane spawn-env-debts: the remote chat re-adopt's transport env (as ws-create's r6Env)
 }); bootTrace.span('restore-probes', probeSockets(), probeFacts); // B-1319: the restore's fuser / fd-scan questions start now, as children — the server listens once they answered (below); B-92a4: or at the cap, the span naming what did not answer
 // ── Agent-tool generators + hook registration (src/server/agent-tool-generators.js) ──

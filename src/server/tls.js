@@ -173,8 +173,9 @@ function create({ app, httpServer, dataDir, port, serverSetting = () => undefine
   // not held here.) `step(name, fn)` names the turn's hold in the boot trace (server.js wires bootTrace.step). Bounded: past
   // holdMaxMs the hold is said and let go — after a step turn already queued (setImmediate: a stalled poll phase that fires the
   // bound and the next turn's hop together still runs the turn first); a step that never ends never stops the hub answering. A step
-  // turn that itself runs past the bound (a registration of many hundreds) is never cut: the bound fires after it, and the hand-over
-  // can then come before batch 1 or the rest of the step — the live set is whole by then (the registration's turn has run).
+  // turn that itself runs past the bound is never cut: the bound fires after it. With the registration in batches (B-cd4b unit 3)
+  // the bound can end BETWEEN two batches when a restore takes longer than it (thousands of survivors: about 3 800 at 32 a turn) —
+  // a request may then arrive before the live set is whole; under that, the hold lasts until the listen step's rest has run.
   let stepTurns = 0, held = null, lift = null, holdTimer = null;
   const letGo = () => { if (holdTimer) { timers.clearTimeout(holdTimer); holdTimer = null; } const l = lift; held = null; lift = null; if (l) l(); };
   function turn(fn, name = 'turn') {

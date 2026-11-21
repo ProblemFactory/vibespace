@@ -322,7 +322,10 @@ const billedN = () => { let n = 0; try { for (const f of fs.readdirSync(META)) {
 const unbill = () => { let n = 0; try { for (const f of fs.readdirSync(META)) { if (!f.endsWith('.json')) continue; const m = readJson(path.join(META, f)); if (m && 'apiKeySource' in m) { delete m.apiKeySource; fs.writeFileSync(path.join(META, f), S(m)); n++; } } } catch { } return n; };
 /** the restore's own words (src/server/boot-restore.js drainSurvivorAttaches): how many, the registration pass, the batches */
 const RESTORE_RE = /\[boot-restore\] (\d+) survivor\(s\): registered in (\d+) ms; attached in (\d+) batch\(es\) of ≤ (\S+) \((\d+) ms, the longest batch (\d+) ms\)/;
-const restoreLine = (log) => { const m = RESTORE_RE.exec(log); return m ? { line: m[0], n: +m[1], registered: +m[2], batches: +m[3], longest: +m[6] } : null; };
+// unit 3's follow (r1050): «registered in N ms» is the wall time across the registration's turns; the bound judges its LONGEST turn
+// («; registered in K turns of ≤ 32 (the longest M ms)»; a one-turn registration is its own longest)
+const REG_TURNS_RE = /; registered in (\d+) turns of ≤ \d+ \(the longest (\d+) ms\)/;
+const restoreLine = (log) => { const m = RESTORE_RE.exec(log); if (!m) return null; const t = REG_TURNS_RE.exec(log); return { line: m[0], n: +m[1], registered: +m[2], batches: +m[3], longest: +m[6], regTurns: t ? +t[1] : 1, regLongest: t ? +t[2] : +m[2] }; };
 
 // ── THE RED CONTROLS' PLANTS: the release's one synchronous pass, written into the scratch tree's copy of the restore (never
 // this tree): «one-pass-attach» = every survivor attached in the restore's one turn (the release's inline attach);
@@ -458,7 +461,7 @@ async function surviveShape(tag, { red = null, scene = null } = {}) {
     await report(tag, tBoot, tW1 || Date.now(), `W1 — the spawn → ready → the restore and its backfill (${liveIds.size} survivors)`, { label, judge: 'red', plant: PLANT_NAMES[red] });
     return rl;
   }
-  check(`${label}: the restore says every survivor, its registration pass and each batch under ${HOLD_LAW_MS} ms`, !!rl && rl.n === liveIds.size && rl.registered < HOLD_LAW_MS && rl.longest < HOLD_LAW_MS, rl);
+  check(`${label}: the restore says every survivor, its longest registration turn and each batch under ${HOLD_LAW_MS} ms`, !!rl && rl.n === liveIds.size && rl.regLongest < HOLD_LAW_MS && rl.longest < HOLD_LAW_MS, rl);
   // THE PAGE COMES BACK: an open page reconnects and re-attaches every window at once (the floor slab behind the first,
   // src/lib/view-visibility.js attachSlab) — each one's history rebuilt from its buffer and transcript
   const pg = await socket();
@@ -503,7 +506,7 @@ if (REDS && SHAPES.includes('survive') && !hubDied && left() > 260000) {
   check('RED one-pass-attach: the restore says it attached every survivor in ONE batch — the release\'s pass', !!r1 && r1.batches === 1 && r1.n === liveIds.size, r1);
   check('RED forking-backfill: planted (the release\'s backfill, verbatim)', plant('forking-backfill'));
   const r2 = await surviveShape('red-fork', { red: 'forking-backfill' });
-  check('RED forking-backfill: the restore\'s own registration and batches stay under the bound — the break is the backfill\'s', !!r2 && r2.batches > 1 && r2.longest < HOLD_LAW_MS && r2.registered < HOLD_LAW_MS, r2);
+  check('RED forking-backfill: the restore\'s own registration turns and batches stay under the bound — the break is the backfill\'s', !!r2 && r2.batches > 1 && r2.longest < HOLD_LAW_MS && r2.regLongest < HOLD_LAW_MS, r2);
   plant(null);
 } else if (REDS) check(`the red controls skipped (${Math.round(left() / 1000)} s left${hubDied ? ', the hub died' : ''})`, false);
 else console.log(`  the red controls: not run (CD4B_PAGE=${PAGE}${process.env.CD4B_REDS === '0' ? ', CD4B_REDS=0' : ''}) — a measure, not the pin`);
