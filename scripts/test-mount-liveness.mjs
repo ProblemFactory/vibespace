@@ -472,7 +472,7 @@ async function killedLegs(MM, tag) {   // the merged B-f230: a hung process stop
   const SENT = require(path.join(REPO, 'src/mount-door.js')).SENTENCE;
   const spellsIt = (t) => t.includes('DOOR.SENTENCE') || t.includes(SENT);   // the name or the words themselves (the cure's readers: files.js wrote the words)
   const spells = srcFiles.filter((f) => f !== 'src/mount-door.js' && spellsIt(fs.readFileSync(path.join(REPO, f), 'utf8')));
-  const DOORS = ['src/design-fs.js', 'src/server/agent-tool-generators.js', 'src/server/frame-host.js', 'src/server/published-pages.js', 'src/server/vault-run-door.js', 'src/webdav.js'];
+  const DOORS = ['src/design-fs.js', 'src/server/root-facts.js', 'src/server/frame-host.js', 'src/server/published-pages.js', 'src/server/vault-run-door.js', 'src/webdav.js'];   // B-ba47 shape H: the root's git facts (and their door) moved from agent-tool-generators to root-facts.js
   const asks = DOORS.filter((f) => fs.readFileSync(path.join(REPO, f), 'utf8').includes('DOOR.sentenceFor('));
   const FH = fs.readFileSync(path.join(REPO, 'src/server/frame-host.js'), 'utf8'), FR = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
   const keeps = FH.includes("e.code === 'storage-blocked' && e.message ? e.message : 'Storage not responding — try again in a moment.'") && (FR.match(/e\.code === 'storage-blocked' && e\.message \? e\.message : 'Storage not responding — try again in a moment\.'/g) || []).length === 2;

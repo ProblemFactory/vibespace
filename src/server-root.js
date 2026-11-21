@@ -148,4 +148,8 @@ function registeredAfterErrorLine({ time = '?', error = '' } = {}) {
   return `VibeSpace registered the agent hooks at ${time} after an earlier read error (${String(error || '').slice(0, 200)}) — sessions started since then have the tools; sessions started during the error pick them up after a restart or compaction.`;
 }
 
-module.exports = { OVERRIDE_ENV, FORCE_ENV, KINDS, REJUDGE_BACKOFF_MS, ROOT_FACTS_TTL_MS, trimSlash, isUnder, tmpRootUnder, parseGitFile, checkoutOfCommonDir, isLinkedWorktree, rootVerdict, refusalLine, nextRejudgeDelay, unknownNoticeDue, registeredAfterErrorLine };
+/** THE ONE TEST «is this root throwaway» (B-ba47 shape H): a linked worktree, or a copy under a temp root (rule 3, B-9dd0 r528 —
+ *  whether it asks the handed home too is the coordinator's to rule) — the root verdict's 'worktree' and 'tmp' kinds. Every gate that keeps a throwaway copy away from the person's state asks it
+ *  (src/server/throwaway-root.js throwaway): git identity, both home-rename migrations, its Xvnc stopped, no owner CLI-config write. */
+const isThrowaway = (v) => !!v && (v.kind === 'worktree' || v.kind === 'tmp');
+module.exports = { OVERRIDE_ENV, FORCE_ENV, KINDS, isThrowaway, REJUDGE_BACKOFF_MS, ROOT_FACTS_TTL_MS, trimSlash, isUnder, tmpRootUnder, parseGitFile, checkoutOfCommonDir, isLinkedWorktree, rootVerdict, refusalLine, nextRejudgeDelay, unknownNoticeDue, registeredAfterErrorLine };

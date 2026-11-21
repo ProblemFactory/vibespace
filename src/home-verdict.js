@@ -13,7 +13,7 @@
  * construction, whatever spelling it reads its home by ($HOME, os.homedir(), XDG_*, a value naming a path under it).
  */
 const { isUnder, trimSlash } = require('./server-root.js');
-const { CONVERSATION_MARKS } = require('./conversation-env.js');   // PURE too: the process marks a suite keeps (主开发 r863)
+const CE = require('./conversation-env.js'), { CONVERSATION_MARKS } = CE;   // PURE too: the process marks a suite keeps (主开发 r863)
 
 const isAbs = (p) => typeof p === 'string' && p.startsWith('/');
 const rootsOf = (tmpRoots) => (Array.isArray(tmpRoots) ? tmpRoots : []).filter(isAbs).map(trimSlash);
@@ -104,20 +104,19 @@ function suiteRehome({ home, tmpRoots, varRoots = [], notTemp = [], resolve = no
   return { rehome: true, why: 'home' };
 }
 
-/** THE HUB VERDICT (shape H). A hub is THROWAWAY ⇔ the handed home would be re-homed by the suite verdict (it is not
- *  under a temp root — a suite already gave it one) AND its declared root lies under a temp root that is not inside
- *  that home (TMPDIR=/home/x/tmp is no proof of a throwaway copy) AND the root is not a recognised real install
- *  (`realInstall`: a service unit naming this root, read once at boot by the caller — this function reads nothing).
- *  → { rehome, why }   why: 'throwaway' · 'temp-home' · 'no-root' · 'not-temp' · 'real-install' */
-function hubRehome({ root, home, tmpRoots, varRoots = [], resolve = noLinks, realInstall = false } = {}) {
+/** THE HUB VERDICT (B-ba47 shape H — 主开发's GO 2026-11-14 16:52Z: a POSITIVE SIGN, never the place). A hub is re-homed ⇔ its
+ *  root is a LINKED WORKTREE (git's fact, read by the caller: every scratch copy VibeSpace's own tooling makes is one; a
+ *  person's clone, or a tree with no .git, never is, wherever it lives) AND the handed home would be re-homed by the suite
+ *  verdict (it is outside every temp root — a suite already gave it one) AND the person did not say otherwise (`override`:
+ *  VIBESPACE_REAL_INSTALL=1, read by the caller, printed at boot).
+ *  → { rehome, why }   why: 'throwaway' · 'no-root' · 'not-worktree' · 'temp-home' · 'override' */
+function hubRehome({ root, home, tmpRoots, varRoots = [], resolve = noLinks, linkedWorktree = false, override = false } = {}) {
   const r = trimSlash(root);
   if (!isAbs(r)) return { rehome: false, why: 'no-root' };
+  if (linkedWorktree !== true) return { rehome: false, why: 'not-worktree' };
   const s = suiteRehome({ home, tmpRoots, varRoots, resolve });
   if (!s.rehome) return { rehome: false, why: s.why };
-  const h = trimSlash(home);
-  const roots = [...rootsOf(tmpRoots), ...rootsOf(varRoots)].filter((t) => !(isAbs(h) && isUnder(t, h)));
-  if (!roots.some((t) => isUnder(r, t))) return { rehome: false, why: 'not-temp' };
-  if (realInstall) return { rehome: false, why: 'real-install' };
+  if (override === true) return { rehome: false, why: 'override' };
   return { rehome: true, why: 'throwaway' };
 }
 
@@ -217,7 +216,27 @@ const ENV_NOT = Object.freeze([
   ...['NODE_OPTIONS'].map(N('free text that can preload code from anywhere — not a shape', 'free text')),
   ...['CLAUDE_CONFIG_DIR', 'CODEX_HOME', 'NVM_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'CODEX_API_KEY'].map(N("the person's agent CLIs: their folders, their sign-ins", "the person's agent CLIs", (n) => (['ANTHROPIC_AUTH_TOKEN', 'CODEX_API_KEY'].includes(n) ? 'the agent CLIs' : null))),
 ]);
-const notRow = (k, not = ENV_NOT) => not.find((x) => x.name === k) || null;
+const notRow = (k, not = ENV_NOT) => not.find((x) => x.name === k) || not.find((x) => x.prefix && k.startsWith(x.prefix) && k.length > x.prefix.length) || null;
+/** THE HUB'S ROWS (B-ba47 shape H, 主开发 r1222 (a)): a re-homed HUB carries the suite's rows PLUS ITS OWN KNOBS — every env
+ *  name the hub's code reads (server.js and src/, the device agent's src/agentd/ aside), DERIVED: src/hub-env-knobs.json, held
+ *  EQUAL both ways to what that code reads by test-architecture §113 (h) — a read name with no row and no NOT is red by name, a
+ *  knob no code reads is red too. Each is carried by shape like any row ('any': a word, or a path judged three ways). */
+const HUB_KNOBS = require('./hub-env-knobs.json');
+const HUB_ROWS = Object.freeze([...ENV_ROWS, ...HUB_KNOBS.knobs.map((n) => R(n, 'any', "a knob the hub's own code reads (src/hub-env-knobs.json, derived from the code)"))]);
+/** What a HUB carries that a suite does not: the kit's switch is FOR the hubs it starts (a suite sets it for its own child). */
+const HUB_OWN = Object.freeze([R('VIBESPACE_SKIP_AGENT_HOOKS', 'word', "the kit's switch for the hubs it starts: the hub it reaches is the one it is for")]);
+/** THE HUB'S NOTs: the suite's (but HUB_OWN); THE CONVERSATION'S NAMES (src/conversation-env.js — the caller's route, credential,
+ *  account sign-in, telemetry receiver and its hub family; the process marks stay rows: the person's Stop finds escapees by
+ *  them) and its families; and the credentials a person sets for their OWN hub (the knob file's `credentials`, each with its
+ *  reason): a throwaway copy gets none of them. */
+const HUB_NOT = Object.freeze([
+  ...ENV_NOT.filter((x) => !HUB_OWN.some((o) => o.name === x.name)),
+  ...[...CE.CONVERSATION_ENV, ...CE.CONVERSATION_TELEMETRY_ENV, ...CE.CONVERSATION_ACCOUNT_ENV, ...CE.CONVERSATION_HUB_ENV].filter((n) => !CONVERSATION_MARKS.includes(n) && !ENV_NOT.some((x) => x.name === n))
+    .map(N("the CALLER's conversation (src/conversation-env.js): its route, its credential, its account's sign-in, its telemetry receiver or its hub's own family — a hub started from inside a conversation is not that conversation", 'a conversation name')),
+  ...CE.CONVERSATION_ENV_FAMILIES.map((prefix) => Object.freeze({ prefix, why: "a conversation family (src/conversation-env.js CONVERSATION_ENV_FAMILIES): the caller's harness names and its browser", tag: 'a conversation family' })),
+  ...HUB_KNOBS.credentials.map((c) => Object.freeze({ name: c.name, why: c.why, tag: "a credential of the person's own hub" })),
+]);
+const HUB_ROWS_ALL = Object.freeze([...HUB_ROWS, ...HUB_OWN]);
 /** THE HANDED ENV, JUDGED (B-ba47 pick B, 主开发 r1139 / r1156 — never the source's forms): every name of `env` that the handing
  *  process ADDED to what it was itself started with (`started`) or CHANGED there (its value differs), by whatever road, and that
  *  is neither a row nor a named NOT. HOME and PATH are the re-home's own (built). Sorted. */
@@ -304,4 +323,4 @@ function rehomeEnv(env, { oldHome, oldHomes = [], newHome, binDir, platform = 'l
   return { env: out, carried: carried.sort(), notCarriedNames, dropped: notCarriedNames.map((x) => x.name), notCarried, pathDropped: notCarried.length, handedPath: handedPath.filter(Boolean), binDir: bin, unset, own: own.sort(), ownPath };
 }
 
-module.exports = { XDG_BASE, SYSTEM_PATHS, TOOL_ROWS, AGENT_CLIS, ENV_ROWS, ENV_NOT, SHAPES, unruledNames, tempRootOf, suiteRehome, hubRehome, cleanPath, walk, noLinks, homeKeys, judgePath, binLinks, rehomeEnv };
+module.exports = { XDG_BASE, SYSTEM_PATHS, TOOL_ROWS, AGENT_CLIS, ENV_ROWS, ENV_NOT, HUB_ROWS: HUB_ROWS_ALL, HUB_OWN, HUB_NOT, HUB_KNOBS, SHAPES, unruledNames, tempRootOf, suiteRehome, hubRehome, cleanPath, walk, noLinks, homeKeys, judgePath, binLinks, rehomeEnv };

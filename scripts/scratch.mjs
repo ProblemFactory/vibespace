@@ -314,27 +314,13 @@ const REHOMES = (() => {
   if (inScripts && NOT_REHOMED.some((r) => { try { return fs.realpathSync(path.join(dirReal, r.file)) === ME; } catch { return false; } })) return false;
   return /^(?:test|dbg)-[A-Za-z0-9._-]+\.mjs$/.test(base) || inScripts;
 })();
-/** Link the named tools (src/home-verdict.js binLinks) into a re-homed PATH's own folder; → the names linked. */
-export function linkTools(binDir, links) {
-  fs.mkdirSync(binDir, { recursive: true, mode: 0o700 });
-  const done = [];
-  for (const { name, target } of links) { try { fs.symlinkSync(target, path.join(binDir, name)); done.push(name); } catch { } }
-  return done;
-}
-/** THE FILE SYSTEM'S WALK (主开发 18:25Z B1): src/home-verdict.js walk over lstat's kind and readlink — a path resolved as
- *  the kernel walks it, links first, a parent step applied to what the prefix resolved to. One resolver = one memo (the
- *  re-home makes one for the handed env at import); → the path, or null when it could not look. */
-export function makeResolver() {
-  const K = new Map(), L = new Map();
-  const kind = (p) => {
-    if (!K.has(p)) { let k; try { const st = fs.lstatSync(p); k = st.isSymbolicLink() ? 'link' : st.isDirectory() ? 'dir' : 'file'; } catch (e) { k = e && e.code === 'ENOENT' ? 'missing' : 'error'; } K.set(p, k); }
-    return K.get(p);
-  };
-  const readlink = (p) => { if (!L.has(p)) L.set(p, fs.readlinkSync(p)); return L.get(p); };
-  return (p) => HV.walk(String(p).startsWith('/') ? String(p) : `${process.cwd()}/${p}`, { kind, readlink });
-}
-export function resolveFs(p) { return makeResolver()(p); }
-const isFile = (f) => { try { return fs.statSync(f).isFile(); } catch { return false; } };
+// THE FILE-SYSTEM SIDE of the re-home — the resolver (src/home-verdict.js walk over lstat and readlink) and the linker — is
+// src/home-links.js, shared with the hub's boot re-home (src/server/throwaway-root.js, B-ba47 shape H): one copy, both callers
+const HL = require('../src/home-links.js');
+export const linkTools = HL.linkTools;
+export const makeResolver = HL.makeResolver;
+export const resolveFs = HL.resolveFs;
+const isFile = HL.isFile;
 /** THE SEAM (主开发 23:36Z, on three conditions): `VS_REHOME_NOT_TEMP=<a folder a suite made under a temp root>` — that
  *  folder is NOT a temp root for the verdict, so a stand-in home made in it is re-homed. It can only turn a re-home ON;
  *  a value outside every temp root is ignored; the line names it when used. Set by test-home-verdict (and a reader's

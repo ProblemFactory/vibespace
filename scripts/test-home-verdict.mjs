@@ -82,25 +82,26 @@ const extraOf = (mod, extra) => (extra.resolve === 'tree' ? { ...extra, resolve:
 const suiteTable = (mod) => SUITE_ROWS.map(([name, home, roots, rehome, why, extra = {}]) => { const v = mod.suiteRehome({ home, tmpRoots: roots, ...extraOf(mod, extra) }); return { name, good: v.rehome === rehome && v.why === why, v }; });
 for (const r of suiteTable(HV)) ok(r.good, `suite: ${r.name}`, r.v);
 
-console.log('— ② hubRehome: throwaway ⇔ the home would be re-homed AND the root under a temp root not inside it AND no real install');
+console.log('— ② hubRehome (B-ba47 shape H, a POSITIVE SIGN): re-homed ⇔ the root is a LINKED WORKTREE AND the home would be re-homed AND no VIBESPACE_REAL_INSTALL=1');
 const HUB_ROWS = [
-  ["a copy under /tmp handed a person's home", { root: '/tmp/vs-wt-1', home: '/home/u' }, true, 'throwaway'],
-  ['a copy under /var/tmp handed the runner home', { root: '/var/tmp/x/wt', home: RUNNER_HOME }, true, 'throwaway'],
-  ['a copy under /tmp handed a TEMP home (a suite re-homed it already)', { root: '/tmp/vs-wt-1', home: '/tmp/vs-rehome-9' }, false, 'temp-home'],
-  ['a lane hub: root and home under /var/tmp', { root: '/var/tmp/vibespace-lanes/wt-a', home: '/var/tmp/vibespace-lanes/a/home' }, false, 'temp-home'],
-  ["the person's own install", { root: '/home/u/vibespace', home: '/home/u' }, false, 'not-temp'],
-  ['an install in /opt', { root: '/opt/vibespace', home: '/home/u' }, false, 'not-temp'],
-  ['a root under a temp root that lies INSIDE the home (TMPDIR=/home/u/tmp)', { root: '/home/u/tmp/wt', home: '/home/u', tmpRoots: [...TMP, '/home/u/tmp'] }, false, 'not-temp'],
-  ['a recognised real install under a temp root', { root: '/tmp/vs-wt-1', home: '/home/u', realInstall: true }, false, 'real-install'],
-  ['no root', { root: '', home: '/home/u' }, false, 'no-root'],
-  ['SEGMENT BOUNDARY: /tmpx/wt is not under /tmp', { root: '/tmpx/wt', home: '/home/u' }, false, 'not-temp'],
+  ["a linked worktree under /var/tmp handed a person's home", { root: '/var/tmp/vs-wt-1', home: '/home/u', linkedWorktree: true }, true, 'throwaway'],
+  ['a linked worktree under /var/tmp handed the runner home', { root: '/var/tmp/x/wt', home: RUNNER_HOME, linkedWorktree: true }, true, 'throwaway'],
+  ["a linked worktree ANYWHERE handed a person's home (~/vs-live)", { root: '/home/u/vs-live', home: '/home/u', linkedWorktree: true }, true, 'throwaway'],
+  ['a linked worktree handed a TEMP home (a suite re-homed it already)', { root: '/var/tmp/vs-wt-1', home: '/var/tmp/vs-rehome-9', linkedWorktree: true }, false, 'temp-home'],
+  ['a lane hub: a worktree, its home under /var/tmp', { root: '/var/tmp/vibespace-lanes/wt-a', home: '/var/tmp/vibespace-lanes/a/home', linkedWorktree: true }, false, 'temp-home'],
+  ["a person's CLONE under /var/tmp, their own home (the readers' REACH-5)", { root: '/var/tmp/vs-clone', home: '/home/u' }, false, 'not-worktree'],
+  ["the person's own install", { root: '/home/u/vibespace', home: '/home/u' }, false, 'not-worktree'],
+  ['an install in /opt', { root: '/opt/vibespace', home: '/home/u' }, false, 'not-worktree'],
+  ["a linked worktree with VIBESPACE_REAL_INSTALL=1 (the person's word)", { root: '/home/u/vs-live', home: '/home/u', linkedWorktree: true, override: true }, false, 'override'],
+  ['no root', { root: '', home: '/home/u', linkedWorktree: true }, false, 'no-root'],
+  ['the sign is git\'s FACT, never a truthy guess', { root: '/var/tmp/vs-wt-1', home: '/home/u', linkedWorktree: 'yes' }, false, 'not-worktree'],
 ];
 const hubTable = (mod) => HUB_ROWS.map(([name, a, rehome, why]) => { const v = mod.hubRehome({ tmpRoots: TMP, ...a }); return { name, good: v.rehome === rehome && v.why === why, v }; });
 for (const r of hubTable(HV)) ok(r.good, `hub: ${r.name}`, r.v);
 { // PARITY — ONE verdict: for every home of ① (the seam is the suite's alone), a hub under /tmp is re-homed exactly when the suite verdict re-homes that home
   const rows = SUITE_ROWS.filter((r) => !(r[5] && r[5].notTemp));
-  const off = rows.filter(([, home, roots, , , extra = {}]) => { const t = roots.length ? roots : ['/tmp']; return HV.hubRehome({ root: '/tmp/vs-wt-p', home, tmpRoots: t, ...extraOf(HV, extra) }).rehome !== HV.suiteRehome({ home, tmpRoots: t, ...extraOf(HV, extra) }).rehome; });
-  ok(off.length === 0, `PARITY: hubRehome's home clause is suiteRehome on all ${rows.length} homes of ① (a copy under /tmp)`, off.map((r) => r[0]));
+  const off = rows.filter(([, home, roots, , , extra = {}]) => { const t = roots.length ? roots : ['/tmp']; return HV.hubRehome({ root: '/var/tmp/vs-wt-p', home, tmpRoots: t, linkedWorktree: true, ...extraOf(HV, extra) }).rehome !== HV.suiteRehome({ home, tmpRoots: t, ...extraOf(HV, extra) }).rehome; });
+  ok(off.length === 0, `PARITY: hubRehome's home clause is suiteRehome on all ${rows.length} homes of ① (a linked worktree)`, off.map((r) => r[0]));
 }
 
 console.log('— ③ THE WALK: a path resolved as the kernel walks it (B1; a missing part walked ON), and THE THREE WAYS');
@@ -311,8 +312,8 @@ console.log("— ④d the accessors answer a row's FILE in this checkout (主开
 console.log('— ⑤ purity');
 const src = fs.readFileSync(path.join(REPO, 'src/home-verdict.js'), 'utf8');
 const code = src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-ok([...code.matchAll(/\brequire\s*\(\s*'([^']+)'\s*\)/g)].map((m) => m[1]).join() === './server-root.js,./conversation-env.js' && !/^\s*import\b|\bprocess\.|\bfs\.|\bos\.|Date\.now|new Date/m.test(code),
-  'src/home-verdict.js requires ./server-root.js and ./conversation-env.js alone (both PURE: the process marks it carries are the one list\u2019s) and reads no env, fs, os or clock (PURE — the callers read the facts)');
+ok([...code.matchAll(/\brequire\s*\(\s*'([^']+)'\s*\)/g)].map((m) => m[1]).join() === './server-root.js,./conversation-env.js,./hub-env-knobs.json' && !/^\s*import\b|\bprocess\.|\bfs\.|\bos\.|Date\.now|new Date/m.test(code),
+  'src/home-verdict.js requires ./server-root.js and ./conversation-env.js (both PURE: the process marks and the conversation names are the one list\u2019s) and the derived ./hub-env-knobs.json (data: the hub\u2019s own knobs, B-ba47 shape H) alone, and reads no env, fs, os or clock (PURE — the callers read the facts)');
 
 console.log('— ⑥ mutant copies of src/home-verdict.js (a weakened rule must turn named rows red)');
 const M = mutantCopies('home-verdict', REPO);
@@ -335,7 +336,7 @@ const CONTROLS = [
   { what: '(e) the «is what the row names» check cut', needle: '(r.is || [r.name]).includes(baseOf(lands)) && ', repl: '', reds: ["bin: (e) the «is what the row names» check ALONE: a helper-named link to an agent CLI's VERSIONED program file (no agent name in it) is not linked"] },
   { what: 'item 1: the temp-directory variable counted even when it holds the home', needle: '...rootsOf(varRoots).map(at).filter((t) => !isUnder(h, t))', repl: '...rootsOf(varRoots).map(at)', reds: ['item 1: TMPDIR EQUAL to the handed home is no temp root', 'item 1: TMPDIR ABOVE the handed home is no temp root'] },
   { what: 'item 1: the home judged by its spelling', needle: '  const h = at(home);', repl: '  const h = cleanPath(home);', reds: ['item 1: a home SPELLED through a temp root (/tmp/../home/u) is judged where it resolves', 'item 1: a home that is a LINK under /tmp into /home/u is judged where it resolves'] },
-  { what: 'hubRehome trusts a temp root inside the home', needle: '.filter((t) => !(isAbs(h) && isUnder(t, h)));', repl: ';', reds: ['a root under a temp root that lies INSIDE the home (TMPDIR=/home/u/tmp)'] },
+  { what: 'hubRehome takes a truthy sign for the worktree fact', needle: "if (linkedWorktree !== true) return { rehome: false, why: 'not-worktree' };", repl: "if (!linkedWorktree) return { rehome: false, why: 'not-worktree' };", reds: ['the sign is git\'s FACT, never a truthy guess'] },
   { what: 'B2: what the process set itself judged like a handed name', needle: '    if (isOwn(k, v)) { out[k] = v; own.push(k); continue; }   // the process set it itself: its own, never judged', repl: '', reds: ['env: B2: a name the process set ITSELF (absent from the started env) is kept as it is — never judged; a handed name beside it is judged as before', 'env: B2: a handed name the process CHANGED is its own (its new value kept); one it REMOVED stays removed'] },
   { what: "B2: its own PATH entries dropped", needle: "  out.PATH = [...ownPath, bin, ...sys].join(':');", repl: "  out.PATH = [bin, ...sys].join(':');", reds: ['env: B2: its own PATH entries (not in the handed PATH) go IN FRONT of the built PATH; the handed ones are judged as before'] },
 ];
@@ -481,13 +482,21 @@ const standinElf = (tag) => {
   const s = standin(tag, { small: true }); fs.rmSync(s.node); fs.linkSync(ELF, s.node); fs.symlinkSync('/lib64', path.join(path.dirname(s.node), 'vsld'));
   return s;
 };
+const HL_M6 = (() => {   // src/home-links.js with its walk cut to «by spelling»; its own require made absolute (the copy lives in the scratch dir)
+  const f = path.join(DIR, 'mut', 'home-links-m6.cjs'); fs.mkdirSync(path.dirname(f), { recursive: true });
+  const t0 = fs.readFileSync(path.join(REPO, 'src/home-links.js'), 'utf8');
+  const t1 = SM.anchored(t0, "require('./home-verdict')", `require(${JSON.stringify(path.join(REPO, 'src/home-verdict.js'))})`, 'mutant home-links «m6» (its require)');
+  fs.writeFileSync(f, SM.anchored(t1, "return (p) => HV.walk(String(p).startsWith('/') ? String(p) : `${process.cwd()}/${p}`, { kind, readlink });", 'return (p) => HV.noLinks(String(p));', 'mutant home-links «m6»'));
+  return f;
+})();
 const MUT = {
   m1: mutant('m1', '  if (nodeUnder) {\n    node = ownNode(', '  if (false) {\n    node = ownNode('),
   m2: mutant('m2', '    if (initPaths) M._initPaths();', '    if (false) M._initPaths();'),
   m3: mutant('m3', ' || (d.mode & 0o777) !== 0o700', ''),
   m4: mutant('m4', "const d = lstat(dir), b = lstat(path.join(dir, 'bin'))", "const d = fs.statSync(dir), b = fs.statSync(path.join(dir, 'bin'))"),
   m5: mutant('m5', 'if (st.source !== key || !st.file || st.file.ino !== f.ino || st.file.size !== f.size || st.file.mtimeMs !== f.mtimeMs) return null;', ''),
-  m6: mutant('m6', "return (p) => HV.walk(String(p).startsWith('/') ? String(p) : `${process.cwd()}/${p}`, { kind, readlink });", 'return (p) => HV.noLinks(String(p));'),
+  // m6: the walk lives in src/home-links.js (shared with the hub's boot, B-ba47 shape H) — the mutant scratch.mjs requires a mutated COPY of it
+  m6: mutant('m6', "const HL = require('../src/home-links.js');", `const HL = require(${JSON.stringify(HL_M6)});`),
   m7: mutant('m7', "  const home = endScratchAtExit(fs.mkdtempSync(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}rehome-`)));\n  fs.chmodSync(home, 0o700);", "  const home = endScratchAtExit(path.join(TMP_ROOTS[0], `${FIXTURE_CWD_PREFIX}rehome-${process.pid}`)); fs.mkdirSync(home, { recursive: true });\n  fs.chmodSync(home, 0o777);"),
   m8: mutant('m8', '  fs.chmodSync(home, 0o700);', '  fs.chmodSync(home, 0o755);'),
   m9: mutant('m9', "${notCarried.length ? ` — not carried: ${notCarried.join(', ')}` : ''}", "${notCarried.length ? ` — not carried: ${[...notCarried.slice(1), '/never-handed'].join(', ')}` : ''}"),

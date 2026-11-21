@@ -990,6 +990,7 @@
 - (2026-11-21) THE CUT RACE in test-codex-effort-meta ⑩ (B-1217 / B-3a3c): its claim checks read the integration branch per call — a cut mid-run judged two branches. 不变量 = ONE commit read, the reads counted (one log, REF only to rev-parse) ⇒ kb-bugfix-invariants
 - (2026-11-21) THE HOURLY JOB-LOG CLEAN-UP FORKED ITS REMOVER FROM THE HUB (B-323e). 不变量 = one child a batch through the starter, no IPC; names in its arguments ≤ 32 KiB, else its request file; a count file read with a bound (missing or torn = unknown), counted once ⇒ kb-file-structure
 - (2026-11-21) THE MEMORY CENSUS SAID «TRANSCRIPT TAILS 276/128 MB · OVER» AND NOTHING ENFORCED THE 128 (B-360d (A)): the idle floor was trimmed only at a put; the live set lawfully holds 512. 不变量 = every stated ceiling is enforced where stated or says «not enforced». (kb-bugfix-invariants)
+- (2026-11-13) A HUB STARTED BY HAND FROM A SCRATCH COPY RAN ON A PERSON'S HOME (B-ba47 shape H, the 2.369.401 hotfix night). 不变量 = a copy run from a git worktree re-homes at its boot's first act, its env built from named rows (kb-bugfix-invariants)
 
 ## AN OLD ENGINE'S RAW «>» IN A TITLE ENDED THE ANCHOR TAG THREE PASSES READ (lane setting-doors, the acceptance's F4, 2026-11-15)
 
@@ -10640,3 +10641,7 @@ Found by reading during the 2.369.412 release red of test-internal-links-chrome 
   - §5b: the sweep of every real row, with a planted unstated ceiling and a made-up enforcer each red.
   test-task-scan-loop's census scene sums the two rows.
 
+## A HUB STARTED BY HAND FROM A SCRATCH COPY RAN ON A PERSON'S HOME (the 2.369.401 hotfix night, 2026-11-13; B-ba47 shape H)
+**The defect.** A claim launched outside its lane's env handed its suites the caller's env; hubs booted from scratch copies with no home of their own found the real claude / codex in `~/.local/bin`, walked `~/.claude/projects` and CREATED their usage index under `~/.vibespace/db`. Pick B re-homes a SUITE at its import; a hub a person or an agent starts BY HAND from a scratch copy had no such door.
+**不变量.** A copy run from a git worktree uses a home of its own — decided ONCE, at runtime-boot's first act, by the one test (src/server/throwaway-root.js: a linked worktree, or a root under a temp root) and pick B's value rule over the hub's rows: the env is BUILT (the suite's rows + the hub's own knobs, derived from its code), never filtered. Every spelling (os.homedir(), $HOME, XDG_*) and every child follows by construction; what does not (the passwd reads, ssh) is a named row. A handed name that is neither a row nor a NOT is said by name at the first act.
+**Pins.** scripts/test-throwaway-boot.mjs (the guard: nothing reads the home before the re-home; ③ the bound) · test-architecture §113 (h) (the knob file equal to the code both ways) · scripts/test-home-verdict.mjs ② (hubRehome's sign, its parity with the suite verdict).

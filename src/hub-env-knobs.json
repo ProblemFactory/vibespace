@@ -1,0 +1,157 @@
+{
+ "_": "B-ba47 shape H (主开发 r1222 (a)): the hub's OWN env knobs, DERIVED from what server.js and src/ read (scripts/hub-home-census.mjs hubEnvReads; the device agent's src/agentd/ aside). test-architecture §113 (h) holds this file EQUAL to that reading both ways. knobs: carried by a re-homed hub by shape; credentials: never carried (named NOTs).",
+ "knobs": [
+  "ANTIGRAVITY_CMD",
+  "AT_SPI_BUS_ADDRESS",
+  "BROWSER",
+  "CLAUDECODE",
+  "CLAUDE_CMD",
+  "CLAUDE_CODE_CHILD_SESSION",
+  "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+  "CODEX_CMD",
+  "DISABLE_AUTOUPDATER",
+  "HOST",
+  "KUBERNETES_SERVICE_HOST",
+  "LOCALAPPDATA",
+  "LOCPATH",
+  "NO_AUTO_UPDATE",
+  "PORT",
+  "RCLONE_CONFIG_VS_CLIENT_ID",
+  "SYSTEMD_EXEC_PID",
+  "SYSTEMROOT",
+  "USERPROFILE",
+  "VIBESPACE_APPS_STUB",
+  "VIBESPACE_APP_SYSTEM",
+  "VIBESPACE_BOOT_TRACE",
+  "VIBESPACE_BOOT_TRACE_CPU",
+  "VIBESPACE_BOOT_TRACE_SYNC",
+  "VIBESPACE_BOOT_TRACE_WINDOW_MS",
+  "VIBESPACE_CEPHMINT_URL",
+  "VIBESPACE_CHANGELOG_FIXTURE_DIR",
+  "VIBESPACE_CHANNELS_FAKE",
+  "VIBESPACE_CHANNELS_FAKE_FEED",
+  "VIBESPACE_CHANNELS_FAKE_FILES",
+  "VIBESPACE_CHANNELS_FAKE_PACE",
+  "VIBESPACE_CHANNELS_FAKE_REVISIONS",
+  "VIBESPACE_CHANNELS_FAKE_SEARCH",
+  "VIBESPACE_CHANNELS_FAKE_SEARCH_N",
+  "VIBESPACE_CHANNELS_FAKE_SELF",
+  "VIBESPACE_CHANNELS_FAKE_TOPICS",
+  "VIBESPACE_CHANNELS_FAKE_VENDOR",
+  "VIBESPACE_CHANNELS_INDEX_VERIFY",
+  "VIBESPACE_CLERK_ALLOWED_EMAILS",
+  "VIBESPACE_CLERK_PUBLISHABLE_KEY",
+  "VIBESPACE_CSP_REPORTS_FILE",
+  "VIBESPACE_DESKTOP_APP",
+  "VIBESPACE_DESKTOP_NETEM",
+  "VIBESPACE_FORCE_AGENT_HOOKS",
+  "VIBESPACE_FRPS_ADDR",
+  "VIBESPACE_FRPS_PORT",
+  "VIBESPACE_FRPS_SUBDOMAIN_HOST",
+  "VIBESPACE_FRP_ADMIN_PORT",
+  "VIBESPACE_FRP_PORT_MAX",
+  "VIBESPACE_FRP_PORT_MIN",
+  "VIBESPACE_FRP_VERSION",
+  "VIBESPACE_GDRIVE_CLIENT_ID",
+  "VIBESPACE_GENERATE_PASSWORD",
+  "VIBESPACE_INTEGRATIONS",
+  "VIBESPACE_JOBS_GRACE_MS",
+  "VIBESPACE_JOBS_MEMORY_MB",
+  "VIBESPACE_MAINTAINER_KEY_SHA",
+  "VIBESPACE_METRICS_PORT",
+  "VIBESPACE_MOUNT_BASE",
+  "VIBESPACE_NODE_MIRROR",
+  "VIBESPACE_OAUTH_RELAY_URL",
+  "VIBESPACE_OPENCODE_SERVE",
+  "VIBESPACE_OPSLOG_CEPHFS_FSNAME",
+  "VIBESPACE_OPSLOG_CEPHFS_MONS",
+  "VIBESPACE_OPSLOG_CEPHFS_NAME",
+  "VIBESPACE_OPSLOG_CEPHFS_PATH",
+  "VIBESPACE_OPSLOG_DIR",
+  "VIBESPACE_OPSLOG_KEEP_DAYS",
+  "VIBESPACE_PRESETS_DIR",
+  "VIBESPACE_PROBE_CAP_MS",
+  "VIBESPACE_PUBLIC_URL",
+  "VIBESPACE_REAL_INSTALL",
+  "VIBESPACE_RUNTIME_REEXEC",
+  "VIBESPACE_RUNTIME_SWITCH",
+  "VIBESPACE_SAFEFS_POOL",
+  "VIBESPACE_SAFEFS_TEST",
+  "VIBESPACE_STOP_GRACE_S",
+  "VIBESPACE_STORE_TIMING",
+  "VIBESPACE_SUPERVISED",
+  "VIBESPACE_TAILSCALE_BIN",
+  "VIBESPACE_TAILSCALE_SOCKS_PORT",
+  "VIBESPACE_TELEMETRY_FORWARD_URL",
+  "VIBESPACE_TEST_BOOT_HOLD_MS",
+  "VIBESPACE_TEST_EGRESS_MAP",
+  "VIBESPACE_TEST_MIGRATION_FAULT",
+  "VIBESPACE_TLS_CERT",
+  "VIBESPACE_USAGE_CURSOR",
+  "VIBESPACE_VFS_CACHE_DIR",
+  "VIBESPACE_VNC_DISPLAY",
+  "VIBESPACE_VNC_GEOMETRY",
+  "VIBESPACE_VNC_PORT",
+  "WSL_DISTRO_NAME",
+  "WSL_INTEROP",
+  "XPRA_WWW_DIR"
+ ],
+ "credentials": [
+  {
+   "name": "RCLONE_CONFIG_VS_CLIENT_SECRET",
+   "why": "a cloud drive's client secret (the person's own mount config): a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "RCLONE_CONFIG_VS_TOKEN",
+   "why": "a cloud drive's sign-in token (the person's own mount): a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_CEPHMINT_TOKEN",
+   "why": "the token that mints the person's cluster storage keys: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_FRPS_TOKEN",
+   "why": "the person's tunnel server token: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_FRP_AUTH_TOKEN",
+   "why": "the person's tunnel client token: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_GDRIVE_CLIENTS",
+   "why": "the person's Google Drive apps, secrets included: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_GDRIVE_CLIENT_SECRET",
+   "why": "the person's Google Drive app secret: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_OPSLOG_CEPHFS_SECRET",
+   "why": "the person's cluster storage key for the ops log: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_PASSWORD",
+   "why": "the person's instance password: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_RELAY_CLUSTER_TOKEN",
+   "why": "the person's relay cluster token: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_RELAY_TOKEN",
+   "why": "the person's relay token: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_TELEMETRY_FORWARD_TOKEN",
+   "why": "the person's telemetry forwarding token: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_TELEMETRY_INGEST_TOKEN",
+   "why": "the person's telemetry receiver token: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  },
+  {
+   "name": "VIBESPACE_TLS_KEY",
+   "why": "the person's TLS private key: a throwaway copy of VibeSpace gets none of the person's own hub's credentials"
+  }
+ ]
+}

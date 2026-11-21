@@ -41,6 +41,8 @@ async function signInAccount(home = os.homedir()) {
 
 /** → { set } | { already: true } | { skipped: why }. Never throws. */
 function ensureGitIdentity({ home = os.homedir(), now = Date.now(), log = console } = {}) {
+  // B-ba47 shape H: `git config --global` writes the PERSON's ~/.gitconfig — a throwaway hub (the one test) never does
+  if (require('./throwaway-root.js').throwaway()) return Promise.resolve({ skipped: 'throwaway' });
   if (settled) return Promise.resolve({ skipped: 'settled' });
   if (inFlight) return inFlight;
   if (now - lastTry < PACE_MS) return Promise.resolve({ skipped: 'paced' });

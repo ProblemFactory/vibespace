@@ -79,8 +79,10 @@ function rewriteStores(dataDir, metaDir, old, user, log) {
  * settled (they go OFF the boot's synchronous road — the store-write census' debt only falls; a start that ends before one
  * lands moves again at the next: a merge).
  */
-function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null, log = console, homeGone = homeGoneOnDisk, now = Date.now } = {}) {
+function migrateHomeRename({ dataDir, metaDir, home = os.homedir(), hooks = null, log = console, homeGone = homeGoneOnDisk, now = Date.now, throwaway = () => require('./throwaway-root.js').throwaway() } = {}) {
   const out = [], writes = [];
+  // B-ba47 shape H: a THROWAWAY hub (the one test) never moves a person's transcript folders (a scratch data/ has no marker, so it would run again)
+  if (throwaway()) { log.log('[migrate] home rename: refused — this copy is a throwaway one (a git worktree, or a temp folder handed a temp home); only an installed copy moves a person\'s transcript folders'); return out; }
   try {
     const user = path.basename(home);
     const hrs = (hooks || require('../harnesses').list().map((h) => h.store && h.store.homeRename)).filter((hr) => hr && typeof hr.staleUsers === 'function');

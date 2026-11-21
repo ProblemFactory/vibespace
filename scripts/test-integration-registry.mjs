@@ -716,6 +716,7 @@ const readRepo = (f) => { let t = REPO_TEXT.get(f); if (t === undefined) { t = f
 // (a) ENV NAMES: the regex matches the NAME, whatever the spelling around it
 const ENV_RE = /VIBESPACE_INTEGRATIONS?\b|VIBESPACE_INTEGRATION_/;
 const ENV_ALLOW = new Map([
+  ['src/hub-env-knobs.json', 'B-ba47 shape H: the DERIVED list of every env name the hub\'s code reads (test-architecture §113 (h)) — it NAMES the env so a re-homed hub carries it; it reads nothing'],
   // lane dc-channels-manifest: DERIVED from the vendor list — each channel vendor's manifest declares its row's cluster env
   ...require(path.join(REPO, 'src/channels/registry-list.js')).MANIFESTS.filter((m) => m.kind !== 'gmail').map((m) => [`src/channels/${m.kind}/manifest.js`, 'its integration row declares the cluster env (clusterEnv)']),
   ['scripts/test-channels-slack-send.mjs', 'design 018: the engine leg hands the store a `slack` preset in the JSON env form (the cluster rung a fleet mounts)'],
@@ -779,6 +780,7 @@ if (tracked.length) {
 // lane oauth-relay-one-source: + fleet.json (the fleet facts — the sign-in relay page) — the same one reader
 const FILE_RE = /VIBESPACE_PRESETS_DIR|['"`]\/etc\/vibespace\/presets|['"`](?:gdrive-clients|fleet)\.json['"`]/;
 const FILE_ALLOW = new Map([
+  ['src/hub-env-knobs.json', 'B-ba47 shape H: the DERIVED list of every env name the hub\'s code reads — it NAMES VIBESPACE_PRESETS_DIR so a re-homed hub carries it; it reads no directory'],
   ['src/server/cluster-presets.js', 'THE reader of the presets directory'],
   ['deploy/helm/vibespace-user/templates/main.yaml', 'renders the projected volume + VIBESPACE_PRESETS_DIR'],
   ['scripts/test-cluster-presets.mjs', 'the reader\'s own suite'],

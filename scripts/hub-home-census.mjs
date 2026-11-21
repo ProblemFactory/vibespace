@@ -515,3 +515,41 @@ export function envCensus(repo, HV) {
   const unread = rows.filter((r) => !r.prog && !readByTree(r.name)).map((r) => r.name);
   return { knobs: [...knobs.keys()].sort(), knobFiles: knobs, unread };
 }
+
+// ── THE HUB'S OWN KNOBS, DERIVED (B-ba47 shape H, 主开发 r1222 (a)) ───────────────────────────────────────────────────────
+// What the HUB's code reads from the environment: server.js and every src/ module (the device agent's src/agentd/ aside: it runs
+// on a paired machine, never in the hub), in code (a read inside a string or a template — a child's source — is the child's):
+// process.env.N / process.env['N'] / a destructure of process.env (envReadsOf), and `env.N` READ off an env object (a
+// parameter that defaults to process.env: runtime-boot's env.NO_AUTO_UPDATE) — never an assignment `env.N = …` (a child's env
+// being built) — and a name spelled once as a constant (`const OVERRIDE_ENV = 'N'`, `FORCE_ENV: 'N'`) and read through it. → Map(name → [files]). src/home-verdict.js HUB_ROWS / HUB_NOT must rule every name, both ways (§113 (h)).
+// THE BOUND (主开发 r1222): a reader of names can miss a form, so the hub's own first act prints every handed name that is
+// neither a row nor a NOT, and scripts/test-throwaway-boot.mjs holds that line EMPTY on a stand-in start.
+const ENV_DOT_READ = /\benv\.([A-Z][A-Z0-9_]{2,})\b(?!\s*=[^=])/g;
+const ENV_CONST = /\b[A-Z][A-Z0-9_]*_ENV\s*[:=]\s*['"]([A-Z][A-Z0-9_]{2,})['"]/g;
+export function hubEnvReads(repo) {
+  const files = execFileSync('git', ['-C', repo, 'ls-files', '-z', '--', 'server.js', 'src'], { encoding: 'utf8', maxBuffer: 1 << 28 }).split('\0')
+    .filter((f) => /\.(?:m?js|cjs)$/.test(f) && !f.startsWith('src/agentd/'));
+  const out = new Map(), add = (n, f) => { if (!out.has(n)) out.set(n, []); if (!out.get(n).includes(f)) out.get(n).push(f); };
+  for (const f of files) {
+    let t = ''; try { t = fs.readFileSync(path.join(repo, f), 'utf8'); } catch { continue; }
+    for (const n of hubReadsOfText(t)) add(n, f);
+  }
+  return out;
+}
+/** PURE: the env names ONE file's code reads, in the three forms above (a read in a string or a template is a child's). */
+export function hubReadsOfText(t) {
+  const names = new Set(envReadsOf(t));
+  const dr = dataRanges(t).filter((r) => r[2] !== 'regex'), inData = (i) => dr.some(([a, b]) => i >= a && i < b);
+  for (const m of t.matchAll(ENV_DOT_READ)) if (!inData(m.index) && !/delete\s+$/.test(t.slice(Math.max(0, m.index - 8), m.index))) names.add(m[1]);
+  for (const m of t.matchAll(ENV_CONST)) if (!inData(m.index)) names.add(m[1]);   // a name read through a constant: `const OVERRIDE_ENV = 'N'` / `OVERRIDE_ENV: 'N'`
+  return names;
+}
+/** PURE: the names of `reads` the hub's rows leave UNRULED (neither a HUB_ROWS row nor a HUB_NOT), and the knob-file names no
+ *  code reads — the census both ways. HOME and PATH are the re-home's own. */
+export function hubKnobCensus(reads, HV) {
+  const row = (n) => HV.HUB_ROWS.some((r) => r.name === n || (r.prefix && n.startsWith(r.prefix)));
+  const not = (n) => HV.HUB_NOT.some((x) => x.name === n || (x.prefix && n.startsWith(x.prefix) && n.length > x.prefix.length));
+  const unruled = [...reads.keys()].filter((n) => n !== 'HOME' && n !== 'PATH' && !row(n) && !not(n)).sort();
+  const unread = [...HV.HUB_KNOBS.knobs, ...HV.HUB_KNOBS.credentials.map((c) => c.name)].filter((n) => !reads.has(n)).sort();
+  return { unruled, unread };
+}

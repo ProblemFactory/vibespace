@@ -91,3 +91,6 @@ src/lib/build-version.js
 # §51 is the census. So no wildcard .js family is ignored under src/: a stray
 # copy stays VISIBLE in `git status` instead of being read as source by every
 # src/ scanner running beside the suite that wrote it — B-0220, batch r1.)
+
+# B-ba47 shape H: a copy run from a git worktree keeps its own home here (src/server/throwaway-root.js)
+.home/

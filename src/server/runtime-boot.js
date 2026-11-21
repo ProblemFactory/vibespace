@@ -95,8 +95,14 @@ function boot({ rootDir, env = process.env, log = (l) => console.log(l) } = {}) 
   if (booted) return booted;
   const switched = NR.reexecOnOwnRuntime({ root: path.join(rootDir, 'data'), env, log });
   delete env.VIBESPACE_RUNTIME_REEXEC;
+  // B-ba47 shape H: THE FIRST ACT after the switch, before any module reads a home — a copy run from a git worktree uses its own
+  // home (src/server/throwaway-root.js rehomeAtBoot: home-verdict.js's verdict, the env BUILT from the hub's rows); every module
+  // server.js requires next, and every child, reads the re-homed env by construction. scripts/test-throwaway-boot.mjs is the guard.
+  const TR = require('./throwaway-root.js');
+  TR.rehomeAtBoot({ root: rootDir, env });
   booted = create({ rootDir, switched, log });
-  setImmediate(() => log(booted.line()));
+  const said = [TR.bootLine(), TR.unruledLine()].filter(Boolean);   // the unruled names: THE BOUND (主开发 r1222), said once
+  setImmediate(() => { log(booted.line()); for (const l of said) log(l); });
   // B-9dd0: a suite's hub (VS_NO_REAL_CLI=1) or a root under any temp folder never runs the runtime check — it would ask
   // nodejs.org (runtimeCheckArmed: the update check's own verdict); the timer is set only when armed
   const b = booted;

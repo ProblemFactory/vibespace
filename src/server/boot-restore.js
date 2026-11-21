@@ -214,6 +214,8 @@ function sessionFromMeta(meta, transportFacts) {
 // cwds keeps working through it). Idempotent; collisions skipped with a log.
 function migrateLegacyHomeProjects() {
   try {
+    // B-ba47 shape H: a THROWAWAY hub (the one test) never relinks a person's transcript folders
+    if (require('./throwaway-root.js').throwaway()) { console.log('[migrate] legacy home projects: refused — this copy is a throwaway one; only an installed copy relinks a person\'s transcript folders'); return; }
     const home = os.homedir();
     if (path.basename(home) === 'vibe') return;
     let st; try { st = fs.lstatSync('/home/vibe'); } catch { return; }

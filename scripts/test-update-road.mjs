@@ -98,8 +98,10 @@ fs.writeFileSync(path.join(STUBS, 'systemctl'), '#!/bin/sh\nexit 1\n', { mode: 0
 const ENV = { GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'maintenance.auto', GIT_CONFIG_VALUE_0: 'false', PATH: `${STUBS}:${path.dirname(REAL)}:/usr/local/bin:/usr/bin:/bin`, HOME, LANG: 'C.UTF-8', GIT_AUTHOR_NAME: 'u', GIT_AUTHOR_EMAIL: 'u@example.invalid', GIT_COMMITTER_NAME: 'u', GIT_COMMITTER_EMAIL: 'u@example.invalid', VIBESPACE_NODE_MIRROR: MIRROR, ...(PRETEND ? { VIBESPACE_RUNTIME_BASE: RUN } : {}) };
 const SEED = path.join(ROOT, 'seed'), ORIGIN = path.join(ROOT, 'origin.git'), CHECKOUT = path.join(ROOT, 'checkout');
 fs.mkdirSync(SEED, { recursive: true });
-// (src/server-root.js: runtime-boot's runtimeCheckArmed asks its tmpRootUnder — B-9dd0)
-for (const f of ['scripts/update.sh', 'scripts/runtime-check.mjs', 'src/runtime-floor.js', 'src/node-runtime.js', 'src/server/runtime-boot.js', 'src/server-root.js', 'package.json', 'package-lock.json', 'src/agentd/version.js']) {
+// (src/server-root.js: runtime-boot's runtimeCheckArmed asks its tmpRootUnder — B-9dd0; B-ba47 shape H: the boot's first act loads the
+// one test and the re-home — src/server/throwaway-root.js and its graph)
+for (const f of ['scripts/update.sh', 'scripts/runtime-check.mjs', 'src/runtime-floor.js', 'src/node-runtime.js', 'src/server/runtime-boot.js', 'src/server-root.js',
+  'src/server/throwaway-root.js', 'src/server/root-facts.js', 'src/home-verdict.js', 'src/hub-env-knobs.json', 'src/conversation-env.js', 'src/home-links.js', 'src/mount-path-class.js', 'src/mount-door.js', 'src/fixture-guard.js', 'package.json', 'package-lock.json', 'src/agentd/version.js']) {
   fs.mkdirSync(path.dirname(path.join(SEED, f)), { recursive: true });
   fs.copyFileSync(path.join(REPO, f), path.join(SEED, f));
 }

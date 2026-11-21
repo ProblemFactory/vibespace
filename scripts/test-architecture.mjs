@@ -25,7 +25,7 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 import { format as formatArgs } from 'node:util';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
-import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, PICK_C, outsideByTier, SELF_LOOKUP, KIT_HANDED, KIT_HANDED_READ, kitNamesOf } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
+import { SPAWN, walk, dataRanges, judge as judgeHubHomes, classify as classifyBoots, rehomed as rehomedBy, SITE_ROWS as HUB_SITE_ROWS, OK_CLASSES as HUB_OK, orderCensus, rehomesFirst, reachesScratch, lateLoads, envCensus, outsideReaders, OUTSIDE_ROW, hubEnvReads, hubKnobCensus, hubReadsOfText, PICK_C, outsideByTier, SELF_LOOKUP, KIT_HANDED, KIT_HANDED_READ, kitNamesOf } from './hub-home-census.mjs';   // §57 + §113: the one reader of a server.js spawn
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
@@ -8061,7 +8061,6 @@ await section(async () => {
     ["data/bin/vibespace-browser", "tmpdirs: [os.tmpdir(), '/tmp']", "read", "the daemon cwd judgment (browser-verbs ensureDaemonCwd)"],
     ["data/bin/vibespace-channels", "const roots = [process.cwd(), os.tmpdir(),", "read", "an allow list for an attachment path"],
     ["data/bin/vibespace-usage-scan", "const TMP_ROOTS = ['/tmp', '/var/tmp'];", "read", "the walk skips scratch roots"],
-    ["server.js", "const throwawayRoot = [os.tmpdir(),", "read", "is this checkout a throwaway (a judgment)"],
     ["src/agentd/agentd.js", "[os.tmpdir(), '/tmp'].some(", "read", "is the daemon root a throwaway (a judgment)"],
     ["src/agentd/agentd.js", "const bridgeSock = () =>", "per-user", "the same socket rule"],
     ["src/agentd/agentd.js", "root: ROOT, platform: process.platform, tmpdir: os.tmpdir()", "per-user", "sock-path picks a per-user rung (vs-dev-<uid>)"],
@@ -8093,6 +8092,7 @@ await section(async () => {
     ["src/routes/files.js", "const rTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));", "unique", "mkdtemp"],
     ["src/routes/files.js", "const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-archive-'));", "unique", "mkdtemp"],
     ["src/server/agent-tool-generators.js", "const tmpSpellings = () => [os.tmpdir(), ...TMP_ROOTS];", "read", "a judgment (B-1425: their real paths read off the loop with the root facts)"],
+    ["src/server/throwaway-root.js", "const tmpRoots = () => [...new Set([realOr(os.tmpdir())", "read", "B-ba47 shape H: the temp roots the one test compares a hub's root and its handed home with (os.tmpdir() + fixture-guard's TMP_ROOTS, as the ORCH's root verdict) — a judgment, nothing made"],
     ["src/server/claude-signin.js", "tmpRoot = os.tmpdir(),", "unique", "its scratch is a mkdtemp under it"],
     ["src/server/cli-env.js", "fs.readdirSync('/tmp/.X11-unix')", "system", "reads the X server's socket dir"],
     ["src/server/cli-self-measure.js", "scratchBases = () =>", "unique", "its run root is a per-run name"],
@@ -8601,6 +8601,19 @@ await section(async () => {
     && tierCtl.fast.join() === 'test-a.mjs' && tierCtl.heavy.join() === 'test-b.mjs' && tierCtl.none.join() === 'dbg-c.mjs',
     `§113 PICK C: ${ord.reach.length} of the ${ord.files.length} suite / debug files take the scratch import first; outside it: ${byTier.fast.length} fast rows, ${byTier.none.length} files of no row, ${byTier.heavy.length} heavy rows (≤ ${PICK_C.heavyLeft}: ${PICK_C.why}) — CONTROL: a planted fast row, heavy row and file of no row are told apart${byTier.fast.length || byTier.none.length || byTier.heavy.length > PICK_C.heavyLeft ? " — add the scratch import as each named file's first import, after node's own if any: import './scratch.mjs';" : ''}`,
     JSON.stringify({ fast: byTier.fast, other: byTier.other, none: byTier.none, ...(byTier.heavy.length > PICK_C.heavyLeft ? { heavy: byTier.heavy } : {}) }));
+  // (h) THE HUB'S OWN KNOBS, DERIVED (B-ba47 shape H, 主开发 r1222 (a)): every env name the hub's code reads (server.js + src/, the
+  // device agent aside) is a hub row (the suite's rows + src/hub-env-knobs.json's knobs) or a hub NOT (the suite's NOTs, the
+  // conversation's names and families, the file's credentials of the person's own hub), and every knob and credential IS read —
+  // both ways. THE BOUND (a reader of names can miss a form): scripts/test-throwaway-boot.mjs ③, the first act's unruled line.
+  const HVh = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/home-verdict.js'));
+  const hubReads = hubEnvReads(REPO), hubC = hubKnobCensus(hubReads, HVh);
+  const ctlRuled = hubKnobCensus(new Map([['HUBCTL_UNRULED_X', ['src/x.js']], ...hubReads]), HVh);
+  const k0 = HVh.HUB_KNOBS.knobs[0], ctlUnread = hubKnobCensus(new Map([...hubReads].filter(([n]) => n !== k0)), HVh);
+  const formsCtl = [...hubReadsOfText("const a = process.env.HC_A1; const b = env.HC_B2; const C3_ENV = 'HC_C3'; env.HC_D4 = '1'; const s = 'process.env.HC_E5'; delete env.HC_F6;")].sort().join();
+  ok(hubC.unruled.length === 0 && hubC.unread.length === 0 && hubReads.size > 100 && HVh.HUB_KNOBS.knobs.length > 50 && ctlRuled.unruled.join() === 'HUBCTL_UNRULED_X' && ctlUnread.unread.join() === k0
+    && formsCtl === 'HC_A1,HC_B2,HC_C3',
+    `§113 (h) THE HUB'S OWN KNOBS: ${hubReads.size} env names the hub's code reads — each a hub row (${HVh.HUB_KNOBS.knobs.length} derived knobs of src/hub-env-knobs.json) or a hub NOT (${HVh.HUB_KNOBS.credentials.length} credentials of the person's own hub; the conversation's names and families), and every knob read — CONTROLS: a planted unruled read is red by name, a knob no code reads is red, the reader takes process.env / env.N / a *_ENV constant and never an assignment, a string or a delete`,
+    { unruled: hubC.unruled, unread: hubC.unread, formsCtl });
   // (d) ONE VERDICT: scratch.mjs decides by src/home-verdict.js, and no copy of its functions lives anywhere else
   const copies = ['server.js', ...fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => 'src/' + f), ...fs.readdirSync(path.join(REPO, 'scripts')).map((f) => 'scripts/' + f)]
     .filter((f) => /\.(m?js)$/.test(f) && f !== 'src/home-verdict.js' && /\b(?:function\s+|(?:const|let)\s+)(?:suiteRehome|hubRehome|rehomeEnv|namesUnder)\b/.test(read(f)));
