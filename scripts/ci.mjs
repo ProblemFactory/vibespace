@@ -2544,21 +2544,25 @@ export function failLegs(stdout, stderr) {
     + xs.slice(0, FAIL_LINES_MAX).map((l) => (l.length > FAIL_LINE_CHARS ? l.slice(0, FAIL_LINE_CHARS) + '…' : l)).join('\n')
     + (more > 0 ? `\n  [ci] … ${more} more ✗ line(s) not shown` : '');
 }
-// AN ENVIRONMENT RED (B-e381 part 3 — 主开发's RULING, r962, 2026-11-21). A full tier the push hook launched from an interactive
+// AN ENVIRONMENT RED (B-e381 part 3 — 主开发's RULING, r962, 2026-11-21; part 2 is the hook's own env, launchPath its first half). A full tier the push hook launched from an interactive
 // shell showed 26 mount-guard refusals and 183 failed lines for a sha the hosted runner ran green: a red whose ONLY failed lines
 // are the mount guard's own refusals is the environment's, not the product's. It is SAID by that name with the refused path;
 // it still BLOCKS (a skip is not a green, an environment red is not a green either); it is never counted as the product's and
 // never retried as a flake. envRedOf(stdout, stderr) → { paths, n } | null: the suite printed at least one guard refusal
 // («[mount-guard] fn(path) from site refused», src/server/sync-fs-witness.js) AND every ✗ line of its output carries the guard's
 // own refusal (its code EVSMOUNTSYNC, its words, or the guard's line). A red with no ✗ line (a crash) or with one ✗ line of
-// another kind is the product's. PURE.
-export const MOUNT_GUARD_REFUSED = /\[mount-guard\] \w+\(([^)\n]*)\) from .* refused\b/;
+// another kind is the product's; so is a refusal of a path inside the run's own roots (`roots`: the gated tree, /tmp, TMPDIR —
+// a suite's fixture mount), a refusal line a ✓ / ✗ label QUOTES (the guard's line counts only at a line's start), and a red that
+// hung, timed out or died of a signal (runSuiteAsync never asks then). The incident's 183 downstream ✗ lines (timeouts, missing
+// elements) stay the product's: the ruling is «ONLY the guard's refusals». PURE.
+export const MOUNT_GUARD_REFUSED = /^\s*\[mount-guard\] \w+\((.*?)\) from .* refused\b/;   // the guard's OWN line, at a line's start — never a ✓ / ✗ label quoting it
 export const MOUNT_GUARD_WORDS = /\bEVSMOUNTSYNC\b|refused: a synchronous fs call on a storage mount|\[mount-guard\] .* refused\b/;
-export function envRedOf(stdout, stderr) {
-  const lines = `${stdout || ''}\n${stderr || ''}`.split('\n');
+export function envRedOf(stdout, stderr, { roots = [] } = {}) {
+  const lines = `${stdout || ''}\n${stderr || ''}`.split('\n'), seen = new Set();
+  const own = (p) => roots.some((r) => r && (p === r || p.startsWith(r.replace(/\/+$/, '') + '/')));   // the run's OWN tree / scratch: a fixture of the suite's, never the environment
   const paths = [];
   let n = 0;
-  for (const l of lines) { const m = MOUNT_GUARD_REFUSED.exec(l); if (m && !paths.includes(m[1])) { n++; if (paths.length < 5) paths.push(m[1]); } }
+  for (const l of lines) { const m = MOUNT_GUARD_REFUSED.exec(l); if (m && m[1].startsWith('/') && !own(m[1]) && !seen.has(m[1])) { seen.add(m[1]); n++; if (paths.length < 5) paths.push(m[1]); } }
   if (!n) return null;
   const xs = lines.filter((l) => /^\s*✗ /.test(l));
   if (!xs.length || !xs.every((l) => MOUNT_GUARD_WORDS.test(l))) return null;
@@ -2567,7 +2571,7 @@ export function envRedOf(stdout, stderr) {
 export const envRedWords = (e) => `the mount guard refused ${(e.paths || []).join(', ')}${e.n > (e.paths || []).length ? ` (and ${e.n - e.paths.length} more)` : ''}`;
 export const ENV_RED_NO_RETRY = "an ENVIRONMENT red — its only failed lines are the mount guard's refusals (主开发 r962): never retried as a flake";
 /** the closing's words for the environment reds (both tiers): «a (the mount guard refused /x), b (…)» */
-export const envRedsSaid = (list) => (list || []).map((x) => `${x.name} (${envRedWords(x)})`).join(', ');
+export const envRedsSaid = (list) => (Array.isArray(list) ? list : []).filter((x) => x && typeof x.name === 'string').map((x) => `${x.name} (${envRedWords({ paths: Array.isArray(x.paths) ? x.paths.filter((p) => typeof p === 'string') : [], n: Number(x.n) || 0 })})`).join(', ');   // a marker's field read defensively (a hand-edited marker never throws inside checkHeavy)
 // A FAILED RUN'S WHOLE OUTPUT, kept: <dir>/<sha8>.<suite>.<try>.log, said on its own line → the file, or null. The heavy
 // tier's <markers>/fail-logs since lane ci-aidev-desktop-batch; the FAST tier's FAST_FAIL_LOGS since lane
 // ci-mirror-hygiene (its hang reports there too) — ci.yml's fast job uploads it on a red, as the heavy shards do theirs.
@@ -2586,14 +2590,15 @@ export const FAST_NO_RETRY = Object.freeze([
 export function fastClosing({ reds, flaky = [], skippedLegs = [], keepGoing = false, ran = 0, hangDir = '', part = null, env = process.env, envReds = [] } = {}) {
   if (!Array.isArray(reds)) throw new TypeError('fastClosing: reds is not a list — a closing never reads a missing fact as «no red»');   // (the verdict's own fact has no default: the run crashes, exit 1)
   const out = [];
-  if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')} (each one's whole output: ${hangDir})`]);
+  const envOf = new Set((envReds || []).map((x) => x.name)), envTail = envOf.size ? ` (of them ENVIRONMENT: ${[...envOf].join(', ')})` : '';   // B-e381
+  if (keepGoing && reds.length) out.push(['err', `\n[ci] --keep-going: ${reds.length} red of ${ran} suites that ran — ${reds.join(', ')}${envTail} (each one's whole output: ${hangDir})`]);
   if (flaky.length) out.push(['log', `\n[ci] FLAKY — red, then green on its one retry (counted in ${FAST_RERUNS}): ${flaky.join(', ')}`]);
   if (skippedLegs.length) out.push(['log', `\n${skippedLegsSaid('ci', skippedLegs).join('\n')}`]); // B-4829: a skip is never a green — a line per suite that skipped
   // a workflow command's message escapes %, CR and LF (GitHub's rule); suite names hold none, the escape keeps it so
   const ghEsc = (t) => String(t).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
-  if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}`)}`]);
+  if (reds.length && env && env.GITHUB_ACTIONS) out.push(['log', `::error title=fast${part ? ` ${part.i}/${part.n}` : ''}::${ghEsc(`${reds.length} red: ${reds.join(', ')}${envTail}`)}`]);
   // B-e381: an ENVIRONMENT red still blocks — said apart, by name with the refused path, never among the product's reds
-  const envNames = new Set((envReds || []).map((x) => x.name)), productReds = reds.filter((n) => !envNames.has(n));
+  const envNames = envOf, productReds = reds.filter((n) => !envNames.has(n));
   if (envNames.size) out.push(['err', `\n[ci] ENVIRONMENT red — not the product's, never retried as a flake (主开发 r962): ${envRedsSaid(envReds)}`]);
   if (envNames.size && reds.length) { out.push(['err', `\n✗ ${productReds.length ? productReds.join(', ') : 'no product red'} · ENVIRONMENT: ${[...envNames].join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; }
   if (reds.length) { out.push(['err', `\n✗ ${reds.join(', ')} — release gate is RED, do not push${skipCount(skippedLegs)}\n`]); return { out, code: 1 }; } // (B-4829: the verdict line carries the skip count)
@@ -2861,7 +2866,7 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
       // B-9dd0 (r321 should 5): a row that FAILED and opened sockets keeps them in its result — its green retry cannot hide them
-      const er = envRedOf(stdout, stderr);   // B-e381: an ENVIRONMENT red (its only failed lines are the mount guard's refusals)
+      const er = !signal && !(error && error.code === 'ETIMEDOUT') && !hl && !own ? envRedOf(stdout, stderr, { roots: [root, '/tmp', process.env.TMPDIR] }) : null;   // B-e381: an ENVIRONMENT red (its only failed lines are the mount guard's refusals); a hang / timeout / signal is the product's
       resolve({ ok: false, ms, load, ...(er ? { envRed: er } : {}), ...(opened.length || lostN ? { egress: egressRows } : {}), killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
         `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${egressNote}${er ? ` — ENVIRONMENT red: ${envRedWords(er)}` : ''}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),

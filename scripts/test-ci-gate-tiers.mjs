@@ -998,6 +998,28 @@ console.log('\n§8i an ENVIRONMENT red — the mount guard\'s refusals only: sai
     && c2.code === 1 && errs(c2).includes('✗ no product red · ENVIRONMENT: test-er-env — release gate is RED, do not push'),
     'B-e381: the fast closing says the environment red APART (its path), never among the product\'s, and it still BLOCKS — alone too (exit 1)', { c1: errs(c1), c2: errs(c2) });
   ok(c0.code === 1 && errs(c0).includes('✗ test-er-env, test-er-product — release gate is RED, do not push'), 'B-e381 CONTROL (the release\'s closing call, no envReds): the environment red is listed among the product\'s reds', errs(c0));
+  // r1 (the adversarial read's MUST 1): the verdict reads the guard's OWN line at a line's start — never a ✓ / ✗ label that QUOTES
+  // it — and a refused path inside the run's own roots (the gated tree, /tmp, TMPDIR: a suite's fixture mount) is the suite's
+  const QUOTE = '  ✓ the guard said it: ' + REF;
+  ok(ci.envRedOf([QUOTE, XL].join('\n'), '') === null, 'B-e381 r1: a ✓ label that QUOTES the guard\'s line is no refusal (test-fs-canary prints one on every run) — the product\'s', ci.envRedOf([QUOTE, XL].join('\n'), ''));
+  const INROOT = REF.replace('/srv/storage/data/bin/tmux', '/tmp/vs-fixture-mount/store/x');
+  ok(ci.envRedOf([INROOT, XL].join('\n'), '', { roots: ['/tmp'] }) === null && JSON.stringify(ci.envRedOf([INROOT, REF, XL].join('\n'), '', { roots: ['/tmp'] })) === JSON.stringify({ paths: ['/srv/storage/data/bin/tmux'], n: 1 }),
+    'B-e381 r1: a refusal of a path inside the run\'s own roots (a fixture mount under /tmp) is the suite\'s own — only paths outside them count');
+  // THE HEAVY BLOCK'S WORDS, driven: a red marker on this tree's HEAD with an environment entry — checkHeavy blocks (exit 1) and
+  // says the environment reds apart; a hand-edited field of another shape never throws inside it
+  {
+    const head = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: REPO, encoding: 'utf-8', env: GIT_ENV }).stdout.trim();
+    const md = mktmp('e381-markers');
+    const mark = (env) => fs.writeFileSync(path.join(md, `${head}.red`), JSON.stringify({ sha: head, result: 'red', failed: ['test-er-env', 'test-er-product'], environment: env, endedAt: Date.now(), ms: 1000, suites: 2 }));
+    const said = (env) => { mark(env); const errs = [], e0 = console.error; console.error = (...a) => errs.push(a.join(' ')); let code; try { code = ci.checkHeavy({ dir: md, head }); } finally { console.error = e0; } return { code, errs }; };
+    const a = said([{ name: 'test-er-env', paths: ['/srv/storage/data/bin/tmux'], n: 1 }]), b = said([null, { name: 7 }, { name: 'test-er-env', paths: 'x' }]);
+    ok(head && a.code === 1 && a.errs.some((l) => l.includes("     of them ENVIRONMENT reds (not the product's — B-e381): test-er-env (the mount guard refused /srv/storage/data/bin/tmux)")) && b.code === 1,
+      'B-e381: checkHeavy BLOCKS on a red marker naming an environment red and says it apart; a field of another shape is read defensively (no throw, still blocked)', { a: a.errs.filter((l) => /ENVIRONMENT/.test(l)), b: b.code });
+  }
+  // the keep-going line and the hosted annotation name them too (the read's NIT)
+  const kgc = ci.fastClosing({ reds: now.reds, envReds: now.envReds, keepGoing: true, ran: 2, hangDir: '/x', env: { GITHUB_ACTIONS: 'true' } });
+  ok(kgc.out.some(([, l]) => l.includes('--keep-going: 2 red of 2 suites that ran — test-er-env, test-er-product (of them ENVIRONMENT: test-er-env)')) && kgc.out.some(([, l]) => l === '::error title=fast::2 red: test-er-env, test-er-product (of them ENVIRONMENT: test-er-env)'),
+    'B-e381 r1: the --keep-going line and the hosted ::error annotation name the environment reds too', kgc.out.map(([, l]) => l.trim()));
   // THE HEAVY LOOP (driven by test-ci-heavy-launch's real runs; here its text): an environment red is never retried, stays in
   // `failed` (the marker blocks exactly as before), is named in the marker's `environment`, and the closing and the block say it
   const cs = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');

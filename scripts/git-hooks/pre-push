@@ -4,8 +4,8 @@
 # longer than a person will wait and longer than GitHub's SSH idle timeout, so
 # it was being skipped. Now:
 #
-#   BEFORE the push   `node scripts/ci.mjs --keep-going`  build + the FAST tier + the
-#                                                  one real haiku turn (~2 min),
+#   BEFORE the push   `node scripts/ci.mjs --keep-going`  build + the FAST tier (~2 min; the one real
+#                                                  vendor turn skipped by name, as at a cut — B-e381),
 #                                                  ONCE per push (round 6) — for
 #                                                  HEAD if it is being pushed,
 #                                                  else the newest pushed sha
@@ -215,29 +215,6 @@ done
 
 [ "${VIBESPACE_SKIP_CI:-}" = "1" ] && { echo "[ci] VIBESPACE_SKIP_CI=1 — gate bypassed" >&2; exit 0; }
 
-# ── THE TIERS' OWN ENV (B-e381, 主开发 r962, 2026-11-21) ──────────────────────
-# A tier this hook launches ran in WHATEVER env the pushing shell had: a full tier launched from an interactive shell
-# (PATH = git's exec-path + the production checkout's data/bin + …) showed 26 mount-guard refusals and 183 failed lines for
-# a sha the hosted runner and the integrator's lane env ran green — such a run is no verdict. So every tier it launches
-# (the fast calls and the full launcher below) runs under `env -i` with an ALLOWLIST, as the tree's service env does for a
-# long-lived child (src/agent-env.js serviceEnv): the search path is the node this push resolves FIRST, then the system
-# folders — nothing of an interactive shell's additions (no checkout's data/bin, no agent programs' folder); the names
-# kept are the service env's (HOME, LANG, LC_*, TMPDIR, XDG_RUNTIME_DIR, TERM) + USER / LOGNAME + the tier's own knobs
-# (VIBESPACE_CI_*); the switches are the ones the cut scripts set: VS_NO_REAL_CLI=1 (no real vendor turn) and
-# VIBESPACE_SKIP_AGENT_HOOKS=1. Nothing here reads or sources a person's shell files. It works for every checkout's
-# ci.mjs (it only narrows the env), so a worktree older than this hook keeps working.
-tier_node="$(command -v node 2>/dev/null || true)"
-case "$tier_node" in /*) ;; *) tier_node="" ;; esac
-tier_path="/usr/local/bin:/usr/bin:/bin"
-[ -n "$tier_node" ] && tier_path="$(dirname "$tier_node"):$tier_path"
-tier_env=(env -i "HOME=${HOME:-}" "PATH=$tier_path" VS_NO_REAL_CLI=1 VIBESPACE_SKIP_AGENT_HOOKS=1)
-for v in USER LOGNAME LANG TMPDIR XDG_RUNTIME_DIR TERM; do
-  [ -n "${!v:-}" ] && tier_env+=("$v=${!v}")
-done
-for v in $(compgen -e); do
-  case "$v" in LC_*|VIBESPACE_CI_*) tier_env+=("$v=${!v}") ;; esac
-done
-echo "[ci] the tiers run in the hook's own env: node ${tier_node:-(none found on the push PATH)} · PATH $tier_path (B-e381: no shell additions)" >&2
 
 # ── HEAVY-TIER VERDICT FIRST (2026-09-07) ─────────────────────────────────
 # A heavy run that went RED on a commit that is an ANCESTOR of what we are
@@ -274,6 +251,42 @@ if [ "$only_docs" = "1" ] && [ "${#REFS[@]}" -gt 0 ]; then
   echo "[ci] docs-only push — fast tier skipped" >&2
   exit 0
 fi
+
+# ── THE TIERS' OWN ENV (B-e381 part 2, 主开发 r962, 2026-11-21) ──────────────
+# A tier this hook launches ran in WHATEVER env the pushing shell had: a full tier launched from an interactive shell
+# (PATH = git's exec-path + the production checkout's data/bin + …) showed 26 mount-guard refusals and 183 failed lines for
+# a sha the hosted runner and the integrator's lane env ran green — such a run is no verdict. So every tier it launches
+# (the fast calls and the full launcher below) runs under `env -i` with an ALLOWLIST, as the tree's service env does for a
+# long-lived child (src/agent-env.js serviceEnv):
+#  - the search path is a PRIVATE folder holding only the node this push resolves first (its real file) and its npm / npx,
+#    then the system folders — never that node's own folder (an npm -g bin: an agent CLI lives there), never a checkout's
+#    data/bin, never the agent programs' ~/.local/bin. The folder is the repository's own (inside its git dir), so the
+#    detached full tier keeps it after this hook exits. The tree pins no node: this is the pushing shell's, said below.
+#  - the names kept are the service env's (HOME, LANG, LC_*, TMPDIR, XDG_RUNTIME_DIR, TERM) + USER / LOGNAME + TZ (a push
+#    that mirrors the hosted runner's zone keeps it) + VS_CHROME + the tier's own knobs BY NAME (never a token: the real
+#    turn's VIBESPACE_CI_OAT stays out); the switches are the cut scripts': VS_NO_REAL_CLI=1 (the one real vendor turn is
+#    skipped by name, as at a cut) and VIBESPACE_SKIP_AGENT_HOOKS=1.
+# Nothing here reads or sources a person's shell files. No node on the push's PATH ⇒ refused by name (nothing judged).
+tier_node="$(command -v node 2>/dev/null || true)"
+case "$tier_node" in /*) ;; *) echo "[ci] REFUSED — no node on this push's PATH: the tiers cannot run, nothing was judged" >&2; exit 1 ;; esac
+tier_real="$(readlink -f "$tier_node" 2>/dev/null || true)"; [ -n "$tier_real" ] || tier_real="$tier_node"
+tier_git="$(git rev-parse --git-common-dir 2>/dev/null || true)"
+tier_bin="$( (cd "${tier_git:-.git}" 2>/dev/null && pwd -P) || true)/vs-tier-node"
+if ! mkdir -p "$tier_bin" 2>/dev/null || ! ln -sfn "$tier_real" "$tier_bin/node" 2>/dev/null; then
+  echo "[ci] REFUSED — the tiers' private node folder $tier_bin could not be written: nothing was judged" >&2; exit 1
+fi
+for t in npm npx; do
+  if [ -e "$(dirname "$tier_real")/$t" ]; then ln -sfn "$(dirname "$tier_real")/$t" "$tier_bin/$t"; else rm -f "$tier_bin/$t"; fi
+done
+tier_path="$tier_bin:/usr/local/bin:/usr/bin:/bin"
+tier_env=(env -i "PATH=$tier_path" VS_NO_REAL_CLI=1 VIBESPACE_SKIP_AGENT_HOOKS=1)
+for v in HOME USER LOGNAME LANG TMPDIR XDG_RUNTIME_DIR TERM TZ VS_CHROME VIBESPACE_CI_FAST_LANES VIBESPACE_CI_HEAVY_LOCK VIBESPACE_CI_LANE_ROOT VIBESPACE_CI_REAP_PROCFS VIBESPACE_CI_REAPER_LOCK VIBESPACE_CI_DIR_SWEEP VIBESPACE_CI_SCRATCH_ROOTS; do
+  [ -n "${!v:-}" ] && tier_env+=("$v=${!v}")
+done
+for v in $(compgen -e); do
+  case "$v" in LC_*) tier_env+=("$v=${!v}") ;; esac
+done
+echo "[ci] the tiers run in the hook's own env: node $tier_real ($("$tier_real" --version 2>/dev/null || echo '?')) · PATH $tier_path${TZ:+ · TZ=$TZ} (B-e381: no shell additions)" >&2
 
 # GREEN MARKER (2.369.51): scripts/ci.mjs writes .git/ci-green = "<sha> <epoch-ms>"
 # after a green run on a CLEAN tree. If it names HEAD and is < 60 min old the gate
@@ -397,7 +410,7 @@ if [ "$skip_fast" = "0" ]; then
     others="$others $(echo "$sha" | cut -c1-8)"; others_n=$((others_n + 1))
   done
   if [ "$others_n" != "0" ]; then
-    echo "[ci] this push publishes $others_n other commit(s) ($(echo $others)) — the fast tier runs ONCE per push (it costs ~2 min and one real billed chat turn), so those are covered by the HEAVY tier only, which is launched for every pushed sha below." >&2
+    echo "[ci] this push publishes $others_n other commit(s) ($(echo $others)) — the fast tier runs ONCE per push (it costs ~2 min; its one real vendor turn is skipped by name — B-e381), so those are covered by the HEAVY tier only, which is launched for every pushed sha below." >&2
   fi
   # No pushed shas at all (a deletion-only push, or a caller that fed us
   # nothing): gate the tree we have, exactly as before. Nothing is claimed
