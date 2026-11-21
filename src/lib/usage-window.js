@@ -11,6 +11,7 @@ import { createBackendIconHtml, getBackendMeta } from './agent-meta.js';
 import { registerWindowType } from './window-types.js';
 import { ledgerNoteEl, ledgerLoadingOf } from './usage-ledger-note.js'; // B-9428 r4: a partial / as-of answer says so under the totals; ledger-boot-load follow-up: LOADING is a state
 import { tailOf } from './account-tails.js'; // B-ba7d: a usage row carries no key tail — the person's read does
+import { costWords, unpricedOf, unpricedModels, priceKeyOf, keepUnpriced, alsoPrices } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
 
 // Small vendor logo — accounts and models from BOTH CLIs mix in one dashboard,
 // so every such row/chip carries the backend brand to keep them apart.
@@ -68,6 +69,9 @@ const fmtNum = (n) => {
   return String(Math.round(n));
 };
 const fmtCost = (n) => '$' + num(n || 0, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+// a ROW's cost (B-d578 P1-b): the priced part, and «+ unknown» / «price unknown» where a provider's model has no price row — never «$0.00»
+const costOfRow = (r) => costWords(r, t, fmtCost, fmtNum);
+const fmtRowCost = (r) => costOfRow(r).text;
 const fmtPct = (r) => (Math.round((r || 0) * 1000) / 10) + '%';
 
 export function openUsageWindow(app, opts = {}) {
@@ -522,6 +526,61 @@ function renderPricingEditor(state, rerender, reload) {
   const scroll = document.createElement('div'); scroll.className = 'usage-price-scroll'; scroll.appendChild(tbl); // the table scrolls sideways on a phone (390 px): every column reachable
   tsec.appendChild(scroll); wrap.appendChild(tsec);
 
+  // ADD A PRICE (lane lg-providers, B-d578 P1-b): a third-party provider's model that no row matches has NO price — its
+  // tokens are counted, every total leaves them out and says so. Its row is added here, under the matcher's own spelling
+  // (priceKeyOf), and counts it from the next answer on. A row is written only with ALL FIVE rates (a blank is not a 0:
+  // type 0 where the provider charges nothing — a free model's row is a choice); an untouched row writes nothing; Save
+  // refuses a half-typed row by name. The key is the table's GLOBAL key (the longest key a model id contains wins), so a
+  // row that would ALSO price another model of this answer says so, and Save refuses it while that model is unpriced and
+  // has no row of its own.
+  const unpriced = unpricedModels(state.data).filter(m => !TIERS.includes(m.key));
+  const addRows = new Map();   // key → {model, inputs, also}
+  if (unpriced.length) {
+    const usec = document.createElement('div'); usec.className = 'usage-section usage-add-price';
+    usec.innerHTML = `<div class="usage-section-title">${escHtml(t('Add a price — models with no price row'))}</div>`;
+    const unote = document.createElement('div'); unote.className = 'usage-note';
+    unote.textContent = t('These models of a third-party provider match no row, so their cost is unknown and every total leaves them out. Enter the provider\'s own rates (USD per million tokens) to count them.');
+    usec.appendChild(unote);
+    const utbl = document.createElement('table'); utbl.className = 'usage-price-tbl';
+    utbl.innerHTML = `<tr><th>${escHtml(t('Model'))}</th>${FIELDS.map(f => `<th>${escHtml(f[1])}</th>`).join('')}<th>${escHtml(t('Tokens'))}</th></tr>`;
+    const allModels = (state.data?.groups?.model || []).map(r => r.key).filter(k => k && k !== 'unknown');
+    const SHOWN = 20;
+    for (const m of unpriced.slice(0, SHOWN)) {
+      const key = m.key;
+      const row = document.createElement('tr'); row.dataset.priceKey = key;
+      const name = document.createElement('td'); name.textContent = m.model;
+      const also = document.createElement('div'); also.className = 'usage-note usage-unpriced-note'; also.hidden = true;
+      name.appendChild(also); row.appendChild(name);
+      const inputs = [];
+      const rec = { model: m.model, inputs, also: [] };
+      addRows.set(key, rec);
+      const sync = () => {
+        const typed = inputs.filter(([, el]) => el.value !== '');
+        if (typed.length === inputs.length) edited.tiers[key] = Object.fromEntries(inputs.map(([fk, el]) => { const v = parseFloat(el.value); return [fk, Number.isFinite(v) && v >= 0 ? v : 0]; }));
+        else delete edited.tiers[key];
+        // which other models of this answer the row would price too (said under its name while anything is typed)
+        rec.also = typed.length ? alsoPrices(key, allModels, TIERS, [...addRows.keys()].filter(k => addRows.get(k).inputs.some(([, el]) => el.value !== ''))) : [];
+        also.hidden = !rec.also.length;
+        also.textContent = rec.also.length ? t('This row also prices: {models}', { models: rec.also.join(', ') }) : '';
+      };
+      for (const [fk, fl] of FIELDS) {
+        const td = document.createElement('td');
+        const inp = document.createElement('input'); inp.type = 'number'; inp.step = '0.01'; inp.min = '0'; inp.className = 'usage-price-inp'; inp.placeholder = '?';
+        inp.setAttribute('aria-label', `${m.model} — ${fl}`);
+        inp.oninput = () => { for (const r2 of addRows.values()) r2.sync?.(); };
+        inputs.push([fk, inp]);
+        td.appendChild(inp); row.appendChild(td);
+      }
+      rec.sync = sync;
+      const tok = document.createElement('td'); tok.className = 'usage-price-src'; tok.textContent = fmtNum(m.tokens); row.appendChild(tok);
+      utbl.appendChild(row);
+    }
+    const uscroll = document.createElement('div'); uscroll.className = 'usage-price-scroll'; uscroll.appendChild(utbl);
+    usec.appendChild(uscroll);
+    if (unpriced.length > SHOWN) { const more = document.createElement('div'); more.className = 'usage-note'; more.textContent = t('…and {n} more models with no price row — add these first, the rest show next', { n: unpriced.length - SHOWN }); usec.appendChild(more); }
+    wrap.appendChild(usec);
+  }
+
   // Per-account discount / override
   const asec = document.createElement('div'); asec.className = 'usage-section';
   asec.innerHTML = `<div class="usage-section-title">${t('Per-account discount')}</div>`;
@@ -534,10 +593,13 @@ function renderPricingEditor(state, rerender, reload) {
     row.innerHTML = `<span class="usage-bar-label">${badge}${escHtml(a.name || a.key)}</span>`;
     const ctrl = document.createElement('span'); ctrl.style.cssText = 'display:flex;align-items:center;gap:6px;grid-column:2/4';
     const inp = document.createElement('input'); inp.type = 'number'; inp.min = '0'; inp.max = '99'; inp.step = '1'; inp.className = 'usage-price-inp'; inp.style.width = '64px'; inp.value = discPct; inp.placeholder = '0';
-    const suffix = document.createElement('span'); suffix.className = 'usage-note'; suffix.style.margin = '0'; suffix.textContent = t('% off (subscriptions ignore this)');
+    const suffix = document.createElement('span'); suffix.className = 'usage-note'; suffix.style.margin = '0';
+    suffix.textContent = a.type === 'provider' ? t('% off (applies once the model has a price)') : t('% off (subscriptions ignore this)');   // B-d578 P1-b: a part off an unknown price is unknown
     inp.oninput = () => {
       const v = parseFloat(inp.value);
-      edited.accounts[a.key] = (Number.isFinite(v) && v > 0) ? { discount: Math.min(0.99, v / 100) } : null; // null clears
+      // the account's OTHER settings (its own rows — a provider's `_default`) are kept: the discount is one field of it (B-d578 P1-b)
+      const rest = { ...cur }; delete rest.discount;
+      edited.accounts[a.key] = (Number.isFinite(v) && v > 0) ? { ...rest, discount: Math.min(0.99, v / 100) } : (Object.keys(rest).length ? rest : null); // null clears
     };
     ctrl.append(inp, suffix); row.appendChild(ctrl); asec.appendChild(row);
   }
@@ -546,6 +608,14 @@ function renderPricingEditor(state, rerender, reload) {
   const actions = document.createElement('div'); actions.style.cssText = 'display:flex;gap:8px;padding:6px 0';
   const save = document.createElement('button'); save.className = 'usage-btn'; save.textContent = t('Save prices');
   save.onclick = async () => {
+    // B-d578 P1-b: a half-typed «Add a price» row, or one that would price ANOTHER unpriced model with no row of its own,
+    // is refused by name — the editor stays, the typing kept
+    for (const rec of addRows.values()) {
+      const typed = rec.inputs.filter(([, el]) => el.value !== '').length;
+      if (typed && typed < rec.inputs.length) { showToast(t('Add a price for {model}: enter all five rates — type 0 where the provider charges nothing', { model: rec.model }), { type: 'error' }); return; }
+      const orphan = typed ? rec.also.filter(o => { const r2 = addRows.get(priceKeyOf(o)); return r2 && !r2.inputs.every(([, el]) => el.value !== ''); }) : [];
+      if (orphan.length) { showToast(t('The row for {model} would also price {models} — give each its own row (the same rates are fine)', { model: rec.model, models: orphan.join(', ') }), { type: 'error' }); return; }
+    }
     save.disabled = true;
     const patch = {};
     if (Object.keys(edited.tiers).length) patch.tiers = edited.tiers;
@@ -590,7 +660,7 @@ function renderTiles(d) {
   // looks like it doesn't add up from what's shown. The four component tiles are
   // grouped (.comp) right after Total so they visibly sum to it.
   wrap.innerHTML = [
-    tile(t('Est. API-equivalent cost'), fmtCost(T.cost), t('subscriptions are plan-covered'), 'accent'),
+    tile(t('Est. API-equivalent cost'), escHtml(fmtRowCost(T)), costOfRow(T).short ? escHtml(t('subscriptions are plan-covered') + ' · ' + costOfRow(T).short) : t('subscriptions are plan-covered'), 'accent'),
     tile(t('Requests'), fmtNum(T.requests), `${fmtNum(T.sessions)} ${t('sessions')}`),
     tile(t('Cache hit ratio'), fmtPct(T.cacheHitRatio), t('of input tokens')),
     tile(t('Total tokens'), fmtNum(T.totalTokens), t('= the 4 components →'), 'total'),
@@ -612,6 +682,9 @@ function renderTrend(d, state) {
   const canvas = document.createElement('canvas'); canvas.className = 'usage-canvas';
   sec.appendChild(canvas);
   requestAnimationFrame(() => drawBars(canvas, series, metricKey));
+  // the bars are the PRICED part: a range with a provider's unpriced model says what they leave out (B-d578 P1-b)
+  const cw = metricKey === 'cost' ? costOfRow(d.totals || {}) : null;
+  if (cw && cw.note) { const n = document.createElement('div'); n.className = 'usage-note usage-unpriced-note'; n.textContent = cw.note; sec.appendChild(n); }
   return sec;
 }
 function drawBars(canvas, series, metricKey) {
@@ -655,6 +728,7 @@ const BILLING_META = {
   'codex-cli-login': { label: () => t('Codex CLI login (unattributed)'), cls: 'global' },
   'unknown-account': { label: () => t('Unknown account'), cls: 'global' },
   'remote-host': { label: () => t('Remote host (its own login)'), cls: 'sub' },
+  'provider': { label: () => t('Third-party provider (billed by the provider)'), cls: 'api' },   // B-d578 P1-b: a provider's record, never «Unknown account»
 };
 function renderBilling(d) {
   const sec = section(t('By billing type'));
@@ -672,9 +746,10 @@ function renderBilling(d) {
 
 function renderGroup(title, rows, state, opts = {}) {
   const sec = section(title);
-  const list = (rows || []).slice(0, opts.limit || 10);
-  if (!list.length) { sec.appendChild(emptyLine()); return sec; }
   const metric = state.metric;
+  // a row whose price is unknown sorts as $0 among the costs: it stays in view, said, never cut off as the smallest bill (B-d578 P1-b)
+  const list = metric === 'cost' ? keepUnpriced(rows, opts.limit || 10) : (rows || []).slice(0, opts.limit || 10);
+  if (!list.length) { sec.appendChild(emptyLine()); return sec; }
   const max = Math.max(...list.map(r => metric === 'cost' ? r.cost : r.totalTokens), 1);
   for (const r of list) {
     let label = r.key;
@@ -696,23 +771,23 @@ function renderGroup(title, rows, state, opts = {}) {
 
 // ── ORIGIN (2026-09-10) ──
 const originVal = (cell, metric) => cell ? (metric === 'cost' ? cell.cost : cell.totalTokens) : 0;
-const originFmt = (v, metric) => metric === 'cost' ? fmtCost(v) : fmtNum(v);
+const originText = (cell, metric) => metric === 'cost' ? fmtRowCost(cell || {}) : fmtNum(cell ? cell.totalTokens : 0);   // a cell's own words (its unknown part said)
 /** "Conversation $1.20 · Subagents $3.40 · Workflows $0.10" — only the origins
  *  this row actually has, so a plain conversation does not grow two zeroes. */
 function originSplitText(cells, metric) {
   if (!cells) return '';
   const M = ORIGIN_META();
-  const parts = ORIGIN_ORDER.filter(k => cells[k]).map(k => `${M[k].label} ${originFmt(originVal(cells[k], metric), metric)}`);
+  const parts = ORIGIN_ORDER.filter(k => cells[k]).map(k => `${M[k].label} ${originText(cells[k], metric)}`);
   return parts.length > 1 ? parts.join(' · ') : '';
 }
 /** The stacked share bar for one row's origin cells (session table + By origin). */
 function originStack(cells, metric) {
   const M = ORIGIN_META();
-  const parts = ORIGIN_ORDER.map(k => ({ k, v: originVal(cells?.[k], metric) })).filter(p => p.v > 0);
+  const parts = ORIGIN_ORDER.map(k => ({ k, v: originVal(cells?.[k], metric), cell: cells?.[k] })).filter(p => p.v > 0);
   const tot = parts.reduce((s, p) => s + p.v, 0);
   const bar = document.createElement('div'); bar.className = 'usage-stack usage-stack-thin';
   if (!tot) return bar;
-  bar.innerHTML = parts.map(p => `<span class="usage-stack-seg" style="width:${(p.v / tot * 100).toFixed(1)}%;background:${M[p.k].color}" title="${escHtml(M[p.k].label)}: ${escHtml(originFmt(p.v, metric))} (${fmtPct(p.v / tot)})"></span>`).join('');
+  bar.innerHTML = parts.map(p => `<span class="usage-stack-seg" style="width:${(p.v / tot * 100).toFixed(1)}%;background:${M[p.k].color}" title="${escHtml(M[p.k].label)}: ${escHtml(originText(p.cell, metric))} (${fmtPct(p.v / tot)})"></span>`).join('');
   return bar;
 }
 
@@ -747,7 +822,7 @@ function renderOrigin(d, state) {
 // with fixed columns, which is why this one is built by hand.
 function renderSessions(d, state, opts = {}) {
   const sec = section(t('By session'));
-  const rows = (d.groups.session || []).slice(0, opts.limit || 12);
+  const rows = state.metric === 'cost' ? keepUnpriced(d.groups.session, opts.limit || 12) : (d.groups.session || []).slice(0, opts.limit || 12);   // B-d578 P1-b: an unknown price stays in view
   if (!rows.length) { sec.appendChild(emptyLine()); return sec; }
   // the origin columns ARE the session×origin pivot: until it is here the
   // section says so and asks once on screen (B-f95d ②)
@@ -774,15 +849,15 @@ function renderSessions(d, state, opts = {}) {
     for (const k of ORIGIN_COLS) {
       const c = cells[k];
       const cell = document.createElement('td'); cell.className = 'usage-sess-v';
-      cell.textContent = c ? originFmt(originVal(c, metric), metric) : '—';
+      cell.textContent = c ? originText(c, metric) : '—';
       // Cost AND tokens on every cell: the table shows one metric at a time but
       // the other one is the question anybody asks next.
-      if (c) cell.title = `${fmtCost(c.cost)} · ${fmtNum(c.totalTokens)} ${t('tokens')} · ${c.requests} ${t('req')}`;
+      if (c) cell.title = `${fmtRowCost(c)} · ${fmtNum(c.totalTokens)} ${t('tokens')} · ${c.requests} ${t('req')}`;
       tr.appendChild(cell);
     }
     const tot = document.createElement('td'); tot.className = 'usage-sess-v usage-sess-total';
-    tot.textContent = originFmt(metric === 'cost' ? r.cost : r.totalTokens, metric);
-    tot.title = `${fmtCost(r.cost)} · ${fmtNum(r.totalTokens)} ${t('tokens')} · ${r.requests} ${t('req')}`;
+    tot.textContent = originText(r, metric);
+    tot.title = `${fmtRowCost(r)} · ${fmtNum(r.totalTokens)} ${t('tokens')} · ${r.requests} ${t('req')}` + (costOfRow(r).note ? '\n' + costOfRow(r).note : '');
     tr.appendChild(tot);
     tbl.appendChild(tr);
   }
@@ -825,7 +900,7 @@ function renderHours(d) {
     const r = by[hEl]; const v = r ? r.totalTokens : 0;
     const cell = document.createElement('div'); cell.className = 'usage-hour';
     cell.style.setProperty('--f', (v / max).toFixed(3));
-    cell.title = `${hEl}:00 — ${fmtNum(v)} ${t('tokens')}, ${fmtCost(r ? r.cost : 0)}`;
+    cell.title = `${hEl}:00 — ${fmtNum(v)} ${t('tokens')}, ${fmtRowCost(r || {})}`;
     if (hEl % 6 === 0) cell.dataset.h = hEl + 'h';
     grid.appendChild(cell);
   }
@@ -850,7 +925,8 @@ function renderFooter(d) {
   const from = d.range?.from ? new Date(d.range.from).toISOString().slice(0, 10) : '—';
   const to = d.range?.to ? new Date(d.range.to).toISOString().slice(0, 10) : '—';
   f.innerHTML = `<span>${t('Data range: {from} → {to}', { from, to })}</span>
-    <span>${escHtml(t('Cost is an estimate at API prices — a subscription’s use is covered by its plan. Change the prices with «Pricing…».'))}</span>`;
+    <span>${escHtml(t('Cost is an estimate at API prices — a subscription’s use is covered by its plan. Change the prices with «Pricing…».'))}</span>`
+    + (costOfRow(d.totals || {}).note ? `<span class="usage-unpriced-note">${escHtml(costOfRow(d.totals || {}).note)}</span>` : '');   // B-d578 P1-b
   return f;
 }
 
@@ -869,16 +945,16 @@ function barRow(label, r, max, metric, opts = {}) {
   const v = metric === 'cost' ? r.cost : r.totalTokens;
   const row = document.createElement('div'); row.className = 'usage-bar-row' + (opts.small ? ' small' : '');
   const pct = Math.max(1, (v / max) * 100);
-  const valStr = metric === 'cost' ? fmtCost(r.cost) : fmtNum(r.totalTokens);
+  const valStr = metric === 'cost' ? escHtml(fmtRowCost(r)) : fmtNum(r.totalTokens);
   row.innerHTML = `
     <span class="usage-bar-label" title="${escHtml(opts.title || label)}">${opts.badge || ''}${escHtml(label)}</span>
     <span class="usage-bar-track"><span class="usage-bar-fill ${opts.cls || ''}" style="width:${pct.toFixed(1)}%"></span></span>
     <span class="usage-bar-val">${valStr}</span>`;
-  if (r.requests != null) row.querySelector('.usage-bar-val').title = `${fmtNum(r.totalTokens)} ${t('tokens')} · ${r.requests} ${t('req')} · ${fmtCost(r.cost)}`;
+  if (r.requests != null) row.querySelector('.usage-bar-val').title = `${fmtNum(r.totalTokens)} ${t('tokens')} · ${r.requests} ${t('req')} · ${fmtRowCost(r)}` + (costOfRow(r).note ? '\n' + costOfRow(r).note : '');
   return row;
 }
 function typeBadge(type, deleted) {
-  const map = { subscription: ['sub', t('sub')], 'codex-subscription': ['sub', t('ChatGPT')], api: ['api', t('API')], global: ['global', t('global')], unknown: ['global', '?'] };
+  const map = { subscription: ['sub', t('sub')], 'codex-subscription': ['sub', t('ChatGPT')], api: ['api', t('API')], provider: ['api', t('provider')], global: ['global', t('global')], unknown: ['global', '?'] };
   const [cls, lab] = map[type] || ['global', type];
   return `<span class="usage-type-badge ${cls}">${escHtml(lab)}${deleted ? ' ✕' : ''}</span>`;
 }
@@ -886,10 +962,13 @@ function emptyLine() { const e = document.createElement('div'); e.className = 'u
 
 function exportCsv(d) {
   if (!d) return;
-  const lines = [['dimension', 'key', 'name', 'type', 'requests', 'sessions', 'input', 'cacheWrite', 'cacheRead', 'output', 'totalTokens', 'estCost'].join(',')];
+  // estCost = the PRICED part; a row whose every request has an unknown price leaves it EMPTY (never 0), and
+  // unpricedTokens says what each row leaves out (B-d578 P1-b — a provider's model with no price row)
+  const lines = [['dimension', 'key', 'name', 'type', 'requests', 'sessions', 'input', 'cacheWrite', 'cacheRead', 'output', 'totalTokens', 'estCost', 'unpricedTokens'].join(',')];
   for (const [dim, rows] of Object.entries(d.groups || {})) {
     for (const r of rows) {
-      lines.push([dim, csvq(r.key), csvq(r.name || ''), r.type || '', r.requests, r.sessions, r.input, r.cacheWrite, r.cacheRead, r.output, r.totalTokens, r.cost.toFixed(4)].join(','));
+      const u = unpricedOf(r);
+      lines.push([dim, csvq(r.key), csvq(r.name || ''), r.type || '', r.requests, r.sessions, r.input, r.cacheWrite, r.cacheRead, r.output, r.totalTokens, u && u.requests >= r.requests ? '' : r.cost.toFixed(4), u ? u.tokens : 0].join(','));
     }
   }
   const blob = new Blob([lines.join('\n')], { type: 'text/csv' });

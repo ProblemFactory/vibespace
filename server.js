@@ -786,7 +786,7 @@ const usageHistory = new UsageHistory({
   // NO key tail (B-ba7d: a usage row reaches every reader of /api/usage-stats; the page lays the person's read on).
   resolveAccount: (id) => {
     const a = accounts.get(id);
-    if (!a) return null;
+    if (!a) { let p = null; try { p = accounts.providerRecordOf(id); } catch { } return p ? { type: 'provider', name: p.label || id } : null; }   // B-d578 P1-b: a third-party provider's RECORD (no account) — its name, never «unknown» / deleted
     const type = a.type || 'api', backend = a.backend || 'claude';
     let ledgerType = null; try { ledgerType = require('./src/harnesses').get(backend).creds?.ledgerType || null; } catch { } // codex: every account is 'codex-subscription'
     return { type: ledgerType || type, name: accounts.nameShownOf(id) };

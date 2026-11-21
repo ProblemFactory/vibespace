@@ -14,6 +14,7 @@
 // keyOf, and a drift between the two is exactly what a comparison reports.
 
 const { globalUsageKeyOf } = require('./backend-caps.js'); // PURE → PURE: the machine login's ledger key per harness
+const { isThirdPartyAccount } = require('./provider-ids.js'); // PURE → PURE (B-d578 P1-b): aggregate's own test for a provider's record
 const SCHEMA_VERSION = 1; // PRAGMA user_version — a database at any other version is deleted and rebuilt
 const HEAD_BYTES = 4096;  // a shard's fingerprint covers at most its first 4 KiB
 const SHARD_RE = /^events-\d{4}-\d{2}\.ndjson$/; // the ledger's monthly shards (usage-history.js _loadEvents)
@@ -77,7 +78,9 @@ function shardMarkVerdict(cur, mark) {
 
 // The Usage window's dimensions, in usage-history.js aggregate's order.
 const DIMS = ['day', 'model', 'account', 'billing', 'project', 'mode', 'host', 'hour', 'weekday', 'session', 'pool', 'origin'];
-const FIELDS = ['requests', 'sessions', 'input', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output', 'cost'];
+const FIELDS = ['requests', 'sessions', 'input', 'cacheWrite5m', 'cacheWrite1h', 'cacheRead', 'output', 'cost', 'unpricedRequests', 'unpricedTokens'];
+// B-d578 P1-b: the unknown-price part — a bucket carries it only when it has one (absent = 0 on both sides)
+const OPTIONAL_FIELDS = new Set(['unpricedRequests', 'unpricedTokens']);
 
 /** aggregate's own pivot filter, verbatim in meaning. */
 function validPivots(pivots) {
@@ -146,7 +149,7 @@ function keysOf(r) {
     day: r.day,
     model: r.model || 'unknown',
     account: r.acct || globalUsageKeyOf(r.be),
-    billing: r.atype === 'api' ? 'api-key' : r.atype === 'subscription' ? 'subscription' : r.atype === 'codex-subscription' ? 'chatgpt' : r.atype === 'host' ? 'remote-host' : (r.acct ? 'unknown-account' : (r.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
+    billing: isThirdPartyAccount(r.acct) ? 'provider' : r.atype === 'api' ? 'api-key' : r.atype === 'subscription' ? 'subscription' : r.atype === 'codex-subscription' ? 'chatgpt' : r.atype === 'host' ? 'remote-host' : (r.acct ? 'unknown-account' : (r.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
     project: r.cwd || 'unknown',
     mode: r.mode || 'unknown',
     host: r.host || 'local',
@@ -212,30 +215,35 @@ function foldAggregate(rows, pivots = null) {
  *  prompt, i, cw5, cw1, cr, o}) is the ledger's own price applied per cell —
  *  `(c) => ledger._cost(c, c.prompt)`: the cell's instant and one request's
  *  whole prompt pick the rates (a cell's summed tokens would cross `long.above`
- *  by themselves); memory sums a price per row, so the costs agree to rounding. */
-function finalizeBucket(b, costOf) {
-  let requests = 0, input = 0, cacheWrite5m = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0;
+ *  by themselves); memory sums a price per row, so the costs agree to rounding.
+ *  unknownOf(c) (B-d578 P1-b) = the ledger's priceUnknown for the cell's model
+ *  and account — a cell is one model of one account, so it is wholly unknown or
+ *  not: its requests and tokens are counted apart, as memory's _add counts them. */
+function finalizeBucket(b, costOf, unknownOf = null) {
+  let requests = 0, input = 0, cacheWrite5m = 0, cacheWrite1h = 0, cacheRead = 0, output = 0, cost = 0, unpricedRequests = 0, unpricedTokens = 0;
   for (const c of b.cells) {
     requests += c.n; input += c.i; cacheWrite5m += c.cw5; cacheWrite1h += c.cw1; cacheRead += c.cr; output += c.o;
-    cost += costOf(c);
+    if (unknownOf && unknownOf(c)) { unpricedRequests += c.n; unpricedTokens += c.i + c.cw5 + c.cw1 + c.cr + c.o; }
+    else cost += costOf(c);
   }
   const totalInput = input + cacheWrite5m + cacheWrite1h + cacheRead;
   return {
     requests, sessions: b.sessions, input, cacheWrite5m, cacheWrite1h, cacheWrite: cacheWrite5m + cacheWrite1h, cacheRead, output,
     totalInput, totalTokens: totalInput + output, cacheHitRatio: totalInput ? cacheRead / totalInput : 0, cost,
+    ...(unpricedRequests ? { unpricedRequests, unpricedTokens } : {}),
   };
 }
 
 /** The folded answer → aggregate's shape (totals, range, groups as arrays,
  *  pivots as rows of cells) — the shape compareAggregates reads on both sides. */
-function finalizeAggregate(folded, costOf) {
+function finalizeAggregate(folded, costOf, unknownOf = null) {
   const groups = {};
-  for (const d of DIMS) groups[d] = Object.entries(folded.groups[d] || {}).map(([key, b]) => ({ key, ...finalizeBucket(b, costOf) }));
+  for (const d of DIMS) groups[d] = Object.entries(folded.groups[d] || {}).map(([key, b]) => ({ key, ...finalizeBucket(b, costOf, unknownOf) }));
   const pivots = {};
   for (const [pk, rows] of Object.entries(folded.pivots || {})) {
-    pivots[pk] = Object.entries(rows).map(([key, cells]) => ({ key, cells: Object.fromEntries(Object.entries(cells).map(([k2, b]) => [k2, finalizeBucket(b, costOf)])) }));
+    pivots[pk] = Object.entries(rows).map(([key, cells]) => ({ key, cells: Object.fromEntries(Object.entries(cells).map(([k2, b]) => [k2, finalizeBucket(b, costOf, unknownOf)])) }));
   }
-  return { totals: finalizeBucket(folded.total, costOf), range: folded.range, groups, pivots };
+  return { totals: finalizeBucket(folded.total, costOf, unknownOf), range: folded.range, groups, pivots };
 }
 
 const sameNum = (f, a, b) => (f === 'cost' ? Math.abs(a - b) <= 1e-9 * Math.max(1, Math.abs(a), Math.abs(b)) : a === b);
@@ -250,7 +258,11 @@ function compareAggregates(mem, idx, { cap = 12 } = {}) {
   const note = (at, m, x) => { if (diffs.length < cap) diffs.push({ at, mem: m, idx: x }); };
   const bucket = (at, m, x) => {
     if (!m || !x) { note(at, m ? 'present' : 'absent', x ? 'present' : 'absent'); return; }
-    for (const f of FIELDS) { checked++; if (!sameNum(f, m[f], x[f])) note(`${at}.${f}`, m[f], x[f]); }
+    for (const f of FIELDS) {
+      checked++;
+      const mv = OPTIONAL_FIELDS.has(f) ? (m[f] ?? 0) : m[f], xv = OPTIONAL_FIELDS.has(f) ? (x[f] ?? 0) : x[f];
+      if (!sameNum(f, mv, xv)) note(`${at}.${f}`, mv, xv);
+    }
   };
   bucket('totals', mem && mem.totals, idx && idx.totals);
   for (const f of ['from', 'to']) { checked++; if ((mem?.range?.[f] ?? null) !== (idx?.range?.[f] ?? null)) note(`range.${f}`, mem?.range?.[f] ?? null, idx?.range?.[f] ?? null); }

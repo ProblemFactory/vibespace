@@ -445,6 +445,8 @@ html, body {
 .usage-refresh-btn.usage-refresh-spin .uref-glyph { display: inline-block; animation: usage-refresh-spin 0.8s linear infinite; }
 @keyframes usage-refresh-spin { to { transform: rotate(360deg); } }
 .usage-note { font-size: 10px; color: var(--text-dim); margin: 4px 0; line-height: 1.45; white-space: normal; }
+/* B-d578 P1-b: what a cost figure leaves out (a provider's model with no price row) — said, in the warning text colour */
+.usage-unpriced-note { color: var(--warn-text); }
 .usage-bar-row { display: grid; grid-template-columns: minmax(90px, 40%) 1fr auto; align-items: center; gap: 8px; padding: 2.5px 0; }
 .usage-bar-row.small { padding: 1.5px 0; }
 .usage-bar-label { font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: flex; align-items: center; gap: 5px; }

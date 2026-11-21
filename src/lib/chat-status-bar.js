@@ -1298,7 +1298,7 @@ export class ChatStatusBar {
     // subscription's figure is quiet.
     if (this._statusCost > 0) {
       const cw = costChipWords(this._statusCost, this._costBasis ?? null, t, (v) => num(v, { minimumFractionDigits: 2, maximumFractionDigits: 2 })); // the page's number formatter (ui-language page-time)
-      const costColor = cw.tone === 'quiet' ? 'var(--text-dim)' : this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
+      const costColor = cw.tone === 'quiet' ? 'var(--text-dim)' : cw.tone === 'unknown' ? tierOrange /* B-d578 P1-b: no figure to tier — the price is unknown */ : this._statusCost > 5 ? tierRed : this._statusCost > 1 ? tierOrange : tierGreen;
       // its context-panel row says the FIGURE (its title has none); an account whose basis nobody knows is SAID as unknown there
       // (主开发's ruling 23:41Z: only per-use billing puts the spend on the door's face)
       inDoor('cost', 'chat-status-cost', cw.title, escHtml(cw.text), { style: `color:${costColor}`, value: (this._costBasis ?? null) === null ? t('{text} · whether it is billed is not known', { text: cw.text }) : cw.text });

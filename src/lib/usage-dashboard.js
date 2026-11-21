@@ -7,6 +7,7 @@ Chart.register(LineController, BarController, DoughnutController, LineElement, P
 import { escHtml, createPopover, showContextMenu } from './utils.js';
 import { t } from './i18n.js';
 import { num } from './page-time.js'; // lane ui-language: the ONE formatter of a time / number a person reads
+import { costWords, unpricedOf, sumParts, keepUnpriced } from './usage-cost-words.js'; // PURE (B-d578 P1-b): a cost with an unknown part says so
 
 /**
  * Configurable usage dashboard (2.96.0) — Grafana/Posthog-style panels over
@@ -170,6 +171,8 @@ const fmtTok = (v) => {
   return String(Math.round(v));
 };
 const fmtPct = (v) => ((Number(v) || 0) * 100).toFixed(1) + '%';
+// a ROW's cost in words (B-d578 P1-b): «$12.30 + unknown» / «price unknown» where a provider's model has no price row
+const rowCost = (r) => costWords(r, t, fmtCost, fmtTok).text;
 
 const PALETTE = ['var(--accent)', 'var(--green, #3fb950)', 'var(--yellow, #e5c07b)', 'var(--red, #e55)', 'var(--blue, #61afef)', 'var(--magenta, #c678dd)', 'var(--cyan, #56b6c2)', 'var(--text-dim)'];
 
@@ -194,7 +197,7 @@ function panelRows(data, panel) {
     // Top-N is a RANKING concept — always cut by value, then order the
     // survivors per the panel's sort (name order alphabetizes the top N).
     rows.sort((a, b) => b.value - a.value);
-    rows = rows.slice(0, panel.topN || 8);
+    rows = first === 'cost' ? keepUnpriced(rows, panel.topN || 8) : rows.slice(0, panel.topN || 8);   // B-d578 P1-b: an unknown price is not the smallest bill
     sortRowsBy(rows, mode, (r) => r.value);
   } else {
     sortRowsBy(rows, mode, (r) => r.value);
@@ -247,7 +250,7 @@ function chartStat(body, rows, mlist) {
   mlist.forEach((m, i) => {
     const cell = document.createElement('div');
     cell.className = 'udash-stat-cell';
-    cell.innerHTML = `<div class="udash-stat">${escHtml(m.fmt(rows[0]?.values?.[i] ?? 0))}</div>`
+    cell.innerHTML = `<div class="udash-stat">${escHtml(m.key === 'cost' && rows[0]?.raw ? rowCost(rows[0].raw) : m.fmt(rows[0]?.values?.[i] ?? 0))}</div>`
       + (mlist.length > 1 ? `<div class="udash-stat-label">${escHtml(m.label)}</div>` : '');
     wrap.appendChild(cell);
   });
@@ -306,7 +309,8 @@ function scaleTicks(mlist, unit, colors) {
   return { color: colors.dim, callback: (v) => m.fmt(v), maxTicksLimit: 6 };
 }
 
-function commonOpts(mlist, colors, { horizontal, showLegend } = {}) {
+// `raws` (B-d578 P1-b) = the usage row behind each category — a cost tooltip words ITS row («$x + unknown» / «price unknown»)
+function commonOpts(mlist, colors, { horizontal, showLegend, raws = null } = {}) {
   const { units, idOf } = axisAssign(mlist);
   const valueAxis = horizontal ? 'x' : 'y';
   const catAxis = horizontal ? 'y' : 'x';
@@ -330,7 +334,8 @@ function commonOpts(mlist, colors, { horizontal, showLegend } = {}) {
           label: (ctx) => {
             const m = mlist[ctx.datasetIndex] || mlist[0];
             const v = horizontal ? ctx.parsed.x : ctx.parsed.y;
-            return `${m.label}: ${m.fmt(v)}`;
+            const raw = m.key === 'cost' && raws ? raws[ctx.dataIndex] : null;
+            return `${m.label}: ${raw ? rowCost(raw) : m.fmt(v)}`;
           },
         },
       },
@@ -357,7 +362,7 @@ function chartBars(body, rows, mlist, panel) {
         [horizontal ? 'xAxisID' : 'yAxisID']: idOf(m.unit),
       })),
     },
-    options: commonOpts(mlist, colors, { horizontal, showLegend: mlist.length > 1 }),
+    options: commonOpts(mlist, colors, { horizontal, showLegend: mlist.length > 1, raws: rows.map((r) => r.raw || null) }),
   });
 }
 
@@ -382,7 +387,7 @@ function chartLine(body, rows, mlist) {
         yAxisID: idOf(m.unit),
       })),
     },
-    options: commonOpts(mlist, colors, { showLegend: mlist.length > 1 }),
+    options: commonOpts(mlist, colors, { showLegend: mlist.length > 1, raws: rows.map((r) => r.raw || null) }),
   });
 }
 
@@ -391,7 +396,8 @@ function chartPie(body, rows, mlist) {
   const m = mlist[0]; // a donut is single-metric by nature — first metric wins
   const top = rows.slice(0, 7);
   const rest = rows.slice(7).reduce((s2, r) => s2 + r.value, 0);
-  const parts = rest > 0 ? [...top, { key: t('Other'), value: rest }] : top;
+  const restRaw = sumParts(rows.slice(7).map((r) => r.raw));   // B-d578 P1-b: «Other» adds its rows' unknown parts too
+  const parts = rest > 0 || (m.key === 'cost' && unpricedOf(restRaw)) ? [...top, { key: t('Other'), value: rest, raw: restRaw }] : top;
   const total = parts.reduce((s2, r) => s2 + r.value, 0) || 1;
   const canvas = chartHolder(body);
   const colors = themeColors(canvas);
@@ -409,7 +415,7 @@ function chartPie(body, rows, mlist) {
       responsive: true, maintainAspectRatio: false, animation: { duration: 250 }, cutout: '58%',
       plugins: {
         legend: { position: 'right', labels: { color: colors.text, boxWidth: 9, boxHeight: 9, font: { size: 10 } } },
-        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${m.fmt(ctx.parsed)} · ${Math.round((ctx.parsed / total) * 100)}%` } },
+        tooltip: { callbacks: { label: (ctx) => `${ctx.label}: ${m.key === 'cost' && parts[ctx.dataIndex]?.raw ? rowCost(parts[ctx.dataIndex].raw) : m.fmt(ctx.parsed)} · ${Math.round((ctx.parsed / total) * 100)}%` } },
       },
     },
   });
@@ -439,12 +445,12 @@ function chartSplit(body, data, panel, mlist) {
   const dimNames = new Map((data.groups?.[panel.dim] || []).map((g) => [g.key, g.name || (panel.dim === 'origin' ? originLabel(g.key) : '')]));
   const labelOf = (k) => dimNames.get(k) || rowName(panel.dim, k, '');
   let rows = pv.map((r) => ({
-    key: r.key, label: labelOf(r.key), cells: r.cells,
+    key: r.key, label: labelOf(r.key), cells: r.cells, raw: sumParts(Object.values(r.cells)),
     total: Object.values(r.cells).reduce((s2, c) => s2 + valueOf(c, m.key), 0),
   }));
   const smode = effectiveSort(panel, dimMeta);
   if (smode === 'axis') rows.sort((a, b) => (numericKeys ? Number(a.key) - Number(b.key) : String(a.key).localeCompare(String(b.key))));
-  else { rows.sort((a, b) => (smode === 'asc' ? a.total - b.total : b.total - a.total)); if (!dimMeta?.seq) rows = rows.slice(0, panel.topN || 8); }
+  else { rows.sort((a, b) => (smode === 'asc' ? a.total - b.total : b.total - a.total)); if (!dimMeta?.seq) rows = m.key === 'cost' ? keepUnpriced(rows, panel.topN || 8) : rows.slice(0, panel.topN || 8); }
   // Series = top split keys by grand total; the tail folds into "Other" so a
   // session/project split stays readable.
   const totalsByS = {};
@@ -463,6 +469,7 @@ function chartSplit(body, data, panel, mlist) {
   const datasets = kept.map((k, i) => ({
     label: String(labMap.get(k) || k),
     data: mkData(k),
+    raws: rows.map((r) => r.cells[k] || null),   // B-d578 P1-b: each point's own cell (its unknown part)
     ...axisBind,
     ...(stacked
       ? { backgroundColor: resolveColor(canvas, PALETTE[i % PALETTE.length], 0.75), borderRadius: 2 }
@@ -472,6 +479,7 @@ function chartSplit(body, data, panel, mlist) {
     datasets.push({
       label: t('Other'),
       data: rows.map((r) => rest.reduce((s2, k) => s2 + valueOf(r.cells[k] || {}, m.key), 0)),
+      raws: rows.map((r) => sumParts(rest.map((k) => r.cells[k]))),
       ...axisBind,
       ...(stacked
         ? { backgroundColor: resolveColor(canvas, 'var(--text-dim)', 0.5), borderRadius: 2 }
@@ -480,7 +488,7 @@ function chartSplit(body, data, panel, mlist) {
   }
   const opts = commonOpts([m], colors, { horizontal, showLegend: true });
   // All datasets share ONE metric — tooltip names the SERIES, not the metric.
-  opts.plugins.tooltip.callbacks.label = (ctx) => `${ctx.dataset.label}: ${m.fmt(horizontal ? ctx.parsed.x : ctx.parsed.y)}`;
+  opts.plugins.tooltip.callbacks.label = (ctx) => { const raw = m.key === 'cost' ? ctx.dataset.raws?.[ctx.dataIndex] : null; return `${ctx.dataset.label}: ${raw ? rowCost(raw) : m.fmt(horizontal ? ctx.parsed.x : ctx.parsed.y)}`; };
   if (stacked) {
     const catAxis = horizontal ? 'y' : 'x';
     opts.scales[catAxis].stacked = true;
@@ -498,7 +506,7 @@ function chartTable(body, rows, mlist, panel) {
   const cols = keys.length > 1 ? keys : [...new Set(['requests', keys[0] === 'cost' ? 'totalTokens' : 'cost', keys[0]])];
   tbl.innerHTML = `<tr><th></th>${cols.map((c) => `<th>${escHtml(metricOf(c).label)}</th>`).join('')}</tr>`
     + rows.map((r) => `<tr><td class="udash-td-key" title="${escHtml(String(r.key))}">${escHtml(String(r.key))}</td>`
-      + cols.map((c) => `<td class="udash-td-num">${escHtml(metricOf(c).fmt(r.raw ? valueOf(r.raw, c) : r.value))}</td>`).join('') + '</tr>').join('');
+      + cols.map((c) => `<td class="udash-td-num">${escHtml(c === 'cost' && r.raw ? rowCost(r.raw) : metricOf(c).fmt(r.raw ? valueOf(r.raw, c) : r.value))}</td>`).join('') + '</tr>').join('');
   body.appendChild(tbl);
 }
 
@@ -570,10 +578,21 @@ function renderPanel(grid, data, panels, panel, idx, onChange, pivotHere) {
     // wait note and asks for it once this panel is on screen
     if (pivotHere && !pivotHere(`${panel.dim}:${panel.splitBy}`, body)) return;
     chartSplit(body, data, panel, mlist);
+    unpricedNote(card, data, mlist);
     return;
   }
   const rows = panelRows(data, panel);
   ({ stat: chartStat, bars: chartBars, line: chartLine, pie: chartPie, table: chartTable }[panel.chart] || chartBars)(body, rows, mlist, panel, data);
+  unpricedNote(card, data, mlist);
+}
+// A COST PANEL SAYS WHAT IT LEAVES OUT (B-d578 P1-b): its figures are the PRICED part; when the window's range holds a
+// provider's model with no price row, the panel says so under its chart (an unknown price never reads as a smaller bill)
+function unpricedNote(card, data, mlist) {
+  if (!mlist.some((m) => m.key === 'cost') || !unpricedOf(data && data.totals)) return;
+  const n = document.createElement('div');
+  n.className = 'usage-note usage-unpriced-note';
+  n.textContent = costWords(data.totals, t, fmtCost, fmtTok).note;
+  card.appendChild(n);
 }
 
 // Panel editor popover — metric / dimension / chart / topN selects.

@@ -24,9 +24,10 @@ const { runUsageWalk } = require('./usage-walker.js');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const CB = require('./cache-bounds.js'); // PURE: the ledger's hot window + byte ceiling + the cold columns (B-9428)
 const { coldRows, readLineAt, readLineAtSync } = require('./usage-cold-walk.js'); // the ledger rows read where they live, verified (B-9428 r2/r3)
-const { Worker } = require('worker_threads');
+const { Worker, isMainThread } = require('worker_threads');
 const v8 = require('v8');
 const { trackWorker } = require('./worker-memory.js');
+const { isThirdPartyAccount } = require('./provider-ids.js'); // PURE (B-d578 P1-b): a `pv-` id that names a third-party provider's record
 const CP = require('./catalog-pricing.js'); // PURE: the price table's three sources — shipped, the installed Claude Code's catalog, the person (lane cli-update-needs-nothing)
 const EH = require('./server/exit-hook.js'); // THE exit hook: a fold worker asleep in a read is never joined (lane usage-fold-worker-exit-hook)
 
@@ -1092,14 +1093,38 @@ class UsageHistory {
    *  cacheWrite1h, cacheRead}` USD per million; `label` = the tier key the model matched ('_default' when none did). */
   priceRowFor(model, { acct = null, ts = Date.now(), prompt = 0 } = {}) {
     const tier = this._tier(model);
+    if (this.priceUnknown(model, acct, tier)) return null;   // B-d578 P1-b: a provider's model with no row HAS no price row (the bulk resume says «not priced»)
     return { label: tier, ...this._rateFor(acct, tier, ts, prompt) };
+  }
+  /** THE UNKNOWN PRICE (lane lg-providers, B-d578 P1-b — the law agreed 2026-11-21): a third-party provider's model
+   *  (an account id `pv-…` that is not a built-in record) that NO row of the table matches, where the person's table
+   *  holds no row of that account's own for it (`accounts[<id>].tiers._default`), has NO price — never `_default`'s
+   *  (Anthropic Sonnet's) rates, never 0. Its tokens are counted apart (`_add`: unpricedRequests / unpricedTokens) and
+   *  every sum says it leaves them out. A row the person adds — a tier key the model matches, or that account's own
+   *  row — makes it a cost. Decided from the ids alone: the fold worker resolves no account. */
+  priceUnknown(model, acct, tier = this._tier(model)) {
+    if (tier !== '_default' || !isThirdPartyAccount(acct)) return false;
+    const ov = this._pricing.accounts && this._pricing.accounts[acct];
+    return !(ov && ov.tiers && ov.tiers._default);
+  }
+  /** One request's price for a sum: its cost in USD, or null when its price is unknown (priceUnknown). The journal line
+   *  is said on the MAIN thread only (a cold fold's worker is a fresh one each time: it would say it again every fold),
+   *  once per model id per instance before the module's once-per-id set (no string built per row). */
+  _priced(ev) {
+    if (!this.priceUnknown(ev.model, ev.acct)) return this._cost(ev);
+    if (isMainThread) { const seen = this._pvWarned || (this._pvWarned = new Set()); if (!seen.has(ev.model)) { seen.add(ev.model); this._warnUnpriced(ev.model, ev.acct); } }
+    return null;
   }
   // `prompt`: the WHOLE request's input (i + cr + cw5 + cw1) when a caller
   // prices ONE request in parts (the token-class splits) — the long-context
   // rule is decided on the request, never on the part, or the parts stop
   // adding up to the whole. Default: this event's own sum.
+  // An UNKNOWN price (priceUnknown) costs 0 HERE — a sum's priced part; every bucket counts its tokens apart (_add) and the
+  // page says the sum leaves them out. The other callers (the live ring, the pool engine, the anchors) read the quota
+  // identity groups and the pools, which a provider's conversation never is (D2).
   _cost(ev, prompt) {
     const tier = this._tier(ev.model);
+    if (tier === '_default' && this.priceUnknown(ev.model, ev.acct, tier)) return 0;
     if (tier === '_default' && ev.be === 'codex') this._warnUnpriced(ev.model);
     const p = this._rateFor(ev.acct, tier, ev.ts, prompt != null ? prompt : (ev.i || 0) + (ev.cr || 0) + (ev.cw5 || 0) + (ev.cw1 || 0), ev.model);
     return (ev.i * p.input + ev.o * p.output + ev.cw5 * p.cacheWrite5m + ev.cw1 * p.cacheWrite1h + ev.cr * p.cacheRead) / 1e6;
@@ -1109,12 +1134,16 @@ class UsageHistory {
   // id per process (journal + a Diagnostics event), never silently. The set is
   // the MODULE's, not the instance's: a migration builds its own UsageHistory
   // (ledger-slot-backfill) beside the server's (verify r1).
-  _warnUnpriced(model) {
+  // A third-party provider's model with no row (`provider` = its account id, B-d578 P1-b): said once per id the same way —
+  // its price is UNKNOWN, never _default's, until the person adds a row (Usage → Pricing…).
+  _warnUnpriced(model, provider = null) {
     const id = String(model || '(no model id)').toLowerCase().slice(0, 80); // the matcher's own spelling
-    if (UNPRICED_WARNED.has(id)) return;
-    UNPRICED_WARNED.add(id);
-    try { global.__vsEvent?.('usage-unpriced-model', 'codex:' + id); } catch { }
-    console.warn(`[usage] codex model "${id}" has no price row — priced at the _default (Anthropic Sonnet) rates until a key is added to DEFAULT_PRICING or pricing.json (see Diagnostics)`);
+    const key = provider ? 'provider:' + id : id;
+    if (UNPRICED_WARNED.has(key)) return;
+    UNPRICED_WARNED.add(key);
+    try { global.__vsEvent?.('usage-unpriced-model', (provider ? 'provider:' : 'codex:') + id); } catch { }
+    if (provider) console.warn(`[usage] provider model "${id}" (${String(provider).slice(0, 70)}) has no price row — its price is UNKNOWN: its tokens are counted, every cost sum leaves them out and says so, until a price is added in Usage → Pricing…`);
+    else console.warn(`[usage] codex model "${id}" has no price row — priced at the _default (Anthropic Sonnet) rates until a key is added to DEFAULT_PRICING or pricing.json (see Diagnostics)`);
   }
   /** Stable token for the EFFECTIVE price table (tiers + per-account overrides
    *  and discounts) — the VERSION half of any memo key over computed costs.
@@ -2075,11 +2104,13 @@ class UsageHistory {
     }
   }
 
-  _emptyBucket() { return { requests: 0, sessions: new Set(), input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, cost: 0 }; }
-  _add(b, ev) {
+  _emptyBucket() { return { requests: 0, sessions: new Set(), input: 0, cacheWrite5m: 0, cacheWrite1h: 0, cacheRead: 0, output: 0, cost: 0, unpricedRequests: 0, unpricedTokens: 0 }; }
+  // `priced` = the row's _priced (its cost, or null when its price is unknown) — _aggRow prices a row ONCE for every bucket it adds to
+  _add(b, ev, priced = this._priced(ev)) {
     b.requests++; b.sessions.add(ev.sid);
     b.input += ev.i; b.cacheWrite5m += ev.cw5; b.cacheWrite1h += ev.cw1; b.cacheRead += ev.cr; b.output += ev.o;
-    b.cost += this._cost(ev);
+    if (priced === null) { b.unpricedRequests++; b.unpricedTokens += ev.i + ev.cw5 + ev.cw1 + ev.cr + ev.o; }   // B-d578 P1-b: counted apart, never as $0
+    else b.cost += priced;
   }
   _finalize(b) {
     const totalIn = b.input + b.cacheWrite5m + b.cacheWrite1h + b.cacheRead;
@@ -2090,6 +2121,9 @@ class UsageHistory {
       totalInput: totalIn, totalTokens: totalIn + b.output,
       cacheHitRatio: totalIn ? b.cacheRead / totalIn : 0,
       cost: b.cost,
+      // B-d578 P1-b: the part whose price is unknown (a provider's model with no row) — `cost` is the priced part only;
+      // present only when there is one (the answer of a hub with no provider is unchanged), the index's twin likewise
+      ...(b.unpricedRequests ? { unpricedRequests: b.unpricedRequests, unpricedTokens: b.unpricedTokens } : {}),
     };
   }
 
@@ -2224,7 +2258,9 @@ class UsageHistory {
       // Device dimension (2.128.0): 'local' = this machine, else a host id —
       // a TOP-LEVEL filter over the whole view (hosts are devices, not accounts)
       if (hostFilter && (ev.host || 'local') !== hostFilter) return;
-      this._add(totals, ev);
+      const priced = this._priced(ev);   // ONCE per row: every bucket below adds the same price (or the same unknown part)
+      const thirdParty = isThirdPartyAccount(ev.acct);   // B-d578 P1-b: a provider's record — its own billing row, whatever the row stored
+      this._add(totals, ev, priced);
       if (st.firstTs == null || ev.ts < st.firstTs) st.firstTs = ev.ts;
       if (st.lastTs == null || ev.ts > st.lastTs) st.lastTs = ev.ts;
       const d = new Date(ev.ts);
@@ -2233,7 +2269,7 @@ class UsageHistory {
         model: ev.model || 'unknown',
         account: acctKey,
         // billing = the coarse category, so subscription $ and API $ never merge
-        billing: ev.atype === 'api' ? 'api-key' : ev.atype === 'subscription' ? 'subscription' : ev.atype === 'codex-subscription' ? 'chatgpt' : ev.atype === 'host' ? 'remote-host' : (ev.acct ? 'unknown-account' : (ev.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
+        billing: thirdParty ? 'provider' : ev.atype === 'api' ? 'api-key' : ev.atype === 'subscription' ? 'subscription' : ev.atype === 'codex-subscription' ? 'chatgpt' : ev.atype === 'host' ? 'remote-host' : (ev.acct ? 'unknown-account' : (ev.be === 'codex' ? 'codex-cli-login' : 'cli-global-login')),
         project: ev.cwd || 'unknown',
         mode: ev.mode || 'unknown',
         host: ev.host || 'local',
@@ -2249,7 +2285,7 @@ class UsageHistory {
         // one bucket = the whole account, defeating the point. Skip those.
         if (dim === 'pool' && !k) continue;
         (dims[dim][k] = dims[dim][k] || this._emptyBucket());
-        this._add(dims[dim][k], ev);
+        this._add(dims[dim][k], ev, priced);
       }
       for (let i = 0; i < pivotPairs.length; i++) {
         const ka = keyOf[pivotPairs[i][0]], kb = keyOf[pivotPairs[i][1]];
@@ -2259,7 +2295,7 @@ class UsageHistory {
         // panels put pool on an axis) — review-caught, do not drop.
         if ((pivotPairs[i][0] === 'pool' && !ka) || (pivotPairs[i][1] === 'pool' && !kb)) continue;
         const row = (pivotAcc[i][ka] = pivotAcc[i][ka] || {});
-        this._add(row[kb] = row[kb] || this._emptyBucket(), ev);
+        this._add(row[kb] = row[kb] || this._emptyBucket(), ev, priced);
       }
       // Freeze human labels for the account dimension (name + billing type +
       // backend, so the UI can badge accounts/models with the vendor logo).
@@ -2268,7 +2304,7 @@ class UsageHistory {
         const live = ev.acct ? this._resolveAccount(ev.acct) : null;
         dimMeta.account[acctKey] = {
           name: ev.acct ? maskDefaultKeyName(live?.name || ev.aname || ev.acct) : (ev.be === 'codex' ? 'Codex CLI login' : 'Claude CLI login'),   // B-ba7d: an event stored under the old default name «API key …<tail>» never answers it
-          type: ev.atype || (ev.acct ? 'unknown' : 'global'),
+          type: thirdParty ? 'provider' : ev.atype || (ev.acct ? 'unknown' : 'global'),
           be: ev.be || 'claude',
           tail: null,   // B-ba7d: no key tail in a usage row (the page lays the person's read on)
           deleted: ev.acct ? !live : false,

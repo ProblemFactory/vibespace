@@ -194,7 +194,8 @@ function create({ getLedger, homeDir = os.homedir(), workerFile = path.join(__di
       const q = { from: opts.from || null, to: opts.to || null, backend: opts.backend || null, accounts: opts.accounts ? [...opts.accounts] : null, hostFilter: opts.hostFilter || null, pivots: opts.pivots || null };
       return queryAggregate(q).then((folded) => {
         const costOf = (c) => ledger._cost(c, c.prompt);
-        const res = M.compareAggregates(mem, M.finalizeAggregate(folded, costOf));
+        const unknownOf = typeof ledger.priceUnknown === 'function' ? (c) => ledger.priceUnknown(c.model, c.acct) : null;   // B-d578 P1-b: the ledger's own unknown-price test, per cell
+        const res = M.compareAggregates(mem, M.finalizeAggregate(folded, costOf, unknownOf));
         if (res.same) counts.same++;
         else {
           counts.diff++;
