@@ -102,7 +102,7 @@ const OWNERS = Object.freeze([
     rules: [dir('app-kinds|mount-providers|plugins|browser-backends'),
       lead('host-tokens|host-keys|host-key-watch|mutual-auth|agent-listener|pairing-token|dial-pairing|dial-health|dial-facts|agentd-signature|device|engine-kernel|engine-distribution|apps|install-slot|installs|ffmpeg-install|mic-install|machine-needs|watch-door|machine-mounts|mount|path-mounts|vfs-cache-place|rclone-obscure|storage-path|storage-facts|fs-canary|relay-token|tailnet|tailscale-dns|hub-act|desktop-apps|desktop-app-keeper|desktop-browser-app|desktop-handover|desktop-machines-cache|encoded-command|modifier-map|ssh-config-block'),
       name('mounts-plugins-wiring|plugins'), but('plugin-', 'loader'), but('jobs?-', 'logs-sweep(?:-worker)?'),   // cure r3: hosts, mounts, port-forward, plugin-loader, jobs are SPLIT rows
-      name('app-card|app-manifest|app-recipes|app-system|window-(?:reach|request|targets|targets-engine|desktop)|exit-(?:proxy|reach|routes|shell)'),
+      name('app-card|app-manifest|app-recipes|app-system|window-(?:reach|request|targets|targets-engine|desktop|unshown)|exit-(?:proxy|reach|routes|shell)'),
       name(`browser|browser-(?:${BROWSER_ROWS})`)] },
   { id: 'conversation', words: 'the conversation, the machine side: create and spawn, the stream parse and its side effects, the hook’s door, files, the keepers’ processes, machine facts',
     rules: [dir('spawn|adapters|agent-routes|server/stdout'), new RegExp(`^src/harnesses/(?!(?:${QUOTA_HARNESS})\\.js$)[\\w.-]+\\.js$`),

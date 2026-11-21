@@ -132,6 +132,7 @@ const T = require('../browser-takeover');
 const DESK = require('../window-desktop');
 const M = require('../desktop-apps'); // takeover r2: browserLaunchVerdict (which launches are web browsers)
 const R = require('../window-reach'); // lane E: reach + the share mode + the pixel road (PURE)
+const UN = require('../window-unshown'); // B-dbb4: the app's windows a pixel image does not show, named (PURE; never in the device bundle)
 const GM = require('../grant-model.js'); // lane grants-unify: THE grant model (admits)
 const GS = require('./grants-store.js'); // lane grants-unify: the ONE store a window's share rows live in
 const PIN = require('../desktop-pin'); // lane e2b (§E2.2): who may pin a window's pixel size (PURE)
@@ -464,7 +465,8 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
         audit({ handle: rec.id, verb: 'show-window', by: 'window', ok: !!m.ok, frames: frames.length, ...(m.ok ? {} : { code: m.code }) });
         if (m.ok) { await sleep(300); const again = await keeper.windows(rec.id); if (again && again.ok) r = again; } // the dialog draws on its map
       }
-      return R.pixelPlan(r.windows, { pin: PIN.pinOf(rec.pin) }); // lane e2b: a pinned window's image = the pin
+      const plan = R.pixelPlan(r.windows, { pin: PIN.pinOf(rec.pin) }); // lane e2b: a pinned window's image = the pin
+      return plan && plan.ok ? { ...plan, unshown: UN.unshownOf(r.windows, plan) } : plan; // B-dbb4: the app's windows this image does not show, named
     } catch { return null; }
   }
   const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
@@ -1437,8 +1439,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       if (r.ok && r.lit === 0) { await sleep(600); const again = await wt.windowShot({ xenv, out, plan, ...helperOpts() }); if (again.ok) r = again; }
       if (!r.ok) { audit({ ...who, verb: 'screenshot', by: 'pixels', ok: false, code: r.code }); throw namedError(r.code, r.why, { helper: true }); }
       heldOrUnlink(rec, facts, out); // lane E verify: a revoke during the grab ⇒ the image is deleted, never handed over
-      audit({ ...who, verb: 'screenshot', by: 'pixels', ok: true, w: r.w, h: r.h, windows: plan.members.length, lit: r.lit });
-      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true };
+      const unshown = Array.isArray(plan.unshown) ? plan.unshown : [];
+      audit({ ...who, verb: 'screenshot', by: 'pixels', ok: true, w: r.w, h: r.h, windows: plan.members.length, lit: r.lit, ...(unshown.length ? { unshown: unshown.length } : {}) });
+      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true, ...(unshown.length ? { unshown, note: UN.unshownText(unshown, rec.id) } : {}) };
     }
     // no window geometry from the keeper: the display grab, cropped to the last snapshot's frame
     let bounds = null;

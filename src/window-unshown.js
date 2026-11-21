@@ -1,0 +1,44 @@
+'use strict';
+/**
+ * B-dbb4 (the coordinator's r756 / r772) — THE APP'S WINDOWS A PIXEL IMAGE DOES NOT SHOW, NAMED. PURE, imports nothing: the
+ * hub's window engine (src/server/window-targets-engine.js) asks it over the keeper's windows and window-reach's pixelPlan. Its
+ * own module so the device agent's bundle (which carries src/window-reach.js) is not touched.
+ */
+/**
+ * B-dbb4 (the coordinator's r756; userW's report of a sign-in popup a desktop-app Chromium opened, «not followed»): THE APP'S
+ * WINDOWS THIS IMAGE DOES NOT SHOW — never a silent stay on the first window. Every NAMED top-level of the app, at least
+ * UNSHOWN_MIN_PX on both sides (Chrome's 15×15 helper is no window a person sees), that the plan leaves out or cuts, with WHY:
+ * 'unmapped' (no pixels on the display), 'outside' (up-left of the main window and not over it — the origin stays the main's),
+ * 'clipped' (partly beyond the image's box: a pinned size). `rows` = the keeper's windows, `plan` = pixelPlan's answer →
+ * `[{id, title, x, y, w, h, why}]` (x / y from the IMAGE's origin, so negative = up-left of it), the largest first, ≤ UNSHOWN_KEEP.
+ */
+const UNSHOWN_MIN_PX = 100, UNSHOWN_KEEP = 8;
+function unshownOf(rows, plan) {
+  if (!plan || !plan.ok || !plan.origin) return [];
+  const ids = new Set((Array.isArray(plan.members) ? plan.members : []).map((m) => m.id));
+  const ox = Number(plan.origin.x), oy = Number(plan.origin.y), right = ox + Number(plan.w), bottom = oy + Number(plan.h);
+  const out = [];
+  for (const w of Array.isArray(rows) ? rows : []) {
+    if (!w || !(w.cls || w.instance || w.title || w.name) || (plan.main && w.id === plan.main.id)) continue;
+    const x = Number(w.x), y = Number(w.y), ww = Number(w.w), hh = Number(w.h);
+    if (![x, y, ww, hh].every(Number.isFinite) || ww < UNSHOWN_MIN_PX || hh < UNSHOWN_MIN_PX) continue;
+    const why = w.mapped === false ? 'unmapped' : !ids.has(w.id) ? 'outside' : (x < ox || y < oy || x + ww > right || y + hh > bottom) ? 'clipped' : null;
+    if (!why) continue;
+    out.push({ id: w.id, title: String(w.title || w.name || w.instance || w.cls || '').replace(/[\u0000-\u001f\u007f]/g, ' ').slice(0, 120), x: x - ox, y: y - oy, w: ww, h: hh, why });
+  }
+  return out.sort((a, b) => b.w * b.h - a.w * a.h).slice(0, UNSHOWN_KEEP);
+}
+/** …and the agent's words for them: what each is, where, why the image leaves it out, and how it can be reached. '' when none. */
+function unshownText(list, handle = '<handle>') {
+  const rows = Array.isArray(list) ? list.filter((u) => u && u.why) : [];
+  if (!rows.length) return '';
+  const WHY = {
+    unmapped: 'it has no pixels on the display yet (nobody shows it) — the user\'s live view of the app shows it (`vibespace-window watch ' + handle + '` names where)',
+    outside: 'it sits up-left of the main window without covering it (this image starts at the main window\'s top-left), so no --at of this image reaches it — the user sees it in the live view (`vibespace-window watch ' + handle + '` names where): ask them to finish or move it',
+    clipped: 'it reaches beyond this image\'s pinned size — `vibespace-window size ' + handle + ' auto` shows the whole window',
+  };
+  const one = (u) => `«${u.title || 'untitled'}» ${u.w}x${u.h} at ${u.x},${u.y} of this image: ${WHY[u.why] || u.why}`;
+  return `this app has ${rows.length} more window(s) this image does not show — ${rows.map(one).join('; ')}`;
+}
+
+module.exports = { unshownOf, unshownText, UNSHOWN_MIN_PX, UNSHOWN_KEEP };

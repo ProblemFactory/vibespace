@@ -377,6 +377,7 @@ function printNode(n) {
     let meta = null; try { meta = JSON.parse(res.headers.get('x-window-shot') || 'null'); } catch { }
     const where = meta && meta.machine ? `, ${meta.w}x${meta.h} — ${meta.machine}'s display${meta.display ? ` ${meta.display}` : ''}, its own pixels; \`click ${h} --at x,y\` takes a pixel of THIS image` : meta ? (meta.coords === 'window' ? `, ${meta.w}x${meta.h} — the window's own pixels (origin ${meta.originX},${meta.originY} on its display${meta.scale && meta.scale !== 1 ? `, scale ${meta.scale}×` : ''}); \`click ${h} --at x,y\` takes a pixel of THIS image` : `, ${meta.w}x${meta.h}${meta.cropped ? ', the window\'s frame' : ', the whole display'} (display coordinates)`) : '';
     console.log(`${out} (${buf.length} bytes${where})${meta && meta.blank ? ' — the image is BLANK (the window drew nothing yet)' : ''}`);
+    if (meta && typeof meta.note === 'string' && meta.note) console.log(`  ${meta.note}`); // B-dbb4: the app's windows this image does not show — never a silent stay
     return;
   }
 

@@ -452,5 +452,65 @@ console.log('CONTROLS (patched copies)');
   for (const x of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7, label: 'desktop-pin' })) ok(x.pass, x.name, x.detail);
 }
 
+// ═══ B-dbb4 (the coordinator's r756 / r772): THE APP'S WINDOWS THE IMAGE DOES NOT SHOW ARE NAMED — never a silent stay ═══
+// userW's report (fb-43b1db9bb4, its record not read past its cut): a sign-in popup a desktop-app Chromium opened was «not
+// followed». The image is pixelPlan's union of MAPPED named top-levels right/below the main's origin or over it, cut to a pin:
+// a popup up-left of the main, an unmapped one the corral map does not reach, or one beyond the pin is left out SILENTLY.
+// Unit 1: every screenshot answer names each (title, size, where, why) with a recipe — PURE, the real engine over a fake
+// keeper, and the real route + the shipped CLI (a non-latin-1 title through the header).
+{
+  console.log('\n§DBB4 the app\'s windows the image does not show are named');
+  const R = require(path.join(REPO, 'src/window-reach.js')), UN = require(path.join(REPO, 'src/window-unshown.js')), WT = require(path.join(REPO, 'src/window-targets.js')), ROUTES = require(path.join(REPO, 'src/routes/window-targets.js')), express = require('express');
+  const dir = scratch('da-pin-dbb4'); fs.mkdirSync(dir, { recursive: true });
+  process.on('exit', () => { try { fs.rmSync(dir, { recursive: true, force: true }); } catch { } });
+  const repo = REPO;
+  const main = { id: 1, title: 'App', cls: 'chromium', x: 600, y: 400, w: 1200, h: 800, mapped: true };
+  const pop = { id: 2, title: 'Sign in – Google Accounts', cls: 'chromium', x: 0, y: 0, w: 500, h: 600, mapped: true }; // up-left, not over the main
+  const helper = { id: 3, cls: 'chromium', x: -10, y: -10, w: 15, h: 15, mapped: true }; // Chrome's own 15×15: no window a person sees
+  const hidden = { id: 4, title: 'Hidden', cls: 'chromium', x: 700, y: 500, w: 400, h: 300, mapped: false }; // unmapped, no corral
+  const over = { id: 5, title: 'Over', cls: 'chromium', x: 650, y: 450, w: 500, h: 400, mapped: true }; // a popup OVER the main: a member
+  const pinned = { id: 7, title: 'App', cls: 'chromium', x: 0, y: 0, w: 1600, h: 900, mapped: true }; // the pinned browser (1600×900) IS the main
+  const big = { id: 6, title: 'Big', cls: 'chromium', x: 1400, y: 700, w: 500, h: 400, mapped: true }; // over the main, reaching past its pinned box
+  const p1 = R.pixelPlan([pop, helper, hidden, over, main]);
+  const u1 = UN.unshownOf([pop, helper, hidden, over, main], p1);
+  ok(u1.length === 2 && u1[0].id === 2 && u1[0].why === 'outside' && u1[0].x === -600 && u1[0].y === -400 && u1[1].id === 4 && u1[1].why === 'unmapped' && !u1.some((x) => x.id === 3 || x.id === 5 || x.id === 1),
+    'unshownOf: the popup up-left of the main (outside, at -600,-400 of the image) and the unmapped window are named; Chrome\'s 15×15 helper, the popup OVER the main (a member) and the main itself never', u1);
+  const pPin = R.pixelPlan([big, pinned], { pin: { w: 1600, h: 900 } });
+  const uPin = UN.unshownOf([big, pinned], pPin);
+  ok(uPin.length === 1 && uPin[0].id === 6 && uPin[0].why === 'clipped' && uPin[0].x === 1400 && uPin[0].y === 700, 'unshownOf: a popup over the pinned main that reaches past the pin\'s box is named clipped', { uPin, main: pPin.main, w: pPin.w, h: pPin.h });
+  ok(UN.unshownOf([over, main], R.pixelPlan([over, main])).length === 0 && UN.unshownText([], 'da-x') === '' && UN.unshownOf([main], { ok: false }).length === 0, 'CONTROL: nothing left out ⇒ nothing named, no words; a plan that failed names nothing');
+  const words = UN.unshownText(u1, 'da-pop');
+  ok(words.startsWith('this app has 2 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image: it sits up-left of the main window without covering it') && words.includes('`vibespace-window watch da-pop`') && words.includes('«Hidden» 400x300 at 100,100 of this image: it has no pixels on the display yet') && !/move it yourself|alt\+tab/.test(words),
+    'unshownText: each window by title, size and place, why the image leaves it out, and how it can be reached (the user\'s live view) — never a promise this unit does not keep', words);
+  ok(UN.UNSHOWN_MIN_PX === 100, 'the smallest window named is 100×100 (Chrome\'s helper is 15×15)');
+  // THE ENGINE over a fake xpra keeper: the screenshot answer carries {unshown, note}; CONTROL: the popup moved over the main
+  const recP = { id: 'da-pop', label: 'Pop', exec: 'x', state: 'ready', display: ':96', pids: { app: 4545 }, backend: 'xpra', startedAt: Date.now(), readyAt: Date.now() };
+  let rowsP = [pop, helper, main].map((w) => ({ ...w }));
+  const keeperP = { listApps: () => [recP], get: (id) => (id === recP.id ? recP : null), sessionPids: () => [4545], x11EnvFor: () => ({ DISPLAY: ':96' }), windows: async () => ({ ok: true, windows: rowsP.map((w) => ({ ...w })) }) };
+  const wtP = { ...WT, probeInputBackends: async () => ({ rows: [{ backend: 'xtest', ok: true }], injection: { backend: 'xtest' }, ours: true }), probeA11y: async () => ({ ok: true, apps: 1 }),
+    windowShot: async ({ out, plan }) => { fs.writeFileSync(out, 'png'); return { ok: true, w: plan.w, h: plan.h, lit: 9, bytes: 3 }; } };
+  const sessP = new Map([['s1', { agentToken: 'vsst_dbb4', name: 'alpha', backend: 'claude', backendSessionId: 'conv-dbb4' }]]);
+  const EP = ENGINE.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-engine'), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
+  const fP = { sessionId: 's1', session: sessP.get('s1'), browserKey: null, name: 'alpha' };
+  EP.grantReach('da-pop', { kind: 'session', id: 's1' }); EP.setShareMode('da-pop', 'pixels'); EP.attach('da-pop', fP);
+  try {
+    const sh = await EP.screenshot('da-pop', fP);
+    ok(sh.windows === 1 && Array.isArray(sh.unshown) && sh.unshown.length === 1 && sh.unshown[0].id === 2 && sh.unshown[0].why === 'outside' && typeof sh.note === 'string' && sh.note.includes('«Sign in – Google Accounts» 500x600 at -600,-400'),
+      'the engine\'s screenshot NAMES the popup its image leaves out (unshown + the words) — the image itself unchanged (1 window, the origin the main\'s)', { windows: sh.windows, unshown: sh.unshown, note: sh.note });
+    ok(/"verb":"screenshot"[^\n]*"unshown":1/.test(fs.readFileSync(EP.auditFile, 'utf8')), 'audited: the screenshot\'s unshown count');
+    // THROUGH THE REAL ROUTE AND THE SHIPPED CLI: the header carries a title outside latin-1 (escaped), the CLI prints the words
+    const appP = express(); appP.use(express.json()); ROUTES.setup({ engine: EP }); appP.use(ROUTES.router);
+    const srvP = await new Promise((res) => { const s0 = appP.listen(0, '127.0.0.1', () => res(s0)); });
+    const tmpP = path.join(dir, 'dbb4-tmp'); fs.mkdirSync(tmpP, { recursive: true });
+    const cliP = (...a) => new Promise((resolve) => execFile(process.execPath, [path.join(repo, 'data/bin/vibespace-window'), ...a], { cwd: tmpP, env: { PATH: process.env.PATH, HOME: dir, TMPDIR: tmpP, VIBESPACE_API: `http://127.0.0.1:${srvP.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_dbb4' }, encoding: 'utf8', timeout: 20000 }, (e, stdout, stderr) => resolve({ status: e ? e.code : 0, stdout: String(stdout || ''), stderr: String(stderr || '') })));
+    const c1 = await cliP('screenshot', 'da-pop');
+    rowsP = [{ ...pop, x: 650, y: 450 }, helper, main].map((w) => ({ ...w })); // CONTROL: the popup now OVER the main
+    const c2 = await cliP('screenshot', 'da-pop');
+    srvP.close();
+    ok(c1.status === 0 && c1.stdout.includes('this app has 1 more window(s) this image does not show — «Sign in – Google Accounts» 500x600 at -600,-400 of this image') && c2.status === 0 && !/does not show/.test(c2.stdout),
+      'the shipped CLI prints the words under the image line (the title with its en dash through the escaped header); CONTROL: the popup over the main ⇒ in the image, nothing said', { c1: c1.stdout.slice(-400) + c1.stderr.slice(-300), c2: c2.stdout.slice(-300) });
+  } catch (e) { ok(false, '§DBB4: the engine / route / CLI legs threw', String((e && e.stack) || e).slice(0, 600)); }
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

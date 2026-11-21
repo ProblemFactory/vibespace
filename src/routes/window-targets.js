@@ -205,7 +205,9 @@ router.get('/api/agent/window/screenshot', async (req, res) => {
   try {
     const r = await engine.screenshot(h, f);
     res.setHeader('Content-Type', 'image/png');
-    res.setHeader('X-Window-Shot', JSON.stringify({ handle: r.handle, w: r.w, h: r.h, x: r.x, y: r.y, originX: r.originX ?? r.x, originY: r.originY ?? r.y, coords: r.coords || 'display', scale: r.scale || 1, windows: r.windows ?? null, blank: !!r.blank, cropped: r.cropped }));
+    // B-dbb4: the app's windows this image does not show ride the header too — a header value is latin-1 only, so every other
+    // character of a window's title is a JSON \\u escape (the CLI's JSON.parse gives it back)
+    res.setHeader('X-Window-Shot', JSON.stringify({ handle: r.handle, w: r.w, h: r.h, x: r.x, y: r.y, originX: r.originX ?? r.x, originY: r.originY ?? r.y, coords: r.coords || 'display', scale: r.scale || 1, windows: r.windows ?? null, blank: !!r.blank, cropped: r.cropped, ...(Array.isArray(r.unshown) && r.unshown.length ? { unshown: r.unshown, note: r.note || '' } : {}) }).replace(/[\u007f-\uffff]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0')));
     const s = fs.createReadStream(r.file);
     const done = () => { try { fs.unlinkSync(r.file); } catch { /* gone */ } };
     s.on('close', done); s.on('error', (e) => { done(); if (!res.headersSent) fail(res, e); else res.end(); });
