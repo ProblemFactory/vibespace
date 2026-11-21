@@ -264,6 +264,11 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // Save sends it, the hub refuses one over a row this dialog never saw (`row_changed`). An older hub's row has none: none sent
   const revOfUse = (x) => (x && Number.isSafeInteger(x.rev) ? x.rev : null);
   let rev = revOfUse(u);
+  // r1260 (3): a row whose facts could not be read at the open AND that carries no stamp (the door's catch: `unknown`, nothing
+  // known) is never saved over — the dialog reads the row first; Save waits for a row it could read or one the hub stamps (a
+  // press before that posts nothing and asks the read again). A row the hub cannot read but still STAMPS (its stored shape
+  // unreadable — the window says «Save it again to repair it») keeps its Save: the hub judges that stamp (the tracer's read)
+  let unread = !!u.unknown && revOfUse(u) == null;
   // B-f212: the instant a chosen end counts from — the press's own now, then the Save that LANDED (a repeated Save posts the same
   // ends, never later ones; the read: pinned at the open, a dialog left open an hour posted «8 hours» as seven, a day as one past).
   // r13: the pin holds only while the OWNER'S inputs (who, 除了, the hosts, the end) are what landed — planNow, for the preview and
@@ -290,7 +295,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   ];
   const fieldsNow = () => Object.fromEntries(FIELDS.map((f) => [f.name, f.read()]));
   const unsavedNow = () => clean !== null && fieldsDiffer(fieldsNow(), clean).length > 0;
-  const { body, close, dismiss, raised } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { gone = true; try { offContents && offContents(); } catch { } try { picker && picker.close(); } catch { } },
+  const { body, close, dismiss, raised, ready } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { gone = true; try { offContents && offContents(); } catch { } try { picker && picker.close(); } catch { } },
     unsaved: { isDirty: unsavedNow, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
   let ownBox = null, hostsIn = null, endSel = null, polIn = null, previewNow = () => {};
@@ -479,6 +484,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   }
   async function saveOnce() {
     err.textContent = '';
+    if (unread) { stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; readRow(); return false; }   // r1260 (3): read the row first — never a Save over one that could not be read
     // B-f212: every end of this press's plan counts from the landed pin; r13: a Save the OWNER changed since (another end, a member
     // added, hours later in the same open dialog) counts from THIS press, never a past one
     const plan = planNow();
@@ -504,10 +510,15 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
         if (r && r.code === 'row_changed' && r.use && Array.isArray(r.use.to) && !r.use.unknown && !r.use.unverified) {
           const lu = r.use;
           refused = true;
+          const knew = snap ? new Set((snap.to || []).filter(Boolean).map(keyOfM)) : null;   // the members this dialog knew (by r11's own key); an older hub's answer named none: nothing said
+          const gained = knew ? lu.to.filter((m) => m && !knew.has(keyOfM(m))) : [];   // r1260 (2): the held row's members it did not
           snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; rev = revOfUse(lu);
           if (stale.textContent !== t('«{name}» was removed from the vault', { name: row.label })) { stale.textContent = ''; stale.hidden = true; }   // a row the hub answered was read — but an entry this dialog read as removed stays said
           land(clean, rowFields(lu, clean));
-          err.textContent = t('Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them');
+          // r1260 (2): the person's typed VALUES (the hosts, the end) are kept and the next Save applies them to EVERY member — also to
+          // one the row gained meanwhile (a card's «Always» with its own host and no end): the preview shows it, the line says it
+          const typedValues = fieldsDiffer(fieldsNow(), clean).some((n) => n === 'hosts' || n === 'end');
+          err.textContent = t('Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them') + (gained.length && typedValues ? ` ${t('Your hosts and end will apply to the new member too — see «What Save writes»')}` : '');
           return false;
         }
         if (r && r.ok) { rowSaved = true; landRow(r, base); endPin = at; landedInputs = inputsKeyOf(clean); previewNow(); }   // B-f212: the landed row's instant pins the next Save's ends (r13: every landing moves it, with the inputs it landed)
@@ -562,7 +573,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
           : !x ? t('«{name}» was removed from the vault', { name: row.label })
             : !lu || lu.unknown || !Array.isArray(lu.to) ? t('Who may use it could not be read just now — this shows it as last read') : '';
       stale.textContent = word; stale.hidden = !word;
-      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true })); }   // B-f212's remainder: and its stamp
+      if (word && unread && lu && revOfUse(lu) != null) { rev = revOfUse(lu); unread = false; save.disabled = false; }   // a row the hub cannot read but stamps: Save offered (the hub judges it)
+      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; unread = false; save.disabled = false; rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true })); }   // B-f212's remainder: and its stamp
     }
     if (owed && !flying) readRow();
   }
@@ -573,6 +585,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   f.append(cancel, save);
   body.parentNode.append(f);
   clean = fieldsNow();
+  if (unread) { save.disabled = true; stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; ready.then((s) => { if (s) readRow(); }); }   // r1260 (3): no Save offered over a row that could not be read — it is read first, once the dialog has opened (§103 r4: a queued form waits behind the open one's ask)
   if (app && app.ws && typeof app.ws.onGlobal === 'function') {
     const onContents = (m) => { if (m && m.type === 'vault-contents') readRow(); };
     app.ws.onGlobal(onContents);

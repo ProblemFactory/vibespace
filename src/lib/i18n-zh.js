@@ -13206,6 +13206,7 @@ export default {
   "{name} will no longer be excluded": "{name} 将不再被排除",
   "This grant changed while the dialog was open — close it and open it again": "这个授权在对话框打开期间变了 — 关掉再打开一次",
   "Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them": "你编辑时有人改了谁可以用它 — 这里显示的是它现在的样子，并保留了你自己的改动；再保存一次就会保留",
+  "Your hosts and end will apply to the new member too — see «What Save writes»": "你填的主机和期限也会用到新加入的成员上 — 请看「保存后写入」",
   // lane held-except-doors r2 (the picker's kept 除了 line) — on plain lines (see r9 above)
   "Kept from an earlier grant — left out:": "早先授权里保留的排除：",
   "Stop leaving {name} out": "不再排除 {name}",

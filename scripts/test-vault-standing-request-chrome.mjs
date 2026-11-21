@@ -56,6 +56,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, anchored, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p; the block's line 118)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -551,6 +552,12 @@ try {
   const postsOf = (tail) => A.evalJs(`(window.__vsrPosts || []).filter((p) => p.url.endsWith(${JSON.stringify(tail)})).map((p) => { try { return JSON.parse(p.body); } catch { return null; } })`);
   const resetPosts = () => A.evalJs(`(() => { (window.__vsrPosts || []).length = 0; return true; })()`);
   const rowFacts = `(() => { const r = ${LIST_ROW(LABEL)}; if (!r) return null; return { chips: [...r.querySelectorAll('.vw-use-chip')].filter((x) => !x.classList.contains('vw-use-except')).map((x) => x.textContent), ex: [...r.querySelectorAll('.vw-use-except')].map((x) => x.textContent) }; })()`;
+  // B-f212's remainder (主开发 r1260 (1)): a Save is judged by the row's STAMP — a refusal over a stamp the page has not re-read is the
+  // law's right answer, so a leg waits for a STATE, never a time: the Vault window's row redrawn after a Save (its chips changed —
+  // the row the dialog opens from carries the new stamp), the dialog's own re-read landed after another page's write (the member's
+  // chip gone from its picker). Each wait that runs out says so (the timed-out mark)
+  const settled = async (expr, ms, what) => { const v = await A.until(expr, { timeout: ms }); return v || markTimedOut(v, ms, what); };
+  const rowRedrawn = (before, what) => settled(`(() => { const f = ${rowFacts}; return f && JSON.stringify(f.chips) !== ${JSON.stringify(JSON.stringify((before && before.chips) || null))} ? f : null; })()`, 8000, what);
   const openUse = async () => { const o = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (!b) return null; b.click(); return true; })()`, { timeout: 15000 }); return !!o && !!(await A.until(`(() => { const d = document.getElementById('vault-use-grant'); return d && d.querySelector('.vw-use-hosts') && d.querySelector('.vw-use-policy-in') ? true : null; })()`, { timeout: 10000 })); };
   const dlgState = `(() => { if (document.querySelector('#vault-reveal-dialog input[type=password]')) return 'pw'; const d = document.getElementById('vault-use-grant'); if (!d) return 'closed'; const e = d.querySelector('.vault-secret-error'); return e && e.textContent ? 'error: ' + e.textContent : null; })()`;
   const saveUse = async () => {   // Save — and 验证是你 when the hub asks for it (the second password typed into the page's own dialog)
@@ -582,10 +589,10 @@ try {
   const dOpen = await openUse();
   await resetPosts();
   const dIn = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const s = d && d.querySelector('.vw-use-end'); if (!s) return null; s.value = '90d'; s.dispatchEvent(new Event('change')); const x = d.querySelector('.pp-except'); return { chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent), exceptOffered: !!x && x.style.display !== 'none' }; })()`);
+  const dPre = await A.evalJs(rowFacts);
   const dSave = await saveUse();
   const [dBody] = await postsOf('/api/vault/use-grants');
-  await sleep(600);
-  const dRow = await A.evalJs(rowFacts);
+  const dRow = await rowRedrawn(dPre, 'the Vault window row redrawn after the 90-day Save (Dee)');   // r1260 (1): the next open (rOpen) reads the row with its new stamp
   check('(r10, MAJOR — the probe\'s P2) the row {Dee (not running now) · d.example; 除了 Transcriber}: the owner changes only the end (→ 90 天) — no «除了» row is offered, the Save sends except [Transcriber] as stored (f23ddb5ad sent except [] — the 除了 gone) and the row keeps «除了 Transcriber»', !!(addD && addD.json && addD.json.ok) && dOpen && !!dIn && dIn.exceptOffered === false && dSave === 'closed' && !!dBody && (dBody.except || []).length === 1 && dBody.except[0].key === PKEY && !dBody.removeExcept && !!dRow && dRow.chips.some((c) => /Dee/.test(c)) && dRow.ex.some((x) => /^除了 Transcriber/.test(x)), { addD: addD && addD.json, dIn, dSave, dBody, dRow });
   const rOpen = await openUse();
   await resetPosts();
@@ -652,14 +659,15 @@ try {
   const sOpen = await openUse();
   const sIn = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const s = d && d.querySelector('.vw-use-end'); if (!s) return null; s.value = '90d'; s.dispatchEvent(new Event('change')); const p = d.querySelector('.vw-use-preview'); return { chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent), preview: p ? p.textContent : null }; })()`);
   const sX = await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: `conversation:${PKEY}`, scope: 'window' });
-  await sleep(300);
+  // r1260 (1): the dialog's own re-read (vault-contents) has landed — Transcriber's chip has left its picker — before the Save
+  const sHeard = await settled(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return null; return [...d.querySelectorAll('.pp-chip')].some((c) => !c.closest('.pp-except') && /Transcriber/.test(c.textContent)) ? null : true; })()`, 8000, 'the dialog re-read its row after the window ✕');
   await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-preview'); if (p) p.scrollIntoView({ block: 'center' }); return true; })()`);
   await A.shot('vsr-29-swept-window-save-dialog-desktop.png');
   await resetPosts();
+  const sPre = await settled(`(() => { const f = ${rowFacts}; return f && !f.chips.some((c) => /Transcriber/.test(c)) ? f : null; })()`, 8000, 'the Vault window row redrawn after the window ✕');   // the window's own redraw of the ✕ first: the Save's redraw is the one waited next
   const sSave = await saveUse();
-  await sleep(600);
-  const sRow = await A.evalJs(rowFacts);
-  check('(r10, MINOR — the probe\'s P1) a dialog drawn while Transcriber held its 1-hour window; the hub then dropped that member (the window\'s ✕ elsewhere — as the hour-end sweep does): the dialog\'s Save (所有 agent → 90 天) LANDS — never «请写明 Transcriber 可用于哪些主机…»; the row: 所有 agent, no Transcriber', !!(addAll && addAll.json && addAll.json.ok) && sOpen && !!sIn && sIn.chips.some((c) => /^所有 agent/.test(c)) && sIn.chips.some((c) => /Transcriber/.test(c)) && !!(sX && sX.json && sX.json.ok) && sSave === 'closed' && !!sRow && sRow.chips.some((c) => /^所有 agent/.test(c)) && !sRow.chips.some((c) => /Transcriber/.test(c)), { addAll: addAll && addAll.json, sIn, sX: sX && sX.json, sSave, sRow });
+  const sRow = await rowRedrawn(sPre, 'the Vault window row redrawn after the 所有 agent Save');
+  check('(r10, MINOR — the probe\'s P1) a dialog drawn while Transcriber held its 1-hour window; the hub then dropped that member (the window\'s ✕ elsewhere — as the hour-end sweep does): the dialog — once its own re-read landed — Saves (所有 agent → 90 天) and it LANDS — never «请写明 Transcriber 可用于哪些主机…»; the row: 所有 agent, no Transcriber', !!(addAll && addAll.json && addAll.json.ok) && sOpen && !!sIn && sIn.chips.some((c) => /^所有 agent/.test(c)) && sIn.chips.some((c) => /Transcriber/.test(c)) && !!(sX && sX.json && sX.json.ok) && !!sHeard && sSave === 'closed' && !!sRow && sRow.chips.some((c) => /^所有 agent/.test(c)) && !sRow.chips.some((c) => /Transcriber/.test(c)), { addAll: addAll && addAll.json, sIn, sX: sX && sX.json, sHeard, sSave, sRow });
   await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: 'everyone' });
   // r11 (主开发's acceptance of r10, MAJOR): a row with a TASK GROUP member (Team, live in the roster) and 除了 Transcriber — the
   // member is known by its principal: a policy-only Save posts NO row, a members-edit Save keeps Team as `group:<its id>`
@@ -688,12 +696,13 @@ try {
   const eOpen = await openUse();
   await resetPosts();
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const s = d && d.querySelector('.vw-use-end'); if (!s) return null; s.value = '90d'; s.dispatchEvent(new Event('change')); return true; })()`);
+  const ePre = await A.evalJs(rowFacts);
   const eSave = await saveUse();
   const [eBody] = await postsOf('/api/vault/use-grants');
-  await sleep(600);
+  const eRow = await rowRedrawn(ePre, 'the Vault window row redrawn after Team\'s 90-day Save');   // r1260 (1): the next open (hOpen) reads the row with its new stamp
   const tIn2 = await A.until(teamChip, { timeout: 6000 });
   const eTo = ((eBody && eBody.to) || []).map((m) => `${m.kind}:${m.id || m.key || ''}`);
-  check('(r11, MAJOR) … then a members-edit Save (Team\'s end → 90 天): the Save sends Team as `group:<its id>` — never the grant id — and the Vault row keeps it so, 除了 Transcriber kept', eOpen && eSave === 'closed' && eTo.length === 1 && eTo[0] === `group:${TG}` && !!tIn2 && tIn2.principal === `group:${TG}` && tIn2.ex.some((x) => /^除了 Transcriber/.test(x)), { eSave, eTo, except: eBody && eBody.except, tIn2 });
+  check('(r11, MAJOR) … then a members-edit Save (Team\'s end → 90 天): the Save sends Team as `group:<its id>` — never the grant id — and the Vault row keeps it so, 除了 Transcriber kept', eOpen && eSave === 'closed' && !!eRow && eTo.length === 1 && eTo[0] === `group:${TG}` && !!tIn2 && tIn2.principal === `group:${TG}` && tIn2.ex.some((x) => /^除了 Transcriber/.test(x)), { eSave, eRow, eTo, except: eBody && eBody.except, tIn2 });
   // MINOR 3: ✕ Team (a narrowing — no prompt) and a policy typed; the page's 验证是你 window gone (its clock past it), the
   // policy's prompt CANCELLED — the dialog stays open and says the members were saved; then Team picked again ⇒ posted
   await A.evalJs(`(() => { if (!window.__realNow) window.__realNow = Date.now.bind(Date); Date.now = () => window.__realNow() + 12 * 60e3; return true; })()`);
