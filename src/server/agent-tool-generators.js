@@ -11,7 +11,7 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-function create({ rootDir, port, onHookFileCreated = null }) { // onHookFileCreated({harness, file, rel, at}) — the registration that CREATED a hook file (lane hooks-create: src/server/late-hooks.js tells the sessions that predate it)
+function create({ rootDir, port, onHookFileCreated = null, applyThisMachine = null }) { // onHookFileCreated({harness, file, rel, at}) — the registration that CREATED a hook file (lane hooks-create: src/server/late-hooks.js tells the sessions that predate it)
   const ensureDir = (dir) => { if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true }); };
   const USAGE_CACHE_DIR = path.join(rootDir, 'data', 'usage-cache');
 // The harness registry + the settings/plan modules are needed by createHookHelper()
@@ -19,7 +19,7 @@ function create({ rootDir, port, onHookFileCreated = null }) { // onHookFileCrea
 const { list: listHarnesses } = require('../harnesses');
 const { buildConfigPlan } = require('../harness-settings');                // PURE: the plan builder (the helper's embedded hooks-only DEFAULT_PLAN)
 const { configPlanSpecs } = require('./harness-config-sync');              // ORCH: descriptor facts → plan specs (ONE spelling, shared with cliConfigPlan)
-const { writeJsonManaged, findOurHookIn, registerHookEntries, stripHookEntries } = require('../harness-config'); // SHARED: the CAS writer + the hook-entry mutators the remote helper embeds
+const { findOurHookIn, stableNodePath } = require('../harness-config'); // SHARED: the CAS writer + the hook-entry mutators the remote helper embeds
 // ── Create editor helper script ──
 // Communicates via HTTP (not terminal output) so Claude Code treats it as a GUI editor
 // and does NOT clear the screen. The server broadcasts via WebSocket to the client.
@@ -462,8 +462,6 @@ createLocalIndexCopy();
 // file (shell, ACP agents) is simply absent here.
 const HOOK_FILES = Object.fromEntries(listHarnesses().filter((h) => h.inject && h.inject.hookFile).map((h) => [h.id, h.inject.hookFile]));
 const HOOK_EVENTS_FOR = (harness) => { const h = listHarnesses().find((x) => x.id === harness); return h?.inject?.hookEvents ? [...h.inject.hookEvents] : []; };
-// Every event any harness registers — the removal path strips our entry from all of them.
-const ALL_HOOK_EVENTS = [...new Set(listHarnesses().flatMap((h) => h.inject?.hookEvents || []))];
 // Persisted opt-out: when the user clicks Remove in Manage Agents, we drop this
 // marker so startup does NOT silently re-register the hooks they removed.
 const HOOK_OPTOUT_FILE = path.join(rootDir, 'data', '.agent-hooks-optout');
@@ -473,12 +471,12 @@ const HOOK_OPTOUT_FILE = path.join(rootDir, 'data', '.agent-hooks-optout');
 // embeds that file's text). Hand-edited shapes never throw: skip non-conforming
 // entries so agentHooksStatus/ensure/remove degrade gracefully instead of 500ing.
 const _findOurHookIn = findOurHookIn;
-const _patchHookFile = (file, createIfMissing, mutate) => writeJsonManaged(file, { createIfMissing }, mutate);
 // TRANSCRIPT RETENTION (2.369.118) is no longer a special case here: it is the
 // claude table's cli-config row `transcriptRetentionDays` (src/harness-settings.js),
 // written by src/server/harness-config-sync.js through the same CAS writer.
 function agentHooksStatus() {
-  const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
+  // the spelling the SHIPPED HELPER writes on this machine (B-ddf3 unit 2 line 1, r1407 (e)): the stable node path (B-b83c)
+  const hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
   const out = { hookPath: HOOK_CMD, optedOut: fs.existsSync(HOOK_OPTOUT_FILE), refused: ownerWriteRefusal(), registeredAfterError: _registeredAfterError }; // verify r2 ①: the chip says "registered at HH:MM after an earlier read error"
   for (const [key, def] of Object.entries(HOOK_FILES)) {
     const file = def.file();
@@ -668,57 +666,51 @@ function replayAtLift() {
   } catch { _replayAtLift = false; }
 }
 function ensureAgentHooks({ auto = false } = {}) {
-  const hookCmd = `${JSON.stringify(process.execPath)} ${HOOK_CMD}`; // absolute interpreter (2.244.2 — see the register template note)
+  // B-ddf3 unit 2 line 1 (the coordinator's r1407): THIS MACHINE'S hook entries are written by the SHIPPED HELPER through the
+  // starter (harness-config-sync applyThisMachine — ONE run writes our hooks AND the managed keys), never by this process.
+  // The refusals stand BEFORE any run; the answer is a PROMISE of { <harness>: { ok, created?, error? } } at the landing.
   const refused = refuseOwnerWrite();
-  if (refused) return { skipped: true, refused };
+  if (refused) return Promise.resolve({ skipped: true, refused });
   const held = settingsHeldNow();
-  if (held) { replayAtLift(); return { skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }; }   // B-225b: no write while the settings are held
-  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return { optedOut: true };
+  if (held) { replayAtLift(); return Promise.resolve({ skipped: true, settingsHeld: { kind: held.kind, code: held.code || null } }); }   // B-225b: no write while the settings are held
+  if (auto && fs.existsSync(HOOK_OPTOUT_FILE)) return Promise.resolve({ optedOut: true });
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
-  const results = {};
-  for (const [key, def] of Object.entries(HOOK_FILES)) {
-    try {
-      const w = _patchHookFile(def.file(), def.createIfMissing, (root) => registerHookEntries(root, HOOK_EVENTS_FOR(key), hookCmd));
-      if (w === 'created') {
-        // THE FILE THE CLI NEVER WROTE (lane hooks-create): created here because its directory proves the CLI has run
-        // ('dir-exists'); a session already running snapshotted its hooks without ours — the caller tells them
-        const rel = def.rel.join('/');
+  if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
+  return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true }).then((landing) => {
+    const results = {};
+    for (const [key, def] of Object.entries(HOOK_FILES)) {
+      const rel = def.rel.join('/');
+      if (!landing || !landing.ok) { console.log(`Hook registration (${key}) not done on this machine: ${landing && landing.why}`); results[key] = { ok: false, error: (landing && landing.why) || 'no landing' }; continue; }
+      if ((landing.created || []).some((c) => c.rel === rel)) {
+        // THE FILE THE CLI NEVER WROTE (lane hooks-create): created because its directory proves the CLI has run ('dir-exists');
+        // a session already running snapshotted its hooks without ours — the caller tells them
         console.log(`created ~/${rel} (the CLI had never written one) and registered VibeSpace hooks`);
         results[key] = { ok: true, created: true };
         if (typeof onHookFileCreated === 'function') {
           try { onHookFileCreated({ harness: key, file: def.file(), rel, at: Date.now() }); } catch (e) { console.warn(`[hooks] ${key}: the sessions that predate ~/${rel} were not told — ${e && e.message}`); }
         }
-      } else {
-        if (w) console.log(`Registered VibeSpace hooks in ${def.file()}`);
-        results[key] = { ok: true };
-      }
-    } catch (e) {
-      console.log(`Hook registration (${key}) skipped:`, e.message);
-      results[key] = { ok: false, error: e.message, ...(e.missing ? { missing: e.missing } : {}) };
+      } else results[key] = { ok: true };
     }
-  }
-  // verify r2 ①: registered AFTER an earlier unknown verdict (a read error at boot) — remembered once, said once by server.js
-  if (_lastRootError && !_registeredAfterError && Object.values(results).some((x) => x && x.ok)) _registeredAfterError = { at: Date.now(), error: _lastRootError.error, since: _lastRootError.at };
-  return results;
+    // verify r2 ①: registered AFTER an earlier unknown verdict (a read error at boot) — remembered once, said once by server.js
+    if (_lastRootError && !_registeredAfterError && Object.values(results).some((x) => x && x.ok)) _registeredAfterError = { at: Date.now(), error: _lastRootError.error, since: _lastRootError.at };
+    return results;
+  });
 }
 // Strip ONLY our entries from both CLI configs — no opt-out marker. Used by
 // the Integration master switch (agents.vibespaceIntegration OFF), which is a
 // SETTING-driven state: boot re-checks the setting, so no marker is needed
 // (and writing one would make a later re-enable silently not re-register).
 function stripAgentHookEntries() {
-  if (refuseOwnerWrite()) return; // a worktree / temp server: never edit the owner's CLI configs
-  if (settingsHeldNow()) return;   // B-225b: the settings HELD — the switch's value is unknown, the person's CLI configs are not written
-  for (const def of Object.values(HOOK_FILES)) {
-    try {
-      _patchHookFile(def.file(), false, (root) => stripHookEntries(root, ALL_HOOK_EVENTS))
-        && console.log(`Removed VibeSpace hooks from ${def.file()}`);
-    } catch { }
-  }
+  if (refuseOwnerWrite()) return Promise.resolve(null); // a worktree / temp server: never edit the owner's CLI configs
+  if (settingsHeldNow()) return Promise.resolve(null);   // B-225b: the settings HELD — the switch's value is unknown, the person's CLI configs are not written
+  if (typeof applyThisMachine !== 'function') return Promise.resolve(null);
+  // the helper's --uninstall run strips ONLY our entries (never a managed key) — through the starter, like every write here
+  return applyThisMachine({ reason: 'hooks removed', strip: true }).then((landing) => { if (landing && landing.ok) console.log('Removed VibeSpace hooks from this machine\'s CLI configs'); else console.warn(`[hooks] the removal did not land: ${landing && landing.why}`); return landing; });
 }
 function removeAgentHooks() {
   // Durable: record the opt-out so startup won't re-register (finding #3).
   try { fs.writeFileSync(HOOK_OPTOUT_FILE, new Date().toISOString() + '\n'); } catch {}
-  stripAgentHookEntries();
+  return stripAgentHookEntries();
 }
   return {
     AGENT_BIN_DIR, EDITOR_DIR, EDITOR_CMD, STATUS_CMD, USAGE_STATUSLINE_CMD, HOOK_CMD,
