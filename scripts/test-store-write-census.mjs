@@ -2287,7 +2287,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       ok(iPoint >= 0 && iLay > iPoint && o.temps.length >= 3 && o.temps.every((t) => t.includes(`.${process.pid}.tmp`)), '⑪ (e) R10: the rollback point owed lands BEFORE the layouts.json write that replaces its state (in the flush, never «usually»), and every temp name carries the PID', o);
       // the ws layout doors (src/ws-handler.js — layout-sync and the four desktop doors) read through ONE guard: held ⇒ `layout-held`
       const WSRC = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
-      ok(WSRC.split("const layoutData = layoutsOrHeld(ws, data); if (!layoutData) break;").length === 6 && !/\n {10}const layoutData = readLayouts\(\);/.test(WSRC) && /type: 'layout-held', op: /.test(WSRC), '⑪ (e) the five ws layout doors (layout-sync, desktop-create / -delete / -rename / -reorder) read the desktops through ONE guard: held ⇒ `layout-held` by name to the sender, nothing applied (a pin)');
+      ok((WSRC.match(/const layoutData = layoutsOrHeld\(ws, data\); if \(!layoutData\) (?:break|return);/g) || []).length === 5 && !/\n {10}const layoutData = readLayouts\(\);/.test(WSRC) && /type: 'layout-held', op: /.test(WSRC), '⑪ (e) the five ws layout doors (layout-sync, desktop-create / -delete / -rename / -reorder) read the desktops through ONE guard: held ⇒ `layout-held` by name to the sender, nothing applied (a pin)');
       // REDs
       const ANS_L = "    const doc = layoutsHold.answer();", DRAIN_A = "    drainPoints();   // B-225b R10";
       ok([ANS_L, DRAIN_A].every((x) => PSRC.split(x).length === 2), 'control setup: the layouts\' answer and the flush\'s drain are found once each in src/routes/persistence.js');
