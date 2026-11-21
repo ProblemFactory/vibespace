@@ -152,6 +152,7 @@ const ARCHIVE_SWEEP_MS = 5 * 60 * 1000;
 // open blocked on the data folder's mount): every file ask of the collection pass runs OFF the loop, ONE at a time, the whole pass
 // bounded by this; what does not answer in it is UNKNOWN, and nothing is collected on an unknown
 const GC_FILES_MS = 10000;
+const GC_SAY_AGAIN_MS = 86400e3;   // B-360d r821 (3): a pass that cannot read says so again once a day (a long outage stays in the journal)
 // A STOP'S GRACE and THE REAP'S BOUND (lane jobs-memory-bound, acceptance round 5): a stop's SIGTERM, then STOP_GRACE_MS before
 // the kill step — the owner's stop, a timeout, an until-marker and a stop the sweep honors alike (the tick never cuts it short);
 // a read of a scope's cgroup.procs answers within REAP_READ_MS or the run is judged without it (a busy threadpool never holds
@@ -3918,8 +3919,9 @@ class JobManager {
   }
   /** B-360d — ONE FILE ASK OF THE COLLECTION PASS, off the loop (`make` → an fs.promises call), waited on until `until` (an instant).
    *  A read that has not come back is NEVER started again beside itself (the file-thread outage class: one pool thread at most):
-   *  while one is out — this pass's or an earlier pass's — the pass asks nothing more. → {v} (its answer) | {e} (its error, an
-   *  answer too: no such file) | null — UNKNOWN: it did not answer in time, or one is still out */
+   *  while one is out — this pass's or an earlier pass's — the pass asks nothing more. → {v} (its answer) | {e} (its error: the
+   *  pass reads ENOENT alone as an answer — «not there» — every other error is UNKNOWN, r821) | null — UNKNOWN: it did not answer
+   *  in time, or one is still out */
   async _gcAsk(make, until) {
     if (this._gcOut) return null;
     const left = until - Date.now();
@@ -3940,18 +3942,15 @@ class JobManager {
     // GC_FILES_MS; an ask that does not answer in time is UNKNOWN, and nothing is collected on an unknown (never a guess)
     const until = Date.now() + (Number(this.d.gcFilesMs) > 0 ? Number(this.d.gcFilesMs) : GC_FILES_MS);
     let unknown = 0;
-    { // spill files: age-swept alongside the records they narrate
-      const dir = path.join(this.d.dataDir, 'job-notifications-read');
-      const ls = await this._gcAsk(() => fs.promises.readdir(dir), until);
-      if (!ls) unknown++;
-      else if (Array.isArray(ls.v)) {
-        for (const f of ls.v) {
-          const fp = path.join(dir, f), st = await this._gcAsk(() => fs.promises.stat(fp), until);
-          if (!st) { unknown++; break; }
-          if (st.v && st.v.mtimeMs < cutoff && !(await this._gcAsk(() => fs.promises.unlink(fp), until))) { unknown++; break; }
-        }
-      }
-    }
+    // r821 (1): ONLY «NOT THERE» IS A REPLY — any other error of an ask (a stale handle, an input error, no access, a timeout) is UNKNOWN
+    const answered = (got) => !!got && !(got.e && got.e.code !== 'ENOENT');
+    // r821 (4): A PASS IN FLIGHT AT THE ENGINE'S STOP ENDS THERE — after each await a stopped engine returns (nothing removed, nothing
+    // saved after the flush and the unlock)
+    const stopped = () => this._logsStopped;
+    // r821 (2): THE RECORDS FIRST, THEN THE SPILL FOLDER — and each walk STARTS AFTER THE LAST ONE IT REACHED (a head that eats the
+    // budget, or a read still out, every hour starves nothing behind it: the next pass begins with the first one not asked)
+    const reached = () => !this._gcOut && until > Date.now();
+    const rotate = (list, keyOf, from) => { const i = from == null ? -1 : list.findIndex((x) => keyOf(x) === from); return i > 0 ? list.slice(i).concat(list.slice(0, i)) : list; };
     // THE STAMP DECIDES ONLY FOR A RECORD THIS PASS WOULD COLLECT (B-360d): those are found first, and only their stamps are read
     const collectable = (job) => {
       if (job.kind !== 'task' || !['done', 'interrupted'].includes(job.state)) return false;
@@ -3962,11 +3961,16 @@ class JobManager {
       if (!(run && run.endedAt && run.endedAt < cutoff)) return false;
       return !(this._notifsUnread && job.clearedAt);   // the B-f276 remainder (5), its read r3 (S2): its record judges the held notices
     };
-    for (const [id, job] of [...this.jobs]) {
-      if (!collectable(job)) continue;
+    const cands = rotate([...this.jobs].filter(([, job]) => collectable(job)), ([id]) => id, this._gcFrom);
+    this._gcFrom = null;
+    for (let i = 0; i < cands.length; i++) {
+      const [id, job] = cands[i];
+      if (!reached()) { unknown += cands.length - i; this._gcFrom = id; break; }   // not asked: the next pass starts here
+      if (this.jobs.get(id) !== job || !collectable(job)) continue;   // moved during an earlier ask of this pass
       const run = job.runs[job.runs.length - 1];
       const got = await this._gcAsk(() => fs.promises.readFile(path.join(this._ctlDir(job, run.startedAt), 'pid.json'), 'utf-8'), until);
-      if (!got) { unknown++; continue; }   // UNKNOWN: its stamp did not answer — nothing of it is collected this pass
+      if (stopped()) return;
+      if (!answered(got)) { unknown++; continue; }   // UNKNOWN: its stamp did not answer, or failed — nothing of it is collected this pass
       let stamp = null;
       if (typeof got.v === 'string') { try { stamp = JSON.parse(got.v); } catch { stamp = null; } }
       if (this._verifyAlive(stamp)) continue; // NEVER gc live work, regardless of record state
@@ -3975,9 +3979,31 @@ class JobManager {
       (this._removalOwed || (this._removalOwed = new Map())).set(id, job);   // the moved2 census: its logs kept until the removal lands
       whole.push(id); gone.push(id);
     }
-    if (unknown) {
-      if (!this._gcUnknownSaid) { this._gcUnknownSaid = true; this.d.log(`[jobs] the collection pass: ${unknown} file read(s) did not answer in time (the data folder's storage may hang) — nothing of theirs is collected; the next pass asks again once the read that is out has come back (said once)`); }
-    } else this._gcUnknownSaid = false;
+    { // spill files: age-swept alongside the records they narrate (after them: the records' stamps are asked first)
+      const dir = path.join(this.d.dataDir, 'job-notifications-read');
+      const ls = reached() ? await this._gcAsk(() => fs.promises.readdir(dir), until) : null;
+      if (stopped()) return;
+      if (!answered(ls)) unknown++;
+      else if (Array.isArray(ls.v)) {
+        const names = rotate([...ls.v].sort(), (f) => f, this._gcSpillFrom);
+        this._gcSpillFrom = null;
+        for (let i = 0; i < names.length; i++) {
+          const f = names[i];
+          if (!reached()) { unknown++; this._gcSpillFrom = f; break; }   // not asked: the next pass starts here
+          const fp = path.join(dir, f), st = await this._gcAsk(() => fs.promises.stat(fp), until);
+          if (stopped()) return;
+          if (!answered(st)) { unknown++; continue; }
+          if (!(st.v && st.v.mtimeMs < cutoff)) continue;
+          const rm = await this._gcAsk(() => fs.promises.unlink(fp), until);
+          if (stopped()) return;
+          if (!answered(rm)) unknown++;
+        }
+      }
+    }
+    if (unknown) {   // r821 (3): said, and said again once a day while it lasts (a dead mount stops the collection until its read comes back)
+      const t = Date.now();
+      if (!(t - (this._gcUnknownSaidAt || 0) < GC_SAY_AGAIN_MS)) { this._gcUnknownSaidAt = t; this.d.log(`[jobs] the collection pass: ${unknown} file read(s) did not answer in time or failed (the data folder's storage may hang) — nothing of theirs is collected; while a read is out no record is collected, until it comes back or the hub restarts (said again once a day)`); }
+    } else this._gcUnknownSaidAt = 0;
     // ARCHIVED records keep their record (the cap bounds it) but their log
     // dirs follow the SAME 14-day retention as a live record's (triage §13)
     try {
@@ -4811,4 +4837,4 @@ class JobManager {
   _hum(ms) { const m = Math.round(Math.abs(ms) / 60000); return m < 60 ? m + 'm' : m < 1440 ? Math.round(m / 60) + 'h' : Math.round(m / 1440) + 'd'; }
 }
 
-module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, GC_FILES_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP, WRAPPER_PROTO, UPDATE_WINDOW_MS };
+module.exports = { JobManager, ARCHIVE_CAP, ARCHIVE_SWEEP_MS, GC_FILES_MS, GC_SAY_AGAIN_MS, jobEnv, wrapperEnv, WRAPPER_ENV_KEEP, WRAPPER_PROTO, UPDATE_WINDOW_MS };
