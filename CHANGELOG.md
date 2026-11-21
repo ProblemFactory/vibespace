@@ -63,6 +63,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In Settings, the note beside eight settings (extra arguments, Codex's personality and reset credit, and two Claude rows) is now in your language.
 - Opening the Diagnostics report on a slow data folder no longer makes VibeSpace stop answering for seconds while it reads its event files.
 - Opening VibeSpace, or its System panel, no longer makes it pause while it lists the machine's processes.
+- On a paired machine, the folder field lists the folder you type even while another folder there hangs, and says when its other suggestions are held.
 
 ## 2.369.415 — 2026-11-21
 
