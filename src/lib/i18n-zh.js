@@ -11750,6 +11750,7 @@ export default {
   "Suggestions from this machine are held for a while — it was slow to list them; the folder you type still works": "这台机器的建议暂时搁置——它列出这些文件夹太慢；你输入的文件夹照常可用",   // B-99b9 (lane bl-machines-b): another machine's rest held after a miss
   "A link to {target} — not checked": "链接到 {target}——未检查",   // B-99b9 (lane bl-machines-b)
   "Only the first {n} folders this text names were asked": "只问了这段文字指向的前 {n} 个文件夹",   // B-99b9 (lane bl-machines-b)
+  "{host} was slow to answer — this folder is not asked for a while": "{host} 刚才回应太慢——暂时不再询问这个文件夹",   // B-99b9 r949 (lane bl-machines-b)
   "The machine's answer kept changing — type again, or press to ask once more": "这台机器的答复一直在变——再输入一下，或按一下再问一次",   // B-d833 (lane bl-tests-a)
   "{path} does not exist — create it?": "{path} 不存在 —— 创建？",
   "{path} does not exist, nor the folder above ({parent})": "{path} 不存在，上一级 {parent} 也不存在",

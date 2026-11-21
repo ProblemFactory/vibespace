@@ -29,7 +29,8 @@ const { REMOTE_PRELUDE, nodeFinder, agentNodeOf } = require('./remote-shell.js')
 const DIR_SLICE_WAIT_MS = 2000;      // the hub stops WAITING on its asks here and replies (its own race, never the run's timeout)
 const SLICE_TYPED_CAP = 4;          // typed folders one text asks at once (the bases' order): each is ONE shell there; past it, named unread
 const SLICE_RUN_MS = 6000;           // a run's own bound there (the device's runCmd / the ssh rung)
-const SLICE_DEADLINE_MS = 8000;      // a run that has not SETTLED by now never will (a shell stuck in the kernel): missed / hung
+const SLICE_DEADLINE_MS = 20000;     // a run that has not SETTLED by now never will (a shell stuck in the kernel): missed / hung — past the longest road
+                                    // (the device's connect 4 s + the hub's own bound 7.5 s, then the ssh rung's 6 s), so a slow healthy landing is kept (r949)
 const SLICE_HUNG_MS = 30e3;          // a typed folder that never landed: marked this long (the hub rung's PROBE_LATE_MS)
 const SLICE_HOLD_MS = 30e3;          // a rest that did not land holds the machine's rest this long, doubling on each miss in a row…
 const SLICE_HOLD_MAX_MS = 600e3;     // …up to this
@@ -1578,7 +1579,7 @@ class HostManager {
         if (err) {
           const hk = err.code === 255 ? HK.hostKeyRefusal(h, stderr?.toString()) : null; // lane lg-remote-hardening: ssh's OWN refusal (exit 255) by name, and the For-you watch hears it
           if (hk) { if (hk.code === 'host-key-changed') { try { this.onHostKeyRefused?.(h, hk); } catch { } } return reject(hk); } // a pin that cannot be used is said on its row, never as a changed key in For you
-          return reject(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)));
+          return reject(Object.assign(new Error((stderr?.toString() || err.message || '').trim().slice(0, 300)), { killed: !!err.killed, signal: err.signal || null }));   // B-99b9 (r949): the run's own FACTS kept (its bound killed it) — a caller never reads them from the words
         }
         resolve(stdout);
       });
@@ -1751,11 +1752,12 @@ class HostManager {
     const t0 = Date.now();
     const now = () => (typeof this._now === 'function' ? this._now() : Date.now());   // the marks' and holds' clock (a suite hands its own)
     const files = kind === 'file';
-    const norm = (v) => (Array.isArray(v) ? v : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~'))).map((p) => (p.length > 1 ? p.replace(/\/+$/, '') : p));
+    const norm = (v) => (Array.isArray(v) ? v : []).map(String).filter((p) => p && (p.startsWith('/') || p.startsWith('~')) && !/[\t\n]/.test(p)).map((p) => (p.length > 1 ? p.replace(/\/+$/, '') : p));
     const baseList = norm(bases).slice(0, 12);
     const probes = [...new Set(norm(probe))].slice(0, 40);
     const probeAs = new Map(); for (const p of (Array.isArray(probe) ? probe : []).map(String)) { const n = norm([p])[0]; if (n) probeAs.set(n, [...(probeAs.get(n) || []), p]); }   // the field's own strings
     const ask = PC.sliceAsk(text, baseList.map((p) => ({ path: p })));
+    for (const k of ['list', 'typed']) ask[k] = ask[k].filter((p) => !/[\t\n]/.test(p));   // r949: a path holding a tab or a newline is never asked (it could fake a row)
     const fuzzy = String(q || '').trim();
     const c = (this._sliceCache = this._sliceCache || new Map()).get(id) || { index: null, names: null };
     this._sliceCache.set(id, c);
@@ -1766,15 +1768,22 @@ class HostManager {
     const sleepUntil = (ms) => new Promise((r) => { const tm = setTimeout(r, Math.max(0, ms - Date.now())); tm.unref?.(); });
     const errs = [];
     // B-99b9: a HANG is a run that never ended (its own bound killed it, or it printed no end) — never a refusal, an offline device or a
-    // connect failure: those are said as the machine's own words and never mark nor hold anything
-    const isHang = (e) => !!(e && (e.killed || e.code === 'ETIMEDOUT' || /time(d)? ?out|timeout/i.test(String(e.message || ''))));
+    // connect failure: those are said as the machine's own words and never mark nor hold anything. 主开发 r949, THE LAW: a hang is told
+    // from a refusal by the run's OWN FACTS, never by its words — the ssh child killed at its bound (`killed`, kept by _ssh), the
+    // machine's own bound stopped it (the device's `timedOut`), or no answer by the hub's own bound on the device road (`hang`)
+    const RUN_MS = Number(this._sliceRunMs) > 0 ? Number(this._sliceRunMs) : SLICE_RUN_MS;   // a suite's shorter bound (its seam); the product's is SLICE_RUN_MS
+    const hangOf = (why) => Object.assign(new Error(why), { hang: true });
+    const isHang = (e) => !!(e && (e.hang === true || e.killed === true));
+    const ownBound = (p, ms) => new Promise((resolve, reject) => { const tm = setTimeout(() => reject(hangOf('no answer within the run\'s bound')), ms); tm.unref?.(); p.then((v) => { clearTimeout(tm); resolve(v); }, (e) => { clearTimeout(tm); reject(e); }); });
     const run = async (script) => {
       if (h.transport === 'dial' || this.dataPlaneOn?.()) {
-        try { const dm = await this.deviceBounded(id, 4000); return String((await dm.runCmd('sh', ['-c', script], { timeoutMs: SLICE_RUN_MS, by })).stdout || ''); }
+        try { const dm = await this.deviceBounded(id, 4000); const r = await ownBound(dm.runCmd('sh', ['-c', script], { timeoutMs: RUN_MS, waitMs: RUN_MS * 1.5, by }), RUN_MS * 1.25); if (r && r.timedOut) throw hangOf('stopped at the run\'s bound there'); if (r && r.truncated) throw new Error('its answer was over the bound and cut'); return String((r && r.stdout) || ''); }   // a cut answer is no hang: said, nothing marked
         catch (e) { if (h.transport === 'dial' || isHang(e)) throw e; /* an ssh host's refused device road falls through — never a run that hung there */ }
       }
       // B-99b9: plain sh there, NOT the login shell's prelude (the prelude itself stats the home)
-      return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\''`)}'`, { timeoutMs: SLICE_RUN_MS }));
+      // r949: ssh's own connect bound (3 s) ends a machine that does not answer its connect BEFORE the run's bound — its own exit 255,
+      // a refusal said by its words, never a run killed as a hang
+      return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\''`)}'`, { timeoutMs: RUN_MS, connectTimeoutS: 3 }));
     };
     // ── R1, THE TYPED ASKS: ONE A TYPED FOLDER (主开发 r880), joined and marked per folder; at most SLICE_TYPED_CAP at once ──
     const typedAll = ask.typed, typed = typedAll.slice(0, SLICE_TYPED_CAP), capped = typedAll.slice(SLICE_TYPED_CAP);

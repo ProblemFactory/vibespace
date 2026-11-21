@@ -185,6 +185,7 @@ function chipText(c) {
     case 'name-same': return t('Same-name folder');
     case 'name-group': return t('Task Group «{group}»', { group: p.group });
     case 'name-home': return p.host ? t('{host} home', { host: p.host }) : t('Home');
+    case 'unchecked': return t('A link to {target} — not checked', { target: p.target }) + (p.relative ? ' · ' + t('relative to {base}', { base: p.relative }) : '');   // B-99b9 (主开发 r880 / r949): another machine's link, never tested — never «Folder»
     default: return p.relative ? t('Folder · relative to {base}', { base: p.relative }) : t('Folder');
   }
 }
@@ -204,10 +205,18 @@ function whyText(w) {
     case 'name-same': return t('A folder of that name already exists');
     case 'absent': return t('Not on {host} · create?', p);
     case 'unsaid': return t('{host} did not answer for it', p);
-    case 'unchecked': return t('A link to {target} — not checked', p);   // B-99b9 (主开发 r880): another machine's link, never tested
+    case 'held': return t('{host} was slow to answer — this folder is not asked for a while', p);   // B-99b9 (r949): a probe the HELD rest did not ask — said, never «did not answer»
     default: return '';
   }
 }
+// B-99b9 (主开发 r949 MUST 1): THE DRAWN ROW — its icon (an unchecked link is drawn as a LINK, never as a folder; the picker's rows
+// too) and its tooltip (the path, then what the row is: an unchecked link's own words, else its why)
+const rowIcon = (r) => (r.file ? getFileIcon(baseName(r.path)) : r.unchecked ? UI_ICONS.link : r.mount ? UI_ICONS.connect : FILE_ICONS.folder);
+const rowTip = (r) => r.path + (r.unchecked ? '\n' + chipText(r.chip) : r.why && !Array.isArray(r.why) ? '\n' + whyText(r.why) : '');
+// B-99b9: what a list that did not finish says, ONE place for the empty list and the hint under the field — the machine's rest HELD
+// first, then the typed folders past the cap, then the unread, then the late; `last` when it finished
+const rowsWords = (R, last) => (R.held ? t('Suggestions from this machine are held for a while — it was slow to list them; the folder you type still works') : R.capped ? t('Only the first {n} folders this text names were asked', { n: String(R.capped) })
+  : R.unread ? t('Some folders here could not be read — the machine did not answer for them') : R.late ? t('Still looking — this machine has not finished') : last);
 function aliasText(a) {
   const k = a.from && a.from.key;
   if (k === 'group-name') return t('Task Group name «{alias}»', { alias: a.text });
@@ -322,6 +331,7 @@ export function pathField(input, opts = {}) {
     const view = groupsNow().map((g) => { const v = groupOn(g, L); if (!h || !v.absent || !v.absent.length) return v; const known = v.absent.filter((f) => knownAbsent(W, f)); return { ...v, absent: known, unknown: v.absent.filter((f) => !known.includes(f)) }; });
     // (r174, the (b) law) an unknown folder the machine was ASKED for and did not answer is said by its name («my-mac did not answer for it»)
     for (const v of view) if (v.unknown && v.unknown.length) v.unsaid = v.unknown.filter((f) => !!(W.unsaid && W.unsaid.has(f)));
+    for (const v of view) if (v.unknown && v.unknown.length) v.held = v.unknown.filter((f) => !(v.unsaid || []).includes(f) && !!(W.heldP && W.heldP.has(f)));   // B-99b9 (r949): one the HELD rest did not ask
     const bases = [];
     for (const g of view.filter((x) => x.selected)) for (const f of g.folders) bases.push({ path: f, label: t('Task Group «{name}»', { name: g.name }) });
     for (const b of call(o.bases, []) || []) if (b && b.path) bases.push({ path: toTilde(h ? L.home : LOCAL.home, stripSlash(b.path)), label: String(b.label || '') });
@@ -455,6 +465,7 @@ export function pathField(input, opts = {}) {
       // so by the machine's name until a later reply answers it: never an unknown row with nothing out and nothing said
       W.unsaid = W.unsaid || new Map(); const late = lateOf(d);
       for (const p of probe || []) { if (late.has(p) && !(d && d.rowsHeld)) W.unsaid.set(p, Date.now()); else if (W.L.dirs[p] || W.asked.has(p)) W.unsaid.delete(p); }   // B-99b9: a HELD rest asked nothing — never «did not answer»
+      W.heldP = W.heldP || new Map(); for (const p of probe || []) { if (late.has(p) && d && d.rowsHeld) W.heldP.set(p, Date.now()); else W.heldP.delete(p); }   // B-99b9 (r949): …it is said as HELD (the latest reply's word)
     }
     W.error = (d && d.error) || (d ? '' : t('the machine did not answer'));
     // B-d833 P8 + the ruling on M3: the rows' words (a source still out: «still looking»; one a dead folder's mark answered: «could not be
@@ -571,12 +582,12 @@ export function pathField(input, opts = {}) {
     const m = model();
     if (!m.rows.length) {
       const W = world(hk());
-      return `<div class="pf-empty">${escHtml(W.unreachable && hk() ? unreachableWords(hk()) : W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : rowsNow().held ? t('Suggestions from this machine are held for a while — it was slow to list them; the folder you type still works') : rowsNow().capped ? t('Only the first {n} folders this text names were asked', { n: String(rowsNow().capped) }) : rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('No matching folder.'))}</div>`;   // (B-d833 P8: rows not finished are never «no match»)
+      return `<div class="pf-empty">${escHtml(W.unreachable && hk() ? unreachableWords(hk()) : W.error ? t('The machine did not answer: {err}', { err: W.error }) : m.mode === 'empty' ? t('No suggestions yet — type a path or a few letters.') : rowsWords(rowsNow(), t('No matching folder.')))}</div>`;   // (B-d833 P8: rows not finished are never «no match»)
     }
     let i = 0;
     const body = m.sections.map((s) => `<div class="pf-sec">${escHtml(secTitle(s))}${s.more ? `<span class="pf-more">${escHtml(t('{n} more', { n: s.more }))}</span>` : ''}</div>` + s.rows.map((r) => {
       const k = i++;
-      const icon = r.file ? getFileIcon(baseName(r.path)) : r.isNew ? UI_ICONS.plus : r.mount ? UI_ICONS.connect : FILE_ICONS.folder;
+      const icon = !r.file && r.isNew ? UI_ICONS.plus : rowIcon(r);   // B-99b9 (r949): an unchecked link is drawn as a link
       const chips = [];
       if (r.isNew && !r.absent) chips.push(`<span class="pf-chip new">${escHtml(t('New'))}</span>`);
       chips.push(`<span class="pf-chip${/group|notes|name-group/.test(r.chip.key) ? ' grp' : r.chip.key === 'mount' ? ' mnt' : ''}">${r.chip.params && r.chip.params.color ? `<span class="tvg-dot" style="--g-color:${escHtml(r.chip.params.color)}"></span>` : ''}${escHtml(chipText(r.chip))}</span>`);
@@ -585,7 +596,7 @@ export function pathField(input, opts = {}) {
       if (m.mode === 'fuzzy' && r.rule) chips.push(`<span class="pf-chip rule" title="${escHtml((r.why || []).map(whyText).join(', ') + (r.boost && r.boost.length ? '\n' + r.boost.map(boostText).join(' · ') : ''))}">${escHtml(ruleText(r.rule))}</span>`);
       if (r.alias) chips.push(`<span class="pf-chip rule">${escHtml(aliasText(r.alias))}</span>`);
       if (r.git) chips.push(`<span class="pf-chip" title="git">${UI_ICONS.forkBranch}</span>`);
-      const tip = r.path + (r.why && !Array.isArray(r.why) ? '\n' + whyText(r.why) : '');
+      const tip = rowTip(r);
       return `<div class="pf-item${k === st.active ? ' active' : ''}${r.sub ? ' sub' : ''}${r.absent ? ' absent' : ''}" data-i="${k}" role="option" aria-selected="${k === st.active}" title="${escHtml(tip)}"><span class="pf-ic">${icon}</span><span class="pf-path">${hl(r.path, r.hl)}</span><span class="pf-rc">${chips.join('')}</span></div>`;
     }).join('')).join('');
     const keys = isPhone() ? '' : `<div class="pf-keys"><span><kbd>↑</kbd><kbd>↓</kbd> ${escHtml(t('choose'))}</span><span><kbd>Enter</kbd> ${escHtml(t('pick'))}</span><span><kbd>Tab</kbd> ${escHtml(t('complete into it'))}</span><span><kbd>Esc</kbd> ${escHtml(t('close'))}</span></div>`;
@@ -628,7 +639,7 @@ export function pathField(input, opts = {}) {
     } else if (!ew && model().rows.length) {
       h += `<div class="pf-res"><span class="pf-hint">${escHtml(isPhone() ? t('No path called «{text}» — press a suggestion above.', { text }) : t('No path called «{text}» — choose a suggestion with ↑↓, Enter picks it.', { text }))}</span></div>`;
     } else if (!ew && M.answer && M.answer.key === keyNow(text)) {
-      h += `<div class="pf-res"><span class="pf-hint">${escHtml(rowsNow().held ? t('Suggestions from this machine are held for a while — it was slow to list them; the folder you type still works') : rowsNow().capped ? t('Only the first {n} folders this text names were asked', { n: String(rowsNow().capped) }) : rowsNow().unread ? t('Some folders here could not be read — the machine did not answer for them') : rowsNow().late ? t('Still looking — this machine has not finished') : t('Nothing found — try other letters, or press the folder button.'))}</span></div>`;
+      h += `<div class="pf-res"><span class="pf-hint">${escHtml(rowsWords(rowsNow(), t('Nothing found — try other letters, or press the folder button.')))}</span></div>`;
     }
     return h;
   }
@@ -905,7 +916,7 @@ export function pathField(input, opts = {}) {
         const m = rankCandidates(K.q, { ...inputsNow(), name: '' });
         const rows = m.rows.filter((r) => !r.isNew);
         if (!rows.length) return `<div class="pf-empty">${escHtml(t('No folder called «{text}».', { text: K.q }))}</div>`;
-        return `<div class="pf-pk-root">${escHtml(t('Search results · the same order as the field'))}</div>` + rows.map((r) => `<div class="pf-tn pin${K.sel === r.path ? ' sel' : ''}" data-sel="${escHtml(r.path)}">${r.file ? getFileIcon(baseName(r.path)) : r.mount ? UI_ICONS.connect : FILE_ICONS.folder}<span class="pf-path">${hl(r.path, r.hl)}</span><span class="pf-chip">${escHtml(chipText(r.chip).split(' · ')[0])}</span></div>`).join('');
+        return `<div class="pf-pk-root">${escHtml(t('Search results · the same order as the field'))}</div>` + rows.map((r) => `<div class="pf-tn pin${K.sel === r.path ? ' sel' : ''}" data-sel="${escHtml(r.path)}" title="${escHtml(rowTip(r))}">${rowIcon(r)}<span class="pf-path">${hl(r.path, r.hl)}</span><span class="pf-chip">${escHtml(chipText(r.chip).split(' · ')[0])}</span></div>`).join('');
       }
       const node = (p, depth) => {
         const y = L().dirs[p]; if (!y) return '';

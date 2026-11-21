@@ -15,7 +15,12 @@
 // a child that IS a mount point, and every child of an autofs folder, is printed BY NAME ONLY (no test of it); NO LINK IS
 // FOLLOWED (its target printed as read, never tested — a link is asked about before any stat of it; the hub keeps it UNCHECKED:
 // never a folder, never a check mark); a name or a target holding a tab or a newline is never listed (it could fake a row);
-// the walk prunes every mount point under the home. THE SHELLS it is written for: a plain POSIX sh — dash, busybox ash, bash as
+// the walk prunes every mount point under the home. 主开发 r949: THE MOUNT TEST COMPARES REAL PATHS — the kernel's table holds them:
+// a listed folder's real path is asked ONCE, of the folder itself (`cd -P` + `pwd -P`, never of a child), and its children are compared
+// under it as well as as typed (what is printed stays as typed); the walk prunes by the home's real path the same way; on a Mac a
+// mount behind the data volume (/System/Volumes/Data/…) is known by its path without that prefix too. A child's own .git and
+// package.json are tested only when they are not links (a link named so is never followed), and an automounter's folder has no
+// .git test of its own (that would ask the automounter for a key). THE SHELLS it is written for: a plain POSIX sh — dash, busybox ash, bash as
 // sh (macOS /bin/sh) — with readlink, awk, cut and the stat / find forms above; nothing beyond them. Nothing is written,
 // detached or left running on the machine by it.
 // PURE: imports nothing.
@@ -39,29 +44,31 @@ function sliceScript({ list = [], probes = [], files = false, index = false, nam
   L.push(`H="$HOME"; U=$(uname -s 2>/dev/null); printf 'H\\t%s\\nU\\t%s\\n' "$H" "$U"`);
   // B-99b9: THE MOUNT POINTS, read WITHOUT touching one — MT = «path<TAB>type» lines, MP = every mount point, AP = the autofs ones
   L.push("NL='\n'; TB=$(printf '\\t')");
-  L.push(`if [ "$U" = Darwin ]; then MT=$(mount 2>/dev/null | awk '{ i = index($0, " on "); j = index($0, " ("); if (i && j > i) { t = substr($0, j + 2); sub(/[,)].*/, "", t); print substr($0, i + 4, j - i - 4) "\\t" t } }'); `
+  L.push(`if [ "$U" = Darwin ]; then MT=$(mount 2>/dev/null | awk '{ i = index($0, " on "); j = index($0, " ("); if (i && j > i) { t = substr($0, j + 2); sub(/[,)].*/, "", t); p = substr($0, i + 4, j - i - 4); print p "\\t" t; if (index(p, "/System/Volumes/Data/") == 1) print substr(p, 21) "\\t" t } }'); `
     + `else MT=$(awk '{ gsub(/\\\\040/, " ", $2); print $2 "\\t" $3 }' /proc/mounts 2>/dev/null); fi; `
     + `MP=$(printf '%s\\n' "$MT" | cut -f1); AP=$(printf '%s\\n' "$MT" | awk -F '\\t' '$2 == "autofs" { print $1 }')`);
   L.push(`inm() { case "$NL$2$NL" in *"$NL$1$NL"*) return 0;; esac; return 1; }`);
+  // r949: the HOME's real path, asked once of the home itself (only by the steps that walk it): the table holds real paths
+  L.push(`RH=; rh() { [ -n "$RH" ] && return 0; RH=$(cd -P "$H" 2>/dev/null && pwd -P) || RH=$H; RH=\${RH%/}; }`);
   L.push(`mt() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1" 2>/dev/null; }`);
   L.push(`sz() { stat -c %s "$1" 2>/dev/null || stat -f %z "$1" 2>/dev/null; }`);
   // B-99b9: a child that IS a mount point, and every child of an autofs folder, BY NAME ONLY (no test of it); a link's target as
   // read (never tested, never followed); a name with a tab or a newline never listed
-  L.push(`ls1() { d=$1; f=$2; k=$3; if [ ! -d "$d" ]; then printf 'X\\t%s\\n' "$d"; return; fi; g=0; [ -e "$d/.git" ] && g=1; printf 'D\\t%s\\t%s\\t%s\\n' "$d" "$(mt "$d")" "$g"; au=0; inm "$d" "$AP" && au=1; n=0; p=\${d%/}; `
+  L.push(`ls1() { d=$1; f=$2; k=$3; if [ ! -d "$d" ]; then printf 'X\\t%s\\n' "$d"; return; fi; p=\${d%/}; rp=$(cd -P "$d" 2>/dev/null && pwd -P) || rp=$p; rp=\${rp%/}; au=0; { inm "$d" "$AP" || inm "\${rp:-/}" "$AP"; } && au=1; g=0; [ $au = 1 ] || [ -L "$d/.git" ] || { [ -e "$d/.git" ] && g=1; }; printf 'D\\t%s\\t%s\\t%s\\n' "$d" "$(mt "$d")" "$g"; n=0; p=\${d%/}; `
     + `for e in "$p"/* "$p"/.[!.]* "$p"/..?*; do b=\${e##*/}; case "$b" in *"$TB"*|*"$NL"*) continue;; esac; `
-    + `if [ $au = 1 ] || inm "$e" "$MP"; then case "$b" in '*'|'.[!.]*'|'..?*') continue;; esac; n=$((n+1)); if [ $n -gt ${MAX_KIDS} ]; then printf 'Z\\t%s\\n' "$d"; break; fi; printf 'K\\t%s\\t%s\\t0\\t\\tm\\n' "$d" "$b"; continue; fi; `
+    + `if [ $au = 1 ] || inm "$e" "$MP" || { [ "$rp" != "$p" ] && inm "$rp/$b" "$MP"; }; then case "$b" in '*'|'.[!.]*'|'..?*') continue;; esac; n=$((n+1)); if [ $n -gt ${MAX_KIDS} ]; then printf 'Z\\t%s\\n' "$d"; break; fi; printf 'K\\t%s\\t%s\\t0\\t\\tm\\n' "$d" "$b"; continue; fi; `
     + `if [ -L "$e" ]; then n=$((n+1)); if [ $n -gt ${MAX_KIDS} ]; then printf 'Z\\t%s\\n' "$d"; break; fi; t=$(readlink "$e" 2>/dev/null); case "$t" in *"$TB"*|*"$NL"*) continue;; esac; printf 'L\\t%s\\t%s\\t%s\\n' "$d" "$b" "$t"; continue; fi; `
     + `[ -e "$e" ] || continue; n=$((n+1)); if [ $n -gt ${MAX_KIDS} ]; then printf 'Z\\t%s\\n' "$d"; break; fi; `
-    + `if [ -d "$e" ]; then kg=0; [ -e "$e/.git" ] && kg=1; kp=; if [ "$k" = 1 ] && [ -f "$e/package.json" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"vibespace"' "$e/package.json" 2>/dev/null; then kp=vibespace; fi; printf 'K\\t%s\\t%s\\t%s\\t%s\\n' "$d" "$b" "$kg" "$kp"; `
+    + `if [ -d "$e" ]; then kg=0; [ -L "$e/.git" ] || { [ -e "$e/.git" ] && kg=1; }; kp=; if [ "$k" = 1 ] && [ ! -L "$e/package.json" ] && [ -f "$e/package.json" ] && grep -q '"name"[[:space:]]*:[[:space:]]*"vibespace"' "$e/package.json" 2>/dev/null; then kp=vibespace; fi; printf 'K\\t%s\\t%s\\t%s\\t%s\\n' "$d" "$b" "$kg" "$kp"; `
     + `elif [ -f "$e" ]; then if [ "$f" = 1 ]; then printf 'F\\t%s\\t%s\\t%s\\t%s\\n' "$d" "$b" "$(sz "$e")" "$(mt "$e")"; else printf 'f\\t%s\\n' "$d"; fi; fi; done; }`);
-  L.push(`pr() { p=$1; if [ -d "$p" ]; then g=0; [ -e "$p/.git" ] && g=1; c=$(find "$p" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' '); printf 'P\\t%s\\t1\\t1\\t%s\\t%s\\t%s\\n' "$p" "$g" "$c" "$(mt "$p")"; elif [ -e "$p" ]; then printf 'P\\t%s\\t1\\t0\\n' "$p"; else printf 'P\\t%s\\t0\\n' "$p"; fi; }`);
+  L.push(`pr() { p=$1; if [ -d "$p" ]; then g=0; inm "$p" "$AP" || [ -L "$p/.git" ] || { [ -e "$p/.git" ] && g=1; }; c=$(find "$p" -maxdepth 1 -type f 2>/dev/null | wc -l | tr -d ' '); printf 'P\\t%s\\t1\\t1\\t%s\\t%s\\t%s\\n' "$p" "$g" "$c" "$(mt "$p")"; elif [ -e "$p" ]; then printf 'P\\t%s\\t1\\t0\\n' "$p"; else printf 'P\\t%s\\t0\\n' "$p"; fi; }`);
   for (const p of list) L.push(`ls1 ${qp(p)} ${files ? 1 : 0} ${p === '~' ? 1 : 0}`);
   for (const p of probes) L.push(`pr ${qp(p)}`);
   if (index) {
     const sk = skip.map((p) => `-o -path ${qp(p)}`).join(' ');
     // B-99b9: the walk PRUNES every mount point under the home (the machine's own table: never entered); the links are read
     // as written (readlink), never followed
-    L.push(`pm() { set -f; o=$IFS; IFS=$NL; for m in $MP; do case "$m" in "$H"/*) printf '%s\\n' "$m";; esac; done; IFS=$o; set +f; }`);
+    L.push(`rh; pm() { set -f; o=$IFS; IFS=$NL; for m in $MP; do case "$m" in "$H"/*) printf '%s\\n' "$m";; esac; if [ "$RH" != "$H" ]; then case "$m" in "$RH"/*) printf '%s\\n' "$H\${m#"$RH"}";; esac; fi; done; IFS=$o; set +f; }`);
     L.push(`set -- "$H" -maxdepth 4 \\( -name '.*' -o -name node_modules -o -name __pycache__ -o -name venv -o -name site-packages -o -path "$H/Library" ${sk}; `
       + `set -f; o=$IFS; IFS=$NL; for m in $(pm); do set -- "$@" -o -path "$m"; done; IFS=$o; set +f; `
       + `find "$@" \\) -prune -o -type d -print 2>/dev/null | head -n ${MAX_INDEX} | awk '{ print "I\\t" $0 }'`);
@@ -70,7 +77,7 @@ function sliceScript({ list = [], probes = [], files = false, index = false, nam
   }
   // B-99b9: the mount ROWS from the table read above (a Mac's /Volumes, /mnt /media and the home's elsewhere) — no stat of one
   L.push(`printf '%s\\n' "$MT" | awk -F '\\t' -v h="$H/" -v u="$U" '$1 != "" { if (u == "Darwin") { if ($1 ~ /^\\/Volumes\\//) { n = split($1, a, "/"); print "M\\t" $1 "\\t" a[n] } } else if ($1 ~ /^\\/(mnt|media)\\// || index($1, h) == 1) print "M\\t" $1 "\\t" $2 }'`);
-  if (names) L.push(`if [ "$U" = Darwin ] && command -v mdls >/dev/null 2>&1; then for e in "$H"/*; do [ -L "$e" ] && continue; inm "$e" "$MP" && continue; [ -d "$e" ] || continue; nm=$(mdls -raw -name kMDItemDisplayName "$e" 2>/dev/null); [ -n "$nm" ] && [ "$nm" != "(null)" ] && [ "$nm" != "\${e##*/}" ] && printf 'N\\t%s\\t%s\\n' "$e" "$nm"; done; fi`);
+  if (names) L.push(`if [ "$U" = Darwin ] && command -v mdls >/dev/null 2>&1; then rh; for e in "$H"/*; do [ -L "$e" ] && continue; inm "$e" "$MP" && continue; [ "$RH" != "$H" ] && inm "$RH/\${e##*/}" "$MP" && continue; [ -d "$e" ] || continue; nm=$(mdls -raw -name kMDItemDisplayName "$e" 2>/dev/null); [ -n "$nm" ] && [ "$nm" != "(null)" ] && [ "$nm" != "\${e##*/}" ] && printf 'N\\t%s\\t%s\\n' "$e" "$nm"; done; fi`);
   L.push('echo VS-SLICE-END');
   return L.join('\n');
 }

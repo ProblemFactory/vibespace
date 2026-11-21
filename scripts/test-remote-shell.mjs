@@ -296,7 +296,7 @@ const tailLineHas = (l) => l.includes('VIBESPACE_SESSION_CWD=') && l.indexOf('VI
   // rung runs it under plain sh, never the login prelude
   const HS2 = rd('src/hosts.js');
   ok(HS2.includes('e.p = run(DS.sliceScript({ list, files })).then((out) => {') && HS2.includes('r2.p = run(DS.sliceScript({ ...want, files })).then((out) => {') && (HS2.split('const r = DS.parseSlice(out);').length - 1) >= 2
-    && HS2.includes("return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\\\''`)}'`, { timeoutMs: SLICE_RUN_MS }));"),
+    && HS2.includes("return String(await this._ssh(h, `exec sh -c '${script.replace(/'/g, `'\\\\''`)}'`, { timeoutMs: RUN_MS, connectTimeoutS: 3 }));"),
     'B-99b9 WIRING: the host rung writes both asks with the one script builder and reads both with the one reader; the ssh rung runs it under plain sh (no login prelude)');
 }
 

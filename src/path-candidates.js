@@ -329,7 +329,7 @@ function rankCandidates(query, o) {
       /* B-d833 (the box pre-run r156): one that machine has NOT YET ANSWERED for (not listed, not asked) is a plain group row — it never says
          «does not exist» before the machine's listing for it answered (the line's own rule for «missing»); one it was ASKED for and did not
          answer (late, or its error — the page's `unsaid`) says so by the machine's name (r174, the (b) law) */
-      for (const f of g.unknown || []) push({ path: f, sec: SEC.GROUP, chip: { key: 'group', params: { group: g.name, color: g.color || '', host, on: '' } }, ...meta(f), ...((g.unsaid || []).includes(f) ? { unsaid: true, why: { key: 'unsaid', params: { host } } } : {}), score: 0 });
+      for (const f of g.unknown || []) push({ path: f, sec: SEC.GROUP, chip: { key: 'group', params: { group: g.name, color: g.color || '', host, on: '' } }, ...meta(f), ...((g.unsaid || []).includes(f) ? { unsaid: true, why: { key: 'unsaid', params: { host } } } : (g.held || []).includes(f) ? { unsaid: true, why: { key: 'held', params: { host } } } : {}), score: 0 });
     }
     for (const n of nameRows) push({ path: n.path, sec: SEC.NAME, chip: n.chip, why: n.why, ...meta(n.path), isNew: !exists(n.path), score: 0 });
     for (const r of recent.slice(0, 5)) push({ path: r.path, sec: SEC.RECENT, chip: chipFor(r.path, SEC.RECENT), ...meta(r.path), score: 0 });

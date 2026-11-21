@@ -11749,6 +11749,7 @@ export default {
   "Suggestions from this machine are held for a while — it was slow to list them; the folder you type still works": "このマシンの候補はしばらく保留中です——一覧の取得が遅いためです。入力したフォルダーはそのまま使えます",   // B-99b9 (lane bl-machines-b): another machine's rest held after a miss
   "A link to {target} — not checked": "{target} へのリンク——未確認",   // B-99b9 (lane bl-machines-b)
   "Only the first {n} folders this text names were asked": "この入力が指すフォルダーのうち最初の {n} 件だけを確認しました",   // B-99b9 (lane bl-machines-b)
+  "{host} was slow to answer — this folder is not asked for a while": "{host} の応答が遅かったため、しばらくこのフォルダーは確認しません",   // B-99b9 r949 (lane bl-machines-b)
   "The machine's answer kept changing — type again, or press to ask once more": "このマシンの答えが変わり続けました——もう一度入力するか、押してもう一度尋ねてください",   // B-d833 (lane bl-tests-a)
   "{path} does not exist — create it?": "{path} はありません —— 作成しますか？",
   "{path} does not exist, nor the folder above ({parent})": "{path} はなく、上のフォルダー（{parent}）もありません",
