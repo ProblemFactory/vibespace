@@ -19,6 +19,7 @@
 //   §6 the REAL remote probe script (run by sh under the scratch home) → the route's ?host= branch
 //   §7 negative controls: patched copies that ignore the metas / drop the liveness verdict go RED
 //   §8 wiring pins (window, card, status bar, ci tier, docs)
+//   §9 a KNOWN session's poll reads only its own folder (B-360d part 2): no walk of every session; control = the release's walk
 // Run: node scripts/test-workflow-disk.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -110,6 +111,11 @@ console.log('§1 the journal arithmetic moved VERBATIM (done / superseded / prog
   ok('started / done / superseded are identical to the pre-move function over a retry chain, the owner shape, a pre-2.1.267 journal and an empty one', same);
   const r = journalAttemptsFromText(retry);
   ok('ADDITIVE: `failed` records are collected ({type,key,agentId} — never beside a result) and the started line\'s label/phase are kept per agent', r.failed.has(aid(3)) && r.failed.has(aid(5)) && r.failed.size === 2 && r.info.get(aid(2)).label === 'a' && r.info.get(aid(2)).phase === 'p');
+  // B-360d part 2: THE FOLD — the same lines folded in pieces (cut at every line end) answer what the whole text answers
+  const pieces = (tx, every) => { const ls = tx.split('\n'), out = []; for (let i = 0; i < ls.length; i += every) out.push(ls.slice(i, i + every).join('\n') + (i + every < ls.length ? '\n' : '')); return out; };
+  const flatOf = (a) => JSON.stringify(['started', 'done', 'superseded', 'failed'].map((k) => [...a[k]]).concat([[...a.info]]));
+  const folded = texts.every((tx) => [1, 2, 3, 7].every((every) => flatOf(WD.journalAttemptsOf(pieces(tx, every).reduce((st, part) => WD.journalFold(st, part), null))) === flatOf(journalAttemptsFromText(tx))));
+  ok('THE FOLD (B-360d part 2): the journal folded a piece at a time (cut at line ends, 1 / 2 / 3 / 7 lines a piece) answers exactly what the whole text answers', folded);
   ok('the route no longer defines its own parser (ONE implementation, required from src/workflow-disk.js)', !/function journalAttemptsFromText/.test(read('src/routes/sessions.js')) && /require\('\.\.\/workflow-disk'\)/.test(read('src/routes/sessions.js')));
 }
 
@@ -563,6 +569,72 @@ console.log('§8 wiring pins (the 2.355.0 lesson: a pure fix with no call site i
   ok('docs: the kb-file-structure INDEX head indexes src/workflow-disk.js; kb §11 no longer calls the journal label-less; kb-bugfix names the invariant',
     /src\/workflow-disk\.js — PURE/.test(indexHead('docs/kb-file-structure.md')) && !/journal\.jsonl` = the resume cache \(`\{started\|result, key, agentId\}`, live-appended, NO phase\/label\)/.test(kb11) && /started` lines carry `label` \+ `phase`/.test(kb11)
     && /the run dir is the truth when the stream is gone/.test(read('docs/kb-bugfix-invariants.md')));
+}
+
+console.log('§9 a known session\'s poll reads only its own folder; the journal is folded as it grows (B-360d part 2, lane chrome-157)');
+{
+  // a running workflow has no snapshot yet and its card / window polls it every 2.5 s. (a) the release's last resort walked EVERY
+  // session entry under ~/.claude/projects at each poll though the call names its session — judged by the PATHS one poll touches:
+  // none under another session's entry; CONTROL: the release's walk, rebuilt from this tree's route by cutting its two stops.
+  // (b) every poll parsed the run's journal WHOLE (its result lines carry each agent's result) — judged by the lines a poll parses.
+  const projects = path.join(HOME, '.claude', 'projects');
+  const fillers = [0, 1, 2].map((p) => path.join(projects, `-b360d-filler-${p}`));
+  for (const d of fillers) { fs.mkdirSync(d, { recursive: true }); for (let s = 0; s < 40; s++) fs.writeFileSync(path.join(d, `other-${s}.jsonl`), ''); }
+  const M9 = mutantCopies('workflow-known', REPO);
+  const route = read('src/routes/sessions.js');
+  const cut9 = (s, from, to) => { if (s.split(from).length !== 2) throw new Error('mutation anchor missing or not unique: ' + from); return s.replace(from, to); };
+  const release = M9.write('src/routes/sessions.js', cut9(cut9(route, '      if (known) return null;\n    }\n    // 3) last resort', '    }\n    // 3) last resort'),
+    '      if (known) return null;   // THE SESSION IS KNOWN (B-360d part 2): its run dir is under its own dir or nowhere\n', ''), 'release-walk');
+  const express = require(path.join(REPO, 'node_modules/express'));
+  const W9 = ['existsSync', 'statSync', 'lstatSync', 'readdirSync'];
+  const orig9 = Object.fromEntries(W9.map((k) => [k, fs[k]]));
+  const mount9 = async (file) => {
+    const { setup, router } = require(file);
+    setup({ activeSessions: new Map(), webuiPids: new Set(), refreshWebuiPids: () => {}, createSessionMessages: () => null, BUFFERS_DIR: '/tmp', PERMISSION_MODES: [], execFileSync: () => '', hosts: { get: (id) => ({ id }), fetchWorkflowState: async () => ({}) }, serverSetting: () => null });
+    const app = express(); app.use(router);
+    const srv = await new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
+    const get = async (rid) => { const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/workflow?runId=${rid}&claudeSessionId=${SID}&cwd=${encodeURIComponent(CWD)}`); return { status: r.status, body: await r.json() }; };
+    return { get, close: () => new Promise((res) => srv.close(res)) };
+  };
+  const pathsOf = async (m, rid) => {
+    const touched = [];
+    try { for (const k of W9) fs[k] = function (p, ...a) { touched.push(String(p)); return orig9[k].call(this, p, ...a); }; const r = await m.get(rid); return { ...r, foreign: touched.filter((p) => fillers.some((d) => p.startsWith(d + path.sep) && !path.relative(d, p).startsWith(SID))).length }; }
+    finally { for (const k of W9) fs[k] = orig9[k]; }
+  };
+  const mCure = await mount9(path.join(REPO, 'src/routes/sessions.js')), mWalk = await mount9(release);
+  const cure = await pathsOf(mCure, 'wf_e2e0fresh'), walk = await pathsOf(mWalk, 'wf_e2e0fresh');
+  ok(`(a) a running workflow's poll of a KNOWN session touches no other session's entry (${cure.foreign} paths) and answers as the walk does (${cure.status}, ${cure.body && cure.body.status})`,
+    cure.foreign === 0 && cure.status === 200 && walk.status === 200 && JSON.stringify(cure.body.phases) === JSON.stringify(walk.body.phases), { cure: cure.foreign, status: [cure.status, walk.status] });
+  ok(`(a) CONTROL (the release's walk, its two stops cut): the same poll touches ${walk.foreign} other sessions' paths — the leg sees the walk`, walk.foreign >= 120, walk.foreign);
+  // (b) THE JOURNAL, FOLDED AS IT GROWS: a poll parses only the lines appended since the last; an unchanged journal parses none;
+  // a journal replaced by another file is read again from its start
+  const RG = 'wf_b360dgrow', gdir = path.join(PROJ, 'subagents', 'workflows', RG); fs.mkdirSync(gdir, { recursive: true });
+  const gid = (i) => (0xb360d100 + i).toString(16).padStart(16, '0');
+  const started = (i) => JSON.stringify({ type: 'started', key: `g:${i}`, agentId: gid(i), label: `g:${i}`, phase: 'Grow' });
+  const resultOf = (i) => JSON.stringify({ type: 'result', key: `g:${i}`, agentId: gid(i), result: { summary: 'r'.repeat(2000) } });
+  const jf = path.join(gdir, 'journal.jsonl');
+  fs.writeFileSync(jf, [JSON.stringify({ type: 'launched' }), ...Array.from({ length: 60 }, (_, i) => started(i))].join('\n') + '\n');
+  const parsesOf = async (fn) => { const o = JSON.parse; let n = 0; JSON.parse = function (...a) { n++; return o.apply(this, a); }; try { return { n, ...(await fn()), get parses() { return n; } }; } finally { JSON.parse = o; } };
+  const agentsOf = (b) => ((b && b.phases) || []).flatMap((p) => p.agents || []);
+  const p1 = await parsesOf(() => mCure.get(RG));
+  fs.appendFileSync(jf, [resultOf(0), resultOf(1), started(60)].join('\n') + '\n');
+  const p2 = await parsesOf(() => mCure.get(RG));
+  const p3 = await parsesOf(() => mCure.get(RG));
+  const a2 = agentsOf(p2.body);
+  ok(`(b) the first poll folds the whole journal (${p1.parses} parses for 61 lines); after 3 appended lines a poll parses only those (${p2.parses}) and shows them; an unchanged journal parses none (${p3.parses})`,
+    p1.parses >= 61 && agentsOf(p1.body).length === 60 && p2.parses <= 3 + 2 && a2.length === 61 && a2.filter((a) => a.state === 'done').length === 2 && p3.parses <= 2 && JSON.stringify(agentsOf(p3.body)) === JSON.stringify(a2),
+    { parses: [p1.parses, p2.parses, p3.parses], agents: [agentsOf(p1.body).length, a2.length], done: a2.filter((a) => a.state === 'done').length });
+  const half = started(61);
+  fs.appendFileSync(jf, half.slice(0, 40));   // a line half-written: not folded until it is whole
+  const p4 = await parsesOf(() => mCure.get(RG));
+  fs.appendFileSync(jf, half.slice(40) + '\n');
+  const p5 = await parsesOf(() => mCure.get(RG));
+  ok('(b) a half-written last line is not an agent until it is whole; then it is', agentsOf(p4.body).length === 61 && agentsOf(p5.body).length === 62, [agentsOf(p4.body).length, agentsOf(p5.body).length]);
+  const tmpJ = jf + '.new'; fs.writeFileSync(tmpJ, [JSON.stringify({ type: 'launched' }), started(0), resultOf(0)].join('\n') + '\n'); fs.renameSync(tmpJ, jf);
+  const p6 = await parsesOf(() => mCure.get(RG));
+  ok('(b) a journal REPLACED by another file (a new inode, shorter) is read again from its start: one agent, done', agentsOf(p6.body).length === 1 && agentsOf(p6.body)[0].state === 'done', agentsOf(p6.body).map((a) => a.state));
+  await mCure.close(); await mWalk.close();
+  for (const r of copiesCensus(M9.files, M9.dir, REPO, { minCopies: 1, label: '§9 ' })) ok(r.name, r.pass, r.detail);
 }
 
 // ── the REAL home is untouched (this process was re-homed before any fixture was written) ──

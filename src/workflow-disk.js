@@ -54,10 +54,12 @@ const STALL_MS = 10 * 60 * 1000;
 // interrupted by user]") — label it instead of showing a bare interrupt.
 // MOVED VERBATIM from routes/sessions.js (2026-09-26); `failed` and `info`
 // are ADDITIVE — they never change started / done / superseded.
-function journalAttemptsFromText(text) {
-  const started = new Set(), done = new Set();
-  const keyOf = new Map(), lastAttempt = new Map();
-  const failed = new Set(), info = new Map();
+// THE FOLD, line by line (B-360d part 2, lane chrome-157): `journalFold(state, text)` folds the lines of `text` into `state`
+// (journalFold(null, …) = a fresh one) and `journalAttemptsOf(state)` answers what journalAttemptsFromText answers for the same
+// lines — a reader that keeps the state across reads of the append-only journal parses each line ONCE in the run's life.
+function journalFold(state, text) {
+  const s = state || { started: new Set(), done: new Set(), keyOf: new Map(), lastAttempt: new Map(), failed: new Set(), info: new Map() };
+  const { started, done, keyOf, lastAttempt, failed, info } = s;
   for (const line of String(text || '').split('\n')) {
     const t = line.trim(); if (!t) continue;
     let o; try { o = JSON.parse(t); } catch { continue; }
@@ -69,10 +71,15 @@ function journalAttemptsFromText(text) {
     } else if (o.type === 'result') done.add(o.agentId);
     else if (o.type === 'failed') failed.add(o.agentId);
   }
+  return s;
+}
+function journalAttemptsOf(state) {
+  const { started, done, keyOf, lastAttempt, failed, info } = state || journalFold(null, '');
   const superseded = new Set();
   for (const [id, k] of keyOf) { if (!done.has(id) && lastAttempt.get(k) !== id) superseded.add(id); }
   return { started, done, superseded, failed, info };
 }
+function journalAttemptsFromText(text) { return journalAttemptsOf(journalFold(null, text)); }
 
 const AGENT_FILE_RE = /^agent-([0-9a-f]+)\.jsonl$/;
 const AGENT_ID_RE = /^[0-9a-f]+$/;
@@ -90,11 +97,11 @@ const str = (v) => (typeof v === 'string' ? v : null);
  * @param {number} [p.newestMtime]           ms — the newest mtime of any file in the run dir (0 = unknown)
  * @param {number} [p.now]                   ms — the clock the mtimes were read against (the host's own for a remote run)
  * @param {boolean} [p.liveTree]             this server holds the run's live task_progress tree
+ * @param {object} [p.attempts]             the journal already folded (journalAttemptsOf — a reader that keeps its fold); then journalLines is not read
  * @returns {object} the /api/workflow live view
  */
-function parseRunDir({ runId = '', journalLines = [], metas = {}, agentFiles = [], scriptName = '', snapshotPresent = false, newestMtime = 0, now = 0, liveTree = false } = {}) {
-  const text = Array.isArray(journalLines) ? journalLines.join('\n') : String(journalLines || '');
-  const { started, done, superseded, failed, info } = journalAttemptsFromText(text);
+function parseRunDir({ runId = '', journalLines = [], metas = {}, agentFiles = [], scriptName = '', snapshotPresent = false, newestMtime = 0, now = 0, liveTree = false, attempts = null } = {}) {
+  const { started, done, superseded, failed, info } = attempts || journalAttemptsFromText(Array.isArray(journalLines) ? journalLines.join('\n') : String(journalLines || ''));
   const metaOf = (id) => {
     const m = metas && typeof metas === 'object' && Object.prototype.hasOwnProperty.call(metas, id) ? metas[id] : null;
     return m && typeof m === 'object' ? m : null;
@@ -263,4 +270,4 @@ function cutShortRunOf({ runId = '', journalText = '', lastActivity = 0, limitAt
   return unfinished > 0 ? { runId, unfinished } : null;
 }
 
-module.exports = { STALL_MS, journalAttemptsFromText, parseRunDir, treeAlive, liveNoteKind, agoWords, stallWords, RUN_ID_RE, CUT_AFTER_MS, CUT_BEFORE_MS, ENDED_STATUSES, cutShortRunOf };
+module.exports = { STALL_MS, journalAttemptsFromText, journalFold, journalAttemptsOf, parseRunDir, treeAlive, liveNoteKind, agoWords, stallWords, RUN_ID_RE, CUT_AFTER_MS, CUT_BEFORE_MS, ENDED_STATUSES, cutShortRunOf };
