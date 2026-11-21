@@ -3206,6 +3206,10 @@ export default {
   "After nudging a session once, wait at least this long before nudging it again. 0 = no cooldown.": "一度セッションに催促した後、次に催促するまで最低これだけの時間を空けます。0 = クールダウンなし。",
   "Agent transcript could not be loaded.": "エージェントのトランスクリプトを読み込めませんでした。",
   "Already connecting…": "接続処理中…",
+  "Disconnecting…": "切断中…",   // B-323e (lane bl-machines-b)
+  "Already disconnecting…": "切断処理中…",   // B-323e (lane bl-machines-b)
+  "Closing the connection — this can take a while when the storage does not answer": "接続を閉じています — ストレージが応答しないときは時間がかかることがあります",   // B-323e (lane bl-machines-b)
+  "{name} did not disconnect — it is still mounted; try again in a moment": "{name} は切断されませんでした — まだマウントされています。少し待ってからもう一度お試しください",   // B-323e (lane bl-machines-b)
   "Already running — opened the live session instead": "すでに実行中です——代わりに実行中のセッションを開きました",
   "Apply batch actions": "一括操作を適用",
   "Attaching \"{name}\" is taking unusually long — it may still be working; check the connection before reloading": "「{name}」への接続に時間がかかっています — まだ動作している可能性があります。再読み込みの前に接続を確認してください",

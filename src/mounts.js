@@ -778,6 +778,7 @@ class MountManager {
         // a plain grey "Not mounted" dot the whole time, and the initiating
         // client's local row-dimming was wiped by any mounts-updated broadcast.
         connecting: this._connecting?.has(m.id) || false,
+        disconnecting: this._disconnecting?.has(m.id) || false,   // B-323e (主开发 r1501 (8)): a person's Disconnect in flight — every client's row says it
         // STARTING (2.369.213): the daemon lives, its fuse mount does not exist
         // yet — the row says what it waits for (cached files, elapsed, ceiling)
         starting: st ? { since: st.since, files: st.files, capped: st.capped, maxMin: Math.round((this._startingT || MountManager.STARTING).ceilingMs / 60e3) } : null,
@@ -1220,6 +1221,7 @@ class MountManager {
   }
 
   async mount(id) {
+    { const dj = this._pressJoins?.get(id); if (dj) await dj.catch(() => { }); }   // B-323e (r1501 (8)): a Disconnect in flight ends first — its daemon wait would kill a new one
     // B-5ce7: a connect ends a PARK — the automatic roads (restore, the sweep's reconnect) never call mount() for a parked
     // record, so a mount() here is the person's (the Reconnect door, Connect, an edit, a re-authorization)
     { const pm = this._state.mounts.find((x) => x.id === id); if (pm && pm.parked) this._unpark(pm, 'reconnect'); if (pm) { try { this._forgetHeldProbes(this.pathOf(pm)); } catch { } } }
@@ -2260,7 +2262,7 @@ class MountManager {
   /** A KERNEL mount's unmount (no fuse daemon to stop) — the cephfs row's `unmount` hook. */
   _kernelUnmount(m, mp, finish) {
     return new Promise((resolve) => {
-      execFile('sudo', ['-n', 'umount', '-l', mp], () => resolve(finish(!this.isMounted(m))));
+      execFile('sudo', ['-n', 'umount', '-l', mp], { timeout: 10000 }, () => resolve(finish(!this.isMounted(m))));   // B-323e: bounded as the trio is (a child that never ends no longer holds the press)
     });
   }
 
@@ -2620,7 +2622,22 @@ class MountManager {
     return dest;
   }
 
+  /** B-323e (主开发 r1501 (8)): A PERSON's DISCONNECT (the route's press: `press`) IS SAID WHILE IT RUNS — `_disconnecting`, a broadcast
+   *  each way, so every client's row says it through every redraw — and a second press (another client) JOINS the one in flight: one
+   *  road, one answer; the mark ends with the road, ok or not, a throw included. A connect meanwhile waits for it (mount()). Every other
+   *  caller (an edit's or a re-authorization's bounce, a removal, a conversion, a teardown) is the road itself, unmarked */
   unmount(id, opts = {}) {
+    if (!opts || !opts.press) return this._unmountRoad(id, opts);
+    const joins = (this._pressJoins = this._pressJoins || new Map());
+    if (joins.has(id)) return joins.get(id);
+    (this._disconnecting = this._disconnecting || new Set()).add(id); this._notify();
+    let road; try { road = Promise.resolve(this._unmountRoad(id, opts)); } catch (e) { road = Promise.reject(e); }
+    const done = road.finally(() => { joins.delete(id); this._disconnecting.delete(id); this._notify(); });
+    joins.set(id, done);
+    return done;
+  }
+
+  _unmountRoad(id, opts = {}) {
     const m = this._get(id);
     if (!(opts && opts.internal)) { this._bumpGen(id); this._cantTell?.delete(this.pathOf(m)); }   // B-e783: the person's Unmount — a sweep that walked meanwhile drops its verdict; a «can't tell» wait ends
     const mp = this.pathOf(m);

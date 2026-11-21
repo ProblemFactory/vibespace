@@ -622,7 +622,7 @@ export function installSidebarMounts(Sidebar) {
       top.innerHTML = `
         ${isCred
           ? `<span class="mounts-cred-key" title="${escHtml(tr('Credential only — this token can’t open the storage root; add submounts (specific buckets/paths) under it.'))}">${MI.key}</span>`
-          : `<span class="mounts-dot mounts-dot-${dot}" title="${m.mounted ? escHtml(tr('Mounted')) : escHtml(m.connecting ? tr('Connecting…') : (m.error ? mountErrorText(m) : tr('Not mounted')))}"></span>`}
+          : `<span class="mounts-dot mounts-dot-${dot}" title="${m.disconnecting ? escHtml(tr('Disconnecting…')) : m.mounted ? escHtml(tr('Mounted')) : escHtml(m.connecting ? tr('Connecting…') : (m.error ? mountErrorText(m) : tr('Not mounted')))}"></span>`}
         ${m.parentId ? '<span class="mounts-child-arrow">↳</span>' : ''}
         <b class="mounts-name" title="${escHtml(m.name)}">${escHtml(m.name)}</b>
         ${m.mode === 'ro' ? '<span class="mounts-badge">RO</span>' : ''}
@@ -632,6 +632,7 @@ export function installSidebarMounts(Sidebar) {
       // client, and the initiating client's row-dimming was wiped by any
       // mounts-updated broadcast that re-rendered the panel mid-connect.
       if (m.connecting && !m.mounted) top.appendChild(hostStateChip('pending', { text: tr('Connecting…'), title: tr('Opening the connection — this can take a few seconds') }));
+      if (m.disconnecting) top.appendChild(hostStateChip('pending', { text: tr('Disconnecting…'), title: tr('Closing the connection — this can take a while when the storage does not answer') }));   // B-323e (主开发 r1501 (8)): on the mark alone — an rclone row is unmounted at once while its daemon's wait runs
       const actions = document.createElement('span');
       actions.className = 'mounts-row-actions';
       const ibtn = (svg, title, fn, cls = '') => {
@@ -651,7 +652,13 @@ export function installSidebarMounts(Sidebar) {
       if (m.mounted) {
         actions.append(
           ibtn(MI.folder, 'Browse in file explorer', () => { this.app.openFileExplorer(m.path); }),
-          ibtn(MI.eject, this._providerRow(m.type).unmountLabel ? tr(this._providerRow(m.type).unmountLabel) : 'Disconnect', () => api(`/api/mounts/${m.id}/unmount`, { method: 'POST' })),
+          ibtn(MI.eject, m.disconnecting ? tr('Disconnecting…') : this._providerRow(m.type).unmountLabel ? tr(this._providerRow(m.type).unmountLabel) : 'Disconnect', async () => {
+            // B-323e (主开发 r1501 (8)): a Disconnect in flight is SAID (the hub's own mark: every client's row, through every redraw), and
+            // one that did not end the mount SAYS SO — the route answers success:false with a 200, which the page used to show as nothing
+            if (m.disconnecting) { showToast(tr('Already disconnecting…')); return; }
+            const r = await api(`/api/mounts/${m.id}/unmount`, { method: 'POST' });
+            if (r && r.success === false) throw new Error(tr('{name} did not disconnect — it is still mounted; try again in a moment', { name: m.name || m.id }));
+          }),
         );
       } else if (!isCred && !m.starting) { // STARTING: no Connect — the row's line says what it waits for
         // Power icon (⏻) in the same icon-button family — the old glyph read
@@ -1717,7 +1724,7 @@ export function installSidebarMounts(Sidebar) {
           // FIRST settle wins).
           done({ privateKey: val, keyPassphrase: passIn.value || '' });
           ctx.close();
-        }, { id: 'mounts-privkey-dialog', onClose: () => done(null), id: 'mounts-key-dialog' });
+        }, { id: 'mounts-key-dialog', onClose: () => done(null) });   // its own id, ONCE (主开发 r1835: a first id here was dead — the second won)
 
         const ov = document.getElementById('mounts-key-dialog');
         const body = ov.querySelector('.dialog-body');
@@ -1910,8 +1917,8 @@ export function installSidebarMounts(Sidebar) {
             // for the next try). Before, the ✕ left this await hanging for ever.
             const placed = await new Promise((done) => {
               // one subject: the public key just generated for the one machine being added
-              this._mountsDialog(tr('Public key generated'), [], tc('select', 'Done'), async (_, ctx) => { done(true); ctx.close(); }, { id: 'mounts-key-dialog', onClose: () => done(false) });
-              const ov = document.getElementById('mounts-key-dialog');
+              this._mountsDialog(tr('Public key generated'), [], tc('select', 'Done'), async (_, ctx) => { done(true); ctx.close(); }, { id: 'mounts-pubkey-dialog', onClose: () => done(false) });   // its own form, its own id (主开发 r1835: it shared the private-key form's)
+              const ov = document.getElementById('mounts-pubkey-dialog');
               const body = ov.querySelector('.dialog-body');
               const ta = document.createElement('textarea');
               ta.readOnly = true; ta.value = k.publicKey; ta.style.minHeight = '64px'; ta.style.fontSize = '11px';

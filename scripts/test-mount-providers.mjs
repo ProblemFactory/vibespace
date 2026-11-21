@@ -211,6 +211,11 @@ ok(fake.oauth && fake.lent, '② its declared cells reach the OAuth facts: OAuth
     const PARK = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'mounted' in v && 'parked' in v && v.parked === null) ? (({ parked, ...r }) => r)(v) : v));
     ok(JSON.stringify(after).includes('"parked":null'), '③ the parked-cell delta is real: list rows carry parked (null unless the mount is kept disconnected)');
     after.splice(0, after.length, ...after.map(PARK));
+    // B-323e (主开发 r1501 (8)): every list row gains ONE cell, `disconnecting` (false unless a person's Disconnect runs) — the named
+    // delta, dropped from the tree's answer before comparing (and proven present)
+    const DISC = (x) => JSON.parse(JSON.stringify(x, (k, v) => (v && typeof v === 'object' && !Array.isArray(v) && 'mounted' in v && 'disconnecting' in v && v.disconnecting === false) ? (({ disconnecting, ...r }) => r)(v) : v));
+    ok(JSON.stringify(after).includes('"disconnecting":false'), '③ the disconnecting-cell delta is real: list rows carry disconnecting (false unless a person\'s Disconnect runs)');
+    after.splice(0, after.length, ...after.map(DISC));
     let same = 0; const diffs = [];
     before.forEach((b, i) => { if (JSON.stringify(b) === JSON.stringify(after[i])) same++; else diffs.push(`scenario ${i}: ` + firstDiff(b, after[i])); });
     ok(before.length === after.length && diffs.length === 0, `③ every provider answers the same before and after the move (${same}/${before.length} scenarios: add · list · config · child · edit · rclone env · OAuth/share facts · re-auth client · raw-rclone adoption)`, diffs.join('\n    '));

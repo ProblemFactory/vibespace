@@ -3206,6 +3206,10 @@ export default {
   "After nudging a session once, wait at least this long before nudging it again. 0 = no cooldown.": "提醒过一个会话一次后，至少要等这么久才能再次提醒它。0 = 无冷却。",
   "Agent transcript could not be loaded.": "无法加载该 agent 的转录。",
   "Already connecting…": "正在连接中…",
+  "Disconnecting…": "正在断开…",   // B-323e (lane bl-machines-b)
+  "Already disconnecting…": "正在断开中…",   // B-323e (lane bl-machines-b)
+  "Closing the connection — this can take a while when the storage does not answer": "正在关闭连接——存储没有回应时可能需要一段时间",   // B-323e (lane bl-machines-b)
+  "{name} did not disconnect — it is still mounted; try again in a moment": "{name} 没有断开——它仍处于挂载状态；请稍后再试",   // B-323e (lane bl-machines-b)
   "Already running — opened the live session instead": "已在运行——已改为打开这个正在运行的会话",
   "Apply batch actions": "应用批量操作",
   "Attaching \"{name}\" is taking unusually long — it may still be working; check the connection before reloading": "连接“{name}”的会话耗时异常——它可能仍在工作；刷新前请先检查网络连接",

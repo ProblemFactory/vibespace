@@ -1139,7 +1139,7 @@ app.post('/api/mounts/:id/reconnect', async (req, res) => {
   catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }   // B-af94: a coded refusal keeps its code
 });
 app.post('/api/mounts/:id/unmount', async (req, res) => {
-  try { res.json({ success: await mounts.unmount(req.params.id) }); }
+  try { res.json({ success: await mounts.unmount(req.params.id, { press: true }) }); }   // B-323e (r1501 (8)): a person's press — said while it runs, joined
   catch (e) { res.status(400).json(require('../mount-error-words.js').errorBody(e)); }
 });
 // Decrypted connection config for the edit dialog (prefill REAL values —
