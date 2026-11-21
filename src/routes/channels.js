@@ -727,13 +727,18 @@ router.post('/api/channels/decision/learn', async (req, res) => {
  *  `?scope=totals` = the rail badge's two numbers. Every other row: GET /api/channels/rows. Owner-only — an agent
  *  lists through /api/agent/channels (its reach), never this. */
 const CHANNELS_LIST_IS_OWNERS = 'the channels list is the owner\'s — an agent lists conversations through vibespace-channels';
-router.get('/api/channels', (req, res) => {
+// B-dfa4 cut 4: the first read after a boot WAITS for the digest's warm-up (its indexes built in slices), at most
+// DIGEST_WAIT_MS — then reads (a digest past the bound builds whole, the release's road)
+const DIGEST_WAIT_MS = 5000;
+router.get('/api/channels', async (req, res) => {
   try {
     forHost(req);
     if (refuseAgentBearer(req, res, CHANNELS_LIST_IS_OWNERS)) return;
     const scope = req.query.scope == null || req.query.scope === '' ? 'first' : String(req.query.scope);
     if (!['first', 'accounts', 'totals'].includes(scope)) return bad(res, 400, 'scope must be first, accounts or totals', { code: 'bad-request' });
-    res.json(engine().digest({ scope }));
+    const eng = engine();
+    if (typeof eng.digestReady === 'function') { let tm = null; await Promise.race([eng.digestReady(), new Promise((r) => { tm = setTimeout(r, DIGEST_WAIT_MS); })]); clearTimeout(tm); }
+    res.json(eng.digest({ scope }));
   } catch (e) { fail(res, e); }
 });
 

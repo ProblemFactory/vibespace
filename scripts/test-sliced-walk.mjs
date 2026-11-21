@@ -249,7 +249,7 @@ const placeKeys = async (s) => { await s.index.update(() => { mkRow(s, 'gmail', 
 // ═══ the engine's stand-in (c, d) ═══
 const AGENT = { kind: 'agent', id: 'agent-1', name: 'Worker' }, AGENT2 = { kind: 'agent', id: 'agent-2', name: 'Other' };
 const A = 'mail';
-const mkEng = (EM, dataDir, walk, log = quiet, clock = null) => EM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: () => {}, now: clock ? () => clock.t : () => T, log, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }], censusTimer: () => ({ cancel() {} }), walk });
+const mkEng = (EM, dataDir, walk, log = quiet, clock = null, bcast = null) => EM.create({ dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, broadcast: bcast || (() => {}), now: clock ? () => clock.t : () => T, log, liveSessions: () => [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }], censusTimer: () => ({ cancel() {} }), walk });
 const rowShape = (i) => ({ title: `Thread ${i}`, kind: 'dm', lastAt: T - (i % 200) * H, unread: 0, readAt: T - 86400e3, listedAt: T - 86400e3, lane: { via: 'poll', lastPollAt: T - (i % 48) * 1800e3 - 40 * H, firstSeenByPoll: 1, firstSeenTotal: 1 } });
 const VERDICT = (at) => ({ at, read: 'yes', sendAs: ['user'], why: null });
 async function standInEngine(name, n, { census = false, rejudge = false } = {}) {
@@ -678,6 +678,106 @@ async function releaseLeg(EM, tag) {
   const EMg = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '      const rows = store.index.rows();\n' + RELEASE_NOW, '      for (const en of Object.values(ix.conversations || {})) if (en) sweep(en.watchers);', 'the release reaches the whole map (the release before cut 3)'), 'release-whole');
   const rg = await releaseLeg(EMg, 'release-red');
   ok(rg.released === 1 && rg.whole >= 1, `(g) RED CONTROL: the release's old walk (ix.conversations inside its update) is a WHOLE-MAP touch at every boot (${rg.whole}) — the leg above would go red`, rg);
+}
+
+// ═══ (h) THE FIRST DIGEST'S WARM-UP (cut 4) ═══
+console.log('(h) the first digest\'s indexes warmed in slices — parity, a write between two slices, readers that wait, a reader that reads at once, the bound');
+const digestOf = (e) => JSON.stringify(e.digest({ scope: 'first' }));
+async function warmLeg(EM, tag, { place = null, during = null, bcast = null, warns = null, at = 'row-facts' } = {}) {
+  const logw = warns ? { log() { }, info() { }, warn: (x) => warns.push(String(x)), error() { } } : quiet;
+  let e = null, placed = null, readyEarly = null, duringOut = null;
+  e = mkEng(EM, copyOf(TPL_D, `h-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
+    if (what !== at || placed !== null) return;
+    placed = i;
+    let ready = false; e.digestReady().then(() => { ready = true; }); await new Promise((z) => setImmediate(z)); readyEarly = ready;
+    if (place) await place(e);
+    if (during) duringOut = await during(e);
+  } }, logw, null, bcast);
+  const warmed = await e.digestWarm();
+  const c0 = e.censusIndexStats().builds;
+  const got = digestOf(e), stats = e.digestWarmStats();
+  const fkBuilds = e.firstReadParity().stats.builds, censusRebuilt = e.censusIndexStats().builds - c0;   // the landed indexes READ, never rebuilt
+  e.stop();
+  const w = mkEng(ENG, copyOf(TPL_D, `h-${tag}-whole`), { syncRows: 1e9 });
+  if (place) await place(w);
+  const whole = digestOf(w);
+  w.stop();
+  return { warmed, same: got === whole, got, whole, stats, placed, readyEarly, duringOut, fkBuilds, censusRebuilt };
+}
+const placeWarm = async (e) => { await e.store.index.update(() => { e.store.index.entry(A, 'm-0', { create: false }).unread = 5; Object.assign(e.store.index.entry(A, 'm-born'), rowShape(0), { lastAt: T, unread: 3 }); }); };
+{
+  const r = await warmLeg(ENG, 'parity');
+  ok(r.warmed === true && r.same && r.stats.sliced === 1 && r.stats.slices > 3 && r.fkBuilds === 1 && r.censusRebuilt === 0, `(h1) PARITY: the first digest after the warm-up equals a whole build's, byte for byte (${r.got.length} bytes; ${r.stats.slices} slices over the row facts, the first read and each account's census)`, { stats: r.stats, n: [r.got.length, r.whole.length] });
+  info(`(h1) LAW 4, printed — the warm-up's longest slice ${r.stats.maxSliceMs} ms; its landing turn ${r.stats.landMs} ms; the first digest read the landed indexes (the kept first read built ${r.fkBuilds}× — the landing's —, the census rebuilt ${r.censusRebuilt}×)`);
+  ok(r.readyEarly === false, '(h3) NOBODY READS HALF: digestReady() (what GET /api/channels awaits) is unresolved while the warm-up runs', r.readyEarly);
+  const r2 = await warmLeg(ENG, 'write', { place: placeWarm });
+  ok(r2.warmed === true && r2.same && r2.stats.reread >= 2 && r2.got.includes('"unread":3'), `(h2) A CHANGE DURING THE WALK (a row's unread behind the walk, a row born): the digest equals a whole build after the same write — the ${r2.stats.reread} touched rows re-read at the first read`, { stats: r2.stats });
+  const bc = [];
+  const r3 = await warmLeg(ENG, 'notify', { bcast: (m) => bc.push(m), during: async (e) => { const n0 = bc.length; e.notify(['m-1'], { full: false }); e.notify([]); return { during: bc.length - n0 }; } });
+  const after = bc.filter((m) => m && m.type === 'channels-updated');
+  ok(r3.duringOut && r3.duringOut.during === 0 && after.length === 1 && after[0].partial === false && r3.stats.deferred === 2, `(h3) a broadcast asked during the warm-up WAITS (${r3.duringOut && r3.duringOut.during} meanwhile) — made ONCE at the landing (${after.length}, full: the merged asks)`, { during: r3.duringOut, n: after.length, stats: r3.stats });
+  const r4 = await warmLeg(ENG, 'sync-read', { during: async (e) => ({ d: digestOf(e) }) });
+  ok(r4.warmed === true && r4.same && r4.duringOut && r4.duringOut.d === r4.whole, '(h4) a synchronous digest() during the warm-up builds whole and answers the whole build\'s digest; the landing does not overwrite it', { same: r4.same });
+  const wb = [];
+  let eb = null, tb = 0;
+  eb = mkEng(ENG, copyOf(TPL_D, 'h-bound2'), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => { if (what === 'row-facts' && i === 1 && tb < 3) { tb++; await eb.store.index.update((x) => { x.conversations; }); } } }, { log() { }, info() { }, warn: (x) => wb.push(String(x)), error() { } });
+  const wbOk = await eb.digestWarm();
+  const sb = eb.digestWarmStats(), saidB = wb.filter((x) => /warm-up was started again 3 times/.test(x)).length;
+  const dB = digestOf(eb);
+  eb.stop();
+  const wwB = mkEng(ENG, copyOf(TPL_D, 'h-bound2-whole'), { syncRows: 1e9 }); const dW = digestOf(wwB); wwB.stop();
+  ok(tb === 3 && wbOk === false && sb.gaveUp === 1 && saidB === 1 && dB === dW, `(h5) THE BOUND: three whole touches during the warm-up — it stops (said ONCE: ${saidB}), the first read builds whole and answers the whole build's digest`, { sb, wb: wb.slice(0, 2) });
+  const SRC4 = engineSource(REPO);
+  const EMh = M.load('src/server/channels-engine.js', anchored(SRC4, 'rowKept.at = t0; rowKept.stale = new Set(touched); }', 'rowKept.at = t0; rowKept.stale = new Set(); }', 'the warm-up forgets the rows touched during it'), 'warm-forget');
+  const rh = await warmLeg(EMh, 'write-red', { place: placeWarm });
+  ok(!rh.same, '(h2) RED CONTROL: a landing that forgets the rows touched during the warm-up answers a digest that is NOT the whole build\'s (the placed unread lost) — the leg above would go red', { same: rh.same });
+}
+
+// (h7) A DUE SIGNAL THAT TOUCHES NO ROW, during the census walk (cut 4's fresh read, MUST): a quiet poll writes only its stamp
+// (store.stamps.set → markDue, never the index's onTouch) — placed on a row the census walk has VISITED; the warm-up hears it and
+// the landed census re-judges it: the digest equals a whole build's after the same stamp. RED CONTROL: the warm-up deaf to
+// markDue (its tap removed) lands a census that still counts the row as it was
+{
+  const stampWarm = async (e) => { e.store.stamps.set(`${A}/m-0`, { lastPollAt: T }); };   // the census walk's first row, just polled
+  const r = await warmLeg(ENG, 'stamp', { place: stampWarm, at: 'census' });
+  ok(r.warmed === true && r.placed !== null && r.same && r.stats.reread >= 1, `(h7) A STAMP DURING THE CENSUS WALK (a row it had visited, polled now — no index touch): the warm-up heard it (${r.stats.reread} re-read) — the digest equals a whole build's`, { stats: r.stats, placed: r.placed });
+  const EMt = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '    markDueTaps.add(tap);\n', '', 'the warm-up deaf to markDue'), 'warm-deaf');
+  const rt = await warmLeg(EMt, 'stamp-red', { place: stampWarm, at: 'census' });
+  ok(rt.warmed === true && rt.placed !== null && !rt.same, `(h7) RED CONTROL: the warm-up deaf to markDue — the landed census counts the stamped row as before the stamp: the digest is NOT the whole build's — the leg above would go red`, { stats: rt.stats });
+}
+
+// (h6) AFTER THE WARM-UP, MANY ROWS AT ONCE: 300 rows touched between two digests (their order, their unread, their poll
+// stamps — more than 64, under every rebuild line): the first read's kept heads and each account's census index move them by
+// ONE merge each (never a splice of the whole array per row, never a deep copy per row) — the digest equals a whole build's,
+// the kept first read equals the walk's; RED CONTROL: a merge that keeps the moved rows' old entries
+async function manyLeg(EM, tag) {
+  const touchMany = async (eng) => {
+    await eng.store.index.update(() => { for (let i = 0; i < 300; i++) { const en = eng.store.index.entry(A, `m-${(i * 5) % ND}`, { create: false }); if (en) { en.lastAt = T - i * 60e3; en.unread = i % 3; } } });
+    for (let i = 0; i < 300; i++) eng.store.stamps.set(`${A}/m-${(i * 5) % ND}`, { lastPollAt: T - i * 60e3 });
+  };
+  const clock = { t: T };   // a clock that moves: the census is paced (censusEveryMs), a fixed clock never reads it again
+  const e = mkEng(EM, copyOf(TPL_D, `h6-${tag}`), { syncRows: 500, sliceMs: 0 }, quiet, clock);
+  await e.digestWarm();
+  digestOf(e);   // the first read after the warm-up: the kept indexes current
+  const f0 = e.firstReadParity().stats, c0 = e.censusIndexStats();
+  await touchMany(e);
+  clock.t = T + 6e3;   // past the census's pacing: the next digest reads each index again (the touched rows: one merge each)
+  const got = digestOf(e), par = e.firstReadParity(), c1 = e.censusIndexStats();
+  clock.t = T + 30 * H;   // the warm window (24 h) passed for hundreds of rows: their census judgements CROSSED at once
+  const got2 = digestOf(e), par2 = e.firstReadParity(), c2 = e.censusIndexStats();
+  e.stop();
+  const wholeAt = async (t, n) => { const wc = { t: T }; const w = mkEng(ENG, copyOf(TPL_D, `h6-${tag}-whole${n}`), { syncRows: 1e9 }, quiet, wc); await touchMany(w); wc.t = t; const d = digestOf(w); w.stop(); return d; };
+  const whole = await wholeAt(T + 6e3, 1), whole2 = await wholeAt(T + 30 * H, 2);
+  const eq = (x) => JSON.stringify(x.kept) === JSON.stringify(x.walk);
+  return { same: got === whole, same2: got2 === whole2, parity: eq(par), parity2: eq(par2), headMerges: par.stats.merges - f0.merges, headBuilds: par2.stats.builds - f0.builds, censusMerges: c1.merges - c0.merges, censusBuilds: c2.builds - c0.builds, crossed: c2.crossedMerges - c1.crossedMerges, rejudged: c2.rejudged - c1.rejudged };
+}
+{
+  const r = await manyLeg(ENG, 'many');
+  ok(r.same && r.parity && r.headMerges >= 1 && r.censusMerges >= 1 && r.headBuilds === 0 && r.censusBuilds === 0, `(h6) MANY ROWS AT ONCE: 300 rows touched after the warm-up — the kept heads moved them by one merge (${r.headMerges}), the census index re-judged them by one (${r.censusMerges}), no build of either; the digest equals a whole build's at the same instant, the kept first read the walk's`, r);
+  ok(r.same2 && r.parity2 && r.crossed >= 1 && r.censusBuilds === 0, `(h6) THE CLOCK 30 h ON: ${r.rejudged} census judgements crossed at once, placed back by one merge (${r.crossed}), no build; the digest equals a whole build's at that instant, the kept first read the walk's`, r);
+  const EMs = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), '      if (i < arr.length && gone && gone.has(arr[i])) { i++; continue; }\n', '', 'a merge that keeps the moved rows\' old entries'), 'merge-keeps-gone');
+  const rs = await manyLeg(EMs, 'many-red');
+  ok(rs.headMerges >= 1 && (!rs.same || !rs.parity || !rs.same2 || !rs.parity2), `(h6) RED CONTROL: a merge that keeps the moved rows' old entries — the digest ${rs.same ? 'equal' : 'NOT equal'} to a whole build's, the kept first read ${rs.parity ? 'equal' : 'NOT equal'} to the walk's — the leg above would go red`, rs);
 }
 
 report();

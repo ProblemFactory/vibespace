@@ -184,11 +184,14 @@ for (const [tag, line, repl, step] of PLANTS) {
 {
   const PAIRS = [
     ["    const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };   // the RAW value: grouped as the walk groups (byId.get)", "    const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // stale-pins: kept (cut 2's grouping, the control's copy)
-    ["        if (!en.unlistedAt && !(en.adapterId !== null && typeof en.adapterId === 'object')) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };", "        if (!en.unlistedAt && en.adapterId != null) { const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // stale-pins: kept (cut 2's grouping, the control's copy)
+    ["    if (!en.unlistedAt && !(en.adapterId !== null && typeof en.adapterId === 'object')) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };", "    if (!en.unlistedAt && en.adapterId != null) { const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"],   // B-dfa4 cut 4: the build's row is fkPlace's now (the warm-up shares it)   // stale-pins: kept (cut 2's grouping, the control's copy)
     ["const arr = firstKept.heads.get(id) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && en.adapterId === id) out.push(en); }", "const arr = firstKept.heads.get(String(id)) || []; const out = []; for (const e of arr) { if (out.length >= FO.HEAD_ROWS) break; const en = liveIx[e.mk]; if (en && !en.unlistedAt && String(en.adapterId) === String(id)) out.push(en); }"],   // stale-pins: kept (cut 2's grouping, the control's copy)
   ];
+  // B-dfa4 cut 4: the kept heads' MANY-row move (headMoveMany) groups as headMove does — cut 2's grouping there too
+  PAIRS.push(["      const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };", "      const acct = String(en.adapterId), e = { a: numOf(en.lastAt), k: String(en.key), mk };"]);   // stale-pins: kept (cut 2's grouping, the control's copy)
+  PAIRS.push(["      if (en.adapterId !== null && typeof en.adapterId === 'object') continue;   // never kept (headMove's rule)", ""]);   // cut 2 had no skip
   PAIRS.push(["    if (en.adapterId !== null && typeof en.adapterId === 'object') return;   // an object / array: no record can have it (JSON ids are strings, numbers, booleans, null) — never kept", ""]);   // cut 2 had no skip either
-  ok(PAIRS.every(([now]) => SRC.split(now).length === 2), 'control setup (string-account): the four lines of cut 2\'s grouping are present once each', PAIRS.map(([now]) => SRC.split(now).length - 1));
+  ok(PAIRS.every(([now]) => SRC.split(now).length === 2), `control setup (string-account): the ${PAIRS.length} lines of cut 2's grouping are present once each`, PAIRS.map(([now]) => SRC.split(now).length - 1));
   const old = anchoredCopy(SRC, PAIRS, 'control string-account');
   const c = await run(MC.load('src/server/channels-engine.js', old, 'string-account'), 'ctl-string-account');
   const i = c.findIndex((x) => x.why.startsWith('a damaged row whose account id is not a string')), s0 = c[i];

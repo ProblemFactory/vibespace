@@ -1444,7 +1444,11 @@ function create(deps = {}) {
   // lane scheduler-census-index: the scheduler card's CENSUS INDEX (`clockIndexed`, beside `schedulerScan`) is re-judged
   // at the same writes as the due index
   const censusIx = new Map();   // adapterId -> { sig, t, kept, rows: Map<key, judgement>, order: [judgement], dirty: Set<key>, stale }
+  // B-dfa4 cut 4: the first digest's warm-up TAPS every due signal — a quiet poll writes only its stamp (store.stamps.set) and a
+  // watch start writes no row; both reach the census through markDue alone, never the index's onTouch
+  const markDueTaps = new Set();
   function markDue(key) {
+    for (const tap of markDueTaps) tap(key === null || key === undefined ? null : String(key));
     if (key === null || key === undefined) { for (const ix of dueIx.values()) ix.stale = true; for (const b of dueBuilding.values()) b.ix.stale = true; for (const cx of censusIx.values()) cx.stale = true; return; }
     const k = String(key), i = k.indexOf('/');
     const ix = i > 0 ? dueIx.get(k.slice(0, i)) : null;
@@ -3372,11 +3376,23 @@ function create(deps = {}) {
   // whole-map touch or a clock gone back rebuilds by the walk. A row whose key is not its own `key` (only a damaged act line)
   // is re-read every time. The touch signal is read LAZILY at the next read (a row's touch may fire before its write).
   // The answer is the walk's own (firstReadWalk, the gates' definition — test-channel-first-kept holds them equal).
-  const firstKept = { built: false, t: -Infinity, facts: new Set(), dirty: new Set(), ob: new Map(), heads: new Map(), at: new Map(), odd: new Set(), stats: { builds: 0, rechecked: 0 } };
+  const firstKept = { built: false, t: -Infinity, facts: new Set(), dirty: new Set(), ob: new Map(), heads: new Map(), at: new Map(), odd: new Set(), stats: { builds: 0, rechecked: 0, merges: 0 } };
   store.index.onTouch((k) => { if (k === null) firstKept.built = false; else if (firstKept.built) firstKept.dirty.add(k); });
   const numOf = (x) => (Number.isFinite(Number(x)) ? Number(x) : 0);
   const headCmp = (p, q) => (q.a - p.a) || (p.k < q.k ? -1 : p.k > q.k ? 1 : 0) || (p.mk < q.mk ? -1 : p.mk > q.mk ? 1 : 0);
   const headAt = (arr, e) => { let lo = 0, hi = arr.length; while (lo < hi) { const m = (lo + hi) >> 1; if (headCmp(arr[m], e) < 0) lo = m + 1; else hi = m; } return lo; };
+  /** B-dfa4 cut 4: a sorted array without the entries in `gone` (a Set of the entries themselves), merged with the sorted
+   *  `adds` — ONE pass (O(rows + adds)), never a splice of the whole array per row (each O(rows)). */
+  function mergeSorted(arr, adds, cmp, gone = null) {
+    const out = [];
+    let i = 0, j = 0;
+    while (i < arr.length || j < adds.length) {
+      if (i < arr.length && gone && gone.has(arr[i])) { i++; continue; }
+      if (j >= adds.length || (i < arr.length && cmp(arr[i], adds[j]) <= 0)) out.push(arr[i++]); else out.push(adds[j++]);
+    }
+    return out;
+  }
+  const MOVE_ONE = 64;   // B-dfa4 cut 4: this many rows or fewer move one by one (a splice each), as before; more by one merge
   function headMove(mk, en) {
     const fk = firstKept, was = fk.at.get(mk);
     if (was) { const arr = fk.heads.get(was.acct); const i = arr ? headAt(arr, was.e) : -1; if (arr && arr[i] === was.e) arr.splice(i, 1); fk.at.delete(mk); }
@@ -3390,27 +3406,50 @@ function create(deps = {}) {
     arr.splice(headAt(arr, e), 0, e);
     fk.at.set(mk, { acct, e });
   }
+  /** B-dfa4 cut 4: MANY rows moved at once in the kept heads — each account's array filtered once and merged with the moved
+   *  rows' entries (mergeSorted): the same arrays as headMove row by row (a burst of thousands of touched rows was a
+   *  splice of a 89 000-entry array each, in the first read's turn). */
+  function headMoveMany(mks, liveIx) {
+    if (mks.length <= MOVE_ONE) { for (const mk of mks) headMove(mk, liveIx[mk]); return; }
+    const fk = firstKept, gone = new Set(), adds = new Map(), hit = new Set();
+    for (const mk of mks) {
+      const was = fk.at.get(mk);
+      if (was) { gone.add(was.e); hit.add(was.acct); fk.at.delete(mk); }
+      fk.odd.delete(mk);
+      const en = liveIx[mk];
+      if (!en) continue;
+      if (String(en.key) !== mk) fk.odd.add(mk);
+      if (en.unlistedAt) continue;
+      if (en.adapterId !== null && typeof en.adapterId === 'object') continue;   // never kept (headMove's rule)
+      const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk };
+      let l = adds.get(acct); if (!l) adds.set(acct, (l = [])); l.push(e); hit.add(acct);
+      fk.at.set(mk, { acct, e });
+    }
+    for (const acct of hit) fk.heads.set(acct, mergeSorted(fk.heads.get(acct) || [], (adds.get(acct) || []).sort(headCmp), headCmp, gone));
+    fk.stats.merges++;
+  }
   const obFact = (ob) => (ob ? `${ob.awaiting}|${ob.unknown}|${ob.ownSentAt}|${ob.latestAt}` : '');
   /** The keys whose facts may make them a candidate at `ctx.t` — a SUPERSET (each is judged by candidateOf at the read). */
+  /** ONE row into the first read's kept facts (the build's, and the warm-up's — B-dfa4 cut 4). */
+  function fkPlace(fk, mk, en, ctx, t) {
+    if (!en) return;
+    if (String(en.key) !== mk) fk.odd.add(mk);
+    if (!en.unlistedAt && !(en.adapterId !== null && typeof en.adapterId === 'object')) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk }; let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = [])); arr.push(e); fk.at.set(mk, { acct, e }); }
+    if (FO.candidateOf(en, ctx.outbox.get(en.key), t, null)) fk.facts.add(mk);
+  }
   function firstFacts(liveIx, ctx) {
     const fk = firstKept, t = ctx.t;
     // rebuilt by the walk: none kept yet / a whole-map touch, the clock gone back (NaN-safe), or a MASS write (a burst of moved
     // rows costs more in its accounts' arrays than one walk — the due index's rule)
     if (!fk.built || !(t >= fk.t) || fk.dirty.size > (fk.at.size >> 3) + 256) {
       fk.facts = new Set(); fk.dirty.clear(); fk.heads = new Map(); fk.at = new Map(); fk.odd = new Set(); fk.ob = new Map();
-      for (const mk in liveIx) {
-        const en = liveIx[mk];
-        if (!en) continue;
-        if (String(en.key) !== mk) fk.odd.add(mk);
-        if (!en.unlistedAt && !(en.adapterId !== null && typeof en.adapterId === 'object')) { const acct = en.adapterId, e = { a: numOf(en.lastAt), k: String(en.key), mk }; let arr = fk.heads.get(acct); if (!arr) fk.heads.set(acct, (arr = [])); arr.push(e); fk.at.set(mk, { acct, e }); }
-        if (FO.candidateOf(en, ctx.outbox.get(en.key), t, null)) fk.facts.add(mk);
-      }
+      for (const mk in liveIx) fkPlace(fk, mk, liveIx[mk], ctx, t);
       for (const arr of fk.heads.values()) arr.sort(headCmp);
       for (const [k, ob] of ctx.outbox) fk.ob.set(k, obFact(ob));
       fk.built = true; fk.stats.builds++;
     } else {
       const again = new Set(fk.facts);
-      for (const mk of fk.dirty) { again.add(mk); headMove(mk, liveIx[mk]); }
+      const moved = [...fk.dirty]; for (const mk of moved) again.add(mk); headMoveMany(moved, liveIx);   // B-dfa4 cut 4: one merge per account's array
       fk.dirty.clear();
       const seen = new Set();   // the outbox's counts that moved (a proposal, a send, an unknown, a prune)
       for (const [k, ob] of ctx.outbox) { seen.add(k); const f = obFact(ob); if (fk.ob.get(k) !== f) { fk.ob.set(k, f); again.add(k); } }
@@ -3600,10 +3639,10 @@ function create(deps = {}) {
     const reading = !paused && !(en.lane && en.lane.lastError);
     return { a: en.adapterId, conversations: 1, unread: Number(en.unread) || 0, paused: paused ? 1 : 0, overridden: paused || caps.validRefresh(ov) ? 1 : 0, reading: reading ? 1 : 0, walked: reading && en.walkedAt ? 1 : 0 };
   }
-  function addFacts(f, sign) {
+  function addFacts(f, sign, byMap = rowKept.by) {   // B-dfa4 cut 4: `byMap` = the warm-up's own sums
     if (!f) return;
-    let tot = rowKept.by.get(f.a);
-    if (!tot) { tot = Object.fromEntries(FACTS.map((k) => [k, 0])); rowKept.by.set(f.a, tot); }
+    let tot = byMap.get(f.a);
+    if (!tot) { tot = Object.fromEntries(FACTS.map((k) => [k, 0])); byMap.set(f.a, tot); }
     for (const k of FACTS) if (f[k]) tot[k] += sign * f[k];
   }
   /** Each account's kept facts (`Map<adapterId, {conversations, unread, …}>`), brought up to date. */
@@ -4522,7 +4561,7 @@ function create(deps = {}) {
    *  settings; the lane — the due index's signature) / the clock went back / a mass write (as the due index). */
   // `rowsRead` = every row a census looked at, either path (the build counts too — the gates' work meter); since B-dfa4 cut 1 a
   // build reads its OWN account's rows (rowsOf), so it counts those, never another account's
-  const censusIxStats = { builds: 0, rejudged: 0, rowsRead: 0, lastBuildMs: 0 };
+  const censusIxStats = { builds: 0, rejudged: 0, rowsRead: 0, lastBuildMs: 0, merges: 0, crossedMerges: 0 };
   function censusJudge(rec, lane, en, t, T) {
     if (!en || en.adapterId !== rec.id || en.unlistedAt) return null;
     const cad = caps.cadenceFor(registry.capsOf(rec.kind), lane, en, t, { tiers: T, watched: isWatched(en.key, t) });
@@ -4555,37 +4594,60 @@ function create(deps = {}) {
     if (j) censusPut(cx, j);
     censusIxStats.rejudged++; censusIxStats.rowsRead++;
   }
+  /** B-dfa4 cut 4: MANY rows re-judged at once — read from the live rows (read-only, never a deep copy each), the order
+   *  filtered once and merged with their fresh judgements (mergeSorted): the same index as censusRejudge row by row. */
+  function censusRejudgeMany(rec, cx, keys, t, T) {
+    if (keys.length <= MOVE_ONE) { for (const k of keys) censusRejudge(rec, cx, k, t, T); return; }
+    const rows = store.index.rows(), gone = new Set(), adds = [];
+    for (const key of keys) {   // cx.dirty's keys: each once
+      const was = cx.rows.get(key) || null;
+      if (was) { cx.rows.delete(key); if (was.at !== Infinity) gone.add(was); }
+      const j = censusJudge(rec, cx.lane, rows[key], t, T);
+      Census.censusStep(cx.kept, was, j);
+      if (j) { cx.rows.set(j.key, j); if (j.at !== Infinity) adds.push(j); }
+      censusIxStats.rejudged++; censusIxStats.rowsRead++;
+    }
+    cx.order = mergeSorted(cx.order, adds.sort(Census.untilCmp), Census.untilCmp, gone);
+    censusIxStats.merges++;
+  }
+  /** ONE row into an account's census index being built (the build's, and the warm-up's — B-dfa4 cut 4). */
+  function censusAdd(rec, cx, en, t, T) {
+    censusIxStats.rowsRead++;
+    if (!en || en.adapterId !== rec.id) return;
+    const j = censusJudge(rec, cx.lane, en, t, T);
+    if (!j) return;
+    Census.censusStep(cx.kept, null, j);
+    cx.rows.set(j.key, j);
+    if (j.at !== Infinity) cx.order.push(j);
+  }
+  const censusSig = (T, lane) => JSON.stringify([T, lane.via, lane.pollCadence, lane.why || null, lane.feedSeconds || null]);
   /** The account's clock counters at `t` ({hot, warm, cold, due} — what `schedulerScan` counts), from the index. */
   function clockIndexed(rec, t) {
     const T = tiers();
     const lane = laneOrScan(rec, {});
-    const sig = JSON.stringify([T, lane.via, lane.pollCadence, lane.why || null, lane.feedSeconds || null]);
+    const sig = censusSig(T, lane);
     let cx = censusIx.get(rec.id);
     if (!cx || cx.stale || cx.sig !== sig || t < cx.t || cx.dirty.size > (cx.rows.size >> 3) + 256) {
       const t0 = Date.now();
       cx = { sig, t, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false };
-      for (const en of store.index.rowsOf(rec.id)) {   // B-dfa4 cut 1: the build reads this account's rows (at boot: once per account, each its own)
-        censusIxStats.rowsRead++;
-        if (!en || en.adapterId !== rec.id) continue;
-        const j = censusJudge(rec, lane, en, t, T);
-        if (!j) continue;
-        Census.censusStep(cx.kept, null, j);
-        cx.rows.set(j.key, j);
-        if (j.at !== Infinity) cx.order.push(j);
-      }
+      for (const en of store.index.rowsOf(rec.id)) censusAdd(rec, cx, en, t, T);   // B-dfa4 cut 1: the build reads this account's rows (at boot: once per account, each its own)
       cx.order.sort(Census.untilCmp);
       censusIx.set(rec.id, cx);
       censusIxStats.builds++; censusIxStats.lastBuildMs = Date.now() - t0;
       return { ...cx.kept };
     }
     cx.lane = lane;
-    if (cx.dirty.size) { const ks = [...cx.dirty]; cx.dirty.clear(); for (const k of ks) censusRejudge(rec, cx, k, t, T); }
+    if (cx.dirty.size) { const ks = [...cx.dirty]; cx.dirty.clear(); censusRejudgeMany(rec, cx, ks, t, T); }   // B-dfa4 cut 4: one merge of the order
     // the rows whose judgement the clock passed: taken off the head once, re-judged at `t` (each re-keys past `t`)
     let n = 0;
     while (n < cx.order.length && Census.expired(cx.order[n], t)) n++;
     if (n) {
       const crossed = cx.order.splice(0, n);
-      for (const j of crossed) { if (cx.rows.get(j.key) === j) cx.rows.delete(j.key); else continue; const now2 = censusJudge(rec, lane, store.index.peek(j.key), t, T); Census.censusStep(cx.kept, j, now2); if (now2) censusPut(cx, now2); censusIxStats.rejudged++; censusIxStats.rowsRead++; }
+      // B-dfa4 cut 4: read from the live rows (read-only, no copy each), placed back by ONE merge when many crossed at once
+      const rows = store.index.rows(), back = [];
+      for (const j of crossed) { if (cx.rows.get(j.key) === j) cx.rows.delete(j.key); else continue; const now2 = censusJudge(rec, lane, rows[j.key], t, T); Census.censusStep(cx.kept, j, now2); if (now2) back.push(now2); censusIxStats.rejudged++; censusIxStats.rowsRead++; }
+      if (back.length <= MOVE_ONE) for (const j of back) censusPut(cx, j);
+      else { const adds = []; for (const j of back) { cx.rows.set(j.key, j); if (j.at !== Infinity) adds.push(j); } cx.order = mergeSorted(cx.order, adds.sort(Census.untilCmp), Census.untilCmp); censusIxStats.merges++; censusIxStats.crossedMerges++; }
     }
     cx.t = t;
     return { ...cx.kept };
@@ -4613,7 +4675,97 @@ function create(deps = {}) {
   /** ONE broadcast per pass, carrying the recomputed RESULT — never one per
    *  message, and never a bare "something changed" (the cache-invalidation
    *  law: one dirty signal, one computation). */
+  // ── B-dfa4 cut 4: THE FIRST DIGEST'S WARM-UP ───────────────────────────
+  // The first full digest after a boot built three kept indexes whole in ITS turn (0.35 s on 96 500 rows, measured): the row
+  // facts' sums (rowKept), the first read's kept facts (firstKept) and each account's census index (censusIx). On an index of
+  // more than WALK.syncRows rows they are now built in slices from the turn after start() (walkSliced), over a STATED SNAPSHOT
+  // of the rows and one clock instant; a row touched meanwhile is re-read by each index's own incremental road at its first
+  // read after the landing; a whole-map touch STARTS IT AGAIN (DIGEST_WARM_RESTARTS times — then said once, and the first read
+  // builds whole). THE LANDING installs each index unless a reader built it whole meanwhile. ITS READERS WAIT: GET
+  // /api/channels awaits digestReady() (bounded); a broadcast asked meanwhile is made ONCE at the landing (the changed keys
+  // merged); a synchronous digest() before the landing builds whole — the release's road, never a partial answer.
+  const DIGEST_WARM_RESTARTS = 3;
+  const digestWarmStats = { sliced: 0, slices: 0, maxSliceMs: 0, walkMs: 0, restarts: 0, gaveUp: 0, deferred: 0, reread: 0, landMs: 0, notifyMs: 0 };   // landMs / notifyMs: the landing turn's own cost (its sorts; the deferred broadcast)
+  let digestWarm = null;   // { touched: Set<key>, whole, promise, pending: {changed: Set, full} }
+  store.index.onTouch((k) => { if (!digestWarm) return; if (k === null) digestWarm.whole = true; else digestWarm.touched.add(String(k)); });
+  /** Resolves when the first digest's indexes are warm (at once when no warm-up runs). */
+  const digestReady = () => (digestWarm ? digestWarm.promise.then(() => true, () => true) : Promise.resolve(true));
+  function digestWarmStart({ syncRows = WALK.syncRows, sliceMs = WALK.sliceMs, onSlice = WALK.onSlice } = {}) {
+    if (digestWarm) return digestWarm.promise;
+    let n = 0; for (const k in store.index.rows()) if (++n > syncRows) break;
+    if (n <= syncRows) return Promise.resolve(false);   // a small index: its first read builds in its own turn, as before
+    const job = { touched: new Set(), whole: false, pending: null, promise: null };
+    digestWarm = job;
+    const tap = (k) => { if (digestWarm !== job) return; if (k === null) job.whole = true; else job.touched.add(k); };
+    markDueTaps.add(tap);
+    job.promise = (async () => {
+      try {
+        const w0 = Date.now();
+        for (let attempt = 0; ; attempt++) {
+          if (stopped || digestWarm !== job) return false;
+          if (attempt >= DIGEST_WARM_RESTARTS) { digestWarmStats.gaveUp++; log.warn(`[channels] the first digest's warm-up was started again ${attempt} times by whole-map writes — the first read builds its indexes whole`); return false; }
+          job.whole = false; job.touched = new Set();
+          const t0 = now(), ctx = viewCtx(t0), T = tiers();
+          const rows = store.index.rows(), keys = Object.keys(rows);
+          const alive = () => !stopped && digestWarm === job && !job.whole;
+          const opts = (what) => ({ what, sliceMs, onSlice, stats: digestWarmStats, alive });
+          // (1) the row facts' sums (rowFactsNow's re-sum)
+          const rf = new Map(), by = new Map();
+          let done = (await walkSliced(keys, (k) => { const f = rowFacts(rows[k]); if (f) { rf.set(k, f); addFacts(f, 1, by); } }, opts('row-facts'))).done;
+          // (2) the first read's kept facts (firstFacts' build)
+          const fk2 = { facts: new Set(), heads: new Map(), at: new Map(), odd: new Set() };
+          if (done) done = (await walkSliced(keys, (mk) => fkPlace(fk2, mk, rows[mk], ctx, t0), opts('first-read'))).done;
+          // (3) each account's census index (clockIndexed's build), the account's own keys
+          const cxs = new Map();
+          for (const rec of adapterRecords().adapters) {
+            if (!done) break;
+            const lane = laneOrScan(rec, {});
+            const cx = { sig: censusSig(T, lane), t: t0, lane, kept: Census.emptyCounts(), rows: new Map(), order: [], dirty: new Set(), stale: false };
+            done = (await walkSliced(store.index.keysOf(rec.id), (k) => censusAdd(rec, cx, rows[k], t0, T), opts('census'))).done;
+            if (done) cxs.set(rec.id, cx);
+          }
+          if (!done) { if (stopped || digestWarm !== job) return false; digestWarmStats.restarts++; continue; }   // a whole touch: AGAIN
+          // THE LANDING, one turn: each index installed unless a reader built it whole meanwhile; the rows touched since the
+          // snapshot are each index's dirty rows (re-read at its first read)
+          const l0 = Date.now(), touched = job.touched;
+          digestWarmStats.reread += touched.size;
+          if (rowKept.stale === null) { rowKept.rows = rf; rowKept.by = by; rowKept.at = t0; rowKept.stale = new Set(touched); }
+          if (!firstKept.built) {
+            for (const arr of fk2.heads.values()) arr.sort(headCmp);
+            firstKept.facts = fk2.facts; firstKept.heads = fk2.heads; firstKept.at = fk2.at; firstKept.odd = fk2.odd;
+            firstKept.ob = new Map(); for (const [k, ob] of ctx.outbox) firstKept.ob.set(k, obFact(ob));   // the snapshot's outbox: a change since is re-checked at the read
+            firstKept.dirty = new Set(touched); firstKept.t = t0; firstKept.built = true; firstKept.stats.builds++;
+          }
+          for (const [id, cx] of cxs) {
+            const cur = censusIx.get(id);
+            if (cur && !cur.stale) continue;   // a reader built it meanwhile
+            cx.order.sort(Census.untilCmp);
+            for (const k of touched) if (k.startsWith(id + '/')) cx.dirty.add(k);
+            censusIx.set(id, cx); censusIxStats.builds++;
+          }
+          digestWarmStats.sliced++; digestWarmStats.walkMs = Date.now() - w0; digestWarmStats.landMs = Date.now() - l0;
+          return true;
+        }
+      } finally {
+        markDueTaps.delete(tap);
+        if (digestWarm === job) digestWarm = null;
+        const p = job.pending; job.pending = null;
+        if (p && !stopped) { const n0 = Date.now(); notify([...p.changed], { full: p.full ? true : (p.asked || !p.changed.size ? null : false) }); digestWarmStats.notifyMs = Date.now() - n0; }   // the broadcasts asked meanwhile: ONE, now
+      }
+    })();
+    return job.promise;
+  }
   function notify(changed = [], { full = null, extra = null } = {}) {
+    // B-dfa4 cut 4: during the first digest's warm-up a broadcast waits for its landing (merged: the changed keys, full if any
+    // asked full) — never a whole build of its indexes in this turn; one carrying side patches (`extra`) goes now
+    if (digestWarm && !extra) {
+      const p = digestWarm.pending || (digestWarm.pending = { changed: new Set(), full: false, asked: false });
+      for (const c of Array.isArray(changed) ? changed : []) if (c) p.changed.add(String(c));
+      if (full === true || (full === null && !(Array.isArray(changed) && changed.length))) p.full = true;
+      if (full === null) p.asked = true;   // an ask that left the choice to notify's own rule (keys that resolve to nothing ⇒ whole)
+      digestWarmStats.deferred++;
+      return;
+    }
     try {
       // 2026-09-26: a broadcast carries the CHANGED conversations only
       // (`partial`), the adapters and the totals always; the whole digest
@@ -9828,6 +9980,7 @@ function create(deps = {}) {
       try { if (r.failed && r.failed.orphans) throw r.failed.orphans; const orphans = r.orphans; if (orphans.length) log.warn(`[channels] ${orphans.length} notification row(s) without access at their grain or above it (the account, a matching rule) — inert until a person grants it: ${orphans.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot notification census failed: ${(err && err.message) || err}`); }
       try { if (r.failed && r.failed.capZero) throw r.failed.capZero; const z = r.capZero; if (z.length) log.warn(`[channels] ${z.length} digest notification(s) stored with a daily cap of 0 — read as cap 1 (a digest is a paced wake and cap 0 never delivers); the store is not rewritten, edit each to set a real cap: ${z.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot digest-cap census failed: ${(err && err.message) || err}`); }
     };
+    try { const w = digestWarmStart(); if (w && typeof w.catch === 'function') w.catch((err) => log.warn(`[channels] the first digest's warm-up failed: ${(err && err.message) || err} — the first read builds whole`)); } catch (err) { log.warn(`[channels] the first digest's warm-up failed: ${(err && err.message) || err}`); }   // B-dfa4 cut 4
     try { const sw = bootSweep(); if (sw.promise) track(sw.promise.then(bootSaid, (err) => log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`))); else bootSaid(sw.sync); } catch (err) { log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`); }
     try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
     reconcileReceiptFates().catch((err) => log.warn(`[channels] boot receipt-fate reconcile failed: ${(err && err.message) || err}`));
@@ -10087,6 +10240,7 @@ function create(deps = {}) {
     // suite drives it by hand — it also runs in `start()`)
     releaseStaleReservations, capZeroDigests,
     bootSweep, bootSweepStats: () => ({ ...bootSweepStats }), rejudgeConvCaps, rejudgeStats: () => ({ ...rejudgeStats }),   // B-dfa4 cut 3: the boot's one sweep (its legs: parity, a write between two slices)
+    digestReady, digestWarm: digestWarmStart, digestWarmStats: () => ({ ...digestWarmStats }),   // B-dfa4 cut 4: the first digest's warm-up (its legs: test-sliced-walk (h))
     pendingWindows: () => [...wakeTimers.entries()].map(([k, w]) => { const i = k.lastIndexOf('|'); return { key: i > 0 ? k.slice(0, i) : k, principal: i > 0 ? k.slice(i + 1) : null, kind: w.kind, startedAt: w.startedAt }; }),
     REQUESTS_PER_MINUTE, RECONCILE_SECONDS, PAGE, MAX_PAGES, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PENDING_CAP, ESTIMATE_CAP,
     DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS,
