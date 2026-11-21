@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 
 const { heldRefresher, pullMountArgs, isMountDaemonOf, mountDaemonsOf, killMountDaemons } = require('../src/device-mount.js');
 let failed = 0, passed = 0;
@@ -16,7 +17,7 @@ const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } els
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (cond, ms = 2000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (cond()) return true; await sleep(5); } return cond(); };
 // a value that stays the same for n looks in a row (an effect that is NOT coming — never a fixed sleep)
-const quiet = async (f, ms = 3000, n = 15) => { const t0 = Date.now(); let last, same = 0; while (Date.now() - t0 < ms) { const v = f(); if (v === last) { if (++same >= n) return v; } else { same = 0; last = v; } await sleep(3); } return f(); };
+const quiet = async (f, ms = 3000, n = 15) => { const t0 = Date.now(); let last, same = 0; while (Date.now() - t0 < ms) { const v = f(); if (v === last) { if (++same >= n) return v; } else { same = 0; last = v; } await sleep(3); } return markTimedOut(f(), ms, `quiet (a value that held still for ${n} reads)`); };   // a wait that runs out says so (r1372; test-ci-gate §2p)
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-pullref-'));
 const proc = path.join(tmp, 'proc');
