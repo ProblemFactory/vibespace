@@ -539,6 +539,9 @@ let ROOT_READ_MS = ROOT_READ_MS_DEFAULT;
 let _rootFsp = fs.promises;   // the reader's file calls (a suite's stand-in through _setRootFs)
 const _rootReads = { started: 0, ended: 0 };   // how many reads were started / came back (the single-flight leg reads them)
 let _rootRead = null, _rootReadAt = 0;
+// r872 (the gate's box zone): the read in flight was told LATE to a waiting caller — the cache then answers late too. A flag, never the
+// clock again: the deadline timer and Date.now() can differ by a millisecond, and «not judged yet» must never follow a late answer
+let _rootReadLate = false;
 const tmpSpellings = () => [os.tmpdir(), ...TMP_ROOTS];   // the judgment's temp roots, as spelled (their real paths are read with the facts)
 const realOr = async (p) => { try { return await _rootFsp.realpath(p); } catch { return p; } };
 async function readRootFacts(root) {
@@ -579,17 +582,17 @@ let _registeredAfterError = null;   // verify r2 ①: {at, error, since} once th
 /** LAW 1: the ONE read — started only when none is out; it stays out until it comes back, whatever any deadline said. */
 function startRootRead() {
   if (_rootRead) return _rootRead;
-  _rootReads.started++; _rootReadAt = Date.now();
+  _rootReads.started++; _rootReadAt = Date.now(); _rootReadLate = false;
   _rootRead = readRootFactsAll(rootDir)
     .catch((e) => ({ root: path.resolve(rootDir), gitDir: null, gitCommonDir: null, error: `the server root could not be read (${(e && e.code) || (e && e.message) || e})` }))
-    .then((f) => { _rootFacts = f; _rootFactsAt = Date.now(); _rootReads.ended++; _rootRead = null; return f; });
+    .then((f) => { _rootFacts = f; _rootFactsAt = Date.now(); _rootReads.ended++; _rootRead = null; _rootReadLate = false; return f; });
   return _rootRead;
 }
 const rootStale = (t = Date.now()) => !_rootFacts || !!_rootFacts.error || t - _rootFactsAt > serverRoot.ROOT_FACTS_TTL_MS;   // an erroring read is never kept (verify r1 F1)
 // a read still out past its deadline with nothing read before it: the NAMED fact (never a hold)
 const lateFacts = () => ({ root: path.resolve(rootDir), gitDir: null, gitCommonDir: null, late: true, error: `the checkout's .git did not answer in ${ROOT_READ_MS / 1000} s (a slow or hung mount) — read again once that read comes back` });
 // what is known NOW, with no file call: the last read; else the read out past its deadline (late); else not read yet (pending)
-const knownFacts = () => _rootFacts || (_rootRead && Date.now() - _rootReadAt >= ROOT_READ_MS ? lateFacts()
+const knownFacts = () => _rootFacts || (_rootRead && (_rootReadLate || Date.now() - _rootReadAt >= ROOT_READ_MS) ? lateFacts()
   : { root: path.resolve(rootDir), gitDir: null, gitCommonDir: null, pending: true, error: 'the server root is being read (off the loop) — not judged yet' });
 /** LAW 2: the facts for a caller that CAN wait — fresh ones, or what is known once the read is out past its deadline. */
 async function rootFactsNow() {
@@ -602,6 +605,7 @@ async function rootFactsNow() {
     clearTimeout(timer);
     if (f) return f;
   }
+  if (_rootRead) _rootReadLate = true;   // told late: the cache says late from now on (never «not judged yet» after a late answer)
   return _rootFacts || lateFacts();
 }
 function rootVerdict() {

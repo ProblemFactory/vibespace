@@ -513,6 +513,44 @@ console.log('— ⑧ B-1425: the root facts are read off the loop — one read i
     const late10 = await G10.rootFactsNow().then(() => G10.ownerWriteRefusal());
     console.log(`  (a first read that never answers: the index is handed ${JSON.stringify(late10 && { kind: late10.kind, pending: !!late10.pending, why: String(late10.why).slice(0, 90) })})`);
     ok(!!late10 && late10.kind === 'unknown' && late10.pending !== true && /did not answer in/.test(late10.why), 'B-1425 r827: a first read past the bound hands the index the NAMED late fact (a real unknown, said) — never «not judged yet»', late10);
+    // r872 (the gate's box zone found it: the deadline timer and Date.now() can differ by a millisecond, and the cache then answered
+    // «not judged yet» right after a LATE answer). The skew PLANTED: the deadline raised after the late answer, so the clock alone says
+    // «not past it yet» — the verdict must stay the named late fact (the read is marked late when a waiting caller was told so)
+    G10._setRootReadMs(60000);
+    const skew10 = G10.ownerWriteRefusal();
+    console.log(`  (the planted skew — the clock says the read is not past its bound, a caller was already told late: ${JSON.stringify(skew10 && { kind: skew10.kind, pending: !!skew10.pending })})`);
+    ok(!!skew10 && skew10.kind === 'unknown' && skew10.pending !== true && /did not answer in/.test(skew10.why), 'B-1425 r872: once a waiting caller was told LATE, the cache says late too — never «not judged yet» after it, whatever the clock reads (a flag, not a second clock read)', skew10);
+  }
+  // r872 (narrow round wudero5nj, THE MUST): a PIN THAT READS THE PARSED TREE, NOT THE TEXT. The cure's first form put its note as a
+  // `//` comment in the MIDDLE of the listen step's last line: every call after it on that line became a comment — the boot timers,
+  // bootRestored, the first sessions sweep, bootPhase.arm — and every text pin stayed green (the text was all there). server.js is
+  // parsed (the tree's own parser, acorn); the listen step's turns are found as code and their CALLS read
+  {
+    const acorn = require('acorn');
+    const nameOfC = (c) => (c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed && c.property.type === 'Identifier' ? c.property.name : null);
+    const kids = (n) => Object.keys(n).flatMap((k) => { const v = n[k]; return Array.isArray(v) ? v.filter((x) => x && typeof x.type === 'string') : v && typeof v.type === 'string' ? [v] : []; });
+    const isTurn = (n) => n.type === 'CallExpression' && n.callee.type === 'MemberExpression' && nameOfC(n.callee) === 'turn' && n.callee.object.type === 'Identifier' && n.callee.object.name === 'hub' && !!n.arguments[0] && /Function/.test(n.arguments[0].type);
+    const callsIn = (node, skip) => { const out = []; (function walk(n) { if (n === skip) return; if (n.type === 'CallExpression') { out.push(nameOfC(n.callee)); for (const x of n.arguments) if (x.type === 'Identifier') out.push('→' + x.name); } kids(n).forEach(walk); })(node); return out; };
+    const turnsOf = (src) => {
+      const ast = acorn.parse(src.replace(/^#!.*/, ''), { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true });
+      let found = null;
+      (function walk(n) {
+        if (found) return;
+        if (isTurn(n)) { let inner = null; (function w2(m) { if (inner) return; if (m !== n && isTurn(m)) { inner = m; return; } kids(m).forEach(w2); })(n.arguments[0].body); if (inner && callsIn(n.arguments[0].body, inner).includes('restoreSessions')) { found = { restore: callsIn(n.arguments[0].body, inner), last: callsIn(inner.arguments[0].body, null) }; return; } }
+        kids(n).forEach(walk);
+      })(ast);
+      return found;
+    };
+    const LAST = ['configure', 'initAfterListen', 'afterListen', 'bootEngineDistribution', 'bootRestored', 'warmSessions', '→bootSessionsIndexed', 'arm'];
+    const T = turnsOf(srv8), lostT = T ? LAST.filter((k) => !T.last.includes(k)) : LAST;
+    console.log(`  (the parsed listen step: the restore turn calls ${T ? T.restore.filter(Boolean).join(', ') : '—'}; the LAST turn calls ${T ? T.last.filter(Boolean).join(', ') : '—'})`);
+    ok(!!T && T.restore.includes('restoreSessions') && !lostT.length, 'B-1425 r872: the listen step\'s LAST turn CALLS, as code (the parsed tree, never the text), the index\'s configure, the three boot timers\' callees, bootRestored, the first sessions sweep (bootSessionsIndexed at its end) and bootPhase.arm — and the turn before it calls restoreSessions', lostT);
+    // RED CONTROL: the cure's first note put back where it stood (mid-line, after the index wait's catch) — the calls after it are LOST, by name
+    const anchorT = "}).catch((e) => console.warn('[local-index] not started: ' + (e && e.message)));";
+    const badT = srv8.replace(anchorT, anchorT + " // B-1425 (r827): the index WAITS for the root's facts (off the loop, ≤ 2 s; landed already ⇒ this very turn) — «not judged yet» is never its role for the run, a real unknown (a read error, the named late fact) is ·");   // stale-pins: kept (the OLD note, rebuilt for the pin's red control)
+    const TB = badT !== srv8 ? turnsOf(badT) : null, lostB = TB ? LAST.filter((k) => !TB.last.includes(k)) : [];
+    console.log(`  (RED: the first form's mid-line note put back — the last turn LOSES ${lostB.join(', ') || 'nothing'})`);
+    ok(!!TB && lostB.join(',') === 'initAfterListen,afterListen,bootEngineDistribution,bootRestored,warmSessions,→bootSessionsIndexed,arm', 'B-1425 r872 RED CONTROL: the cure\'s first note put back mid-line turns the pin red BY THE NAME of each lost call (the three timers\' callees, bootRestored, the sessions sweep, bootPhase.arm) — the text pins stayed green over it', lostB);
   }
   clearInterval(keep8);
 }
