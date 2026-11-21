@@ -48,13 +48,15 @@ const BIG = 12582912;   // (a size for master's roads' rows — round 13: no bou
 
 const VNOW = Date.UTC(2026, 10, 11, 12);
 let framed = 0;   // (the bytes every hub's socket client was sent)
+// B-0248 (c): the route's stores are THE STORE WRITER's (src/store-hold.js owe/after) — this suite's world lands each write AT ITS CALL (the writer's contract, no latency: its bytes written whole, then onWritten, and every answer at once), as the release's write at the call did; the off-loop laws are test-store-write-census ⑭'s
+const landingWriter = () => ({ dirty(lwFile, o) { const b = o.produce(), parts = Array.isArray(b) ? b : [b], lwTmp = lwFile + '.lw.tmp'; for (let i = 0; i < parts.length; i++) fs.writeFileSync(lwTmp, parts[i], { flag: i ? 'a' : 'w' }); fs.renameSync(lwTmp, lwFile); if (o.onWritten) o.onWritten(true, null); }, durable(lwFile, o) { if (o && o.answer) o.answer(true); return Promise.resolve(true); }, pending: () => false, flushSync: () => ({ written: [], left: [] }), whyNotDurable: () => null });
 /** a fresh hub: the real route, a data dir of its own, one clock */
 const hub = ({ dir: dirIn = null, clock = null } = {}) => {   // (round 14: a hub on another's data dir — a restart; a clock that moves)
   for (const key of Object.keys(require.cache)) if (key.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[key];
   const P = require(path.join(REPO, 'src/routes/persistence.js'));
   const dir = dirIn || fs.mkdtempSync(path.join(TMP, 'h-'));
   // (one socket client, taking each frame's bytes as a real one does — the broadcast is part of a write's cost)
-  P.setup({ dataDir: dir, wss: { clients: new Set([{ readyState: 1, send: (j) => { framed += j.length; } }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (clock ? clock.t : VNOW), userStateMono: () => (clock ? clock.t : VNOW) });
+  P.setup({ writer: landingWriter(), dataDir: dir, wss: { clients: new Set([{ readyState: 1, send: (j) => { framed += j.length; } }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (clock ? clock.t : VNOW), userStateMono: () => (clock ? clock.t : VNOW) });
   const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
   /** one request, timed: the handler alone, its body already parsed (as the door's parser hands it) — its time is PRINTED only (B-518e) */
   const timed = (method, p, body) => {
@@ -164,12 +166,14 @@ const on = () => { Set.prototype.add = function (v) { sets++; return add.call(th
   Array.prototype.slice = function (...a) { const r = slc.apply(this, a); walks += r.length; return r; }; };
 const off = () => { Set.prototype.add = add; Map.prototype.set = mset; Array.prototype.includes = inc; Array.prototype.indexOf = iof; fs.renameSync = ren; fs.linkSync = lnk; fs.writeFileSync = wfs; JSON.stringify = str;
   CB.forEach((m, j) => { Array.prototype[m] = cbOrig[j]; }); Array.prototype.slice = slc; };
+// B-0248 (c): the child's route lands each write at its call (the store writer's contract, no latency), as the release's write at the call did
+const landingWriter = () => ({ dirty(lwFile, o) { const b = o.produce(), parts = Array.isArray(b) ? b : [b], lwTmp = lwFile + '.lw.tmp'; for (let i = 0; i < parts.length; i++) fs.writeFileSync(lwTmp, parts[i], { flag: i ? 'a' : 'w' }); fs.renameSync(lwTmp, lwFile); if (o.onWritten) o.onWritten(true, null); }, durable(lwFile, o) { if (o && o.answer) o.answer(true); return Promise.resolve(true); }, pending: () => false, flushSync: () => ({ written: [], left: [] }), whyNotDurable: () => null });
 const out = [];
 for (const f of FILES) {
   const sc = JSON.parse(fs.readFileSync(f, 'utf8'));
   for (const key of Object.keys(require.cache)) if (key.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[key];
   const P = require(path.join(REPO, 'src/routes/persistence.js')), dir = fs.mkdtempSync(path.join(TMP, 'w-'));
-  P.setup({ dataDir: dir, wss: { clients: new Set([{ readyState: 1, send() { } }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => VNOW, userStateMono: () => VNOW });
+  P.setup({ writer: landingWriter(), dataDir: dir, wss: { clients: new Set([{ readyState: 1, send() { } }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => VNOW, userStateMono: () => VNOW });
   const handler = (method, p) => { const l = P.router.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[0].handle; };
   const call = (method, p, body) => { let status = 200, o = null; const res = { status(c) { status = c; return res; }, json(x) { o = x; return res; } }; handler(method, p)({ body, query: {}, params: {}, headers: {} }, res, () => { }); return { status, body: o }; };
   if (sc.pre) call('post', '/api/config/import', sc.pre);

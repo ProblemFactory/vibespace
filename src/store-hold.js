@@ -17,6 +17,17 @@
 // hold's OWN ladder (the silent rungs, then 30 s doubling to 5 min) — never dropped, never swallowed. SAID once past the silent rungs
 // (onUnsaved: every page told — nothing is said for a failure the next rung cures; a person's PRESS says it at once), LIFTED when a
 // write lands (onSaved, for a said one only). A flush at the stop that fails is the caller's journal line (owed() names it).
+// THE WRITE OFF THE LOOP (lane bl-loop-b, B-0248 (c) — 主开发 r912; measured: at 500 ms a rename every write of these stores held the
+// hub's loop 501 ms, before its own answer): a store handed a WRITER (create({ writer })) writes through owe(next, { name, bytes }) —
+// `name` its row of src/timed-sync.js STORES, a literal at the call (test-architecture §72 reads it there): the change
+// is the store's value AT ONCE — the PENDING state, so the next change builds on it (one queue a store: the store writer writes one
+// version of a file at a time, each a later one) — and its bytes go to the store writer's thread, made on the main thread when the
+// write is due (a burst of changes is ONE write). The main loop never waits on the storage. THE ANSWER waits for the LANDING:
+// after(answer) — answer(true) once the version owed NOW is on disk, answer(false) when it failed or passed the writer's bound (the
+// writer keeps it and writes it again). onLanded(value): the value that LANDED, told once a write — what a store tells its pages and
+// hooks is never ahead of the disk, and is told before the answer. A store NOT THERE is born by the exclusive create AT THE CALL (R6:
+// the appeared refusal needs the link, which the writer's rename cannot give) — once a file. A store with no writer writes at the
+// call, as before (the layouts and the settings, R11).
 
 const fs = require('fs');
 const path = require('path');
@@ -50,8 +61,10 @@ function unreadError(file, held, what) {
  *   onLift    (value, was) — the hold lifted: the caller's lift is a CHANGE (its hooks run, its pages are told «read again»)
  *   onSaid    (held) — the hold outlasted the silent rungs: the caller says it (the banner, an episode's notice)
  */
-function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, onUnsaved = null, onSaved = null, onOwedRefused = null, schedule = null } = {}) {
+function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, log = console, silentMs = SILENT_RUNGS_MS, ladder = LADDER, onLift = null, onSaid = null, onUnsaved = null, onSaved = null, onOwedRefused = null, schedule = null, writer = null, onLanded = null } = {}) {
   if (!file) throw new Error('store-hold: file is required');
+  /** the store writer (B-0248 (c)) — a function (the process's writer, made at the first use) or the writer itself; null: at the call */
+  const W = () => (typeof writer === 'function' ? writer() : writer);
   let value;                 // the document (undefined: none — held, or not read yet)
   let text = null;           // the bytes the value was read from, until the caller takes them once (takeText: its normalizer compares)
   let held = null;           // { kind, code, why, since, rung }
@@ -64,7 +77,11 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   /** THE READ AT THE START (sync — a start reads its stores before it serves; `pre` = the same read made off the loop by the caller,
    *  { text } | { error }). → 'data' | 'missing' | 'held' */
   function readAtStart(pre) {
-    const read = pre && (typeof pre.text === 'string' || pre.error) ? pre : readSync(file);
+    // A START READS WHAT THIS PROCESS STILL OWES (B-0248 (c), as the decision engine's): a store made again in the same process (a
+    // suite's restart) lands the write the last one handed the writer BEFORE it reads — a hub's start owes nothing (no wait)
+    let owedHere = false;
+    try { const w = W(); if (w && typeof w.pending === 'function' && w.pending(file) && typeof w.flushSync === 'function') { w.flushSync([file]); owedHere = true; } } catch { /* read as it is */ }
+    const read = !owedHere && pre && (typeof pre.text === 'string' || pre.error) ? pre : readSync(file);
     const a = answerOf(read);
     started = true;   // (only once the read has an answer: a throw above leaves the store NOT READ — refused by name, read again next time)
     if (a.state === 'data') { value = a.value; text = read.text; missing = false; return 'data'; }
@@ -143,6 +160,43 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
     value = next; text = null;
     return true;
   }
+  // ── THE WRITE OFF THE LOOP (B-0248 (c), above) ──
+  let producedValue, producedSeq = 0, toldSeq = 0;
+  /** the value whose bytes LANDED, told ONCE a write (its pages, its hooks) — from the writer's landing, or the first answer it frees */
+  function tell() {
+    if (producedSeq <= toldSeq) return;
+    toldSeq = producedSeq;
+    try { onLanded?.(producedValue); } catch (e) { log.warn?.(`[store-hold] ${path.basename(file)}: its landing's hooks failed: ${(e && e.message) || e}`); }
+  }
+  /** THE CHANGE: `next` is the store's value now (the pending state); `bytes(value)` makes its bytes (a text, or its PARTS in order)
+   *  when the write is due — for the LATEST value; `name` the writer's row; `accepted()` the caller's own commit (its cache, its facts),
+   *  run once the change is taken and BEFORE anything is told of it (a hook told at the landing reads the caller's copy). Refuses a
+   *  store with no value BY NAME (R1), synchronously, before anything moves. → true when it landed at the call (no writer, or the
+   *  exclusive create of a store NOT THERE), false when the writer owes it */
+  function owe(next, { name, bytes: bytesOf, accepted = null } = {}) {
+    if (!started) throw unreadError(file, NOT_READ(), 'this change');
+    if (held) throw unreadError(file, held, 'this change');
+    if (typeof bytesOf !== 'function') throw new Error(`store-hold: ${path.basename(file)}: owe() needs its bytes`);
+    const w = W();
+    if (w && !name) throw new Error(`store-hold: ${path.basename(file)}: a write handed to the store writer names its row (src/timed-sync.js STORES)`);
+    if (!w || missing) { write(next, bytesOf(next)); producedValue = next; producedSeq++; try { accepted?.(); } finally { tell(); } return true; }
+    value = next; text = null;
+    accepted?.();   // (before the hand-off: a stand-in writer may make the bytes, land them and tell inside dirty())
+    // urgent: an ACT — written at the writer's next turn, as durable() asks, whether or not a door waits on it (a rename over the
+    // socket has no waiter; paced, a large list would wait its gap before any page is told)
+    w.dirty(file, { name, rank: 0, urgent: true, produce: () => { const v = value; const bytes = bytesOf(v); producedValue = v; producedSeq++; return bytes; }, onWritten: (ok) => { if (ok) tell(); } });
+    return false;
+  }
+  /** THE ANSWER AFTER THE LANDING: `answer(ok)` once what the store owes NOW is on disk (true), or its write failed / passed the
+   *  writer's bound (false — the writer keeps it and writes it again). Nothing owed ⇒ answered at once. The writer's `answer` road
+   *  (never a promise's .then): an answer the hub's exit flush frees is sent inside that flush */
+  function after(answer) {
+    const w = W();
+    if (!w) { answer(true); return; }
+    w.durable(file, { answer: (ok) => { if (ok) tell(); answer(ok); } });
+  }
+  /** why the store's last act is not on disk yet ({ why, code, ahead, lastMs }) — the door's 503 words — or null */
+  const notDurable = () => { try { const w = W(); return w && typeof w.whyNotDurable === 'function' ? w.whyNotDurable(file) : null; } catch { return null; } };
   /** the caller's in-memory value after a change it will write (the copy in memory is the truth while it exists — R12) */
   function set(next) { if (!started) throw unreadError(file, NOT_READ(), 'this change'); if (held) throw unreadError(file, held, 'this change'); value = next; text = null; }
   /** a WHOLE read of the file made by the caller (a re-read after the migrations wrote it): the value as read — and the store is THERE
@@ -231,7 +285,7 @@ function create({ file, valid = () => true, parse = JSON.parse, now = Date.now, 
   function stop() { stopped = true; if (timer) { (schedule ? null : clearTimeout(timer)); timer = null; } if (owedTimer) { (schedule ? null : clearTimeout(owedTimer)); owedTimer = null; } }
 
   return {
-    readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop, flush, owedAgain,
+    readAtStart, readAgain, answer, refuseIfHeld, write, set, adoptRead, takeText, setAside, stop, flush, owedAgain, owe, after, notDurable,
     owed: owedFacts,   // the owed write's facts ({ file, code, why, since, rung }), or null
     held: () => (held ? { file: path.basename(file), kind: held.kind, code: held.code, since: held.since, rung: held.rung } : null),
     isMissing: () => missing, file,

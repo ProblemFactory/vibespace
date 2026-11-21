@@ -165,8 +165,10 @@ const fakeLs = () => { const m = new Map(); return { getItem: (k) => (m.has(k) ?
 /** a BROWSER = one localStorage every tab of it shares (round 3: it holds the display copy only — nothing about an act) */
 const newBrowser = () => ({ ls: fakeLs() });
 
+// B-0248 (c): the route's stores are THE STORE WRITER's (src/store-hold.js owe/after) — this suite's world lands each write AT ITS CALL (the writer's contract, no latency: its bytes written whole, then onWritten, and every answer at once), as the release's write at the call did; the off-loop laws are test-store-write-census ⑭'s
+const landingWriter = () => ({ dirty(lwFile, o) { const b = o.produce(), parts = Array.isArray(b) ? b : [b], lwTmp = lwFile + '.lw.tmp'; for (let i = 0; i < parts.length; i++) fs.writeFileSync(lwTmp, parts[i], { flag: i ? 'a' : 'w' }); fs.renameSync(lwTmp, lwFile); if (o.onWritten) o.onWritten(true, null); }, durable(lwFile, o) { if (o && o.answer) o.answer(true); return Promise.resolve(true); }, pending: () => false, flushSync: () => ({ written: [], left: [] }), whyNotDurable: () => null });
 /** a world: the real route over a temp data dir, a stub socket, pages, and a virtual clock with a queue of events */
-function createWorld({ seed = 1, sessions, lag = null } = {}) {
+function createWorld({ seed = 1, sessions, lag = null, landMs = null } = {}) {
   const R = rng(seed);
   const dataDir = fs.mkdtempSync(path.join(TMP, 'w-'));
   const P = freshPersistence();
@@ -175,9 +177,40 @@ function createWorld({ seed = 1, sessions, lag = null } = {}) {
   let now = 0, evSeq = 0;
   const T0 = 1794400000000;   // the world's wall clock at its start (the route's facts and the page's ages read it) — declared BEFORE the setup: the route takes its clock at boot (round 9)
   let w = null;
-  P.setup({ dataDir, wss: { clients }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, onUserStateWrite: (st) => hookSaw.push((st.archivedSessions || []).length), userStateClock: () => T0 + now + ((w && w.serverStep) || 0), userStateMono: () => now });
+  // B-0248 (c) §24: `landMs` — the list's writes LAND LATER, on this world's clock: one version of the file in flight at a time, its
+  // bytes made when it starts (the latest state), landed landMs later; then its waiters (a version at or before it), then onWritten,
+  // then the next version starts — a burst of acts lands as ONE write and ONE frame, an answer may come after a later frame
+  const clocked = !landMs ? null : (() => {
+    const S = new Map(), stats = { landings: 0, versions: [] };
+    const st = (f) => { if (!S.has(f)) S.set(f, { v: 0, wv: 0, flight: null, dirty: false, o: null, waiters: [] }); return S.get(f); };
+    const start = (ckFile, s) => {
+      if (s.flight || !s.dirty) return;
+      s.dirty = false;
+      const b = s.o.produce();
+      s.flight = { v: s.v, from: s.wv, parts: Array.isArray(b) ? b : [b] };
+      at(now + landMs, () => {
+        const fl = s.flight; s.flight = null;
+        const ckTmp = ckFile + '.ck.tmp';
+        for (let i = 0; i < fl.parts.length; i++) fs.writeFileSync(ckTmp, fl.parts[i], { flag: i ? 'a' : 'w' });
+        fs.renameSync(ckTmp, ckFile);
+        stats.landings++; stats.versions.push(fl.v - fl.from); s.wv = fl.v;
+        const keep = []; for (const x of s.waiters) { if (x.want <= s.wv) x.cb(true); else keep.push(x); } s.waiters = keep;
+        try { if (s.o.onWritten) s.o.onWritten(true, null); } catch { }
+        start(ckFile, s);
+      }, 'landing');
+    };
+    const W = {
+      dirty(ckFile, o) { const s = st(ckFile); s.o = o; s.v++; s.dirty = true; start(ckFile, s); },
+      durable(ckFile, { answer = null } = {}) { const s = S.get(ckFile); if (!s || (!s.dirty && !s.flight)) { if (answer) answer(true); return Promise.resolve(true); } const want = s.v; return new Promise((res) => s.waiters.push({ want, cb: (ok) => { if (answer) answer(ok); res(ok); } })); },
+      pending: (ckFile) => { const s = S.get(ckFile); return !!s && (s.dirty || !!s.flight); },
+      flushSync: () => ({ written: [], left: [] }), whyNotDurable: () => null,
+    };
+    return { W, stats };
+  })();
+  P.setup({ writer: clocked ? clocked.W : landingWriter(), dataDir, wss: { clients }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, onUserStateWrite: (st) => hookSaw.push((st.archivedSessions || []).length), userStateClock: () => T0 + now + ((w && w.serverStep) || 0), userStateMono: () => now });
   const H = { get: handlerOf(P.router, 'get', '/api/user-state'), post: handlerOf(P.router, 'post', '/api/user-state'), patch: handlerOf(P.router, 'patch', '/api/user-state'), ops: handlerOf(P.router, 'patch', '/api/user-state/batches'), exp: handlerOf(P.router, 'post', '/api/config/export') };
-  const call = (h, body) => { let status = 200, out = null; const res = { status(c) { status = c; return res; }, json(o) { out = J(o); return res; } }; try { h({ body: body === undefined ? undefined : J(body), query: {}, params: {}, headers: {} }, res, () => { }); } catch (e) { status = 500; out = { error: String(e && e.message) }; } return { status, body: out }; };   // (a handler that throws = a 500, as express answers it)
+  // (B-0248 (c): an answer may come LATER — after its write landed, on this world's clock: `pending` until then, `onAnswer` runs at it)
+  const call = (h, body) => { let status = 200, out = null, answered = false; const r = { status: 200, body: null, pending: false, onAnswer: null }; const res = { status(c) { status = c; return res; }, json(o) { out = J(o); answered = true; r.status = status; r.body = out; if (r.onAnswer) { const f = r.onAnswer; r.onAnswer = null; f(); } return res; } }; try { h({ body: body === undefined ? undefined : J(body), query: {}, params: {}, headers: {} }, res, () => { }); } catch (e) { status = 500; out = { error: String(e && e.message) }; answered = true; } if (answered) { r.status = status; r.body = out; } r.pending = !answered; return r; };   // (a handler that throws = a 500, as express answers it)
   const q = [];
   const at = (t, fn, label) => { const e = { t: Math.max(t, now), s: ++evSeq, fn, label, dead: false }; q.push(e); return e; };
   w = {
@@ -210,6 +243,7 @@ function createWorld({ seed = 1, sessions, lag = null } = {}) {
           const h = method === 'get' ? H.get : method === 'post' ? H.post : opsDoor ? H.ops : H.patch;
           if (method === 'patch') { if (body && body.batches) w.opsRequests++; else w.wholeRequests++; }   // counted by what the body IS
           const r = h ? call(h, body) : { status: 404, body: { error: 'Cannot PATCH ' + url } };   // a route with no ops door (an older VibeSpace)
+          const finish = () => {   // (B-0248 (c): run at the answer — at once, or at its write's landing on this world's clock)
           if (method === 'patch' && r.status !== 503) w.handled.push({ page: page.__name, issuedAt, at: now });
           if (method !== 'get' && r.status === 200) {
             const wrote = grevOf(w, r.body) > w.lastRev;   // a request that changes nothing writes nothing (round 5, smaller 2)
@@ -238,6 +272,8 @@ function createWorld({ seed = 1, sessions, lag = null } = {}) {
           if (page.__dead) return;   // a reloaded / closed tab: its request may land, nothing answers it
           if (reach.drop) { at(now + answer, () => { if (!page.__dead) reject(new Error('the connection dropped')); }, 'drop'); return; }
           at(now + answer, () => { if (!page.__dead) resolve({ ok: r.status < 400, status: r.status, json: async () => J(r.body) }); }, 'answer');
+          };
+          if (r.pending) r.onAnswer = finish; else finish();
         }, 'server ' + method);
       });
     },
@@ -275,6 +311,7 @@ function createWorld({ seed = 1, sessions, lag = null } = {}) {
       if (until !== Infinity) now = Math.max(now, until);
     },
     serverState: () => call(H.get).body,
+    writerStats: () => (clocked ? clocked.stats : null),
   };
   return w;
 }
@@ -346,7 +383,7 @@ console.log('§2 the route (src/routes/persistence.js): the server\'s counter, o
   ok(w.hookSaw.length === 6 && w.hookSaw[0] === 1 && w.hookSaw[1] === 2, 'the server\'s own hook (onUserStateWrite — an archive ends its groups\' waits) fires for an ops write exactly as for a whole write', w.hookSaw);
   // the counter survives a restart (the file holds it); the export carries the person's keys only
   const P2 = freshPersistence();
-  P2.setup({ dataDir: w.dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
+  P2.setup({ writer: landingWriter(), dataDir: w.dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
   const after = w.call((handlerOf(P2.router, 'patch', '/api/user-state/batches') || handlerOf(P2.router, 'patch', '/api/user-state')), { batches: [{ batch: 'pgtest04:1', ops: [{ key: 'starredSessions', item: a, value: true }] }] });
   ok(after.body.rev === 7, 'a restart continues the counter from the file (7 after 6), never from zero', after.body);
   let exported = null;
@@ -1004,7 +1041,7 @@ const restartWorld = (w, writeFile = null) => {
   { const t0 = Date.now(), r0 = performance.now(); while (Date.now() === t0 && performance.now() - r0 < 5) { } }   // a new life starts LATER than the one before (its epoch carries its start); bounded on the REAL clock (a scene may hold Date.now on the world's)
   if (writeFile) fs.writeFileSync(path.join(w.dataDir, 'user-state.json'), JSON.stringify(writeFile, null, 2));
   const P2 = freshPersistence();
-  P2.setup({ dataDir: w.dataDir, wss: { clients: w.clients }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
+  P2.setup({ writer: landingWriter(), dataDir: w.dataDir, wss: { clients: w.clients }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
   w.H.get = handlerOf(P2.router, 'get', '/api/user-state'); w.H.post = handlerOf(P2.router, 'post', '/api/user-state'); w.H.patch = handlerOf(P2.router, 'patch', '/api/user-state'); w.H.ops = handlerOf(P2.router, 'patch', '/api/user-state/batches'); w.older = false;
   return P2;
 };
@@ -1139,7 +1176,7 @@ console.log('§12 round 2, smaller: an older server, a sign-in, the migration, t
   const first = w.call(w.H.ops || w.H.patch, { batches: [{ batch: 'pgboot001:1', ops: [{ key: 'archivedSessions', item: w.sessions[1].sessionKey, value: true }] }] });
   w.call(w.H.ops || w.H.patch, { batches: [{ batch: 'pgother01:1', ops: [{ key: 'archivedSessions', item: w.sessions[1].sessionKey, value: false }] }] });   // another page un-archives it
   const P2 = freshPersistence();
-  P2.setup({ dataDir: w.dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
+  P2.setup({ writer: landingWriter(), dataDir: w.dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
   const again = w.call((handlerOf(P2.router, 'patch', '/api/user-state/batches') || handlerOf(P2.router, 'patch', '/api/user-state')), { batches: [{ batch: 'pgboot001:1', ops: [{ key: 'archivedSessions', item: w.sessions[1].sessionKey, value: true }] }] });
   const st = w.call(handlerOf(P2.router, 'get', '/api/user-state')).body;
   ok(first.body.rev === 1 && JSON.stringify(again.body.superseded) === JSON.stringify(['pgboot001:1']) && !(again.body.applied || []).length && again.body.rev >= 1 && !st.archivedSessions.includes(w.sessions[1].sessionKey),
@@ -1342,7 +1379,7 @@ async function pageLoss(src, { acts, leaveAfter = 50, delay = 200, kill = false,
     const appliedIds = [];
     let h = w.H.ops || w.H.patch;
     for (let k = 0; k < deliveries.length; k++) {
-      if (k === restartAt) { const P2 = freshPersistence(); P2.setup({ dataDir: w.dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() }); h = handlerOf(P2.router, 'patch', '/api/user-state/batches') || handlerOf(P2.router, 'patch', '/api/user-state'); w.H.get = handlerOf(P2.router, 'get', '/api/user-state'); }
+      if (k === restartAt) { const P2 = freshPersistence(); P2.setup({ writer: landingWriter(), dataDir: w.dataDir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => (w.T0 || 0) + w.now() + (w.serverStep || 0), userStateMono: () => w.now() }); h = handlerOf(P2.router, 'patch', '/api/user-state/batches') || handlerOf(P2.router, 'patch', '/api/user-state'); w.H.get = handlerOf(P2.router, 'get', '/api/user-state'); }
       const r = w.call(h, deliveries[k]);
       if (r.status === 200) appliedIds.push(...(r.body.applied || []));
     }
@@ -1843,7 +1880,7 @@ const DAY_MS = 86400000;
     let served;
     try {
       const P2 = freshPersistence();
-      P2.setup({ dataDir: w.dataDir, wss: { clients: w.clients }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => w.T0 + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
+      P2.setup({ writer: landingWriter(), dataDir: w.dataDir, wss: { clients: w.clients }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => w.T0 + w.now() + (w.serverStep || 0), userStateMono: () => w.now() });
       w.H.get = handlerOf(P2.router, 'get', '/api/user-state'); w.H.ops = handlerOf(P2.router, 'patch', '/api/user-state/batches');
       served = w.call(w.H.get).body;
       refuse = false;   // the disk frees: the next write
@@ -2515,7 +2552,7 @@ console.log('§19 round 9: the clock mark taken at boot; judging a request costs
   const dir = fs.mkdtempSync(path.join(TMP, 'frac-'));
   let wall = 1794400000000, mono = 0;
   const P2 = freshPersistence();
-  P2.setup({ dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => wall, userStateMono: () => mono });
+  P2.setup({ writer: landingWriter(), dataDir: dir, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, userStateClock: () => wall, userStateMono: () => mono });
   const ops = handlerOf(P2.router, 'patch', '/api/user-state/batches');
   const callIt = (body) => { let out = null; const res = { status() { return res; }, json(o) { out = o; return res; } }; ops({ body, query: {}, params: {}, headers: {} }, res, () => { }); return out; };
   callIt({ batches: [{ batch: 'pgfrac0001:1', age: 0, ops: [{ key: 'starredSessions', item: 'claude:f0', value: true }] }] });
@@ -3414,6 +3451,25 @@ console.log('§23 round 14: the fork-title road refuses before the window\'s tit
 }
 
 // ════════ §8 THE MUTANTS ════════
+// ════════ §24 B-0248 (c) — THE LIST IS THE STORE WRITER'S: a write lands LATER than its call (on the world's clock) ════════
+console.log('§24 B-0248 (c): the writes land later than their calls — a burst of acts lands as ONE write and ONE frame, answers after later frames; every page converges, every act once');
+{
+  const Sb = await loadPage(STATE_SRC);
+  const w = createWorld({ seed: 241, sessions: mkSessions(12), landMs: 150 });
+  const A = await addPage(w, Sb, 'tabA', { browser: newBrowser() }), B = await addPage(w, Sb, 'tabB', { browser: newBrowser() }), C = await addPage(w, Sb, 'tabC', { browser: newBrowser() });
+  await w.run(800);
+  const pages = [A, B, C];
+  for (let i = 0; i < 9; i++) { const p = pages[i % 3], s0 = w.sessions[1 + i]; w.at(w.now() + 7 * i, () => (i % 2 ? p.toggleStar(s0) : p.toggleArchive(s0)), 'act'); }
+  await w.run(w.now() + 600000);
+  const st = w.serverState(), disk = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'user-state.json'), 'utf8'));
+  const arch = [0, 2, 4, 6, 8].map((i) => w.sessions[1 + i].sessionKey), star = [1, 3, 5, 7].map((i) => w.sessions[1 + i].sessionKey);
+  const ws = w.writerStats();
+  const onDisk = arch.every((k) => disk.archivedSessions.includes(k)) && star.every((k) => disk.starredSessions.includes(k));
+  ok(onDisk && slotDiff(slotsOf(st), slotsOf(disk)).length === 0 && converged(w, pages) && opsApplied(w, (o) => o.key === 'archivedSessions') === 5 && opsApplied(w, (o) => o.key === 'starredSessions') === 4 && ws && ws.versions.some((n) => n > 1),
+    `§24 nine acts on three pages, each write landing 150 ms after it starts: every act on disk once (5 archive ops, 4 star ops), the hub's answer = the file, all three pages converge — ${ws ? ws.landings : 0} landings for ${ws ? ws.versions.reduce((a, n) => a + n, 0) : 0} writes (a burst landed as one: ${ws ? ws.versions.filter((n) => n > 1).length : 0})`,
+    { landings: ws && ws.landings, versions: ws && ws.versions, archived: st.archivedSessions.length, starred: st.starredSessions.length, dup: w.dup });
+}
+
 console.log('§8 the mutants — each RED by name');
 {
   // M1: the echo applied WHOLESALE again (05082bbd0's _applyServerState: the sets REPLACED by whatever the echo held)

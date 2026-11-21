@@ -80,7 +80,7 @@ const SCOPED = { 'src/server/session-stdout.js': ['writeSessionMeta', 'patchSess
 // snapshot's call, its truncate and writeBuffersAtomic's own three) go to zero ⇒ 893
 // B-48a4 (the exit door's cost; restacked on 2.369.410): the two audit rings onto the store writer through ONE appender — device-audit.js's
 // 3 and exit-proxy.js audit's 3 go to zero; every save of hosts.json through the store writer — hosts.js _save's 2 go to zero ⇒ 881 − 8 = 873
-const DEBT_MAX = 847;   // B-f276 1b (bl-windows): −1 — the channels' torn-file set-aside at the load (held by src/store-hold.js now); lane bl-keys-misc (B-360d): −1 — the jobs' collection pass removes its old spill files off the loop (fs.promises.unlink: the synchronous unlink gone). lane lg-store-writes (B-225b, the persistence holds — cut 4): −1 — the settings onto src/store-hold.js's one write; cut 3: −3 — the desktops (layouts.json), the bookmarks and the custom themes onto src/store-hold.js's one write; cut 2: −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 850 -1 = 849]
+const DEBT_MAX = 843;   // lane bl-loop-b (B-0248 (c)): −4 — persistence.js's «*» row 20 → 16 (the conversation list, the bookmarks and the custom themes written by the store writer: no data-folder make at each write). B-f276 1b (bl-windows): −1 — the channels' torn-file set-aside at the load (held by src/store-hold.js now); lane bl-keys-misc (B-360d): −1 — the jobs' collection pass removes its old spill files off the loop (fs.promises.unlink: the synchronous unlink gone). lane lg-store-writes (B-225b, the persistence holds — cut 4): −1 — the settings onto src/store-hold.js's one write; cut 3: −3 — the desktops (layouts.json), the bookmarks and the custom themes onto src/store-hold.js's one write; cut 2: −2 — the conversation list (user-state.json) onto src/store-hold.js's one write (its normalizer's write-back and its whole write: the hold refuses a list it could not read); before: lane lg-store-writes (主开发 2026-11-20 03:10Z, the measured holds after 2.369.412): −4 — desktop-serve's record file onto the store writer on the hub (its device road classed not-main), −2 — device-alerts' ledger onto the writer ⇒ 868 − 6; before: usage-cpu U4 (moved onto 2.369.412's second checkpoint 8f96c01eb): −2 — otel-ingest's per-post stash append (mkdirSync + appendFileSync) moved onto the store writer ⇒ 870 − 2 = 868. Before: lane lg-providers U1 cure (restack on int411): −1 — src/server/provider-store.js's write moved onto the store writer (its debt row gone) ⇒ 871 − 1 = 870; int411 seam (2026-11-18, both falls kept by arithmetic: 881 − 8 − 2 = 871) — the two lines above: −8; B-3767 unit 2 (restack 2.369.412): −2 — the codex zst cache's and HostManager's ssh control folder's own mkdirSync left their files (the one ensureSocketDir site is src/sock-path.js's row); was 881. Before: int410 seam (rule 2, 2026-11-18): both falls kept (893 − 10 − 2 = 881) — lane bl-windows batch-4 cure: −2 — the layout-history prune's two unlinks went async (persistence.js 28 → 26); then lane lg-store-writes U3 (B-0248): −2 — src/channel-store.js's wake-pace and dispatch ledgers through owe() (paceFlush / dispatchFlush rows gone); U2: −2 — src/turn-carry.js's outstanding table handed to the writer (its row gone); U1: −6 — src/server/decision-engine.js's memo and day's counter handed to the writer (its writeJsonAtomic ×4 + the helper's write and rename); was 893. Was 516 — lane job-logs-sweep r3: −2 — jobs.js's two load-failure set-aside renames moved into JobManager._logsHeldFile, a durable row (the failed load's fact on disk); on .397's 518 (hub-sync-holds −2) ⇒ 516 [moved onto the .414 train: its own 850 -1 = 849]
 // [file, scope, n, class, other readers, what a lost last write costs, why]
 const ROWS = [
   ["src/agy-store-fs.js","*",1,"debt","—","—","newly seen (channel-store-off-loop, commit 1: the census counts mkdirSync, openSync for write / append, rmSync and unlinkSync): a directory made, a file opened for write or removed on the main thread — onto the store writer when its store is next touched"],
@@ -177,7 +177,7 @@ const ROWS = [
   ["src/remote-fs.js","*",2,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched"],
   ["src/routes/editor.js","*",2,"not-a-store","—","—","a person's own file (the editor's save)"],
   ["src/routes/files.js","*",21,"not-a-store","—","—","a person's own files (the file explorer); ckpt61 cure 3: + the archive entry's temp folder removed on its two new refusals (a reader that never started, a write that failed)"],
-  ["src/routes/persistence.js","*",20,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26)"],
+  ["src/routes/persistence.js","*",16,"debt","—","—","a store's synchronous write on the main thread — onto the store writer when its store is next touched (bl-windows batch-4 cure: the layout-history prune's two unlinks went async, 28 → 26; lane bl-loop-b, B-0248 (c): the conversation list's, the bookmarks' and the custom themes' writes are the store writer's — they no longer make the data folder at each write, the start read made it: 20 → 16)"],
   ["src/safe-fs-worker.js","*",15,"not-main","—","—","the SafeFs worker thread"],
   ["src/search-index-worker.js","*",3,"not-main","—","—","the search index worker thread"],
   ["src/secret-box.js","*",6,"durable","—","NOT idempotent: money / authority / a credential","a store key file (secrets) — must be on disk before the answer"],
@@ -540,6 +540,7 @@ console.log('② the synchronous flushes the main thread waits on — named debt
     ['src/jobs.js', 2, 'JobManager._onDisk() — one file\'s write waited for: the run\'s intent before its child, the boot\'s skeletons, a notifications claim / drain (the moved2 cure 2: an answer, a removal, a clear\'s asks, the gc\'s log folders wait on NOTHING — their steps ride the landing); _load() — an engine made again in the same process lands what the last one owed, a write still held holds the store unread (EOWED)'],
     ['src/turn-carry.js', 1, 'createOutstanding() — a table made AGAIN in the same process (a suite\'s new hub on the same data dir) lands the write the last one still owed before it reads the file; a hub\'s boot owes nothing (pending() is false: no wait) — lane lg-store-writes U2'],
     ['src/server/decision-engine.js', 1, 'create() — an engine made AGAIN in the same process (a suite\'s restart) lands the memo / counter write the last one still owed before it reads the files; a hub\'s boot owes nothing (pending() is false: no wait) — lane lg-store-writes U1'],
+    ['src/store-hold.js', 1, 'readAtStart() — a persistence store made AGAIN in the same process (a suite\'s restart) lands the write the last one still owed for its file before it reads; a hub\'s start owes nothing (pending() is false: no wait) — lane bl-loop-b, B-0248 (c), 主开发 r912'],
     ['src/server/device-alerts.js', 1, 'create() — a ledger made AGAIN in the same process (a suite\'s restart) lands the write the last one still owed before it reads the file; a hub\'s boot owes nothing (pending() is false: no wait) — lane lg-store-writes, 主开发 2026-11-20 03:10Z'],
     ['src/desktop-serve.js', 2, 'shutdown() — the machine\'s stop lands the record file before the hub hands over (bounded; a held storage said); reshapeStore() — a boot migration\'s reshape on disk before the runner records it (once, at the boot; not landed ⇒ it throws and runs again) — lane lg-store-writes, 主开发 2026-11-20 03:10Z'],
     ['src/hosts.js', 1, 'flushThrottled() — hosts.json on disk before the shutdown hands over (server.js), before the dial-token migration renames its legacy file (its hashes on disk first: a kill between would lose them) and before a suite reads the file (B-48a4: every save of hosts.json goes through the store writer); one small whole-file write (the machines\' records, KBs), the write in flight first'],
@@ -2735,7 +2736,7 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
               if (!(DIRECT_OK[f] || []).some((re) => re.test(a0))) out.bad.push(`fs.${f}(${a0}) — a direct write of ${a0}`);
             }
             if (c.type === 'Identifier' && c.name === 'writeJsonAtomic') { out.atomic.push(a0); if (!/^path\.join\(HISTORY_DIR, /.test(a0)) out.bad.push(`writeJsonAtomic(${a0}) — the atomic writer aimed outside the rollback points`); }
-            if (c.type === 'MemberExpression' && !c.computed && (c.property.name === 'write' || c.property.name === 'flush') && c.object.type === 'Identifier' && /Hold$/.test(c.object.name)) out.holdWrites[c.object.name] = (out.holdWrites[c.object.name] || 0) + 1;   // (B-225b's second half: a hold's FLUSH is its write door too — the owed write retried behind it)
+            if (c.type === 'MemberExpression' && !c.computed && (c.property.name === 'write' || c.property.name === 'flush' || c.property.name === 'owe') && c.object.type === 'Identifier' && /Hold$/.test(c.object.name)) out.holdWrites[c.object.name] = (out.holdWrites[c.object.name] || 0) + 1;   // (B-0248 (c): a hold's OWE — the store writer's road — is its write door too; B-225b's second half: a hold's FLUSH is its write door too — the owed write retried behind it)
             if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'setAside') out.setAside++;
           }
           for (const k of Object.keys(n)) { if (k === 'start' || k === 'end') continue; const v = n[k]; if (Array.isArray(v)) v.forEach(walk); else if (v && typeof v === 'object' && typeof v.type === 'string') walk(v); }
@@ -2891,6 +2892,344 @@ console.log('⑪ the store hold: a store that could not be read has no value, an
       ok(XS.whole.status === 200 && XS.whole.body.success === true && XS.unsavedWords === 0 && XS.told.every((x) => !x.unsaved),
         'CONTROL (the release\'s swallow, in a copy): the restore answers SUCCESS over a write the storage refused and nothing is said — red', { whole: XS.whole, words: XS.unsavedWords });
     }
+  } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
+}
+
+// ⑭ B-0248 (c) (lane bl-loop-b, 主开发 r912): THE CONVERSATION LIST, THE BOOKMARKS AND THE CUSTOM THEMES OFF THE LOOP. Measured first
+// (a probe, never lined — the real persistence router, a 500 ms stall placed in each rename / fsync): every write of these stores held
+// the hub's loop for its rename (501 ms), before its own answer. Now each is THE STORE WRITER's (src/store-hold.js owe/after). LAWS:
+// (a) a change is the PENDING state: two quick renames, the first still IN FLIGHT, both land, in order — RED: the second built on the
+//     DISK's state loses the first; (b) every door answers AFTER the landing (the pages told at the landing, before the answer; an
+//     import after every store it wrote) — RED: the PATCH door's answer at once, the import's answer before its stores; (c) the loop
+//     no longer waits: a 300 ms stall placed in each main-thread rename / fsync, the real writer — RED: no writer (the release: the
+//     write at the call); (d) the archive verb tells «archived» only once the list is on disk — RED: its wait cut; (e) the stop lands
+//     every store moved here (the writer's exit flush) — RED: a change kept in memory only. Each RED an anchored edit, in a copy.
+console.log('⑭ B-0248 (c): the conversation list, the bookmarks and the custom themes off the loop — each change built on the PENDING state, each answer after its landing');
+{
+  const { scratchDir, anchored } = await import('./scratch.mjs');
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const PREL = 'src/routes/persistence.js', PSRC = fs.readFileSync(path.join(REPO, PREL), 'utf8');
+  const COREL = 'src/server/conversation-ops.js', COSRC = fs.readFileSync(path.join(REPO, COREL), 'utf8');
+  const J = (x) => JSON.stringify(x);
+  const roots = [];
+  const quiet = { log() { }, warn() { }, error() { } };
+  // A GATED WRITER — the store writer's contract (dirty / durable({answer}) / pending / flushSync / whyNotDurable), its storage HELD
+  // by the leg: ONE write of a file in flight at a time, its bytes made when it starts (produce — the latest state), landed only when
+  // the leg says so; then its waiters (a version at or before the landed one) are answered, then onWritten, then the next version
+  // starts — made NOW. A failed landing keeps the change owed and answers its waiters false (the writer's own failure road)
+  const gatedWriter = () => {
+    const S = new Map(), names = [];
+    const st = (f) => { if (!S.has(f)) S.set(f, { v: 0, wv: 0, flight: null, dirty: false, o: null, waiters: [] }); return S.get(f); };
+    const start = (s) => { if (s.flight || !s.dirty) return; s.dirty = false; const b = s.o.produce(); s.flight = { v: s.v, bytes: Array.isArray(b) ? b.join('') : String(b) }; };
+    const W = {
+      dirty(f, o) { names.push(o && o.name); const s = st(f); s.o = o; s.v++; s.dirty = true; start(s); },
+      pending: (f) => { const s = S.get(f); return !!s && (s.dirty || !!s.flight); },
+      durable(f, { answer = null } = {}) {
+        const s = S.get(f); const done = (ok) => { if (answer) answer(ok); return ok; };
+        if (!s || (!s.dirty && !s.flight)) return Promise.resolve(done(true));
+        const want = s.v; return new Promise((res) => s.waiters.push({ want, cb: (ok) => res(done(ok)) }));
+      },
+      whyNotDurable: () => ({ why: 'failed', code: 'EIO' }),
+      flushSync(files) { for (const f of files || [...S.keys()]) { const s = S.get(f); for (let i = 0; s && (s.flight || s.dirty) && i < 10; i++) land1(f, true); } return { written: [], left: [] }; },
+    };
+    function land1(gwFile, ok = true) {
+      const s = S.get(gwFile); if (!s) return; if (!s.flight) start(s); const fl = s.flight; if (!fl) return;
+      s.flight = null;
+      if (ok) {
+        const gwTmp = gwFile + '.gw.tmp'; fs.writeFileSync(gwTmp, fl.bytes); fs.renameSync(gwTmp, gwFile); s.wv = fl.v;
+        const keep = []; for (const w of s.waiters) { if (w.want <= s.wv) w.cb(true); else keep.push(w); } s.waiters = keep;
+        try { s.o.onWritten && s.o.onWritten(true, null); } catch { }
+        start(s);
+      } else {
+        s.dirty = true; const ws = s.waiters; s.waiters = []; for (const w of ws) w.cb(false);
+        try { s.o.onWritten && s.o.onWritten(false, Object.assign(new Error('EIO: a stand-in'), { code: 'EIO' })); } catch { }
+      }
+    }
+    return { W, names, land: (ok = true) => { for (const f of [...S.keys()]) land1(f, ok); }, inFlight: () => [...S.values()].filter((s) => s.flight).length };
+  };
+  const fresh = (P) => { for (const k of Object.keys(require.cache)) if (k.endsWith(path.join('src', 'routes', 'persistence.js'))) delete require.cache[k]; return P(); };
+  const setupP = (P, d, W, told, hooked) => {
+    P.setup({ dataDir: d, wss: { clients: new Set([{ readyState: 1, send: (t) => told.push(JSON.parse(t)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null, getHosts: () => [], getMounts: () => [], getTasks: () => null, getAccounts: () => null, getUsageHistory: () => null, onSettingsWrite: () => { }, onUserStateWrite: (s) => hooked.push(s), writer: W });
+    return P.router;
+  };
+  const handlerOf = (R, method, p) => { const l = R.stack.find((x) => x.route && x.route.path === p && x.route.methods[method]); return l.route.stack[l.route.stack.length - 1].handle; };
+  const call = (R, method, p, { body = {}, params = {}, headers = {}, tap = null } = {}) => {
+    const out = { status: 200, body: undefined, answered: false };
+    const res = { status(c) { out.status = c; return res; }, json(x) { out.body = x; out.answered = true; if (tap) out.tapped = tap(); return res; }, set() { return res; }, setHeader() { }, headersSent: false };
+    try { handlerOf(R, method, p)({ body, params, headers: { 'sec-fetch-site': 'same-origin', ...headers }, query: {} }, res, (e) => { if (e) out.err = String(e && e.message || e); }); } catch (e) { out.err = String(e && e.message || e); }
+    return out;
+  };
+  const seed = (d) => {
+    fs.writeFileSync(path.join(d, 'user-state.json'), J({ customNames: {}, archivedSessions: [] }));   // a list THERE (a store NOT there is born at the call — R6)
+    fs.writeFileSync(path.join(d, 'bookmarks.json'), J([{ label: 'Home', path: '/home' }]));
+    fs.writeFileSync(path.join(d, 'custom-themes.json'), J({}));
+  };
+  const disk = (d, f) => JSON.parse(fs.readFileSync(path.join(d, f), 'utf8'));
+  try {
+    // (a) + (b): THE PENDING STATE and THE ANSWER AFTER THE LANDING, through the router's own doors
+    const lawScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-' + tag); roots.push(d); seed(d);
+      const g = gatedWriter(), told = [], hooked = [];
+      const R = setupP(fresh(load), d, g.W, told, hooked);
+      call(R, 'get', '/api/user-state'); call(R, 'get', '/api/bookmarks'); call(R, 'get', '/api/custom-themes');   // the start reads
+      for (let i = 0; i < 4 && g.inFlight(); i++) g.land();   // (the start read's own rewrite, if any, landed first: the scene starts with nothing in flight)
+      told.length = 0; hooked.length = 0;
+      const out = {};
+      out.one = R.setCustomName('claude:a', 'one');            // handed to the writer: IN FLIGHT, held
+      out.two = R.setCustomName('claude:b', 'two');            // the second, while the first is not on disk
+      out.disk0 = disk(d, 'user-state.json').customNames;      // nothing on disk yet (the loop wrote nothing)
+      out.getInFlight = (call(R, 'get', '/api/user-state').body || {}).customNames;   // what LEAVES the store is what landed (the doors build on the pending)
+      out.readerInFlight = R.readUserState().customNames;
+      const revsTold = () => told.filter((t) => t.type === 'user-state-updated').map((t) => t.state.stateRev);
+      const patch = call(R, 'patch', '/api/user-state', { body: { starredSessions: ['claude:a'] }, tap: revsTold });   // a door's act: its answer waits
+      out.inFlight = g.inFlight();
+      g.land();                                                // the FIRST write lands: the first rename only
+      out.disk1 = disk(d, 'user-state.json').customNames;
+      out.answeredAt1 = patch.answered; out.toldAt1 = told.filter((t) => t.type === 'user-state-updated').length;
+      g.land();                                                // the next — made at the first's landing, from the PENDING state
+      const f2 = disk(d, 'user-state.json');
+      out.disk2 = f2.customNames; out.star2 = f2.starredSessions; out.rev2 = f2.stateRev;
+      out.patch = { status: patch.status, answered: patch.answered, rev: patch.body && patch.body.rev, toldAtAnswer: patch.tapped };
+      out.getLanded = (call(R, 'get', '/api/user-state').body || {}).customNames;
+      const us = told.filter((t) => t.type === 'user-state-updated');
+      out.told = us.map((t) => ({ rev: t.state.stateRev, names: t.state.customNames }));
+      out.hooked = hooked.map((s) => s.stateRev);
+      out.names = [...new Set(g.names)];
+      // the bookmarks and the custom themes: the same road (each change on the PENDING state; the answer and the pages' word at the landing)
+      const bm = call(R, 'post', '/api/bookmarks', { body: [{ label: 'A', path: '/a' }] });
+      const th1 = call(R, 'post', '/api/custom-themes', { body: { name: 'one', css: { '--a': '1' } } });
+      const th2 = call(R, 'post', '/api/custom-themes', { body: { name: 'two', css: { '--b': '2' } } });   // while the first theme is in flight
+      out.bmBefore = { answered: bm.answered, told: told.filter((t) => t.type === 'bookmarks-updated').length, onDisk: disk(d, 'bookmarks.json').length };
+      out.thBefore = { answered: th1.answered || th2.answered, told: told.filter((t) => t.type === 'custom-themes-updated').length };
+      for (let i = 0; i < 3; i++) g.land();
+      out.bm = { answered: bm.answered, status: bm.status, told: told.filter((t) => t.type === 'bookmarks-updated').length, onDisk: disk(d, 'bookmarks.json').map((b) => b.label) };
+      out.th = { answered: th1.answered && th2.answered, onDisk: Object.keys(disk(d, 'custom-themes.json')).sort(), frames: told.filter((t) => t.type === 'custom-themes-updated').map((t) => Object.keys(t.themes).sort().join(',')) };
+      // a write the storage REFUSES: the door says so by name (503 not-durable), the change stays owed, and lands at the next try
+      const xFrames = () => told.filter((t) => t.type === 'user-state-updated' && J(t.state.archivedFolders) === J(['/x'])).length;
+      const fail = call(R, 'patch', '/api/user-state', { body: { archivedFolders: ['/x'] } });
+      g.land(false);
+      out.fail = { status: fail.status, code: fail.body && fail.body.code, framesAtFail: xFrames() };
+      g.land(); out.failLanded = disk(d, 'user-state.json').archivedFolders; out.failFrames = xFrames();
+      // the import spans stores: answered once every store it wrote landed
+      const imp = call(R, 'post', '/api/config/import', { body: { file: { app: 'vibespace-config', sections: { bookmarks: [{ label: 'I', path: '/i' }], userState: { customNames: { 'claude:i': 'imported' } } } }, sections: ['bookmarks', 'userState'] } });
+      out.impBefore = imp.answered;
+      for (let i = 0; i < 3; i++) g.land();
+      out.imp = { answered: imp.answered, status: imp.status, applied: imp.body && imp.body.applied };
+      return out;
+    };
+    const real = await lawScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(real.one === true && real.two === true && J(real.disk0) === '{}' && real.inFlight === 1 && J(real.disk1) === J({ 'claude:a': 'one' }) && J(real.disk2) === J({ 'claude:a': 'one', 'claude:b': 'two' }) && J(real.star2) === J(['claude:a']),
+      '⑭a two quick renames, the first IN FLIGHT: nothing on disk at the call (the loop wrote nothing), the first lands alone, the second lands WITH it (built on the pending state) — both, in order', real);
+    ok(J(real.getInFlight) === '{}' && J(real.readerInFlight) === '{}' && J(real.getLanded) === J(real.disk2),
+      '⑭b WHAT LEAVES THE STORE IS WHAT LANDED: while the renames are in flight the GET and the hub\'s readers (router.readUserState — the groups, isArchived) hand the state on disk; after the landing, the landed one', { inFlight: real.getInFlight, reader: real.readerInFlight, landed: real.getLanded });
+    ok(Array.isArray(real.patch.toldAtAnswer) && real.patch.toldAtAnswer.includes(real.patch.rev), '⑭b the pages are told the landed state BEFORE the door answers (the frame of the answer\'s rev was sent when it answered)', real.patch);
+    ok(real.answeredAt1 === false && real.toldAt1 === 1 && real.patch.answered && real.patch.status === 200 && real.patch.rev === real.rev2 && J(real.told.map((t) => t.rev)) === J([real.rev2 - 2, real.rev2]) && real.hooked.length === 2 && J(real.names) === J(['user-state.write']),
+      '⑭b the door\'s answer waits for its landing (not answered while only the first rename is on disk); every page told what LANDED, once a landing (2 frames for 3 changes), before the answer; the write hook at each landing; the writer\'s row user-state.write', { at1: real.answeredAt1, toldAt1: real.toldAt1, patch: real.patch, told: real.told, hooked: real.hooked, names: real.names });
+    ok(!real.bmBefore.answered && real.bmBefore.told === 0 && real.bmBefore.onDisk === 1 && !real.thBefore.answered && real.thBefore.told === 0 && real.bm.answered && real.bm.status === 200 && real.bm.told === 1 && J(real.bm.onDisk) === J(['A']) && real.th.answered && J(real.th.onDisk) === J(['one', 'two']),
+      '⑭b the bookmarks and the custom themes: nothing told or answered before the landing; then told once and answered; two quick theme saves both land', { bmBefore: real.bmBefore, thBefore: real.thBefore, bm: real.bm, th: real.th });
+    ok(J(real.th.frames) === J(['one', 'one,two']), '⑭b each theme frame tells what LANDED — «one» alone at the first landing, then «one,two» (never a theme still in flight)', real.th.frames);
+    ok(real.fail.framesAtFail === 0 && real.failFrames === 1, '⑭b a write the storage refused is told NOTHING; its retry that lands is told exactly ONCE', { atFail: real.fail.framesAtFail, after: real.failFrames });
+    ok(real.fail.status === 503 && real.fail.code === 'not-durable' && J(real.failLanded) === J(['/x']) && real.impBefore === false && real.imp.answered && real.imp.status === 200 && J(real.imp.applied) === J(['userState', 'bookmarks']),
+      '⑭b a write the storage refuses is answered 503 not-durable BY NAME and stays owed (it lands at the next try); the import answers only once both its stores landed', { fail: real.fail, failLanded: real.failLanded, impBefore: real.impBefore, imp: real.imp });
+    // RED (a): the second rename built on the DISK's state
+    const DISK_A = "    const cur = readUserState();\n    const names = { ...(cur.customNames || {}) };\n";
+    ok(PSRC.split(DISK_A).length === 2, 'control setup: the rename\'s read of the list is found once');
+    const XA = await lawScene(() => mutantCopies('swc-pl-disk', REPO).load(PREL, anchored(PSRC, DISK_A, "    const cur = JSON.parse(require('fs').readFileSync(USER_STATE_FILE, 'utf8'));   // MUTANT: the DISK's state\n    const names = { ...(cur.customNames || {}) };\n", 'pl-disk-state')), 'disk');
+    ok(J(XA.disk2) === J({ 'claude:b': 'two' }), 'CONTROL (the second rename built on the DISK\'s state, in a copy): it loses the first — only «two» lands (red)', XA.disk2);
+    // RED (b): the PATCH door answered at once; the import answered before its stores
+    const ANS_A = /^( {4}const rev = UO\.revOf\(_userStateCache\);[^\n]*\n {4}answerAfter\(userStateHold, res, \(\) => res\.json\(\{ success: true, rev, epoch: userStateEpoch\(\) \}\)\);[^\n]*\n)(?=  \}\);\n  \/\/ THE OPS DOOR)/m;
+    const IMP_A = '    afterAll(movedOf(), (bad) => {\n';
+    ok(PSRC.split(IMP_A).length === 2, 'control setup: the import\'s wait for its stores is found once');
+    const XB = await lawScene(() => mutantCopies('swc-pl-now', REPO).load(PREL, anchored(anchored(PSRC, ANS_A, "    res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });   // MUTANT: answered at once\n", 'pl-answer-now'), IMP_A, '    afterAll([], (bad) => {   // MUTANT: answered before its stores\n', 'pl-import-now')), 'now');
+    ok(XB.answeredAt1 === true && XB.impBefore === true, 'CONTROL (the PATCH door\'s answer at once, the import\'s before its stores — in a copy): both answered while their change is not on disk (red)', { at1: XB.answeredAt1, imp: XB.impBefore });
+    // RED (a), THE MECHANISM: the change taken but the list in memory NOT moved to it (the next change built on the state the start read)
+    const ACC_A = "accepted: () => { _userStateCache = st; _userStateFacts.commit(draft); } }); }\n";
+    ok(PSRC.split(ACC_A).length === 2, 'control setup: the list\'s accepted (the pending state) is found once');
+    const XM = await lawScene(() => mutantCopies('swc-pl-nopending', REPO).load(PREL, anchored(PSRC, ACC_A, "accepted: () => { _userStateFacts.commit(draft); } }); }   // MUTANT: the pending state never taken\n", 'pl-no-pending')), 'nopending');
+    ok(J(XM.disk2) !== J({ 'claude:a': 'one', 'claude:b': 'two' }), 'CONTROL (the list in memory never moved to the pending state, in a copy): the quick renames do not both land — each change built on the state the start read (red)', XM.disk2);
+    // RED: a theme edited IN PLACE (the fresh read's MUST — the release's edit of the set in memory)
+    const TH_A = "    const data = { ...readCustomThemes() };\n    data[name] = { css, terminal: terminal || {} };\n";
+    ok(PSRC.split(TH_A).length === 2, 'control setup: the theme save\'s copy is found once');
+    const XT = await lawScene(() => mutantCopies('swc-pl-inplace', REPO).load(PREL, anchored(PSRC, TH_A, "    const data = readCustomThemes();   // MUTANT: edited in place\n    data[name] = { css, terminal: terminal || {} };\n", 'pl-theme-in-place')), 'inplace');
+    ok(XT.th.frames[0] === 'one,two', 'CONTROL (a theme edited in place, in a copy): the FIRST landing tells «one,two» while the file holds «one» alone (red)', XT.th.frames);
+    // RED: the readers handed the PENDING list
+    const OUT_A = "  function userStateOut() { const st = readUserState(); return _userStateLandedSt || st; }\n";
+    ok(PSRC.split(OUT_A).length === 2, 'control setup: the readers\' landed list is found once');
+    const XO = await lawScene(() => mutantCopies('swc-pl-outpending', REPO).load(PREL, anchored(PSRC, OUT_A, "  function userStateOut() { return readUserState(); }   // MUTANT: the pending list\n", 'pl-out-pending')), 'outpending');
+    ok(J(XO.getInFlight) === J({ 'claude:a': 'one', 'claude:b': 'two' }), 'CONTROL (the readers handed the pending list, in a copy): the GET shows both renames while neither is on disk (red)', XO.getInFlight);
+    // RED: the hold answers BEFORE it tells (the store hold, in a copy loaded in its place)
+    const SHREL = 'src/store-hold.js', SHSRC = fs.readFileSync(path.join(REPO, SHREL), 'utf8'), SHP = require.resolve(path.join(REPO, SHREL));
+    const TELL_A = "    w.durable(file, { answer: (ok) => { if (ok) tell(); answer(ok); } });\n";
+    ok(SHSRC.split(TELL_A).length === 2, 'control setup: the hold\'s tell-then-answer is found once');
+    const holdX = mutantCopies('swc-pl-answerfirst', REPO).load(SHREL, anchored(SHSRC, TELL_A, "    w.durable(file, { answer: (ok) => { answer(ok); if (ok) tell(); } });   // MUTANT: answered first\n", 'pl-answer-first'));
+    const savedHold = require.cache[SHP];
+    let XF;
+    try { require.cache[SHP] = { id: SHP, filename: SHP, loaded: true, exports: holdX, children: [], paths: [] }; XF = await lawScene(() => require(path.join(REPO, PREL)), 'answerfirst'); }
+    finally { if (savedHold) require.cache[SHP] = savedHold; else delete require.cache[SHP]; }
+    ok(Array.isArray(XF.patch.toldAtAnswer) && !XF.patch.toldAtAnswer.includes(XF.patch.rev), 'CONTROL (the hold answering before it tells, in a copy): the door answers while no page has been told its state (red)', XF.patch);
+
+    // (c) THE LOOP NO LONGER WAITS — the REAL store writer (its own thread), a stall PLACED in every main-thread rename / fsync of the
+    // scene's folder (Atomics.wait inside the call: never load; the writer's thread has its own fs). RED: no writer — the release's
+    // write at the call
+    const SW = require(path.join(REPO, 'src/store-writer.js'));
+    const STALL = 300, SAB = new Int32Array(new SharedArrayBuffer(4));
+    const loopScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-loop-' + tag); roots.push(d); seed(d);
+      const w = SW.create({ log: quiet, graceMs: 5000 });
+      const told = [], hooked = [];
+      const R = setupP(fresh(load), d, w, told, hooked);
+      call(R, 'get', '/api/user-state');
+      await new Promise((r) => w.durable(path.join(d, 'user-state.json'), { answer: r }));   // (the start read's rewrite, if any, landed)
+      const oRen = fs.renameSync, oFsync = fs.fsyncSync;
+      fs.renameSync = function (a, ...r) { if (String(a).startsWith(d)) Atomics.wait(SAB, 0, 0, STALL); return oRen.call(this, a, ...r); };
+      fs.fsyncSync = function (...r) { Atomics.wait(SAB, 0, 0, STALL); return oFsync.apply(this, r); };
+      let last = performance.now(), gap = 0, on = true;
+      const tick = () => { const t = performance.now(); if (t - last > gap) gap = t - last; last = t; if (on) setTimeout(tick, 1); };
+      setTimeout(tick, 1);
+      const t0 = performance.now();
+      let a, b;
+      try {
+        a = call(R, 'patch', '/api/user-state', { body: { customNames: { 'claude:l': 'loop' } } });
+        b = call(R, 'post', '/api/bookmarks', { body: [{ label: 'L', path: '/l' }] });
+        for (let i = 0; i < 400 && !(a.answered && b.answered); i++) await new Promise((r) => setTimeout(r, 5));   // a wait for WHAT HAPPENED: both answered
+      } finally { fs.renameSync = oRen; fs.fsyncSync = oFsync; on = false; }
+      await new Promise((r) => setTimeout(r, 5));
+      const out = { gap: Math.round(gap), ms: Math.round(performance.now() - t0), answered: a.answered && b.answered, status: [a.status, b.status], onDisk: disk(d, 'user-state.json').customNames['claude:l'] || null, bm: disk(d, 'bookmarks.json').map((x) => x.label) };
+      try { w.stop(); } catch { }
+      return out;
+    };
+    const LR = await loopScene(() => require(path.join(REPO, PREL)), 'real');
+    console.log(`  ⊙ ⑭c the loop's longest turn with ${STALL} ms placed in each main-thread rename / fsync: ${LR.gap} ms over ${LR.ms} ms (a rename and a bookmarks save, both answered after their landing)`);
+    ok(LR.answered && J(LR.status) === J([200, 200]) && LR.onDisk === 'loop' && J(LR.bm) === J(['L']) && LR.gap < STALL / 2, `⑭c the loop no longer waits on the storage: with ${STALL} ms placed in each main-thread rename / fsync the longest turn is ${LR.gap} ms (< ${STALL / 2}); both acts answered after their landing, both on disk`, LR);
+    const NOW_A = "  const storeW = () => writer || require('../store-writer.js').storeWriter();\n";
+    ok(PSRC.split(NOW_A).length === 2, 'control setup: the stores\' writer is found once');
+    const XC = await loopScene(() => mutantCopies('swc-pl-nowriter', REPO).load(PREL, anchored(PSRC, NOW_A, '  const storeW = () => null;   // MUTANT: no writer — the write at the call (the release)\n', 'pl-no-writer')), 'nowriter');
+    ok(XC.gap >= STALL && XC.onDisk === 'loop', `CONTROL (no writer — the release's write at the call, in a copy): the loop is held ${XC.gap} ms (≥ ${STALL}) by the rename (red)`, XC);
+
+    // (d) THE ARCHIVE VERB tells «archived» only once the list is ON DISK (an agent told so never asks again)
+    const verbScene = async (CO, landed) => {
+      const V = CO.automationVerbs({ activeSessions: new Map(), archive: () => ({ ok: true, already: false, landed }), deadOf: () => ({ conversationId: 'c-1', sessionKey: 'claude:c-1', name: 'one' }), isArchived: () => false });
+      const p = V['conversations.archive']({ target: 'c-1' }, { caller: { conversationId: 'c-0', sessionKey: 'claude:c-0' }, keyId: 'k-1', reach: () => ({ ok: true, by: 'opener' }), scopes: [] });
+      let settled = null; p.then((r) => { settled = r; }, (e) => { settled = { threw: String(e && e.message || e) }; });
+      return { p, now: () => settled };
+    };
+    let release; const pend = new Promise((r) => { release = r; });
+    const CO = require(path.join(REPO, COREL));
+    const v1 = await verbScene(CO, pend);
+    await new Promise((r) => setTimeout(r, 20)); const before = v1.now();
+    release(true); await v1.p; const after1 = v1.now();
+    const v2 = await verbScene(CO, Promise.resolve(false)); await v2.p; const notOn = v2.now();
+    ok(before === null && after1 && after1.ok === true && after1.archived === true && notOn && notOn.ok === false && notOn.code === 'not-durable',
+      '⑭d the archive verb waits for the list\'s landing: no answer while it is in flight, «archived» after; a list not on disk is answered not-durable BY NAME', { before, after: after1, notOn });
+    const VERB_A = "      if (a.landed && !(await a.landed)) return { ok: false, code: 'not-durable',";
+    ok(COSRC.split(VERB_A).length === 2, 'control setup: the verb\'s wait for the landing is found once');
+    const COX = mutantCopies('swc-pl-verb', REPO).load(COREL, anchored(COSRC, VERB_A, "      if (false && a.landed && !(await a.landed)) return { ok: false, code: 'not-durable',", 'pl-verb-nowait'));
+    let release2; const pend2 = new Promise((r) => { release2 = r; });
+    const vx = await verbScene(COX, pend2); await new Promise((r) => setTimeout(r, 20)); const xBefore = vx.now(); release2(true);
+    ok(xBefore && xBefore.ok === true && xBefore.archived === true, 'CONTROL (the verb\'s wait cut, in a copy): «archived» told while the list is not on disk (red)', xBefore);
+
+    // (d') THE VERB ON THE REAL ROUTER: conversations.archive over archiveSession, the list's write held by the gated writer — no answer
+    // while in flight; «archived» at the landing; a write the storage refuses ⇒ not-durable, and asked again ⇒ already_archived only once
+    // it is on disk. RED: archiveSession's `landed` answered at once (in a copy)
+    const realVerb = async (load, tag) => {
+      const d = scratchDir('swc-pl-verb-' + tag); roots.push(d); seed(d);
+      const g = gatedWriter();
+      const R = setupP(fresh(load), d, g.W, [], []);
+      call(R, 'get', '/api/user-state');
+      const V = CO.automationVerbs({ activeSessions: new Map(), archive: (k) => R.archiveSession(k), deadOf: (t) => ({ conversationId: t, sessionKey: 'claude:' + t, name: t }), isArchived: (k) => R.isArchived(k) });
+      const ask = (t) => { let r = null; const p = V['conversations.archive']({ target: t }, { caller: { conversationId: 'c-0', sessionKey: 'claude:c-0' }, keyId: 'k-1', reach: () => ({ ok: true, by: 'opener' }), scopes: [] }); p.then((x) => { r = x; }, (e) => { r = { threw: String(e && e.message || e) }; }); return { p, now: () => r }; };
+      const tick = () => new Promise((r) => setTimeout(r, 15));
+      const out = {};
+      const a1 = ask('c-1'); await tick(); out.inFlight = a1.now(); out.isArchivedInFlight = R.isArchived('claude:c-1');
+      g.land(); await a1.p; out.landed = a1.now(); out.onDisk = disk(d, 'user-state.json').archivedSessions.includes('claude:c-1');
+      const a2 = ask('c-2'); await tick(); g.land(false); await a2.p; out.refused = a2.now();
+      const a3 = ask('c-2'); await tick(); out.againInFlight = a3.now();
+      g.land(); await a3.p; out.again = a3.now();
+      return out;
+    };
+    const RV = await realVerb(() => require(path.join(REPO, PREL)), 'real');
+    ok(RV.inFlight === null && RV.isArchivedInFlight === false && RV.landed && RV.landed.ok === true && RV.landed.archived === true && RV.onDisk && RV.refused && RV.refused.code === 'not-durable' && RV.againInFlight === null && RV.again && RV.again.code === 'already_archived',
+      '⑭d THE VERB ON THE REAL ROUTER: no answer while the list is in flight (and isArchived still false — what landed); «archived» at the landing, on disk; a refused write ⇒ not-durable; asked again, it waits, then already_archived once on disk', RV);
+    const LAND_A = "    return { ok: true, already: false, landed: landedOf(userStateHold) };\n";
+    ok(PSRC.split(LAND_A).length === 2, 'control setup: archiveSession\'s landing promise is found once');
+    const RVX = await realVerb(() => mutantCopies('swc-pl-landnow', REPO).load(PREL, anchored(PSRC, LAND_A, "    return { ok: true, already: false, landed: Promise.resolve(true) };   // MUTANT: «landed» at once\n", 'pl-landed-now')), 'landnow');
+    ok(RVX.inFlight && RVX.inFlight.archived === true, 'CONTROL (archiveSession\'s landing answered at once, in a copy): the verb says «archived» while the list is not on disk (red)', RVX.inFlight);
+
+    // (f) THE BATCHES DOOR (the page's ops) and A WRITE OF THE FACTS ALONE, through the gated writer; (g) a store NOT THERE; (h) the start
+    // read's own rewrite stays AT THE CALL (the boot's one-time migrations read the file after it)
+    const moreScene = async (load, tag) => {
+      const out = {};
+      { const d = scratchDir('swc-pl-ops-' + tag); roots.push(d); seed(d);
+        const g = gatedWriter(), told = [];
+        const R = setupP(fresh(load), d, g.W, told, []);
+        call(R, 'get', '/api/user-state');
+        const frames = () => told.filter((t) => t.type === 'user-state-updated').length;
+        const b1 = { batches: [{ batch: 'pgops01:1', age: 0, ops: [{ key: 'archivedSessions', item: 'claude:x', value: true }] }] };
+        const o1 = call(R, 'patch', '/api/user-state/batches', { body: b1 });
+        const o2 = call(R, 'patch', '/api/user-state/batches', { body: b1 });   // the page's re-send of the SAME batch, while the first is in flight
+        out.opsBefore = { a: o1.answered, b: o2.answered };
+        g.land(); g.land();
+        out.ops = { a: o1.answered && o1.status, b: o2.answered && o2.status, applied: o1.body && o1.body.applied, held: o2.body && o2.body.held, onDisk: disk(d, 'user-state.json').archivedSessions };
+        const f0 = frames();
+        const b2 = { batches: [{ batch: 'pgops02:1', age: 0, ops: [{ key: 'archivedSessions', item: 'claude:x', value: true }] }] };   // another page's act on a slot already so: its FACTS alone
+        const o3 = call(R, 'patch', '/api/user-state/batches', { body: b2 });
+        out.factsOwed = g.inFlight(); out.factsBefore = o3.answered;
+        g.land(); g.land();
+        out.facts = { answered: o3.answered && o3.status, framesAdded: frames() - f0, applied: o3.body && o3.body.applied };
+      }
+      { const d = scratchDir('swc-pl-none-' + tag); roots.push(d);   // NOTHING there: the list's first change is its exclusive create, AT THE CALL
+        const g = gatedWriter(), told = [];
+        const R = setupP(fresh(load), d, g.W, told, []);
+        call(R, 'get', '/api/user-state');
+        const n1 = call(R, 'patch', '/api/user-state', { body: { customNames: { 'claude:n': 'new' } } });
+        out.none = { answered: n1.answered && n1.status, onDisk: fs.existsSync(path.join(d, 'user-state.json')) ? disk(d, 'user-state.json').customNames : null, owed: g.inFlight(), frames: told.filter((t) => t.type === 'user-state-updated').length };
+        const n2 = call(R, 'patch', '/api/user-state', { body: { customNames: { 'claude:n': 'next' } } });   // the file is THERE now: the writer's
+        out.none.secondOwed = g.inFlight(); out.none.secondBefore = n2.answered; g.land(); out.none.second = n2.answered && disk(d, 'user-state.json').customNames['claude:n'];
+      }
+      { const d = scratchDir('swc-pl-rewrite-' + tag); roots.push(d);
+        const LEGACY = '0a0b0c0d-1111-4222-8333-444455556666';   // a legacy ref (no «claude:»): the start read's normalizer rewrites the file
+        fs.writeFileSync(path.join(d, 'user-state.json'), J({ archivedSessions: [LEGACY] }));
+        const g = gatedWriter();
+        const R = setupP(fresh(load), d, g.W, [], []);
+        out.rewrite = { owed: g.inFlight(), onDisk: disk(d, 'user-state.json').archivedSessions, served: R.readUserState().archivedSessions };
+      }
+      return out;
+    };
+    const MR = await moreScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(!MR.opsBefore.a && !MR.opsBefore.b && MR.ops.a === 200 && MR.ops.b === 200 && J(MR.ops.applied) === J(['pgops01:1']) && J(MR.ops.held) === J(['pgops01:1']) && J(MR.ops.onDisk) === J(['claude:x']),
+      '⑭f THE BATCHES DOOR: a batch and its re-send (held as its own duplicate) — NEITHER answered while the write that applied it is in flight; both after its landing; on disk once', MR.ops);
+    ok(MR.factsOwed === 1 && MR.factsBefore === false && MR.facts.answered === 200 && MR.facts.framesAdded === 0,
+      '⑭f a write of the FACTS alone (another page\'s act on a slot already so): handed to the writer, answered after its landing, and told to no page (no new state)', { owed: MR.factsOwed, before: MR.factsBefore, ...MR.facts });
+    ok(MR.none.answered === 200 && J(MR.none.onDisk) === J({ 'claude:n': 'new' }) && MR.none.owed === 0 && MR.none.frames === 1 && MR.none.secondOwed === 1 && MR.none.secondBefore === false && MR.none.second === 'next',
+      '⑭g a list NOT THERE: its first change is the exclusive create AT THE CALL (on disk at once, nothing owed, answered, told once); the next goes to the writer', MR.none);
+    ok(MR.rewrite.owed === 0 && J(MR.rewrite.onDisk) === J(['claude:' + '0a0b0c0d-1111-4222-8333-444455556666']) && J(MR.rewrite.served) === J(MR.rewrite.onDisk),
+      '⑭h the start read\'s own rewrite stays AT THE CALL: the legacy ref is normalized ON DISK when the start read returns (the boot\'s one-time migrations read the file after it) — nothing owed to the writer', MR.rewrite);
+    const REW_A = "      try { userStateHold.write(_userStateCache, userStateText(_userStateCache)); }\n";
+    ok(PSRC.split(REW_A).length === 2, 'control setup: the start read\'s rewrite is found once');
+    const MRX = await moreScene(() => mutantCopies('swc-pl-rewriteowed', REPO).load(PREL, anchored(PSRC, REW_A, "      try { userStateHold.owe(_userStateCache, { name: 'user-state.write', bytes: userStateBytes }); }   // MUTANT: handed to the writer\n", 'pl-rewrite-owed')), 'rewriteowed');
+    ok(MRX.rewrite.owed === 1 && J(MRX.rewrite.onDisk) !== J(MRX.rewrite.served), 'CONTROL (the start read\'s rewrite handed to the writer, in a copy): when the start read returns the file still holds the legacy ref — a migration reading it then reads the old list (red)', MRX.rewrite);
+
+    // (e) THE STOP lands every store moved here: the REAL writer's exit (beginExit + exitFlush) right after three acts, before any landing
+    const stopScene = async (load, tag) => {
+      const d = scratchDir('swc-pl-stop-' + tag); roots.push(d); seed(d);
+      const w = SW.create({ log: quiet, graceMs: 5000 });
+      const R = setupP(fresh(load), d, w, [], []);
+      call(R, 'get', '/api/user-state'); call(R, 'get', '/api/bookmarks'); call(R, 'get', '/api/custom-themes');
+      await new Promise((r) => w.durable(path.join(d, 'user-state.json'), { answer: r }));
+      R.setCustomName('claude:s', 'stop');
+      call(R, 'post', '/api/bookmarks', { body: [{ label: 'S', path: '/s' }] });
+      call(R, 'post', '/api/custom-themes', { body: { name: 'stop', css: { '--s': '1' } } });
+      try { w.beginExit(); w.exitFlush(); } catch (e) { return { threw: String(e && e.message || e) }; }
+      const out = { name: disk(d, 'user-state.json').customNames['claude:s'] || null, bm: disk(d, 'bookmarks.json').map((x) => x.label), th: Object.keys(disk(d, 'custom-themes.json')) };
+      try { w.stop(); } catch { }
+      return out;
+    };
+    const SR1 = await stopScene(() => require(path.join(REPO, PREL)), 'real');
+    ok(SR1.name === 'stop' && J(SR1.bm) === J(['S']) && J(SR1.th) === J(['stop']), '⑭e the stop lands every store moved here: a rename, a bookmarks save and a theme save made just before it are on disk after the writer\'s exit flush', SR1);
+    const KEEP_A = "    try { return userStateHold.owe(st, { name: 'user-state.write', bytes: userStateBytes, accepted: () => { _userStateCache = st; _userStateFacts.commit(draft); } }); }\n";
+    ok(PSRC.split(KEEP_A).length === 2, 'control setup: the list\'s hand-off to the writer is found once');
+    const XE = await stopScene(() => mutantCopies('swc-pl-memory', REPO).load(PREL, anchored(PSRC, KEEP_A, "    try { userStateHold.set(st); _userStateCache = st; _userStateFacts.commit(draft); return false; }   // MUTANT: kept in memory only\n", 'pl-memory-only')), 'memory');
+    ok(XE.name === null, 'CONTROL (the change kept in memory only, in a copy): the stop lands nothing of it — the rename is lost (red)', XE);
   } finally { for (const d of roots) fs.rmSync(d, { recursive: true, force: true }); }
 }
 

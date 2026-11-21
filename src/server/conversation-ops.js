@@ -610,6 +610,9 @@ function automationVerbs({ activeSessions, groupsOf = () => [], lineageOf = null
       }
       const a = archive(f.sessionKey);   // the sidebar's own store write (persistence router archiveSession)
       if (!a || !a.ok) return { ok: false, code: (a && a.code) || 'failed', why: (a && a.why) || 'the archived list could not be written', target: label };
+      // B-0248 (c): the archived list is the store writer's — «archived» (or «already archived») is told once it is ON DISK: a caller
+      // told so never asks again; one told not-durable asks again and hears already_archived once the list landed
+      if (a.landed && !(await a.landed)) return { ok: false, code: 'not-durable', why: 'the archived list could not be written to disk yet — it is kept and written again; ask again: already_archived says it is on disk', target: label };
       if (a.already && !ended) return { ok: false, code: 'already_archived', why: 'that conversation is already in the archived list', target: label };
       return { ok: true, target: f.conversationId, sessionKey: f.sessionKey, ended, archived: true, already: !!a.already, resolvedAsks: resolved };
     },

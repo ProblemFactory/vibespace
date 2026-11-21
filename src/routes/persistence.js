@@ -104,7 +104,7 @@ function ringKeep(names, { pinned = null, last = RING_KEEP.last, hours = RING_KE
 }
 
 /** Setup persistence routes. Requires { dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth } context. */
-function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {}, getExitProxy = () => null, userStateClock = () => Date.now(), userStateMono = () => performance.now() }) {   // (lane sidebar-echo-order r7: the facts' clock — a test's virtual one)
+function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getHosts, getMounts, getTasks, getAccounts, getUsageHistory, onSettingsWrite, onUserStateWrite = () => {}, getExitProxy = () => null, userStateClock = () => Date.now(), userStateMono = () => performance.now(), writer = null }) {   // (lane sidebar-echo-order r7: the facts' clock — a test's virtual one)
   const broadcast = (msg) => {
     const json = JSON.stringify(msg);
     wss.clients.forEach(client => {
@@ -134,6 +134,29 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     try { r = fn.call(this, req, res, next); } catch (e) { if (storeRefused(res, e)) return undefined; throw e; }
     if (r && typeof r.then === 'function') return r.catch((e) => { if (!storeRefused(res, e)) throw e; });
     return r;
+  };
+  // B-0248 (c) (lane bl-loop-b, 主开发 r912): the conversation list, the bookmarks and the custom themes are written by THE STORE WRITER
+  // (src/store-writer.js — its own thread does the temp + rename; a suite may hand its own) through their holds' owe()
+  // (src/store-hold.js «THE WRITE OFF THE LOOP»): a change is the store's value at once (the next change builds on it), its pages and
+  // hooks are told at its LANDING, and every door that changes one ANSWERS AFTER the landing, as when the write held the loop
+  const storeW = () => writer || require('../store-writer.js').storeWriter();
+  /** a door's answer when its act is not on disk yet (its write failed or passed the writer's bound): 503 BY NAME — the writer keeps
+   *  the change and writes it again (a page keeps its acts pending and sends them again: each is held as its own duplicate) */
+  const notOnDisk = (res, hold, extra = {}) => {
+    const w = hold.notDurable() || {};
+    const why = w.code ? ` (${w.code})` : w.why === 'queued' ? ' in time (its write is still queued)' : '';
+    return res.status(503).json({ error: `not on disk yet: ${path.basename(hold.file)} could not be written${why} — the change is kept and written again`, code: 'not-durable', why: w.why || null, ...extra });
+  };
+  /** an answer made on the landing's road may be made INSIDE the hub's exit flush: unencoded (the store writer's identityAtExit —
+   *  compression() is asynchronous and the exit comes first), as every route answering on durable()'s road does */
+  const exitSafe = (res) => { try { require('../store-writer.js').identityAtExit(res); } catch { /* no writer module: nothing to mark */ } };
+  /** a door's answer AFTER its store's landing: `ok200()` once on disk, else 503 not-durable by name */
+  const answerAfter = (hold, res, ok200) => hold.after((ok) => { exitSafe(res); if (ok) ok200(); else notOnDisk(res, hold); });
+  /** ONE answer after the landing of every hold in `holds` (an import spans stores) → answer([files not on disk]) */
+  const afterAll = (holds, answer) => {
+    let n = holds.length; const bad = [];
+    if (!n) { answer(bad); return; }
+    for (const h of holds) h.after((ok) => { if (!ok) bad.push(path.basename(h.file)); if (--n === 0) answer(bad); });
   };
   /** the stores' word to every page (R7 — the page's ONE banner reads it): a hold SAID past its silent rungs, and its LIFT */
   const storeWord = (type, facts) => broadcastText(() => JSON.stringify({ type, ...facts }));
@@ -680,7 +703,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.writeLayouts = writeLayouts;
   writeLayouts.note = noteLayout; // the ws handler's notes for the ring (a property: the ws ctx contract hands writeLayouts alone)
   router.flushLayouts = flushLayouts;
-  router.readUserState = () => readUserState(); // TaskGroupManager one-time Groups migration
+  router.readUserState = () => userStateOut(); // TaskGroupManager one-time Groups migration; every reader outside the store (B-0248 (c): what LANDED)
   router.readLayouts = () => readLayouts(); // the manager design's piece 4: the resume verb names the desktop of a conversation's row — READ ONLY (the live cache)
   // lane peer-card-sender (③): ONE custom name set from the server (ws rename-session — an agent or a script renaming a
   // session) through the same store + broadcast the sidebar's own rename PATCHes; an unchanged name writes nothing
@@ -705,11 +728,15 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       const cur = readUserState();
       const list = Array.isArray(cur.archivedSessions) ? cur.archivedSessions : [];
       const bare = k.slice(k.indexOf(':') + 1);
-      if (list.some((x) => String(x) === k || String(x) === bare)) return { ok: true, already: true };
+      if (list.some((x) => String(x) === k || String(x) === bare)) return { ok: true, already: true, landed: landedOf(userStateHold) };
       writeUserState({ ...cur, archivedSessions: [...list, k] });
     } catch (e) { if (e && (e.code === 'store_unread' || e.code === 'store_appeared')) return { ok: false, code: e.code, why: e.message }; throw e; }   // B-225b: by name
-    return { ok: true, already: false };
+    // B-0248 (c): `landed` — a promise of the LANDING (true on disk; false: not yet, kept and written again) — the archive verb tells
+    // its caller «archived» only after it (an agent told so never asks again)
+    return { ok: true, already: false, landed: landedOf(userStateHold) };
   };
+  /** a hold's landing as a promise (true: what it owes now is on disk) — for a caller that is not a door */
+  function landedOf(hold) { return new Promise((resolve) => hold.after(resolve)); }
 
   // the manager design (piece 4's verbs, piece 7's deliveries): ONE read of the archived list — the state in memory (the
   // cache archiveSession writes through), never a file read per ask; an older entry is a bare id, so either form answers
@@ -717,7 +744,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const k = String(key || '');
     if (!k) return false;
     let st;
-    try { st = _userStateCache || readUserState(); }
+    try { st = userStateOut(); }   // B-0248 (c): what LANDED — an archive still owed is not acted on (the wake, the resume verb)
     catch (e) { if (e && e.code === 'store_unread') return null; throw e; }   // B-225b R3: UNKNOWN while the list is held — a door that acts for nobody refuses on it by name
     const list = st.archivedSessions;
     const bare = k.includes(':') ? k.slice(k.indexOf(':') + 1) : k;
@@ -730,9 +757,12 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // at every GET — a read that failed mid-run served the four defaults, and the next save wrote them over the person's list); HELD ⇒
   // no value: the GET and the save answer 503 store_unread by name. NOT THERE ⇒ the four defaults in memory, nothing written
   let _bookmarksCache = null, _bookmarksRead = false;
+  let _bookmarksLanded = null;   // B-0248 (c): what LANDED — the list any reader outside the store is handed (the cache is the pending one)
   const bookmarksHold = SH.create({
     file: BOOKMARKS_FILE,
     valid: (v) => Array.isArray(v),
+    writer: storeW,   // B-0248 (c): off the loop (writeBookmarks' owe); every page told at the landing
+    onLanded: (v) => { _bookmarksLanded = v; broadcast({ type: 'bookmarks-updated', bookmarks: v }); },
     onLift: (v) => { _bookmarksCache = v; console.log('[bookmarks] the bookmarks are read again (its hold lifted)'); storeWord('store-lifted', { file: 'bookmarks.json', why: 'its hold lifted' }); broadcast({ type: 'bookmarks-updated', bookmarks: v }); },
     onSaid: (h) => { console.warn(`[bookmarks] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the bookmarks are HELD: nothing is written over them`); storeWord('store-held', h); },
   });
@@ -751,35 +781,40 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const v = bookmarksHold.answer();   // R2: HELD ⇒ store_unread by name
     bookmarksHold.takeText();
     _bookmarksCache = v === undefined ? BOOKMARKS_DEFAULT() : v;
+    _bookmarksLanded = _bookmarksCache;
     return _bookmarksCache;
   }
+  /** B-0248 (c): WHAT LEAVES THE STORE IS WHAT LANDED — the GET, the export (the doors build on the pending list) */
+  const bookmarksOut = () => { const v = readBookmarks(); return _bookmarksLanded || v; };
   function writeBookmarks(data) {
     if (!_bookmarksRead) readBookmarks();   // the start read first (MUST 1): held ⇒ refused by name
-    ensureDir(dataDir);
-    try { bookmarksHold.write(data); }   // R1: refuses a held list by name; NOT THERE ⇒ created exclusively
+    // R1: refuses a held list by name; NOT THERE ⇒ created exclusively (at the call); else the STORE WRITER's (B-0248 (c)), told at its landing
+    try { bookmarksHold.owe(data, { name: 'bookmarks.write', bytes: (v) => JSON.stringify(v, null, 2) }); }
     catch (e) { if (e && e.code === 'store_appeared') { _bookmarksCache = null; try { broadcast({ type: 'bookmarks-updated', bookmarks: readBookmarks() }); } catch { /* said by the read */ } } throw e; }
     _bookmarksCache = data;
   }
 
-  router.get('/api/bookmarks', guarded((req, res) => res.json(readBookmarks())));
+  router.get('/api/bookmarks', guarded((req, res) => res.json(bookmarksOut())));
 
   router.post('/api/bookmarks', guarded((req, res) => {
     const bookmarks = req.body;
     if (!Array.isArray(bookmarks)) return res.status(400).json({ error: 'Expected array' });
-    writeBookmarks(bookmarks);
-    broadcast({ type: 'bookmarks-updated', bookmarks });
-    res.json({ success: true });
+    writeBookmarks(bookmarks);   // (every page is told at the landing — the hold's onLanded — before this answer)
+    answerAfter(bookmarksHold, res, () => res.json({ success: true }));
   }));
 
   // ── Custom Themes ──
   const CUSTOM_THEMES_FILE = path.join(dataDir, 'custom-themes.json');
   let _customThemesCache = null, _customThemesRead = false;
+  let _customThemesLanded = null;   // B-0248 (c): what LANDED — the set any reader outside the store is handed
   // B-225b (cut 3 — R1, R2, R6): a custom-themes.json the START could not read is HELD — no value: the GET and every save answer 503
   // store_unread by name, nothing is written over it (the release served «no themes», and the next save wrote the one theme over the
   // person's set). NOT THERE ⇒ no themes in memory, nothing written
   const themesHold = SH.create({
     file: CUSTOM_THEMES_FILE,
     valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
+    writer: storeW,   // B-0248 (c): off the loop (writeCustomThemes' owe); every page told at the landing
+    onLanded: (v) => { _customThemesLanded = v; broadcast({ type: 'custom-themes-updated', themes: v }); },
     onLift: (v) => { _customThemesCache = v; console.log('[themes] the custom themes are read again (its hold lifted)'); storeWord('store-lifted', { file: 'custom-themes.json', why: 'its hold lifted' }); broadcast({ type: 'custom-themes-updated', themes: v }); },
     onSaid: (h) => { console.warn(`[themes] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the custom themes are HELD: nothing is written over them`); storeWord('store-held', h); },
   });
@@ -790,23 +825,26 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const v = themesHold.answer();   // R2: HELD ⇒ store_unread by name
     themesHold.takeText();
     _customThemesCache = v === undefined ? {} : v;
+    _customThemesLanded = _customThemesCache;
     return _customThemesCache;
   }
+  /** B-0248 (c): WHAT LEAVES THE STORE IS WHAT LANDED — the GET, the export */
+  const themesOut = () => { const v = readCustomThemes(); return _customThemesLanded || v; };
 
   function writeCustomThemes(data) {
     if (!_customThemesRead) readCustomThemes();   // the start read first (MUST 1): held ⇒ refused by name
-    ensureDir(dataDir);
     // q-059 r5 (lane cache-warmth-ramp r3): the ONE writer of the store — the POST save, the delete, the config import — drops a
     // value the warmth derivation SUPERSEDED (a bundle exported on .374, an old tab's save) with the same PURE rule the one-shot
     // boot migration ran over what was already on disk
     data = normalizeCustomThemes(data).doc;
-    try { themesHold.write(data); }   // R1: refuses a held set by name; NOT THERE ⇒ created exclusively (a file that appeared: adopted)
+    // R1: refuses a held set by name; NOT THERE ⇒ created exclusively at the call (a file that appeared: adopted); else the STORE
+    // WRITER's (B-0248 (c)) — every page told at its landing (the hold's onLanded), never ahead of the disk
+    try { themesHold.owe(data, { name: 'custom-themes.write', bytes: (v) => JSON.stringify(v, null, 2) }); }
     catch (e) { if (e && e.code === 'store_appeared') { _customThemesCache = null; try { broadcast({ type: 'custom-themes-updated', themes: readCustomThemes() }); } catch { /* said by the read */ } } throw e; }
     _customThemesCache = data;
-    broadcast({ type: 'custom-themes-updated', themes: data });
   }
 
-  router.get('/api/custom-themes', (req, res) => res.json(readCustomThemes()));
+  router.get('/api/custom-themes', (req, res) => res.json(themesOut()));
 
   router.post('/api/custom-themes', (req, res) => {
     const { name, css, terminal } = req.body;
@@ -824,18 +862,20 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (!/^--[\w-]+$/.test(k)) return res.status(400).json({ error: `Invalid CSS variable name: ${k}` });
       if (/[{}<;]/.test(String(v))) return res.status(400).json({ error: `Invalid value for ${k}` });
     }
-    const data = readCustomThemes();
+    // B-0248 (c): a COPY — the set in memory is the PENDING one, whose earlier version may be landing now: an edit in place would make
+    // that landing tell every page a theme the file does not hold (the fresh read's MUST)
+    const data = { ...readCustomThemes() };
     data[name] = { css, terminal: terminal || {} };
     writeCustomThemes(data);
-    res.json({ success: true });
+    answerAfter(themesHold, res, () => res.json({ success: true }));   // B-0248 (c): the answer after the landing
   });
 
   router.delete('/api/custom-themes/:name', (req, res) => {
-    const data = readCustomThemes();
+    const data = { ...readCustomThemes() };   // (a COPY — above)
     if (!data[req.params.name]) return res.status(404).json({ error: 'Theme not found' });
     delete data[req.params.name];
     writeCustomThemes(data);
-    res.json({ success: true });
+    answerAfter(themesHold, res, () => res.json({ success: true }));   // B-0248 (c): the answer after the landing
   });
 
   // ── Sync Store snapshots ──
@@ -858,6 +898,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     file: USER_STATE_FILE,
     valid: (v) => !!v && typeof v === 'object' && !Array.isArray(v),
     onLift: () => userStateAgain('its hold lifted'),
+    // B-0248 (c) (lane bl-loop-b): THE STORE WRITER's — a write that held the loop for its rename before its own answer. At the
+    // LANDING (once a write — a burst of changes is one): every page told the state that landed, then the write hook (the archived
+    // list the groups judge) — never ahead of the disk; a write that changed no state (its facts alone, the read's own rewrite) tells nothing
+    writer: storeW,   // (writeUserStateFile's owe; the start read's own rewrite stays at the call)
+    onLanded: (st) => { _userStateLandedSt = st; userStateLanded(st); },
     onSaid: (h) => { console.warn(`[user-state] ${h.file} still cannot be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — the conversation list is HELD: nothing is written over it, its doors refuse by name until it reads`); storeWord('store-held', h); },
   });
   // lane sidebar-echo-order (inc-mwbn2xp8-ks0b): user state BY ITEM, IN THE SERVER'S ORDER — the ops (src/user-state-ops.js, PURE,
@@ -903,15 +948,36 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return { parts, wire: () => `${head}${empty ? '' : ','}${JSON.stringify(UO.EPOCH_KEY)}:${JSON.stringify(userStateEpoch())}}` };
   };
   const userStateParts = (st, draft = null) => userStateTexts(st, draft).parts;
-  /** user-state.json written whole — the ONE call both writers make (a state, or the facts alone): its texts, for the broadcast */
-  // B-225b: THROUGH THE HOLD'S ONE WRITE — it refuses a held list by name (R1), creates a list NOT THERE exclusively (R6: a file that
-  // appeared since is adopted and every page told, this change refused by name — 409 store_appeared), every temp name with the pid
-  const writeUserStateFile = (st, draft) => {
-    const texts = userStateTexts(st, draft);
-    try { userStateHold.write(st, texts.parts); }
+  // B-0248 (c): the bytes are made when the write is DUE (the writer's produce — the LATEST state), so the facts a write changed ride
+  // them two ways: laid over the store's when the bytes are made inside the call (`_stDraft` — the exclusive create, or a write the
+  // writer starts at once), committed to the store right after the call otherwise. Each state's texts are kept by the state (a
+  // WeakMap): its broadcast at the landing is the same one stringify as its file (round 12, LAW A)
+  let _stDraft = null;
+  const _stTextsOf = new WeakMap();
+  const userStateBytes = (st) => { const t = userStateTexts(st, _stDraft); _stTextsOf.set(st, t); return t.parts; };
+  let _userStateToldRev = 0;   // the last state the pages were told (a landing with no new state tells nothing)
+  let _userStateLandedSt = null;   // what LANDED — the list every reader OUTSIDE the store is handed (userStateOut); the cache is the pending one
+  function userStateLanded(st) {
+    const rev = UO.revOf(st);
+    if (rev <= _userStateToldRev) return;
+    _userStateToldRev = rev;
+    const t = _stTextsOf.get(st);
+    broadcastText(() => `{"type":"user-state-updated","state":${t ? t.wire() : JSON.stringify(wireOf(st))}}`);   // (= wireOf(st), read off the file's one stringify — round 12)
+    // lane pair-group-fate: the ONE write of the sidebar's archived list — a conversation archived here ends its groups' waits (at
+    // its landing: what the groups judge is on disk)
+    try { onUserStateWrite(st); } catch (e) { console.warn('[user-state] write hook failed:', e && e.message); }
+  }
+  /** user-state.json's change — the ONE call both writers make (a state, or the facts alone). B-225b: THROUGH THE HOLD — it refuses a
+   *  held list by name (R1), creates a list NOT THERE exclusively at the call (R6: a file that appeared since is adopted and every page
+   *  told, this change refused by name — 409 store_appeared); B-0248 (c): else the store writer's, its answer the hold's after() (a declaration: test-architecture §72 reads its row's name in its body) */
+  function writeUserStateFile(st, draft) {
+    _stDraft = draft;
+    // accepted: THE PENDING STATE — the next write builds on it — and only what this write changed of the facts, the next act judged
+    // against them; before anything is told (the write hook reads this copy). A refusal by name throws first: nothing moves
+    try { return userStateHold.owe(st, { name: 'user-state.write', bytes: userStateBytes, accepted: () => { _userStateCache = st; _userStateFacts.commit(draft); } }); }
     catch (e) { if (e && e.code === 'store_appeared') userStateAgain('a file appeared where the start found none'); throw e; }
-    return texts;
-  };
+    finally { _stDraft = null; }
+  }
   const userStateText = (st, draft = null) => userStateParts(st, draft).join('');
   /** what a client is told: the store minus the server's facts, plus the server's life */
   const wireOf = (st) => { const { [UO.FACTS_KEY]: _f, [UO.CLOCK_KEY]: _c, ...rest } = st || {}; return { ...rest, [UO.EPOCH_KEY]: userStateEpoch() }; };
@@ -1041,12 +1107,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   /** the facts alone (a request whose applied ops decided slots without changing a value): no new rev, no broadcast, no hook — a
    *  restart must still know which act decided them */
   function writeUserFacts(draft, now) {
-    ensureDir(dataDir);
     const next = { ...readUserState(), [UO.CLOCK_KEY]: now };
     _userStateFacts.sweep(draft, now);
-    writeUserStateFile(next, draft);
-    _userStateCache = next;
-    _userStateFacts.commit(draft);   // only what this write changed
+    writeUserStateFile(next, draft);   // (the cache and the facts move in its `accepted`)
   }
 
   function readUserState() {
@@ -1061,13 +1124,18 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (!_userStateRead) { userStateHold.readAtStart(); _userStateRead = true; }
     const parsed = userStateHold.answer();
     const rawText = userStateHold.takeText();
-    if (parsed === undefined) { _userStateCache = { ...USER_STATE_DEFAULT }; return _userStateCache; }   // NOT THERE (R6): the defaults in memory, nothing written
+    if (parsed === undefined) { _userStateCache = { ...USER_STATE_DEFAULT }; _userStateLandedSt = _userStateCache; return _userStateCache; }   // NOT THERE (R6): the defaults in memory, nothing written
     _userStateCache = normalizeUserState(parsed);
     if (UO.revOf(parsed)) _userStateCache[UO.REV_KEY] = UO.revOf(parsed);   // the counter survives a restart (the file holds it)
     const mark = Number(parsed[UO.CLOCK_KEY]);
     if (Number.isSafeInteger(mark) && mark > 0) { _userStateCache[UO.CLOCK_KEY] = mark; if (mark > _userStateClockMark) _userStateClockMark = mark; }   // the hub's clock mark survives too
     _userStateFacts.load(parsed[UO.FACTS_KEY]);   // as read (pruned only at a write)
+    _userStateToldRev = UO.revOf(_userStateCache);   // the pages are told from the state read on
+    _userStateLandedSt = _userStateCache;
     if (rawText != null && userStateText(_userStateCache) !== String(rawText).trim()) {
+      // B-0248 (c): THE READ'S OWN REWRITE STAYS AT THE CALL (the queued-write class): the boot's one-time migrations read
+      // user-state.json FROM DISK after this start read (src/server/migrations.js — the archived list leaves its groups, recorded as
+      // done once), so the file they read is the one this read made — never one still owed to the writer
       try { userStateHold.write(_userStateCache, userStateText(_userStateCache)); }
       catch (e) { if (!_userStateReadOnlySaid) { _userStateReadOnlySaid = true; console.warn('[user-state] the normalized state could not be written back — it is served as read:', (e && (e.code || e.message)) || e); } }
     }
@@ -1075,10 +1143,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return _userStateCache;
   }
 
+  /** B-0248 (c): WHAT LEAVES THE STORE IS WHAT LANDED — every reader outside the list's own doors (the hub's readers through the
+   *  router: the groups' liveness and signature, isArchived for the wake and the resume verb, the owner's facts, the inbox; the GET; the
+   *  export) is handed the state ON DISK, as the release's cache was; the doors build the next change on the PENDING one */
+  function userStateOut() { const st = readUserState(); return _userStateLandedSt || st; }
   /** the list read again WHOLE (its hold lifted, or a file appeared where the start found none): a NEW life — every page takes it
    *  whatever its number (the life's rule) — and the write hook runs on it (the archived list the groups judge). R11's «the lift is a change» */
   function userStateAgain(why) {
-    _userStateCache = null; _userStateEpoch = null;
+    _userStateCache = null; _userStateEpoch = null; _userStateLandedSt = null;
     let st;
     try { st = readUserState(); } catch (e) { console.warn(`[user-state] the list could not be read again (${why}): ${(e && e.message) || e}`); return; }
     console.log(`[user-state] the conversation list is read again (${why})`);
@@ -1088,10 +1160,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   }
 
   function writeUserState(data, { facts = null, decided = null, writer = null, omits = false, whole = false, maxMoves = Infinity } = {}) {
-    ensureDir(dataDir);
     const prev = _userStateCache || readUserState();
-    // lane sidebar-echo-order («once» is on disk before it is said): the next state and its FACTS are ONE write; the cache and the
-    // facts change only once it is on disk — a write that throws (a full disk) changes nothing here, and its caller says so.
+    // lane sidebar-echo-order («once» is on disk before it is said): the next state and its FACTS are ONE write; a write REFUSED (held,
+    // a file that appeared, a full disk at the exclusive create) changes nothing here, and its caller says so. B-0248 (c): the change
+    // is the PENDING state once handed to the writer — the next write builds on it (one queue a store) — and the door answers after
+    // its LANDING (the hold's after()); a write that fails there stays owed (the writer writes it again) and the door says so by name.
     // THE ONE PLACE every writer moves the facts (round 7): each slot whose value this write changes — by a page's op (`writers`),
     // or by a whole-key writer (an old page, desktop-app-prefs, a restore, the server's own archive / rename: no page)
     const next = normalizeUserState(data);
@@ -1106,12 +1179,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // (round 10, MUST 3: `omits` = an old page's whole key — what it lacks is its ignorance; every other writer is an act at its time)
     UO.moveFacts(draft, prev, after, now, decided || new Set(), writer, undefined, omits, whole ? UO.KEYS : null, maxMoves);   // (an import decides every key whole, at its time)
     _userStateFacts.sweep(draft, now);   // a fact older than a week is dropped HERE, at most hourly (no op old enough to need it is applied)
-    const texts = writeUserStateFile(next, draft);
-    _userStateCache = next;
-    _userStateFacts.commit(draft);   // only what this write changed
-    broadcastText(() => `{"type":"user-state-updated","state":${texts.wire()}}`);   // (= wireOf(next), read off the file's one stringify — round 12)
-    // lane pair-group-fate: the ONE write of the sidebar's archived list — a conversation archived here ends its groups' waits
-    try { onUserStateWrite(_userStateCache); } catch (e) { console.warn('[user-state] write hook failed:', e && e.message); }
+    writeUserStateFile(next, draft);   // a refusal by name throws here, nothing moved; else the cache (THE PENDING STATE) and the facts
+    // move in its `accepted` — and every page is told the state, and the write hook runs, at the LANDING (userStateLanded)
   }
 
   // round 9: THE HUB'S CLOCK MARK IS TAKEN AT BOOT — the state (and its mark) read and the clock taken once, before the routes serve
@@ -1131,7 +1200,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.use('/api/user-state/batches', userStateBody(UO.MAX_BODY_BYTES));
   { const layer = router.stack[router.stack.length - 1]; router.ownsBody = (p) => layer.regexp.test(p) || layoutSyncLayer.regexp.test(p); }   // (the parsers' own layers: user-state's, and B-46fc's layout-sync)
   router.get('/api/user-state', (req, res) => {   // lane sidebar-echo-order: + stateEpoch, − stateBatches
-    let st; try { st = readUserState(); } catch (e) { if (storeRefused(res, e)) return; throw e; }
+    let st; try { st = userStateOut(); } catch (e) { if (storeRefused(res, e)) return; throw e; }   // B-0248 (c): what LANDED
     res.json(wireOf(st));
   });
 
@@ -1144,7 +1213,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (storeRefused(res, e)) return;
       return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` });
     }
-    res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });
+    const rev = UO.revOf(_userStateCache);   // THIS write's number (a later write may land with it)
+    answerAfter(userStateHold, res, () => res.json({ success: true, rev, epoch: userStateEpoch() }));   // B-0248 (c): after the landing
   });
 
   // Merge-only write (B-b87b clobber belt): user-state is full-doc
@@ -1169,7 +1239,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // MASTER'S ROAD (round 13): an older page's whole key takes what master takes — no bound master does not have; past MAX_WHOLE_MOVES
     // changed items the write is ONE record a key naming the items it changed (round 14 — never a refusal)
     try { writeUserState({ ...readUserState(), ...data }, { omits: true, maxMoves: UO.MAX_WHOLE_MOVES }); } catch (e) { if (storeRefused(res, e)) return; return res.status(503).json({ error: `not saved: the server could not write its state (${(e && (e.code || e.message)) || 'write failed'})` }); }
-    res.json({ success: true, rev: UO.revOf(_userStateCache), epoch: userStateEpoch() });
+    const rev = UO.revOf(_userStateCache);   // THIS write's number (a later write may land with it)
+    answerAfter(userStateHold, res, () => res.json({ success: true, rev, epoch: userStateEpoch() }));   // B-0248 (c): after the landing
   });
   // THE OPS DOOR: each op judged against its slot's fact — THE LATER ACT WINS (round 7): applied when no other writer changed the
   // slot after the act was made (its age), its own page's next act; held as its own duplicate; superseded otherwise. An act older
@@ -1179,7 +1250,9 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const data = req.body;
     if (!data || typeof data !== 'object' || Array.isArray(data)) return res.status(400).json({ error: 'Expected object', code: 'malformed' });
     const { batches, ...whole } = data;
-    const answer = (extra = {}) => res.json({ success: true, rev: UO.revOf(_userStateCache || readUserState()), epoch: userStateEpoch(), ...extra });
+    // B-0248 (c): EVERY answer of this door waits for what the list owes NOW — a re-sent batch held as its own duplicate is answered
+    // only once the write that applied it landed (an answer at once would confirm an act the disk does not hold yet)
+    const answer = (extra = {}) => { const rev = UO.revOf(_userStateCache || readUserState()); answerAfter(userStateHold, res, () => res.json({ success: true, rev, epoch: userStateEpoch(), ...extra })); };
     if (Object.keys(whole).length) return res.status(400).json({ error: `whole top-level keys beside batches (${Object.keys(whole).slice(0, 4).join(', ')}) — whole keys go to PATCH /api/user-state`, code: 'malformed' });
     // (its body is read at most MAX_BODY_BYTES at its parser, below — round 12, law C: a header no longer decides it)
     const r = UO.parseRequest(batches);
@@ -1504,10 +1577,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const heldOf = new Map(heldSections(Object.keys(STORE_SECTIONS)).map((h) => [h.section, h]));
     const unread = (n) => ({ unread: true, held: heldOf.get(n) });
     const settings = heldOf.has('settings') ? {} : readSettings();
-    const themes = heldOf.has('customThemes') ? {} : readCustomThemes();
+    const themes = heldOf.has('customThemes') ? {} : themesOut();
     const layouts = heldOf.has('layouts') ? {} : readLayouts();
-    const state = heldOf.has('userState') ? {} : readUserState();
-    const bookmarks = heldOf.has('bookmarks') ? [] : readBookmarks();
+    const state = heldOf.has('userState') ? {} : userStateOut();
+    const bookmarks = heldOf.has('bookmarks') ? [] : bookmarksOut();
     res.json({
       sections: {
         settings: heldOf.has('settings') ? unread('settings') : { count: Object.keys(settings).length },
@@ -1556,10 +1629,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     };
     const take = (name, fn) => { if (sections.includes(name)) file.sections[name] = fn(); };
     take('settings', readSettings);
-    take('customThemes', readCustomThemes);
+    take('customThemes', themesOut);   // B-0248 (c): what LANDED (the three stores the writer writes)
     take('layouts', readLayouts);
-    take('userState', () => UO.personKeys(readUserState()));   // lane sidebar-echo-order: stateRev / stateBatches are the server's, never exported
-    take('bookmarks', readBookmarks);
+    take('userState', () => UO.personKeys(userStateOut()));   // lane sidebar-echo-order: stateRev / stateBatches are the server's, never exported
+    take('bookmarks', bookmarksOut);
     take('tasks', () => getTasks?.()?.exportBundle?.() || null);
     take('pricing', () => getUsageHistory?.()?.pricingTable?.() || null);
     if (sections.includes('clientPrefs') && clientPrefs && typeof clientPrefs === 'object') {
@@ -1641,6 +1714,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
       if (later.length) return res.status(503).json({ error: `the import was refused: ${later.map((h) => h.file).join(', ')} could not be read — nothing was imported`, code: 'store_unread', held: later });
       for (const h of hs) { if (!damagedReplace(req, res, h.section)) return; setAsideSaid.push(h.file); } }
     const applied = [], held = [];   // held: a section a HELD store refused by its code (the page words it in the reader's language)
+    // B-0248 (c): the sections this import wrote through the STORE WRITER — every answer below waits for their landing
+    const movedOf = () => [['customThemes', themesHold], ['userState', userStateHold], ['bookmarks', bookmarksHold]].filter(([n]) => applied.includes(n)).map(([, h]) => h);
     const apply = (name, fn) => {
       if (!sections.includes(name) || file.sections[name] === undefined) return;
       fn(file.sections[name]);
@@ -1653,10 +1728,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     apply('customThemes', (d) => { if (d && typeof d === 'object') { writeCustomThemes(d); } });
     apply('layouts', (d) => { if (d && typeof d === 'object') writeLayouts(d); });
     apply('userState', (d) => { if (d && typeof d === 'object') writeUserState(d, { whole: true }); });   // lane sidebar-echo-order r10: a person's import is an ACT at its time — an act made before it, re-sent after, does not land over it
-    apply('bookmarks', (d) => { if (Array.isArray(d)) { writeBookmarks(d); broadcast({ type: 'bookmarks-updated', bookmarks: d }); } });
+    apply('bookmarks', (d) => { if (Array.isArray(d)) writeBookmarks(d); });   // (every page told at its landing — the hold's onLanded)
     // lane lg-store-writes, the census cure ((b)): the groups not on disk at the bound stop the import before the other stores — said
     try { apply('tasks', (d) => { if (d && typeof d === 'object') getTasks?.()?.importBundle?.(d, { bearer: !!require('../write-origin.js').pressBearer(req.headers) }); }); }   // lane lg-group-parents: a bearer's import brings no lineage
-    catch (e) { if (e && e.code === 'EVSNOTONDISK') return res.status(503).json({ error: e.message, applied, notOnDisk: true }); throw e; }
+    catch (e) { if (e && e.code === 'EVSNOTONDISK') return afterAll(movedOf(), (bad) => { exitSafe(res); res.status(503).json({ error: e.message, applied, notOnDisk: true, ...(bad.length ? { storesNotOnDisk: bad } : {}) }); }); throw e; }   // B-0248 (c): told once the stores written before it landed
     let pricingSkipped = [];
     apply('pricing', (d) => { if (d && typeof d === 'object') { const uh = getUsageHistory?.(); uh?.setPricing?.(d); pricingSkipped = uh?.lastCatalogSkips?.() || []; } });
     // lane cli-update-needs-nothing: a row the export marked as Claude Code's own price is not imported as yours — said here, by key
@@ -1668,7 +1743,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (includeSensitive.length && file.sensitive) {   // (the person was asked above, before any section was written — B-ee0a)
       let sens;
       try { sens = decryptSensitive(file.sensitive, passphrase); }
-      catch { return res.status(400).json({ error: 'Wrong passphrase (or corrupted file)' }); }
+      catch { return afterAll(movedOf(), () => { exitSafe(res); res.status(400).json({ error: 'Wrong passphrase (or corrupted file)' }); }); }   // B-0248 (c): after the sections written before it landed
       if (includeSensitive.includes('claudeCreds') && sens.claudeCreds) {
         ensureDir(path.dirname(CLAUDE_CREDS));
         fs.writeFileSync(CLAUDE_CREDS, JSON.stringify(sens.claudeCreds), { mode: 0o600 });
@@ -1711,7 +1786,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
         applied.push('vsPassword');
       }
     }
-    res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}), ...(setAsideSaid.length ? { setAside: setAsideSaid } : {}) });   // held: the sections a held machines list refused; setAside: the damaged stores this import replaced (B-225b)
+    // B-0248 (c): the import answers once every store it wrote through the writer has LANDED — a section not on disk yet is named (503,
+    // kept and written again), never «imported»
+    afterAll(movedOf(), (bad) => {
+      exitSafe(res);
+      if (bad.length) return res.status(503).json({ error: `not on disk yet: ${bad.join(', ')} could not be written — the import is kept and written again`, code: 'not-durable', applied, notOnDisk: bad });
+      res.json({ success: true, applied, clientPrefs, ...(held.length ? { held } : {}), ...(setAsideSaid.length ? { setAside: setAsideSaid } : {}) });   // held: the sections a held machines list refused; setAside: the damaged stores this import replaced (B-225b)
+    });
   });
 
   // B-225b: EVERY door of the desktops and the custom themes answers a held store BY NAME (503 store_unread) — its handlers wrapped
