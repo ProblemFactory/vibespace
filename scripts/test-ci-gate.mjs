@@ -262,7 +262,7 @@ console.log('\n§2 tier hygiene');
   const pkg = read('package.json');
   ok(hook.includes('--check-heavy') && hook.includes('--heavy-launch'),
     'the tracked pre-push hook checks the heavy verdict AND launches the heavy tier');
-  ok(hook.indexOf('--check-heavy') < hook.indexOf('node scripts/ci.mjs ||'),
+  ok(hook.indexOf('--check-heavy') < hook.indexOf('node scripts/ci.mjs --keep-going ||') && hook.indexOf('node scripts/ci.mjs --keep-going ||') > 0,
     'the hook asks for the heavy verdict BEFORE it spends the fast tier');
   ok(/node scripts\/ci\.mjs --fast-part=\$\{\{ matrix\.part \}\}\/2 --keep-going\s*$/m.test(wf) && wf.includes('node scripts/ci.mjs --heavy'),
     'the Actions mirror runs BOTH tiers (the fast tier as its parts, each to its end: --keep-going names every red — B-d24c)');

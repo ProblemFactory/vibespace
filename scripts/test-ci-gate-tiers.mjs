@@ -794,6 +794,17 @@ console.log('\n§8e the fast tier lists every red with --keep-going (B-6e71)');
     ok(there, `WIRING control «${what}»: its anchor is in scripts/ci.mjs once`, there ? undefined : 'the anchor of the control «' + what + '» is not in the source');
     ok(there && !wiredClosing(src.replace(from, to)), `WIRING control «${what}»: the mutant is refused by the pin`);
   }
+  // B-6e71 (the hook now runs every fast call with --keep-going): A RUN WITH A RED NEVER WRITES THE GREEN MARKER the hook
+  // trusts — the marker is called at ONE place in the whole file, inside fastGate, AFTER the closing's `return 1`; a run with a
+  // red (keep-going or not) returns before it. The control writes it before the closing and is refused by name
+  const markerAfterRed = (x) => {
+    const g = x.slice(x.indexOf('async function fastGate('), x.indexOf('function writeGreenMarker('));
+    const ret = g.indexOf('if (closing.code === 1) return 1;'), at = g.indexOf('writeGreenMarker()');
+    return ret > 0 && at > ret && x.split('writeGreenMarker()').length - 1 === 1 && g.split('writeGreenMarker()').length - 1 === 1;
+  };
+  ok(markerAfterRed(src), 'B-6e71: the green marker is written at ONE place, inside fastGate, after `if (closing.code === 1) return 1;` — a run with a red never reaches it');
+  const earlyMark = src.replace('    const closing = fastClosing(', '    writeGreenMarker();\n    const closing = fastClosing(');
+  ok(earlyMark !== src && !markerAfterRed(earlyMark), 'B-6e71 CONTROL: a copy that writes the marker before the closing is refused by the pin');
   // the annotation's message escapes %, CR and LF (GitHub's workflow-command rule); control: the unescaped line is not what it prints
   const escR = fastClosing({ reds: ['a%b\nc\rd'], env: { GITHUB_ACTIONS: 'true' } });
   ok(annOf(escR).length === 1 && annOf(escR)[0] === '::error title=fast::1 red: a%25b%0Ac%0Dd',

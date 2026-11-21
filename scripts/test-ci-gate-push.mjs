@@ -90,7 +90,7 @@ if (argv.includes('--check-heavy')) {
 }
 const li = argv.indexOf('--heavy-launch');
 if (li >= 0) { note({ mode: 'heavy-launch', sha: argv[li + 1], range: (argv.find((a) => a.startsWith('--range=')) || '').slice(8) }); process.exit(0); }
-note({ mode: 'fast', isolate: argv.includes('--isolate'), sha: (argv.find((a) => a.startsWith('--sha=')) || '').slice(6) || null });
+note({ mode: 'fast', isolate: argv.includes('--isolate'), keepGoing: argv.includes('--keep-going'), sha: (argv.find((a) => a.startsWith('--sha=')) || '').slice(6) || null });
 process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
 `);
   fs.copyFileSync(path.join(REPO, 'scripts', 'git-hooks', 'pre-push'), path.join(repo, 'pre-push'));
@@ -138,6 +138,30 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
   const A = commit(repo, 'src/a.js', '//a\n', 'A');
   const r1 = runHook(A);
   ok(r1.status === 0, 'fast tier green ⇒ the push proceeds');
+  // B-6e71: EVERY fast call the hook makes runs the WHOLE tier and names every red at its end (`--keep-going`) — a first
+  // red no longer hides the ones behind it; the verdict is unchanged (any red is exit 1 = GATE RED; the marker is written by
+  // an all-green whole in-place run only — test-ci-gate-tiers §8e). The three calls: a push of HEAD (in place), a pushed tip
+  // that is not HEAD (--isolate, its leg below), and a push that names no sha at all (the fallback).
+  const fastOf = (r) => r.calls.filter((c) => c.mode === 'fast');
+  ok(fastOf(r1).length === 1 && fastOf(r1)[0].keepGoing === true && !fastOf(r1)[0].isolate,
+    'B-6e71: the fast call for a push of HEAD runs in place WITH --keep-going (every red named)', r1.calls);
+  const rNone = runHookRefs('');
+  ok(rNone.status === 0 && fastOf(rNone).length === 1 && fastOf(rNone)[0].keepGoing === true && !fastOf(rNone)[0].isolate && !fastOf(rNone)[0].sha,
+    'B-6e71: a push whose stdin names no sha gates the tree it has (the fallback) — WITH --keep-going', { status: rNone.status, calls: rNone.calls });
+  fs.writeFileSync(path.join(repo, 'FAST_RED'), 'red\n');
+  const rRed = runHook(A);
+  try { fs.unlinkSync(path.join(repo, 'FAST_RED')); } catch { }
+  ok(rRed.status === 1 && /GATE RED — push blocked/.test(rRed.out) && fastOf(rRed).length === 1 && fastOf(rRed)[0].keepGoing === true,
+    'B-6e71: a red under --keep-going still BLOCKS the push (exit 1, «GATE RED — push blocked») — the mode lists reds, it never passes one', { status: rRed.status });
+  // the STATIC census: every `node scripts/ci.mjs` line of the hook that is a FAST call (no heavy verb) carries --keep-going —
+  // a fourth call added tomorrow without it is red by name; the control drops the flag from one call
+  const fastCallsOf = (src) => src.split('\n').filter((l) => /^\s*node scripts\/ci\.mjs\b/.test(l) && !/--(check-heavy|heavy-launch|heavy)\b/.test(l));
+  const bare = (src) => fastCallsOf(src).filter((l) => !/ --keep-going\b/.test(l));
+  ok(fastCallsOf(hookSrc).length === 3 && bare(hookSrc).length === 0,
+    `B-6e71 census: the hook's fast calls are ${fastCallsOf(hookSrc).length} and each carries --keep-going`, bare(hookSrc));
+  const dropped = hookSrc.replace('node scripts/ci.mjs --isolate --keep-going --sha="$sha"', 'node scripts/ci.mjs --isolate --sha="$sha"');
+  ok(dropped !== hookSrc && bare(dropped).length === 1 && /--isolate --sha=/.test(bare(dropped)[0]),
+    'B-6e71 census CONTROL: the hook with the flag dropped from its isolated call is refused, naming that line');
   ok(r1.calls.map((c) => c.mode).join(',') === 'check-heavy,fast,heavy-launch',
     `the hook checks the heavy verdict FIRST, then runs fast, then launches heavy (got: ${r1.calls.map((c) => c.mode).join(',')})`);
   ok(r1.calls.find((c) => c.mode === 'heavy-launch')?.sha === A, 'the heavy run is launched for the sha being PUSHED');
@@ -589,6 +613,7 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     const fastCall = rIso.calls.find((c) => c.mode === 'fast');
     ok(!!fastCall && fastCall.isolate === true && fastCall.sha === UNGATED,
       `pushing a ref whose tip is NOT HEAD gates THAT COMMIT (--isolate --sha=${UNGATED.slice(0, 8)}), not the tree you have checked out`);
+    ok(!!fastCall && fastCall.keepGoing === true, 'B-6e71: …and the isolated fast call runs WITH --keep-going (every red at that commit named)', fastCall);
     ok(/is NOT the commit you have checked out/.test(rIso.out), '…and says so, naming the ref and the sha (§no-silent-failures)');
     // The ordinary push is untouched — this must not cost every push a worktree.
     const rPlain = runHookRefs(`refs/heads/elsewhere5 ${STANDING} refs/heads/elsewhere5 ${SIDE}\n`);

@@ -338,6 +338,10 @@ if [ "$skip_fast" = "0" ]; then
     case " $distinct " in *" $newest "*) subject="$newest" ;; esac
     [ -z "$subject" ] && subject="$(echo $distinct | awk '{print $1}')"
   fi
+  # KEEP-GOING (B-6e71, 2026-11-21): every fast call below runs the WHOLE tier and names EVERY red at its end — a first
+  # red no longer hides the ones behind it (a release cut learned its reds one push at a time). The verdict is the
+  # same: any red is exit 1 = GATE RED, and only a whole, clean, in-place, all-green run writes the green marker. The
+  # price: a red push runs the rest of the tier (at most a green tier's time) before it refuses.
   # `fast_subjects` is the guard: it is what makes this ONE run instead of one
   # per pushed sha. (test-ci-gate's negative control sets it back to
   # "$distinct" — that is the round-5 hook, verbatim in behaviour.)
@@ -347,10 +351,10 @@ if [ "$skip_fast" = "0" ]; then
     ref="$(ref_for_sha "$sha")"
     if [ "$sha" = "$head_sha" ]; then
       echo "[ci] release gate — fast tier (VIBESPACE_SKIP_CI=1 to bypass in an emergency)…" >&2
-      node scripts/ci.mjs || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
+      node scripts/ci.mjs --keep-going || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
     else
       echo "[ci] $ref tips at $(echo "$sha" | cut -c1-8), which is NOT the commit you have checked out — the fast tier runs in an ISOLATED worktree at that commit (a verdict about the tree you have is not a verdict about the tree you are publishing)…" >&2
-      node scripts/ci.mjs --isolate --sha="$sha" || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
+      node scripts/ci.mjs --isolate --keep-going --sha="$sha" || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
     fi
     ran_fast=1
   done
@@ -370,7 +374,7 @@ if [ "$skip_fast" = "0" ]; then
   # about a list we do not have.
   if [ "$ran_fast" = "0" ]; then
     echo "[ci] release gate — fast tier (VIBESPACE_SKIP_CI=1 to bypass in an emergency)…" >&2
-    node scripts/ci.mjs || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
+    node scripts/ci.mjs --keep-going || { echo "[ci] GATE RED — push blocked" >&2; exit 1; }
   fi
 fi
 
