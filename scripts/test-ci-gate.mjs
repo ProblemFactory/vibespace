@@ -1730,7 +1730,7 @@ console.log('\n§2p a wait that runs out says so: no suite returns its last read
   const t0 = Date.now();
   const acorn = createRequire(import.meta.url)('acorn');
   const { lastReadWaits } = await import('./last-read-waits.mjs');
-  const RATCHET = { 'test-browser-resume-ui': 3 };   // 2026-11-21: 35 waits in 20 heavy suites; each cure lowers its row
+  const RATCHET = {};   // 2026-11-21: 35 waits in 20 heavy suites; each cure lowered its row — EMPTY since test-browser-resume-ui's last 3 fell to 0 at bl-browser-a's cure (block line 105) on the 2.369.416 train: the next one is a NEW one, RED by name
   const heavy = SUITES, per = new Map(), unread = [];   // every tier (r1372); the name kept for the lines below
   for (const x of heavy) {
     const f = path.join(REPO, 'scripts', x.name + '.mjs'); if (!fs.existsSync(f)) continue;
