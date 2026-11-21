@@ -581,6 +581,7 @@ export function installSessionLifecycle(App, ctx = {}) {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
                 if (data.notLoaded) chatView._sayHistoryNotLoaded?.(data.notLoaded, { info: { storageHung: !!data.storageHung, readerGone: !!data.readerGone, readerCause: data.readerCause || null, retryAt: data.retryAt || null, retryIn: data.retryIn ?? null } });   // row B-422c: a resumed history the reader refused says so
                 else if (data.chatStatus) chatView.applyStatus(data.chatStatus);
+                if (data.findUnknown) chatView._renderers.appendSystem(t('Its saved history is not known yet — it is read again the next time this conversation opens.'));   // B-a60e remainder (r1638): «not known yet», said
               })
               .catch(() => {})
               // Send the fork's first message AFTER history renders, so the

@@ -2995,6 +2995,7 @@ class ChatView {
       throw Object.assign(new Error(this._readerAskWords(info)), { code: data.notLoaded });
     }
     if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
+    if (data && data.findUnknown) this._showHistoryStatus(t('Its saved history is not known yet — it is read again the next time this conversation opens.'), { kind: 'info' });   // B-a60e remainder (r1638): a read whose rollout is «not known yet» — said, never «the conversation begins here»
     return data;
   }
 

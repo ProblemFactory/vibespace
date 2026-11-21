@@ -2849,6 +2849,7 @@ class HostManager {
     if (!h.store || typeof h.store.remoteFind !== 'function') throw new Error(`${h.id} conversations cannot be fetched from a host (no remote transcript location)`);
     const rf = h.store.remoteFind(sessionId);
     const r = await this._fetchRemoteByFind(id, rf.findExpr, path.join(id, rf.cacheRel), { maxBytes: maxBytes || rf.maxBytes || 64 * 1024 * 1024, root: rf.root });
+    if (typeof r === 'string' && r && typeof h.store.noteFetched === 'function') { try { h.store.noteFetched(sessionId, r); } catch { } }   // B-a60e remainder: the copy just written is known to its finder at once
     if (h.spawn?.isLocalConversation) { try { this.convIndex.note(sessionId, id, { src: 'fetch' }); } catch { } } // conversation-location index (R3 tail)
     return r;
   }

@@ -239,7 +239,7 @@ async function lastCodexTurnContextAsync(threadId, { fsp = fs.promises } = {}) {
  *  → { ok, has(id) → boolean, pathOf(id) → path|null, dirs, entries, rollouts } */
 async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessionsDir = CODEX_SESSIONS_DIR, remoteRoot = CODEX_REMOTE_ROOT, onDone = null } = {}) {
   const keys = new Set(), stems = [], fps = [], cached = new Set();
-  const firstOf = new Map(), hostsSeen = [];   // key → { plain, zst } (the first of each in the walk's order) · [{ dir, names }] in listing order
+  const firstOf = new Map(), hostsSeen = [], hostDirs = [];   // key → { plain, zst } (the first of each in the walk's order) · [{ dir, names }] in listing order
   const st = { ok: true, dirs: 0, entries: 0, rollouts: 0 };   // ok: no listing failed
   let late = false;   // past the bound
   const listOf = async (dir, { quiet = [] } = {}) => {
@@ -265,7 +265,16 @@ async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessio
     return null;
   };
   const key = sessionsDir + '\0' + remoteRoot;
-  if (CODEX_WALKS_OUT.has(key)) { require('../session-store.js').stuckSaid(CODEX_WALKS_OUT, key, 'codex', sessionsDir); return { ...st, ok: false, late: true, has: () => false, pathOf: () => null }; }   // a stuck walk is not doubled, said once
+  const out = CODEX_WALKS_OUT.get(key);
+  if (out) {   // a walk of the same root is out (the channels' sweep, the attachments' door, the rollout index): never a second
+    // walk, never an at-once «unknown» — WAITED for, within this read's bound, and what it read is this read's (主开发 r1638 must 1)
+    let wt = null;
+    const got = await Promise.race([out.done, new Promise((r) => { wt = setTimeout(() => r(null), boundMs); })]);
+    clearTimeout(wt);
+    if (got) { if (typeof onDone === 'function') { try { onDone(got); } catch { } } return { ...got, adopted: true }; }
+    if (Date.now() - out.since > boundMs) require('../session-store.js').stuckSaid(CODEX_WALKS_OUT, key, 'codex', sessionsDir);   // said only PAST the bound, once
+    return { ...st, ok: false, late: true, has: () => false, pathOf: () => null };
+  }
   const walk = (async () => {
     const stack = [{ dir: sessionsDir, top: true }];
     while (stack.length) {
@@ -274,7 +283,9 @@ async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessio
         if (e.isDirectory()) stack.push({ dir: path.join(dir, e.name), top: false });
         else if (e.isFile()) note(e.name, dir);
       }
-      if (!st.ok || (late && !onDone)) return;   // a listing failed; or past the bound for a one-off read (the index's walk goes on to its end)
+      // a listing failed, or past the bound: a one-off read stops (unknown); THE INDEX's walk goes on to its end and past a folder it
+      // cannot list (主开发 r1638 must 2: one such folder never hides every rollout after it — the walk is only never a «none»)
+      if ((!st.ok || late) && !onDone) return;
     }
     // the cache: findCodexSessionJsonlPath asks existsSync(<host>/codex/<id>.jsonl | .jsonl.zst) — an exact name, of any
     // kind, a link followed (a dangling one finds nothing); a host without a codex directory has none
@@ -285,22 +296,26 @@ async function codexTranscriptIndex({ boundMs = 10000, fsp = fs.promises, sessio
         if (e.isSymbolicLink()) { try { await fsp.stat(path.join(d, e.name)); } catch { continue; } }
         cached.add(e.name); names.add(e.name);
       }
-      if (names.size) hostsSeen.push({ dir: d, names });
-      if (!st.ok || (late && !onDone)) return;
+      hostDirs.push(d); if (names.size) hostsSeen.push({ dir: d, names });
+      if ((!st.ok || late) && !onDone) return;
     }
   })();
-  CODEX_WALKS_OUT.set(key, { since: Date.now(), said: false });
+  const startedAt = Date.now();
+  let doneSettle = null; const done = new Promise((r) => { doneSettle = r; });
+  CODEX_WALKS_OUT.set(key, { since: startedAt, said: false, done });
   walk.then(() => {}, () => { st.ok = false; }).finally(() => {
-    CODEX_WALKS_OUT.delete(key);
-    if (typeof onDone === 'function') { try { onDone({ ok: st.ok, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf }); } catch { } }
+    if (CODEX_WALKS_OUT.get(key)?.done === done) CODEX_WALKS_OUT.delete(key);
+    const full = { ok: st.ok, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf, hostDirs: hostDirs.slice(), startedAt };   // the walk's own start: «none» is judged by it
+    if (typeof onDone === 'function') { try { onDone(full); } catch { } }
+    doneSettle(full);
   });
   let timer = null;
   const bound = new Promise((r) => { timer = setTimeout(() => { late = true; r(); }, boundMs); });
   try { await Promise.race([walk.catch(() => { st.ok = false; }), bound]); } finally { clearTimeout(timer); }
   const ok = st.ok && !late;   // a late walk that finishes after the bound changes nothing handed out
-  return { ok, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf };
+  return { ok, dirs: st.dirs, entries: st.entries, rollouts: st.rollouts, has, pathOf, hostDirs: hostDirs.slice(), startedAt };
 }
-const CODEX_WALKS_OUT = new Map();   // roots → {since, said}
+const CODEX_WALKS_OUT = new Map();   // roots → { since, said, done: the walk's whole result when it ends }
 
 /** B-a60e: a thread's LOCAL rollout path, KEPT. A local codex conversation's status() (chatStatus → _ensureParsed →
  *  parseCodexSessionJsonl → here) walked the whole ~/.codex/sessions tree with readdirSync on the hub's main loop at EVERY
@@ -352,27 +367,51 @@ function keepCodexPath(threadId, fp) {
 // asynchronous one awaits the walk (bounded: CODEX_ASK_BOUND_MS), then answers «not known yet». A late find is never «none».
 const CODEX_NONE_FRESH_MS = 60_000;   // a «none» stands a minute after the walk that found it began (the kept .zst's minute)
 const CODEX_ASK_BOUND_MS = 10_000;    // what an asynchronous asker waits for a walk (the liveness index's own bound)
-const CODEX_WALK_RETRY_MS = 5_000;    // a walk that failed is not asked again sooner (a folder it cannot list stays unlistable a while)
+const CODEX_WALK_RETRY_MS = 5_000;    // a walk that failed is asked again by itself after this, doubling a failure in a row …
+const CODEX_WALK_RETRY_MAX_MS = 300_000;   // … up to five minutes (a folder that cannot be listed stays so a while)
 const CODEX_MISSES_MAX = 4096;        // the threads missed, each with the time it was first missed (the oldest goes first)
-const ROLLOUT_INDEX = { last: null, running: null, walks: 0, ended: 0, asks: 0, missAt: new Map() };   // ended = the walks that have ENDED (a reader's re-read epoch)
+// gen: a reset of the index (a leg's) detaches every walk still out — its end writes nothing; ended = the walks that RAN and
+// ended (a reader's re-read epoch); failStreak = failed walks in a row (the retry's doubling); noted = rollouts a fetch WROTE
+// (hosts.fetchTranscript → the harness's noteFetched): known at once, never a minute's «none»; late = the epoch at which an
+// AWAITED ask of a thread ended «not known yet» (the next awaited ask of it, nothing moved since, answers at once — one wait,
+// not one a caller); asking = the awaited asks in flight (one a thread)
+const ROLLOUT_INDEX = { last: null, running: null, walks: 0, ended: 0, asks: 0, gen: 0, failStreak: 0, retry: null, missAt: new Map(), noted: new Map(), late: new Map(), asking: new Map() };
+const ROLLOUT_TIMING = { retryMs: CODEX_WALK_RETRY_MS };
 function isRemoteCachePath(fp) { return String(fp || '').startsWith(CODEX_REMOTE_ROOT + path.sep); }
-/** One walk in flight, shared: the running one, else a new one (null = a failed walk ended less than CODEX_WALK_RETRY_MS ago).
- *  → a promise of the index the walk leaves (a failed or stuck walk: the one before it, or null) */
+const keepBounded = (m, k, v) => { m.delete(k); m.set(k, v); if (m.size > CODEX_MISSES_MAX) m.delete(m.keys().next().value); };
+/** One walk in flight, shared: the running one, else a new one. After a FAILED walk the next one waits its retry time (5 s,
+ *  doubling a failure in a row, up to 5 min) and is then ASKED BY ITSELF (one timer): a reader that read «not known yet»
+ *  meanwhile is corrected with no press. → a promise of the index the walk leaves, or null (its retry is scheduled) */
 function requestRolloutWalk() {
   if (ROLLOUT_INDEX.running) return ROLLOUT_INDEX.running;
   const last = ROLLOUT_INDEX.last;
-  if (last && !last.ok && Date.now() - last.endedAt < CODEX_WALK_RETRY_MS) return null;
-  const startedAt = Date.now();
+  if (last && !last.ok) {
+    const due = last.endedAt + Math.min(ROLLOUT_TIMING.retryMs * 2 ** Math.max(0, ROLLOUT_INDEX.failStreak - 1), CODEX_WALK_RETRY_MAX_MS);
+    if (Date.now() < due) {
+      if (!ROLLOUT_INDEX.retry) {
+        const g = ROLLOUT_INDEX.gen;
+        ROLLOUT_INDEX.retry = setTimeout(() => { ROLLOUT_INDEX.retry = null; if (g === ROLLOUT_INDEX.gen) requestRolloutWalk(); }, Math.max(1, due - Date.now()));
+        if (typeof ROLLOUT_INDEX.retry.unref === 'function') ROLLOUT_INDEX.retry.unref();   // nothing awaits it: never what holds a process up
+      }
+      return null;
+    }
+  }
+  const startedAt = Date.now(), gen = ROLLOUT_INDEX.gen;
   let settle = null; const p = new Promise((r) => { settle = r; });
   ROLLOUT_INDEX.running = p; ROLLOUT_INDEX.walks++;
   let ended = false;
   const end = (idx) => {
-    if (ended) return; ended = true; ROLLOUT_INDEX.ended++;
+    if (ended) return; ended = true;
+    if (gen !== ROLLOUT_INDEX.gen) { settle(null); return; }   // a reset came between: this walk writes nothing
     if (ROLLOUT_INDEX.running === p) ROLLOUT_INDEX.running = null;
-    if (idx) ROLLOUT_INDEX.last = { ...idx, startedAt, endedAt: Date.now() };
+    if (idx) {   // ONLY A WALK THAT RAN moves the epoch (r1638: a bounce never did any work to re-read)
+      ROLLOUT_INDEX.ended++;
+      ROLLOUT_INDEX.last = { ...idx, startedAt: idx.startedAt || startedAt, endedAt: Date.now() };
+      ROLLOUT_INDEX.failStreak = idx.ok ? 0 : ROLLOUT_INDEX.failStreak + 1;
+    }
     settle(ROLLOUT_INDEX.last);
   };
-  codexTranscriptIndex({ boundMs: CODEX_ASK_BOUND_MS, onDone: end }).then((r) => { if (r && r.late) end(null); }, () => end(null));   // late: another asker's walk is stuck out — nothing of ours ran
+  codexTranscriptIndex({ boundMs: CODEX_ASK_BOUND_MS, onDone: end }).then((r) => { if (r && r.late) end(null); }, () => end(null));   // late: a walk of this root out past the bound — none of ours ran
   return p;
 }
 /** A thread's rollout, never walked on this thread: → { fp, known } (fp null + known = «none»; known false = «not known yet») */
@@ -383,50 +422,77 @@ function codexRolloutLookup(threadId) {
   const kept = keptCodexPath(threadId);
   if (kept) return { fp: kept, known: true };
   const last = ROLLOUT_INDEX.last, now = Date.now();
-  if (last) {
-    const fp = last.pathOf(threadId);   // a name a walk READ is a fact, even from a walk that failed later
-    if (fp && fs.existsSync(fp)) { ROLLOUT_INDEX.missAt.delete(threadId); return { fp: isRemoteCachePath(fp) ? fp : keepCodexPath(threadId, fp), known: true }; }
-  }
+  const read = last ? last.pathOf(threadId) : null;   // a name a walk READ is a fact, even from a walk that failed later
+  if (read && !isRemoteCachePath(read) && fs.existsSync(read)) { ROLLOUT_INDEX.missAt.delete(threadId); return { fp: keepCodexPath(threadId, read), known: true }; }
+  const noted = ROLLOUT_INDEX.noted.get(threadId);   // a fetch wrote it (the remote cache): known at once
+  if (noted && fs.existsSync(noted)) { ROLLOUT_INDEX.missAt.delete(threadId); return { fp: noted, known: true }; }
+  if (read && fs.existsSync(read)) { ROLLOUT_INDEX.missAt.delete(threadId); return { fp: read, known: true }; }
   let missAt = ROLLOUT_INDEX.missAt.get(threadId);
-  if (missAt === undefined) {
-    missAt = now; ROLLOUT_INDEX.missAt.set(threadId, now);
-    if (ROLLOUT_INDEX.missAt.size > CODEX_MISSES_MAX) ROLLOUT_INDEX.missAt.delete(ROLLOUT_INDEX.missAt.keys().next().value);
-  }
+  if (missAt === undefined) { missAt = now; keepBounded(ROLLOUT_INDEX.missAt, threadId, now); }
   if (last && last.ok && last.startedAt >= missAt) {
-    if (now - last.startedAt < CODEX_NONE_FRESH_MS) return { fp: null, known: true };
+    if (now - last.startedAt < CODEX_NONE_FRESH_MS) {
+      // ONE EXACT LOOK before «none» (r1638): the remote cache's exact names in every host folder the walk listed — a copy a
+      // fetch wrote since (an existsSync each, never a listing)
+      for (const d of last.hostDirs || []) for (const ext of ['.jsonl', '.jsonl.zst']) { const f = path.join(d, threadId + ext); if (fs.existsSync(f)) { ROLLOUT_INDEX.missAt.delete(threadId); return { fp: f, known: true }; } }
+      return { fp: null, known: true };
+    }
     ROLLOUT_INDEX.missAt.set(threadId, now);   // that «none» is a minute old: a walk begun from now decides again
   }
   requestRolloutWalk();
   return { fp: null, known: false };
 }
 /** The same, awaiting the walk it asks: at most two walks (a running one begun before the miss, then one after) inside
- *  `boundMs`; past them → «not known yet» (the walk goes on: the next ask reads what it left). */
-async function codexRolloutLookupAsync(threadId, { boundMs = CODEX_ASK_BOUND_MS } = {}) {
-  let r = codexRolloutLookup(threadId);
-  const until = Date.now() + boundMs;
-  for (let walks = 0; !r.known && walks < 2; walks++) {
-    const p = ROLLOUT_INDEX.running || requestRolloutWalk();
-    const left = until - Date.now();
-    if (!p || left <= 0) break;
-    let timer = null;
-    const late = await Promise.race([p.then(() => false), new Promise((res) => { timer = setTimeout(() => res(true), left); })]);
-    clearTimeout(timer);
-    r = codexRolloutLookup(threadId);
-    if (late) break;
-  }
-  return r;
+ *  `boundMs`; past them → «not known yet» (the walk goes on: the next ask reads what it left). ONE awaited ask a thread at a
+ *  time (a second asker joins it), and an ask of a thread whose last awaited ask ended «not known yet» with nothing moved since
+ *  answers at once — an attach, a resume's three questions, never wait the bound twice (r1638). */
+function codexRolloutLookupAsync(threadId, { boundMs = CODEX_ASK_BOUND_MS } = {}) {
+  const first = codexRolloutLookup(threadId);
+  if (first.known) { ROLLOUT_INDEX.late.delete(threadId); return Promise.resolve(first); }
+  if (ROLLOUT_INDEX.late.get(threadId) === ROLLOUT_INDEX.ended) return Promise.resolve(first);   // waited already, nothing moved since
+  const joined = ROLLOUT_INDEX.asking.get(threadId);
+  if (joined) return joined;
+  const job = (async () => {
+    let r = first;
+    const until = Date.now() + boundMs;
+    for (let walks = 0; !r.known && walks < 2; walks++) {
+      const p = ROLLOUT_INDEX.running || requestRolloutWalk();
+      const left = until - Date.now();
+      if (!p || left <= 0) break;
+      let timer = null;
+      const late = await Promise.race([p.then(() => false), new Promise((res) => { timer = setTimeout(() => res(true), left); })]);
+      clearTimeout(timer);
+      r = codexRolloutLookup(threadId);
+      if (late) break;
+    }
+    if (r.known) ROLLOUT_INDEX.late.delete(threadId); else keepBounded(ROLLOUT_INDEX.late, threadId, ROLLOUT_INDEX.ended);
+    return r;
+  })().finally(() => { ROLLOUT_INDEX.asking.delete(threadId); });
+  ROLLOUT_INDEX.asking.set(threadId, job);
+  return job;
+}
+/** A fetch WROTE a thread's rollout (hosts.fetchTranscript → the codex harness's noteFetched): the index knows it at once */
+function noteCodexRollout(threadId, fp) {
+  if (!threadId || !fp) return;
+  keepBounded(ROLLOUT_INDEX.noted, String(threadId), String(fp));
+  ROLLOUT_INDEX.missAt.delete(String(threadId)); ROLLOUT_INDEX.late.delete(String(threadId));
 }
 /** The boot's warm (before the restore's first codex read) and a test's wait: the running walk, or a new one. */
 function warmCodexRolloutIndex() { return ROLLOUT_INDEX.running || requestRolloutWalk() || Promise.resolve(ROLLOUT_INDEX.last); }
-/** The index's epoch: how many walks have ended. A reader that read «not known yet» reads again only once it has moved (a
+/** The index's epoch: how many walks have RUN and ended. A reader that read «not known yet» reads again only once it has moved (a
  *  synchronous road asked in a loop does no work and asks no walk between two walks). */
 function rolloutIndexEpoch() { return ROLLOUT_INDEX.ended; }
 /** A walk begun NOW (after any running one ends): what a store's writer, or a leg that has just written rollouts, awaits so the
  *  index has seen them. → the index it left */
 async function refreshCodexRolloutIndex() { if (ROLLOUT_INDEX.running) await ROLLOUT_INDEX.running; return (await (requestRolloutWalk() || Promise.resolve(ROLLOUT_INDEX.last))); }
 /** What the index has done (a leg reads it): its walks, the last walk's facts, whether one runs. */
-function rolloutIndexStats() { const l = ROLLOUT_INDEX.last; return { walks: ROLLOUT_INDEX.walks, asks: ROLLOUT_INDEX.asks, running: !!ROLLOUT_INDEX.running, missed: ROLLOUT_INDEX.missAt.size, kept: CODEX_PATH_KEPT.size, last: l ? { ok: l.ok, rollouts: l.rollouts, dirs: l.dirs, startedAt: l.startedAt, endedAt: l.endedAt } : null }; }
-function _resetRolloutIndexForTests() { ROLLOUT_INDEX.last = null; ROLLOUT_INDEX.running = null; ROLLOUT_INDEX.walks = 0; ROLLOUT_INDEX.ended++; ROLLOUT_INDEX.missAt.clear(); CODEX_PATH_KEPT.clear(); }
+function rolloutIndexStats() { const l = ROLLOUT_INDEX.last; return { walks: ROLLOUT_INDEX.walks, ended: ROLLOUT_INDEX.ended, asks: ROLLOUT_INDEX.asks, running: !!ROLLOUT_INDEX.running, retrying: !!ROLLOUT_INDEX.retry, failStreak: ROLLOUT_INDEX.failStreak, missed: ROLLOUT_INDEX.missAt.size, kept: CODEX_PATH_KEPT.size, last: l ? { ok: l.ok, rollouts: l.rollouts, dirs: l.dirs, startedAt: l.startedAt, endedAt: l.endedAt } : null }; }
+function _resetRolloutIndexForTests() {
+  ROLLOUT_INDEX.gen++; ROLLOUT_INDEX.ended++;   // every walk still out is detached (its end writes nothing); readers re-read
+  if (ROLLOUT_INDEX.retry) { clearTimeout(ROLLOUT_INDEX.retry); ROLLOUT_INDEX.retry = null; }
+  ROLLOUT_INDEX.last = null; ROLLOUT_INDEX.running = null; ROLLOUT_INDEX.walks = 0; ROLLOUT_INDEX.failStreak = 0;
+  for (const m of [ROLLOUT_INDEX.missAt, ROLLOUT_INDEX.noted, ROLLOUT_INDEX.late, ROLLOUT_INDEX.asking, CODEX_PATH_KEPT, CODEX_WALKS_OUT]) m.clear();
+}
+function _setRolloutTimingForTests({ retryMs } = {}) { ROLLOUT_TIMING.retryMs = retryMs == null ? CODEX_WALK_RETRY_MS : Number(retryMs); }
 
 /** Locate a thread's rollout: `…-<threadId>.jsonl`, else its `.jsonl.zst`
  *  twin (codex ≥0.153 compression; the plain file wins when both exist), then
@@ -2003,7 +2069,7 @@ module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
-  findCodexSessionJsonlPath, findCodexSessionJsonlPathAsync, codexRolloutLookup, codexRolloutLookupAsync, warmCodexRolloutIndex, refreshCodexRolloutIndex, rolloutIndexEpoch, rolloutIndexStats, _resetRolloutIndexForTests,   // B-a60e remainder: THE ROLLOUT INDEX
+  findCodexSessionJsonlPath, findCodexSessionJsonlPathAsync, codexRolloutLookup, codexRolloutLookupAsync, warmCodexRolloutIndex, refreshCodexRolloutIndex, rolloutIndexEpoch, rolloutIndexStats, noteCodexRollout, _resetRolloutIndexForTests, _setRolloutTimingForTests,   // B-a60e remainder: THE ROLLOUT INDEX
   CODEX_NONE_FRESH_MS, CODEX_ASK_BOUND_MS,
   normalizeCodexSource,
   parseCodexSessionJsonl,

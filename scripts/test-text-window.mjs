@@ -203,7 +203,7 @@ ok('ws-handler: the live attach ships the slab the attach ASKED for (perf r1: fl
 ok('ws-handler: the view-only attach ships the slab asked for too', /messages: mm\.tailWindow\(attachWindowOpts\(data\.slab\)\), totalCount: mm\.total, chatStatus: sm\.chatStatus\(\), isStreaming: false, viewOnly: true/.test(wsh));
 ok('ws-handler: the mapping is the PURE module\'s (one spelling of "floor")', /const \{ attachWindowOpts \} = require\('\.\/text-window\.js'\);/.test(wsh) && !/data\.slab === 'floor'/.test(wsh));
 ok('ws-handler: no attach path ships tail(50) any more', !/\.tail\(50\)/.test(wsh));
-ok('transcript-service.page(): the default branch is the text window (HTTP + the daemon op; row B-422c: + its «not loaded», when said)', /return \{ messages: mm\.tailWindow\(\), total: mm\.total(?:, \.\.\.saidOf\(v\))? \};/.test(ts) && !/mm\.tail\(50\)/.test(ts));
+ok('transcript-service.page(): the default branch is the text window (HTTP + the daemon op; row B-422c: + its «not loaded», when said)', /return \{ messages: mm\.tailWindow\(\), total: mm\.total(?:, \.\.\.saidOf\(v\))?(?:, \.\.\.said)? \};/.test(ts) && !/mm\.tail\(50\)/.test(ts));
 const hc = fs.readFileSync(path.join(REPO, 'scripts/test-harness-contract.mjs'), 'utf8');
 ok('the harness contract requires tailWindow of EVERY normalizer (a new harness cannot ship without it)', /const NORM_METHODS = \[[^\]]*'tailWindow'/.test(hc));
 

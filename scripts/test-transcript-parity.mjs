@@ -248,7 +248,7 @@ const cref = { backend: 'codex', sessionId: TID, cwd: CWD };
   // the machine is a PARAMETER, never a second implementation (主开发 r1465): the agent this suite runs carries the hub's own
   // index — its one shared walk, the bound an asker waits, the stuck-walk guard — bundled from the same src/adapters/codex.js
   const bundle = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-agentd.js'), 'utf8');
-  const carried = { walk: /function requestRolloutWalk\d*\(/.test(bundle), bound: /CODEX_ASK_BOUND_MS\d* = /.test(bundle), stuck: /CODEX_WALKS_OUT\d*\.has\(/.test(bundle), lookup: /function codexRolloutLookup\d*\(/.test(bundle) };
+  const carried = { walk: /function requestRolloutWalk\d*\(/.test(bundle), bound: /CODEX_ASK_BOUND_MS\d* = /.test(bundle), stuck: /CODEX_WALKS_OUT\d*\.get\(/.test(bundle), lookup: /function codexRolloutLookup\d*\(/.test(bundle) };
   ok(Object.values(carried).every(Boolean), `the agent bundle carries the rollout index's own walk, bound and stuck-walk guard (${JSON.stringify(carried)})`);
   ok(!!inproc && !!inproc.chatStatus && inproc.chatStatus.model === 'gpt-5.6' && st.walks === 1 && st.last && st.last.ok,
     `…the hub's side read the rollout (model «${inproc && inproc.chatStatus && inproc.chatStatus.model}») after ONE walk of its index (${st.walks}; ${st.last && st.last.rollouts} rollouts)`);

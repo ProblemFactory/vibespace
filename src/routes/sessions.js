@@ -80,6 +80,7 @@ function setup(ctx) {
         const st = await transcripts.status(ref);
         payload.chatStatus = st.chatStatus;
         payload.taskState = st.taskState;
+        if (st.findUnknown) payload.findUnknown = true;   // B-a60e remainder (r1638): «not known yet» travels to the page
         payload.turnMap = (await transcripts.turnmap(ref)).turns;
       }
       res.json(payload);

@@ -4,7 +4,7 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { HARNESS_SETTINGS } = require('../harness-settings'); // PURE: THE declared settings table (design-harness-settings §2)
 const { cliConfigFile } = require('../harness-config');       // SHARED: the descriptor-side file objects over the table's `files`
 const { CodexAdapter } = require('../adapters/codex');
-const { findCodexSessionJsonlPath, findCodexSessionJsonlPathAsync, codexRolloutLookupAsync, extractCodexThreadMeta, lastCodexTurnContextAsync } = require('../adapters/codex');
+const { findCodexSessionJsonlPath, findCodexSessionJsonlPathAsync, codexRolloutLookupAsync, noteCodexRollout, extractCodexThreadMeta, lastCodexTurnContextAsync } = require('../adapters/codex');
 const { CodexMessageManager } = require('../codex-message-manager');
 const codexStore = require('../codex-session-store');
 const codexThreadRead = require('../codex-thread-read');
@@ -175,6 +175,7 @@ module.exports = {
     discover: ({ activeSessions } = {}) => codexStore.listCodexThreadsAsync({ activeSessions }),
     locate: (id) => findCodexSessionJsonlPath(id),   // (threadId) → rollout path|null (cwd irrelevant) — on the hub's thread never a walk (B-a60e remainder: the rollout index; null = «none» or «not known yet»)
     locateAsync: (id) => findCodexSessionJsonlPathAsync(id),   // B-a60e remainder: the same, AWAITED in the rollout index (an asynchronous caller's road)
+    noteFetched: (id, fp) => noteCodexRollout(id, fp),   // B-a60e remainder (r1638): a fetch WROTE its rollout into the remote cache — the index knows it at once
     locateIsProof: true, // a null PROVES no rollout is here (the walk + the remote cache) — the transcript worker's `locate` op (a worker's thread walks)
     // lane chat-attachments-persist (the cut): WHERE A PICTURE SITS IN A ROLLOUT LINE — a function output's input_image data
     // URL (a view_image); the key = the output's call_id; no sub-agent files (a Codex sub-agent is a thread of its own)

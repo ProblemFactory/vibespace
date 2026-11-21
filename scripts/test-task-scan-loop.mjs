@@ -399,6 +399,171 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const lg = await loopRoad(CS), lr = await loopRoad(mutantCopies('a60e-no-epoch', REPO).load('src/codex-session-store.js', anchored(csSrcA, EPOCH, '    if (this._all && !this._partial) return;\n', 'a60e-no-epoch'), 'no-epoch'));
       ok(lg.loopAsks === 0 && lg.walks === 1 && lg.n === 0 && lg.model === 'gpt-stand-in-a60e' && lr.loopAsks >= 200,
         `chatStatus() 200 times while the one walk hangs: ${lg.loopAsks} asks of the index, ${lg.walks} walk, ${lg.n} synchronous listings; the walk ended, the next ask reads the rollout (model «${lg.model}»); RED (no epoch rule): ${lr.loopAsks} asks`);
+      // ── THE ROUND wdxrfw5q7's CURE (主开发 r1638): each leg on the real modules, each RED in an anchored copy ──
+      const withReaddir = async (pick, fn) => {   // a listing this leg refuses (EACCES) or holds (a promise): fs.promises, as the walk reads it
+        const real = fs.promises.readdir;
+        fs.promises.readdir = function (p0, ...a) { const v = pick(p0); if (v === 'fail') return Promise.reject(Object.assign(new Error('EACCES: permission denied, scandir ' + p0), { code: 'EACCES' })); if (v && typeof v.then === 'function') return v.then(() => real.call(this, p0, ...a)); return real.call(this, p0, ...a); };
+        try { return await fn(); } finally { fs.promises.readdir = real; }
+      };
+      const adCopy = (tag, src) => require(mutantCopies(tag, REPO).write('src/adapters/codex.js', src, tag));
+      // (9) MUST 1 — ONE WALK OF A ROOT, SHARED: a channels-style walk of the same root runs on SLOW storage; a lookup of a rollout
+      // only THAT walk sees WAITS for it and answers the path (never «not known yet» at once); no stuck words within the bound;
+      // the epoch moves once. RED: today's guard (an at-once «unknown» while another walk is out)
+      const tF = 'eeeeeeee-0000-4000-8000-0000000a60f1', fF = path.join(rdir, `rollout-2026-07-02T00-00-21-${tF}.jsonl`);
+      const foreign = async (A) => {
+        A._resetRolloutIndexForTests(); const e0 = A.rolloutIndexStats().ended;
+        let release = () => { }; const gate = new Promise((r) => { release = r; });
+        let warned = 0; const realWarn = console.warn; console.warn = (...a) => { if (/has not answered since/.test(String(a[0]))) warned++; else realWarn.apply(console, a); };
+        try {
+          return await withReaddir((p0) => (p0 === csess ? gate : null), async () => {
+            const sweep = A.codexTranscriptIndex({ boundMs: 5000 });   // the channels' sweep: the same root, held at its first listing
+            fs.writeFileSync(fF, '{}\n');                                // a rollout only that walk will see
+            const ask = A.codexRolloutLookupAsync(tF);
+            setTimeout(release, 60);
+            const [sw, got] = await Promise.all([sweep, ask]);
+            return { got, sweepSaw: sw.has(tF), moved: A.rolloutIndexStats().ended - e0, warned };
+          });
+        } finally { console.warn = realWarn; release(); fs.rmSync(fF, { force: true }); }
+      };
+      const OUT_NOW = adSrc.slice(adSrc.indexOf('  const out = CODEX_WALKS_OUT.get(key);\n'), adSrc.indexOf("    return { ...st, ok: false, late: true, has: () => false, pathOf: () => null };\n  }\n") + "    return { ...st, ok: false, late: true, has: () => false, pathOf: () => null };\n  }\n".length);
+      const OUT_THEN = "  if (CODEX_WALKS_OUT.has(key)) { require('../session-store.js').stuckSaid(CODEX_WALKS_OUT, key, 'codex', sessionsDir); return { ...st, ok: false, late: true, has: () => false, pathOf: () => null }; }   // a stuck walk is not doubled, said once\n";   // stale-pins: kept (the red control plants the release's guard back)
+      const g9 = await foreign(AD), r9 = await foreign(adCopy('a60e-bounce', anchored(adSrc, OUT_NOW, OUT_THEN, 'a60e-bounce')));
+      ok(OUT_NOW.length > 200 && g9.got.fp === fF && g9.got.known && g9.sweepSaw && g9.warned === 0 && g9.moved === 1 && r9.got.known === false,
+        `a channels-style walk of the same root on slow storage: the lookup WAITED for it and read the path it saw (${path.basename(String(g9.got.fp))}), ${g9.warned} stuck lines, the epoch moved ${g9.moved}; RED (today's guard): «not known yet» at once (known ${r9.got.known})`);
+      // (10) MUST 2 — A FOLDER THAT CANNOT BE LISTED hides nothing after it: the index's walk goes on (the first folder below the root
+      // refuses); every rollout elsewhere is found, those it could not see are «not known yet», none is «none». RED: the walk stops there
+      const walkOn = async (A) => {
+        A._resetRolloutIndexForTests(); let failed = null;
+        return withReaddir((p0) => { if (!failed && p0 !== csess && p0.startsWith(csess + path.sep)) { failed = p0; return 'fail'; } return null; }, async () => {
+          const got = await Promise.all(ids30.map((t) => A.codexRolloutLookupAsync(t)));
+          return { found: got.filter((x) => x.fp).length, none: got.filter((x) => !x.fp && x.known).length, unknown: got.filter((x) => !x.known).length, ok: A.rolloutIndexStats().last && A.rolloutIndexStats().last.ok, failed };
+        });
+      };
+      const WALK_ON = "      if ((!st.ok || late) && !onDone) return;\n    }\n    // the cache:";
+      const g10 = await walkOn(AD), r10 = await walkOn(adCopy('a60e-walk-stops', anchored(adSrc, WALK_ON, "      if (!st.ok || (late && !onDone)) return;\n    }\n    // the cache:", 'a60e-walk-stops')));
+      ok(g10.ok === false && g10.none === 0 && g10.unknown === 30 - g10.found && g10.found >= 10 && r10.found < g10.found,
+        `one folder below the root cannot be listed (${path.relative(csess, String(g10.failed))}): the walk went on — ${g10.found} of 30 found, ${g10.unknown} «not known yet», ${g10.none} «none»; RED (the walk stops there): ${r10.found} found`);
+      // (11) MUST 3 — THE FLAG TRAVELS: the service's status and page (the paired machine's transcript ops ARE these) of a conversation
+      // whose rollout's folder cannot be listed SAY «not known yet». RED: the status reply without it
+      const travel = async (TSm) => withReaddir((p0) => (p0 === rdir ? 'fail' : null), async () => {
+        AD._resetRolloutIndexForTests();
+        const svc = TSm.createTranscriptService({ activeSessions: new Map(), createSessionMessages: (s0) => new CS.CodexSessionMessages(s0, undefined, { buffersDir: path.join(os.homedir(), 'buf') }), hosts: null });
+        const st = await svc.status(cref2), pg = await svc.page(cref2);
+        return { st: !!st.findUnknown, pg: !!pg.findUnknown };
+      });
+      const FLAG = "    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.findUnknown ? { findUnknown: true } : {}) };";
+      const g11 = await travel({ createTranscriptService }), r11 = await travel(mutantCopies('a60e-no-flag', REPO).load('src/transcript-service.js', anchored(tsSrc, FLAG, '    return { chatStatus, taskState: sm.taskState?.() || null };', 'a60e-no-flag'), 'no-flag'));   // stale-pins: kept (the red control plants the status reply without the flag)
+      const PAGE_SRC = ['src/lib/chat-view.js', 'src/lib/session-lifecycle.js'].map((f) => fs.readFileSync(path.join(REPO, f), 'utf8')).join('\n');
+      const said = PAGE_SRC.split("t('Its saved history is not known yet — it is read again the next time this conversation opens.')").length - 1;
+      ok(g11.st && g11.pg && !r11.st && said >= 5,
+        `a rollout «not known yet»: the service's status says it (${g11.st}), its page says it (${g11.pg}); the page's five roads word it (${said}: the attach, the re-attach, the two views, the HTTP history pill, the resume's first page); RED (status without the flag): ${r11.st}`);
+      AD._resetRolloutIndexForTests();
+      // (12) «none» NEVER STANDS OVER A COPY A FETCH WROTE: one exact look before «none» (the host folders the walk listed), and the
+      // fetch's note (a host folder the walk never listed). RED: neither (the walk's minute-long «none»)
+      const RR = path.join(HOME_FAKE, 'remote-root-a60e'); fs.mkdirSync(path.join(RR, 'host-y', 'codex'), { recursive: true });
+      const ROOTLINE = "const CODEX_REMOTE_ROOT = path.join(__dirname, '..', '..', 'data', 'remote-jsonl');   // the remote-jsonl cache (hosts.fetchCodexJsonl)\n";
+      const adRR = anchored(adSrc, ROOTLINE, `const CODEX_REMOTE_ROOT = ${JSON.stringify(RR)};\n`, 'a60e-remote-root');
+      const EXACT = "      for (const d of last.hostDirs || []) for (const ext of ['.jsonl', '.jsonl.zst']) { const f = path.join(d, threadId + ext); if (fs.existsSync(f)) { ROLLOUT_INDEX.missAt.delete(threadId); return { fp: f, known: true }; } }\n";
+      const NOTE = "  keepBounded(ROLLOUT_INDEX.noted, String(threadId), String(fp));\n";
+      const exactRoad = async (A) => {
+        const tY = 'eeeeeeee-0000-4000-8000-0000000a60f2', tX = 'eeeeeeee-0000-4000-8000-0000000a60f3';
+        const fy = path.join(RR, 'host-y', 'codex', tY + '.jsonl'), fx = path.join(RR, 'host-z', 'codex', tX + '.jsonl');
+        const y0 = await A.codexRolloutLookupAsync(tY); fs.writeFileSync(fy, '{}\n'); const y1 = A.codexRolloutLookup(tY);
+        const x0 = await A.codexRolloutLookupAsync(tX); fs.mkdirSync(path.dirname(fx), { recursive: true }); fs.writeFileSync(fx, '{}\n'); A.noteCodexRollout(tX, fx); const x1 = A.codexRolloutLookup(tX);
+        fs.rmSync(fy, { force: true }); fs.rmSync(path.join(RR, 'host-z'), { recursive: true, force: true });
+        return { y0, y1, x0, x1 };
+      };
+      const g12 = await exactRoad(adCopy('a60e-rr', adRR)), r12 = await exactRoad(adCopy('a60e-rr-red', anchored(anchored(adRR, EXACT, '', 'a60e-no-exact'), NOTE, '', 'a60e-no-note')));
+      ok(g12.y0.known && !g12.y0.fp && g12.y1.fp && g12.x0.known && !g12.x0.fp && g12.x1.fp && !r12.y1.fp && !r12.x1.fp,
+        `a «none», then a fetch writes the copy: in a host folder the walk listed, the exact look finds it (${path.basename(String(g12.y1.fp))}); in one it never listed, the fetch's note (${path.basename(String(g12.x1.fp))}); RED (neither): «none» for both`);
+      // (13) ONE WAIT A THREAD: while the one walk hangs, an awaited ask of a thread waits its bound ONCE; the next awaited ask of it,
+      // nothing moved since, answers at once (an attach, a resume's three questions). RED: the second waits the bound again
+      const LATE = '  if (ROLLOUT_INDEX.late.get(threadId) === ROLLOUT_INDEX.ended) return Promise.resolve(first);   // waited already, nothing moved since\n';
+      const ASK_BOUND = 150;   // the bound these two asks are given (the mechanism's constant: the first waits it, × 0.8 slack)
+      const oneWait = async (A) => {
+        A._resetRolloutIndexForTests(); let release = () => { }; const gate = new Promise((r) => { release = r; });
+        try {
+          return await withReaddir((p0) => (p0 === csess ? gate : null), async () => {
+            const tZ = 'eeeeeeee-0000-4000-8000-0000000a60f4';
+            const t0 = Date.now(); const a = await A.codexRolloutLookupAsync(tZ, { boundMs: ASK_BOUND }); const t1 = Date.now();
+            const b = await A.codexRolloutLookupAsync(tZ, { boundMs: ASK_BOUND }); const t2 = Date.now();
+            release(); await A.warmCodexRolloutIndex();
+            return { a, b, first: t1 - t0, second: t2 - t1 };
+          });
+        } finally { release(); }
+      };
+      const g13 = await oneWait(AD), r13 = await oneWait(adCopy('a60e-two-waits', anchored(adSrc, LATE, '', 'a60e-two-waits')));
+      ok(!g13.a.known && !g13.b.known && g13.first >= ASK_BOUND * 0.8 && g13.second * 4 < g13.first && r13.second * 4 >= r13.first,   // the second against the first, measured in the run
+        `while the walk hangs: the first awaited ask waited its bound (${g13.first} ms), the second answered at once (${g13.second} ms); RED (no memo): the second waited again (${r13.second} ms)`);
+      // (14) A FAILED WALK IS ASKED AGAIN BY ITSELF (the status line never stays partial until a re-open): the walk fails once at a
+      // folder; nobody asks; its retry (a short time here) walks, the epoch moves, the next read finds the rollout. RED: no retry
+      const RETRY = '      if (!ROLLOUT_INDEX.retry) {\n';
+      const retryRoad = async (A) => {
+        A._resetRolloutIndexForTests(); A._setRolloutTimingForTests({ retryMs: 40 }); let once = false;
+        try {
+          return await withReaddir((p0) => { if (!once && p0 === rdir) { once = true; return 'fail'; } return null; }, async () => {
+            const a = await A.codexRolloutLookupAsync(tid2, { boundMs: 300 }); const w1 = A.rolloutIndexStats().walks;
+            await new Promise((r) => setTimeout(r, 400));
+            const s = A.rolloutIndexStats(); const b = A.codexRolloutLookup(tid2);
+            return { a, w1, walks: s.walks, ok: !!(s.last && s.last.ok), b };
+          });
+        } finally { A._setRolloutTimingForTests({}); }
+      };
+      const g14 = await retryRoad(AD), r14 = await retryRoad(adCopy('a60e-no-retry', anchored(adSrc, RETRY, '      if (false) {\n', 'a60e-no-retry')));
+      ok(!g14.a.known && g14.w1 === 1 && g14.walks === 2 && g14.ok && g14.b.fp === rfile && r14.walks === 1 && !r14.b.known,
+        `a walk that failed once at a folder: «not known yet»; nobody asked, its retry walked (${g14.walks} walks), the next read found it (${path.basename(String(g14.b.fp))}); RED (no retry): ${r14.walks} walk, still «not known yet»`);
+      AD._resetRolloutIndexForTests();
+      // (15) the kept .jsonl.zst yields to its plain twin in the same folder, with no walk (the round's should: its leg restored).
+      // RED (no twin check) ⇒ the .zst stays
+      const tid3 = 'eeeeeeee-0000-4000-8000-0000000a60e3', zfile = path.join(rdir, `rollout-2026-07-02T00-00-01-${tid3}.jsonl.zst`), pfile = zfile.slice(0, -'.zst'.length);
+      const twin = async (A) => {
+        A._resetRolloutIndexForTests(); fs.writeFileSync(zfile, 'zst');
+        const first = (await A.codexRolloutLookupAsync(tid3)).fp; fs.writeFileSync(pfile, '{}\n');
+        let got = null; const n = await listing(async () => { got = A.codexRolloutLookup(tid3).fp; }); const w = A.rolloutIndexStats().walks;
+        fs.rmSync(pfile, { force: true }); fs.rmSync(zfile, { force: true }); return { first, got, n, w };
+      };
+      const TWIN = "    if (fs.existsSync(plain)) { CODEX_PATH_KEPT.set(threadId, { fp: plain, at: Date.now() }); return plain; }\n";
+      const tw = await twin(AD), twr = await twin(adCopy('a60e-no-twin', anchored(adSrc, TWIN, '', 'a60e-no-twin')));
+      ok(tw.first === zfile && tw.got === pfile && tw.n === 0 && tw.w === 1 && twr.got === zfile,
+        `a kept .jsonl.zst and then its plain twin: the plain wins (${path.basename(String(tw.got))}) with ${tw.n} listings and no walk; RED (no twin check): ${path.basename(String(twr.got))}`);
+      // (16) THE CHANNELS' LIVENESS FALLBACK: a codex conversation of THIS machine (its session-meta here) whose rollout is «not known
+      // yet» is NOT gone; once a walk begun after the miss found none, it is gone. RED: the release's fallback (gone at once)
+      const tQ = 'eeeeeeee-0000-4000-8000-0000000a60f5', metaDir = path.join(HOME_FAKE, 'meta-a60e'); fs.mkdirSync(metaDir, { recursive: true });
+      fs.writeFileSync(path.join(metaDir, 'q.json'), JSON.stringify({ backendSessionId: tQ }));
+      const cwSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf8');
+      const FOUND = cwSrc.split('\n').find((l) => l.startsWith('  const found = findTranscript || ((cid) => { if (require(')) + '\n';
+      const live = async (W) => {
+        AD._resetRolloutIndexForTests();
+        const rd = W.livenessReader({ liveSessions: () => [], readUserState: () => ({}), convIndex: () => null, metaDir, transcriptDirs: () => [projects] });
+        const before = rd(tQ); await AD.warmCodexRolloutIndex(); await AD.codexRolloutLookupAsync(tQ); const after = rd(tQ);
+        return { before: before.state, after: after.state };
+      };
+      const g16 = await live(require(path.join(REPO, 'src/server/channels-wiring.js'))), r16 = await live(mutantCopies('a60e-gone-at-once', REPO).load('src/server/channels-wiring.js', anchored(cwSrc, FOUND, "  const found = findTranscript || ((cid) => !!(require('../session-store.js').findSessionJsonlPath(cid) || require('../adapters/codex.js').findCodexSessionJsonlPath(cid)));\n", 'a60e-gone-at-once'), 'gone-at-once'));   // stale-pins: kept (the red control plants the release's liveness fallback back)
+      ok(FOUND.length > 60 && g16.before !== 'gone' && g16.after === 'gone' && r16.before === 'gone',
+        `the channels' liveness fallback: a local codex conversation whose rollout is «not known yet» is ${g16.before} (never gone), after a walk that found none ${g16.after}; RED (the release's fallback): ${r16.before} at once`);
+      // (17) THE THREAD/READ WARM starts no app-server for a rollout «not known yet» (it may be there): the rollout's folder cannot be
+      // listed ⇒ false, no codex started. RED: the warm that reads only the path (a codex app-server started)
+      const hSrc = fs.readFileSync(path.join(REPO, 'src/harnesses/codex.js'), 'utf8'), WARM = '      if (got.fp || !got.known) return false;\n';
+      const warmRoad = async (HC, name) => withReaddir((p0) => (p0 === rdir ? 'fail' : null), async () => {
+        AD._resetRolloutIndexForTests(); const cmd = standIn(name); const was = process.env.CODEX_CMD; process.env.CODEX_CMD = cmd;
+        try { CTR._resetForTests(); CTR.configure({ codexCmd: cmd, enabled: true }); const r = await HC.store.warmTranscript(tid2, cwd, {}); await new Promise((x) => setTimeout(x, 300)); return { r, ran: ran(cmd) }; }
+        finally { if (was === undefined) delete process.env.CODEX_CMD; else process.env.CODEX_CMD = was; }
+      });
+      const g17 = await warmRoad(require(path.join(REPO, 'src/harnesses/codex.js')), 'codex-warm-green'), r17 = await warmRoad(mutantCopies('a60e-warm', REPO).load('src/harnesses/codex.js', anchored(hSrc, WARM, '      if (got.fp) return false;\n', 'a60e-warm'), 'warm'), 'codex-warm-red');
+      ok(g17.r === false && !g17.ran && r17.ran,
+        `the thread/read warm, its rollout «not known yet»: ${g17.r}, no codex started; RED (the path alone read): a codex app-server started (${r17.ran})`);
+      // (18) THE RESUME'S FORK CHAIN, awaited: a forked thread's rollout written after the last walk — the resume's road (ws-create →
+      // forkChainEnvAsync) carries its native parent; the synchronous road at the same moment would not. RED: the sync chain on that road
+      const tP = 'eeeeeeee-0000-4000-8000-0000000a60f6', tC = 'eeeeeeee-0000-4000-8000-0000000a60f7', fC = path.join(rdir, `rollout-2026-07-02T00-00-31-${tC}.jsonl`);
+      const rsSrc = fs.readFileSync(path.join(REPO, 'src/resume-store.js'), 'utf8'), ASYNC_CHAIN = "await st.forkChainAsync(resumeId) : st.forkChain(resumeId)";
+      const chainRoad = async (RS) => {
+        AD._resetRolloutIndexForTests(); await AD.warmCodexRolloutIndex();
+        fs.writeFileSync(fC, JSON.stringify({ timestamp: T0, type: 'session_meta', payload: { id: tC, forked_from: [tP] } }) + '\n');
+        try { return Object.values(await RS.forkChainEnvAsync('codex', tC))[0] || ''; } finally { fs.rmSync(fC, { force: true }); }
+      };
+      const g18 = await chainRoad(require(path.join(REPO, 'src/resume-store.js'))), r18 = await chainRoad(mutantCopies('a60e-sync-chain', REPO).load('src/resume-store.js', anchored(rsSrc, ASYNC_CHAIN, 'st.forkChain(resumeId) : st.forkChain(resumeId)', 'a60e-sync-chain'), 'sync-chain'));
+      ok(g18 === `${tP},${tC}` && r18 === tC, `the resume's fork chain (a rollout written after the last walk): «${g18}»; RED (the synchronous chain on that road): «${r18}»`);
+      AD._resetRolloutIndexForTests();
       fs.rmSync(rfile, { force: true });
     }
     // claude: its own task-state warm, awaited before the reader is built — on both roads

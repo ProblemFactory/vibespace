@@ -254,8 +254,9 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     // it — `notLoaded`, the page's «not loaded yet» — never a short history passed off as the whole one
     const notLoaded = sm.notLoaded || null;
     const notLoadedInfo = notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null, readerGone: !!sm.notLoadedReaderGone, readerCause: sm.notLoadedReaderCause || null } : null;   // r1243: which door, when again
-    if (r.memo) r.memo.view = { mm, session, notLoaded, notLoadedInfo };
-    return { mm, session, notLoaded, notLoadedInfo };
+    const findUnknown = !!sm.findUnknown;   // B-a60e remainder (r1638): a rollout «not known yet» — the reply SAYS it, never an empty history without a word
+    if (r.memo) r.memo.view = { mm, session, notLoaded, notLoadedInfo, findUnknown };
+    return { mm, session, notLoaded, notLoadedInfo, findUnknown };
   }
   const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, readerGone: !!v.notLoadedInfo.readerGone, readerCause: v.notLoadedInfo.readerCause || null, retryAt: v.notLoadedInfo.retryAt, retryIn: Number(v.notLoadedInfo.retryAt) ? Math.max(0, v.notLoadedInfo.retryAt - Date.now()) : null } : {}) } : {});   // retryIn: the delay from the hub's now (a page's clock is not the hub's)
 
@@ -263,21 +264,22 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     const r0 = norm(ref);
     const viaDev = await tryDevice(r0, 'page', { offset, limit, untilUuid });
     if (viaDev) return viaDev;
-    const v = await view(ref), { mm } = v;
+    const v = await view(ref), { mm, findUnknown } = v;
+    const said = findUnknown ? { findUnknown: true } : {};   // B-a60e remainder (r1638): the flag on every page of such a read
     if (untilUuid) {
       const idx = mm.messages.findIndex((m) => m.uuid === untilUuid);
       const upto = idx >= 0 ? idx + 1 : mm.total;
       const start = Math.max(0, upto - 50);
-      return { messages: mm.messages.slice(start, upto), total: upto, ...saidOf(v) };
+      return { messages: mm.messages.slice(start, upto), total: upto, ...saidOf(v), ...said };
     }
     if (offset !== undefined || limit !== undefined) {
-      return { messages: mm.slice(parseInt(offset) || 0, parseInt(limit) || 50), total: mm.total, ...saidOf(v) };
+      return { messages: mm.slice(parseInt(offset) || 0, parseInt(limit) || 50), total: mm.total, ...saidOf(v), ...said };
     }
     // THE DEFAULT PAGE = the attach slab's rule (src/text-window.js) — the HTTP
     // withStatus read AND the daemon's `transcript-op page` (agentd bundles this
     // service), byte-identical by test-transcript-parity. An OLD daemon answers
     // tail(50); the client renders any N (nothing assumes 50).
-    return { messages: mm.tailWindow(), total: mm.total, ...saidOf(v) };
+    return { messages: mm.tailWindow(), total: mm.total, ...saidOf(v), ...said };
   }
 
   async function turnmap(ref) {
@@ -315,7 +317,7 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     if (session?._permissionMode && chatStatus && !chatStatus.permissionMode) {
       chatStatus.permissionMode = session._permissionMode;
     }
-    return { chatStatus, taskState: sm.taskState?.() || null };
+    return { chatStatus, taskState: sm.taskState?.() || null, ...(sm.findUnknown ? { findUnknown: true } : {}) };   // B-a60e remainder (r1638): «not known yet» travels
   }
 
   async function taskState(ref) {
