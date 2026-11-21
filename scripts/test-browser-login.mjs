@@ -580,6 +580,29 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
         const eNew = BV.parseSnapshotRefs(EDGE).map((r) => r.ref), eOld = BV_OLD.parseSnapshotRefs(EDGE).map((r) => r.ref);
         ok(JSON.stringify(eNew) === JSON.stringify(['@e5', '@e6', '@e7']) && JSON.stringify(eOld) === JSON.stringify(['@e5', '@e1', '@e7']),
           'B-21cc: a ref after a value is read; a «[ref=…]» in the quoted name or in the value is never one (RED: today\'s scan read the name\'s «@e1» as the field\'s ref)', { eNew, eOld });
+        // round w620gd7gd (主开发 r1089 2): THE WRONG-FIELD CLASS — two fields of one role and one name, the first attributed, the second
+        // plain: the scan counts them 0 then 1, as the hub's query counts the page's fields. RED: the release's scan skipped the first, so
+        // the second got index 0 — and the hub's nth 0 is the FIRST field: a fill of the second ref landed in the first's field. The same
+        // pair in the driver's own index forms («[ref=e3, nth=1]», «[ref=e3] [nth=1]») gives 0 then 1 too.
+        const nthOf = (M, t) => M.parseSnapshotRefs(t).map((r) => [r.ref, r.nth]);
+        const PAIR = '- textbox "Password" [required, ref=e2]\n- textbox "Password" [ref=e3]';
+        const PAIR_IN = '- textbox "Password" [required, ref=e2]\n- textbox "Password" [ref=e3, nth=1]';
+        const PAIR_SEP = '- textbox "Password" [required, ref=e2]\n- textbox "Password" [ref=e3] [nth=1]';
+        const dup = { plain: nthOf(BV, PAIR), inBracket: nthOf(BV, PAIR_IN), sep: nthOf(BV, PAIR_SEP), oldPlain: nthOf(BV_OLD, PAIR), oldIn: nthOf(BV_OLD, PAIR_IN), oldSep: nthOf(BV_OLD, PAIR_SEP) };
+        const ZERO_ONE = JSON.stringify([['@e2', 0], ['@e3', 1]]);
+        ok(JSON.stringify(dup.plain) === ZERO_ONE && JSON.stringify(dup.inBracket) === ZERO_ONE && JSON.stringify(dup.sep) === ZERO_ONE,
+          'B-21cc (round w620gd7gd): two fields of one role and name, the first attributed — counted 0 then 1, in the plain form and in both index forms', dup);
+        ok(JSON.stringify(dup.oldPlain) === JSON.stringify([['@e3', 0]]),
+          'B-21cc RED: the release\'s scan gave the SECOND field index 0 — the hub\'s nth 0 is the first field, so its fill landed in the first\'s field', dup.oldPlain);
+        // a quoted attribute is the page's words: a comma inside it does not split (its «ref=» is never the field's)
+        const quoted = BV.parseSnapshotRefs('- textbox "Card" [value="x, ref=e9, y", ref=e3]').map((r) => r.ref);
+        ok(JSON.stringify(quoted) === JSON.stringify(['@e3']), 'B-21cc (round w620gd7gd): a comma inside a quoted attribute does not split — the page\'s «ref=e9» is never read', quoted);
+        // a page's long run of «[» (text the full snapshot prints): the line-end bracket is read from the LAST «[» only, with an anchored
+        // test — linear BY CONSTRUCTION (the clock is never the judge here, and the work meter counts no regex's steps): the source pin
+        // holds that construction, and a run of 40 000 «[» reads no ref
+        const runRefs = BV.parseSnapshotRefs('- paragraph: ' + '['.repeat(40000));
+        ok(runRefs.length === 0 && bvSrc.includes("const lb = tail.lastIndexOf('['); const end = lb >= 0 ? /^\\[[^\\]\\n]*\\]\\s*$/.exec(tail.slice(lb)) : null;") && !bvSrc.includes('/\\[[^\\]\\n]*\\]\\s*$/.exec(tail)'),   // stale-pins: kept — an absence check: the unanchored end regex must not come back
+          'B-21cc (round w620gd7gd): the line-end bracket is read from the last «[» with an anchored test (an unanchored end regex over the tail was quadratic on a page\'s run of «[»); 40 000 «[» read no ref', { refs: runRefs.length });
         await watch.noteSnapshot({ profileId: PID, browserKey: KEY }, { parsedRefs: refsOld });
         const oldUser = await runCli(['fill', '@e1', '--vault', 'shop.example.test#alice/user']);
         await watch.noteSnapshot({ profileId: PID, browserKey: KEY }, REQ);   // the hub parses the listing with the tree's parser

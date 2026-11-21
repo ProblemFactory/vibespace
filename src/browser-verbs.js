@@ -1470,13 +1470,17 @@ function parseSnapshotRefs(outText) {
     const name = qm ? qm[1].replace(/\\(["\\])/g, '$1') : '';
     // B-21cc: the ref (and an nth) is read from the BRACKETS RIGHT AFTER the role and name — agent-browser 0.38.2 prints a field's
     // attributes and its ref in ONE bracket («[required, ref=e3]», «[level=1, ref=e18]», «[checked=false, ref=e23]»), so a bracket
-    // that is exactly «[ref=…]» missed every attributed field and its vault fill answered «not in the snapshot». The quoted name and
-    // a value after «:» are the page's words: a «[ref=…]» written there is never a ref.
+    // that is exactly «[ref=…]» missed every attributed field and its vault fill answered «not in the snapshot». The quoted name is the
+    // page's words: a «[ref=…]» written there is never a ref; nor is one in a value after brackets that already hold a ref.
     const tail = qm ? afterRole.slice(qm[0].length) : afterRole;
     let ref = null, nth = null;
     const readGroups = (text) => {
       for (const bm of String(text || '').matchAll(/\[([^\]\n]*)\]/g)) {
-        for (const part of bm[1].split(',')) {
+        // round w620gd7gd: the attributes are split at commas OUTSIDE double quotes — a quoted attribute value is the page's words
+        const parts = []; let cur = '', inQ = false;
+        for (const ch of bm[1]) { if (ch === '"') inQ = !inQ; if (ch === ',' && !inQ) { parts.push(cur); cur = ''; } else cur += ch; }
+        parts.push(cur);
+        for (const part of parts) {
           const kv = /^\s*(ref|nth)=([A-Za-z0-9_-]+)\s*$/.exec(part);
           if (!kv) continue;
           if (kv[1] === 'ref' && ref === null) ref = kv[2];
@@ -1487,8 +1491,10 @@ function parseSnapshotRefs(outText) {
     const groups = /^(?:\s*\[[^\]\n]*\])+/.exec(tail);
     readGroups(groups ? groups[0] : '');
     // a driver that prints a value BEFORE the bracket («"Month": 1 [ref=e5]»): the bracket that ENDS the line, only when the brackets
-    // after the name hold no ref (no wider than the scan it replaces, which took the first «[ref=…]» anywhere, the name included)
-    if (!ref) { const end = /\[[^\]\n]*\]\s*$/.exec(tail); if (end) { nth = null; readGroups(end[0]); } }
+    // after the name hold no ref — no wider than the scan it replaces (which took the first «[ref=…]» anywhere, the name included): a
+    // line whose brackets after the name hold no ref still reads a value ending in «[ref=…]», as the release did. Read from the LAST «[»
+    // only (round w620gd7gd: an unanchored end regex was quadratic on a page's run of «[»)
+    if (!ref) { const lb = tail.lastIndexOf('['); const end = lb >= 0 ? /^\[[^\]\n]*\]\s*$/.exec(tail.slice(lb)) : null; if (end) { nth = null; readGroups(end[0]); } }
     if (!ref) continue;
     pushRef(ref, role, name, nth);
   }
