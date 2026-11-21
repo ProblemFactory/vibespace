@@ -24,6 +24,15 @@ const PM = require('../src/peer-messaging.js');
 const { findPeer, postToPeer } = PM;
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-peer-'));
 const sockPath = path.join(dir, 'inbox.sock');
@@ -160,7 +169,7 @@ fs.writeFileSync(path.join(hub, `${process.pid}.0123abcd.key`), KEY + '\n');
   const FIRST = '    if (!best) best = { rec, identity: v.identity };\n';
   ok(src.split(RULE).length === 2 && src.split(CHOICE).length === 2, 'CONTROL anchors: the identity rule and the choice rule each sit on ONE line of src/peer-messaging.js');
   const M = mutantCopies('peerid', REPO);
-  const Old = M.load('src/peer-messaging.js', src.replace(RULE, PID_ONLY).replace(CHOICE, FIRST), 'pidonly');
+  const Old = M.load('src/peer-messaging.js', editAnchor(editAnchor(src, RULE, PID_ONLY, "src/peer-messaging.js"), CHOICE, FIRST, "src/peer-messaging.js"), 'pidonly');
   writeHub(hub, [[STALE_F, staleRec], [LIVE_F, liveRec]]);
   const p = Old.findPeer(HSID, hub);
   ok(p && p.socketPath === staleRec.messagingSocketPath, 'RED CONTROL: the pid-only first-record rule picks the STALE record (its socket absent) on the hub\'s shape', JSON.stringify(p));

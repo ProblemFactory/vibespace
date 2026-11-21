@@ -16,6 +16,15 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const PS = require(path.join(repo, 'src/plugin-settings.js'));
 const S = await import(path.join(repo, 'src/lib/settings-schema.js'));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-plugin-settings-'));
@@ -116,8 +125,8 @@ try {
   const live = fs.readFileSync(path.join(repo, 'src/plugins/llm.js'), 'utf8');
   const A_CFG = '      const v = h.settings();', A_REQ = "require('../decision-model.js')";   // the control's anchors — each fails BY NAME when gone (rule 06:25Z)
   for (const a of [A_CFG, A_REQ]) ok(live.includes(a), `④ the anchor of the RED CONTROL is in the source (src/plugins/llm.js): ${a.trim()}`);
-  const planted = live.replace(A_CFG, `      const v = { ...h.settings(), ${SECOND_TRUTH} }; // the base's second truth (7b6fa3c7b, frozen)`)
-    .replace(A_REQ, `require(${JSON.stringify(path.join(repo, 'src/decision-model.js'))})`);
+  const planted = editAnchor(editAnchor(live, A_CFG, `      const v = { ...h.settings(), ${SECOND_TRUTH} }; // the base's second truth (7b6fa3c7b, frozen)`, "src/plugins/llm.js"),
+    A_REQ, `require(${JSON.stringify(path.join(repo, 'src/decision-model.js'))})`, "src/plugins/llm.js");
   ok(!!SECOND_TRUTH && planted !== live, `④ the base's cfg line (frozen) carries its second truth ${SECOND_TRUTH} — the expression re-planted below is that line's own`);
   fs.writeFileSync(baseFile, planted);
   const bd = decisionOf(require(baseFile), {});

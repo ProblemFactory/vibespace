@@ -40,6 +40,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 let pass = 0, fail = 0;
 const ok = (c, m, extra) => { if (c) { pass++; console.log('  ✓ ' + m); } else { fail++; console.log('  ✗ ' + m + (extra !== undefined ? ' — ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const cleanup = [];
 process.on('exit', () => { for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
 const tmpdir = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); cleanup.push(d); return d; };
@@ -599,7 +608,7 @@ console.log('⑭ A LOOK-AGAIN READ ASKS THE MOUNT ITSELF — another process cha
   const hits = ACC_SRC.split(N1).length === 2 && ACC_SRC.split(N2).length === 2;
   ok(hits, 'RED CONTROL: both forget needles hit once in a copy of src/accounts.js');
   if (hits) {
-    const blindAM = require(MU.write('src/accounts.js', ACC_SRC.replace(N1, '  _lookAgain(id) { return this.readSubCreds(id); }').replace(N2, '} void d; }'), 'no-forget')).AccountManager;
+    const blindAM = require(MU.write('src/accounts.js', editAnchor(editAnchor(ACC_SRC, N1, '  _lookAgain(id) { return this.readSubCreds(id); }', "src/accounts.js"), N2, '} void d; }', "src/accounts.js"), 'no-forget')).AccountManager;
     const stale = [];
     for (const [label, make] of SITES) { const r = await siteRun({ AccountManager: blindAM, engMod }, make); if (r.got !== r.want) stale.push(label.split(' — ')[0] + ': ' + JSON.stringify(r.got)); }
     ok(stale.length === SITES.length, `RED CONTROL: with the look-again's forget removed, EVERY site (${stale.length} of ${SITES.length}) acts on the run's stale answer — ${stale.join(' · ')}`);

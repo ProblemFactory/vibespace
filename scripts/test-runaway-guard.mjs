@@ -40,6 +40,15 @@ const MUT = mutantCopies('runaway-guard', repo);
 
 let pass = 0, fail = 0;
 const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (d !== undefined ? '\n    ' + JSON.stringify(d) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const GiB = 2 ** 30, MiB = 2 ** 20;
 
 // the incident fixture: 25 Chrome processes, ~82 MB VmRSS each (2.0 GB summed) sharing their pages, ~30 MB PSS each
@@ -163,7 +172,7 @@ console.log('⑤ negative controls (patched copies in scratch)');
   const oscOf = (mod) => { let st = null; const o = []; for (let i = 0; i < 10; i++) { const v = mod.resourceVerdict({ cpuTicks: 0, memBytes: (i % 2 ? 1.95 : 2.05) * GiB, memMetric: 'pss' }, { at: 0, cpuTicks: 0 }, 0, 60e3 * (i + 1)); const x = mod.reportTransition(st, v, { now: 60e3 * (i + 1) }); st = x.state; o.push(x.fire ? 1 : 0); } return o.join(''); };
   const rearm = "pick('REPORT_REARM_SAMPLES')", floor = "pick('REPORT_NOTICE_FLOOR_MS')";
   ok(src.split(rearm).length === 2 && src.split(floor).length === 2 && src.split('pending: delivered === 0').length === 2, 'CONTROL setup: the re-arm count, the floor and the delivery rule are each found exactly once');
-  const m3 = MUT.load('src/runaway-guard.js', src.replace(rearm, '0').replace(floor, '0').replace('s.clearRun = verdict.clear ? s.clearRun + 1 : 0;', 's.clearRun = 1;'), 'no-hysteresis');
+  const m3 = MUT.load('src/runaway-guard.js', editAnchor(editAnchor(editAnchor(src, rearm, '0', "src/runaway-guard.js"), floor, '0', "src/runaway-guard.js"), 's.clearRun = verdict.clear ? s.clearRun + 1 : 0;', 's.clearRun = 1;', "src/runaway-guard.js"), 'no-hysteresis');
   ok(oscOf(m3) === '1010101010' && oscOf(RG) === '1000000000', `CONTROL: a copy without the hysteresis or the floor files 5 notices on the oscillation fixture (${oscOf(m3)}) — the shipped level files one`);
   const m4 = MUT.load('src/runaway-guard.js', src.replace('pending: delivered === 0', 'pending: false'), 'no-delivery');
   const undelivered = (mod) => { const a = mod.reportTransition(null, { over: 'x', memGuard: 'pss', clear: false }, { now: 0 }); return mod.reportTransition(mod.reportDelivery(a.state, 0), { over: 'x', memGuard: 'pss', clear: false }, { now: 60e3 }).notify; };

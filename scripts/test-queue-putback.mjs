@@ -41,6 +41,15 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 let pass = 0, fail = 0;
 const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 900) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 const S = JSON.stringify;
 const QP = require('../src/queue-putback.js');
@@ -502,7 +511,7 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
   // after the interrupt, exactly what the 2.1.308 measurement saw. A copy of the wrapper with its hold switched off.
   const ctlDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-claude-ctl-'));
   const cwSrc = read('data/bin/chat-wrapper.js');
-  const ctlSrc = cwSrc.replace("if (!(turnBusy || cliOwesTurn || stopping) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }", "{ forwardUser(line, o, buffered); return; }");
+  const ctlSrc = editAnchor(cwSrc, "if (!(turnBusy || cliOwesTurn || stopping) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }", "{ forwardUser(line, o, buffered); return; }", "data/bin/chat-wrapper.js");
   fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
   fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
   fs.writeFileSync(path.join(ctlDir, 'data', 'bin', 'chat-wrapper.js'), ctlSrc);
@@ -527,7 +536,7 @@ console.log('§6 claude, live — the REAL chat-wrapper over a stand-in CLI, its
   };
   ok(await bootOne(path.join(REPO, 'data/bin/chat-wrapper.js')), '§6 an init said BEFORE any input (no turn behind it) opens nothing — the first message reaches the CLI');
   const anyInitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-putback-claude-anyinit-'));
-  const anyInitSrc = cwSrc.replace("msg.subtype === 'init' && busyWord;", "msg.subtype === 'init';");
+  const anyInitSrc = editAnchor(cwSrc, "msg.subtype === 'init' && busyWord;", "msg.subtype === 'init';", "data/bin/chat-wrapper.js");
   fs.mkdirSync(path.join(anyInitDir, 'data', 'bin'), { recursive: true });
   fs.symlinkSync(path.join(REPO, 'src'), path.join(anyInitDir, 'src'));
   fs.writeFileSync(path.join(anyInitDir, 'data', 'bin', 'chat-wrapper.js'), anyInitSrc);

@@ -26,6 +26,15 @@ const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-reply-door-'));
 process.on('exit', () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 let passed = 0, failed = 0;
 const ok = (c, msg) => { if (c) { passed++; console.log('  ✓ ' + msg); } else { failed++; console.log('  ✗ ' + msg); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const say = (s) => console.log(s);
 const reqOf = (T) => createRequire(path.join(T, 'package.json'));
 const quiet = (fn) => { const o = console.log, w = console.warn; console.log = () => { }; console.warn = () => { }; try { return fn(); } finally { console.log = o; console.warn = w; } };
@@ -146,7 +155,7 @@ let skipped = 0;
   const SRC = fs.readFileSync(path.join(REPO, 'src/routes/user-todos-reply.js'), 'utf8'), ANCH = "origin: 'inbox-reply', door: 'enter' });";
   if (ok(SRC.split(ANCH).length === 3, 'the patch «the reply without its door» applies (its anchor is there twice — the live send and the reopen)')) {
     const M = path.join(ROOT, 'patch'); fs.cpSync(path.join(REPO, 'src'), path.join(M, 'src'), { recursive: true });
-    fs.writeFileSync(path.join(M, 'src/routes/user-todos-reply.js'), SRC.split(ANCH).join("origin: 'inbox-reply' });"));
+    fs.writeFileSync(path.join(M, 'src/routes/user-todos-reply.js'), editAnchor(SRC, ANCH, "origin: 'inbox-reply' });", "src/routes/user-todos-reply.js", 'join'));
     for (const f of ['package.json', 'node_modules']) { try { fs.symlinkSync(path.join(REPO, f), path.join(M, f)); } catch { } }
     const s = await scene(M); ok(!s.ok, `the reply without its door ⇒ RED at the owner's scene: ${s.text}`);
   }

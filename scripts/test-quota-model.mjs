@@ -45,6 +45,15 @@ const { familyOfScopedBucket } = require(path.join(ROOT, 'src/model-family.js'))
 
 let pass = 0, fail = 0;
 const ok = (c, m) => { if (c) { pass++; console.log('  ✓', m); } else { fail++; console.log('  ✗', m); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 // scratch dirs this suite makes (mkdtemp, never a fixed /tmp name — the fast tier
 // forbids a suite claiming a machine-global path); swept on exit so a run that
 // drives the shipped tool repeatedly does not leave a directory per assert.
@@ -3172,7 +3181,7 @@ console.log('\n⑳ B-9f4b: one limit is one row; only a NAMED model cap carries 
     const src20 = fs.readFileSync(path.join(ROOT, 'src/quota-model.js'), 'utf8');
     ok(src20.split(skip).length === 2, '⑳a NEGATIVE CONTROL setup: the skip line is in the module exactly once');
     const mdir = fs.mkdtempSync(path.join(os.tmpdir(), `vs-qm20mut-${process.pid}-`)); tmpDirs.push(mdir);
-    fs.writeFileSync(path.join(mdir, 'quota-model.js'), src20.split(skip).join(''));
+    fs.writeFileSync(path.join(mdir, 'quota-model.js'), editAnchor(src20, skip, '', "src/quota-model.js", 'join'));
     const QMpre20 = require(path.join(mdir, 'quota-model.js'));
     const vPre20 = QMpre20.toLegacyView(noPlan, { nowSec: Math.round(at / 1000) + 60 });
     ok((vPre20.scopedWeekly || []).length === 1 && vPre20.scopedWeekly[0].name === 'GPT-5.3-Codex-Spark' && vPre20.sevenDay && vPre20.sevenDay.resetsAt === vPre20.scopedWeekly[0].resetsAt,

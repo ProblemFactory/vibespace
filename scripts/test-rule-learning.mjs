@@ -68,6 +68,15 @@ const SRC = fs.readFileSync(path.join(repo, 'src/rule-learning.js'), 'utf8');
 const MC = mutantCopies('rulelearn', repo);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 700) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const mutant = (needle, to, tag) => { if (!SRC.includes(needle)) throw new Error(`mutant needle missing (${tag}): ${needle}`); return MC.load('src/rule-learning.js', SRC.replace(needle, () => to), tag); };
 // token shapes built at runtime (never a literal — the secret scan reads the tree)
@@ -316,7 +325,7 @@ const LONG = 'Anything my manager or the finance team sends about invoices, cont
   ok(mtA.rows[0].op === 'edit' && mtA.rows[0].unsupported && !mtA.rows[0].tick && mtA.rows[0].text !== LONG && mtA.rows[0].text.length <= RL.LEARN.textMax, 'RED CONTROL (F2, the normalizer): the old one (the 120-cut text compared) demotes the kept line to an unticked 改写 · 无依据 whose box holds a cut copy — the §S2 leg above is red on it', mtA.rows[0]);
   const mB = mutant(C_NEW, C_OLD, 'f2b');
   ok(mB.blockFrom(mB.diffTable(LONG, weak)) === '', 'RED CONTROL (F2, the claim): an unsupported row claiming its line again ⇒ the default 保存 erases the block');
-  const mAB = MC.load('src/rule-learning.js', SRC.replace(N_NEW, () => N_OLD).replace(C_NEW, () => C_OLD), 'f2ab');
+  const mAB = MC.load('src/rule-learning.js', editAnchor(editAnchor(SRC, N_NEW, () => N_OLD, "src/rule-learning.js"), C_NEW, () => C_OLD, "src/rule-learning.js"), 'f2ab');
   ok(mAB.blockFrom(mAB.diffTable(LONG, mAB.normalizeProposal(keepLong, { block: LONG, examples: EX3 }))) === '', 'RED CONTROL (F2, verify r1\'s §S2 exactly — both old shapes): 保存 writes "" for the one-line block (each fix alone already keeps it: two defences)');
 
   const own = Array.from({ length: 11 }, (_, i) => `rule ${String(i + 1).padStart(2, '0')}: ` + `the person's own words about what matters, line ${i + 1} `.repeat(3).slice(0, 118));
@@ -379,7 +388,7 @@ const STORED = Array.from({ length: 14 }, (_, i) => `stored rule ${i + 1}: ` + w
   ok(RL.LEARN_SCHEMA.properties.lines.items.properties.text.maxLength === RL.LEARN.textMax, "the strict schema bounds a line's text: maxLength 120 (the bound the task states)");
   const CUT_NEW = '    let text = long ? cutLine(head, LEARN.textMax) : head;', CUT_OLD = '    let text = clean(x.text, LEARN.textMax);';
   const LONG_NEW = "    const cut = kind !== 'keep' && long;", LONG_OLD = '    const cut = false;';
-  const mF4 = MC.load('src/rule-learning.js', SRC.replace(CUT_NEW, () => CUT_OLD).replace(LONG_NEW, () => LONG_OLD), 'f4');
+  const mF4 = MC.load('src/rule-learning.js', editAnchor(editAnchor(SRC, CUT_NEW, () => CUT_OLD, "src/rule-learning.js"), LONG_NEW, () => LONG_OLD, "src/rule-learning.js"), 'f4');
   const tF4 = mF4.diffTable(BLK, mF4.normalizeProposal(ans, { block: BLK, examples: EX3 }));
   ok(SRC.includes(CUT_NEW) && SRC.includes(LONG_NEW) && tF4.rows[1].tick && /characters omitted/.test(mF4.blockFrom(tF4)), "RED CONTROL (F4): the old cut ⇒ the edit is pre-ticked holding cleanPart's marker, and 保存 writes it (verify r2's F4)", mF4.blockFrom(tF4).split('\n').map((l) => l.slice(0, 70)));
 
@@ -565,8 +574,8 @@ const clientOf = (Mod) => (e, t) => (Mod ? Mod.create({ integrations: ROW, ledge
   // way — GREEN on every census (no new token) and on the sweep until it drove a half body; planted on the FROZEN client
   // (it writes nothing), so only the half-body answer can catch it
   const S5_AT = '      sending = fetch(url, ', S5_RES = '      const res = await sending;\n      status = res.status;\n      const j = await res.json().catch(() => null);\n';
-  const s5 = TM_SRC.includes(S5_AT) && TM_SRC.includes(S5_RES) ? TM_SRC.replace(S5_AT, '      let res = null, j = null;\n      for (let a = 0; a < 2; a++) {\n' + S5_AT)
-    .replace(S5_RES, "      res = await sending;\n      status = res.status;\n      let half = false;\n      j = await res.json().catch((e) => { half = a === 0 && !!e && e.name === 'TypeError'; return null; });\n      if (!half) break;\n      }\n") : null;
+  const s5 = TM_SRC.includes(S5_AT) && TM_SRC.includes(S5_RES) ? editAnchor(editAnchor(TM_SRC, S5_AT, '      let res = null, j = null;\n      for (let a = 0; a < 2; a++) {\n' + S5_AT, "src/server/text-model-client.js"),
+    S5_RES, "      res = await sending;\n      status = res.status;\n      let half = false;\n      j = await res.json().catch((e) => { half = a === 0 && !!e && e.name === 'TypeError'; return null; });\n      if (!half) break;\n      }\n", "src/server/text-model-client.js") : null;
   const r5 = s5 && await sweepLaw(clientOf(MCW.load('src/server/text-model-client.js', s5, 'sweep-s5')), { first: true, tiers: ['sonnet', 'flash'] });
   ok(r5 && r5.broke.length > 0 && r5.broke[0].answer === 'half', `RED CONTROL (verify r3 S5 — a retry through the ONE call site on a half body): the sweep breaks at ${r5 && r5.broke[0] ? `${r5.broke[0].tier} · ${r5.broke[0].answer} ⇒ ${r5.broke[0].requests.join(' + ')}` : 'nothing'} (answer ${r5 && r5.n})`, r5 && r5.broke.slice(0, 1));
 }
