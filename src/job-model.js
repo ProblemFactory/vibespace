@@ -499,18 +499,23 @@ function budgetVerdict({ limitMb, running = [], askedMb, nowMs, ageMs = BUDGET.a
   return usedMb + asked <= budgetMb ? { ...out, ok: true } : { ...out, ok: false, refused: true, roomMb: Math.max(0, budgetMb - usedMb) };
 }
 const budgetSize = (mb) => { const n = Math.max(0, Math.floor(Number(mb) || 0)); return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`; };
-/** the AGENT's refusal (the CLI prints it; English): the holders BY MEASURE — only the starting job's OWN conversation's by name
- *  (`own`: another conversation's jobs are counted and summed, never named to an agent), this job's bound, and the recipe with
- *  its verbs. `create`: the words of a `run` refused before anything was created */
-function budgetRefusalWords(v, { id, create = false } = {}) {
-  const own = v.holders.filter((h) => h.own !== false), others = v.holders.filter((h) => h.own === false);
-  const named = own.slice(0, BUDGET.namedHolders).map((h) => `${clip(String(h.name || h.id), 40)} ${budgetSize(h.mb)}`).join(', ') + (own.length > BUDGET.namedHolders ? ', …' : '');
+/** THE REFUSAL'S WORDS (English: the CLI prints them; the event line carries them). THE PRIVACY LAW (round wh9e7xe8i, MUST 1): a
+ *  holder is NAMED only to a reader who may VIEW it (`own` on the holder = this reader may view it — the engine judges it against
+ *  the CALLER, never the job's owner); every other holder is counted and summed. `named: false` — a line MANY readers read (the
+ *  job's event line, a notice, a push copy): no holder is named at all, only the count and the sum. `create`: a `run` refused
+ *  before anything was created */
+function budgetRefusalWords(v, { id, create = false, named = true } = {}) {
+  const clipName = (h) => clip(String(h.name || h.id), 40);
+  const own = named ? v.holders.filter((h) => h.own === true) : [], others = named ? v.holders.filter((h) => h.own !== true) : [];
+  const list = own.slice(0, BUDGET.namedHolders).map((h) => `${clipName(h)} ${budgetSize(h.mb)}`).join(', ') + (own.length > BUDGET.namedHolders ? ', …' : '');
   const rest = others.length ? `${others.length} of other conversations ${budgetSize(others.reduce((a, h) => a + h.mb, 0))}` : '';
   const arg = v.roomMb % 1024 === 0 ? `${v.roomMb / 1024}G` : `${v.roomMb}M`;
   const lower = v.roomMb >= MEMORY.minMb ? (create ? `give it --memory ${arg} or less` : `lower this job's bound to ${budgetSize(v.roomMb)} or less (vibespace-job memory ${id || '<id>'} ${arg})`) : '';
-  const stop = own.length ? 'stop one of yours (vibespace-job stop <id>)' : '';
-  const recipe = [stop, lower].filter(Boolean).join(', or ') || 'wait until one of them ends';
-  return `${create ? 'not created' : 'not started'}: the instance's memory budget for jobs is ${budgetSize(v.budgetMb)}, and ${budgetSize(v.usedMb)} of it is in use by ${v.holders.length} running job${v.holders.length === 1 ? '' : 's'} (${[named, rest].filter(Boolean).join('; ')}); this job's bound is ${budgetSize(v.askedMb)}. To start it: ${recipe}${create ? '' : ', then start it again'}`;
+  const stop = own.length ? 'stop one of the jobs named (vibespace-job stop <id>, where you may)' : '';
+  const ended = named ? 'wait until one of them ends' : `${create ? 'run' : 'start'} it again once a running job has ended`;
+  const recipe = [stop, lower].filter(Boolean).join(', or ') + (!named && lower ? `, or ${ended}` : '') || ended;
+  const n = v.holders.length, held = [list, rest].filter(Boolean).join('; ');
+  return `${create ? 'not created' : 'not started'}: the instance's memory budget for jobs is ${budgetSize(v.budgetMb)}, and ${budgetSize(v.usedMb)} of it is in use by ${n} running job${n === 1 ? '' : 's'}${held ? ` (${held})` : ''}; this job's bound is ${budgetSize(v.askedMb)}. To start it: ${recipe}${create || !named ? '' : ', then start it again'}`;
 }
 /** WHICH LIMIT capped (round 4), by the cgroup that holds it: «/» — the root a container sees (a pod's cgroup namespace) — is
  *  the instance; user.slice / user-<uid>.slice the user slice; any other cgroup its own name (the hub's unit, a slice) */
@@ -943,6 +948,8 @@ const FOR_YOU_WORDS = Object.freeze({
   doubt: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running',
   'parked-memory': '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again',
   // B-b14a: a service whose automatic restarts the instance's memory budget refused, parked by its ladder — never «crash-looped»
+  // B-b14a round wh9e7xe8i: a person's press answered «it starts once its last run is stopped», refused by the budget later
+  'refused-budget': '{name}: not started — the instance’s memory budget for jobs ({budget}) is in use by other running jobs ({holders}). Stop one of them or lower this job’s memory bound, then start it again',
   'parked-budget': '{name}: parked — not restarted {count} times in a row: the instance’s memory budget for jobs ({budget}) is in use by other running jobs ({holders}). Stop one of them or lower this job’s memory bound, then start it again',
   // B-2566 (主开发 r327/r339): a FAILURE of a job whose owner conversation is not running (ended, archived) reaches a PERSON by name — ONE
   // item a job (a cron's: its schedule's), renewed with its count while it is open, never once a failure; «what failed» is the engine's
@@ -1021,6 +1028,7 @@ function forYouWords(job, kind, opts) {
   if (kind === 'missed') return { fact: 'missed', words: { key: FOR_YOU_WORDS.missed, params: { name } }, urgency: 'high' };
   if (kind === 'doubt') return { fact: 'doubt', words: { key: FOR_YOU_WORDS.doubt, params: { name, why: String(why), ifGone: String(ifGone) } }, urgency: 'normal' };
   if (kind === 'parked-memory') return { fact: 'parked-memory', words: { key: FOR_YOU_WORDS['parked-memory'], params: { name } }, urgency: 'normal' };
+  if (kind === 'refused-budget') return { fact: 'refused-budget', words: { key: FOR_YOU_WORDS['refused-budget'], params: { name, budget: String(budget || 'unknown'), holders: String(holders || 'unknown') } }, urgency: 'normal' };   // B-b14a round wh9e7xe8i
   if (kind === 'parked-budget') return { fact: 'parked-budget', words: { key: FOR_YOU_WORDS['parked-budget'], params: { name, count: String(count == null ? SUPERVISE.failCap : count), budget: String(budget || 'unknown'), holders: String(holders || 'unknown') } }, urgency: 'normal' };   // B-b14a
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };

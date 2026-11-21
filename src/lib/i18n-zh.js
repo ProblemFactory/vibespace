@@ -12928,6 +12928,7 @@ export default {
   "stopped: used more than {size}": "已停止：内存超限（用了超过 {size}）",
   "killed: the instance ran out of memory": "被终止：整个实例的内存耗尽",
   "{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again": "{name}：已停住 — 连续两次内存超限。提高它的上限或修好任务，然后再启动它",
+  "{name}: not started — the instance’s memory budget for jobs ({budget}) is in use by other running jobs ({holders}). Stop one of them or lower this job’s memory bound, then start it again": "{name}：未启动 — 实例给任务的内存预算（{budget}）正被其他运行中的任务占用（{holders}）。停掉其中一个，或调低此任务的内存上限，然后再启动它",
   "{name}: parked — not restarted {count} times in a row: the instance’s memory budget for jobs ({budget}) is in use by other running jobs ({holders}). Stop one of them or lower this job’s memory bound, then start it again": "{name}：已停住 — 连续 {count} 次未能重启：实例给任务的内存预算（{budget}）正被其他运行中的任务占用（{holders}）。停掉其中一个，或调低此任务的内存上限，然后再启动它",
   "Background job {name} failed while its conversation was not running — exit {exit} ({cause}); failures since {since}: {count}": "后台任务 {name} 在它的对话未运行时失败了 — 退出码 {exit}（{cause}）；自 {since} 起失败 {count} 次",
   "Memory bound of a background job (MB)": "后台任务的内存上限（MB）",

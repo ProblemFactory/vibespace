@@ -343,7 +343,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     try {
       let r;
       if (act === 'stop') r = jm.stop(job, { force: !!req.body?.force });
-      else if (act === 'start') r = jm.start(job);
+      else if (act === 'start') r = jm.start(job, { caller: USER });   // B-b14a: the refusal is worded for its caller (the person views every job)
       else if (act === 'rm') r = jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
       else if (act === 'answer') r = jm.answerPanel(job, req.body?.answers || {});
       else if (act === 'memory') r = jm.setMemory(job, req.body?.value ?? null, { byUser: true });   // lane jobs-memory-bound: the job's properties (0 = unbounded: the owner's call)

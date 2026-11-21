@@ -205,6 +205,11 @@
   "why": "skipped fire said; nothing follows"
  },
  {
+  "key": "jobs · src/jobs.js · JobManager.start > undo · _save()",
+  "verdict": "none",
+  "why": "refused start undone; error answered"
+ },
+ {
   "key": "jobs · src/jobs.js · JobManager._settleWait · _save()",
   "verdict": "none",
   "why": "wait ended; re-judged at boot"

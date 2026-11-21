@@ -476,7 +476,7 @@ const svcScene = async (Mod, tag) => {
   }
   for (const r of copiesCensus(MJ9.files, MJ9.dir, ROOT, { minCopies: 5, label: 'B-cac2 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
   const ar = fs.readFileSync(path.join(ROOT, 'src/agent-routes.js'), 'utf8'), cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-job'), 'utf8');
-  ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
+  ok(/const needsControl = \[[^\]]*'restart'[^\]]*\];/.test(ar) && /else if \(act === 'restart'\) r = a\.jm\.restart\(job, \{ caller: a\.caller \}\);/.test(ar) && /case 'restart': \{/.test(cli) && /vibespace-job restart <id>/.test(cli) && /else if \(r\.pending\) console\.log\(`not started yet: /.test(cli), 'WIRING: the agent route\'s restart needs control; the CLI has `restart <id>` (in its usage) and says a pending start as one');
 }
 
 // ── §10 B-2c5c: a hub started by hand INSIDE a job — its scope, its process group and its mark hold the hub — is never ended by the

@@ -268,7 +268,7 @@ export function budgetWords(j, t) {
  *  this job's bound and the recipe; `create`: nothing was created */
 export function budgetRefusalPersonWords(b, t, { create = false } = {}) {
   const hs = Array.isArray(b && b.holders) ? b.holders : [];
-  const holders = hs.slice(0, 4).map((h) => `${h.name || h.id} ${memoryWords(h.mb)}`).join(', ') + (hs.length > 4 ? ', …' : '');
+  const holders = hs.slice(0, 4).map((h) => `${String(h.name || h.id).slice(0, 40)} ${memoryWords(h.mb)}`).join(', ') + (hs.length > 4 ? ', …' : '');   // each name bounded like the agent's (round wh9e7xe8i)
   const p = { budget: memoryWords(b.budgetMb), used: memoryWords(b.usedMb), n: hs.length, holders, asked: memoryWords(b.askedMb), room: memoryWords(b.roomMb) };
   if (create) return b.roomMb >= 256 ? t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or give this job a memory bound of {room} or less.', p) : t('Not created: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p);
   return b.roomMb >= 256 ? t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them, or lower this job’s memory bound to {room} or less.', p) : t('Not started: the instance’s memory budget for jobs is {budget}, and {used} of it is in use by {n} running job(s) ({holders}); this job asks {asked}. Stop one of them first.', p);

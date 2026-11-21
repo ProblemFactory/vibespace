@@ -12927,6 +12927,7 @@ export default {
   "stopped: used more than {size}": "停止：メモリ上限超過（{size} を超えて使用）",
   "killed: the instance ran out of memory": "強制終了：インスタンス全体のメモリ不足",
   "{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again": "{name}：停止中 — 2 回続けてメモリ上限超過。上限を上げるかジョブを直してから、もう一度開始してください",
+  "{name}: not started — the instance’s memory budget for jobs ({budget}) is in use by other running jobs ({holders}). Stop one of them or lower this job’s memory bound, then start it again": "{name}：開始されませんでした — インスタンスのジョブ用メモリ予算（{budget}）がほかの実行中ジョブに使われています（{holders}）。どれかを止めるか、このジョブのメモリ上限を下げてから、もう一度開始してください",
   "{name}: parked — not restarted {count} times in a row: the instance’s memory budget for jobs ({budget}) is in use by other running jobs ({holders}). Stop one of them or lower this job’s memory bound, then start it again": "{name}：停止中 — {count} 回続けて再起動できませんでした：インスタンスのジョブ用メモリ予算（{budget}）がほかの実行中ジョブに使われています（{holders}）。どれかを止めるか、このジョブのメモリ上限を下げてから、もう一度開始してください",
   "Background job {name} failed while its conversation was not running — exit {exit} ({cause}); failures since {since}: {count}": "バックグラウンドジョブ {name} は会話が動いていない間に失敗しました — 終了コード {exit}（{cause}）。{since} からの失敗回数：{count}",
   "Memory bound of a background job (MB)": "バックグラウンドジョブのメモリ上限（MB）",

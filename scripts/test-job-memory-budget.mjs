@@ -65,13 +65,18 @@ for (const [n, c, f] of verdictRows(M)) ok(c, n, f);
   const v = M.budgetVerdict({ nowMs: T0, limitMb: 12 * GB, running: [R('a', 3000, { own: true }), R('b', 2000, { own: false }), R('c', 1500, { own: false })], askedMb: 4 * GB });
   v.holders = v.holders.map((h) => ({ ...h, own: h.id === 'a' }));
   const w = M.budgetRefusalWords(v, { id: 'jb-9' });
-  ok(w === "not started: the instance's memory budget for jobs is 9 GB, and 6.3 GB of it is in use by 3 running jobs (job-a 2.9 GB; 2 of other conversations 3.4 GB); this job's bound is 4 GB. To start it: stop one of yours (vibespace-job stop <id>), or lower this job's bound to 2.7 GB or less (vibespace-job memory jb-9 2716M), then start it again",
-    'the AGENT\'s words: its own conversation\'s holders by name, the others counted and summed (never named to an agent), this job\'s bound, the recipe with the verbs', w);
+  ok(w === "not started: the instance's memory budget for jobs is 9 GB, and 6.3 GB of it is in use by 3 running jobs (job-a 2.9 GB; 2 of other conversations 3.4 GB); this job's bound is 4 GB. To start it: stop one of the jobs named (vibespace-job stop <id>, where you may), or lower this job's bound to 2.7 GB or less (vibespace-job memory jb-9 2716M), then start it again",
+    'the CALLER\'s words: the holders this caller may VIEW by name (`own`), the others counted and summed, this job\'s bound, the recipe with the verbs', w);
+  const wn = M.budgetRefusalWords(v, { id: 'jb-9', named: false });
+  ok(wn === "not started: the instance's memory budget for jobs is 9 GB, and 6.3 GB of it is in use by 3 running jobs; this job's bound is 4 GB. To start it: lower this job's bound to 2.7 GB or less (vibespace-job memory jb-9 2716M), or start it again once a running job has ended",
+    'the LINE many readers read (`named: false` — the event line, a notice): NO holder named, the count and the sum only (round wh9e7xe8i MUST 1)', wn);
   const wc = M.budgetRefusalWords(v, { create: true });
   ok(wc.startsWith('not created: ') && wc.includes('give it --memory 2716M or less') && !wc.includes('then start it again'), 'a `run` refused: «not created», the recipe gives the --memory to ask', wc);
   const vo = { ...v, holders: v.holders.map((h) => ({ ...h, own: false })), roomMb: 100 };
   const wo = M.budgetRefusalWords(vo, { id: 'jb-9' });
-  ok(wo.includes('To start it: wait until one of them ends') && !wo.includes('stop one of yours'), 'every holder another conversation\'s, no room to lower into: the recipe is to wait — never a verb it cannot use', wo);
+  ok(wo.includes('To start it: wait until one of them ends') && !wo.includes('stop one of the jobs named') && !/job-[abc]/.test(wo), 'no holder this caller may view, no room to lower into: none named, the recipe is to wait — never a verb it cannot use', wo);
+  const long = M.budgetRefusalWords({ ...v, holders: [{ id: 'x', name: 'n'.repeat(90), mb: 6500, own: true }] }, { id: 'jb-9' });
+  ok(!long.includes('n'.repeat(40)) && long.includes('n'.repeat(39) + '…'), 'a holder\'s name is bounded (40 characters, the model\'s clip) in the agent\'s words', long.length);
 }
 const MJ = mutantCopies('job-memory-budget', REPO);
 {
@@ -84,8 +89,10 @@ const MJ = mutantCopies('job-memory-budget', REPO);
 console.log('§2 THE ENGINE — every start road over a placed measure and a fake limit');
 // the stand-in wrapper takes its spec and exits: the run stays OPEN in the record (the sweep that would judge its end is off)
 const STANDIN = "const fs = require('fs'); const [ctl, spec] = process.argv.slice(2); try { fs.unlinkSync(spec); } catch { }\n";
-const owner = { conversation: { id: 'conv-budget' }, sessionId: 'sess-b', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
-const caller = { conversationId: 'conv-budget', sessionId: 'sess-b', sessionCreatedAt: 1, groups: new Set() };
+const owner = { conversation: { id: 'conv-budget' }, sessionId: 'sess-b', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['grp-g'] };
+const caller = { conversationId: 'conv-budget', sessionId: 'sess-b', sessionCreatedAt: 1, groups: new Set(['grp-g']) };
+const OTHER = { conversationId: 'conv-other', sessionId: 'sess-o', sessionCreatedAt: 1, groups: new Set(['grp-g']) };   // a groupmate: control by the group grant
+const PERSON = { isUser: true, groups: new Set() };
 const limitDir = (v) => { const d = fs.mkdtempSync(path.join(TMP, 'lim-')); fs.writeFileSync(path.join(d, 'memory.max'), v + '\n'); return d; };
 const MEASURE = new Map();   // THE PLACED MEASURE: job name → MB (absent = the measure answers nothing)
 const said = [];
@@ -97,7 +104,7 @@ function engine(name, { limit, JM = JobManager } = {}) {
   jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
   return jm;
 }
-const mk = (jm, name, mem, extra = {}) => jm.create({ kind: 'task', name, cmd: { argv: ['sh', '-c', 'sleep 1'], cwd: TMP }, memoryMb: mem, owner, ...extra }, caller);
+const mk = (jm, name, mem, extra = {}, who = caller) => jm.create({ kind: 'task', name, cmd: { argv: ['sh', '-c', 'sleep 1'], cwd: TMP }, memoryMb: mem, owner, ...extra }, who);
 const byName = (jm, n) => [...jm.jobs.values()].find((j) => j.name === n);
 // a run ENDED as the sweep would judge it (its scope read empty: nothing of it runs — no doubt holds the next start)
 const endRun = (j, state) => { const r = j.runs[j.runs.length - 1]; r.endedAt = Date.now(); r._scopeEmpty = true; j.state = state; };
@@ -105,15 +112,86 @@ const evOf = (jm, j) => jm.events.filter((e) => e.jobId === j.id).map((e) => e.w
 // the doors' fact is worked out once a second (_budgetFacts' memo) — a leg reads it as the next answer would, past the memo
 const factsOf = (jm, j) => { jm._budgetMemo = null; return jm.snapshot(j).memoryBudget; };
 const MB12G = String(12 * 1024 * 1048576);
-{
-  const jn = engine('no-limit', { limit: limitDir('max') });
-  const made = ['x', 'y', 'z'].map((n) => mk(jn, n, '8G'));
-  for (const n of ['x', 'y', 'z']) MEASURE.set(n, 7000);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (fn, ms) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (fn()) return true; } catch { } await sleep(20); } return false; };
+let runN = 0;
+
+// THE SCENES — each runs on the real engine AND on the red copies below (a scene is the leg; its rows are judged per engine)
+async function noLimitScene(JM) {
+  const jn = engine(`no-limit-${++runN}`, { limit: limitDir('max'), JM });
+  const made = ['nx', 'ny', 'nz'].map((n) => mk(jn, n, '8G'));
+  for (const n of ['nx', 'ny', 'nz']) MEASURE.set(n, 7000);
   await jn._sampleUse();
-  const w = mk(jn, 'w', '8G');
-  ok(made.every((r) => !!r.job) && !!w.job && factsOf(jn, byName(jn, 'w')) === null && !byName(jn, 'x')._use,
-    'CONTROL «nothing changes without a limit» (memory.max = max, the owner\'s box): four 8 GB jobs beside 21 GB in use all start, nothing is sampled, no budget field', { made: made.map((r) => r.error || 'ok'), w: w.error || 'ok', sampled: !!byName(jn, 'x')._use });
-  for (const n of ['x', 'y', 'z']) MEASURE.delete(n);
+  const w = mk(jn, 'nw', '8G');
+  const snap = (() => { jn._budgetMemo = null; return jn.snapshot(byName(jn, 'nw') || byName(jn, 'nx')); })();
+  return { made: made.map((r) => r.error || 'ok'), w: w.error || 'ok', field: 'memoryBudget' in snap, sampled: !!byName(jn, 'nx')._use };
+}
+const noLimitOk = (r) => r.made.every((x) => x === 'ok') && r.w === 'ok' && !r.field && !r.sampled;
+async function idleScene(JM) {
+  const ji = engine(`idle-${++runN}`, { limit: limitDir(MB12G), JM });
+  mk(ji, 'ia', '4G'); mk(ji, 'ib', '4G');
+  MEASURE.set('ia', 100); MEASURE.set('ib', 100);
+  await ji._sampleUse();
+  const c = mk(ji, 'ic', '4G');
+  return { c: c.error || 'ok' };
+}
+async function privacyScene(JM) {
+  const jp = engine(`privacy-${++runN}`, { limit: limitDir(MB12G), JM });
+  const secret = mk(jp, 'secret-train', '4G', { access: { view: 'session', control: 'session' } });
+  const shared = mk(jp, 'shared-api', '4G', { access: { view: 'group', control: 'session' } });
+  const api = mk(jp, 'api', '4G', { access: { view: 'group', control: 'group' } });
+  MEASURE.set('secret-train', 4000); MEASURE.set('shared-api', 2000); MEASURE.set('api', 100);
+  await jp._sampleUse();
+  const j = byName(jp, 'api'); endRun(j, 'done');
+  const other = jp.start(j, { caller: OTHER });   // a groupmate starts the owner's job by the group's control grant
+  const mine = jp.start(j, { caller });   // the owner conversation
+  const ev = evOf(jp, j).filter((w) => /^not started: /.test(w));
+  return { made: [secret, shared, api].every((r) => !!r.job), other: other.error || '', otherCode: other.code, mine: mine.error || '', ev };
+}
+async function pressScene(JM, tag) {
+  const name = `press-${tag}-${++runN}`, lim = limitDir(MB12G);
+  const j1 = engine(name, { limit: lim, JM });
+  mk(j1, 'hog', '4G');
+  const sv = j1.create({ kind: 'service', name: 'svc-press', cmd: { argv: ['sh', '-c', 'sleep 1'], cwd: TMP }, memoryMb: '4G', owner }, caller);
+  const s1 = sv.job ? j1.jobs.get(sv.job.id) : null;
+  if (!s1) return { error: 'the service was not created: ' + JSON.stringify(sv) };
+  // the person STOPPED it earlier: down, not wanted up; its last run proven over (persisted — a new engine must not doubt it)
+  const r = s1.runs[s1.runs.length - 1]; r.endedAt = Date.now(); r.doubtOver = { by: 'stop', at: Date.now() }; s1.state = 'down'; s1.desiredUp = false; j1._touch(s1); j1._save();
+  MEASURE.set('hog', 6000);
+  await j1._sampleUse();
+  const before = JSON.stringify({ desiredUp: s1.desiredUp, supervise: s1.supervise, state: s1.state, runs: s1.runs.length });
+  const press = j1.start(s1, { caller: PERSON });
+  const after = JSON.stringify({ desiredUp: s1.desiredUp, supervise: s1.supervise, state: s1.state, runs: s1.runs.length });
+  const lock = j1.lockFile;
+  j1.shutdown();
+  const unlocked = await until(() => !fs.existsSync(lock), 5000);
+  const j2 = engine(name, { limit: lim, JM });   // THE NEXT HUB: the same data folder, its boot's replay (nothing measured)
+  const s2 = j2.jobs.get(s1.id);
+  return { code: press.code, error: press.error || '', same: before === after, before, after, unlocked, readOnly: !!j2.readOnly, state2: s2 && s2.state, runs2: s2 && s2.runs.length, runs1: s1.runs.length };
+}
+const pressOk = (r) => r.code === 'memory-budget' && r.same && r.unlocked && !r.readOnly && r.state2 === 'down' && r.runs2 === r.runs1;
+async function measureScene(JM) {
+  // THE REAL MEASURE (no seam): a stand-in wrapper whose child holds 48 MB — its tree's RssAnon read through /proc, the wrapper
+  // itself not counted. Two tiny processes for a second, ended by their group
+  const jr = engine(`measure-${++runN}`, { limit: limitDir(MB12G), JM });
+  const { spawn } = await import('node:child_process');
+  const kid = "const b = Buffer.alloc(48 * 1048576, 1); process.stdout.write('ready'); setInterval(() => { b[0]++; }, 1000);";
+  const wrap = spawn(process.execPath, ['-e', `require('child_process').spawn(process.execPath, ['-e', ${JSON.stringify(kid)}], { stdio: ['ignore', 'inherit', 'ignore'] }); setInterval(() => { }, 1000);`], { detached: true, stdio: ['ignore', 'pipe', 'ignore'] });
+  let out = ''; wrap.stdout.on('data', (d) => { out += d; });
+  const ready = await until(() => out.includes('ready'), 8000);
+  const tj = { id: 'jb-measure-0001', name: 'measured', runs: [{ startedAt: 1700000000000 }] };
+  const ctl = jr._ctlDir(tj, tj.runs[0].startedAt); fs.mkdirSync(ctl, { recursive: true });
+  fs.writeFileSync(path.join(ctl, 'pid.json'), JSON.stringify({ pid: wrap.pid }));
+  let mb = null;
+  try { mb = await jr._treeAnonMb(tj); } finally { try { process.kill(-wrap.pid, 'SIGKILL'); } catch { } }
+  return { ready, mb, children: fs.existsSync(`/proc/${process.pid}/task/${process.pid}/children`) };
+}
+const measureOk = (r) => r.ready && Number.isFinite(r.mb) && r.mb >= 40 && r.mb < 400;
+
+// ── the real engine ──
+{
+  const r = await noLimitScene(JobManager);
+  ok(noLimitOk(r), 'CONTROL «nothing changes without a limit» (memory.max = max, the owner\'s box): four 8 GB jobs beside 21 GB in use all start, nothing is sampled, NO budget field in the snapshot', r);
 }
 const jm = engine('pod', { limit: limitDir(MB12G) });
 {
@@ -124,38 +202,37 @@ const jm = engine('pod', { limit: limitDir(MB12G) });
   ok(byName(jm, 'a')._use && byName(jm, 'a')._use.mb === 3000 && byName(jm, 'b')._use.mb === 3000, 'the sampler reads each running job\'s OWN measure through the seam (a placed measure, never real load)', byName(jm, 'a')._use);
   const n0 = jm.jobs.size;
   const c = mk(jm, 'c', '4G');
-  ok(!c.job && c.code === 'memory-budget' && c.error.startsWith("not created: the instance's memory budget for jobs is 9 GB, and 5.9 GB of it is in use by 2 running jobs (") && c.error.includes('give it --memory 3216M or less') && jm.jobs.size === n0 && c.budget && same(c.budget.holders.map((h) => h.own), [true, true]),
-    'a `run` past the budget (5.9 GB used + 4 GB > 9 GB): refused by name — the holders, the recipe — and NOTHING is created', c);
+  ok(!c.job && c.code === 'memory-budget' && c.error.startsWith("not created: the instance's memory budget for jobs is 9 GB, and 5.9 GB of it is in use by 2 running jobs (a 2.9 GB, b 2.9 GB)") && c.error.includes('give it --memory 3216M or less') && jm.jobs.size === n0 && same(c.budget.holders.map((h) => h.own), [true, true]),
+    'a `run` past the budget (5.9 GB used + 4 GB > 9 GB): refused by name — the holders its caller may view, the recipe — and NOTHING is created', c);
+  const r = await idleScene(JobManager);
+  ok(r.c === 'ok', 'two jobs IDLE (100 MB each, 4 GB bounds): a third 4 GB job starts — their bounds (8 GB) are never counted (the ruling)', r);
   MEASURE.set('a', 100); MEASURE.set('b', 100);
   await jm._sampleUse();
   const c2 = mk(jm, 'c2', '4G');
-  ok(!!c2.job, 'the same two jobs IDLE (100 MB each): a third 4 GB job starts — their bounds (8 GB) are never counted (the ruling)', c2.error);
-  // a service, made while there is room — then down, its restarts asked while the others use 6 GB
   const svc = jm.create({ kind: 'service', name: 'svc', cmd: { argv: ['sh', '-c', 'sleep 1'], cwd: TMP }, memoryMb: '4G', owner }, caller);
   const sj = svc.job ? jm.jobs.get(svc.job.id) : null;
   for (const n of ['a', 'b', 'c2']) MEASURE.set(n, 3000);
   MEASURE.set('svc', 100);
   await jm._sampleUse();
-  // a stopped task started again: refused, its record as it was
+  // a stopped task started again by its owner conversation: refused, its record exactly as it was
   const d = byName(jm, 'a'); endRun(d, 'done');
-  const before = JSON.stringify({ state: d.state, runs: d.runs.length });
-  const sr = jm.start(d);
-  ok(sr.code === 'memory-budget' && /^not started: /.test(sr.error) && sr.error.endsWith(', then start it again') && !!sr.budget && JSON.stringify({ state: d.state, runs: d.runs.length }) === before && evOf(jm, d).some((w) => /^not started: .* \(manual\)$/.test(w)),
-    'a START past the budget: refused by name (the code + the facts the panel words), the record as it was, the refusal on its events', { sr, state: d.state, runs: d.runs.length });
-  // a stale measure: not judged ⇒ it starts
+  const before = JSON.stringify({ state: d.state, runs: d.runs.length, desiredUp: d.desiredUp, supervise: d.supervise });
+  const sr = jm.start(d, { caller });
+  ok(!!c2.job && sr.code === 'memory-budget' && /^not started: /.test(sr.error) && sr.error.endsWith(', then start it again') && !!sr.budget && JSON.stringify({ state: d.state, runs: d.runs.length, desiredUp: d.desiredUp, supervise: d.supervise }) === before && evOf(jm, d).some((w) => /^not started: .* \(manual\)$/.test(w)),
+    'a START past the budget: refused by name (the code + the facts the panel words), the record EXACTLY as it was (state, runs, wanted-up, supervision), the refusal on its events', { sr, state: d.state, runs: d.runs.length });
   for (const n of ['b', 'c2', 'svc']) byName(jm, n)._use.at = Date.now() - 20000;
-  const sr2 = jm.start(d);
+  const sr2 = jm.start(d, { caller });
   ok(!sr2.error && d.state === 'up', 'the same start once the measures are older than 15 s: NOT judged — it starts (a stale measure is no measure)', sr2);
   endRun(d, 'done');
   await jm._sampleUse();
-  // a schedule's fire past the budget: THIS fire skipped, said; the schedule kept
+  // a schedule's fires past the budget: each fire skipped and said; ONE alarm a stretch of skips; the schedule kept
   const cron = jm.create({ kind: 'cron', name: 'nightly', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'], cwd: TMP }, memoryMb: '4G' } }, owner }, caller);
   const cj = jm.jobs.get(cron.job.id), next0 = cj.nextFireAt;
-  jm._fireCron(cj, 'cron');
+  jm._fireCron(cj, 'cron'); jm._fireCron(cj, 'cron'); jm._fireCron(cj, 'cron');
   const child = [...jm.jobs.values()].find((j) => j.cronParent === cj.id);
-  const ev = evOf(jm, cj).join(' | ');
-  ok(/fire skipped — not started: the instance's memory budget/.test(ev) && cj.nextFireAt === next0 && cj.nextFireAt !== null && cj.state === 'scheduled' && cj.desiredUp === true && !!child && child.state === 'missed' && child.runs.length === 0,
-    'a SCHEDULE\'s fire past the budget: that fire is skipped and said on the schedule; the schedule stays on, its next fire as it was (never the vet\'s switch-off)', { ev, next: cj.nextFireAt === next0, state: cj.state, child: child && child.state });
+  const cev = jm.events.filter((e) => e.jobId === cj.id && /^fire skipped/.test(e.what));
+  ok(cev.length === 3 && cev.filter((e) => e.alarm).length === 1 && /fire skipped again \(3 in a row\) — not started: the instance's memory budget/.test(cev[2].what) && cj.nextFireAt === next0 && cj.state === 'scheduled' && cj.desiredUp === true && !!child && child.state === 'missed' && child.runs.length === 0,
+    'a SCHEDULE\'s fires past the budget: each skipped and said on the schedule, ONE alarm for the stretch (round wh9e7xe8i), the schedule on, its next fire as it was', { ev: cev.map((e) => (e.alarm ? '! ' : '') + e.what.slice(0, 60)), next: cj.nextFireAt === next0, state: cj.state, child: child && child.state });
   // a service's automatic restarts past the budget: counted on its ladder, then parked — the park and its For-you copy name the budget
   let ladder = null;
   if (sj) {
@@ -164,13 +241,32 @@ const jm = engine('pod', { limit: limitDir(MB12G) });
     const copy = said.filter((n) => n.jobId === sj.id && n.fact === 'parked-budget');
     ladder = { state: sj.state, fails: sj.supervise && sj.supervise.consecutiveFails, runs: sj.runs.length, parks: evOf(jm, sj).filter((w) => /^parked: not restarted/.test(w)), copies: copy.length, params: copy[0] && copy[0].words && copy[0].words.params, crashLoop: said.some((n) => n.jobId === sj.id && n.fact === 'parked') };
   }
-  ok(!!ladder && ladder.state === 'failed' && ladder.fails === M.SUPERVISE.failCap && ladder.runs === 1 && ladder.parks.length === 1 && /the instance's memory budget/.test(ladder.parks[0]),
-    `a SERVICE's automatic restarts past the budget count on its ladder: ${M.SUPERVISE.failCap} refused ⇒ PARKED (no run started), the park naming the budget`, ladder || svc);
+  ok(!!ladder && ladder.state === 'failed' && ladder.fails === M.SUPERVISE.failCap && ladder.runs === 1 && ladder.parks.length === 1 && /the instance's memory budget/.test(ladder.parks[0]) && !/\b(a|b|c2) 2\.9 GB/.test(ladder.parks[0]),
+    `a SERVICE's automatic restarts past the budget count on its ladder: ${M.SUPERVISE.failCap} refused ⇒ PARKED (no run started); the park's LINE names the budget and no holder (its subscribers read it)`, ladder || svc);
   ok(!!ladder && ladder.copies === 1 && !ladder.crashLoop && ladder.params && ladder.params.budget === '9 GB' && /^(a|b|c2) 2\.9 GB, (a|b|c2) 2\.9 GB/.test(ladder.params.holders || '') && ladder.params.count === String(M.SUPERVISE.failCap),
-    '…and the person\'s For-you copy is the budget\'s own («parked-budget»: the budget and its holders by name) — never «crash-looped»', ladder && { copies: ladder.copies, crashLoop: ladder.crashLoop, params: ladder.params });
+    '…and the PERSON\'s For-you copy is the budget\'s own («parked-budget»: the budget and its holders by name — the person views every job) — never «crash-looped»', ladder && { copies: ladder.copies, crashLoop: ladder.crashLoop, params: ladder.params });
   const pol = read('src/jobs.js');
-  ok((pol.match(/catch \((e2?)\) \{ if \(\1 && \1\.code === 'memory-budget'\) this\._budgetLadder\(job, \1\); \}/g) || []).length === 2 && pol.includes("if (e && e.code === 'memory-budget' && job.kind === 'service' && trigger !== 'manual') this._budgetLadder(job, e);"),
-    'WIRING: every automatic restart hands a budget refusal to the ladder — the policy\'s timer, the ladder\'s own retry, and a start DEFERRED behind its last run\'s reap (each swallowed it before)');
+  ok((pol.match(/catch \((e2?)\) \{ if \(\1 && \1\.code === 'memory-budget'\) this\._budgetLadder\(job, \1\); \}/g) || []).length === 2 && pol.includes("else if (e && e.code === 'memory-budget' && job.kind === 'service' && trigger !== 'manual') this._budgetLadder(job, e);") && pol.includes("} catch (e) { if (e && e.code === 'memory-budget' && job.kind === 'service' && job.state === 'down' && job.desiredUp) this._budgetLadder(job, e); else this.d.log(`[jobs] ${trigger} start of ${job.id} made again"),
+    'WIRING: every automatic restart hands a budget refusal to the ladder — the policy\'s timer, the ladder\'s own retry, a start DEFERRED behind its reap, the landing retry (round wh9e7xe8i: the third swallow)');
+  // a PERSON's press DEFERRED behind its last run's reap, refused later: undone, and the person told in the For-you tray
+  {
+    const dj = mk(jm, 'deferred-svc', '1G', { kind: 'service' });   // created beside 6 GB in use (1 GB fits), its bound raised after
+    const ds = dj.job ? jm.jobs.get(dj.job.id) : null;
+    if (ds) ds.memoryMb = 4096;
+    let res = null;
+    if (ds) {
+      const r0 = ds.runs[ds.runs.length - 1]; r0.endedAt = Date.now(); r0._scopeEmpty = true; ds.state = 'down'; ds.desiredUp = false;
+      const was = JSON.stringify({ desiredUp: ds.desiredUp, supervise: ds.supervise });
+      let release; const gate = new Promise((r) => { release = r; });
+      const un = (() => { const p0 = jm._pending, c0 = jm._clearBefore; jm._pending = () => true; jm._clearBefore = () => gate; return () => { jm._pending = p0; jm._clearBefore = c0; }; })();
+      const ans = jm.start(ds, { caller: PERSON });
+      release(true); await sleep(20); un();
+      const copy = said.filter((n) => n.jobId === ds.id && n.fact === 'refused-budget');
+      res = { ans, after: JSON.stringify({ desiredUp: ds.desiredUp, supervise: ds.supervise }), was, state: ds.state, copies: copy.length, params: copy[0] && copy[0].words && copy[0].words.params };
+    }
+    ok(!!res && res.ans.ok === true && res.after === res.was && res.state === 'down' && res.copies === 1 && res.params.budget === '9 GB' && /2\.9 GB/.test(res.params.holders),
+      'a PERSON\'s press answered «it starts once its last run is stopped», refused by the budget LATER: the record back as it was, and the person told in the For-you tray («refused-budget», the holders by name)', res || dj);
+  }
   // the snapshot's numbers, and the limit read OFF the loop
   const snap = factsOf(jm, d);
   ok(!!snap && snap.budgetMb === 9 * GB && snap.running === 2 && snap.usedMb === 6000 && !('holders' in snap), 'the snapshot carries the budget\'s NUMBERS only (the two jobs still running, 6 GB) — a viewer may see none of the holders', snap);
@@ -181,16 +277,73 @@ const jm = engine('pod', { limit: limitDir(MB12G) });
   await jm._refreshLimit();
   ok(stillOld === 12 * GB && jm._instanceLimit().mb === 16 * GB, 'the limit is re-read OFF the loop: the cached figure answers at once (12 GB), the bounded async read then lands the new one (16 GB)', { stillOld, now: jm._instanceLimit().mb });
 }
-console.log('§2b RED: a copy of src/jobs.js whose start asks no budget');
+// MUST 1 (round wh9e7xe8i): PRIVACY BETWEEN CONVERSATIONS — a holder is NAMED only to a reader who may view it
+const privacyRows = (r) => [
+  ['PRIVACY: a GROUPMATE starting the owner\'s job (control by the group grant) is refused with the holders IT may view by name (shared-api) and the one it may not COUNTED, never named (secret-train)', r.made && r.otherCode === 'memory-budget' && r.other.includes('shared-api 2 GB') && !r.other.includes('secret-train') && r.other.includes('1 of other conversations 3.9 GB')],
+  ['PRIVACY: the job\'s EVENT LINE (every subscriber of the job reads it) names NO holder — the count and the sum', r.ev.length >= 1 && r.ev.every((w) => !/secret-train|shared-api/.test(w) && / in use by 2 running jobs; /.test(w))],
+  ['PRIVACY: the OWNER conversation starting it is told both by name (it views both)', r.mine.includes('secret-train 3.9 GB') && r.mine.includes('shared-api 2 GB')],
+];
+const PRIV_ROWS = privacyRows({ made: true, otherCode: '', other: '', mine: '', ev: [] }).map(([n]) => n);
 {
-  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '{ const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb); if (bv.refused) throw this._budgetRefusal(job, bv, trigger); }', '{ /* MUTANT: no budget at the start */ }', 'the start\'s budget verdict'), 'no-budget');
+  const r = await privacyScene(JobManager);
+  for (const [n, c] of privacyRows(r)) ok(c, n, r);
+}
+// MUST 2 (round wh9e7xe8i): A REFUSED PRESS IS NOT UNDONE — the next hub's boot must not start what the person was told was not started
+{
+  const r = await pressScene(JobManager, 'real');
+  ok(pressOk(r), 'A REFUSED PRESS LEAVES THE RECORD AS IT WAS: a person\'s Start of a stopped 4 GB service beside 6 GB in use is refused, the service stays not-wanted-up — and the NEXT hub over the same data folder (its boot replay, nothing measured) does not start it', r);
+}
+// THE REAL MEASURE (round wh9e7xe8i: the seam replaced it everywhere)
+{
+  const r = await measureScene(JobManager);
+  ok(measureOk(r), `THE REAL MEASURE: a stand-in wrapper's child holding 48 MB reads ${r.mb} MB — its tree's RssAnon through /proc (the wrapper not counted; pid.json read off the loop)`, r);
+}
+
+console.log('§2b RED copies of src/jobs.js');
+const SPAWN_VERDICT = '{ const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb, caller); if (bv.refused) throw this._budgetRefusal(job, bv, trigger, caller); }';
+{
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), SPAWN_VERDICT, '{ /* MUTANT: no budget at the start */ }', 'the start\'s budget verdict'), 'no-budget');
   const jx = engine('pod-mut', { limit: limitDir(MB12G), JM: JX.JobManager });
   mk(jx, 'p', '4G'); mk(jx, 'q', '4G'); mk(jx, 'r', '1G');
   MEASURE.set('p', 3000); MEASURE.set('q', 3000); MEASURE.set('r', 100);
   await jx._sampleUse();
   const r = byName(jx, 'p'); endRun(r, 'done');
-  const sr = jx.start(r);
+  const sr = jx.start(r, { caller });
   ok(!sr.error && r.state === 'up', 'CONTROL (no verdict at the start, in a copy): the start past the budget GOES — the verdict line is what refuses it', sr);
+}
+{
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), 'use: j._use || null,', 'use: { mb: Number((j.runs[j.runs.length - 1] || {}).memoryMb) || 0, at: now() },   /* MUTANT: judged on BOUNDS */', 'the verdict\'s measure'), 'on-bounds');
+  const r = await idleScene(JX.JobManager);
+  ok(r.c !== 'ok' && /not created/.test(r.c), 'CONTROL (judged on the running jobs\' BOUNDS, in a copy): the third job beside two IDLE ones is refused — the idle leg is what catches it', r);
+}
+{
+  let src = anchored(read('src/jobs.js'), '    if (!lim || !lim.mb) return;\n    const running = [...this.jobs.values()].filter((j) => this._holdsBudget(j) && !j._walking);', '    const running = [...this.jobs.values()].filter((j) => this._holdsBudget(j) && !j._walking);   /* MUTANT: sampled with no limit */', 'the sampler\'s no-limit door');
+  src = anchored(src, 'M.budgetVerdict({ limitMb: lim && lim.mb, running, askedMb, nowMs: now() })', 'M.budgetVerdict({ limitMb: (lim && lim.mb) || 16384, running, askedMb, nowMs: now() })   /* MUTANT: a guessed limit */', 'the verdict\'s limit');
+  const JX = MJ.load('src/jobs.js', src, 'no-limit-guessed');
+  const r = await noLimitScene(JX.JobManager);
+  ok(!noLimitOk(r) && r.w !== 'ok', 'CONTROL (a machine with no limit judged against a GUESSED one, in a copy): the fourth 8 GB job is refused — the no-limit leg catches it', r);
+}
+{
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), 'own: caller ? M.canView(j, caller) : false', 'own: M.isOwner(j, M.ownerAsCaller(job))   /* MUTANT: named against the job\'s owner */', 'the holder\'s «own»'), 'own-by-owner');
+  const r = await privacyScene(JX.JobManager);
+  const red = privacyRows(r).filter(([, c]) => !c).map(([n]) => n);
+  ok(same(red, [PRIV_ROWS[0]]), 'CONTROL (a holder named when the JOB\'s owner may view it, in a copy — the release candidate\'s fault): exactly the groupmate\'s row goes red', red);
+}
+{
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '    const line = M.budgetRefusalWords(v, { id, named: false });', '    const line = M.budgetRefusalWords(v, { id });   /* MUTANT: the event line named */', 'the event line\'s words'), 'line-named');
+  const r = await privacyScene(JX.JobManager);
+  const red = privacyRows(r).filter(([, c]) => !c).map(([n]) => n);
+  ok(red.includes(PRIV_ROWS[1]), 'CONTROL (the event line worded with names, in a copy): the event-line row goes red', red);
+}
+{
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '    const undo = () => { job.desiredUp = was.desiredUp; job.supervise = was.supervise; this._touch(job); this._save(); };', '    const undo = () => { };   /* MUTANT: the press\'s writes kept */', 'the refused press\'s undo'), 'press-kept');
+  const r = await pressScene(JX.JobManager, 'mut');
+  ok(!pressOk(r) && r.state2 === 'up' && r.runs2 === r.runs1 + 1, 'CONTROL (a refused press\'s writes KEPT, in a copy): the next hub\'s boot replay STARTS the service the person was told was not started — the press leg catches it', r);
+}
+{
+  const JX = MJ.load('src/jobs.js', anchored(read('src/jobs.js'), '      for (const k of (await rd(`/proc/${pid}/task/${pid}/children`)).trim().split(/\\s+/).filter(Boolean)) await walk(k, false);', '      /* MUTANT: the walk never descends */', 'the measure\'s walk'), 'no-descent');
+  const r = await measureScene(JX.JobManager);
+  ok(!measureOk(r) && r.mb === 0, 'CONTROL (a walk that never leaves the wrapper, in a copy): the measure reads 0 — the real-measure leg catches it', r);
 }
 
 // ════════ §3 THE DOORS' WORDS ════════

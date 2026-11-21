@@ -3008,8 +3008,8 @@ app.post('/api/agent/jobs/:ref/:act', (req, res) => {
   try {
     let r;
     if (act === 'stop') r = a.jm.stop(job, { force: !!req.body?.force });
-    else if (act === 'start') r = a.jm.start(job);
-    else if (act === 'restart') r = a.jm.restart(job);   // B-cac2: stop, wait, start — one answer
+    else if (act === 'start') r = a.jm.start(job, { caller: a.caller });   // B-b14a round wh9e7xe8i: a refusal names only the holders THIS caller may view
+    else if (act === 'restart') r = a.jm.restart(job, { caller: a.caller });   // B-cac2: stop, wait, start — one answer
     else if (act === 'rm') r = a.jm.rm(job, { stop: !!req.body?.stop, orphan: !!req.body?.orphan });
     else if (act === 'progress') r = a.jm.progress(job, req.body?.text || '');
     else if (act === 'ask') r = a.jm.ask(job, req.body?.panel);

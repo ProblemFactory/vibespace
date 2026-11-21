@@ -342,7 +342,7 @@ class JobManager {
         if (job.state === 'waiting') { if (this._waitLive(job)) this._startAfter(job, trigger, () => this._waitLive(job)); }
         else if (job.kind === 'service' && job.state === 'down' && job.desiredUp) this._startAfter(job, trigger, () => job.desiredUp && job.state === 'down');
         else if (job.kind === 'task' && job.state === 'interrupted' && trigger === 'update-rerun') this._spawn(job, 'update-rerun');
-      } catch (e) { this.d.log(`[jobs] ${trigger} start of ${job.id} made again (its store on disk) refused:`, e.message); }
+      } catch (e) { if (e && e.code === 'memory-budget' && job.kind === 'service' && job.state === 'down' && job.desiredUp) this._budgetLadder(job, e); else this.d.log(`[jobs] ${trigger} start of ${job.id} made again (its store on disk) refused:`, e.message); }   // B-b14a round wh9e7xe8i: a budget refusal here is a failed start on the ladder too
     }
   }
   /** the engine lock's ONE removal (test-job-logs-sweep counts jobs.js's removal calls by name) */
@@ -2601,14 +2601,15 @@ class JobManager {
    *  pending (_pending: nothing kept, its scope measured empty in exit.json or already reaped) it starts at once, in the
    *  caller's own tick; with something pending it starts after at least one bounded read (async — on the cgroup rung a dead
    *  wrapper's scope is always read first) */
-  _startAfter(job, trigger, should) {
+  _startAfter(job, trigger, should, opts = {}) {
     if (job._starting) return job._starting;
     const run = job.runs && job.runs[job.runs.length - 1];
-    const go = () => { if (should() && this.jobs.get(job.id) === job && !this._besideLive(job, trigger) && !this._doubtBlocks(job, run, trigger)) this._spawn(job, trigger); };
+    const go = () => { if (should() && this.jobs.get(job.id) === job && !this._besideLive(job, trigger) && !this._doubtBlocks(job, run, trigger)) this._spawn(job, trigger, opts); };
     if (!this._pending(job, run)) { go(); return Promise.resolve(); }
     // B-b14a: a DEFERRED start the budget refused (it waited for its last run's reap) is a service's failed start too — on its
     // ladder, exactly like the start that went at once (the restart policy's catch); a person's press is said on its events
-    const p = job._starting = this._clearBefore(job, run, trigger).then((clear) => { delete job._starting; if (!clear) return; try { go(); } catch (e) { if (e && e.code === 'memory-budget' && job.kind === 'service' && trigger !== 'manual') this._budgetLadder(job, e); else this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); } });
+    // round wh9e7xe8i: a PRESS deferred that way and refused later is undone (the record as it was) and told to the person who pressed
+    const p = job._starting = this._clearBefore(job, run, trigger).then((clear) => { delete job._starting; if (!clear) return; try { go(); } catch (e) { if (e && e.code === 'memory-budget' && trigger === 'manual' && typeof opts.onRefused === 'function') opts.onRefused(e); else if (e && e.code === 'memory-budget' && job.kind === 'service' && trigger !== 'manual') this._budgetLadder(job, e); else this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); } });
     return p;
   }
   /** round 7: its last run's wrapper STILL RUNS (a boot that could not read its pid.json judged that run ended) — never a run
@@ -2920,12 +2921,12 @@ class JobManager {
   /** a SCHEDULED job's fires judged at its create / start — each would wait ⇒ said beside «scheduled» (a fire's wait is
    *  otherwise heard only when it fires) */
   _cronVaultWait(job) { return job.kind === 'cron' ? this._vaultWaitOf(job) : null; }
-  _spawn(job, trigger) {
+  _spawn(job, trigger, { caller = null } = {}) {
     const vet = M.vetSpec(job);
     if (!vet.ok) { this._refuseRun(job, vet, trigger); throw new Error(vet.error); }
     // B-b14a: THE BUDGET — a start whose bound does not fit beside what the running jobs MEASURABLY use is refused by name (no
     // measure ⇒ not judged: a boot replay, whose jobs were never measured, is never refused here)
-    { const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb); if (bv.refused) throw this._budgetRefusal(job, bv, trigger); }
+    { const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb, caller); if (bv.refused) throw this._budgetRefusal(job, bv, trigger, caller); }
     // THE VAULT VALUES (lane vault-job-road): a job that declared --vault starts WITH its values or not at all — locked or
     // unapproved ⇒ it WAITS (no run, no counted failure; an unlock or an approval starts it — vaultChanged); an entry gone ⇒ refused
     const vj = VJ.refsOf(job).length ? this._vaultGate(job, trigger) : null;
@@ -3554,77 +3555,103 @@ class JobManager {
   }
   /** B-b14a: a job HOLDS budget while it runs (its live run) */
   _holdsBudget(j) { const run = j && j.runs && j.runs[j.runs.length - 1]; return !!run && !run.endedAt && ['up', 'starting', 'awaiting-user'].includes(j.state); }
-  /** B-b14a: THE MEASURE — the job's OWN processes (the wrapper's descendants; the wrapper is not the job), RssAnon summed off the
-   *  loop: never the instance's whole counter (it holds the hub and the page cache). At most M.BUDGET.perJobPids processes */
+  /** B-b14a: THE MEASURE — the job's OWN processes (the wrapper's descendants; the wrapper is not the job), RssAnon summed, ALL off
+   *  the loop — its pid.json too (round wh9e7xe8i: the stamp was read synchronously under data/): never the instance's whole
+   *  counter. At most M.BUDGET.perJobPids processes. WHAT IT MISSES (the kb says it): a child forked by another thread of a process
+   *  (only the main thread's children file is read), a process re-parented away (setsid + its parent gone, a double fork), and on
+   *  a kernel without the children file every job reads 0 — each makes the budget more generous, never a wrong refusal */
   async _treeAnonMb(job) {
-    const st = this._readStamp(job);
-    if (!st || !st.pid) return null;
-    let sum = 0, n = 0;
+    const run = job.runs && job.runs[job.runs.length - 1];
+    if (!run) return null;
     const rd = (f) => fs.promises.readFile(f, 'utf8').catch(() => '');
+    let st = null;
+    try { st = JSON.parse(await rd(path.join(this._ctlDir(job, run.startedAt), 'pid.json'))); } catch { st = null; }
+    if (!st || !Number.isInteger(Number(st.pid)) || Number(st.pid) <= 0) return null;
+    let sum = 0, n = 0;
     const walk = async (pid, self) => {
       if (n++ > M.BUDGET.perJobPids) return;
       if (!self) { const m = /^RssAnon:\s+(\d+) kB/m.exec(await rd(`/proc/${pid}/status`)); if (m) sum += Number(m[1]) * 1024; }
       for (const k of (await rd(`/proc/${pid}/task/${pid}/children`)).trim().split(/\s+/).filter(Boolean)) await walk(k, false);
     };
-    await walk(st.pid, true);
+    await walk(Number(st.pid), true);
     return Math.round(sum / 1048576);
   }
   /** B-b14a: THE SAMPLER — on an instance WITH a limit, every M.BUDGET.sampleMs while a job runs: each running job's own measure
-   *  (`d.measureJobUse(job)` — the seam a suite places — else _treeAnonMb), bounded per job; ONE tick in flight; nothing on a
+   *  (`d.measureJobUse(job)` — the seam a suite places — else _treeAnonMb), its ANSWER bounded per job; ONE tick in flight, and a
+   *  job whose last walk still runs is not walked again (round wh9e7xe8i: the bound stops the answer, not the walk); nothing on a
    *  machine with no limit */
   async _sampleUse() {
     if (this._useTick || this.readOnly) return;
     const lim = this._instanceLimit();
     if (!lim || !lim.mb) return;
-    const running = [...this.jobs.values()].filter((j) => this._holdsBudget(j));
+    const running = [...this.jobs.values()].filter((j) => this._holdsBudget(j) && !j._walking);
     if (!running.length) return;
     this._useTick = true;
     try {
       await Promise.all(running.map(async (j) => {
         let mb = null;
-        try { mb = await withinMs(Promise.resolve(typeof this.d.measureJobUse === 'function' ? this.d.measureJobUse(j) : this._treeAnonMb(j)), M.BUDGET.readBoundMs); } catch { mb = null; }
+        const raw = (async () => (typeof this.d.measureJobUse === 'function' ? this.d.measureJobUse(j) : this._treeAnonMb(j)))();
+        j._walking = true; raw.then(() => { j._walking = false; }, () => { j._walking = false; });
+        try { mb = await withinMs(raw, M.BUDGET.readBoundMs); } catch { mb = null; }
         if (Number.isFinite(mb)) j._use = { mb: Math.round(mb), at: now() };
       }));
     } finally { this._useTick = false; }
   }
-  /** B-b14a: THE VERDICT for a start of `job` asking `askedMb` — the OTHER running jobs' measures; each holder says whether it is a
-   *  job of the starting job's own conversation (`own`: an agent's words name only those) */
-  _budgetVerdict(job, askedMb) {
-    const lim = this._instanceLimit(), mine = M.ownerAsCaller(job);
-    const running = [...this.jobs.values()].filter((j) => j !== job && j.id !== job.id && this._holdsBudget(j)).map((j) => ({ id: j.id, name: this.labelOf(j), use: j._use || null, own: M.isOwner(j, mine) }));
+  /** B-b14a: THE VERDICT for a start of `job` asking `askedMb` — the OTHER running jobs' measures. Round wh9e7xe8i (MUST 1, THE
+   *  PRIVACY LAW): a holder is `own` (named) only when the CALLER may VIEW it — never judged against the job's owner; no caller (a
+   *  restart policy, a schedule, a boot, a replay) ⇒ nobody is named */
+  _budgetVerdict(job, askedMb, caller = null) {
+    const lim = this._instanceLimit();
+    const running = [...this.jobs.values()].filter((j) => j !== job && j.id !== job.id && this._holdsBudget(j)).map((j) => ({ id: j.id, name: this.labelOf(j), use: j._use || null, own: caller ? M.canView(j, caller) : false }));
     const v = M.budgetVerdict({ limitMb: lim && lim.mb, running, askedMb, nowMs: now() });
     if (v.holders) { const own = new Map(running.map((r) => [r.id, r.own])); v.holders = v.holders.map((h) => ({ ...h, own: !!own.get(h.id) })); }
     return v;
   }
   /** B-b14a: a start the budget refused — said on the job (its event line), never a state the job did not have: a run that never
-   *  started leaves the record as it was (a schedule's fresh run record: «missed»); the caller's error carries the code + facts */
-  _budgetRefusal(job, v, trigger) {
-    const words = M.budgetRefusalWords(v, { id: job.cronParent || job.id });
+   *  started leaves the record as it was (a schedule's fresh run record: «missed»). Round wh9e7xe8i (MUST 1): the EVENT LINE names
+   *  no holder (every subscriber of the job reads it) — the count and the sum; the CALLER's answer (the error) names what that
+   *  caller may view; with no caller the error is the line's own words */
+  _budgetRefusal(job, v, trigger, caller = null) {
+    const id = job.cronParent || job.id;
+    const line = M.budgetRefusalWords(v, { id, named: false });
     if (job.state === 'starting' && !(job.runs || []).length) job.state = 'missed';
-    this._touch(job, { what: `${words} (${trigger})` });   // an event: the job did not END — its failures (a park, a skipped fire) raise the alarm
+    this._touch(job, { what: `${line} (${trigger})` });   // an event: the job did not END — its failures (a park, a skipped fire) raise the alarm
     this.d.log(`[jobs] ${job.id} not started (${trigger}): the instance's memory budget (${v.usedMb} + ${v.askedMb} > ${v.budgetMb} MB)`);
     this._save();
-    return Object.assign(new Error(words), { code: 'memory-budget', budget: v });
+    return Object.assign(new Error(caller ? M.budgetRefusalWords(v, { id }) : line), { code: 'memory-budget', budget: v });
   }
   /** B-b14a: a SERVICE whose automatic restart the budget refused counts it as a failed start: the ladder's backoff tries again,
-   *  its count parks it — the park's notice names the budget */
+   *  its count parks it — the park's notice names the budget. Never throws (round wh9e7xe8i: it runs inside timers' catches) */
   _budgetLadder(job, e) {
-    const dec = M.onServiceExit(job, { uptimeMs: 0, now: now() });
-    job.supervise = { ...(dec.supervise || job.supervise) };
-    if (dec.park) {
-      job.state = 'failed'; this._teardownPublish(job);
-      const what = `parked: not restarted ${M.SUPERVISE.failCap} times in a row — ${e.message}`;
-      this._touch(job, { what, alarm: true });
-      const v = (e && e.budget) || {}, hs = v.holders || [];
-      const holders = hs.slice(0, M.BUDGET.namedHolders).map((h) => `${h.name || h.id} ${M.memoryWords(h.mb)}`).join(', ') + (hs.length > M.BUDGET.namedHolders ? ', …' : '');
-      this._forYou(job, M.forYouCopy(job, 'parked-budget', { count: M.SUPERVISE.failCap, budget: M.memoryWords(v.budgetMb), holders }));   // the person's copy names the budget, never «crash-looped»
-      this._notifyOwner(job, { what, wake: 'result', personTold: true });
-    } else if (dec.restartInMs) {
-      job.state = 'down'; this._touch(job, { what: `not restarted — tried again in ${Math.round(dec.restartInMs / 1000)} s` });
-      const t = setTimeout(() => { try { this._startAfter(job, 'restart-policy', () => job.desiredUp && job.state === 'down'); } catch (e2) { if (e2 && e2.code === 'memory-budget') this._budgetLadder(job, e2); } }, dec.restartInMs);
-      t.unref?.();
-    }
-    this._save();
+    try {
+      const dec = M.onServiceExit(job, { uptimeMs: 0, now: now() });
+      job.supervise = { ...(dec.supervise || job.supervise) };
+      if (dec.park) {
+        job.state = 'failed'; this._teardownPublish(job);
+        const what = `parked: not restarted ${M.SUPERVISE.failCap} times in a row — ${e.message}`;
+        this._touch(job, { what, alarm: true });
+        this._forYou(job, M.forYouCopy(job, 'parked-budget', { count: M.SUPERVISE.failCap, ...this._budgetCopyParams(e) }));   // the person's copy names the budget, never «crash-looped»
+        this._notifyOwner(job, { what, wake: 'result', personTold: true });
+      } else if (dec.restartInMs) {
+        job.state = 'down'; this._touch(job, { what: `not restarted — tried again in ${Math.round(dec.restartInMs / 1000)} s` });
+        const t = setTimeout(() => { try { this._startAfter(job, 'restart-policy', () => job.desiredUp && job.state === 'down'); } catch (e2) { if (e2 && e2.code === 'memory-budget') this._budgetLadder(job, e2); } }, dec.restartInMs);
+        t.unref?.();
+      }
+      this._save();
+    } catch (err) { try { this.d.log(`[jobs] ${job && job.id}: the budget's ladder failed:`, err && err.message); } catch { } }
+  }
+  /** B-b14a: the PERSON's copy's fields (the For-you tray is the person's, who may view every job): the budget and its holders by
+   *  name, each clipped */
+  _budgetCopyParams(e) {
+    const v = (e && e.budget) || {}, hs = v.holders || [];
+    const holders = hs.slice(0, M.BUDGET.namedHolders).map((h) => `${String(h.name || h.id).slice(0, 40)} ${M.memoryWords(h.mb)}`).join(', ') + (hs.length > M.BUDGET.namedHolders ? ', …' : '');
+    return { budget: M.memoryWords(v.budgetMb), holders };
+  }
+  /** B-b14a round wh9e7xe8i: a PERSON's press answered «it starts once its last run is stopped», refused by the budget LATER —
+   *  the person is told where they look (the For-you tray: a failed action of a person reaches the person); an agent's press is
+   *  said on the job's event line (its owner and subscribers read it) */
+  _tellRefused(job, e, caller) {
+    try { if (caller && caller.isUser) this._forYou(job, M.forYouCopy(job, 'refused-budget', this._budgetCopyParams(e))); } catch (err) { this.d.log(`[jobs] ${job.id}: the refusal's notice failed:`, err && err.message); }
   }
   /** B-b14a: THE BUDGET'S FACT for the doors (numbers only — a viewer may see none of the holders): worked out ONCE per second */
   _budgetFacts() {
@@ -4033,8 +4060,16 @@ class JobManager {
       // B-3992: the run's token reads what its CRON was given at create (the parent's grant, handed at every fire like notifyUser)
       if (M.mayReadOf(job)) child.mayRead = M.mayReadOf(job); else delete child.mayRead;
       delete child._untilCursor; delete child._untilHit; // fresh run, fresh scan
-      try { this._spawn(child, trigger); }
-      catch (e) { if (!(e && e.code === 'memory-budget')) throw e; this._touch(job, { what: `fire skipped — ${e.message}`, alarm: true }); this._save(); }   // B-b14a: the next fire as scheduled
+      try { this._spawn(child, trigger); delete job._budgetSkips; }
+      catch (e) {
+        if (!(e && e.code === 'memory-budget')) throw e;
+        // B-b14a: the next fire as scheduled (a one-time schedule has none: said). Round wh9e7xe8i: ONE alarm a STRETCH of skips —
+        // the first; the rest are events with their count (a fire that starts ends the stretch)
+        const once = job.schedule && job.schedule.at ? ' — a one-time schedule does not come back by itself: schedule it again if it still matters' : '';
+        if (!job._budgetSkips) { job._budgetSkips = 1; this._touch(job, { what: `fire skipped — ${e.message}${once}`, alarm: true }); }
+        else { job._budgetSkips += 1; this._touch(job, { what: `fire skipped again (${job._budgetSkips} in a row) — ${e.message}${once}` }); }
+        this._save();
+      }
     }
   }
   /** B-360d — ONE FILE ASK OF THE COLLECTION PASS, off the loop (`make` → an fs.promises call), waited on until `until` (an instant).
@@ -4471,7 +4506,7 @@ class JobManager {
       ...(mr.grant ? { mayRead: mr.grant } : {}),   // B-3992: what this job's token may READ beside itself (read only)
     };
     if (job.kind !== 'cron') {   // B-b14a: past the budget ⇒ refused by name, NOTHING created (a schedule is judged at each fire)
-      const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb);
+      const bv = this._budgetVerdict(job, M.memoryMbOf(job, this._memoryCtx({ hub: true })).mb, caller);   // named: what the CALLER may view
       if (bv.refused) { this.d.log(`[jobs] create of «${this.labelOf(job)}» refused: the instance's memory budget (${bv.usedMb} + ${bv.askedMb} > ${bv.budgetMb} MB)`); return { error: M.budgetRefusalWords(bv, { create: true }), code: 'memory-budget', budget: bv }; }
     }
     this.jobs.set(job.id, job);
@@ -4485,10 +4520,10 @@ class JobManager {
   }
   /** B-cac2: STOP, WAIT, START — ONE answer. A live run is stopped and the start is remembered (_finalizeRun does it when the stop
    *  ends); nothing running, or nothing the stop could reach, starts now */
-  restart(job) {
+  restart(job, { caller = null } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     const run = job.runs && job.runs[job.runs.length - 1];
-    if (!this._runLive(job, run)) return this.start(job);
+    if (!this._runLive(job, run)) return this.start(job, { caller });
     const s = this.stop(job);
     if (s && s.error) return s;
     // a live run whose stop reached no process yet (no pid stamp; its wrapper gone, not judged yet) still ends: the sweep honours
@@ -4530,7 +4565,7 @@ class JobManager {
     this._save();
     return { ok: true, hadProc };
   }
-  start(job) {
+  start(job, { caller = null } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
     // B-cac2 (fb-f4a0c70a84): a START while a STOP's grace runs is no «already running» (the service then ended down and a second
     // start was needed) — it is REMEMBERED and done when the stop ends (_finalizeRun), said with the grace left
@@ -4541,6 +4576,10 @@ class JobManager {
       const left = job._termAt ? Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000)) : null;   // a forced / not-yet-reached stop has no grace clock
       return { ok: true, pending: true, words: (left != null ? `still stopping (${left} s left) — it starts when the stop ends` : 'still stopping — it starts when the stop ends') + ' (a VibeSpace restart before then forgets it: start it again)' };   // 主开发 21:46Z (b): said where the person is told
     }
+    // B-b14a round wh9e7xe8i (MUST 2): A REFUSED START LEAVES THE RECORD EXACTLY AS IT WAS — the budget refuses after these writes,
+    // so a refusal UNDOES them (a service left wanted-up would start unjudged at the next boot's replay, beside the set it did not fit)
+    const was = { desiredUp: job.desiredUp, supervise: job.supervise };
+    const undo = () => { job.desiredUp = was.desiredUp; job.supervise = was.supervise; this._touch(job); this._save(); };
     job.desiredUp = true;
     job.supervise = { consecutiveFails: 0, parkedAt: null };
     // lane jobs-memory-bound: the owner acted — a cron parked for its child's out-of-memory ends counts its child afresh
@@ -4561,7 +4600,9 @@ class JobManager {
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
       if (this._besideLive(job, 'manual')) return { error: `${job.id}'s last run is still running — stop it first` }; // round 7
       const last = job.runs && job.runs[job.runs.length - 1]; // round 8: its doubt checked first, never beside it
-      try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state)); } catch (e) { return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; }   // B-b14a
+      // a press DEFERRED behind its last run's reap and refused later: undone, and the PERSON who pressed is told (round wh9e7xe8i)
+      const onRefused = (e) => { undo(); this._tellRefused(job, e, caller); };
+      try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state), { caller, onRefused }); } catch (e) { if (e && e.code === 'memory-budget') undo(); return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; }   // B-b14a
       this._save();
       if (['up', 'starting'].includes(job.state)) return { ok: true };
       if (job.state === 'waiting') return this._waitAnswer(job); // lane vault-job-road r2: it waits for its values — nothing is «stopped first»
@@ -4577,7 +4618,7 @@ class JobManager {
       if (vw) return { ok: true, state: 'waiting', waitFor: vw.waitFor, after: `${after} — and its vault values would wait now: ${vw.words}` };
       return { ok: true, after };
     }
-    try { this._spawn(job, 'manual'); } catch (e) { return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; } // B-f8c7: the run-time vet's refusal is an answer · B-b14a: the budget's too
+    try { this._spawn(job, 'manual', { caller }); } catch (e) { if (e && e.code === 'memory-budget') undo(); return { error: e.message, ...(e && e.code ? { code: e.code } : {}), ...(e && e.budget ? { budget: e.budget } : {}) }; } // B-f8c7: the run-time vet's refusal is an answer · B-b14a: the budget's too
     this._save();
     return job.state === 'waiting' ? this._waitAnswer(job) : { ok: true }; // lane vault-job-road r2: a wait is said as one
   }
@@ -4847,7 +4888,7 @@ class JobManager {
       // full creation parameters (2.347.0, owner ask: agents must be able to
       // re-inspect what they registered) — env VALUES stay out (names only)
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
-      memoryBudget: this._budgetFacts(),   // B-b14a: the instance's budget for running jobs — numbers only ({budgetMb, running, usedMb} or {…, unmeasured}); null without a limit
+      ...((b) => (b ? { memoryBudget: b } : {}))(this._budgetFacts()),   // B-b14a: the instance's budget for running jobs — numbers only ({budgetMb, running, usedMb} or {…, unmeasured}); NO field without a limit
       mayRead: M.mayReadOf(job),   // B-3992: the jobs this job's token may READ beside itself (null: only itself)
       vault: VJ.refsOf(job).map((r) => ({ name: r.name, ref: r.ref })), waitFor: job.state === 'waiting' ? job.waitFor || null : null, waitWords: job.state === 'waiting' ? VJ.waitWords(job.waitFor) : null, // lane vault-job-road: REFERENCES only, never a value
       // a cron's action TYPE (an enum: 'notify' | 'spawn-task' | null) — the panel words what --notify-user does per kind

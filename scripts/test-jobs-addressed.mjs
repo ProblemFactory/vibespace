@@ -405,6 +405,7 @@ const CLASS = {
   // B-b14a (the instance's memory budget for running jobs): a start the budget refused is an EVENT (the job did not end); its
   // failures raise the alarm — a service parked by its ladder, a schedule's fire skipped; a ladder's retry is an event
   '_budgetRefusal#1': 'event', '_budgetLadder#1': 'alarm', '_budgetLadder#2': 'event', '_fireCron#2': 'alarm',
+  '_fireCron#3': 'event',   // round wh9e7xe8i: ONE alarm a stretch of skipped fires — the first; the later ones are events
 };
 for (const s of SITES) ok(CLASS[s.key], `census row: ${s.key} (src/jobs.js:${s.line}) has a class`, s.src);
 ok(Object.keys(CLASS).every((k) => SITES.some((s) => s.key === k)), 'every class row names a site that exists (a removed producer leaves no stale row)', Object.keys(CLASS).filter((k) => !SITES.some((s) => s.key === k)));
@@ -491,6 +492,14 @@ const DRIVERS = {
     const un = stub(jm, { _spawn: () => { throw BUDGET_E(); } });
     try { jm._fireCron(j, 'cron'); } finally { un(); }
     for (const k of [...jm.jobs.values()]) if (k.cronParent === j.id) jm.jobs.delete(k.id);   // the fire's child never started: nothing of it stays
+    return j;
+  },
+  '_fireCron#3': async () => {
+    const j = mkJob(jm, { kind: 'cron', name: 'drv-fire-budget-again', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: { argv: ['sh', '-c', 'true'] } } } });
+    j._budgetSkips = 1;   // a stretch already begun: this skip is its second
+    const un = stub(jm, { _spawn: () => { throw BUDGET_E(); } });
+    try { jm._fireCron(j, 'cron'); } finally { un(); }
+    for (const k of [...jm.jobs.values()]) if (k.cronParent === j.id) jm.jobs.delete(k.id);
     return j;
   },
   '_startAskedAtStop#1': async () => { const j = task('drv-start-asked'); const un = stub(jm, { start: () => ({ error: 'refused for the driver' }) }); jm._startAskedAtStop(j, true); await new Promise((r) => setImmediate(r)); un(); return j; },   // B-cac2 cure r1
