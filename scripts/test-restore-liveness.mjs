@@ -1032,9 +1032,20 @@ console.log('— §7 a paired machine that cannot be reached never stops the hub
     // the release's fake ssh; (b) 300 ms, well inside the linger — on the lingering ssh the held write still meets EPIPE with the
     // child alive and the hub DIES: the linger, not the box's timing, decides
     const STALL7 = "  try { if (bytes == null) stdin.end(); else stdin.end(bytes); } catch (e) { if (!fed.error) fed.error = e; }\n";
-    const held7 = (how) => (preFix7.includes(STALL7) ? preFix7.replace(STALL7, `  ${how}(() => { try { if (bytes == null) stdin.end(); else stdin.end(bytes); } catch (e) { if (!fed.error) fed.error = e; } }${how === 'setTimeout' ? ', 300' : ''}); /* B-1217: the stall placed */\n`) : null);
-    const afterExit7 = held7("child.once('exit', "), stalled7 = held7('setTimeout');
-    ok(!!afterExit7 && !!stalled7 && afterExit7.includes("child.once('exit', (() =>") === false, '§7 the race\'s stall finds its line in the pre-fix copy (the one write of feedStdin)');
+    // ONE TEMPLATE A FORM (r1632's must: one generic template wrote the exit form with an unclosed call — the copy did not parse and
+    // its hub never booted): each form is written whole, its text asserted present, and the copy must COMPILE before a hub boots on it
+    const BODY7 = 'try { if (bytes == null) stdin.end(); else stdin.end(bytes); } catch (e) { if (!fed.error) fed.error = e; }';
+    const EXIT_FORM7 = `  child.once('exit', () => { ${BODY7} }); /* B-1217: the stall placed — the write only after the child's exit */\n`;
+    const LATE_FORM7 = `  setTimeout(() => { ${BODY7} }, 300); /* B-1217: the stall placed — the write 300 ms late */\n`;
+    const afterExit7 = preFix7.includes(STALL7) ? preFix7.replace(STALL7, EXIT_FORM7) : null;
+    const stalled7 = preFix7.includes(STALL7) ? preFix7.replace(STALL7, LATE_FORM7) : null;
+    const compiles7 = (src) => { try { new (require('node:vm').Script)('(function (exports, require, module, __filename, __dirname) {' + src + '\n})', { filename: 'hosts-copy.js' }); return true; } catch (e) { return String(e && e.message); } };
+    ok(!!afterExit7 && !!stalled7 && afterExit7.includes(EXIT_FORM7) && stalled7.includes(LATE_FORM7) && !afterExit7.includes(STALL7) && !stalled7.includes(STALL7),
+      '§7 the race\'s stall finds its line in the pre-fix copy (the one write of feedStdin) and each form is written whole');
+    ok(compiles7(afterExit7) === true && compiles7(stalled7) === true, '§7 …and both stalled copies of src/hosts.js COMPILE (a copy that does not parse is red here, by name — never a hub that silently never boots)',
+      { exitForm: compiles7(afterExit7), lateForm: compiles7(stalled7) });
+    const broken7 = preFix7.replace(STALL7, `  child.once('exit', (() => { ${BODY7} }); /* the form 3837f878c wrote */\n`);
+    ok(compiles7(broken7) !== true, `§7 CONTROL of the compile check: the form 3837f878c wrote (its exit call never closed) does NOT compile — «${compiles7(broken7)}»`);
     const raceNow = await deadHub('race-now', afterExit7, { expectDeath: true, bin: BIN7_NOW });
     ok(raceNow.ready && raceNow.exitedAfterInstall == null,
       `§7 THE RACE (RED on the release's fake ssh): the write held until the child's exit meets a stdin Node already destroyed — no 'error', the pre-fix hub LIVES (exit ${JSON.stringify(raceNow.exitedAfterInstall)}, next ${raceNow.steps.next.status})`, raceNow.journal().slice(-400));
