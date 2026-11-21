@@ -4,7 +4,8 @@
  * invoked by Claude Code's EDITOR mechanism.
  */
 
-import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme, activeLineSelectionPatch } from './code-editor.js';
+import { CodeEditor, detectLang, getLangExtension, loadEditorSettings, saveEditorSettings, editorLightTheme, activeLineSelectionPatch, editorFontFace, editorFontTheme, sayFingerFloor } from './code-editor.js';
+import { isTouchDevice } from './utils.js';
 import { t } from './i18n.js';
 import { fsErrorText } from './file-explorer-ops.js';   // B-3b03 follow-up: the pane's refused save in the reader's language
 import { Resizer } from './resizer.js';
@@ -134,7 +135,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
   const btnWrap = mkBtn(edSettings.wordWrap ? 'Wrap: On' : 'Wrap: Off');
   // Font size
   const btnFontDown = mkBtn('A-');
-  const fontDisplay = document.createElement('span'); fontDisplay.className = 'editor-font-size-display'; fontDisplay.textContent = edSettings.fontSize;
+  const fontDisplay = document.createElement('span'); fontDisplay.className = 'editor-font-size-display'; fontDisplay.textContent = editorFontFace(edSettings.fontSize, isTouchDevice()).drawn;   // B-9b12: the size DRAWN (the finger rule — code-editor.js)
   const btnFontUp = mkBtn('A+');
   // Theme toggle
   const btnTheme = mkBtn(edSettings.theme === 'dark' ? 'Dark' : 'Light');
@@ -190,7 +191,7 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
             activeLineSelectionPatch,
             themeComp.of(edSettings.theme === 'dark' ? oneDark : editorLightTheme),
             wrapComp.of(edSettings.wordWrap ? EditorView.lineWrapping : []),
-            fontSizeComp.of(EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: edSettings.fontSize + 'px' } })),
+            fontSizeComp.of(editorFontTheme(edSettings.fontSize, isTouchDevice())),
             ...langExtensions,
             Prec.highest(keymap.of([
               { key: 'Mod-s', run: () => { doSave(); return true; } },
@@ -211,18 +212,18 @@ export function openExternalEditor(app, filePath, signalPath, sessionId, host) {
         editorView.dispatch({ effects: wrapComp.reconfigure(edSettings.wordWrap ? EditorView.lineWrapping : []) });
         saveEditorSettings(edSettings);
       };
-      btnFontDown.onclick = () => {
-        edSettings.fontSize = Math.max(8, edSettings.fontSize - 1);
-        fontDisplay.textContent = edSettings.fontSize;
-        editorView.dispatch({ effects: fontSizeComp.reconfigure(EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: edSettings.fontSize + 'px' } })) });
+      // B-9b12: the same finger rule as the code editor (one stored size): the size DRAWN shown and written, «−» at the touch floor
+      // says why, a step counts from the size drawn
+      const stepFont = (delta) => {
+        const finger = isTouchDevice(), { drawn, floor } = editorFontFace(edSettings.fontSize, finger);
+        if (delta < 0 && floor) { sayFingerFloor(); return; }
+        edSettings.fontSize = Math.max(8, Math.min(32, drawn + delta));
+        fontDisplay.textContent = editorFontFace(edSettings.fontSize, finger).drawn;
+        editorView.dispatch({ effects: fontSizeComp.reconfigure(editorFontTheme(edSettings.fontSize, finger)) });
         saveEditorSettings(edSettings);
       };
-      btnFontUp.onclick = () => {
-        edSettings.fontSize = Math.min(32, edSettings.fontSize + 1);
-        fontDisplay.textContent = edSettings.fontSize;
-        editorView.dispatch({ effects: fontSizeComp.reconfigure(EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: edSettings.fontSize + 'px' } })) });
-        saveEditorSettings(edSettings);
-      };
+      btnFontDown.onclick = () => stepFont(-1);
+      btnFontUp.onclick = () => stepFont(1);
       btnTheme.onclick = () => {
         edSettings.theme = edSettings.theme === 'dark' ? 'light' : 'dark';
         btnTheme.textContent = edSettings.theme === 'dark' ? 'Dark' : 'Light';

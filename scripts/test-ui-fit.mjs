@@ -11,6 +11,7 @@
 //      appended — two renders drew the forwards, the scan and the input twice)
 //   ④ THE TOUR STEPS ASIDE (#4): a guided window opened from the tour hides the tour while it is up and brings it back
 //   ⑤ THE DISK NOTICE TAKES ITS OWN LINE (#3): the editor's bar wraps while «the file on disk changed» stands
+//   ⑤b the code editor and the finger rule (B-9b12)
 //   ⑥ THE CHECK ROW (M6): the row rule comes after `.dialog-body label` at its weight; no class a check-row label wears
 //      (70-odd labels the client builds around a checkbox or a radio) stacks the row (a column, centred text, a block)
 // Each census has its RED control (a planted site / rule, or the base's shape) printed beside it.
@@ -173,6 +174,61 @@ const SHOW = "if (this.modified) { this._diskSeen = m; this._diskChip.style.disp
 const plantedED = ED.replace(SHOW, "if (this.modified) { this._diskSeen = m; this._diskChip.style.display = ''; this._toolbarEl?.classList.add('ce-disk-changed'); }");
 const plantIn = ED.includes(SHOW) && plantedED !== ED && /classList\.add\('ce-disk-changed'\)/.test(plantedED);   // stale-pins: kept — the release's wrap mark, read in the copy this RED control plants
 check('⑤ RED CONTROL: the plant is in its copy (the release\'s wrap mark on the show line) — and the law reads that copy red', plantIn && !diskLaw(plantedED, VW).noMark, { plantIn });
+
+// ⑤b THE FINGER RULE IN THE EDITOR (B-9b12): on a touch screen the code editor DRAWS max(16, the chosen size) — public/style.css
+// «EVERY FIELD AT 16 PX ON A FINGER» (a phone zooms the page into a smaller field) — and SAYS so: the size control shows the size
+// drawn, «−» at 16 says why in ONE toast (a title is for a mouse), «+» counts from the size drawn; the size is written on the
+// SCROLLER too, because the rule's `1em` is the parent's size (the release drew 16 for every chosen size, 12 to 24, measured under
+// touch emulation). The editor's OWN methods run here on a stand-in (its source sliced), with a touch switch; the Ctrl+G pane
+// (external-editor.js) reads the same stored size through the same helpers
+const EXT = read('src/lib/external-editor.js');
+const fnSrc = (src, name) => { const i = src.indexOf(`export function ${name}(`), j = src.indexOf('\n}\n', i); return i >= 0 && j > i ? src.slice(i + 'export '.length, j + 2) : ''; };
+const methSrc = (src, head) => { const i = src.indexOf('\n  ' + head); if (i < 0) return ''; const eol = src.indexOf('\n', i + 1), line = src.slice(i + 1, eol); if (/\}\s*$/.test(line)) return line; const j = src.indexOf('\n  }\n', i); return j > i ? src.slice(i + 1, j + 4) : ''; };
+const METHS = ['_finger() {', '_paintFontSize() {', '_applyFontSize() {', '_changeFontSize(delta) {', '_getFontSizeExtension() {'];
+const rigOf = (ed) => (touch, chosen) => {
+  const srcs = [fnSrc(ed, 'editorFontFace'), fnSrc(ed, 'editorFontTheme')], meths = METHS.map((h) => methSrc(ed, h));
+  if (srcs.some((x) => !x) || meths.some((x) => !x)) return null;
+  const calls = { toast: 0, saved: [] };
+  const proto = new Function('isTouchDevice', 'EditorView', 't', 'sayFingerFloor', 'saveEditorSettings', `${srcs.join('\n')}\nreturn {\n${meths.join(',\n')}\n};`)(
+    () => touch, { theme: (o) => o }, (w, v) => (v && v.n != null ? w.replace('{n}', v.n) : w), () => { calls.toast++; }, (st) => { calls.saved.push(st.fontSize); });
+  const o = Object.assign(Object.create(proto), { _settings: { fontSize: chosen }, fontSizeDisplay: { textContent: '', title: '' }, _sizeDown: { title: '', setAttribute() {} }, _fontSizeCompartment: { reconfigure: (x) => x } });
+  o.editorView = { dispatch: (x) => { o.lastTheme = x.effects; } };
+  return { o, calls };
+};
+const SEL = '.cm-scroller, .cm-content, .cm-gutters';
+const scenes = (ed) => {
+  const rig = rigOf(ed), bad = [];
+  if (!rig) return ['the editor\'s methods or helpers are not in code-editor.js'];
+  { const { o, calls } = rig(true, 14); o._paintFontSize(); const th = o._getFontSizeExtension();
+    if (o.fontSizeDisplay.textContent !== '16px') bad.push(`touch, chosen 14: the control shows «${o.fontSizeDisplay.textContent}», not the size drawn «16px»`);
+    if (!th || !th[SEL] || th[SEL].fontSize !== '16px') bad.push(`touch, chosen 14: the theme writes ${JSON.stringify(th)} — not 16px on the scroller, the content and the gutters`);
+    o._changeFontSize(-1); if (calls.toast !== 1 || o._settings.fontSize !== 14 || calls.saved.length) bad.push(`touch at 16: «−» must say why and change nothing (toasts ${calls.toast}, size ${o._settings.fontSize}, saved ${calls.saved})`);
+    o._changeFontSize(1); if (o._settings.fontSize !== 17 || o.fontSizeDisplay.textContent !== '17px' || !o.lastTheme || o.lastTheme[SEL]?.fontSize !== '17px' || calls.saved.join() !== '17') bad.push(`touch: «+» from the size drawn ⇒ 17, shown and written (size ${o._settings.fontSize}, shown «${o.fontSizeDisplay.textContent}», theme ${JSON.stringify(o.lastTheme)}, saved ${calls.saved})`); }
+  { const { o, calls } = rig(true, 24); o._paintFontSize(); const th = o._getFontSizeExtension();
+    if (o.fontSizeDisplay.textContent !== '24px' || th[SEL]?.fontSize !== '24px') bad.push(`touch, chosen 24: drawn 24 (shown «${o.fontSizeDisplay.textContent}», theme ${JSON.stringify(th)})`);
+    o._changeFontSize(-1); if (o._settings.fontSize !== 23 || calls.toast) bad.push('touch, chosen 24: «−» steps to 23, no toast'); }
+  { const { o, calls } = rig(false, 14); o._paintFontSize(); const th = o._getFontSizeExtension();
+    if (o.fontSizeDisplay.textContent !== '14px' || th[SEL]?.fontSize !== '14px') bad.push(`a mouse screen, chosen 14: shown and drawn 14 (shown «${o.fontSizeDisplay.textContent}», theme ${JSON.stringify(th)})`);
+    o._changeFontSize(-1); if (o._settings.fontSize !== 13 || calls.toast) bad.push(`a mouse screen: «−» steps to 13, no toast (size ${o._settings.fontSize}, toasts ${calls.toast})`); }
+  return bad;
+};
+// sayFingerFloor: ONE toast at a time (a second press while it stands adds none)
+const sayOnce = (() => { const src = fnSrc(ED, 'sayFingerFloor'); if (!src) return null; let shown = 0; const f = new Function('showToast', 't', `let fingerFloorToast = null;\n${src}\nreturn sayFingerFloor;`)(() => { shown++; return { isConnected: true }; }, (w) => w); f(); f(); f(); return shown; })();
+const paneLaw = {
+  helpers: /import \{ CodeEditor, [^}]*editorFontFace, editorFontTheme, sayFingerFloor \} from '\.\/code-editor\.js';/.test(EXT),
+  theme: /fontSizeComp\.of\(editorFontTheme\(edSettings\.fontSize, isTouchDevice\(\)\)\)/.test(EXT) && /fontSizeComp\.reconfigure\(editorFontTheme\(edSettings\.fontSize, finger\)\)/.test(EXT),
+  step: /if \(delta < 0 && floor\) \{ sayFingerFloor\(\); return; \}\n\s*edSettings\.fontSize = Math\.max\(8, Math\.min\(32, drawn \+ delta\)\);/.test(EXT),
+  noOld: !EXT.includes("'.cm-content, .cm-gutters': { fontSize: edSettings.fontSize + 'px' }"),   // stale-pins: kept — a deliberate GONE check: the pane's old theme line must not come back
+};
+const listener = /matchMedia\(FINGER_MQ\)\.addEventListener\?\.\('change', \(\) => this\._applyFontSize\(\)/.test(ED) && /const FINGER_MQ = '\(hover: none\) and \(pointer: coarse\)';/.test(ED);
+const fingerRule = (CSS["style.css"] || read("public/style.css")).includes('[contenteditable]:not([contenteditable="false"]) { font-size: max(16px, 1em) !important; }');
+const sc = scenes(ED);
+check(`⑤b the editor and the finger rule — its OWN methods on a stand-in: on a touch screen the size drawn shown and written on the scroller, the content and the gutters, «−» at 16 says why (one toast at a time: ${sayOnce} of 3 presses), «+» from the size drawn, a chosen 24 drawn 24; a mouse screen as before; the Ctrl+G pane the same; a screen that turns redraws`, sc.length === 0 && sayOnce === 1 && Object.values(paneLaw).every(Boolean) && listener && fingerRule, { sc, sayOnce, paneLaw, listener, fingerRule });
+// RED CONTROL, its plant proven first: the release's theme line (the chosen size, the content and the gutters) put back in editorFontTheme
+const CUR = "EditorView.theme({ '.cm-scroller, .cm-content, .cm-gutters': { fontSize: drawn + 'px' } })";
+const plantedFinger = ED.replace(CUR, "EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: chosen + 'px' } })");   // stale-pins: kept — the release's theme line, planted by this RED control on purpose
+const fingerPlantIn = ED.includes(CUR) && plantedFinger !== ED && plantedFinger.includes("'.cm-content, .cm-gutters': { fontSize: chosen + 'px' }");
+check('⑤b RED CONTROL: the plant is in its copy (the release\'s theme line in editorFontTheme) — and the editor\'s own methods run on that copy red', fingerPlantIn && scenes(plantedFinger).length > 0, { fingerPlantIn, red: scenes(plantedFinger).slice(0, 2) });
 
 // ⑥ THE CHECK ROW
 const ROW_SEL = '.dialog-body label:where(:has(> input:is([type="checkbox"], [type="radio"])))';

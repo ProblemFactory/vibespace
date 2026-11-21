@@ -14085,6 +14085,9 @@ export default {
   "Format document (Shift+Alt+F)": "格式化文档（Shift+Alt+F）",
   "Decrease font size": "缩小字号",
   "Increase font size": "放大字号",
+  // B-9b12: the code editor says why it shows 16 px on a touch screen
+  "On a touch screen the editor shows at least 16 px, so a phone does not zoom the page": "触屏上编辑器的字号至少 16 px，手机就不会放大整个页面",
+  "Chosen: {n} px — on a touch screen the editor shows at least 16 px, so a phone does not zoom the page": "你选的是 {n} px——触屏上编辑器的字号至少 16 px，手机就不会放大整个页面",
   "Save (Ctrl+S)": "保存（Ctrl+S）",
   "Failed to load file: {error}": "文件加载失败：{error}",
   "No formatter for this language": "这种语言没有格式化工具",

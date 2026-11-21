@@ -14084,6 +14084,9 @@ export default {
   "Format document (Shift+Alt+F)": "ドキュメントを整形（Shift+Alt+F）",
   "Decrease font size": "文字を小さく",
   "Increase font size": "文字を大きく",
+  // B-9b12: the code editor says why it shows 16 px on a touch screen
+  "On a touch screen the editor shows at least 16 px, so a phone does not zoom the page": "タッチ画面ではエディタの文字は 16 px 以上です。スマホがページ全体を拡大しないためです",
+  "Chosen: {n} px — on a touch screen the editor shows at least 16 px, so a phone does not zoom the page": "選んだのは {n} px です。タッチ画面ではエディタの文字は 16 px 以上で、スマホがページ全体を拡大しないためです",
   "Save (Ctrl+S)": "保存（Ctrl+S）",
   "Failed to load file: {error}": "ファイルを読み込めませんでした：{error}",
   "No formatter for this language": "この言語の整形ツールはありません",

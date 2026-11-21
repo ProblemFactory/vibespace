@@ -11,7 +11,7 @@ import { EditorState, Compartment, EditorSelection } from '@codemirror/state';
 import { keymap } from '@codemirror/view';
 import { indentWithTab } from '@codemirror/commands';
 import { marked } from 'marked';
-import { escHtml, showConfirmDialog } from './utils.js';
+import { escHtml, showConfirmDialog, showToast, isTouchDevice } from './utils.js';
 import { lineDelta } from '../artifacts.js'; // lane artifacts-model: the save's "+a −b lines"
 import { t, tc } from './i18n.js';
 import { needLine } from './need-line.js'; // lane ui-needs-a-button (desktop-apps-30): a state + both ways on one line
@@ -124,6 +124,29 @@ const activeLineSelectionFix = EditorView.theme({
   '&.cm-has-selection .cm-activeLineGutter': { backgroundColor: 'transparent' },
 });
 
+// B-9b12 — THE FINGER RULE IN THE EDITOR (public/style.css «EVERY FIELD AT 16 PX ON A FINGER», lane phone-six): on a touch
+// screen a field's text is never under 16 px — a phone zooms the whole page into a smaller one and does not zoom back. The
+// editor DRAWS max(16, the chosen size) there and SAYS so: the size it shows is the size drawn, «−» at 16 says why it goes no
+// lower. The size is written on the scroller too: the rule's `1em` is the PARENT's size, so a chosen 18 or 24 drew 16 as well.
+// The Ctrl+G pane under a terminal (external-editor.js) reads the same stored size and uses the same three helpers.
+const FINGER_MQ = '(hover: none) and (pointer: coarse)';   // utils.js isTouchDevice()'s own query (the listener needs its text)
+/** PURE: the editor's font as drawn — `chosen` px, `finger` = a touch screen (FINGER_MQ) → { drawn, floor } (floor: «−» stops) */
+export function editorFontFace(chosen, finger) {
+  const drawn = finger ? Math.max(16, chosen) : chosen;
+  return { drawn, floor: !!finger && drawn <= 16 };
+}
+/** the size DRAWN, written on the scroller, the content and the gutters (the content's 1em is then the size; the numbers match the text) */
+export function editorFontTheme(chosen, finger) {
+  const { drawn } = editorFontFace(chosen, finger);
+  return EditorView.theme({ '.cm-scroller, .cm-content, .cm-gutters': { fontSize: drawn + 'px' } });
+}
+let fingerFloorToast = null;
+/** «−» at the touch floor says why — ONE toast at a time (a second press while it stands adds none to the stack or the history) */
+export function sayFingerFloor() {
+  if (fingerFloorToast && fingerFloorToast.isConnected) return;
+  fingerFloorToast = showToast(t('On a touch screen the editor shows at least 16 px, so a phone does not zoom the page'), { duration: 4000 });
+}
+
 // Editor settings persistence
 function loadEditorSettings() {
   // theme defaults to 'dark' (matches the app default) — when it was absent,
@@ -228,8 +251,8 @@ class CodeEditor {
     const sizeDown = this._btn('\u2212'); sizeDown.title = t('Decrease font size');
     this.fontSizeDisplay = document.createElement('span');
     this.fontSizeDisplay.className = 'editor-font-size-display';
-    this.fontSizeDisplay.textContent = this._settings.fontSize;
     const sizeUp = this._btn('+'); sizeUp.title = t('Increase font size');
+    this._sizeDown = sizeDown; this._paintFontSize();
     sizeDown.onclick = () => this._changeFontSize(-1);
     sizeUp.onclick = () => this._changeFontSize(1);
 
@@ -273,6 +296,18 @@ class CodeEditor {
     // this document-level observer (and the full file text via a detached
     // EditorView) permanently (audit round-3).
     winInfo._listenerCtl?.signal.addEventListener('abort', () => this._themeObserver?.disconnect());
+    // B-9b12: a screen that turns to touch (or back) redraws the size by the finger rule
+    if (typeof matchMedia === 'function') matchMedia(FINGER_MQ).addEventListener?.('change', () => this._applyFontSize(), winInfo._listenerCtl ? { signal: winInfo._listenerCtl.signal } : undefined);
+  }
+
+  _finger() { return isTouchDevice(); }
+
+  /** the size control's words: the size DRAWN; on a touch screen under the floor, why (B-9b12 — a title is for a mouse; «−» says it in a toast) */
+  _paintFontSize() {
+    const chosen = this._settings.fontSize, { drawn, floor } = editorFontFace(chosen, this._finger());
+    this.fontSizeDisplay.textContent = drawn + 'px';
+    this.fontSizeDisplay.title = drawn !== chosen ? t('Chosen: {n} px — on a touch screen the editor shows at least 16 px, so a phone does not zoom the page', { n: chosen }) : t('Font size');
+    if (this._sizeDown) { this._sizeDown.title = floor ? t('On a touch screen the editor shows at least 16 px, so a phone does not zoom the page') : t('Decrease font size'); this._sizeDown.setAttribute('aria-label', t('Decrease font size')); }
   }
 
   _btn(text) {
@@ -291,7 +326,7 @@ class CodeEditor {
   }
 
   _getFontSizeExtension() {
-    return EditorView.theme({ '.cm-content, .cm-gutters': { fontSize: this._settings.fontSize + 'px' } });
+    return editorFontTheme(this._settings.fontSize, this._finger());   // B-9b12: the size drawn, the scroller too (the finger rule's 1em)
   }
 
   _applyWrap() {
@@ -307,11 +342,13 @@ class CodeEditor {
   _applyFontSize() {
     if (!this.editorView) return;
     this.editorView.dispatch({ effects: this._fontSizeCompartment.reconfigure(this._getFontSizeExtension()) });
-    this.fontSizeDisplay.textContent = this._settings.fontSize + 'px';
+    this._paintFontSize();
   }
 
   _changeFontSize(delta) {
-    const newSize = Math.max(8, Math.min(32, this._settings.fontSize + delta));
+    const { drawn, floor } = editorFontFace(this._settings.fontSize, this._finger());
+    if (delta < 0 && floor) { sayFingerFloor(); return; }   // B-9b12: at the touch floor «−» says why (never a silent override)
+    const newSize = Math.max(8, Math.min(32, drawn + delta));   // from the size DRAWN (a touch screen's 16 over a chosen 14: «+» is 17)
     if (newSize === this._settings.fontSize) return;
     this._settings.fontSize = newSize;
     this._applyFontSize();
