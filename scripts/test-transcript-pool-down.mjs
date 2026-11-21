@@ -260,7 +260,7 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const H1 = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(H1);
   fs.writeFileSync(claudeFp, lines.slice(0, 700).join('\n') + '\n');
   await SS0.warmSessionJsonlAsync(sid, cwd);   // the storage's: the file's record holds it
-  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.jsonlGapInfoAsync(claudeFp); } catch { }
+  C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.readJsonlTailAsync(claudeFp, { dropSubagent: true }); } catch { }   // a HISTORY read refused as «no worker»
   C._setTranscriptPoolForTest(H1);
   const h1a = tails(H1); SS0.parseSessionJsonl(sid, cwd); await new Promise((res) => setImmediate(res));
   ok(C.fileStorageHung(claudeFp) && tails(H1) === h1a, `a refusal of another kind (no worker) after a hung path never unhangs it: the parse asks no warm (${tails(H1) - h1a} more)`);
@@ -291,6 +291,9 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   ok(readC === true && metrics.includes('srv-jsonl-parse-bytes') && U.calls.includes('taskLines'), `the hung retry that reads stamps its parse and warms the task scan (metrics: ${[...new Set(metrics)].join(', ') || 'none'}; asked: ${U.calls.join(', ')})`, { metrics, calls: U.calls });
   // (5) THE STORAGE'S RETRY HAS A GAP: a file the storage's is asked of the pool again at most once a gap (30 s doubling, ≤ 8 min —
   // here 60 ms): a warm inside the gap asks nothing, the first after it asks once
+  // (6) A GAP READ'S PLAIN REFUSAL notes nothing of the file (the mirror of the forgiving: only a history read's word counts)
+  { const fpG = path.join(projDir, 'gap-only.jsonl'); C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); try { await C.jsonlGapInfoAsync(fpG); } catch { }
+    ok(!C.fileRefused(fpG), 'a gap read\'s plain refusal notes nothing of the file (only a history read\'s refusal or the storage\'s does)'); }
   C._setSlicedForTest({ storageRetryMs: 60 });
   fs.writeFileSync(claudeFp, lines.slice(0, 400).join('\n') + '\n');
   const Hg = refusing({ status: 503, code: 'path-hung' }); C._setTranscriptPoolForTest(Hg);

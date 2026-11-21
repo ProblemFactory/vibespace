@@ -769,7 +769,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   const seen = (e, ownCall) => { if (pool && !pool.inPlace && isPoolFailure(e)) { refusal = readerRefusal(e, fp, { ownCall }); notePoolRefusing(e); noteFileRefusal(fp, refusal, { history: true }); } };
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why, refusal); } catch { } return null; };
   const pool = _transcriptPoolGet();
-  if (!pool) { refusal = readerRefusal(null); notePoolRefusing(refusal); noteFileRefusal(fp, refusal); return said('no transcript pool on this process'); }
+  if (!pool) { refusal = readerRefusal(null); notePoolRefusing(refusal); noteFileRefusal(fp, refusal, { history: true }); return said('no transcript pool on this process'); }
   let why = null;
   for (let tries = 0; tries < 2; tries++) {
     let token = null;   // set once page 0 answered: a page with it parses the snapshot in memory (seen in the catch below)
@@ -792,7 +792,7 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
       const code = e && e.code;
       seen(e, !token);
       if (code === 'heap_bound' && !entry) return said(`the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}`);
-      if (refusal && refusal.storageHung) return said(`its storage hung (${(e && e.message) || e}) — no one-shot read sent into it`);   // nothing more tried there
+      if (refusal && (refusal.storageHung || fileStorageHung(fp))) return said(`its storage hung (${(e && e.message) || e}) — no one-shot read sent into it`);   // nothing more tried there (a retry of a storage file is ONE call)
       why = code === 'heap_bound' ? `the history worker's heap bound (${HISTORY_HEAP_MB} MB): ${e.message}` : code === 'history_busy' ? 'the history lane was busy past its wait' : `the history worker failed (${(e && e.message) || e})`;
       break;
     }
@@ -989,7 +989,7 @@ function _slicedTurn(kind, fp, read) {
     sayOnce(fp, `[transcript] ${path.basename(fp)}: ${road.why} — its history is read on the main process in bounded slices (row B-422c)`);
     try { return await read(); }
     catch (e) {
-      if (e && (e.storageHung || e.code === 'sliced_read_deadline')) (_fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message })).ownDeadline = true;   // a record evicted meanwhile is made again
+      if (e && (e.storageHung || e.code === 'sliced_read_deadline')) (_fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message }, { history: true })).ownDeadline = true;   // a record evicted meanwhile is made again (a history read's)
       sayOnce('failed:' + fp, `[transcript] ${path.basename(fp)}: the main process's read of its history failed (${(e && e.message) || e}) — «not loaded» (row B-422c)`);
       throw e;
     }
