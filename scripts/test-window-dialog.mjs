@@ -20,6 +20,7 @@ import path from 'node:path';
 import { spawn, spawnSync, execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 const require = createRequire(import.meta.url);
 const D = require('../src/desktop-display.js'), WT = require('../src/window-targets.js'), R = require('../src/window-reach.js'), M = require('../src/desktop-apps.js');
 const HERE = path.dirname(new URL(import.meta.url).pathname);
@@ -81,7 +82,7 @@ async function windowsNow() {
   return D.seamlessWindows(r.windows).map((w) => ({ id: w.id, title: w.name, cls: w.cls, instance: w.instance, x: w.x, y: w.y, w: w.w, h: w.h, mapped: w.mapped, depth: w.depth, ...(w.frame ? { frame: w.frame } : {}) }));
 }
 // a window mapped a moment ago may not have drawn yet — the engine's own second look (screenshot: lit 0 ⇒ 600 ms ⇒ again)
-const shot = async (plan, tag) => { let r = null; for (let i = 0; i < 6; i++) { r = await WT.windowShot({ xenv, out: path.join(S, `${tag}.png`), plan, wallMs: 20000 }); if (!r.ok || r.lit > 0) break; await sleep(600); } return r; };
+const shot = async (plan, tag) => { let r = null; for (let i = 0; i < 6; i++) { r = await WT.windowShot({ xenv, out: path.join(S, `${tag}.png`), plan, wallMs: 20000 }); if (!r.ok || r.lit > 0) break; await sleep(600); } return r && r.ok && !(r.lit > 0) ? markTimedOut(r, 6 * 600, `shot ${tag} (a lit picture)`) : r; };   // a wait that runs out says so (r1372; test-ci-gate §2p)
 const snap = async (pid) => { const s = await WT.snapshotTarget({ pids: [pid], env: process.env, wallMs: 20000 }); return s.ok ? { ...s, d: WT.dialogFirst(s.snapshot.nodes) } : s; };
 const lineOf = (child, re, ms = 15000) => new Promise((res) => { let s = ''; const on = (d) => { s += d; const m = re.exec(s); if (m) { child.stdout.off('data', on); res(m); } }; child.stdout.on('data', on); setTimeout(() => res(null), ms); });
 const onBus = async (pid) => { for (let i = 0; i < 40; i++) { const r = await WT.runHelper({ op: 'apps' }, { env: process.env, wallMs: 8000 }); if (r.ok && (r.apps || []).some((a) => a.pid === pid)) return true; await sleep(250); } return false; };
