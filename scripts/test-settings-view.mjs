@@ -590,7 +590,7 @@ console.log('§13 a typed number is saved on Enter / blur only, its row says «N
   ok(/bindNumberField\(input, \{/.test(ui) && /onTyping: \(typed\) => this\._markTyped\(path, typed\)/.test(ui) && /if \(\(schema\.type === 'number' && !schema\.slider && !schema\.store\) \|\| schema\.serverVerdict\) controlWrap\.appendChild\(this\._saveMark\(path\)\);/.test(ui) && /saveMarkWords\(st, t, \{ inForce, refused: /.test(ui),
     'R3 wiring: the Settings number field is bound by bindNumberField (its typing marks the row), and every number row carries the save mark (+ a row the server may refuse — the exit check, 主开发 17:04Z: its refusal is said there)');
   const per = read('src/routes/persistence.js');
-  ok(/const spend = writeSettings\(data\);\n\s+answerAtLanding\(res, \{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\)(?:, \.\.\.\(refused \? \{ refused \} : \{\}\))? \}\);/.test(per) && /broadcast\(\{ type: 'settings-updated', settings: data, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per)
+  ok(/const out = \{\}, spend = writeSettings\(data, out\);\n\s+answerAtLanding\(res, \{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\)(?:, \.\.\.\(refused \? \{ refused \} : \{\}\))? \}, out\.landing\);/.test(per) && /broadcast\(\{ type: 'settings-updated', settings: data, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per)
     && /this\.settings\.applyRemote\(msg\.settings, \{ spend: msg\.spend \|\| null \}\);/.test(read('src/lib/app.js')),
     'r2 wiring: the ONE settings writer computes the in-force `spend` once — the POST echoes it AND the settings-updated broadcast carries it to every tab');
 }

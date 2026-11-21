@@ -483,7 +483,7 @@ function checkAgentHookHealth() {
         Promise.resolve(ensureAgentHooks({ auto: true })).then((healed) => { // self-heal the registration in place, through the shipped helper (B-ddf3 u2 line 1) (B-225b r552: while the settings are held it SKIPS — nothing repaired, nothing said)
         if (!(healed && healed.skipped) && !(healed && healed[key] && healed[key].ok === false) && !hookRootWatch.saidRecoveryInstead(info, scriptMissing)) serverNotice(`hook-health-${key}`, // verify r2 ①: a root never registered because it could not be read is a recovery, not "broken and repaired"
           `VibeSpace's ${key} agent-hook registration was broken (stale or missing path) and has been repaired — CLI sessions already running pick the fix up only after they restart or compact.`,
-          { level: 2 }); });
+          { level: 2 }); }).catch((e) => console.warn(`[hooks] the self-heal of ${key} could not be said: ${(e && e.message) || e}`));
       }
     }
   } catch (e) { console.warn('[hook-health] probe failed:', e.message); }

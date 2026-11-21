@@ -2760,7 +2760,7 @@ export function installManageAgents(App, ctx = {}) {
               rmBtn.title = t('Unregister the hook from both CLIs (sessions stop receiving Task Group context)');
               rmBtn.onclick = async () => {
                 rmBtn.disabled = true;
-                try { await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); showToast(t('Hook removed')); } catch {}
+                try { const r = await fetchJson('/api/agent-hooks/uninstall', { method: 'POST' }); if (!r || r.success === false || typeof r.error === 'string') showToast(t('The hooks were not removed — {reason}', { reason: (r && r.error) || t('server unreachable') }), { type: 'error' }); else showToast(t('Hook removed')); } catch {}   // B-ddf3 unit 2 (r1518): a removal that did not land is said
                 refresh();
               };
               actions.appendChild(rmBtn);

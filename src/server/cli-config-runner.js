@@ -7,9 +7,12 @@
 // machine runs) is started for THIS machine through THE STARTER (src/server/child-starter.js: a direct start forks the whole
 // hub), with the plan in VIBESPACE_CLI_CONFIG, and its CFG| receipt lines are read as for any machine (parseReceiptLines).
 // THE LAWS (r1407):
-//   · ONE APPLY IN FLIGHT, THE NEWEST WAITING: a request made while a run is in flight resolves at the landing of the run that
-//     STARTS after it (with the plan as it stands then): two writes in quick succession land in order, the last one winning,
-//     and two helpers never write one file at once.
+//   · ONE RUN IN FLIGHT, THE REQUESTS WAITING IN THE ORDER ASKED: two helpers never write one file at once. A request NEVER
+//     replaces one of another KIND (the full round w4utz2bqb's must, r1518): a removal of our hook rows ('strip'), an apply that
+//     registers them ('apply+hooks') and an apply of the managed keys alone ('apply') are different operations — each kind
+//     asked RUNS, in the order asked, and a caller is told «landed» only by a run of ITS OWN kind. A request joins only the LAST
+//     waiting one, and only when it is of the same kind (two saves in quick succession: one run, the newest plan winning — the
+//     plan is read when the run starts).
 //   · NO SECOND WRITER: the starter down, slow or not up yet — the request waits for it within its bound and FAILS BY NAME
 //     («the starter did not answer»); the release's in-process road is never a silent fallback. A failed landing is asked
 //     again at the next request.
@@ -30,7 +33,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
   if (!starter || typeof starter.run !== 'function') throw new Error('cli-config-runner: a starter (run) is required');
   if (!helperPath) throw new Error('cli-config-runner: the helper path is required');
   let inFlight = null;          // the run in flight: Promise<landing>
-  let waiting = null;           // { planB64, reason, uninstall, resolvers: [] } — the newest request, its plan read when it starts
+  const queue = [];             // the requests waiting, IN THE ORDER ASKED: { kind, planOf, reason, uninstall, before, resolvers }
   let last = null;              // the newest landing: { at, reason, ok, receipts, created, why }
   const watchers = new Set();   // landedWithin's waiters: (landing) => void
 
@@ -61,51 +64,60 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
     return { at, reason, ok: bad.length === 0, receipts, created, why: bad.length ? bad.map((x) => `${x.harness}.${x.key}: ${x.reason || x.state}`).join('; ') : null };
   }
 
-  function settle(landing) { last = landing; for (const w of [...watchers]) { try { w(landing); } catch { } } return landing; }
+  // the spawn gate's waiters hear the landing that leaves the queue EMPTY (this machine's config as every request asked it)
+  function settle(landing) { for (const w of [...watchers]) { try { w(landing); } catch { } } return landing; }
 
-  /** APPLY the plan on this machine: resolves at the landing of a run that STARTED after this call. `planOf()` is read when the
-   *  run starts (the newest settings win). */
-  function apply(planOf, reason = 'apply', { uninstall = false } = {}) {
+  /** APPLY a plan on this machine → resolves at the landing of a run of ITS OWN KIND that started after this call. `planOf()` is
+   *  read when the run starts (the newest settings win); `kind` names what the run does ('strip' | 'apply+hooks' | 'apply');
+   *  `before()` (optional) runs at the run's start, before the helper, its answer handed back on the landing (`landing.before`). */
+  function apply(planOf, reason = 'apply', { uninstall = false, kind = uninstall ? 'strip' : 'apply', before = null } = {}) {
     return new Promise((resolve) => {
-      if (waiting) { waiting.planOf = planOf; waiting.reason = reason; waiting.uninstall = uninstall; waiting.resolvers.push(resolve); return; }
-      waiting = { planOf, reason, uninstall, resolvers: [resolve] };
+      const tail = queue[queue.length - 1];
+      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; tail.resolvers.push(resolve); return; }
+      queue.push({ kind, planOf, reason, uninstall, before, resolvers: [resolve] });
       pump();
     });
   }
+  const broke = (job, why) => ({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why });
   function pump() {
-    if (inFlight || !waiting) return;
-    const job = waiting; waiting = null;
-    let planB64 = null;
-    try { planB64 = typeof job.planOf === 'function' ? job.planOf() : job.planOf; } catch (e) { planB64 = null; }
-    inFlight = (planB64 == null
-      ? Promise.resolve({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why: 'the plan could not be built' })
-      : runOnce(planB64, { reason: job.reason, uninstall: job.uninstall }).catch((e) => ({ at: Date.now(), reason: job.reason, ok: false, receipts: [], created: [], why: `the run broke (${(e && e.message) || e}) — nothing is known to have landed` })))
+    if (inFlight || !queue.length) return;
+    const job = queue.shift();
+    inFlight = (async () => {
+      let before;
+      if (typeof job.before === 'function') { try { before = await job.before(); } catch { before = undefined; } }
+      let planB64 = null;
+      try { planB64 = typeof job.planOf === 'function' ? job.planOf() : job.planOf; } catch { planB64 = null; }
+      if (planB64 == null) return broke(job, 'the plan could not be built');
+      const landing = await runOnce(planB64, { reason: job.reason, uninstall: job.uninstall });
+      return before === undefined ? landing : { ...landing, before };
+    })()
+      .catch((e) => broke(job, `the run broke (${(e && e.message) || e}) — nothing is known to have landed`))
       .then((landing) => {
-        settle(landing);
+        landing.kind = job.kind;
+        last = landing;
         if (landing.ok) for (const c of landing.created) journal(`[cli-config] created ~/${c.rel} (the CLI had never written one) (${job.reason})`);
         else warn(`[cli-config] not applied on this machine (${job.reason}): ${landing.why}`);
         for (const res of job.resolvers) res(landing);
         return landing;
       })
-      .finally(() => { inFlight = null; pump(); });
+      .finally(() => { inFlight = null; if (!queue.length) settle(last); pump(); });
   }
   /** --status: the managed keys read off disk BY THE HELPER (nothing written). Never queued behind an apply's waiter list:
    *  a read beside a write is a read. */
   function status(planB64) { return runOnce(planB64, { reason: 'status', status: true }); }
   /** the spawn gate's question: has a landing (newer than `since`) come within `ms`? → { landed } | { failed, why } | { late } */
   function landedWithin(ms = boundMs, { since = 0 } = {}) {
-    const now = () => (last && last.at >= since ? last : null);
-    const done = now();
-    if (done && !inFlight && !waiting) return Promise.resolve(done.ok ? { landed: true, landing: done } : { failed: true, why: done.why, landing: done });
-    if (!inFlight && !waiting && !last) return Promise.resolve({ late: true, why: 'no apply was asked yet on this machine' });
+    const idle = !inFlight && !queue.length;
+    if (idle && last && last.at >= since) return Promise.resolve(last.ok ? { landed: true, landing: last } : { failed: true, why: last.why, landing: last });
+    if (idle && !last) return Promise.resolve({ late: true, why: 'no apply was asked yet on this machine' });
     return new Promise((resolve) => {
-      const w = (landing) => { if (landing.at < since) return; clearTimeout(t); watchers.delete(w); resolve(landing.ok ? { landed: true, landing } : { failed: true, why: landing.why, landing }); };
+      const w = (landing) => { if (!landing || landing.at < since) return; clearTimeout(t); watchers.delete(w); resolve(landing.ok ? { landed: true, landing } : { failed: true, why: landing.why, landing }); };
       const t = setTimeout(() => { watchers.delete(w); resolve({ late: true, why: `the CLI config did not land within ${ms} ms` }); }, ms);
       t.unref?.();
       watchers.add(w);
     });
   }
-  return { apply, status, landedWithin, last: () => last, busy: () => !!(inFlight || waiting), BOUND_MS: boundMs };
+  return { apply, status, landedWithin, last: () => last, busy: () => !!(inFlight || queue.length), BOUND_MS: boundMs };
 }
 
 module.exports = { createCliConfigRunner, BOUND_MS, RUN_TIMEOUT_MS };

@@ -1789,7 +1789,7 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   const SPEND_CAP_KEYS = new Set(require('../spend-authorizer.js').CAP_SETTING_KEYS);
   const blankCaps = (d) => { if (d && typeof d === 'object') for (const k of SPEND_CAP_KEYS) if (Object.prototype.hasOwnProperty.call(d, k) && d[k] === null) d[k] = ''; return d; };
   function spendOf(data) { try { return require('../spend-authorizer.js').budgetLimits((k) => (data || {})[k]); } catch { return null; } }
-  function writeSettings(data) {
+  function writeSettings(data, out = null) {   // `out` (B-ddf3 unit 2, r1518): the caller's OWN object, handed the CLI-config landing
     readSettings();
     settingsHold.refuseIfHeld('this settings change');   // B-225b R1: the settings HELD — nothing is written over them
     ensureDir(dataDir);
@@ -1807,14 +1807,14 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // Server-side change hook (2.190.0): the ONLY settings key with a server
     // side effect is the Integration master switch — everything else is read
     // lazily via readSettings. Never let a callback failure break the write.
-    try { _landing = onSettingsWrite?.(data, prev) || null; } catch (e) { _landing = null; console.warn('[settings] change callback failed:', e.message); }
+    try { const landing = onSettingsWrite?.(data, prev) || null; if (out) out.landing = landing; } catch (e) { console.warn('[settings] change callback failed:', e.message); }
     try { require('../server/spend-guard.js').noteLimitsWritten(spendOf(prev), spend); } catch { }   // B-0a33 (2): waiting frames re-judged at once
     return spend;
   }
   // B-ddf3 unit 2 line 1 (the coordinator's r1407 (b)): the settings answer waits for the CLI config's LANDING on this machine, or
-  // says by name that it did not land (src/server/landing-answer.js)
-  var _landing = null;   // the change hook's return for the write in hand (var: a write during setup, before this line runs, meets no TDZ)
-  const answerAtLanding = (res, body) => { const p = _landing; _landing = null; return require('../server/landing-answer.js').answerAtLanding(res, body, p); };
+  // says by name that it did not land (src/server/landing-answer.js). The landing rides the route's OWN call (writeSettings' `out`),
+  // never a module-wide variable another writer could leave behind (r1518)
+  const answerAtLanding = (res, body, landing) => require('../server/landing-answer.js').answerAtLanding(res, body, landing || null);
 
   // Server-side settings accessor: /api/settings persists HERE
   // (data/settings.json) — NOT in the 'settings' SyncStore (settings-sync.json,
@@ -1927,8 +1927,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
     // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
     // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
-    const spend = writeSettings(data);
-    answerAtLanding(res, { success: true, ...(spend ? { spend } : {}), ...(refused ? { refused } : {}) });
+    const out = {}, spend = writeSettings(data, out);
+    answerAtLanding(res, { success: true, ...(spend ? { spend } : {}), ...(refused ? { refused } : {}) }, out.landing);
   });
 
   router.patch('/api/settings', (req, res) => {
@@ -1941,8 +1941,8 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     const refused = setAsideExitUrl(req, merged); // the exit check: a person's refused address set aside, said — the rest lands
     if (refuseEngineRows(req, res, merged)) return; // lane engine-spi-egress L1b (V3) — r2: the file the patch would leave
     if (refuseSpendRows(req, res, merged)) return; // lane setting-doors pick 0: the spending rows are the owner's press
-    writeSettings(merged);
-    answerAtLanding(res, { success: true, ...(refused ? { refused } : {}) });
+    const out = {}; writeSettings(merged, out);
+    answerAtLanding(res, { success: true, ...(refused ? { refused } : {}) }, out.landing);
   });
 
   // ── Config export / import (whole-instance transfer) ──

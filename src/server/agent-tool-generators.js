@@ -19,7 +19,7 @@ function create({ rootDir, port, onHookFileCreated = null, applyThisMachine = nu
 const { list: listHarnesses } = require('../harnesses');
 const { buildConfigPlan } = require('../harness-settings');                // PURE: the plan builder (the helper's embedded hooks-only DEFAULT_PLAN)
 const { configPlanSpecs } = require('./harness-config-sync');              // ORCH: descriptor facts → plan specs (ONE spelling, shared with cliConfigPlan)
-const { findOurHookIn, stableNodePath, keepsHookCommand } = require('../harness-config'); // SHARED: the CAS writer + the hook-entry mutators the remote helper embeds
+const { findOurHookIn, stableNodePath, keepsHookCommand, HOOK_MARKER } = require('../harness-config'); // SHARED: the CAS writer + the hook-entry mutators the remote helper embeds
 // ── Create editor helper script ──
 // Communicates via HTTP (not terminal output) so Claude Code treats it as a GUI editor
 // and does NOT clear the screen. The server broadcasts via WebSocket to the client.
@@ -678,12 +678,11 @@ function ensureAgentHooks({ auto = false } = {}) {
   if (!auto) { try { fs.rmSync(HOOK_OPTOUT_FILE, { force: true }); } catch {} }
   if (typeof applyThisMachine !== 'function') return Promise.resolve(Object.fromEntries(Object.keys(HOOK_FILES).map((k) => [k, { ok: false, error: 'no helper road on this server: nothing written' }])));
   const fsp = fs.promises, hookCmd = `${JSON.stringify(stableNodePath(process.execPath))} ${HOOK_CMD}`;
-  // (r1407 (e)) our entries' commands as they stand BEFORE the run, read off the loop: a rewrite of the spelling is journalled by name
+  // our entries' commands BEFORE the run, read at its own start (r1407 (e): a rewrite journalled by name); r1518: QUEUED AT THE CALL
   const ourCmds = async (key, file) => { try { const root = JSON.parse(await fsp.readFile(file, 'utf8')); return Object.fromEntries(HOOK_EVENTS_FOR(key).map((ev) => { const h = _findOurHookIn(root && root.hooks && root.hooks[ev]); return [ev, h ? h.command : null]; })); } catch { return null; } };
-  return Promise.all(Object.entries(HOOK_FILES).map(([key, def]) => ourCmds(key, def.file()).then((c) => [key, c]))).then((pairs) => {
-    const before = Object.fromEntries(pairs);
-    return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true }).then((landing) => ({ landing, before }));
-  }).then(async ({ landing, before }) => {
+  const readBefore = () => Promise.all(Object.entries(HOOK_FILES).map(([key, def]) => ourCmds(key, def.file()).then((c) => [key, c]))).then(Object.fromEntries);
+  return applyThisMachine({ reason: auto ? 'hooks' : 'hooks (asked)', hooks: true, before: readBefore }).then(async (landing) => {
+    const before = (landing && landing.before) || {};
     // the helper prints KEY receipts only: each hook file is VERIFIED here, off the loop (fs.promises), after the landing
     const results = {};
     for (const [key, def] of Object.entries(HOOK_FILES)) {
@@ -721,8 +720,25 @@ function stripAgentHookEntries() {
   if (refuseOwnerWrite()) return Promise.resolve(null); // a worktree / temp server: never edit the owner's CLI configs
   if (settingsHeldNow()) return Promise.resolve(null);   // B-225b: the settings HELD — the switch's value is unknown, the person's CLI configs are not written
   if (typeof applyThisMachine !== 'function') return Promise.resolve(null);
-  // the helper's --uninstall run strips ONLY our entries (never a managed key) — through the starter, like every write here
-  return applyThisMachine({ reason: 'hooks removed', strip: true }).then((landing) => { if (landing && landing.ok) console.log('Removed VibeSpace hooks from this machine\'s CLI configs'); else console.warn(`[hooks] the removal did not land: ${landing && landing.why}`); return landing; });
+  // the helper's --uninstall run strips ONLY our entries (never a managed key) — through the starter, like every write here. The
+  // helper prints KEY receipts only (a removal has none), so the OUTCOME is read on the files, off the loop, before «removed» is
+  // said (r1518): a file that cannot be read or parsed, or that still holds one of our entries, is a removal that did not land
+  return applyThisMachine({ reason: 'hooks removed', strip: true }).then(async (landing) => {
+    if (landing && landing.ok) {
+      const left = [];
+      for (const [, def] of Object.entries(HOOK_FILES)) {
+        const rel = def.rel.join('/');
+        let text = null;
+        try { text = await fs.promises.readFile(def.file(), 'utf8'); } catch (e) { if (!e || e.code !== 'ENOENT') left.push(`~/${rel} could not be read (${(e && e.code) || e})`); continue; }
+        let root = null; try { root = JSON.parse(text); } catch { left.push(`~/${rel} is not valid JSON — not touched`); continue; }
+        const ours = Object.values((root && root.hooks) || {}).some((gs) => Array.isArray(gs) && gs.some((g) => g && Array.isArray(g.hooks) && g.hooks.some((h) => h && typeof h.command === 'string' && h.command.includes(HOOK_MARKER))));
+        if (ours) left.push(`our hook entries are still in ~/${rel}`);
+      }
+      if (left.length) landing = { ...landing, ok: false, why: left.join('; ') };
+    }
+    if (landing && landing.ok) console.log('Removed VibeSpace hooks from this machine\'s CLI configs'); else console.warn(`[hooks] the removal did not land: ${landing && landing.why}`);
+    return landing;
+  });
 }
 function removeAgentHooks() {
   // Durable: record the opt-out so startup won't re-register (finding #3).

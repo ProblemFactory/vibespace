@@ -134,10 +134,13 @@ function create({ serverSetting, harnesses, adapterRegistry, activeSessions, hoo
     return plan;
   }
   /** THE ONE WRITE ROAD of this machine's CLI config → Promise<landing> ({ ok, receipts, created, why } | a refusal) */
-  function applyThisMachine({ reason = 'apply', hooks = hooksWanted(), strip = false } = {}) {
+  // r1518: the request's KIND is fixed when it is made (a removal, a registration, the managed keys alone) and never replaced by
+  // another kind's in the runner's queue; `before()` runs at the run's own start (the registration's before-read of its files)
+  function applyThisMachine({ reason = 'apply', hooks = hooksWanted(), strip = false, before = null } = {}) {
     if (!cliRunner) return Promise.resolve({ ok: false, receipts: [], created: [], why: 'no helper road on this server (no helper path given): nothing written' });
     // a STRIP keeps the plan's hook rows: the applier's --uninstall strips only the files whose plan names our hooks (never a managed key)
-    return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? true : hooks })), reason, { uninstall: strip });
+    const kind = strip ? 'strip' : hooks ? 'apply+hooks' : 'apply';
+    return cliRunner.apply(() => encodePlan(planFor({ hooks: strip ? true : hooks })), reason, { uninstall: strip, kind, before });
   }
   /** THE SPAWN GATE (r1407 (a)): null when this machine's config has landed (or nothing was asked: a refused or skipped
    *  server), else { late | failed, why } once the bound passes — the start goes on either way and says it once. A failed

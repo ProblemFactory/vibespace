@@ -62,9 +62,30 @@ const R = require(path.join(REPO, RUNNER_REL));
 {
   const q = await queueLegs(R);
   ok(q.first === 1 && q.second === 2 && q.plan2 === 'PLAN-C' && q.most === 1 && q.same, 'three quick requests: ONE run in flight, the two waiting ones coalesce into the next run with the NEWEST plan, never two runs at once', q);
-  const M = require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), '    if (inFlight || !waiting) return;', '    if (!waiting) return;', 'two runs at once'), 'two-at-once'));
+  const M = require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), '    if (inFlight || !queue.length) return;', '    if (!queue.length) return;', 'two runs at once'), 'two-at-once'));
   const qm = await queueLegs(M);
   ok(qm.most > 1, 'RED (the queue\'s guard taken out): two helper runs at once on one file', qm);
+}
+
+console.log('①b r1518 (the full round\'s must): a request is NEVER replaced by one of another kind — each kind asked runs, in order');
+// THE TIP's MERGE (c90929dc8): one waiting slot, the newest request's kind written over the waiting one's — rebuilt for the red
+const TAIL = '      if (tail && tail.kind === kind) { tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; tail.resolvers.push(resolve); return; }';
+const MERGED = '      if (tail) { tail.kind = kind; tail.uninstall = uninstall; tail.planOf = planOf; tail.reason = reason; if (before) tail.before = before; tail.resolvers.push(resolve); return; }';   // stale-pins: kept (the tip's merge, rebuilt for the red control)
+async function kindLegs(Rm) {
+  const st = handStarter(), r = Rm.createCliConfigRunner({ starter: st, helperPath: '/x/helper.mjs', stat: async () => { throw new Error('none'); }, journal: () => {}, warn: () => {} });
+  const inflight = r.apply(() => 'PLAN-0', 'a save', { kind: 'apply' });
+  await tick();
+  const strip = r.apply(() => 'PLAN-S', 'hooks removed', { uninstall: true }), save = r.apply(() => 'PLAN-A', 'settings change', { kind: 'apply' });
+  for (let k = 0; k < 4; k++) { for (const call of st.calls) call.finish(okRun); await tick(); }
+  const all = await Promise.race([Promise.all([inflight, strip, save]), new Promise((res) => setTimeout(() => res(null), 5000))]);
+  return { runs: st.calls.map((c) => (c.args.includes('--uninstall') ? 'strip' : 'apply') + ':' + c.o.envAdd.VIBESPACE_CLI_CONFIG), kinds: all ? all.map((l) => l.kind) : null };
+}
+{
+  const k = await kindLegs(R);
+  ok(JSON.stringify(k.runs) === JSON.stringify(['apply:PLAN-0', 'strip:PLAN-S', 'apply:PLAN-A']) && JSON.stringify(k.kinds) === JSON.stringify(['apply', 'strip', 'apply']),
+    'a removal waiting behind a run, then a save: BOTH run, in the order asked (the strip with --uninstall), and each caller is told by a run of its OWN kind', k);
+  const km = await kindLegs(require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), TAIL, MERGED, 'the tip\'s merge'), 'tip-merge')));
+  ok(!km.runs.some((x) => x.startsWith('strip')) && km.kinds && km.kinds[1] === 'apply', 'RED (the tip\'s merge): the removal is REPLACED by the save — no --uninstall run, and the removal\'s caller is told «landed» by a run of another kind', km);
 }
 
 console.log('② no second writer: a starter that does not answer is a failed landing, said; asked again next time');
@@ -155,6 +176,9 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
     const kAfter = JSON.parse(fs.readFileSync(sf, 'utf8'));
     ok(stK.installed === true && stK.stale === false && rk.claude && rk.claude.ok === true && ['SessionStart', 'UserPromptSubmit', 'Stop'].every((ev) => cmdOf(kAfter, ev) === keptCmd) && !said.some((l) => l.startsWith('Hook command rewritten')),
       '(d) a kept spelling reads installed (the check starts nothing for it), and a registration over it keeps it, rewrites nothing and reads ok', { stK, rk, said });
+    const GENM = require(MC.write('src/server/agent-tool-generators.js', anchored(src('src/server/agent-tool-generators.js'), '  const sameRunner = (c) => c === hookCmd || keepsHookCommand(c, hookCmd);', '  const sameRunner = (c) => c === hookCmd;', 'a plain string compare'), 'plain-compare')).create({ rootDir: genRoot, port: 0, applyThisMachine: (o) => SYNC.applyThisMachine(o) });
+    const stKm = GENM.agentHooksStatus().claude;
+    ok(stKm.installed === false && stKm.stale === true, 'RED (a plain string compare): the kept spelling reads stale — the six-hourly check would start a run for it every time', stKm);
     // THE REMOVAL (the Integration switch off, «Remove hooks»): the helper's --uninstall strips ONLY our entries, never a managed key
     const HC2 = require(path.join(REPO, 'src/harness-config.js'));
     const oursIn = (root) => Object.values((root && root.hooks) || {}).some((gs) => (gs || []).some((g) => (g.hooks || []).some((h) => String(h && h.command).includes(HC2.HOOK_MARKER))));
@@ -172,6 +196,45 @@ console.log('④⑤⑥ the REAL helper on a scratch HOME — one run, created re
     const mkS = (M) => M.create({ serverSetting: () => undefined, harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs'), starter, hooksWanted: () => true, log: () => {}, warn: () => {} });
     const slm = await stripLeg(mkS(SM));
     ok(slm.had && slm.left, 'RED (a strip plan without its hook rows — this line\'s first build): the removal «lands» and strips nothing', slm);
+    // r1518's must on the REAL files: a removal queued behind a run in flight, then a save that moves a managed key — BOTH land
+    const store = {}; let hold = null;
+    const holdStarter = { run: (cmd, args, o) => (hold ? hold.then(() => starter.run(cmd, args, o)) : starter.run(cmd, args, o)) };
+    const mkK = (runner) => require(path.join(REPO, SYNC_REL)).create({ serverSetting: (k) => store[k], harnesses: require(path.join(REPO, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs'), starter: holdStarter, hooksWanted: () => false, runner, log: () => {}, warn: () => {} });
+    const both = async (S) => {
+      delete store['claude.transcriptRetentionDays'];
+      await SYNC.applyThisMachine({ reason: 'boot', hooks: true });   // our entries and the managed key in place (the real road)
+      let release; hold = new Promise((r) => { release = r; });
+      const first = S.applyThisMachine({ reason: 'a save in flight' });
+      await tick();
+      const strip = S.applyThisMachine({ reason: 'hooks removed', strip: true });
+      store['claude.transcriptRetentionDays'] = 365;
+      const save = S.applyThisMachine({ reason: 'settings change' });
+      hold = null; release();
+      const ls = await Promise.all([first, strip, save]);
+      const now = JSON.parse(fs.readFileSync(sf, 'utf8'));
+      return { hooksLeft: oursIn(now), days: now.cleanupPeriodDays, kinds: ls.map((l) => l.kind) };
+    };
+    const bk = await both(mkK(null));
+    ok(!bk.hooksLeft && bk.days === 365 && JSON.stringify(bk.kinds) === JSON.stringify(['apply', 'strip', 'apply']), 'r1518: a removal queued behind a run, then a save: our hook entries are GONE and the saved key is written (365) — both effects on the real files', bk);
+    const MR = require(MC.write(RUNNER_REL, anchored(src(RUNNER_REL), TAIL, MERGED, 'the tip\'s merge'), 'tip-merge-real'));
+    const bkm = await both(mkK(MR.createCliConfigRunner({ starter: holdStarter, helperPath: path.join(genRoot, 'data', 'bin', 'vibespace-hook-register.mjs'), home, journal: () => {}, warn: () => {} })));
+    ok(bkm.hooksLeft && bkm.days === 365, 'RED (the tip\'s merge): the removal is replaced by the save — our hook entries STAY in the person\'s file, and its caller was told «landed»', bkm);
+    // ON then OFF at once: the registration is queued at its call, so the removal asked after it runs after it (the hooks end removed)
+    const genSay = [], warn0 = console.warn, log0b = console.log;
+    process.env.VIBESPACE_FORCE_AGENT_HOOKS = '1'; console.warn = (...a) => { genSay.push(a.join(' ')); }; console.log = (...a) => { genSay.push(a.join(' ')); };
+    try {
+      const [reg, rm] = await Promise.all([GEN.ensureAgentHooks({ auto: true }), GEN.stripAgentHookEntries()]);
+      ok(!!reg.claude && rm && rm.ok === true && !oursIn(JSON.parse(fs.readFileSync(sf, 'utf8'))), 'ON then OFF at once: the registration runs first, the removal after it — our entries end REMOVED (never registered with the switch off)', { reg: reg.claude, rm: rm && rm.ok });
+      // a removal's OUTCOME is read on the files before «removed» is said: an unreadable file is a removal that did not land
+      await SYNC.applyThisMachine({ reason: 'boot', hooks: true });
+      const good = fs.readFileSync(sf, 'utf8');
+      fs.writeFileSync(sf, good.slice(0, -3));   // torn: not valid JSON (the CAS writer refuses it, our entries stay in it)
+      genSay.length = 0;
+      const bad = await GEN.stripAgentHookEntries();
+      ok(bad && bad.ok === false && /~\/\.claude\/settings\.json is not valid JSON — not touched/.test(bad.why || '') && genSay.some((l) => /\[hooks\] the removal did not land: /.test(l)) && !genSay.some((l) => /Removed VibeSpace hooks/.test(l)),
+        'r1518: a removal the files did not take (a torn ~/.claude/settings.json) is said NOT landed, by name — never «Removed VibeSpace hooks»', { bad, genSay });
+      fs.writeFileSync(sf, good);
+    } finally { console.warn = warn0; console.log = log0b; delete process.env.VIBESPACE_FORCE_AGENT_HOOKS; }
     const SJ = src('server.js'), hc = SJ.slice(SJ.indexOf('function checkAgentHookHealth()'), SJ.indexOf('function checkAgentHookHealth()') + 1600);
     ok(/if \(info\.stale \|\| !info\.installed \|\| scriptMissing\) \{[\s\S]*?ensureAgentHooks\(\{ auto: true \}\)/.test(hc) && (hc.match(/ensureAgentHooks\(/g) || []).length === 1,
       'WIRING (d): the six-hourly check asks the helper only inside «stale, not installed, or the hook script missing»');
@@ -206,13 +269,39 @@ async function answerLegs(A) {
   const M = require(MC.write(ANSWER_REL, anchored(src(ANSWER_REL), "  if (!landing || typeof landing.then !== 'function') return res.json(body);", '  return res.json(body);', 'an answer that never waits'), 'no-wait-answer'));
   const am = await answerLegs(M);
   ok(am.before !== null && !('cliConfig' in am.before), 'RED (an answer that never waits): «success» before the landing, the landing never said', am.before);
-  ok(/answerAtLanding\(res, \{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\)/.test(src('src/routes/persistence.js')) && /_landing = onSettingsWrite\?\.\(data, prev\) \|\| null/.test(src('src/routes/persistence.js')), 'WIRING: the settings POST and PATCH answer through it, with the change hook\'s landing');
+  const PS = src('src/routes/persistence.js');
+  ok(/const out = \{\}, spend = writeSettings\(data, out\);\n\s+answerAtLanding\(res, \{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\)[^\n]*\}, out\.landing\);/.test(PS) && /const out = \{\}; writeSettings\(merged, out\);\n\s+answerAtLanding\(res, \{ success: true, [^\n]*\}, out\.landing\);/.test(PS)
+    && /if \(out\) out\.landing = landing;/.test(PS) && !/_landing\b/.test(PS),
+    'WIRING (r1518): the settings POST and PATCH answer through it with THEIR OWN write\'s landing (writeSettings\' `out`) — no module-wide landing another writer could leave behind');
+  ok(/const r = await fetchJson\('\/api\/agent-hooks\/uninstall', \{ method: 'POST' \}\); if \(!r \|\| r\.success === false \|\| typeof r\.error === 'string'\) showToast\(t\('The hooks were not removed — \{reason\}'/.test(src('src/lib/manage-agents.js'))
+    && src('src/lib/i18n-zh.js').includes('"The hooks were not removed — {reason}":') && src('src/lib/i18n-ja.js').includes('"The hooks were not removed — {reason}":'),
+    'WIRING (r1518): «Remove» says a removal that did not land (zh / ja), never «Hook removed» over it');
   // the page says it: a save whose answer carries «not landed» is a toast with the why (en / zh / ja)
   const W = "Saved in VibeSpace, but not yet in this machine's CLI files: {why}";
   const SM = src('src/lib/settings.js'), APP = src('src/lib/app.js');
   ok(/if \(j && j\.cliConfig && j\.cliConfig\.landed === false\) \{ try \{ this\.onCliConfig\?\.\(j\.cliConfig\); \}/.test(SM) && APP.includes(`this.settings.onCliConfig = (c) => { showToast(t(${JSON.stringify(W)}, { why: String((c && c.why) || '') }), { type: 'warn' }); };`)
     && src('src/lib/i18n-zh.js').includes(JSON.stringify(W) + ':') && src('src/lib/i18n-ja.js').includes(JSON.stringify(W) + ':'),
     'WIRING: the settings save hands a «not landed» answer to the page, which says it in a toast with the why (zh and ja words)');
+}
+
+console.log('⑧ r1518 (the full round\'s must): the hook root\'s watch sees a recovery on a machine where one CLI never ran');
+const RW_REL = 'src/server/hook-root-watch.js';
+async function watchRecovery(RW) {
+  const d = path.join(ROOT, `watch-${Math.random().toString(36).slice(2, 8)}`); fs.mkdirSync(d, { recursive: true });
+  const memo = path.join(d, RW.MEMO_FILE); fs.writeFileSync(memo, JSON.stringify({ cause: 'an earlier unknown root' }));
+  const notices = [];
+  const w = RW.create({ dataDir: d, ensureAgentHooks: () => ({ claude: { ok: true }, codex: { ok: false, missing: 'no-dir', error: '~/.codex not found — the CLI has not run on this machine; nothing is created' } }), rootRecovery: () => ({ registeredAfterError: { at: 0, error: 'EIO' } }), ownerWriteRefusal: () => null, serverNotice: (id) => { notices.push(id); return 1; }, setTimer: () => ({ unref() { } }), log: () => { } });
+  w._state.attempt = 3; await w.sync();
+  return { memoKept: fs.existsSync(memo), said: w._state.said, attempt: w._state.attempt, notices };
+}
+{
+  const RWM = require(path.join(REPO, RW_REL));
+  const rw = await watchRecovery(RWM);
+  ok(!rw.memoKept && rw.said === true && rw.attempt === 0 && rw.notices.includes('hook-root-registered'), 'a good registration on a Claude-only machine (codex: no folder here) IS a recovery: the memo removed, the backoff reset, «registered after an earlier read error» said', rw);
+  const TIP_GUARD = "      else if (r && !r.refused && !Object.values(r).some((x) => x && x.ok === false)) recovered();   // a registration that did not land is no recovery";   // stale-pins: kept (the tip's guard, rebuilt for the red control)
+  const NOW_GUARD = /      else if \(r && !r\.refused && require\('\.\/landing-answer\.js'\)\.notLanded\(r\) === null\) recovered\(\);[^\n]*/;
+  const rwm = await watchRecovery(require(MC.write(RW_REL, anchored(src(RW_REL), NOW_GUARD, TIP_GUARD, 'the tip\'s guard'), 'tip-guard')));
+  ok(rwm.memoKept && rwm.said === false, 'RED (the tip\'s guard): «no folder here» reads as a failure — the memo kept, the recovery never said (a person keeps a warning that is no longer true)', rwm);
 }
 
 clearInterval(KEEP);
