@@ -162,8 +162,9 @@ function formsOf(h) {
 }
 
 // ── a server over a router ────────────────────────────────────────────────────
-async function serve(router, remoteFs, { json = false } = {}) {
+async function serve(router, remoteFs, { json = false, locals = {} } = {}) {
   const app = express();
+  Object.assign(app.locals, locals);   // r1066: a route's seam (the clipboard poll's shorter bound)
   if (json) app.use(express.json({ limit: '5mb' }));   // B-3767 ⑩: a JSON route (the real server parses bodies globally)
   app.set('env', 'test'); // finalhandler: no stack traces on the console for the expected 404s
   app.locals.getRemoteFs = () => remoteFs;
@@ -720,7 +721,8 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         '#!/bin/sh',
         "# test-raw-filename's stand-in for xclip (K65): it records what it was given and exits — it never opens a display",
         `REC='${CLIP_REC}'`,
-        'case " $* " in *" -o "*) [ -f "$REC/type" ] && cat "$REC/type"; exit 0;; esac',
+        // r1066: a placed SLOW read marks its start and its end around the sleep; a NEVER read answers no picture
+        'case " $* " in *" -o "*) n=$$; if [ -f "$REC/slow" ]; then : > "$REC/o-start-$n"; sleep "$(cat "$REC/slow")"; : > "$REC/o-end-$n"; fi; [ -f "$REC/never" ] && exit 0; [ -f "$REC/type" ] && cat "$REC/type"; exit 0;; esac',
         'n=$$',
         'printf \'%s\\n\' "$@" > "$REC/args-$n"',
         'printf \'%s\' "$DISPLAY" > "$REC/display-$n"',
@@ -730,7 +732,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         'exit 0', ''].join('\n'), { mode: 0o755 });
       const NO_DISPLAY = (() => { for (let n = 60001; n < 61000; n++) if (!fs.existsSync(`/tmp/.X11-unix/X${n}`)) return `:${n}`; return ':65534'; })();
       const firstOnPath = (name, p) => { for (const d of String(p || '').split(':').filter(Boolean)) { const f = path.join(d, name); try { fs.accessSync(f, fs.constants.X_OK); return f; } catch { } } return null; };
-      const clipGuard = (p) => { const f = firstOnPath('xclip', p); return f === STANDIN ? { ok: true } : { ok: false, refused: `REFUSED: the xclip first on the suite's search path is ${f || 'none'}, not the suite's stand-in (${STANDIN}) — the paste leg never runs the real clipboard program` }; };
+      const clipGuard = (p, { none = false } = {}) => { const f = firstOnPath('xclip', p); return f === STANDIN || (none && f === null) ? { ok: true } : { ok: false, refused: `REFUSED: the xclip first on the suite's search path is ${f || 'none'}, not the suite's stand-in (${STANDIN}) — the paste leg never runs the real clipboard program` }; };
       const records = () => fs.readdirSync(CLIP_REC).filter((f) => f.startsWith('done-')).map((f) => f.slice(5));
       const recordOf = (n) => ({ args: fs.readFileSync(path.join(CLIP_REC, `args-${n}`), 'utf8').split('\n').filter(Boolean), display: fs.readFileSync(path.join(CLIP_REC, `display-${n}`), 'utf8'), stdin: fs.readFileSync(path.join(CLIP_REC, `stdin-${n}`)) });
       const envWas = { PATH: process.env.PATH, DISPLAY: process.env.DISPLAY, XAUTHORITY: process.env.XAUTHORITY };
@@ -774,6 +776,58 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         let r0; try { r0 = await pasteOnce(S.base); } finally { process.env.PATH = envPath; }
         ok(!g0.ok && /^REFUSED: the xclip first on the suite's search path is .*, not the suite's stand-in \(/.test(g0.refused) && r0.refused === g0.refused && r0.file === null,
           'K65 CONTROL: with the stand-in taken off the search path the paste leg REFUSES BY NAME before any request — it never falls through to the real clipboard program', r0.refused || r0);
+      }
+      // r1066 (主开发 — the K65 find, now a unit; B-323e's family): THE CLIPBOARD'S POLL NEVER HOLDS THE HUB'S LOOP. The route asks
+      // the clipboard through the hub's STARTER (a small process), awaited — never a synchronous child. A placed SLOW stand-in (its
+      // TARGETS read sleeps SLOW_S, under the read's own 1 s bound): while that read is in flight the loop TURNS — evidence by ORDER
+      // (a loop turn lands after the read's start and before its end), no clock bound. RED: a copy with today's synchronous call.
+      // And what the person is told when the clipboard never takes the picture: said BY NAME (it was a silent `ready: false`)
+      const SLOW_S = '0.6';
+      const flag = (n, v) => { const f = path.join(CLIP_REC, n); if (v == null) fs.rmSync(f, { force: true }); else fs.writeFileSync(f, String(v)); };
+      const marks = (pre) => fs.readdirSync(CLIP_REC).filter((f) => f.startsWith(pre)).map((f) => f.slice(pre.length));
+      const pasteAnswer = async (base) => {
+        const g = clipGuard(process.env.PATH, { none: true });
+        if (!g.ok) return { refused: g.refused };
+        try { const r = await fetch(base + '/api/paste-image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dataUrl: PNG }), signal: AbortSignal.timeout(20000) }); return await r.json(); } catch (e) { return { error: 'no answer: ' + (e && e.name) }; }
+      };
+      const loopScene = async (base) => {
+        flag('slow', SLOW_S);
+        try {
+          const before = new Set(marks('o-start-'));
+          const answer = pasteAnswer(base);
+          let started = null; const t0 = Date.now();
+          while (!(started = marks('o-start-').find((n) => !before.has(n))) && Date.now() - t0 < 15000) await new Promise((r) => setTimeout(r, 10));
+          const turnedInFlight = started ? await new Promise((r) => setImmediate(() => r(!fs.existsSync(path.join(CLIP_REC, 'o-end-' + started))))) : false;
+          return { started: !!started, turnedInFlight, answer: await answer };
+        } finally { flag('slow', null); }
+      };
+      const POLL_LOCALS = { clipboardPollMs: 1000 };   // the route's own seam: the poll's bound in this suite (the product's is 5 s)
+      const SC = await serve(filesRouter, null, { json: true, locals: POLL_LOCALS });
+      try {
+        const L1 = await loopScene(SC.base);
+        ok(L1.started && L1.turnedInFlight === true && !!L1.answer && L1.answer.ready === true,
+          'r1066: while the clipboard\'s read is in flight (a placed slow stand-in) the hub\'s loop TURNS — the read runs in the starter\'s small process, awaited; the paste then answers ready as before', L1);
+        flag('never', '1');
+        let n1; try { n1 = await pasteAnswer(SC.base); } finally { flag('never', null); }
+        ok(!!n1 && n1.ready === false && n1.code === 'clipboard_not_taken' && n1.error === 'the clipboard did not take the picture in time' && typeof n1.path === 'string',
+          'r1066: a picture the clipboard never takes is ANSWERED BY NAME within the poll\'s bound (code + words the terminal says) — it was a silent «ready: false»', n1);
+        // the clipboard program missing: a search path holding bash and cat only — nothing named xclip anywhere, so no real program can answer
+        const NOBIN = path.join(DIR, 'nobin'); fs.mkdirSync(NOBIN, { recursive: true });
+        for (const b of ['bash', 'cat']) { const real = firstOnPath(b, envWas.PATH || '/usr/bin:/bin'); if (real && !fs.existsSync(path.join(NOBIN, b))) fs.symlinkSync(real, path.join(NOBIN, b)); }
+        const pathNow = process.env.PATH; process.env.PATH = NOBIN;
+        let n2; try { n2 = await pasteAnswer(SC.base); } finally { process.env.PATH = pathNow; }
+        ok(!!n2 && n2.ready === false && n2.code === 'clipboard_no_program' && /^the clipboard program is not installed/.test(n2.error || ''),
+          'r1066: …and with no clipboard program on the machine the answer names THAT', n2);
+      } finally { await SC.close(); }
+      {
+        const FSRC1 = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
+        const RUN = "last = await starter.run('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], { timeoutMs: 1000, capture: true, wholeEnv: true, env: clipEnv });";
+        const SYNC = "last = (() => { try { return { code: 0, stdout: execFileSync('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], { env: clipEnv, encoding: 'utf-8', timeout: 1000 }) }; } catch (e) { return { code: 1, stdout: '', error: e && e.code }; } })();   /* MUTANT: today's synchronous call */";
+        const SR = await serve(M.load('src/routes/files.js', anchored(FSRC1, RUN, SYNC, 'r1066-sync-poll'), 'r1066-sync'), null, { json: true, locals: POLL_LOCALS });
+        try {
+          const L0 = await loopScene(SR.base);
+          ok(L0.started && L0.turnedInFlight === false, 'CONTROL r1066 (today\'s synchronous call, in a copy): NO loop turn lands while the read is in flight — the leg above would be red', L0);
+        } finally { await SR.close(); }
       }
       const FSRC = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
       const LEG = "  if (!host || !rfsInst) return;\n";

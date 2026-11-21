@@ -9,6 +9,7 @@ const fs = require('fs');
 const os = require('os');
 const { execFileSync, spawn } = require('child_process');
 const { serviceEnv } = require('../agent-env.js');
+const { childStarter } = require('../server/child-starter');   // the paste's clipboard reads start in the small process, never the hub (r1066)
 const multer = require('multer');
 
 const router = express.Router();
@@ -748,6 +749,20 @@ function sweepPasteTemps(rfsInst, host) {
   rfsInst._run(host, `find ~/.vibespace/paste -type f -mmin +1440 -delete 2>/dev/null || true`).catch(() => {});
 }
 
+// THE CLIPBOARD'S POLL (the paste below): how long the clipboard is asked whether it holds the picture — today's bound
+const CLIPBOARD_POLL_MS = 5000;
+/** macOS: the pasted picture onto the clipboard (osascript) through the hub's starter — its whole env built HERE (the service
+ *  env; the old road gave it the hub's whole env, its secrets included) */
+function macClipboardWrite(starter, tmpPath) {
+  return starter.run('osascript', ['-e', `set the clipboard to (read POSIX file "${tmpPath}" as «class PNGf»)`], { timeoutMs: 5000, capture: true, wholeEnv: true, env: serviceEnv(process.env) });
+}
+/** a picture the clipboard never took, BY NAME (the terminal words the code): the program missing, the display not opened, or no
+ *  picture in time — from the last read's own answer */
+function clipboardWhy(r, display) {
+  if (r && r.error === 'ENOENT') return { code: 'clipboard_no_program', words: `the clipboard program is not installed on the machine VibeSpace runs on` };
+  if (r && /can't open display/i.test(String(r.stderr || ''))) return { code: 'clipboard_no_display', words: `the display ${display || '(none)'} could not be opened for the clipboard` };
+  return { code: 'clipboard_not_taken', words: 'the clipboard did not take the picture in time' };
+}
 // Paste image from clipboard → save to temp file + set X clipboard via xclip
 router.post('/api/paste-image', async (req, res) => {
   try {
@@ -780,11 +795,19 @@ router.post('/api/paste-image', async (req, res) => {
     const tmpPath = path.join(pasteDir.dir, `claude-paste-${Date.now()}.${ext}`);
     await fs.promises.writeFile(tmpPath, buf);   // B-3767 follow-up: off the loop (a reader's should); swept by sweepOwnTmp above (B-5527)
     // Set system clipboard with image — macOS uses osascript, Linux uses xclip
+    // NO SYNCHRONOUS CHILD ON THE HUB'S LOOP (B-323e's family, 主开发 r1066 — the paste's own site): the clipboard's READS (the poll
+    // below, every 200 ms for up to 5 s) and macOS's one write run through the hub's STARTER (src/server/child-starter.js: a small
+    // process forks them, never the hub; each awaited, each bounded, its env the one this route built) — while a person pastes a
+    // picture no other window of the hub stalls. The program that OWNS the clipboard (xclip: it lives until another program takes
+    // the clipboard, by design) is started as before. A picture the clipboard never takes is ANSWERED BY NAME within the same bound
+    // (`code` + `error`; the terminal words it) — before, the answer was a silent `ready: false`
     const isMac = process.platform === 'darwin';
+    const starter = childStarter();
     try {
       if (isMac) {
-        execFileSync('osascript', ['-e', `set the clipboard to (read POSIX file "${tmpPath}" as «class PNGf»)`], { timeout: 5000 });
-        res.json({ path: tmpPath, ready: true });
+        const r = await macClipboardWrite(starter, tmpPath);
+        if (r && r.code === 0 && !r.timedOut && !r.unknown) res.json({ path: tmpPath, ready: true });
+        else { const why = clipboardWhy(r, null); res.json({ path: tmpPath, ready: false, code: why.code, error: why.words }); }
       } else {
         // Use the display the server PROBED at startup (app.locals.xEnv) — the
         // inherited DISPLAY is often stale, and XWayland needs the compositor's
@@ -802,20 +825,20 @@ router.post('/api/paste-image', async (req, res) => {
           });
           cp.on('error', (e) => console.warn(`[files] the clipboard helper could not be started: ${(e && e.code) || e}`));   // ckpt61 cure 2: the hub survives a start that fails (the road's own failure words owed: the next unit)
           cp.unref();
-          const pollStart = Date.now();
-          const poll = () => {
+          const pollStart = Date.now(), pollFor = Number(req.app.locals.clipboardPollMs) > 0 ? Number(req.app.locals.clipboardPollMs) : CLIPBOARD_POLL_MS;   // a suite's seam: its own shorter bound
+          let last = null;
+          const poll = async () => {
             try {
-              const out = execFileSync('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], {
-                env: clipEnv, encoding: 'utf-8', timeout: 1000,
-              });
-              if (out.includes('image/')) return res.json({ path: tmpPath, ready: true });
-            } catch {}
-            if (Date.now() - pollStart < 5000) return setTimeout(poll, 200);
+              last = await starter.run('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], { timeoutMs: 1000, capture: true, wholeEnv: true, env: clipEnv });
+              if (last && last.code === 0 && String(last.stdout || '').includes('image/')) return res.json({ path: tmpPath, ready: true });
+            } catch { }
+            if (Date.now() - pollStart < pollFor) return void setTimeout(poll, 200);
             if (retriesLeft > 0 && req.app.locals.refreshXEnv) {
               req.app.locals.refreshXEnv();
               return attempt(retriesLeft - 1);
             }
-            res.json({ path: tmpPath, ready: false });
+            const why = clipboardWhy(last, clipEnv.DISPLAY);
+            res.json({ path: tmpPath, ready: false, code: why.code, error: why.words });
           };
           setTimeout(poll, 300);
         };

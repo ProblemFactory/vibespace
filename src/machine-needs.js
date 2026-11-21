@@ -54,6 +54,9 @@ const NEEDS = Object.freeze([
     match: /needs curl/i, door: { none: 'said before pairing — the machine is not paired yet, so nothing can open a door on it' } },
   { id: 'posix-shell', need: 'a POSIX shell for some file operations on Windows', platforms: ['win32'], kind: '-',
     match: /POSIX shell/, door: { none: 'a product gap — not offered on Windows yet' } },
+  // r1066 (lane bl-proposals): a picture pasted into a terminal reaches the CLI through the clipboard of the machine VibeSpace runs on
+  { id: 'clipboard-program', need: 'a clipboard program (xclip) on the machine VibeSpace runs on — a picture pasted into a terminal conversation goes through it', platforms: ['linux'], kind: 'b',
+    match: /^Paste failed: the clipboard program is not installed on the machine VibeSpace runs on$/, door: { none: 'the hub\'s own machine: a program installed there needs its owner\'s password (apt) — said by name at the paste that failed' } },
   // B-bd27 X2: a Node the machine already had, on a machine with no pairing sheet (an ssh host, the hub's own agent)
   { id: 'node-runtime-system', need: 'the machine\'s own Node at or above the advisory floor (an agent with no pairing sheet runs on it)', platforms: ['win32', 'darwin', 'linux'], kind: 'b',
     match: /runs this machine’s own Node/, door: { none: 'that Node is the machine\'s own program (its package manager, its administrator): its upgrade line is shown to type there, and VibeSpace never upgrades a program it did not install; the agent runs on the new Node from its next connection' } },

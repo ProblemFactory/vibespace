@@ -446,6 +446,8 @@ export const KINDS = Object.freeze(['probe', 'upstream', 'default', 'self', 'deb
  *  [file, the function it is in, count, why — where its env is BUILT (a builder: serviceEnv, or an ENV_FUNCS function)].
  *  A request with no row, a row with no request (DEAD) or a count that differs ⇒ RED. */
 export const WHOLE_ROWS = Object.freeze([
+  ['src/routes/files.js', 'macClipboardWrite', 1, "the paste's macOS clipboard write (osascript), r1066: serviceEnv(process.env) built in the function — the service list, nothing of the hub's own (the old synchronous road handed it the hub's whole env)"],
+  ['src/routes/files.js', 'poll', 1, "the paste's clipboard reads (xclip -t TARGETS -o), r1066: clipEnv — serviceEnv + the display and its cookie (the probed one, else the inherited one), built in attempt() exactly as the clipboard's owning xclip gets it"],
   ['src/mounts.js', '_rcloneProbeRun', 1, "the mount sweep's rclone probes (the backend access probe, the OAuth read probe): their env from _rcloneFor = rcloneEnv = serviceEnv + the egress door + the provider's RCLONE_CONFIG_VS_* (ENV_FUNCS above); the hub's own secret prefixes refused by the starter"],
 ]);
 

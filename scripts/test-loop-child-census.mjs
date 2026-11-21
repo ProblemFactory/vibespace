@@ -47,7 +47,6 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/cli-identity.js', 'procArgv', 'child-ref:execFileSync', 1, FALLBACK, 'B-f64b: the default of its `execImpl` (a suite injects one): `ps -p <pid> -o args=` only where there is NO /proc (macOS / BSD) — on Linux a pid /proc cannot read is gone, no second program (the boot\'s walk held 33 s on one ps per exited pid)'],
     ['src/cli-identity.js', 'parentIndex', 'child-ref:execFileSync', 1, FALLBACK, 'the default of its `execImpl`: ONE `ps -eo pid=,ppid=` per sweep for the whole table — NO-/proc fallback only'],
     ['src/usage-routes.js', 'setupUsage > _readOAuthCreds', 'child:execFileSync', 1, FALLBACK, 'macOS only (the keychain\'s `security`): never runs on Linux'],
-    ['src/routes/files.js', 'route:POST /api/paste-image', 'child:execFileSync', 1, FALLBACK, 'macOS only (osascript) — a person\'s paste'],
     // DEBT — on the hub's loop; the conversions follow in this order (主开发 23:0xZ): timer / boot / per spawn-attach first, then a person's act
     ['src/usage-walker.js', 'walkSteps', 'walk', 1, DEBT, 'timer — the usage walk\'s poll on the hub\'s thread (usage-history runUsageWalk; the daemon runs it in its own process)'],
     ['src/task-groups.js', 'TaskGroupManager._listContextFiles > walk', 'walk', 1, DEBT, 'per prompt — for every belonged group (contextDirSignature, a 4 s cache) and per context listing'],
@@ -63,7 +62,6 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/vnc.js', 'which', 'child:execFileSync', 1, DEBT, 'per act — a display start looks up the X server and dbus-launch on PATH, 2 s each'],
     ['src/routes/files.js', 'route:GET /api/fonts', 'child:execFileSync', 1, DEBT, 'per act — the fonts list (fc-list), 3 s'],
     ['src/routes/files.js', 'route:POST /api/format > tryFormat', 'child:execFileSync', 1, DEBT, 'per act — format a file (prettier / ruff …)'],
-    ['src/routes/files.js', 'route:POST /api/paste-image > attempt > poll', 'child:execFileSync', 1, DEBT, 'per act — paste an image (xclip TARGETS)'],
     ['src/server/ops-routes.js', 'create > route:GET /api/version', 'child:execFileSync', 1, DEBT, 'per process, ONCE — the first GET /api/version (the commit is memoised): git rev-parse, 3 s'],
     ['src/transcript-service.js', 'createTranscriptService > rescue', 'child:execFileSync', 1, DEBT, 'per act — a transcript rescue (fuser), 3 s'],
     ['src/hosts.js', 'HostManager.installAgentTools', 'child:execFileSync', 1, DEBT, 'per act — a machine\'s tool install (tar, 15 s)'],
@@ -79,7 +77,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
   // rows tell the truth on every road (safe-fs's inline road ×2, startToken's unbounded ps on Linux for an exited pid)
-  const DEBT_MAX = 24;   // B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
+  const DEBT_MAX = 23;   // r1066 (lane bl-proposals, B-323e's family): the paste route's clipboard poll (xclip TARGETS, every 200 ms for up to 5 s) and macOS's osascript write run through the hub's starter — src/routes/files.js's paste starts no synchronous child (24 → 23; the macOS row was a fallback). B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
   const key = (f, sc, k) => `${f}|${sc}|${k}`;
   const judge = (r) => {
     const by = new Map(); for (const st of r.sites) by.set(key(st.file, st.scope, st.kind), (by.get(key(st.file, st.scope, st.kind)) || 0) + 1);

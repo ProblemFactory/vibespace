@@ -574,6 +574,12 @@ class TerminalSession {
             this.ws.send({ type: 'input', sessionId: this.sessionId, data: escaped + ' ' });
           } else if (data.ready) {
             this.ws.send({ type: 'input', sessionId: this.sessionId, data: '\x16' });
+          } else if (data.code === 'clipboard_no_program') {   // r1066: a picture the clipboard never took is said by name (was silent)
+            showToast(t('Paste failed: the clipboard program is not installed on the machine VibeSpace runs on'), { type: 'error' });
+          } else if (data.code === 'clipboard_no_display') {
+            showToast(t('Paste failed: the clipboard of the screen VibeSpace runs on could not be opened'), { type: 'error' });
+          } else if (data.code === 'clipboard_not_taken') {
+            showToast(t('Paste failed: the clipboard did not take the picture'), { type: 'error' });
           } else if (data.error) {
             showToast(t('Paste failed: {msg}', { msg: data.error }), { type: 'error' });
           }
