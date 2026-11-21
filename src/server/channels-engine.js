@@ -1245,25 +1245,39 @@ function create(deps = {}) {
       // owed mark), then the pending rows — by their fresh key once the merge keyed them (only those due by it), before that
       // a cursor that moves each turn; at most turnMax a turn, `more` past it
       const job = ix.merging ? dueMerging.get(rec.id) : null;
+      const extra = new Set();   // the touched rows this turn took as candidates (each judged by dueRow below)
+      let pendingWaiting = 0;
       if (job && job.ix === ix) {
-        let extra = 0;
-        const take = (k) => { if (cand.has(k)) return true; if (extra >= turnMax) { out.more = true; return false; } cand.add(k); extra++; return true; };
-        for (const k of ix.dirty) if (!take(k)) break;
-        if (job.fresh) { for (const [k, at] of job.fresh) if (at <= t && !take(k)) break; for (const k of job.owed) if (!take(k)) break; }
+        // cut 3d (round wu3c992y5): the rows touched SINCE the merge began and the PENDING rows each have their OWN turnMax —
+        // a pass's stamps (thousands of just-polled rows in `dirty`) never starve a pending row whose instant moved earlier
+        const budget = () => { let left = turnMax; return (k) => { if (cand.has(k)) return true; if (left <= 0) { out.more = true; return false; } cand.add(k); extra.add(k); left--; return true; }; };
+        const takeDirty = budget(), takePending = budget();
+        for (const k of ix.dirty) if (!takeDirty(k)) break;
+        // the pending rows by their FRESH keys once known: the most overdue first (job.sorted), a row touched since the merge
+        // began left to the touched-since budget (a polled row's stamp moved it: never the same polled rows each turn)
+        if (job.sorted) {
+          let i = 0;
+          for (; i < job.sorted.length && job.sorted[i].at <= t; i++) { const k = job.sorted[i].key; if (ix.dirty.has(k)) continue; if (!takePending(k)) break; }
+          for (; i < job.sorted.length && job.sorted[i].at <= t; i++) { const k = job.sorted[i].key; if (!ix.dirty.has(k) && !cand.has(k) && !(ix.at.get(k) <= t)) pendingWaiting++; }   // due, not taken, not counted below
+          for (const k of job.owed) if (!takePending(k)) break;
+        }
         else {
-          const pend = job.keys, n0 = pend.length;
-          for (let c = 0; c < n0 && extra < turnMax; c++) { const k = pend[(job.cursor + c) % n0]; take(k); }
-          job.cursor = (job.cursor + Math.min(n0, turnMax)) % Math.max(1, n0);
+          const pend = job.keys, n0 = pend.length, n = Math.min(n0, turnMax);
+          for (let c = 0; c < n; c++) takePending(pend[(job.cursor + c) % n0]);
+          job.cursor = (job.cursor + n) % Math.max(1, n0);
           if (n0 > turnMax) out.more = true;
         }
-        if (out.more && out.lateTotal === undefined) out.lateTotal = dueSeek(ix.keys, t, '\uffff') + extra;
       }
       const rows0 = store.index.rows();   // B-dfa4 cut 3c: read-only, no copy (dueRow reads only) — a copy a candidate was the release's 0.8 s
       for (const k of cand) { const en = rows0[k]; if (en && en.adapterId === rec.id) dueRow(rec, e, en, t, T, out, false); }
+      // cut 3d (round wu3c992y5): during a merge the card's WAITING count is the index's overdue keys plus the pending rows
+      // due by their fresh keys that this turn did NOT take (never every candidate taken; each row once — one whose live key
+      // is overdue is in the first) — set whenever the turn says `more`
+      if (job && job.ix === ix && out.more) out.lateTotal = dueSeek(ix.keys, t, '\uffff') + pendingWaiting;
       // a head the clock did not make due after all (its tier relaxed since it was keyed — the key is a LOWER bound) moves
       // to its true instant: each row is re-keyed once per tier step, never re-judged every pass
       const due = new Set(out.map((d) => d.key));
-      for (const k of late) if (!due.has(k)) dueRekey(rec, ix, k, t, T);
+      dueRekeyMany(rec, ix, late.filter((k) => !due.has(k)), t, T);   // B-dfa4 cut 3d: up to the turn's 2000 heads — one merge of the list
     }
     out.sort((x, y) => x.dueAt - y.dueAt || (x.key < y.key ? -1 : 1));
     return out;
@@ -1303,7 +1317,8 @@ function create(deps = {}) {
   const DUE_SYNC_ROWS = WALK.syncRows;
   // the due TURN (the tick's look, the pass's turn) takes the most overdue rows only (each re-judged by dueRow, ~10 µs):
   // after a long stop EVERY row of a big account is overdue, and re-judging all 89 000 in one turn held the loop 0.8 s; the
-  // rest wait for the next turn (counted: `lateTotal`, the card's waiting). A census (dueListOf) reads every due row.
+  // rest wait for the next turn (counted: `lateTotal`, the card's waiting). A census (dueListOf) reads every due row. During a
+  // MERGE (cut 3c/3d) a turn has three budgets of DUE_TURN_MAX — the heads, the rows touched since it began, the pending rows.
   const DUE_TURN_MAX = 2000;
   const dueBuilding = new Map();   // adapterId -> { ix, promise }
   const dueFailed = new Set();     // accounts whose sliced build threw: built in one turn next (a throw there fails the pass, as before — never a loop of builds)
@@ -1313,17 +1328,25 @@ function create(deps = {}) {
   const DUE_RESTARTS = 3;
   const dueRestarts = new Map();   // adapterId -> sliced builds made stale (by whole-map writes) in a row
   const dueOverLine = (ix) => ix.dirty.size > (ix.at.size >> 3) + 256;   // a mass of touched rows (the rebuild line)
+  // B-dfa4 cut 3d: UNDER that line a big account's touched rows were re-keyed one by one in the read's turn, two splices of
+  // its sorted list each (11 000 rows under an 89 000-row mailbox's line: 22 000 moves of the whole list in one turn). Past
+  // DUE_REKEY_MAX touched rows a BIG account merges them in slices (cut 3c's road, served meanwhile); fewer, and the turn's
+  // heads the clock did not make due, are re-keyed at once by ONE filter and ONE merge of the list (dueRekeyMany)
+  const DUE_REKEY_MAX = (walk && Number.isFinite(walk.rekeyMax)) ? walk.rekeyMax : 512;   // a suite's seam (walk.rekeyMax)
+  const dueOverMerge = (ix) => ix.dirty.size > Math.min((ix.at.size >> 3) + 256, DUE_REKEY_MAX);
   // B-dfa4 cut 3c (主开发's law: under ORDINARY row touches a big account's due index never falls back to a whole build in one
   // turn): THE MERGE — the touched rows (a stated snapshot: `pending`) keyed again in slices, then the sorted list without
-  // them merged with their fresh keys in slices over the old list (O(rows) cheap steps, never O(rows) re-keys); the index is
-  // SERVED meanwhile, read-only (no splice: a re-key asked meanwhile waits in `dirty`), its pending and dirty rows judged as
-  // possibly due by dueList. A whole touch or a replaced index ends it (the touched rows go back to `dirty`).
+  // them merged with their fresh keys in slices over a COPY of the old list (O(rows) cheap steps, never O(rows) re-keys); the
+  // index is SERVED meanwhile, its pending and dirty rows judged as possibly due by dueList. A row touched meanwhile waits in
+  // `dirty`; the due turn's heads the clock did not make due are still re-keyed on the LIVE list (dueRekeyMany: one merge of
+  // it) and noted in `moved` — the landing re-places each by that live key (cut 3d: never back to `dirty`, never a second
+  // merge for rows already keyed). A whole touch or a replaced index ends it (the touched rows go back to `dirty`).
   const dueMerging = new Map();   // adapterId -> { ix }
   function dueMerge(rec, ix, lane, T) {
     const cur = dueMerging.get(rec.id);
     if ((cur && cur.ix === ix) || stopped || dueFailed.has(rec.id)) return;   // one merge an index; a job of a replaced index is superseded
     const pending = ix.dirty; ix.dirty = new Set(); ix.pending = pending; ix.merging = true;
-    const job = { ix, keys: [...pending], cursor: 0, fresh: null, owed: new Set(), moved: new Set(), promise: null };
+    const job = { ix, keys: [...pending], cursor: 0, fresh: null, sorted: null, owed: new Set(), moved: new Set(), promise: null };
     dueMerging.set(rec.id, job);
     const alive = () => !stopped && !ix.stale && dueIx.get(rec.id) === ix && dueMerging.get(rec.id) === job;
     job.promise = (async () => {
@@ -1340,6 +1363,7 @@ function create(deps = {}) {
       job.fresh = fresh;   // the pending rows' instants known: the due list judges only those due by them
       const s1 = Date.now();
       const sorted = [...fresh].map(([key, at]) => ({ key, at })).sort((x, y) => dueCmp(x, y.at, y.key));
+      job.sorted = sorted;   // cut 3d: the turn takes the pending rows by these, the most overdue first
       { const ms = Date.now() - s1; if (ms > dueStats.maxSortMs) dueStats.maxSortMs = ms; }
       const old = ix.keys.slice(), merged = [];   // a COPY: the live list keeps its re-keys meanwhile (noted in `moved`)
       let j = 0;
@@ -1351,13 +1375,18 @@ function create(deps = {}) {
       if (!r.done) return;
       while (j < sorted.length) merged.push(sorted[j++]);
       // THE LANDING, one turn: the pending rows' keys, instants and marks; a row re-keyed on the live list meanwhile leaves
-      // the merged list and is re-placed by the next read (its instant moved since the copy)
+      // the merged list (its instant moved since the copy) and is re-placed by its LIVE key, the newer one (cut 3d: one merge
+      // of the list — never back to `dirty`; a row touched after its live re-key is in `dirty` already)
       const moved = job.moved;
-      ix.keys = moved.size ? merged.filter((en) => !moved.has(en.key)) : merged;
+      const back = [], backMarks = [];
+      for (const k of moved) { const at = ix.at.get(k); if (at !== undefined) back.push({ key: k, at }); if (ix.marks.has(k)) backMarks.push(k); }
       for (const k of job.keys) { ix.at.delete(k); ix.marks.delete(k); }
       for (const [k, at] of fresh) ix.at.set(k, at);
       for (const k of job.owed) ix.marks.add(k);
-      for (const k of moved) { ix.at.delete(k); ix.dirty.add(k); }
+      for (const k of moved) { ix.at.delete(k); ix.marks.delete(k); }
+      for (const b of back) ix.at.set(b.key, b.at);
+      for (const k of backMarks) ix.marks.add(k);
+      ix.keys = moved.size ? dueListMerge(merged, back.sort((x, y) => dueCmp(x, y.at, y.key)), moved) : merged;
       ix.pending = null; ix.merging = false;
       if (dueMerging.get(rec.id) === job) dueMerging.delete(rec.id);   // landed: a read from here on sees no merge in flight
       dueStats.merged++; dueStats.lastMergeMs = Date.now() - t0;
@@ -1411,7 +1440,7 @@ function create(deps = {}) {
   }
   /** The due build in flight for this account (the pass awaits it before its due turn), or null. */
   const dueBuildOf = (adapterId) => { const b = dueBuilding.get(adapterId); return b ? b.promise : null; };
-  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0, sliced: 0, slices: 0, maxSliceMs: 0, maxSortMs: 0, whole: 0, merged: 0, lastMergeMs: 0 };
+  const dueStats = { builds: 0, rekeys: 0, lastBuildMs: 0, sliced: 0, slices: 0, maxSliceMs: 0, maxSortMs: 0, whole: 0, merged: 0, lastMergeMs: 0, rekeyBatches: 0 };
   // lane scheduler-census-index: the scheduler card's CENSUS INDEX (`clockIndexed`, beside `schedulerScan`) is re-judged
   // at the same writes as the due index
   const censusIx = new Map();   // adapterId -> { sig, t, kept, rows: Map<key, judgement>, order: [judgement], dirty: Set<key>, stale }
@@ -1458,6 +1487,36 @@ function create(deps = {}) {
     if (en && en.adapterId === rec.id) duePut(ix, key, dueKeyOf(rec, ix.lane, en, t, T));
     dueStats.rekeys++;
   }
+  /** B-dfa4 cut 3d: MANY rows re-keyed at once — the sorted list filtered once and merged with their fresh keys (O(rows +
+   *  n·log n)), never one splice of the whole list each (O(rows) each); a few (DUE_REKEY_ONE) one by one, as before. The
+   *  same index as re-keying each in turn (dueRekey's rule, row by row). */
+  const DUE_REKEY_ONE = 64;
+  /** The sorted due list `old` without the entries whose key is in `drop`, merged with the sorted `adds` — ONE pass. */
+  function dueListMerge(old, adds, drop) {
+    const out = [];
+    let i = 0, j = 0;
+    while (i < old.length || j < adds.length) {
+      if (i < old.length && drop.has(old[i].key)) { i++; continue; }
+      if (j >= adds.length || (i < old.length && dueCmp(old[i], adds[j].at, adds[j].key) <= 0)) out.push(old[i++]); else out.push(adds[j++]);
+    }
+    return out;
+  }
+  function dueRekeyMany(rec, ix, keys, t, T) {
+    if (keys.length <= DUE_REKEY_ONE) { for (const k of keys) dueRekey(rec, ix, k, t, T); return; }
+    const job = ix.merging ? dueMerging.get(rec.id) : null;
+    const moving = !!(job && job.ix === ix);
+    const rows = store.index.rows();   // read-only, no copy
+    const drop = new Set(keys), adds = [];
+    for (const key of drop) {
+      if (moving) job.moved.add(key);   // the merge walks a COPY (cut 3c): the row re-placed after its landing
+      ix.marks.delete(key); ix.at.delete(key);
+      const en = rows[key];
+      if (en && en.adapterId === rec.id) { const d = dueKeyOf(rec, ix.lane, en, t, T); if (d.owed) ix.marks.add(key); if (d.at !== Infinity) { ix.at.set(key, d.at); adds.push({ key, at: d.at }); } }
+      dueStats.rekeys++;
+    }
+    ix.keys = dueListMerge(ix.keys, adds.sort((a, b) => dueCmp(a, b.at, b.key)), drop);
+    dueStats.rekeyBatches++;
+  }
   /** The account's due index, current: built (one O(rows) pass) when absent / stale / its shared inputs changed; else
    *  the rows written since are re-keyed (O(written · log rows)). */
   function dueIndex(rec, t, T, { sync = false } = {}) {
@@ -1466,10 +1525,11 @@ function create(deps = {}) {
     let ix = dueIx.get(rec.id);
     // B-dfa4 cut 3c: a BIG account's mass of touched rows (past the rebuild line) is MERGED in slices, the index served meanwhile
     // (read-only; the touched rows judged as possibly due by dueList) — never a whole build, never one in a single turn
-    if (ix && !ix.stale && ix.sig === sig && !sync && !dueFailed.has(rec.id) && (ix.merging || dueOverLine(ix)) && (ix.merging || store.index.keysOf(rec.id).length > DUE_SYNC_ROWS)) { ix.lane = lane; if (!ix.merging) dueMerge(rec, ix, lane, T); if (ix.merging) return ix; }
+    let ksNow = null; const keysNow = () => ksNow || (ksNow = store.index.keysOf(rec.id));   // one copy of the account's keys a call
+    if (ix && !ix.stale && ix.sig === sig && !sync && !dueFailed.has(rec.id) && (ix.merging || dueOverMerge(ix)) && (ix.merging || keysNow().length > DUE_SYNC_ROWS)) { ix.lane = lane; if (!ix.merging) dueMerge(rec, ix, lane, T); if (ix.merging) return ix; }
     // a mass write (a boot's stamps, a big discovery page run) is one O(rows) build, never thousands of O(rows) splices
     if (!ix || ix.stale || ix.sig !== sig || dueOverLine(ix)) {
-      const ks = store.index.keysOf(rec.id);
+      const ks = keysNow();
       const restarts = dueRestarts.get(rec.id) || 0;
       if (!sync && ks.length > DUE_SYNC_ROWS && restarts >= DUE_RESTARTS) { dueRestarts.delete(rec.id); dueStats.whole++; log.warn(`[channels] ${rec.id}: its due index was made stale by whole-map writes during ${restarts} sliced builds in a row — built in one turn (${ks.length} rows)`); }
       else if (!sync && ks.length > DUE_SYNC_ROWS && !dueFailed.has(rec.id)) {   // B-dfa4 cut 3: in slices — NOT READY until it lands (never an empty index taken as truth)
@@ -1494,7 +1554,7 @@ function create(deps = {}) {
       return ix;
     }
     ix.lane = lane;
-    if (ix.dirty.size && !ix.merging) { const ks = [...ix.dirty]; ix.dirty.clear(); for (const k of ks) dueRekey(rec, ix, k, t, T); }
+    if (ix.dirty.size && !ix.merging) { const ks = [...ix.dirty]; ix.dirty.clear(); dueRekeyMany(rec, ix, ks, t, T); }   // B-dfa4 cut 3d: one merge of the list
     return ix;
   }
   /** lane discovery-cursor-persist (B-6638): the walk's state as the record keeps it (`rec.discovery`) — the PURE drain's
@@ -9913,7 +9973,7 @@ function create(deps = {}) {
     // R4 (2026-09-27): access and notification — two operations, access first; the compose verb; the agent's search
     setGrain, setAccess, setWatchers, removePattern, accessFor, migrateGrants, compose, searchFor, setAccountPolicy, effectiveForAccount,
     // lane channel-feed-authority: the scheduler's due rows of one account (the census legs) and the due index's counters
-    dueListOf: (adapterId, { all = false, sync = true } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all, sync }) : null; },   // B-dfa4 cut 3: a census reads every due row, built in its turn (sync: false = the tick's reading)
+    dueListOf: (adapterId, { all = false, sync = true, turnMax = Infinity } = {}) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); const e = rec && live.get(rec.id); return rec ? dueList(rec, e || { dueNow: new Set() }, now(), { all, sync, turnMax }) : null; },   // B-dfa4 cut 3: a census reads every due row, built in its turn (sync: false = the tick's reading)
     dueIndexStats: () => ({ ...dueStats, merging: dueMerging.size }),
     walkCostStats: () => ({ ...walkCost, kept: keptRows.size }),   // B-dfa4 U3: rows the recheck / revisions walks read, and the recheck turns answered kept
     recheckDueOf: (adapterId, t = null) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? recheckDueFor(rec, t == null ? now() : t) : null; },   // B-dfa4 U3: the drain turn's recheck list (the leg)

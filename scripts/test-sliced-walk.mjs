@@ -36,7 +36,14 @@
 //   its bytes only at its landing → (b4) red; the per-account keys' landing forgetting the touched keys → (b5) red; the due list answering [] while it is built → (c1) red; the sweep's landing not reading
 //   the touched rows again → (d2) red; the sweep blind to a grants change → (d3) red; a tick that does not ask again →
 //   (f) red; the release's old whole-map walk → (g) red; cut 3c: cut 3b's road for a mass of touched rows (the fourth build
-//   in one turn) → (c5) red; a merge whose touched rows are not judged meanwhile → (c5) red.
+//   in one turn) → (c5) red; a merge whose touched rows are not judged meanwhile → (c5) red; cut 3d: the merge asked only
+//   past the rebuild line (cut 3c's) → (c6) red; one budget for the touched-since and the pending rows (cut 3c's) → (c7) red.
+//   cut 3d: (c7) the turn's cap during a merge (more said, the three budgets held — a pending row served while the rows
+//       touched since spend theirs — nothing not due served; the waiting count printed) and a deletion (a whole touch) during a merge — rebuilt in slices, then the whole build's;
+//       (c5) now judges every phase of each merge and the landing, with a row touched again, one unlisted and one born.
+//   cut 3d: (c6) UNDER the rebuild line — a big account's rows touched outside any walk, more than walk.rekeyMax: the next
+//       read MERGES them in slices (never one by one in its turn); at most rekeyMax: re-keyed at once by one merge of the
+//       list (dueRekeyMany); the served due list equals a whole build's after each.
 // Run: node scripts/test-sliced-walk.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -333,43 +340,158 @@ const placeDue = async (e) => {
 }
 
 // (c5) THE LAW (cut 3c, 主开发 r644): ordinary touches past the rebuild line during each of FOUR walks in a row (a sliced
-// build or a merge) — the index MERGED in slices and served meanwhile, never a whole build in one turn; DURING each merge the
-// served due list answers a whole build's of that instant (every due row, none not due); after them it answers it too
+// build or a merge) — the index MERGED in slices and served meanwhile, never a whole build in one turn; the served due list
+// answers a whole build's of that instant (every due row, none not due) IN EACH PHASE of each merge — while the touched rows'
+// keys are made (the cursor), while the list is merged (their fresh keys known) — and at the read after each landing (the
+// read that starts the next merge, its rows judged as possibly due); during the SECOND merge a row the first one landed past
+// the clock is touched AGAIN back to due (served only by the touched-since road: its key in the list is not overdue), a row
+// BORN (in no list yet), and a due row UNLISTED (never served: dueRow reads the row — coverage, not a control; a deletion
+// from the map is a whole touch: (c7)) (cut 3d, round wu3c992y5: the leg covered one phase only)
+const replayOp = async (eng, op) => {
+  if (op.kind === 'stamp') { for (let i = 0; i < op.n; i++) eng.store.stamps.set(`${A}/m-${(op.from + i) % NC}`, { lastPollAt: op.at }); }
+  else if (op.kind === 'stamp1') eng.store.stamps.set(op.key, { lastPollAt: op.at });
+  else if (op.kind === 'unlist') await eng.store.index.update(() => { eng.store.index.entry(A, op.id, { create: false }).unlistedAt = T; });
+  else if (op.kind === 'born') await eng.store.index.update(() => { Object.assign(eng.store.index.entry(A, op.id), rowShape(op.i), { lastAt: T }); });
+  else if (op.kind === 'delete') await eng.store.index.update(() => { delete eng.store.index.live()[op.key]; });
+};
+const replayWhole = async (applied, tag) => { const w = mkEng(ENG, copyOf(TPL_C, tag), { syncRows: 1e9 }); for (const op of applied) await replayOp(w, op); const l = w.dueListOf(A); w.stop(); return l; };
 async function mergeLeg(EM, tag) {
   const applied = [];
-  let e = null, armed = 0, walks = 0;
-  const during = [];
-  const stamp = (eng, from, at) => { for (let i = 0; i < 500; i++) eng.store.stamps.set(`${A}/m-${(from + i) % NC}`, { lastPollAt: at }); };
-  const wholeNow = () => { const w = mkEng(ENG, copyOf(TPL_C, `c5-${tag}-w${during.length}`), { syncRows: 1e9 }); for (const [from, at] of applied) stamp(w, from, at); const l = w.dueListOf(A); w.stop(); return l; };
+  let e = null, armed = 0, walks = 0, placed = false, lists = 0;
+  const during = [];   // {phase, same}
+  const apply = async (op) => { await replayOp(e, op); applied.push(op); };
+  // the ops so far, copied (a slice placed while the replay awaits is the next check's)
+  const check = async (phase) => { const served = e.dueListOf(A, { sync: false }); const whole = await replayWhole(applied.slice(), `c5-${tag}-w${during.length}`); during.push({ phase, same: !served.notReady && dueRows(served) === dueRows(whole) }); };
   e = mkEng(EM, copyOf(TPL_C, `c5-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
-    if (armed <= 0 || i !== 1 || (what !== 'due' && what !== 'due-merge-keys')) return;   // the FIRST walk of a build or of a merge
-    armed--; walks++;
-    const from = walks * 311, at = walks % 2 ? T : T - 50 * H;
-    stamp(e, from, at); applied.push([from, at]);   // 500 rows touched DURING the walk (past the line: 187 + 256)
-    if (what === 'due-merge-keys') { const served = e.dueListOf(A, { sync: false }); during.push(!served.notReady && dueRows(served) === dueRows(wholeNow())); }
+    if (i !== 1) return;
+    if (armed > 0 && (what === 'due' || what === 'due-merge-keys')) {   // the FIRST walk of a build or of a merge
+      armed--; walks++;
+      await apply({ kind: 'stamp', from: walks * 311, n: 500, at: walks % 2 ? T : T - 50 * H });   // 500 rows touched DURING the walk (past the line: 187 + 256)
+      if (what === 'due-merge-keys') await check('keys');
+    } else if (what === 'due-merge-list') {
+      if (++lists === 2 && !placed) { placed = true; await apply({ kind: 'stamp1', key: `${A}/m-3`, at: T - 50 * H }); await apply({ kind: 'unlist', id: 'm-1300' }); await apply({ kind: 'born', id: 'm-born-c5', i: 4 }); }   // m-3: stamped now by the first touch, landed past the clock by the first merge
+      await check('list');
+    }
   } });
   await until('the due index to land', () => !e.dueListOf(A, { sync: false }).notReady);
-  stamp(e, 0, T); applied.push([0, T]);
+  await apply({ kind: 'stamp', from: 0, n: 500, at: T });
   armed = 4;
-  let l = null;
-  await until('four touched walks in a row and the index current', () => { l = e.dueListOf(A, { sync: false }); const st = e.dueIndexStats(); return !l.notReady && !(st.merging > 0) && (armed === 0 || st.whole > 0); }, 15000);
+  let l = null, lastMerged = e.dueIndexStats().merged;
+  for (const t0 = Date.now(); ;) {
+    const st = e.dueIndexStats();
+    if (st.merged !== lastMerged && !(st.merging > 0)) { lastMerged = st.merged; await check('landed'); }   // right after a landing
+    l = e.dueListOf(A, { sync: false });
+    const st2 = e.dueIndexStats();
+    if (!l.notReady && !(st2.merging > 0) && (armed === 0 || st2.whole > 0)) break;
+    if (Date.now() - t0 > 15000) throw new Error('four touched walks in a row and the index current: not in 15 s');
+    await new Promise((z) => setTimeout(z, 1));
+  }
   const stats = e.dueIndexStats();
   e.stop();
-  const whole = wholeNow();
-  return { same: dueRows(l) === dueRows(whole), n: whole.length, stats, walks, during };
+  const whole = await replayWhole(applied, `c5-${tag}-final`);
+  return { same: dueRows(l) === dueRows(whole), n: whole.length, stats, walks, during, placed };
 }
 {
   const r = await mergeLeg(ENG, 'law');
-  ok(r.walks === 4 && r.stats.whole === 0 && r.stats.merged >= 4 && r.during.length === 4 && r.during.every((x) => x === true) && r.same && r.n > 0, `(c5) THE LAW: 500 rows touched (past the line) during each of four merges in a row — merged ${r.stats.merged}× in slices, NEVER a build in one turn (${r.stats.whole}); DURING each merge the served due list answered the whole build's of that instant (${r.during.filter(Boolean).length}/4), after them its ${r.n} due rows`, { stats: r.stats, during: r.during });
+  const ph = (p) => r.during.filter((x) => x.phase === p);
+  ok(r.walks === 4 && r.stats.whole === 0 && r.stats.merged >= 4 && r.placed && ph('keys').length === 4 && ph('list').length >= 4 && ph('landed').length >= 3 && r.during.every((x) => x.same) && r.same && r.n > 0, `(c5) THE LAW: 500 rows touched (past the line) during each of four merges in a row — merged ${r.stats.merged}× in slices, NEVER a build in one turn (${r.stats.whole}); the served due list answered the whole build's of that instant in every phase (keys ${ph('keys').filter((x) => x.same).length}/${ph('keys').length}, list ${ph('list').filter((x) => x.same).length}/${ph('list').length}, at the read after a landing ${ph('landed').filter((x) => x.same).length}/${ph('landed').length}; a row touched again back to due, one born, one unlisted during the second), after them its ${r.n} due rows`, { stats: r.stats, during: r.during });
   const SRCm = engineSource(REPO);
   const EM3b = M.load('src/server/channels-engine.js', anchored(anchored(SRCm,
-    "    if (ix && !ix.stale && ix.sig === sig && !sync && !dueFailed.has(rec.id) && (ix.merging || dueOverLine(ix)) && (ix.merging || store.index.keysOf(rec.id).length > DUE_SYNC_ROWS)) { ix.lane = lane; if (!ix.merging) dueMerge(rec, ix, lane, T); if (ix.merging) return ix; }\n", '', 'no merge (cut 3b: a mass of touched rows rebuilt)'),
+    "    if (ix && !ix.stale && ix.sig === sig && !sync && !dueFailed.has(rec.id) && (ix.merging || dueOverMerge(ix)) && (ix.merging || keysNow().length > DUE_SYNC_ROWS)) { ix.lane = lane; if (!ix.merging) dueMerge(rec, ix, lane, T); if (ix.merging) return ix; }\n", '', 'no merge (cut 3b: a mass of touched rows rebuilt)'),
     "      dueRestarts.delete(rec.id);   // B-dfa4 cut 3c: a clean landing", "      if (ix.dirty.size > (ix.at.size >> 3) + 256) dueRestarts.set(rec.id, (dueRestarts.get(rec.id) || 0) + 1); else dueRestarts.delete(rec.id);", 'cut 3b: a landing past the line counts toward the one-turn bound'), 'cut3b-due');   // stale-pins: kept (the control restores cut 3b's lines)
   const rc = await mergeLeg(EM3b, 'law-red');
   ok(rc.stats.whole >= 1, `(c5) RED CONTROL: cut 3b's road (a landing past the line rebuilt, counted toward the bound) — after three such landings the fourth build runs in ONE turn (${rc.stats.whole}) — the leg above would go red`, rc.stats);
   const EMj = M.load('src/server/channels-engine.js', anchored(SRCm, '      if (job && job.ix === ix) {', '      if (false) {', 'the touched rows not judged during a merge'), 'merge-unjudged');
   const rj = await mergeLeg(EMj, 'judge-red');
-  ok(rj.during.some((x) => x === false), `(c5) RED CONTROL: a merge whose touched rows are not judged meanwhile serves a due list that is NOT the whole build's (${rj.during.filter((x) => !x).length} of ${rj.during.length} instants) — the leg above would go red`, { during: rj.during });
+  ok(rj.during.some((x) => !x.same), `(c5) RED CONTROL: a merge whose touched rows are not judged meanwhile serves a due list that is NOT the whole build's (${rj.during.filter((x) => !x.same).length} of ${rj.during.length} instants) — the leg above would go red`, { during: rj.during });
+}
+
+// (c6) UNDER THE LINE (cut 3d): a big account's rows touched OUTSIDE any walk, fewer than its rebuild line (187 + 256) — more
+// than rekeyMax (the seam, 100 here; 512 by default) and the next read MERGES them in slices (only the turn's heads the clock
+// did not make due are re-keyed in it, by one merge of the list); at most rekeyMax and they are re-keyed at once in ONE merge of
+// the list (rekeyBatches); after each the served due list answers a whole build's of that instant (every due row, none not
+// due). Half the rows are stamped NOW (just polled: keyed past the clock), half 50 h back (due): the list's ORDER decides
+// what the due turn reads (it stops at the first key past the clock), so a mis-ordered or mis-keyed merge loses a due row
+async function underLeg(EM, tag) {
+  const applied = [];
+  const stamp = (eng, groups) => { for (const [from, n, at] of groups) for (let i = 0; i < n; i++) eng.store.stamps.set(`${A}/m-${(from + i) % NC}`, { lastPollAt: at }); };
+  const wholeNow = () => { const w = mkEng(ENG, copyOf(TPL_C, `c6-${tag}-w${applied.length}`), { syncRows: 1e9 }); for (const g of applied) stamp(w, g); const l = w.dueListOf(A); w.stop(); return l; };
+  const e = mkEng(EM, copyOf(TPL_C, `c6-${tag}`), { syncRows: 500, sliceMs: 0, rekeyMax: 100 });
+  await until('the due index to land', () => !e.dueListOf(A, { sync: false }).notReady);
+  const step = async (groups) => {
+    stamp(e, groups); applied.push(groups);
+    const s0 = e.dueIndexStats();
+    e.dueListOf(A, { sync: false });   // THE READ after the touch
+    const s1 = e.dueIndexStats();
+    let l = null;
+    await until('the index current', () => { l = e.dueListOf(A, { sync: false }); return !l.notReady && !(e.dueIndexStats().merging > 0); });
+    const s2 = e.dueIndexStats();
+    const whole = wholeNow();
+    return { inTurn: s1.rekeys - s0.rekeys, merging: s1.merging > 0, merged: s2.merged - s0.merged, batches: s2.rekeyBatches - s0.rekeyBatches, built: s2.builds - s0.builds, whole: s2.whole - s0.whole, same: dueRows(l) === dueRows(whole), n: whole.length };
+  };
+  const many = await step([[100, 150, T], [250, 150, T - 50 * H]]);   // 300 touched: under the line, past rekeyMax
+  const few = await step([[700, 40, T], [740, 40, T - 50 * H]]);       // 80: at most rekeyMax (more than DUE_REKEY_ONE, 64: the merge of the list)
+  e.stop();
+  return { many, few };
+}
+{
+  const r = await underLeg(ENG, 'law');
+  ok(r.many.merging && r.many.merged >= 1 && r.many.built === 0 && r.many.whole === 0 && r.many.same && r.many.n > 0, `(c6) UNDER THE LINE: 300 rows touched outside any walk (under the line 443, past rekeyMax 100) — the next read MERGED them in slices (${r.many.merged}; the turn's not-due heads re-keyed in it: ${r.many.inTurn}), no build (${r.many.built}); the served list then answered the whole build's (${r.many.n} due rows)`, r.many);
+  ok(r.few.inTurn >= 80 && !r.few.merging && r.few.merged === 0 && r.few.batches >= 1 && r.few.built === 0 && r.few.same, `(c6) AT MOST rekeyMax: 80 rows touched — re-keyed at once in the read (${r.few.inTurn}) by ONE merge of the list (${r.few.batches} batch${r.few.batches === 1 ? '' : 'es'}), no merge in slices, no build; the served list answered the whole build's`, r.few);
+  const SRCu = engineSource(REPO);
+  const EMu = M.load('src/server/channels-engine.js', anchored(SRCu, '(ix.merging || dueOverMerge(ix))', '(ix.merging || dueOverLine(ix))', 'cut 3c: the merge asked only past the rebuild line'), 'merge-past-line-only');   // stale-pins: kept (the control restores cut 3c's line)
+  const rc = await underLeg(EMu, 'under-red');
+  ok(rc.many.inTurn >= 300 && !rc.many.merging && rc.many.same, `(c6) RED CONTROL: the merge asked only past the rebuild line (cut 3c's) — the 300 rows re-keyed in the read's own turn (${rc.many.inTurn}) — the leg above would go red`, rc.many);
+}
+
+// (c7) THE TURN'S CAP DURING A MERGE, AND A DELETION (cut 3d, round wu3c992y5): the due turn as the tick reads it (turnMax 50)
+// DURING a merge — it says `more`, takes at most turnMax heads, turnMax touched-since rows and turnMax pending rows, and every row
+// it serves is due by a whole build of that instant (nothing not due); its waiting count (lateTotal) is printed. A row DELETED from the map during a merge (a whole touch) ends it: the index is built again in slices and
+// then answers the whole build's
+async function capLeg(EM, tag) {
+  const applied = [], caps = [];
+  let e = null, armed = 0, del = false;
+  const apply = async (op) => { await replayOp(e, op); applied.push(op); };
+  e = mkEng(EM, copyOf(TPL_C, `c7-${tag}`), { syncRows: 500, sliceMs: 0, onSlice: async (i, what) => {
+    if (i !== 1 || what !== 'due-merge-list' || armed <= 0) return;
+    armed--;
+    await apply({ kind: 'stamp', from: 900, n: 120, at: T });   // the pass's stamps: touched since the merge began
+    const served = e.dueListOf(A, { sync: false, turnMax: 50 });
+    const whole = await replayWhole(applied.slice(), `c7-${tag}-w${caps.length}`);
+    const wk = new Set(whole.map((d) => `${d.key}|${d.dueAt}`));
+    const idx = (d) => { const m = /\/m-(\d+)$/.exec(d.key); return m ? Number(m[1]) : -1; };
+    const pendServed = [...served].filter((d) => { const i = idx(d); return (i >= 600 && i < 900) || (i >= 1020 && i < 1100); }).length;   // merge 2's pending rows, not re-stamped — never a head (their keys in the list are past the clock)
+    caps.push({ more: !!served.more, n: served.length, sub: [...served].every((d) => wk.has(`${d.key}|${d.dueAt}`)), late: served.lateTotal, wholeDue: whole.length, pendServed });
+    if (!del) { del = true; await apply({ kind: 'delete', key: `${A}/m-5` }); }   // a deletion: a whole touch (the merge ends)
+  } });
+  await until('the due index to land', () => !e.dueListOf(A, { sync: false }).notReady);
+  const s0 = e.dueIndexStats();
+  await apply({ kind: 'stamp', from: 0, n: 500, at: T - 50 * H });   // merge 1 (a deletion during it: the merge ends, rebuilt)
+  armed = 2;
+  let l = null;
+  await until('merge 1 read, ended by the deletion, the index built again', () => { l = e.dueListOf(A, { sync: false }); return armed === 1 && !l.notReady && !(e.dueIndexStats().merging > 0); }, 15000);
+  const s1b = e.dueIndexStats();
+  armed = 0;
+  await apply({ kind: 'stamp', from: 600, n: 500, at: T });   // those rows polled NOW: landed past the clock (never a head below)
+  await until('those rows landed', () => { l = e.dueListOf(A, { sync: false }); return !l.notReady && !(e.dueIndexStats().merging > 0); }, 15000);
+  const s1c = e.dueIndexStats();
+  armed = 1;
+  await apply({ kind: 'stamp', from: 600, n: 500, at: T - 50 * H });   // merge 2: the same rows due again — read under the cap, then it lands
+  await until('merge 2 read and the index current', () => { l = e.dueListOf(A, { sync: false }); return armed === 0 && !l.notReady && !(e.dueIndexStats().merging > 0); }, 15000);
+  const s1 = e.dueIndexStats();
+  e.stop();
+  const whole = await replayWhole(applied, `c7-${tag}-final`);
+  return { caps, same: dueRows(l) === dueRows(whole), rebuilt: s1b.sliced - s0.sliced, endedMerged: s1b.merged - s0.merged, merged: s1.merged - s1c.merged, whole: s1.whole - s0.whole };
+}
+{
+  const r = await capLeg(ENG, 'cap');
+  const c = r.caps;
+  ok(c.length === 2 && c.every((x) => x.more && x.sub && x.n > 0 && x.n <= 150 && Number.isFinite(x.late)) && c[1].pendServed >= 1, `(c7) THE CAP DURING A MERGE: the turn as the tick reads it (turnMax 50) said more (its waiting count set), served ${c.map((x) => x.n).join(' / ')} rows (at most 3 × 50: the heads, the rows touched since, the pending rows), every one due by a whole build of that instant; with 120 just-stamped rows spending the touched-since budget, ${c[1].pendServed} pending rows (no head, no stamp) were served all the same`, c);
+  info(`(c7) the waiting count during the merges, printed (lower-bound keys: never asserted against the whole build's) — ${c.map((x) => x.late).join(' / ')} (the whole build's due rows ${c.map((x) => x.wholeDue).join(' / ')})`);
+  const EMb = M.load('src/server/channels-engine.js', anchored(engineSource(REPO), 'const takeDirty = budget(), takePending = budget();', 'const takeDirty = budget(), takePending = takeDirty;', 'cut 3c: one budget for the touched-since and the pending rows'), 'one-budget');
+  const rb = await capLeg(EMb, 'cap-red');
+  ok(rb.caps.length === 2 && rb.caps[1].pendServed === 0, `(c7) RED CONTROL: ONE budget for the rows touched since and the pending rows (cut 3c's) — the 120 just-stamped rows spend it, ${rb.caps.length === 2 ? rb.caps[1].pendServed : '?'} pending rows served — the leg above would go red`, rb.caps);
+  ok(r.endedMerged === 0 && r.rebuilt >= 1 && r.merged === 1 && r.whole === 0 && r.same, `(c7) A DELETION DURING A MERGE (a whole touch): that merge never landed (${r.endedMerged}), the index was built again in slices (${r.rebuilt}), never in one turn (${r.whole}); the next merge landed (${r.merged}) — then it answered the whole build's`, r);
 }
 
 // ═══ (d) THE BOOT'S SWEEP ═══
