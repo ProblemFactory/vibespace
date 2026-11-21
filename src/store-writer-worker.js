@@ -72,10 +72,55 @@ function linkedHere(fs, tmp, file) {
   dropTemp(fs, tmp);
   return true;
 }
+/** A REWRITE of an append store FROM ITS OWN BYTES (row B-360d — the OTel stash's trim as a job of its ONE writer, 主开发
+ *  r725 a): the kept byte ranges of the file's first `size` bytes, then every byte past `size` (appended after the ranges were
+ *  read — in order, since no append of this file runs beside this job), then the job's own parts (the appends owed with it),
+ *  copied to the temp in pieces of at most PIECE bytes, fsync'd, closed and renamed over the file. A range ending at size + 1
+ *  is the file's unterminated last line: the newline it lacks is written after it. A file shorter than `size` (not the bytes
+ *  the ranges were read from), a short read or a short write FAILS the job: the caller removes the temp, the file stays whole. */
+const PIECE = 4 * 1024 * 1024;
+function rewriteJob(m, fs) {
+  sweepTemps(fs, m.file, m.tmp);   // B-f276 1b's: this road's own temp left by an earlier life of its thread
+  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) throw Object.assign(new Error(`${m.tmp} is still a second name of ${m.file} (its removal failed) — not written through it`), { code: 'ETEMPLINKED' });   // B-f276 1b's law: never opened for a write while it is a second name of the store
+  const ranges = m.rewrite.ranges, size = m.rewrite.size;
+  let src = null, out = null, err = null;
+  try {
+    src = fs.openSync(m.file, 'r');
+    const now = fs.fstatSync(src).size;
+    if (now < size) throw Object.assign(new Error(`the file is ${now} bytes, shorter than the ${size} its kept lines were read from`), { code: 'ESHRUNK' });
+    out = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode);
+    const buf = Buffer.allocUnsafe(PIECE);
+    let o = 0;
+    const flush = () => { for (let w = 0; w < o;) { const n = fs.writeSync(out, buf, w, o - w); if (!(n > 0)) throw Object.assign(new Error(`a short write: ${w} of ${o} bytes written, then ${n}`), { code: 'ESHORT' }); w += n; } o = 0; };
+    const copy = (a, e) => {
+      for (let at = a; at < e;) {
+        if (o === PIECE) flush();
+        const n = fs.readSync(src, buf, o, Math.min(PIECE - o, e - at), at);
+        if (!(n > 0)) throw Object.assign(new Error(`a short read at ${at} of the ${e} bytes to keep`), { code: 'ESHORTREAD' });
+        o += n; at += n;
+      }
+    };
+    for (let k = 0; k < ranges.length; k += 2) {
+      const a = ranges[k], e = ranges[k + 1];
+      if (!(a >= 0 && e > a && e <= size + 1)) throw Object.assign(new Error(`a kept range out of the file: [${a}, ${e}) of ${size}`), { code: 'EBADRANGE' });
+      if (e > size) { copy(a, size); if (o === PIECE) flush(); buf[o++] = 10; } else copy(a, e);
+    }
+    copy(size, now);
+    flush();
+    writeAll(fs, out, m.parts);
+    fs.fsyncSync(out);
+  } catch (e) { err = e; }
+  if (out != null) { try { fs.closeSync(out); } catch (e) { if (!err) err = e; } }
+  if (src != null) { try { fs.closeSync(src); } catch { } }
+  if (err) throw err;   // the caller removes the temp: the file keeps its whole old version
+  if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
+  fs.renameSync(m.tmp, m.file);   // the commit point: the old whole file or the new one
+}
 /** ONE job. A whole-file write: temp, every byte, fsync (B-9275), close (its error is the write's), rename — NOTHING is renamed
  *  over the store unless every byte was written, synced and the temp closed without error. An APPEND (the acts journal): every byte,
  *  fsync, close — a failure truncates back to the size before it (no torn line is left for a promise that resolved). */
 function writeJob(m, fs = FS) {
+  if (m.rewrite) return rewriteJob(m, fs);
   if (m.append) {
     // the ONE open of an append (made again after a ring's rotation); a missing parent directory is made here, on the writer's
     // thread, ONLY for a store that asks (`m.makeDir` — B-48a4: the hub's audit rings, whose old main-thread code made it per line)
@@ -149,4 +194,4 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
   });
 }
 
-module.exports = { writeJob, writeAll, sweepTemps, linkedHere };
+module.exports = { writeJob, writeAll, sweepTemps, linkedHere, rewriteJob };

@@ -124,8 +124,8 @@ const PAYLOAD = (recs) => ({
   ok((await post(PAYLOAD([REC()]), 'WRONG')).status === 403, 'bad token → 403 (the only gate — cookie middleware exempts /otel/)');
   const r1 = await post(PAYLOAD([REC()]));
   ok(r1.status === 200, 'valid ingest → 200', r1.body);
-  ok(ingest.observedOrgForRid('req_011TESTTRUTH000000000001') === 'sub-true', 'rid → resolved observed org (DIAGNOSTIC since 2026-09-07 — the map is kept, it just decides nothing)');
-  ok(ingest.observedOrgForRid('req_unknown') === undefined, 'no observation → undefined');
+  ok((await ingest.observedOrgForRid('req_011TESTTRUTH000000000001')) === 'sub-true', 'rid → resolved observed org (DIAGNOSTIC since 2026-09-07 — the map is kept, it just decides nothing)');
+  ok((await ingest.observedOrgForRid('req_unknown')) === undefined, 'no observation → undefined');
   ok(attribCalls.length === 0, 'REFUTED AND REMOVED: a mismatch writes NO corrective attribution record — organization.id is the identity the CLI cached at SPAWN, so the correction booked a hot-switched session\'s spend to the account it started on forever', JSON.stringify(attribCalls));
   ok((() => { const r0 = JSON.parse(fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n')[0]); return r0.labelMatchesSlot === false && !('agreed' in r0); })(), 'the stash row RECORDS the label beside the walk\'s slot (`labelMatchesSlot` — a coincidence metric; the old `agreed` read as identity) instead of acting on it');
   await post(PAYLOAD([REC()]));
@@ -135,27 +135,27 @@ const PAYLOAD = (recs) => ({
   // org flips back to the configured one → correction must RE-write
   groups.set('org:aaaaaaaa-0000-0000-0000-000000000000', { accountIds: ['sub-configured'], accountId: 'sub-configured' });
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: 'aaaaaaaa-0000-0000-0000-000000000000' }, request_id: { stringValue: 'req_flip2' } })]));
-  ok(attribCalls.length === 0 && ingest.observedOrgForRid('req_flip2') === 'sub-configured', 'observation agreeing with the attribution walk → nothing to report');
+  ok(attribCalls.length === 0 && (await ingest.observedOrgForRid('req_flip2')) === 'sub-configured', 'observation agreeing with the attribution walk → nothing to report');
   // unknown org: stashed as unknown, no truth entry, no correction
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: 'ffffffff-9999-9999-9999-999999999999' }, 'user.email': { stringValue: 'nobody@nowhere.io' }, request_id: { stringValue: 'req_unknownorg' } })]));
-  ok(ingest.observedOrgForRid('req_unknownorg') === undefined && attribCalls.length === 0, 'UNKNOWN org → no map entry, nothing written');
+  ok((await ingest.observedOrgForRid('req_unknownorg')) === undefined && attribCalls.length === 0, 'UNKNOWN org → no map entry, nothing written');
   ok(JSON.parse(fs.readFileSync(path.join(dir, 'usage-history', 'otel-truth.ndjson'), 'utf-8').trim().split('\n').pop()).acctKnown === false, 'unknown org still stashed (acctKnown:false — offline re-derivable)');
   // email fallback
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: 'bbbbbbbb-0000-0000-0000-000000000000' }, 'user.email': { stringValue: 'Mail@Example.com' }, request_id: { stringValue: 'req_mail' } })]));
-  ok(ingest.observedOrgForRid('req_mail') === 'sub-mail', 'org unknown but roster email matches → email-fallback resolution');
+  ok((await ingest.observedOrgForRid('req_mail')) === 'sub-mail', 'org unknown but roster email matches → email-fallback resolution');
   // ── review-caught cases (adversarial pass, 2.361.0) ──
   // ① '__global__' is a TRUTHY pseudo-id and may come FIRST in the group
   //    (live production shape on this machine) — resolveOrg must skip it.
   groups.set('org:cccccccc-0000-0000-0000-000000000000', { accountIds: ['__global__', 'sub-named'], accountId: null });
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: 'cccccccc-0000-0000-0000-000000000000' }, request_id: { stringValue: 'req_gmix' } })]));
-  ok(ingest.observedOrgForRid('req_gmix') === 'sub-named', "'__global__'-first group resolves to the NAMED sub, never the pseudo-id");
+  ok((await ingest.observedOrgForRid('req_gmix')) === 'sub-named', "'__global__'-first group resolves to the NAMED sub, never the pseudo-id");
   // ② global-ONLY org → truth null; a global session (walk null) must get NO
   //    bogus record of any kind.
   groups.set('org:dddddddd-0000-0000-0000-000000000000', { accountIds: ['__global__'], accountId: null });
   const before2 = attribCalls.length;
   curAcct = null;
   await post(PAYLOAD([REC({ 'organization.id': { stringValue: 'dddddddd-0000-0000-0000-000000000000' }, request_id: { stringValue: 'req_gonly' } })]));
-  ok(ingest.observedOrgForRid('req_gonly') === null && attribCalls.length === before2, 'global-only org → resolves to null, still nothing written');
+  ok((await ingest.observedOrgForRid('req_gonly')) === null && attribCalls.length === before2, 'global-only org → resolves to null, still nothing written');
   // ③ THE CANONICAL SEQUENCE, AND WHAT IT MEANS NOW (2026-09-07). agree →
   //    pool hot-switch → the CLI keeps REPORTING the old org. Until this date
   //    the third step wrote a corrective attribution record; the owner's
@@ -197,7 +197,7 @@ const PAYLOAD = (recs) => ({
   settingVal = undefined;
   // boot replay: a fresh instance over the same dataDir re-learns the truth map
   const ingest2 = require(REPO + '/src/server/otel-ingest.js').create({ dataDir: dir, PORT: 0, getUsageHistory: () => fakeUH, identityGroups: () => groups, listAccounts: () => [], serverSetting: () => undefined });
-  ok(ingest2.observedOrgForRid('req_011TESTTRUTH000000000001') === 'sub-true', 'boot replay: stash → observation map survives restarts');
+  ok((await ingest2.observedOrgForRid('req_011TESTTRUTH000000000001')) === 'sub-true', 'boot replay: stash → observation map survives restarts');
   ok(ingest2.envFor().OTEL_EXPORTER_OTLP_HEADERS === ingest.envFor().OTEL_EXPORTER_OTLP_HEADERS, 'token PERSISTED across boots (surviving sessions keep a valid truth stream)');
   // B-1319: THE REPLAY RUNS OFF THE LOOP — a fresh instance has read nothing when create() returns; its `replayed`
   // promise fills the map (no reader finished it); a stash over FILE_MAX is rewritten only when the trim drops a line,
@@ -206,25 +206,39 @@ const PAYLOAD = (recs) => ({
   const ingest3 = mk3();
   ok(ingest3.stats().rids === 0 && typeof ingest3.replayed?.then === 'function', 'B-1319: create() reads no stash on the loop — the map is empty when it returns (the replay is a promise)');
   await ingest3.replayed;
-  ok(ingest3.stats().rids > 0 && ingest3.observedOrgForRid('req_011TESTTRUTH000000000001') === 'sub-true', 'B-1319: …its replay fills the map by itself (stats, which never finishes it, sees the rows)');
+  ok(ingest3.stats().rids > 0 && (await ingest3.observedOrgForRid('req_011TESTTRUTH000000000001')) === 'sub-true', 'B-1319: …its replay fills the map by itself (stats, which never finishes it, sees the rows)');
   const stash3 = path.join(dir, 'usage-history', 'otel-truth.ndjson'), big = JSON.stringify({ rid: 'req_pad', ts: Date.now(), acct: 'sub-true', acctKnown: true, pad: 'p'.repeat(2000) }) + '\n';
   fs.appendFileSync(stash3, big.repeat(Math.ceil(12.2 * 1048576 / big.length)));
+  // row B-360d (主开发 r738 Q1): THE KEEP RULE FOLLOWS THE STASH'S READERS — a trim only once the migrations' ledger records the
+  // ledger backfill (it reads every old row) as run
+  const ledger3 = path.join(dir, 'migrations.json'), ran3 = JSON.stringify({ applied: { '2026-09-backfill-ledger-by-slot': Date.now() - 86400e3 } });
+  fs.writeFileSync(ledger3, ran3);
   const st0 = fs.statSync(stash3); await mk3().replayed; await new Promise((r) => setTimeout(r, 200));
   ok(fs.statSync(stash3).ino === st0.ino && fs.statSync(stash3).size === st0.size, 'B-1319: a 12 MB+ stash with nothing to trim is NOT rewritten (it used to be, whole, at every boot)');
   fs.appendFileSync(stash3, JSON.stringify({ rid: 'req_old', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
   await mk3().replayed; for (let k = 0; k < 50 && fs.statSync(stash3).ino === st0.ino; k++) await new Promise((r) => setTimeout(r, 50));
   ok(fs.statSync(stash3).ino !== st0.ino && !fs.readFileSync(stash3, 'utf8').includes('req_old') && fs.readFileSync(stash3, 'utf8').includes('req_011TESTTRUTH000000000001'), 'B-1319: …one past the 30-day horizon is trimmed — the rewrite lands off the loop (a new file renamed in), the fresh rows kept');
+  { // WHERE THE MIGRATION IS NOT RECORDED AS RUN the stash is kept WHOLE, said once a start — never the 30-day cut before it read its rows
+    fs.unlinkSync(ledger3);
+    fs.appendFileSync(stash3, JSON.stringify({ rid: 'req_old2', ts: Date.now() - 40 * 86400e3, acct: 'sub-true', acctKnown: true }) + '\n');
+    const st1 = fs.statSync(stash3), said = [], log0 = console.log; console.log = (...a) => { said.push(a.join(' ')); };
+    try { await mk3().replayed; } finally { console.log = log0; }
+    await new Promise((r) => setTimeout(r, 300));
+    ok(fs.statSync(stash3).ino === st1.ino && fs.statSync(stash3).size === st1.size && fs.readFileSync(stash3, 'utf8').includes('req_old2') && said.filter((l) => l.includes('kept WHOLE')).length === 1,
+      'row B-360d: the ledger backfill migration NOT recorded as run ⇒ a stash with a line past the horizon is kept WHOLE (that migration reads every old row), said once', said.join(' | '));
+    fs.writeFileSync(ledger3, ran3);
+  }
 
   // lane ci-351-reds — THE REPLAY IN TIME SLICES IS THE SAME REPLAY. Its 20 000-line slice took 31 ms on the measured boot
   // and the first one rode the listen tick (the read resolves in a poll-phase callback; ONE setImmediate from there stays
-  // in that loop iteration). Now: a later turn first, then REPLAY_SLICE_MS slices. The ONE-PASS copy (the slice bound
-  // cut) is the control. Two copies of one 12 MB+ stash (in-horizon rows, rows to trim, unknown-account rows, a blank and
+  // in that loop iteration). Now (row B-360d): bounded reads through one descriptor (src/ndjson-lines.js), a turn after each,
+  // then REPLAY_SLICE_MS slices. The ONE-PASS copy (one read of the whole file, no slice bound, no turn) is the control. Two copies of one 12 MB+ stash (in-horizon rows, rows to trim, unknown-account rows, a blank and
   // a torn line): the same map, the same counts, the same rewritten bytes — and the sliced one hands the loop back.
   {
     const oisrc = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
-    const FIRST = "    await nextTurn();   // never on the tick the read resolved on\n", BOUND = 'replayTake(performance.now() + REPLAY_SLICE_MS)';
-    ok(oisrc.split(FIRST).length === 2 && oisrc.split(BOUND).length === 2, 'SLICED REPLAY premise: the first hop and the time bound are each one site of the module');
-    const OnePass = mutantCopies('otel-truth-slice', REPO).load('src/server/otel-ingest.js', editAnchor(editAnchor(oisrc, FIRST, '', "src/server/otel-ingest.js"), BOUND, 'replayTake()', "src/server/otel-ingest.js"), 'one-pass');
+    const ONE = 'const STASH_READ = { readBytes: READ_BYTES, maxLine: READ_BYTES, sliceMs: REPLAY_SLICE_MS, turn: nextTurn };';
+    ok(oisrc.split(ONE).length === 2, 'SLICED REPLAY premise: the stash\'s read — its bound, its slices, its turns — is one site of the module');
+    const OnePass = mutantCopies('otel-truth-slice', REPO).load('src/server/otel-ingest.js', editAnchor(oisrc, ONE, () => 'const STASH_READ = { readBytes: 64 * 1048576, maxLine: 64 * 1048576, sliceMs: Infinity, turn: () => Promise.resolve() };', "src/server/otel-ingest.js"), 'one-pass');   // B-0d3e: its anchor judged by name
     const now = Date.now(), rows = [];
     for (let k = 0; k < 90000; k++) {
       const old = k % 7 === 3, known = k % 5 !== 1;
@@ -232,7 +246,7 @@ const PAYLOAD = (recs) => ({
       if (k === 4000) rows.push(''); if (k === 9000) rows.push('{"rid":"req_torn","ts":');
     }
     const body = rows.join('\n') + '\n';
-    const mkDir = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-otel-slice-${tag}-`)); fs.mkdirSync(path.join(d, 'usage-history')); fs.writeFileSync(path.join(d, 'usage-history', 'otel-truth.ndjson'), body); return d; };
+    const mkDir = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), `vs-otel-slice-${tag}-`)); fs.mkdirSync(path.join(d, 'usage-history')); fs.writeFileSync(path.join(d, 'usage-history', 'otel-truth.ndjson'), body); fs.writeFileSync(path.join(d, 'migrations.json'), JSON.stringify({ applied: { '2026-09-backfill-ledger-by-slot': now - 86400e3 } })); return d; };   // row B-360d: the migration recorded as run — the count rule trims
     const replayOn = async (mod, tag) => {
       const d = mkDir(tag), f = path.join(d, 'usage-history', 'otel-truth.ndjson'), ino = fs.statSync(f).ino;
       const realPerf = performance.now.bind(performance);
@@ -254,7 +268,7 @@ const PAYLOAD = (recs) => ({
       await new Promise((r) => setTimeout(r, 5));
       clearInterval(iv);
       for (let k = 0; k < 100 && fs.statSync(f).ino === ino; k++) await new Promise((r) => setTimeout(r, 50));   // the trim's rewrite, off the loop
-      const map = []; for (let k = 0; k < 90000; k += 97) map.push(oi.observedOrgForRid(`req_slice${String(k).padStart(6, '0')}`));
+      const map = []; for (let k = 0; k < 90000; k += 97) map.push(await oi.observedOrgForRid(`req_slice${String(k).padStart(6, '0')}`));
       const out = { stats: JSON.stringify(oi.stats()), map: JSON.stringify(map), bytes: fs.readFileSync(f, 'utf8'), rewritten: fs.statSync(f).ino !== ino, maxGap: Math.round(maxGap), turns: perTurn.size, perTurnMax: Math.max(0, ...perTurn.values()), parsed: [...perTurn.values()].reduce((x, y) => x + y, 0) };
       fs.rmSync(d, { recursive: true, force: true });
       return out;
@@ -294,7 +308,7 @@ const PAYLOAD = (recs) => ({
     ok(countIn(w0.text, 'req_u4new') === 1 && countIn(w0.text, 'req_u4old39990') === 1 && w0.rows < 40000, `U4 where it waits: both records are the bytes handed to the store writer for otel-truth.pending.ndjson (rank 0, written at once) while the replay runs (${w0.rows} rows replayed)`);
     const res4 = await a.out; await o4.replayed;
     await settle(d4, 'otel-truth.ndjson', () => countIn(stashOf(d4), 'req_u4new') === 1); await settle(d4, 'otel-truth.pending.ndjson', () => (spillOf(d4) || '') === '');
-    ok(res4.kept === 2 && o4.observedOrgForRid('req_u4new') === 'sub-true' && countIn(stashOf(d4), 'req_u4new') === 1 && countIn(stashOf(d4), 'req_u4old39990') === 1 && (spillOf(d4) || '') === '', `U4 after the replay the post is taken in order: the new rid stashed once, the replayed one (near the stash's end) NOT again (${countIn(stashOf(d4), 'req_u4old39990')} line), the spill empty`);
+    ok(res4.kept === 2 && (await o4.observedOrgForRid('req_u4new')) === 'sub-true' && countIn(stashOf(d4), 'req_u4new') === 1 && countIn(stashOf(d4), 'req_u4old39990') === 1 && (spillOf(d4) || '') === '', `U4 after the replay the post is taken in order: the new rid stashed once, the replayed one (near the stash's end) NOT again (${countIn(stashOf(d4), 'req_u4old39990')} line), the spill empty`);
     // the stop: a spill a stopped hub left (its record not in the stash) — the next boot takes it once, a second boot adds nothing
     const rec5 = parseOtlpLogs(PAYLOAD([REC({ request_id: { stringValue: 'req_u4stop' } })])).records[0];
     const d5 = mkDir4('b'); fs.writeFileSync(path.join(d5, 'usage-history', 'otel-truth.pending.ndjson'), JSON.stringify(rec5) + '\n');
@@ -302,30 +316,30 @@ const PAYLOAD = (recs) => ({
     await settle(d5, 'otel-truth.ndjson', () => countIn(stashOf(d5), 'req_u4stop') === 1); await settle(d5, 'otel-truth.pending.ndjson', () => (spillOf(d5) || '') === '');
     const once5 = countIn(stashOf(d5), 'req_u4stop'), spill5 = spillOf(d5);
     const o6 = mk4(d5); await o6.replayed; await new Promise((r) => setTimeout(r, 30)); await SW.durable(path.join(d5, 'usage-history', 'otel-truth.ndjson')).catch(() => false);
-    ok(o5.observedOrgForRid('req_u4stop') === 'sub-true' && once5 === 1 && (spill5 || '') === '' && o6.observedOrgForRid('req_u4stop') === 'sub-true' && countIn(stashOf(d5), 'req_u4stop') === 1, `U4 a hub that stopped with a post waiting: the next boot takes the spilled record ONCE (${once5} stash line), the spill empties, a second boot adds nothing (${countIn(stashOf(d5), 'req_u4stop')})`);
+    ok((await o5.observedOrgForRid('req_u4stop')) === 'sub-true' && once5 === 1 && (spill5 || '') === '' && (await o6.observedOrgForRid('req_u4stop')) === 'sub-true' && countIn(stashOf(d5), 'req_u4stop') === 1, `U4 a hub that stopped with a post waiting: the next boot takes the spilled record ONCE (${once5} stash line), the spill empties, a second boot adds nothing (${countIn(stashOf(d5), 'req_u4stop')})`);
     { // a post that comes DURING the replay's slices (the buffer read, the map half filled) waits too — never a replay finished in its tick
       // (B-1217 member 14, 主开发 r464: red in whole fast-tier runs on the first test machine, «40000 of 40 000 rows replayed» — the post
       // came after the replay had ENDED, nothing was left to wait behind). THE RACE IS PLACED, never hoped: the replay runs over a copy of
       // the ingest with ONE seam — after a slice that did not end the stash, before its next turn, it waits on a hold this leg opens; the
       // post is sent while the replay is held between two slices, and the replay is released after. A setup line says the hold was reached
-      const SLICE = '    while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) await nextTurn();';
+      const SEAM = 'const STASH_READ = { readBytes: READ_BYTES, maxLine: READ_BYTES, sliceMs: REPLAY_SLICE_MS, turn: nextTurn };';   // row B-360d: the replay's turns are the reader's
       const src8 = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
       // (主开发 r584 — the candidate's box zone, Node 24: the CONTROL's first 20 ms slice read all 40 000 rows, so its replay never
       // entered the loop's body and never reached the hold; the leg's own slice had read 38399 of them in the same run) THE SEAM HOLDS AT
       // A ROW COUNT, never at the clock: while the hold is armed a slice is bounded by -Infinity, so it ends at its first check (255
       // lines) and the hold is reached after one slice on any machine — the leg and its control alike
-      const hold8 = src8.split(SLICE).length === 2 ? src8.replace(SLICE, () => '    while (!replay.done && !replayTake(globalThis.__u4SliceHold ? -Infinity : performance.now() + REPLAY_SLICE_MS)) { if (globalThis.__u4SliceHold) await globalThis.__u4SliceHold(); await nextTurn(); }') : null;
+      const hold8 = src8.split(SEAM).length === 2 ? src8.replace(SEAM, () => 'const STASH_READ = { readBytes: READ_BYTES, maxLine: READ_BYTES, get sliceMs() { return globalThis.__u4SliceHold ? -Infinity : REPLAY_SLICE_MS; }, turn: async () => { const h = globalThis.__u4SliceHold && globalThis.__u4SliceHold(); if (h) await h; await nextTurn(); } };') : null;
       const sliced = async (src, tag) => {
         const M8 = mutantCopies(`otel-truth-u4-${tag}`, REPO).load('src/server/otel-ingest.js', src, tag);
         let o8 = null, reached = null, open = null; const gate = new Promise((r) => { open = r; });
-        globalThis.__u4SliceHold = () => { if (reached) return null; reached = { rids: o8 ? o8.stats().rids : -1 }; return gate; };
+        globalThis.__u4SliceHold = () => { if (reached) return null; const rids = o8 ? o8.stats().rids : -1; if (!(rids > 0)) return null; reached = { rids }; return gate; };   // a turn after a READ (no row yet) is not the hold: after a slice of rows
         const d8 = mkDir4(`e-${tag}`); o8 = mk4(d8, M8);
         for (let k = 0; k < 1000000 && !reached; k++) await new Promise((r) => setImmediate(r));   // the replay reaches its hold (bounded by a count of turns)
         const mid = o8.stats().rids, p8 = midPost(o8, PAYLOAD([REC({ request_id: { stringValue: `req_u4mid${tag}` } })]));
         const right = o8.stats().rids, waits = !!(p8.out && typeof p8.out.then === 'function');
         globalThis.__u4SliceHold = null; open();
         const out8 = await p8.out; await o8.replayed;
-        const res = { reached, mid, right, bytes: p8.bytes, waits, kept: out8 && out8.kept, org: o8.observedOrgForRid(`req_u4mid${tag}`) };
+        const res = { reached, mid, right, bytes: p8.bytes, waits, kept: out8 && out8.kept, org: (await o8.observedOrgForRid(`req_u4mid${tag}`)) };
         try { SW.forget(path.join(d8, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d8, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d8, { recursive: true, force: true });
         return res;
       };
@@ -333,12 +347,13 @@ const PAYLOAD = (recs) => ({
       ok(!!s8 && !!s8.reached && s8.reached.rids > 0 && s8.reached.rids < 40000, `U4 setup: the replay HELD between two slices (${s8 && s8.reached ? s8.reached.rids : 'never reached'} of 40 000 rows replayed) — a seam of the suite: a copy of the ingest whose replay, after a slice that did not end the stash, waits on this leg's hold`, JSON.stringify(s8));
       const mid = s8 ? s8.mid : -1, right = s8 ? s8.right : -1;
       ok(!!s8 && mid > 0 && mid < 40000 && right === mid && s8.bytes === 0 && s8.waits && s8.kept === 1 && s8.org === 'sub-true', `U4 a post during the replay's slices (${mid} of 40 000 rows replayed) waits: the map unmoved in its tick (${right}), 0 stash bytes read on the loop, taken after the replay`, JSON.stringify(s8));
-      // CONTROL, red for its own reason: the same placed race over the release's finishReplay at the top of the ingest — the post finishes
-      // the replay in its own tick (the map moves in the post's tick) and does not wait
+      // CONTROL, red for its own reason: the same placed race over a copy whose post is TAKEN AT ONCE over the half-replayed map (row
+      // B-360d: the release's finishReplay — the road that finished the replay in the post's tick — is removed) — the map moves in
+      // the post's tick and the post does not wait
       const FIN = '    if (replay.done) return take(records, seen);';
-      const c8 = hold8 && hold8.split(FIN).length === 2 ? await sliced(hold8.replace(FIN, () => '    finishReplay(); return take(records, seen);'), 'fin') : null;
+      const c8 = hold8 && hold8.split(FIN).length === 2 ? await sliced(hold8.replace(FIN, () => '    return take(records, seen);'), 'fin') : null;
       ok(!!c8 && !!c8.reached && c8.reached.rids > 0 && c8.reached.rids < 40000, `CONTROL setup: the copy's replay HELD between two slices too (${c8 && c8.reached ? c8.reached.rids : 'never reached'} of 40 000 rows replayed) — the same seam as the leg`, JSON.stringify(c8));
-      ok(!!c8 && !!c8.reached && c8.mid > 0 && c8.mid < 40000 && c8.right > c8.mid && !c8.waits, `CONTROL: the same placed race over the release's finishReplay at the top of the ingest — the post finished the held replay in its own tick (the map ${c8 && c8.mid} → ${c8 && c8.right}) and did not wait ⇒ RED`, JSON.stringify(c8));
+      ok(!!c8 && !!c8.reached && c8.mid > 0 && c8.mid < 40000 && c8.right > c8.mid && !c8.waits, `CONTROL: the same placed race over a copy whose post is taken at once over the half-replayed map — the map moved in the post's tick (${c8 && c8.mid} → ${c8 && c8.right}) and it did not wait ⇒ RED`, JSON.stringify(c8));
     }
     { // a write the writer never confirmed (its thread restarted and asked again) is OFFERED AGAIN, on a new line
       const d9 = mkDir4('f'), o9 = mk4(d9); await o9.replayed;
@@ -352,7 +367,7 @@ const PAYLOAD = (recs) => ({
       const rec10 = parseOtlpLogs(PAYLOAD([REC({ request_id: { stringValue: 'req_u4both' } })])).records[0];
       const d10 = mkDir4('g', JSON.stringify({ ...rec10, acct: 'sub-true', acctKnown: true }) + '\n'); fs.writeFileSync(path.join(d10, 'usage-history', 'otel-truth.pending.ndjson'), JSON.stringify(rec10) + '\n');
       const o10 = mk4(d10); await o10.replayed; await settle(d10, 'otel-truth.pending.ndjson', () => (spillOf(d10) || '') === '');
-      ok(countIn(stashOf(d10), 'req_u4both') === 1 && (spillOf(d10) || '') === '' && o10.observedOrgForRid('req_u4both') === 'sub-true', `U4 a record in the stash AND the spill (a stop between the two writes) is stashed no second time (${countIn(stashOf(d10), 'req_u4both')} line); the spill empties`);
+      ok(countIn(stashOf(d10), 'req_u4both') === 1 && (spillOf(d10) || '') === '' && (await o10.observedOrgForRid('req_u4both')) === 'sub-true', `U4 a record in the stash AND the spill (a stop between the two writes) is stashed no second time (${countIn(stashOf(d10), 'req_u4both')} line); the spill empties`);
       try { SW.forget(path.join(d10, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d10, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d10, { recursive: true, force: true });
     }
     { // the chain's cure (as if a must): THE STASH IS ON DISK BEFORE ITS ANSWER — the post's lines by the store writer's urgent road,
@@ -378,7 +393,7 @@ const PAYLOAD = (recs) => ({
       const RS = mutantCopies('otel-truth-cure-split', REPO).load('src/server/otel-ingest.js', srcS.replace(SPLIT, () => "        if (!onDisk) return res.status(503)"), 'no-split');   // stale-pins: kept (2b202b257's door, planted back as the RED control)
       const dS = mkDir4('j'), oS = mk4(dS, RS); await oS.replayed;
       try { g4 = await callLogs(oH, dH, 'req_cure_failing'); g4red = await callLogs(oS, dS, 'req_cure_failing_red'); } finally { SW.durable = realDurable; SW.whyNotDurable = realWhy; }
-      ok(srcS.split(SPLIT).length === 2 && g4 && g4.code === 200 && oH.observedOrgForRid('req_cure_failing') === 'sub-true' && g4red && g4red.code === 503,
+      ok(srcS.split(SPLIT).length === 2 && g4 && g4.code === 200 && (await oH.observedOrgForRid('req_cure_failing')) === 'sub-true' && g4red && g4red.code === 503,
         `a FAILING storage (its back-off past the exporter's retries): the post answered 200, its record held (${g4 && g4.code}); RED (no split): ${g4red && g4red.code} — the exporter would drop a batch the hub already holds`, { g4, g4red });
       try { await SW.durable(path.join(dS, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(dS, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(dS, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(dS, { recursive: true, force: true });
       const srcC = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8'), WAIT = "      if (stashOwed.length || stashWriting) {\n";
@@ -391,10 +406,10 @@ const PAYLOAD = (recs) => ({
       for (const d of [dH, dR]) { try { await SW.durable(path.join(d, 'usage-history', 'otel-truth.ndjson')).catch(() => false); SW.forget(path.join(d, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d, { recursive: true, force: true }); }
     }
     const src4 = fs.readFileSync(path.join(REPO, 'src/server/otel-ingest.js'), 'utf8');
-    const rel4 = src4.replace('    if (replay.done) return take(records, seen);', '    finishReplay(); return take(records, seen);');
+    const rel4 = src4.replace('    if (replay.done) return take(records, seen);', () => '    if (!replay.done) { try { fs.readFileSync(file); } catch { } }\n    if (replay.done) return take(records, seen);');   // row B-360d: the release's road (a whole read of the stash in the post's tick) planted back
     const R4 = mutantCopies('otel-truth-u4', REPO).load('src/server/otel-ingest.js', rel4, 'sync-finish');
     const d7 = mkDir4('c'), c7 = midPost(mk4(d7, R4), PAYLOAD([REC({ request_id: { stringValue: 'req_u4ctl' } })]));
-    ok(rel4 !== src4 && c7.bytes > 1048576 && c7.out && typeof c7.out.then !== 'function', `control (the release's finishReplay at the top of the ingest): the post read ${(c7.bytes / 1048576).toFixed(1)} MB of the stash on the loop ⇒ RED`);
+    ok(rel4 !== src4 && c7.bytes > 1048576, `control (the release's whole read of the stash in a post's tick, planted back): the post read ${(c7.bytes / 1048576).toFixed(1)} MB of the stash on the loop ⇒ RED`);
     for (const d of [d4, d5, d7]) { try { SW.forget(path.join(d, 'usage-history', 'otel-truth.ndjson')); SW.forget(path.join(d, 'usage-history', 'otel-truth.pending.ndjson')); } catch { } fs.rmSync(d, { recursive: true, force: true }); }
   }
   srv.close();

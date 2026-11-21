@@ -54,24 +54,31 @@
 // channel — never argv). The auth.js cookie middleware exempts /otel/* and
 // THIS gate is the only door (same pattern as /svc per-mount auth).
 const fs = require('fs');
-const { timedSync } = require('../timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const path = require('path');
 const crypto = require('crypto');
 const { sameToken } = require('../pairing-token.js'); // B-8dda: the per-boot header is a secret too
 const { parseOtlpLogs } = require('../otel-truth.js');
+const { eachLine } = require('../ndjson-lines.js'); // row B-360d: the spill and the stash read by their lines in bounded reads (one descriptor each)
 const { spawnOf } = require('../harnesses'); // the spawn.otelExport row: whose accounts OTel can name
 
 const MAX_TRUTH = 60000;      // in-memory rid map cap (~a week of heavy storms)
 const FILE_MAX = 12 * 1024 * 1024; // boot-time trim threshold for the stash
 const KEEP_MS = 30 * 86400e3; // trim horizon
+// row B-360d (主开发 r713 / r725 / r738): ONE read of the spill or the stash is at most READ_BYTES (src/ndjson-lines.js — a line
+// carried across two reads, a turn after each); the trim's copy is the store writer's, in its own pieces
+const READ_BYTES = 4 * 1024 * 1024;
+// THE STASH'S OTHER READER: the ledger backfill migration reads EVERY old row (src/ledger-slot-backfill.js readOtelStash, the
+// rows the OTel path billed from 2.361.0 to the 2026-09-07 law). Until the migrations' own ledger records it as run, the trim
+// keeps the stash WHOLE (r738 Q1: never the 30-day cut before that migration has read its rows)
+const BACKFILL_ID = '2026-09-backfill-ledger-by-slot';
 // boot-replay slice (lane ci-351-reds, 2026-10-24): a TIME bound — the 20 000-line count (B-1319: ~20 ms here) took 31 ms
 // on the measured boot and its first slice rode the listen tick (the read resolves in a poll-phase callback; ONE
 // setImmediate from there runs in that same loop iteration). Lines are taken until REPLAY_SLICE_MS of the real clock;
 // the next slice is TWO immediates away (past the next timers phase).
 const REPLAY_SLICE_MS = 20;
 const nextTurn = () => new Promise((r) => setImmediate(() => setImmediate(r)));
+const STASH_READ = { readBytes: READ_BYTES, maxLine: READ_BYTES, sliceMs: REPLAY_SLICE_MS, turn: nextTurn };
 const spillOf = new WeakMap(); // usage-cpu U4: a waited record → its line in the spill (a side table: the record itself carries no mark)
-const NL = Buffer.from('\n');
 const W = () => require('../store-writer.js').storeWriter(); // usage-cpu U4: the stash and the spill are written by THE STORE WRITER's thread
 const STASH_DURABLE_MS = 4000; // the chain's cure: a post's answer waits at most this for its stash lines; past it «retry» — two waits + the 1 s Retry-After stay inside the exporter's own 10 s
 
@@ -103,19 +110,38 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
   // lines go to the store writer's thread as ONE append per write; a failed append keeps its lines for the next one, which
   // starts on a new line (a torn tail never glues the next row to it — a blank line is skipped by the replay)
   let stashOwed = [], stashWriting = null, stashTorn = false;
+  // THE TRIM IS A JOB OF THE STASH'S ONE WRITER (row B-360d, 主开发 r725 a — the release's trim was skipped whenever the file
+  // grew during its write or a write was owed: on a busy hub, at every start). Owed at the replay's end, it is the store
+  // writer's next job of this file: on the writer's THREAD the kept lines are copied in bounded pieces to a new file, then
+  // what was appended after the replay read, then the appends owed with it, and the new file is renamed over the stash
+  // (src/store-writer-worker.js rewriteJob) — in order with every append, so «the file grew meanwhile» cannot happen and
+  // nothing is skipped. A failed trim leaves the stash whole as it was, said; the appends go on alone. A synchronous flush
+  // (the exit) never rewrites the stash: the next start trims.
+  let trimOwed = null, trimWriting = null;
   // a write the writer never confirmed (its thread restarted and asked again) is OFFERED AGAIN with what came since — on a new
   // line (a torn tail never glues the next row to it; a line written twice is one rid twice: the replay keeps one)
-  const produceStash = () => {
+  const produceStash = (o) => {
     const again = stashWriting, batch = (again || []).concat(stashOwed);
     stashOwed = [];
-    if (!batch.length) { stashWriting = null; return null; }
+    const trim = trimOwed && !(o && o.sync) ? trimOwed : null;
+    if (!batch.length && !trim) { stashWriting = null; return null; }
     stashWriting = batch;
-    return { append: (stashTorn || again ? '\n' : '') + batch.map((x) => x.line).join('') };
+    // the lines' lead: a new line after a torn tail (an append that failed, or a stash whose last line had none) or a re-offered
+    // write; a REWRITE ends every kept line with its newline itself — its lines need one only after a re-offered write
+    const lead = trim ? again : stashTorn || again;
+    const text = batch.length ? (lead ? '\n' : '') + batch.map((x) => x.line).join('') : '';
+    if (!trim) return { append: text };
+    trimOwed = null; trimWriting = trim;
+    return { rewrite: { ranges: trim.ranges, size: trim.size }, then: text, as: 'otel-truth.write' };
   };
-  const stashWritten = (ok) => {
-    const w = stashWriting; stashWriting = null;
+  const stashWritten = (ok, err) => {
+    const w = stashWriting, t = trimWriting; stashWriting = null; trimWriting = null;
+    if (t) {
+      if (ok) console.log(`[otel] the stash trimmed by its writer: ${t.size} → ${t.kept} bytes (+ this start's appends) — ${t.what}`);
+      else console.warn(`[otel] the stash's trim FAILED (${(err && (err.code || err.message)) || 'an error'}) — the stash stays whole as it was; the next start trims it`);
+    }
     if (!w) return;
-    if (!ok) { stashTorn = true; stashOwed = w.concat(stashOwed); return; }
+    if (!ok) { if (!t) stashTorn = true; stashOwed = w.concat(stashOwed); return; }   // a failed REWRITE left the file as it was: no torn tail
     stashTorn = false;
     const done = new Set(w.map((x) => x.spill).filter(Boolean));
     if (done.size) { for (let k = spilled.length - 1; k >= 0; k--) if (done.has(spilled[k])) spilled.splice(k, 1); writeSpill(); }
@@ -146,48 +172,60 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     if (lastApi.size > LAST_API_CAP) lastApi.delete(lastApi.keys().next().value);
   };
 
-  // Boot replay: the stash IS the persistence — bake-time overrides must
-  // survive restarts or a reboot mid-race re-bakes with link-intent again.
-  // OFF THE LOOP SINCE B-1319 (measured 2026-10-13: production's stash is 163 MB — every boot read it, parsed 353 k
-  // lines and REWROTE it whole in main-module evaluation, the rewrite firing on size alone with nothing to trim; 0.5 s
-  // in a lane on local disk): the bytes come through fs.promises, REPLAY_SLICE_MS slices of lines are taken, the trim rewrite
-  // is written off the loop and only when it changes the file. A reader before the replay is done (ingest's dedupe,
-  // observedOrgForRid) finishes it in its own tick — the map is never answered half-replayed.
-  const replay = { buf: null, at: 0, cutoff: Date.now() - KEEP_MS, kept: [], keptBytes: 0, done: false };
-  const replayTake = (untilMs = Infinity) => { // the next lines until the real clock passes `untilMs` (checked every 256); true when the stash is read to its end
-    const b = replay.buf;
-    for (let n = 0; replay.at < b.length; n++) {
-      if ((n & 255) === 255 && performance.now() >= untilMs) break;
-      let nl = b.indexOf(10, replay.at); if (nl < 0) nl = b.length;
-      const a = replay.at; replay.at = nl + 1;
-      if (nl === a) continue;
-      try {
-        const r = JSON.parse(b.toString('utf8', a, nl));
-        if (!r.rid || (r.ts || 0) < replay.cutoff) continue;
-        replay.kept.push(a, nl); replay.keptBytes += nl - a + 1;
-        if (r.acctKnown) { truth.set(r.rid, r.acct ?? null); order.push(r.rid); }
-      } catch { }
+  // THE BOOT REPLAY (row B-360d — 主开发 r713 / r725 / r738; before it B-1319, ci-351-reds, usage-cpu U4). The stash IS the
+  // persistence of the rid map (a post's dedupe across restarts). On 2026-11-20 the owner's stash was 476 631 564 bytes
+  // (1 019 053 lines over 43 days: its trim had not landed since 10-09, the file grew at every start); the release read it
+  // into ONE buffer, kept every rid while it replayed and joined the kept lines in ONE turn. Now:
+  //   · the spill, then the stash, each through ONE descriptor in bounded reads (src/ndjson-lines.js: READ_BYTES, a line
+  //     carried across two reads, a turn after every read and between REPLAY_SLICE_MS slices of lines);
+  //   · the map is CAPPED WHILE IT REPLAYS at the cap it has at its first take (MAX_TRUTH: the newest rids by the stash's order);
+  //   · THE KEEP RULE follows the file's two readers: until the migrations' own ledger (data/migrations.json, read at the
+  //     replay's end) records BACKFILL_ID as run, the stash is kept WHOLE, said once a start. Once it is recorded, a stash
+  //     over FILE_MAX keeps the newest MAX_TRUTH known-org lines inside the 30-day horizon (what the map can hold) and every
+  //     unknown-org line inside it (the only trace of a request billed to an account this hub does not know); the trim is
+  //     owed to the stash's writer (produceStash) when that is not the file as it is;
+  //   · a post before the replay ended WAITS for it (its records in the spill meanwhile): nothing answers the map half-replayed.
+  const replay = { cutoff: Date.now() - KEEP_MS, done: false };
+  let head = 0;   // while it replays: order[head..] are the rids in the map, oldest first
+  const replayRid = (rid, acct) => {
+    if (truth.has(rid)) { truth.set(rid, acct); return; }   // a rid written twice keeps its first place, its last account (as remember() does)
+    truth.set(rid, acct); order.push(rid);
+    if (truth.size > MAX_TRUTH) { truth.delete(order[head++]); if (head >= MAX_TRUTH) { order.splice(0, head); head = 0; } }
+  };
+  // THE COUNT RULE's lines while it replays, as byte ranges of the file (each with its newline): the newest MAX_TRUTH known
+  // ones inside the horizon (a ring) and every unknown-org one inside it (adjacent ones joined)
+  const ring = new Float64Array(2 * MAX_TRUTH), unknownAt = [];
+  let ringN = 0, unknownN = 0, lastEnd = -1;
+  const onStashLine = (buf, a, nl, at) => {
+    lastEnd = at + (nl - a);
+    let r; try { r = JSON.parse(buf.toString('utf8', a, nl)); } catch { return; }
+    if (!r || !r.rid || (r.ts || 0) < replay.cutoff) return;
+    if (r.acctKnown) { replayRid(r.rid, r.acct ?? null); const k = (ringN++ % MAX_TRUTH) * 2; ring[k] = at; ring[k + 1] = lastEnd + 1; return; }
+    unknownN++;
+    if (unknownAt.length && unknownAt[unknownAt.length - 1] === at) unknownAt[unknownAt.length - 1] = lastEnd + 1; else unknownAt.push(at, lastEnd + 1);
+  };
+  /** the count rule's kept lines in file order, adjacent ranges joined → {ranges, kept: their bytes} */
+  const keptRanges = () => {
+    const out = [], n = Math.min(ringN, MAX_TRUTH), first = ringN > MAX_TRUTH ? ringN % MAX_TRUTH : 0;
+    let kept = 0, i = 0, j = 0;
+    const put = (s, e) => { kept += e - s; if (out.length && out[out.length - 1] === s) out[out.length - 1] = e; else out.push(s, e); };
+    while (i < n || j < unknownAt.length) {
+      const k = ((first + i) % MAX_TRUTH) * 2;
+      if (j >= unknownAt.length || (i < n && ring[k] < unknownAt[j])) { put(ring[k], ring[k + 1]); i++; } else { put(unknownAt[j], unknownAt[j + 1]); j += 2; }
     }
-    return replay.at >= b.length;
+    return { ranges: Float64Array.from(out), kept };
   };
-  const replayEnd = () => { // the trim: over FILE_MAX and the kept lines are not the file as it is ⇒ rewrite, off the loop
-    replay.done = true;
-    const b = replay.buf, kept = replay.kept;
-    replay.buf = null; replay.kept = [];
-    if (b.length <= FILE_MAX || replay.keptBytes === b.length) return;
-    const parts = []; for (let k = 0; k < kept.length; k += 2) parts.push(b.subarray(kept[k], kept[k + 1]), NL);
-    fs.promises.writeFile(file + '.tmp', Buffer.concat(parts)).then(() => {
-      let grew = true; try { grew = fs.statSync(file).size !== b.length; } catch { }
-      if (grew || stashWriting || stashOwed.length) { fs.promises.unlink(file + '.tmp').catch(() => { }); return; } // an export appended meanwhile, or one owed / on the writer's thread (U4): the next boot trims
-      timedSync('otel-truth.write', () => fs.renameSync(file + '.tmp', file)); // the same tick as the size check — no append between
-    }).catch((e) => console.warn('[otel] truth stash trim failed:', e.message));
+  const backfillRan = async () => {
+    try { const L = JSON.parse(await fs.promises.readFile(path.join(dataDir, 'migrations.json'), 'utf8')); return !!(L && L.applied && L.applied[BACKFILL_ID]); } catch { return false; }
   };
-  // THE DIAGNOSTIC ROAD ONLY (observedOrgForRid — no hub caller): it finishes the replay in its own tick; a post never does
-  // (usage-cpu U4: the first OTLP post of every boot read the whole stash and parsed it on the loop — 4.4 s held)
-  const finishReplay = () => {
-    if (replay.done) return;
-    if (!replay.buf) { try { replay.buf = fs.existsSync(file) ? timedSync('otel-truth.read', () => fs.readFileSync(file)) : Buffer.alloc(0); } catch (e) { replay.buf = Buffer.alloc(0); console.warn('[otel] truth stash load failed:', e.message); } }
-    replayTake(); replayEnd(); drain();
+  /** the stash read to its end (`st`): the trim it owes its writer, by the keep rule */
+  const oweTrim = (st, ran) => {
+    if (st.bytes <= FILE_MAX) return;
+    if (!ran) { console.log(`[otel] the stash is kept WHOLE (${st.bytes} bytes): the migration ${BACKFILL_ID} is not recorded as run in data/migrations.json — it reads every old row; once it has run, the trim keeps the newest ${MAX_TRUTH} known lines inside 30 days`); return; }
+    const { ranges, kept } = keptRanges();
+    if (kept === st.bytes) return;   // the kept lines ARE the file: nothing to write
+    trimOwed = { ranges, size: st.bytes, kept, what: `kept the newest ${Math.min(ringN, MAX_TRUTH)} known lines inside 30 days and ${unknownN} unknown-org ones` };
+    W().dirty(file, { name: 'otel-truth.write', produce: produceStash, onWritten: stashWritten, allowEmpty: true });
   };
   // the posts that waited, in their order, once the map is whole; then the records a stopped hub left in the spill
   let leftover = null;
@@ -196,26 +234,32 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
     while (waiting.length) { const w = waiting.shift(); let out; try { out = take(w.records, w.seen); } catch (e) { out = { kept: 0, disagreements: 0, seen: w.seen }; } w.resolve(out); }
   };
   const replayed = (async () => {
-    let b = Buffer.alloc(0);
     try { // the records a stopped hub left waiting (U4) — read first: this boot's own spill is written only after
-      const t = await fs.promises.readFile(spill, 'utf8'), recs = [], lines = [];
-      for (const l of t.split('\n')) { if (!l) continue; try { const r = JSON.parse(l); spillOf.set(r, l + '\n'); recs.push(r); lines.push(l + '\n'); } catch { } }
-      if (recs.length) { leftover = recs; spilled.unshift(...lines); }
+      const recs = [], lines = [], fh = await fs.promises.open(spill, 'r');
+      try {
+        await eachLine(fh, (buf, a, nl) => { const l = buf.toString('utf8', a, nl); try { const r = JSON.parse(l); if (r && typeof r === 'object') { spillOf.set(r, l + '\n'); recs.push(r); lines.push(l + '\n'); } } catch { } }, STASH_READ);
+      } finally { await fh.close().catch(() => { }); }
+      if (recs.length) { leftover = recs; const mine = spilled.splice(0); for (const l of lines) spilled.push(l); for (const l of mine) spilled.push(l); }   // its lines go first
       spillRead = true;
     } catch (e) {
       if (e && e.code === 'ENOENT') spillRead = true;
       else console.warn(`[otel] the waiting posts' file could not be read (${e && e.message}) — kept as it is; this boot's waiting posts are taken after the replay but not written beside it`);
     }
     if (spillRead && spilled.length) { writeSpill(); W().durable(spill).catch(() => { }); }
-    try { b = await fs.promises.readFile(file); } catch (e) { if (e.code !== 'ENOENT') console.warn('[otel] truth stash load failed:', e.message); }
-    if (replay.done) { drain(); return; }
-    if (!replay.buf) replay.buf = b;
-    await nextTurn();   // never on the tick the read resolved on
-    while (!replay.done && !replayTake(performance.now() + REPLAY_SLICE_MS)) await nextTurn();
-    if (!replay.done) replayEnd();
+    let st = null, fh = null;
+    try { fh = await fs.promises.open(file, 'r'); } catch (e) { if (e.code !== 'ENOENT') console.warn('[otel] truth stash load failed:', e.message); }
+    if (fh) {
+      try { st = await eachLine(fh, onStashLine, STASH_READ); }
+      catch (e) { st = null; console.warn(`[otel] truth stash read failed (${e.message}) — the map holds what was read; the stash is not trimmed this start`); }
+      finally { await fh.close().catch(() => { }); }
+    }
+    if (head) { order.splice(0, head); head = 0; }
+    if (st && lastEnd === st.bytes) stashTorn = true;   // a last line with no newline (a torn tail): the first append starts on a new line, never glued to it
+    if (st) oweTrim(st, await backfillRan());   // before the drain: the waiting posts' lines ride the trim's own job
+    replay.done = true;
     drain();
   })().catch((e) => { // a replay that throws still ends: the waiting posts go on over the map as far as it was read, said once
-    console.warn('[otel] truth stash replay failed:', (e && e.message) || e); replay.done = true; replay.buf = null; replay.kept = []; spillRead = true; drain();
+    console.warn('[otel] truth stash replay failed:', (e && e.message) || e); if (head) { order.splice(0, head); head = 0; } replay.done = true; spillRead = true; drain();
   });
 
   // organization.id → VibeSpace account id. Prefer a NAMED sub over the
@@ -383,8 +427,8 @@ function create({ dataDir, PORT, getUsageHistory, identityGroups, listAccounts, 
      *  that a caller re-introducing the old wiring has to say the new name,
      *  and so the source pin in scripts/test-readings-attribution.mjs can
      *  assert nobody passes it to a bake path. */
-    observedOrgForRid(rid) { finishReplay(); return rid && truth.has(rid) ? truth.get(rid) : undefined; },
-    /** The boot replay off the loop (B-1319): resolves when the stash is read (by it, or by a reader that finished it). */
+    async observedOrgForRid(rid) { await replayed; return rid && truth.has(rid) ? truth.get(rid) : undefined; },   // row B-360d: answered once the replay ended — the synchronous road that finished it in the caller's tick (a whole read and parse) is REMOVED
+    /** The boot replay off the loop (B-1319; row B-360d): resolves when the stash is read to its end and the waiting posts taken. */
     replayed,
     /** The newest api_request instant (ms) this conversation's CLI exported, or null (lane-dead-bridge's witness). */
     lastApiRequestAt(sid) { return (sid && lastApi.get(sid)) || null; },

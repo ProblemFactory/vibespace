@@ -81,6 +81,7 @@
  * is loud and retried next boot. Zero vendor calls: local files only.
  */
 const fs = require('fs');
+const { eachLineSync } = require('./ndjson-lines.js'); // row B-360d: the OTel stash read by its rows, never one string
 const path = require('path');
 const { decideLagShadow } = require('./reading-lag.js');
 const { deathMarkers, isForeign, _sessionKeyMap, sessionKeysFor } = require('./reading-repair.js');
@@ -160,20 +161,26 @@ function readPriorArchive(archiveDir, id) {
 
 /** The OTel stash, read back: rid → {acct, sid, ts} for KNOWN orgs only (an
  *  unknown org was never baked — `truthLookup` answered undefined for it), and
- *  sid → [{acct, ts}] for the corrective-entry test. */
+ *  sid → [{acct, ts}] for the corrective-entry test.
+ *  READ BY ITS ROWS (row B-360d, 主开发 r725 b): through ONE descriptor in bounded reads (src/ndjson-lines.js eachLineSync),
+ *  never one string — the release's readFileSync into one string threw past the runtime's longest string (536 870 888
+ *  characters; the owner's stash was 476 631 564 bytes on 2026-11-20) and its catch answered «no stash», so this migration
+ *  was recorded as run with no rows. A stash that is not there is «no stash»; a read that FAILS throws: the migration is
+ *  failed by the runner's own law (retried at the next start, never «done»). */
 function readOtelStash(historyDir) {
   const byRid = new Map(), bySid = new Map();
-  let rows = 0;
-  let text = ''; try { text = fs.readFileSync(path.join(historyDir, 'otel-truth.ndjson'), 'utf-8'); } catch { return { byRid, bySid, rows }; }
-  for (const line of text.split('\n')) {
-    if (!line) continue;
-    let r; try { r = JSON.parse(line); } catch { continue; }
-    if (!r || !r.acctKnown || !r.rid) continue;
-    rows++;
-    const acct = r.acct ?? null; // `truth.set(rid, r.acct ?? null)` — null = the machine login
-    if (!byRid.has(r.rid)) byRid.set(r.rid, { acct, sid: r.sid || null, ts: Number(r.ts) || 0 });
-    if (r.sid) { const l = bySid.get(r.sid) || []; l.push({ acct, ts: Number(r.ts) || 0 }); bySid.set(r.sid, l); }
-  }
+  let rows = 0, fd = null;
+  try { fd = fs.openSync(path.join(historyDir, 'otel-truth.ndjson'), 'r'); } catch (e) { if (e && e.code === 'ENOENT') return { byRid, bySid, rows }; throw e; }
+  try {
+    eachLineSync(fd, (buf, a, nl) => {
+      let r; try { r = JSON.parse(buf.toString('utf8', a, nl)); } catch { return; }
+      if (!r || !r.acctKnown || !r.rid) return;
+      rows++;
+      const acct = r.acct ?? null; // `truth.set(rid, r.acct ?? null)` — null = the machine login
+      if (!byRid.has(r.rid)) byRid.set(r.rid, { acct, sid: r.sid || null, ts: Number(r.ts) || 0 });
+      if (r.sid) { const l = bySid.get(r.sid) || []; l.push({ acct, ts: Number(r.ts) || 0 }); bySid.set(r.sid, l); }
+    }, { fs });
+  } finally { try { fs.closeSync(fd); } catch { } }
   return { byRid, bySid, rows };
 }
 

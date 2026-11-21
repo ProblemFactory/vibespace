@@ -64,6 +64,18 @@ const EXIT_ROUNDS = 4;          // round 6's amend: the exit's last pass writes 
  *  not a string / Buffer / an array of them, or EMPTY (unless the store said `allowEmpty`), THROW — that store's failed
  *  write, said (round 2, law E iii: `[]` or `''` renamed an empty file over a store with durable() true). */
 function partsOf(bytes, { allowEmpty = false } = {}) {
+  // A REWRITE of an append store from its own bytes (row B-360d, the OTel stash's trim — 主开发 r725 a): `{rewrite: {ranges,
+  // size}, then: bytes, as}` = the byte ranges [s, e) of the file's first `size` bytes (a Float64Array, ascending; a range
+  // that ends at size + 1 ends with the newline the file lacks), then every byte the file holds past `size`, then `then`,
+  // written to the temp on the writer's THREAD in bounded pieces and renamed over the file (store-writer-worker.js
+  // rewriteJob) — in order with the store's appends; `as` = the store-timing row it is timed under. Never on the main thread.
+  if (bytes && typeof bytes === 'object' && !Array.isArray(bytes) && typeof bytes.byteLength !== 'number' && bytes.rewrite) {
+    const R = bytes.rewrite;
+    if (!(R.ranges instanceof Float64Array) || R.ranges.length % 2 || !(Number.isFinite(R.size) && R.size >= 0)) throw Object.assign(new Error('its rewrite is not {ranges: Float64Array of pairs, size}'), { code: 'EBADBYTES' });
+    const then = bytes.then == null || bytes.then === '' ? null : partsOf(bytes.then, { allowEmpty: true });
+    const ranges = R.ranges.slice();   // a copy: what the store keeps is never handed away
+    return { parts: then ? then.parts : [], transfer: [...(then ? then.transfer : []), ranges.buffer], size: then ? then.size : 0, append: false, rewrite: { ranges, size: R.size }, as: typeof bytes.as === 'string' ? bytes.as : null };
+  }
   let append = false;
   if (bytes && typeof bytes === 'object' && !Array.isArray(bytes) && typeof bytes.byteLength !== 'number' && 'append' in bytes) { append = true; bytes = bytes.append; }
   const list = Array.isArray(bytes) ? bytes : [bytes];
@@ -211,10 +223,10 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     } catch (e) { fail(s, since, e); return; }
     if (mainOnly || !startWorker()) { writeHere(s, p, since); return; }
     const id = ++seq;
-    inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
+    inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, as: p.as || null };   // a rewrite keeps the store an append store (its pace, never unlinked as a forgotten whole file)
     posted++;
     LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive }, p.transfer); }
+    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive, rewrite: p.rewrite || null }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); }
   }
   function onMessage(m) {
@@ -224,7 +236,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (m.ev !== 'written') return;
     const f = inflight; inflight = null;
     const s = stores.get(f.name);
-    if (s) finish(s, m.err, m.ms, f.size, f.since, false, f.append);
+    if (s) finish(s, m.err, m.ms, f.size, f.since, false, f.append, null, f.as);
     if (s && s.forgotten && !m.err && !f.append) { postUnlink(s); return; }   // forgotten while its write flew: the file it renamed goes again
     if (s && s.forgotten) stores.delete(f.name);
     schedule();
@@ -236,7 +248,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     posted++;
     try { worker.postMessage({ ev: 'unlink', id, file: s.file }); } catch { inflight = null; posted--; stores.delete(s.file); schedule(); }
   }
-  function finish(s, err, ms, size, since, onMain = false, append = false, waitedBy = null) {
+  function finish(s, err, ms, size, since, onMain = false, append = false, waitedBy = null, as = null) {
     if (err) { fail(s, since, err); return; }
     if (s.exclusive && !append) s.exclusive = false;   // B-f276 1b: its first whole write landed — the file is its store's own now
     s.failures = 0; s.failedAt = null; s.lastEndAt = now(); if (!append) s.bytes = size; s.writes++; s.bytesWritten += size; s.lastMs = ms; s.maxMs = Math.max(s.maxMs, ms);
@@ -245,7 +257,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     settled(s, s.writingVersion);
     if (exiting) { exitWritten.push(s.name); publishExit(); }   // round 6: the keeper's line names what IS on disk
     if (!s.dirty) s.rank = s.keepRank;
-    if (record) { try { record(s.name, ms); } catch { } }
+    if (record) { try { record(as || s.name, ms); } catch { } }
     if (ms >= slowMs && now() - s.slowSaidAt >= SLOW_SAY_EVERY_MS) {
       s.slow++; s.slowSaidAt = now();
       // a write on the main thread HELD it — said as such, never «the main loop did not wait» (round 2, law E i)
@@ -403,6 +415,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   /** the bytes written on THIS thread — the SAME writeJob as the thread's (every byte, the close's error, then the rename;
    *  an append fsynced) — the exit flush, a store's own close, a process without a writer thread */
   function writeHere(s, p, since) {
+    if (p.rewrite) { fail(s, since, Object.assign(new Error('a rewrite is never written on the main thread (it copies the file)'), { code: 'EREWRITEMAIN' })); return false; }   // its store keeps the file whole and goes on
     const t0 = now(), tmp = `${s.file}.tmp-${process.pid}`;
     try {
       W().writeJob({ file: s.file, tmp, parts: p.parts, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, append: p.append, exclusive: !!s.exclusive }, fs);
@@ -429,7 +442,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     const f = inflight; inflight = null;
     const s = stores.get(f.name);
     if (f.unlink) { if (s && s.forgotten) stores.delete(f.name); return true; }
-    if (s) finish(s, Atomics.load(S, 2) === 2 ? { code: jobErrorCode() } : null, now() - f.startedAt, f.size, f.since, false, f.append, waitedBy);
+    if (s) finish(s, Atomics.load(S, 2) === 2 ? { code: jobErrorCode() } : null, now() - f.startedAt, f.size, f.since, false, f.append, waitedBy, f.as);
     if (s && s.forgotten && !f.append && Atomics.load(S, 2) !== 2) postUnlink(s);   // forgotten while it flew: gone again — on the thread
     return true;
   }
@@ -440,10 +453,10 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (inflight && !settleInflight(deadline, waitedBy)) return 'held';
     if (mainOnly || !startWorker() || !S) return writeHere(s, p, since) ? 'ok' : 'failed';
     const id = ++seq, f0 = s.failures;
-    inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
+    inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append || !!p.rewrite, as: p.as || null };
     posted++;
     LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive }, p.transfer); }
+    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive, rewrite: p.rewrite || null }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); return 'failed'; }
     if (exiting) publishExit();   // round 6's amend: the keeper's line names this write as IN FLIGHT, not «still owed»
     if (!settleInflight(deadline, waitedBy)) return 'held';
