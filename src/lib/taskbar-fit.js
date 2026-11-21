@@ -5,6 +5,7 @@
 //   · stripHidden — which tiles the strip does not show whole (the «+N» chip lists them)
 //   · wheelScroll — a vertical wheel over the strip scrolls it sideways
 //   · switcherForm — the desktop switcher full (a preview per desktop) or compact (ONE «Desktop k/N ▾» button)
+//   · stripKeys — the strip's TWO names: its STRUCTURE (rebuild the tiles) and its TEXT (paint them in place) — B-6cf9
 // The tile's floor is style.css's `.taskbar-item { min-width }` (TILE_MIN_PX, pinned by scripts/test-desktop-small.mjs).
 // src/lib/taskbar.js (fitTaskbarStrip) and src/lib/desktop-manager.js (_renderSwitcher) ask it; the gates are
 // scripts/test-desktop-small.mjs (the tables) and scripts/test-desktop-small-chrome.mjs ⑥ (the four viewports).
@@ -60,4 +61,19 @@ export function switcherForm({ n = 1, each = 54, add = 23, bar = 0, others = 0, 
   if (!(bar > 0) || n <= 1) return 'full';
   const need = n * each + add;
   return need <= bar * share && need <= bar - others - stripMin ? 'full' : 'compact';
+}
+
+/** B-6cf9 (the coordinator's r1479) — THE STRIP'S TWO NAMES. `structure` = which tiles stand where: each entry's id in
+ *  order, and a group's tab ids and its active tab — when it changes, src/lib/taskbar.js rebuilds the tiles. `text` = what
+ *  they say: a window's title and its star (a group: every tab's title) — when ONLY it changes, the tiles are painted IN
+ *  PLACE. A title used to be part of the one key, so ANY title change emptied the strip and built every tile again: a press
+ *  whose down and up straddled that rebuild had its up on a new element, the browser fired no click, and a person's press
+ *  on a tile did nothing while an agent's status moved in a title (row B-6cf9's planted press, test-desktop-small-chrome).
+ *  entries: [{ id, title, star, group: null | { tabs: [{ id, title }], active } }] — JSON, so a title holding a tab or a
+ *  newline can never make two states read alike. */
+export function stripKeys(entries = []) {
+  const list = Array.isArray(entries) ? entries : [];
+  const structure = list.map((e) => (e.group ? [e.id, e.group.tabs.map((x) => x.id), e.group.active] : [e.id]));
+  const text = list.map((e) => [e.id, String(e.title ?? ''), String(e.star ?? ''), ...(e.group ? [e.group.tabs.map((x) => String(x.title ?? ''))] : [])]);
+  return { structure: JSON.stringify(structure), text: JSON.stringify(text) };
 }

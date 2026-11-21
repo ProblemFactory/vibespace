@@ -10,6 +10,9 @@
 //      offset, its cap lifted only as far as its rows stay — r5)
 //   §3 the taskbar at a small screen (src/lib/taskbar-fit.js stripHidden / wheelScroll / switcherForm + TILE_MIN_PX = the
 //      stylesheet's tile floor)
+//   §3b the strip's TWO names (taskbar-fit.js stripKeys — B-6cf9): a title / a star / a tab's title changes the TEXT only
+//      (taskbar.js paints the tiles in place, a press across it still clicks); open / close / reorder / a tab / the active tab
+//      change the STRUCTURE (the tiles rebuilt); its control in §7: the base's one key, titles in it, goes RED by name
 //   §4 the cascade that buries nothing (src/lib/window-min-size.js cascadeBox)
 //   §5 the desktop tier's toast spot (src/lib/utils.js toastDeskSpot) + B-7a51: the stack beside the OPEN For-you panel — its
 //      left, else its right (toastBesidePanel) — else its plain toasts HELD (toastMayYield: an error, an action toast, a pinned
@@ -279,6 +282,39 @@ console.log('§3 the taskbar at a small screen (taskbar-fit.js)');
   const form = (n, bar, others = 140) => TF.switcherForm({ n, each: 54, add: 27, bar, others });
   ok(form(1, 300) === 'full' && form(3, 1008) === 'full' && form(8, 1008) === 'compact' && form(8, 679) === 'compact' && form(3, 679) === 'compact' && form(2, 679) === 'full' && form(6, 0) === 'full',
     'switcherForm: one desktop full; the walk\'s 3 at 1280 full; 8 (the owner\'s many) compact at 951 and 1280; 3 at a 951 px bar compact — the tiles keep 4 × 90 px; a bar not laid out full', [form(1, 300), form(3, 1008), form(8, 1008), form(8, 679), form(3, 679), form(2, 679), form(6, 0)]);
+}
+
+// ── §3b ─────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// B-6cf9 (the coordinator's r1479): THE STRIP'S TWO NAMES — a row: [name, before, after, wanted change: 'text' | 'structure' | 'none']
+const stripRows = () => {
+  const one = (id, title, star = '') => ({ id, title, star, group: null });
+  const grp = (id, tabs, active, star = '') => ({ id, title: tabs[active][1], star, group: { tabs: tabs.map(([tid, title]) => ({ id: tid, title })), active } });
+  const base = [one('w1', 'Lane A — ~/work'), one('w2', 'Terminal'), grp('w3', [['w3', 'Docs'], ['w4', 'Notes']], 0)];
+  const edit = (f) => { const c = JSON.parse(JSON.stringify(base)); f(c); return c; };
+  return [
+    ['a title changes (an agent\'s status in it)', base, edit((c) => { c[0].title = 'Lane A · working — ~/work'; }), 'text'],
+    ['a star is given', base, edit((c) => { c[1].star = '\u2605 '; }), 'text'],
+    ['a grouped tab\'s title changes (not the active one)', base, edit((c) => { c[2].group.tabs[1].title = 'Notes · 2'; }), 'text'],
+    ['a title holding a tab and a newline reads apart from its neighbour', [one('w1', 'a\tb'), one('w2', 'c')], [one('w1', 'a'), one('w2', 'b\tc')], 'text'],
+    ['a window opens', base, edit((c) => { c.push(one('w9', 'New')); }), 'structure'],
+    ['a window closes', base, edit((c) => { c.splice(1, 1); }), 'structure'],
+    ['the tiles reorder', base, edit((c) => { c.reverse(); }), 'structure'],
+    ['a tab joins a group', base, edit((c) => { c[2].group.tabs.push({ id: 'w5', title: 'More' }); }), 'structure'],
+    ['a group\'s active tab changes', base, edit((c) => { c[2].group.active = 1; c[2].title = 'Notes'; }), 'structure'],
+    ['nothing changes', base, edit(() => {}), 'none'],
+  ];
+};
+const stripTable = (keysOf) => stripRows().map(([name, a, b, want]) => {
+  const x = keysOf(a), y = keysOf(b);
+  const got = x.structure !== y.structure ? 'structure' : x.text !== y.text ? 'text' : 'none';
+  return [name, got, want];
+});
+console.log('§3b the strip\'s two names (taskbar-fit.js stripKeys — B-6cf9)');
+{
+  const rows = stripTable(TF.stripKeys);
+  const bad = rows.filter(([, got, want]) => got !== want);
+  ok(rows.length === 10 && bad.length === 0, `stripKeys: a title, a star or a grouped tab's title changes the TEXT only (painted in place — a press across it keeps its element); a window opened, closed or moved, a tab joining, the active tab change the STRUCTURE (the tiles rebuilt); nothing changed, nothing — ${rows.map(([n, g]) => `${n}: ${g}`).join(' · ')}`, bad);
+  ok(same(TF.stripKeys([]), { structure: '[]', text: '[]' }) && same(TF.stripKeys(null), { structure: '[]', text: '[]' }), 'stripKeys: an empty strip has two empty names (and a non-list reads as none)');
 }
 
 // ── §4 ──────────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -635,6 +671,10 @@ console.log('§7 controls — each rule\'s base form, on its own table');
   ok(menuTable(mpNoCap.menuPlace).filter(([n, g, w]) => /wider than the viewport/.test(n) && !same(g, w)).length === 2, 'CONTROL menuPlace without `maxW` (doors-table r4): a menu wider than the viewport runs past its right edge (RED)');
   const mpNoOffset = await patched('src/lib/menu-place.js', [['    const tall = Math.min(below, h - scroll);', '    const tall = Math.min(below, h);']], 'menu-no-offset');
   ok(menuTable(mpNoOffset.menuPlace).filter(([n, g, w]) => /^doors-table r5: a list wheeled 100 px(, the room grown| whose content shrank)/.test(n) && !same(g, w)).length === 2, 'CONTROL menuPlace lifting a wheeled box\'s cap whole (5a98bf0f): the offset dropped — every row comes down by it (RED)');
+  // B-6cf9: the base's ONE key — a title in the structure ⇒ every title change rebuilds the strip (the press across it lost)
+  const tfOneKey = await patched('src/lib/taskbar-fit.js', [['  const structure = list.map((e) => (e.group ? [e.id, e.group.tabs.map((x) => x.id), e.group.active] : [e.id]));', '  const structure = list.map((e) => [e.id, String(e.title ?? \'\'), String(e.star ?? \'\'), ...(e.group ? [e.group.tabs.map((x) => [x.id, x.title]), e.group.active] : [])]);']], 'strip-one-key');
+  { const red = stripTable(tfOneKey.stripKeys).filter(([, got, want]) => got !== want).map(([n]) => n);
+    ok(red.length === 4 && red[0] === 'a title changes (an agent\'s status in it)', `CONTROL the base's one key (titles and stars in the strip's structure): a title change rebuilds every tile — RED by name: «${red.join(' · ')}»`, red); }
   const tfNoCut = await patched('src/lib/taskbar-fit.js', [['    if (l >= -0.5 && r <= width + 0.5) continue;', '    if (l >= -0.5 && l <= width) continue;']], 'strip-cut-counts');
   ok(!same(tfNoCut.stripHidden({ tiles: Array.from({ length: 8 }, (_, i) => ({ id: 'w' + i, left: i * 92 - 60, width: 90 })), width: 500 }).hidden, ['w0', 'w6', 'w7']), 'CONTROL stripHidden counting a cut tile as shown: the «+N» list misses it (RED)');
   const deNoCut = await patched('src/lib/drag-end.js', [['export function resizeRelease(box, ws, dir = \'\', keep = RELEASE_KEEP, min = null) {\n', 'export function resizeRelease(box, ws, dir = \'\', keep = RELEASE_KEEP, min = null) {\n  if (box) return { ...box, moved: false };\n']], 'resize-no-release');

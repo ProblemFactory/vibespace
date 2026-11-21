@@ -1,6 +1,6 @@
 import { startFileDownload } from './file-download.js';
 import { createPopover, showContextMenu, showToast, uiScale } from './utils.js';
-import { stripHidden, wheelScroll } from './taskbar-fit.js'; // PURE (lane desktop-small P2-2): the tiles the strip cuts, the wheel's sideways scroll
+import { stripHidden, wheelScroll, stripKeys } from './taskbar-fit.js'; // PURE (lane desktop-small P2-2): the tiles the strip cuts, the wheel's sideways scroll; B-6cf9: the strip's two names
 import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the «+N» list beside its chip (lane desktop-small r2 ②)
 import { groupClickVerdict, hoverVerdict, hoverStep, groupKeyVerdict, inFrontOf, GROUP_HOVER_INTENT_MS, GROUP_HOVER_LEAVE_MS } from './taskbar-group.js';
 import { t } from './i18n.js';
@@ -162,16 +162,22 @@ export function updateTaskbar(app) {
   // Structure unchanged → update state classes in place. onWindowsChanged
   // fires on EVERY focus (each mousedown); a full innerHTML rebuild + listener
   // re-wiring per click was constant churn.
-  const structKey = entries.map(e => {
-    const g = e.group
-      ? `\tG:${e.group.tabWins.map(t => t.id).join(',')}:${e.group.active}:${e.group.tabWins.map(t => t.win.title).join('\t')}`
-      : '';
-    return `${e.id}\t${e.win.title}\t${e.starPrefix}${g}`;
-  }).join('\n');
+  // B-6cf9 (the coordinator's r1479): the strip has TWO names (PURE taskbar-fit.js stripKeys). Its STRUCTURE (the ids in
+  // order, a group's tab ids and active tab) rebuilds the tiles; its TEXT (a title, a star, a group's tab titles) is
+  // painted IN PLACE by paintTaskbarText — a title used to rebuild every tile, so a press whose down and up straddled it
+  // had its up on a new element and fired no click. A press across a real STRUCTURE change may still be lost (kb-features).
+  const { structure: structKey, text: textKey } = stripKeys(entries.map((e) => ({ id: e.id, title: e.win.title, star: e.starPrefix,
+    group: e.group ? { tabs: e.group.tabWins.map((x) => ({ id: x.id, title: x.win.title })), active: e.group.active } : null })));
   if (container._structKey === structKey) {
+    if (container._textKey !== textKey) {
+      container._textKey = textKey;
+      const byId = new Map(entries.map((e) => [e.id, e]));
+      for (const el of container.children) { const e = byId.get(el.dataset.winId); if (e && paintTaskbarText(app, el, e)) paintTile(app, el); } // a refilled icon takes its warmth ring again
+    }
     for (const el of container.children) _applyTaskbarItemState(app, el);
   } else {
     container._structKey = structKey;
+    container._textKey = textKey;
     for (const id of _hoverSpent) if (!entries.some((e) => e.id === id && e.group)) _hoverSpent.delete(id); // a group gone from the taskbar ends its visit
     container.innerHTML = '';
     _rebuildTaskbarItems(app, container, entries);
@@ -291,6 +297,61 @@ function showHiddenTiles(app, chip) {
   });
 }
 
+// B-6cf9 (the coordinator's r1479) — THE STRIP'S ONE TEXT PAINTER: what a tile SAYS and shows — its title line (the
+// star first), its second line, its tooltip (a single tile) or its accessible name (a group), its icon — and, while a
+// group's chooser is open, each of its rows' titles. The builders call it once; updateTaskbar calls it again when only the
+// strip's TEXT name changed, so the tile stays the element a press went down on (a rebuild between a press's down and up
+// fired no click). It writes text through textContent and attributes only — a title is a peer's text, never markup; the
+// one markup it sets is the product's own type icon, as the builder always did. An icon is refilled only when ITS key
+// changed (a press on an icon kept still keeps its element too); → true when an icon was refilled (its warmth ring went
+// with it: the caller paints it again).
+const _tileIconKey = (w) => (w?.backendIconSlot?.children.length ? 'b:' + w.backendIconSlot.children[0].outerHTML : 't:' + (w?._typeIcon || ''));
+function paintTaskbarText(app, item, { win, starPrefix, group }) {
+  const title = item.querySelector(':scope > .taskbar-text > .taskbar-title');
+  const subtitle = item.querySelector(':scope > .taskbar-text > .taskbar-subtitle');
+  if (!title || !subtitle) return false;
+  let refilled = false;
+  if (group) {
+    const activeTab = group.tabWins[group.active] || group.tabWins[0];
+    title.textContent = starPrefix + windowWords(activeTab.win);
+    subtitle.textContent = t('{n} windows grouped', { n: group.tabWins.length });
+    item.setAttribute('aria-label', `${activeTab.win.title} \u2014 ${subtitle.textContent}`);
+    const stack = item.querySelector(':scope > .taskbar-icon-stack');
+    const key = group.active + '|' + group.tabWins.map((x) => _tileIconKey(x.win)).join('|');
+    if (stack && stack._iconKey !== key) { const fresh = _buildStackIcon(app, group); fresh._iconKey = key; stack.replaceWith(fresh); refilled = true; }
+    const pop = _chooserOf(group.chain.tabs[0]);
+    if (pop) for (const row of pop.querySelectorAll('.overlap-switcher-item[data-win-id]')) {
+      const w = app.wm.windows.get(row.dataset.winId), label = row.querySelector(':scope > .taskbar-chooser-label');
+      const words = w && label ? windowTitle(w) : null;   // a LIST row: the whole title, the folder kept (test-window-types' sites)
+      if (words != null && label.textContent !== words) label.textContent = words;
+    }
+    return refilled;
+  }
+  item.title = win.title; // full title — taskbar items truncate hard
+  // Split title: first part = name, second part = path (after " — ")
+  const parts = win.title.split(' \u2014 ');
+  // lane ui-plain-words M2b: a title-less window is named by its kind's words; the second line is the title's tail,
+  // else the kind's words when they say something the first line does not (never the raw `type`: «stage-placeholder»)
+  title.textContent = starPrefix + windowWords(win);
+  const kindWords = windowKindWords(win.type);
+  subtitle.textContent = parts[1] || (kindWords !== windowWords(win) ? kindWords : '');
+  const icon = item.querySelector(':scope > .taskbar-icon');
+  const key = _tileIconKey(win);
+  if (icon && icon._iconKey !== key) {
+    icon._iconKey = key;
+    // the window's backend+mode icon if available, else its type icon (the product's own SVG)
+    if (win.backendIconSlot?.children.length) {
+      const clone = win.backendIconSlot.children[0].cloneNode(true);
+      clone.style.width = ''; clone.style.height = '';
+      icon.replaceChildren(clone);
+    } else {
+      icon.innerHTML = win._typeIcon || '';
+    }
+    refilled = true;
+  }
+  return refilled;
+}
+
 function _rebuildTaskbarItems(app, container, entries) {
   for (const { id, win, starPrefix, group } of entries) {
     const item = document.createElement('div'); item.className = 'taskbar-item';
@@ -301,33 +362,19 @@ function _rebuildTaskbarItems(app, container, entries) {
     if (win.isMinimized) item.classList.add('minimized');
     if (windowWaits(win)) item.classList.add('waiting'); // THE waiting fact (desktop-switch.js windowWaits — the phone's doors read it too)
     if (win.element.classList.contains('window-arrived')) item.classList.add('arrived'); // an agent placed it (window.js markArrived)
-    // Icon: clone the window's backend+mode icon if available, else use type emoji
+    // Icon (the window's backend+mode icon, else its type icon) and the text column (title + subtitle): drawn by THE ONE
+    // painter below (B-6cf9) — the same call paints them IN PLACE when only a title or a star changes later
     const icon = document.createElement('span');
     icon.className = 'taskbar-icon';
-    if (win.backendIconSlot?.children.length) {
-      const clone = win.backendIconSlot.children[0].cloneNode(true);
-      clone.style.width = ''; clone.style.height = '';
-      icon.appendChild(clone);
-    } else {
-      icon.innerHTML = win._typeIcon || '';
-    }
-    item.title = win.title; // full title — taskbar items truncate hard
-    // Text column (title + subtitle)
     const textCol = document.createElement('div');
     textCol.className = 'taskbar-text';
     const title = document.createElement('div');
     title.className = 'taskbar-title';
-    // Split title: first part = name, second part = path (after " — ")
-    const parts = win.title.split(' \u2014 ');
-    // lane ui-plain-words M2b: a title-less window is named by its kind's words; the second line is the title's tail,
-    // else the kind's words when they say something the first line does not (never the raw `type`: «stage-placeholder»)
-    title.textContent = starPrefix + windowWords(win);
     const subtitle = document.createElement('div');
     subtitle.className = 'taskbar-subtitle';
-    const kindWords = windowKindWords(win.type);
-    subtitle.textContent = parts[1] || (kindWords !== windowWords(win) ? kindWords : '');
     textCol.append(title, subtitle);
     item.append(icon, textCol);
+    paintTaskbarText(app, item, { win, starPrefix, group: null });
     paintTile(app, item); // lane cache-warmth-band: the tile's warmth ring (before the icon), from the tick's map
     // Draggable: allow dropping onto desktop previews
     item.draggable = true;
@@ -647,28 +694,25 @@ function _buildGroupItem(app, container, item, hostWin, starPrefix, group) {
   item.classList.add('taskbar-group');
   item.dataset.groupTabs = group.tabWins.map(t => t.id).join(',');
   _applyTaskbarItemState(app, item);
-  item.appendChild(_buildStackIcon(app, group));
-
-  const activeTab = group.tabWins[group.active] || group.tabWins[0];
+  const stack = document.createElement('span'); stack.className = 'taskbar-icon taskbar-icon-stack';   // filled by the painter (B-6cf9)
+  item.appendChild(stack);
   const textCol = document.createElement('div'); textCol.className = 'taskbar-text';
   const title = document.createElement('div'); title.className = 'taskbar-title';
-  const parts = activeTab.win.title.split(' \u2014 ');
-  title.textContent = starPrefix + windowWords(activeTab.win);
   const subtitle = document.createElement('div'); subtitle.className = 'taskbar-subtitle';
-  subtitle.textContent = t('{n} windows grouped', { n: group.tabWins.length });
   textCol.append(title, subtitle);
   item.appendChild(textCol);
-  paintTile(app, item); // lane cache-warmth-band: the group tile's ring = the worst live tier over its tabs
   // no native tooltip: the hover chooser lists every title (a tooltip would sit
-  // over it); the keyboard / screen reader get the button's name
+  // over it); the keyboard / screen reader get the button's name (the painter writes it)
   item.tabIndex = 0;
   item.setAttribute('role', 'button');
   item.setAttribute('aria-haspopup', 'menu');
   item.setAttribute('aria-expanded', 'false');
-  item.setAttribute('aria-label', `${activeTab.win.title} \u2014 ${subtitle.textContent}`);
+  paintTaskbarText(app, item, { win: hostWin, starPrefix, group });
+  paintTile(app, item); // lane cache-warmth-band: the group tile's ring = the worst live tier over its tabs
 
   const hostId = group.chain.tabs[0];
-  // a REBUILD under an open chooser (a tab title change re-keys the structure)
+  // a REBUILD under an open chooser (a tab added, closed or made active re-keys the STRUCTURE; a title change no
+  // longer does — B-6cf9 paints it in place)
   // hands it this button: aria-expanded, the Esc focus return and the
   // outside-mousedown exclusion follow the live button, never a detached one
   _chooserOf(hostId)?._chooser.reanchor(item);
@@ -813,6 +857,7 @@ export function showTabGroupList(app, anchor, chain, { hover = false, keyboard =
     icon.style.cssText = 'flex-shrink:0;display:inline-flex;align-items:center';
     icon.appendChild(_cloneTabIcon(win));
     const label = document.createElement('span');
+    label.className = 'taskbar-chooser-label';   // B-6cf9: the strip's painter writes a tab's new title here while the list is open
     label.textContent = windowTitle(win);
     item.append(icon, label);
     paintTile(app, item); // lane cache-warmth-band: the row's own ring (its tab's conversation)
