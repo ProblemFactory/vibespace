@@ -9,6 +9,7 @@ const isLoop = (n) => /^(For|While|DoWhile|ForOf|ForIn)Statement$/.test(n.type);
 const SLEEPS = /^(sleep|tick|delay|wait|pause|nap|realSleep)$/;
 const sleeps = (n) => { let y = false; walk(n, (m) => { if (y || m.type !== 'AwaitExpression') return; walk(m.argument, (c) => { if ((c.type === 'Identifier' && (SLEEPS.test(c.name) || c.name === 'setTimeout')) || (c.type === 'MemberExpression' && c.property && c.property.name === 'setTimeout')) y = true; }); }); return y; };
 const unAwait = (a) => (a && a.type === 'AwaitExpression' ? a.argument : a);
+const rootOf = (e) => { while (e && (e.type === 'CallExpression' || e.type === 'MemberExpression' || e.type === 'AwaitExpression')) e = e.type === 'CallExpression' ? e.callee : e.type === 'MemberExpression' ? e.object : e.argument; return e && e.type === 'Identifier' ? e.name : null; };
 const calleeOf = (a) => { a = unAwait(a); if (!a || a.type !== 'CallExpression') return null; const c = a.callee; return c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && c.property && c.property.name ? '.' + c.property.name : null; };
 function shapesOf(ast, page) {
   const out = [];
@@ -32,15 +33,24 @@ function shapesOf(ast, page) {
           else if (after.type === 'CallExpression' && fromCall.get(v) && fromCall.get(v) === calleeOf(after)) hit = `returns ${v} = ${fromCall.get(v)}() when a test on it passes, and one more ${fromCall.get(v)}() when its bound runs out`;
         }
       });
+      // THE BREAK FORM (r1372, read in the nine): a test on the read BREAKS the loop, and the read (or a call on it: o.sort(…)) is
+      // returned after it, whichever way the loop ended. Cured: a timed-out mark (markTimedOut) or a choice between the two ends
+      if (!hit) {
+        const x = rootOf(ret.argument), assigned = new Set();
+        walk(loop, (m) => { if (m.type === 'AssignmentExpression' && m.left.type === 'Identifier') assigned.add(m.left.name); if (m.type === 'VariableDeclarator' && m.id.type === 'Identifier') assigned.add(m.id.name); });
+        if (x && assigned.has(x)) walk(loop, (m) => { if (hit || m.type !== 'IfStatement' || (m.test.type === 'Identifier' && m.test.name === x)) return; let brk = false; walk(m.consequent, (c) => { if (c.type === 'BreakStatement' && !c.label) brk = true; }); if (brk) hit = `breaks its loop when a test on ${x} passes, and returns ${x} — its last read — whichever way the loop ended`; });
+      }
       if (hit) out.push({ at: fn.start, page, hit });
     }
   });
   return out;
 }
 // the cheap gate before the parse: a test that returns a NAME (the in-loop success of the shape), and a wait (a sleep or a timer)
+const BREAKS = /if\s*\([^\n]*?\)\s*(?:\{\s*)?break\s*[;}][^]{0,240}?\}\s*return\s+[A-Za-z_$]/;   // the break form's own text gate (r1372): a break, the loop's end, then its return
 const MAYBE = /if\s*\([^\n]*?\)\s*(?:\{\s*)?return\s+([A-Za-z_$][\w$]*)\s*[;}]/g, WAITS = /\b(?:sleep|tick|delay|wait|pause|nap|realSleep|setTimeout)\s*\(/;
 export const mayHaveLastReadWait = (src) => {
   if (!WAITS.test(src)) return false;
+  if (BREAKS.test(src)) return true;
   for (const m of src.matchAll(MAYBE)) { const tail = src.slice(m.index + m[0].length, m.index + m[0].length + 700); if (new RegExp(`\\}\\s*(?:try\\s*\\{\\s*)?return\\s+(?:await\\s+)?(?:${m[1].replace(/\$/g, '\\$')}\\b|[A-Za-z_$.][\\w$.]*\\()`).test(tail)) return true; }   // the loop's own end, then its return
   return false;
 };
