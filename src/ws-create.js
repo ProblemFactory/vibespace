@@ -902,7 +902,9 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // (…and the pool DEFAULT the store self-heals is the POOL's choice: the conversation's pin rides only its own link)
                 // (`hinted`: the family is the instance default standing in for a resume that commands none — no spare-lane placement on a guess, B-8a65 verify r1)
                 // (`forDefault`: the store is placing the POOL's default, not this conversation — no proving spawn there, lane reset-unproven r3)
-                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, hinted: !data.model, forDefault: !!how.forDefault, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}) }),
+                // (`resumeOf`, B-d578 pool unit (a): a RESUME names the backend id it resumes — a conversation the pool moved to another
+                // provider starts on the member it was moved to, not where the rules under 'never' would put it back; a fork never)
+                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, hinted: !data.model, forDefault: !!how.forDefault, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}), ...(data.resumeId && !data.fork ? { resumeOf: String(data.resumeId) } : {}) }),
                 pinned: !!data._poolPin, // a codex pool spawns straight onto the chooser's answer only for a pinned conversation
               });
             }

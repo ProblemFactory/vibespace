@@ -3188,7 +3188,7 @@ await (async () => {
       const hRed = eDef ? healLegs(healWorld(eDef)).filter((r) => !r.pass).map((r) => r.name) : ['no patch'];
       ck('r3 MAJOR RED: proving admitted for the pool DEFAULT re-points the default onto the guess (U) — the default legs go red by name', !!eDef && hRed.some((n) => n.includes('re-pointed onto MEASURED headroom')), JSON.stringify(hRed));
       const ePer = ectl('perpool', [['const _proving = new Map();\n', 'const _provingPools = new Map(); let _proving = new Map(); /* PATCHED: a map per pool, as r2 had it */\n'],
-        ['function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false } = {}) {\n', 'function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false } = {}) { _proving = _provingPools.get(poolId) || _provingPools.set(poolId, new Map()).get(poolId); /* PATCHED */\n']]);
+        ['function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) {\n', 'function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false, resumeOf = null } = {}) { _proving = _provingPools.get(poolId) || _provingPools.set(poolId, new Map()).get(poolId); /* PATCHED */\n']]);
       const tpRed = ePer ? twoPools(ePer) : null;
       ck('r3 MINOR 2 RED: with a hold map PER POOL the second pool sends its spawn onto the SAME guess (UCI, UCI)', !!tpRed && tpRed[0] === 'uci' && tpRed[1] === 'uci', JSON.stringify(tpRed));
       const eOwn = ectl('ownfile', [['readReading: poolReadReading(),', "readReading: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } }, /* PATCHED: the member's own file only */"]]);
@@ -3601,9 +3601,21 @@ await (async () => {
     ck('engine: …the toast says who, both providers and both models', wn.notices.some((n) => n.t === 'Pool "Pool": conversation "s1" — switched from Member A (Claude subscription) to Member B (DeepSeek), model sonnet → deepseek-chat. Restarting the conversation to apply it.'), J(wn.notices.map((n) => n.t)));
     ck('engine: …the pool setting is untouched by Allow once (still never)', wn.am.get(wn.Pl).crossProvider === undefined);
     ck('engine: …ONE line is owed to the RESUMED conversation (the restart rebuilds the chat)', wn.eng._crossLinesOwed.get('cid-s1')?.text === 'Switched from Member A (Claude subscription) to Member B (DeepSeek) — model sonnet → deepseek-chat', J([...wn.eng._crossLinesOwed]));
-    wn.sessions.delete('s1'); const rs = wn.mk('s1b', 'cid-s1'); wn.am.ensureSessionPoolLink(wn.Pl, 's1b', wn.B, { why: 'spawn' });
+    // THE COLD MOVE LANDS (row B-d578, the pool's fallback unit (a), ruling r1516 — was faked here by a link set by hand): the
+    // RESUMED process is placed by the REAL chooser through the store's own spawn road — resolveForSpawn's per-session link with
+    // ws-create's chooseMember (the restart's model, `resumeOf` = the backend id it resumes)
+    const chooseFor = (resumeOf) => (pid, how = {}) => wn.eng.poolChooserForModel(pid, { model: 'deepseek-chat', hinted: false, forDefault: !!how.forDefault, ...(resumeOf ? { resumeOf } : {}) });
+    ck('engine: …the carry names B for this pool under the backend id (cid-s1), from the server id it left (s1)', (() => { const c = wn.eng._crossPlacementOwed.get('cid-s1'); return !!c && c.poolId === wn.Pl && c.to === wn.B && c.fromSid === 's1'; })(), J([...wn.eng._crossPlacementOwed]));
+    wn.sessions.delete('s1'); const rs = wn.mk('s1b', 'cid-s1');
+    const ctl = wn.quiet(() => wn.am.resolveForSpawn(wn.Pl, 'claude', { sessionKey: 's1c', chooseMember: chooseFor(null) }));
+    ck('engine: CONTROL — a resume that does not name its backend id (the release\'s road) is placed back on Member A by the rules under never: the move would not land', ctl && ctl.poolTarget === wn.A, J(ctl && ctl.poolTarget));
+    const sp = wn.quiet(() => wn.am.resolveForSpawn(wn.Pl, 'claude', { sessionKey: 's1b', chooseMember: chooseFor('cid-s1') }));
+    ck('engine: …the RESUME (a new server id, s1b, same backend id) starts on Member B — the spawn\'s own link, by the real chooser', sp && sp.poolTarget === wn.B && sp.sessionLink === true && wn.on('s1b') === 'B', J({ target: sp && sp.poolTarget, on: wn.on('s1b') }));
+    ck('engine: …a FORK of it (no resumeOf) and the POOL\'s default (forDefault) are never placed by the carry', wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat', forDefault: true, resumeOf: 'cid-s1' }) !== wn.B && wn.eng.poolChooserForModel(wn.Pl, { model: 'deepseek-chat' }) !== wn.B);
+    ck('engine: …another pool never reads this pool\'s carry', wn.eng.crossCarryFor('pool-other', 'cid-s1') === null && wn.eng.crossCarryFor(wn.Pl, 'cid-s1') === wn.B);
     wn.pass();
     ck('engine: …and it is fed once into the resumed conversation (same backend id, a new server id)', !wn.eng._crossLinesOwed.has('cid-s1') && !!rs, J([...wn.eng._crossLinesOwed]));
+    ck('engine: …the carry ends where the resumed conversation is seen (a later resume is placed by the rules again); the pass keeps it on B', !wn.eng._crossPlacementOwed.has('cid-s1') && wn.on('s1b') === 'B', J({ carry: [...wn.eng._crossPlacementOwed], on: wn.on('s1b') }));
     // Deny: nothing moves, not asked again
     const wd = pworld(); wd.client(); wd.mk('s2'); wd.pass();
     const c3 = wd.items.find((x) => x.action && x.action.type === 'pool-cross-provider');
