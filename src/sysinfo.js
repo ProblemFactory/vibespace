@@ -230,31 +230,47 @@ function statTicks(st) {
 }
 // B-360d (lane bl-keys-misc, r1072 — measured on the test machine: the sample read /proc/<pid>/stat for EVERY row of the table,
 // synchronously, 32–35 ms at the owner's 2 400 processes, every 5 s while the System panel is open): THE READS GO OFF THE LOOP —
-// fs.promises in slices of SAMPLE_SLICE, each slice's answers parsed in one short turn. One instant for the whole table, as before.
+// fs.promises in slices of SAMPLE_SLICE, each slice's answers parsed in one short turn. r1316 (the round's three smalls):
+//   · ONE SAMPLE IN FLIGHT: two pages, or a page and a paired machine's poll, would interleave their slices over the one baseline
+//     map (a row then reads 0 % or falls back): a second ask JOINS the flight that is out (its rows take the flight's shares by pid)
+//   · A BOUND: the reads ride the file threadpool; a pool held behind a storage that stops replying never answers — past
+//     SAMPLE_BOUND_MS the table goes out «not sampled» (as a failed read does), and the next ask joins that same flight (never one
+//     more pending table each poll)
+//   · THE INSTANT IS A SLICE'S: taken when that slice's reads have answered, so a busy pool in one sample and not the other skews
+//     nothing
 const SAMPLE_SLICE = 128;
-async function sampleProcCpu(rows) {
-  if (process.platform !== 'linux') return false;
-  const now = Date.now();
-  const seen = new Set();
-  let any = false;
-  for (let i = 0; i < rows.length; i += SAMPLE_SLICE) {
-    const slice = rows.slice(i, i + SAMPLE_SLICE);
-    const texts = await Promise.all(slice.map((r) => fs.promises.readFile('/proc/' + r.pid + '/stat', 'utf8').catch(() => null)));   // null: exited between ps and the sample
+const SAMPLE_BOUND_MS = 4000;
+let _sampleFlight = null;
+async function sampleRun(pids) {
+  const seen = new Set(), live = new Map();
+  for (let i = 0; i < pids.length; i += SAMPLE_SLICE) {
+    const slice = pids.slice(i, i + SAMPLE_SLICE);
+    const texts = await Promise.all(slice.map((pid) => fs.promises.readFile('/proc/' + pid + '/stat', 'utf8').catch(() => null)));   // null: exited between ps and the sample
+    const now = Date.now();   // THE SLICE'S instant (r1316)
     for (let k = 0; k < slice.length; k++) {
       const t = texts[k] === null ? null : statTicks(texts[k]);
       if (!t) continue;
-      const r = slice[k], key = r.pid + ':' + t.start;
+      const pid = slice[k], key = pid + ':' + t.start;
       seen.add(key);
       const prev = _procCpu.get(key);
       _procCpu.set(key, { ticks: t.ticks, at: now });
-      if (prev && now > prev.at) {
-        // % of ONE core (btop convention — multithreaded may exceed 100)
-        r.pcpuNow = Math.max(0, Math.round(((t.ticks - prev.ticks) / 100) / ((now - prev.at) / 1000) * 1000) / 10);
-        any = true;
-      }
+      // % of ONE core (btop convention — multithreaded may exceed 100)
+      if (prev && now > prev.at) live.set(pid, Math.max(0, Math.round(((t.ticks - prev.ticks) / 100) / ((now - prev.at) / 1000) * 1000) / 10));
     }
   }
   if (_procCpu.size > 2000) for (const k of _procCpu.keys()) if (!seen.has(k)) _procCpu.delete(k);
+  return live;
+}
+/** → Promise<boolean> (a live share was set on any row). A second ask JOINS the flight that is out; past `boundMs` it answers
+ *  false (the table «not sampled») and the flight is left to end on its own. */
+async function sampleProcCpu(rows, { boundMs = SAMPLE_BOUND_MS } = {}) {
+  if (process.platform !== 'linux') return false;
+  const flight = _sampleFlight || (_sampleFlight = sampleRun(rows.map((r) => r.pid)).finally(() => { _sampleFlight = null; }));
+  let timer = null;
+  const live = await Promise.race([flight, new Promise((resolve) => { timer = setTimeout(() => resolve(null), boundMs); if (timer.unref) timer.unref(); })]).finally(() => clearTimeout(timer));
+  if (!live) return false;
+  let any = false;
+  for (const r of rows) { const v = live.get(r.pid); if (v !== undefined) { r.pcpuNow = v; any = true; } }
   return any;
 }
 
@@ -474,4 +490,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } 
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram, sampleProcCpu, statTicks, SAMPLE_SLICE };
+module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram, sampleProcCpu, statTicks, SAMPLE_SLICE, SAMPLE_BOUND_MS };

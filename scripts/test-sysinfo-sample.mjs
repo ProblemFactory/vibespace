@@ -9,6 +9,10 @@
 //   ② OFF THE LOOP at 2 400 rows over this machine's real pids (cycled): the loop's longest gap while the sample runs, against the
 //      release's synchronous sample in a copy measured in the same run (RED: the copy holds the loop); both sample the same rows
 //   ③ listProcs samples the WHOLE table before it caps, and answers `sampled`
+//   ⑤ (r1316) ONE SAMPLE IN FLIGHT: two asks at once read each stat file ONCE (the second joins); RED: a copy without the join reads
+//      twice
+//   ⑥ (r1316) THE BOUND: a pool that never answers — the ask answers «not sampled» at its bound, a second ask joins that flight (no
+//      new reads); RED: a copy without the bound never answers
 //   ④ CENSUS: no synchronous read left in the sample
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,7 +45,7 @@ WD.section('①');
 }
 
 // THE RELEASE'S SAMPLE, in a copy: the synchronous loop over the whole table (its body before this unit)
-const ASYNC_A = SRC.indexOf('async function sampleProcCpu(rows) {'), ASYNC_B = SRC.indexOf('\n  return any;\n}', ASYNC_A);
+const ASYNC_A = SRC.indexOf('async function sampleRun(pids) {'), ASYNC_B = SRC.indexOf('\n  return any;\n}', SRC.indexOf('async function sampleProcCpu(rows, ', ASYNC_A));
 const ASYNC_FN = ASYNC_A > 0 && ASYNC_B > ASYNC_A ? SRC.slice(ASYNC_A, ASYNC_B + '\n  return any;\n}'.length) : '';
 const RELEASE_FN = `function sampleProcCpu(rows) {
   if (process.platform !== 'linux') return false;
@@ -78,6 +82,7 @@ else {
   const run = async (Mod) => { const a = rowsOf(); await Mod.sampleProcCpu(a); await new Promise((r) => setTimeout(r, 30)); const b = rowsOf(); const g = await gapOf(() => Promise.resolve(Mod.sampleProcCpu(b))); return { max: g.max, took: g.took, sampled: g.out, live: b.filter((r) => typeof r.pcpuNow === 'number').length }; };
   const rel = await run(REL), mine = await run(SI);
   ok(rel.max >= rel.took * 0.8, `CONTROL (the release's synchronous sample, in a copy): the loop is HELD for the whole sample — its longest gap ${rel.max} ms of its ${rel.took} ms (one turn) over ${ROWS} stat files`);
+  say(`    the sample's wall time at ${ROWS} rows (slices of ${SI.SAMPLE_SLICE}): ${mine.took} ms off the loop; the release's ${rel.took} ms in one turn`);
   ok(mine.max < rel.max / 3 && mine.max < mine.took / 2, `this tree: the reads off the loop, in slices of ${SI.SAMPLE_SLICE} — the longest gap ${mine.max} ms of its ${mine.took} ms, under a third of the release's ${rel.max} ms measured in this run`);
   ok(mine.sampled === true && rel.sampled === true && mine.live > 0 && rel.live > 0, `both sample the table (${mine.live} / ${rel.live} rows carry a live CPU %: a pid's FIRST row of a run reads the last run's — the rows cycle ${pids.length} pids, and a process may end between the runs)`);
   for (const r of copiesCensus(M.files, M.dir, ROOT, { minCopies: 1, label: 'B-360d sample ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
@@ -95,9 +100,58 @@ WD.section('③');
 say('④ CENSUS');
 WD.section('④');
 {
-  ok(ASYNC_FN.length > 0 && !/readFileSync|statSync|openSync/.test(ASYNC_FN) && /fs\.promises\.readFile\('\/proc\/' \+ r\.pid \+ '\/stat'/.test(ASYNC_FN), 'no synchronous read left in the sample: /proc/<pid>/stat through fs.promises');
+  ok(ASYNC_FN.length > 0 && !/readFileSync|statSync|openSync/.test(ASYNC_FN) && /fs\.promises\.readFile\('\/proc\/' \+ pid \+ '\/stat'/.test(ASYNC_FN) && /const now = Date\.now\(\);   \/\/ THE SLICE'S instant/.test(ASYNC_FN), 'no synchronous read left in the sample: /proc/<pid>/stat through fs.promises; the instant is each slice\'s (r1316)');
   const PURE = SRC.slice(SRC.indexOf('function statTicks(st) {'), SRC.indexOf('\n}', SRC.indexOf('function statTicks(st) {')) + 2);
   ok(PURE.length > 50 && !/\bfs\.|require\(/.test(PURE), 'statTicks is PURE (no file, no module)');
+}
+say('⑤ ONE SAMPLE IN FLIGHT (r1316): a second ask joins the one that is out');
+WD.section('⑤');
+if (!LINUX) { skipped++; say('  · SKIP ⑤ ⑥: no /proc — COUNTED, not passed'); }
+else {
+  const M2 = mutantCopies('sysinfo-sample-flight', ROOT);
+  const JOIN = '  const flight = _sampleFlight || (_sampleFlight = sampleRun(rows.map((r) => r.pid)).finally(() => { _sampleFlight = null; }));\n';
+  ok(SRC.split(JOIN).length === 2, 'control setup: the join is one line');
+  const NOJOIN = require(M2.write('src/sysinfo.js', anchored(SRC, JOIN, '  const flight = sampleRun(rows.map((r) => r.pid));   // MUTANT: no join\n', 'no-join'), 'no-join'));
+  const BOUND = '  const live = await Promise.race([flight, new Promise((resolve) => { timer = setTimeout(() => resolve(null), boundMs); if (timer.unref) timer.unref(); })]).finally(() => clearTimeout(timer));\n';
+  ok(SRC.split(BOUND).length === 2, 'control setup: the bound is one line');
+  const NOBOUND = require(M2.write('src/sysinfo.js', anchored(SRC, BOUND, '  const live = await flight;   // MUTANT: no bound\n', 'no-bound'), 'no-bound'));
+  const pids = fs.readdirSync('/proc').filter((d) => /^\d+$/.test(d)).map(Number).slice(0, 200);
+  const rowsN = () => pids.map((pid) => ({ pid, rss: 0, pcpu: 0 }));
+  // every /proc stat read counted (the product reads through fs.promises.readFile on the shared fs module)
+  const rf0 = fs.promises.readFile; let reads = 0, hang = false; const held = [];
+  fs.promises.readFile = function (p, ...a) { if (typeof p === 'string' && p.startsWith('/proc/') && p.endsWith('/stat')) { reads++; if (hang) return new Promise((r) => held.push(r)); } return rf0.call(this, p, ...a); };
+  let keepAlive = null;   // ⑥'s (below)
+  try {
+    const twoAsks = async (Mod) => { await Mod.sampleProcCpu(rowsN()); await new Promise((r) => setTimeout(r, 30)); reads = 0; const a = rowsN(), b = rowsN(); const [ra, rb] = await Promise.all([Mod.sampleProcCpu(a), Mod.sampleProcCpu(b)]); return { reads, ra, rb, la: a.filter((r) => typeof r.pcpuNow === 'number').length, lb: b.filter((r) => typeof r.pcpuNow === 'number').length }; };
+    const mine = await twoAsks(SI), rel = await twoAsks(NOJOIN);
+    ok(mine.reads === pids.length && mine.ra === true && mine.rb === true && mine.la > 0 && mine.la === mine.lb, `two asks at once: ${mine.reads} stat reads for ${pids.length} rows (ONE flight), and both tables carry the same shares (${mine.la} / ${mine.lb} rows)`, mine);
+    ok(rel.reads === 2 * pids.length, `RED CONTROL (a copy without the join): ${rel.reads} reads — two samples interleave over the one baseline map`, rel);
+    say('⑥ THE BOUND (r1316): a pool that never answers');
+    WD.section('⑥');
+    const B = 150;   // the bound handed to the product (its own is SAMPLE_BOUND_MS)
+    // the product's bound timer is unref'd (it never holds the hub open); in this lone process, with every read held, nothing else
+    // would keep the loop alive — a ref'd keep-alive while the leg waits (the first gate exited 13: «unsettled top-level await»)
+    keepAlive = setInterval(() => { }, 1000);
+    hang = true; reads = 0;
+    const t0 = performance.now();
+    const r1 = await SI.sampleProcCpu(rowsN(), { boundMs: B });
+    const firstReads = reads;
+    const r2 = await SI.sampleProcCpu(rowsN(), { boundMs: B });
+    ok(r1 === false && r2 === false && firstReads === Math.min(pids.length, SI.SAMPLE_SLICE) && reads === firstReads,   // the first slice's reads hang: the next slice never starts
+ `past its bound the table goes out «not sampled» (${r1}, ${r2}); the second ask JOINS the flight that is out — ${reads} reads in all, never one more pending table`);
+    say(`    the two bounded asks answered in ${(performance.now() - t0).toFixed(0)} ms (the bound handed: ${B} ms each)`);
+    let settled = false;
+    NOBOUND.sampleProcCpu(rowsN(), { boundMs: B }).then(() => { settled = true; });
+    await new Promise((r) => setTimeout(r, 3 * B));
+    ok(settled === false, `RED CONTROL (a copy without the bound): after three bounds it has not answered — a poll would pile one more table every 5 s`);
+  } finally {
+    clearInterval(keepAlive);
+    hang = false;
+    for (const r of held.splice(0)) r(null);   // the hung reads answer «not there»: every flight ends
+    fs.promises.readFile = rf0;
+  }
+  await new Promise((r) => setTimeout(r, 50));
+  for (const r of copiesCensus(M2.files, M2.dir, ROOT, { minCopies: 2, label: 'B-360d sample flight ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
 }
 say(`\n${failed ? `${failed} FAILED (${passed} passed${skipped ? `, ${skipped} skipped` : ''})` : `ALL PASS (${passed}${skipped ? `; ${skipped} SKIPPED` : ''})`}`);
 process.exit(failed ? 1 : 0);
