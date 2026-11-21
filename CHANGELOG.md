@@ -60,6 +60,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A pooled Codex conversation whose account cannot be named no longer has its usage counted against the pool's current account.
 - The hub no longer pauses while it checks folder mounts or reconnects a storage that went down; an unanswered check says so instead of «no permission».
 - A storage folder that cannot be read is no longer mounted over, and files that may have been moved aside before a reconnect are listed in For you.
+- In Settings, the note beside eight settings (extra arguments, Codex's personality and reset credit, and two Claude rows) is now in your language.
 
 ## 2.369.415 — 2026-11-21
 

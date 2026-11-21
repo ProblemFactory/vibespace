@@ -568,6 +568,25 @@ This file is the engineers' record of every release: the lanes, the verification
 - **The ratchet.** test-architecture §57c BOOTS_OUTSIDE_HELPER 171 → 168, counted on the tree by the rule (170 sites, the manager stack's two suites carried by name until B-cdb2).
 - **No leg spells an old scratch name** (ilinks-home, setlinks-stub and the like: a fixed-string search over scripts/). The suites read their tree through `wt` and their HOME through `fakeHome`.
 
+### bl-msg B-82b8 — the settings words leave the device bundle, and eight notes become a person's words (主开发 r654)
+- THE WEIGHT: the device agent's bundle carried src/harness-settings.js whole, and 171 of its strings were shown only by the hub's Settings window (labels, descriptions, details, option labels, categories, the apply notes).
+- THE SPLIT (text only — no setting's behaviour, default or apply road changes):
+  - src/harness-settings.js keeps the machine facts: keys, types, defaults, options' values, the apply road.
+  - Every word a person reads lives in the NEW src/harness-settings-words.js, keyed by the row's own name.
+  - `withWords(table)` joins them back into the shape the table always had. settings-schema.js (the browser) and conversation-ops.js `limitChoices` (the hub) read the joined table.
+  - The descriptor check (src/harnesses/index.js) and `checkTable(…, {wordsApart: true})` judge a built-in table's machine facts.
+  - `wordsCensus` names a row with no words, words with no row, or a word left in the device's table.
+- MOVED: the four tables' `category`; 29 rows' `label` and `description`; one `details`; 81 option labels; 27 `apply.how`. LEFT: every function of the file (rowOf, rowsOfKind, coerce, unsetValue, readRow, refusedValue, isOff, checkTable, buildConfigPlan …), every value.
+- THE EIGHT NOTES were engineers' English on a translated screen. Each is now a person's words, a dictionary entry with zh and ja:
+  - «appended argv» ×4 ⇒ «added at the end of the command that starts the agent»;
+  - Claude's continue-at-limit and agent-tools notes;
+  - Codex's personality note;
+  - «pool engine — the codex reset-credit rung of the exhaustion ladder» ⇒ «when a Codex conversation reaches its usage limit» (the trigger: a warm conversation tries a credit before it switches account, a cold one switches first — src/reset-credit.js).
+- PINS:
+  - test-harness-contract: the census + its RED controls, the joined/bare checkTable verdicts, the eight notes in zh and ja;
+  - test-architecture §107: the device bundle carries the table, never the words;
+  - three suites read a built-in row through the join (test-agent-tool-rules, test-harness-settings, test-auto-resume's pin).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
