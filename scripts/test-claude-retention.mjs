@@ -266,29 +266,41 @@ console.log('§7 ensureAgentHooks on a scratch HOME (~/.claude present and absen
 const created = [];
 const logs = [];
 let GEN;
+// B-ddf3 unit 2 line 1: THIS machine is written by the SHIPPED helper (data/bin/vibespace-hook-register.mjs, the file the
+// generator writes) through the starter — here a STAND-IN starter that runs the real helper with this node, as the real one does
+const { spawn: spawnChild } = await import('node:child_process');
+const STANDIN_STARTER = { run: (cmd, args, o = {}) => new Promise((resolve) => {
+  let out = '', err = ''; const c = spawnChild(cmd, args, { env: { ...process.env, ...(o.envAdd || {}) }, stdio: ['ignore', 'pipe', 'pipe'] });
+  c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; });
+  c.on('error', (e) => resolve({ started: false, code: null, error: String(e && e.code), stdout: out, stderr: err }));
+  c.on('close', (code) => resolve({ started: true, code, stdout: out, stderr: err }));
+}) };
+const syncFor = (root, home, extra = {}) => require(path.join(repo, 'src/server/harness-config-sync.js')).create({ serverSetting: () => undefined, harnesses: require(path.join(repo, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home, helperPath: path.join(root, 'data', 'bin', 'vibespace-hook-register.mjs'), starter: STANDIN_STARTER, hooksWanted: () => true, log: (m) => logs.push(m), warn: (m) => logs.push('WARN ' + m), ...extra });
 {
   process.env.HOME = path.join(HKC, 'home-gen');
   fs.mkdirSync(process.env.HOME, { recursive: true });
   ok('the scratch HOME is the one every write resolves (os.homedir() === /tmp/vs-hkc-<pid>/home-gen)', os.homedir() === process.env.HOME && process.env.HOME.startsWith(HKC + path.sep));
   const genRoot = path.join(HKC, 'gen-root'); fs.mkdirSync(path.join(genRoot, 'data'), { recursive: true });
-  GEN = require(path.join(repo, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, onHookFileCreated: (ev) => created.push(ev) });
+  let SYNC = null;
+  GEN = require(path.join(repo, 'src/server/agent-tool-generators.js')).create({ rootDir: genRoot, port: 0, onHookFileCreated: (ev) => created.push(ev), applyThisMachine: (o) => SYNC.applyThisMachine(o) });
   await GEN.rootFactsNow();   // B-1425: the root facts are read off the loop — awaited once, as the hub's boot does
+  SYNC = syncFor(genRoot, process.env.HOME);
   const origLog = console.log;
-  const run = (fn) => { console.log = (...a) => { logs.push(a.join(' ')); }; try { return fn(); } finally { console.log = origLog; } };
+  const run = async (fn) => { console.log = (...a) => { logs.push(a.join(' ')); }; try { return await fn(); } finally { console.log = origLog; } };
   // the belt holds as before: VIBESPACE_SKIP_AGENT_HOOKS=1 (this suite's env) ⇒ nothing written
-  const skipped = run(() => GEN.ensureAgentHooks({ auto: true }));
+  const skipped = await run(() => GEN.ensureAgentHooks({ auto: true }));
   ok('hookRegistrationSafe unchanged: under VIBESPACE_SKIP_AGENT_HOOKS=1 the registration is skipped, nothing created', !!skipped.skipped && !fs.existsSync(path.join(process.env.HOME, '.claude')));
   process.env.VIBESPACE_FORCE_AGENT_HOOKS = '1';
   try {
     const st0 = GEN.agentHooksStatus();
-    const r0 = run(() => GEN.ensureAgentHooks({ auto: true }));
+    const r0 = await run(() => GEN.ensureAgentHooks({ auto: true }));
     ok('~/.claude ABSENT ⇒ skipped and said (missing: no-dir), the directory never created, no callback', r0.claude && r0.claude.ok === false && r0.claude.missing === 'no-dir' && !fs.existsSync(path.join(process.env.HOME, '.claude')) && created.length === 0 && st0.claude.dirExists === false && st0.claude.creatable === false, { r0, st0: st0.claude });
     ok('…the journal says why (the CLI has not run on this machine)', logs.some((l) => /Hook registration \(claude\) skipped: .*\.claude not found — the CLI has not run on this machine; nothing is created/.test(l)), logs);
     fs.mkdirSync(path.join(process.env.HOME, '.claude', 'projects'), { recursive: true }); // the incident's shape: the CLI ran, wrote projects/, never settings.json
     const st1 = GEN.agentHooksStatus();
     ok('~/.claude present, settings.json missing ⇒ the status says creatable (the chip offers Apply)', st1.claude.fileExists === false && st1.claude.dirExists === true && st1.claude.creatable === true, st1.claude);
     logs.length = 0;
-    const r1 = run(() => GEN.ensureAgentHooks({ auto: true }));
+    const r1 = await run(() => GEN.ensureAgentHooks({ auto: true }));
     const sf = path.join(process.env.HOME, '.claude', 'settings.json');
     const j = JSON.parse(fs.readFileSync(sf, 'utf8'));
     const cmd = (ev) => j.hooks[ev] && j.hooks[ev][0].hooks[0].command;
@@ -297,13 +309,13 @@ let GEN;
     ok('…onHookFileCreated fired ONCE with {harness: claude, rel: .claude/settings.json, file, at}', created.length === 1 && created[0].harness === 'claude' && created[0].rel === '.claude/settings.json' && created[0].file === sf && created[0].at > 0, created);
     const st2 = GEN.agentHooksStatus();
     ok('…the status now reads installed, not creatable', st2.claude.installed === true && st2.claude.creatable === false);
-    const r2 = run(() => GEN.ensureAgentHooks({ auto: true }));
+    const r2 = await run(() => GEN.ensureAgentHooks({ auto: true }));
     ok('a second registration over the created file: ok, never "created" again, no second callback', r2.claude.ok && !r2.claude.created && created.length === 1, r2);
     // the boot CLI-config plan follows the same rule (cleanupPeriodDays alone creates the file — e.g. the hooks were Removed)
     const homeB = mkHome('home-sync', ['.claude']);
-    const sync = require(path.join(repo, 'src/server/harness-config-sync.js')).create({ serverSetting: () => undefined, harnesses: require(path.join(repo, 'src/harnesses/index.js')), adapterRegistry: { get: () => null }, activeSessions: new Map(), hookRegistrationSafe: () => true, home: homeB, log: (m) => logs.push(m), warn: (m) => logs.push('WARN ' + m) });
+    const sync = syncFor(genRoot, homeB, { hooksWanted: () => false });   // the managed keys only (the hooks were Removed)
     logs.length = 0;
-    const rs = sync.syncCliConfig({ reason: 'boot' });
+    const rs = await sync.syncCliConfig({ reason: 'boot' });
     const sfB = path.join(homeB, '.claude', 'settings.json');
     ok("the boot cli-config plan follows the same rule: ~/.claude present ⇒ settings.json created with cleanupPeriodDays 36500 (0600), journal says created", fs.existsSync(sfB) && JSON.parse(fs.readFileSync(sfB, 'utf8')).cleanupPeriodDays === 36500 && modeOf(sfB) === 0o600 && logs.some((l) => /\[cli-config\] created ~\/\.claude\/settings\.json \(the CLI had never written one\) \(boot\)/.test(l)) && rs.receipts.some((x) => x.key === 'transcriptRetentionDays' && x.state === 'applied'), logs);
     const st = sync.cliConfigStatus();

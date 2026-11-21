@@ -26,7 +26,7 @@ const { parseReceiptLines, decodePlan } = require('../harness-config');
 const BOUND_MS = 10000;      // how long a start waits for a landing (r1407: «within your bound»)
 const RUN_TIMEOUT_MS = 30000; // one helper run's own bound (the starter answers `unknown` past it + its guard)
 
-function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath, home = null, journal = (l) => console.log(l), warn = (l) => console.warn(l), timeoutMs = RUN_TIMEOUT_MS, stat = (p) => fsp.stat(p) } = {}) {
+function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath, home = null, journal = (l) => console.log(l), warn = (l) => console.warn(l), timeoutMs = RUN_TIMEOUT_MS, boundMs = BOUND_MS, stat = (p) => fsp.stat(p) } = {}) {
   if (!starter || typeof starter.run !== 'function') throw new Error('cli-config-runner: a starter (run) is required');
   if (!helperPath) throw new Error('cli-config-runner: the helper path is required');
   let inFlight = null;          // the run in flight: Promise<landing>
@@ -93,7 +93,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
    *  a read beside a write is a read. */
   function status(planB64) { return runOnce(planB64, { reason: 'status', status: true }); }
   /** the spawn gate's question: has a landing (newer than `since`) come within `ms`? → { landed } | { failed, why } | { late } */
-  function landedWithin(ms = BOUND_MS, { since = 0 } = {}) {
+  function landedWithin(ms = boundMs, { since = 0 } = {}) {
     const now = () => (last && last.at >= since ? last : null);
     const done = now();
     if (done && !inFlight && !waiting) return Promise.resolve(done.ok ? { landed: true, landing: done } : { failed: true, why: done.why, landing: done });
@@ -105,7 +105,7 @@ function createCliConfigRunner({ starter, nodeBin = process.execPath, helperPath
       watchers.add(w);
     });
   }
-  return { apply, status, landedWithin, last: () => last, busy: () => !!(inFlight || waiting), BOUND_MS };
+  return { apply, status, landedWithin, last: () => last, busy: () => !!(inFlight || waiting), BOUND_MS: boundMs };
 }
 
 module.exports = { createCliConfigRunner, BOUND_MS, RUN_TIMEOUT_MS };

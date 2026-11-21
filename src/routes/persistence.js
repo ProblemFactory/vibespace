@@ -1811,25 +1811,10 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     try { require('../server/spend-guard.js').noteLimitsWritten(spendOf(prev), spend); } catch { }   // B-0a33 (2): waiting frames re-judged at once
     return spend;
   }
-  // B-ddf3 unit 2 line 1 (the coordinator's r1407 (b)): a write that moves a CLI-config row (or the Integration switch) is
-  // answered at the LANDING of the shipped helper's run on this machine — or told BY NAME that it did not land (refused,
-  // failed, or still writing past the bound: the landing still comes and is journalled). Never «applied» before it.
-  var _landing = null;   // (var: a write during setup, before this line runs, meets no TDZ)
-  const LANDING_BOUND_MS = 10000;
-  function answerAtLanding(res, body) {
-    const p = _landing; _landing = null;
-    if (!p || typeof p.then !== 'function') return res.json(body);
-    let done = false;
-    const say = (cliConfig) => { if (done) return; done = true; clearTimeout(t); res.json({ ...body, cliConfig }); };
-    const t = setTimeout(() => say({ landed: false, why: `the CLI config has not landed on this machine within ${LANDING_BOUND_MS / 1000} s (still writing)` }), LANDING_BOUND_MS);
-    t.unref?.();
-    p.then((r) => {
-      if (!r) return say({ landed: true });
-      if (r.skipped) return say({ landed: false, why: r.refused ? (r.refused.line || r.refused.why || 'refused on this server') : r.settingsHeld ? 'the settings are held' : 'skipped' });
-      const failed = r.error || (r.landing && r.landing.ok === false && r.landing.why) || Object.entries(r).filter(([, v]) => v && v.ok === false).map(([k, v]) => `${k}: ${v.error}`).join('; ');
-      say(failed ? { landed: false, why: String(failed) } : { landed: true });
-    }, (e) => say({ landed: false, why: (e && e.message) || String(e) }));
-  }
+  // B-ddf3 unit 2 line 1 (the coordinator's r1407 (b)): the settings answer waits for the CLI config's LANDING on this machine, or
+  // says by name that it did not land (src/server/landing-answer.js)
+  var _landing = null;   // the change hook's return for the write in hand (var: a write during setup, before this line runs, meets no TDZ)
+  const answerAtLanding = (res, body) => { const p = _landing; _landing = null; return require('../server/landing-answer.js').answerAtLanding(res, body, p); };
 
   // Server-side settings accessor: /api/settings persists HERE
   // (data/settings.json) — NOT in the 'settings' SyncStore (settings-sync.json,
