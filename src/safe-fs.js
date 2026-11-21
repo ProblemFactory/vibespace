@@ -177,7 +177,7 @@ class SafeFs {
     this._blockedOf = opts.blocked || DOOR.blocked;   // B-afc4: (path) → blocked mount root | false
     // row B-422c: the payload keys that NAME a path (the door's blocked check, B-23e5's memory, its forgiving) — PATH_KEYS, plus a
     // pool's own (the transcript pool names its file `fp`: a transcript read that ran out its deadline is remembered like any path)
-    this._pathKeys = Array.isArray(opts.pathKeys) && opts.pathKeys.length ? [...new Set([...PATH_KEYS, ...opts.pathKeys])] : PATH_KEYS;
+    this._pathKeys = Array.isArray(opts.pathKeys) && opts.pathKeys.length ? [...new Set([...PATH_KEYS, ...opts.pathKeys])] : PATH_KEYS;   // a stand-in built without this constructor reads PATH_KEYS
     this._hungMs = opts.hungMs === 0 ? 0 : opts.hungMs > 0 ? opts.hungMs : HUNG_MS;   // B-23e5: how long a path that ended a worker at its deadline is not asked (0 = no memory: a pool that must keep asking)
     this._hung = new Map();                                  // B-23e5: path → { until, exact, op, bound } (one memory with the lanes)
     this._mountsText = typeof opts.mountsText === 'function' ? opts.mountsText : () => fs.promises.readFile(MOUNTINFO, 'utf8');   // B-23e5: the mount table, read off the loop
@@ -309,7 +309,7 @@ class SafeFs {
    * deadline) so routes can map to the "storage not responding" response.
    */
   _blocked(payload) {
-    for (const p of payload ? pathsOf(payload, this._pathKeys) : []) {   // the folder rule's look (`paths`) too — never into a blocked mount
+    for (const p of payload ? pathsOf(payload, this._pathKeys || PATH_KEYS) : []) {   // the folder rule's look (`paths`) too — never into a blocked mount
       const mp = this._blockedOf(p);
       if (mp) return mp;
     }
@@ -329,7 +329,7 @@ class SafeFs {
     const out = [];
     if (!this._hung || !this._hung.size || !payload) return out;   // a pool built without its constructor (a suite's stand-in) has no memory
     const now = this._clock(), wide = WIDE_OPS.has(op), key = opKeyOf(op, payload);
-    for (const k of this._pathKeys) {
+    for (const k of (this._pathKeys || PATH_KEYS)) {
       const p = payload[k];
       if (typeof p !== 'string' || !p) continue;
       for (const [h, m] of this._hung) {
@@ -353,7 +353,7 @@ class SafeFs {
     if (!payload || !this._hungMs || !this._hung || SIZE_OPS.has(op)) return Promise.resolve();
     const look = op === 'lstatKinds';   // (b), r1378 (4): the look's own hang is remembered like any op — and never climbs (it IS a climb's)
     const now0 = this._clock(), bound = Number.isFinite(ms) ? (early ? 1 : 1.5) * ms : Infinity, key = opKeyOf(op, payload);
-    const mine = new Set(pathsOf(payload, this._pathKeys));   // one call's two paths (a rename) are one sibling
+    const mine = new Set(pathsOf(payload, this._pathKeys || PATH_KEYS));   // one call's two paths (a rename) are one sibling
     const climbs = [];
     for (const p of mine) {
       if (look && this._hung.has(p)) continue;   // the look's own hang names no strike on a path already remembered (its folder is named by it)
@@ -386,7 +386,7 @@ class SafeFs {
   _forgive(payload, op) {
     if (!payload || !this._hung || !this._hung.size) return;
     const wide = WIDE_OPS.has(op), key = opKeyOf(op, payload);
-    for (const k of this._pathKeys) {
+    for (const k of (this._pathKeys || PATH_KEYS)) {
       const p = payload[k];
       if (typeof p !== 'string' || !p) continue;
       for (const [h, m] of [...this._hung]) {
