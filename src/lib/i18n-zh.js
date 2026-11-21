@@ -7301,6 +7301,9 @@ export default {
   "Connect again now": "现在重新连接", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
   "Try again now": "现在再试一次", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
   "Watch again now": "现在重新监看", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
+  "Tried again at {clock}: still cannot watch this browser ({cause}).": "{clock} 已重试：仍然无法监看这个浏览器（{cause}）。", // B-346d r1505: a press always gets its reply
+  "its connection was lost": "与它的连接已断开", // B-346d r1505: a press always gets its reply
+  "no watch could open": "无法开始监看", // B-346d r1505: a press always gets its reply
   "Hidden window": "隐藏窗口", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
   "Browser “{label}” is waiting for a passkey ({rp}) — switch to it to answer": "浏览器「{label}」正在等待通行密钥（{rp}）——切换过去回应", // lane passkey-browse-yourself (acceptance r1)
   "Another browser of this conversation is waiting for a passkey ({rp}) — switch to it to answer": "这个对话的另一个浏览器正在等待通行密钥（{rp}）——切换过去回应", // lane passkey-browse-yourself (acceptance r1)

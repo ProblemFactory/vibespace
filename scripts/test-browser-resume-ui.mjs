@@ -722,6 +722,8 @@ else await (async () => {
     //    moment («Watch again now» / «Connect again now»), none for another machine's browser. The digest and the bridge's passkey
     //    fact are planted in the page (the hub's own words are proved by test-browser-display / test-browser-passkey); PNGs where
     //    VIBESPACE_TABS_PNG_DIR names a dir.
+    //    r1505: (3) a press that changed nothing is answered under the line (the bridge's ack planted); the mark is quiet text;
+    //    the two pictures asked for (the reply state, en 1280 / zh 390) are also printed as base64 «PICTURE» lines.
     console.log('— ⑩ B-346d: the out-of-sight mark (its line once a run) and the sign-in prompts line with its button — en + zh, 1280 + 390');
     {
       const D10 = require(path.join(repo, 'src/browser-display.js'));
@@ -737,10 +739,17 @@ else await (async () => {
         const s = L().state(); const br = rect(bar); const boxes = [bar, vis(note) ? note : null, vis(db) ? db : null].filter(Boolean).map(rect);
         return { mark: vis(mk) ? { text: mk.textContent, title: mk.title, right: rect(mk).left + rect(mk).width, barRight: br.left + br.width, tag: mk.tagName } : null, folded: (s.folded || []).includes('hidden'), note: vis(note) ? note.textContent : '', line: vis(line) ? line.textContent : '', btn: vis(btn) ? { text: btn.textContent, right: rect(btn).left + rect(btn).width, dbRight: db ? rect(db).left + rect(db).width : 0 } : null,
           clip: boxes.length ? { left: Math.min(...boxes.map((b) => b.left)), top: Math.min(...boxes.map((b) => b.top)), right: Math.max(...boxes.map((b) => b.left + b.width)), bottom: Math.max(...boxes.map((b) => b.top + b.height)) } : null };`);
+      // r1505: the two pictures the coordinator looks at (the bar with its mark and the sign-in line's reply, en at 1280 and zh
+      // at 390) are ALSO printed into the suite's own output as base64 lines («PICTURE <name> <i>/<n> <chunk>»), so they come back
+      // wherever the whole output is kept (the test machine's one-row part) with no picture folder; elsewhere a green suite's
+      // output is not kept and the lines cost nothing
+      const ASKED = new Set(['b346d-reply-gave-up-en-1280.png', 'b346d-reply-gave-up-zh-390.png']);
       const shoot = async (name, b, wpx) => {
-        if (!PNG_DIR || !b || !b.clip) return;
+        if ((!PNG_DIR && !ASKED.has(name)) || !b || !b.clip) return;
         const c = b.clip, shot = await send('Page.captureScreenshot', { format: 'png', clip: { x: Math.max(0, c.left), y: Math.max(0, c.top), width: Math.max(1, Math.min(c.right - c.left, wpx)), height: Math.max(1, c.bottom - c.top), scale: 1 } });
-        if (shot.result?.data) { const f = path.join(PNG_DIR, name); fs.writeFileSync(f, Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${f}`); }
+        if (!shot.result?.data) return;
+        if (PNG_DIR) { const f = path.join(PNG_DIR, name); fs.writeFileSync(f, Buffer.from(shot.result.data, 'base64')); console.log(`    PNG ${f}`); }
+        if (ASKED.has(name)) { const d = shot.result.data, n = Math.ceil(d.length / 4000); for (let i = 0; i < n; i++) console.log(`    PICTURE ${name} ${i + 1}/${n} ${d.slice(i * 4000, (i + 1) * 4000)}`); }
       };
       const markOk = (b, w) => !!b && ((b.mark && b.mark.text === w.mark && b.mark.tag === 'SPAN' && b.mark.right <= b.mark.barRight + 1) || (!b.mark && b.folded)) && (!b.mark || b.mark.title.length > 20);
       for (const lang of ['en', 'zh']) {
@@ -774,6 +783,14 @@ else await (async () => {
           ok([1280, 390].every((x) => w.prompts.test(got[x].line) && (btnWord ? !!got[x].btn && got[x].btn.text === btnWord && got[x].btn.right <= got[x].btn.dbRight + 1 : !got[x].btn)),
             `⑩ ${lang}: «${why}» — the line speaks of sign-in prompts and says what to do; ${btnWord ? `its button «${btnWord}», whole inside the bar` : 'no button (another machine: close the tab there)'}, at 1280 and 390`, S(got));
         }
+        // (3) r1505: A PRESS ALWAYS GETS ITS REPLY — «Connect again now» pressed, the bridge's answer planted as the fact is (the
+        // present fact unchanged, then the ack: not ok, nothing moved): the words say so under the line, with the press's time
+        const feedAck = () => ev(`L().state().pkRetryAt = Date.now(); L().ws().onmessage({ data: JSON.stringify({ type: 'passkey-retry-ack', ok: false, changed: false, error: 'the watch did not open' }) }); return true;`);
+        const REPLY = { en: /^Tried again at .+: still cannot watch this browser \(no watch could open\)\.$/, zh: /已重试：仍然无法监看这个浏览器（无法开始监看）。$/ }; // the arm failed: said in the person's words (the first zh picture had the arm's English error inside)
+        const said = {};
+        for (const wpx of [1280, 390]) { await sizeTo(wpx); await plantRun(runA); await feedPk('gave-up'); await feedAck(); await sleep(150); said[wpx] = await bars(); said[wpx].reply = await ev(`const e = L().el().querySelector('.browser-live-passkey-retry-said'); return e && e.style.display !== 'none' ? e.textContent : '';`); await shoot(`b346d-reply-gave-up-${lang}-${wpx}.png`, said[wpx], wpx); }
+        ok([1280, 390].every((x) => REPLY[lang].test(said[x].reply) && markOk(said[x], w) && !!said[x].btn && said[x].btn.text === w.connect),
+          `⑩ ${lang}: a press that changed nothing is ANSWERED under the line («${said[1280].reply}»), the mark quiet beside it, at 1280 and 390`, S(said));
         await feedPk(null);
       }
       await send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false });

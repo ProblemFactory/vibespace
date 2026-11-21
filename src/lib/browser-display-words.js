@@ -37,6 +37,18 @@ export function displayMarkOf(fact) {
   return null;
 }
 
+/** B-346d (r1228): how long the out-of-sight line is said, once a browser run, before the bar's mark alone says it. */
+const DISPLAY_SAY_MS = 20000;
+/** B-346d (r1228; PURE since r1505): is a browser run's out-of-sight line said NOW — once a run, for `sayMs` from the first time a
+ *  view showed that run. `firstAt` = when the view first showed it (null/undefined: this is the first showing). Returns
+ *  { first, at, say, leftMs }: `at` = the first showing's time (the caller keeps it), `leftMs` = until the line ends (the caller's
+ *  one re-render). A first showing dated after now (the clock went back) still says the line, never longer than `sayMs`. */
+export function runLineVerdict(firstAt, now, sayMs = DISPLAY_SAY_MS) {
+  const first = !Number.isFinite(firstAt), at = first ? now : firstAt;
+  const left = Math.min(sayMs, sayMs - (now - at));
+  return { first, at, say: left > 0, leftMs: Math.max(0, left) };
+}
+
 /** One sentence for a browser's launch fact — '' when there is nothing to say (a window as asked, or none asked). */
 export function displayFactText(fact) {
   const c = factCode(fact);

@@ -7300,6 +7300,9 @@ export default {
   "Connect again now": "今すぐ再接続", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
   "Try again now": "今すぐ再試行", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
   "Watch again now": "今すぐ監視し直す", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
+  "Tried again at {clock}: still cannot watch this browser ({cause}).": "{clock} にもう一度試しました：まだこのブラウザーを監視できません（{cause}）。", // B-346d r1505: a press always gets its reply
+  "its connection was lost": "接続が切れています", // B-346d r1505: a press always gets its reply
+  "no watch could open": "監視を始められませんでした", // B-346d r1505: a press always gets its reply
   "Hidden window": "非表示ウィンドウ", // B-346d r1228: the live view's sign-in prompts line / its button / the out-of-sight mark
   "Browser “{label}” is waiting for a passkey ({rp}) — switch to it to answer": "ブラウザー「{label}」がパスキーを待っています（{rp}）。切り替えて応答してください", // lane passkey-browse-yourself (acceptance r1)
   "Another browser of this conversation is waiting for a passkey ({rp}) — switch to it to answer": "この会話の別のブラウザーがパスキーを待っています（{rp}）。切り替えて応答してください", // lane passkey-browse-yourself (acceptance r1)

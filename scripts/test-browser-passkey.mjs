@@ -817,7 +817,7 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     const br = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
     const fct = fs.readFileSync(path.join(REPO, 'src/browser-fact.js'), 'utf8');
-    ok(/case 'passkey': st\.pkRelay = /.test(live) && /const pk = !d \? pkFactNow\(\) : null;/.test(live) && /return real\(r\) \? r : real\(s\) \? s : r \|\| s;/.test(live) && !/if \(H\)[^\n]{0,80}pkRelay/.test(live) && /display: pk\.display \|\| null/.test(live), '⑨ ONE renderer: the banner reads pkFactNow() — the session row\'s fact, else the relay\'s record — gated on the fact, never on the road; the display rides it');
+    ok(/case 'passkey': if \(JSON\.stringify\(m\.fact \|\| null\) !== JSON\.stringify\(st\.pkRelay \|\| null\)\) st\.pkRetrySaid = null; st\.pkRelay = /.test(live) && /const pk = !d \? pkFactNow\(\) : null;/.test(live) && /return real\(r\) \? r : real\(s\) \? s : r \|\| s;/.test(live) && !/if \(H\)[^\n]{0,80}pkRelay/.test(live) && /display: pk\.display \|\| null/.test(live), '⑨ ONE renderer: the banner reads pkFactNow() — the session row\'s fact, else the relay\'s record — gated on the fact, never on the road; the display rides it');
     ok(/relay\.target\.kind === 'attachment' \|\| relay\.target\.kind === 'human'\) return relay\.target\.profileId/.test(br) && /if \(ev\.kind === 'passkey' \|\| ev\.kind === 'passkey-proposal' \|\| ev\.kind === 'watched'\) pushPasskey\(r\);/.test(br) && (br.match(/if \(!pushPasskey\(relay\)\) send\(ws, passkeyNow\(relay\)\);/g) || []).length === 2 && !/ephemeral: relay\.target\.kind !== 'attachment'/.test(br), '⑨ the bridge: his window names its profile (armed by it, its dialogs + passkey reach it, answered as a named profile\'s), the passkey fact pushed when it moves, replayed to a late viewer on both doors');
     ok(/v\.stuck\.state === 'passkey' \|\| v\.stuck\.state === 'prompt'\)\) fact\.stuck = v\.stuck;/.test(fct), '⑨ the session row\'s fact lets `passkey` through (measured on 43d0f8d2d: fact.stuck null while stuckForKey said passkey_open — the takeover banner was dead on every road)');
     const BF = require(path.join(REPO, 'src/browser-fact.js'));
@@ -1596,25 +1596,80 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const target = BHS.humanTarget({ key: HK, profileId: PID, label: 'Mine' });
     const known = { humanTargetFor: () => target, humanAttach: () => ({ ok: true, take: true }), streamPortFor: async () => ({ ok: true, port: 9 }) };
     const keeper = new Proxy(known, { get: (o, k) => (k in o ? o[k] : typeof k === 'string' ? () => undefined : undefined) });
-    const arms = [];
-    const dialogs = { arm: async (pid, o) => { arms.push(o || null); return { ok: false, watched: false }; }, passkeyFactOf: () => ({ state: 'passkey', passkey: PK.passkeyBlock({ state: 'unknown', why: 'gave-up' }), profileId: PID }), onChange: () => () => {}, cancelPasskey: async () => ({ ok: true, n: 0 }), openOn: () => null, surfacesIn: () => [] };
-    class Up { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
-    const bridge = SB.create({ keeper, activeSessions: new Map(), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: Up, keepaliveMs: 60000 });
-    const srv = http.createServer(); srv.on('upgrade', (req, s, h) => bridge.handleUpgrade(req, s, h));
-    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
-    const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HK}`); const got = [];
-    ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } });
-    await new Promise((r) => { ws.on('open', r); ws.on('error', r); });
-    await until2(() => arms.length >= 1); const a0 = arms.length;
-    ws.send(JSON.stringify({ type: 'passkey-retry' }));
-    await until2(() => arms.length > a0, 1000); await sleep2(30);
-    const refused = got.some((m) => m.type === 'refused');
-    try { ws.close(); } catch { /* */ }
-    bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+    // B-346d r1505: ONE world, run on the tree's bridge and on a control copy — the press, and what the pressing viewer is told after it
+    const pressWorld = async (SBm) => {
+      const arms = [];
+      const dialogs = { arm: async (pid, o) => { arms.push(o || null); return { ok: false, watched: false }; }, passkeyFactOf: () => ({ state: 'passkey', passkey: PK.passkeyBlock({ state: 'unknown', why: 'gave-up' }), profileId: PID }), onChange: () => () => {}, cancelPasskey: async () => ({ ok: true, n: 0 }), openOn: () => null, surfacesIn: () => [] };
+      class Up { constructor() { this.readyState = 0; this.h = {}; setTimeout(() => { this.readyState = 1; if (this.h.open) this.h.open(); }, 0); } on(ev, fn) { this.h[ev] = fn; return this; } send() {} ping() {} close() { this.readyState = 3; } terminate() { this.readyState = 3; } }
+      const bridge = SBm.create({ keeper, activeSessions: new Map(), requestAuthed: () => true, log: { warn() {}, log() {} }, dialogs, WebSocketImpl: Up, keepaliveMs: 60000 });
+      const srv = http.createServer(); srv.on('upgrade', (req, s, h) => bridge.handleUpgrade(req, s, h));
+      await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+      const ws = new WSm.WebSocket(`ws://127.0.0.1:${srv.address().port}${bridge.STREAM_PATH}?browse=${HK}`); const got = [];
+      ws.on('message', (d) => { try { got.push(JSON.parse(String(d))); } catch { /* */ } });
+      await new Promise((r) => { ws.on('open', r); ws.on('error', r); });
+      await until2(() => arms.length >= 1); const a0 = arms.length;
+      const p0 = got.length;
+      ws.send(JSON.stringify({ type: 'passkey-retry' }));
+      await until2(() => arms.length > a0, 1000); await sleep2(30);
+      await until2(() => got.slice(p0).some((m) => m.type === 'passkey-retry-ack'), 1000);
+      const refused = got.some((m) => m.type === 'refused');
+      try { ws.close(); } catch { /* */ }
+      bridge.shutdown(); await new Promise((r) => srv.close(() => r()));
+      return { arms, a0, refused, after: got.slice(p0) };
+    };
+    const { arms, a0, refused, after } = await pressWorld(SB);
     const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
     const unk = (live.split('    } else if (pkUnknown) {')[1] || '').split('\n    }\n')[0];
-    ok(words.retry === 'Connect again now' && plain.retry === '' && /«Connect again now» in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'person' && arms[0].by === 'person' && !refused && /textBtn\(pkUnknown\.retry, \(\) => send\(\{ type: 'passkey-retry' \}\)/.test(unk),
+    ok(words.retry === 'Connect again now' && plain.retry === '' && /«Connect again now» in the browser window/.test(PK.GAVE_UP_TEXT) && !/the next action on this browser reconnects/.test(PK.GAVE_UP_TEXT + words.line) && arms.length === a0 + 1 && !!arms[a0] && arms[a0].by === 'person' && arms[0].by === 'person' && !refused && /textBtn\(pkUnknown\.retry, \(\) => \{ st\.pkRetryAt = Date\.now\(\); send\(\{ type: 'passkey-retry' \}\); \}/.test(unk),
       '⑨r3 TO VERIFY 2: the gave-up line names a door that WORKS — his window draws a Retry press (only on gave-up), the bridge turns `passkey-retry` into a fresh arm (the tries start over; his own browsing window arms as HIM — ⑨r4, the opener a hub restart keeps); never the false «the next action on this browser reconnects» (his clicks never re-arm)', { retry: words.retry, plain: plain.retry, arms, refused });
+    // B-346d (the coordinator's r1505): A PRESS ALWAYS GETS ITS REPLY — the arm changed nothing (this watch's fact stays «gave up») and
+    // failed: the pressing viewer is told the PRESENT fact, then the ack (not ok, nothing moved, the arm's error), in that order; the
+    // view says it in words with the cause and the press's time. CONTROL: the release's bridge line (the press only re-arms) — the
+    // viewer is told nothing after its press — RED
+    const fact1 = after.find((m) => m.type === 'passkey'), ack1 = after.find((m) => m.type === 'passkey-retry-ack');
+    ok(!!fact1 && !!fact1.fact && fact1.fact.passkey && fact1.fact.passkey.why === 'gave-up' && !!ack1 && ack1.ok === false && ack1.changed === false && ack1.error === 'the watch did not open' && after.indexOf(fact1) < after.indexOf(ack1),
+      'B-346d r1505: a press that changes nothing is ANSWERED — the pressing viewer gets the present fact (still «gave up»), then the ack (not ok, nothing moved, why)', after.map((m) => m.type + (m.type === 'passkey-retry-ack' ? JSON.stringify(m) : '')));
+    const MUT1505 = mutantCopies('browser-passkey-b346d-reply', REPO);
+    const sbsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
+    const silentSB = MUT1505.load('src/server/browser-stream.js', anchored(sbsrc, "    if (msg && msg.type === 'passkey-retry') { retryPasskey(relay, viewer); return; }", "    if (msg && msg.type === 'passkey-retry') { armDialogs(relay); return; }", 'r1505 control: the release\'s press'), 'press-only-rearms'); // stale-pins: kept (r1505: the release's line, the control's rebuilt text)
+    const silent = await pressWorld(silentSB);
+    ok(silent.arms.length === silent.a0 + 1 && !silent.after.some((m) => m.type === 'passkey-retry-ack' || m.type === 'passkey'), 'CONTROL (r1505): the release\'s bridge re-arms on the press and tells the viewer NOTHING when the fact stays — RED', silent.after.map((m) => m.type));
+    // the words: '' when the fact moved; else the cause in the person's language («its connection was lost» after the tries stopped,
+    // «no watch could open» when the arm failed, on a refusal, or when nothing is known — never the arm's own English error text,
+    // which the r1505 zh picture showed inside the Chinese sentence) and the press's time. CONTROL: a copy whose words are silence
+    const replyTable = (R) => {
+      const gave = PK.passkeyBlock({ state: 'unknown', why: 'gave-up' }), ref = PK.passkeyBlock({ state: 'unknown', why: 'refused', cause: 'no CDP endpoint' }), nw = PK.passkeyBlock({ state: 'unknown', why: 'not-watched' });
+      const rows = [
+        ['the fact moved: no words (the line drawn anew is the reply)', R({ ok: true, changed: true }, gave, null, { clock: '14:03' }) === ''],
+        ['the tries stopped, still', R({ ok: true, changed: false }, gave, null, { clock: '14:03' }) === 'Tried again at 14:03: still cannot watch this browser (its connection was lost).'],
+        ['a refusal, still', R({ ok: true, changed: false }, ref, null, { clock: '14:03' }) === 'Tried again at 14:03: still cannot watch this browser (no watch could open).'],
+        ['the arm failed: its own error text is never the words', R({ ok: false, changed: false, error: 'the keeper refused' }, gave, null, { clock: '9:05' }) === 'Tried again at 9:05: still cannot watch this browser (no watch could open).'],
+        ['nothing known', R({ ok: true, changed: false }, nw, null, { clock: '9:05' }) === 'Tried again at 9:05: still cannot watch this browser (no watch could open).'],
+        ['no ack: no words', R(null, gave, null) === ''],
+      ];
+      return rows.filter(([, good]) => !good).map(([name]) => name);
+    };
+    const replyBad = replyTable(PK.retryReplyWords);
+    ok(replyBad.length === 0, 'B-346d r1505: the reply\'s words (PURE retryReplyWords) — the cause in the person\'s words (never the arm\'s own error text), the press\'s time; none when the fact moved', replyBad);
+    const zhT = (s, p) => (s === 'no watch could open' ? '无法开始监看' : s === 'Tried again at {clock}: still cannot watch this browser ({cause}).' ? `${p.clock} 已重试：仍然无法监看这个浏览器（${p.cause}）。` : s);
+    const zhSaid = PK.retryReplyWords({ ok: false, changed: false, error: 'the watch did not open' }, PK.passkeyBlock({ state: 'unknown', why: 'gave-up' }), zhT, { clock: '08:46' });
+    ok(zhSaid === '08:46 已重试：仍然无法监看这个浏览器（无法开始监看）。' && !/[A-Za-z]/.test(zhSaid), `B-346d r1505 (the zh picture): a failed arm in zh is said wholly in Chinese — «${zhSaid}» (was «…（the watch did not open）。»)`, zhSaid);
+    const pksrc = fs.readFileSync(path.join(REPO, 'src/browser-passkey.js'), 'utf8');
+    const mute = MUT1505.load('src/browser-passkey.js', anchored(pksrc, "  if (!ack || ack.changed) return '';", "  return '';", 'r1505 control: the reply is silence'), 'reply-silence');
+    const muteBad = replyTable(mute.retryReplyWords);
+    ok(muteBad.length === 4 && !muteBad.some((n) => /moved|no ack/.test(n)), `CONTROL (r1505): words that are silence — the four «still» rows are RED by name (${muteBad.length})`, muteBad);
+    // the view: the press stamps its time, the ack's words drawn under the line, cleared when the fact moves
+    const VPINS = [
+      ["case 'passkey-retry-ack': st.pkRetrySaid = retryReplyWords(m, ((pkFactNow() || {}).passkey) || null, t, { clock: clockOf(st.pkRetryAt || Date.now()) }) || null; st.pkRetryWhy = m.ok === false && m.error ? String(m.error).slice(0, 200) : ''; renderDialog(); break;", 'the ack read into words'],
+      ["if (st.pkRetrySaid) { const said = document.createElement('span'); said.className = 'browser-live-dialog-body browser-live-passkey-retry-said'; said.textContent = st.pkRetrySaid; if (st.pkRetryWhy) said.title = st.pkRetryWhy; dialogBar.append(said); }", '…drawn as text under the line (the arm\'s own error only as its tip)'],
+      ["case 'passkey': if (JSON.stringify(m.fact || null) !== JSON.stringify(st.pkRelay || null)) st.pkRetrySaid = null;", '…cleared when the fact moves'],
+    ];
+    const vmiss = VPINS.filter(([x]) => live.split(x).length !== 2).map(([, w]) => w);
+    ok(vmiss.length === 0 && !/disabled = [^;]*pkRetry/.test(live), 'B-346d r1505: the live view says the reply — the ack in words, drawn as text, cleared when the fact moves; the button never greyed while it waits', vmiss);
+    const zhR = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), jaR = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
+    const RKEYS = ['Tried again at {clock}: still cannot watch this browser ({cause}).', 'its connection was lost', 'no watch could open'];
+    ok(RKEYS.every((k) => zhR.includes('  ' + JSON.stringify(k) + ': ') && jaR.includes('  ' + JSON.stringify(k) + ': ')), 'B-346d r1505: the reply\'s words have zh and ja rows');
+    for (const r of copiesCensus(MUT1505.files, MUT1505.dir, REPO, { label: 'B-346d r1505 controls: ' })) ok(r.pass, r.name, r.detail);
   }
   // B-346d (the coordinator's r1228): THE LINE SAYS WHAT THE PERSON CAN DO, in their words («sign-in prompts»), its button's word
   // naming the moment — where a fresh watch can help (not watched now / the tries stopped / a refusal); another machine's browser

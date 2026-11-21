@@ -224,6 +224,20 @@ function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k
 /** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop.
  *  lane passkey-ui (§2.4 / §2.5): `passkey_ask` = the page waits for the OWNER's card — the banner carries that card's
  *  words and choices (`card`, the same buttons as the tray and the chat; the same approve route). */
+/** B-346d (the coordinator's r1505): A PRESS ALWAYS GETS ITS REPLY — what the live view says after «Watch again now» / «Try again
+ *  now» / «Connect again now» when the press changed nothing (the cause still holds) or the arm failed: the cause and the press's
+ *  time; '' when the fact moved (the line drawn anew is the reply). `ack` = the bridge's passkey-retry-ack ({ ok, changed, error }),
+ *  `b` = the present passkey block, `clock` = the press's time as the person reads it. */
+function retryReplyWords(ack, b, tIn, { clock = '' } = {}) {
+  const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
+  if (!ack || ack.changed) return '';
+  const u = b && b.state === 'unknown' ? b : null;
+  // the cause in the PERSON's language, from what is known (r1505's zh picture showed the arm's English error inside the Chinese
+  // sentence): the tries stopped ⇒ «its connection was lost»; the arm failed, a refusal, or nothing known ⇒ «no watch could open».
+  // The arm's own error text is never the words — the view keeps it as their tip (a detail, for the curious)
+  const cause = ack.ok !== false && u && u.why === 'gave-up' ? t('its connection was lost') : t('no watch could open');
+  return t('Tried again at {clock}: still cannot watch this browser ({cause}).', { clock: str(clock), cause });
+}
 function passkeyWords(b, tIn, { headed = false, card = null, display = null, deskDoor = false, temporary = false } = {}) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   // lane passkey-browse-yourself: the watch cannot see this browser — the view says so (a quiet line; a Retry press when the re-arms stopped), never nothing
@@ -572,5 +586,5 @@ module.exports = {
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
   NONE_TEXT, UNKNOWN_TEXT, REMOTE_TEXT, GAVE_UP_TEXT, REFUSED_TEXT, NOT_WATCHED_TEXT, FOR_YOU_WORDS, DOORS_WORDS, DOORS_DOOR_WORDS, waitsSaid,
   rpWord, parseEvent, kernelEvent /* lane passkey-sink */, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
-  loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, leftForYouItem /* B-97ae walk (b) */, leftMoreItem /* round 2 */, LEFT_WORDS, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
+  loopVerdict, cancelText, passkeyWords, retryReplyWords /* B-346d r1505 */, forYouItem, keyForYouItem, leftForYouItem /* B-97ae walk (b) */, leftMoreItem /* round 2 */, LEFT_WORDS, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };

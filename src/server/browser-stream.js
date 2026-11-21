@@ -310,11 +310,25 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   const promptNow = (relay) => promptRecordOf(relay);
   /** A watch that went down: read again once its re-arm had its chance (a stopped browser's upstream is gone by then — nothing said). */
   function passkeyAfterDown(relay) { const t = setTimeout(() => pushPasskey(relay), PASSKEY_RECHECK_MS); if (t.unref) t.unref(); }
+  // B-346d r1505: the arm's outcome is ANSWERED ({ ok } or { ok: false, error }, never a rejection) — a person's press is replied to
   function armDialogs(relay) {
-    if (!dialogs) return;
+    if (!dialogs) return Promise.resolve({ ok: false, error: 'VibeSpace is not watching this browser' });
     const pid = relayProfileId(relay);
-    if (!pid) return;
-    dialogs.arm(pid, { by: isHuman(relay) ? 'person' : 'viewer' }).then(() => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); pushPasskey(relay); }).catch(() => { /* the watch says why in its own journal line */ }); // lane browser-surfaces: + the noted surfaces; lane passkey-browse-yourself: + the passkey fact (acceptance r3: his own browsing window's arm is HIS — after a hub restart it arms first, and his Close still ends the watch he opened)
+    if (!pid) return Promise.resolve({ ok: false, error: 'VibeSpace is not watching this browser' });
+    return dialogs.arm(pid, { by: isHuman(relay) ? 'person' : 'viewer' }).then((r) => { const rec = dialogRecordFor(relay); if (rec) broadcast(relay, rec); for (const x of surfaceRecordsFor(relay)) broadcast(relay, x); pushPasskey(relay); return r && r.ok === false ? { ok: false, error: String(r.error || r.code || 'the watch did not open') } : { ok: true }; }).catch((e) => ({ ok: false, error: String((e && e.message) || 'the watch did not open') })); /* the watch also says why in its own journal line */ // lane browser-surfaces: + the noted surfaces; lane passkey-browse-yourself: + the passkey fact (acceptance r3: the person's own browsing window's arm is theirs — after a hub restart it arms first, and their Close still ends the watch they opened)
+  }
+  /** B-346d (the coordinator's r1505): A PRESS ALWAYS GETS ITS REPLY. «Watch again now» / «Try again now» / «Connect again now» is a
+   *  fresh arm; the PRESSING viewer is answered whether or not anything moved: the present passkey fact (sent to it when nothing
+   *  moved — when the fact moved, every viewer was told by the broadcast), then the ack: ok (the arm opened a watch), changed (the
+   *  fact moved), the arm's error when it failed (the view shows it only as the line's tip). */
+  function retryPasskey(relay, viewer) {
+    const before = relay.pkDigest || '';
+    armDialogs(relay).then((r) => {
+      pushPasskey(relay); // a rejected arm pushed nothing: the present fact read once more (said only when it moved)
+      const changed = (relay.pkDigest || '') !== before;
+      if (!changed) send(viewer.ws, passkeyNow(relay));
+      send(viewer.ws, { type: 'passkey-retry-ack', ok: !!(r && r.ok), changed, ...(r && r.ok ? {} : { error: String((r && r.error) || 'the watch did not open').slice(0, 200) }) });
+    });
   }
   function answerDialog(relay, viewer, msg) {
     const pid = relayProfileId(relay);
@@ -1633,7 +1647,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
   function onViewerMessage(relay, viewer, d) {
     let msg = null; try { msg = JSON.parse(typeof d === 'string' ? d : d.toString()); } catch { send(viewer.ws, { type: 'refused', code: 'bad-message', error: 'not JSON' }); return; }
     if (msg && msg.type === 'passkey-cancel') { cancelPasskeyFor(relay, viewer); return; } // lane browser-passkey: the banner's ONE button
-    if (msg && msg.type === 'passkey-retry') { armDialogs(relay); return; } // acceptance r2 of lane passkey-browse-yourself: the gave-up line's Retry — a fresh arm (the tries start over), then the current fact
+    if (msg && msg.type === 'passkey-retry') { retryPasskey(relay, viewer); return; } // acceptance r2 of lane passkey-browse-yourself: the gave-up line's Retry — a fresh arm, then its reply (r1505)
     if (msg && msg.type === 'prompt-answer') { answerPromptFor(relay, viewer, msg); return; } // lane browser-ui-prompts: the sign-in boxes / Dismiss — the message is never kept, traced or logged
     if (msg && msg.type === 'x-ticket') { viewer.xWanted = true; viewer.xOwed = true; xTicketFor(relay, viewer); return; } // lane browser-x-in-window (B2): the X picture's ticket for THIS viewer
     if (msg && msg.type === 'dialog-answer') { answerDialog(relay, viewer, msg); return; } // lane browser-stuck: the user's Accept / Dismiss on a page dialog (any viewer — the user's own chrome, not a forwarded page input)

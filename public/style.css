@@ -8388,7 +8388,7 @@ label.chan-cap-row { cursor: default; }
 .browser-live-blocked-row > .mounts-btn { white-space: nowrap; flex: 0 0 auto; } /* the house text button (2026-09-28): a banner button says what it does */
 .browser-live-blocked-detail { flex: 1 0 100%; font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; white-space: pre-wrap; }
 .browser-live-blocked-text { flex: 1; min-width: 0; }
-.browser-live-hidden-mark { flex: none; white-space: nowrap; font-size: 11px; padding: 0 6px; line-height: 18px; color: var(--text-secondary); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: default; } /* B-346d r1228: the browser runs out of sight — a state on the bar, never a door */
+.browser-live-hidden-mark { flex: none; white-space: nowrap; color: var(--text-dim); cursor: default; } /* B-346d r1228: the browser runs out of sight — a state on the bar, never a door; r1505: drawn as the bar's other states (the viewers count): plain quiet text, no border, no box */
 .browser-live-display-note { padding: 3px 8px; font-size: 12px; line-height: 1.4; color: var(--text-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; overflow-wrap: anywhere; } /* lane headless-fallback: headless because the machine has no desktop session */
 .browser-chip { font-family: var(--font-mono, monospace); font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text); white-space: nowrap; }
 /* the rebuilt switch dialog (2026-09-27, src/lib/browser-switcher.js): every row a block, words wrap as sentences, every

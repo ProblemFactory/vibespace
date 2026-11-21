@@ -29,7 +29,8 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 import { execFile, spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, scratchHome, endRootedProcesses } from './scratch.mjs';
+import { pathToFileURL } from 'node:url';
+import { scratch, scratchHome, endRootedProcesses, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const landedU5b = () => { try { require('../src/store-writer.js').storeWriter().flushSync(); } catch { } };   // lane lg-store-writes U5b: browser-profiles.json is the store writer's — a read or a fixture write of the FILE lands what the writer owes first (the release's order)
@@ -745,11 +746,25 @@ console.log('— ④ the words every surface says it with, and where they are dr
       ["the mark is a SPAN (a state)", "const hiddenMark = document.createElement('span'); hiddenMark.className = 'browser-live-hidden-mark';"],
       ['…on the bar, folding first with the backend', 'kbd: kbdChip, kbdBtn, hidden: hiddenMark, echo: echoEl,'], ['…its priority', 'backend: 4, backendLabel: 4, hidden: 4,'],
       ['…folded: an info row (no act)', "else if (key === 'hidden') rows.push({ caption: hiddenMark.textContent, title: hiddenMark.title });"],
-      ['the line said ONCE a browser run (keyed by the record\'s start), then the mark alone', "if (Date.now() - saidRuns.get(run) >= DISPLAY_SAY_MS) line = '';"],
+      ['the line said ONCE a browser run (keyed by the record\'s start) by the PURE rule (r1505), then the mark alone', "const said = runLineVerdict(saidRuns.get(run), Date.now());"],
+      ['…its first showing kept, ONE re-render when the line ends', "if (said.first) { saidRuns.set(run, said.at); setTimeout(() => { if (!st.closed) renderDisplay(); }, said.leftMs + 50); }"], ['…the line dropped past it', "if (!said.say) line = '';"],
       ['…the run key', 'const run = `${pid}:${(rec && rec.startedAt) || \'\'}`;'], ['…the mark drawn while the fact holds', "hiddenMark.style.display = mark ? '' : 'none';"],
     ];
     const miss = PINS.filter(([, x]) => n(x) !== 1).map(([w, x]) => ({ w, n: n(x) }));
     ok(miss.length === 0 && !/hiddenMark\.(onclick|addEventListener)/.test(LW), `B-346d r1228: the live view's wiring of the mark, each line ONCE (${PINS.length} pins), and no act on it (a state, never a door)`, miss);
+    // r1505 (two readers): «SAID ONCE A RUN» IS A PURE RULE — runLineVerdict(firstAt, now): the first showing says it for 20 s, then
+    // not; a run shown again later is not a first showing; a first showing dated after now (the clock went back) says it, never
+    // longer than 20 s. CONTROL: a copy that says the line for ever (its `say` always true) — the table is RED
+    const runTable = (V) => { const a = V(undefined, 1000), b = V(1000, 20999), c = V(1000, 21000), d = V(5000, 1000), e = V(null, 7);
+      return [['first showing', a.first && a.at === 1000 && a.say && a.leftMs === 20000], ['said at +19 999 ms', !b.first && b.say && b.leftMs === 1], ['not said at +20 s', !c.first && !c.say && c.leftMs === 0],
+        ['a first showing after now says it, ≤ 20 s', d.say && d.leftMs === 20000], ['null is a first showing too', e.first && e.at === 7 && e.say]].filter(([, good]) => !good).map(([name]) => name); };
+    const runBad = runTable(W.runLineVerdict);
+    ok(runBad.length === 0, 'B-346d r1505: «said once a run» is PURE (runLineVerdict) — 20 s from the first showing, then the mark alone; a clock gone back never says it longer', runBad);
+    const MR = mutantCopies('browser-display-runline', REPO), wsrcR = fs.readFileSync(path.join(REPO, 'src/lib/browser-display-words.js'), 'utf8');
+    const WF = await import(pathToFileURL(MR.write('src/lib/browser-display-words.js', anchored(wsrcR, '  return { first, at, say: left > 0, leftMs: Math.max(0, left) };', '  return { first, at, say: true, leftMs: Math.max(0, left) };', 'r1505 control: said for ever'), 'said-for-ever')).href);
+    const runRed = runTable(WF.runLineVerdict);
+    ok(runRed.length === 1 && runRed[0] === 'not said at +20 s', `CONTROL (r1505): a line said for ever — the table is RED by name: «${runRed[0]}»`, runRed);
+    for (const r of copiesCensus(MR.files, MR.dir, REPO, { label: 'B-346d r1505 control: ' })) ok(r.pass, r.name, r.detail);
     const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8');
     ok(['Hidden window', 'No window'].every((k) => zh.includes('  ' + JSON.stringify(k) + ': ') && ja.includes('  ' + JSON.stringify(k) + ': ')), 'B-346d r1228: the mark\'s words have zh and ja rows');
   }

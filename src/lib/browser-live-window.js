@@ -171,8 +171,8 @@ import { dialogWords, answeredWords, stuckWords, promptWords, permissionWords, p
 import { surfaceWords } from '../browser-surfaces.js'; // lane browser-surfaces: a browser kernel's prompt in words — its answers are the buttons (PURE)
 import { createLoopBanner, loopTabRowOf, loopDoorsShown } from './browser-loop-banner.js';
 import { patchPasskeyButtons } from './browser-proposal-card.js'; // lane passkey-ui: the passkey_ask banner's choices = the card's (one approve route)
-import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
-import { displayFactOf, displayFactText, stoppedText, displayMarkOf } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
+import { passkeyWords, retryReplyWords } from '../browser-passkey.js'; // lane browser-passkey: a page waiting for a passkey — ONE button, Cancel (PURE words) // lane site-reset: the navigation loop, keyed + patched in place
+import { displayFactOf, displayFactText, stoppedText, displayMarkOf, runLineVerdict } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
 import { pictureSourceOf, pictureForView, BG_SETTLE_MS } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
 import { deskDoorOf, deskDoorStuck, settlesOnClear } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
@@ -228,8 +228,6 @@ export const URL_MIN_PX = 120;
 export const LIVE_BAR_PRIORITY = Object.freeze({ take: 0, handback: 0, reconnect: 0, close: 0, agentBrowser: 1, badge: 1, bind: 1, continue: 2, url: 2, open: 2, fit: 2, copy: 2, viewers: 3, rec: 3, kbd: 3, kbdBtn: 3, quit: 3, backend: 4, backendLabel: 4, hidden: 4, tabs: 5, console: 5, trace: 5, echo: 5 });
 /** lane J r2: how long the bar's "input sent · n" stays bright after an act, and a ripple lives. */
 const ECHO_MS = 1600;
-/** B-346d (r1228): how long the out-of-sight line is said, once a browser run, before the bar's mark alone says it. */
-const DISPLAY_SAY_MS = 20000;
 const RIPPLE_MS = 650;
 const RIPPLE_KEEP = 8;
 // (isEditable — an element a caret can live in — is src/lib/keyboard-yield.js's, ONE definition for the view and the yield.
@@ -1296,7 +1294,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     } else if (pkUnknown) { // lane passkey-browse-yourself (rule 4): never silence — VibeSpace says it cannot see passkey requests here
       const line = document.createElement('span'); line.className = 'browser-live-dialog-body browser-live-passkey-unknown'; line.textContent = pkUnknown.line;
       dialogBar.append(line);
-      if (pkUnknown.retry) dialogBar.append(textBtn(pkUnknown.retry, () => send({ type: 'passkey-retry' }), 'browser-live-dialog-restart browser-live-passkey-retry')); // acceptance r2: the re-arms stopped — his door (his clicks on the page never re-arm)
+      if (pkUnknown.retry) dialogBar.append(textBtn(pkUnknown.retry, () => { st.pkRetryAt = Date.now(); send({ type: 'passkey-retry' }); }, 'browser-live-dialog-restart browser-live-passkey-retry')); // acceptance r2: the re-arms stopped — the person's door (their clicks on the page never re-arm)
+      // B-346d (the coordinator's r1505): A PRESS ALWAYS GETS ITS REPLY — the bridge answers it with the present fact; when nothing moved
+      // (the cause still holds) or the arm failed, the view says so in words, with the cause and the press's time
+      if (st.pkRetrySaid) { const said = document.createElement('span'); said.className = 'browser-live-dialog-body browser-live-passkey-retry-said'; said.textContent = st.pkRetrySaid; if (st.pkRetryWhy) said.title = st.pkRetryWhy; dialogBar.append(said); }
       if (prLine) drawPrLines(prLine); // B-b56d (its read, S3; the cure): the sign-in lines beside the passkey one, never hidden by it
     } else if (prLine) drawPrLines(prLine);
   };
@@ -2091,8 +2092,9 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     if (mark) {
       const rec = app._browserProfiles && app._browserProfiles.browsers && pid ? app._browserProfiles.browsers[pid] : null;
       const run = `${pid}:${(rec && rec.startedAt) || ''}`;
-      if (!saidRuns.has(run)) { saidRuns.set(run, Date.now()); setTimeout(() => { if (!st.closed) renderDisplay(); }, DISPLAY_SAY_MS + 50); }
-      if (Date.now() - saidRuns.get(run) >= DISPLAY_SAY_MS) line = '';
+      const said = runLineVerdict(saidRuns.get(run), Date.now()); // r1505: the once-a-run rule is PURE (src/lib/browser-display-words.js)
+      if (said.first) { saidRuns.set(run, said.at); setTimeout(() => { if (!st.closed) renderDisplay(); }, said.leftMs + 50); }
+      if (!said.say) line = '';
     }
     if (displayNote.textContent !== line) displayNote.textContent = line;
     displayNote.style.display = line ? '' : 'none';
@@ -2379,7 +2381,8 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
       case 'page-note': pageNote(m.permission || null); break; // lane browser-ui-prompts-r2: the bar's one line (a permission decided, a print closed)
       case 'dialog': onDialogRecord(m); break; // lane browser-stuck: a page dialog opened / closed on the tab this view shows
       case 'prompt-fact': st.prRelay = m.fact && typeof m.fact === 'object' && m.fact.state === 'prompt' ? m.fact : null; st.prEnded = m.ended && typeof m.ended === 'object' ? m.ended : null; st.prHook = m.hook && typeof m.hook === 'object' ? m.hook : null; renderDialog(); break; // B-37a1: the person's window's native-prompt fact (the banner + the Desktop door)
-      case 'passkey': st.pkRelay = m.fact && typeof m.fact === 'object' ? m.fact : null; st.pkPid = typeof m.profileId === 'string' && m.profileId ? m.profileId : (st.pkRelay && st.pkRelay.profileId) || null; renderDialog(); break; // lane passkey-browse-yourself: the relay's passkey fact (acceptance r1: + the browser on show)
+      case 'passkey-retry-ack': st.pkRetrySaid = retryReplyWords(m, ((pkFactNow() || {}).passkey) || null, t, { clock: clockOf(st.pkRetryAt || Date.now()) }) || null; st.pkRetryWhy = m.ok === false && m.error ? String(m.error).slice(0, 200) : ''; renderDialog(); break; // B-346d r1505: the press's reply (the present fact came just before it)
+      case 'passkey': if (JSON.stringify(m.fact || null) !== JSON.stringify(st.pkRelay || null)) st.pkRetrySaid = null; st.pkRelay = m.fact && typeof m.fact === 'object' ? m.fact : null; st.pkPid = typeof m.profileId === 'string' && m.profileId ? m.profileId : (st.pkRelay && st.pkRelay.profileId) || null; renderDialog(); break; // lane passkey-browse-yourself: the relay's passkey fact (acceptance r1: + the browser on show)
       case 'surface': onSurfaceRecord(m); break; // lane browser-surfaces: a kernel's NOTED prompt (it never holds the page)
       case 'passkey-ack': if (!m.ok) { st.passkeyCancelling = false; renderDialog(); showToast(t('The passkey request could not be cancelled: {why}', { why: String(m.error || m.code || '') }), { type: 'error' }); } else if (m.failed) { st.passkeyCancelling = false; renderDialog(); showToast(t('VibeSpace could not cancel the page\'s passkey request — the page did not take the cancel, so it is still waiting. Closing the tab ends it.'), { type: 'error' }); } else if (m.ended) { st.passkeyCancelling = false; st.pkRelay = null; renderDialog(); showToast(t('The passkey wait had already ended'), { duration: 3000 }); } break; // B-97ae round 3: a cancel the page did not take keeps the banner and says so // lane browser-passkey — acceptance r1 of lane passkey-browse-yourself: a Cancel whose wait is gone says so (the bridge sends the current fact after it)
       case 'prompt-ack': { const w = promptAckWords(m, t); if (w) showToast(w, { type: 'error' }); } break; // B-37a1 cure: the sign-in form's refused answer, said by its code
