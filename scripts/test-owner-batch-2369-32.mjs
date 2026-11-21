@@ -15,7 +15,7 @@ let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 300) : '')); } };
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 
-// ── codex model continuity: lastCodexTurnModel reads the rollout tail ──
+// ── codex model continuity: the last turn's model, read off the loop from the rollout tail ──
 const home = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ob32-'));
 process.env.HOME = home; process.env.CODEX_HOME = path.join(home, '.codex');
 const dir = path.join(home, '.codex', 'sessions', '2026', '09', '05'); fs.mkdirSync(dir, { recursive: true });
@@ -29,8 +29,9 @@ fs.writeFileSync(path.join(dir, `rollout-2026-09-05T10-34-43-${TID}.jsonl`), [
   rec({ timestamp: '2026-09-05T19:51:00.000Z', type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'ok "model":"gpt-5.6-sol" mentioned in prose' }] } }),
 ].join(''));
 const CX = require(path.join(REPO, 'src/adapters/codex.js'));
-ok(CX.lastCodexTurnModel(TID) === 'gpt-6-astra', 'lastCodexTurnModel = the LAST turn_context model (prose mentions of other models are ignored)');
-ok(CX.lastCodexTurnModel('00000000-0000-4000-8000-000000000000') === null, 'unknown thread → null (resume falls back to the default)');
+const lastModel = async (id) => ((await CX.lastCodexTurnContextAsync(id)) || {}).model || null;   // B-80cb: the async twin (the sync pair is gone)
+ok(await lastModel(TID) === 'gpt-6-astra', 'the last turn\'s model = the LAST turn_context model (prose mentions of other models are ignored)');
+ok(await lastModel('00000000-0000-4000-8000-000000000000') === null, 'unknown thread → null (resume falls back to the default)');
 const wc = read('src/ws-create.js');
 // B-6b6d: the continuity fallback is no longer a codex-only env post-fill — it
 // is the shared ladder in src/resume-continuity.js reading the harness

@@ -166,31 +166,10 @@ function _walkJsonlFiles(rootDir) {
   return files;
 }
 
-/** The model a thread LAST ran on = its last turn_context (the wrapper's own
- *  authoritative record). A resume that carries no explicit model would
- *  otherwise fall back to the THREAD's start model (app-server thread.model)
- *  and silently downgrade a conversation the user had switched mid-way
- *  (owner report 2.369.32: "selected GPT-6, the view says 5.6"). Tail read only. */
-function lastCodexTurnModel(threadId) { return _lastTurnContextField(threadId, 'model'); }
-/** The effort a thread LAST ran on (last turn_context.effort — codex writes
- *  it per turn since 0.149; the wrapper's own copy carries null when nothing
- *  was commanded, so nulls are skipped). The effort twin of lastCodexTurnModel
- *  (B-21e4 item 4): a resume without an explicit effort carries it, so the
- *  app-server's per-thread default can never flip a conversation's effort. */
-function lastCodexTurnEffort(threadId) { return _lastTurnContextField(threadId, 'effort'); }
-function _lastTurnContextField(threadId, field) {
-  const fp = findCodexSessionJsonlPath(threadId);
-  if (!fp) return null;
-  let text;
-  try { text = readJsonlBounded(fp, { tailOnly: true }); } catch { return null; }
-  const lines = String(text || '').split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i];
-    if (l.indexOf('"turn_context"') < 0) continue;
-    try { const r = JSON.parse(l); if (r.type === 'turn_context' && r.payload?.[field]) return String(r.payload[field]); } catch { }
-  }
-  return null;
-}
+// THE LAST TURN'S MODEL AND EFFORT (owner report 2.369.32; B-21e4 item 4): the last turn_context's {model, effort} carried by a resume
+// that names neither — read ONLY off the loop (lastCodexTurnContextAsync below). B-80cb: the synchronous pair (lastCodexTurnModel /
+// lastCodexTurnEffort — a 32 MB string split on the loop, 115–136 ms each measured on stand-ins) had no product caller since
+// resume-all-paced L2 and is gone.
 
 /** RESUME CONTINUITY OFF THE LOOP (lane resume-all-paced, L2 — measured on a 120 MB rollout: `_lastTurnContextField` builds a 32 MB
  *  string and splits it, ~30 ms of the hub's loop, and a resume asks it TWICE — model, then effort): the last `turn_context`'s
@@ -1864,7 +1843,7 @@ module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   _setTranscriptPoolForTest, // row B-422c's legs
   readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, readerRefusedAnswer, readerCauseOf, readerCauseFor, fileStorageHung, fileRefused, poolRefusing, poolGone, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
-  plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
+  plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,
   CodexAdapter,
   findCodexSessionJsonlPath,

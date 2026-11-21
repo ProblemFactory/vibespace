@@ -95,9 +95,8 @@ const heapMB = () => { gc(); return Math.round(process.memoryUsage().heapUsed / 
 console.log('— ① RESUME CONTINUITY: the last model and effort read off the loop, one read for both');
 {
   const a = await during(() => Promise.all([desc.store.lastTurnModel(ID), desc.store.lastTurnEffort(ID)]));
-  const b = await during(() => [codex.lastCodexTurnModel(ID), codex.lastCodexTurnEffort(ID)]);
-  ok(JSON.stringify(a.r) === JSON.stringify(['gpt-5.1-codex', 'high']) && JSON.stringify(a.r) === JSON.stringify(b.r), 'the descriptor\'s hooks answer the sync reader\'s answers — model from the LAST turn_context, effort from the last that STATES one (the last states none)', { async: a.r, sync: b.r });
-  ok(a.gap <= LAW_MS, `…and hold no loop turn past ${LAW_MS} ms (worst ${a.gap} ms over ${a.ms} ms; the sync reader, two 32 MB strings: worst ${b.gap} ms)`);
+  ok(JSON.stringify(a.r) === JSON.stringify(['gpt-5.1-codex', 'high']), 'the descriptor\'s hooks answer the last turn\'s own values — model from the LAST turn_context, effort from the last that STATES one (the last states none)', { async: a.r });
+  ok(a.gap <= LAW_MS, `…and hold no loop turn past ${LAW_MS} ms (worst ${a.gap} ms over ${a.ms} ms; the sync pair is gone — B-80cb)`);
 }
 
 console.log('— ② ATTACH: the store\'s records and rebuildHistory, off the loop');
