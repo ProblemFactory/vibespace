@@ -132,6 +132,7 @@ const RANDOM32 = new Map([
   ['src/server/sealed-json.js', [1, 'a sealed JSON file\'s key — minted INTO the vault as its `file:<name>` entry (secretPut), never a file (lane vault-e2e-password-fix-r2)']],
   ['src/server/feedback-forward.js', [1, 'the feedback ORIGIN KEY (fk_, lane feedback-forward): names this instance to the maintainer hub and opens only the marks on its own forwarded reports — data/feedback-outbox.json 0600, a named exception in src/vault.js SECRETS_AT_REST (never a store key); the hub keeps its sha256']],
   ['src/webauthn-sign.js', [1, 'makeCredential: a new passkey\'s CREDENTIAL ID (lane passkey-sink) — public, handed to the site in the attestation and kept in the row; never a key (the key pair is generateKeyPairSync, sealed through the passkeys\' lawfulKey)']],
+  ['src/link-proof.js', [1, 'challenge: a link greeting\'s NONCE (the separation, 主开发 r1087) — sent once as the interface\'s challenge on the link\'s control channel, held in memory for that one link, never a key and never persisted']],
   ['src/relay-token.js', [1, 'tokenOf: an instance\'s OWN relay token (vsrt_, design q-051) — the owner\'s named exception in src/vault.js SECRETS_AT_REST (data/relay-token.json, 0600, never in the vault so a restart re-publishes without the second password); never a store key']], // lane relay-token-per-instance
 ]);
 const KEYNAME_RE = /^(\.[a-z0-9][a-z0-9._-]*[-.]key|[a-z0-9][a-z0-9._-]*\.key)$/; // a dotfile ending -key / .key, or any *.key (key-file-law-fix: dots too — '.vault.key')

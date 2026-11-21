@@ -215,7 +215,10 @@ console.log('— ⑤ THE SECRET travels only on fd 3 and in memory');
   const runs = [await bootThrough(HP, d), await bootThrough(HP, d, { deathAfter: true }), await bootThrough(HP, d, { joinResult: 'refused' })];
   const said = runs.flatMap((r) => [...r.lines, JSON.stringify(r.record)]).join('\n');
   ok(said.length > 0 && !said.includes(SECRET), `every line the module said (${runs.reduce((n, r) => n + r.lines.length, 0)}) and every record: no secret`);
-  const leaky = await bootThrough(mutant("try { log.log?.(`[hub-port] ${JSON.stringify(record)}`); } catch { } if (pendingPem", "try { log.log?.(`[hub-port] ${JSON.stringify(decision.start)}`); } catch { } if (pendingPem"), d);
+  const held = await HP.decide({ pipe: pipeWith(START) }); await bootThrough(HP, held);
+  ok(!JSON.stringify(held.start).includes(SECRET) && held.start && held.start.link === START.link, `once its digest is made, the wiring holds no start value (r1087: every join proves with the digest alone): the decision keeps ${JSON.stringify(Object.keys(held.start || {}))}`);
+  const MADE = "      const start = { party: decision.start.party || 'hub', link: decision.start.link, digest: digestOf(decision.start.secret) };\n";
+  const leaky = await bootThrough(mutant(MADE, MADE + "      try { log.log?.(`[hub-port] ${JSON.stringify(decision.start)}`); } catch { }\n"), await HP.decide({ pipe: pipeWith(START) }));
   ok(leaky.lines.join('\n').includes(SECRET), 'RED CONTROL — the start line logged: the secret is in the output', leaky.lines);
   // A REAL fd 3: a child decides from its inherited start pipe; its output, argv and environment
   const probe = path.join(T, 'probe.cjs');
