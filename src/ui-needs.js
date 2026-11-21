@@ -321,7 +321,7 @@ const NEEDS = Object.freeze([
 ]);
 /** The net's catches that state no need with a missing door — each with its reason. */
 const NOT_NEEDS = Object.freeze([
-  { why: 'a paste\'s failure said at the paste (r1066): the screen\'s clipboard could not be opened, or did not take the picture — an outcome, nothing to install; pasting again is the way', match: /^Paste failed: the clipboard (of the screen VibeSpace runs on could not be opened|did not take the picture)$/ },
+  { why: 'a paste\'s failure said at the paste (r1066): the screen\'s clipboard could not be opened, did not take the picture, or could not be asked — an outcome; pasting again is the way — except on a hub with NO display at all, where every paste ends at «could not be opened» (a screen it does not have: no door here)', match: /^Paste failed: (the clipboard (of the screen VibeSpace runs on could not be opened|did not take the picture)|could not ask the clipboard — paste again)$/ },
   { why: 'a mount door\'s refusal or row words, worded by code (src/mount-error-words.js, B-af94): said AT the door the person used — the storage or machine row, the dialog that asked, its toast — and that door is its way out (the dialog\'s own fields, Remount, Re-authorize, Connect)', match: oneOf(MOUNT_REFUSALS) },
   { why: 'says what is NOT needed («no terminal needed») — the Connect button it names is on the same form, above the box (pick 4, storage-1)', match: /^press “Connect[^”]*” — no terminal needed$/ },
   { why: 'the need\'s own fields are under it on the same form (the client id and secret boxes) — the form is its door', match: /^Gmail needs your own OAuth client here \(with the gmail\.readonly scope\)\.$/ },

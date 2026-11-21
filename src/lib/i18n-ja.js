@@ -2143,6 +2143,7 @@ export default {
   "Paste failed: the clipboard program is not installed on the machine VibeSpace runs on": "貼り付けに失敗しました：VibeSpace を実行しているマシンにクリップボードのプログラムがインストールされていません",
   "Paste failed: the clipboard of the screen VibeSpace runs on could not be opened": "貼り付けに失敗しました：VibeSpace を実行している画面のクリップボードを開けませんでした",
   "Paste failed: the clipboard did not take the picture": "貼り付けに失敗しました：クリップボードがこの画像を受け取りませんでした",
+  "Paste failed: could not ask the clipboard — paste again": "貼り付けに失敗しました：クリップボードに問い合わせられませんでした。もう一度貼り付けてください",
   "Paste {n} items": "{n} 個の項目を貼り付け",
   "Pasted {done}, failed {failed}": "{done} 件貼り付け、{failed} 件失敗",
   "Pasted {n} items": "{n} 個の項目を貼り付けました",

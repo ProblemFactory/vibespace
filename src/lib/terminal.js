@@ -580,6 +580,8 @@ class TerminalSession {
             showToast(t('Paste failed: the clipboard of the screen VibeSpace runs on could not be opened'), { type: 'error' });
           } else if (data.code === 'clipboard_not_taken') {
             showToast(t('Paste failed: the clipboard did not take the picture'), { type: 'error' });
+          } else if (data.code === 'clipboard_no_helper') {   // r1090: the helper could not ask — its own fault, never the clipboard's
+            showToast(t('Paste failed: could not ask the clipboard — paste again'), { type: 'error' });
           } else if (data.error) {
             showToast(t('Paste failed: {msg}', { msg: data.error }), { type: 'error' });
           }

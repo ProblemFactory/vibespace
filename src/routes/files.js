@@ -760,6 +760,8 @@ function macClipboardWrite(starter, tmpPath) {
  *  picture in time — from the last read's own answer */
 function clipboardWhy(r, display) {
   if (r && r.error === 'ENOENT') return { code: 'clipboard_no_program', words: `the clipboard program is not installed on the machine VibeSpace runs on` };
+  // r1090: the HELPER could not ask (the starter down, restarting, never answering) — its own fault, never the clipboard's
+  if (r && r.unknown) return { code: 'clipboard_no_helper', words: 'could not ask the clipboard (the helper process did not answer) — paste again' };
   if (r && /can't open display/i.test(String(r.stderr || ''))) return { code: 'clipboard_no_display', words: `the display ${display || '(none)'} could not be opened for the clipboard` };
   return { code: 'clipboard_not_taken', words: 'the clipboard did not take the picture in time' };
 }
@@ -795,12 +797,14 @@ router.post('/api/paste-image', async (req, res) => {
     const tmpPath = path.join(pasteDir.dir, `claude-paste-${Date.now()}.${ext}`);
     await fs.promises.writeFile(tmpPath, buf);   // B-3767 follow-up: off the loop (a reader's should); swept by sweepOwnTmp above (B-5527)
     // Set system clipboard with image — macOS uses osascript, Linux uses xclip
-    // NO SYNCHRONOUS CHILD ON THE HUB'S LOOP (B-323e's family, 主开发 r1066 — the paste's own site): the clipboard's READS (the poll
-    // below, every 200 ms for up to 5 s) and macOS's one write run through the hub's STARTER (src/server/child-starter.js: a small
-    // process forks them, never the hub; each awaited, each bounded, its env the one this route built) — while a person pastes a
-    // picture no other window of the hub stalls. The program that OWNS the clipboard (xclip: it lives until another program takes
-    // the clipboard, by design) is started as before. A picture the clipboard never takes is ANSWERED BY NAME within the same bound
-    // (`code` + `error`; the terminal words it) — before, the answer was a silent `ready: false`
+    // B-323e's family, 主开发 r1066 — the paste's own site: the clipboard's READS (the poll below, every 200 ms for up to 5 s) and
+    // macOS's one write run through the hub's STARTER (src/server/child-starter.js: a small process forks them, never the hub; each
+    // awaited, each bounded, its env the one this route built) — they no longer hold the hub's loop. NOT YET OFF THE LOOP (r1090,
+    // said): a poll that runs out re-probes the display ONCE (req.app.locals.refreshXEnv → src/server/cli-env.js detectXDisplay /
+    // stabilizeXAuth, src/server/cli-cmd.js resolveCmd) — synchronous children, the loop-child census's DEBT rows «per refreshXEnv».
+    // The program that OWNS the clipboard (xclip: it lives until another program takes the clipboard, by design) is started as before.
+    // A picture the clipboard never takes is ANSWERED BY NAME within the same bound (`code` + `error`; the terminal words it) — before,
+    // the answer was a silent `ready: false`; a read that finds NO program answers that at once (no further read, no re-probe)
     const isMac = process.platform === 'darwin';
     const starter = childStarter();
     try {
@@ -831,6 +835,8 @@ router.post('/api/paste-image', async (req, res) => {
             try {
               last = await starter.run('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], { timeoutMs: 1000, capture: true, wholeEnv: true, env: clipEnv });
               if (last && last.code === 0 && String(last.stdout || '').includes('image/')) return res.json({ path: tmpPath, ready: true });
+              // r1090: the program is not there — said AT ONCE (no further read, no re-probe: neither can bring it)
+              if (last && last.error === 'ENOENT') { const why = clipboardWhy(last, clipEnv.DISPLAY); return res.json({ path: tmpPath, ready: false, code: why.code, error: why.words }); }
             } catch { }
             if (Date.now() - pollStart < pollFor) return void setTimeout(poll, 200);
             if (retriesLeft > 0 && req.app.locals.refreshXEnv) {

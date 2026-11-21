@@ -66,6 +66,7 @@ import path from 'node:path';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
@@ -717,12 +718,16 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
       // not resolve `xclip` to the stand-in is REFUSED BY NAME before any request (never a fall-through to the real program)
       const CLIP = path.join(DIR, 'clip-standin'), CLIP_REC = path.join(CLIP, 'rec'), STANDIN = path.join(CLIP, 'xclip');
       fs.mkdirSync(CLIP_REC, { recursive: true });
+      // displays that cannot exist (no socket): the suite's own, and one per r1090 leg the stand-in answers by (keyed by the DISPLAY
+      // the route hands it — each such leg on its own server, its xEnv naming it)
+      const [NO_DISPLAY, NEVER_D, NODISP_D, HELPER_D, NOPROG_D] = (() => { const out = []; for (let n = 60001; n < 61000 && out.length < 5; n++) if (!fs.existsSync(`/tmp/.X11-unix/X${n}`)) out.push(`:${n}`); while (out.length < 5) out.push(`:${65530 - out.length}`); return out; })();
       fs.writeFileSync(STANDIN, [
         '#!/bin/sh',
         "# test-raw-filename's stand-in for xclip (K65): it records what it was given and exits — it never opens a display",
         `REC='${CLIP_REC}'`,
         // r1066: a placed SLOW read marks its start and its end around the sleep; a NEVER read answers no picture
-        'case " $* " in *" -o "*) n=$$; if [ -f "$REC/slow" ]; then : > "$REC/o-start-$n"; sleep "$(cat "$REC/slow")"; : > "$REC/o-end-$n"; fi; [ -f "$REC/never" ] && exit 0; [ -f "$REC/type" ] && cat "$REC/type"; exit 0;; esac',
+        // r1090: on NEVER_D a read answers no picture; on NODISP_D it says what the real program says when a display cannot be opened
+        `case " $* " in *" -o "*) n=$$; if [ -f "$REC/slow" ]; then : > "$REC/o-start-$n"; sleep "$(cat "$REC/slow")"; : > "$REC/o-end-$n"; fi; [ "$DISPLAY" = "${NEVER_D}" ] && exit 0; [ "$DISPLAY" = "${NODISP_D}" ] && { echo "Error: Can't open display: $DISPLAY" >&2; exit 1; }; [ -f "$REC/type" ] && cat "$REC/type"; exit 0;; esac`,
         'n=$$',
         'printf \'%s\\n\' "$@" > "$REC/args-$n"',
         'printf \'%s\' "$DISPLAY" > "$REC/display-$n"',
@@ -730,7 +735,6 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         'for a in "$@"; do case "$a" in image/*) printf \'TARGETS\\n%s\\n\' "$a" > "$REC/type";; esac; done',
         ': > "$REC/done-$n"',
         'exit 0', ''].join('\n'), { mode: 0o755 });
-      const NO_DISPLAY = (() => { for (let n = 60001; n < 61000; n++) if (!fs.existsSync(`/tmp/.X11-unix/X${n}`)) return `:${n}`; return ':65534'; })();
       const firstOnPath = (name, p) => { for (const d of String(p || '').split(':').filter(Boolean)) { const f = path.join(d, name); try { fs.accessSync(f, fs.constants.X_OK); return f; } catch { } } return null; };
       const clipGuard = (p, { none = false } = {}) => { const f = firstOnPath('xclip', p); return f === STANDIN || (none && f === null) ? { ok: true } : { ok: false, refused: `REFUSED: the xclip first on the suite's search path is ${f || 'none'}, not the suite's stand-in (${STANDIN}) — the paste leg never runs the real clipboard program` }; };
       const records = () => fs.readdirSync(CLIP_REC).filter((f) => f.startsWith('done-')).map((f) => f.slice(5));
@@ -801,24 +805,47 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
           return { started: !!started, turnedInFlight, answer: await answer };
         } finally { flag('slow', null); }
       };
-      const POLL_LOCALS = { clipboardPollMs: 1000 };   // the route's own seam: the poll's bound in this suite (the product's is 5 s)
+      // r1090: THE STARTER, COUNTED — the real starter wrapped (src/server/child-starter.js's own seam): every read the route asks is
+      // counted by the display it names (order evidence: «no second read»), and on HELPER_D the starter answers that it could not
+      // ask at all (a placed helper fault) — never a real program on any of them
+      const CS = require(path.join(REPO, 'src/server/child-starter.js'));
+      const realStarter = CS.createChildStarter(), reads = [];
+      CS.setChildStarter({ run: (cmd, args, o) => { const d = (o && o.env && o.env.DISPLAY) || ''; if (cmd === 'xclip') reads.push(d); if (d === HELPER_D) return Promise.resolve({ unknown: true, why: 'the suite\'s placed helper fault' }); return realStarter.run(cmd, args, o); }, stats: () => realStarter.stats(), closePipe: () => realStarter.closePipe() });
+      const POLL_LOCALS = { clipboardPollMs: 400 };   // the route's own seam: the poll's bound in this suite (the product's is 5 s)
       const SC = await serve(filesRouter, null, { json: true, locals: POLL_LOCALS });
       try {
         const L1 = await loopScene(SC.base);
         ok(L1.started && L1.turnedInFlight === true && !!L1.answer && L1.answer.ready === true,
           'r1066: while the clipboard\'s read is in flight (a placed slow stand-in) the hub\'s loop TURNS — the read runs in the starter\'s small process, awaited; the paste then answers ready as before', L1);
-        flag('never', '1');
-        let n1; try { n1 = await pasteAnswer(SC.base); } finally { flag('never', null); }
+        // the three named failures that wait the poll's bound — at once, each on its own server (its display keys the stand-in / the starter)
+        const own = async (d) => { const X = await serve(filesRouter, null, { json: true, locals: { ...POLL_LOCALS, xEnv: { DISPLAY: d } } }); try { return await pasteAnswer(X.base); } finally { await X.close(); } };
+        const [n1, nd, nh] = await Promise.all([own(NEVER_D), own(NODISP_D), own(HELPER_D)]);
         ok(!!n1 && n1.ready === false && n1.code === 'clipboard_not_taken' && n1.error === 'the clipboard did not take the picture in time' && typeof n1.path === 'string',
           'r1066: a picture the clipboard never takes is ANSWERED BY NAME within the poll\'s bound (code + words the terminal says) — it was a silent «ready: false»', n1);
+        ok(!!nd && nd.ready === false && nd.code === 'clipboard_no_display' && nd.error === `the display ${NODISP_D} could not be opened for the clipboard`,
+          'r1090: a display the clipboard program cannot open (the stand-in says what xclip says) is answered by THAT name, the display in its words', nd);
+        ok(!!nh && nh.ready === false && nh.code === 'clipboard_no_helper' && /^could not ask the clipboard \(the helper process did not answer\) — paste again$/.test(nh.error || ''),
+          'r1090: when the starter could not ask at all the person is told THAT — never «the clipboard did not take the picture»', nh);
         // the clipboard program missing: a search path holding bash and cat only — nothing named xclip anywhere, so no real program can answer
         const NOBIN = path.join(DIR, 'nobin'); fs.mkdirSync(NOBIN, { recursive: true });
         for (const b of ['bash', 'cat']) { const real = firstOnPath(b, envWas.PATH || '/usr/bin:/bin'); if (real && !fs.existsSync(path.join(NOBIN, b))) fs.symlinkSync(real, path.join(NOBIN, b)); }
+        let reprobes = 0;
+        const SN = await serve(filesRouter, null, { json: true, locals: { ...POLL_LOCALS, xEnv: { DISPLAY: NOPROG_D }, refreshXEnv: () => { reprobes++; } } });
         const pathNow = process.env.PATH; process.env.PATH = NOBIN;
-        let n2; try { n2 = await pasteAnswer(SC.base); } finally { process.env.PATH = pathNow; }
-        ok(!!n2 && n2.ready === false && n2.code === 'clipboard_no_program' && /^the clipboard program is not installed/.test(n2.error || ''),
-          'r1066: …and with no clipboard program on the machine the answer names THAT', n2);
-      } finally { await SC.close(); }
+        let n2; try { n2 = await pasteAnswer(SN.base); } finally { process.env.PATH = pathNow; await SN.close(); }
+        const noProgReads = reads.filter((d) => d === NOPROG_D).length;
+        ok(!!n2 && n2.ready === false && n2.code === 'clipboard_no_program' && /^the clipboard program is not installed/.test(n2.error || '') && noProgReads === 1 && reprobes === 0,
+          'r1090: with no clipboard program on the machine the answer names THAT AT ONCE — the first read\'s answer: no second read is started, no re-probe (by order: one read counted, the re-probe never called)', { n2, reads: noProgReads, reprobes });
+      } finally { await SC.close(); CS.setChildStarter(null); realStarter.closePipe(); }
+      // r1090: THE TERMINAL WORDS EVERY CODE THE ROUTE ANSWERS — each code the route can answer has its branch and its sentence in the
+      // three dictionaries (a dropped branch, or a code with no sentence, is red by name)
+      {
+        const FSRCC = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8'), TERM = fs.readFileSync(path.join(REPO, 'src/lib/terminal.js'), 'utf8');
+        const ZHD = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-zh.js')).href)).default, JAD = (await import(pathToFileURL(path.join(REPO, 'src/lib/i18n-ja.js')).href)).default;
+        const codes = [...new Set([...FSRCC.matchAll(/code: '(clipboard_[a-z_]+)'/g)].map((m) => m[1]))];
+        const rows = codes.map((c) => { const m = new RegExp(`data\\.code === '${c}'\\) \\{[^\\n]*\\n\\s*showToast\\(t\\('([^']+)'\\)`).exec(TERM); return { c, key: m && m[1], zh: !!(m && ZHD[m[1]]), ja: !!(m && JAD[m[1]]) }; });
+        ok(codes.length === 4 && rows.every((r) => r.key && r.zh && r.ja), `r1090: the terminal words each of the route's ${codes.length} codes (${codes.join(', ')}) — a branch with its sentence, in zh and ja`, rows);
+      }
       {
         const FSRC1 = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
         const RUN = "last = await starter.run('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o'], { timeoutMs: 1000, capture: true, wholeEnv: true, env: clipEnv });";
@@ -826,7 +853,7 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         const SR = await serve(M.load('src/routes/files.js', anchored(FSRC1, RUN, SYNC, 'r1066-sync-poll'), 'r1066-sync'), null, { json: true, locals: POLL_LOCALS });
         try {
           const L0 = await loopScene(SR.base);
-          ok(L0.started && L0.turnedInFlight === false, 'CONTROL r1066 (today\'s synchronous call, in a copy): NO loop turn lands while the read is in flight — the leg above would be red', L0);
+          ok(L0.started && L0.turnedInFlight === false, 'CONTROL r1066 (an equivalent of the base\'s synchronous read — execFileSync with its arguments, env and 1 s bound — in a copy): NO loop turn lands while the read is in flight — the leg above would be red', L0);
         } finally { await SR.close(); }
       }
       const FSRC = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');

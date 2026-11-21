@@ -2143,6 +2143,7 @@ export default {
   "Paste failed: the clipboard program is not installed on the machine VibeSpace runs on": "粘贴失败：运行 VibeSpace 的机器上没有安装剪贴板程序",
   "Paste failed: the clipboard of the screen VibeSpace runs on could not be opened": "粘贴失败：无法打开运行 VibeSpace 的屏幕的剪贴板",
   "Paste failed: the clipboard did not take the picture": "粘贴失败：剪贴板没有接收这张图片",
+  "Paste failed: could not ask the clipboard — paste again": "粘贴失败：无法询问剪贴板——请再粘贴一次",
   "Paste {n} items": "粘贴 {n} 个项目",
   "Pasted {done}, failed {failed}": "已粘贴 {done} 个，失败 {failed} 个",
   "Pasted {n} items": "已粘贴 {n} 个项目",
