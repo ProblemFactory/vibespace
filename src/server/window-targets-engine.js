@@ -451,10 +451,16 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   /** Lane E: the app's windows → the pixel plan (null when the keeper cannot say — a keeper without `windows`). */
   async function planFor(rec, sub = null) {
-    if (rec.origin === 'desktop' || typeof keeper.windows !== 'function') return null;
+    // B-dbb4 unit 2's cure (round wudero5nj): a call on a window's OWN handle acts on THAT window or is refused by name — never
+    // on the main window, never on display coordinates (M1); and no window handle exists on a SHARED desktop (a rung that does
+    // not own its display holds the person's own windows beside the app: their terminal is never addressable by a typed id)
+    const subH = sub != null ? UN.subHandle(rec.id, sub) : null;
+    const unreadable = (why) => namedError('window_list_unreadable', `${subH}: the app's window list could not be read just now${why ? ` (${String(why).slice(0, 120)})` : ''} — nothing was done; try again, or \`vibespace-window screenshot ${rec.id}\` for the app's own image`, { handle: subH });
+    if (sub != null && (rec.origin === 'desktop' || !capsOf(rec).ownsDisplay)) throw namedError('window_subject_shared', `${subH}: a window's own handle exists only on a desktop the app owns — this one is shared with the person's own windows; use the app's own handle ${rec.id}`, { handle: subH });
+    if (rec.origin === 'desktop' || typeof keeper.windows !== 'function') { if (sub != null) throw unreadable(); return null; }
     try {
       let r = await keeper.windows(rec.id);
-      if (!r || !r.ok) return null;
+      if (!r || !r.ok) { if (sub != null) throw unreadable(r && r.error); return null; }
       // lane window-dialog-member (owner 2026-10-11, JASP's Open; MEASURED on xpra 6.5.4): a dialog the app opened while no
       // viewer was attached stays in an UNMAPPED corral — the tree said "showing", the plan had one member, keys went to the
       // main window. Map its corral (what an attaching viewer does), then read the plan FRESH; never when the main is unmapped
@@ -469,13 +475,16 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       // subject — its own image, origin and --at; a window gone (closed, never this app's) is refused by name, never the main's
       if (sub != null) {
         const row = (r.windows || []).find((w) => w && Number(w.id) === sub);
-        if (!row) throw namedError('window_gone', `the app's window ${UN.subHandle(rec.id, sub)} is gone (closed, or not a window of this app) — \`vibespace-window screenshot ${rec.id}\` names the windows it has now`, { handle: rec.id });
+        if (!row) throw namedError('window_gone', `the app's window ${subH} is gone (closed, or not a window of this app) — \`vibespace-window screenshot ${rec.id}\` names the windows it has now`, { handle: subH });
         const own = R.pixelPlan([row]);
-        return own && own.ok ? { ...own, subject: { id: row.id, handle: UN.subHandle(rec.id, sub), title: String(row.title || row.name || row.instance || row.cls || '').slice(0, 120) } } : own;
+        return own && own.ok ? { ...own, subject: { id: row.id, handle: subH, title: UN.titleOf(row) } } : own;
       }
       const plan = R.pixelPlan(r.windows, { pin: PIN.pinOf(rec.pin) }); // lane e2b: a pinned window's image = the pin
       return plan && plan.ok ? { ...plan, unshown: UN.unshownOf(r.windows, plan) } : plan; // B-dbb4: the app's windows this image does not show, named
-    } catch (e) { if (e && e.code === 'window_gone') throw e; return null; }
+    } catch (e) {
+      if (sub != null) throw (e && ['window_gone', 'window_list_unreadable', 'window_subject_shared'].includes(e.code) ? e : unreadable(e && e.message));
+      return null;
+    }
   }
   const streamOf = (rec) => (rec && (rec.stream || M.streamKindOf(rec))) || null; // a FACT the reach view reports, never a branch
   const capsOf = (rec) => M.capsOf(rec); // the rung's capability cells (the view's, else the row's)
@@ -1244,10 +1253,13 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const verb = String(body.verb || '');
     const { handle, sub } = splitSubject(handle0);
     const { rec, lease } = requireLease(handle, facts, verb || 'act');
-    if (sub != null && (body.ref || ['snapshot'].includes(verb))) throw namedError('window_subject_pixels', `${UN.subHandle(rec.id, sub)} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${rec.id}`, { handle: rec.id });
+    // B-dbb4 M3: the chosen window IS the plan's main (its own plan) — keys and text focus it and go to its X window
+    const subjectWin = (px) => (sub != null && px && px.plan && px.plan.subject && px.plan.main ? px.plan.main : null);
+    const centreOf = (m) => ({ x: m.x + Math.min(20, Math.floor(m.w / 2)), y: m.y + Math.min(20, Math.floor(m.h / 2)) });
+    if (sub != null && (body.ref || ['snapshot'].includes(verb))) throw namedError('window_subject_pixels', `${UN.subHandle(rec.id, sub)} is one window of the app, reached by its pixels — \`screenshot\`, \`click --at\`, \`type\`, \`key\`, \`scroll\`; the tree verbs (@refs) take the app's own handle ${rec.id}`, { handle: UN.subHandle(rec.id, sub) });
     if (rec.origin === AGENT_BROWSER_ORIGIN) { try { keeper.noteInput?.(rec.id); } catch { /* the idle clock only */ } } // lane e2a r3 (#7): an agent driving its own browser is not idle
     const base = WT.treeEnvOf(rec, env()); // lane app-display-a11y-bus: the node verbs act on THIS app's a11y bus
-    const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, origin: rec.origin || ORIGIN };
+    const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, ...(sub != null ? { subject: UN.subHandle(rec.id, sub) } : {}), origin: rec.origin || ORIGIN };
     // P10 (§6.6): on the user's own desktop the two INJECTION verbs are refused
     // by NAME before any backend is probed — nothing is ever injected there
     if (rec.origin === 'desktop') {
@@ -1357,15 +1369,15 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       /** Lane E: text as KEYS into whatever holds focus on the app's own display (pixel mode, Chrome's entries). */
       const injected = async (e, line) => {
         const px = await pixelsFor(rec, who, 'type', { sub });
-        await displayHolds(rec, px, keysPointOf(px, lease), who, 'type', 'keys are');   // fb-bc200800e0: keys on a display that cannot take them are refused, never «typed»
+        await displayHolds(rec, px, subjectWin(px) ? visiblePoint(subjectWin(px)) : keysPointOf(px, lease), who, 'type', 'keys are');   // fb-bc200800e0: keys on a display that cannot take them are refused, never «typed»
         if (e) { held(); const f = await wt.focusNode({ entry: e, env: base, ...helperOpts() }); fromHelper(f, { verb: 'focus', by: 'node', node: nodeLine(e) }); await sleep(120); }
         held();
-        const dw = e ? null : dialogWindow(px, lease);
-        const r = await injecting((signal) => wt.injectType({ bins: px.bins, xenv: px.xenv, text, replace: !!body.replace, focus: mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
-        fromHelper(r, { verb: 'type', by: 'inject', chars: text.length, ...(e ? { node: nodeLine(e), focusedBy: 'tree' } : dw ? { focusedBy: 'window' } : {}), ...line, backend: px.backends.injection.backend });
+        const dw = e ? null : (subjectWin(px) || dialogWindow(px, lease)); // B-dbb4 M3: a chosen window's text goes to ITS X window
+        const r = await injecting((signal) => wt.injectType({ bins: px.bins, xenv: px.xenv, text, replace: !!body.replace, focus: subjectWin(px) ? centreOf(subjectWin(px)) : mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
+        fromHelper(r, { verb: 'type', by: 'inject', chars: text.length, ...(e ? { node: nodeLine(e), focusedBy: 'tree' } : dw ? { focusedBy: subjectWin(px) ? 'subject' : 'window' } : {}), ...line, backend: px.backends.injection.backend });
         return { ok: true, handle: rec.id, did: { verb: 'type', by: 'inject', ...(e ? { ref: e.ref } : {}), chars: text.length, replaced: !!body.replace } };
       };
-      if (!body.ref && pixelShare) return injected(null, { mode: rr.mode });
+      if (!body.ref && (pixelShare || sub != null)) return injected(null, { mode: rr ? rr.mode : null, ...(sub != null ? { subject: true } : {}) }); // B-dbb4 M2: a chosen window is typed into by its keys, under any share — never the app's focused field
       let e = null;
       if (body.ref) e = refEntry();
       else {
@@ -1394,13 +1406,13 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       const chord = wt.parseChord(body.chord);
       if (!chord.ok) throw namedError(chord.code, chord.why);
       const px = await pixelsFor(rec, who, 'key', { sub });
-      await displayHolds(rec, px, keysPointOf(px, lease), who, 'key', 'keys are');   // fb-bc200800e0: the same for a chord
+      await displayHolds(rec, px, subjectWin(px) ? visiblePoint(subjectWin(px)) : keysPointOf(px, lease), who, 'key', 'keys are');   // fb-bc200800e0: the same for a chord
       // where the pointer rests before a chord (a bare display has PointerRoot focus): inside the MAIN window when the
       // keeper names it (lane E — tree bounds are toolkit coordinates), else the last snapshot's frame
       held();
-      const dw = dialogWindow(px, lease); // lane window-dialog-member: a dialog's keys go to ITS X window
-      const r = await injecting((signal) => wt.injectKey({ bins: px.bins, xenv: px.xenv, chord, focus: mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
-      fromHelper(r, { verb: 'key', by: 'inject', chord: chord.hasModifier ? chord.xdotool : '(key)', ...(dw ? { focusedBy: 'window' } : {}), backend: px.backends.injection.backend });
+      const dw = subjectWin(px) || dialogWindow(px, lease); // lane window-dialog-member: a dialog's keys go to ITS X window — B-dbb4 M3: a chosen window's to ITS
+      const r = await injecting((signal) => wt.injectKey({ bins: px.bins, xenv: px.xenv, chord, focus: subjectWin(px) ? centreOf(subjectWin(px)) : mainFocus(px, lease), window: dw ? dw.id : null, signal, python }));
+      fromHelper(r, { verb: 'key', by: 'inject', chord: chord.hasModifier ? chord.xdotool : '(key)', ...(dw ? { focusedBy: subjectWin(px) ? 'subject' : 'window' } : {}), backend: px.backends.injection.backend });
       return { ok: true, handle: rec.id, did: r.did };
     }
     throw namedError('bad-request', `unknown verb ${JSON.stringify(verb)} — click | type | key | scroll`);
@@ -1439,7 +1451,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const { handle, sub } = splitSubject(handle0);
     const { rec, lease } = requireLease(handle, facts, 'screenshot');
     if (rec.origin === 'desktop') return desktopScreenshot(rec, facts);
-    const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id };
+    const who = { sessionId: facts.sessionId, browserKey: facts.browserKey, handle: rec.id, ...(sub != null ? { subject: UN.subHandle(rec.id, sub) } : {}) };
     gateMode(rec, lease, 'screenshot', false, who); // always allowed — notes a mode change for the audit
     const xenv = xenvOf(rec);
     const dir = path.join(dataDir, SHOT_DIR);
@@ -1450,7 +1462,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const plan = await planFor(rec, sub);
     if (plan) {
       const vis = R.visibilityVerdict({ perWindow: capsOf(rec).perWindow, plan });
-      if (!vis.ok) { audit({ ...who, verb: 'screenshot', by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', rec.id), { handle: rec.id }); }
+      if (!vis.ok) { audit({ ...who, verb: 'screenshot', by: 'pixels', ok: false, code: vis.code }); throw namedError(vis.code, vis.why.replace('<handle>', sub != null ? UN.subHandle(rec.id, sub) : rec.id), { handle: sub != null ? UN.subHandle(rec.id, sub) : rec.id }); }
       let r = await wt.windowShot({ xenv, out, plan, ...helperOpts() });
       // a window mapped a moment ago may not have drawn yet (a viewer just attached): one short second look before
       // the image is answered as blank — a blank image is SAID (`blank`), never passed off as the window
@@ -1459,7 +1471,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       heldOrUnlink(rec, facts, out); // lane E verify: a revoke during the grab ⇒ the image is deleted, never handed over
       const unshown = Array.isArray(plan.unshown) ? plan.unshown : [];
       audit({ ...who, verb: 'screenshot', by: 'pixels', ok: true, w: r.w, h: r.h, windows: plan.members.length, lit: r.lit, ...(unshown.length ? { unshown: unshown.length } : {}) });
-      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true, ...(plan.subject ? { subject: plan.subject } : {}), ...(unshown.length ? { unshown, note: UN.unshownText(unshown, rec.id) } : {}) };
+      return { handle: rec.id, file: out, w: r.w, h: r.h, x: plan.origin.x, y: plan.origin.y, originX: plan.origin.x, originY: plan.origin.y, coords: 'window', scale: Number(rec.scale) || 1, windows: plan.members.length, blank: r.lit === 0, bytes: r.bytes, cropped: true, ...(plan.subject ? { subject: plan.subject } : {}), ...(unshown.length ? { unshown, note: UN.unshownText(unshown, rec.id, { handles: !!capsOf(rec).ownsDisplay }) } : {}) };
     }
     // no window geometry from the keeper: the display grab, cropped to the last snapshot's frame
     let bounds = null;

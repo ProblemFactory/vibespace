@@ -76,8 +76,11 @@ const hits = [];
 // B-dbb4 unit 2's stand-in (r756 / r772): /popups is one button over the whole page — a REAL click (XTEST: a user gesture, so
 // Chrome's popup blocker lets it through) opens two TOP-LEVEL windows by the page's own script, the sign-in shape: one at the
 // display's origin, one far outside it; /p1 and /p2 are their pages (the server sees them load)
-const POPUPS_HTML = '<!doctype html><title>Popups</title><button id="open" style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" onclick="window.open(\'/p1\', \'p1\', \'left=0,top=0,width=520,height=620\'); window.open(\'/p2\', \'p2\', \'left=3200,top=2400,width=420,height=320\')">Open the sign-in windows</button>';
-const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html'); if (String(req.url).startsWith('/popups')) return res.end(POPUPS_HTML); if (/^\/p[12]\b/.test(String(req.url))) return res.end(`<!doctype html><title>Sign in – stand-in ${String(req.url).slice(2, 3)}</title><h1>Sign in</h1>`); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
+// the cure (round wudero5nj, M3): every page reports its OWN keydowns (/key?w=<which>&k=<key>) — a key on the popup's handle must
+// arrive in the popup and none in the main; the main's own «x» closes both popups (the CONTROL key, and the leg's clean-up)
+const KEYS_JS = (w) => `<script>addEventListener('keydown', (e) => { fetch('/key?w=${w}&k=' + encodeURIComponent(e.key)); if (${JSON.stringify(w)} === 'main' && e.key === 'x') { for (const p of (window.__pops || [])) { try { p.close(); } catch {} } } });</script>`;
+const POPUPS_HTML = '<!doctype html><title>Popups</title><button id="open" style="position:fixed;inset:0;width:100%;height:100%;font-size:40px" onclick="window.__pops = [window.open(\'/p1\', \'p1\', \'left=0,top=0,width=520,height=620\'), window.open(\'/p2\', \'p2\', \'left=3200,top=2400,width=420,height=320\')]">Open the sign-in windows</button>' + KEYS_JS('main');
+const page = http.createServer((req, res) => { hits.push({ url: req.url, ua: req.headers['user-agent'] || '' }); res.setHeader('Content-Type', 'text/html'); if (String(req.url).startsWith('/popups')) return res.end(POPUPS_HTML); if (/^\/p[12]\b/.test(String(req.url))) return res.end(`<!doctype html><title>Sign in – stand-in ${String(req.url).slice(2, 3)}</title><h1>Sign in</h1>${KEYS_JS('p' + String(req.url).slice(2, 3))}`); res.end('<!doctype html><title>E2A rung page</title><h1>Hello rung</h1><button>Press me</button>'); });
 await new Promise((r) => page.listen(PAGE_PORT, '127.0.0.1', r));
 const appsOf = () => { try { return Object.values(JSON.parse(fs.readFileSync(path.join(wt, 'data/desktop-apps.json'), 'utf8')).apps); } catch { return []; } };
 let cleaned = false;
@@ -297,7 +300,25 @@ try {
     const own = [];
     for (const h of (acc && acc.named) || []) { const f = path.join(PNG_DIR || scratch('da-rung-png'), `dbb4-${h}.png`); const r = await cli('vibespace-window', ['screenshot', h, '--out', f]); own.push({ h, code: r.code, dims: pngDims(f), subject: /this image is ONE window of the app: /.test(r.out), out: r.out.trim().slice(0, 300), err: r.err.trim().slice(0, 300) }); }
     console.log(`    MEASURE B-dbb4 (not a proof): each named window's own screenshot: ${JSON.stringify(own)}`);
-    check(`B-dbb4 unit 2 on the real chromium: each named window's OWN handle gives that window's own image (${own.length} named)`, own.every((x) => (x.code === 0 && x.subject && x.dims) || /\[window_not_visible\]/.test(x.err)), own);
+    // the cure (wudero5nj): the leg cannot pass on nothing — at least one NAMED window is the stand-in's own popup, BY ITS TITLE,
+    // and its own handle gave its own image
+    const popNamed = ((ssP && ssP.out) || '').match(/«Sign in – stand-in ([12])» \d+x\d+ at [^;]*? its own handle `([^`]+)`/);
+    const popOwn = popNamed ? own.find((x) => x.h === popNamed[2]) : null;
+    check(`B-dbb4 unit 2 on the real chromium: a NAMED window is the stand-in's own popup by its title (${popNamed ? `«Sign in – stand-in ${popNamed[1]}» as ${popNamed[2]}` : 'none named'}) and its OWN handle gives its own image; every other named window's too (${own.length} named)`, !!popNamed && !!popOwn && popOwn.code === 0 && popOwn.subject && !!popOwn.dims && own.every((x) => (x.code === 0 && x.subject && x.dims) || /\[window_not_visible\]/.test(x.err)), { popNamed, own });
+    // M3: a key on the popup's OWN handle arrives in THAT popup (its page reads its own keydown) and the main window gets none;
+    // CONTROL: the same kind of key on the APP's own handle lands in the main page (and its «x» closes both popups: the clean-up)
+    if (popNamed) {
+      const k0 = hits.length;
+      const kp = await cli('vibespace-window', ['key', popNamed[2], 'k']);
+      const inPop = await until(async () => (hits.slice(k0).some((h) => h.url === `/key?w=p${popNamed[1]}&k=k`) ? true : null), 15000, 300);
+      await sleep(1500);
+      const inMain = hits.slice(k0).filter((h) => /^\/key\?w=main/.test(h.url)).map((h) => h.url);
+      const k1 = hits.length;
+      const km = await cli('vibespace-window', ['key', H2, 'x']);
+      const mainGot = await until(async () => (hits.slice(k1).some((h) => h.url === '/key?w=main&k=x') ? true : null), 15000, 300);
+      console.log(`    MEASURE B-dbb4 (not a proof): the keys the pages heard — ${JSON.stringify(hits.slice(k0).filter((h) => /^\/key/.test(h.url)).map((h) => h.url))}`);
+      check(`B-dbb4 M3 on the real chromium: \`key ${popNamed[2]} k\` arrives in the POPUP (its own keydown) and the main window hears none; CONTROL: \`key ${H2} x\` lands in the main page`, kp.code === 0 && !!inPop && !inMain.length && km.code === 0 && !!mainGot, { kp, inPop: !!inPop, inMain, km, mainGot: !!mainGot });
+    }
   }
   // lane e2-canvas (THE SECOND E2 CHROME PATH, 4/6 at 1 and 2 lanes after the first race's fix): xpra 6.5.4 closes a connection
   // whose packet beats its threaded hello answer (server/base.py handle_invalid_packet ⇒ proto.close(), no disconnect packet ⇒

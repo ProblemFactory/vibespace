@@ -155,6 +155,22 @@ vibespace-window watch <handle>                where the user sees this window l
 vibespace-window detach <handle>               drop the lease; the app keeps running
 ```
 
+**The app's other windows (a popup, a sign-in window).** A `screenshot` composes the app's main window and what covers it. Any
+other window of the app that the image does not show — a popup the page opened beside or away from it, one with no pixels
+yet, one beyond a pinned size — is NAMED under the image line, with its title, size, place, why, and **its own handle**
+`<handle>.w<hex id>` (`da-pop.w2a00004`). That handle makes ONE window the subject of a call: `screenshot da-pop.w2a00004`
+is that window's own image (its own origin; the CLI says «this image is ONE window of the app»), and `click … --at x,y`,
+`type`, `key` and `scroll` on it act on THAT window's pixels. Keys and text first give that window the X focus (xdotool
+`windowfocus`, no raise): the focus is LEFT there, as when a person clicks a window — the user's live view shows the
+popup focused, and nothing puts it back. A window's own handle reaches only the granted app's own windows on a desktop the
+app owns. Refused by name:
+- `window_gone` — that window closed, or it is not one of this app's (`screenshot <app handle>` names what it has now);
+- `window_list_unreadable` — the app's window list could not be read just now; nothing was done, try again;
+- `window_subject_pixels` — the tree verbs (`snapshot`, `@refs`) take the app's own handle, never a window's;
+- `window_subject_shared` — on a desktop shared with the user's own windows no window has a handle of its own: use the
+  app's own handle, and ask the user about the other windows (they see them in the live view);
+- `window_not_visible` — the window has no pixels yet (nobody shows it): the user's live view shows it.
+
 A **handle** is the window's id from `list` (`da-…`); `open` prints it. A
 **lease** is what `attach` takes: one holder per window, and every reading or
 acting verb needs it (`not_attached` tells you; `window_leased` names that

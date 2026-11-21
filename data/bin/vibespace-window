@@ -80,6 +80,8 @@ const USAGE = `vibespace-window — act on a native window through its accessibi
   vibespace-window snapshot <handle> [--budget N] [--no-text] [--json]
                                                  THE accessibility tree: @ref role "name" [actions] (x,y wxh) states — refs are per snapshot
   vibespace-window screenshot <handle> [--out <file.png>]
+                                                 the app's other windows the image does not show are NAMED under it, each with ITS OWN handle <handle>.w<hex>:
+                                                 screenshot / click --at / type / key / scroll on that handle act on THAT window (window_gone, window_list_unreadable, window_subject_pixels, window_subject_shared)
                                                  the window's OWN pixels (its size + origin printed): the pixel-mode read; --at x,y is a pixel of it.
                                                  It lands in <temp dir>/vibespace-window-<your uid>/ (the path is printed), never in your current directory;
                                                  a relative --out is under the session's directory (else that temp dir); ~/.ssh, any ~/.<dir>

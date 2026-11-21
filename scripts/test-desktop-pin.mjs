@@ -512,6 +512,65 @@ console.log('CONTROLS (patched copies)');
     let gone = null; try { await EP.screenshot('da-pop.w99', fP); } catch (e) { gone = e; }
     let tree = null; try { await EP.act('da-pop.w2', fP, { verb: 'click', ref: '@e1' }); } catch (e) { tree = e; }
     ok(!!(gone && gone.code === 'window_gone' && /da-pop\.w99 is gone/.test(gone.message) && tree && tree.code === 'window_subject_pixels'), 'unit 2: a window that is not the app\'s (or gone) is refused window_gone by name, never the main window\'s image; a tree verb on a chosen window is refused by name (window_subject_pixels)', { gone: gone && [gone.code, gone.message], tree: tree && tree.code });
+    // ── THE CURE (round wudero5nj): a call on a window's own handle acts on THAT window or is refused by name ──
+    const keysP = [], typedP = [];
+    wtP.injectKey = async (o) => { keysP.push({ window: o.window, focus: o.focus }); return { ok: true, did: { verb: 'key' } }; };
+    wtP.injectType = async (o) => { typedP.push({ window: o.window, focus: o.focus, text: o.text }); return { ok: true, did: { verb: 'type' } }; };
+    // M3: keys and text on a chosen window go to ITS X window and focus inside it (the popup at 0,0: its centre-ish 20,20)
+    await EP.act('da-pop.w2', fP, { verb: 'key', chord: 'Return' });
+    await EP.act('da-pop.w2', fP, { verb: 'type', text: 'hi' });
+    ok(keysP.length === 1 && keysP[0].window === 2 && keysP[0].focus.x === 20 && keysP[0].focus.y === 20 && typedP.length === 1 && typedP[0].window === 2 && typedP[0].focus.x === 20,
+      'M3: a key and a text on `da-pop.w2` go to the POPUP\'s X window (window 2) with the pointer inside it — never the main window that holds X focus', { keysP, typedP });
+    // M2: under a TREE share a text on a chosen window still goes by its keys into THAT window — never the app's focused field
+    EP.setShareMode('da-pop', 'tree');
+    await EP.act('da-pop.w2', fP, { verb: 'type', text: 'tree' });
+    EP.setShareMode('da-pop', 'pixels');
+    ok(typedP.length === 2 && typedP[1].window === 2 && typedP[1].text === 'tree', 'M2: under a TREE share `type da-pop.w2` types into the popup by its keys (window 2) — the tree road (the app\'s focused field) is never taken for a chosen window', typedP);
+    // M1: the window list unreadable (a bounded read timed out, a record still launching) ⇒ refused by name, NOTHING done
+    const rowsKeep = rowsP; const clicks0 = clicksP.length;
+    const winsKeep = keeperP.windows; keeperP.windows = async () => ({ ok: false, error: 'the gate: the list timed out' });
+    let u1 = null, u2 = null; try { await EP.screenshot('da-pop.w2', fP); } catch (e) { u1 = e; } try { await EP.act('da-pop.w2', fP, { verb: 'click', at: '10,20' }); } catch (e) { u2 = e; }
+    keeperP.windows = async () => { throw new Error('the gate: the helper died'); };
+    let u3 = null; try { await EP.act('da-pop.w2', fP, { verb: 'key', chord: 'Return' }); } catch (e) { u3 = e; }
+    keeperP.windows = winsKeep; rowsP = rowsKeep;
+    ok(!!(u1 && u1.code === 'window_list_unreadable' && /^da-pop\.w2: the app's window list could not be read just now \(the gate: the list timed out\) — nothing was done/.test(u1.message) && u2 && u2.code === 'window_list_unreadable' && u3 && u3.code === 'window_list_unreadable' && clicksP.length === clicks0 && keysP.length === 1),
+      'M1: the window list answering not-ok, or throwing ⇒ a screenshot, a click and a key on `da-pop.w2` are refused window_list_unreadable naming THAT handle — no click, no key (never the main\'s image, never display coordinates)', { u1: u1 && [u1.code, u1.message], u2: u2 && u2.code, u3: u3 && u3.code, clicks: clicksP.length - clicks0 });
+    // RED CONTROLS: an engine copy with today's fall-through (the list's not-ok answers null) / no subject focus / the tree road
+    const ES = read(ENGINE_REL);
+    const fall = ES.replace("if (!r || !r.ok) { if (sub != null) throw unreadable(r && r.error); return null; }", 'if (!r || !r.ok) return null;').replace("if (sub != null) throw (e && ['window_gone', 'window_list_unreadable', 'window_subject_shared'].includes(e.code) ? e : unreadable(e && e.message));\n      return null;", 'return null;'); // stale-pins: kept (a RED control plants the pre-cure text)
+    const noFocus = ES.replace("const dw = subjectWin(px) || dialogWindow(px, lease); // lane window-dialog-member", "const dw = dialogWindow(px, lease); // lane window-dialog-member"); // stale-pins: kept (a RED control plants the pre-cure text)
+    const treeRoad = ES.replace("if (!body.ref && (pixelShare || sub != null)) return injected(", "if (!body.ref && pixelShare) return injected("); // stale-pins: kept (a RED control plants the pre-cure text)
+    ok(fall !== ES && noFocus !== ES && treeRoad !== ES, 'controls planted: the fall-through, the key without its subject window, the tree road for a chosen window');
+    const runCopy = async (src, tag, fn) => {
+      const EC = MUT.load(ENGINE_REL, src, tag);
+      const E2 = EC.create({ keeper: keeperP, dataDir: path.join(dir, 'dbb4-' + tag), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
+      E2.grantReach('da-pop', { kind: 'session', id: 's1' }); E2.setShareMode('da-pop', 'pixels'); E2.attach('da-pop', fP);
+      try { return await fn(E2); } catch (e) { return { threw: e && e.code }; }
+    };
+    const cR = clicksP.length;
+    const red1 = await runCopy(fall, 'fall-through', async (E2) => { keeperP.windows = async () => ({ ok: false }); try { await E2.act('da-pop.w2', fP, { verb: 'click', at: '10,20' }); return { clicked: clicksP.length - cR }; } finally { keeperP.windows = winsKeep; } });
+    const kR = keysP.length;
+    const red2 = await runCopy(noFocus, 'no-subject-focus', async (E2) => { await E2.act('da-pop.w2', fP, { verb: 'key', chord: 'Return' }); return keysP[kR] || null; });
+    const tR = typedP.length;
+    const red3 = await runCopy(treeRoad, 'tree-road', async (E2) => { E2.setShareMode('da-pop', 'tree'); await E2.act('da-pop.w2', fP, { verb: 'type', text: 'x' }); return { typed: typedP.length - tR }; });
+    ok(!!(red1 && red1.clicked === 1), 'RED CONTROL of M1: today\'s fall-through — the list unreadable, the click on `da-pop.w2` is SENT (at display coordinates) and answered', red1);
+    ok(!!(red2 && red2.window == null), 'RED CONTROL of M3: without the subject window the key carries no window — X focus decides (the main, on xpra with a viewer)', red2);
+    ok(!!(red3 && (red3.threw || red3.typed === 0)), 'RED CONTROL of M2: the tree road for a chosen window never types into it (the app\'s focused field, or a refusal of the tree\'s own)', red3);
+    // RULED: on a SHARED desktop (a rung that does not own its display) no window has a handle of its own
+    const recS = { id: 'da-sh', label: 'Shared', exec: 'x', state: 'ready', display: ':0', pids: { app: 4646 }, backend: 'desktop-singleton', startedAt: Date.now(), readyAt: Date.now() };
+    const keeperS = { ...keeperP, listApps: () => [recP, recS], get: (id) => (id === recP.id ? recP : id === recS.id ? recS : null) };
+    const ES2 = ENGINE.create({ keeper: keeperS, dataDir: path.join(dir, 'dbb4-shared'), env: () => ({}), activeSessions: sessP, wt: wtP, bins: { xdotool: '/bin/true' }, log: { warn() { }, log() { } }, groupsOf: () => [], modeProbeMs: 0 });
+    ES2.grantReach('da-sh', { kind: 'session', id: 's1' }); ES2.setShareMode('da-sh', 'pixels'); ES2.attach('da-sh', fP);
+    let sh1 = null; try { await ES2.screenshot('da-sh.w2', fP); } catch (e) { sh1 = e; }
+    const shWords = UN.unshownText([{ id: 2, title: 'Terminal', x: -600, y: 0, w: 500, h: 400, why: 'outside' }], 'da-sh', { handles: false });
+    ok(!!(sh1 && sh1.code === 'window_subject_shared' && /use the app's own handle da-sh/.test(sh1.message) && !/own handle `/.test(shWords) && /shared with the user's own windows/.test(shWords)),
+      'RULED: on a SHARED desktop (desktop-singleton: it does not own its display) a typed window handle is refused window_subject_shared (use the app\'s own handle), and unit 1\'s words give no window a handle there', { sh1: sh1 && [sh1.code, sh1.message], shWords });
+    // a window of ANOTHER app (an id this app's display does not list) is refused window_gone — the list is the app's own display's
+    let fo = null; try { await EP.screenshot('da-pop.w7', fP); } catch (e) { fo = e; }
+    ok(!!(fo && fo.code === 'window_gone' && /da-pop\.w7 is gone/.test(fo.message)), 'a window id this app\'s display does not hold (another app\'s, a closed one) is refused window_gone naming THAT handle', fo && [fo.code, fo.message]);
+    ok(UN.titleOf({ title: 'Sign\u0007in\u001b[31m\u0085x' }) === 'Sign in [31m x' && UN.titleOf({ cls: 'chromium' }) === 'chromium', 'ONE title helper: every control character (C0, DEL, C1) a space, the class when there is no title', UN.titleOf({ title: 'Sign\u0007in\u001b[31m\u0085x' }));
+    const auditRows = fs.readFileSync(EP.auditFile, 'utf8').split('\n').filter((l) => l.includes('"verb":"key"') && l.includes('"subject":"da-pop.w2"'));
+    ok(auditRows.length >= 1, 'the audit row of a call on a chosen window carries its subject (da-pop.w2)', fs.readFileSync(EP.auditFile, 'utf8').split('\n').filter((l) => l.includes('"verb":"key"')).slice(-3));
     // THROUGH THE REAL ROUTE AND THE SHIPPED CLI: the header carries a title outside latin-1 (escaped), the CLI prints the words
     const appP = express(); appP.use(express.json()); ROUTES.setup({ engine: EP }); appP.use(ROUTES.router);
     const srvP = await new Promise((res) => { const s0 = appP.listen(0, '127.0.0.1', () => res(s0)); });
