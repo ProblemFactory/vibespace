@@ -24,6 +24,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { freePort, scratch, ONBOARDED_SOURCE, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): a read whose state never came is SAID on its own line, right above the
+// judge that reads it, and MARKED (an object or a list carries `timedOut`) — so its red reads that, never a verdict on the product
+const markTimedOut = (v, ms, what) => { console.log(`    (${what}: the state it waits for did not come in ${ms / 1000} s (a wait that expects nothing ends so too); its last read ${JSON.stringify(v === undefined ? null : v).slice(0, 160)})`); return v && typeof v === 'object' ? Object.assign(v, { timedOut: `the state never came in ${ms / 1000} s` }) : v; };
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
@@ -245,7 +248,7 @@ async function page(w, h, winCss) {
 const ROW = (id, label) => JSON.stringify({ hostId: id, label, code: 'desktop_ready', auth: 'none', setup: 'win32', desktop: 'vnc-native', selectable: true });
 const GEO = `(() => { const w = [...document.querySelectorAll('.vs-win[data-type="machine-app"]')].pop(); if (!w) return null; const pane = w.querySelector('.machine-app-pane'), box = w.querySelector('.machine-app-box'), st = w.querySelector('.machine-app-stage'), cv = st && st.querySelector('canvas'); const p = pane.getBoundingClientRect(), b = box.getBoundingClientRect(); return { shown: box.style.display !== 'none', pane: [p.left, p.top, p.width, p.height], box: [b.left, b.top, b.width, b.height], stage: [parseFloat(st.style.left), parseFloat(st.style.top), parseFloat(st.style.width)], fb: cv ? [cv.width, cv.height] : null, title: w.querySelector('.vs-win-title').textContent, say: w.querySelector('.machine-app-say').style.display === 'none' ? '' : w.querySelector('.machine-app-say').textContent, share: w.querySelector('.machine-app-share').style.display === 'none' ? '' : w.querySelector('.machine-app-share').textContent }; })()`;
 const pins = () => fs.readFileSync(PINS, 'utf8').trim().split('\n').filter(Boolean);
-const pointerAfter = async (n, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const p = vnc.seen.pointers.slice(n); if (p.some((e) => e.mask & 1)) return p; await sleep(50); } return vnc.seen.pointers.slice(n); };
+const pointerAfter = async (n, ms = 5000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const p = vnc.seen.pointers.slice(n); if (p.some((e) => e.mask & 1)) return p; await sleep(50); } return markTimedOut(vnc.seen.pointers.slice(n), ms, 'pointerAfter (a press)'); };
 // ckpt61 hosted cure (主开发 20:5xZ): a press lands within the POINTER'S QUANTIZATION at THIS crop's scale s (one CSS pixel = 1/s
 // machine px): Chrome hands noVNC an integer clientX / clientY (under one CSS pixel off) and noVNC cuts the machine coordinate with
 // `|0` (under one machine pixel) — so |off| < 1/s + 1, computed from the LIVE geometry, never a fixed number. The old ±1 held only
