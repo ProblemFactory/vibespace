@@ -149,14 +149,31 @@ function hostKeyRefusal(h, stderr) {
 }
 
 /** The page's view of a record's pin (no key text: the fingerprints say it). */
-const pinView = (h) => (pinned(h) ? { hostKeys: keysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })), hostKeysAt: h.hostKeysAt || null } : { hostKeys: null });
+const pinView = (h) => (pinned(h) ? { hostKeys: keysOf(h).map((k) => ({ type: k.type, fp: fingerprintOf(k.key) })), hostKeysAt: h.hostKeysAt || null } : pinUnusable(h) ? { hostKeys: null, hostKeysUnusable: true } : { hostKeys: null });   // r1602: a REFUSED pin is not «not pinned» (no one-press for it)
 
 /** B-7f0b (the coordinator's r1220 (2)): THE KEYS THIS HUB ALREADY TRUSTS for a record — the hub user's own known_hosts lines
  *  (ssh's accept-new wrote them at the machine's first dial), under the name ssh looks the record up by (`host`, or `[host]:port`
  *  off port 22; a hashed name matched by its HMAC). Read async within KNOWN_FILE_MAX; EACH LINE judged alone by THE parser (a
  *  marker, a wildcard or a bad line elsewhere in the file costs no other line its read, and is never a pin). No new trust: nothing
- *  is asked of the machine. → [{type, key, fp}] ([] when the hub trusts no key for it, or has no such file) */
+ *  is asked of the machine. → [{type, key, fp}] ([] when the hub trusts no key for it, or has no such file)
+ *  r1602 (the round wd8wo8si8's musts): A KEY THE FILE REVOKES IS NEVER PINNED — a key named by ANY `@revoked` line of the file,
+ *  whatever its host pattern, is left out; what is left decides (none ⇒ the caller's refusal by name). A file over the bound or one
+ *  that cannot be read is refused by its own code (host-key-known-too-big / host-key-known-unreadable), never «no key yet», and
+ *  never with the file's path in its words. */
 const KNOWN_FILE_MAX = 4 * 1024 * 1024;
+const knownRefusal = (code, why) => Object.assign(new Error(why), { code });
+/** the keys the file's `@revoked` lines name (any host pattern: `@revoked * ssh-ed25519 K` revokes K for every host) */
+function revokedKeysOf(text) {
+  const out = new Set();
+  for (const line of String(text).split('\n')) {
+    const t = line.trim();
+    if (!/^@revoked\s/i.test(t)) continue;
+    const f = t.split(/\s+/);
+    const at = f.findIndex((x, i) => i > 0 && SKF.HOST_KEY_TYPES.includes(x));
+    if (at > 0 && f[at + 1]) out.add(f[at + 1]);
+  }
+  return out;
+}
 async function knownKeysOf(h, { file } = {}) {
   const port = Number(h && h.port) || 22;
   const want = SKF.knownHostName(port !== 22 ? `${aliasOf(h)}:${port}` : aliasOf(h));
@@ -164,14 +181,20 @@ async function knownKeysOf(h, { file } = {}) {
   let text = '';
   try {
     const fh = await fs.promises.open(file, 'r');
-    try { const b = Buffer.alloc(KNOWN_FILE_MAX + 1); const { bytesRead } = await fh.read(b, 0, b.length, 0); if (bytesRead > KNOWN_FILE_MAX) return []; text = b.subarray(0, bytesRead).toString('utf-8'); }
+    try { const b = Buffer.alloc(KNOWN_FILE_MAX + 1); const { bytesRead } = await fh.read(b, 0, b.length, 0); if (bytesRead > KNOWN_FILE_MAX) throw knownRefusal('host-key-known-too-big', `this hub's known_hosts file is over ${KNOWN_FILE_MAX / 1048576} MiB, so it is not read for a pin`); text = b.subarray(0, bytesRead).toString('utf-8'); }
     finally { await fh.close(); }
-  } catch (e) { if (e && e.code === 'ENOENT') return []; throw e; }
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return [];
+    if (e && e.code === 'host-key-known-too-big') throw e;
+    throw knownRefusal('host-key-known-unreadable', `this hub's known_hosts file could not be read (${(e && e.code) || 'an error'})`);   // the code only: never the path
+  }
+  const revoked = revokedKeysOf(text);
   const out = [], had = new Set();
   for (const line of text.split('\n')) {
     const p = SKF.parseKnownHosts(line + '\n');
     if (!p.ok || p.keys.length !== 1) continue;
     const k = p.keys[0];
+    if (revoked.has(k.key)) continue;   // r1602 (1): revoked anywhere in the file ⇒ never this machine's pin
     const hit = (k.names || []).includes(want) || (k.hashed || []).some(({ salt, hash }) => { try { return crypto.createHmac('sha1', Buffer.from(salt, 'base64')).update(want).digest('base64') === hash; } catch { return false; } });
     if (!hit || had.has(k.type + ' ' + k.key)) continue;
     had.add(k.type + ' ' + k.key);
@@ -180,4 +203,4 @@ async function knownKeysOf(h, { file } = {}) {
   return out;
 }
 
-module.exports = { knownKeysOf, KNOWN_FILE_MAX, fingerprintOf, pinFileOf, pinned, aliasOf, namesOf, pinText, aliasWhy, pinWhy, nameWhy, pinUnusable, pinRefusal, NAME_DOOR, DOOR, writePinFile, hostKeyOpts, scanOpts, keysOfScan, hostKeyWords, hostKeyRefusal, pinView, HOSTKEY_RE };
+module.exports = { knownKeysOf, revokedKeysOf, KNOWN_FILE_MAX, fingerprintOf, pinFileOf, pinned, aliasOf, namesOf, pinText, aliasWhy, pinWhy, nameWhy, pinUnusable, pinRefusal, NAME_DOOR, DOOR, writePinFile, hostKeyOpts, scanOpts, keysOfScan, hostKeyWords, hostKeyRefusal, pinView, HOSTKEY_RE };

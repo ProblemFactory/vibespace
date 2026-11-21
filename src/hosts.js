@@ -2463,14 +2463,23 @@ class HostManager {
   /** B-7f0b (the coordinator's r1220 (2)): ONE PRESS of a person pins the key(s) this hub ALREADY trusts for a machine — its own
    *  known_hosts lines (HK.knownKeysOf: the line ssh wrote at the first dial). No new trust and nothing asked of the machine; a
    *  record with no such line is refused BY NAME (host-key-not-known): its Host key… dialog's scan-and-confirm stays its road.
-   *  Nothing pins by itself: only this press. `file` is a suite's stand-in (never a caller's word: the route passes none). */
+   *  Nothing pins by itself: only this press. `file` is a suite's stand-in (never a caller's word: the route passes none).
+   *  r1602: the press pins only where ssh's lookup name is CERTAIN from the record itself — a record that takes its address or
+   *  port from this hub's ssh configuration (viaConfig: an alias, its HostName / Port / HostKeyAlias) is refused by name
+   *  (host-key-via-config) and its Host key… dialog's scan-and-confirm is its road; a record whose pin was REFUSED as unusable is
+   *  refused by that pin's own words, never re-pinned from the file. */
   async pinKnownHostKeys(id, { file = null } = {}) {
     const h0 = this.get(id);
     if (h0.transport === 'dial') throw Object.assign(new Error(`${h0.name} dials out — it has no ssh host key to pin`), { code: 'host-key-no-ssh', hostId: h0.id });
     if (HK.pinned(h0)) return HK.pinView(h0);
+    const unusable = HK.pinUnusable(h0);
+    if (unusable) throw HK.pinRefusal(h0, unusable);
     const bad = HK.nameWhy(h0);
     if (bad) throw HK.pinRefusal(h0, bad);
-    const keys = await HK.knownKeysOf(h0, { file: file || this._knownHostsFile() });
+    if (h0.viaConfig) throw Object.assign(new Error(`${h0.name} takes its address or port from this hub's ssh configuration, so the key ssh trusted for it is filed under a name the record does not hold — open its Host key… to check the key it shows now`), { code: 'host-key-via-config', hostId: h0.id, params: { name: h0.name } });
+    let keys;
+    try { keys = await HK.knownKeysOf(h0, { file: file || this._knownHostsFile() }); }
+    catch (e) { throw Object.assign(new Error(`${h0.name}: ${e.message} — open its Host key… to check the key it shows now`), { code: e.code || 'host-key-known-unreadable', hostId: h0.id, params: { name: h0.name } }); }
     if (!keys.length) throw Object.assign(new Error(`this hub trusts no key for ${h0.name} yet — open its Host key… to check the key it shows now`), { code: 'host-key-not-known', hostId: h0.id, params: { name: h0.name } });
     return this._pinTheseKeys(h0.id, keys);
   }

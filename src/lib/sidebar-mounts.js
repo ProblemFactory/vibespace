@@ -53,6 +53,10 @@ function hostKeyErrorWords(h, e) { // lane lg-remote-hardening (unit 2; renamed 
   const name = (h && h.name) || '';
   if (e && e.code === 'hosts-unread') return hostsHeldWords(); // the meeting with bl-jobs' held store (B-f276 §8): worded by its code
   if (e && e.code === 'host-key-name') return tr('{name}: its host-key pin cannot be used — its address is not one plain host name, so VibeSpace does not connect to it. Remove it and add it again with its plain address (Remote → {name} → Remove host, then Remote → Add machine)', { name });
+  // B-7f0b (r1602): the one-press pin's own refusals, worded by code (never the hub's English, never a path)
+  if (e && e.code === 'host-key-via-config') return tr('{name} takes its address or port from this hub\'s ssh configuration, so its key cannot be named from the record — check the key it shows now.', { name });
+  if (e && e.code === 'host-key-known-too-big') return tr('This hub\'s known_hosts file is over 4 MiB, so it is not read for a pin — check the key {name} shows now.', { name });
+  if (e && e.code === 'host-key-known-unreadable') return tr('This hub\'s known_hosts file could not be read — check the key {name} shows now.', { name });
   if (!e || e.code !== 'host-key-changed') return (e && e.message) || '';
   const b = e.body && typeof e.body === 'object' ? e.body : {};
   const fp = typeof b.fp === 'string' && b.fp ? b.fp : '?';
@@ -435,7 +439,7 @@ export function installSidebarMounts(Sidebar) {
         root.appendChild(hlist);
         // B-7f0b (r1220 (2)): «Pin all N» — every ssh machine not pinned, at once, when there are several (each pins the key this hub
         // already trusts for it; one with none keeps its Host key… dialog)
-        const unpinned = hostsHeld ? [] : hd.hosts.filter((x) => x.transport !== 'dial' && !(x.hostKeys && x.hostKeys.length) && !(this._hostStatus?.[x.id] && /^host-key-/.test(this._hostStatus[x.id].code || '')));
+        const unpinned = hostsHeld ? [] : hd.hosts.filter((x) => x.transport !== 'dial' && !(x.hostKeys && x.hostKeys.length) && !x.hostKeysUnusable && !(this._hostStatus?.[x.id] && /^host-key-/.test(this._hostStatus[x.id].code || '')));
         if (unpinned.length >= 2) {
           const all = document.createElement('button');
           all.className = 'mounts-action mounts-pin-all';
@@ -443,9 +447,10 @@ export function installSidebarMounts(Sidebar) {
           all.title = tr('Pin the key this hub already trusts for every machine that is not pinned');
           all.onclick = async () => {
             all.disabled = true;
-            const r = { pinned: 0, unknown: 0, failed: 0 };
-            for (const x of unpinned) r[await this._pinKnown(x)]++;
-            showToast(r.unknown || r.failed ? tr('{n} pinned; {m} not yet: this hub trusts no key for them — open each one\'s Host key… to check the key it shows now.', { n: r.pinned, m: r.unknown + r.failed }) : tr('{n} pinned.', { n: r.pinned }), r.unknown || r.failed ? { type: 'warn' } : {});
+            // r1602: the toast says WHICH machines did not pin and why, each in its own words (never one count under one cause)
+            let pinnedN = 0; const missed = [];
+            for (const x of unpinned) { const o = await this._pinKnown(x); if (o.kind === 'pinned') pinnedN++; else missed.push(o.words); }
+            showToast(missed.length ? tr('{n} pinned; not pinned — {list}', { n: pinnedN, list: missed.join(' · ') }) : tr('{n} pinned.', { n: pinnedN }), missed.length ? { type: 'warn' } : {});
             this._renderMounts();
           };
           root.appendChild(all);
@@ -1213,7 +1218,7 @@ export function installSidebarMounts(Sidebar) {
         : { text: tr('device key changed'), title: pairingDoorOf(h) === 'pairing' ? tr('Its agent did not prove the device key VibeSpace pinned — this hub\'s link to its agent is refused until you pair it again or forget the key (Host key…).') : tr('Its agent did not prove the device key VibeSpace pinned — this hub\'s link to its agent is refused until you forget the key (Host key…).') })); // lane lg-remote-hardening (D3): the words by code and by the row's own door
       // B-7f0b (the coordinator's r1220 (2)): an ssh machine with NO host-key pin SAYS so on its row (it showed only inside the
       // dialog), and ONE PRESS pins the key this hub already trusts for it (its known_hosts line); none ⇒ the dialog's scan-and-confirm
-      if (!isDial && !(h.hostKeys && h.hostKeys.length) && !(st && /^host-key-/.test(st.code || ''))) {
+      if (!isDial && !(h.hostKeys && h.hostKeys.length) && !h.hostKeysUnusable && !(st && /^host-key-/.test(st.code || ''))) {   // r1602: a REFUSED pin is not «not pinned»
         top.appendChild(pinChip('stale', { text: tr('not pinned'), title: tr('VibeSpace trusts the key this machine showed the first time it connected. One press pins it: a different key is refused from then on.') }));
         const pb = document.createElement('button');
         pb.className = 'mounts-pin-btn';
@@ -2690,17 +2695,19 @@ export function installSidebarMounts(Sidebar) {
     // lane lg-remote-hardening (B-7f0b, q-042 D6): THE HOST-KEY PIN of an ssh machine — what is pinned, what the machine
     // shows now, pin it / remove the pin. The person compares the fingerprint with the machine's own (the recipe is shown);
     // the hub pins only a key the machine shows again at that moment (src/hosts.js pinHostKeys).
-    /** B-7f0b (r1220 (2)): ONE press pins the key this hub already trusts for a machine (POST …/host-keys/known). → 'pinned' |
-     *  'unknown' (the hub trusts no key for it: a single press opens the Host key… dialog's scan-and-confirm) | 'failed' */
+    /** B-7f0b (r1220 (2)): ONE press pins the key this hub already trusts for a machine (POST …/host-keys/known). → { kind:
+     *  'pinned' | 'unknown' (no certain key: the hub trusts none for it, or ssh files it under its configuration's name — a single
+     *  press opens the Host key… dialog's scan-and-confirm) | 'failed', words } (r1602: «Pin all N» names each one's words) */
     async _pinKnown(h, { one = false } = {}) {
       try {
         await api(`/api/hosts/${encodeURIComponent(h.id)}/host-keys/known`, { method: 'POST' });
         if (one) { showToast(tr('{name}: pinned to the key this hub already trusts.', { name: h.name })); this._renderMounts(); }
-        return 'pinned';
+        return { kind: 'pinned', words: '' };
       } catch (e) {
-        if (e && e.code === 'host-key-not-known') { if (one) { showToast(tr('This hub trusts no key for {name} yet — check the key it shows now.', { name: h.name })); this._showHostKeyDialog(h, { scanNow: true }); } return 'unknown'; }
-        if (one) showToast(hostKeyErrorWords(h, e) || tr('Failed'), { type: 'error' });
-        return 'failed';
+        const scan = !!e && ['host-key-not-known', 'host-key-via-config', 'host-key-known-too-big', 'host-key-known-unreadable'].includes(e.code);   // no certain key from this hub ⇒ the scan-and-confirm
+        const words = e && e.code === 'host-key-not-known' ? tr('This hub trusts no key for {name} yet — check the key it shows now.', { name: h.name }) : (hostKeyErrorWords(h, e) || tr('Failed'));
+        if (one) { showToast(words, scan ? {} : { type: 'error' }); if (scan) this._showHostKeyDialog(h, { scanNow: true }); }
+        return { kind: scan ? 'unknown' : 'failed', words };
       }
     },
 
