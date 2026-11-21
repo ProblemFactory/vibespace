@@ -261,6 +261,10 @@ const realClick = realClicker({ evalJs, cdp });
 const dialogVisible = `!document.getElementById('dialog-overlay').classList.contains('hidden') && !document.getElementById('dialog-new-session').classList.contains('hidden')`;
 const stdinFrames = () => (fs.existsSync(STDIN_LOG) ? fs.readFileSync(STDIN_LOG, 'utf8').split('\n').filter(Boolean).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter(Boolean) : []);
 const responsesFor = (rid) => stdinFrames().filter((m) => m.type === 'control_response' && m.response?.request_id === rid);
+// A WAIT THAT RUNS OUT SAYS SO (主开发 r1141; test-ci-gate §2p): the stub's answers to a request, MARKED when none came — its judges say
+// that by name («the state never came»), never «the CLI got the wrong answer» as a verdict on the product
+const responsesWhen = async (rid) => { for (let i = 0; i < 50; i++) { const r = responsesFor(rid); if (r.length) return r; await sleep(100); } return Object.assign(responsesFor(rid), { timedOut: `no answer to ${rid} came in 5 s` }); };
+const never = (got) => (got && got.timedOut ? ` — THE STATE NEVER CAME: ${got.timedOut}, so this red is that, not a verdict on the product` : '');
 const argvFiles = () => fs.readdirSync(stubDir).filter((f) => f.startsWith('argv-')).map((f) => ({ f, t: fs.statSync(path.join(stubDir, f)).mtimeMs, argv: JSON.parse(fs.readFileSync(path.join(stubDir, f), 'utf8')) })).sort((a, b) => a.t - b.t);
 const settingsOfArgv = (argv) => { const i = argv.indexOf('--settings'); if (i < 0) return null; try { return JSON.parse(argv[i + 1]); } catch { return 'unparseable'; } };
 
@@ -479,10 +483,10 @@ try {
 
   // C2 — Always Allow sends the widened rule under the CLI's own field name
   check('C2 one real click on Always Allow', await realClick(`${card(0)} .chat-perm-always`));
-  const got1 = await (async () => { for (let i = 0; i < 50; i++) { const r = responsesFor('req-lane-0'); if (r.length) return r; await sleep(100); } return responsesFor('req-lane-0'); })();
+  const got1 = await responsesWhen('req-lane-0');
   const resp1 = got1[0]?.response?.response || {};
-  check('C2 THE FINDING: the stub receives `updatedPermissions` (the CLI\'s schema) …', Array.isArray(resp1.updatedPermissions) && resp1.behavior === 'allow', resp1);
-  check('C2 … carrying the widened rule Bash(vibespace-browser:*) to localSettings', JSON.stringify(resp1.updatedPermissions?.[0]?.rules) === JSON.stringify([{ toolName: 'Bash', ruleContent: 'vibespace-browser:*' }]) && resp1.updatedPermissions?.[0]?.destination === 'localSettings', resp1.updatedPermissions);
+  check('C2 THE FINDING: the stub receives `updatedPermissions` (the CLI\'s schema) …' + never(got1), Array.isArray(resp1.updatedPermissions) && resp1.behavior === 'allow', resp1);
+  check('C2 … carrying the widened rule Bash(vibespace-browser:*) to localSettings' + never(got1), JSON.stringify(resp1.updatedPermissions?.[0]?.rules) === JSON.stringify([{ toolName: 'Bash', ruleContent: 'vibespace-browser:*' }]) && resp1.updatedPermissions?.[0]?.destination === 'localSettings', resp1.updatedPermissions);
   check('C2 … and never `permission_updates` (a key the CLI strips — why Always Allow never stuck)', !('permission_updates' in resp1));
   check('C2 exactly ONE response for that card', got1.length === 1, got1.length);
 
@@ -508,8 +512,8 @@ try {
   const rb = await centerOf(`${card(1)} .chat-perm-allow`);
   check('C3 the Allow button does not move for 1.5 s (a click aimed from a screenshot lands)', ra && rb && Math.abs(ra.x - rb.x) < 1 && Math.abs(ra.y - rb.y) < 1, { ra, rb });
   check('C3 ONE real click on Allow', await realClick(`${card(1)} .chat-perm-allow`));
-  const got2 = await (async () => { for (let i = 0; i < 50; i++) { const r = responsesFor('req-lane-1'); if (r.length) return r; await sleep(100); } return responsesFor('req-lane-1'); })();
-  check('C3 the stub is answered by that ONE click (no second click needed)', got2.length === 1 && got2[0].response?.response?.behavior === 'allow' && !got2[0].response?.response?.updatedPermissions, got2);
+  const got2 = await responsesWhen('req-lane-1');
+  check('C3 the stub is answered by that ONE click (no second click needed)' + never(got2), got2.length === 1 && got2[0].response?.response?.behavior === 'allow' && !got2[0].response?.response?.updatedPermissions, got2);
   // lane-mirror-198 (the Actions mirror of 2.369.198, red on both attempts): the click renders "✓ Allowed" AT ONCE
   // (the optimistic overlay in the click handler), then the stub's tool_result COMPLETES the card and renderToolMsg
   // drops the overlay BY RULE (resolved + complete ⇒ no overlay — the ✓ label and the output say it ran), taking
@@ -541,8 +545,8 @@ try {
   check('C5 CONTROL: `git status` is a plain Bash card — no browser face, no what-line', /Permission: Bash/.test(c4.label) && !/Agent browser/.test(c4.head) && !c4.what, c4);
   check('C5 CONTROL: its Always Allow is the CLI\'s own suggestion, unwidened', c4.always === 'Always allow: Bash(git status *)', c4.always);
   await realClick(`${card(3)} .chat-perm-always`);
-  const got4 = await (async () => { for (let i = 0; i < 50; i++) { const r = responsesFor('req-lane-3'); if (r.length) return r; await sleep(100); } return responsesFor('req-lane-3'); })();
-  check('C5 its Always Allow sends the CLI\'s rule as-is', JSON.stringify(got4[0]?.response?.response?.updatedPermissions?.[0]?.rules) === JSON.stringify([{ toolName: 'Bash', ruleContent: 'git status *' }]), got4);
+  const got4 = await responsesWhen('req-lane-3');
+  check('C5 its Always Allow sends the CLI\'s rule as-is' + never(got4), JSON.stringify(got4[0]?.response?.response?.updatedPermissions?.[0]?.rules) === JSON.stringify([{ toolName: 'Bash', ruleContent: 'git status *' }]), got4);
   check('the run finishes (the stub\'s final "done")', await waitFor(`[...document.querySelectorAll('.chat-msg')].some((m) => m.textContent.trim().endsWith('done'))`, 8000));
   // ═══ D the model menu follows the account's provider (lane models-at-session, design q-053 r1 §3 + §6 P0c) ═══════
   // the seeded accounts (before the boot, below the stub): two claude API keys that NAME a third-party provider
