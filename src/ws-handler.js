@@ -1684,8 +1684,8 @@ function registerWsHandler(wss, ctx) {
                   // transcript worker, the merge in slices — measured 380–880 ms of one sync hold per 120 MB rollout); raw() then reads it.
                   // L3: its turn in the hub's line — a person's window first, the first attach of a bulk resume's conversation after them
                   await readOffLoop(sm, { bulk: bulkRead, label: data.sessionId });
-                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true && !session.host, notLoaded: sm.notLoaded || null });   // B-437e: a paired machine's copy may be a stale fetch: never whole on a rebuild · row B-422c: a history the reader refused is not marked loaded (the next attach reads again)
-                  session._historyNotLoaded = sm.notLoaded || null; // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                  await rebuildHistory(session, data.sessionId, sm.raw(), { helperResults: typeof sm.helperResults === 'function' ? sm.helperResults() : null, fromStart: sm.fromStart === true && !session.host, notLoaded: sm.notLoaded || null }); // B-437e: a paired machine's copy may be a stale fetch: never whole on a rebuild // verify r3: the helpers' tool_results (skipped from the record list) settle an asked ask the table's result rows
+                  session._historyNotLoaded = sm.notLoaded || null;   // row B-422c: a history the reader refused is not marked loaded (rebuildHistory's notLoaded) — the attach payload says it, the next attach reads again
                 }
                 finally { clearInterval(progressTimer); }
                 // A kill / CLI exit can land during the (now non-blocking)
