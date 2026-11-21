@@ -54,6 +54,11 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A tool that did not start is listed in Session Properties and ⚙ Diagnostics, and on a phone or tablet the search button sits in the top bar.
 - On a tablet held upright, when its top bar is full, search moves into the bar's «⋯» menu as «Search this conversation».
 
+### Added
+- The Vault window shows which background jobs use each secret, with ✕ to take it back; a job's card names its secrets and what it waits for.
+- Deleting a secret in the Vault window stops the background jobs that use it; locking the vault does not stop them.
+- A background job that needs a stored secret now asks you once in For you: Allow (with your second password) starts it, Deny refuses it.
+
 ## 2.369.415 — 2026-11-21
 
 ### Fixed
