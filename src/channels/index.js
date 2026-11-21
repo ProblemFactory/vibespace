@@ -149,6 +149,10 @@ const { peerName, FACT_KIND_NAMES, validateFacts } = require('../channel-record.
 const SR = require('../channel-search.js');   // design 010: the search row's enums + THE snippet bound (PURE)
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const RECEIVE_MODES = Object.freeze(['push', 'poll', 'scan']);
+/** B-82c2 round wn462wr7s: why an OPEN word (its own list: a name the member list was needed for) was not looked up — the read
+ *  was refused, the chat dissolved, the channel gave no answer (a back-off, a blip, a rate refusal), the list was not whole (a
+ *  page mark left), or the account's sign-in expired. The proposal is created either way: the words go as plain words. */
+const OPEN_WHYS = Object.freeze(['members-unreadable', 'chat-dissolved', 'members-no-answer', 'members-partial', 'members-signed-out', 'not-read']);
 // lane webhook-l1-server: HOW a push lane hears its vendor — CLOSED (a long-lived socket, a pull subscription, a long
 // poll, or an HTTP door the vendor calls: `http-inbound`, the webhook adapter's `/hook/<slug>`)
 const PUSH_TRANSPORTS = Object.freeze(['ws-long-conn', 'pubsub-pull', 'long-poll', 'http-inbound']);
@@ -431,6 +435,9 @@ function validateCaps(kind, caps, { channelSettings } = {}) {
   if (c.mentions !== undefined && !MENTION_CAPS.includes(c.mentions)) bad(`caps.mentions must be one of ${MENTION_CAPS.join('|')} (got ${JSON.stringify(c.mentions)})`);
   if (c.prepareSend !== undefined && typeof c.prepareSend !== 'boolean') bad('caps.prepareSend must be a boolean (true = prepareSend(convId, {text}) decides the mentions when a proposal is made)');
   if (c.prepareSend === true && !(Array.isArray(c.sendAs) && c.sendAs.length)) bad('caps.prepareSend on a read-only adapter (caps.sendAs is empty)');
+  // B-82c2: the ids a prepared mention may carry are the ADAPTER's (Slack's U…, Lark's ou_… / all) — an anchored pattern of
+  // its own; an adapter that states none carries no mention (fail closed: its prepared names stay words)
+  if (c.mentionId !== undefined && !(typeof c.mentionId === 'string' && c.mentionId.length <= 200 && c.mentionId.startsWith('^') && c.mentionId.endsWith('$') && (() => { try { new RegExp(c.mentionId); return true; } catch { return false; } })())) bad('caps.mentionId must be an anchored pattern (^…$, ≤ 200 characters) of the ids a prepared mention carries');
   if (c.retention !== undefined && !RETENTION_MODES.includes(c.retention)) bad(`caps.retention must be one of ${RETENTION_MODES.join('|')}`);
   if (c.factsOf === true && !(Array.isArray(c.facts) && c.facts.length)) bad('caps.factsOf without caps.facts (which kinds would it read?)');
   if (c.budget !== undefined) {
@@ -858,6 +865,8 @@ function createChannelRegistry({ channelSettings } = {}) {
         throw new ChannelError('vendor-error', `${kind}.${name}: ${e && e.message ? e.message : String(e)}`, { retryable: false, detail: { threw: true } });
       }
     };
+    // B-82c2: the adapter's own id shape for a prepared mention (caps.mentionId, checked anchored at registration); none ⇒ none pass
+    const mentionIdRe = typeof caps.mentionId === 'string' ? new RegExp(caps.mentionId) : null;
     const gated = (name, fn) => {
       const gate = METHOD_GATES[name];
       if (gate && !gate(caps)) {
@@ -1025,9 +1034,24 @@ function createChannelRegistry({ channelSettings } = {}) {
         // its mark, only when the token is exactly that id's (the send turns its escaped form back into the mention)
         // r3 (the lane's adversarial read): the token must also pass the name door unchanged — a control character or a bidi mark in its label is refused
         const rawOk = (x) => x.raw === true && typeof x.name === 'string' && x.name.length <= 100 && /^<@[A-Z0-9][A-Z0-9_]{1,40}(?:\|[^<>\n]{0,80})?>$/.test(x.name) && (x.name.startsWith(`<@${x.id}>`) || x.name.startsWith(`<@${x.id}|`)) && peerName(x.name, 100) === x.name;
-        const mentions = (Array.isArray(r.mentions) ? r.mentions : []).filter((x) => x && typeof x.id === 'string' && /^[A-Z0-9][A-Z0-9_]{1,40}$/.test(x.id) && (rawOk(x) || peerName(x.name, 100))).slice(0, 50).map((x) => (rawOk(x) ? { name: x.name, id: x.id, raw: true } : { name: peerName(x.name, 100), id: x.id }));
+        // B-82c2: each mention's id in the ADAPTER's own shape (caps.mentionId; none stated ⇒ no mention passes) — it was Slack's, which dropped every Lark id
+        const idOk = (id) => mentionIdRe !== null && typeof id === 'string' && id.length <= 80 && mentionIdRe.test(id);
+        // round wn462wr7s: a mention and the name it notifies are filtered as a PAIR (notifies[i] names mentions[i]) — a dropped
+        // mention takes its name with it, so the card never says a name the wire does not notify (nor the reverse)
+        const rawMentions = Array.isArray(r.mentions) ? r.mentions : [], rawNotifies = Array.isArray(r.notifies) ? r.notifies : [];
+        const pairs = rawMentions.map((x, i) => [x, rawNotifies[i]]).filter(([x]) => x && idOk(x.id) && (rawOk(x) || peerName(x.name, 100))).slice(0, 50);
+        const mentions = pairs.map(([x]) => (rawOk(x) ? { name: x.name, id: x.id, raw: true } : { name: peerName(x.name, 100), id: x.id }));
+        // a road with no mentions (the webhook's callers) states its notify names alone: those pass through the name door as before
+        const notifies = rawMentions.length ? pairs.map(([x, n]) => peerName(n, 100) || (rawOk(x) ? x.id : peerName(x.name, 100))) : names(r.notifies);
         // lane webhook-l1-server: an explicit-recipient send (`recipients`: the callers a compose --caller expanded to, ids only)
-        return { text: typeof r.text === 'string' ? r.text : '', notifies: names(r.notifies), unresolved: names(r.unresolved), plain: names(r.plain), over: names(r.over), mentions, tooLong: r.tooLong === true, sendMax: Number.isInteger(r.sendMax) && r.sendMax > 0 ? r.sendMax : null, at: Number.isFinite(r.at) ? r.at : Date.now(), ...(Array.isArray(r.recipients) ? { recipients: r.recipients.filter((x) => typeof x === 'string' && /^c-[0-9a-f]{8}$/.test(x)).slice(0, 50), skipped: (Array.isArray(r.skipped) ? r.skipped : []).filter((x) => typeof x === 'string' && /^c-[0-9a-f]{8}$/.test(x)).slice(0, 50) } : {}) };
+        const open = names(r.open), unchecked = names(r.unchecked);
+        // round wfgpbe038 RULE D: the decided PLACES (offset, typed length, id) — only for an id a kept mention holds, ≤ 200
+        const keptIds = new Set(mentions.map((x) => x.id));
+        const places = (Array.isArray(r.places) ? r.places : []).filter((x) => x && Number.isInteger(x.at) && x.at >= 0 && x.at < 1e6 && Number.isInteger(x.len) && x.len > 0 && x.len <= 400 && keptIds.has(x.id)).slice(0, 200).map((x) => ({ at: x.at, len: x.len, id: x.id, ...(x.tag === true ? { tag: true } : {}) }));
+        const unread = Number.isInteger(r.unread) && r.unread > 0 ? Math.min(r.unread, 1e6) : 0;
+        return { text: typeof r.text === 'string' ? r.text : '', notifies, unresolved: names(r.unresolved), plain: names(r.plain), over: names(r.over), mentions, ...(r.everyone === true ? { everyone: true } : {}), ...(open.length ? { open, ...(OPEN_WHYS.includes(r.openWhy) ? { openWhy: r.openWhy } : {}) } : {}),
+          ...(places.length ? { places } : {}), ...(unchecked.length ? { unchecked, ...(OPEN_WHYS.includes(r.uncheckedWhy) ? { uncheckedWhy: r.uncheckedWhy } : {}) } : {}), ...(unread ? { unread } : {}),
+          ...(typeof r.readKey === 'string' && /^rk-[0-9a-f]{16}$/.test(r.readKey) ? { readKey: r.readKey } : {}), tooLong: r.tooLong === true, sendMax: Number.isInteger(r.sendMax) && r.sendMax > 0 ? r.sendMax : null, at: Number.isFinite(r.at) ? r.at : Date.now(), ...(Array.isArray(r.recipients) ? { recipients: r.recipients.filter((x) => typeof x === 'string' && /^c-[0-9a-f]{8}$/.test(x)).slice(0, 50), skipped: (Array.isArray(r.skipped) ? r.skipped : []).filter((x) => typeof x === 'string' && /^c-[0-9a-f]{8}$/.test(x)).slice(0, 50) } : {}) };
       },
       /** lane message-facts (B-f066): a stored thread's facts — `{facts: {[vendorId]: [...]}}`, each list through the ONE
        *  validator and held to `caps.facts` (an undeclared kind is dropped by name), ≤ 500 messages, ids bounded. */

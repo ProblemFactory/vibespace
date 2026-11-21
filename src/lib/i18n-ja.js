@@ -8387,6 +8387,29 @@ export default {
   "Notifies": "通知先",
   "nobody (no @name here was resolved)": "なし（ここで解決された @名前はありません）",
   "Not a member here": "ここのメンバーではない",
+  "Notifies everyone": "全員に通知",   // B-82c2
+  "everyone in this chat — only where the group allows mentioning everyone": "このチャットの全員 — グループが全員へのメンションを許可している場合のみ",   // B-82c2
+  "Not looked up": "照会できず",   // B-82c2
+  "{names} — sent as plain words, nobody is notified: the channel did not answer when its members were looked up": "{names} —— 普通の文字として送信され、誰にも通知されません：メンバーを照会したときチャネルが応答しませんでした",   // B-82c2 round wwb543hm7
+  "{names} — sent as plain words, nobody is notified: the chat has more members than one look-up reads": "{names} —— 普通の文字として送信され、誰にも通知されません：チャットのメンバーが一度の照会で読める数より多いため",   // B-82c2 round wn462wr7s
+  "{names} — sent as plain words, nobody is notified: this account's sign-in has expired": "{names} —— 普通の文字として送信され、誰にも通知されません：このアカウントのサインインが期限切れです",   // B-82c2 round wn462wr7s
+  "{names} — sent as plain words, nobody is notified: the chat's members were not looked up": "{names} —— 普通の文字として送信され、誰にも通知されません：チャットのメンバーを照会していません",   // B-82c2 round wn462wr7s
+  "Changed": "変更あり",   // B-82c2 round wfgpbe038
+  "Who this message notifies changed — nothing was sent; read the rows below, then approve again": "このメッセージが通知する相手が変わりました —— 送信していません。下の行を確認してから、もう一度承認してください",   // B-82c2 round wfgpbe038
+  "Not checked": "未確認",   // B-82c2 round wfgpbe038
+  "{names} — taken from this chat; the whole member list was not read, so another member may bear this name: {why}": "{names} —— このチャットから取得。メンバー一覧をすべて読めなかったため、同じ名前の別のメンバーがいるかもしれません：{why}",   // B-82c2 round wfgpbe038
+  "Not read": "未読み取り",   // B-82c2 round wfgpbe038
+  "{n} more @ words were not read (past the bounds of one message) — sent as plain words, nobody is notified": "さらに {n} 個の @ の語は読み取っていません（1 通のメッセージの上限を超えています）—— 普通の文字として送信され、誰にも通知されません",   // B-82c2 round wfgpbe038
+  "this chat was dissolved": "このチャットは解散されました",   // B-82c2 round wfgpbe038
+  "the channel did not answer when its members were looked up": "メンバーを照会したときチャネルが応答しませんでした",   // B-82c2 round wfgpbe038
+  "this account may not read the chat's members": "このアカウントはチャットのメンバーを読み取れません",   // B-82c2 round wfgpbe038
+  "the chat has more members than one look-up reads": "チャットのメンバーが一度の照会で読める数より多いため",   // B-82c2 round wfgpbe038
+  "this account's sign-in has expired": "このアカウントのサインインが期限切れです",   // B-82c2 round wfgpbe038
+  "the chat's members were not looked up": "チャットのメンバーを照会していません",   // B-82c2 round wfgpbe038
+  "{names} — sent as plain words, nobody is notified: this chat was dissolved": "{names} —— 普通の文字として送信され、誰にも通知されません：このチャットは解散されています",   // B-82c2
+  "{names} — sent as plain words, nobody is notified: this account may not read the chat's members": "{names} —— 普通の文字として送信され、誰にも通知されません：このアカウントはチャットのメンバーを読めません",   // B-82c2
+  "Notified {taken} of the {decided} mentions decided — the channel took fewer; the rest went as plain words": "決めた {decided} 件のメンションのうち {taken} 件を通知 — チャネルが受け付けたのは少なく、残りは普通の文字として送信",   // B-82c2
+  "Notified: {n} mentioned": "通知済み：{n} 件のメンション",   // B-82c2
   "Past the mark limit": "メンションの上限超え",
   "{names} — past the 50 mentions a message carries: sent as plain words, nobody is notified": "{names} — 1 通のメッセージに付けられる 50 件のメンションを超えました：普通の文字として送り、誰にも通知しません",
   "{names} — sent as plain words, nobody is notified": "{names} —— 普通の文字として送信され、誰にも通知されません",

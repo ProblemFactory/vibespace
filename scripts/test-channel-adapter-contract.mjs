@@ -276,7 +276,7 @@ for (const { kind, caps } of REGISTERED) {
     { name: 'Bob', id: bob },
   ];
   const modOf = (kind) => ({
-    kind, caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', sendAs: ['user'], identityMarking: 'none', prepareSend: true },
+    kind, caps: { receive: 'poll', pollInterval: { hot: 30, cold: 300, floor: 10 }, history: 'page', sendAs: ['user'], identityMarking: 'none', prepareSend: true, mentionId: '^[A-Z0-9][A-Z0-9_]{1,40}$' },   // B-82c2: a Slack-shaped stub states Slack's id shape (each adapter its own)
     create: () => ({
       auth: { state: async () => ({ state: 'connected' }) },
       listConversations: async () => ({ conversations: [], complete: true }),
@@ -653,9 +653,9 @@ for (const { kind, caps } of REGISTERED) {
   ok(P2.policyMode({ mode: 'direct' }, slackMod.caps).mode === 'direct', 'NEGATIVE CONTROL — a channel-policy copy without the clamp obeys a stored "direct" on Slack (the rule is what refuses it)');
   // the wrapper: gated by the row, bounded
   const r = CH.createChannelRegistry();
-  r.register({ kind: 'prep', caps: { ...good, prepareSend: true }, create: () => ({ auth: { state: async () => ({ state: 'connected' }) }, convCaps: async () => ({ read: 'yes', sendAs: ['user'] }), history: async () => ({ records: [], reachedAnchor: true }), send: async () => ({ ok: true }), reconcile: async () => ({}), prepareSend: async () => ({ text: 'x', notifies: ['Bob\u202e', 'A'.repeat(500)], unresolved: [], mentions: [{ name: 'Bob', id: 'U1BOB' }, { name: 'Eve', id: 'not an id' }], tooLong: false, sendMax: 4000 }) }) });
+  r.register({ kind: 'prep', caps: { ...good, prepareSend: true, mentionId: '^[A-Z0-9][A-Z0-9_]{1,40}$' }, create: () => ({ auth: { state: async () => ({ state: 'connected' }) }, convCaps: async () => ({ read: 'yes', sendAs: ['user'] }), history: async () => ({ records: [], reachedAnchor: true }), send: async () => ({ ok: true }), reconcile: async () => ({}), prepareSend: async () => ({ text: 'x', notifies: ['Bob\u202e', 'A'.repeat(500), 'Eve'], unresolved: [], mentions: [{ name: 'Bob', id: 'U1BOB' }, { name: 'Ann', id: 'U2ANN' }, { name: 'Eve', id: 'not an id' }], tooLong: false, sendMax: 4000 }) }) });
   const pr = await r.create('prep', { id: 'prep' }).prepareSend('c', { text: 'x' });
-  ok(pr.mentions.length === 1 && pr.mentions[0].id === 'U1BOB' && !pr.notifies[0].includes('\u202e') && pr.notifies[1].length <= 100, 'the wrapper bounds the answer: a mention id outside the id alphabet is dropped, names through the name door (bidi gone, ≤ 100)');
+  ok(pr.mentions.length === 2 && pr.mentions[0].id === 'U1BOB' && pr.notifies.length === 2 && !pr.notifies[0].includes('\u202e') && pr.notifies[1].length <= 100 && !pr.notifies.includes('Eve'), 'the wrapper bounds the answer: a mention id outside the id alphabet is dropped WITH the name it notifies (B-82c2 round wn462wr7s: a pair), names through the name door (bidi gone, ≤ 100)', JSON.stringify(pr));
   r.register({ kind: 'noprep', caps: good, create: () => ({ auth: {}, convCaps: async () => ({ read: 'yes', sendAs: [] }), history: async () => ({ records: [], reachedAnchor: true }), send: async () => ({}), reconcile: async () => ({}) }) });
   const e = await threw(() => r.create('noprep', { id: 'noprep' }).prepareSend('c', { text: 'x' }));
   ok(e && e.code === 'not-supported', 'an adapter that does not declare prepareSend answers not-supported (the engine never asks it)');

@@ -65,6 +65,7 @@ const { createLarkLive, NAMES_WAIT_MS, UNAVAILABLE_WORDS, UNAVAILABLE_CAUSES, PU
 // §25 (2026-09-27): THE RENDER RUNGS — a vendor item → the typed block tree
 // the window draws (a post's rich text kept, mentions as chips, a picture as
 // the picture); `text` stays the agent-facing string.
+const LM = require('./lark/mentions.js');   // B-82c2: Lark's half of the outbox's mention contract (PURE)
 const Blocks = require('./lark/blocks.js');   // lane dc-channels-blocks: Lark's rungs live with Lark
 const { blocksToPlain } = require('../channel-blocks.js');
 // lane lark-search-poll (B-5aab): the change feed's PURE arithmetic — the hit shape, the declared unit, the ISO window
@@ -380,6 +381,7 @@ const UNGATED = Object.freeze([
  *  test-channels-lark-shape) reads the file and is red for any other catch — r1 F1 and r2 F1 were this class twice. */
 const RATE_OK = Object.freeze([
   { id: 'push-names', why: 'the push path must persist the record inside the vendor\'s 3 s ack budget, so a names refusal never fails a message; a RATE refusal pauses the push path\'s lookups for the vendor\'s hint (at most 5 min) instead of one members read per pushed message into the stop' },
+  { id: 'prepare-members', why: 'B-82c2 round wn462wr7s (the coordinator\'s r845): a proposal\'s or an edit\'s ONE member read for the words its records leave open — a refusal of any kind, a 429 too, NEVER refuses the proposal (an at-word in pasted code was refusing it): the words stay open, plain on the wire and said on the card with the reason; the rate refusal has already set the account\'s people pause inside namesFor, so the next proposals read nothing until the vendor\'s hint; no pass, nothing retried' },
   { id: 'consent-user-info', why: 'ONE user_info read inside a human consent: a refusal of any kind ends that consent as nameless, by name; no pass, nothing retried' },
   { id: 'consent-app-scopes', why: 'lane lark-minutes-scopes: ONE read of the app\'s own permission list when a human starts a consent: a refusal of any kind (a 429 too) asks the built-in list instead, said once in the log; no pass, nothing retried' },
   { id: 'integration-test', why: 'the integrations panel\'s Test button (a human POST): the refusal\'s words ARE the answer; no pass, nothing retried' },  { id: 'send-parts', why: 'lane channel-send-files: a message sent in PARTS (the text, then one message per file) whose LATER part is refused — a rate refusal included — STOPS the chain: no further request, nothing retried, the receipt names the refusal; a refusal before anything landed is re-thrown to the ladder; lane lark-send-hold: a RATE refusal also holds the account\'s later sends until the vendor\'s reset (noteSendHold)' },
@@ -412,6 +414,11 @@ const caps = Object.freeze({
   historyBySource: null,
   listConversations: true,
   sendAs: ['user'],                // P4: as the USER (decision 2); convCaps narrows until the send scopes are held
+  // B-82c2 (the owner's proposal whose @names notified nobody): WHO A PROPOSAL'S @NAME IS, decided when it is proposed and
+  // at every edit (src/channels/lark/mentions.js — the conversation's own people first, ONE read of the chat's members only
+  // for a name not found there); sent in Lark's own form; the ids this adapter's mentions carry (open_id, or `all`)
+  prepareSend: true,
+  mentionId: LM.MENTION_ID,
   // lane channel-send-files (.212): an agent's pictures and files — uploaded with the ACCOUNT's user token (im/v1/images
   // `image_type=message` ≤ 10 MB, else im/v1/files ≤ 30 MB — the docs list user_access_token for both), then ONE message
   // per attachment as the user (`msg_type: image|file` + the key). Lark has NO mixed message as a user: the text goes
@@ -1581,13 +1588,18 @@ function create(record = {}, deps = {}) {
   let learnedTenant = null;
   const selfTenant = () => ((readToken().token || {}).tenantKey || learnedTenant || null);
   const learnTenant = (memberId, tenantKey) => { const me = selfOpenId(); if (me && String(memberId) === me && typeof tenantKey === 'string' && tenantKey && tenantKey.length <= 64) learnedTenant = tenantKey; };
+  const MEMBERS_OWN_COPY_MS = 60e3;   // round wwb543hm7 (b): a proposal reuses a member list read in the last minute
   /** lane lark-threads (B1): a DISSOLVED chat (232009) — its members are asked again only after this, and said ONCE. */
   const DISSOLVED_TTL_MS = 24 * 3600e3;
-  async function namesFor(convId) {
+  async function namesFor(convId, { fresh = false } = {}) {   // B-82c2: `fresh` = a proposal's ONE read of the list
     const c = members.get(convId);
-    if (c && (c.until ? now() < c.until : now() - c.at < (c.dissolved ? DISSOLVED_TTL_MS : MEMBERS_TTL_MS))) return c.names;
+    // round wwb543hm7 (b): a proposal's read uses its own copy when under a minute old, and never reads while the adapter's back-off
+    // holds (a transport pause on this chat, or the vendor's rate pause on people reads): null = no read now (said as «no answer»)
+    if (fresh && c && !c.refused && now() - c.at < MEMBERS_OWN_COPY_MS) return c.names;
+    if (fresh && ((c && c.until && now() < c.until) || peopleRefusedUntil > now())) return null;
+    if (!fresh && c && (c.until ? now() < c.until : now() - c.at < (c.dissolved ? DISSOLVED_TTL_MS : MEMBERS_TTL_MS))) return c.names;
     const names = new Map();
-    let refused = false, dissolved = false, until = 0;
+    let refused = false, dissolved = false, until = 0, partial = false;
     try {
       let pageToken = null, pages = 0;
       do {
@@ -1597,6 +1609,7 @@ function create(record = {}, deps = {}) {
         for (const m of (d.data && d.data.items) || []) if (m && m.member_id) { names.set(String(m.member_id), String(m.name || '')); learnTenant(m.member_id, m.tenant_key); noteName(m.member_id, 'member', m.name); }
         pageToken = nextToken(d.data);
       } while (pageToken && ++pages < 10);
+      partial = !!pageToken;   // round wn462wr7s: a page mark LEFT after ten pages = the list is not whole (a chat over 1000 members)
     } catch (e) {
       if (e instanceof ChannelError && e.code === 'auth-expired') throw e;   // a dead token is the pass's failure, not a missing name
       // verify r2 F1 (the vendor-budget class): a RATE refusal on the members page is the READ's 429 — the account's back-off
@@ -1616,13 +1629,57 @@ function create(record = {}, deps = {}) {
         log.warn && log.warn(`[channels] lark: member names for ${convId} unavailable (${(e && e.message) || e})${dissolved ? ' — the chat was dissolved; asked again in 24 h' : until ? ` — asked again in ${Math.round((until - now()) / 1000)} s` : ''} — authors are named by their profiles where the sign-in may read them`);
       }
     }
-    members.set(convId, { names, at: now(), refused, dissolved, until });
+    members.set(convId, { names, at: now(), refused, dissolved, until, partial });
     return names;
+  }
+  /** round wn462wr7s: THE MEMBER LIST AS ITS READ RECORDED IT, for a decision — `{list, whole, why}`. «Whole» is the READ's own
+   *  fact, never a caller's: whole only when it ended with no page mark left, was not refused and stood under no back-off. And a
+   *  read that FAILS never refuses the proposal: a rate refusal, a back-off, a transport blip, a refusal, a dead token — each is a
+   *  list not whole with the reason (`why`), and the words it would have decided stay open, said. */
+  async function memberListFor(convId) {
+    let names;
+    try { names = await namesFor(convId, { fresh: true }); }
+    catch (e) { return { list: [], whole: false, why: e instanceof ChannelError && e.code === 'auth-expired' ? 'members-signed-out' : 'members-no-answer' }; }   // rate-ok: prepare-members
+    if (names === null) return { list: [], whole: false, why: 'members-no-answer' };   // the adapter's back-off holds: no read now
+    const m = members.get(convId) || {};
+    if (m.refused) return { list: [], whole: false, why: m.dissolved ? 'chat-dissolved' : m.until ? 'members-no-answer' : 'members-unreadable' };   // a transport failure is «no answer», never «may not read»
+    const list = [...names].map(([id, name]) => ({ id, name }));
+    return m.partial ? { list, whole: false, why: 'members-partial' } : { list, whole: true, why: null };
   }
   /** May this sign-in read ANOTHER person's profile? (the users/get doc: any one of PEOPLE_READ_SCOPES for a user token —
    *  MEASURED: `contact:user.base:readonly` alone is refused 99991679). Asked before every lookup: nothing is sent
    *  without it, and the account card says "re-authorize to read people's profiles" (`peopleGrant`). */
   const canReadPeople = () => { const sc = ((readToken().token || {}).scopes) || []; return PEOPLE_READ_SCOPES.some((x) => sc.includes(x)); };
+  /** round wfgpbe038 RULE B — THE MEMBERS DECIDE WHENEVER THEY CAN BE READ: a proposal's text with any at-word reads the
+   *  member list ONCE, and that read is KEPT for the proposal's edits under a key stored with its decision (`readKey`): bound
+   *  to this chat and this account (this adapter), at most READS_KEPT_MAX of them, a day at most; a read that failed is not
+   *  kept (an edit asks again, under the same back-off), and after a restart the first edit reads once more. */
+  const READS_KEPT = new Map(), READS_KEPT_MAX = 200, READS_KEPT_MS = 24 * 3600e3;
+  async function memberFactFor(convId, readKey) {
+    const k = typeof readKey === 'string' && /^rk-[0-9a-f]{16}$/.test(readKey) ? readKey : null;
+    const kept = k ? READS_KEPT.get(k) : null;
+    if (kept && kept.convId === convId && now() - kept.at < READS_KEPT_MS) return { fact: kept.fact, readKey: k };
+    const fact = await memberListFor(convId);
+    const key = k || `rk-${crypto.randomBytes(8).toString('hex')}`;
+    if (fact.list.length || fact.whole) {
+      READS_KEPT.delete(key); READS_KEPT.set(key, { convId, fact, at: now() });
+      while (READS_KEPT.size > READS_KEPT_MAX) READS_KEPT.delete(READS_KEPT.keys().next().value);
+    }
+    return { fact, readKey: key };
+  }
+  /** B-82c2 — A PROPOSAL'S MENTIONS, decided by THE ONE DECISION (LM.decideMentions: the same call for the proposal and every
+   *  edit; the reconcile's re-issue sends the decision the approve stored): the text, the people the engine read from this
+   *  conversation's own records (`known`: its authors, the members its messages mention, an earlier decision's name+id pairs)
+   *  and — whenever the text holds an at-word (rule B) — the member list of the proposal's ONE read with its own «whole or
+   *  not». Nothing here throws for the read: a failed read decides by the records alone, each such name SAID on the card
+   *  (`unchecked` + why), every other word open (`openWhy`). */
+  async function prepareSendImpl(convId, { text = '', known = null, readKey = null } = {}) {
+    const t = String(text == null ? '' : text);
+    let members = null, rk = null;
+    if (LM.hasAtWords(t)) ({ fact: members, readKey: rk } = await memberFactFor(String(convId), readKey));
+    const d = LM.decideMentions({ text: t, known, members });
+    return { text: t, ...d, over: [], ...(rk ? { readKey: rk } : {}), tooLong: false, sendMax: null, at: now() };
+  }
   /** …and a department's name (`contact/v3/departments/:id` under a user token asks contact:contact.base:readonly). */
   const canReadDepts = () => (((readToken().token || {}).scopes) || []).some((x) => x === PEOPLE_SCOPE || x === 'contact:contact:readonly');
   let peopleRefusedUntil = 0;
@@ -1948,7 +2005,7 @@ function create(record = {}, deps = {}) {
     if (typeof key !== 'string' || !key || key.length > 200) throw new ChannelError('vendor-error', `lark upload ${plan.msgType}: the answer carries no ${plan.keyName}`, { retryable: false, detail: { why: 'no-key' } });
     return key;
   }
-  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null, attachments = null, _body = null, _windowOf = null, budgetMs = null } = {}) {
+  async function sendImpl(convId, { text, replyTo = null, idemKey, as = 'user', replyAnchor = null, inThread = false, placement = null, attachments = null, prepared = null, _body = null, _windowOf = null, budgetMs = null } = {}) {
     const deadline = Plan.deadlineOf(budgetMs, now());   // r2 F3: the caller's remaining time bounds the upload retry
     if (as !== 'user') throw new ChannelError('send-not-available', `lark: sending as '${as}' is not declared (caps.sendAs: user)`, { retryable: false, detail: { sendAs: caps.sendAs } });
     // r6 verify F1 (the belt under the engine's gate): the reply endpoint names only the MESSAGE, never the chat —
@@ -1968,9 +2025,11 @@ function create(record = {}, deps = {}) {
     const held = heldRefusal();
     if (held) throw held;
     const files = Array.isArray(attachments) ? attachments.filter((a) => a && Buffer.isBuffer(a.data)) : [];
-    if (files.length) return sendWithFiles(convId, { text, replyTo, replyAnchor, idemKey, inThread, placement, files, deadline });
+    // B-82c2: each mention decided at the proposal in Lark's own form (`<at user_id="ou_…">Name</at>`); a name not decided stays its characters
+    const wire = LM.wireText(String(text == null ? '' : text), prepared && prepared.places);   // round wfgpbe038 D: the decision's own places
+    if (files.length) return sendWithFiles(convId, { text: wire, replyTo, replyAnchor, idemKey, inThread, placement, files, deadline });
     const uuid = uuidFor(idemKey);
-    const body = { ...(_body || { msg_type: 'text', content: JSON.stringify({ text: String(text == null ? '' : text) }) }), uuid };
+    const body = { ...(_body || { msg_type: 'text', content: JSON.stringify({ text: wire }) }), uuid };
     // lane channel-threads (L6): a reply INTO a thread says so — `reply_in_thread` is a PROMISE the composer made
     // (a reply to a message already in a thread lands there anyway; one to a plain message mints the thread)
     // (2026-09-28: the registry hands a declared PLACEMENT — `thread` sets the flag, `quote` is the plain reply endpoint)
@@ -2001,9 +2060,11 @@ function create(record = {}, deps = {}) {
     sendHold.release('send', now());   // lane lark-send-hold: the first success after the reset forgets the hold
     const m = (d && d.data) || {};
     const senderType = m.sender && m.sender.sender_type ? String(m.sender.sender_type) : null;
+    const taken = LM.takenOf(d);   // B-82c2: the mentions Lark's own answer says it took (the receipt's count; no extra call)
     return {
       ok: true, vendorMessageId: String(m.message_id || ''), at: Number(m.create_time) || now(), sentAs: 'user', uuid,
       observed: { senderType, senderId: m.sender && m.sender.id ? String(m.sender.id) : null, ...(m.thread_id ? { threadKey: String(m.thread_id) } : {}) },
+      ...(taken !== null ? { mentionsTaken: taken } : {}),
     };
   }
 
@@ -2578,6 +2639,7 @@ function create(record = {}, deps = {}) {
     async reactionSet() { return { keys: LARK_EMOJI.map((e) => ({ key: e.key, glyph: e.glyph, label: e.label, custom: false })), quick: LARK_QUICK.slice(), custom: false, at: now() }; },
 
     send: sendImpl,
+    prepareSend: prepareSendImpl,   // B-82c2
 
     /**
      * A LOST OUTCOME ONLY (§9.4). ① the chat itself: newest-first back to the
@@ -2590,9 +2652,12 @@ function create(record = {}, deps = {}) {
      * that holds nothing is `landed:false`; anything short of that is
      * `unknown` with the reason.
      */
-    async reconcile(convId, { idemKey, sentAt = null, text = null, replyTo = null, replyAnchor = null, inThread = false, threadKey = null } = {}) {
+    async reconcile(convId, { idemKey, sentAt = null, text = null, replyTo = null, replyAnchor = null, inThread = false, threadKey = null, prepared = null } = {}) {
       const selfId = selfOpenId();
       const wanted = String(text == null ? '' : text);
+      // round wwb543hm7 MUST 2: the decided mentions ride the reconcile too — its scan compares ONE form on both sides (our wire's
+      // tags, the stored message's per-message placeholders through its own mentions list), its re-issue sends them in Lark's form
+      const wantCanon = LM.canonWire(prepared && Array.isArray(prepared.places) ? LM.wireText(wanted, prepared.places) : wanted);
       const sent = Number(sentAt) || now();
       const since = sent - RECONCILE_SLACK_MS;
       let pageToken = null, scanned = 0, reachedSince = false, scanErr = null;
@@ -2611,7 +2676,7 @@ function create(record = {}, deps = {}) {
             const mine = selfId ? String((m.sender && m.sender.id) || '') === selfId : (m.sender && m.sender.sender_type) !== 'app';
             if (!mine || m.msg_type !== 'text' || m.deleted === true) continue;
             const c = parseContent(m.body && m.body.content);
-            if (c && String(c.text || '') === wanted && (!replyTo || String(m.parent_id || '') === String(replyTo) || (inThreadScan && String(m.thread_id || '') === threadKey))) {
+            if (c && LM.canonVendor(String(c.text || ''), m.mentions) === wantCanon && (!replyTo || String(m.parent_id || '') === String(replyTo) || (inThreadScan && String(m.thread_id || '') === threadKey))) {
               return { landed: true, vendorMessageId: String(m.message_id), at: Number(m.create_time) || null, detail: { how: 'found-in-chat', scanned } };
             }
           }
@@ -2621,7 +2686,7 @@ function create(record = {}, deps = {}) {
       } catch (e) { if (e instanceof ChannelError && e.code === 'rate-limited') throw e; scanErr = e; }   // verify r3: a RATE refusal on the scan is the account's — thrown; the owner's reconcile used to swallow it and RE-ISSUE the send into the vendor's stop
       if (now() - sent < UUID_WINDOW_MS) {
         try {
-          const r = await sendImpl(convId, { text: wanted, replyTo, idemKey, as: 'user', replyAnchor, inThread });
+          const r = await sendImpl(convId, { text: wanted, replyTo, idemKey, as: 'user', replyAnchor, inThread, prepared });   // MUST 2: the re-issue carries the decision
           return { landed: true, vendorMessageId: r.vendorMessageId, at: r.at, detail: { how: 'reissued-same-uuid', scanned, observed: r.observed || null } };
         } catch (e) {
           if (e instanceof ChannelError && e.code === 'rate-limited') throw e;   // verify r3: the re-issue's own 429 is the account's too

@@ -2140,6 +2140,32 @@ async function chatReadLegs(ENGmod, name) {
         ok(kept[0].retried === 1 && !('retried' in kept[1]) && /landed: "a\.pdf" \(retried, landed on attempt 2\)/.test(line) && /NOT landed: "b\.pdf" \(transport: slack files\.upload: HTTP 504 \(after 3 attempts\)\); "c\.pdf" \(not sent/.test(line) && find(card, 'chan-prop-state-partly').length === 1,
           'channel-upload-retry (real card): the outcome line says the file that landed on attempt 2 and the one that failed "(after 3 attempts)"; sendParts keeps `retried`', line);
       }
+      // B-82c2 (lane lg-text-legs-3): A LARK PROPOSAL'S MENTIONS ON THE CARD, before the press — whom it notifies, a word not
+      // looked up (round wn462wr7s: the OPEN list, its own row) and WHY, a name nobody bears, everyone as its own row; the sent
+      // card's count from the channel's own answer (fewer said); a member's name drawn as TEXT, never markup
+      {
+        const lb = { id: 'p-82a', adapterId: 'lark-1', adapterLabel: 'Lark', convId: 'oc_1', key: 'lark-1/oc_1', state: 'awaiting-approval', text: '@张三 and @<b>Eve</b> please look', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, at: 1, updatedAt: 1 };
+        const pr = { mentions: [{ name: '张三', id: 'ou_zhang00001' }], notifies: ['张三'], plain: ['Zed'], open: ['<b>Eve</b>'], openWhy: 'members-unreadable', everyone: true };
+        const rowT = (card, cls) => (find(card, cls)[0] || { textContent: '' }).textContent;
+        const c1 = CO.renderProposalCard(app, { ...lb, prepared: pr });
+        const markup = c1._all().filter((e) => e.tagName === 'B').length;
+        ok(/张三/.test(rowT(c1, 'chan-prop-notifies')) && /Not looked up/.test(rowT(c1, 'chan-prop-open')) && rowT(c1, 'chan-prop-open').includes('@<b>Eve</b>') && /may not read the chat's members/.test(rowT(c1, 'chan-prop-open')) && /Not a member here/.test(rowT(c1, 'chan-prop-plain')) && rowT(c1, 'chan-prop-plain').includes('@Zed') && /everyone in this chat/.test(rowT(c1, 'chan-prop-everyone')) && markup === 0,
+          'B-82c2 (real card): «Notifies 张三»; the word not looked up its OWN row — «Not looked up … plain words, nobody is notified: this account may not read the chat\'s members»; a name nobody bears its own row beside it; everyone its own row; a member\'s name drawn as text (no <b> element)', JSON.stringify({ notifies: rowT(c1, 'chan-prop-notifies'), open: rowT(c1, 'chan-prop-open'), plain: rowT(c1, 'chan-prop-plain'), everyone: rowT(c1, 'chan-prop-everyone'), markup }));
+        const whys = ['members-no-answer', 'members-partial', 'members-signed-out', 'chat-dissolved', null].map((w, i) => rowT(CO.renderProposalCard(app, { ...lb, id: `p-82w${i}`, prepared: { mentions: [], notifies: [], plain: [], open: ['Ann Lee'], ...(w ? { openWhy: w } : {}) } }), 'chan-prop-open'));
+        ok(/did not answer when its members were looked up/.test(whys[0]) && /more members than one look-up reads/.test(whys[1]) && /sign-in has expired/.test(whys[2]) && /dissolved/.test(whys[3]) && /members were not looked up/.test(whys[4]) && whys.every((w) => w.includes('@Ann Lee')),
+          'B-82c2 round wn462wr7s (real card): each reason a word was not looked up is said in its own words — no answer, a list not whole, a sign-in expired, a dissolved chat, none named', JSON.stringify(whys));
+        // round wfgpbe038: a name decided WITHOUT the whole member list is said on its own row (rule B); the at-words past the
+        // bounds are said; a press that found a decision the card had not shown leaves ONE line above the rows (rule C), and the
+        // card drawn from that record is a NEW card — it arms again, so a double tap cannot send what it never showed
+        const chg = CO.renderProposalCard(app, { ...lb, id: 'p-82ch', decisionChanged: { at: 2, by: 'user' }, prepared: { mentions: [{ name: '张伟', id: 'ou_zw00000001' }], notifies: ['张伟'], plain: [], unchecked: ['张伟'], uncheckedWhy: 'members-no-answer', unread: 4 } });
+        ok(/Who this message notifies changed — nothing was sent/.test(rowT(chg, 'chan-prop-changed')) && /张伟 — taken from this chat; the whole member list was not read/.test(rowT(chg, 'chan-prop-unchecked')) && /did not answer when its members were looked up/.test(rowT(chg, 'chan-prop-unchecked')) && /4 more @ words were not read/.test(rowT(chg, 'chan-prop-unread')) && chg._cls.has('chan-prop-arming') && find(c1, 'chan-prop-changed').length === 0,
+          'B-82c2 round wfgpbe038 (real card): «Not checked» names a person decided without the whole member list, with the read\'s reason; «Not read» counts the at-words past the bounds; a decision the press found changed draws ONE line above the rows, on a card that ARMS again (none on a card whose decision did not change)', JSON.stringify({ changed: rowT(chg, 'chan-prop-changed'), unchecked: rowT(chg, 'chan-prop-unchecked'), unread: rowT(chg, 'chan-prop-unread') }));
+        const c2 = CO.renderProposalCard(app, { ...lb, id: 'p-82b', prepared: { mentions: pr.mentions, notifies: ['张三'], plain: ['Zed'] } });
+        ok(/Not a member here/.test(rowT(c2, 'chan-prop-plain')) && find(c2, 'chan-prop-everyone').length === 0, 'B-82c2 (real card): a name nobody bears keeps its own row «Not a member here … plain words»', rowT(c2, 'chan-prop-plain'));
+        const c3 = CO.renderProposalCard(app, { ...lb, id: 'p-82c', state: 'sent', result: { vendorMessageId: 'om_9' }, receipt: { status: 'sent', notified: { decided: 2, taken: 1 } }, prepared: pr });
+        const c4 = CO.renderProposalCard(app, { ...lb, id: 'p-82d', state: 'sent', result: { vendorMessageId: 'om_10' }, receipt: { status: 'sent', notified: { decided: 2, taken: 2 } }, prepared: pr });
+        ok(/Notified 1 of the 2 mentions decided — the channel took fewer/.test(rowT(c3, 'chan-prop-notified')) && /Notified: 2 mentioned/.test(rowT(c4, 'chan-prop-notified')), 'B-82c2 (real card): the sent card says how many the channel took — and when it took FEWER than were decided', JSON.stringify([rowT(c3, 'chan-prop-notified'), rowT(c4, 'chan-prop-notified')]));
+      }
       // lane outbox-attachment-preview (owner 2026-10-09 "草稿的那个界面怎么不能点开文件预览，只能下载"): a click on a draft's
       // file OPENS it — a picture in THE image overlay, a document in a viewer window by URL — and the ⤓ on every row
       // downloads; a type with no preview keeps its download. Controls: a mutant whose name downloads on click ⇒ RED.

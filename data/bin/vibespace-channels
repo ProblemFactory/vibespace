@@ -340,6 +340,10 @@ const USAGE = `vibespace-channels — read connected channels, PROPOSE replies (
   vibespace-channels api wait <proposal id> [--timeout 120]
 <conv> is the key list prints: <adapter>/<conversation id>.
 A reply is a PROPOSAL — the user may edit or reject it; the receipt lands in your next turn.
+A MENTION (reply / compose) on a channel whose messages have them (Lark, Slack): write @ and the person's name — "@Ann Lee",
+"@张三" (@所有人 / @all = everyone in the chat). It is resolved when you propose and shown on the user's card; the answer says,
+per name, notified or plain words and why. A name two people here bear is REFUSED (write the full name); a name nobody
+here bears goes as plain words.
 Reactions show as counts ("(the account owner)" = the user's own) — never who reacted.
 Changed your mind? withdraw it (or --replaces it) — never leave the user a stale draft to reject.
 A conversation you cannot see and one that does not exist give the same answer.`;
@@ -371,6 +375,20 @@ function printRecipients(p) {
   const e = p && p.replyEnvelope;
   if (!e || !e.to) return;
   console.log(`    ${e.all ? 'reply all — ' : ''}to: ${e.to}${e.cc ? ` · cc: ${e.cc}` : ''}${Array.isArray(e.added) && e.added.length ? ` (you added: ${e.added.join(', ')})` : ''}`);
+}
+/** B-82c2: WHO THE PROPOSAL NOTIFIES, per name — the server's decision (its names through the belt), said in our words. */
+const OPEN_WHY_WORDS = Object.freeze({ 'members-unreadable': 'this account may not read the chat\'s members', 'chat-dissolved': 'this chat was dissolved', 'members-no-answer': 'the channel did not answer when its members were looked up', 'members-partial': 'the chat has more members than one look-up reads', 'members-signed-out': 'this account\'s sign-in has expired' });
+function printMentions(p) {
+  const pr = p && p.prepared && typeof p.prepared === 'object' ? p.prepared : null;
+  if (!pr) return;
+  const notifies = Array.isArray(pr.notifies) ? pr.notifies : [], plain = Array.isArray(pr.plain) ? pr.plain : [], open = Array.isArray(pr.open) ? pr.open : [], over = Array.isArray(pr.over) ? pr.over : [], unchecked = Array.isArray(pr.unchecked) ? pr.unchecked : [];
+  if (notifies.length) console.log(`    notifies: ${notifies.join(', ')}`);
+  if (pr.everyone === true) console.log('    notifies everyone in this chat (only where the group allows mentioning everyone)');
+  if (open.length) console.log(`    not looked up, plain words, nobody notified: ${open.join(', ')} — ${OPEN_WHY_WORDS[pr.openWhy] || 'the chat\'s members were not looked up'}`);   // round wn462wr7s: the open words, their own line
+  if (unchecked.length) console.log(`    not checked against the whole member list (another member may bear the name): ${unchecked.join(', ')} — ${OPEN_WHY_WORDS[pr.uncheckedWhy] || 'the chat\'s members were not looked up'}`);   // round wfgpbe038 rule B
+  if (plain.length) console.log(`    plain words, nobody notified: ${plain.join(', ')} — nobody here bears that name`);
+  if (Number.isInteger(pr.unread) && pr.unread > 0) console.log(`    ${pr.unread} more @ words not read (past the bounds of one message) — plain words, nobody notified`);
+  if (over.length) console.log(`    plain words, past the 50 mentions a message carries: ${over.join(', ')}`);
 }
 /** The replace half of a reply / compose answer, said by name. */
 function printReplaced(r) {
@@ -642,6 +660,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     const attLine = attachmentLine(p);
     if (attLine) console.log(attLine);
     printRecipients(p);
+    printMentions(p);   // B-82c2
     printReplaced(r);
     // lane channel-direct-send-sync: a direct send's receipt is read INLINE here — no second "[Channels · Outbox]"
     // message waits in your queue for the next turn (a review proposal still gets its receipt in the next turn)

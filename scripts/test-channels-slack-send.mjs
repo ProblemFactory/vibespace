@@ -382,18 +382,25 @@ async function editLeg(engMod, name) {
   const ambSent = v.state.posted.length - n0;
   const st1 = eng.store.outbox.snapshot().proposals[p1.proposal.id].state;
   clock += 5000;
+  const n2 = v.state.posted.length;
   const ok2 = await eng.approve(p1.proposal.id, { text: 'Thanks @alice.w — @Bob is out, ask @nobody' });
+  const heldSent = v.state.posted.length - n2;
+  // B-82c2 round wfgpbe038 RULE C: an edit whose decision CHANGED (here: Alice added, @nobody as words) is stored with its
+  // decision and NOT sent at that press (mentions-changed); the card redraws, and the NEXT press sends what it shows
+  clock += 5000;
+  const ok3 = ok2 && ok2.code === 'mentions-changed' ? await eng.approve(p1.proposal.id, {}) : null;
   const sent = v.state.posted[v.state.posted.length - 1];
   const stored = eng.store.outbox.snapshot().proposals[p1.proposal.id];
-  return { amb, ambSent, st1, ok2, sent: sent && sent.text, stored: stored && stored.prepared };
+  return { amb, ambSent, st1, ok2, heldSent, ok3, sent: sent && sent.text, stored: stored && stored.prepared };
 }
 {
   const r = await editLeg(null, 'edit');
   ok(r.amb.ok === false && r.amb.why === 'mention-ambiguous' && r.amb.ambiguous.join() === 'Alice' && r.ambSent === 0 && r.st1 === 'awaiting-approval', `an edit that ADDS an @Alice two people answer is refused by name, nothing sent, the proposal still waits (${r.amb.why}, ${r.ambSent} sent, ${r.st1})`);
-  ok(r.ok2 && r.ok2.ok !== false && r.sent === 'Thanks <@U0ALICE02> — <@U0BOB0001> is out, ask @nobody', `an edit adding @alice.w resolves her now, keeps Bob's decided id, leaves @nobody as words (${r.sent})`);
+  ok(r.ok2 && r.ok2.code === 'mentions-changed' && r.heldSent === 0, `B-82c2 round wfgpbe038 RULE C: the edit adding @alice.w CHANGES who is notified — stored with its decision, nothing on the wire at that press (${r.ok2 && r.ok2.code}, ${r.heldSent} sent)`);
+  ok(r.ok3 && r.ok3.ok !== false && r.sent === 'Thanks <@U0ALICE02> — <@U0BOB0001> is out, ask @nobody', `…the next press sends what the card then showed: @alice.w resolved, Bob's id, @nobody as words (${r.sent})`);
   ok(r.stored && r.stored.notifies.join() === 'Alice,Bob' && r.stored.plain.join() === 'nobody', `the decision is stored with the edit — the card and receipt say who was notified (${JSON.stringify(r.stored && { n: r.stored.notifies, p: r.stored.plain })})`);
   const esrc = engineSource(REPO);
-  const EDIT = '    if (edited && p0.prepared && !p0.compose) {';
+  const EDIT = '    if (recD && (registry.capsOf(recD.kind) || {}).prepareSend === true && (edited || !p0.prepared)) {';
   ok(esrc.split(EDIT).length === 2, 'the patch site of the edit-decision control is in channels-engine.js (once)');
   const r2 = await editLeg(require(MC.write('src/server/channels-engine.js', esrc.replace(EDIT, '    if (false) {'), 'noeditprep')), 'noeditprep');
   ok(r2.ambSent === 1, `NEGATIVE CONTROL — a copy that does not decide the edit SENDS the ambiguous @Alice as plain words (${r2.ambSent} sent)`);

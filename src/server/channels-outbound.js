@@ -218,6 +218,9 @@ function create(engineCtx) {
   }
   /** verify r3 F6: the ids a proposal's AGENT view carries — the target conversation, its thread, the answered message, the
    *  sent message's vendor id (the receipt), a reaction's message + its quote's author (a name, else an id) — as line pieces */
+  /** B-82c2: a proposal's mention decision as the DRAFTER reads it — per name, notified, plain words, or not looked up and why; every name
+   *  a member's (text a peer wrote) through the belt as a line piece; the vendor's ids never leave the engine. */
+  const agentPrepared = (pr) => { const names = (v) => (Array.isArray(v) ? v : []).slice(0, 50).map((n) => agentText(String(n == null ? '' : n), { kind: 'line', max: 100 })); return { notifies: names(pr.notifies), plain: names(pr.plain), open: names(pr.open), over: names(pr.over), unchecked: names(pr.unchecked), everyone: pr.everyone === true, openWhy: typeof pr.openWhy === 'string' ? pr.openWhy : null, uncheckedWhy: typeof pr.uncheckedWhy === 'string' ? pr.uncheckedWhy : null, unread: Number.isInteger(pr.unread) ? pr.unread : 0 }; };
   function agentIdsOf(v) {
     if (!v || typeof v !== 'object') return v;
     const out = { ...v, convId: agentId(v.convId), threadKey: agentId(v.threadKey), replyTo: agentId(v.replyTo) };
@@ -227,6 +230,7 @@ function create(engineCtx) {
     if (Array.isArray(v.also)) { const d = v.draftedBy || {}; out.also = v.also.map((a) => ({ id: a.id, state: a.state, mine: !!(a.by && a.by.kind === 'agent' && d.kind === 'agent' && a.by.id === d.id), byUser: !!(a.by && a.by.kind === 'user') })); }
     if (v.replyEnvelope && typeof v.replyEnvelope === 'object') out.replyEnvelope = agentEnvelope(v.replyEnvelope);   // B-a085: the recipients the agent's CLI prints
     if (v.receipt && typeof v.receipt === 'object') out.receipt = { ...v.receipt, vendorMessageId: agentId(v.receipt.vendorMessageId) };
+    if (v.prepared && typeof v.prepared === 'object') out.prepared = agentPrepared(v.prepared);   // B-82c2: who it notifies, per name — the names through the belt, no id
     if (v.reaction && typeof v.reaction === 'object') out.reaction = { ...v.reaction, msg: agentId(v.reaction.msg), ...(v.reaction.quote && typeof v.reaction.quote === 'object' ? { quote: { ...v.reaction.quote, author: agentText(v.reaction.quote.author, { kind: 'line', max: 200 }) } } : {}) };
     // lane channels-proposals-recall: the message a recall takes back, and its quote (the user's own words — still through the belt)
     if (v.recall && typeof v.recall === 'object') out.recall = { ...v.recall, msg: agentId(v.recall.msg), ...(v.recall.quote && typeof v.recall.quote === 'object' ? { quote: { author: agentText(v.recall.quote.author, { kind: 'line', max: 200 }), text: agentText(v.recall.quote.text, { kind: 'line', max: 200 }) } } : {}) };
@@ -683,10 +687,10 @@ function create(engineCtx) {
     // WILL SEE it (`convCaps.audience`, D20), as the card's line
     let prepared = null;
     if (c0.prepareSend === true) {
-      try { prepared = await adapterFor(rec).adapter.prepareSend(convId, { text: v.proposal.text }); }
+      try { prepared = await adapterFor(rec).adapter.prepareSend(convId, { text: v.proposal.text, known: knownPeopleOf(adapterId, convId) }); }   // B-82c2: the conversation's own people first
       catch (err) { return { ok: false, code: 'send-not-available', why: 'prepare-send', error: `who this message would notify could not be resolved (${(err && err.code) || 'unknown'}) — nothing was created; propose it again` }; }
       if (prepared.tooLong) return { ok: false, code: 'bad-proposal', why: 'too-long', error: `this message is longer than ${prepared.sendMax || 4000} characters — nothing was created; split it` };
-      if (prepared.unresolved.length) return { ok: false, code: 'bad-proposal', why: 'mention-ambiguous', ambiguous: prepared.unresolved.slice(0, 10), error: 'a name after @ answers more than one person in this conversation — nothing was created; write the full name' };
+      if (prepared.unresolved.length) return { ok: false, code: 'bad-proposal', why: 'mention-ambiguous', ambiguous: prepared.unresolved.slice(0, 10), error: `${sharedNameWords(prepared.unresolved)} — nothing was created` };
     }
     const audience = ((effectiveConvCaps(rec, enNow) || {}).audience) || null;
     // The authority the drafter holds HERE: the user's own is `send`; an
@@ -734,7 +738,7 @@ function create(engineCtx) {
           id, adapterId, convId, key: en.key, title: agentTitle(en, convId),   // verify r1 F2: the proposal's title is printed by `vibespace-channels status`
           text: v.proposal.text, originalText: v.proposal.text, replyTo: v.proposal.replyTo, why: v.proposal.why, attachments: OF.metaOf(att.files),
           replyAnchor: ra.anchor, replyEnvelope: ra.envelope,
-          ...(prepared ? { prepared: { mentions: prepared.mentions, notifies: prepared.notifies, plain: prepared.plain, ...(prepared.over && prepared.over.length ? { over: prepared.over } : {}), at: prepared.at } } : {}), ...(audience ? { audience } : {}),
+          ...(prepared ? { prepared: storedPrepared(prepared) } : {}), ...(audience ? { audience } : {}),
           placement, ...(placement !== 'chat' ? { replyQuote } : {}), ...(pv.defaulted && placement !== 'chat' ? { placementDefaulted: pv.rule } : {}),
           ...(intoThread ? { inThread: true, threadKey, threadQuote: replyQuote } : {}),
           draftedBy: drafter, ...drafterGroupsOf(ctx), authority, at: t, updatedAt: t, state: 'proposed',
@@ -1091,24 +1095,45 @@ function create(engineCtx) {
    * lands in `failed`, and the receipt carries that reason verbatim.
    */
   /** slack-core verify r1 (F2): the decision an owner's edit carries (see approve) — `{ok, prepared}` or a refusal. */
+  /** B-82c2: THE PEOPLE A CONVERSATION'S OWN RECORDS HOLD — its authors (a person, never an application) and the members
+   *  its messages mention (`record.mentions`: the vendor's id + the name) — the first place a proposal's @name is looked up
+   *  (an adapter reads the vendor only for a name not found here). The newest LOOK_BACK_PEOPLE records, newest name wins. */
+  const LOOK_BACK_PEOPLE = 500;
+  /** round wfgpbe038 (a small): the refusal for a name two people here bear names a way out that works even when the FULL name
+   *  itself is shared — the @ dropped (the name goes as words), or which one said in words. */
+  const sharedNameWords = (names) => `more than one person in this conversation bears the name after @ (${names.slice(0, 5).join(', ')}): write a longer name if one tells them apart; if the full name itself is shared, drop the @ (the name goes as words) or say in words which one`;
+  /** THE DECISION AS STORED on a proposal (the proposal's and the edit's, one shape): the mentions with their notify names (one to
+   *  one), the plain words, the OPEN words with the read's reason (round wn462wr7s: their own list to the card), the overflow. */
+  const storedPrepared = (d) => ({ mentions: d.mentions, notifies: d.notifies, plain: d.plain, ...(Array.isArray(d.open) && d.open.length ? { open: d.open.slice(), ...(d.openWhy ? { openWhy: d.openWhy } : {}) } : {}), ...(Array.isArray(d.over) && d.over.length ? { over: d.over.slice() } : {}), ...(d.everyone ? { everyone: true } : {}),
+    // round wfgpbe038: the decided PLACES (rule D: the wire tags only these), the names decided WITHOUT the whole member list
+    // (rule B: said on the card, with the read's reason), the at-words past the bounds (said), the proposal's member read's key
+    ...(Array.isArray(d.places) && d.places.length ? { places: d.places.slice() } : {}), ...(Array.isArray(d.unchecked) && d.unchecked.length ? { unchecked: d.unchecked.slice(), ...(d.uncheckedWhy ? { uncheckedWhy: d.uncheckedWhy } : {}) } : {}),
+    ...(Number.isInteger(d.unread) && d.unread > 0 ? { unread: d.unread } : {}), ...(typeof d.readKey === 'string' ? { readKey: d.readKey } : {}), at: d.at });
+  function knownPeopleOf(adapterId, convId) {
+    let recs = [];
+    try { recs = store.readTail(adapterId, convId, { limit: LOOK_BACK_PEOPLE }); } catch { recs = []; }
+    const byId = new Map();
+    for (const r of Array.isArray(recs) ? recs : []) {
+      const a = r && r.author;
+      if (a && typeof a.id === 'string' && a.id && !a.isBot && typeof a.name === 'string' && a.name) byId.set(a.id, a.name);
+      for (const m of Array.isArray(r && r.mentions) ? r.mentions : []) if (m && typeof m.id === 'string' && m.id && m.kind !== 'broadcast' && typeof m.name === 'string' && m.name) byId.set(m.id, m.name);
+    }
+    return [...byId].map(([id, name]) => ({ id, name }));
+  }
+  /** THE EDIT'S DECISION (round wn462wr7s): the edited text decided FRESH by the adapter's one decision, kept as it comes — the
+   *  edit keeps NOTHING of the earlier decision by itself. The earlier decision's mentions join the people the records hold as
+   *  name+id pairs (`known`; an adapter that reads its own directory, as Slack does, may ignore them), so a name decided before
+   *  is decided again only where the edited text still names it and nothing after it could continue a longer name. */
+  const pairsOf = (pr) => (pr && Array.isArray(pr.mentions) ? pr.mentions : []).filter((m) => m && !m.raw && typeof m.id === 'string' && m.id !== 'all' && typeof m.name === 'string' && m.name).slice(0, 50).map((m) => ({ id: m.id, name: m.name }));
   async function prepareEdit(p0, text) {
     const rec = adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null;
     if (!rec) return { ok: true, prepared: null };   // the approval's recheck refuses it by name
     let fresh;
-    try { fresh = await adapterFor(rec).adapter.prepareSend(p0.convId, { text }); }
+    try { fresh = await adapterFor(rec).adapter.prepareSend(p0.convId, { text, known: [...pairsOf(p0.prepared), ...knownPeopleOf(p0.adapterId, p0.convId)], ...(p0.prepared && typeof p0.prepared.readKey === 'string' ? { readKey: p0.prepared.readKey } : {}) }); }   // B-82c2: the edit decides as the proposal did (its one member read kept)
     catch (err) { return { ok: false, code: 'send-not-available', why: 'prepare-send', error: `who the edited message would notify could not be resolved (${(err && err.code) || 'unknown'}) — nothing was sent; approve it again` }; }
     if (fresh.tooLong) return { ok: false, code: 'bad-proposal', why: 'too-long', error: 'the edited message is longer than one message may be here — nothing was sent; shorten it' };
-    const was = p0.prepared || {};
-    const old = new Map((Array.isArray(was.mentions) ? was.mentions : []).map((m, i) => [m.name, { m, as: (Array.isArray(was.notifies) && was.notifies[i]) || m.name }]));
-    const ambiguous = fresh.unresolved.filter((n) => !old.has(n));
-    if (ambiguous.length) return { ok: false, code: 'bad-proposal', why: 'mention-ambiguous', ambiguous: ambiguous.slice(0, 10), error: 'a name after @ in the edit answers more than one person in this conversation — nothing was sent; write the full name' };
-    const out = { mentions: [], notifies: [], plain: [], at: fresh.at };
-    const keep = (n) => { const o = old.get(n); out.mentions.push(o.m); out.notifies.push(o.as); };
-    fresh.mentions.forEach((m, i) => { if (old.has(m.name)) keep(m.name); else { out.mentions.push(m); out.notifies.push(fresh.notifies[i] || m.name); } });
-    for (const n of fresh.unresolved) keep(n);
-    for (const n of fresh.plain) { if (old.has(n)) keep(n); else out.plain.push(n); }
-    if (Array.isArray(fresh.over) && fresh.over.length) out.over = fresh.over.slice();   // the cure: the overflow past the bound keeps its own label
-    return { ok: true, prepared: out };
+    if (fresh.unresolved.length) return { ok: false, code: 'bad-proposal', why: 'mention-ambiguous', ambiguous: fresh.unresolved.slice(0, 10), error: `${sharedNameWords(fresh.unresolved)} — nothing was sent` };
+    return { ok: true, prepared: storedPrepared(fresh) };
   }
   async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null, shown = null, withoutFiles = false, pressed = null } = {}) {
     const p0 = store.outbox.snapshot().proposals[id];
@@ -1141,13 +1166,30 @@ function create(engineCtx) {
       if (!v.ok) return { ok: false, code: 'bad-proposal', error: v.error };
     }
     // slack-core verify r1 (F2): an OWNER'S EDIT on an adapter that declared `prepareSend` is decided like the proposal
-    // was — an @name the edit ADDS is resolved now (two people answering it ⇒ refused by name, nothing sent), a name the
-    // proposal decided keeps its id (decided once), a name the edit dropped notifies nobody; stored with the edit
+    // was — B-82c2 round wn462wr7s: FRESH, by the adapter's one decision (the earlier mentions only join the known people as
+    // pairs): a name two people answer ⇒ refused by name, nothing sent; a name the edit dropped notifies nobody; stored with the edit
+    // round wfgpbe038 RULE C — THE PRESS SENDS ONLY WHAT THE CARD SHOWED FOR EXACTLY THIS TEXT: an edit (or a proposal stored
+    // before its adapter decided mentions) is decided here; when its decision is not the one the card showed (who is notified,
+    // everyone, the open words, the words that are no member, the names not checked, the words past the bounds), the text and
+    // its decision are stored in ONE step, NOTHING is sent, and the answer is `mentions-changed` — the card redraws with the new
+    // rows and one line saying the decision changed; the next press sends what it shows
     let prepared = null;
-    if (edited && p0.prepared && !p0.compose) {
-      const pe = await prepareEdit(p0, text);
+    const recD = !p0.compose && !reactionKind && p0.kind !== 'recall' ? (adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null) : null;
+    if (recD && (registry.capsOf(recD.kind) || {}).prepareSend === true && (edited || !p0.prepared)) {
+      const pe = await prepareEdit(p0, edited ? text : p0.text);
       if (!pe.ok) return { ...pe, proposal: proposalView(p0) };
       prepared = pe.prepared;
+      if (prepared && P.decisionSummary(prepared) !== P.decisionSummary(p0.prepared)) {
+        await store.outbox.update((ob) => {
+          const p = ob.proposals[id];
+          if (!p || p.state !== 'awaiting-approval' || p.text !== p0.text) return;   // moved meanwhile: nothing stored here
+          if (edited) { p.text = text; p.edited = true; }
+          p.prepared = prepared; p.decisionChanged = { at: now(), by }; p.updatedAt = now();
+        });
+        const p1 = store.outbox.snapshot().proposals[id];
+        notifyOutbox([id]);
+        return { ok: false, code: 'mentions-changed', why: 'mentions-changed', error: edited ? 'the edit changes who this message notifies — nothing was sent; the card now shows it: read it, then approve again' : 'who this message notifies was decided now — nothing was sent; the card now shows it: read it, then approve again', proposal: proposalView(p1) };
+      }
     }
     const composing = !!p0.compose && !p0.result;
     const cf0 = composing ? { en: null, rec: adapterRecords().adapters.find((r) => r.id === p0.adapterId) || null } : convFor(p0.adapterId, p0.convId);
@@ -1168,7 +1210,7 @@ function create(engineCtx) {
     if (!stillOffered || targetWhy) {
       const why = targetWhy || (!rec ? 'adapter no longer exists' : ccErr ? `convCaps could not be resolved (${ccErr})` : (cc && cc.why) || 'not-offered');
       await transition(id, 'failed', 'recheck', (p) => {
-        p.approvedBy = by; if (edited) { p.text = text; p.edited = true; if (prepared) p.prepared = prepared; }
+        p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } if (prepared) p.prepared = prepared; delete p.decisionChanged;
         stampReceiptChoice(p, receiptChoice);
         p.reason = `send-not-available: ${why}`; p.failure = { code: 'send-not-available', why, at: now() };
       });
@@ -1199,7 +1241,7 @@ function create(engineCtx) {
     // r4: a THROW after the grant (the transition's or the send's store
     // write refused) gives the slot back unless the request may have left
     try {
-      const tr = await transition(id, 'sending', by, (p) => { if (leftOut) p.filesLeftOut = leftOut; p.approvedBy = by; if (edited) { p.text = text; p.edited = true; if (prepared) p.prepared = prepared; } stampReceiptChoice(p, receiptChoice); });
+      const tr = await transition(id, 'sending', by, (p) => { if (leftOut) p.filesLeftOut = leftOut; p.approvedBy = by; if (edited) { p.text = text; p.edited = true; } if (prepared) p.prepared = prepared; delete p.decisionChanged; stampReceiptChoice(p, receiptChoice); });
       if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return { ok: false, code: 'bad-state', error: tr.why }; }
       auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
       await sendNow(id, { pressed });
@@ -1538,7 +1580,7 @@ function create(engineCtx) {
     if (r && r.ok) {
       to = 'sent';
       patch = (q) => {
-        q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null, ...(q.compose ? { threadId: r.threadId || null } : {}), ...(P.sendParts(r.parts) ? { parts: P.sendParts(r.parts) } : {}) };
+        q.result = { vendorMessageId: r.vendorMessageId || null, at: r.at || t, sentAs: r.sentAs || q.sendAs, lane: r.lane || null, honestyLine: !!line, observed: r.observed || null, handle: r.handle || q.sendHandle || null, ...(q.compose ? { threadId: r.threadId || null } : {}), ...(P.sendParts(r.parts) ? { parts: P.sendParts(r.parts) } : {}), ...(Number.isInteger(r.mentionsTaken) && r.mentionsTaken >= 0 ? { mentionsTaken: Math.min(r.mentionsTaken, 100) } : {}) };   // B-82c2: the mentions the channel's answer took
         // lane channel-threads: the thread the reply LANDED in (the vendor's word, e.g. Lark's `thread_id`) — the receipt names it
         if (q.inThread && r.observed && r.observed.threadKey) q.threadKey = String(r.observed.threadKey);
         q.reason = null;
@@ -1943,7 +1985,7 @@ function create(engineCtx) {
     try {
       const e = adapterFor(rec);
       const anchorR = p.compose ? null : anchorFactsOf(p);
-      answer = await e.adapter.reconcile(p.convId, { idemKey: p.id, sentAt: p.attemptAt || p.updatedAt || p.at, text: (p.wire && p.wire.text) || p.text, replyTo: p.replyTo, as: p.sendAs, handle: p.sendHandle || null, ...(p.compose ? { compose: p.compose } : {}), ...(anchorR ? { replyAnchor: anchorR } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}), ...(p.inThread ? { inThread: true, threadKey: p.threadKey || null } : {}) });
+      answer = await e.adapter.reconcile(p.convId, { idemKey: p.id, sentAt: p.attemptAt || p.updatedAt || p.at, text: (p.wire && p.wire.text) || p.text, replyTo: p.replyTo, as: p.sendAs, handle: p.sendHandle || null, ...(p.compose ? { compose: p.compose } : {}), ...(anchorR ? { replyAnchor: anchorR } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}), ...(p.inThread ? { inThread: true, threadKey: p.threadKey || null } : {}), ...(p.prepared ? { prepared: p.prepared } : {}) });   // B-82c2 round wwb543hm7: the decided mentions ride the reconcile (its re-issue, its scan)
     } catch (err) {
       // verify r3: a RATE refusal inside the reconcile is thrown by the adapter now (never an `unknown` that invited the next
       // press into the vendor's stop) — the answer names the wait the vendor gave, so the owner's next look can say it

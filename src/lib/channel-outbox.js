@@ -333,12 +333,42 @@ function appendReplyTarget(card, p) {
   if (p.audience && p.audience.kind) card.appendChild(envRow('chan-prop-audience', t('Seen by'), audienceText(p.audience)));
   const pr = p.prepared;
   if (pr && typeof pr === 'object') {
-    card.appendChild(envRow('chan-prop-notifies', t('Notifies'), Array.isArray(pr.notifies) && pr.notifies.length ? pr.notifies.join(', ') : t('nobody (no @name here was resolved)')));
+    // B-82c2 round wfgpbe038 RULE C: the press found a decision this card had not shown (an edit, or a proposal decided only
+    // now) — stored, nothing sent; ONE line above the rows says so, and the next press sends what they show
+    if (p.decisionChanged && p.state === 'awaiting-approval') card.appendChild(envRow('chan-prop-changed', t('Changed'), t('Who this message notifies changed — nothing was sent; read the rows below, then approve again')));
+    card.appendChild(envRow('chan-prop-notifies', t('Notifies'), Array.isArray(pr.notifies) && pr.notifies.length ? [...new Set(pr.notifies)].join(', ') : t('nobody (no @name here was resolved)')));   // B-82c2: one name a mention — a person typed twice is said once
     // B-a0ae: a typed <@U…> that matched no member is shown as typed (never «@<@U…>»)
+    // B-82c2: EVERYONE IN THE CHAT is its own decided case, said as what it is (the channel sends it only where the group allows it)
+    if (pr.everyone === true) card.appendChild(envRow('chan-prop-everyone', t('Notifies everyone'), t('everyone in this chat — only where the group allows mentioning everyone')));
+    // B-82c2 round wn462wr7s: an OPEN word (the member list was needed for it and the read was not whole) is its OWN list to the
+    // card — «Not looked up», with the read's reason, before the press; it goes as plain words and notifies nobody
+    if (Array.isArray(pr.open) && pr.open.length) card.appendChild(envRow('chan-prop-open', t('Not looked up'), openWhyText(pr.open.map((n) => '@' + n).join(', '), pr.openWhy)));
+    // round wfgpbe038 RULE B: a name decided WITHOUT the whole member list (the read failed or was cut) is said on its own row —
+    // another member may bear it; the reason is the read's
+    if (Array.isArray(pr.unchecked) && pr.unchecked.length) card.appendChild(envRow('chan-prop-unchecked', t('Not checked'), t('{names} — taken from this chat; the whole member list was not read, so another member may bear this name: {why}', { names: pr.unchecked.join(', '), why: whyWords(pr.uncheckedWhy) })));
+    if (Number.isInteger(pr.unread) && pr.unread > 0) card.appendChild(envRow('chan-prop-unread', t('Not read'), t('{n} more @ words were not read (past the bounds of one message) — sent as plain words, nobody is notified', { n: String(pr.unread) })));
     if (Array.isArray(pr.plain) && pr.plain.length) card.appendChild(envRow('chan-prop-plain', t('Not a member here'), t('{names} — sent as plain words, nobody is notified', { names: pr.plain.map((n) => (String(n).startsWith('<@') ? n : '@' + n)).join(', ') })));
     // the cure (verdict 06:13Z): marks past the bound have their OWN label — a member past it is no «not a member here»
     if (Array.isArray(pr.over) && pr.over.length) card.appendChild(envRow('chan-prop-over', t('Past the mark limit'), t('{names} — past the 50 mentions a message carries: sent as plain words, nobody is notified', { names: pr.over.map((n) => (String(n).startsWith('<@') ? n : '@' + n)).join(', ') })));
   }
+}
+/** B-82c2 round wfgpbe038: the member read's reason as a phrase (the «Not checked» row's {why}). */
+function whyWords(why) {
+  if (why === 'chat-dissolved') return t('this chat was dissolved');
+  if (why === 'members-no-answer') return t('the channel did not answer when its members were looked up');
+  if (why === 'members-unreadable') return t('this account may not read the chat\'s members');
+  if (why === 'members-partial') return t('the chat has more members than one look-up reads');
+  if (why === 'members-signed-out') return t('this account\'s sign-in has expired');
+  return t('the chat\'s members were not looked up');
+}
+/** B-82c2 round wn462wr7s: why the open words were not looked up, in words (the read's own reason; none named = not looked up). */
+function openWhyText(names, why) {
+  if (why === 'chat-dissolved') return t('{names} — sent as plain words, nobody is notified: this chat was dissolved', { names });
+  if (why === 'members-no-answer') return t('{names} — sent as plain words, nobody is notified: the channel did not answer when its members were looked up', { names });
+  if (why === 'members-unreadable') return t('{names} — sent as plain words, nobody is notified: this account may not read the chat\'s members', { names });
+  if (why === 'members-partial') return t('{names} — sent as plain words, nobody is notified: the chat has more members than one look-up reads', { names });
+  if (why === 'members-signed-out') return t('{names} — sent as plain words, nobody is notified: this account\'s sign-in has expired', { names });
+  return t('{names} — sent as plain words, nobody is notified: the chat\'s members were not looked up', { names });
 }
 /** design 012 D20: the audience in words — a DM, a private conversation's members, the whole workspace, or a
  *  conversation shared with other organizations (named). */
@@ -648,6 +678,9 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
     // the refusal is a CODE (worded); the sentence beside it is the fallback
     card.appendChild(el('div', 'chan-prop-foot chan-prop-reason', t('Cannot be checked by the machine: {why}', { why: P.reconcileWhyText(p.reconcileWhyCode, { t }) || p.reconcileWhy })));
   }
+  // B-82c2: HOW MANY WERE NOTIFIED, from the channel's own answer — and said when it took fewer than were decided
+  const nf = p.state === 'sent' && p.receipt && p.receipt.notified;
+  if (nf && Number.isInteger(nf.decided) && Number.isInteger(nf.taken)) card.appendChild(el('div', 'chan-prop-foot chan-prop-notified', nf.taken < nf.decided ? t('Notified {taken} of the {decided} mentions decided — the channel took fewer; the rest went as plain words', { taken: nf.taken, decided: nf.decided }) : t('Notified: {n} mentioned', { n: nf.decided })));
   // THE FATE LINE (2026-09-27): does the drafting agent know yet? Its own
   // element, patched in place when only the fate moved (patchFate)
   const fateText = fateLineText(p);

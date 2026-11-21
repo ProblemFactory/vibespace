@@ -187,6 +187,11 @@ const CHANNELS_GATES = {
   newestStored: 'store.index',
   sharedSince: 'store.index.peek(',                     // lane slack-file-send-key r2: the sent transition's look-back — a KNOWN conversation's own stored shares (file ids only, never served)
   propose: 'convFor(',
+  // B-82c2: the people a conversation's own records hold (authors, mentioned members) for a proposal's @names — a helper whose
+  // two call sites sit after their gates (propose: convFor( · prepareEdit: the account's record); names only, handed to the
+  // adapter's prepare step, never a served record
+  knownPeopleOf: { callers: ['propose', 'prepareEdit'] },
+  prepareEdit: 'adapterRecords().adapters.find',
   proposeReaction: 'convFor(',
   proposeRecall: 'convFor(',                            // lane channels-proposals-recall: a recall's quote — a KNOWN conversation the caller sees, its own stored message
   recallMessage: 'convOr404(',                          // …and the approved recall: the conversation known first, then the message it takes back

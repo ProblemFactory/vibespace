@@ -8388,6 +8388,29 @@ export default {
   "Notifies": "会通知",
   "nobody (no @name here was resolved)": "无人（这里没有解析出任何 @名字）",
   "Not a member here": "不是这里的成员",
+  "Notifies everyone": "通知所有人",   // B-82c2
+  "everyone in this chat — only where the group allows mentioning everyone": "这个群里的所有人——仅在群允许 @所有人 时",   // B-82c2
+  "Not looked up": "未能查找",   // B-82c2
+  "{names} — sent as plain words, nobody is notified: the channel did not answer when its members were looked up": "{names} —— 作为普通文字发送，不会通知任何人：查找成员时渠道没有响应",   // B-82c2 round wwb543hm7
+  "{names} — sent as plain words, nobody is notified: the chat has more members than one look-up reads": "{names} —— 作为普通文字发送，不会通知任何人：群成员多于一次查找能读完的数量",   // B-82c2 round wn462wr7s
+  "{names} — sent as plain words, nobody is notified: this account's sign-in has expired": "{names} —— 作为普通文字发送，不会通知任何人：这个账号的登录已过期",   // B-82c2 round wn462wr7s
+  "{names} — sent as plain words, nobody is notified: the chat's members were not looked up": "{names} —— 作为普通文字发送，不会通知任何人：没有查找群成员",   // B-82c2 round wn462wr7s
+  "Changed": "已变更",   // B-82c2 round wfgpbe038
+  "Who this message notifies changed — nothing was sent; read the rows below, then approve again": "这条消息会通知的人变了 —— 没有发送；看一下下面几行，再批准一次",   // B-82c2 round wfgpbe038
+  "Not checked": "未核对",   // B-82c2 round wfgpbe038
+  "{names} — taken from this chat; the whole member list was not read, so another member may bear this name: {why}": "{names} —— 取自本群；没有读到完整的成员名单，可能还有别的成员同名：{why}",   // B-82c2 round wfgpbe038
+  "Not read": "未读取",   // B-82c2 round wfgpbe038
+  "{n} more @ words were not read (past the bounds of one message) — sent as plain words, nobody is notified": "还有 {n} 个 @ 词没有读取（超出一条消息的上限）—— 作为普通文字发送，不会通知任何人",   // B-82c2 round wfgpbe038
+  "this chat was dissolved": "这个群已解散",   // B-82c2 round wfgpbe038
+  "the channel did not answer when its members were looked up": "查找成员时渠道没有响应",   // B-82c2 round wfgpbe038
+  "this account may not read the chat's members": "这个账号无权读取群成员",   // B-82c2 round wfgpbe038
+  "the chat has more members than one look-up reads": "群成员多于一次查找能读完的数量",   // B-82c2 round wfgpbe038
+  "this account's sign-in has expired": "这个账号的登录已过期",   // B-82c2 round wfgpbe038
+  "the chat's members were not looked up": "没有查找群成员",   // B-82c2 round wfgpbe038
+  "{names} — sent as plain words, nobody is notified: this chat was dissolved": "{names} —— 作为普通文字发送，不会通知任何人：这个群已解散",   // B-82c2
+  "{names} — sent as plain words, nobody is notified: this account may not read the chat's members": "{names} —— 作为普通文字发送，不会通知任何人：这个账号无权读取群成员",   // B-82c2
+  "Notified {taken} of the {decided} mentions decided — the channel took fewer; the rest went as plain words": "已通知 {decided} 个提及中的 {taken} 个——渠道接受的比确定的少；其余作为普通文字发出",   // B-82c2
+  "Notified: {n} mentioned": "已通知：提及 {n} 人",   // B-82c2
   "Past the mark limit": "超出提及上限",
   "{names} — past the 50 mentions a message carries: sent as plain words, nobody is notified": "{names}——超出一条消息可带的 50 个提及：作为普通文字发出，不通知任何人",
   "{names} — sent as plain words, nobody is notified": "{names} —— 作为普通文字发送，不会通知任何人",

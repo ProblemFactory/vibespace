@@ -798,6 +798,8 @@ function printPiecesOnce(src) {
 // id / a conversation key ending in an opener was live before the next line's `>` — an id is a line piece through `agentId`.
 const JUDGES = ['judged', 'own', 'vibespace', 'user', 'lineage', 'log'];
 const JUDGED_DOORS = {   // door → [file, a pin on its belt call]
+  // B-82c2: a proposal's mention decision in the DRAFTER's view — every name a member bears (a peer's text) through the belt, a line piece, no vendor id
+  agentPrepared: ['src/server/channels-outbound.js', /const agentPrepared = \(pr\) => \{ const names = \(v\) => \(Array\.isArray\(v\) \? v : \[\]\)\.slice\(0, 50\)\.map\(\(n\) => agentText\(String\(n == null \? '' : n\), \{ kind: 'line', max: 100 \}\)\); return \{ notifies: names\(pr\.notifies\), plain: names\(pr\.plain\), open: names\(pr\.open\), over: names\(pr\.over\)/],
   // B-2198 the raw API: every string of a vendor's answer (body, header values, a proposal's result) through redaction + the belt
   apiAnswer: ['src/server/channel-api.js', /if \(typeof v === 'string'\) return toAgentText\(redactSecrets\(v\)\.text, \{ max: Math\.max\(1, v\.length\) \}\);/],
   agentId: ['src/server/channels-engine.js', /const agentId = \(v, max = 512\) => \(v == null \? v : agentText\(v, \{ kind: 'line', max \}\)\)/],
@@ -1040,6 +1042,15 @@ const PRINTS = {
     'p.replyEnvelope': `${V}:the reply's envelope record (its fields e.* — rows)`, 'e.all': `${V}:a flag`,
     'e.to': 'judged:agentEnvelope — the To the answered message\'s headers gave, a line piece (agentIdsOf)', 'e.cc': 'judged:agentEnvelope — its Cc, a line piece (agentIdsOf)',
     'e.added': `${O}:the plain addresses the agent itself added with --cc (validated, lower-cased)`,
+    // B-82c2: whom a proposal notifies, per name (printMentions) — a member's name is a PEER's text: agentPrepared put each through the belt
+    'p.prepared': `${V}:the proposal's mention decision (its fields pr.* — rows)`,
+    'pr.notifies': 'judged:agentPrepared — the names it notifies, each a line piece through the belt (agentIdsOf)', 'notifies': 'judged:agentPrepared — that list (pr.notifies)',
+    'pr.plain': 'judged:agentPrepared — the names sent as plain words, each a line piece through the belt', 'plain': 'judged:agentPrepared — that list (pr.plain)',
+    'pr.over': 'judged:agentPrepared — the names past the mark limit, each a line piece through the belt', 'over': 'judged:agentPrepared — that list (pr.over)',
+    'pr.open': 'judged:agentPrepared — the names not looked up (round wn462wr7s: their own list), each a line piece through the belt', 'open': 'judged:agentPrepared — that list (pr.open)',
+    'pr.openWhy': `${V}:the why KEY (our enum: members-unreadable / chat-dissolved / members-no-answer / members-partial / members-signed-out / not-read), worded by the CLI's own OPEN_WHY_WORDS`, 'OPEN_WHY_WORDS': `${V}:the CLI's own words for each why key`,
+    'pr.unchecked': 'judged:agentPrepared — the names decided without the whole member list (round wfgpbe038), each a line piece through the belt', 'unchecked': 'judged:agentPrepared — that list (pr.unchecked)',
+    'pr.uncheckedWhy': `${V}:the why KEY (the same enum), worded by the CLI's own OPEN_WHY_WORDS`, 'pr.unread': `${V}:a count (an integer the engine bounds)`,
     'pl.line': 'judged:agentPlaceLine — the parent\'s peerName author + a bounded first line, the line rule (channel-thread.js)', 'pl.tag': 'judged:agentPlaceLine — the thread tag (key + count) under the line rule',
     // lane channels-search-says-hidden / search-no-group-log: `--full` prints the plain search FIRST (r.*), then the account's
     // own search's answer (f.*); the words after the rows are RENDERED CLI-SIDE from the server's KEY (`x.saidKind`) + this CLI's

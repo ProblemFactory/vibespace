@@ -221,6 +221,7 @@ const caps = Object.freeze({
   reactions: Object.freeze({ read: 'list', add: true, remove: 'own', vocabulary: 'names', custom: 'none', perMessageMax: null }),
   policyModes: Object.freeze(['review']),
   prepareSend: true,
+  mentionId: '^[A-Z0-9][A-Z0-9_]{1,40}$',   // B-82c2: Slack's own id shape for a prepared mention (U…/W…; the registry held it for every adapter)
   retention: 'purge-on-remove',
   // design 010's third reading row (lane slack-search, owner 2026-10-12: 「话说slack不支持搜索吗？」): THE OWNER'S FULL
   // SEARCH — `search.messages` with the person's words as Slack's own `query`, on a person's press only, under the HELD

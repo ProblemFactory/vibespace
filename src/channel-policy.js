@@ -1124,7 +1124,18 @@ function shownFields(p) {
     ...(q.filesBlocked && typeof q.filesBlocked === 'object' ? [['files-blocked', s(q.filesBlocked.why)]] : []),
     // lane channels-proposals-recall: WHICH message a recall takes back (appended only for a recall)
     ...(q.kind === 'recall' && q.recall && typeof q.recall === 'object' ? [['recall', s(q.recall.msg)]] : []),
+    // B-82c2 round wfgpbe038 RULE C: WHO IT NOTIFIES is shown on the card — a press from a card drawn before the decision
+    // changed is `changed-since-shown` (appended only when there is a decision: every other proposal keeps its digest)
+    ...(q.prepared && typeof q.prepared === 'object' ? [['mentions', decisionSummary(q.prepared)]] : []),
   ];
+}
+/** B-82c2 round wfgpbe038 RULE C — WHAT A MENTION DECISION SHOWS, as one comparable string: who is notified (the ids), everyone,
+ *  the open words, the words that are no member, the names decided without the whole member list, the overflow, the words past
+ *  the bounds. Two decisions with the same summary show the same card rows; an edit whose summary differs is not sent blind. */
+function decisionSummary(pr) {
+  const q = pr && typeof pr === 'object' ? pr : {};
+  const set = (v) => [...new Set((Array.isArray(v) ? v : []).map((x) => String(x)))].sort();
+  return JSON.stringify([set((Array.isArray(q.mentions) ? q.mentions : []).map((m) => m && m.id)), q.everyone === true, set(q.open), set(q.plain), set(q.unchecked), set(q.over), Number.isInteger(q.unread) ? q.unread : 0]);
 }
 /** FNV-1a 32 over the UTF-16 units, seeded (the plugin-manifest precedent). */
 function fnv32(str, seed) {
@@ -1627,11 +1638,22 @@ function receiptFor(p) {
     ...replyPlaceOf(p),
     // design 005 §2.B: the files it carried — name, size, sha256 (what the person approved)
     ...(storedAttachments(p).length ? { attachments: storedAttachments(p).map((a) => ({ name: a.name, bytes: Number(a.bytes) || 0, sha256: a.sha256 })) } : {}),
+    // B-82c2: HOW MANY WERE NOTIFIED — the mentions decided at the proposal (or the edit) and the ones the channel's own answer
+    // took (`result.mentionsTaken`); said only when the channel reported it
+    ...(notifiedOf(p) ? { notified: notifiedOf(p) } : {}),
     // lane channel-send-files: per part, what landed and what did not (a send in parts; a refusal's parts too)
     ...(sendParts((p.result && p.result.parts) || (p.failure && p.failure.detail && p.failure.detail.parts)) ? { parts: sendParts((p.result && p.result.parts) || p.failure.detail.parts) } : {}),
   };
 }
 
+/** B-82c2: a sent proposal's mentions — `{decided, taken}` (the distinct people and everyone decided, the count the channel's
+ *  answer took); null when nothing was decided or the channel's answer did not say. */
+function notifiedOf(p) {
+  if (!p || p.state !== 'sent' || !p.prepared || !Array.isArray(p.prepared.mentions) || !p.prepared.mentions.length) return null;
+  const taken = p.result && Number.isInteger(p.result.mentionsTaken) ? p.result.mentionsTaken : null;
+  if (taken === null) return null;
+  return { decided: new Set(p.prepared.mentions.map((m) => m && m.id).filter(Boolean)).size, taken };
+}
 /** A reply's place on its receipt: `{placement}` for a quote / thread / thread+chat (+ `inThread` and the thread's key
  *  for the thread ones); nothing for a plain message, a composed one or a reaction. */
 function replyPlaceOf(p) {
@@ -1700,6 +1722,8 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
     else lines.push(`the recipient sees: ${r.identityMarkingText || (r.identityMarking === 'unknown' ? 'NOT VERIFIED — this channel\'s attribution has not been measured' : 'marked as sent by an application')}`);
   }
   if (r.honestyLine) lines.push('a sender honesty line naming you as the drafting agent was appended (the channel\'s option is on)');
+  // B-82c2: how many mentions the channel's own answer took, and FEWER than were decided said
+  if (r.notified && Number.isInteger(r.notified.decided) && Number.isInteger(r.notified.taken)) lines.push(r.notified.taken < r.notified.decided ? `notified: ${r.notified.taken} of the ${r.notified.decided} mentions decided — the channel took FEWER than were decided (the rest went as plain words)` : `notified: the ${r.notified.decided} mention${r.notified.decided === 1 ? '' : 's'} decided (the channel took ${r.notified.taken})`);
   if (r.reconciled) lines.push('this outcome was established by a reconcile check after the send\'s result was lost');
   if (r.reason) lines.push(`reason: ${inertFrames(String(r.reason)).slice(0, 400)}`);
   // 2026-09-27: WHAT THE USER CHANGED, not only the final text — a line diff
@@ -1742,7 +1766,7 @@ module.exports = {
   REJECTED_DEFAULT_REASON, outcomeOf, outcomeText, reconcileWhyText,
   // r6 verify (2026-09-28): what you approve is what runs — the reply's anchor (F1), its recipients (F3),
   // the digest of the card (F6), the arming delay (F6), the characters that hide what a line says (O1)
-  replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, ARM_MS, armVerdict, rearmVerdict,
+  replyAnchorVerdict, anchorView, envelopeVerdict, ENVELOPE_HEADER_MAX, envelopeAddresses, withAddedCc, addressesOf, shownFields, shownDigest, decisionSummary, ARM_MS, armVerdict, rearmVerdict,
   hiddenCharsOf, revealSegments,
   // design 005 §2.B (B-fd1f): an agent's attachments — bounds, the name rule, the sniffed type, the adapter's row
   ATTACH_MAX_COUNT, ATTACH_MAX_TOTAL, ATTACH_NAME_MAX, ATTACH_CODES, INLINE_RASTER, fileAloneOf, attachmentUrlFor, base64Bytes, safeAttachmentName, attachmentsOf, sniffType, nameTypeMismatch, attachmentKind, attachmentFormat, composeFilesVerdict, sendParts, reconciledParts, partsWords, attachVerdict, storedAttachments, attachmentSize, ATTACH_HELD_MAX, attachHeldVerdict,
