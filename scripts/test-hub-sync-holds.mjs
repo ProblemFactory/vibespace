@@ -219,7 +219,14 @@ console.log('§13 rank 13 — a plugin snapshot runs no synchronous child; its s
     const ppid = (() => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); return Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1]); } catch { return null; } })();
     const starterPid = require(path.join(REPO, 'src/server/child-starter.js')).childStarter().stats().pid;
     const ms = Date.now() - t0;
-    ok(`§13 (c) an aborted ask stops waiting at once (${ms} ms) and records nothing (the name stays unknown); its \`which\` — one that IGNORES SIGTERM — is the STARTER's child (B-323e), ended at the starter's own bound, never a child of the hub`, got === null && !WK.whichKnown('vs-no-such-cmd-c') && ms < WK.TIMEOUT_MS && !!starterPid && ppid === starterPid && ppid !== process.pid, { pid, ppid, starterPid, got, known: WK.whichKnown('vs-no-such-cmd-c'), ms });
+    // r1381 (6): AND A DEAF CHILD DIES AT THE STARTER'S BOUND, proven again here — the real starter, a child that ignores SIGTERM, a
+    // short bound of its own (the lookup's is TIMEOUT_MS: the same law, the same SIGKILL)
+    const DEAF = path.join(DIR, 'deaf'), DPID = PIDF + '.deaf';
+    fs.writeFileSync(DEAF, `#!${process.execPath}\nrequire('fs').writeFileSync(${JSON.stringify(DPID)}, String(process.pid)); process.on('SIGTERM', () => { }); setTimeout(() => { }, 20000);\n`, { mode: 0o755 });
+    const dr = await require(path.join(REPO, 'src/server/child-starter.js')).childStarter().run(DEAF, [], { timeoutMs: 400 });
+    const dpid = (() => { try { return Number(fs.readFileSync(DPID, 'utf8')); } catch { return 0; } })();
+    const gone = !!dr && dr.timedOut === true && dpid > 0 && await until(() => !fs.existsSync(`/proc/${dpid}`), 2000);
+    ok(`§13 (c) an aborted ask stops waiting at once (${ms} ms) and records nothing (the name stays unknown); its \`which\` — one that IGNORES SIGTERM — is the STARTER's child (B-323e), never a child of the hub — and a DEAF child the starter holds is gone at its bound (400 ms, SIGKILL)`, got === null && !WK.whichKnown('vs-no-such-cmd-c') && ms < WK.TIMEOUT_MS && !!starterPid && ppid === starterPid && ppid !== process.pid && gone, { pid, ppid, starterPid, got, gone, known: WK.whichKnown('vs-no-such-cmd-c'), ms });
   }
   { // (d) a `which` that cannot be SPAWNED: no unhandled rejection, the name not poisoned — the next ask answers
     let unhandled = 0; const onU = () => { unhandled++; }; process.on('unhandledRejection', onU);

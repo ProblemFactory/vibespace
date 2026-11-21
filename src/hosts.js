@@ -2284,7 +2284,7 @@ class HostManager {
       // B-323e (lane bl-keys-misc, 主开发 r1351): the tar is ASYNC — it was a SYNCHRONOUS start (up to 15 s held) redone on every connect
       // while an install keeps failing (connects come from polls); its bytes cannot cross the starter's line pipe: a direct start, a
       // TIMER debt row of the start census (scripts/start-triggers.mjs)
-      const tar = await new Promise((resolve, reject) => execFile('tar', ['-c', '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])], { timeout: 15000, maxBuffer: 32 * 1024 * 1024, encoding: 'buffer' }, (e, out) => (e ? reject(e) : resolve(out))));
+      const tar = await new Promise((resolve, reject) => execFile('tar', ['-c', '-C', stage, 'agentd.js', 'token', ...(rel.signed ? ['agentd.manifest.json'] : [])], { env: serviceEnv(process.env), timeout: 15000, maxBuffer: 32 * 1024 * 1024, encoding: 'buffer' }, (e, out) => (e ? reject(e) : resolve(out))));   // r1381 (1): the service env, never the hub's whole one
       const remote = installAgentdScript(ver, rel.signed);
       return new Promise((resolve, reject) => {
         const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--', remote],

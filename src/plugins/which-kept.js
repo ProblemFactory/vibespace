@@ -17,7 +17,8 @@ const GRACE_MS = 1000;
 const kept = new Map(); // name → { path, at, pending }
 const seam = { get: () => runWhich, set: (fn) => { runWhich = fn; } }; // a suite's stand-in for the run (round 3: a run that throws)
 /** round 3: a child still alive `after` ms on — past its timeout, or after its ask was aborted — ignores SIGTERM: SIGKILL it.
- *  Only OUR child, by its own handle. */
+ *  Only OUR child, by its own handle. (B-323e: this file's own lookup no longer holds a child — the starter does; kept for the
+ *  plugins' children that are still the hub's own.) */
 function graceKill(c, after) {
   const t = setTimeout(() => { if (c && c.exitCode === null && c.signalCode === null) { try { c.kill('SIGKILL'); } catch { } } }, after);
   if (t.unref) t.unref();
@@ -53,14 +54,19 @@ function whichKept(name, { maxAgeMs = MAX_AGE_MS } = {}) {
   if (!k || Date.now() - k.at > maxAgeMs) refresh(name);
   return k ? k.path : null;
 }
-/** a fresh answer (async, bounded by the child's timeout; `signal` — the asker's abort — kills its child). NAMED: the lookup is
- *  SHARED by name, so an ask that joins a `which` the kept read (whichKept) started first does not hand that child its signal —
- *  aborted, the ask stops waiting on it, but the child runs on to its own 5 s timeout (+ the 1 s grace): one orphan for up to
- *  6 s, nothing started beside it. */
+/** a fresh answer (async, bounded by the child's timeout; `signal` — the asker's abort — stops the WAITING). The lookup is SHARED
+ *  by name and its `which` is the hub's STARTER's child (B-323e): an aborted ask stops waiting at once and records nothing; the
+ *  child runs to the starter's bound (TIMEOUT_MS, SIGKILL there), nothing started beside it. */
 function whichNow(name, { signal } = {}) { return refresh(name, signal); }
-/** B-323e: the kept answer when it is fresh (a found or a missing one, ≤ maxAgeMs), else a fresh one — the display's lookup */
-function whichFresh(name, { maxAgeMs = MAX_AGE_MS } = {}) { const k = kept.get(name); return k && k.at && Date.now() - k.at <= maxAgeMs ? Promise.resolve(k.path) : refresh(name); }
+/** B-323e (r1381): the kept answer when fresh, else a fresh one, SAID WITH whether it is known: {path, known} — known false = the
+ *  lookup got no reply (the starter's no answer, its bound): never «not found». maxAgeMs 0 = a person's press: always looks again. */
+function whichFreshAnswer(name, { maxAgeMs = MAX_AGE_MS } = {}) {
+  const k = kept.get(name);
+  if (k && k.at && Date.now() - k.at <= maxAgeMs) return Promise.resolve({ path: k.path, known: true });
+  const at0 = k ? k.at : 0;
+  return refresh(name).then(() => { const k2 = kept.get(name); return { path: k2 && k2.at !== at0 ? k2.path : null, known: !!(k2 && k2.at && k2.at !== at0) }; });
+}
 /** has a lookup of this name FINISHED once? Before it, a caller says «checking» — never «not found» (rank 13 round 2) */
 function whichKnown(name) { const k = kept.get(name); return !!(k && k.at); }
 
-module.exports = { whichKept, whichNow, whichFresh, whichKnown, graceKill, TIMEOUT_MS, MAX_AGE_MS, GRACE_MS, _seam: seam };
+module.exports = { whichKept, whichNow, whichFreshAnswer, whichKnown, graceKill, TIMEOUT_MS, MAX_AGE_MS, GRACE_MS, _seam: seam };

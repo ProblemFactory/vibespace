@@ -3431,6 +3431,7 @@ export default {
   "Cron": "スケジュール",
   "none": "なし",
   "Outside the registry (read-only)": "レジストリ外（読み取り専用）",
+  "Outside the registry: not read just now — ⟳ reads it again": "レジストリ外：今回は読めませんでした — ⟳ でもう一度読みます",
   "next": "次回",
   "Open panel": "パネルを開く",
   "Remove job": "ジョブを削除",

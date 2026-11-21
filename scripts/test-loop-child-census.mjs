@@ -61,13 +61,11 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
     ['src/server/cli-cmd.js', 'resolveCmd', 'child:execFileSync', 1, DEBT, 'boot — module constants (dtach, xset, xauth) + per refreshXEnv: /usr/bin/which, 2 s'],
     ['src/codex-fork-ledger-purge.js', 'purgeCodexForkReplays', 'walk', 1, DEBT, 'boot, once — a migration (the run-at-most-once ledger)'],
     ['src/server/migrations.js', 'create > removeDesignKit > walk', 'walk', 1, DEBT, 'boot, once — a migration (the run-at-most-once ledger)'],
-    ['src/vnc.js', 'which', 'child:execFileSync', 1, DEBT, 'per act — a display start looks up the X server and dbus-launch on PATH, 2 s each'],
     ['src/routes/files.js', 'route:GET /api/fonts', 'child:execFileSync', 1, DEBT, 'per act — the fonts list (fc-list), 3 s'],
     ['src/routes/files.js', 'route:POST /api/format > tryFormat', 'child:execFileSync', 1, DEBT, 'per act — format a file (prettier / ruff …)'],
     ['src/server/ops-routes.js', 'create > route:GET /api/version', 'child:execFileSync', 1, DEBT, 'per process, ONCE — the first GET /api/version (the commit is memoised): git rev-parse, 3 s'],
     ['src/transcript-service.js', 'createTranscriptService > rescue', 'child:execFileSync', 1, DEBT, 'per act — a transcript rescue (fuser), 3 s'],
     ['src/hosts.js', 'HostManager.installAgentTools', 'child:execFileSync', 1, DEBT, 'per act — a machine\'s tool install (tar, 15 s)'],
-    ['src/hosts.js', 'HostManager.installAgentd', 'child:execFileSync', 1, DEBT, 'per act — a device agent install / upgrade (tar, 15 s)'],
     // round 2 — the four walks the census SEES now (the iterative shape)
     ['src/agentd/agentd.js', 'du', 'walk', 1, OFF, 'the device agent — its OWN process (agentd), never the hub\'s loop'],
     ['src/adapters/codex.js', '_walkJsonlFiles', 'walk', 1, DEBT, 'per find — a codex session\'s rollout lookup (findCodexSessionJsonlPath: an open, a resume, a transcript read) walks the WHOLE sessions tree; since B-a60e once per thread while its LOCAL rollout stays where it was found (the path kept, asked again by an existsSync; a .jsonl.zst walked again after a minute) — a thread with no local rollout yet, or one found in the remote cache, is walked at each find'],
@@ -80,7 +78,7 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   // THE RATCHET: the debt rows only SHRINK — a conversion deletes its row and lowers this number in the same commit. Round 2: 22 → 28
   // — NOT six new holds: the census now SEES three walks it missed (the iterative shape: codex, the builds picker, usage) and its
   // rows tell the truth on every road (safe-fs's inline road ×2, startToken's unbounded ps on Linux for an exited pid)
-  const DEBT_MAX = 23;   // r1066 (lane bl-proposals, B-323e's family): the paste route's clipboard poll (xclip TARGETS, every 200 ms for up to 5 s) and macOS's osascript write run through the hub's starter — src/routes/files.js's paste starts no synchronous child (24 → 23; the macOS row was a fallback). B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
+  const DEBT_MAX = 21;   // B-323e (lane bl-keys-misc, r1351): vnc's `which` (asynchronous through the starter now) and installAgentd's tar (asynchronous) paid — 23 → 21; r1066 (lane bl-proposals, B-323e's family): the paste route's clipboard poll (xclip TARGETS, every 200 ms for up to 5 s) and macOS's osascript write run through the hub's starter — src/routes/files.js's paste starts no synchronous child (24 → 23; the macOS row was a fallback). B-f64b: cli-identity procArgv's and proc-identity startToken's ps per exited pid are no-/proc fallbacks now (28 → 26); B-323e: rcloneAvailable's and _rcloneHasFlag's execFileSync gone — src/mounts.js starts no synchronous child (26 → 24)
   const key = (f, sc, k) => `${f}|${sc}|${k}`;
   const judge = (r) => {
     const by = new Map(); for (const st of r.sites) by.set(key(st.file, st.scope, st.kind), (by.get(key(st.file, st.scope, st.kind)) || 0) + 1);
@@ -99,8 +97,10 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   const debt = ROWS.filter((x) => x[4] === DEBT).length;
   ok(`THE RATCHET: ${debt} debt rows — exactly DEBT_MAX (${DEBT_MAX}); a conversion deletes its row and lowers it, a new hold raises it (which a reviewer refuses)`, debt === DEBT_MAX, { debt, DEBT_MAX });
   // CONTROLS — the same census over planted text (a scratch copy of one file's source; nothing written)
-  const vnc = fs.readFileSync(path.join(REPO, 'src/vnc.js'), 'utf8');
-  const c1 = judge(C.census(REPO, { patch: { 'src/vnc.js': vnc.replace(/function which\(cmd\) \{/, "function which(cmd) { require('child_process').execFileSync('true');") } }));
+  // B-323e (lane bl-keys-misc, 主开发 r1351): vnc's `which` and the agent bundle's tar are no sync children any more (their rows
+  // paid) — the control's rowed scope is the transcript rescue's (the same kind of row)
+  const ts1 = fs.readFileSync(path.join(REPO, 'src/transcript-service.js'), 'utf8');
+  const c1 = judge(C.census(REPO, { patch: { 'src/transcript-service.js': ts1.replace("require('child_process').execFileSync('fuser', [fp]", "require('child_process').execFileSync('true'); require('child_process').execFileSync('fuser', [fp]") } }));
   const c2 = judge(C.census(REPO, { patch: { 'src/new-walker.js': "const fs = require('fs');\nfunction scan(d) { for (const e of fs.readdirSync(d, { withFileTypes: true })) if (e.isDirectory()) scan(d + '/' + e.name); }\nmodule.exports = { scan };\n" } }));
   const c3 = judge(C.census(REPO, { patch: { 'src/new-alias.js': "const { execSync: run } = require('child_process');\nfunction go() { return run('true'); }\nmodule.exports = { go };\n" } }));
   const c4 = judge(C.census(REPO, { patch: { 'src/new-computed.js': "const cp = require('child_process');\nfunction go() { return cp['exec' + 'Sync']('true'); }\nmodule.exports = { go };\n" } }));
@@ -109,11 +109,11 @@ console.log('the loop-child census — every synchronous child / tree walk in sr
   const c7 = judge(C.census(REPO, { patch: { 'src/new-renamed.js': "const fsx = require('fs');\nfunction walkx(d) { for (const n of fsx.readdirSync(d)) walkx(d + '/' + n); }\nmodule.exports = { walkx };\n" } }));
   const c8 = judge(C.census(REPO, { patch: { 'src/new-rd.js': "const { readdirSync: rd } = require('fs');\nfunction walkr(d) { for (const n of rd(d)) walkr(d + '/' + n); }\nmodule.exports = { walkr };\n" } }));
   const c9 = judge(C.census(REPO, { patch: { 'src/new-bound.js': "const { execSync: ex2 } = require('child_process');\nconst cp2 = require('child_process');\nfunction b1() { return ex2.call(null, 'true'); }\nfunction b2() { return cp2.execFileSync.apply(cp2, ['true']); }\nmodule.exports = { b1, b2 };\n" } }));
-  const offRows = ROWS.map((x) => (x[0] === 'src/vnc.js' && x[1] === 'which' ? [...x.slice(0, 4), OFF, 'a WORKER thread (a 20-character why)'] : x));
+  const offRows = ROWS.map((x) => (x[0] === 'src/transcript-service.js' && x[1] === 'createTranscriptService > rescue' ? [...x.slice(0, 4), OFF, 'a WORKER thread (a 20-character why)'] : x));
   const c10 = offRows.filter((x) => x[4] === OFF && !OFF_HOMES.test(x[0])).map((x) => x[0]);
-  ok('CONTROLS (round 2, the shapes followed now): an ITERATIVE stack walk RED; a walk through fs under another name RED; through a destructured readdirSync RED; execSync.call / cp.execFileSync.apply RED (two sites); a hub file\'s DEBT row moved to OFF-LOOP with a short why RED', c6.unrowed.some((u) => /new-iter\.js\|tree\|walk/.test(u)) && c7.unrowed.some((u) => /new-renamed\.js\|walkx\|walk/.test(u)) && c8.unrowed.some((u) => /new-rd\.js\|walkr\|walk/.test(u)) && c9.unrowed.some((u) => /new-bound\.js\|b1\|child:execSync/.test(u)) && c9.unrowed.some((u) => /new-bound\.js\|b2\|child:execFileSync/.test(u)) && c10.includes('src/vnc.js'), { c6: c6.unrowed, c7: c7.unrowed, c8: c8.unrowed, c9: c9.unrowed, c10 });
+  ok('CONTROLS (round 2, the shapes followed now): an ITERATIVE stack walk RED; a walk through fs under another name RED; through a destructured readdirSync RED; execSync.call / cp.execFileSync.apply RED (two sites); a hub file\'s DEBT row moved to OFF-LOOP with a short why RED', c6.unrowed.some((u) => /new-iter\.js\|tree\|walk/.test(u)) && c7.unrowed.some((u) => /new-renamed\.js\|walkx\|walk/.test(u)) && c8.unrowed.some((u) => /new-rd\.js\|walkr\|walk/.test(u)) && c9.unrowed.some((u) => /new-bound\.js\|b1\|child:execSync/.test(u)) && c9.unrowed.some((u) => /new-bound\.js\|b2\|child:execFileSync/.test(u)) && c10.includes('src/transcript-service.js'), { c6: c6.unrowed, c7: c7.unrowed, c8: c8.unrowed, c9: c9.unrowed, c10 });
   ok('CONTROLS: one more sync child in a rowed scope moves its count (RED); a new recursive readdirSync walk (RED); a sync child through a destructured alias (RED); a computed call of child_process the scanner cannot follow (RED, unclassified); readdirSync(…, {recursive: true}) (RED)',
-    c1.moved.some((m) => /src\/vnc\.js\|which\|child:execFileSync 1 → 2/.test(m)) && c2.unrowed.some((u) => /src\/new-walker\.js\|scan\|walk/.test(u)) && c3.unrowed.some((u) => /src\/new-alias\.js\|go\|child:execSync/.test(u)) && c4.unclassified.length >= 1 && c5.unrowed.some((u) => /src\/new-recursive\.js/.test(u)), { c1: c1.moved, c2: c2.unrowed, c3: c3.unrowed, c4: c4.unclassified, c5: c5.unrowed });
+    c1.moved.some((m) => /src\/transcript-service\.js\|createTranscriptService > rescue\|child:execFileSync 1 → 2/.test(m)) && c2.unrowed.some((u) => /src\/new-walker\.js\|scan\|walk/.test(u)) && c3.unrowed.some((u) => /src\/new-alias\.js\|go\|child:execSync/.test(u)) && c4.unclassified.length >= 1 && c5.unrowed.some((u) => /src\/new-recursive\.js/.test(u)), { c1: c1.moved, c2: c2.unrowed, c3: c3.unrowed, c4: c4.unclassified, c5: c5.unrowed });
 }
 
 

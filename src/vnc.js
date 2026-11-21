@@ -58,7 +58,8 @@ const VNC_GEOMETRY = process.env.VIBESPACE_VNC_GEOMETRY || '1920x1080';
 // B-323e (lane bl-keys-misc, 主开发 r1351 (6)): where a program lives — the kept lookup (src/plugins/which-kept.js: a found OR a
 // missing answer kept 60 s), asked of the hub's starter; never a SYNCHRONOUS child (status() runs on the belt's 60 s facts
 // refresh: a box with no Xvnc paid two synchronous forks of the hub a minute)
-const which = (cmd) => require('./plugins/which-kept.js').whichFresh(cmd);
+const lookup = (cmd, o) => require('./plugins/which-kept.js').whichFreshAnswer(cmd, o);   // {path, known} — known false: no reply
+const which = async (cmd) => (await lookup(cmd)).path;
 
 function portListening(port, timeoutMs = 700) {
   return new Promise((resolve) => {
@@ -111,16 +112,21 @@ class VncManager {
     return { running: this._running, display: this.display, port: this.port, authFile: null, refresh: () => this.status() };
   }
 
-  async _findXvnc() {
-    if (this._xvncBin) return this._xvncBin;
-    this._xvncBin = (await which('Xtigervnc')) || (await which('Xvnc'));
-    return this._xvncBin;
+  /** → {path, known}: known false = the lookup got no reply (r1381: never said as «not installed»); `fresh` = a person's Start
+   *  (it looks again past a kept «not found»: an Xvnc installed a moment ago is found) */
+  async _findXvnc({ fresh = false } = {}) {
+    if (this._xvncBin) return { path: this._xvncBin, known: true };
+    const o = fresh ? { maxAgeMs: 0 } : undefined;
+    const a = await lookup('Xtigervnc', o); if (a.path) { this._xvncBin = a.path; return a; }
+    const b = await lookup('Xvnc', o); if (b.path) { this._xvncBin = b.path; return b; }
+    return { path: null, known: !!(a.known && b.known) };
   }
 
   async status() {
     const running = await portListening(this.port);
     this._running = running;
-    return { available: running || !!(await this._findXvnc()), running, port: this.port };
+    const x = running ? null : await this._findXvnc();
+    return { available: running || !!(x && x.path), running, port: this.port, ...(x && !x.known ? { lookup: 'no-reply' } : {}) };
   }
 
   /** Start (or adopt) the desktop stack. Resolves to status(). */
@@ -132,8 +138,9 @@ class VncManager {
 
   async _ensureRunning() {
     if (await portListening(this.port)) return this.status(); // adopt — on the RECORDED display (constructor), B-956d
-    const xvnc = await this._findXvnc();
-    if (!xvnc) throw new Error('no VNC server installed (Xtigervnc/Xvnc not on PATH)');
+    const found = await this._findXvnc({ fresh: true });
+    if (!found.path) throw new Error(found.known ? 'no VNC server installed (Xtigervnc/Xvnc not on PATH)' : 'could not check whether a VNC server is installed — the lookup got no answer in time; try again');
+    const xvnc = found.path;
     // the flags' reasons (-localhost, SecurityTypes None, -UseBlacklist 0) live on _spawnX
     // B-956d: the preferred display first; held ⇒ the X server picks a free one itself (-displayfd)
     let r = await this._spawnX(xvnc, this._preferred);

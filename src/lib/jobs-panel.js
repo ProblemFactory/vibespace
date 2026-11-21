@@ -630,7 +630,7 @@ export function openJobsWindow(app, opts = {}) {
   // the LATEST render paints (lane-redact verify r5): a list fetched before a clear must not land after the one fetched
   // after it — every jobs-updated, the 30 s tick and ⟳ start a render, and their answers can arrive out of order
   let renderSeq = 0;
-  async function render() {
+  async function render(fresh) {   // fresh === true: a person's Refresh (B-323e r1381 (3))
     const seq = ++renderSeq;
     const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);
     if (seq !== renderSeq) return;
@@ -645,15 +645,16 @@ export function openJobsWindow(app, opts = {}) {
     const seenAll = seenAllButton(ackableIds(jobs), render);
     if (seenAll) seenSlot.appendChild(seenAll);
     renderList(app, root, jobs, { compact: false, refresh: render, archivedCount: r?.archivedCount || 0 });
-    const esc = await fetchJson('/api/jobs-escapes');
+    const esc = await fetchJson('/api/jobs-escapes' + (fresh === true ? '?fresh=1' : ''));
     if (seq !== renderSeq) return;
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
       root.appendChild(h);
       for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) root.appendChild(escLine(line));
     }
+    if (esc && esc.unread && esc.unread.length) { const u = document.createElement('div'); u.className = 'jobs-empty jobs-esc-unread'; u.textContent = t('Outside the registry: not read just now — ⟳ reads it again'); root.appendChild(u); }   // B-323e (r1381 (3)): a read that got no answer says so
   }
-  btnRefresh.onclick = render;
+  btnRefresh.onclick = () => render(true);
   const off = app.ws.onGlobal((msg) => { if (msg.type === 'jobs-updated') render(); });
   const tick = setInterval(() => { if (!document.hidden) render(); }, 30000);
   winInfo._listenerCtl?.signal.addEventListener('abort', () => { try { off?.(); } catch { } clearInterval(tick); });
@@ -675,7 +676,7 @@ openJobsWindow.renderRail = (app, c) => {
   c.append(bar, root);
   const focusId = app.sidebar?._jobsFocusId || null;
   if (app.sidebar) app.sidebar._jobsFocusId = null;
-  async function render() {
+  async function render(fresh) {   // fresh === true: a person's Refresh (B-323e r1381 (3))
     const [r] = await Promise.all([fetchJson('/api/jobs'), loadFolds(app)]);
     if (!c.isConnected) return;
     root.textContent = '';
@@ -687,17 +688,18 @@ openJobsWindow.renderRail = (app, c) => {
     summary.classList.toggle('jobs-summary-held', !!(r?.held && r.held.total));
     if (!jobs.length && !(r?.archivedCount > 0)) { const e = document.createElement('div'); e.className = 'jobs-empty'; e.textContent = t('No background jobs yet — agents register them with vibespace-job'); root.appendChild(e); return; }
     renderList(app, root, jobs, { compact: true, refresh: render, archivedCount: r?.archivedCount || 0 });
-    const esc = await fetchJson('/api/jobs-escapes');
+    const esc = await fetchJson('/api/jobs-escapes' + (fresh === true ? '?fresh=1' : ''));
     if (!c.isConnected) return;
     if (esc && (esc.systemd?.length || esc.crontab?.length)) {
       const h = document.createElement('div'); h.className = 'jobs-sec-head jobs-sec-esc'; h.textContent = t('Outside the registry (read-only)');
       root.appendChild(h);
       for (const line of [...(esc.systemd || []), ...(esc.crontab || [])]) root.appendChild(escLine(line));
     }
+    if (esc && esc.unread && esc.unread.length) { const u = document.createElement('div'); u.className = 'jobs-empty jobs-esc-unread'; u.textContent = t('Outside the registry: not read just now — ⟳ reads it again'); root.appendChild(u); }   // B-323e (r1381 (3)): a read that got no answer says so
     if (focusId) { const el = root.querySelector(`[data-job="${CSS.escape(focusId)}"]`); el?.scrollIntoView({ block: 'center' }); el?.classList.add('jobs-focus'); }
   }
   btnNew.onclick = () => openCreateDialog(app, render);
-  btnRefresh.onclick = render;
+  btnRefresh.onclick = () => render(true);
   render();
 };
 

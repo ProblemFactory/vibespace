@@ -24,7 +24,7 @@ const OWN_CHROME_RETELL_MS = 30 * 60 * 1000;
 const PSS_READS = 300;            // PSS for the largest processes by RSS; the rest count their RSS (said: "(RSS)")
 const TMP_ROOT_RE = /^(vs-|cdp-prof-|agent-browser-chrome-)/;
 const TMPFS_MAGIC = 0x01021994;
-const PS_MAX_BUFFER = 64 * 1024 * 1024;
+const PS_MAX_BUFFER = 8 * 1024 * 1024;   // r1381 (8): the starter's answer is ONE line the loop parses — 8 MB is ~10× the owner's 2 400-process table
 
 function psTable() {
   return new Promise((resolve) => {
@@ -49,7 +49,7 @@ async function withPss(rows, n = PSS_READS) {
 function du(paths, timeout = 20000) {
   if (!paths.length) return Promise.resolve([]);
   return new Promise((resolve) => {
-    via('du', ['-s', '-B1', '--', ...paths], { timeout, maxBuffer: 8 * 1024 * 1024 }).then(({ stdout: out }) => {
+    via('du', ['-s', '-B1', '--', ...paths], { timeout, maxBuffer: 1024 * 1024 }).then(({ stdout: out }) => {
       resolve(String(out || '').split('\n').map((l) => /^(\d+)\s+(.+)$/.exec(l)).filter(Boolean).map((m) => ({ path: m[2], bytes: +m[1] })));
     });
   });

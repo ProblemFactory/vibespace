@@ -7832,7 +7832,11 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // B-323e (lane bl-keys-misc, 主开发 r1351 (6)): the ask rides the hub's starter — the keeper's 5 s tick re-asks a binary that says
     // no version every CLI_FRESH_MS, never a fork of the hub; the child gets the service env + the PATH its site gave (the probe
     // needs no more). The starter's answer read as the probe table reads execFile's: missing ⇒ null, no answer / timed out ⇒ ''
-    const r = await Promise.resolve().then(() => require('./child-starter').childStarter().run(p, ['--version'], { timeoutMs: 8000, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: (env() || {}).PATH || process.env.PATH || '' } })).catch(() => null);
+    // r1381 gate: the site hands the NAMES its env had (the keeper's, sanitized — as the old road gave the child), never more; the
+    // starter refuses a secret-shaped one by itself
+    const probeEnv = F.sanitizeProbeEnv({ ...(env() || {}), PATH: (env() || {}).PATH || process.env.PATH || '' }), envAdd = {};
+    for (const [k, v] of Object.entries(probeEnv)) if (typeof v === 'string') envAdd[k] = v;
+    const r = await Promise.resolve().then(() => require('./child-starter').childStarter().run(p, ['--version'], { timeoutMs: 8000, capture: true, maxBuffer: 64 * 1024, envAdd })).catch(() => null);
     const er = !r || r.unknown || r.timedOut || r.overflow ? { killed: true } : r.started === false ? { code: r.error || null } : r.code !== 0 ? { code: r.code } : null;
     const v = F.versionFromProbe({ err: er, stdout: r && r.stdout, stderr: r && r.stderr }) || null; // verify r1 ⑦ + r2 ⑥: ONE probe table (browser-facts.versionFromProbe) — a crash names no version, a version on stdout counts whatever the exit
     cliVersions.set(p, { id, version: v, at: now() }); // B-7a30: a silent one too (asked again after CLI_FRESH_MS)

@@ -16,21 +16,29 @@ const SFW = require('../settings-file-words.js'); // B-8dcf item two (PURE): loa
 // broadcast (every job change, unthrottled) while the sidebar's Jobs tab or a Background Work window is open, and every 30 s
 // per open window. Now they ride the hub's starter (src/server/child-starter.js) and ONE answer stands ESCAPES_FRESH_MS for
 // every page and every render; a read in flight is shared — a render, a page, a broadcast starts nothing of its own.
+// r1381 (3): A NO-REPLY IS NEVER KEPT AS A REPLY — a read the starter did not answer (no answer, its bound, past ESCAPES_MAX) says so
+// (`unread`: the page says «could not be read just now») and stamps nothing: the next read asks again. A PERSON'S REFRESH asks once,
+// fresh (`fresh`), past the 30 s; a read in flight answers every ask. ESCAPES_MAX bounds what the loop parses of either answer.
 const ESCAPES_FRESH_MS = 30000;
-function escapesReader({ via, now = () => Date.now(), freshMs = ESCAPES_FRESH_MS } = {}) {
+const ESCAPES_MAX = 256 * 1024;
+const ESCAPES_SYSTEMD = ['--user', 'list-units', '--type=service,timer', '--state=running,active', '--no-legend', '--plain'];
+function escapesReader({ starter = () => require('./child-starter').childStarter(), now = () => Date.now(), freshMs = ESCAPES_FRESH_MS } = {}) {
   let last = null;   // { at (0 while in flight), p }
-  return function read() {
-    if (last && (last.at === 0 || now() - last.at < freshMs)) return last.p;
-    const run = via || require('./child-starter').execFileVia(require('./child-starter').childStarter());
+  return function read({ fresh = false } = {}) {
+    if (last && last.at === 0) return last.p;
+    if (!fresh && last && now() - last.at < freshMs) return last.p;
     const one = last = { at: 0, p: null };
+    const ask = (bin, args) => Promise.resolve().then(() => starter().run(bin, args, { timeoutMs: 5000, maxBuffer: ESCAPES_MAX, capture: true, envAdd: {} })).catch(() => null);
+    const said = (r) => (!r || r.unknown || r.timedOut || r.overflow ? null : r.started === false ? '' : r.code === 0 ? String(r.stdout || '') : '');   // null = no reply; '' = none (no program, no crontab)
     one.p = (async () => {
-      const out = { systemd: [], crontab: [] };
-      const a = await run('systemctl', ['--user', 'list-units', '--type=service,timer', '--state=running,active', '--no-legend', '--plain'], { timeout: 5000 });
-      if (!a.err && a.stdout) out.systemd = a.stdout.split('\n').filter((l) => l.trim() && !/^(vibespace|dbus|pipewire|wireplumber|gvfs|xdg|gnome|tracker|at-spi|pulse)/.test(l.trim())).map((l) => l.trim().split(/\s+/)[0]).slice(0, 40);
-      const b = await run('crontab', ['-l'], { timeout: 5000 });
-      if (!b.err && b.stdout) out.crontab = b.stdout.split('\n').filter((l) => l.trim() && !l.startsWith('#')).slice(0, 40);
-      return out;
-    })().catch(() => ({ systemd: [], crontab: [] })).finally(() => { one.at = now(); });
+      const out = { systemd: [], crontab: [] }, unread = [];
+      const a = said(await ask('systemctl', ESCAPES_SYSTEMD));
+      if (a === null) unread.push('systemd'); else out.systemd = a.split('\n').filter((l) => l.trim() && !/^(vibespace|dbus|pipewire|wireplumber|gvfs|xdg|gnome|tracker|at-spi|pulse)/.test(l.trim())).map((l) => l.trim().split(/\s+/)[0]).slice(0, 40);
+      const b = said(await ask('crontab', ['-l']));
+      if (b === null) unread.push('crontab'); else out.crontab = b.split('\n').filter((l) => l.trim() && !l.startsWith('#')).slice(0, 40);
+      return unread.length ? { ...out, unread } : out;
+    })();
+    one.p.then((r) => { if (r.unread) { if (last === one) last = null; } else one.at = now(); });
     return one.p;
   };
 }
@@ -449,7 +457,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   // a job's secret comes from the vault (job-model vetSpec refuses a named envFrom `envfrom_retired`)
   // read-only escape visibility: hand-rolled systemd/crontab jobs OUTSIDE the registry
   const readEscapes = escapesReader();
-  app.get('/api/jobs-escapes', async (req, res) => { res.json(await readEscapes()); });
+  app.get('/api/jobs-escapes', async (req, res) => { res.json(await readEscapes({ fresh: !!(req.query && req.query.fresh === '1') })); });   // ?fresh=1: a person's Refresh
   // Live-session catch-up (2.344.1): sessions spawned BEFORE 2.344.0 lack the
   // --settings crossSessionInbound accept, and dtach sessions survive updates
   // for weeks — their bypass-mode inbound would HOLD our notifications in a
@@ -497,4 +505,4 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
   };
 }
 
-module.exports = { create, escapesReader, ESCAPES_FRESH_MS };
+module.exports = { create, escapesReader, ESCAPES_FRESH_MS, ESCAPES_MAX };

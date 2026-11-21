@@ -12,6 +12,23 @@ const os = require('os');
 
 const router = express.Router();
 
+/** B-323e (r1381 (2) + (5)): THE HUB'S pane-map reader, handed to src/session-store.js (a device bundle input — it carries none of
+ *  the starter's words). tmux is found by the KEPT lookup (src/plugins/which-kept.js, itself through the starter: never a stat walk
+ *  of PATH on the loop) and its pane list asked of the starter. → the list's text ('' = no tmux, or no tmux server), or undefined:
+ *  NO REPLY (the lookup or the list did not answer — never kept as a reply). `starter` / `lookup` are getters (a suite hands its own). */
+function tmuxReaderVia(starter = () => require('../server/child-starter').childStarter(), lookup = (n) => require('../plugins/which-kept.js').whichFreshAnswer(n)) {
+  return async (args) => {
+    const found = await lookup('tmux');
+    if (!found || !found.known) return undefined;
+    if (!found.path) return '';
+    const r = await starter().run(found.path, args, { timeoutMs: 3000, capture: true, maxBuffer: 1024 * 1024, envAdd: { PATH: process.env.PATH || '', ...(process.env.TMUX_TMPDIR ? { TMUX_TMPDIR: process.env.TMUX_TMPDIR } : {}) } });
+    if (!r || r.unknown || r.timedOut || r.overflow) return undefined;
+    if (r.started === false) return r.error === 'ENOENT' ? '' : undefined;
+    return r.code === 0 ? String(r.stdout || '') : '';   // tmux answered: no server is no pane
+  };
+}
+require('../session-store').useTmuxReader(tmuxReaderVia());
+
 const {
   cwdToProjectDir, execFileP, isSubagentMessage,
 } = require('../session-store');
@@ -1063,4 +1080,4 @@ async function boundElsewhereOf(backend, id, accountId, opts = {}) {
 /** B-a5a4 (1): a resume whose stored account is gone → {refuse} for an account-bound harness, else null (degrade, said). */
 const acctGoneOf = (backend) => (accountBoundOf(backend) ? { refuse: ACCT_GONE_BOUND } : null);
 
-module.exports = { SWEEP_LATE_SAY_MS, SWEEP_ANSWER_MAX_BYTES, SWEEP_ROWS_IN_MAX, router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, sweepFails: () => (_sweepFailsOf ? _sweepFailsOf() : null), POLL_WAIT_MS, SWEEP_STALE_SAY_AFTER, _sweepTestSeam: (o) => { Object.assign(_sweepTest, o || {}); if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+module.exports = { tmuxReaderVia, SWEEP_LATE_SAY_MS, SWEEP_ANSWER_MAX_BYTES, SWEEP_ROWS_IN_MAX, router, setup, mergeKeptStopped, sweepMerge, withSessionKey, heldAccountOf, heldAccountOfNow, acctGoneOf, boundElsewhereOf, ACCT_GONE_BOUND, BOUND_ELSEWHERE, warmthDiff, sendSessions, sweepPool, sessionRow, sessionRows, sweepStats: () => _sweepStats, sweepFails: () => (_sweepFailsOf ? _sweepFailsOf() : null), POLL_WAIT_MS, SWEEP_STALE_SAY_AFTER, _sweepTestSeam: (o) => { Object.assign(_sweepTest, o || {}); if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, closeSweepPool: () => { if (_sweepPool) { try { _sweepPool.close(); } catch { } _sweepPool = null; } }, _noteSweptRows: (rows) => { _heldRows = rows; _sweptStopped = rows; }, keptSessions: () => (_keptRead ? _keptRead() : { rows: null, paused: false }), warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

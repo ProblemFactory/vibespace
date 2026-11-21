@@ -28,6 +28,7 @@
 
 const fs = require('fs');
 const os = require('os');
+const FASTBIN_RETRY_MS = 15 * 60e3;   // B-323e (r1381 (4)): a FAILED local copy of the rclone binary is tried again after this — never at every rcloneBin(), never «for the process's life»
 const path = require('path');
 // B-e783: the daemons' /proc walk is async and bounded (below); every kill goes through PI.signalIdentity (a recycled pid is
 // never signalled)
@@ -356,7 +357,7 @@ class MountManager {
   // not persist through FUSE) vs 0.06s from local disk. Copy the binary ONCE
   // to a machine-local cache keyed by (size, mtime) and exec that instead.
   _fastBin(binPath) {
-    if (this._fastBinMemo?.src === binPath) return this._fastBinMemo.use;
+    if (this._fastBinMemo?.src === binPath && !(this._fastBinMemo.failedAt && Date.now() - this._fastBinMemo.failedAt > FASTBIN_RETRY_MS)) return this._fastBinMemo.use;
     try {
       if (process.platform !== 'linux' || !this._onNetworkFs(binPath)) {
         this._fastBinMemo = { src: binPath, use: binPath };
@@ -379,7 +380,7 @@ class MountManager {
         const tmp = `${cached}.tmp-${process.pid}`;
         execFile('sh', ['-c', `cp "${binPath}" "${tmp}" && chmod 755 "${tmp}" && mv "${tmp}" "${cached}"`], { timeout: 180000 }, (err) => {
           this._fastBinCopying = false;
-          if (err) this._fastBinMemo = { src: binPath, use: binPath };   // B-323e: a FAILED copy is remembered (the network path stands) — never redone at every rcloneBin() (each list of the mounts)
+          if (err) this._fastBinMemo = { src: binPath, use: binPath, failedAt: Date.now() };   // B-323e: a FAILED copy is remembered FASTBIN_RETRY_MS (the network path stands meanwhile) — never redone at every rcloneBin()
           if (!err) {
             try {
               for (const f of fs.readdirSync(cacheDir)) { // prune superseded copies

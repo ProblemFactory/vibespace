@@ -3431,6 +3431,7 @@ export default {
   "Cron": "定时",
   "none": "无",
   "Outside the registry (read-only)": "注册表之外（只读）",
+  "Outside the registry: not read just now — ⟳ reads it again": "注册表之外：这次没有读到——⟳ 再读一次",
   "next": "下次",
   "Open panel": "打开面板",
   "Remove job": "移除任务",

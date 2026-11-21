@@ -97,7 +97,7 @@ function runChild(bin, args, timeout) {
  *  (src/server/boot-restore.js) keep runChild — a start's, named in the start census. */
 function runViaStarter(bin, args, timeout) {
   const t0 = Date.now();
-  return Promise.resolve().then(() => require('./child-starter').childStarter().run(bin, args, { timeoutMs: timeout, capture: true, maxBuffer: 4 * 1024 * 1024 })).then((r) => {
+  return Promise.resolve().then(() => require('./child-starter').childStarter().run(bin, args, { timeoutMs: timeout, capture: true, maxBuffer: 1024 * 1024 })).then((r) => {
     const code = !r || r.unknown || r.timedOut ? 'TIMEOUT' : r.started === false ? (r.error === 'ENOENT' ? 'ENOENT' : (r.error || 1)) : r.overflow ? 1 : r.code === 0 ? 0 : (r.code != null ? r.code : (r.signal || 1));
     return { code, out: String((r && r.stdout) || ''), err: String((r && (r.stderr || r.error)) || (code === 'TIMEOUT' ? 'timeout' : '')), ms: Date.now() - t0 };
   }, (e) => ({ code: 1, out: '', err: String((e && e.message) || e), ms: Date.now() - t0 }));

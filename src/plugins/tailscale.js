@@ -40,7 +40,7 @@ const run = (prog, args, ms, signal) => new Promise((resolve) => {
   const end = (r) => { if (over) return; over = true; if (signal) signal.removeEventListener('abort', onAbort); resolve(r); };
   const onAbort = () => end({ code: null, out: '' });
   if (signal) signal.addEventListener('abort', onAbort, { once: true });
-  Promise.resolve().then(() => require('../server/child-starter').childStarter().run(prog, args, { timeoutMs: ms, capture: true, maxBuffer: 16 << 20, envAdd: { PATH: process.env.PATH || '' } }))
+  Promise.resolve().then(() => require('../server/child-starter').childStarter().run(prog, args, { timeoutMs: ms, capture: true, maxBuffer: 4 << 20, envAdd: { PATH: process.env.PATH || '' } }))
     .then((r) => end({ code: r && r.started !== false && !r.unknown && !r.timedOut && !r.overflow && typeof r.code === 'number' ? r.code : null, out: String((r && r.stdout) || '') }), () => end({ code: null, out: '' }));
 });
 const { pidCmdline, pidAlive } = require('./proc.js');

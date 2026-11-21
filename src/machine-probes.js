@@ -39,7 +39,7 @@ const exec = (cmd, args, timeout = 5000) => new Promise((resolve) => {
 // agent hands nothing and keeps its own exec
 let versionVia = null;
 function useStarter(via) { versionVia = typeof via === 'function' ? via : null; }
-const execVersion = (p) => (versionVia ? versionVia(p, ['--version'], { timeout: 5000 }).then((r) => (r && !r.err ? String(r.stdout || '') : null), () => null) : exec(p, ['--version']));
+const execVersion = (p) => (versionVia ? versionVia(p, ['--version'], { timeout: 5000, maxBuffer: 64 * 1024 }).then((r) => (r && !r.err ? String(r.stdout || '') : null), () => null) : exec(p, ['--version']));
 
 /** NO REAL AGENT CLI UNDER THE FLAG (B-ec25, lane bl-tests-e): VS_NO_REAL_CLI=1 (every lane env, acceptance run, the test
  *  machine) means a probe here never STARTS an agent CLI the process found by itself (a PATH lookup, the resolver's
