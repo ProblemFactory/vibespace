@@ -707,18 +707,55 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
     // the request is let go (the clipboard step's poll is not this leg's). RED: a copy with the legacy leg back deletes it.
     {
       const okP = (c, n, facts) => { ok(c, n, facts); if (c) console.log('      ' + JSON.stringify(facts)); };
+      // K65 (主开发 r1058 — the integrator's watcher found a real xclip left by this leg on the hub box): A SUITE NEVER TOUCHES A
+      // DISPLAY'S CLIPBOARD AND NEVER STARTS THE REAL CLIPBOARD PROGRAM. The route starts `cat <file> | xclip -selection clipboard
+      // -t <type>` and polls `xclip … -o`, both with the hub's env (its PATH; DISPLAY = the probed one, else the inherited one,
+      // else ':0'). So before any paste the leg plants a STAND-IN `xclip` FIRST on the suite's own search path — it records its
+      // arguments, its standard input and the DISPLAY it was handed, answers a TARGETS read with the type it holds, and exits —
+      // names a display that cannot exist (no socket) and no cookie, and judges the route by the record. A paste whose path does
+      // not resolve `xclip` to the stand-in is REFUSED BY NAME before any request (never a fall-through to the real program)
+      const CLIP = path.join(DIR, 'clip-standin'), CLIP_REC = path.join(CLIP, 'rec'), STANDIN = path.join(CLIP, 'xclip');
+      fs.mkdirSync(CLIP_REC, { recursive: true });
+      fs.writeFileSync(STANDIN, [
+        '#!/bin/sh',
+        "# test-raw-filename's stand-in for xclip (K65): it records what it was given and exits — it never opens a display",
+        `REC='${CLIP_REC}'`,
+        'case " $* " in *" -o "*) [ -f "$REC/type" ] && cat "$REC/type"; exit 0;; esac',
+        'n=$$',
+        'printf \'%s\\n\' "$@" > "$REC/args-$n"',
+        'printf \'%s\' "$DISPLAY" > "$REC/display-$n"',
+        'cat > "$REC/stdin-$n"',
+        'for a in "$@"; do case "$a" in image/*) printf \'TARGETS\\n%s\\n\' "$a" > "$REC/type";; esac; done',
+        ': > "$REC/done-$n"',
+        'exit 0', ''].join('\n'), { mode: 0o755 });
+      const NO_DISPLAY = (() => { for (let n = 60001; n < 61000; n++) if (!fs.existsSync(`/tmp/.X11-unix/X${n}`)) return `:${n}`; return ':65534'; })();
+      const firstOnPath = (name, p) => { for (const d of String(p || '').split(':').filter(Boolean)) { const f = path.join(d, name); try { fs.accessSync(f, fs.constants.X_OK); return f; } catch { } } return null; };
+      const clipGuard = (p) => { const f = firstOnPath('xclip', p); return f === STANDIN ? { ok: true } : { ok: false, refused: `REFUSED: the xclip first on the suite's search path is ${f || 'none'}, not the suite's stand-in (${STANDIN}) — the paste leg never runs the real clipboard program` }; };
+      const records = () => fs.readdirSync(CLIP_REC).filter((f) => f.startsWith('done-')).map((f) => f.slice(5));
+      const recordOf = (n) => ({ args: fs.readFileSync(path.join(CLIP_REC, `args-${n}`), 'utf8').split('\n').filter(Boolean), display: fs.readFileSync(path.join(CLIP_REC, `display-${n}`), 'utf8'), stdin: fs.readFileSync(path.join(CLIP_REC, `stdin-${n}`)) });
+      const envWas = { PATH: process.env.PATH, DISPLAY: process.env.DISPLAY, XAUTHORITY: process.env.XAUTHORITY };
+      process.env.PATH = `${CLIP}:${envWas.PATH || '/usr/bin:/bin'}`; process.env.DISPLAY = NO_DISPLAY; process.env.XAUTHORITY = path.join(CLIP, 'no-such-cookie');
       const PNG = 'data:image/png;base64,' + Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString('base64');
       const OLD2 = (Date.now() - 48 * 3600 * 1000) / 1000;
       const plant = (n) => { const f = path.join(T, n); fs.writeFileSync(f, 'a legacy paste of another hub'); fs.utimesSync(f, OLD2, OLD2); return f; };
       const pasteOnce = async (base) => {
+        const g = clipGuard(process.env.PATH);
+        if (!g.ok) return { refused: g.refused, file: null, reads: [] };   // K65: never a paste the real program could answer
+        const before = new Set(records());
         const reads = [], P = fs.promises, origW = P.writeFile, origR = P.readdir;
         let wrote; const landed = new Promise((r) => { wrote = r; });
         P.readdir = function (d, ...a) { reads.push(path.resolve(String(d))); return origR.call(this, d, ...a); };
         P.writeFile = async function (f, ...a) { const r = await origW.call(this, f, ...a); if (/claude-paste-\d+\.png$/.test(String(f))) setImmediate(() => wrote(String(f))); return r; };
         const ac = new AbortController();
         const req = fetch(base + '/api/paste-image', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ dataUrl: PNG }), signal: ac.signal }).catch(() => null);
-        try { const f = await Promise.race([landed, new Promise((r) => setTimeout(() => r(null), 10000))]); return { file: f, reads: [...reads] }; }
+        let out;
+        try { const f = await Promise.race([landed, new Promise((r) => setTimeout(() => r(null), 10000))]); out = { file: f, reads: [...reads] }; }
         finally { P.writeFile = origW; P.readdir = origR; ac.abort(); await req; }
+        // K65: the route judged by what the STAND-IN recorded (its clipboard step runs on after the request is let go)
+        const t0 = Date.now(); let fresh = [];
+        while (!(fresh = records().filter((n) => !before.has(n))).length && Date.now() - t0 < 8000) await new Promise((r) => setTimeout(r, 20));
+        out.clip = fresh.length ? recordOf(fresh[0]) : null; out.clipRuns = fresh.length;
+        return out;
       };
       const there = (f) => { try { fs.lstatSync(f); return true; } catch { return false; } };
       const legacy = plant('claude-paste-1700000000000.png');
@@ -726,6 +763,18 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
       okP(!!a1.file && path.dirname(a1.file) === path.join(root, 'paste') && there(legacy) && !a1.reads.includes(path.resolve(T)),
         'B-5527: a paste through the REAL route lands in the hub\'s own paste folder and leaves an old paste-named file in the SHARED temp folder alone — it never reads that folder',
         { pasteLanded: a1.file && path.relative(T, a1.file), legacyKept: there(legacy), sharedFolderRead: a1.reads.includes(path.resolve(T)) });
+      const PNG_BYTES = Buffer.from(PNG.split(',')[1], 'base64');
+      ok(!!a1.clip && a1.clipRuns === 1 && JSON.stringify(a1.clip.args) === JSON.stringify(['-selection', 'clipboard', '-t', 'image/png']) && a1.clip.stdin.equals(PNG_BYTES) && a1.clip.display === NO_DISPLAY,
+        `K65: the route's clipboard step reached the suite's STAND-IN, never the real xclip — «-selection clipboard -t image/png», the pasted image's bytes on its input, and the display the suite named (${NO_DISPLAY}: no such display) — and the stand-in exited`,
+        a1.clip ? { args: a1.clip.args, bytes: a1.clip.stdin.length, display: a1.clip.display } : { clipRuns: a1.clipRuns });
+      {
+        const withoutStandIn = process.env.PATH.split(':').filter((d) => d !== CLIP).join(':');
+        const g0 = clipGuard(withoutStandIn), envPath = process.env.PATH;
+        process.env.PATH = withoutStandIn;
+        let r0; try { r0 = await pasteOnce(S.base); } finally { process.env.PATH = envPath; }
+        ok(!g0.ok && /^REFUSED: the xclip first on the suite's search path is .*, not the suite's stand-in \(/.test(g0.refused) && r0.refused === g0.refused && r0.file === null,
+          'K65 CONTROL: with the stand-in taken off the search path the paste leg REFUSES BY NAME before any request — it never falls through to the real clipboard program', r0.refused || r0);
+      }
       const FSRC = fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8');
       const LEG = "  if (!host || !rfsInst) return;\n";
       const OLDLEG = "  if (!host || !rfsInst) { const now0 = Date.now(); fs.promises.readdir(os.tmpdir()).then(async (names) => { for (const n of names) { if (!n.startsWith('claude-paste-')) continue; const p = path.join(os.tmpdir(), n); try { const st = await fs.promises.stat(p); if (now0 - st.mtimeMs > 24 * 3600 * 1000) await fs.promises.unlink(p); } catch {} } }).catch(() => {}); return; }\n";
@@ -739,7 +788,10 @@ console.log('⑩ B-3767 — the upload\'s temp folder is THIS hub\'s own (src/se
         okP(!!a2.file && !there(legacy2) && a2.reads.includes(path.resolve(T)),
           'RED CONTROL B-5527: with the legacy leg back (a copy of the route) the paste READS the shared temp folder and DELETES the old paste-named file there — the leg above would be red',
           { sharedFolderRead: a2.reads.includes(path.resolve(T)), legacyDeleted: !there(legacy2) });
-      } finally { await SL.close(); }
+      } finally {
+        await SL.close();
+        for (const [k, v] of Object.entries(envWas)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }   // K65: the suite's own env back
+      }
     }
   } finally { if (prevTmp === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = prevTmp; await S.close(); }
 }
