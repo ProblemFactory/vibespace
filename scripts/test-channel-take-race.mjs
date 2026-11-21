@@ -11,8 +11,8 @@
 // reader sees, the census of its sites, must 2's law of order); ③ the family's finds in the engine — the in-flight row kept
 // (r432), one message one turn for one watcher (must 1), the stop after the digest's wait; ④ the hand-over's clear of the same
 // receiver's other rows at each of its three sites, only on a hand-over a restart keeps (must 3).
-// THE REMAINDER (主开发 r1194 — THE DOOR): ⑥ three chains, then a restart: a record handed to a receiver is never started for it
-// again, whatever row survives (the verdict reads the hand's own durable ledger); ⑦ the door keys the RECORD, never the vendor id.
+// THE DOOR (B-1ca5's remainder and its follow: a record handed to a receiver is never started for it again, whatever row
+// survives) has a fast suite of its own: scripts/test-channel-door.mjs (this suite keeps ① «the door alone» and `noDoor`).
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -46,12 +46,12 @@ function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, rost
   fs.mkdirSync(dataDir, { recursive: true });
   const REVS = path.join(dataDir, 'revisions.json');
   if (!fs.existsSync(REVS)) fs.writeFileSync(REVS, J({ revisions: {} }));
-  const delivered = [], stashed = [], asked = [], refused = [], starts = [];
+  const delivered = [], stashed = [], asked = [], refused = [], starts = [], replies = [];   // replies: the time each ladder call answered
   const deliver = {
     // `refuse`: the ladder says no (the spend cap) — the engine stashes the refused block for the next turn
     // B-1ca5: `starts` = every ladder call (a billed turn's START); `gate(k)` = a promise the k-th call waits on (a STALL placed in
     // the window), `answer(k)` = a planted refusal for the k-th call, `stashThrows(cid, e)` = a planted stash failure
-    deliverToConversation: async (cid, text, o) => { const k = starts.length; starts.push({ cid, text }); const g = gate ? gate(k) : null; if (g) await g; const a = answer ? answer(k) : null; if (a) { refused.push({ cid, text, o }); return a; } if (refuse) { refused.push({ cid, text, o }); return { ok: false, reason: 'the spend cap is reached', refused: 'cap' }; } delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
+    deliverToConversation: async (cid, text, o) => { const k = starts.length; starts.push({ cid, text }); const g = gate ? gate(k) : null; if (g) await g; replies.push(Date.now()); const a = answer ? answer(k) : null; if (a) { refused.push({ cid, text, o }); return a; } if (refuse) { refused.push({ cid, text, o }); return { ok: false, reason: 'the spend cap is reached', refused: 'cap' }; } delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
     stashFor: (cid, e) => { if (stashThrows && stashThrows(cid, e)) throw new Error('the stash refused (planted)'); stashed.push({ cid, ...e }); return stashAnswer ? stashAnswer(cid, e) : { stored: true }; },   // `stashAnswer`: a planted «held in memory only»
   };
   const registry = CH.createChannelRegistry();
@@ -69,7 +69,10 @@ function mkEngine(ENGM, dataDir, { clock = dayStartClock(), refuse = false, rost
   const blocks = () => stashed.filter((x) => x.fromName !== NOTE_FROM);   // the message blocks themselves (a stashed refusal, the free stash)
   // the cadence is one by-id ask per message per hour: the next pass an hour on re-reads what a wake carried
   const hourLater = async () => { clock.advance(61 * 60e3); return eng.pass(A, { force: true }); };
-  return { eng, clock, delivered, refused, stashed, asked, starts, recall, tail, recOf, woke, recalled, notes, blocks, hourLater };
+  // B-1ca5 follow (r1273): `park(rows)` = pending rows written through the store's ONE door (a durable update), never pushed
+  // into the live map behind it
+  const park = (conv, rows) => eng.store.index.update(() => { const e = eng.store.index.entry(A, conv, { create: false }); if (e) for (const r of rows) e.pending.push(r); }, { durable: true });
+  return { eng, clock, delivered, refused, stashed, asked, starts, replies, recall, tail, recOf, woke, recalled, notes, blocks, hourLater, park };
 }
 
 // RECORDS handed — the woken-for ledger's rows of ONE message for ONE receiver
@@ -722,104 +725,6 @@ console.log('⑤ round wig9owq5o — THE NEXT-TURN PENDING STASH KEEPS A ROW THE
     `round wig9owq5o MUST: the next-turn pending stash read «kept» for m (its holder in flight past the stash's bound) and its clear LEFT the row (${pk.rowKept}); the holder gave m back and the row was still there (${pk.rowAfterGiveBack}); G's next flush delivered m ONCE (${pk.delivered})`, J(pk));
   const pkR = await pendingKeptLeg(MUT.load('src/server/channels-engine.js', anchored(src, KEPT_PENDING, '', 'pending-clears-a-kept-row'), 'pending-clears-a-kept-row'), 'pending-kept-red');
   ok(pkR.rowKept === 0 && pkR.delivered === 0, `RED CONTROL: the pending stash's clear as it was — the KEPT row cleared (${pkR.rowKept}); the holder gave m back to a row that was gone: m delivered ${pkR.delivered} times — the watcher never hears of it`, J(pkR));
-}
-
-console.log('⑥ B-1ca5\'s REMAINDER — THREE CHAINS, THEN A RESTART: the door refuses the stale row, whatever chain left it');
-{
-  // agent-1's account digest (chain 1) takes m and sits in its ladder; the group G (agent-1 its one live member, a WAKE watcher)
-  // flushes its pending row (chain 2): it meets the take, waits its bound and KEEPS its row on chain 1's ticket; chain 1 is REFUSED
-  // (its stash refused too) and gives m back; the digest flushes again (chain 3) and HANDS m to agent-1 — G's own row (it names no
-  // member) is on no list chain 3 clears and SURVIVES. The hub restarts; G's pending flush: the door reads the hand's own ledger
-  // (m handed to agent-1) — zero more starts, each count printed. RED: the door cut — m starts for agent-1 a second time.
-  const pendFor = (w, r, pk, conv = OPS) => ((w.eng.store.index.live()[`${A}/${conv}`] || {}).pending || []).filter((p) => p && p.record && p.record.id === r.id && p.for === pk).length;
-  async function threeChainsLeg(ENGM, tag) {
-    let open = () => {}, entered = () => {}, waited = false, stashCalls = 0;
-    const gate1 = new Promise((r) => { open = r; }), in1 = new Promise((r) => { entered = r; });
-    const live = { 'agent-1': [] };
-    const dataDir = path.join(ROOT, tag);
-    const roster = () => [{ cid: 'agent-1', name: 'Worker', groups: live['agent-1'] }, { cid: 'agent-2', name: 'Other', groups: [] }];
-    const w = mkEngine(ENGM, dataDir, {
-      roster,
-      gate: (k) => (k === 0 ? (entered(), gate1) : null),
-      answer: (k) => (k === 0 ? { ok: false, reason: 'the spend cap is reached (planted)', refused: 'cap' } : null),
-      stashThrows: () => ++stashCalls === 1,   // the FIRST stash is the refused holder's: it gives m back, nothing kept for it
-      onTakeWait: () => { waited = true; },
-      heldBound: { takeWaitMs: 200 },
-    });
-    await w.eng.pass(A, { force: true });
-    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT)], watchers: [{ principal: AGENT, notify: 'digest', digestMinutes: 30 }] });
-    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
-    const m = w.tail(OPS).slice(-1)[0];
-    await w.eng.onFresh(w.recOf(), OPS, [m], { origin: 'test' });   // G has no live member yet: its row of m waits; the digest holds m too
-    live['agent-1'] = ['G'];
-    const first = w.eng.flushScope(A, 'account', null, 'agent:agent-1');   // CHAIN 1: the digest takes m, held in its ladder
-    await in1;
-    await w.eng.flushPending(A, OPS, { pk: 'group:G' });   // CHAIN 2: G's wake meets the take, waits, keeps its row on chain 1
-    if (w.eng.settleWakes) await w.eng.settleWakes();
-    const placed = waited, rowKept = pendFor(w, m, 'group:G');
-    open(); await first;   // chain 1 REFUSED (its stash refused too): it gives m back
-    if (w.eng.settleWakes) await w.eng.settleWakes();
-    await w.eng.flushScope(A, 'account', null, 'agent:agent-1');   // CHAIN 3: the digest takes m again and HANDS it to agent-1
-    if (w.eng.settleWakes) await w.eng.settleWakes();
-    const rowAfter3 = pendFor(w, m, 'group:G'), startsBefore = w.starts.length, handedBefore = recs(w, 'agent-1', m);
-    await w.eng.stop();
-    const w2 = mkEngine(ENGM, dataDir, { clock: w.clock, roster: () => [{ cid: 'agent-1', name: 'Worker', groups: ['G'] }, { cid: 'agent-2', name: 'Other', groups: [] }] });   // THE RESTART
-    await w2.eng.flushPending(A, OPS, { pk: 'group:G' });   // G's pending flush (as the boot's)
-    if (w2.eng.settleWakes) await w2.eng.settleWakes();
-    const out = { placed, rowKept, rowAfter3, startsBefore, handedBefore, startsAfterRestart: w2.starts.length, handed: recs(w2, 'agent-1', m), rowEnd: pendFor(w2, m, 'group:G') };
-    await w2.eng.stop();
-    return out;
-  }
-  const tc = await threeChainsLeg(ENG, 'three-chains');
-  console.log(`    G's row of m: kept on chain 1 ${tc.rowKept}, after chain 3 handed m ${tc.rowAfter3}; starts before the restart ${tc.startsBefore} (chain 1 refused, chain 3 handed), after it ${tc.startsAfterRestart}; m handed to agent-1 ${tc.handed} time(s); G's row at the end ${tc.rowEnd}`);
-  ok(tc.placed && tc.rowKept === 1 && tc.rowAfter3 === 1 && tc.startsBefore === 2 && tc.handedBefore === 1 && tc.startsAfterRestart === 0 && tc.handed === 1 && tc.rowEnd === 0,
-    `B-1ca5's REMAINDER — THREE CHAINS: G's row kept on chain 1 survives chain 3's hand (${tc.rowAfter3}, on no list it clears); after the RESTART the door reads the hand's ledger — ZERO more starts (${tc.startsAfterRestart}), m handed to agent-1 once, the stale row dropped at the door (${tc.rowEnd})`, J(tc));
-  const tcR = await threeChainsLeg(MUT.load('src/server/channels-engine.js', noDoor(src), 'three-chains-no-door'), 'three-chains-red');
-  console.log(`    the door cut: after the restart ${tcR.startsAfterRestart} start(s), m handed to agent-1 ${tcR.handed} time(s)`);
-  ok(tcR.rowAfter3 === 1 && tcR.startsAfterRestart === 1 && tcR.handed === 2, `RED CONTROL: the door cut (the memory map alone) — after the restart G's surviving row starts m for agent-1 a SECOND time (${tcR.startsAfterRestart} start, handed ${tcR.handed} times)`, J(tcR));
-  // the door's fact lives as long as a row that could start it again: the ledger's cap never drops a row whose message still has a
-  // pending row (PURE: channel-revisions.js capWokeRows) — RED: the cap as it was drops it with the oldest
-  const rows = Array.from({ length: 50 }, (_, i) => ({ vid: `v${i}`, cid: `c${i % 3}`, at: i }));
-  const kept = Rev.capWokeRows(rows, 40, new Set(['v0'])), plain = Rev.capWokeRows(rows, 40);
-  ok(kept.length === 40 && kept.some((r) => r.vid === 'v0') && !plain.some((r) => r.vid === 'v0'), `the ledger's cap keeps a row whose message still has a pending row (v0 kept, ${kept.length} rows) — RED: the cap as it was (no pending set) drops it with the oldest`);
-}
-
-console.log('⑦ B-1ca5\'s REMAINDER — THE DOOR KEYS THE RECORD: a stored copy that shares the vendor id is no record handed');
-{
-  // the memory map keys a mark by the RECORD id, and the door's durable half reads the same key (`rid`): a second record that
-  // carries the same vendor id (a stored copy, as test-channel-agent-watch parks thirty) is still delivered — RED: the door keyed
-  // on the vendor message refuses the copy (and the heavy suite's thirty with it)
-  const RID_DOOR = '    return rows.some((w) => w && w.door === 1 && w.rid === rid && (recv !== null ? w.cid === recv : w.pk === name)) ? { handed: true } : null;\n';
-  ok(src.split(RID_DOOR).length === 2, 'control setup: the door\'s ledger read (by the record id) is present once');
-  async function copyLeg(ENGM, tag) {
-    const live = { 'agent-1': [] };
-    const roster = () => [{ cid: 'agent-1', name: 'Worker', groups: live['agent-1'] }, { cid: 'agent-2', name: 'Other', groups: [] }];
-    const w = mkEngine(ENGM, path.join(ROOT, tag), { roster });
-    await w.eng.pass(A, { force: true });
-    await w.eng.setGrain(A, { kind: 'conversation', convId: OPS }, { access: [acc(GRP)], watchers: [{ principal: GRP }] });
-    const m = w.tail(OPS).slice(-1)[0];
-    const en = () => w.eng.store.index.live()[`${A}/${OPS}`] || {};
-    await w.eng.onFresh(w.recOf(), OPS, [m], { origin: 'test' });   // G has no live member yet: its row of m waits
-    const row = (en().pending || []).find((p) => p && p.record && p.record.id === m.id && p.for === 'group:G');
-    const parked = row ? JSON.parse(J(row)) : null;
-    live['agent-1'] = ['G'];
-    await w.eng.flushPending(A, OPS, { pk: 'group:G' });   // m HANDED to agent-1: the door's row names the record
-    if (w.eng.settleWakes) await w.eng.settleWakes();
-    const s1 = w.starts.length;
-    const doorRow = (en().wokeFor || []).filter((x) => x && x.door === 1 && x.rid === String(m.id) && x.cid === 'agent-1').length;
-    const copyId = `${m.id}-copy`;
-    if (parked) en().pending.push({ ...parked, record: { ...parked.record, id: copyId, text: 'a stored copy' } });   // same vendor id, another record
-    await w.eng.flushPending(A, OPS, { pk: 'group:G' });
-    if (w.eng.settleWakes) await w.eng.settleWakes();
-    const out = { parked: !!parked, s1, doorRow, starts: w.starts.length, copyLeft: (en().pending || []).filter((p) => p && p.record && p.record.id === copyId).length };
-    await w.eng.stop();
-    return out;
-  }
-  const cp = await copyLeg(ENG, 'door-copy');
-  console.log(`    starts: m handed ${cp.s1}, then the copy ${cp.starts - cp.s1} (the door's row of m: ${cp.doorRow}, the copy's row left ${cp.copyLeft})`);
-  ok(cp.parked && cp.s1 === 1 && cp.doorRow === 1 && cp.starts === 2 && cp.copyLeft === 0, `THE DOOR KEYS THE RECORD: m handed once (the door's row names it: ${cp.doorRow}); a stored copy sharing m's vendor id is ANOTHER record — it starts (${cp.starts - cp.s1}), its row gone`, J(cp));
-  const cpR = await copyLeg(MUT.load('src/server/channels-engine.js', anchored(src, RID_DOOR, '    return rows.some((w) => w && w.door === 1 && w.vid === Rev.wokeKeyOf(r.vendorId) && (recv !== null ? w.cid === recv : w.pk === name)) ? { handed: true } : null;\n', 'door-by-vendor-id'), 'door-by-vendor-id'), 'door-copy-red');
-  ok(cpR.s1 === 1 && cpR.starts === 1 && cpR.copyLeft === 0, `RED CONTROL: the door keyed on the vendor message — the copy is refused at the door (${cpR.starts - cpR.s1} starts), dropped though no card of it was ever handed`, J(cpR));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

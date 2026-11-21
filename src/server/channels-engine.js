@@ -6299,14 +6299,17 @@ function create(deps = {}) {
    *  memory map uses — a stored copy may share the vendor id) for this receiver (`→cid`) or this watcher ⇒ handed — the verdict says spent and the row is dropped at the door, whatever chain left it. */
   function ledgerMark(adapterId, convId, name, h) {
     const r = h && h.record;
-    const rid = r && r.id !== null && r.id !== undefined ? String(r.id).slice(0, 128) : null;   // the RECORD, as the memory map keys it
+    const rid = r && r.id !== null && r.id !== undefined ? doorCut(r.id, DOOR_RID_MAX) : null;   // the RECORD, as the memory map keys it
     if (!rid) return null;
-    let en = null;
-    try { en = store.index.entry(adapterId, convId, { create: false }); } catch { en = null; }
+    // B-1ca5 follow (主开发 r1273, 1): THE DOOR'S READ TOUCHES NOTHING — the live row through the store's read-only accessor,
+    // never `entry()` (outside an update that marks the row changed: its key into the dirty set, every touch hook fired, the
+    // row judged and written again at the next flush). This read runs for every hit the memory map holds no mark for
+    const en = store.index.rows()[`${adapterId}/${convId}`];
     const rows = en && Array.isArray(en.wokeFor) ? en.wokeFor : null;
     if (!rows || !rows.length) return null;
-    const recv = name.startsWith('→') ? name.slice(1) : null;
-    return rows.some((w) => w && w.door === 1 && w.rid === rid && (recv !== null ? w.cid === recv : w.pk === name)) ? { handed: true } : null;
+    // the same cut on both sides (r1273, 5): the note keeps a receiver's id to DOOR_CID_MAX and a watcher's name to DOOR_PK_MAX
+    const recv = name.startsWith('→') ? doorCut(name.slice(1), DOOR_CID_MAX) : null, pkCut = recv === null ? doorCut(name, DOOR_PK_MAX) : null;
+    return rows.some((w) => w && w.door === 1 && w.rid === rid && (recv !== null ? w.cid === recv : w.pk === pkCut)) ? { handed: true } : null;
   }
   /** THE READ: every hit sorted by the verdict, under the watcher's name and (once known) the receiver's. With `take` (a
    *  ticket, or true for a new one) the hits it may deliver are TAKEN under both names IN THE SAME SYNCHRONOUS CALL — the
@@ -6915,14 +6918,14 @@ function create(deps = {}) {
     const items = [], recs = new Map();
     // B-dfa4 U3: the rows FRESH within the window (a message in the last 24 h, or woken for in the last 7 days), kept —
     // a write re-judges its row, the clock only takes one out — instead of judging every row of the account each pass
-    const fresh = (k, en) => !!en && k.startsWith(`${rec.id}/`) && (Number(en.lastAt) > t - Rev.RECHECK_FRESH_MS || (Array.isArray(en.wokeFor) && en.wokeFor.some((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS)));
+    const fresh = (k, en) => !!en && k.startsWith(`${rec.id}/`) && (Number(en.lastAt) > t - Rev.RECHECK_FRESH_MS || (Array.isArray(en.wokeFor) && en.wokeFor.some((w) => w && w.vid !== null && Number(w.at) > t - Rev.RECHECK_WOKE_MS)));
     const kept = keptFor('revisions', rec, '', fresh, t);
     for (const k of kept.set) {
       const en = ix[k];
       walkCost.revisionRows++;
       if (!fresh(k, en)) { kept.set.delete(k); continue; }   // aged out: only a write brings it back
       const convId = k.slice(rec.id.length + 1);
-      const woke = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];
+      const woke = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && w.vid !== null && Number(w.at) > t - Rev.RECHECK_WOKE_MS) : [];   // a door-only row (no vendor id) is never asked
       let tail = [];
       try { tail = store.readTail(rec.id, convId, { limit: 40 }) || []; } catch { tail = []; }
       for (const r of tail) if (r && r.vendorId && Number(r.at) > t - Rev.RECHECK_FRESH_MS && r.kind !== 'system') { const key = `${convId}\n${r.vendorId}`; recs.set(key, r); items.push({ key, at: r.at }); }
@@ -6987,20 +6990,30 @@ function create(deps = {}) {
    *  A row is keyed by the message's revision key (`Rev.wokeKeyOf` — the id the by-id recheck asks with, the same for
    *  every version); the bound is fair (`Rev.capWokeRows`). Census: scripts/test-channel-revisions.mjs ⑧. */
   const WOKE_FOR_MAX = 40;
+  /** B-1ca5 follow (r1273, 5): the ledger keeps a receiver's id, a watcher's name and a record's id to these lengths — the
+   *  note writes them cut and the door (`ledgerMark`) compares the SAME cut (a receiver's conversation key holds up to 200
+   *  characters; a watcher name passes 256 as a group's per-member key: an id of up to 120, «>», a member's key) */
+  const DOOR_CID_MAX = 128, DOOR_PK_MAX = 256, DOOR_RID_MAX = 128;
+  function doorCut(v, max) { return String(v).slice(0, max); }
   function noteDelivered(en, hits, cid, t, pk = null, door = false) {
     if (!en || !cid) return;
     // B-1ca5's remainder (THE DOOR): the ledger row is the DURABLE fact «this record (`rid`) was handed to this receiver, for this watcher»
-    // the verdict reads after a restart (markOf → ledgerMark) — it names the watcher too, and a row whose message still has a pending
-    // row in this conversation is kept past the age and the cap (a row that could start it again outlives it never). `door` = a
+    // the verdict reads after a restart (markOf → ledgerMark) — it names the watcher too, and a door row whose record still has a
+    // pending row in this conversation is kept past the age and the cap (a row that could start it again outlives it never). `door` = a
     // hand-over a restart KEEPS (billed, or a stash stored): only such a row is the door's fact — a stash «held in memory only» is
     // forgotten by a restart, so its message must still reach the receiver after one (must 3)
-    const pend = new Set((Array.isArray(en.pending) ? en.pending : []).map((p) => (p && p.record ? Rev.wokeKeyOf(p.record.vendorId) : null)).filter(Boolean));
-    const prev = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && (Number(w.at) > t - Rev.RECHECK_WOKE_MS || pend.has(w.vid))) : [];
+    // B-1ca5 follow (r1273, 2): the door's fact is keyed by the RECORD id ALONE — a record with no vendor id (the recall
+    // ledger cannot ask it, so it had no row) gets a door row too (`vid: null`: the recall readers skip it); a door row whose
+    // record still has a pending row in this conversation (`pend`: those record ids) outlives the age and the cap
+    const pend = new Set((Array.isArray(en.pending) ? en.pending : []).map((p) => (p && p.record && p.record.id !== null && p.record.id !== undefined ? doorCut(p.record.id, DOOR_RID_MAX) : null)).filter(Boolean));
+    const prev = Array.isArray(en.wokeFor) ? en.wokeFor.filter((w) => w && (Number(w.at) > t - Rev.RECHECK_WOKE_MS || pend.has(w.rid))) : [];
     for (const h of hits || []) {
       const r = h && h.record;
-      const vid = r ? Rev.wokeKeyOf(r.vendorId) : null;
-      if (!vid) continue;
-      prev.push({ vid, cid: String(cid).slice(0, 128), ...(pk ? { pk: String(pk).slice(0, 256) } : {}), ...(door && r.id !== null && r.id !== undefined ? { door: 1, rid: String(r.id).slice(0, 128) } : {}), at: t, msgAt: Number(r.at) || null, tk: r.threadKey ? String(r.threadKey).slice(0, 512) : null });
+      if (!r) continue;
+      const vid = Rev.wokeKeyOf(r.vendorId);
+      const rid = door && r.id !== null && r.id !== undefined ? doorCut(r.id, DOOR_RID_MAX) : null;
+      if (!vid && !rid) continue;   // neither a recall row nor a door row
+      prev.push({ vid: vid || null, cid: doorCut(cid, DOOR_CID_MAX), ...(pk ? { pk: doorCut(pk, DOOR_PK_MAX) } : {}), ...(rid ? { door: 1, rid } : {}), at: t, msgAt: Number(r.at) || null, tk: r.threadKey ? String(r.threadKey).slice(0, 512) : null });
     }
     en.wokeFor = Rev.capWokeRows(prev, WOKE_FOR_MAX, pend);
   }
@@ -7014,7 +7027,7 @@ function create(deps = {}) {
     // unset (KEPT: heldPass runs this again when its read lands), never marked and then dropped
     const wkey = Rev.wokeKeyOf(vid);
     const en0 = store.index.live()[`${rec.id}/${convId}`];
-    const cand = [...new Set((en0 && Array.isArray(en0.wokeFor) ? en0.wokeFor : []).filter((w) => w && String(w.vid) === wkey && !w.noted).map((w) => String(w.cid)))];
+    const cand = [...new Set((en0 && Array.isArray(en0.wokeFor) ? en0.wokeFor : []).filter((w) => w && w.vid !== null && String(w.vid) === wkey && !w.noted).map((w) => String(w.cid)))];
     if (cand.length) await readFirst(cand);
     const still = new Set(cand.filter((c) => unreadNow([c])));
     // round 3 (smaller 2): the note goes WITH the mark — a durable update that failed (not-durable: applied in memory, not on
@@ -7026,7 +7039,7 @@ function create(deps = {}) {
       // ONE note per conversation (lane channel-recall-engine-leg): a message carried to it twice (a re-delivery, a scope
       // digest beside a wake) has two rows here — both are marked, the conversation hears it once (the first wake's time)
       const key = Rev.wokeKeyOf(vid);   // the door's key (lane channel-recall-ledger)
-      for (const w of en.wokeFor) if (w && String(w.vid) === key && !w.noted && !still.has(String(w.cid))) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
+      for (const w of en.wokeFor) if (w && w.vid !== null && String(w.vid) === key && !w.noted && !still.has(String(w.cid))) { w.noted = true; if (!due.some((d) => d.cid === w.cid)) due.push({ cid: w.cid, at: w.at }); }
     }, { durable: true }); } catch (e) { if (e && e.code === 'not-durable' && e.applied) notDurable = e; else throw e; }
     if (notDurable && due.length) log.warn(`[channels] ${rec.id}/${convId}: a recall's «noted» marks are in memory, not on disk yet — the note is sent now (a restart before the storage answers may send it once more)`);
     if (still.size) holdFor('recall note', rec, convId, [...still], (h) => { const v = String(vid); const c0 = h.notes.get(v) || new Set(); for (const c of still) c0.add(c); h.notes.delete(v); h.notes.set(v, c0); });
