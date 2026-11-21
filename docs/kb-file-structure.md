@@ -16008,7 +16008,8 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
 - **The edit (insertions only):**
   - The guard is the census's own `if (typeof c !== 'boolean') throw new TypeError(…)`, placed right after the body's `{` ON THE OPENING LINE, so no line moves.
   - An arrow with an EXPRESSION body gets a block made of it, on the same lines: `=> { <guard> return (<the expression>); }`.
-  - In every call, each operand of an && / || chain (and each branch of a ?:) that is not a boolean BY ITS OPERATOR (true / false, `!`, a comparison, instanceof / in) gets `!!( … )`. So a comparison never stands under a `!`, which the wall-clock census reads a bound through.
+  - In every call, each operand of an && / || chain (and each branch of a ?:) that is not a boolean BY ITS OPERATOR (true / false, `!`, a comparison, instanceof / in) goes through THE GUARDED COERCION of the shared checker, `verdictOf( … )` (scripts/lib/check.mjs), imported on the file's last code line (an import is hoisted: no line moves). So a comparison never stands under a wrap, which the wall-clock census reads a bound through.
+  - THE ROW'S CLASS STAYS VISIBLE (the coordinator's r1347): never a plain `!!( … )`, which would turn every vacuous leg of the tree into a `true` the guard accepts for good. With `verdictOf`, a PROMISE or a FUNCTION handed as a verdict FAILS, red by name: a line names the suite and the kind, and the helper's own ✗ names the leg. So the applied tree's first run LISTS the vacuous legs it held, each to be cured or named before the apply is taken. Any other value coerces exactly as `!!` would (a match, a length, a string): coerced, not audited.
   - A call inside another call's condition composes.
 - **When a wrap is exact:** a helper is guarded only if its body asks its condition TRUE OR FALSE: an if / while / ?: test, a `!`, or an && / || in a test or a statement. A helper that hands its condition back is guarded only where every call reads the value as true or false. A condition a guarded call wraps counts as read so, which is the same reading a second run makes; both rules form one fixpoint over the guarded set. There, a call passes exactly when it passed before, and the guard never throws on a call that was there.
 - **Left by rule, by name:**
@@ -16018,7 +16019,8 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
   - a named function expression;
   - a name declared twice in one scope;
   - a file with a direct eval or a `with` statement;
-  - a body that uses its condition as more than true or false (`c === true`, `typeof c`, printed, stored, passed on, `c ?? x`);
+  - a body that uses its condition as more than true or false (`c === true`, `typeof c`, printed, stored, passed on, `c ?? x`, or a function helper's own `arguments`);
+  - a file that already names another `verdictOf`;
   - a call with no condition argument, or by spread;
   - a call that hands it a STRING where the condition goes (whole or joined with `+`), or holds a condition in its name slot: a swap, so cure the call first;
   - a call of it inside another call's name argument.
@@ -16030,8 +16032,11 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
   - the census reads every guarded helper as guarded with its order unchanged. The exception, said by name, is a helper whose body opens with its test (`{c?…}`): the census no longer reads its order and counts it neither way, and its runtime guard judges every call;
   - the wall-clock census reads a file the same when a wrap there holds a comparison.
 
-  If any file fails, or a SECOND RUN over the texts it would write plans anything, nothing is written and the run exits 1.
-- **The list:** scripts/fixtures/unguarded-helpers.json is LOWERED to what the census reads after the run. A row only falls; it is never added or raised. §7b's leg asks that the list was READ (its `files` map), no longer that it is long.
+  - a wrapped file imports the coercion; the wall-clock census is read with the product's span fields, as the gate's ratchet reads it.
+
+  If any file fails, or a SECOND RUN over the texts it would write plans anything, nothing is written and the run exits 1. ON DISK too: every file is written to a temp first and renamed only once all stand; a failed temp write removes every temp (nothing changed), a failed rename says its one restore step (`git checkout -- scripts`).
+- **The apply's proof (the integrator's, on the block's assembled tip as its last line; the tool prints it):** the dry run says NOTHING TO DO after it; the stale-pin scan over the APPLIED diff (a negative pin over an edited line stays green in any tier run); the whole fast tier in both zones; every heavy suite it edited; the vacuous legs the first run lists, each cured or named. `--coordinator-word` is a word the integrator types, not a second check.
+- **The list:** scripts/fixtures/unguarded-helpers.json is LOWERED to what the census reads after the run, over the file set §7b reads (scripts/lib/check.mjs counted, never a target). A row only falls; it is never added or raised. §7b's leg asks that the list was READ (its `files` map), no longer that it is long.
 - **At 2.369.414 (a117cebb8), the dry run** (1378 scripts; about 30 s on one core):
   - It guards 1103 helpers in 1034 files: 1074 arrow blocks, 13 functions, 16 arrow expressions.
   - The census reads 1119 unguarded before and 16 after.
@@ -16040,7 +16045,8 @@ A stranded `qid` entry (no answer within SETTLE_TTL_MS) is `unanswered`: kept, o
   - Plants: 3. Guarded but no longer read by the census: 1 (test-conversation-index line 10).
   - Self-check failures: 0. The second run plans nothing.
   - The list goes from 1051 rows / 1121 to 16 / 16.
-- **Not caught (said):** a swap whose name is a VARIABLE (`check(cond, label)` against a name-first helper). The tool wraps `label`, and the leg stays as vacuous as it was before.
+- **Not caught (said):** a swap whose name is a VARIABLE (`check(cond, label)` against a name-first helper): the tool wraps `label`, which coerces as before (a string is not a promise). The leg stays as vacuous as it was.
+- **The generator:** scripts/harness-new.mjs's suite skeleton takes `checker()` (no inline helper): test-harness-add-census §5, with its anchored RED.
 - **test-guard-inline-helpers (fast):** fixtures of each shape (an arrow block; a name-first function called above its hoisted definition; two expression arrows; a shadowing parameter and an inner block; plants in a string, a template, a line comment and a block comment; two helpers, one inside the other's condition; a helper that hands its condition back; a clock bound in an && chain) and each call kind. Every guarantee has an ANCHORED mutant of the tool as its RED:
   - the edit applied;
   - no line moves;

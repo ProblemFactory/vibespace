@@ -16,8 +16,11 @@
 //                          slot is not — the vacuous leg, read by the order of the nearest definition above the call (a
 //                          block-scoped twin of another order is not told apart: no file has one; a call quoted in a
 //                          whole-line comment is skipped).
+//   verdictOf(value)     → the GUARDED COERCION the guard tool (scripts/guard-inline-helpers.mjs) wraps an existing call's
+//                          condition in: a thenable or a function is no verdict — the leg fails, red by name (a line on
+//                          stderr names the suite and the kind); any other value coerces as !!value.
 // test-ci-gate-tiers §7b runs both over every script: no swapped call anywhere, and the inline helpers without the guard
-// only ever fall (a new suite imports this file). PURE: no I/O beyond the console in checker().
+// only ever fall (a new suite imports this file). PURE: no I/O beyond the console in checker() and verdictOf().
 
 export function checker({ log = (l) => console.log(l), err = (l) => console.error(l), exit = (c) => process.exit(c) } = {}) {
   const counts = { pass: 0, fail: 0, failed: [] };
@@ -36,6 +39,19 @@ export function checker({ log = (l) => console.log(l), err = (l) => console.erro
   return { ok, report, counts };
 }
 const safeJson = (v) => { try { return JSON.stringify(v); } catch { return String(v); } };
+
+// THE GUARDED COERCION (B-1747 part 2, the coordinator's r1347): scripts/guard-inline-helpers.mjs wraps an EXISTING call's
+// condition in it wherever that condition is no boolean by its operator — never a plain `!!( … )`, which would make a vacuous
+// leg invisible for good. A THENABLE or a FUNCTION handed as a verdict proves nothing (an un-awaited promise is always
+// truthy): the leg FAILS, red by name — this line names the suite and the kind, the helper's own ✗ line names the leg — so
+// the first run of the applied tree lists every vacuous leg it held. Any other value coerces exactly as !!value does (a match,
+// a length, a string).
+export function verdictOf(value) {
+  const kind = typeof value === 'function' ? 'a function' : value !== null && typeof value === 'object' && typeof value.then === 'function' ? 'a promise' : null;
+  if (!kind) return !!value;
+  console.error(`  ✗ ${String(process.argv[1] || '').split('/').pop()}: ${kind} handed as a verdict — the leg named next proves nothing (${kind === 'a promise' ? 'await it' : 'call it'}, and compare what it gives)`);
+  return false;
+}
 
 // ── the census (PURE over a file's text) ──────────────────────────────────────────────────────────────────────────────
 // A helper definition = a const / let / var binding of the name to an arrow function of two or more parameters, or a

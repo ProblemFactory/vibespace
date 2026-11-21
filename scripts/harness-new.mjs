@@ -168,16 +168,15 @@ process.exit(2);
 // a tool card, a refusal, resume); the stream shapes; RED copies (scripts/mutant-copy.mjs) for every rule.
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { checker } from './lib/check.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
-let pass = 0, fail = 0;
-const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? ' — ' + e : '')); } };
+const { ok, report } = checker();   // THE ONE GUARDED HELPER (B-1747): a non-boolean condition or a swapped name throws
 const H = require(path.join(REPO, 'src/harnesses/index.js'));
 const d = require(path.join(REPO, 'src/harnesses/${ID}.js'));
-ok(H.has('${ID}') && H.isBuiltin('${ID}'), '${ID} is a registered built-in harness');
+ok(H.has('${ID}') === true && H.isBuiltin('${ID}') === true, '${ID} is a registered built-in harness');
 ok(H.REQUIRED_DESCRIPTOR_KEYS.every((k) => k in d), \`the descriptor declares \${H.REQUIRED_DESCRIPTOR_KEYS.join('/')}\`);
-console.log(fail ? \`\${fail} FAILED (\${pass} passed)\` : \`ALL PASS (\${pass})\`);
-process.exit(fail ? 1 : 0);
+report();
 `;
   return out;
 }

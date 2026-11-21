@@ -107,6 +107,7 @@ const FIX = {
   handsBack: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; return c; };', "ok(extra.length, 'a statement');", "if (!ok(pass, 'a test')) extra.push('failed');", "ok(1, 'chained') && extra.push('chained');"),
   nestedHands: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', K + ' ck = (c, n) => { if (c) pass++; else fail++; return c; };', "ok(ck(1, 'in') && 2, 'out');"),
   clock: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const t0 = performance.now(); const r = { done: true };', "ok(r.done && performance.now() - t0 >= 0, 'a lower bound in a chain');"),
+  vacuous: lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(Promise.resolve(false), 'a promise handed as a verdict');", "ok(() => false, 'a function handed as a verdict');", "ok(/a/.exec('a'), 'a match object');", "ok('ab'.length, 'a length');"),
   opensWithTest: lines(HEAD, K + ' ok = (c, n) => {c ? pass++ : fail++;};', "ok(extra.length, 'a value');", "ok(pass === 0, 'a comparison');"),
 };
 const LEFT = {
@@ -122,13 +123,19 @@ const LEFT = {
   twice: [lines(HEAD, V + ' ok = (c, n) => { if (c) pass++; else fail++; };', '{ ' + V + " ok = (n, c) => { if (c) pass++; else fail++; }; }", "ok('x', 1);"), /^its name is declared twice in one scope/],
   evalFile: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'eval("ok(1, \'x\')");'), /^the file holds a direct eval/],
   nameCond: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "const label = 'x';", 'ok(label, 1 === 1);'), /^a call holds a condition in its NAME slot/],
+  argumentsUse: [lines(HEAD, F + ' check(n, c) { if (!c) fail++; else pass++; extra.push(arguments[1]); }', "check('a value', 3);"), /^it uses its condition as more than true or false/],
+  collision: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', 'const verdictOf = (x) => x;', "ok(verdictOf(1), 'its own');", "ok(2, 'a value');"), /^the file already names another verdictOf/],
   nestedInName: [lines(HEAD, K + ' ok = (c, n) => { if (c) pass++; else fail++; };', "ok(1, 'outer ' + ok(2, 'inner'));"), /^a call of it stands inside another call's NAME argument/],
 };
 const RUNNABLE = ['arrowBlock', 'functionNameFirst', 'arrowExpression', 'scope', 'plants', 'opensWithTest', 'twoHelpers', 'handsBack', 'nestedHands', 'clock'];
 const NAME_SLOT = { ok: 1, check: 0, ck: 1, leg: 0 };
 const LATER = (applied) => applied + '\n' + lines(K + ' check = (c, n) => { if (!c) fail++; else pass++; };', "check(pass, 'a new helper at a later tip');");
 // a fixture run: its tally (or why it threw) — the fixtures are this file's own texts
-const run = (text) => { try { return JSON.stringify(new Function(text + '\nreturn { pass, fail, extra };')()); } catch (e) { return 'THREW ' + String((e && e.message) || e).slice(0, 140); } };
+const IMPORT_RE = /[ ;]import \{ verdictOf \} from '\.\/(?:lib\/)?check\.mjs';/;
+const run = (text) => {
+  const t = text.replace(IMPORT_RE, ''), own = /\b(?:const|let|var|function) verdictOf\b/.test(t);   // a fixture with its own verdictOf keeps it
+  try { return JSON.stringify(new Function(...(own ? [] : ['verdictOf']), t + '\nreturn { pass, fail, extra };')(...(own ? [] : [C.verdictOf]))); } catch (e) { return 'THREW ' + String((e && e.message) || e).slice(0, 140); }
+};
 const nl = (s) => s.split('\n').length;
 const callsOf = (text) => { const out = [], ast = acorn.parse(text, G0.PARSE_OPTS); const v = (n) => { if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name in NAME_SLOT) out.push(n); for (const k in n) { const x = n[k]; if (x && typeof x === 'object' && k !== 'loc') (Array.isArray(x) ? x : [x]).forEach((y) => y && typeof y.type === 'string' && v(y)); } }; v(ast); return out.sort((a, b) => a.start - b.start); };
 
@@ -137,21 +144,26 @@ function verdicts(G, only = null) {
   const V = {}, say = {}, plan = (t) => G.planFile(t, { C, acorn }), edit = (t) => { const p = plan(t); return { p, o: G.applyEdits(t, p.edits) }; };
   const judge = (key, fn) => { if (only && only !== key) return; try { const r = fn(); V[key] = r === true; if (typeof r === 'string') say[key] = r; } catch (e) { V[key] = false; say[key] = 'THREW ' + String(e.message).slice(0, 160); } };
   const R = {}; for (const k of Object.keys(FIX)) R[k] = edit(FIX[k]);
-  const at = (k, n) => R[k].o.split('\n')[n - 1];
+  const at = (k, n) => R[k].o.split('\n')[n - 1].replace(IMPORT_RE, '');   // a line as read, the coercion's import aside (its own leg)
   judge('applied', () => {
     const want = [
       [at('arrowBlock', 2), K + " ok = (c, n) => { " + G0.guardText('ok', 'c') + ' if (c) pass++; else fail++; };'],
       [at('arrowBlock', 4), "ok(v.a === 1, 'a comparison');"], [at('arrowBlock', 5), "ok(!v.none, 'a negation');"],
-      [at('arrowBlock', 8), "ok(true, `a template name ${v.a}`);"], [at('arrowBlock', 10), "ok(!!(v.a), 'a property');"],
-      [at('arrowBlock', 13), "ok(!!(v.s) && !!(v.a), 'an and of values');"], [at('arrowBlock', 14), "ok(!!(v.none ?? v.z), 'a nullish (fails)');"], [at('arrowBlock', 15), "ok(v.a ? !!(v.s) : !!(0), 'a ternary of values');"], [at('arrowBlock', 16), 'ok(!!(v.list'], [at('arrowBlock', 18), "  .find((x) => x > 3)), 'a call over three lines');"],
+      [at('arrowBlock', 8), "ok(true, `a template name ${v.a}`);"], [at('arrowBlock', 10), "ok(verdictOf(v.a), 'a property');"],
+      [at('arrowBlock', 13), "ok(verdictOf(v.s) && verdictOf(v.a), 'an and of values');"], [at('arrowBlock', 14), "ok(verdictOf(v.none ?? v.z), 'a nullish (fails)');"], [at('arrowBlock', 15), "ok(v.a ? verdictOf(v.s) : verdictOf(0), 'a ternary of values');"], [at('arrowBlock', 16), 'ok(verdictOf(v.list'], [at('arrowBlock', 18), "  .find((x) => x > 3)), 'a call over three lines');"],
       [at('functionNameFirst', 3), F + ' check(n, c) { ' + G0.guardText('check', 'c') + ' if (!c) { fail++; return; } pass++; }'],
-      [at('functionNameFirst', 5), "check('a regex test', !!(/a/.test('a')));"], [at('functionNameFirst', 7), "for (const x of [1, 0]) check('a loop value ' + x, !!(x));"],
+      [at('functionNameFirst', 5), "check('a regex test', verdictOf(/a/.test('a')));"], [at('functionNameFirst', 7), "for (const x of [1, 0]) check('a loop value ' + x, verdictOf(x));"],
       [at('arrowExpression', 2), K + ' ck = (c, n) => { ' + G0.guardText('ck', 'c') + ' return (c ? pass++ : fail++); };'],
       [at('arrowExpression', 3), K + ' leg = (n, c) => { ' + G0.guardText('leg', 'c') + ' return ((c ? (pass++, true) : (fail++, false))); };'],
-      [at('twoHelpers', 4), "ok(!!(check('in', !!(1))) && !!(2), 'out');"], [at('clock', 4), "ok(!!(r.done) && performance.now() - t0 >= 0, 'a lower bound in a chain');"],
-      [at('handsBack', 4), "if (!ok(!!(pass), 'a test')) extra.push('failed');"],
-      [at('scope', 3), F + " inner(ok) { return ok(5, 'not ours: a parameter'); }"], [at('scope', 5), '{ ' + K + ' ok = (a, b) => a * b; extra.push(ok(6, 7)); }'], [at('scope', 6), "ok(!!(pass + 1), 'ours');"],
+      [at('twoHelpers', 4), "ok(verdictOf(check('in', verdictOf(1))) && verdictOf(2), 'out');"], [at('clock', 4), "ok(verdictOf(r.done) && performance.now() - t0 >= 0, 'a lower bound in a chain');"],
+      [at('handsBack', 4), "if (!ok(verdictOf(pass), 'a test')) extra.push('failed');"],
+      [at('scope', 3), F + " inner(ok) { return ok(5, 'not ours: a parameter'); }"], [at('scope', 5), '{ ' + K + ' ok = (a, b) => a * b; extra.push(ok(6, 7)); }'], [at('scope', 6), "ok(verdictOf(pass + 1), 'ours');"],
     ];
+    // the coercion's import: once, on the LAST line of every fixture with a wrap (no line moves); none where nothing is wrapped
+    const imp = Object.keys(R).filter((k) => R[k].p.edits.some((e) => e.kind === 'wrap-open')), noWrap = Object.keys(R).filter((k) => !imp.includes(k));
+    const lastOk = imp.every((k) => { const ls = R[k].o.split('\n'); return (R[k].o.match(new RegExp(IMPORT_RE.source, 'g')) || []).length === 1 && IMPORT_RE.test(ls[ls.length - 1]); }) && noWrap.every((k) => !IMPORT_RE.test(R[k].o));
+    want.push([String(lastOk), 'true']);
+    want.push([R.functionNameFirst.o.split('\n')[6].slice(-50), "x, verdictOf(x)); import { verdictOf } from './lib/check.mjs';".slice(-50)]);
     const bad = want.filter(([got, w]) => got !== w);
     const shapes = JSON.stringify([R.arrowBlock.p, R.functionNameFirst.p, R.arrowExpression.p, R.scope.p].map((p) => [p.guards.map((g) => g.shape).join('+'), p.calls.wrapped, p.calls.boolean]));
     say.applied = `the edited lines read as written, ${want.length} of them; [shape, wrapped, boolean] by fixture ${shapes}${bad.length ? ' — OFF: ' + bad.map(([g, w]) => `«${String(g).slice(0, 90)}» ≠ «${w.slice(0, 90)}»`).join(' | ') : ''}`;
@@ -169,7 +181,7 @@ function verdicts(G, only = null) {
     return off.length === 0;
   });
   judge('literal', () => {
-    const lit = Object.keys(R).filter((k) => /!!\(\s*['"`]/.test(R[k].o));
+    const lit = Object.keys(R).filter((k) => /verdictOf\(\s*['"`]/.test(R[k].o));
     const swaps = ['swapWhole', 'swapJoined'].map((k) => { const p = plan(LEFT[k][0]); return p.edits.length === 0 && p.left.length === 1 && LEFT[k][1].test(p.left[0].why); });
     say.literal = `no condition shaped as a string is wrapped; a whole and a joined string where the condition goes leave their helper by name (${swaps.join(', ')})${lit.length ? ' — WRAPPED in ' + lit.join(', ') : ''}`;
     return lit.length === 0 && swaps.every(Boolean);
@@ -195,7 +207,7 @@ function verdicts(G, only = null) {
     return bad.length === 0 && !named.ok && named.why.some((w) => /an edit inside a NAME argument/.test(w)) && notes.length === 1 && /^opensWithTest: the census no longer reads the order of ok at line 2/.test(notes[0]) && C.helperDefs(R.opensWithTest.o)[0].order === 'unknown';
   });
   judge('twice', () => {
-    const again = [...Object.keys(R).filter((k) => k !== 'nested').map((k) => [k, R[k].o]), ...Object.entries(LEFT).map(([k, [t]]) => [k, G.applyEdits(t, plan(t).edits)])].map(([k, t]) => [k, plan(t)]).filter(([, p]) => p.edits.length);
+    const again = [...Object.keys(R).map((k) => [k, R[k].o]), ...Object.entries(LEFT).map(([k, [t]]) => [k, G.applyEdits(t, plan(t).edits)])].map(([k, t]) => [k, plan(t)]).filter(([, p]) => p.edits.length);
     say.twice = `a second run over every edited text plans nothing${again.length ? ' — AGAIN: ' + again.map(([k, p]) => `${k} ${p.guards.length} guards ${p.wraps.length} wraps`).join(', ') : ''}`;
     return again.length === 0;
   });
@@ -205,14 +217,14 @@ function verdicts(G, only = null) {
     return p.guards.length === 1 && p.guards[0].name === 'check' && p.wraps.length === 1 && p.wraps[0].cond === 'pass';
   });
   judge('behaviour', () => {
-    const off = RUNNABLE.filter((k) => run(FIX[k]) !== run(R[k].o) || /^THREW/.test(run(R[k].o)));
+    const off = RUNNABLE.filter((k) => run(FIX[k]) !== run(R[k].o) || /^THREW/.test(run(R[k].o)));   // (the vacuous fixture: its own leg)
     const swapped = '\nok(\'a swapped name\', v.a);', before = run(FIX.arrowBlock + swapped), after = run(R.arrowBlock.o + swapped);
     say.behaviour = `each fixture's tally is the same before and after (${run(R.arrowBlock.o)} · ${run(R.arrowExpression.o)} · ${run(R.scope.o)}); a swapped call passed before (${before.slice(0, 40)}) and THROWS after (${after.slice(0, 90)})${off.length ? ' — DIFFERS: ' + off.map((k) => `${k} ${run(FIX[k])} → ${run(R[k].o)}`).join(' | ') : ''}`;
     return off.length === 0 && /"pass":/.test(before) && /^THREW ok: its condition is a string, not a boolean/.test(after);
   });
   judge('left', () => {
     const r = Object.entries(LEFT).map(([k, [t, why]]) => { const p = plan(t); return [k, p.edits.length === 0 && p.left.length >= 1 && p.left.every((x) => why.test(x.why)), p.left.length ? p.left.map((x) => x.why).join(' / ') : 'NOT LEFT']; });
-    const asBefore = ['handed', 'valueUse', 'handsRead', 'namedExpr', 'nameCond', 'nestedInName'].filter((k) => run(LEFT[k][0]) !== run(G.applyEdits(LEFT[k][0], plan(LEFT[k][0]).edits)));
+    const asBefore = ['handed', 'valueUse', 'handsRead', 'namedExpr', 'nameCond', 'nestedInName', 'argumentsUse', 'collision'].filter((k) => run(LEFT[k][0]) !== run(G.applyEdits(LEFT[k][0], plan(LEFT[k][0]).edits)));
     say.left = `each helper the guard could make throw, or a wrap change, is LEFT by name: ${r.map(([k, y, w]) => `${k} ${y ? '✓' : '✗ ' + w.slice(0, 70)}`).join(' · ')}; they run as before${asBefore.length ? ' — NOT: ' + asBefore.join(', ') : ''}`;
     return r.every(([, y]) => y) && asBefore.length === 0;
   });
@@ -221,8 +233,19 @@ function verdicts(G, only = null) {
     say.scope = `a parameter and an inner block named like the helper bind other functions: ${p.wraps.length} wrap (${p.wraps.map((w) => w.cond).join(', ')}), the run the same: ${run(R.scope.o)}`;
     return p.wraps.length === 1 && p.wraps[0].cond === 'pass + 1' && same && run(R.scope.o).includes('[26,42]');
   });
+  judge('vacuous', () => {
+    // THE ROW'S OWN CLASS STAYS VISIBLE (r1347): a promise or a function handed as a verdict passed before; once wrapped it FAILS,
+    // red by name (a line naming the kind), while a match object and a length pass as before
+    const said = [], err0 = console.error;
+    console.error = (...a) => { said.push(a.join(' ')); };
+    let was, now;
+    try { was = run(FIX.vacuous); now = run(R.vacuous.o); } finally { console.error = err0; }
+    const kinds = ['a promise handed as a verdict', 'a function handed as a verdict'].map((k) => said.some((l) => l.includes(k)));
+    say.vacuous = `before ${was} → after ${now}; said: ${said.map((l) => l.trim().slice(0, 90)).join(' | ') || 'NOTHING'}`;
+    return was === JSON.stringify({ pass: 4, fail: 0, extra: [] }) && now === JSON.stringify({ pass: 2, fail: 2, extra: [] }) && kinds.every(Boolean);
+  });
   judge('clock', () => {
-    const read = (t) => JSON.stringify(W.wallClockFindings(t).map((f) => [f.line, f.kind, f.boundMs]));
+    const read = (t) => JSON.stringify(W.wallClockFindings(t, { fields: W.productSpanFields(t) }).map((f) => [f.line, f.kind, f.boundMs]));
     const was = read(FIX.clock), now = read(R.clock.o), chk = G.selfCheck(FIX.clock, R.clock.o, R.clock.p, { C, acorn, W });
     say.clock = `the wall-clock census reads the bound in a wrapped && chain the same before and after: ${was} → ${now}; the self-check with it: ${chk.ok ? 'green' : chk.why.join('; ').slice(0, 120)}`;
     return was !== '[]' && was === now && chk.ok;
@@ -231,16 +254,32 @@ function verdicts(G, only = null) {
 }
 
 // ⑨ the run over a scratch repo
-async function treeRun(G, name) {
+const TREE_FILES = { 'scripts/a.mjs': FIX.arrowBlock, 'scripts/b.mjs': LEFT.handed[0], 'scripts/c.mjs': FIX.plants, 'scripts/e.mjs': LEFT.spread[0], 'scripts/lib/d.mjs': FIX.arrowExpression };
+const TREE_LISTED = { 'a.mjs': 1, 'b.mjs': 1, 'c.mjs': 4, 'gone.mjs': 1, 'lib/d.mjs': 2 };
+function scratchRepo(name) {
   const dir = scratch(name), w = (rel, t) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), t); };
   w('scripts/lib/check.mjs', fs.readFileSync(path.join(REPO, 'scripts', 'lib', 'check.mjs'), 'utf8'));
   w('package.json', '{ "name": "guard-inline-fixture", "private": true }\n');
   fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(dir, 'node_modules'));
-  const files = { 'scripts/a.mjs': FIX.arrowBlock, 'scripts/b.mjs': LEFT.handed[0], 'scripts/c.mjs': FIX.plants, 'scripts/e.mjs': LEFT.spread[0], 'scripts/lib/d.mjs': FIX.arrowExpression };
-  for (const [rel, t] of Object.entries(files)) w(rel, t);
-  const listed = { 'a.mjs': 1, 'b.mjs': 1, 'c.mjs': 4, 'gone.mjs': 1, 'lib/d.mjs': 2 };
-  w('scripts/fixtures/unguarded-helpers.json', JSON.stringify({ '//': 'a fixture list', files: listed }, null, 1) + '\n');
-  const read = (rel) => fs.readFileSync(path.join(dir, rel), 'utf8'), logs = [[], [], []];
+  for (const [rel, t] of Object.entries(TREE_FILES)) w(rel, t);
+  w('scripts/fixtures/unguarded-helpers.json', JSON.stringify({ '//': 'a fixture list', files: TREE_LISTED }, null, 1) + '\n');
+  return { dir, read: (rel) => fs.readFileSync(path.join(dir, rel), 'utf8') };
+}
+// a temp write that fails at the second file: NOTHING may change (every file as it was, no temp left, the list as it was)
+async function treeFault(G, name) {
+  const { dir, read } = scratchRepo(name), logs = [];
+  let n = 0;
+  const io = { writeFile: (p, t) => { if (/\.guard-tmp$/.test(p) && ++n === 2) throw Object.assign(new Error('ENOSPC: a planted full disk'), { code: 'ENOSPC' }); fs.writeFileSync(p, t); }, rename: (a, b) => fs.renameSync(a, b), unlink: (p) => fs.unlinkSync(p) };
+  const T = await G.runTree(dir, { apply: true, log: (l) => logs.push(l), io });
+  const same = Object.entries(TREE_FILES).every(([rel, t]) => read(rel) === t) && JSON.stringify(JSON.parse(read('scripts/fixtures/unguarded-helpers.json')).files) === JSON.stringify(TREE_LISTED);
+  const temps = [];
+  const walkDir = (d) => { for (const e of fs.readdirSync(d, { withFileTypes: true })) { if (e.name === 'node_modules') continue; const q = path.join(d, e.name); if (e.isDirectory()) walkDir(q); else if (/\.guard-tmp$/.test(e.name)) temps.push(e.name); } };
+  walkDir(path.join(dir, 'scripts'));
+  const said = logs.find((l) => /APPLY/.test(l)) || '';
+  return { verdict: same && temps.length === 0 && /APPLY FAILED: a temp could not be written \(ENOSPC\)[^]*NOTHING CHANGED/.test(said) && T.written === false, say: `${said.slice(0, 160)} · every file as it was: ${same} · temps left: ${temps.length}` };
+}
+async function treeRun(G, name) {
+  const { dir, read } = scratchRepo(name), files = TREE_FILES, listed = TREE_LISTED, logs = [[], [], []];
   const dry = await G.runTree(dir, { log: (l) => logs[0].push(l) });
   const dryKept = Object.entries(files).every(([rel, t]) => read(rel) === t) && JSON.parse(read('scripts/fixtures/unguarded-helpers.json')).files['a.mjs'] === 1;
   const applied = await G.runTree(dir, { apply: true, log: (l) => logs[1].push(l) });
@@ -261,10 +300,11 @@ const LEG_NAMES = {
   plants: '⑤ a helper spelled in a string, a template or a comment is a plant — told apart, never edited', inside: '⑤ an edit point inside a string is refused by the self-check',
   selfCheck: '⑤ the self-check: green on what it may write, red on a call nested in a name', twice: '⑥ run twice = run once', later: '⑥ a later tip: only what is new',
   behaviour: '⑦ it passes exactly when it passed before; a swap now throws', left: '⑧ left by rule, by name', scope: '⑧ scope by scope: a parameter or an inner binding is another function',
-  clock: '⑦ a comparison stays outside every !: the wall-clock census reads a bound the same',
+  clock: '⑦ a comparison stays outside every wrap: the wall-clock census reads a bound the same (with the product\'s span fields)',
+  vacuous: '⑦ THE ROW\'S CLASS STAYS VISIBLE: a promise or a function handed as a verdict now fails, red by name; a match and a length pass as before',
 };
 for (const [k, label] of Object.entries(LEG_NAMES)) ok(real.V[k] === true, label, real.say[k] || '');
-for (const k of ['applied', 'behaviour', 'later', 'plants']) console.log(`    ${k}: ${String(real.say[k]).slice(0, 400)}`);
+for (const k of ['applied', 'behaviour', 'later', 'plants', 'vacuous']) console.log(`    ${k}: ${String(real.say[k]).slice(0, 400)}`);
 
 console.log('\n②–⑧ RED CONTROLS: each guarantee\'s leg goes red on a tool that breaks it');
 const REDS = [
@@ -275,7 +315,9 @@ const REDS = [
   ['inside', "the self-check's span test out", 'if (code.ok) for (const e of es) if (code.inside(e.at))', 'if (false) for (const e of es) if (code.inside(e.at))'],
   ['twice', 'a guard the census cannot read (the value-use rule out too: it would leave such a helper, not guard it again)', "${condP} !== 'boolean') throw new TypeError(", "${condP} !== 'boolean') console.error(", VALUE_RULE_OUT],
   ['later', 'targets that ignore «guarded» (the value-use rule out too: the guard\'s own typeof would leave the old helper)', "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown' && !d.guarded);", "const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown');", VALUE_RULE_OUT],
-  ['behaviour', '`!(` for `!!(`', "text: '!!(', kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
+  ['behaviour', '`!(` for the coercion', "text: `${VERDICT}(`, kind: 'wrap-open'", "text: '!(', kind: 'wrap-open'"],
+  ['vacuous', 'a plain `!!(` for the coercion (every vacuous leg invisible)', "text: `${VERDICT}(`, kind: 'wrap-open'", "text: '!!(', kind: 'wrap-open'"],
+  ['left', 'the arguments rule out', "else if (n.name === 'arguments' && ownArgs) seen(n, 'value');", ''],
   ['behaviour', 'an expression block without its return', 'text: `{ ${guard} return (`', 'text: `{ ${guard} (`'],
   ['left', 'the handed-on rule out', 'if (handed) { leave(', 'if (false) { leave('],
   ['scope', 'calls read by name, not by binding', 'const mine = B.calls.filter((c) => c.bind === b.id);', 'const mine = B.calls.filter((c) => c.node.callee.name === d.name);'],
@@ -295,6 +337,11 @@ console.log('\n⑨ the run over a tree (a scratch repo)');
 const tr = await treeRun(G0, 'guard-inline-repo');
 ok(tr.verdict, '⑨ the dry run writes nothing; the apply writes and lowers the one-way list; a second run says NOTHING TO DO', tr.say);
 console.log('    ' + tr.say);
+const tf = await treeFault(G0, 'guard-inline-repo-fault');
+ok(tf.verdict, '⑨ ALL OR NOTHING ON DISK: a temp write that fails at the second file changes nothing, leaves no temp, and is said', tf.say);
+console.log('    ' + tf.say);
+const tfRed = await treeFault(await mutant('red-direct-write', ["io.writeFile(p + '.guard-tmp', out); made.push(p);", "io.writeFile(p, out); made.push(p);"]), 'guard-inline-repo-fault-red');
+ok(tfRed.verdict === false, 'RED «each file written in place, no temp first»: a failure at the second file leaves the first one changed', tfRed.say);
 const trRed = await treeRun(mutants['red-twice-5'], 'guard-inline-repo-red');
 ok(trRed.verdict === false, 'RED «a guard the census cannot read»: the tree run is refused or runs again', `${trRed.say} — ${trRed.logs[1].find((l) => /APPLY|APPLIED/.test(l)) || ''}`);
 console.log('    ' + (trRed.logs[1].find((l) => /APPLY|APPLIED/.test(l)) || '').slice(0, 160));

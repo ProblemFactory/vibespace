@@ -16,8 +16,12 @@
 //      right after the body's `{`; an ARROW WITH AN EXPRESSION BODY gets a block made of it, on the same lines:
 //      `=> { <guard> return (<the expression, the parser's own range>); }`.
 //   3. WRAPS each call whose condition is not a boolean BY ITS OPERATOR (true / false, `!`, a comparison, instanceof / in,
-//      and && / || / ?: made of those) in place: `!!( … )` around each operand of an && / || chain (each branch of a ?:) that
-//      is not one, so a comparison never stands under a `!`. Only a helper whose body asks its condition TRUE OR FALSE (an
+//      and && / || / ?: made of those) in place, through THE GUARDED COERCION of the shared checker (scripts/lib/check.mjs
+//      verdictOf, imported on the file's last code line: no line moves) around each operand of an && / || chain (each branch
+//      of a ?:) that is not one, so a comparison never stands under a call. NEVER A PLAIN `!!( … )` (the coordinator's r1347:
+//      it would make every vacuous leg of the tree invisible for good): a PROMISE or a FUNCTION handed as a verdict now FAILS,
+//      red by name, so the applied tree's first run LISTS the vacuous legs it held; any other value coerces as !! would (a
+//      match, a length, a string: coerced, not audited). Only a helper whose body asks its condition TRUE OR FALSE (an
 //      if / ?: test, a `!`, an && / || in a test or a statement) is guarded — there the call passes exactly when it passed
 //      before, and the guard never throws on a call that was there. A condition shaped as a STRING (a literal, a template, a
 //      `+` with one) is never wrapped: that is the swap the guard exists for, and its helper is left, by name, for the call
@@ -28,15 +32,18 @@
 //      operator, and its NAME argument byte-identical with no edit inside it; the census reads every guarded helper as
 //      guarded with its order unchanged (or, said by name, no longer reads the order of one whose body opens with its
 //      test), and no helper more or less; the wall-clock census reads a file with a `<` / `>` in a wrapped condition the
-//      same. If any file fails, or a SECOND RUN over the texts it would write plans anything, NOTHING is written, the
-//      failures are said by name, and the run exits 1.
+//      same, with the product's span fields as the gate's ratchet reads it; a wrapped file imports the coercion. If any file
+//      fails, or a SECOND RUN over the texts it would write plans anything, NOTHING is written, the failures are said by
+//      name, and the run exits 1. ON DISK too: every file is written to a temp first and renamed only when all stand (a
+//      failed rename says its one restore step: `git checkout -- scripts`).
 //   5. LOWERS the one-way list scripts/fixtures/unguarded-helpers.json to what the census reads after it (a row only falls;
 //      a row is never added or raised — a rise is §7b's red).
 // NOT BY RULE (each said by name and line; the guard could throw, or a wrap change what it sees, where the tool cannot
 // tell): a condition parameter that is destructured, defaulted or a rest; an exported helper (its calls live in other
 // files); a helper handed on as a value (passed, stored, reassigned, exported by name); a named function expression; a name
 // declared twice in one scope; a file with a direct eval or a with statement; a body that uses its condition as more than
-// true or false (c === true, typeof c, c printed, stored or passed on, c ?? x); one that hands its condition back where a
+// true or false (c === true, typeof c, c printed, stored or passed on, c ?? x, or a function helper's own `arguments`); a
+// file that already names another verdictOf; one that hands its condition back where a
 // call reads the value; a call with no condition argument, or by spread; a call that hands it a string where the condition
 // goes, or holds a condition in its name slot (a swap: cure the call first); a call of it inside another call's name
 // argument; a file the parser cannot read. scripts/lib/check.mjs (the census and the one guarded checker) is not a target.
@@ -44,7 +51,10 @@
 // run finds nothing and says so; at any later tip it guards only a helper that is new, and wraps only that helper's calls.
 //   node scripts/guard-inline-helpers.mjs [<repo>]                              the DRY RUN: counts, the self-check, writes nothing
 //   node scripts/guard-inline-helpers.mjs --list [<repo>]                       … and each guard, wrap, plant and helper left, one line each
-//   node scripts/guard-inline-helpers.mjs --apply --coordinator-word [<repo>]   writes (the integrator, on the coordinator's word)
+//   node scripts/guard-inline-helpers.mjs --apply --coordinator-word [<repo>]   writes (the integrator, on the coordinator's word —
+//        a word the integrator types, not a second check), ON THE BLOCK'S ASSEMBLED TIP as its last line; the apply's proof
+//        (it prints it): the dry run says NOTHING TO DO after it, the stale-pin scan over the APPLIED diff, the whole fast tier in
+//        both zones, every heavy suite it edited, and the vacuous legs the first run lists, each cured or named
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -190,26 +200,26 @@ export function bindingsOf(ast, names) {
 }
 
 // ── how a helper's own body uses its condition (the body as found, before any guard) ───────────────────────────────────────
-// A `!!( … )` keeps what a call passes only for a body that asks its condition TRUE OR FALSE: an if / while / for / ?: test, a
+// A wrap keeps what a call passes only for a body that asks its condition TRUE OR FALSE: an if / while / for / ?: test, a
 // `!`, an && / || in a test or a statement, Boolean(c). → { value: the first use that sees more (c === true, typeof c, c passed
 // on, printed, stored, `c ?? x`), or null; hands: it hands its condition back (`return c`, an expression body that is c) }.
 // A nested function that binds the same name is another variable; one that reads it is judged the same way (a return there is
 // a value).
 const isStmt = (c) => /(?:Statement|Declaration)$/.test(c.type) || c.type === 'StaticBlock';
 export function condUse(fn, name, wrapped = null) {
-  let value = null, hands = false;
+  let value = null, hands = false, ownArgs = fn.type !== 'ArrowFunctionExpression';   // a function's own `arguments` reads its condition unseen
   const seen = (n, pos) => { if (pos === 'return') hands = true; else if (pos === 'value' && !value) value = n; };
   function expr(n, pos, nested) {
     if (!n) return;
     switch (n.type) {
-      case 'Identifier': if (n.name === name) seen(n, pos === 'return' && nested ? 'value' : pos); return;
+      case 'Identifier': if (n.name === name) seen(n, pos === 'return' && nested ? 'value' : pos); else if (n.name === 'arguments' && ownArgs) seen(n, 'value'); return;
       case 'ParenthesizedExpression': return expr(n.expression, pos, nested);
       case 'UnaryExpression': return expr(n.argument, n.operator === '!' ? 'test' : n.operator === 'void' ? 'discard' : 'value', nested);
       case 'LogicalExpression': expr(n.left, n.operator !== '??' && (pos === 'test' || pos === 'discard') ? 'test' : 'value', nested); return expr(n.right, pos, nested);
       case 'ConditionalExpression': expr(n.test, 'test', nested); expr(n.consequent, pos, nested); return expr(n.alternate, pos, nested);
       case 'SequenceExpression': n.expressions.forEach((x, i) => expr(x, i === n.expressions.length - 1 ? pos : 'discard', nested)); return;
       case 'CallExpression':
-        if (n.callee.type === 'Identifier' && n.callee.name === 'Boolean' && n.arguments.length === 1) return expr(n.arguments[0], 'test', nested);
+        if (isCoercion(n)) return expr(n.arguments[0], 'test', nested);
         // the condition of a call the tool guards is read as true or false once wrapped (the same reading a second run makes)
         if (wrapped && n.arguments.some((a) => wrapped(n, a))) { expr(n.callee, 'value', nested); for (const a of n.arguments) expr(a, wrapped(n, a) ? 'test' : 'value', nested); return; }
         break;
@@ -237,8 +247,11 @@ export function condUse(fn, name, wrapped = null) {
   }
   function fnBody(f, nested) {
     if (nested && (f.id && f.id.name === name || f.params.some((p) => patternIds(p).some((id) => id.name === name)))) return;
+    const had = ownArgs;
+    if (nested && f.type !== 'ArrowFunctionExpression') ownArgs = false;   // an inner function's `arguments` is its own
     for (const p of f.params) if (p.type === 'AssignmentPattern') expr(p.right, 'value', nested);
     if (f.body.type === 'BlockStatement') for (const s of f.body.body) stmt(s, nested); else expr(f.body, nested ? 'value' : 'return', nested);
+    ownArgs = had;
   }
   fnBody(fn, false);
   return { value, hands };
@@ -260,13 +273,19 @@ export function callPos(node, parent, wrapped = null) {
       case 'ConditionalExpression': if (p.test === n) return 'test'; n = p; continue;
       case 'SequenceExpression': if (p.expressions[p.expressions.length - 1] !== n) return 'discard'; n = p; continue;
       case 'LogicalExpression': { if (p.operator === '??') return 'value'; const up = callPos(p, parent, wrapped); return up === 'test' ? 'test' : up === 'discard' ? (p.left === n ? 'test' : 'discard') : 'value'; }
-      case 'CallExpression': return wrapped && wrapped(p, n) ? 'test' : 'value';
+      case 'CallExpression': return isCoercion(p) || (wrapped && wrapped(p, n)) ? 'test' : 'value';
       default: return 'value';
     }
   }
 }
 
 // ── 3. the condition's shape, by its operator (never by a name or a method: those are wrapped) ─────────────────────────────
+// THE WRAP (the coordinator's r1347): scripts/lib/check.mjs verdictOf — the GUARDED coercion, never a plain `!!( … )`: a
+// thenable or a function handed as a verdict fails red by name, any other value coerces as !!value. Its import goes on the
+// file's last code line (an import is hoisted: no line moves); `Boolean(x)` and `verdictOf(x)` are booleans by their call.
+export const VERDICT = 'verdictOf';
+const isCoercion = (n) => !!n && n.type === 'CallExpression' && n.callee.type === 'Identifier' && (n.callee.name === VERDICT || n.callee.name === 'Boolean') && n.arguments.length === 1 && n.arguments[0].type !== 'SpreadElement';
+export const importText = (file = '', after = '') => `${after === ';' ? ' ' : ';'}import { ${VERDICT} } from '${String(file).startsWith('lib/') ? './check.mjs' : './lib/check.mjs'}';`;
 const CMP = new Set(['==', '!=', '===', '!==', '<', '<=', '>', '>=', 'instanceof', 'in']);
 export function boolByNode(n) {
   switch (n && n.type) {
@@ -277,6 +296,7 @@ export function boolByNode(n) {
     case 'ConditionalExpression': return boolByNode(n.consequent) && boolByNode(n.alternate);
     case 'ParenthesizedExpression': return boolByNode(n.expression);
     case 'SequenceExpression': return boolByNode(n.expressions[n.expressions.length - 1]);
+    case 'CallExpression': return isCoercion(n);
     default: return false;
   }
 }
@@ -291,7 +311,7 @@ export function stringByNode(n) {
     default: return false;
   }
 }
-// where `!!( … )` goes so that a condition is a boolean by its operator, as true or as false as it was: around each operand of
+// where the coercion goes so that a condition is a boolean by its operator, as true or as false as it was: around each operand of
 // an && / || chain and each branch of a ?: that is not one — so a comparison never stands under a `!` (the wall-clock census
 // reads a bound through it), and the wrap is the smallest
 export function wrapsOf(n) {
@@ -310,7 +330,7 @@ export function guardText(name, condP) {
 // so a wrap inside another call's condition composes, and nothing is ever replaced.
 // → { skipped, code, edits, guards: [{ name, at, line, order, shape, condP }], plants: [{ name, line }], left: [{ name, line, kind, why }],
 //     calls: { all, wrapped, boolean }, wraps: [{ line, name, cond, pieces }], checks: [the read-back of each wrapped call] }
-export function planFile(src, { C, acorn }) {
+export function planFile(src, { C, acorn, file = '' }) {
   const res = { skipped: null, code: null, edits: [], guards: [], plants: [], left: [], calls: { all: 0, wrapped: 0, boolean: 0 }, wraps: [], checks: [] };
   const judged = C.helperDefs(src).filter((d) => d.order !== 'unknown' && !d.guarded);
   if (!judged.length) return res;
@@ -397,12 +417,20 @@ export function planFile(src, { C, acorn }) {
       res.calls.all++;
       const a = c.node.arguments, cond = a[slot], ws = wrapsOf(cond);
       if (!ws.length) { res.calls.boolean++; continue; }
-      for (const [s, e] of ws) { res.edits.push({ at: s, len: 0, text: '!!(', kind: 'wrap-open', pair: e }); res.edits.push({ at: e, len: 0, text: ')', kind: 'wrap-close', pair: s }); }
+      for (const [s, e] of ws) { res.edits.push({ at: s, len: 0, text: `${VERDICT}(`, kind: 'wrap-open', pair: e }); res.edits.push({ at: e, len: 0, text: ')', kind: 'wrap-close', pair: s }); }
       const nameArg = a[nameSlot] || null;
       res.checks.push({ callee: c.node.callee.start, slot, nameSlot, condStart: cond.start, condEnd: cond.end, cond: text(cond), name: nameArg ? text(nameArg) : null, nameStart: nameArg ? nameArg.start : -1, nameEnd: nameArg ? nameArg.end : -1 });
       res.calls.wrapped++;
       res.wraps.push({ line: lineAt(c.node.start), name: d.name, cond: text(cond).replace(/\s+/g, ' ').slice(0, 80), pieces: ws.length });
     }
+  }
+  // the coercion's import, once, on the file's last code line (hoisted: no line moves) — or the one an earlier run put there
+  if (res.edits.some((e) => e.kind === 'wrap-open')) {
+    const body = code.ast.body, has = body.some((n) => n.type === 'ImportDeclaration' && /(?:^|\/)check\.mjs$/.test(String(n.source.value)) && n.specifiers.some((x) => x.type === 'ImportSpecifier' && x.imported.name === VERDICT && x.local.name === VERDICT));
+    if (!has && new RegExp(`\\b${VERDICT}\\b`).test(src)) {   // the file names another verdictOf: every helper of it is left
+      for (const g of res.guards) left.set(inCode.find((d) => d.at === g.at), [`the file already names another ${VERDICT}`, '']);
+      res.edits = []; res.guards = []; res.checks = []; res.wraps = []; res.calls = { all: 0, wrapped: 0, boolean: 0 };
+    } else if (!has && body.length) { const end = body[body.length - 1].end; res.edits.push({ at: end, len: 0, text: importText(file, src[end - 1]), kind: 'import' }); }
   }
   for (const [d, [kind, where]] of left) res.left.push({ name: d.name, line: d.line, kind, why: kind + where });
   res.left.sort((x, y) => x.line - y.line);
@@ -410,9 +438,11 @@ export function planFile(src, { C, acorn }) {
 }
 
 // ── applying, and the tool's own proof ──────────────────────────────────────────────────────────────────────────────────────
-// the order of insertions at one point: what closes there first (the inner first), then what opens (the outer first)
+// the order of insertions at one point: what closes there first (the inner first), then what opens (the outer first), and
+// the coercion's import last of all (after a statement that ends with an expression body's own close)
 const OPENS = new Set(['guard', 'block-open', 'wrap-open']), FAR = 1e15;
-export const insertionOrder = (a, b) => a.at - b.at || (OPENS.has(a.kind) - OPENS.has(b.kind)) || (b.pair ?? FAR) - (a.pair ?? FAR);
+const rank = (e) => (e.kind === 'import' ? 2 : OPENS.has(e.kind) ? 1 : 0);
+export const insertionOrder = (a, b) => a.at - b.at || rank(a) - rank(b) || (b.pair ?? FAR) - (a.pair ?? FAR);
 export function applyEdits(src, edits) {
   const es = [...edits].sort(insertionOrder), parts = [];
   let k = 0;
@@ -467,10 +497,11 @@ export function selfCheck(src, out, plan, { C, acorn, W = null }) {
     else if (guarded.has(d.at) ? !x.guarded : x.guarded !== d.guarded) why.push(`the census reads ${d.name} at line ${d.line} as ${x.guarded ? '' : 'un'}guarded`);
   });
   if (C.swappedCalls(out, after).length > C.swappedCalls(src, before).length) why.push('the census reads a swapped call the file did not hold');
+  if (es.some((e) => e.kind === 'wrap-open') && !back.ast.body.some((n) => n.type === 'ImportDeclaration' && n.specifiers.some((x) => x.type === 'ImportSpecifier' && x.imported.name === VERDICT && x.local.name === VERDICT) && /(?:^|\/)check\.mjs$/.test(String(n.source.value)))) why.push(`a wrapped file does not import ${VERDICT} from the shared checker`);
   // (only where a wrap holds a comparison: a top-level one stays outside every wrap by wrapsOf)
   const cmp = (t) => /[<>]/.test(t.replace(/=>/g, ''));
   if (W && es.some((e) => e.kind === 'wrap-open' && cmp(src.slice(e.at, e.pair)))) {
-    const read = (t) => JSON.stringify(W.wallClockFindings(t).map((f) => [f.line, f.kind, f.boundMs]));
+    const read = (t) => JSON.stringify(W.wallClockFindings(t, { fields: W.productSpanFields ? W.productSpanFields(t) : [] }).map((f) => [f.line, f.kind, f.boundMs]));   // the gate's own ratchet reads with the product's span fields
     const was = read(src), now = read(out);
     if (was !== now) why.push(`the wall-clock census reads it otherwise after the edit (${was.slice(0, 60)} → ${now.slice(0, 60)})`);
   }
@@ -486,17 +517,22 @@ export function lowerList(listed, counts) {
 
 // ── the run over a tree ─────────────────────────────────────────────────────────────────────────────────────────────────────
 export const LIST_FILE = path.join('scripts', 'fixtures', 'unguarded-helpers.json');
-export async function runTree(repo, { apply = false, list = false, log = (l) => console.log(l) } = {}) {
+// THE WRITES ARE ALL OR NOTHING ON DISK TOO (the round's should): every file is first written whole to a temp beside it; only
+// when every temp stands are they renamed into place, the list last. A failed temp write removes every temp: nothing changed.
+// A failed rename (after the first) is said with the one restore step: `git checkout -- scripts` (the tree is a git checkout).
+// `io` is the test's seam (a planted failure); the tool itself uses fs.
+export async function runTree(repo, { apply = false, list = false, log = (l) => console.log(l), io = { writeFile: (p, t) => fs.writeFileSync(p, t), rename: (a, b) => fs.renameSync(a, b), unlink: (p) => fs.unlinkSync(p) } } = {}) {
   const C = await import(pathToFileURL(path.join(repo, 'scripts', 'lib', 'check.mjs')).href);
   const acorn = createRequire(path.join(repo, 'package.json'))('acorn');
   const wcc = path.join(repo, 'scripts', 'wall-clock-census.mjs'), W = fs.existsSync(wcc) ? await import(pathToFileURL(wcc).href) : null;
   const dir = path.join(repo, 'scripts');
-  const files = [...fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')), ...fs.readdirSync(path.join(dir, 'lib')).filter((f) => f.endsWith('.mjs') && f !== 'check.mjs').map((f) => 'lib/' + f)].sort();
+  // the file set §7b reads (scripts/*.mjs and scripts/lib/*.mjs) — scripts/lib/check.mjs read and counted, never a target
+  const files = [...fs.readdirSync(dir).filter((f) => f.endsWith('.mjs')), ...fs.readdirSync(path.join(dir, 'lib')).filter((f) => f.endsWith('.mjs')).map((f) => 'lib/' + f)].sort();
   const T = { files: files.length, edited: 0, guards: 0, unread: [], pieces: 0, byShape: {}, left: {}, plants: 0, plantFiles: 0, calls: { all: 0, wrapped: 0, boolean: 0 }, skipped: [], failed: [], writes: [], before: 0, after: 0, second: { guards: 0, wraps: 0, files: [] } };
   const counts = {}, unguarded = (s) => C.helperDefs(s).filter((d) => d.order !== 'unknown' && !d.guarded).length;
   for (const f of files) {
     const p = path.join(dir, f), src = fs.readFileSync(p, 'utf8');
-    const plan = planFile(src, { C, acorn });
+    const plan = f === 'lib/check.mjs' ? planFile('', { C, acorn }) : planFile(src, { C, acorn, file: f });
     let now = src;
     if (f !== 'test-ci-gate-tiers.mjs') T.before += unguarded(src);
     if (plan.skipped) T.skipped.push(`${f}: ${plan.skipped}`);
@@ -511,11 +547,11 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
         for (const g of plan.guards) T.byShape[g.shape] = (T.byShape[g.shape] || 0) + 1;
         for (const k of Object.keys(T.calls)) T.calls[k] += plan.calls[k];
         for (const w of plan.wraps) T.pieces += w.pieces;
-        if (list) { for (const g of plan.guards) log(`    guard  ${f} line ${g.line} ${g.name} (${g.order}, ${g.shape})`); for (const w of plan.wraps) log(`    wrap   ${f} line ${w.line} ${w.name}(${w.cond} …) — !!( … ) around ${w.pieces} operand(s)`); }
+        if (list) { for (const g of plan.guards) log(`    guard  ${f} line ${g.line} ${g.name} (${g.order}, ${g.shape})`); for (const w of plan.wraps) log(`    wrap   ${f} line ${w.line} ${w.name}(${w.cond} …) — ${VERDICT}( … ) around ${w.pieces} operand(s)`); }
         if (apply) T.writes.push([p, out]);
         now = out;
         // RUN TWICE = RUN ONCE, over the very text it would write: a second run plans nothing
-        const again = planFile(out, { C, acorn });
+        const again = planFile(out, { C, acorn, file: f });
         if (again.guards.length || again.wraps.length) { T.second.guards += again.guards.length; T.second.wraps += again.wraps.length; T.second.files.push(f); }
       }
     }
@@ -524,24 +560,34 @@ export async function runTree(repo, { apply = false, list = false, log = (l) => 
   const listPath = path.join(repo, LIST_FILE), listJson = JSON.parse(fs.readFileSync(listPath, 'utf8')), listed = listJson.files || {};
   const lowered = lowerList(listed, counts), sum = (o) => Object.values(o).reduce((a, b) => a + b, 0);
   const listMoves = JSON.stringify(lowered) !== JSON.stringify(listed);
-  const writes = apply && !T.failed.length && !T.second.files.length;
+  let writes = apply && !T.failed.length && !T.second.files.length, ioFault = null;
   if (writes) {
-    for (const [p, out] of T.writes) fs.writeFileSync(p, out);
-    if (listMoves) fs.writeFileSync(listPath, JSON.stringify({ ...listJson, files: lowered }, null, 1) + '\n');
+    const all = [...T.writes, ...(listMoves ? [[listPath, JSON.stringify({ ...listJson, files: lowered }, null, 1) + '\n']] : [])], made = [];
+    try { for (const [p, out] of all) { io.writeFile(p + '.guard-tmp', out); made.push(p); } } catch (e) {
+      for (const p of made) { try { io.unlink(p + '.guard-tmp'); } catch { } }
+      writes = false; ioFault = `a temp could not be written (${e.code || e.message}) at ${path.relative(repo, (all[made.length] || [''])[0])}: every temp removed, NOTHING CHANGED`;
+    }
+    if (writes) {
+      let k = 0;
+      try { for (; k < made.length; k++) io.rename(made[k] + '.guard-tmp', made[k]); } catch (e) {
+        writes = false; ioFault = `a rename failed (${e.code || e.message}) after ${k} of ${made.length} files: RESTORE with \`git checkout -- scripts\` and remove every *.guard-tmp left (${made.length - k})`;
+      }
+    }
   }
   const n = (o) => Object.entries(o).map(([k, v]) => `${k}: ${v}`).join(' · ') || 'none';
-  log(`guard-inline-helpers — ${apply ? (writes ? 'APPLIED' : 'APPLY REFUSED (a self-check or the second run failed; nothing written)') : 'DRY RUN (nothing written)'} over ${T.files} scripts of ${repo}`);
+  log(`guard-inline-helpers — ${apply ? (writes ? 'APPLIED' : ioFault ? `APPLY FAILED: ${ioFault}` : 'APPLY REFUSED (a self-check or the second run failed; nothing written)') : 'DRY RUN (nothing written)'} over ${T.files} scripts of ${repo}`);
   log(T.edited ? `  it guards ${T.guards} helpers in ${T.edited} files — by shape: ${n(T.byShape)}` : '  NOTHING TO DO: every helper the census judges in code is guarded or left by rule (an applied tip, or nothing new since)');
   log(`  the census (test-ci-gate-tiers §7b, that file aside) reads ${T.before} unguarded helpers before, ${T.after} after`);
   log(`  guarded, but its order no longer read by the census (counted neither way): ${T.unread.length}${T.unread.length ? ' — ' + T.unread.slice(0, 4).map((x) => x.replace(/ once guarded.*$/, '')).join(' | ') : ''}`);
-  log(`  their calls: ${T.calls.all} — wrapped !!( … ) in place ${T.calls.wrapped} (around ${T.pieces} operands) · a boolean by its operator, untouched ${T.calls.boolean}`);
+  log(`  their calls: ${T.calls.all} — wrapped ${VERDICT}( … ) in place ${T.calls.wrapped} (around ${T.pieces} operands: a promise or a function there now FAILS, red by name; any other value as !! would) · a boolean by its operator, untouched ${T.calls.boolean}`);
   log(`  LEFT BY RULE: ${n(T.left)}`);
   log(`  PLANTS (the census reads a helper in a string, a template's text, a regex or a comment — not code, never edited): ${T.plants} in ${T.plantFiles} files`);
   log(`  files the parser could not read: ${T.skipped.length}${T.skipped.length ? ' — ' + T.skipped.slice(0, 6).join(' | ') : ''}`);
   log(`  SELF-CHECK (lines, parse, text spans, read-back of every condition and name, the census) failed in: ${T.failed.length}${T.failed.length ? ' — ' + T.failed.slice(0, 6).join(' | ') : ''}`);
   log(`  A SECOND RUN over the texts it writes: ${T.second.files.length ? `${T.second.guards} guards and ${T.second.wraps} wraps more in ${T.second.files.join(', ')} — NOT IDEMPOTENT` : 'nothing to do (run twice = run once)'}`);
   log(`  the one-way list ${LIST_FILE}: ${Object.keys(listed).length} rows / ${sum(listed)} → ${Object.keys(lowered).length} rows / ${sum(lowered)}${listMoves ? '' : ' (no row falls)'}`);
-  return { ...T, listBefore: listed, listAfter: lowered, written: writes };
+  if (writes) log('  NEXT (the apply\'s proof): this dry run again says NOTHING TO DO · the stale-pin scan over the applied diff · the whole fast tier in both zones · every heavy suite it edited · the vacuous legs the first run lists (✗ «a promise / a function handed as a verdict»), each cured or named');
+  return { ...T, listBefore: listed, listAfter: lowered, written: writes, ioFault };
 }
 
 // the CLI's one refusal (PURE): a write without the coordinator's word, or a flag it does not know

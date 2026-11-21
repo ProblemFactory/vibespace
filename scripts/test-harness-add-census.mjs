@@ -198,6 +198,14 @@ console.log('§5 the generator: its plan satisfies every row kind in memory; the
   ok(refuses(['ZZ-gen', '--label', 'x', '--wrapper', 'data/bin/x.js']) && refuses(['zz', '--wrapper', 'data/bin/x.js']) && refuses(['zz', '--label', 'x', '--kind', 'chat']) && refuses(['zz', '--label', 'x', '--kind', 'pty', '--bogus']) && !refuses(['zz', '--label', 'x', '--kind', 'pty']) && G.descriptorOf(G.parseArgs(['zz', '--label', 'x', '--kind', 'pty'])).kind === 'terminal', 'the arguments are judged: a slug id, a label, a data/bin wrapper for a chat / acp harness, no unknown flag; pty = a terminal descriptor');
   const sk = G.skeletons(o);
   ok(/module\.exports = \{/.test(sk['src/harnesses/zz-gen.js']) && ['id', 'label', 'kind', 'caps', 'Adapter', 'adapterConfig', 'wrapper'].every((k) => new RegExp(`^  ${k}:`, 'm').test(sk['src/harnesses/zz-gen.js'])) && (sk['src/harnesses/zz-gen.js'].match(/TODO/g) || []).length >= 8 && /test-harness-contract/.test(sk['src/harnesses/zz-gen.js']), 'the descriptor skeleton declares the REQUIRED keys and names the contract at every TODO');
+  // B-1747 part 2 (the coordinator's r1347): the generated suite takes THE ONE GUARDED HELPER — it imports checker() and defines
+  // no inline helper the census reads. RED: the generator's earlier template (an inline ok), anchored.
+  const CC = await import('./lib/check.mjs'), { anchored } = await import('./scratch.mjs'), { mutantCopies } = await import('./mutant-copy.mjs');
+  const testSk = (S) => S['scripts/test-zz-gen-harness.mjs'] || '', K = 'const';   // (the planted helper spelled in pieces: the census reads this file too)
+  const guardedSk = (S) => /^import \{ checker \} from '\.\/lib\/check\.mjs';$/m.test(testSk(S)) && CC.helperDefs(testSk(S)).length === 0;
+  const oldTpl = anchored(fs.readFileSync(path.join(REPO, 'scripts/harness-new.mjs'), 'utf8'), 'const { ok, report } = checker();', `let pass = 0, fail = 0;\n${K} ok = (c, n, e) => { if (c) { pass++; } else { fail++; console.error('  ✗ ' + n); } };`, 'the earlier template: an inline ok');
+  const Gold = await import(pathToFileURL(mutantCopies('harness-add-tpl', REPO).write('scripts/harness-new.mjs', oldTpl, 'inline-ok')).href);
+  ok(guardedSk(sk) && !guardedSk(Gold.skeletons(o)), 'the generated suite imports checker() and defines no inline helper (RED: the earlier template\'s inline ok)', { now: testSk(sk).split('\n').filter((l) => /checker|ok = /.test(l)), old: testSk(Gold.skeletons(o)).split('\n').filter((l) => /checker|ok = /.test(l)) });
 }
 console.log(`\n${fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`}`);
 process.exit(fail ? 1 : 0);
