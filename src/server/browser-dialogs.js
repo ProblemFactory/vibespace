@@ -287,12 +287,18 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (r.t) return;
     rearms.set(pid, r);
     if (r.n >= REARM_TRIES) { gaveUp.set(pid, now()); try { log.warn?.(`[browser-dialog] ${pid}: the watch's socket failed ${r.n} re-arms in a row — stopped trying (the next arm of this browser starts again)`); } catch { /* */ } emit({ kind: 'passkey', profileId: pid, state: 'unwatched', why: 'gave-up' }); return; }
-    const t = setTimeout(() => { r.t = null; if (humanHolds(pid) || viewed(pid)) arm(pid, { budgetMs: 0, rearm: true }).catch(() => { /* the watch says why in its own journal line */ }); }, rearmMs * 2 ** r.n);
+    // B-346d (the rest of law 1): a re-arm whose ENDPOINT is refused (a daemon between runs answers no CDP url yet) while the browser
+    // still RUNS keeps the backoff — before, the tries ended there and the view said «cannot watch» of a browser that came back
+    const t = setTimeout(() => { r.t = null; if (!(humanHolds(pid) || viewed(pid))) return; r.inFlight = true; arm(pid, { budgetMs: 0, rearm: true }).then(() => { r.inFlight = false; if (rearms.get(pid) === r && !watches.get(pid) && browserRuns(pid) && (humanHolds(pid) || viewed(pid))) rearmLater(pid); }, () => { r.inFlight = false; /* the watch says why in its own journal line */ }); }, rearmMs * 2 ** r.n);
     r.n++;
     if (t.unref) t.unref();
     r.t = t;
   }
 
+  // B-346d: a re-arm is COMING for this browser (one pending, or one asking its endpoint now) and its tries have not run out
+  const rearmPending = (pid) => { const r = rearms.get(String(pid)); return !!(r && (r.t || r.inFlight)) && !gaveUp.has(String(pid)); };
+  // B-346d: the keeper's record says the browser RUNS (browser-profiles' LIVE_BROWSER_STATES: this file is copied beside few modules)
+  const browserRuns = (pid) => { try { const b = keeper && typeof keeper.browserOf === 'function' ? keeper.browserOf(String(pid)) : null; return !!b && (b.state === 'starting' || b.state === 'ready'); } catch { return false; } };
   function emit(ev) { for (const fn of [...listeners]) { try { fn(ev); } catch (e) { say('listener:' + (e && e.message), `a listener threw: ${e && e.message}`); } } }
   /** verify r1 (lane browser-stuck, A3/A6): the idle notice of a dialog that closed is withdrawn — the agent's next verb
    *  says how it was answered instead; a stale "the page will not move" never rides its next turn. */
@@ -1264,6 +1270,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const unknown = (b = PK.passkeyBlock({ state: 'unknown' })) => ({ state: 'passkey', passkey: b, headed: false, since: 0, profileId: pid });
     const w = watches.get(pid);
     if (w && w.state === 'connecting') return null; // its `watched` / `down` comes next — never a flash of the unknown line
+    // B-346d (the rest of law 1): THE VIEW NEVER SAYS «NOT WATCHING» OF A BROWSER IT WILL REACH AGAIN — while a re-arm is coming
+    // (a socket that closed under a view or the person's own browsing; its tries not run out) nothing is said, as while connecting; its
+    // `watched` follows, or after REARM_TRIES the given-up line (with its Retry door)
+    if (!w && rearmPending(pid)) return null;
     if (!w || w.state !== 'open') return unknown(unknownBlock(pid));
     const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
     const b = PK.passkeyBlock(passkeyIn(pid, scope));

@@ -912,8 +912,8 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const f = sock2(world);
     let clock = 1_000_000;
     const listeners = new Set(), items = [], events = [];
-    const keeper = { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async (pid, o) => { (world.eps = world.eps || []).push(!!(o && o.fresh)); return ep || (hostId ? { ok: false, code: 'remote', error: 'the browser runs on another machine' } : { ok: true, url }); }, viewersFor: () => world.viewers || 0 /* B-346d: the live views watching it now */ /* the keeper's own answers (its hostId branch is ITS — the machine handle's) */, onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
-      browserOf: () => ({ state: 'ready', launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
+    const keeper = { profile: () => ({ id: PID, label: 'Mine' }), cdpEndpointFor: async (pid, o) => { (world.eps = world.eps || []).push(!!(o && o.fresh)); if (world.epRefuse) return { ok: false, code: 'no-cdp', error: 'the browser answered no CDP url yet' }; /* B-346d: a daemon between runs */ return ep || (hostId ? { ok: false, code: 'remote', error: 'the browser runs on another machine' } : { ok: true, url }); }, viewersFor: () => world.viewers || 0 /* B-346d: the live views watching it now */ /* the keeper's own answers (its hostId branch is ITS — the machine handle's) */, onLease: (fn) => { listeners.add(fn); return () => listeners.delete(fn); },
+      browserOf: () => ({ state: world.brState || 'ready' /* B-346d: the record's run state */, launch: 'attach', displaySession: { id: 'da-0000x2', display: ':1' }, ...(hostId ? { hostId } : {}) }), setFor: (bk) => (bk === CK ? { attachments: [{ profileId: PID }] } : null), ephemeralFor: () => null };
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
     const mkD = () => { const d = require(modPath || path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), ...(callTimeoutMs != null ? { callTimeoutMs } : {}), ...(leftMax != null ? { leftMax } : {}), leaseCountOf: () => holdersOf().length, passkeys,
@@ -1037,6 +1037,57 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const noEnd = MUT346.write('src/server/browser-dialogs.js', dsrc346.replace(DISARM_REARM, '    { /* (no end of a pending re-arm) */ }'), 'b346d-disarm-keeps-rearm');
     const [stopNow, stopCtl] = await Promise.all([stoppedLeg(null), stoppedLeg(noEnd)]);
     ok(stopNow === 0 && stopCtl > 0, `B-346d: a socket closed under an open view, then the browser STOPS — no socket opens after it (${stopNow}); CONTROL: a disarm that leaves the pending re-arm opens ${stopCtl} on the stopped browser — RED`, { stopNow, stopCtl });
+  }
+  // B-346d, THE REST OF LAW 1: THE VIEW NEVER SAYS «NOT WATCHING» OF A BROWSER IT WILL REACH AGAIN. (a) A socket closed under an
+  // open view whose first re-arms FAIL (the relaunched Chrome not listening yet): every read of the view's fact while the re-arms
+  // are coming says nothing — never not-watched — and it is watched again when the socket answers. CONTROL: the release's fact (the
+  // copy without the pending re-arm's silence) says not-watched in that window — RED
+  {
+    const dsrcR = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+    const SILENT = '    if (!w && rearmPending(pid)) return null;\n';
+    const KEEP_TRYING = ' r.inFlight = false; if (rearms.get(pid) === r && !watches.get(pid) && browserRuns(pid) && (humanHolds(pid) || viewed(pid))) rearmLater(pid);';
+    // (anchored(): each anchor found exactly once, else the control throws by name — never a copy that changed nothing)
+    const MUTR = mutantCopies('browser-passkey-b346d-law1', REPO);
+    const noSilence = MUTR.write('src/server/browser-dialogs.js', anchored(dsrcR, SILENT, '', 'b346d law 1: the pending re-arm\'s silence'), 'b346d-says-not-watched');
+    const noRetry = MUTR.write('src/server/browser-dialogs.js', anchored(dsrcR, KEEP_TRYING, ' r.inFlight = false;', 'b346d law 1: the refused re-arm\'s next try'), 'b346d-refusal-ends-tries');
+    const silentLeg = async (modPath) => {
+      const X = world2({ holders: 'agent', print: false, rearmMs: 15, modPath });
+      await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open');
+      X.world.viewers = 1; X.world.refuse = true; const s0 = X.world.sockets;
+      try { X.f.sock().h.close(); } catch { /* */ }
+      const said = new Set();
+      const t0 = Date.now(); // the reads span the first two failed re-arms (15 + 30 ms): the mechanism's own backoff, then the socket answers
+      while (X.world.sockets < s0 + 3 && Date.now() - t0 < 1500) { const f = X.D.passkeyFactOf({ profileId: PID, browserKey: CK, sessionId: 's-c' }); said.add(f ? f.passkey.why || f.passkey.state : 'nothing'); await sleep2(2); }
+      X.world.refuse = false;
+      const back = !!(await until2(() => X.w() && X.w().state === 'open', 1500));
+      const out = { said: [...said], back, tries: X.world.sockets - s0 };
+      X.D.shutdown();
+      return out;
+    };
+    const [now1, ctl1] = await Promise.all([silentLeg(null), silentLeg(noSilence)]);
+    ok(now1.tries >= 3 && !now1.said.includes('not-watched') && now1.said.includes('nothing') && now1.back, `B-346d law 1: a socket closed under an open view, its first re-arms FAILING — every read of the view's fact while the re-arms are coming says nothing (${now1.said.join(', ')}), never «not watching»; the socket answers ⇒ watched again`, now1);
+    ok(ctl1.said.includes('not-watched'), `B-346d law 1 CONTROL: the release's fact (no silence for a pending re-arm) says «not watching» of that running browser in the same window (${ctl1.said.join(', ')}) — RED`, ctl1);
+    // (b) A re-arm whose ENDPOINT is refused (a daemon between runs answers no CDP url yet) while the browser RUNS: the tries go on,
+    // the view says nothing, and it is watched again when the endpoint answers. CONTROL: the release's re-arm (its tries END at the
+    // refusal) ⇒ one ask, no socket, the view says «cannot watch» — RED. The accepted rule: a browser that does NOT run keeps its refusal
+    const refusedLeg = async (modPath, brState) => {
+      const X = world2({ holders: 'agent', print: false, rearmMs: 15, modPath });
+      await X.D.arm(PID); await until2(() => X.w() && X.w().state === 'open');
+      X.world.viewers = 1; X.world.epRefuse = true; X.world.brState = brState; const s0 = X.world.sockets, e0 = (X.world.eps || []).length;
+      try { X.f.sock().h.close(); } catch { /* */ }
+      await until2(() => (X.world.eps || []).length >= e0 + 2, 600); // a second endpoint ask = the tries went on (the backoff's own 15 + 30 ms)
+      const asks = (X.world.eps || []).length - e0;
+      const mid = X.D.passkeyFactOf({ profileId: PID, browserKey: CK, sessionId: 's-c' });
+      X.world.epRefuse = false;
+      const back = !!(await until2(() => X.world.sockets > s0 && X.w() && X.w().state === 'open', asks >= 2 ? 1500 : 200));
+      const out = { asks, mid: mid ? mid.passkey.why || mid.passkey.state : 'nothing', back };
+      X.D.shutdown();
+      return out;
+    };
+    const [now2, ctl2, stopped2] = await Promise.all([refusedLeg(null, 'ready'), refusedLeg(noRetry, 'ready'), refusedLeg(null, 'stopped')]);
+    ok(now2.asks >= 2 && now2.mid === 'nothing' && now2.back, `B-346d law 1: a re-arm whose endpoint is REFUSED while the browser runs — the tries go on (${now2.asks} asks), the view says nothing meanwhile, and it is watched again when the endpoint answers`, now2);
+    ok(ctl2.asks === 1 && ctl2.mid === 'refused' && !ctl2.back, `B-346d law 1 CONTROL: the release's re-arm ends its tries at the refusal — one ask, the view says «cannot watch», no socket after — RED`, ctl2);
+    ok(stopped2.asks === 1 && stopped2.mid === 'refused', 'B-346d law 1 (the accepted rule): a browser whose record does NOT run keeps the refusal said — one ask, its cause on the view (its next start arms it)', stopped2);
   }
   // the re-arm is bounded (rearmMs 1: the five tries' backoff is 1+2+4+8+16 ms — r5: was 5 ms, the waits scaled with it)
   {
