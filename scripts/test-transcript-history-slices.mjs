@@ -158,6 +158,9 @@ SS.jsonlCacheClear();   // the next leg's memory: the 32 MB entry goes
 console.log('② the codex history, the pool closed for good');
 {
   const sess = { backend: 'codex', backendSessionId: tid, cwd, buffer: '' };
+  // the codex rollout's FINDER walk and its head's meta read run with the pool up too (row B-a60e's, the meta cache) — made before
+  // the road, so the road's reads are its own (the first heavy run: the finder's head read was the one sync read of the first attach)
+  C.findCodexSessionJsonlPath(tid); C.extractCodexThreadMeta(codexFp);
   const R0 = await road('② the first attach after the refusal', async () => { const m = new CS.CodexSessionMessages(sess, tid, {}); const all = await m.rawAsync(); return { n: all.length, notLoaded: m.notLoaded || null }; });
   ok(R0.out && R0.out.notLoaded === 'transcript_reader_restarting' && content(R0).length === 0 && opens(R0).length === 0, `${R0.name}: «not loaded yet», nothing read (${opens(R0).length} opens)`, { out: R0.out });
   await sleep(90);
