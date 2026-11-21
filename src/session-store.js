@@ -740,7 +740,12 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
     const stat = fs.statSync(fp);
     tasks = warmTaskEvents(claudeSessionId, fp, stat); // B-299b A2: the task-tool scan, in the transcript worker, beside the tail's warm
     const cached = _jsonlCache.get(claudeSessionId);
-    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) { ownRead = true; _jsonlCachePut(claudeSessionId, cached); return true; } // already warm (touched: the working set)
+    if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size && cached.ino === stat.ino) {
+      ownRead = true;
+      const n1 = _historyRefused.get(claudeSessionId);   // unit 2: the stat just proved the cache IS the file — a read note's mark follows it
+      if (n1 && n1.sliced) n1.sliced = { mtimeMs: cached.mtimeMs, size: cached.size, ino: cached.ino };
+      _jsonlCachePut(claudeSessionId, cached); return true;
+    } // already warm (touched: the working set)
     const { readJsonlTail } = require('./adapters/codex');
     if (cached && cached.incr && stat.size > cached.size && stat.size - cached.spanEnd <= WARM_INLINE_APPEND_MAX) {
       const t0 = performance.now();
@@ -750,8 +755,10 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
         _stampJsonlParse(r.bytes, performance.now() - t0);
         _jsonlCachePut(claudeSessionId, r.entry);
         ownRead = true;
-        const n0 = _historyRefused.get(claudeSessionId);   // unit 2: a note of a history the main process read moves to the copy it read now
-        if (n0 && n0.sliced) n0.sliced = { mtimeMs: r.entry.mtimeMs, size: r.entry.size, ino: r.entry.ino };
+        // unit 2: the main process READ the copy now — a note that stands while the pool still refuses this file is marked with it
+        // (sliced or not: its parse answers this copy by a stat, never a read of a grown file on this loop)
+        const n0 = _historyRefused.get(claudeSessionId);
+        if (n0 && (n0.sliced || C().fileRefused(n0.fp || fp))) n0.sliced = { mtimeMs: r.entry.mtimeMs, size: r.entry.size, ino: r.entry.ino };
         return true;
       }
     }
@@ -802,7 +809,11 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
       return false;
     }
     return ok;
-  } catch { return false; } finally { const cur = _historyRefused.get(claudeSessionId); if (!refusedNow && cur === noteAtStart && !(cur && cur.sliced && ownRead)) _historyRefused.delete(claudeSessionId); if (tasks) await tasks; }   // unit 2: a note of a history the main process read ends only on the POOL's word (or the file's end) — never at an end with none   // row B-422c: any end but the refusal clears the note it found (the file gone, an op's own error, an append folded in) — never one another warm took meanwhile
+  } catch { return false; } finally {
+    if (tasks) await tasks;   // first: the task scan's answer (the pool's word for this file) is part of what ends a read note
+    const cur = _historyRefused.get(claudeSessionId);
+    if (!refusedNow && cur === noteAtStart && !(cur && cur.sliced && ownRead && C().fileRefused(cur.fp))) _historyRefused.delete(claudeSessionId);
+  }   // unit 2: a note of a history the main process read ends only on the POOL's word (or the file's end) — never at an end with none   // row B-422c: any end but the refusal clears the note it found (the file gone, an op's own error, an append folded in) — never one another warm took meanwhile
 }
 
 function parseSessionJsonl(claudeSessionId, cwd) {
@@ -810,7 +821,8 @@ function parseSessionJsonl(claudeSessionId, cwd) {
   if (refused) {   // row B-422c: the warm's read was refused — the kept copy or «not loaded yet», never a parse on the loop
     const kept = _jsonlCache.get(claudeSessionId);
     // unit 2: the main process READ it (the sliced road) and the file is still what it read ⇒ loaded (one stat, never a read)
-    if (refused.sliced && refused.fp && kept && Array.isArray(kept.messages) && kept.mtimeMs === refused.sliced.mtimeMs && kept.size === refused.sliced.size && !C().fileStorageHung(refused.fp)) {
+    if (refused.sliced && refused.fp && C().fileStorageHung(refused.fp)) refused.storageHung = true;   // the memory calls it the storage's now: no stat, no warm from here (the next warm: the pool alone)
+    if (refused.sliced && refused.fp && kept && Array.isArray(kept.messages) && kept.mtimeMs === refused.sliced.mtimeMs && kept.size === refused.sliced.size && !refused.storageHung) {
       let st = null; try { st = fs.statSync(refused.fp); } catch { st = null; }
       if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) { _jsonlUsed.set(kept, Date.now()); return kept.messages; }   // in use: never idle-evicted under the reader
     }

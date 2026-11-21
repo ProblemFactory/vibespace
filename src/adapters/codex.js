@@ -871,6 +871,8 @@ function noteFileRefusal(fp, refusal) {
   return rec;
 }
 const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
+/** does the pool's refusal of this file still STAND (its storage's, or refused within the stated gap)? — memory only */
+function fileRefused(fp) { const r = fp && _fileRefusals.get(fp); return !!r && (r.storageHung || Date.now() - r.lastAt <= STAND_GAP_MS); }
 /** the storage's, as far as memory knows (its record, the mount door) — never a file call */
 function fileStorageHung(fp) { const r = fp && _fileRefusals.get(fp); if (r && r.storageHung) return true; try { return !!require('../mount-door').blocked(fp); } catch { return false; } }
 /** May this file's history be read on the main process now? → { ok, why } (never a file call: memory only) */
@@ -1722,7 +1724,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

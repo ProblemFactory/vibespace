@@ -59,7 +59,7 @@ fs.mkdirSync(cwd, { recursive: true });
 const SS = require(path.join(REPO, 'src/session-store.js'));
 const projDir = path.join(HOME, '.claude', 'projects', SS.cwdToProjectDir(cwd));
 fs.mkdirSync(projDir, { recursive: true });
-const sids = ['a1111111-2222-4333-8444-555555555555', 'b1111111-2222-4333-8444-555555555555', 'c1111111-2222-4333-8444-555555555555', 'd1111111-2222-4333-8444-555555555555'];
+const sids = ['a1111111-2222-4333-8444-555555555555', 'b1111111-2222-4333-8444-555555555555', 'c1111111-2222-4333-8444-555555555555', 'd1111111-2222-4333-8444-555555555555', 'e1111111-2222-4333-8444-555555555555', 'f1111111-2222-4333-8444-555555555555'];
 const claudeFp = (sid) => path.join(projDir, sid + '.jsonl');
 const BIG = 36 * 1024 * 1024;
 function placeClaude(fp, bytes) {
@@ -126,6 +126,8 @@ async function road(name, fn) {
 const content = (r) => r.reads.filter((x) => /^(readSync|readFileSync) /.test(x));
 const opens = (r) => r.reads.filter((x) => /^promises\.open /.test(x));
 const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
+const TW = require(path.join(REPO, 'src/transcript-worker.js'));
+const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return Promise.resolve(TW.runOp(op, payload)).then((x) => x.result); } });   // a pool that answers (in place: the legs' control)
 const same = (a, b) => { if (a.length !== b.length) return false; for (let i = 0; i < a.length; i++) if (JSON.stringify(a[i]) !== JSON.stringify(b[i])) return false; return true; };
 
 C._setSlicedForTest({ afterMs: 300 });
@@ -212,6 +214,34 @@ console.log('③ the storage\'s refusal, ④ the other roads, ⑤ said once');
   const perFile = (sid) => lines.filter((l) => l.includes(path.basename(claudeFp(sid)))).length;
   ok(again === true && perFile(sids[0]) === 1 && perFile(sids[2]) === 1 && perFile(sids[1]) === 0, `⑤ said ONCE a file in the journal (the first file read again: ${again}, ${perFile(sids[0])} line; the hung one: ${perFile(sids[1])}): «${(lines[0] || '').slice(0, 160)}»`, lines.slice(0, 3));
   SS.jsonlCacheClear();
+}
+console.log('⑤b the read note\'s two ends');
+{
+  const fail = { calls: [], call(op) { this.calls.push(op); return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code: 'no-worker' })); } };
+  const hungP = { call() { return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code: 'path-hung' })); } };
+  C._setSlicedForTest({ afterMs: 0 });
+  // (a) THE STORAGE'S WORD WINS: a read note's file the memory then calls the storage's (another road's hung path) — a parse of
+  // the grown file makes NO stat and asks NO warm (RED: its warm's find + stat on the loop, against the hung storage)
+  const sa = sids[4], fa = claudeFp(sa);
+  C._setTranscriptPoolForTest(fail);
+  ok(await SS.warmSessionJsonlAsync(sa, cwd) === true, 'premise: a history read on the main process (its note marked)');
+  C._setTranscriptPoolForTest(hungP); try { await C.jsonlGapInfoAsync(fa); } catch { }   // another road: a hung path
+  fs.appendFileSync(fa, '{"type":"user","uuid":"later","message":{"role":"user","content":"q"}}\n');
+  C._setTranscriptPoolForTest(fail); fail.calls.length = 0;
+  const Ra = await road('⑤b(a) a parse of the grown file after the memory called it the storage\'s', () => { const l = SS.parseSessionJsonl(sa, cwd); return { notLoaded: l.notLoaded || null }; });
+  await new Promise((res) => setImmediate(res));
+  ok(Ra.reads.length === 0 && fail.calls.filter((o) => o === 'jsonlTail').length === 0 && Ra.out && Ra.out.notLoaded, `${Ra.name}: no call of any kind on the transcript (${Ra.reads.length}), no warm asked (${fail.calls.length} pool calls) — «not loaded»`, { reads: Ra.reads.slice(0, 4), calls: fail.calls });
+  // (b) THE POOL'S WORD ENDS IT: the pool answers again (the warm's task scan reaches it) — the note ends, the next parse of the
+  // grown file is the old road's (RED: the note kept, the stale copy answered «not loaded» on a healthy hub)
+  const sb = sids[5], fb = claudeFp(sb);
+  C._setTranscriptPoolForTest(fail);
+  ok(await SS.warmSessionJsonlAsync(sb, cwd) === true, 'premise: a second history read on the main process');
+  C._setTranscriptPoolForTest(up());
+  await SS.warmSessionJsonlAsync(sb, cwd);   // already warm — its task scan answered: the file forgiven
+  const n0 = SS.parseSessionJsonl(sb, cwd).length;
+  fs.appendFileSync(fb, '{"type":"user","uuid":"after","message":{"role":"user","content":"q"}}\n');
+  const nb = SS.parseSessionJsonl(sb, cwd);
+  ok(!nb.notLoaded && nb.length === n0 + 1, `⑤b(b) the pool answered again ⇒ the read note ended: the grown file's parse is the old road's (${nb.length} records, untagged)`, { n0, n: nb.length, notLoaded: nb.notLoaded });
 }
 console.log('⑥ a deadline on the codex merged read');
 {
