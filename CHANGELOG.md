@@ -76,6 +76,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The accounts list no longer freezes VibeSpace when account folders sit on a slow share; a sign-in still being read says so, never «not logged in».
 - A click on a taskbar tile no longer does nothing when a window's title changes at that moment, such as an agent's status shown in its title.
 - On a paired machine, «End them» now ends what a stopped turn left running there, if that machine's agent is up to date.
+- An open System panel no longer makes VibeSpace pause every few seconds while it reads the CPU use of each process.
 
 ## 2.369.415 — 2026-11-21
 
