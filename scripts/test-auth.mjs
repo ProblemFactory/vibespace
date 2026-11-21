@@ -327,14 +327,22 @@ for (const mode of ['password', 'clerk', 'open']) {
     'a page that meets the refusal says it in words: fetchJson and api() turn {error:\'cross-site\'} into 「这次操作来自别的站点，已拒绝」 (zh / ja / en), the code kept');
 }
 {
-  // RED CONTROL: the gate cut ⇒ another site's write with the owner's cookie goes through
+  // RED CONTROL: the gate cut ⇒ another site's write with the owner's cookie goes through. The gate is TWO lines since it fails
+  // closed (B3a follow): the cross-site refusal, and the line that refuses a class nobody named («unclassed»). The refusal cut
+  // ALONE is refused by that second line (500), which is the gate failing closed, not the gate cut.
   const src = readRepo(AUTH);
-  const cut = src.split('\n').filter((l) => /return res\.status\(403\)\.json\(\{ error: 'cross-site'/.test(l));
+  const refusal = (l) => /return res\.status\(403\)\.json\(\{ error: 'cross-site'/.test(l), closed = (l) => /return res\.status\(500\)\.json\(\{ error: 'unclassed'/.test(l);
+  const cut = src.split('\n').filter((l) => refusal(l) || closed(l));
   const M = MUT.load(AUTH, src.split('\n').filter((l) => !cut.includes(l)).join('\n'), 'no-gate');
   const I = await instance('password', { authMod: M });
   const xs = await hit(I, '/api/sessions/x/kill', { headers: { ...I.cookie, ...XS } });
-  ok(cut.length === 1 && xs.status === 200 && xs.json && xs.json.reached, 'CONTROL — the gate cut ⇒ a cross-site POST with the owner\'s cookie reaches the route (④ red by the same asserts)', { cut: cut.length, status: xs.status });
+  ok(cut.length === 2 && cut.some(refusal) && cut.some(closed) && xs.status === 200 && xs.json && xs.json.reached, 'CONTROL — the gate cut (the cross-site refusal and the fail-closed line) ⇒ a cross-site POST with the owner\'s cookie reaches the route (④ red by the same asserts)', { cut: cut.length, status: xs.status });
   await I.close();
+  const M1 = MUT.load(AUTH, src.split('\n').filter((l) => !refusal(l)).join('\n'), 'no-refusal');
+  const I1 = await instance('password', { authMod: M1 });
+  const xs1 = await hit(I1, '/api/sessions/x/kill', { headers: { ...I1.cookie, ...XS } });
+  ok(xs1.status === 500 && xs1.json && xs1.json.error === 'unclassed' && !xs1.json.reached, `the refusal cut ALONE: the gate fails closed — ${xs1.status} ${JSON.stringify(xs1.json)} (never the route)`, xs1);
+  await I1.close();
 }
 
 // ── ⑤ WEBSOCKET HANDSHAKES ──────────────────────────────────────────────────────────────────────────────────────────

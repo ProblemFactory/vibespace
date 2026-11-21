@@ -32,6 +32,7 @@ process.on('exit', () => { try { fs.rmSync(T, { recursive: true, force: true });
 const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
 function compileAt(rel, src) { const file = path.join(REPO, rel); const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src, file); return m.exports; }
 const D = require(path.join(REPO, 'src/door.js'));
+const WO = require(path.join(REPO, 'src/write-origin.js'));   // the same-origin rule, to name a cross-site row as it names one
 const { Auth } = require(path.join(REPO, 'src/auth.js'));
 const before = require(path.join(REPO, 'scripts/fixtures/auth-middleware-before-b3a.cjs'));
 
@@ -125,8 +126,10 @@ function judge(AuthClass, name) {
   for (const [base, tally] of law.byBase) console.log(`    ${base} and its variants: ${Object.entries(tally).map(([k, v]) => `${k} ×${v}`).join(' · ')}`);
   for (const d of law.diff.slice(0, 20)) console.log(`    DIFFERS ${tagOf(d.r)}: master ${said(d.master)}, now ${said(d.now)}`);
   ok(law.n > 10000 && law.diff.length === 0, `${law.n} generated requests (${BASES.length} bases × their variants × ${METHODS.length} methods × the Origin header three ways, then ${4000} seeded over Sec-Fetch-Site, the forwarded headers, TLS, sign-in off, three cookies and WebSocket handshakes): today's gate answers every one as master's did — ${law.diff.length} differ`, law.diff.slice(0, 3).map((d) => ({ tag: tagOf(d.r), master: said(d.master), now: said(d.now) })));
-  const kinds = new Set(CORPUS.slice(0, 2000).map((r) => D.doorClassOf({ method: r.method, path: r.path, headers: { host: OWN, ...r.headers } }).kind));
-  ok(['door', 'login', 'page', 'refused'].every((k) => kinds.has(k)), `the corpus reaches every kind of the class: ${[...kinds].join(', ')}`);
+  // every request of the corpus, classed as the gate classes it (sign-in on or off, TLS or not): each of the five kinds is met
+  const kinds = new Map();
+  for (const r of CORPUS) { const k = D.doorClassOf({ method: r.method, path: r.path, headers: { host: OWN, ...r.headers }, encrypted: r.encrypted }, { enabled: r.on }).kind; kinds.set(k, (kinds.get(k) || 0) + 1); }
+  ok(['door', 'refused', 'open', 'login', 'page'].every((k) => kinds.get(k) > 0), `the corpus reaches every kind of the class: ${[...kinds].map(([k, n]) => `${k} ×${n}`).join(' · ')}`);
   // RED CONTROL 1: ONE door line cut from a COPY of the door class, under a copy of the auth layer that requires it
   const authCopyOver = (doorSrc) => { globalThis.__vsDoorCopy = compileAt('src/door.js', doorSrc); const asrc = read('src/auth.js'); if (asrc.split("require('./door.js')").length !== 2) throw new Error('CONTROL needle not found exactly once: auth.js requires the door class'); return compileAt('src/auth.js', asrc.replace("require('./door.js')", 'globalThis.__vsDoorCopy')).Auth; };
   const dsrc = read('src/door.js');
@@ -140,8 +143,12 @@ function judge(AuthClass, name) {
   if (dsrc.split(V).length !== 2 || dsrc.split(NX).length !== 2) throw new Error('CONTROL needle not found exactly once: the same-origin verdict or the door lines\' start');
   const moved = dsrc.replace(V, '').replace(NX, V.trimEnd() + '\n' + NX);
   const red2 = judge(authCopyOver(moved), 'red2');
-  const crossSite = (d) => d.r.headers.origin === FOREIGN || d.r.headers['sec-fetch-site'] === 'cross-site' || d.r.headers['sec-fetch-site'] === 'same-site';
-  ok(red2.diff.length > 0 && red2.diff.every((d) => d.master.next && d.now.status === 403 && crossSite(d)), `RED CONTROL 2 — the ORDER: the same-origin verdict moved above the doors in a copy ⇒ ${red2.diff.length} answers differ, every one a CROSS-SITE request to a door that master let through and the copy refuses — ${red2.diff.slice(0, 2).map((d) => tagOf(d.r)).join(' | ')}`);
+  // «cross-site» as the same-origin rule itself says it, over the head as the gate saw it (a TLS request or a forwarded pair moves the
+  // instance's own origin, so the own origin's header can be another site's there)
+  const crossSite = (d) => { const headers = { host: OWN, ...d.r.headers }; return !WO.crossSiteVerdict({ method: d.r.method, headers }, WO.ownOriginOf(headers, { encrypted: d.r.encrypted })).ok; };
+  const notCross = red2.diff.filter((d) => !(d.master.next && d.now.status === 403 && crossSite(d)));
+  for (const d of notCross.slice(0, 6)) console.log(`    NOT A CROSS-SITE DOOR ROW ${tagOf(d.r)}: master ${said(d.master)}, now ${said(d.now)}`);
+  ok(red2.diff.length > 0 && notCross.length === 0, `RED CONTROL 2 — the ORDER: the same-origin verdict moved above the doors in a copy ⇒ ${red2.diff.length} answers differ, every one a CROSS-SITE request to a door that master let through and the copy refuses — ${red2.diff.slice(0, 2).map((d) => tagOf(d.r)).join(' | ')}`);
 }
 
 console.log('— ③ THE GATE FAILS CLOSED: a class nobody named in the gate is refused by name, never let in by default');
