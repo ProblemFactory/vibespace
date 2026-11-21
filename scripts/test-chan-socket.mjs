@@ -26,7 +26,9 @@ const ok = (n, c, e) => { if (typeof n !== 'string') throw new TypeError('ok(…
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // waits on an EFFECT with a deadline — never a fixed sleep (主开发 2026-11-17, must 6)
 const until = async (f, ms = 2000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (f()) return true; await sleep(2); } return !!f(); };
-const quiet = async (f, ms = 2000, n = 8) => { const t0 = Date.now(); let last, same = 0; while (Date.now() - t0 < ms) { const v = f(); if (v === last) { if (++same >= n) return v; } else { same = 0; last = v; } await sleep(3); } return f(); };
+// waits for a value to STOP MOVING (n equal reads in a row) → that value; when its bound runs out → null, a timed-out mark its caller
+// names (test-ci-gate §2p, 主开发 r1667: a wait that runs out says so — never its last read handed back as the answer)
+const quiet = async (f, ms = 2000, n = 8) => { const t0 = Date.now(); let last, same = 0; while (Date.now() - t0 < ms) { const v = f(); if (v === last) { if (++same >= n) return v; } else { same = 0; last = v; } await sleep(3); } return null; };
 const queuedOn = (mux, c) => (mux._sendQ.get(c) || []).reduce((n, b) => n + b.length, 0);
 const { Mux, INITIAL_WINDOW } = require(path.join(REPO, 'src/agentd/mux.js'));
 const SOCKF = 'src/agentd/chan-socket.js';
@@ -74,6 +76,7 @@ for (const [name, lib, want] of [['the socket-shaped channel', real, true], ['RE
   const s = W.router.open(5, {}); W.server.emit('connection', s);
   W.far.data(5, Buffer.from('GET /big HTTP/1.1\r\nHost: x\r\n\r\n'));
   const queued = await quiet(() => queuedOn(W.hub, 5));   // the server has written all it could: the hub's queue stops moving
+  if (queued === null) { ok(`${name}: the hub's queue for the channel settles — it never stopped moving within the wait's 2 s (the wait ran out: no verdict read off a queue still moving)`, false); continue; }
   // now the far reader takes and credits everything, a window at a time
   for (let t = 0; t < 200 && (W.got.get(5) || Buffer.alloc(0)).length < 16 * 65536; t++) { const have = (W.got.get(5) || Buffer.alloc(0)).length; W.far.credit(5, INITIAL_WINDOW); await sleep(5); if ((W.got.get(5) || Buffer.alloc(0)).length === have && t > 100) break; }
   const body = (W.got.get(5) || Buffer.alloc(0)).length;
