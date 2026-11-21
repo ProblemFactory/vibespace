@@ -1461,9 +1461,6 @@ function parseSnapshotRefs(outText) {
     } catch { /* fall through to line scan */ }
   }
   for (const line of body.split(/\r?\n/)) {
-    const rm = /\[ref=([A-Za-z0-9_-]+)\]/.exec(line);
-    if (!rm) continue;
-    const nm = /\[nth=(\d+)\]/.exec(line);
     const head = line.replace(/^\s*-\s*/, '');
     const roleM = /^([A-Za-z][A-Za-z0-9_-]*)/.exec(head);
     if (!roleM) continue;
@@ -1471,7 +1468,29 @@ function parseSnapshotRefs(outText) {
     const afterRole = head.slice(role.length);
     const qm = /^\s+"((?:\\.|[^"\\])*)"/.exec(afterRole);
     const name = qm ? qm[1].replace(/\\(["\\])/g, '$1') : '';
-    pushRef(rm[1], role, name, nm ? Number(nm[1]) : null);
+    // B-21cc: the ref (and an nth) is read from the BRACKETS RIGHT AFTER the role and name — agent-browser 0.38.2 prints a field's
+    // attributes and its ref in ONE bracket («[required, ref=e3]», «[level=1, ref=e18]», «[checked=false, ref=e23]»), so a bracket
+    // that is exactly «[ref=…]» missed every attributed field and its vault fill answered «not in the snapshot». The quoted name and
+    // a value after «:» are the page's words: a «[ref=…]» written there is never a ref.
+    const tail = qm ? afterRole.slice(qm[0].length) : afterRole;
+    let ref = null, nth = null;
+    const readGroups = (text) => {
+      for (const bm of String(text || '').matchAll(/\[([^\]\n]*)\]/g)) {
+        for (const part of bm[1].split(',')) {
+          const kv = /^\s*(ref|nth)=([A-Za-z0-9_-]+)\s*$/.exec(part);
+          if (!kv) continue;
+          if (kv[1] === 'ref' && ref === null) ref = kv[2];
+          else if (kv[1] === 'nth' && nth === null && /^\d+$/.test(kv[2])) nth = Number(kv[2]);
+        }
+      }
+    };
+    const groups = /^(?:\s*\[[^\]\n]*\])+/.exec(tail);
+    readGroups(groups ? groups[0] : '');
+    // a driver that prints a value BEFORE the bracket («"Month": 1 [ref=e5]»): the bracket that ENDS the line, only when the brackets
+    // after the name hold no ref (no wider than the scan it replaces, which took the first «[ref=…]» anywhere, the name included)
+    if (!ref) { const end = /\[[^\]\n]*\]\s*$/.exec(tail); if (end) { nth = null; readGroups(end[0]); } }
+    if (!ref) continue;
+    pushRef(ref, role, name, nth);
   }
   return out;
 }

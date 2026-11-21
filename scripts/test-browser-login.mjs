@@ -12,7 +12,7 @@ import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { scratch, freePort, deadPort } from './scratch.mjs';
+import { scratch, freePort, deadPort, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 import { startFakeKernel } from './fixtures/fake-kernel.mjs';
 import { runR28LoginNails } from './fixtures/r28-login-nails.mjs';
@@ -558,6 +558,39 @@ console.log(JSON.stringify({ success: true, data: { ok: true } }));
           { id: 'sub_pw', tag: 'input', type: 'password', name: 'Child password', frameId: `${tid}-CF1` },
         ],
       });
+      // B-21cc (the agent feedback fb-2450b6f77a: «fill @e3 --vault» answered target_not_found right after `snapshot -i` showed ref=e3;
+      // the CSS selector for the same field worked): agent-browser 0.38.2 prints a field's attributes and its ref in ONE bracket — a
+      // sign-in page marks its fields required («[required, ref=e1]»; the box's own listing: «[level=1, ref=e18]»). THE LAW: a ref of the
+      // latest snapshot is a target for the vault fill exactly as for a plain fill. The listing in that form ⇒ the vault fill BY REF
+      // LANDS (the value read back from the page, the receipt as today, the secret never in the agent's output).
+      // RED: today's line scan (a bracket exactly «[ref=…]», re-created in a copy) leaves both refs out ⇒ the fill answers
+      // [target_not_found] «Element not found: @e1» — the reported refusal.
+      {
+        const REQ = '- heading "Sign in" [level=1, ref=e9]\n- textbox "Email" [required, ref=e1]\n- textbox "Password" [required, ref=e2]\n- checkbox "Remember me" [checked=false, ref=e8]';
+        const bvSrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
+        const MB = mutantCopies('b21cc-ref-scan', REPO);
+        const BV_OLD = MB.load('src/browser-verbs.js', anchored(bvSrc, '    if (!ref) continue;\n    pushRef(ref, role, name, nth);',
+          '    { const rm = /\\[ref=([A-Za-z0-9_-]+)\\]/.exec(line); if (!rm) continue; const nm = /\\[nth=(\\d+)\\]/.exec(line); pushRef(rm[1], role, name, nm ? Number(nm[1]) : null); }', 'b21cc-exact-bracket'), 'b21cc-exact-bracket');   // stale-pins: kept — the RED re-creates today's exact-bracket scan on purpose
+        const refsNew = BV.parseSnapshotRefs(REQ), refsOld = BV_OLD.parseSnapshotRefs(REQ);
+        ok(JSON.stringify(refsNew.map((r) => [r.ref, r.role, r.name])) === JSON.stringify([['@e9', 'heading', 'Sign in'], ['@e1', 'textbox', 'Email'], ['@e2', 'textbox', 'Password'], ['@e8', 'checkbox', 'Remember me']]) && refsOld.length === 0,
+          'B-21cc: every ref of a 0.38.2 listing is read, attributes beside it in its bracket (required, level, checked); CONTROL: today\'s scan reads NONE of them', { refsNew, refsOld });
+        // the edges: a ref at the line's END after a value (a driver that prints the value first) is read; a «[ref=…]» inside the page's
+        // quoted NAME is the page's words — never a ref (today's scan took the first one anywhere: the page could name another field's ref)
+        const EDGE = '- spinbutton "Month": 1 [ref=e5]\n- textbox "Card [ref=e1]" [ref=e6]\n- textbox "Email" [ref=e7]: [ref=e2]';
+        const eNew = BV.parseSnapshotRefs(EDGE).map((r) => r.ref), eOld = BV_OLD.parseSnapshotRefs(EDGE).map((r) => r.ref);
+        ok(JSON.stringify(eNew) === JSON.stringify(['@e5', '@e6', '@e7']) && JSON.stringify(eOld) === JSON.stringify(['@e5', '@e1', '@e7']),
+          'B-21cc: a ref after a value is read; a «[ref=…]» in the quoted name or in the value is never one (RED: today\'s scan read the name\'s «@e1» as the field\'s ref)', { eNew, eOld });
+        await watch.noteSnapshot({ profileId: PID, browserKey: KEY }, { parsedRefs: refsOld });
+        const oldUser = await runCli(['fill', '@e1', '--vault', 'shop.example.test#alice/user']);
+        await watch.noteSnapshot({ profileId: PID, browserKey: KEY }, REQ);   // the hub parses the listing with the tree's parser
+        const reqUser = await runCli(['fill', '@e1', '--vault', 'shop.example.test#alice/user']);
+        const reqPw = await runCli(['fill', '@e2', '--vault', 'shop.example.test#alice/password']);
+        const vReq = fk.readDomValues(tid);
+        ok(reqUser.code === 0 && reqPw.code === 0 && vReq.u === 'alice' && vReq.pw === PW_ALICE && !reqPw.out.includes(PW_ALICE) && !reqPw.err.includes(PW_ALICE) && /Receipt vr-[0-9a-f]{12}\./.test(reqPw.out),
+          'B-21cc: a vault fill BY REF lands on fields the listing prints «[required, ref=…]» — the value in the page, the receipt as today, the secret never in the agent\'s output', { vals: vReq, out: reqPw.out.trim(), err: reqPw.err.trim() });
+        ok(oldUser.code === 1 && /\[target_not_found\]/.test(oldUser.err) && /Element not found: @e1/.test(oldUser.err) && /snapshot -i/.test(oldUser.err),
+          'B-21cc RED: with today\'s scan the same fill is refused [target_not_found] «Element not found: @e1 … snapshot -i» — the reported refusal (and the name the plain fill\'s driver uses)', oldUser.err.trim());
+      }
       await watch.noteSnapshot(
         { profileId: PID, browserKey: KEY },
         '- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]\n- textbox "One-time code" [ref=e3]\n- textbox "Plain text" [ref=e4]\n- textbox "Trap focus" [ref=e5]\n- textbox "Trap clear" [ref=e6]\n- textbox "Child password" [ref=e7]',

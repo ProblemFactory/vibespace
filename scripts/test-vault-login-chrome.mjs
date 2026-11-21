@@ -189,11 +189,14 @@ const foreignBodyLeakedSecret = (rows, sec) => {
   return false;
 };
 
+// B-21cc, ALSO CURED: the ref is read with the TREE's parser — anywhere in the bracket after the name («[required, ref=e3]»); a
+// bracket exactly «[ref=…]» found no ref on an attributed field, and the legs' CSS fallbacks would have hidden the miss
 const findRef = (snapOut, labelRe) => {
+  const PV = require(path.join(REPO, 'src/browser-verbs.js'));
   for (const line of String(snapOut || '').split('\n')) {
     if (!labelRe.test(line)) continue;
-    const m = /\[ref=(e\d+)\]/.exec(line);
-    if (m) return `@${m[1]}`;
+    const r = PV.parseSnapshotRefs(line)[0];
+    if (r && r.ref) return r.ref;
   }
   return null;
 };
@@ -598,6 +601,40 @@ try {
         await run(['open', `${SITE}/plain`]);
         const snapP = await run(['snapshot', '-i']);
         ok(snapP.code === 0 && !/\[frame_other_site\]/.test(snapP.err), 'B-5f2e: the tab moved to a page with no such frame ⇒ the sentence is gone (the old page\'s frames are not said)', { err: snapP.err.trim().slice(0, 400) });
+      }
+
+      // B-21cc (agent feedback fb-2450b6f77a; 主开发 r1077): a sign-in page whose fields are REQUIRED. MEASURED here and printed: the
+      // listing's own lines for the two fields. THE LAW: the vault fill takes the same targets as a plain fill — BY REF it lands (the
+      // form posts the vault's values; the secret never in the agent's output); a ref the page navigated past is refused by the name the
+      // plain fill's driver uses («Element not found: …» [target_not_found]). RED (judged on the box's own lines): today's scan — a
+      // bracket exactly «[ref=…]» — reads no ref there, so the vault fill answered «not in the latest snapshot».
+      {
+        await run(['open', `${SITE}/required`]);
+        const snapQ = await run(['snapshot', '-i']);
+        const lineOf = (re) => String(snapQ.out || '').split('\n').find((l) => re.test(l)) || '';
+        const uLine = lineOf(/Email address/i), pLine = lineOf(/Password/i);
+        console.log(`  B-21cc MEASURE: the listing's lines for the two required fields: ${JSON.stringify([uLine.trim(), pLine.trim()])}`);
+        const uQ = findRef(snapQ.out, /Email address/i), pQ = findRef(snapQ.out, /Password/i), cQ = findRef(snapQ.out, /Continue/i);
+        const exact = (l) => /\[ref=([A-Za-z0-9_-]+)\]/.test(l);   // today's scan, restated
+        ok(snapQ.code === 0 && !!uQ && !!pQ && !!cQ, 'B-21cc: snapshot -i lists both required fields and the button with their refs (the tree\'s parser)', { uLine, pLine, uQ, pQ, cQ });
+        ok(!exact(uLine) && /\[(?=[^\]]*\bref=)[^\]]*,[^\]]*\]/.test(uLine), 'B-21cc MEASURED — the RED of today\'s scan: the real driver prints the required field\'s attributes and its ref in ONE bracket, where a bracket exactly «[ref=…]» reads no ref', { uLine, pLine });
+        pages.clear();
+        const qu = await run(['fill', uQ || '@e0', '--vault', `${SITE}#${USER}/user`]);
+        const qp = await run(['fill', pQ || '@e0', '--vault', `${SITE}#${USER}/password`]);
+        const qc = await run(['click', cQ || 'button[type=submit]']);
+        const gotQ = await until(() => pages.received().find((x) => x.path === '/done/required'), 10000);
+        ok(qu.code === 0 && qp.code === 0 && /Receipt vr-[0-9a-f]{12}\./.test(qp.out) && !qp.out.includes(PW) && !qp.err.includes(PW) && qc.code === 0 && Boolean(gotQ) && gotQ.body.username === USER && gotQ.body.password === PW,
+          'B-21cc: the vault fill BY REF lands on the required fields — the form posts the vault\'s user and password, the receipt as today, the secret never in the agent\'s output', { qu: qu.err.trim().slice(0, 300), qp: qp.out.trim().slice(0, 200), posted: gotQ ? { u: gotQ.body.username, pwMatch: gotQ.body.password === PW } : null });
+        // a ref the page NAVIGATED past: refused by the plain fill's name, nothing typed
+        await run(['open', `${SITE}/required`]);
+        const snapQ2 = await run(['snapshot', '-i']);
+        const uQ2 = findRef(snapQ2.out, /Email address/i);
+        const heardAt = w.cdpRecv.length;
+        await run(['open', `${SITE}/required?again=1`]);
+        await until(() => w.cdpRecv.slice(heardAt).some((x) => x.method === 'Page.frameNavigated'), 10000);   // the hub's watch heard the navigation
+        const stale = await run(['fill', uQ2 || '@e0', '--vault', `${SITE}#${USER}/user`]);
+        ok(!!uQ2 && stale.code === 1 && /\[target_not_found\]/.test(stale.err) && /Element not found: @e\d+ expired because the page navigated/.test(stale.err) && /snapshot -i/.test(stale.err),
+          'B-21cc: a ref the page navigated past is refused [target_not_found] by the plain fill\'s name — «Element not found: … expired because the page navigated … snapshot -i»', { err: stale.err.trim().slice(0, 300) });
       }
 
       // Plain `<input type="text">` (`/plain`)

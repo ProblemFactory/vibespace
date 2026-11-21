@@ -5131,7 +5131,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           return {
             ok: false,
             code: 'target_not_found',
-            error: (rr && rr.error) || `element ${tgtStr} is not in the current tab's latest snapshot — run \`vibespace-browser snapshot -i\` and retry`,
+            error: (rr && rr.error) || `Element not found: ${tgtStr} is not in the current tab's latest snapshot — run \`vibespace-browser snapshot -i\` and retry`,
           };
         }
         if (e.snapshotRefs === snapAtCall && (snapAtCall.navSeq ?? 0) === (e.navSeq || 0) && snapAtCall.resolved) {
@@ -5144,8 +5144,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
           ok: false,
           code: 'target_not_found',
           error: e.snapshotExpiredByNav
-            ? `element ${tgtStr} expired because the page navigated since the last snapshot — run \`vibespace-browser snapshot -i\` and retry`
-            : `element ${tgtStr} is not in the current tab's latest snapshot — run \`vibespace-browser snapshot -i\` and retry`,
+            ? `Element not found: ${tgtStr} expired because the page navigated since the last snapshot — run \`vibespace-browser snapshot -i\` and retry`   // B-21cc: a stale ref is refused by the name the plain fill's driver uses («Element not found»)
+            : `Element not found: ${tgtStr} is not in the current tab's latest snapshot — run \`vibespace-browser snapshot -i\` and retry`,
         };
       }
       const preInFrame = Boolean(refEntry.inFrame || (refEntry.frameId && String(refEntry.frameId) !== iso.topFrameId));

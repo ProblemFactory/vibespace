@@ -271,6 +271,9 @@ document.getElementById('s-all').addEventListener('click', async () => {
   await mark('s-all', true);
 });`);
   },
+  // B-21cc: a sign-in page whose fields are REQUIRED (the reported page's shape: a text box for the username, inputmode email) — the
+  // real driver prints a required field's attributes and its ref in ONE bracket
+  '/required': () => page('Sign in — required fields', `<form id="qf" method="post" action="/done/required"><label for="qu">Email address*</label><input id="qu" name="username" type="text" inputmode="email" autocomplete="username" required><label for="qp">Password*</label><input id="qp" name="password" type="password" autocomplete="current-password" required><label><input id="qr" type="checkbox" name="remember" checked> Remember me</label><button type="submit">Continue</button></form>`),
   '/plain': () => page('Nothing to sign in', '<p>No form here.</p><input id="q" placeholder="Search">'),
   '/rapid-jump': (url, opts = {}) => {
     if (opts.stopBounce) return page('Rapid jump stopped', '<p>Stopped.</p><input id="q" placeholder="Stopped">');
