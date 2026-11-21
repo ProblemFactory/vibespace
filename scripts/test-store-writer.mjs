@@ -6,9 +6,10 @@
 //      gap after the last write, its backoff after a failure), which store goes next, the exit line's words
 //   ② COALESCE: a burst of 50 changes is ONE write of the latest state; a store's own order: every write a later state
 //   ③ THE PACE, run: a store changing every 20 ms is written at its gap, never back to back
-//   ④ ONE WRITE IN FLIGHT ACROSS ALL STORES, on the writer's thread — and THE THREADPOOL LAW: 20 stores dirty on a slow
-//      storage (300 ms a write) ⇒ an unrelated fs.promises.stat and a dns lookup still answer in milliseconds, and the
-//      main loop never waits (its largest gap stays small)
+//   ④ ONE WHOLE WRITE ON THE STORAGE AT A TIME (the writer unit's two lanes, r1584: every whole write on the whole lane's ONE
+//      thread, an append on its own; a whole job made early waits parked, one at most) — and THE THREADPOOL LAW: 20 stores
+//      dirty on a slow storage (300 ms a write) ⇒ an unrelated fs.promises.stat and a dns lookup still answer in
+//      milliseconds, and the main loop never waits (its largest gap stays small); RED: whole writes on both lanes
 //   ⑤ A FAILED WRITE never throws: said («… not written (EISDIR; attempt 1) — kept in memory, retrying in 1 s»), the
 //      previous file intact, retried until it lands
 //   ⑥ THE EXIT: beginExit defers a store's own flush; exitFlush waits for the write in flight (no bound of ours — round
@@ -47,7 +48,7 @@ const MB = 1024 * 1024;
 // the slow storage: the writer's own thread script, sleeping `delayMs` before each write and recording how many run at once
 const SLOW = path.join(ROOT, 'slow-worker.cjs');
 fs.writeFileSync(SLOW, `'use strict';
-const { parentPort, workerData } = require('worker_threads');
+const { parentPort, workerData, threadId } = require('worker_threads');
 const fs = require('fs');
 const { writeJob } = require(${JSON.stringify(path.join(REPO, 'src/store-writer-worker.js'))});
 const S = new Int32Array(workerData.sab), Z = new Int32Array(new SharedArrayBuffer(4));
@@ -59,10 +60,14 @@ parentPort.on('message', (m) => {
   if (delay) Atomics.wait(Z, 0, 0, delay);   // the storage takes its time — on THIS thread
   if (m.ev === 'unlink') { try { fs.unlinkSync(m.file); } catch { } } else try { writeJob(m); } catch (e) { err = { code: e.code || null, message: e.message }; }
   const ms = Number(process.hrtime.bigint() - t0) / 1e6;
+  // r1584: ITS OWN MARK — the storage time of each job, with its thread and kind (whole / append), so section 4 counts what
+  // touched the storage at once (process.hrtime is the process's one clock: comparable across both lanes' threads)
+  if (process.env.VS_SLOW_MARKS) fs.appendFileSync(process.env.VS_SLOW_MARKS, JSON.stringify({ tid: threadId, ev: m.ev, append: !!m.append, t0: String(t0), t1: String(process.hrtime.bigint()) }) + '\n');
   Atomics.store(S, 2, err ? 2 : 1); Atomics.add(S, 1, 1); Atomics.store(S, 0, 0); Atomics.notify(S, 0);
   parentPort.postMessage({ ev: m.ev === 'unlink' ? 'unlinked' : 'written', id: m.id, ms, err });
 });
 `);
+const FOUR = {};   // section 4's scene, for its RED at the end
 const loopWatch = () => { let last = performance.now(), max = 0; const iv = setInterval(() => { const t = performance.now(); max = Math.max(max, t - last); last = t; }, 5); return () => { clearInterval(iv); return Math.round(max); }; };
 
 try {
@@ -107,24 +112,48 @@ try {
     ok(st.writes >= 2 && st.writes <= 4 && st.gapMs === 1000, `a 2 MB store dirtied ${n} times in 3.2 s ⇒ ${st.writes} writes (its gap ${st.gapMs} ms) — before this commit a busy store was rewritten every ~0.5 s`, st);
     w.stop();
   }
-  // ── ④ ONE IN FLIGHT, THE THREADPOOL LAW ───────────────────────────────────────────────────────────────────────────
-  console.log('④ one write in flight across all stores, on its own thread — the fs threadpool, DNS and the loop untouched');
+  // ── ④ ONE WHOLE WRITE ON THE STORAGE AT A TIME, THE THREADPOOL LAW ──────────────────────────────────────────────────
+  // r1584 (the box's row 101 at 36e7ca211): since the writer unit, stats()' «inflight» is the FENCE (a job on a thread OR made
+  // and waiting, parked, for its lane) — here a store not known yet is made on the free append lane, its bytes are whole, so it
+  // waits parked on the busy whole lane: the fence read 2 while ONE write touched the storage. The law is read where it lives:
+  // each job's own storage time, its thread and its kind, marked by the slow stand-in.
+  console.log('④ one WHOLE write on the storage at a time (the whole lane\'s one thread; an append on its own) — the fs threadpool, DNS and the loop untouched');
   {
     process.env.VS_SLOW_MS = '300';
-    const w = SW.create({ log: { warn() {} }, workerPath: SLOW });
-    const files = [...Array(20)].map((_, i) => path.join(ROOT, `s${i}.json`));
-    const stop = loopWatch();
-    for (const f of files) w.dirty(f, { name: path.basename(f), produce: () => JSON.stringify({ f }), debounceMs: 0 });
-    await sleep(100);   // the first slow write is in flight
-    const t1 = performance.now(); await fs.promises.stat(path.join(ROOT, 'burst.json')); const statMs = performance.now() - t1;
-    const t2 = performance.now(); let dnsMs = null; try { await dns.promises.lookup('localhost'); dnsMs = performance.now() - t2; } catch { dnsMs = performance.now() - t2; }
-    const busy = w.stats().filter((x) => x.inflight).length;
-    await sleep(20 * 300 + 900);
-    const gap = stop(), done = w.stats().filter((x) => x.writes === 1).length;
-    ok(busy === 1 && done === 20, `20 dirty stores on a 300 ms-a-write storage: ONE in flight at a time (${busy}), all ${done} written one after another`);
-    ok(statMs < 50 && dnsMs < 200, `meanwhile an unrelated fs.promises.stat answered in ${statMs.toFixed(1)} ms and a dns lookup in ${dnsMs.toFixed(1)} ms — the writer takes no fs threadpool thread`);
-    ok(gap < 100, `…and the main loop's largest gap over the 6 s was ${gap} ms (each write held only the writer's thread)`);
-    w.stop(); delete process.env.VS_SLOW_MS;
+    const marks = path.join(ROOT, 'slow-marks.jsonl');
+    const readMarks = () => (fs.existsSync(marks) ? fs.readFileSync(marks, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).map((x) => ({ ...x, t0: BigInt(x.t0), t1: BigInt(x.t1) })) : []);
+    // how many jobs touched the storage at once at the most (an end before a start at the same instant)
+    const atOnce = (xs) => { const ev = xs.flatMap((x) => [[x.t0, 1], [x.t1, -1]]).sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : a[1] - b[1])); let n = 0, m = 0; for (const [, d] of ev) { n += d; m = Math.max(m, n); } return m; };
+    const scene = async (mod, count, { probe = false } = {}) => {
+      fs.rmSync(marks, { force: true }); process.env.VS_SLOW_MARKS = marks;
+      const dir = fs.mkdtempSync(path.join(ROOT, 'four-'));
+      const w = mod.create({ log: { warn() {} }, workerPath: SLOW });
+      const files = [...Array(count)].map((_, i) => path.join(dir, `s${i}.json`));
+      let fenceMax = 0; const fv = setInterval(() => { fenceMax = Math.max(fenceMax, w.stats().filter((x) => x.inflight).length); }, 10);
+      const stop = loopWatch();
+      for (const f of files) w.dirty(f, { name: path.basename(f), produce: () => JSON.stringify({ f }), debounceMs: 0 });
+      const out = {};
+      if (probe) {
+        await sleep(100);   // the first slow write is in flight
+        const t1 = performance.now(); await fs.promises.stat(path.join(ROOT, 'burst.json')); out.statMs = performance.now() - t1;
+        const t2 = performance.now(); try { await dns.promises.lookup('localhost'); } catch { } out.dnsMs = performance.now() - t2;
+      }
+      await sleep(count * 300 + 900);
+      clearInterval(fv);
+      out.gap = stop(); out.done = w.stats().filter((x) => x.writes === 1).length; out.fenceMax = fenceMax;
+      w.stop(); delete process.env.VS_SLOW_MARKS;
+      const ms = readMarks().filter((x) => x.ev === 'write'), whole = ms.filter((x) => !x.append);
+      Object.assign(out, { jobs: ms.length, whole: whole.length, appends: ms.length - whole.length, wholeAtOnce: atOnce(whole), allAtOnce: atOnce(ms), threads: new Set(ms.map((x) => x.tid)).size });
+      return out;
+    };
+    const r = await scene(SW, 20, { probe: true });
+    ok(r.wholeAtOnce === 1 && r.whole === 20 && r.done === 20, `20 dirty stores on a 300 ms-a-write storage: ONE whole write on the storage at a time (${r.wholeAtOnce} at the most, by each job's own storage time), all ${r.done} written one after another`, r);
+    ok(r.appends === 0 && r.threads === 1 && r.allAtOnce === 1, `…every one of them on the whole lane's ONE thread — the append lane's thread wrote nothing (${r.appends} appends, ${r.threads} thread(s) used; at most two threads ever touch the storage at once: one whole, one append)`, r);
+    ok(r.fenceMax >= 1 && r.fenceMax <= 2, `…and the fence (stats' «inflight»: a job on a thread or made and waiting) held ${r.fenceMax} at the most: the one in flight and at most ONE made early, parked behind it — never a pile of snapshots`, r);
+    ok(r.statMs < 50 && r.dnsMs < 200, `meanwhile an unrelated fs.promises.stat answered in ${r.statMs.toFixed(1)} ms and a dns lookup in ${r.dnsMs.toFixed(1)} ms — the writer takes no fs threadpool thread`);
+    ok(r.gap < 100, `…and the main loop's largest gap over the 6 s was ${r.gap} ms (each write held only the writer's thread)`);
+    FOUR.scene = scene;   // its RED runs LAST (below): its mutant copy imports scratch.mjs, which may re-home a suite
+    delete process.env.VS_SLOW_MS;
   }
   // ── ⑤ A FAILED WRITE ──────────────────────────────────────────────────────────────────────────────────────────────
   console.log('⑤ a failed write is said, kept, retried — never a throw');
@@ -502,6 +531,21 @@ if (mode === 'scene') {
     // EPERM · working), a kill before the retry, a new process — the fast suite runs three of the eight pairs
     { const r = spawnSync(process.execPath, [path.join(REPO, 'scripts/test-store-writer-r4.mjs')], { env: { ...process.env, VS_R4_PAIRS: 'all' }, encoding: 'utf8', timeout: 120000 });
       ok(r.status === 0 && /✓ MUST 1: an append cut AT ITS NEWLINE[^\n]*\(8 pairs\)/.test(r.stdout || ''), 'MUST 1, the whole matrix (2 cuts × 4 truncate outcomes, a kill before the retry, a new process): every pair green — test-store-writer-r4 with VS_R4_PAIRS=all', { status: r.status, tail: String(r.stdout || '').slice(-600) + String(r.stderr || '').slice(-300) }); }
+  }
+  // ── ④ RED, RUN LAST ─────────────────────────────────────────────────────────────────────────────────────────────────
+  // its mutant copy (scripts/mutant-copy.mjs) imports scratch.mjs, which re-homes a suite whose HOME is outside every temp root
+  // (a hosted runner's): no leg before this one runs under a home changed half-way
+  console.log('④ RED: the writer with whole writes on BOTH lanes — two whole writes on the storage at once');
+  {
+    process.env.VS_SLOW_MS = '300';
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { anchored } = await import('./scratch.mjs');
+    const srcW = fs.readFileSync(path.join(REPO, 'src/store-writer.js'), 'utf8');
+    const M4 = mutantCopies('store-writer-4', REPO);
+    const BOTH = M4.load('src/store-writer.js', anchored(srcW, 'const laneOf = (p) => (p && p.append ? LA : LW);', 'let alt = 0; const laneOf = (p) => (p && p.append ? LA : (alt++ % 2 ? LA : LW));', 'whole writes on both lanes'), 'both-lanes');
+    const m = await FOUR.scene(BOTH, 6);
+    ok(m.wholeAtOnce === 2 && m.threads === 2, `RED: whole writes alternating between the two lanes put ${m.wholeAtOnce} whole writes on the storage at once (${m.threads} threads) — section 4's first check catches it`, m);
+    delete process.env.VS_SLOW_MS;
   }
 } finally {
   fs.rmSync(ROOT, { recursive: true, force: true });
