@@ -136,7 +136,8 @@ export function refusalOf(root, { homes = null, mounts = null, checkout = REPO, 
 }
 
 /** The env a suite hands its hub, stripped of what it must never inherit: the vendor keys (scratch.mjs withoutVendorKeys), a
- *  daemon root an enclosing run set (rule 8), and a caller conversation's names (src/conversation-env.js — B-ba47's follow-up). */
+ *  daemon root an enclosing run set (rule 8), and a caller conversation's names (src/conversation-env.js — B-ba47's follow-up),
+ *  the process marks too: the suite's own process keeps them (scratch.mjs), a hub under test never inherits them (主开发 r863). */
 export function strippedEnv(env = process.env) {
   const out = withoutConversationNames(withoutVendorKeys(env)).env;
   for (const k of DAEMON_ROOT_ENV) delete out[k];

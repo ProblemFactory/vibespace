@@ -123,6 +123,7 @@ const OWNERS = Object.freeze([
       name('helper-fact'),   // B-bc9f: a Claude settings file's key-helper fact — ONE rule for the create and a paired machine's probe (PURE)
       name('ckpt-switch'),   // row B-437e U0: the checkpoint switch's PURE verdict (the probe, the release road, their suites)
       name('claude-route-names'),   // B-e7c0 cure: the CLI's route / credential names (PURE) the managed rule and the merge both read
+      name('conversation-env'),   // B-ba47's follow-up: the names the create and the spawns write into a conversation's child (PURE; the suites' scratch import and §112 read it — no hub path loads it, so no helper slot: 主开发 r863's should)
       name('claude-level-signal'),   // B-24e2: the background signal's declaration + the build's identity, out of the catalog (PURE; the catalog, the device's scan)
       name('left-behind|left-behind-door|left-behind-line'),   // B-69a7: what a stopped turn's command tool left running — the read (SHARED; the hub and the device agent) and the hub's door
       name('managed-claude-settings'),   // lane lg-providers (主开发 23:45Z): does the machine's managed Claude settings set a key helper, credential or address (the create, the provider Test)
@@ -145,7 +146,6 @@ const HELPERS = Object.freeze([
   ['src/egress-fence.js', 'the address verdict and one fenced request to an owner-configured address; nothing kept between calls'],
   ['src/cache-bounds.js', 'PURE: no fs, no clock, nothing at module level — the ceilings, and eviction and slab classes acting on the map or slab their CALLER owns'],
   ['src/fixture-guard.js', 'PURE: the one declaration of what a test fixture looks like'],
-  ['src/conversation-env.js', 'PURE, imports nothing: the names the hub injects into a conversation (B-ba47 follow-up); constant tables'],
   ['src/client-swap-step.js', 'PURE, imports nothing: the client-swap rule (what was said, the client in force, who must act → the act) the channel accounts and the storage mounts share'],
   ['src/owner-mark.js', 'r1213: a temp folder\'s owner mark — written, read and judged per call on the folder its CALLER made (the sign-in card, the token mint); nothing kept'],
 ].map(([path, why]) => Object.freeze({ path, why })));

@@ -8240,55 +8240,78 @@ await section(async () => {
 });
 
 // §112 THE NAMES THE HUB INJECTS INTO A CONVERSATION ARE ONE LIST, held to the sites BOTH WAYS (B-ba47's follow-up pick, 主开发
-// r791/r807, 2026-11-21). src/conversation-env.js holds them (identity, route, credential + the four harness families); scripts/
-// scratch.mjs removes them from a suite at import, so a suite run from inside a conversation cannot hand the caller's token to a
-// child. The injector sites keep their own spelling (主开发 r807); this census is the wall: over every tracked src/ file and
-// server.js, a VIBESPACE_* / <FAMILY>WEBUI_* name in a WRITER shape (`NAME=` in an env pair or shell line, an object key `NAME:`,
-// `x.NAME =` / `x['NAME'] =`) is judged — at a SITE every VIBESPACE_* name written must be in the list; every list name is
-// written by a site; every family has a writer and every *_WEBUI_* name written belongs to a family; and a file that writes one
-// and is no site, no family writer and no declared reader is a NEW injector site, red by name. CONTROLS: one plant each way.
+// r791/r807/r863, 2026-11-21). src/conversation-env.js holds them (identity, route, credential; the telemetry pair; the account's
+// sign-in; the five families) and the three process marks a suite keeps; scripts/scratch.mjs removes the rest from a suite at
+// import, so a suite run from inside a conversation cannot hand the caller's route or credential to a child. The injector sites
+// keep their own spelling (主开发 r807); this census is the wall: over every tracked src/ file and server.js, a VIBESPACE_* /
+// <FAMILY>WEBUI_* / telemetry name in a WRITER shape (`NAME=` in an env pair or shell line, an object key
+// `NAME:`, `x.NAME =` / `x['NAME'] =`) is judged — a `NAME=` spelled to MATCH another process's environ (after `^`, `/` or
+// `mark: `) is a read, never a write. At a SITE or in a family dir every VIBESPACE_* name written must be in the list; every
+// site-held name (CONVERSATION_ENV + the telemetry pair) is written by a site; every family has a writer and every *_WEBUI_*
+// name written belongs to a family; a file that writes one and is no site and no declared reader is a NEW injector site, red by
+// name — a family dir (src/adapters/, src/harnesses/) is exempt for its FAMILY names only. The account's sign-in is written
+// through computed keys no writer shape sees, so its group is held EQUAL to the descriptors' own answer (src/harness-env.js
+// agentCredentialEnvNames) both ways. THE BROWSER FAMILY (AGENT_BROWSER_*) is a namespace the hub owns whole — the keeper's
+// daemon, the session's env prefix, a lease's CDP address, constants of the same spelling — so it is held to the agent door's own
+// rule instead: a family that is not *_WEBUI_ must be a prefix src/agent-env.js agentEnv drops from every inherited env («the
+// browser env of a session comes from VibeSpace, never inherited»). SAID LIMITS: an env object built in a file that is no site is seen only where that file
+// spells the names in a writer shape (so src/server/otel-ingest.js is a site); data/bin wrappers are outside the scope.
+// CONTROLS: one plant per rule, each its own check.
 await section(async () => {
   console.log('\n§112 the names the hub injects into a conversation: ONE list (src/conversation-env.js), held to the sites both ways');
-  const CE112 = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/conversation-env.js'));
+  const req112 = (await import('node:module')).createRequire(import.meta.url);
+  const CE112 = req112(path.join(REPO, 'src/conversation-env.js'));
   const SITES112 = Object.freeze({
     'src/ws-create.js': 'the create', 'src/spawn/local.js': 'the local spawn (the account key)', 'src/spawn/ssh.js': 'the spawn’s ssh road',
     'src/spawn/dial.js': 'the dial road', 'src/remote-shell.js': 'the remote shell', 'src/jobs.js': 'the jobs',
     'src/server/boot-restore.js': 'the boot’s re-adopt (the sixth site the row did not count)', 'src/hosts.js': 'the remote hook-register run (its CLI config)',
+    'src/server/otel-ingest.js': 'the telemetry pair (envFor: the hub’s receiver address + the credential it minted; the create merges it into every local claude conversation)',
+    'src/claude-oat-probe.js': 'the oat probe’s own CLI (a probe child, never a conversation): its telemetry to this hub’s receiver',
   });
   const FAMILY_DIRS112 = ['src/adapters/', 'src/harnesses/'];
   // the hub's OWN knobs a site hands a child (not the conversation's identity, route or credential), each named with its reason
   const KNOBS112 = Object.freeze({
-    VIBESPACE_USAGE_SCAN_MAX_MS: 'the remote usage scan\u2019s own time bound (src/hosts.js), the hub\u2019s knob',
-    VIBESPACE_USAGE_SCAN_MAX_BYTES: 'the remote usage scan\u2019s own byte bound (src/hosts.js), the hub\u2019s knob',
+    VIBESPACE_USAGE_SCAN_MAX_MS: 'the remote usage scan’s own time bound (src/hosts.js), the hub’s knob',
+    VIBESPACE_USAGE_SCAN_MAX_BYTES: 'the remote usage scan’s own byte bound (src/hosts.js), the hub’s knob',
   });
   const READERS112 = Object.freeze({
     'src/left-behind.js': 'a process MARK matched in another process’s environ (CLAUDE_WEBUI_SESSION_ID= / VIBESPACE_JOB_ID=), never written',
     'src/server/left-behind-door.js': 'the same mark, spelled for the match',
     'src/server/agent-tool-generators.js': 'a generated shim READS ${CLAUDE_WEBUI_PORT:-<port>} with a default',
   });
-  const NAME112 = '((?:VIBESPACE|[A-Z]+_WEBUI)_[A-Z0-9_]+)';
+  const SITE_HELD112 = Object.freeze([...CE112.CONVERSATION_ENV, ...CE112.CONVERSATION_TELEMETRY_ENV]);
+  const esc112 = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const WEBUI_FAMS112 = CE112.CONVERSATION_ENV_FAMILIES.filter((p) => /^[A-Z]+_WEBUI_$/.test(p));
+  const OTHER_FAMS112 = CE112.CONVERSATION_ENV_FAMILIES.filter((p) => !WEBUI_FAMS112.includes(p));
+  const NAME112 = '((?:VIBESPACE|[A-Z]+_WEBUI)_[A-Z0-9_]+|' + CE112.CONVERSATION_TELEMETRY_ENV.map(esc112).join('|') + ')';
   const W1 = new RegExp('\\b' + NAME112 + '(?:=(?!=)|\\s*:(?![:-])|\\s*\\]?\\s*=(?!=))', 'g');
   const W2 = new RegExp("\\.(" + NAME112.slice(1, -1) + ")\\s*=(?!=)|\\[['\"]" + NAME112 + "['\"]\\]\\s*=(?!=)", 'g');
+  const READ_BEFORE112 = /(?:\^|\/|mark:\s*[`'"])$/;   // `^NAME=` (a grep), `/NAME=` (a regex), `mark: \`NAME=` (a mark scan): a read
   const writtenIn = (text) => {
     const out = new Map();
     text.split('\n').forEach((line, i) => {
       const code = line.replace(/(^|\s)\/\/.*$/, ''); if (/^\s*\*/.test(code)) return;
-      for (const re of [W1, W2]) for (const m of code.matchAll(re)) { const k = m[1] || m[2]; if (!out.has(k)) out.set(k, i + 1); }
+      for (const re of [W1, W2]) for (const m of code.matchAll(re)) {
+        const k = m[1] || m[2];
+        if (re === W1 && READ_BEFORE112.test(code.slice(Math.max(0, m.index - 12), m.index))) continue;
+        if (!out.has(k)) out.set(k, i + 1);
+      }
     });
     return out;
   };
-  const isFam = (k) => /^[A-Z]+_WEBUI_/.test(k);
-  const census112 = (files, list = CE112.CONVERSATION_ENV, fams = CE112.CONVERSATION_ENV_FAMILIES) => {
+  const isWebui = (k) => /^[A-Z]+_WEBUI_/.test(k);
+  const famOf = (k, fams) => fams.find((p) => k.startsWith(p) && k.length > p.length) || null;
+  const census112 = (files, list = SITE_HELD112, fams = WEBUI_FAMS112) => {
     const red = [], written = new Set(), famHit = new Set();
     for (const [f, text] of Object.entries(files)) {
       const w = writtenIn(text), site = !!SITES112[f], famWriter = FAMILY_DIRS112.some((d) => f.startsWith(d));
       for (const [k, line] of w) {
-        const isList = list.includes(k), fam = isFam(k) ? fams.find((p) => k.startsWith(p)) : null;
-        if (isFam(k) && !fam) red.push(`${f}:${line} writes ${k}: no declared family (src/conversation-env.js CONVERSATION_ENV_FAMILIES)`);
-        if (site && k.startsWith('VIBESPACE_') && !isList && !KNOBS112[k]) red.push(`${f}:${line} (${SITES112[f]}) writes ${k} into a child's env — not in src/conversation-env.js CONVERSATION_ENV: add it, or name why it is not the conversation's`);
+        const isList = list.includes(k), fam = famOf(k, fams);
+        if (isWebui(k) && !fam) red.push(`${f}:${line} writes ${k}: no declared family (src/conversation-env.js CONVERSATION_ENV_FAMILIES)`);
+        if ((site || famWriter) && k.startsWith('VIBESPACE_') && !isList && !KNOBS112[k] && !CE112.CONVERSATION_ACCOUNT_ENV.includes(k)) red.push(`${f}:${line} (${SITES112[f] || 'a family dir'}) writes ${k} into a child's env — not in src/conversation-env.js: add it, or name why it is not the conversation's`);
         if (site && isList) written.add(k);
         if (fam && (site || famWriter)) famHit.add(fam);
-        if ((isList || fam) && !site && !famWriter && !READERS112[f]) red.push(`${f}:${line} writes ${k} — a NEW injector site: add it to §112's SITES112 (or name it a reader)`);
+        if ((isList || fam) && !site && !(famWriter && fam) && !READERS112[f]) red.push(`${f}:${line} writes ${k} — a NEW injector site: add it to §112's SITES112 (or name it a reader)`);
       }
     }
     for (const k of list) if (!written.has(k)) red.push(`${k} is in src/conversation-env.js but NO site writes it — drop it, or name the site`);
@@ -8297,16 +8320,45 @@ await section(async () => {
   };
   const files112 = Object.fromEntries(trackedFiles(REPO, 'src').filter((f) => /\.js$/.test(f)).concat(['server.js']).map((f) => [f, read(f)]));
   const real112 = census112(files112);
-  ok(Object.keys(SITES112).every((f) => files112[f] && files112[f].length) && real112.written.size === CE112.CONVERSATION_ENV.length && !real112.red.length,
-    `§112 ${CE112.CONVERSATION_ENV.length} conversation names + ${CE112.CONVERSATION_ENV_FAMILIES.length} families, each written by a site (${Object.keys(SITES112).length} sites); no site writes a VIBESPACE_* name the list lacks; no new injector site${real112.red.length ? ' — RED: ' + real112.red.slice(0, 6).join(' | ') : ''}`, real112.red);
+  ok(Object.keys(SITES112).every((f) => files112[f] && files112[f].length) && real112.written.size === SITE_HELD112.length && !real112.red.length,
+    `§112 ${SITE_HELD112.length} site-held names (${CE112.CONVERSATION_ENV.length} + the telemetry pair) + ${WEBUI_FAMS112.length} harness families, each written by a site (${Object.keys(SITES112).length} sites); no site writes a VIBESPACE_* name the list lacks; no new injector site${real112.red.length ? ' — RED: ' + real112.red.slice(0, 6).join(' | ') : ''}`, real112.red);
+  // THE BROWSER FAMILY, held to the agent door's own prefix drop (a family that is not *_WEBUI_ is the hub's whole namespace)
+  const doorDrops112 = (text) => [...text.matchAll(/k\.startsWith\('([A-Z][A-Z0-9_]*_)'\)\) continue/g)].map((m) => m[1]);
+  const fam112 = (fams, text) => fams.filter((p) => !doorDrops112(text).includes(p));
+  const doorText112 = files112['src/agent-env.js'] || '';
+  ok(OTHER_FAMS112.length >= 1 && doorDrops112(doorText112).includes('AGENT_BROWSER_') && !fam112(OTHER_FAMS112, doorText112).length,
+    `§112 every family that is not a harness's (${OTHER_FAMS112.join(', ')}) is a prefix src/agent-env.js agentEnv drops from every inherited env — the hub's own namespace${fam112(OTHER_FAMS112, doorText112).length ? ' — NOT dropped there: ' + fam112(OTHER_FAMS112, doorText112).join(', ') : ''}`);
+  // THE ACCOUNT'S SIGN-IN, held to the descriptors both ways (the agent door's own answer: every spawnEnvVar / keyEnvVars, homes out)
+  const declared112 = req112(path.join(REPO, 'src/harness-env.js')).agentCredentialEnvNames(req112(path.join(REPO, 'src/harnesses')).list());
+  const acct112 = (list, decl) => ({ missing: decl.filter((n) => !list.includes(n)), extra: list.filter((n) => !decl.includes(n)) });
+  const a112 = acct112(CE112.CONVERSATION_ACCOUNT_ENV, declared112);
+  ok(declared112.length >= 5 && !a112.missing.length && !a112.extra.length && CE112.CONVERSATION_ACCOUNT_ENV.every((n) => CE112.isConversationName(n)),
+    `§112 the account's sign-in group equals the descriptors' answer both ways (${declared112.join(', ')})${a112.missing.length ? ' — a descriptor declares ' + a112.missing.join(', ') + ' and the list lacks it' : ''}${a112.extra.length ? ' — the list holds ' + a112.extra.join(', ') + ' and no descriptor declares it' : ''}`);
+  // THE PROCESS MARKS (主开发 r863 MUST 2): conversation names, each read as a mark by the left-behind or the job stop; kept on request
+  const markRead112 = (k) => ['src/left-behind.js', 'src/jobs.js'].some((f) => (files112[f] || '').includes(k + '='));
+  const kept112 = CE112.withoutConversationNames({ CLAUDE_WEBUI_SESSION_ID: 'x', VIBESPACE_JOB_ID: 'x', VIBESPACE_JOB_RUN: 'x', VIBESPACE_SESSION_TOKEN: 'x', CLAUDE_WEBUI_PORT: 'x', PATH: '/bin' }, { keepMarks: true });
+  const strict112 = CE112.withoutConversationNames({ CLAUDE_WEBUI_SESSION_ID: 'x', VIBESPACE_JOB_RUN: 'x' });
+  ok(CE112.CONVERSATION_MARKS.length === 3 && CE112.CONVERSATION_MARKS.every((k) => CE112.isConversationName(k) && markRead112(k))
+    && kept112.kept.join() === 'CLAUDE_WEBUI_SESSION_ID,VIBESPACE_JOB_ID,VIBESPACE_JOB_RUN' && kept112.dropped.join() === 'CLAUDE_WEBUI_PORT,VIBESPACE_SESSION_TOKEN' && kept112.env.PATH === '/bin'
+    && strict112.dropped.length === 2 && !strict112.kept.length,
+    `§112 the three process marks (${CE112.CONVERSATION_MARKS.join(', ')}) are conversation names read as marks (src/left-behind.js, src/jobs.js): kept when asked (a suite's own process), dropped otherwise (a hub under test)`);
+  // CONTROLS, one per rule — each red by name
   const plant112 = (f, add) => census112({ ...files112, [f]: (files112[f] || '') + '\n' + add });
-  const pA = plant112('src/ws-create.js', "const x = { VIBESPACE_CALLER_NEW: '1' };");
-  const pB = census112(files112, [...CE112.CONVERSATION_ENV, 'VIBESPACE_NEVER_WRITTEN']);
-  const pC = plant112('src/server/new-road.js', "env.CLAUDE_WEBUI_SESSION_ID = id;");
-  const pD = plant112('src/adapters/acp.js', "const e = { GEMINI_WEBUI_MODEL: m };");
-  ok(pA.red.some((r) => /ws-create\.js:\d+ \(the create\) writes VIBESPACE_CALLER_NEW/.test(r)) && pB.red.some((r) => /VIBESPACE_NEVER_WRITTEN is in src\/conversation-env\.js but NO site writes it/.test(r))
-    && pC.red.some((r) => /new-road\.js:\d+ writes CLAUDE_WEBUI_SESSION_ID — a NEW injector site/.test(r)) && pD.red.some((r) => /writes GEMINI_WEBUI_MODEL: no declared family/.test(r)),
-    '§112 CONTROLS, each red by name: a site writing a VIBESPACE_* name the list lacks; a list name no site writes; a new file writing a conversation name; a *_WEBUI_* name of no declared family');
+  const has112 = (r, re) => r.red.some((x) => re.test(x));
+  ok(has112(plant112('src/ws-create.js', "const x = { VIBESPACE_CALLER_NEW: '1' };"), /ws-create\.js:\d+ \(the create\) writes VIBESPACE_CALLER_NEW/), '§112 CONTROL: a site writing a VIBESPACE_* name the list lacks is red by name');
+  ok(has112(census112(files112, [...SITE_HELD112, 'VIBESPACE_NEVER_WRITTEN']), /VIBESPACE_NEVER_WRITTEN is in src\/conversation-env\.js but NO site writes it/), '§112 CONTROL: a list name no site writes is red by name');
+  ok(has112(plant112('src/server/new-road.js', 'env.CLAUDE_WEBUI_SESSION_ID = id;'), /new-road\.js:\d+ writes CLAUDE_WEBUI_SESSION_ID — a NEW injector site/), '§112 CONTROL: a new file writing a conversation name is a NEW injector site, red by name');
+  ok(has112(plant112('src/adapters/acp.js', 'const e = { GEMINI_WEBUI_MODEL: m };'), /writes GEMINI_WEBUI_MODEL: no declared family/), '§112 CONTROL: a *_WEBUI_* name of no declared family is red by name');
+  ok(has112(plant112('src/adapters/acp.js', 'const e = { VIBESPACE_SESSION_TOKEN: t };'), /acp\.js:\d+ writes VIBESPACE_SESSION_TOKEN — a NEW injector site/), '§112 CONTROL: a family dir writing a VIBESPACE_* list name is a NEW injector site (the dir is exempt for its family names only)');
+  ok(has112(plant112('src/server/new-road.js', "const t = { OTEL_EXPORTER_OTLP_HEADERS: h };"), /new-road\.js:\d+ writes OTEL_EXPORTER_OTLP_HEADERS — a NEW injector site/),
+    '§112 CONTROL: a new file writing the telemetry pair is a NEW injector site, red by name');
+  ok(fam112(['AGENT_BROWSER_', 'NEW_FAMILY_'], doorText112).join() === 'NEW_FAMILY_' && fam112(['AGENT_BROWSER_'], doorText112.replace("k.startsWith('AGENT_BROWSER_')", "k.startsWith('AGENT_BROWSERX_')")).join() === 'AGENT_BROWSER_',
+    '§112 CONTROL: a non-harness family the agent door does not drop is red by name (a new prefix; the door\u2019s drop of the browser family removed)');
+  const readOnly112 = plant112('src/server/mark-scan.js', "PI.membersOf({ mark: `VIBESPACE_JOB_RUN=${id}` }); const q = `grep '^VIBESPACE_API=' x`; const re = /VIBESPACE_API=http/;");
+  ok(!readOnly112.red.some((x) => /mark-scan\.js/.test(x)) && has112(plant112('src/server/mark-scan.js', 'const e = { VIBESPACE_JOB_RUN: id };'), /mark-scan\.js:\d+ writes VIBESPACE_JOB_RUN — a NEW injector site/),
+    '§112 CONTROL: a NAME= spelled to match (a mark scan, a grep, a regex) is a read and never a write; the same name as an env key is');
+  ok(acct112(CE112.CONVERSATION_ACCOUNT_ENV, [...declared112, 'NEW_VENDOR_TOKEN']).missing.join() === 'NEW_VENDOR_TOKEN' && acct112([...CE112.CONVERSATION_ACCOUNT_ENV, 'OLD_TOKEN'], declared112).extra.join() === 'OLD_TOKEN',
+    '§112 CONTROL: a descriptor declaring a sign-in name the list lacks, and a list name no descriptor declares, are each red by name');
 });
 
 await sectionsEnd();   // B-2c31: the worker's sections, every one handed over; the check floor

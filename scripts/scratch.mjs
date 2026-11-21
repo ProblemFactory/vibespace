@@ -30,11 +30,14 @@ const TEMP_SWEEPERS = require('../src/temp-sweepers.js');   // r1213: the PRODUC
 // children would reach the CALLER's hub with the caller's own credential (and a wrapper's leg read the caller's id). Removed at
 // the FIRST import of this module, whether or not anything re-homes; src/conversation-env.js is the one list (test-architecture
 // §112 holds it to the hub's injector sites). A suite that needs a conversation's names mints its own after the import.
+// THE PROCESS MARKS STAY (主开发 r863 MUST 2): the conversation id and the two job marks are ids — no route, no credential — and
+// they are how the person's Stop (src/left-behind.js) and a job's stop (src/jobs.js) find what a suite's children left behind;
+// the line says they were kept. Names only on stderr, never a value.
 const { withoutConversationNames } = require('../src/conversation-env.js');
 export const CALLER_CONVERSATION_NAMES = (() => {
-  const { dropped } = withoutConversationNames(process.env);
+  const { dropped, kept } = withoutConversationNames(process.env, { keepMarks: true });
   for (const k of dropped) delete process.env[k];
-  if (dropped.length) process.stderr.write(`scratch: the caller's conversation names are not carried: ${dropped.join(', ')}\n`);
+  if (dropped.length) process.stderr.write(`scratch: the caller's conversation names are not carried: ${dropped.join(', ')}${kept.length ? `; the process marks are kept: ${kept.join(', ')}` : ''}\n`);
   return Object.freeze(dropped);
 })();
 export { stampScratchRun, readRunRecord, runOwnerState, RUN_RECORD };
