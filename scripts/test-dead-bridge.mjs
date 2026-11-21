@@ -41,6 +41,7 @@ import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, vncEnv, endRootedProcesses } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { markTimedOut } from './lib/timed-out.mjs';   // a wait that runs out says so: THE ONE MARK (test-ci-gate §2p)
 
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -547,7 +548,7 @@ e2e: {
       if (!(out && /starting/.test(String(out.error || '')))) break;
       await sleep(500);
     }
-    return out;
+    return out && /starting/.test(String(out.error || '')) ? markTimedOut(out, 40 * 500, `startHolder ${name} (the jobs engine past «starting»)`) : out;   // a wait that runs out says so (r1372; test-ci-gate §2p)
   };
   const j1 = await startHolder('holder-a');
   ok(j1 && j1.job && j1.job.id, `setup: the server started a long-lived job after the attach (${j1 && j1.job && j1.job.id})`, JSON.stringify(j1).slice(0, 300));
