@@ -103,6 +103,7 @@ import { enterSubmits } from './chat-enter-keys.js';
 import { placeWarmthChip } from './warmth-chrome.js'; // lane cache-warmth-band (q-059 r1b): the prompt-cache warmth summary chip follows For-you like the lock chip
 import { initVault, listenVaultDoor, maybeNagVault, unlockFirst, placeVaultChip } from './vault-unlock.js'; // lane vault-e2e-password: the unlock modal after every start, the setup ask until set (lane vault-locked-loud: the ⚙ press unlocks first)
 import { insideFolder, membershipCwds } from '../task-membership.js'; // PURE (lane open-task-binds): THE Task Group folder rule (a folder includes itself); B-df5f: the page's cwds of a row
+import { oatDeadFor, oatExpiredBy } from '../login-expiry.js'; // B-8703 follow: the New Session list reads the ONE verdict + the server's last day
 
 const BACKEND_SESSION_OPTIONS = {
   claude: {
@@ -2215,7 +2216,7 @@ class App {
             if (a.loggedIn && (!onHost || allowSubRemote)) opts.push([a.id, t('{name} (subscription)', { name: a.name })]);
             // Long-lived token (B-211a): usable locally via the env token even
             // with no local login (expired = disabled with the reason)
-            else if (bill.longLivedToken && a.oat) opts.push(a.oatDaysLeft <= 0
+            else if (bill.longLivedToken && a.oat) opts.push(oatExpiredBy(a)   // B-8703 follow: the server's last day
               ? [a.id, a.name + ' — ' + t('long-lived token expired'), true]
               : [a.id, a.name + ' ' + t('· long-lived token')]);
             continue;
@@ -2225,8 +2226,9 @@ class App {
           const held = v ? (v.usable && v.how === 'host-held') : (!linked && hostHeld(a));
           if (linked) opts.push([a.id, a.name + ' ' + t('· is {host}’s machine login (same account)', { host: hostName })]);
           else if (held) opts.push([a.id, a.name + ' ' + t('· own login held on {host}', { host: hostName })]);
-          else if ((v ? (v.usable && v.how === 'oat') : !!a.oat) && !(a.oatDaysLeft <= 0)) opts.push([a.id, a.name + ' ' + t('· via long-lived token')]);
-          else if (a.oat && a.oatDaysLeft <= 0) opts.push([a.id, a.name + ' — ' + t('long-lived token expired'), true]);
+          else if ((v ? (v.usable && v.how === 'oat') : !!a.oat) && !oatExpiredBy(a)) opts.push([a.id, a.name + ' ' + t('· via long-lived token')]);
+          // B-8703 follow (主开发 r976): the billing menu's ONE verdict — a signed-in account the verdict lets through is not refused here
+          else if (oatDeadFor(a, v)) opts.push([a.id, a.name + ' — ' + t('long-lived token expired'), true]);
           else if (v && v.reason === 'held-identity-mismatch') opts.push([a.id, a.name + ' — ' + t('host login belongs to {email}', { email: v.dirEmail || '?' }), true]);
           // !a.localOnly: macOS Keychain-backed logins never ship (PR #23) —
           // the verdict path already blocks via reason 'local-only-mac'

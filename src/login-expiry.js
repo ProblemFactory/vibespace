@@ -517,7 +517,22 @@ function materializeVerdict(member, now = Date.now()) {
   return { verdict: 'materialize', archive: !ours && (m.fileState === 'unreadable' || !!o), cleanup: false };
 }
 
+// THE TOKEN'S LAST DAY (B-8703 follow, 主开发 r976): the server serves a long-lived token until its mint + TTL (accounts.js hasOat);
+// a row's `oatDaysLeft` is Math.floor of the days left, so 0 = its LAST day, still serving. Expired = below 0 — ONE boundary for
+// every list, mark and notice, the page's and the server's.
+function oatExpiredBy(a) { return !!a && typeof a.oatDaysLeft === 'number' && a.oatDaysLeft < 0; }
+// ONE verdict «is this account's long-lived token dead for this conversation» (B-8703 follow, r914 / r919 / r976), read by the billing
+// menu, Session Properties, the New Session dialog and the resume's verdict (src/resume-account.js). `v` = the host's verdict for the
+// account or null (a local conversation, the probe in flight, an older server): with a verdict, its own 'oat-expired' or a token it
+// calls usable whose days ran out (the belt vs a stale server); without one, an expired token on an account NOT signed in here.
+function oatDeadFor(a, v) {
+  if (!a) return false;
+  if (v) return v.reason === 'oat-expired' || (!!v.usable && v.how === 'oat' && oatExpiredBy(a));
+  return !!a.oat && oatExpiredBy(a) && !a.loggedIn;
+}
+
 module.exports = {
+  oatExpiredBy, oatDeadFor,
   OAT_FILE_MARK, oatFileOf, oatFileOurs, usageBearerOk, usageBearerRefusal, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, storedShapeOf, oatFileBody, materializeVerdict,
   EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS, OAT_ONLY,
   loginState, withOat, ledgerExp, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,

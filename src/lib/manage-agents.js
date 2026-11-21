@@ -31,6 +31,7 @@ import { cliWhereWords, remoteCliWhereWords } from './cli-missing-dialog.js'; //
 import { track } from './telemetry-client.js';
 import { openPermissionRulesDialog, runLocalOracle } from './permission-rules-view.js';
 import { permissionRulesCaps, resetCreditCapable, scopedCapsReadOnDemand, billingRow, getBackendMeta } from './agent-meta.js';
+import { oatExpiredBy } from '../login-expiry.js'; // B-8703 follow: ONE last day — 0 days left still serves (the server's)
 import { rosterResetOffer } from '../reset-credit.js'; // PURE (design-reset-credits p2): what a row says about stored reset credits
 import { renderProviderRows, namedLiveRows } from './provider-roster.js'; // lane lg-providers U5 (B-d578): a third party's rows under the roster
 import { openProviderWizard } from './provider-wizard.js'; // lane lg-providers U5: Add a third-party model… (four screens)
@@ -431,14 +432,14 @@ const oatAskTitle = (a) => (a.oatIdentity === 'hint'
 export const oatEndOnChip = (a, { local = true } = {}) => !!(local && a && a.loginState && a.loginState.state === 'oat-only'
   && typeof a.loginState.msLeft === 'number' && a.loginState.msLeft < 24 * 3600e3);
 /** the countdown tag's own case (oatTagHtml's ≤ 30-day branch: no other token fact ahead of it) */
-const oatCountdownCase = (a) => !!(a && a.type === 'subscription' && a.oat && a.oatDaysLeft > 0 && a.oatDaysLeft <= 30
+const oatCountdownCase = (a) => !!(a && a.type === 'subscription' && a.oat && !oatExpiredBy(a) && a.oatDaysLeft <= 30
   && !oatForeign(a) && !oatIdentityAsk(a) && !oatUnknownRoad(a) && !oatUnverified(a));
 const oatCountdownTitle = (a) => t('Long-lived token (used for remote machines) expires in {n} days — re-mint it in «Long-lived token (active)…».', { n: a.oatDaysLeft });
 export function oatTagHtml(a, { local = true } = {}) {
   if (!a || a.type !== 'subscription' || !a.oat) return '';
-  const oatDead = a.oatDaysLeft <= 0;
+  const oatDead = oatExpiredBy(a);
   if (!local && !oatDead) return '';
-  return a.oatDaysLeft <= 0
+  return oatExpiredBy(a)
     ? ` <span class="acct-blocked-hint" style="color:var(--red,#e55)" title="${t('The long-lived token EXPIRED — sessions using it fail until you re-mint one («Long-lived token (expired)…»).')}">${t('· long-lived token expired')}</span>`
     // the identity post-check (lane oat-identity-postcheck): its first reading carried ANOTHER account's window
     : oatForeign(a)
@@ -1048,10 +1049,10 @@ export function installManageAgents(App, ctx = {}) {
     if (raised) return null;   // raised: the same subject's form, as it was
     const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
     // 改绑 (lane oat-identity-postcheck): the rows the token may move to — Claude subscriptions holding no live token
-    const rebindTo = (oatForeign(a) || oatIdentityAsk(a) || oatUnverified(a)) ? (this._accounts?.accounts || []).filter((x) => x && x.id !== id && x.type === 'subscription' && !x.pooled && (x.backend || 'claude') === (a.backend || 'claude') && !(x.oat && x.oatDaysLeft > 0)) : [];
+    const rebindTo = (oatForeign(a) || oatIdentityAsk(a) || oatUnverified(a)) ? (this._accounts?.accounts || []).filter((x) => x && x.id !== id && x.type === 'subscription' && !x.pooled && (x.backend || 'claude') === (a.backend || 'claude') && !(x.oat && !oatExpiredBy(x))) : [];
     const rebindPick = (a?.oatIdentityOtherIds || []).find((x) => rebindTo.some((r) => r.id === x)) || '';
     const status = a?.oat
-      ? (a.oatDaysLeft <= 0
+      ? (oatExpiredBy(a)
         ? `<div class="usage-warn">${t('The stored token has EXPIRED — sessions using it fail until you paste a fresh one.')}</div>`
         : oatForeign(a)
         ? `<div class="usage-warn oat-foreign">${t('This long-lived token belongs to another account — re-mint or re-bind it')}${a.oatIdentityOther ? ' · ' + t('Its usage matches {other}.', { other: escHtml(a.oatIdentityOther) }) : ''}</div>`
@@ -3377,7 +3378,7 @@ export function installManageAgents(App, ctx = {}) {
       const hostSub = v ? (isSub && subBlocked && v.usable && v.how === 'host-held') : (isSub && subBlocked && !linked && hostSubIds.includes(a.id));
       // Long-lived token (B-211a): usable on any machine via the secret env
       // channel — ranked below host-held/linked by the server verdict.
-      const oatDead = isSub && !!a.oat && a.oatDaysLeft <= 0;
+      const oatDead = isSub && !!a.oat && oatExpiredBy(a);
       const viaOat = !oatDead && (v ? (isSub && v.usable && v.how === 'oat') : (isSub && !!a.oat && !selectedHost));
       const blocked = isSub && subBlocked && !linked && !hostSub && !viaOat; // subscription on a remote host, opt-in off (incl. held-identity-mismatch — Test/spawn error explains)
       // token-derived orgEmail (per-account ⟳ roles bake) beats the creds
@@ -3846,7 +3847,7 @@ export function installManageAgents(App, ctx = {}) {
           items.splice(1, 0, { label: a?.loggedIn ? t('Re-login on this machine…') : t('Log in on this machine…'), action: () => this._reloginSubscription(id, a, refresh) });
         }
         if (isSub && !a?.pooled && a?.oat) items.push({ label: t('Subscription type…'), title: t('Which subscription this long-lived token belongs to — stated by a sign-in, or chosen here'), action: () => openOatShapeDialog({ id, name: a?.name || '', onSignIn: () => this._reloginSubscription(id, a, refresh), refresh }) }); // lane oat-add-door
-        if (isSub && !a?.pooled) items.push({ label: a?.oat ? (a.oatDaysLeft <= 0 ? t('Long-lived token (expired)…') : t('Long-lived token (active)…')) : t('Long-lived token…'), action: () => this._oatDialog(id, a, refresh) });
+        if (isSub && !a?.pooled) items.push({ label: a?.oat ? (oatExpiredBy(a) ? t('Long-lived token (expired)…') : t('Long-lived token (active)…')) : t('Long-lived token…'), action: () => this._oatDialog(id, a, refresh) });
         // lane account-reset-door: «I reset this account on Anthropic's site» — the whole account (each lane's own act is where
         // the lane is drawn: the usage popup); a claim, never a reading — its next reading confirms or corrects it
         if (isSub && !a?.pooled && !selectedHost && billingRow(a?.backend).usage === 'accounts') items.push({ label: t('I reset this account on Anthropic’s site…'), title: t('Mark every limit of this account as reset — unconfirmed until the next refresh reads them'), action: () => this._resetClaim?.(id, 'all') });

@@ -1,7 +1,8 @@
 // Session lifecycle: create/attach/resume/fork/view/kill + billing switcher + openSpec replay (mixin split from app.js, 2.82.0 audit seam).
 import { ChatView } from './chat-view.js';
 import { namedModel } from '../model-providers.js'; // THE model door (lane fable-52-cli-321 r6) — the hub refuses what it refuses
-import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor, accountBound, oatDeadFor } from './agent-meta.js';
+import { backendFeatureCaps, terminalOnly, worktreePick, uiRow, billingRow, accountUsageStore, viewIdFor, legacyIdFor, accountBound } from './agent-meta.js';
+import { oatDeadFor, oatExpiredBy } from '../login-expiry.js'; // B-8703 follow: ONE verdict + ONE last day (the server's)
 import { track, metric } from './telemetry-client.js';
 import { t } from './i18n.js';
 import { unknownRowOf } from './resume-pacer.js'; // B-f64b cure: a row still being checked is never started unasked
@@ -1826,7 +1827,7 @@ export function installSessionLifecycle(App, ctx = {}) {
       // — locally there ARE no verdicts (vOf needs a host), and remotely this
       // covers the probe-in-flight window. Expired is the one honest refusal.
       if (a.oat) {
-        const expired = typeof a.oatDaysLeft === 'number' && a.oatDaysLeft <= 0;
+        const expired = oatExpiredBy(a);   // B-8703 follow: the server's last day (0 days left still serves)
         // valid oat = usable anywhere; expired blocks ONLY where the oat is
         // the actual spawn channel — a LOCALLY logged-in account keeps its
         // dir login (the server drops the dead secret), so it must fall

@@ -2,7 +2,8 @@ import { UI_ICONS } from './icons.js';
 import { escHtml, copyText, showConfirmDialog, stripCwdHostLabel, taskGroupColor, fetchJson, showToast, showContextMenu } from './utils.js';
 import { clearRecords, isCleared, clearedText } from './record-clear-ui.js'; // "Clear content…" (2026-09-28): a status entry's menu + the cleared sentence
 import { SESSION_STATE_META, SESSION_URGENCY_META } from './sidebar-tasks.js';
-import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu, oatDeadFor } from './agent-meta.js';
+import { getBackendMeta, getAgentKindMeta, getAgentRoleLabel, responseStyleCaps, responseStyleOrigin, spawnValueOrigin, effortDisplay, composerSendModes, notificationDeliveryFor, worktreeCapsFor, worktreePick, permissionRulesCaps, billingRow, hasEffortMenu } from './agent-meta.js';
+import { oatDeadFor, oatExpiredBy } from '../login-expiry.js'; // B-8703 follow: ONE verdict + ONE last day (the server's)
 import { loadInto, renderInto } from './permission-rules-view.js';
 import { t, deviceLocale } from './i18n.js';
 import { stampAt as when, stampAt as whenAt } from './page-time.js';
@@ -370,7 +371,7 @@ export function openSessionProps(app, sessionRef, { syncId, section = null } = {
       // LOCAL conversation's too (it was offered there with no word, saved for the resume, then refused by the server)
       if (oatDeadFor(x, v)) return true;
       if (v) return !v.usable; // verdict is authoritative — the same call the spawn makes
-      return (x.oat && !(x.oatDaysLeft <= 0)) ? false : (rHost
+      return (x.oat && !oatExpiredBy(x)) ? false : (rHost
         && (!bill.apiKeys || x.type === 'subscription')
         && !hostLinked(x)
         && !hostSubHeld(x)

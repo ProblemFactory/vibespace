@@ -17,7 +17,7 @@
  *
  * NO SILENT SWITCHING: the verdict only says; the conversation keeps its pin until the owner picks.
  */
-const { loginUsable } = require('./login-expiry.js');
+const { loginUsable, oatDeadFor, oatExpiredBy } = require('./login-expiry.js');
 
 /** Every reason a pinned account cannot serve a resume — each has a sentence below. */
 const RESUME_ACCOUNT_WHYS = Object.freeze(['wiped', 'never-logged-in', 'expired', 'oat-expired', 'missing-account', 'remote-cannot-ship', 'pool-no-target']);
@@ -38,8 +38,8 @@ function rowServes(a, { host = null, verdicts = null, logins = null } = {}) {
     if (a.type === 'provider') return { ok: false, why: 'remote-cannot-ship', since: null };   // a third-party provider runs on this machine only (lane lg-providers U5 r1)
     const v = verdicts && verdicts[a.id];
     if (!v) return { ok: true, unjudged: true }; // the host has not answered yet: no claim (the create judges)
+    if (oatDeadFor(a, v)) return { ok: false, why: 'oat-expired', since: null };   // B-8703 follow: the lists' ONE verdict
     if (v.usable) return { ok: true };
-    if (v.reason === 'oat-expired') return { ok: false, why: 'oat-expired', since: null };
     if (v.reason === 'never-signed-in') return { ok: false, why: 'never-logged-in', since: null };
     return { ok: false, why: 'remote-cannot-ship', since: null, reason: v.reason || null };
   }
@@ -50,15 +50,14 @@ function rowServes(a, { host = null, verdicts = null, logins = null } = {}) {
   const ls = a.loginState && typeof a.loginState === 'object' ? a.loginState : null;
   const cred = (logins && logins[a.id]) || null;
   if (ls && ls.state === 'oat-only') return { ok: true }; // a dead login, a live token: the token is the spawn
-  const days = num(a.oatDaysLeft);
-  const oatLive = !!a.oat && (days == null || days >= 0);
+  const oatLive = !!a.oat && !oatExpiredBy(a);   // B-8703 follow: ONE last day (0 days left still serves)
   if (a.loggedIn) {
     if (!ls || loginUsable(ls)) return { ok: true };
     // the login's refresh deadline passed: it still parses loggedIn, and the CLI's first refresh fails
     return { ok: false, why: 'expired', since: num(cred && cred.state === 'expired' ? cred.since : null) ?? num(ls.refreshExpiresAt) };
   }
   if (oatLive) return { ok: true };
-  if (a.oat) return { ok: false, why: 'oat-expired', since: num(ls && ls.oatValidUntil) ?? num(cred && cred.since) };
+  if (oatDeadFor(a, null)) return { ok: false, why: 'oat-expired', since: num(ls && ls.oatValidUntil) ?? num(cred && cred.since) };
   if ((ls && ls.state === 'logged-out') || (cred && cred.state === 'wiped')) return { ok: false, why: 'wiped', since: num(cred && cred.since) };
   if ((ls && ls.state === 'expired') || (cred && cred.state === 'expired')) return { ok: false, why: 'expired', since: num(cred && cred.since) ?? num(ls && ls.refreshExpiresAt) };
   return { ok: false, why: 'never-logged-in', since: null };

@@ -7,14 +7,15 @@
 // Long-lived-token expiry sweep (B-211a): setup-token tokens live exactly 1
 // year and a 401 has NO self-heal — warn while there's still time to re-mint.
 // Once per boot, notice-deduped per account.
+const { oatExpiredBy } = require('../login-expiry.js'); // B-8703 follow: ONE last day, the page's and the server's
 function checkOatExpiry({ accounts, serverNotice }) {
   try {
     for (const a of accounts.list().accounts) {
       if (!a.oat || typeof a.oatDaysLeft !== 'number') continue;
-      if (a.oatDaysLeft <= 0) {
-        serverNotice(`oat-expired-${a.id}`, `The long-lived token for "${a.name}" has EXPIRED — sessions using it will fail until you re-mint one (Manage agents → the account's ⋯ menu → Long-lived token).`, { level: 2 });
+      if (oatExpiredBy(a)) {   // B-8703 follow: the last day (0 days left) still serves — not expired
+        serverNotice(`oat-expired-${a.id}`, `The long-lived token for "${a.name}" has EXPIRED — sessions using it will fail until you re-mint one (Manage agents: «Long-lived token (expired)…» on its row).`, { level: 2 });
       } else if (a.oatDaysLeft <= 21) {
-        serverNotice(`oat-expiring-${a.id}`, `The long-lived token for "${a.name}" expires in ${a.oatDaysLeft} days — re-mint it soon (Manage agents → ⋯ → Long-lived token).`, { level: 2 });
+        serverNotice(`oat-expiring-${a.id}`, `The long-lived token for "${a.name}" expires ${a.oatDaysLeft < 1 ? 'within a day' : `in ${a.oatDaysLeft} days`} — re-mint it soon (Manage agents: «Long-lived token (active)…» on its row).`, { level: 2 });
       }
     }
   } catch { }

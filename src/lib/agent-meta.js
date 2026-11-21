@@ -462,17 +462,6 @@ export function terminalOnly(backend) {
 }
 /** Does a conversation of this harness live in ONE account's own store (backend-caps `accountBound` — the descriptor's
  *  store.accountBound, bound by test-dead-socket-keeps-chat-meta §10)? Its Resume offers that account alone (B-a5a4 follow-up). */
-/** B-8703 follow (主开发 r914 / r919): ONE verdict «is this account's long-lived token dead for this conversation», read by the
- *  billing menu AND Session Properties (the billing menu's rule is the truth: such an account is not offered as a choice; it is
- *  shown with its mark and its door). `v` = the host's verdict for the account (evaluateOnHost) or null (a local conversation,
- *  the probe in flight, an older server): with a verdict, its own 'oat-expired', or a token it calls usable whose days ran out
- *  (the belt vs a stale server); without one, an expired token on an account NOT signed in here (a signed-in one keeps its
- *  own login — the server drops the dead secret). PURE. */
-export function oatDeadFor(a, v) {
-  if (!a) return false;
-  if (v) return v.reason === 'oat-expired' || (!!v.usable && v.how === 'oat' && a.oatDaysLeft <= 0);
-  return !!a.oat && typeof a.oatDaysLeft === 'number' && a.oatDaysLeft <= 0 && !a.loggedIn;
-}
 export function accountBound(backend) {
   return serverCapsOf(backend).accountBound === true;
 }

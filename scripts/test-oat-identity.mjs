@@ -644,7 +644,8 @@ console.log('§5 the roster words');
     const unv = MA.oatTagHtml(rowOf({ oatIdentity: 'unverified' }));
     ok(/acct-oat-unverified/.test(unv) && /· Identity unverified/.test(unv) && /over a day/.test(unv), 'F8: an unjudged token\'s row says Identity unverified (身份未验证), its tooltip where the doors are', unv);
     ok(!MA.oatTagHtml(rowOf({})).includes('another account') && !MA.oatTagHtml(rowOf({ oatIdentity: 'confirmed' })).includes('another account') && !MA.oatTagHtml(rowOf({ oatIdentity: 'pending' })).includes('another account'), 'a healthy / confirmed / unjudged-and-young token row says nothing of it');
-    ok(/long-lived token expired/.test(MA.oatTagHtml(rowOf({ oatDaysLeft: 0, oatIdentity: 'mismatch' }))), 'an EXPIRED token says expired first (it stops sessions)');
+    ok(/long-lived token expired/.test(MA.oatTagHtml(rowOf({ oatDaysLeft: -1, oatIdentity: 'mismatch' }))), 'an EXPIRED token says expired first (it stops sessions)');
+    ok(!/long-lived token expired/.test(MA.oatTagHtml(rowOf({ oatDaysLeft: 0, oatIdentity: 'mismatch' }))), 'B-8703 follow: a token on its LAST day (0 days left) is not called expired — the server still serves it');
     ok(MA.oatTagHtml(rowOf({ oatIdentity: 'mismatch' }), { local: false }) === '' && MA.oatForeign(rowOf({ oatIdentity: 'mismatch' })) === true && MA.oatForeign(rowOf({ oat: false, oatIdentity: 'mismatch' })) === false
       && MA.oatIdentityAsk(rowOf({ oatIdentity: 'hint' })) && MA.oatIdentityAsk(rowOf({ oatIdentity: 'anchor' })) && !MA.oatIdentityAsk(rowOf({ oatIdentity: 'mismatch' })) && MA.oatUnverified(rowOf({ oatIdentity: 'unverified' })),
     'a host section stays quiet (the local roster says it); oatForeign = token + mismatch; oatIdentityAsk = hint / anchor; oatUnverified');
