@@ -141,7 +141,7 @@ console.log('— ③ NO FALLBACK: a piped hub whose link dies waits for a new in
   const tries = died.calls.answer.slice(1);   // the boot's own join is the first
   ok(HP.REJOIN_TRY_FLOOR_MS === 1000 && tries.length >= 1 && tries.every((a) => a >= HP.REJOIN_TRY_FLOOR_MS), `the last try's floor is said by name (REJOIN_TRY_FLOOR_MS = ${HP.REJOIN_TRY_FLOOR_MS} ms): each of the ${tries.length} tries inside the 0.15 s bound was given ${JSON.stringify(tries)} ms to be answered, never the bound's last crumbs`, died.calls.answer);
   const FLOOR = '          const answerMs = Math.max(REJOIN_TRY_FLOOR_MS, ';
-  const crumbs = await bootThrough(mutant(FLOOR, '          const answerMs = Math.max(REJOIN_FIRST_MS, '), await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 1 ? 'ack' : 'gone') });
+  const crumbs = await bootThrough(mutant(FLOOR, '          const answerMs = Math.max(REJOIN_FIRST_MS, '), await fresh(), { deathAfter: true, rejoinMs: REJOIN, joinPlan: (n) => (n === 1 ? 'ack' : 'gone') });   // stale-pins: kept — the release's own floor, the red's text
   ok(crumbs.calls.answer.slice(1).some((a) => a < HP.REJOIN_TRY_FLOOR_MS), `RED CONTROL — the release's floor (the first wait, 50 ms): a try inside the bound gets ${JSON.stringify(crumbs.calls.answer.slice(1))} ms, under what a real start meets`, crumbs.calls.answer);
   // A SECOND LISTEN CALL IS REFUSED BY NAME (主开发 r1124 4): the port is decided once — in the piped form a second call would
   // join again with no start value left (its digest made of nothing), in the plain form listen on the port twice

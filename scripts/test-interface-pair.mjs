@@ -64,6 +64,7 @@ process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 
 // THE ORACLE: today's road, no start pipe
+const plainStart = Date.now();
 keep('plain', spawn(process.execPath, ['server.js'], { cwd: wtPlain, env: { ...hubEnv(plainHome), ...VNC_PLAIN, PORT: String(PLAIN_PORT) }, stdio: ['ignore', 'pipe', 'pipe'] }));
 // THE PAIR: the interface first (its admit for the hub written BEFORE the hub starts), then the hub
 const ifaceSecret = crypto.randomBytes(32).toString('hex'), hubSecret = crypto.randomBytes(32).toString('hex');
@@ -71,12 +72,19 @@ const hubDigest = crypto.createHash('sha256').update(hubSecret).digest('hex');
 const iface = keep('interface', spawn(process.execPath, [path.join(wt, 'src/interface/main.js')], { cwd: wt, env: { PATH: process.env.PATH, PORT: String(IFACE_PORT), HOST: '127.0.0.1', VIBESPACE_START_FD: '3' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));   // the B2b cure: the start NAMES its pipe
 iface.stdio[3].write(JSON.stringify({ op: 'start', party: 'interface', secret: ifaceSecret, link }) + '\n' + JSON.stringify({ op: 'admit', party: 'hub', digest: hubDigest }) + '\n');
 await until(() => /listening on/.test(outs.get('interface')), 20000);
+const pipedStart = Date.now(); let pipedJoined = 0;
 const hub = keep('piped', spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...hubEnv(fakeHome), ...VNC_PAIR, PORT: String(IFACE_PORT), VIBESPACE_START_FD: '3' }, stdio: ['ignore', 'pipe', 'pipe', 'pipe'] }));
 hub.stdio[3].on('error', () => { }); hub.stdio[3].write(JSON.stringify({ op: 'start', party: 'hub', secret: hubSecret, link }) + '\n');   // the hub reads this ONE line at its line 5 and closes its end (the B2b cure 2)
 
 const record = (name) => { const m = [...outs.get(name).matchAll(/\[hub-port\] (\{[^\n]*\})/g)].pop(); try { return m ? JSON.parse(m[1]) : null; } catch { return null; } };
 const ready = (port, secure = false) => new Promise((resolve) => { const q = (secure ? https : http).get({ host: '127.0.0.1', port, path: '/api/home', agent: false, rejectUnauthorized: false, timeout: 3000 }, (r) => { r.resume(); resolve(r.statusCode > 0); }); q.on('error', () => resolve(false)); q.on('timeout', () => { q.destroy(); resolve(false); }); });
-const upPlain = await until(() => ready(PLAIN_PORT), 90000), upPair = await until(() => ready(IFACE_PORT), 90000);
+for (const s of [hub.stdout, hub.stderr]) s.on('data', () => { if (!pipedJoined && /\[hub-port\] \{/.test(outs.get('piped'))) pipedJoined = Date.now(); });   // the moment the piped hub's own record says it joined
+const upPlain = await until(() => ready(PLAIN_PORT), 90000), plainUp = Date.now();
+// THE PAIR IS READY ONCE ITS HUB HAS JOINED: before it, the interface answers every page itself (503 «no-owner»), and a status
+// is no readiness — a branch table run then reads the interface's own refusal (two reds of 1522499e5's own read: the piped hub
+// joined after the plain hub answered, a race the plain hub's own start time had hidden)
+const upPair = await until(async () => pipedJoined > 0 && await ready(IFACE_PORT), 90000);
+console.log(`    (FACT, never judged: the plain hub answered ${plainUp - plainStart} ms after its start; the piped hub joined ${pipedJoined ? pipedJoined - pipedStart : 'never'} ms after its own)`);
 check('the oracle (plain) and the pair (interface + piped hub) both answer', upPlain && upPair, { upPlain, upPair, iface: outs.get('interface').slice(-400), piped: outs.get('piped').slice(-400) });
 
 console.log('① NEVER TWO OWNERS OF THE PORT — read off the hub\'s own record');
