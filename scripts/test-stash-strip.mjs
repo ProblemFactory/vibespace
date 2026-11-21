@@ -73,6 +73,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // THE SUITE CLEANS ITS OWN SCRATCH (verify r6): every rig mints `/tmp/vs-stash-strip-…-<pid>` and nothing removed them —
@@ -950,7 +959,7 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   const ar = read('src/agent-routes.js');
   const a1 = '  if (!pm.shown.length || need > room) {\n';
   if (!ar.includes(a1)) throw new Error('mutation anchor missing: fit');
-  const NoFit = MUT5.load('src/agent-routes.js', ar.replace(a1, '  if (!pm.shown.length) {\n'), 'no-fit');
+  const NoFit = MUT5.load('src/agent-routes.js', editAnchor(ar, a1, '  if (!pm.shown.length) {\n', "src/agent-routes.js"), 'no-fit');
   const H = routesRig({ backend: 'claude', routesMod: NoFit });
   H.deliver.stashFor(H.cid, { source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: frame6 });
   const tc = H.get('/api/agent/task-context');
@@ -966,7 +975,7 @@ const ends = (ctx) => Array.from({ length: 6 }, (_, i) => ctx.includes(`END-${i}
   ok([...f._delivered.keys()].filter((k) => k.startsWith('ho-spent')).length === 5 && [...f._delivered.keys()].filter((k) => k.startsWith('ho-live')).length === 44, 'CONTROL spent-first removed: six LIVE records are forgotten while five spent ones stay (②f can go red)');
   const a3 = " && Number(rec.at) > 0) delivered.set(id, { ...rec, at: Number(rec.at),";
   if (!sh.includes(a3)) throw new Error('mutation anchor missing: at-gate');
-  const Junk = MUT5.load('src/server/stash-handover.js', sh.replace(a3, ') delivered.set(id, { ...rec,'), 'junk-at');
+  const Junk = MUT5.load('src/server/stash-handover.js', editAnchor(sh, a3, ') delivered.set(id, { ...rec,', "src/server/stash-handover.js"), 'junk-at');
   fs.writeFileSync(path.join(dir, SH.DELIVERED_FILE), JSON.stringify({ 'ho-junk': { cid: 'c', text: 't', msg: [], jobs: [], at: 'yesterday' } }));
   const j = Junk.create({ activeSessions: new Map(), getDeliver: () => null, getJobs: () => null, dataDir: dir, log: { log() {}, warn() {} } });
   ok(j._delivered.has('ho-junk'), 'CONTROL the numeric-instant gate removed: the junk record is loaded (②f can go red)');
@@ -1158,13 +1167,13 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
   const a1 = "    const committed = () => B(parts.join('\\n\\n')) + pendingPreambleBytes(s) + (extraBlock ? B(extraBlock) + 2 : 0) + rescueReserve() + tailHeld;\n";
   if (!ar.includes(a1)) throw new Error('mutation anchor missing: tail');
   // r7 form: `committed()` without the rescue reserve and the tail decided so far = r5's blind side again
-  const NoTail = MUT6.load('src/agent-routes.js', ar.replace(a1, "    const committed = () => B(parts.join('\\n\\n')) + pendingPreambleBytes(s) + (extraBlock ? B(extraBlock) + 2 : 0) + 0 * (rescueReserve() + tailHeld);\n"), 'no-tail');
+  const NoTail = MUT6.load('src/agent-routes.js', editAnchor(ar, a1, "    const committed = () => B(parts.join('\\n\\n')) + pendingPreambleBytes(s) + (extraBlock ? B(extraBlock) + 2 : 0) + 0 * (rescueReserve() + tailHeld);\n", "src/agent-routes.js"), 'no-tail');
   const t1 = tailSweep(NoTail);
   ok(t1.trimmed > 100 && t1.cut >= 1 && t1.noticeCut >= 1 && t1.nudgeCut > 100 && t1.firstCut && !t1.firstCut.whole,
     `CONTROL the tail uncounted: capInline trims ${t1.trimmed} of 800 fills — the nudge ${t1.nudgeCut}×, the CONSUMED status notice ${t1.noticeCut}× (lost), a DRAINED entry ${t1.cut}× (its card shown, its store empty) (②g can go red)`, { ...t1, firstCut: t1.firstCut && { P: t1.firstCut.P, q: t1.firstCut.q, bytes: t1.firstCut.bytes } });
   const a2 = "  while (need > room && pm.shown.length > 1) {\n";
   if (!ar.includes(a2)) throw new Error('mutation anchor missing: shrink');
-  const NoShrink = MUT6.load('src/agent-routes.js', ar.replace(a2, "  while (false && need > room && pm.shown.length > 1) {\n"), 'no-shrink');
+  const NoShrink = MUT6.load('src/agent-routes.js', editAnchor(ar, a2, "  while (false && need > room && pm.shown.length > 1) {\n", "src/agent-routes.js"), 'no-shrink');
   const t2 = tailSweep(NoShrink, [3000]);
   ok(t2.waited > 50 && t2.trimmed === 0, `CONTROL the shrink loop removed: ${t2.waited} of 400 fills are held whole though the newest alone fits (②g can go red)`, t2);
   const cd6 = read('src/server/conversation-deliver.js');
@@ -1172,7 +1181,7 @@ function tailSweep(routesMod, Ps = [3000, 3600]) {
   // log line reads `evicted.length`
   const a3 = "    if (evicted.length) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr";
   if (!cd6.includes(a3)) throw new Error('mutation anchor missing: eviction log');
-  const Quiet = MUT6.load('src/server/conversation-deliver.js', cd6.replace(a3, "    if (evicted.length && false) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr"), 'quiet-evict');
+  const Quiet = MUT6.load('src/server/conversation-deliver.js', editAnchor(cd6, a3, "    if (evicted.length && false) log(`[deliver] ${cid}: ${evicted.length} oldest waiting entr", "src/server/conversation-deliver.js"), 'quiet-evict');
   const dir = scratch('stash-strip-r6-ctl-' + Math.random().toString(36).slice(2, 7)); fs.mkdirSync(dir, { recursive: true });
   const qlogs = [];
   const qd = Quiet.create({ dataDir: dir, activeSessions: new Map(), serverSetting: () => undefined, peerMsg: { findPeer: () => null, postToPeer: async () => ({ ok: false }), postChannelEvent: async () => ({ ok: false }) }, emitPeerCard: () => {}, log: (...a) => qlogs.push(a.join(' ')) });
@@ -1505,7 +1514,7 @@ function producerCensus(src) {
   // (i) an UNCOUNTED producer after the drains: the census goes red AND the sweep trims
   const a1 = "        const pmText = drainStashUnderCap(deliver, caller2.conversationId, aheadOfDrains(), console.log, carry);\n        if (pmText) parts.push(pmText);\n";
   if (!ar.includes(a1)) throw new Error('mutation anchor missing: stash push');
-  const extraSrc = ar.replace(a1, a1 + "        parts.push('<vibespace-r7-uncounted>' + 'u'.repeat(700) + '</vibespace-r7-uncounted>');\n");
+  const extraSrc = editAnchor(ar, a1, a1 + "        parts.push('<vibespace-r7-uncounted>' + 'u'.repeat(700) + '</vibespace-r7-uncounted>');\n", "src/agent-routes.js");
   const c = producerCensus(extraSrc);
   ok(c.undecided.length === 1 && /vibespace-r7-uncounted/.test(c.undecided[0].arg), 'CONTROL an uncounted producer appended after the drains: the census names it UNDECIDED (②h can go red)', c.undecided);
   const Extra = MUT7.load('src/agent-routes.js', extraSrc, 'uncounted');
@@ -1514,27 +1523,27 @@ function producerCensus(src) {
   // (ii) the notices consumed BEFORE the fit (r6's form): the restart shape loses the takeover notice
   const a2 = "      if (taken) {\n        const byKey = new Map();\n";
   if (!ar.includes(a2)) throw new Error('mutation anchor missing: notice fit');
-  const Early = MUT7.load('src/agent-routes.js', ar.replace(a2, "      taken = queue.length;   // every notice consumed whether it fits or not (r6's form)\n      if (taken) {\n        const byKey = new Map();\n"), 'consume-first');
+  const Early = MUT7.load('src/agent-routes.js', editAnchor(ar, a2, "      taken = queue.length;   // every notice consumed whether it fits or not (r6's form)\n      if (taken) {\n        const byKey = new Map();\n", "src/agent-routes.js"), 'consume-first');
   const H = rigR7({ groups: 2, n: 25, routesMod: Early, settings: restartSettings() });
   try { H.notice('status-override'); H.notice('browser-takeover'); H.events(8); const c1 = H.get('/api/agent/prompt-context'); const c2 = H.get('/api/agent/prompt-context');
     ok(/context trimmed/.test(c1) && H.sessionStatus.pendingNotices(H.key).length === 0 && !/took over your browser/.test(c1) && !/took over your browser/.test(c2), 'CONTROL the notices consumed before their fit: the restart\'s first prompt is trimmed, the takeover notice is consumed and gone from both prompts (②h can go red)'); } finally { H.done(); }
   // (iii) the manager intro stamped before its fit
   const a3 = "      if (fits(MANAGER_INTRO)) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }";
   if (!ar.includes(a3)) throw new Error('mutation anchor missing: manager fit');
-  const Mgr = MUT7.load('src/agent-routes.js', ar.replace(a3, "      if (true) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }"), 'manager-unfit');
+  const Mgr = MUT7.load('src/agent-routes.js', editAnchor(ar, a3, "      if (true) { parts.push(MANAGER_INTRO); carry.stage('manager-intro', () => { s._mgrIntroSeen = true; }); }", "src/agent-routes.js"), 'manager-unfit');
   const M = rigR7({ groups: 2, n: 25, manager: true, settings: managerSettings('/api/agent/prompt-context'), routesMod: Mgr });
   try { const c1 = M.get('/api/agent/prompt-context'); const c2 = M.get('/api/agent/prompt-context'); ok(/context trimmed/.test(c1) && !c1.includes('</vibespace-group-manager>') && M.s._mgrIntroSeen === true && !c2.includes('<vibespace-group-manager>'), 'CONTROL the manager intro stamped before its fit: cut mid-verb on the first prompt, never again (②h can go red)'); } finally { M.done(); }
   // (iv) the codex SessionStart door removed: the stash drains into the dropped answer
   const a4 = "    if (!honoursSessionStart(s)) return res.json({ success: true, context: '' });\n";
   if (!ar.includes(a4)) throw new Error('mutation anchor missing: SessionStart door');
-  const NoDoor = MUT7.load('src/agent-routes.js', ar.replace(a4, "    if (false && !honoursSessionStart(s)) return res.json({ success: true, context: '' });\n"), 'no-ss-door');
+  const NoDoor = MUT7.load('src/agent-routes.js', editAnchor(ar, a4, "    if (false && !honoursSessionStart(s)) return res.json({ success: true, context: '' });\n", "src/agent-routes.js"), 'no-ss-door');
   const X = rigR7({ backend: 'codex', groups: 1, n: 5, routesMod: NoDoor });
   try { for (let i = 0; i < 3; i++) X.deliver.stashFor(X.cid, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: `lark-${i} END-${i}`, ts: 1000 + i }); const ss = X.get('/api/agent/task-context'); const p1 = X.get('/api/agent/prompt-context');
     ok(ss.includes('END-2') && X.deliver.stashCount(X.cid) === 0 && X.cards.length === 3 && !p1.includes('END-2'), 'CONTROL the SessionStart door removed: codex\'s SessionStart drains all three into the answer the app-server drops, three cards, the wrapper\'s first prompt carries none (②h can go red)'); } finally { X.done(); }
   // (v) the hook door removed: the hook's dead call drains the window's arrival
   const a5 = "  if (hookOriginated(req) && !hookOutputHonoured(hit[0])) return res.json({ success: true, context: '' });\n";
   if (!ar.includes(a5)) throw new Error('mutation anchor missing: hook door');
-  const NoHook = MUT7.load('src/agent-routes.js', ar.replace(a5, "  if (false && hookOriginated(req) && !hookOutputHonoured(hit[0])) return res.json({ success: true, context: '' });\n"), 'no-hook-door');
+  const NoHook = MUT7.load('src/agent-routes.js', editAnchor(ar, a5, "  if (false && hookOriginated(req) && !hookOutputHonoured(hit[0])) return res.json({ success: true, context: '' });\n", "src/agent-routes.js"), 'no-hook-door');
   const Y = rigR7({ backend: 'codex', groups: 1, n: 5, routesMod: NoHook });
   try { Y.get('/api/agent/prompt-context'); Y.get('/api/agent/prompt-context'); Y.deliver.stashFor(Y.cid, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'in the window END-W', ts: 2001 }); const hook = Y.get('/api/agent/prompt-context', { 'x-vibespace-hook-event': 'UserPromptSubmit' }); const next = Y.get('/api/agent/prompt-context');
     ok(hook.includes('END-W') && !next.includes('END-W') && Y.deliver.stashCount(Y.cid) === 0, 'CONTROL the hook door removed: the hook\'s call drains the window\'s arrival, the wrapper\'s next call carries nothing (②h can go red)'); } finally { Y.done(); }
@@ -1560,7 +1569,7 @@ console.log('②i verify r8: an unrenderable notice at the head of the queue is 
   const ar8 = read('src/agent-routes.js');
   const a8 = "{ const t = SessionStatusManager.renderNotice(n); queue.push({ k, text: t || '' }); if (!t) console.warn(";
   if (!ar8.includes(a8)) throw new Error('mutation anchor missing: notice positions');
-  const Skip = MUT8.load('src/agent-routes.js', ar8.replace(a8, "{ const t = SessionStatusManager.renderNotice(n); if (!t) continue; queue.push({ k, text: t || '' }); if (!t) console.warn("), 'skip-unrenderable');
+  const Skip = MUT8.load('src/agent-routes.js', editAnchor(ar8, a8, "{ const t = SessionStatusManager.renderNotice(n); if (!t) continue; queue.push({ k, text: t || '' }); if (!t) console.warn(", "src/agent-routes.js"), 'skip-unrenderable');
   const K = rigR7({ groups: 0, routesMod: Skip });
   try {
     seedUnknown(K); K.notice('browser-takeover'); K.notice('status-override');
@@ -1633,7 +1642,7 @@ console.log('②j verify r8: a seeded walk over both routes — every stash entr
   const arw = read('src/agent-routes.js');
   const aw = "      if (taken) {\n        const byKey = new Map();\n";
   if (!arw.includes(aw)) throw new Error('mutation anchor missing: notice fit (walk)');
-  const EarlyW = MUT8b.load('src/agent-routes.js', arw.replace(aw, "      taken = queue.length;\n      if (taken) {\n        const byKey = new Map();\n"), 'consume-first-walk');
+  const EarlyW = MUT8b.load('src/agent-routes.js', editAnchor(arw, aw, "      taken = queue.length;\n      if (taken) {\n        const byKey = new Map();\n", "src/agent-routes.js"), 'consume-first-walk');
   const ctl = walk(EarlyW, 8, 500);
   ok(ctl.fails > 0 && ctl.why.some((w) => /CONSUMED BUT NOT IN THE ANSWER|a notice cut/.test(w)), `CONTROL the notices consumed before their fit: the same walk finds ${ctl.fails} violation(s) (②j can go red)`, ctl.why);
   for (const c of copiesCensus(MUT8b.files, MUT8b.dir, REPO, { minCopies: 1, label: '②j ' })) ok(c.pass, c.name, c.detail);
@@ -1729,7 +1738,7 @@ console.log('②k group messages waiting for the next turn: the fact reads the e
   const src = read('src/server/stash-handover.js');
   const ga = "      const groups = groupEntriesOf(s);\n";
   if (!src.includes(ga)) throw new Error('mutation anchor missing: group entries');
-  const NoGroups = MUTG.load('src/server/stash-handover.js', src.replace(ga, "      const groups = [];\n"), 'no-groups');
+  const NoGroups = MUTG.load('src/server/stash-handover.js', editAnchor(src, ga, "      const groups = [];\n", "src/server/stash-handover.js"), 'no-groups');
   const view2 = NoGroups.create({ activeSessions: sessions, getDeliver: () => deliver, getJobs: () => null, getGroups: () => ge, broadcastSessions: () => {}, renderMsgStash, renderNotifStash, debounceMs: 20 });
   deliver.drainStash(B);
   const strip2 = SS.createStashStrip({ sessionId: 'w1' });
@@ -1747,7 +1756,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   const src = read('src/server/stash-handover.js');
   const anchor1 = "      const sum = S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });\n";
   if (!src.includes(anchor1)) throw new Error('mutation anchor missing: hide');
-  const Hide = MUT.load('src/server/stash-handover.js', src.replace(anchor1, "      const sum = null && S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });\n"), 'hide');
+  const Hide = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor1, "      const sum = null && S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });\n", "src/server/stash-handover.js"), 'hide');
   const R = rig({ handoverModule: Hide });
   R.deliver.stashFor(R.CID, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'sent' });
   const strip = SS.createStashStrip({ sessionId: 'w1' });
@@ -1755,7 +1764,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   ok(strip.el.hidden === true, 'CONTROL a hand-over module that hides the fact: a notice waits and the strip NEVER appears (② and ④ can go red)');
   const anchor2 = "    const { msg: stashed, jobs, retry } = entriesOf(cid);\n";
   if (!src.includes(anchor2)) throw new Error('mutation anchor missing: take-first');
-  const Take = MUT.load('src/server/stash-handover.js', src.replace(anchor2, "    const { msg: stashed, jobs, retry } = entriesOf(cid);\n    d.drainStash(cid); { const jm0 = jobsReady(); if (jm0) jm0.drainNotifs(cid); }\n"), 'take-first');
+  const Take = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor2, "    const { msg: stashed, jobs, retry } = entriesOf(cid);\n    d.drainStash(cid); { const jm0 = jobsReady(); if (jm0) jm0.drainNotifs(cid); }\n", "src/server/stash-handover.js"), 'take-first');
   const R2 = rig({ refuse: 'day-cap', handoverModule: Take });
   R2.deliver.stashFor(R2.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'hi' });
   const r2 = await R2.view.handOver('w1');
@@ -1763,7 +1772,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // the in-flight guard removed: two clicks bill twice
   const anchor3 = "    if (cur) return { ok: false, code: 'in_flight',";
   if (!src.includes(anchor3)) throw new Error('mutation anchor missing: no-guard');
-  const NoGuard = MUT.load('src/server/stash-handover.js', src.replace(anchor3, "    if (false) return { ok: false, code: 'in_flight',"), 'no-guard');
+  const NoGuard = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor3, "    if (false) return { ok: false, code: 'in_flight',", "src/server/stash-handover.js", 'first'), 'no-guard');
   const R3 = rig({ deferPost: true, handoverModule: NoGuard });
   R3.deliver.stashFor(R3.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'msg-1' });
   const q1 = R3.view.handOver('w1'); await sleep(5); const q2 = R3.view.handOver('w1'); await sleep(5);
@@ -1773,7 +1782,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // the claim removed: the injection race delivers twice
   const anchor4 = "    if (shownStashed.length && typeof d.claimStash === 'function') releases.push(d.claimStash(cid, shownStashed, id));\n";
   if (!src.includes(anchor4)) throw new Error('mutation anchor missing: no-claim');
-  const NoClaim = MUT.load('src/server/stash-handover.js', src.replace(anchor4, ''), 'no-claim');
+  const NoClaim = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor4, '', "src/server/stash-handover.js"), 'no-claim');
   const R4 = rig({ deferPost: true, handoverModule: NoClaim });
   R4.deliver.stashFor(R4.CID, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'receipt-X' });
   const q4 = R4.view.handOver('w1'); await sleep(5);
@@ -1783,7 +1792,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // `billed` read off the turn alone
   const anchor5 = "    try { return !(notificationDelivery(capsOf(s && s.backend)) === 'steer' && !!(s && s._isStreaming)); } catch { return true; }";
   if (!src.includes(anchor5)) throw new Error('mutation anchor missing: turn-only');
-  const TurnOnly = MUT.load('src/server/stash-handover.js', src.replace(anchor5, "    return !(s && s._isStreaming);"), 'turn-only');
+  const TurnOnly = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor5, "    return !(s && s._isStreaming);", "src/server/stash-handover.js"), 'turn-only');
   const R5 = rig({ backend: 'claude', streaming: true, handoverModule: TurnOnly });
   R5.deliver.stashFor(R5.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'hi' });
   const f5 = R5.view.summaryFor(R5.s); await R5.view.handOver('w1');
@@ -1792,7 +1801,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // the shutdown that does not wait: the SIGTERM leg re-delivers
   const anchor6 = "    if (!ps.length) return Promise.resolve(0);\n";
   if (!src.includes(anchor6)) throw new Error('mutation anchor missing: no-settle');
-  const NoSettle = MUT.load('src/server/stash-handover.js', src.replace(anchor6, "    if (true) return Promise.resolve(0);\n"), 'no-settle');
+  const NoSettle = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor6, "    if (true) return Promise.resolve(0);\n", "src/server/stash-handover.js"), 'no-settle');
   {
     const dir = scratch('stash-strip-ctl-settle-' + Math.random().toString(36).slice(2, 7));
     const R6 = rig2({ dir, deferPost: true, handoverModule: NoSettle });
@@ -1811,7 +1820,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // (the .195 merge: the same line also emits lane channel-withdraw's `drained` with what was TAKEN)
   const anchor7 = "      if (took.length) { writeStashNow(); stashChanged(cid); ";
   if (!cdsrc.includes(anchor7)) throw new Error('mutation anchor missing: lazy-drain');
-  const LazyDrain = MUT.load('src/server/conversation-deliver.js', cdsrc.replace(anchor7, "      if (took.length) { persistStash(); stashChanged(cid); "), 'lazy-drain');
+  const LazyDrain = MUT.load('src/server/conversation-deliver.js', editAnchor(cdsrc, anchor7, "      if (took.length) { persistStash(); stashChanged(cid); ", "src/server/conversation-deliver.js"), 'lazy-drain');
   {
     const R7 = rig2({ deliverModule: LazyDrain });
     R7.deliver.stashFor(R7.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'ctl-lazy' }); R7.deliver.flush();
@@ -1832,7 +1841,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // the restorer removed: the frame that came back is ONE blob
   const anchor9 = "    const rec = delivered.get(m[1]);\n";
   if (!src.includes(anchor9)) throw new Error('mutation anchor missing: no-restore');
-  const NoRestore = MUT.load('src/server/stash-handover.js', src.replace(anchor9, "    const rec = null;\n"), 'no-restore');
+  const NoRestore = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor9, "    const rec = null;\n", "src/server/stash-handover.js"), 'no-restore');
   {
     const R9 = rig2({ handoverModule: NoRestore });
     for (let i = 0; i < 3; i++) R9.deliver.stashFor(R9.CID, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'r-' + i });
@@ -1845,7 +1854,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // `held` dropped from the result: the toast hides the rest
   const anchor10 = "      const out = { ok: true, id, delivered: tookMsg.length + tookJobs.length, held, lane";   // lane lg-store-writes (the census cure, finding 11): the answer is built once, then sent at the drain's landing
   if (!src.includes(anchor10)) throw new Error('mutation anchor missing: no-held');
-  const NoHeld = MUT.load('src/server/stash-handover.js', src.replace(anchor10, "      const out = { ok: true, id, delivered: tookMsg.length + tookJobs.length, held: 0, lane"), 'no-held');
+  const NoHeld = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor10, "      const out = { ok: true, id, delivered: tookMsg.length + tookJobs.length, held: 0, lane", "src/server/stash-handover.js"), 'no-held');
   {
     const R10 = rig2({ handoverModule: NoHeld });
     for (let i = 0; i < 9; i++) R10.deliver.stashFor(R10.CID, { source: 'channel', kind: 'notification', fromName: 'Channels · Lark', text: 'm' + i + ' ' + 'x'.repeat(1900) });
@@ -1855,7 +1864,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // `inFlight` dropped from the fact: a second client's button stays live
   const anchor11 = "inFlight: inflight.has(cid),";
   if (!src.includes(anchor11)) throw new Error('mutation anchor missing: no-inflight');
-  const NoInFlight = MUT.load('src/server/stash-handover.js', src.replace(anchor11, "inFlight: false,"), 'no-inflight');
+  const NoInFlight = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor11, "inFlight: false,", "src/server/stash-handover.js"), 'no-inflight');
   {
     const R11 = rig2({ deferPost: true, handoverModule: NoInFlight });
     R11.deliver.stashFor(R11.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'x' });
@@ -1868,7 +1877,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // the text equality dropped: a peer's quoted tag resurrects a delivered hand-over and loses the peer's message
   const anchor12 = "    if (!sameFrame(rec, echoed)) {";   // the lane-redact merge: the equality lives in sameFrame (a cleared record keeps its frame's digest)
   if (!src.includes(anchor12)) throw new Error('mutation anchor missing: tag-only');
-  const TagOnly = MUT.load('src/server/stash-handover.js', src.replace(anchor12, "    if (false) {"), 'tag-only');
+  const TagOnly = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor12, "    if (false) {", "src/server/stash-handover.js"), 'tag-only');
   {
     const steerCaps = { peerMessage: true, inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all'] };
     // judged on an OLD wrapper's echo (no kind): r4's kind gate is stripped from r3's control (a new guard layer is
@@ -1881,7 +1890,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // r4: the echo's kind gate removed — a peer frame that IS the exact frame text resurrects the delivered entries
   const anchor14 = "    if (meta && meta.kind === 'peer') {";
   if (!src.includes(anchor14)) throw new Error('mutation anchor missing: no-kind');
-  const NoKind = MUT.load('src/server/stash-handover.js', src.replace(anchor14, "    if (false) {"), 'no-kind');
+  const NoKind = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor14, "    if (false) {", "src/server/stash-handover.js"), 'no-kind');
   {
     const steerCaps = { peerMessage: true, inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all'] };
     const L = await peerTagLeg(rig2({ backend: 'codex', inbox: false, sidecar: steerCaps, handoverModule: NoKind }), null, { whole: true });
@@ -1890,7 +1899,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // the door removed: a press during the shutdown's wait starts a hand-over nobody waits for
   const anchor13 = "    if (closed) return { ok: false, code: 'restarting',";
   if (!src.includes(anchor13)) throw new Error('mutation anchor missing: no-door');
-  const NoDoor = MUT.load('src/server/stash-handover.js', src.replace(anchor13, "    if (false) return { ok: false, code: 'restarting',"), 'no-door');
+  const NoDoor = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor13, "    if (false) return { ok: false, code: 'restarting',", "src/server/stash-handover.js", 'first'), 'no-door');
   {
     const R13 = rig2({ deferPost: true, handoverModule: NoDoor });
     R13.deliver.stashFor(R13.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'ctl-door-1' });
@@ -1908,7 +1917,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // (cdsrc is the ladder source read above)
   const anchor15 = "    let over = q.filter((e) => !(e && e.ho) && !keptE(e)).length - STASH_CAP;";   // B-f276 1a: a kept entry is not the cap's
   if (!cdsrc.includes(anchor15)) throw new Error('mutation anchor missing: cap-all');
-  const CapAll = MUT.load('src/server/conversation-deliver.js', cdsrc.replace(anchor15, "    let over = q.length - STASH_CAP; if (over > 0) return q.splice(0, over);"), 'cap-all');
+  const CapAll = MUT.load('src/server/conversation-deliver.js', editAnchor(cdsrc, anchor15, "    let over = q.length - STASH_CAP; if (over > 0) return q.splice(0, over);", "src/server/conversation-deliver.js"), 'cap-all');
   {
     const R15 = rig2({ deferPost: true, deliverModule: CapAll });
     for (let i = 0; i < 5; i++) R15.deliver.stashFor(R15.CID, { source: 'agent', kind: 'peer', fromName: 'Ada', text: 'old-' + i });
@@ -1948,7 +1957,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   // the delivered memory not persisted: the echo after a restart restores nothing — the frame is one notice
   const anchor16 = "    try { fs.writeFileSync(file + '.tmp', JSON.stringify(Object.fromEntries(delivered))); fs.renameSync(file + '.tmp', file); }";
   if (!src.includes(anchor16)) throw new Error('mutation anchor missing: no-persist');
-  const NoPersist = MUT.load('src/server/stash-handover.js', src.replace(anchor16, "    try { void file; }"), 'no-persist');
+  const NoPersist = MUT.load('src/server/stash-handover.js', editAnchor(src, anchor16, "    try { void file; }", "src/server/stash-handover.js"), 'no-persist');
   {
     const steerCaps = { peerMessage: true, inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all'] };
     const R16 = rig2({ backend: 'codex', streaming: true, sidecar: steerCaps, inbox: false, dataDir: true, handoverModule: NoPersist });
@@ -1966,7 +1975,7 @@ console.log('⑤ negative controls (patched scratch copies)');
   const arsrc = read('src/agent-routes.js');
   const anchor17 = "    if (notice && text.length > MSG_STASH_LINE_MAX) return";
   if (!arsrc.includes(anchor17)) throw new Error('mutation anchor missing: no-block');
-  const NoBlock = MUT.load('src/agent-routes.js', arsrc.replace(anchor17, "    if (false) return"), 'no-block');
+  const NoBlock = MUT.load('src/agent-routes.js', editAnchor(arsrc, anchor17, "    if (false) return", "src/agent-routes.js"), 'no-block');
   {
     const long = 'frame (hand-over ho-zz-3):\n\n' + Array.from({ length: 6 }, (_, i) => `- lark-${i} ` + 'x'.repeat(500)).join('\n');
     const out = NoBlock.renderMsgStash([{ source: 'agent', kind: 'notification', fromName: 'VibeSpace notices', text: long, ts: 1 }]);
@@ -2208,13 +2217,13 @@ console.log('B-02a3 the group press: drawn mid-turn where Enter steers, the door
   const MUTGH = mutantCopies('stash-strip-gh', REPO);
   const uiSrc = read('src/server/user-input.js'), uiA = "      if (session._turnLive !== true) return { ok: false, code: 'not_mid_turn', error: 'VibeSpace does not see the agent in a turn right now — the group messages ride its next turn' };\n";
   if (!uiSrc.includes(uiA)) throw new Error('the anchor of the control «an idle press is written» is not in the source');
-  const sendX = uiOf(MUTGH.load('src/server/user-input.js', uiSrc.replace(uiA, ''), 'idle-written'));
+  const sendX = uiOf(MUTGH.load('src/server/user-input.js', editAnchor(uiSrc, uiA, '', "src/server/user-input.js"), 'idle-written'));
   sess._turnLive = false; fs.writeFileSync(path.join(bufs, 'w9.json'), JSON.stringify({ pid: 1, caps: { inputQueue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'] } }));
   const ux = sendX('w9', 'group words', { origin: 'group-handover' }); sess._turnLive = true;
   ok(ux.ok === true && lines.length === 3, 'RED CONTROL the typing path without its mid-turn check WRITES the frame to an idle agent (a turn the press would start)', { ux, lines: lines.length });
   const shSrc = read('src/server/stash-handover.js'), shA = "      const r = sendUserInput(String(webuiId), frame, { origin: 'group-handover', steer: true });   // its door: the running turn (the typing path writes it only there)\n";
   if (!shSrc.includes(shA)) throw new Error('the anchor of the control «settled at the write» is not in the source');
-  view = mkView(MUTGH.load('src/server/stash-handover.js', shSrc.replace(shA, shA + "      pend.said('handed');\n"), 'settle-at-write'));
+  view = mkView(MUTGH.load('src/server/stash-handover.js', editAnchor(shSrc, shA, shA + "      pend.said('handed');\n", "src/server/stash-handover.js"), 'settle-at-write'));
   await ge.post({ group: made.group.id, from: A, text: 'a fifth one' }); await sleep(30);
   const cx = cards.length, wx = groupsWaiting();
   await view.handOverGroups('w1', { pressed: PRESS }); await sleep(40);

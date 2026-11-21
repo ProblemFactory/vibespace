@@ -215,7 +215,7 @@ console.log('§2 every failure is {ok:false, code, error} — nothing throws acr
   // CONTROL: the runner without its catch REJECTS on the same throw (the daemon would relay an error string, not the op's shape)
   const from = "  } catch (e) {\n    return { ok: false, code: (e && e.code) || 'op_failed', error: String((e && e.message) || e) };\n  }";
   ok(serveSrc.split(from).length === 2, 'CONTROL setup: the runner\'s catch is spelled once');
-  const Mc = MUT.load('src/desktop-serve.js', serveSrc.replace(from, "  } finally { /* pre-fix CONTROL: no catch */ }"), 'nocatch');
+  const Mc = MUT.load('src/desktop-serve.js', editAnchor(serveSrc, from, "  } finally { /* pre-fix CONTROL: no catch */ }", "src/desktop-serve.js"), 'nocatch');
   const rej = await Mc.runDesktopServeOp(boom, 'launch', { body: {} }).then(() => null, (e) => e.message);
   ok(rej === 'kaboom', 'CONTROL: without the catch the same throw REJECTS the runner (a throw across the wire)', rej);
 }
@@ -365,7 +365,7 @@ console.log('§6 lane C2 — the install rung\'s PURE plan, the picker verdict, 
     const dSrc = read('src/desktop-display.js');
     const probeLine = "  if (!out.root && binOnPath('sudo', { env })) { const r = await run('sudo', ['-n', 'true'], { env, timeout: 4000 }); out.sudo = !r.err; }";
     ok(dSrc.split(probeLine).length === 2, 'CONTROL setup: the probe line is spelled once');
-    const Dmut = MUT.load('src/desktop-display.js', dSrc.replace(probeLine, '  out.sudo = true; /* CONTROL: no probe */'), 'nosudoprobe');
+    const Dmut = MUT.load('src/desktop-display.js', editAnchor(dSrc, probeLine, '  out.sudo = true; /* CONTROL: no probe */', "src/desktop-display.js"), 'nosudoprobe');
     const mNo = await probeSudo(Dmut, 'no');
     ok(mNo.sudo === true && mNo.argv === null, 'CONTROL: a copy that claims sudo without probing answers sudo:true for the sudo that wants a password — the leg above reddens it', mNo);
   }
@@ -704,7 +704,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const accSrc = read('src/server/desktop-access.js');
   const launchLine = '    const launch = SLOT.installLauncherArgv(argv, { stateDir, mode });\n';
   ok(accSrc.split(launchLine).length === 2, 'CONTROL setup: the launcher wrap is spelled once');
-  const accPre = MUT.write('src/server/desktop-access.js', accSrc.replace(launchLine, '    const launch = argv;\n'), 'nolauncher');
+  const accPre = MUT.write('src/server/desktop-access.js', editAnchor(accSrc, launchLine, '    const launch = argv;\n', "src/server/desktop-access.js"), 'nolauncher');
   const f4b = await f4(accPre, 'pre');
   ok(f4b.sawStep1 && !f4b.landed, 'CONTROL: the pre-fix rung (the install a direct child on the starter\'s pipe) dies with its starter — SIGPIPE at its next line, the marker never lands', f4b);
 
@@ -872,15 +872,15 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   ok(m1Reset && m1Verify && appsSrc.split(m1Reset).length === 2 && appsSrc.split(m1Verify).length === 2, 'CONTROL setup: the winner\'s pid reset and the pre-tail verification are spelled once each');
   const appsPreM1 = MUT.write('src/install-slot.js', editAnchor(editAnchor(appsSrc, m1Reset, '\n', "src/install-slot.js"), m1Verify, "  '  r=$pid;',\n", "src/install-slot.js"), 'm1pre');
   ok(accSrc.split("const SLOT = require('../install-slot.js');").length === 2, 'CONTROL setup: the access layer requires the package slot once (the closed world re-binds it)');
-  const AccPreM1 = MUT.load('src/server/desktop-access.js', accSrc.replace("const SLOT = require('../install-slot.js');", `const SLOT = require(${JSON.stringify(appsPreM1)});`), 'accm1pre');
+  const AccPreM1 = MUT.load('src/server/desktop-access.js', editAnchor(accSrc, "const SLOT = require('../install-slot.js');", `const SLOT = require(${JSON.stringify(appsPreM1)});`, "src/server/desktop-access.js"), 'accm1pre');
   const flockTake = lineOf("'    if flock -n 9; then'"), flockGuard = lineOf("'flock -n 9 2>/dev/null ||");
   ok(flockTake && flockGuard && appsSrc.split(flockTake).length === 2 && appsSrc.split(flockGuard).length === 2, 'CONTROL setup: the launcher\'s lock and the runner\'s re-assertion are spelled once each');
   const AppsNoFlock = MUT.load('src/install-slot.js', editAnchor(editAnchor(appsSrc, flockTake, flockTake.replace('if flock -n 9; then', 'if true; then'), "src/install-slot.js"), flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||'), "src/install-slot.js"), 'noflock');
-  const AppsNoGuard = MUT.load('src/install-slot.js', appsSrc.replace(flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||')), 'noguard');
+  const AppsNoGuard = MUT.load('src/install-slot.js', editAnchor(appsSrc, flockGuard, flockGuard.replace('flock -n 9 2>/dev/null ||', 'true ||'), "src/install-slot.js"), 'noguard');
   const setsidLine = lineOf('command -v setsid'), flockCheck = lineOf('command -v flock');
   ok(setsidLine && flockCheck && appsSrc.split(setsidLine).length === 2 && appsSrc.split(flockCheck).length === 2, 'CONTROL setup: the setsid and flock checks are spelled once each');
-  const AppsNoSetsidCheck = MUT.load('src/install-slot.js', appsSrc.replace(setsidLine, '\n'), 'nosetsidcheck');
-  const AppsNoFlockCheck = MUT.load('src/install-slot.js', appsSrc.replace(flockCheck, '\n'), 'noflockcheck');
+  const AppsNoSetsidCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, setsidLine, '\n', "src/install-slot.js"), 'nosetsidcheck');
+  const AppsNoFlockCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, flockCheck, '\n', "src/install-slot.js"), 'noflockcheck');
   // a state dir that exists but cannot be written: refused by name at once
   const stRo = path.join(root, 'st-ro'); fs.mkdirSync(stRo, { recursive: true }); fs.chmodSync(stRo, 0o555);
   const asRoot = typeof process.getuid === 'function' && process.getuid() === 0;
@@ -890,10 +890,10 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   } else console.log('  - SKIP the read-only state dir row: running as root (a mode bit does not stop root)');
   const roLine = lineOf('[ -w "$D" ] ||');
   ok(roLine && appsSrc.split(roLine).length === 2, 'CONTROL setup: the writable check is spelled once');
-  const AppsNoRoCheck = MUT.load('src/install-slot.js', appsSrc.replace(roLine, '\n'), 'norocheck');
+  const AppsNoRoCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, roLine, '\n', "src/install-slot.js"), 'norocheck');
   const refuseLine = lineOf('[ -n "$s" ] || { echo "+ [vibespace] cannot read /proc/$$/stat');
   ok(refuseLine && appsSrc.split(refuseLine).length === 2, 'CONTROL setup: the runner\'s refusal is spelled once');
-  const AppsNoRefuse = MUT.load('src/install-slot.js', appsSrc.replace(refuseLine, '\n'), 'norefuse');
+  const AppsNoRefuse = MUT.load('src/install-slot.js', editAnchor(appsSrc, refuseLine, '\n', "src/install-slot.js"), 'norefuse');
   // (M4) FIVE hubs START at the same moment on one machine: exactly ONE runner; the other four follow it and answer ITS
   // code. A ~2 % race is never gated by one trial: 40 trials at their natural speed (batches of 8 at once), then 20 with
   // the windows WIDENED — `setsid` waits 0.3 s before exec'ing the real one (the lock → pidfile window) and `flock` a
@@ -990,7 +990,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const t3Line = lineOf("'  T=/run/user/$u;"), t3Check = lineOf('is not a directory this user owns');
   ok(t3Line && t3Check && appsSrc.split(t3Line).length === 2 && appsSrc.split(t3Check).length === 2, 'CONTROL setup: the uid-named directory and its ownership check are spelled once each');
   const AppsEnvRoot = MUT.load('src/install-slot.js', editAnchor(editAnchor(appsSrc, t3Line, "  '  T=${XDG_RUNTIME_DIR:-/tmp}; [ -d \"$T\" ] && [ -w \"$T\" ] || T=/tmp',\n", "src/install-slot.js"), t3Check, '\n', "src/install-slot.js"), 'envroot');
-  const AppsNoOwnCheck = MUT.load('src/install-slot.js', appsSrc.replace(t3Check, '\n'), 'noowncheck');
+  const AppsNoOwnCheck = MUT.load('src/install-slot.js', editAnchor(appsSrc, t3Check, '\n', "src/install-slot.js"), 'noowncheck');
   // a fake uid (an `id` that answers -u with it): /run/user/<n> does not exist ⇒ the per-uid /tmp dir, created 0700
   const fakeUid = 4000000000 + (process.pid % 1000000) * 4;
   const idShim = (n, answer) => { const d = path.join(root, `bin-id-${n}`); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, 'id'), `#!/bin/sh\ncase "$1" in -u) echo '${answer}' ;; *) exec ${realBin('id')} "$@" ;; esac\n`, { mode: 0o755 }); return { ...process.env, PATH: `${d}:${process.env.PATH}` }; };
@@ -1068,7 +1068,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   const envNoFd9 = { ...process.env, PATH: `${noFd9}:${process.env.PATH}` };
   const waitLine4 = lineOf('[ -e "/proc/$b" ]; do sleep 0.05');
   ok(waitLine4 && appsSrc.split(waitLine4).length === 2, 'CONTROL setup: the pidfile wait bounded by the runner\'s life is spelled once');
-  const AppsUnbounded = MUT.load('src/install-slot.js', appsSrc.replace(waitLine4, waitLine4.replace(' && [ -e "/proc/$b" ]', '')), 'unbounded');
+  const AppsUnbounded = MUT.load('src/install-slot.js', editAnchor(appsSrc, waitLine4, waitLine4.replace(' && [ -e "/proc/$b" ]', ''), "src/install-slot.js"), 'unbounded');
   const l4Leg = (async () => {
     const stF = path.join(root, 'st-l4'), stC = path.join(root, 'st-l4-pre'); fs.mkdirSync(stF, { recursive: true }); fs.mkdirSync(stC, { recursive: true });
     // the fix's killAfter is PATIENCE, never a bound (our own launcher — the install is `echo`); the control is killed AT
@@ -1190,7 +1190,7 @@ console.log('§10 lane C2 — desktop-access: the picker rows (no connect ladder
   ok(ll.busyEnd === null && ll.freed.length === 1 && /the link was lost during the install; dial-on, reached again, reports the install process gone, exit 0/.test(ll.freed[0]), 'the reconnected machine reports it gone ⇒ freed, the line naming the cause', ll.freed);
   const holdLine = "      catch (e) { if (e && (e.code === 'install_timeout' || e.code === 'install_link_lost')) held = e.code; if (e && !e.plan) e.plan = plan; throw e; }\n";
   ok(accSrc.split(holdLine).length === 2, 'CONTROL setup: the hold verdict is spelled once');
-  const AccNoHold = MUT.load('src/server/desktop-access.js', accSrc.replace(holdLine, "      catch (e) { if (e && e.code === 'install_timeout') held = e.code; if (e && !e.plan) e.plan = plan; throw e; }\n"), 'nolinkhold');
+  const AccNoHold = MUT.load('src/server/desktop-access.js', editAnchor(accSrc, holdLine, "      catch (e) { if (e && e.code === 'install_timeout') held = e.code; if (e && !e.plan) e.plan = plan; throw e; }\n", "src/server/desktop-access.js"), 'nolinkhold');
   const llPre = await lostRun(AccNoHold);
   ok(llPre.code === 'install_link_lost' && llPre.busyAtDrop === null, 'CONTROL: a layer that does not hold on a lost link frees the slot AT the drop — a second click would start a second apt beside the running one', { busyAtDrop: llPre.busyAtDrop });
   // unobserved to the end: held for holdMs, then freed naming that nothing saw it end
@@ -1289,7 +1289,7 @@ console.log('\n§adopt-office (verify r1, B-04da ④) a restart never signals a 
   ok(head.state === 'ready' && head.appAlive && head.xAlive && JSON.stringify(head.asks) === '[".uno:Quit"]' && /kept: LibreOffice may hold unsaved edits/.test(head.lastError || ''), 'a surviving LibreOffice whose picture server is silent at boot is ASKED once (.uno:Quit) and, still asking, KEPT ready — its app and display alive', head);
   const fixLine = "        if (verdict.state === 'failed' && alive.x && alive.app && M.askCloseVerdict(rec).ask) {";
   ok(serveSrc.split(fixLine).length === 2, 'CONTROL setup: the boot ask is spelled once');
-  const pre = await run(MUT.load('src/desktop-serve.js', serveSrc.replace(fixLine, '        if (false) {'), 'noadoptask'), 'pre');
+  const pre = await run(MUT.load('src/desktop-serve.js', editAnchor(serveSrc, fixLine, '        if (false) {', "src/desktop-serve.js"), 'noadoptask'), 'pre');
   ok(pre.state === 'failed' && !pre.appAlive && pre.asks.length === 0, 'CONTROL: without the boot ask the same record is REAPED — failed, its LibreOffice signalled with nobody asked (the verify r1 reproduction)', pre);
 }
 

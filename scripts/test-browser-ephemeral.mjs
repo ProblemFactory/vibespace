@@ -624,13 +624,13 @@ console.log('— ④ lane H: the managed ephemeral browser is a holder row, its 
   ok(bReal.connected && bReal.rowBefore && bReal.gone && bReal.state === 'stopped' && bReal.stopped === 1 && bReal.asked === 0 && c.status === 0, `④ H2: the REAL bridge's upstream close on the ephemeral relay tells the keeper — the dead browser's holder row left in ${bReal.ms} ms with no tick and no view asking (stopped said once, 0 stream asks)`, bReal);
   const MB = mutantCopies('browser-ephemeral-h2', REPO);
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
-  const bmut = bsrc.replace(/\n\s*if \(relay\.target\.kind === 'ephemeral' && keeper && typeof keeper\.noteStreamClosed === 'function'\)[^\n]*/, '');
+  const bmut = editAnchor(bsrc, /\n\s*if \(relay\.target\.kind === 'ephemeral' && keeper && typeof keeper\.noteStreamClosed === 'function'\)[^\n]*/, '', "src/server/browser-stream.js");
   const bCtl = bmut !== bsrc ? await bridgeLeg(MB.load('src/server/browser-stream.js', bmut, 'no-note'), 'control') : null;
   ok(bCtl && bCtl.connected && bCtl.rowBefore && !bCtl.gone && bCtl.state === 'ready', '④ H2 CONTROL: a bridge copy WITHOUT the keeper call leaves the dead browser\'s row (and its `ready` record) standing until the tick — the leg above can go red', bCtl || 'the anchor line was not found in src/server/browser-stream.js');
   // …and a keeper copy that reads the RECORD (the pre-fix streamPortFor) asks the CLI for a dead browser's port
   const MK2 = mutantCopies('browser-ephemeral-h2k', REPO);
   const ksrcH2 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const kmutH2 = ksrcH2.replace(/\n\s*if \(bk\) judgeEphemeral\(bk, 'a view asked for its port'\);[^\n]*/, '');
+  const kmutH2 = editAnchor(ksrcH2, /\n\s*if \(bk\) judgeEphemeral\(bk, 'a view asked for its port'\);[^\n]*/, '', "src/server/browser-keeper.js");
   if (kmutH2 !== ksrcH2) {
     const KH = MK2.load('src/server/browser-keeper.js', kmutH2, 'record-only');
     const KEY_Q = 'bk-0000a12a'; live.add(KEY_Q);
@@ -740,7 +740,7 @@ console.log('— ④ lane H: the managed ephemeral browser is a holder row, its 
   {
     const MC = mutantCopies('browser-ephemeral-child', REPO);
     const tsrcC = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
-    const tmutC = tsrcC.replace('    if (!ev.sessionId) return Promise.resolve(null);\n    return watch({ sessionId: ev.sessionId, profileId: null, browserKey: ev.browserKey || null, child: !!ev.child }).catch(() => null);', '    if (!ev.sessionId || ev.child) return Promise.resolve(null);\n    return watch({ sessionId: ev.sessionId, profileId: null, browserKey: ev.browserKey || null, child: !!ev.child }).catch(() => null);');
+    const tmutC = editAnchor(tsrcC, '    if (!ev.sessionId) return Promise.resolve(null);\n    return watch({ sessionId: ev.sessionId, profileId: null, browserKey: ev.browserKey || null, child: !!ev.child }).catch(() => null);', '    if (!ev.sessionId || ev.child) return Promise.resolve(null);\n    return watch({ sessionId: ev.sessionId, profileId: null, browserKey: ev.browserKey || null, child: !!ev.child }).catch(() => null);', "src/server/browser-trace.js");
     if (tmutC !== tsrcC) {
       const TC = MC.load('src/server/browser-trace.js', tmutC, 'child-skip');
       const trcC = TC.create({ dataDir: path.join(ROOT, 'data4c'), keeper: k, bridge: fakeBridge, serverSetting: () => undefined, broadcast: () => { }, log: { log() { }, warn() { } }, sweepEveryMs: 0 });
@@ -802,13 +802,13 @@ console.log('— ④ lane H: the managed ephemeral browser is a holder row, its 
   // (④ r2 L5 the trace-status wiring pin — MOVED to the fast scripts/test-browser-ephemeral-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const ML = mutantCopies('browser-ephemeral-l1', REPO);
   const tsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
-  const tmut = tsrc.replace("if (ev.kind === 'verb') return armOnVerb(ev);", "if (ev.kind === 'verb') return armEphemeral(ev);");
+  const tmut = editAnchor(tsrc, "if (ev.kind === 'verb') return armOnVerb(ev);", "if (ev.kind === 'verb') return armEphemeral(ev);", "src/server/browser-trace.js");
   if (tmut !== tsrc) {
     const l1c = await l1Leg(ML.load('src/server/browser-trace.js', tmut, 'verb-joins'), 'bk-0000a12c', 'l1c', { third: false });
     ok(l1c.second >= ARMW - 100 && l1c.failCallsAfterF2 === 2, `④ L1 CONTROL: a recorder copy whose \`verb\` joins the pending arming (pre-fix) holds the SECOND verb ${l1c.second} ms and re-arms a failed tap at once (${l1c.failCallsAfterF2} calls) — the legs above can go red`, l1c);
   } else ok(false, '④ L1 CONTROL: the anchor `if (ev.kind === \'verb\') return armOnVerb(ev);` was not found in src/server/browser-trace.js');
   // r2 L5 CONTROL: a recorder copy that never says the failure (the pre-fix silence) — the L5 leg can go red
-  const tmut5 = tsrc.replace('    if (!tp || tp.profileId) return; // the backoff (and so the gap) is the ephemeral tap\'s alone', '    return;');
+  const tmut5 = editAnchor(tsrc, '    if (!tp || tp.profileId) return; // the backoff (and so the gap) is the ephemeral tap\'s alone', '    return;', "src/server/browser-trace.js");
   if (tmut5 !== tsrc) {
     const l5c = await l1Leg(ML.load('src/server/browser-trace.js', tmut5, 'silent-arm-fail'), 'bk-0000a12f', 'l5c', { third: false });
     ok((l5c.statusAfterF1 || []).length === 0 && l5c.statusAfterF2 === 0 && l5c.failCallsAfterF2 === 1, `④ r2 L5 CONTROL: a recorder copy that does not say the failed arming leaves the backoff silent (${(l5c.statusAfterF1 || []).length} status) — the leg above can go red`, { f1: l5c.statusAfterF1, f2: l5c.statusAfterF2 });
@@ -886,7 +886,7 @@ console.log('— ④ lane H: the managed ephemeral browser is a holder row, its 
   }
   const MD = mutantCopies('browser-ephemeral-l2', REPO);
   const ksrcL2 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const kmutL2 = ksrcL2.replace("emitLease({ kind: 'detach', browserKey, profileId: id, sessionId: d.lease ? d.lease.sessionId || null : null, ...evFields });", "emitLease({ kind: 'detach', browserKey, profileId: id, sessionId: d.lease ? d.lease.sessionId || null : null });");
+  const kmutL2 = editAnchor(ksrcL2, "emitLease({ kind: 'detach', browserKey, profileId: id, sessionId: d.lease ? d.lease.sessionId || null : null, ...evFields });", "emitLease({ kind: 'detach', browserKey, profileId: id, sessionId: d.lease ? d.lease.sessionId || null : null });", "src/server/browser-keeper.js");
   if (kmutL2 !== ksrcL2) {
     const KD = MD.load('src/server/browser-keeper.js', kmutL2, 'detach-bare');
     const kd = KD.create({ dataDir: path.join(ROOT, 'data-l2m'), homeDir: fakeHome, env: () => rtEnv, serverSetting: (x) => settings[x], liveKeys: () => live, runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, install: false });
@@ -898,7 +898,7 @@ console.log('— ④ lane H: the managed ephemeral browser is a holder row, its 
   // CONTROL (scripts/mutant-copy.mjs): a keeper whose holder rows DROP the ephemeral — the pre-lane representation
   const M = mutantCopies('browser-ephemeral-laneh', REPO);
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const kmut = ksrc.replace('const holders = (leases) => B.holderRows({ leases, profiles: reg.profiles, browsers: reg.browsers, view: leaseView });', 'const holders = (leases) => B.holderRows({ leases, profiles: reg.profiles, browsers: reg.browsers, view: leaseView }).filter((r) => !r.ephemeral);');
+  const kmut = editAnchor(ksrc, 'const holders = (leases) => B.holderRows({ leases, profiles: reg.profiles, browsers: reg.browsers, view: leaseView });', 'const holders = (leases) => B.holderRows({ leases, profiles: reg.profiles, browsers: reg.browsers, view: leaseView }).filter((r) => !r.ephemeral);', "src/server/browser-keeper.js");
   const KM = M.load('src/server/browser-keeper.js', kmut, 'no-eph-holder');
   const KEY_M = 'bk-0000a11d'; live.add(KEY_M);
   mkSession('sess-m', KEY_M, 'w', { name: 'mutant' });
@@ -1010,17 +1010,17 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
   const M5 = mutantCopies('browser-ephemeral-one-launcher', REPO);
   const k5src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   // lane browser-shared-profile-freeze: the anchor names the lease's own url (leaseUrlFor — the scope road's, else the raw one)
-  const k5dir = k5src.replace('env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseUrl, socketDir: rec && rec.launch === \'attach\' ? rec.socketDir : null })', 'env: [`AGENT_BROWSER_SESSION=vs-${browserKey}`, `AGENT_BROWSER_NAMESPACE=vs-${p.id}`, `AGENT_BROWSER_PROFILE=${p.dir}`, \'AGENT_BROWSER_IDLE_TIMEOUT_MS=0\']');
+  const k5dir = editAnchor(k5src, 'env: B.attachedEnvFor({ browserKey, profileId: p.id, cdpUrl: leaseUrl, socketDir: rec && rec.launch === \'attach\' ? rec.socketDir : null })', 'env: [`AGENT_BROWSER_SESSION=vs-${browserKey}`, `AGENT_BROWSER_NAMESPACE=vs-${p.id}`, `AGENT_BROWSER_PROFILE=${p.dir}`, \'AGENT_BROWSER_IDLE_TIMEOUT_MS=0\']', "src/server/browser-keeper.js");
   if (k5dir !== k5src) {
     const c5 = await legOf(M5.load('src/server/browser-keeper.js', k5dir, 'env-dir'), 'ctl-dir');
     ok(c5.cmdX && c5.cmdX.status !== 0 && c5.cmdY && c5.cmdY.status !== 0 && c5.refused.length === 2 && c5.launches.length === 1, `⑤ CONTROL: a keeper copy that hands the lease the DIRECTORY (the pre-fix env) — both sessions' commands die on the lock (${c5.refused.length} SingletonLock refusals): the legs above can go red`, c5);
   } else ok(false, '⑤ CONTROL (directory env): the anchor was not found in src/server/browser-keeper.js');
-  const k5view = k5src.replace("    if (starting.has(p.id)) { try { await starting.get(p.id); } catch { /* its own verdict */ } }\n    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return", "    try { await start(p.id, { why: 'live view' }); } catch (e) { return { ok: false, port: null, code: e.code || 'launch_failed', error: String(e.message || e) }; }\n    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return");
+  const k5view = editAnchor(k5src, "    if (starting.has(p.id)) { try { await starting.get(p.id); } catch { /* its own verdict */ } }\n    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return", "    try { await start(p.id, { why: 'live view' }); } catch (e) { return { ok: false, port: null, code: e.code || 'launch_failed', error: String(e.message || e) }; }\n    if (!reg.browsers[p.id] || reg.browsers[p.id].state !== 'ready') return", "src/server/browser-keeper.js");
   if (k5view !== k5src) {
     const c6 = await legOf(M5.load('src/server/browser-keeper.js', k5view, 'view-starts'), 'ctl-view');
     ok(c6.launchesByView === 1 && c6.stateAfterView === 'ready', `⑤ CONTROL: a keeper copy whose view STARTS a stopped browser (P2's old rule) relaunches it (${c6.launchesByView} launch) — the finding-3 leg can go red`, { launchesByView: c6.launchesByView, state: c6.stateAfterView, view: c6.viewStopped });
   } else ok(false, '⑤ CONTROL (a view starts): the anchor was not found in src/server/browser-keeper.js');
-  const k5view2 = k5src.replace("const cdp = await rt.cdpUrl(ns, { dir: p.dir, extraEnv: { ...launchEnv, ...vendorEnv } });", "const cdp = await rt.cdpUrl(ns, { dir: p.dir });");
+  const k5view2 = editAnchor(k5src, "const cdp = await rt.cdpUrl(ns, { dir: p.dir, extraEnv: { ...launchEnv, ...vendorEnv } });", "const cdp = await rt.cdpUrl(ns, { dir: p.dir });", "src/server/browser-keeper.js");
   if (k5view2 !== k5src) {
     const c7 = await legOf(M5.load('src/server/browser-keeper.js', k5view2, 'cdp-no-view'), 'ctl-lview');
     ok(c7.restarts && c7.restarts.length >= 1 && c7.recPidAlive === false, `⑤ CONTROL: a keeper copy whose own \`get cdp-url\` drops the launch's idle value restarts its daemon (${(c7.restarts || []).length} restart(s)) and records a pid that is already dead — the launch-view leg can go red`, { restarts: c7.restarts, recPidAlive: c7.recPidAlive });
@@ -2021,7 +2021,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     } else ok(false, '⑥ M1 CONTROL: the reapOrphan / clearProfileLock anchors were not found in src/server/browser-keeper.js');
     // (2) L4 pre-fix: liveness = 'gone' only (a recycled pid stays ready and the CLI is asked)
     const DG = "  const daemonGone = (rec) => ['gone', 'recycled', 'unrecorded'].includes(livenessOf(rec));";
-    const k6b = k6src.replace(DG, "  const daemonGone = (rec) => livenessOf(rec) === 'gone';");
+    const k6b = editAnchor(k6src, DG, "  const daemonGone = (rec) => livenessOf(rec) === 'gone';", "src/server/browser-keeper.js");
     if (k6b !== k6src) {
       const KB = M6.load('src/server/browser-keeper.js', k6b, 'recycled-live');
       const KEY8 = 'bk-0000b604';
@@ -2054,7 +2054,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     // (4) r3 MAJOR 1 (a): re-capture neutered alone — the tick no longer follows a relaunch, and an ephemeral's relaunched
     //     chrome (a temp dir nobody minted) LEAKS after its daemon's SIGKILL, whichever judge ran
     if (k6src.includes(RC)) {
-      const KD = M6.load('src/server/browser-keeper.js', k6src.replace(RC, RC + '    return rec ? rec.browser || null : null;\n'), 'no-recapture');
+      const KD = M6.load('src/server/browser-keeper.js', editAnchor(k6src, RC, RC + '    return rec ? rec.browser || null : null;\n', "src/server/browser-keeper.js"), 'no-recapture');
       const cg = await respawnLeg(KD, 'ctl-recapture', { judge: 'tick' });
       ok(cg.recordAfterJudge !== cg.c2, `⑥ r3 M1 (a) CONTROL: a keeper copy with no re-capture keeps the stale record after the tick (${cg.c1} → ${cg.recordAfterJudge}, the live chrome is ${cg.c2})`, cg);
       for (const judge of ['tick', 'start', 'view']) {
@@ -2071,7 +2071,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     const CLI_STAMP = "      if (!rec.cli || (info.version && info.version !== rec.cli.version)) { const cd = cliOfDaemon(info); rec.cli = cd || rec.cli || null; if (cd && cd.path) cliKeptByLaunch(rec); } // verify r2 (H1): the daemon's own answer decides // B-7a30: the daemon's own program (/proc/<pid>/exe) is its answer\n";
     const LC = "      if (info.pid && rec.starttime == null && F.startsReadable()) { rec.state = 'failed'; rec.endedAt = now(); rec.lastError = unrecordedLaunch(info.pid); commit(); throw namedError('launch_failed', rec.lastError); }\n" + CLI_STAMP + "      captureBrowser(rec, p.dir);";
     if (k6src.includes(LC)) {
-      const cu = await launchLeg(M6.load('src/server/browser-keeper.js', k6src.replace(LC, CLI_STAMP + '      captureBrowser(rec, p.dir);'), 'launch-unread'), 'ctl-unread');
+      const cu = await launchLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, LC, CLI_STAMP + '      captureBrowser(rec, p.dir);', "src/server/browser-keeper.js"), 'launch-unread'), 'ctl-unread');
       ok(cu.state === 'ready' && !cu.err, `⑥ r3 LOW 3 CONTROL: a keeper copy without the launch check records the identity-less daemon ${cu.state} — the launch leg can go red`, cu);
     } else ok(false, '⑥ r3 LOW 3 CONTROL: the launch-check anchor was not found in src/server/browser-keeper.js');
     // (6) r4 MAJOR 1: the heal neutered — a named profile whose chrome died stays `ready` with NO browser after the leased
@@ -2094,7 +2094,7 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
       const realBOD = F.browserOfDaemon;
       const readKids = require('../src/cli-identity.js').readChildPids;
       F.browserOfDaemon = (daemonPid, { dir = null, depth = 2 } = {}) => { let fr = [daemonPid]; const seen = new Set(fr); for (let d = 0; d < depth && fr.length; d++) { const nx = []; for (const p0 of fr) for (const k of (readKids(p0) || []).map(Number)) { if (seen.has(k)) continue; seen.add(k); nx.push(k); const c = F.procCmdline(k); if (!c || /(?:^|[\s\0])--type=/.test(c)) continue; const ds = B.userDataDirsOf(c, dir ? [dir] : []); const pick = dir ? ds.find((x) => B.sameDir(x, dir)) : ds[0]; if (pick) return { pid: k, starttime: F.procStart(k), dir: pick }; } fr = nx; } return null; };
-      let cw; try { cw = await wrapLeg(M6.load('src/server/browser-keeper.js', k6src.replace(LH, LH + '    return null;\n'), 'no-lock-pref'), 'ctl-wrap'); } finally { F.browserOfDaemon = realBOD; }
+      let cw; try { cw = await wrapLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, LH, LH + '    return null;\n', "src/server/browser-keeper.js"), 'no-lock-pref'), 'ctl-wrap'); } finally { F.browserOfDaemon = realBOD; }
       ok(!cw.threw && cw.recorded === cw.helper && !cw.chromeGone, `⑥ r4 LOW 4 CONTROL: with the r3 capture (shallowest argv match) the record names the wrapper ${cw.helper} and the chrome ${cw.chrome} outlives the tick — the LOW 4 leg can go red`, cw);
       killAll6();
     } else ok(false, '⑥ r4 LOW 4 CONTROL: the lockHeldUnder anchor was not found in src/server/browser-keeper.js');
@@ -2102,19 +2102,19 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     // 2.369.183: lane P's launchIdle (the same pairs' idle) — the one launch line; the .197 integration: lane headless-fallback added the display fact's env to it
     const IL = '        const r = await rt.launch(null, { idleMs: launchIdle, headed: null, extraEnv: { ...env0, ...rec.display.env } });';
     if (k6src.includes(IL)) {
-      const ci = await idleLeg(M6.load('src/server/browser-keeper.js', k6src.replace(IL, '        const r = await rt.launch(null, { idleMs: idleMs(), headed: null, extraEnv: { ...env0, ...rec.display.env } });'), 'idle-now'), 'ctl-idle');
+      const ci = await idleLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, IL, '        const r = await rt.launch(null, { idleMs: idleMs(), headed: null, extraEnv: { ...env0, ...rec.display.env } });', "src/server/browser-keeper.js"), 'idle-now'), 'ctl-idle');
       ok(!ci.threw && ci.launchIdle === '300000', `⑥ r4 LOW 5 CONTROL: a keeper copy launching with the setting NOW launches with ${ci.launchIdle} — the LOW 5 leg can go red`, ci);
     } else ok(false, '⑥ r4 LOW 5 CONTROL: the ephemeral launch anchor was not found in src/server/browser-keeper.js');
     // (9) r5 MAJOR 1 (a): the LEDGER neutered — the storm relaunches on EVERY tick and nobody is told
     const BUD = '      const bud = B.healBudgetVerdict({ attempts: L.attempts, now: now() });';
     if (k6src.includes(BUD)) {
-      const cs = await stormLeg(M6.load('src/server/browser-keeper.js', k6src.replace(BUD, '      const bud = { ok: true, count: 0, recent: [] };'), 'no-ledger'), 'ctl-storm');
+      const cs = await stormLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, BUD, '      const bud = { ok: true, count: 0, recent: [] };', "src/server/browser-keeper.js"), 'no-ledger'), 'ctl-storm');
       ok(!cs.threw && cs.relaunches >= 5 && cs.rec.closed !== 'browser_unstable' && cs.notices.length === 0, `⑥ r5 MAJOR 1 (a) CONTROL: a keeper copy without the ledger relaunches ${cs.relaunches} times in six ticks (${cs.perTick.join(' ')}) and tells nobody — the storm leg can go red`, cs);
     } else ok(false, '⑥ r5 MAJOR 1 (a) CONTROL: the budget anchor was not found in src/server/browser-keeper.js');
     // (9b) B-47f9: the ledger keeps only the 10-min window (the base) — the slow closer is restarted on every closure, nobody told
     const KEPT = '      noteHeal(rec, { attempts: [...B.healBudgetVerdict({ attempts: B.healLedger(rec.heals).attempts, now: tAsk }).kept, tAsk], failed: null });';
     if (k6src.includes(KEPT)) {
-      const csl = await slowLeg(M6.load('src/server/browser-keeper.js', k6src.replace(KEPT, KEPT.replace(').kept,', ').recent,')), 'window-ledger'), 'ctl-slow');
+      const csl = await slowLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, KEPT, KEPT.replace(').kept,', ').recent,'), "src/server/browser-keeper.js"), 'window-ledger'), 'ctl-slow');
       ok(!csl.threw && csl.relaunches === 14 && csl.rec.closed !== 'browser_unstable' && csl.notices.length === 0, `⑥ B-47f9 CONTROL: a keeper copy whose ledger keeps only the 10-min window relaunches the slow closer ${csl.relaunches} times in 14 ticks (${csl.perTick.join(' ')}) and tells nobody — the slow-closer leg can go red`, csl.threw || null);
     } else ok(false, '⑥ B-47f9 CONTROL: the ledger anchor was not found in src/server/browser-keeper.js');
     // (9c) B-47f9 verify r1 LOW: the journal lines before the fix — the day's ledger length read as the 10-min count
@@ -2126,43 +2126,43 @@ out({ success: false, error: 'fake: unknown verb ' + process.argv.slice(2).join(
     // (10) r5 MAJOR 1 (b): the identified-check neutered — a healed chrome that died before its recapture reads as a success
     const WP = '      if (!b) { // r5 MAJOR 1 (b)';
     if (k6src.includes(WP)) {
-      const cw = await wipeLeg(M6.load('src/server/browser-keeper.js', k6src.replace(WP, '      if (false) { // r5 MAJOR 1 (b)'), 'no-identified-check'), 'ctl-wipe');
+      const cw = await wipeLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, WP, '      if (false) { // r5 MAJOR 1 (b)', "src/server/browser-keeper.js"), 'no-identified-check'), 'ctl-wipe');
       ok(!cw.threw && !cw.t1.closed && !cw.t1.browser && !cw.t1.lost && /^ok /.test(cw.attach1 || ''), `⑥ r5 MAJOR 1 (b) CONTROL: a keeper copy without the identified-check leaves \`${cw.t1.state}\`, no browser, no verdict, and an attach hands out the dead url (${String(cw.attach1).slice(0, 60)}) — the wipe leg can go red`, cw);
     } else ok(false, '⑥ r5 MAJOR 1 (b) CONTROL: the identified-check anchor was not found in src/server/browser-keeper.js');
     // (11) r5 MAJOR 1 (iii): the START's identified-check neutered
     const SB = '      if (!rec.browser && launchEvidenced(p.dir, stamp0)) {';
     if (k6src.includes(SB)) {
-      const cb3 = await birthLeg(M6.load('src/server/browser-keeper.js', k6src.replace(SB, '      if (false) {'), 'no-start-check'), 'ctl-birth');
+      const cb3 = await birthLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, SB, '      if (false) {', "src/server/browser-keeper.js"), 'no-start-check'), 'ctl-birth');
       ok(!cb3.threw && /^ok /.test(cb3.attach1 || '') && !cb3.rec1.closed && !cb3.rec1.browser, `⑥ r5 MAJOR 1 (iii) CONTROL: a keeper copy without the start's check records \`${cb3.rec1.state}\` with no browser and no verdict, and the attach hands out the dead url — the start leg can go red`, cb3);
     } else ok(false, '⑥ r5 MAJOR 1 (iii) CONTROL: the start-check anchor was not found in src/server/browser-keeper.js');
     // (12) r5 LOW 4: the retry gate neutered — a failed heal is retried on every tick (the budget then trips)
     const GT = '  const healGated = (rec) => !!(rec && rec.closed && Number.isFinite(rec.closed.retryAt) && now() < rec.closed.retryAt);';
     if (k6src.includes(GT)) {
-      const cg4 = await gateLeg(M6.load('src/server/browser-keeper.js', k6src.replace(GT, '  const healGated = () => false;'), 'no-gate'), 'ctl-gate');
+      const cg4 = await gateLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, GT, '  const healGated = () => false;', "src/server/browser-keeper.js"), 'no-gate'), 'ctl-gate');
       ok(!cg4.threw && cg4.a2 > cg4.a1 + 0, `⑥ r5 LOW 4 CONTROL: a keeper copy without the gate asks the binary ${cg4.a2 - cg4.a1} more time(s) in three ticks — the gate leg can go red`, cg4);
     } else ok(false, '⑥ r5 LOW 4 CONTROL: the gate anchor was not found in src/server/browser-keeper.js');
     // (13) r5 LOW 4: the cloak branch neutered — a bare re-ask relaunches a provider-flagged browser as plain chromium
     const CL = '      if (rec.launchFlags === true) {'; // dc-browser-providers (2.369.213): the pre-r4 provider rung is gone with the row's launchFlags
     if (k6src.includes(CL)) {
-      const cc5 = await cloakLeg(M6.load('src/server/browser-keeper.js', k6src.replace(CL, '      if (false) {'), 'no-cloak-branch'), 'ctl-cloak');
+      const cc5 = await cloakLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, CL, '      if (false) {', "src/server/browser-keeper.js"), 'no-cloak-branch'), 'ctl-cloak');
       ok(!cc5.threw && cc5.cdp >= 1 && cc5.chromes === 1, `⑥ r5 LOW 4 CONTROL: a keeper copy without the cloak branch re-asks the binary (${cc5.cdp}) and relaunches it bare (${cc5.chromes} chrome) — the cloak leg can go red`, cc5);
     } else ok(false, '⑥ r5 LOW 4 CONTROL: the cloak anchor was not found in src/server/browser-keeper.js');
     // (14) r5 MINOR 2: the view heals whatever the lease says (r4)
     const VW = "await followRelaunch(recV, 'a view asking for its port', { heal: leasedNow(p.id), force: true });";
     if (k6src.includes(VW)) {
-      const cv6 = await viewLeg(M6.load('src/server/browser-keeper.js', k6src.replace(VW, "await followRelaunch(recV, 'a view asking for its port', { heal: true, force: true });"), 'view-heals'), 'ctl-view');
+      const cv6 = await viewLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, VW, "await followRelaunch(recV, 'a view asking for its port', { heal: true, force: true });", "src/server/browser-keeper.js"), 'view-heals'), 'ctl-view');
       ok(!cv6.threw && cv6.afterView === 1 && cv6.view && cv6.view.ok, `⑥ r5 MINOR 2 CONTROL: a keeper copy whose view heals regardless starts the unleased browser (${cv6.afterView} chrome, port ${cv6.view && cv6.view.port}) — the view leg can go red`, cv6);
     } else ok(false, '⑥ r5 MINOR 2 CONTROL: the view anchor was not found in src/server/browser-keeper.js');
     // (15) r5 LOW 5: every close arms the gate (r4: a refusal re-armed it) — the heal after the human closes waits
     const SC = '  function setClosed(rec, c, { retry = false } = {}) {\n';
     if (k6src.includes(SC)) {
-      const cl7 = await lockGateLeg(M6.load('src/server/browser-keeper.js', k6src.replace(SC, SC + '    retry = true;\n'), 'refusal-arms'), 'ctl-lockgate');
+      const cl7 = await lockGateLeg(M6.load('src/server/browser-keeper.js', editAnchor(k6src, SC, SC + '    retry = true;\n', "src/server/browser-keeper.js"), 'refusal-arms'), 'ctl-lockgate');
       ok(!cl7.threw && cl7.cdp === 0 && cl7.chromes.length === 0 && cl7.after.closed === 'profile_locked', `⑥ r5 LOW 5 CONTROL: a keeper copy whose refusal arms the gate does NOT heal on the tick after the human closes (${cl7.chromes.length} chromes, still \`${cl7.after.closed}\`) — the LOW 5 leg can go red`, cl7);
     } else ok(false, '⑥ r5 LOW 5 CONTROL: the setClosed anchor was not found in src/server/browser-keeper.js');
     // (16) r6 MINOR 1: today's order (r5) — the attempt counted BEFORE the ask, so a FAILED ask spends the relaunch budget
     const BO = '      if (!bud.ok) { markUnstable(rec, p, bud.count, seenBy, { windowMs: bud.windowMs }); commit(); return null; }\n'; // B-47f9: the tier's window named
     if (k6src.includes(BO)) {
-      const KO = M6.load('src/server/browser-keeper.js', k6src.replace(BO, BO + '      noteHeal(rec, { attempts: [...bud.recent, now()] });\n'), 'count-before-ask');
+      const KO = M6.load('src/server/browser-keeper.js', editAnchor(k6src, BO, BO + '      noteHeal(rec, { attempts: [...bud.recent, now()] });\n', "src/server/browser-keeper.js"), 'count-before-ask');
       const cgo = await gateLeg(KO, 'ctl-gate-r6');
       ok(!cgo.threw && cgo.ext.some((x) => /:browser_unstable$/.test(x)) && cgo.notices.some((x) => /closed each time/.test(x)), `⑥ r6 MINOR 1 CONTROL: a keeper copy counting the attempt BEFORE the ask turns the gate leg's failed asks into \`browser_unstable\` (${cgo.ext.join(' ')}) with a "closed each time" notice — the gate leg can go red`, cgo);
       const cco = await failCapLeg(KO, 'ctl-failcap');
@@ -2641,7 +2641,7 @@ process.exit(code);
     const W2 = '        const launchIdle = B.pairsIdleMs(pairs) ?? idleMs();\n';
     ok(ksrc.includes(W2), 'F2 NEGATIVE CONTROL setup: the launch\'s pairs idle is found in src/server/browser-keeper.js');
     if (ksrc.includes(W2)) {
-      const mut2 = MK2.load('src/server/browser-keeper.js', ksrc.replace(W2, '        const launchIdle = idleMs();\n'), 'launch-idle-setting');
+      const mut2 = MK2.load('src/server/browser-keeper.js', editAnchor(ksrc, W2, '        const launchIdle = idleMs();\n', "src/server/browser-keeper.js"), 'launch-idle-setting');
       const ric = await runIdle((o) => mut2.create(o), 'ctl');
       ok(ric['pairs name 900000'].launch.join() === '600000', 'F2 NEGATIVE CONTROL (launch idle): the pre-fix launch passes the SETTING (600000) over pairs naming 900000 — the daemon the agent\'s first verb would restart; the launch-idle leg is red on it', ric);
     }
