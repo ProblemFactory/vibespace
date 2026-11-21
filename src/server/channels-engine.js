@@ -9877,7 +9877,7 @@ function create(deps = {}) {
     stillSees, effectiveForAccount, searchFor, readAroundFor, setPolicy, setReach, reachView, request, decideRequest, directoryLists,
     setAgentDirectory, agentWatch, agentUnwatch, agentWatchesFor, listFor, reachCountFor, signinExpiredFor, readFor, readThreadFor, statusFor, proposalsListFor, setGrain, setAccess, setWatchers, removePattern,
     setAssignment, setScopeAssignment, accessFor, estimateScope, migrateAggregated, migrateGrants, setFilter, estimateFilter,
-    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
+    previewRule, membersNow, wakeAdmitOf, expireWatchRequests, withdrawWatchRequest, reconcileAsks, completeGrainActs, grainActsOwedNow, wakeHeldAt, grainReadAt, grainReadLive, heldRead, resurfacePointers, openAccessPointers, holdAside,
   } = Object.assign(engineCtx, ChannelsAccess.create(engineCtx));
   const {
     honestyLineFor, proposalsFor, stashAbout, stashGate, outboxView, sendStartsTurn, outboxAttachment, filesSweep, propose, proposeReaction, proposeRecall, compose, composeEach,
@@ -10257,6 +10257,9 @@ function create(deps = {}) {
     starts++;   // B-f276 A3 (r566 #5): the start that ran (the leg: a held small family lifts ⇒ the engine starts, once)
     timer = setInterval(tick, 5000);
     if (timer.unref) timer.unref();
+    // lane lg-group-parents (B-526c): an Access-dialog act the stop cut short (on disk in the grants rows, its index copy still in the pace) is completed FIRST — queued on the index before anything this boot reads a grain through it; a boot that owes any part sweeps after it (every other boot sweeps in this turn, as before)
+    const owedAtBoot = grainActsOwedNow(), completing = completeGrainActs().catch((err) => log.warn(`[channels] boot: the grain completion failed: ${(err && err.message) || err}`));
+    track(completing);
     // B-dfa4 cut 3: the three censuses and the heal's plan — ONE walk (bootSweep), in this turn for a small store, in slices for a big one
     const bootSaid = (r) => {
       if (!r) return;
@@ -10266,7 +10269,8 @@ function create(deps = {}) {
       try { if (r.failed && r.failed.capZero) throw r.failed.capZero; const z = r.capZero; if (z.length) log.warn(`[channels] ${z.length} digest notification(s) stored with a daily cap of 0 — read as cap 1 (a digest is a paced wake and cap 0 never delivers); the store is not rewritten, edit each to set a real cap: ${z.map((o) => `${o.principal} on ${o.grain} ${o.id}`).join(', ').slice(0, 600)}`); } catch (err) { log.warn(`[channels] boot digest-cap census failed: ${(err && err.message) || err}`); }
     };
     try { const w = digestWarmStart(); if (w && typeof w.catch === 'function') w.catch((err) => log.warn(`[channels] the first digest's warm-up failed: ${(err && err.message) || err} — the first read builds whole`)); } catch (err) { log.warn(`[channels] the first digest's warm-up failed: ${(err && err.message) || err}`); }   // B-dfa4 cut 4
-    try { const sw = bootSweep(); if (sw.promise) track(sw.promise.then(bootSaid, (err) => log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`))); else bootSaid(sw.sync); } catch (err) { log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`); }
+    const sweepNow = () => { try { const sw = bootSweep(); if (sw.promise) track(sw.promise.then(bootSaid, (err) => log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`))); else bootSaid(sw.sync); } catch (err) { log.warn(`[channels] the boot sweep failed: ${(err && err.message) || err}`); } };
+    if (owedAtBoot) track(completing.then(sweepNow)); else sweepNow();
     try { track(releaseStaleReservations()); } catch (err) { log.warn(`[channels] boot reservation release failed: ${(err && err.message) || err}`); }
     reconcileReceiptFates().catch((err) => log.warn(`[channels] boot receipt-fate reconcile failed: ${(err && err.message) || err}`));
     try { scheduleBootPending(); } catch (err) { log.warn(`[channels] boot pending scan failed: ${(err && err.message) || err}`); }

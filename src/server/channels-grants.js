@@ -12,8 +12,13 @@
  *                   conversation:<key>#user                     the owner's hand-written reach rows (`level`)
  *                   conversation:<key>#request                  approved requests (`level` visible)
  *                   account:<adapterId>#user                    an account-scope row of another origin (pre-unify only)
- *   channel-watch   the grain's resource (as the three above)   WHO that grain's notification wakes (the settings stay
- *                                                               on the watcher row in the index, keyed by principal)
+ *   channel-watch   the grain's resource (as the three above)   WHO that grain's notification wakes — and, lane
+ *                                                               lg-group-parents B-526c, each watcher's SETTINGS (the
+ *                                                               index keeps its own copy + the pace ledgers, keyed by
+ *                                                               principal; an older record's entry is the bare principal)
+ *   + a rule's two rows carry `rule` {adapterId, pattern}, the watch row `blocks` (the agents whose own watch the person
+ *     removed there) — B-526c: a grain write's DURABLE half is these rows (synchronous, before the answer); the index's
+ *     copy follows at its pace and the boot completes an act the stop cut short (channels-access completeGrainActs)
  *   channel-api     <credential>  (an account id | mount:<id>)  the raw-API `tier` (+ `perDay`)
  *
  * A row's `except` = the members of its Task Groups / of All agents LEFT OUT («除了»): a left-out member gets nothing
@@ -84,7 +89,7 @@ function create({ grants = null, dataDir = null } = {}) {
     for (const r of s ? s.rowsOfDoor(door) : []) {
       if (!r || r.unreadable || r.to === null) { ix.unreadable = true; continue; }
       const n = GM.normRow(r);
-      ix.rows.set(String(r.resource), Object.freeze(n.ok ? { to: Object.freeze(n.row.to), except: Object.freeze(n.row.except) } : { to: Object.freeze([]), except: Object.freeze([]), unknown: true, why: n.why }));
+      ix.rows.set(String(r.resource), Object.freeze(n.ok ? { to: Object.freeze(n.row.to), except: Object.freeze(n.row.except), ...(n.row.rule ? { rule: n.row.rule } : {}), ...(n.row.blocks ? { blocks: n.row.blocks } : {}) } : { to: Object.freeze([]), except: Object.freeze([]), unknown: true, why: n.why }));   // B-526c: + what the row carries
     }
     cache.set(door, ix);
     return ix;
@@ -269,6 +274,45 @@ function create({ grants = null, dataDir = null } = {}) {
     if (!p || !GM.ENTRY_FIELDS['channel-api'].tier.includes(g.api)) return null;
     return { ...p, tier: g.api, ...(Number(g.perDay) > 0 ? { perDay: Math.min(100000, Math.floor(Number(g.perDay))) } : {}), ...(Number(g.at) ? { at: Number(g.at) } : {}) };
   };
+  /** lane lg-group-parents (B-526c): ONE watcher row → its watch-row ENTRY carrying the watcher's SETTINGS (GM.ENTRY_FIELDS
+   *  ['channel-watch']; `body` = its inline filter's body, when it names one). A watcher the record cannot carry whole (a value
+   *  past the model's bounds — a filter body over GM.BLOB_MAX, a filter id over 512 characters) is the BARE principal, its
+   *  key named in `short` (that act waits for the index's disk — setGrain). → the entry | null (no principal). */
+  const entryOfWatch = (w, body, short) => {
+    const p = GM.fromChannelPrincipal(w && w.principal);
+    if (!p) return null;
+    const e = { ...p, notify: w.notify === 'digest' ? 'digest' : 'wake', mode: w.mode === 'filtered' ? 'filtered' : 'all' };
+    if (w.digestMinutes !== undefined && w.digestMinutes !== null) e.digestMinutes = w.digestMinutes;
+    if (w.dailyWakeCap !== undefined && w.dailyWakeCap !== null) e.dailyWakeCap = w.dailyWakeCap;
+    if (w.receiptWake === true) e.receiptWake = true;
+    if (w.delivery !== undefined && w.delivery !== null) e.delivery = w.delivery;
+    if (w.origin === 'agent') e.origin = 'agent';
+    if (w.via) e.via = w.via;
+    if (w.filterId) e.filterId = w.filterId;
+    if (body) e.filter = body;
+    const at = Number(w.updatedAt || w.createdAt);
+    if (at > 0) e.at = at;
+    if (typeof w.createdBy === 'string' && w.createdBy) e.by = w.createdBy.slice(0, 64);
+    if (GM.normEntry(e, DOORS.watch)) return e;
+    if (short) short.push(GM.principalKey(p));
+    return p;
+  };
+  /** lane lg-group-parents (B-526c): a CARRIED watch entry → the index's watcher row it stands for (the settings; `prev` = the
+   *  index's own row of that principal, whose created-at, estimate and pace ledger are kept). null = the entry carries none
+   *  (an older record: the index's row is the only settings). */
+  function watcherOfEntry(e, prev = null) {
+    if (!e || (e.notify !== 'wake' && e.notify !== 'digest')) return null;
+    const principal = GM.toChannelPrincipal(e);
+    if (!principal) return null;
+    const at = Number(e.at) || null;
+    return {
+      principal, notify: e.notify, mode: e.mode === 'filtered' ? 'filtered' : 'all', filterId: e.filterId || null,
+      ...(e.digestMinutes !== undefined ? { digestMinutes: e.digestMinutes } : {}), ...(e.dailyWakeCap !== undefined ? { dailyWakeCap: e.dailyWakeCap } : {}),
+      receiptWake: e.receiptWake === true, ...(e.delivery ? { delivery: e.delivery } : {}), ...(e.origin === 'agent' ? { origin: 'agent' } : {}), ...(e.via ? { via: e.via } : {}),
+      createdAt: prev && prev.createdAt ? prev.createdAt : at, updatedAt: at, createdBy: prev && prev.createdBy ? prev.createdBy : (e.by || 'user'),
+      estimateAtSet: prev ? prev.estimateAtSet || null : null, stats: prev && prev.stats ? prev.stats : { wakes: [], hits: [] },
+    };
+  }
   const exceptEntries = (list) => (Array.isArray(list) ? list.map((x) => (x && (x.kind === 'agent' || x.kind === 'everyone') ? GM.fromChannelPrincipal(x) : GM.bareOf(x))).map((x) => x || { kind: 'invalid' }) : []);
   /** The changes ONE grain write makes — its access row and its watch row (`except` / `watchExcept` = the lists to keep:
    *  absent ⇒ the stored ones). lane held-except-doors: a row with no Task Group / All agents left KEEPS its exceptions (they
@@ -279,7 +323,7 @@ function create({ grants = null, dataDir = null } = {}) {
    *  that member's own exception BY NAME (`lift`: 'always' — the owner's writes —, 'dormant' — an agent's own: only where
    *  no Task Group / All agents entry is on the row, a live exception is the owner's to lift —, false); a list the caller
    *  sent is never edited here (a member both given and left out there ⇒ except_conflicts, the caller's contradiction). */
-  function grainChanges(res, { access = null, watchers = null, except = undefined, watchExcept = undefined, removeExcept = [], watchRemoveExcept = [], lift = false } = {}) {
+  function grainChanges(res, { access = null, watchers = null, except = undefined, watchExcept = undefined, removeExcept = [], watchRemoveExcept = [], lift = false, bodies = null, rule = undefined, blocks = undefined, short = null } = {}) {   // lane lg-group-parents B-526c: + the carried settings (`bodies` = filter id → an inline filter's body), `rule`, `blocks`; `short` collects what could not be carried
     const rowOfChange = (door, to, stored, given, named) => {
       let ex = given === undefined ? stored : exceptEntries(given);
       const rx = Array.isArray(named) ? [...named] : [];
@@ -291,16 +335,42 @@ function create({ grants = null, dataDir = null } = {}) {
       return { door, resource: res, to, except: ex, removeExcept: rx };
     };
     const out = [];
-    if (access) out.push(rowOfChange(DOORS.reach, access.map(entryOfAccess).filter(Boolean), [...exceptOf(res)], except, removeExcept));
-    if (watchers) out.push(rowOfChange(DOORS.watch, watchers.map((w) => GM.fromChannelPrincipal(w && w.principal)).filter(Boolean), [...watchOf(res).except], watchExcept, watchRemoveExcept));
+    const ruleOf = (ch) => (rule ? { ...ch, rule } : ch);   // B-526c: a rule's record rides both of its rows
+    if (access) out.push(ruleOf(rowOfChange(DOORS.reach, access.map(entryOfAccess).filter(Boolean), [...exceptOf(res)], except, removeExcept)));
+    if (watchers) {
+      const bodyOf = (w) => (bodies && w && w.mode === 'filtered' && w.filterId && bodies.get(w.filterId)) || null;
+      const ch = ruleOf(rowOfChange(DOORS.watch, watchers.map((w) => entryOfWatch(w, bodyOf(w), short)).filter(Boolean), [...watchOf(res).except], watchExcept, watchRemoveExcept));   // B-526c: each entry its watcher's settings
+      out.push(Array.isArray(blocks) && blocks.length ? { ...ch, blocks } : ch);
+    }
     return out;
   }
-  /** ONE grain's rows, written together (all or nothing). → the store's answer. */
+  /** ONE grain's rows, written together (all or nothing). → the store's answer; lane lg-group-parents B-526c: + `short` = the
+   *  watchers (principal keys) and `rule` the record could not carry whole — the caller's act then waits for the index's disk. */
   function setGrainRows(res, lists, by) {
     const s = S();
     if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
-    const ch = grainChanges(res, lists);
-    return ch.length ? s.setMany(ch, by) : { ok: true, changed: [] };
+    const short = [];
+    const rule = lists && lists.rule !== undefined && lists.rule !== null ? (GM.rowFieldsOf(DOORS.reach, res, { rule: lists.rule }).fields.rule || null) : undefined;
+    if (rule === null) short.push('rule');
+    const ch = grainChanges(res, { ...lists, rule: rule || undefined, short });
+    const r = ch.length ? s.setMany(ch, by) : { ok: true, changed: [] };
+    return r && r.ok ? { ...r, short } : r;
+  }
+  /** lane lg-group-parents (B-526c): every channel row that CARRIES something the boot's completion reads — a watch row with a
+   *  watcher's settings or the agents' blocks, a rule's row with its record. → [{door, resource, to, rule?, blocks?}] (the
+   *  normalized index; an unreadable store ⇒ none — nothing is completed from a record that cannot be read). */
+  function rowsCarrying() {
+    const out = [];
+    for (const door of [DOORS.watch, DOORS.reach]) {
+      const ix = doorIndex(door);
+      if (ix.unreadable) return [];
+      for (const [resource, r] of ix.rows) {
+        if (r.unknown) continue;
+        const settings = door === DOORS.watch && r.to.some((e) => e.notify === 'wake' || e.notify === 'digest');
+        if (settings || r.rule || r.blocks) out.push({ door, resource, to: r.to, ...(r.rule ? { rule: r.rule } : {}), ...(r.blocks ? { blocks: r.blocks } : {}) });
+      }
+    }
+    return out;
   }
   /** One principal's row in a conversation's `#user` / `#request` row (null level ⇒ removed). */
   function setLevel(res, principal, level, { at = null, by = 'user' } = {}) {
@@ -348,6 +418,7 @@ function create({ grants = null, dataDir = null } = {}) {
   return {
     DOORS, RES, grainResource, rowOf, resourcesOf, refusalOf, watchAdmitsFor, exceptBare, generation, plainGeneration, hasConversationRows, ruleIdsWithRows, ownConversationKeys, accessOf, exceptOf, conversationGrants, accountGrants, ruleGrants, apiGrants, watchOf,
     watchLists, wakeAdmits, anyReachExcept, hasAnyExcept, grainChanges, setGrainRows, setLevel, setApiRows, removeAccount, removeRule, store: S,
+    entryOfWatch, watcherOfEntry, rowsCarrying,   // lane lg-group-parents B-526c
   };
 }
 
