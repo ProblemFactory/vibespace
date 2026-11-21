@@ -2496,30 +2496,42 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
   }
   // ── B-346d's RECORDER (the coordinator's r1228): THE ONE JOURNAL RECORD AT «DAEMON GONE» — names and numbers only ──
   // (d) the hub unit's OOM kill counter: its cgroup's memory.events `oom_kill`, read ASYNC (never a sync read on the loop); the
-  // path is read off /proc/self/cgroup once (an injected stand-in in the fast gate). `oomSeen` = the latest tick's reading.
-  let oomPathP = null, oomSeen = null;
+  // path is read off /proc/self/cgroup once (an injected stand-in in the fast gate). r1311: THE RECORDER NEVER GATES THE TICK —
+  // the read is its OWN flight (one at a time; a flight still out is not started again: a held file threadpool holds one read,
+  // never the tick); `oomSeen` = the last value that came back, with its time.
+  let oomPathP = null, oomSeen = null, oomFlight = null;
   const oomPath = () => oomPathP || (oomPathP = oomEventsPath ? Promise.resolve(oomEventsPath) : fs.promises.readFile('/proc/self/cgroup', 'utf8').then((t) => GR.memoryEventsPathFrom(t), () => null));
   const readOomKills = () => oomPath().then((p) => (p ? fs.promises.readFile(p, 'utf8').then((t) => GR.oomKillsFrom(t), () => null) : null), () => null);
-  // (a) a tick saw this run's daemon alive: the record's lower bound, and (d) the counter at its first tick alive — in memory, one
-  // row a profile, keyed by the run's start (a run started again begins a new row: one run's facts are never the next one's)
-  const aliveRuns = new Map(); // profileId → { run: startedAt, at: the last tick alive, oom: the counter at its first tick alive }
+  function refreshOom() {
+    if (oomFlight) return;
+    oomFlight = readOomKills().then((n) => { if (n != null) oomSeen = { n, at: now() }; }, () => { /* not read: said in the line */ }).then(() => { oomFlight = null; });
+  }
+  // (a) a tick saw this run's daemon alive: the record's lower bound, and (d) the first counter value read during its run — in
+  // memory, one row a profile, keyed by the run's start (a run started again begins a new row: one run's facts are never the next
+  // one's); r1311 (3): a run is FORGOTTEN when its record is no longer live (its stop, its idle end, its removal) at the next tick
+  const aliveRuns = new Map(); // profileId → { run: startedAt, at: the last tick alive, oom: { n, at } | null }
   function aliveSeen(rec, at) {
     const run = Number(rec.startedAt) || 0, cur = aliveRuns.get(rec.profileId);
-    if (cur && cur.run === run) { cur.at = at; return; }
-    aliveRuns.set(rec.profileId, { run, at, oom: oomSeen && oomSeen.n != null ? oomSeen.n : null });
+    if (cur && cur.run === run) { cur.at = at; if (!cur.oom && oomSeen) cur.oom = { ...oomSeen }; return; }
+    aliveRuns.set(rec.profileId, { run, at, oom: oomSeen ? { ...oomSeen } : null });
   }
+  function forgetEndedRuns() { for (const pid of [...aliveRuns.keys()]) { const r0 = reg.browsers[pid]; if (!r0 || !B.isLiveBrowser(r0)) aliveRuns.delete(pid); } }
   /** The facts of ONE gone daemon, read BEFORE the hub ends its Chrome — (a) the bound on both sides, (b) its Chrome said in every
    *  case, (c) the hub's own signals to either pid during the run (the ledger, read from the run's start: a reused pid's rows are
-   *  not this run's), (d) the counter at its first tick alive and now. The line is journaled when the counter's read answers. */
+   *  not this run's; a row whose process start is not this run's process is said as another process), (d) the first counter value
+   *  read during the run and the last one read. r1311 (2): the line is written WHEN ITS FACTS ARE READ — before the reap's own line,
+   *  never after it (the reap's own signal to its Chrome is not one of the run's). Its callers fence it (r1311 (1)). */
   function goneRecord(rec, seenBy) {
     const at = now(), since = Number(rec.startedAt) || 0;
     const b = rec.browser && Number.isInteger(rec.browser.pid) ? rec.browser : null;
     const chrome = !b ? { state: 'none' } : !F.pidAlive(b.pid) ? { state: 'gone', pid: b.pid } : F.sameProcess(b.pid, b.starttime) ? { state: 'alive', pid: b.pid } : { state: 'other', pid: b.pid };
-    const signals = [...SL.signalsTo(rec.pid, { since }).map((x) => ({ ...x, of: 'daemon' })), ...(b ? SL.signalsTo(b.pid, { since }).map((x) => ({ ...x, of: 'chrome' })) : [])].sort((x, y) => x.at - y.at);
+    const other = (x, start) => x.start != null && start != null && String(x.start) !== String(start);
+    const signals = [...SL.signalsTo(rec.pid, { since }).map((x) => ({ ...x, of: 'daemon', other: other(x, rec.starttime) })), ...(b ? SL.signalsTo(b.pid, { since }).map((x) => ({ ...x, of: 'chrome', other: other(x, b.starttime) })) : [])].sort((x, y) => x.at - y.at);
     const seen = aliveRuns.get(rec.profileId); aliveRuns.delete(rec.profileId);
     const mine = seen && seen.run === since ? seen : null;
-    const facts = { profileId: rec.profileId, ns: rec.ns || null, pid: rec.pid, startedAt: rec.startedAt || null, seenAliveAt: mine ? mine.at : null, foundGoneAt: at, seenBy, chrome, signals, oomStart: mine ? mine.oom : null, oomEnd: null };
-    readOomKills().then((n) => { facts.oomEnd = n == null ? null : n; }, () => { /* unreadable: said in the line */ }).then(() => { try { log.log?.(GR.goneRecordLine(facts)); } catch { /* the journal's own failure */ } });
+    const facts = { profileId: rec.profileId, ns: rec.ns || null, pid: rec.pid, startedAt: rec.startedAt || null, seenAliveAt: mine ? mine.at : null, foundGoneAt: at, seenBy, chrome, signals,
+      ledgerSince: SL.HELD_SINCE, ledgerMax: SL.LEDGER_MAX, oomStart: mine && mine.oom ? { ...mine.oom } : null, oomEnd: oomSeen ? { ...oomSeen } : null };
+    log.log?.(GR.goneRecordLine(facts));
     return facts;
   }
   function markEphemeralGone(rec, seenBy = 'the tick') {
@@ -2538,7 +2550,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     log.log?.(`[browser] ephemeral ${rec.profileId} (${rec.ns}) daemon gone (pid ${rec.pid}${livenessOf(rec) === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped (${early ? `found gone within ${Math.round(quietMs / 1000)} s of a command it served, before its idle timeout of ${Math.round(Number(idleFor) / 60000)} min — why is not known here` : 'idle'}), the next verb restarts it`);
     emitLease({ kind: 'browser-stopped', profileId: rec.profileId, why: 'idle', local: true, ...ephEventFields(rec.profileId) }); // lane H: its holder row leaves the digest
     keptNote('stop', profile(rec.profileId), { why: early ? 'ended' : 'idle' }); // lane browser-resume: its logins + its last tabs are kept (the daemon is gone: the relay's list); B-346d: 'ended' reopens as 'idle' does
-    goneRecord(rec, seenBy); // B-346d's recorder: its facts read BEFORE the hub ends its Chrome
+    try { goneRecord(rec, seenBy); } catch (e) { try { log.warn?.(`[browser] ${rec.profileId}: its gone record could not be written (${e && e.message}) — the stop and the reap go on`); } catch { /* the journal's own failure */ } } // B-346d's recorder, FENCED (r1311 (1)): its facts read BEFORE the hub ends its Chrome
     reapOrphan(rec, seenBy); // verify r2 M1: the Chrome its dead daemon left behind is ended (tracked; a start waits on it)
   }
   /** VERIFY r2 M1: a NAMED profile's local record whose daemon is gone (dead, or its pid recycled) — recorded stopped,
@@ -2553,7 +2565,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     dirty = true;
     log.log?.(`[browser] ${rec.profileId} daemon gone (pid ${rec.pid}${v === 'recycled' ? ', now another process' : ''}, seen by ${seenBy}) — recorded stopped`);
     tabsLost(rec.profileId, `its daemon gone (seen by ${seenBy})`); // lane profile-lock-roll (L2): every lease's tab went with it
-    goneRecord(rec, seenBy); // B-346d's recorder: its facts read BEFORE the hub ends its Chrome
+    try { goneRecord(rec, seenBy); } catch (e) { try { log.warn?.(`[browser] ${rec.profileId}: its gone record could not be written (${e && e.message}) — the stop and the reap go on`); } catch { /* the journal's own failure */ } } // B-346d's recorder, FENCED (r1311 (1)): its facts read BEFORE the hub ends its Chrome
     return reapOrphan(rec, seenBy);
   }
   // ── LANE PROFILE-LOCK-ROLL (2026-10-01) ──
@@ -3295,11 +3307,9 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     const same = () => F.pidAlive(pid) && F.sameProcess(pid, starttime);
     if (!F.pidAlive(pid)) return 'gone';
     if (!same()) return 'unproven';
-    SL.noteSignal(pid, site, 'SIGTERM', now()); // B-346d's recorder (c): the hub's own signal, in the ledger
-    try { process.kill(pid, 'SIGTERM'); } catch { /* gone meanwhile */ }
+    try { process.kill(pid, 'SIGTERM'); SL.noteSignal(pid, site, 'SIGTERM', now(), starttime); } catch { /* gone meanwhile */ } // B-346d's recorder (c): noted only when the kill succeeded
     for (let i = 0; i < termMs / 100 && F.pidAlive(pid); i++) await sleep(100);
-    if (same()) SL.noteSignal(pid, site, 'SIGKILL', now()); // (c): the KILL below goes only while it is the same process
-    if (same()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } for (let i = 0; i < 10 && F.pidAlive(pid); i++) await sleep(50); }
+    if (same()) { try { process.kill(pid, 'SIGKILL'); SL.noteSignal(pid, site, 'SIGKILL', now(), starttime); } catch { /* gone */ } for (let i = 0; i < 10 && F.pidAlive(pid); i++) await sleep(50); }
     return F.pidAlive(pid) && F.sameProcess(pid, starttime) ? 'survived' : 'ended';
   }
   /** End the browser a record's (gone) daemon launched — tracked per profile, single flight. The RECORDED browser first
@@ -5615,12 +5625,10 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
         const v = pidVerdictOf(rec);
         if (v === 'ours') {
           recaptureBrowser(rec, 'the stop'); // verify r3: again, right before our own signal
-          SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGTERM', now()); // B-346d's recorder (c)
-          try { process.kill(rec.pid, 'SIGTERM'); } catch { /* gone */ }
+          try { process.kill(rec.pid, 'SIGTERM'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGTERM', now(), rec.starttime); } catch { /* gone */ } // B-346d's recorder (c)
           const t2 = now() + 1500;
           while (now() < t2 && F.pidAlive(rec.pid)) await sleep(100);
-          if (F.pidAlive(rec.pid)) SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGKILL', now()); // (c)
-          if (F.pidAlive(rec.pid)) { try { process.kill(rec.pid, 'SIGKILL'); } catch { /* gone */ } await sleep(200); }
+          if (F.pidAlive(rec.pid)) { try { process.kill(rec.pid, 'SIGKILL'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGKILL', now(), rec.starttime); } catch { /* gone */ } await sleep(200); }
           if (F.pidAlive(rec.pid)) left = `daemon pid ${rec.pid} survived SIGKILL`;
         } else left = `daemon pid ${rec.pid} is still alive but not provably ours (${v}) — left alone, never signalled`;
       }
@@ -8595,7 +8603,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     if (heldReg) return;   // the B-f276 remainder: nothing is judged on a held registry
     warmCliVersions(); // verify r3 (Y1): the row's sync readers see a replaced binary's version within a tick
     const t = now();
-    oomSeen = { n: await readOomKills(), at: t }; // B-346d's recorder (d): the hub unit's OOM counter, once a tick (async)
+    refreshOom(); forgetEndedRuns(); // B-346d's recorder (r1311): the counter's own flight (never awaited) + runs no longer live forgotten
     const r = reconcile({ graceMs: B.LEASE_DROP_GRACE_MS });
     if (r.dropped.length || r.stamped.length) dirty = true;
     await r.retired;
@@ -8611,7 +8619,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
       // P4: a process on a paired machine / an external browser is never
       // pid-judged or sampled here (the pid is not ours, or not local)
       if (isLocalRec(rec) && daemonGone(rec)) { markDaemonGone(rec, 'the tick'); healAttach(rec, 'the tick'); continue; } // lane one-browser-b1: an attach Chrome under a holder is started again
-      if (isLocalRec(rec)) aliveSeen(rec, t); // B-346d's recorder (a): this tick saw its daemon alive
+      if (isLocalRec(rec)) { try { aliveSeen(rec, t); } catch { /* the recorder never stops the tick (r1311 (1)) */ } } // B-346d's recorder (a): this tick saw its daemon alive
       // verify r3 M1 (a): the daemon is ours — its browser record follows an in-place relaunch (re-captured from the lock)
       // r4 MAJOR 1: a daemon with no browser is healed by the tick while a lease holds it (a conversation is using it); an
       // unleased one waits for its next start / view (or its idle clock) — nobody is asking for a window to reappear
@@ -9100,6 +9108,7 @@ function create({ unreadRetry = null /* the B-f276 remainder: {firstMs, maxMs} o
     // P1 second half (§3.7/§3.8): the set, handles, the one-time refusal, children, the audit, adopt
     setFor, tell, resolveFor, newChild, dropChild, jobHandleFor, findJobHandle, jobOf, releaseJob, audit, adoptScratch, auditFile: path.join(dataDir, AUDIT_FILE),
     reconcile, adoptAll, boot, tick, startTimer, shutdown, orphanCensus,
+    recorderRuns: () => [...aliveRuns.keys()], // B-346d's recorder (r1311 (3)): the runs it holds — a run no longer live is forgotten
     // P4 (§7.3): the paired-machine question the routes ask before a create is judged
     hostKnown: knownHost, machinesHeld, isLocalRec, probeCdp, desktopConsent,
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL

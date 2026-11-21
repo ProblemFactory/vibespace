@@ -427,25 +427,30 @@ console.log('— ⑪ B-346d law 2: a daemon gone BEFORE its idle timeout is neve
     'the kept browser\'s reason: «ended» (found gone before its idle timeout, why unknown) — its tabs reopen by themselves as an idle-out\'s do; the agent\'s words say it', { why: KB.stopWhyOf('ended'), kind: KB.restoreKindFor('ended'), words: KB.stopWhyWords('ended') });
 }
 
-console.log('— ⑫ B-346d\'s RECORDER (r1228): ONE journal record at «daemon gone» — the bound both sides, its Chrome, the hub\'s own signals, the OOM counter');
+console.log('— ⑫ B-346d\'s RECORDER (r1228, r1311): ONE journal record at «daemon gone» — the bound both sides, its Chrome, the hub\'s own signals, the OOM counter; the recorder never gates the tick');
 {
   const { anchored } = await import('./scratch.mjs');
+  const { execFileSync } = require('node:child_process');
   const SLm = require('../src/server/signal-ledger.js');
   const GRm = require('../src/browser-gone-record.js');
   const CLK0 = 1795100000000, IDLE = 900000;
   const kids = [];
-  const standIn = async (args = []) => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', ...args], { stdio: 'ignore' }); kids.push(c); for (let i = 0; i < 100 && F.procStart(c.pid) == null; i++) await new Promise((r) => setTimeout(r, 10)); return c; };
+  const pause = (ms) => new Promise((r) => setTimeout(r, ms)); // the counter's own flight comes back in it (r1311: never awaited by the tick)
+  const standIn = async (args = []) => { const c = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)', '--', ...args], { stdio: 'ignore' }); kids.push(c); for (let i = 0; i < 100 && F.procStart(c.pid) == null; i++) await pause(10); return c; };
   const ended = (c) => new Promise((r) => { if (c.exitCode !== null || c.signalCode !== null) return r(); c.once('exit', () => r()); try { c.kill('SIGKILL'); } catch { r(); } });
-  // ONE world: an ephemeral daemon (a stand-in process) seen alive by a tick, its Chrome (a stand-in naming its user-data-dir), the
-  // hub unit's counter (a stand-in memory.events), then the daemon ENDS and the next tick finds it gone 12 s later
-  const recordOf = async (Km, { chromeCase = 'alive', signal = true, oomStart = 3, oomEnd = 4, tickAlive = true, beforeRun = false } = {}) => {
+  const isEnded = async (c) => { for (let i = 0; i < 200 && c.exitCode === null && c.signalCode === null; i++) await pause(10); return c.exitCode !== null || c.signalCode !== null; };
+  const evText = (n) => `low 0\nhigh 0\nmax 0\noom 0\noom_kill ${n}\n`;
+  // ONE world: an ephemeral daemon (a stand-in process) seen alive by three ticks, its Chrome (a stand-in naming its user-data-dir),
+  // the hub unit's counter (a stand-in memory.events: 3, then 4 before the third tick), then the daemon ENDS and the fourth tick
+  // finds it gone 12 s after the last tick that saw it alive
+  const recordOf = async (Km, { chromeCase = 'alive', signal = 'during', oomEnd = 4, tickAlive = true } = {}) => {
     const dataDir = path.join(ROOT, 'gone-' + (++dirN)); fs.mkdirSync(dataDir, { recursive: true });
     const chromeDir = path.join(dataDir, 'chrome-profile'); fs.mkdirSync(chromeDir, { recursive: true });
-    const events = path.join(dataDir, 'memory.events'); fs.writeFileSync(events, `low 0\nhigh 0\nmax 0\noom 0\noom_kill ${oomStart}\n`);
+    const events = path.join(dataDir, 'memory.events'); fs.writeFileSync(events, evText(3));
     const daemon = await standIn();
     const chrome = chromeCase === 'none' ? null : await standIn([`--user-data-dir=${chromeDir}`]);
     let clk = CLK0;
-    const key = 'bk-0000c4a' + dirN.toString(16).slice(-1), id = 'bp-' + (0x30000000 + dirN).toString(16);
+    const key = 'bk-0000c4' + (0xa0 + dirN).toString(16).slice(-2), id = 'bp-' + (0x30000000 + dirN).toString(16);
     const profile = B.newProfileRecord({ id, label: '(ephemeral) recorder', dir: null, ephemeral: true, owner: { kind: 'conversation', id: key }, now: CLK0 - 60e3 });
     profile.lastVerbAt = CLK0 - 30e3; profile.verbBeforeAt = CLK0 - 40e3;
     const browser = { profileId: id, state: 'ready', pid: daemon.pid, starttime: F.procStart(daemon.pid), cdpUrl: null, ns: 'vs-' + key, startedAt: CLK0 - 60e3, idleMs: IDLE,
@@ -455,51 +460,102 @@ console.log('— ⑫ B-346d\'s RECORDER (r1228): ONE journal record at «daemon 
     const lines = [];
     const log = { log: (l) => lines.push(String(l)), warn: (l) => lines.push(String(l)), error() { }, info() { } };
     const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv }), liveKeys: () => new Set([key]), now: () => clk, install: false, log, tickMs: 3600e3, oomEventsPath: events });
+    let threw = null;
     try {
-      if (signal) SLm.noteSignal(daemon.pid, 'the keeper: its stop', 'SIGTERM', beforeRun ? CLK0 - 120e3 : CLK0 - 5e3); // before the run (a reused pid) or during it
-      if (tickAlive) await k.tick();                 // the tick sees the daemon alive at CLK0 (and reads the counter)
-      await ended(daemon);                           // the daemon ENDS (who or what is the record's question)
-      if (chrome && chromeCase === 'gone') await ended(chrome); // …its Chrome with it (both found dead by the next tick)
-      fs.writeFileSync(events, `low 0\nhigh 0\nmax 0\noom 0\noom_kill ${oomEnd}\n`);
-      clk = CLK0 + 12e3;
-      await k.tick();                                // the next tick finds it gone
-      for (let i = 0; i < 200 && !lines.some((l) => l.includes('gone record')); i++) await new Promise((r) => setTimeout(r, 10));
-      return { line: lines.find((l) => l.includes('gone record')) || '', daemon: daemon.pid, chrome: chrome ? chrome.pid : null };
+      const dStart = F.procStart(daemon.pid);
+      if (signal === 'during') SLm.noteSignal(daemon.pid, 'the keeper: its stop', 'SIGTERM', CLK0 - 5e3, dStart);
+      if (signal === 'before') SLm.noteSignal(daemon.pid, 'the keeper: its stop', 'SIGTERM', CLK0 - 120e3, dStart);   // a row from before the run (a reused pid)
+      if (signal === 'other') SLm.noteSignal(daemon.pid, 'the keeper: its stop', 'SIGTERM', CLK0 - 5e3, 'another-start'); // a row whose process is not this run's
+      if (tickAlive) {
+        await k.tick(); await pause(40);                                     // alive at CLK0 (the counter's flight reads 3)
+        clk = CLK0 + 5e3; await k.tick(); await pause(40);                   // alive (the run's first value: 3)
+        fs.writeFileSync(events, evText(oomEnd)); clk = CLK0 + 10e3; await k.tick(); await pause(40); // alive (the flight reads oomEnd)
+      } else fs.writeFileSync(events, evText(oomEnd));
+      await ended(daemon); if (chrome && chromeCase === 'gone') await ended(chrome);   // the daemon ENDS (who or what is the record's question)
+      clk = CLK0 + 22e3;
+      try { await k.tick(); } catch (e) { threw = String(e && e.message); }  // the next tick finds it gone
+      for (let i = 0; i < 200 && !lines.some((l) => l.includes('gone record') || l.includes('could not be written')); i++) await pause(10);
+      const chromeEnded = chrome && chromeCase === 'alive' ? await isEnded(chrome) : null;
+      for (let i = 0; i < 100 && chromeEnded && !lines.some((l) => l.includes('ended its own orphaned browser pid')); i++) await pause(10);
+      const rec = k.browserOf(id) || {};
+      return { line: lines.find((l) => l.includes('gone record')) || '', lines, daemon: daemon.pid, chrome: chrome ? chrome.pid : null, state: rec.state, chromeEnded, threw, runs: k.recorderRuns() };
     } finally { try { k.shutdown(); } catch { /* none */ } for (const c of [daemon, chrome]) if (c) await ended(c); }
   };
   const iso = (ms) => new Date(ms).toISOString();
   const all = await recordOf(K);
-  ok(/gone record bp-/.test(all.line) && all.line.includes(`last seen alive ${iso(CLK0)} (12 s before it was found gone)`) && all.line.includes(`found gone ${iso(CLK0 + 12e3)} by the tick`),
-    'B-346d recorder (a): the record says the last time a tick saw its daemon ALIVE beside the time it was found gone — a bound on both sides (12 s), never only «within N s of a command»', all.line);
-  ok(all.line.includes(`its Chrome: alive (pid ${all.chrome}) when its daemon was found gone — the hub ends it now`), 'B-346d recorder (b): its Chrome OUTLIVED the daemon — said, read before the hub ends it', all.line);
-  ok(all.line.includes(`the hub's own signals: SIGTERM to its daemon (pid ${all.daemon}) by the keeper: its stop at ${iso(CLK0 - 5e3)}`), 'B-346d recorder (c): the hub\'s own signal to that daemon during its run — which site, when (the one ledger a pid)', all.line);
-  ok(all.line.includes('the hub unit\'s OOM kills: 3 → 4: ROSE by 1 during its run'), 'B-346d recorder (d): the hub unit\'s OOM counter at its first tick alive and when found gone — a rise said', all.line);
-  ok(!/https?:|:\/\/|\bwww\./.test(all.line) && !/title/i.test(all.line), 'B-346d recorder: names and numbers only — no page address, no site name, no title in the record', all.line);
-  const [gone, none, quiet, early] = await Promise.all([recordOf(K, { chromeCase: 'gone', signal: false, oomEnd: 3 }), recordOf(K, { chromeCase: 'none', beforeRun: true }), recordOf(K, { chromeCase: 'alive', signal: false }), recordOf(K, { tickAlive: false, signal: false })]);
-  ok(gone.line.includes(`its Chrome: already gone (pid ${gone.chrome})`) && none.line.includes('its Chrome: none recorded for this run'), 'B-346d recorder (b): every case said — a Chrome already gone, none recorded for the run (before: silent unless it outlived its daemon)', { gone: gone.line, none: none.line });
-  ok(gone.line.includes('the hub\'s own signals: none') && none.line.includes('the hub\'s own signals: none'), 'B-346d recorder (c): no signal ⇒ «none»; a row noted BEFORE the run (a reused pid) is never read as this run\'s', { gone: gone.line, none: none.line });
-  ok(gone.line.includes('3 → 3: no change') && early.line.includes('last seen alive never by a tick') && early.line.includes('(no reading at its first tick alive)'), 'B-346d recorder (a)+(d): an unchanged counter says «no change»; a daemon gone before any tick saw it says so (never a made-up bound)', { gone: gone.line, early: early.line });
+  ok(/gone record bp-/.test(all.line) && all.line.includes(`last seen alive ${iso(CLK0 + 10e3)} (12 s before it was found gone)`) && all.line.includes(`found gone ${iso(CLK0 + 22e3)} by the tick`),
+    'B-346d recorder (a): the record says the last time a tick saw its daemon ALIVE beside the time it was found gone — a bound on both sides (12 s)', all.line);
+  ok(all.line.includes(`its Chrome: alive (pid ${all.chrome}) when its daemon was found gone (the reap decides)`), 'B-346d recorder (b): its Chrome OUTLIVED the daemon — said, read before the reap (which decides by its own, stricter rule)', all.line);
+  ok(all.line.includes(`the hub's own signals: SIGTERM to its daemon (pid ${all.daemon}) by the keeper: its stop at ${iso(CLK0 - 5e3)}`), 'B-346d recorder (c): the hub\'s own signal to that daemon during its run — what was sent, by which site, when', all.line);
+  ok(all.line.includes(`the hub unit's OOM kills: 3 (read ${iso(CLK0)}) → 4 (read ${iso(CLK0 + 10e3)}): ROSE by 1 during its run`), 'B-346d recorder (d): the first counter value read during the run and the last one read, each with its time — a rise said', all.line);
+  ok(!/https?:|:\/\/|\bwww\./.test(all.line) && !/title/i.test(all.line), 'B-346d recorder: names and numbers only — no page address, no site name, no title', all.line);
+  // r1311 (2): THE LINE IS WRITTEN WHEN ITS FACTS ARE READ — before the reap's own line; the reap's own signal to its Chrome is not one of the run's
+  const iGone = all.lines.findIndex((l) => l.includes('gone record')), iReap = all.lines.findIndex((l) => l.includes('ended its own orphaned browser pid'));
+  ok(iGone >= 0 && iReap > iGone && all.chromeEnded && !all.line.includes('its orphaned Chrome'), 'B-346d recorder (r1311 (2)): the record is written BEFORE the reap\'s own line, and the reap\'s own signal to its Chrome is never among the run\'s signals; the Chrome is still ended', { iGone, iReap, chromeEnded: all.chromeEnded });
+  const [gone, none, other, early] = await Promise.all([recordOf(K, { chromeCase: 'gone', signal: 'none', oomEnd: 3 }), recordOf(K, { chromeCase: 'none', signal: 'before' }), recordOf(K, { signal: 'other' }), recordOf(K, { tickAlive: false, signal: 'none' })]);
+  ok(gone.line.includes(`its Chrome: already gone (pid ${gone.chrome})`) && none.line.includes('its Chrome: none recorded for this run'), 'B-346d recorder (b): every case said — a Chrome already gone, none recorded for the run', { gone: gone.line, none: none.line });
+  ok(gone.line.includes('the hub\'s own signals: none (the ledger holds this hub process\'s notes since ') && none.line.includes('the hub\'s own signals: none (') && none.line.includes(`the newest ${SLm.LEDGER_MAX} pids)`),
+    'B-346d recorder (c): no signal ⇒ «none», saying since when the ledger holds notes; a row noted BEFORE the run (a reused pid) is never read as this run\'s', { gone: gone.line, none: none.line });
+  ok(other.line.includes(`SIGTERM to pid ${other.daemon} (another process by then, not its daemon)`), 'B-346d recorder (r1311 (4)): a row whose process start is not this run\'s daemon is said as ANOTHER PROCESS — never as a signal to it', other.line);
+  ok(gone.line.includes('3 (read ') && gone.line.includes(': no change') && early.line.includes('last seen alive never by a tick') && /OOM kills: not read/.test(early.line), 'B-346d recorder (a)+(d): an unchanged counter says «no change»; a daemon gone before any tick saw it says «never by a tick», and a counter value that never came back «not read»', { gone: gone.line, early: early.line });
+  ok(!all.runs.includes(all.line.match(/gone record (bp-[0-9a-f]+)/)?.[1]) && Array.isArray(all.runs), 'B-346d recorder (r1311 (3)): a run found gone is forgotten (the runs no longer live are forgotten at every tick: one entry a conversation never lives for the hub\'s life)', all.runs);
   ok(GRm.memoryEventsPathFrom('0::/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service\n') === '/sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/app.slice/vibespace.service/memory.events' && GRm.memoryEventsPathFrom('12:cpu:/x\n') === null && GRm.oomKillsFrom('oom 1\noom_kill 7\n') === 7 && GRm.oomKillsFrom('oom 1\n') === null,
-    'B-346d recorder (d): the hub unit\'s memory.events path read off /proc/self/cgroup (cgroup v2 only; none ⇒ unreadable), oom_kill parsed', null);
-  // THE LEDGER'S SITES, each ONCE: the keeper's endProcess (TERM, KILL), its stop (TERM, KILL), the person's process-panel kill
+    'B-346d recorder (d): the hub unit\'s memory.events path read off /proc/self/cgroup (cgroup v2 only; none ⇒ unreadable), oom_kill parsed');
+  // THE LEDGER'S SITES — each notes only where the kill SUCCEEDED, with the process's start (r1311 (4))
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'), wsrc = fs.readFileSync(path.join(REPO, 'src/server/sysinfo-wiring.js'), 'utf8');
   const n = (t, x) => t.split(x).length - 1;
-  const SITES = [[ksrc, "    SL.noteSignal(pid, site, 'SIGTERM', now());"], [ksrc, "    if (same()) SL.noteSignal(pid, site, 'SIGKILL', now());"], [ksrc, "SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGTERM', now());"], [ksrc, "if (F.pidAlive(rec.pid)) SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGKILL', now());"], [wsrc, "require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig);"]];
-  ok(SITES.every(([t, x]) => n(t, x) === 1), `B-346d recorder (c): the hub's ${SITES.length} signal sites that can reach a browser's daemon or Chrome each note the ONE ledger, once`, SITES.map(([t, x]) => [x.slice(0, 50), n(t, x)]));
+  const SITES = [[ksrc, "try { process.kill(pid, 'SIGTERM'); SL.noteSignal(pid, site, 'SIGTERM', now(), starttime); }"], [ksrc, "try { process.kill(pid, 'SIGKILL'); SL.noteSignal(pid, site, 'SIGKILL', now(), starttime); }"],
+    [ksrc, "try { process.kill(rec.pid, 'SIGTERM'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGTERM', now(), rec.starttime); }"], [ksrc, "try { process.kill(rec.pid, 'SIGKILL'); SL.noteSignal(rec.pid, 'the keeper: its stop', 'SIGKILL', now(), rec.starttime); }"],
+    [wsrc, "try { process.kill(pid, 'SIG' + sig); require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); }"]];
+  ok(SITES.every(([t, x]) => n(t, x) === 1), `B-346d recorder (c): the hub's ${SITES.length} signal sites each note the ONE ledger after their kill, inside its try (a failed kill notes nothing)`, SITES.map(([t, x]) => [x.slice(0, 50), n(t, x)]));
+  ok(n(ksrc, 'function forgetEndedRuns() { for (const pid of [...aliveRuns.keys()]) { const r0 = reg.browsers[pid]; if (!r0 || !B.isLiveBrowser(r0)) aliveRuns.delete(pid); } }') === 1 && n(ksrc, '    refreshOom(); forgetEndedRuns();') === 1,
+    'B-346d recorder (r1311 (3)): every tick forgets the runs whose record is no longer live — a stop, an idle end, a removal (the gone path forgets its own at once: judged above)');
+  // r1311 THE MUST — THE RECORDER NEVER GATES THE TICK: a counter whose read never answers (a FIFO nobody writes: a held file
+  // threadpool) leaves the tick free; CONTROL: the tick that awaits the read (58a5e2c02's) stays held — RED
+  const heldTick = async (Km) => {
+    const dataDir = path.join(ROOT, 'held-' + (++dirN)); fs.mkdirSync(dataDir, { recursive: true });
+    const fifo = path.join(dataDir, 'memory.events'); execFileSync('mkfifo', [fifo]);
+    const daemon = await standIn(), key = 'bk-0000c4f' + (dirN % 10), id = 'bp-' + (0x31000000 + dirN).toString(16);
+    const profile = B.newProfileRecord({ id, label: '(ephemeral) held', dir: null, ephemeral: true, owner: { kind: 'conversation', id: key }, now: CLK0 - 60e3 });
+    fs.writeFileSync(path.join(dataDir, 'browser-profiles.json'), JSON.stringify({ version: 1, profiles: [profile], children: {}, told: {}, pins: {},
+      browsers: { [id]: { profileId: id, state: 'ready', pid: daemon.pid, starttime: F.procStart(daemon.pid), cdpUrl: null, ns: 'vs-' + key, startedAt: CLK0 - 60e3, idleMs: IDLE } },
+      leases: [{ profileId: id, browserKey: key, sessionId: 'sess-held', targetId: null, since: CLK0 - 60e3, input: 'agent', viewers: 0, carrierLostAt: null, alias: 'ephemeral' }] }));
+    const k = Km.create({ dataDir, homeDir: ROOT, env: () => kenv, runtime: F.createBrowserRuntime({ env: kenv }), liveKeys: () => new Set([key]), now: () => CLK0, install: false, log: { log() { }, warn() { }, error() { }, info() { } }, tickMs: 3600e3, oomEventsPath: fifo });
+    let done = false;
+    const t1 = k.tick().then(() => { done = true; }, () => { done = true; });
+    await pause(300);   // the read is held for good: the tick is judged by whether it has ended, never by a clock
+    const free = done;
+    const w = fs.openSync(fifo, fs.constants.O_RDWR); fs.writeSync(w, evText(9)); fs.closeSync(w);   // release the held read (both ends ours: never blocks)
+    await t1; try { k.shutdown(); } catch { /* none */ } await ended(daemon);
+    return free;
+  };
+  const Kawait = M.load('src/server/browser-keeper.js', anchored(ksrc, '    refreshOom(); forgetEndedRuns();', '    oomSeen = { n: await readOomKills(), at: t }; forgetEndedRuns();', 'recorder: the tick awaits the counter'), 'recorder-tick-awaits');
+  const [freeNow, freeCtl] = [await heldTick(K), await heldTick(Kawait)];
+  ok(freeNow === true, 'B-346d recorder (r1311 THE MUST): a counter whose read never answers (a FIFO nobody writes — a held file threadpool) leaves the tick FREE: the read is its own flight', freeNow);
+  ok(freeCtl === false, 'CONTROL (the tick that awaits the counter, as 58a5e2c02 did): the same held read holds the tick — RED', freeCtl);
   // RED CONTROLS — each field taken out of a copy of the keeper (anchored(): each anchor found once, else the control throws by name)
   const cut = (anchor, to, name) => M.load('src/server/browser-keeper.js', anchored(ksrc, anchor, to, name), name.replace(/[^a-z0-9]+/gi, '-').toLowerCase());
-  const [ca, cb, cc, cd] = await Promise.all([
-    recordOf(cut('      if (isLocalRec(rec)) aliveSeen(rec, t); // B-346d\'s recorder (a): this tick saw its daemon alive\n', '', 'recorder (a) no alive stamp')),
+  const FENCE_CALL = "    try { goneRecord(rec, seenBy); } catch (e) { try { log.warn?.(`[browser] ${rec.profileId}: its gone record could not be written (${e && e.message}) — the stop and the reap go on`); } catch { /* the journal's own failure */ } } // B-346d's recorder, FENCED (r1311 (1)): its facts read BEFORE the hub ends its Chrome\n";
+  const THROW = ['  function goneRecord(rec, seenBy) {\n', "  function goneRecord(rec, seenBy) {\n    throw new Error('planted: the recorder throws');\n"];
+  const throwing = anchored(ksrc, THROW[0], THROW[1], 'recorder (1) a planted throw');
+  const unfenced = anchored(throwing, FENCE_CALL, '    goneRecord(rec, seenBy);\n', 'recorder (1) the fence taken away', { count: 2 });
+  const afterReap = anchored(ksrc, FENCE_CALL + "    reapOrphan(rec, seenBy); // verify r2 M1:", "    { const snap = rec.browser; reapOrphan(rec, seenBy).then(() => { rec.browser = snap; try { goneRecord(rec, seenBy); } finally { rec.browser = null; } }); } // verify r2 M1:", 'recorder (2) the facts read after the reap');
+  const [ca, cb, cc, fenced, bare, late] = await Promise.all([
+    recordOf(cut('      if (isLocalRec(rec)) { try { aliveSeen(rec, t); } catch { /* the recorder never stops the tick (r1311 (1)) */ } } // B-346d\'s recorder (a): this tick saw its daemon alive\n', '', 'recorder (a) no alive stamp')),
     recordOf(cut("    const chrome = !b ? { state: 'none' } :", "    const chrome = { state: 'none' }; const chromeRead = !b ? { state: 'none' } :", 'recorder (b) the Chrome never said')),
     recordOf(cut("    const signals = [...SL.signalsTo(", "    const signals = [] || [...SL.signalsTo(", 'recorder (c) no ledger')),
-    recordOf(cut('    oomSeen = { n: await readOomKills(), at: t };', '    oomSeen = null;', 'recorder (d) no reading at the start')),
+    recordOf(M.load('src/server/browser-keeper.js', throwing, 'recorder-throws-fenced')),
+    recordOf(M.load('src/server/browser-keeper.js', unfenced, 'recorder-throws-unfenced')),
+    recordOf(M.load('src/server/browser-keeper.js', afterReap, 'recorder-after-reap')),
   ]);
   ok(ca.line.includes('last seen alive never by a tick'), 'CONTROL (a): a keeper whose tick does not stamp «seen alive» says «never by a tick» of a daemon a tick saw — RED', ca.line);
   ok(cb.line.includes('its Chrome: none recorded for this run') && !cb.line.includes('alive (pid'), 'CONTROL (b): a record that never reads the Chrome says «none recorded» of a Chrome that outlived its daemon — RED', cb.line);
-  ok(cc.line.includes('the hub\'s own signals: none'), 'CONTROL (c): a record that never reads the ledger says «none» of a daemon the hub signalled — RED', cc.line);
-  ok(cd.line.includes('(no reading at its first tick alive)') && !cd.line.includes('ROSE'), 'CONTROL (d): a tick that never reads the counter cannot say the rise — RED', cd.line);
+  ok(cc.line.includes('the hub\'s own signals: none ('), 'CONTROL (c): a record that never reads the ledger says «none» of a daemon the hub signalled — RED', cc.line);
+  ok(fenced.state === 'stopped' && fenced.chromeEnded === true && !fenced.threw && fenced.lines.some((l) => l.includes('its gone record could not be written (planted: the recorder throws)')),
+    'B-346d recorder (r1311 (1)): a recorder that THROWS is fenced — the daemon is still marked gone (stopped), its Chrome still ended, the tick goes on, the journal says why no record was written', { state: fenced.state, chromeEnded: fenced.chromeEnded, threw: fenced.threw });
+  ok(!!bare.threw || bare.chromeEnded === false, 'CONTROL (1): the same throw with the fence taken away stops the tick before the reap — the Chrome is NOT ended — RED', { threw: bare.threw, chromeEnded: bare.chromeEnded });
+  ok(late.line.includes('by the keeper: its orphaned Chrome') || late.lines.findIndex((l) => l.includes('gone record')) > late.lines.findIndex((l) => l.includes('ended its own orphaned browser pid')), 'CONTROL (2): facts read AFTER the reap carry the reap\'s own signal to its Chrome as the run\'s, written after the reap\'s line — RED', late.line);
   for (const c of kids) await ended(c);
 }
-
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -143,8 +143,7 @@ async function signalProc(hostId, pidRaw, sigRaw, { by = 'system:sysinfo' } = {}
   if (!hostId) {
     if (pid === process.pid) throw new Error('that is the VibeSpace server itself — restart it via Update / systemctl, not a kill');
     if (sig !== 'STOP') { try { require('./unexpected-exit').markAskedByPid(pid, 'user-signal', { refreshOnly: sig === 'CONT' }); } catch { } } // B-f698 verify r1: a user kill is never "unexpected"; r2: a CONT delivers a TERM sent while STOPped — it refreshes the mark
-    require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); // B-346d's recorder (c): the hub's ledger
-    try { process.kill(pid, 'SIG' + sig); } catch (e) {
+    try { process.kill(pid, 'SIG' + sig); require('./signal-ledger.js').noteSignal(pid, 'the person: the process panel', 'SIG' + sig); } catch (e) { // B-346d's recorder (c): noted only when the kill succeeded
       if (e.code === 'ESRCH') throw new Error('no such process (already gone)');
       if (e.code === 'EPERM') throw new Error("permission denied (another user's process)");
       throw e;
