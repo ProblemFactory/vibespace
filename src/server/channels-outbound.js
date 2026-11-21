@@ -34,7 +34,7 @@ function create(engineCtx) {
     accountsBrief, conversationName, notify, kick, budgetRefusal, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, offerNow,
     threadRefresh, rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, refreshConvCaps, track, policyFor,
     policyRequiresReview, authorityCapsFor, healP2, effectiveFor, billedWake, reachFor, groupsOfSession, inheritedOfSession, convFor, stillSees, effectiveForAccount,
-    accountScopeGrants, recallMessage,
+    accountScopeGrants, recallMessage, collectWindowMs,
   } = engineCtx;
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -796,10 +796,10 @@ function create(engineCtx) {
   // that waits on its DIRECT send (a reply, a new message) sets the send's deadline at the proposal's own instant: the
   // CLI's write budget, or the collect window when the command reads the receipt inline (Plan.commandBudgetMs). Every
   // other send (the owner's Approve or own send, a held send's release) brings the outbox's own (sendNow's default).
-  const commandDeadline = (ctx, guards, decision, at) => (ctx && ctx.kind === 'agent' ? at + Plan.commandBudgetMs({ collectWindowMs: collectsInline(guards, decision) ? collectWindowMs() : null }) : null);
+  const commandDeadline = (ctx, guards, decision, at) => (ctx && ctx.kind === 'agent' ? at + Plan.commandBudgetMs({ collectWindowMs: collectsInline(guards, decision) ? collectWindow() : null }) : null);
   function inlineReceiptOf(fresh, guards, decision) {
     if (!collectsInline(guards, decision)) return {};
-    if (!fresh || !fresh.receipt) return { receiptText: null, receiptPending: true, collectWindowMs: collectWindowMs() };   // the CLI polls as long as the hold lasts
+    if (!fresh || !fresh.receipt) return { receiptText: null, receiptPending: true, collectWindowMs: collectWindow() };   // the CLI polls as long as the hold lasts
     let receiptText = null;
     try { receiptText = renderReceiptText(fresh, fresh.receipt); } catch { receiptText = null; }
     return { receiptText, receiptPending: false };
@@ -2207,11 +2207,13 @@ function create(engineCtx) {
   // dies before collecting: `armCollect`'s one-shot timer (bounded by the send window) delivers the message after all.
   const collectTimers = new Map();   // proposalId → the fallback timer
   const COLLECT_SLACK_MS = 50;
-  function collectWindowMs() { let v; try { v = Number(serverSetting('channels.collectWindowMs')); } catch { v = NaN; } return Number.isFinite(v) && v > 0 ? v : P.COLLECT_WINDOW_MS; }
+  // B-eca3: the window is channel-policy's CONSTANT (the api-card road and the CLI's budget read the same one); it was read as
+  // a setting no schema row ever had — a suite's seam, now the engine's `collectWindowMs` option (null ⇒ the constant)
+  function collectWindow() { const v = Number(collectWindowMs); return Number.isFinite(v) && v > 0 ? v : P.COLLECT_WINDOW_MS; }
   function armCollect(id) {
     const k = String(id);
     if (collectTimers.has(k) || engineCtx.stopped) return;
-    const timer = setTimeout(() => { collectTimers.delete(k); track(collectExpire(k)); }, collectWindowMs() + COLLECT_SLACK_MS);
+    const timer = setTimeout(() => { collectTimers.delete(k); track(collectExpire(k)); }, collectWindow() + COLLECT_SLACK_MS);
     if (timer.unref) timer.unref();
     collectTimers.set(k, timer);
   }
@@ -2272,13 +2274,13 @@ function create(engineCtx) {
     // lane channel-direct-send-sync: a DIRECT send whose CLI is waiting reads this receipt INLINE from its own
     // command — the message road is NOT consulted. Hold it for the collect window; the CLI's collect door marks it
     // read, or armCollect's fallback delivers the message if it never collects.
-    const collecting = !!p.receiptCollect && !(p.receipt && p.receipt.road) && (now() - (Number(p.at) || 0) <= collectWindowMs());
+    const collecting = !!p.receiptCollect && !(p.receipt && p.receipt.road) && (now() - (Number(p.at) || 0) <= collectWindow());
     if (P.receiptRoad({ ...p, receipt: rc }, { collecting }).road === 'inline') {
       const t = now();
       await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q) q.receiptDelivery = { at: t, road: 'inline', collecting: true, collected: false, choice: q.receiptChoice || 'next-turn' }; });
       notifyOutbox([id]);
       armCollect(id);
-      log.log(`[channels] receipt ${id} → ${cid}: held for the drafting CLI to read inline (${Math.round(collectWindowMs() / 1000)}s window)`);
+      log.log(`[channels] receipt ${id} → ${cid}: held for the drafting CLI to read inline (${Math.round(collectWindow() / 1000)}s window)`);
       return rc;
     }
     return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key, { pressed }));

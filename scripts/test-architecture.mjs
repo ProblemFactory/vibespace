@@ -1631,12 +1631,31 @@ await section(async () => {
   // migration's own function only (its id in this table, its body found by name); anywhere else it is a reader, red
   const CARRIED = Object.freeze({ 'browser.cloak.executablePath': 'function migrateCloakToPlugin(', 'browser.cloak.egressAllowlist': 'function migrateCloakToPlugin(' });
   const carrierBody = (text, fn) => { const i = text.indexOf(fn); if (i < 0) return ''; const j = text.indexOf('\n  }\n', i); return text.slice(i, j < 0 ? undefined : j); };
+  // B-eca3 (the settings' three faces): THE ONE READER A RETIREMENT KEEPS ON PURPOSE, by name with its why — a stored value read
+  // ONCE to say it is retired (anywhere else, or a second read in that file, is a reader: red)
+  const WARNS = Object.freeze({ 'browser.fenceScriptsWhileDriven': { file: 'src/server/browser-keeper.js', fn: 'const sayRetiredSwitch = () => {', why: "the owner's ruling 2026-09-27: a stored value is read once at the keeper's birth to say it is retired" } });
+  // …and a COMMENT that names a retired key reads nothing: the scan judges the code (acorn's comment ranges blanked; a file
+  // that does not parse is judged whole)
+  const codeOnly = (text) => {
+    const spans = [];
+    for (const sourceType of ['module', 'script']) { try { spans.length = 0; acorn.parse(text, { ecmaVersion: 'latest', sourceType, allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, onComment: (block, t, start, end) => spans.push([start, end]) }); break; } catch { spans.length = 0; } }
+    let out = text; for (const [a0, b0] of spans.reverse()) out = out.slice(0, a0) + out.slice(a0, b0).replace(/[^\n]/g, ' ') + out.slice(b0);
+    return out;
+  };
   const quoted = (texts) => {
     const hits = [];
-    for (const [f, text0] of texts) for (const k of RETIRED_SETTING_KEYS || []) {
-      // the migration's constant block + its function carry it; the rest of the file is judged as any other
-      const text = f === 'src/server/migrations.js' && CARRIED[k] ? text0.replace(carrierBody(text0, CARRIED[k]), '').replace(/const CLOAK_OLD = Object\.freeze\(\{[\s\S]*?\n\}\);/, '') : text0;
-      if (new RegExp('[\'"`]' + k.replace(/\./g, '\\.') + '[\'"`]').test(text)) hits.push(f + ': ' + k);
+    for (const [f, text0] of texts) {
+      const named = (RETIRED_SETTING_KEYS || []).filter((k) => text0.includes(k));   // the cheap door: most files name none
+      if (!named.length) continue;
+      const code0 = codeOnly(text0);   // ONE parse a file
+      for (const k of named) {
+        // the migration's constant block + its function carry it; the rest of the file is judged as any other
+        let text = f === 'src/server/migrations.js' && CARRIED[k] ? codeOnly(text0.replace(carrierBody(text0, CARRIED[k]), '').replace(/const CLOAK_OLD = Object\.freeze\(\{[\s\S]*?\n\}\);/, '')) : code0;
+        // the warn's own function carries its one read (its body found by name, as CARRIED's migration); the rest is judged
+        const w = WARNS[k];
+        if (w && w.file === f) { const i = text.indexOf(w.fn), j = i < 0 ? -1 : text.indexOf('\n  };\n', i); if (i >= 0 && j >= 0) text = text.slice(0, i) + text.slice(j); }
+        if (new RegExp('[\'"`]' + k.replace(/\./g, '\\.') + '[\'"`]').test(text)) hits.push(f + ': ' + k);
+      }
     }
     return hits;
   };
@@ -1653,8 +1672,12 @@ await section(async () => {
   ok(asRow({ ...SETTINGS_SCHEMA, 'agents.vibespaceChannel': { type: 'boolean', default: false, label: 'x', description: 'x', category: 'Integration' } }).length === 1
     && quoted([['src/planted.js', "if (serverSetting('agents.vibespaceChannel') === true) spawnTheSocket();"]]).length === 1
     && quoted([['src/planted.js', "settings?.get(\"sessionCard.detailTruncation\") ?? 'left'"]]).length === 1
-    && quoted([['src/server/migrations.js', "function other() { return settings['browser.cloak.executablePath']; }\n  function migrateCloakToPlugin() {\n  }\n"]]).length === 1,
-    'NEGATIVE CONTROL: a re-added retired row, a planted serverSetting / settings.get read of a retired key, and a read of a CARRIED key outside the migration that carries it are what 44d reports');
+    && quoted([['src/server/migrations.js', "function other() { return settings['browser.cloak.executablePath']; }\n  function migrateCloakToPlugin() {\n  }\n"]]).length === 1
+    && quoted([['src/planted.js', "// the old `agents.vibespaceChannel` row is gone\n/* and 'sessionCard.detailTruncation' too */\nconst x = 1;\n"]]).length === 0
+    && quoted([['src/server/browser-keeper.js', "  const sayRetiredSwitch = () => {\n    let v; try { v = serverSetting('browser.fenceScriptsWhileDriven'); } catch { }\n  };\n"]]).length === 0
+    && quoted([['src/server/browser-keeper.js', "  const sayRetiredSwitch = () => {\n  };\n  const on = serverSetting('browser.fenceScriptsWhileDriven') === true;\n"]]).length === 1
+    && quoted([['src/server/other.js', "const a = serverSetting('browser.fenceScriptsWhileDriven');\n"]]).length === 1,
+    'NEGATIVE CONTROL: a re-added retired row, a planted serverSetting / settings.get read of a retired key, and a read of a CARRIED key outside the migration that carries it are what 44d reports — and (B-eca3) a retired key named only in COMMENTS is not, the one warn-only read of browser.fenceScriptsWhileDriven inside sayRetiredSwitch (src/server/browser-keeper.js) is its exception (a read outside that function, or in another file, is reported)');
 });
 
 // 45. THE PER-ITEM SPAWN CENSUS (2026-09-09, userW's pod: 27 of 27 session

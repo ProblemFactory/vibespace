@@ -18,6 +18,11 @@ const RETIRED_SETTING_KEYS = Object.freeze([
   // plugin's reserved rows (plugin.<id>.executablePath / .egressAllowlist) and strips them; nothing reads them any more
   'browser.cloak.executablePath',
   'browser.cloak.egressAllowlist',
+  // B-eca3 (the settings' three faces, lane lg-text-legs-2): two retirements the list never carried. No migration strips their
+  // stored values (none ever did: a stored value is ignored) — the list now refuses them coming back as a row or a reader.
+  'agents.opencodeServeAutostart',     // removed 2026-09-07 (docs/settings.md «Removed»): the OpenCode service is the plugin's
+  'browser.fenceScriptsWhileDriven',   // the owner's ruling 2026-09-27: a takeover interrupts every script — the keeper reads a
+                                       // stored value ONCE to say it is retired (test-architecture 44d's one exception by name)
 ]);
 /** The keys 2026-10-settings-rows-retired shipped with — that migration strips exactly these, ever (a ledger lost on an
  *  instance re-runs it, and it must not strip a key a LATER retirement's own migration still has to carry). */

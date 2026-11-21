@@ -218,7 +218,7 @@ function harnessAvailability() {
 // VIBESPACE_OPENCODE_SERVE=0/1 wins, else the plugin record (enabled &&
 // desiredUp). Read through a FUNCTION so enabling the plugin takes effect
 // without a restart; reuse of an already-running recorded instance still works
-// with autostart off. (The old `agents.opencodeServeAutostart` setting and the
+// with autostart off. (The old agents.opencodeServeAutostart setting — retired, src/retired-settings.js — and the
 // VIBESPACE_SKIP_AGENT_HOOKS belt are GONE with it — nothing starts a
 // third-party daemon on a fresh instance any more, so smokes need no belt.)
 const opencodeServeModule = require('../opencode-serve');

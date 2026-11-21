@@ -155,7 +155,7 @@ function mkEngine(opts = {}) {
   const userTodos = opts.userTodos === null ? null : (opts.userTodos || new UserTodoManager({ dataDir, now }));
   const e = (opts.engine || ENG).create({
     dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: opts.registry, broadcast: (m) => events.push(m),
-    userTodos, deliver, now, serverSetting: (k) => (opts.settings || {})[k], log: opts.log || { log() {}, warn() {}, error() {} }, channelsHeldRetry: { firstMs: 5, maxMs: 10 },
+    userTodos, deliver, now, serverSetting: (k) => (opts.settings || {})[k], log: opts.log || { log() {}, warn() {}, error() {} }, channelsHeldRetry: { firstMs: 5, maxMs: 10 }, collectWindowMs: opts.collectWindowMs ?? null,   // B-eca3: the collect window is an engine option (a constant in the product)
     liveSessions: () => opts.live || [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }],
   });
   return { eng: e, events, delivered, stash, userTodos, deliver, advance: (ms) => { offset += ms; }, dataDir };
@@ -4253,7 +4253,7 @@ async function primeDirect(eng) {
   // ci-346-reds: the hold is judged on the ENGINE's clock (`now() − p.at ≤ window`) — a 30 ms window on the wall clock is
   // outlasted by the send itself on a loaded runner (load 5: compose's twin went red). The clock stands still through the
   // send (the window is open, deterministically); the fallback is the real one-shot timer, waited for (bounded), never slept
-  const W = mkEngine({ name: 'collect-timeout', settings: { 'channels.collectWindowMs': 30 }, now: heldClock() });
+  const W = mkEngine({ name: 'collect-timeout', collectWindowMs: 30, now: heldClock() });
   const { eng, delivered, stash } = W;
   await primeDirect(eng);
   const r = await eng.propose(AGENT, A, C, { text: 'nobody collects me' }, { collect: true });
@@ -4369,7 +4369,7 @@ async function primeCompose(eng, authority = 'send') {
 {
   // a NEW mail whose CLI never reads it ⇒ after the window the receipt falls back to the MESSAGE road (reply's fallback)
   // ci-346-reds (red on the runner only, load 5): the clock held still through the compose — see collect-timeout above
-  const W = mkEngine({ name: 'compose-timeout', settings: { 'channels.collectWindowMs': 30 }, now: heldClock() });
+  const W = mkEngine({ name: 'compose-timeout', collectWindowMs: 30, now: heldClock() });
   const { eng, delivered } = W;
   await primeCompose(eng);
   const r = await eng.compose(AGENT, A, MAIL, { collect: true });
@@ -4381,7 +4381,7 @@ async function primeCompose(eng, authority = 'send') {
   // 30 ms window — finds the window SHUT when the receipt is ready: it is a message during the compose, and the judge
   // above ("held at first") reads it red
   let tSlow = Date.now();
-  const S = mkEngine({ name: 'compose-timeout-slow', settings: { 'channels.collectWindowMs': 30 }, now: () => (tSlow += 100) });
+  const S = mkEngine({ name: 'compose-timeout-slow', collectWindowMs: 30, now: () => (tSlow += 100) });
   await primeCompose(S.eng);
   const rs = await S.eng.compose(AGENT, A, MAIL, { collect: true });
   ok(rs.ok && S.delivered.length === 1 && S.delivered[0].opts.spendReason === 'channel-receipt', 'CONTROL: a compose slower than the window (every clock read 100 ms on) delivers its receipt inside the compose — "held at first" is RED on it', JSON.stringify({ ok: rs.ok, code: rs.code, delivered: S.delivered.length }));

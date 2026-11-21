@@ -487,6 +487,9 @@ function create(deps = {}) {
     deliver = null,
     // The setting reader (`channels.pushCoalesceSeconds`, fence 12).
     serverSetting = () => undefined,
+    // B-eca3: the collect window of a direct send's receipt (channel-policy COLLECT_WINDOW_MS) — a CONSTANT, never a setting
+    // (no schema row ever named it); a suite shortens it here (null ⇒ the constant).
+    collectWindowMs = null,
     // lane pod-oauth-callback: THIS INSTANCE'S ADDRESS (src/server/instance-url.js `url()`, the ONE resolver) — a redirect
     // consent (Lark, Gmail) lands on <https address>/api/channels/oauth/cb/<kind> when the browser is elsewhere
     // (src/consent-road.js); null ⇒ the adapter's own loopback, as before.
@@ -9857,7 +9860,7 @@ function create(deps = {}) {
     presetsOf, clientFieldDecls, customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, kick, known, budgetRefusal,
     dropLive, outlived, reactionsPerMin, threadIxOf, vocabularyOf, reactionsFor, withView, offerNow, NOT_A_THREAD, threadRead, threadRefresh,
     rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, recallMessage, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
-    retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
+    retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict, collectWindowMs,
     flushScope, flushPending,   // lane wake-approve-card r6: a held digest the owner releases is delivered through the same flush (channels-access decideHeld)
     speakSignin, retractSignin, landSignin,   // lane channel-reauth-visible: the dead sign-in's ONE item (an unfinished consent re-asserts it; a removal / a disconnect ends it); lane lark-refresh-stall r2: a landing VERIFIES
     clientSwapCheck,   // B-166e part 2 (1): a re-authorize / a connect under a company preset recounts its key's client-swap item
