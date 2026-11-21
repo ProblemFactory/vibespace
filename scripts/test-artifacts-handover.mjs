@@ -418,6 +418,112 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   const saidI = errsI.filter((m) => /the step before a record failed during history rebuild/.test(m));
   ok(saidI.length === 1 && saidI[0].includes('rtoolu_T17') && saidI[0].includes('planted fold error') && rows(RE)[':' + CWD + '/broken/f0.md'] && !rows(RE)[':' + CWD + '/broken/f99.md'] && rows(RE)[':' + CWD + '/broken/after.md'],
     'a paced fold that throws midway: ONE journal line naming the record it was folding (its uuid) and why; the ops before it stand, its later ones are lost, the NEXT record still folds', { said: saidI, rows: Object.keys(rows(RE)).length });
+
+  // (j) B-360d (主开发 r1206 — the artifact registry's fold over a helper's transcript, the LIVE door): EVERY PACED STRETCH STARTS ON
+  // A LOOP ITERATION OF ITS OWN. MEASURED on the release (probe runs 70db1a0a8-20261121120046-box and 7f71e6078-…-box, never lined):
+  // one dense 34 MB helper held the loop 71 ms in one turn — the per-record hook loop began in the iteration that received the read's
+  // last page, the rows in the iteration of the hook's last slice, each with a FRESH 20 ms budget. COUNTED, not timed (a fast leg
+  // judges no wall clock): an immediate that re-arms itself counts the CHECK PHASES; the read's last page lands in a POLL phase, so
+  // one setImmediate from there still runs in that SAME iteration (no timer between — the round's must): the first hook call is TWO
+  // check phases after the read's end; the first row's apply at least one after the last hook call; the rows the same. CONTROLS:
+  // a single hop ⇒ ONE (the same iteration); the two yields removed ⇒ the same phases.
+  const RSRC = fs.readFileSync(path.join(REPO, 'src/server/artifact-registry.js'), 'utf8');
+  {
+    const DJ = CWD + '/turns/';
+    helper('a18', 'toolu_T18', 'Turn taker', { mb: 0.3, writes: Array.from({ length: 40 }, (_, i) => ({ atMb: 0.005 * i, file: DJ + `f${i}.md` })) });
+    const TJ = [agentUse('toolu_T18', 'Turn taker', 100), ends('toolu_T18', 'a18', 101)];
+    const Hc = require(path.join(REPO, 'src/harnesses')).harnessOf('claude');
+    const turnsOf = async (reg, id) => {
+      let turns = 0, on = true; const spin = () => { if (!on) return; turns++; setImmediate(spin); };
+      const realRead = C.readJsonlBoundedParsedPagedAsync, realHook = Hc.artifactsOf, realApply = AF.apply;
+      const at = { read: null, firstHook: null, lastHook: null, firstApply: null };
+      C.readJsonlBoundedParsedPagedAsync = function (...a) { return realRead.apply(this, a).then((v) => { if (at.read == null) at.read = turns; return v; }); };
+      Hc.artifactsOf = function (...a) { if (at.read != null && at.firstApply == null) { if (at.firstHook == null) at.firstHook = turns; at.lastHook = turns; } return realHook.apply(this, a); };
+      AF.apply = function (...a) { if (at.lastHook != null && at.firstApply == null) at.firstApply = turns; return realApply.apply(this, a); };
+      setImmediate(spin);
+      let s = null;
+      try { s = await liveOf(reg, id, TJ); } finally { on = false; C.readJsonlBoundedParsedPagedAsync = realRead; Hc.artifactsOf = realHook; AF.apply = realApply; }
+      return { ...at, rows: Object.keys(rows(s)).filter((k) => k.includes('/turns/')).length };
+    };
+    const real = await turnsOf(REG, 'BJ');
+    const HOP2 = 'const loopTurn = () => new Promise((r) => setImmediate(() => { queueReset(); setImmediate(r); }));', HOP1 = 'const loopTurn = () => new Promise((r) => setImmediate(r));';
+    const Y1 = "  const out = [], pace = pacer();\n  await pace.turn();\n", Y2 = "      const pace = pacer();\n      await pace.turn();\n";
+    const MH = M.load('src/server/artifact-registry.js', anchored(RSRC, HOP2, HOP1, 'B-360d one hop'), 'b360d-onehop');
+    const hop = MH ? await turnsOf(MH, 'BJh') : null;
+    const MJ = M.load('src/server/artifact-registry.js', anchored(anchored(RSRC, Y1, "  const out = [], pace = pacer();\n", 'B-360d the hook\'s yield'), Y2, "      const pace = pacer();\n", 'B-360d the rows\' yield'), 'b360d-noyield');
+    const ctl = MJ ? await turnsOf(MJ, 'BJm') : null;
+    REG.configure({ activeSessions: () => new Map(), log: quiet });   // the copies' configure pointed the seams at themselves — the real one again
+    ok(real.read != null && real.firstHook - real.read >= 2 && real.firstApply - real.lastHook >= 1 && real.rows === 40,
+      'B-360d: the live helper fold\'s paced stretches each start on a loop ITERATION of their own — the first hook call two check phases after the read\'s end (a timer phase between), the first row\'s apply after the last hook call\'s; its 40 rows', real);
+    ok(!!hop && hop.read != null && hop.firstHook - hop.read === 1 && hop.rows === 40, 'CONTROL one hop (a single setImmediate from the read\'s poll phase): the hook starts ONE check phase later — in the very iteration that received the page — the leg above can tell', hop);
+    ok(!!ctl && ctl.read != null && ctl.firstHook === ctl.read && ctl.firstApply === ctl.lastHook && ctl.rows === 40,
+      'CONTROL the two yields removed (its rows the same 40): the hook starts in the read\'s own turn and the rows in the hook\'s last', ctl);
+  }
+  // (k) B-360d (its read's shoulds): THE BUDGET IS ASKED BEFORE EVERY OP, AND IT IS SHARED. A clock the leg advances by 25 ms (over the
+  // 20 ms budget) on every helper op noted: at most ONE op lands in any loop iteration; CONTROL a check per 16-op chunk ⇒ 16 in one.
+  // Two pacers resumed in ONE check phase: the second sees the first one's work — due at once; CONTROL a budget per pacer ⇒ not due.
+  {
+    const DK = CWD + '/budget/';
+    helper('a19', 'toolu_T19', 'Budget one', { mb: 0.05, writes: Array.from({ length: 40 }, (_, i) => ({ atMb: 0.001 * i, file: DK + `a${i}.md` })) });
+    const TK = [agentUse('toolu_T19', 'Budget one', 110), ends('toolu_T19', 'a19', 111)];
+    const perIteration = async (reg, id) => {
+      let turns = 0, on = true, t = 1e12; const spin = () => { if (!on) return; turns++; setImmediate(spin); };
+      const realApply = AF.apply, byTurn = new Map();
+      let s = null;
+      try {
+        reg._setHelperClockForTest(() => t);
+        AF.apply = function (rowsX, op) { if (op && op.via) { byTurn.set(turns, (byTurn.get(turns) || 0) + 1); t += 25; } return realApply.call(this, rowsX, op); };
+        setImmediate(spin);
+        s = await liveOf(reg, id, TK);
+      } finally { on = false; AF.apply = realApply; reg._setHelperClockForTest(null); }
+      await new Promise((r) => setImmediate(() => setImmediate(r)));   // the budget's reset runs before the next leg (the leg's clock is gone)
+      return { max: Math.max(0, ...byTurn.values()), ops: [...byTurn.values()].reduce((x, y) => x + y, 0), rows: Object.keys(rows(s)).filter((k) => k.includes('/budget/')).length };
+    };
+    const pk = await perIteration(REG, 'BK');
+    const PER_OP = "        for (const op of ops) {   // the budget is asked before EACH op (one past the rows' cap costs ~1.1 ms: a 16-op chunk overran it)\n          if (pace.due()) { await pace.turn(); if (!stands(session)) return; }\n          noteOps(session, [op]);\n        }\n";
+    const MC = M.load('src/server/artifact-registry.js', anchored(RSRC, PER_OP, "        if (pace.due()) { await pace.turn(); if (!stands(session)) return; }\n        if (ops.length) noteOps(session, ops);\n", 'B-360d the budget per chunk'), 'b360d-perchunk');
+    const pc = MC ? await perIteration(MC, 'BKc') : null;
+    REG.configure({ activeSessions: () => new Map(), log: quiet });
+    ok(pk.ops === 40 && pk.max === 1 && pk.rows === 40, 'B-360d: the rows\' budget is asked before EVERY op — an op that spends the whole budget (the leg\'s clock) lands ALONE in its loop iteration; 40 ops, 40 rows', pk);
+    ok(!!pc && pc.max === 16 && pc.rows === 40, 'CONTROL the budget asked per 16-op chunk: 16 such ops land in ONE iteration — the leg above can tell', pc);
+    // THE SHARED BUDGET: two pacers whose turns were asked together resume in ONE check phase; the first spends the budget
+    const sharedOf = async (reg) => {
+      let t = 2e12; reg._setHelperClockForTest(() => t);
+      try {
+        const P = reg._pacerForTest, p1 = P(), p2 = P();
+        let second = null;
+        await Promise.all([p1.turn().then(() => { t += 25; }), p2.turn().then(() => { second = p2.due(); })]);
+        await p2.turn();
+        return { second, next: p2.due() };
+      } finally { reg._setHelperClockForTest(null); await new Promise((r) => setImmediate(() => setImmediate(r))); }
+    };
+    const sh = await sharedOf(REG);
+    const OWN = "    due: () => _helperClock() - _turnT0 >= HELPER_TURN_MS,\n";
+    const MP = M.load('src/server/artifact-registry.js', anchored(RSRC, OWN, "    due: () => _helperClock() - mine >= HELPER_TURN_MS,\n", 'B-360d a budget per pacer'), 'b360d-perpacer');
+    const shc = MP ? await sharedOf(MP) : null;
+    ok(sh.second === true && sh.next === false, 'B-360d: the budget is SHARED — of two pacers resumed in one check phase, the second is due at once when the first spent the budget; a new iteration gives a new budget', sh);
+    ok(!!shc && shc.second === false, 'CONTROL a budget per pacer: the second takes a fresh 20 ms in the same check phase — the leg above can tell', shc);
+    // NO FOLD STARVES BEHIND ANOTHER (its read's should): two stretches of 40 units of 5 ms each (4 to a budget), side by side — a
+    // slice cut short by the other's spend resumes one iteration sooner, so they take the iterations in turn: when the first ends,
+    // the second is (nearly) done too; CONTROL every turn a whole iteration ⇒ the second does one forced unit per two iterations
+    const fairOf = async (reg) => {
+      let t = 3e12;
+      try {
+        reg._setHelperClockForTest(() => t);
+        const P = reg._pacerForTest, done = { a: 0, b: 0 };
+        const run = async (k, p) => { await p.turn(); for (let i = 0; i < 40; i++) { if (p.due()) await p.turn(); t += 5; done[k]++; } };
+        let bAtAEnd = null;
+        await Promise.all([run('a', P()).then(() => { bAtAEnd = done.b; }), run('b', P())]);
+        return { bAtAEnd, b: done.b };
+      } finally { reg._setHelperClockForTest(null); await new Promise((r) => setImmediate(() => setImmediate(r))); }
+    };
+    const fr = await fairOf(REG);
+    const SHORT = "      const short = resumed && _helperClock() - mine < HELPER_TURN_MS / 2;\n      if (short) { queueReset(); await oneHop(); } else await loopTurn();\n";
+    const MF = M.load('src/server/artifact-registry.js', anchored(RSRC, SHORT, "      await loopTurn();\n", 'B-360d no turn taking'), 'b360d-nofair');
+    const frc = MF ? await fairOf(MF) : null;
+    ok(fr.b === 40 && fr.bAtAEnd >= 30, 'B-360d: two folds side by side take the loop\'s iterations IN TURN — when the first of two 40-unit stretches ends, the second has done ≥ 30 of its own', fr);
+    ok(!!frc && frc.bAtAEnd < 20, 'CONTROL every turn a whole iteration (no turn taking): the second stretch only crawls behind the first — the leg above can tell', frc);
+  }
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

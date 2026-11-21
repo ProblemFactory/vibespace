@@ -151,10 +151,37 @@ const helperReadStats = () => ({ read: _helperStats.read, kept: _helperStats.kep
 let _helperReadTail = Promise.resolve();
 /** ONE helper read at a time, every conversation's (the worker keeps one 'helper' snapshot). */
 const oneHelperRead = (fn) => { const p = _helperReadTail.then(fn, fn); _helperReadTail = p.catch(() => { }); return p; };
-const loopTurn = () => new Promise((r) => setImmediate(r));
-/** `due()` once HELPER_TURN_MS of work ran since the last loop turn; `turn()` gives the loop one (MEASURED: past the rows' 500 cap a
- *  helper's write costs ~1.1 ms to fold — a count-sliced 500 held the loop 0.7 s a turn). */
-function pacer() { let t0 = Date.now(); return { due: () => Date.now() - t0 >= HELPER_TURN_MS, turn: async () => { await loopTurn(); t0 = Date.now(); } }; }
+let _helperClock = () => Date.now();
+/** tests only: the pacers' clock (a leg advances it by the work it plants — one op = the whole budget); null = the real clock */
+function _setHelperClockForTest(fn) { _helperClock = typeof fn === 'function' ? fn : () => Date.now(); }
+// B-360d (its read's MUST): a turn is ONE LOOP ITERATION, never just the current check phase — asked from a poll-phase callback (a
+// worker's page, a stat's answer) a single setImmediate runs in that SAME iteration's check phase, no timer between: it hops twice
+// B-360d: THE BUDGET IS SHARED — every pacer of this door counts from the first slice that began in this loop iteration, so folds
+// resumed in one check phase (two conversations' helpers, a read beside another's rows, a rebuild's prefetch) never take a fresh
+// HELPER_TURN_MS each. Its reset runs FIRST in each check phase (its read's should): it is queued in the iteration before — by the
+// first hop or opening there — ahead of every hop's second half, so no slice ever inherits the previous iteration's budget.
+let _turnT0 = 0, _turnOpen = false, _resetQueued = false;
+function queueReset() { if (_resetQueued) return; _resetQueued = true; setImmediate(() => { _resetQueued = false; _turnOpen = false; }); }
+const oneHop = () => new Promise((r) => setImmediate(r));
+const loopTurn = () => new Promise((r) => setImmediate(() => { queueReset(); setImmediate(r); }));
+function turnBegins() { if (_turnOpen) return; _turnOpen = true; _turnT0 = _helperClock(); queueReset(); }
+/** `due()` once HELPER_TURN_MS of work ran in this loop iteration (every pacer's, shared); `turn()` gives the loop an iteration
+ *  (MEASURED: past the rows' 500 cap a helper's write costs ~1.1 ms to fold — a count-sliced 500 held the loop 0.7 s a turn).
+ *  A slice cut short by ANOTHER stretch's spend (it ran under half the budget itself) resumes one iteration sooner — a single hop,
+ *  safe once it has resumed before (it runs from a check phase: the hop still crosses a timer phase) — so two folds take the
+ *  iterations in turn, never one starved behind the other. */
+function pacer() {
+  turnBegins();
+  let mine = _helperClock(), resumed = false;
+  return {
+    due: () => _helperClock() - _turnT0 >= HELPER_TURN_MS,
+    turn: async () => {
+      const short = resumed && _helperClock() - mine < HELPER_TURN_MS / 2;
+      if (short) { queueReset(); await oneHop(); } else await loopTurn();
+      resumed = true; turnBegins(); mine = _helperClock();
+    },
+  };
+}
 function harnessHooks(session) {
   let h = null;
   try { h = require('../harnesses').harnessOf(session.backend || 'claude'); } catch { h = null; }
@@ -189,7 +216,12 @@ async function helperFileRead(of, file, st) {
     return null;
   }
   _helperStats.read++;
+  // B-360d (MEASURED on the release, probe runs 70db1a0a8-20261121120046-box / 7f71e6078-…-box): the read's last page was received
+  // in THIS iteration — the hook's slices start on the next one (a turn hops twice: see loopTurn), so no iteration holds a page's
+  // receive AND a full slice (one dense 34 MB
+  // helper held the loop 71 ms in one turn; a workflow of 10 × 8.5 MB 62 ms)
   const out = [], pace = pacer();
+  await pace.turn();
   for (let i = 0; i < recs.length; i++) {
     if (pace.due()) await pace.turn();
     const rec = recs[i];
@@ -233,8 +265,20 @@ function foldHelpers(session, record, state) {
     for (const { file, via } of files) {
       if (!stands(session)) return;
       const list = await helperFileOps(h.artifactsOf, file);
-      const ops = list && list.length ? helperTagged(session, list, via, state, at) : [], pace = pacer();
-      for (let i = 0; i < ops.length; i += HELPER_NOTE_CHUNK) { if (pace.due()) await pace.turn(); if (!stands(session)) return; noteOps(session, ops.slice(i, i + HELPER_NOTE_CHUNK)); }
+      if (!list || !list.length) continue;
+      // B-360d: the rows start on an iteration of their own (the hook's last slice may have run in this one — two fresh 20 ms budgets
+      // back to back held one turn past 50 ms), and a helper's ops are tagged chunk by chunk inside the budget (its kept ops, up to
+      // HELPER_OPS_MAX, were tagged in one unpaced stretch)
+      const pace = pacer();
+      await pace.turn();
+      if (!stands(session)) return;
+      for (let i = 0; i < list.length; i += HELPER_NOTE_CHUNK) {
+        const ops = helperTagged(session, list.slice(i, i + HELPER_NOTE_CHUNK), via, state, at);
+        for (const op of ops) {   // the budget is asked before EACH op (one past the rows' cap costs ~1.1 ms: a 16-op chunk overran it)
+          if (pace.due()) { await pace.turn(); if (!stands(session)) return; }
+          noteOps(session, [op]);
+        }
+      }
     }
   }).catch((e) => { deps.log.warn?.(`[artifacts] a helper's rows failed: ${e.message}`); });
 }
@@ -250,7 +294,13 @@ const NO_FILES = Object.freeze([]);
 async function helperPrefetch(session, records) {
   const h = session && harnessHooks(session);
   if (!h || !Array.isArray(records) || (session.host && session.host !== 'local')) return null;
-  const state = { runs: new Map() }, files = new WeakMap(), ops = new Map(), pace = pacer();
+  const state = { runs: new Map() }, files = new WeakMap(), ops = new Map();
+  // B-360d (its read's notes): the prefetch is reached SYNCHRONOUSLY from its caller (a rebuild) — maybe inside another module's
+  // immediate, ahead of the budget's reset in that check phase: it enters through a TIMER (the timers phase comes before that reset),
+  // so its pacer opens in order, and its slices start on an iteration of their own
+  await new Promise((r) => setTimeout(r, 0));
+  const pace = pacer();
+  await pace.turn();
   for (let i = 0; i < records.length; i++) {
     if (pace.due()) await pace.turn();
     const rec = records[i], named = helperFilesOf(session, rec, state);
@@ -556,5 +606,5 @@ function hostNamesOf(ids) {
 }
 function mount(app) { app.get('/api/artifacts', (req, res) => res.json(listFor(req.query && req.query.sessionId))); return api; }
 
-const api = { configure, mount, listFor, observe, helperOps, helperPrefetch, helperSettled, helperReadStats, _setHelperPrefetchMsForTest, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
+const api = { configure, mount, listFor, observe, helperOps, helperPrefetch, helperSettled, helperReadStats, _setHelperPrefetchMsForTest, _setHelperClockForTest, _pacerForTest: pacer, handover, judgeAsk, presentAsk, ownerOf, holdersOf, noteEdit, touch, notePage, noteDesign, noteUploads, storeRowsOf, servicesOf, noteService, noteForwards, DOC_EDIT_FROM };
 module.exports = api;
