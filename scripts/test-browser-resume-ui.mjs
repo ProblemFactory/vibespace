@@ -590,11 +590,32 @@ else await (async () => {
         await ev(feedOf({ ...base, front: frontE }) + 'return true;');
         // line 100's cure (r618): the wait is for THE STATE THIS FEED ASKS FOR — 企业助手's own chip, or a fold whose tip names 企业助手 —
         // never «any marked fold» (the scene before left one behind); bounded, and the judge below is red by name when it never comes
-        const seen = await ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 80; i++) { const r = read(); if ((r.chip && r.chip.id === 'E' && r.chip.here) || (r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页'))) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`);
+        // r943 (the 2.369.414 candidate's hosted red, twice): at 1280 px the read was the 390 px SCENE's row — the own chip still cut
+        // to 186 px and bare, the front still folded, with 1141 px of list free — because «a fold whose tip names 企业助手» is also
+        // what 390 left behind: on the runner's slower draw the wait ended on it before the 1280 fit. Where there is room the wait
+        // asks for THAT width's state (the front's chip whole), bounded 5 s; the judge below is red by name when it never comes
+        const wantChip = wpx === 1280;
+        const seen = await ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 200; i++) { const r = read(); if ((r.chip && r.chip.id === 'E' && r.chip.here) || (${wantChip ? 'false' : 'true'} && r.more && r.more.marked && r.more.tip.includes('企业助手 的标签页'))) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`);
         console.log(`    ⑨ the row at ${wpx} px: ${S(seen)}`);
         const said = !!(seen && ((seen.chip && seen.chip.here === '在此窗口最前面') || (seen.more && seen.more.marked && seen.more.text.includes('最前面') && seen.more.tip.includes('企业助手 的标签页在此窗口最前面'))));
         ok(said, `⑨ zh at ${wpx} px: the foreign front is SAID — its chip whole («在此窗口最前面»), or the fold names it in words (r608: never folded unsaid)`, S(seen));
         if (wpx === 1280) ok(!!(seen && seen.chip && seen.chip.here === '在此窗口最前面'), '⑨ zh at 1280 px: there is room — the front\'s own chip, whole', S(seen));
+        if (wpx === 1280) {
+          // r943 THE LAW, whatever face the machine draws zh with: a PLANTED WIDE FACE (every CJK glyph a quarter wider, by the row's
+          // own letter-spacing) — the fit measures the text as drawn, so where there is room the front's chip is still whole; CONTROL:
+          // a face so wide the room is gone — the chip cannot be whole there (the fold says it), so this judge can go red
+          const plant = async (em) => ev(`let st = document.getElementById('r943-face'); if (!st) { st = document.createElement('style'); st.id = 'r943-face'; document.head.appendChild(st); } st.textContent = ${JSON.stringify('')} + (${em} ? '.browser-live-tabrow, .browser-live-tabrow * { letter-spacing: ${em}em !important; }' : ''); window.dispatchEvent(new Event('resize')); return true;`);
+          const settle = async (want) => { const cond = want === 'chip' ? '(r.chip && r.chip.id === \'E\' && r.chip.here)' : '(r.more && r.more.marked)'; return ev(`const read = () => { ${rowAt} }; for (let i = 0; i < 200; i++) { const r = read(); if (${cond}) return r; await new Promise((q) => setTimeout(q, 25)); } return read();`); };
+          await plant(0.25); await ev(feedOf({ ...base, front: frontE }) + 'return true;');
+          const wide = await settle('chip');
+          console.log(`    ⑨ the row at 1280 px under a planted WIDE face (letter-spacing 0.25em): ${S(wide)}`);
+          ok(!!(wide && wide.chip && wide.chip.here === '在此窗口最前面' && wide.own && wide.own.scroll <= wide.own.client + 1), 'r943: under a planted WIDER zh face (0.25em more per glyph) at 1280 px there is still room — the front\'s own chip, whole, and this view\'s own chip unclipped (the fit measures the text as drawn)', S(wide));
+          await plant(6); await ev(feedOf({ ...base, front: frontE }) + 'return true;');
+          const huge = await settle('fold');
+          console.log(`    ⑨ the row at 1280 px under a CONTROL face with no room (letter-spacing 6em): ${S(huge)}`);
+          ok(!!(huge && !(huge.chip && huge.chip.here) && huge.more && huge.more.marked && huge.more.tip.includes('企业助手 的标签页在此窗口最前面')), 'r943 CONTROL: a face so wide there is no room — the front\'s chip is not whole (the judge above would read red) and the fold names it in words', S(huge));
+          await plant(0); await ev(feedOf({ ...base, front: frontE }) + 'return true;');
+        }
         // line 100's cure (r618): NO PART of this view's own chip is clipped — only its title gives way; its «here» words and owner's mark
         // are whole (or not shown at all: bare), and the chip ends inside the row's list
         const o9 = seen && seen.own;
