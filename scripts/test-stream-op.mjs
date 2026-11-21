@@ -764,14 +764,20 @@ console.log('§9b THE OPT-OUT\'S LIFETIME in-process (lane stream-sdr-ecoqos): n
   ok(relsHere.length >= 5 && relReqs(pointAtTree(ssText)).length === 0 && relsHere.every((r) => fs.existsSync(path.resolve(SS_DIR, r)))
     && plantedSib !== ssText && relReqs(pointAtTree(plantedSib)).length === 0 && relReqs(byNames(plantedSib)).includes('./watch-guard.js'),
     `the mutant copy's requires: all ${relsHere.length} relative ones resolved against src/agentd by ONE rule (each a file of the tree), none left; RED control: a NEW sibling require planted in the text is resolved by the rule, while the release's name list leaves it (${JSON.stringify(relReqs(byNames(plantedSib)))})`, { relsHere });
-  const notLoaded = {};
+  // a mutant that is not made is a NAMED red row of its own leg (why() below), never a crash: (B-0d3e) a moved or doubled anchor
+  // THROWS with the anchor it wanted and the file (as does a copy that cannot be written), and a copy that cannot load says so
+  const notMade = {};
   const mutant = (name, from, to) => {
-    if (ssText.split(from).length !== 2) return null; // the anchor moved: the mutant is not made (and its row is RED)
-    const f = path.join(copyDir, `mut-${name}`, 'stream-screen.js'); fs.mkdirSync(path.dirname(f), { recursive: true });
-    fs.writeFileSync(f, pointAtTree(ssText.replace(from, to)));
-    try { return require(f); } catch (e) { notLoaded[name] = String((e && e.message) || e).split('\n')[0]; return null; }   // a NAMED red row, never a crash
+    const f = path.join(copyDir, `mut-${name}`, 'stream-screen.js');
+    try {
+      const n = ssText.split(from).length - 1;
+      if (n !== 1) throw new Error(`its anchor moved: ${JSON.stringify(from).slice(0, 100)} found ${n} times in src/agentd/stream-screen.js, one meant — no mutant made`);
+      fs.mkdirSync(path.dirname(f), { recursive: true });
+      fs.writeFileSync(f, pointAtTree(ssText.replace(from, to)));
+    } catch (e) { notMade[name] = String((e && e.message) || e).split('\n')[0]; return null; }
+    try { return require(f); } catch (e) { notMade[name] = `THE COPY DID NOT LOAD: ${String((e && e.message) || e).split('\n')[0]}`; return null; }
   };
-  const why = (name, m) => (m ? '' : notLoaded[name] ? ` — THE COPY DID NOT LOAD: ${notLoaded[name]}` : ' — its anchor moved: no mutant made');
+  const why = (name, m) => (m ? '' : ` — ${notMade[name]}`);
   const m1 = mutant('no-give-back', '    qosScript([process.pid], true);\n', '\n');
   const r1 = m1 && await lifetime(m1);
   ok(r1 && offOk(r1.stop) && !r1.stop.back && !r1.crash.back, 'MUTANT — the keeper forgets the give-back: this process stays opted out after the stop and after the crash ⇒ both lifetime rows are RED' + why('no-give-back', m1), r1 && { stop: r1.stop.after, crash: r1.crash.after });

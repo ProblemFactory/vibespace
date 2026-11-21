@@ -293,7 +293,9 @@ async function legHung() {
   const w = await legHungWrite();
   ok(w.ok, `three captures against a write that never answers: ${w.writes.length} write started (ONE); the first «the disk did not answer in 10 s», the next two «has not been written yet»`, { writes: w.writes, doors: w.r.out && w.r.out.doors, b: w.b.map((x) => x.split('\n').slice(-1)[0]) });
   // THE MUTANTS: a scratch copy of src/, one text swap each in the watchdog thread
-  const mut = (name, from, to) => { const dir = path.join(ROOT, name); fs.cpSync(path.join(REPO, 'src'), path.join(dir, 'src'), { recursive: true }); const p = path.join(dir, 'src/server/sync-fs-witness-worker.js'), t = fs.readFileSync(p, 'utf8'); if (!t.includes(from)) return null; fs.writeFileSync(p, t.replace(from, to)); return dir; };
+  // B-0d3e: `mut` judges its anchor BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the
+  // MUTANT row reds too, nothing crashes)
+  const mut = (name, from, to) => { const dir = path.join(ROOT, name); fs.cpSync(path.join(REPO, 'src'), path.join(dir, 'src'), { recursive: true }); const p = path.join(dir, 'src/server/sync-fs-witness-worker.js'), t = fs.readFileSync(p, 'utf8'); const k = t.split(from).length - 1; if (k !== 1) { ok(false, `ANCHOR (${name}, src/server/sync-fs-witness-worker.js): ${JSON.stringify(from).slice(0, 100)} — found ${k} times, one meant: the mutant builds nothing`); return null; } fs.writeFileSync(p, t.replace(from, to)); return dir; };
   const m1 = mut('mut-read', "if (took == null) why = 'budget';", "if (took == null) { why = 'budget'; naming = null; }");
   const ma = m1 ? await legHungRead(m1) : { ok: true, stats: [] };
   ok(ma.premise !== false && !ma.ok && ma.stats.length > 1, `MUTANT «the read's guard cleared at its budget» is RED by name: ${ma.stats.length} reads started`, ma.stats);
@@ -316,7 +318,9 @@ try {
     const MUT = path.join(ROOT, 'mut'); fs.cpSync(path.join(REPO, 'src'), path.join(MUT, 'src'), { recursive: true });
     const mp = path.join(MUT, 'src/cpu-capture.js'), msrc = fs.readFileSync(mp, 'utf8'), anchor = "if (s !== 'running' && w === 'ep_poll' && beatAgeMs <= freshMs) return 'idle';";
     fs.writeFileSync(mp, msrc.replace(anchor, ''));
-    const m = msrc.includes(anchor) ? await legIdle(HERE, process.execPath, MUT) : { ok: true, sp: {} };
+    const k = msrc.split(anchor).length - 1;   // B-0d3e (ALSO CURED): the anchor named on a red, as `mut` above
+    if (k !== 1) ok(false, `ANCHOR (the idle rule, src/cpu-capture.js): ${JSON.stringify(anchor).slice(0, 100)} — found ${k} times, one meant: the mutant builds nothing`);
+    const m = k === 1 ? await legIdle(HERE, process.execPath, MUT) : { ok: true, sp: {} };
     ok(!m.ok, `MUTANT «the kernel state not read first» (the tick's idle rule removed) is RED by name: idle ${m.sp.idle} % — not ~90 %`, m.sp);
   }
   if (leg('D')) await legNative(HERE, process.execPath);

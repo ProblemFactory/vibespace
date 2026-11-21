@@ -209,12 +209,16 @@ console.log('⑥ AUDIO + KEY NEVER IN A LOG, AUDIO NEVER ON DISK (and their RED 
       fs.symlinkSync(path.join(REPO, 'node_modules'), path.join(dir, 'node_modules'));
       for (const f of ['src/voice-model.js', 'src/assistant-note.js', 'src/notification-senders.js', 'src/inbox-reply-text.js', 'src/server/dropline-client.js', 'src/routes/voice.js']) fs.copyFileSync(path.join(REPO, f), path.join(dir, f));
       const src = fs.readFileSync(path.join(REPO, rel), 'utf8');
+      // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (the plant then runs on
+      // as before with once: false, and the control's own row reds too — nothing crashes)
+      const n = src.split(anchor).length - 1;
+      if (n !== 1) ok(`ANCHOR (${rel}): ${JSON.stringify(anchor).slice(0, 100)} — found ${n} times, one meant: the plant is not the control it says`, false);
       fs.writeFileSync(path.join(dir, rel), src.replace(anchor, replacement));
       const M = await hub(path.join(dir, 'src/server/dropline-client.js'), path.join(dir, 'src/routes/voice.js'));
       logs.length = 0; fsWrites.length = 0; script = [{ status: 200 }];
       const r = await dictate(M);
       M.close();
-      return { once: src.split(anchor).length === 2, status: r.status, audio: holds(MARK), key: holds(KEY), writes: [...fsWrites] };
+      return { once: n === 1, status: r.status, audio: holds(MARK), key: holds(KEY), writes: [...fsWrites] };
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   };
   const a1 = "    if (!pluginOn()) throw new DroplineError('plugin-off'";

@@ -135,7 +135,13 @@ try {
     return { starting: !!row(g, R.id).starting, blocked: !!g.pathBlocked(mp), alive: (await g._daemonPids(mp)).length === 1, error: row(g, R.id).error };
   };
   const MC = mutantCopies('mount-starting', REPO); // patched copies live outside the tree (§51)
-  const mutant = async (tag, from, to) => (src.includes(from) ? scenario(require(MC.write('src/mounts.js', src.replace(from, to), tag)).MountManager, tag) : null);
+  // B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the NEGATIVE
+  // CONTROL row reds too, nothing crashes)
+  const mutant = async (tag, from, to) => {
+    const n = src.split(from).length - 1;
+    if (n !== 1) { ok(false, `ANCHOR (${tag}, src/mounts.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the control builds nothing`); return null; }
+    return scenario(require(MC.write('src/mounts.js', src.replace(from, to), tag)).MountManager, tag);
+  };
   const real = await scenario(MountManager, 'real');
   ok(real.starting && real.blocked && real.alive, '⑦ control baseline: the real module keeps a starting daemon alive and its path blocked', JSON.stringify(real));
   const m1 = await mutant('5s', 'now - t0 >= T.ceilingMs', 'now - t0 >= T.quickMs');

@@ -1181,7 +1181,13 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const ssrc = fs.readFileSync(path.join(REPO, 'src/session-status.js'), 'utf8');
   const gone = [];   // lane chrome-157 (主开发 10:45Z): a control whose anchor matches nothing FAILS BY NAME, never a quiet gap in the count
-  const dCut = (a, b, tag) => { if (dsrc.split(a).length !== 2) { gone.push(tag.replace(/^hole-/, '')); return null; } return MUT.load('src/server/browser-dialogs.js', dsrc.replace(a, () => b), tag); };
+  // B-0d3e: dCut judges its anchor BY NAME — a moved or doubled anchor is a red row naming it and the file (and still counts in
+  // `gone`, so the census row below stays honest); then null, nothing crashes
+  const dCut = (a, b, tag) => {
+    const n = dsrc.split(a).length - 1;
+    if (n !== 1) { ok(false, `control ${tag.replace(/^hole-/, '')}: its anchor ${JSON.stringify(a).slice(0, 100)} found ${n} times in src/server/browser-dialogs.js, one meant — no copy made`); gone.push(tag.replace(/^hole-/, '')); return null; }
+    return MUT.load('src/server/browser-dialogs.js', dsrc.replace(a, () => b), tag);
+  };
   const reds = [];
   { const m = dCut("${r.error}`); held(w, tid, d); }", '${r.error}`); }', 'hole-2.6'); const r = m && await failedAccept(m); if (r && r.via !== 'event' && r.notices === 0) reds.push('2.6'); }
   // lane chrome-157 (the .402 claim C, rule 3(a)): the filter line now also holds the one-state kinds (session-status ONE_STATE_KINDS) —

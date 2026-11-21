@@ -204,7 +204,13 @@ ok(!keeper.browserOf(p.id).unresponsive && todos.length === 1, 'answering: no ve
 console.log('— ⑤ patched-copy controls');
 const MUT = path.join(ROOT, 'mut'); fs.mkdirSync(MUT, { recursive: true });
 const bsSrc = fs.readFileSync(new URL('../src/browser-stuck.js', import.meta.url), 'utf8');
-function mutant(name, from, to) { if (!bsSrc.includes(from)) return null; const f = path.join(MUT, name + '.js'); fs.writeFileSync(f, bsSrc.replace(from, to)); return require(f); }
+// B-0d3e: the anchor judged BY NAME — a moved or doubled anchor is a red row naming it and the file (then null: the control's own
+// row reds too, nothing crashes)
+function mutant(name, from, to) {
+  const n = bsSrc.split(from).length - 1;
+  if (n !== 1) { ok(false, `ANCHOR (${name}, src/browser-stuck.js): ${JSON.stringify(from).slice(0, 100)} — found ${n} times, one meant: the control builds nothing`); return null; }
+  const f = path.join(MUT, name + '.js'); fs.writeFileSync(f, bsSrc.replace(from, to)); return require(f);
+}
 const noVerdict = mutant('no-verdict', "return { state: hung ? 'unresponsive' : 'missing'", "return { state: false ? 'unresponsive' : 'missing'");
 ok(noVerdict && table(noVerdict).hung === false && table(noVerdict).oneMiss === true, 'control: with no verdict the table\'s "≥ 60 s ⇒ unresponsive" row goes red (every refusal stays "run the command again")');
 const ungated = mutant('ungated', "  if (by === 'user') return { ok: true };", "  return { ok: true };");

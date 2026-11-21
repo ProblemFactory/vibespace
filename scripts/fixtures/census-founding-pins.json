@@ -404,30 +404,7 @@
  },
  "anchor-helpers": {
   "row": "B-0d3e",
-  "total": 40,
-  "files": {
-   "test-boot-phase.mjs": 1,
-   "test-browser-stuck.mjs": 1,
-   "test-browser-unresponsive.mjs": 1,
-   "test-cdp-census.mjs": 1,
-   "test-channel-outbox.mjs": 2,
-   "test-channel-send-files.mjs": 1,
-   "test-channel-touch.mjs": 10,
-   "test-conversation-ops.mjs": 1,
-   "test-cpu-capture-live.mjs": 1,
-   "test-design-model.mjs": 3,
-   "test-loop-hold.mjs": 3,
-   "test-mount-starting.mjs": 1,
-   "test-pool-auto.mjs": 2,
-   "test-reset-credit-verdict.mjs": 2,
-   "test-still-press.mjs": 1,
-   "test-stream-op.mjs": 1,
-   "test-user-state-echo.mjs": 2,
-   "test-vault-job-model.mjs": 1,
-   "test-vault-run-model.mjs": 1,
-   "test-vault-run.mjs": 2,
-   "test-vault-standing-request.mjs": 1,
-   "test-voice-proxy.mjs": 1
-  }
+  "total": 0,
+  "files": {}
  }
 }
