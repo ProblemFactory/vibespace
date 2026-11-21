@@ -177,8 +177,10 @@ if (!process.env.TASK_SCAN_LOOP_CHILD) {
       const now = await scene(require(path.join(REPO, 'src/ws-handler.js')), 1);
       ok(now.first === 'pending' && now.second === 'completed' && now.probeSeen && !now.probeAhead && now.unstamped && wshSrc.split(WARM).length === 2,
         'a conversation born in this hub: its second attach answers the TaskUpdate the transcript gained (pending → completed); while the warm waited — the new socket resizing meanwhile — the STAMPED frame reached the socket already attached and NOT the new one ahead of its `attached` (the verdict covers it), the UNSTAMPED one reached both (r3, r4)', now);
-      const noWarm = await scene(plantW('no-warm', [[WARM, '']]), 2);
-      ok(noWarm.second === 'pending', `RED CONTROL (no warm at the attach — the first rebuild's alone): the second attach answers the stale state (${noWarm.second})`, noWarm);
+      // B-80cb: the re-attach's reader door (readOffLoop → the claude reader's rawAsync: the worker's warm, which also scans the task
+      // tools) refreshes the state too — the control takes BOTH warms away
+      const noWarm = await scene(plantW('no-warm', [[WARM, ''], ['await readOffLoop(reSm, {', 'await (async () => null)(reSm, {']]), 2);
+      ok(noWarm.second === 'pending', `RED CONTROL (no warm at the attach — neither the task warm nor the reader's door; the first rebuild's alone): the second attach answers the stale state (${noWarm.second})`, noWarm);
       const late = await scene(plantW('warm-after-join', [[WARM, ''], [JOIN, JOIN + '            await warmTaskStateFor(session);\n']]), 3);
       ok(late.second === 'completed' && late.probeAhead, 'RED CONTROL (the warm after the socket joined — the first cure\'s place): the stamped frame reached the new socket AHEAD of its `attached`', late);
       const noPend = await scene(plantW('no-pending-join', [[PEND, '']]), 4, SB, { resize: false });   // r2's own window (no resize: a resize would register the socket with no flag at all)

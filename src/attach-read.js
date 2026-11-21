@@ -2,6 +2,9 @@
 /**
  * attach-read.js — THE ATTACH'S OFF-LOOP READ (lane resume-all-paced L3 cure, 主开发 2026-11-16 23:16Z, P1 + P2).
  *
+ * B-80cb: the claude reader has its door too (SessionMessages.rawAsync — the worker's warm of its tail, then its merge), so every
+ * caller of readOffLoop warms claude as it warms codex: a re-attach of a conversation whose history is loaded no longer parses its
+ * tail on the loop (an append since the warm is folded in on the loop, up to 4 MB, as before; the transcript pool down: the old road).
  * P1 — A RE-ATTACH IS AN ATTACH. A reader that can read its records off the loop (codex: CodexSessionMessages.rawAsync — the parse
  * in the transcript worker, the merges in slices) does so at EVERY door that reads it: the first attach, every re-attach (a page
  * reload, a reconnect, a second device — the history already loaded, the reader a fresh one), the read-only view, the transcript
@@ -16,8 +19,8 @@
  * `wanted` (主开发 02:22Z, the restack's follow-up): asked when the read's turn comes in the line — false (the socket closed while it
  * waited) drops the read before it starts. Such a read is its caller's alone: it is never the reader's shared memo (a later caller
  * of the same reader starts its own read — codex-session-store.js rawAsync).
- * → true when the reader went the off-loop road (read, or dropped as unwanted), false when the reader reads synchronously by design
- * (claude: its own warm cache)
+ * → true when the reader went the off-loop road (read, or dropped as unwanted), false when the reader has no door (since B-80cb
+ * claude's has one: SessionMessages.rawAsync; a serve-backed reader — opencode — loads through its own prepare)
  */
 const ATTACH_ACK_MS = 10000;   // the rebuild's re-ack cadence (ws-handler.js, 2.369.16): one clock for every wait of an attach
 

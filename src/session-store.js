@@ -1497,6 +1497,19 @@ class SessionMessages {
   raw() { this._ensureParsed(); return this._all; }
   /** the records reach back to the transcript's first byte (B-437e files tier: the rebuild says it to the normalizer) */
   get fromStart() { this._ensureParsed(); return this._fromStart === true; }
+  /** B-80cb: THE DOOR every reader takes (readOffLoop, src/attach-read.js — as codex's reader has one): the transcript's tail parsed
+   *  in the worker (warmSessionJsonlAsync) BEFORE this reader's merge, so a reader read after it does not parse its 32 MB tail on
+   *  the hub's loop (measured on stand-ins: 123–162 ms a cold parse; an append since the warm is folded in on the loop, up to 4 MB, as
+   *  before; the transcript pool down: the old road). `wanted` (a socket closed while it waited) drops the read before
+   *  it starts. → the records (null when dropped) */
+  async rawAsync({ wanted = null } = {}) {
+    if (this._all) return this._all;
+    if (typeof wanted === 'function' && !wanted()) return null;
+    const id = getHistorySessionId(this._session);
+    if (id) { try { await warmSessionJsonlAsync(id, this._session.cwd); } catch { } }
+    this._ensureParsed();
+    return this._all;
+  }
   /** THE HELPERS' TOOL_RESULTS (lane S1 verify r3): every sidechain `user` record's
    *  tool_result blocks, as `{toolUseId, text, isError, parentToolUseId}` — the
    *  record list (`raw()`) skips sidechain records, yet a helper's result for an
