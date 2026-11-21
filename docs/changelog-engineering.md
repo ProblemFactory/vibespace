@@ -58,6 +58,8 @@ This file is the engineers' record of every release: the lanes, the verification
 - After the second leg (line 138: the wiring does not end the daemon; the control's idle-out is seen first by the viewer's socket closing): the keeper's browser_stopped for a stopped ephemeral carries `ended` (endedFactsOf: stoppedBy, the launched idle, law 2's early bound), the bridge forwards it, and the live view says stoppedText(ended) — its own idle after N min, or ended on its own within N s of a command it served, before its idle (why not known); a stop by an act keeps the plain sentence. en/zh/ja. The watch half shipped in .410.
 - Gate: test-browser-display (PURE cells + a control, four wiring pins, the zh/ja rows).
 
+- ITS FOLLOW (round wrm8730fx, 主开发 r831): the hosts delta answers FALSE after a failed close (no landing — its caller reads the whole file again, as when the slot moved); the job wrapper's logOpen() reopens a log that has no number and writes a failed close's OWED sentence first, and every direct line of its own (the stop, the exit) asks it — none goes nowhere; a rotation counts from 0 again (a rename that failed never rotates every chunk); the channels CLI forgets its handle BEFORE the awaited close (the catch never closes it twice). LEGS: test-fd-close-census ⑤b drives every road with a placed close failure — the channels journal (a real store), a wrapper's rewrite in place and the job log's rotation with a reopen that throws (each from its own text), the CLI's attachment (the real CLI, a child) — each with its red copy.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
