@@ -577,7 +577,7 @@ export function installSessionLifecycle(App, ctx = {}) {
               .then(r => r.json())
               .then(data => {
                 if (data.messages?.length) chatView.loadHistory(data.messages, data.total);
-                if (data.notLoaded) chatView._sayHistoryNotLoaded?.(data.notLoaded);   // row B-422c: a resumed history the reader refused says so
+                if (data.notLoaded) chatView._sayHistoryNotLoaded?.(data.notLoaded, { info: { storageHung: !!data.storageHung, retryAt: data.retryAt || null } });   // row B-422c: a resumed history the reader refused says so
                 else if (data.chatStatus) chatView.applyStatus(data.chatStatus);
               })
               .catch(() => {})
@@ -1070,7 +1070,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           } else {
             chatView._applyLiveMeta?.(msg); // zero messages still has live state
           }
-          if (msg.historyNotLoaded) chatView._sayHistoryNotLoaded?.(msg.historyNotLoaded);   // row B-422c: the first attach of a history that waits on the reader
+          if (msg.historyNotLoaded) chatView._sayHistoryNotLoaded?.(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: the first attach of a history that waits on the reader
           if (msg.viewOnly) chatView._setReadOnly();
           winInfo.onClose = () => {
             const shouldKill = !msg.viewOnly && (this.settings.get('window.closeBehavior') ?? 'terminate') === 'terminate';
@@ -2267,7 +2267,7 @@ export function installSessionLifecycle(App, ctx = {}) {
     // ws.request (not a bare send + onGlobal): the view-only attach is
     // idempotent, so it can be RE-SENT after a reconnect — a server restart
     // between request and reply is exactly the documented blank-shell class.
-    this.ws.request({
+    const viewSpec = {
       type: 'attach',
       sessionId: viewId,
       viewOnly: true,
@@ -2278,7 +2278,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       host: hostId || undefined, // remote session: server pulls the transcript over ssh first
       cwd,
       name,
-    }, (msg) => {
+    };
+    chatView._viewAttachSpec = viewSpec;   // row B-422c (r1243 item 2): the view's own request, re-sent by itself while its history is not loaded
+    this.ws.request(viewSpec, (msg) => {
       if (msg.type === 'error' && msg.sessionId === viewId) {
         loadingEl?.remove();
         chatView._renderers.appendSystem(msg.message || t('Session not found.'));
@@ -2294,7 +2296,7 @@ export function installSessionLifecycle(App, ctx = {}) {
           // pane (blank windows read as bugs; real user report).
           chatView._renderers.appendSystem(t("No messages in this session's transcript yet."));
         }
-        if (msg.historyNotLoaded) chatView._sayHistoryNotLoaded?.(msg.historyNotLoaded);   // row B-422c: never «no messages» for a history the reader refused
+        if (msg.historyNotLoaded) chatView._sayHistoryNotLoaded?.(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: never «no messages» for a history the reader refused
         return true;
       }
       return false;

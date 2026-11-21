@@ -138,7 +138,7 @@ ok(content(R4b).length === 0 && !R4b.err && R4b.out && R4b.out.notLoaded === 'tr
 console.log('every refusal kind of the pool, and what is NOT a pool failure');
 const refusing = (shape, extra = {}) => ({ calls: [], ...extra, call(op) { this.calls.push(op); return Promise.reject(Object.assign(new Error(`a stand-in's ${shape.code || (shape.safeFsTimeout ? 'deadline' : 'refusal')}`), shape)); } });
 const KINDS = [
-  ['no worker', { status: 503, code: 'no-worker' }, false], ['no idle worker', { status: 503, code: 'no-idle' }, false],
+  ['no worker', { status: 503, code: 'no-worker' }, false], ['no idle worker', { status: 503, code: 'no-idle-worker' }, false],
   ['a hung path', { status: 503, code: 'path-hung' }, true],
   ['the history lane\'s heap bound', { code: 'heap_bound' }, false], ['the history lane busy past its wait', { code: 'history_busy' }, false],
   ['a blocked mount (the door\'s storage-blocked)', { status: 503, code: 'storage-blocked' }, true],
@@ -159,6 +159,19 @@ for (const [name, shape, hung, extra] of KINDS) {
   C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' }, { inPlace: true }));
   e = null; try { await C.jsonlGapInfoAsync(claudeFp); } catch (x) { e = x; }
   ok(!!e && e.code === 'no-worker', 'the device\'s IN-PLACE road (no worker script: its own loop) is no pool failure — its error passes as before', { code: e && e.code });
+}
+// SafeFs's own `no-idle-worker` is a pool-wide refusal (the round w5gioyat2: POOL_WIDE spelled it `no-idle`, a code SafeFs never sends)
+C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-idle-worker' })); try { await C.jsonlGapInfoAsync(claudeFp); } catch { }
+ok(C.poolRefusing(), 'SafeFs\'s own «no idle worker» (no-idle-worker) is a refusal of every call (poolRefusing)');
+// THE ARTIFACT PASS's own whole-file paged read (note: false) marks nothing of the file — a page past its deadline on a big healthy
+// file never makes the person's history «not loaded» (r1243 item 5); the control (a history read): the storage's
+{
+  const fpA = path.join(projDir, 'artifact-only.jsonl');
+  C._setTranscriptPoolForTest(refusing({ status: 503, safeFsTimeout: true, deadline: true }));
+  await C.readJsonlBoundedParsedPagedAsync(fpA, { tailOnly: false, slot: 'helper', note: false });
+  const quiet = !C.fileRefused(fpA) && !C.fileStorageHung(fpA);
+  await C.readJsonlBoundedParsedPagedAsync(fpA, { tailOnly: false });
+  ok(quiet && C.fileStorageHung(fpA), 'the artifact pass\'s paged read marks nothing of the file (its deadline never the person\'s history); the control, a history read: the storage\'s', { quiet, control: C.fileStorageHung(fpA) });
 }
 // the codex history: the pool's refusal ⇒ «not loaded yet», nothing parsed here; on the in-place road and for the op's own error ⇒
 // the old road (the sync parse, said) — as before this row
@@ -215,6 +228,8 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   SS0.parseSessionJsonl(sid, cwd); SS0.parseSessionJsonl(sid, cwd);
   await new Promise((res) => setImmediate(res));
   ok(asked0 === 1 && tails(H) === asked0, `a hung path (the storage's) ⇒ the parse asks no warm again (${tails(H) - asked0} more asks after two parses; the warm itself asked ${asked0})`, { asked0, asked1: tails(H) });
+  { const pi = SS0.parseSessionJsonl(sid, cwd);
+    ok(pi.notLoaded && pi.storageHung === true && typeof pi.retryAt === 'number' && pi.retryAt > Date.now(), `r1243 item 1: the storage's «not loaded» says its door (storageHung) and its next try (at +${pi.retryAt - Date.now()} ms) — the page's words and its own re-ask read them`, { storageHung: pi.storageHung, retryAt: pi.retryAt }); }
   // …and a warm while the storage's note stands (an attach's, a page's) runs NOTHING on this loop — no find, no stat: the pool alone
   const Rh = await road('④d a warm while the storage\'s note stands', () => SS0.warmSessionJsonlAsync(sid, cwd));
   ok(Rh.reads.length === 0 && Rh.out === false && tails(H) === asked0 + 1, `${Rh.name}: ${Rh.reads.length} sync calls of any kind on the transcript (no find, no stat) — the pool alone was asked (${tails(H) - asked0} ask), refused again`, { reads: Rh.reads.slice(0, 6), out: Rh.out });
@@ -293,6 +308,18 @@ const up = () => ({ calls: [], call(op, payload) { this.calls.push(op); return P
   const readC = await SS0.warmSessionJsonlAsync(sid, cwd);
   global.__vsMetric = metricWas;
   ok(readC === true && metrics.includes('srv-jsonl-parse-bytes') && U.calls.includes('taskLines'), `the hung retry that reads stamps its parse and warms the task scan (metrics: ${[...new Set(metrics)].join(', ') || 'none'}; asked: ${U.calls.join(', ')})`, { metrics, calls: U.calls });
+  // (7) THE PAGE IS TOLD (r1243 item 2): a session answered «not loaded» is announced ONCE to the store's listeners when a warm next
+  // loads it (ws-handler pushes `history-ready` to its clients — the page asks again by itself, never a re-open)
+  { const heard = []; const off = SS0.onHistoryReadable((id) => heard.push(id));
+    fs.writeFileSync(claudeFp, lines.slice(0, 300).join('\n') + '\n');
+    C._setTranscriptPoolForTest(refusing({ status: 503, code: 'no-worker' })); await SS0.warmSessionJsonlAsync(sid, cwd);
+    const nl = SS0.parseSessionJsonl(sid, cwd);   // «not loaded» (the cache behind the file): the session awaits
+    await SS0.warmSessionJsonlAsync(sid, cwd);   // settles the re-warm the parse asked
+    const before = heard.length;
+    C._setTranscriptPoolForTest(up()); await SS0.warmSessionJsonlAsync(sid, cwd);   // the pool answers: the warm loads it
+    await SS0.warmSessionJsonlAsync(sid, cwd);   // a second load says nothing (told once)
+    off();
+    ok(!!nl.notLoaded && typeof nl.retryAt === 'number' && before === 0 && heard.filter((x) => x === sid).length === 1, `a page told «not loaded» (its own re-ask at +${nl.retryAt - Date.now()} ms) is NOTIFIED once when a warm loads its history (${heard.length} heard)`, { heard, before }); }
   // (5) THE STORAGE'S RETRY HAS A GAP: a file the storage's is asked of the pool again at most once a gap (30 s doubling, ≤ 8 min —
   // here 60 ms): a warm inside the gap asks nothing, the first after it asks once
   // (6) A GAP READ'S PLAIN REFUSAL notes nothing of the file (the mirror of the forgiving: only a history read's word counts)
@@ -361,13 +388,16 @@ C._setTranscriptPoolForTest(pool);   // the real pool (closed) back in its place
 {
   const cv = fs.readFileSync(path.join(REPO, 'src/lib/chat-view.js'), 'utf8'), csr = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8'), sl = fs.readFileSync(path.join(REPO, 'src/lib/session-lifecycle.js'), 'utf8');
   const pins = [
-    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\);\n\s+throw /.test(cv)],
+    ['the page fetch of a refused history FAILS (the view that stands kept), «try again» unless quiet — in its door\'s words', /if \(data && data\.notLoaded\) \{\n\s+if \(!quietRefusal\) this\._sayReaderRestarting\(\{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null \}\);\n\s+throw /.test(cv)],
     ['the read-only 2 s poll asks quietly', /_fetchMessagePage\(nextOffset, 200, \{ withStatus: true, quietRefusal: true \}\)/.test(cv)],
-    ['the view reset says the line again', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\n\s+if \(msg && msg\.historyNotLoaded\) this\._sayHistoryNotLoaded\(msg\.historyNotLoaded, \{ again: true \}\);/.test(cv)],
+    ['the view reset says the line again', /this\.loadHistory\(msg\.messages \|\| \[\], msg\.totalCount \|\| 0, msg\.isStreaming, msg\);\n\s+if \(msg && msg\.historyNotLoaded\) this\._sayHistoryNotLoaded\(msg\.historyNotLoaded, \{ again: true, info: msg\.historyNotLoadedInfo \|\| null \}\);/.test(cv)],
+    ['r1243: the storage\'s own words (its file not answering, trying again at a time)', /if \(info && info\.storageHung\) this\._renderers\.appendSystem\(t\("This conversation's file is not answering, so its history is not loaded yet/.test(cv)],
+    ['r1243: the page asks again BY ITSELF at the server\'s time, and at history-ready', /this\._scheduleHistoryReask\(info && info\.retryAt\);/.test(cv) && /msg\.type === 'history-ready' && msg\.sessionId === sessionId\) \{\n\s+this\._reaskHistory\(\);/.test(cv) && /if \(!this\._readOnly\) \{ this\._reattach\(false\); return; \}/.test(cv)],
+    ['r1243: a view-only window keeps its own request for the re-ask', /chatView\._viewAttachSpec = viewSpec;/.test(sl) && /this\._viewAttachSpec = spec;/.test(cv)],
     ['the minimap fallback draws nothing from it', /if \(d\.turns\?\.length && !d\.notLoaded\) this\._chatMinimap\.render\(d\.turns\)/.test(cv)],
     ['/api/subagents\' reason in the page\'s words', /if \(r\?\.reason === 'transcript_reader_restarting'\) \{ this\._sayReaderRestarting\(\); return; \}/.test(cv)],
-    ['a search of it says «try again», never «No results»', /if \(data && data\.notLoaded\) \{ if \(!stale\(\)\) this\._searchStatus\.textContent = t\('The transcript reader is restarting — try again in a moment\.'\); return; \}/.test(csr)],
-    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded\);/.test(sl)],
+    ['a search of it says «try again» (or the storage\'s words), never «No results»', /this\._searchStatus\.textContent = data\.storageHung \? t\("This conversation's file is not answering — trying again at \{time\}\.", \{ time: when \}\) : t\('The transcript reader is restarting — try again in a moment\.'\);/.test(csr)],
+    ['the resume road says the line', /if \(data\.notLoaded\) chatView\._sayHistoryNotLoaded\?\.\(data\.notLoaded, \{ info: \{ storageHung: !!data\.storageHung, retryAt: data\.retryAt \|\| null \} \}\);/.test(sl)],
     ['the REBUILD alone sets _historyNotLoaded (never an attach that joined it)', /session\._historyNotLoaded = notLoaded \|\| null;/.test(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8')) && !/session\._historyNotLoaded = /.test(fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8'))],   // stale-pins: kept (the absence check: ws-handler writes it no more)
   ];
   for (const [name, held] of pins) ok(held, `the page: ${name}`);

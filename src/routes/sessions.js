@@ -109,7 +109,7 @@ function setup(ctx) {
     // holding it was unreachable" produce the same empty view otherwise.
     if (!fp) return res.json({ gap: null, ...(hostFetchError ? { error: hostFetchError } : {}) });
     // row B-422c (主开发 r1006): the transcript reader REFUSED (a pool failure) — said by name, never «no gap» (the page: a toast)
-    const readerRefused = (e) => res.status(503).set('Retry-After', '2').json({ error: e.message, code: e.code });
+    const readerRefused = (e) => res.status(503).set('Retry-After', String(Math.max(2, Math.ceil(((e.retryAt || 0) - Date.now()) / 1000)))).json({ error: e.message, code: e.code, storageHung: !!e.storageHung, retryAt: e.retryAt || null });   // r1243: which door refused, when again
     if (refused) return readerRefused(refused);
     if (!gap) return res.json({ gap: null });
     if (req.query.info) return res.json({ gap });

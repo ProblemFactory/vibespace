@@ -1407,7 +1407,10 @@ class ChatView {
         this._paintOutboxChip(); // lane outbox-session-chip: the session's ids are known now — the chip re-asks the held Outbox rows
         if (msg.normEpoch) this._normEpoch = msg.normEpoch;
         if (msg.remoteState) this._statusBar?.setRemoteState(msg.remoteState);
-        if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded);   // row B-422c: a re-attach whose history waits on the reader
+        if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: a re-attach whose history waits on the reader
+        else this._historyLoadedNow();
+      } else if (msg.type === 'history-ready' && msg.sessionId === sessionId) {
+        this._reaskHistory();   // r1243 item 2: the server loaded it — ask again now
       } else if (msg.type === 'error' && msg.sessionId === sessionId) {
         this._onSessionError(msg);
       } else if (msg.type === 'jobs-updated' && msg.held) {
@@ -2766,7 +2769,7 @@ class ChatView {
     // row B-422c: a history the transcript reader refused (its kept copy, or nothing) is a FAILED fetch — the view that stands is never
     // replaced by a short one; the person is told «try again» (a toast, at most one each few seconds; the 2 s poll stays quiet)
     if (data && data.notLoaded) {
-      if (!quietRefusal) this._sayReaderRestarting();
+      if (!quietRefusal) this._sayReaderRestarting({ storageHung: !!data.storageHung, retryAt: data.retryAt || null });
       throw Object.assign(new Error(t('The transcript reader is restarting — try again in a moment.')), { code: data.notLoaded });
     }
     if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
@@ -3487,7 +3490,7 @@ class ChatView {
       if (!res.ok) {
         // row B-422c (主开发 r1006 item 3): a read the transcript reader REFUSED asks the person to try again — a toast, never silence
         let body = null; try { body = await res.json(); } catch { }
-        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting();
+        if (body && body.code === 'transcript_reader_restarting') this._sayReaderRestarting({ storageHung: !!body.storageHung, retryAt: body.retryAt || null });
         return { ok: false, error: (body && body.error) || `HTTP ${res.status}`, code: (body && body.code) || null };
       }
       return { ok: true, data: await res.json() };
@@ -3496,20 +3499,53 @@ class ChatView {
     }
   }
 
-  /** row B-422c: the transcript reader refused a read — said once every few seconds, never a toast per slab */
-  _sayReaderRestarting() {
+  /** row B-422c: the transcript reader refused a read — said once every few seconds, never a toast per slab; r1243 item 1: in the
+   *  words of the door that refused (the STORAGE's: its file is not answering, and when it is tried again) */
+  _sayReaderRestarting(info = null) {
     const now = Date.now();
     if (this._readerRestartingSaidAt && now - this._readerRestartingSaidAt < 5000) return;
     this._readerRestartingSaidAt = now;
-    showToast(t('The transcript reader is restarting — try again in a moment.'));
+    if (info && info.storageHung) showToast(t("This conversation's file is not answering — trying again at {time}.", { time: this._clockOf(info.retryAt) }));
+    else showToast(t('The transcript reader is restarting — try again in a moment.'));
   }
+  _clockOf(ms) { try { return new Date(Number(ms) || Date.now()).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { return ''; } }
 
-  /** row B-422c (主开发 r1006 item 3): the history WAITS ON THE TRANSCRIPT READER — said in plain words where it would be (never an
-   *  empty pane), once per attach that says so */
-  _sayHistoryNotLoaded(code, { again = false } = {}) {
-    if (!code || (!again && this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0))) return;
+  /** row B-422c (主开发 r1006 item 3): the history WAITS — said in plain words where it would be (never an empty pane), once per attach
+   *  that says so, in the words of the door that refused (r1243 item 1); and (r1243 item 2) the page ASKS AGAIN BY ITSELF at the time
+   *  the server gave (`info.retryAt` — the storage's retry, the moment the main process's read opens, a worker's respawn) or when the
+   *  server pushes `history-ready`: never a re-open */
+  _sayHistoryNotLoaded(code, { again = false, info = null } = {}) {
+    if (!code) return;
+    this._historyNotLoadedCode = code;
+    this._scheduleHistoryReask(info && info.retryAt);
+    if (!again && this._historyNotLoadedSaid === code + (this._lastAttachedAt || 0)) return;
     this._historyNotLoadedSaid = code + (this._lastAttachedAt || 0);
-    this._renderers.appendSystem(t('The history is not loaded yet, or not all of it — the transcript reader is restarting. Open this conversation again in a moment to see all of it.'));
+    if (info && info.storageHung) this._renderers.appendSystem(t("This conversation's file is not answering, so its history is not loaded yet (or not all of it). Trying again at {time} — it fills in here by itself.", { time: this._clockOf(info.retryAt) }));
+    else this._renderers.appendSystem(t('The history is not loaded yet, or not all of it — the transcript reader is restarting. It fills in here by itself in a moment.'));
+  }
+  /** the history loaded (an attach said nothing of it): no more re-asks */
+  _historyLoadedNow() { this._historyNotLoadedCode = null; clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null; }
+  /** one re-ask at `at` (never sooner than 2 s, never later than 10 min) while the window lives and its history is still not loaded */
+  _scheduleHistoryReask(at) {
+    clearTimeout(this._historyReaskTimer);
+    const wait = Math.min(10 * 60000, Math.max(2000, (Number(at) || 0) - Date.now()));
+    this._historyReaskTimer = setTimeout(() => this._reaskHistory(), wait);
+  }
+  _reaskHistory() {
+    clearTimeout(this._historyReaskTimer); this._historyReaskTimer = null;
+    if (this._disposed || !this._historyNotLoadedCode) return;
+    if (!this._readOnly) { this._reattach(false); return; }   // a live window: the attach reads it again (its answer re-renders, or says it again)
+    const spec = this._viewAttachSpec;   // a view-only window: its view request again
+    if (!spec || !this.ws?.request) return;
+    this.ws.request(spec, (msg) => {
+      if (this._disposed) return true;
+      if (msg.type === 'error') return true;
+      if (msg.type !== 'attached') return false;
+      if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
+      if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });
+      else this._historyLoadedNow();
+      return true;
+    });
   }
 
   // ── Whole-conversation minimap for gapped (huge) sessions ──
@@ -7097,7 +7133,7 @@ class ChatView {
     // next attach asks for no seq and rebuilds from the full rung
     try {
       this.loadHistory(msg.messages || [], msg.totalCount || 0, msg.isStreaming, msg);
-      if (msg && msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true });   // row B-422c: the reset removed the line — said again over the new slab
+      if (msg && msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { again: true, info: msg.historyNotLoadedInfo || null });   // row B-422c: the reset removed the line — said again over the new slab
       // the slab is the truth now: a poisoned watermark is healed (perf r1) —
       // only when the rebuild itself ran through (a throw above keeps it poisoned)
       this._seqPoisoned = false;
@@ -7381,16 +7417,18 @@ class ChatView {
       this.sessionId = viewId;
       if (msg.messages?.length) this.loadHistory(msg.messages, msg.totalCount, false, { chatStatus: msg.chatStatus });
       else if (!msg.historyNotLoaded) this._renderers.appendSystem(t("No messages in this session's transcript yet."));
-      if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded);   // row B-422c: never «no messages» for a history the reader refused
+      if (msg.historyNotLoaded) this._sayHistoryNotLoaded(msg.historyNotLoaded, { info: msg.historyNotLoadedInfo || null });   // row B-422c: never «no messages» for a history the reader refused
       this._renderers.appendSystem(t('The session is no longer running — showing saved history.'));
       this._setReadOnly();
     };
     this.ws.onGlobal(handler);
-    this.ws.send({
+    const spec = {
       type: 'attach', sessionId: viewId, viewOnly: true, backend, slab: this._attachSlabHint(),
       backendSessionId: bsid, claudeSessionId: legacyIdFor(backend, bsid) ?? undefined,
       host: ids.host || undefined, cwd: ids.cwd || '', name: this.winInfo?.title || '',
-    });
+    };
+    this._viewAttachSpec = spec;   // row B-422c (r1243 item 2): the view's own request, re-sent by itself while its history is not loaded
+    this.ws.send(spec);
     try { track('event', 'chat-attach-rescued'); } catch {}
     return true;
   }

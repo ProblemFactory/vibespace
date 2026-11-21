@@ -245,7 +245,7 @@ async function helperFileOps(of, file) {
 }
 async function helperFileRead(of, file, st) {
   let why = null;
-  const recs = await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, slot: 'helper', onFail: (w) => { why = w; } });
+  const recs = await require('../adapters/codex.js').readJsonlBoundedParsedPagedAsync(file, { tailOnly: false, slot: 'helper', note: false, onFail: (w) => { why = w; } });   // row B-422c: its refusals carry no history weight (a page past its deadline on a big healthy file never marks the person's history «not loaded»)
   if (!recs) {
     _helperStats.unread++;
     if (!_helperStats.said) { _helperStats.said = true; deps.log.warn?.(`[artifacts] a helper's rows were not derived — its transcript was not read off the main loop (${why || 'no reason given'}); none is read on it (B-299b). Said once a process.`); }

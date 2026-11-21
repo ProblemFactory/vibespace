@@ -253,10 +253,11 @@ function createTranscriptService({ activeSessions, createSessionMessages, hosts 
     // row B-422c: a history the transcript reader refused (its kept copy, or the live buffer alone) is SAID in every answer built on
     // it — `notLoaded`, the page's «not loaded yet» — never a short history passed off as the whole one
     const notLoaded = sm.notLoaded || null;
-    if (r.memo) r.memo.view = { mm, session, notLoaded };
-    return { mm, session, notLoaded };
+    const notLoadedInfo = notLoaded ? { storageHung: !!sm.notLoadedStorage, retryAt: sm.notLoadedRetryAt || null } : null;   // r1243: which door, when again
+    if (r.memo) r.memo.view = { mm, session, notLoaded, notLoadedInfo };
+    return { mm, session, notLoaded, notLoadedInfo };
   }
-  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded } : {});
+  const saidOf = (v) => (v && v.notLoaded ? { notLoaded: v.notLoaded, ...(v.notLoadedInfo ? { storageHung: v.notLoadedInfo.storageHung, retryAt: v.notLoadedInfo.retryAt } : {}) } : {});
 
   async function page(ref, { offset, limit, untilUuid } = {}) {
     const r0 = norm(ref);

@@ -665,7 +665,7 @@ function artifactDeriveOpts({ backend, cwd, host, sessionId = null } = {}) {
   return typeof of === 'function' ? { artifactsOf: of, cwd: cwd || '', host: host || '', helper: { backend: backend || 'claude', sessionId } } : null;
 }
 const artifactsOptsOf = (session, sessionId) => { const o = artifactDeriveOpts({ backend: session.backend, cwd: session.cwd, host: session.host, sessionId: session.claudeSessionId || session.backendSessionId || null }); return o && artifactQuoteSource ? { ...o, quoted: artifactQuoteSource(session, sessionId || session.sockName) } : o; }; // r10: + whose item a tray answer quotes
-function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null, fromStart = false, notLoaded = null } = {}) {
+function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, replay = null, helperResults = null, fromStart = false, notLoaded = null, notLoadedInfo = null } = {}) {
   if (session._rebuildPromise) return session._rebuildPromise;
   const opHandlers = [...(session._normalizer?.listeners || [])];
   // 2.369.402: the conversation's cost fold rides the rebuild — the old normalizer's (the kept fact the boot resumed + every
@@ -711,6 +711,7 @@ function rebuildHistory(session, sessionId, records, { budgetMs, onProgress, rep
       try { upgradeWakeCards(mm, session._groupCards); } catch (err) { console.error('[normalizer] group wake cards skipped:', err.message); }
       if (!notLoaded) session._historyLoaded = true;   // row B-422c: a history the transcript reader refused stays unloaded — the next attach reads it again
       session._historyNotLoaded = notLoaded || null;   // …and THIS rebuild says so — never an attach that joined it with its own reader's answer
+      session._historyNotLoadedInfo = notLoaded ? (notLoadedInfo || null) : null;   // r1243: which door refused, when the page asks again
       // lane S1: the rebuilt cards carry the helpers' unanswered asks — every
       // helper view that already exists is handed them, and the inbox re-syncs
       // verify r4: the rebuilt pending set is what the attach payload hands the clients — sealed, so

@@ -163,7 +163,13 @@ class ChatSearch {
       const res = await fetch(`/api/session-messages?backend=${encodeURIComponent(backend || 'claude')}&backendSessionId=${encodeURIComponent(backendSessionId)}&cwd=${encodeURIComponent(cwd)}&search=${encodeURIComponent(q)}${host ? `&host=${encodeURIComponent(host)}` : ''}`);
       const data = await res.json();
       // row B-422c: a history the transcript reader refused cannot be searched — said, never «No results»
-      if (data && data.notLoaded) { if (!stale()) this._searchStatus.textContent = t('The transcript reader is restarting — try again in a moment.'); return; }
+      if (data && data.notLoaded) {   // r1243 item 1: in the words of the door that refused
+        if (!stale()) {
+          let when = ''; try { when = new Date(Number(data.retryAt) || Date.now()).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }); } catch { }
+          this._searchStatus.textContent = data.storageHung ? t("This conversation's file is not answering — trying again at {time}.", { time: when }) : t('The transcript reader is restarting — try again in a moment.');
+        }
+        return;
+      }
       matches = data.matches || [];
     } catch {}
     if (stale()) return; // a newer search superseded this one

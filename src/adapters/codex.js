@@ -720,11 +720,11 @@ function readerRefusal(e, fp = null, opts = {}) {
 async function poolRead(op, payload, opts) {
   const fp = payload && payload.fp;   // unit 2: the FILE's state — a refusal notes it, any answer for it (a result, or the op's own error) forgives it
   const pool = _transcriptPoolGet();
-  if (!pool) { const r = readerRefusal(null); notePoolRefusing(r); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); throw r; }
+  if (!pool) { const r = readerRefusal(null); notePoolRefusing(r); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); throw r; }
   let out;
   try { out = await pool.call(op, payload, opts); }
   catch (e) {
-    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); throw r; }
+    if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e, fp); notePoolRefusing(e); noteFileRefusal(fp, r, { history: HISTORY_OPS.has(op) }); r.retryAt = nextReadAt(fp); throw r; }   // its next try, after the record took the refusal
     poolAnswered(fp, op);   // the op's own error: a worker ran it — the pool answered
     throw e;
   }
@@ -762,14 +762,14 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  Row B-422c: `onFail(why, refusal)` — `refusal` = the reader's refusal by name when the POOL failed (closed, no worker, a deadline,
  *  a hung path, the lane's bound or wait; never on the device's in-place road), null when the op itself failed (the caller's own road).
  *  → the records (or, with `entry`, { entry, mode, bytes }), or null */
-async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false } = {}) {
+async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false, note = true } = {}) {   // note: false — a caller whose refusals say nothing of the file's history (the artifact pass's whole-file read)
   let refusal = null;   // the LAST pool failure on this road (a later op error clears it: then the op's failure is the answer)
   // ownCall: page 0 (it reads the FILE — later pages parse its snapshot in memory) is the history lane's own call; the one-shot runs in
   // the main pool. A pool refusal STAYS the road's answer through a later op error (never a sync parse of a refused file after it)
-  const seen = (e, ownCall) => { if (pool && !pool.inPlace && isPoolFailure(e)) { refusal = readerRefusal(e, fp, { ownCall }); notePoolRefusing(e); noteFileRefusal(fp, refusal, { history: true }); } };
+  const seen = (e, ownCall) => { if (pool && !pool.inPlace && isPoolFailure(e)) { refusal = readerRefusal(e, fp, { ownCall }); notePoolRefusing(e); if (note) noteFileRefusal(fp, refusal, { history: true }); } };
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why, refusal); } catch { } return null; };
   const pool = _transcriptPoolGet();
-  if (!pool) { refusal = readerRefusal(null); notePoolRefusing(refusal); noteFileRefusal(fp, refusal, { history: true }); return said('no transcript pool on this process'); }
+  if (!pool) { refusal = readerRefusal(null); notePoolRefusing(refusal); if (note) noteFileRefusal(fp, refusal, { history: true }); return said('no transcript pool on this process'); }
   let why = null;
   for (let tries = 0; tries < 2; tries++) {
     let token = null;   // set once page 0 answered: a page with it parses the snapshot in memory (seen in the catch below)
@@ -885,7 +885,7 @@ function storageRetryDue(fp) {
   return true;
 }
 let _poolRefusedAt = 0;
-const POOL_WIDE = new Set(['no-worker', 'no-idle']);
+const POOL_WIDE = new Set(['no-worker', 'no-idle-worker']);   // SafeFs's own codes (src/safe-fs.js NO_WORKER / NO_IDLE)
 function notePoolRefusing(e) { if (!e || POOL_WIDE.has(e.code) || /safeFs closed/.test(String(e.message || '')) || e.why === 'no transcript pool on this process') _poolRefusedAt = Date.now(); }
 // an answer of the pool ends «refusing every call»; only a HISTORY READ's answer forgives the file (a task scan or a gap read answered
 // on the other worker says nothing of whether its tail can be read: the whole-state read's MUST)
@@ -936,12 +936,14 @@ function fileStorageHung(fp) {
   try { return !!require('../mount-door').blocked(fp); } catch { return false; }
 }
 /** May this file's history be read on the main process now? → { ok, why } (never a file call: memory only) */
-function slicedRoadFor(fp) {
+function slicedRoadFor(fp, { storageRetry = false } = {}) {
   const rec = fp && _fileRefusals.get(fp);
   if (!rec) return { ok: false, why: 'no refusal of it stands' };
-  if (fileStorageHung(fp)) return { ok: false, why: 'its storage hung (a deadline, a hung path or a blocked mount) — never tried here' };
+  // `storageRetry`: the storage's DUE retry (storageRetryDue claimed it) while the pool refuses every call — the pool cannot retry it,
+  // so the main process does, under the same guard (one at a time, none while one is parked, the read's own deadline)
+  if (!storageRetry && fileStorageHung(fp)) return { ok: false, why: 'its storage hung (a deadline, a hung path or a blocked mount) — never tried here' };
   const stood = Date.now() - rec.firstAt;
-  if (stood < SLICED_AFTER_MS) return { ok: false, why: `refused for ${Math.round(stood / 1000)} s — the main process reads it past ${SLICED_AFTER_MS / 1000} s` };
+  if (!storageRetry && stood < SLICED_AFTER_MS) return { ok: false, why: `refused for ${Math.round(stood / 1000)} s — the main process reads it past ${SLICED_AFTER_MS / 1000} s` };
   let mp = false; try { mp = require('../mount-door').blocked(fp); } catch { mp = false; }
   if (mp) return { ok: false, why: 'its mount is blocked' };
   if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', 0)) return { ok: false, why: 'the transcript pool remembers it hung' };   // patience 0: any entry AT OR ABOVE it refuses (every transcript entry is one)
@@ -965,7 +967,7 @@ function _readTailBytesAsync(fp) {
       return { stat, size, lower, from, raw: off === raw.length ? raw : raw.subarray(0, off) };
     } finally { await fh.close().catch((e) => console.warn(`[transcript] the main-process read of ${path.basename(fp)}: its file handle did not close (${e.message})`)); }
   })();
-  work.then(() => { }, () => { }).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place
+  work.then(() => { if (parked) { const r = _fileRefusals.get(fp); if (r) r.ownDeadline = false; } }, () => { }).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place — and the file answered: its own-deadline mark ends
   const deadline = new Promise((_, rej) => { timer = setTimeout(() => { parked = true; _slicedParked++; rej(Object.assign(new Error(`no answer in ${SLICED_READ_DEADLINE_MS / 1000} s — the storage hangs`), { code: 'sliced_read_deadline', storageHung: true })); }, SLICED_READ_DEADLINE_MS); });
   return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
 }
@@ -980,15 +982,20 @@ async function _stepSliced(stepper) {
   }
 }
 /** one read on the main process at a time (the same file's second ask joins it); the guard asked at ITS turn; said once a file */
-function _slicedTurn(kind, fp, read) {
+function _slicedTurn(kind, fp, read, { storageRetry = false } = {}) {
   const key = kind + ':' + fp;
   if (_slicedJoin.has(key)) return _slicedJoin.get(key);
   const run = async () => {
-    const road = slicedRoadFor(fp);
+    const road = slicedRoadFor(fp, { storageRetry });
     if (!road.ok) throw Object.assign(new Error(road.why), { code: 'sliced_refused' });
     const sayOnce = (key, line) => { if (_slicedSaid.has(key)) return; if (_slicedSaid.size > 512) _slicedSaid.clear(); _slicedSaid.add(key); console.warn(line); };
     sayOnce(fp, `[transcript] ${path.basename(fp)}: ${road.why} — its history is read on the main process in bounded slices (row B-422c)`);
-    try { return await read(); }
+    try {
+      const out = await read();
+      const rec = _fileRefusals.get(fp);
+      if (rec) { rec.storage = false; rec.ownDeadline = false; }   // the file ANSWERED a read: no storage of it is hung (the pool's refusal of it stands)
+      return out;
+    }
     catch (e) {
       if (e && (e.storageHung || e.code === 'sliced_read_deadline')) (_fileRefusals.get(fp) || noteFileRefusal(fp, { why: e.message }, { history: true })).ownDeadline = true;   // a record evicted meanwhile is made again (a history read's)
       sayOnce('failed:' + fp, `[transcript] ${path.basename(fp)}: the main process's read of its history failed (${(e && e.message) || e}) — «not loaded» (row B-422c)`);
@@ -1002,7 +1009,7 @@ function _slicedTurn(kind, fp, read) {
   return turn;
 }
 /** readJsonlTail's FULL read on the main process, sliced — the same entry ({entry, mode: 'full', bytes}); throws its refusal */
-function readJsonlTailSliced(fp, { dropSubagent = false } = {}) {
+function readJsonlTailSliced(fp, { dropSubagent = false, storageRetry = false } = {}) {
   return _slicedTurn('tail' + (dropSubagent ? '-d' : ''), fp, async () => {
     if (isZstPath(fp)) throw Object.assign(new Error('a compressed rollout — only the worker decompresses it'), { code: 'sliced_zst' });
     const { stat, size, lower, from, raw } = await _readTailBytesAsync(fp);
@@ -1020,10 +1027,10 @@ function readJsonlTailSliced(fp, { dropSubagent = false } = {}) {
       incr,
     };
     return { entry, mode: 'full', bytes: raw.length };
-  });
+  }, { storageRetry });
 }
 /** parseCodexSessionJsonl's read and parse (readJsonlBounded tail-only + every line) on the main process, sliced → the records */
-function readCodexRolloutSliced(fp) {
+function readCodexRolloutSliced(fp, { storageRetry = false } = {}) {
   return _slicedTurn('rollout', fp, async () => {
     if (isZstPath(fp)) throw Object.assign(new Error('a compressed rollout — only the worker decompresses it'), { code: 'sliced_zst' });
     const { lower, raw } = await _readTailBytesAsync(fp);
@@ -1032,7 +1039,19 @@ function readCodexRolloutSliced(fp) {
     const got = await _stepSliced(_jsonlLineStepper(buf, 0, false));
     if (got.partial !== undefined) got.records.push(got.partial);
     return got.records;
-  });
+  }, { storageRetry });
+}
+/** r1243 item 2 — WHEN A PAGE TOLD «NOT LOADED» MAY ASK AGAIN AND BE ANSWERED (it re-asks by itself then, never a re-open): a file the
+ *  storage's — its retry time; a refusal that has not stood the stated time — the moment it has (the sliced road opens); a road that
+ *  cannot open (a read parked in a dead file, a compressed rollout) — a minute; otherwise a worker's respawn away (2 s). Never sooner
+ *  than 2 s, so a page's re-asks stay bounded. Memory only. */
+function nextReadAt(fp) {
+  const now = Date.now(), floor = now + 2000;
+  const r = fp && _fileRefusals.get(fp);
+  if (fileStorageHung(fp)) return Math.max(floor, (r && r.retryAt) || now + STORAGE_RETRY_MS);
+  if (r && r.firstAt + SLICED_AFTER_MS > now) return Math.max(floor, r.firstAt + SLICED_AFTER_MS + 250);
+  if (_slicedParked || (fp && isZstPath(fp))) return now + 60000;
+  return floor;
 }
 /** row B-422c unit 2's legs: the stated time and the read's deadline (ms; null = the product's), and the file records' state */
 function _setSlicedForTest({ afterMs = null, deadlineMs = null, standGapMs = null, storageRetryMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; STAND_GAP_MS = standGapMs == null ? 120000 : standGapMs; STORAGE_RETRY_MS = storageRetryMs == null ? 30000 : storageRetryMs; }
@@ -1784,7 +1803,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
-  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, storageRetryDue, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, fileStorageHung, fileRefused, poolRefusing, storageRetryDue, nextReadAt, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

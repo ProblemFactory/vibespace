@@ -665,11 +665,19 @@ const _fpOf = new Map();       // claudeSessionId → its transcript's path, as 
 const _reWarmAt = new Map();   // claudeSessionId → when the parse may ask the warm again
 const FP_OF_MAX = 8192;
 const knowFp = (id, fp) => { _fpOf.delete(id); _fpOf.set(id, fp); while (_fpOf.size > FP_OF_MAX) _fpOf.delete(_fpOf.keys().next().value); };
-const notLoadedList = () => Object.assign([], { notLoaded: NOT_LOADED });
+const notLoadedList = (info = {}) => Object.assign([], { notLoaded: NOT_LOADED, storageHung: !!info.storageHung, retryAt: info.retryAt || null });
+// r1243 item 2 — A PAGE TOLD «NOT LOADED» IS NOTIFIED when its history becomes readable (the tree's law: a cache a page also keeps is
+// NOTIFIED at its one entry point): a session answered «not loaded» is remembered; the warm or the parse that next LOADS it tells
+// every listener once (ws-handler pushes `history-ready` to that conversation's clients — the page asks again, never a re-open)
+const _awaitingRead = new Set();
+const _readableListeners = new Set();
+function onHistoryReadable(fn) { _readableListeners.add(fn); return () => _readableListeners.delete(fn); }
+function noteAwaiting(id) { _awaitingRead.delete(id); _awaitingRead.add(id); while (_awaitingRead.size > FP_OF_MAX) _awaitingRead.delete(_awaitingRead.keys().next().value); }
+function noteReadable(id) { if (!_awaitingRead.delete(id)) return; for (const fn of _readableListeners) { try { fn(id); } catch (e) { console.warn('[session-store] a history-readable listener threw:', e && e.message); } } }
 const C = () => require('./adapters/codex');   // lazily (the adapter requires nothing of this module at load)
 // the kept copy's tagged twin, ONE per cache entry (an entry's list never changes in place): the merge memo keys on the array
 const _taggedKept = new WeakMap();
-const taggedKeptOf = (list) => { let c = _taggedKept.get(list); if (!c) { c = Object.assign(list.slice(), { notLoaded: NOT_LOADED, kept: true }); _taggedKept.set(list, c); } return c; };
+const taggedKeptOf = (list, info = {}) => { let c = _taggedKept.get(list); if (!c) { c = Object.assign(list.slice(), { notLoaded: NOT_LOADED, kept: true }); _taggedKept.set(list, c); } c.storageHung = !!info.storageHung; c.retryAt = info.retryAt || null; return c; };   // the twin is ours: its door and its next try are told fresh
 // B-cd4b unit 2 (hold 3): THE WARM'S COLD READ IN PAGES. Its one-shot reply (`jsonlTail`: readJsonlTail's whole entry, a 100 MB
 // conversation's ~70 MB of records) crossed to the main thread in ONE structured clone — measured at a hub restart with 80
 // survivors, the page's re-attaches: the loop held ~1.0–1.3 s at its deserialize. Now the ONE pager carries it
@@ -721,7 +729,7 @@ function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
   const k = claudeSessionId + '\u0000' + (cwd || ''), bulk = !!(opts && opts.bulk === true);
   const was = _warmOfSession.get(k);
   if (was && (bulk || !was.bulk)) return was.p;
-  const p = warmOnce(claudeSessionId, cwd, opts).then((ok) => { if (ok) _reWarmAt.delete(claudeSessionId); return ok; })   // a warm that read: the parse may ask again at once after a later refusal
+  const p = warmOnce(claudeSessionId, cwd, opts).then((ok) => { if (ok) { _reWarmAt.delete(claudeSessionId); noteReadable(claudeSessionId); } return ok; })   // a warm that read: the parse may ask again at once after a later refusal; a page told «not loaded» is told it can read now
     .finally(() => { const cur = _warmOfSession.get(k); if (cur && cur.p === p) _warmOfSession.delete(k); });
   _warmOfSession.set(k, { p, bulk });
   return p;
@@ -735,9 +743,12 @@ async function warmOnce(claudeSessionId, cwd, opts = null) {
     if (!C().storageRetryDue(known)) return false;   // asked of the pool again at most once a gap (30 s doubling, ≤ 8 min) — never stuck
     // the STORAGE hung under this transcript (a deadline, a hung path, a blocked mount — its record says so) — NO find and NO stat on
     // this loop: the pool alone is asked again (its path memory refuses at once while it remembers; then a worker tries, off the loop)
+    // the POOL refusing every call (closed, gone) cannot retry it: the due retry is the main process's own sliced read (r1243 item 3 —
+    // the guard holds: one at a time, none while one is parked, its own deadline; a door-blocked mount never)
     const t0 = performance.now();
     let r = null;
-    try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; }
+    if (C().poolRefusing()) { try { r = await C().readJsonlTailSliced(known, { dropSubagent: true, storageRetry: true }); } catch { return false; } }
+    else { try { r = await C().readJsonlTailAsync(known, { dropSubagent: true }); } catch { return false; } }
     if (!r || !r.entry) return false;
     _stampJsonlParse(r.bytes, performance.now() - t0);
     _jsonlCachePut(claudeSessionId, r.entry);
@@ -816,10 +827,11 @@ function parseSessionJsonl(claudeSessionId, cwd) {
       }
     }
     const kept = _jsonlCache.get(claudeSessionId);   // after the warm's synchronous part (an append it folded in)
-    if (!kept || !Array.isArray(kept.messages)) return notLoadedList();
+    const info = { storageHung: hung, retryAt: C().nextReadAt(known) };   // r1243 items 1 + 2: the page says which door refused, and when it asks again
+    if (!kept || !Array.isArray(kept.messages)) { noteAwaiting(claudeSessionId); return notLoadedList(info); }
     if (!hung && known) {
       let st = null; try { st = fs.statSync(known); } catch { st = null; }
-      if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) { _jsonlUsed.set(kept, Date.now()); return kept.messages; }   // the copy IS the file: loaded
+      if (st && st.mtimeMs === kept.mtimeMs && st.size === kept.size && st.ino === kept.ino) { _jsonlUsed.set(kept, Date.now()); noteReadable(claudeSessionId); return kept.messages; }   // the copy IS the file: loaded
       // the file merely GREW past the copy, within the warm's inline bound (≤ WARM_INLINE_APPEND_MAX): folded in here as the warm does
       // with the pool up — a bounded read of the appended bytes, never the whole file — so a growing conversation never flickers
       // «not loaded» between two warms
@@ -830,11 +842,13 @@ function parseSessionJsonl(claudeSessionId, cwd) {
           if (r.mode === 'append') carryPosFrom(r.entry, kept);
           _stampJsonlParse(r.bytes, performance.now() - t0);
           _jsonlCachePut(claudeSessionId, r.entry);
+          noteReadable(claudeSessionId);
           return r.entry.messages;
         }
       }
     }
-    return taggedKeptOf(kept.messages);   // BEHIND the file (or its storage hung): a copy of its list, tagged — never the cache's own array
+    noteAwaiting(claudeSessionId);
+    return taggedKeptOf(kept.messages, info);   // BEHIND the file (or its storage hung): a copy of its list, tagged — never the cache's own array
   }
   const fp = findSessionJsonlPath(claudeSessionId, cwd);
   if (!fp) return [];
@@ -1278,6 +1292,8 @@ class SessionMessages {
     // bound is read from its tail only (src/adapters/codex.js readJsonlTail: the span's start); no transcript read: not known
     this._fromStart = spanFromStart(historySessionId ? _jsonlCache.get(historySessionId) : null, jsonl);
     this.notLoaded = (jsonl && jsonl.notLoaded) || null;   // row B-422c: the page says the history waits on the reader
+    this.notLoadedStorage = !!(jsonl && jsonl.notLoaded && jsonl.storageHung);   // r1243 item 1: which door refused (the storage's: its own words)
+    this.notLoadedRetryAt = (jsonl && jsonl.notLoaded && jsonl.retryAt) || null;   // r1243 item 2: when the page asks again by itself
     // THE MERGE MEMO (perf chunk C): the merge below is a pure function of
     // (the jsonl array, the buffer string) and the cache hands back the SAME
     // array until the file changes, so a burst of SessionMessages over one
@@ -1992,7 +2008,7 @@ function dedupWebuiSockets(entries) {
 }
 
 module.exports = { setJsonlHeld, noteJsonlView, dropJsonlView, dropJsonlViews, jsonlCacheTrim, jsonlCacheTestPut, jsonlHas, claudeTranscriptIndex, stuckSaid,
-  warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus,
+  warmSessionJsonlAsync, jsonlCacheClear, jsonlCacheCensus, onHistoryReadable,
   taskLinesSince, warmTaskEvents, TASK_EVENT_CACHE_MAX, _taskEventCache, _mergeCounts, _taskScanCounts, _taskStateCensus: taskStateCensus, _spanFromStart: spanFromStart, _jsonlPosOf: jsonlPosOf, _userAtOrAfter: userAtOrAfter, _jsonlPosCensus: jsonlPosCensus, POS_KEY_BYTES, POS_ORD_BYTES,
   extractSessionMeta,
   SESSIONS_DIR,

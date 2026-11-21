@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// test-transcript-history-slices.mjs — FAST (in-process): ROW B-422c UNIT 2 (lane hub-loop-stalls, 主开发 r1006 item 2 — THE
+// test-transcript-history-slices.mjs — HEAVY (in-process; the fast tier's stated sum sits at its cap): ROW B-422c UNIT 2 (lane hub-loop-stalls, 主开发 r1006 item 2 — THE
 // DEGRADATION ROAD of the TWO HISTORIES). THE LAW: a person can always read a conversation's history, and no step of it holds the
 // loop 250 ms. With the REAL transcript pool closed for good, a history whose refusal is NOT the storage's and has stood past the
 // stated time is read ON THE MAIN PROCESS in bounded slices (src/adapters/codex.js readJsonlTailSliced / readCodexRolloutSliced):
 //   ① the Claude history: the first warm says «not loaded» (the refusal has not stood yet — nothing read); past the stated time the
 //     warm loads it, NO synchronous read of the transcript, the longest loop turn UNDER THE LAW; its cache entry = the worker's
-//     (readJsonlTail's full read, field for field). RED: the whole-file parse on the loop (readJsonlTail, timed here) — one turn
-//     past the law.
-//   ② the codex history (CodexSessionMessages.rawAsync): the same — its records = parseCodexSessionJsonl's. RED: that parse, timed.
+//     (readJsonlTail's full read, field for field). The whole-file parse on the loop (readJsonlTail, the release's road) is timed
+//     here and PRINTED beside it (r1243: a premise on the machine's speed is no guard — the guards are the sliced road's longest
+//     turn and its zero synchronous reads).
+//   ② the codex history (CodexSessionMessages.rawAsync): the same — its records = parseCodexSessionJsonl's (that parse timed, printed).
 //   ③ the STORAGE's refusal (a hung path): nothing read on the main process, ever (RED: a refusal of another kind reads it there).
 //   ④ the four other roads never take it (the gap read refuses by name; nothing opened).
 //   ⑤ said once a file in the journal.
@@ -59,7 +60,7 @@ fs.mkdirSync(cwd, { recursive: true });
 const SS = require(path.join(REPO, 'src/session-store.js'));
 const projDir = path.join(HOME, '.claude', 'projects', SS.cwdToProjectDir(cwd));
 fs.mkdirSync(projDir, { recursive: true });
-const sids = ['a1111111-2222-4333-8444-555555555555', 'b1111111-2222-4333-8444-555555555555', 'c1111111-2222-4333-8444-555555555555', 'd1111111-2222-4333-8444-555555555555', 'e1111111-2222-4333-8444-555555555555', 'f1111111-2222-4333-8444-555555555555'];
+const sids = ['a1111111-2222-4333-8444-555555555555', 'b1111111-2222-4333-8444-555555555555', 'c1111111-2222-4333-8444-555555555555', 'd1111111-2222-4333-8444-555555555555', 'e1111111-2222-4333-8444-555555555555', 'f1111111-2222-4333-8444-555555555555', '71111111-2222-4333-8444-555555555555'];
 const claudeFp = (sid) => path.join(projDir, sid + '.jsonl');
 const BIG = 36 * 1024 * 1024;
 function placeClaude(fp, bytes) {
@@ -149,7 +150,7 @@ console.log('① the Claude history, the pool closed for good');
   const fields = ['mtimeMs', 'size', 'ino', 'dev', 'spanStart', 'spanEnd', 'partial', 'headProbe', 'tailProbe', 'incr'];
   ok(fields.every((k) => a[k] === b[k]) && a.starts.length === b.starts.length && a.starts.every((v, i) => v === b.starts[i]) && same(a.messages, b.messages),
     `① its entry is the worker's, field for field (readJsonlTail's full read: ${a.messages.length} records, the span ${a.spanStart}…${a.spanEnd})`, { diff: fields.filter((k) => a[k] !== b[k]) });
-  ok(syncMs >= LAW_MS, `① RED — the whole-file parse on the loop (the release's road, readJsonlTail): ONE turn of ${syncMs} ms ≥ ${LAW_MS} ms`, { syncMs });
+  console.log(`  · ① the whole-file parse on the loop (the release's road, readJsonlTail): ONE turn of ${syncMs} ms — the sliced road's longest ${R1.longest} ms (printed: a machine's speed is no guard)`);
   // while the pool refuses the FILE (its record: no answer for it since) — through a warm with no word from the pool («already
   // warm») — the file then GROWN, a parse with NO warm reads nothing on the loop (the copy tagged, the warm asked again) — RED: the
   // parse's sync append read
@@ -183,7 +184,7 @@ console.log('② the codex history, the pool closed for good');
     `${R1.name}: LOADED on the main process — ${R1.out && R1.out.n} records after the merges (the sync parse's ${sync.length}), every file call async, the longest turn ${R1.longest} ms < ${LAW_MS} ms`, { out: R1.out, longest: R1.longest, reads: content(R1).slice(0, 3) });
   const viaSlices = await C.readCodexRolloutSliced(codexFp);
   ok(same(viaSlices, sync), `② its records are parseCodexSessionJsonl's, record for record (${sync.length})`);
-  ok(syncMs >= LAW_MS, `② RED — the whole-file parse on the loop (parseCodexSessionJsonl): ONE turn of ${syncMs} ms ≥ ${LAW_MS} ms`, { syncMs });
+  console.log(`  · ② the whole-file parse on the loop (parseCodexSessionJsonl): ONE turn of ${syncMs} ms — the sliced road's longest ${R1.longest} ms (printed)`);
 }
 console.log('③ the storage\'s refusal, ④ the other roads, ⑤ said once');
 {
@@ -246,6 +247,20 @@ console.log('⑤b the read note\'s two ends');
   fs.appendFileSync(fb, '{"type":"user","uuid":"after","message":{"role":"user","content":"q"}}\n');
   const nb = SS.parseSessionJsonl(sb, cwd);
   ok(!nb.notLoaded && nb.length === n0 + 1, `⑤b(b) the pool answering again: the grown file's parse answers it whole (${nb.length} records, untagged)`, { n0, n: nb.length, notLoaded: nb.notLoaded });
+}
+console.log('⑤c the double fault: the pool closed for good AND the file the storage\'s');
+{
+  // r1243 item 3: the pool refusing every call cannot retry a storage file — the DUE retry is the main process's own sliced read
+  // (RED: it asked the pool, which never answers — the conversation «not loaded» until a restart)
+  C._setSlicedForTest({ storageRetryMs: 0, afterMs: 0 });
+  const sc = sids[6];
+  C._setTranscriptPoolForTest({ call() { return Promise.reject(Object.assign(new Error('a stand-in refusal'), { status: 503, code: 'path-hung' })); } });
+  await SS.warmSessionJsonlAsync(sc, cwd);   // the storage's
+  C._setTranscriptPoolForTest(pool);   // the real pool, closed for good: poolRefusing
+  ok(C.fileStorageHung(claudeFp(sc)) && C.poolRefusing(), 'premise: the file the storage\'s, the pool refusing every call');
+  const Rd2 = await road('⑤c the storage\'s due retry with the pool closed', () => SS.warmSessionJsonlAsync(sc, cwd));
+  const got = SS.parseSessionJsonl(sc, cwd);
+  ok(Rd2.out === true && opens(Rd2).length >= 1 && content(Rd2).length === 0 && !got.notLoaded && got.length > 0 && !C.fileStorageHung(claudeFp(sc)), `${Rd2.name}: read on the main process in slices (${opens(Rd2).length} open, ${content(Rd2).length} sync reads) — loaded (${got.length} records), the storage mark ended by its answer`, { out: Rd2.out, n: got.length, notLoaded: got.notLoaded });
 }
 console.log('⑥ a deadline on the codex merged read');
 {
@@ -326,7 +341,7 @@ console.log('⑨ the read\'s own deadline (a FIFO whose open never answers)');
     const w = fs.openSync(fifo, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK);   // the file answers at last: the parked open completes
     fs.closeSync(w);
     for (let i = 0; i < 100 && C.slicedState().parked; i++) await sleep(20);
-    ok(C.slicedState().parked === 0 && !C.slicedRoadFor(fifo).ok, `⑨ the parked read answered at last ⇒ its place is free (parked ${C.slicedState().parked}); the file stays the storage's`, C.slicedState());
+    ok(C.slicedState().parked === 0 && !C.fileStorageHung(fifo) && C.slicedRoadFor(fifo).ok, `⑨ the parked read answered at last ⇒ its place is free (parked ${C.slicedState().parked}) and the file ANSWERED: its own-deadline mark ends, the road opens again (r1243 item 3 — it was stuck until a restart)`, { st: C.slicedState(), why: C.slicedRoadFor(fifo).why });
   }
   C._setTranscriptPoolForTest(pool);
   C._setSlicedForTest({});
