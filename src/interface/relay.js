@@ -50,6 +50,15 @@ function requestLines(raw) {
 const answerLines = (req, raw) => (req.httpVersion === '1.0' ? without(raw, OLD_PAGE_DROPS) : raw.slice());
 /** an upgrade's head as received: its request line and its header lines, re-joined (latin1: the bytes as they came) */
 const headOf = (req) => { let h = `${req.method} ${req.url} HTTP/${req.httpVersion}\r\n`; for (let i = 0; i + 1 < req.rawHeaders.length; i += 2) h += `${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}\r\n`; return Buffer.from(h + '\r\n', 'latin1'); };
+/** the channel socket as Node's client writes on it: every STRING it is handed is a head's text (a page's body comes as
+ *  Buffers), and a head is latin1. Node's own Expect flush (lib/_http_outgoing.js: _storeHeader → _send('')) hands the head
+ *  as a string with NO encoding, which the socket writes as UTF-8 — a byte above 0x7f would reach the party re-encoded. So a
+ *  string is written as latin1, whatever it is told. */
+function headsAsLatin1(sock) {
+  const write = sock.write.bind(sock);
+  sock.write = (data, enc, cb) => (typeof data === 'string' ? write(Buffer.from(data, 'latin1'), typeof enc === 'function' ? enc : cb) : write(data, enc, cb));
+  return sock;
+}
 /** a 103's hints as Node's writeEarlyHints takes them (DECLARED.informational, on Node 22) */
 const hintsOf = (raw) => { const h = {}; for (const [k, v] of pairsOf(raw)) { const key = String(k).toLowerCase() === 'link' ? 'link' : k; h[key] = h[key] === undefined ? v : [].concat(h[key], v); } return h; };
 
@@ -89,7 +98,7 @@ function create({ ownerOf, newTrace = () => crypto.randomBytes(8).toString('hex'
     if (!sock) { stats.noOwner++; answerItself(res, 503, exhausted ? SPENT : NO_OWNER); req.resume(); return; }
     let out;
     // NO agent: with `agent: false` Node builds an Agent of its own, which dials TCP and never calls createConnection
-    try { out = http.request({ createConnection: () => sock, method: req.method, path: req.url, headers: requestLines(req.rawHeaders), setDefaultHeaders: false }); }
+    try { out = http.request({ createConnection: () => headsAsLatin1(sock), method: req.method, path: req.url, headers: requestLines(req.rawHeaders), setDefaultHeaders: false }); }
     catch (e) {   // a head Node's server read and Node's writer refuses: answered by name, the process never ends on it
       stats.unforwardable++; sock.destroy(); req.resume();
       try { log.error?.(`[interface] a head Node's writer refuses was answered 400 «unforwardable» (${String(e && e.code || e).slice(0, 60)})`); } catch { }

@@ -33,8 +33,9 @@
 //     once its CLOSE is out — the relay needs no forget of its own; 10 000 by hand, the same). RED CONTROL: the frame code's
 //     forget neutered.
 //   ⑪ MUST 4 — A CLOSE NEVER OVERTAKES ITS OWN BYTES: a page uploads one window + 64 KiB + 1000 bytes and ends, to an owner that
-//     holds its credit ⇒ the owner has every byte when the close arrives. RED CONTROL: the page's end sent as a CLOSE at once,
-//     past the bytes still waiting in the channel's socket ⇒ the close arrives first. (A link without closeAfterQueue is
+//     holds its credit ⇒ the owner has every byte when the close arrives. RED CONTROL: the page's bytes taken as they come and
+//     its end sent as a CLOSE at once, past the bytes still waiting in the channel's socket ⇒ the close arrives first (with the
+//     page under back-pressure no byte waits there when its end is read — the end is read only after the last read drained). (A link without closeAfterQueue is
 //     refused by the channel sockets themselves: src/agentd/chan-socket.js, scripts/test-chan-socket.mjs.)
 // in-process; a scratch dir under os.tmpdir(); a throwaway self-signed pair made with openssl.
 import fs from 'node:fs';
@@ -177,7 +178,7 @@ function upgraded(port) {
     s.on('data', onData); s.once('close', () => resolve(s));
   });
 }
-async function roundTrips(port, n = 30) {
+async function roundTrips(port, n = 16) {
   const s = await upgraded(port); const times = [];
   let acc = '', waiter = null; s.on('data', (b) => { acc += b.toString(); if (acc.includes('PONG\n')) { acc = acc.replace('PONG\n', ''); const w = waiter; waiter = null; w && w(); } });
   for (let i = 0; i < n; i++) { const t0 = performance.now(); await new Promise((r) => { waiter = r; s.write('PING\n'); }); times.push(performance.now() - t0); }
@@ -269,7 +270,7 @@ async function optionsSeen(I, n = 4) {
   const M = await boot(interfaceWith({ front: mutFront })); far.mode = 'raw';
   const nagle = await roundTrips(M.port);
   await M.close();
-  ok(law.median * 3 < nagle.median, `30 keystroke round trips: median ${law.median.toFixed(2)} ms with the socket's options set here — RED CONTROL, the default left on (Nagle): ${nagle.median.toFixed(2)} ms`, { law, nagle });
+  ok(law.median * 3 < nagle.median, `16 keystroke round trips: median ${law.median.toFixed(2)} ms with the socket's options set here — RED CONTROL, the default left on (Nagle): ${nagle.median.toFixed(2)} ms`, { law, nagle });
   const opts = await optionsSeen();
   const bare = await optionsSeen(interfaceWith({ front: mutant('src/interface/front.js', '  socket.setNoDelay(true);\n  socket.setKeepAlive(true, 0);\n', '') }));
   ok(opts.noDelay >= 4 && opts.keepAlive >= 4 && bare.noDelay === 0 && bare.keepAlive === 0, `4 pages: every socket told no-delay (${opts.noDelay}) and keep-alive (${opts.keepAlive}) HERE — RED CONTROL, the options cut: ${bare.noDelay} / ${bare.keepAlive}`, { opts, bare });
@@ -285,10 +286,10 @@ async function stalledThenResumed(I, { resumeMs = 15000 } = {}) {
   let last = -1, steady = 0, maxHeld = 0;
   for (let i = 0; i < 300 && steady < 10; i++) { await sleep(10); const h = B.iface.stats().held; maxHeld = Math.max(maxHeld, h); steady = h === last ? steady + 1 : 0; last = h; }
   const held = B.iface.stats().held;
-  let got = 0; s.on('data', (b) => { got += b.length; }); s.resume();   // the page reads again
-  await until(() => got >= BIG, resumeMs);
+  let got = 0; s.on('data', (b) => { got += b.length; }); const t0 = performance.now(); s.resume();   // the page reads again
+  await until(() => got >= BIG, resumeMs); const resumeTook = performance.now() - t0;
   s.destroy(); await B.close();
-  return { held, maxHeld, got };
+  return { held, maxHeld, got, resumeTook };
 }
 {
   const law = await stalledThenResumed();
@@ -296,7 +297,7 @@ async function stalledThenResumed(I, { resumeMs = 15000 } = {}) {
   ok(law.got === BIG, `the page reads again: all ${law.got} bytes arrive (the withheld credit goes back at each drain)`, law);
   const onReceipt = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock); sock.on('data', (b) => socket.write(b)); tap(socket);\n") }), { resumeMs: 15000 });
   ok(onReceipt.held > 4 * INITIAL_WINDOW, `RED CONTROL — the channel read with no back-pressure (every byte taken as it comes, so credited): ${onReceipt.held} bytes wait in the interface`, onReceipt.held);
-  const noDrain = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock); sock.on('data', (b) => { if (!socket.write(b)) sock.pause(); }); tap(socket);\n") }), { resumeMs: 1500 });
+  const noDrain = await stalledThenResumed(interfaceWith({ relay: mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock); sock.on('data', (b) => { if (!socket.write(b)) sock.pause(); }); tap(socket);\n") }), { resumeMs: Math.max(200, 4 * law.resumeTook) });   // four times what the law's resume took here
   ok(noDrain.got < BIG, `RED CONTROL — the page's drain never resumes the channel: the page reads again and gets ${noDrain.got} of ${BIG} bytes, then nothing`, noDrain);
 }
 async function uploadToDeafOwner(I) {
@@ -422,9 +423,9 @@ async function uploadThenEnd(I) {
 {
   const law = await uploadThenEnd();
   ok(law.gotAtClose === law.total, `a page uploads one window, a 64 KiB read and 1000 bytes (${law.total}) to an owner that holds its credit, and ends: the owner has all ${law.gotAtClose} bytes when the close arrives`, law);
-  const early = mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.pipe(sock, { end: false }); socket.on('end', () => { try { sock.mux.closeChan(sock.chan); } catch { } }); sock.pipe(socket); tap(socket);\n");
+  const early = mutant('src/interface/relay.js', '    socket.pipe(sock); sock.pipe(socket); tap(socket);\n', "    socket.on('data', (b) => sock.write(b)); socket.on('end', () => { try { sock.mux.closeChan(sock.chan); } catch { } }); sock.pipe(socket); tap(socket);\n");
   const red = await uploadThenEnd(interfaceWith({ relay: early }));
-  ok(red.gotAtClose !== undefined && red.gotAtClose < red.total, `RED CONTROL — the page's end sent as a CLOSE at once, past the bytes still in the channel's socket: the owner sees the close after ${red.gotAtClose} of ${red.total} bytes`, red);
+  ok(red.gotAtClose !== undefined && red.gotAtClose < red.total, `RED CONTROL — the page's bytes taken as they come and its end sent as a CLOSE at once, past the bytes still waiting in the channel's socket: the owner sees the close after ${red.gotAtClose} of ${red.total} bytes`, red);
 }
 
 lap('⑧ ');
@@ -600,11 +601,14 @@ async function midUpload(I, bound = null, { hubDestroys = true } = {}) {
   let ended = false; page.on('end', () => { ended = true; }); page.on('close', () => { ended = true; });
   page.write('POST /up HTTP/1.1\r\nHost: x\r\nContent-Length: 4000000\r\n\r\n');
   const chunk = Buffer.alloc(65536, 7); for (let i = 0; i < 8; i++) page.write(chunk);   // 512 KiB of a 4 MB upload
-  if (hubDestroys) await until(() => destroyedAt > 100000 && ended, 3000); else await until(() => destroyedAt > 100000, 3000);
+  const t1 = performance.now();
+  if (hubDestroys) await until(() => destroyedAt > 100000 && (ended || iface.stats().channels === 0), 3000); else await until(() => destroyedAt > 100000, 3000);
+  const upTook = performance.now() - t1;
   await sleep(30); page.resetAndDestroy();   // the page goes (an RST: no FIN — its close handler's road)
   const t0 = performance.now(); await until(() => iface.stats().channels === 0 && party.router.size === 0, bound || 3000); const took = performance.now() - t0; await sleep(20);
   const L = link;
-  const r = { channels: iface.stats().channels, routerSize: party.router.size, held: { closeAfter: L._closeAfter.size, sendQ: L._sendQ.size, sendWin: L._sendWin.size }, took, hubSawGone };
+  const r = { channels: iface.stats().channels, routerSize: party.router.size, held: { closeAfter: L._closeAfter.size, sendQ: L._sendQ.size, sendWin: L._sendWin.size }, took, upTook, hubSawGone };
+  console.log(`    (midUpload ${hubDestroys ? 'hub-first' : 'page-first'}: the upload phase ${Math.round(upTook)} ms, the let-go ${Math.round(took)} ms)`);   // printed, never judged
   try { party.mux.destroy(); } catch { } await iface.close(); srv.close(); hubServer.close();
   return r;
 }

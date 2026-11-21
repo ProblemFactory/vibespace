@@ -21,7 +21,7 @@
 //     (the informational answers, the status line, every header line, the body's digest, the trailers) are EQUAL but for
 //     src/interface/relay.js DECLARED, by name — or the same refusal by Node; the door class at the interface's end equals
 //     the hub's; a head inside a body opens no channel; the interface answers after every case. RED CONTROLS: a forwarder
-//     that joins duplicate lines; one that re-encodes the target.
+//     that joins duplicate lines; one that re-encodes the target; the channel socket left to Node's Expect flush (UTF-8).
 //   ⑧ EVERY CLOCK ON A PAGE SOCKET IS THE INTERFACE'S (leg 8, its framing half): each named clock is no shorter than the
 //     plain form's, and each fires in its own case — a silent head, a slow body, an idle kept-alive connection, a head over
 //     the size bound, an upgraded socket whose channel ended; three poll-period requests of one tab ride ONE accept; a reset
@@ -394,6 +394,9 @@ console.log('— ⑥ FAITHFUL BOTH WAYS: a seeded differential against the plain
   const dup = await redOf(joins, 'GET /dup HTTP/1.1\r\nHost: hub.example\r\nCookie: a=1\r\nCookie: b=2\r\nConnection: close\r\n\r\n');
   ok(dup.differs, `RED CONTROL — a forwarder that joins duplicate lines: the differential differs on two Cookie lines (${JSON.stringify(dup.plain)} → ${JSON.stringify(dup.through)})`, dup);
   const enc = await redOf(reenc, 'GET /p%7Eq/caf%C3%A9 HTTP/1.1\r\nHost: hub.example\r\nConnection: close\r\n\r\n');
+  const utf8 = mutant('src/interface/relay.js', 'createConnection: () => headsAsLatin1(sock),', 'createConnection: () => sock,');
+  const exp = await redOf(utf8, 'POST /e HTTP/1.1\r\nHost: hub.example\r\nX-Weird: v\u00e9\r\nExpect: 100-continue\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok');
+  ok(exp.differs, `RED CONTROL — the channel socket left to Node's Expect flush (no latin1): an Expect head's byte above 0x7f reaches the hub re-encoded as UTF-8 (${JSON.stringify(exp.plain && exp.plain[1][3])} → ${JSON.stringify(exp.through && exp.through[1][3])})`, exp);
   ok(enc.differs, `RED CONTROL — a forwarder that re-encodes the target: the differential differs on /p%7Eq/caf%C3%A9 (${JSON.stringify(enc.plain && enc.plain[0])} → ${JSON.stringify(enc.through && enc.through[0])})`, enc);
   await P.close(); plain.close();
 }
@@ -484,7 +487,7 @@ console.log('— ⑩ NO PAGE BYTE IS A CONTROL LINE: the channel numbers stop be
   const wraps = mutant('src/interface/relay.js', '    if (next > LAST_CHAN) {', '    if (false) {');
   const redHub = hubWith();
   const R = await pair(redHub.h, { relayMod: wraps, firstChan: RELAY.LAST_CHAN - 1 });
-  await get(R.port, '/one'); await get(R.port, '/two'); await post(R.port);
+  await get(R.port, '/one'); await get(R.port, '/two'); post(R.port);   // its answer never comes (it went out on channel 0): not waited for
   await until(() => redHub.seen.includes('203.0.113.66'), 1500);
   ok(redHub.seen.includes('203.0.113.66'), `RED CONTROL — the guard cut: the next exchange's bytes go out on channel 0 and the page's JSON line reaches the hub as a CONTROL line — a forged open line, its stamp «203.0.113.66» (${JSON.stringify(redHub.seen)})`, redHub.seen);
   await R.close();
