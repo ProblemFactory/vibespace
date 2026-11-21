@@ -220,6 +220,32 @@ console.log('\n§3 A RED CONTROL THAT BUILDS NOTHING FAILS BY NAME (B-0d3e) — 
   const nC = unanchoredEdits(P("const code = src.replace(/\\/\\/.*$/gm, ''); ok(code.includes('x'), 'read'); const real = MUT.load('src/x.js', src, 'as-is', { same: true });")).length;
   const nD = unanchoredEdits(P("const p = src.replace('a', 'b').replace('c', 'd'); const f = new Function(p);")).length;
   ok(nA === 1 && nB === 0 && nC === 0 && nD === 2, `CONTROL: the walk finds a replace-then-load (1), never an anchored() edit (0) nor a read that feeds no loader (0), and each link of a chain bound once and loaded (2) — ${[nA, nB, nC, nD].join(' / ')}`);
+  // B-0d3e's reach (lane lg-text-legs-2): a chain is followed to its read THROUGH a cured link (a suite's editAnchor, scratch.mjs
+  // anchored()), inline or held in a name — before it, a call base was no name and an edit appended after a cure was invisible
+  // (2.369.414 held nine in five suites, test-cli-level-scan's path-only control among them). Only a REBASE of module paths is
+  // left out: every match, a relative path and no module's name in the pattern, a replacement that re-roots each path the same way
+  const nE = unanchoredEdits(P("const m = MUT.load('src/x.js', editAnchor(src, 'a', 'b', 'src/x.js').replace('c', 'd'), 't');")).length;
+  const nE2 = unanchoredEdits(P("const m = MUT.load('src/x.js', anchored(src, 'a', 'b', 't').split('c').join('d'), 't');")).length;
+  const nE3 = unanchoredEdits(P("const c = editAnchor(src, 'a', 'b', 'src/x.js'); const m = MUT.load('src/x.js', c.replace('c', 'd'), 't');")).length;
+  ok(nE === 1 && nE2 === 1 && nE3 === 1, `CONTROL (the planted red): a SECOND EDIT appended to a cured chain is counted — after editAnchor() ${nE}, after anchored() ${nE2}, after a cured link held in a name ${nE3} (1 each; the census before followed no cured link and counted 0)`);
+  const L = (e) => `const m = MUT.load('src/x.js', ${e}, 't');`;
+  const CASES = [   // [the body, the count meant, what it is]
+    [L("anchored(anchored(src, 'a', 'b', 't'), 'c', 'd', 't2').replace(/require\\('\\.\\//g, `require('${ROOT}/`)"), 0, 'cured links chained, then a prefix rebase'],
+    [L("src.replace(/require\\('\\.\\/([\\w-]+\\.js)'\\)/g, (_, f) => 'require(' + JSON.stringify(path.join(ROOT, f)) + ')')"), 0, 'a rebase by a function of the captured name'],
+    [L("src.split(\"require('../\").join(`require('${ROOT}/`)"), 0, 'a split/join prefix rebase (its pattern is split\'s)'],
+    [L("src.replace(/require\\('\\.\\/([\\w-]+\\.js)'\\)/g, (_, f) => 'require(' + JSON.stringify(map[f] || path.join(ROOT, f)) + ')')"), 1, 'a map lookup picks what loads'],
+    [L("src.split(\"require('./store.js')\").join(\"require('./fake.js')\")"), 1, 'a fixed module swapped'],
+    [L("src.replace(/require\\('\\.\\/([\\w-]+\\.js)'\\)/g, () => \"require('./fake.js')\")"), 1, 'one module named for every path'],
+    [L("src.replace(/require\\('\\.\\/store\\.js'(\\))/g, (_, close) => \"require('./fake.js'\" + close)"), 1, 'a fixed module in the pattern, its tail caught'],
+    [L("src.replace(/require\\('\\.\\//, `require('${ROOT}/`)"), 1, 'the first match only'],
+    [L("src.replace(\"require('./a.js')\", 'R')"), 1, 'one require, not every'],
+    [L("src.replaceAll('moved from the queue', 'R')"), 1, 'prose that says «from»'],
+    [L("src.split('a').join(\"require('../\")"), 1, 'a path in the REPLACEMENT is no pattern'],
+    [L("src.replace(/^import [^\\n]*\\n/gm, '')"), 1, 'import lines stripped (no relative path)'],
+    ["const from = 'a', to = 'b'; " + L('src.split(from).join(to)'), 1, 'an anchor held in a variable named «from»'],
+  ];
+  const caseMiss = CASES.map(([body, want, why]) => [unanchoredEdits(P(body)).length, want, why]).filter(([got, want]) => got !== want);
+  ok(caseMiss.length === 0, `CONTROL: only a REBASE of module paths is left out — ${CASES.filter((c) => c[1] === 0).length} rebases not counted, ${CASES.filter((c) => c[1] === 1).length} look-alikes counted${caseMiss.length ? ' — WRONG: ' + caseMiss.map(([g, w, y]) => `${y} ${g} (meant ${w})`).join(' · ') : ''}`);
   const jA = judge({ 'test-new.mjs': 1, 'test-old.mjs': 3 }, { 'test-old.mjs': 3 }), jB = judge({ 'test-old.mjs': 1 }, { 'test-old.mjs': 3 });
   ok(jA.added.join() === 'test-new.mjs' && !jB.added.length && jB.fell.join() === 'test-old.mjs', 'CONTROL: a file that ADDS an unanchored edit is red by name; one whose count falls is only said (the one-way rule)');
   const many = Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`test-over-${i}.mjs`, Array.from({ length: 30 }, (_, k) => ({ line: k + 1, text: 'src.replace(' + 'x'.repeat(90) + ')' }))]));

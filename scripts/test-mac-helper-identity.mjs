@@ -258,7 +258,7 @@ console.log('— ⑪ ROUND 3: a digit-first Team ID — the dumper quotes it; th
   // compare refuses what codesign actually prints for such a team: a0d876c5f's defect, by name
   const EQ = 'if (sameRequirement(req.designated, expect)) return null; // by meaning: the dumper\'s quoting is not a difference';
   const bytesOnly = editAnchor(SRC_TEXT, EQ, 'if (req.designated === expect) return null;', "src/mac-helper-identity.js");
-  const round2 = bytesOnly.replace('certificate leaf[subject.OU] = ${ouText(teamId)}`;', 'certificate leaf[subject.OU] = ${teamId}`;');
+  const round2 = editAnchor(bytesOnly, 'certificate leaf[subject.OU] = ${ouText(teamId)}`;', 'certificate leaf[subject.OU] = ${teamId}`;', "src/mac-helper-identity.js");
   ok(SRC_TEXT.includes(EQ) && bytesOnly !== SRC_TEXT && /extra clauses/.test(load(bytesOnly).requirementVerdict(db, { teamId: CS.DIGIT_TEAM }) || '') && load(bytesOnly).requirementVerdict(dq, { teamId: CS.DIGIT_TEAM }) === null, 'RED: a bytes-only compare refuses the BARE form of a digit-first team as «extra clauses» — the tokens are what bite');
   ok(round2 !== bytesOnly && /extra clauses/.test(load(round2).requirementVerdict(dq, { teamId: CS.DIGIT_TEAM }) || '') && / = 0VSTEAM002$/.test(load(round2).designatedRequirement({ teamId: CS.DIGIT_TEAM })) && load(round2).requirementVerdict(MI.parseDesignatedRequirement(CS.designated({ team: CS.TEAM })), { teamId: CS.TEAM }) === null, 'RED (a0d876c5f): round 2\'s bare emission + bytes-only compare refuses what the dumper prints for a digit-first team (and still passes a letter-first one — the one capture it generalised from)');
 }

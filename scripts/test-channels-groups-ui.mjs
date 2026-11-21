@@ -620,8 +620,8 @@ console.log('§verify r1 — a legacy chip after "İ" covers its @');
   ok(runs(V, rec) === 'İ [@beta] hi', 'F10: the legacy chip covers "@beta" exactly', runs(V, rec));
   const { pathToFileURL } = await import('node:url');
   const src = fs.readFileSync(path.join(REPO, 'src/lib/channel-groups-view.js'), 'utf-8');
-  const old = editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(src, 'const lower = foldCase(text);', 'const lower = text.toLowerCase();', "src/lib/channel-groups-view.js"), "const needle = '@' + foldCase(m.name);", "const needle = '@' + String(m.name).toLowerCase();", "src/lib/channel-groups-view.js"),
-    "from '../channel-groups.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-groups.js')).href), "src/lib/channel-groups-view.js").replaceAll("from './channel-focus.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-focus.js')).href)),
+  const old = editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(editAnchor(src, 'const lower = foldCase(text);', 'const lower = text.toLowerCase();', "src/lib/channel-groups-view.js"), "const needle = '@' + foldCase(m.name);", "const needle = '@' + String(m.name).toLowerCase();", "src/lib/channel-groups-view.js"),
+    "from '../channel-groups.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-groups.js')).href), "src/lib/channel-groups-view.js"), "from './channel-focus.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-focus.js')).href), "src/lib/channel-groups-view.js", 'all'),
     "from '../channel-ref.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/channel-ref.js')).href), "src/lib/channel-groups-view.js"),
     "from './channel-avatar.js'", 'from ' + JSON.stringify(pathToFileURL(path.join(REPO, 'src/lib/channel-avatar.js')).href), "src/lib/channel-groups-view.js");   // + channels-polish's account badges   // memberName climbs channel-names' ladder (the 2.369.202 integration)
   const oldFile = path.join(ROOT, 'channel-groups-view-v1-old.mjs');

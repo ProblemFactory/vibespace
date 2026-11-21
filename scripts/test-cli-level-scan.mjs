@@ -146,7 +146,7 @@ console.log('② the machine: one scan per binary, one at a time, a cut read rem
   const gone = await ask(MP, '2.1.429');
   ok(gone.state === 'gone' && gone.version === '2.1.429' && gone.read === '2.1.431', 'a build that is no longer on the machine: «gone», naming what the PATH\'s program reads instead — never its verdict', gone);
   const MSRC2 = fs.readFileSync(path.join(REPO, 'src/machine-probes.js'), 'utf8');
-  const PATHONLY = mutantCopies('level-path-only', REPO).load('src/machine-probes.js', anchored(MSRC2, "  if (version && platform === 'linux') {   // ① a process started from that build", "  if (false) {   // ① a process started from that build", 'path-only-a').replace("  if (version && vdir) { const f = path.join(vdir, version);", "  if (false) { const f = path.join(vdir, version);"), 'path-only');
+  const PATHONLY = mutantCopies('level-path-only', REPO).load('src/machine-probes.js', anchored(anchored(MSRC2, "  if (version && platform === 'linux') {   // ① a process started from that build", "  if (false) {   // ① a process started from that build", 'path-only-a'), "  if (version && vdir) { const f = path.join(vdir, version);", "  if (false) { const f = path.join(vdir, version);", 'path-only-b'), 'path-only');   // both edits by name (B-0d3e's reach: the second was a bare .replace after the cured link)
   PATHONLY._levelReset();
   const po = await ask(PATHONLY, '2.1.430');
   ok(po.state === 'gone' && po.read === '2.1.431', '② RED CONTROL: the PATH\'s file read for it — the conversation\'s build is never read (its end stays refused for good)', po);

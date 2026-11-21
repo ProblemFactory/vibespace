@@ -133,7 +133,12 @@ export function mutantCopies(name, repo) {
  *  text (a binding read from src/, server.js or data/bin) whose result reaches a LOADER (a mutant copy's write / load, a
  *  `_compile`, a vm run, `new Function`, a written copy), directly or through the one const it is bound to — each the
  *  anchor of a red control that says nothing when the product line moves. scripts/scratch.mjs `anchored()` is the door
- *  that fails by name (it calls no `.replace` in the suite). → [{ line, text }] (a file that does not parse → []). */
+ *  that fails by name (it calls no `.replace` in the suite). → [{ line, text }] (a file that does not parse → []).
+ *  THE REACH (B-0d3e's last unit, lane lg-text-legs-2): a chain is followed to its read THROUGH a cured link — a suite's
+ *  `editAnchor(text, …)` or scratch.mjs `anchored(text, …)` hands its first argument on, and a name bound to one is the product's
+ *  text still — so a second edit appended to a cured chain (`editAnchor(src, a, b, f).replace(c, d)`) is counted like any other.
+ *  Only a REBASE of module paths is left out (`rebase` below: every match, a relative path and no module's name in the pattern, a
+ *  replacement that re-roots each path the same way); a lookup, a swap, a first match, prose that says «from» stay counted. */
 export function unanchoredEdits(src, { ast: given = null } = {}) {
   // the cheap door first: no line that reads a product file, or no edit, or no loader ⇒ nothing to parse
   if (!/\.(?:replace|replaceAll|join)\(/.test(src) || !/(?:\.load|\.write|_compile|runIn\w*Context|compileFunction|writeFileSync|new Function)\(/.test(src)) return [];
@@ -149,16 +154,61 @@ export function unanchoredEdits(src, { ast: given = null } = {}) {
   // ONE walk: the product bindings, the identifiers handed to a loader, and every candidate edit with what it reaches
   const product = new Set(), loaderArgs = new Set(), cands = [];
   const isLoader = (n) => (n.type === 'CallExpression' && LOADER.test(text(n.callee))) || (n.type === 'NewExpression' && /^(?:Function|vm\.Script|Script)$/.test(text(n.callee)));
-  const baseOf = (n) => { let b = n; while (b && b.type === 'CallExpression' && b.callee.type === 'MemberExpression' && /^(?:replace|replaceAll|split|join)$/.test(b.callee.property.name || '')) b = b.callee.object; return b; };
+  // down the chain to its read: an edit's text, or a cured link's first argument (the text it was handed)
+  const CURED = new Set(['editAnchor', 'anchored']);
+  const baseOf = (n) => {
+    let b = n;
+    for (;;) {
+      if (b && b.type === 'CallExpression' && b.callee.type === 'MemberExpression' && /^(?:replace|replaceAll|split|join)$/.test(b.callee.property.name || '')) b = b.callee.object;
+      else if (b && b.type === 'CallExpression' && b.callee.type === 'Identifier' && CURED.has(b.callee.name) && b.arguments[0]) b = b.arguments[0];
+      else return b;
+    }
+  };
+  // a REBASE of module paths (not counted): a rewrite of EVERY match (a /g RegExp, replaceAll, split/join) whose pattern is a
+  // literal naming require / import / from and a RELATIVE path (./ ../) and NO module's name — it ends there, or a group / class
+  // reads the name — and whose replacement re-roots each path the same way: a literal when the pattern ends at the opener, else a
+  // function of the captured name with no lookup and no choice in it (no x[y], no ?: / || / &&, no if / switch). A fixed module's
+  // swap, a map lookup, a choice by name, a first match only, or prose that says «from» stay counted: each picks what loads.
+  const OPENER = /\\\.(?:\\\.\??|\{1,2\})?\\\//g;   // ./ ../ ..?/ .{1,2}/ as a RegExp source spells them
+  const rebase = (n, prop) => {
+    const pat = prop === 'join' ? n.callee.object.arguments[0] : n.arguments[0], to = prop === 'join' ? n.arguments[0] : n.arguments[1];
+    if (!pat || !to || pat.type !== 'Literal') return false;
+    let rest;   // what follows the pattern's last relative opener ('' = the pattern ends there)
+    if (pat.regex) {
+      if (prop === 'replace' && !pat.regex.flags.includes('g')) return false;
+      const s = pat.regex.pattern; let last = -1;
+      if (!/(?:^|\W|\\b)(?:require|import|from)\b/.test(s)) return false;
+      for (const m of s.matchAll(OPENER)) last = m.index + m[0].length;
+      if (last < 0) return false;
+      rest = s.slice(last);
+      if (rest !== '' && !/^[([]/.test(rest)) return false;
+    } else if (typeof pat.value === 'string' && prop !== 'replace') {
+      if (!/(?:require\(|import\(|from )\s*['"`]\.\.?\/$/.test(pat.value)) return false;
+      rest = '';
+    } else return false;
+    if (rest === '') return (to.type === 'Literal' && typeof to.value === 'string') || to.type === 'TemplateLiteral';
+    if (to.type !== 'ArrowFunctionExpression' && to.type !== 'FunctionExpression') return false;
+    const caught = new Set(to.params.slice(1).filter((q) => q.type === 'Identifier').map((q) => q.name));
+    let choice = false, reads = false;
+    walk(to.body, (x) => {
+      if ((x.type === 'MemberExpression' && x.computed) || x.type === 'ConditionalExpression' || x.type === 'LogicalExpression' || x.type === 'IfStatement' || x.type === 'SwitchStatement') choice = true;
+      if (x.type === 'Identifier' && caught.has(x.name)) reads = true;
+    });
+    return !choice && reads;
+  };
   const ids = (n, into) => walk(n, (x) => { if (x.type === 'Identifier') into.add(x.name); });
+  const curedOf = (x) => { if (!x || x.type !== 'CallExpression' || x.callee.type !== 'Identifier' || !CURED.has(x.callee.name)) return false; const b = baseOf(x); return !!b && b.type === 'Identifier' && product.has(b.name); };
   walk(ast, (n, anc) => {
     if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && READ.test(text(n.init)) && PRODUCT.test(text(n.init))) product.add(n.id.name);
     else if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier' && READ.test(text(n.right)) && PRODUCT.test(text(n.right))) product.add(n.left.name);
+    // a cured link's result held in a name is the product's text still (`const c = editAnchor(src, …)`; then `c.replace(…)`)
+    else if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && curedOf(n.init)) product.add(n.id.name);
+    else if (n.type === 'AssignmentExpression' && n.left.type === 'Identifier' && curedOf(n.right)) product.add(n.left.name);
     if ((n.type === 'CallExpression' || n.type === 'NewExpression') && isLoader(n)) for (const a of n.arguments) ids(a, loaderArgs);
     if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return;
     const prop = n.callee.property.name;
     const edit = (prop === 'replace' || prop === 'replaceAll') || (prop === 'join' && n.callee.object.type === 'CallExpression' && n.callee.object.callee.type === 'MemberExpression' && n.callee.object.callee.property.name === 'split');
-    if (!edit) return;
+    if (!edit || rebase(n, prop)) return;
     const base = baseOf(n);
     if (!base || base.type !== 'Identifier') return;
     let inLoader = false, decl = null;
