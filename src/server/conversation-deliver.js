@@ -1053,7 +1053,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     const same = (retry[cid] || []).find(isEnded);
     // B-2566's remainder (r1277): a wake owed while its machine cannot be reached carries that on ITSELF (`away`, written with the
     // entry) — the hold stands from what is durable, read with the link's state, so a restart changes nothing
-    const away = (() => { const u = unreachableOf(cid); return u ? { hostId: u.hostId, since: u.since } : null; })();
+    const away = (() => { const u = unreachableOf(cid); return u ? { hostId: u.hostId, since: u.since, at: clock.now() } : null; })();
     if (same) {
       if (away && !same.away) same.away = away;
       if (sender && !same.senders.includes(sender)) same.senders.push(sender);
@@ -1730,7 +1730,7 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   function markUnreachable(hid) {
     if (!hid || linkOf(hid) !== 'offline') return null;
     const now = clock.now(), was = unreachable.get(hid), off = silentSinceOf(hid);
-    const e = { at: now, since: off || (was ? was.since : now) };
+    const e = { at: now, since: was ? Math.min(was.since, off || was.since) : (off || now) };   // r1397 (5): a flap never moves the outage's start
     unreachable.delete(hid); unreachable.set(hid, e);
     if (unreachable.size > 200) unreachable.delete(unreachable.keys().next().value);
     return e;
@@ -1766,10 +1766,13 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     let held = 0, first = Infinity;
     for (const q of Object.values(retry)) for (const e of q || []) if (e && isEnded(e) && e.away && e.away.hostId === hid) { held++; first = Math.min(first, Number(e.away.since) || Infinity); }
     if (!m && !held) return null;
-    return { since: silentSinceOf(hid) || (m ? m.since : Number.isFinite(first) ? first : clock.now()), held };
+    // the held wakes end only on the machine's word, so the oldest of them starts THIS outage (r1397 (5): never the last flap's
+    // disconnect); with none held, the dial facts' disconnect, else the rung's first miss
+    return { since: Number.isFinite(first) ? first : (silentSinceOf(hid) || (m ? m.since : clock.now())), held };
   }
-  /** is `hid` still a paired machine? A HELD list cannot say — it is kept (the hold's own rule); only a list that READ it gone says no */
-  const hostPaired = (hid) => { try { return !!getHosts?.()?.get?.(hid); } catch (e) { return !!(e && e.code === 'hosts-unread') || hostsHeld(); } };
+  /** is `hid` still a paired machine? A list that cannot say (absent, held, or a read that threw) keeps it — only a list that READ the
+   *  machine gone says no (r1397 (2): «unpaired» turns its notices for good; it is never guessed) */
+  const hostPaired = (hid) => { const h = getHosts?.(); if (!h || typeof h.get !== 'function' || hostsHeld()) return true; try { return !!h.get(hid); } catch { return true; } };   // r1397 (2): a list that cannot say keeps the wake
   /** a wake's `away` is over: the machine gave its word about this conversation (a delivery landed; its answer) — written (durable) */
   function clearAway(cid) { let n = 0; for (const e of retry[cid] || []) if (e && e.away) { delete e.away; n++; } if (n) writeRetrySoon(); return n; }
   const AWAY_HOLD_MS = 60e3;
@@ -1783,20 +1786,47 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     if (!hostPaired(hid)) { for (const e of all) endEnded(e, { outcome: 'refused', code: 'unpaired', why: 'its machine is no longer paired — open the conversation to read what waits for it' }); return; }
     for (const e of all) e.nextAt = clock.now() + AWAY_HOLD_MS;
     scheduleRetry();
-    if (linkOf(hid) !== 'online' || awayAsking.has(cid)) return;
+    const link = linkOf(hid);
+    // THE LAW, COMPLETED (r1397 (1)): where a machine CANNOT say — no device link to ask ('unknown': an ssh-only machine), or an agent
+    // with no such op (older) — the release's road stands for it: the link's word, once it has stood a bound; the row says why
+    if (link === 'unknown') { const from = Math.max(...all.map((e) => Number(e.away && e.away.at) || 0)); if (from && clock.now() - from >= REMOTE_ENDED_MS) releaseWordless(cid, all, 'no_link'); return; }
+    if (link !== 'online') { wordlessSince.delete(cid); return; }
+    const older = wordlessSince.get(cid);
+    if (older != null) { if (clock.now() - older >= REMOTE_ENDED_MS) releaseWordless(cid, all, 'agent_older'); return; }
+    if (awayAsking.has(cid)) return;
     awayAsking.add(cid);
-    (async () => {
+    const p = (async () => {
       let st;
       try { const dm = await getHosts().deviceBounded(hid, 6000); st = await remoteStateOf(dm, cid, hid); }
       catch { st = undefined; markUnreachable(hid); }
       finally { awayAsking.delete(cid); }
-      if (!st) return;   // no answer (still away), or an older agent's none: held — its next look in a minute
+      if (retryClosed) return;   // r1397 (4): an answer landing during a stop hands nothing to the resume line
+      if (st === null) { if (!wordlessSince.has(cid)) wordlessSince.set(cid, clock.now()); return; }   // an older agent: it cannot say — the bound starts
+      if (!st) return;   // no answer: still held — its next look in a minute
       if (st.live === false) { remoteEnded.delete(cid); remoteEnded.set(cid, { at: clock.now(), hostId: hid }); if (remoteEnded.size > 500) remoteEnded.delete(remoteEnded.keys().next().value); }
       log(`[deliver] ${cid}: its machine answered for it after being away — ${st.live === false ? 'it ended there: the resume line' : 'it runs there: its next turn and the hand-over carry the words'}`);
       clearAway(cid);
       attemptEnded(cid);
     })();
+    retryInFlight.add(p); p.finally(() => retryInFlight.delete(p));
   }
+  /** the conversations whose machine is online but whose OLDER agent cannot say (cid → since when) — the bound before the release's road */
+  const wordlessSince = new Map();
+  const WORDLESS_WHY = {
+    no_link: 'whether it runs cannot be asked of its machine — the words wait for its next turn',
+    agent_older: 'its device agent is older: update it — the words wait for its next turn',
+  };
+  /** the release's road for a machine that cannot give its word (r1397 (1)): the hold ends «running» as before this unit, and the
+   *  row says WHY (its ended answer, read by the conversation's «not resumed» line) */
+  function releaseWordless(cid, all, code) {
+    wordlessSince.delete(cid);
+    clearAway(cid);
+    const why = WORDLESS_WHY[code];
+    for (const e of all) endEnded(e, { outcome: 'running', code, why });
+    endedAnswers.set(cid, { outcome: 'refused', code, why, until: null, at: clock.now() });
+    log(`[deliver] ${cid}: its machine cannot say whether it runs (${code}) — the release's road after ${Math.round(REMOTE_ENDED_MS / 60e3)} min: ${why}`);
+  }
+
   const saidOlder = new Set();
   // B-95fc follow-up (主开发 r491): a machine whose conversations' registry cannot be read is said ONCE a machine in the journal (unknown, by name)
   const saidUnread = new Set();

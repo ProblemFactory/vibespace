@@ -72,7 +72,7 @@ function rig(name, { state = { live: false, inbox: false }, held = () => false, 
   if (hello) dm.helloInfo = () => ({ capabilities: hello });
   // B-2566's remainder: `connect` = the bounded connect (it may throw: the machine did not answer), `link` = the list's own classifier
   // (hosts.linkState: never a probe), `dial` = the host record's dial facts (when it was last connected / disconnected)
-  const hosts = { deviceBounded: connect || (async () => dm), device: async () => dm, get: () => (paired() ? { id: 'h-1', name: 'box-p', ...(dial ? { dial: dial() } : {}) } : undefined), held, ...(link ? { linkState: (id) => link(id) } : {}) };
+  const hosts = { deviceBounded: connect || (async () => dm), device: async () => dm, get: () => { const pd = paired(); if (pd === 'throws') throw new Error('hosts.json could not be read'); return pd ? { id: 'h-1', name: 'box-p', ...(dial ? { dial: dial() } : {}) } : undefined; }, held, ...(link ? { linkState: (id) => link(id) } : {}) };
   R.dm = dm;
   const sessions = new Map();
   R.deliver = mod.create({
@@ -425,8 +425,8 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   const LINKS_WORD = mutantCopies('peer-state-links-word', REPO).load('src/server/conversation-deliver.js', anchored(anchored(DSRC, LAW, OLD_HOLD, 'the-links-word'), DURABLE, '    return null;', 'no-durable-hold'), 'the-links-word');
   /** one rig over `dir`: the machine shut (no handle, the list offline) unless `box` says otherwise; its answer = `state` */
   const machine = (name, mod, box, state) => {
-    const R = rig(name, { mod, state, link: () => box.link, paired: () => box.paired !== false, connect: async () => { if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); },
-      dial: () => ({ lastConnectAt: 1_790_000_000_000 - 5 * 3600e3, lastDisconnectAt: 1_790_000_000_000 - 2 * 3600e3 }) });
+    const R = rig(name, { mod, state, hello: box.hello || null, link: () => box.link, paired: () => (box.paired === 'throws' ? 'throws' : box.paired !== false), connect: async () => { if (box.gate) await box.gate; if (box.up) return R.dm; throw Object.assign(new Error('the machine did not answer within 6000 ms'), { code: 'connect_timeout' }); },
+      dial: () => ({ lastConnectAt: 1_790_000_000_000 - 5 * 3600e3, lastDisconnectAt: box.off || 1_790_000_000_000 - 2 * 3600e3 }) });
     return R;
   };
   const facts = (R) => ({ owed: R.deliver.endedEntries(X).length, away: R.deliver.endedEntries(X).map((e) => !!e.away), hooked: R.hooked.length, running: R.wakes.filter((w) => w.cid === X && w.outcome === 'running').length, live: R.deliver.liveForWake(X) });
@@ -500,6 +500,70 @@ console.log('⑭ B-2566\'s remainder: a paired machine that CANNOT BE REACHED �
   const uw = U.wakes.filter((w) => w.cid === X);
   ok(U.deliver.endedEntries(X).length === 0 && uw.length === 1 && uw[0].outcome === 'refused' && uw[0].code === 'unpaired' && /no longer paired/.test(uw[0].why || ''),
     'A PAIRING REMOVED: the held wake is refused by name (code unpaired — «its machine is no longer paired — open the conversation to read what waits for it»)', uw);
+
+  // THE LAW, COMPLETED (r1397 (1)): a machine that CANNOT give its word takes the release's road once the link has stood a bound, and
+  // the row says why — RED for each: the tip before this cure (9e93dc0c9) held it for ever
+  const release = async (mod, tag, kind) => {
+    const box = { up: false, link: 'offline', ...(kind === 'older' ? { hello: ['peer-state'] } : {}) };   // an older agent: no peer-post-wait ⇒ never asked
+    const M = machine('law-wordless-' + kind + '-' + tag, mod, box, { live: false, inbox: false });
+    await M.result(X, 'nightly report finished');
+    if (kind === 'older') { box.link = 'online'; box.up = true; } else box.link = 'unknown';   // an ssh-only machine: its link reads «unknown» once its memo ends
+    M.c.now += 61e3; await M.fire(); await settle();
+    const early = facts(M);
+    M.c.now += 11 * 60e3; await M.fire(); await settle(); await M.fire(); await settle();
+    return { early, late: facts(M), answer: M.deliver.endedAnswerOf ? M.deliver.endedAnswerOf(X) : null, asked: M.asked };
+  };
+  const WORDLESS_OLDER = mutantCopies('peer-state-older-forever', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "      if (st === null) { if (!wordlessSince.has(cid)) wordlessSince.set(cid, clock.now()); return; }", "      if (st === null) return;", 'older-held-for-ever'), 'older-held-for-ever');
+  const WORDLESS_LINK = mutantCopies('peer-state-nolink-forever', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "    if (link === 'unknown') { const from = Math.max(...all.map((e) => Number(e.away && e.away.at) || 0)); if (from && clock.now() - from >= REMOTE_ENDED_MS) releaseWordless(cid, all, 'no_link'); return; }", "    if (link === 'unknown') return;", 'nolink-held-for-ever'), 'nolink-held-for-ever');
+  const o = await release(DELIVER, 'g', 'older'), or = await release(WORDLESS_OLDER, 'r', 'older');
+  ok(o.early.owed === 1 && o.early.running === 0 && o.late.owed === 0 && o.late.running === 1 && o.late.hooked === 0 && o.answer && o.answer.code === 'agent_older',
+    'an OLDER agent (no such op: never asked) with its link back: held a bound, then the release\'s road — «running», and the row says why (agent_older: update it)', { early: o.early, late: o.late, answer: o.answer });
+  ok(or.late.owed === 1 && or.late.running === 0, '(1) RED: the tip before this cure (a copy) ⇒ an older agent\'s wake is held FOR EVER while its machine is online', or.late);
+  const n = await release(DELIVER, 'g', 'nolink'), nr = await release(WORDLESS_LINK, 'r', 'nolink');
+  ok(n.early.owed === 1 && n.late.owed === 0 && n.late.running === 1 && n.answer && n.answer.code === 'no_link' && n.asked === 0,
+    'a machine with NO device link (its link «unknown»: never asked): the bound from the hold\'s start, then the release\'s road — the row says why (no_link)', { late: n.late, answer: n.answer });
+  ok(nr.late.owed === 1 && nr.late.running === 0, '(1) RED: the tip before this cure (a copy) ⇒ an ssh-only machine\'s wake is held FOR EVER', nr.late);
+
+  // (2) «THE LIST CANNOT SAY» IS NOT «UNPAIRED»: a read of the machines list that THROWS keeps the wake — RED: the cure's first check
+  const cannotSay = async (mod, tag) => {
+    const box = { up: false, link: 'offline' };
+    const C = machine('law-cannot-say-' + tag, mod, box, { live: true, inbox: true });
+    await C.result(X, 'nightly report finished');
+    box.paired = 'throws';
+    C.c.now += 61e3; await C.fire();
+    return { owed: C.deliver.endedEntries(X).length, refused: C.wakes.filter((w) => w.cid === X && w.code === 'unpaired').length };
+  };
+  const OLD_PAIRED = mutantCopies('peer-state-guessed-unpaired', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "  const hostPaired = (hid) => { const h = getHosts?.(); if (!h || typeof h.get !== 'function' || hostsHeld()) return true; try { return !!h.get(hid); } catch { return true; } };", "  const hostPaired = (hid) => { try { return !!getHosts?.()?.get?.(hid); } catch (e) { return !!(e && e.code === 'hosts-unread') || hostsHeld(); } };", 'list-read-as-unpaired'), 'list-read-as-unpaired');   // stale-pins: kept (the red copy's text: the cure's first check, as it read)
+  const cs = await cannotSay(DELIVER, 'g'), csr = await cannotSay(OLD_PAIRED, 'r');
+  ok(cs.owed === 1 && cs.refused === 0, '(2) a machines list whose read THROWS cannot say — the wake is KEPT (never «unpaired»: that turns its notices for good)', cs);
+  ok(csr.refused === 1 && csr.owed === 0, '(2) RED: the cure\'s first check (a copy) ⇒ a list that could not be read refuses the wake as «unpaired»', csr);
+
+  // (4) an «ended» answer landing DURING A STOP hands nothing to the resume line — RED: the stop's check removed
+  const stopped = async (mod, tag) => {
+    const box = { up: false, link: 'offline' };
+    const S = machine('law-stop-' + tag, mod, box, { live: false, inbox: false });
+    await S.result(X, 'nightly report finished');
+    box.link = 'online'; box.up = true;
+    let answer; box.gate = new Promise((res) => { answer = res; });   // the machine's answer is held until after the stop
+    S.c.now += 61e3; await S.fire();   // the ask leaves …
+    S.deliver.closeRetries();          // … the server stops …
+    answer(); await settle(); await settle();   // … and only then the machine answers «ended»
+    return { hooked: S.hooked.length, asked: S.asked };
+  };
+  const NOSTOP = mutantCopies('peer-state-ask-ignores-stop', REPO).load('src/server/conversation-deliver.js', anchored(DSRC, "      if (retryClosed) return;   // r1397 (4): an answer landing during a stop hands nothing to the resume line\n", '', 'ask-ignores-stop'), 'ask-ignores-stop');
+  const st = await stopped(DELIVER, 'g'), str = await stopped(NOSTOP, 'r');
+  ok(st.asked === 1 && st.hooked === 0, '(4) the machine\'s «ended» landing during a stop hands nothing to the resume line', st);
+  ok(str.hooked === 1, '(4) RED: the stop\'s check removed (a copy) ⇒ the resume line is asked after the stop', str);
+
+  // (5) «silent since» is the OUTAGE's start: a flap (the dial's disconnect moves) never moves it
+  const boxF = { up: false, link: 'offline' };
+  const F5 = machine('law-since', DELIVER, boxF, { live: true, inbox: true });
+  await F5.result(X, 'nightly report finished');
+  const sinceA = F5.deliver.machineAwayOf('h-1');
+  boxF.off = 1_790_000_000_000 - 60e3;   // a two-second dark wake: the dial facts now say it disconnected a minute ago
+  await F5.deliver.deliverToConversation(CID(143), 'another result', { kind: 'notification', spendReason: 'job-notification' });
+  const sinceB = F5.deliver.machineAwayOf('h-1');
+  ok(sinceA && sinceB && sinceA.since === 1_790_000_000_000 - 2 * 3600e3 && sinceB.since === sinceA.since, '(5) «silent since» is the OUTAGE\'s start — a later disconnect (a flap) never moves it', { before: sinceA, after: sinceB });
 }
 {
   // a machine the list knows NOTHING of ('unknown': an ssh host with no facts) is never marked — today's road (an untyped miss); and a

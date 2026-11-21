@@ -101,6 +101,8 @@ export function refusalWords(code) {
                 : code === 'harness_unread' ? t('what its resume starts by itself is not known — resume it yourself')
                   : code === 'needs_a_page' || code === 'cannot_resume' ? t('it resumes only in a window')
                     : code === 'archived' ? t('it is archived')
+                      : code === 'unpaired' ? t('its machine is no longer paired — open the conversation to read what waits')   // B-2566's remainder (r1397 (7))
+                      : code === 'no_link' ? t('whether it runs cannot be asked of its machine — the words wait for its next turn')   // r1397 (1)
                       : code === 'agent_older' ? t('its device agent is older: update it — the words wait for its next turn')   // B-95fc U1: a paired machine whose agent cannot say whether the conversation ended there
                       : code === 'no_mid_session' ? t('its agent takes no message mid-session — the words wait for its next turn')
                       : code === 'inbox_gone' ? t('it ended again before its agent opened its inbox')

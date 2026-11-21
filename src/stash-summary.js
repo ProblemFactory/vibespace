@@ -338,7 +338,7 @@ const HELD_WHY = Object.freeze({
   'not-running': 'they arrived while this conversation was not running',
   'not-reachable': 'the agent did not accept them at once (busy or unreachable) — delivered now',
   'machine-away': 'they arrived while the machine this conversation runs on could not be reached — delivered now that it replies',   // B-2566's remainder
-  'machine-unpaired': 'they waited for a machine that is no longer paired',   // r1277 (6)
+  'machine-unpaired': 'they waited for their machine, which was unpaired',   // r1277 (6); r1397 (6): true even once it is paired again
   'retrying': 'their delivery was being retried — delivered now',
   'maybe-delivered': 'the server stopped while they were being sent — some may have reached the agent already, delivered again now',   // verify r2: a may-have-landed entry (its own key — `heldKeyOf`)
   'rate-floor': 'they were paced by the 30 s per-conversation floor',

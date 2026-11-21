@@ -1112,7 +1112,7 @@ const NOTIF_TAIL = Object.freeze({
   'not-running': 'These arrived while this conversation was not running.',
   'not-reachable': 'The agent did not accept these when they arrived (busy or unreachable) — delivered now.',
   'machine-away': 'These arrived while the machine this conversation runs on could not be reached — delivered now that it replies.',
-  'machine-unpaired': 'These waited for a machine that is no longer paired.',
+  'machine-unpaired': 'These waited for a machine that was unpaired.',
   'retrying': 'These were waiting for a retry — delivered now.',
   'rate-floor': 'These were paced by the 30 s per-conversation floor.',
   'spend-cap': 'These were held by the spending ceiling for turns nobody typed.',

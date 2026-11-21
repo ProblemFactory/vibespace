@@ -1475,6 +1475,8 @@ class JobManager {
   }
   _onRetryEvent(ev, cid, entry, extra = {}) {
     if (ev === 'wake' && extra && extra.code === 'unpaired') this._machineUnpaired(cid);   // B-2566's remainder (r1277 (6))
+    else if (ev === 'wake' && extra && extra.outcome === 'running' && (extra.code === 'agent_older' || extra.code === 'no_link')) this._machineWordless(cid, extra.code);   // r1397 (1)
+    else if (ev === 'wake' && extra && (extra.outcome === 'refused' || extra.outcome === 'failed')) this._machineReplied(cid);   // r1397 (3)
     // the manager design's piece 7: an owed wake's ANSWER reaches EVERY job it carries, whichever producer asked first (a
     // peer's wake and a job's result ride ONE wake; each delivery's own facts are in `metas`)
     if (ev === 'wake' && entry && Array.isArray(entry.metas)) { for (const id of new Set(entry.metas.filter((m) => m && m.jobId).map((m) => m.jobId))) this._wakeAnswered(cid, id, extra); return false; }
@@ -1662,8 +1664,16 @@ class JobManager {
     const a = typeof this.d.machineAwayOf === 'function' ? this.d.machineAwayOf(hid) : null;
     const w = this._machineAwayOwed(hid);
     if (!a || !w.n || now() - a.since < M.MACHINE_AWAY_GRACE_MS) return null;
+    return this._fileMachineAway(hid, w, a.since);
+  }
+  /** the one filing of the machine's item: a PERSON's close stands for the outage (an item a person closed after this outage began is
+   *  kept closed — the engine's own judgement, over the store's answer; the wiring files what it is handed) */
+  _fileMachineAway(hid, w, since, wordless = null) {
+    const closed = typeof this.d.machineAwayClosedAt === 'function' ? this.d.machineAwayClosedAt(hid) : 0;
+    if (closed && Number(closed) >= Number(since)) return null;   // a person closed it this outage: kept closed
+    (this._machineAwaySince || (this._machineAwaySince = new Map())).set(hid, Number(since));
     (this._machineAwaySaid || (this._machineAwaySaid = new Set())).add(hid);
-    try { return this.d.noticeMachineAway({ hid, n: w.n, convs: w.convs, since: a.since }) || null; }
+    try { return this.d.noticeMachineAway({ hid, n: w.n, convs: w.convs, since, ...(wordless ? { wordless } : {}) }) || null; }
     catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» For-you item was not filed — ${e && e.message}`); return null; }
   }
   /** B-2566's remainder (r1277 (6)): the conversation's machine is NO LONGER PAIRED (the park refused its held wake by name) — its
@@ -1674,10 +1684,36 @@ class JobManager {
     for (const e of this.pendingNotifs.get(cid) || []) if (e && e.held && e.held.kind === 'machine-away') { e.held = { ...e.held, kind: 'machine-unpaired' }; n++; }
     if (!n) return 0;
     this._dirty = true;
-    try { this._save(); } catch { }
     this._machineAwaySettle();
     try { this.d.broadcast('jobs-updated', { held: cid }); } catch { }
     return n;
+  }
+  /** r1397 (3): the machine GAVE its word (the conversation ended there) and the resume line then REFUSED (the guard at release,
+   *  archived, the store unread): its notices no longer wait for the machine — they wait for the conversation (not-running: «the
+   *  conversation was not running; delivered when it next resumes»; its row says why it was not resumed), «notices wait» counts them
+   *  again, and the machine's item is settled NOW (never at the next drain) */
+  _machineReplied(cid) {
+    let n = 0;
+    for (const e of this.pendingNotifs.get(cid) || []) if (e && e.held && e.held.kind === 'machine-away') { e.held = { ...e.held, kind: 'not-running' }; n++; }
+    if (!n) return 0;
+    this._dirty = true;
+    (this._stoppedThisRun || (this._stoppedThisRun = new Set())).add(cid);
+    this._machineAwaySettle();
+    try { this.sayWakeWaiting(cid); } catch { }
+    try { this.d.broadcast('jobs-updated', { held: cid }); } catch { }
+    return n;
+  }
+  /** r1397 (1): the machine could NOT give its word (an older agent; no device link) and the release's road ended the hold: the
+   *  machine's item says WHY in words, in place, and goes once its results went out (never on the link's return alone) */
+  _machineWordless(cid, code) {
+    const hids = new Set((this.pendingNotifs.get(cid) || []).filter((e) => e && e.held && e.held.kind === 'machine-away' && e.held.hostId).map((e) => e.held.hostId));
+    const wl = this._machineWordlessOf || (this._machineWordlessOf = new Map());
+    for (const hid of hids) {
+      wl.set(hid, code);
+      const w = this._machineAwayOwed(hid), said = this._machineAwaySaid && this._machineAwaySaid.has(hid);
+      if (said && w.n) this._fileMachineAway(hid, w, Number(this._machineAwaySince && this._machineAwaySince.get(hid)) || 0, code);
+    }
+    return hids.size;
   }
   /** the notices owed to the conversations of machine `hid` while it cannot be reached → {n, convs} */
   _machineAwayOwed(hid) {
@@ -1696,9 +1732,12 @@ class JobManager {
     const said = this._machineAwaySaid || (this._machineAwaySaid = new Set());
     if (!this._machineAwayLooked) { try { const open = typeof this.d.machineAwayOpen === 'function' ? this.d.machineAwayOpen() : []; if (Array.isArray(open)) { this._machineAwayLooked = true; for (const hid of open) said.add(hid); } } catch { } }
     for (const hid of [...said]) {
-      const back = typeof this.d.machineAwayOf === 'function' && !this.d.machineAwayOf(hid);
+      // a machine that could not give its word (r1397 (1)): its item goes only once its results went out — never on the link's return
+      const wordless = this._machineWordlessOf && this._machineWordlessOf.has(hid);
+      const back = !wordless && typeof this.d.machineAwayOf === 'function' && !this.d.machineAwayOf(hid);
       if (!back && this._machineAwayOwed(hid).n) continue;
       said.delete(hid);
+      if (this._machineWordlessOf) this._machineWordlessOf.delete(hid);
       try { this.d.resolveMachineAway(hid); } catch (e) { this.d.log(`[jobs] ${hid}: the «results wait for a machine» For-you item was not closed — ${e && e.message}`); }
     }
   }

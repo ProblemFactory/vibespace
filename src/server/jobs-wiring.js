@@ -149,17 +149,20 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // (its own itemKey), never one a conversation or a job; its count grows in place while it is open. A person's close stands for the
     // outage: an item a person closed after this outage began (createdAt ≥ since) is kept closed. The words say what waits, why, and what a person
     // can do — open the machine; nothing to press (no button opens a laptop). Closed by the agent when the machine replies.
-    noticeMachineAway: function noticeMachineAway({ hid, n, convs, since }) {
+    noticeMachineAway: function noticeMachineAway({ hid, n, convs, since, wordless = null }) {
       if (userTodos.isHeldUnread?.()) { userTodos.whenRead(() => jm._machineAway(hid), 'the «results wait for a machine» item'); return null; }
       const key = `jobs-machine-away:${hid}`;
-      const had = userTodos.idsWhere((i) => i.itemKey === key).map((id) => userTodos.get(id)).filter(Boolean);
-      if (had.some((i) => i.status !== 'open' && i.resolvedBy !== 'agent' && !i.clearedAt && Number(i.createdAt) >= Number(since))) return null;   // a PERSON closed it this outage: kept closed (the agent's own close is no answer)
       const machine = (() => { try { return deliver.machineNameOf(hid); } catch { return String(hid); } })();
       const it = userTodos.add('jobs', {
         origin: 'jobs', kind: 'notice', urgency: 'normal', by: 'agent', filerKey: forYouKey, itemKey: key, hostId: hid, sessionName: 'Background Work',
         i18n: {
-          text: { key: '{n} Background Work result(s) wait for {convs} conversation(s) on {machine} — it has been silent since {since}', params: { n: String(n), convs: String(convs), machine, since: { at: Number(since) } } },
-          detail: [{ key: 'They are kept in order and go out by themselves when {machine} replies — nothing is lost or billed meanwhile. To let them through, open {machine} and keep VibeSpace’s device agent running there.', params: { machine } }],
+          // r1397 (1): a machine that cannot give its word says WHY (its agent is older / it has no device link), never «silent»
+          text: wordless === 'agent_older' ? { key: '{n} Background Work result(s) for {convs} conversation(s) on {machine} go out without its word — its agent is older and cannot say whether they run', params: { n: String(n), convs: String(convs), machine } }
+            : wordless === 'no_link' ? { key: '{n} Background Work result(s) for {convs} conversation(s) on {machine} go out without its word — whether they run cannot be asked of it', params: { n: String(n), convs: String(convs), machine } }
+              : { key: '{n} Background Work result(s) wait for {convs} conversation(s) on {machine} — it has been silent since {since}', params: { n: String(n), convs: String(convs), machine, since: { at: Number(since) } } },
+          detail: [wordless === 'agent_older' ? { key: 'They are handed over when each conversation can take them. Update VibeSpace’s device agent on {machine} so it can say whether its conversations run.', params: { machine } }
+            : wordless === 'no_link' ? { key: 'They are handed over when each conversation can take them. Pair {machine} with VibeSpace’s device agent so it can say whether its conversations run.', params: { machine } }
+              : { key: 'They are kept in order and go out by themselves when {machine} replies — nothing is lost or billed meanwhile. To let them through, open {machine} and keep VibeSpace’s device agent running there.', params: { machine } }],
         },
       });
       return (it && it.id) || null;
@@ -170,6 +173,9 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       for (const id of ids) { try { userTodos.setStatus(id, 'done', 'agent'); } catch (e) { log('[jobs] For-you resolve failed:', e.message); } }
       return ids.length;
     },
+    /** the latest instant a PERSON closed machine `hid`'s item (never the agent's own close; a cleared one is gone) — 0 when none;
+     *  null while the tray is held (the engine files nothing into a held store anyway) */
+    machineAwayClosedAt: (hid) => { if (userTodos.isHeldUnread?.()) return null; let at = 0; for (const id of userTodos.idsWhere((i) => i.itemKey === `jobs-machine-away:${hid}`)) { const i = userTodos.get(id); if (i && i.status !== 'open' && i.resolvedBy !== 'agent' && !i.clearedAt) at = Math.max(at, Number(i.createdAt) || 0); } return at; },
     /** the machines an open «results wait» item names (an earlier run's too) — the engine asks once a run it could READ (null: held) */
     machineAwayOpen: () => { if (userTodos.isHeldUnread?.()) return null; return userTodos.idsWhere((i) => typeof i.itemKey === 'string' && i.itemKey.startsWith('jobs-machine-away:') && i.status === 'open').map((id) => String((userTodos.get(id) || {}).itemKey || '').slice('jobs-machine-away:'.length)).filter(Boolean); },
     ownerUnreachable: (cid) => { try { return deliver.unreachableOf(cid); } catch { return null; } },   // B-2566's remainder: the ladder's own verdict

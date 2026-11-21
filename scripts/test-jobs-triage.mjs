@@ -1914,10 +1914,10 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     okP(g.said === false && g.waitItems === 0 && r.waitItems === 1, 'r1277 (2): a conversation\'s «notices wait» does not count the results its MACHINE\'s item counts — RED: the filter removed ⇒ said twice', { green: g, red: r });
   }
   {
-    // r1277 (7): a person's close stands for the outage — RED: the guard removed (a copy of the wiring) ⇒ a later result reopens it
-    const WSRC = fs.readFileSync(path.join(ROOT, 'src/server/jobs-wiring.js'), 'utf8');
-    const NOGUARD = MC.load('src/server/jobs-wiring.js', anchored(WSRC, "      if (had.some((i) => i.status !== 'open' && i.resolvedBy !== 'agent' && !i.clearedAt && Number(i.createdAt) >= Number(since))) return null;", '', 'b2566r-close-guard'), 'b2566r-close-guard');
-    const R = rig('machine-close-red', NOGUARD), P = cidOf(0xf601);
+    // r1277 (7): a person's close stands for the outage — the guard is the ENGINE's (its one filing, _fileMachineAway): RED: it removed (a
+    // copy of the engine) ⇒ a later result REOPENS the item the person closed (a copy of the wiring cannot file at all: For you hands
+    // origin 'jobs''s key to its one filer, src/server/jobs-wiring.js, by its own frame)
+    const R = rig('machine-close-red', wiringWith(anchored(JSRC, "    if (closed && Number(closed) >= Number(since)) return null;   // a person closed it this outage: kept closed\n", '', 'b2566r-close-guard'), 'b2566r-close-guard')), P = cidOf(0xf601);
     R.down.set(P, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
     const pj = task(R, 'jb-p', 'render-p', P);
     failOf(R, pj);
@@ -1925,7 +1925,42 @@ console.log('§12 B-2566: a failure of a job whose owner conversation is not run
     R.todos.setStatus(machineItems(R)[0].id, 'dismissed');
     nudge(R, P); failOf(R, pj, 'failed exit=5 error (1m)');
     await settle(() => machineItems(R)[0].status === 'open');
-    okP(machineItems(R)[0].status === 'open', 'r1277 (7) RED CONTROL: the person-close guard removed (a copy of the wiring) ⇒ a later result REOPENS the item the person closed — the close leg would be red', { status: machineItems(R)[0].status });
+    okP(machineItems(R)[0].status === 'open', 'r1277 (7) RED CONTROL: the person-close guard removed (a copy of the engine) ⇒ a later result REOPENS the item the person closed — the close leg would be red', { status: machineItems(R)[0].status });
+    R.stop();
+  }
+  {
+    // r1397 (3): the machine gave its word (it ended there) and the resume line then REFUSED: its notices wait for the CONVERSATION now
+    // (not-running — never «delivered when it replies» after it replied), «notices wait» counts them again, and the machine's item goes NOW
+    const R = rig('machine-refused-resume'), E = cidOf(0xf901);
+    R.down.set(E, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+    const ej = task(R, 'jb-e', 'render-e', E);
+    failOf(R, ej);
+    await settle(() => machineItems(R).length === 1);
+    R.hostsDown.delete('h-b');   // the machine replied: the conversation ended there; the resume line refused (archived)
+    R.jm._onRetryEvent('wake', E, { producer: 'jobs', meta: { jobId: 'jb-e' } }, { outcome: 'refused', code: 'archived', why: 'it is archived' });
+    const kinds = (R.jm.pendingNotifs.get(E) || []).map((n) => n.held && n.held.kind);
+    okP(kinds.join() === 'not-running' && machineItems(R)[0].status === 'done' && waitItems(R, E).length === 1,
+      'r1397 (3): a refused resume after the machine\'s word ⇒ its notices are «not running» (the conversation\'s words, true), the machine\'s item goes AT ONCE, «notices wait» says them', { kinds, machineItem: machineItems(R)[0].status, noticesWait: waitItems(R, E).length });
+    R.stop();
+  }
+  {
+    // r1397 (1): a machine that CANNOT give its word (an older agent): the release's road ended the hold — the machine's item says WHY in
+    // place, and goes only once its results went out (never on the link's return alone)
+    const R = rig('machine-wordless'), K = cidOf(0xfa01), K2 = cidOf(0xfa02);
+    R.down.set(K, 'h-b'); R.down.set(K2, 'h-b'); R.hostsDown.set('h-b', Date.now() - 2 * HOUR);
+    const kj = task(R, 'jb-k', 'render-k', K);
+    failOf(R, kj);
+    await settle(() => machineItems(R).length === 1);
+    R.hostsDown.delete('h-b');   // its link is back; its agent is older — the ladder released the hold (agent_older)
+    R.jm._onRetryEvent('wake', K, { producer: 'jobs', meta: { jobId: 'jb-k' } }, { outcome: 'running', code: 'agent_older', why: 'its device agent is older: update it — the words wait for its next turn' });
+    // COPIES of what the item says NOW (the store hands its own objects: read later, they are what the drain made them)
+    const said0 = machineItems(R)[0], said = { status: said0.status, text: said0.i18n.text.key, detail: said0.i18n.detail[0].key, items: machineItems(R).length };
+    nudge(R, K2); failOf(R, task(R, 'jb-k2', 'render-k2', K2));   // a delivery lands on the machine: the link's word alone
+    await settle(() => (R.jm.jobs.get('jb-k2').notifyLog || []).length > 0);
+    const afterLanding = machineItems(R)[0].status;
+    R.jm.drainNotifs(K);
+    okP(/its agent is older and cannot say whether they run/.test(said.text) && said.status === 'open' && said.items === 1 && /Update VibeSpace’s device agent/.test(said.detail) && afterLanding === 'open' && machineItems(R)[0].status === 'done',
+      'r1397 (1): a machine that cannot give its word — its item says WHY in place (its agent is older; update it), stays while its results wait (a landing on the machine is the link\'s word alone), and goes when they went out', { said, afterLanding, final: machineItems(R)[0].status });
     R.stop();
   }
   {
