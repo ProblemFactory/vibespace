@@ -1,0 +1,375 @@
+#!/usr/bin/env node
+// test-temp-rename-census — B-9275 unit 2 (lane lg-store-writes, the coordinator's r1153 / r1200). FAST, PURE (acorn over the
+// tracked src/ files and server.js that name a rename). THE LAW: A STORE'S NEW BYTES ARE ON DISK BEFORE ITS NAME POINTS AT THEM.
+// Every file-system rename of the tree is a ROW: its file, its CLASS (read here), its FAMILY (judged), one scope per site —
+//   synced    a file written, SYNCED, then renamed over its name (a sync before the rename in the same scope)
+//   unsynced  a file written in its scope, then renamed with no sync between
+//   move      no file written before it in its scope: an existing file or folder moved
+// (the scope read = the enclosing functions out to the one the site's scope names, never another function's text; a write is a
+// writeFile / createWriteStream / an open for writing / a copy INTO the source; an open to append is a log's rotation, not a
+// write). Each FAMILY goes through the store writer, or is named with its reason, or is A CURE OWED with its row (FAMILIES).
+// A NEW site without a row is red by name, a rowed site that is gone is red, a class its family does not admit is red, and
+// OWED_MAX (the sites of the owed families) may only fall: the unit that cures a site lowers it.
+//
+// WHAT A SYNC COSTS ON A NETWORK SHARE (the owner's hub keeps its data folder on one today) — from the filesystem's own words,
+// not a run: nfs(5) «The sync mount option»: the NFS client delays an application's writes and sends them to the server when
+// «an application flushes file data explicitly with sync(2), msync(2), or fsync(3)» or when «an application closes a file with
+// close(2)»; «Close-to-open cache consistency»: «When the application closes the file, the NFS client writes back any pending
+// changes to the file». So the writer's close already wrote the temp back; the sync placed BEFORE the close (B-9275 unit 1) takes
+// that same write-back ahead of it, and the close then has nothing pending: no second write of the bytes. On a share mounted
+// `nocto` the close does not write back, and there the sync is what puts the bytes on the server before the rename.
+// Run: node scripts/test-temp-rename-census.mjs
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { walk, scopeOf } from './sync-fs-census.mjs';
+import { trackedFiles } from './tracked-files.mjs';
+import { checker } from './lib/check.mjs';
+
+const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+const require = createRequire(import.meta.url);
+const { ok, report } = checker();
+
+// the objects whose rename is the file system's (fs, fs.promises, an injected fs: agentd's `f`, engine-distribution's `io`…)
+const FS_OBJ = /^(?:fs|fsp|fsx|fsImpl|io|f|P|promises|[A-Za-z_$][\w$]*\.promises|require\((['"])(?:node:)?fs(?:\/promises)?\1\)(?:\.promises)?)$/;
+// renames that are not the file system's, judged once
+const NOT_FS = new Map([
+  ['accounts', 'the accounts store renames an account (its label)'],
+  ['c.ge', 'the groups engine renames a group (its label)'],
+  ['ge', 'the groups engine renames a group (its label)'],
+  ['G', 'the group model renames a group (its label)'],
+  ['D()', 'the conversation ops rename a conversation (its label)'],
+  ['panes', 'the machine desktop renames a pane key (in memory)'],
+  ['design', 'the design engine renames a canvas (its own record)'],
+  ['R.fs', 'a PAIRED machine\'s file: the remote file road asks the device agent to move it (not a write of the hub)'],
+]);
+// a WRITE of a path (its argument index), a SYNC of a descriptor or a handle
+const WRITE = new Map([['writeFileSync', 0], ['writeFile', 0], ['createWriteStream', 0], ['write', 0], ['openSync', 0], ['open', 0], ['copyFileSync', 1], ['copyFile', 1], ['cpSync', 1], ['cp', 1]]);
+const SYNC = new Set(['fsyncSync', 'fsync', 'fdatasyncSync', 'fdatasync']);
+const isFn = (n) => n.type === 'FunctionDeclaration' || n.type === 'FunctionExpression' || n.type === 'ArrowFunctionExpression';
+// a function the scope NAMES (scopeOf's): the search for the write stops there — never another function's text
+const named = (fnNode, up) => (fnNode.type === 'FunctionDeclaration' && !!fnNode.id) || (!!up && ['MethodDefinition', 'Property', 'VariableDeclarator', 'AssignmentExpression', 'PropertyDefinition'].includes(up.type));
+
+/** Every rename call of one file's source: { file, line, scope, obj, cls, from, to, why } (cls: synced | unsynced | move — read
+ *  in the enclosing functions up to the one its scope names, or its top-level statement), plus the renames on other objects
+ *  ({ skipped }) and on objects nobody judged ({ unknown }). */
+export function renameSites(rel, src, AC) {
+  const code = src.replace(/^#!.*/, '');
+  const opts = { ecmaVersion: 'latest', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowHashBang: true, locations: true };
+  let ast; try { ast = AC.parse(code, { ...opts, sourceType: 'script' }); } catch { ast = AC.parse(code, { ...opts, sourceType: 'module', allowReturnOutsideFunction: false }); }
+  const text = (n) => code.slice(n.start, n.end).replace(/\s+/g, ' ').trim();
+  const sites = [], skipped = [], unknown = [];
+  walk(ast, (n, parents) => {
+    if (n.type !== 'CallExpression' || n.callee.type !== 'MemberExpression' || n.callee.computed) return;
+    const p = n.callee.property && n.callee.property.name;
+    if (p !== 'rename' && p !== 'renameSync') return;
+    const obj = text(n.callee.object), line = n.loc.start.line, scope = scopeOf(parents);
+    if (NOT_FS.has(obj)) { skipped.push({ file: rel, line, obj }); return; }
+    if (!FS_OBJ.test(obj)) { unknown.push({ file: rel, line, obj, scope }); return; }
+    const from = n.arguments[0] ? text(n.arguments[0]) : '', to = n.arguments[1] ? text(n.arguments[1]) : '';
+    // where to read: the enclosing functions out to the one the scope names (inclusive); at the top level, its statement
+    const roots = [];
+    for (let i = parents.length - 1; i >= 0; i--) { if (!isFn(parents[i])) continue; roots.push(parents[i]); if (named(parents[i], parents[i - 1])) break; }
+    if (!roots.length) roots.push(parents[1] || ast);
+    const root = roots[roots.length - 1];
+    let wrote = null, synced = [];
+    walk(root, (c) => {
+      if (c.type !== 'CallExpression' || c.start >= n.start || c.callee.type !== 'MemberExpression' || c.callee.computed) return;
+      const q = c.callee.property && c.callee.property.name;
+      if (SYNC.has(q) || ((q === 'sync' || q === 'datasync') && !c.arguments.length)) { synced.push(c.start); return; }
+      if (!WRITE.has(q)) return;
+      const a = c.arguments[WRITE.get(q)];
+      if (!a || text(a) !== from) return;
+      if (q === 'open' || q === 'openSync') { const fl = c.arguments[1]; if (!fl || (fl.type === 'Literal' && typeof fl.value === 'string' && /^[ra]/.test(fl.value))) return; }   // a read, or an append (a log's rotation)
+      if (!wrote || c.start > wrote) wrote = c.start;
+    });
+    const cls = wrote != null ? (synced.some((x) => x > wrote) ? 'synced' : 'unsynced') : (synced.length ? 'synced' : 'move');
+    sites.push({ file: rel, line, scope, obj, cls, from: from.slice(0, 70), to: to.slice(0, 50) });
+  });
+  return { sites, skipped, unknown };
+}
+
+// ── THE FAMILIES: each goes THROUGH THE WRITER, or is NAMED with its reason, or is A CURE OWED with its row ─────────────────────
+const FAMILIES = {
+  writer: { verdict: 'through the writer', classes: ['synced'], why: 'the store writer\'s thread (src/store-writer-worker.js writeJob): every store the writer holds — the temp synced before the rename since B-9275 unit 1' },
+  'self-synced': { verdict: 'named', classes: ['synced'], why: 'its own writer syncs the temp before the rename (a private credential file, the vault\'s files, the device identity, a sealed app secret)' },
+  secret: { verdict: 'cured', row: 'B-dc3f', classes: ['unsynced', 'synced'], why: 'the secret-bearing replace (src/secret-file.js): CURED in the hotfix 2.369.415 by another lane (row B-dc3f: synced, renamed, its folder synced) — it reads unsynced until that hotfix is under this tree, synced after; either is this row' },
+  store: { verdict: 'owed', row: 'B-574d', classes: ['unsynced', 'move'], why: 'a store or a record of the HUB written by its own temp + rename with no sync: after a power loss its name can point at an empty file, read back as damaged. The cure: through the store writer (synced since B-9275 unit 1) or one shared synced replace' },
+  b0248: { verdict: 'owed', row: 'B-0248', classes: ['unsynced'], why: 'a store that moves onto the store writer in row B-0248 (lane bl-loop-b): synced once it is there' },
+  spend: { verdict: 'owed', row: 'B-ef83', classes: ['unsynced'], why: 'the spend ledger (data/spend-budget.json): onto the store writer in row B-ef83' },
+  person: { verdict: 'owed', row: 'B-ddf3', classes: ['unsynced'], why: 'a file of the PERSON\'s written through the hub (a copy across machines, a DAV upload, a design file, a CLI\'s settings, a rescued transcript, an export, a browser profile\'s preferences): after a power loss its name can point at an empty file — the person\'s own bytes' },
+  device: { verdict: 'owed', row: 'B-93e7', classes: ['unsynced', 'move'], why: 'the device agent\'s own state on a paired machine (its dial file, trust / policy / floor pins, orders, cursors, a secret file it is handed, its bundle\'s landing): after a power loss there it can come back unable to dial; its cure changes the device agent (a signed release)' },
+  derived: { verdict: 'named', classes: ['unsynced', 'move', 'synced'], why: 'bytes MADE AGAIN from their source when missing or wrong (a tool copied at every start, a download checked by its digest, an unpacked build, a generated wrapper or shim, a decompressed copy, a cache of a remote file): a lost file costs a remake, never a person\'s data' },
+  aside: { verdict: 'named', classes: ['unsynced', 'move'], why: 'a file SET ASIDE, not new bytes put in place (a stale lock moved out of the way)' },
+  move: { verdict: 'named', classes: ['move'], why: 'no bytes written before it in its scope: an existing file or folder moved (a rotation, an aside of a damaged copy, a folder swap, a symlink swap) — its bytes were written and closed long before' },
+};
+
+/** The census's verdict over its sites: rows matched by (file, class, scope), one scope per site. */
+export function judge(sites, rows, families = FAMILIES) {
+  const left = rows.map((r) => { const m = new Map(); for (const sc of r.slice(4)) m.set(sc, (m.get(sc) || 0) + 1); return m; });
+  const noRow = [], extra = [], badFamily = [];
+  let owed = 0;
+  for (const s of sites) {
+    const cands = rows.map((r, i) => i).filter((i) => rows[i][0] === s.file && rows[i][1] === s.cls && left[i].has(s.scope));
+    if (!cands.length) { noRow.push(s); continue; }
+    const i = cands.find((k) => left[k].get(s.scope) > 0);
+    if (i === undefined) { extra.push(s); continue; }
+    left[i].set(s.scope, left[i].get(s.scope) - 1);
+    const fam = families[rows[i][2]];
+    if (!fam || !fam.classes.includes(s.cls)) badFamily.push({ ...s, family: rows[i][2] });
+    else if (fam.verdict === 'owed') owed++;
+  }
+  const gone = []; rows.forEach((r, i) => { for (const [sc, n] of left[i]) if (n > 0) gone.push({ file: r[0], cls: r[1], family: r[2], scope: sc, missing: n }); });
+  return { noRow, extra, gone, badFamily, owed };
+}
+
+// ── THE ROWS: [file, class, family, note, ...one scope per site] ─────────────────────────────────────────────────────────────
+const ROWS = [
+  ["src/account-material.js", "move", "move", "", "repointPoolSymlink", "linkInto", "moveAside", "archiveCredentialFile", "moveCredentialArchives"],
+  ["src/account-material.js", "synced", "self-synced", "", "writePrivateFile", "writePrivateFileAsync"],
+  ["src/accounts.js", "unsynced", "store", "", "AccountManager._save"],
+  ["src/accounts.js", "move", "move", "", "AccountManager.reloginResolve > moveLogin"],
+  ["src/adapters/codex.js", "unsynced", "derived", "a decompressed copy of a .zst transcript (made again from it)", "plainJsonlPath"],
+  ["src/agentd/agentd.js", "move", "move", "", "rename", "move", "noteAct", "log"],
+  ["src/agentd/agentd.js", "synced", "self-synced", "", "part-commit", "deviceIdentity"],
+  ["src/agentd/agentd.js", "unsynced", "device", "", "writeDialStatus", "<module>", "<module>", "pinTrust", "writeFloor", "pinHub", "_persist", "serveConnection > onControl > st.commit", "serveConnection > onControl", "onListening", "learnHub"],
+  ["src/agentd/agentd.js", "move", "device", "its signed bundle landed (the temp written by the stream or the ssh road), then `current` repointed", "landBundle"],
+  ["src/agentd/agentd.js", "move", "device", "the ssh road's staged bundle moved to its temp", "<module>"],
+  ["src/agentd/client.js", "unsynced", "device", "the local device's upgrade proof", "DeviceManager._writeLocalProof"],
+  ["src/agentd/client.js", "move", "move", "", "DeviceManager.installLocal"],
+  ["src/agentd/reexec.js", "move", "move", "the `current` symlink swapped (metadata, no file bytes)", "repointCurrent", "repointCurrent"],
+  ["src/agentd/self-retire.js", "unsynced", "device", "", "runRetire"],
+  ["src/agentd/stream-mac.js", "unsynced", "device", "the mac stream helper's state and version", "createMacHelper > writeState", "createMacHelper > ensure"],
+  ["src/agentd/stream-mac.js", "move", "derived", "the helper binary built or pushed (made again)", "createMacHelper > build", "createMacHelper > ensure"],
+  ["src/app-secrets-seal.js", "synced", "self-synced", "", "<module>"],
+  ["src/app-serve.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/app-serve.js", "move", "move", "", "create > writeManifest"],
+  ["src/app-serve.js", "move", "derived", "a downloaded installer / app image, checked and installed again", "create > fetchInstaller", "create > installAppImage", "create > installAppImage"],
+  ["src/app-system-serve.js", "unsynced", "derived", "the shims, synced again at each start", "create > syncShims"],
+  ["src/browser-serve.js", "unsynced", "person", "a browser profile's own preferences file", "planLaunch"],
+  ["src/browser-serve.js", "unsynced", "derived", "the build pointer, written again at each launch", "writeBuildView"],
+  ["src/channel-outbox-files.js", "move", "move", "", "commit"],
+  ["src/channel-store.js", "unsynced", "store", "", "writeJsonAtomic", "createChannelStore > rewriteRecords", "createChannelStore > trim", "createChannelStore > prependRecords", "createChannelStore > trimSide", "createChannelStore > avatarPut", "createChannelStore > attachmentPut"],
+  ["src/channel-store.js", "move", "move", "", "createChannelStore > loadJsonFamily > setAside"],
+  ["src/channels/webhook.js", "synced", "self-synced", "", "writeJsonAtomic"],
+  ["src/channels/webhook.js", "unsynced", "store", "", "queueAppend"],
+  ["src/claude-oat-probe.js", "move", "derived", "the probe's own scratch (a symlink, a variant folder)", "measure > repoint", "measure > runVariant", "measure > runVariant"],
+  ["src/codex-fork-ledger-purge.js", "unsynced", "store", "", "_writeAtomic"],
+  ["src/conversation-index.js", "unsynced", "store", "", "ConversationIndex._flush"],
+  ["src/design-fs.js", "unsynced", "person", "a design file of the person's", "writeUser"],
+  ["src/desktop-display.js", "unsynced", "derived", "the X authority file, made at each display start", "writeXauthority"],
+  ["src/desktop-mic.js", "unsynced", "store", "", "createMic > writeJson"],
+  ["src/desktop-serve.js", "unsynced", "b0248", "the desktop apps' store", "writeJsonAtomic"],
+  ["src/desktop-serve.js", "unsynced", "store", "", "install > scrubRdpLogFile"],
+  ["src/desktop-serve.js", "unsynced", "derived", "a seeded profile frame, made again when missing", "install > seedChromiumFrame"],
+  ["src/desktop-serve.js", "move", "move", "", "install > stop"],
+  ["src/exit-proxy.js", "synced", "self-synced", "", "ExitProxyManager._transferHeld"],
+  ["src/fixture-ledger-purge.js", "unsynced", "store", "", "_writeAtomic"],
+  ["src/gmail-sync.js", "unsynced", "store", "", "GmailSync._saveState"],
+  ["src/gmail-sync.js", "unsynced", "derived", "a mail message copied from the mailbox (fetched again)", "GmailSync._writeMessage"],
+  ["src/harness-config.js", "unsynced", "person", "a CLI's own settings file (the person's)", "commitWrite", "commitCreate"],
+  ["src/harnesses/claude-home.js", "move", "move", "", "moveUser", "moveUser", "relinkLegacy"],
+  ["src/harnesses/codex-models.js", "unsynced", "derived", "a cache of the CLI's model list", "models"],
+  ["src/host-keys.js", "unsynced", "store", "", "writePinFile"],
+  ["src/hosts.js", "unsynced", "store", "", "HostManager._persistDiscovery"],
+  ["src/hosts.js", "move", "move", "", "HostManager.migrateDialTokenFile > later", "HostManager.migrateDialTokenFile", "HostManager._migrateDialTokensAtRead > later"],
+  ["src/hosts.js", "unsynced", "derived", "a cache of a remote file, fetched again", "HostManager._fetchRemoteByFindOnce", "HostManager._fetchRemoteByFindOnce"],
+  ["src/job-logs-sweep-worker.js", "unsynced", "store", "", "orphaned"],
+  ["src/job-logs-sweep-worker.js", "move", "move", "", "stateOf"],
+  ["src/jobs.js", "unsynced", "store", "", "writeJsonAtomic", "JobManager._rewriteSpills"],
+  ["src/jobs.js", "move", "move", "", "JobManager._unreadPrefetch", "JobManager._noteDone", "JobManager._logsHeldFile"],
+  ["src/ledger-slot-backfill.js", "unsynced", "store", "", "_writeAtomic"],
+  ["src/machine-mounts.js", "unsynced", "store", "", "MachineMounts._migrateLegacy", "MachineMounts._save"],
+  ["src/machine-mounts.js", "move", "move", "", "MachineMounts._migrateLegacy", "MachineMounts._migrateLegacy"],
+  ["src/migration-runner.js", "unsynced", "store", "", "writeLedger"],
+  ["src/mounts.js", "unsynced", "store", "", "MountManager._save"],
+  ["src/mounts.js", "move", "move", "", "MountManager._openMountLog"],
+  ["src/node-runtime.js", "unsynced", "derived", "a downloaded Node runtime (checked by its digest), fetched again", "fetchFile", "flip", "flip"],
+  ["src/node-runtime.js", "move", "derived", "a downloaded Node runtime (checked by its digest), fetched again", "provision", "provision"],
+  ["src/opencode-serve.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/plugins.js", "unsynced", "store", "", "PluginManager._save"],
+  ["src/port-forward.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/reading-repair.js", "unsynced", "store", "", "_writeAtomic"],
+  ["src/routes/files.js", "unsynced", "store", "", "writeExtractJournal"],
+  ["src/routes/files.js", "move", "move", "", "crossHostTransfer"],
+  ["src/routes/files.js", "unsynced", "person", "a file copied from another machine into the person's folder", "crossHostTransfer"],
+  ["src/routes/persistence.js", "unsynced", "b0248", "the layouts and settings", "writeJsonAtomic"],
+  ["src/safe-fs-worker.js", "move", "move", "", "rename", "move"],
+  ["src/safe-fs-worker.js", "unsynced", "person", "the person's file copied or moved across devices (its .part)", "copy", "move"],
+  ["src/secret-file.js", "unsynced", "secret", "the secret-bearing replace", "replaceShredding"],
+  ["src/server/agent-listener.js", "unsynced", "store", "", "keepPort"],
+  ["src/server/agent-tool-generators.js", "unsynced", "derived", "an agent tool copied from the checkout at every start", "create > createBrowserVerbsCopy", "create > createBrowserStuckCopy", "create > createBrowserPasskeyCopy", "create > createBrowserReadBackCopy", "create > createCliTextCopy", "create > createCliCallCopy", "create > createFdCloseCopy", "create > createLocalIndexCopy"],
+  ["src/server/apps-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/auto-cli-loop.js", "unsynced", "store", "", "saveState"],
+  ["src/server/auto-resume.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/automation-engine.js", "synced", "self-synced", "", "writeJsonAtomic"],
+  ["src/server/boot-restore.js", "unsynced", "store", "", "writeJsonAtomic", "create > keepEnded"],
+  ["src/server/boot-restore.js", "move", "move", "", "create > retireDeadSocket"],
+  ["src/server/boot-trace.js", "unsynced", "store", "", "start > close"],
+  ["src/server/browser-bindings.js", "unsynced", "store", "", "create > writeAll"],
+  ["src/server/browser-builds-keeper.js", "move", "derived", "a browser build's folder landed or removed (downloaded again)", "create > landUnpacked", "create > removeChromeBuild"],
+  ["src/server/browser-clone-run.js", "unsynced", "derived", "a profile copied for one run", "copyProfileDir"],
+  ["src/server/browser-display-config.js", "unsynced", "derived", "a generated wrapper, made again when it differs", "create > engineWrapperFor"],
+  ["src/server/browser-env.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/browser-keeper.js", "unsynced", "store", "", "writeJsonAtomic", "create > lineageLedger"],
+  ["src/server/browser-keeper.js", "move", "move", "", "create > adoptScratch"],
+  ["src/server/browser-kept.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/browser-kept.js", "move", "move", "", "create > load", "create > moveAside"],
+  ["src/server/browser-trace.js", "unsynced", "store", "", "writeJsonAtomic", "create > rewriteIndex"],
+  ["src/server/browser-trace.js", "move", "move", "", "create > forgetProfile > moveAside", "create > forgetOrphan"],
+  ["src/server/channel-api-cards.js", "unsynced", "store", "", "create > save"],
+  ["src/server/channel-api.js", "unsynced", "store", "", "create > save"],
+  ["src/server/channel-api.js", "move", "move", "", "create > audit"],
+  ["src/server/channels-attention.js", "unsynced", "store", "", "create > save"],
+  ["src/server/cli-model-catalog.js", "unsynced", "store", "", "saveLedger"],
+  ["src/server/cli-models-door.js", "unsynced", "store", "", "createCliModelsDoor > save"],
+  ["src/server/cli-registration.js", "unsynced", "store", "", "create > save"],
+  ["src/server/conversation-deliver.js", "unsynced", "store", "", "create", "create > writeStashNow", "create > writeRetryNow"],
+  ["src/server/conversation-deliver.js", "move", "move", "", "create"],
+  ["src/server/csp-reports.js", "move", "move", "", "create > append"],
+  ["src/server/csp-reports.js", "unsynced", "store", "", "create > rejudge"],
+  ["src/server/decision-engine.js", "unsynced", "store", "", "create > trimJournal"],
+  ["src/server/design-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/desktop-app-keeper.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/device-upgrade-watch.js", "unsynced", "store", "", "create > save"],
+  ["src/server/dial-health-watch.js", "unsynced", "store", "", "create > save"],
+  ["src/server/doc-engine.js", "unsynced", "store", "", "ownerMemo > save"],
+  ["src/server/dropline-oauth.js", "unsynced", "store", "", "tokenFile > write"],
+  ["src/server/engine-distribution.js", "move", "derived", "an engine build's folders swapped (downloaded and unpacked again)", "create > rename", "create > landDir", "create > landDir", "create > landDir", "create > landDir", "create > stageNext", "create > stageNext", "create > stageNext > back", "create > healAside", "create > putBack"],
+  ["src/server/engine-distribution.js", "unsynced", "store", "", "create > save"],
+  ["src/server/feedback-forward.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/feedback-store.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/grants-migration.js", "unsynced", "store", "", "migrate"],
+  ["src/server/grants-store.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/grants-store.js", "move", "move", "", "create > audit"],
+  ["src/server/home-rename.js", "unsynced", "store", "", "rewriteStores", "migrateHomeRename"],
+  ["src/server/host-tokens.js", "unsynced", "store", "", "create > writeIdentity"],
+  ["src/server/instance-url.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/integration-store.js", "move", "move", "", "create > load"],
+  ["src/server/job-secrets-door.js", "move", "move", "", "create > setAside"],
+  ["src/server/local-index.js", "unsynced", "derived", "the person CLI's index and copy, written again from the hub's state", "write", "write", "stop", "installPersonCli"],
+  ["src/server/login-expiry-watch.js", "unsynced", "store", "", "create > save"],
+  ["src/server/migrations.js", "unsynced", "store", "", "create > run", "create > run", "create > run", "create > run", "create > run", "create > run", "create > run", "create > run", "create > migrateContextRowsFile", "create > dropWarmthDerived", "create > cloakMigrateNow > writeAtomic", "create > stripRetiredSettingsFile", "create > migrateExitLists > reshape", "create > migrateExitLists", "create > voidRunaway", "create > stampDesktopHostKey"],
+  ["src/server/migrations.js", "move", "move", "", "create > run"],
+  ["src/server/otel-ingest.js", "unsynced", "store", "", "create > replayEnd"],
+  ["src/server/plugin-install.js", "move", "move", "", "moveDir"],
+  ["src/server/plugin-loader.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/published-pages.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/published-pages.js", "unsynced", "person", "a page's published content", "create > publishContent"],
+  ["src/server/queued-wakes.js", "move", "move", "", "create"],
+  ["src/server/session-stdout.js", "unsynced", "store", "", "create > setupSessionPty > finishTeardown", "create > writeSessionMeta"],
+  ["src/server/spend-guard.js", "unsynced", "spend", "data/spend-budget.json", "writeJsonAtomic"],
+  ["src/server/spend-guard.js", "unsynced", "aside", "a stale lock set aside", "create > takeLock"],
+  ["src/server/stash-handover.js", "unsynced", "store", "", "create > persistDelivered"],
+  ["src/server/sync-fs-witness-worker.js", "unsynced", "store", "", "finishCapture"],
+  ["src/server/tailnet-door.js", "unsynced", "store", "", "create > keep"],
+  ["src/server/tls.js", "unsynced", "store", "", "create > saveState"],
+  ["src/server/usage-pool-engine.js", "unsynced", "store", "", "create > persistResetCreditTries"],
+  ["src/server/usage-pool-engine.js", "move", "move", "", "create > loadResetCreditTries"],
+  ["src/server/usage-probe-log.js", "move", "move", "", "appendProbeLog"],
+  ["src/server/vault-engine.js", "synced", "self-synced", "", "writeAtomic"],
+  ["src/server/vault-run-door.js", "synced", "self-synced", "", "writeJsonAtomic"],
+  ["src/server/vault-totp.js", "synced", "self-synced", "", "writeJsonAtomic"],
+  ["src/server/vault-use-grants.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/window-targets-engine.js", "unsynced", "store", "", "writeJsonAtomic"],
+  ["src/server/writes-lost.js", "unsynced", "store", "", "writeAtomic"],
+  ["src/server/writes-lost.js", "move", "move", "", "create > load"],
+  ["src/slot-transitions.js", "unsynced", "store", "", "SlotTransitions._maybeTrim"],
+  ["src/store-hold.js", "unsynced", "b0248", "the hold's write (the desktops and their rollback points)", "create > write", "create > write"],
+  ["src/store-hold.js", "move", "move", "", "create > setAside"],
+  ["src/store-writer-worker.js", "move", "move", "a ring's rotation (the live log to .1; each append was synced)", "writeJob"],
+  ["src/store-writer-worker.js", "synced", "writer", "the store writer's thread: every store the writer holds", "writeJob"],
+  ["src/sync-store.js", "unsynced", "store", "", "SyncStore.flush"],
+  ["src/sysinfo.js", "unsynced", "store", "", "persistHistory"],
+  ["src/task-groups.js", "move", "move", "", "TaskGroupManager._mirrorIo > rename"],
+  ["src/task-groups.js", "unsynced", "derived", "a Task Group's mirror file, written again from the group's state", "TaskGroupManager._runMirror"],
+  ["src/task-groups.js", "unsynced", "store", "", "TaskGroupManager._archiveClear", "TaskGroupManager._importArchive"],
+  ["src/task-groups.js", "unsynced", "person", "an export the person asked for", "TaskGroupManager.exportToFile"],
+  ["src/transcript-service.js", "unsynced", "person", "a conversation transcript rescued in place (its backup kept)", "createTranscriptService > rescue"],
+  ["src/usage-cache-write.js", "unsynced", "store", "", "atomicWrite"],
+  ["src/usage-history.js", "unsynced", "store", "", "UsageHistory._writeAtomic"],
+  ["src/usage-hold-road.js", "move", "move", "", "UsageHoldRoad._setAsideFile"],
+  ["src/usage-hold-road.js", "unsynced", "store", "", "UsageHoldRoad._setAsideLive", "UsageHoldRoad._dropCompact"],
+  ["src/usage-ledger-dedup.js", "move", "move", "", "appendFile"],
+  ["src/usage-ledger-dedup.js", "synced", "self-synced", "", "dedupSteps"],
+  ["src/usage-origin-backfill.js", "unsynced", "store", "", "_writeAtomic"],
+  ["src/usage-routes.js", "unsynced", "store", "", "setupUsage > writeUsageCache"],
+  ["src/user-todos.js", "move", "move", "", "UserTodoManager._setAside", "UserTodoManager._setAsideOff"],
+  ["src/user-todos.js", "unsynced", "store", "", "UserTodoManager._flush"],
+  ["src/vnc.js", "unsynced", "store", "", "VncManager._record"],
+  ["src/webdav.js", "unsynced", "store", "", "MountTokens._save"],
+  ["src/webdav.js", "unsynced", "person", "a DAV upload (PUT)", "registerWebdav > route:USE /dav"],
+  ["src/webdav.js", "move", "move", "", "registerWebdav > route:USE /dav"]
+];
+const OWED_MAX = 148;   // the sites of the OWED families (store B-574d, device B-93e7, person B-ddf3, b0248 B-0248, spend B-ef83): may only fall
+
+const AC = require(path.join(REPO, 'node_modules/acorn'));
+const NAMES = /\brename(?:Sync)?\s*\(/;
+const sitesOfTree = (repo) => {
+  const all = { sites: [], skipped: [], unknown: [] };
+  for (const rel of trackedFiles(repo, 'src', 'server.js').filter((f) => /\.(?:c|m)?js$/.test(f))) {
+    const src = fs.readFileSync(path.join(repo, rel), 'utf8');
+    if (!NAMES.test(src)) continue;
+    const r = renameSites(rel, src, AC);
+    for (const k of Object.keys(all)) all[k].push(...r[k]);
+  }
+  return all;
+};
+const all = sitesOfTree(REPO);
+const say = (s) => `${s.file}:${s.line} ${s.scope} (${s.cls}) ${s.from} → ${s.to}`;
+console.log(`① every file-system rename of src/ and server.js: ${all.sites.length} sites in ${new Set(all.sites.map((s) => s.file)).size} files (${['synced', 'unsynced', 'move'].map((c) => `${all.sites.filter((s) => s.cls === c).length} ${c}`).join(', ')}); ${all.skipped.length} renames of other objects`);
+ok(all.unknown.length === 0, 'every rename is on a judged object (the file system, or NOT_FS by name)', all.unknown);
+const J = judge(all.sites, ROWS);
+for (const s of J.noRow) console.error(`  ✗ NO ROW (a new rename: give it its family): ${say(s)}`);
+for (const s of J.extra) console.error(`  ✗ ONE MORE SITE than its row says: ${say(s)}`);
+for (const g of J.gone) console.error(`  ✗ GONE (drop it from its row; a cure lowers OWED_MAX): ${g.file} ${g.scope} (${g.cls}, ${g.family}) ×${g.missing}`);
+for (const s of J.badFamily) console.error(`  ✗ ITS FAMILY «${s.family}» DOES NOT ADMIT ${s.cls}: ${say(s)}`);
+ok(J.noRow.length === 0 && J.extra.length === 0 && J.gone.length === 0, `every rename site has its row, and every row its sites (${J.noRow.length} new, ${J.extra.length} more, ${J.gone.length} gone)`);
+ok(J.badFamily.length === 0, 'every site\'s class is one its family admits (the writer\'s and a self-synced family\'s: synced only)');
+ok(ROWS.every((r) => !!FAMILIES[r[2]]) && Object.values(FAMILIES).every((f) => ['through the writer', 'named', 'cured', 'owed'].includes(f.verdict) && ((f.verdict !== 'owed' && f.verdict !== 'cured') || /^B-[0-9a-f]{4}$/.test(f.row))), 'every row names a family, and every family goes through the writer, is named, or is a cure (owed or done elsewhere) WITH its row');
+ok(J.owed === OWED_MAX, `OWED_MAX: ${J.owed} sites of the owed families (stated ${OWED_MAX}) — ${J.owed < OWED_MAX ? `LOWER OWED_MAX to ${J.owed} (a cure: the ratchet falls)` : J.owed > OWED_MAX ? 'a NEW owed site: the ratchet only falls (cure it, or name its family with its reason)' : 'held'}`);
+console.log('② the families:');
+for (const [k, f] of Object.entries(FAMILIES)) {
+  const rs = ROWS.filter((r) => r[2] === k), n = rs.reduce((a, r) => a + r.length - 4, 0);
+  console.log(`  · ${k} — ${f.verdict}${f.row ? ' ' + f.row : ''} — ${n} site${n === 1 ? '' : 's'} in ${new Set(rs.map((r) => r[0])).size} file${new Set(rs.map((r) => r[0])).size === 1 ? '' : 's'}: ${f.why}`);
+}
+
+// ── ③ THE CLASSIFIER, planted (PURE) ─────────────────────────────────────────────────────────────────────────────────────────
+console.log('③ the classifier on planted sources');
+{
+  const one = (src) => renameSites('src/zz-plant.js', src, AC);
+  const cls = (src) => one(src).sites.map((s) => s.cls).join(',');
+  ok(cls(`function save(f, d) { const tmp = f + '.tmp'; fs.writeFileSync(tmp, d); fs.renameSync(tmp, f); }`) === 'unsynced', 'a temp written then renamed: unsynced');
+  ok(cls(`function save(f, d) { const tmp = f + '.t'; const fd = fs.openSync(tmp, 'w'); fs.writeSync(fd, d); fs.fsyncSync(fd); fs.closeSync(fd); fs.renameSync(tmp, f); }`) === 'synced', 'a temp written, fsynced, renamed: synced');
+  ok(cls(`async function save(f, d) { const tmp = f + '.t'; const h = await fsp.open(tmp, 'w'); await h.writeFile(d); await h.sync(); await h.close(); await fsp.rename(tmp, f); }`) === 'synced', 'a handle\'s sync() before the rename: synced');
+  ok(cls(`function save(f, d) { const tmp = f + '.t'; fs.writeFileSync(tmp, d); fs.renameSync(tmp, f); const fd = fs.openSync(f, 'r'); fs.fsyncSync(fd); }`) === 'unsynced', 'a sync AFTER the rename is no sync of the temp: unsynced');
+  ok(cls(`function rot(f) { fs.renameSync(f, f + '.1'); }`) === 'move', 'a rename with no write before it: move');
+  ok(cls(`function rot(f, b) { const fd = fs.openSync(f, 'a'); fs.writeSync(fd, b); fs.closeSync(fd); fs.renameSync(f, f + '.1'); }`) === 'move', 'an append log\'s rotation (opened \'a\'): move');
+  ok(cls(`async function c(d) { const tmp = d + '.tmp'; await fs.promises.copyFile(path.join(a, 'b'), tmp); await fs.promises.rename(tmp, d); }`) === 'unsynced', 'a copy INTO the temp (its first argument a call): unsynced');
+  ok(cls(`function a(t) { fs.writeFileSync(t, 'x'); }\nfunction b(t, f) { fs.renameSync(t, f); }`) === 'move', 'a write in ANOTHER named function is not this scope\'s: move');
+  ok(cls(`function c(t, f) { fs.writeFileSync(t, 'x'); setImmediate(() => fs.renameSync(t, f)); }`) === 'unsynced', 'a callback reads the scope that names it: unsynced');
+  const u = one(`function z() { thing.rename(1, 2); accounts.rename('a', 'b'); }`);
+  ok(u.unknown.length === 1 && u.unknown[0].obj === 'thing' && u.skipped.length === 1 && u.sites.length === 0, 'an object nobody judged is red by name; a NOT_FS object is skipped by name', u);
+}
+
+// ── ④ THE WRITER'S LAW, and the census's own controls ───────────────────────────────────────────────────────────────────────
+console.log('④ the store writer syncs (B-9275 unit 1) — RED: today\'s writeJob; a new site, a gone site, a fallen count');
+{
+  const { anchored } = await import('./scratch.mjs');
+  const rel = 'src/store-writer-worker.js', real = fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const wj = (src) => renameSites(rel, src, AC).sites.filter((s) => s.scope === 'writeJob' && s.from === 'm.tmp').map((s) => s.cls).join(',');
+  const today = anchored(real, 'try { writeAll(fs, fd, m.parts); fs.fsyncSync(fd); } catch (e) { err = e; }', 'try { writeAll(fs, fd, m.parts); } catch (e) { err = e; }', 'today: a whole write renamed with no sync');   // stale-pins: kept (today's line, the RED copy)
+  ok(wj(real) === 'synced', `the store writer's whole write reads synced (${wj(real)})`);
+  const swapped = all.sites.filter((s) => s.file !== rel).concat(renameSites(rel, today, AC).sites);
+  const Jt = judge(swapped, ROWS);
+  ok(wj(today) === 'unsynced' && Jt.noRow.some((s) => s.file === rel && s.scope === 'writeJob' && s.cls === 'unsynced'), `RED (today's writeJob): it reads ${wj(today)}, and no row takes an unsynced write of the writer (its family admits synced only)`, Jt.noRow);
+  const owedRow = ROWS.find((r) => FAMILIES[r[2]].verdict === 'owed');
+  const pick = all.sites.find((s) => s.file === owedRow[0] && s.cls === owedRow[1] && s.scope === owedRow[4]);
+  const J1 = judge(all.sites.concat([{ ...pick, line: 0 }]), ROWS);
+  ok(J1.extra.length === 1, 'CONTROL: one more unsynced site in a rowed scope is red («one more site»)');
+  const J2 = judge(all.sites.concat([{ ...pick, file: 'src/zz-new.js' }]), ROWS);
+  ok(J2.noRow.length === 1, 'CONTROL: a rename in a file with no row is red («no row»)');
+  const J3 = judge(all.sites.filter((s) => s !== pick), ROWS);
+  ok(J3.gone.length === 1 && J3.owed === OWED_MAX - 1, `CONTROL: a cured owed site is red until its row drops it and OWED_MAX falls (${J3.owed} of ${OWED_MAX})`);
+}
+report();
