@@ -427,24 +427,40 @@ function _preadAll(fd, from, to) {
  *  line the writer has not finished) are parsed too — the string path parses
  *  them — but reported apart, never consumed. */
 function _parseJsonlLines(buf, base, dropSubagent) {
+  const s = _jsonlLineStepper(buf, base, dropSubagent);
+  s.step(Infinity);
+  return s.finish();
+}
+/** THE LINE PARSE, ONE IMPLEMENTATION (row B-422c unit 2): `_parseJsonlLines` runs it whole; the sliced road
+ *  (`_stepSliced`) runs it a few hundred lines at a time with the loop free between — the same records, starts and end
+ *  by construction. `step(n)` parses up to n '\n'-terminated lines → true once none is left; `finish()` parses the bytes
+ *  after the last '\n' (reported apart, never consumed) and answers {records, starts, end, partial}. */
+function _jsonlLineStepper(buf, base, dropSubagent) {
   const records = [], starts = [];
   const keep = (msg) => !(dropSubagent && (msg.parent_tool_use_id || msg.isSidechain));
   let pos = 0;
-  for (;;) {
-    const nl = buf.indexOf(10, pos);
-    if (nl === -1) break;
-    if (nl > pos) {
-      const t = buf.toString('utf8', pos, nl).trim();
-      if (t) { try { const msg = JSON.parse(t); if (keep(msg)) { records.push(msg); starts.push(base + pos); } } catch { } }
-    }
-    pos = nl + 1;
-  }
-  let partial;
-  if (pos < buf.length) {
-    const t = buf.toString('utf8', pos, buf.length).trim();
-    if (t) { try { const msg = JSON.parse(t); if (keep(msg)) partial = msg; } catch { } }
-  }
-  return { records, starts, end: base + pos, partial };
+  return {
+    step(n) {
+      for (let i = 0; i < n; i++) {
+        const nl = buf.indexOf(10, pos);
+        if (nl === -1) return true;
+        if (nl > pos) {
+          const t = buf.toString('utf8', pos, nl).trim();
+          if (t) { try { const msg = JSON.parse(t); if (keep(msg)) { records.push(msg); starts.push(base + pos); } } catch { } }
+        }
+        pos = nl + 1;
+      }
+      return false;
+    },
+    finish() {
+      let partial;
+      if (pos < buf.length) {
+        const t = buf.toString('utf8', pos, buf.length).trim();
+        if (t) { try { const msg = JSON.parse(t); if (keep(msg)) partial = msg; } catch { } }
+      }
+      return { records, starts, end: base + pos, partial };
+    },
+  };
 }
 
 const _PROBE = 4096;
@@ -692,9 +708,13 @@ function readerRefusal(e) {
 }
 /** one op through the transcript pool → its answer; a pool failure ⇒ the refusal by name, never a read on this loop */
 async function poolRead(op, payload, opts) {
+  const fp = payload && payload.fp;   // unit 2: the file's refusals are noted (the histories' sliced road reads the record), its answer forgives them
   const pool = _transcriptPoolGet();
-  if (!pool) throw readerRefusal(null);
-  try { return await pool.call(op, payload, opts); } catch (e) { throw !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : e; }
+  if (!pool) { const r = readerRefusal(null); noteFileRefusal(fp, r); throw r; }
+  let out;
+  try { out = await pool.call(op, payload, opts); } catch (e) { if (!pool.inPlace && isPoolFailure(e)) { const r = readerRefusal(e); noteFileRefusal(fp, r); throw r; } throw e; }
+  forgiveFile(fp);
+  return out;
 }
 async function jsonlGapInfoAsync(fp) { return poolRead('gapInfo', { fp }); }
 async function readJsonlLineRangeAsync(fp, startLine, endLine) { return poolRead('lineRange', { fp, startLine, endLine }); }
@@ -729,10 +749,10 @@ async function readJsonlBoundedParsedAsync(fp, { tailOnly = true, dropSubagent =
  *  → the records (or, with `entry`, { entry, mode, bytes }), or null */
 async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PAGE_LINES, onFail = null, slot = '', entry = false, dropSubagent = false } = {}) {
   let refusal = null;   // the LAST pool failure on this road (a later op error clears it: then the op's failure is the answer)
-  const seen = (e) => { refusal = pool && !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : null; };
+  const seen = (e) => { refusal = pool && !pool.inPlace && isPoolFailure(e) ? readerRefusal(e) : null; if (refusal) noteFileRefusal(fp, refusal); };
   const said = (why) => { _pagedStats.failed++; try { onFail?.(why, refusal); } catch { } return null; };
   const pool = _transcriptPoolGet();
-  if (!pool) { refusal = readerRefusal(null); return said('no transcript pool on this process'); }
+  if (!pool) { refusal = readerRefusal(null); noteFileRefusal(fp, refusal); return said('no transcript pool on this process'); }
   let why = null;
   for (let tries = 0; tries < 2; tries++) {
     try {
@@ -748,8 +768,8 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
         if (entry && r.starts) for (const x of r.starts) startsOut.push(x);
         start = Number.isInteger(r.next) && r.next > start ? r.next : start + page;
       }
-      if (!gone && entry) { _pagedStats.reads++; return head ? { entry: { ...head.facts, messages: out, starts: startsOut }, mode: head.mode, bytes: head.bytes } : said('the paged entry came without its facts'); }
-      if (!gone) { _pagedStats.reads++; return out; }
+      if (!gone && entry) { _pagedStats.reads++; forgiveFile(fp); return head ? { entry: { ...head.facts, messages: out, starts: startsOut }, mode: head.mode, bytes: head.bytes } : said('the paged entry came without its facts'); }
+      if (!gone) { _pagedStats.reads++; forgiveFile(fp); return out; }
     } catch (e) {
       const code = e && e.code;
       seen(e);
@@ -765,7 +785,9 @@ async function readJsonlBoundedParsedPagedAsync(fp, { tailOnly = true, page = PA
   if (entry) { const e1 = await readJsonlTailAsync(fp, { dropSubagent }); return e1 == null ? said(`${why}; then the one-shot read answered nothing`) : e1; }
   let r = null;
   try { r = await pool.call('boundedParsed', { fp, tailOnly, dropSubagent: !!dropSubagent }); } catch (e) { seen(e); why = `${why}; then the one-shot read failed too (${(e && e.message) || e})`; return said(why); }
-  return r == null ? said(`${why}; then the one-shot read answered nothing`) : r;
+  if (r == null) return said(`${why}; then the one-shot read answered nothing`);
+  forgiveFile(fp);
+  return r;
 }
 /** B-f3f9: a codex conversation's WHOLE history read, parsed and MERGED in the transcript worker's `history` lane (its fork
  *  ancestry's files in order, its own last — `files` = [{fp, threadId, untilOrdinal}]), THEN the live buffer merged last:
@@ -805,6 +827,129 @@ async function codexHistoryMergedPagedAsync({ files = [], liveBuffer = () => '' 
   }
   return said(why);
 }
+// ── ROW B-422c UNIT 2 (主开发 r1006 item 2): THE TWO HISTORIES' DEGRADATION ROAD ─────────────────────────────────────────────
+// THE LAW: a person can always read a conversation's history, and no step of it holds the loop 250 ms. When the pool's refusal of
+// ONE FILE is not the storage's and has stood SLICED_AFTER_MS (stated: 10 s — twenty times a worker's respawn), the two histories
+// (the Claude tail, the codex rollout) read that file ON THE MAIN PROCESS: every file call async (libuv — never a sync call on this
+// loop), the line parse in slices of SLICE_MS with the loop free between them (`_jsonlLineStepper`: the worker's records, by
+// construction). THE GUARD — a storage that hung is never tried here: the file's record says the storage hung (a deadline, a hung
+// path, a blocked mount: for the record's life), the mount door holds it blocked, or the pool remembers it hung ⇒ never; ONE such
+// read at a time on the hub, and none while one that ran out its own deadline (SLICED_READ_DEADLINE_MS, then the file is the
+// storage's) has not answered — at most one libuv thread parked in a dead file; a compressed rollout is never decompressed here
+// (the worker's). Said once a file in the journal. The four other roads never take it.
+let SLICED_AFTER_MS = 10000, SLICED_READ_DEADLINE_MS = 60000;
+const SLICE_MS = 8, SLICE_LINES = 256, ZSTD_MAGIC = 0xFD2FB528;
+const _fileRefusals = new Map();   // fp → { firstAt, count, storageHung, why } — the pool's refusals of ONE file, standing
+const _slicedSaid = new Set();
+let _slicedChain = Promise.resolve(), _slicedParked = 0;
+const _slicedJoin = new Map();     // kind:fp → the read in flight (a second ask of the same file joins it)
+function noteFileRefusal(fp, refusal) {
+  if (!fp) return;
+  let rec = _fileRefusals.get(fp);
+  if (!rec) { rec = { firstAt: Date.now(), count: 0, storageHung: false, why: '' }; _fileRefusals.set(fp, rec); while (_fileRefusals.size > 512) _fileRefusals.delete(_fileRefusals.keys().next().value); }
+  rec.count++;
+  rec.why = (refusal && refusal.why) || rec.why || 'refused';
+  if (refusal && refusal.storageHung) rec.storageHung = true;
+}
+const forgiveFile = (fp) => { if (fp) _fileRefusals.delete(fp); };   // the pool answered for it: the refusal no longer stands
+/** May this file's history be read on the main process now? → { ok, why } (never a file call: memory only) */
+function slicedRoadFor(fp) {
+  const rec = fp && _fileRefusals.get(fp);
+  if (!rec) return { ok: false, why: 'no refusal of it stands' };
+  if (rec.storageHung) return { ok: false, why: 'its storage hung (a deadline, a hung path or a blocked mount) — never tried here' };
+  const stood = Date.now() - rec.firstAt;
+  if (stood < SLICED_AFTER_MS) return { ok: false, why: `refused for ${Math.round(stood / 1000)} s — the main process reads it past ${SLICED_AFTER_MS / 1000} s` };
+  let mp = false; try { mp = require('../mount-door').blocked(fp); } catch { mp = false; }
+  if (mp) { rec.storageHung = true; return { ok: false, why: 'its mount is blocked' }; }
+  if (_transcriptPool && typeof _transcriptPool._hungOf === 'function' && _transcriptPool._hungOf({ fp }, 'jsonlTail', SLICED_READ_DEADLINE_MS)) return { ok: false, why: 'the transcript pool remembers it hung' };
+  if (_slicedParked) return { ok: false, why: 'a read on the main process is still parked in a file that never answered' };
+  return { ok: true, why: `the transcript reader refused it for ${Math.round(stood / 1000)} s (${rec.count} refusals: ${rec.why})` };
+}
+/** the file's bounded tail bytes, every call async, under ONE deadline (a deadline ⇒ the storage's, `storageHung`) */
+function _readTailBytesAsync(fp) {
+  let parked = false, timer = null;
+  const work = (async () => {
+    const fh = await fs.promises.open(fp, 'r');
+    try {
+      const stat = await fh.stat();
+      const head = Buffer.alloc(4);
+      const h = await fh.read(head, 0, 4, 0);
+      if (h.bytesRead === 4 && head.readUInt32LE(0) === ZSTD_MAGIC) throw Object.assign(new Error('a compressed rollout — only the worker decompresses it'), { code: 'sliced_zst' });
+      const size = stat.size, lower = jsonlTailLower(size), from = Math.max(lower, 0);
+      const raw = Buffer.allocUnsafe(Math.max(0, size - from));
+      let off = 0;
+      while (off < raw.length) { const { bytesRead } = await fh.read(raw, off, Math.min(raw.length - off, 4 << 20), from + off); if (!(bytesRead > 0)) break; off += bytesRead; }
+      return { stat, size, lower, from, raw: off === raw.length ? raw : raw.subarray(0, off) };
+    } finally { await fh.close().catch((e) => console.warn(`[transcript] the main-process read of ${path.basename(fp)}: its file handle did not close (${e.message})`)); }
+  })();
+  work.then(() => { }, () => { }).finally(() => { if (parked) _slicedParked--; });   // a parked read that answers late frees its place
+  const deadline = new Promise((_, rej) => { timer = setTimeout(() => { parked = true; _slicedParked++; rej(Object.assign(new Error(`no answer in ${SLICED_READ_DEADLINE_MS / 1000} s — the storage hangs`), { code: 'sliced_read_deadline', storageHung: true })); }, SLICED_READ_DEADLINE_MS); });
+  return Promise.race([work, deadline]).finally(() => clearTimeout(timer));
+}
+/** the line parse in slices: SLICE_LINES lines at a time until SLICE_MS, then the loop's turn */
+async function _stepSliced(stepper) {
+  for (;;) {
+    const t0 = performance.now();
+    let done = false;
+    do { done = stepper.step(SLICE_LINES); } while (!done && performance.now() - t0 < SLICE_MS);
+    if (done) return stepper.finish();
+    await new Promise((r) => setImmediate(r));
+  }
+}
+/** one read on the main process at a time (the same file's second ask joins it); the guard asked at ITS turn; said once a file */
+function _slicedTurn(kind, fp, read) {
+  const key = kind + ':' + fp;
+  if (_slicedJoin.has(key)) return _slicedJoin.get(key);
+  const run = async () => {
+    const road = slicedRoadFor(fp);
+    if (!road.ok) throw Object.assign(new Error(road.why), { code: 'sliced_refused' });
+    if (!_slicedSaid.has(fp)) { _slicedSaid.add(fp); if (_slicedSaid.size > 512) _slicedSaid.clear(); console.warn(`[transcript] ${path.basename(fp)}: ${road.why} — its history is read on the main process in bounded slices (row B-422c)`); }
+    try { return await read(); }
+    catch (e) { if (e && (e.storageHung || e.code === 'sliced_read_deadline')) { const rec = _fileRefusals.get(fp); if (rec) rec.storageHung = true; } throw e; }
+  };
+  const turn = _slicedChain.then(run, run);
+  _slicedChain = turn.then(() => { }, () => { });
+  _slicedJoin.set(key, turn);
+  turn.then(() => _slicedJoin.delete(key), () => _slicedJoin.delete(key));
+  return turn;
+}
+/** readJsonlTail's FULL read on the main process, sliced — the same entry ({entry, mode: 'full', bytes}); throws its refusal */
+function readJsonlTailSliced(fp, { dropSubagent = false } = {}) {
+  return _slicedTurn('tail' + (dropSubagent ? '-d' : ''), fp, async () => {
+    if (isZstPath(fp)) throw Object.assign(new Error('a compressed rollout — only the worker decompresses it'), { code: 'sliced_zst' });
+    const { stat, size, lower, from, raw } = await _readTailBytesAsync(fp);
+    let start = from, buf = raw, incr = true;
+    if (lower >= 0) { const nl = raw.indexOf(10); if (nl === -1) incr = false; else { buf = raw.subarray(nl + 1); start = from + nl + 1; } }
+    const got = await _stepSliced(_jsonlLineStepper(buf, start, !!dropSubagent));
+    const messages = got.records;
+    if (got.partial !== undefined) messages.push(got.partial);
+    const end = got.end, readEnd = from + raw.length;
+    const entry = {
+      mtimeMs: readEnd === size ? stat.mtimeMs : -1, size: readEnd, ino: stat.ino, dev: stat.dev, spanStart: start, spanEnd: end,
+      messages, starts: got.starts, partial: got.partial !== undefined ? 1 : 0,
+      headProbe: buf.toString('latin1', 0, Math.min(end - start, _PROBE)),
+      tailProbe: buf.toString('latin1', Math.max(0, end - start - _PROBE), end - start),
+      incr,
+    };
+    return { entry, mode: 'full', bytes: raw.length };
+  });
+}
+/** parseCodexSessionJsonl's read and parse (readJsonlBounded tail-only + every line) on the main process, sliced → the records */
+function readCodexRolloutSliced(fp) {
+  return _slicedTurn('rollout', fp, async () => {
+    if (isZstPath(fp)) throw Object.assign(new Error('a compressed rollout — only the worker decompresses it'), { code: 'sliced_zst' });
+    const { lower, raw } = await _readTailBytesAsync(fp);
+    let buf = raw;
+    if (lower >= 0) { const nl = raw.indexOf(10); if (nl !== -1) buf = raw.subarray(nl + 1); }
+    const got = await _stepSliced(_jsonlLineStepper(buf, 0, false));
+    if (got.partial !== undefined) got.records.push(got.partial);
+    return got.records;
+  });
+}
+/** row B-422c unit 2's legs: the stated time and the read's deadline (ms; null = the product's), and the file records' state */
+function _setSlicedForTest({ afterMs = null, deadlineMs = null } = {}) { SLICED_AFTER_MS = afterMs == null ? 10000 : afterMs; SLICED_READ_DEADLINE_MS = deadlineMs == null ? 60000 : deadlineMs; }
+const slicedState = () => ({ files: _fileRefusals.size, parked: _slicedParked, said: _slicedSaid.size });
+
 /** Generic off-loop call (S3: codex discovery ops) → the worker's result. Row B-422c: `whenRefused(refusal)` is what a POOL
  *  FAILURE answers — a kept answer or null, NEVER a read on this loop (the release ran an inline walk here: the codex sessions
  *  tree on the 5 s poll while the pool was down); an error of the op itself answers the same. The device's in-place road runs the
@@ -1551,6 +1696,7 @@ class CodexAdapter extends BackendAdapter {
 module.exports = { codexTranscriptIndex, transcriptPool: _transcriptPoolGet,
   pagedReadStats, codexParsesOnLoop, _setHistoryHeapMbForTest, codexHistoryMergedPagedAsync, mergedReadStats, // B-f3f9
   _setTranscriptPoolForTest, // row B-422c's legs
+  readJsonlTailSliced, readCodexRolloutSliced, slicedRoadFor, slicedState, _setSlicedForTest, // row B-422c unit 2: the histories' sliced road
   jsonlGapInfoAsync, readJsonlLineRangeAsync, scanJsonlUserTurnsAsync, readJsonlBoundedParsedAsync, readJsonlBoundedParsedPagedAsync, readJsonlTailAsync, transcriptWorkerCall,
   plainJsonlPath, fileIsZst, ZST_MAX_PLAIN, deriveCodexSessionName, CODEX_ROLLOUT_RE, lastCodexTurnModel, lastCodexTurnEffort, lastCodexTurnContextAsync,
   CODEX_SESSIONS_DIR,

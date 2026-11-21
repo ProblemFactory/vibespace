@@ -664,9 +664,12 @@ function noteHistoryRefused(id, e, fp, { stillHung = false } = {}) {
   const was = _historyRefused.get(id);
   // `stillHung`: a refusal of the hung storage's own retry stays the STORAGE's whatever its kind (a no-worker answer between a
   // deadline kill and the respawn is the same hung storage) — never back to the 2 s re-warm and its find + stat on this loop
-  _historyRefused.set(id, { at: Date.now(), why: (e && e.why) || (e && e.message) || 'refused', storageHung: stillHung || !!(e && e.storageHung), fp: fp || (was && was.fp) || null, retryAt: was ? was.retryAt : 0 });
+  const rec = { at: Date.now(), why: (e && e.why) || (e && e.message) || 'refused', storageHung: stillHung || !!(e && e.storageHung), fp: fp || (was && was.fp) || null, retryAt: was ? was.retryAt : 0 };
+  _historyRefused.set(id, rec);
+  return rec;
 }
 const notLoadedList = () => Object.assign([], { notLoaded: NOT_LOADED });
+const C = () => require('./adapters/codex');   // lazily (the adapter requires nothing of this module at load)
 // the kept copy's tagged twin, ONE per cache entry (an entry's list never changes in place): the merge memo keys on the array
 const _taggedKept = new WeakMap();
 const taggedKeptOf = (list) => { let c = _taggedKept.get(list); if (!c) { c = Object.assign(list.slice(), { notLoaded: NOT_LOADED, kept: true }); _taggedKept.set(list, c); } return c; };
@@ -775,7 +778,23 @@ async function warmSessionJsonlAsync(claudeSessionId, cwd, opts = null) {
       const now = _jsonlCache.get(claudeSessionId), cur = _historyRefused.get(claudeSessionId);
       // a STORAGE note another warm took meanwhile stays the storage's (this late refusal of another kind never brings back the 2 s
       // re-warm and its find + stat on the loop)
-      if (e && e.code === NOT_LOADED && !(now && now !== cached && now.mtimeMs === stat.mtimeMs && now.size === stat.size && now.ino === stat.ino)) { refusedNow = true; noteHistoryRefused(claudeSessionId, e, fp, { stillHung: !!(cur && cur !== noteAtStart && cur.storageHung) }); }
+      let mine = null;
+      if (e && e.code === NOT_LOADED && !(now && now !== cached && now.mtimeMs === stat.mtimeMs && now.size === stat.size && now.ino === stat.ino)) { refusedNow = true; mine = noteHistoryRefused(claudeSessionId, e, fp, { stillHung: !!(cur && cur !== noteAtStart && cur.storageHung) }); }
+      // ROW B-422c UNIT 2: a refusal of THIS FILE that is not the storage's and has stood past the stated time ⇒ the main process
+      // reads it in bounded slices (src/adapters/codex.js readJsonlTailSliced — the same entry, every file call async, the guard)
+      if (mine && !mine.storageHung && C().slicedRoadFor(fp).ok) {
+        const t1 = performance.now();
+        try {
+          const r2 = await C().readJsonlTailSliced(fp, { dropSubagent: true });
+          if (r2 && r2.entry) {
+            _stampJsonlParse(r2.bytes, performance.now() - t1);
+            _jsonlCachePut(claudeSessionId, r2.entry);
+            if (_historyRefused.get(claudeSessionId) === mine) _historyRefused.delete(claudeSessionId);
+            refusedNow = false;
+            return true;
+          }
+        } catch (e2) { mine.why = `${mine.why}; the main process's read failed too (${(e2 && e2.message) || e2})`; if (e2 && e2.storageHung) mine.storageHung = true; }
+      }
       return false;
     }
     return ok;

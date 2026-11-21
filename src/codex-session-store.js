@@ -704,6 +704,13 @@ async function parseCodexSessionJsonlAsync(threadId, { fp: known } = {}) {
     // wait): NOTHING is parsed on the loop — «not loaded yet» (an empty list tagged; the reader says it, the page shows it). The op's
     // own failure, and the device's in-place road (its own loop, by design), read as before.
     if (refusal) {
+      // ROW B-422c UNIT 2: a refusal of THIS FILE that is not the storage's and has stood past the stated time ⇒ the main process
+      // reads it in bounded slices (src/adapters/codex.js readCodexRolloutSliced — parseCodexSessionJsonl's records, every file call
+      // async, the guard); the merges after it are sliced already
+      const C = require('./adapters/codex');
+      if (!refusal.storageHung && C.slicedRoadFor(fp).ok) {
+        try { return await C.readCodexRolloutSliced(fp); } catch (e) { why = `${why}; the main process's read failed too (${(e && e.message) || e})`; }
+      }
       noteNotLoadedOnce(threadId, why);
       return Object.assign([], { notLoaded: NOT_LOADED, why, storageHung: !!refusal.storageHung });
     }
