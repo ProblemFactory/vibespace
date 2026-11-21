@@ -13206,6 +13206,8 @@ export default {
   "This grant changed while the dialog was open — close it and open it again": "ダイアログを開いている間にこの許可が変わりました — 閉じてもう一度開いてください",
   "Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them": "編集中に、誰が使えるかが変更されました — 今の内容に、あなたの変更を残して表示しています。もう一度保存すると反映されます",
   "Your hosts and end will apply to the new member too — see «What Save writes»": "入力したホストと期限は新しく加わったメンバーにも適用されます — 「保存すると書き込まれる内容」を確認してください",
+  "Who may use it is being read first — Save again once it shows": "誰が使えるかを先に読み込んでいます — 表示されたらもう一度保存してください",
+  "Who may use it could not be read — nothing was saved; close it and open it again (it stays as it is)": "誰が使えるかを読み込めませんでした — 何も保存していません。閉じてもう一度開いてください（今のままです）",
   // lane held-except-doors r2 (the picker's kept 除了 line) — on plain lines (see r9 above)
   "Kept from an earlier grant — left out:": "以前の許可から残っている除外：",
   "Stop leaving {name} out": "{name} を除外しない",

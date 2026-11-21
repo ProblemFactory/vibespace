@@ -269,6 +269,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // press before that posts nothing and asks the read again). A row the hub cannot read but still STAMPS (its stored shape
   // unreadable — the window says «Save it again to repair it») keeps its Save: the hub judges that stamp (the tracer's read)
   let unread = !!u.unknown && revOfUse(u) == null;
+  let readFailed = false, failWord = '';   // r1423: a read of the unread row came back unread — the press then says what a person can do
   // B-f212: the instant a chosen end counts from — the press's own now, then the Save that LANDED (a repeated Save posts the same
   // ends, never later ones; the read: pinned at the open, a dialog left open an hour posted «8 hours» as seven, a day as one past).
   // r13: the pin holds only while the OWNER'S inputs (who, 除了, the hosts, the end) are what landed — planNow, for the preview and
@@ -484,7 +485,9 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   }
   async function saveOnce() {
     err.textContent = '';
-    if (unread) { stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; readRow(); return false; }   // r1260 (3): read the row first — never a Save over one that could not be read
+    // r1260 (3) + r1423 (the owner's rule: no greyed control — a person's press is attended): a press while the row is unread posts
+    // nothing, answers in words what it waits for and reads the row again; a read that keeps failing says what a person can do
+    if (unread) { err.textContent = readFailed ? failWord : t('Who may use it is being read first — Save again once it shows'); readRow(); return false; }
     // B-f212: every end of this press's plan counts from the landed pin; r13: a Save the OWNER changed since (another end, a member
     // added, hours later in the same open dialog) counts from THIS press, never a past one
     const plan = planNow();
@@ -573,8 +576,12 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
           : !x ? t('«{name}» was removed from the vault', { name: row.label })
             : !lu || lu.unknown || !Array.isArray(lu.to) ? t('Who may use it could not be read just now — this shows it as last read') : '';
       stale.textContent = word; stale.hidden = !word;
-      if (word && unread && lu && revOfUse(lu) != null) { rev = revOfUse(lu); unread = false; save.disabled = false; }   // a row the hub cannot read but stamps: Save offered (the hub judges it)
-      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; unread = false; save.disabled = false; rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true })); }   // B-f212's remainder: and its stamp
+      if (word && unread && lu && revOfUse(lu) != null) { rev = revOfUse(lu); unread = false; err.textContent = ''; }   // a row the hub cannot read but stamps: Save saves (the hub judges it)
+      // r1423: the read came back unread — a press says what a person can do: close it and open it again; but a LOCKED vault or an
+      // entry that is GONE says its own status (unlocking re-reads by itself; a removed entry cannot be opened again). Words a press
+      // already showed («being read») follow the read that failed after it (the tracer's read)
+      if (word && unread) { readFailed = true; failWord = locked || (listed && !x) ? word : t('Who may use it could not be read — nothing was saved; close it and open it again (it stays as it is)'); if (err.textContent) err.textContent = failWord; }
+      if (!word) { snap = { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] }; if (unread) { unread = false; err.textContent = ''; } rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true })); }   // B-f212's remainder: and its stamp
     }
     if (owed && !flying) readRow();
   }
@@ -585,7 +592,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   f.append(cancel, save);
   body.parentNode.append(f);
   clean = fieldsNow();
-  if (unread) { save.disabled = true; stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; ready.then((s) => { if (s) readRow(); }); }   // r1260 (3): no Save offered over a row that could not be read — it is read first, once the dialog has opened (§103 r4: a queued form waits behind the open one's ask)
+  if (unread) { stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; ready.then((s) => { if (s) readRow(); }); }   // r1260 (3): a row that could not be read is read first, once the dialog has opened (§103 r4: a queued form waits behind the open one's ask); r1423: the Save stays a LIVE button — never greyed with a hint
   if (app && app.ws && typeof app.ws.onGlobal === 'function') {
     const onContents = (m) => { if (m && m.type === 'vault-contents') readRow(); };
     app.ws.onGlobal(onContents);

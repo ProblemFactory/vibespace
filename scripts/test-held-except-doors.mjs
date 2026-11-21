@@ -1785,7 +1785,11 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     stampless: ['...(rev != null ? { rev } : {})', "...(rev != null && globalThis.__f212red !== 'stampless' ? { rev } : {})"],   // ㉘: the Save sends no stamp (the release)
     refusal: ["if (r && r.code === 'row_changed' && r.use && Array.isArray(r.use.to) && !r.use.unknown && !r.use.unverified) {", "if (globalThis.__f212red !== 'refusal' && r && r.code === 'row_changed' && r.use && Array.isArray(r.use.to) && !r.use.unknown && !r.use.unverified) {"],   // ㉘: the hub's refusal is not landed
     gained: ["err.textContent = t('Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them') + (gained.length && typedValues ?", "err.textContent = t('Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them') + (globalThis.__f212red !== 'gained' && gained.length && typedValues ?"],   // r1260 (2): the line leaves out the gained member
-    unread: ["    if (unread) { stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; readRow(); return false; }", "    if (globalThis.__f212red !== 'unread' && unread) { stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; readRow(); return false; }"],   // r1260 (3): a Save over a row that could not be read
+    unread: ["    if (unread) { err.textContent = readFailed ? failWord : t('Who may use it is being read first — Save again once it shows'); readRow(); return false; }", "    if (globalThis.__f212red !== 'unread' && unread) { err.textContent = readFailed ? failWord : t('Who may use it is being read first — Save again once it shows'); readRow(); return false; }"],   // r1260 (3): a Save over a row that could not be read
+    greyed: ["  if (unread) { stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; ready.then(", "  if (unread) { if (globalThis.__f212red === 'greyed') save.disabled = true; stale.textContent = t('Who may use it could not be read just now — this shows it as last read'); stale.hidden = false; ready.then("],   // r1423: the tip before — the Save greyed at the open
+    failwords: ["err.textContent = readFailed ? failWord : t('Who may use it is being read first — Save again once it shows');", "err.textContent = readFailed && globalThis.__f212red !== 'failwords' ? failWord : t('Who may use it is being read first — Save again once it shows');"],   // r1423: a read that keeps failing still says «being read»
+    stalewords: ['if (err.textContent) err.textContent = failWord;', "if (err.textContent && globalThis.__f212red !== 'stalewords') err.textContent = failWord;"],   // the tracer: a press's «being read» left standing after its read failed
+    remedy: ["failWord = locked || (listed && !x) ? word : t('Who may use it could not be read — nothing was saved; close it and open it again (it stays as it is)');", "failWord = globalThis.__f212red !== 'remedy' && (locked || (listed && !x)) ? word : t('Who may use it could not be read — nothing was saved; close it and open it again (it stays as it is)');"],   // the tracer: a locked vault told to close and open it again   // r1260 (3): a Save over a row that could not be read
     readrev: ['rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true }));', "if (globalThis.__f212red !== 'readrev') rev = revOfUse(lu); land(clean, rowFields(lu, clean, { policy: true }));"],   // round lens 3: the re-read keeps the old stamp
     landrev: ['stale.hidden = true; rev = revOfUse(lu); }   // the hub just answered the row', "stale.hidden = true; if (globalThis.__f212red !== 'landrev') rev = revOfUse(lu); }   // the hub just answered the row"],   // round lens 3: a landed Save keeps the old stamp
     kept: ['keptPress = null; if (refused) return false; return doSave();', "keptPress = null; if (refused && globalThis.__f212red !== 'kept') return false; return doSave();"],   // ㉘ (the read): a press kept over a refusal posts at once
@@ -2119,6 +2123,7 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
     const said2 = await saved(P, P.shell.opts.unsaved.save());
     return { ...first, second: { sent: sentOf(H.posts[1]), posted: keysTo(H.posts[1]), said: said2, closed: P.closed, stored: H.row.to.map((m) => m.key).sort(), rev: H.rev } };
   };
+  const WAIT28 = 'Who may use it is being read first — Save again once it shows', FAIL28 = 'Who may use it could not be read — nothing was saved; close it and open it again (it stays as it is)';
   const WORDS28 = 'Someone changed who may use it while you were editing — this shows it as it is now, with your own changes kept; Save again to keep them', WORDS28G = 'Your hosts and end will apply to the new member too — see «What Save writes»';
   const sf = await stampFlow(real);
   ok(sf.sent === 7 && J(sf.picked) === J([K_ADA, K_CEE]) && sf.end === '8h' && sf.dirty && sf.closed === 0 && sf.err === `${WORDS28} ${WORDS28G}` && J(sf.stored) === J(['cid-ada', 'cid-cee'])
@@ -2148,32 +2153,69 @@ console.log('㉖ B-f212: vault «Who may use» — a swept member leaves the pic
   // says the value applies to the new member too (stampFlow's line above, both words). RED: the sentence left out
   const sfG = await asRed('gained', stampFlow);
   ok(sfG.err === WORDS28, `RED control: the line leaves out the gained member ⇒ the person's «8 hours» is written onto Cee unsaid — ${J({ err: sfG.err })}`, sfG);
-  // r1260 (3): a row whose facts could not be read at the open (use.unknown, no stamp): the dialog offers NO Save — it reads the row
-  // first; a press before that read posts nothing; once the row lands (its stamp in it) the Save sends the stamp and keeps the
-  // person's pick. RED: Save offered over it ⇒ a stampless post written unjudged over the row it never read (Ada lost)
+  // r1260 (3) + r1423: a row whose facts could not be read at the open (use.unknown, no stamp): the Save stays LIVE — a press before
+  // the read posts nothing and says it is being read; once the row lands (its stamp in it) the Save sends the stamp and keeps the
+  // person's pick. RED: Save posting over it ⇒ a stampless post written unjudged over the row it never read (Ada lost)
   const unknownFlow = async (show, { stamped = false } = {}) => {
     const H = stampHub28([ada]);
     const P = newPage({ routes: H.routes, roster: ROSTER27 });
     show({ id: ENTRY, label: 'API key', run: { use: { unknown: true, to: [], except: [], entryHosts: [], ...(stamped ? { rev: H.rev } : {}) } } }, { app: VU_APP, refresh: () => { } });
-    const q = (c) => byCls(P.shell.body, c), saveB = byCls(P.shell.dialog, 'vw-use-save'), hostsIn = q('vw-use-hosts');   // the footer sits beside the body, in the dialog
+    const q = (c) => byCls(P.shell.body, c), saveB = byCls(P.shell.dialog, 'vw-use-save'), hostsIn = q('vw-use-hosts'), errEl = q('vault-secret-error');   // the footer sits beside the body, in the dialog
     const disabledAtOpen = !!(saveB && saveB.disabled);
     P.pickers[0].pick([K_CEE]); hostsIn.value = 'c.example'; hostsIn.fire('input');   // the person picks Cee at once
     const p1 = P.shell.opts.unsaved.save();   // …and presses Save before the row is read
+    const pressWords = errEl ? errEl.textContent : null;
     const postsAtPress = H.posts.length, sentFirst = H.posts[0] ? (H.posts[0].rev === undefined ? 'none' : H.posts[0].rev) : null;
     const said1 = await saved(P, p1);   // the read the open asked lands meanwhile
     const enabled = !!(saveB && !saveB.disabled), picked = setOf(P.pickers[0].selected());
     const said2 = await saved(P, P.shell.opts.unsaved.save());
     const last = H.posts[H.posts.length - 1] || null;
-    return { disabledAtOpen, postsAtPress, sentFirst, said1, enabled, picked, said2, posts: H.posts.length, sent: last ? (last.rev === undefined ? 'none' : last.rev) : null, stored: H.row.to.map((m) => m.key).sort(), closed: P.closed, gets: H.gets };
+    return { disabledAtOpen, pressWords, postsAtPress, sentFirst, said1, enabled, picked, said2, posts: H.posts.length, sent: last ? (last.rev === undefined ? 'none' : last.rev) : null, stored: H.row.to.map((m) => m.key).sort(), closed: P.closed, gets: H.gets };
   };
   const uf = await unknownFlow(real), ufR = await asRed('unread', unknownFlow);
-  ok(uf.disabledAtOpen && uf.postsAtPress === 0 && uf.said1 === false && uf.gets >= 1 && uf.enabled && J(uf.picked) === J([K_ADA, K_CEE]) && uf.posts === 1 && uf.sent === 7 && J(uf.stored) === J(['cid-ada', 'cid-cee']) && uf.closed === 1,
-    `r1260 (3): a row whose facts could not be read at the open is never saved over — Save not offered, a press posts nothing, the row read first; then the Save sends its stamp and keeps both — ${J(uf)}`, uf);
+  ok(!uf.disabledAtOpen && uf.pressWords === WAIT28 && uf.postsAtPress === 0 && uf.said1 === false && uf.gets >= 1 && uf.enabled && J(uf.picked) === J([K_ADA, K_CEE]) && uf.posts === 1 && uf.sent === 7 && J(uf.stored) === J(['cid-ada', 'cid-cee']) && uf.closed === 1,
+    `r1260 (3) + r1423: a row whose facts could not be read at the open is never saved over — the Save a LIVE button (never greyed), a press posts nothing and says it is being read first, the row read; then the Save sends its stamp and keeps both — ${J(uf)}`, uf);
   // the tracer's read: a row the hub cannot read but STILL STAMPS (its stored shape unreadable — the window says «Save it again to
   // repair it») keeps its Save — the press posts at once, with that stamp (the hub judges it). RED: every unknown row blocked
   const us = await unknownFlow(real, { stamped: true }), usR = await asRed('stampedunread', (show) => unknownFlow(show, { stamped: true }));
   ok(!us.disabledAtOpen && us.postsAtPress === 1 && us.sentFirst === 7, `the tracer's read: an unknown row the hub still stamps keeps its Save — the press posts its stamp (the repair road) — ${J(us)}`, us);
-  ok(usR.disabledAtOpen && usR.postsAtPress === 0, `RED control: every unknown row blocked ⇒ a row the hub stamps can never be saved again (the repair road shut) — ${J({ disabledAtOpen: usR.disabledAtOpen, postsAtPress: usR.postsAtPress })}`, usR);
+  ok(usR.postsAtPress === 0, `RED control: every unknown row blocked ⇒ a row the hub stamps can never be saved again (the repair road shut) — ${J({ postsAtPress: usR.postsAtPress })}`, usR);
+  // r1423 (the owner's rule: NO GREYED-OUT CONTROL WITH A HINT): the Save is never disabled while the row is unread. RED: the tip
+  // before — the Save greyed at the open
+  const ufG = await asRed('greyed', unknownFlow);
+  ok(ufG.disabledAtOpen, `RED control: the Save greyed at the open (the tip before r1423) ⇒ a dead button beside a hint — ${J({ disabledAtOpen: ufG.disabledAtOpen })}`, ufG);
+  // r1423: a read that KEEPS FAILING — the Save stays live, a press posts nothing, reads again and says what a person can do (close
+  // it and open it again; nothing was saved). RED: it still says «being read»
+  const unknownFail = async (show, { reply = () => ({ ok: false, code: 'not_read' }), early = false } = {}) => {
+    const H = stampHub28([ada]); H.getReply = reply;   // every read of the row answers so
+    const P = newPage({ routes: H.routes, roster: ROSTER27 });
+    show({ id: ENTRY, label: 'API key', run: { use: { unknown: true, to: [], except: [], entryHosts: [] } } }, { app: VU_APP, refresh: () => { } });
+    const errEl = byCls(P.shell.body, 'vault-secret-error'), saveB = byCls(P.shell.dialog, 'vw-use-save');
+    let pressed = null;
+    if (early) { pressed = P.shell.opts.unsaved.save(); }   // the tracer: a press BEFORE the open's read came back
+    const wordsEarly = early && errEl ? errEl.textContent : null;
+    await settledOf(P);   // the read(s) come back unread
+    if (early) { const said = await saved(P, pressed); return { disabled: !!(saveB && saveB.disabled), wordsEarly, words: errEl ? errEl.textContent : null, said, posts: H.posts.length, gets: H.gets }; }
+    const gets0 = H.gets;
+    const p = P.shell.opts.unsaved.save();
+    const words = errEl ? errEl.textContent : null;
+    const said = await saved(P, p);
+    return { disabled: !!(saveB && saveB.disabled), gets0, words, said, posts: H.posts.length, gets: H.gets };
+  };
+  const ufF = await unknownFail(real), ufFR = await asRed('failwords', unknownFail);
+  ok(!ufF.disabled && ufF.gets0 >= 1 && ufF.words === FAIL28 && ufF.said === false && ufF.posts === 0 && ufF.gets > ufF.gets0, `r1423: a read that keeps failing — the Save live, a press posts nothing, reads again, and says to close it and open it again — ${J(ufF)}`, ufF);
+  ok(ufFR.words === WAIT28 && ufFR.posts === 0, `RED control: a failing read still answered «being read» ⇒ a press that never says what a person can do — ${J({ words: ufFR.words })}`, ufFR);
+  // the tracer's read: (a) a press BEFORE the read came back — its «being read» follows the read that then failed; (b) a LOCKED vault
+  // says its own status (unlocking re-reads by itself), never «close and open it again». REDs: the words left standing; the
+  // locked vault told to close and open it again
+  const ufE = await unknownFail(real, { early: true }), ufER = await asRed('stalewords', (show) => unknownFail(show, { early: true }));
+  ok(!ufE.disabled && ufE.wordsEarly === WAIT28 && ufE.words === FAIL28 && ufE.posts === 0, `the tracer's read: a press before the read came back says «being read», and the words follow the read that then failed — ${J(ufE)}`, ufE);
+  ok(ufER.wordsEarly === WAIT28 && ufER.words === WAIT28, `RED control: the press's «being read» left standing after its read failed — ${J({ wordsEarly: ufER.wordsEarly, words: ufER.words })}`, ufER);
+  const LOCK28 = 'The vault is locked — who may use it could not be read just now; this shows it as last read';
+  const lockedReply = () => ({ ok: false, code: 'vault_locked' });
+  const ufL = await unknownFail(real, { reply: lockedReply }), ufLR = await asRed('remedy', (show) => unknownFail(show, { reply: lockedReply }));
+  ok(!ufL.disabled && ufL.words === LOCK28 && ufL.posts === 0, `the tracer's read: a LOCKED vault — a press says the vault is locked (its own status), never «close it and open it again» — ${J(ufL)}`, ufL);
+  ok(ufLR.words === FAIL28, `RED control: the locked vault told to close and open it again — ${J({ words: ufLR.words })}`, ufLR);
   ok(ufR.postsAtPress === 1 && ufR.sentFirst === 'none', `RED control: Save offered over a row that could not be read ⇒ a stampless post, written unjudged — ${J({ postsAtPress: ufR.postsAtPress, sentFirst: ufR.sentFirst, stored: ufR.stored })}`, ufR);
   // round lens 3: the dialog takes the NEW stamp from (a) its re-read after another client's Save and (b) its own Save that landed
   // — so neither is refused next. REDs: the re-read keeps the old stamp; the landed Save keeps the old stamp
