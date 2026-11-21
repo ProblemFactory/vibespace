@@ -54,6 +54,10 @@ This file is the engineers' record of every release: the lanes, the verification
 - LEG (test-task-scan-loop ⑥b): a find with its cwd lists NO project folder; with no cwd, or a conversation that moved, the folders are walked once and it is found; CONTROL the release's order (the own path not asked first) lists on every find.
 - r839 (owed from line 151): the store reader's read (src/agy-store-fs.js linesFrom — fs.promises realpath / open / read) has NO deadline of its own, so a warm whose read never returns held every later warm behind it: the agy warm queue's HEAD is bounded — the next warm starts when the head has not settled in WARM_HEAD_MS (10 s), said once a process; the late warm still ends on its own. Leg (test-agy-store ⑪): a read that never returns — the next warm goes on, said once; CONTROL a copy with the head unbounded keeps it waiting.
 
+### bl-browser-a B-346d law 1's person half — the stopped view says why (the coordinator's r803)
+- After the second leg (line 138: the wiring does not end the daemon; the control's idle-out is seen first by the viewer's socket closing): the keeper's browser_stopped for a stopped ephemeral carries `ended` (endedFactsOf: stoppedBy, the launched idle, law 2's early bound), the bridge forwards it, and the live view says stoppedText(ended) — its own idle after N min, or ended on its own within N s of a command it served, before its idle (why not known); a stop by an act keeps the plain sentence. en/zh/ja. The watch half shipped in .410.
+- Gate: test-browser-display (PURE cells + a control, four wiring pins, the zh/ja rows).
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said

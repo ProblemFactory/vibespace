@@ -8,6 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - When a Channels file cannot be read, the sidebar shows a warning and the panel says what is paused; nothing is fetched, sent or written over until it reads.
 - A damaged Channels file now waits in For you with «Start it empty»: its bytes are kept under a dated name, never deleted.
 - With hundreds of project folders, VibeSpace no longer pauses while it finds the history of each conversation it opens.
+- When an agent's own browser stops by itself, its live view now says why: it sat idle past its timeout, or it ended early for a reason VibeSpace does not know.
 
 ## 2.369.415 — 2026-11-21
 
