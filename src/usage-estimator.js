@@ -770,8 +770,8 @@ class UsageEstimator {
     for (const e of this._lineCache.values()) { const b = e.size || 0; if (now - (e.usedAt || 0) < ESTIMATOR_LINES_IDLE_MS) { liveB += b; liveN++; } else { idleB += b; idleN++; } }
     const liveMax = this.linesLiveMaxBytes || ESTIMATOR_LIVE_MAX_BYTES;
     return [
-      cacheRow('estimator anchor lines (idle)', { bytes: idleB, count: idleN, unit: 'identities', ceiling: ESTIMATOR_LINES_MAX_BYTES, enforced: { by: ['lines', 'lineCacheTrim'], when: 'at every read of an identity, and at the memory census tick (a minute): idle identities go oldest-first past the floor' }, basis: `anchor-file bytes of identities not read for ${ESTIMATOR_LINES_IDLE_MS / 60e3} min` }),
-      cacheRow('estimator anchor lines (live)', { bytes: liveB, count: liveN, unit: 'identities', ceiling: liveMax, enforced: { by: ['lines'], when: 'at every read: past the ceiling a newcomer is served and not kept, then the oldest-touched go' }, basis: `anchor-file bytes of identities read in the last ${ESTIMATOR_LINES_IDLE_MS / 60e3} min${this._lineLiveEvicted ? ', ' + this._lineLiveEvicted + ' live evicted past it' : ''}` }),
+      cacheRow('estimator anchor lines (idle)', { bytes: idleB, count: idleN, unit: 'identities', ceiling: ESTIMATOR_LINES_MAX_BYTES, enforced: { by: ['src/usage-estimator.js#lines', 'src/usage-estimator.js#lineCacheTrim'], when: 'at every read of an identity, and at the memory census tick (a minute): idle identities go oldest-first past the floor' }, basis: `anchor-file bytes of identities not read for ${ESTIMATOR_LINES_IDLE_MS / 60e3} min` }),
+      cacheRow('estimator anchor lines (live)', { bytes: liveB, count: liveN, unit: 'identities', ceiling: liveMax, enforced: { by: ['src/usage-estimator.js#lines'], when: 'at every read: past the ceiling a newcomer is served and not kept, then the oldest-touched go' }, basis: `anchor-file bytes of identities read in the last ${ESTIMATOR_LINES_IDLE_MS / 60e3} min${this._lineLiveEvicted ? ', ' + this._lineLiveEvicted + ' live evicted past it' : ''}` }),
     ];
   }
   // Every account id this identity has EVER anchored under — ledger events

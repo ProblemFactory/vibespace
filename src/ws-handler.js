@@ -1478,6 +1478,7 @@ function registerWsHandler(wss, ctx) {
           break;
         }
 
+        case 'view-close': { try { require('./session-store').dropJsonlView(ws, data.sessionId); } catch { } break; } // B-360d (A) r1374: a history window closed — its tail's hold goes with it
         case 'attach': {
           // PROOF-OF-LIFE ACK (2.234.1, userL mass "session died" incident):
           // the full attach reply can lawfully take >20s (degraded event loop,
@@ -1941,7 +1942,7 @@ function registerWsHandler(wss, ctx) {
           } else if (data.viewOnly && (data.backendSessionId || data.claudeSessionId)) {
             // View-only: load JSONL history without an active session
             const backendSessionId = data.backendSessionId || data.claudeSessionId;
-            try { require('./session-store').noteJsonlView(ws, data.claudeSessionId || backendSessionId); } catch { } // B-360d (A): a window open on its history HOLDS the tail
+            try { require('./session-store').noteJsonlView(ws, backendSessionId, data.sessionId || backendSessionId); } catch { } // B-360d (A): a window open on its history HOLDS the tail — under the cache's own key, by window (r1374)
             // Remote session: pull the transcript over ssh into the local
             // cache first (findSessionJsonlPath scans it) — history then
             // loads through the normal path. Stale cache beats no history.

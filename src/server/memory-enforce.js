@@ -4,7 +4,8 @@
 // set held over its floor as long as nothing new arrived) are trimmed here too, once a minute: a cache drop — nothing read,
 // nothing asked, a walk of two small maps. THE HELD CONVERSATIONS are named here, once a tick, and handed to the tails' cache:
 // a conversation with a client attached (a window open on the live session) or a turn running (session._isStreaming) keeps its
-// tail whatever its last read; a history window opened by a socket still open is held by session-store itself (noteJsonlView).
+// tail whatever its last read; a history window still open is held by session-store itself (noteJsonlView at its view-only
+// attach, dropJsonlView at the page's `view-close`, dropJsonlViews at its socket's close — r1374).
 // Called by src/server/memory-sampler.js's `enforce` hook (server.js hands it in, beside the census's owners).
 const ss = require('../session-store.js');
 
@@ -14,9 +15,8 @@ function heldOf(activeSessions) {
   try {
     for (const s of activeSessions.values()) {
       if (!s) continue;
-      const id = s.claudeSessionId || s.backendSessionId;
-      if (!id) continue;
-      if (s._isStreaming === true || (s.clients && typeof s.clients.size === 'number' && s.clients.size > 0)) out.add(String(id));
+      if (!(s._isStreaming === true || (s.clients && typeof s.clients.size === 'number' && s.clients.size > 0))) continue;
+      for (const id of [s.claudeSessionId, s.backendSessionId]) if (id) out.add(String(id));   // r1374: under the cache's own key whichever id it is
     }
   } catch { /* a map being changed: the next tick */ }
   return out;

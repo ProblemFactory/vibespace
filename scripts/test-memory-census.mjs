@@ -256,6 +256,11 @@ ok(/import \{ censusRows, WORDS as MEMORY_WORDS \} from '\.\.\/memory-census\.js
   'the System window draws the census for THIS instance only (a remote machine has no server census)');
 const smp = read('src/server/memory-sampler.js');
 ok(!/\b(readFileSync|readdirSync|statSync|existsSync|execSync|spawnSync)\b/.test(smp) && /fsp\.readFile\('\/proc\/self\/smaps_rollup'/.test(smp), 'the sampler does no sync fs: the one /proc read is async (fs.promises)');
+// B-360d (A) r1374: THE TICK DROPS, NEVER READS — the enforce file the sampler calls every minute holds no fs, no child, no read
+const enf = read('src/server/memory-enforce.js');
+const ENF_READS = /\b(?:readFileSync|readdirSync|statSync|existsSync|execSync|spawnSync|readFile|readdir|createReadStream)\b|require\('(?:node:)?(?:fs|child_process)'\)/;
+ok(!ENF_READS.test(enf) && /jsonlCacheTrim\(now\)/.test(enf), 'the census tick (src/server/memory-enforce.js) drops, never reads: no fs, no child, no read in it');
+ok(ENF_READS.test(enf.replace('const tails = ss.jsonlCacheTrim(now);', 'const tails = ss.jsonlCacheTrim(now); const fs = require(\'fs\');')) && ENF_READS.test(enf.replace('const tails = ss.jsonlCacheTrim(now);', 'const tails = ss.jsonlCacheTrim(now); ss.x.readFile(\'/x\');')), 'CONTROLS: an fs require and a read planted in the tick are each caught by the same pin');
 ok(!/require\(/.test(read('src/memory-census.js')), 'src/memory-census.js imports nothing (PURE)');
 const srv = read('server.js');
 ok(/serverMemory: memSampler\.latest\(\) \|\| undefined/.test(srv) && /memSampler\.start\(\);/.test(srv), 'server.js: GET /api/sysinfo carries serverMemory; the sampler starts at listen');

@@ -304,7 +304,7 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
   // each keeps its 32 MiB tail through the tick; RED: the same tick with nothing held drops them (the oldest go first)
   const sessions = new Map([['s-open', { claudeSessionId: 't0', clients: new Map([[{}, {}]]) }], ['s-turn', { claudeSessionId: 't1', _isStreaming: true, clients: new Map() }], ['s-shut', { claudeSessionId: 't3', clients: new Map() }]]);
   const sock = {};
-  fill(); SS.noteJsonlView(sock, 't2');
+  fill(); SS.noteJsonlView(sock, 't2', 'view-t2');
   const kept = ME.tick({ activeSessions: sessions, now: later });
   const heldAfter = ['t0', 't1', 't2', 't3'].map((k) => SS.jsonlHas(k));
   ok(JSON.stringify(heldAfter) === '[true,true,true,false]' && kept.tails.evicted > 0, `HELD through the tick: a window open (t0), a turn running (t1), a history window of an open socket (t2) keep their tails; a session with nothing open (t3) does not — ${JSON.stringify(heldAfter)}`);
@@ -318,6 +318,49 @@ console.log('§4b B-360d (A) (主开发 r1358): a stated ceiling is enforced whe
   const c = await smp.sample();
   ok(JSON.stringify(order) === '["enforce","rows"]' && c.enforced && typeof c.loopMs === 'number', `the memory census's tick runs the trims first, then reads its rows (timed in its own loopMs) — ${JSON.stringify(order)}`);
   ok(/enforce: \(\) => require\('\.\/src\/server\/memory-enforce\.js'\)\.tick\(\{ activeSessions, usageEstimator \}\)/.test(files['server.js']), 'server.js hands the sampler the tick (beside its owners)');
+  // r1374 (2): THE ESTIMATOR'S TRIM AT THE TICK — five identities read, then idle past 30 min with no read: the tick brings the
+  // idle set to its 32 MB floor; RED: with no tick (the release's road) they stay over it
+  {
+    const { UsageEstimator } = require('../src/usage-estimator.js');
+    const edir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cache-bounds-est-tick-'));
+    const est = new UsageEstimator({ anchorsDir: edir, usageHistory: null });
+    const big = JSON.stringify({ fetchedAt: 1, accountId: 'a', utilization: { fiveHour: 0.1 }, pad: 'x'.repeat(500) }) + '\n';
+    for (const k of ['e1', 'e2', 'e3', 'e4', 'e5']) { fs.writeFileSync(est._file(k), big.repeat(Math.ceil(9 * MB / big.length))); est.lines(k); }
+    const late = Date.now() + 31 * 60e3;
+    const [i0] = est.lineCacheCensus(late);
+    const r = ME.tick({ usageEstimator: est, now: late });
+    const [i1] = est.lineCacheCensus(late);
+    console.log(`      the estimator: 5 identities × 9 MB read, 31 min idle: idle ${(i0.bytes / MB).toFixed(0)} MB (floor ${i0.ceiling / MB}) → the tick evicted ${r.lines && r.lines.evicted} → ${(i1.bytes / MB).toFixed(0)} MB`);
+    ok(i0.over && i0.bytes > 40 * MB, 'RED (the release\'s road: the floor enforced only at the next read): five idle identities hold ~45 MB over the 32 MB floor');
+    ok(!!r.lines && r.lines.evicted > 0 && i1.bytes <= CB.ESTIMATOR_LINES_MAX_BYTES && !i1.over, 'THE TICK trims the estimator\'s idle identities to their floor too (lineCacheTrim, a cache drop)');
+    fs.rmSync(edir, { recursive: true, force: true });
+  }
+  // r1374 (2): the socket handler's two wirings, pinned with a RED (each gone ⇒ a history window's tail is not held)
+  {
+    const wsSrc = files['src/ws-handler.js'];
+    const noteRe = /\} else if \(data\.viewOnly && \(data\.backendSessionId \|\| data\.claudeSessionId\)\) \{[\s\S]{0,400}noteJsonlView\(ws, backendSessionId, data\.sessionId \|\| backendSessionId\)/;
+    const closeRe = /case 'view-close': \{ try \{ require\('\.\/session-store'\)\.dropJsonlView\(ws, data\.sessionId\); \} catch \{ \} break; \}/;
+    const sockRe = /ws\.on\('close', \(\) => \{[\s\S]{0,400}dropJsonlViews\(ws\)/;
+    ok(noteRe.test(wsSrc) && closeRe.test(wsSrc) && sockRe.test(wsSrc), 'the socket handler: the view-only attach notes the hold (the cache\'s key, by window); `view-close` drops that window\'s; the socket\'s close drops the rest');
+    const cut = wsSrc.replace(/try \{ require\('\.\/session-store'\)\.noteJsonlView\([^\n]*\n/, '\n');
+    ok(cut !== wsSrc && !noteRe.test(cut), 'RED: the handler without its noteJsonlView line — a history window\'s tail is never held');
+    const cvSrc = files['src/lib/chat-view.js'];
+    ok(/  dispose\(\) \{\n[\s\S]{0,1200}?\n    try \{ const vid = this\._viewHoldId \|\| \(String\(this\.sessionId \|\| ''\)\.startsWith\('view-'\) \? this\.sessionId : null\); if \(vid\) this\.ws\?\.send\?\.\(\{ type: 'view-close', sessionId: vid \}\)/.test(cvSrc) && /const viewId = viewIdFor\(backend, bsid\);\n    this\._viewHoldId = viewId;/.test(cvSrc), 'the page: a history window (opened as one, or rescued into one) says `view-close` when it goes (chat-view dispose)');
+    // the window's hold ends with the WINDOW: two windows of one socket, one closed
+    SS.jsonlCacheClear(); SS.setJsonlHeld(() => null);
+    for (let k = 0; k < 30; k++) SS.jsonlCacheTestPut('t' + k, k < 6 ? 32 * MB : 3 * MB);
+    const sock2 = {}; SS.noteJsonlView(sock2, 't0', 'view-a'); SS.noteJsonlView(sock2, 't1', 'view-b'); SS.dropJsonlView(sock2, 'view-a');
+    ME.tick({ activeSessions: new Map([['x', { claudeSessionId: 'zz', clients: new Map() }]]), now: Date.now() + 11 * 60e3 });
+    ok(!SS.jsonlHas('t0') && SS.jsonlHas('t1'), `a CLOSED history window's hold is gone, its socket's other window still holds (t0 ${SS.jsonlHas('t0')}, t1 ${SS.jsonlHas('t1')})`);
+    SS.dropJsonlViews(sock2); SS.jsonlCacheClear(); SS.setJsonlHeld(() => null);
+  }
+  // r1374 (2): the rows FLATTENED in server.js — without it the four idle / live rows are nested arrays the census drops
+  {
+    ok(/caches: \(\) => \[\.\.\.usageHistory\.cacheCensus\(\), require\('\.\/src\/session-store'\)\.jsonlCacheCensus\(\), usageEstimator\.lineCacheCensus\(\)\]\.flat\(\)/.test(files['server.js']), 'server.js flattens the owners\' rows (two of them hand back two rows each)');
+    const owners = [[CB.cacheRow('a', { bytes: 1 })], [CB.cacheRow('t (idle)', { bytes: 1, ceiling: 2 }), CB.cacheRow('t (live)', { bytes: 1, ceiling: 2 })], [CB.cacheRow('e (idle)', { bytes: 1, ceiling: 2 }), CB.cacheRow('e (live)', { bytes: 1, ceiling: 2 })]];
+    const flat = MC.memoryCensus({ main: {}, caches: [...owners[0], owners[1], owners[2]].flat() }).caches.length, nested = MC.memoryCensus({ main: {}, caches: [...owners[0], owners[1], owners[2]] }).caches.length;
+    ok(flat === 5 && nested === 1, `RED (no .flat()): the four idle / live rows vanish from the census with nothing said — ${flat} rows flattened, ${nested} nested`);
+  }
   // THE TICK'S OWN COST at the owner's order: 40 tails (30 the cache's count, 10 held past it) and 150 live sessions — a walk, no parse
   SS.jsonlCacheClear(); const many = new Map(); for (let k = 0; k < 150; k++) many.set('s' + k, { claudeSessionId: 'u' + k, clients: new Map(k < 40 ? [[{}, {}]] : []) });
   for (let k = 0; k < 40; k++) SS.jsonlCacheTestPut('u' + k, 4 * MB);
@@ -363,16 +406,18 @@ console.log('§5b B-360d (A): THE SWEEP — every ceiling the census states is p
   const edir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cache-bounds-sweep-'));
   const est = new UsageEstimator({ anchorsDir: edir, usageHistory: null });
   const rows = [...t.cacheCensus(), ...SS.jsonlCacheCensus(), ...est.lineCacheCensus()];
-  const SRC = Object.entries(files).filter(([f]) => f.startsWith('src/')).map(([, x]) => x).join('\n');
-  const defined = (n) => new RegExp(`(?:function\\s+${n}\\b|^\\s*(?:async\\s+)?${n}\\s*\\(.*\\)\\s*\\{|\\b${n}\\s*=\\s*(?:function|\\())`, 'm').test(SRC);
+  // r1374 (3): each enforcer is named WITH its file («src/x.js#name») and judged in THAT file only — a generic name defined
+  // somewhere else proves nothing
+  const defined = (q) => { const m = /^(src\/[\w./-]+\.js)#([\w$]+)$/.exec(String(q)); if (!m || !files[m[1]]) return false; const n = m[2]; return new RegExp(`(?:function\\s+${n}\\b|^\\s*(?:async\\s+)?${n}\\s*\\(.*\\)\\s*\\{|\\b${n}\\s*=\\s*(?:function|\\())`, 'm').test(files[m[1]]); };
   const judge = (r) => { if (r.ceiling == null) return null; const e = r.enforced; if (!e || typeof e !== 'object') return `${r.name}: a ceiling and no statement of what enforces it`; if (typeof e.not === 'string') return /^not enforced: .{8,}/.test(e.not) ? null : `${r.name}: «not enforced» says no why`; if (!Array.isArray(e.by) || !e.by.length || typeof e.when !== 'string' || !e.when) return `${r.name}: an enforcement with no function or no «when»`; const gone = e.by.filter((n) => !defined(n)); return gone.length ? `${r.name}: names ${gone.join(', ')}, which the tree does not define` : null; };
   for (const r of rows) console.log(`      ${r.name}: ${r.ceiling == null ? 'no ceiling' : r.enforced && r.enforced.not ? r.enforced.not : r.enforced ? `enforced by ${r.enforced.by.join(' + ')} — ${r.enforced.when}` : 'UNSTATED'}`);
   const bad = rows.map(judge).filter(Boolean);
   ok(rows.length >= 10 && !bad.length, `every census row with a ceiling states what enforces it, by functions the tree defines, or «not enforced: …» with its why (${rows.length} rows) — ${bad.join('; ')}`);
   ok(rows.some((r) => r.name === 'usage ledger cold columns' && r.enforced && /^not enforced: .*lg-providers/.test(r.enforced.not || '')), 'the cold columns say «not enforced», and whose it is (lane lg-providers\' unit 3)');
   // CONTROLS: a ceiling with no statement, and a statement naming a function no file defines, are each red by name
-  const plantA = judge(CB.cacheRow('planted', { bytes: 1, ceiling: 2 })), plantB = judge(CB.cacheRow('planted2', { bytes: 1, ceiling: 2, enforced: { by: ['noSuchTrimAnywhere'], when: 'never' } }));
-  ok(!!plantA && /no statement/.test(plantA) && !!plantB && /noSuchTrimAnywhere/.test(plantB), `CONTROL: an unstated ceiling and a made-up enforcer are each red by name — «${plantA}» · «${plantB}»`);
+  const plantA = judge(CB.cacheRow('planted', { bytes: 1, ceiling: 2 })), plantB = judge(CB.cacheRow('planted2', { bytes: 1, ceiling: 2, enforced: { by: ['src/session-store.js#noSuchTrimAnywhere'], when: 'never' } }));
+  const plantC = judge(CB.cacheRow('planted3', { bytes: 1, ceiling: 2, enforced: { by: ['src/session-store.js#_take'], when: 'a name that exists in ANOTHER file' } })), plantD = judge(CB.cacheRow('planted4', { bytes: 1, ceiling: 2, enforced: { by: ['lines'], when: 'a bare name' } }));
+  ok(!!plantA && /no statement/.test(plantA) && !!plantB && /noSuchTrimAnywhere/.test(plantB) && !!plantC && /_take/.test(plantC) && !!plantD && /lines/.test(plantD), `CONTROL: an unstated ceiling, a made-up enforcer, a real function of ANOTHER file and a bare name are each red by name — «${plantA}» · «${plantB}» · «${plantC}» · «${plantD}»`);
   const mc = MC.memoryCensus({ main: {}, caches: rows });
   ok(mc.caches.every((x, i) => JSON.stringify(x.enforced) === JSON.stringify(rows[i].enforced || null)), 'the census (the System window, /api/sysinfo) carries each row\'s statement');
   fs.rmSync(edir, { recursive: true, force: true });

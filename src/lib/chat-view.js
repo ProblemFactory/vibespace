@@ -7334,6 +7334,7 @@ class ChatView {
     this._rescueTried = true;
     const backend = ids.backend || 'claude';
     const viewId = viewIdFor(backend, bsid);
+    this._viewHoldId = viewId;   // B-360d (A) r1374: the hold the server notes under this id ends at dispose, even before the reply
     const handler = (msg) => {
       if (this._disposed) { this.ws.offGlobal(handler); return; }
       if (msg.sessionId !== viewId) return;
@@ -8403,6 +8404,8 @@ class ChatView {
     try { this.app?._reconnectQueue?.cancel(this); } catch { } // a disposed view never takes its reconnect slot (perf ⑤b)
     try { this._cvReleaseIO?.disconnect(); } catch { }
     try { this._cvSlabIO?.disconnect(); } catch { }
+    // B-360d (A) r1374: a HISTORY window (its id `view-…`) tells the server it is gone, so its tail's hold ends with it
+    try { const vid = this._viewHoldId || (String(this.sessionId || '').startsWith('view-') ? this.sessionId : null); if (vid) this.ws?.send?.({ type: 'view-close', sessionId: vid }); } catch { }
     LIVE_CHAT_VIEWS.delete(this);
     // The keybinding is signal-bound to the WINDOW, but a view can be replaced
     // while its window lives on — an orphaned binding would keep answering the

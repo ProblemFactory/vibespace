@@ -378,8 +378,8 @@ class HashIndex {
 
 /** A census row. bytes in the CEILING's unit (unit says which); kind = where it lives: 'heap' (counted in
  *  the main heap) or 'arraybuffers' (typed-array stores, counted in External). over = past the ceiling.
- *  B-360d (A) (主开发 r1358): A STATED CEILING SAYS WHAT ENFORCES IT — `enforced` = { by: [the functions that hold the row to its
- *  ceiling], when: words } or { not: why it is not enforced, and whose it is }. test-cache-bounds §5b sweeps every row the hub
+ *  B-360d (A) (主开发 r1358): A STATED CEILING SAYS WHAT ENFORCES IT — `enforced` = { by: ['src/<file>.js#<function>' — each
+ *  function that holds the row to its ceiling, named WITH its file (r1374)], when: words } or { not: why it is not enforced, and whose it is }. test-cache-bounds §5b sweeps every row the hub
  *  states: a ceiling with neither is red by name. */
 function cacheRow(name, { bytes = 0, count = 0, unit = 'entries', ceiling = null, kind = 'heap', basis = 'bytes', live = null, enforced = null } = {}) {
   const b = Math.max(0, Math.round(Number(bytes) || 0));
