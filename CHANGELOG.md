@@ -72,6 +72,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A second VibeSpace on the same machine no longer has its old pasted images deleted by another one; each cleans up only its own.
 - A helper agent that worked for a long time now has its early files in Artifacts too, which can push the oldest out past its 500 files.
 - A vault entry an agent saves again under the name of one you deleted no longer shows the deleted value's uses: its count starts at zero.
+- The usage popup now updates at once when you allow or stop automatic turns, instead of a few seconds later.
+- In Chinese and Japanese, a few messages no longer point to a menu or a control above or below that the English does not name.
 
 ## 2.369.413 — 2026-11-20
 
