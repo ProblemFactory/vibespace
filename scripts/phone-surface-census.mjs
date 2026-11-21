@@ -176,7 +176,6 @@ export const OPENERS = {
   'dialog:cli-missing-dialog': { open: `M['cli-missing-dialog'].openCliMissingDialog(app, { backend: 'codex' })`, mods: ['src/lib/cli-missing-dialog.js'] },
   'dialog:design-publish-dialog': { open: `M['design-window'].openDesignPublishDialog(app, { host: '', dir: '/srv/designs/a-design-with-a-long-folder-name', title: 'A design' })`, mods: ['src/lib/design-window.js'] },
   'dialog:desktop-launch-dialog': { open: `M['desktop-app-launcher'].showLaunchDialog(app, {})`, mods: ['src/lib/desktop-app-launcher.js'] },
-  'dialog:pool-members-dialog': { open: `app._poolMembersDialog(FX.P, { id: FX.P, name: 'Main pool' }, () => {})` },
   'dialog:agents-dialog-overlay': { open: `app._showAgentsDialog({})` },
   'dialog:oat-shape-dialog': { open: `M['oat-shape-dialog'].openOatShapeDialog({ id: FX.A, name: 'Work Max' })`, mods: ['src/lib/oat-shape-dialog.js'] },
   'dialog:perm-rules-dialog': { open: `M['permission-rules-view'].openPermissionRulesDialog({ backend: 'claude', accountId: FX.A, accountName: 'Work Max' })`, mods: ['src/lib/permission-rules-view.js'] },
@@ -312,6 +311,7 @@ export const EXCUSES = {
   'dialog:window-share-dialog': 'needs a desktop app window — its reach is asked of the desktop apps engine, which the scratch hub does not run',
   'dialog:window-ask-dialog': 'needs a desktop app window — its reach is asked of the desktop apps engine, which the scratch hub does not run',
   'view:usage-popup': 'needs a usage reading — the bar hides its usage door while there is none, as in the scratch hub',
+  'dialog:pool-members-dialog': 'needs a pool — accounts.js createPool refuses with no logged-in subscription, and a scratch hub has none: its member rows (the long names it is for) cannot be drawn',
   'popover:hand:utils:showImageOverlay': 'needs a picture to show full screen (a picture in a conversation or a file)',
 };
 /** The words that excuse a key, or null when it has none: its own, else its file's. */
@@ -572,7 +572,12 @@ export const DECLARED_SCROLLERS = [
  *  «held»): { [key]: { [lang]: { L1?|L2?|L3?: { [element name]: count } } } } — the name is the element's structural one (tag,
  *  #id or two classes — never its words, which move with the language and the fixture). Filled from the first counted run;
  *  it only falls. */
-export const RATCHET = {};
+export const RATCHET = {
+  // THE SETTINGS VIEW's CLAUDE PAGE SCROLLS SIDEWAYS AT 390 (zh and en): its content pane is wider inside than the phone —
+  // found by the lane's own read on the first test machine (2026-11-21, unit 2); a page a phone cannot read is a person's harm:
+  // its CURE is the lane's next unit (主开发 r1514), which lowers this row to nothing
+  'view:settings:Claude': { en: { L3: { 'div.settings-content': 1 } }, zh: { L3: { 'div.settings-content': 1 } } },
+};
 
 const lawNames = (r, law) => (r.names && r.names[law]) || {};
 /** The verdict of a run against the ratchet: results = [{ key, lang, L1, L2, L3, names: { L1: {name: n}, … } }] →
@@ -634,7 +639,12 @@ export const MEASURE_SOURCE = `(root, declared) => {
   for (const el of all) {
     if (el !== root && !vis(el)) continue;
     const c = cs(el);
-    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1 && !isDecl(el)) L3.push({ el: name(el), k: kOf(el), sw: el.scrollWidth, cw: el.clientWidth });
+    if ((c.overflowX === 'auto' || c.overflowX === 'scroll') && el.scrollWidth > el.clientWidth + 1 && !isDecl(el)) {
+      // BY WHAT: the descendant reaching furthest right past the scroller's box (the cure's address, said on the red's line)
+      const er = el.getBoundingClientRect(); let by = null, far = er.right;
+      for (const d of el.querySelectorAll('*')) { if (!vis(d)) continue; const dr = d.getBoundingClientRect(); if (dr.right > far + 0.5) { far = dr.right; by = d; } }
+      L3.push({ el: name(el), k: kOf(el), sw: el.scrollWidth, cw: el.clientWidth, by: by ? name(by) + ' → ' + Math.round(far) : null });
+    }
     if (el === root || c.position === 'fixed') continue;
     let a = el.parentElement, under = false, inPast = false;
     while (a && a !== root) { if (past.has(a)) { inPast = true; break; } const ca = cs(a); if (ca.overflowX !== 'visible' || ca.position === 'fixed') { under = true; break; } a = a.parentElement; }

@@ -43,7 +43,7 @@ const gone = real.problems.filter((p) => p.kind === 'gone' || p.kind === 'stale-
 ok(gone.length === 0, 'every opener and every key\'s words name a surface of the tree; every file\'s words are taken', gone.slice(0, 12));
 console.log('── ③ the excuses grow only by name ──');
 const named = real.problems.filter((p) => p.kind === 'new-by-file' || p.kind === 'stale-excuse');
-console.log(`  (excused: ${real.excused} — ${C.EXCUSED_BY_FILE_WORDS.length} by their file's words, listed by name in EXCUSED_BY_FILE_WORDS; the rest by words of their own)`);
+console.log(`  (excused: ${real.excused} — ${C.EXCUSED_BY_FILE_WORDS.length} by their file's words, listed by name in EXCUSED_BY_FILE_WORDS; ${Object.keys(C.EXCUSES).length} by words of their own — a jump there is said here)`);
 ok(named.length === 0, 'every surface excused by its file\'s words is listed BY NAME, and every listed name is still excused that way (a new one takes an opener or words of its own)', named.slice(0, 8));
 console.log('── ④ the ratchet\'s rows ──');
 const rat = real.problems.filter((p) => p.kind === 'ratchet');
@@ -90,6 +90,10 @@ const fileKey = C.EXCUSED_BY_FILE_WORDS[0], p3 = C.checkTables(list, { ...tables
 ok(p3.some((p) => p.kind === 'new-by-file' && p.key === fileKey), `CONTROL: a surface excused only by its file's words and not listed (${fileKey}) is red BY NAME — a new one in an excused file`, p3.slice(0, 2));
 const p3b = C.checkTables(list, { ...tables, EXCUSED_BY_FILE_WORDS: [...C.EXCUSED_BY_FILE_WORDS, Object.keys(C.OPENERS)[0]] }).problems;
 ok(p3b.some((p) => p.kind === 'stale-excuse' && p.key === Object.keys(C.OPENERS)[0]), 'CONTROL: a listed name that is opened now (or gone) is red — the list only holds what its file\'s words excuse', p3b.slice(0, 2));
+const p3c = C.checkTables(list, { ...tables, EXCUSED_BY_FILE_WORDS: [...C.EXCUSED_BY_FILE_WORDS, 'menu:planted:one-more'] }).problems;
+ok(p3c.some((p) => p.kind === 'list-grew'), 'CONTROL: a list one name longer than its max is red (list-grew) — the list may not grow by an edit alone', p3c.filter((p) => p.kind === 'list-grew'));
+const p3d = C.checkTables(list, { ...tables, EXCUSED_BY_FILE_WORDS_MAX: C.EXCUSED_BY_FILE_WORDS_MAX + 1 }).problems;
+ok(p3d.some((p) => p.kind === 'list-max'), 'CONTROL: a max one higher than the list is red (list-max) — the max only falls, to the list', p3d.filter((p) => p.kind === 'list-max'));
 const excusedKey = list.find((s) => !C.openerOf(s)).key;
 const p4 = C.checkTables(list, { ...tables, RATCHET: { [excusedKey]: { zh: { L2: { 'div.x': 1 } } } } }).problems;
 ok(p4.some((p) => p.kind === 'ratchet' && p.key === excusedKey), `CONTROL: a ratchet row for a surface with no opener (${excusedKey}) is red`, p4.slice(0, 2));

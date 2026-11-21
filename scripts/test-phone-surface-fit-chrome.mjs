@@ -18,6 +18,8 @@
 //   right — L1; ② B-16ab (2)'s old rule (the Agents dialog's body min-width 380 px) planted
 //   back — the Agents dialog's L2 + L3 grows over its own count; ③ a long-option select planted in a Settings row, the row
 //   measured as its own surface: inside it with B-0406's two rules, past it (L2 by name) with just those two lifted
+// AN OPENER IS A CALL, NOT A PRESS: it opens a surface the way the page's own code does (a function, a click() on its door, a
+// synthetic contextmenu) — the census measures what is DRAWN, not the gesture's wiring (a broken long press is not its catch).
 // A SURFACE'S DRAWS: its opener, then each `also` variant of census OPENERS (the shared input / confirm shell drawn as both;
 // the phone's sheet from «+» and from ⋯) — each its own row (`key~label`) in the run and in the ratchet.
 // THE FIRST RUN IS RED BY DESIGN: RATCHET starts empty, so today's reds read NEW; that counted run (hosted) prints RATCHET-NOW
@@ -132,9 +134,7 @@ FX.task = tg && (tg.id || tg.task?.id || tg.taskId) || null;
 let cliRow = null;
 for (let i = 0; i < 40; i++) {
   try { cliRow = (await (await fetch(ORIGIN + '/api/backend-status')).json()).claude || null; } catch { cliRow = null; }
-  // 'shell' = the login shell's answer, and its PATH puts the stand-in's bin FIRST (a real claude in /usr/bin comes after it);
-  // a row that names a path names the stand-in's
-  if (cliRow && cliRow.provenance === 'shell' && !(/"\/(?:usr|opt|home)\/[^"]*\/claude"/.test(JSON.stringify(cliRow)) && !JSON.stringify(cliRow).includes(path.join(CLI_BIN, 'claude')))) break;
+  if (cliRow && cliRow.provenance === 'shell' && cliRow.cmdPath === path.join(CLI_BIN, 'claude')) break;   // the path the hub checked IS the stand-in (machine-probes cliFacts: which() of the shell's answer)
   cliRow = null; await sleep(500);
 }
 check('the hub found claude through the login shell AS THE STAND-IN, before any conversation is created (no real CLI can be spawned)', !!cliRow, cliRow);
@@ -249,7 +249,9 @@ const openAndMeasure = async (s, o = C.openerOf(s)) => {
   // in it still says it is loading (aria-busy), and the opener's own fact when it names one — each bounded at 6 s
   const quiet = await waitFor(`(() => { const r = document.querySelector('[data-fit-root]'); return !!r && !r.querySelector('[aria-busy="true"]') && r.getAttribute('aria-busy') !== 'true'; })()`, 6000);
   if (!quiet) console.log(`      (${s.key}: still aria-busy after 6 s — measured as it stood)`);   // said, never silent (the read's 13)
-  if (o.ready && !(await waitFor(`(() => { try { return !!(${o.ready}); } catch { return false; } })()`, 6000))) console.log(`      (${s.key}: its content fact «${o.ready}» never held in 6 s — measured as it stood)`);
+  // ITS OWN FACT (主开发 r1514's law): an opener that declares its surface's own fact and never sees it OPENED NOTHING OF ITS
+  // OWN — red by name, never judged as a draw (a list that stops opening must not be measured as a dialog without it)
+  if (o.ready && !(await waitFor(`(() => { try { return !!(${o.ready}); } catch { return false; } })()`, 6000))) return { failed: `its own fact never held in 6 s: ${o.ready}` };
   const KEY = `(() => { const r = document.querySelector('[data-fit-root]'); if (!r) return null; const b = r.getBoundingClientRect(); return [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height), r.scrollWidth, r.scrollHeight, r.getElementsByTagName('*').length].join(','); })()`;
   for (let k = 0, prev = await evalJs(KEY).catch(() => null); k < 16; k++) { await sleep(130); const now = await evalJs(KEY).catch(() => null); if (now === prev) break; prev = now; }
   const m = await MEASURE(`document.querySelector('[data-fit-root]')`).catch((e) => ({ error: e.message }));
@@ -289,7 +291,9 @@ for (const lang of LANGS) {
       const bad = v.filter((x) => x.verdict === 'new' || x.verdict === 'cured');
       const red = row.L1 + row.L2 + row.L3 > 0;
       if (red) await shot(`${lang}-${d.key}`);
-      const said = `L1 ${row.L1} · L2 ${row.L2} · L3 ${row.L3} (ratchet ${v.map((x) => x.was).join('/')}) · L4 ${m.L4.small}/${m.L4.n} small, ${m.L4.font} small text · ${secs(ts)} s`;
+      // a red's own address ON its line (a heavy runner's summary keeps only the ✗ line): the first element of each red law
+      const where = red ? ' · ' + [['L1', m.L1[0] && m.L1[0].el], ['L2', m.L2[0] && m.L2[0].el], ['L3', m.L3[0] && (m.L3[0].el + (m.L3[0].by ? ' by ' + m.L3[0].by : ''))]].filter((x) => x[1]).map((x) => `${x[0]}: ${String(x[1]).slice(0, 120)}`).join(' · ') : '';
+      const said = `L1 ${row.L1} · L2 ${row.L2} · L3 ${row.L3} (ratchet ${v.map((x) => x.was).join('/')}) · L4 ${m.L4.small}/${m.L4.n} small, ${m.L4.font} small text · ${secs(ts)} s${where}`;
       check(`[${lang}] ${d.key} — ${said}`, bad.length === 0,
         bad.map((x) => `${x.law} ${x.verdict === 'new' ? 'NEW ' + JSON.stringify(x.added) : 'CURED — lower the ratchet row ' + JSON.stringify(x.gone)}: ${x.now} (was ${x.was})`).join('; ') + ' — ' + JSON.stringify({ box: m.box, L1: m.L1.slice(0, 3), L2: m.L2.slice(0, 5), L3: m.L3.slice(0, 3) }));
       if (pageErrors.length > e0) console.log(`      (the page threw while it was open: ${pageErrors.slice(e0).map((x) => String(x).split('\n')[0]).join(' | ').slice(0, 300)})`);
