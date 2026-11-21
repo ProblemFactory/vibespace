@@ -397,6 +397,7 @@ const CLASS = {
   // B-2c5c: _hubMainDown#1 = a hub-main service not restarted by itself (its end, or the next hub's boot: said, never a failure);
   // _sweepPass#1 = a hub-main run's wrapper gone while its main (this hub) runs — not ended (said once)
   '_hubMainDown#1': 'event',
+  '_hubMainTaskEnd#1': 'event',   // r1610: a hub-main TASK met at the next boot — its own words, never «the machine restarted»
   '_fireCron#1': 'event', 'setMemory#1': 'event', 'ask#1': 'event', 'answerPanel#1': 'event', 'withdrawAsk#1': 'event',   // B-8bd5: the filer withdraws its panel
   '_startAskedAtStop#1': 'alarm',   // B-cac2 (cure r1): a start asked during a stop that cannot be done — said in its events and to its owner
   '_applyWakeGrant#1': 'event',   // the manager design's piece 7: the grant set / cleared (by the person or a key) — a fact on the job's own journal (the one door's apply, lane lg-store-writes)
@@ -468,6 +469,7 @@ const DRIVERS = {
   '_bootNoExit#3': async () => { const j = task('drv-boot-env'), r = run0(j); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },
   '_parkForMemory#1': async () => { const j = svc('drv-park-memory'), r = run0(j, { endedAt: Date.now(), cause: 'oom-bound', memoryMb: 512 }); jm._parkForMemory(j, r); return j; },
   '_finalizeRun#1': async () => { const j = svc('drv-end-left'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 0, park: false }) }); jm._finalizeRun(j, r, { code: 0, endedAt: Date.now(), forced: 'its scope was killed after the grace' }, 'exit'); un(); return j; },
+  '_hubMainTaskEnd#1': async () => { const j = task('drv-boot-hub-task'), r = run0(j, { hubMain: true }); jm._bootNoExit(j, r, { cause: 'env-restart' }); return j; },   // r1610 (as _bootNoExit#3's road)
   '_hubMainDown#1': async () => { const j = svc('drv-end-hub-main'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 0, park: false }) }); jm._finalizeRun(j, r, { code: 0, endedAt: Date.now(), hubMain: true }, 'exit'); un(); return j; },   // B-2c5c unit 2
   '_finalizeRun#2': async () => { const j = svc('drv-end-window'), r = run0(j); const un = stub(jm, { _inUpdateWindow: () => true }); jm._finalizeRun(j, r, { code: 9, endedAt: Date.now(), reason: 'update_window' }, 'exit'); un(); return j; },
   '_finalizeRun#3': async () => { const j = svc('drv-end-oom-once'), r = run0(j); const un = stub(jm, { _countEnd: () => ({ count: 1, park: false }) }); jm._finalizeRun(j, r, { code: 137, endedAt: Date.now(), memory: { cause: 'oom-bound', by: 'cgroup', mb: 512 } }, 'exit'); un(); return j; },

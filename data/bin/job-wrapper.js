@@ -786,7 +786,7 @@ let hubLeftSaid = 0;
 // never said «ended»
 const sayHubLeft = (sig) => {
   if (hubLeftSaid++) return;
-  const what = mainLive() ? `its main process was the VibeSpace hub (or what started it) and still runs, though it is no longer recognised as the hub (its <data>/server.pid changed): nothing of it is this job's to stop — stop VibeSpace itself to end it`
+  const what = mainLive() ? `its main process was the VibeSpace hub (or what started it) and still runs, though it is no longer recognised as the hub: nothing of it is this job's to stop — stop VibeSpace itself to end it`
     : `its main process was the VibeSpace hub (or what started it) and has ended: what is left is the hub's (its conversations and helpers), never this job's to stop`;
   try { fs.writeSync(logOpen(), Buffer.from(`\n[job-wrapper] stop: ${sig} refused — ${what}\n`)); } catch { }
 };

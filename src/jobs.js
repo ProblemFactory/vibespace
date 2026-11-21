@@ -2276,9 +2276,18 @@ class JobManager {
   /** r1263 MUST 1: a SERVICE whose run's main was the hub is never restarted by itself — not by its policy, not by a boot's replay: a
    *  restart would start a second hub beside the one that runs. Not wanted up any more; said on its journal AND its card
    *  (`hubMainDown`, cleared by the person's Start) */
-  _hubMainDown(job) {
+  _hubMainDown(job, memWhat = null) {
     job.state = 'down'; job.desiredUp = false; job.hubMainDown = now(); this._teardownPublish(job);
-    this._touch(job, { what: 'its main process was the VibeSpace hub — not restarted by itself: a restart would start a second hub beside the one that runs (start it again by hand if you mean to)' });
+    // r1610 should: a hub-main service that ended on MEMORY keeps the memory words (its two roads name the end the same way)
+    this._touch(job, { what: `${memWhat ? memWhat + ' — ' : ''}its main process was the VibeSpace hub — not restarted by itself: a restart would start a second hub beside the one that runs (start it again by hand if you mean to)` });
+  }
+  /** r1610 should 1: a TASK whose main was the hub, met at the next hub's boot (its wrapper killed, no exit record), ended WITH that
+   *  hub — never «the machine restarted»: its own sentence names the hub, and the owner is never invited to start it again (a start
+   *  would run a second hub beside the one that runs) */
+  _hubMainTaskEnd(job) {
+    job.state = 'interrupted';
+    const what = 'interrupted: it ended with the VibeSpace hub that was its main process — not to be started again: a start would run a second VibeSpace beside the one that runs';
+    this._touch(job, { what }); this._notifyOwner(job, { what, wake: 'interrupted' });
   }
   /** B-2c5c (THE MAIN DOOR): the refusal by name — said once a run and a road in the run's own log and the hub's; the job is not said
    *  stopped or ended (no stop asked, no grace, no kill step) */
@@ -3533,7 +3542,7 @@ class JobManager {
     }
     // r1263 MUST 1: THE NEXT HUB'S BOOT reads the KEPT fact — a run whose main was the hub (its wrapper killed: no exit record) ended
     // with that hub; a SERVICE is not replayed (a second hub beside this one), nothing is counted toward a park
-    if (job.kind === 'service' && this._hubMainOf(run, null)) { this._hubMainDown(job); return; }
+    if (this._hubMainOf(run, null)) { if (job.kind === 'service') this._hubMainDown(job, v.cause === 'oom' && ends ? M.memoryEndWhat(run) : null); else this._hubMainTaskEnd(job); return; }   // r1610: a TASK too, by its own words
     const mp = ends ? this._countEnd(job, v.cause) : null;
     if (v.cause === 'oom' && ends) {
       const said = `${M.memoryEndWhat(run)} — it held ${M.memoryWords(v.jobAnonMb)} of the instance's ${M.memoryWords(v.anonMb)} of anon memory (limit ${M.memoryWords(v.limitMb)})`;
@@ -3844,7 +3853,7 @@ class JobManager {
     // person's Start is theirs
     const hubMainEnd = job.kind === 'service' && this._hubMainOf(run, exit);
     if (hubMainEnd) {
-      this._hubMainDown(job);
+      this._hubMainDown(job, memCause ? M.memoryEndWhat(run) : null);
     } else if (job.kind === 'service' && windowEnd) {
       job.state = 'down'; this._touch(job, { what: 'down (update_window: it started while VibeSpace was updating itself and never ran — the restarted server starts it again)' }); // never a crash of the supervisor's count: the boot replay starts a desiredUp service
     } else if (job.kind === 'service' && memPark && memPark.park) {

@@ -291,28 +291,34 @@ const fnOf4 = (src, head) => { const i = src.indexOf(head); if (i < 0) throw new
   const uses = (JSRC.match(/this\._hubMainOf\(/g) || []).length;
   ok(strays.length === 0 && uses === 7, `THE CENSUS: every road that ends, reaps, judges or replays a run reads «its main is the hub» through _hubMainOf (${uses} callers: the reap, the wait before a start, the boot's gate, the boot's no-exit judge, the finalize, the sweep's gate, the card's fact) — no reader of the exit record's fact alone`, { strays, uses });
   ok(strayX.length === 1 && strayX[0] === '_reapOnce', 'CONTROL (a reader of the exit record alone, in a copy): the census names it — RED', strayX);
+  // r1610: src/job-model.js reads a LEFT record's `hubMain` for its words and its record's shape only — exempt BY NAME (a gate added
+  // there, in any other function, is red here)
+  const MODEL = fs.readFileSync(path.join(ROOT, 'src/job-model.js'), 'utf8').split('\n');
+  const modelReaders = MODEL.map((l, i) => [l.replace(/\/\/.*$/, ''), i]).filter(([l]) => /\.hubMain\b/.test(l)).map(([, i]) => { for (let k = i; k >= 0; k--) { const m = /^function (\w+)\(/.exec(MODEL[k]); if (m) return m[1]; } return '?'; });
+  ok(modelReaders.length >= 1 && modelReaders.every((f) => f === 'leftWords' || f === 'leftRecord'), 'THE CENSUS, src/job-model.js: the left record\'s `hubMain` is read only by leftWords and leftRecord (words and the record\'s shape — EXEMPT, never a gate)', modelReaders);
 }
 /** THE NEXT HUB'S BOOT (r1263 MUST 1): a service run whose main WAS the hub, its wrapper killed (no exit record, a dead stamp), the
  *  fact KEPT on the run by the hub that proved it (an older boot) — then a NEW engine boots over the folder (a hub after that one) */
 const STANDIN4 = "const fs = require('fs'); const [ctl, spec] = process.argv.slice(2); try { fs.unlinkSync(spec); } catch { }\n";
-async function nextBootScene(JMx, tag) {
+async function nextBootScene(JMx, tag, kind = 'service') {
   const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), STANDIN4);
   const { JobManager } = require(path.join(ROOT, 'src/jobs.js'));
   const deps = { dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] };
   const j1 = new JobManager(deps); j1.init(); for (const t of j1._timers || []) clearInterval(t); j1._timers = [];
-  const r = j1.create({ kind: 'service', name: 'hub-svc', cmd: { argv: ['sleep', '300'] }, owner: OWNER }, CALLER);
+  const r = j1.create({ kind, name: 'hub-' + kind, cmd: { argv: ['sleep', '300'] }, owner: OWNER }, CALLER);
   const id = r.job && r.job.id, job = j1.jobs.get(id), run = job.runs[job.runs.length - 1];
   const dead = require('node:child_process').spawnSync(process.execPath, ['-e', '0']).pid;   // a pid that has ended: the killed wrapper's
-  job.state = 'up'; job.desiredUp = true; delete run.endedAt; run.hubMain = true; run.hubMainAt = 1;   // proven and kept by an older boot
+  job.state = 'up'; if (kind === 'service') job.desiredUp = true; delete run.endedAt; run.hubMain = true; run.hubMainAt = 1;   // proven and kept by an older boot
   const ctl = j1._ctlDir(job, run.startedAt); fs.mkdirSync(ctl, { recursive: true });
   fs.writeFileSync(path.join(ctl, 'pid.json'), JSON.stringify({ pid: dead, starttime: 1, bootId: PI.bootIdOf() })); try { fs.unlinkSync(path.join(ctl, 'exit.json')); } catch { }
   j1._dirty = true; const lock = j1.lockFile; j1.shutdown(); await until(() => !fs.existsSync(lock), 5000);
-  const logs = [], seen = { reaped: 0, replayed: 0, spawned: 0 };
+  const logs = [], seen = { reaped: 0, replayed: 0, spawned: 0 }, told = [];
   const j2 = new JMx({ ...deps, log: (...a) => logs.push(a.join(' ')) });
+  j2._notifyOwner = (j, o) => { told.push((o && o.what) || ''); };   // what the owner is told (r1610: a hub-main task)
   j2._reapScope = async () => { seen.reaped++; return true; }; j2._startAfter = () => { seen.replayed++; }; j2._spawn = () => { seen.spawned++; };
   j2.init(); for (const t of j2._timers || []) clearInterval(t); j2._timers = [];
   const k = j2.jobs.get(id), snap = k ? j2.snapshot(k) : null;
-  const out = { ...seen, state: k && k.state, desiredUp: k && k.desiredUp, cardDown: !!(snap && snap.hubMainDown), said: j2.events.filter((e) => e.jobId === id).map((e) => e.what).join(' | ') };
+  const out = { ...seen, state: k && k.state, desiredUp: k && k.desiredUp, cardDown: !!(snap && snap.hubMainDown), said: j2.events.filter((e) => e.jobId === id).map((e) => e.what).join(' | '), told: told.join(' | ') };
   try { j2.shutdown(); } catch { }
   return out;
 }
@@ -354,6 +360,36 @@ async function besideScene(wrapperText, tag) {
     && /its main process was the VibeSpace hub — not restarted by itself: a restart would start a second hub beside the one that runs/.test(boot.said),
     'MUST 1 — THE NEXT HUB\'S BOOT reads the KEPT fact: a service run whose main was the hub (its wrapper killed: no exit record, a dead stamp) is NOT reaped (the dead hub\'s conversations live) and NOT replayed (no second hub); not wanted up, said — on its journal AND its card', boot);
   ok(bootX.reaped >= 1 && bootX.replayed >= 1, 'CONTROL (the accessor reading the exit record alone, in a copy): the boot reaps the scope and replays the service — a second hub — RED', bootX);
+  // r1610 should 1: a TASK whose main was the hub, met at the next boot, is said to have ended WITH the hub — never «the machine
+  // restarted», never invited to start again (a start would run a second hub); r1610: a hub-main service that ended on MEMORY keeps the
+  // memory words, on both roads
+  const TASKROAD = "    if (this._hubMainOf(run, null)) { if (job.kind === 'service') this._hubMainDown(job, v.cause === 'oom' && ends ? M.memoryEndWhat(run) : null); else this._hubMainTaskEnd(job); return; }";
+  const JT = MJ.load('src/jobs.js', anchored(JSRC, TASKROAD, "    if (job.kind === 'service' && this._hubMainOf(run, null)) { this._hubMainDown(job); return; }   /* MUTANT: the service alone, as before */", 'b2c5c-r1610-task'), 'b2c5c-r1610-task');
+  const [tk, tkX] = await Promise.all([nextBootScene(require(path.join(ROOT, 'src/jobs.js')).JobManager, 'next-boot-task', 'task'), nextBootScene(JT.JobManager, 'next-boot-task-mut', 'task')]);
+  const HUBTASK = /interrupted: it ended with the VibeSpace hub that was its main process — not to be started again: a start would run a second VibeSpace/;
+  ok(tk.state === 'interrupted' && tk.replayed === 0 && tk.spawned === 0 && tk.reaped === 0 && HUBTASK.test(tk.said) && HUBTASK.test(tk.told) && !/start it again if it still matters|the machine restarted/.test(tk.said + tk.told),
+    'r1610 — A TASK WHOSE MAIN WAS THE HUB, met at the next hub\'s boot: interrupted WITH the hub, said so on its journal and to its owner, never «the machine restarted — start it again» (a start would run a second hub); nothing reaped, nothing run', tk);
+  ok(/start it again if it still matters/.test(tkX.told), 'CONTROL (the service alone, as before, in a copy): the task is said ended by the machine and its owner invited to start it again — RED', tkX);
+  const memScene = (JMx, tag, road) => {
+    const dd = path.join(D, tag); fs.mkdirSync(path.join(dd, 'bin'), { recursive: true }); fs.writeFileSync(path.join(dd, 'bin', 'job-wrapper.js'), STANDIN4);
+    const jm = new JMx({ dataDir: dd, broadcast() { }, notifyUser() { return { ok: true }; }, log() { }, apiBase: 'http://127.0.0.1:9', memoryRungs: [] });
+    jm.init(); for (const t of jm._timers || []) clearInterval(t); jm._timers = [];
+    const r = jm.create({ kind: 'service', name: 'hub-mem', cmd: { argv: ['sleep', '300'] }, owner: OWNER }, CALLER);
+    const job = jm.jobs.get(r.job.id), run = job.runs[job.runs.length - 1]; run.hubMain = true;
+    if (road === 'boot') jm._bootNoExit(job, run, { cause: 'oom', at: Date.now(), jobAnonMb: 100, anonMb: 200, limitMb: 300 });
+    else jm._finalizeRun(job, run, { code: 137, endedAt: Date.now(), memory: { cause: 'oom-bound', by: 'cgroup', mb: 512 } }, 'exit');
+    const what = jm.events.filter((e) => e.jobId === job.id).map((e) => e.what).filter(Boolean).pop() || '';
+    const out = { state: job.state, desiredUp: job.desiredUp, mem: M.memoryEndWhat(run), what };
+    try { jm.shutdown(); } catch { }
+    return out;
+  };
+  const MEMW = "    this._touch(job, { what: `${memWhat ? memWhat + ' — ' : ''}its main process was the VibeSpace hub";
+  const JMm = MJ.load('src/jobs.js', anchored(JSRC, MEMW, "    this._touch(job, { what: `its main process was the VibeSpace hub", 'b2c5c-r1610-mem'), 'b2c5c-r1610-mem');
+  const JR = require(path.join(ROOT, 'src/jobs.js')).JobManager;
+  const mb = memScene(JR, 'mem-boot', 'boot'), mf = memScene(JR, 'mem-end', 'end'), mx = memScene(JMm.JobManager, 'mem-mut', 'boot');
+  ok([mb, mf].every((m) => m.desiredUp === false && !!m.mem && m.what.startsWith(m.mem + ' — its main process was the VibeSpace hub — not restarted by itself')),
+    'r1610 — a hub-main SERVICE that ended on MEMORY keeps the memory words, on both roads (the next boot\'s judge, the end\'s finalize), and is not restarted by itself', { mb, mf });
+  ok(!!mx.mem && !mx.what.includes(mx.mem), 'CONTROL (the memory words dropped, in a copy): the memory end is said only as «its main process was the VibeSpace hub» — RED', mx);
   ok(lau.kid > 1 && lau.log.includes(LATCH_LINE) && lau.alive === true && !!lau.exit && lau.exit.hubMain === true,
     'MUST 2 — A LAUNCHER MAIN (it started the hub as its child, and ends when the hub ends): the wrapper latches it (the hub\'s own chain reaches the job through it — the engine\'s test), so its end stops nothing the hub started; exit.json says `hubMain`', { kid: lau.kid, alive: lau.alive, exit: lau.exit && lau.exit.hubMain, state: lau.state });
   ok(lauX.kid > 1 && lauX.alive === false && !(lauX.exit && lauX.exit.hubMain), 'CONTROL (the release\'s recogniser — the main itself only — in a copy of the wrapper): the launcher is never latched and its end SIGTERMs the hub\'s child — RED', { alive: lauX.alive });
@@ -410,14 +446,15 @@ async function besideScene(wrapperText, tag) {
   // SMALLS: the refused stop's words are TRUE (a main that still runs is never said «ended»); the card's two sentences, zh and ja
   const sayOf = (src, live) => { const out = []; const f = new Function('mainLive', 'fs', 'logOpen', `let hubLeftSaid = 0; ${fnOf4(src, 'const sayHubLeft = (sig) => {')}\nreturn sayHubLeft;`)(() => live, { writeSync: (fd, b) => out.push(String(b)) }, () => 9); f('SIGTERM'); return out.join(''); };   // eslint-disable-line no-new-func
   const runs = sayOf(WRAP, true), ended = sayOf(WRAP, false), runsX = sayOf(anchored(WRAP, '  const what = mainLive() ? ', '  const what = false ? ', 'b2c5c-r1263-words-cut'), true);
-  ok(/refused — its main process was the VibeSpace hub \(or what started it\) and still runs, though it is no longer recognised as the hub/.test(runs) && !/has ended/.test(runs) && /and has ended: what is left is the hub's/.test(ended),
+  ok(/refused — its main process was the VibeSpace hub \(or what started it\) and still runs, though it is no longer recognised as the hub:/.test(runs) && !/server\.pid changed/.test(runs) && !/has ended/.test(runs) && /and has ended: what is left is the hub's/.test(ended),   // stale-pins: kept — a NEGATIVE pin: the words must never name that cause again
     'the words of a stop refused after the latch: a main that still runs (no longer recognised) is said to run, never «ended»; an ended one is said ended', { runs, ended });
   ok(/has ended/.test(runsX), 'CONTROL (one sentence, in a copy): a main that still runs is said «ended» — RED', runsX);
   const PANEL = fs.readFileSync(path.join(ROOT, 'src/lib/jobs-panel.js'), 'utf8'), ZH = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), JA = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
   const K1 = 'Not restarted by itself: its main process was VibeSpace itself, and a restart would start a second one. Start it again if you mean to.';
   const K2 = 'This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.';
-  ok(PANEL.includes(`j.hubMainDown && j.state === 'down' && !j.desiredUp ? t('${K1}')`) && PANEL.includes(`j.runsHub && /^\\d/.test(memoryChip(j, t) || '') ? t('${K2}')`)
-    && [K1, K2].every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':'))
+  const K1s = 'Not restarted: it ran VibeSpace itself.', K2s = 'Runs VibeSpace: its memory bound ends it whole.';   // r1610: the compact rail's short forms
+  ok(PANEL.includes(`j.hubMainDown && j.state === 'down' && !j.desiredUp ? (compact ? t('${K1s}') : t('${K1}'))`) && PANEL.includes(`j.runsHub && /^\\d/.test(memoryChip(j, t) || '') ? (compact ? t('${K2s}') : t('${K2}'))`)
+    && [K1, K2, K1s, K2s].every((k) => ZH.includes(JSON.stringify(k) + ':') && JA.includes(JSON.stringify(k) + ':'))
     && /hubMainDown: !!job\.hubMainDown, runsHub: !!\(run && !run\.endedAt && this\._hubMainOf\(run, null\)\)/.test(JSRC) && JSRC.includes('    delete job.hubMainDown;   // B-2c5c r1263: the person\'s Start') && JSRC.includes('    if (p.was.hubMainDown) job.hubMainDown = p.was.hubMainDown;') && JSRC.includes('...(job.hubMainDown ? { hubMainDown: job.hubMainDown } : {}) };'),
     'WIRING: the card says it — a service not restarted by itself (until the person\'s Start), and (4c) VibeSpace running under this job\'s memory bound ends WITH its conversations — the snapshot\'s two facts, both sentences in zh and ja; the Start clears the card\'s fact and a REFUSED start puts it back (B-b14a\'s law: a refused start leaves the record as it was)');
 }

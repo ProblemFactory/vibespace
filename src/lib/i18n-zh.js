@@ -12902,6 +12902,8 @@ export default {
   "the default": "默认值",
   "Not restarted by itself: its main process was VibeSpace itself, and a restart would start a second one. Start it again if you mean to.": "不会自动重启：它的主进程就是 VibeSpace 本身，重启会再启动第二个。如确有需要，请手动再次启动。",
   "This job runs VibeSpace itself: when VibeSpace and its conversations pass this memory bound, they all end together.": "此任务运行的是 VibeSpace 本身：当 VibeSpace 及其对话超出此内存上限时，它们会一起结束。",
+  "Not restarted: it ran VibeSpace itself.": "未自动重启：它运行的是 VibeSpace 本身。",
+  "Runs VibeSpace: its memory bound ends it whole.": "运行 VibeSpace：超出内存上限会让它整体结束。",
   "Memory bound": "内存上限",
   "unbounded": "不设上限",
   "from its next run": "下次运行起生效",
