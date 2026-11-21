@@ -161,6 +161,11 @@ const LH_KEYS_DEEP = '(deep recursion)';
 const LATE_D = [-30, -15, -8, -5, -3, -2, -1, 0, 1, 2, 4];   // round 3 (1): the late watchdog's release around the hog's end (measured: ≤ −5 JS inside, 0 asked at its end, ≥ 5 unseen)
 const HEAP_PER_EVAL_B = 400;   // round 3 (3): main-thread heap kept per REAL evaluate, at most (a constant text: measured ~? B; round 2: ~3 500)
 const LH = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/loop-hold.js'));
+// r942 (the hosted runner's red at the .414 candidate ac510a55d): a hold line STATES A COLLECTION AS A FACT only outside the hedged
+// class «native code or garbage collection» (a CPU sample outside JavaScript — native code OR a collection, never told apart without
+// the observer). A leg judges that meaning, never the words a class's own name holds: on the runner a 0.3 s hold gave one sample in
+// JavaScript and one outside it, and the tie's line named the second by that class — the old word check refused an honest line
+const collectionStated = (line) => /garbage collection/.test(String(line).split(LH.V.native).join(''));
 // (its readers' should 7) THE ASKS' TIMES, named once and read off the product's own schedule (LH.sampleDue with the first ask one
 // beat before the bar, LH.firstAskMs — B-7c97) at the children's injected hold 100 / beat 20: 80 / 200 / 400 ms of the hold
 const askDue = (k) => { for (let ms = 0; ms <= 100 * 2 ** k; ms++) if (LH.sampleDue(k, ms, 100, LH.SAMPLES_PER_HOLD, LH.firstAskMs(100, 20))) return ms; return null; };
@@ -547,7 +552,7 @@ async function legNamed(tag, node) {
   // less data) — the hold line carries the heap's size instead; the observer, opted in, names the collections
   const gcOff = await run({ plan: 'gc' }, { args: ['--expose-gc'] });
   const g0 = holdLines(gcOff).find((l) => l.startsWith('[loop-hold] the main loop was held'));
-  ok(g0 && !/garbage collection/.test(g0) && /heap \d+\.\d of \d+\.\d GB, external \d+\.\d GB, rss \d+\.\d GB/.test(g0), `law B as shipped: no collection observer — the hold line carries the heap's size: ${g0}`, gcOff.lines);
+  ok(g0 && !collectionStated(g0) && /heap \d+\.\d of \d+\.\d GB, external \d+\.\d GB, rss \d+\.\d GB/.test(g0), `law B as shipped: no collection observer — the hold line states no collection as a fact (a sample outside JavaScript keeps its hedged class «${LH.V.native}») and carries the heap's size: ${g0}`, gcOff.lines);
   const gc = await run({ plan: 'gc', gcMinMs: 5, observeGc: true }, { args: ['--expose-gc'] });   // opted in; the ring's floor injected (5 ms): two forced mark-compacts of a ~75 MB heap
   const g = holdLines(gc).find((l) => l.startsWith('[loop-hold] the main loop was held') && /gcHog \(src\/hogs\.js:9\)|busyHog/.test(l) && /garbage collection: mark-compact \d+\.\d s \(2\)[^;]* inside the hold/.test(l));
   ok(g, `the observer opted in: a collection forced inside a hold is named: ${g}`, gc.lines);

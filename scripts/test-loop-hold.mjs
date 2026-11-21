@@ -1355,6 +1355,18 @@ console.log('r116 + r147 (lane hub-loop-stalls): an ask at the hold\'s EDGE is i
   ok(!!r1 && r1.fo.verdict === LH.V.js, `RED (no edge rule — the release): the native continuation's one ask names the hold «${r1 && r1.fo.verdict}»`, r1 && r1.line);
   ok(!!r2 && r2.line.includes('the first JavaScript after it: busyHog'), `RED (r116's first wording, the edge as «after it»): a true JavaScript hold's own last moment is said as what ran AFTER it — false (${r2 && words(r2.line).slice(0, 60)}…)`, r2 && r2.line);
   ok(!!r3 && r3.fo.verdict !== LH.V.tie, `RED (a winner by list order): the tie reads «${r3 && r3.fo.verdict}»`, r3 && r3.line);
+  // (r942 — the hosted runner's red at the .414 candidate ac510a55d, test-loop-hold-live's law B) THE TWO-SAMPLE TIE WITH NO COLLECTION
+  // OBSERVER, placed (planted samples: no clock, no load): one sample in JavaScript, then one on the CPU outside it, as the runner's
+  // 0.3 s hold gave. The line names the second by its hedged class «native code or garbage collection» — native code OR a collection —
+  // and states no collection as a FACT. The meaning, judged: the words «garbage collection» stand only inside that class's own name
+  const collectionStated = (line) => /garbage collection/.test(String(line).split(LH.V.native).join(''));
+  const tie942 = holdOf(LH, [jsAt(FROM + 750, BUSY), native(FROM + 2000)], 3000);
+  ok(tie942.fo.verdict === LH.V.tie && words(tie942.line).startsWith(`${LH.V.js} ×1 and ${LH.V.native} ×1 (a tie, in the order they came)`) && !collectionStated(tie942.line),
+    `(r942) a two-sample tie with no collection observer names the sample outside JavaScript by its hedged class and states no collection as a fact («${words(tie942.line).slice(0, 96)}…»)`, tie942.line);
+  ok(/garbage collection/.test(tie942.line), `(r942) why the heavy leg changed: a WORD check («garbage collection» anywhere in the line) reads that hedged class's name as a claim — the honest line it refused on the runner`, tie942.line);
+  const gcFact = mut('native-as-collection', "k === 'native' ? (gc ? V.gc : V.native) :", "k === 'native' ? V.gc :");
+  const red942 = gcFact ? holdOf(gcFact, [jsAt(FROM + 750, BUSY), native(FROM + 2000)], 3000) : null;
+  ok(!!red942 && collectionStated(red942.line), `(r942) RED CONTROL: a copy that names that sample «${LH.V.gc}» with no observer states a collection as a fact — the meaning check catches it («${red942 && words(red942.line).slice(0, 80)}…»)`, red942 && red942.line);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
