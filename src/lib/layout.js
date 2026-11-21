@@ -447,6 +447,7 @@ class LayoutManager {
     let heldClosed = false; // a window THIS client closed, still listed by the record (inc-mukeyzpt-lpou) — the close is re-sent once below
     let heldMoved = false; // a window THIS page moved AFTER the record arrived (verify r2) — kept where the user put it, the move re-sent once below
     let keptShown = false; // a window THIS page shows that the record let go as a duplicate (r3 F, the hub's trace) — kept, listed again below
+    let standing = new Set(); // a window THIS page shows that stands under its own id for a row it cannot build (B-1d87) — never closed by this record
     const keptIds = []; // …which (r4 J: kept in its place and its group)
     const heldIds = (state.windows || []).map((rw) => rw.winId || rw.id).filter((id) => this._closeHeld(id));
     // THE HELD CHAIN ACT (stage-blank verify r5): a tab this user tore off / merged / moved in its strip here that no record
@@ -475,6 +476,13 @@ class LayoutManager {
       // Windows: update existing, create missing, close removed
       if (state.windows) {
         const remoteIds = new Set();
+        // THE PAGE'S WINDOW STANDS, AND THE RECORD KEEPS ONE ROW (B-1d87 — desktop-manager takeRowsShown): a row this page cannot build
+        // ONLY because a window of its own shows that conversation, unlisted, takes that window — re-keyed (its view, composer and draft
+        // stand; the rows below place it like any window the record lists); under a held act the window stands in the row's place
+        const shownBy = this.app.desktopManager?.takeRowsShown?.(this.app.desktopManager?.activeDesktopId, state, {
+          held: (w) => heldChain.has(String(w.id)) || this.actHeld(w._movedAt, receivedAt, w) || this.actHeld(w._boundsAt, receivedAt, w) || this.actHeld(w._chainAt, receivedAt, w),
+          rowHeld: (id) => heldIds.includes(id) });
+        standing = new Set((shownBy?.stands || []).map(([w]) => String(w)));
         // A COPY THIS PAGE CANNOT BUILD IS A GHOST FROM THE MOMENT THE RECORD NAMES IT (r5 O): a row whose conversation this page
         // already shows in another window is never built here (its open would raise that other window) — nor waited for
         const ghostRows = new Set(this.app.desktopManager?.copiesOf?.(this.app.desktopManager?.activeDesktopId, state) || []);
@@ -605,6 +613,7 @@ class LayoutManager {
           if (!remoteIds.has(id)) {
             const win = this.app.wm.windows.get(id);
             if (activeDesk && win?._desktopId && win._desktopId !== activeDesk) continue;
+            if (standing.has(String(id))) continue; // B-1d87: it stands for a row of this record under its own id — never closed by it
             // Windows without an openSpec can't have been replayed remotely —
             // e.g. a createSession window still waiting for its 'created' reply.
             // Closing it here would KILL the just-created session.
@@ -757,6 +766,7 @@ class LayoutManager {
     if (owed && [...owed].some((d) => !this._unacked.some((s) => s.desks.includes(d)))) heldMoved = true;
     if (heldMoved) setTimeout(() => this._resendHeldMove(), 1000); // …and a move the record could not know (verify r2)
     if (keptShown) setTimeout(() => this.resendKeptShown(), 1000); // …and a shown window a dedup wrote away (r3 F: the hub learns it)
+    if (standing.size && !keptShown) setTimeout(() => this.resendKeptShown(), 1000); // …and a window standing in a row's place (B-1d87: the other page takes its id)
     // (an owed RECIPE is not re-armed here — r4 N1: it is no act of the person's; it rides the next save of its desktop, once — noteOwnRecipe)
   }
 

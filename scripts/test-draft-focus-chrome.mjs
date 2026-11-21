@@ -12,6 +12,10 @@
 //   ③ a REAL mouse press on A's Send while a held draft CONTINUES A's words ⇒ what A typed is sent (the judge waits for
 //      the press to end: the press blurs the box BEFORE its click sends)
 //   ④ a×8 / b×8 interleaved (120 ms, then 200 ms) ⇒ each box holds exactly its own typing, each page saved only what it typed
+//   ⑤ B-1d87 (the hosted print of run 44903979657, made deterministic): A makes a conversation, B's person opens it BEFORE A's record
+//      reaches B (B's gate holds the record); B types, an IME composition in progress, and keeps typing THROUGH the record's apply ⇒
+//      B's window STANDS (the same element) and takes A's id: one window of it on B, every character in the box, focus and caret
+//      kept. RED CONTROL: B's page with the release's apply (nothing taken) ⇒ its window of the conversation is closed
 // RED CONTROLS: ①/④ the 2.369.354 landing (the box OVERWRITTEN — its own autosave then saves what landed) patched into the
 // live composers of a second conversation; ③ a judge AT the blur (no press wait) added to a third one.
 // Run: node scripts/test-draft-focus-chrome.mjs   (SKIPs without chrome)
@@ -302,6 +306,44 @@ try {
     check(`interleaved every ${gap} ms: 0 of 16 characters lost — A «${r4.a}», B «${r4.b}»; each page saved only its own characters (A ${JSON.stringify(r4.aSent)}, B ${JSON.stringify(r4.bSent)})`, r4.a === 'aaaaaaaa' && r4.b === 'bbbbbbbb' && r4.ownOnly, r4);
   }
 
+  console.log('⑤ B-1d87: one conversation opened on both devices in the same seconds — B\'s window stands and takes A\'s id while B types');
+  // the window(s) of conversation `s` on page P: the first one's id and its mark (the element this leg marked), and how many there are
+  const winsOf = (P, s) => P.evalJs(`(() => { const ws = [...app.wm.windows.values()].filter((x) => x._openSpec && x._openSpec.serverId === ${JSON.stringify(s)}); return { n: ws.length, id: ws[0] ? ws[0].id : null, mark: ws[0] ? (ws[0].element.dataset.df1d87 || null) : null }; })()`);
+  async function legStands(name, not, { release = false } = {}) {
+    // B's GATE (the print: B's apply waited 2.8 s): A's record and B's own save wait under it — the release's apply patched in for the control
+    await B.evalJs(`(() => { app.layoutManager._restoring = true; ${release ? 'app.desktopManager.takeRowsShown = () => ({ rekeyed: [], stands: [] });' : ''} return true; })()`);
+    await A.evalJs(`app.createSession({ cwd: ${JSON.stringify(CWD)}, name: ${JSON.stringify(name)}, mode: 'chat', backend: 'antigravity' }); true`);
+    let s = null;
+    for (let i = 0; i < 80 && !s; i++) { s = await A.evalJs(`([...app.sessions.values()].find((v) => v && v._messageList && !${JSON.stringify(not)}.includes(v.sessionId))?.sessionId) || null`); if (!s) await sleep(250); }
+    await until(() => s && agyStarted(s), 15000);
+    await B.evalJs(`app.attachSession(${JSON.stringify(s)}, ${JSON.stringify(name)}, ${JSON.stringify(CWD)}, { mode: 'chat', backend: 'antigravity' }); true`); // B's person opens it (its sidebar row)
+    await viewReady(B, s);
+    const a1 = (await winsOf(A, s)).id;
+    const carried = await B.waitFor(`[...app.layoutManager._pendingRemote.values()].some((m) => (m.state?.windows || []).some((w) => (w.winId || w.id) === ${JSON.stringify(a1)}))`, 15000); // A's record naming its window waits on B
+    const b0 = await winsOf(B, s);
+    await B.evalJs(`(() => { const w = app.wm.windows.get(${JSON.stringify(b0.id)}); w.element.dataset.df1d87 = '1'; return true; })()`);
+    await focusBox(B, s);
+    for (const ch of 'ab') { await typeChar(B, ch); await sleep(80); }
+    await B.cdp('Input.imeSetComposition', { text: '退', selectionStart: 1, selectionEnd: 1 });   // a composition in progress…
+    await B.evalJs('app.layoutManager._restoring = false; true');                                    // …when the gate opens: the record applies now
+    await sleep(500);
+    await B.cdp('Input.imeSetComposition', { text: '退款', selectionStart: 2, selectionEnd: 2 });
+    await sleep(150);
+    await B.cdp('Input.insertText', { text: '退款' });                                               // the composition committed
+    for (const ch of 'cd') { await typeChar(B, ch); await sleep(80); }
+    await sleep(900);
+    const b1 = await winsOf(B, s);
+    const out = { s, a1, carried, before: b0, after: b1 };
+    if (b1.n) Object.assign(out, await B.evalJs(`(() => { const ci = ${CI(s)}, ta = ci && ci._textarea; return { value: ta ? ta.value : null, focused: !!ta && document.activeElement === ta && document.hasFocus(), caret: ta ? ta.selectionStart : null }; })()`));
+    await B.evalJs('delete app.desktopManager.takeRowsShown; app.layoutManager._restoring = false; true');
+    return out;
+  }
+  const r5 = await legStands('draft-focus-stands', [sid]);
+  check(`B opened the conversation before A's record reached it; the record applied WHILE B typed: B's window STANDS — the same element, now under A's id (${r5.before.id} → ${r5.after.id}), one window of it on B`,
+    r5.carried && r5.before.id !== r5.a1 && r5.after.n === 1 && r5.after.id === r5.a1 && r5.after.mark === '1', r5);
+  check(`…nothing was lost under B's hands: the box holds «${r5.value}» (every character, the IME composition committed), focused, the caret at its end`,
+    r5.value === 'ab退款cd' && r5.focused === true && r5.caret === 'ab退款cd'.length, r5);
+
   console.log('RED CONTROLS — the 2.369.354 landing (the box overwritten) in a second conversation; a judge at the blur in a third');
   const sid2 = await openChat('draft-focus-base', [sid]);
   const c1 = await legTyping(sid2, 'draft-focus-base', { base: [A] });
@@ -314,6 +356,8 @@ try {
   const sid3 = await openChat('draft-focus-blur', [sid, sid2]);
   const c3 = await legPress(sid3, 'draft-focus-blur', { judgeAtBlur: true });
   check(`RED CONTROL ③: judged AT the blur, the held «hello world» lands during the press («${c3.duringPress}») and the click sends «${c3.read}» — not what A typed`, c3.before.held === 'hello world' && c3.read === 'hello world', c3);
+  const c5 = await legStands('draft-focus-stands-base', [sid, sid2, sid3, r5.s], { release: true });
+  check(`RED CONTROL ⑤ (B-1d87): B's page with the release's apply (nothing taken) — the record CLOSED B's window of the conversation and nothing opened it (${c5.after.n} window of it on B)`, c5.carried && c5.after.n === 0, c5);
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('✗ threw: ' + (e && e.stack || e));

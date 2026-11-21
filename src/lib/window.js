@@ -1976,6 +1976,7 @@ class WindowManager {
     this.windows.delete(oldId);
     win.id = newId;
     this.windows.set(newId, win);
+    if (this.activeWindowId === oldId) this.activeWindowId = newId; // the focused window keeps the focus under its new id (B-1d87: a person typing in it)
     const c = win._tabChain;
     if (c) {
       const sw = (l) => { if (Array.isArray(l)) l.forEach((m, i) => { if (m === oldId) l[i] = newId; }); }; // in place: every member holds this chain

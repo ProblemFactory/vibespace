@@ -437,6 +437,7 @@ export class DesktopManager {
   cacheShownState(desktopId, state) {
     if (!desktopId || desktopId !== this._activeId || !state || typeof state !== 'object') return;
     state = this.keptRecord(desktopId, state, this._takeKept(desktopId)); // a window the apply kept: in its place and its group (r4 J)
+    state = this._standsInto(desktopId, state); // a window that stands in a row's place (B-1d87): read in that row's place and seat
     this._relisted(desktopId, state);
     const held = this.app.layoutManager?.heldCloseIds?.() || [];
     this._setRecord(desktopId, held.length ? mergeDesktopRecord({ record: state, remove: held }) : state);
@@ -551,7 +552,11 @@ export class DesktopManager {
     refusals.set(d, ref);
     // the windows this page built there through THE ONE CAPTURE: a phone's re-send carries the kept record's arrangement,
     // never its own z (phone-arrangement-verify F2: the reconciled re-send wrote the phone's z, a desktop's reload restacked)
+    // THE PAGE'S WINDOW STANDS (B-1d87): the record a refusal kept is taken over this page's windows like an applied one — a row it
+    // cannot build only because a window of its own shows that conversation takes that window (re-keyed), or the window stands in its place
+    if (d === this._activeId) this.takeRowsShown(d, rec, { held: (w) => ['_movedAt', '_boundsAt', '_chainAt'].some((k) => !!lm.actHeld?.(w[k], Date.now(), w)), rowHeld: (id) => (lm.heldCloseIds?.() || []).includes(id) });
     this._setRecord(d, mergeDesktopRecord({ record: rec, built: this.captureBuilt(d, rec), remove: lm.heldCloseIds?.() || [] }));
+    if (this._standsNow?.get(d)?.length) this._setRecord(d, this._standsInto(d, this._savedStates.get(d))); // …a window standing in a row's place (B-1d87)
     this.noteWire(d, rec);
     let opened = 0;
     if (d === this._activeId && !this.app.stage?.isActive) opened = this._replayMissing(d, this._savedStates.get(d));
@@ -693,6 +698,72 @@ export class DesktopManager {
       }
     }
     return out;
+  }
+
+  /** THE PAGE'S WINDOW STANDS, AND THE RECORD KEEPS ONE ROW (B-1d87, the coordinator's r1287 / r1303 — the hosted print of
+   *  test-draft-focus-chrome: a conversation opened on a second device in the seconds before the first device's record arrived was
+   *  CLOSED by that record's apply — a row it could not build, its own window not listed, no dedup trace — and never opened again; the
+   *  composer and its view gone). For a record of the desktop on show that this page takes over its windows — an apply (layout.js
+   *  _applyRemoteState, before its copies are read) or the record a refusal kept (onSyncRefused): each row it cannot build ONLY because
+   *  a window of its own shows that conversation (showerFor) — that window TAKES THE ROW'S ID (wm.rekeyWindow: the same window — its
+   *  view, its composer, caret and draft; nothing closed, nothing built — and the page holds the record's one row; the apply then
+   *  places it like any window it lists). Under a held act of that window (`held(w)`: a move, a resize, a chain act no save carried)
+   *  it STANDS under its own id in the row's place instead (noteStands — the record read so, its next write carrying it; the other page
+   *  takes that id). A row this page closed and no save has carried (`rowHeld`) is left as today. One window for one row.
+   *  WHICH ID WINS when two pages each opened the conversation: the HUB's order — the staleness gate (§6b guard 11) accepts only a write
+   *  made from the newest record of the desktop; the other page's write is refused and that page takes the kept record on the refusal
+   *  road (this method too) — so every page takes the id of the first record the hub accepted, never a swap.
+   *  → { rekeyed: [[from, to]], stands: [[win, row]] } */
+  takeRowsShown(desk, state, { held = () => false, rowHeld = () => false } = {}) {
+    const out = { rekeyed: [], stands: [] }, wm = this.app.wm;
+    if (!desk || desk !== this._activeId || desk === '__stage__' || this.app.stage?.isActive || !state || !Array.isArray(state.windows)) return out;
+    const taken = new Set();
+    for (const row of state.windows) {
+      const id = row ? rowId(row) : null;
+      if (!id || wm.windows.has(id) || rowHeld(id)) continue;
+      const w = this.showerFor(row, state, taken);
+      if (!w) continue;
+      const was = String(w.id);
+      taken.add(was);
+      if (!held(w) && wm.rekeyWindow(was, id, { inChain: true })) {
+        taken.add(id);
+        if (this.wireListed(desk, was)) this._noteDeparted(was, 'replaced', id); // the hub held it: its drop is explained
+        this._buildAttempts.delete(id);
+        out.rekeyed.push([was, id]);
+        try { window.__vsOp?.('layout-copy-rekeyed', { from: was, to: id }); } catch { }
+        continue;
+      }
+      this.noteStands(desk, was, id);
+      out.stands.push([was, id]);
+    }
+    return out;
+  }
+  /** The built window of the desktop on show that makes `row` of `state` a copy this page cannot build — it shows the row's
+   *  conversation (THE census, _shownCensus: the session the row's own door attaches) — when `state` does NOT list that window.
+   *  `taken` = windows already standing for a row (one window for one row). null = none: the row is no copy, or its window is listed
+   *  too (two rows of one conversation in one record: today's dedup world, untouched). */
+  showerFor(row, state, taken = null) {
+    const census = this._shownCensus(), sid = doorSessionOf(row, census.live);
+    const id = sid ? census.shows.get(sid) : null;
+    if (!id || id === rowId(row) || (taken && taken.has(id))) return null;
+    const w = this.app.wm.windows.get(id);
+    if (!w || w._onStage || w._desktopId === '__stage__' || (w._desktopId && w._desktopId !== this._activeId)) return null;
+    if (windowIds(state).includes(id)) return null;
+    return w;
+  }
+  /** B-1d87: window `winId` STANDS under its own id in the place of the record's row `rowId` (no re-key: a held act) — read once */
+  noteStands(desk, winId, rowId) { const m = this._standsNow || (this._standsNow = new Map()); if (!m.has(desk)) m.set(desk, []); m.get(desk).push([String(winId), String(rowId)]); }
+  _takeStands(desk) { const l = this._standsNow?.get(desk); if (l) this._standsNow.delete(desk); return l || []; }
+  /** `state` with each window standing for a row (noteStands) in that row's place and seat — the row leaves with evidence
+   *  'replaced' (the page's next write says it); a window no longer built leaves nothing */
+  _standsInto(desk, state) {
+    for (const [w, r] of this._takeStands(desk)) {
+      const cap = this.captureBuilt(desk, state, [w]);
+      if (!cap.length) continue;
+      state = mergeDesktopRecord({ record: state, built: cap, remove: [r], replaced: [[w, r]] });
+      this._noteDeparted(r, 'replaced', w);
+    }
+    return state;
   }
 
   /** ONE CENSUS FOR EVERY COPY VERDICT (r9): `shows` = each session this page shows or is still attaching → the built window that

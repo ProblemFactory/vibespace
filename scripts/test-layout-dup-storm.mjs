@@ -644,6 +644,123 @@ await section('§D285 B-d285 (lane bl-windows) — the reveal door reads the one
 });
 
 // ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+// §1D87 B-1d87 (the coordinator's r1287 / r1303 — the hosted print of test-draft-focus-chrome, run 44903979657): TWO DEVICES OPEN ONE
+// CONVERSATION IN THE SAME SECONDS. Page B opened S in a window of its own before page A's record (S in A's window) arrived; the
+// apply skipped A's row (a copy B cannot build: it shows S) and CLOSED B's window (not in the record, no dedup trace: B had saved
+// nothing) — B left with no window of S, never opened again. THE LAW: the page's window STANDS and the record keeps ONE row — it takes
+// the row's id (desktop-manager takeRowsShown → wm.rekeyWindow: the same window, nothing closed, nothing built) on BOTH roads a record
+// is taken over the page's windows (the apply, the record a refusal kept); under a held act it stands under its own id in the row's
+// place and the other page takes that id. Which id wins when both pages wrote their own: the hub's order (the staleness gate accepts
+// the first, refuses the other — that page takes the kept record). Two pages on the REAL hub, the REAL attachSession, real timers;
+// every scene and every control runs at once — the verdicts are SAID after all of them ended (the hub's quiet sends swap the console
+// while they run). → { failed: names, said: [[pass, name, detail]] }
+async function b1d87Legs({ DM = RealDM, LM = RealLM, install = null, legs = null } = {}) {
+  const failed = [], said = [];
+  const leg = (c, n, extra) => { said.push([!!c, n, extra]); if (!c) failed.push(n); return !!c; };
+  const want = (k) => !legs || legs.includes(k);
+  if (!install) return { failed, said };
+  const recs = () => ({ 'desk-x': [files('x-1', 0)], 'desk-y': [files('y-1', 0)], 'desk-v': [files('v-1', 0)] });
+  const pair = (r = recs()) => { const H = hub(loadHandler(), DOC(r), { alive: [S, T] }); return { H, A: pageOn(H, install, 'desk-x', { DM, LM, attachMs: 20 }), B: pageOn(H, install, 'desk-x', { DM, LM, attachMs: 20 }) }; };
+  const open = (P) => P.app.attachSession(S, 'Atlas notes', '/srv/u/atlas', { mode: 'chat', backend: 'claude', backendSessionId: CID }); // a person's open (a sidebar card)
+  const sWins = (P) => [...P.wins.values()].filter((w) => w._openSpec && w._openSpec.serverId === S).map((w) => w.id);
+  const onHub = (H) => (((H.layouts().desktops || {})['desk-x'] || {}).autoSave?.windows || []).filter((w) => w && w.openSpec && w.openSpec.serverId === S).map((w) => w.winId || w.id);
+  const save = (P) => { P.dm._restoring = false; P.lm._restoring = false; P.lm._userDirty = true; P.lm._lastUserInputAt = Date.now(); return P.lm._doAutoSave(); }; // a person's act, saved
+  const drain = async (P) => { P.dm._restoring = false; P.lm._restoring = false; await tick(450); }; // the gate opens: the deferred record's drain (it polls every 200 ms)
+  const closeOn = async (P, id) => { P.app.wm.requestClose(id); await save(P); await tick(30); }; // a person's close, saved
+  const scenes = [];
+  if (want('a')) scenes.push((async () => {
+    const { H, A, B } = pair();
+    B.lm._restoring = true; // B's gate (the print: B's apply waited 2.8 s) — its own save and A's record wait under it
+    open(B); open(A); await tick(40);
+    const [b1] = sWins(B), [a1] = sWins(A), bWin = B.wins.get(b1);
+    await save(A); await tick(10);
+    const deferred = B.lm._pendingRemote.size;
+    await drain(B);
+    const after = sWins(B), hubRows = onHub(H);
+    leg(deferred === 1 && J(after) === J([a1]) && B.wins.get(a1) === bWin && !B.closed.includes(b1) && J(hubRows) === J([a1]),
+      `§1D87 (a) THE PRINT'S SCENE: B opened S (${b1}) before A's record (S in ${a1}) arrived — applied, B's OWN window stands and takes the record's id: one window of S, the very window (never closed, nothing built), one row on the hub`, { b1, a1, deferred, after, closed: B.closed, hubRows });
+    await closeOn(B, a1); await drain(A);
+    leg(J(sWins(A)) === '[]' && J(onHub(H)) === '[]', '§1D87 (a) …and a person\'s close of S on B closes it on A (one row: the close travels by its id)', { A: sWins(A), hubRows: onHub(H) });
+  })());
+  if (want('b')) scenes.push((async () => {
+    const { H, A, B } = pair();
+    A.lm._restoring = true; // A's own save waits (r1303 (3): a person's press made B dirty — B's save goes first)
+    open(A); open(B); await tick(40);
+    const [a1] = sWins(A), [b1] = sWins(B), aWin = A.wins.get(a1);
+    await save(B); await tick(10);
+    await drain(A);
+    leg(J(sWins(A)) === J([b1]) && A.wins.get(b1) === aWin && !A.closed.includes(a1) && J(sWins(B)) === J([b1]) && J(onHub(H)) === J([b1]),
+      `§1D87 (b) THE MIRRORED SCENE (a person's own road — B's save first): A, whose window (${a1}) was never sent, re-keys onto B's id (${b1}) — one window of S on each page, one id, one row`, { a1, b1, A: sWins(A), B: sWins(B), hubRows: onHub(H) });
+    await closeOn(A, b1); await drain(B);
+    leg(J(sWins(B)) === '[]' && J(onHub(H)) === '[]', '§1D87 (b) …and a close of S on A closes it on B', { B: sWins(B), hubRows: onHub(H) });
+  })());
+  if (want('c')) scenes.push((async () => {
+    const { H, A, B } = pair();
+    open(A); open(B); await tick(40);
+    const [a1] = sWins(A), [b1] = sWins(B);
+    // both pages write their own window of S at once: the hub accepts A's (first) and refuses B's as written from an older base (§6b
+    // guard 11 — the record kept rides the refusal); A's relayed record reaches B under B's gate (raised right after its write)
+    save(A); save(B); B.lm._restoring = true;
+    await tick(30);
+    const atRefusal = sWins(B), pend = B.lm._pendingRemote.size;
+    await drain(B); await tick(100); // A's relayed record applied on B (its window already holds that id)
+    leg(J(atRefusal) === J([a1]) && pend === 1 && J(sWins(A)) === J([a1]) && J(sWins(B)) === J([a1]) && J(onHub(H)) === J([a1]),
+      `§1D87 (c) TWO PAGES WRITE THEIR OWN AT ONCE (r1303 (4)): the hub accepts the first (${a1}) and refuses B's (${b1}) — B takes the kept record on the REFUSAL road and its window takes ${a1} there, before A's relayed record is applied; one id on both pages, one row (the rule both compute alike: the id of the first record the hub accepted)`, { a1, b1, atRefusal, pend, A: sWins(A), B: sWins(B), hubRows: onHub(H) });
+  })());
+  if (want('d')) scenes.push((async () => {
+    const { A, B } = pair({ ...recs(), 'desk-x': [files('x-1', 0), chat('x-t', T, 1)] });
+    await closeOn(A, 'x-t'); await drain(B);
+    leg(!B.wins.has('x-t') && B.closed.includes('x-t'), '§1D87 (d) a window whose conversation the record no longer carries closes as today (a person closed it on the other device)', { closed: B.closed });
+  })());
+  if (want('e')) scenes.push((async () => {
+    const { B } = pair();
+    open(B); await tick(40);
+    const [b1] = sWins(B), row = chat('win-z-s', S, 2), bWin = B.wins.get(b1);
+    const alone = B.dm.showerFor(row, { windows: [row] }), both = B.dm.showerFor(row, { windows: [row, chat(b1, S, 3)] }), once = B.dm.showerFor(row, { windows: [row] }, new Set([b1]));
+    leg(alone === bWin && both === null && once === null, '§1D87 (e) the window that stands for a row: the one showing its conversation when the record does not list it; a record listing BOTH rows is today\'s dedup world (none); one window for one row', { alone: alone && alone.id, both, once });
+  })());
+  if (want('f')) scenes.push((async () => {
+    const { H, A, B } = pair();
+    B.lm._restoring = true;
+    open(B); open(A); await tick(40);
+    const [b1] = sWins(B), [a1] = sWins(A);
+    await save(A); await tick(10);
+    B.wins.get(b1)._movedAt = Date.now() + 5; // the person moved B's window after A's record arrived (a held move)
+    await drain(B);
+    const atApply = sWins(B);
+    await tick(2300); // B's window stands in the row's place, re-sent after the apply's 1 s gate (+ the 500 ms debounce); A takes its id
+    leg(J(atApply) === J([b1]) && J(sWins(A)) === J([b1]) && J(sWins(B)) === J([b1]) && J(onHub(H)) === J([b1]),
+      `§1D87 (f) no re-key under a held act: B's window (${b1}), moved after A's record arrived, STANDS under its own id in the row's place and is re-sent — A's window (${a1}) takes ${b1}; one id on both pages, one row`, { a1, b1, atApply, A: sWins(A), B: sWins(B), hubRows: onHub(H) });
+  })());
+  await Promise.all(scenes);
+  return { failed, said };
+}
+const install1d87 = await loadLifecycle();
+await section('§1D87 B-1d87 — a conversation opened on two devices in the same seconds: the page\'s window stands and takes the record\'s id; one row; closes travel', async () => {
+  const LSRC = read('src/lib/layout.js'), DSRC = read('src/lib/desktop-manager.js');
+  const apply = 'const shownBy = this.app.desktopManager?.takeRowsShown?.(';
+  const refusal = 'if (d === this._activeId) this.takeRowsShown(d, rec, {';
+  const rekey = 'if (!held(w) && wm.rekeyWindow(was, id, { inChain: true })) {';
+  const stands = '      this.noteStands(desk, was, id);\n';
+  const set = ok(LSRC.includes(apply) && DSRC.includes(refusal) && DSRC.includes(rekey) && DSRC.includes(stands), '§1D87 CONTROL setup: the apply\'s and the refusal road\'s calls, the re-key and the stand exist (layout.js, desktop-manager.js)');
+  const M = mutantCopies('ldup-1d87', REPO);
+  const lm = async (src, name) => (await import(pathToFileURL(M.write('src/lib/layout.js', src, name, { esm: true })).href)).LayoutManager;
+  const dm = async (src, name) => (await import(pathToFileURL(M.write('src/lib/desktop-manager.js', src, name, { esm: true })).href)).DesktopManager;
+  const none = { failed: [], said: [] };
+  const [real, { failed: rel }, { failed: refused }, { failed: keep }] = await Promise.all([
+    b1d87Legs({ install: install1d87 }),
+    set ? lm(LSRC.replace(apply, 'const shownBy = ((..._) => null)('), '1d87-release').then((LMx) => b1d87Legs({ LM: LMx, install: install1d87, legs: ['a', 'b'] })) : none,
+    set ? dm(DSRC.replace(refusal, 'if (false) this.takeRowsShown(d, rec, {'), '1d87-refusal-road').then((DMx) => b1d87Legs({ DM: DMx, install: install1d87, legs: ['c'] })) : none,
+    set ? dm(DSRC.replace(rekey, 'if (false) {').replace(stands, ''), '1d87-keep-only').then((DMx) => b1d87Legs({ DM: DMx, install: install1d87, legs: ['a'] })) : none,
+  ]);
+  for (const [c, n, e] of real.said) ok(c, n, e);
+  if (!set) return;
+  ok(rel.some((n) => n.startsWith('§1D87 (a) THE PRINT')) && rel.some((n) => n.startsWith('§1D87 (b) THE MIRRORED')), `§1D87 RED CONTROL — the release's apply (nothing taken): the page's window of S is closed by the record and nothing opens it (a: ${rel.filter((n) => n.startsWith('§1D87 (a)')).length} red, b: ${rel.filter((n) => n.startsWith('§1D87 (b)')).length} red)`, rel);
+  ok(refused.some((n) => n.startsWith('§1D87 (c)')), `§1D87 RED CONTROL — the refusal road takes nothing: the refused page's window keeps its own id over the kept record (${refused.length} red)`, refused);
+  ok(keep.some((n) => n.startsWith('§1D87 (a)')), `§1D87 RED CONTROL — the keep alone (r1297's first form: the window kept, never re-keyed, never in the row's place): two rows of S — the close no longer travels (${keep.length} red)`, keep);
+});
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
 // §PR — A PHONE NEVER REPLACES A DESKTOP'S ROWS (lane phone-resume-keeps-layout, userW 2026-11-05 11:30Z: after a hub restart his
 // PHONE page reconnected first and accepted «Resume all»; each stopped conversation reopened in a NEW window, the desktops' rows
 // were retired for them — evidence 'closed' / 'moved' — and the phone, which owns no desktop geometry, wrote eleven desktops'

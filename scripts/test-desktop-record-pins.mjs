@@ -32,6 +32,7 @@ const ALLOWED = [
   ['src/lib/desktop-manager.js', "if (id !== '__stage__' && dState.autoSave) { this._setRecord(id, dState.autoSave);", 'held-write', 'boot: each desktop\'s record the server sent, as it is'],
   ['src/lib/desktop-manager.js', 'this._setRecord(desktopId, state);', 'held-write', 'noteSent: the record recordFor made that just left this page'],
   ['src/lib/desktop-manager.js', 'this._setRecord(this._activeId, currentState);', 'held-write', 'switchTo: `currentState = this.recordFor(this._activeId)` on the line above'],
+  ['src/lib/desktop-manager.js', 'if (this._standsNow?.get(d)?.length) this._setRecord(d, this._standsInto(d, this._savedStates.get(d)));', 'held-write', 'onSyncRefused (B-1d87): a window standing in a row\'s place — _standsInto returns a mergeDesktopRecord result (the ONE capture of that window into the row\'s seat)'],
 ];
 function census(srcs) {
   const out = [];
