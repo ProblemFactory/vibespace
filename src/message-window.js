@@ -350,7 +350,10 @@ class MessageWindow {
     const wasLive = this._live;
     this._live = false; // a history conversion says no op (a move included)
     try { for (const record of records || []) {
-      if (beforeRecord) { try { const p = beforeRecord(record); if (p && typeof p.then === 'function') await p; } catch { } }
+      if (beforeRecord) {
+        try { const p = beforeRecord(record); if (p && typeof p.then === 'function') await p; }
+        catch (e) { const r = (e && e.record) || record; console.error(`[${this._logTag}] the step before a record failed during history rebuild (record ${(r && (r.uuid || r.id || r.type)) || '?'}): ${(e && e.message) || e}`); } // B-299b (主开发 r751): said, never silent — a paced fold that broke midway lost that record's later rows
+      }
       try { this._feedRecord(record, false); }
       catch (e) { console.error(`[${this._logTag}] record skipped during history rebuild:`, e.message); }
       done++;

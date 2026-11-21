@@ -374,28 +374,50 @@ console.log('⑤ B-299b: a helper\'s transcript is read OFF the hub\'s loop (the
   ok(!rows(RB1)[':' + B1 + 'one.md'] && !rows(RB1)[':' + B1 + 'two.md'] && s1.left - s0.left === 2 && told.some((m) => /the history opened before 2 of 2 helper transcripts were read/.test(m)) && rows(RB2)[':' + B1 + 'one.md'] && rows(RB2)[':' + B1 + 'two.md'] && s1.read - s0.read === 3,
     'a rebuild whose prefetch wait is spent (behind a long helper read) opens without the two helpers\' rows and SAYS it; their reads go on — the next open folds both, each file read once (three reads with the long one)', { first: shape(rows(RB1)), second: shape(rows(RB2)), left: s1.left - s0.left, reads: s1.read - s0.read, told });
 
-  // (h) THE REBUILD'S FOLD, PACED (B-299b, the member after A6 — 主开发 r604 / r648): ONE Task end bringing 560 helper writes (past the
-  // 500-row cap, ~1 ms a new row there) folds in loop turns, then the parent's own Edit of one of them; the rows, the cards and every
-  // message's place are the UNPACED fold's (a copy with the pacing off); the paced fold answered the conversion a promise, the copy none
-  const DH = CWD + '/heavy/', HW = 560;
+  // (h) THE REBUILD'S FOLD, PACED (B-299b, the member after A6 — 主开发 r604 / r648 / r751): ONE Task end bringing 1 200 helper writes
+  // (700 past the 500-row cap, ~1 ms a new row there: far over the 20 ms line) folds in loop turns, then the parent's own Edit of one
+  // of them. THE LOOP GETS ITS TURNS — counted, not timed (a fast leg judges no wall clock): an immediate that re-arms itself counts the
+  // turns that ran WHILE that record folded; CONTROL a copy with the yield removed (the async wrapper kept) ⇒ 0 turns. The rows, the cards
+  // and every message's place = the UNPACED fold's (a copy with the pacing off), which answered the conversion no promise.
+  const DH = CWD + '/heavy/', HW = 1200;
   fs.writeFileSync(path.join(SUB, 'agent-a16.jsonl'), Array.from({ length: HW }, (_, i) => JSON.stringify(side('a16', `toolu_H16_${i}`, 'Write', { file_path: DH + `f${i}.md`, content: 'x' }, 2))).join('\n') + '\n');
   fs.writeFileSync(path.join(SUB, 'agent-a16.meta.json'), JSON.stringify({ agentType: 'general-purpose', description: 'Heavy writer', toolUseId: 'toolu_T16' }));
-  const TH = [agentUse('toolu_T16', 'Heavy writer', 80), ends('toolu_T16', 'a16', 81), use('toolu_E16', 'Edit', { file_path: DH + 'f559.md', old_string: 'x', new_string: 'y' }, 82)];
+  const TH = [agentUse('toolu_T16', 'Heavy writer', 80), ends('toolu_T16', 'a16', 81), use('toolu_E16', 'Edit', { file_path: DH + `f${HW - 1}.md`, old_string: 'x', new_string: 'y' }, 82)];
   const MWP = require(path.join(REPO, 'src/message-window.js')).MessageWindow.prototype, realConvert = MWP.convertHistoryAsync;
-  let thenables = 0;
-  MWP.convertHistoryAsync = function (records, opts = {}) { const br = opts && opts.beforeRecord; return realConvert.call(this, records, br ? { ...opts, beforeRecord: (r) => { const p = br(r); if (p && typeof p.then === 'function') thenables++; return p; } } : opts); };
+  let thenables = 0, turns = 0, foldTurns = [];
+  MWP.convertHistoryAsync = function (records, opts = {}) {
+    const br = opts && opts.beforeRecord;
+    return realConvert.call(this, records, br ? { ...opts, beforeRecord: (r) => { const p = br(r); if (p && typeof p.then === 'function') { thenables++; const at0 = turns; return p.then((v) => { foldTurns.push(turns - at0); return v; }); } return p; } } : opts);
+  };
+  const counting = async (run) => { let on = true; thenables = 0; foldTurns = []; const spin = () => { if (!on) return; turns++; setImmediate(spin); }; setImmediate(spin); try { await run(); } finally { on = false; } return { thenables, turns: foldTurns.reduce((a, b) => a + b, 0) }; };
   const factsOf = (sx) => ({ rows: JSON.stringify(Object.values(rows(sx)).sort((x, y) => String(x.key).localeCompare(String(y.key)))), order: sx._normalizer.messages.map((m) => m.id).join(), cards: sx._normalizer.messages.filter((m) => m.noticeKind === 'artifact').length });
-  let paced = null, unpaced = null, tPaced = -1, tUnpaced = -1;
+  const NSRC = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8');
+  const copyOf = (anchor, to, name, tag) => { const C2 = M.load('src/normalizers.js', anchored(NSRC, anchor, to, name), tag); C2.setArtifactHelperSource(REG.helperOps, REG.helperPrefetch); return C2; };
+  let paced = null, unpaced = null, cP = null, cU = null, cY = null;
   try {
-    const RP = mk('BH', { _normalizer: null, _artifacts: null }); thenables = 0; await N.rebuildHistory(RP, 'BH', TH); tPaced = thenables; paced = factsOf(RP);
-    const MU = M.load('src/normalizers.js', anchored(fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf8'), 'const DERIVE_PACED = 64,', 'const DERIVE_PACED = Infinity,', 'the derivation unpaced'), 'unpaced');
-    MU.setArtifactHelperSource(REG.helperOps, REG.helperPrefetch);
-    const RU = mk('BH', { _normalizer: null, _artifacts: null }); thenables = 0; await MU.rebuildHistory(RU, 'BH', TH); tUnpaced = thenables; unpaced = factsOf(RU);
+    const RP = mk('BH', { _normalizer: null, _artifacts: null }); cP = await counting(() => N.rebuildHistory(RP, 'BH', TH)); paced = factsOf(RP);
+    const MU = copyOf('const DERIVE_PACED = 64,', 'const DERIVE_PACED = Infinity,', 'the derivation unpaced', 'unpaced');
+    const RU = mk('BH', { _normalizer: null, _artifacts: null }); cU = await counting(() => MU.rebuildHistory(RU, 'BH', TH)); unpaced = factsOf(RU);
+    const MY = copyOf('if (Date.now() - t0 >= DERIVE_TURN_MS) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); }', /* stale-pins: kept — the control's PLANT (the yield removed), not a pin */ 'if (Date.now() - t0 >= DERIVE_TURN_MS) { t0 = Date.now(); }', 'the paced fold without its yield', 'noyield');
+    const RY = mk('BH', { _normalizer: null, _artifacts: null }); cY = await counting(() => MY.rebuildHistory(RY, 'BH', TH));
   } finally { MWP.convertHistoryAsync = realConvert; }
   const heavyRows = paced ? JSON.parse(paced.rows) : [];
-  ok(tPaced >= 1 && tUnpaced === 0 && paced.rows === unpaced.rows && paced.order === unpaced.order && heavyRows.length === 500 && heavyRows.some((r) => r.path === DH + 'f559.md' && r.writes === 1 && r.edits === 1 && r.lastOp === 'edit'),
-    'a rebuild of ONE end bringing 560 helper writes folds them PACED (it answered the conversion a promise; CONTROL the unpaced copy none): every row field, every card and every message\'s place = the unpaced fold\'s — 500 rows (the cap), the parent\'s later Edit on its row',
-    { thenables: { paced: tPaced, unpaced: tUnpaced }, rows: heavyRows.length, cards: paced && paced.cards, sameRows: paced && unpaced && paced.rows === unpaced.rows, sameOrder: paced && unpaced && paced.order === unpaced.order });
+  ok(cP.thenables === 1 && cP.turns >= 3 && cY.thenables === 1 && cY.turns === 0 && cU.thenables === 0,
+    'a rebuild of ONE end bringing 1 200 helper writes folds them PACED: the loop got turns while that record folded (counted); CONTROL the yield removed ⇒ 0 turns (the async wrapper alone holds the loop), the pacing off ⇒ no promise', { paced: cP, noYield: cY, unpaced: cU });
+  ok(paced.rows === unpaced.rows && paced.order === unpaced.order && heavyRows.length === 500 && heavyRows.some((r) => r.path === DH + `f${HW - 1}.md` && r.writes === 1 && r.edits === 1 && r.lastOp === 'edit'),
+    '…and every row field, every card and every message\'s place = the unpaced fold\'s — 500 rows (the cap), the parent\'s later Edit on its row', { rows: heavyRows.length, cards: paced.cards, sameRows: paced.rows === unpaced.rows, sameOrder: paced.order === unpaced.order });
+
+  // (i) 主开发 r751: a fold that THROWS midway is SAID — one journal line naming the record it was folding — and the conversion goes on
+  fs.writeFileSync(path.join(SUB, 'agent-a17.jsonl'), Array.from({ length: 100 }, (_, i) => JSON.stringify(side('a17', `toolu_H17_${i}`, 'Write', { file_path: CWD + `/broken/${i === 70 ? 'boom' : 'f' + i}.md`, content: 'x' }, 2))).join('\n') + '\n');
+  fs.writeFileSync(path.join(SUB, 'agent-a17.meta.json'), JSON.stringify({ agentType: 'general-purpose', description: 'Broken writer', toolUseId: 'toolu_T17' }));
+  const TE = [agentUse('toolu_T17', 'Broken writer', 90), ends('toolu_T17', 'a17', 91), use('toolu_E17', 'Write', { file_path: CWD + '/broken/after.md', content: 'z' }, 92)];
+  const MBR = copyOf('  function applyOp(raw, o) {\n', "  function applyOp(raw, o) {\n    if (String(o.path || '').endsWith('/boom.md')) throw new Error('planted fold error');\n", 'a fold that throws', 'foldthrows');
+  const errsI = [], realErrI = console.error; console.error = (...x) => errsI.push(x.join(' '));
+  const RE = mk('BE', { _normalizer: null, _artifacts: null });
+  try { await MBR.rebuildHistory(RE, 'BE', TE); } finally { console.error = realErrI; }
+  const saidI = errsI.filter((m) => /the step before a record failed during history rebuild/.test(m));
+  ok(saidI.length === 1 && saidI[0].includes('rtoolu_T17') && saidI[0].includes('planted fold error') && rows(RE)[':' + CWD + '/broken/f0.md'] && !rows(RE)[':' + CWD + '/broken/f99.md'] && rows(RE)[':' + CWD + '/broken/after.md'],
+    'a paced fold that throws midway: ONE journal line naming the record it was folding (its uuid) and why; the ops before it stand, its later ones are lost, the NEXT record still folds', { said: saidI, rows: Object.keys(rows(RE)).length });
 }
 console.log(`\n${fail ? fail + ' FAILED' : 'ALL PASS'} — ${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

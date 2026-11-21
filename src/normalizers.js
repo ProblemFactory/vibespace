@@ -390,9 +390,11 @@ function artifactDeriver(mm, { artifactsOf, cwd = '', host = '', helper = null, 
     if (raw && (raw.parent_tool_use_id || raw.isSidechain)) ops = []; // a helper's own record: the helper door folds it at the Task's end
     if (helper && artifactHelperSource && raw) { try { ops = ops.concat(artifactHelperSource(who, raw, hstate, read) || []); } catch { } }
     ops = AF.quotedOps(ops, quoted); // r10: a tray answer's quote is the agent's only when it quotes the conversation's ask (no source: nobody's)
-    if (ops.length <= DERIVE_PACED) { for (const o of ops) applyOp(raw, o); return null; }
-    return (async () => { let t0 = Date.now(); for (const o of ops) { if (Date.now() - t0 >= DERIVE_TURN_MS) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); } applyOp(raw, o); } })();
+    if (ops.length <= DERIVE_PACED) { try { for (const o of ops) applyOp(raw, o); } catch (e) { throw foldError(e, raw); } return null; }
+    return (async () => { try { let t0 = Date.now(); for (const o of ops) { if (Date.now() - t0 >= DERIVE_TURN_MS) { await new Promise((r) => setImmediate(r)); t0 = Date.now(); } applyOp(raw, o); } } catch (e) { throw foldError(e, raw); } })();
   };
+  // a fold that throws names the record it was folding (the conversion's journal line says it — 主开发 r751)
+  const foldError = (e, raw) => { if (e && typeof e === 'object' && !e.record) { try { e.record = raw; } catch { } } return e; };
   function applyOp(raw, o) {
     const r = AF.apply(rows, { host, cwd, ...o, at: recordAt(raw), by: AF.opAuthor(o) }); // the person's own page link stays theirs (lane artifacts-by-intent)
     if (r.skipped || !r.row) return;
@@ -488,7 +490,7 @@ async function convertWithCards(mm, records, cards, opts = {}) {
   if (!due.length && !derive) return mm.convertHistoryAsync(records, rest);
   let i = 0;
   const placeDue = (raw) => { const at = recordAt(raw); if (!at) return; while (i < due.length && cardPlaceAt(due[i]) <= at) placeAnyCard(mm, due[i++]); };
-  const beforeRecord = (raw) => { const p = derive ? derive.before(raw) : null; if (p) return p.then(() => placeDue(raw)); placeDue(raw); return null; }; // a paced fold first, the due cards after it
+  const beforeRecord = (raw) => { const p = derive ? derive.before(raw) : null; if (p) return p.then(() => placeDue(raw), (e) => { placeDue(raw); throw e; }); placeDue(raw); return null; }; // a paced fold first, the due cards after it (a fold that failed too)
   if (derive) await derive.prefetch(records);
   await mm.convertHistoryAsync(records, { ...rest, beforeRecord });
   if (derive) mm.derivedArtifacts = await derive.end();
