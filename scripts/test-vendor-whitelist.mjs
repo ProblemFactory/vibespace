@@ -79,6 +79,11 @@ for (const rel of trackedFiles(REPO, 'data/bin')) {
 // copy or a scratch file is always read from disk.
 const SRC_TEXT = new Map();
 const readSrc = (f) => { let t = SRC_TEXT.get(f); if (t === undefined) { try { t = fs.readFileSync(f, 'utf8'); } catch (e) { t = e; } SRC_TEXT.set(f, t); } if (t instanceof Error) throw t; return t; };
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — 5c and 5d's own scope (src/ minus every public/ folder, .js) is
+// LISTED once (three passes walked it afresh), and every whole-tree pass reads its text through readSrc above (four passes
+// bypassed it: 5c's users, §10's read census, §14's others, §15's texts0). A mutant copy is still read from disk.
+const SRC_LISTS = new Map();
+const srcListedNoPublic = (dir) => { if (!SRC_LISTS.has(dir)) { const walkNP = (d0) => fs.readdirSync(path.join(REPO, d0), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : walkNP(path.join(d0, d.name))) : /\.js$/.test(d.name) ? [path.join(d0, d.name)] : []); SRC_LISTS.set(dir, walkNP(dir)); } return SRC_LISTS.get(dir); };
 
 // ── 1+2: request constructions near a vendor string, per file ──
 // A "construction" = a vendor endpoint within ±4 lines of a request primitive.
@@ -606,7 +611,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       // the paired machine's fence; a wait whose conversation is gone
       /return l === null \? true : l\.some\(\(s\) => s && s\._isStreaming === true\);/, /if \(steady < paceMs\)/, /door\.stoppedWhy\(key\)/, /if \(session\.host\) return null;/, /if \(!l\.includes\(w\.session\)\) return null;/] },
   };
-  const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
+  const srcFiles = srcListedNoPublic;   // the scope listed once a run (r1563)
   const strip = (t) => t.replace(/^\s*(\/\/|\*).*$/gm, '');
   const callsIn = (t) => (strip(t).match(/\b(?:usageDoor|door)\.read\(/g) || []).length;
   const found = {};
@@ -640,7 +645,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
   const armLaw = (a) => { const c = strip(a);
     return (c.match(/after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnEnd\(session, msg\)/.test(branch(c, 'prompt_end'))
       && (c.match(/\bonTurnEnd\(/g) || []).length === 1 && (c.match(/after-turn-read\.js'\)\.onTurnStart\(session, msg\)/g) || []).length === 1 && /after-turn-read\.js'\)\.onTurnStart\(session, msg\)/.test(branch(c, 'prompt_start')); };
-  const users = [...srcFiles('src'), 'server.js'].filter((f) => f !== 'src/server/after-turn-read.js' && /after-turn-read\.js/.test(strip(fs.readFileSync(path.join(REPO, f), 'utf-8')))).sort();
+  const users = [...srcFiles('src'), 'server.js'].filter((f) => f !== 'src/server/after-turn-read.js' && /after-turn-read\.js/.test(strip(readSrc(path.join(REPO, f))))).sort();
   ok(armLaw(acp) && JSON.stringify(users) === JSON.stringify(['src/server/account-usage-routes.js', 'src/server/stdout/acp-events.js']),
     '5c: the after-turn read is ARMED at a turn\'s end alone — the consumer\'s prompt_end branch (and cancelled by prompt_start); no other file reaches the road but the hub\'s configure', JSON.stringify({ arm: armLaw(acp), users }));
   // CONTROLS: a third caller, a timer, a session start, an idle tick and a restart catch-up, planted, are RED by the same reads
@@ -666,7 +671,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
 // cliDoor minting before its one ask, mounted for the OPENING of a model menu and the explicit «Refresh from …» row (POST,
 // never a GET); `modelsReport` read by the door alone; the door's timers its child's two, no setInterval; the row bounded.
 {
-  const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? (d.name === 'public' ? [] : srcFiles(path.join(dir, d.name))) : /\.js$/.test(d.name) ? [path.join(dir, d.name)] : []);
+  const srcFiles = srcListedNoPublic;   // the scope listed once a run (r1563)
   const strip = (t) => t.replace(/^\s*(\/\/|\*).*$/gm, '');
   const callsIn = (t) => (strip(t).match(/\bmodelsDoor\.ask\(/g) || []).length;
   const mintsIn = (t) => (strip(t).match(/\bmodelsMint\b/g) || []).length;
@@ -1345,7 +1350,7 @@ ok(/get_usage/.test(adapter) && !VENDOR.test(adapter), 'claude-code adapter: get
       'src/codex-reset-helper.js': { n: 2, why: 'the helper\'s read-first (a person\'s press with no conversation to carry it) · its post-consume read' },
     };
     const hitsR = {};
-    for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; let t = ''; try { t = strip8(fs.readFileSync(f, 'utf8')); } catch { continue; } const n = (t.match(READ) || []).length; if (n) hitsR[rel] = n; }
+    for (const f of files) { const rel = path.relative(REPO, f); if (rel.startsWith('data/bin/vibespace-agentd')) continue; let t = ''; try { t = strip8(readSrc(f)); } catch { continue; } const n = (t.match(READ) || []).length; if (n) hitsR[rel] = n; }
     ok(JSON.stringify(Object.keys(hitsR).sort()) === JSON.stringify(Object.keys(ALLOW_READ).sort()) && Object.entries(ALLOW_READ).every(([rel, r]) => hitsR[rel] === r.n), `§10 READ CENSUS (verify r9 ⑥): the account/rateLimits/read request sites are exactly the allowlisted rows, by file and count (${JSON.stringify(hitsR)})`, JSON.stringify(hitsR));
     const wrapperRaw = fs.readFileSync(path.join(REPO, 'data/bin/codex-chat-wrapper.js'), 'utf8'), wrapperT = strip8(wrapperRaw);
     const rc = wrapperT.indexOf("msg.type === 'codex-reset-credit')"), rf = wrapperT.indexOf('if (msg.readFirst === true) {', rc), rd = wrapperT.indexOf("request('account/rateLimits/read'", rf), go = wrapperT.indexOf('resetCreditGoWaiters.set(idempotencyKey', rd), cons = wrapperT.indexOf("request('account/rateLimitResetCredit/consume'", go);
@@ -1606,7 +1611,7 @@ console.log('§14 the Channels raw API: ONE fetch site, the host table, the gran
   const reach = declared.flatMap(({ who, row }) => [...row.hosts, ...(row.refresh ? [new URL(row.refresh).host] : [])].map((h) => `${who}:${h}`));
   const hostLit = /['"`](https?:\/\/)?[a-z0-9-]+(\.[a-z0-9-]+)*\.(com|cn|net|org|io|ai|dev|app)\b/i;
   ok(declared.length >= 4 && !reach.some((x) => /anthropic|claude\.ai/i.test(x)) && !/anthropic|claude\.ai/i.test(fence + src0) && !hostLit.test(fence) && !hostLit.test(src0), `§14 the hosts are the DECLARED rows' (${declared.map((d) => d.who).join(', ')}) — no Anthropic endpoint among them, and the fence + orchestrator hold no host literal`, reach.join(' '));
-  const others = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${f}`).filter((f) => /\.js$/.test(f) && f !== rel && /\brawApi\b/.test(fs.readFileSync(path.join(REPO, f), 'utf8')) && /\bvendorFetch\(/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  const others = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${f}`).filter((f) => /\.js$/.test(f) && f !== rel && /\brawApi\b/.test(readSrc(path.join(REPO, f))) && /\bvendorFetch\(/.test(readSrc(path.join(REPO, f))));
   ok(others.length === 0, '§14 no other file calls the raw API\'s vendorFetch', others.join(', '));
   const cut = (a, b) => (src0.split(a).length === 2 ? src0.replace(a, b) : null);
   const ctl = [
@@ -1639,7 +1644,7 @@ console.log('§15 the listed-provider refresh: a person\'s press · the vault ·
   const MOD = 'src/server/provider-models.js', DOOR = 'src/routes/provider-models.js', WIRE = 'src/server/account-usage-routes.js';
   const strip = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '').replace(/([^:'"\\])\/\/[^'"\n]*$/gm, '$1');
   const TIMER = /\b(?:setTimeout|setInterval|setImmediate|cron|schedule)\s*\(/;
-  const texts0 = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), fs.readFileSync(f, 'utf-8')]; } catch { return [path.relative(REPO, f), '']; } }));
+  const texts0 = Object.fromEntries(files.map((f) => { try { return [path.relative(REPO, f), readSrc(f)]; } catch { return [path.relative(REPO, f), '']; } }));
   // → the census's findings (an empty list = green)
   const census15 = (texts) => {
     const bad = [];

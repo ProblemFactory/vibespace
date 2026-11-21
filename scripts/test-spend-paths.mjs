@@ -74,7 +74,17 @@ function editAnchor(text, from, to, file, mode = 'one') {
   if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(`ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`, false); }
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
-const read = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — every pass over the tracked server source (its census, the
+// passed loop, the guard texts, the press files, the computed set, §26's two loops, the late census) read every file from disk
+// again through an un-memoised read(), and the tracked list was asked of git six times. Now each text is read once (TEXT,
+// this suite's own memo: repo-relative path → { t } or { e }) and the list once (TRACKED). read() keeps its old meaning (a
+// failed read is ''); a census over a SCRATCH or mutant root still reads from disk (textAt); the pruneBudget leg keeps its own
+// scope (git grep over every tracked file) and reads its hits through the memo.
+const TEXT = new Map();
+const textOf = (f) => { let r = TEXT.get(f); if (!r) { try { r = { t: fs.readFileSync(path.join(REPO, f), 'utf8') }; } catch (e) { r = { e }; } TEXT.set(f, r); } return r; };
+const read = (f) => { const r = textOf(f); return r.e ? '' : r.t; };
+/** a file's text under `root`: the repo's through the memo (a failed read throws again), any other root's from disk */
+const textAt = (root, f) => { if (root !== REPO) return fs.readFileSync(path.join(root, f), 'utf8'); const r = textOf(f); if (r.e) throw r.e; return r.t; };
 const cleanup = [];
 process.on('exit', () => { for (const d of cleanup) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } } });
 const tmpdir = (p) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), p)); cleanup.push(d); return d; };
@@ -548,7 +558,7 @@ function censusOver(root, files) {
   const hits = [];
   for (const f of files) {
     let src = '';
-    try { src = fs.readFileSync(path.join(root, f), 'utf8'); } catch { continue; }
+    try { src = textAt(root, f); } catch { continue; }
     const code = stripLineComments(src);
     const S = gateScopes(code);
     for (const p of PRIMITIVES) {
@@ -564,7 +574,7 @@ function censusOver(root, files) {
 /** The RETIRED, file-granular verdict — kept as a live negative control so the
  *  blind spot r3 closed can be demonstrated rather than described. */
 function fileGranularGated(root, f) {
-  try { return new RegExp(GATED_RE.source).test(fs.readFileSync(path.join(root, f), 'utf8')); } catch { return false; }
+  try { return new RegExp(GATED_RE.source).test(textAt(root, f)); } catch { return false; }
 }
 /** lane owner-press-attended r2 — a DEFERRED attended reason: declared in SPEND_REASONS before its ONE site exists (a
  *  census row, never prose). §2 lets it have no producer; §2b goes red the day its site exists while the row stands. */
@@ -694,10 +704,17 @@ function guardWiring(texts) {
   }
   return { takers, sites, unwired };
 }
+let TRACKED = null;   // r1563: git asked ONCE a run; a failure is kept and thrown again at every call (each caller keeps its own catch)
 function trackedServerSource() {
-  const out = execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'src', 'server.js', 'data/bin'], { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }).toString();
-  return out.split('\0').filter(Boolean)
-    .filter((f) => f.endsWith('.js') && !f.startsWith('src/lib/'));  // src/lib = the browser; it cannot spend
+  if (!TRACKED) {
+    try {
+      const out = execFileSync('git', ['-C', REPO, 'ls-files', '-z', '--', 'src', 'server.js', 'data/bin'], { env: GIT_ENV, maxBuffer: 64 * 1024 * 1024 }).toString();
+      TRACKED = { files: out.split('\0').filter(Boolean)
+        .filter((f) => f.endsWith('.js') && !f.startsWith('src/lib/')) };  // src/lib = the browser; it cannot spend
+    } catch (e) { TRACKED = { err: e }; }
+  }
+  if (TRACKED.err) throw TRACKED.err;
+  return TRACKED.files.slice();
 }
 {
   let files = [];
@@ -2748,7 +2765,7 @@ console.log('\n§5b a steered notification opens no turn, so it spends no budget
       const KEEP = new Set(['LOAD_RETENTION', 'A.LOAD_RETENTION']);
       const calls = [], bad = [];
       for (const rel of scanned) {
-        let src; try { src = fs.readFileSync(path.join(REPO, rel), 'utf8'); } catch { continue; }
+        let src; { const r = textOf(rel); if (r.e) continue; src = r.t; }
         const re = /\bpruneBudget\b/g; let m;
         while ((m = re.exec(src))) {
           const at = m.index, after = src.slice(at + 'pruneBudget'.length);

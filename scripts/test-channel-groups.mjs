@@ -54,6 +54,11 @@ import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const waitUntil = async (pred, ms, what) => { for (let k = 0, n = Math.ceil(ms / 2); k <= n; k++) { if (pred()) return true; await new Promise((r) => setTimeout(r, 2)); } console.log(`  … waited ${ms} ms of turns for ${what} — it never came`); return null; };   // B-1217 member 17: bounded by a COUNT of turns, says what never came
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — §5's census (git's tracked list) and §B-ff04's resolver census
+// (a walk of the disk) keep their own lists but share ONE read of every file, this suite's own memo (repo-relative path → text).
+// A read that fails throws as before and is not kept; a scratch copy is never read through it.
+const TEXTS = new Map();
+const textOf = (rel) => { let t = TEXTS.get(rel); if (t === undefined) TEXTS.set(rel, t = fs.readFileSync(path.join(REPO, rel), 'utf-8')); return t; };
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
 // B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
@@ -1230,7 +1235,7 @@ console.log('§3h the owner routes: a consent echo, and paced when auth is OFF (
   r = await api(`/api/channel-groups/${gid}/invite`, { members: [C], expectWakes: 1 });
   ok(r.status === 200 && r.body.woke.length === 1, '…with expectWakes:1 the invitee is added and woken');
   await new Promise((resolve) => srv.close(resolve));
-  const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  const read = textOf;   // the memo (r1563)
   ok(/authEnabled: \(\) => auth\.enabled/.test(read('server.js').split('channels-wiring.js').slice(1).join('')) && /authEnabled/.test(read('src/server/channels-wiring.js')), 'PIN: server.js hands the channels wiring the auth switch, the wiring hands it to the routes');
   ok(/expectWakes: /.test(read('src/lib/channel-window.js')) && /expectWakes: /.test(read('src/lib/channel-group-dialogs.js')), 'PIN: the panel sends the count it previewed (composer + New group / Invite dialog)');
   f.close();
@@ -2193,7 +2198,7 @@ console.log('§5 censuses');
   const WRITER = /['"`/]groups\.json/;   // data/channels/groups.json — NOT task-groups.json
   const judge = (list) => list.filter(({ f, src }) => WRITER.test(src.replace(/^\s*(\*|\/\/).*$/gm, '')) && f !== 'src/channel-store.js');
   if (files) {
-    const list = files.map((f) => { try { return { f, src: fs.readFileSync(path.join(REPO, f), 'utf-8') }; } catch { return { f, src: '' }; } });
+    const list = files.map((f) => { try { return { f, src: textOf(f) }; } catch { return { f, src: '' }; } });
     const strays = judge(list).map((x) => x.f);
     ok(list.length > 50, `the census walked ${list.length} tracked files`);
     ok(strays.length === 0, 'groups.json is named (built as a path) ONLY by src/channel-store.js — every other writer goes through its door', strays.join(', '));
@@ -2265,7 +2270,7 @@ console.log('§6 the CLI (data/bin/vibespace-msg) against a STUB server');
 // wake is by id. CENSUS: no wake / delivery path reads an @ by name text (grep-derived, a planted control goes red).
 console.log('§B-ff04 an @ is structured end to end — an id behind it from the send to the delivery');
 {
-  const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  const read = textOf;   // the memo (r1563)
   const f = fixture('ff04');
   const made = await f.eng.create({ by: G.OWNER, name: 'at-structure', members: [A, B, C], quiet: true });
   const gid = made.group.id;
@@ -2343,7 +2348,7 @@ console.log('§B-ff04 an @ is structured end to end — an id behind it from the
 // report / pending strip / unread hold nothing else; nothing else is queued (the marker moves past it) ──
 console.log('§B-a354 mention = only what @mentions you reaches you (wake + delivery)');
 {
-  const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  const read = textOf;   // the memo (r1563)
   const f = fixture('a354');
   const made = await f.eng.create({ by: G.OWNER, name: 'at-style', members: [A, B, C], quiet: true });
   const gid = made.group.id;
@@ -2389,7 +2394,7 @@ console.log('§B-a354 mention = only what @mentions you reaches you (wake + deli
 // U+0130, lower-cases to two code units: the lane head refused "İzmir @beta" and silently dropped "İİ @beta") ──
 console.log('§verify r1 — `later` names only who is handed it; the @ scan keeps its places');
 {
-  const read = (p) => fs.readFileSync(path.join(REPO, p), 'utf-8');
+  const read = textOf;   // the memo (r1563)
   const absReq = (src, dir) => src.replace(/require\('(\.{1,2}\/[^']+)'\)/g, (_, rel) => 'require(' + JSON.stringify(path.join(dir, rel)) + ')');
   const laterOf = async (ge, name) => {
     const f = fixture(name, { ge });

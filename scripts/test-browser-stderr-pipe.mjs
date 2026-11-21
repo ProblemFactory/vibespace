@@ -29,7 +29,11 @@ ok(BE.withQuietLogging('--a\n--b') === '--a\n--b\n--disable-logging\n--log-level
 for (const theirs of ['--enable-logging=stderr', '--v=1', '--log-level=0', '--vmodule=*=2']) ok(BE.withQuietLogging(`--no-sandbox,${theirs}`) === `--no-sandbox,${theirs}`, `the user's own ${theirs} wins (untouched — the automationFlag precedent)`);
 // THE CENSUS: no launch switch VibeSpace composes turns Chrome's logging ON — a source literal "--enable-logging" lives only in the module that names the rule
 const ENABLE_RE = /['"`][^'"`\n]*--enable-logging/;
-function enableCensus(files) { return files.filter((f) => ENABLE_RE.test(fs.readFileSync(f, 'utf8').split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n'))).map((f) => path.relative(ROOT, f)); }
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — the enable census and ③'s launch roads each read every src file
+// from disk; now one memo of this suite's own (absolute path → text). The planted control's scratch file is read once, fresh.
+const TEXTS = new Map();
+const textOf = (f) => { let t = TEXTS.get(f); if (t === undefined) TEXTS.set(f, t = fs.readFileSync(f, 'utf8')); return t; };
+function enableCensus(files) { return files.filter((f) => ENABLE_RE.test(textOf(f).split('\n').filter((l) => !/^\s*(\/\/|\*)/.test(l)).join('\n'))).map((f) => path.relative(ROOT, f)); }
 const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
 const srcFiles = walk(path.join(ROOT, 'src')).filter((f) => !/\/lib\/i18n-|\/vendor\//.test(f));
 const hits = enableCensus(srcFiles);
@@ -59,9 +63,9 @@ function stdioCensus(src) {
   return out;
 }
 const ours = fs.readdirSync(path.join(ROOT, 'src/server')).filter((n) => /^browser-.*\.js$/.test(n)).map((n) => path.join(ROOT, 'src/server', n)).concat([path.join(ROOT, 'src/browser-stderr.js'), path.join(ROOT, 'src/browser-facts.js')]);
-const unread = ours.flatMap((f) => stdioCensus(fs.readFileSync(f, 'utf8')).map((c) => `${path.relative(ROOT, f)}: ${c}`));
+const unread = ours.flatMap((f) => stdioCensus(textOf(f)).map((c) => `${path.relative(ROOT, f)}: ${c}`));
 ok(unread.length === 0, `every spawn in ${ours.length} files (src/server/browser-*.js, browser-facts.js, browser-stderr.js) has a reader or no pipe`, unread);
-const spawnCount = ours.reduce((n, f) => n + (fs.readFileSync(f, 'utf8').match(/\bspawn\(/g) || []).length, 0);
+const spawnCount = ours.reduce((n, f) => n + (textOf(f).match(/\bspawn\(/g) || []).length, 0);
 ok(spawnCount >= 2, `the census sees the spawns it judges (${spawnCount} ≥ 2: browser-cli-install + browser-installs, both a file fd)`);
 ok(stdioCensus("const c = spawn('the-driver', ['open'], { stdio: ['ignore', 'pipe', 'pipe'], detached: true });\nc.unref();").length === 1, 'CONTROL: a planted spawn with stdio pipes and no reader is RED');
 ok(stdioCensus("const c = spawn('the-driver', ['open']);").length === 1, 'CONTROL: a planted spawn with NO stdio option (three pipes) and no reader is RED');
@@ -97,7 +101,7 @@ const cmpV = (a, b) => { const x = String(a).split('.').map(Number), y = String(
 ok(BE.FIXED_IN === '0.38.2' && cmpV(VERBS.AGENT_BROWSER_CLI.table, BE.FIXED_IN) >= 0, `the pinned driver (${VERBS.AGENT_BROWSER_CLI.table}) is at least the version that drains Chrome's stderr (${BE.FIXED_IN})`);
 const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 ok(JSON.stringify(pkg).includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`) && fs.readFileSync(path.join(ROOT, 'deploy/docker/Dockerfile'), 'utf8').includes(`agent-browser@${VERBS.AGENT_BROWSER_CLI.table}`), 'package.json\'s install line and the Dockerfile name the same pin');
-const KS = fs.readFileSync(path.join(ROOT, 'src/server/browser-keeper.js'), 'utf8');
+const KS = textOf(path.join(ROOT, 'src/server/browser-keeper.js'));
 // B-1789 cure (主开发 11:12Z — «THE SWITCHES LIVE WHERE EVERY LAUNCH ROAD PASSES, AND A CENSUS DERIVES THE ROADS»): a LAUNCH ROAD is
 // any src code that marks a launch (withKeeperMark / keeperMarkArg — every VibeSpace launch carries its mark, lane H verify r4),
 // quiets one (withQuietLogging) or composes one (launchTail / generatedConfig / generatedConfigParts) — found HERE by what it
@@ -139,7 +143,7 @@ function launchRoads(files) {
   }
   return { roads, bad };
 }
-const srcTexts = srcFiles.map((f) => ({ rel: path.relative(ROOT, f), text: fs.readFileSync(f, 'utf8') }));
+const srcTexts = srcFiles.map((f) => ({ rel: path.relative(ROOT, f), text: textOf(f) }));
 const LR = launchRoads(srcTexts);
 const roadFiles = [...new Set(LR.roads.map((r) => r.where.split(':')[0]))].sort();
 ok(LR.bad.length === 0 && LR.roads.length >= 10 && ['src/browser-profiles.js', 'src/server/browser-env.js', 'src/server/browser-keeper.js'].every((f) => roadFiles.includes(f)) && LR.roads.some((r) => /^argv road/.test(r.call)),
@@ -150,7 +154,7 @@ ok(plant("  cfg.args = B.withKeeperMark(cfg.args, key);").length === 1, 'CONTROL
 ok(plant("  const argv = [dir, B.keeperMarkArg(id), url];").length === 1, 'CONTROL: a planted argv with a hand-made mark and no QUIET_LOG_ARGS is named — RED');
 ok(plant("  cfg.args = B.launchTail(cfg.args, key, { quiet: false });").length === 1 && plant("  log.warn(`it carries ${B.keeperMarkArg(id)}`); cfg.args = B.launchTail(cfg.args, key, { quiet: quietLogFor(kind, key) });").length === 0,
   'CONTROL: a planted road that turns the switches off without its stamp is named — RED (a sentence naming the mark and a stamped opt-out are not)');
-{ const BP = fs.readFileSync(path.join(ROOT, 'src/browser-profiles.js'), 'utf8'); const i = BP.indexOf('\nfunction launchTail(');
+{ const BP = textOf(path.join(ROOT, 'src/browser-profiles.js')); const i = BP.indexOf('\nfunction launchTail(');
   ok(launchRoads([{ rel: 'src/browser-profiles.js', text: i < 0 ? BP : BP.slice(0, i) + '\nfunction launchTailRenamed(' + BP.slice(i + '\nfunction launchTail('.length) }]).bad.some((b) => /not in the composer/.test(b.why)), 'CONTROL: the composer\'s tail gone (renamed) ⇒ the census fails BY NAME, never vacuously green'); }
 // THE TAIL itself (PURE): the switches, then the mark — last
 const BP0 = require('../src/browser-profiles.js');
@@ -165,7 +169,7 @@ const uw = BS.unresponsiveWords({ since: Date.UTC(2026, 9, 10, 18, 32), label: '
 ok(uw.tooltip === fullK && uw.state === 'Not answering since 18:32', 'the panel row\'s words name the log pipe (state word unchanged)', uw);
 ok(/hung, not busy/.test(BS.unresponsiveWords({ since: 1, clock: '00:00' }).tooltip), 'no cause ⇒ the words as before');
 for (const lang of ['zh', 'ja']) { const tr = fs.readFileSync(path.join(ROOT, `src/lib/i18n-${lang}.js`), 'utf8'); ok(tr.includes(JSON.stringify(fullK) + ':'), `the ${lang} catalogue carries the new words`); }
-ok(/cause: r\.unresponsive\.cause \|\| null/.test(fs.readFileSync(path.join(ROOT, 'src/lib/browser-trace-view.js'), 'utf8')), 'the Browser panel\'s row passes the keeper\'s cause to the words');
+ok(/cause: r\.unresponsive\.cause \|\| null/.test(textOf(path.join(ROOT, 'src/lib/browser-trace-view.js'))), 'the Browser panel\'s row passes the keeper\'s cause to the words');
 
 fs.rmSync(S, { recursive: true, force: true });
 console.log(`\n${fail ? '✗' : '✓'} test-browser-stderr-pipe: ${pass} passed, ${fail} failed`);

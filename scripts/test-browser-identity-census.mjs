@@ -57,7 +57,13 @@ function editAnchor(text, from, to, file, mode = 'one') {
   if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
-const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — §②'s two walks of src/ (the raw doors' callers, the bindings
+// writer's callers) each listed every folder and read every file again; now each folder is listed once (DIRENTS) and each
+// file read once (TEXTS), this suite's own memos. A control's copy outside the tree is still read from disk (it bypasses read).
+const TEXTS = new Map();
+const read = (rel) => { let t = TEXTS.get(rel); if (t === undefined) TEXTS.set(rel, t = fs.readFileSync(path.join(REPO, rel), 'utf8')); return t; };
+const DIRENTS = new Map();
+const direntsOf = (d) => { let es = DIRENTS.get(d); if (es === undefined) DIRENTS.set(d, es = fs.readdirSync(path.join(REPO, d), { withFileTypes: true })); return es; };
 const stripComments = (src) => src.split('\n').map((l) => (/^\s*(\/\/|\*|\/\*)/.test(l) ? '' : l)).join('\n');
 
 const ROOT = scratch('browser-idcensus');
@@ -201,14 +207,14 @@ const KNOWN_CALLERS = [
   // the raw doors: reshapeStore / _reg are never called outside the keeper, the migrations and the suites
   const rawCallers = [];
   const RAW_READERS = { 'src/server/browser-trace.js': 'the recorder READS the registry (forget / adopt / orphans verdicts over leases + browsers + dirs) — never a write' };
-  const walkDir = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(e.name)) walkDir(rel); } else if (/\.(c|m)?js$/.test(e.name)) { const src = stripComments(read(rel)); if (/^src\/server\/(migrations|browser-keeper)\.js$/.test(rel)) continue; if (/\b(?:k|keeper|kp)\??\.reshapeStore\(/.test(src)) rawCallers.push(rel + ' (reshapeStore)'); if (/\b(?:k|keeper|kp)\??\._reg\(/.test(src) && (!RAW_READERS[rel] || /\breg\.(leases|pins|profiles|browsers)\s*(=[^=]|\.push\(|\.splice\()|\.owner\s*=[^=]/.test(src))) rawCallers.push(rel + ' (_reg)'); } } };
+  const walkDir = (d) => { for (const e of direntsOf(d)) { const rel = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(e.name)) walkDir(rel); } else if (/\.(c|m)?js$/.test(e.name)) { const src = stripComments(read(rel)); if (/^src\/server\/(migrations|browser-keeper)\.js$/.test(rel)) continue; if (/\b(?:k|keeper|kp)\??\.reshapeStore\(/.test(src)) rawCallers.push(rel + ' (reshapeStore)'); if (/\b(?:k|keeper|kp)\??\._reg\(/.test(src) && (!RAW_READERS[rel] || /\breg\.(leases|pins|profiles|browsers)\s*(=[^=]|\.push\(|\.splice\()|\.owner\s*=[^=]/.test(src))) rawCallers.push(rel + ' (_reg)'); } } };
   walkDir('src'); { const s0 = stripComments(read('server.js')); if (/\b(?:k|keeper)\??\.(reshapeStore|_reg)\(/.test(s0)) rawCallers.push('server.js'); }
   ok(!rawCallers.length, 'the keeper\'s raw doors: `reshapeStore` is called by the migrations only; `_reg` is read by the recorder alone (forget / adopt verdicts) and written by nobody in src/ + server.js', rawCallers);
   // the bindings writer: ONE caller (session-stdout's meta choke point) and its two refusals before the write
   const bsrc = stripComments(read('src/server/browser-bindings.js'));
   const rec = bsrc.slice(bsrc.indexOf('  function record(conversationId, key'), bsrc.indexOf('  function lookup(conversationId)'));
   const recCallers = [];
-  const walk2 = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(e.name)) walk2(rel); } else if (/\.js$/.test(e.name) && rel !== 'src/server/browser-bindings.js') { const src = stripComments(read(rel)); if (/\bb(?:indings)?\.record\(/.test(src) || /browserBindings\(\)\.record\(/.test(src)) recCallers.push(rel); } } };
+  const walk2 = (d) => { for (const e of direntsOf(d)) { const rel = path.join(d, e.name); if (e.isDirectory()) { if (!/node_modules|\.git/.test(e.name)) walk2(rel); } else if (/\.js$/.test(e.name) && rel !== 'src/server/browser-bindings.js') { const src = stripComments(read(rel)); if (/\bb(?:indings)?\.record\(/.test(src) || /browserBindings\(\)\.record\(/.test(src)) recCallers.push(rel); } } };
   walk2('src');
   ok(recCallers.length === 1 && recCallers[0] === 'src/server/session-stdout.js' && rec.indexOf('refuseMove(') < rec.indexOf('writeAll(all)') && rec.indexOf('refuseShare(') < rec.indexOf('writeAll(all)'), 'the bindings writer `record` has ONE caller (session-stdout\'s meta choke point) and refuses a moved binding (a fork never takes its parent\'s key) and a shared key BEFORE it writes', { recCallers });
   // the stream bridge: every target comes from streamTargetFor over the session's OWN attachment set — never a profile named freely

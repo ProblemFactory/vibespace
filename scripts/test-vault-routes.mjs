@@ -922,7 +922,10 @@ console.log('⑮ (lane vault-standing-request r11, MINOR 2) THE «谁可以用�
   const ONE_MEMBER = ['addMember', 'revoke', 'revokeWindow', 'pruneWindows', 'drop'];   // never judged: each moves the stamp
   const WRITE_RE = /\b(setRow|saveRow|rawSetRow|restoreRow|carryWildcards)\(|\.carry\(|\/api\/vault\/use-grants['"`]|\.(set|remove)\((U\.DOOR|['"]vault-use['"])/;   // + a grants-store write of the door anywhere but the one writer itself
   const wrFiles = (() => { const out = []; const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = `${d}/${e.name}`; if (e.isDirectory()) walk(r); else if (e.isFile()) out.push(r); } }; walk('src'); walk('data/bin'); return out.concat(['server.js']).sort(); })();
-  const wrText = (f) => { try { return fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { return ''; } };
+  // r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — the census and its two RED controls read every file of
+  // wrFiles through this suite's own memo (each read it from disk again); a control still plants its ONE file over it
+  const WR_TEXT = new Map();
+  const wrText = (f) => { let t = WR_TEXT.get(f); if (t === undefined) { try { t = fs.readFileSync(path.join(REPO, f), 'utf8'); } catch { t = ''; } WR_TEXT.set(f, t); } return t; };
   const censusOf = (textOf) => {
     const unnamed = [], noStamp = [], counts = new Map(WHOLE_ROW.map((w) => [w, 0]));
     for (const f of wrFiles) {

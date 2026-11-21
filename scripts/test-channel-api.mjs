@@ -52,8 +52,15 @@ function editAnchor(text, from, to, file, mode = 'one') {
   if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
-const SRC = fs.readFileSync(path.join(REPO, 'src/channel-api.js'), 'utf8');
-const OSRC = fs.readFileSync(path.join(REPO, 'src/server/channel-api.js'), 'utf8');
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — items 9 and 10 each listed src/ (recursive) and read every .js
+// file again; now src/'s .js files are listed once (srcJs) and every text read once, this suite's own memo (repo-relative path →
+// text). A mutant is still built from its ONE file's text; its copy lives outside the tree.
+const TEXTS = new Map();
+const textOf = (rel) => { let t = TEXTS.get(rel); if (t === undefined) TEXTS.set(rel, t = fs.readFileSync(path.join(REPO, rel), 'utf8')); return t; };
+let SRC_JS = null;
+const srcJs = () => SRC_JS || (SRC_JS = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => /\.js$/.test(f)));
+const SRC = textOf('src/channel-api.js');
+const OSRC = textOf('src/server/channel-api.js');
 const MUT = mutantCopies('channel-api', REPO);
 const mutate = (src, a, b) => { if (!src.includes(a)) throw new Error(`mutant anchor missing: ${a.slice(0, 80)}`); return src.replace(a, b); };
 
@@ -139,7 +146,7 @@ for (const r of ROWS) {
   ok(r.judge(F), r.name);
   let red;
   try {
-    if (r.file) { const L = MUT.load(r.file, mutate(fs.readFileSync(path.join(REPO, r.file), 'utf8'), r.mutant[0], r.mutant[1]), 'row'); red = !r.judge(F, { ...C, [r.cred]: { ...C[r.cred], api: L.API_ROW } }); }
+    if (r.file) { const L = MUT.load(r.file, mutate(textOf(r.file), r.mutant[0], r.mutant[1]), 'row'); red = !r.judge(F, { ...C, [r.cred]: { ...C[r.cred], api: L.API_ROW } }); }
     else { const M = MUT.load('src/channel-api.js', mutate(SRC, r.mutant[0], r.mutant[1]), 'row'); red = !r.judge(M); }
   } catch (e) { red = `threw: ${e.message}`; }
   ok(red === true, `CONTROL: ${r.name} — without its rule the row goes red`, red);
@@ -445,7 +452,7 @@ console.log('⑥ the declared row: census, the registry contract, a fake vendor 
   const eng0 = create({ dataDir: fs.mkdtempSync(path.join(tmpRoot, 'e-')), log: quiet, fetch: async () => { throw new Error('no network'); } });
   const mods = eng0.registry.list().map(({ kind }) => eng0.registry.get(kind));
   const files = fs.readdirSync(path.join(REPO, 'src/channels')).filter((f) => /\.js$/.test(f));
-  const bearerIn = (kind) => files.some((f) => { const t = fs.readFileSync(path.join(REPO, 'src/channels', f), 'utf8'); return new RegExp(`const KIND = '${kind}'`).test(t) && /\n\s+apiBearer: /.test(t); });
+  const bearerIn = (kind) => files.some((f) => { const t = textOf('src/channels/' + f); return new RegExp(`const KIND = '${kind}'`).test(t) && /\n\s+apiBearer: /.test(t); });
   const rows = mods.filter((m) => m.api);
   const bad = mods.filter((m) => !!m.api !== bearerIn(m.kind)).map((m) => m.kind);
   let invalid = null; try { for (const m of rows) CH.validateApi(m.kind, m.api); } catch (e) { invalid = e.message; }
@@ -666,7 +673,7 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
 
   // 9. THE CODES: the agent route maps both; the retired api_redirect_refused is gone from src/
   const ar = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
-  const retired = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).filter((f) => /\.js$/.test(f) && fs.readFileSync(path.join(REPO, 'src', f), 'utf8').includes('api_redirect_refused'));
+  const retired = srcJs().filter((f) => textOf('src/' + f).includes('api_redirect_refused'));
   ok(/api_redirect_unjudged: 502, api_redirect_loop: 502/.test(ar) && retired.length === 0, 'the agent route answers api_redirect_unjudged / api_redirect_loop as 502; api_redirect_refused is retired from src/', retired);
 
   // 10. THE REDIRECT POLICY CENSUS (grep-derived): every src/ server file that requires the fence is a raw-API file; each
@@ -675,8 +682,8 @@ console.log('⑦ the redirect rule (B-fc37): a vendor\'s 3xx target is judged be
   //     'manual' may appear in the file. Printed; a planted `redirect: 'follow'` and the policy put before the spread are RED.
   const strip = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (x) => x.replace(/[^\n]/g, ' ')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
   const callAt = (code, i) => { let d = 0; for (let k = code.indexOf('(', i); k < code.length; k++) { if (code[k] === '(') d++; else if (code[k] === ')' && --d === 0) return code.slice(i, k + 1); } return code.slice(i); };
-  const files = fs.readdirSync(path.join(REPO, 'src'), { recursive: true }).map((f) => `src/${f}`).filter((f) => /\.js$/.test(f) && !f.startsWith('src/lib/') && (f === 'src/channel-api.js' || /require\((['"])(\.\.?\/)+channel-api\.js\1\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8')))).sort();
-  const texts = Object.fromEntries(files.map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]));
+  const files = srcJs().map((f) => `src/${f}`).filter((f) => !f.startsWith('src/lib/') && (f === 'src/channel-api.js' || /require\((['"])(\.\.?\/)+channel-api\.js\1\)/.test(textOf(f)))).sort();
+  const texts = Object.fromEntries(files.map((f) => [f, textOf(f)]));
   const census = (tx) => {
     const rows = [], bad = [];
     for (const [rel, text] of Object.entries(tx)) {

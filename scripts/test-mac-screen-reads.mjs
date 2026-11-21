@@ -46,6 +46,12 @@ function walk(dir, out = []) {
   }
   return out;
 }
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — census() walked src/ and read every file from disk for the base
+// and for each of its six mutants and controls; now the walk and the texts are this suite's own memo (TREE), read at the first
+// census. A mutant still gives its ONE file over it (overrides: rel → text; null removes it; a new name adds it).
+let TREE = null;
+const tree = () => TREE || (TREE = new Map(walk('src').map((rel) => [rel, fs.readFileSync(path.join(REPO, rel), 'utf8')])));
+const textOf = (rel) => (tree().has(rel) ? tree().get(rel) : fs.readFileSync(path.join(REPO, rel), 'utf8'));
 /** The file's code with every comment blanked (offsets and newlines kept) — null when acorn cannot read it. */
 function codeOf(text) {
   const spans = [];
@@ -58,10 +64,10 @@ function codeOf(text) {
 const anyToken = new RegExp(TOKENS.map(([, re]) => re.source).join('|'));
 /** THE CENSUS over src/ (+ `overrides`: rel → text, a text of null removes the file). → { rows, problems } */
 function census(overrides = {}) {
-  const files = [...new Set([...walk('src'), ...Object.keys(overrides)])].sort();
+  const files = [...new Set([...tree().keys(), ...Object.keys(overrides)])].sort();
   const rows = [], problems = [];
   for (const rel of files) {
-    const text = Object.prototype.hasOwnProperty.call(overrides, rel) ? overrides[rel] : fs.readFileSync(path.join(REPO, rel), 'utf8');
+    const text = Object.prototype.hasOwnProperty.call(overrides, rel) ? overrides[rel] : tree().get(rel);
     if (text == null || !anyToken.test(text)) continue; // the prefilter: most files name none of them, even in a comment
     const code = codeOf(text);
     if (code == null) { problems.push(`${rel}: acorn cannot read it — the census cannot see its code`); continue; }
@@ -86,20 +92,20 @@ ok(base.rows.some((r) => r.rel === HELPER && r.kind === 'helper') && base.rows.f
 ok(!base.rows.some((r) => r.rel === 'src/machine-window.js' || r.rel.startsWith('src/agentd/') && r.rel !== HELPER), 'src/machine-window.js and the agent\'s own files read no screen (the window look, the screen table, the pin)', base.rows.map((r) => r.rel));
 
 console.log('§2 the reads live in the helper — moved, not lost');
-const helperText = fs.readFileSync(path.join(REPO, HELPER), 'utf8');
+const helperText = textOf(HELPER);
 const swift = fs.readFileSync(path.join(REPO, 'tools/vibespace-screen/vibespace-screen.swift'), 'utf8');
 ok(['CGWindowListCopyWindowInfo', 'CGDisplayBounds', 'NSScreen', 'SCShareableContent'].every((t) => helperText.includes(t) && swift.includes(t)), 'the helper (source + its bundled text) reads the window list, the displays and the shareable content');
 
 console.log('§3 MUTANTS — the census goes RED');
-const agentd = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
-const mw = fs.readFileSync(path.join(REPO, 'src/machine-window.js'), 'utf8');
+const agentd = textOf('src/agentd/agentd.js');
+const mw = textOf('src/machine-window.js');
 const m1 = census({ 'src/agentd/agentd.js': agentd + "\nconst peek = () => require('child_process').execFileSync('/usr/bin/osascript', ['-l', 'JavaScript', '-e', \"ObjC.import('CoreGraphics'); $.CGWindowListCopyWindowInfo(1, 0)\"]);\n" });
 ok(m1.problems.some((p) => p.startsWith('src/agentd/agentd.js:') && /CGWindowListCopyWindowInfo/.test(p)), 'a CGWindowList read added under src/agentd ⇒ RED (named, with its line)', m1.problems);
 const m2 = census({ 'src/machine-window.js': mw + "\nconst MAC_TRACK_JXA = [\"ObjC.import('Cocoa');\", 'const scr = $.NSScreen.mainScreen;'].join('\\n');\n" });
 ok(m2.problems.some((p) => p.startsWith('src/machine-window.js:') && /NSScreen/.test(p)), 'the old JXA look put back in src/machine-window.js ⇒ RED', m2.problems);
 const m3 = census({ 'src/agentd/window-peek.js': "'use strict';\nmodule.exports = (execFile) => execFile('/usr/sbin/screencapture', ['-x', 'shot.png']);\n" });
 ok(m3.problems.some((p) => p.startsWith('src/agentd/window-peek.js:') && /screencapture/.test(p)), 'a NEW src/ file running screencapture ⇒ RED (the walk is the tree — an uncommitted file is seen)', m3.problems);
-const m4 = census({ 'src/routes/files.js': fs.readFileSync(path.join(REPO, 'src/routes/files.js'), 'utf8') + "\nconst grab = 'screencapture -x';\n" });
+const m4 = census({ 'src/routes/files.js': textOf('src/routes/files.js') + "\nconst grab = 'screencapture -x';\n" });
 ok(m4.problems.some((p) => p.startsWith('src/routes/files.js:')), 'an ALLOW row allows only its own tokens: screencapture beside the clipboard\'s osascript ⇒ RED', m4.problems);
 const m5 = census({ 'src/routes/files.js': null });
 ok(m5.problems.some((p) => /an ALLOW row with nothing/.test(p)), 'an ALLOW row whose file no longer hits ⇒ RED (a stale row)', m5.problems);

@@ -45,7 +45,11 @@ function editAnchor(text, from, to, file, mode = 'one') {
   return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const read = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — the census and each of its six planted controls called TEXTS(),
+// which walked src/ again and read every file from disk; now the listing and every text are this suite's own memo. TEXTS()
+// still returns NEW objects (a plant writes into them); only the strings are shared. A missing file still throws (not kept).
+const TEXT = new Map();
+const read = (rel) => { if (!TEXT.has(rel)) TEXT.set(rel, fs.readFileSync(path.join(REPO, rel), 'utf8')); return TEXT.get(rel); };
 
 // ════════════════════════════════ ① THE CENSUS ════════════════════════════════
 /** The 2-space-indented methods of a class file: [{name, line, body}] (header to the next header). */
@@ -106,12 +110,13 @@ function census(T) {
   if (!/try \{ exitProxy\.onMachineUnpaired\(h\.id\); \} catch \{ \}\s*\n\s*hosts\.remove\(h\.id\);/.test(T.exitRoutes) || !/app\.delete\('\/api\/hosts\/:id'[^\n]*\n(?:\s*if \(hosts\.unreadWords && hosts\.unreadWords\(\)\) return res\.status\(503\)[^\n]*\n)?[^\n]*\n\s*await removeHost\(hosts\.get\(req\.params\.id\)\);/.test(T.exitRoutes)) v.push('exit-routes.js DELETE /api/hosts/:id (removeHost) does not call exitProxy.onMachineUnpaired before hosts.remove');
   return v;
 }
-const sessionFileList = () => {
+let SESSION_FILES = null;
+const sessionFileList = () => SESSION_FILES || (SESSION_FILES = (() => {
   const out = ['server.js'];
   const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) { if (r !== path.join('src', 'lib')) walk(r); } else if (e.name.endsWith('.js')) out.push(r); } };
   walk('src');
   return out;
-};
+})());
 const TEXTS = () => ({
   hosts: read('src/hosts.js'), tasks: read('src/task-groups.js'), server: read('server.js'), tgw: read('src/server/task-groups-wiring.js'), exit: read('src/exit-proxy.js'),
   dialPairing: read('src/server/dial-pairing.js'), exitRoutes: read('src/server/exit-routes.js'),

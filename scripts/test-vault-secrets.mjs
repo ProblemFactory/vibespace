@@ -77,6 +77,13 @@ let seq = 0;
 const dirOf = (tag) => { const d = path.join(ROOT, `${tag}-${++seq}`); fs.mkdirSync(d, { recursive: true }); return d; };
 const engines = [];
 const mkVault = (dataDir, o = {}) => { const e = VE.create({ dataDir, kdf: CHEAP, log: quiet, idleTimer: false, ...o }); engines.push(e); return e; };
+// r1563 (B-7e49 slice 1, lane bl-tests-e): THE TREE ONCE A RUN — the repo's source text is read once through this suite's own
+// memo (srcText), and its comment-stripped form once (srcCode): ⑤'s census, ⑧'s readers and the retired-name census each kept
+// their own scope's list but read every file again (naming() twice). A scratch folder the suite writes is still read from disk.
+const SRC_TEXT = new Map();
+const srcText = (f) => { let t = SRC_TEXT.get(f); if (t === undefined) { try { t = fs.readFileSync(f, 'utf8'); } catch (e) { t = e; } SRC_TEXT.set(f, t); } if (t instanceof Error) throw t; return t; };
+const CODE_TEXT = new Map();
+const srcCode = (f) => { let c = CODE_TEXT.get(f); if (c === undefined) CODE_TEXT.set(f, c = srcText(f).replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')); return c; };
 /** every file under `dir` (recursive) → [abs path] */
 const walk = (dir, out = []) => { let es = []; try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; } for (const e of es) { const p = path.join(dir, e.name); if (e.isDirectory()) walk(p, out); else if (e.isFile()) out.push(p); } return out; };
 /** the forms a secret could sit in a file: raw, hex, base64 (+ url) — a hit in any is a leak */
@@ -403,7 +410,7 @@ console.log('⑤ THE CARDS — a secret the LOCKED vault keeps closed reads 「�
   const files = walk(path.join(REPO, 'src')).filter((f) => /\.js$/.test(f) && !/\/channels\/(?!index\.js)/.test(f.replace(REPO, '')));
   const missing = [];
   for (const f of files) {
-    const s = fs.readFileSync(f, 'utf8');
+    const s = srcText(f);
     const words = /case 'auth-expired':\s*return\b|=== 'auth-expired' \? t\(/.test(s);
     if (words && !/'vault-locked'/.test(s)) missing.push(path.relative(REPO, f));
   }
@@ -657,7 +664,7 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
       ['src/server/vault-job-door.js', 'secret:<id> / agent:<scope>/<name> only (lane vault-job-road): a Background Work job\'s --vault values, opened at ONE spawn the verdict allowed, framed for the wrapper\'s fd 3 and zeroed — never an answer, never a file'],
     ]);
     const walkJs = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkJs(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []));
-    const callers = [...walkJs(path.join(REPO, 'src')), path.join(REPO, 'server.js')].filter((f) => /\bsecretGet\(/.test(fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''))).map((f) => path.relative(REPO, f)).filter((f) => f !== 'src/server/vault-engine.js').sort();
+    const callers = [...walkJs(path.join(REPO, 'src')), path.join(REPO, 'server.js')].filter((f) => /\bsecretGet\(/.test(srcCode(f))).map((f) => path.relative(REPO, f)).filter((f) => f !== 'src/server/vault-engine.js').sort();
     ok(callers.join() === [...READERS.keys()].sort().join(), `THE SEED'S READERS are named: every src/ caller of secretGet( is classified (${callers.join(', ')})`, { callers, named: [...READERS.keys()] });
   }
   // the boundary, stated by the census: what stays a file (TLS key, vendor CLI files, …) is the exception list — none of it is planted here
@@ -693,7 +700,7 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     // src/ is walked (a new, not-yet-committed source file counts); data/bin is git's list (its untracked rclone ELF and the
     // generated agentd bundle are not source — test-architecture §96)
     const files = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : e.isFile() ? [path.join(dir, e.name)] : []));
-    const code = (f) => fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+    const code = srcCode;   // the memo above (r1563): naming() runs twice over the scope
     const scope = [...files(path.join(REPO, 'src')).filter((f) => f.endsWith('.js')), path.join(REPO, 'server.js'), ...trackedFiles(REPO, 'data/bin').map((f) => path.join(REPO, f))];
     const naming = (re) => scope.filter((f) => re.test(code(f))).map((f) => path.relative(REPO, f)).sort();
     const KNOWN = new Map([
