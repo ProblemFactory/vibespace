@@ -107,7 +107,24 @@ const readPid = (n) => { try { return Number(fs.readFileSync(F(n), 'utf8').trim(
 // (DEATH_MS), and
 // the answer is how many ms after `t0` the process was gone (a zombie counts gone) — null = still alive at the bound
 const DEATH_MS = 5000;
-const diedWithin = async (pid, t0, bound = DEATH_MS) => { if (!(pid > 1)) return null; while (alive(pid) && Date.now() - t0 < bound) await new Promise((r) => setTimeout(r, 10)); return alive(pid) ? null : Date.now() - t0; };
+// r1649 (the load row — B-1217's class; seen red at 4861f5e5c-20261121204803-both, the box zone, machine 1: «child … ALIVE 5000 ms
+// after the bound answered», the shell dead at 0 ms): a SIGKILLed task dies when the kernel next RUNS it, and on a loaded test
+// machine a task in uninterruptible sleep can stay past any bound with the kill already delivered. The PRODUCT's act is the
+// kill (the shell, then its session's group); the kernel's scheduling is not. So a death is judged GONE, or SIGKILL PENDING (its
+// /proc status holds signal 9 in SigPnd or ShdPnd: the kill reached it), waited for under the same bound; a task that is neither
+// is said with its state, its process group and its session — a group other than the probe's own is the product's fault, named
+const KILL_BIT = 1n << 8n;   // signal 9 (SIGKILL) in a /proc pending mask
+const killPending = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/status`, 'utf8'); return ['SigPnd', 'ShdPnd'].some((k) => { const m = st.match(new RegExp('^' + k + ':\\s*([0-9a-f]+)', 'm')); return !!m && (BigInt('0x' + m[1]) & KILL_BIT) !== 0n; }); } catch { return false; } };
+const taskFacts = (pid) => { try { const st = fs.readFileSync(`/proc/${pid}/stat`, 'utf8'); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); return { state: f[0], pgrp: Number(f[2]), session: Number(f[3]), killPending: killPending(pid) }; } catch { return { state: 'gone' }; } };
+const KILLED_NOT_RUN = new Set();   // the pids whose wait ended on a pending SIGKILL (the kill delivered, the kernel had not run them yet)
+const diedWithin = async (pid, t0, bound = DEATH_MS) => {
+  if (!(pid > 1)) return null;
+  const ended = () => !alive(pid) || killPending(pid);
+  while (!ended() && Date.now() - t0 < bound) await new Promise((r) => setTimeout(r, 10));
+  if (!ended()) return null;
+  if (alive(pid)) KILLED_NOT_RUN.add(pid);
+  return Date.now() - t0;
+};
 // a try's leftovers BY ITS OWN GROUP (the read: a try whose child pid was never written left its `sleep 60` to outlive the suite): every
 // process whose process group is that try's sleepy shell — its pid read from the file the try's own shell just wrote — AND whose command
 // line is the sleepy rc's (its script, or `sleep 60`): /proc evidence, never a name alone
@@ -492,8 +509,8 @@ async function rungLegs(mod, { groups = ['noisy', 'kinds', 'env', 'sleepy'], bou
       // once) and its time is the leg's own fact; a process the product never signalled stays alive past the bound: red (⑦'s mutant)
       const [dS, dC] = a.kind !== 'GUARD' ? await Promise.all([diedWithin(sp, at, deathMs), diedWithin(sc, at, deathMs)]) : [null, null]; // the guard ended it ⇒ nobody killed them: red, reaped below
       const dead = dS !== null && dC !== null;
-      const said = (pid, d) => (a.kind === 'GUARD' ? `${pid > 1 ? pid : '(no pid written)'} not waited for (the guard answered, not the bound)` : !(pid > 1) ? 'no pid written' : `${pid} ${d === null ? `ALIVE ${deathMs} ms after the bound answered` : `died ${d} ms after the bound answered`}`);
-      leg('…the shell (its pid) AND its rc\'s leftover child (its own session) are dead', sp > 1 && sc > 1 && dead, `shell ${said(sp, dS)} · child ${said(sc, dC)}`);
+      const said = (pid, d) => (a.kind === 'GUARD' ? `${pid > 1 ? pid : '(no pid written)'} not waited for (the guard answered, not the bound)` : !(pid > 1) ? 'no pid written' : `${pid} ${d === null ? (() => { const f = taskFacts(pid); return `ALIVE ${deathMs} ms after the bound answered, never signalled (state ${f.state}, process group ${f.pgrp}, session ${f.session}${f.pgrp > 1 && sp > 1 && f.pgrp !== sp ? ` — NOT the probe's own group ${sp}: the product's group kill cannot reach it` : ''})`; })() : KILLED_NOT_RUN.has(pid) ? `killed ${d} ms after the bound answered (SIGKILL delivered, pending: the kernel had not run it yet — state ${taskFacts(pid).state})` : `died ${d} ms after the bound answered`}`);
+      leg('…the shell (its pid) AND its rc\'s leftover child (its own session) are dead — or KILLED, the product\'s SIGKILL delivered and pending (a loaded kernel had not run them yet)', sp > 1 && sc > 1 && dead, `shell ${said(sp, dS)} · child ${said(sc, dC)}`);
       if (printDeaths) console.log(`    [the rc that never returns] the shell died ${dS === null ? 'NOT' : dS + ' ms'} and its leftover child ${dC === null ? 'NOT' : dC + ' ms'} after the bound answered (waited up to ${deathMs} ms)`);
       if (!dead) {   // nobody's kill ended them (a mutant, the guard): reaped here — after the shell had a bounded moment to write its pids
         for (const t0r = Date.now(); Date.now() - t0r < 1000 && !(readPid('sleepy.pid') > 1 && readPid('sleepy-child.pid') > 1);) await new Promise((res) => setTimeout(res, 20));
