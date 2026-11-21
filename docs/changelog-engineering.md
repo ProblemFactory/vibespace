@@ -653,14 +653,21 @@ This file is the engineers' record of every release: the lanes, the verification
   - `--apply` needs `--coordinator-word` (a word the integrator types, not a check): the integrator applies it on the block's assembled tip as a generated commit. This unit applies nothing.
 - THE MUST OF r1347, cured: a plain `!!( … )` would have made every vacuous leg of the tree invisible for good (an un-awaited promise becomes `true`, the guard accepts it, the list falls from 1051 to 16). `verdictOf` FAILS a promise or a function handed as a verdict, red by name, so the applied tree's first run LISTS the vacuous legs it held. Any other value coerces as `!!` would: coerced, not audited.
 - WITH IT: a file that binds its own `verdictOf` imports the coercion as `verdictOfGuard` (only the imported name counts as a coercion there); a comma expression is wrapped with its parentheses (the dry run's self-check refused three files where it was not); a function helper's own `arguments` is a value use (left by rule); the wall-clock self-check reads with the product's span fields; the list is counted over §7b's own file set; the generator's suite skeleton takes `checker()`.
-- THE DRY RUN AT a117cebb8:
+- THE APPLY'S PRECONDITION (the coordinator's r1385, its own commit):
+  - --apply refuses by name while scripts/ holds an uncommitted change, so a restore never touches another edit.
+  - A rename that fails midway is put back by the tool from the originals it held.
+  - A failed temp write removes its own partial temp too.
+  - The checker COUNTS its vacuous finds and prints a total at exit, so the apply's list is read from those lines (a vacuous operand beside a real one still passes).
+  - A helper inside a function serialised into a page is left by rule.
+  - The limits are said in the header and the kb: Boolean(promise), a ?: test, any then-able, an existence leg, a String(fn) page.
+- THE DRY RUN AT a117cebb8, both cures (on the test machine, a probe suite, about 60 s):
+  - The census reads 1118 unguarded before and 15 after.
+  - Of 80 433 calls, 42 062 are wrapped in the coercion and 38 371 are untouched as booleans by their operator. 3 files import it as `verdictOfGuard`.
+  - 13 helpers are left by rule: exported 1, handed on as a value 9, a call by spread 1, a direct eval in the file 2. There are 2 plants (the harness template is no longer one).
+  - The list goes from 1051 rows / 1121 to 15 / 15.
   - 1103 helpers guarded in 1034 files: 1074 arrow blocks, 13 functions, and all 16 arrow expressions. The 17th of the earlier text count is test-ssh-key-dialog's `ok`, a plant in a page script's text.
-  - The census reads 1119 unguarded before and 16 after.
-  - Of 80 432 calls, 42 061 are wrapped and 38 371 are untouched as booleans by their operator.
-  - 13 helpers are left by rule: exported 1, handed on as a value 9, a call by spread 1, a direct eval in the file 2. There are 3 plants.
   - 1 helper is guarded but no longer read by the census, said by name: test-conversation-index line 10, whose body opens `{c?…}`. The suite is heavy, so it is not rewritten by hand.
   - 0 self-check failures; the second run plans nothing.
-  - The list goes from 1051 rows / 1121 to 16 / 16.
 - ITS READ (a fresh reader with probes; every finding cured in the tool and given a fixture):
   - A named function expression is left by rule.
   - A body that uses its condition as more than true or false is left, and so is a helper that hands its condition back where a call reads the value. Both rules form one fixpoint with the guarded set, so a second run reads the same.
