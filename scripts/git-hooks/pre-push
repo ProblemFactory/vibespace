@@ -5,7 +5,10 @@
 # it was being skipped. Now:
 #
 #   BEFORE the push   `node scripts/ci.mjs --keep-going`  build + the FAST tier (~2 min; the one real
-#                                                  vendor turn skipped by name, as at a cut — B-e381),
+#                                                  vendor turn skipped by name, as at a cut — B-e381:
+#                                                  nothing of ours bills a turn nobody typed; the turn
+#                                                  is proven once a run by the HOSTED fast job, the part
+#                                                  holding test-chat-e2e, with VIBESPACE_CI_OAT — ci.yml),
 #                                                  ONCE per push (round 6) — for
 #                                                  HEAD if it is being pushed,
 #                                                  else the newest pushed sha

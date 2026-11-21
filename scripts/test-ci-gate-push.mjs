@@ -228,6 +228,8 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     // a fifth launch added tomorrow without it is red by name; its control drops the prefix from the isolated call
     const tierCalls = (src) => src.split('\n').filter((l) => !/^\s*#/.test(l) && /\bnode scripts\/ci\.mjs\b/.test(l) && !/--check-heavy\b/.test(l.split('||')[0]));
     const unprefixed = (src) => tierCalls(src).filter((l) => !/"\$\{tier_env\[@\]\}" node scripts\/ci\.mjs\b/.test(l));
+    ok(/vendor turn skipped by name, as at a cut — B-e381:\n#[^\n]*nothing of ours bills a turn nobody typed; the turn\n#[^\n]*is proven once a run by the HOSTED fast job, the part\n#[^\n]*holding test-chat-e2e, with VIBESPACE_CI_OAT — ci\.yml\)/.test(hookSrc),
+      'B-e381 (r1037): the hook\'s head says its one real turn is skipped by name and WHERE it is still proven (the hosted fast job\'s part holding test-chat-e2e)');
     ok(tierCalls(hookSrc).length === 4 && unprefixed(hookSrc).length === 0, `B-e381 census: the hook's tier launches are ${tierCalls(hookSrc).length} (three fast calls, the full launcher), each under tier_env`, unprefixed(hookSrc));
     const bare = hookSrc.replace('"${tier_env[@]}" node scripts/ci.mjs --isolate', 'node scripts/ci.mjs --isolate');
     ok(bare !== hookSrc && unprefixed(bare).length === 1 && /--isolate/.test(unprefixed(bare)[0]), 'B-e381 census CONTROL: the hook with the isolated call outside tier_env is refused, naming that line');

@@ -1032,6 +1032,11 @@ console.log('\n§8i an ENVIRONMENT red — the mount guard\'s refusals only: sai
   const noBranch = cs.replace('        if (!r.ok && r.envRed) {', '        if (false) {');
   ok(noBranch !== cs && !/if \(!r\.ok && r\.envRed\) \{/.test(noBranch.slice(noBranch.indexOf('async function heavyGate('), noBranch.indexOf('function checkHeavy('))),
     'B-e381 CONTROL: the heavy pin is refused by a copy without its branch (its anchor is in the source once)');
+  // 主开发 r1037: A SKIP IS NOT A GREEN — the push's own ALL GREEN line counts a by-name skip (the hook's VS_NO_REAL_CLI=1 skips the
+  // one real turn); the control is the line as it was (only absent suites counted)
+  const greenLine = (x) => /ALL GREEN — fast gate[^\n]*\$\{skippedByName\.length \? ` — SKIPPED by name, not run and not passed: \$\{skippedByName\.join\(', '\)\}` : ''\}\$\{skipCount\(skippedLegs\)\}/.test(x);
+  ok(greenLine(cs), 'B-e381 (r1037): the fast tier\'s ALL GREEN line names every suite SKIPPED BY NAME («not run and not passed») — the hook\'s skipped real turn is counted on the push\'s own closing line');
+  ok(!greenLine(cs.replace("${skippedByName.length ? ` — SKIPPED by name, not run and not passed: ${skippedByName.join(', ')}` : ''}", '')), 'B-e381 CONTROL: the line as it was (only absent suites counted) is refused by the pin');
 }
 
 // ── §8h A SKIP IS NOT A GREEN (B-4829) ──
