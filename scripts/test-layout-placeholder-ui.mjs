@@ -25,7 +25,7 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch, scratchHome, freePort, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, relayBroadcastJs, CHROME_QUIET } from './scratch.mjs';
-import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 import { loadPage } from './cdp-page-load.mjs';
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port for every server this suite boots (test-architecture §57)
 const require = createRequire(import.meta.url);
@@ -84,7 +84,6 @@ else await (async () => {
   fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
   const version = JSON.parse(fs.readFileSync(path.join(wt, 'package.json'), 'utf8')).version;
   fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${J(version)};\n`);
-  const esbuild = require('esbuild');
   await buildClientBundleApi({ repo, entry: path.join(wt, 'src/client.js'), outFile: path.join(wt, 'public/bundle.js') });
   ok(fs.statSync(path.join(wt, 'public/bundle.js')).size > 500000, 'the worktree built its own bundle (esbuild JS API)');
 

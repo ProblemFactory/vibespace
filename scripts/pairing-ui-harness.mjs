@@ -316,7 +316,6 @@ export const ROW_FIX_REVERT = [
  *  the copy's relative imports resolve against the ORIGINAL file's directory. → the bundle's text (openPage's
  *  `bundleText`). Never writes the checkout. */
 export async function buildPatchedBundle(M, rel, patchedSrc, tag = 'ctl') {
-  const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
   const orig = path.join(REPO, rel);
   const copy = path.join(M.dir, `${path.basename(rel, '.js')}-${tag}-${process.pid}.js`);
   fs.writeFileSync(copy, patchedSrc); M.files.push(copy);

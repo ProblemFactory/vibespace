@@ -2015,8 +2015,13 @@ console.log('\n§2r no real agent CLI on the hosted runner but the legs sanction
 // suites whose OWN scratch hub serves the built client by the product's route (the slow-intake fault does not apply there:
 // 主开发 r1305 — ONE closed debt list, it only shrinks: a row whose file no longer builds its own way is stale and red). No file of
 // any row may fulfil a /bundle.js through the debugging door with an own-way build.
+// WHAT THE CENSUS CANNOT SEE (it reads one line at a time; an API build only with client.js on its own line or the next two):
+// an esbuild command split across lines (esbuild on one, src/client.js on the next); a path built by path.join('src', 'client.js')
+// or by concatenation; a wrapper of the suite's own around esbuild.build called with src/client.js more than two lines from it;
+// an entry file of the suite's own that re-exports src/client.js. Those are a reader's to see (主开发 r1453, round wjxrsyg87).
 console.log('\n§2q one suite-built client bundle: a suite builds src/client.js as the product does, through scripts/client-bundle.mjs — every other way is a named row');
 {
+  const t2q = Date.now();   // PRINTED at the section's end (its share of the suite's time), never judged
   const CB = await import('./client-bundle.mjs');
   const TOOLS = {
     'scripts/ci.mjs': 'reachContext READS the client step out of package.json (a regex literal naming esbuild + src/client.js); it builds nothing',
@@ -2099,11 +2104,19 @@ console.log('\n§2q one suite-built client bundle: a suite builds src/client.js 
   ]);
   // (the helper itself, and THIS suite — its own planted shapes below — are not read)
   const files = String(git(REPO, ['ls-files', 'scripts'])).split('\n').filter((f) => /\.(mjs|cjs|js)$/.test(f) && f !== 'scripts/client-bundle.mjs' && f !== 'scripts/test-ci-gate.mjs');
-  const own = new Map(files.map((f) => [f, CB.ownClientBuilds(fs.readFileSync(path.join(REPO, f), 'utf8'))]).filter(([, h]) => h.length));
-  const named = (f) => !!(TOOLS[f] || FIXTURE[f] || HUB_ROAD.has(f));
-  const unnamed = [...own.keys()].filter((f) => !named(f)).map((f) => `${f}:${own.get(f).map((h) => h.line).join(',')}`);
-  const stale = [...Object.keys(TOOLS), ...Object.keys(FIXTURE), ...HUB_ROAD].filter((f) => !own.has(f));
-  const door = [...own.keys()].filter((f) => { const L = fs.readFileSync(path.join(REPO, f), 'utf8').split('\n'); return L.some((l, i) => /Fetch\.fulfillRequest/.test(l) && /bundle\.js/.test(L.slice(Math.max(0, i - 3), i + 2).join(' '))); });
+  // THE census, ONE function for the tree and for the planted control below: [file, text] pairs in, each text read once (an
+  // own-way file's text is kept for the door check, every other one dropped) → what builds its own way, what is not a named row,
+  // which row is stale, which own-way build is fed to a page through the debugging door
+  const censusOf = (pairs, rows) => {
+    const own = new Map(), text = new Map();
+    for (const [f, t] of pairs) { const h = CB.ownClientBuilds(t); if (h.length) { own.set(f, h); text.set(f, t); } }
+    const unnamed = [...own.keys()].filter((f) => !rows.has(f)).map((f) => `${f}:${own.get(f).map((h) => h.line).join(',')}`);
+    const stale = [...rows].filter((f) => !own.has(f));
+    const door = [...own.keys()].filter((f) => { const L = text.get(f).split('\n'); return L.some((l, i) => /Fetch\.fulfillRequest/.test(l) && /bundle\.js/.test(L.slice(Math.max(0, i - 3), i + 2).join(' '))); });
+    return { own, unnamed, stale, door };
+  };
+  const rows = new Set([...Object.keys(TOOLS), ...Object.keys(FIXTURE), ...HUB_ROAD]);
+  const { own, unnamed, stale, door } = censusOf((function* () { for (const f of files) yield [f, fs.readFileSync(path.join(REPO, f), 'utf8')]; })(), rows);
   console.log(`  · ${own.size} file(s) build src/client.js their own way: ${Object.keys(TOOLS).length} tools, ${Object.keys(FIXTURE).length} fixture, ${HUB_ROAD.size} on their hub's road (closed); every door-served bundle goes through the helper`);
   ok(!unnamed.length, `every file that builds src/client.js its own way is a NAMED row — none new${unnamed.length ? ' — NOT NAMED (build through scripts/client-bundle.mjs, or name its row with its reason): ' + unnamed.join(' ') : ''}`);
   ok(!stale.length, `no named row is stale (its file still builds its own way; the closed list only shrinks)${stale.length ? ' — STALE: ' + stale.join(' ') : ''}`);
@@ -2121,9 +2134,19 @@ console.log('\n§2q one suite-built client bundle: a suite builds src/client.js 
   };
   const seen = Object.fromEntries(Object.entries(shapes).map(([k, v]) => [k, CB.ownClientBuilds(v).map((h) => h.how).join()]));
   ok(seen.cli === 'cli' && seen.argv === 'argv' && seen.api === 'api' && seen.helper === '' && seen.comment === '', `the census reads the three own ways (command line, argv, the JS API) and never the helper or a comment (${JSON.stringify(seen)})`);
-  const planted = 'scripts/test-planted-own-build.mjs';
-  const unnamedP = [planted].filter((f) => CB.ownClientBuilds(shapes.cli).length && !named(f));
-  ok(unnamedP.length === 1, `CONTROL: a planted suite building src/client.js its own way is NOT NAMED — the census would name it red (${unnamedP.join(' ') || 'not found'})`);
+  // CONTROL (主开发 r1453 (a)): a PLANTED tree through the same censusOf — an own-way suite no row names, a named own-way suite fed
+  // to its page through the debugging door, a row whose file now builds through the helper, and the two clean shapes (a named
+  // suite on its hub's road; a helper-built bundle fed through the door) — each red found, by name, and nothing else
+  const DOOR = "await cdp('Fetch.enable', { patterns: [{ urlPattern: '*/bundle.js*', requestStage: 'Request' }] });\n"
+    + "onPaused = (p) => cdp('Fetch.fulfillRequest', { requestId: p.requestId, responseCode: 200, body: B });";
+  const P = (n) => `scripts/test-planted-${n}.mjs`;
+  const plantedTree = [[P('unnamed'), shapes.cli], [P('door'), shapes.argv + '\n' + DOOR], [P('gone'), shapes.helper],
+    [P('hub-road'), shapes.api], [P('helper-door'), shapes.helper + '\n' + DOOR]];
+  const pc = censusOf(plantedTree, new Set([P('door'), P('gone'), P('hub-road')]));
+  const pcSeen = { unnamed: pc.unnamed, stale: pc.stale, door: pc.door };
+  ok(JSON.stringify(pcSeen) === JSON.stringify({ unnamed: [P('unnamed') + ':1'], stale: [P('gone')], door: [P('door')] }),
+    `CONTROL: over a planted tree the census names each red — the unnamed own-way suite, the stale row, the own-way build fed through the door — and passes the named hub-road suite and the helper-built bundle fed through the door (${JSON.stringify(pcSeen)})`);
+  console.log(`  · §2q took ${Date.now() - t2q} ms (the census read ${files.length} file(s) once each)`);
 }
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }

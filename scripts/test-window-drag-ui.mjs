@@ -576,7 +576,6 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       console.log('  control source: ' + how);
       if (!ok(missed.length === 0, 'the control source is whole (every patch of the pre-fix overlay found its line in today\'s source — a control whose patch missed proves nothing)', missed)) { /* nothing below can be judged */ }
       else {
-        const esbuild = require('esbuild');
         // overlay the three files with the control TEXT (its relative imports resolve from wt/src/lib — resolveDir —, so no
         // copy is written into the tree; §51 holds by construction) and bundle the client on it
         const built = await buildClientBundleApi({ repo, entry: path.join(wt, 'src/client.js'),
@@ -607,7 +606,6 @@ out({ success: false, error: 'fake agent-browser: unknown verb ' + process.argv.
       if (!ok(tgFixed.includes(CAP_LINE), 'the C2 control found the capture-element line it reverts')) { /* nothing to judge */ }
       else {
         const tgOnTab = tgFixed.replace(CAP_LINE, 'const capEl = tabEl; /* control: the tab element */');
-        const esbuild = require('esbuild');
         const built = await buildClientBundleApi({ repo, entry: path.join(wt, 'src/client.js'),
           plugins: [{ name: 'drj-c2', setup(b) { b.onLoad({ filter: /src\/lib\/tab-group\.js$/ }, () => ({ contents: tgOnTab, loader: 'js', resolveDir: path.join(wt, 'src/lib') })); } }] });
         const c2Bundle = built.buf.toString('base64');

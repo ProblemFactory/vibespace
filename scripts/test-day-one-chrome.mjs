@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePorts, scratch, vncEnv, endRootedProcesses, CHROME_QUIET } from './scratch.mjs';
 import { waitPageTarget } from './cdp-page-target.mjs';
-import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { buildClientBundle } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));

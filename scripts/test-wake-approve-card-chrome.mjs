@@ -78,7 +78,7 @@ import { frontState, becameFront, frontShot } from './cdp-front-shot.mjs';   // 
 import { mintRoot, startHub, strippedEnv } from './hub-boot.mjs';
 import * as SCR from './scratch.mjs';   // the runner's fontconfig helpers where this tree has them (2.369.358+)
 import { armWatchdog } from './suite-watchdog.mjs';
-import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { buildClientBundle } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 const VNC_ENV = await vncEnv(); // per-run singleton-Desktop display + port (test-architecture §57)
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');

@@ -39,7 +39,7 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
-import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { buildClientBundle } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 import { loadPage } from './cdp-page-load.mjs';
 
 const require = createRequire(import.meta.url);
@@ -185,7 +185,7 @@ async function newPage({ lang = 'zh', width = 1400, height = 1000, control = fal
   // (主开发 r1291) THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): the wait is tied to this navigation's document; a load of the
   // suite-built CONTROL bundle prints its time and its asks (the stronger wait below — the window manager and the sidebar — stays)
   const call = async (method, params) => { const m = await cdp(method, params); if (m && m.error) throw new Error(`${method}: ${m.error.message}`); return m && m.result; };
-  const lp = await loadPage(call, `${BASE}/`, { who: 'test-channel-api-chrome' });
+  const lp = await loadPage(call, `${BASE}/`, { who: 'test-channel-api-chrome', bootMs: 40000 });   // the 40 s its page had before the move
   if (control) console.log(`  · a mutant load (the suite's own CONTROL bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
   const loaded = await until(() => evaljs('!!(window.app && window.app.wm && window.app.sidebar)'), 40000);
   const shot = async (file, sel) => {

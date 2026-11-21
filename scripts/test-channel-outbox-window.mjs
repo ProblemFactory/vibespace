@@ -43,14 +43,14 @@
 // outbox-fold-zh.png, outbox-base-zh.png, chat-chip-zh.png, outbox-filtered-zh.png, chat-chip-live-zh.png, outbox-touch-480-zh.png,
 // after-chip-rows-*, after-from-chip-row-*, after-from-tool-card-row-*, after-rejected-row-* (zh, en), after-see-them-in-all-en.png.
 // Run: node scripts/test-channel-outbox-window.mjs   (SKIPs without chrome)
-import { execSync, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { freePort, scratch, scratchHome, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, CHROME_STORE, CHROME_QUIET } from './scratch.mjs';
-import { buildClientBundle, buildClientBundleApi } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
+import { buildClientBundle } from './client-bundle.mjs';   // 主开发 r1291: a suite's changed client is built as the product builds its own
 import { loadPage } from './cdp-page-load.mjs';
 
 const require = createRequire(import.meta.url);
@@ -216,7 +216,7 @@ async function newPage({ control = false, outbox = OUTBOX, api = APIS, lang = 'z
   // (主开发 r1291) THE ONE PAGE LOAD (scripts/cdp-page-load.mjs): the wait is tied to this navigation's document; a load of the
   // suite-built CONTROL bundle prints its time and its asks (the stronger wait below — the window manager and the sidebar — stays)
   const call = async (method, params) => { const m = await cdp(method, params); if (m && m.error) throw new Error(`${method}: ${m.error.message}`); return m && m.result; };
-  const lp = await loadPage(call, `${BASE}/`, { who: 'test-channel-outbox-window' });
+  const lp = await loadPage(call, `${BASE}/`, { who: 'test-channel-outbox-window', bootMs: 40000 });   // the 40 s its page had before the move
   if (control) console.log(`  · a mutant load (the suite's own CONTROL bundle): the app booted in ${lp.ms} ms (${lp.asks} ask(s))`);
   const loaded = await until(() => evaljs("!!(window.app && window.app.wm && window.app.sidebar) && (() => { const l = document.getElementById('loading-screen'); return !l || !l.isConnected || getComputedStyle(l).display === 'none' || Number(getComputedStyle(l).opacity) === 0; })()"), 40000);
   const shot = async (file) => {
