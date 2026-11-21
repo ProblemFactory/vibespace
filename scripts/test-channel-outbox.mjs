@@ -155,7 +155,7 @@ function mkEngine(opts = {}) {
   const userTodos = opts.userTodos === null ? null : (opts.userTodos || new UserTodoManager({ dataDir, now }));
   const e = (opts.engine || ENG).create({
     dataDir, env: { VIBESPACE_CHANNELS_FAKE: '1' }, registry: opts.registry, broadcast: (m) => events.push(m),
-    userTodos, deliver, now, serverSetting: (k) => (opts.settings || {})[k], log: { log() {}, warn() {}, error() {} },
+    userTodos, deliver, now, serverSetting: (k) => (opts.settings || {})[k], log: opts.log || { log() {}, warn() {}, error() {} }, channelsHeldRetry: { firstMs: 5, maxMs: 10 },
     liveSessions: () => opts.live || [{ cid: 'agent-1', name: 'Worker', groups: ['g1'] }],
   });
   return { eng: e, events, delivered, stash, userTodos, deliver, advance: (ms) => { offset += ms; }, dataDir };
@@ -4577,6 +4577,262 @@ console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — n
   ok(ru.race.status === 'withdrawn' && ru.race.live === 1, 'RED CONTROL (no undo): the request says withdrawn and a live wake watch stands — the other-order leg goes red (and the race was run: the Allow did write)', JSON.stringify(ru.race));
   const rm = await run(MCc.load('src/server/channels-engine.js', src.replace(MARK, 'return decideOpenWatch(requestId, req0, approve, by, person, t);'), 'ae13-mark-held'), 'bae13-markheld');
   ok(rm.gone.withdraw && rm.gone.withdraw.ok === false && rm.gone.withdraw.code === 'not-withdrawable', 'RED CONTROL (the mark kept on an early return): the asker\'s withdraw is refused «being decided» — the early-return leg goes red', JSON.stringify(rm.gone));
+}
+
+// ── B-f276 (lane bl-windows, 主开发 r460): A HELD INDEX PAUSES THE ENGINE — nothing runs half-blind over the empty list ──
+console.log('§P B-f276: the list of conversations could not be read at a start — the channels PAUSED, every door refused BY NAME');
+async function pausedLegs(ENGmod, tag) {
+  const r = {};
+  // a world: a conversation and a proposal AWAITING the person's approval, on disk
+  const W = mkEngine({ name: `paused-${tag}`, engine: ENGmod });
+  await prime(W.eng);
+  const p = await W.eng.propose(AGENT, A, C, { text: 'waiting for the person' });
+  try { await W.eng.stop?.(); } catch { }
+  const chan = path.join(W.dataDir, 'channels'), ixFile = path.join(chan, 'index.json'), obFile = path.join(chan, 'outbox.json');
+  const good = fs.readFileSync(ixFile, 'utf8');
+  fs.rmSync(ixFile); fs.mkdirSync(ixFile); fs.writeFileSync(path.join(ixFile, 'x'), 'x');   // the next start's read of the list FAILS (EISDIR)
+  const ob0 = fs.readFileSync(obFile, 'utf8');
+  const said = [];
+  const H = mkEngine({ name: `paused-${tag}`, engine: ENGmod, log: { log() {}, error() {}, warn: (...a) => said.push(a.join(' ')) } });
+  const refusal = async (fn) => { try { const v = await fn(); return v && v.code ? `answer:${v.code}` : `answer:${JSON.stringify(v).slice(0, 80)}`; } catch (e) { return `threw:${e && e.code}`; } };
+  H.eng.start();
+  r.started = said.filter((w) => /the channels are paused/.test(w)).length;
+  r.pass = await refusal(() => H.eng.pass(A, { force: true }));
+  r.push = await refusal(() => H.eng.pushInbound(A, { kind: 'record', convId: C, eventId: 'ev-held-1', record: { vendorId: 'v-held-1', text: 'pushed while held', at: Date.now() } }));
+  r.approve = await refusal(() => H.eng.approve(p.proposal.id));
+  r.propose = await refusal(() => H.eng.propose(AGENT, A, C, { text: 'a reply while held' }));
+  r.compose = await refusal(() => H.eng.compose(AGENT, A, { to: ['someone'], text: 'a new message while held' }));
+  r.markRead = await refusal(() => H.eng.markRead(A, C));
+  r.setPolicy = await refusal(() => H.eng.setPolicy(A, C, 'review'));
+  r.outboxSame = fs.readFileSync(obFile, 'utf8') === ob0;
+  r.state = ((H.eng.store.outbox.live().proposals || {})[p.proposal.id] || {}).state;
+  r.sent = H.delivered.length;
+  r.item = (H.userTodos.snapshot().open || []).filter((i) => /Channels paused: index\.json could not be read/.test(i.text)).map((i) => i.detail);
+  { const tt = H.eng.digest({ scope: 'totals' }); r.totals = { needsMe: tt.needsMe, paused: tt.paused || null }; }   // the rail badge's own scope (word 8)
+  // r566 #3: a migration whose engine door is refused while paused is recorded NOT RUN (its ledger holds no «done») — it runs at the next boot
+  {
+    const ledgerPath = path.join(W.dataDir, 'leg-migrations.json');
+    const { runMigrations } = require(path.join(REPO, 'src/migration-runner.js'));
+    try { await runMigrations({ ledgerPath, migrations: [{ id: 'leg-channel-credential-key', run: () => H.eng.stampCredentialKeys() }], log: () => {}, warn: () => {} }); } catch { }
+    let led = {}; try { led = JSON.parse(fs.readFileSync(ledgerPath, 'utf8')); } catch { }
+    r.migDone = !!(led.applied && led.applied['leg-channel-credential-key']);
+  }
+  try { await H.eng.stop?.(); } catch { }
+  // the file reads again and VibeSpace starts again: everything is where it was
+  fs.rmSync(ixFile, { recursive: true, force: true }); fs.writeFileSync(ixFile, good);
+  const N = mkEngine({ name: `paused-${tag}`, engine: ENGmod });
+  const a2 = await N.eng.approve(p.proposal.id);
+  r.next = { ok: !!(a2 && a2.ok), state: a2 && a2.proposal && a2.proposal.state };
+  try { await N.eng.stop?.(); } catch { }
+  return r;
+}
+{
+  const r = await pausedLegs(ENG, 'head');
+  console.log(`    facts: ${JSON.stringify(r)}`);
+  const refused = (x) => x === 'threw:store-blocked' || x === 'answer:store-blocked';
+  ok(r.started === 1 && refused(r.pass), 'a start over an unreadable index.json: ONE «paused» line, no pass runs (no poll, no discovery, no vendor call)', JSON.stringify(r));
+  ok(refused(r.push), 'a pushed message is refused BY NAME (store-blocked) — never taken as a duplicate later: the sender delivers it again', r.push);
+  ok(refused(r.approve) && r.outboxSame && r.state === 'awaiting-approval' && r.sent === 0, 'approving a proposal that waited from before: refused BY NAME, the proposal NOT moved (still awaiting approval), outbox.json byte-identical, nothing sent', JSON.stringify(r));
+  ok(refused(r.propose) && refused(r.compose), 'a reply and a new message while held: refused BY NAME (store-blocked), never «no such conversation»', JSON.stringify({ propose: r.propose, compose: r.compose }));
+  ok(refused(r.markRead) && refused(r.setPolicy), 'an act on a conversation (read mark, policy): refused BY NAME, never «no such conversation»', JSON.stringify({ markRead: r.markRead, setPolicy: r.setPolicy }));
+  ok(r.item.length === 1 && /delivered again only while its sender retries/.test(r.item[0]) && /restart VibeSpace to load it/.test(r.item[0]), 'For you says it: paused, a pushed message comes again only while its sender retries, and the act (restart once it reads)', JSON.stringify(r.item));
+  ok(!!r.totals && !!r.totals.paused && Array.isArray(r.totals.paused.files) && r.totals.paused.files.includes('index.json'), 'B-f276 1b (word 8): the rail badge\'s TOTALS scope says paused — with the held file — never a bare 0 read as «nothing needs you»', JSON.stringify(r.totals));
+  ok(r.next.ok && r.next.state === 'sent', 'the next start with the list readable: the waiting proposal is approvable and goes out — nothing was destroyed', JSON.stringify(r.next));
+  ok(r.migDone === false, 'r566 #3: a migration whose engine door is refused while paused is recorded NOT RUN — the ledger holds no «done» for it (it runs at the next boot)', JSON.stringify({ migDone: r.migDone }));
+  // A2 (主开发 r487): a SMALL family held — outbox.json — pauses the engine too, and the engine STARTS BY ITSELF once it reads (the
+  // same start: nothing ran over the empty outbox). THE WALL: the files sweep never deletes a waiting proposal's folder.
+  {
+    const refusal = async (fn) => { try { const v = await fn(); return v && v.code ? `answer:${v.code}` : `answer:${JSON.stringify(v === undefined ? null : v).slice(0, 80)}`; } catch (e) { return `threw:${e && e.code}`; } };
+    const W2 = mkEngine({ name: 'paused-outbox' });
+    await prime(W2.eng);
+    const p2 = await W2.eng.propose(AGENT, A, C, { text: 'a card with its files' });
+    try { await W2.eng.stop?.(); } catch { }
+    const chan2 = path.join(W2.dataDir, 'channels'), ob2 = path.join(chan2, 'outbox.json');
+    const filesDir = path.join(chan2, 'outbox-files', p2.proposal.id);
+    fs.mkdirSync(filesDir, { recursive: true }); fs.writeFileSync(path.join(filesDir, 'a.txt'), 'the attachment');
+    const goodOb = fs.readFileSync(ob2, 'utf8');
+    fs.rmSync(ob2); fs.mkdirSync(ob2); fs.writeFileSync(path.join(ob2, 'x'), 'x');   // the outbox's read fails at the next start
+    const said2 = [];
+    const H2 = mkEngine({ name: 'paused-outbox', log: { log() {}, error() {}, warn: (...a) => said2.push(a.join(' ')) } });
+    const opened = await (async () => { H2.eng.start(); return said2.some((w) => /the channels are paused: outbox\.json could not be read/.test(w)); })();
+    const sweep = await refusal(() => H2.eng.filesSweep());
+    const kept1 = fs.existsSync(path.join(filesDir, 'a.txt'));
+    const approve1 = await refusal(() => H2.eng.approve(p2.proposal.id));
+    // the outbox reads again: the store takes it in, then the engine's SAME start runs by itself
+    const starts0 = H2.eng.startedCount();
+    fs.rmSync(ob2, { recursive: true, force: true }); fs.writeFileSync(ob2, goodOb);
+    // THE ENGINE'S OWN START (r566 #5, the read's M2): its start-on-read ran — the counter of the starts, not a waiter of the leg's
+    const end = Date.now() + 5000; while (H2.eng.startedCount() === starts0 && Date.now() < end) await new Promise((z) => setTimeout(z, 5));   // the bound is a red line, never the wait
+    const started = H2.eng.startedCount() === starts0 + 1;
+    const pz = H2.eng.pausedState();
+    const sweep2 = await refusal(() => H2.eng.filesSweep());
+    const kept2 = fs.existsSync(path.join(filesDir, 'a.txt'));
+    const a3 = await H2.eng.approve(p2.proposal.id).catch((e) => ({ ok: false, code: e && e.code }));
+    try { await H2.eng.stop?.(); } catch { }
+    console.log(`    facts: outbox held — paused line ${opened}, sweep ${sweep}, kept ${kept1}, approve ${approve1} · read again — started ${started}, paused ${!!pz}, sweep ${sweep2}, kept ${kept2}, approve ${a3 && a3.ok ? a3.proposal.state : a3 && a3.code}`);
+    ok(opened && refused(sweep) && kept1 && refused(approve1), 'A2: outbox.json held at a start (the list reads) — the channels PAUSED by it: the files sweep refused, the waiting card\'s folder KEPT, an approve refused by name', JSON.stringify({ opened, sweep, kept1, approve1 }));
+    ok(started && !pz && kept2 && a3 && a3.ok && a3.proposal.state === 'sent', 'A2: …outbox.json reads again: the engine STARTS BY ITSELF (the same start), the folder is still there, the card approves and goes out', JSON.stringify({ started, pz, sweep2, kept2, a3: a3 && (a3.ok ? a3.proposal.state : a3.code) }));
+  }
+  // CONTROL (r566 #5): THE A2 WRAPPER — the start door classed «paused»: the wrapper swallows the start, its start-on-read never registers,
+  // and after the outbox reads the engine never starts — red
+  {
+    const esrcS = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+    const ROW = esrcS.match(/^    start: \['allow', 'sync', '[^'\n]+'\],$/m);
+    ok(!!ROW, 'CONTROL setup: the start row is where the control cuts it');
+    if (ROW) {
+      const { mutantCopies: mc2 } = await import('./mutant-copy.mjs');
+      const A2 = mc2('channel-outbox-a2-start', REPO).load('src/server/channels-engine.js', esrcS.replace(ROW[0], "    start: ['paused', 'sync', 'the A2 row'],"), 'a2-start-paused');
+      const W3 = mkEngine({ name: 'a2-start', engine: A2 });
+      await prime(W3.eng); await W3.eng.propose(AGENT, A, C, { text: 'a card' }); try { await W3.eng.stop?.(); } catch { }   // B-f276 1b: an outbox file to hold (the missing law writes no untouched family)
+      const ob3 = path.join(W3.dataDir, 'channels', 'outbox.json'); const good3 = fs.readFileSync(ob3, 'utf8');
+      fs.rmSync(ob3); fs.mkdirSync(ob3); fs.writeFileSync(path.join(ob3, 'x'), 'x');
+      const H3 = mkEngine({ name: 'a2-start', engine: A2 });
+      H3.eng.start();
+      fs.rmSync(ob3, { recursive: true, force: true }); fs.writeFileSync(ob3, good3);
+      const end3 = Date.now() + 1500; while (H3.eng.pausedState() && Date.now() < end3) await new Promise((z) => setTimeout(z, 5));   // the outbox taken in (bounded)
+      const s3 = H3.eng.startedCount();
+      try { await H3.eng.stop?.(); } catch { }
+      ok(!H3.eng.pausedState() && s3 === 0, 'CONTROL (the A2 wrapper: the start classed «paused»): the outbox reads, the pause lifts — and the engine NEVER starts (no tick, no poll for the rest of the life) — red', JSON.stringify({ paused: H3.eng.pausedState(), starts: s3 }));
+    }
+  }
+  // THE CENSUS: every door of the engine is a row of HELD_DOORS (paused / refused / read / none) — a door without a row is red
+  const esrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const blk = (esrc.split('  const HELD_DOORS = {\n')[1] || '').split('\n  };\n')[0] || '';
+  const rows = new Map([...blk.matchAll(/^    ([A-Za-z_$][\w$]*): \['(allow|paused|refused|read|none)', '(async|sync|const)', '([^'\n]+)'\],/gm)].map((m) => [m[1], { cls: m[2], kind: m[3], why: m[4] }]));
+  const E = mkEngine({ name: 'paused-census' });
+  const keys = Object.keys(E.eng);
+  try { await E.eng.stop?.(); } catch { }
+  const noRow = keys.filter((k) => !rows.has(k)), stale = [...rows.keys()].filter((k) => !keys.includes(k));
+  const kinds = keys.filter((k) => rows.has(k) && (typeof E.eng[k] === 'function') !== (rows.get(k).kind !== 'const'));
+  console.log(`    census: ${keys.length} doors — ${['allow', 'paused', 'refused'].map((c) => `${c} ${[...rows.values()].filter((x) => x.cls === c).length}`).join(', ')}`);
+  // A3 (主开发 r566 #7): THE ALLOW LIST IS THE CENSUS — deny by default: no read / none rows left, every allow row says what it answers
+  ok([...rows.values()].every((x) => ['allow', 'paused', 'refused'].includes(x.cls)) && [...rows.entries()].filter(([, x]) => x.cls === 'allow' && x.kind !== 'const').every(([, x]) => x.why.length > 20), 'A3: every door is ALLOWED (with what it answers when the reply depends on a held file), PAUSED or REFUSED — nothing in between', JSON.stringify([...rows.entries()].filter(([, x]) => !['allow', 'paused', 'refused'].includes(x.cls)).map(([k]) => k)));
+  ok(rows.size > 100 && !noRow.length && !stale.length && !kinds.length, `THE CENSUS: every door of the engine (${keys.length}) is a row of HELD_DOORS with its class and its why; none without a row, none stale, the kind matches`, JSON.stringify({ noRow, stale, kinds }));
+  // THE CALLERS' CENSUS (主开发 r596; A3's read must 5 — the raw-API agent routes called refused SYNC doors with no try: a bare 500, a
+  // hang): EVERY call of a REFUSED door from OUTSIDE the engine (routes, the raw API, the wiring, migrations, search, apps) is a ROW —
+  // inside a try whose catch answers by name (fail / chanFail / the paused code), a promise chain that does, or after a pausedState()
+  // ask. A caller added later without either is red, by its file and line. Static, over the tracked tree; printed.
+  const { spawnSync: spawnC } = await import('node:child_process');
+  const REFUSED = [...rows.entries()].filter(([, x]) => x.cls === 'refused').map(([k]) => k);
+  const ENGINE_OWN = new Set(['src/server/channels-engine.js', 'src/server/channels-access.js', 'src/server/channels-outbound.js', 'src/server/channels-auth.js', 'src/channel-store.js']);
+  const RECV = String.raw`engine\(\)|getChannels\(\)|deps\.channels|\beng|\bchannels|\bchEng`;
+  const DOORS_ALT = [...REFUSED].sort((a, b) => b.length - a.length).join('|');
+  // a file's own ALIASES of the engine (`const e = eng()` — the raw API's shape): each one is a receiver too
+  const aliasRe = /\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:engine|eng|getChannels|channels|chEng)\(\)/g;
+  const callReOf = (text) => new RegExp(`(?:${[RECV, ...new Set([...text.matchAll(aliasRe)].map((m) => String.raw`\b` + m[1].replace(/\$/g, '\\$')))].join('|')})\\??\\.(${DOORS_ALT})\\(`, 'g');
+  const HANDLED = /\b(fail|chanFail|pausedRefused|pausedOf|answerPaused)\(\s*res\s*,\s*\w+\s*\)|store-blocked|\.paused\b|pausedAnswer|pausedError/;
+  // the text with every string, template and comment BLANKED (same length — the indexes stand): braces are counted on code only
+  const blank = (t) => { let out = '', q = null, blk = false, line = false; for (let i = 0; i < t.length; i++) { const c = t[i], n = t[i + 1]; if (c === '\n') { line = false; if (q && q !== '`') q = null; out += '\n'; continue; } if (line) { out += ' '; continue; } if (blk) { if (c === '*' && n === '/') { blk = false; out += '  '; i++; } else out += ' '; continue; } if (q) { if (c === '\\') { out += '  '; i++; continue; } if (c === q) { q = null; out += c; } else out += ' '; continue; } if (c === '/' && n === '/') { line = true; out += ' '; continue; } if (c === '/' && n === '*') { blk = true; out += ' '; continue; } if (c === '"' || c === "'" || c === '`') { q = c; out += c; continue; } out += c; } return out; };
+  const closeOf = (B, open) => { let d = 0; for (let i = open; i < B.length; i++) { if (B[i] === '{') d++; else if (B[i] === '}') { d--; if (!d) return i; } } return -1; };
+  function guardOf(text, B, at) {
+    // the enclosing TRY whose catch answers by name
+    let depth = 0;
+    for (let i = at - 1; i >= 0; i--) {
+      if (B[i] === '}') { depth++; continue; }
+      if (B[i] !== '{') continue;
+      if (depth) { depth--; continue; }
+      if (/\btry\s*$/.test(B.slice(Math.max(0, i - 12), i))) {
+        const end = closeOf(B, i); const m = end > 0 ? /^\s*catch\s*(?:\(\s*\w+\s*\))?\s*\{/.exec(B.slice(end + 1, end + 200)) : null;
+        if (m) { const cOpen = end + 1 + m[0].length - 1, cEnd = closeOf(B, cOpen); if (cEnd > 0 && HANDLED.test(text.slice(cOpen, cEnd + 1))) return 'try'; }
+      }
+    }
+    // a promise chain that answers by name
+    if (/^[^;]{0,400}?(\.catch\(|\.then\([^;]*,\s*\(?\s*\w+\s*\)?\s*=>)[^;]{0,200}?(fail|chanFail|pausedRefused|store-blocked)/.test(text.slice(at, at + 700).replace(/\n/g, ' '))) return 'promise';
+    // a pausedState() ask before it, in the same handler (from its route / function head)
+    const head = Math.max(B.lastIndexOf('\nrouter.', at), B.lastIndexOf('\nfunction ', at), B.lastIndexOf('\nasync function ', at), B.lastIndexOf('\n  function ', at), B.lastIndexOf('\n  async function ', at), B.lastIndexOf('\napp.', at));
+    if (head >= 0 && /pausedState\(\)|\bpausedRefused\(res\)/.test(B.slice(head, at))) return 'paused-ask';
+    return null;
+  }
+  // a call inside a LAMBDA (`const makeR = () => eng.propose(…)`) is guarded where the lambda RUNS: every use of its name must be
+  const lambdaGuard = (text, B, at) => {
+    const ls = B.lastIndexOf('\n', at) + 1;
+    const m = /\bconst\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?\([^)]*\)\s*=>\s*$/.exec(B.slice(ls, at));
+    if (!m) return null;
+    const uses = [...B.matchAll(new RegExp(String.raw`\b${m[1]}\(\)|\bmake:\s*${m[1]}\b`, 'g'))].map((u) => u.index);
+    return uses.length && uses.every((u) => guardOf(text, B, u)) ? 'lambda' : null;
+  };
+  // rows a census cannot read as code, each with its reason (a NEW unguarded call has none: red) — `file:door`, or a whole file
+  const EXCEPT = {
+    'src/agent-routes.js:reachCountFor': 'the prompt hook\'s reach hint (a line injected into a prompt, never an answer): silent while paused; the agent\'s own reads are refused by name',
+    'src/agent-routes.js:connectTaught': 'the same reach hint line (connect taught)',
+    'src/agent-routes.js:signinExpiredFor': 'the same reach hint line (dead sign-ins named)',
+    'src/agent-routes.js:connectOffers': 'a decoration of `channels list` AFTER its listFor, which refuses by name first — never reached while paused',
+    'src/agent-routes.js:accessFor': 'a decoration of `channels status` AFTER its statusFor, which refuses by name first — never reached while paused',
+    'src/routes/channels.js:wakeHeldAt': 'the watch gate\'s answer: a throw reads «held, unknown» — unknown never wakes (the conservative answer, said)',
+    'src/routes/webhook.js:refreshConvCaps': 'syncRow: run only by owner routes that ask pausedRefused first (webhook.js), after an index write that refuses while held',
+    'src/routes/webhook.js:notify': 'syncRow: the same — after the refused index write',
+    'src/server/migrations.js': 'a migration\'s run: a refused door THROWS, the shared runner records the run failed by its words and runs it at the next start (word 3 — §P\'s «recorded NOT RUN» leg)',
+    'src/server/channel-api.js': 'the raw API\'s own engine calls: every caller of rawApi() outside it is a row of the SECOND TIER below and answers the pause by name',
+  };
+  function callersCensus(over = {}) {
+    const files = spawnC('git', ['ls-files', 'src', 'server.js'], { cwd: REPO, encoding: 'utf8' }).stdout.split('\n').filter((f) => f.endsWith('.js') && !ENGINE_OWN.has(f) && !f.startsWith('src/lib/') && !f.startsWith('src/channels/'));
+    const sites = [], bare = [];
+    for (const f of files) {
+      const text = Object.hasOwn(over, f) ? over[f] : fs.readFileSync(path.join(REPO, f), 'utf8');
+      const callRe = callReOf(text);
+      if (!callRe.test(text)) continue;
+      const B = blank(text);
+      for (const m of B.matchAll(callReOf(text))) {
+        const line = B.slice(0, m.index).split('\n').length, key = `${f}:${m[1]}`;
+        const g = guardOf(text, B, m.index) || lambdaGuard(text, B, m.index) || (Object.hasOwn(EXCEPT, key) || Object.hasOwn(EXCEPT, f) ? 'except' : null);
+        sites.push({ f, line, door: m[1], g });
+        if (!g) bare.push(`${f}:${line} ${m[1]}`);
+      }
+    }
+    // THE SECOND TIER: the raw API (src/server/channel-api.js) calls refused doors itself — so every call of its object from outside
+    for (const f of files) {
+      if (f === 'src/server/channel-api.js') continue;
+      const text = Object.hasOwn(over, f) ? over[f] : fs.readFileSync(path.join(REPO, f), 'utf8');
+      const al = [...new Set([...text.matchAll(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*rawApi\(\)/g)].map((m) => m[1]))];
+      const rawRe = new RegExp(`(?:rawApi\\(\\)${al.map((a) => String.raw`|\b` + a).join('')})\\.([A-Za-z_$][\\w$]*)\\(`, 'g');
+      if (!rawRe.test(text)) continue;
+      const B = blank(text);
+      for (const m of B.matchAll(new RegExp(rawRe.source, 'g'))) {
+        const line = B.slice(0, m.index).split('\n').length;
+        const g = guardOf(text, B, m.index) || lambdaGuard(text, B, m.index);
+        sites.push({ f, line, door: 'raw:' + m[1], g });
+        if (!g) bare.push(`${f}:${line} raw:${m[1]}`);
+      }
+    }
+    return { sites, bare, files: new Set(sites.map((s) => s.f)).size };
+  }
+  const cc = callersCensus();
+  const by = (g) => cc.sites.filter((s) => s.g === g).length;
+  console.log(`    the callers' census: ${REFUSED.length} refused doors; ${cc.sites.length} outside calls in ${cc.files} files — ${by('try')} in a try that answers by name, ${by('promise')} in a promise chain that does, ${by('paused-ask')} behind a pause ask, ${by('lambda')} in a lambda run inside one, ${by('except')} excepted with a reason (${Object.keys(EXCEPT).length} rows)`);
+  ok(cc.sites.length > 20 && !cc.bare.length, `THE CALLERS' CENSUS: every outside call of a refused door answers the pause BY NAME (a try, a promise chain or a pausedState ask) — none bare`, cc.bare.join(' · '));
+  // B-f276 1b (A3's read, should 2): the webhook paths list reads each path's options from the list — while paused it asks first
+  ok(/router\.get\('\/api\/channels\/webhook\/paths', \(req, res\) => \{ if \(!owner\(req, res\)\) return; if \(pausedRefused\(res\)\) return;/.test(fs.readFileSync(path.join(REPO, 'src/routes/webhook.js'), 'utf8')), 'PIN (B-f276 1b): the webhook paths list asks the pause before it reads its options off the list (never the defaults shown as the truth)');
+  // CONTROL: a planted bare call of a refused SYNC door (the raw API's shape before the cure) — red by its file and line
+  const AR = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf8');
+  const planted = callersCensus({ 'src/agent-routes.js': `${AR}\nfunction plantedBare(cid) { return getChannels().apiAccounts(cid); }\n` });
+  ok(planted.bare.length === 1 && /^src\/agent-routes\.js:\d+ apiAccounts$/.test(planted.bare[0]), 'CALLERS\' CENSUS CONTROL: a planted bare call of a refused door (no try, no pausedState ask) is red BY ITS FILE AND LINE', planted.bare.join(' · '));
+  // THE INNER GUARDS — the roads that bypass the API (a kick timer, a sign-in's landing, setOptions → the inner pass; the push lanes'
+  // sync; a live lane's event; the tick): PINNED here (no fast road drives them while held — said in the line)
+  {
+    const inner = [
+      [/async function pass\(adapterId, \{ force = false, origin = 'timer' \} = \{\}\) \{\n\s+if \(indexHeld\(\)\) \{ sayPaused\(\); return pausedAnswer\(\); \}/, 'the inner pass'],
+      [/async function syncPushLanes\(\) \{\n\s+if \(indexHeld\(\)\) return;/, 'the push lanes\' sync'],
+      [/async function onPushEvent\(rec, e, ev\) \{\n\s+if \(indexHeld\(\)\) throw pausedError\(\);[^\n]*\n\s+const p = pushRow\(rec\);/, 'a live lane\'s event, BEFORE its seen-mark'],
+      [/function tick\(\) \{\n\s+if \(stopped \|\| indexHeld\(\)\) return;/, 'the tick'],
+    ];
+    const esrc0 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+    const missing = inner.filter(([re]) => !re.test(esrc0)).map(([, n]) => n);
+    ok(!missing.length, `the inner guards stand at the top of each road that bypasses the API (${inner.map(([, n]) => n).join(', ')})`, missing.join(', '));
+  }
+  // CONTROL: the gate cut (the API not wrapped, the start and the tick not paused) — today's half-blind engine
+  const src = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
+  const CUTS = [["\n  return pauseDoors({\n", "\n  return ({\n"], ["    if (indexHeld()) {   // B-f276: no tick, no boot pass, no push lane", "    if (false) {   // B-f276: no tick, no boot pass, no push lane"]];
+  ok(CUTS.every(([from]) => src.split(from).length === 2), 'CONTROL setup: the gate is where the control cuts it');
+  const { mutantCopies: mcOf } = await import('./mutant-copy.mjs');
+  const MC = mcOf('channel-outbox-paused', REPO);
+  const cut = MC.load('src/server/channels-engine.js', CUTS.reduce((t, [a, b]) => t.replace(a, b), src), 'paused-gate-cut');
+  const c = await pausedLegs(cut, 'cut');
+  { const TOT = "    if (!keys && scope === 'totals') return { ...totalsNow(t), scope: 'totals', at: t, paused: indexHeld() ? pausedFacts() : null };";
+    const { anchored: anchoredT } = await import('./scratch.mjs');
+    const tc = await pausedLegs(MC.load('src/server/channels-engine.js', anchoredT(src, TOT, "    if (!keys && scope === 'totals') return { ...totalsNow(t), scope: 'totals', at: t };", 'the totals scope without paused'), 'totals-no-paused'), 'totals-cut');   // stale-pins: kept — the cut's own text (the totals scope as A3 had it)
+    ok(!tc.totals || !tc.totals.paused, 'TOTALS CONTROL (the badge scope without «paused», as A3): the rail reads a bare 0 while paused — red', JSON.stringify(tc.totals)); }
+  ok(c.migDone === true, 'CONTROL (the gate cut): the same migration runs over the empty held list and is recorded DONE for good — red', JSON.stringify({ migDone: c.migDone }));
+  ok(!refused(c.approve) && c.state !== 'awaiting-approval' && !refused(c.propose), 'CONTROL (the gate cut — today\'s engine over a held list): the waiting proposal is moved out of «awaiting approval» and the reply is answered «no such conversation» — red', JSON.stringify({ approve: c.approve, state: c.state, propose: c.propose }));
 }
 
 console.log(fail ? `\nFAILED (${pass} passed, ${fail} failed)` : `\nALL PASS (${pass})`);

@@ -2828,6 +2828,7 @@ console.log('\n㉗ B-166e part 2 (2): a change of an account\'s own client is re
     const dir = path.join(ROOT, tag); fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [SEED] }));
     const E = M.create({ dataDir: dir, env: {}, now, broadcast: () => {}, integrations, fetch: v.fetchFn, log: quiet, ...FAST_PACE });
+    for (const end = Date.now() + 3000; !(E.store.adapters.asideCopies && E.store.adapters.asideCopies()) && Date.now() < end;) await new Promise((z) => setTimeout(z, 5));   // B-f276 1b: UNKNOWN HOLDS (主开发 r459) — the start's one listing of the accounts' copies answers before a seal
     let err = null, r = null;
     try { r = await E.setCustomSecret(SEED.id, OTHER); } catch (x) { err = x; }
     const mem = JSON.stringify((E.adapterRecords().adapters.find((x) => x.id === SEED.id) || {}).credential || null);

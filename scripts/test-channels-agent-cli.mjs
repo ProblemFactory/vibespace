@@ -83,6 +83,7 @@ const REFUSAL_FIXTURES = {
   'backoff': { error: 'the vendor refused this account\'s last fetch (rate-limited) — it is retried in 27 s; read what is there now', retryAfterSec: 27 },
   'account-changed': { error: 'the account changed while the refresh waited (removed) — refresh again', retryAfterSec: 0 },
   'stopped': { error: 'the channels engine is stopping — refresh again after the restart', retryAfterSec: 0 },
+  'store-blocked': { error: 'the channels are paused: the list of conversations (index.json) could not be read — nothing is fetched or sent until it reads again and VibeSpace is restarted (it is loaded at the next start)', retryAfterSec: 0 },   // B-f276 1b
 };
 for (const c of Object.keys(REFUSAL_FIXTURES)) REFUSAL_FIXTURES[c].status = ROUTE_STATUS.get(c) || 500;
 ok(JSON.stringify(Object.keys(REFUSAL_FIXTURES).sort()) === JSON.stringify(expectedRefused), 'CENSUS: one fixture per refused code — a code added to the route without a fixture here is red', Object.keys(REFUSAL_FIXTURES).sort().join(', '));

@@ -326,18 +326,27 @@ export function installSidebarRail(Sidebar) {
       this._railSetBadge('browser', n > 99 ? '99+' : (n || ''));
       return n;
     },
+    /** B-f276 1b: the channels PAUSED (a file of theirs could not be read — the digest's `paused: {files}`) ⇒ the badge warns (⚠) and its
+     *  tip names the held file; nothing the badge counts is read from a list nobody read */
+    _railPausedFrom(paused) {
+      this._railPaused = paused && Array.isArray(paused.files) && paused.files.length ? paused.files.slice(0, 4) : null;
+      this._railPausedLifts = paused && paused.lifts ? String(paused.lifts) : null;
+      this._railChanBadge('paused', this._railPaused ? 1 : 0);
+    },
     _railChanBadge(part, n) {
       this._chanBadgeParts = { ...(this._chanBadgeParts || {}), [part]: Number(n) || 0 };
       const p = this._chanBadgeParts;
       const total = (p.ch || 0) + (p.grp || 0) + (p.acct || 0);
       // a dead sign-in turns the badge RED with ⚠ and names the accounts (the tip + the accessible name)
-      this._railSetBadge('channels', p.acct ? `⚠${total}` : (total || ''));
+      this._railSetBadge('channels', p.acct || p.paused ? `⚠${total || ''}` : (total || ''));   // B-f276 1b: paused warns too (its own part, never counted)
       const b = this._railEl?.querySelector('.rail-item[data-rail="channels"]');
       if (!b) return;
       if (b.dataset.tipBase === undefined) b.dataset.tipBase = b.dataset.tip || tr('Channels');
-      b.classList.toggle('rail-danger', !!p.acct);
+      b.classList.toggle('rail-danger', !!(p.acct || p.paused));
       const names = p.acct ? (this._railSignin || []).map((x) => x.name) : [];
-      const tip = names.length ? `${b.dataset.tipBase} — ${tr('Sign-in expired: {accounts}', { accounts: names.join(', ') })}` : b.dataset.tipBase;
+      const pf = this._railPaused && this._railPaused[0], lifts = this._railPausedLifts;
+      const paused = p.paused && pf ? (lifts === 'a-person' ? tr("Channels paused: {file} could not be read as itself — nothing is fetched or sent until it is started empty or a good copy is put back", { file: pf }) : lifts === 'next-start' ? tr("Channels paused: {file} could not be read — nothing is fetched or sent until it reads again and VibeSpace restarts", { file: pf }) : tr('Channels paused: {file} could not be read — nothing is fetched or sent until it reads again', { file: pf })) : '';
+      const tip = [b.dataset.tipBase, names.length ? tr('Sign-in expired: {accounts}', { accounts: names.join(', ') }) : '', paused].filter(Boolean).join(' — ');
       if (b.dataset.tip !== tip) { b.dataset.tip = tip; b.setAttribute('aria-label', tip); }
     },
 
@@ -357,6 +366,7 @@ export function installSidebarRail(Sidebar) {
         if (msg.type === 'channels-updated') {
           if (msg.digest) this._railChanBadge('ch', Number(msg.digest.needsMe) || 0);   // lane attention-predicate-shared: the conversations in bands 1–4
           if (msg.digest) this._railSigninFrom(msg.digest.adapters);   // lane channel-reauth-visible: the dead sign-ins, live
+          if (msg.digest) this._railPausedFrom(msg.digest.paused);   // B-f276 1b: the channels PAUSED — the badge never reads «nothing needs you»
           // The open Channels panel is NOT torn down here: its own broadcast
           // handler redraws in place from this very digest (a1 D12 — the
           // remove + re-render + refetch emptied the list for the fetch's
@@ -369,7 +379,7 @@ export function installSidebarRail(Sidebar) {
         //  the server's count is re-read and the groups' half recounted
         if (msg.type === 'settings-updated') {
           this._railTakeoverBadge(); // lane browser-takeover-queue: a band switch moves the Browser badge too
-          fetchJson('/api/channels?scope=totals').then((r) => { if (r && !r.error) { this._railChanBadge('ch', Number(r.needsMe) || 0); this._railSigninFrom(r.signin); } }).catch(() => {});
+          fetchJson('/api/channels?scope=totals').then((r) => { if (r && !r.error) { this._railChanBadge('ch', Number(r.needsMe) || 0); this._railSigninFrom(r.signin); this._railPausedFrom(r.paused); } }).catch(() => {});
           this._railChanBadge('grp', this._railGroupsNeed());
         }
         if (msg.type === 'jobs-updated') {

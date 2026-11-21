@@ -2201,11 +2201,13 @@ const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'
 // `/api/agent/channels/` handler calls touchChannel, or is on its closed exemption list with the reason.
 // lane touch-chip-cause: every touch here is the AGENT's own act (its CLI's verb) — the chat binds it to the call that ran it.
 const touchChannel = (id, touches) => { try { const w = getTouches(); if (w && touches && touches.length) w.recordMany(id, touches, { cause: 'agent' }); } catch (e) { console.warn('[channel-touches] record failed:', (e && e.message) || e); } };
+// B-f276 (主开发 r460): the channels PAUSED (their list could not be read) reach the agent BY NAME — 503 with its code
+const chanFail = (res, e) => (e && e.code === 'store-blocked' ? res.status(503).json({ ok: false, code: 'store-blocked', error: e.message }) : res.status(500).json({ error: e.message }));
 const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   if (r && r.badSpec) return res.status(400).json({ ...r, error: r.error || 'refused', code });   // lane agent-watch-parity: a watch row the dialog's validators refuse (src/channel-watch-spec.js) — a request to fix, never a retry
-  const status = code === 'not-found' ? 404 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' || code === 'rest-not-sent' || code === 'rest-already' || code === 'rest-nothing-left' || code === 'rest-files-gone' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' || code === 'bad-filter' ? 400 : code === 'stopped' ? 503 : code === 'no-access' || code === 'excepted' ? 403 : code === 'except_conflicts' || code === 'except_unnamed' ? 409 : code === 'not-watching' ? 404 : code === 'watcher-needs-access' ? 400 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
+  const status = code === 'not-found' ? 404 : code === 'store-blocked' ? 503 : code === 'not-yours' ? 403 : code === 'send-not-available' || code === 'account-changed' || code === 'compose-not-available' || code === 'not-withdrawable' || code === 'rest-not-sent' || code === 'rest-already' || code === 'rest-nothing-left' || code === 'rest-files-gone' ? 409 : code === 'refresh-queue-full' || code === 'rate-floor' || code === 'refresh-floor' || code === 'vendor-budget' || code === 'backoff' ? 429 : code === 'bad-proposal' || code === 'bad-request' || code === 'bad-filter' ? 400 : code === 'stopped' ? 503 : code === 'no-access' || code === 'excepted' ? 403 : code === 'except_conflicts' || code === 'except_unnamed' ? 409 : code === 'not-watching' ? 404 : code === 'watcher-needs-access' ? 400 : 500;   // r5: the request set's cap is a 429 with its wait; an account changed mid-wait a 409; the engine stopping a 503; R4: an adapter that cannot start a conversation a 409; 2026-09-27: somebody else's proposal a 403, one past withdrawing a 409
   if (r && r.retryAfterSec) res.setHeader('Retry-After', String(r.retryAfterSec));
   return res.status(status).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
 };
@@ -2217,7 +2219,7 @@ app.get('/api/agent/channels/list', (req, res) => {
   if (!eng) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
   // lane channel-agent-watch W2: `?all=1` adds the account directories' rows (titles the agent may REQUEST, never read)
-  const r = eng.listFor(channelPrincipal(s, id), { all: req.query.all === '1' || req.query.all === 'true' });
+  let r; try { r = eng.listFor(channelPrincipal(s, id), { all: req.query.all === '1' || req.query.all === 'true' }); } catch (e) { return chanFail(res, e); }   // B-f276: a refused (paused) read by name
   // lane pod-oauth-callback: the types no account of which is signed in — the CLI names them with the `connect` verb
   if (r && r.ok && typeof eng.connectOffers === 'function') { try { r.connectable = eng.connectOffers().map((x) => ({ kind: x.kind, label: x.label, accounts: x.accounts })); } catch { } }
   chanAnswer(res, r);
@@ -2234,7 +2236,7 @@ app.post('/api/agent/channels/connect', (req, res) => {
   if (!eng || typeof eng.connectOffer !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [, id] = hit;
   const b = req.body || {};
-  const r = eng.connectOffer(typeof b.kind === 'string' ? b.kind : '');
+  let r; try { r = eng.connectOffer(typeof b.kind === 'string' ? b.kind : ''); } catch (e) { return chanFail(res, e); }   // B-f276 1b (A3's read must 5): a refused (paused) door answers BY NAME — never a bare 500, never a hang
   if (r && r.ok) touchChannel(id, [{ op: 'connect', adapterId: r.kind, kind: r.kind, account: r.label, icon: r.glyph }]);   // §26: the row IS the Connect card
   chanAnswer(res, r);
 });
@@ -2259,7 +2261,7 @@ app.get('/api/agent/channels/read', async (req, res) => {
     : thread && typeof eng.readThreadFor === 'function'
     ? eng.readThreadFor(channelPrincipal(s, id), key.adapterId, key.convId, thread, { limit: Number(req.query.limit) || 50 })
     : eng.readFor(channelPrincipal(s, id), key.adapterId, key.convId, { limit: Number(req.query.limit) || 50, since: Number.isFinite(since) ? since : null });
-  } catch (e) { return res.status(500).json({ error: e.message }); }
+  } catch (e) { return chanFail(res, e); }
   if (r && r.ok) touchChannel(id, [{ op: 'read', adapterId: key.adapterId, convId: key.convId, title: r.conversation && r.conversation.title, count: (r.records || []).length }]);
   chanAnswer(res, r);
 });
@@ -2311,7 +2313,7 @@ app.get('/api/agent/channels/attachment', async (req, res) => {
     st.pipe(res);
   } catch (e) {
     if (fh) fh.close().catch(() => {});
-    if (!res.headersSent) res.status(500).json({ error: e.message }); else res.destroy();
+    if (!res.headersSent) chanFail(res, e); else res.destroy();
   }
 });
 // THE AGENT'S OWN REFRESH (2026-09-26, design §6.5): reach first (invisible =
@@ -2330,7 +2332,7 @@ app.post('/api/agent/channels/:adapterId/:convId/refresh', async (req, res) => {
     if (r && r.ok) touchChannel(id, [{ op: 'refresh', adapterId: String(req.params.adapterId), convId: String(req.params.convId), title: r.conversation && r.conversation.title, count: r.appended || 0 }]);
     chanAnswer(res, r);
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 app.post('/api/agent/channels/reply', async (req, res) => {
   const hit = agentSession(req, res);
@@ -2367,7 +2369,7 @@ app.post('/api/agent/channels/reply', async (req, res) => {
     if (r && r.ok) r.chars = cliText.chars(b.text);   // lane cli-one-text-arg: the text proposed, counted (the CLI echoes sent: N characters)
     chanAnswer(res, r);
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 // lane channel-threads (spec §9): the reaction + thread verbs' OWN status table (chanAnswer's is the refresh
 // census's — test-channels-agent-cli derives the CLI's refused set from it and it stays unchanged)
@@ -2398,7 +2400,7 @@ app.post('/api/agent/channels/react', async (req, res) => {
     if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'react', adapterId: key.adapterId, convId: key.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, glyph: (r.proposal.reaction && (r.proposal.reaction.glyph || `:${r.proposal.reaction.key}:`)) || null }]);
     rxAnswer(res, r);
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 // THE AGENT'S THREAD WALK (spec §5.1): `refresh <conv> --thread <msg>` — the only door by which an agent causes one
 app.post('/api/agent/channels/:adapterId/:convId/thread/:msg/refresh', async (req, res) => {
@@ -2413,7 +2415,7 @@ app.post('/api/agent/channels/:adapterId/:convId/thread/:msg/refresh', async (re
     if (r && r.ok) touchChannel(id, [{ op: 'refresh', adapterId: String(req.params.adapterId), convId: String(req.params.convId), title: r.conversation && r.conversation.title, count: r.appended || 0 }]);
     rxAnswer(res, r);
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 // R4 (B-6acc): COMPOSE a NEW message on an account the agent has access to
 // (a whole-account access row) — the same outbox policy as `reply`, the same
@@ -2444,7 +2446,7 @@ app.post('/api/agent/channels/compose', async (req, res) => {
     if (r && r.ok && r.proposal) touchChannel(id, [{ op: 'compose', adapterId: r.proposal.adapterId || account, convId: r.proposal.convId || null, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id }]);   // §26 (B-099e)
     chanAnswer(res, r);
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 async function composeCallers(req, res, eng, s, id, b) {
   const key = splitConvKey(b.conv);
@@ -2457,7 +2459,7 @@ async function composeCallers(req, res, eng, s, id, b) {
     for (const x of (r && r.proposals) || []) if (x.ok && x.proposal) touchChannel(id, [{ op: 'compose', adapterId: key.adapterId, convId: key.convId, title: x.proposal.title, account: x.proposal.adapterLabel, proposalId: x.proposal.id }]);
     if (r && Array.isArray(r.proposals) && r.proposals.length) return res.json({ ...r, chars: cliText.chars(b.text) });   // one answer per caller (a refused one says so on its row); lane cli-one-text-arg: the text, counted
     chanAnswer(res, r);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { chanFail(res, e); }
 }
 // 2026-09-27 (the owner: "agent 似乎没有撤回之前制作的 draft 的能力，必须要我手动
 // reject 是吗？"): the drafting agent WITHDRAWS its own proposal while nobody
@@ -2491,9 +2493,9 @@ app.post('/api/agent/channels/proposals/:id/withdraw', async (req, res) => {
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
   const b = req.body || {};
   // lane bl-msg B-ae13: a WAKE REQUEST id (wr-…) is the asker's own request, taken back the same way (approval stays the person's click)
-  if (/^wr-/.test(String(req.params.id)) && typeof eng.withdrawWatchRequest === 'function') { try { return chanAnswer(res, await eng.withdrawWatchRequest({ requestId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); } catch (e) { return res.status(500).json({ error: e.message }); } }
+  if (/^wr-/.test(String(req.params.id)) && typeof eng.withdrawWatchRequest === 'function') { try { return chanAnswer(res, await eng.withdrawWatchRequest({ requestId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); } catch (e) { return chanFail(res, e); } }
   try { chanAnswer(res, await eng.withdrawProposal({ proposalId: String(req.params.id), why: typeof b.why === 'string' ? b.why : null, by })); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 // lane bl-msg B-da74: the DRAFTING agent asks to send the rest of its sent proposal — the files that did not land, as a NEW
 // proposal the user approves (never sent by the agent itself); the same caller rules as withdraw
@@ -2508,7 +2510,7 @@ app.post('/api/agent/channels/proposals/:id/resend', async (req, res) => {
   const by = callerChannelPrincipal(who);
   if (!by) return res.status(409).json({ error: NO_CID_YET, code: 'bad-member' });
   try { const r = await eng.resendRest(String(req.params.id), { ctx: by }); if (r && r.ok && r.proposal) { try { touchChannel(who.id, [{ op: 'reply', adapterId: r.proposal.adapterId, convId: r.proposal.convId, title: r.proposal.title, account: r.proposal.adapterLabel, proposalId: r.proposal.id, placement: r.proposal.placement || null }]); } catch { } } chanAnswer(res, r); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 // R4: SEARCH the messages the agent can SEE (reach filters every hit; the
 // local logs only — never a vendor call)
@@ -2530,7 +2532,7 @@ app.get('/api/agent/channels/search', async (req, res) => {
     if (r && r.ok) touchChannel(id, searchTouches(r.results, { query: String(req.query.q || ''), memo }));   // one touch per conversation hit (the most hits first, bounded) — .212: + what was searched and ≤ 50 hit refs each
     chanAnswer(res, r);
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 app.get('/api/agent/channels/status', (req, res) => {
   const hit = agentSession(req, res);
@@ -2543,9 +2545,9 @@ app.get('/api/agent/channels/status', (req, res) => {
   // lane channel-direct-send-sync: `?collect=1` on one proposal is the drafting CLI reading its direct send's
   // receipt INLINE — mark it read (the message road never fires for it); `pending` ⇒ the send is not out yet, poll on
   if (req.query.collect === '1' && req.query.id && typeof eng.collectReceipt === 'function') {
-    return Promise.resolve().then(() => eng.collectReceipt(ctx, String(req.query.id))).then((cr) => chanAnswer(res, cr), (e) => res.status(500).json({ error: e.message }));
+    return Promise.resolve().then(() => eng.collectReceipt(ctx, String(req.query.id))).then((cr) => chanAnswer(res, cr), (e) => chanFail(res, e));
   }
-  const r = eng.statusFor(ctx, req.query.id ? String(req.query.id) : null);
+  let r; try { r = eng.statusFor(ctx, req.query.id ? String(req.query.id) : null); } catch (e) { return chanFail(res, e); }   // B-f276: a refused (paused) read by name
   // R4: WHAT YOU WERE GIVEN — every grain naming you (or a group of yours):
   // its access authority and whether a notification wakes you
   if (r && r.ok && !req.query.id && typeof eng.accessFor === 'function') { try { r.access = eng.accessFor(ctx).access; } catch { r.access = []; } }
@@ -2566,7 +2568,7 @@ app.get('/api/agent/channels/proposals', (req, res) => {
   if (!eng || typeof eng.proposalsListFor !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
   try { chanAnswer(res, eng.proposalsListFor(channelPrincipal(s, id), { all: req.query.all === '1' || req.query.all === 'true' })); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 // lane channels-proposals-recall (agent feedback fb-1b79b2d9d4 — the user wanted a message HE sent on Lark taken back):
 // PROPOSE a RECALL of the user's own message — never direct (the user approves it, as any send); the approval takes it
@@ -2594,7 +2596,7 @@ app.post('/api/agent/channels/recall', async (req, res) => {
     if (r && r.ok) return res.json(r);
     const code = (r && r.code) || 'error';
     return res.status(RECALL_STATUS[code] || 500).json({ ...(r || {}), error: (r && r.error) || 'refused', code });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { chanFail(res, e); }
 });
 app.post('/api/agent/channels/request', async (req, res) => {
   const hit = agentSession(req, res);
@@ -2617,7 +2619,7 @@ app.post('/api/agent/channels/request', async (req, res) => {
     if (r && r.ok) r.chars = cliText.chars(b.why);   // lane cli-one-text-arg: the reason, counted
     chanAnswer(res, r);
   }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 
 // lane channel-agent-watch W1 (the owner, 2026-10-01: "是否允许agent自己注册针对他有权限访问的某个聊天的通知？"): the agent's
@@ -2644,7 +2646,7 @@ const watchVerb = async (verb, req, res) => {
     const key = splitConvKey(b.target);
     chanAnswer(res, r);
     return r && r.ok && key ? { id, touches: [{ op: verb, adapterId: key.adapterId, convId: key.convId }] } : null;
-  } catch (e) { res.status(500).json({ error: e.message }); return null; }
+  } catch (e) { chanFail(res, e); return null; }
 };
 app.post('/api/agent/channels/watch', async (req, res) => { const t = await watchVerb('watch', req, res); if (t) touchChannel(t.id, t.touches); });   // §26 (B-099e): a conversation watched is a conversation touched
 app.post('/api/agent/channels/unwatch', async (req, res) => { const t = await watchVerb('unwatch', req, res); if (t) touchChannel(t.id, t.touches); });
@@ -2658,7 +2660,7 @@ app.get('/api/agent/channels/watches', (req, res) => {
   if (!eng || typeof eng.agentWatchesFor !== 'function') return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
   const [s, id] = hit;
   try { chanAnswer(res, eng.agentWatchesFor(channelPrincipal(s, id), typeof req.query.target === 'string' && req.query.target.trim() ? req.query.target.trim() : null)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { chanFail(res, e); }
 });
 // B-2198 THE RAW API PASS-THROUGH (docs/design-channel-raw-api.md): the agent sends a raw vendor call — method + PATH —
 // and VibeSpace adds the credential's token server-side; src/server/channel-api.js holds the tier (asked again after
@@ -2687,7 +2689,7 @@ app.post('/api/agent/channels/api', async (req, res) => {
   else if (typeof b.body === 'string') body = b.body;
   let r;
   try { r = await api.call(channelPrincipal(s, id), { cred: b.cred, method: b.method, host: b.host, path: b.path, query: b.query, headers: b.headers, body, why: typeof b.why === 'string' ? b.why : null }); }
-  catch (e) { return res.status(500).json({ error: e.message }); }
+  catch (e) { return chanFail(res, e); }
   if (r && r.touch) touchChannel(id, [r.touch]);
   // lane inline-receipts-compose-api: `collect` (`api … --wait`) on a call that filed a proposal = the CLI waits on it now —
   // its receipt is held for the CLI to read inline (the poll below renews the hold); no `collect` ⇒ the receipt message
@@ -2699,21 +2701,21 @@ app.get('/api/agent/channels/api/creds', (req, res) => {
   if (!hit) return;
   const api = rawApi();
   if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
-  apiAnswer(res, api.creds(channelPrincipal(hit[0], hit[1])));
+  try { apiAnswer(res, api.creds(channelPrincipal(hit[0], hit[1]))); } catch (e) { chanFail(res, e); }   // B-f276 1b (A3's read must 5): a refused (paused) door answers BY NAME — never a bare 500, never a hang
 });
 app.get('/api/agent/channels/api/docs', (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   const api = rawApi();
   if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
-  apiAnswer(res, api.docs(channelPrincipal(hit[0], hit[1]), String(req.query.cred || '')));
+  try { apiAnswer(res, api.docs(channelPrincipal(hit[0], hit[1]), String(req.query.cred || ''))); } catch (e) { chanFail(res, e); }   // B-f276 1b (A3's read must 5): a refused (paused) door answers BY NAME — never a bare 500, never a hang
 });
 app.get('/api/agent/channels/api/proposals/:id', async (req, res) => {
   const hit = agentSession(req, res);
   if (!hit) return;
   const api = rawApi();
   if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
-  const r = api.proposalFor(channelPrincipal(hit[0], hit[1]), String(req.params.id));
+  let r; try { r = api.proposalFor(channelPrincipal(hit[0], hit[1]), String(req.params.id)); } catch (e) { return chanFail(res, e); }   // B-f276 1b (A3's read must 5): a refused (paused) door answers BY NAME — never a bare 500, never a hang
   // lane inline-receipts-compose-api: `?collect=1` = the CLI waiting on ITS proposal (`api … --wait` / `api wait <id>`; the
   // orchestrator's own-proposal answer above is the gate) — still pending: the receipt stays held while it polls; decided:
   // the outcome is read HERE, with the card's words, and the receipt message is never filed (`messaged` = it went already)
@@ -2725,7 +2727,7 @@ app.get('/api/agent/channels/api/log', (req, res) => {
   if (!hit) return;
   const api = rawApi();
   if (!api) return res.status(503).json({ error: 'Channels are not available on this instance', code: 'unavailable' });
-  apiAnswer(res, api.logFor(channelPrincipal(hit[0], hit[1]), String(req.query.cred || '')));
+  try { apiAnswer(res, api.logFor(channelPrincipal(hit[0], hit[1]), String(req.query.cred || ''))); } catch (e) { chanFail(res, e); }   // B-f276 1b (A3's read must 5): a refused (paused) door answers BY NAME — never a bare 500, never a hang
 });
 
 const serveAgentDoc = (req, res, topic) => {

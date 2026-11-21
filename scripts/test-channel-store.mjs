@@ -754,7 +754,7 @@ console.log('§r3 a BLOCKED family refuses the ACTION, not only the write (r3 fi
   else {
     const warns = [];
     const st = S.createChannelStore({ dir, log: { warn: (...a) => warns.push(a.join(' ')), log() {}, info() {} } });
-    ok(['index.json', 'adapters.json', 'outbox.json', 'groups.json'].every((f) => st.quarantined.some((q) => q.file === f && q.blocked === true)), 'FIXTURE: every family is BLOCKED (named in store.quarantined)', JSON.stringify(st.quarantined));
+    ok(['index.json', 'adapters.json', 'outbox.json', 'groups.json'].every((f) => st.quarantined.some((q) => q.file === f && q.held === true && q.kind === 'damaged')), 'FIXTURE: every family is HELD as damaged (named in store.quarantined — B-f276 1b: torn bytes are held, never set aside)', JSON.stringify(st.quarantined));
     let ixErr = null;
     const r = await st.index.update((ix) => { ix.conversations['fake/c1'] = { key: 'fake/c1', id: 'c1', adapterId: 'fake', tracked: true }; }).then(() => 'RESOLVED', (e) => { ixErr = e; return 'rejected'; });
     ok(r === 'rejected' && ixErr && ixErr.code === 'store-blocked' && ixErr.status === 503 && /index\.json/.test(ixErr.message), 'index.update over a BLOCKED index.json REJECTS with code store-blocked (503) — never a success the next restart takes back', JSON.stringify({ r, code: ixErr && ixErr.code, status: ixErr && ixErr.status }));
@@ -1511,7 +1511,7 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   ok(!dc.line, '⑭ CONTROL: the line cut — a start that lost every poll time is silent — red');
 
   // verify r1 (A10): a FOREIGN-shaped side file (another `v`, its columns renamed or gone, entries that are not lists) is
-  // never read as "no stamps" in silence — set aside and said like every family, or counted
+  // never read as "no stamps" in silence — HELD as damaged like every family (B-f276 1b: kept where it is, never set aside), or counted
   const foreignRun = async (M, tag) => {
     const out = {};
     const bodies = { v2: { v: 2, fields: ['pollAt', 'scanAt', 'walkAt'], stamps: { 'a/c1': [T, T, T] } }, nofields: { v: 1, fields: [], stamps: { 'a/c1': [T] } }, entries: { v: 1, fields: ['lastPollAt', 'lastScanAt', 'walkStartedAt'], stamps: { 'a/c1': { lastPollAt: T }, 'a/c2': [T, null, null] } } };
@@ -1521,18 +1521,19 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
       fs.writeFileSync(st.stamps.file, JSON.stringify(body));
       const n0 = say.length;
       const re = M.createChannelStore({ dir, log: slog });
-      out[name] = { said: say.slice(n0).some((w) => /poll-stamps\.json/.test(w) && /no last-poll time/.test(w)), aside: fs.readdirSync(dir).some((f) => f.startsWith('poll-stamps.json.corrupt-')), c2: re.stamps.get('a/c2').lastPollAt || null };
+      out[name] = { said: say.slice(n0).some((w) => /poll-stamps\.json/.test(w) && /no last-poll time/.test(w)), held: (re.quarantined || []).some((q) => q.file === 'poll-stamps.json' && q.held && q.kind === 'damaged'), aside: fs.readdirSync(dir).some((f) => /^poll-stamps\.json\.(corrupt|damaged)-/.test(f)), c2: (re.stamps.get('a/c2') || {}).lastPollAt || null };
       re.close();
+      out[name].kept = fs.readFileSync(st.stamps.file, 'utf8') === JSON.stringify(body);   // after the close: nothing wrote over it
     }
     return out;
   };
   const fh = await foreignRun(S, 'head');
-  ok(fh.v2.said && fh.v2.aside && fh.nofields.said && fh.nofields.aside && fh.entries.said && !fh.entries.aside && fh.entries.c2 === T, `⑭ a foreign-shaped poll-stamps.json (v 2 / no columns) is set aside and said; a v1 entry that is not a list is counted, the readable ones kept: ${JSON.stringify(fh)}`);
+  ok(fh.v2.held && fh.v2.kept && !fh.v2.aside && fh.nofields.held && fh.nofields.kept && !fh.nofields.aside && fh.entries.said && !fh.entries.held && !fh.entries.aside && fh.entries.c2 === T, `⑭ a foreign-shaped poll-stamps.json (v 2 / no columns) is HELD as damaged — kept where it is, never set aside or written over (B-f276 1b); a v1 entry that is not a list is counted, the readable ones kept: ${JSON.stringify(fh)}`);
   const VALID = ["v.v === 1 && Array.isArray(v.fields) && v.fields.includes('lastPollAt') && v.stamps", 'Array.isArray(v.fields) && v.stamps'];
   const UNREAD = ['      if (!Array.isArray(arr)) { unreadStamps++; continue; }\n', '      if (!Array.isArray(arr)) continue;\n'];
   ok([VALID, UNREAD].every(([from]) => src.split(from).length === 2), '⑭ CONTROL setup: the foreign-shape rules are where the control cuts them');
   const fc = await foreignRun(cut('qf-loose', VALID, UNREAD), 'c-loose');
-  ok(!fc.v2.said && !fc.v2.aside && !fc.nofields.said && !fc.entries.said, `⑭ CONTROL: the loose shape check (lane head f469d942) — every one read as "no stamps" in silence, each conversation due at once unsaid — red: ${JSON.stringify(fc)}`);
+  ok(!fc.v2.said && !fc.v2.held && !fc.nofields.said && !fc.nofields.held && !fc.entries.said, `⑭ CONTROL: the loose shape check (lane head f469d942) — every one read as "no stamps" in silence, each conversation due at once unsaid — red: ${JSON.stringify(fc)}`);
 
   // the engine reads the stamps through ONE door (laneOf) and writes them through ONE (store.stamps.set)
   const esrc = engineSource(REPO);
@@ -1542,6 +1543,147 @@ console.log('\n⑭ design 011 lane 2: the poll stamps leave the row — a quiet 
   const planted = esrc.replace('const last = Number(laneOf(en).lastPollAt) || 0;', 'const last = Number(en.lane && en.lane.lastPollAt) || 0;');
   ok(planted !== esrc && census(planted).past === 1, '⑭ CONTROL: the base\'s dueList read planted back on the row is counted — red');
   if (verifyEnv !== undefined) process.env.VIBESPACE_CHANNELS_INDEX_VERIFY = verifyEnv;
+}
+
+console.log('\n⑮ B-f276 (lane bl-windows, 主开发 r457): a failed READ holds the family — never set aside, never written over, read again');
+{
+  const src = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+  const say = [];
+  const hlog = { log() {}, info() {}, warn: (...a) => say.push(a.join(' ')), error() {} };
+  const RETRY = { firstMs: 5, maxMs: 10 };
+  const until = async (fn, ms = 5000) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v) return v; if (Date.now() > end) return null; await new Promise((r) => setTimeout(r, 5)); } };   // the bound is a failure line, never the wait
+  // the read of a family file FAILS: a directory stands where the file is (EISDIR — a read error, never ENOENT)
+  const unreadable = (dir, name) => { fs.mkdirSync(path.join(dir, name), { recursive: true }); fs.writeFileSync(path.join(dir, name, 'x'), 'x'); };
+  const heal = (dir, name, body) => { fs.rmSync(path.join(dir, name), { recursive: true, force: true }); fs.writeFileSync(path.join(dir, name), JSON.stringify(body)); };
+  const aside = (dir, name) => fs.readdirSync(dir).filter((f) => f.startsWith(name + '.corrupt-') || f.startsWith(name + '.damaged-'));   // B-f276 1b: either name — a held read sets nothing aside
+  const isHeld = (st, name) => (st.quarantined || []).some((x) => x.file === name && x.held);   // a control that renamed it is never read again: no wait
+  const heldRun = async (M, tag) => {
+    const r = {};
+    // ── the accounts (a small family): held, refused by name, adopted when it reads
+    {
+      const dir = path.join(ROOT, `h-${tag}-ad`); fs.mkdirSync(dir, { recursive: true });
+      unreadable(dir, 'adapters.json');
+      const events = [];
+      const st = M.createChannelStore({ dir, log: hlog, heldRetry: RETRY });
+      st.onHeldRead?.((ev) => events.push(ev));
+      let ran = false, refusal = null;
+      try { await st.adapters.update(() => { ran = true; }); } catch (e) { refusal = e && e.code; }
+      const q = (st.quarantined || []).find((x) => x.file === 'adapters.json') || {};
+      r.ad = { blocked: st.adapters.blocked(), held: st.adapters.held ? st.adapters.held() : null, ran, refusal, aside: aside(dir, 'adapters.json'), stillDir: fs.statSync(path.join(dir, 'adapters.json')).isDirectory(), q: { ...q } };
+      heal(dir, 'adapters.json', { v: 1, adapters: [{ id: 'a1', kind: 'fake', label: 'One' }] });
+      const ev = isHeld(st, 'adapters.json') ? await until(() => events.find((e) => e.file === 'adapters.json')) : null;
+      let wrote = null;
+      if (ev && ev.state === 'loaded') { await st.adapters.update((a) => { a.adapters[0].label = 'Two'; }); wrote = JSON.parse(fs.readFileSync(path.join(dir, 'adapters.json'), 'utf8')).adapters[0].label; }
+      r.ad.after = { ev: ev && ev.state, id: (st.adapters.live().adapters[0] || {}).id, blocked: st.adapters.blocked(), wrote, loadedAt: !!(st.quarantined.find((x) => x.file === 'adapters.json') || {}).loadedAt };
+      st.close();
+    }
+    // ── the index: held, refused by name, the acts journal untouched; when it reads it is SAID, loaded at the next start
+    {
+      const dir = path.join(ROOT, `h-${tag}-ix`); fs.mkdirSync(dir, { recursive: true });
+      const st0 = M.createChannelStore({ dir, log: hlog });
+      await st0.index.update((ix) => { ix.conversations['fake/c1'] = { key: 'fake/c1', id: 'c1', adapterId: 'fake', name: 'kept row' }; });
+      st0.close();
+      const good = fs.readFileSync(path.join(dir, 'index.json'), 'utf8');
+      const journal = () => { try { return fs.readFileSync(path.join(dir, 'index-acts.ndjson'), 'utf8'); } catch { return null; } };
+      const j0 = journal();
+      fs.rmSync(path.join(dir, 'index.json')); unreadable(dir, 'index.json');
+      const events = [];
+      const st = M.createChannelStore({ dir, log: hlog, heldRetry: RETRY });
+      st.onHeldRead?.((ev) => events.push(ev));
+      let refusal = null;
+      try { await st.index.update((ix) => { ix.conversations['fake/c2'] = { key: 'fake/c2', id: 'c2' }; }); } catch (e) { refusal = e && e.code; }
+      const q = (st.quarantined || []).find((x) => x.file === 'index.json') || {};
+      r.ix = { blocked: st.index.blocked(), refusal, aside: aside(dir, 'index.json'), q: { ...q }, rows: Object.keys(st.index.live()).length, journalSame: journal() === j0 };
+      fs.rmSync(path.join(dir, 'index.json'), { recursive: true, force: true }); fs.writeFileSync(path.join(dir, 'index.json'), good);
+      const ev = isHeld(st, 'index.json') ? await until(() => events.find((e) => e.file === 'index.json')) : null;
+      r.ix.after = { ev: ev && ev.state, stillHeld: !!st.index.blocked(), rows: Object.keys(st.index.live()).length, readsAt: !!(st.quarantined.find((x) => x.file === 'index.json') || {}).readsAt, said: say.some((w) => /index\.json reads again/.test(w) && /next start of VibeSpace/.test(w)) };
+      st.close();
+      const st2 = M.createChannelStore({ dir, log: hlog });   // the next start
+      r.ix.next = { rows: Object.keys(st2.index.live()), blocked: st2.index.blocked() };
+      st2.close();
+    }
+    // ── the wake-pace ledger: a floor granted DURING the hold is kept over the file's when it reads
+    {
+      const dir = path.join(ROOT, `h-${tag}-pc`); fs.mkdirSync(dir, { recursive: true });
+      unreadable(dir, 'wake-pace.json');
+      const events = [];
+      const st = M.createChannelStore({ dir, log: hlog, heldRetry: RETRY });
+      st.onHeldRead?.((ev) => events.push(ev));
+      st.pace.set({ v: 1, pairs: { now: 1 }, senders: { s1: [30] } });
+      heal(dir, 'wake-pace.json', { v: 1, pairs: { before: 2 }, senders: { s1: [10, 20] } });
+      const ev = isHeld(st, 'wake-pace.json') ? await until(() => events.find((e) => e.file === 'wake-pace.json')) : null;
+      st.pace.flush();
+      r.pc = { ev: ev && ev.state, live: Object.keys((st.pace.live() || {}).pairs || {}).sort(), s1: (((st.pace.live() || {}).senders || {}).s1 || []).join() };
+      st.close();
+      r.pc.disk = Object.keys(JSON.parse(fs.readFileSync(path.join(dir, 'wake-pace.json'), 'utf8')).pairs || {}).sort();
+    }
+    // ── torn bytes (READ, do not parse): HELD as damaged (B-f276 1b, 主开发 r809) — nothing set aside at a start; a person's door sets
+    // them aside under a dated name, LISTED among the accounts' copies the key check counts
+    {
+      const dir = path.join(ROOT, `h-${tag}-torn`); fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'adapters.json'), '{"v":1,"adapters":[{"id":"a1"');
+      const st = M.createChannelStore({ dir, log: hlog, heldRetry: RETRY });
+      const q = (st.quarantined || []).find((x) => x.file === 'adapters.json') || {};
+      const atStart = { aside: aside(dir, 'adapters.json'), kind: q.kind || null, blocked: !!st.adapters.blocked() };
+      await until(() => (st.adapters.asideCopies ? st.adapters.asideCopies() : ['n/a']));
+      const door = st.startDamagedEmpty ? await st.startDamagedEmpty('adapters.json') : null;
+      r.torn = { atStart, door: door && door.state, aside: aside(dir, 'adapters.json'), copies: st.adapters.asideCopies ? st.adapters.asideCopies() : null, blocked: st.adapters.blocked() };
+      st.close();
+    }
+    return r;
+  };
+  const r = await heldRun(S, 'head');
+  console.log(`    facts: accounts ${JSON.stringify({ refusal: r.ad.refusal, aside: r.ad.aside.length, after: r.ad.after })} · index ${JSON.stringify({ refusal: r.ix.refusal, aside: r.ix.aside.length, after: r.ix.after, next: r.ix.next.rows })} · pace ${JSON.stringify(r.pc)}`);
+  ok(r.ad.held === true && /could not be read/.test(r.ad.blocked || '') && /held/.test(r.ad.blocked || '') && !r.ad.ran && r.ad.refusal === 'store-blocked' && r.ad.aside.length === 0 && r.ad.stillDir && r.ad.q.held && r.ad.q.lifts === 'by-itself', '⑮ adapters.json unreadable at the open: HELD — nothing set aside (no .corrupt-, the file where it was), a change refused by name (store-blocked, its function never ran), the item says it lifts by itself', JSON.stringify(r.ad));
+  ok(r.ad.after.ev === 'loaded' && r.ad.after.id === 'a1' && r.ad.after.blocked === null && r.ad.after.wrote === 'Two' && r.ad.after.loadedAt, '⑮ …it reads again: its records taken in, the hold lifted, a change written again', JSON.stringify(r.ad.after));
+  ok(/could not be read/.test(r.ix.blocked || '') && r.ix.refusal === 'store-blocked' && r.ix.aside.length === 0 && r.ix.q.held && r.ix.q.lifts === 'next-start' && r.ix.rows === 0 && r.ix.journalSame, '⑮ index.json unreadable at the open: HELD — nothing set aside, an act refused by name, the acts journal byte-identical (its lines wait for the next start)', JSON.stringify(r.ix));
+  ok(r.ix.after.ev === 'reads-again' && r.ix.after.stillHeld && r.ix.after.rows === 0 && r.ix.after.readsAt && r.ix.after.said, '⑮ …it reads again: SAID (loaded at the next start of VibeSpace) — never swapped under the running readers, still held', JSON.stringify(r.ix.after));
+  ok(r.ix.next.rows.includes('fake/c1') && !r.ix.next.blocked, '⑮ …the next start loads it: the kept row is there', JSON.stringify(r.ix.next));
+  ok(r.pc.ev === 'loaded' && r.pc.live.join() === 'before,now' && r.pc.disk.join() === 'before,now' && r.pc.s1 === '10,20,30', '⑮ wake-pace.json held, then read: the file\'s floors AND the one granted during the hold, in memory and on disk — a sender\'s wake stamps JOINED (none of the file\'s window dropped)', JSON.stringify(r.pc));
+  ok(r.torn.atStart.aside.length === 0 && r.torn.atStart.kind === 'damaged' && r.torn.atStart.blocked && r.torn.door === 'pass' && r.torn.aside.length === 1 && /\.damaged-/.test(r.torn.aside[0]) && Array.isArray(r.torn.copies) && r.torn.copies.includes(r.torn.aside[0]) && r.torn.blocked === null, '⑮ torn adapters.json (read, does not parse): HELD as damaged at the start — nothing set aside; the person\'s door (Start it empty) sets it aside under a dated name, LISTED among the accounts\' copies the key check counts', JSON.stringify(r.torn));
+  // CONTROLS: today's rename of a failed read; the ledger taken over (no merge)
+  const HOLD = ["    if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }\n", "    if (st !== 'data') { fam.value = empty(); fam.missing = true; return fam; }   /* MUTANT: the release — a failed read starts EMPTY */\n"];   // B-f276 1b: the store hold's answer
+  const MERGE = ["(v) => { paceSet({ ...v, pairs: unionBy(v.pairs, pc.pairs), senders: unionBy(v.senders, pc.senders) }); }", '(v) => { paceSet(v); }'];
+  ok([HOLD, MERGE].every(([from]) => src.split(from).length === 2), '⑮ CONTROL setup: the hold and the merge are where the controls cut them');
+  const mut = (tag, ...cs) => require(MUTCS.write('src/channel-store.js', cs.reduce((t, [from, to]) => t.replace(from, to), src), tag));
+  const c1 = await heldRun(mut('held-rename', HOLD), 'c-rename');
+  ok(c1.ad.ran === true && c1.ad.refusal !== 'store-blocked', '⑮ CONTROL: the hold cut (the release\'s read: a failed read starts EMPTY) — a change RUNS over the accounts nobody read — red', JSON.stringify({ ad: { ran: c1.ad.ran, refusal: c1.ad.refusal } }));
+  const c2 = await heldRun(mut('held-nomerge', MERGE), 'c-nomerge');
+  ok(c2.pc.live.join() === 'before', '⑮ CONTROL: the ledger taken over at the read — the floor granted during the hold is forgotten — red', JSON.stringify(c2.pc));
+}
+
+console.log('\n⑮b B-f276 A2 (主开发 r487): A CLEANUP DELETES ONLY WHAT IT KNOWS IS AN ORPHAN — the walls, a census');
+{
+  const W = S.HELD_WALLS || {};
+  const files = ['src/channel-store.js', 'src/server/channels-engine.js', 'src/server/channels-outbound.js', 'src/server/channels-auth.js', 'src/server/channels-access.js', 'src/server/groups-engine.js'];
+  // the CODE is asked, never a comment (the read's nit): comments stripped first
+  const text = files.map((f) => fs.readFileSync(path.join(REPO, f), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`\\])\/\/.*$/gm, '$1')).join('\n');
+  const asked = new Map();
+  for (const m of text.matchAll(/wallHeld\('([A-Za-z]+)'\)|\bHELD_WALLS\.([A-Za-z]+) &&/g)) { const n = m[1] || m[2]; asked.set(n, (asked.get(n) || 0) + 1); }
+  // A3 (r566 #7): the wrapper is DENY BY DEFAULT — a door with no row is refused while paused, an allowed one answers
+  {
+    const api = S.pauseDoorsOf({ plantedNewDoor: () => 'yes', allowedDoor: () => 'ok' }, { allowedDoor: ['allow', 'sync', 'a test row'] }, { held: () => true, error: () => Object.assign(new Error('paused'), { code: 'store-blocked' }), answer: () => ({}) });
+    let threw = null; try { api.plantedNewDoor(); } catch (e) { threw = e && e.code; }
+    ok(threw === 'store-blocked' && api.allowedDoor() === 'ok', '⑮b A3: a PLANTED door with no row is refused while paused (deny by default, until someone allows it); an allowed door answers', JSON.stringify({ threw }));
+  }
+  const rows = Object.keys(W);
+  const unasked = rows.filter((n) => !asked.has(n)), twice = rows.filter((n) => (asked.get(n) || 0) > 1), stray = [...asked.keys()].filter((n) => !rows.includes(n));
+  console.log(`    walls: ${rows.map((n) => `${n} ← ${W[n].join(', ')}`).join(' · ')}`);
+  ok(rows.length >= 7 && !unasked.length && !twice.length && !stray.length, `⑮b THE WALLS: every cleanup that deletes / closes / drops on what a family holds is a row of HELD_WALLS (${rows.length}) and asks it ITSELF exactly once — none unasked, none asked twice, none asked without a row`, JSON.stringify({ unasked, twice, stray }));
+  // the wall holds while its family is held, and lets go once it reads: a held outbox keeps a waiting card's folder
+  const dir = path.join(ROOT, 'wall-files'); fs.mkdirSync(path.join(dir, 'outbox-files', 'p-x-1'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'outbox-files', 'p-x-1', 'a.txt'), 'kept');
+  fs.mkdirSync(path.join(dir, 'outbox.json')); fs.writeFileSync(path.join(dir, 'outbox.json', 'x'), 'x');
+  const st = S.createChannelStore({ dir, log: { log() {}, info() {}, warn() {}, error() {} }, heldRetry: { firstMs: 5, maxMs: 10 } });
+  const heldNow = st.wallHeld('filesSweep');
+  st.close();
+  ok(heldNow === true && fs.existsSync(path.join(dir, 'outbox-files', 'p-x-1', 'a.txt')), '⑮b a held outbox: the files sweep\'s wall is up (wallHeld) — the waiting card\'s folder is there', JSON.stringify({ heldNow }));
+  // trim: only a MISSING message log is «no log» — a failed read trims nothing (unknown is never an orphan)
+  const d2 = path.join(ROOT, 'wall-trim'); const st2 = S.createChannelStore({ dir: d2, log: { log() {}, info() {}, warn() {}, error() {} } });
+  const lp = path.join(d2, 'msgs', 'fake', 'c1.ndjson'); fs.mkdirSync(lp, { recursive: true });   // the log's read fails (EISDIR)
+  const t = st2.trim('fake', 'c1');
+  st2.close();
+  ok(t && t.unread === true && t.removed === 0, '⑮b trim: a message log whose read FAILED trims nothing and keeps its side log (only ENOENT is «no log»)', JSON.stringify(t));
 }
 
 console.log('\n⑩ the patched copies never touch the tree');

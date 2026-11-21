@@ -349,6 +349,8 @@ const LANDING_WHY = Object.freeze({
   'over-limit': Object.freeze({ en: 'Too many sign-ins were open at once, so this older one was ended — start it again in VibeSpace.', zh: '同时打开的登录太多，这次较早的已被结束——请回到 VibeSpace 重新开始。', ja: '同時に開いているサインインが多すぎたため、この古いサインインは終了しました — VibeSpace でもう一度始めてください。' }),
   used: Object.freeze({ en: 'It already finished — its answer is used once, so there is nothing left to do here. Go back to VibeSpace.', zh: '它已经完成过了——应答只能用一次，这里没有要做的了。回到 VibeSpace 即可。', ja: 'すでに完了しています — 応答は一度しか使えないため、ここですることはありません。VibeSpace に戻ってください。' }),
   failed: Object.freeze({ en: '{name} did not accept the exchange — the VibeSpace window where you started it says why.', zh: '{name} 没有接受这次交换——你开始登录的那个 VibeSpace 窗口里写着原因。', ja: '{name} が交換を受け付けませんでした — サインインを始めた VibeSpace のウィンドウに理由が表示されます。' }),
+  // B-f276 1b: the channels PAUSED (a file of theirs could not be read) — nothing was connected; VibeSpace reads it again by itself
+  paused: Object.freeze({ en: 'The channels are paused: a file of theirs could not be read, so nothing was connected. VibeSpace reads it again by itself — start the sign-in again in a few minutes.', zh: '频道已暂停：它们的一个文件读不出来，所以什么也没连接。VibeSpace 会自己再读——过几分钟再重新登录。', ja: 'チャンネルは一時停止中です：ファイルを読めなかったため、何も接続していません。VibeSpace が自動で読み直します — 数分後にもう一度サインインしてください。' }),
   refused: Object.freeze({ en: 'VibeSpace refused it — start it again in VibeSpace.', zh: 'VibeSpace 没有接受它——请回到 VibeSpace 重新开始。', ja: 'VibeSpace が受け付けませんでした — VibeSpace でもう一度始めてください。' }),
 });
 /** `r` = the engine's landing answer `{ok, why, user, error}`; `lang` = landingLang of the request (one paragraph, the

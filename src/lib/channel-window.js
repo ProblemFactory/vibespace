@@ -1648,7 +1648,7 @@ export function openChannelWindow(app, adapterId, convId, opts = {}) {
     if (readInFlight) return;
     readInFlight = true;
     fetchJson(`/api/channels/${encodeURIComponent(adapterId)}/${encodeURIComponent(convId)}/read`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
-      .then((d) => { if (d && d.code === 'not-durable') showToast(routeErrorText(d), { type: 'error' }); })   // round 3: a failed mark is SAID (law F), never dropped
+      .then((d) => { if (d && (d.code === 'not-durable' || d.code === 'store-appeared' || d.code === 'store-blocked')) showToast(routeErrorText(d), { type: 'error' }); })   // round 3: a failed mark is SAID (law F), never dropped — B-f276 1b: a paused or appeared store's refusal too (r566 word 2: at the press)
       .catch(() => {}).finally(() => { readInFlight = false; });
   }
 

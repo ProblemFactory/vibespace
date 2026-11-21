@@ -1541,14 +1541,14 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const rB = path.join(tmp, 'agg-b'); const dB = path.join(rB, 'data');
     seed(dB, '{ this is not json');
     for (const sub of ['msgs', 'archive']) fs.mkdirSync(path.join(dB, 'channels', sub), { recursive: true });   // what the store creates at boot
-    fs.chmodSync(path.join(dB, 'channels'), 0o500);          // the corrupt file cannot be set aside ⇒ the index is blocked
+    fs.chmodSync(path.join(dB, 'channels'), 0o500);          // B-f276 1b: the torn index is HELD as damaged (never set aside at a start) ⇒ the channels are paused
     let resB = null, eB = null;
     try {
       eB = ENG.create({ dataDir: dB, env: {}, log: quiet });
       resB = runOnly(create({ rootDir: rB, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eB }), rB).find((x) => x.id === ID);
     } finally { fs.chmodSync(path.join(dB, 'channels'), 0o700); }
     const ledB = JSON.parse(fs.readFileSync(path.join(dB, 'migrations.json'), 'utf-8'));
-    ok(resB && resB.status === 'failed' && /blocked|refus/i.test(resB.error || '') && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
+    ok(resB && resB.status === 'failed' && /blocked|refus|paused/i.test(resB.error || '') && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
     if (eB) eB.stop();
   }
   // ── 2026-09-channels-access-watchers (R4, 2026-09-27) ──
@@ -1628,7 +1628,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       resB = runOnly(create({ rootDir: rB, homeDir: scratchHomeDir, serverNotice: () => { }, channels: eB }), rB).find((x) => x.id === ID);
     } finally { fs.chmodSync(path.join(dB, 'channels'), 0o700); }
     const ledB = JSON.parse(fs.readFileSync(path.join(dB, 'migrations.json'), 'utf-8'));
-    ok(resB && resB.status === 'failed' && /refus|blocked/i.test(resB.error || '') && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
+    ok(resB && resB.status === 'failed' && /refus|blocked|paused/i.test(resB.error || '') /* B-f276 1b: a held index pauses the channels — the run fails in the pause's words */ && !(ledB.applied || {})[ID], 'a blocked index FAILS the run by name and the ledger does not record success (retried next boot)', JSON.stringify(resB));
     if (eB) eB.stop();
     // (c) NO ENGINE on this boot: a pre-split record fails the run BY NAME; none is a success
     const rC = path.join(tmp, 'aw-c'); const dC = path.join(rC, 'data');

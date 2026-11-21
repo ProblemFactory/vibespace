@@ -349,86 +349,241 @@ console.log('§2 the store: groups.json through ONE serialized door');
   ok(Object.keys(JSON.parse(fs.readFileSync(f, 'utf-8')).groups).length === 1, 'NEGATIVE CONTROL: the same two writes as read-modify-write LOSE one');
 }
 
-console.log('§2b an unreadable groups.json is SET ASIDE, never overwritten (r2 finding 3)');
+console.log('§2b a torn groups.json is HELD (damaged), never set aside at a start and never overwritten — its ONE door starts it empty (B-f276 1b, 主开发 r809)');
 {
   const dir = path.join(ROOT, 'store-corrupt', 'channels');
   fs.mkdirSync(dir, { recursive: true });
   const CORRUPT = '{"v":1,"groups":{"g-deadbeef":{"id":"g-deadbeef","name":"was here","members":[{"member":"x"';
+  const TORN_AD = '{"v":1,"adapters":[{"id":';
   fs.writeFileSync(path.join(dir, 'groups.json'), CORRUPT);
-  fs.writeFileSync(path.join(dir, 'adapters.json'), '{"v":1,"adapters":[{"id":');
+  fs.writeFileSync(path.join(dir, 'adapters.json'), TORN_AD);
   const lines = [];
   const st = createChannelStore({ dir, log: { warn: (...a) => lines.push(a.join(' ')), log() {}, info() {} } });
-  const aside = fs.readdirSync(dir).filter((n) => /^groups\.json\.corrupt-/.test(n));
-  ok(aside.length === 1 && fs.readFileSync(path.join(dir, aside[0]), 'utf-8') === CORRUPT, 'a truncated groups.json is RENAMED to groups.json.corrupt-<ts> with its bytes intact (never unlinked)', fs.readdirSync(dir).join(','));
-  ok(Object.keys(st.groups.live().groups).length === 0 && Array.isArray(st.quarantined) && st.quarantined.some((q) => q.file === 'groups.json' && q.to === aside[0]), 'the store starts EMPTY only after the copy is safe, and names what it set aside (store.quarantined)', JSON.stringify(st.quarantined));
-  ok(lines.some((l) => /groups\.json/.test(l) && /corrupt|unreadable/.test(l)), 'ONE named log line says so', lines.join(' | '));
-  ok(fs.readdirSync(dir).some((n) => /^adapters\.json\.corrupt-/.test(n)) && (st.quarantined || []).some((q) => q.file === 'adapters.json'), 'the same guard covers adapters.json (index.json / outbox.json share the reader)');
+  const asideNow = () => fs.readdirSync(dir).filter((n) => /^groups\.json\.(corrupt|damaged)-/.test(n));
+  const qg = (st.quarantined || []).find((q) => q.file === 'groups.json'), qa = (st.quarantined || []).find((q) => q.file === 'adapters.json');
+  ok(asideNow().length === 0 && fs.readFileSync(path.join(dir, 'groups.json'), 'utf-8') === CORRUPT, 'a truncated groups.json is NOT set aside at a start — its bytes stay where they are, untouched', fs.readdirSync(dir).join(','));
+  ok(!!qg && qg.held === true && qg.kind === 'damaged' && qg.lifts === 'a-person' && !!qa && qa.kind === 'damaged', 'it is HELD as damaged (its one door is a person\'s), and so is the torn adapters.json (the same reader for every family)', JSON.stringify(st.quarantined));
+  ok(lines.some((l) => /groups\.json/.test(l) && /damaged/.test(l) && /held/.test(l)), 'ONE named log line says it is held as damaged', lines.join(' | '));
+  let refused = null;
+  try { await st.groups.update((gr) => { gr.groups['g-00000001'] = G.makeGroup({ id: 'g-00000001', name: 'new', createdBy: A, at: T0, members: [B] }).group; }); } catch (e) { refused = e && e.code; }
+  ok(refused === 'store-blocked' && fs.readFileSync(path.join(dir, 'groups.json'), 'utf-8') === CORRUPT, 'a group verb while it is held is REFUSED BY NAME (store-blocked) — nothing is written over the torn bytes', String(refused));
+  // THE ONE DOOR: a person's choice — the bytes set aside under a dated name (never deleted), the family starts EMPTY in place
+  const door = await st.startDamagedEmpty('groups.json');
+  const kept = asideNow();
+  ok(door && door.ok && door.state === 'pass' && kept.length === 1 && /^groups\.json\.damaged-/.test(kept[0]) && fs.readFileSync(path.join(dir, kept[0]), 'utf-8') === CORRUPT && !fs.existsSync(path.join(dir, 'groups.json')), 'the door (Start it empty) sets the bytes aside under a dated name — intact, never deleted — and the family starts empty', JSON.stringify({ door, kept }));
   await st.groups.update((gr) => { gr.groups['g-00000001'] = G.makeGroup({ id: 'g-00000001', name: 'new', createdBy: A, at: T0, members: [B] }).group; });
-  ok(aside.length === 1 && fs.readFileSync(path.join(dir, aside[0]), 'utf-8') === CORRUPT && JSON.parse(fs.readFileSync(path.join(dir, 'groups.json'), 'utf-8')).groups['g-00000001'], 'the first group verb writes a NEW groups.json — the corrupt bytes survive beside it');
+  ok(JSON.parse(fs.readFileSync(path.join(dir, 'groups.json'), 'utf-8')).groups['g-00000001'] && fs.readFileSync(path.join(dir, kept[0]), 'utf-8') === CORRUPT, 'the first group verb after the door writes a NEW groups.json — the damaged copy survives beside it');
+  ok((await st.startDamagedEmpty('groups.json')).state === 'none', 'the door a second time: nothing damaged now — it answers «none» and moves nothing');
   st.close();
+  fs.writeFileSync(path.join(dir, 'adapters.json'), '{"v":1,"adapters":[]}');
   const st2 = createChannelStore({ dir, log: { warn() {}, log() {}, info() {} } });
-  ok(Object.keys(st2.groups.live().groups).join() === 'g-00000001' && (st2.quarantined || []).length === 0, 'CONTROL: a reload of the healthy file reads it and sets nothing aside; a MISSING file is simply empty');
+  ok(Object.keys(st2.groups.live().groups).join() === 'g-00000001' && (st2.quarantined || []).length === 0, 'CONTROL: a reload of the healthy files reads them and holds nothing');
   st2.close();
-  // the For-you notice: the channels engine files ONE item per set-aside file
+  // THE MISSING LAW (主开发 r809): a family that read MISSING claims its file by an EXCLUSIVE create before its first change — a file that
+  // appeared between the read and the first change (a mount that came late) is read and KEPT, the change refused by name
+  const appearRun = async (mkStore, tag) => {
+    const d = path.join(ROOT, `store-appear-${tag}`, 'channels');
+    fs.mkdirSync(d, { recursive: true });
+    const s3 = mkStore({ dir: d, log: { warn() {}, log() {}, info() {} } });
+    const LATE = JSON.stringify({ v: 1, groups: { 'g-1a7e0001': G.makeGroup({ id: 'g-1a7e0001', name: 'came late', createdBy: A, at: T0, members: [B] }).group } });
+    fs.writeFileSync(path.join(d, 'groups.json'), LATE);   // appeared AFTER the store read «missing»
+    let code = null;
+    try { await s3.groups.update((gr) => { gr.groups['g-00000002'] = G.makeGroup({ id: 'g-00000002', name: 'mine', createdBy: A, at: T0, members: [B] }).group; }); } catch (e) { code = e && e.code; }
+    const live = Object.keys(s3.groups.live().groups).sort().join();
+    s3.close();   // every write this store owed lands first — the bytes are read after it
+    return { code, keptBytes: fs.readFileSync(path.join(d, 'groups.json'), 'utf-8') === LATE, live };
+  };
+  const ap = await appearRun(createChannelStore, 'head');
+  ok(ap.code === 'store-appeared' && ap.keptBytes && ap.live === 'g-1a7e0001', 'THE MISSING LAW: a groups.json that appeared between the read and the first change is READ AND KEPT — the change is refused by name (store-appeared) and the store holds the file that came', JSON.stringify(ap));
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { anchored } = await import('./scratch.mjs');
+    const SSRC = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+    const cut = anchored(SSRC, '    return { exclusive: !!fam.missing, onWritten: (ok, err) => {', '    return { exclusive: false, onWritten: (ok, err) => {', 'the first write not exclusive');
+    const M = mutantCopies('channel-groups-missing-law', REPO).load('src/channel-store.js', cut, 'no-claim');
+    const apx = await appearRun(M.createChannelStore, 'cut');
+    ok(!apx.keptBytes && apx.code === null, 'MISSING-LAW CONTROL (the first write not exclusive, in a copy): the file that appeared is WRITTEN OVER by the empty state plus the change — red', JSON.stringify(apx));
+  }
+  // ── B-f276 1b, its fresh read r1 (work/read-1b-r1.md): each cure with its red control (an anchored() copy of the product file) ──
+  {
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { anchored } = await import('./scratch.mjs');
+    const SSRC = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
+    const MC = mutantCopies('channel-groups-read-r1', REPO);
+    const qlog = { warn() {}, log() {}, info() {} };
+    const nap = (ms) => new Promise((z) => setTimeout(z, ms));
+    // M1: a DAMAGED big family whose ends look like one object stays HELD past many rungs of its ladder — only the door lifts it
+    const bigDamagedRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-bigdamaged-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'index.json'), '{"v":1,"conversations":{"fake/c1":{"key":"fake/c1",}}}');   // both ends an object, the middle not JSON
+      const evs = [];
+      const s4 = mk({ dir: d, log: qlog, heldRetry: { firstMs: 5, maxMs: 10 } });
+      if (s4.onHeldRead) s4.onHeldRead((ev) => evs.push(ev.state));
+      await nap(200);
+      const q = (s4.quarantined || []).find((x) => x.file === 'index.json') || {};
+      const door = await s4.startDamagedEmpty('index.json');
+      s4.close();
+      return { kind: q.kind || null, events: evs.join(), door: door && door.state };
+    };
+    const bd = await bigDamagedRun(createChannelStore, 'head');
+    ok(bd.kind === 'damaged' && !/reads-again/.test(bd.events) && bd.door === 'pass', 'r1 M1: a DAMAGED index.json whose ends look like one object stays HELD past its ladder (the cheap parse never lifts it) — the door starts it empty', JSON.stringify(bd));
+    const bdx = await bigDamagedRun(MC.load('src/channel-store.js', anchored(SSRC, "    if (big && h.kind === 'damaged') fam.H.stop();\n", '', 'the damaged big hold not stopped'), 'r1-m1').createChannelStore, 'cut');
+    ok(/reads-again/.test(bdx.events) && bdx.door === 'none', 'r1 M1 CONTROL (the ladder left running): the cheap parse lifts it «reads again» and the door answers «none» for ever — red', JSON.stringify(bdx));
+    // M2 + S1: the door sets the family's OTHER files aside with it (the index's acts journal, the outbox's attachment folders), and an
+    // index that never landed journals NOTHING: the act writes the index itself — the next start reads no row of the damaged store
+    const OLD_ACTS = '{"seq":5001,"rows":{"fake/old":{"key":"fake/old","id":"old","adapterId":"fake"}}}\n';
+    const famFilesRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-famfiles-${tag}`, 'channels'); fs.mkdirSync(path.join(d, 'outbox-files', 'p-x-1'), { recursive: true });
+      fs.writeFileSync(path.join(d, 'index.json'), '{"v":1,"conversations":{');
+      fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
+      fs.writeFileSync(path.join(d, 'outbox.json'), '{"v":1,"proposals":{');
+      fs.writeFileSync(path.join(d, 'outbox-files', 'p-x-1', 'a.txt'), 'the attachment');
+      const s5 = mk({ dir: d, log: qlog });
+      const dIx = await s5.startDamagedEmpty('index.json'), dOb = await s5.startDamagedEmpty('outbox.json');
+      let actErr = null;
+      try { await s5.index.update(() => { const en = s5.index.entry('fake', 'new'); en.title = 'new'; }, { durable: true }); } catch (e) { actErr = (e && e.code) || 'threw'; }   // ONE row touched (a journal line's act — never the whole map)
+      const journalNow = fs.existsSync(path.join(d, 'index-acts.ndjson'));
+      s5.close();
+      const names = fs.readdirSync(d), sfx = String(dIx.aside || '').slice('index.json'.length);
+      const fAside = names.find((n) => n.startsWith('outbox-files.damaged-'));
+      const s6 = mk({ dir: d, log: qlog });
+      const rows = Object.keys(s6.index.live() || {}).sort().join();
+      s6.close();
+      return { dIx: dIx.state, dOb: dOb.state, actErr, journalNow, rows, actsAside: !!sfx && names.includes('index-acts.ndjson' + sfx) && fs.readFileSync(path.join(d, 'index-acts.ndjson' + sfx), 'utf8') === OLD_ACTS, filesAside: !!fAside && fs.existsSync(path.join(d, fAside, 'p-x-1', 'a.txt')) };
+    };
+    const ff = await famFilesRun(createChannelStore, 'head');
+    ok(ff.dIx === 'pass' && ff.dOb === 'pass' && ff.actsAside && ff.filesAside, 'r1 M2 / S1: the door sets the family\'s OTHER files aside with it, under the same dated name — the index\'s acts journal (its lines intact), the outbox\'s attachment folders (the files sweep never meets them)', JSON.stringify(ff));
+    ok(ff.actErr === null && !ff.journalNow && ff.rows === 'fake/new', 'r1 M2: an index started empty journals NOTHING until it landed — the durable act wrote the index itself; the next start reads its row and no row of the damaged store', JSON.stringify(ff));
+    const ffx = await famFilesRun(MC.load('src/channel-store.js', anchored(SSRC, "Object.freeze({ 'index.json': ['index-acts.ndjson'], ", "Object.freeze({ 'index.json': [], ", 'the journal not set aside'), 'r1-m2').createChannelStore, 'cut');
+    ok(!ffx.actsAside, 'r1 M2 CONTROL (the journal left beside the new index): the damaged store\'s journal is not kept under the dated name — compacted away or replayed over the new rows — red', JSON.stringify(ffx));
+    // S5 (+ M2 under the missing law): an index that APPEARED (a late mount: the index AND its journal) — the act is refused by name, the
+    // index held at once, and nothing of this life is appended to the journal that came
+    const IX = JSON.stringify({ v: 1, conversations: { 'fake/late': { key: 'fake/late', id: 'late', adapterId: 'fake' } } });
+    const ACTS = '{"seq":7,"rows":{"fake/late":{"key":"fake/late","id":"late","adapterId":"fake","title":"t"}}}\n';
+    const ixAppearRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-ixappear-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s7 = mk({ dir: d, log: qlog });
+      fs.writeFileSync(path.join(d, 'index.json'), IX); fs.writeFileSync(path.join(d, 'index-acts.ndjson'), ACTS);
+      let code = null;
+      try { await s7.index.update(() => { const en = s7.index.entry('fake', 'mine'); en.title = 'mine'; }, { durable: true }); } catch (e) { code = (e && e.code) || 'threw'; }   // ONE row touched (a journal line's act — never the whole map)
+      const q = (s7.quarantined || []).find((x) => x.file === 'index.json') || {};
+      s7.close();
+      return { code, kind: q.kind || null, ixKept: fs.readFileSync(path.join(d, 'index.json'), 'utf8') === IX, actsKept: fs.readFileSync(path.join(d, 'index-acts.ndjson'), 'utf8') === ACTS };
+    };
+    const ia = await ixAppearRun(createChannelStore, 'head');
+    ok(ia.code === 'store-appeared' && ia.kind === 'appeared' && ia.ixKept && ia.actsKept, 'r1 S5 / M2: an index.json (and its journal) that APPEARED — the durable act is refused by name (store-appeared), the index held at once, both files byte-identical (nothing of this life appended to the journal that came)', JSON.stringify(ia));
+    const iax = await ixAppearRun(MC.load('src/channel-store.js', anchored(SSRC, "    if (t.all || ixLoad.missing) return 'whole';", "    if (t.all) return 'whole';", 'a missing index journals'), 'r1-m2a').createChannelStore, 'cut');   // stale-pins: kept — the cut's own text
+    ok(!iax.actsKept && iax.code === null, 'r1 M2 CONTROL (a missing index journals its acts): the act is appended to the journal that came and answered OK — dropped as «skipped» at the next start — red', JSON.stringify(iax));
+    // S6: a small family's value that appeared — its own adopt's write (the pace's union) lands
+    const paceAppearRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-paceappear-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s8 = mk({ dir: d, log: qlog });
+      fs.writeFileSync(path.join(d, 'wake-pace.json'), JSON.stringify({ v: 1, pairs: { before: 2 }, senders: {} }));
+      s8.pace.set({ v: 1, pairs: { now: 1 }, senders: {} });
+      try { s8.pace.flush(); } catch { }
+      for (const end = Date.now() + 3000; !Object.keys((s8.pace.live() || {}).pairs || {}).includes('before') && Date.now() < end;) await nap(5);
+      const live = Object.keys((s8.pace.live() || {}).pairs || {}).sort().join();
+      s8.close();
+      return { live, disk: Object.keys(JSON.parse(fs.readFileSync(path.join(d, 'wake-pace.json'), 'utf8')).pairs || {}).sort().join() };
+    };
+    const pa = await paceAppearRun(createChannelStore, 'head');
+    ok(pa.live === 'before,now' && pa.disk === 'before,now', 'r1 S6: a wake-pace.json that appeared is taken in WITH this life\'s floor, and the union is on disk (the adopt\'s own write lands)', JSON.stringify(pa));
+    const MISS = "        fam.missing = false;   // its own now — BEFORE the adopt (its read r1 S6: the pace's union is the adopt's own write; the writer hears `exclusive: false`)\n";
+    const ADOPT = "        try { fam.adopt(a.value); } catch (e) { warn(`[channels] ${fam.name}: the file that appeared was not taken in: ${(e && e.message) || e}`); }\n";
+    const pax = await paceAppearRun(MC.load('src/channel-store.js', anchored(anchored(SSRC, MISS, '', 'missing cleared late (1)'), ADOPT, ADOPT + '        fam.missing = false;\n', 'missing cleared late (2)'), 'r1-s6').createChannelStore, 'cut');
+    ok(pax.live === 'before,now' && pax.disk === 'before', 'r1 S6 CONTROL (missing cleared after the adopt): the union lives in memory only — the file keeps the floor that came, this life\'s is lost at a restart — red', JSON.stringify(pax));
+    // r2 S1: a HALF-DONE press — the family's own set-aside fails after its acts journal moved: the journal is put BACK, the door says failed
+    const halfRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-halfpress-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, 'index.json'), '{"v":1,"conversations":{');
+      fs.writeFileSync(path.join(d, 'index-acts.ndjson'), OLD_ACTS);
+      const s9 = mk({ dir: d, log: qlog });
+      const real = fs.renameSync, ixf = path.join(d, 'index.json');
+      fs.renameSync = function (a, b) { if (path.resolve(String(a)) === path.resolve(ixf)) throw Object.assign(new Error('EIO'), { code: 'EIO' }); return real.call(this, a, b); };
+      let door;
+      try { door = await s9.startDamagedEmpty('index.json'); } finally { fs.renameSync = real; }
+      const q = (s9.quarantined || []).find((x) => x.file === 'index.json') || {};
+      s9.close();
+      return { door: door && door.state, code: door && door.code, journalBack: fs.existsSync(path.join(d, 'index-acts.ndjson')) && fs.readFileSync(path.join(d, 'index-acts.ndjson'), 'utf8') === OLD_ACTS, stillHeld: !!q.held && !q.done, aside: fs.readdirSync(d).filter((n) => /\.damaged-/.test(n)) };
+    };
+    const hp = await halfRun(createChannelStore, 'head');
+    ok(hp.door === 'failed' && hp.code === 'EIO' && hp.journalBack && hp.stillHeld && hp.aside.length === 0, 'r2 S1: a press whose own set-aside FAILS after the acts journal moved — the journal is put BACK, the index stays held, the door answers failed (never a split family)', JSON.stringify(hp));
+    const hpx = await halfRun(MC.load('src/channel-store.js', anchored(SSRC, "        await back();\n        return { ok: false, state: 'failed', code: (e && e.code) || 'EIO' };\n      }\n      if (fam.name === 'adapters.json'", "        return { ok: false, state: 'failed', code: (e && e.code) || 'EIO' };\n      }\n      if (fam.name === 'adapters.json'", 'no roll back'), 'r2-s1').createChannelStore, 'cut');
+    ok(!hpx.journalBack && hpx.aside.length === 1, 'r2 S1 CONTROL (no roll back): the journal stays under the dated name beside a held index — red', JSON.stringify(hpx));
+    // r2 S3: a stamps JOURNAL that appeared (a late mount) while the stamps read missing — never appended to, the stamps held at once
+    const LOG = '["fake/a",1795000000000,null,null]\n';
+    const logRun = async (mk, tag) => {
+      const d = path.join(ROOT, `store-logappear-${tag}`, 'channels'); fs.mkdirSync(d, { recursive: true });
+      const s10 = mk({ dir: d, log: qlog });
+      fs.writeFileSync(path.join(d, 'poll-stamps.log'), LOG);
+      s10.stamps.set('fake/b', { lastPollAt: 1795000001000 });
+      const q = (s10.quarantined || []).find((x) => x.file === 'poll-stamps.json') || {};
+      s10.close();
+      return { kind: q.kind || null, kept: fs.readFileSync(path.join(d, 'poll-stamps.log'), 'utf8') === LOG };
+    };
+    const lr = await logRun(createChannelStore, 'head');
+    ok(lr.kind === 'appeared' && lr.kept, 'r2 S3: a poll-stamps.log that APPEARED while the stamps read missing is kept byte for byte — its first open is an exclusive create; the stamps held at once', JSON.stringify(lr));
+    const lrx = await logRun(MC.load('src/channel-store.js', anchored(SSRC, "psLoad.missing && !journalWas ? 'ax' : 'a'", "'a'", 'the journal opened for append'), 'r2-s3').createChannelStore, 'cut');
+    ok(!lrx.kept, 'r2 S3 CONTROL (the journal opened for append): this life\'s stamp is appended to the journal that came — red', JSON.stringify(lrx));
+    // S2 + S3: the writer's thread — a temp left as a second name is never opened again; our own link answered EEXIST is our link landed
+    const WSRC = fs.readFileSync(path.join(REPO, 'src/store-writer-worker.js'), 'utf-8');
+    const workerRun = (WK, tag) => {
+      const d = path.join(ROOT, `store-worker-${tag}`); fs.mkdirSync(d, { recursive: true });
+      const file = path.join(d, 'x.json'), tmp = file + '.tmp-1-w';
+      const out = {};
+      // S3: the link lands, its answer is EEXIST (an NFS retransmit)
+      const F3 = Object.assign(Object.create(fs), { linkSync: (a, b) => { fs.linkSync(a, b); throw Object.assign(new Error('EEXIST'), { code: 'EEXIST' }); } });
+      try { WK.writeJob({ file, tmp, parts: ['{"v":1}'], exclusive: true }, F3); out.s3 = fs.readFileSync(file, 'utf8') === '{"v":1}' && !fs.existsSync(tmp) ? 'landed' : 'odd'; } catch (e) { out.s3 = (e && e.code) || 'threw'; }
+      // S2: the next exclusive file — its temp's removal FAILS after the link; the next write fails part-way: the store stays whole
+      const file2 = path.join(d, 'y.json'), tmp2 = file2 + '.tmp-1-w';
+      let failUnlink = true;
+      const F2 = Object.assign(Object.create(fs), { unlinkSync: (p) => { if (failUnlink && p === tmp2) { failUnlink = false; throw Object.assign(new Error('EIO'), { code: 'EIO' }); } return fs.unlinkSync(p); } });
+      try { WK.writeJob({ file: file2, tmp: tmp2, parts: ['{"v":1,"a":"whole"}'], exclusive: true }, F2); } catch (e) { out.first = (e && e.code) || 'threw'; }
+      const F2b = Object.assign(Object.create(fs), { writeSync: () => { throw Object.assign(new Error('EIO'), { code: 'EIO' }); } });
+      try { WK.writeJob({ file: file2, tmp: tmp2, parts: ['{"v":1,"a":"next"}'] }, F2b); out.second = 'no-throw'; } catch (e) { out.second = (e && e.code) || 'threw'; }
+      try { fs.unlinkSync(tmp2); } catch { }
+      out.storeWhole = fs.readFileSync(file2, 'utf8') === '{"v":1,"a":"whole"}';
+      return out;
+    };
+    const wk = workerRun(require(path.join(REPO, 'src/store-writer-worker.js')), 'head');
+    ok(wk.s3 === 'landed' && wk.second === 'EIO' && wk.storeWhole, 'r1 S3 / S2: an EEXIST whose file IS the temp is our own link landed (never «appeared»); a temp whose removal failed after its link is never opened again — a later write that fails part-way leaves the store whole', JSON.stringify(wk));
+    const cutW = anchored(anchored(WSRC, "    if (e && e.code === 'EEXIST' && sameFile(fs, tmp, file)) { dropTemp(fs, tmp); return true; }\n", '', 'our own link not recognised'),
+      "  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) throw", "  if (false) throw", 'the second name opened');
+    const wkx = workerRun(MC.load('src/store-writer-worker.js', cutW, 'r1-s2s3'), 'cut');
+    ok(wkx.s3 === 'EEXIST' && !wkx.storeWhole, 'r1 S3 / S2 CONTROL (no inode check, the second name opened): our own link reads as «appeared», and the failed write truncates the live store through the shared inode — red', JSON.stringify(wkx));
+  }
+  // the For-you notice: the channels engine files ONE item per held file — a damaged one carries its door (the For-you check row)
   const ddir = path.join(ROOT, 'store-corrupt-engine');
   fs.mkdirSync(path.join(ddir, 'channels'), { recursive: true });
   fs.writeFileSync(path.join(ddir, 'channels', 'groups.json'), CORRUPT);
   const filed = [];
   const CE = require(path.join(REPO, 'src/server/channels-engine.js'));
   const ce = CE.create({ dataDir: ddir, env: {}, broadcast() {}, userTodos: { add: (key, it) => { filed.push({ key, ...it }); return { id: 't' + filed.length }; }, get: () => null, setStatus() {} }, deliver: null, serverSetting: () => undefined, log: { log() {}, warn() {}, error() {}, info() {} } });
-  ok(filed.length === 1 && /groups\.json/.test(filed[0].text) && filed[0].i18n && filed[0].i18n.text && /set aside/.test(filed[0].i18n.text.key), 'the channels engine files ONE "For you" item naming the set-aside file (words as i18n structure)', JSON.stringify(filed));
+  const fi = filed.find((x) => /groups\.json/.test(x.text || ''));
+  ok(!!fi && fi.i18n && /could not be read as itself \(damaged\)/.test(fi.i18n.text.key) && fi.action && fi.action.type === 'channel-store-damaged' && fi.action.file === 'groups.json', 'the channels engine files ONE "For you" item naming the DAMAGED file — its words as i18n structure, its one door as the action (Start it empty)', JSON.stringify(fi && { key: fi.i18n && fi.i18n.text.key, action: fi.action }));
   try { ce.stop(); } catch {}
   try { ce.store.close(); } catch {}
 }
 
 
-console.log('§2c a set-aside store is on the FIRST SCREEN, and a blocked one is worded as blocked (r3 findings 7 + 8)');
+console.log('§2c a held store is on the FIRST SCREEN (r3 finding 7, re-stated by B-f276 1b: held, never set aside)');
 {
   const CE = require(path.join(REPO, 'src/server/channels-engine.js'));
   const quietLog = { log() {}, warn() {}, error() {}, info() {} };
-  // finding 7: the digest (GET /api/channels and every channels-updated) names what was set aside
   const d1 = path.join(ROOT, 'store-aside-digest');
   fs.mkdirSync(path.join(d1, 'channels'), { recursive: true });
   fs.writeFileSync(path.join(d1, 'channels', 'adapters.json'), '{"v":1,"adapters":[{"id":');
-  const bc = [];
-  const ce1 = CE.create({ dataDir: d1, env: {}, broadcast: (m) => bc.push(m), userTodos: null, deliver: null, serverSetting: () => undefined, log: quietLog });
+  const ce1 = CE.create({ dataDir: d1, env: {}, broadcast: () => {}, userTodos: null, deliver: null, serverSetting: () => undefined, log: quietLog });
   const dg = ce1.digest();
-  ok(Array.isArray(dg.quarantined) && dg.quarantined.length === 1 && dg.quarantined[0].file === 'adapters.json' && /^adapters\.json\.corrupt-/.test(dg.quarantined[0].to) && dg.quarantined[0].blocked === false && Number.isFinite(dg.quarantined[0].at),
-    'the DIGEST (GET /api/channels, the first screen) carries `quarantined` — adapters.json set aside, where to, when', JSON.stringify(dg.quarantined));
+  ok(Array.isArray(dg.quarantined) && dg.quarantined.length === 1 && dg.quarantined[0].file === 'adapters.json' && dg.quarantined[0].kind === 'damaged' && dg.quarantined[0].to === null && Number.isFinite(dg.quarantined[0].at),
+    'the DIGEST (GET /api/channels, the first screen) carries `quarantined` — adapters.json held as damaged (nothing set aside), when', JSON.stringify(dg.quarantined));
   try { ce1.stop(); } catch {}
   try { ce1.store.close(); } catch {}
   const P = fs.readFileSync(path.join(REPO, 'src/lib/channels-panel.js'), 'utf-8');
-  ok(/d\.quarantined/.test(P) && /noteLine\('chan-quarantine-note'/.test(P), 'PIN: the panel draws a warning line per set-aside store from the digest');
-  // finding 8: a BLOCKED file (the rename failed) is never said to be "set aside as" itself
-  const d2 = path.join(ROOT, 'store-blocked-engine');
-  const cdir = path.join(d2, 'channels');
-  fs.mkdirSync(path.join(cdir, 'msgs'), { recursive: true });
-  fs.mkdirSync(path.join(cdir, 'archive'), { recursive: true });
-  fs.writeFileSync(path.join(cdir, 'adapters.json'), '{"v":1,"adapters":[{"id":"lark-1","kind":"lark"}]}}}}');
-  fs.chmodSync(cdir, 0o555);
-  let canRename = false;
-  try { fs.renameSync(path.join(cdir, 'adapters.json'), path.join(cdir, 'probe')); fs.renameSync(path.join(cdir, 'probe'), path.join(cdir, 'adapters.json')); canRename = true; } catch {}
-  if (canRename) console.log('  … SKIP blocked-headline leg: a read-only directory still allows a rename here (running as root?) — no blocked rung to produce');
-  else {
-    const filed = [];
-    let ce2 = null;
-    try { ce2 = CE.create({ dataDir: d2, env: {}, broadcast() {}, userTodos: { add: (k, it) => { filed.push(it); return { id: 'x' }; }, get: () => null, setStatus() {} }, deliver: null, serverSetting: () => undefined, log: quietLog }); } catch (e) { filed.push({ threw: e.message }); }
-    const it = filed.find((x) => x.text && /adapters\.json/.test(x.text));
-    ok(it && !/set aside as adapters\.json/.test(it.text) && /could NOT be set aside/.test(it.text) && it.i18n && /could NOT be set aside/.test(it.i18n.text.key) && !('where' in (it.i18n.text.params || {})),
-      'a BLOCKED file\'s headline says it could NOT be set aside (never "set aside as adapters.json") — its own i18n key', JSON.stringify(it && { text: it.text, key: it.i18n && it.i18n.text.key }));
-    ok(ce2 && (ce2.digest().quarantined || []).some((q) => q.file === 'adapters.json' && q.blocked === true && q.to === null), '…and the digest says `blocked: true`', JSON.stringify(ce2 && ce2.digest().quarantined));
-    // the store's open closes its root to the owning account by its own async stat + chmod (bits only taken away: this
-    // read-only 0555 root becomes 0500) — its event is awaited here, or that chmod lands AFTER the 0755 below and the
-    // scratch folder stays locked (the exit cleanup's rmSync refused with EACCES, swallowed)
-    try { ce2 && await ce2.store.rootClosed; } catch {}
-    try { ce2 && ce2.stop(); } catch {}
-    try { ce2 && ce2.store.close(); } catch {}
-  }
-  fs.chmodSync(cdir, 0o755);
-  ok((fs.statSync(cdir).mode & 0o777) === 0o755, 'the scratch store folder is given back 0755 (fs.statSync after the restore: the store\'s own root close had landed before it)', (fs.statSync(cdir).mode & 0o777).toString(8));
+  ok(/d\.quarantined/.test(P) && /noteLine\('chan-quarantine-note'/.test(P) && /q\.kind === 'damaged'/.test(P), 'PIN: the panel draws a warning line per held store from the digest — a damaged one in its own words');
   const zh = fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf-8'), ja = fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf-8');
-  const KEY = 'Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved';
-  ok(zh.includes(JSON.stringify(KEY)) && ja.includes(JSON.stringify(KEY)), 'the blocked headline has zh + ja rows');
+  const KEY = 'Channels: {file} could not be read as itself (damaged) — every change to it is refused';
+  ok(zh.includes(JSON.stringify(KEY)) && ja.includes(JSON.stringify(KEY)), 'the damaged headline has zh + ja rows');
 }
 
 console.log('§1e the PACE rules (PURE) — r3 findings 4 + 5');

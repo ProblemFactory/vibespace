@@ -126,7 +126,11 @@ async function hookDoor(req, res, slugIn) {
       replyTo: peer ? peer.inReplyTo : req.headers[WA.HEADERS.replyTo], threadKey: peer ? peer.threadKey : req.headers[WA.HEADERS.thread], event: req.headers[WA.HEADERS.event], mapping: peer ? WP.PEER_MAPPING : opts });
   } catch { return refused(req, res, { step: 'parse', answer: 'bad-body' }); }
   const e = engine();
-  const r = e && typeof e.pushInbound === 'function' ? await e.pushInbound(ADAPTER_ID, { kind: 'record', convId: slug, eventId, record }) : null;
+  // B-f276 (主开发 r460): the channels PAUSED (their list could not be read) is said BY NAME — 503 store-blocked, the receipt never
+  // committed, so the peer's retry is taken in once the list reads (never a 401, never a 200 for a message nothing kept)
+  let r;
+  try { r = e && typeof e.pushInbound === 'function' ? await e.pushInbound(ADAPTER_ID, { kind: 'record', convId: slug, eventId, record }) : null; }
+  catch (err) { if (err && err.code === 'store-blocked') { res.set('Cache-Control', 'no-store'); res.set('Retry-After', '60'); return res.status(503).json({ ok: false, code: 'store-blocked', error: err.message }); } throw err; }
   if (!(r && (r.persisted === true || r.duplicate === true))) { res.set('Cache-Control', 'no-store'); return res.status(503).json({ ok: false, error: 'unavailable' }); }
   memos.commit(c.id, { sig: av.scheme === 'hmac' ? av.sig : null, key: eventId, sha: bodySha }, t);         // verify r1 #9: ⑨ ⑩ committed only now
   st.noteCall(slug, c.id, t);
@@ -298,10 +302,14 @@ async function syncRow(slug, options) {
   // the index write alone broadcasts nothing; the engine's one notify door names this path's row
   try { if (typeof e.notify === 'function') e.notify([`${ADAPTER_ID}/${slug}`]); } catch { }
 }
+// B-f276 A2 (主开发 r487): while the channels are PAUSED (a family of theirs could not be read) an owner's webhook act is refused by
+// name — 503 store-blocked — before the path, its callers or its row change (the index's half would be refused: a half-made path)
+const pausedRefused = (res) => { const e = engine(); const pz = e && typeof e.pausedState === 'function' ? e.pausedState() : null; if (!pz) return false; res.set('Cache-Control', 'no-store'); res.status(503).json({ ok: false, code: 'store-blocked', error: pz.error }); return true; };
 const pathView = (st, slug) => ({ ...st.path(slug), options: optionsOf(slug), callers: st.callers(slug), hookUrl: `/hook/${slug}` });
-router.get('/api/channels/webhook/paths', (req, res) => { if (!owner(req, res)) return; const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable'); res.set('Cache-Control', 'no-store').json({ ok: true, paths: st.paths().map((s) => pathView(st, s)) }); });
+router.get('/api/channels/webhook/paths', (req, res) => { if (!owner(req, res)) return; if (pausedRefused(res)) return; /* B-f276 1b: each path's options are read from the held list — never its defaults shown as the truth */ const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable'); res.set('Cache-Control', 'no-store').json({ ok: true, paths: st.paths().map((s) => pathView(st, s)) }); });
 router.post('/api/channels/webhook/paths', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
   if (pathRefused(req, res)) return;   // r5: a NEW path's events reach the account's wake / a rule's (no slug yet: the grains above it)
   try {
     const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable');
@@ -317,6 +325,7 @@ router.post('/api/channels/webhook/paths', json, async (req, res) => {
 });
 router.put('/api/channels/webhook/paths/:slug', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
   if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
@@ -333,6 +342,7 @@ router.put('/api/channels/webhook/paths/:slug', json, async (req, res) => {
  *  proposal per caller, each sent at once as the owner (the agents' `compose --caller` door, the same PURE expansion). */
 router.post('/api/channels/webhook/paths/:slug/send', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
   try {
     const e = engine(); const st = store(); const slug = String(req.params.slug || '');
     if (!e || !st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -344,6 +354,7 @@ router.post('/api/channels/webhook/paths/:slug/send', json, async (req, res) => 
 /** REGISTER — mint → atomic write → the token in THIS answer and nowhere else (a failed write answers 500, no token). */
 router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
   if (pathRefused(req, res)) return;   // r5: a new caller = new events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
@@ -357,6 +368,7 @@ router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) 
 });
 router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
   if (pathRefused(req, res)) return;   // r5: rotate / revoke / delivery — who may post the events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || ''); const id = String(req.params.id || '');
@@ -378,6 +390,7 @@ router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (
  *  minutes keeps it valid (lane webhook-pair-join). */
 router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
   if (!owner(req, res)) return;
+  if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
   if (pathRefused(req, res)) return;   // r5: the code IS the authority of the completion (/:slug/pair) that writes a caller
   try {
     const st = store(); const slug = String(req.params.slug || '');
@@ -416,6 +429,7 @@ function joinRefusal(r, from) {
  *  `check: true` stops after the reads — who offers the code, its host, its path, the path here — nothing posted. */
 router.post('/api/channels/webhook/join', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pausedRefused(res)) return;   // B-f276: the channels paused — refused BY NAME before any state change (no half-made path)
   try {
     const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable');
     const b = req.body || {};

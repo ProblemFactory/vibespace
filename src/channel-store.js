@@ -160,6 +160,8 @@ const fs = require('fs');
 const path = require('path');
 const FC = require('./fd-close.js');   // B-15ac: the ONE close of a written file (a failed close said in the journal)
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
+const SR = require('./store-read.js'); // PURE: what ONE read of a store answers (B-f276 — a failed read is held, never set aside)
+const SH = require('./store-hold.js'); // B-f276 1b (主开发 r809): THE STORE HOLD — one per family: the read, the hold, the ladder, the lift
 const crypto = require('crypto');
 const { sideKey, validateSide, isSystemRecord, asSystemRecord, isDraftRecord, asDraftRecord } = require('./channel-record.js');   // + the system pair: lane lark-system-records; + the draft pair: lane gmail-draft-not-a-message
 // lane lark-threads (A1): THE PLACE PATCH's PURE rules (widen-only, the fold, the compaction) — imports only channel-record
@@ -350,7 +352,7 @@ const dayStamp = (ms) => new Date(ms).toISOString().slice(0, 10);
  * Build the store. `dir` is `<dataDir>/channels`. `now` is injectable so the
  * retention and audit-roll rules are testable without a clock.
  */
-function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024, stampsFlushMs = STAMPS_FLUSH_MS, walk = null } = {}) {
+function createChannelStore({ dir, now = () => Date.now(), log = console, onWrite = null, writer = null, actsMaxBytes = 8 * 1024 * 1024, stampsFlushMs = STAMPS_FLUSH_MS, walk = null, heldRetry = null } = {}) {
   // lane hub-loop-stalls commit 2: the index reaches the disk through THE STORE WRITER (its own thread; a pace stated for
   // the index's size) — a 21.7 MB index's rename held the owner's main loop 1.3 s median, 58 times in six hours
   const W = () => writer || require('./store-writer.js').storeWriter();
@@ -366,7 +368,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const adaptersFile = path.join(dir, 'adapters.json');
   const auditFile = path.join(dir, 'audit.ndjson');
 
-  fs.mkdirSync(msgsDir, { recursive: true, mode: 0o700 });
+  const madeFirst = fs.mkdirSync(msgsDir, { recursive: true, mode: 0o700 });   // B-f276 1b: the first folder it made (undefined: every one was there)
   fs.mkdirSync(archiveDir, { recursive: true, mode: 0o700 });
   // THE STORE IS THE OWNING ACCOUNT'S ALONE (the owner, 2026-11-17): channel content — heads, bodies, attachments — stays
   // PLAIN at rest, as transcripts and the search index are; only an account's sign-in token and app secret are sealed (the
@@ -379,40 +381,194 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     .then((s) => ((s.mode & 0o077) ? fs.promises.chmod(dir, s.mode & 0o700).then(() => true) : true))
     .catch((e) => { warn(`[channels] the store's folder was not closed to other accounts (${(e && e.code) || (e && e.message) || e}) — its files keep the modes they have`); return false; });
 
-  // ── FAIL CLOSED ON AN UNREADABLE STORE FILE (r2, 2026-09-23 verifier: a
-  // truncated groups.json read as EMPTY with no log line, and the first group
-  // verb overwrote it — every group, membership, notify mode and report
-  // marker gone). A MISSING file is an empty store; a file that exists but
-  // cannot be parsed (or has the wrong shape) is RENAMED beside itself as
-  // `<name>.corrupt-<ts>` — never unlinked — with ONE named log line, and the
-  // store starts empty only once the bytes are safe. If even the rename fails
-  // the family is BLOCKED: its door refuses every write rather than overwrite
-  // the only copy. `quarantined` names what was set aside (the channels
-  // engine files ONE "For you" item per entry).
+  // ── FAIL CLOSED ON AN UNREADABLE STORE FILE (r2, 2026-09-23 verifier: a truncated groups.json read as EMPTY with no log
+  // line, and the first group verb overwrote it). A MISSING file is an empty store. THE STORE-READ LAW (B-f276, lane
+  // bl-windows, through src/store-read.js storeAnswer): a READ that FAILED (EIO, EACCES, ETIMEDOUT, …) is NO ANSWER — the
+  // family is HELD: nothing is set aside, nothing is written over, its door refuses every write by name (`blocked`), and
+  // it is READ AGAIN off the loop (SR.retryDelay). A family whose caller hands an `adopt` (the six small ones) takes the
+  // bytes in place when they read and its hold LIFTS by itself; the index and the poll stamps (the acts journal's replay,
+  // the engine's live readers) are never swapped under a running hub: the read again SAYS the file reads now and it is
+  // loaded at the next start. Only bytes that were READ and do not parse (or have the wrong shape) are corrupt: renamed
+  // beside themselves as `<name>.corrupt-<ts>` — never unlinked — with ONE named log line, and the family starts empty
+  // only once the bytes are safe; if even the rename fails the family is BLOCKED (its door refuses every write rather
+  // than overwrite the only copy). `quarantined` names each (the channels engine files ONE "For you" item per entry).
   const quarantined = [];
-  function loadJsonFamily(file, valid, empty) {
-    const name = path.basename(file);
-    const setAside = (why) => {
-      const to = `${name}.corrupt-${new Date(now()).toISOString().replace(/[:.]/g, '-')}`;
-      try { fs.renameSync(file, path.join(dir, to)); } catch (e) {
-        warn(`[channels] ${name} is ${why} and could NOT be set aside (${(e && e.code) || (e && e.message)}) — writes to it are REFUSED until the file is fixed or moved by hand`);
-        quarantined.push({ file: name, to: null, why, at: now(), blocked: true });
-        return { value: empty(), blocked: `${name} is ${why} and could not be set aside — refusing to overwrite it (fix or move the file, then restart)` };
-      }
-      warn(`[channels] ${name} was ${why} — set aside as ${to} (its bytes kept, never overwritten); that store starts empty`);
-      quarantined.push({ file: name, to, why, at: now() });
-      return { value: empty(), blocked: null };
-    };
-    let text;
-    try { text = fs.readFileSync(file, 'utf-8'); } catch (e) {
-      if (e && e.code === 'ENOENT') return { value: empty(), blocked: null };
-      return setAside(`unreadable (${(e && e.code) || (e && e.message)})`);
-    }
-    let v;
-    try { v = JSON.parse(text); } catch (e) { return setAside(`corrupt JSON (${String((e && e.message) || e).slice(0, 80)})`); }
-    if (!valid(v)) return setAside('not the expected shape');
-    return { value: v, blocked: null };
+  const holds = new Map();  // file → { fam } — the families held now (each its own store hold, read again by its ladder)
+  const GROUP_FILES = new Set(['groups.json', 'wake-pace.json', 'dispatch-ledger.json']);   // the agent groups' families (their pause is the groups engine's, 1c)
+  const famByFile = new Map();   // file → its family (filled at each family's read — before any write can run)
+  let heldStopped = false;  // close() ran (its own flag: the index loads before `closed` is declared)
+  const heldHooks = [];     // fn({ file, state: 'loaded' | 'reads-again' | 'emptied' | 'appeared', q }) — the engine's words and start passes
+  const heldSay = (ev) => { for (const fn of heldHooks) { try { fn(ev); } catch (e) { warn(`[channels] a held-file hook threw: ${(e && e.message) || e}`); } } };
+  // a held ledger read again: per key, the file's entries and this life's — arrays joined (a stamp in the file's window kept), else memory wins
+  const unionBy = (file, mem) => { const out = { ...(file || {}) }; for (const [k, v] of Object.entries(mem || {})) out[k] = Array.isArray(v) && Array.isArray(out[k]) ? [...new Set([...out[k], ...v])].sort((x, y) => (x > y ? 1 : x < y ? -1 : 0)) : v; return out; };
+  // B-f276 1b (主开发 r809): a BIG family (the index ~22 MB, the poll stamps) is never PARSED on the loop at a read again — the read
+  // answered and its ends look like an object ⇒ «reads again», loaded at the next start (its whole parse runs there, as at any start)
+  const cheapParse = (t) => { const x = String(t); if (/^\s*\{/.test(x.slice(0, 64)) && /\}\s*$/.test(x.slice(-64))) return {}; throw new SyntaxError('its ends are not one JSON object'); };
+  const heldWords = (name, h, big) => (h.kind === 'damaged'
+    ? `${name} could not be read as itself (damaged: its bytes are not the store) — it is held: nothing was set aside or written over, and every change to it is refused until a person starts it empty (For you) or puts a good copy back${big ? ' and restarts VibeSpace' : ''}`
+    : `${name} could not be read (${h.kind}${h.code ? `, ${h.code}` : ''}) — it is held: nothing was set aside or written over, and every change to it is refused until it reads again${big ? ' (it is then loaded at the next start)' : ''}`);
+  /** ONE FAMILY'S READ AT THE START, through its store hold (src/store-hold.js). `adopt` (the six small families) takes a read-again value
+   *  in place; none (the index, the stamps) = loaded at the next start. → { value, blocked, held, missing, H, q, big, name, file } */
+  function loadJsonFamily(file, valid, empty, adopt = null) {
+    const name = path.basename(file), big = !adopt;
+    let startRead = false;
+    const fam = { value: undefined, blocked: null, held: false, missing: false, file, name, big, empty, adopt, valid, q: null, H: null, appearing: null };
+    famByFile.set(file, fam);
+    fam.H = SH.create({
+      file, now, log: { warn: (m) => warn(m) },
+      parse: (t) => (big && startRead ? cheapParse(t) : JSON.parse(t)),
+      valid: (v) => (big && startRead ? true : valid(v)),
+      ...(heldRetry ? { silentMs: [], ladder: { firstMs: Number(heldRetry.firstMs) || 30000, maxMs: Number(heldRetry.maxMs) || 300000 } } : {}),
+      onLift: (v) => liftFamily(fam, v),
+    });
+    let st;
+    try { st = fam.H.readAtStart(); } finally { startRead = true; }
+    if (st === 'data') { fam.value = fam.H.answer(); return fam; }
+    if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }
+    const h = fam.H.held();
+    fam.value = empty(); fam.held = true; fam.blocked = heldWords(name, h, big);
+    fam.q = { file: name, to: null, why: `${h.kind}${h.code ? ` (${h.code})` : ''}`, kind: h.kind, at: now(), held: true, lifts: h.kind === 'damaged' ? 'a-person' : big ? 'next-start' : 'by-itself', groups: GROUP_FILES.has(name), readsAt: null, loadedAt: null };
+    quarantined.push(fam.q);
+    holds.set(file, { fam });
+    // B-f276 1b (its read r1 M1): a DAMAGED big family lifts only by a person — the cheap parse after the start cannot tell its own torn
+    // bytes from a good copy (ends that look like one object lifted it a second later, and the door answered «none» for ever)
+    if (big && h.kind === 'damaged') fam.H.stop();
+    warn(`[channels] ${fam.blocked}`);
+    return fam;
   }
+  /** the store hold's lift: the family reads again (a small one is taken in place; a big one is SAID, loaded at the next start) */
+  function liftFamily(fam, v) {
+    if (heldStopped || !holds.has(fam.file)) return;
+    if (fam.big) {
+      fam.q.readsAt = now(); fam.q.readsAs = 'data';
+      warn(`[channels] ${fam.name} reads again — it is loaded at the next start of VibeSpace (never swapped under the running engine); until then it stays held`);
+      heldSay({ file: fam.name, state: 'reads-again', q: fam.q });
+      return;
+    }
+    holds.delete(fam.file);
+    fam.value = v; fam.blocked = null; fam.held = false;   // the door opens FIRST: the adopt may write (pace / dispatch)
+    try { fam.adopt(v); } catch (e) { warn(`[channels] ${fam.name}: its read-again value was not taken in: ${(e && e.message) || e}`); }
+    fam.q.readsAt = fam.q.loadedAt = now();
+    warn(`[channels] ${fam.name} reads again — loaded; its hold is lifted, changes to it are written again`);
+    heldSay({ file: fam.name, state: 'loaded', q: fam.q });
+  }
+  /** THE MISSING LAW (主开发 r809) — ONE DOOR, THE WRITER'S: a family that read MISSING hands its whole writes as EXCLUSIVE creates until
+   *  one lands (on the writer's thread: a link that refuses an existing file — src/store-writer-worker.js). A file that APPEARED since
+   *  (a mount that came late) is never written over: the writer drops the change and says so; the family reads the file and KEEPS it
+   *  (tookAppeared); a durable change's promise rejects by name (landed: store-appeared). → the writer's options for `file` */
+  function firstWrite(file, onWritten) {
+    const fam = famByFile.get(file);
+    if (!fam) return onWritten ? { onWritten } : {};
+    return { exclusive: !!fam.missing, onWritten: (ok, err) => {
+      if (ok && fam.missing && !fam.appearing) fam.missing = false;
+      else if (!ok && err && err.code === 'EEXIST' && fam.missing) tookAppeared(fam);
+      if (onWritten) onWritten(ok, err);
+    } };
+  }
+  /** a file that appeared since the start: read and KEPT (a small family takes it in place — its writes go again; a big one is held,
+   *  «loaded at the next start», its writes refused — AT ONCE, no read of a file it will not load: its read r1 S5). ONE read a family (a
+   *  second EEXIST while it runs waits for the same read). The folder changed under the store: a first start's empty copies list is
+   *  listed again (its read r1 S4) */
+  function holdAppeared(fam) {
+    fam.held = true; fam.blocked = `${fam.name} appeared since the start (it was not there when it was read) — it is kept as it is and loaded at the next start; every change to it is refused until then`;
+    fam.q = { file: fam.name, to: null, why: 'appeared since the start', kind: 'appeared', at: now(), held: true, lifts: 'next-start', readsAt: null, loadedAt: null };
+    quarantined.push(fam.q);
+  }
+  function tookAppeared(fam) {
+    if (fam.appearing) return fam.appearing;
+    relistAside();
+    if (fam.big) {
+      holdAppeared(fam);
+      fam.appearedAt = now();
+      warn(`[channels] ${fam.name} appeared since the start — kept as it is, loaded at the next start; the change that found it was not made`);
+      heldSay({ file: fam.name, state: 'appeared', q: fam.q });
+      fam.appearing = Promise.resolve();
+      return fam.appearing;
+    }
+    fam.appearing = (async () => {
+      let read;
+      try { read = { text: await fs.promises.readFile(fam.file, 'utf-8') }; } catch (error) { read = { error }; }
+      const a = SR.storeAnswer(read, { valid: fam.valid });
+      if (a && a.state === 'data') {
+        fam.value = a.value;
+        fam.missing = false;   // its own now — BEFORE the adopt (its read r1 S6: the pace's union is the adopt's own write; the writer hears `exclusive: false`)
+        try { fam.adopt(a.value); } catch (e) { warn(`[channels] ${fam.name}: the file that appeared was not taken in: ${(e && e.message) || e}`); }
+      } else holdAppeared(fam);
+      fam.appearedAt = now();
+      warn(`[channels] ${fam.name} appeared since the start — read and kept; the change that found it was not made`);
+      heldSay({ file: fam.name, state: 'appeared', q: fam.q });
+    })();
+    return fam.appearing;
+  }
+  const appearedError = (fam) => Object.assign(new Error(`${fam.name} appeared since the start — ${fam.big ? 'it is kept as it is and loaded at the next start' : 'it is read and kept'}; this change was not made`), { code: 'store-appeared', status: 409 });
+  /** THE DAMAGED DOOR (主开发 r809: torn bytes follow the store hold — held, ONE door): a person's choice to start a damaged family EMPTY:
+   *  its bytes are set aside under a dated name (never deleted), the family starts empty IN PLACE (nothing of it was loaded — empty for
+   *  empty, the index too), and its first write is the exclusive create. → { ok, state: 'pass' | 'none', aside? } */
+  // THE FAMILY'S OTHER FILES (its read r1 M2 / S1): a family is more than its one file — the index's acts journal, the stamps' journal,
+  // the outbox's attachment folders. The door sets them aside WITH it, under the same dated name (nothing deleted): a journal left
+  // behind takes this life's acts (dropped as «backwards» at the next start, or its lines deleted by a compaction), and the files sweep
+  // discards every folder of the proposals in the copy
+  const COMPANIONS = Object.freeze({ 'index.json': ['index-acts.ndjson'], 'poll-stamps.json': ['poll-stamps.log'], 'outbox.json': ['outbox-files'] });
+  const emptying = new Map();   // file → the press in flight (ONE at a time: a second press waits for the first's answer)
+  async function startDamagedEmpty(fileName) {
+    const fam = [...holds.values()].map((x) => x.fam).find((f) => f.name === String(fileName || ''));
+    const h = fam ? fam.H.held() : null;
+    if (!fam || !h || h.kind !== 'damaged') return { ok: true, state: 'none' };
+    if (emptying.has(fam.file)) return emptying.get(fam.file);
+    const run = (async () => {
+      fam.H.stop();   // nothing lifts under the press: the person chose to start it empty
+      const when = now(), suffix = `.damaged-${new Date(when).toISOString().replace(/[:.]/g, '-')}`;   // the hold's own dated name (src/store-hold.js setAside)
+      const moved = [];   // the other files set aside so far — renamed BACK if the press cannot finish (its read r2 S1: never a split family)
+      const back = async () => { for (const c of moved.reverse()) { try { await fs.promises.rename(path.join(dir, c + suffix), path.join(dir, c)); } catch (e) { warn(`[channels] ${fam.name}: its ${c} could not be put back from ${c + suffix} (${(e && e.code) || (e && e.message) || e}) — move it back by hand`); } } };
+      for (const c of COMPANIONS[fam.name] || []) {
+        try { await fs.promises.rename(path.join(dir, c), path.join(dir, c + suffix)); moved.push(c); }
+        catch (e) {
+          if (e && e.code === 'ENOENT') continue;
+          warn(`[channels] ${fam.name}: its ${c} could not be set aside (${(e && e.code) || (e && e.message) || e}) — nothing was started empty; it stays held`);
+          await back();
+          return { ok: false, state: 'failed', code: (e && e.code) || 'EIO' };
+        }
+      }
+      let aside;
+      try { aside = fam.H.setAside(when); }
+      catch (e) {
+        warn(`[channels] ${fam.name} could not be set aside (${(e && e.code) || (e && e.message) || e}) — nothing was started empty; it stays held, its other files put back`);
+        await back();
+        return { ok: false, state: 'failed', code: (e && e.code) || 'EIO' };
+      }
+      if (fam.name === 'adapters.json' && !asideNames.includes(path.basename(aside))) asideNames.push(path.basename(aside));   // B-f276 1b: the accounts' copy COUNTS in the key check (it may hold sealed sign-ins — never a value made over them)
+      holds.delete(fam.file);
+      fam.value = fam.empty(); fam.blocked = null; fam.held = false; fam.missing = true; fam.appearing = null;   // its first write: the exclusive create
+      if (fam.adopt) { try { fam.adopt(fam.value); } catch (e) { warn(`[channels] ${fam.name}: its empty store was not taken in: ${(e && e.message) || e}`); } }
+      if (fam.q) { fam.q.to = path.basename(aside); fam.q.loadedAt = now(); fam.q.done = true; }
+      warn(`[channels] ${fam.name} was damaged — a person started it empty; its bytes were set aside as ${path.basename(aside)}${(COMPANIONS[fam.name] || []).length ? ` (its ${COMPANIONS[fam.name].join(', ')} beside it, under the same name)` : ''} — nothing deleted`);
+      heldSay({ file: fam.name, state: 'emptied', q: fam.q });
+      return { ok: true, state: 'pass', aside: path.basename(aside) };
+    })().finally(() => { emptying.delete(fam.file); });
+    emptying.set(fam.file, run);
+    return run;
+  }
+
+  // THE ACCOUNTS' SET-ASIDE COPIES (主开发 r459, B-f276 unit 1): torn bytes of adapters.json set aside may hold sealed
+  // sign-ins the store's value opens — the key-file law's check counts them (never a value made over them). Listed ONCE
+  // at the start, off the loop, only beside the file (never a walk); `null` until listed = unknown (the check: holds).
+  const asideNames = [];
+  // B-f276 1b: a store whose MESSAGE folder this start made has never run in this folder — and a copy is made only by a store that ran
+  // there (its own start's set-aside in a release before 1b, or the damaged door): its list is KNOWN EMPTY at once, by the start's own
+  // mkdir answer (no read) — a first start's sign-in is never refused as «unknown»; any other start lists them off the loop (r459)
+  const firstStart = !!madeFirst;
+  let asideListed = firstStart;
+  let asideTries = 0;
+  const listAside = () => fs.promises.readdir(dir).then((names) => { for (const n of names) if ((n.startsWith('adapters.json.corrupt-') || n.startsWith('adapters.json.damaged-')) && !asideNames.includes(n)) asideNames.push(n); asideListed = true; })   // B-f276 1b: + the damaged door's copies
+    .catch((e) => {
+      if (e && e.code === 'ENOENT') { asideListed = true; return; }
+      if (!asideTries) warn(`[channels] the accounts' set-aside copies were not listed (${(e && e.code) || (e && e.message) || e}) — no store value is made until they are; listed again`);
+      if (heldStopped) return;
+      const t = setTimeout(listAside, SR.retryDelay(++asideTries, heldRetry || undefined)); if (t.unref) t.unref();
+    });
+  if (!firstStart) listAside();
+  let relisted = false;
+  function relistAside() { if (!firstStart || relisted || heldStopped) return; relisted = true; asideListed = false; listAside(); }   // B-f276 1b (its read r1 S4): unknown again until listed — it holds
 
   /** A BLOCKED family's refusal (r3): a typed Error the routes answer as
    *  `503 {error, code:'store-blocked'}` — the panel words the code, the
@@ -421,7 +577,6 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
 
   const ixLoad = timedSync('channels-index.read', () => loadJsonFamily(indexFile, (v) => v && typeof v === 'object' && v.conversations && typeof v.conversations === 'object', EMPTY_INDEX));
   let ix = ixLoad.value;
-  const ixBlocked = ixLoad.blocked;
 
   let dirty = false;
 
@@ -442,7 +597,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const ACTS_MAX_BYTES = actsMaxBytes;   // 8 MB (a suite states a smaller one)
   let actSeq = Number(ix.actsSeq) > 0 ? Number(ix.actsSeq) : 0, actLines = [], pendingActsSeq = 0, actsReplayed = 0;
   let appendedSeq = 0, journalBytes = 0, compactOwed = false, actsOverSaid = 0;
-  if (!ixBlocked && ix.conversations && typeof ix.conversations === 'object') {
+  if (!ixLoad.blocked && ix.conversations && typeof ix.conversations === 'object') {
     let text = null;
     try { text = timedSync('channels-acts.read', () => fs.readFileSync(actsFile, 'utf8')); } catch { text = null; }
     const held = actSeq;
@@ -505,11 +660,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const stampsSince = new Set();   // cure r1 (C2): the keys set after the side file's bytes were made — what a fold keeps
   let stampsTimer = null;
   const stampStats = { writes: 0, healed: 0, lostAtLoad: 0 };
-  let journalFd = null, journalTorn = false, journalSaidAt = 0;
+  let journalFd = null, journalTorn = false, journalSaidAt = 0, journalWas = false;   // journalWas: a journal there at the start (or opened since)
   const journalStats = { replayed: 0, torn: 0, lines: 0, bytes: 0, folds: 0 };
   {   // the journal replayed over the side file, in order — a kill since its last write lost no stamp
     let text = '';
-    try { text = fs.readFileSync(stampsLog, 'utf8'); } catch { /* none: the side file is the whole truth */ }
+    try { text = fs.readFileSync(stampsLog, 'utf8'); journalWas = true; } catch { /* none: the side file is the whole truth */ }
     if (text && !text.endsWith('\n')) journalTorn = true;   // a tail a kill cut short: the next line starts on its own
     for (const ln of text.split('\n')) {
       if (!ln) continue;
@@ -527,6 +682,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   /** Take a row's own stamps into the side map — the NEWER instant wins per key — and strip them from the row (a legacy
    *  row, or one written past the door). Returns whether the map took one. */
   function healRow(key, en) {
+    if (HELD_WALLS.healRow && psLoad && psLoad.blocked) return false;   // B-f276 wall: the poll times stay in the row while their side file is held
     const l = en && en.lane;
     if (!l || typeof l !== 'object') return false;
     let took = false;
@@ -694,7 +850,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // in flight when the engine stopped holds its hits pending) is written
     // NOW — the debounce is gone, and an unflushed hold was a lost message
     if (closed) { try { flush(); } catch (e) { warn('[channels] index.json not written after close:', (e && e.message) || e); } return; }
-    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, onWritten: indexWritten, ...(act ? { rank: 0 } : {}) });
+    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, ...firstWrite(indexFile, indexWritten), ...(act ? { rank: 0 } : {}) });   // B-f276 1b: a missing index's first write is the exclusive create
   }
 
   // THE WRITER ASKS FOR THE BYTES when the index is due (lane hub-loop-stalls commit 2): the serialization runs HERE on
@@ -706,7 +862,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function produceIndex(o) {
     if (!dirty && !fullOwed) return null;
     // every refusal is said (r3: a once-only line went silent after the first)
-    if (ixBlocked) { warn('[channels] index.json not written: ' + ixBlocked); dirty = false; return null; }
+    if (ixLoad.blocked) { warn('[channels] index.json not written: ' + ixLoad.blocked); dirty = false; return null; }
     const full = fullOwed; fullOwed = false;
     if (actSeq > 0 && ix.actsSeq !== actSeq) ix.actsSeq = actSeq;   // the last act this write holds (the load replays past it)
     pendingActsSeq = actSeq;
@@ -736,7 +892,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function flush({ full = false } = {}) {
     if (!dirty && !W().pending(indexFile)) return false;   // a clean index is not rewritten (`full` = HOW, when there is something to write)
     if (full) fullOwed = true;
-    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, onWritten: indexWritten });
+    W().dirty(indexFile, { name: 'channels-index.write', produce: produceIndex, debounceMs: FLUSH_DEBOUNCE_MS, mode: 0o600, ...firstWrite(indexFile, indexWritten) });
     const r = W().flushSync([indexFile]);
     // a failed write THROWS, as the inline write did (the writer keeps it owed and retries): a caller ordering a cursor
     // after the rows never advances it past rows that are not on disk
@@ -989,7 +1145,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     // r3: a BLOCKED index refuses the ACTION, not only the write — an update
     // that resolved while the flush was refused was a user action that
     // succeeded on screen and vanished at the next restart
-    if (ixBlocked) return Promise.reject(blockedError(ixBlocked));
+    if (ixLoad.blocked) return Promise.reject(blockedError(ixLoad.blocked));
     let whole = false, none = false;   // this act reached the whole map (the index itself is written durable) / changed nothing
     const run = chain.then(() => {
       const t = curTouch = new Set();
@@ -1014,6 +1170,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       const fileN = whole ? 'index.json' : 'index-acts.ndjson';
       // round 4 (true words 4): WHY, by the writer's own record — a write still QUEUED at durable()'s bound is waiting, never «failed»
       const wn = (() => { try { return W().whyNotDurable(whole ? indexFile : actsFile); } catch { return null; } })();
+      if (wn && wn.code === 'EEXIST') throw Object.assign(appearedError(ixLoad), { applied: true });   // B-f276 1b (its read r1 S5): the index APPEARED — held for the life, never «written when the storage can»
       const why = wn && wn.why === 'queued' ? `its write is still queued${wn.ahead > 0 ? ` behind at least ${wn.ahead} other write${wn.ahead === 1 ? '' : 's'}` : ''} — the storage is slow${wn.lastMs ? ` (its last write took ${(wn.lastMs / 1000).toFixed(1)} s)` : ''}; kept, written in its turn` : 'its write failed — kept, retried';
       if (!notDurableSaid[fileN]) { notDurableSaid[fileN] = 1; warn(`[channels] ${fileN}: an act is in memory but not on disk yet (${why}; the next acts not on disk the same way are counted, said when a write lands)`); }
       else notDurableSaid[fileN]++;
@@ -1024,7 +1181,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  top-level tables when they changed — appended through the writer. → 'line' | 'none' (it changed nothing: nothing is
    *  written, round 2, law C iv) | 'whole' (it reached the whole map: the caller writes the index itself, durable) */
   function actOf(t) {
-    if (t.all) return 'whole';
+    if (t.all || ixLoad.missing) return 'whole';   // B-f276 1b (its read r1 M2): an index that never landed (read missing, or started empty) journals NOTHING — the act writes the index itself, through its exclusive create
     const conv = ix.conversations, rows = [];
     for (const k of t) {
       const s0 = hasOwn(conv, k) ? JSON.stringify(conv[k], INDEX_KEYS) : null;
@@ -1509,7 +1666,9 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function trim(adapterId, convId, { days = RETENTION_DAYS, maxRecords = RETENTION_MAX_RECORDS, floorDays = RETENTION_FLOOR_DAYS } = {}) {
     const fp = logPath(adapterId, convId);
     let lines;
-    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch {
+    try { lines = fs.readFileSync(fp, 'utf-8').split('\n').filter(Boolean); } catch (e) {
+      // B-f276 (unknown is never an orphan): only a MISSING log is «no log» — a read that failed trims nothing (said)
+      if (!e || e.code !== 'ENOENT') { warn(`[channels] ${adapterId}/${convId}: its message log could not be read (${(e && e.code) || (e && e.message)}) — nothing trimmed, its side log kept`); return { removed: 0, kept: 0, side: null, unread: true }; }
       // no message log: a side line for a conversation that never got one is "message gone" (attack 13)
       let side = null;
       try { side = trimSide(adapterId, convId, { liveIds: new Set() }); } catch { }
@@ -2186,7 +2345,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   const moved = new Set();   // the files this store handed to the writer (close() flushes them through it)
   function owe(file, { name, produce, mode, act = false, onWritten, makeDir = false } = {}) {
     moved.add(file);
-    W().dirty(file, { name, produce, ...(mode !== undefined ? { mode } : {}), ...(act ? { rank: 0 } : {}), ...(onWritten ? { onWritten } : {}), ...(makeDir ? { makeDir: true } : {}) });
+    W().dirty(file, { name, produce, ...(mode !== undefined ? { mode } : {}), ...(act ? { rank: 0 } : {}), ...firstWrite(file, onWritten), ...(makeDir ? { makeDir: true } : {}) });   // B-f276 1b (r809): a family read missing — its first write is the exclusive create
     if (closed) writeNow(file);
   }
   /** the file's bytes through the writer NOW, waited for (bounded by the writer's synchronous bound) — close(), a change
@@ -2205,6 +2364,11 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
       if (await W().durable(file)) return;
       const why = W().whyNotDurable(file);
       if (why && why.why === 'queued') continue;
+      if (why && why.code === 'EEXIST') {   // B-f276 1b (r809): the family's file APPEARED since its read — read and kept, this change not made
+        const fam = famByFile.get(file);
+        if (fam && fam.appearing) await fam.appearing.catch(() => { });
+        throw appearedError(fam || { name: path.basename(file) });
+      }
       const code = (why && why.code) || 'EWRITE';
       throw Object.assign(new Error(`${path.basename(file)} not written (${code})`), { code });
     }
@@ -2216,7 +2380,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // LIVE inside a serialized door, and written by that door only — there is
   // deliberately no `writeAdapters(obj)` for a caller to hand a private copy
   // to, for the same reason there is no `writeIndex`.
-  const adLoad = loadJsonFamily(adaptersFile, (v) => v && typeof v === 'object' && Array.isArray(v.adapters), () => ({ v: 1, adapters: [] }));
+  const adLoad = loadJsonFamily(adaptersFile, (v) => v && typeof v === 'object' && Array.isArray(v.adapters), () => ({ v: 1, adapters: [] }), (v) => { ad = v; });
   let ad = adLoad.value;
   let adChain = Promise.resolve();
   // channel-store-off-loop (commit 1): `{paced: true}` = a bookkeeping stamp (a pass's time, a counter, a cursor after
@@ -2238,7 +2402,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // disagree (§9.2). Bounded: terminal proposals past OUTBOX_KEEP fall off
   // oldest-first at write time (the audit log keeps the record for ever).
   const outboxFile = path.join(dir, 'outbox.json');
-  const obLoad = loadJsonFamily(outboxFile, (v) => v && typeof v === 'object' && v.proposals && typeof v.proposals === 'object', () => ({ v: 1, proposals: {}, seq: 0 }));
+  const obLoad = loadJsonFamily(outboxFile, (v) => v && typeof v === 'object' && v.proposals && typeof v.proposals === 'object', () => ({ v: 1, proposals: {}, seq: 0 }), (v) => { ob = v; if (!Number.isFinite(ob.seq)) ob.seq = 0; obSnap = null; });
   let ob = obLoad.value;
   if (!Number.isFinite(ob.seq)) ob.seq = 0;
   let obChain = Promise.resolve();
@@ -2284,7 +2448,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // 1/2/5 for free and a busy group never rewrites this file per message
   // beyond its `lastAt`/`lastText` summary.
   const groupsFile = path.join(dir, 'groups.json');
-  const grLoad = loadJsonFamily(groupsFile, (v) => v && typeof v === 'object' && v.groups && typeof v.groups === 'object' && !Array.isArray(v.groups), () => ({ v: 1, groups: {} }));
+  const grLoad = loadJsonFamily(groupsFile, (v) => v && typeof v === 'object' && v.groups && typeof v.groups === 'object' && !Array.isArray(v.groups), () => ({ v: 1, groups: {} }), (v) => { gr = v; });
   let gr = grLoad.value;
   let grChain = Promise.resolve();
   // channel-store-off-loop (commit 1): a group verb and a report's marker are acts — DURABLE, the promise means on disk
@@ -2300,7 +2464,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   //    `{v:1, aliases: {[adapterId]: {[authorId]: {alias, at}}}}`, ONE serialized owner like groups.json, set aside
   //    (never overwritten) when unreadable
   const aliasesFile = path.join(dir, 'aliases.json');
-  const alLoad = loadJsonFamily(aliasesFile, (v) => v && typeof v === 'object' && v.aliases && typeof v.aliases === 'object' && !Array.isArray(v.aliases), () => ({ v: 1, aliases: {} }));
+  const alLoad = loadJsonFamily(aliasesFile, (v) => v && typeof v === 'object' && v.aliases && typeof v.aliases === 'object' && !Array.isArray(v.aliases), () => ({ v: 1, aliases: {} }), (v) => { al = v; });
   let al = alLoad.value;
   let alChain = Promise.resolve();
   // channel-store-off-loop (commit 1): the owner's names — an owner's act, DURABLE
@@ -2323,7 +2487,8 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // a moment after each change. After close() owe() writes at once: a failed write is SAID here, never thrown into the
   // groups engine (as the release's flush did).
   const paceFile = path.join(dir, 'wake-pace.json');
-  const pcLoad = loadJsonFamily(paceFile, (v) => v && typeof v === 'object' && !Array.isArray(v), () => ({ v: 1, pairs: {}, senders: {} }));
+  // a held ledger read again: the file's floors, with every floor this life granted kept over them (memory wins per key)
+  const pcLoad = loadJsonFamily(paceFile, (v) => v && typeof v === 'object' && !Array.isArray(v), () => ({ v: 1, pairs: {}, senders: {} }), (v) => { paceSet({ ...v, pairs: unionBy(v.pairs, pc.pairs), senders: unionBy(v.senders, pc.senders) }); });
   let pc = pcLoad.value;
   let paceDirty = false;   // the BLOCKED rung's change not said yet
   let paceTimer = null;
@@ -2348,7 +2513,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   // after the write in flight and at most one paced write (2K + 1 writes for K acts owed) — a kill in that gap re-compacts
   // once on the retry (spend-guard gates the wake). After close() a failed write is said, never thrown.
   const dispatchFile = path.join(dir, 'dispatch-ledger.json');
-  const dlLoad = loadJsonFamily(dispatchFile, (v) => v && typeof v === 'object' && !Array.isArray(v) && v.entries && typeof v.entries === 'object', () => ({ v: 1, entries: {} }));
+  const dlLoad = loadJsonFamily(dispatchFile, (v) => v && typeof v === 'object' && !Array.isArray(v) && v.entries && typeof v.entries === 'object', () => ({ v: 1, entries: {} }), (v) => { dispatchSet({ ...v, entries: { ...(v.entries || {}), ...(dl.entries || {}) } }); });
   let dl = dlLoad.value;
   let dlDirty = false;   // the BLOCKED rung's change not said yet
   let dlTimer = null;
@@ -2409,15 +2574,18 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  a process kill in the page cache the moment it returns; the writer's queue would lose it. The field never named it
    *  (the 15 holds were the snapshot's open). Pinned by test-channel-store-loop-free and its census row. */
   function journal(keys) {
-    if (closed || psLoad.blocked || ixBlocked) return;
+    if (closed || psLoad.blocked || ixLoad.blocked) return;
     const lineOf = (k) => { const st = stampMap.get(k); return `${JSON.stringify([k, ...STAMP_KEYS.map((f) => (st && st[f]) || null)])}\n`; };
     const b = Buffer.from(`${journalTorn ? '\n' : ''}${Array.isArray(keys) ? keys.map(lineOf).join('') : lineOf(keys)}`, 'utf8');
     try {
-      if (journalFd === null) journalFd = fs.openSync(stampsLog, 'a');
+      // B-f276 1b (its read r2 S3): the stamps read missing with no journal at the start — the journal's first open is an EXCLUSIVE create:
+      // a journal that APPEARED (a mount that came late) is kept as it is, never appended to
+      if (journalFd === null) { journalFd = fs.openSync(stampsLog, psLoad.missing && !journalWas ? 'ax' : 'a'); journalWas = true; }
       let o = 0;
       while (o < b.length) o += fs.writeSync(journalFd, b, o, b.length - o);
       journalTorn = false; journalStats.lines += Array.isArray(keys) ? keys.length : 1; journalStats.bytes += b.length;
     } catch (e) {
+      if (e && e.code === 'EEXIST' && psLoad.missing) { tookAppeared(psLoad); return; }   // the journal APPEARED: the stamps held at once (loaded at the next start)
       journalTorn = true;
       if (now() - journalSaidAt >= 60e3) { journalSaidAt = now(); warn(`[channels] poll-stamps.log not written (${(e && e.code) || (e && e.message) || e}) — the stamp is kept in memory and in the side file's next write`); }
     }
@@ -2440,7 +2608,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
    *  nothing to write. A BLOCKED family or index is never written (said each time). */
   function produceStamps() {
     if (!stampsDirty) return null;
-    if (psLoad.blocked || ixBlocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixBlocked)); return null; }
+    if (psLoad.blocked || ixLoad.blocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixLoad.blocked)); return null; }
     const conv = ix.conversations, lines = [];
     for (const [k, st] of stampMap) {
       if (!hasOwn(conv, k)) { stampMap.delete(k); continue; }
@@ -2458,16 +2626,16 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   function oweStamps() {
     if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
     if (!stampsDirty) return;
-    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten });
+    owe(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten });   // owe(): a missing stamps file's first write is the exclusive create
   }
   /** THE SYNCHRONOUS WRITE of the side file (close, a suite): through the writer, waited for. → whether it was written;
    *  never throws (a failure is said, kept in memory and retried) */
   function stampsFlush() {
     if (stampsTimer) { clearTimeout(stampsTimer); stampsTimer = null; }
     if (!stampsDirty && !W().pending(stampsFile)) return false;
-    if (psLoad.blocked || ixBlocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixBlocked)); return false; }
+    if (psLoad.blocked || ixLoad.blocked) { warn('[channels] poll-stamps.json not written: ' + (psLoad.blocked || ixLoad.blocked)); return false; }
     moved.add(stampsFile);
-    W().dirty(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, onWritten: stampsWritten });
+    W().dirty(stampsFile, { name: 'channels-stamps.write', produce: produceStamps, ...firstWrite(stampsFile, stampsWritten) });   // B-f276 1b: a missing side file's first write is the exclusive create
     try { return writeNow(stampsFile); }
     catch (e) { warn(`[channels] poll-stamps.json not written (${(e && e.code) || (e && e.message) || e}) — kept in memory, retried`); armStamps(); return false; }
   }
@@ -2478,8 +2646,32 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   }, FLUSH_INTERVAL_MS);
   if (interval.unref) interval.unref();
 
+  // B-f276 A2 (主开发 r487): THE ONE PAUSE — every reader of this store's families asks HERE, never a rule of its own (the channels
+  // engine, the groups engine). `heldOf(names)` = the families among `names` that are HELD (their read failed) or BLOCKED (torn
+  // bytes that could not be set aside): a reader of any of them PAUSES. `whenRead(names, fn)` = fn() ONCE when none of them is held
+  // any more (at once when none is): a small family's read again takes its bytes in place BEFORE fn runs — no adoption under a
+  // running reader. The index and the poll stamps stay held for the life (loaded at the next start): their readers start then.
+  const FAMILIES = { 'index.json': () => ixLoad, 'poll-stamps.json': () => psLoad, 'adapters.json': () => adLoad, 'outbox.json': () => obLoad, 'groups.json': () => grLoad, 'aliases.json': () => alLoad, 'wake-pace.json': () => pcLoad, 'dispatch-ledger.json': () => dlLoad };
+  function heldOf(names) { return (Array.isArray(names) ? names : Object.keys(FAMILIES)).filter((n) => { const f = FAMILIES[n] && FAMILIES[n](); return !!(f && f.blocked); }); }
+  const readWaiters = [];
+  function whenRead(names, fn) {
+    if (typeof fn !== 'function') return;
+    if (!heldOf(names).length) { fn(); return; }
+    readWaiters.push({ names, fn });
+  }
+  heldHooks.push(() => {
+    for (let i = 0; i < readWaiters.length;) {
+      const w = readWaiters[i];
+      if (heldOf(w.names).length) { i++; continue; }
+      readWaiters.splice(i, 1);
+      try { w.fn(); } catch (e) { warn(`[channels] a reader's start after its families read threw: ${(e && e.message) || e}`); }
+    }
+  });
+
   function close() {
     closed = true;
+    heldStopped = true;
+    for (const h of holds.values()) { try { h.fam.H.stop(); } catch { } }
     if (interval) { clearInterval(interval); interval = null; }
     flush({ full: true });   // B-f32b: the last write is the whole serialization, not the cache
     stampsFlush();
@@ -2513,7 +2705,7 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     dir, indexFile, adaptersFile, auditFile, archiveDir, outboxFile, groupsFile, aliasesFile, logPath, purgeAccount,
     // `blocked()` = the refusal sentence while a family's file could not be set aside (null = writable)
     index: {
-      update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixBlocked || null,
+      update, snapshot, peek, has, live: liveConversations, rows, touch, table: liveTable, entry, flush, durable: durableIndex, isDirty: () => dirty, blocked: () => ixLoad.blocked || null, held: () => !!ixLoad.held,
       // B-dfa4 U2: `keysOf(adapterId)` = that account's row keys, kept (a walk of one account reads its own rows); `keysStats()` for the gates
       keysOf, rowsOf, keysReady, keysStats: () => ({ ...acctStats, kept: !!byAcct, warming: !!acctWarm, odd: oddKeys.size }),   // B-dfa4 cut 1: `rowsOf(adapterId)` = those rows, read-only
       // B-f32b: `onTouch(fn)` = fn(key) after an update touched that row, fn(null) after it reached the whole map (the
@@ -2522,13 +2714,24 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
     },
     // design 011 lane 2: the poll stamps (lastPollAt / lastScanAt / walkStartedAt) — `set` writes, `lane(row)` reads
     stamps: { get: stampsGet, set: stampsSet, lane: stampsLane, flush: stampsFlush, file: stampsFile, log: stampsLog, isDirty: () => stampsDirty, stats: () => ({ ...stampStats, keys: stampMap.size, journal: { ...journalStats } }) },
-    adapters: { update: adaptersUpdate, live: () => ad, blocked: () => adLoad.blocked || null, landed: () => landed(adaptersFile) },
+    adapters: { update: adaptersUpdate, live: () => ad, blocked: () => adLoad.blocked || null, landed: () => landed(adaptersFile), held: () => !!adLoad.held,
+      // B-f276 (主开发 r459): the set-aside copies of adapters.json beside it (names), null until listed (unknown)
+      asideCopies: () => (asideListed ? asideNames.slice() : null) },
     outbox: { update: outboxUpdate, snapshot: outboxSnapshot, nextId: outboxNextId, live: () => ob },
     groups: { update: groupsUpdate, snapshot: groupsSnapshot, live: () => gr },
     aliases: { update: aliasesUpdate, live: () => al, blocked: () => alLoad.blocked || null },
     pace: { live: () => pc, set: paceSet, flush: paceFlush },
     dispatch: { live: () => dl, set: dispatchSet, flush: dispatchFlush },
     quarantined,
+    heldOf, whenRead,   // B-f276 A2: THE ONE PAUSE (both engines)
+    // B-f276 A3: what lifts a family's pause — null (not held) | 'by-itself' (a small family, read again) | 'next-start' (the index, the
+    // poll stamps) | 'blocked' (torn bytes that could not be set aside: fixed or moved by hand)
+    familyKind: (n) => { const f = FAMILIES[n] && FAMILIES[n](); return f && f.blocked && f.q ? f.q.kind || null : null; },   // B-f276 1b (its read r1 N1): damaged | appeared | unreadable
+    familyState: (n) => { const f = FAMILIES[n] && FAMILIES[n](); if (!f || !f.blocked) return null; return (f.q && f.q.lifts) || (f.big ? 'next-start' : 'by-itself'); },   // B-f276 1b: 'by-itself' | 'next-start' | 'a-person' (damaged: the one door)
+    wallHeld: (name) => heldOf(HELD_WALLS[name] || Object.keys(FAMILIES)).length > 0,   // a cleanup's own wall (an unknown name = every family)
+    // B-f276: fn({ file, state: 'loaded' | 'reads-again', q }) after a held family read again (the engine's words + start passes)
+    onHeldRead: (fn) => { if (typeof fn === 'function') heldHooks.push(fn); },
+    startDamagedEmpty,   // B-f276 1b: the damaged family's one door (a person's choice — the engine's route asks it)
     appendRecords, readTail, readTailAsync, countSince, trim, audit, auditTail, close,
     // 2026-09-26 (the aggregated IM): backfill, search, attachments
     prependRecords, oldestRecord, search, attachmentGet, attachmentPut, attachmentUsage, avatarGet, avatarPut, avatarRefuse, peopleRead, peopleWrite,
@@ -2543,8 +2746,42 @@ function createChannelStore({ dir, now = () => Date.now(), log = console, onWrit
   };
 }
 
+/** B-f276 A2 (主开发 r487): A CLEANUP DELETES ONLY WHAT IT KNOWS IS AN ORPHAN; UNKNOWN IS NEVER AN ORPHAN. Every sweep / reaper /
+ *  pass that deletes a file or a folder, closes a For-you item or drops a waiting delivery on the strength of what a family holds
+ *  is a row: the families it trusts. Each asks `store.wallHeld(name)` ITSELF (the wall behind the pause) and does nothing while one
+ *  is held. scripts/test-channel-store.mjs ⑮'s census: every row asked exactly once in the product, none asked without a row. */
+const HELD_WALLS = Object.freeze({
+  filesSweep: ['outbox.json'],                                    // channels-outbound.js — deletes outbox-files/<id> folders with no proposal
+  stashGate: ['index.json', 'adapters.json'],                     // channels-outbound.js — drops / rewrites an agent's waiting channel entry
+  clientSwapCheck: ['adapters.json'],                             // channels-engine.js — closes client-swap For-you items as out of date
+  removeAccount: ['index.json', 'adapters.json', 'outbox.json'],  // channels-auth.js — the reference check and the purge
+  heldPass: ['index.json', 'adapters.json'],                      // channels-engine.js — drops kept deliveries
+  owedPass: ['index.json', 'adapters.json'],                      // channels-engine.js — drops owed deliveries
+  healRow: ['poll-stamps.json'],                                  // channel-store.js — moves the poll times out of the rows (lost while the side file is held)
+});
+/** B-f276 A3 (主开发 r566): THE ONE DOOR WRAPPER both engines call (the channels engine, the groups engine) over THE ONE PAUSE (a
+ *  store's heldOf) — never the rule written twice. WHILE PAUSED EVERY FUNCTION DOOR IS REFUSED BY NAME UNLESS A ROW ALLOWS IT, so a door
+ *  added later is refused until someone allows it (the census is the allow list). A row `table[key] = [class, kind, why]`:
+ *  'allow'  → answers while paused (its why says what it answers when the reply depends on the held file);
+ *  'paused' → does nothing while paused: say() (the caller's, once), answer() (a promise of it for an 'async' door) — a timer / boot
+ *             door whose caller expects an answer, never a throw;
+ *  anything else, or NO row → refused: error() thrown (sync) or rejected (async; an AsyncFunction without a row counts as async). → api. */
+function pauseDoorsOf(api, table, { held, error, answer, say = () => {} }) {
+  for (const name of Object.keys(api)) {
+    const v = api[name];
+    if (typeof v !== 'function') continue;
+    const row = table[name];
+    const cls = row ? row[0] : 'refused';
+    if (cls === 'allow') continue;
+    const kind = row ? row[1] : (v.constructor && v.constructor.name === 'AsyncFunction' ? 'async' : 'sync');
+    if (cls === 'paused') api[name] = (...a) => { if (!held()) return v(...a); say(); return kind === 'async' ? Promise.resolve(answer()) : answer(); };
+    else api[name] = (...a) => { if (!held()) return v(...a); const e = error(); if (kind === 'async') return Promise.reject(e); throw e; };
+  }
+  return api;
+}
+
 module.exports = {
-  createChannelStore, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, WALK_SYNC_ROWS, WALK_SLICE_MS, walkSliced, STAMP_KEYS, STAMPS_FLUSH_MS,
+  createChannelStore, pauseDoorsOf, HELD_WALLS, writeJsonAtomic, safeSeg, INDEX_CHUNK, SWEEP_CHUNKS, WALK_SYNC_ROWS, WALK_SLICE_MS, walkSliced, STAMP_KEYS, STAMPS_FLUSH_MS,
   RETENTION_DAYS, RETENTION_MAX_RECORDS, RETENTION_FLOOR_DAYS, DEDUP_MAX, TAIL_BYTES, OUTBOX_KEEP, OUTBOX_PRUNABLE, OUTBOX_PRUNE_RANK,
   SIDE_DEDUP_MAX, SIDE_READ_MAX, SIDE_DIR, SIDE_READ_BYTES, SIDE_COMPACT_BYTES, SIDE_KEEP_BYTES, PLACE_CACHE_MAX, PLACE_KEEP_MAX,
 };

@@ -176,7 +176,10 @@ function partWords(item, t) {
  *  next turn's injection (UserPromptSubmit — a turn of ANY origin since lane stash-any-turn, 2026-10-05) — a message
  *  typed into a running turn is folded into it with no such hook (and a long-running agent's turn can last hours):
  *  mid-turn the strip says the next turn AFTER this one ends. */
-function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false, midTurn = false, groupPress = false } = {}) {
+function stashSummaryWords(summary, t, { billed = true, inFlight = false, held = 0, reachable = true, now = Date.now(), armed = false, midTurn = false, groupPress = false, kept = 0 } = {}) {
+  // B-f276 1b: KEPT entries (their reach cannot be judged now) — alone they are the strip, in their own words, with no press
+  const k = Number(kept) > 0 ? Number(kept) : 0;
+  if (summary && !summary.count && k) return { head: k === 1 ? t('1 notice waits whose reach cannot be judged now') : t('{n} notices wait whose reach cannot be judged now', { n: k }), parts: [], line: k === 1 ? t('1 notice waits whose reach cannot be judged now') : t('{n} notices wait whose reach cannot be judged now', { n: k }), button: t('Hand over now'), cost: null, held: t('a channels file could not be read — they are handed over once it reads again'), noButton: t('they wait until VibeSpace can judge them'), title: t('VibeSpace cannot tell now whether these still reach this agent (a channels file could not be read) — nothing is handed over until it can') };
   if (!summary || !summary.count) return null;
   const n = summary.count;
   // THE RETRYING ONES (lane notify-retry): on their way by themselves — the head says so when they are all there is,
@@ -190,6 +193,7 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
   const parts = summary.items.map((i) => partWords(i, t));
   const h = Number(held) > 0 ? Number(held) : 0;
   const heldWords = h ? (h === 1 ? t('1 more is held for the next hand-over') : t('{n} more are held for the next hand-over', { n: h })) : null;
+  const keptWords = k ? (k === 1 ? t('1 more waits whose reach cannot be judged now') : t('{n} more wait whose reach cannot be judged now', { n: k })) : null;   // B-f276 1b: beside others, the kept ones are named
   // GROUP MESSAGES RIDE THE NEXT MESSAGE (lane group-report-card): a hand-over carries the stash, never the groups
   // engine's reports — so they are counted apart. All of what waits is group messages ⇒ no button (the server says
   // `reachable: false`), the sentence where it would be; some ⇒ the button stays and the count they are is said.
@@ -205,7 +209,7 @@ function stashSummaryWords(summary, t, { billed = true, inFlight = false, held =
     line: `${head}: ${parts.join(', ')}`,
     button: inFlight ? t('Handing over…') : t('Hand over now'),
     cost: reachable ? costWords : null,
-    held: [armed ? t('they will arrive as a message when this turn ends') : null, retryWords, heldWords, ridesWords].filter(Boolean).join(' · ') || null,   // `armed` (R3): the last prompt could not carry them inline
+    held: [armed ? t('they will arrive as a message when this turn ends') : null, retryWords, heldWords, keptWords, ridesWords].filter(Boolean).join(' · ') || null,   // `armed` (R3): the last prompt could not carry them inline
     // no hand-over for this harness: the sentence stands where the button would
     noButton: reachable ? null : midTurn ? t('this agent is mid-turn — they ride the next turn, after this one ends') : t('they ride the next turn'),
     title: allRetrying ? t('The agent did not accept this at once; VibeSpace posts it again when its turn ends and on a schedule — Hand over now delivers it this instant')

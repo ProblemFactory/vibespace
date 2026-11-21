@@ -2547,13 +2547,13 @@ await leg(148, async () => {
 
   // THE DOOR'S RE-ASK IS ITS OWN (the fourth read's must): a held wake BESIDE a paced wake that is not held, two hours — the paced
   // wake's life (its pace asks, its post) is the SAME as alone: the held one's minute is never a whole attempt of the conversation
-  const besideRun = async (DL, tag, { withHeld }) => {
+  const besideRun = async (DL, tag, { withHeld, throwing = false }) => {
     const R = rig(`held1a-beside-${tag}`, { DELIVER: DL });
     let asks = 0;
     R.deliver.registerWakePacer(() => { const m = () => { asks++; return { reason: 'paced', why: 'a floor', rule: 'pace', retryInMs: 600e3 }; }; m.force = () => ({ ok: true }); m.refund = () => { }; return m; });
     R.deliver.registerOwedWake('stand-in-w', { render: () => ({ text: 'the paced wake', kind: 'notification', fromName: 'Stand-in' }), fell: () => true, cancelled: () => { } });
     if (withHeld) {
-      R.deliver.registerOwedWake('stand-in-h', { render: () => ({ text: 'the held wake', kind: 'notification', fromName: 'Stand-in' }), fell: () => true, cancelled: () => { }, held: () => true });
+      R.deliver.registerOwedWake('stand-in-h', { render: () => ({ text: 'the held wake', kind: 'notification', fromName: 'Stand-in' }), fell: () => true, cancelled: () => { }, held: () => { if (throwing) throw new Error('its store could not be read'); return true; } });
       R.deliver.parkOwedWake(B, { producer: 'stand-in-h', key: 'k-h', retryInMs: 1000, spendReason: 'stand-in', sender: A, reason: 'paced', meta: { k: 'h' } });
     }
     R.deliver.parkOwedWake(B, { producer: 'stand-in-w', key: 'k-w', retryInMs: 1000, spendReason: 'stand-in', sender: A, reason: 'paced', meta: { k: 'w' } });
@@ -2567,6 +2567,8 @@ await leg(148, async () => {
   const alone = await besideRun(DELIVER0, 'alone', { withHeld: false }), beside = await besideRun(DELIVER0, 'beside', { withHeld: true });
   console.log(`    facts: a paced wake alone ${JSON.stringify(alone)} · beside a held wake ${JSON.stringify(beside)}`);
   ok(JSON.stringify(beside) === JSON.stringify(alone) && alone.at40.posts === 0, 'B-f276 1a (the fourth read\'s must): a held wake beside a paced one — the paced wake\'s pace asks and its post are EXACTLY as alone (never forced early, never asked once a minute)', JSON.stringify({ alone, beside }));
+  const besideThrow = await besideRun(DELIVER0, 'beside-throw', { withHeld: true, throwing: true });
+  ok(JSON.stringify(besideThrow) === JSON.stringify(alone), 'B-f276 1b (the 1a round\'s should): a held() that THROWS beside a paced wake — the paced wake\'s life is EXACTLY as alone (one producer\'s throw never stops another\'s)', JSON.stringify({ alone, besideThrow }));
   const DRAG = MH.load('src/server/conversation-deliver.js', anchored(DSRC, '      if (d.length && d.every(aside)) { asideHeld(cid); if (!dueOf(cid).some((e) => !aside(e))) continue; }\n', '', 'the held minute runs a whole attempt'), 'held-minute-drags');
   const bx = await besideRun(DRAG, 'drag', { withHeld: true });
   ok(bx.asks > alone.asks || bx.at40.posts > 0, 'B-f276 1a RE-ASK CONTROL (the held wake\'s minute runs a whole attempt, in a copy): the paced wake is asked every minute and forced early — red', JSON.stringify(bx));
@@ -2598,6 +2600,26 @@ await leg(148, async () => {
   ok(rs.during.posts === 0 && rs.during.owed === 1 && rs.posts === 1 && rs.owed === 0 && rs.wentBack === 0, 'B-f276 1a: a hold ACROSS A RESTART — never posted while held, posted ONCE at the lift, and no false «the clock went back» (the hold credited from the boot)', JSON.stringify(rs));
   const rsx = await restartRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, 'at - Math.max(Number(e.waitsHeld && e.waitsHeld.since) || at, parkBootAt));', 'at - (Number(e.waitsHeld && e.waitsHeld.since) || at));', 'the downtime credited twice'), 'restart-double-credit'), 'cut');
   ok(rsx.wentBack > 0, 'B-f276 1a RESTART CONTROL (the downtime credited twice, in a copy): the bound clock lands in the future — a false «the clock went back» — red', JSON.stringify(rsx));
+
+  const swRun = async (DL, tag) => {
+    const R = rig(`held1a-sw-${tag}`, { DELIVER: DL });
+    let held = true;
+    R.deliver.registerStashGate((cid, e) => (held && e && e.ref === 'rcpt-1' ? { keep: true } : null));
+    R.deliver.stashFor(B, { source: 'channel-receipt', kind: 'notification', fromName: 'Channels · Outbox', text: 'the kept receipt', ref: 'rcpt-1', about: { keys: ['held/c1'] } });
+    R.deliver.parkOwedWake(B, { producer: 'stash-wake', key: 'rcpt-1', retryInMs: 1000, spendReason: 'stand-in', sender: 'owner', reason: 'paced', meta: { ref: 'rcpt-1' } });
+    await R.at(2 * 3600e3);
+    const during = { posts: R.posts.length, owed: R.owed(B).length };
+    held = false;
+    await R.at(2 * 3600e3 + 15 * 60e3);
+    const out = { during, posts: R.posts.length, owed: R.owed(B).length };
+    R.close();
+    return out;
+  };
+  const sw = await swRun(DELIVER0, 'head');
+  console.log(`    facts: the stash wake over a kept receipt ${JSON.stringify(sw)}`);
+  ok(sw.during.posts === 0 && sw.during.owed === 1 && sw.posts === 1 && sw.owed === 0, 'B-f276 1b (the 1a round\'s should): the STASH WAKE over a receipt the gate keeps — never rendered, claimed, fallen or cancelled while kept; posted ONCE when the gate lets it out', JSON.stringify(sw));
+  const swx = await swRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, "    held(cid, e) { const ref = e && e.meta && e.meta.ref; if (!ref || stashEntries(cid).some((x) => x && x.ref === ref)) return false; return (stash[cid] || []).some((x) => x && x.ref === ref && isKept(cid, x)); },\n", '', 'the stash wake without its hook'), 'stash-wake-no-hook'), 'cut');
+  ok(swx.posts === 0, 'B-f276 1b STASH-WAKE CONTROL (the stash wake without its held hook, in a copy): its render finds no receipt and CANCELS the wake while the receipt is kept — nothing goes at the lift — red', JSON.stringify(swx));
 
   // THE PARK'S CAP (the read's must 1): the door first — a held wake is never the victim, the cap's loop ends
   const capRun = async (DL, tag) => {
@@ -2639,6 +2661,67 @@ await leg(148, async () => {
   console.log(`    facts: an ended wake of a held producer ${JSON.stringify(en)}`);
   ok(en.during.parked && en.during.line === 0 && en.during.owed === 1, 'B-f276 1a (the read\'s must 5): a wake owed to an ENDED conversation whose producer is held — never handed to the resume line (no resume, no billed turn) over three hours; still owed', JSON.stringify(en.during));
   ok(en.after.line === 1 && en.after.owed === 0, 'B-f276 1a: …the lift: handed to the line ONCE', JSON.stringify(en.after));
+  // r809 (1): ONE ended wake, TWO producers — A held (or its hook throwing), B not: the resume goes ahead for B (never held whole)
+  const twoRun = async (DL, tag, { throws = false } = {}) => {
+    let held = true;
+    const R = rig(`held1a-two-${tag}`, { DELIVER: DL, peerOf: () => null });
+    everyoneStopped(R, A);
+    R.deliver.registerOwedWake('stand-in-a', { render: () => null, cancelled: () => { }, held: () => { if (throws) throw new Error('its store could not be read'); return held; } });
+    R.deliver.registerOwedWake('stand-in-b', { render: () => null, cancelled: () => { }, held: () => false });
+    const line = [];
+    R.deliver.registerEndedWake(async (cid) => { line.push(cid); return { outcome: 'delivered' }; });
+    R.deliver.parkEndedWake(B, { producer: 'stand-in-a', spendReason: 'stand-in', reason: 'a' });
+    R.deliver.parkEndedWake(B, { producer: 'stand-in-b', spendReason: 'stand-in', reason: 'b' });   // the same wake: its producers merged
+    await R.at(30 * 60e3);
+    const out = { line: line.length, owed: R.deliver.endedEntries(B).length, producers: (R.deliver.endedEntries(B)[0] || {}).producers || null };
+    R.close();
+    return out;
+  };
+  const tw = await twoRun(DELIVER0, 'head'), tt = await twoRun(DELIVER0, 'throws', { throws: true });
+  console.log(`    facts: one ended wake, two producers ${JSON.stringify({ held: tw, throws: tt })}`);
+  ok(tw.line === 1 && tw.owed === 0 && tt.line === 1 && tt.owed === 0, 'B-f276 1b (主开发 r809 (1)): ONE ended wake, producer A held (or its hook THROWING), producer B not — the resume goes ahead for B, once', JSON.stringify({ tw, tt }));
+  const twx = await twoRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, '    if (first && (!isEnded(e) || every)) return first;', '    if (first) return first;', 'any producer held holds the whole wake'), 'two-any-held'), 'cut');
+  ok(twx.line === 0 && twx.owed === 1, 'B-f276 1b TWO-PRODUCERS CONTROL (any producer held holds the whole ended wake, as 1a): B\'s delivery never resumes it while A is held — red', JSON.stringify(twx));
+  // a held() that answers a PROMISE (an async hook): unknown is held, said BY NAME (never a silent hold for ever)
+  const pr = await (async () => {
+    const R = rig('held1a-promise', { DELIVER: DELIVER0 });
+    R.deliver.registerOwedWake('stand-in-async', { render: () => ({ text: 'w', kind: 'notification', fromName: 'S' }), fell: () => true, cancelled: () => { }, held: async () => false });
+    R.deliver.parkOwedWake(B, { producer: 'stand-in-async', key: 'k-p', retryInMs: 1000, spendReason: 'stand-in', sender: 'owner', reason: 'paced', meta: { k: 'p' } });
+    await R.at(10 * 60e3);
+    const out = { posts: R.posts.length, said: R.logs.filter((l) => /answered held\(\) with a promise/.test(l)).length };
+    R.close();
+    return out;
+  })();
+  ok(pr.posts === 0 && pr.said === 1, 'B-f276 1b: a held() that answers a PROMISE is unknown = held — no post, said ONCE by name (never a truthy promise held for ever unsaid)', JSON.stringify(pr));
+  // the boot window (the 1a round's should): an ENDED wake marked held by a producer that is NOT registered yet at the next start stays
+  // aside for the boot's hour — never resumed before its producer can say; it registers (not held) ⇒ resumed once
+  const bootRun = async (DL, tag) => {
+    const c = { now: T0, timers: [] };
+    let held = true;
+    const R1 = rig(`held1a-boot-${tag}`, { DELIVER: DL, shared: c, peerOf: () => null });
+    everyoneStopped(R1, A);
+    R1.deliver.registerOwedWake('stand-in-late', { render: () => null, cancelled: () => { }, held: () => held });
+    R1.deliver.registerEndedWake(async () => ({ outcome: 'delivered' }));
+    R1.deliver.parkEndedWake(B, { producer: 'stand-in-late', spendReason: 'stand-in', reason: 'late' });
+    await R1.at(5 * 60e3);
+    R1.close(); c.timers.length = 0; c.now = T0 + 10 * 60e3;
+    const R2 = rig(`held1a-boot-${tag}-2`, { DELIVER: DL, shared: c, dir: R1.dataDir, peerOf: () => null });
+    everyoneStopped(R2, A);
+    const line = [];
+    R2.deliver.registerEndedWake(async (cid) => { line.push(cid); return { outcome: 'delivered' }; });   // the line comes up FIRST, its producer later
+    await R2.advanceTo(T0 + 40 * 60e3);
+    const before = line.length;
+    held = false;
+    R2.deliver.registerOwedWake('stand-in-late', { render: () => null, cancelled: () => { }, held: () => held });
+    await R2.advanceTo(T0 + 45 * 60e3);
+    const out = { before, after: line.length };
+    R2.close();
+    return out;
+  };
+  const bt = await bootRun(DELIVER0, 'head');
+  ok(bt.before === 0 && bt.after === 1, 'B-f276 1b (the 1a round\'s should): at a start whose producer is NOT registered yet, its held ended wake stays aside (never resumed before it can say) — it registers, not held: resumed ONCE', JSON.stringify(bt));
+  const btx = await bootRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, '      if (e.waitsHeld.by && !owedProducers.has(e.waitsHeld.by)) {', '      if (false) {', 'the boot window cut'), 'boot-window-cut'), 'cut');
+  ok(btx.before > 0, 'B-f276 1b BOOT-WINDOW CONTROL (the mark lifts at once at the start, in a copy): the ended wake is resumed before its producer can say — red', JSON.stringify(btx));
   const enx = await endedRun(NO_DOOR, 'cut');
   ok(enx.during.line > 0, 'B-f276 1a ENDED CONTROL (the door never asks): the ended wake goes to the resume line over the held file — red', JSON.stringify(enx.during));
   const enl = await endedRun(NO_LIFT, 'nolift');
@@ -2689,6 +2772,8 @@ await leg(148, async () => {
   ok(phx.during.forced > 0 || phx.during.posts > 0, 'B-f276 1a PACE CONTROL (the door never asks the pace, in a copy): the wake is forced past its bound over the held pace file — red', JSON.stringify(phx.during));
   const fl = await forceRun(DELIVER0, 'long', { forceWait: 700e3 });
   ok(fl.posts === 0 && fl.said === 1 && fl.wentBack === 0 && fl.bytesSame && fl.forced >= 12 && fl.forced <= 13, 'B-f276 1a (the fifth read\'s must): a pacer that asks for MORE than the longest step (700 s) — asked again at the 10-min step (12–13 forces in the two hours past the bound), no «the clock went back» line, msg-retry.json byte-identical from 1.5 h to 3 h', JSON.stringify(fl));
+  const fso = await forceRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, '            const first = all.filter((e) => !e.forceRefusedAt);', '            const first = all;', 'said at every refusal'), 'force-said-every'), 'said-every');
+  ok(fso.said > 1, 'B-f276 1b SAID-ONCE CONTROL (the refusal said at every ask, in a copy): the line and the write come at every refused force — red', JSON.stringify(fso));
   const flx = await forceRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, '            const step = Math.min(wait, RETRY_STEPS_MS[RETRY_STEPS_MS.length - 1]);', '            const step = wait;', 'the pacer\'s time unbounded'), 'force-step-unbounded'), 'long-cut', { forceWait: 700e3 });
   ok(flx.wentBack > 0 || !flx.bytesSame, 'B-f276 1a FORCE-STEP CONTROL (the pacer\'s time unbounded, in a copy): repairClock pulls it back — a write and a false «clock went back» line each ask — red', JSON.stringify(flx));
   const cf = await forceRun(MH.load('src/server/conversation-deliver.js', anchored(DSRC, "if (fr && typeof fr === 'object' && fr.ok === false) return { ok: false, forceRefused: true,", 'if (false) return { ok: false, forceRefused: true,', 'the force answer ignored'), 'force-answer-ignored'), 'cut');

@@ -1606,7 +1606,9 @@ export function renderChannelsPanel(app, c) {
     return p;
   }
 
+  let pausedNow = null;   // B-f276 A3: the digest's held files (null = not paused) — an empty list then is no truth
   function build(d) {
+    pausedNow = d && d.paused && Array.isArray(d.paused.files) && d.paused.files.length ? d.paused.files : null;
     const top = [];
     const into = { appendChild: (x) => { top.push(x); return x; } };
     const adapters = (d && d.adapters) || [];
@@ -1661,12 +1663,21 @@ export function renderChannelsPanel(app, c) {
     // first screen — accounts that vanished with an unreadable adapters.json
     // were otherwise unexplained unless the For-you inbox was opened
     for (const q of (d && d.quarantined) || []) {
-      const text = q.blocked
-        ? t('{file} could not be read and could NOT be set aside — changes to it are refused until it is fixed or moved', { file: q.file })
-        : q.file === 'adapters.json'
-          ? t('{file} could not be read — set aside as {to}; your accounts were reset, reconnect them', { file: q.file, to: q.to })
-          : t('{file} could not be read — set aside as {to}; that store started empty', { file: q.file, to: q.to });
-      into.appendChild(noteLine('chan-quarantine-note', text, { warn: true }));
+      // B-f276: a file whose READ failed is HELD — nothing set aside, nothing written over — and the line names what lifts it
+      // B-f276 1b (r809): every entry is a HOLD — damaged (its one door: For you), appeared since the start, started empty, or a read that failed
+      {
+        const held = q.done && q.to ? t("{file} was started empty — its damaged bytes are kept as {where}", { file: q.file, where: q.to })
+          : q.loadedAt ? t('{file} read again and is loaded', { file: q.file })
+          : q.kind === 'damaged' ? t("{file} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back", { file: q.file })
+          : q.kind === 'appeared' ? t("{file} appeared since the start — it is kept as it is and loaded at the next start of VibeSpace", { file: q.file })
+          : q.file === 'index.json' && !q.readsAt ? t('Channels paused: {file} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it', { file: q.file })
+          : q.lifts === 'next-start'
+            ? (q.readsAt ? t('{file} reads again — restart VibeSpace to load it', { file: q.file }) : t('{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace', { file: q.file }))
+            : q.file === 'adapters.json' ? t('{file} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads', { file: q.file })
+              : t('{file} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads', { file: q.file });
+        into.appendChild(noteLine('chan-quarantine-note', held, { warn: !q.loadedAt && !q.done }));
+        continue;
+      }
     }
 
     // ── THE FIRST SCREEN: the group list (ONE element across draws, its rows reconciled) ──
@@ -1674,7 +1685,9 @@ export function renderChannelsPanel(app, c) {
     listEl.dataset.view = fs.view;
     const listKids = [];
     const list = { appendChild: (x) => { listKids.push(x); return x; } };
-    if (!rows.length) {
+    if (pausedNow) {
+      list.appendChild(chanLine('empty-hint chan-groups-empty chan-paused', t('The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again', { file: pausedNow[0] })));   // B-f276 (r566 #8)
+    } else if (!rows.length) {
       list.appendChild(chanLine('empty-hint chan-groups-empty', t('No groups yet. "New group" starts one with live agent sessions; an agent can too (vibespace-msg group create). Every conversation of an account you connect below appears here as well.')));
     } else if (fs.view === 'focus' && !focusN) {
       list.appendChild(chanLine('empty-hint chan-groups-empty chan-focus-empty', t('Nothing here needs you or an agent yet. A conversation appears here when you hand it to an agent, an agent reads it, a draft waits for your approval, a wake is held, or you reply in it. Every conversation is under All ({n}).', { n: allN })));
@@ -2092,7 +2105,7 @@ export function renderChannelsPanel(app, c) {
     // a filter opened this section (it is folded otherwise): its MATCHES, not its whole list
     for (const conv of fo.virtual ? fo.matchRows : listed) rows.appendChild(row(conv, { child: true }));
     if (!fo.virtual) moreRows(a, rows);
-    if (!listed.length && a.enabled !== false && (a.auth || {}).state === 'connected') rows.appendChild(chanLine('empty-hint empty-hint-inline chan-sec-empty', t('No conversations yet — the first pass lists them.')));
+    if (!listed.length && !pausedNow && a.enabled !== false && (a.auth || {}).state === 'connected') rows.appendChild(chanLine('empty-hint empty-hint-inline chan-sec-empty', t('No conversations yet — the first pass lists them.')));
     reconcile(rowsEl, rowKids);
     sec.appendChild(rowsEl);
     reconcile(secEl, secKids);
@@ -2228,7 +2241,7 @@ export function renderChannelsPanel(app, c) {
     const rowKids = [];
     const rows = { appendChild: (x) => { rowKids.push(x); return x; } };
     const listed = mine.filter((x) => !x.unlisted).sort((x, y) => (y.lastAt || 0) - (x.lastAt || 0));
-    if (!listed.length) {
+    if (!listed.length && !pausedNow) {   // B-f276: a paused list's empty section is no truth
       const e = document.createElement('div');
       e.className = 'empty-hint empty-hint-inline chan-sec-empty';
       e.textContent = offersPaths(a) ? t('No path yet — each path is an address another system can call.') : t('No conversations discovered yet.');

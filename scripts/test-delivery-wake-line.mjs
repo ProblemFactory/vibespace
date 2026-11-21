@@ -815,7 +815,8 @@ console.log('㉔ B-f276 1a (lane bl-windows): an ended wake whose stash holds on
     R.deliver.parkEndedWake(X, { producer: 'jobs', spendReason: 'job-notification', kind: 'notification', fromName: 'Background Work · nightly', reason: 'done', meta: { jobId: 'jb-k', jobName: 'nightly', wake: 'result' } });
     await R.at(3 * 3600e3);
     const row = R.view.waitingAll()[X] || null;
-    const during = { reopens: R.reopens.length, probes: R.probes.length, owed: R.deliver.endedEntries(X).length, told: R.wakes.filter((w) => w.cid === X).map((w) => w.outcome), row: row && { n: row.n, code: row.code } };
+    const strip = R.view.summaryFor({ claudeSessionId: X, backendSessionId: X, name: 'kept', mode: 'chat', backend: 'claude' });   // B-f276 1b: the strip's fact over only kept entries
+    const during = { reopens: R.reopens.length, probes: R.probes.length, owed: R.deliver.endedEntries(X).length, told: R.wakes.filter((w) => w.cid === X).map((w) => w.outcome), row: row && { n: row.n, code: row.code }, strip: strip && { count: strip.count, kept: strip.kept, reachable: strip.reachable } };
     held = false;
     await R.at(3 * 3600e3 + 5 * 60e3);
     const after = { reopens: R.reopens.length, carried: R.framesTo(X).filter((f) => f.text.includes('the kept receipt')).length, owed: R.deliver.endedEntries(X).length, told: R.wakes.filter((w) => w.cid === X).map((w) => w.outcome) };
@@ -826,6 +827,7 @@ console.log('㉔ B-f276 1a (lane bl-windows): an ended wake whose stash holds on
   console.log(`    facts: ${JSON.stringify(k0)}`);
   ok(k0.during.reopens === 0 && k0.during.owed === 1 && k0.during.told.length === 0 && k0.during.probes === 1, 'B-f276 1a: three hours with every entry kept — no resume (asked of the guard ONCE, at the first look), the wake STAYS OWED, nobody told it ended', JSON.stringify(k0.during));
   ok(!!k0.during.row && k0.during.row.n === 1 && !k0.during.row.code, 'B-f276 1a: …the ended row says «1 notice is waiting for it» — never «not resumed: nothing is waiting»', JSON.stringify(k0.during.row));
+  ok(!!k0.during.strip && k0.during.strip.kept === 1 && k0.during.strip.count === 0 && k0.during.strip.reachable === false, 'B-f276 1b: …and the strip\'s fact counts the KEPT entry (kept 1, no press) — never no strip over an entry that waits', JSON.stringify(k0.during.strip));
   ok(k0.after.reopens === 1 && k0.after.carried === 1 && k0.after.owed === 0 && k0.after.told.join() === 'delivered', 'B-f276 1a: …the lift: ONE resume, the kept receipt carried in its frame, the wake ended «delivered»', JSON.stringify(k0.after));
   const lineCut = MJ_DWL.load('src/server/delivery-wake.js', anchored(DWO_SRC, "if (!claim.ok && claim.code === 'nothing_waiting' && Number(claim.kept) > 0) return", 'if (false) return', 'the line never answers «held»'), 'line-held-cut');
   const kx = await keptRun(DELIVER, lineCut, 'line-cut');

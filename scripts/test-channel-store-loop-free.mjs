@@ -223,7 +223,7 @@ console.log('(e) close() writes every moved file through the writer; (f) the key
   ok(!before.lastPass && after.lastPass && after.lastPass.at === 31 && !!readJson(path.join(dir, 'acct-e', 'people.json')), '(e) close() writes every moved file through the writer: a paced stamp and a new account\'s people owed at close are on disk after it', { before: before.lastPass || null, after: after.lastPass || null });
   w.stop();
   const eng = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-  ok(/holdsCiphertext\(\{ values: \[store\.adapters\.live\(\)\], files: \[path\.join\(dataDir, 'channels', 'adapters\.json'\)\]/.test(eng), '(f) the key-mint check (holdsCiphertext) reads the store\'s LIVE records before adapters.json — the file may lag a token sealed in memory a moment ago');
+  ok(/const accountsHold = \(\) => \{\n\s+const chan = path\.join\(dataDir, 'channels'\);\n\s+if \(holdsCiphertext\(\{ values: \[store\.adapters\.live\(\)\], files: \[path\.join\(chan, 'adapters\.json'\)\]/.test(eng) && /secretBox\(path\.join\(dataDir, KEY_FILE\), \{ hasCiphertext: accountsHold \}\)/.test(eng), '(f) the key-mint check (holdsCiphertext, in accountsHold — B-f276) reads the store\'s LIVE records before adapters.json — the file may lag a token sealed in memory a moment ago');
 }
 
 

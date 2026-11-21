@@ -318,7 +318,7 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
   ok(!addrBad.length, 'a connected Google page in each language: the address between both markers with the @ as an entity — no bare @ anywhere, nothing the obfuscation pattern matches', addrBad.map((x) => x.l));
   ok(CR.landingHtml({ ok: true, user: "a$'b$&<i>" }, { name: 'Lark' }).includes("(<!--email_off-->a$&#39;b$&amp;&lt;i&gt;<!--/email_off-->)"), 'a person whose name holds $\' / $& / markup prints it as typed (escaped; no replacement pattern is expanded)');
   // (d) THE VERDICTS — each says what happened in the one language; no sentence stands in for another's
-  const WHYS_SEEN = ['bad-hmac', 'expired', 'timed-out', 'bad-shape', 'wrong-kind', 'wrong-flow', 'superseded', 'cancelled', 'over-limit', 'used', 'failed'];
+  const WHYS_SEEN = ['bad-hmac', 'expired', 'timed-out', 'bad-shape', 'wrong-kind', 'wrong-flow', 'superseded', 'cancelled', 'over-limit', 'used', 'failed', 'paused' /* B-f276 1b: a landing while the channels are paused */];
   ok(WHYS_SEEN.every((w) => Object.prototype.hasOwnProperty.call(CR.LANDING_WHY, w)) && Object.keys(CR.LANDING_WHY).every((w) => w === 'refused' || WHYS_SEEN.includes(w)), 'LANDING_WHY covers every refusal the state, the engine and the flow name (+ refused for anything else)', Object.keys(CR.LANDING_WHY));
   const sentence = (w, l) => CR.LANDING_WHY[w][l].split('{name}').join('Lark');
   const matrix = [];

@@ -36,7 +36,7 @@ function writeAll(fs, fd, parts) {
 /** a killed process leaves its temp file (`<file>.tmp-<pid>[-w]`): the first write of a file in this process removes
  *  the ones another process left (never this one's) */
 const swept = new Set();
-function sweepTemps(fs, file) {
+function sweepTemps(fs, file, ownTmp = null) {   // B-f276 1b (its read r2 N3): + THIS road's own temp left by an earlier life of its thread
   if (swept.has(file)) return;
   swept.add(file);
   const dir = path.dirname(file), base = path.basename(file) + '.tmp-';
@@ -44,8 +44,33 @@ function sweepTemps(fs, file) {
   try { names = fs.readdirSync(dir); } catch { return; }
   for (const n of names) {
     const m = n.startsWith(base) ? /^(\d+)(-w)?$/.exec(n.slice(base.length)) : null;
-    if (m && Number(m[1]) !== process.pid) { try { fs.unlinkSync(path.join(dir, n)); } catch { } }
+    if (m && (Number(m[1]) !== process.pid || path.join(dir, n) === ownTmp)) { try { fs.unlinkSync(path.join(dir, n)); } catch { } }
   }
+}
+/** B-f276 1b (主开发 r809, THE MISSING LAW): an EXCLUSIVE job — its store read the file MISSING — LINKS the temp to the file: a link
+ *  refuses an existing file (EEXIST — it appeared since, a mount that came late: thrown, the caller removes the temp, nothing is written
+ *  over it). → true (linked: the temp removed) | false (a filesystem without links and no file there: the caller renames) */
+const NO_LINK = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV']);
+// B-f276 1b (its read r1 S2): a temp whose removal FAILED after its link is a SECOND NAME of the store file — never opened for a write
+// again (an open would truncate the live store in place) before it is gone
+const LINKED = new Set();
+function dropTemp(fs, tmp) {
+  try { fs.unlinkSync(tmp); } catch (e) { if (!e || e.code !== 'ENOENT') { LINKED.add(tmp); return false; } }
+  LINKED.delete(tmp);
+  return true;
+}
+// B-f276 1b (its read r1 S3): an EEXIST whose file IS the temp (an NFS retransmit of our own link, its first answer lost) is our link landed
+const sameFile = (fs, a, b) => { try { const [x, y] = [a, b].map((p) => fs.statSync(p, { bigint: true })); return x.ino === y.ino && x.dev === y.dev; } catch { return false; } };   // bigint: an NTFS id passes 2^53
+function linkedHere(fs, tmp, file) {
+  try { fs.linkSync(tmp, file); }
+  catch (e) {
+    if (e && e.code === 'EEXIST' && sameFile(fs, tmp, file)) { dropTemp(fs, tmp); return true; }
+    if (!e || !NO_LINK.has(e.code)) throw e;
+    if (fs.existsSync(file)) throw Object.assign(new Error(`${file} appeared since its store read it missing`), { code: 'EEXIST' });
+    return false;
+  }
+  dropTemp(fs, tmp);
+  return true;
 }
 /** ONE job. A whole-file write: temp, every byte, close (its error is the write's), rename — NOTHING is renamed over the
  *  store unless every byte was written and the temp closed without error. An APPEND (the acts journal): every byte,
@@ -77,11 +102,12 @@ function writeJob(m, fs = FS) {
     if (err) throw err;
     return;
   }
-  sweepTemps(fs, m.file);
+  sweepTemps(fs, m.file, m.tmp);
   // channel-store-off-loop (commit 1): A MISSING PARENT DIRECTORY IS MADE HERE, on the writer's thread — a store whose
   // directory is new (an account's people.json) never makes it on the main thread (the field: an account directory's
   // mkdir held the owner's loop 75 s in a day on a mount where a create costs ~4 s). Owner-only, as the store's own file.
   // Cure r1: ONLY for a write that asks (`m.makeDir` — the people door); any other store's missing directory is ENOENT.
+  if (LINKED.has(m.tmp) && !dropTemp(fs, m.tmp)) throw Object.assign(new Error(`${m.tmp} is still a second name of ${m.file} (its removal failed) — not written through it`), { code: 'ETEMPLINKED' });
   let fd;
   try { fd = fs.openSync(m.tmp, 'w', m.mode == null ? 0o666 : m.mode); }
   catch (e) {
@@ -95,6 +121,7 @@ function writeJob(m, fs = FS) {
   if (err) throw err;   // the caller removes the temp: the store keeps its previous whole version
   // `mode` applies when the temp file is CREATED; a leftover temp from a killed write keeps its old bits
   if (m.mode != null) { try { fs.chmodSync(m.tmp, m.mode); } catch { /* a filesystem without modes */ } }
+  if (m.exclusive && linkedHere(fs, m.tmp, m.file)) return;   // B-f276 1b: a store read missing — its first write never lands over a file that appeared
   fs.renameSync(m.tmp, m.file);   // THE commit point: the store's file is the old whole version or the new one, never half
 }
 
@@ -119,4 +146,4 @@ if (parentPort && require.main === module) {   // the thread's own script (a sui
   });
 }
 
-module.exports = { writeJob, writeAll, sweepTemps };
+module.exports = { writeJob, writeAll, sweepTemps, linkedHere };

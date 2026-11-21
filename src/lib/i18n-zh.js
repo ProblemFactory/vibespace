@@ -375,16 +375,49 @@ export default {
   "Several sessions share that name — pick one by its conversation id": "有多个会话同名 —— 请用会话 id 指定一个",
   "A group needs at least two agents": "一个群至少需要两个 agent",
   "The group changed since the preview — this would wake {n} agent(s) now. Review and send again.": "群在预览之后有变化——现在这样发会唤醒 {n} 个 agent。请检查后再发送。",
-  "Channels: {file} could not be read and was set aside as {where}": "频道：{file} 无法读取，已另存为 {where}",
-  "Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved": "频道：{file} 无法读取，而且无法另存 —— 在修好或移走它之前，对它的写入都会被拒绝",
   "Sent at once, as you — it wakes this agent: 1 billed turn.": "以你的身份立即发送 —— 会唤醒这个 agent：1 次计费回合。",
   "Approving wakes this agent: 1 billed turn": "批准会唤醒这个 agent：1 次计费回合",
-  "A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)": "有一个频道存储文件无法读取也无法另存 —— 在修好或移走它之前，修改都会被拒绝（见“给你”）",
+  "Paused: a channels file could not be read — this change is refused, and nothing is fetched or sent, until it reads again (see For you)": "已暂停：某个频道文件无法读取 —— 在能再次读取之前，此修改会被拒绝，也不获取、不发送任何内容（见「待你处理」）",
+  "Not saved: a channels file appeared since VibeSpace started (a storage that came late) — it is kept as it is; this change was not made (see For you)": "未保存：VibeSpace 启动后出现了一个频道文件（存储晚到了）——它按原样保留；这次更改没有生效（见「待你处理」）",   // B-f276 1b: the missing law's refusal
+  "A channels store file appeared since VibeSpace started — it is kept as it is; this change was not made (see For you)": "VibeSpace 启动后出现了一个频道存储文件——它按原样保留；这次更改没有生效（见「待你处理」）",   // B-f276 1b
   "This send wakes an agent (a billed turn) but the request did not confirm it — reload the window and send again": "这次发送会唤醒一个 agent（一次计费回合），但请求没有确认这一点 —— 请重新加载窗口后再发送",
   "Not sent: this agent was woken less than 30 s ago (sign-in is off, so your sends are paced) — send again in a moment": "未发送：这个 agent 不到 30 秒前刚被唤醒过（未开启登录，所以你的发送会被限速）—— 请稍后再发",
-  "{file} could not be read and could NOT be set aside — changes to it are refused until it is fixed or moved": "{file} 无法读取，而且无法另存 —— 在修好或移走它之前，对它的修改都会被拒绝",
-  "{file} could not be read — set aside as {to}; your accounts were reset, reconnect them": "{file} 无法读取 —— 已另存为 {to}；你的账号已被重置，请重新连接",
-  "{file} could not be read — set aside as {to}; that store started empty": "{file} 无法读取 —— 已另存为 {to}；该存储已从空开始",
+  "Channels: {file} could not be read — it is held: nothing was set aside or written over": "频道：{file} 无法读取 —— 已保留：没有另存，也没有覆盖",
+  "Every change to it is refused and the channels are paused until it reads again. VibeSpace reads it again by itself and loads it when it reads — nothing to do.": "在它能再次读取之前，对它的每一次修改都会被拒绝，频道也会暂停。VibeSpace 会自己再读，读到后自动载入 —— 你无需操作。",
+  "Every change to it is refused and the channels are paused until it is loaded at the next start of VibeSpace: once it reads again, restart VibeSpace. Nothing is lost — each conversation is then fetched from where it was, and nothing is added twice.": "在 VibeSpace 下次启动载入它之前，对它的每一次修改都会被拒绝，频道也会暂停：能再次读取后，请重启 VibeSpace。不会丢失 —— 届时每个对话从原来的位置获取，已有的也不会重复。",
+  "Every change to it is refused and the agent groups are paused until it reads again. VibeSpace reads it again by itself and loads it when it reads — nothing to do.": "在它能再次读取之前，对它的每一次修改都会被拒绝，agent 分组也会暂停。VibeSpace 会自己再读，读到后自动载入 —— 你无需操作。",
+  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again": "频道已暂停：{file} 无法读取 —— 在能再次读取之前，不获取也不发送任何内容",
+  "Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved": "频道：{file} 无法读取，而且无法另存 —— 在修好或移走它之前，对它的写入都会被拒绝",
+  "Channels: {file} could not be read and was set aside as {where}": "频道：{file} 无法读取，已另存为 {where}",
+  "A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)": "有一个频道存储文件无法读取也无法另存 —— 在修好或移走它之前，修改都会被拒绝（见“给你”）",
+  "Start it empty": "从空开始",   // B-f276 1b: the damaged door
+  "Set the damaged file aside and start it empty — nothing is deleted, its bytes are kept under a dated name": "把损坏的文件移到一旁并从空开始——不删除任何内容，它的字节以带日期的名字保留",   // B-f276 1b: the damaged door
+  "Started empty — the damaged bytes are kept under a dated name": "已从空开始——损坏的字节以带日期的名字保留",   // B-f276 1b: the damaged door
+  "The file is not damaged now — nothing to set aside": "这个文件现在没有损坏——没有要移到一旁的",   // B-f276 1b: the damaged door
+  "Could not start the file empty": "无法让这个文件从空开始",   // B-f276 1b: the damaged door
+  "Channels: {file} could not be read as itself (damaged) — every change to it is refused": "频道：{file} 无法按原样读取（已损坏）——对它的每项更改都会被拒绝",   // B-f276 1b: the store hold's words
+  "Nothing was set aside or written over. Put a good copy back while VibeSpace is stopped, or press Start it empty: its bytes are set aside under a dated name (nothing is deleted) and it starts empty.": "没有移走或覆盖任何内容。请在 VibeSpace 停止时放回一份完好的副本，或按「从空开始」：它的字节会以带日期的名字移到一旁（不删除任何内容），然后从空开始。",   // B-f276 1b: the store hold's words
+  "Channels: {file} appeared since the start — it is kept as it is and loaded at the next start": "频道：{file} 在启动后才出现——按原样保留，下次启动时载入",   // B-f276 1b: the store hold's words
+  "Every change to it is refused until then: restart VibeSpace to load it.": "在此之前对它的每项更改都会被拒绝：重启 VibeSpace 以载入它。",   // B-f276 1b: the store hold's words
+  "Channels: {file} started empty — its damaged bytes are kept as {where}": "频道：{file} 已从空开始——它损坏的字节保留为 {where}",   // B-f276 1b: the store hold's words
+  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again and VibeSpace restarts": "频道已暂停：{file} 无法读取——在它能再次读取并重启 VibeSpace 之前，不获取也不发送任何内容",   // B-f276 1b: the store hold's words
+  "Channels paused: {file} could not be read as itself — nothing is fetched or sent until it is started empty or a good copy is put back": "频道已暂停：{file} 无法按原样读取——在它从空开始或放回完好副本之前，不获取也不发送任何内容",   // B-f276 1b: the store hold's words
+  "{file} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back": "{file} 无法按原样读取（已损坏）——已保持不动：没有移走或覆盖；可在「待你处理」里让它从空开始，或放回一份完好的副本",   // B-f276 1b: the store hold's words
+  "{file} appeared since the start — it is kept as it is and loaded at the next start of VibeSpace": "{file} 在启动后才出现——按原样保留，在 VibeSpace 下次启动时载入",   // B-f276 1b: the store hold's words
+  "{file} was started empty — its damaged bytes are kept as {where}": "{file} 已从空开始——它损坏的字节保留为 {where}",   // B-f276 1b: the store hold's words
+  "Nothing was set aside or written over. A pushed message is delivered again only while its sender retries, so reading it again soon matters. VibeSpace reads it again; once it reads, restart VibeSpace to load it.": "没有另存，也没有覆盖。推送来的消息只会在发送方重试期间再次送达，所以尽快能再读取很重要。VibeSpace 会再读；读到后，请重启 VibeSpace 以载入。",
+  "It is loaded at the next start of VibeSpace; until then the channels stay paused — nothing is fetched or sent.": "它会在 VibeSpace 下次启动时载入；在此之前频道保持暂停 —— 不获取也不发送任何内容。",
+  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it": "频道已暂停：{file} 无法读取 —— 在能再次读取之前，不获取也不发送任何内容；读到后请重启 VibeSpace 以载入",
+  "Channels: {file} reads again — restart VibeSpace to load it": "频道：{file} 已能读取 —— 重启 VibeSpace 即可载入",
+  "It is loaded at the next start of VibeSpace; until then it stays held and every change to it is refused.": "它会在 VibeSpace 下次启动时载入；在此之前仍暂停使用，对它的每一次修改都会被拒绝。",
+  "Channels: {file} read again and loaded — nothing to do": "频道：{file} 已重新读取并载入 —— 你无需操作",
+  "{file} read again and is loaded": "{file} 已重新读取并载入",
+  "The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "频道已暂停 —— {file} 无法读取，所以这里不是完整的列表；在能再次读取之前，不获取也不发送任何内容",
+  "It read again and is loaded; changes to it are written again.": "已重新读取并载入；对它的修改会再次写入。",
+  "{file} reads again — restart VibeSpace to load it": "{file} 已能读取 —— 重启 VibeSpace 即可载入",
+  "{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{file} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会在 VibeSpace 下次启动时载入",
+  "{file} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{file} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后你的账号会自动回来",
+  "{file} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads": "{file} 无法读取 —— 已保留：没有另存，也没有覆盖；读到后会自动载入",
   "The group changed since the preview (a member was renamed, joined, left or changed its notify mode) — the preview is updated; review it and send again.": "群在预览之后有变化（有成员改名、加入、离开或更改了通知方式）—— 预览已更新；请检查后再发送。",
   "Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.": "没有删除任何内容。可在服务器停止时修好 JSON 再移回原处；或者保留新的存储，确认不再需要后删除这份副本。",
   "For you could not read its saved list and set it aside as {where} \u2014 the list started empty": "「待你处理」无法读取保存的列表，已把它另存为 {where} — 列表从空开始",
@@ -6293,6 +6326,13 @@ export default {
   "Handing over…": "正在交出…",
   "1 more is held for the next hand-over": "还有 1 条留到下一次交出",
   "{n} more are held for the next hand-over": "还有 {n} 条留到下一次交出",
+  "1 notice waits whose reach cannot be judged now": "有 1 条通知在等待，目前无法判断它还能否送达",   // B-f276 1b: kept stash entries
+  "{n} notices wait whose reach cannot be judged now": "有 {n} 条通知在等待，目前无法判断它们还能否送达",   // B-f276 1b: kept stash entries
+  "1 more waits whose reach cannot be judged now": "另有 1 条在等待，目前无法判断它还能否送达",   // B-f276 1b: kept stash entries
+  "{n} more wait whose reach cannot be judged now": "另有 {n} 条在等待，目前无法判断它们还能否送达",   // B-f276 1b: kept stash entries
+  "a channels file could not be read — they are handed over once it reads again": "一个频道文件读不出来——等能再次读取时就会交出",   // B-f276 1b: kept stash entries
+  "they wait until VibeSpace can judge them": "它们会等到 VibeSpace 能判断为止",   // B-f276 1b: kept stash entries
+  "VibeSpace cannot tell now whether these still reach this agent (a channels file could not be read) — nothing is handed over until it can": "VibeSpace 现在无法判断这些是否还能送达这个 agent（一个频道文件读不出来）——在能判断之前不会交出任何内容",   // B-f276 1b: kept stash entries
   "they ride the next turn": "它们随下一轮送达",
   "1 group message rides the next turn, after this one ends": "1 条群消息随本轮结束后的下一轮送达",
   "{n} group messages ride the next turn, after this one ends": "{n} 条群消息随本轮结束后的下一轮送达",

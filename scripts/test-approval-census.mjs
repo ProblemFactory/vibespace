@@ -569,6 +569,14 @@ const ROWS = [
     c: [pin('src/foryou-actions.js', /\{ type: 'queued-file-unread', identity: null, producer: 'src\/server\/queued-file-for-you\.js',/, 'THE registry row: one producer, one door (a check: Set it aside)'), pin('src/server/queued-file-for-you.js', /action: \{ type: TYPE \}, itemKey: TYPE \}\);/, 'ONE item (its itemKey) — a re-file updates it, never a second')],
     d: [decl('no agent wrote words here to be read and approved: the item names a file of the hub\'s own data folder in fixed sentences')],
     gate: [['scripts/test-queued-wake.mjs', '㉓ C: the file repaired a moment before the press — the press reads it once more first'], ['scripts/test-queued-wake.mjs', '㉓ B: «Set it aside» renames the torn file beside it']] },
+  // B-f276 1b (主开发 r809): a channels file HELD as damaged — its ONE door, a person's own Start it empty (the For-you check row)
+  { id: 'channel-store-damaged', surface: 'a channels file held as damaged — "Channels: {file} could not be read as itself (damaged) — every change to it is refused" (Start it empty in For you; one item per file)',
+    doors: [['A', 'src/server/channels-engine.js', /^channel-store-damaged$/]],
+    a: [pin('src/server/channels-engine.js', /\.\.\.\(damaged \? \{ action: \{ type: 'channel-store-damaged', file: q\.file \} \} : \{\}\),/, 'the item names the held file of the store\'s own data folder (the hold\'s own fact), in fixed sentences')],
+    b: [pin('src/channel-store.js', /if \(!fam \|\| !h \|\| h\.kind !== 'damaged'\) return \{ ok: true, state: 'none' \};/, 'the press asks the hold once more: a file that is not damaged now is never moved — «nothing to set aside»')],
+    c: [pin('src/foryou-actions.js', /\{ type: 'channel-store-damaged', identity: 'file', producer: 'src\/server\/channels-engine\.js',/, 'THE registry row: one producer, one door (a check: Start it empty)')],
+    d: [decl('no agent wrote words here to be read and approved: the item names a file of the hub\'s own data folder in fixed sentences')],
+    gate: [['scripts/test-channel-groups.mjs', 'the door (Start it empty) sets the bytes aside under a dated name — intact, never deleted — and the family starts empty']] },
 ];
 function approvalRows(read) {
   const hits = doorHits(read), unclaimed = [], wrong = [];

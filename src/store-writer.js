@@ -146,8 +146,13 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
    *  at a stop), `allowEmpty` (an empty file is a valid state of it), `makeDir` (channel-store-off-loop cure r1: the ONE
    *  store that may make its missing parent directory — a new account's people.json; any other store whose directory is
    *  gone fails its write ENOENT, said, as before). */
-  function dirty(file, { name, produce, debounceMs, mode, onWritten, rank, allowEmpty, makeDir, rotateAt, urgent = false } = {}) {
+  function dirty(file, { name, produce, debounceMs, mode, onWritten, rank, allowEmpty, makeDir, rotateAt, urgent = false, exclusive } = {}) {
     const s = store(file);
+    // B-f276 1b (主开发 r809, THE MISSING LAW): `exclusive: true` — its store read the file MISSING: its whole writes are EXCLUSIVE creates
+    // until one lands; `false` — its store holds the file (it took in the one that appeared): writes rename again. A file that APPEARED
+    // is never written over: its store's changes are not taken until it says `false` (durable() answers false, EEXIST)
+    if (exclusive === false) { s.exclusive = false; s.appeared = null; } else if (exclusive) s.exclusive = true;
+    if (s.appeared) { if (typeof onWritten === 'function') s.onWritten = onWritten; return; }
     if (s.forgotten) s.forgotten = false;   // a new owner of the file: the pending unlink after the write in flight is off
     if (name) s.name = name;
     if (rank === 0) s.rank = 0;   // a person's act / a binding is pending: it goes first at the exit (until written)
@@ -209,7 +214,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
     posted++;
     LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append }, p.transfer); }
+    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); }
   }
   function onMessage(m) {
@@ -233,6 +238,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   }
   function finish(s, err, ms, size, since, onMain = false, append = false, waitedBy = null) {
     if (err) { fail(s, since, err); return; }
+    if (s.exclusive && !append) s.exclusive = false;   // B-f276 1b: its first whole write landed — the file is its store's own now
     s.failures = 0; s.failedAt = null; s.lastEndAt = now(); if (!append) s.bytes = size; s.writes++; s.bytesWritten += size; s.lastMs = ms; s.maxMs = Math.max(s.maxMs, ms);
     if (!onMain) LC.max('writeMaxMs', ms);   // loop-day-report M5: the hour's longest write on the writer thread
     if (Number.isFinite(since)) s.ageMaxMs = Math.max(s.ageMaxMs || 0, s.lastEndAt - since);   // round 3: the MEASURED age of its oldest change when it reached the disk
@@ -280,6 +286,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   function durable(file, { timeoutMs = durableMs, answer = null } = {}) {
     const s = stores.get(file);
     const now1 = (ok) => { if (answer) { try { answer(ok); } catch (e) { answerThrew(s ? s.name : path.basename(file), e); } } return Promise.resolve(ok); };
+    if (s && s.appeared) { s.notDurable = { why: 'failed', code: 'EEXIST' }; return now1(false); }   // B-f276 1b: its file appeared — nothing of it is written
     if (!s || (!s.dirty && !(inflight && inflight.name === file) && s.writtenVersion >= s.version)) return now1(true);
     if (exitAnswered) return now1(false);   // the exit's last pass is over: owed now = not on disk, and nothing writes it
     const want = s.version;
@@ -369,6 +376,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
   /** why a durable act of this store is not on disk yet — {why: 'queued' | 'failed', ahead?, lastMs?} — for its caller's line */
   function whyNotDurable(file) { const s = stores.get(file); return s && s.notDurable ? { ...s.notDurable } : null; }
   function fail(s, since, err) {
+    if (s.exclusive && err && err.code === 'EEXIST') { appearedHere(s, err); return; }
     s.failures++; s.failedAt = now(); s.notDurable = { why: 'failed', code: (err && (err.code || err.message)) || null };
     if (!s.dirty) { s.dirty = true; s.dirtySince = since != null ? since : now(); } else if (since != null && since < s.dirtySince) s.dirtySince = since;
     // the waiters hear it NOW (false — the change stays owed and the writer retries; the caller says so) — AFTER the store is
@@ -382,12 +390,22 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     if (exiting || s.failures === 1 || s.failures % 10 === 0) say(`[store-write] ${s.name} not written (${why}; attempt ${s.failures}) — ${next}`);
     if (s.onWritten) { try { s.onWritten(false, err); } catch { } }
   }
+  /** B-f276 1b (THE MISSING LAW): an exclusive write met a file that APPEARED since its store read it missing — NEVER retried, never
+   *  written over: the change is not written here (its store reads and keeps the file — onWritten(false, EEXIST)); its waiters hear
+   *  false, said once */
+  function appearedHere(s, err) {
+    s.appeared = { at: now() }; s.dirty = false; s.dirtySince = null; s.urgent = false; s.later = false;
+    s.notDurable = { why: 'failed', code: 'EEXIST' };
+    if (s.waiters.length) { const ws = s.waiters; s.waiters = []; for (const w of ws) { try { w.resolve(false); } catch { } } }
+    say(`[store-write] ${s.name} not written: its file appeared since its store read it missing — kept as it is, nothing written over it`);
+    if (s.onWritten) { try { s.onWritten(false, err); } catch { } }
+  }
   /** the bytes written on THIS thread — the SAME writeJob as the thread's (every byte, the close's error, then the rename;
    *  an append fsynced) — the exit flush, a store's own close, a process without a writer thread */
   function writeHere(s, p, since) {
     const t0 = now(), tmp = `${s.file}.tmp-${process.pid}`;
     try {
-      W().writeJob({ file: s.file, tmp, parts: p.parts, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, append: p.append }, fs);
+      W().writeJob({ file: s.file, tmp, parts: p.parts, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, append: p.append, exclusive: !!s.exclusive }, fs);
       finish(s, null, now() - t0, p.size, since, true, p.append);
       return true;
     } catch (e) { if (!p.append) { try { fs.unlinkSync(tmp); } catch { } } fail(s, since, e); return false; }
@@ -425,7 +443,7 @@ function create({ log = console, now = mono, record = null, graceMs: graceIn = n
     inflight = { id, name: s.file, since, startedAt: now(), size: p.size, append: p.append };
     posted++;
     LC.inc('writes');   // loop-day-report M5: a write handed to the writer thread
-    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append }, p.transfer); }
+    try { worker.postMessage({ ev: 'write', id, file: s.file, tmp: `${s.file}.tmp-${process.pid}-w`, mode: s.mode, makeDir: !!s.makeDir, rotateAt: s.rotateAt || 0, parts: p.parts, append: p.append, exclusive: !!s.exclusive }, p.transfer); }
     catch (e) { inflight = null; posted--; fail(s, since, e); return 'failed'; }
     if (exiting) publishExit();   // round 6's amend: the keeper's line names this write as IN FLIGHT, not «still owed»
     if (!settleInflight(deadline, waitedBy)) return 'held';

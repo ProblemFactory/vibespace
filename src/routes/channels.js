@@ -108,6 +108,9 @@ function engine() {
 /** A typed adapter failure answers with a status BY CODE: a missing
  *  application credential is 409 `needs-credentials` (the wizard opens the
  *  Integrations card), an undeclared capability 501, a vendor refusal 502. */
+/** B-f276 1b (A3's read, should 1): a door that reads the ACCOUNTS as a verdict asks the pause first — while the channels are paused
+ *  «no such account» / an empty account list would be read as the truth; refused BY NAME instead (503 store-blocked) */
+function pausedRefused(res) { const e = engine(); const pz = e && typeof e.pausedState === 'function' ? e.pausedState() : null; if (!pz) return false; res.status(503).json({ ok: false, code: 'store-blocked', error: pz.error }); return true; }
 function fail(res, e) {
   let status = e && e.status;
   let code = (e && e.code) || null;
@@ -182,6 +185,19 @@ function choiceOf(b) {
 // refused first: the tier is the user's to grant, a proposal the user's to decide (the agent surface is
 // /api/agent/channels/api*).
 const API_IS_OWNERS = 'API access and its proposals are the owner\'s — an agent token may not grant, approve or read them here';
+const STORE_IS_OWNERS = 'starting a damaged channels file empty is the owner\'s — an agent token may not set a file aside';
+// B-f276 1b (主开发 r809): THE DAMAGED DOOR — a person's own choice to start a channels file that could not be read as itself EMPTY:
+// its bytes are set aside under a dated name (nothing deleted), the family starts empty in place, its first write the exclusive create.
+// Answers the For-you check row's shape: {ok, state: 'pass'} (done) | {ok, state: 'none'} (not damaged now)
+router.post('/api/channels/stores/:file/empty', async (req, res) => {
+  try {
+    forHost(req);
+    if (refuseAgentBearer(req, res, STORE_IS_OWNERS)) return;
+    const e = engine();
+    if (!e || typeof e.startDamagedEmpty !== 'function') return bad(res, 503, 'the channels are not ready on this server', { code: 'unavailable' });
+    res.json(await e.startDamagedEmpty(String(req.params.file || '')));
+  } catch (e) { fail(res, e); }
+});
 const rawApi = () => { const e = engine(); if (!e || !e.rawApi) { const err = new Error('Channels are not available'); err.status = 503; throw err; } return e.rawApi; };
 router.get('/api/channels/api', (req, res) => {
   try { if (refuseAgentBearer(req, res, API_IS_OWNERS)) return; const e = engine(); res.json({ ...rawApi().ownerView(), cards: e && e.apiCards ? e.apiCards.records() : [] }); } catch (e) { fail(res, e); }
@@ -299,7 +315,9 @@ router.get('/api/channels/oauth/cb/:kind', async (req, res) => {
   const door = OAUTH_DOORS.doorOf(kind);
   const lang = ConsentRoad.landingLang(req.get('accept-language'));
   const inLang = (p) => (typeof p === 'function' ? (r) => p(r, { lang }) : null);
-  const pageOf = () => { if (door) return inLang(door.page); try { return inLang(engine().consentLandingOf(kind)); } catch { return null; } };
+  // B-f276 1b: while the channels are PAUSED the landing is still a page — the account type's own is not read (its file is held), the
+  // consent road's plain page says «paused» in the person's language; never «no consent lands here» (a 404 over a sign-in that waits)
+  const pageOf = () => { if (door) return inLang(door.page); try { return inLang(engine().consentLandingOf(kind)); } catch (e) { return e && e.paused ? (r) => ConsentRoad.landingHtml(r, { name: kind, lang }) : null; } };
   // the door limit judges the ADDRESS before anything else is looked at; its page is :kind's own (the refused words for
   // 'too-many' — wait a minute, reload), a kind with no landing row answers JSON
   if (!landingAllowed(req.socket.remoteAddress || '?')) { const p = pageOf(); return p ? res.status(429).set(LANDING_HEADERS).send(p({ ok: false, why: 'too-many' })) : res.status(429).json({ error: 'too many sign-in landings from this address in the last minute — wait a minute', code: 'too-many' }); }
@@ -309,7 +327,7 @@ router.get('/api/channels/oauth/cb/:kind', async (req, res) => {
     if (refuseAgentBearer(req, res, SIGNIN_IS_OWNERS)) return;
     page = pageOf();
     if (page) r = await (door ? door.landing({ code: one(q.code), state: one(q.state), error: one(q.error) }) : engine().oauthLanding({ kind, code: one(q.code), state: one(q.state), error: one(q.error) }));
-  } catch { r = { ok: false, why: 'failed', user: null, error: null }; }
+  } catch (e) { r = { ok: false, why: e && e.paused ? 'paused' : 'failed', user: null, error: null }; }   // B-f276 1b: a landing refused while the channels are paused says so, by name
   page = page || pageOf();
   if (!page) return res.status(404).json({ error: `no consent lands here for "${kind}" — that account type declares no consent landing`, code: 'no-landing' });
   r = r || { ok: false, why: 'failed', user: null, error: null };
@@ -396,6 +414,7 @@ router.get('/api/channels/adapters/:id/config', (req, res) => {
 router.get('/api/channels/adapters/:id/view', (req, res) => {
   try {
     forHost(req);
+    if (pausedRefused(res)) return;   // B-f276 1b: never «no such account» over an accounts file nobody read
     const rec = engine().adapterRecords().adapters.find((r) => r.id === req.params.id);
     if (!rec) return bad(res, 404, 'no such account', { code: 'no-such-adapter' });
     res.json({ adapter: engine().adapterView(rec) });
@@ -770,6 +789,7 @@ router.get('/api/channels/rows', (req, res) => {
 router.get('/api/channels/adapters', (req, res) => {
   try {
     forHost(req);
+    if (pausedRefused(res)) return;   // B-f276 1b: never an empty account list over an accounts file nobody read
     res.json({ adapters: engine().adapterRecords().adapters.map((r) => ({ id: r.id, kind: r.kind, builtin: !!r.builtin, enabled: r.enabled !== false })) });
   } catch (e) { fail(res, e); }
 });
@@ -1434,7 +1454,7 @@ function wakeGuards(b) {
 function groupReply(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
-  const status = code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' ? 403 : code === 'archived' || code === 'pair-group' || code === 'wake-count-mismatch' ? 409 : 400;
+  const status = code === 'store-blocked' ? 503 : code === 'not-found' || code === 'unreachable' ? 404 : code === 'not-allowed' || code === 'not-member' ? 403 : code === 'archived' || code === 'pair-group' || code === 'wake-count-mismatch' ? 409 : 400;   // B-f276: the agent groups paused, by name
   // r3: a wake-count-mismatch carries the group view the server counted
   // against, so the panel repaints before its next click
   return res.status(status).json({ error: (r && r.error) || 'refused', code, ...(r && Number.isFinite(r.wakes) ? { wakes: r.wakes } : {}), ...(r && r.group && (code === 'wake-count-mismatch' || code === 'unknown-mention' || code === 'ambiguous-mention') ? { group: r.group } : {}), ...(r && (code === 'unknown-mention' || code === 'ambiguous-mention') ? { token: r.token || '', candidates: r.candidates || [] } : {}) });

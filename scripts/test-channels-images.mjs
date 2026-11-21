@@ -574,7 +574,7 @@ console.log('④ negative controls (patched copies in this run\'s scratch dir)')
   const NEW_HIT = '    if (l.items[k]) { l.items[k].usedAt = now(); lruTouch(adapterId); }';
   ok(STORE_SRC.includes(NEW_HIT), 'CONTROL setup: the coalesced hit is spelled once in the store');
   const oldStorePath = MUT.write('src/channel-store.js', STORE_SRC.replace(NEW_HIT, OLD_HIT), null, { esm: false, name: `store-oldhit-${process.pid}` });
-  const engOld = MUT.load('src/server/channels-engine.js', ENGINE_SRC.replace("const { createChannelStore } = require('../channel-store.js');", `const { createChannelStore } = require(${JSON.stringify(oldStorePath)});`), 'old-hit');
+  const engOld = MUT.load('src/server/channels-engine.js', ENGINE_SRC.replace("const { createChannelStore, pauseDoorsOf } = require('../channel-store.js');", `const { createChannelStore, pauseDoorsOf } = require(${JSON.stringify(oldStorePath)});`), 'old-hit');
   const C = await rig('ctl-lru', { engineMod: engOld });
   await C.get('pic-0');
   const dir = path.join(C.dataDir, 'channels', 'attachments', 'pics');

@@ -537,6 +537,8 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
     let hit = false;
     for (const fn of judges) {
       let r = null, threw = false;
+      // B-f276 1b (主开发 r809 (3)) THE JUDGES' CONTRACT, worded: a judge's {keep} is its OWN, entry by entry (it answers keep only for an
+      // entry of its store); ANY judge's THROW while an owed entry is judged again keeps it — fail closed, said once per (entry, judge)
       try { r = fn(entry); } catch (e) { threw = true; const said = owed ? threwSaid.get(entry) : null; if (!said || !said.has(fn)) log('[deliver] a stash judge threw:', e && e.message); if (owed) { if (said) said.add(fn); else threwSaid.set(entry, new Set([fn])); entry.judgeOwed = true; } r = null; }   // B-f276 1a: re-judging an owed entry, a throw keeps it (unknown is never delivered), said once per (entry, judge)
       if (owed && !threw) { const said = threwSaid.get(entry); if (said) said.delete(fn); }   // it answered: a later throw of it is said again
       if (!r || typeof r !== 'object') continue;
@@ -955,13 +957,24 @@ function create({ dataDir, peerMsg, getHosts, getConvIndex, serverSetting, activ
   const producersOf = (e) => (isEnded(e) ? (Array.isArray(e.producers) ? e.producers : [e.producer]) : isOwed(e) ? [e.producer] : []).filter(Boolean);
   /** → {why, by} (by = the producer that said held) | null */
   function heldWhy(e) {
-    for (const p of producersOf(e)) {
+    const ps = producersOf(e);
+    let first = null, every = ps.length > 0;
+    for (const p of ps) {
       const h = owedProducers.get(p);
-      if (!h || typeof h.held !== 'function') continue;
-      let v = false;
-      try { v = !!h.held(e.cid, e); } catch { return { why: `its producer «${p}» could not say whether it can judge it (its held() threw) — unknown is held`, by: p }; }
-      if (v) return { why: `its producer «${p}» cannot judge it now (its file is held)`, by: p };
+      let said = null;
+      if (h && typeof h.held === 'function') {
+        let v = false;
+        try { v = h.held(e.cid, e); } catch { said = { why: `its producer «${p}» could not say whether it can judge it (its held() threw) — unknown is held`, by: p }; }
+        // a held() is SYNC: `true` = held; a PROMISE (an async hook) answers nothing now — unknown is held, said by name (never «held for ever» unsaid)
+        if (!said && v && typeof v.then === 'function') { try { v.then(null, () => { }); } catch { } said = { why: `its producer «${p}» answered held() with a promise (it must answer at once) — unknown is held`, by: p }; }
+        else if (!said && v === true) said = { why: `its producer «${p}» cannot judge it now (its file is held)`, by: p };
+      }
+      if (said) { if (!first) first = said; } else every = false;
     }
+    // B-f276 1b (主开发 r809 (1)): a wake owed to an ENDED conversation MERGES its producers — it waits only when EVERY one of them says
+    // held: one producer's hold never stops another's delivery (B's job result resumes the conversation while A is held; A's kept
+    // entries do not go out anyway, and A's words in its own store are read only when it can)
+    if (first && (!isEnded(e) || every)) return first;
     // THE PACE'S OWN FILE (registerWakePacer's `held`): an owed wake is paced by it — while it cannot be read, no pace is asked, no force
     if (isOwed(e) && wakePacer && typeof wakePacer.held === 'function') {
       let v = false;

@@ -188,7 +188,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       const groups = groupEntriesOf(s);
       const sum = S.summarize({ msg: [...both.retry, ...both.msg, ...groups], jobs: both.jobs });
       const d = getDeliver();
-      return sum ? { ...sum, ...(s.host ? { groupHandover: false } : {}), billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: reachableFor(s) && (both.msg.length + both.jobs.length + both.retry.length) > 0, ...(d && typeof d.handoverArmed === 'function' && d.handoverArmed(cid) ? { armed: true } : {}) } : null;
+      // B-f276 1b: entries KEPT (their reach cannot be judged now — a channels file could not be read) are counted, never hidden: beside
+      // others the strip names them; alone they are the strip (no press — nothing can be handed over until they can be judged)
+      const kept = d && typeof d.stashKeptCount === 'function' ? d.stashKeptCount(cid) : 0;
+      if (!sum && kept > 0) return { count: 0, kept, items: [], billed: false, inFlight: false, held: 0, reachable: false };
+      return sum ? { ...sum, ...(kept > 0 ? { kept } : {}), ...(s.host ? { groupHandover: false } : {}), billed: billedFor(s), inFlight: inflight.has(cid), held: heldOf([...both.retry, ...both.msg]), reachable: reachableFor(s) && (both.msg.length + both.jobs.length + both.retry.length) > 0, ...(d && typeof d.handoverArmed === 'function' && d.handoverArmed(cid) ? { armed: true } : {}) } : null;
     } catch (e) { log.warn?.(`[stash] summary failed: ${(e && e.message) || e}`); return null; }
   }
 

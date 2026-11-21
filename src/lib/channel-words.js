@@ -174,7 +174,8 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     case 'no-test-runner': return t('This row declares a test but nothing runs it');
     case 'store-unreadable': return t('The integrations store could not be read — every write is refused until it can be');
     // r3: a channels store file that could not be read AND could not be set aside
-    case 'store-blocked': return t('A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)');
+    case 'store-blocked': return t('Paused: a channels file could not be read — this change is refused, and nothing is fetched or sent, until it reads again (see For you)');
+    case 'store-appeared': return t('Not saved: a channels file appeared since VibeSpace started (a storage that came late) — it is kept as it is; this change was not made (see For you)');   // B-f276 1b (its read r2 S2): the missing law's refusal   // B-f276: the hold's own words (a held family pauses the channels)
     // r3: a send that starts a turn — the echo, and the owner's pace when sign-in is off
     case 'wake-count-mismatch': return t('This send wakes an agent (a billed turn) but the request did not confirm it — reload the window and send again');
     case 'rate-floor': return t('Not sent: this agent was woken less than 30 s ago (sign-in is off, so your sends are paced) — send again in a moment');
@@ -367,6 +368,7 @@ export function groupErrorText(r) {
     case 'self': return t('An agent cannot do that to itself');
     case 'unavailable': return t('Agent groups are not available on this instance');
     case 'store-blocked': return t('A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)');
+    case 'store-appeared': return t('A channels store file appeared since VibeSpace started — it is kept as it is; this change was not made (see For you)');   // B-f276 1b (its read r2 S2)
     // r3: a 409 that carries the fresh view has already repainted the preview
     case 'wake-count-mismatch': return r.group ? t('The group changed since the preview (a member was renamed, joined, left or changed its notify mode) — the preview is updated; review it and send again.') : t('The group changed since the preview — this would wake {n} agent(s) now. Review and send again.', { n: Number(r.wakes) || 0 });
     // B-ff04: an @ is resolved to a member when it is SENT — one that names nobody (or two) is refused before anything is written

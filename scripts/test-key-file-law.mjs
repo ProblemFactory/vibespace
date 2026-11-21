@@ -35,7 +35,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
-import { scratch } from './scratch.mjs';
+import { scratch, anchored } from './scratch.mjs';
 import { mutantCopies, copiesCensus } from './mutant-copy.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -485,13 +485,129 @@ const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
 const engines = [];
 await storeLegs({
   tag: 'channels', keyFile: (d) => path.join(d, '.channels-key'), shape: hexShape, ctFiles: (d) => [path.join(d, 'channels', 'acct-kfl', 'callers.json')],
-  load: () => ENG, baseRule: () => loadBase('src/server/channels-engine.js', stripBoxQuestion),
-  make: (d, m) => { const e = m.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, integrations: IS.create({ dataDir: path.join(d, 'int'), env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet }), fetch: async () => { throw new Error('no network in this suite'); }, log: quiet }); engines.push(e); return { e, d }; },
+  // B-f276 (lane bl-windows): the engine's question is a named function (the accounts' set-aside copies count too) — its base
+  // rule is the box with no question, as stripBoxQuestion makes it for the inline ones
+  load: () => ENG, baseRule: () => loadBase('src/server/channels-engine.js', (s) => s.replace('secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: accountsHold });', 'secretBox(path.join(dataDir, KEY_FILE));')),
+  make: async (d, m) => { const e = m.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, integrations: IS.create({ dataDir: path.join(d, 'int'), env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet }), fetch: async () => { throw new Error('no network in this suite'); }, log: quiet }); engines.push(e); const end = Date.now() + 3000; while (!(e.store.adapters.asideCopies && e.store.adapters.asideCopies()) && Date.now() < end) await new Promise((r) => setTimeout(r, 5)); return { e, d }; },   // B-f276 1b: UNKNOWN HOLDS (主开发 r459) — a seal waits for the start's one listing of the accounts' copies
   seal: ({ e, d }, text) => { const blob = e.secrets.seal(text); const f = path.join(d, 'channels', 'acct-kfl', 'callers.json'); fs.mkdirSync(path.dirname(f), { recursive: true }); if (!fs.existsSync(f)) fs.writeFileSync(f, JSON.stringify({ callers: [{ id: 'c1', tokenEnc: blob }] }), { mode: 0o600 }); return { blob }; },
   open: ({ e }, h) => e.secrets.open(h.blob),
   rowCode: ({ e }, h) => { try { e.secrets.open(h.blob); return null; } catch (x) { return (x && x.reason) || (x && x.code) || 'threw'; } },
 });
 for (const e of engines) { try { await e.stop?.(); } catch { } }
+// B-f276 (lane bl-windows, 主开发 r458 / r459): UNKNOWN IS NEVER «NO CIPHERTEXT» — the accounts' file (channels/adapters.json, its
+// sealed sign-ins) HELD at a start while the store's value is missing too: nothing is minted over the tokens nobody read; the value
+// put back opens them once the file reads again (the hold's adoption). And torn bytes SET ASIDE still count: the copy beside it.
+// CONTROLS: today's read (the failed read renamed aside) mints, the sealed rows no longer open; the copies not read ⇒ a mint.
+{
+  const engines2 = [];
+  const STORE_REL = 'src/channel-store.js', ENG_REL = 'src/server/channels-engine.js';
+  const chanMake = (d, m = ENG) => { const e = m.create({ dataDir: d, env: {}, now: () => Date.now(), broadcast: () => {}, integrations: IS.create({ dataDir: path.join(d, 'int'), env: {}, now: () => Date.now(), broadcast: () => {}, log: quiet }), fetch: async () => { throw new Error('no network in this suite'); }, log: quiet, channelsHeldRetry: { firstMs: 5, maxMs: 10 } }); engines2.push(e); return e; };
+  const kfOf = (d) => path.join(d, '.channels-key'), adOf = (d) => path.join(d, 'channels', 'adapters.json');
+  const until = async (fn, ms = 5000) => { const end = Date.now() + ms; for (;;) { const v = fn(); if (v) return v; if (Date.now() > end) return null; await new Promise((r) => setTimeout(r, 5)); } };   // the bound is a red line, never the wait
+  const whyOf = (x) => (x && (x.reason || x.code)) || 'threw';
+  // the storage hiccup hits the STORE's read at the start only (one read): the key check after it reads the file as it is —
+  // present (the hold kept its name) or gone (today's rename: ENOENT, the real hole) — never an injected error that holds by itself
+  const withReadErrorOnce = async (file, code, fn) => { let left = 1; fs.readFileSync = function onceRead(p, ...a) { if (left > 0 && path.resolve(String(p)) === path.resolve(file)) { left--; throw errno(code); } return realRead.call(this, p, ...a); }; try { return await fn(); } finally { fs.readFileSync = realRead; } };
+  // the store: its value K seals ONE sign-in, kept in adapters.json alone (no callers.json)
+  const A = freshDir('chan-held');
+  const e0 = chanMake(A);
+  const blob = e0.secrets.seal('secret-held');
+  try { await e0.stop?.(); } catch { }
+  fs.mkdirSync(path.dirname(adOf(A)), { recursive: true });
+  const AD = JSON.stringify({ v: 1, adapters: [{ id: 'acct-held', kind: 'fake', label: 'held', auth: { tokenEnc: blob } }] });
+  fs.writeFileSync(adOf(A), AD);
+  const K = bytes(kfOf(A));
+  const heldRun = async (m) => {
+    const B = freshDir('chan-held'); copyDir(A, B); fs.renameSync(kfOf(B), kfOf(B) + '.backup');   // the value is missing at this start
+    const r = { B };
+    let ev = null;
+    await withReadErrorOnce(adOf(B), 'EIO', async () => {
+      const e = r.e = chanMake(B, m);
+      e.store.onHeldRead?.((x) => { if (x.file === 'adapters.json') ev = x; });
+      let sealed = true; try { e.secrets.seal('secret-two'); } catch (x) { sealed = false; r.code = whyOf(x); }
+      let opened = null; try { opened = e.secrets.open(blob); } catch (x) { opened = `<${whyOf(x)}>`; }
+      r.held = { minted: fs.existsSync(kfOf(B)), sealed, opened, code: r.code || null, aside: fs.readdirSync(path.join(B, 'channels')).filter((n) => /^adapters\.json\.(corrupt|damaged)-/.test(n)).length };
+    });
+    // the hiccup is over: the person puts the value's file back (from the backup) and the accounts' file reads again
+    if (!fs.existsSync(kfOf(B))) fs.renameSync(kfOf(B) + '.backup', kfOf(B));
+    const got = r.held.aside === 0 && ((r.e.store.quarantined || []).some((x) => x.file === 'adapters.json' && x.held)) ? await until(() => ev, 3000) : null;   // nothing held (a control that read it as empty): no lift to wait for   // a file set aside (the control) is never read again: no wait
+    let opened2 = null; try { opened2 = r.e.secrets.open(blob); } catch (x) { opened2 = `<${whyOf(x)}>`; }
+    r.after = { ev: got && got.state, opened: opened2, theValue: bytes(kfOf(B)) === K, records: ((r.e.store.adapters.live() || {}).adapters || []).map((x) => x.id) };
+    return r;
+  };
+  // B-f276 1b (主开发 r809): torn bytes are HELD as damaged (never set aside at a start); a person's door sets them aside under a dated
+  // name — that copy is LISTED among the accounts' copies the key check counts
+  const tornRun = async (m) => {
+    const B = freshDir('chan-torn'); copyDir(A, B); fs.renameSync(kfOf(B), kfOf(B) + '.backup');
+    fs.writeFileSync(adOf(B), AD.slice(0, AD.length - 3));   // torn: READ, does not parse — its sealed sign-in still in the bytes
+    const e = chanMake(B, m);
+    await until(() => e.store.adapters.asideCopies && e.store.adapters.asideCopies(), 3000);
+    const seal = () => { try { e.secrets.seal('secret-two'); return null; } catch (x) { return whyOf(x); } };
+    const q = (e.store.quarantined || []).find((x) => x.file === 'adapters.json') || {};
+    const held = { kind: q.kind || null, code: seal(), minted: fs.existsSync(kfOf(B)) };
+    const door = e.store.startDamagedEmpty ? await e.store.startDamagedEmpty('adapters.json') : null;
+    const after = { state: door && door.state, listed: e.store.adapters.asideCopies(), code: seal(), minted: fs.existsSync(kfOf(B)) };
+    return { held, after };
+  };
+  const r = await heldRun(ENG);
+  console.log(`    facts: held ${JSON.stringify(r.held)} · after ${JSON.stringify(r.after)}`);
+  ok(!r.held.minted && !r.held.sealed && r.held.code === 'key-missing' && r.held.aside === 0, 'channels B-f276: adapters.json HELD at a start (its read failed) while the value is missing — NOTHING minted (key-missing), the file not set aside', JSON.stringify(r.held));
+  ok(r.after.ev === 'loaded' && r.after.opened === 'secret-held' && r.after.theValue && r.after.records.includes('acct-held'), 'channels B-f276: …the value put back and the file read again: the accounts taken in, the sealed sign-in opens WITH THE VALUE THAT SEALED IT', JSON.stringify(r.after));
+  const t = await tornRun(ENG);
+  ok(t.held.kind === 'damaged' && t.held.code === 'key-missing' && !t.held.minted, 'channels B-f276 1b: torn adapters.json HELD as damaged (its sealed sign-in still in the bytes it keeps where they are) — NOTHING minted', JSON.stringify(t.held));
+  ok(t.after.state === 'pass' && Array.isArray(t.after.listed) && t.after.listed.length === 1 && /^adapters\.json\.damaged-/.test(t.after.listed[0]) && t.after.code === 'key-missing' && !t.after.minted, 'channels B-f276 1b: …a person starts it empty (the damaged door): the bytes set aside under a dated name are LISTED among the accounts\' copies — the copy counts: NOTHING minted', JSON.stringify(t.after));
+  // B-f276 1b, its read r1 S4: a LEGACY copy (a release before 1b set torn bytes aside as .corrupt-) beside a store that RAN there is listed
+  // off the loop and counts; a FIRST start's empty list is taken again once a family's file appears (the folder changed under it)
+  const legacyRun = async (m) => {
+    const B = freshDir('chan-legacy'); copyDir(A, B); fs.renameSync(kfOf(B), kfOf(B) + '.backup');
+    fs.renameSync(adOf(B), adOf(B) + '.corrupt-2026-11-01T00-00-00-000Z');   // the sealed sign-in only in the legacy copy
+    fs.writeFileSync(adOf(B), JSON.stringify({ v: 1, adapters: [] }));
+    const e = chanMake(B, m);
+    await until(() => e.store.adapters.asideCopies && e.store.adapters.asideCopies(), 3000);
+    let code = null; try { e.secrets.seal('secret-two'); } catch (x) { code = whyOf(x); }
+    return { listed: e.store.adapters.asideCopies(), code, minted: fs.existsSync(kfOf(B)) };
+  };
+  const lateRun = async (m) => {
+    const B = freshDir('chan-late');   // a FIRST start: the store makes its folders (a mount not there yet)
+    const e = chanMake(B, m);
+    const chan = path.join(B, 'channels');
+    fs.writeFileSync(adOf(B) + '.corrupt-2026-11-01T00-00-00-000Z', AD);   // the mount came: a legacy copy beside it …
+    fs.writeFileSync(path.join(chan, 'groups.json'), JSON.stringify({ v: 1, groups: {} }));   // … and a family's file
+    let upd = null; try { await e.store.groups.update(() => { }); } catch (x) { upd = x && x.code; }   // the first write meets it
+    await until(() => e.store.adapters.asideCopies && e.store.adapters.asideCopies(), 3000);   // the list again (unknown until listed) — a control that never lists again answers at once
+    let code = null; try { e.secrets.seal('secret-two'); } catch (x) { code = whyOf(x); }
+    return { upd, listed: e.store.adapters.asideCopies(), code, minted: fs.existsSync(kfOf(B)) };
+  };
+  const lg = await legacyRun(ENG), lt = await lateRun(ENG);
+  ok(Array.isArray(lg.listed) && lg.listed.length === 1 && /\.corrupt-/.test(lg.listed[0]) && lg.code === 'key-missing' && !lg.minted, 'channels B-f276 1b (r1 S4): a legacy .corrupt- copy beside a store that ran there is LISTED (off the loop) and counts — NOTHING minted over its sealed sign-in', JSON.stringify(lg));
+  ok(lt.upd === 'store-appeared' && Array.isArray(lt.listed) && lt.listed.length === 1 && lt.code === 'key-missing' && !lt.minted, 'channels B-f276 1b (r1 S4): a FIRST start\'s empty list is taken again once a family\'s file APPEARED — the legacy copy that came counts: NOTHING minted', JSON.stringify(lt));
+  // CONTROLS — an engine copy over a store copy
+  const storeSrc = realRead(path.join(REPO, STORE_REL), 'utf-8'), engSrc = realRead(path.join(REPO, ENG_REL), 'utf-8');
+  const HOLD = ["    if (st === 'missing') { fam.value = empty(); fam.missing = true; return fam; }\n", "    if (st !== 'data') { fam.value = empty(); fam.missing = true; return fam; }   /* MUTANT: the release — a failed read starts EMPTY */\n"];   // B-f276 1b: the store hold's answer
+  const COPIES = ['    const hit = aside.find((n) => { if (!asideHolds.has(n)) asideHolds.set(n, holdsCiphertext({ files: [path.join(chan, n)] })); return asideHolds.get(n); });', '    const hit = null;'];
+  const REQ = "const { createChannelStore, pauseDoorsOf } = require('../channel-store.js');";
+  ok(storeSrc.split(HOLD[0]).length === 2 && engSrc.split(COPIES[0]).length === 2 && engSrc.split(REQ).length === 2, 'channels B-f276 CONTROL setup: the hold, the copies\' count and the store\'s require are where the controls cut them');   // the door's listing: anchored() throws by name when it is gone
+  const storeMut = MUT.write(STORE_REL, anchored(storeSrc, HOLD[0], HOLD[1], 'kfl-hold-cut'), 'kfl-held-rename');
+  const PUSH = "    if (fam.name === 'adapters.json' && !asideNames.includes(path.basename(aside))) asideNames.push(path.basename(aside));   // B-f276 1b: the accounts' copy COUNTS in the key check (it may hold sealed sign-ins — never a value made over them)\n";
+  // the copies' three cuts in ONE store copy (one engine over it — each control red by its own cut: the door's push for the torn run,
+  // every start taken for a first one for the legacy run, no list again for the late run; the other two cuts change nothing there)
+  const copiesMut = MUT.write(STORE_REL, anchored(anchored(anchored(storeSrc, PUSH, '', 'kfl-door-unlisted'), '  const firstStart = !!madeFirst;', '  const firstStart = true;', 'kfl-first-start'), '    relistAside();\n', '', 'kfl-no-relist'), 'kfl-copies-cuts');
+  const engOver = (tag, text) => MUT.load(ENG_REL, text, tag);
+  BELT.paused++;   // the controls mint OUTSIDE the law on purpose (as the base rules above do)
+  let c1, c2, c3, c4, c5;
+  try {
+    c1 = await heldRun(engOver('kfl-held-rename-eng', engSrc.replace(REQ, `const { createChannelStore, pauseDoorsOf } = require(${JSON.stringify(storeMut)});`)));
+    c2 = await tornRun(engOver('kfl-copies-unread', engSrc.replace(COPIES[0], COPIES[1])));
+    const copiesEng = engOver('kfl-copies-cuts-eng', anchored(engSrc, REQ, `const { createChannelStore, pauseDoorsOf } = require(${JSON.stringify(copiesMut)});`, 'kfl-copies-cuts-eng'));
+    c3 = await tornRun(copiesEng); c4 = await legacyRun(copiesEng); c5 = await lateRun(copiesEng);
+  } finally { BELT.paused--; }
+  ok(!c1.after.records.includes('acct-held') && c1.after.ev !== 'loaded', 'channels B-f276 CONTROL: the hold cut (the release\'s read: a failed read starts EMPTY) — the file that reads again is never taken in, the account gone from the store — red', JSON.stringify({ held: c1.held, after: c1.after }));
+  ok(c2.after.minted, 'channels B-f276 CONTROL: the set-aside copies not read — after the door a value is minted over the damaged copy\'s sealed sign-in — red', JSON.stringify(c2));
+  ok(c4.minted && Array.isArray(c4.listed) && c4.listed.length === 0, 'channels B-f276 1b CONTROL (every start taken for a first one): the legacy copy is never listed — a value minted over its sealed sign-in — red', JSON.stringify(c4));
+  ok(c5.minted && Array.isArray(c5.listed) && c5.listed.length === 0, 'channels B-f276 1b CONTROL (a first start never lists again): the copy that came with the mount is never counted — a value minted over its sealed sign-in — red', JSON.stringify(c5));
+  ok(c3.after.minted && Array.isArray(c3.after.listed) && c3.after.listed.length === 0, 'channels B-f276 1b CONTROL: the door\'s copy not listed (the release of this unit before its cure) — a value minted over the sealed sign-in the copy keeps — red', JSON.stringify(c3));
+  for (const e of engines2) { try { await e.stop?.(); } catch { } }
+}
 // app-secrets (the machine's master; the sealed stores are per app)
 const AS = require(path.join(REPO, 'src/app-secrets.js'));
 await storeLegs({

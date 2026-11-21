@@ -1082,6 +1082,9 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   function grantsStoreOf() { const g = typeof grants === 'function' ? grants() : grants; return g || require('./grants-store.js').forDir(dataDir); }
   function grantsUnify({ ensure = true } = {}) {
     const eng = typeof channels === 'function' ? channels() : channels;
+    // B-f276 A3 (主开发 r566 #3): the channels PAUSED (a file of theirs could not be read) — the who-lists are not read from an index
+    // nobody read: the run FAILS by name and the runner retries it at the next boot (never recorded as done over an empty list)
+    { const pz = eng && typeof eng.pausedState === 'function' ? eng.pausedState() : null; if (pz) throw Object.assign(new Error(`grants-unify waits: ${pz.error}`), { code: 'store-blocked' }); }
     let channelIndex = null;
     try { channelIndex = eng && eng.store && eng.store.index && typeof eng.store.index.snapshot === 'function' ? eng.store.index.snapshot() : null; } catch { channelIndex = null; }
     let bindings = null;

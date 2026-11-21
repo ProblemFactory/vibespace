@@ -375,16 +375,49 @@ export default {
   "Several sessions share that name — pick one by its conversation id": "同じ名前のセッションが複数あります — 会話 id で 1 つ指定してください",
   "A group needs at least two agents": "グループには少なくとも 2 つの agent が必要です",
   "The group changed since the preview — this would wake {n} agent(s) now. Review and send again.": "プレビュー後にグループが変わりました — このままでは {n} 個の agent を起こします。確認してから送り直してください。",
-  "Channels: {file} could not be read and was set aside as {where}": "チャンネル: {file} を読み込めなかったため {where} として退避しました",
-  "Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved": "チャンネル: {file} を読み込めず、退避もできませんでした — 修正または移動するまで、このファイルへの書き込みは拒否されます",
   "Sent at once, as you — it wakes this agent: 1 billed turn.": "あなたとして即時送信 — この agent を起こします: 課金ターン 1 回。",
   "Approving wakes this agent: 1 billed turn": "承認するとこの agent を起こします: 課金ターン 1 回",
-  "A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)": "チャンネルのストアファイルを読み込めず、退避もできませんでした — 修正または移動するまで変更は拒否されます（「あなたへ」を参照）",
+  "Paused: a channels file could not be read — this change is refused, and nothing is fetched or sent, until it reads again (see For you)": "一時停止中: チャンネルのファイルを読み込めません — 読めるようになるまで、この変更は拒否され、取得も送信もしません（「あなた宛て」を参照）",
+  "Not saved: a channels file appeared since VibeSpace started (a storage that came late) — it is kept as it is; this change was not made (see For you)": "保存されていません：VibeSpace の起動後にチャンネルのファイルが現れました（ストレージが後から来ました）— そのまま保持し、この変更は行われていません（「あなた宛て」を参照）",   // B-f276 1b: the missing law's refusal
+  "A channels store file appeared since VibeSpace started — it is kept as it is; this change was not made (see For you)": "VibeSpace の起動後にチャンネルのストアファイルが現れました — そのまま保持し、この変更は行われていません（「あなた宛て」を参照）",   // B-f276 1b
   "This send wakes an agent (a billed turn) but the request did not confirm it — reload the window and send again": "この送信は agent を起こします（課金ターン）が、リクエストがそれを確認していません — ウィンドウを再読み込みしてから送り直してください",
   "Not sent: this agent was woken less than 30 s ago (sign-in is off, so your sends are paced) — send again in a moment": "未送信: この agent は 30 秒以内に起こされたばかりです（サインインがオフのため送信はペース制限されます）— 少し待ってから送り直してください",
-  "{file} could not be read and could NOT be set aside — changes to it are refused until it is fixed or moved": "{file} を読み込めず、退避もできませんでした — 修正または移動するまで、変更は拒否されます",
-  "{file} could not be read — set aside as {to}; your accounts were reset, reconnect them": "{file} を読み込めませんでした — {to} として退避しました。アカウントはリセットされたので、再接続してください",
-  "{file} could not be read — set aside as {to}; that store started empty": "{file} を読み込めませんでした — {to} として退避しました。そのストアは空から始まりました",
+  "Channels: {file} could not be read — it is held: nothing was set aside or written over": "チャンネル: {file} を読み込めませんでした — 保留中です。退避も上書きもしていません",
+  "Every change to it is refused and the channels are paused until it reads again. VibeSpace reads it again by itself and loads it when it reads — nothing to do.": "再び読めるまで、このファイルへの変更はすべて拒否され、チャンネルは一時停止します。VibeSpace が自動で読み直し、読めたら読み込みます。操作は不要です。",
+  "Every change to it is refused and the channels are paused until it is loaded at the next start of VibeSpace: once it reads again, restart VibeSpace. Nothing is lost — each conversation is then fetched from where it was, and nothing is added twice.": "次回の VibeSpace 起動で読み込まれるまで、このファイルへの変更はすべて拒否され、チャンネルは一時停止します。読めるようになったら VibeSpace を再起動してください。失われるものはなく、各会話は元の位置から取得され、重複もしません。",
+  "Every change to it is refused and the agent groups are paused until it reads again. VibeSpace reads it again by itself and loads it when it reads — nothing to do.": "再び読めるまで、このファイルへの変更はすべて拒否され、エージェントのグループは一時停止します。VibeSpace が自動で読み直し、読めたら読み込みます。操作は不要です。",
+  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again": "チャンネルを一時停止しました: {file} を読み込めません — 読めるようになるまで、取得も送信もしません",
+  "Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved": "チャンネル: {file} を読み込めず、退避もできませんでした — 修正または移動するまで、このファイルへの書き込みは拒否されます",
+  "Channels: {file} could not be read and was set aside as {where}": "チャンネル: {file} を読み込めなかったため {where} として退避しました",
+  "A channels store file could not be read or set aside — changes are refused until it is fixed or moved (see For you)": "チャンネルのストアファイルを読み込めず、退避もできませんでした — 修正または移動するまで変更は拒否されます（「あなたへ」を参照）",
+  "Start it empty": "空から始める",   // B-f276 1b: the damaged door
+  "Set the damaged file aside and start it empty — nothing is deleted, its bytes are kept under a dated name": "破損したファイルを退避して空から始めます — 何も削除せず、そのバイトは日付付きの名前で保持します",   // B-f276 1b: the damaged door
+  "Started empty — the damaged bytes are kept under a dated name": "空から始めました — 破損したバイトは日付付きの名前で保持しています",   // B-f276 1b: the damaged door
+  "The file is not damaged now — nothing to set aside": "このファイルは今は破損していません — 退避するものはありません",   // B-f276 1b: the damaged door
+  "Could not start the file empty": "ファイルを空から始められませんでした",   // B-f276 1b: the damaged door
+  "Channels: {file} could not be read as itself (damaged) — every change to it is refused": "チャンネル：{file} を本来の形で読めません（破損）— 変更はすべて拒否されます",   // B-f276 1b: the store hold's words
+  "Nothing was set aside or written over. Put a good copy back while VibeSpace is stopped, or press Start it empty: its bytes are set aside under a dated name (nothing is deleted) and it starts empty.": "何も退避も上書きもしていません。VibeSpace を止めている間に正常なコピーを戻すか、「空から始める」を押してください：そのバイトは日付付きの名前で退避され（何も削除しません）、空から始まります。",   // B-f276 1b: the store hold's words
+  "Channels: {file} appeared since the start — it is kept as it is and loaded at the next start": "チャンネル：{file} は起動後に現れました — そのまま保持し、次回の起動で読み込みます",   // B-f276 1b: the store hold's words
+  "Every change to it is refused until then: restart VibeSpace to load it.": "それまでは変更がすべて拒否されます：読み込むには VibeSpace を再起動してください。",   // B-f276 1b: the store hold's words
+  "Channels: {file} started empty — its damaged bytes are kept as {where}": "チャンネル：{file} を空から始めました — 破損したバイトは {where} として保持しています",   // B-f276 1b: the store hold's words
+  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again and VibeSpace restarts": "チャンネルを一時停止しました：{file} を読めません — 再び読めるようになり VibeSpace を再起動するまで、何も取得も送信もしません",   // B-f276 1b: the store hold's words
+  "Channels paused: {file} could not be read as itself — nothing is fetched or sent until it is started empty or a good copy is put back": "チャンネルを一時停止しました：{file} を本来の形で読めません — 空から始めるか正常なコピーを戻すまで、何も取得も送信もしません",   // B-f276 1b: the store hold's words
+  "{file} could not be read as itself (damaged) — it is held: nothing set aside or written over; start it empty from For you, or put a good copy back": "{file} を本来の形で読めません（破損）— 保留中：何も退避・上書きしていません。「あなた宛て」から空で始めるか、正常なコピーを戻してください",   // B-f276 1b: the store hold's words
+  "{file} appeared since the start — it is kept as it is and loaded at the next start of VibeSpace": "{file} は起動後に現れました — そのまま保持し、VibeSpace の次回起動で読み込みます",   // B-f276 1b: the store hold's words
+  "{file} was started empty — its damaged bytes are kept as {where}": "{file} を空から始めました — 破損したバイトは {where} として保持しています",   // B-f276 1b: the store hold's words
+  "Nothing was set aside or written over. A pushed message is delivered again only while its sender retries, so reading it again soon matters. VibeSpace reads it again; once it reads, restart VibeSpace to load it.": "退避も上書きもしていません。プッシュされたメッセージは送信元が再試行している間だけ再送されるため、早く読めるようになることが大切です。VibeSpace が読み直します。読めたら VibeSpace を再起動して読み込んでください。",
+  "It is loaded at the next start of VibeSpace; until then the channels stay paused — nothing is fetched or sent.": "次回の VibeSpace 起動時に読み込まれます。それまでチャンネルは一時停止のままで、取得も送信もしません。",
+  "Channels paused: {file} could not be read — nothing is fetched or sent until it reads again; once it reads, restart VibeSpace to load it": "チャンネルを一時停止しました: {file} を読み込めません — 読めるようになるまで取得も送信もしません。読めたら VibeSpace を再起動して読み込んでください",
+  "Channels: {file} reads again — restart VibeSpace to load it": "チャンネル: {file} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
+  "It is loaded at the next start of VibeSpace; until then it stays held and every change to it is refused.": "次回の VibeSpace 起動時に読み込まれます。それまでは保留のままで、変更はすべて拒否されます。",
+  "Channels: {file} read again and loaded — nothing to do": "チャンネル: {file} を読み直して読み込みました — 操作は不要です",
+  "{file} read again and is loaded": "{file} を読み直して読み込みました",
+  "The channels are paused — {file} could not be read, so this list is not the whole list; nothing is fetched or sent until it reads again": "チャンネルは一時停止中です — {file} を読み込めないため、ここは一覧のすべてではありません。読めるようになるまで取得も送信もしません",
+  "It read again and is loaded; changes to it are written again.": "読み直して読み込みました。変更は再び書き込まれます。",
+  "{file} reads again — restart VibeSpace to load it": "{file} が読めるようになりました — VibeSpace を再起動すると読み込まれます",
+  "{file} could not be read — it is held: nothing set aside or written over; once it reads, it is loaded at the next start of VibeSpace": "{file} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら次回の VibeSpace 起動時に読み込みます",
+  "{file} could not be read — it is held: nothing set aside or written over; your accounts come back by themselves when it reads": "{file} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたらアカウントは自動で戻ります",
+  "{file} could not be read — it is held: nothing set aside or written over; it loads by itself when it reads": "{file} を読み込めませんでした — 保留中です（退避も上書きもしていません）。読めたら自動で読み込みます",
   "The group changed since the preview (a member was renamed, joined, left or changed its notify mode) — the preview is updated; review it and send again.": "プレビュー後にグループが変わりました（メンバーの名前変更・参加・退出・通知モードの変更）— プレビューを更新しました。確認してから送り直してください。",
   "Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.": "何も削除していません。サーバー停止中に JSON を直して元に戻すか、新しいストアを使い続け、不要になったらコピーを削除してください。",
   "For you could not read its saved list and set it aside as {where} \u2014 the list started empty": "「あなた宛て」は保存済みの一覧を読めなかったため {where} として退避しました — 一覧は空から始まります",
@@ -6292,6 +6325,13 @@ export default {
   "Handing over…": "引き渡し中…",
   "1 more is held for the next hand-over": "あと 1 件は次の引き渡しまで保留",
   "{n} more are held for the next hand-over": "あと {n} 件は次の引き渡しまで保留",
+  "1 notice waits whose reach cannot be judged now": "届くかどうか今は判断できない通知が 1 件待っています",   // B-f276 1b: kept stash entries
+  "{n} notices wait whose reach cannot be judged now": "届くかどうか今は判断できない通知が {n} 件待っています",   // B-f276 1b: kept stash entries
+  "1 more waits whose reach cannot be judged now": "ほかに、届くかどうか今は判断できないものが 1 件待っています",   // B-f276 1b: kept stash entries
+  "{n} more wait whose reach cannot be judged now": "ほかに、届くかどうか今は判断できないものが {n} 件待っています",   // B-f276 1b: kept stash entries
+  "a channels file could not be read — they are handed over once it reads again": "チャンネルのファイルを読めませんでした — 読めるようになり次第、引き渡します",   // B-f276 1b: kept stash entries
+  "they wait until VibeSpace can judge them": "VibeSpace が判断できるまで待ちます",   // B-f276 1b: kept stash entries
+  "VibeSpace cannot tell now whether these still reach this agent (a channels file could not be read) — nothing is handed over until it can": "これらがまだこのエージェントに届くかどうか、VibeSpace には今は判断できません（チャンネルのファイルを読めませんでした）— 判断できるまで何も引き渡しません",   // B-f276 1b: kept stash entries
   "they ride the next turn": "次のターンと一緒に届きます",
   "1 group message rides the next turn, after this one ends": "グループメッセージ 1 件は、このターンが終わった後の次のターンと一緒に届きます",
   "{n} group messages ride the next turn, after this one ends": "グループメッセージ {n} 件は、このターンが終わった後の次のターンと一緒に届きます",

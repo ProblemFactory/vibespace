@@ -300,6 +300,7 @@ function create(engineCtx) {
   // (groups, key) verdict is asked once — a 30-entry stash read is one roster lookup + one reach per distinct key
   function stashGate(cid, entry, memo = null) {
     if (!entry || (entry.source !== 'channel' && entry.source !== 'channel-receipt')) return null;
+    if (store.wallHeld && store.wallHeld('stashGate')) return { keep: true };   // B-f276 wall (主开发 r520): its reach cannot be judged now — kept, neither delivered nor changed
     const a = entry.about;
     if (!a || typeof a !== 'object') return null;
     const M = memo instanceof Map ? memo : new Map();
@@ -593,6 +594,7 @@ function create(engineCtx) {
   /** design 005 §2.B retention (once a minute, beside the expiry sweep): a sent / failed proposal's files 7 days after
    *  it ended, a folder whose record is gone, a stage a crash left; the record keeps name, size and sha256 */
   async function filesSweep() {
+    if (store.wallHeld && store.wallHeld('filesSweep')) return [];   // B-f276 wall: a held outbox reads as no proposal — no folder is an orphan then
     const removed = OF.sweep(store.dir, store.outbox.snapshot().proposals, now());
     if (removed.length) await store.outbox.update((ob) => { for (const id of removed) { const q = ob.proposals[id]; if (q && !q.attachmentsGoneAt) q.attachmentsGoneAt = now(); } });
     return removed;

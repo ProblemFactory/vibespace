@@ -3722,6 +3722,7 @@ await section(async () => {
   };
   const OWNER = {
     notify: 'the `channels-updated` broadcast to the owner\'s windows (the ws is the owner\'s cookie session)',
+    fileHeldNotice: 'the owner\'s For-you notice of a channels file HELD (its read failed, it appeared since the start, or its bytes are damaged — its one door, Start it empty): B-f276 1b',
     notifyOutbox: 'the Outbox broadcast to the owner\'s windows',
     pointerSync: 'the owner\'s For-you pointer to proposals awaiting approval',
     composePointerSync: 'the owner\'s For-you pointer to composed messages awaiting approval',

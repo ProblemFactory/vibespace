@@ -137,21 +137,22 @@ export function createStashStrip({ sessionId }) {
     const held = Number(summary && summary.held) || 0;
     const reachable = summary && typeof summary.reachable === 'boolean' ? summary.reachable : true;
     const armed = !!(summary && summary.armed);
+    const kept = Number(summary && summary.kept) || 0;   // B-f276 1b: entries whose reach cannot be judged now — counted, never hidden
     // B-c198: "the next turn" is not the running one — the words say "after this one ends"; verify r1: `waiting` (paused
     // on the user — a permission, a question) is INSIDE the turn too: the answer continues it, no UserPromptSubmit
     const midTurn = turn === 'running' || turn === 'waiting';
     // B-02a3: the group messages waiting, and whether the group press is drawn (mid-turn, the Enter door steers)
     const rides = summary && Array.isArray(summary.items) ? summary.items.filter((i) => i && i.kind === 'group').reduce((a, i) => a + (Number(i.n) || 0), 0) : 0;
     const groupPress = midTurn && steers === true && rides > 0 && !(summary && summary.groupHandover === false);   // a remote conversation: no press (its wrapper's door is not read on this machine)
-    const key = summary && summary.count ? summaryDigest(summary) + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + groupPress + '|' + rides + '|' + previewDigest(summary) : '';
+    const key = summary && (summary.count || kept) ? summaryDigest(summary) + '|' + kept + '|' + billed + '|' + inFlight + '|' + held + '|' + reachable + '|' + armed + '|' + midTurn + '|' + groupPress + '|' + rides + '|' + previewDigest(summary) : '';
     if (key === st.key) return;
     st.key = key;
     st.summary = key ? summary : null;
     if (!key) { el.hidden = true; return; }
     drawList(summary);
-    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable, now: Date.now(), armed, midTurn, groupPress });   // `now`: a retrying notice names its next attempt relative to this device's clock
+    const w = stashSummaryWords(summary, t, { billed, inFlight, held, reachable, now: Date.now(), armed, midTurn, groupPress, kept });   // `now`: a retrying notice names its next attempt relative to this device's clock
     setText(head, w.head);
-    setText(parts, ': ' + w.parts.join(', '));
+    setText(parts, w.parts.length ? ': ' + w.parts.join(', ') : '');   // kept alone: no parts to list
     setText(goLabel, w.button);
     setText(cost, w.cost ? ' · ' + w.cost : '');
     setText(heldEl, w.held || '');
@@ -176,7 +177,7 @@ export function createStashStrip({ sessionId }) {
 
 /** The sidebar card's "N waiting" chip (null when nothing waits). */
 export function stashHintChip(summary) {
-  if (!summary || !summary.count) return null;
+  if (!summary || (!summary.count && !summary.kept)) return null;   // B-f276 1b (its read r1 N4): kept entries wait too
   const c = span('sess-state-chip sess-state-derived sess-stash-chip');
   c.style.setProperty('--chip-color', 'var(--accent)');
   const ic = span('chip-icon'); ic.innerHTML = UI_ICONS.inbox;   // the library's own static SVG
@@ -185,10 +186,11 @@ export function stashHintChip(summary) {
   return c;
 }
 function patchHint(chip, summary) {
-  const w = stashSummaryWords(summary, t, { billed: true });
-  setText(chip.querySelector('.chip-text'), t('{n} waiting', { n: summary.count }));
+  const kept = Number(summary.kept) || 0;
+  const w = stashSummaryWords(summary, t, { billed: true, kept });
+  setText(chip.querySelector('.chip-text'), t('{n} waiting', { n: (summary.count || 0) + kept }));
   chip.dataset.tip = w.line;
-  chip.dataset.stashKey = summaryDigest(summary);
+  chip.dataset.stashKey = summaryDigest(summary) + '|' + kept;
 }
 /** Every rendered card of a live session: add / patch / remove its hint from the broadcast's rows (by webui id). */
 export function patchStashHints(listEl, sessions) {
@@ -199,8 +201,8 @@ export function patchStashHints(listEl, sessions) {
     if (!wid) continue;
     const sum = by.has(wid) ? by.get(wid) : null;
     let chip = card.querySelector('.sess-stash-chip');
-    if (!sum || !sum.count) { if (chip) chip.remove(); continue; }
-    if (chip) { if (chip.dataset.stashKey !== summaryDigest(sum)) patchHint(chip, sum); continue; }
+    if (!sum || (!sum.count && !sum.kept)) { if (chip) chip.remove(); continue; }
+    if (chip) { if (chip.dataset.stashKey !== summaryDigest(sum) + '|' + (Number(sum.kept) || 0)) patchHint(chip, sum); continue; }
     chip = stashHintChip(sum);
     const anchor = card.querySelector('.sess-state-chip');
     if (anchor) anchor.after(chip);

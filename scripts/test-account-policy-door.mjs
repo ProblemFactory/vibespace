@@ -117,6 +117,28 @@ try {
   ok(st1.ok && st1.conversation.policy.mode === 'direct' && st1.conversation.policy.source === 'account' && st2.conversation.policy.source === 'conversation' && !stN.ok && stN.code === 'not-found', 'agent `status <conversation>`: the effective policy + its source; an agent that cannot see it gets the uniform not-found', JSON.stringify([st1, stN]));
   const row = (eng.listFor(ctx).conversations || []).find((c) => c.key === `acc/${C1}`);
   ok(row && row.policy === 'direct' && row.policySource === 'account', 'the agent\'s list row carries the policy AND its source', JSON.stringify(row && { policy: row.policy, policySource: row.policySource }));
+  // B-f276 1b (A3's read, should 1): the ACCOUNT doors read the accounts as a verdict — while the channels are PAUSED they ask the pause
+  // first and refuse BY NAME (503 store-blocked), never «no such account» / an empty list over an accounts file nobody read
+  {
+    const pausedEng = { pausedState: () => ({ code: 'store-blocked', error: 'the channels are paused: adapters.json could not be read', held: ['adapters.json'] }), adapterRecords: () => ({ adapters: [] }), adapterView: () => null };
+    const askBoth = async (R0) => {
+      R0.setup({ getEngine: () => pausedEng });
+      const app2 = express(); app2.use(express.json()); app2.use(R0.router);
+      const s2 = await new Promise((resolve) => { const x = app2.listen(0, '127.0.0.1', () => resolve(x)); });
+      const b2 = `http://127.0.0.1:${s2.address().port}`;
+      const one = async (u) => { const r = await fetch(b2 + u); return { status: r.status, code: (await r.json().catch(() => ({}))).code || null }; };
+      try { return { view: await one('/api/channels/adapters/acc/view'), list: await one('/api/channels/adapters') }; } finally { s2.close(); }
+    };
+    const pz = await askBoth(routes);
+    routes.setup({ getEngine: () => eng });   // the real engine back for the legs below
+    ok(pz.view.status === 503 && pz.view.code === 'store-blocked' && pz.list.status === 503 && pz.list.code === 'store-blocked', 'B-f276 1b: while the channels are PAUSED the account view and the account list refuse BY NAME (503 store-blocked) — never «no such account», never an empty list', JSON.stringify(pz));
+    const { mutantCopies } = await import('./mutant-copy.mjs');
+    const { anchored } = await import('./scratch.mjs');
+    const RSRC = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8');
+    const cut = anchored(anchored(RSRC, '    if (pausedRefused(res)) return;   // B-f276 1b: never «no such account» over an accounts file nobody read\n', '', 'the view asks no pause'), '    if (pausedRefused(res)) return;   // B-f276 1b: never an empty account list over an accounts file nobody read\n', '', 'the list asks no pause');
+    const pc = await askBoth(mutantCopies('account-door-paused', REPO).load('src/routes/channels.js', cut, 'accounts-no-pause'));
+    ok(pc.view.status === 404 && pc.list.status === 200, 'B-f276 1b CONTROL (the account doors ask no pause, in a copy): «no such account» (404) and an empty list (200) over the held file — red', JSON.stringify(pc));
+  }
   const back = await call('PUT', '/api/channels/adapters/acc', { policy: null, base: 'direct' });
   ok(back.status === 200 && eng.conversationView('acc', C1).policy.mode === 'review' && eng.conversationView('acc', C2).policy.source === 'conversation', '"The vendor\'s default" (PUT null) ⇒ the inheriting conversation reads review again; the one with its own keeps its own');
   // the CLI's words (the same function the CLI prints with)

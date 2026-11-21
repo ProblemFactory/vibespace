@@ -1181,6 +1181,7 @@ function create(engineCtx) {
   /** lane webhook-l1-server: the module's DECLARED facts (removable / reach / listed / seed) — never a `builtin` branch. */
   const declaredOf = (kind) => { try { return registry.get(kind) || {}; } catch { return {}; } };
   async function remove(adapterId) {
+    if (store.wallHeld && store.wallHeld('removeAccount')) throw httpErr(503, 'store-blocked', 'the channels are paused: a file they read could not be read — the account is not removed until it reads again');   // B-f276 wall
     const rec = recordOrThrow(adapterId);
     if (declaredOf(rec.kind).removable === false) throw httpErr(400, 'builtin', `${rec.label || rec.id} is built in and cannot be removed`);   // lane webhook-l1-server: the module's declared fact
     const refs = referencesOf(rec.id);

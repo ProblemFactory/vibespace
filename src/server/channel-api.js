@@ -270,8 +270,12 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
     return state.proposals[id];
   }
   /** THE CALL. → the answer, `api_pending` (a proposal filed), or a refusal by name. `touch` = the chat's call row. */
+  // B-f276 A2 (主开发 r487): while the channels are PAUSED nothing is fetched or sent on a channels credential — a call and an
+  // approval refused BY NAME (store-blocked) before any vendor request; a lent mount's credential is not the channels'
+  const pausedOf = (cred) => { if (String(cred || '').startsWith('mount:')) return null; const e = eng(); return e && typeof e.pausedState === 'function' ? e.pausedState() : null; };
   async function call(ctx, input = {}) {
     const cred = String(input.cred || '');
+    { const pz = pausedOf(cred); if (pz) return { ok: false, code: 'store-blocked', error: pz.error }; }
     const line = (req, extra) => audit(cred, F.auditLine({ at: now(), principal: ctx, conv: ctx.id, cred, req, ...extra }));
     const asked = () => ({ method: String(input.method || '').toUpperCase().slice(0, 8), host: null, path: String(input.path || '').slice(0, 200), query: [] });
     // a call on a credential this conversation holds no access to is a refused call too — its line in THAT credential's
@@ -389,6 +393,7 @@ function create({ dataDir, engine, getMounts = () => null, fetchFn = (typeof fet
   async function approve(id, { always = false, by = 'user', digest = null } = {}) {
     const p = state.proposals[String(id || '')];
     if (!p) return { ok: false, code: 'not-found', error: 'no such API proposal' };
+    { const pz = pausedOf(p.cred); if (pz) return { ok: false, code: 'store-blocked', error: pz.error }; }   // B-f276: the card stays pending
     if (p.status !== 'pending') return { ok: false, code: 'not-pending', error: `this proposal is ${p.status} already` };
     if (!digest || digest !== (p.frozen && p.frozen.digest)) return { ok: false, code: 'api_frozen_mismatch', error: 'the card you approved is not the request on record — reopen API access… and decide the card again' };
     const req = F.thaw(p.frozen);

@@ -453,7 +453,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   // refusal with its sentence, never an error (r6 measured exit 1 on
   // account-changed / stopped: "error" for "retry in a moment"). The
   // test-channels-agent-cli census keeps this list equal to the route's.
-  const REFRESH_REFUSED = ['refresh-floor', 'refresh-queue-full', 'vendor-budget', 'backoff', 'account-changed', 'stopped'];
+  const REFRESH_REFUSED = ['refresh-floor', 'refresh-queue-full', 'vendor-budget', 'backoff', 'account-changed', 'stopped', 'store-blocked'];   // B-f276 1b: the channels paused — said by name, the agent learns what is paused
   const refreshConv = async (conv) => {
     const i = conv.indexOf('/');
     if (i <= 0) { console.error('<conv> is <adapter>/<conversation id>, as vibespace-channels list prints it'); process.exit(1); }

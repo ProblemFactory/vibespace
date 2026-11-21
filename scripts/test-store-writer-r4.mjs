@@ -140,6 +140,7 @@ parentPort.on('message', (m) => {
   const sl = (ms) => new Promise((r) => setTimeout(r, ms));
   const run = async (failing) => {
     const dir = path.join(T, failing ? 'failing' : 'queued'); fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'index.json'), JSON.stringify({ v: 1, conversations: {} }));   // B-f276 1b: an index that LANDED — one never written journals nothing (its acts write the index itself)
     if (failing) fs.writeFileSync(path.join(dir, 'failing'), '1');
     const w = SW.create({ log: { warn() {} }, workerPath: SLOW, durableMs: failing ? 3000 : 100 });   // failing: a bound longer than the writes ahead, so the act's own write fails first
     const said = [];

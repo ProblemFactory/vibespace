@@ -96,7 +96,7 @@ const OF = require('./owner-facts.js');   // lane wake-approve-card r6: a held d
 const path = require('path');
 const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
-const { createChannelStore } = require('../channel-store.js');
+const { createChannelStore, pauseDoorsOf } = require('../channel-store.js');
 const { walkSliced, WALK_SYNC_ROWS, WALK_SLICE_MS } = require('../channel-store.js');   // B-dfa4 cut 3: the one budgeted walk
 const { clientSwapStep } = require('../client-swap-step.js');   // B-166e part 2's rule (PURE) — B-e40d's storage mounts say a swap by it too
 const { createChannelRegistry, ChannelError } = require('../channels/index.js');
@@ -539,7 +539,29 @@ function create(deps = {}) {
 
   // lane channel-threads: ONE write hook — every log writer (a pass, the push lane, a backfill, a trim, the side
   // log) keeps the derived caches (the thread index, the message → conversation map) honest; never a call-site list
-  const store = createChannelStore({ dir: path.join(dataDir, 'channels'), now, log, onWrite: (a, c, w) => onStoreWrite(a, c, w), walk });
+  const store = createChannelStore({ dir: path.join(dataDir, 'channels'), now, log, onWrite: (a, c, w) => onStoreWrite(a, c, w), walk, heldRetry: deps.channelsHeldRetry || null });
+  // B-f276 (主开发 r460): A HELD INDEX PAUSES THE CHANNELS ENGINE — nothing runs half-blind over the empty list. While the
+  // store's index is held (its read failed), no tick, no poll, no push taken in, no send: every door refuses BY NAME (the
+  // store's own code: store-blocked, 503) before any state changes. HELD_DOORS (below the API) is the census of the doors.
+  // A2 (r487): the channels engine reads FIVE families — any one held pauses it (the groups engine asks for its own three)
+  const CHAN_FAMILIES = ['index.json', 'poll-stamps.json', 'adapters.json', 'outbox.json', 'aliases.json'];
+  const indexHeld = () => store.heldOf(CHAN_FAMILIES).length > 0;   // «the channels are paused» (the name kept from the index's first form)
+  const PAUSED_WORDS = 'the channels are paused: the list of conversations (index.json) could not be read — nothing is fetched or sent until it reads again and VibeSpace is restarted (it is loaded at the next start)';
+  const pausedWords = () => {
+    const first = store.heldOf(CHAN_FAMILIES)[0] || 'index.json';
+    if (store.familyKind && store.familyKind(first) === 'appeared') return `the channels are paused: ${first === 'index.json' ? 'the list of conversations (index.json)' : first} appeared since the start — it is kept as it is; nothing is fetched or sent until VibeSpace is restarted (it is loaded then)`;   // B-f276 1b (its reads r1 N1, r2 N5)
+    if (first === 'index.json') return store.familyState && store.familyState(first) === 'a-person' ? 'the channels are paused: the list of conversations (index.json) could not be read as itself (damaged) — nothing is fetched or sent until a person starts it empty (For you) or puts a good copy back and restarts VibeSpace' : PAUSED_WORDS;
+    const how = store.familyState ? store.familyState(first) : 'by-itself';
+    if (how === 'a-person') return `the channels are paused: ${first} could not be read as itself (damaged) — nothing is fetched or sent until a person starts it empty (For you) or puts a good copy back`;
+    if (how === 'next-start') return `the channels are paused: ${first} could not be read — nothing is fetched or sent until it is loaded at the next start of VibeSpace (restart once it reads again)`;
+    return `the channels are paused: ${first} could not be read — nothing is fetched or sent until it reads again (VibeSpace reads it again by itself)`;
+  };
+  /** the digest's `paused` (word 8): the held files, and how the first one lifts ('by-itself' | 'next-start' | 'a-person') */
+  const pausedFacts = () => { const files = store.heldOf(CHAN_FAMILIES); return { files, lifts: (store.familyState && files[0] && store.familyState(files[0])) || null }; };
+  const pausedError = () => { const e = new Error(pausedWords()); e.code = 'store-blocked'; e.status = 503; e.paused = true; return e; };
+  const pausedAnswer = () => ({ ok: false, code: 'store-blocked', paused: true, error: pausedWords() });
+  let pausedSaid = false, startOnRead = false, starts = 0;
+  const sayPaused = () => { if (pausedSaid) return; pausedSaid = true; log.warn(`[channels] ${pausedWords()} — the engine does not start${store.index.held && store.index.held() ? '; once the file reads again, restart VibeSpace to load it' : ''}`); };
   // lane decision-attention (D2): the first screen's JUDGED rows — the scan, the examples, the draft; a verdict is patched
   // in by one partial broadcast of its row. The body it reads = the conversation's newest records (the store's tail).
   const attention = require('./channels-attention.js').create({ dataDir, decision: decisionEngine, serverSetting, now, log, notify: (keys) => notify(keys),
@@ -550,35 +572,99 @@ function create(deps = {}) {
     // lane decision-attention-facts: the facts of ONE scan (built once per drain) + the row's read line / own newest message
     facts: () => attentionScanFacts(),
     rowState: (key) => { const en = store.index.live()[key]; return en ? { readAt: Number(en.readAt) || 0, selfAt: Number(en.selfAt) || 0, lastAt: Number(en.lastAt) || 0 } : null; } });
-  // A store file that could not be read at boot was SET ASIDE (r2 — never
+  // A store file whose bytes did not parse at boot was SET ASIDE (r2 — never
   // silently read as empty and overwritten): ONE "For you" item per file,
   // naming where its bytes are. The store already logged the named line.
+  // B-f276 (lane bl-windows, 主开发 r457): a store file whose READ FAILED is HELD — nothing set aside, nothing written over,
+  // every change to it refused — and read again by the store. ONE "For you" item per file names the act that lifts it: the
+  // six small families load by themselves when they read (nothing to do — the item says so and is resolved); the index and
+  // the poll stamps are loaded at the next start (the item says the file reads again now: restart VibeSpace).
+  const HELD_HEAD = i18nKey('Channels: {file} could not be read — it is held: nothing was set aside or written over');
+  const HELD_BY_ITSELF = i18nKey('Every change to it is refused and the channels are paused until it reads again. VibeSpace reads it again by itself and loads it when it reads — nothing to do.');
+  const HELD_STAMPS = i18nKey('Every change to it is refused and the channels are paused until it is loaded at the next start of VibeSpace: once it reads again, restart VibeSpace. Nothing is lost — each conversation is then fetched from where it was, and nothing is added twice.');
+  const HELD_GROUPS = i18nKey('Every change to it is refused and the agent groups are paused until it reads again. VibeSpace reads it again by itself and loads it when it reads — nothing to do.');   // the agent groups' files pause the agent groups, not the channels
+  // the index held = the channels PAUSED (主开发 r460): the truth of the moment, the pushed messages' clock, the act by name
+  const PAUSED_HEAD = i18nKey('Channels paused: {file} could not be read — nothing is fetched or sent until it reads again');
+  const PAUSED_DETAIL = i18nKey('Nothing was set aside or written over. A pushed message is delivered again only while its sender retries, so reading it again soon matters. VibeSpace reads it again; once it reads, restart VibeSpace to load it.');
+  const PAUSED_READS_DETAIL = i18nKey('It is loaded at the next start of VibeSpace; until then the channels stay paused — nothing is fetched or sent.');
+  const HELD_READS = i18nKey('Channels: {file} reads again — restart VibeSpace to load it');
+  const HELD_READS_DETAIL = i18nKey('It is loaded at the next start of VibeSpace; until then it stays held and every change to it is refused.');
+  const HELD_LOADED = i18nKey('Channels: {file} read again and loaded — nothing to do');
+  const HELD_LOADED_DETAIL = i18nKey('It read again and is loaded; changes to it are written again.');
+  // what the read again FOUND, said as it is (the read's M3): torn bytes / a file gone — the next start's act named
+  // B-f276 1b (r809): torn bytes are HELD (damaged — one door: a person starts it empty), a file that appeared since the start is kept
+  const DAMAGED_HEAD = i18nKey("Channels: {file} could not be read as itself (damaged) — every change to it is refused");
+  const DAMAGED_DETAIL = i18nKey("Nothing was set aside or written over. Put a good copy back while VibeSpace is stopped, or press Start it empty: its bytes are set aside under a dated name (nothing is deleted) and it starts empty.");
+  const APPEARED_HEAD = i18nKey("Channels: {file} appeared since the start — it is kept as it is and loaded at the next start");
+  const APPEARED_DETAIL = i18nKey("Every change to it is refused until then: restart VibeSpace to load it.");
+  const EMPTIED_HEAD = i18nKey("Channels: {file} started empty — its damaged bytes are kept as {where}");
+  const PAUSED_HEAD_START = i18nKey("Channels paused: {file} could not be read — nothing is fetched or sent until it reads again and VibeSpace restarts");
+  const PAUSED_HEAD_DAMAGED = i18nKey("Channels paused: {file} could not be read as itself — nothing is fetched or sent until it is started empty or a good copy is put back");
+  const HEADS_HELD = new Set([HELD_HEAD, PAUSED_HEAD, PAUSED_HEAD_START, PAUSED_HEAD_DAMAGED, DAMAGED_HEAD, APPEARED_HEAD]);
+  const heldItemOf = (file) => (x) => x && x.origin === 'channels' && x.i18n && x.i18n.text && HEADS_HELD.has(x.i18n.text.key) && x.i18n.text.params && x.i18n.text.params.file === file;
+  const fillHead = (key, file) => key.replace('{file}', file);
+  const whenTodos = (fn, label) => { if (!userTodos) return; if (typeof userTodos.whenRead === 'function') userTodos.whenRead(fn, label); else fn(); };
+  function fileHeldNotice(q) {
+    const paused = q.file === 'index.json';
+    const damaged = q.kind === 'damaged', appeared = q.kind === 'appeared';
+    // B-f276 1b: the head names what LIFTS it (A3's read, should 3) — a damaged file's one door is a person's (Start it empty)
+    const head = appeared ? APPEARED_HEAD : damaged ? (paused ? PAUSED_HEAD_DAMAGED : DAMAGED_HEAD) : paused ? PAUSED_HEAD_START : HELD_HEAD;
+    const tail = appeared ? APPEARED_DETAIL : damaged ? DAMAGED_DETAIL : paused ? PAUSED_DETAIL : q.lifts === 'next-start' ? HELD_STAMPS : q.groups ? HELD_GROUPS : HELD_BY_ITSELF;   // the store says which files are the groups' (it owns their names)
+    try {
+      userTodos.add(INBOX_KEY, {
+        origin: 'channels', text: fillHead(head, q.file),
+        detail: `${q.file} was ${q.why}.\n${tail}`,
+        urgency: 'high', by: 'agent', sessionName: 'Channels',
+        ...(damaged ? { action: { type: 'channel-store-damaged', file: q.file } } : {}),   // the one door (src/foryou-actions.js)
+        i18n: { text: { key: head, params: { file: q.file } }, detail: [{ key: tail }], source: INBOX_SOURCE },
+      });
+    } catch (e) { log.warn(`[channels] could not file the held-file notice for ${q.file}: ${(e && e.message) || e}`); }
+  }
+  store.onHeldRead?.(() => { try { notify([], { full: true }); } catch { /* the panel re-reads on its next draw */ } });   // the panel's line follows
+  store.onHeldRead?.((ev) => whenTodos(() => {
+    if (!userTodos || typeof userTodos.redrawItem !== 'function') return;
+    const pred = heldItemOf(ev.file);
+    const it = (userTodos.openItems ? userTodos.openItems() : []).find(pred);
+    try {
+      if (ev.state === 'reads-again') {
+        const rd = ev.file === 'index.json' ? PAUSED_READS_DETAIL : HELD_READS_DETAIL;
+        userTodos.redrawItem(pred, { text: fillHead(HELD_READS, ev.file), detail: `${ev.file} reads again.\n${rd}`, i18n: { text: { key: HELD_READS, params: { file: ev.file } }, detail: [{ key: rd }], source: INBOX_SOURCE } });
+      } else if (ev.state === 'appeared' && ev.q) {
+        fileHeldNotice(ev.q);   // a file that appeared since the start: its own item (kept, loaded at the next start)
+      } else if (ev.state === 'emptied' && it) {
+        const where = (ev.q && ev.q.to) || '';
+        userTodos.redrawItem(pred, { text: EMPTIED_HEAD.replace('{file}', ev.file).replace('{where}', where), detail: `${ev.file}: ${EMPTIED_HEAD.replace('{file}', ev.file).replace('{where}', where)}`, i18n: { text: { key: EMPTIED_HEAD, params: { file: ev.file, where } }, source: INBOX_SOURCE } });
+        userTodos.setStatus(it.id, 'done', 'agent');
+      } else if (it) {
+        userTodos.redrawItem(pred, { text: fillHead(HELD_LOADED, ev.file), detail: `${ev.file}: ${HELD_LOADED_DETAIL}`, i18n: { text: { key: HELD_LOADED, params: { file: ev.file } }, detail: [{ key: HELD_LOADED_DETAIL }], source: INBOX_SOURCE } });
+        userTodos.setStatus(it.id, 'done', 'agent');
+      }
+    } catch (e) { log.warn(`[channels] the held-file notice of ${ev.file} was not redrawn: ${(e && e.message) || e}`); }
+  }, "the channels' held-file notice"));
+  // B-f276 1b (r809): every entry is a HOLD — nothing is set aside at a start (torn bytes are held as damaged, with their one door)
   for (const q of store.quarantined || []) {
     if (!userTodos || typeof userTodos.add !== 'function') break;
-    try {
-      // r3: a BLOCKED file (the rename failed) was NOT set aside — its
-      // headline says so, never "set aside as <its own name>"
-      const head = q.blocked
-        ? { text: `Channels: ${q.file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved`, key: i18nKey('Channels: {file} could not be read and could NOT be set aside — writes to it are refused until it is fixed or moved'), params: { file: q.file } }
-        : { text: `Channels: ${q.file} could not be read and was set aside as ${q.to}`, key: i18nKey('Channels: {file} could not be read and was set aside as {where}'), params: { file: q.file, where: q.to } };
-      userTodos.add(INBOX_KEY, {
-        origin: 'channels', // B-328d
-        text: head.text,
-        detail: `${q.file} was ${q.why}.\n${q.to ? `Its bytes are kept as data/channels/${q.to} — nothing was deleted; the store started empty.` : 'It could NOT be renamed, so writes to it are refused until the file is fixed or moved.'}\n\nRestore it by fixing the JSON and moving it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.`,
-        urgency: 'high', by: 'agent', sessionName: 'Channels',
-        i18n: {
-          text: { key: head.key, params: head.params },
-          detail: [{ key: i18nKey('Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.') }],
-          source: INBOX_SOURCE,
-        },
-      });
-    } catch (e) { log.warn(`[channels] could not file the set-aside notice for ${q.file}: ${(e && e.message) || e}`); }
+    fileHeldNotice(q);
   }
   // THE KEY-FILE LAW (lane key-file-law-stores): a key is minted only while adapters.json and every account's own
   // callers.json hold no ciphertext — else `key-missing` (the account card's why), never a key that opens nothing
   // channel-store-off-loop (commit 1): adapters.json is the store writer's now and may lag memory — the check reads the
   // store's LIVE records first (a token sealed in memory a moment ago holds a ciphertext the file may not show yet)
-  const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: () => holdsCiphertext({ values: [store.adapters.live()], files: [path.join(dataDir, 'channels', 'adapters.json')], each: [{ dir: path.join(dataDir, 'channels'), file: 'callers.json' }] }) });
+  // B-f276 (主开发 r459): UNKNOWN IS NEVER «NO CIPHERTEXT» — the accounts' torn bytes set aside beside adapters.json may hold
+  // sealed sign-ins this value opens: they count too (listed once at the start, off the loop; null = not listed yet = holds).
+  // When ONLY a copy holds, ONE journal line names it and the two acts that end it (the account card's words are owed).
+  const asideSaid = new Set(), asideHolds = new Map();
+  const accountsHold = () => {
+    const chan = path.join(dataDir, 'channels');
+    if (holdsCiphertext({ values: [store.adapters.live()], files: [path.join(chan, 'adapters.json')], each: [{ dir: chan, file: 'callers.json' }] })) return true;
+    const aside = store.adapters.asideCopies ? store.adapters.asideCopies() : [];
+    if (!aside) return true;
+    const hit = aside.find((n) => { if (!asideHolds.has(n)) asideHolds.set(n, holdsCiphertext({ files: [path.join(chan, n)] })); return asideHolds.get(n); });   // each copy read ONCE (a refusal may be asked on every render)
+    if (!hit) return false;
+    if (!asideSaid.has(hit)) { asideSaid.add(hit); log.warn(`[channels] the accounts' store value is missing and ${hit} (adapters.json's set-aside copy) holds sealed sign-ins — no new value is made over them: put the value's file back, or remove ${hit} and restart VibeSpace to start over`); }
+    return true;
+  };
+  const box = secretBox(path.join(dataDir, KEY_FILE), { hasCiphertext: accountsHold });
   /** lane vault-e2e-password-fix-r2: the vault holds this store's key and is LOCKED — every account's sign-in (and every
    *  app credential the integrations store seals) is closed until a person unlocks: a STATE of its own, never "expired" */
   const vaultLocked = () => { try { const r = box.refusal(); return !!(r && r.code === VAULT_LOCKED_CODE); } catch { return false; } };
@@ -2615,6 +2701,7 @@ function create(deps = {}) {
    * ordering of its own to get wrong.
    */
   async function pass(adapterId, { force = false, origin = 'timer' } = {}) {
+    if (indexHeld()) { sayPaused(); return pausedAnswer(); }   // B-f276: the INNER pass too (a kick timer, a sign-in's landing, setOptions) — no vendor call while the list is held
     const recs = adapterRecords();
     const rec = recs.adapters.find((r) => r.id === adapterId);
     if (!rec || rec.enabled === false) return { ok: false, why: 'no-such-adapter' };
@@ -3202,7 +3289,7 @@ function create(deps = {}) {
   function digest(...args) { return attention.walk(() => digestWalk(...args)); }   // B-dfa4 U1: ONE walk — the judge's switch and threshold are read once inside it (attention.walk)
   function digestWalk({ keys = null, scope = 'first' } = {}) {
     const t = now();
-    if (!keys && scope === 'totals') return { ...totalsNow(t), scope: 'totals', at: t };
+    if (!keys && scope === 'totals') return { ...totalsNow(t), scope: 'totals', at: t, paused: indexHeld() ? pausedFacts() : null };   // B-f276 1b (word 8): the rail's badge scope says paused too — never «nothing needs you» over a list nobody read
     const recs = adapterRecords();
     const liveIx = store.index.live();
     const adapters = recs.adapters.map((rec) => adapterView(rec, t));
@@ -3245,7 +3332,8 @@ function create(deps = {}) {
       // r3: a store file set aside (or BLOCKED) at boot, on the FIRST SCREEN —
       // the For-you item alone left a real instance's vanished accounts
       // unexplained in the panel
-      quarantined: (store.quarantined || []).map(({ file, to, why, at, blocked }) => ({ file, to: to || null, why, at, blocked: !!blocked })),
+      paused: indexHeld() ? pausedFacts() : null,   // B-f276 A3 (r566 #8): the first screen is never an empty inbox as the truth
+      quarantined: (store.quarantined || []).map(({ file, to, why, kind, at, blocked, held, lifts, readsAt, readsAs, loadedAt, done }) => ({ file, to: to || null, why, kind: kind || null, at, blocked: !!blocked, held: !!held, lifts: lifts || null, readsAt: readsAt || null, readsAs: readsAs || null, loadedAt: loadedAt || null, done: !!done })),   // B-f276: a HELD file and what lifts it
       judging: attention.on(),   // lane decision-attention: the LLM plugin judges the first screen (the account ⋯ "never judge" row)
       at: t,
     };
@@ -4851,6 +4939,7 @@ function create(deps = {}) {
   /** Arm every lane that is wanted and stop every one that is not — called
    *  by the tick and by the mutations that change the answer. */
   async function syncPushLanes() {
+    if (indexHeld()) return;   // B-f276: no live lane is armed while the list is held (a sign-in's landing, an option, the tick)
     if (stopped) return;
     for (const rec of adapterRecords().adapters) {
       if (registry.capsOf(rec.kind).receive !== 'push') continue;
@@ -4908,6 +4997,7 @@ function create(deps = {}) {
    * conversation is the probe whose history call syncs the mailbox).
    */
   async function onPushEvent(rec, e, ev) {
+    if (indexHeld()) throw pausedError();   // B-f276: refused BY NAME before the seen-mark below — the sender delivers it again
     const p = pushRow(rec);
     const t = now();
     p.lastEventAt = t;                                   // any frame is positive evidence
@@ -6041,6 +6131,7 @@ function create(deps = {}) {
    *  the watchers it was kept for, and keeps nothing new — L3), the note through noteRecall (its mark still unset), the
    *  digest re-batched. */
   async function heldPass() {
+    if (store.wallHeld('heldPass')) return 0;   // B-f276 wall: kept deliveries are never dropped over a list nobody read
     if (heldBusy || stopped) return 0;
     if (!heldUnread.size) { clearOverSaid(); return 0; }
     heldBusy = true;
@@ -8040,6 +8131,7 @@ function create(deps = {}) {
   const swapMemoOf = (x) => (x && typeof x === 'object' && typeof x.to === 'string' && x.to
     ? { to: x.to, named: Array.isArray(x.named) ? x.named.filter((id) => typeof id === 'string') : [], itemId: typeof x.itemId === 'string' && x.itemId ? x.itemId : null, sig: typeof x.sig === 'string' ? x.sig : '', stuck: typeof x.stuck === 'string' ? x.stuck : '' } : null);   // a hand-edited / older memo read strictly
   async function clientSwapCheckNow() {
+    if (store.wallHeld('clientSwapCheck')) return;   // B-f276 wall: a held accounts file would close every open client-swap item as out of date
     if (stopped || !integrations || typeof integrations.resolveIntegration !== 'function' || vaultLocked()) return;
     const memos = (() => { const m = store.adapters.live().clientSwaps; return m && typeof m === 'object' && !Array.isArray(m) ? m : {}; })();
     const keys = new Map();   // `${row}|${key}` → { key, to, kind, label, need: [rec], blind }
@@ -8591,6 +8683,7 @@ function create(deps = {}) {
   /** THE ROAD CAME BACK — the owed messages are judged now, for the watchers their skip named (as a fresh batch: the same
    *  pre-passes, filters and doors); one past the reply-judging window is dropped. → how many were handed back. */
   async function owedPass() {
+    if (store.wallHeld('owedPass')) return 0;   // B-f276 wall: owed deliveries are never dropped over a list nobody read
     if (owedBusy || stopped) return 0;
     owedBusy = true;
     let n = 0;
@@ -9693,7 +9786,7 @@ function create(deps = {}) {
   }
 
   function tick() {
-    if (stopped) return;
+    if (stopped || indexHeld()) return;   // B-f276: paused while the index is held
     // The push lanes follow the resolver's answer on every tick: armed when
     // wanted, stopped when not (an option, a switch, a credential changed).
     syncPushLanes().catch((err) => console.warn('[channels] push lanes sync failed:', err && err.message));
@@ -9976,6 +10069,14 @@ function create(deps = {}) {
   }
   function start() {
     if (timer || stopped) return;
+    if (indexHeld()) {   // B-f276: no tick, no boot pass, no push lane while a family is held
+      sayPaused();
+      // A2 (r487): THE START ON READ — when every held family has read again (taken in place), this SAME start runs once; the index
+      // and the poll stamps never read again in a life, so a hold of theirs waits for the next start of VibeSpace
+      if (!startOnRead) { startOnRead = true; store.whenRead(CHAN_FAMILIES, () => { startOnRead = false; pausedSaid = false; start(); }); }
+      return;
+    }
+    starts++;   // B-f276 A3 (r566 #5): the start that ran (the leg: a held small family lifts ⇒ the engine starts, once)
     timer = setInterval(tick, 5000);
     if (timer.unref) timer.unref();
     // B-dfa4 cut 3: the three censuses and the heal's plan — ONE walk (bootSweep), in this turn for a small store, in slices for a big one
@@ -10002,6 +10103,8 @@ function create(deps = {}) {
     // before this code) is re-judged once at boot — the read path re-judges on the way out anyway; this persists it
     for (const rec of adapterRecords().adapters) rejudgeConvCaps(rec, 'boot').catch(() => {});
     clientSwapCheck().catch((err) => log.warn(`[channels] boot client-swap check failed: ${(err && err.message) || err}`));   // B-166e part 2 (1): a swap while the hub was down
+    // B-f276 A2: a family held at the open paused this start; the start on read (above) runs it whole once they read — its
+    // passes (the caps re-judge, the client-swap check) then see the accounts taken in
     // lane lark-p2p: a change-feed row an older hit reader wrote starts over NOW (never waits out that reader's back-off
     // or park) — written at once so the card says "searching for the first time", not the old reader's state
     try {
@@ -10116,7 +10219,255 @@ function create(deps = {}) {
   // the accounts whose adapter DECLARES a raw-API row (src/channels/index.js validateApi) — never a list of kinds
   const declaresApi = (kind) => { try { return registry.has(kind) && !!registry.get(kind).api; } catch { return false; } };
   function apiAccounts() { return adapterRecords().adapters.filter((r) => r && r.enabled !== false && declaresApi(r.kind)).map((r) => ({ id: r.id, kind: r.kind, label: r.label || r.id })); }
-  return {
+  // B-f276 (主开发 r460): THE CENSUS OF THE ENGINE'S DOORS while the index is held — EVERY key of the API below is a row of
+  // HELD_DOORS (scripts/test-channel-store.mjs ⑮ is red on a key without one): `paused` does nothing and answers the paused
+  // refusal (timer / boot / pass work — no vendor call, no state change), `refused` refuses BY NAME before any state change
+  // (async ⇒ a rejected promise, sync ⇒ a throw: the store's code store-blocked, the routes' 503), `read` answers from the empty
+  // held list, `none` never touches the index. Row = [class, 'async' | 'sync' | 'const', why].
+  const HELD_DOORS = {
+    startedCount: ['allow', 'sync', 'how many times the start ran — a counter, reads no family'],
+    pausedState: ['allow', 'sync', 'the pause itself: the held families by name — never a verdict on what they hold'],
+    startDamagedEmpty: ['allow', 'async', 'the ONE door of a damaged family (a person’s route): answers what it did — none when the file is not damaged; it changes only the file that could not be read'],
+    bootSweep: ['paused', 'sync', 'the boot census walk of the index rows (B-dfa4 cut 3): boot work — while paused it does nothing (the start runs it after the pause)'],
+    bootSweepStats: ['allow', 'sync', 'the boot sweep counters (rows, slices, the longest slice, restarts) — reads no family'],
+    digestReady: ['allow', 'async', 'whether the first digest’s warm-up has landed (a promise of true) — reads no family; the digest itself says paused'],
+    digestWarm: ['paused', 'async', 'the first digest’s sliced warm-up over the index rows (B-dfa4 cut 4): boot work — while paused it does nothing'],
+    digestWarmStats: ['allow', 'sync', 'the warm-up counters (slices, the longest slice, restarts) — reads no family'],
+    rejudgeConvCaps: ['refused', 'async', 'refused while paused (no allow row): re-judges the conversations of an account — writes rows of the held list'],
+    rejudgeStats: ['allow', 'sync', 'the sliced re-judge counters (slices, the longest slice) — reads no family'],
+    store: ['allow', 'const', 'a constant — answers the same held or not'],
+    registry: ['allow', 'const', 'a constant — answers the same held or not'],
+    digest: ['allow', 'sync', 'the first screen: while a family is held it carries paused + the held files and the held line — never an empty inbox as the truth'],
+    notify: ['refused', 'sync', 'refused while paused (no allow row): broadcasts digest of an index read channels-engine.js:4368; held ⇒ an empty-list broadcast, nothing written'],
+    pass: ['paused', 'async', 'the account pass: vendor reads + index writes channels-engine.js:2386; todays own refusals {ok:false,why}; the INNER pass is also reached by kick timers, setOptions, o…'],
+    refreshConvCaps: ['refused', 'async', 'vendor e.adapter.convCaps BEFORE index.update, no known gate channels-engine.js:7310: a vendor call while held today'],
+    markRead: ['refused', 'async', 'index.update readAt/unread durable channels-engine.js:7427; known false while held ⇒ false today'],
+    messages: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (readTail through withView channels-engine.js:7457; known false ⇒ null ⇒ rout'],
+    noteHandedOver: ['paused', 'async', 'stash-handover.js:506 hook answer ignored, .catch stamps handedOverAt by an index write channels-engine.js:3811, 3820; no-op answer []'],
+    retryConvCaps: ['refused', 'async', 'owner Retry → refreshConvCaps vendor ask channels-engine.js:7375, known gate first'],
+    conversationView: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (an index read channels-engine.js:3873; held ⇒ null ⇒ route 404)'],
+    setRefresh: ['refused', 'async', 'owner override written by an index write channels-engine.js:4727, 4731; known answers not-found while held today'],
+    refresh: ['refused', 'async', 'owner/window Refresh → requestRefresh → the drains vendor pass channels-engine.js:4746; known = not-found while held today'],
+    agentRefresh: ['refused', 'async', 'agent refresh → requestRefresh vendor fetch channels-engine.js:4924; convFor peek = not-found while held'],
+    watch: ['refused', 'async', 'window heartbeat: marks watched/due + fires refresh and refreshConvCaps vendor asks channels-engine.js:4938; known not-found today'],
+    loadOlder: ['refused', 'async', 'vendor e.adapter.older + the store’s prependRecords channels-engine.js:5034; known index.has, :4715 answers not-found while held today'],
+    attachment: ['refused', 'async', 'cache miss falls back to vendor e.adapter.fetchAttachment + the store’s attachmentPut channels-engine.js:5241'],
+    search: ['refused', 'async', 'refused while paused (no allow row): local the store’s search, no vendor channels-engine.js:7025; NOTE store readdirs every log on disk channel-store.js:1753: held ⇒ hits from the logs with null title'],
+    searchVendor: ['refused', 'async', 'vendorSearch has NO index gate channels-engine.js:7236: a real vendor search runs while held today'],
+    aroundOwner: ['refused', 'async', 'aroundFor calls e.adapter.around, only a rec check channels-engine.js:7254, 7267: a vendor call while held today'],
+    readAroundFor: ['refused', 'async', 'convFor peek then a vendor around read channels-access.js:756, 774'],
+    forgetSearchMemo: ['refused', 'sync', 'refused while paused (no allow row): drops the search memo memory + the store’s searchMemoDrop, no index channels-engine.js:7120'],
+    conversationName: ['allow', 'sync', 'a card’s name: null while the index is held (the card says the id) — a name, never a verdict'],
+    accountsBrief: ['refused', 'sync', 'refused while paused (no allow row): adapters.json records only channels-engine.js:3743'],
+    healSelfAt: ['paused', 'async', 'boot one-shot walking live + an index write per row channels-engine.js:9328, 9338; no-op answer {planned:0,found:0}'],
+    setScopeAssignment: ['refused', 'async', '→ setGrain or removePattern channels-access.js:2705-2722'],
+    estimateScope: ['refused', 'sync', 'refused while paused (no allow row): rowsOf + local readTail, no vendor channels-access.js:2761'],
+    effectiveFor: ['refused', 'sync', 'refused while paused (no allow row): the API lambda peeks the index channels-engine.js:9567 → effectiveFor null = null channels-access.js:322-323'],
+    migrateAggregated: ['refused', 'sync', 'migration: already throws on an index read channels-access.js:2811-2812; migrations.js:546 needs a THROW to fail + retry — a paused object would break it'],
+    setGrain: ['refused', 'async', 'CG.setGrainRows lands channels-access.js:2408 BEFORE the refused index.update channels-access.js:2412 ⇒ half-applied today; owner/agent routes'],
+    setAccess: ['refused', 'async', 'plain function returning setGrains Promise channels-access.js:2657'],
+    setWatchers: ['refused', 'async', 'plain function returning setGrains Promise channels-access.js:2660'],
+    removePattern: ['refused', 'async', 'CG.removeRule channels-access.js:2668 then index.update channels-access.js:2670'],
+    accessFor: ['refused', 'sync', 'refused while paused (no allow row): accountGrainOf, patternsOf, rowsOf channels-access.js:2730-2752'],
+    migrateGrants: ['refused', 'sync', 'migration: already throws on blocked channels-access.js:2865-2866; a paused object would be RECORDED as success migrations.js:571-575 resolves rep.write undefined'],
+    compose: ['refused', 'async', 'vendor composeCaps channels-outbound.js:980 + outbox create :1002 + direct sendNow :1020; def channels-outbound.js:966'],
+    searchFor: ['refused', 'async', 'walks an index read channels-access.js:657; with full:true asks the vendor vendorSearch channels-access.js:732; held ⇒ the agent reads «nothing»'],
+    setAccountPolicy: ['refused', 'async', 'refused while paused (no allow row): adapters.json policy + audit + notify channels-auth.js:1474-1484; own refusals are {ok:false,code,error}'],
+    effectiveForAccount: ['refused', 'sync', 'refused while paused (no allow row): accountGrainOf reads an index read accountAssignments channels-access.js:219, 624'],
+    dueListOf: ['refused', 'sync', 'refused while paused (no allow row): dueList over the due index / an index read channels-engine.js:9571, 1223; null on no account'],
+    dueIndexStats: ['refused', 'sync', 'refused while paused (no allow row): a copy of the due index counters channels-engine.js:9572'],
+    walkCostStats: ['refused', 'sync', 'refused while paused (no allow row): walk counters + kept-row count channels-engine.js:9573'],
+    recheckDueOf: ['refused', 'sync', 'refused while paused (no allow row): recheckDueFor walks an index read channels-engine.js:9574, 2111'],
+    revisionsPassOf: ['paused', 'async', 'the leg of revisionsPass: vendor e.adapter.revisionOf + an index write channels-engine.js:9575, 6338, 6396; null on no account'],
+    cadenceOf: ['refused', 'sync', 'refused while paused (no allow row): an index read then cadenceOf channels-engine.js:9576; held ⇒ null'],
+    budgetOf: ['refused', 'sync', 'refused while paused (no allow row): the accounts minute meter from live/paceCarry channels-engine.js:9577, budgetView 1167'],
+    flushScope: ['paused', 'async', 'a scope digests delivery wake/stash + index ledger write = the window timers work channels-engine.js:9579, 8602; timer 8577; own refusals {ok:false,why}'],
+    adapterRecords: ['allow', 'sync', 'the accounts for a name / glyph lookup: no account while adapters.json is held (the lookup says unknown) — never a verdict'],
+    laneOrScan: ['refused', 'sync', 'refused while paused (no allow row): the resolvers lane over the record + entry passed channels-engine.js:1201'],
+    start: ['allow', 'sync', 'its own pause inside: while a family is held it arms nothing and waits through the store’s whenRead, then the same start runs once'],
+    stop: ['allow', 'sync', 'stops the engine’s timers — reads no family'],
+    vaultRows: ['refused', 'sync', 'refused while paused (no allow row): adapters.json sealed tokens/secrets, masked channels-engine.js:9532'],
+    vaultReveal: ['refused', 'sync', 'refused while paused (no allow row): one sealed value through the box channels-engine.js:9544'],
+    secrets: ['allow', 'const', 'a constant — answers the same held or not'],
+    pushInbound: ['refused', 'async', 'HTTP inbound door: may arm the lane, then e.adapter.live.deliver → onPushEvent stores + indexes channels-engine.js:9601, 4504; webhook.js:132 answers 200 only on persi…'],
+    firstReadParity: ['refused', 'sync', 'refused while paused (no allow row): the gates oracle over an index read channels-engine.js:9615'],
+    clientSwapCheck: ['refused', 'async', 'refused while paused (no allow row): adapters.json memos + tokens + a For-you item, no index channels-engine.js:7619'],
+    clientSwapSettled: ['refused', 'async', 'refused while paused (no allow row): returns the swap chain promise channels-engine.js:9621'],
+    schedulerExact: ['refused', 'sync', 'refused while paused (no allow row): schedulerScan walks an index read channels-engine.js:9622, 4213'],
+    censusStats: ['refused', 'sync', 'refused while paused (no allow row): clock-walk counters channels-engine.js:9623'],
+    censusIndexStats: ['refused', 'sync', 'refused while paused (no allow row): census-index work counters channels-engine.js:9625'],
+    CENSUS_INDEX_PROOF: ['allow', 'const', 'a constant — answers the same held or not'],
+    schedulerIndexed: ['refused', 'sync', 'refused while paused (no allow row): clockIndexed builds from an index read channels-engine.js:9626, 4311'],
+    rows: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (rowsWalk pages an index read channels-engine.js:3269; held ⇒ an empty page)'],
+    digestStats: ['refused', 'sync', 'refused while paused (no allow row): view counters channels-engine.js:9628'],
+    liveMemSizes: ['refused', 'sync', 'refused while paused (no allow row): counts the live entrys memories channels-engine.js:9630'],
+    LIVE_MEM_KEEP_MS: ['allow', 'const', 'a constant — answers the same held or not'],
+    connect: ['refused', 'async', 'refused while paused (no allow row): writes the account record adapters.json only — its pass and its push lanes are paused INSIDE the pass / push-lane guards; a one-time sign-in code is never thrown a'],
+    reauthorize: ['refused', 'async', 'refused while paused (no allow row): writes the account record adapters.json only — its pass and its push lanes are paused INSIDE the pass / push-lane guards; a one-time sign-in code is never thrown a'],
+    finishAuth: ['refused', 'async', 'refused while paused (no allow row): writes the account record adapters.json only — its pass and its push lanes are paused INSIDE the pass / push-lane guards; a one-time sign-in code is never thrown a'],
+    cancelAuth: ['refused', 'async', 'refused while paused (no allow row): flows.cancel + pendingFlows delete + notify channels-auth.js:1054'],
+    narrowAuth: ['refused', 'sync', 'refused while paused (no allow row): flows.narrow: a new consent URL for a running sign-in channels-auth.js:1035'],
+    oauthNarrow: ['refused', 'sync', 'refused while paused (no allow row): the same for a pending sign-in channels-auth.js:1042'],
+    disconnect: ['refused', 'async', 'clears token + adapters.json, then rejudgeConvCaps an index write channels-auth.js:1138; while held that write is refused and swallowed ⇒ half done'],
+    setEnabled: ['refused', 'async', 'refused while paused (no allow row): writes the account record adapters.json only — its pass and its push lanes are paused INSIDE the pass / push-lane guards; a one-time sign-in code is never thrown a'],
+    setOptions: ['refused', 'async', 'refused while paused (no allow row): writes the account record adapters.json only — its pass and its push lanes are paused INSIDE the pass / push-lane guards; a one-time sign-in code is never thrown a'],
+    adapterView: ['refused', 'sync', 'refused while paused (no allow row): the cards census via schedulerView → clockIndexed over an index read channels-engine.js:4073, 4311'],
+    setAlias: ['refused', 'async', 'refused while paused (no allow row): aliases.json only an aliases write + thread-index cache drop channels-engine.js:3564'],
+    aliasesOf: ['refused', 'sync', 'refused while paused (no allow row): aliases.json channels-engine.js:3585'],
+    clientFor: ['refused', 'sync', 'refused while paused (no allow row): resolves the client from the record + integration store; side effect only scheduleInline, an adapters.json copy channels-auth.js:50, 91-92'],
+    startOAuth: ['refused', 'async', 'refused while paused (no allow row): in-memory pending sign-in + adapter auth.begin; its landing waits for Connect, no pass onPendingDone channels-auth.js:632-650; def :780'],
+    oauthStatus: ['refused', 'sync', 'refused while paused (no allow row): reads pendingFlows / flows.status channels-auth.js:800'],
+    oauthCancel: ['refused', 'sync', 'refused while paused (no allow row): flows.cancel of a pending sign-in channels-auth.js:816'],
+    oauthCallback: ['refused', 'async', 'refused while paused (no allow row): paste-back for a NEW-account pending only pendingOrThrow refuses targetId, channels-auth.js:794; onPendingDone writes memory + a For-you ask :864'],
+    oauthLanding: ['refused', 'async', 'refused while paused (no allow row): writes the account record adapters.json only — its pass and its push lanes are paused INSIDE the pass / push-lane guards; a one-time sign-in code is never thrown a'],
+    consentLandingOf: ['refused', 'sync', 'refused while paused (no allow row): the consent rows landing HTML channels-auth.js:826'],
+    duplicate: ['refused', 'async', 'refused while paused (no allow row): adds a new record to adapters.json only, no rows, no grants channels-auth.js:1291'],
+    referencesOf: ['refused', 'sync', 'refused while paused (no allow row): an index read channels-auth.js:1153 + accountGrainOf index table answer the empty held list; grants + outbox still read'],
+    remove: ['refused', 'async', 'removeRecord runs CG.removeAccount channels-auth.js:1208 before an index write :1218: held ⇒ grants gone, rows kept; the empty referencesOf passes the reference check'],
+    setLabel: ['refused', 'async', 'refused while paused (no allow row): adapters.json label + clientSwapCheck channels-auth.js:1301'],
+    setCustomSecret: ['refused', 'async', 'refused while paused (no allow row): adapters.json credential only channels-auth.js:1317'],
+    adapterConfig: ['refused', 'sync', 'refused while paused (no allow row): a view of the record channels-auth.js:1329'],
+    mountClientsFor: ['refused', 'sync', 'refused while paused (no allow row): storage mounts list, nothing stored channels-auth.js:364'],
+    inlineLegacyClient: ['refused', 'async', 'refused while paused (no allow row): returns a Promise: adapters.json own→custom copy + dropLive channels-auth.js:1369'],
+    inlineLegacyClients: ['refused', 'sync', 'refused while paused (no allow row): migration migrations.js:509: adapters.json through inlineLegacyClient; returns {…,write:Promise} channels-auth.js:1397'],
+    DUPLICATE_FIELDS: ['allow', 'const', 'a constant — answers the same held or not'],
+    DUPLICATE_NEVER: ['allow', 'const', 'a constant — answers the same held or not'],
+    blankRecord: ['refused', 'sync', 'refused while paused (no allow row): newRecord of a connectable type, never stored channels-engine.js:9641'],
+    offeredCredentials: ['refused', 'sync', 'refused while paused (no allow row): the integration stores offered list channels-auth.js:138'],
+    defaultCredentialKey: ['refused', 'sync', 'refused while paused (no allow row): resolveIntegration pick channels-auth.js:145'],
+    stampCredentialKeys: ['refused', 'sync', 'refused while paused (no allow row): migration migrations.js:481 stamps credentialKey, saveAdapters channels-auth.js:1441'],
+    stampIdentities: ['refused', 'sync', 'refused while paused (no allow row): boot stamp of rec.identity from the token, saveAdapters channels-auth.js:1424; called at channels-engine.js create'],
+    setPush: ['refused', 'async', 'refused while paused (no allow row): writes the account record adapters.json only — its pass and its push lanes are paused INSIDE the pass / push-lane guards; a one-time sign-in code is never thrown a'],
+    syncPushLanes: ['paused', 'async', 'tick / mutations: refreshAuth + armPush starts the vendor live lane channels-engine.js:4447, 4420'],
+    pushView: ['refused', 'sync', 'refused while paused (no allow row): the records push half channels-engine.js:4687'],
+    kick: ['paused', 'sync', 'marks the newest row an index read due + a timer pass channels-engine.js:9645, 4612; answer undefined'],
+    oauth: ['allow', 'const', 'a constant — answers the same held or not'],
+    setAssignment: ['refused', 'async', '→ setGrain channels-access.js:2682-2700'],
+    setFilter: ['refused', 'async', 'index.update channels-access.js:2913, 2921'],
+    estimateFilter: ['refused', 'sync', 'refused while paused (no allow row): known + local readTail channels-access.js:2981'],
+    settleWakes: ['refused', 'async', 'refused while paused (no allow row): awaits the wakes in flight channels-engine.js:7941'],
+    coalesceSeconds: ['refused', 'sync', 'refused while paused (no allow row): a setting read channels-engine.js:7950'],
+    previewRule: ['refused', 'async', 'refused while paused (no allow row): index peek/rowsOf + local the store’s search, no vendor channels-access.js:2944'],
+    apiGrants: ['refused', 'sync', 'refused while paused (no allow row): the credential-level rows of the raw-API grants'],
+    apiExceptOf: ['refused', 'sync', 'refused while paused (no allow row): one CG rows except list channels-engine.js:9497'],
+    setApiGrants: ['refused', 'async', 'refused while paused (no allow row): the raw-API grants, their own store — reads no conversation'],
+    apiTierFor: ['refused', 'sync', 'refused while paused (no allow row): ACL.effectiveApi over apiGrants channels-engine.js:9510'],
+    apiCredential: ['refused', 'sync', 'refused while paused (no allow row): the raw API src/server/channel-api.js reads no conversation — see the line: its vendor call is the agent’s own act under its grant'],
+    apiAccounts: ['refused', 'sync', 'refused while paused (no allow row): adapters.json records declaring a raw-API row channels-engine.js:9554'],
+    composeEach: ['refused', 'async', 'convFor + vendor adapter.prepareSend channels-outbound.js:958, then propose per recipient; def :951'],
+    propose: ['refused', 'async', 'convFor index peek held ⇒ not-found today, vendor prepareSend + outbox create + sendNow channels-outbound.js:592'],
+    approve: ['refused', 'async', 'engine wraps it in onProposal; convFor index channels-outbound.js:1149, vendor refreshConvCaps/composeCaps, transition + sendNow :1109'],
+    reject: ['refused', 'async', 'transition to rejected channels-outbound.js:1255 + receipt + pointerSync index write :1260'],
+    outboxView: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (outbox snapshot + proposalViews an index read for convKind/filesBlocked chan'],
+    expireSweep: ['paused', 'async', 'ticks minute sweep: transition to expired + receipt + pointerSync channels-outbound.js:2313'],
+    pointerSync: ['paused', 'async', 'internal: an index read channels-outbound.js:2340 — held peek null ⇒ returns; else userTodos.add + index update :2367, 2379'],
+    receipt: ['paused', 'async', 'internal follow-on reject :1259, expireSweep :2321, no src caller of .receipt : outbox write channels-outbound.js:2212 + receiptNow index peek/update :2237, 2304'],
+    filesSweep: ['paused', 'async', 'ticks minute sweep: OF.sweep deletes files + an outbox write attachmentsGoneAt channels-outbound.js:586-588; no index'],
+    outboxAttachment: ['refused', 'async', 'refused while paused (no allow row): outbox snapshot + OF.verify of the stored file, no index channels-outbound.js:574'],
+    withdrawProposal: ['refused', 'async', 'not declared async, always a Promise; agent door → withdrawNow outbox write + pointerSync channels-outbound.js:1310, 1364'],
+    resendRest: ['refused', 'async', 'the onProposal promise → resendRestNow → propose = a vendor send channels-outbound.js:1343'],
+    replaceProposal: ['refused', 'async', 'agent door: make proposes, outbox replaces-stamp + withdrawNow channels-outbound.js:1377, 1391-1392'],
+    reconcileReceiptFates: ['paused', 'async', 'boot only start: deliver.stashPeek + an outbox write channels-outbound.js:1441, 1456; outbox only'],
+    reconcile: ['refused', 'async', 'engine wraps it in onProposal; the owners Check outcome asks the vendor for a lost sends fate + outbox update channels-outbound.js:1918, 1930'],
+    sweepSending: ['paused', 'async', 'boot: moves sending to unknown + pointerSync, re-arms the held-send timers that later SEND channels-outbound.js:2080, 2083'],
+    sweepReplaces: ['paused', 'async', 'boot: withdrawNow of a half-finished replace = outbox write + pointerSync channels-outbound.js:2109'],
+    releaseHeld: ['paused', 'async', 'returns a Promise; the held-send timers work → sendNow = a vendor send channels-outbound.js:1632, 1646; timer :1626'],
+    setSenderHonesty: ['refused', 'async', 'refused while paused (no allow row): adapters.json + notifyOutbox broadcast, no outbox write channels-auth.js:1487'],
+    honestyLineFor: ['refused', 'sync', 'refused while paused (no allow row): rec.senderHonestyLine + serverSetting, no index channels-outbound.js:87'],
+    deprecatedReceiptWakes: ['refused', 'sync', 'refused while paused (no allow row): boot census over index tables + live via eachRowInEffect channels-engine.js:9420; held ⇒ []'],
+    collectReceipt: ['refused', 'async', 'agent CLI route agent-routes.js:2530: writes the outbox receipt road + disarmCollect channels-outbound.js:2193, 2201'],
+    setPolicy: ['refused', 'async', 'writes the index an index write channels-access.js:788; owner route'],
+    policyFor: ['refused', 'sync', 'refused while paused (no allow row): pure over the rec/en passed + registry caps channels-access.js:59-74'],
+    setReach: ['refused', 'async', 'writes a grants row CG.setLevel channels-access.js:807, 815; owner route'],
+    reachView: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (grantsOfConversation over the passed en + the patternAssignments table chann'],
+    reachFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (over the passed en; derivesFromRule reads the index table patternAssignments'],
+    request: ['refused', 'async', 'agent door: files a For-you item userTodos.add channels-access.js:849 then index.update :869'],
+    decideRequest: ['refused', 'async', 'owner decide route routes/channels.js:1382: index.update + CG.setLevel channels-access.js:902, 915'],
+    expireWatchRequests: ['paused', 'async', 'minute sweep / boot: index.update channels-access.js:1696; no-op answer [] callers read .length'],
+    withdrawWatchRequest: ['refused', 'async', 'agent route agent-routes.js:2478: index.update channels-access.js:1678'],
+    reconcileAsks: ['paused', 'async', 'boot reconcile: index.update, userTodos, re-filing channels-access.js:1709-1736; no-op answer {expired:[],settled,resurfaced,refiled,presses}'],
+    wakeHeldAt: ['refused', 'sync', 'refused while paused (no allow row): tables + rows channels-access.js:2230; held ⇒ NOT_HELD; the routes wakeRefused guard routes/channels.js:496 — the write after it is refused'],
+    grainReadAt: ['refused', 'sync', 'refused while paused (no allow row): index peek or tables + CG channels-access.js:261'],
+    resurfacePointers: ['paused', 'sync', 'boot reconcileAsks channels-access.js:1733 / migration migrations.js:910: walks live, reopens For-you items userTodos.setStatus :883; no-op answer a count'],
+    openAccessPointers: ['refused', 'sync', 'migration: [] is taken as «done» and recorded {open:0} migrations.js:891-892; only a THROW fails and retries it channels-access.js:1784'],
+    agentWatch: ['refused', 'async', 'agent door: setGrain channels-access.js:1025 or fileWatchRequest = For-you + index writes :1023, 1153, 1185'],
+    agentUnwatch: ['refused', 'async', 'agent door: setGrain drop channels-access.js:1097'],
+    agentWatchesFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (index live + accountAssignments/patternAssignments tables channels-access.js'],
+    setAgentDirectory: ['refused', 'async', 'refused while paused (no allow row): adapters.json only an accounts write channels-access.js:948'],
+    directoryLists: ['refused', 'sync', 'refused while paused (no allow row): pure over rec/en via ACL.directoryOf channels-access.js:936'],
+    attention: ['allow', 'const', 'a constant — answers the same held or not'],
+    setJudge: ['refused', 'async', 'refused while paused (no allow row): adapters.json only an accounts write channels-engine.js:6965'],
+    labelJudged: ['refused', 'sync', 'writes an attention example attention.label save, channels-attention.js:217 after reading index.live channels-engine.js:7016; held ⇒ view null ⇒ not-found today'],
+    owedPass: ['paused', 'async', 'owedTimers look → onFresh channels-engine.js:8186; timer 8139; no-op answer a count'],
+    judgedRoadFor: ['refused', 'sync', 'refused while paused (no allow row): decision-road state of a filter, no index channels-engine.js:8211'],
+    heldPass: ['paused', 'async', 'heldTimers look → onFresh / noteRecall channels-engine.js:5636; timer 5631; no-op answer a count'],
+    membershipChanged: ['paused', 'async', 'the rosterChanged hook channels-wiring.js:235 → heldDigestPass + heldPass channels-engine.js:9669; returns a Promise'],
+    onFresh: ['paused', 'async', 'the hit funnel: match + wake + index ledger writes channels-engine.js:8228, 8244; pass / push work'],
+    carryParked: ['paused', 'sync', 'agent-routes.js:2177 turn hook answer ignored: reads live, starts billedWake stashes channels-engine.js:8542; no-op answer 0'],
+    listFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (walks an index read channels-access.js:1822; held ⇒ an empty list)'],
+    readFor: ['refused', 'sync', 'agent route agent-routes.js:2245; writes the index on its road stampAgentRead channels-access.js:1942 → index.update :1975; held ⇒ a false «not found»'],
+    statusFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (outbox proposals + stillSees / convFor peeks channels-access.js:2022; held ⇒'],
+    proposalsListFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (ownProposals + agentProposalView, read-only channels-access.js:2053)'],
+    proposeRecall: ['refused', 'async', 'convFor peek; outbox create channels-outbound.js:906 + pointerSync :921; def :883'],
+    reachCountFor: ['refused', 'sync', 'refused while paused (no allow row): walks live channels-access.js:1899; held ⇒ null'],
+    mayUseFor: ['refused', 'sync', 'refused while paused (no allow row): reads the index rows an index read channels-access.js:3025 + CG rows; held ⇒ no rows'],
+    signinExpiredFor: ['refused', 'sync', 'refused while paused (no allow row): rowsOf of the dead accounts channels-access.js:1913; held ⇒ []'],
+    speakSignin: ['refused', 'async', 'refused while paused (no allow row): adapters.json signinDead + a For-you item channels-engine.js:7789'],
+    retractSignin: ['refused', 'async', 'refused while paused (no allow row): adapters.json + closes the For-you item channels-engine.js:7889'],
+    landSignin: ['refused', 'async', 'refused while paused (no allow row): adapters.json signinVerifying channels-engine.js:7858'],
+    retractFailure: ['refused', 'async', 'refused while paused (no allow row): adapters.json failureItem + closes the item channels-engine.js:7900'],
+    connectOffer: ['refused', 'sync', 'refused while paused (no allow row): registry + adapterRecords only; own refusal {ok:false,code,error} channels-auth.js:216'],
+    connectOffers: ['refused', 'sync', 'refused while paused (no allow row): registry + adapterRecords channels-auth.js:227'],
+    connectTaught: ['refused', 'sync', 'refused while paused (no allow row): registry + adapterRecords channels-auth.js:230'],
+    flushPending: ['paused', 'async', 'a conversation windows delivery wake/stash + index ledger = the wake timers work channels-engine.js:9678, 8733; timer 8478; own refusals {ok:false,why}'],
+    orphanWatchers: ['refused', 'sync', 'refused while paused (no allow row): boot census over index tables + live channels-engine.js:9350; held ⇒ []'],
+    releaseStaleReservations: ['paused', 'async', 'boot GC: an index write dropping dead boots reservations channels-engine.js:9381, 9397; returns a Promise of a count'],
+    capZeroDigests: ['refused', 'sync', 'refused while paused (no allow row): boot census via eachRowInEffect channels-engine.js:9411; held ⇒ []'],
+    pendingWindows: ['refused', 'sync', 'refused while paused (no allow row): in-memory wake timers channels-engine.js:9684'],
+    REQUESTS_PER_MINUTE: ['allow', 'const', 'a constant — answers the same held or not'],
+    RECONCILE_SECONDS: ['allow', 'const', 'a constant — answers the same held or not'],
+    PAGE: ['allow', 'const', 'a constant — answers the same held or not'],
+    MAX_PAGES: ['allow', 'const', 'a constant — answers the same held or not'],
+    KICK_MIN_INTERVAL_MS: ['allow', 'const', 'a constant — answers the same held or not'],
+    PUSH_NOTIFY_DEBOUNCE_MS: ['allow', 'const', 'a constant — answers the same held or not'],
+    PENDING_CAP: ['allow', 'const', 'a constant — answers the same held or not'],
+    ESTIMATE_CAP: ['allow', 'const', 'a constant — answers the same held or not'],
+    DEFAULT_BUDGET_PER_MIN: ['allow', 'const', 'a constant — answers the same held or not'],
+    WATCH_TTL_MS: ['allow', 'const', 'a constant — answers the same held or not'],
+    DISCOVERY_MAX_PAGES: ['allow', 'const', 'a constant — answers the same held or not'],
+    REFRESH_QUEUE_CAP: ['allow', 'const', 'a constant — answers the same held or not'],
+    REFRESH_OWNER_RESERVE: ['allow', 'const', 'a constant — answers the same held or not'],
+    REFRESH_WAIT_MS: ['allow', 'const', 'a constant — answers the same held or not'],
+    refreshQueueOf: ['refused', 'sync', 'refused while paused (no allow row): the drain census in memory channels-engine.js:4909'],
+    idle: ['allow', 'async', 'waits for the engine to settle — reads no family'],
+    tick: ['paused', 'sync', 'the 5 s scheduler step: syncPushLanes, sweeps, passes channels-engine.js:9287; interval 9427; the worktree already returns while held'],
+    messageFacts: ['refused', 'async', 'vendor e.adapter.factsOf channels-engine.js:5318 + fx side lines the store’s appendSide :5339'],
+    threadRead: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (local thread view from thIx + index.live channels-engine.js:6037; convOr404 '],
+    threadRefresh: ['refused', 'async', 'vendor e.adapter.threadHistory + appendRecords + index.update channels-engine.js:6107, 6137'],
+    threadOlder: ['refused', 'async', 'past the local page it calls threadRefresh {older:true} channels-engine.js:6227'],
+    reactionsRead: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (local fold of the side log, reactionsFor channels-engine.js:6484; convOr404 '],
+    reactionsRefresh: ['refused', 'async', 'vendor e.adapter.reactions + appendSides channels-engine.js:6544'],
+    react: ['refused', 'async', 'vendor e.adapter.react + self delta side line channels-engine.js:6605'],
+    unreact: ['refused', 'async', 'vendor e.adapter.reactions / unreact channels-engine.js:6642, 6653'],
+    emojiSet: ['refused', 'async', 'refused while paused (no allow row): account-level reaction set via vocabularyOf channels-engine.js:6713; the reaction set of every adapter is a static list today'],
+    emojiImage: ['refused', 'async', 'cache miss fetches vendor e.adapter.emojiImage + attachmentPut channels-engine.js:6759; never reads the index account-level fetch'],
+    avatarImage: ['refused', 'async', 'memo miss fetches vendor e.adapter.avatarImage + avatarPut channels-engine.js:6858; authorIsOurs reads the index ⇒ not-found while held unless memo-cached'],
+    migrateThreads: ['refused', 'sync', 'migration: index.live scan + index.update + adapters stamp channels-engine.js:6945; held ⇒ stamps adapters, reset 0, RECORDED done migrations.js:590 — must THROW to retry'],
+    setReactionPolicy: ['refused', 'async', 'refused while paused (no allow row): adapters.json only an accounts write channels-engine.js:6955'],
+    proposeReaction: ['refused', 'async', 'convFor index peek; outbox create channels-outbound.js:847; direct ⇒ sendNow :863; def :807'],
+    readThreadFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (convFor peek + threadRead, a local fold, no vendor channels-access.js:1992)'],
+    agentThreadRefresh: ['refused', 'async', 'the agents thread walk = threadRefresh {by:agent} channels-engine.js:6195'],
+    withView: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (render helper over caller records: side log + index.live walked stamps chann'],
+    reactionsFor: ['refused', 'sync', 'a person’s / an agent’s read: while paused an empty answer would say «no such conversation» or «nothing» — refused by name (side-log fold + namesOf index authors; empty Map on no account channels-engi'],
+    rxStateOf: ['refused', 'sync', 'refused while paused (no allow row): the live entrys reaction-minute counters channels-engine.js:9694'],
+    appendSides: ['refused', 'sync', 'writes the conversation side log the store’s appendSide + notifySide channels-engine.js:6474; suite-only door lambda :9695'],
+  };
+  function pauseDoors(api) { return pauseDoorsOf(api, HELD_DOORS, { held: indexHeld, error: pausedError, answer: pausedAnswer, say: sayPaused }); }   // THE ONE WRAPPER (src/channel-store.js)
+
+  return pauseDoors({
+    startedCount: () => starts,   // B-f276 A3: how many times the start ran (the start-on-read leg)
+    pausedState: () => (indexHeld() ? { code: 'store-blocked', error: pausedWords(), held: store.heldOf(CHAN_FAMILIES) } : null),
+    startDamagedEmpty: async (file) => (typeof store.startDamagedEmpty === 'function' ? store.startDamagedEmpty(file) : { ok: true, state: 'none' }),   // B-f276 1b: the damaged door   // B-f276 A2: the pause, asked by the routes and the raw API
     store, registry, digest, notify, pass, refreshConvCaps, markRead, messages,
     noteHandedOver,   // lane owner-press-attended: a hand-over delivered a held wake's block — the row's «last wake held» clears
     retryConvCaps,   // lane gmail-reply-known: the owner's Retry on a refused send row
@@ -10259,7 +10610,7 @@ function create(deps = {}) {
     reactionsFor: (adapterId, convId, ids) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? reactionsFor(rec, convId, ids) : new Map(); },
     rxStateOf: (adapterId) => { const e = live.get(adapterId); return e ? { reserved: Drain.rxMinuteAt(e.rxMinute, now()).n, calls: (e.rxCalls || []).filter((x) => now() - x < 60e3).length } : null; },
     appendSides: (adapterId, convId, sides) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? appendSides(rec, convId, sides) : { appended: 0 }; },
-  };
+  });
 }
 
 module.exports = { create, clientSwapStep, previewText, SETTING_BOUNDS, DUPLICATE_FIELDS, DUPLICATE_NEVER, CUSTOM_KEY, PENDING_FLOW_TTL_MS, REQUESTS_PER_MINUTE, DEFAULT_BUDGET_PER_MIN, WATCH_TTL_MS, DISCOVERY_MAX_PAGES, REFRESH_QUEUE_CAP, REFRESH_OWNER_RESERVE, REFRESH_WAIT_MS, ATTACHMENT_MAX_BYTES, RECONCILE_SECONDS, BACKOFF_MS, PAGE, MAX_PAGES, FAILURES_BEFORE_LOUD, REAL_ADAPTERS, KEY_FILE, INBOX_KEY, KICK_MIN_INTERVAL_MS, PUSH_NOTIFY_DEBOUNCE_MS, PUSH_EVENT_DEDUP_MAX, PENDING_CAP, ESTIMATE_CAP, COALESCE_DEFAULT_SECONDS, COALESCE_MAX_SECONDS, BOOT_PENDING_DELAY_MS };
