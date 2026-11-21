@@ -140,7 +140,7 @@ console.log('— ① PURE: the click verdict, the watch verb, the strip\'s drive
   ok(!foldBad.length && foldsWithout > 0, `G3 tabRowFold keeps the tab on show AND the watched one at every width (6 widths × 3 watched tabs; without watchedRef the watched one folds in ${foldsWithout} cells)`, foldBad);
   const lsSrc = read('src/lib/live-strip-layout.js'); const KEEP = '  if (row && row.keep) return 0;';
   if (ok(lsSrc.includes(KEEP), 'G3 control setup: the keep clause is found')) {
-    const Lc = M.load('src/lib/live-strip-layout.js', lsSrc.replace(KEEP, ''), 'no-watched-keep');
+    const Lc = M.load('src/lib/live-strip-layout.js', editAnchor(lsSrc, KEEP, '', "src/lib/live-strip-layout.js"), 'no-watched-keep');
     ok(Lc.tabRowFold({ rows: FR, widths: FW, avail: 250, morePx: 44, watchedRef: FR[5].targetId }).folded.includes(FR[5].targetId), 'G3 CONTROL: a layout copy without the watched keep folds the watched chip at 250 px — the leg above can go red');
   }
   // (G3's refold source pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -259,7 +259,7 @@ async function backgroundLeg(BSmod, { visibility = 'hidden', sayWaitMs = 2500 } 
   const src = read('src/server/browser-stream.js');
   const ARM = "    if (relay.bgTimer || !keeper || typeof keeper.tabVisibilityFor !== 'function') return;\n";
   ok(src.includes(ARM), 'control setup: the background check is armed per relay');
-  const c = await backgroundLeg(M.load('src/server/browser-stream.js', src.replace(ARM, '    return;\n'), 'no-bg-check'), { sayWaitMs: 3 * SILENCE });
+  const c = await backgroundLeg(M.load('src/server/browser-stream.js', editAnchor(src, ARM, '    return;\n', "src/server/browser-stream.js"), 'no-bg-check'), { sayWaitMs: 3 * SILENCE });
   ok(c.ready && !c.said && !c.vis.length, 'NEGATIVE CONTROL: a bridge copy without the check leaves the frozen picture unsaid (userW\'s 卡死) — the leg above can go red', JSON.stringify(c));
 }
 
@@ -298,7 +298,7 @@ async function hungLeg(BSmod) {
   const src = read('src/server/browser-stream.js');
   const HUNG_LINE = "      if (!r || !r.ok) { if (!r || r.error !== 'no tab') noAnswer(relay, id, t, (r && r.error) || 'no answer'); return; }";
   ok(src.includes(HUNG_LINE), 'B-d635 control setup: the unresponsive verdict line is found');
-  const c = await hungLeg(M.load('src/server/browser-stream.js', src.replace(HUNG_LINE, '      if (!r || !r.ok) return;'), 'hung-silent'));
+  const c = await hungLeg(M.load('src/server/browser-stream.js', editAnchor(src, HUNG_LINE, '      if (!r || !r.ok) return;', "src/server/browser-stream.js"), 'hung-silent'));
   ok(c.ready && !c.said, 'B-d635 CONTROL: a bridge copy that returns silently on no answer (the base) leaves the hung tab unsaid — the leg above can go red', JSON.stringify(c));
   // (the unresponsive state's client words — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -325,7 +325,7 @@ async function slowLeg(BSmod, misses) {
   const src = read('src/server/browser-stream.js');
   const LINE = "noAnswer(relay, id, t, (r && r.error) || 'no answer'); return; }";
   ok(src.includes(LINE), 'B-d635 verify r1 control setup: the no-answer line is found');
-  const c = await slowLeg(M.load('src/server/browser-stream.js', src.replace(LINE, "setBackground(relay, id, 'unresponsive', (r && r.error) || 'no answer'); return; }"), 'one-miss'), 1);
+  const c = await slowLeg(M.load('src/server/browser-stream.js', editAnchor(src, LINE, "setBackground(relay, id, 'unresponsive', (r && r.error) || 'no answer'); return; }", "src/server/browser-stream.js"), 'one-miss'), 1);
   ok(c.ready && c.saidHung, `B-d635 verify r1 CONTROL: a bridge copy that says "not responding" at the FIRST missed ask (the lane's a2066802) tells the slow tab so (${JSON.stringify(c.records)}) — the leg above can go red`, JSON.stringify(c));
 }
 
@@ -358,7 +358,7 @@ async function staleLeg(BSmod) {
   const src = read('src/server/browser-stream.js');
   const GAP = ' || t0 - b.noAnswer.last > bgHungMs) b.noAnswer = { id, since: t0 };';
   ok(src.includes(GAP), 'B-d635 verify r1 control setup: the pause clause is found');
-  const c = await staleLeg(M.load('src/server/browser-stream.js', src.replace(GAP, ') b.noAnswer = { id, since: t0 };'), 'no-pause'));
+  const c = await staleLeg(M.load('src/server/browser-stream.js', editAnchor(src, GAP, ') b.noAnswer = { id, since: t0 };', "src/server/browser-stream.js"), 'no-pause'));
   ok(c.ready2 && c.saidHung, `B-d635 verify r1 CONTROL: a bridge copy that keeps the old miss says "not responding" at the returning viewer's first miss (${JSON.stringify(c.records)}) — the leg above can go red`, JSON.stringify(c));
 }
 
@@ -447,7 +447,7 @@ console.log('— ②d verify r1 ④: the poll stops with the last viewer; a pain
   const src = read('src/server/browser-stream.js');
   const PAINT = "    { const pa = WIN.paintsAgain({ frameTimes: b.frameTimes || [], now: t }); if (pa.paints) { clearBackground(relay, `it paints again (${pa.recent} frames in a second)`); return; } }\n";
   ok(src.includes(PAINT), 'control setup: the frame-facts rule is found in the bridge');
-  const U2 = await fakeUpstream(); const S2 = stubKeeper(U2, { visibility: 'hidden' }); const B2 = await bridgeOn(M.load('src/server/browser-stream.js', src.replace(PAINT, ''), 'page-word-only'), S2.k);
+  const U2 = await fakeUpstream(); const S2 = stubKeeper(U2, { visibility: 'hidden' }); const B2 = await bridgeOn(M.load('src/server/browser-stream.js', editAnchor(src, PAINT, '', "src/server/browser-stream.js"), 'page-word-only'), S2.k);
   const A2 = viewer(B2.P); await A2.ready();
   const said2 = await until(() => A2.of('tab-background').some((m) => m.targetId === T1), 2500);
   const storm2 = setInterval(() => U2.frame('storm'), 16);
@@ -535,25 +535,25 @@ console.log('— ③ verify r1 T1: the window-ownership table (actor × target �
   const C8 = 'filter(([, v]) => isObj(v) && Number(v.count) > 1)';
   const C9 = '  if (info.openerId && scope.targets.has(String(info.openerId))) return true;\n';
   ok([C1, C2, C9].every((x) => msrc.includes(x)) && [C3, C4, C8].every((x) => wsrc.includes(x)) && [C5, C6].every((x) => tsrc.includes(x)), 'control setup: every rule\'s line is found in its module');
-  const med1 = M.load('src/browser-mediation.js', msrc.replace(C1, '    if (false) return null;\n'), 'no-target-scope');
+  const med1 = M.load('src/browser-mediation.js', editAnchor(msrc, C1, '    if (false) return null;\n', "src/browser-mediation.js"), 'no-target-scope');
   ok(jc(med1, { method: 'Target.activateTarget', params: { targetId: B1 } }, scopeA()) === 'allowed', 'CONTROL R1: a mediation copy without the target fence lets lease A activate B\'s tab — the scope cells can go red');
-  const med2 = M.load('src/browser-mediation.js', msrc.replace(C2, ''), 'no-placement');
+  const med2 = M.load('src/browser-mediation.js', editAnchor(msrc, C2, '', "src/browser-mediation.js"), 'no-placement');
   ok(place(med2, { url: 'x' }) === 'as-written' && place(med2, { url: 'x', forTab: true }) === 'as-written', 'CONTROL R2: a copy without the placement rewrite forwards the plain create (the last focused window — another holder\'s) — the placement cells can go red');
-  const win3 = M.load('src/browser-windows.js', wsrc.replace(C3, ''), 'takeover-takes-all');
+  const win3 = M.load('src/browser-windows.js', editAnchor(wsrc, C3, '', "src/browser-windows.js"), 'takeover-takes-all');
   ok(win3.windowMates({ leases, profileId: 'bp-1', browserKey: 'bk-0000000a', instance: '1' }).length > 0, 'CONTROL R3: a copy whose takeover takes every lease pauses B in its own window — the takeover-scope cell can go red');
-  const win4 = M.load('src/browser-windows.js', wsrc.replace(C4, "  return { act: 'switch', why: 'x' };\n"), 'watch-switches');
+  const win4 = M.load('src/browser-windows.js', editAnchor(wsrc, C4, "  return { act: 'switch', why: 'x' };\n", "src/browser-windows.js"), 'watch-switches');
   ok(win4.tabClickVerdict({ owner: 'agent', targetId: A2, driving: false, active: false }).act === 'switch', 'CONTROL R4: a copy whose watch click switches the agent\'s tab — the watch cell can go red');
   const C10 = "    return w && w === id ? { act: 'none', why: 'already-watched' } : { act: 'watch', why: 'view-only' };\n";
-  const win10 = wsrc.includes(C10) ? M.load('src/browser-windows.js', wsrc.replace(C10, "    return { act: 'none', why: 'not-the-agents' };\n"), 'no-watch-others') : null;
+  const win10 = wsrc.includes(C10) ? M.load('src/browser-windows.js', editAnchor(wsrc, C10, "    return { act: 'none', why: 'not-the-agents' };\n", "src/browser-windows.js"), 'no-watch-others') : null;
   ok(!!win10 && win10.tabClickVerdict({ owner: 'other', targetId: A2, driving: false }).act === 'none' && W.tabClickVerdict({ owner: 'other', targetId: A2, driving: false }).act === 'watch', 'CONTROL F8 (accept-fixes-strip): a copy whose chip of another conversation\'s tab does nothing (the 2.369.202 rule) — the R4 watch cell can go red');
-  const tabs5 = M.load('src/browser-tabs.js', tsrc.replace(C5, ''), 'no-take-over-first');
+  const tabs5 = M.load('src/browser-tabs.js', editAnchor(tsrc, C5, '', "src/browser-tabs.js"), 'no-take-over-first');
   ok(tabs5.userTabVerdict({ act: 'switch', owner: 'agent', driving: false, counts: { agent: 2 } }).ok === true, 'CONTROL R5: a copy that lets a watcher switch the agent\'s tab — the user-acts cell can go red');
-  const tabs6 = M.load('src/browser-tabs.js', tsrc.replace(C6, "  if (owner === 'other') return no('not_your_tab');\n"), 'human-on-agent-tab');
+  const tabs6 = M.load('src/browser-tabs.js', editAnchor(tsrc, C6, "  if (owner === 'other') return no('not_your_tab');\n", "src/browser-tabs.js"), 'human-on-agent-tab');
   ok(tabs6.userTabVerdict({ act: 'switch', owner: 'agent', human: true, driving: true, counts: { agent: 2 } }).ok === true, 'CONTROL R6: a copy that lets the human act on an agent\'s tab from his window — the human cell can go red');
   ok(jc(MED, { method: 'Target.createTarget', params: { url: 'x' } }, scopeA(), false) === 'allowed', 'CONTROL R7: the same create with the pause not seen is allowed — the paused cells can go red');
-  const win8 = M.load('src/browser-windows.js', wsrc.replace(C8, 'filter(() => false)'), 'no-red-cell');
+  const win8 = M.load('src/browser-windows.js', editAnchor(wsrc, C8, 'filter(() => false)', "src/browser-windows.js"), 'no-red-cell');
   ok(win8.multiWindowHolders(win8.windowCensus([{ holder: 'A', windowId: 11 }, { holder: 'A', windowId: 13 }])).length === 0, 'CONTROL R8: a copy whose census never names a two-window holder — the red cell can go red');
-  const med9 = M.load('src/browser-mediation.js', msrc.replace(C9, ''), 'no-opener-admission');
+  const med9 = M.load('src/browser-mediation.js', editAnchor(msrc, C9, '', "src/browser-mediation.js"), 'no-opener-admission');
   ok(popup(med9, A1) === 'dropped', 'CONTROL R9: a copy that does not admit a page-opened tab drops A\'s own popup — the opener cell can go red');
   // (R7 the keeper's order pin — MOVED to the fast scripts/test-browser-windows-pins.mjs — lane lg-text-legs-3, B-94d3: a leg that reads only source text runs in every lane's gate)
   const kp = read('src/server/browser-keeper.js');
@@ -757,31 +757,31 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   const scen = async (Kmod, tag) => { const kx = mk(Kmod, { dataDir: path.join(O, 'data-' + tag) }); await kx._facts.probeVersion(); const px = kx.createProfile({ label: 'C ' + tag }); await kx.attach({ profileId: px.id, browserKey: KA, sessionId: 'x-' + KA }); return { kx, px }; };
   { // (a) the window-id reader: `Number(null)` is 0 — the old expression stamps window 0 for an unread id
     const needleA = '    l2.windowId = WIN.windowIdOf(r.windowId); // T2 ⑧'; ok(ksrc.includes(needleA), 'control (a) setup');
-    const Ka = M.load('src/server/browser-keeper.js', ksrc.replace(needleA, '    l2.windowId = Number.isFinite(Number(r.windowId)) ? Number(r.windowId) : null; // T2 ⑧'), 'window-zero');
+    const Ka = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleA, '    l2.windowId = Number.isFinite(Number(r.windowId)) ? Number(r.windowId) : null; // T2 ⑧', "src/server/browser-keeper.js"), 'window-zero');
     model.windowReadFails = 1; const { kx, px } = await scen(Ka, 'a'); const l = B.findLease(kx._reg().leases, px.id, KA);
     ok(l && l.windowId === 0, `CONTROL (a): a keeper copy reading the id with Number(…) stamps window ${l && l.windowId} for an unread one (the c15 row goes red: no tab answers window 0 ⇒ re-minted)`, l);
   }
   { // (b) the derivation: without it a lease with no stamped id opens a window per tab
     const needleB = '      if (wantWin == null && lease && WIN.hasOwnWindow(lease, WIN.instanceOf(rec))) {'; ok(ksrc.includes(needleB), 'control (b) setup');
-    const Kb = M.load('src/server/browser-keeper.js', ksrc.replace(needleB, '      if (false) {'), 'no-derivation');
+    const Kb = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleB, '      if (false) {', "src/server/browser-keeper.js"), 'no-derivation');
     const { kx, px } = await scen(Kb, 'b'); delete B.findLease(kx._reg().leases, px.id, KA).windowId; const ow = model.openWindowCalls; await tabNew(kx, KA, 'https://c.example/b');
     ok(model.openWindowCalls > ow, 'CONTROL (b): a keeper copy without the derivation opens a NEW window for a lease whose id was never stamped (the pre-r1 / unread rows go red)');
   }
   { // (c) the window_busy return: without it a living window is traded for the browser's last window (another holder's)
     const needleC = "    if (made && made.code === 'window_busy') return { ok: false, code: 'window_busy', why: made.why || 'ladder', targetId: null, window: 'own', error: made.error };"; ok(ksrc.includes(needleC), 'control (c) setup');
-    const Kc2 = M.load('src/server/browser-keeper.js', ksrc.replace(needleC, ''), 'busy-falls-back');
+    const Kc2 = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleC, '', "src/server/browser-keeper.js"), 'busy-falls-back');
     const { kx, px } = await scen(Kc2, 'c'); setState(roots(kx, px, KA), 'elsewhere'); model.rung2Fails = true; const r = await tabNew(kx, KA, 'https://c.example/c'); model.rung2Fails = false;
     ok(r.ok && r.r && r.r.opened && r.r.opened.window === 'shared' && r.r.noteCode === 'tab_shared_window', 'CONTROL (c): a keeper copy without the window_busy return falls back to the shared-window tab (the "every rung mismatches" row goes red)', r);
   }
   { // (d) rung 2: without it a whole window of blocked tabs is refused instead of landing
     const needleD = '        if (!(made && made.ok)) made = await viaActivate(anchors[0]); // verify r5: the plan is read in there, at rung 2'; ok(ksrc.includes(needleD), 'control (d) setup');
-    const Kd = M.load('src/server/browser-keeper.js', ksrc.replace(needleD, "        if (!(made && made.ok)) made = { ok: false, code: 'open_failed', error: 'no rung 2' };"), 'no-rung2');
+    const Kd = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleD, "        if (!(made && made.ok)) made = { ok: false, code: 'open_failed', error: 'no rung 2' };", "src/server/browser-keeper.js"), 'no-rung2');
     const { kx, px } = await scen(Kd, 'd'); setState(roots(kx, px, KA), 'crashed'); const r = await tabNew(kx, KA, 'https://c.example/d');
     ok(!r.ok && r.code === 'window_busy', 'CONTROL (d): a keeper copy without rung 2 refuses window_busy where the product lands (the crashed / navigating / override rows go red)', r);
   }
   { // (e) the census: a copy that counts a page's popup window as the holder's second
     const wsrc2 = read('src/browser-windows.js'); const needleE = "    if (r.popup === true) { if (!out[h].popupWindows.includes(w)) { out[h].popupWindows.push(w); out[h].popups++; } continue; }\n"; ok(wsrc2.includes(needleE), 'control (e) setup');
-    const We = M.load('src/browser-windows.js', wsrc2.replace(needleE, ''), 'popup-counted');
+    const We = M.load('src/browser-windows.js', editAnchor(wsrc2, needleE, '', "src/browser-windows.js"), 'popup-counted');
     const ce = We.windowCensus([{ holder: 'A', windowId: 1 }, { holder: 'A', windowId: 2, popup: true }]);
     ok(ce.A.count === 2 && We.multiWindowHolders(ce).join() === 'A', 'CONTROL (e): a census copy without the popup row names the holder in the red cell for the page\'s own popup');
   }
@@ -1062,43 +1062,43 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   // ── THE REVERT TABLE of verify r3's parts — a patched copy per part ──
   { // (f) the re-ask: without it a window gone during the ladder is called busy ("your tabs are still there")
     const needleF = '          let answers = 0; for (const c of cands) { const w = await windowOf(c); if (w != null && w === wantWin) answers++; }'; ok(ksrc.includes(needleF), 'control (f) setup');
-    const Kf = M.load('src/server/browser-keeper.js', ksrc.replace(needleF, '          let answers = 1;'), 'no-reask');
+    const Kf = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleF, '          let answers = 1;', "src/server/browser-keeper.js"), 'no-reask');
     const { kx, px } = await scen(Kf, 'f'); setState([roots(kx, px, KA)[0]], 'closing-last'); const r = await tabNew(kx, KA, 'https://c.example/f');
     ok(!r.ok && r.code === 'window_busy' && /still there/.test(r.error), 'CONTROL (f): a keeper copy without the re-ask calls a window that went away during the ladder busy (the c19 row goes red)', r);
   }
   { // (g) the strays note: without it a lease whose tabs sit in several windows is never told
     const needleG = "      if (made.window === 'own' && made.strays && made.strays.windows.length && l && l.straysSaidIn !== WIN.instanceOf(rec) && !out.note) {"; ok(ksrc.includes(needleG), 'control (g) setup');
-    const Kg = M.load('src/server/browser-keeper.js', ksrc.replace(needleG, '      if (false) {'), 'no-strays-note');
+    const Kg = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleG, '      if (false) {', "src/server/browser-keeper.js"), 'no-strays-note');
     const { kx, px } = await scen(Kg, 'g'); const nsg = B.sessionNameFor(px.id); { const l = B.findLease(kx._reg().leases, px.id, KA); l.tabRoots = TBS.addRoot(l.tabRoots, addTab(nsg, mintTid(), { windowId: ++model.nextW, holder: 'keeper' })); }
     const r = await tabNew(kx, KA, 'https://c.example/g');
     ok(r.ok && !r.r.noteCode, 'CONTROL (g): a keeper copy without the strays note lands the tab and says nothing about the other window (the c20 row goes red)', r);
   }
   { // (h) the leak count: a keeper copy that does not count rung 2's leaks
     const needleH = '          for (const lk of Array.isArray(made && made.leaks) ? made.leaks : []) {'; ok(ksrc.includes(needleH), 'control (h) setup');
-    const Kh = M.load('src/server/browser-keeper.js', ksrc.replace(needleH, '          for (const lk of []) {'), 'no-leak-count');
+    const Kh = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleH, '          for (const lk of []) {', "src/server/browser-keeper.js"), 'no-leak-count');
     const { kx, px } = await scen(Kh, 'h'); setState(roots(kx, px, KA), 'crashed'); model.rung2LeakOnce = true; const r = await tabNew(kx, KA, 'https://c.example/h');
     ok(r.ok && kx.list().windowLeaks.count === 0, 'CONTROL (h): a keeper copy that does not count the leaks reports 0 after a leaked rung 2 (the c17 row goes red)', { r, leaks: kx.list().windowLeaks });
   }
   { // (i) the version table without the named-line rule
     const fsrc = read('src/browser-facts.js'); const needleI = '  const v = named(so) || named(se) || B.parseVersion(so) || (!err && B.parseVersion(se)) || null;'; ok(fsrc.includes(needleI), 'control (i) setup');
-    const Fi = M.load('src/browser-facts.js', fsrc.replace(needleI, '  const v = err ? B.parseVersion(so) : B.parseVersion(so + se);'), 'no-named-line');
+    const Fi = M.load('src/browser-facts.js', editAnchor(fsrc, needleI, '  const v = err ? B.parseVersion(so) : B.parseVersion(so + se);', "src/browser-facts.js"), 'no-named-line');
     ok(Fi.versionFromProbe({ stdout: 'npm notice 10.9.0 -> 11.0.0\n', stderr: 'agent-browser 0.38.1\n' }) === '10.9.0', 'CONTROL (i): a facts copy without the named-line rule reads the wrapper\'s notice as the version (the ⑧ table goes red)');
   }
   { // (j) the rung-2 plan: a windows copy that cycles on a real display too
     const wsrc3 = read('src/browser-windows.js'); const needleJ = "  return { run: true, breaker: false, activate: true, why: 'a real display: the window is never minimized in front of the user', create: RUNG2_CREATE };"; ok(wsrc3.includes(needleJ), 'control (j) setup');
-    const Wj = M.load('src/browser-windows.js', wsrc3.replace(needleJ, "  return { run: true, breaker: true, activate: true, why: 'always', create: RUNG2_CREATE };"), 'cycle-on-real-display');
+    const Wj = M.load('src/browser-windows.js', editAnchor(wsrc3, needleJ, "  return { run: true, breaker: true, activate: true, why: 'always', create: RUNG2_CREATE };", "src/browser-windows.js"), 'cycle-on-real-display');
     ok(Wj.rung2Plan({ headed: true, fallback: null }).breaker === true && W.rung2Plan({ headed: true, fallback: null }).breaker === false, 'CONTROL (j): a windows copy that cycles the window on a real display too (the c18 row goes red)');
   }
   { // (k) verify r4 T1: a keeper copy that never asks whether the user drives — rung 2 runs (cycle + activation) under his hands
     const needleK = '        const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: userDrivesAnyWindowOf(p.id) });'; ok(ksrc.includes(needleK), 'control (k) setup');
-    const Kk = M.load('src/server/browser-keeper.js', ksrc.replace(needleK, '        const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: false });'), 'rung2-under-the-users-hands');
+    const Kk = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleK, '        const planNow = () => WIN.rung2Plan(rec.display, { viewers: watchers.get(inputKey(holderKey, p.id)) || 0, driven: false });', "src/server/browser-keeper.js"), 'rung2-under-the-users-hands');
     const { kx, px } = await scen(Kk, 'k'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/kb'); const t = kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true });
     const c0 = model.rung2Calls; setState(roots(kx, px, KA), 'crashed'); const r = await tabNew(kx, KA, 'https://c.example/k'); setState(roots(kx, px, KA), 'ok');
     ok(t.ok && r.ok && model.rung2Calls > c0, 'CONTROL (k): a keeper copy that never asks whether the user drives runs rung 2 under his hands (the c23 / c24 rows and the walk go red)', r);
   }
   { // (l) verify r4 ①: a plan copy without the viewer rule cycles the window a live view shows
     const wsrc4 = read('src/browser-windows.js'); const needleL = '  const watched = (Number(viewers) || 0) > 0;'; ok(wsrc4.includes(needleL), 'control (l) setup');
-    const Wl = M.load('src/browser-windows.js', wsrc4.replace(needleL, '  const watched = false;'), 'cycle-under-a-live-view');
+    const Wl = M.load('src/browser-windows.js', editAnchor(wsrc4, needleL, '  const watched = false;', "src/browser-windows.js"), 'cycle-under-a-live-view');
     ok(Wl.rung2Plan({ headed: false }, { viewers: 2 }).breaker === true && W.rung2Plan({ headed: false }, { viewers: 2 }).breaker === false, 'CONTROL (l): a plan copy without the viewer rule runs the window-state cycle under a live view (the c22 row goes red)');
   }
   { // (m) verify r4 ③: the model under a FOREGROUND create — the other holder's foreground tab moves when the stray closes (the invariant has teeth; the product's create is the background one pinned below)
@@ -1117,7 +1117,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   }
   { // (o) verify r5 ③: a keeper copy that falls to the binary's own `tab new` when the bind fails — the tab lands in the browser's last window (another holder's), said shared
     const needleO = "      if (fallback) { log.log?.(`[browser] ${holderKey} on ${p ? p.id : '?'}: its new tab ${id.slice(0, 8)} could not be bound to its session (${execWhy(b)}) — closed, refused window_busy (bind_failed), never the browser's last window`); made = { ok: false, code: 'window_busy', why: 'bind_failed', error: `your new tab could not be bound to your session (${execWhy(b)}) — nothing opened; run the same \\`tab new\\` once more (a window of yours that is gone gets a new one)` }; }"; ok(ksrc.includes(needleO), 'control (o) setup');
-    const Ko = M.load('src/server/browser-keeper.js', ksrc.replace(needleO, "      if (fallback) made = { ok: false, error: `its new window could not be bound to its session (${execWhy(b)})` };"), 'shared-fallback-on-bind-failure');
+    const Ko = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleO, "      if (fallback) made = { ok: false, error: `its new window could not be bound to its session (${execWhy(b)})` };", "src/server/browser-keeper.js"), 'shared-fallback-on-bind-failure');
     const { kx, px } = await scen(Ko, 'o'); const NSo = B.sessionNameFor(px.id);
     model.onCreated = (tid) => { const w = model.targets.get(tid).windowId; for (const [id, t] of [...model.targets]) if (t.windowId === w && t.state !== 'closed') { closeTab(id); fakeRemove(NSo, id); } };
     const r = await tabNew(kx, KA, 'https://c.example/o');
@@ -1125,7 +1125,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   }
   { // (p) verify r5 ②: a keeper copy that never remembers a refusal — the handback tells nobody
     const needleP = '          noteRung2Refused(p.id, holderKey, lease ? lease.sessionId : null);'; ok(ksrc.includes(needleP), 'control (p) setup');
-    const Kp = M.load('src/server/browser-keeper.js', ksrc.replace(needleP, ''), 'refusal-forgotten');
+    const Kp = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleP, '', "src/server/browser-keeper.js"), 'refusal-forgotten');
     const { kx, px } = await scen(Kp, 'p'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/pb');
     const evs = []; kx.onInput((ev) => evs.push(ev.kind)); kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true });
     setState(roots(kx, px, KA), 'crashed'); const r = await tabNew(kx, KA, 'https://c.example/p'); setState(roots(kx, px, KA), 'ok'); kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
@@ -1155,7 +1155,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   { // (s) lane browser-windows-rung-race (B-81c6): r3's lock compared `cur`, never the stored tail — its entry outlived every rung 2,
     // so a holder ALONE at the lock is journaled as waiting behind nobody (c31's bQueued goes red)
     const needleS = 'if (rung2Locks.get(k) === tail) rung2Locks.delete(k);'; ok(ksrc.includes(needleS), 'control (s) setup');
-    const Ks = M.load('src/server/browser-keeper.js', ksrc.replace(needleS, 'if (rung2Locks.get(k) === cur) rung2Locks.delete(k);'), 'lock-entry-kept');
+    const Ks = M.load('src/server/browser-keeper.js', editAnchor(ksrc, needleS, 'if (rung2Locks.get(k) === cur) rung2Locks.delete(k);', "src/server/browser-keeper.js"), 'lock-entry-kept');
     const { kx, px } = await scen(Ks, 's'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/sb');
     setState(roots(kx, px, KA), 'crashed'); const r0 = await tabNew(kx, KA, 'https://c.example/s0'); setState(roots(kx, px, KA), 'ok'); // one rung 2, alone
     const L = await lockWait(kx, px, { act: () => ({ ok: true }), tag: 's1' });
@@ -1201,9 +1201,9 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     const n1 = "    for (const h of tabHoldersOf(pid)) if (h && h.key === bk) for (const t of (Array.isArray(h.roots) ? h.roots : [])) if (t) out.add(String(t));\n";
     const n2 = "    if (lostWhy) keepRebound(p.id, browserKey, { how: 'new', targetId: String(r.targetId), url: 'about:blank', why: lostWhy, text: TBS.reboundNoteText({ how: 'new', why: lostWhy }) });\n";
     ok(ksrc.includes(n1) && ksrc.includes(n2), 'control (bwf) setup: both fix lines are found in src/server/browser-keeper.js');
-    const c1 = await bwf(M.load('src/server/browser-keeper.js', ksrc.replace(n1, ''), 'bwf-no-roots'), 'c1');
+    const c1 = await bwf(M.load('src/server/browser-keeper.js', editAnchor(ksrc, n1, '', "src/server/browser-keeper.js"), 'bwf-no-roots'), 'c1');
     ok(!c1.tabs.ownA && !c1.tabs.ownB && c1.said.rebound, 'CONTROL (bwf-1): a keeper copy whose holderTabs skips the roots (2666de5a) names NO holder\'s own-window tab — the site-reset-chrome ⑤ shape', c1.tabs);
-    const c2 = await bwf(M.load('src/server/browser-keeper.js', ksrc.replace(n2, ''), 'bwf-silent-rebind'), 'c2');
+    const c2 = await bwf(M.load('src/server/browser-keeper.js', editAnchor(ksrc, n2, '', "src/server/browser-keeper.js"), 'bwf-silent-rebind'), 'c2');
     ok(c2.tabs.ownA && c2.said.newWindow && c2.said.markSpent && !c2.said.rebound, 'CONTROL (bwf-2): a keeper copy without the note (2666de5a) opens the new window and SPENDS the mark, saying nothing — the share ⑩ shape', c2.said);
   }
 }

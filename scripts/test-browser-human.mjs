@@ -205,12 +205,12 @@ function pureLegs(H, tag = '') {
     if (!src.includes(needle)) { ok(false, `CONTROL ${name}: its needle is gone from src/browser-human.js`); continue; }
     if (name === 'keeps-the-text') {
       // the typed words must never survive the step: a copy that carries the real text reddens the typing / paste legs
-      const Hk = M.load('src/browser-human.js', src.replace("  if (r.type === 'input_text') { flushWheel(st, acts); flushTyping(st, acts); const n = Array.from(str(r.text)).length; if (n) acts.push({ action: 'type', params: { text: PLACEHOLDER.repeat(Math.min(20000, n)) } }); return done(); }", "  if (r.type === 'input_text') { flushWheel(st, acts); flushTyping(st, acts); if (str(r.text)) acts.push({ action: 'type', params: { text: str(r.text) } }); return done(); }"), name);
+      const Hk = M.load('src/browser-human.js', editAnchor(src, "  if (r.type === 'input_text') { flushWheel(st, acts); flushTyping(st, acts); const n = Array.from(str(r.text)).length; if (n) acts.push({ action: 'type', params: { text: PLACEHOLDER.repeat(Math.min(20000, n)) } }); return done(); }", "  if (r.type === 'input_text') { flushWheel(st, acts); flushTyping(st, acts); if (str(r.text)) acts.push({ action: 'type', params: { text: str(r.text) } }); return done(); }", "src/browser-human.js"), name);
       const red = pureLegs(Hk, `[${name}] `).filter((x) => !x.c);
       ok(red.some((x) => /paste/.test(x.n)), `CONTROL ${name}: a step that keeps a paste's TEXT turns the paste leg red`, red.map((x) => x.n));
       continue;
     }
-    const Hm = M.load('src/browser-human.js', src.replace(needle, repl), name);
+    const Hm = M.load('src/browser-human.js', editAnchor(src, needle, repl, "src/browser-human.js"), name);
     const red = pureLegs(Hm, `[${name}] `).filter((x) => !x.c);
     ok(red.some((x) => mustRed.test(x.n)), `CONTROL ${name}: the patched copy turns its leg RED (${red.map((x) => x.n.replace(/^\[[^\]]+\] /, '').slice(0, 60)).join(' | ')})`);
   }
@@ -225,14 +225,14 @@ function pureLegs(H, tag = '') {
     'verify r1 (H2): a character made WITH Alt — AltGr on Windows (Ctrl+Alt: "@", "€"), a Mac\'s Option ("™", "å") — is typed text, recorded as its LENGTH; a Ctrl / ⌘ chord stays a chord (Control+A, Meta+C)', shown(HM));
   const hsrc = fs.readFileSync(path.join(REPO, 'src/browser-human.js'), 'utf8');
   const hneedle = "    const typed = printable && (!chord || ((mods & MOD.alt) !== 0 && (mods & MOD.meta) === 0));";
-  const Hc = M.load('src/browser-human.js', hsrc.replace(hneedle, '    const typed = printable && !chord;'), 'alt-chars-as-chords');
+  const Hc = M.load('src/browser-human.js', editAnchor(hsrc, hneedle, '    const typed = printable && !chord;', "src/browser-human.js"), 'alt-chars-as-chords');
   ok(hsrc.includes(hneedle) && /Control\+Alt\+@/.test(shown(Hc)) && /Alt\+™/.test(shown(Hc)), 'CONTROL: the pre-fix act step names the AltGr / Option character in the chord (`press Control+Alt+@`, `press Alt+™`) — red', shown(Hc));
   const cred = { id: 'tr-000000000001', at: 1, browserKey: 'hu-0000e001', profileId: P1, command: { action: 'open', params: { url: 'https://alice:hunter2pw@bank.example/login?session=abc' } }, result: { success: false, error: 'net::ERR_ABORTED at https://alice:hunter2pw@bank.example/login' }, position: T0.positionOf({ kind: 'navigation', params: { url: 'https://alice:hunter2pw@bank.example/login?session=abc' } }), url: 'https://alice:hunter2pw@bank.example/home', holder: 'user' };
   const e0 = T0.entryFor(cred);
   ok(!J(e0).includes('hunter2pw') && e0.params.url === 'https://bank.example/login?«cut»' && e0.url === 'https://bank.example/home' && /bank\.example/.test(e0.error) && T0.withoutUserinfo('mailto:a@b.example') === 'mailto:a@b.example' && T0.withoutUserinfo('http://h.example/p@q') === 'http://h.example/p@q',
     'verify r1 (H2): a URL\'s credentials never reach a trace entry — params, text, the page url and the error say the page without `user:pass@` (a mailto, an @ in a path untouched)', e0);
   const tsrc = fs.readFileSync(path.join(REPO, 'src/browser-trace.js'), 'utf8');
-  const Tc = M.load('src/browser-trace.js', tsrc.replace("function withoutUserinfo(v) { return typeof v === 'string' ?", "function withoutUserinfo(v) { return v; return typeof v === 'string' ?"), 'userinfo-kept');
+  const Tc = M.load('src/browser-trace.js', editAnchor(tsrc, "function withoutUserinfo(v) { return typeof v === 'string' ?", "function withoutUserinfo(v) { return v; return typeof v === 'string' ?", "src/browser-trace.js"), 'userinfo-kept');
   ok(J(Tc.entryFor(cred)).includes('hunter2pw'), 'CONTROL: a trace copy that keeps URLs as typed stores the password — red');
   // verify r2 (#7, r1's HELD query secrets re-judged — cut): a URL whose query / fragment NAMES a credential-shaped key keeps
   // its scheme, host and path and loses the whole query (fragment) — for EVERY navigation, an agent's too; by the key's
@@ -271,16 +271,16 @@ function pureLegs(H, tag = '') {
   // verify r3 (the revert table): the ERROR field of an entry went through entryFor unpinned for the query cut
   const errE = T0.entryFor({ id: 'tr-0000000000e1', at: 4, browserKey: 'bk-0000e0a1', profileId: P1, command: { action: 'open', params: { url: 'https://a.example/x' } }, result: { success: false, error: 'net::ERR_ABORTED at https://a.example/cb?code=ERRCODE9&state=s' } });
   ok(!J(errE).includes('ERRCODE9') && /a\.example\/cb\?«cut»/.test(errE.error), 'verify r3: an entry\'s ERROR naming a callback loses its query too (entryFor, not only the PURE cut)', errE.error);
-  const Tq = M.load('src/browser-trace.js', tsrc.replace('function cutSecretQuery(u) {\n', 'function cutSecretQuery(u) {\n  return u;\n'), 'query-kept');
+  const Tq = M.load('src/browser-trace.js', editAnchor(tsrc, 'function cutSecretQuery(u) {\n', 'function cutSecretQuery(u) {\n  return u;\n', "src/browser-trace.js"), 'query-kept');
   ok(tsrc.includes('function cutSecretQuery(u) {\n') && J(Tq.entryFor({ id: 'tr-000000000003', at: 3, browserKey: 'bk-0000e0a1', profileId: P1, command: { action: 'open', params: { url: 'https://a.example/cb?code=SECRETCODE42' } }, result: { success: true } })).includes('SECRETCODE42'), 'CONTROL: a trace copy that keeps queries as typed stores the OAuth code — red');
   const vneedle0 = "  if (eq < 0 || depth >= 2) return false;\n";
-  const Tv = M.load('src/browser-trace.js', tsrc.replace(vneedle0, '  return false;\n'), 'query-value-kept');
+  const Tv = M.load('src/browser-trace.js', editAnchor(tsrc, vneedle0, '  return false;\n', "src/browser-trace.js"), 'query-value-kept');
   ok(tsrc.includes(vneedle0) && Tv.withoutUrlSecrets('https://mail.example/click?url=https%3A%2F%2Fapp.example%2Fmagic%3Ftoken%3DSECRET1').includes('SECRET1'), 'CONTROL (verify r3): a trace copy that judges only the keys keeps a redirector\'s encoded magic link — red');
   // verify r2 (the revert table): the ARRAY branch of the params (a batch's lines, a list of urls) had no gate — reverted to
   // keep its strings as typed, the whole fast tier stayed green
   const arr = T0.redactParams('batch', { lines: ['open https://alice:hunter2pw@h.example/in?token=ARRTOKEN9', 'click #a'] });
   const aneedle = "v.map((x) => withoutUrlSecrets(String(x)).slice(0, 200))";
-  const Ta = M.load('src/browser-trace.js', tsrc.replace(aneedle, 'v.map((x) => String(x).slice(0, 200))'), 'array-kept');
+  const Ta = M.load('src/browser-trace.js', editAnchor(tsrc, aneedle, 'v.map((x) => String(x).slice(0, 200))', "src/browser-trace.js"), 'array-kept');
   ok(!J(arr).includes('hunter2pw') && !J(arr).includes('ARRTOKEN9') && arr.lines[0] === 'open https://h.example/in?«cut»' && arr.lines[1] === 'click #a' && tsrc.includes(aneedle) && J(Ta.redactParams('batch', { lines: ['open https://alice:hunter2pw@h.example/in?token=ARRTOKEN9'] })).includes('hunter2pw'),
     'verify r2: a list param (a batch\'s lines) is cut like a string — no password, no token; CONTROL the copy that keeps list items as typed stores both — red', arr);
 }
@@ -301,7 +301,7 @@ function pureLegs(H, tag = '') {
   ok(HM.humanShareLine({ id: P1, mediated: false }, zhT) === '这个配置的 agent 也能看到并操作这个标签页', 'the line goes through the device\'s t() (the owner\'s zh words)');
   const ssrc = fs.readFileSync(path.join(REPO, 'src/browser-human.js'), 'utf8');
   const sneedle = "  if (profile.mediated === true || profile.ephemeral === true || profile.host) return null;\n";
-  const Hs = M.load('src/browser-human.js', ssrc.replace(sneedle, "  if (profile.ephemeral === true || profile.host) return null;\n"), 'share-line-ignores-mediated');
+  const Hs = M.load('src/browser-human.js', editAnchor(ssrc, sneedle, "  if (profile.ephemeral === true || profile.host) return null;\n", "src/browser-human.js"), 'share-line-ignores-mediated');
   ok(ssrc.includes(sneedle) && J(rows(Hs)) !== J([EN, EN, null, null, null, null]), 'CONTROL: a copy that ignores `mediated` shows the line on a "separate tabs" profile — the leg above can go red', rows(Hs));
   // (the WIRING pin of the person's window share chip: MOVED to the fast scripts/test-browser-human-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
 }
@@ -442,7 +442,7 @@ let work, solo, shop;
     const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const needle = "    let tv = null;\n    if (v.act === 'tab') {";
     ok(src.includes(needle), 'the tab verdict needle (the control below removes it)');
-    const Kt = M.load('src/server/browser-keeper.js', src.replace(needle, "    let tv = null;\n    if (false) {"), 'any-tab');
+    const Kt = M.load('src/server/browser-keeper.js', editAnchor(src, needle, "    let tv = null;\n    if (false) {", "src/server/browser-keeper.js"), 'any-tab');
     const kt = mkKeeper(Kt, { dataDir: path.join(ROOT, 'data-t'), readTargets });
     const tp = kt.createProfile({ label: 'T' }, { owner: { kind: 'instance', id: null } });
     await kt.browse(tp.id);
@@ -477,7 +477,7 @@ let work, solo, shop;
     ok(sw && sw.ok === true && sa && sa.refused === 'not_your_tab', 'through the keeper\'s OWN reader: his popup (opener = his tab) is his to switch to; the agent\'s tab is refused', { sw, sa });
     const vsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-viewport.js'), 'utf8');
     const vneedle = 'openerId: t.openerId ? String(t.openerId) : null';
-    const VPx = M.load('src/server/browser-viewport.js', vsrc.replace(vneedle, 'openerId: null'), 'no-opener');
+    const VPx = M.load('src/server/browser-viewport.js', editAnchor(vsrc, vneedle, 'openerId: null', "src/server/browser-viewport.js"), 'no-opener');
     const rx = await VPx.browserTargets(CDP);
     ok(vsrc.includes(vneedle) && rx.ok && !HM.humanTabSet(rx.targets, OWN_TAB).has(POP_TAB), 'CONTROL: a read that drops the opener makes his popup nobody\'s (refused, never closed by his Close) — the legs above can go red');
     try { await kv.stop(vp.id, { why: 'user' }); } catch { }
@@ -532,7 +532,7 @@ let work, solo, shop;
     const osrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const oneedle = "orphans: view ? HM.orphanTabSet(view.targets, view.own, { leased: reg.leases.some((l) => l.profileId === p.id) }) : null";
     ok(osrc.includes(oneedle), 'the orphan needle (the control below removes it)');
-    const Ko = M.load('src/server/browser-keeper.js', osrc.replace(oneedle, 'orphans: null'), 'no-orphans');
+    const Ko = M.load('src/server/browser-keeper.js', editAnchor(osrc, oneedle, 'orphans: null', "src/server/browser-keeper.js"), 'no-orphans');
     const oc = await orphanLeg(Ko, 'data-orph-c');
     ok(oc.take && oc.take.refused === 'not_your_tab' && !oc.ran && !oc.closed.includes('tab close C0C0000000000000000000000000000D'), 'CONTROL: the keeper copy without the orphan rule refuses the tab nobody holds (`not_your_tab`, its way out a live view that does not exist) and his Close leaves it — the leg above can go red', oc);
     // verify r3 (#3, the conversation comes BACK while he holds its old tab): r2 remembered a lease that LEFT its page only
@@ -627,8 +627,8 @@ let work, solo, shop;
     const rn1 = "    if (a.state === 'data') { rawDoc = a.value; reg = B.normalizeRegistry(rawDoc); }"; // (lane profile-lock-roll verify r7: the raw document is kept for the token dedupe's report)
     const rn2 = 'adopted: Array.isArray(r.adopted) ? r.adopted.slice() : [], fresh: null';
     ok(rsrc.includes(rn1) && rsrc.includes(rn2), 'the restart needles (the controls below remove each layer)');
-    const Kr1 = M.load('src/server/browser-keeper.js', rsrc.replace(rn1, rn1.replace('; }', '; reg.leftTabs = {}; }')), 'left-not-loaded');
-    const Kr2 = M.load('src/server/browser-keeper.js', rsrc.replace(rn2, 'adopted: [], fresh: null'), 'adopted-not-loaded');
+    const Kr1 = M.load('src/server/browser-keeper.js', editAnchor(rsrc, rn1, rn1.replace('; }', '; reg.leftTabs = {}; }'), "src/server/browser-keeper.js"), 'left-not-loaded');
+    const Kr2 = M.load('src/server/browser-keeper.js', editAnchor(rsrc, rn2, 'adopted: [], fresh: null', "src/server/browser-keeper.js"), 'adopted-not-loaded');
     const cr1 = await restartLeftLeg(Kr1, 'data-left-rc1'), cr2 = await restartLeftLeg(Kr2, 'data-left-rc2');
     ok(!cr1.leftAfterRestart && !cr1.marked && cr2.leftAfterRestart && cr2.marked && !cr2.closed.includes('tab close C0C0000000000000000000000000002D'), 'CONTROLS: a keeper that loads no leftTabs marks nothing after the restart; one that loads no adopted tabs leaves the tab he took open at his Close — the leg above can go red', { cr1: { left: cr1.leftAfterRestart, marked: cr1.marked }, cr2: { closed: cr2.closed } });
     const RN = B.normalizeRegistry({ leftTabs: { 'bp-0000e0d5': { 'bk-0000e0d5': 5, 'bk-0000e0d6.2': 6, 'xx': 7 } }, humans: { 'bp-0000e0d5': { key: 'hu-0000e0d5', adopted: ['C0C0000000000000000000000000002D', 'nope'], state: 'away' } } });
@@ -643,7 +643,7 @@ let work, solo, shop;
       'verify r3: the returning session\'s bind FAILS ⇒ its attach is refused `tab_unbound` (never a command in the page he took), the mark stays and its next command binds a new tab', lFail);
     const fneedle = "      if (!bound && hu && Array.isArray(hu.adopted) && hu.adopted.length) throw namedError('tab_unbound',";
     const fsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const Kf = M.load('src/server/browser-keeper.js', fsrc.replace(fneedle, "      if (false) throw namedError('tab_unbound',"), 'bind-fails-open');
+    const Kf = M.load('src/server/browser-keeper.js', editAnchor(fsrc, fneedle, "      if (false) throw namedError('tab_unbound',", "src/server/browser-keeper.js"), 'bind-fails-open');
     const cFail = await leftLeg(Kf, 'data-left-fc', 'detach', { failBind: true });
     ok(fsrc.includes(fneedle) && cFail.failedBind && cFail.failedBind.attached === true, 'CONTROL: the keeper copy that only warns on a failed bind attaches (the command would run in his page) — the leg above can go red', cFail);
     // verify r4 (the tab-release census / THE BOUND): noteLeftTab keeps 64 keys per profile and DROPPED the oldest silently —
@@ -675,7 +675,7 @@ let work, solo, shop;
     ok(capL.kept === 64 && capL.take && capL.take.adopted === true && capL.oldestBackNewTab === 1, 'verify r4: the left-tab bound (64 per profile) FAILS CLOSED — 65 conversations leave a page, he takes one, the one the bound evicted binds a NEW tab on its return (never lands in his page)', capL);
     const csrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const cneedle = "{ markTabLost(pd.id, x, 'closed'); delete m[x]; }"; // lane profile-lock-roll: the ONE mark pair (verify r1 F6: the needle follows the rename)
-    const capC = await capLeg(M.load('src/server/browser-keeper.js', csrc.replace(cneedle, 'delete m[x];'), 'left-bound-forgets'), 'data-left-capc');
+    const capC = await capLeg(M.load('src/server/browser-keeper.js', editAnchor(csrc, cneedle, 'delete m[x];', "src/server/browser-keeper.js"), 'left-bound-forgets'), 'data-left-capc');
     ok(csrc.includes(cneedle) && capC.kept === 64 && capC.oldestBackNewTab === 0, 'CONTROL: a keeper copy whose bound only forgets (r3) binds the evicted conversation nothing on its return — the leg above can go red', capC);
     // verify r4 (the tab-release census / THE TAKE IS MADE WHERE IT IS JUDGED): r3 adopted AFTER his `tab <id>` returned — a
     // conversation that came back inside that window cleared its own leftTabs entry ("back on its own tab") before the
@@ -736,7 +736,7 @@ let work, solo, shop;
       const ff = path.join(AB, 'fail-tabnew-vs-' + KA); fs.writeFileSync(ff, '1'); // its bind fails (a busy daemon, a timeout)
       const ru = await j('POST', '/api/agent/browser/use', { profile: 'Unbound' }, as(sA));
       const usrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-      const Ru = M.load('src/routes/browser.js', usrc.replace('  tab_unbound: 503,\n', ''), 'tab-unbound-500');
+      const Ru = M.load('src/routes/browser.js', editAnchor(usrc, '  tab_unbound: 503,\n', '', "src/routes/browser.js"), 'tab-unbound-500');
       Ru.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
       const au = express(); au.use(express.json()); au.use(Ru.router);
       const su = http.createServer(au); servers.push(su); await new Promise((r) => su.listen(0, '127.0.0.1', r));
@@ -851,7 +851,7 @@ let work, solo, shop;
     const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const needle = "    if (humans.has(profileId)) throw namedError('browsing_yourself', HM.humanRefusalText('browsing_yourself', { label: p.label }));";
     ok(src.includes(needle), 'the Delete refusal needle');
-    const Kd = M.load('src/server/browser-keeper.js', src.replace(needle, ''), 'delete-under-him');
+    const Kd = M.load('src/server/browser-keeper.js', editAnchor(src, needle, '', "src/server/browser-keeper.js"), 'delete-under-them');
     const kd = mkKeeper(Kd, { dataDir: path.join(ROOT, 'data-del'), readTargets });
     const dp = kd.createProfile({ label: 'Del' }, { owner: { kind: 'instance', id: null } });
     await kd.browse(dp.id);
@@ -866,7 +866,7 @@ let work, solo, shop;
     const rd = await j('POST', `/api/browser/profiles/${dp2.id}/forget`, { release: true, unpin: true });
     ok(rd.status === 409 && rd.json.code === 'browsing_yourself' && k.browserOf(dp2.id).state === 'ready' && k.humanOf(dp2.id), 'verify r2: Delete… through its ROUTE (POST …/forget {release}) while he browses answers 409 `browsing_yourself` — nothing released, nothing stopped', rd.json);
     const trsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8');
-    const TRd = M.load('src/routes/browser-trace.js', trsrc.replace('browsing_yourself: 409, ', ''), 'delete-500');
+    const TRd = M.load('src/routes/browser-trace.js', editAnchor(trsrc, 'browsing_yourself: 409, ', '', "src/routes/browser-trace.js"), 'delete-500');
     TRd.setup({ keeper: k, trace, activeSessions: active, releaseProfile: (id) => R.releaseProfile(id), unpinProfile: (id) => R.unpinProfile(id), notice: () => { }, keyForPickedSession: (id) => R.keyForPickedSession(id) });
     const ad = express(); ad.use(express.json()); ad.use(TRd.router);
     const sd = http.createServer(ad); servers.push(sd); await new Promise((r) => sd.listen(0, '127.0.0.1', r));
@@ -943,7 +943,7 @@ let work, solo, shop;
   // the CONTROL's run (judged below, where it always stood): the keeper copy that restores nothing — its idle stop's landing time
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = '    for (const r of Object.values(reg.humans || {})) {';
-  const Kr = M.load('src/server/browser-keeper.js', src.replace(needle, '    for (const r of []) {'), 'memory-only-human');
+  const Kr = M.load('src/server/browser-keeper.js', editAnchor(src, needle, '    for (const r of []) {', "src/server/browser-keeper.js"), 'memory-only-human');
   const rc = await restartLeg(Kr, 'data-rc', { stops: true });
   try { await rc.k2.stop(rc.p.id, { why: 'user' }); } catch { } rc.k2.shutdown();
   const quietMs = Math.max(1000, 3 * (rc.stopLanded ? rc.waitedMs : 1000));
@@ -992,13 +992,13 @@ let work, solo, shop;
   ok(aw.at1130 === 'away' && aw.at1201 === null, 'verify r2: AWAY 11 h when the server restarted — still kept at 11 h 30, ended `left` at 12 h 01 after his ORIGINAL close (never a fresh 12 h from the restart)', aw);
   const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const aneedle = "awaySince: r.state === 'away' && r.awaySince ? r.awaySince : now(),";
-  const awc = await awayLeg(M.load('src/server/browser-keeper.js', ksrc.replace(aneedle, 'awaySince: now(),'), 'keep-from-restart'), 'data-awc');
+  const awc = await awayLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, aneedle, 'awaySince: now(),', "src/server/browser-keeper.js"), 'keep-from-restart'), 'data-awc');
   ok(ksrc.includes(aneedle) && awc.at1201 === 'away', 'CONTROL: a keeper copy that restarts the keep at the restart still keeps him at 12 h 01 — the leg above can go red', awc);
   const doc = { humans: { 'bp-0000aaa1': { key: 'hu-0000aaa1', since: 1 }, 'bp-0000aaa2': { key: 'hu-0000bbb2', since: 1 }, 'x': { key: 'hu-0000aaa3' } } };
   const kept = Object.keys(B.normalizeRegistry(doc).humans);
   const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
   const bneedle = " && v.key === 'hu-' + k.slice(3)).map(";
-  const Bn = M.load('src/browser-profiles.js', bsrc.replace(bneedle, ').map('), 'human-key-unchecked');
+  const Bn = M.load('src/browser-profiles.js', editAnchor(bsrc, bneedle, ').map(', "src/browser-profiles.js"), 'human-key-unchecked');
   ok(J(kept) === J(['bp-0000aaa1']) && bsrc.includes(bneedle) && Object.keys(Bn.normalizeRegistry(doc).humans).includes('bp-0000aaa2'), 'verify r2: a persisted holder is kept only when its key names its profile (a hand-edited or foreign row is dropped); CONTROL the copy without the check keeps the mismatched row — red', { kept });
 }
 // verify r2 (KILL CLASS / the heal): his Chrome dies under his page and a NEW one runs on the directory (the tick's heal, or
@@ -1051,8 +1051,8 @@ let work, solo, shop;
     const h2 = await healLeg(K, 'data-heal-2', { twoStep: true }), h3 = await healLeg(K, 'data-heal-3', { samePid: true });
     ok([h2, h3].every((x) => x.replaced && x.human === null && J(x.ended) === J(['stopped']) && x.browse === 'join' && x.hisNewTab === 1), 'verify r3 (the heal): he ends `stopped` when the tick first records the loss and the heal then relaunches (two steps), and when the new Chrome carries a recycled pid number with another starttime', { h2, h3 });
     const hsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const Kb = M.load('src/server/browser-keeper.js', hsrc.replace(': !!rec.browserLost);', ': false);'), 'replaced-no-loss-arm');
-    const Kc = M.load('src/server/browser-keeper.js', hsrc.replace('!(next.pid === b.pid && next.starttime === b.starttime)', '!(next.pid === b.pid)'), 'replaced-pid-only');
+    const Kb = M.load('src/server/browser-keeper.js', editAnchor(hsrc, ': !!rec.browserLost);', ': false);', "src/server/browser-keeper.js"), 'replaced-no-loss-arm');
+    const Kc = M.load('src/server/browser-keeper.js', editAnchor(hsrc, '!(next.pid === b.pid && next.starttime === b.starttime)', '!(next.pid === b.pid)', "src/server/browser-keeper.js"), 'replaced-pid-only');
     const c2 = await healLeg(Kb, 'data-heal-2c', { twoStep: true }), c3 = await healLeg(Kc, 'data-heal-3c', { samePid: true });
     ok(hsrc.includes(': !!rec.browserLost);') && c2.human !== null && c3.human !== null, 'CONTROLS: a copy without the recorded-loss arm keeps him on the dead tab after a two-step heal; a pid-only copy keeps him after a recycled pid — the leg above can go red', { c2: c2.human, c3: c3.human });
   }
@@ -1060,7 +1060,7 @@ let work, solo, shop;
   {
     const lsrc0 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const ln = "      const launched = v.how === 'launch' || (v.how === 'join' && !!rec && rec.startedBy === BROWSE_WHY);";
-    const Kl0 = M.load('src/server/browser-keeper.js', lsrc0.replace(ln, "      const launched = v.how === 'launch';"), 'launch-by-press-only');
+    const Kl0 = M.load('src/server/browser-keeper.js', editAnchor(lsrc0, ln, "      const launched = v.how === 'launch';", "src/server/browser-keeper.js"), 'launch-by-press-only');
     const hc = await healLeg(Kl0, 'data-heal-keep');
     ok(lsrc0.includes(ln) && hc.browse === 'join' && hc.keepMs === 10 * 60e3, 'CONTROL: the copy that counts only THIS press as his launch keeps his page 10 min after the heal — the leg above can go red', { keepMs: hc.keepMs });
   }
@@ -1071,7 +1071,7 @@ let work, solo, shop;
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = '    if (replaced) tabsWentWithBrowser(rec, seenBy);\n';
   ok(src.includes(needle), 'the replaced-browser needle (the control below removes it)');
-  const Kh = M.load('src/server/browser-keeper.js', src.replace(needle, ''), 'relaunch-keeps-dead-tabs');
+  const Kh = M.load('src/server/browser-keeper.js', editAnchor(src, needle, '', "src/server/browser-keeper.js"), 'relaunch-keeps-dead-tabs');
   const hc = await healLeg(Kh, 'data-heal-c');
   ok(hc.human === 'driving' && hc.browse === 'focus' && hc.hisNewTab === 0, 'CONTROL: the keeper copy that ignores the replacement keeps him "driving" a dead tab (Browse yourself = focus, no new tab) — the leg above can go red', hc);
 }
@@ -1124,7 +1124,7 @@ let work, solo, shop;
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = "      if (p && !isEph(p) && why !== 'switch') for (const l of reg.leases) if (l.profileId === profileId) markTabLost(profileId, l.browserKey, 'closed');"; // lane profile-lock-roll: the ONE mark pair (verify r1 F6)
   ok(src.includes(needle), 'the stop\'s tab-mark needle');
-  const Kq = M.load('src/server/browser-keeper.js', src.replace(needle, needle.replace("!isEph(p) && why", "!isEph(p) && !isMediated(p) && why")), 'mediated-unmarked');
+  const Kq = M.load('src/server/browser-keeper.js', editAnchor(src, needle, needle.replace("!isEph(p) && why", "!isEph(p) && !isMediated(p) && why"), "src/server/browser-keeper.js"), 'mediated-unmarked');
   const mc = await medLeg(Kq, 'data-mqc');
   ok(!mc.marked && mc.bound === 0, 'CONTROL: the keeper copy that leaves mediated leases unmarked binds nothing — the conversation keeps its gone tab (the real binary answered `tab_gone`) — red', mc);
 }
@@ -1133,7 +1133,7 @@ let work, solo, shop;
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const needle = '      const idle = B.browserIdle(rec, holdersOn(rec.profileId), t, idleMs());';
   ok(src.includes(needle), 'the idle clock reads holdersOn (the census needle)');
-  const Kc = M.load('src/server/browser-keeper.js', src.replace(needle, '      const idle = B.browserIdle(rec, reg.leases, t, idleMs());'), 'idle-leases-only');
+  const Kc = M.load('src/server/browser-keeper.js', editAnchor(src, needle, '      const idle = B.browserIdle(rec, reg.leases, t, idleMs());', "src/server/browser-keeper.js"), 'idle-leases-only');
   const kx = mkKeeper(Kc, { dataDir: path.join(ROOT, 'data-x') });
   const xp = kx.createProfile({ label: 'X' }, { owner: { kind: 'instance', id: null } });
   await kx.browse(xp.id);
@@ -1411,8 +1411,8 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
     ok(mine.status === 200 && frame.status === 200 && /image\/jpeg/.test(frame.headers.get('content-type') || ''), '…the cookie path (no bearer) reads his entry and its frame as before', { entry: mine.status, frame: frame.status });
     // CONTROLS: a trace-routes copy whose guard is blind (the pre-r1 routes) answers his entry + frame to an agent token; a
     // copy whose guard knows only vsst_ answers them to a job token — the walk above can go red on each
-    const TRx = M.load('src/routes/browser-trace.js', rt.replace("const isAgentBearer = (req) => /^Bearer\\s+(vsst_|jbt_)/i.test(", "const isAgentBearer = (req) => false && /^Bearer\\s+(vsst_|jbt_)/i.test("), 'trace-guard-blind'); TRx.setup({ keeper: kb, trace: trace2, activeSessions: activeB, releaseProfile: () => null, unpinProfile: () => null, notice: () => { }, keyForPickedSession: () => null });
-    const TRj = M.load('src/routes/browser-trace.js', rt.replace("/^Bearer\\s+(vsst_|jbt_)/i", "/^Bearer\\s+(vsst_)/i"), 'trace-guard-vsst-only'); TRj.setup({ keeper: kb, trace: trace2, activeSessions: activeB, releaseProfile: () => null, unpinProfile: () => null, notice: () => { }, keyForPickedSession: () => null });
+    const TRx = M.load('src/routes/browser-trace.js', editAnchor(rt, "const isAgentBearer = (req) => /^Bearer\\s+(vsst_|jbt_)/i.test(", "const isAgentBearer = (req) => false && /^Bearer\\s+(vsst_|jbt_)/i.test(", "src/routes/browser-trace.js"), 'trace-guard-blind'); TRx.setup({ keeper: kb, trace: trace2, activeSessions: activeB, releaseProfile: () => null, unpinProfile: () => null, notice: () => { }, keyForPickedSession: () => null });
+    const TRj = M.load('src/routes/browser-trace.js', editAnchor(rt, "/^Bearer\\s+(vsst_|jbt_)/i", "/^Bearer\\s+(vsst_)/i", "src/routes/browser-trace.js"), 'trace-guard-vsst-only'); TRj.setup({ keeper: kb, trace: trace2, activeSessions: activeB, releaseProfile: () => null, unpinProfile: () => null, notice: () => { }, keyForPickedSession: () => null });
     const X = await serveW([TRx.router]), Jb = await serveW([TRj.router]);
     const cx = [await hit(X, 'GET', `/api/browser/actions/${clickE.id}`, undefined, 'vsst_' + 'w'.repeat(24)), await hit(X, 'GET', `/api/browser/actions/${clickE.id}/frame/before`, undefined, 'vsst_' + 'w'.repeat(24)), await hit(Jb, 'GET', `/api/browser/sessions?browserKey=${HL}`, undefined, 'jbt_' + 'w'.repeat(24)), await hit(Jb, 'GET', `/api/browser/actions/${clickE.id}`, undefined, 'jbt_' + 'w'.repeat(24))];
     ok(cx.every((x) => x.status === 200), 'CONTROLS: a blind trace guard answers his entry and its frame to vsst_; a vsst_-only guard answers his sessions and his entry to jbt_ — the walk above can go red on each', cx);
@@ -1454,7 +1454,7 @@ bridge.shutdown(); trace2.shutdown(); await up.close(); await up2.close();
   const bsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8');
   const gneedle = "    if (browse && /^Bearer\\s+(vsst_|jbt_)/i.test(";
   ok(bsrc.includes(gneedle), 'the parsed-query guard needle (the control below restores the raw-url regex)');
-  const BRx = M.load('src/server/browser-stream.js', bsrc.replace(gneedle, "    if (/[?&]browse=/.test(String(req.url || '')) && /^Bearer\\s+(vsst_|jbt_)/i.test("), 'raw-url-guard');
+  const BRx = M.load('src/server/browser-stream.js', editAnchor(bsrc, gneedle, "    if (/[?&]browse=/.test(String(req.url || '')) && /^Bearer\\s+(vsst_|jbt_)/i.test(", "src/server/browser-stream.js"), 'raw-url-guard');
   const bridgeX = BRx.create({ keeper: { ...kbView, setViewerAlive() { } }, activeSessions: activeB, requestAuthed: () => true, log: quiet }); // (its own viewer fact never replaces the real bridge's in the keeper)
   const bsrvX = http.createServer((_q, res) => { res.statusCode = 404; res.end(); });
   bsrvX.on('upgrade', (req, socket, head) => bridgeX.handleUpgrade(req, socket, head)); servers.push(bsrvX);
@@ -1519,8 +1519,8 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const took = (x) => x.how === 'stop' || (x.take && x.take.adopted === true);
   ok(legs.every((x) => took(x) && x.backNewTab === 1) && legs.filter((x) => x.how !== 'stop').every((x) => x.left) && legs.find((x) => x.how === 'narrow').closedMark && legs.find((x) => x.how === 'dropChild').again === legs.find((x) => x.how === 'dropChild').key,
     'THE PATHS over the fake 0.38.1 (beside ②\'s tick drop, agent detach, a helper\'s tick drop, Quit, the heal, the bound and the race): the UI\'s Detach, a helper\'s handle dropped (the next helper gets the SAME handle), a narrowing (its tab closed and marked), a restart without the conversation (the boot\'s drop), the row\'s Stop — each time the returning session binds a NEW tab first, never lands in the page he took', legs);
-  const dropC = await pathLeg(M.load('src/server/browser-keeper.js', ksrc.replace('    for (const l of reg.leases) if (l.browserKey === handle) noteLeftTab(l.profileId, handle);', '    // (control)'), 'drop-child-unrecorded'), 'data-rel-dropc', 'dropChild');
-  const bootC = await pathLeg(M.load('src/server/browser-keeper.js', ksrc.replace('      noteLeftTab(d.lease.profileId, d.lease.browserKey);\n', ''), 'tick-unrecorded'), 'data-rel-bootc', 'boot');
+  const dropC = await pathLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, '    for (const l of reg.leases) if (l.browserKey === handle) noteLeftTab(l.profileId, handle);', '    // (control)', "src/server/browser-keeper.js"), 'drop-child-unrecorded'), 'data-rel-dropc', 'dropChild');
+  const bootC = await pathLeg(M.load('src/server/browser-keeper.js', editAnchor(ksrc, '      noteLeftTab(d.lease.profileId, d.lease.browserKey);\n', '', "src/server/browser-keeper.js"), 'tick-unrecorded'), 'data-rel-bootc', 'boot');
   ok(dropC.take && dropC.take.adopted === true && dropC.backNewTab === 0 && bootC.take && bootC.take.adopted === true && bootC.backNewTab === 0, 'CONTROLS: a keeper copy whose dropChild records nothing, one whose reconcile records nothing — he takes the page and the returning session binds NO new tab (its next command would run in his page) — the legs above can go red', { dropC, bootC });
 }
 // (THE AGENT CAN NEVER REACH THE PERSON'S BROWSING: MOVED to the fast scripts/test-browser-human-pins.mjs — lane text-legs, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -1547,7 +1547,7 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
   const needle = '  if (refuseAgentBearer(req, res)) return;\n';
   ok((rsrc.split(needle).length - 1) === 4, 'the guard sits on the four routes (the control removes it)');
-  const Rx = M.load('src/routes/browser.js', rsrc.split(needle).join(''), 'no-agent-guard');
+  const Rx = M.load('src/routes/browser.js', editAnchor(rsrc, needle, '', "src/routes/browser.js", 'join'), 'no-agent-guard');
   Rx.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
   const ax = express(); ax.use(express.json()); ax.use(Rx.router);
   const sx = http.createServer(ax); servers.push(sx); await new Promise((r) => sx.listen(0, '127.0.0.1', r));
@@ -1558,7 +1558,7 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   // 16065c65 tree) — while he browses, only HIS Stop (a cookie) ends it; both tokens refused, the row's cookie Stop unchanged
   const stopA = await j('POST', `/api/browser/profiles/${gp.id}/stop`, {}, asA), stopJ = await j('POST', `/api/browser/profiles/${gp.id}/stop`, {}, asJob);
   ok(stopA.status === 403 && stopA.json.code === 'agent_forbidden' && stopJ.status === 403 && stopJ.json.code === 'agent_forbidden' && k.browserOf(gp.id).state === 'ready' && k.humanOf(gp.id), 'verify r2: an agent token (vsst_ / jbt_) on the row\'s Stop route while he browses is refused `agent_forbidden` — his page and the browser untouched', { stopA: stopA.status, stopJ: stopJ.status });
-  const Rz = M.load('src/routes/browser.js', rsrc.replace("  if (typeof k.humanOf === 'function' && k.humanOf(req.params.id) && refuseAgentBearer(req, res)) return;\n", ''), 'stop-for-agent-token');
+  const Rz = M.load('src/routes/browser.js', editAnchor(rsrc, "  if (typeof k.humanOf === 'function' && k.humanOf(req.params.id) && refuseAgentBearer(req, res)) return;\n", '', "src/routes/browser.js"), 'stop-for-agent-token');
   Rz.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
   const az = express(); az.use(express.json()); az.use(Rz.router);
   const sz = http.createServer(az); servers.push(sz); await new Promise((r) => sz.listen(0, '127.0.0.1', r));
@@ -1589,7 +1589,7 @@ console.log('— ③ censuses: no card for him (+ control), the holder readers, 
   const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
   const needle = "    if (row.profileId && typeof k.humanOf === 'function' && k.humanOf(row.profileId)) return res.status(409)";
   ok(rsrc.includes(needle), 'the strip-stop needle (the control below removes it)');
-  const Rs = M.load('src/routes/browser.js', rsrc.replace(needle, '    if (false) return res.status(409)'), 'strip-stops-his-page');
+  const Rs = M.load('src/routes/browser.js', editAnchor(rsrc, needle, '    if (false) return res.status(409)', "src/routes/browser.js"), 'strip-stops-their-page');
   Rs.setup({ keeper: k, activeSessions: active, notice: () => { }, tasksForSession: () => [] });
   const as2 = express(); as2.use(express.json()); as2.use(Rs.router);
   const ss = http.createServer(as2); servers.push(ss); await new Promise((r) => ss.listen(0, '127.0.0.1', r));

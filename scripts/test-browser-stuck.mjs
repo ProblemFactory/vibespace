@@ -146,9 +146,9 @@ function kindTable(mod) {
     const holdNeedle = "  if (held && !list.length) return { state: 'blind', why: 'held', count: 0, ...held };";
     const wordsNeedle = "  if (f.state === 'blind') return { chip: t('dialog watch blind'),";
     ok(src.includes(holdNeedle) && src.includes(wordsNeedle), 'CONTROL needles stand in src/browser-stuck.js');
-    const oldRule = table(MUT.load('src/browser-stuck.js', src.replace(holdNeedle, "  if (held) return { state: 'unresponsive', why: 'tab-held', count: 0, since: held.since };" + holdNeedle), 'held-at-once'));
+    const oldRule = table(MUT.load('src/browser-stuck.js', editAnchor(src, holdNeedle, "  if (held) return { state: 'unresponsive', why: 'tab-held', count: 0, since: held.since };" + holdNeedle, "src/browser-stuck.js"), 'held-at-once'));
     ok(!oldRule['held × ok 59 s ago ⇒ ok'] && !oldRule['held × no outcomes ⇒ blind (targetId, since)'], 'CONTROL: the old rule (a held tab ⇒ unresponsive at once) reddens the table', oldRule);
-    const noChip = table(MUT.load('src/browser-stuck.js', src.replace(wordsNeedle, "  if (false) return { chip: t('dialog watch blind'),"), 'blind-no-words'));
+    const noChip = table(MUT.load('src/browser-stuck.js', editAnchor(src, wordsNeedle, "  if (false) return { chip: t('dialog watch blind'),", "src/browser-stuck.js"), 'blind-no-words'));
     ok(!noChip['the blind words: a quiet info chip, no Restart, the tab named'], 'CONTROL: the words without the blind chip redden the table', noChip);
   }
 }
@@ -191,7 +191,7 @@ function a2Surfaces(mod) {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8');
   const needle = 'function pageText(s, max = MESSAGE_MAX) {';
   ok(src.includes(needle), 'control setup: pageText is found in src/browser-stuck.js');
-  const mut = MUT.load('src/browser-stuck.js', src.replace(needle, needle + ' return clean(s, max);'), 'a2-clean-only');
+  const mut = MUT.load('src/browser-stuck.js', editAnchor(src, needle, needle + ' return clean(s, max);', "src/browser-stuck.js"), 'a2-clean-only');
   ok(a2Surfaces(mut).filter((x) => CR.carriesFrame(x)).length > 0, 'CONTROL: page text that is only cleaned (the shipped rule before verify r1) leaves live frames in the agent\'s output — the A2 leg reddens on it');
 }
 // VERIFY r2 — THE REVERT TABLE'S HOLES in r1's A2 fix: parts that stayed green reverted ALONE. Each gets its own leg:
@@ -230,7 +230,7 @@ function a2Holes(mod) {
   const red = [];
   for (const [id, [a, b]] of Object.entries(parts)) {
     if (src.split(a).length !== 2) { red.push(id + ':needle'); continue; }
-    const holes = a2Holes(MUT.load('src/browser-stuck.js', src.replace(a, () => b), 'r2-hole-' + id));
+    const holes = a2Holes(MUT.load('src/browser-stuck.js', editAnchor(src, a, () => b, "src/browser-stuck.js"), 'r2-hole-' + id));
     if (holes.some((h) => h.startsWith(id + ' '))) red.push(id);
   }
   ok(red.join(',') === '1.2,1.8,1.9,1.11,1.12', 'CONTROLS: each of the five parts reverted ALONE reddens its own leg (they stayed green in the r1 suite)', red);
@@ -286,7 +286,7 @@ function invisibleLeak(mod) {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8');
   const needle = "const n = /[\\ud800-\\udbff]/.test(t.charAt(max - 2)) ? max - 2 : max - 1;";
   ok(src.includes(needle), 'control setup: the pair-safe cut is found in src/browser-stuck.js');
-  ok(cuts(MUT.load('src/browser-stuck.js', src.replace(needle, 'const n = max - 1;'), 'r2-1-split')).some((x) => LONE.test(x)), 'CONTROL: the r1 cut (max − 1 code units) leaves a lone surrogate — the leg above reddens on it');
+  ok(cuts(MUT.load('src/browser-stuck.js', editAnchor(src, needle, 'const n = max - 1;', "src/browser-stuck.js"), 'r2-1-split')).some((x) => LONE.test(x)), 'CONTROL: the r1 cut (max − 1 code units) leaves a lone surrogate — the leg above reddens on it');
 }
 // (the UI words — every kind × accept/dismiss × en/zh/ja a dictionary entry, the live view's toasts literal t() keys: MOVED to the fast scripts/test-browser-stuck-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
 // VERIFY r2 (reproduced): a beforeunload's BLOCK (what the bridge sends the live view, what an idle notice stores) carried
@@ -301,7 +301,7 @@ function invisibleLeak(mod) {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8');
   const needle = '  if (byChrome(d)) b.chromeText = true;';
   ok(src.includes(needle), 'control setup: the block\'s Chrome flag is found in src/browser-stuck.js');
-  const c = chromeWords(MUT.load('src/browser-stuck.js', src.replace(needle, ''), 'r2-chrome-words'));
+  const c = chromeWords(MUT.load('src/browser-stuck.js', editAnchor(src, needle, '', "src/browser-stuck.js"), 'r2-chrome-words'));
   ok(c.view === ST.BEFOREUNLOAD_TEXT && /the page's own words/.test(c.notice), 'CONTROL: a block without it shows the English sentence in the zh view and calls it the page\'s own words (the reproduced shape) — the leg above reddens on it', c);
 }
 // CONTROL 1: the daemons' default (every kind answered automatically) fails the kind table
@@ -309,7 +309,7 @@ function invisibleLeak(mod) {
   const src = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8');
   const needle = "if (!d || d.type !== 'alert') return { auto: false, why: 'it asks for a decision' };";
   ok(src.includes(needle), 'control setup: the per-kind rule is found in src/browser-stuck.js');
-  const mut = MUT.load('src/browser-stuck.js', src.replace(needle, "if (!d) return { auto: false, why: 'none' };"), 'auto-all');
+  const mut = MUT.load('src/browser-stuck.js', editAnchor(src, needle, "if (!d) return { auto: false, why: 'none' };", "src/browser-stuck.js"), 'auto-all');
   const bad = kindTable(mut);
   ok(bad.includes('beforeunload') && bad.includes('confirm'), `CONTROL: a verdict that auto-answers every kind (what 0.38.1 does to alert + beforeunload) fails the table: ${bad.join(', ')}`);
 }
@@ -387,16 +387,16 @@ console.log('①b PURE the navigation loop (the measured 0.38.1 shapes) + the si
   const tp = ST.loopText(vp);
   ok(/12 loads moving through "https:\/\/x\.test\/app\/1", "https:\/\/x\.test\/login\/2" and "https:\/\/x\.test\/app\/3" and 9 more addresses, settling on none in \d+ s \(a navigation loop\)/.test(tp) && /site-reset x\.test/.test(tp) && ST.loopBlock(vp).chain === true && !('chain' in ST.loopBlock(v4)), 'verify r2: the sentence says "moving through … settling on none" (never "cycling"), the block carries `chain`; a repeat loop carries none', { tp, b: ST.loopBlock(vp) });
   { const srcC = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8'); const cNeedle = 'if (chain && hs.length < chainFloor) return null;'; ok(srcC.includes(cNeedle), 'control setup: the chain rule is found in src/browser-stuck.js');
-    const mc = MUT.load('src/browser-stuck.js', srcC.replace(cNeedle, 'if (chain) return null;'), 'r2-no-chain');
+    const mc = MUT.load('src/browser-stuck.js', editAnchor(srcC, cNeedle, 'if (chain) return null;', "src/browser-stuck.js"), 'r2-no-chain');
     ok(mc.navigationLoopVerdict(pathNonce(12, (i) => `https://x.test/${i % 2 ? 'app' : 'login'}/${i}`), { now: BASE + 12 * 450 + 10 }) === null && !!mc.navigationLoopVerdict(cyc4(8), { now: BASE + 8 * 800 }), 'CONTROL: the repeat-only verdict reads the path-nonce loop as a hand-off (the 25 s timeout again) while the sign-in cycle still counts — the rows above redden on it'); }
   // verify r1: the USER's own clicks while they drive (a takeover) — stamped `user` by the watch — are never the page's loop
   const clicks = (user) => [{ at: BASE, url: 'https://mail.test/inbox', reason: null }].concat(Array.from({ length: 7 }, (_, i) => ({ at: BASE + (i + 1) * 1500, url: i % 2 ? 'https://mail.test/inbox' : 'https://mail.test/message/42', reason: 'anchorClick', reqAt: BASE + (i + 1) * 1500 - 1, user })));
   ok(ST.navigationLoopVerdict(clicks(true), { now: BASE + 7 * 1500 + 10 }) === null && !!ST.navigationLoopVerdict(clicks(false), { now: BASE + 7 * 1500 + 10 }), 'verify r1: seven clicks between an inbox and a message while the USER drives (hops stamped `user`) are the user\'s — never a loop; the same hops with nobody driving are the page\'s');
   { const srcU = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8'); const uNeedle = "if (e.user) return true; // verify r1"; ok(srcU.includes(uNeedle), 'control setup: the user-hop rule is found in src/browser-stuck.js');
-    const mu = MUT.load('src/browser-stuck.js', srcU.replace(uNeedle, 'if (false) return true; //'), 'loop-user-hops');
+    const mu = MUT.load('src/browser-stuck.js', editAnchor(srcU, uNeedle, 'if (false) return true; //', "src/browser-stuck.js"), 'loop-user-hops');
     ok(!!mu.navigationLoopVerdict(clicks(true), { now: BASE + 7 * 1500 + 10 }), 'CONTROL: a verdict blind to the user stamp calls the user\'s own clicking a loop — the row above reddens on it'); }
   { const srcR1 = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8'); const cNeedle = 'const chain = urls.length * 2 > hs.length;'; ok(srcR1.includes(cNeedle), 'control setup: the repeat rule is found in src/browser-stuck.js');
-    const mc = MUT.load('src/browser-stuck.js', srcR1.replace(cNeedle, 'if (urls.length > maxUrls) return null; const chain = false;'), 'loop-address-cap');
+    const mc = MUT.load('src/browser-stuck.js', editAnchor(srcR1, cNeedle, 'if (urls.length > maxUrls) return null; const chain = false;', "src/browser-stuck.js"), 'loop-address-cap');
     ok(mc.navigationLoopVerdict(cyc4(16), { now: BASE + 16 * 800 }) === null && !!ST.navigationLoopVerdict(cyc4(16), { now: BASE + 16 * 800 }), 'CONTROL: the pre-verify hard address cap never judges a 4-address cycle even at 16 hops — the rows above redden on it'); }
   // verify r3 #3: a SLOW run — one page hop every 3 s, every address new — never reached LOOP_CHAIN_HOPS inside the 30 s window
   // (10 a window), so a page that moved itself forty times in two minutes was never judged and every verb sat the timeout for
@@ -421,7 +421,7 @@ console.log('①b PURE the navigation loop (the measured 0.38.1 shapes) + the si
   const settledAt = chain13[12].at;
   ok(!!ST.navigationLoopVerdict(chain13, { now: settledAt }) && !!ST.navigationLoopVerdict(chain13, { now: settledAt + ST.LOOP_QUIET_MS }) && ST.navigationLoopVerdict(chain13, { now: settledAt + ST.LOOP_QUIET_MS + 1 }) === null && ['stop', 'tab', 'close', 'screenshot', 'site-reset', 'open', 'back', 'reload'].every((v) => ST.loopPasses(v)), 'verify r3 #3 (stated): a legitimate 12-hop chain settling on the 13th is a loop until LOOP_QUIET_MS after its last hop, then clears (the watch re-judges on its quiet timer, `loop-cleared` one tick later); every way-out verb runs regardless');
   { const srcL = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8'); const lNeedle = '  return long.length >= longFloor ? judge(long, longFloor) : null;'; ok(srcL.includes(lNeedle), 'control setup: the longer span is found in src/browser-stuck.js');
-    const ml = MUT.load('src/browser-stuck.js', srcL.replace(lNeedle, '  return null;'), 'r3-no-long-span');
+    const ml = MUT.load('src/browser-stuck.js', editAnchor(srcL, lNeedle, '  return null;', "src/browser-stuck.js"), 'r3-no-long-span');
     ok(firstJudged(ml, nonce3s(40)) === null && firstJudged(ml, slowRun(24, 7000, (i) => `https://bank.test/${i % 2 ? 'app' : 'login'}`)) === null && !!ml.navigationLoopVerdict(cyc4(8), { now: BASE + 8 * 800 }), 'CONTROL: the r2 verdict (the 30 s window only) never judges the slow nonce chain nor the slow bounce — the rows above redden on it; the fast shapes still judge'); }
   // the agent's own page turns: 8 clicks on "Next" (one list path, a changing query) — each click a command, its page turn right after
   const cmds = [], paging = [{ at: BASE, url: 'https://shop.test/list?p=1', reason: null }];
@@ -467,11 +467,11 @@ console.log('①b PURE the navigation loop (the measured 0.38.1 shapes) + the si
   const src = fs.readFileSync(path.join(REPO, 'src/browser-stuck.js'), 'utf8');
   const qNeedle = "return `${x.protocol}//${x.host.toLowerCase()}${x.pathname || '/'}`.slice(0, URL_MAX);";
   ok(src.includes(qNeedle), 'control setup: the address key is found in src/browser-stuck.js');
-  const mq = MUT.load('src/browser-stuck.js', src.replace(qNeedle, "return String(x.href).slice(0, URL_MAX);"), 'loop-keeps-query');
+  const mq = MUT.load('src/browser-stuck.js', editAnchor(src, qNeedle, "return String(x.href).slice(0, URL_MAX);", "src/browser-stuck.js"), 'loop-keeps-query');
   ok(judgedAt(mq, shapes.pendingLogin300ms) === null, 'CONTROL: an address that keeps its query never judges the incident\'s loop (a sign-in `state` makes every hop "new") — the leg above reddens on it');
   const aNeedle = "if (!e.same && (e.reason == null || e.reason === '')) return true; // browser-initiated: never the page's own";
   ok(src.includes(aNeedle), 'control setup: the browser-initiated rule is found in src/browser-stuck.js');
-  const ma = MUT.load('src/browser-stuck.js', src.replace(aNeedle, ''), 'loop-no-agent-hop');
+  const ma = MUT.load('src/browser-stuck.js', editAnchor(src, aNeedle, '', "src/browser-stuck.js"), 'loop-no-agent-hop');
   const agentOpens = shapes.pendingLogin300ms.slice(0, 4).concat([{ at: shapes.pendingLogin300ms[3].at + 100, url: 'https://elsewhere.test/', reason: null }], shapes.pendingLogin300ms.slice(0, 4).map((h, i) => ({ ...h, at: shapes.pendingLogin300ms[3].at + 200 + i * 300, reason: i ? h.reason : null })));
   ok(ST.navigationLoopVerdict(agentOpens, { now: agentOpens[agentOpens.length - 1].at }) === null && !!ma.navigationLoopVerdict(agentOpens, { now: agentOpens[agentOpens.length - 1].at }), 'CONTROL: a verdict that counts the agent\'s own navigations as the page\'s calls two short runs a loop — the rule above keeps them apart');
   // verify r4 #4 (reproduced on the real 0.38.1): a READABLE page that refreshes itself (<meta refresh> every second: every hop
@@ -723,7 +723,7 @@ async function stormRun(Dmod) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = 'ST.autoAnswerVerdict(d, { recent })';
   ok(src.includes(needle), 'control setup: the budget read is found in src/server/browser-dialogs.js');
-  const Dm = MUT.load('src/server/browser-dialogs.js', src.replace(needle, 'ST.autoAnswerVerdict(d, { recent: 0 })'), 'a3-no-budget');
+  const Dm = MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, 'ST.autoAnswerVerdict(d, { recent: 0 })', "src/server/browser-dialogs.js"), 'a3-no-budget');
   const c = await stormRun(Dm);
   ok(c.accepts >= 60 && !c.f.open, `CONTROL: without the budget the same page is accepted ${c.accepts} times in ${c.ms} ms and never stops (the reproduced storm) — the A3 leg reddens on it`, { accepts: c.accepts });
 }
@@ -748,7 +748,7 @@ async function stormRun(Dmod) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = '!d.byBrowser && !d.autoPending && ';
   ok(src.includes(needle), 'control setup: the in-flight rule is found in openIn');
-  const c = await slowAccept(MUT.load('src/server/browser-dialogs.js', src.replace(needle, '!d.byBrowser && '), 'a3-pending-open'));
+  const c = await slowAccept(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, '!d.byBrowser && ', "src/server/browser-dialogs.js"), 'a3-pending-open'));
   ok(c.mid && c.mid.type === 'alert', 'CONTROL: without it the alert being accepted reads as an open dialog (the verb would answer [dialog_open] for an alert) — the leg reddens on it', c.mid);
 }
 // VERIFY r2 #2 — the budget under attack: (a) a page ALTERNATING alert / confirm (every confirm held for a decision, the
@@ -814,7 +814,7 @@ async function driveAlert(Dmod) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = "if (d.type === 'alert' && userDrives(w.profileId)) { d.forUser = true; held(w, tid, d); return; }";
   ok(src.includes(needle), 'control setup: the drive rule is found in src/server/browser-dialogs.js');
-  const c = await driveAlert(MUT.load('src/server/browser-dialogs.js', src.replace(needle, ''), 'r2-2b-drive'));
+  const c = await driveAlert(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, '', "src/server/browser-dialogs.js"), 'r2-2b-drive'));
   ok(c.answers >= 1 && !c.view, 'CONTROL: without it VibeSpace accepts the alert under the user\'s hands (the reproduced shape) — the leg above reddens on it', c);
 }
 // VERIFY r1 of lane site-reset (reproduced): while the USER drove the browser, seven clicks between an inbox and a message
@@ -844,7 +844,7 @@ async function driveClicks(Dmod) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = "if (!h.same) { let u = false; try { u = userDrivesTab(w, e.targetId); } catch { u = false; } if (u) h.user = true; }";
   ok(src.includes(needle), 'control setup: the user stamp is found in src/server/browser-dialogs.js');
-  const c = await driveClicks(MUT.load('src/server/browser-dialogs.js', src.replace(needle, ''), 'r1-user-hops'));
+  const c = await driveClicks(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, '', "src/server/browser-dialogs.js"), 'r1-user-hops'));
   ok(c.driving === true, 'CONTROL: a watch that does not stamp the user\'s hops calls their clicking a loop — the row above reddens on it', c);
 }
 // VERIFY r2 of lane site-reset (reproduced): the user stamp reached EVERY tab of the browser — while the user drove one
@@ -876,7 +876,7 @@ async function driveReach(Dmod) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = 'try { u = userDrivesTab(w, e.targetId); }';
   ok(src.includes(needle), 'control setup: the driven-tab stamp is found in src/server/browser-dialogs.js');
-  const c = await driveReach(MUT.load('src/server/browser-dialogs.js', src.replace(needle, 'try { u = userDrives(w.profileId); }'), 'r2-stamp-every-tab'));
+  const c = await driveReach(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, 'try { u = userDrives(w.profileId); }', "src/server/browser-dialogs.js"), 'r2-stamp-every-tab'));
   ok(c.ownTab === false && c.clicks === false, 'CONTROL: a watch that stamps every tab of the browser hides the agent\'s own looping tab for the whole takeover — the row above reddens on it', c);
 }
 // VERIFY r3 #4 of lane site-reset (reproduced at the watch): a driving holder whose tabs are UNKNOWN — a live view before its
@@ -917,7 +917,7 @@ async function driveBlind(Dmod, { driver = KEY2 } = {}) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = '    const named = tabOwners(w, tid);\n    if (!named.length) return true;\n    return blind.some((bk) => named.includes(parentKey(bk)));';
   ok(src.includes(needle), 'control setup: the blind-driver rule is found in src/server/browser-dialogs.js');
-  const c = await driveBlind(MUT.load('src/server/browser-dialogs.js', src.replace(needle, '    return true;'), 'r3-blind-stamps-all'));
+  const c = await driveBlind(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, '    return true;', "src/server/browser-dialogs.js"), 'r3-blind-stamps-all'));
   ok(c.witnessed === false && c.witnessedStamped === 6 && c.keeperNamed === false, 'CONTROL: the r2 rule (unknown ⇒ every tab) hides A\'s own loop for the whole takeover — the rows above redden on it', c);
 }
 // VERIFY r2 of lane site-reset (reproduced on the real 0.38.1): on a SHARED profile a cooperative session's own tabs — the page
@@ -986,9 +986,9 @@ async function witnessRows(Dmod) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = 'if (e.seenAt) e.owner = e.opener ? openerOwner(w, e.opener) : personOwn ? null : createdOwner(w);'; // B-e674 follow (r694 (2)): the person browsing their own window makes it unclear (this suite's keeper stub has no personBrowsing: personOwn is false)
   ok(src.includes(needle), 'control setup: the creation witness (with the opener rule) is found in src/server/browser-dialogs.js');
-  const c = await witnessRows(MUT.load('src/server/browser-dialogs.js', src.replace(needle, ''), 'r2-no-witness'));
+  const c = await witnessRows(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, '', "src/server/browser-dialogs.js"), 'r2-no-witness'));
   ok(c.one.a.length === 0 && c.loop.a === false && c.loop.stA === false, 'CONTROL: a watch without the witness leaves the conversation\'s own tab out of its scope — the rows above redden on it (the real 0.38.1 shape before the fix)', c);
-  const c2 = await witnessRows(MUT.load('src/server/browser-dialogs.js', src.replace(needle, 'if (e.seenAt) e.owner = createdOwner(w);'), 'r3-opener-ignored'));
+  const c2 = await witnessRows(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, 'if (e.seenAt) e.owner = createdOwner(w);', "src/server/browser-dialogs.js"), 'r3-opener-ignored'));
   ok(c2.popup.aHasP1 === true && c2.popup.ownsA === 'ok' && c2.chain.p6a === 'ok', 'CONTROL: the r2 witness (the opener ignored) hands a stranger\'s popup — and the user\'s — to the verb in flight; the popup rows above redden on it', c2.popup);
 }
 // VERIFY r4 #1 of lane site-reset (reproduced on the real 0.38.1): B's `tab new` while A's slow `open` was in flight — two verbs
@@ -1090,7 +1090,7 @@ async function orphanRows(Dmod) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = "const orphan = watched && !d ? orphanBusy(w, scope) : { busy: false, loop: null };";
   ok(src.includes(needle), 'control setup: the orphan rule is found in src/server/browser-dialogs.js');
-  const c = await orphanRows(MUT.load('src/server/browser-dialogs.js', src.replace(needle, "const orphan = { busy: false, loop: null };"), 'r4-no-orphan-rule'));
+  const c = await orphanRows(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, "const orphan = { busy: false, loop: null };", "src/server/browser-dialogs.js"), 'r4-no-orphan-rule'));
   ok(c.orphan.bShared === false && c.orphan.bUn === false, 'CONTROL: a watch without the orphan rule tells a conversation holding tabs NOTHING of the orphan\'s loop (the r1 shape) — the row above reddens on it', c.orphan);
 }
 // verify r4 #4: the watch marks a hop LOADED on the main frame's frameStoppedLoading — a standing loop's `readable` follows
@@ -1202,13 +1202,13 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   // lane chrome-157 (the .402 claim C, rule 3(a)): the filter line now also holds the one-state kinds (session-status ONE_STATE_KINDS) —
   // the anchor follows the line as it stands; the mutant still cuts the WHOLE filter
   { const a = '    if (replaceKind || ONE_STATE_KINDS.has(n.kind)) rec.pendingNotices = rec.pendingNotices.filter((x) => !(x && x.kind === n.kind));\n';
-    if (ssrc.split(a).length === 2) { const SSm = MUT.load('src/session-status.js', ssrc.replace(a, '\n'), 'hole-4.1'); const r = await noticeCase('two-tabs', { SSmod: SSm }); if (r.length === 2) reds.push('4.1'); } else gone.push('4.1'); }
+    if (ssrc.split(a).length === 2) { const SSm = MUT.load('src/session-status.js', editAnchor(ssrc, a, '\n', "src/session-status.js"), 'hole-4.1'); const r = await noticeCase('two-tabs', { SSmod: SSm }); if (r.length === 2) reds.push('4.1'); } else gone.push('4.1'); }
   { const m = dCut('    if (d) withdrawNotices([d.id]);\n  }', '  }', 'hole-4.4'); const r = m && await noticeCase('answered', { Dmod: m }); if (r && r.length === 1) reds.push('4.4'); }
   { const m = dCut("by: 'tab-closed', at: now(), targetId: tid } }); withdrawNotices([dlg.id]); }", "by: 'tab-closed', at: now(), targetId: tid } }); }", 'hole-4.5'); const r = m && await noticeCase('tab-closed', { Dmod: m }); if (r && r.length === 1) reds.push('4.5'); }
   { const m = dCut('    if (!keepNotices) withdrawNotices(open.map((d) => d.id));', '', 'hole-4.6'); const r = m && await noticeCase('down', { Dmod: m }); if (r && r.length === 1) reds.push('4.6'); }
   { const m = dCut("down(w, 'the server is restarting', { keepNotices: true });", "down(w, 'the server is restarting');", 'hole-4.7'); const r = m && await noticeCase('shutdown', { Dmod: m }); if (r && r.length === 0) reds.push('4.7'); }
   { const a2 = '    rec.pendingNotices = keep;\n    if (!keep.length';
-    if (ssrc.split(a2).length === 2) { const SSm = MUT.load('src/session-status.js', ssrc.replace(a2, '    if (!keep.length'), 'hole-4.8'); const r = await noticeCase('answered', { SSmod: SSm }); if (r.length === 1) reds.push('4.8'); } else gone.push('4.8'); }
+    if (ssrc.split(a2).length === 2) { const SSm = MUT.load('src/session-status.js', editAnchor(ssrc, a2, '    if (!keep.length', "src/session-status.js"), 'hole-4.8'); const r = await noticeCase('answered', { SSmod: SSm }); if (r.length === 1) reds.push('4.8'); } else gone.push('4.8'); }
   ok(reds.join(',') === '2.6,4.1,4.4,4.5,4.6,4.7,4.8', 'CONTROLS: each of those seven parts reverted ALONE reddens its leg (they stayed green in the r1 suite; 4.8 = the store\'s own drop, beside another pending notice)', reds);
   ok(!gone.length, gone.length ? gone.map((g) => `control ${g}: its anchor is gone`).join(' · ') : 'CONTROLS: every one of the seven anchors is in the source as it stands (a gone anchor fails by name)', gone);
   // 5.3: a navigation that STOPS (a download, a 204, a stop) — or moves within the document — ends the loading run
@@ -1241,7 +1241,7 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const needle = "const okey = (pid, bk) => `${pid}|${bk || ''}`;";
   ok(src.includes(needle), 'control setup: the per-conversation run key is found in src/server/browser-dialogs.js');
   const run = (Dmod) => { const w = Dmod.create({ keeper: null, log: { warn() { } } }); for (let i = 0; i < 3; i++) w.noteOutcome(NAMED, { state: 'timeout', browserKey: KEY2 }); const f = w.factFor({ profileId: NAMED, browserKey: KEY, consume: false }); w.shutdown(); return f; };
-  ok(!run(D).stuck && run(MUT.load('src/server/browser-dialogs.js', src.replace(needle, "const okey = (pid, bk) => `${pid}|`;"), 'shared-run')).stuck, 'CONTROL: a run keyed by the browser alone says another conversation\'s timeouts are this one\'s — the shared-run leg reddens on it');
+  ok(!run(D).stuck && run(MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, "const okey = (pid, bk) => `${pid}|`;", "src/server/browser-dialogs.js"), 'shared-run')).stuck, 'CONTROL: a run keyed by the browser alone says another conversation\'s timeouts are this one\'s — the shared-run leg reddens on it');
 }
 // VERIFY r1 A1 (LOW): a direct call to the dialog route never answers a dialog under the user's hands. lane browser-windows:
 // the one-driver belt is gone with the drive claim — the user driving the WINDOW this lease is in (its own, or an older run's
@@ -1279,7 +1279,7 @@ async function noticeCase(scenario, { Dmod = D, SSmod = null } = {}) {
   const src = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
   const needle = 'if (v.auto) {';
   ok(src.includes(needle), 'control setup: the alert rule is found in src/server/browser-dialogs.js');
-  const Dm = MUT.load('src/server/browser-dialogs.js', src.replace(needle, 'if (false) {'), 'no-alert');
+  const Dm = MUT.load('src/server/browser-dialogs.js', editAnchor(src, needle, 'if (false) {', "src/server/browser-dialogs.js", 'first'), 'no-alert');
   const ch = await fakeChrome().listen(); ch.addTab('T1');
   const w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: ch.url }) }, log: { warn() { } } });
   await w.arm(NAMED);
@@ -1489,7 +1489,7 @@ try {
     const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
     const needle = "state: loading && !loading.over ? 'loading' : outcome"; // verify r2 #5: the rule as it reads since the run's grace
     ok(rsrc.includes(needle), 'control setup: the network rule is found in src/routes/browser.js');
-    const c7 = await slowSite(MUT.load('src/routes/browser.js', rsrc.replace(needle, 'state: outcome'), 'a7-slow'));
+    const c7 = await slowSite(MUT.load('src/routes/browser.js', editAnchor(rsrc, needle, 'state: outcome', "src/routes/browser.js"), 'a7-slow'));
     ok(/page_unresponsive/.test(c7.last.err) && c7.fact.stuck, 'CONTROL: routes that count a slow site\'s timeouts brand the browser "not responding" (the reproduced false Restart) — the A7 leg reddens on it', c7.last.err);
     dialogs.resetOutcomes(EPH);
   }
@@ -1525,12 +1525,12 @@ try {
     const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
     const dneedle = 'const since = e.navFirst || e.navSince;';
     ok(dsrc.includes(dneedle), 'control setup: the run\'s first start is found in src/server/browser-dialogs.js');
-    const c1 = await navLoop(MUT.load('src/server/browser-dialogs.js', dsrc.replace(dneedle, 'const since = e.navSince;'), 'r2-5-per-start'), R);
+    const c1 = await navLoop(MUT.load('src/server/browser-dialogs.js', editAnchor(dsrc, dneedle, 'const since = e.navSince;', "src/server/browser-dialogs.js"), 'r2-5-per-start'), R);
     ok(!c1.some((e) => /page_unresponsive/.test(e)), 'CONTROL: a clock restarted by every navigation start never reaches the grace — the loop is "loading" for ever (the reproduced shape); the leg above reddens on it', c1.map((e) => (e.match(/\[page_[a-z]+\]/g) || []).join(',')));
     const rsrc2 = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
     const rneedle2 = "loading: loading ? require('../browser-stuck.js').loadingText(loading, { now: loading.at }) : null";
     ok(rsrc2.includes(rneedle2), 'control setup: the loading words are found in src/routes/browser.js');
-    const c2 = await navLoop(D, MUT.load('src/routes/browser.js', rsrc2.replace(rneedle2, 'loading: null'), 'r2-5-silent'));
+    const c2 = await navLoop(D, MUT.load('src/routes/browser.js', editAnchor(rsrc2, rneedle2, 'loading: null', "src/routes/browser.js"), 'r2-5-silent'));
     ok(!c2.slice(0, 4).some((e) => /page_loading|page_unresponsive|loading for/.test(e)), 'CONTROL: routes that only keep the count (r1) tell the agent NOTHING for the first 2 minutes of timeouts — the reproduced silence; the leg above reddens on it', c2[0]);
     dialogs.resetOutcomes(EPH);
   }
@@ -1574,14 +1574,14 @@ try {
     const rsrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
     const rneedle = 'if (!fct.open && (fct.blind || fct.unattributed)) return blindSay(fct);';
     ok(rsrc.split(rneedle).length === 3, 'control setup: both blind refusals are found in src/routes/browser.js');
-    const c5 = await blindLegs(MUT.load('src/routes/browser.js', rsrc.split(rneedle).join(''), 'a5-blind'), 'control');
+    const c5 = await blindLegs(MUT.load('src/routes/browser.js', editAnchor(rsrc, rneedle, '', "src/routes/browser.js", 'join'), 'a5-blind'), 'control');
     ok(c5.statusCalls === 0 && /No page dialog is open/.test(c5.status.out) && c5.dismissCalls === 0 && /\[no_dialog\]/.test(c5.dismiss.err), 'CONTROL: routes that trust the blind watch say "No page dialog is open" and never ask the daemon (the reproduced dead end) — the A5 legs redden on it', { s: c5.status.out, d: c5.dismiss.err });
     // CONTROL (verify r2, the revert table's 3.6): a CLI that strips the browser CLI's dialog lines from its OWN fallback
     // `dialog status` whenever a note rode the answer — the status loses its only answer
     const cli36src = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
     const n36 = 'const strip = !!DS && !dialogVerb && !!(open || notes.length);';
     ok(cli36src.includes(n36), 'control setup: the fallback strip rule is found in data/bin/vibespace-browser');
-    const c36 = await blindLegs(R, 'c36', MUT.write('data/bin/vibespace-browser', cli36src.replace(n36, 'const strip = !!DS && !!(open || notes.length);'), 'r2-3-6-strip'));
+    const c36 = await blindLegs(R, 'c36', MUT.write('data/bin/vibespace-browser', editAnchor(cli36src, n36, 'const strip = !!DS && !!(open || notes.length);', "data/bin/vibespace-browser"), 'r2-3-6-strip'));
     ok(!/confirm dialog is open/.test(c36.status.out) && /a page alert was auto-accepted/.test(c36.status.err), 'CONTROL: a CLI that strips its own fallback\'s lines beside a note answers `dialog status` with nothing — the A5 status leg reddens on it', c36.status);
     ch.targets.delete('TB'); for (const c of ch.wss.clients) c.send(JSON.stringify({ method: 'Target.targetDestroyed', params: { targetId: 'TB' } }));
     await until(() => !dialogs.factFor({ profileId: EPH, browserKey: KEY, ephemeral: true, consume: false }).blind && !dialogs.factFor({ profileId: EPH, browserKey: KEY, ephemeral: true, consume: false }).stuck, 2000);
@@ -1592,7 +1592,7 @@ try {
   const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
   const pollNeedle = 'if (dlg && dlg.watched && dlg.profileId && !dialogVerb) {\n    (async () => {';
   ok(cliSrc.includes(pollNeedle), 'control setup: the long-poll is found in data/bin/vibespace-browser');
-  const noPoll = MUT.write('data/bin/vibespace-browser', cliSrc.replace(pollNeedle, 'if (false) {\n    (async () => {'), 'no-poll');
+  const noPoll = MUT.write('data/bin/vibespace-browser', editAnchor(cliSrc, pollNeedle, 'if (false) {\n    (async () => {', "data/bin/vibespace-browser"), 'no-poll');
   dialogs.resetOutcomes(EPH);
   fs.writeFileSync(LOG, '');
   setPlan({ open: { trigger: trigger('beforeunload'), hangMs: 2500, out: '{"success":false,"data":null,"error":"CDP command timed out: Page.navigate"}', exit: 1 } });
@@ -1686,7 +1686,7 @@ try {
     const rsrcR = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
     const belt = "  if (refuseAgentBearer(req, res, RESTART_IS_USERS)) return; // verify r2: the user's act";   // the .197 integration: THE one guard
     ok(rsrcR.split(belt).length === 3, 'control setup: the belt is found on both Restart routes');
-    const cr = await restartAs(MUT.load('src/routes/browser.js', rsrcR.split(belt).join(''), 'r2-restart-agent'), TOKEN);
+    const cr = await restartAs(MUT.load('src/routes/browser.js', editAnchor(rsrcR, belt, '', "src/routes/browser.js", 'join'), 'r2-restart-agent'), TOKEN);
     ok(cr.pr.status === 200 && cr.acts.join(',') === 'stop,start' && cr.sr.status !== 403, 'CONTROL: without it the agent\'s own token stops and restarts the user\'s browser (sign-in off) — the leg above reddens on it', cr);
   }
   // ③p lane browser-shared-profile-freeze (fleet fb-8727ee62fb / fb-0898d92d0a — MEASURED on agent-browser 0.38.2 + Chrome 154:
@@ -1749,7 +1749,7 @@ try {
     ch.silentAll = true; fs.writeFileSync(LOG, '');
     const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-browser'), 'utf8');
     const busyNeedle = "if (busyStand && DS && typeof DS.busyPasses === 'function' && !DS.busyPasses(words0[0] || '')) {";
-    const noBusy = MUT.write('data/bin/vibespace-browser', cliSrc.replace(busyNeedle, 'if (false) {'), 'no-page-busy');
+    const noBusy = MUT.write('data/bin/vibespace-browser', editAnchor(cliSrc, busyNeedle, 'if (false) {', "data/bin/vibespace-browser"), 'no-page-busy');
     r = await runCli(['eval', '1+1'], { cli: noBusy });
     ok(cliSrc.includes(busyNeedle) && evals() === 1 && !/page_busy/.test(r.out + r.err), '③p CONTROL: a CLI copy without the page-busy door spawns the browser CLI on the silent page (it would wait there — the base) — the legs above can go red', r.out + r.err);
     ch.silentAll = false;

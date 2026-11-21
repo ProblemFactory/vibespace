@@ -894,21 +894,21 @@ await section('§7 controls (patched copies)', async () => {
   const M = mutantCopies('exo', REPO);
   // (a) the judge that folds a spawn failure back into nothing
   const xsSrc = fs.readFileSync(path.join(REPO, 'src/exit-shell.js'), 'utf8');
-  const xsMut = xsSrc.replace("  if (!/^E[A-Z0-9]{2,15}$/.test(code)) return null;", '  return null;');
+  const xsMut = editAnchor(xsSrc, "  if (!/^E[A-Z0-9]{2,15}$/.test(code)) return null;", '  return null;', "src/exit-shell.js");
   ok(xsMut !== xsSrc, '(a) the patch applies');
   const XSa = M.load('src/exit-shell.js', xsMut, 'nojudge');
   const noent = await execFileP(`/nonexistent/vs-exo-${process.pid}-c`, [], { timeout: 5000 });
   ok(XSa.spawnFailure(noent.err) === null, 'CONTROL (a): a judge that answers null for the real ENOENT — the §1 leg goes red (the production fold)');
   // (b) the manager sending sh -lc whatever the capability (the pre-fix line)
   const mpSrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-  const mpMut = mpSrc.replace("const useShell = caps.includes(XS.RUN_SHELL_CAP);", 'const useShell = false;');
+  const mpMut = editAnchor(mpSrc, "const useShell = caps.includes(XS.RUN_SHELL_CAP);", 'const useShell = false;', "src/exit-proxy.js");
   ok(mpMut !== mpSrc, '(b) the patch applies');
   const wb = world({ Mgr: M.load('src/exit-proxy.js', mpMut, 'alwayssh').ExitProxyManager, caps: ['run-shell'], platform: 'win32' });
   await settle(wb.mgr.run(wb.sessions.get('wa'), 'wa', 'WINDOWS', 'hostname'));
   ok(wb.calls.length === 1 && wb.calls[0].form === 'argv' && wb.calls[0].cmd === 'sh', 'CONTROL (b): a hub that chooses the shell sends `sh -lc` to a daemon that advertised run-shell — the R1 leg goes red', wb.calls);
   // (c) the heads without the belt: a frame in the output is LIVE
   const erSrc = fs.readFileSync(path.join(REPO, 'src/exit-reach.js'), 'utf8');
-  const erMut = erSrc.replace("const text = PT.toAgentText(c.text, { max: Math.max(1, c.text.length), kind: 'block' });", 'const text = c.text;');
+  const erMut = editAnchor(erSrc, "const text = PT.toAgentText(c.text, { max: Math.max(1, c.text.length), kind: 'block' });", 'const text = c.text;', "src/exit-reach.js");
   ok(erMut !== erSrc, '(c) the patch applies');
   const Ec = M.load('src/exit-reach.js', erMut, 'nobelt');
   ok(readsLive(Ec.outputHeads({ stdout: LIVE }).stdout), 'CONTROL (c): without the belt a frame in a command\'s output is live in the stored head — the §2 / §3 legs go red');
@@ -929,22 +929,22 @@ await section('§7 controls (patched copies)', async () => {
   } finally { try { dm.stop(); } catch { } }
   // (e) verify r1 F1: a secret-shape rule that redacts nothing — the §2b table and the §3 printenv leg go red
   const ssSrc = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
-  const ssMut = ssSrc.replace("  if (!text) return { text, redacted: 0 };", '  return { text, redacted: 0 };');
+  const ssMut = editAnchor(ssSrc, "  if (!text) return { text, redacted: 0 };", '  return { text, redacted: 0 };', "src/secret-shapes.js", 'first');
   ok(ssMut !== ssSrc, '(e) the patch applies');
   const SSe = M.load('src/secret-shapes.js', ssMut, 'noredact');
   ok(SSe.redactSecrets('AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI').text.includes('wJalrXUtnFEMI') && SSe.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA').text.includes('MIIEpAIBAAKCAQEA'), 'CONTROL (e): a rule that redacts nothing keeps the key — the §2b rows go red (the production shape before verify r1)');
   // (f) verify r2 F1: the rule judging the RAW bytes (the fold after it) — the environ leg goes red
-  const erMutF = erSrc.replace('const folded = PT.foldHidden(pre.text);', 'const folded = pre.text;');
+  const erMutF = editAnchor(erSrc, 'const folded = PT.foldHidden(pre.text);', 'const folded = pre.text;', "src/exit-reach.js");
   ok(erMutF !== erSrc, '(f) the patch applies');
   const Ef = M.load('src/exit-reach.js', erMutF, 'foldafter');
   ok(/wJalrXUtnFEMI/.test(Ef.outputHeads({ stdout: 'PATH=/x\u0000AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI\u0000' }).stdout), 'CONTROL (f): with the fold after the rule a NUL-separated environ keeps its secret — the §2 environ leg goes red (the verify r1 shape)');
   // (g) verify r2 F2: the cut inside a value restored — the long-value rows go red
-  const ssMutG = ssSrc.replace('    const val = text.slice(headEnd, valEnd);', '    valEnd = Math.min(valEnd, headEnd + VALUE_MAX + 2);\n    const val = text.slice(headEnd, valEnd);');
+  const ssMutG = editAnchor(ssSrc, '    const val = text.slice(headEnd, valEnd);', '    valEnd = Math.min(valEnd, headEnd + VALUE_MAX + 2);\n    const val = text.slice(headEnd, valEnd);', "src/secret-shapes.js");
   ok(ssMutG !== ssSrc, '(g) the patch applies');
   const SSg = M.load('src/secret-shapes.js', ssMutG, 'valuecut');
   ok(/SSSSSSSS/.test(SSg.redactSecrets('TOKEN=' + 'S'.repeat(10240)).text), 'CONTROL (g): a cut at 4096 inside the value keeps its tail — the long-value rows go red (the verify r1 shape)');
   // (h) verify r2 F3: the continuation pass removed — the next-line rows go red
-  const ssMutH = ssSrc.replace("    const cont = redactContinuations(text, say); text = cont.text; n += cont.n;   // verify r2 F3: before R2 (R2 then hides the head's own value)", '');
+  const ssMutH = editAnchor(ssSrc, "    const cont = redactContinuations(text, say); text = cont.text; n += cont.n;   // verify r2 F3: before R2 (R2 then hides the head's own value)", '', "src/secret-shapes.js");
   ok(ssMutH !== ssSrc, '(h) the patch applies');
   const SSh = M.load('src/secret-shapes.js', ssMutH, 'nocont');
   ok(/hunter2/.test(SSh.redactSecrets('password:\n  hunter2').text) && /AAAA1/.test(SSh.redactSecrets('Private-Lines: 1\nAAAA1').text), 'CONTROL (h): without the continuation pass a YAML value on the next line and a .ppk keep their material — the §2b next-line rows go red (the verify r1 shape)');
@@ -959,7 +959,7 @@ await section('§7 controls (patched copies)', async () => {
   };
   let ruleCopies = 0;
   for (const [rule, [from, to]] of Object.entries(RULES)) {
-    const mut = ssSrc.replace(from, to);
+    const mut = editAnchor(ssSrc, from, to, "src/secret-shapes.js");
     ok(mut !== ssSrc, `(i) ${rule}: the patch applies`);
     const SSr = M.load('src/secret-shapes.js', mut, 'no' + rule); ruleCopies++;
     const reds = ROWS.filter(([, text, frag]) => { const r = SSr.redactSecrets(text); return frag ? (r.text.includes(frag) || !r.text.includes(SSr.REDACTED)) : r.text !== text; }).map(([name]) => name);
@@ -969,7 +969,7 @@ await section('§7 controls (patched copies)', async () => {
   // count there already reads ×20–62 (×26–63 at 1 → 8 KiB), and at the legs' 64 KiB its backtracks pass V8's 2^30 limit
   // (~15 s of unoptimized backtracking per control, measured) — the leg's own bound ×8.8 goes red at any of these sizes
   // (j) verify r3 F1: the backtracking R6 regex restored (`\S*(?:word)\S*`) — the §2c keyRun / regLine legs go red (×45 / ×54 at ×8)
-  const ssMutJ = ssSrc.replace('const REG_RE = /^([ \\t]*)(\\S+)([ \\t]{2,}REG_', 'const REG_RE = /^([ \\t]*)(\\S*(?:password|passwd|secret|token|key|cred|auth|cookie|session)\\S*)([ \\t]{2,}REG_');
+  const ssMutJ = editAnchor(ssSrc, 'const REG_RE = /^([ \\t]*)(\\S+)([ \\t]{2,}REG_', 'const REG_RE = /^([ \\t]*)(\\S*(?:password|passwd|secret|token|key|cred|auth|cookie|session)\\S*)([ \\t]{2,}REG_', "src/secret-shapes.js");
   ok(ssMutJ !== ssSrc, '(j) the patch applies');
   const fJ = M.write('src/secret-shapes.js', ssMutJ, 'regback');
   { const v = stepsOf(R3_SHAPES.keyRun, 512, 8, { module: fJ }); ok(!v.err && !v.ok, `CONTROL (j): the backtracking R6 reads quadratic by the count — ${stepsLine(v)} at ×8 input (the §2c leg goes red)`, v); }
@@ -981,42 +981,42 @@ await section('§7 controls (patched copies)', async () => {
   { const r = spawnSync(process.execPath, ['--input-type=module', '-e', `import(${JSON.stringify(path.join(REPO, 'scripts/work-meter.mjs'))}).then((m) => { try { m.startWorkMeter({ backtracks: true }); console.log('STARTED'); } catch (e) { console.log(e.message); } })`], { encoding: 'utf8', timeout: 60000 });
     ok(/needs a process started with --allow-natives-syntax --no-regexp-optimization --no-regexp-tier-up/.test(r.stdout) && !/STARTED/.test(r.stdout), 'the backtrack charge refuses a process started without its three flags', r.stdout + r.stderr); }
   // (k) verify r3 F2: the pre-check with its two blank runs restored — the §2c colonSpacesX leg goes red (×28 at ×8)
-  const ssMutK = ssSrc.replace('const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*[ \\t]*|["\'][^\\n]*)?(?:\\r?\\n|$)/;', 'const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*|["\'][^\\n]*)?[ \\t]*(?:\\r?\\n|$)/;');
+  const ssMutK = editAnchor(ssSrc, 'const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*[ \\t]*|["\'][^\\n]*)?(?:\\r?\\n|$)/;', 'const CONT_ANY_RE = /[:=][ \\t]*(?:[|>][+-]?\\d*|["\'][^\\n]*)?[ \\t]*(?:\\r?\\n|$)/;', "src/secret-shapes.js");
   ok(ssMutK !== ssSrc, '(k) the patch applies');
   const fK = M.write('src/secret-shapes.js', ssMutK, 'precheckback');
   { const v = stepsOf(R3_SHAPES.colonSpacesX, 512, 8, { module: fK }); ok(!v.err && !v.ok, `CONTROL (k): the two-run pre-check reads quadratic by the count — ${stepsLine(v)} at ×8 input (the §2c leg goes red)`, v); }
   // (l) verify r3 F3: the joiner fold removed — a joiner inside a secret name keeps its value (the §2c JOINED rows go red)
-  const ssMutL = ssSrc.replace("  if (text.includes('\\u200C') || text.includes('\\u200D')) text = text.replace(JOINER_IN_WORD_RE, '');", '');
+  const ssMutL = editAnchor(ssSrc, "  if (text.includes('\\u200C') || text.includes('\\u200D')) text = text.replace(JOINER_IN_WORD_RE, '');", '', "src/secret-shapes.js", 'first');
   ok(ssMutL !== ssSrc, '(l) the patch applies');
   const SSl = M.load('src/secret-shapes.js', ssMutL, 'nojoinfold');
   ok(/hunter2/.test(SSl.redactSecrets('SEC\u200DRET=hunter2').text) && /ABCDEFGHIJ/.test(SSl.redactSecrets('gh\u200Dp_ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789').text), 'CONTROL (l): without the joiner fold a joiner inside a name or a prefix keeps the secret — the §2c JOINED rows go red (the verify r2 shape)');
   // (m) verify r3 F4: the half-marker trim removed — the §2c pad leg goes red (`TOKEN=«redac`)
-  const erMutM = erSrc.replace('    if (c.cut) c.text = withoutHalfMarker(c.text);', '');
+  const erMutM = editAnchor(erSrc, '    if (c.cut) c.text = withoutHalfMarker(c.text);', '', "src/exit-reach.js");
   ok(erMutM !== erSrc, '(m) the patch applies');
   const Em = M.load('src/exit-reach.js', erMutM, 'halfmarker');
   ok(/TOKEN=«redac$/.test(Em.outputHeads({ stdout: 'x'.repeat(4082) + '\nTOKEN=abcdef\n' }).stdout), 'CONTROL (m): without the trim the cut head ends in half a marker — the §2c pad leg goes red (the verify r2 shape)');
   // (n) verify r3 F5: CONT_HEAD's `.*` restored — the CRLF rows go red and contCR reads quadratic
-  const ssMutN = ssSrc.replace("\\3[ \\t]*[:=][ \\t]*([^\\n]*)$/;", '\\3[ \\t]*[:=][ \\t]*(.*)$/;');
+  const ssMutN = editAnchor(ssSrc, "\\3[ \\t]*[:=][ \\t]*([^\\n]*)$/;", '\\3[ \\t]*[:=][ \\t]*(.*)$/;', "src/secret-shapes.js");
   ok(ssMutN !== ssSrc, '(n) the patch applies');
   const fN = M.write('src/secret-shapes.js', ssMutN, 'contdot'), SSn = require(fN);
   { const v = stepsOf(R3_SHAPES.contCR, 512, 8, { module: fN }); ok(/hunter2/.test(SSn.redactSecrets('password:\r\n  hunter2\r\n').text) && !v.err && !v.ok, `CONTROL (n): with \`.*\` the CRLF continuation keeps hunter2 and contCR reads quadratic by the count — ${stepsLine(v)} at ×8 (the §2c rows go red)`, v); }
   // (o) verify r3 F6: the indent compared by characters again — the tab row goes red
-  const ssMutO = ssSrc.replace('      if (indentCols(l) <= indent) break;', '      if (indentChars(l) <= indentChars(lines[i])) break;');
+  const ssMutO = editAnchor(ssSrc, '      if (indentCols(l) <= indent) break;', '      if (indentChars(l) <= indentChars(lines[i])) break;', "src/secret-shapes.js");
   ok(ssMutO !== ssSrc, '(o) the patch applies');
   const SSo = M.load('src/secret-shapes.js', ssMutO, 'indentchars');
   ok(/hunter2/.test(SSo.redactSecrets('    password:\n\thunter2\nnext: 1').text), 'CONTROL (o): by characters a tab under four spaces is shallower and its secret stays — the §2c tab row goes red (the verify r2 shape)');
   // (p) verify r3 F7: the open-quote clause removed — the two-line quoted rows go red
-  const ssMutP = ssSrc.replace(' && !openQuote(val))) continue;', ')) continue;');
+  const ssMutP = editAnchor(ssSrc, ' && !openQuote(val))) continue;', ')) continue;', "src/secret-shapes.js");
   ok(ssMutP !== ssSrc, '(p) the patch applies');
   const SSp = M.load('src/secret-shapes.js', ssMutP, 'noopenquote');
   ok(/def"/.test(SSp.redactSecrets('password: "abc\n  def"\nnext: 1').text) && !/def"/.test(SS.redactSecrets('password: "abc\n  def"\nnext: 1').text), 'CONTROL (p): without the open-quote clause the scalar\'s second line stays, with it it goes — the §2c quoted rows go red (the verify r2 shape; the pre-check gate must admit the line too)');
   // (q) verify r4 F1: the `/\s+$/` trim restored — the §2d trim legs go red (×85–150 at ×8)
-  const ssMutQ = ssSrc.replace('    const trimmed = val.trimEnd();', "    const trimmed = val.replace(/\\s+$/, '');");
+  const ssMutQ = editAnchor(ssSrc, '    const trimmed = val.trimEnd();', "    const trimmed = val.replace(/\\s+$/, '');", "src/secret-shapes.js");
   ok(ssMutQ !== ssSrc, '(q) the patch applies');
   const fQ = M.write('src/secret-shapes.js', ssMutQ, 'trimre');
   { const v = stepsOf(R4_SHAPES.trimNbspBare, 512, 8, { module: fQ }); ok(!v.err && !v.ok, `CONTROL (q): the regex trim reads quadratic by the count — ${stepsLine(v)} at ×8 input (the §2d trim legs go red)`, v); }
   // (r) verify r4 F2: the PEM label regexes restored — the §2d pem legs go red (×70–100 at ×8)
-  const ssMutR = ssSrc.replace("function pemLine(line, word) {\n", "const PEM_RES = { BEGIN: /^\\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/, END: /^\\s*-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/ };\nfunction pemLine(line, word) {\n  return PEM_RES[word].test(line);\n");
+  const ssMutR = editAnchor(ssSrc, "function pemLine(line, word) {\n", "const PEM_RES = { BEGIN: /^\\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/, END: /^\\s*-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----\\s*$/ };\nfunction pemLine(line, word) {\n  return PEM_RES[word].test(line);\n", "src/secret-shapes.js");
   ok(ssMutR !== ssSrc, '(r) the patch applies');
   const fR = M.write('src/secret-shapes.js', ssMutR, 'pemre'), SSr = require(fR);
   { const v = stepsOf(R4_SHAPES.pemBeginStorm, 512, 8, { module: fR }); ok(!v.err && !v.ok && !/MIIEpAIBAAKCAQEA/.test(SSr.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----').text), `CONTROL (r): the label regex reads quadratic by the count — ${stepsLine(v)} at ×8 input, the plain block still hidden (the §2d pem legs go red)`, v); }
@@ -1028,7 +1028,7 @@ await section('§7 controls (patched copies)', async () => {
   const fS = M.write('src/secret-shapes.js', ssMutS, 'jwtre'), SSs = require(fS);
   { const v = stepsOf(R4_SHAPES.jwtDashStorm, 512, 8, { module: fS }); ok(!v.err && !v.ok && SSs.redactSecrets('x-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc y').text === 'x-eyJ«redacted» y', `CONTROL (s): the JWT alternative reads quadratic by the count — ${stepsLine(v)} at ×8 input, the plain token still hidden (the §2d jwt legs go red)`, v); }
   // (t) verify r4 F4: the per-head line-end search restored — the §2d work witness goes red (6 553 searches for one line)
-  const ssMutT = ssSrc.replace("    if (headEnd > lineEnd) { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }", "    { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }");
+  const ssMutT = editAnchor(ssSrc, "    if (headEnd > lineEnd) { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }", "    { const nl = text.indexOf('\\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }", "src/secret-shapes.js");
   ok(ssMutT !== ssSrc, '(t) the patch applies');
   const SSt = M.load('src/secret-shapes.js', ssMutT, 'nlperhead');
   { const c = countNl(SSt.redactSecrets, R4_WORK.kvQuotedLine(65536)); ok(c >= 6000, `CONTROL (t): the per-head search reads ${c} line-end searches for one line (the §2d work witness goes red)`); }
@@ -1043,23 +1043,23 @@ await section('§7 controls (patched copies)', async () => {
   const SSv = M.load('src/secret-shapes.js', ssMutV, 'r5first');
   ok(/hunter2/.test(SSv.redactSecrets('  Password  REG_SZ  hunter2\n').text) && !/hunter2/.test(SSv.redactSecrets('    Password    REG_SZ    hunter2\n').text), 'CONTROL (v): with R5 first a two-blank reg row keeps hunter2 (the four-blank one is hidden) — the §2d F7 row goes red');
   // (x) verify r5 F2: the guard refusing every `REG_` token restored — the §2e F2 row goes red (`password REG_hunter2` kept)
-  const ssMutX = ssSrc.replace('(?!«)(?!REG_(?:SZ|EXPAND_SZ|BINARY|MULTI_SZ|DWORD|QWORD|LINK|NONE)\\b)\\S{1,65536}/gi;', '(?!«)(?!REG_)\\S{1,65536}/gi;');
+  const ssMutX = editAnchor(ssSrc, '(?!«)(?!REG_(?:SZ|EXPAND_SZ|BINARY|MULTI_SZ|DWORD|QWORD|LINK|NONE)\\b)\\S{1,65536}/gi;', '(?!«)(?!REG_)\\S{1,65536}/gi;', "src/secret-shapes.js");
   ok(ssMutX !== ssSrc, '(x) the patch applies');
   const SSx = M.load('src/secret-shapes.js', ssMutX, 'regany');
   ok(/REG_hunter2/.test(SSx.redactSecrets('password REG_hunter2\n').text) && !/REG_hunter2/.test(SS.redactSecrets('password REG_hunter2\n').text) && !/hunter2/.test(SSx.redactSecrets('  Password  REG_SZ  hunter2\n').text), 'CONTROL (x): the any-REG_ guard keeps `REG_hunter2` after password (the reg row still hidden by R6) — the §2e F2 row goes red');
   // (w) verify r5 F1: the doubled-quote step removed from the close scan (backslashes only, the r4 shape) — the §2e F1 rows go red
-  const ssMutW = ssSrc.replace("else if (i + 1 < end && text[i + 1] === q) i = text.indexOf(q, i + 2); ", '');
+  const ssMutW = editAnchor(ssSrc, "else if (i + 1 < end && text[i + 1] === q) i = text.indexOf(q, i + 2); ", '', "src/secret-shapes.js");
   ok(ssMutW !== ssSrc, '(w) the patch applies');
   const SSw = M.load('src/secret-shapes.js', ssMutW, 'nodoubled');
   ok(/s-s3cret/.test(SSw.redactSecrets("password: 'it''s-s3cret'\n").text) && /anyone'/.test(SSw.redactSecrets("password: '\n  don''t\n  anyone'\n").text) && !/s-s3cret/.test(SS.redactSecrets("password: 'it''s-s3cret'\n").text), 'CONTROL (w): a close scan reading backslashes only keeps `s-s3cret` after the `\'\'` and ends the continuation at `don\'\'t` — the §2e F1 rows go red');
   // (dus) lane device-upgrade-stuck: the guard removed — a Windows agent without run-shell is sent `sh -lc` again (pre-fix)
-  const mpMutO = mpSrc.replace('if (!XS.canRunLine(platform, caps)) outdated =', 'if (false) outdated =');
+  const mpMutO = editAnchor(mpSrc, 'if (!XS.canRunLine(platform, caps)) outdated =', 'if (false) outdated =', "src/exit-proxy.js");
   ok(mpMutO !== mpSrc, '(dus) the patch applies');
   const wOm = world({ Mgr: M.load('src/exit-proxy.js', mpMutO, 'nooutdated').ExitProxyManager, caps: ['probe'], platform: 'win32' });
   const rOm = await settle(wOm.mgr.run(wOm.sessions.get('wa'), 'wa', 'WINDOWS', 'hostname'));
   ok(wOm.calls.length === 1 && wOm.calls[0].form === 'argv' && wOm.calls[0].cmd === 'sh' && !(rOm.e && rOm.e.code === 'device_agent_outdated'), 'CONTROL (dus): without the guard the hub sends `sh -lc` to a Windows agent that cannot run it — DUS-1 goes red', wOm.calls);
   // (dus2) the PURE rule answering "yes" for every agent — the same red, through the rule
-  const xsMutO = xsSrc.replace("  return !(platform === 'win32' && !(Array.isArray(capabilities) && capabilities.includes(RUN_SHELL_CAP)));", '  return true;');
+  const xsMutO = editAnchor(xsSrc, "  return !(platform === 'win32' && !(Array.isArray(capabilities) && capabilities.includes(RUN_SHELL_CAP)));", '  return true;', "src/exit-shell.js");
   ok(xsMutO !== xsSrc && M.load('src/exit-shell.js', xsMutO, 'canrunall').canRunLine('win32', []) === true, 'CONTROL (dus2): a canRunLine that says yes to a Windows agent without run-shell — DUS-3 goes red');
   for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 20, label: 'mutant-copy (exit-run): ' })) ok(r.pass, r.name, r.detail);
 });
@@ -1094,20 +1094,20 @@ await section('§8 exit-see-whole: the card and the owner\'s list carry the WHOL
   // CONTROLS (scripts/mutant-copy.mjs): each lane rule removed from a patched copy goes red
   const M8 = mutantCopies('exo8', REPO);
   const erSrc = fs.readFileSync(path.join(REPO, 'src/exit-reach.js'), 'utf8'), epSrc = fs.readFileSync(path.join(REPO, 'src/exit-proxy.js'), 'utf8');
-  const mA = erSrc.replace("...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanLines(cmd, CMD_MAX) } : {}),", "...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanCmd(cmd, 80) } : {}),");
+  const mA = editAnchor(erSrc, "...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanLines(cmd, CMD_MAX) } : {}),", "...(typeof cmd === 'string' && cmd.trim() ? { cmd: cleanCmd(cmd, 80) } : {}),", "src/exit-reach.js");
   ok(mA !== erSrc, '(see-a) the patch applies');
   const EA = M8.load('src/exit-reach.js', mA, 'cmdhead');
   ok(EA.cardOutput({ cmd: one }).cmd !== one && EA.cardOutput({ cmd: lines200 }).cmd !== lines200, 'CONTROL (see-a): the card\'s command cut to a flattened 80-character head (the pre-fix card) — §8 goes red');
-  const mB = erSrc.replace('folded: lines > CMD_FOLD_LINES || c.length > CMD_FOLD_CHARS', 'folded: lines > CMD_FOLD_LINES');
+  const mB = editAnchor(erSrc, 'folded: lines > CMD_FOLD_LINES || c.length > CMD_FOLD_CHARS', 'folded: lines > CMD_FOLD_LINES', "src/exit-reach.js");
   ok(mB !== erSrc && M8.load('src/exit-reach.js', mB, 'nolen').cmdFold('x'.repeat(1365)).folded === false, 'CONTROL (see-b): a fold that counts lines only — a 1 365-character one-liner is never folded (red)');
-  const mC = erSrc.replace('cmd: agent ? cleanCmd(l.cmd, CMD_MAX) : cleanLines(l.cmd, CMD_MAX)', 'cmd: cleanCmd(l.cmd, CMD_MAX)');
+  const mC = editAnchor(erSrc, 'cmd: agent ? cleanCmd(l.cmd, CMD_MAX) : cleanLines(l.cmd, CMD_MAX)', 'cmd: cleanCmd(l.cmd, CMD_MAX)', "src/exit-reach.js");
   ok(mC !== erSrc && M8.load('src/exit-reach.js', mC, 'flatrow').runRow(row).cmd !== row.cmd, 'CONTROL (see-c): the reader flattening the owner\'s rows (pre-fix) — the lines are lost (red)');
-  const mD = epSrc.replace('rec.cmd = E.cleanLines(rec.cmd, E.CMD_MAX);', "rec.cmd = rec.cmd.replace(/[\\u0000-\\u001f\\u007f]/g, ' ').slice(0, E.CMD_MAX);");
+  const mD = editAnchor(epSrc, 'rec.cmd = E.cleanLines(rec.cmd, E.CMD_MAX);', "rec.cmd = rec.cmd.replace(/[\\u0000-\\u001f\\u007f]/g, ' ').slice(0, E.CMD_MAX);", "src/exit-proxy.js");
   ok(mD !== epSrc, '(see-d) the patch applies');
   const wD = world({ tag: 'see-d', Mgr: M8.load('src/exit-proxy.js', mD, 'flataudit').ExitProxyManager, reply: okReply });
   await settle(wD.mgr.run(wD.sessions.get('wa'), 'wa', 'WINDOWS', lines200));
   ok(wD.audit().find((l) => l.verb === 'run').cmd !== lines200, 'CONTROL (see-d): the audit line flattening the lines (pre-fix) — the owner\'s list reads one line (red)');
-  const mE = epSrc.replace('exitRun: E.cardOutput({ cmd, code, ms,', 'exitRun: E.cardOutput({ code, ms,');
+  const mE = editAnchor(epSrc, 'exitRun: E.cardOutput({ cmd, code, ms,', 'exitRun: E.cardOutput({ code, ms,', "src/exit-proxy.js");
   ok(mE !== epSrc, '(see-e) the patch applies');
   const wE = world({ tag: 'see-e', Mgr: M8.load('src/exit-proxy.js', mE, 'nocmd').ExitProxyManager, reply: okReply });
   await settle(wE.mgr.run(wE.sessions.get('wa'), 'wa', 'WINDOWS', one));
@@ -1366,7 +1366,7 @@ await section('§8b the routes + the CLI: pull / push end to end, a refusal befo
     // CONTROL (x8): the pre-fix CLI (the pull's POST through global fetch) under the same clock gives up before the file lands — the leg above goes red
     const MC = mutantCopies('exo8b', REPO);
     const cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-exit'), 'utf8');
-    const cliMut = cliSrc.replace("await postLong('/api/agent/exit/pull'", "await post('/api/agent/exit/pull'");
+    const cliMut = editAnchor(cliSrc, "await postLong('/api/agent/exit/pull'", "await post('/api/agent/exit/pull'", "data/bin/vibespace-exit");
     ok(cliMut !== cliSrc, '(x8) the patch applies');
     const c10 = await cli(['pull', 'BOX', '/srv/slow.bin', 'slow-x8.bin'], ['--require', warp], MC.write('data/bin/vibespace-exit', cliMut, 'fetchpull'));
     // lane cli-call-timeouts: the short road is now THE ONE CALL's write bound (30 s, exit 124, the wait named) — before it, global fetch's 300 s headers deadline («fetch failed», exit 1)
@@ -1557,7 +1557,7 @@ else if (line === 'file-missing') { process.stderr.write(Buffer.from(${JSON.stri
   // CONTROLS (patched copies, never src/)
   const M9 = mutantCopies('exo9', REPO);
   const xsSrc9 = fs.readFileSync(path.join(REPO, 'src/exit-shell.js'), 'utf8');
-  const xsMut9 = xsSrc9.replace("  const label = cp == null ? null : codePageLabel(cp);", "  return { stdout: String(stdout), stderr: String(stderr), encoding: 'utf-8' };");
+  const xsMut9 = editAnchor(xsSrc9, "  const label = cp == null ? null : codePageLabel(cp);", "  return { stdout: String(stdout), stderr: String(stderr), encoding: 'utf-8' };", "src/exit-shell.js");
   ok(xsMut9 !== xsSrc9, '(w1) the patch applies');
   const reds = cpTable(M9.load('src/exit-shell.js', xsMut9, 'string')).filter(([c]) => !c).length;
   ok(reds >= 5, `CONTROL (w1): a decoder that is String(stdout) — ${reds} rows of the table go red`);

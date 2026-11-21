@@ -270,7 +270,7 @@ try {
   ok(!CMDLINE_RE.test(r.json.error), '…with no command line in its words', r.json.error);
   {
     const loud = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
-    const silent = loud.replace("    return { ok: false, code: (e && e.code) || 'launch_failed', pinned: true,", "    return { ...v, kind: 'none' }; return { ok: false, code: (e && e.code) || 'launch_failed', pinned: true,");
+    const silent = editAnchor(loud, "    return { ok: false, code: (e && e.code) || 'launch_failed', pinned: true,", "    return { ...v, kind: 'none' }; return { ok: false, code: (e && e.code) || 'launch_failed', pinned: true,", "src/routes/browser.js");
     ok(silent !== loud, 'control: the patched copy falls back instead of refusing');
     const Rs = M.load('src/routes/browser.js', silent, 'silent-fallback');
     Rs.setup(ctxFor(k));
@@ -352,7 +352,7 @@ try {
     facts[KA].turn = 'idle'; facts[KB].turn = 'idle'; facts[KD].turn = 'idle';
     // CONTROL: the pre-lane rule (every lease of the profile is a mate) — the per-window leg goes red
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const allMates = ksrc.replace("return WIN.windowMates({ leases: reg.leases, profileId, browserKey, instance: WIN.instanceOf(reg.browsers[profileId]) });", "return reg.leases.filter((l) => l && l.profileId === profileId && l.browserKey !== browserKey);");
+    const allMates = editAnchor(ksrc, "return WIN.windowMates({ leases: reg.leases, profileId, browserKey, instance: WIN.instanceOf(reg.browsers[profileId]) });", "return reg.leases.filter((l) => l && l.profileId === profileId && l.browserKey !== browserKey);", "src/server/browser-keeper.js");
     ok(allMates !== ksrc, 'control: the patched keeper copy takes every lease of the profile as a mate (the pre-lane rule)');
     const kc = mkKeeper(M.load('src/server/browser-keeper.js', allMates, 'all-mates'), { dataDir: path.join(ROOT, 'data-windows-c'), openWindow: winSeam, closeTarget: async () => ({ ok: true }) });
     fs.mkdirSync(path.join(ROOT, 'data-windows-c'), { recursive: true });
@@ -726,7 +726,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
   }
   // (d) CONTROL: with the fork rule off, an older terminal fork (a bare forkRequested) gets the PARENT's key — two conversations on one browser
   const FORK = '    const forkPending = !!conversationId && (restoredForkPending(view) || BB.bindableIdOf({ ...view, browserKeyFor: conversationId }) !== conversationId);\n';
-  const noFork = src.replace(FORK, '    const forkPending = false;\n');
+  const noFork = editAnchor(src, FORK, '    const forkPending = false;\n', "src/server/browser-key.js");
   if (ok(noFork !== src, 'CONTROL ③d: the patched copy without the fork rule')) {
     const engF = mkEngine(M.load('src/server/browser-key.js', noFork, 'no-fork-rule'));
     const vF = engF.ensureBrowserKey(sFk2, { sessionId: 'sess-fork2' });
@@ -918,7 +918,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     }
     // CONTROL (r2): the engine as it was before r2 (the ladder's pick at the MINT) — the same judge sees the later default
     const AT2 = "late = B.lateDefaultPin({ witness, ladder: ladder.refused ? { profileId: '', origin: 'harness' } : ladder });";
-    const asBefore = src.replace(AT2, "late = ladder.refused ? { profileId: '', origin: 'harness', at: null, by: null, source: 'none' } : { profileId: ladder.profileId || '', origin: ladder.origin, at: null, by: 'user', source: ladder.origin === 'conversation' ? 'conversation' : 'landing' };");
+    const asBefore = editAnchor(src, AT2, "late = ladder.refused ? { profileId: '', origin: 'harness', at: null, by: null, source: 'none' } : { profileId: ladder.profileId || '', origin: ladder.origin, at: null, by: 'user', source: ladder.origin === 'conversation' ? 'conversation' : 'landing' };", "src/server/browser-key.js");
     if (ok(asBefore !== src && !asBefore.includes(AT2), 'CONTROL ③f (r2): the patched copy (the ladder read at the MINT — the pre-r2 engine)')) {
       const engU = mkEngine2(M.load('src/server/browser-key.js', asBefore, 'ladder-at-mint'));
       R.setup(ctx2(engU));
@@ -933,7 +933,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     }
     // CONTROL 2: a copy that stamps the group cap from the group LIVE — the same judge sees the later cap
     const CAP2 = "k.stampGroupCap(bk.key, groupFacts, { value: B.witnessCap(witness) });";
-    const liveCap = src.replace(CAP2, 'k.stampGroupCap(bk.key, groupFacts);');
+    const liveCap = editAnchor(src, CAP2, 'k.stampGroupCap(bk.key, groupFacts);', "src/server/browser-key.js");
     if (ok(liveCap !== src && !liveCap.includes(CAP2), 'CONTROL ③f (r2): the patched copy (the group cap read LIVE at the mint)')) {
       const engC = mkEngine2(M.load('src/server/browser-key.js', liveCap, 'live-cap'));
       R.setup(ctx2(engC));
@@ -968,7 +968,7 @@ console.log('— ③ the late key: a keyless live session\'s first browser use m
     ok(realR.pin && !realR.widened && !realR.admits, '③f (2.369.196) keeper.restorePin (the real keeper, direct): the pin is written, NO profile\'s owner changes, the list still refuses the key', realR);
     const ksrcR = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
     const RP = "    reg.pins[browserKey] = { profileId: p.id, origin: witness.origin, at: Math.min(now(), Number(witness.at) || 0), by: witness.by === 'agent' ? 'agent' : 'user' };\n";
-    const widens = ksrcR.replace(RP, RP + "    addConversation(p, browserKey, null, {});\n");
+    const widens = editAnchor(ksrcR, RP, RP + "    addConversation(p, browserKey, null, {});\n", "src/server/browser-keeper.js");
     if (ok(ksrcR.split(RP).length === 2 && widens !== ksrcR, 'CONTROL ③f (2.369.196) setup: restorePin\'s pin write is found exactly once; the patched copy also ADDS the conversation (a witness read as an authorization)')) {
       const DATA3 = path.join(ROOT, 'data-late-pin-ctl'); fs.mkdirSync(DATA3, { recursive: true, mode: 0o700 });
       const kW = M.load('src/server/browser-keeper.js', widens, 'restore-widens').create({ ...keeperOpts2, dataDir: DATA3 });
@@ -1047,13 +1047,13 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   // (a) an admission that reads an unknown shape as "all"
   const aNeedle = "  if (u.unknown) return null;\n  const bare = (e) => GM.bareOf(e);\n";
   ok(bsrc.split(aNeedle).length === 2, 'control (a) setup: the fail-closed unknown of grantRowOf (the row the admission judges) is found exactly once');
-  const Ba = M.load('src/browser-profiles.js', bsrc.replace(aNeedle, "  if (u.unknown) return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: [{ kind: 'everyone' }], except: [] };\n  const bare = (e) => GM.bareOf(e);\n"), 'who-unknown-all');
+  const Ba = M.load('src/browser-profiles.js', editAnchor(bsrc, aNeedle, "  if (u.unknown) return { door: 'browser-profile', resource: String((p && p.id) || '-'), to: [{ kind: 'everyone' }], except: [] };\n  const bare = (e) => GM.bareOf(e);\n", "src/browser-profiles.js"), 'who-unknown-all');
   ok(sig(Ba) !== real && Ba.mayAttach(PROFS[3], { browserKey: KB }).ok, 'CONTROL (a): an admission reading an unknown shape as "all" admits everyone — THE TABLE\'s unknown row goes red', sig(Ba));
   // (b) a mayAttach that ignores Task Group rows
   // lane lg-group-parents U3b: the admission also hands the model the asker's lineage — the mutant drops both lists
   const bNeedle = "groupIds: Array.isArray(taskIds) ? taskIds : [], inheritedGroupIds: Array.isArray(inheritedTaskIds) ? inheritedTaskIds : [], groupsUnreadable: !!groupsUnreadable });\n";
   ok(bsrc.split(bNeedle).length === 2, 'control (b) setup: the Task Group admission (the asker\'s groups handed to the model) is found exactly once');
-  const Bb = M.load('src/browser-profiles.js', bsrc.replace(bNeedle, "groupIds: [], inheritedGroupIds: [], groupsUnreadable: !!groupsUnreadable });\n"), 'no-task-rows');
+  const Bb = M.load('src/browser-profiles.js', editAnchor(bsrc, bNeedle, "groupIds: [], inheritedGroupIds: [], groupsUnreadable: !!groupsUnreadable });\n", "src/browser-profiles.js"), 'no-task-rows');
   ok(sig(Bb) !== real && Bb.mayAttach(PROFS[2], ASK[2]).code === 'not_owner', 'CONTROL (b): a mayAttach ignoring task rows refuses a conversation in the listed Task Group — THE TABLE\'s "B in G" cells go red', sig(Bb));
   // a scratch keeper world seeded straight into its registry (no browser needed: the re-judge and the write are registry acts)
   const seedKeeper = (Kmod, tag, keys = [KA, KB, KC]) => {
@@ -1074,7 +1074,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   groupsOf.set(KB, ['T-G']); unreadable.add(KC);
   const kReal = seedKeeper(K, 'real-c');
   const rc = kReal.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA }] } });
-  const Kc = M.load('src/server/browser-keeper.js', ksrc.replace(cNeedle, ''), 'rejudge-detaches-unreadable');
+  const Kc = M.load('src/server/browser-keeper.js', editAnchor(ksrc, cNeedle, '', "src/server/browser-keeper.js"), 'rejudge-detaches-unreadable');
   const kMut = seedKeeper(Kc, 'mut-c');
   const rcm = kMut.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }, { kind: 'session', key: KA }] } });
   ok(rc.undecided.join() === KC && !rc.detached.length && kReal.leasesOn('bp-0000c0d1').some((l) => l.browserKey === KC), 'the re-judge (real keeper): an unreadable Task Group list KEEPS the lease (undecided), detaches nothing', rc);
@@ -1087,7 +1087,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const kReal2 = seedKeeper(K, 'real-d');
   const ed = await threw(() => kReal2.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] }, base: stale }));
   ok(ed && ed.code === 'list-changed' && B.whoMayUse(kReal2.profile('bp-0000c0d1')).mode === 'all', 'the keeper RE-ASKS the base (after the route\'s awaits): a stale one is list-changed, nothing written');
-  const Kd = M.load('src/server/browser-keeper.js', ksrc.replace(dNeedle, ''), 'ignores-base');
+  const Kd = M.load('src/server/browser-keeper.js', editAnchor(ksrc, dNeedle, '', "src/server/browser-keeper.js"), 'ignores-base');
   const kMut2 = seedKeeper(Kd, 'mut-d');
   const edm = await threw(() => kMut2.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] }, base: stale }));
   ok(!edm && B.whoMayUse(kMut2.profile('bp-0000c0d1')).mode === 'only', 'CONTROL (d): a keeper ignoring `base` overwrites a list it never read — the 409 leg goes red');
@@ -1098,7 +1098,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   kReal3.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] } });
   const pe = kReal3.setPin(KB, 'bp-0000c0d1', { origin: 'chosen', by: 'user' });
   ok(pe.added && B.whoMayUse(kReal3.profile('bp-0000c0d1')).who.some((w) => w.id === KB), 'the user\'s pick shows in the list (the panel draws the list — who can use it is never an invisible second reader)');
-  const Ke = M.load('src/server/browser-keeper.js', ksrc.replace(eNeedle, "    const added = null;\n"), 'pin-not-in-list');
+  const Ke = M.load('src/server/browser-keeper.js', editAnchor(ksrc, eNeedle, "    const added = null;\n", "src/server/browser-keeper.js"), 'pin-not-in-list');
   const kMut3 = seedKeeper(Ke, 'mut-e');
   kMut3.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'session', key: KA }] } });
   kMut3.setPin(KB, 'bp-0000c0d1', { origin: 'chosen', by: 'user' });
@@ -1109,7 +1109,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const KX = 'bk-0000c0e9'; // a key NO live session carries
   const kReal4 = seedKeeper(K, 'real-f', [KA, KX]);
   const rf = kReal4.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }] } });
-  const Kf = M.load('src/server/browser-keeper.js', ksrc.replace(fNeedle, "      const notNow = !!g.unreadable;\n"), 'stopped-is-no-group');
+  const Kf = M.load('src/server/browser-keeper.js', editAnchor(ksrc, fNeedle, "      const notNow = !!g.unreadable;\n", "src/server/browser-keeper.js"), 'stopped-is-no-group');
   const kMut4 = seedKeeper(Kf, 'mut-f', [KA, KX]);
   const rfm = kMut4.updateProfile('bp-0000c0d1', { use: { mode: 'only', who: [{ kind: 'task', id: 'T-G' }] } });
   ok(rf.undecided.join() === KX && rf.detached.map((d) => d.browserKey).join() === KA && kReal4.leasesOn('bp-0000c0d1').some((l) => l.browserKey === KX), 'the re-judge (real keeper): a list with a Task Group row keeps a STOPPED holder undecided (its groups are judged at its next command); the live one outside the group is detached', rf);
@@ -1141,7 +1141,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   };
   const wReal = countedKeeper(K, 'real-w'); const rw = narrow(wReal);
   ok(rw.detached.length === 49 && wReal.kk.leasesOn('bp-0000c0d1').length === 1 && wReal.counts.writes === 1 && wReal.counts.broadcasts === 1, `a narrowing over 50 leases (real keeper): 49 detached, ONE registry write, ONE broadcast (${wReal.counts.writes} / ${wReal.counts.broadcasts})`, wReal.counts);
-  const Kw = M.load('src/server/browser-keeper.js', ksrc.replace(wNeedle, "  function updateProfile(id, patch = {}, opts = {}) { return updateProfileNow(id, patch, opts); }\n"), 'unbatched-narrowing');
+  const Kw = M.load('src/server/browser-keeper.js', editAnchor(ksrc, wNeedle, "  function updateProfile(id, patch = {}, opts = {}) { return updateProfileNow(id, patch, opts); }\n", "src/server/browser-keeper.js"), 'unbatched-narrowing');
   const wMut = countedKeeper(Kw, 'mut-w'); const rwm = narrow(wMut);
   ok(rwm.detached.length === 49 && wMut.counts.writes >= 50 && wMut.counts.broadcasts >= 50, `CONTROL (w): the unbatched keeper writes and broadcasts once PER LEASE (${wMut.counts.writes} writes / ${wMut.counts.broadcasts} broadcasts) — the one-write leg goes red`, wMut.counts);
   wReal.kk.shutdown(); wMut.kk.shutdown();
@@ -1152,10 +1152,10 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const rsrcAll = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
   const BELT_LINE = 'router.use(AGENT_PREFIX, agentBelt);';
   ok(rsrcAll.split(BELT_LINE).length === 2, 'control (g)/(k) setup: the belt line is found once, and is peeled out of the view-layer controls below');
-  const rsrcG = rsrcAll.replace(BELT_LINE, '');
+  const rsrcG = editAnchor(rsrcAll, BELT_LINE, '', "src/routes/browser.js");
   const gNeedle = /profile: B\.agentProfileView\(p, agentFactsOf\(f\), \{ mediated: !!\(v\.profile && v\.profile\.mediated\) \}\)/;
   ok(gNeedle.test(rsrcG), 'control (g) setup: the agent backend route\'s view is found');
-  const Rg = M.load('src/routes/browser.js', rsrcG.replace(gNeedle, 'profile: v.profile'), 'backend-raw-record');
+  const Rg = M.load('src/routes/browser.js', editAnchor(rsrcG, gNeedle, 'profile: v.profile', "src/routes/browser.js"), 'backend-raw-record');
   const pG = k.createProfile({ label: 'Ctl G' }, { owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } });
   const sX = mkSession('sess-8', 'bk-0000c0e8', 'Outsider'); active.set('sess-8', sX); live.add('bk-0000c0e8');
   Rg.setup(ctxFor(k));
@@ -1170,7 +1170,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const tsrcH = fs.readFileSync(path.join(REPO, 'src/routes/browser-trace.js'), 'utf8');
   const hNeedle = /          if \(rs\) return res\.status\(STATUS\.no_browser_key\)\.json\([^\n]*\n/;
   ok(hNeedle.test(tsrcH), 'control (h) setup: the remote-holder refusal is found');
-  const TRh = M.load('src/routes/browser-trace.js', tsrcH.replace(hNeedle, ''), 'remote-key-row-accepted');
+  const TRh = M.load('src/routes/browser-trace.js', editAnchor(tsrcH, hNeedle, '', "src/routes/browser-trace.js"), 'remote-key-row-accepted');
   // identity verify r2 (2026-09-28): the KEEPER now refuses a remote key too (knownKeysOf skips it) — a second layer,
   // peeled out of THIS control: the route-only mutant runs over a keeper that knows no remote key, so the route's own check
   // is what the control measures (the real route over the same keeper still refuses)
@@ -1203,7 +1203,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   kIreal.reshapeStore((doc) => { doc.leases.push({ profileId: pI.id, browserKey: 'bk-0000dead', sessionId: 'sess-9', targetId: null, since: 1, input: 'agent', viewers: 0, carrierLostAt: null }); });
   const eI2 = await threw(() => kIreal.attach({ profileId: pI.id, browserKey: 'bk-0000dead', sessionId: 'sess-9' }));
   ok(eI2 && eI2.code === 'remote_session' && !kIreal.leasesOn(pI.id).some((l) => l.browserKey === 'bk-0000dead'), '…and a lease such a session took BEFORE the fence (planted in the registry) goes with the refusal');
-  const Ki = M.load('src/server/browser-keeper.js', ksrc.replace(iNeedle, "    if (false) {\n      const rr = B.remoteSessionRefusal({ label: p.label });\n"), 'no-remote-fence');
+  const Ki = M.load('src/server/browser-keeper.js', editAnchor(ksrc, iNeedle, "    if (false) {\n      const rr = B.remoteSessionRefusal({ label: p.label });\n", "src/server/browser-keeper.js"), 'no-remote-fence');
   const dIm = path.join(ROOT, 'data-ctl-im'); fs.mkdirSync(dIm, { recursive: true });
   const kImut = mkKeeper(Ki, { dataDir: dIm });
   const pIm = kImut.createProfile({ label: 'Ctl Im' }, { owner: { kind: 'instance', id: null } });
@@ -1219,7 +1219,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   ok(pj && !('added' in pj) && !B.whoMayUse(kIreal.profile(pI.id)).who.some((w) => w.id === 'bk-0000dead'), 'the real keeper: the user\'s pick for a remote spawn (remote:true) pins without adding');
   const pj2 = kIreal.setPin('bk-0000dead', pI.id, { origin: 'chosen', by: 'user' });
   ok(pj2 && !('added' in pj2) && !B.whoMayUse(kIreal.profile(pI.id)).who.some((w) => w.id === 'bk-0000dead'), '…and the same pick judged by the wiring\'s remote-key list (no `remote` flag) adds nothing either');
-  const Kj = M.load('src/server/browser-keeper.js', ksrc.replace(jNeedle, ''), 'add-ignores-remote');
+  const Kj = M.load('src/server/browser-keeper.js', editAnchor(ksrc, jNeedle, '', "src/server/browser-keeper.js"), 'add-ignores-remote');
   const dJ = path.join(ROOT, 'data-ctl-j'); fs.mkdirSync(dJ, { recursive: true });
   const kJ = mkKeeper(Kj, { dataDir: dJ });
   const pJ = kJ.createProfile({ label: 'Ctl J' }, { owner: { kind: 'only', who: [{ kind: 'session', id: KA }] } });
@@ -1231,7 +1231,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   const kNeedle1 = "  return B.agentDigestView(k.list(), agentFactsOf(f), (id) => k.profile(id));\n";
   const kNeedle2 = "    const agent = B.agentDigestView({ leases: v.leases, blocked: v.blocked }, agentFactsOf(f));\n";
   ok(rsrcG.split(kNeedle1).length === 2 && rsrcG.split(kNeedle2).length === 2, 'control (k) setup: the digest view and the backend view are found exactly once each');
-  const Rk = M.load('src/routes/browser.js', rsrcG.replace(kNeedle1, "  return { ...k.list(), profiles: k.list().profiles.map((row) => B.agentProfileView(k.profile(row.id) || row, agentFactsOf(f), { mediated: row.mediated })) };\n").replace(kNeedle2, "    const agent = { leases: v.leases, blocked: v.blocked };\n"), 'digest-raw-rows');
+  const Rk = M.load('src/routes/browser.js', editAnchor(editAnchor(rsrcG, kNeedle1, "  return { ...k.list(), profiles: k.list().profiles.map((row) => B.agentProfileView(k.profile(row.id) || row, agentFactsOf(f), { mediated: row.mediated })) };\n", "src/routes/browser.js"), kNeedle2, "    const agent = { leases: v.leases, blocked: v.blocked };\n", "src/routes/browser.js"), 'digest-raw-rows');
   Rk.setup(ctxFor(k));
   const srvK = await serve(Rk.router);
   const jK = jAt(`http://127.0.0.1:${srvK.address().port}`);
@@ -1244,7 +1244,7 @@ console.log('— the list\'s controls: each rule removed in a patched copy turns
   ok(kMut5.status === 200 && namesA(kMut5.json.leases) && kMut6.status === 200 && namesA(kMut6.json.leases), 'CONTROL (k): routes answering the raw rows hand the outsider First chat\'s key + webui id in both answers — the agent-view legs go red');
   const kNeedleP = "  if (ownRow(l, myKey)) return { ...l };\n";
   ok(bsrc.split(kNeedleP).length === 2, 'control (k′) setup: agentLeaseRow\'s own-row branch is found exactly once');
-  const Bk = M.load('src/browser-profiles.js', bsrc.replace(kNeedleP, "  return { ...l };\n"), 'lease-rows-whole');
+  const Bk = M.load('src/browser-profiles.js', editAnchor(bsrc, kNeedleP, "  return { ...l };\n", "src/browser-profiles.js"), 'lease-rows-whole');
   const dv = Bk.agentDigestView({ leases: [{ profileId: 'bp-0000c0c1', browserKey: KA, sessionId: 'sess-1' }], ephemerals: [], blocked: [], pins: {} }, { browserKey: KB });
   ok(dv.leases[0].browserKey === KA && !B.agentDigestView({ leases: [{ profileId: 'bp-0000c0c1', browserKey: KA, sessionId: 'sess-1' }], ephemerals: [], blocked: [], pins: {} }, { browserKey: KB }).leases[0].browserKey, 'CONTROL (k′): a PURE view keeping every lease row whole names the other conversation — the real one does not');
   srvK.close(); try { k.detach({ profileId: pG.id, browserKey: KA, by: 'user' }); } catch { } await k.stop(pG.id).catch(() => { }); active.delete('sess-8'); live.delete('bk-0000c0e8');
@@ -1433,21 +1433,21 @@ console.log('— ④ lane profile-lock-roll: a lock under this machine\'s PREVIO
     ok(sb.fileHost === HOST && Array.isArray(sb.hosts) && sb.hosts.join() === 'pod-old' && !sb.err && sb.launched === 1 && sb.left === 0, '④c THE SECOND BOOT: a boot that saved without a launch re-stamps the file under this name but the legacy record now CARRIES the old pod as its lineage — the next restart still takes the old pod\'s lock over', sb);
     // (d) CONTROLS — a patched copy per rule
     const bsrc = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
-    const noLineage = bsrc.replace("if (ours.includes(lockHost)) return { step: 'hostname', kind: 'stale-previous-host'", "if (false) return { step: 'hostname', kind: 'stale-previous-host'");
+    const noLineage = editAnchor(bsrc, "if (ours.includes(lockHost)) return { step: 'hostname', kind: 'stale-previous-host'", "if (false) return { step: 'hostname', kind: 'stale-previous-host'", "src/browser-profiles.js");
     ok(noLineage !== bsrc, '④d control setup: the lineage rule is where the control cuts');
     const Bpre = M.load('src/browser-profiles.js', noLineage, 'no-lineage');
     ok(Bpre.profileLockVerdict({ lock: { host: 'pod-old', pid: 77 }, hostname: HOST, dir: D, launchHosts: ['pod-old'] }).kind === 'foreign', '④d CONTROL: a verdict without the lineage rule reads the previous-host lock as foreign — the ④a row catches it (the pre-lane shape: userW\'s profile_locked)');
     // verify r1 (F1): a copy whose hostname rule ignores a holder alive here — the lane's first shape
-    const noLive = bsrc.replace('const liveHere = !!(holder && holder.alive && holder.cmdline != null && (holder.dirs || []).some((d) => sameDir(d, dir)));', 'const liveHere = false; /* CONTROL */');
+    const noLive = editAnchor(bsrc, 'const liveHere = !!(holder && holder.alive && holder.cmdline != null && (holder.dirs || []).some((d) => sameDir(d, dir)));', 'const liveHere = false; /* CONTROL */', "src/browser-profiles.js");
     ok(noLive !== bsrc, '④d control setup: the live-holder precondition is where the control cuts');
     const Bnl = M.load('src/browser-profiles.js', noLive, 'no-live-here');
     ok(Bnl.profileLockVerdict({ lock: { host: 'pod-old', pid: 77 }, hostname: HOST, dir: D, minted: true, mark: 'bp-00000001', launchHosts: ['pod-old'], holder: { pid: 77, alive: true, cmdline: `chrome\0--user-data-dir=${D}\0--vibespace-keeper=bp-00000001`, dirs: [D], starttime: 5, parentIsDaemon: false, parentPid: 1 } }).kind === 'stale-previous-host', '④d CONTROL: a verdict that does not ask whether the lock\'s pid is alive here takes a LIVE holder\'s lock over — the ④a live-holder rows catch it');
     const ksrc = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const noStamp = ksrc.replace(/stampLaunchHost\(rec, prevRec, p\.dir \|\| null\); \/\/ lane profile-lock-roll \(L1\)[^\n]*/, '/* CONTROL: no stamp */'); // (r4: the directory rides the stamp)
-    const noRemove = ksrc.replace('const removed = F.removeSingletonFiles(dir);', 'const removed = []; /* CONTROL: nothing removed */');
+    const noStamp = editAnchor(ksrc, /stampLaunchHost\(rec, prevRec, p\.dir \|\| null\); \/\/ lane profile-lock-roll \(L1\)[^\n]*/, '/* CONTROL: no stamp */', "src/server/browser-keeper.js", 'first'); // (r4: the directory rides the stamp)
+    const noRemove = editAnchor(ksrc, 'const removed = F.removeSingletonFiles(dir);', 'const removed = []; /* CONTROL: nothing removed */', "src/server/browser-keeper.js", 'first');
     ok(noStamp !== ksrc && noRemove !== ksrc, '④d control setup: the stamp and the removal are where the controls cut');
     // verify r1 (F2): a copy that keeps the file's writer only in memory — the lane's first shape
-    const noLoadStamp = ksrc.replace(/if \(fileHost\) for \(const rec of Object\.values\(reg\.browsers\)\)[^\n]*/, '/* CONTROL: the legacy witness stays in memory */');
+    const noLoadStamp = editAnchor(ksrc, /if \(fileHost\) for \(const rec of Object\.values\(reg\.browsers\)\)[^\n]*/, '/* CONTROL: the legacy witness stays in memory */', "src/server/browser-keeper.js");
     ok(noLoadStamp !== ksrc, '④d control setup: the load-time stamp is where the control cuts');
     const sbc = await secondBoot(M.load('src/server/browser-keeper.js', noLoadStamp, 'no-load-stamp'), 'control');
     ok(sbc.fileHost === HOST && !sbc.hosts && sbc.err === 'profile_locked' && sbc.launched === 0 && sbc.left === 3, '④d CONTROL: a keeper that never persists the file\'s writer onto the legacy record loses the witness at the first save — the second boot refuses the old pod\'s lock by name (the ④c second-boot leg catches it)', sbc);
@@ -1584,15 +1584,15 @@ console.log('— ④e verify r2 T1: the lock verdict as ONE closed table (pid ×
   try { for (const p of kE.list().profiles) await kE.stop(p.id).catch(() => { }); } catch { /* none */ } kE.shutdown();
   // CONTROLS — a patched copy per rule of the hostname branch (the lineage rule and the whole precondition have theirs in ④d)
   const bsrcE = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
-  const aliveAlone = bsrcE.replace('const liveHere = !!(holder && holder.alive && holder.cmdline != null && (holder.dirs || []).some((d) => sameDir(d, dir)));', 'const liveHere = !!(holder && holder.alive); /* CONTROL: alive here alone */');
-  const unreadableAsDead = bsrcE.replace("if (holder && holder.alive && holder.cmdline == null) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read", "if (false) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read");
+  const aliveAlone = editAnchor(bsrcE, 'const liveHere = !!(holder && holder.alive && holder.cmdline != null && (holder.dirs || []).some((d) => sameDir(d, dir)));', 'const liveHere = !!(holder && holder.alive); /* CONTROL: alive here alone */', "src/browser-profiles.js");
+  const unreadableAsDead = editAnchor(bsrcE, "if (holder && holder.alive && holder.cmdline == null) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read", "if (false) return { step: 'hostname', kind: 'foreign', pid, host: lockHost, why: `the lock (${lockPath}) was written on ${lockHost} and names pid ${pid}, which is alive on this machine but whose command line cannot be read", "src/browser-profiles.js");
   ok(aliveAlone !== bsrcE && unreadableAsDead !== bsrcE, '④e control setup: the directory test and the unreadable rule are where the controls cut');
   const tA = table(M.load('src/browser-profiles.js', aliveAlone, 'alive-alone'));
   ok(tA.bad.some((x) => /previous\|not-a-chrome\(reuse\): launch/.test(x)) && tA.bad.some((x) => /previous\|chrome\/other-dir: launch/.test(x)), '④e CONTROL: a verdict for which "alive here" alone is a live holder hands a reused pid under the previous name to Chromium as free — the launch hangs on its dialog (measured) — the table catches it', tA.bad.slice(0, 4));
   // verify r2 (F4) CONTROL: a keeper that ends its orphan under a previous name and launches into the lock it left
   {
     const ksrcE = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const noClear = ksrcE.replace('function clearEndedOrphanLock(p, dir, endedPid = null) {\n    const lk = F.readSingletonLock(dir);', 'function clearEndedOrphanLock(p, dir, endedPid = null) {\n    const lk = null; /* CONTROL: the ended orphan\'s lock is left */');
+    const noClear = editAnchor(ksrcE, 'function clearEndedOrphanLock(p, dir, endedPid = null) {\n    const lk = F.readSingletonLock(dir);', 'function clearEndedOrphanLock(p, dir, endedPid = null) {\n    const lk = null; /* CONTROL: the ended orphan\'s lock is left */', "src/server/browser-keeper.js");
     ok(noClear !== ksrcE, '④e control setup: the ended orphan\'s lock removal is where the control cuts');
     const DATA_C = path.join(ROOT, 'data-table-ctl'); fs.mkdirSync(DATA_C, { recursive: true });
     const kC = mkKeeper(M.load('src/server/browser-keeper.js', noClear, 'no-ended-orphan-lock-clear'), { dataDir: DATA_C, log: klogE });
@@ -1643,7 +1643,7 @@ console.log('— ④f verify r2 F1: a holder that takes the directory between th
   ok(lines.some((l) => /taken while launching/.test(l) && /profile_locked|your own browser/.test(l)), '④f …said in the journal: the directory was taken while launching', lines.filter((l) => /Race product/.test(l)).slice(-2));
   // CONTROL: a keeper that never judges the lock again after a failed launch — the reproduced shape
   const ksrcF = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-  const noRejudge = ksrcF.replace('function lockRefusalAfterLaunch(p, prev) {\n    if (!p || !p.dir) return null;', 'function lockRefusalAfterLaunch(p, prev) {\n    if (p) return null; /* CONTROL: no second judgement */');
+  const noRejudge = editAnchor(ksrcF, 'function lockRefusalAfterLaunch(p, prev) {\n    if (!p || !p.dir) return null;', 'function lockRefusalAfterLaunch(p, prev) {\n    if (p) return null; /* CONTROL: no second judgement */', "src/server/browser-keeper.js");
   ok(noRejudge !== ksrcF, '④f control setup: the second judgement is where the control cuts');
   const c = await run(M.load('src/server/browser-keeper.js', noRejudge, 'no-rejudge-after-launch'), 'control');
   ok(c.e1 && c.e1.code === 'launch_failed' && c.e2 && c.e2.code === 'profile_locked', '④f CONTROL: without the second judgement the first answer is a generic launch_failed and only the next command names the holder — the ④f race leg catches it', c);
@@ -1722,7 +1722,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   // ── F2: the clear is keyed on the ORPHAN'S pid — a lock rewritten between the end and the clear is left, never called ours ──
   const runF2 = async (Bmod, tag) => {
     const dd = path.join(ROOT, 'data-g-f2-' + tag); fs.mkdirSync(dd, { recursive: true });
-    const Kx = tag === 'product' ? K : M.load('src/server/browser-keeper.js', ksrcG.replace("require('../browser-profiles.js')", `require(${JSON.stringify(Bmod.__file)})`), 'keeper-over-' + tag);
+    const Kx = tag === 'product' ? K : M.load('src/server/browser-keeper.js', editAnchor(ksrcG, "require('../browser-profiles.js')", `require(${JSON.stringify(Bmod.__file)})`, "src/server/browser-keeper.js"), 'keeper-over-' + tag);
     const kk = mkKeeper(Kx, { dataDir: dd, log: klogG });
     const p = await mkProfG(kk, 'F2 ' + tag); const dead = await deadPidG(); const h = holderG(p.dir, p.id, relink(p.dir, `${STRANGER}-${dead}`)); await sleep(120); plantG(p.dir, PREV, h.pid);
     const l0 = linesG.length;
@@ -1735,7 +1735,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   ok(r2.left === 3 && r2.lock === `${STRANGER}-${r2.lock ? r2.lock.split('-').pop() : ''}` && r2.leftSaid === 1 && r2.lied === 0, '④g F2 a lock rewritten to a STRANGER\'s between the end and the clear is LEFT (not the orphan\'s pid), said so, never called "this machine\'s previous name"', r2);
   {
     const bsrcG = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
-    const noIdentity = bsrcG.replace('  if (endedPid != null && Number(lock.pid) !== Number(endedPid)) return', '  if (false && endedPid != null && Number(lock.pid) !== Number(endedPid)) return /* CONTROL: the clear is not keyed on the orphan\'s pid */');
+    const noIdentity = editAnchor(bsrcG, '  if (endedPid != null && Number(lock.pid) !== Number(endedPid)) return', '  if (false && endedPid != null && Number(lock.pid) !== Number(endedPid)) return /* CONTROL: the clear is not keyed on the orphan\'s pid */', "src/browser-profiles.js");
     ok(noIdentity !== bsrcG, '④g F2 control setup: the pid identity is where the control cuts');
     const fB = M.write('src/browser-profiles.js', noIdentity, 'no-ended-pid-identity', { esm: false }); const Bc = require(fB); Bc.__file = fB;
     const c2 = Bc.__file ? await runF2(Bc, 'control') : null;
@@ -1746,7 +1746,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
     const dd = path.join(ROOT, 'data-g-f3-' + tag); fs.mkdirSync(dd, { recursive: true });
     const real = F.createBrowserRuntime({ env }); let once = false; // armed AFTER the setup launch (the lineage is stamped by then)
     const rt = new Proxy(real, { get(t, k2) { if (k2 !== 'launch') return t[k2]; return async (ns, o) => { if (once && o && o.dir) { once = false; plantG(o.dir, PREV, await deadPidG()); return { ok: false, stderr: 'Command failed: agent-browser open about:blank', stdout: '', error: null }; } return t.launch(ns, o); }; } });
-    const Kx = tag === 'product' ? K : M.load('src/server/browser-keeper.js', ksrcG.replace("require('../browser-profiles.js')", `require(${JSON.stringify(Bmod.__file)})`), 'keeper-over-' + tag);
+    const Kx = tag === 'product' ? K : M.load('src/server/browser-keeper.js', editAnchor(ksrcG, "require('../browser-profiles.js')", `require(${JSON.stringify(Bmod.__file)})`, "src/server/browser-keeper.js"), 'keeper-over-' + tag);
     const kk = mkKeeper(Kx, { dataDir: dd, runtime: rt, log: klogG });
     const p = await mkProfG(kk, 'F3 ' + tag); const l0 = linesG.length; once = true;
     const e1 = await threw(() => kk.attach({ profileId: p.id, browserKey: KB, sessionId: 'sess-2' }));
@@ -1760,7 +1760,7 @@ console.log('— ④g verify r3: the ONE ordered lock verdict (+ the swap contro
   ok(/^profile_locked: /.test(r3.e1) && /previous name \(pod-old/.test(r3.e1) && /took the lock over now; run the command again/.test(r3.e1) && r3.left1 === 0 && r3.e2 === null && r3.renamed && r3.said === 1, '④g F3 the FIRST answer after a failed launch on a previous name\'s lock names it, takes it over (the lock gone, "renamed from"), says it once in the journal; the next command launches', r3);
   {
     const bsrcG = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8');
-    const noTakeover = bsrcG.replace("  if (v.kind === 'stale-previous-host') return { step: 'post-launch', kind: 'take-over', verdict: v };", "  /* CONTROL: a previous name's lock after a failed launch is nobody's business */");
+    const noTakeover = editAnchor(bsrcG, "  if (v.kind === 'stale-previous-host') return { step: 'post-launch', kind: 'take-over', verdict: v };", "  /* CONTROL: a previous name's lock after a failed launch is nobody's business */", "src/browser-profiles.js");
     ok(noTakeover !== bsrcG, '④g F3 control setup: the post-launch takeover is where the control cuts');
     const fB = M.write('src/browser-profiles.js', noTakeover, 'no-post-launch-takeover', { esm: false }); const Bc = require(fB); Bc.__file = fB;
     const c3 = Bc.__file ? await runF3(Bc, 'control') : null;
@@ -1975,16 +1975,16 @@ console.log('— ④h verify r4: the third judgement — userW\'s scenarios thro
   // ── the three patched-KEEPER controls ──
   const ksrcH = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   if (!isRoot) {
-    const noRemember = ksrcH.replace("    if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }", "    /* CONTROL: a retired record's lineage is nobody's memory */"); // (r5: re-anchored to the remember door)
+    const noRemember = editAnchor(ksrcH, "    if (p.dir && reg.browsers[id]) { const rr = reg.browsers[id]; if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true }); else lineageLedger('retire-skipped-refused', { dir: dirKeyOf(p.dir), id }); }", "    /* CONTROL: a retired record's lineage is nobody's memory */", "src/server/browser-keeper.js"); // (r5: re-anchored to the remember door)
     ok(noRemember !== ksrcH, '④h control setup: the retire-time remember is where the control cuts');
     const c1 = await runEph(M.load('src/server/browser-keeper.js', noRemember, 'no-dir-lineage-at-retire'), 'ctl1');
     ok(c1.S26a.err === null && c1.S26b.err === 'profile_locked' && /another machine's name \(pod-old/.test(c1.S26b.msg) && c1.S26b.launched === 0 && c1.S26b.left === 3, '④h CONTROL 1: a keeper that forgets a retired record\'s lineage takes the lock over in the first life (the file\'s writer) and REFUSES the conversation\'s own kept directory one restart later as FOREIGN — the reproduced shape (userW\'s class on the ephemeral row); S26b catches it', { a: c1.S26a.err, b: c1.S26b.err, msg: c1.S26b.msg.slice(0, 160) });
-    const noRead = ksrcH.replace("const byDir = dir ? lineageOf(dir).hosts : []; if (byDir.length) return byDir;", "const byDir = []; /* CONTROL: the directory's lineage is never read */ if (byDir.length) return byDir;"); // (r5: re-anchored to the identity-keyed read; r6: the read carries the marker; r7: the read is the ONE lineage verdict)
+    const noRead = editAnchor(ksrcH, "const byDir = dir ? lineageOf(dir).hosts : []; if (byDir.length) return byDir;", "const byDir = []; /* CONTROL: the directory's lineage is never read */ if (byDir.length) return byDir;", "src/server/browser-keeper.js"); // (r5: re-anchored to the identity-keyed read; r6: the read carries the marker; r7: the read is the ONE lineage verdict)
     ok(noRead !== ksrcH, '④h control setup: the directory read is where the control cuts');
     const c2 = await runEph(M.load('src/server/browser-keeper.js', noRead, 'no-dir-lineage-read'), 'ctl2');
     ok(c2.S26a.err === null && c2.S26b.err === 'profile_locked' && c2.S26b.left === 3, '④h CONTROL 2: a keeper that never reads the directory\'s lineage — the same refusal one restart later; S26b catches it', { a: c2.S26a.err, b: c2.S26b.err });
   }
-  { const holderless = ksrcH.replace("const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: facts.holder,", "const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: null, /* CONTROL: the post-launch judgement drops the holder's facts */");
+  { const holderless = editAnchor(ksrcH, "const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: facts.holder,", "const a = B.lockVerdict({ phase: 'after-launch', lock: facts.lock, holder: null, /* CONTROL: the post-launch judgement drops the holder's facts */", "src/server/browser-keeper.js");
     ok(holderless !== ksrcH, '④h control setup: the post-launch judgement\'s holder facts are where the control cuts');
     const c3 = await runS8(M.load('src/server/browser-keeper.js', holderless, 'post-launch-holderless'), 'ctl3');
     ok(c3.err === 'profile_locked' && /took the lock over now/.test(c3.msg) && c3.left === 0 && c3.holderAlive === true, '④h CONTROL 3: a post-launch judgement without the holder\'s facts takes a LIVE holder\'s lock over (step ⑤ before step ①: the lock gone under a running browser — two Chromes next) — S8 catches it', { err: c3.err, left: c3.left, alive: c3.holderAlive, msg: c3.msg.slice(0, 140) }); }
@@ -2148,16 +2148,16 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
   // ── the three patched-KEEPER controls ──
   const ksrcI = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   if (!isRoot) {
-    const anyErr = ksrcI.replace("try { fs.lstatSync(d); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) gone = true; else err = e; }", "try { fs.lstatSync(d); } catch (e) { gone = true; /* CONTROL: any error prunes */ }");
+    const anyErr = editAnchor(ksrcI, "try { fs.lstatSync(d); } catch (e) { if (e && (e.code === 'ENOENT' || e.code === 'ENOTDIR')) gone = true; else err = e; }", "try { fs.lstatSync(d); } catch (e) { gone = true; /* CONTROL: any error prunes */ }", "src/server/browser-keeper.js");
     ok(anyErr !== ksrcI, '④i control setup: the prune\'s error classification is where the control cuts');
     const c4 = await runNamed(M.load('src/server/browser-keeper.js', anyErr, 'prune-on-any-error'), 'ctl4');
     ok(c4.S36 && c4.S36.kept.length === 0 && c4.S36.err === 'profile_locked' && c4.S36.left === 3 && c4.S36.launched === 0, '④i CONTROL 4: a keeper that prunes on ANY stat error loses the lineage at one unreadable load and refuses the directory as FOREIGN at the next resume — S36 catches it', c4.S36 && { kept: c4.S36.kept, err: c4.S36.err, left: c4.S36.left });
   }
-  { const literal = ksrcI.replace("const id = F.dirIdentity(d); return id ? id.replace(/\\/+$/, '') || id : d; };", "return d; /* CONTROL: the spelling as given */ };");
+  { const literal = editAnchor(ksrcI, "const id = F.dirIdentity(d); return id ? id.replace(/\\/+$/, '') || id : d; };", "return d; /* CONTROL: the spelling as given */ };", "src/server/browser-keeper.js");
     ok(literal !== ksrcI, '④i control setup: the identity key is where the control cuts');
     const c5k = await runSpell(M.load('src/server/browser-keeper.js', literal, 'literal-dir-key'), 'ctl5k');
     ok(c5k.S42.rememberedUnder === 'LINK' && c5k.S42.err === null && c5k.S42b.rekeyed === false, '④i CONTROL 5 (r6, the key alone): a keeper that keys by the spelling as given still remembers under the symlink spelling and never re-keys (S42 / S42b see the structure) — but the TOKEN finds the lineage the key missed, so the verdict holds', { under: c5k.S42.rememberedUnder, err: c5k.S42.err, rekeyed: c5k.S42b.rekeyed });
-    const literalNoTok = literal.replace("const dirTokOf = (dir) => { try {", "const dirTokOf = (dir) => { return null; /* CONTROL: no marker read */ try {");
+    const literalNoTok = editAnchor(literal, "const dirTokOf = (dir) => { try {", "const dirTokOf = (dir) => { return null; /* CONTROL: no marker read */ try {", "src/server/browser-keeper.js");
     ok(literalNoTok !== literal, '④i control setup: the marker read is where the second cut is');
     const c5 = await runSpell(M.load('src/server/browser-keeper.js', literalNoTok, 'literal-dir-key-no-marker'), 'ctl5');
     ok(c5.S42.rememberedUnder === 'LINK' && c5.S42.err === 'profile_locked' && c5.S42.left === 3 && c5.S42b.err === 'profile_locked', '④i CONTROL 5: a keeper that keys the lineage by the spelling as given AND reads no marker orphans it at the personalization (remembered under the symlink spelling, read under the real one — refused as foreign; the r4-era file never re-keyed) — S42 / S42b catch it', { under: c5.S42.rememberedUnder, err: c5.S42.err, left: c5.S42.left, b: c5.S42b.err }); }
@@ -2167,7 +2167,7 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     ok(c6.S32a.err === null && c6.S32a.launched === 1 && c6.S38b.err === null && c6.S38b.launched === 1, '④i CONTROL 6: a keeper with NEITHER witness (no inode, no marker — the r4 keeper) hands a forgotten directory\'s lineage to a fresh directory at its path (S32a catches it; a copy is taken over there as here)', { a: c6.S32a.err, b: c6.S38b.err }); }
 
   // ── r6: two more controls — a keeper that never reads the marker, the PURE rule without it ──
-  { const noTok = ksrcI.replace("const dirTokOf = (dir) => { try {", "const dirTokOf = (dir) => { return null; /* CONTROL: the marker is never read */ try {");
+  { const noTok = editAnchor(ksrcI, "const dirTokOf = (dir) => { try {", "const dirTokOf = (dir) => { return null; /* CONTROL: the marker is never read */ try {", "src/server/browser-keeper.js");
     ok(noTok !== ksrcI, '④i control setup: the marker read is where the control cuts');
     const c7 = await runR6(M.load('src/server/browser-keeper.js', noTok, 'no-marker-read'), 'ctl7');
     ok(c7.S44.err === 'profile_locked' && c7.S44.left === 3 && c7.S44.launched === 0 && c7.S54.err === 'profile_locked' && c7.S54.launched === 0, '④i CONTROL 7: a keeper that never reads the directory\'s marker (the inode alone — r5\'s rule) refuses the RESTORED directory and the MOVED one as foreign — S44 / S54 catch it', { a: c7.S44.err, b: c7.S54.err }); }
@@ -2323,23 +2323,23 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     ok(TABLE7.length >= 28 && !dis7.length, `④j THE SIXTH JUDGEMENT: ${TABLE7.length} rows (the marker table + ${TABLE7.length - 14} scenarios through the real keeper), every one as the truth says`, dis7.map((r) => `${r.id}: ${r.diffs.join(' / ')}`));
     // ── the controls: a keeper whose bearer is always "gone" (r6's token search), the PURE rule without the copy verdict, a keeper
     //    without the legacy witness, a keeper without the ledger, a keeper that never mints a fresh marker ──
-    { const noBearer = ksrcI.replace("tok: dirTokOf(dir), bearer: dirBearerOf });", "tok: dirTokOf(dir), bearer: () => null /* CONTROL: the bearer is always gone — r6's search by token */ });");
+    { const noBearer = editAnchor(ksrcI, "tok: dirTokOf(dir), bearer: dirBearerOf });", "tok: dirTokOf(dir), bearer: () => null /* CONTROL: the bearer is always gone — r6's search by token */ });", "src/server/browser-keeper.js");
       ok(noBearer !== ksrcI, '④j control setup: the bearer probe is where the control cuts');
       const c9 = await runR7(M.load('src/server/browser-keeper.js', noBearer, 'no-bearer'), 'ctl9', ['S56']);
       ok(c9.S56.err === null && c9.S56.launched === 1 && c9.S56d.origEntryKept === false && c9.S56b.err === 'profile_locked', '④j CONTROL 9: a keeper whose token search never asks the bearer honours the copy beside its original (its old-pod lock taken over), STEALS the original\'s entry at the copy\'s remember and refuses the original as foreign once the copy is gone — S56 / S56d / S56b catch it', { copy: c9.S56.err, kept: c9.S56d.origEntryKept, b: c9.S56b.err }); }
-    { const psrc7 = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'); const noCopy = psrc7.replace("return none('copy', k);", "return { hosts: hostsOf(m[k]), via: 'token', key: k, why: 'moved', fresh: false }; /* CONTROL: a copy is a move */");
+    { const psrc7 = fs.readFileSync(path.join(REPO, 'src/browser-profiles.js'), 'utf8'); const noCopy = editAnchor(psrc7, "return none('copy', k);", "return { hosts: hostsOf(m[k]), via: 'token', key: k, why: 'moved', fresh: false }; /* CONTROL: a copy is a move */", "src/browser-profiles.js");
       ok(noCopy !== psrc7, '④j control setup: the copy verdict is where the control cuts');
       const c10 = pureTable(M.load('src/browser-profiles.js', noCopy, 'no-copy-verdict'));
       ok(c10["M7 a stranger's copy of OUR marker into THEIR dir (ours still bears it, another inode)"].L3previous === 'stale-previous-host@hostname' && c10['M10 two directories, one token (the copy beside its original, judged for the COPY)'].hosts.length === 1, '④j CONTROL 10: the PURE rule without the copy verdict hands the lineage to a stranger\'s copy of our marker and to the copy beside the original — the table\'s M7 / M10 rows catch it'); }
-    { const noWitness = ksrcI.replace("const w = B.legacyLockWitness({ rec, lock: F.readSingletonLock(own), lockAt, devtools, dir: own, hostname: os.hostname() });", "const w = null; /* CONTROL: no legacy witness */");
+    { const noWitness = editAnchor(ksrcI, "const w = B.legacyLockWitness({ rec, lock: F.readSingletonLock(own), lockAt, devtools, dir: own, hostname: os.hostname() });", "const w = null; /* CONTROL: no legacy witness */", "src/server/browser-keeper.js");
       ok(noWitness !== ksrcI, '④j control setup: the legacy witness is where the control cuts');
       const c11 = await runR7(M.load('src/server/browser-keeper.js', noWitness, 'no-legacy-witness'), 'ctl11', ['S59']);
       ok(c11.S59a.err === 'profile_locked' && c11.S59a.left === 3 && c11.S59aEph.err === 'profile_locked' && c11.S59b.err === null, '④j CONTROL 11: a keeper without the legacy lock witness refuses userW\'s named AND ephemeral kept directories on the upgrade-is-the-roll path (the Update-first order still works by the file\'s writer) — S59a / S59a-eph catch it', { a: c11.S59a.err, e: c11.S59aEph.err, b: c11.S59b.err }); }
-    { const noLedger = ksrcI.replace("fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId,", "if (false) fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId, /* CONTROL: no ledger */");
+    { const noLedger = editAnchor(ksrcI, "fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId,", "if (false) fs.appendFileSync(f, JSON.stringify({ at: now(), boot: bootId, /* CONTROL: no ledger */", "src/server/browser-keeper.js");
       ok(noLedger !== ksrcI, '④j control setup: the ledger write is where the control cuts');
       const c12 = await runR7(M.load('src/server/browser-keeper.js', noLedger, 'no-ledger'), 'ctl12', ['S60']);
       ok(c12.S60.journalLines === 1 && c12.S60.ledgerNamedAll === false, '④j CONTROL 12: a keeper without the ledger says the storm once and names three — the other 37 pruned paths are nowhere — S60 catches it', c12.S60); }
-    { const noFresh = ksrcI.replace("const tok = mintDirTok(dir, { fresh: !!v.fresh });", "const tok = mintDirTok(dir); /* CONTROL: never a fresh marker */");
+    { const noFresh = editAnchor(ksrcI, "const tok = mintDirTok(dir, { fresh: !!v.fresh });", "const tok = mintDirTok(dir); /* CONTROL: never a fresh marker */", "src/server/browser-keeper.js");
       ok(noFresh !== ksrcI, '④j control setup: the fresh mint is where the control cuts');
       const c13 = await runR7(M.load('src/server/browser-keeper.js', noFresh, 'no-fresh-mint'), 'ctl13', ['S56']);
       ok(c13.S56d.copyTokDiffers === false && c13.S56d.origEntryKept === false, '④j CONTROL 13: a keeper that keeps the copied marker at the copy\'s first remember lets "one token, one entry" delete the original\'s entry — S56d catches it', { differs: c13.S56d.copyTokDiffers, kept: c13.S56d.origEntryKept }); }
@@ -2558,27 +2558,27 @@ console.log('— ④i verify r5: the fourth judgement — the directory lineage:
     ok(!dis8.length && TABLE8.length === (isRoot ? 13 : 14), `④k THE SEVENTH JUDGEMENT (+ verify r9's seven): ${TABLE8.length} scenarios through the real keeper (the .199 boot first ×2, the witness's clock, the backup ×2, the ledger's tail ×3, a Forget ×3, the witness's own path ×3), every one as the truth says${dis8.length ? ' — ' + dis8.map((x) => x.id + ': ' + x.diffs.join(' / ')).join(' || ') : ''}`);
     // ── the controls: each r8 part cut in a patched copy (never src/), the scenario that catches it ──
     const ksrc8 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8'); const tsrc8 = fs.readFileSync(path.join(REPO, 'src/server/browser-trace.js'), 'utf8');
-    { const cut = "let devtools = null; try { const df = path.join(own, 'DevToolsActivePort'); const d = B.parseDevToolsActivePort(fs.readFileSync(df, 'utf8')); devtools = d ? { ...d, at: fs.statSync(df).mtimeMs } : null; } catch { devtools = null; }"; const noDev = ksrc8.replace(cut, 'let devtools = null; /* CONTROL: the port file never read */');
+    { const cut = "let devtools = null; try { const df = path.join(own, 'DevToolsActivePort'); const d = B.parseDevToolsActivePort(fs.readFileSync(df, 'utf8')); devtools = d ? { ...d, at: fs.statSync(df).mtimeMs } : null; } catch { devtools = null; }"; const noDev = editAnchor(ksrc8, cut, 'let devtools = null; /* CONTROL: the port file never read */', "src/server/browser-keeper.js");
       ok(noDev !== ksrc8, '④k control setup: the port-file witness is where the control cuts');
       const c14 = await runR8(M.load('src/server/browser-keeper.js', noDev, 'no-devtools-witness'), 'ctl14', ['S70']);
       ok(c14.S70.err === 'profile_locked' && c14.S70.left === 3 && c14.S70x.err === 'profile_locked', '④k CONTROL 14: a keeper that never reads the directory\'s DevToolsActivePort refuses userW\'s named profile on the .199-boot-first order (the r7 keeper: its pid witness is nulled by that boot) — S70 catches it', { a: c14.S70.err, x: c14.S70x.err }); }
-    { const cut = "let lockAt = null; try { lockAt = fs.lstatSync(path.join(own, 'SingletonLock')).ctimeMs; } catch { lockAt = null; }"; const noAt = ksrc8.replace(cut, 'let lockAt = null; /* CONTROL: the lock\'s ctime never handed in */');
+    { const cut = "let lockAt = null; try { lockAt = fs.lstatSync(path.join(own, 'SingletonLock')).ctimeMs; } catch { lockAt = null; }"; const noAt = editAnchor(ksrc8, cut, 'let lockAt = null; /* CONTROL: the lock\'s ctime never handed in */', "src/server/browser-keeper.js");
       ok(noAt !== ksrc8, '④k control setup: the lock\'s ctime is where the control cuts');
       const c15 = await runR8(M.load('src/server/browser-keeper.js', noAt, 'no-lock-ctime'), 'ctl15', ['S71']);
       ok(c15.S71.witnessed === true && c15.S71.err === null && c15.S71.left === 0, '④k CONTROL 15: a keeper that never hands the lock\'s ctime in takes over a lock that predates the record\'s own start (pid equality alone — r7) — S71 catches it', { w: c15.S71.witnessed, e: c15.S71.err }); }
-    { const cut = "if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true });"; const always = ksrc8.replace(cut, "if (true) rememberDir(p.dir, launchHostsFor(rr, p.dir)); /* CONTROL: a retire remembers a refused record and may mint */");
+    { const cut = "if (rr.state !== 'failed') rememberDir(p.dir, launchHostsFor(rr, p.dir), { retire: true });"; const always = editAnchor(ksrc8, cut, "if (true) rememberDir(p.dir, launchHostsFor(rr, p.dir)); /* CONTROL: a retire remembers a refused record and may mint */", "src/server/browser-keeper.js");
       ok(always !== ksrc8, '④k control setup: the retire rule is where the control cuts');
       const c16 = await runR8(M.load('src/server/browser-keeper.js', always, 'retire-mints'), 'ctl16', ['S72']);
       ok(c16.S72.tokKeptAtRemove === false && c16.S72b.err === 'profile_locked', '④k CONTROL 16: a keeper whose retire remembers a refused record mints a fresh marker INTO the adopted backup, and the restore from it is refused as foreign (r7) — S72 / S72b catch it', { kept: c16.S72.tokKeptAtRemove, r: c16.S72b.err }); }
-    { const cut = 'if (!ledgerTailChecked) {'; const noTail = ksrc8.replace(cut, 'if (false) { /* CONTROL: a torn tail never terminated */');
+    { const cut = 'if (!ledgerTailChecked) {'; const noTail = editAnchor(ksrc8, cut, 'if (false) { /* CONTROL: a torn tail never terminated */', "src/server/browser-keeper.js");
       ok(noTail !== ksrc8, '④k control setup: the tail check is where the control cuts');
       const c17 = await runR8(M.load('src/server/browser-keeper.js', noTail, 'no-tail-termination'), 'ctl17', ['S74']);
       ok(c17.S74a.glued === true && c17.S74a.terminated === false, '④k CONTROL 17: a keeper that never terminates a torn tail glues this boot\'s first line onto it (two records, one unparsable line — r7) — S74a catches it', c17.S74a); }
-    { const cut = 'let mv = null; try { mv = keeper.moveDirLineage(lineageKey, to); } catch (e) { mv = { ok: false, moved: false, key: null, error: e && e.message }; }'; const noMove = tsrc8.replace(cut, 'let mv = { ok: true, moved: false, key: null }; /* CONTROL: the lineage never follows a Forget */');
+    { const cut = 'let mv = null; try { mv = keeper.moveDirLineage(lineageKey, to); } catch (e) { mv = { ok: false, moved: false, key: null, error: e && e.message }; }'; const noMove = editAnchor(tsrc8, cut, 'let mv = { ok: true, moved: false, key: null }; /* CONTROL: the lineage never follows a Forget */', "src/server/browser-trace.js");
       ok(noMove !== tsrc8, '④k control setup: the Forget\'s re-key is where the control cuts');
       const c18 = await runR8(K, 'ctl18', ['S75'], M.load('src/server/browser-trace.js', noMove, 'no-forget-rekey'));
       ok(c18.S75b.entryFollowed === false && c18.S75b.err === 'profile_locked', '④k CONTROL 18: a Forget whose rename never re-keys the lineage leaves the entry at the old path (pruned at the next boot) and the adopted-back directory\'s old-pod lock is foreign by name (r7) — S75b catches it', { f: c18.S75b.entryFollowed, e: c18.S75b.err }); }
-    { const cut = 'if (!saveNow()) { reg.dirHosts = before;'; const noSave = ksrc8.replace(cut, 'if (false && !saveNow()) { reg.dirHosts = before; /* CONTROL: the move re-keys in memory only (r8) */');   // lane lg-store-writes U5b: the move's save is saveNow() (on disk before the move)
+    { const cut = 'if (!saveNow()) { reg.dirHosts = before;'; const noSave = editAnchor(ksrc8, cut, 'if (false && !saveNow()) { reg.dirHosts = before; /* CONTROL: the move re-keys in memory only (r8) */', "src/server/browser-keeper.js");   // lane lg-store-writes U5b: the move's save is saveNow() (on disk before the move)
       ok(noSave !== ksrc8, '④k control setup: the move\'s save is where the control cuts');
       const c19 = await runR8(M.load('src/server/browser-keeper.js', noSave, 'move-never-saves'), 'ctl19', ['S76']);
       ok(c19.S76.crashClean === true && c19.S76.diskNamesNew === false && c19.S76.bootPruned === true && c19.S76.err === 'profile_locked' && (isRoot || (c19.S76b.refusedCode === null && c19.S76b.stillThere === false)), '④k CONTROL 19 (verify r9): a keeper whose move re-keys in memory only (r8) loses the lineage at a crash after a Forget — pruned at the next boot, the adopted-back directory refused by name — and an unwritable data/ refuses nothing (moved, the disk names the old path): S76 / S76b catch it', { d: c19.S76.diskNamesNew, p: c19.S76.bootPruned, e: c19.S76.err, o: c19.S76.owedAtCrash, c: c19.S76.crashClean, b: isRoot ? null : [c19.S76b.refusedCode, c19.S76b.stillThere] }); }

@@ -1543,126 +1543,126 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = '    this._pendingRemote.set(deferKey(msg), msg);'; // B-4767: the slot keys per desktop AND writer class (layout-model.js)
     ok(LSRC0.includes(find), 'control one-slot: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, "    this._pendingRemote.clear(); this._pendingRemote.set('', msg);"), 'one-slot', { esm: true }))).LayoutManager, { quiet: true, legs: ['a', 'i'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, "    this._pendingRemote.clear(); this._pendingRemote.set('', msg);", "src/lib/layout.js"), 'one-slot', { esm: true }))).LayoutManager, { quiet: true, legs: ['a', 'i'] });
     ok(f.some((n) => /pointerup applies BOTH/.test(n)) && !f.some((n) => /THE DROP onto an UNVISITED/.test(n)), `control one-slot: one slot for every desktop loses the target's record of a move (RED) (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   // (h) verify r1: a remote move applied as a CLOSE (the lane's ①)
   {
     const find = '  adoptRemoteMove(win, from, { to = null, rec = null } = {}) {\n';
     ok(DSRC.includes(find), 'control move-as-close: the patched line exists in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, find + '    return null;\n'), 'move-as-close', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['a', 'i', 'j'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, find + '    return null;\n', "src/lib/desktop-manager.js"), 'move-as-close', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['a', 'i', 'j'] });
     ok(f.some((n) => /REMOTE MOVE OUT/.test(n)) && f.some((n) => /REMOTE MOVE IN/.test(n)) && !f.some((n) => /THE DROP onto an UNVISITED/.test(n)), `control move-as-close: a page that closes a window another client moved turns the remote-move legs RED (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   // (i) verify r1: a reconnect that re-reads nothing (the lane's ①)
   {
     const find = '    app.ws.onStateChange((connected) => { if (!connected) { this._lastSentJson = null; this._unacked = this._unacked.filter((s) => s.at == null); } if (connected) { this._clockTick(); this._lastRemoteSeq = 0; for (const s of this._unacked) if (s.at == null) s.at = Date.now(); if (this._connects++ > 0) setTimeout(() => this._resyncFromServer(), 250); } });';
     ok(LSRC0.includes(find), 'control no-resync: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    app.ws.onStateChange((connected) => { if (connected) this._lastRemoteSeq = 0; });'), 'no-resync', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    app.ws.onStateChange((connected) => { if (connected) this._lastRemoteSeq = 0; });', "src/lib/layout.js"), 'no-resync', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
     ok(f.some((n) => /RECONNECT re-reads/.test(n)) && f.some((n) => /hr-4 arrived during the outage/.test(n)), `control no-resync: a reconnect that re-reads nothing leaves the stale base (RED) (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 200)})`);
   }
   // (j) verify r1 D1: a delete that leaves the target's record to the next autosave
   {
     const find = '    this._broadcastDesktopState(targetId, this.recordFor(targetId)); // the target holds them BEFORE the server forgets the desktop\n';
     ok(DSRC.includes(find), 'control delete-no-send: the patched line exists in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, ''), 'delete-no-send', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['l'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'delete-no-send', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['l'] });
     ok(f.some((n) => /deleting the desktop ON SHOW/.test(n)), `control delete-no-send: the target's record is not sent — RED (${f.length})`);
   }
   // (k) verify r1 D6: a rearmSave that does nothing
   {
     const find = '  rearmSave() {\n';
     ok(LSRC0.includes(find), 'control no-rearm: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, find + '    return;\n'), 'no-rearm', { esm: true }))).LayoutManager, { quiet: true, legs: ['m'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, find + '    return;\n', "src/lib/layout.js"), 'no-rearm', { esm: true }))).LayoutManager, { quiet: true, legs: ['m'] });
     ok(f.some((n) => /re-arms the save/.test(n)) && f.some((n) => /goes out on its own/.test(n)), `control no-rearm: the refused record of the desktop on show never goes out — RED (${f.length})`);
   }
   // (l) verify r1 D6: the switch's broadcast without the evidence
   {
     const find = "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: this.evidence(), sentAt, viewport: this.app.isMobile ? 'phone' : 'desktop', base: this.stampOf(desktopId) });";
     ok(DSRC.includes(find), 'control switch-no-evidence: the patched line exists in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: [], sentAt });"), 'switch-no-evidence', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['n'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, "    this.app.ws.send({ type: 'layout-sync', state, desktopId, evidence: [], sentAt });", "src/lib/desktop-manager.js"), 'switch-no-evidence', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['n'] });
     ok(f.some((n) => /switch's broadcast of the desktop being left/.test(n)), `control switch-no-evidence: the closes leave unexplained — RED (${f.length})`);
   }
   // (m) verify r1 ⑥: the same-conversation rule patched out ⇒ the entry lingers as a build attempt
   {
     const find = "      if (ws.openSpec.action === 'attachSession' && ws.openSpec.serverId && liveServerIds.has(ws.openSpec.serverId)) { noSpec.push(winId); continue; }\n";
     ok(DSRC.includes(find), 'control dup-lingers: the patched line exists in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, ''), 'dup-lingers', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['f'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'dup-lingers', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['f'] });
     ok(f.some((n) => /already open here under another window id/.test(n)) && !f.some((n) => /PARENT of a fork/.test(n)), `control dup-lingers: the entry is replayed and lingers — RED; the parent leg stays green (${f.length})`);
   }
   // (o) verify r2: the settle rule keyed on the CONVERSATION id (r1's key) settles a fork's parent
   {
     const find = "      if (ws.openSpec.action === 'attachSession' && ws.openSpec.serverId && liveServerIds.has(ws.openSpec.serverId)) { noSpec.push(winId); continue; }\n";
     const conv = "      if (ws.openSpec.action === 'attachSession' && ws.openSpec.backendSessionId && [...this.app.wm.windows.values()].some((w) => w._openSpec?.action === 'attachSession' && w._openSpec.backendSessionId === ws.openSpec.backendSessionId)) { noSpec.push(winId); continue; }\n";
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, conv), 'settle-by-conversation', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['f'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, conv, "src/lib/desktop-manager.js"), 'settle-by-conversation', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['f'] });
     ok(f.some((n) => /PARENT of a fork/.test(n)) && !f.some((n) => /already open here under another window id/.test(n)), `control settle-by-conversation: r1's key drops the fork's parent — RED; the true duplicate still settles (${f.length})`);
   }
   // (n) verify r2: a move with no witness — the stale record re-adopts the window the user just dragged off
   {
     const find = '    for (const m of members) { m._desktopId = desktopId; m._movedAt = movedAt; }';
     ok(DSRC.includes(find), 'control no-held-move: the patched line exists in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, '    for (const m of members) m._desktopId = desktopId;'), 'no-held-move', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['o'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '    for (const m of members) m._desktopId = desktopId;', "src/lib/desktop-manager.js"), 'no-held-move', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['o'] });
     ok(f.some((n) => /THE HELD MOVE/.test(n)) && f.some((n) => /goes out once more/.test(n)), `control no-held-move: the user's drop is put back by the record deferred under the drag and never sent — RED (${f.length}: ${f.map((n) => n.slice(0, 70)).join(' | ')})`);
   }
   // (p) verify r2: the chain loop without its desktop guard breaks hidden desktops' groups
   {
     const find = "            if (activeDesk && w._desktopId && w._desktopId !== activeDesk) continue;\n";
     ok(LSRC0.includes(find), 'control chain-any-desktop: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, ''), 'chain-any-desktop', { esm: true }))).LayoutManager, { quiet: true, legs: ['p'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'chain-any-desktop', { esm: true }))).LayoutManager, { quiet: true, legs: ['p'] });
     ok(f.some((n) => /leaves the tab group on hidden HR intact/.test(n)), `control chain-any-desktop: a record of Fin breaks HR's hidden group — RED (${f.length})`);
   }
   // (q) verify r2 ④: the old fallback — a deleted desktop's windows to desktop #1 on every other page
   {
     const find = '            const dest = homeOf(win.id) || fallbackId;';
     ok(DSRC.includes(find), 'control delete-to-first: the patched line exists in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, '            const dest = fallbackId;'), 'delete-to-first', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['q'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '            const dest = fallbackId;', "src/lib/desktop-manager.js"), 'delete-to-first', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['q'] });
     ok(f.some((n) => /not on desktop #1/.test(n)) && f.some((n) => /never writes it under D1 too/.test(n)), `control delete-to-first: the windows land on #1 and the next save doubles them — RED (${f.length})`);
   }
   // (r) verify r2 ⑤: a re-read that leaves an older deferred record to drain after it
   {
     const find = '      else { this._pendingRemote.delete(key); this._handleRemoteSync(msg); }\n';
     ok(LSRC0.includes(find), 'control resync-keeps-stale: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '      else this._handleRemoteSync(msg);\n'), 'resync-keeps-stale', { esm: true }))).LayoutManager, { quiet: true, legs: ['r'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '      else this._handleRemoteSync(msg);\n', "src/lib/layout.js"), 'resync-keeps-stale', { esm: true }))).LayoutManager, { quiet: true, legs: ['r'] });
     ok(f.some((n) => /never lands AFTER the re-read/.test(n)), `control resync-keeps-stale: the stale record drains over the fresh one — RED (${f.length})`);
   }
   // (s) verify r2 ⑥: a re-read that gives up on the first failure
   {
     const find = '      if (attempt < RESYNC_RETRIES) { setTimeout(() => this._resyncFromServer(attempt + 1), RESYNC_RETRY_MS * (attempt + 1)); return; }\n';
     ok(LSRC0.includes(find), 'control resync-no-retry: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, ''), 'resync-no-retry', { esm: true }))).LayoutManager, { quiet: true, legs: ['s'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'resync-no-retry', { esm: true }))).LayoutManager, { quiet: true, legs: ['s'] });
     ok(f.some((n) => /a failed re-read is retried/.test(n)), `control resync-no-retry: the page stays on its stale base — RED (${f.length})`);
   }
   // (t) verify r2 R7: a drain in insertion order (no seq sort)
   {
     const find = '      const { next, drop } = releaseNext(this._pendingRemote, this._appliedSeq);'; // B-4767: the order (and the drop) live in layout-model.js
     ok(LSRC0.includes(find), 'control drain-no-sort: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '      const { next, drop } = { next: [...this._pendingRemote.entries()][0], drop: [] };'), 'drain-no-sort', { esm: true }))).LayoutManager, { quiet: true, legs: ['t'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '      const { next, drop } = { next: [...this._pendingRemote.entries()][0], drop: [] };', "src/lib/layout.js"), 'drain-no-sort', { esm: true }))).LayoutManager, { quiet: true, legs: ['t'] });
     ok(f.some((n) => /BEFORE the source/.test(n)), `control drain-no-sort: the source drains first and closes the moved window — RED (${f.length})`);
   }
   // (u) verify r2 R7: the cached sweep without its adopt
   {
     const find = '.filter((w) => !this.adoptRemoteMove(w, desktopId))';
     ok(DSRC.split(find).length === 2, 'control cache-sweep-closes: the patched text exists once in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, ''), 'cache-sweep-closes', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['u'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, '', "src/lib/desktop-manager.js"), 'cache-sweep-closes', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['u'] });
     ok(f.some((n) => /cached sweep moves the hidden window/.test(n)), `control cache-sweep-closes: the hidden window is closed — RED (${f.length})`);
   }
   // (v) verify r2 R7: the re-read closing whatever the record lacks (no `closeOnlyWired`)
   {
     const find = '            if (closeOnlyWired && !this.app.desktopManager?.wireListed?.(activeDesk, id)) continue;\n';
     ok(LSRC0.includes(find), 'control close-any-wired: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, ''), 'close-any-wired', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'close-any-wired', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
     ok(f.some((n) => /OWN unsent window kept/.test(n)), `control close-any-wired: the page's own unsent window is closed by the re-read — RED (${f.length})`);
   }
   // (w) verify r2 R7: the re-read in the server's order (the desktop on show not last)
   {
     const find = '    const order = Object.entries(desktops).sort(([a], [b]) => (a === active) - (b === active));';
     ok(LSRC0.includes(find), 'control resync-any-order: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    const order = Object.entries(desktops);'), 'resync-any-order', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    const order = Object.entries(desktops);', "src/lib/layout.js"), 'resync-any-order', { esm: true }))).LayoutManager, { quiet: true, legs: ['k'] });
     ok(f.some((n) => /moved off the desktop on show during the outage is MOVED/.test(n)), `control resync-any-order: a window moved off the desktop on show during the outage is closed — RED (${f.length})`);
   }
   // (v) verify r2 ⑩: an apply that never holds the user's own geometry
   {
     const find = '          const heldGeom = this.actHeld(win._boundsAt, receivedAt, win);\n';
     ok(LSRC0.includes(find), 'control no-held-geometry: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '          const heldGeom = false;\n'), 'no-held-geometry', { esm: true }))).LayoutManager, { quiet: true, legs: ['v'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '          const heldGeom = false;\n', "src/lib/layout.js"), 'no-held-geometry', { esm: true }))).LayoutManager, { quiet: true, legs: ['v'] });
     ok(f.some((n) => /THE HELD GEOMETRY/.test(n)) && f.some((n) => /drag goes out once more/.test(n)) && !f.some((n) => /other windows still apply/.test(n)), `control no-held-geometry: the drag is snapped back and never sent — RED (${f.length})`);
   }
   // ((x) verify r3 ①: the click-witness controls of §6's geomWitnessPin over patched window.js text: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -1670,28 +1670,28 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = '    const receivedAt = Math.min(startedAt, this._movesSentAt ?? 0);';
     ok(LSRC0.includes(find), 'control resync-horizon: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    const receivedAt = Date.now();'), 'resync-horizon', { esm: true }))).LayoutManager, { quiet: true, legs: ['w', 'x'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    const receivedAt = Date.now();', "src/lib/layout.js"), 'resync-horizon', { esm: true }))).LayoutManager, { quiet: true, legs: ['w', 'x'] });
     ok(f.some((n) => /horizon is the ask/.test(n)), `control resync-horizon: a horizon at the answer reverses the in-flight move whose save left before the answer — RED (${f.length}; the queued one is held by the unsaved-act rule since verify r4 ①)`);
   }
   // (z) verify r3 ②: a save queued while disconnected stamped as sent
   {
     const find = '    this._unacked.push({ sentAt, desks: [...desks], pending: desks.length, refused: new Set(), at: this.app.ws?.connected !== false ? Date.now() : null });\n    this._armAckWatch();';
     ok(LSRC0.includes(find), 'control queued-as-sent: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    for (const d of desks) this._markCarried(d, sentAt);'), 'queued-as-sent', { esm: true }))).LayoutManager, { quiet: true, legs: ['w', 'x', 'ak', 'ak2'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    for (const d of desks) this._markCarried(d, sentAt);', "src/lib/layout.js"), 'queued-as-sent', { esm: true }))).LayoutManager, { quiet: true, legs: ['w', 'x', 'ak', 'ak2'] });
     ok(f.some((n) => /never READ is not reversed/.test(n)) && !f.some((n) => /horizon is the ask/.test(n)), `control queued-as-sent (today's rule: a save carried at its SEND): a save on a dead socket is reversed by the re-read — RED; the in-flight leg still holds (${f.length})`);
   }
   // (aa) verify r3 ③: noteClosed refusing every close under `_restoring` (the user's in the cooldown included)
   {
     const find = '    if (!id || this._applying || this._booting) return;';
     ok(LSRC0.includes(find), 'control close-under-cooldown: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    if (!id || this._restoring) return;'), 'close-under-cooldown', { esm: true }))).LayoutManager, { quiet: true, legs: ['z'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    if (!id || this._restoring) return;', "src/lib/layout.js"), 'close-under-cooldown', { esm: true }))).LayoutManager, { quiet: true, legs: ['z'] });
     ok(f.some((n) => /a close made in the cooldown is HELD/.test(n)), `control close-under-cooldown: a close in the cooldown is not held (RED) (${f.length})`);
   }
   // (ab) verify r3 ③: a save under a gate DROPPED (no deferral)
   {
     const find = '    if (!this._userDirty || this._applying || this._deferT) return;\n    const at = this._lastUserInputAt || Date.now();';
     ok(LSRC0.includes(find), 'control save-dropped-under-gate: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    return;\n    const at = this._lastUserInputAt || Date.now();'), 'save-dropped-under-gate', { esm: true }))).LayoutManager, { quiet: true, legs: ['y'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    return;\n    const at = this._lastUserInputAt || Date.now();', "src/lib/layout.js"), 'save-dropped-under-gate', { esm: true }))).LayoutManager, { quiet: true, legs: ['y'] });
     ok(f.some((n) => /the move is saved on its own/.test(n)), `control save-dropped-under-gate: a drop in the cooldown waits for the next act (RED) (${f.length})`);
   }
   // (ac) verify r3 ④: a save from the stale base (no hold) — the copies also shorten the retry ladder (150 ms): a control's wall is the mechanism's, not the product's constants
@@ -1712,14 +1712,14 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = '    return t >= receivedAt || t > (win ? this._carriedAt(win._desktopId) : (this._movesSentAt || 0));';
     ok(LSRC0.includes(find), 'control unsaved-act-reverted: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    return t >= receivedAt;'), 'unsaved-act-reverted', { esm: true }))).LayoutManager, { quiet: true, legs: ['ua', 'ub', 'uc'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    return t >= receivedAt;', "src/lib/layout.js"), 'unsaved-act-reverted', { esm: true }))).LayoutManager, { quiet: true, legs: ['ua', 'ub', 'uc'] });
     ok(f.some((n) => /does not put fin-2 back on Fin/.test(n)) && f.some((n) => /does not snap fin-2 back \(the drag/.test(n)) && f.some((n) => /never re-adopted onto Fin/.test(n)), `control unsaved-act-reverted: the receipt clause alone lets a record 100 ms after a drop / a drag / under a chatty peer undo it — RED (${f.length}: ${f.map((n) => n.slice(0, 60)).join(' | ')})`);
   }
   // (ah) verify r4 ②: adoptRemoteMove told a destination equal to the source falls through to the held-record search (the r1 form)
   {
     const find = "      if (to === from || to === '__stage__') return null;\n      dest = to;\n    } else {\n";
     ok(DSRC.includes(find), 'control adopt-falls-through: the patched lines exist in desktop-manager.js');
-    const mut = DSRC.replace(find, "      dest = to !== from && to !== '__stage__' ? to : null;\n    }\n    if (!dest) {\n");
+    const mut = editAnchor(DSRC, find, "      dest = to !== from && to !== '__stage__' ? to : null;\n    }\n    if (!dest) {\n", "src/lib/desktop-manager.js");
     const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', mut, 'adopt-falls-through', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['ue'] });
     ok(f.some((n) => /record of the desktop on show LISTS stays on it/.test(n)), `control adopt-falls-through: the search moves the listed window out — RED (${f.length})`);
   }
@@ -1727,21 +1727,21 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = '    const fresh = (t, hold = ACT_HOLD_MS) => t > 0 && before - t <= hold;\n';
     ok(LSRC0.includes(find), 'control clock-unwatched: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    return;\n'), 'clock-unwatched', { esm: true }))).LayoutManager, { quiet: true, legs: ['cj', 'st2'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    return;\n', "src/lib/layout.js"), 'clock-unwatched', { esm: true }))).LayoutManager, { quiet: true, legs: ['cj', 'st2'] });
     ok(f.some((n) => /survives the wake/.test(n)) && !f.some((n) => /FOLLOWS the server/.test(n)), `control clock-unwatched: with no re-arm the drag before the sleep is lost at the wake — RED; the run minute (st2) still expires either way (${f.length})`);
   }
   // (a5) verify r5 ⑥: an owed desk that re-arms nothing — the move waits for the next act: RED by a5
   {
     const find = "    if (owed && [...owed].some((d) => !this._unacked.some((s) => s.desks.includes(d)))) heldMoved = true;\n";
     ok(LSRC0.includes(find), 'control owed-desk-unarmed: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, ''), 'owed-desk-unarmed', { esm: true }))).LayoutManager, { quiet: true, legs: ['a5'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'owed-desk-unarmed', { esm: true }))).LayoutManager, { quiet: true, legs: ['a5'] });
     ok(f.some((n) => /the owed desk re-arms the re-send/.test(n)), `control owed-desk-unarmed: the move stays on the page and never reaches the server — RED (${f.length})`);
   }
   // (st2b) verify r5 ④: a count that retires nothing — the same expired act is toasted at every stale release: RED by st2's second episode
   {
     const find = '      n++; w._movedAt = 0; w._boundsAt = 0; w._chainAt = 0; // counted once: said, then gone\n';
     ok(LSRC0.includes(find), 'control expired-not-retired: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '      n++;\n'), 'expired-not-retired', { esm: true }))).LayoutManager, { quiet: true, legs: ['st2'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '      n++;\n', "src/lib/layout.js"), 'expired-not-retired', { esm: true }))).LayoutManager, { quiet: true, legs: ['st2'] });
     ok(f.some((n) => /a second release with nothing new says nothing/.test(n)) && !f.some((n) => /told ONCE how many changes were not kept/.test(n)), `control expired-not-retired: the expired move is toasted again at the second release — RED; the first release still counts right (${f.length})`);
   }
   // (ch) verify r5 ②: the hold lines gone — the merge dissolves, the split falls back, the tear-off is re-grouped: RED by ch; a verb's stamp gone: RED by the pin
@@ -1765,7 +1765,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = '    if (refused) s.refused.add(key);\n';
     ok(LSRC0.includes(find), 'control refusal-carries: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, ''), 'refusal-carries', { esm: true }))).LayoutManager, { quiet: true, legs: ['ar'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '', "src/lib/layout.js"), 'refusal-carries', { esm: true }))).LayoutManager, { quiet: true, legs: ['ar'] });
     ok(f.some((n) => /stays held — a stale record cannot put fin-2 back/.test(n)), `control refusal-carries: a refused record that counts as carried lets a stale record undo the act — RED (${f.length})`);
   }
   // ((r5③) a door planted without a witness RED by §6's census, each new stamp removed RED by the doors pin: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -1774,18 +1774,18 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = "    if (expired) showToast(t('The layout was re-read";
     ok(LSRC0.includes(find), 'control stale-release-untold: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC0.replace(find, "    if (false) showToast(t('The layout was re-read"), 'stale-release-untold', { esm: true }))).LayoutManager, { quiet: true, legs: ['st2'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, "    if (false) showToast(t('The layout was re-read", "src/lib/layout.js"), 'stale-release-untold', { esm: true }))).LayoutManager, { quiet: true, legs: ['st2'] });
     ok(f.some((n) => /told ONCE how many changes were not kept/.test(n)) && !f.some((n) => /FOLLOWS the server/.test(n)), `control stale-release-untold: the acts are dropped without a word — RED; the page still follows the server (${f.length})`);
   }
   // (ae)/(af) verify r3 revert table: r2 ④'s unknown-desktop guards in _setRecord and noteWire
   {
     const f1 = '    if (!this._desktops.some((d) => d.id === desktopId)) return;\n    this._savedStates.set(desktopId, record);';
     ok(DSRC.includes(f1), 'control orphan-held: the patched line exists in desktop-manager.js');
-    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(f1, '    this._savedStates.set(desktopId, record);'), 'orphan-held', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['orph'] });
+    const f = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, f1, '    this._savedStates.set(desktopId, record);', "src/lib/desktop-manager.js"), 'orphan-held', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['orph'] });
     ok(f.some((n) => /an orphan record/.test(n)), `control orphan-held: _setRecord without its guard holds the orphan (RED) (${f.length})`);
     const f2 = "    if (!this._desktops.some((d) => d.id === desktopId)) return; // a desktop this page does not know (verify r2 ④)\n";
     ok(DSRC.includes(f2), 'control orphan-wire: the patched line exists in desktop-manager.js');
-    const g = await doorLegs((await import(M.write('src/lib/desktop-manager.js', DSRC.replace(f2, ''), 'orphan-wire', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['orph'] });
+    const g = await doorLegs((await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, f2, '', "src/lib/desktop-manager.js"), 'orphan-wire', { esm: true }))).DesktopManager, RealLM, { quiet: true, legs: ['orph'] });
     ok(g.some((n) => /an orphan record/.test(n)), `control orphan-wire: noteWire without its guard keeps a wire base for the orphan (RED) (${g.length})`);
   }
   // (b) the pre-fix _updateCachedDesktop (2.369.198, byte for byte in its body)
@@ -1816,7 +1816,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     const LSRC = read('src/lib/layout.js');
     const find = '    for (const d of dm?.takeDirty?.() || []) {';
     ok(LSRC.includes(find), 'control no-dirty-send: the patched line exists in layout.js');
-    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', LSRC.replace(find, '    for (const d of []) {'), 'no-dirty-send', { esm: true }))).LayoutManager, { quiet: true, legs: ['a', 'g'] });
+    const f = await doorLegs(RealDM, (await import(M.write('src/lib/layout.js', editAnchor(LSRC, find, '    for (const d of []) {', "src/lib/layout.js"), 'no-dirty-send', { esm: true }))).LayoutManager, { quiet: true, legs: ['a', 'g'] });
     ok(f.some((n) => /THE AUTOSAVE after the drop SENDS HR/.test(n)) && f.some((n) => /corrected record goes out/.test(n)), `control no-dirty-send: the autosave leg turns RED — the server never hears of HR (${f.length}: ${f.slice(0, 2).join(' | ').slice(0, 160)})`);
   }
   // ((d) a NEW raw writer of a held record — §5's census over a patched desktop-manager.js: MOVED to the fast scripts/test-desktop-record-pins.mjs — lane lg-text-legs-2, B-94d3: a leg that reads only source text runs in every lane's gate)
@@ -1858,7 +1858,7 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
   {
     const find = "    if (viewport === 'phone') for (const k of PHONE_KEEPS) delete chrome[k];";
     ok(DSRC.includes(find), 'control pre-p1-write-half: the patched line exists in desktop-manager.js');
-    const DM0 = (await import(M.write('src/lib/desktop-manager.js', DSRC.replace(find, "    if (viewport === 'phone') for (const k of ['sidebarOpen', 'grid']) delete chrome[k];"), 'pre-p1-write-half', { esm: true }))).DesktopManager;
+    const DM0 = (await import(M.write('src/lib/desktop-manager.js', editAnchor(DSRC, find, "    if (viewport === 'phone') for (const k of ['sidebarOpen', 'grid']) delete chrome[k];", "src/lib/desktop-manager.js"), 'pre-p1-write-half', { esm: true }))).DesktopManager;
     const f = await gateDoorLegs(DM0, loadHandler(), { quiet: true, legs: ['cur'] });
     ok(f.some((n) => /a CURRENT phone page/.test(n)), `control pre-p1-write-half: the P0 write half (a phone carries the sidebar and the grid only) — the gate REFUSES a phone save whose own theme / fonts / bars differ from the desk's (RED) (${f.length})`);
   }
@@ -1890,21 +1890,21 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     const find = "    || (spec.action === 'attachSession' && spec.serverId && find((s) => s.id === spec.serverId))\n", imp = "import { conversationOf, hostOf, sessionOf, liveSessionOf } from './desktop-record.js';";
     ok(PSRC.includes(find) && LSRC0.includes(imp), 'control ring-restore-ignores-spec: the patched lines exist in desktop-record.js (liveSessionOf) and layout.js (its import)');
     const rec = M.write('src/lib/desktop-record.js', PSRC.replace(find, ''), 'ring-restore-ignores-spec');
-    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(imp, imp.replace("'./desktop-record.js'", JSON.stringify(rec))), 'ring-restore-ignores-spec', { esm: true }))).LayoutManager;
+    const LMx = (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, imp, imp.replace("'./desktop-record.js'", JSON.stringify(rec)), "src/lib/layout.js"), 'ring-restore-ignores-spec', { esm: true }))).LayoutManager;
     const f = await ringRestoreLegs(RealDM, LMx, { quiet: true });
     ok(f.some((n) => /THE BOOT RESTORE of 工作's NAMELESS five/.test(n)), `control ring-restore-ignores-spec (2.369.340's restoreState): a nameless chat matches nothing and builds nothing — RED (${f.length})`);
   }
   {
     const find = "{ mode: 'chat', backend: alive.backend || backend, machine: true, backendSessionId: alive.backendSessionId || alive.claudeSessionId || backendSessionId || undefined });";
     ok(LSRC0.includes(find), 'control ring-attach-nameless: the patched line exists in layout.js');
-    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(find, "{ mode: 'chat', backend: alive.backend || backend, machine: true });"), 'ring-attach-nameless', { esm: true }))).LayoutManager;
+    const LMx = (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, "{ mode: 'chat', backend: alive.backend || backend, machine: true });", "src/lib/layout.js"), 'ring-attach-nameless', { esm: true }))).LayoutManager;
     const f = await ringRestoreLegs(RealDM, LMx, { quiet: true });
     ok(f.length === 1 && f.some((n) => /each attach CARRIES the conversation id/.test(n)), `control ring-attach-nameless (2.369.340's attach): the window's openSpec names no conversation until 'attached' — RED (${f.length})`);
   }
   {
     const find = "    if (behindStamp(this._appliedStamps, msg)) {";
     ok(LSRC0.includes(find), 'control ring-applies-older: the patched line exists in layout.js');
-    const LMx = (await import(M.write('src/lib/layout.js', LSRC0.replace(find, '    if (false) {'), 'ring-applies-older', { esm: true }))).LayoutManager;
+    const LMx = (await import(M.write('src/lib/layout.js', editAnchor(LSRC0, find, '    if (false) {', "src/lib/layout.js"), 'ring-applies-older', { esm: true }))).LayoutManager;
     const f = await ringDoorLegs(RealDM, LMx, loadHandler(), { quiet: true, legs: ['behind'] });
     ok(f.some((n) => /A RECORD NEVER GOES BACKWARDS on the page/.test(n)), `control ring-applies-older: the older record lands over the newer — RED (${f.length})`);
   }
