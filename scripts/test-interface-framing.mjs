@@ -48,6 +48,7 @@ import { Duplex } from 'node:stream';
 import { execFileSync } from 'node:child_process';
 import Module, { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { anchored } from './scratch.mjs';   // the ONE door for a red control's edit (B-0d3e)
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -266,10 +267,16 @@ console.log('— ③ IN REQUEST ORDER, AND NOTHING LEFT');
   }
   const lives = await deathWithUpgrade();
   ok(lives.upgraded && lives.uncaught === 0, `the link dies while an upgraded channel is open at the hub: nothing thrown in the hub (${lives.uncaught} uncaught) — the death is said by name, never thrown`, lives);
+  // TWO GUARDS, each enough alone (B-55e4, 主开发 r1341): the party's own 'error' listener on every channel socket, and the
+  // channel socket's «the error only where it is heard» (src/agentd/chan-socket.js dead()). With the party's cut, the socket
+  // module alone keeps the hub alive; with BOTH cut, the dead link's error is thrown out of the hub.
   const PARTY = read('src/server/interface-party.js'), ERR = "          s.on('error', () => { });";
-  if (PARTY.split(ERR).length !== 2) throw new Error('CONTROL needle not found exactly once: the party\'s channel error listener');
-  const dies = await deathWithUpgrade(compileAt('src/server/interface-party.js', PARTY.replace(ERR, '')));
-  ok(dies.uncaught >= 1, `RED CONTROL — the party's listener cut: the dead link's «${dies.why}» is thrown out of the hub (${dies.uncaught} uncaught)`, dies);
+  const noListener = anchored(PARTY, ERR, '', 'the party\'s channel error listener cut');
+  const partyCut = await deathWithUpgrade(compileAt('src/server/interface-party.js', noListener));
+  ok(partyCut.upgraded && partyCut.uncaught === 0, `the party's listener cut: the channel socket alone keeps the hub alive at the link's death (${partyCut.uncaught} uncaught — B-55e4)`, partyCut);
+  globalThis.__vsLoudSock = compileAt('src/agentd/chan-socket.js', anchored(read('src/agentd/chan-socket.js'), "try { s._deadReason = reason; s.destroy(s.listenerCount('error') > 0 ? new Error(reason) : undefined); } catch { }", 'try { s.destroy(new Error(reason)); } catch { }', 'every channel socket destroyed with the error'));   // stale-pins: kept — the release-era death, the red's text
+  const dies = await deathWithUpgrade(compileAt('src/server/interface-party.js', anchored(noListener, "require('../agentd/chan-socket.js')", 'globalThis.__vsLoudSock', 'the loud channel socket')));
+  ok(dies.uncaught >= 1, `RED CONTROL — BOTH guards cut (the party's listener, and the socket's «the error only where it is heard»): the dead link's «${dies.why}» is thrown out of the hub (${dies.uncaught} uncaught)`, dies);
   const RS = read('src/interface/relay.js');
   const D1 = "        if (!req.complete) { req.unpipe(out); req.resume(); }   // answered before the page's body ended: the rest is read and dropped, as the plain form's Node dumps it — the page connection goes on\n";
   const D2 = "      req.unpipe(out); req.resume();   // nobody takes the rest of the page's body now\n";

@@ -19,7 +19,10 @@
 //              the socket (a paused keep-alive socket can hold a whole window: else the far side stalls for good, its
 //              CLOSE never leaves and the sink is never removed — 主开发 2026-11-17).
 //   death    — the owner calls the router's dead() from the Mux's onDead: every socket is ended on its far side, then
-//              destroyed with «link lost» (a held write's callback gets the error), and both maps are cleared.
+//              destroyed with «link lost» (a held write's callback gets the error), and both maps are cleared. The ERROR goes only
+//              to a socket someone listens on (B-55e4): an upgraded socket has no listener left (http.Server let go of it), and a
+//              stream's 'error' with no listener throws uncaught — one page's upgrade would end the hub with its link. The others
+//              are destroyed plainly; the death itself is said by the owner's onDead.
 //   the link — the owner's Mux MUST be built with `closeAfterQueue` (a CLOSE behind the channel's own queued bytes, the
 //              interface's link): without it end() would drop the reply still queued. createChanSockets refuses one.
 //   socket   — remoteAddress / remotePort / encrypted come from the open line's stamp; setNoDelay / setTimeout /
@@ -49,7 +52,7 @@ class ChanSocket extends Duplex {
   _destroy(err, cb) {
     const owed = this._pushed - this._credited;   // what the far side sent that no reader will take now — its window back
     if (owed > 0 && !this._farClosed) { this._credited += owed; try { this.mux.credit(this.chan, owed); } catch { } }
-    this._closeChan(); const w = this._waitWrite; this._waitWrite = null; if (w) w(err || new Error('destroyed')); cb(err);
+    this._closeChan(); const w = this._waitWrite; this._waitWrite = null; if (w) w(err || new Error(this._deadReason || 'destroyed')); cb(err);   // a held write hears the link's death by name, listened or not
   }
   _read() { this._settleCredit(); }
   // every reader takes bytes through read() — the flowing mode's own loop too — so the credit is settled right there
@@ -95,7 +98,7 @@ function createChanSockets(mux) {
     /** the link died (the owner calls this from the Mux's onDead): each socket ends on its far side, then is destroyed */
     dead(reason = 'link lost') {
       const all = [...socks.values()]; socks.clear(); sinks.clear();
-      for (const s of all) { try { s.remoteClosed(); } catch { } try { s.destroy(new Error(reason)); } catch { } }
+      for (const s of all) { try { s.remoteClosed(); } catch { } try { s._deadReason = reason; s.destroy(s.listenerCount('error') > 0 ? new Error(reason) : undefined); } catch { } }   // B-55e4: the error only where it is heard
     },
     get size() { return socks.size + sinks.size; },
   };

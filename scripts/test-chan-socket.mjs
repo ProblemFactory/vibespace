@@ -18,6 +18,7 @@ import http from 'node:http';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { mutantCopies } from './mutant-copy.mjs';
+import { anchored } from './scratch.mjs';   // the ONE door for a red control's edit (B-0d3e)
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -166,6 +167,23 @@ for (const [name, lib, want] of [['the router', real, true], ['RED CONTROL (no r
   await until(() => sockClosed && resClosed && W.router.size === 0, want ? 2000 : 300);
   if (want) ok(`${name}: the link killed under a keep-alive socket with a held write (${heldWrite}) — the socket is ended and destroyed («${sockErr}»), the response closes, the held write is released and the router holds nothing (${W.router.size})`, heldWrite && sockClosed && resClosed && sockErr === 'link lost' && !s._waitWrite && W.router.size === 0, { heldWrite, sockClosed, resClosed, sockErr });
   else ok(`${name}: the socket, its held write and the response stay for ever (closed ${sockClosed}, router ${W.router.size})`, heldWrite && !sockClosed && W.router.size === 1, { sockClosed, resClosed });
+}
+// B-55e4 (主开发 r1341): A SOCKET NO ONE LISTENS ON FOR ERRORS NEVER THROWS AT THE LINK'S DEATH. An upgraded socket has no 'error'
+// listener left (http.Server let go of it), and a stream's 'error' with no listener throws uncaught: one page's upgrade ended the hub
+// with its link. The error goes only where it is heard; the rest are destroyed plainly. RED CONTROL: every socket destroyed with it.
+const LOUD = "try { s._deadReason = reason; s.destroy(s.listenerCount('error') > 0 ? new Error(reason) : undefined); } catch { }";
+const loudDead = (() => { const src = fs.readFileSync(path.join(REPO, SOCKF), 'utf8'); return require(MUT.write(SOCKF, anchored(src, LOUD, 'try { s.destroy(new Error(reason)); } catch { }', 'every socket destroyed with the error'), 'loud-dead')); })();   // stale-pins: kept — the release-era death, the red's text
+for (const [name, lib, want] of [['the router', real, true], ['RED CONTROL (every socket destroyed with the error)', loudDead, false]]) {
+  const W = world(lib);
+  const s = W.router.open(21, {});                         // NO 'error' listener: an upgraded socket's state
+  let closed = false; s.on('close', () => { closed = true; });
+  let uncaught = null; const onUncaught = (e) => { uncaught = e; };
+  process.on('uncaughtException', onUncaught);
+  W.hub.stream.emit('close');                              // the link dies under it
+  await until(() => closed, 1000); await sleep(20);
+  process.removeListener('uncaughtException', onUncaught);
+  if (want) ok(`${name}: a channel socket no one listens on for errors (an upgraded one) is destroyed at the link's death and nothing is thrown (closed ${closed}, uncaught ${uncaught ? uncaught.message : 'none'})`, closed && !uncaught && W.router.size === 0);
+  else ok(`${name}: the link's death throws «${uncaught && uncaught.message}» uncaught — one page's upgrade ends the hub with its link`, !!uncaught && uncaught.message === 'link lost');
 }
 {
   let refused = null; try { real.createChanSockets(new Mux(new EventEmitter(), { heartbeat: false })); } catch (e) { refused = e.message; }
