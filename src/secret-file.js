@@ -1,12 +1,19 @@
 'use strict';
 /**
- * A SECRET-BEARING FILE REPLACED (lane vault-e2e-password-fix-r2) — SHARED tier, fs + crypto only. A rewrite that REMOVES a
+ * A SECRET-BEARING FILE REPLACED (lane vault-e2e-password-fix-r2) — SHARED tier, fs + path + crypto only. A rewrite that REMOVES a
  * secret (a device token taken out of an attach config, a plaintext login map re-written as digests, a voice pair sealed)
  * must not leave the old bytes in the inode the rename retired: `replaceShredding` writes the new text atomically (tmp +
  * rename, 0600) and then overwrites the OLD inode in place through an fd opened before the rename. Readers of the name
  * never see a torn file (the rename is atomic; the overwrite reaches only the retired inode).
+ * THE NEW BYTES ARE ON DISK BEFORE THE NAME POINTS AT THEM (B-dc3f, 主开发 r1148 4): the temp file is synced, THEN renamed,
+ * then its folder synced (best effort). Before, the rename came first: a crash or a power loss after it could leave the name
+ * on a file of no bytes — the sign-in table is rewritten at least once an hour while anyone is signed in, and a torn one
+ * started a home machine OPEN. One function, so every user gets it: src/auth.js (the sign-in table), src/plugins/frp.js (the
+ * relay record and its config), src/server/host-tokens.js (the link values' copies), src/server/sealed-json.js (the
+ * sealed stores).
  */
 const fs = require('fs');
+const path = require('path');
 const crypto = require('crypto');
 
 /** Replace a SECRET-BEARING file's content atomically (tmp + rename, 0600) and overwrite the OLD bytes in place — the inode
@@ -18,13 +25,17 @@ function replaceShredding(file, text) {
   try { old = fs.openSync(file, 'r+'); size = fs.fstatSync(old).size; } catch { old = null; }
   const tmp = `${file}.tmp-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
   try {
-    fs.writeFileSync(tmp, text, { mode: 0o600, flag: 'wx' });
-    fs.renameSync(tmp, file);
+    const fd = fs.openSync(tmp, 'wx', 0o600);
+    try { fs.writeFileSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }   // THE BYTES ON DISK FIRST
+    fs.renameSync(tmp, file);                                                              // then the name points at them
   } catch (e) {
     try { fs.unlinkSync(tmp); } catch { /* never written */ }
     if (old !== null) try { fs.closeSync(old); } catch { }
     throw e;
   }
+  let dir = null;   // the folder's sync, best effort (not every platform opens a folder)
+  try { dir = fs.openSync(path.dirname(file), 'r'); fs.fsyncSync(dir); } catch { /* the name already points at the synced bytes */ }
+  if (dir !== null) { fs.closeSync(dir); dir = null; }
   if (old !== null) {
     try { if (size > 0) fs.writeSync(old, crypto.randomBytes(size), 0, size, 0); try { fs.fsyncSync(old); } catch { } } catch { /* the name already holds the new text */ }
     try { fs.closeSync(old); } catch { }

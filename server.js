@@ -1430,6 +1430,7 @@ const agentdDialWss = new WebSocketServer({ noServer: true }); // Transport B di
 hub.attachToServers('upgrade', (req, socket, head) => { // BOTH servers (http + the https one, src/server/tls.js) — never server.on (§89)
   const pathname = (req.url || '').split('?')[0];
   const deny = () => { socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n'); socket.destroy(); };
+  if (auth.upgradeHeld(pathname)) return auth.refuseHeldUpgrade(socket);   // B-dc3f: a HELD sign-in file shuts every upgrade, a public /svc socket too — but a paired machine's dial-in (its own dial token)
   if (pathname === '/ws') {
     if (!auth.requestAuthed(req)) return deny();
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit('connection', ws, req));

@@ -21,6 +21,12 @@
  *   `passwordEnabled` answer «on»; no login is valid (`checkToken`, `requestAuthed`: every upgrade that asks); NOTHING is
  *   written over the file (`_save` and every road that would write refuse). The journal says it once, at the start. A
  *   file that is truly missing (nothing at the path) stays a new instance, as before.
+ *   THE HOLD CLOSES WHAT THE FILE GUARDS (the round, 主开发 r1148): with single sign-on on, SSO still guards — its logins
+ *   live in memory only (nothing is written), the local password road stays refused, the held words stay on the sign-in
+ *   page and in the journal. Without it (`shut`) everything is refused, but THE SIGN-IN PAGE ANSWERS AS A PAGE (200, the
+ *   held words): a health check's start, ready and alive probes ask it, and a refusal there restarted a held pod for ever.
+ *   Every upgrade is shut too (`upgradeHeld`), a public /svc socket included, but a paired machine's dial-in, which
+ *   carries its own dial token.
  */
 
 const fs = require('fs');
@@ -37,16 +43,24 @@ const TOKEN_TTL_MS = 180 * 24 * 3600 * 1000; // THE CAP: 180 days from the sign-
 const TOKEN_IDLE_MS = 30 * 24 * 3600 * 1000; // THE SLIDE: 30 days from the last use (each use extends it)
 const TOKEN_SLIDE_SAVE_MS = 3600 * 1000;     // a use moves `usedAt` on disk (and the cookie's Max-Age) at most once an hour
 const MAX_TOKENS = 200;
-/** the held state's refusal (B-dc3f): every request the gate sees — a page gets the words (the sign-in page says it), an API
- *  or a door gets them as JSON; 503, the way out named */
-function refuseHeld(held, req, res) {
-  const lang = landingLang(req.headers['accept-language']), w = loginWords(lang);
+/** the upgrade roads a held file never shuts: a paired machine's dial-in carries its own dial token (server.js
+ *  gateDialUpgrade); what it reaches goes back through the app, where the gate refuses it, or needs no person's allow */
+const OWN_RULE_UPGRADES = new Set(['/api/device-dial', '/api/agentd-dial']);
+/** the local sign-in road — refused while held, also where single sign-on still guards */
+const LOCAL_ROAD = new Set(['/api/login', '/api/auth/set-password']);
+/** the held words in the asked language: why and the way out; `sso` = single sign-on still guards (B-dc3f) */
+function heldWords(lang, sso) { const w = loginWords(lang); return { title: w.title, why: w[sso ? 'signin-held-sso' : 'signin-held'], fix: w[sso ? 'signin-held-sso-fix' : 'signin-held-fix'] }; }
+const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+/** the held state's answer (B-dc3f): a page navigation gets the words (in the asked language), an API or a door gets them as
+ *  JSON — 503, the way out named. `page` = THE SIGN-IN PAGE itself: it answers AS A PAGE, 200 whatever the request accepts
+ *  (a health check asks it — the tree's chart: start, ready and alive — and a refusal there restarted a held pod for ever) */
+function refuseHeld(held, req, res, { sso = false, page = false } = {}) {
+  const lang = landingLang(req.headers['accept-language']), w = heldWords(lang, sso);
   res.setHeader('Retry-After', '3600');
-  if (req.method === 'GET' && String(req.headers.accept || '').includes('text/html')) {
-    const esc = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-    return res.status(503).type('html').send(`<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(w.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1em;line-height:1.5"><h1 style="font-size:1.3em">${esc(w['signin-held'])}</h1><p>${esc(w['signin-held-fix'])}</p><p style="color:#666;font-size:.9em"><code>data/auth.json</code>: ${esc(held.why)}</p></body></html>`);
+  if (page || (req.method === 'GET' && String(req.headers.accept || '').includes('text/html'))) {
+    return res.status(page ? 200 : 503).type('html').send(`<!doctype html><html lang="${lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escHtml(w.title)}</title></head><body style="font-family:system-ui,sans-serif;max-width:36em;margin:4em auto;padding:0 1em;line-height:1.5"><h1 style="font-size:1.3em">${escHtml(w.why)}</h1><p>${escHtml(w.fix)}</p><p style="color:#666;font-size:.9em"><code>data/auth.json</code>: ${escHtml(held.why)}</p></body></html>`);
   }
-  return res.status(503).json({ error: 'signin-held', why: LOGIN_WORDS['signin-held'].en, fix: LOGIN_WORDS['signin-held-fix'].en, detail: held.why });
+  return res.status(503).json({ error: 'signin-held', why: w.why, fix: w.fix, lang, detail: held.why });
 }
 const heldError = (held) => Object.assign(new Error(`the sign-in file is held (${held.why}) — nothing is written over it`), { code: 'signin-held' });
 /** auth.json keys a login by sha256(token) — never the token. A 48-hex key is a token an older build stored (hashed at load). */
@@ -73,6 +87,8 @@ class Auth {
     let parsed;
     try { parsed = JSON.parse(text); } catch { return this._hold('its text is not a sign-in table (it does not parse)'); }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return this._hold('it holds no sign-in table');
+    if (parsed.passwordHash !== undefined && (typeof parsed.passwordHash !== 'string' || typeof parsed.salt !== 'string')) return this._hold('its password record is not text');   // a hash that is not text: no login could ever verify (500), held by name
+    if (parsed.tokens !== undefined && (!parsed.tokens || typeof parsed.tokens !== 'object' || Array.isArray(parsed.tokens))) return this._hold('its logins are not a table');
     this._state = parsed;
     // THE MIGRATION (once, at the first start of this build): a plaintext token map becomes its digests — every login
     // stays valid ONCE (the cookie's token hashes to its key; an older build never stamped a use, so the migration counts as
@@ -88,13 +104,23 @@ class Auth {
 
   /** HOLD the instance closed on a sign-in file that cannot be read (B-dc3f): said once, here, at the start */
   _hold(why) {
-    this._state = null;
+    const sso = !!this._clerk?.enabled;
+    this._state = sso ? { tokens: {} } : null;   // single sign-on still guards: its logins in MEMORY only (_save writes nothing while held)
     this._held = { why };
-    try { console.error(`[auth] THE SIGN-IN FILE IS HELD: ${this._file} is there but ${why} — every page and API is refused until it is restored from a backup (then restart), or removed to start with no sign-in; nothing is written over it`); } catch { }
+    const fix = 'if it looks whole, restart VibeSpace first (a read can fail for a moment); otherwise restore it from a backup and restart, or remove it and restart';
+    try { console.error(sso
+      ? `[auth] THE SIGN-IN FILE IS HELD: ${this._file} is there but ${why} — single sign-on still guards this instance (its logins kept in memory only, until the next restart) and the password sign-in is refused; ${fix}; nothing is written over it`
+      : `[auth] THE SIGN-IN FILE IS HELD: ${this._file} is there but ${why} — every page and API is refused (the sign-in page says so); ${fix} to start with no sign-in; nothing is written over it`); } catch { }
   }
 
   /** the held state (B-dc3f), or null: { why } */
   get held() { return this._held; }
+  /** held and nothing else guards (no single sign-on): every page, API, door and upgrade is refused — but the sign-in page */
+  get shut() { return !!this._held && !this._clerk?.enabled; }
+  /** does the held state refuse this upgrade path? every one but a paired machine's dial-in (its own dial token) */
+  upgradeHeld(pathname) { return this.shut && !OWN_RULE_UPGRADES.has(pathname); }
+  /** the upgrade dispatcher's refusal while shut: 503 by name, nothing proxied */
+  refuseHeldUpgrade(socket) { try { socket.write('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 3600\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{"error":"signin-held"}'); } catch { } try { socket.destroy(); } catch { } }
 
   _save() {
     if (!this._state || this._held) return;   // NOTHING is written over a held file
@@ -159,7 +185,7 @@ class Auth {
   /** Revoke every login token except (optionally) one — in-app password change kicks all other devices; a vault LOCK
    *  revokes them all (lane vault-e2e-password-fix-r2 — the hub's wiring). → how many logins ended. */
   revokeAllTokens(exceptToken = null) {
-    if (!this._state || this._held) return 0;
+    if (!this._state || this.shut) return 0;   // held under single sign-on: its in-memory logins are revoked (a vault lock still signs everyone out)
     const d = exceptToken ? tokenDigest(exceptToken) : null;
     const keep = d && this._state.tokens ? this._state.tokens[d] : null;
     const n = Object.keys(this._state.tokens || {}).length - (keep ? 1 : 0);
@@ -219,7 +245,7 @@ class Auth {
   }
 
   issueToken(ua = '') {
-    if (this._held) throw heldError(this._held);
+    if (this.shut) throw heldError(this._held);   // held under single sign-on: the login lives in memory only (_save writes nothing)
     const token = crypto.randomBytes(24).toString('hex');
     const now = Date.now();
     // Clerk-only instances may have no auth.json yet — tokens still persist
@@ -238,7 +264,7 @@ class Auth {
 
   /** A use of a login: alive ⇒ it SLIDES (in memory now; on disk at most once an hour) → true. */
   checkToken(token) {
-    if (this._held) return false;   // held: no login is valid
+    if (this.shut) return false;   // held, nothing else guarding: no login is valid (under single sign-on: its in-memory logins)
     if (!this.enabled) return true;
     const rec = this._login(token);
     const now = Date.now();
@@ -259,7 +285,7 @@ class Auth {
   }
 
   revokeToken(token) {
-    if (this._held) return;
+    if (this.shut) return;
     const d = token ? tokenDigest(token) : null;
     if (d && this._state?.tokens?.[d]) { delete this._state.tokens[d]; this._save(); }
   }
@@ -309,7 +335,7 @@ class Auth {
    *  from this instance's own page: every caller (the upgrade dispatcher's /ws and /proxy/, the desktop and browser
    *  streams, private /svc mounts, private /p pages) inherits the same-origin rule */
   requestAuthed(req) {
-    if (this._held) return false;   // held: every upgrade and private page that asks is refused
+    if (this.shut) return false;   // held, nothing else guarding: every upgrade and private page that asks is refused
     const v = this.originVerdict(req);
     if (!v.ok) { this._logCrossSite(req, v); return false; }
     if (!this.enabled) return true;
@@ -319,8 +345,12 @@ class Auth {
   /** Express middleware guarding everything except the login flow — server.js mounts it BEFORE every router */
   middleware() {
     return (req, res, next) => {
-      if (this._held) return refuseHeld(this._held, req, res);   // HELD (B-dc3f): before every door and route — nothing is open
       const p = req.path;
+      if (this._held) {   // HELD (B-dc3f): before every door and route
+        // nothing else guards: nothing is open — but THE SIGN-IN PAGE answers as a page (200, the held words: a health check asks it)
+        if (this.shut) return refuseHeld(this._held, req, res, { page: (req.method === 'GET' || req.method === 'HEAD') && p === '/login' });
+        if (LOCAL_ROAD.has(p)) return refuseHeld(this._held, req, res, { sso: true });   // single sign-on still guards: the local password road stays refused
+      }
       // ── THE DOORS: callers that are not the owner's browser, each judged by its OWN credential — never the cookie,
       // so never the same-origin rule below (a door's refusals are its own) ──
       // WebDAV bridge authenticates with scoped Bearer mount tokens (webdav.js)
@@ -431,7 +461,7 @@ class Auth {
       // lane app-page-csp: the sign-in page reports too — its one inline script carries this response's nonce
       const nonce = crypto.randomBytes(16).toString('base64');
       res.set(appCsp.HEADER, appCsp.loginPolicy({ nonce, clerkHost: this._clerk?.enabled ? this._clerk.frontendApi : '' }));
-      res.type('html').send(loginHtml({ clerk: this._clerk, passwordEnabled: this.passwordEnabled, nonce, lang: landingLang(req.headers['accept-language']) }));
+      res.type('html').send(loginHtml({ clerk: this._clerk, passwordEnabled: this._held ? false : this.passwordEnabled, held: this._held, nonce, lang: landingLang(req.headers['accept-language']) }));   // held under single sign-on: SSO only, the held words
     });
 
     // Clerk SSO exchange: the login page verified the user on Clerk's hosted
@@ -545,7 +575,7 @@ function express_json_lite(req, res, next) {
  * our cookie. A 403 (email not allowed / missing claim) offers an SSO
  * sign-out link so the user can retry with a different account.
  */
-function loginHtml({ clerk = null, passwordEnabled = true, nonce = '', lang = 'en' } = {}) {
+function loginHtml({ clerk = null, passwordEnabled = true, held = null, nonce = '', lang = 'en' } = {}) {
   const clerkOn = !!clerk?.enabled;
   // lane ui-language (the walk's first-run-3): the page's words in the browser's language (src/login-words.js); its script
   // re-applies this device's own choice below — the app's per-device rule (localStorage `vibespace.lang`)
@@ -575,10 +605,12 @@ function loginHtml({ clerk = null, passwordEnabled = true, nonce = '', lang = 'e
   .or::before, .or::after { content:''; flex:1; height:1px; background:#262c37; }
   .err { color:#f87171; font-size:12px; min-height:16px; margin-top:10px; }
   .err a { color:#8a93a3; }
+  .held { color:#fbbf24; font-size:13px; }
 </style></head>
 <body><form class="card" id="f">
   <h1>VibeSpace</h1>
   <p data-w="${passwordEnabled ? 'subPassword' : 'subSso'}">${e(sub)}</p>
+  ${held ? `<p class="held" data-w="signin-held-sso">${e(W['signin-held-sso'])}</p><p class="held" data-w="signin-held-sso-fix">${e(W['signin-held-sso-fix'])}</p>` : ''}
   ${passwordEnabled ? `
   <input type="password" id="pw" placeholder="${e(W.password)}" data-w-ph="password" autofocus autocomplete="current-password">
   <button type="submit" data-w="signIn">${e(W.signIn)}</button>` : ''}
