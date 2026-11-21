@@ -60,6 +60,10 @@ This file is the engineers' record of every release: the lanes, the verification
 
 - ITS FOLLOW (round wrm8730fx, 主开发 r831): the hosts delta answers FALSE after a failed close (no landing — its caller reads the whole file again, as when the slot moved); the job wrapper's logOpen() reopens a log that has no number and writes a failed close's OWED sentence first, and every direct line of its own (the stop, the exit) asks it — none goes nowhere; a rotation counts from 0 again (a rename that failed never rotates every chunk); the channels CLI forgets its handle BEFORE the awaited close (the catch never closes it twice). LEGS: test-fd-close-census ⑤b drives every road with a placed close failure — the channels journal (a real store), a wrapper's rewrite in place and the job log's rotation with a reopen that throws (each from its own text), the CLI's attachment (the real CLI, a child) — each with its red copy.
 
+### bl-scratch — test-codex-zst's two sections ⑦
+
+- scripts/test-codex-zst.mjs carried two sections numbered ⑦ (B-f64b's «the boot's process walk» and B-3767 unit 2's «the two per-user folders», found at 2.369.411's block assembly): the later one is ⑧. 2.369.412's shipped bullet for B-3767 unit 2 still says «test-codex-zst ⑦»; a shipped section is not changed — that section is ⑧ from here. Tests and notes only.
+
 ## 2.369.415 — 2026-11-21
 
 ### lg-text-legs-3 — B-82c2: a mention in a Lark proposal is a real mention, or it is said
