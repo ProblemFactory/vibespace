@@ -30,6 +30,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In Channels, an account's own search repeated after ten minutes now asks the account again, and an agent is told how old a remembered result is.
 - The tab row of an agent browser's live view now fits itself again when the font or font size changes, so a tab in front is no longer cut off at its edge.
 - Scrubbing a command's output no longer holds VibeSpace for minutes; past a set limit the rest of the output is held back, and the agent is told.
+- In «Run a command», the working directory is now checked on its machine before it is used; one that does not resolve is said under the box and nothing runs.
+- A Task Group's Export and Import use the file as checked: a path that does not resolve, or a new file not ticked to create, is said instead of used as typed.
 
 ## 2.369.415 — 2026-11-21
 
