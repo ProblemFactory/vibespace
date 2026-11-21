@@ -232,7 +232,7 @@ console.log('§1 the PURE words (xpra-proto.js)');
     // CONTROL: the pre-lane rule (display-configure whenever the server names it) — the root follows, the work area stays at the hello's
     const src = read('src/lib/xpra-proto.js'), line = "  const rowsTaken = types.includes('desktop_size') || !name;";
     ok(src.split(line).length === 2, 'CONTROL anchor: the rows rule is one line in xpra-proto.js');
-    const Ppre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', src.replace(line, '  const rowsTaken = !name;'), 'workarea')).href);
+    const Ppre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-proto.js', editAnchor(src, line, '  const rowsTaken = !name;', "src/lib/xpra-proto.js"), 'workarea')).href);
     const pre = serverAfter(Ppre, seq[0], seq.slice(1));
     ok(same(pre.size, [1660, 1296]) && same(pre.wa, [0, 0, 1574, 974]) && Ppre.displayPacket(T654, { width: 1660, height: 1296 })[0] === 'display-configure', `CONTROL: the pre-lane packet on the same sizes — root ${pre.size.join('×')}, work area ${pre.wa.join(',')} (the hello's: the owner's blank strip)`, pre);
     ok(P.displayPacket(T654, { width: 640, height: 480, dpi: 143.6 })[8] === 144, 'the legacy form\'s dpi fields are whole numbers (xpra reads them as u16; the worker\'s rencode writes every number as an int)');
@@ -401,11 +401,11 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
     const csrc = read('src/lib/xpra-client.js');
     const REST = '    if (plan.rest) {', HOLD = '  const keyOut = (k, pressed) => { if (held) held.push', AGAIN = '        send(P.keyboardConfigPacket(packetTypes, { layout, extra: ime.slots.size ? [...ime.slots.entries()] : null }));';
     ok([REST, HOLD, AGAIN].every((l) => csrc.split(l).length === 2), 'CONTROL anchors: the rest, the hold and the republish are one line each in xpra-client.js');
-    const r1 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(REST, '    if (false) {'), 'imerest')).href));
+    const r1 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, REST, '    if (false) {', "src/lib/xpra-client.js"), 'imerest')).href));
     ok(r1.typed.length === P.IME_KEYCODES.length + 1, `CONTROL: without the later batch the commit loses ${20 - P.IME_KEYCODES.length} characters (${r1.typed.length - 1} of 20 typed)`, r1.typed.length);
-    const r2 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(HOLD, '  const keyOut = (k, pressed) => { if (false) held.push'), 'imehold')).href));
+    const r2 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, HOLD, '  const keyOut = (k, pressed) => { if (false) held.push', "src/lib/xpra-client.js"), 'imehold')).href));
     ok(r2.typed.length === 21 && r2.typed.indexOf('a') === P.IME_KEYCODES.length, `CONTROL: without the hold, the key pressed during the gap overtakes the rest (a typed ${r2.typed.indexOf('a') + 1}th of 21)`, r2.typed.indexOf('a'));
-    const r3 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(AGAIN, '        send(P.keyboardConfigPacket(packetTypes, { layout }));'), 'imeagain')).href));
+    const r3 = await imeRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, AGAIN, '        send(P.keyboardConfigPacket(packetTypes, { layout }));', "src/lib/xpra-client.js"), 'imeagain')).href));
     ok(r3.again === 0, 'CONTROL: the pre-lane post-hello keymap carries no IME row', r3.again);
   }
   // A ⌘ CHORD FROM A MAC IS A TAP (lane xpra-ime-mac, inc-mvaddc4m-6m0t's ⌘+a): a Mac browser never fires the keyup of a key
@@ -440,7 +440,7 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
     // CONTROL on a copy: without the tap line the Mac ⌘+a press stays down until a keyup a Mac never sends
     const csrc = read('src/lib/xpra-client.js'), TAP = "    if ((ev?.viewerMeta ?? ev?.mods?.meta) && (typeof mac === 'function' ? mac() : mac) && !P.MODIFIER_KEYNAMES.has(k.keyname)) {";
     ok(csrc.split(TAP).length === 2, 'CONTROL anchor: the tap is one line in xpra-client.js');
-    const t0 = await tapRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(TAP, '    if (false) {'), 'mactap')).href), true, { meta: true });
+    const t0 = await tapRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, TAP, '    if (false) {', "src/lib/xpra-client.js"), 'mactap')).href), true, { meta: true });
     ok(same(t0.atDown, ['a+']), `CONTROL: the pre-lane client leaves ⌘+a pressed at the keydown (${t0.atDown.join(' ')}) — X holds it and autorepeats`, t0);
     // lane xpra-mac-modifiers: ⌘+a (tapped; its keyup never comes), THEN a plain a — the fresh press clears the stale mark, so
     // the plain a's own keyup releases it (the .286 mark swallowed that keyup: X held a and autorepeated it)
@@ -465,7 +465,7 @@ console.log('§2 the session over a fake worker (xpra-client.js)');
     ok(same(s1, ['a+', 'a-', 'a+', 'a-']), `a Mac viewer's ⌘+a, then a plain a: the plain a's own keyup releases it (${s1.join(' ')}) — the tapped press's mark is cleared by the next press of that key`, s1);
     const FRESH = '    foreignDown.delete(ev?.code || ev?.key); // a FRESH press:';
     ok(csrc.split(FRESH).length === 2, 'CONTROL anchor: the stale-mark clear is one line');
-    const s0 = await againRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(FRESH, '    void 0; //'), 'stalemark')).href));
+    const s0 = await againRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, FRESH, '    void 0; //', "src/lib/xpra-client.js"), 'stalemark')).href));
     ok(same(s0, ['a+', 'a-', 'a+']), `CONTROL: without it the stale mark swallows the plain a's keyup (${s0.join(' ')}) — X holds a and autorepeats it`, s0);
   }
   wk.posted.length = 0;
@@ -662,7 +662,7 @@ console.log('§2d round 3 lane B (docs/design-desktop-apps-seamless §3.3): init
   const src = read('src/lib/xpra-client.js');
   const line = "      case 'initiate-moveresize': case 'window-initiate-moveresize': moveResizeAsked(p); return;\n";
   ok(src.split(line).length === 2, 'the moveresize dispatch is spelled once (the control removes exactly it)');
-  const Cpre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', src.replace(line, ''), 'moveresize')).href);
+  const Cpre = await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(src, line, '', "src/lib/xpra-client.js"), 'moveresize')).href);
   const M = await run(Cpre);
   ok(M.ev.mr.length === 0, `CONTROL: the pre-lane client surfaces NO move (${M.ev.mr.length} events for 14 packets) — the header-bar drag did nothing (M3b)`);
   M.c.close();
@@ -1019,7 +1019,7 @@ console.log('§3d lane xpra-mac-modifiers (the owner, 2026-10-16: 「根据 host
   // CONTROL: the view with no map (the pre-lane door) — the Mac viewer's ⌘+a goes as Super_L + a under mod4
   const vsrc = read('src/lib/xpra-view.js'), MAPLINE = "  const modMap = () => primaryModifierMap({ viewer: viewerPlatform(), host: typeof hostPlatform === 'function' ? hostPlatform() : hostPlatform });";
   ok(vsrc.split(MAPLINE).length === 2, 'CONTROL anchor: the view asks the table on one line');
-  const V0 = await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', vsrc.replace(MAPLINE, '  const modMap = () => null;'), 'nomodmap')).href);
+  const V0 = await import(pathToFileURL(MUTXC.write('src/lib/xpra-view.js', editAnchor(vsrc, MAPLINE, '  const modMap = () => null;', "src/lib/xpra-view.js"), 'nomodmap')).href);
   const m0 = await modRun(V0, 'mac', null);
   ok(same(m0.chord, ['Super_L+[mod4]', 'a+[mod4]', 'a-[mod4]', 'Super_L-[]']) && same(m0.click, ['down[mod4]', 'up[mod4]']), `CONTROL: without the map a Mac viewer's ⌘+a reaches the Linux app as ${m0.chord.join(' ')} and ⌘+click as mod4 — Super, never select-all`, m0);
 }
@@ -1223,7 +1223,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
   const src = read('src/lib/xpra-client.js');
   const ratioLine = "  const ratioNow = () => P.pixelRatioOf(typeof ratio === 'function' ? ratio() : ratio);";
   ok(src.split(ratioLine).length === 2, 'the ratio is read in ONE place in xpra-client.js (the control patches exactly it)');
-  const mutFile = MUTXC.write('src/lib/xpra-client.js', src.replace(ratioLine, '  const ratioNow = () => 1; // pre-fix: CSS px are X px'), 'dpr');
+  const mutFile = MUTXC.write('src/lib/xpra-client.js', editAnchor(src, ratioLine, '  const ratioNow = () => 1; // pre-fix: CSS px are X px', "src/lib/xpra-client.js"), 'dpr');
   const runDpr = async (mod) => {
     FakeWorker.instances.length = 0;
     const cons = [];
@@ -1272,7 +1272,7 @@ console.log('§6 HiDPI + THE APP\'S MINIMUM (2.369.158, docs/design-desktop-apps
     const winEl = view.stage.children[0];
     return { view, w, mins, winEl, pane };
   };
-  const vMut = MUTXC.write('src/lib/xpra-view.js', vsrc.replace(vLine, '  const screenRatio = () => 1; // pre-fix'), 'dpr');
+  const vMut = MUTXC.write('src/lib/xpra-view.js', editAnchor(vsrc, vLine, '  const screenRatio = () => 1; // pre-fix', "src/lib/xpra-view.js"), 'dpr');
   try {
     const A = await runView(V);
     const cv = A.winEl.children[0];
@@ -1654,7 +1654,7 @@ console.log('§8 lane app-fit-fixed (2026-10-03, the owner: WeChat\'s login in a
     const vsrc8 = read('src/lib/xpra-view.js');
     const vfx = "      } else if (minSize && !(fixedCss && fixedFollows())) {";
     ok(vsrc8.split(vfx).length === 2, 'CONTROL: the view\'s no-scale lever is spelled once');
-    const vm = MUTXC.write('src/lib/xpra-view.js', vsrc8.replace(vfx, '      } else if (minSize) { // pre-fix CONTROL'), 'fixedv');
+    const vm = MUTXC.write('src/lib/xpra-view.js', editAnchor(vsrc8, vfx, '      } else if (minSize) { // pre-fix CONTROL', "src/lib/xpra-view.js"), 'fixedv');
     const M = await runFixedView(await import(vm), true);
     ok(M.view.stageScale < 1 && M.view.fitBadge.style.display === '', `CONTROL: pre-fix the fixed window is scaled to fit with the badge (stage ${M.view.stageScale.toFixed(3)}) — the "75 %" the owner refused`);
     M.view.dispose();
@@ -1944,7 +1944,7 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
   const csrc = read('src/lib/xpra-client.js');
   const SLOT = "    if (!isMain && kind === 'main' && !watch && slotsOn() && !noSlot.has(wid)) { slotOrder.push(wid); layoutSlots(); } // S2: a second top-level gets its slot";
   ok(csrc.split(SLOT).length === 2, 'CONTROL: the slot is given in ONE line of xpra-client.js');
-  const cm = MUTXC.write('src/lib/xpra-client.js', csrc.replace(SLOT, '    // pre-lane CONTROL: no slot'), 'noslot');
+  const cm = MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, SLOT, '    // pre-lane CONTROL: no slot', "src/lib/xpra-client.js"), 'noslot');
   {
     const M = await runSlots(await import(cm));
     ok(M.ev.slot.length === 0 && same(M.w.sent('map-window')[1].slice(1, 6), [2, 347, 0, 880, 1120]) && same(M.ev.cons.slice(-1), [[880, 1120]]), `CONTROL: pre-lane Moments is S1's guest — centred OVER Weixin in the one pane, growing it (${JSON.stringify(M.w.sent('map-window')[1].slice(2, 6))})`);
@@ -1953,7 +1953,7 @@ console.log('§10 design 016 S2 (lane app-satellite-windows, 2026-10-03 — the 
   const vsrc = read('src/lib/xpra-view.js');
   const HOME = "return sat && sat.bound ? sat.stage : stage; };";
   ok(vsrc.split(HOME).length === 2, 'CONTROL: the satellite\'s stage is chosen in ONE place of xpra-view.js');
-  const vm = MUTXC.write('src/lib/xpra-view.js', vsrc.replace(HOME, 'return stage; }; // pre-lane CONTROL'), 'nohome');
+  const vm = MUTXC.write('src/lib/xpra-view.js', editAnchor(vsrc, HOME, 'return stage; }; // pre-lane CONTROL', "src/lib/xpra-view.js"), 'nohome');
   {
     const VM = await import(vm);
     FakeWorker.instances.length = 0;
@@ -2116,7 +2116,7 @@ console.log('§T lane xpra-title-election — the main-window title reaches the 
   const csrc = read('src/lib/xpra-client.js');
   const stashRe = /if \(!win\) \{ \/\/ lane xpra-title-election[\s\S]*?\n {8}\}/;
   ok(stashRe.test(csrc), 'CONTROL anchor: the window-metadata stash block is present (the control reverts exactly it)');
-  const dropSrc = csrc.replace(stashRe, 'if (!win) return;');
+  const dropSrc = editAnchor(csrc, stashRe, 'if (!win) return;', "src/lib/xpra-client.js");
   ok(dropSrc.includes('if (!win) return;') && dropSrc !== csrc && !/STASH it \(bounded\)/.test(dropSrc), 'CONTROL: the copy reverts the stash to the pre-fix `if (!win) return;`');
   const preMut = await import(fileUrl(MUTXC.write('src/lib/xpra-client.js', dropSrc, 'titledrop')));
   const mb = await titleRun(preMut, [['window-metadata', 7, { title: 'B' }], ['new-window', 7, 0, 0, 300, 200, { title: 'A', 'window-type': ['NORMAL'] }]]);
@@ -2290,10 +2290,10 @@ console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 
   const REFUSE = "      if (win.wid !== focusedWid) { emit('refused', { act: 'wheel', code: 'click-first' }); return; }";
   const FRONT_RANK = 'if (heldWindow(win) && (!best || frontRank(win) > frontRank(best))) best = win;';
   ok(csrc.split(REFUSE).length === 2 && psrc.split(FRONT_RANK).length === 2, 'r6 mutants: the wheel\'s refusal and the front\'s rank are each spelled once');
-  const MW = await wheelRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace(REFUSE, ''), 'wheel-takes-focus')).href));
+  const MW = await wheelRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, REFUSE, '', "src/lib/xpra-client.js"), 'wheel-takes-focus')).href));
   ok(MW.focusedAfter === HIS && !same(MW.covered, []), `MUTANT wheel-takes-focus (r5's wheel: the raise whoever holds his focus) ⇒ the probe's leg goes RED: focus moves to ${MW.focusedAfter.toString(16)}, his next key to ${JSON.stringify(MW.nextKey)}`, MW);
-  const pp = MUTXC.write('src/lib/xpra-proto.js', psrc.replace(FRONT_RANK, 'if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;'), 'front-by-stack-rank');
-  const MF = await writerRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace("from './xpra-proto.js'", `from ${JSON.stringify(pathToFileURL(pp).href)}`), 'front-by-stack-rank')).href));
+  const pp = MUTXC.write('src/lib/xpra-proto.js', editAnchor(psrc, FRONT_RANK, 'if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;', "src/lib/xpra-proto.js"), 'front-by-stack-rank');
+  const MF = await writerRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', editAnchor(csrc, "from './xpra-proto.js'", `from ${JSON.stringify(pathToFileURL(pp).href)}`, "src/lib/xpra-client.js"), 'front-by-stack-rank')).href));
   ok(MF.atPress === 2 && same(MF.x, { act: 'ask-front', to: [2] }), `MUTANT front-by-stack-rank (r5's frontOf: the drawn tiers) ⇒ the Writer leg goes RED: the Navigator stays the front, the ✕ closes it (${JSON.stringify(MF.x)})`, MF);
 
   // ── r7 (acceptance r6): ONE TOAST PACER PER SENTENCE in desktop-app-window.js — the bridge's refusal (a refused press) at t0, the

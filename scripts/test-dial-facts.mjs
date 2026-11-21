@@ -732,7 +732,7 @@ console.log('naive-user N-refused: the refused row names the CURRENT command and
     // CONTROL (l): the pre-fix words — the refused state always says "generate a new one"
     const M = mutantCopies('dialwords', REPO);
     const psrc = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
-    const lsrc = psrc.replace("case 'refused': return rs.mintedAt", "case 'refused': return false");
+    const lsrc = editAnchor(psrc, "case 'refused': return rs.mintedAt", "case 'refused': return false", "src/lib/dial-address-picker.js");
     ok(lsrc !== psrc, '(l) the patch applies');
     const PL = await import(pathToFileURL(M.write('src/lib/dial-address-picker.js', lsrc, 'oldwords')).href);
     const lw = PL.dialStateText({ state: 'refused', at: now, n: 4, reason: 'token-mismatch', host: 'x:1', mintedAt: now - 60000, dup: null });
@@ -740,7 +740,7 @@ console.log('naive-user N-refused: the refused row names the CURRENT command and
     ok(/^\d\d:\d\d$/.test(hm(now)) && !/[AP]M/.test(words), 'L-time: the zh words print the time the zh way ("17:09"), never the browser\'s "05:09 PM"', words);
     // CONTROL (m): the pre-fix clock — the browser's own locale ([]) — prints "PM" inside the zh sentence under an en-US node
     // (lane ui-language: the clock is page-time's now — the mutant swaps the one line that hands it over for an en-US clock)
-    const msrc = psrc.replace('const hhmm = (ms) => when(ms, { words: true });', "const hhmm = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });");
+    const msrc = editAnchor(psrc, 'const hhmm = (ms) => when(ms, { words: true });', "const hhmm = (ms) => new Date(ms).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });", "src/lib/dial-address-picker.js");
     ok(msrc !== psrc, '(m) the patch applies');
     const PM = await import(pathToFileURL(M.write('src/lib/dial-address-picker.js', msrc, 'browserclock')).href);
     const mw = PM.dialStateText({ state: 'refused', at: new Date().setHours(17, 9, 0, 0), n: 1, reason: 'token-mismatch', host: '', mintedAt: new Date().setHours(17, 8, 0, 0) });
@@ -816,7 +816,7 @@ console.log('verify-r5 G1: the address picker, built on a mini DOM — what it c
     // CONTROL (s): r4 F3's picker line reverted — the loopback row is checked again on the 127.0.0.1 server
     const M = mutantCopies('dialpicker', REPO);
     const psrc = fs.readFileSync(path.join(REPO, 'src/lib/dial-address-picker.js'), 'utf8');
-    const ssrc = psrc.replace("  if (first.kind === 'custom') {", "  if (first.kind === 'custom' && own && first.value) {");
+    const ssrc = editAnchor(psrc, "  if (first.kind === 'custom') {", "  if (first.kind === 'custom' && own && first.value) {", "src/lib/dial-address-picker.js");
     ok(ssrc !== psrc, '(s) the patch applies');
     const PS = await import(pathToFileURL(M.write('src/lib/dial-address-picker.js', ssrc, 'loopcheck')).href);
     const s1 = view(PS.dialAddressPicker({ candidates: loopRows, listen: LISTEN }));
@@ -925,12 +925,12 @@ console.log('controls (patched copies)');
   const src = fs.readFileSync(path.join(REPO, 'src/dial-facts.js'), 'utf8');
   const R = (status, refusal) => Object.assign(new Error('x'), { code: 'UPGRADE_REFUSED', status, refusal, body: '' });
   // (a) every 401 read as refused-unknown
-  const a = src.replace("if (DIAL_REFUSAL_CODES.includes(ref)) return { code: `refused-${ref}`, detail: said || ref, status };", '');
+  const a = editAnchor(src, "if (DIAL_REFUSAL_CODES.includes(ref)) return { code: `refused-${ref}`, detail: said || ref, status };", '', "src/dial-facts.js");
   ok(a !== src, '(a) the patch applies');
   const A = M.load('src/dial-facts.js', a, 'every401');
   ok(A.dialFailureOf(R(401, 'token-mismatch')).code === 'refused-unknown' && DF.dialFailureOf(R(401, 'token-mismatch')).code === 'refused-token-mismatch', 'CONTROL (a): a classifier reading every 401 as refused-unknown turns the token-mismatch cell red');
   // (b) no mint guard
-  const b = src.replace('> Math.max(lastConnectAt, mintedAt)) return', '> lastConnectAt) return');
+  const b = editAnchor(src, '> Math.max(lastConnectAt, mintedAt)) return', '> lastConnectAt) return', "src/dial-facts.js");
   ok(b !== src, '(b) the patch applies');
   const B = M.load('src/dial-facts.js', b, 'nomint');
   const guard = { transport: 'dial', online: false, dial: { tokenMintedAt: 30, lastRefusal: { code: 'token-mismatch', at: 20 } } };
@@ -941,13 +941,13 @@ console.log('controls (patched copies)');
   const C = M.load('src/dial-facts.js', c, 'loopback');
   ok(C.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.0.0.1')) && !DF.dialAddressCandidates({ interfaces: IF, port: 1 }).some((r) => r.base.includes('127.')), 'CONTROL (c): candidates including loopback are caught');
   // (d) the pre-verify push: whoever holds the old command gets the new token whenever a device is dialed in
-  const d = src.replace("  if (!live) return { push: false, why: 'not-dialed-in' };\n  return { push: false, why: 'not-requested' };", "  if (!live) return { push: false, why: 'not-dialed-in' };\n  return { push: true, why: 'requested' };");
+  const d = editAnchor(src, "  if (!live) return { push: false, why: 'not-dialed-in' };\n  return { push: false, why: 'not-requested' };", "  if (!live) return { push: false, why: 'not-dialed-in' };\n  return { push: true, why: 'requested' };", "src/dial-facts.js");
   ok(d !== src, '(d) the patch applies');
   const D = M.load('src/dial-facts.js', d, 'pushalways');
   ok(D.inPlacePushVerdict({ existed: true, live: true }).push === true && DF.inPlacePushVerdict({ existed: true, live: true }).push === false, 'CONTROL (d): a verdict pushing to any connected holder turns the not-requested cell red (the rotation would serve an impostor)');
   // (w) verify-r6 P1: the pre-fix verdict — a requested push to a device that is gone falls to a plain rotation, and a
   //     requested push goes to whatever link is here now
-  const w = src.replace("    if (!live) return { push: false, why: 'not-dialed-in', refuse: 'link_gone' };\n    if (shownSince !== undefined && Number(shownSince) !== Number(liveSince)) return { push: false, why: 'link-changed', refuse: 'link_changed' };\n", "    if (!live) return { push: false, why: 'not-dialed-in' };\n");
+  const w = editAnchor(src, "    if (!live) return { push: false, why: 'not-dialed-in', refuse: 'link_gone' };\n    if (shownSince !== undefined && Number(shownSince) !== Number(liveSince)) return { push: false, why: 'link-changed', refuse: 'link_changed' };\n", "    if (!live) return { push: false, why: 'not-dialed-in' };\n", "src/dial-facts.js");
   ok(w !== src, '(w) the patch applies');
   const W6 = M.load('src/dial-facts.js', w, 'pushdowngrade');
   ok(!W6.inPlacePushVerdict({ existed: true, live: false, requested: true, shownSince: 20 }).refuse && W6.inPlacePushVerdict({ existed: true, live: true, requested: true, shownSince: 20, liveSince: 45 }).push === true, 'CONTROL (w): the pre-P1 verdict rotates a device the owner asked to keep and pushes to a link the sheet never showed — the P1 cells go red');
@@ -960,12 +960,12 @@ console.log('controls (patched copies)');
   const hf = HH.dialFailureOf(R503);
   ok(hf.code === 'http-503' && /not as a VibeSpace dial endpoint/.test(HH.dialCheckLines({ ...hf, host: 'h:1' }).lines.join('\n')) && DF.dialFailureOf(R503).code === 'held', 'CONTROL (h): without the held class the hub\'s hold reads «not a VibeSpace dial endpoint» at the install check');
   // (e) B9: a verdict that never refuses (the pre-B9 rule: a newcomer always replaces)
-  const e = src.replace("if (current.alive === true) return { action: 'refuse', why: 'duplicate' };", '');
+  const e = editAnchor(src, "if (current.alive === true) return { action: 'refuse', why: 'duplicate' };", '', "src/dial-facts.js");
   ok(e !== src, '(e) the patch applies');
   const E = M.load('src/dial-facts.js', e, 'noduprefuse');
   ok(E.duplicateDialVerdict({ current: { boot: 'aabbccdd', alive: true }, incoming: { boot: '11223344' } }).action !== 'refuse' && DF.duplicateDialVerdict({ current: { boot: 'aabbccdd', alive: true }, incoming: { boot: '11223344' } }).action === 'refuse', 'CONTROL (e): a verdict that never refuses turns the duplicate cell red');
   // (f) verify-r2 B9-r2a: r1's rule restored — a newcomer without a boot id replaces the live device unasked
-  const f = src.replace("if (cb && ib && cb === ib) return { action: 'replace', why: 'same-daemon' };", "if (!cb || !ib) return { action: 'replace', why: 'unknown-boot' };\n  if (cb === ib) return { action: 'replace', why: 'same-daemon' };");
+  const f = editAnchor(src, "if (cb && ib && cb === ib) return { action: 'replace', why: 'same-daemon' };", "if (!cb || !ib) return { action: 'replace', why: 'unknown-boot' };\n  if (cb === ib) return { action: 'replace', why: 'same-daemon' };", "src/dial-facts.js");
   ok(f !== src, '(f) the patch applies');
   const F = M.load('src/dial-facts.js', f, 'nobootpass');
   ok(F.duplicateDialVerdict({ current: { boot: 'aabbccdd', alive: true }, incoming: {} }).action === 'replace' && DF.duplicateDialVerdict({ current: { boot: 'aabbccdd', alive: true }, incoming: {} }).action === 'refuse', 'CONTROL (f): r1\'s "no boot id ⇒ replace" turns the header-less newcomer cell red (the eviction by omission)');
@@ -979,7 +979,7 @@ console.log('controls (patched copies)');
     ok(lines === 5000, `CONTROL (g): keyed by the raw address with no window ceiling, 5 000 knocks from ONE /64 write ${lines} lines — the rotation leg goes red`);
   }
   // (h) the ceiling counting knocks instead of lines: one noisy address mutes everybody else
-  const h = src.replace("if (all.lines >= globalMax) {", "all.lines += 1; if (all.lines > globalMax) {");
+  const h = editAnchor(src, "if (all.lines >= globalMax) {", "all.lines += 1; if (all.lines > globalMax) {", "src/dial-facts.js");
   ok(h !== src, '(h) the patch applies');
   const Hm = M.load('src/dial-facts.js', h, 'knockceiling');
   {
@@ -988,7 +988,7 @@ console.log('controls (patched copies)');
     ok(bh.hit('198.51.100.2', 'mac', 1e12 + 6000).log === false, 'CONTROL (h): a ceiling counting knocks lets one noisy address mute a paired device on another address — the lines leg goes red');
   }
   // (i) verify-r3 B-grad: r2's composition — the arguments (both tokens) in the remote command, i.e. the local ssh's argv
-  const i2 = src.replace("return { remote: 'bash -s', stdin: `set -- ${String(args)}\\n${String(installer)}` };", "return { remote: `bash -s -- ${String(args)}`, stdin: String(installer) };");
+  const i2 = editAnchor(src, "return { remote: 'bash -s', stdin: `set -- ${String(args)}\\n${String(installer)}` };", "return { remote: `bash -s -- ${String(args)}`, stdin: String(installer) };", "src/dial-facts.js");
   ok(i2 !== src, '(i) the patch applies');
   const I2 = M.load('src/dial-facts.js', i2, 'argvinstall');
   ok(/vsdt_/.test(I2.sshInstallInvocation({ args: GRAD_ARGS, installer: '#!/usr/bin/env bash' }).remote), 'CONTROL (i): r2\'s composition puts the dial token in the ssh remote command (the argv) — the B-grad leg goes red');
@@ -1001,7 +1001,7 @@ console.log('controls (patched copies)');
     ok(J2.dialDefaultChoice({ candidates: rowsJ }).base === 'http://127.0.0.1:3456' && rowsJ[0].loopback === true, 'CONTROL (j): the pre-fix rank + default put the browser\'s 127.0.0.1 first AND checked — the N-loop default cell goes red');
   }
   // (k) naive-user N-sheet: the pre-fix default — the device's facts ignored, the first reachable row checked
-  const k2 = src.replace('const d = dial && typeof dial === \'object\' ? dial : null;', 'const d = null;');
+  const k2 = editAnchor(src, 'const d = dial && typeof dial === \'object\' ? dial : null;', 'const d = null;', "src/dial-facts.js");
   ok(k2 !== src, '(k) the patch applies');
   const K2 = M.load('src/dial-facts.js', k2, 'nodial');
   {
@@ -1010,7 +1010,7 @@ console.log('controls (patched copies)');
     ok(K2.dialDefaultChoice({ candidates: rowsK, dial }).base === 'http://100.87.42.107:3456' && DF.dialDefaultChoice({ candidates: rowsK, dial }).base === 'http://192.168.4.116:3456', 'CONTROL (k): a default that ignores the device\'s facts checks another address for a device paired on the LAN — "Generate" would move it (the N-sheet cells go red)');
   }
   // (n) verify-r4 F1: the Host header read as the device's address again (naive-user N-sheet's `lastAccept.host`)
-  const n2 = src.replace("if (la && la.dialed && n(d.lastConnectAt) > 0 && n(d.lastConnectAt) >= n(d.tokenMintedAt)) {\n      const v = dialBaseVerdict(la.dialed);", "if (la && la.host && n(d.lastConnectAt) > 0 && n(d.lastConnectAt) >= n(d.tokenMintedAt)) {\n      const v = dialBaseVerdict(baseOfDialedHost(la.host, d.mintedBase) || '');"); // verify-r5: the anchor follows C1's block (the Host header read back in, whatever C1 then words it)
+  const n2 = editAnchor(src, "if (la && la.dialed && n(d.lastConnectAt) > 0 && n(d.lastConnectAt) >= n(d.tokenMintedAt)) {\n      const v = dialBaseVerdict(la.dialed);", "if (la && la.host && n(d.lastConnectAt) > 0 && n(d.lastConnectAt) >= n(d.tokenMintedAt)) {\n      const v = dialBaseVerdict(baseOfDialedHost(la.host, d.mintedBase) || '');", "src/dial-facts.js"); // verify-r5: the anchor follows C1's block (the Host header read back in, whatever C1 then words it)
   ok(n2 !== src, '(n) the patch applies');
   const N2 = M.load('src/dial-facts.js', n2, 'hosthdr');
   {
@@ -1020,7 +1020,7 @@ console.log('controls (patched copies)');
     ok(mut.claim === 'https://127.0.0.1' && mut.why === 'paired' && real.base === 'https://relay.example.net' && real.why === 'connected' && !real.claim, 'CONTROL (n): the Host header read as the device\'s address offers https://127.0.0.1 as the device\'s address for a relay-paired device (verify-r6 L1: as its claim, beside the command\'s base — r4: checked in Custom…) — the F1 cell goes red', { mut, real });
   }
   // (o) verify-r4 F3: the candidates ignore the server's bind (what the MACHINE has, not what its socket accepts)
-  const o2 = src.replace('const admits = bindAdmits(bind);', 'const admits = bindAdmits(null);');
+  const o2 = editAnchor(src, 'const admits = bindAdmits(bind);', 'const admits = bindAdmits(null);', "src/dial-facts.js");
   ok(o2 !== src, '(o) the patch applies');
   const O2 = M.load('src/dial-facts.js', o2, 'nobind');
   {
@@ -1031,7 +1031,7 @@ console.log('controls (patched copies)');
   }
   // (u) verify-r5 A1: a route verdict that ignores what the dialog expects — the second window replaces silently
   {
-    const usrc = src.replace("if (exact && expect === 'new') return", 'if (false) return');
+    const usrc = editAnchor(src, "if (exact && expect === 'new') return", 'if (false) return', "src/dial-facts.js");
     ok(usrc !== src, '(u) the patch applies');
     const U2 = M.load('src/dial-facts.js', usrc, 'noexpect');
     const Hu = [{ id: 'host-dial-racemac', name: 'racemac', transport: 'dial', deviceId: 'racemac', online: true }];
@@ -1039,21 +1039,21 @@ console.log('controls (patched copies)');
   }
   // (v) verify-r5 A3: a case-blind route verdict — "macbook" minted beside "Macbook"
   {
-    const vsrc = src.replace("    if (twin) return { ok: false, code: 'name_case_taken'", "    if (false) return { ok: false, code: 'name_case_taken'");
+    const vsrc = editAnchor(src, "    if (twin) return { ok: false, code: 'name_case_taken'", "    if (false) return { ok: false, code: 'name_case_taken'", "src/dial-facts.js");
     ok(vsrc !== src, '(v) the patch applies');
     const V2 = M.load('src/dial-facts.js', vsrc, 'caseblind');
     const Hv = [{ id: 'host-dial-MacBook', name: 'MacBook', transport: 'dial', deviceId: 'MacBook', online: true }];
     ok(V2.pairRequestVerdict({ deviceId: 'macbook', expect: 'new', hosts: Hv }).ok === true && DF.pairRequestVerdict({ deviceId: 'macbook', expect: 'new', hosts: Hv }).code === 'name_case_taken', 'CONTROL (v): a case-blind verdict mints "macbook" beside "MacBook" (one token file on a case-insensitive disk) — the A3 cells go red');
   }
   // (p) verify-r4 F6: the collision verdict blind to existing devices (the pre-fix dialog: nothing said before Create)
-  const p2 = src.replace("const h = deviceId ? (Array.isArray(hosts) ? hosts : []).find((x) => x && x.deviceId === deviceId) : null;", 'const h = null;');
+  const p2 = editAnchor(src, "const h = deviceId ? (Array.isArray(hosts) ? hosts : []).find((x) => x && x.deviceId === deviceId) : null;", 'const h = null;', "src/dial-facts.js");
   ok(p2 !== src, '(p) the patch applies');
   const P2 = M.load('src/dial-facts.js', p2, 'noname');
   ok(P2.pairNameVerdict('Macbook', [{ deviceId: 'Macbook', transport: 'dial', online: true }]).exists === false && DF.pairNameVerdict('Macbook', [{ deviceId: 'Macbook', transport: 'dial', online: true }]).exists === true, 'CONTROL (p): a verdict blind to existing devices lets "Create pairing" replace a connected device unsaid — the F6 cells go red');
   // (r) verify-r5 C1: a default that trusts the device's statement as a FACT (no `claimed`) — the leaked holder's address
   //     reads "the address this device connects through"
   {
-    const rsrc = src.replace('        if (offered) return r;\n        claim = v.base;', '        return r;');
+    const rsrc = editAnchor(src, '        if (offered) return r;\n        claim = v.base;', '        return r;', "src/dial-facts.js");
     ok(rsrc !== src, '(r) the patch applies');
     const R2 = M.load('src/dial-facts.js', rsrc, 'trust-claim');
     const rowsR = DF.dialAddressCandidates({ origin: 'http://127.0.0.1:3456', relay: 'https://relay.example.net', interfaces: { eth0: [{ address: '192.168.4.116', family: 'IPv4', internal: false }] }, port: 3456 });
@@ -1061,7 +1061,7 @@ console.log('controls (patched copies)');
     const mutR = R2.dialDefaultChoice({ candidates: rowsR, dial: dialR }), realR = DF.dialDefaultChoice({ candidates: rowsR, dial: dialR });
     ok(mutR.why === 'connected' && mutR.value === 'https://evil.example' && realR.why === 'paired' && realR.claim === 'https://evil.example', 'CONTROL (r): a default that takes the device\'s statement as a fact words a leaked holder\'s https://evil.example "connects through" and checks it — the C1 cells go red', { mutR, realR });
     // (r2) verify-r6 L1: r5's shape — the claim CHECKED by default (worded as a claim): one Generate mints it
-    const r2src = src.replace('        if (offered) return r;\n        claim = v.base;', "        return offered ? r : { ...r, why: 'claimed' };");
+    const r2src = editAnchor(src, '        if (offered) return r;\n        claim = v.base;', "        return offered ? r : { ...r, why: 'claimed' };", "src/dial-facts.js");
     ok(r2src !== src, '(r2) the patch applies');
     const R3 = M.load('src/dial-facts.js', r2src, 'precheck-claim');
     const m0 = R3.dialDefaultChoice({ candidates: rowsR, dial: dialR });
@@ -1070,7 +1070,7 @@ console.log('controls (patched copies)');
   }
   // (t) verify-r5 C2: the row's host reading a refused knock's statement first (the r4 line)
   {
-    const tsrc = src.replace('  const host = authOf(d.lastAccept && d.lastAccept.dialed) || cmdHost;', '  const host = authOf(d.lastRefusal && d.lastRefusal.dialed) || authOf(d.lastAccept && d.lastAccept.dialed) || cmdHost;');
+    const tsrc = editAnchor(src, '  const host = authOf(d.lastAccept && d.lastAccept.dialed) || cmdHost;', '  const host = authOf(d.lastRefusal && d.lastRefusal.dialed) || authOf(d.lastAccept && d.lastAccept.dialed) || cmdHost;', "src/dial-facts.js");
     ok(tsrc !== src, '(t) the patch applies');
     const T2 = M.load('src/dial-facts.js', tsrc, 'refusal-host');
     const knock = { transport: 'dial', deviceId: 'Mac', online: true, dial: { tokenMintedAt: 1, lastConnectAt: 5, lastAccept: { at: 5, dialed: 'https://relay.example.net' }, lastRefusal: { code: 'token-mismatch', at: 9, dialed: 'http://evil.example' } } };
@@ -1082,7 +1082,7 @@ console.log('controls (patched copies)');
     const pkRel = 'src/lib/dial-address-picker.js', dpRel = 'src/server/dial-pairing.js';
     const pk = fs.readFileSync(path.join(REPO, pkRel), 'utf8'), dp = fs.readFileSync(path.join(REPO, dpRel), 'utf8');
     const pkMut = pk.replace("rc.checked = true; chosen = 'custom'; custom.value = first.value || '';", "rc.checked = true; chosen = 'custom'; custom.value = first.value || location.origin;");
-    const dpMut = dp.replace('dialed: hints.dialed, platform: hints.platform, host: String(req.headers.host', 'dialed: String(req.headers.host || \'\'), platform: hints.platform, host: String(req.headers.host');
+    const dpMut = editAnchor(dp, 'dialed: hints.dialed, platform: hints.platform, host: String(req.headers.host', 'dialed: String(req.headers.host || \'\'), platform: hints.platform, host: String(req.headers.host', "src/server/dial-pairing.js");
     ok(pkMut !== pk && dpMut !== dp, '(q) both patches apply');
     const fPk = M.write(pkRel, pkMut, 'census-origin'), fDp = M.write(dpRel, dpMut, 'census-host');
     const readWith = (rel, file) => (f) => fs.readFileSync(f === rel ? file : path.join(REPO, f), 'utf8');

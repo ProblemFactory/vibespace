@@ -316,7 +316,7 @@ console.log('§1c reportFor');
   const MUTW = mutantCopies('chan-groups-whole', REPO);
   const gsrcW = fs.readFileSync(path.join(REPO, 'src/channel-groups.js'), 'utf-8');
   if (!gsrcW.includes('const LINE_MAX = 2000;')) throw new Error('mutation anchor missing: LINE_MAX');
-  const At400 = MUTW.load('src/channel-groups.js', gsrcW.replace('const LINE_MAX = 2000;', 'const LINE_MAX = 400;'), 'line-max-400');
+  const At400 = MUTW.load('src/channel-groups.js', editAnchor(gsrcW, 'const LINE_MAX = 2000;', 'const LINE_MAX = 400;', "src/channel-groups.js"), 'line-max-400');
   ok(walk1900(At400) === false && At400.reportFor(gc, [recC(T0 + 5, M1900)], B, {}).lines[0].cut === true, 'CONTROL: a copy with LINE_MAX back at 400 cuts the 1 900-character message (the whole-message leg above goes red)');
   const cutOver = [];
   for (let b = GE.MIN_REPORT_ROOM; b <= 4096; b += 7) {
@@ -768,7 +768,7 @@ console.log('§1f deliveryOf — where a record stands with each recipient (lane
   const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
   const stampLine = 'm.reportedUpTo = upTo; m.reportedAt = now(); moved = true;';
   if (!geSrc.includes(stampLine)) throw new Error('mutation anchor missing: the clock stamp');
-  const NoClock = MUT.load('src/server/groups-engine.js', geSrc.replace(stampLine, 'm.reportedUpTo = upTo; moved = true;'), 'no-clock');
+  const NoClock = MUT.load('src/server/groups-engine.js', editAnchor(geSrc, stampLine, 'm.reportedUpTo = upTo; moved = true;', "src/server/groups-engine.js"), 'no-clock');
   const fc = fixture('dlv-ctl');
   const engC = NoClock.create({ store: fc.store, deliver: fc.deliver, now: () => Date.now(), roster: () => fc.roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
   const gC = (await engC.create({ by: A, name: 'ctl', members: [B], quiet: true })).group.id;
@@ -1050,7 +1050,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   const e1 = await early(GE);
   ok(e1.sync0 === 0 && e1.n === NG * 2 && e1.nulls === e1.n && e1.said === 1 && e1.changed === NG && e1.groups === NG && e1.bad.length === 0 && e1.syncAfter === 0 && e1.numbers,
     `§3g2 a reader in the start's own turn (list() + listFor()): ${e1.sync0} log(s) read on the loop, ${e1.nulls} of ${e1.n} counts «not counted yet» (null); the warm-up's end said the list ${e1.said}× (${e1.changed} groups named), every count = the from-scratch count; then list() reads ${e1.syncAfter} log(s)`, e1.bad.slice(0, 4).join(' '));
-  const relReader = geSrc.replace(COLD, '');
+  const relReader = editAnchor(geSrc, COLD, '', "src/server/groups-engine.js");
   ok(geSrc.split(COLD).length === 2 && relReader !== geSrc, 'CONTROL (the release\'s reader): its plant — the cold-group line — is spelled exactly once');
   const e2 = await early(MUTWU.load('src/server/groups-engine.js', relReader, 'release-reader'));
   ok(e2.sync0 === NG * 2 && e2.nulls === 0, `CONTROL (the release's reader): ${e2.sync0} SYNC log reads in the start's own turn (every cold group, the owner's list and a member's) ⇒ RED`);
@@ -1130,7 +1130,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   await settle(b3, NG * 2);
   ok(start > 0 && b3.seen.sync >= NG * 2 && b3.seen.async.length === 0, `CONTROL (the old warm-up): ${b3.seen.sync} SYNC reads of whole logs on the loop for ${NG} groups (the owner and each member apiece, four groups a turn) ⇒ RED`);
   b3.st.close();
-  const noCheck = geSrc.replace("if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) return false;", "if (!now2) return false;");   // the check lives in countFrom (the cure: one helper for the warm read and a late one)
+  const noCheck = editAnchor(geSrc, "if (!now2 || (Number(now2.lastAt) || 0) !== lastAt || clearedN(now2) !== cl) return false;", "if (!now2) return false;", "src/server/groups-engine.js");   // the check lives in countFrom (the cure: one helper for the warm read and a late one)
   const b4 = boot(MUTWU.load('src/server/groups-engine.js', noCheck, 'nolanded'), landed);
   await settle(b4, NG);
   const c4 = memberCount(b4), c4c = memberCount(b4, C);
@@ -1166,7 +1166,7 @@ console.log('§3g2 B-b17f the boot warm-up reads each group\'s log ONCE, off the
   const firstCure = geSrc.replace("          if (!whos(g).some(([who, since]) => unreadOwed(g, who, since))) continue;   // every count known: nothing to read\n",
     "          if (!whos(g).some(([who, since]) => { const m = unreadMemo.get(g.id + '|' + who); return lastAt > since && !(m && m.since === since && m.lastAt === lastAt); })) { for (const [who, since] of whos(g)) unreadFor(g, who, since, []); continue; }\n");
   // the first cure's hazard needs a count memoised before the warm-up — the release's reader made one (the cure's makes none)
-  const firstCureRel = firstCure.replace(COLD, '');
+  const firstCureRel = editAnchor(firstCure, COLD, '', "src/server/groups-engine.js");
   const d2 = await modeScene(MUTWU.load('src/server/groups-engine.js', firstCureRel, 'firstcure'));
   ok(firstCure !== geSrc && firstCureRel !== firstCure && d2.ok && Number.isInteger(d2.pre) && d2.got === 0 && d2.want > 0, `CONTROL (the first cure: fresh by since + lastAt, an empty log handed in — over the release's reader, which memoised ${d2.pre} first): the count ${d2.got} ≠ the from-scratch ${d2.want} — a zero memoised ⇒ RED`);
   // (g) should 3 (its read's S2): a group MADE AFTER THE START is never cold — its count is a number at once, while the warm-up is
@@ -1534,7 +1534,7 @@ console.log('§4 the next-turn drain through the REAL prompt-context route — a
     const arSrc = fs.readFileSync(path.join(REPO, 'src/agent-routes.js'), 'utf-8');
     const NEEDLE = '      if (ge && myCid) {\n';
     if (arSrc.split(NEEDLE).length !== 2) throw new Error('mutation anchor missing: the any-turn report gate');
-    const ARg = MUTG.load('src/agent-routes.js', arSrc.replace(NEEDLE, '      if (ge && myCid && turnIsUserInitiated(s)) {\n'), 'gate');
+    const ARg = MUTG.load('src/agent-routes.js', editAnchor(arSrc, NEEDLE, '      if (ge && myCid && turnIsUserInitiated(s)) {\n', "src/agent-routes.js"), 'gate');
     const routesG = {};
     ARg.setupAgentRoutes({ ...arDeps, app: { get: (p, h) => { routesG['GET ' + p] = h; }, post() {}, put() {}, delete() {}, use() {} } });
     const askG = () => new Promise((resolve) => { routesG['GET /api/agent/prompt-context']({ headers: { authorization: 'Bearer vsst_beta' }, query: {} }, { json: (o) => resolve(o), status() { return this; } }); });
@@ -1697,7 +1697,7 @@ console.log('§4d4 the re-delivered FULL context gives up its OLDEST activity li
   const fitLine = 'for (let i = blocks.length - 1; i >= 0 && blocksOver() > 0; i--) if (fitters[i]) blocks[i] = fitters[i](Math.max(1, B(blocks[i]) - blocksOver()));';
   ok(arSrc.includes(fitLine), 'PIN: prompt-context fits its blocks into the room left by re-rendering them, the last first');
   const MUTF = mutantCopies('chan-groups-f1', REPO);
-  const NoFit = MUTF.load('src/agent-routes.js', arSrc.replace(fitLine, ''), 'nofit');
+  const NoFit = MUTF.load('src/agent-routes.js', editAnchor(arSrc, fitLine, '', "src/agent-routes.js"), 'nofit');
   const run = async (Mod, tag) => {
     const f = fixture('e4d4-' + tag);
     const made = await f.eng.create({ by: A, name: 'house', members: [B], quiet: true });
@@ -1809,7 +1809,7 @@ console.log('§4d3 a 4 KB report rides WHOLE beside a 3.4 KB tools section + a t
   const geSrcR = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
   const roomNeedle = '{ budget: Math.min(G.REPORT_BUDGET, room), also: reachFor(g, cid) }';
   if (!geSrcR.includes(roomNeedle)) throw new Error('mutation anchor missing: the room budget');
-  const NoRoom = MUTR.load('src/server/groups-engine.js', geSrcR.replace(roomNeedle, '{ budget: G.REPORT_BUDGET, also: reachFor(g, cid) }'), 'no-room');
+  const NoRoom = MUTR.load('src/server/groups-engine.js', editAnchor(geSrcR, roomNeedle, '{ budget: G.REPORT_BUDGET, also: reachFor(g, cid) }', "src/server/groups-engine.js"), 'no-room');
   const fr = fixture('e4d3-ctl', { ge: NoRoom });
   const gr = (await fr.eng.create({ by: A, name: 'int226', members: [B], quiet: true })).group.id;
   for (const t of ['D1', 'D2']) await fr.eng.post({ group: gr, from: A, text: prog(t) });
@@ -2086,7 +2086,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
     const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
     const SKIP = "      if (wakesInFlight.has(g.id + '|' + cid)) continue;";
     if (geSrc.split(SKIP).length !== 2) throw new Error('mutation anchor missing: the in-flight skip');
-    const if2 = await inflight(MUTW.load('src/server/groups-engine.js', geSrc.replace(SKIP, ''), 'inflight'), 'mut');
+    const if2 = await inflight(MUTW.load('src/server/groups-engine.js', editAnchor(geSrc, SKIP, '', "src/server/groups-engine.js"), 'inflight'), 'mut');
     ok(if2.woke === 1 && if2.during.length === 1 && if2.during[0].includes('the woken words'), 'CONTROL: a copy without the in-flight skip hands the woken message to the wake\'s own turn TWICE (frame + report)', JSON.stringify(if2));
   }
 
@@ -2132,7 +2132,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   const ge = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf-8');
   const emitLine = "    else for (const c of cards) { try { deliver.emitPeerCard(cid, { fromName: c.fromName, text: c.text, kind: 'group', group: c.group }); }";
   if (!ge.includes(emitLine)) throw new Error('mutation anchor missing: the emission');
-  const NoEmit = MUT.load('src/server/groups-engine.js', ge.replace(emitLine, "    else for (const c of []) { try { deliver.emitPeerCard(cid, { fromName: c.fromName, text: c.text, kind: 'group', group: c.group }); }"), 'no-emit');
+  const NoEmit = MUT.load('src/server/groups-engine.js', editAnchor(ge, emitLine, "    else for (const c of []) { try { deliver.emitPeerCard(cid, { fromName: c.fromName, text: c.text, kind: 'group', group: c.group }); }", "src/server/groups-engine.js"), 'no-emit');
   const fc = fixture('gc-ctl');
   const engC = NoEmit.create({ store: fc.store, deliver: fc.deliver, now: () => Date.now(), roster: () => fc.roster, groupSetting: () => 'none', log: { info() {}, warn() {}, log() {} } });
   const gC = (await engC.create({ by: A, name: 'ctl', members: [B], quiet: true })).group.id;
@@ -2142,7 +2142,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   const nz = fs.readFileSync(path.join(REPO, 'src/normalizers.js'), 'utf-8');
   const keyLine = "  if (GC.ringHas(ring, key)) return false;   // carded before in this conversation — never twice\n";
   if (!nz.includes(keyLine)) throw new Error('mutation anchor missing: the key');
-  const NoKey = MUT.load('src/normalizers.js', nz.replace(keyLine, ''), 'no-key');
+  const NoKey = MUT.load('src/normalizers.js', editAnchor(nz, keyLine, '', "src/normalizers.js"), 'no-key');
   const sk = liveSession('w-k');
   NoKey.feedPeerCard(sk, { ...first }); NoKey.feedPeerCard(sk, { ...first, group: { ...first.group } });
   const skn = sk._normalizer.messages.filter((m) => m.originKind === 'peer-message').length;
@@ -2153,7 +2153,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
     '…but after a RESTART (a fresh normalizer, the ring from the meta) the keyless door draws the re-report AGAIN while the real one draws nothing (§7 (e)/(f) can go red)');
   const replayLine = "[...browserCardsFor({ session }), ...GC.ringCards(session._groupCards)]";
   if (!nz.includes(replayLine)) throw new Error('mutation anchor missing: the rebuild replay');
-  const NoReplay = MUT.load('src/normalizers.js', nz.replace(replayLine, 'browserCardsFor({ session })'), 'no-replay');
+  const NoReplay = MUT.load('src/normalizers.js', editAnchor(nz, replayLine, 'browserCardsFor({ session })', "src/normalizers.js"), 'no-replay');
   const s3 = { claudeSessionId: B, backend: 'claude', mode: 'chat', _groupCards: ring, _normalizer: NoReplay.createMessageManager('claude', 'w-bb') };
   await NoReplay.rebuildHistory(s3, 'w-bb', records);
   ok(s3._normalizer.messages.filter((m) => m.originKind === 'peer-message').length === 0, 'CONTROL a rebuild without the ring\'s cards: after a restart the card is GONE (§7 (f) can go red)');
@@ -2175,7 +2175,7 @@ console.log('§7 the cards: a group message handed to a turn is SEEN in that cha
   const geSrc = fs.readFileSync(path.join(REPO, 'src/server/groups-engine.js'), 'utf8');
   const wakeLine = '        const wc = wakeCardOf(rep, rec);\n';
   if (!geSrc.includes(wakeLine)) throw new Error('mutation anchor missing: the wake card of several messages');
-  const OneSender = MUT.load('src/server/groups-engine.js', geSrc.replace(wakeLine, "        const wc = { text: rec.text, authors: {} };\n"), 'one-sender');
+  const OneSender = MUT.load('src/server/groups-engine.js', editAnchor(geSrc, wakeLine, "        const wc = { text: rec.text, authors: {} };\n", "src/server/groups-engine.js"), 'one-sender');
   const f8 = fixture('gc-sp0', { ge: OneSender });
   const w8 = await wakeOfThree(f8);
   ok(!threeOk(w8) && w8.cards.length === 1 && w8.cards[0].text === '@beta please look now' && !w8.cards[0].group.authors, 'CONTROL the pre-fix wake card (the waker only): gamma and alpha\'s first message are on NO card (§7 (g3) can go red)', w8.cards);
@@ -2450,7 +2450,7 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   const FM = mutantCopies('chan-groups-fate', REPO);
   const fsrc = fs.readFileSync(path.join(REPO, 'src/channel-groups.js'), 'utf-8');
   const needle = "const state = handed ? 'handed' : ended ? 'undeliverable' :";
-  const NoFate = FM.load('src/channel-groups.js', fsrc.replace(needle, "const state = handed ? 'handed' : false ? 'undeliverable' :"), 'nofate');
+  const NoFate = FM.load('src/channel-groups.js', editAnchor(fsrc, needle, "const state = handed ? 'handed' : false ? 'undeliverable' :", "src/channel-groups.js"), 'nofate');
   ok(fsrc.includes(needle) && NoFate.deliveryOf(mkG, r1, { log: [r1], liveness: arch }).find((x) => x.member === B).state === 'waiting', 'CONTROL: a copy without the fate branch reads an ARCHIVED member waiting (the table above can go red)');
   const pairG = G.makeGroup({ id: 'g-0000fa7f', name: '', createdBy: A, at: T0, members: [B], pair: true }).group;
   const cl = G.closePair(pairG, { member: B, why: 'archived', at: T0 + 99 });
@@ -2549,7 +2549,7 @@ console.log('§verify r1 — `later` names only who is handed it; the @ scan kee
   rl.fr.close();
   const wsrcR = fs.readFileSync(path.join(REPO, 'src/server/channels-wiring.js'), 'utf-8');
   const oldNeedle = '{ transcript, owner: ownerOf(cid), dirReadable: dirReadable() }';
-  const OldReader = FM.load('src/server/channels-wiring.js', wsrcR.replace(oldNeedle, "{ transcript, owner: 'local', dirReadable: true }"), 'oldreader');
+  const OldReader = FM.load('src/server/channels-wiring.js', editAnchor(wsrcR, oldNeedle, "{ transcript, owner: 'local', dirReadable: true }", "src/server/channels-wiring.js"), 'oldreader');
   const rc = await remoteLeg('pgf-remote-ctl', OldReader);
   const sBc = await rc.eng.post({ group: rc.gid('B'), from: A, text: 'still there?' });
   ok(wsrcR.includes(oldNeedle) && rc.sw.closed.includes(rc.gid('B')) && rc.eng.get(rc.gid('B')).closed.why === 'gone' && sBc.ok === false, 'CONTROL: a copy with the OLD reader (no transcript here ⇒ gone) CLOSES the remote pair and refuses the send (the legs above can go red)', JSON.stringify([rc.sw, sBc.code]));
@@ -2840,9 +2840,9 @@ console.log('§bl-msg B-3e61 a message arrives whole — the value masked, the r
   const M = mutantCopies('blmsg-ge', REPO);
   const LATE = 'const body = belt.maskForSink(given, { dataDir, message: true, said: masked, mentions: mw });';
   ok(src.split(LATE).length === 2 && src.split('message: true').length === 4, 'the controls find their lines (the post\'s mask, the three MESSAGE-mode asks)');
-  const late = await drive('blmsg-late', M.load('src/server/groups-engine.js', src.replace(LATE, 'const body = given;'), 'late-mask'));
+  const late = await drive('blmsg-late', M.load('src/server/groups-engine.js', editAnchor(src, LATE, 'const body = given;', "src/server/groups-engine.js"), 'late-mask'));
   ok(late.p.ok && late.atB !== '@beta' && !(late.p.masked || []).length, 'RED CONTROL (the mask only at the append, after the @-scan): the @ place misses its @ and the answer names nothing — the SEND legs go red', JSON.stringify(late.atB));
-  const lineMode = await drive('blmsg-line', M.load('src/server/groups-engine.js', src.split('message: true').join('message: false'), 'line-mode'));
+  const lineMode = await drive('blmsg-line', M.load('src/server/groups-engine.js', editAnchor(src, 'message: true', 'message: false', "src/server/groups-engine.js", 'join'), 'line-mode'));
   ok(lineMode.p.ok && !lineMode.p.message.text.includes('the rest of the brief arrives'), 'RED CONTROL (the line mode in the group log): the rest of the message is lost again — the SEND leg goes red', JSON.stringify(lineMode.p.message && lineMode.p.message.text));
 }
 

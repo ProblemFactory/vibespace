@@ -110,9 +110,9 @@ try {
   const P_OLD = "    const out = await new Promise((resolve) => require('child_process').execFile('sh', ['-c', PORT_SCAN], { timeout: 8000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve({ stdout })))";
   const D_NEW = '  if (_starter && belt) {\n    const envAdd = {};';
   const red = await tick(
-    { MountManager: MC.load('src/mounts.js', msrc.replace(M_NEW, () => M_OLD), 'red-mounts').MountManager },
-    { PortForwardManager: MC.load('src/port-forward.js', psrc.replace(P_NEW, () => P_OLD), 'red-pf').PortForwardManager },
-    MC.load('src/desktop-display.js', dsrc.replace(D_NEW, () => '  if (false) {\n    const envAdd = {};'), 'red-dd'));
+    { MountManager: MC.load('src/mounts.js', editAnchor(msrc, M_NEW, () => M_OLD, "src/mounts.js"), 'red-mounts').MountManager },
+    { PortForwardManager: MC.load('src/port-forward.js', editAnchor(psrc, P_NEW, () => P_OLD, "src/port-forward.js"), 'red-pf').PortForwardManager },
+    MC.load('src/desktop-display.js', editAnchor(dsrc, D_NEW, () => '  if (false) {\n    const envAdd = {};', "src/desktop-display.js"), 'red-dd'));
   ok(msrc.split(M_NEW).length === 2 && psrc.split(P_NEW).length === 2 && dsrc.split(D_NEW).length === 2 && now.mainStarts === 0 && now.viaStarter === 4 && red.mainStarts === 4,
     `a tick of the three sites (an attr + a list probe, a port scan, a belt X tool): ${now.mainStarts} programs started by the main process, ${now.viaStarter} by the starter; RED (the train tip's call lines planted back): ${red.mainStarts} from the main process`, { now, red });
 
@@ -135,7 +135,7 @@ try {
   };
   const life = await lifeOf(null);
   const psSrc = fs.readFileSync(path.join(REPO, 'src/server/child-starter-proc.js'), 'utf8'), ENDS = "process.stdin.on('end', bye);\nprocess.stdin.on('close', bye);\n";
-  const noEnd = await lifeOf(MC.write('src/server/child-starter-proc.js', psSrc.replace(ENDS, () => ''), 'no-end'));
+  const noEnd = await lifeOf(MC.write('src/server/child-starter-proc.js', editAnchor(psSrc, ENDS, () => '', "src/server/child-starter-proc.js"), 'no-end'));
   ok(psSrc.split(ENDS).length === 2 && life.ended && life.ended.code === 0 && life.ended.signal === null && life.signalled === 0 && life.kid > 0 && life.kidGone === true && noEnd.ended === null,
     `the hub's end of the pipe closed: the starter ended by itself (code ${life.ended && life.ended.code}, signal ${life.ended && life.ended.signal}), its held child gone (${life.kidGone}), ${life.signalled} signals sent; RED (no end-of-pipe rule): the starter stayed`, { life, noEnd });
 
@@ -164,7 +164,7 @@ try {
   const d3 = await counting(async () => { mm4.p3 = await mm4._probeMountpoint(T, 3000, 'attr'); });
   const p4 = await mm4._probeMountpoint(T, 3000, 'attr');
   const UNK = "        if (r.unknown) return { health: 'unknown', ms: Date.now() - t0 };\n";
-  const RU = MC.load('src/mounts.js', msrc.replace(UNK, () => ''), 'red-unknown');
+  const RU = MC.load('src/mounts.js', editAnchor(msrc, UNK, () => '', "src/mounts.js"), 'red-unknown');
   const S4r = CS.createChildStarter({ script: SILENT, guardMs: 100, log: { warn: () => { } } }); CS.setChildStarter(S4r);
   const pr = await Object.create(RU.MountManager.prototype)._probeMountpoint(T, 150, 'attr');
   ok(msrc.split(UNK).length === 2 && p1.health === 'unknown' && st1.faults === 1 && st1.restarted && !st1.direct && p2.health === 'unknown' && st2.faults === 2 && st2.direct && mm4.p3.health === 'ok' && d3 === 1 && p4.health === 'ok' && said.length === 1 && /the old road/.test(said[0]) && pr.health === 'error',
@@ -190,7 +190,7 @@ try {
   fs.writeFileSync(TALIVE, "let b='';process.stdin.on('data',(d)=>{b+=d;let i;while((i=b.indexOf('\\n'))>=0){const l=b.slice(0,i);b=b.slice(i+1);let m;try{m=JSON.parse(l)}catch{continue}if(m.op!=='run')continue;process.stdout.write(JSON.stringify({id:m.id,ev:'started',pid:process.pid})+'\\n'+JSON.stringify({id:m.id,ev:'timeout'})+'\\n')}});process.stdin.on('end',()=>process.exit(0));\n");
   const alive2 = async (M) => { const st = CS.createChildStarter({ script: TALIVE }); CS.setChildStarter(st); const mm = Object.create(M.MountManager.prototype); const r1 = await mm._probeMountpoint(T, 2000, 'attr'); const r2 = await mm._probeMountpoint(T, 2000, 'attr'); st.closePipe(); return `${r1.health}${r1.held ? '/held' : ''} → ${r2.health}${r2.held ? '/held' : ''}`; };
   const REC = "start: pid ? ((PI.statOf(pid) || [])[1] || null) : null";
-  const t2 = await alive2({ MountManager }), t2r = await alive2(MC.load('src/mounts.js', msrc.replace(REC, () => "start: pid ? 'not-the-field' : null"), 'red-rec'));
+  const t2 = await alive2({ MountManager }), t2r = await alive2(MC.load('src/mounts.js', editAnchor(msrc, REC, () => "start: pid ? 'not-the-field' : null", "src/mounts.js"), 'red-rec'));
   ok(msrc.split(REC).length === 2 && t2 === 'hung → hung/held' && t2r === 'hung → hung', `a child that timed out and lives: the next probe says held («${t2}») — its recorded start time is the live child's; RED (the wrong field recorded): «${t2r}» — a second probe stacked`);
   // the moved chain's cure (主开发 23:58Z, a must): THE RECORDED START IS THE CHILD'S OWN, and a RECYCLED pid is gone. The silent
   // break the move cured — the onTimeout asking B-e783's async procStat(root, pid): a Promise read as a list ⇒ the start null, so
@@ -221,12 +221,12 @@ try {
   const S6 = CS.createChildStarter(); CS.setChildStarter(S6);
   const lost = async (M) => { const mm = Object.create(M.MountManager.prototype); mm._heldProbes = new Map([['attr:' + T, { t0: Date.now() - 1000, pid: gone }]]); return (await mm._probeMountpoint(T, 5000, 'attr')).health; };
   const PIDCHK = "    if (held && held.pid) {";
-  const RP = MC.load('src/mounts.js', msrc.replace(PIDCHK, () => '    if (false) {'), 'red-no-pid');
+  const RP = MC.load('src/mounts.js', editAnchor(msrc, PIDCHK, () => '    if (false) {', "src/mounts.js"), 'red-no-pid');
   const g1 = await lost({ MountManager }), g1r = await lost(RP);
   S6.closePipe();
   const live = async (M) => { const mm = Object.create(M.MountManager.prototype); mm._heldProbes = new Map([['attr:' + T, { t0: Date.now() - 1000, pid: process.pid }]]); const r = await mm._probeMountpoint(T, 5000, 'attr'); return `${r.health}${r.held ? '/held' : ''}`; };
   const KEEP = "      if (!gone) return Promise.resolve({ health: 'hung', ms: Date.now() - held.t0, held: true });";
-  const l1 = await live({ MountManager }), l1r = await live(MC.load('src/mounts.js', msrc.replace(KEEP, () => '      if (false) return null;'), 'red-drop-all'));
+  const l1 = await live({ MountManager }), l1r = await live(MC.load('src/mounts.js', editAnchor(msrc, KEEP, () => '      if (false) return null;', "src/mounts.js"), 'red-drop-all'));
   ok(msrc.split(KEEP).length === 2 && l1 === 'hung/held' && l1r === 'ok',
     `a held mark whose child is ALIVE keeps the mount «hung» (${l1}) — no second probe stacks behind it; RED (every mark dropped): «${l1r}»`);
   ok(msrc.split(PIDCHK).length === 2 && g1 === 'ok' && g1r === 'hung',
@@ -240,7 +240,7 @@ try {
     return Math.round(((f._blockedPaths.get(T) || 0) - Date.now()) / 1000);
   };
   const UNKB = "    if (lv.unknown) { this.blockPath(mp, UNKNOWN_BLOCK_MS); this._notify(); return this.isMounted(m); }\n";
-  const c1 = await conn({ MountManager }), c1r = await conn(MC.load('src/mounts.js', msrc.replace(UNKB, () => ''), 'red-conn'));
+  const c1 = await conn({ MountManager }), c1r = await conn(MC.load('src/mounts.js', editAnchor(msrc, UNKB, () => '', "src/mounts.js"), 'red-conn'));
   ok(msrc.split(UNKB).length === 2 && c1 > 0 && c1 <= 65 && c1r > 900,
     `a connect probe with no answer: the path is blocked ${c1} s more (the next sweep decides — the table's own 65 s); RED (the connect block kept): ${c1r} s`);
 
@@ -248,12 +248,12 @@ try {
   { // ④d an access error's re-probe that got no answer keeps the banner (undefined: «leave it as it is»), never «accessible»
     const acc = async (M, again) => { const f = Object.create(M.MountManager.prototype); Object.assign(f, { _revocable: () => false, _oauthBacked: () => false, _probeMountpoint: async () => ({ health: again, ms: 1 }), _probeBackendAccess: async () => 'ok', _accessErrorMsg: () => 'denied' }); return f._accessErrorFor({ id: 'm1' }, T, 'error'); };
     const AU = "      if (again === 'unknown' || again === 'hung') return undefined;";
-    const RA = MC.load('src/mounts.js', msrc.replace(AU, () => ''), 'red-acc');
+    const RA = MC.load('src/mounts.js', editAnchor(msrc, AU, () => '', "src/mounts.js"), 'red-acc');
     const a1 = [await acc({ MountManager }, 'unknown'), await acc({ MountManager }, 'hung'), await acc({ MountManager }, 'ok')], a1r = [await acc(RA, 'unknown'), await acc(RA, 'hung')];
     ok(msrc.split(AU).length === 2 && a1[0] === undefined && a1[1] === undefined && a1[2] === null && a1r[0] === null && a1r[1] === null, `an access error whose re-probe got no answer or hung: the banner stands (${a1[0]}, ${a1[1]}); a listing clears it (${a1[2]}); RED (anything but «error» read as «lists now»): ${a1r.join(', ')} — the error cleared`);
     const auth = async (M, said) => { const f = Object.create(M.MountManager.prototype); Object.assign(f, { _revocable: () => false, _oauthBacked: () => true, _errors: new Map([['m1', 'the sign-in expired — re-authorize the mount']]), _probeBackendAccess: async () => said, _probeBackendRead: async () => 'ok', _accessErrorMsg: () => 'denied' }); return f._accessErrorFor({ id: 'm1' }, T, 'ok'); };
     const AUTH = "        if (showingAuthErr && acc !== 'ok') return undefined;";
-    const RO = MC.load('src/mounts.js', msrc.replace(AUTH, () => ''), 'red-auth');
+    const RO = MC.load('src/mounts.js', editAnchor(msrc, AUTH, () => '', "src/mounts.js"), 'red-auth');
     const o1 = [await auth({ MountManager }, 'unknown'), await auth({ MountManager }, 'hung'), await auth({ MountManager }, 'ok')], o1r = await auth(RO, 'unknown');
     ok(msrc.split(AUTH).length === 2 && o1[0] === undefined && o1[1] === undefined && o1[2] === null && o1r === null, `an auth error showing, a backend probe with no answer or hung: it stays (${o1[0]}, ${o1[1]}); a probe that reads fine clears it (${o1[2]}); RED: ${o1r} — cleared for up to 10 min`);
   }
@@ -261,7 +261,7 @@ try {
     const reused = async (M) => { const mm = Object.create(M.MountManager.prototype); mm._heldProbes = new Map([['attr:' + T, { t0: Date.now() - 1000, pid: process.pid, start: 'not-its-start' }]]); return (await mm._probeMountpoint(T, 5000, 'attr')).health; };
     const SC = CS.createChildStarter(); CS.setChildStarter(SC);
     const START = "(!!held.start && st[1] !== held.start)";
-    const e1 = await reused({ MountManager }), e1r = await reused(MC.load('src/mounts.js', msrc.replace(START, () => 'false'), 'red-reuse'));
+    const e1 = await reused({ MountManager }), e1r = await reused(MC.load('src/mounts.js', editAnchor(msrc, START, () => 'false', "src/mounts.js"), 'red-reuse'));
     SC.closePipe();
     ok(msrc.split(START).length === 2 && e1 === 'ok' && e1r === 'hung', `a held mark whose pid now runs another process (its start time differs): asked again («${e1}»); RED (the pid alone): «${e1r}» for good`);
   }
@@ -273,7 +273,7 @@ try {
     // the first request warms the stand-in (its boot is never inside the window); the second is answered 800 ms after it: past its bound + one guard (600), inside the second guard (1 100)
     const lateRun = async (M) => { const s = M.createChildStarter({ script: LATE, guardMs: 500, log: { warn: () => { } } }); await s.run('true', [], { timeoutMs: 5000, capture: true }); const r = await s.run('true', [], { timeoutMs: 100, capture: true }); const st = s.stats(); s.closePipe(); return { out: r.stdout || null, unknown: !!r.unknown, faults: st.faults }; };
     const csrc = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8'), GRACE = 'if (!q.grace && proc) {';
-    const f1 = await lateRun(CS), f1r = await lateRun(MC.load('src/server/child-starter.js', csrc.replace(GRACE, () => 'if (false) {'), 'red-grace'));
+    const f1 = await lateRun(CS), f1r = await lateRun(MC.load('src/server/child-starter.js', editAnchor(csrc, GRACE, () => 'if (false) {', "src/server/child-starter.js"), 'red-grace'));
     ok(csrc.split(GRACE).length === 2 && f1.out === 'late' && f1.faults === 0 && f1r.unknown && f1r.faults === 1, `an answer after the first guard (100 ms + 500, answered at 800): one more guard, the answer used («${f1.out}», ${f1.faults} faults); RED (no grace): unknown, ${f1r.faults} fault`, { f1, f1r });
   }
   { // ④g the old road is not for good: a fresh starter is tried again after its re-arm time
@@ -288,7 +288,7 @@ try {
       return { st0, stD, stA, stB, said: said2.length };
     };
     const csrc2 = fs.readFileSync(path.join(REPO, 'src/server/child-starter.js'), 'utf8'), REARM = "    if (direct && mono() - directAt >= rearmMs) {", ONE = 'direct = false; restarted = true; stats.rearmed++;';
-    const g = await rearm(CS), gr = await rearm(MC.load('src/server/child-starter.js', csrc2.replace(REARM, () => '    if (false) {'), 'red-rearm')), g2 = await rearm(MC.load('src/server/child-starter.js', csrc2.replace(ONE, () => 'direct = false; restarted = false; stats.rearmed++;'), 'red-two'));   // stale-pins: kept (the cure's re-arm, planted back as RED 2)
+    const g = await rearm(CS), gr = await rearm(MC.load('src/server/child-starter.js', editAnchor(csrc2, REARM, () => '    if (false) {', "src/server/child-starter.js"), 'red-rearm')), g2 = await rearm(MC.load('src/server/child-starter.js', editAnchor(csrc2, ONE, () => 'direct = false; restarted = false; stats.rearmed++;', "src/server/child-starter.js"), 'red-two'));   // stale-pins: kept (the cure's re-arm, planted back as RED 2)
     ok(csrc2.split(REARM).length === 2 && csrc2.split(ONE).length === 2 && g.st0.direct && g.stD.starts === g.st0.starts && g.stA.starts === g.st0.starts + 1 && g.stA.rearmed === 1 && g.stA.direct && g.stB.starts === g.stA.starts && g.said === 1 && gr.stA.starts === gr.st0.starts && gr.stA.direct && g2.stB.starts === g2.stA.starts + 1,
       `after two faults the old road (${g.stD.starts} starts while it lasts); past its re-arm time ONE fresh starter is tried (${g.stA.starts}) and its one fault puts the old road back for the hour (no second start: ${g.stB.starts}), said ${g.said} time in all; RED (no re-arm): the old road for good; RED 2 (a replacement after the re-arm): ${g2.stB.starts - g2.stA.starts} more start`, { g, gr, g2 });
   }
@@ -360,12 +360,12 @@ try {
     });
   };
   const rb0 = S5.stats().requests, b5 = await beltAll(D), rb = S5.stats().requests - rb0;
-  const b5r = await beltAll(MC.load('src/desktop-display.js', dsrc.replace(D_NEW, () => '  if (false) {\n    const envAdd = {};'), 'red-belt-all'));
+  const b5r = await beltAll(MC.load('src/desktop-display.js', editAnchor(dsrc, D_NEW, () => '  if (false) {\n    const envAdd = {};', "src/desktop-display.js"), 'red-belt-all'));
   ok(b5 === 0 && rb === 5 && b5r === 5, `the belt's other sites (a window tree, the visible windows, an xrandr resize, a wmctrl and an xdotool fit): ${b5} starts from the main process, ${rb} by the starter; RED (the tip's call line planted back): ${b5r}`);
   const P2_NEW = "      await this._enrichDocker(ports, (cmd) => starter.run('sh', ['-c', cmd], { timeoutMs: 6000, maxBuffer: 1024 * 1024, capture: true, envAdd: dockerEnv() }).then((r) => String(r.stdout || '')));";
   const P2_OLD = "      await this._enrichDocker(ports, (cmd) => new Promise((resolve) => require('child_process').execFile('sh', ['-c', cmd], { timeout: 6000, maxBuffer: 1024 * 1024 }, (e, so) => resolve(String(so || '')))));";
   const dockerRung = async (P) => { const pf = pfOf(P); mounts.push(pf); pf.detectLocal = async () => [{ port: 40001, proc: '' }]; CS.setChildStarter(S5); const r0 = S5.stats().requests; const n = await counting(() => pf.detect('__local__')); return { main: n, via: S5.stats().requests - r0 }; };
-  const dk = await dockerRung({ PortForwardManager }), dkr = await dockerRung(MC.load('src/port-forward.js', psrc.replace(P2_NEW, () => P2_OLD), 'red-docker'));
+  const dk = await dockerRung({ PortForwardManager }), dkr = await dockerRung(MC.load('src/port-forward.js', editAnchor(psrc, P2_NEW, () => P2_OLD, "src/port-forward.js"), 'red-docker'));
   ok(psrc.split(P2_NEW).length === 2 && dk.main === 0 && dk.via >= 1 && dkr.main >= 1, `an anonymous listener: the docker / uid rungs' sh (${dk.via}) by the starter, ${dk.main} from the main process; RED (the tip's docker line planted back): ${dkr.main} from the main process`, { dk, dkr });
   // a call that is NOT the belt's (an unmount — a person's or an agent's act) starts as before even with the starter injected
   D.useStarter(S5);

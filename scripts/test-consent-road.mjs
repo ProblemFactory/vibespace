@@ -355,15 +355,15 @@ console.log('⑪ the landing speaks ONE language, shows the address as typed, an
   // (e) RED CONTROLS (mutant copies of src/consent-road.js)
   const roadSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
   const USER = "  const user = x.ok && typeof x.user === 'string' && x.user ? ` (${landingUser(x.user)})` : '';";
-  const bare = MUT.load('src/consent-road.js', roadSrc.replace(USER, "  const user = x.ok && typeof x.user === 'string' && x.user ? ` (${escHtml(x.user.slice(0, 200))})` : '';"), 'bare-user');
+  const bare = MUT.load('src/consent-road.js', editAnchor(roadSrc, USER, "  const user = x.ok && typeof x.user === 'string' && x.user ? ` (${escHtml(x.user.slice(0, 200))})` : '';", "src/consent-road.js"), 'bare-user');
   const bp = bare.landingHtml({ ok: true, user: ADDR }, { name: 'Google' });
   ok(roadSrc.split(USER).length === 2 && CF.test(bp) && !bp.includes('email_off'), 'RED CONTROL: the address printed as escaped text alone (the base) is what Cloudflare rewrites into «[email protected]» — red on (c)', bp.match(CF) && bp.match(CF)[0]);
   const WHY = "  const why = (Object.prototype.hasOwnProperty.call(LANDING_WHY, x.why) ? LANDING_WHY[x.why] : LANDING_WHY.refused)[l];";
-  const catchAll = MUT.load('src/consent-road.js', roadSrc.replace(WHY, '  const why = LANDING_WHY.expired[l];'), 'catch-all');
+  const catchAll = MUT.load('src/consent-road.js', editAnchor(roadSrc, WHY, '  const why = LANDING_WHY.expired[l];', "src/consent-road.js"), 'catch-all');
   const caught = WHYS_SEEN.filter((w) => w !== 'expired' && catchAll.landingHtml({ ok: false, why: w }, { name: 'Lark', lang: 'en' }).includes(sentence('expired', 'en')));
   ok(roadSrc.split(WHY).length === 2 && caught.length === WHYS_SEEN.length - 1, `RED CONTROL: a page whose every refusal reads «expired» (the owner's B-24d8) — red on (d) for each of the ${WHYS_SEEN.length - 1} other verdicts`, caught);
   const LANG_PICK = "  const l = LANGS.includes(lang) ? lang : 'en';";
-  const stacked = MUT.load('src/consent-road.js', roadSrc.replace(LANG_PICK, "  const l = 'en';"), 'deaf');
+  const stacked = MUT.load('src/consent-road.js', editAnchor(roadSrc, LANG_PICK, "  const l = 'en';", "src/consent-road.js"), 'deaf');
   ok(roadSrc.split(LANG_PICK).length === 2 && !stacked.landingHtml({ ok: true }, { name: 'Lark', lang: 'zh' }).includes(CR.LANDING.ok.zh.split('{')[0].slice(0, 12)), 'RED CONTROL: a page deaf to the language answers a zh browser in English — red on (b)');
 }
 
@@ -641,24 +641,24 @@ console.log('⑥ RED controls (mutant copies)');
   ok(larkSrc.split(VIA).length === 2 && gmailSrc.split(VIA).length === 2, 'the patch site exists once in each adapter (the road the adapter takes)');
   const realL = await redirectOf(require(path.join(REPO, 'src/channels/lark.js')).adapter, 'lark', CRED, consent, POD);
   const realG = await redirectOf(require(path.join(REPO, 'src/channels/gmail.js')).adapter, 'gmail', GCRED, consent, POD);
-  const baseL = await redirectOf(MUT.load('src/channels/lark.js', larkSrc.replace(VIA, 'const viaRoute = false;'), 'base').adapter, 'lark', CRED, consent, POD);
-  const baseG = await redirectOf(MUT.load('src/channels/gmail.js', gmailSrc.replace(VIA, 'const viaRoute = false;'), 'base').adapter, 'gmail', GCRED, consent, POD);
+  const baseL = await redirectOf(MUT.load('src/channels/lark.js', editAnchor(larkSrc, VIA, 'const viaRoute = false;', "src/channels/lark.js"), 'base').adapter, 'lark', CRED, consent, POD);
+  const baseG = await redirectOf(MUT.load('src/channels/gmail.js', editAnchor(gmailSrc, VIA, 'const viaRoute = false;', "src/channels/gmail.js"), 'base').adapter, 'gmail', GCRED, consent, POD);
   ok(realL === ROUTE_LARK && realG === ROUTE_GMAIL, 'the real adapters, driven alone with the engine\'s consent facts: the route', { realL, realG });
   ok(/^http:\/\/127\.0\.0\.1:\d+/.test(baseL) && /^http:\/\/127\.0\.0\.1:\d+/.test(baseG) && baseL !== ROUTE_LARK && baseG !== ROUTE_GMAIL, 'RED CONTROL = THE BASE: an adapter that never takes the route sends a pod\'s browser to 127.0.0.1 (study 2 B2) — red on the route leg', { baseL, baseG });
   const roadSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
   const LOCAL = "  if (loopbackOrigin(origin)) return loop('local-browser');\n";
-  const blind = MUT.load('src/consent-road.js', roadSrc.replace(LOCAL, ''), 'blind');
+  const blind = MUT.load('src/consent-road.js', editAnchor(roadSrc, LOCAL, '', "src/consent-road.js"), 'blind');
   ok(roadSrc.split(LOCAL).length === 2 && blind.consentRoad({ kind: 'lark', publicUrl: POD, origin: 'http://127.0.0.1' }).road === 'route', 'RED CONTROL: a verdict that ignores the browser\'s origin sends a local hub\'s own browser to the route — red on ③\'s local browser');
   // lane oauth-relay-road: RED CONTROL = 2c22424d — the relay never asked (the adapters before this lane): a fleet pod's
   // consent names its OWN route, an address every pod must register — red on ⑦'s fleet leg
   const RELAY_ARG = ', ...CR.relayOf(consent, cred) });';
   const fleetConsent = { sign, publicUrl: () => FLEET, relayUrl: () => PUBLIC_RELAY, fleetRelayUrl: () => ADMIN_RELAY };
   const realFleet = await redirectOf(require(path.join(REPO, 'src/channels/lark.js')).adapter, 'lark', { ...CRED, source: 'cluster' }, fleetConsent, FLEET);
-  const baseFleet = await redirectOf(MUT.load('src/channels/lark.js', larkSrc.replace(RELAY_ARG, ' });'), 'norelay').adapter, 'lark', { ...CRED, source: 'cluster' }, fleetConsent, FLEET);
+  const baseFleet = await redirectOf(MUT.load('src/channels/lark.js', editAnchor(larkSrc, RELAY_ARG, ' });', "src/channels/lark.js"), 'norelay').adapter, 'lark', { ...CRED, source: 'cluster' }, fleetConsent, FLEET);
   ok(larkSrc.split(RELAY_ARG).length === 2 && gmailSrc.split(RELAY_ARG).length === 2 && realFleet === ADMIN_RELAY && fleetRedirect === ADMIN_RELAY && baseFleet === `${FLEET}/api/channels/oauth/cb/lark`,
     'RED CONTROL = 2c22424d: an adapter that never asks for the relay sends a fleet pod\'s consent to the POD\'s own route (one registered address per pod) — red on ⑦\'s fleet leg', { realFleet, baseFleet });
   const VERDICT = "  if (page && u && SM.relayTargetVerdict(u, { allow }) === 'redirect') return";
-  const anyRelay = MUT.load('src/consent-road.js', roadSrc.replace(VERDICT, "  if (page && u) return"), 'anyrelay');
+  const anyRelay = MUT.load('src/consent-road.js', editAnchor(roadSrc, VERDICT, "  if (page && u) return", "src/consent-road.js"), 'anyrelay');
   const wouldShow = anyRelay.consentRoad({ kind: 'lark', publicUrl: FLEET, origin: FLEET, relayUrl: PUBLIC_RELAY });
   ok(roadSrc.split(VERDICT).length === 2 && wouldShow.road === 'relay' && relayPage.decide(`?code=x-relay-code&state=${encodeURIComponent(CR.stateOf({ origin: FLEET, flowId: 'a1b2c3d4e5f60718', issuedAt: Date.now(), kind: 'lark' }, sign))}`, []).act === 'show-code',
     'RED CONTROL: a verdict that rides ANY configured relay sends a pod through the public page — which only shows the code (a dead end) — red on ①\'s public-page pod row');
@@ -676,7 +676,7 @@ console.log('⑥ RED controls (mutant copies)');
   const rtSrc = fs.readFileSync(path.join(REPO, 'src/routes/channels.js'), 'utf8');
   const HASHED = "; script-src 'sha256-${CLOSE_SCRIPT_HASH}'";
   ok(rtSrc.split(HASHED).length === 2, 'the route\'s CSP names the close script\'s hash once');
-  const noHash = MUT.load('src/routes/channels.js', rtSrc.replace(HASHED, ''), 'nohash');
+  const noHash = MUT.load('src/routes/channels.js', editAnchor(rtSrc, HASHED, '', "src/routes/channels.js"), 'nohash');
   const ENGM = ENG;
   {
     const dir = path.join(ROOT, 'nohash'); fs.mkdirSync(dir, { recursive: true });
@@ -841,7 +841,7 @@ console.log('⑨ a Google client\'s kind (Web application / Desktop app) and the
   // (d) RED CONTROL = c8aa8820 — the client's kind never asked: a Desktop client on a local hub rides the public page, which a Desktop client can never take (redirect_uri_mismatch)
   const roadSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
   const DESK = "  if (clientType === 'desktop') return loop('desktop-client');";
-  const base = MUT.load('src/consent-road.js', roadSrc.replace(DESK, ''), 'nokind');
+  const base = MUT.load('src/consent-road.js', editAnchor(roadSrc, DESK, '', "src/consent-road.js"), 'nokind');
   const was = base.consentRoad({ kind: 'gmail', publicUrl: '', origin: HUBO, relayUrl: PUBLIC_RELAY, clientType: 'desktop' });
   ok(roadSrc.split(DESK).length === 2 && was.road === 'relay' && was.redirectUri === PUBLIC_RELAY, 'RED CONTROL = c8aa8820: a verdict that never asks the client\'s kind sends a Desktop client through the https relay page — Google refuses it (redirect_uri_mismatch) — red on (a)', was);
 }
@@ -1046,7 +1046,7 @@ console.log('⑩ one source: the fleet\'s relay page from the presets\' fleet.js
     const engSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
     const NOW = "  const fleetRelayUrl = () => { try { return integrations && typeof integrations.fleetRelayUrl === 'function' ? String(integrations.fleetRelayUrl() || '').trim() : ''; } catch { return ''; } };";
     const WAS = "  const fleetRelayUrl = () => String((env && env.VIBESPACE_OAUTH_RELAY_URL) || '').trim();";
-    const base = MUT.load('src/server/channels-engine.js', engSrc.replace(NOW, WAS), 'env-relay');
+    const base = MUT.load('src/server/channels-engine.js', editAnchor(engSrc, NOW, WAS, "src/server/channels-engine.js"), 'env-relay');
     const b = await world('one-source-base', { publicUrl: FLEET, presets: reader, eng: base });
     try {
       const g = await b.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: FLEET });
@@ -1239,7 +1239,7 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   const OS = require(path.join(REPO, 'src/oauth-setup.js'));
   const OSsrc = fs.readFileSync(path.join(REPO, 'src/oauth-setup.js'), 'utf8');
   const GUARD = 'clientTypes && https && !preset ?';
-  const OSm = MUT.load('src/oauth-setup.js', OSsrc.replace(GUARD, 'clientTypes && https ?'), 'noclaimguard13');
+  const OSm = MUT.load('src/oauth-setup.js', editAnchor(OSsrc, GUARD, 'clientTypes && https ?', "src/oauth-setup.js"), 'noclaimguard13');
   const kOwn = OS.refusalKeys({ clientTypes: true, https: true, preset: false }), kPre = OS.refusalKeys({ clientTypes: true, https: true, preset: true });
   ok(kOwn.includes('refusal.desktop') && !kPre.includes('refusal.desktop') && kPre.includes('refusal') && /The client is a Desktop app client/.test(OS.WORDS['refusal.desktop']),
     'r3 PIN (law 3): refusalKeys draws the «The client is a Desktop app client» claim for a person\'s OWN client on an https road, NEVER for a company preset (the refusal lines stay)', { own: kOwn, preset: kPre });
@@ -1249,9 +1249,9 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   {
     const authSrcW = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
     const BOUND = 'const START_WAIT_MS = 20e3;';
-    const authW = MUT.write('src/server/channels-auth.js', authSrcW.replace(BOUND, 'const START_WAIT_MS = 300;'), 'startwait13');
+    const authW = MUT.write('src/server/channels-auth.js', editAnchor(authSrcW, BOUND, 'const START_WAIT_MS = 300;', "src/server/channels-auth.js"), 'startwait13');
     const engSrcW = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-    const engW = MUT.load('src/server/channels-engine.js', engSrcW.replace("require('./channels-auth.js')", `require(${JSON.stringify(authW)})`), 'startwait13');
+    const engW = MUT.load('src/server/channels-engine.js', editAnchor(engSrcW, "require('./channels-auth.js')", `require(${JSON.stringify(authW)})`, "src/server/channels-engine.js"), 'startwait13');
     const ww = await world('wall-hung', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT, eng: engW });
     try {
       const b0 = ww.oauth.begin; let first = true;
@@ -1282,9 +1282,9 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   {
     const authSrcA = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
     const SET = '      startChain.set(mod.kind, entry);';
-    const authMutA = MUT.write('src/server/channels-auth.js', authSrcA.replace(SET, ''), 'nochain13');
+    const authMutA = MUT.write('src/server/channels-auth.js', editAnchor(authSrcA, SET, '', "src/server/channels-auth.js"), 'nochain13');
     const engSrcA = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-    const engMutA = MUT.load('src/server/channels-engine.js', engSrcA.replace("require('./channels-auth.js')", `require(${JSON.stringify(authMutA)})`), 'nochain13');
+    const engMutA = MUT.load('src/server/channels-engine.js', editAnchor(engSrcA, "require('./channels-auth.js')", `require(${JSON.stringify(authMutA)})`, "src/server/channels-engine.js"), 'nochain13');
     const wm2 = await world('wall-nochain', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT, eng: engMutA });
     try {
       const [x, y] = await Promise.all([wm2.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD }), wm2.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD })]);
@@ -1295,14 +1295,14 @@ console.log('⑬ a company preset never rides an address its app does not list; 
   // (d) RED CONTROLS (mutant copies): the base verdict (no preset gate) and the base engine (no one-pending rule)
   const crSrc = fs.readFileSync(path.join(REPO, 'src/consent-road.js'), 'utf8');
   const GATE = "  if (!routeAllowed({ preset, listed })) return loop('preset-loopback');\n";
-  const noGate = MUT.load('src/consent-road.js', crSrc.replace(GATE, ''), 'nogate13');
+  const noGate = MUT.load('src/consent-road.js', editAnchor(crSrc, GATE, '', "src/consent-road.js"), 'nogate13');
   const was = noGate.consentRoad({ kind: 'gmail', publicUrl: POD, origin: POD, clientKinds: true, ...P({}) });
   ok(crSrc.split(GATE).length === 2 && was.road === 'route' && was.redirectUri === ROUTE_GMAIL, 'RED CONTROL = f5e087bb5\'s verdict: without the preset gate a silent company preset rides the instance\'s own https address — the owner\'s redirect_uri_mismatch — red on ⑬\'s first table row', { road: was.road, redirect: was.redirectUri });
   const authSrc = fs.readFileSync(path.join(REPO, 'src/server/channels-auth.js'), 'utf8');
   const ONE = "    const earlier = target ? [] :";   // r2: the earlier sign-ins of the kind, found after the per-kind place
-  const authMut = MUT.write('src/server/channels-auth.js', authSrc.replace(ONE, '    const earlier = true ? [] :'), 'nosupersede13');
+  const authMut = MUT.write('src/server/channels-auth.js', editAnchor(authSrc, ONE, '    const earlier = true ? [] :', "src/server/channels-auth.js"), 'nosupersede13');
   const engSrc13 = fs.readFileSync(path.join(REPO, 'src/server/channels-engine.js'), 'utf8');
-  const engMut = MUT.load('src/server/channels-engine.js', engSrc13.replace("require('./channels-auth.js')", `require(${JSON.stringify(authMut)})`), 'nosupersede13');
+  const engMut = MUT.load('src/server/channels-engine.js', editAnchor(engSrc13, "require('./channels-auth.js')", `require(${JSON.stringify(authMut)})`, "src/server/channels-engine.js"), 'nosupersede13');
   const wm = await world('wall-mut', { serverSetting: NO_RELAY, fixedPath: 'gmail/cb', drive: SILENT, eng: engMut });
   try {
     const a = await wm.e.startOAuth({ kind: 'gmail', clientPreset: 'org1', origin: POD, road: 'fixed' });

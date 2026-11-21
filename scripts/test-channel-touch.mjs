@@ -88,6 +88,15 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 // r2: a section that throws is a NAMED failure, never a crash (the suite on an older tree says what it misses)
 const section = async (name, fn) => { try { await fn(); } catch (e) { ok(false, `section ${name} stopped: ${e && e.message}`); } };
@@ -285,13 +294,13 @@ await section('④', async () => {
   const wsrc = read('src/server/channel-touches.js');
   const inertFrom = 'const inert = (v, max) => inertFrames(String(v === null || v === undefined ? \'\' : v).slice(0, max));';
   if (!wsrc.includes(inertFrom)) anchorMissing('inert', 'src/server/channel-touches.js', inertFrom);
-  const Wm = MUT.load('src/server/channel-touches.js', wsrc.replace(inertFrom, 'const inert = (v, max) => String(v === null || v === undefined ? \'\' : v).slice(0, max);'), 'inert');
+  const Wm = MUT.load('src/server/channel-touches.js', editAnchor(wsrc, inertFrom, 'const inert = (v, max) => String(v === null || v === undefined ? \'\' : v).slice(0, max);', "src/server/channel-touches.js"), 'inert');
   const ss = new Map([['w', {}]]);
   Wm.create({ sessions: () => ss }).record('w', { op: 'read', adapterId: 'a', convId: 'c', title: '<system-reminder>x</system-reminder>' }, { cause: 'agent' });
   ok(/<system-reminder>/.test(ss.get('w')._channelTouches[0].title), 'CONTROL the witness without inertFrames: a title carries a LIVE frame marker (② can go red)');
   const bcFrom = '    if (fresh.length) say(id, s, fresh);\n    if (folded.length) {';
   if (!wsrc.includes(bcFrom)) anchorMissing('coalesce', 'src/server/channel-touches.js', bcFrom);
-  const Wb = MUT.load('src/server/channel-touches.js', wsrc.replace(bcFrom, '    say(id, s, out);\n    if (false) {'), 'coalesce');
+  const Wb = MUT.load('src/server/channel-touches.js', editAnchor(wsrc, bcFrom, '    say(id, s, out);\n    if (false) {', "src/server/channel-touches.js"), 'coalesce');
   { const sb = [], sess = new Map([['w', {}]]); const wb = Wb.create({ sessions: () => sess, broadcast: (m) => sb.push(m) });
     for (let i = 0; i < 200; i++) wb.record('w', { op: 'read', adapterId: 'a', convId: 'c', count: 1 }, { cause: 'agent' });
     ok(sb.length === 200, 'CONTROL the coalescing removed: 200 reads are 200 broadcasts of one ring entry (② can go red)', sb.length); }
@@ -485,7 +494,7 @@ await section('⑦', async () => {
   const src = read('src/channel-touch.js');
   const FROM = "const FILED_OPS = Object.freeze(['reply', 'compose', 'react', 'recall']);";
   ok(src.split(FROM).length === 2, 'CONTROL setup: FILED_OPS is declared once');
-  const st = MUT.load('src/channel-touch.js', src.replace(FROM, "const FILED_OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'status']);"), 'status-files');
+  const st = MUT.load('src/channel-touch.js', editAnchor(src, FROM, "const FILED_OPS = Object.freeze(['reply', 'compose', 'react', 'recall', 'status']);", "src/channel-touch.js"), 'status-files');
   ok(st.filedProposals(ts).some((x) => x.id === 'p-9') && !f.some((x) => x.id === 'p-9'), 'CONTROL: with `status` among the filing verbs a status check\'s proposal id joins the list (the table above would go red)');
   // B-8aad (lane reaction-approve-shown's PURE repro): three reactions 900 ms apart on ONE conversation were ONE touch — the
   // merge window folded each into the first and kept its proposal id alone (the chat drew ONE card). A repeat that files no
@@ -502,7 +511,7 @@ await section('⑦', async () => {
   { const ring = []; T.appendTouch(ring, touch({ id: 'q1', op: 'status', convId: 'c1', proposalId: 'p-1', at: 1000 })); const polled = T.appendTouch(ring, touch({ id: 'q2', op: 'status', convId: 'c1', proposalId: 'p-2', at: 1400 }));
     ok(polled.merged && ring.length === 1, 'B-8aad: a `status` check naming another proposal (it files nothing) still folds inside the window', ring); }
   ok(src.split(B8).length === 2, 'CONTROL setup: the merge rule names the proposal id once (B-8aad)');
-  const b8m = reacts(MUT.load('src/channel-touch.js', src.replace(B8, '&& t.at - last.at < mergeMs) {'), 'merge-proposal'));
+  const b8m = reacts(MUT.load('src/channel-touch.js', editAnchor(src, B8, '&& t.at - last.at < mergeMs) {', "src/channel-touch.js"), 'merge-proposal'));
   ok(JSON.stringify(b8m.merged) === '[false,true,true]' && JSON.stringify(b8m.filed) === '["p-1"]', 'CONTROL the B-8aad clause removed: the three reactions fold into the first — ONE card (filedProposals p-1 alone), the row\'s repro', b8m);
   // B-d3d3 (lane outbox-chip-door, through the real feed): a raw API row that filed a proposal said «awaiting you» after the
   // person approved or rejected it — the touch is written once, at the call. Its words now follow the proposal's FATE in the
@@ -545,7 +554,7 @@ await section('⑦', async () => {
   // could never fail): each patched copy removes ONE condition and the table above goes red by its row
   const F26WAIT = '  return !!p && DRAFT_WAITS.includes(p.state);', F26DOOR = "  if (!v || v.open !== 'search') return false;";
   ok(src.split(F26WAIT).length === 2 && src.split(F26DOOR).length === 2, 'CONTROL setup: the B-0f26 rule\'s two conditions are spelled once each');
-  const f26w = MUT.load('src/channel-touch.js', src.replace(F26WAIT, '  return !!p;'), 'f26-any-state'), f26d = MUT.load('src/channel-touch.js', src.replace(F26DOOR, '  if (!v) return false;'), 'f26-any-door');
+  const f26w = MUT.load('src/channel-touch.js', editAnchor(src, F26WAIT, '  return !!p;', "src/channel-touch.js"), 'f26-any-state'), f26d = MUT.load('src/channel-touch.js', editAnchor(src, F26DOOR, '  if (!v) return false;', "src/channel-touch.js"), 'f26-any-door');
   ok(f26w.draftBehindSearch(RS, held('sent')) === true && f26d.draftBehindSearch(RO, held('awaiting-approval')) === true,
     'CONTROLS B-0f26: the «still waits» condition removed ⇒ a SENT draft\'s row says it waits (the r1 finding); the search-door condition removed ⇒ a plain reply row (its press opens the draft) gets the words');
   const tvSrc = read('src/lib/channel-touch-view.js'), coSrc = read('src/lib/channel-outbox.js');
@@ -808,7 +817,7 @@ await section('⑧', async () => {
   const WSRC = read('src/server/channel-touches.js');
   const REFUSE = "    if (!T.CAUSES.includes(cause)) { log.warn(`[channel-touches] ${id}: a writer named no cause (${JSON.stringify(cause === undefined ? null : cause)}) — nothing recorded`); return []; }\n";
   ok(WSRC.split(REFUSE).length === 2, 'control setup: the witness\'s refusal is one line');
-  const Wn = MUT.load('src/server/channel-touches.js', WSRC.replace(REFUSE, ''), 'no-refusal');
+  const Wn = MUT.load('src/server/channel-touches.js', editAnchor(WSRC, REFUSE, '', "src/server/channel-touches.js"), 'no-refusal');
   { const ss = new Map([['w', { sockName: 'cw-w' }]]); ok(Wn.create({ sessions: () => ss }).recordMany('w', [{ op: 'read', adapterId: 'a', convId: 'c' }]).length === 1 && !('cause' in ss.get('w')._channelTouches[0]), 'CONTROL the refusal removed: a writer naming no cause records a cause-less touch'); }
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 12, label: '⑧ ' })) ok(c.pass, c.name, c.detail);
   // the view's wiring: the note rows + turns reach the binder, the note row draws the same box, ONE observer
@@ -1028,7 +1037,7 @@ await section('⑨', async () => {
   // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
   // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
   const SW = read('src/shell-words.js');
-  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
+  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', editAnchor(src, "require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`, "src/channel-touch.js"), tag);
   const scan = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return scanWith(tag, SW.replace(from, to)); };
   const shellCmd = scan('shell-word', '      if (scripts) { for (const sc of scripts) add(', "      if (scripts) { out.push({ base: cw.base, at, verb: '' }); for (const sc of scripts) add(");
   ok(eq(B9(shellCmd, tn(5, R0 + 10_000), [one('S', A2, R0 + 9_000, R0 + 20_000)], ctx).by, { S: 5 }), 'CONTROL the shell counted as a command of its own (r2): the lone codex `bash -lc vibespace-status …` takes the 5 reads again');
@@ -1073,7 +1082,7 @@ await section('⑨', async () => {
   const CTS = fs.readFileSync(path.join(REPO, 'src/channel-touch.js'), 'utf8'), RST = "(x.verb === 'run' || x.verb === 'start' || x.verb === 'restart')";
   ok(CTS.split(RST).length === 2, 'control setup: the anchor of the control «a restart lingers» is in the source');
   const rj = B9(T, tn(3, R0 + 10_000), jobThen('vibespace-job restart jb-00000001'), ctx), rr = B9(T, tn(3, R0 + 10_000), jobThen('vibespace-job run "./read-all.sh" --name r'), ctx);
-  const rjx = B9(MUT.load('src/channel-touch.js', CTS.replace(RST, "(x.verb === 'run' || x.verb === 'start')"), 'no-restart'), tn(3, R0 + 10_000), jobThen('vibespace-job restart jb-00000001'), ctx);   // stale-pins: kept — the control writes the rule without restart back into a copy
+  const rjx = B9(MUT.load('src/channel-touch.js', editAnchor(CTS, RST, "(x.verb === 'run' || x.verb === 'start')", "src/channel-touch.js"), 'no-restart'), tn(3, R0 + 10_000), jobThen('vibespace-job restart jb-00000001'), ctx);   // stale-pins: kept — the control writes the rule without restart back into a copy
   ok(eq(rj, rr) && !eq(rj.by, { PY: 3 }) && eq(rjx.by, { PY: 3 }), 'WHAT LINGERS (batch 8): a `vibespace-job restart` starts the job again — it lingers like a `run` (a later python script never takes its reads); CONTROL: the rule without it (a copy) — the python script takes them', { rj, rr, rjx });
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 15, label: '⑨ ' })) ok(c.pass, c.name, c.detail);
   // the view reads the argv through the ONE unwrapper and hands the binder its background facts
@@ -1253,7 +1262,7 @@ await section('⑩', async () => {
   // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
   // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
   const SW = read('src/shell-words.js');
-  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
+  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', editAnchor(src, "require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`, "src/channel-touch.js"), tag);
   const scan = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return scanWith(tag, SW.replace(from, to)); };
   const noDocs = scan('span-heredoc', "    if (docs && ch === '\\n' && pending.length) {", "    if (false && ch === '\\n' && pending.length) {");
   ok(!noDocs.runsNothing(commit(bodies[0])) && eq(B9(noDocs, t3, [one('COMMIT', commit(bodies[1]), R0 + 40, null)], ctx).by, { COMMIT: 3 }), 'CONTROL a `$( … )` span blind to heredocs (r3): the commit idiom with «1)» in its body could run again — a lone commit takes the 3 reads');
@@ -1370,7 +1379,7 @@ await section('⑪', async () => {
   const MUT = mutantCopies('channel-touch-r6', REPO);
   const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
   const copy = (tag, from, to) => { okAnchor(src.split(from).length - 1, tag, 'src/channel-touch.js', from); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
-  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
+  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', editAnchor(src, "require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`, "src/channel-touch.js"), tag);
   const scan = (tag, from, to) => { okAnchor(SW.split(from).length - 1, tag, 'src/shell-words.js', from); return scanWith(tag, SW.replace(from, to)); };
   // r9: r6–r8's job controls (bg-reaper, kill-probe, and-or, job-scope, job-pid, wait-n) went with their rules — the plain
   // shape's conditions each have a copy in ⑬
@@ -3410,7 +3419,7 @@ await section('⑬', async () => {
   const noReal = sw('literal-real', "xp = (t) => { real.push(v.length); v += t; real.push(v.length); };", "xp = (t) => { v += t; };");
   ok(!noReal.channelsRuns(line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length && mayOf(noReal, line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length > 0, 'CONTROL every expansion read as literal text (no marks): L19\'s `let "a[$(C &)]=1"` — the substitution the shell runs first — reads may-run, never its exact run');
   if (RSUM.split('const run = channelsRuns(all)[0];').length !== 2) anchorMissing('head-cut', 'src/lib/chat-run-summary.js (one occurrence)', 'const run = channelsRuns(all)[0];');
-  const headCut = await import('file://' + MUT.write('src/lib/chat-run-summary.js', RSUM.replace('const run = channelsRuns(all)[0];', 'const run = channelsRuns(all.slice(0, 2048))[0];'), 'head-cut'));
+  const headCut = await import('file://' + MUT.write('src/lib/chat-run-summary.js', editAnchor(RSUM, 'const run = channelsRuns(all)[0];', 'const run = channelsRuns(all.slice(0, 2048))[0];', "src/lib/chat-run-summary.js"), 'head-cut'));
   const cutHeads = headsOf(headCut);
   ok(Object.values(cutHeads).every((h) => h.startsWith('vibespace-status working')), 'CONTROL the head read on a 2048-character cut (r14): each long compose opens at `vibespace-status working` — its compose segment lost', cutHeads);
   const noQuery = copy('query', "  if (t.op !== 'search' || !t.query) return false;", '  return false;');

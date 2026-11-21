@@ -512,7 +512,7 @@ console.log('§5 2026-09-27: the agent WITHDRAWS / REPLACES its own proposal; th
   {
     const LINE = '  sent: Object.freeze({}),';
     ok(polSrc.split(LINE).length === 2, 'the sent row is present once (the control patches exactly it)');
-    const bad = M.load('src/channel-policy.js', polSrc.replace(LINE, "  sent: Object.freeze({ withdrawn: ['agent'] }),"), 'sent-withdrawable');
+    const bad = M.load('src/channel-policy.js', editAnchor(polSrc, LINE, "  sent: Object.freeze({ withdrawn: ['agent'] }),", "src/channel-policy.js"), 'sent-withdrawable');
     const br = withdrawRows(bad);
     ok(br.forbiddenBad.includes('sent→withdrawn→agent'), `CONTROL: a copy that lets sent → withdrawn through is caught by the forbidden table (${br.forbiddenBad.join(', ')})`);
   }
@@ -556,7 +556,7 @@ console.log('§5 2026-09-27: the agent WITHDRAWS / REPLACES its own proposal; th
   {
     const LINE = "  const diff = r.status === 'edited' && typeof proposed === 'string' && typeof text === 'string' ? receiptDiff(proposed, text, { maxBytes: Math.max(200, maxBytes - used - utf8Bytes(DIFF_HEAD) - 2) }) : '';";
     ok(polSrc.split(LINE).length === 2, 'the diff line is present once (the control patches exactly it)');
-    const bad = M.load('src/channel-policy.js', polSrc.replace(LINE, "  const diff = '';"), 'no-diff');
+    const bad = M.load('src/channel-policy.js', editAnchor(polSrc, LINE, "  const diff = '';", "src/channel-policy.js"), 'no-diff');
     const blk = bad.renderReceiptBlock(bad.receiptFor(eb), { text: 'Hi Bob,\nthe deploy is finished.\nbye', proposed: 'Hi Bob,\nthe deploy is done.\nbye' });
     ok(!/what the user changed/.test(blk) && /final text:/.test(blk), 'CONTROL: a copy without the diff hands the agent only the final text — the leg above would go red');
   }
@@ -578,7 +578,7 @@ console.log('§5 2026-09-27: the agent WITHDRAWS / REPLACES its own proposal; th
   {
     const LINE = "  if (p.receiptWake) return { deliver: 'next-turn', why: 'already-woken' };";
     ok(polSrc.split(LINE).length === 2, 'the one-per-proposal line is present once (the control removes exactly it)');
-    const bad = M.load('src/channel-policy.js', polSrc.replace(LINE, ''), 'wake-twice');
+    const bad = M.load('src/channel-policy.js', editAnchor(polSrc, LINE, '', "src/channel-policy.js"), 'wake-twice');
     ok(bad.receiptDeliveryVerdict('wake-now', { draftedBy: ag, receiptWake: { ok: true } }, { live: true }).deliver === 'wake-now', 'CONTROL: a copy without the row check wakes the same proposal twice — the table above would go red');
   }
   // ── PURE: THE FATE ──
@@ -1013,7 +1013,7 @@ async function evictionLeg(ladderMod, name) {
   ok(ev.bc >= 2, `the card learns it live (${ev.bc} broadcasts naming the proposal: stashed, evicted)`);
   const EVICT = "    if (evicted.length) emitStash('evicted', cid, evicted, { held: q.length });";
   ok(dsrc.split(EVICT).length === 2, 'the ladder\'s evicted emission is present once (the control removes exactly it)');
-  const silent = MV2.load('src/server/conversation-deliver.js', dsrc.replace(EVICT, ''), 'ladder-silent-evict');
+  const silent = MV2.load('src/server/conversation-deliver.js', editAnchor(dsrc, EVICT, '', "src/server/conversation-deliver.js"), 'ladder-silent-evict');
   const ec = await evictionLeg(silent, 'evict-ctl');
   ok(ec.gone && ec.live.kind === 'waiting' && ec.boot.kind === 'handed', `CONTROL: a ladder whose cap drops entries silently leaves the card saying "${ec.live.text}" and the boot reconcile guessing "${ec.boot.text}" — the leg would go red`);
 }
@@ -1044,7 +1044,7 @@ async function claimLeg(ladderMod, name) {
   ok(c.claimed === 1 && c.during === 'waiting' && !c.evictedAt && c.took === 1 && c.after === 'handed' && c.left === 30, `merge-a a CLAIMED receipt is never evicted: 31 arrivals while its hand-over is in flight drop the oldest UNCLAIMED entry (${c.left} left), the card keeps "${c.during}", and the hand-over's drain says handed (${c.after})`, JSON.stringify(c));
   const CAP = "    let over = q.filter((e) => !(e && e.ho) && !keptE(e)).length - STASH_CAP;";   // B-f276 1a: a kept entry is not the cap's
   ok(dsrc.split(CAP).length === 2, 'merge-a the unclaimed cap is spelled once (the control caps the whole store)');
-  const capAll = MV2.load('src/server/conversation-deliver.js', dsrc.replace(CAP, "    let over = q.length - STASH_CAP; if (over > 0) return q.splice(0, over);"), 'm195-cap-all');
+  const capAll = MV2.load('src/server/conversation-deliver.js', editAnchor(dsrc, CAP, "    let over = q.length - STASH_CAP; if (over > 0) return q.splice(0, over);", "src/server/conversation-deliver.js"), 'm195-cap-all');
   const cc = await claimLeg(capAll, 'm195-claim-ctl');
   ok(cc.during === 'evicted' && cc.took === 0, `CONTROL: a cap over the whole store evicts the claimed receipt — the card says "${cc.during}" for a notice the hand-over carries, and its drain finds nothing (took ${cc.took}) — merge-a would go red`, JSON.stringify(cc));
 }
@@ -1071,10 +1071,10 @@ async function takenLeg(ladderMod, name) {
   const TOOK = "      if (took.length) { writeStashNow(); stashChanged(cid); emitStash('drained', cid, took); }";
   const RESTORED = "    emitStash('stashed', cid, mine);\n";
   ok(dsrc.split(TOOK).length === 2 && dsrc.split(RESTORED).length === 2, 'merge-b/c the by-identity drain\'s event and the restore\'s event are each spelled once (the controls change exactly them)');
-  const whole = MV2.load('src/server/conversation-deliver.js', dsrc.replace(TOOK, "      if (took.length) { writeStashNow(); stashChanged(cid); emitStash('drained', cid, q); }"), 'm195-drained-whole');
+  const whole = MV2.load('src/server/conversation-deliver.js', editAnchor(dsrc, TOOK, "      if (took.length) { writeStashNow(); stashChanged(cid); emitStash('drained', cid, q); }", "src/server/conversation-deliver.js"), 'm195-drained-whole');
   const tw = await takenLeg(whole, 'm195-taken-ctl');
   ok(tw.f2 === 'handed', `CONTROL: a drain that names the whole queue says "${tw.f2}" for the receipt still waiting — merge-b would go red`, JSON.stringify(tw));
-  const quiet = MV2.load('src/server/conversation-deliver.js', dsrc.replace(RESTORED, ''), 'm195-restore-quiet');
+  const quiet = MV2.load('src/server/conversation-deliver.js', editAnchor(dsrc, RESTORED, '', "src/server/conversation-deliver.js"), 'm195-restore-quiet');
   const tq = await takenLeg(quiet, 'm195-restore-ctl');
   ok(tq.r1 === 'handed' && tq.held === 2, `CONTROL: a restore that says nothing leaves the card at "${tq.r1}" over a receipt back in the queue — merge-c would go red`, JSON.stringify(tq));
 }
@@ -1117,7 +1117,7 @@ async function takenLeg(ladderMod, name) {
   ok(/could not be written/.test(r.threw || '') && r.same && r.told, `merge-e a failed write of a ref'd entry: the producer refused by name, the queue restored EXACTLY (head ${JSON.stringify(r.head)}), the change hook told`, JSON.stringify(r));
   const OLDTB = "      q.splice(0, q.length, ...before);   // the take-back: the entry out, whatever the cap dropped back in its place\n";
   ok(dsrc.split(OLDTB).length === 2, 'merge-e the exact take-back is spelled once (the control restores the pre-merge unshift)');
-  const unshift = MV2.load('src/server/conversation-deliver.js', dsrc.replace(OLDTB, "      const i = q.indexOf(entry); if (i >= 0) q.splice(i, 1);\n      if (evicted.length) q.unshift(...evicted);\n"), 'm195-takeback-unshift');
+  const unshift = MV2.load('src/server/conversation-deliver.js', editAnchor(dsrc, OLDTB, "      const i = q.indexOf(entry); if (i >= 0) q.splice(i, 1);\n      if (evicted.length) q.unshift(...evicted);\n", "src/server/conversation-deliver.js"), 'm195-takeback-unshift');
   const rc = run(unshift);
   ok(rc.threw && !rc.same && rc.head[0] === 'u1', `CONTROL: the pre-merge take-back (splice the entry, unshift what the cap dropped) re-orders the queue — the cap's victim lands in front of the claimed entry (head ${JSON.stringify(rc.head)}) — merge-e would go red`, JSON.stringify(rc));
   try { fs.rmSync(dir, { recursive: true }); } catch { }
@@ -1283,7 +1283,7 @@ async function boundLeg(storeMod, name) {
   ok(b.n === STORE.OUTBOX_KEEP && b.withdrawn <= STORE.OUTBOX_KEEP && b.live, `THE BOUND holds when the terminal proposals are withdrawn ones: ${b.n} on disk (OUTBOX_KEEP ${STORE.OUTBOX_KEEP}), the awaiting draft kept`, JSON.stringify(b));
   const LINE = "const OUTBOX_PRUNABLE = Object.freeze(['sent', 'failed', 'rejected', 'expired', 'withdrawn']);";
   ok(ssrcV3.split(LINE).length === 2, 'the prunable set is spelled once (the control drops withdrawn from it)');
-  const bc = await boundLeg(MV3.load('src/channel-store.js', ssrcV3.replace(LINE, "const OUTBOX_PRUNABLE = Object.freeze(['sent', 'failed', 'rejected', 'expired']);"), 'bound-no-withdrawn'), 'v3-bound-ctl');
+  const bc = await boundLeg(MV3.load('src/channel-store.js', editAnchor(ssrcV3, LINE, "const OUTBOX_PRUNABLE = Object.freeze(['sent', 'failed', 'rejected', 'expired']);", "src/channel-store.js"), 'bound-no-withdrawn'), 'v3-bound-ctl');
   ok(bc.n > STORE.OUTBOX_KEEP && bc.withdrawn === STORE.OUTBOX_KEEP + 40, `CONTROL: a store whose bound does not know withdrawn keeps every one of them (${bc.n} on disk) — the leg would go red`);
   // verify r4 (2026-09-27): THE ORDER THEY GO IN — oldest-first alone let one agent's replace loop push ANOTHER
   // drafter's decided records (the owner's sent / rejected history) out before a single withdrawal left
@@ -1311,7 +1311,7 @@ async function boundLeg(storeMod, name) {
     ok(JSON.stringify(Object.keys(STORE.OUTBOX_PRUNE_RANK).sort()) === JSON.stringify([...STORE.OUTBOX_PRUNABLE].sort()) && STORE.OUTBOX_PRUNE_RANK.withdrawn < STORE.OUTBOX_PRUNE_RANK.expired && STORE.OUTBOX_PRUNE_RANK.expired < STORE.OUTBOX_PRUNE_RANK.sent && STORE.OUTBOX_PRUNE_RANK.sent === STORE.OUTBOX_PRUNE_RANK.rejected && STORE.OUTBOX_PRUNE_RANK.sent === STORE.OUTBOX_PRUNE_RANK.failed, 'the rank names every prunable state exactly: withdrawn < expired < the decided three (sent = failed = rejected)');
     const RANK = "    const done = all.filter((p) => p && OUTBOX_PRUNABLE.includes(p.state)).sort((a, b) => (rank(a) - rank(b)) || ((a.updatedAt || a.at || 0) - (b.updatedAt || b.at || 0)));";
     ok(ssrcV3.split(RANK).length === 2, 'the ranked sort is present once (the control sorts oldest-first alone)');
-    const rkc = await rankLeg(MV3.load('src/channel-store.js', ssrcV3.replace(RANK, "    const done = all.filter((p) => p && OUTBOX_PRUNABLE.includes(p.state)).sort((a, b) => (a.updatedAt || a.at || 0) - (b.updatedAt || b.at || 0));"), 'bound-oldest-first'), 'v4-rank-ctl');
+    const rkc = await rankLeg(MV3.load('src/channel-store.js', editAnchor(ssrcV3, RANK, "    const done = all.filter((p) => p && OUTBOX_PRUNABLE.includes(p.state)).sort((a, b) => (a.updatedAt || a.at || 0) - (b.updatedAt || b.at || 0));", "src/channel-store.js"), 'bound-oldest-first'), 'v4-rank-ctl');
     ok(rkc.n === STORE.OUTBOX_KEEP && rkc.decided === 0 && rkc.expired === 0, `CONTROL: oldest-first alone drops the other drafter's decided records and the expired ones first (${rkc.decided} decided, ${rkc.expired} expired left) — the leg would go red`);
   }
 }
@@ -1344,7 +1344,7 @@ async function rowWriteLeg(engMod, name) {
   const psrcV4 = fs.readFileSync(path.join(REPO, 'src/channel-policy.js'), 'utf-8');
   const ROWLOST = "  const rowLost = !del.woke && del.choice === 'wake-now' && del.verdict === 'row-unwritten';";
   ok(psrcV4.split(ROWLOST).length === 2, 'the row-lost fate line is present once (the control never names it)');
-  const PC4 = MV3.load('src/channel-policy.js', psrcV4.replace(ROWLOST, "  const rowLost = false;"), 'policy-row-lost-silent');
+  const PC4 = MV3.load('src/channel-policy.js', editAnchor(psrcV4, ROWLOST, "  const rowLost = false;", "src/channel-policy.js"), 'policy-row-lost-silent');
   const fc = PC4.receiptFateOf({ receipt: { status: 'rejected' }, draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, state: 'rejected', receiptDelivery: { at: 1, ok: false, stashed: true, woke: false, choice: 'wake-now', verdict: 'row-unwritten' } });
   ok(fc && fc.kind === 'waiting' && !fc.wakeRefused, 'CONTROL: the policy without the line says a plain "waiting" over a wake the owner asked for and never got — the leg would go red');
   const LINE = "      try { await store.outbox.update((ob) => { const q = ob.proposals[id]; if (q && !q.receiptWake) { q.receiptWake = { at: tR, reserved: true, bootId: BOOT_ID, pid: process.pid }; took = true; } }); got = took; }";
@@ -1397,7 +1397,7 @@ async function durableLeg(ladderMod, name) {
   const dsrcV3 = fs.readFileSync(path.join(REPO, 'src/server/conversation-deliver.js'), 'utf-8');
   const LINE = '    const stored = flush();\n    if (!stored && entry.ref) {';
   ok(dsrcV3.split(LINE).length === 2, 'the durable-first line is present once (the control debounces every entry)');
-  const dc = await durableLeg(MV3.load('src/server/conversation-deliver.js', dsrcV3.replace(LINE, '    persistStash(); const stored = true;\n    if (!stored && entry.ref) {'), 'stash-debounced'), 'v3-durable-ctl');
+  const dc = await durableLeg(MV3.load('src/server/conversation-deliver.js', editAnchor(dsrcV3, LINE, '    persistStash(); const stored = true;\n    if (!stored && entry.ref) {', "src/server/conversation-deliver.js"), 'stash-debounced'), 'v3-durable-ctl');
   ok(!dc.refOnDisk && dc.peerOnDisk === 0, 'CONTROL: a ladder that debounces every entry has nothing on disk when the producer records "stashed" — the leg would go red');
   // verify r4 (2026-09-27): …AND WHEN THAT WRITE FAILS THE PRODUCER IS TOLD — a full disk at the decision (the write
   // threw, was logged, the entry stayed in memory) left the outbox saying `stashed`; the next boot's reconcile found
@@ -1465,7 +1465,7 @@ async function durableLeg(ladderMod, name) {
       `a peer's entry under a failed write: kept in memory (1 held), answered {stored:false} with the sentence, one \`unwritten\` event, stashHealth says so; the next write heals and both are on disk (${JSON.stringify(u)})`);
     const KEEP = "    if (!stored) { const why = ";
     ok(dsrcV3.split(KEEP).length === 2, 'the named-outcome line is present once (the control answers nothing)');
-    const uc = await peerUnwritableLeg(MV3.load('src/server/conversation-deliver.js', dsrcV3.replace(KEEP, "    if (false) { const why = "), 'peer-unwritten-silent'), 'v5-peer-unwritable-ctl');
+    const uc = await peerUnwritableLeg(MV3.load('src/server/conversation-deliver.js', editAnchor(dsrcV3, KEEP, "    if (false) { const why = ", "src/server/conversation-deliver.js"), 'peer-unwritten-silent'), 'v5-peer-unwritable-ctl');
     ok(uc.stored === true && uc.unwritten === 0, `CONTROL: the copy that answers nothing tells the producer "stored" over a file without the entry (${JSON.stringify(uc)}) — the leg would go red`);
   }
   // …and the legacy msg lane (agent-routes, no groups engine) relays it to the sender
@@ -1507,7 +1507,7 @@ async function durableLeg(ladderMod, name) {
   const ssrc = fs.readFileSync(path.join(REPO, 'src/channel-store.js'), 'utf-8');
   const MEMO = "  function outboxSnapshot() { if (!obSnap) obSnap = deepFreeze(JSON.parse(JSON.stringify(ob))); return obSnap; }";
   ok(ssrc.split(MEMO).length === 2, 'the memoised snapshot line is present once (the control copies on every read)');
-  const STc = MV3.load('src/channel-store.js', ssrc.replace(MEMO, "  function outboxSnapshot() { return JSON.parse(JSON.stringify(ob)); }"), 'snapshot-per-read');
+  const STc = MV3.load('src/channel-store.js', editAnchor(ssrc, MEMO, "  function outboxSnapshot() { return JSON.parse(JSON.stringify(ob)); }", "src/channel-store.js"), 'snapshot-per-read');
   const dir2 = path.join(ROOT, 'v5-memo-ctl'); fs.mkdirSync(dir2, { recursive: true });
   const st2 = STc.createChannelStore({ dir: dir2 });
   await st2.outbox.update((ob) => { ob.proposals['p-1'] = { id: 'p-1', state: 'awaiting-approval' }; });
@@ -1556,7 +1556,7 @@ async function durableLeg(ladderMod, name) {
   ok(Buffer.byteLength(rej, 'utf-8') <= P.RECEIPT_BLOCK_MAX_BYTES && rej.endsWith(P.RECEIPT_GUIDANCE), 'a rejection with the longest CJK reason fits with its guidance');
   const LINE = "const RECEIPT_BLOCK_MAX_BYTES = 4096;";
   ok(psrcV3.split(LINE).length === 2, 'the byte budget is spelled once (the control lifts it)');
-  const PC = MV3.load('src/channel-policy.js', psrcV3.replace(LINE, 'const RECEIPT_BLOCK_MAX_BYTES = Infinity;'), 'policy-no-byte-budget');
+  const PC = MV3.load('src/channel-policy.js', editAnchor(psrcV3, LINE, 'const RECEIPT_BLOCK_MAX_BYTES = Infinity;', "src/channel-policy.js"), 'policy-no-byte-budget');
   const bc = PC.renderReceiptBlock({ proposalId: 'p-1', status: 'edited', adapterId: A, convId: C, sentAs: 'user', identityMarking: 'unknown' }, { adapterLabel: 'Fake', title: 'Ops', text: cjkB, proposed: cjkA });
   ok(Buffer.byteLength(bc, 'utf-8') > FILT.BLOCK_MAX_BYTES, `CONTROL: a block with no byte budget is ${Buffer.byteLength(bc, 'utf-8')} B — the drain clips it and its guidance line is the part cut — the leg would go red`);
 }
@@ -1964,7 +1964,7 @@ async function ccReachLeg(engine, tag) {
   eng.stop();
   const LINE = "    if (h.length) return { ok: false, error: `an address carries invisible characters (${h.join(', ')}) — it would read as another address`, why: 'address' };";
   ok(PSRC_R6.split(LINE).length === 2, 'the address refusal is present once (the control removes exactly it)');
-  const PC = MR6.load('src/channel-policy.js', PSRC_R6.replace(LINE, '    // (control) no hidden-character refusal'), 'no-hidden-address');
+  const PC = MR6.load('src/channel-policy.js', editAnchor(PSRC_R6, LINE, '    // (control) no hidden-character refusal', "src/channel-policy.js"), 'no-hidden-address');
   ok(PC.validateCompose({ ...base, to: 'a​@example.com' }).ok, 'CONTROL: without the refusal `a<U+200B>@example.com` passes the address rule (the plain-address regex does not see it) — the leg above would go red');
 }
 
@@ -4522,7 +4522,7 @@ console.log('§bl-msg B-9b9c two replies to ONE message — both cards name the 
   ok(src.split(LINK).length === 2, 'the control finds its line');
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const MUTO = mutantCopies('blm-9b9c', REPO);
-  const r = await runOn(MUTO.load('src/server/channels-engine.js', src.replace(LINK, 'const alsoIds = false ?'), 'no-also'), 'b9b9c-red');
+  const r = await runOn(MUTO.load('src/server/channels-engine.js', editAnchor(src, LINK, 'const alsoIds = false ?', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'no-also'), 'b9b9c-red');
   ok(!ids(r.v1).length && !ids(r.v2).length && !(r.p2 && r.p2.also), 'RED CONTROL (no cross-link): neither card nor the answer names the other reply — the B-9b9c legs go red');
 }
 
@@ -4580,15 +4580,15 @@ console.log('§bl-msg B-ae13 the asker withdraws its own open wake request — n
   const RES = "try { userTodos.resolveAnswered([r0.todoId], 'agent'); } catch { }";
   ok(src.split(RES).length === 2, 'the control finds its line');
   const { mutantCopies } = await import('./mutant-copy.mjs');
-  const r = await run(mutantCopies('blm-ae13', REPO).load('src/server/channels-engine.js', src.replace(RES, ''), 'ae13-no-resolve'), 'bae13-red');
+  const r = await run(mutantCopies('blm-ae13', REPO).load('src/server/channels-engine.js', editAnchor(src, RES, '', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'ae13-no-resolve'), 'bae13-red');
   ok(r.after.status === 'withdrawn' && !(r.after.item && r.after.item.status !== 'open'), 'RED CONTROL (the item never ended): the request is withdrawn but the person\'s card stays open — the leg above goes red', JSON.stringify(r.after));
   // the cure's RED CONTROLS (each fails by name when its line is gone): no undo ⇒ the watch stands; the mark kept on an early return ⇒ refused
   const UNDO = "      if (undo && endedAs !== 'approved') {", MARK = 'try { return await decideOpenWatch(requestId, req0, approve, by, person, t); } finally { deciding.delete(requestId); }';
   ok(src.split(UNDO).length === 2 && src.split(MARK).length === 2, 'the cure\'s two controls find their lines');
   const MCc = mutantCopies('blm-ae13c', REPO);
-  const ru = await run(MCc.load('src/server/channels-engine.js', src.replace(UNDO, '      if (false) {'), 'ae13-no-undo'), 'bae13-noundo');
+  const ru = await run(MCc.load('src/server/channels-engine.js', editAnchor(src, UNDO, '      if (false) {', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'ae13-no-undo'), 'bae13-noundo');
   ok(ru.race.status === 'withdrawn' && ru.race.live === 1, 'RED CONTROL (no undo): the request says withdrawn and a live wake watch stands — the other-order leg goes red (and the race was run: the Allow did write)', JSON.stringify(ru.race));
-  const rm = await run(MCc.load('src/server/channels-engine.js', src.replace(MARK, 'return decideOpenWatch(requestId, req0, approve, by, person, t);'), 'ae13-mark-held'), 'bae13-markheld');
+  const rm = await run(MCc.load('src/server/channels-engine.js', editAnchor(src, MARK, 'return decideOpenWatch(requestId, req0, approve, by, person, t);', "src/server/channels-engine.js + its family files (scripts/channels-engine-src.mjs engineSource)"), 'ae13-mark-held'), 'bae13-markheld');
   ok(rm.gone.withdraw && rm.gone.withdraw.ok === false && rm.gone.withdraw.code === 'not-withdrawable', 'RED CONTROL (the mark kept on an early return): the asker\'s withdraw is refused «being decided» — the early-return leg goes red', JSON.stringify(rm.gone));
 }
 

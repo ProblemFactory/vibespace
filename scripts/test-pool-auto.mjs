@@ -1572,7 +1572,7 @@ await (async () => {
   const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
   const anchor = "const notMember = membership != null && !(typeof membership.has === 'function' ? membership : new Set(membership)).has(currentId);";
   ck('member CONTROL: the patch anchor is in the product source', src.includes(anchor));
-  const mut = M.load('src/account-pool-auto.js', src.replace(anchor, 'const notMember = false; // PATCHED: membership is not a fact'), 'nomember');
+  const mut = M.load('src/account-pool-auto.js', editAnchor(src, anchor, 'const notMember = false; // PATCHED: membership is not a fact', "src/account-pool-auto.js"), 'nomember');
   const mr = mut.decidePoolSwitch({ currentId: 'a', members: [{ id: 'b', name: 'B' }, { id: 'c', name: 'C' }], readCache: (id) => healthy[id] ?? null, nowSec: NOW, explain: true, membership: ['b', 'c'] });
   ck('member CONTROL: without the membership fact the removed member (70 % left) STAYS — healthy, nothing moves (the 16:56 incident)', mr.to === null && mr.reason === 'healthy', JSON.stringify(mr));
 
@@ -1674,7 +1674,7 @@ await (async () => {
     const engSrc = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
     const a2 = 'const membership = poolMembershipOf(poolId); // the removed-member wall';
     ck('engine CONTROL: the patch anchor is in the engine (the pass\'s own line, once)', engSrc.split(a2).length === 2);
-    const mEng = M.load('src/server/usage-pool-engine.js', engSrc.replace(a2, 'const membership = null; // PATCHED: master'), 'engmaster');
+    const mEng = M.load('src/server/usage-pool-engine.js', editAnchor(engSrc, a2, 'const membership = null; // PATCHED: master', "src/server/usage-pool-engine.js"), 'engmaster');
     const wm = world(mEng);
     wm.am.updatePool(wm.P, { members: [wm.id.uci, wm.id.fish] });
     quietly(() => wm.eng.maybePoolAutoSwitchForPool(wm.P, { force: true }));
@@ -2357,7 +2357,7 @@ await (async () => {
     const engSrc = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
     const beltLine = 'if (now - lastS < 180000 && !ds.escape &&';
     ck('r1 belt control: the patch (pin-return exempt again) hits', engSrc.split(beltLine).length === 2);
-    const loose = MR.load('src/server/usage-pool-engine.js', engSrc.replace(beltLine, "if (now - lastS < 180000 && ds.reason !== 'pin-return' && !ds.escape &&"), 'nobelt');
+    const loose = MR.load('src/server/usage-pool-engine.js', editAnchor(engSrc, beltLine, "if (now - lastS < 180000 && ds.reason !== 'pin-return' && !ds.escape &&", "src/server/usage-pool-engine.js"), 'nobelt');
     const was = flap(loose);
     ck('r1 belt control: with the return exempt the conversation re-points on EVERY evaluation (12 of 12 — what verify r1 measured)', was.moves === 12, JSON.stringify(was));
     // the belt never delays an ESCAPE: the return off a member under its hard bar names that (fromRemaining)
@@ -2400,7 +2400,7 @@ await (async () => {
     const src = fs.readFileSync(path.resolve('src/account-pool-auto.js'), 'utf8');
     const clause = "if (escape) return { to: pinId, toName: pinnedName, fromRemaining, toRemaining: r.remaining, reason: 'pin-return', band: 'hard', escape, ...pinCross, ...base };";
     ck('r1 wall control: the patch (the escape clause removed) hits', src.split(clause).length === 2);
-    const noEscape = MW.load('src/account-pool-auto.js', src.replace(clause, ''), 'noescape');
+    const noEscape = MW.load('src/account-pool-auto.js', editAnchor(src, clause, '', "src/account-pool-auto.js"), 'noescape');
     ck('r1 wall control: without it the pinned conversation is HELD mid-turn on the spent member (what verify r1 reproduced)', ask(noEscape, { readCache: (id) => ({ a: bucket(0.1), b: bucket(0.99), c: bucket(0.1) })[id] }).reason === 'pin-hold');
     // the real engine, hot pool: mid-turn on a spent member, the pin can serve
     const wh = world({});
@@ -2458,7 +2458,7 @@ await (async () => {
     ck('r1 gather control: the patch (the judgement removed) hits', gj.test(gsrc));
     const { mutantCopies: mcG } = await import('./mutant-copy.mjs');
     const MG = mcG('poolpin-r2gather', path.resolve('.'));
-    const wold = setup({ routesMod: MG.load('src/server/account-usage-routes.js', gsrc.replace(gj, '    const plan = null;'), 'unjudged') });
+    const wold = setup({ routesMod: MG.load('src/server/account-usage-routes.js', editAnchor(gsrc, gj, '    const plan = null;', "src/server/account-usage-routes.js"), 'unjudged') });
     wold.wr('uci', 0.995, 0.2, 5 * 86400);
     quietly(() => wold.eng.maybePoolAutoSwitchForPool(wold.P, { force: true })); wold.eng._poolSwitchAt.clear(); wold.eng._poolAutoLast.clear();
     const rowsOld = wold.am.slotTransitions.all().length;
@@ -2582,7 +2582,7 @@ await (async () => {
     // (under 全B the first clause is reached only by a verdict that is not the hold; the second is R5's leg above)
     const vh = "        if (dv && dv.reason === 'removed-hold') { const h = holdRemoved(poolId, sid, s, on, dv, now); if (h.held || h.deferred) out.held.push({ sid, on, to: h.to, deferred: h.deferred }); else out.stayed.push({ sid, on }); continue; } // 全B: stop and wait (a mid-turn one at its stop)\n";
     ck('r2 held control (全B): the patch (the hold removed from the held branch) hits', esrc.split(vh).length === 2);
-    const was = cx(MH.load('src/server/usage-pool-engine.js', esrc.replace(vh, ''), 'noheld'), { bSpent: true });
+    const was = cx(MH.load('src/server/usage-pool-engine.js', editAnchor(esrc, vh, '', "src/server/usage-pool-engine.js"), 'noheld'), { bSpent: true });
     ck('r2 held control (全B): without the hold the process STAYS on the removed member (no restart) — it keeps billing it (r1\'s behaviour, the owner\'s A)', was.asked.length === 0 && was.res.body.evicted.stayed === 1, JSON.stringify({ asked: was.asked, e: was.res.body.evicted }));
     if (prevHome === undefined) delete process.env.CODEX_HOME; else process.env.CODEX_HOME = prevHome;
   }
@@ -2950,7 +2950,7 @@ await (async () => {
     const asrc = fs.readFileSync(path.resolve('src/accounts.js'), 'utf8');
     const g = /        const listedNow = this\.poolMembership\(id\);\n        if \(member && !listedNow\.includes\(member\)\) \{[\s\S]*?\n        \}\n/;
     ck('全B new control: the patch (the store without the guard) hits', g.test(asrc));
-    const { AccountManager: OldMgr } = MN.load('src/accounts.js', asrc.replace(g, ''), 'noguard');
+    const { AccountManager: OldMgr } = MN.load('src/accounts.js', editAnchor(asrc, g, '', "src/accounts.js"), 'noguard');
     const n2 = mkStore(OldMgr);
     let err2 = null; try { n2.am2.resolveForSpawn(n2.P, 'claude', { sessionKey: 'nc-3' }); } catch (e) { err2 = e; }
     ck('全B new control: …without it the new conversation starts ON the removed member (billing it)', !err2 && n2.am2.poolCurrentFor(n2.P, 'nc-3') === n2.ids[0], err2 ? err2.message : n2.am2.poolCurrentFor(n2.P, 'nc-3'));
@@ -3319,21 +3319,21 @@ await (async () => {
       const PEND = '  if (_poolEvalPending) { if (!kick) _poolEvalPending.kick = false; return; }   // one pass already scheduled: this ask rides it\n';
       ck('ANCHOR: the throttle\'s kicks-only test and the pending pass\'s un-kick, each spelled once', ENG.split(THR).length === 2 && ENG.split(PEND).length === 2);
       if (ENG.split(THR).length === 2 && ENG.split(PEND).length === 2) {
-        const MT = await throttled(M37.load('src/server/usage-pool-engine.js', ENG.replace(THR, '  if (now - _poolEvalKickAt < 5000) return;\n'), 'throttle-all'), false);   // stale-pins: kept (the release's throttle line, restored on purpose by this mutant)
+        const MT = await throttled(M37.load('src/server/usage-pool-engine.js', editAnchor(ENG, THR, '  if (now - _poolEvalKickAt < 5000) return;\n', "src/server/usage-pool-engine.js"), 'throttle-all'), false);   // stale-pins: kept (the release's throttle line, restored on purpose by this mutant)
         ck('MUTANT RED: the throttle for every ask (the release\'s) ⇒ the compaction\'s ask 1 ms after a kick is DROPPED', !!MT && MT.at === MT.back, MT);
-        const MP = await throttled(M37.load('src/server/usage-pool-engine.js', ENG.replace(PEND, '  if (_poolEvalPending) return;\n'), 'pending-kicked'), true);
+        const MP = await throttled(M37.load('src/server/usage-pool-engine.js', editAnchor(ENG, PEND, '  if (_poolEvalPending) return;\n', "src/server/usage-pool-engine.js"), 'pending-kicked'), true);
         ck('MUTANT RED: a pending pass left KICKED ⇒ the same-chunk compaction rides a kick and the gate holds it', !!MP && MP.held === 1 && MP.at === MP.back, MP);
       }
       const ASK = "  kickPoolEval({ kick: false });   // B-37f9: OWED — the free move window closes at the next request-out; never held by the kicks' gate (the release's road)\n";
       ck('ANCHOR: the compaction\'s owed ask, spelled once', ENG.split(ASK).length === 2);
       if (ENG.split(ASK).length === 2) {
-        const CM = await compactAsk(M37.load('src/server/usage-pool-engine.js', ENG.replace(ASK, '  kickPoolEval();\n'), 'compaction-kicks'));
+        const CM = await compactAsk(M37.load('src/server/usage-pool-engine.js', editAnchor(ENG, ASK, '  kickPoolEval();\n', "src/server/usage-pool-engine.js"), 'compaction-kicks'));
         ck('MUTANT RED: the compaction\'s ask as a KICK ⇒ the tick\'s evaluation 3 s earlier holds it — the free window can close unasked', !!CM && CM.compacted && CM.held === 1 && CM.at === CM.back, CM);
       }
       if (okAnchor) {
-        const KO = kicks(M37.load('src/server/usage-pool-engine.js', ENG.replace(STAMP, ''), 'stamp-gone'));
+        const KO = kicks(M37.load('src/server/usage-pool-engine.js', editAnchor(ENG, STAMP, '', "src/server/usage-pool-engine.js"), 'stamp-gone'));
         ck('MUTANT RED: no evaluation stamp (the release\'s gate for kicks) ⇒ no kick is held — five records, five evaluations', !!KO && KO.held === 0);
-        const KG = kicks(M37.load('src/server/usage-pool-engine.js', ENG.replace(GATE, "    if (!evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n"), 'gate-every-pass'));
+        const KG = kicks(M37.load('src/server/usage-pool-engine.js', editAnchor(ENG, GATE, "    if (!evalGateOpen({ now, last: _poolEvalAt.get(poolId), force })) {\n", "src/server/usage-pool-engine.js"), 'gate-every-pass'));
         ck('MUTANT RED: the gate on EVERY un-forced pass (not only kicks) ⇒ the pass that owes its decision is held, nothing evaluated', !!KG && KG.tickHeld === 1 && !KG.tickEvaluated);
       }
     }
@@ -3515,12 +3515,12 @@ await (async () => {
   ck('mutant ①: the anchor (the allow gate of the cold move) hits once', src.split(A1).length === 2);
   ck('mutant ②: the anchor (the model gate) hits once', src.split(A2).length === 2);
   if (src.split(A1).length === 2) {
-    const m1 = MP.load('src/account-pool-auto.js', src.replace(A1, "if (provOf && hardDead && !placing && crossRows.length) { // PATCHED: never ignored"), 'never-ignored');
+    const m1 = MP.load('src/account-pool-auto.js', editAnchor(src, A1, "if (provOf && hardDead && !placing && crossRows.length) { // PATCHED: never ignored", "src/account-pool-auto.js"), 'never-ignored');
     const bad = CELLS.filter((c) => c.prov === 'other' && c.mode === 'never' && c.servable).map((c) => m1.decidePoolSwitch(cellOpts(c)));
     ck('mutant ① RED: a member of ANOTHER provider chosen under never ⇒ the never-cells fail (the copy moves the conversation)', bad.length === 2 && bad.every((d) => d.to === 'm' && !expectCell({ prov: 'other', mode: 'never', servable: true, readings: true }, d)), J(bad));
   }
   if (src.split(A2).length === 2) {
-    const m2 = MP.load('src/account-pool-auto.js', src.replace(A2, 'if (false && other && toModel == null) { modelBlocked.push('), 'model-ignored');
+    const m2 = MP.load('src/account-pool-auto.js', editAnchor(src, A2, 'if (false && other && toModel == null) { modelBlocked.push(', "src/account-pool-auto.js"), 'model-ignored');
     const bad = CELLS.filter((c) => c.prov === 'other' && !c.servable).map((c) => [c, m2.decidePoolSwitch(cellOpts(c))]);
     ck('mutant ② RED: a member that CANNOT serve the model enters the candidates ⇒ every not-servable cell fails (moved or offered, model null)', bad.length === 4 && bad.every(([c, d]) => !expectCell(c, d) && (d.to === 'm' || (d.crossOffer && d.crossOffer.id === 'm'))), J(bad.map((x) => x[1])));
   }

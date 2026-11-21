@@ -409,7 +409,7 @@ keeper.onConfirmation((ev) => confEvents.push(ev));
   {
     const M8 = mutantCopies('browser-takeover-l8', REPO);
     const ksrc8 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
-    const kmut8 = ksrc8.replace("    if (by !== 'user') { const paused = pausedVerdictFor(browserKey, inPid); if (paused) throw namedError(paused.code, detachPausedText(paused.error), { takenAt: paused.takenAt, lastUserInputAt: paused.lastUserInputAt }); }\n", '');
+    const kmut8 = editAnchor(ksrc8, "    if (by !== 'user') { const paused = pausedVerdictFor(browserKey, inPid); if (paused) throw namedError(paused.code, detachPausedText(paused.error), { takenAt: paused.takenAt, lastUserInputAt: paused.lastUserInputAt }); }\n", '', "src/server/browser-keeper.js");
     if (kmut8 !== ksrc8) {
       const K8 = M8.load('src/server/browser-keeper.js', kmut8, 'detach-under-user');
       const ev8 = [];
@@ -508,7 +508,7 @@ keeper.onConfirmation((ev) => confEvents.push(ev));
   const ksrcS = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const HBS = '      handBackOnStop(profileId, p, why); // r6 LOW 3\n';
   if (ksrcS.split(HBS).length === 3) {
-    const cs = await stopLeg(MS.load('src/server/browser-keeper.js', ksrcS.split(HBS).join(''), 'stop-no-handback'), 'ctl');
+    const cs = await stopLeg(MS.load('src/server/browser-keeper.js', editAnchor(ksrcS, HBS, '', "src/server/browser-keeper.js", 'join'), 'stop-no-handback'), 'ctl');
     ok(!cs.threw && cs.after.input === 'user' && cs.hb.length === 0 && cs.resolve === 'browser_paused', `r6 LOW 3 CONTROL: a keeper copy without the stop's handback keeps input ${cs.after.input} after the Stop, and the agent's next command on the NEW browser answers ${cs.resolve} — the leg above can go red`, cs);
   } else ok(false, 'r6 LOW 3 CONTROL: the two handBackOnStop call sites were not found in src/server/browser-keeper.js');
   for (const r of copiesCensus(MS.files, MS.dir, REPO, { minCopies: 1, label: 'r6 LOW 3 ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
@@ -560,7 +560,7 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
     const hsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-handback.js'), 'utf8');
     const CID = '  const conversationIdOf = (s) => addressableId(s);';
     ok(hsrc.split(CID).length === 2, 'the announcer reads the session\'s conversation id through addressableId, once');
-    const Hc = MF.load('src/server/browser-handback.js', hsrc.replace(CID, "  const conversationIdOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;"), 'handback-rawcid');
+    const Hc = MF.load('src/server/browser-handback.js', editAnchor(hsrc, CID, "  const conversationIdOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;", "src/server/browser-handback.js"), 'handback-rawcid');
     const deliveredC = [];
     const annC = Hc.create({ keeper, deliver: { deliverToConversation: async (cid, text, opts) => { deliveredC.push({ cid, opts }); return { ok: true }; }, stashFor: () => ({ stored: true }) }, serverSetting: (k) => settings2[k], activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: () => {}, log: { log() { }, warn() { } } });
     const rfc = await annC.announce(ev('explicit', { sessionId: 'sess-fork', browserKey: 'bk-f0f0f0f0', pressed: PRESS }));
@@ -962,7 +962,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     const TS5 = fs.readFileSync(path.join(REPO, 'src/browser-takeover.js'), 'utf8');
     const c = { tag: 'yh-always-keep', from: "  return homeVisible ? 'keep' : 'end';", to: "  return 'keep';" };
     const found = TS5.split(c.from).length === 2;
-    const Tm = found ? MY.load('src/browser-takeover.js', TS5.replace(c.from, c.to), c.tag) : null;
+    const Tm = found ? MY.load('src/browser-takeover.js', editAnchor(TS5, c.from, c.to, "src/browser-takeover.js"), c.tag) : null;
     ok(found && JSON.stringify(yhBad(Tm)) === JSON.stringify([YH_ROWS[0][2]]), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly the homeless row`, JSON.stringify({ found, bad: Tm && yhBad(Tm) }));
     for (const r of copiesCensus(MY.files, MY.dir, REPO, { minCopies: 1, label: '⑦ yield home ' })) ok(r.pass, r.name, r.detail);
   }
@@ -1007,7 +1007,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     ];
     for (const c of QCTL) {
       const found = TS4.split(c.from).length === 2;
-      const Tm = found ? MQ.load('src/browser-takeover.js', TS4.replace(c.from, c.to), c.tag) : null;
+      const Tm = found ? MQ.load('src/browser-takeover.js', editAnchor(TS4, c.from, c.to, "src/browser-takeover.js"), c.tag) : null;
       const bad = Tm ? rcBad(Tm) : null;
       ok(found && JSON.stringify(bad) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.join(' · ')}`, JSON.stringify({ found, bad }));
     }
@@ -1026,7 +1026,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     ];
     for (const c of TCTL) {
       const found = TS3.split(c.from).length === 2;
-      const Tm = found ? MT.load('src/browser-takeover.js', TS3.replace(c.from, c.to), c.tag) : null;
+      const Tm = found ? MT.load('src/browser-takeover.js', editAnchor(TS3, c.from, c.to, "src/browser-takeover.js"), c.tag) : null;
       const bad = Tm ? ktBad(Tm) : null;
       ok(found && JSON.stringify(bad) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.join(' · ')}`, JSON.stringify({ found, bad }));
     }
@@ -1110,7 +1110,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     ];
     for (const c of DCTL) {
       const found = TSD.split(c.from).length === 2;
-      const Tm = found ? MD.load('src/browser-takeover.js', TSD.replace(c.from, c.to), c.tag) : null;
+      const Tm = found ? MD.load('src/browser-takeover.js', editAnchor(TSD, c.from, c.to, "src/browser-takeover.js"), c.tag) : null;
       const got = Tm ? c.bad(Tm) : null;
       ok(found && JSON.stringify(got) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.join(' · ')}`, JSON.stringify({ found, got }));
     }
@@ -1145,7 +1145,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     ];
     for (const c of CTL) {
       const found = TS.split(c.from).length === 2;
-      const Tm = found ? MK.load('src/browser-takeover.js', TS.replace(c.from, c.to), c.tag) : null;
+      const Tm = found ? MK.load('src/browser-takeover.js', editAnchor(TS, c.from, c.to, "src/browser-takeover.js"), c.tag) : null;
       const fb = Tm ? fvBad(Tm) : null, ub = Tm ? upBad(Tm) : null;
       ok(found && JSON.stringify(fb) === JSON.stringify(c.fv) && JSON.stringify(ub) === JSON.stringify(c.up), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly its rows — ${[...c.fv, ...c.up].join(' · ')}`, JSON.stringify({ found, fb, ub }));
     }
@@ -1172,7 +1172,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     ];
     for (const c of HCTL) {
       const found = TS2.split(c.from).length === 2;
-      const Tm = found ? MH.load('src/browser-takeover.js', TS2.replace(c.from, c.to), c.tag) : null;
+      const Tm = found ? MH.load('src/browser-takeover.js', editAnchor(TS2, c.from, c.to, "src/browser-takeover.js"), c.tag) : null;
       const bad = Tm ? hrBad(Tm) : null;
       ok(found && JSON.stringify(bad) === JSON.stringify(c.red), `NEGATIVE CONTROL (${c.tag}): the patched copy fails exactly ${c.red.length} row(s)`, JSON.stringify({ found, bad }));
     }
@@ -1306,7 +1306,7 @@ console.log('— ⑦ lane J r2: keyboard ownership, the key routes, text records
     const HS = fs.readFileSync(path.join(REPO, 'src/server/browser-handback.js'), 'utf8');
     const line = "      if (ev.kind === 'takeover' || ev.kind === 'handback') { try { sweepStale(ev, ev.kind); } catch (e) { log.warn?.(`[browser] stale-approval sweep failed — ${e && e.message}`); } }";
     ok(HS.split(line).length === 2, 'control setup: the sweep\'s one call site is found exactly once');
-    const H0 = MC.load('src/server/browser-handback.js', HS.replace(line, '      /* NEGATIVE CONTROL: no stale sweep */'));
+    const H0 = MC.load('src/server/browser-handback.js', editAnchor(HS, line, '      /* NEGATIVE CONTROL: no stale sweep */', "src/server/browser-handback.js"));
     const s = mkSession('bk-0000lj23');
     runSweep(H0, s, [], { kind: 'takeover' });
     ok(!permOf(s, 'click').resolved && s.writes.length === 0, 'NEGATIVE CONTROL: without the sweep the pre-takeover browser click stays PENDING after the takeover — Allow would run it on a page the user changed (the study\'s S8-36)');
@@ -1466,7 +1466,7 @@ console.log('— ⑧ the owner\'s ruling: in flight = PURE(trace, instant); one 
   const hsrc = fs.readFileSync(path.join(REPO8, 'src/server/browser-handback.js'), 'utf8');
   const hAnchor = "      if (ev.kind === 'takeover') { try { announceTakeover(ev); } catch (e) { log.warn?.(`[browser] takeover announce failed — ${e && e.message}`); } return; }\n";
   ok(hsrc.split(hAnchor).length === 2, '⑧ control setup: the takeover moment is wired once');
-  const Hc = M8.load('src/server/browser-handback.js', hsrc.replace(hAnchor, ''), 'no-takeover-card');
+  const Hc = M8.load('src/server/browser-handback.js', editAnchor(hsrc, hAnchor, '', "src/server/browser-handback.js"), 'no-takeover-card');
   const cardsC = [], noticesC = [];
   const annC = Hc.create({ keeper, deliver: { ...deliver, emitPeerCard: (cid, card) => cardsC.push(card) }, serverSetting: () => undefined, activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: (id, s, n) => noticesC.push(n), log: { log() { }, warn() { } } });
   annC.install();
@@ -1636,7 +1636,7 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
   const ksrc9 = fs.readFileSync(path.join(REPO, 'src/server/browser-keeper.js'), 'utf8');
   const line9 = "      if (profileId) siblingTakeover({ browserKey, profileId, viewerId, at, alive });\n";
   ok(ksrc9.split(line9).length === 2, '⑨ control setup: the sibling takeover is wired once');
-  const K9c = M9.load('src/server/browser-keeper.js', ksrc9.replace(line9, ''), 'no-siblings');
+  const K9c = M9.load('src/server/browser-keeper.js', editAnchor(ksrc9, line9, '', "src/server/browser-keeper.js"), 'no-siblings');
   const kc = K9c.create({ dataDir: path.join(ROOT, 'data9c'), homeDir: HOME, env: () => rtEnv, broadcast: () => { }, serverSetting: (k) => set9[k], serverNotice: null, getTelemetry: () => null, liveKeys: () => new Set([KEY_S1, KEY_S2]), runtime: F.createBrowserRuntime({ env: rtEnv }), facts: F.createBrowserFacts({ env: rtEnv }), log: { log() { }, warn() { }, error() { } }, now, install: false });
   const sc = kc.createProfile({ label: 'Shared9c' }, { owner: { kind: 'instance', id: null } });
   await kc.attach({ profileId: sc.id, browserKey: KEY_S1, sessionId: 'sess-91' }); await kc.attach({ profileId: sc.id, browserKey: KEY_S2, sessionId: 'sess-92' });
@@ -1665,7 +1665,7 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
   };
   const real9 = await mkPair(K, 'data9r');
   ok(!real9.ok && real9.code === 'held' && real9.s1 === 981 && real9.s2 === 981, '⑨ r7 the REAL keeper: with the per-relay reading false but the cross-relay fact live, the second view is `held` (981 keeps the browser)', JSON.stringify(real9));
-  const K9h = M9.load('src/server/browser-keeper.js', ksrc9.replace(aliveLine9, '    const alive = () => holderAlive; // MUTANT r7: the cross-relay fact ignored\n'), 'no-alive');
+  const K9h = M9.load('src/server/browser-keeper.js', editAnchor(ksrc9, aliveLine9, '    const alive = () => holderAlive; // MUTANT r7: the cross-relay fact ignored\n', "src/server/browser-keeper.js"), 'no-alive');
   const mut9 = await mkPair(K9h, 'data9h');
   ok(mut9.ok && mut9.s1 === 982 && mut9.s2 === 982, '⑨ CONTROL r7 (the cross-relay fact ignored, in a copy): the second view TAKES the browser from a live viewer (981 → 982 on both leases) — consulting the fact is the rule', JSON.stringify(mut9));
   // CONTROL r7 (the bridge half): a bridge copy reading the holder's liveness PER RELAY (the r6 bridge, no cross-relay fact for the keeper) ⇒ a second view takes a browser a LIVE viewer is driving
@@ -1715,7 +1715,7 @@ console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes ea
   // C1b the card's slots: the pre-fix card rebuilt its rows from the live ids alone — a row that goes shifts the rest up
   const slotLine = "  while (out.length && out[out.length - 1].gone) out.pop();\n";
   ok(tsrc.split(slotLine).length === 2, '⑩ C1b setup: the trailing-tombstone rule is present once');
-  const T1b = M10.load('src/browser-takeover.js', tsrc.replace(slotLine, '  for (let i = out.length - 1; i >= 0; i--) if (out[i].gone) out.splice(i, 1);\n'), 'no-slots');
+  const T1b = M10.load('src/browser-takeover.js', editAnchor(tsrc, slotLine, '  for (let i = out.length - 1; i >= 0; i--) if (out[i].gone) out.splice(i, 1);\n', "src/browser-takeover.js"), 'no-slots');
   const sb = T1b.confirmSlots(T1b.confirmSlots([], ['a', 'b', 'c']), ['b', 'c']).map((x) => x.id).join();
   ok(sb === 'b,c', '⑩ CONTROL C1b (rows rebuilt from the live ids, in a copy): the expired row\'s slot is taken by the next one (b moves up under the pointer) — keeping the slot is the rule', sb);
   // a keeper factory for the copies (the ephemeral browser: no attach needed — its answer runs under the spawn pairs)
@@ -1745,13 +1745,13 @@ console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes ea
   // C2 first write wins reverted: the pre-fix notePending (the second record overwrites, silently)
   const nvLine = "    const nv = T.pendingNoteVerdict(held, confirmation);\n";
   ok(ksrc.split(nvLine).length === 2, '⑩ C2 setup: notePending asks pendingNoteVerdict once');
-  const K2 = M10.load('src/server/browser-keeper.js', ksrc.replace(nvLine, "    const nv = { kind: 'new' }; // MUTANT: the pre-fix overwrite\n"), 'overwrite');
+  const K2 = M10.load('src/server/browser-keeper.js', editAnchor(ksrc, nvLine, "    const nv = { kind: 'new' }; // MUTANT: the pre-fix overwrite\n", "src/server/browser-keeper.js"), 'overwrite');
   const mutFW = await firstWriteLeg(K2, 'data10fwm');
   ok(mutFW === 'click', '⑩ CONTROL C2 (the pre-fix overwrite, in a copy): the forged record REPLACES the upload\'s card with "click" — first write wins is the rule', mutFW);
   // C3 the answer's gate removed: an id pending nowhere and a Confirm pressed on another card both reach upstream
   const gateLine = "    if (!gate.ok) { log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ''}: ${a.decision} ${a.id} refused before upstream — ${gate.code}`); return gate; }\n";
   ok(ksrc.split(gateLine).length === 2, '⑩ C3 setup: answerConfirmation refuses on the gate once');
-  const K3 = M10.load('src/server/browser-keeper.js', ksrc.replace(gateLine, ''), 'no-gate');
+  const K3 = M10.load('src/server/browser-keeper.js', editAnchor(ksrc, gateLine, '', "src/server/browser-keeper.js"), 'no-gate');
   const mutGate = await gateLeg(K3, 'data10gm');
   ok(mutGate.spawned.includes('confirm c_nothere') && mutGate.spawned.includes('confirm ' + upl.id), '⑩ CONTROL C3 (the answer\'s gate removed, in a copy): `confirm c_nothere` and the forged-card `confirm ' + upl.id + '` both reach upstream — the gate is the rule', JSON.stringify(mutGate));
   // C4 the Hand back echo removed: a press whose control said 1 hands back (and wakes 2)
@@ -1770,7 +1770,7 @@ console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes ea
   };
   const realEcho = await echoLeg(K, 'data10e');
   ok(realEcho.wakes === 2 && !realEcho.ok && realEcho.code === 'wake_count_changed' && realEcho.input === 'user', '⑩ the REAL keeper: a sibling with a refused click makes the count 2; a press that said 1 is refused, still driven', JSON.stringify(realEcho));
-  const K4 = M10.load('src/server/browser-keeper.js', ksrc.replace(echoLine, ''), 'no-echo');
+  const K4 = M10.load('src/server/browser-keeper.js', editAnchor(ksrc, echoLine, '', "src/server/browser-keeper.js"), 'no-echo');
   const mutEcho = await echoLeg(K4, 'data10em');
   ok(mutEcho.ok === true && mutEcho.input === 'agent', '⑩ CONTROL C4 (the echo removed, in a copy): the press whose control said 1 hands back — 2 billed turns under a button that said 1; the echo is the rule', JSON.stringify(mutEcho));
   // WIRING PINS: the bridge pairs the command with its result and hands the keeper's view (never the raw parse) to the viewers;
