@@ -218,29 +218,39 @@ function capProcs(all, max = 350) {
 // First call has no baseline → callers fall back to ps %CPU; the 5s panel
 // poll makes every later call a good sample. macOS/BSD: no /proc — ps only.
 const _procCpu = new Map(); // 'pid:starttime' → { ticks, at }
-function sampleProcCpu(rows) {
+/** PURE: one /proc/<pid>/stat line → { ticks: utime + stime, start: starttime } (null: not a stat line). The comm may hold
+ *  spaces and parens: the fields are read after the LAST ')': [0]=state(3) … utime(14)→[11], stime(15)→[12], starttime(22)→[19] */
+function statTicks(st) {
+  const close = String(st).lastIndexOf(')');
+  if (close < 0) return null;
+  const rest = String(st).slice(close + 2).split(' ');
+  return { ticks: (parseInt(rest[11], 10) || 0) + (parseInt(rest[12], 10) || 0), start: rest[19] };
+}
+// B-360d (lane bl-keys-misc, r1072 — measured on the test machine: the sample read /proc/<pid>/stat for EVERY row of the table,
+// synchronously, 32–35 ms at the owner's 2 400 processes, every 5 s while the System panel is open): THE READS GO OFF THE LOOP —
+// fs.promises in slices of SAMPLE_SLICE, each slice's answers parsed in one short turn. One instant for the whole table, as before.
+const SAMPLE_SLICE = 128;
+async function sampleProcCpu(rows) {
   if (process.platform !== 'linux') return false;
   const now = Date.now();
   const seen = new Set();
   let any = false;
-  for (const r of rows) {
-    try {
-      const st = fs.readFileSync('/proc/' + r.pid + '/stat', 'utf8');
-      const close = st.lastIndexOf(')'); // comm may contain spaces/parens
-      if (close < 0) continue;
-      const rest = st.slice(close + 2).split(' ');
-      // fields after comm: [0]=state(3) … utime(14)→[11], stime(15)→[12], starttime(22)→[19]
-      const ticks = (parseInt(rest[11], 10) || 0) + (parseInt(rest[12], 10) || 0);
-      const key = r.pid + ':' + rest[19];
+  for (let i = 0; i < rows.length; i += SAMPLE_SLICE) {
+    const slice = rows.slice(i, i + SAMPLE_SLICE);
+    const texts = await Promise.all(slice.map((r) => fs.promises.readFile('/proc/' + r.pid + '/stat', 'utf8').catch(() => null)));   // null: exited between ps and the sample
+    for (let k = 0; k < slice.length; k++) {
+      const t = texts[k] === null ? null : statTicks(texts[k]);
+      if (!t) continue;
+      const r = slice[k], key = r.pid + ':' + t.start;
       seen.add(key);
       const prev = _procCpu.get(key);
-      _procCpu.set(key, { ticks, at: now });
+      _procCpu.set(key, { ticks: t.ticks, at: now });
       if (prev && now > prev.at) {
         // % of ONE core (btop convention — multithreaded may exceed 100)
-        r.pcpuNow = Math.max(0, Math.round(((ticks - prev.ticks) / 100) / ((now - prev.at) / 1000) * 1000) / 10);
+        r.pcpuNow = Math.max(0, Math.round(((t.ticks - prev.ticks) / 100) / ((now - prev.at) / 1000) * 1000) / 10);
         any = true;
       }
-    } catch { /* exited between ps and the sample */ }
+    }
   }
   if (_procCpu.size > 2000) for (const k of _procCpu.keys()) if (!seen.has(k)) _procCpu.delete(k);
   return any;
@@ -253,7 +263,7 @@ function listProcs({ max = 350 } = {}) {
     // Same sizing story as topProcs above — measured 4,244,406 bytes for 2,404
     // processes here, which is half of the old 8 MiB: the cap is applied AFTER
     // parsing the whole table, so the WHOLE table has to fit.
-    runProgram('ps', ['axo', PS_COLUMNS], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }).then(({ err, stdout: out }) => {
+    runProgram('ps', ['axo', PS_COLUMNS], { timeout: 8000, maxBuffer: PS_MAX_BUFFER }).then(async ({ err, stdout: out }) => {
       if (err) {
         console.warn(`[sysinfo] listProcs: ps failed — process table will be EMPTY (${String(err.message || err).slice(0, 200)})`);
         return resolve({ procs: [], total: 0, sampled: false, error: String(err.message || err).slice(0, 200) });
@@ -264,7 +274,8 @@ function listProcs({ max = 350 } = {}) {
       // the flatlined lifetime %CPU, so a newly-hot low-RSS process on a
       // >max-proc machine never got sampled and never shipped; a full sweep
       // is ~7ms for ~1000 /proc stat reads)
-      const sampled = sampleProcCpu(all);
+      let sampled = false;
+      try { sampled = await sampleProcCpu(all); } catch { sampled = false; }   // B-360d: its reads off the loop (the whole table, before the cap); a sample that fails never holds the answer
       const procs = capProcs(all, max);
       resolve({ procs, total: all.length, sampled });
     });
@@ -461,4 +472,4 @@ function startWatch({ broadcast, dataDir, intervalMs = 45000, onSample = null } 
   return () => { clearInterval(t); clearInterval(lagT); clearInterval(persistT); persistHistory(); };
 }
 
-module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram };
+module.exports = { read, startWatch, loopLagNow, memInfo, memInfoAsync, history, persistHistory, listProcs, parsePsProcs, capProcs, PS_COLUMNS, cmdlineHead, cmdlineHeadOf, CMDLINE_HEAD, useStarter, runProgram, sampleProcCpu, statTicks, SAMPLE_SLICE };
