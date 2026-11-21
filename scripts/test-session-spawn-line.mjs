@@ -304,8 +304,8 @@ console.log('— ④ B-460d: what a conversation starts never outranks the hub �
   ok(!clean.length && cutWs.some((r) => /PRIORITY ROAD src\/ws-create\.js/.test(r)) && cutJob.some((r) => /PRIORITY ROAD src\/jobs\.js/.test(r)) && newRoad.some((r) => /UNLISTED session line src\/server\/new-road\.js/.test(r))
     && twoInBr.some((r) => /PRIORITY EXCEPTION src\/server\/boot-restore\.js: 2 session line/.test(r)) && cutVault.some((r) => /PRIORITY ROAD src\/server\/vault-run-door\.js/.test(r)),
     `THE SPAWN CENSUS: the ${C.PRIORITY_ROADS.length} places read clean; RED for the ws-create line with its priority cut, the job spawn without it, the vault run door's command without it (B-7f18), a NEW caller of the session line with no row, and a SECOND (local) line in the excepted file`, { clean, cutWs, cutJob, cutVault, newRoad, twoInBr });
-  ok(/session\._cpuNice = ocPty \? null : \(session\.host && session\._cpuNice !== undefined \? \(session\._cpuNice \|\| SPRI\.factOf\(\(readSessionMeta\(sockName\) \|\| \{\}\)\.cpuNice\)\) : r6Pri\.fact\);/.test(src) && /child\.once\('error', /.test(JSRC),
-    'an OpenCode serve terminal (its pty is the serve\'s, never this line) gets no fact — no row claims it lowered; a job wrapper whose exec fails late is an error event the engine catches, never the hub\'s crash');
+  ok(/session\._cpuNice = ocPty \? ocServeFact\(\) : \(session\.host && session\._cpuNice !== undefined \? \(session\._cpuNice \|\| SPRI\.factOf\(\(readSessionMeta\(sockName\) \|\| \{\}\)\.cpuNice\)\) : r6Pri\.fact\);/.test(src) && /child\.once\('error', /.test(JSRC),
+    'an OpenCode serve terminal (its pty is the serve\'s, never this line) states the SERVE\'s fact (B-460d\'s remainder: ocServeFact — the serve starts below the hub); a job wrapper whose exec fails late is an error event the engine catches, never the hub\'s crash');
   // the words a person reads (Session Properties' row, src/lib/cpu-priority-words.js)
   const { cpuPriorityWords } = await import(path.join(REPO, 'src/lib/cpu-priority-words.js'));
   const tt = (k, p) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p && p[n] !== undefined ? p[n] : m));
@@ -356,7 +356,7 @@ console.log('— ⑤ B-460d\'s remainder: a PAIRED machine\'s conversation start
     && cnt(DIAL, "pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd,") === 1
     && cnt(DIAL, "spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd } }") === 1
     && cnt(DIAL, "{ cmd: 'sh', args: ['-lc', shellCmd]") === 2 && cnt(DIAL, 'session._cpuNice = devPri.fact;') === 1 && cnt(DIAL, 'session._cpuNice = dialKeeperSid ? null : devPri.fact;') === 1 && DIAL.includes('hosts.connectedDevice(h.id)')
-    && WSC.includes('session._cpuNice = ocPty ? null : (session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact);'),
+    && WSC.includes('session._cpuNice = ocPty ? ocServeFact() : (session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact);'),
     'THE WIRING: both dial branches (the terminal\'s pty, the chat\'s pipe session) ask the device\'s verdict from a link already up and build their spec with the builder — no spec left without it; each fresh start keeps ITS machine\'s fact (ws-create keeps a paired start\'s own)');
   // THE LADDER ITSELF (the round's S2): src/spawn/dial.js's terminal and chat, driven with a stand-in device — Integration off, no
   // account, a bridge that answers a port — and the cfg file each writes read back (what the attach client hands the device)
@@ -423,6 +423,78 @@ console.log('— ⑤ B-460d\'s remainder: a PAIRED machine\'s conversation start
   ok(wr5 === 'Below its machine’s agent (nice +5), and everything it starts' && wl5 === 'Below the server (nice +5) — and everything it starts' && /its own machine/.test(wrr)
     && ZH.includes(JSON.stringify(KEY) + ': ') && JA.includes(JSON.stringify(KEY) + ': ') && SPROPS.includes('cpuPriorityWords(s.cpuNice, t, { remote: !!s.host })'),
     'Session Properties\' row for a paired machine\'s conversation: «Below its machine’s agent (nice +5), and everything it starts» (en, zh, ja); a local one keeps «Below the server…»; every not-lowered case keeps today\'s sentence', { wr5, wl5, wrr });
+}
+// ── B-460d's REMAINDER, ITS ssh HALF (lane login-request-card, 主开发 r1362 (3)): an ssh-ONLY machine's fresh start asks the SAME
+// verdict, fed by its agent's hello on a link ALREADY UP (memory only: never a dial, never a wait) and taken as a CHOICE among the
+// hub's own fixed list (src/nice-program.js listedNicePath — the machine's bytes never reach the line); no answer ⇒ the release's
+// start, at once. The REAL src/spawn/ssh.js terminal and chat (the device road and the keeper road), driven with stand-ins.
+console.log('\n── B-460d\'s remainder (ssh half): an ssh-only machine starts below ITS agent only on an answer from the hub\'s own list ──');
+{
+  const SPRI = require(path.join(REPO, 'src/server/spawn-priority.js')), NP = require(path.join(REPO, 'src/nice-program.js'));
+  const OFFS = (k) => (k === SPRI.SETTING ? false : undefined);
+  // (b) THE CHOICE, PURE: exact matches of the hub's own list only — a crafted line, a near miss, Windows ⇒ none
+  const crafted = ['/usr/bin/nice; touch /tmp/pwned', '/usr/bin/nice ', ' /usr/bin/nice', '/usr/bin/nice\n', '/usr/bin/../bin/nice', '/tmp/nice', '/usr/bin/nicer', 'nice', '', null, 42, { toString: () => '/usr/bin/nice' }];
+  const wrongC = crafted.filter((x) => NP.listedNicePath(x) !== null);
+  ok(NP.LISTED.every((p) => NP.listedNicePath(p) === p) && !wrongC.length && NP.listedNicePath('/usr/bin/nice', { platform: 'win32' }) === null,
+    'PURE listedNicePath: each of the hub\'s own listed paths is accepted (the hub\'s constant handed back); every crafted or near-miss answer, a non-string and a Windows machine are refused', wrongC);
+  NP._resetNice(); const here = NP.niceProgram(); NP._resetNice();
+  ok(here === null || NP.listedNicePath(here) === here, 'THE PARITY (the device\'s look ⇄ the hub\'s list, one module): what this machine\'s own look answers is a path the hub\'s list holds — the two never drift', here);
+  // (c) THE LOOK IS MEMORY ONLY: no link up ⇒ null at once, the dial road never asked
+  let dialled = 0;
+  const never = { connectedDevice: () => null, device: () => { dialled++; return new Promise(() => { }); } };
+  const t0 = process.hrtime.bigint(), hNone = SPRI.linkedHello(never, 'ssh-1'), dt = Number(process.hrtime.bigint() - t0) / 1e6;
+  const vNone = SPRI.sshPriorityFor({ hello: hNone }), vOff = SPRI.sshPriorityFor({ serverSetting: OFFS, hello: { nicePath: '/usr/bin/nice', platform: 'linux' } });
+  ok(hNone === null && dialled === 0 && typeof dt === 'number' && vNone.priority === null && vNone.fact.why === 'remote' && vOff.priority === null && vOff.fact.why === 'off',
+    'THE LOOK (no link up, a dial road that never answers): no hello, the dial road NEVER asked, the release\'s start with «set by its own machine»; the setting off ⇒ «off in Settings»', { hNone, dialled, vNone, vOff });
+  // THE LADDER ITSELF: the real ssh terminal / chat, a stand-in machine
+  const SL = require(path.join(REPO, 'src/spawn/ssh.js')), slDir = scratchDir('sline-ssh');
+  let sn = 0;
+  const driveS = async (mode, { hosts, data = {}, setting, agentd = true } = {}) => {
+    const sent = [], session = {}, id = `s6-${mode}-${++sn}`;
+    const hostsAll = new Proxy(hosts || {}, { get: (t, k) => (k in t ? t[k] : (k === 'sshArgs' ? () => ['-o', 'BatchMode=yes', 'u@ssh-host'] : k === 'sshEnv' ? () => ({}) : (typeof k === 'string' ? async () => null : undefined))) });
+    const ctx = { hosts: hostsAll, path, fs, os, AGENT_BIN_DIR: '/x/bin', EDITOR_CMD: '/x/code', PORT: 3999, ownerWriteRefusal: () => null, cliConfigPlanB64: () => '', serverSetting: setting || (() => undefined),
+      ensureDir: (d) => fs.mkdirSync(d, { recursive: true }), NODE_CMD: '/n/node',
+      agentdRemote: agentd ? { lockedWhy: () => null, agentdDir: slDir, attachBundle: '/a/attach.js', ensureAgentdOnHost: async () => true } : null };
+    const c = { ctx, execFileAsync: async () => ({ stdout: '' }), ws: { send: (m) => sent.push(m) }, data: { reqId: 1, ...data }, id, backend: 'claude', SP: {}, sessionMode: mode, session, cwd: '/home/u/p',
+      spawnAccount: null, integrationOn: false, spawnBrowserPre: '', needsClaudeLoginHelper: false, sweepOpts: () => ({}), h: { id: 'ssh-6', name: 's6' },
+      shq: (x) => `'${String(x).split("'").join(`'\\''`)}'`, rcmd: 'claude', rargs: [], spawnCmd: 'claude', spawnArgs: [], spawnEnvPairs: [], spawnCwd: '/home/u/p' };
+    const ans = await SL[mode](c);
+    let cfg = null; try { cfg = JSON.parse(fs.readFileSync(path.join(slDir, 'session-' + id + '.json'), 'utf8')); } catch { }
+    return { ans, cfg, session, sent };
+  };
+  const upAs = (nicePath, platform = 'linux') => ({ connectedDevice: () => ({ helloInfo: () => ({ nicePath, platform }) }) });
+  const LOW = '/usr/bin/nice';
+  const tLow = await driveS('terminal', { hosts: upAs(LOW) }), cLow = await driveS('chat', { hosts: upAs(LOW) }), kLow = await driveS('chat', { hosts: upAs(LOW), agentd: false });
+  const tLine = (x) => String((x.ans && x.ans.spawnArgs || []).slice(-1)[0] || '');
+  ok(/dtach -A \/tmp\/vs-\S+ -r winch \/usr\/bin\/nice -n 5 sh -lc /.test(tLine(tLow)) && tLow.session._cpuNice?.by === 5
+    && !!cLow.cfg && cLow.cfg.spawn && cLow.cfg.spawn.cmd === LOW && JSON.stringify(cLow.cfg.spawn.args.slice(0, 4)) === '["-n","5","sh","-lc"]' && cLow.session._cpuNice?.by === 5
+    && / -- \/usr\/bin\/nice -n 5 claude\b/.test(tLine(kLow)) && kLow.session._cpuNice?.by === 5 && !tLow.sent.length && !cLow.sent.length && !kLow.sent.length,
+    'THE LADDER (src/spawn/ssh.js, a machine whose agent names a LISTED nice on a link up): the terminal\'s dtach line, the device road\'s pipe-session spec and the keeper road\'s run each start with the hub\'s /usr/bin/nice -n 5; each start\'s fact {by: 5}', { t: tLine(tLow), c: cLow.cfg && cLow.cfg.spawn, k: tLine(kLow) });
+  const tBad = await driveS('terminal', { hosts: upAs('/usr/bin/nice; touch /tmp/pwned') }), cBad = await driveS('chat', { hosts: upAs('/tmp/nice') }), kNone = await driveS('chat', { hosts: never, agentd: false });
+  const tNone = await driveS('terminal', { hosts: never }), cWin = await driveS('chat', { hosts: upAs(LOW, 'win32') }), cOff = await driveS('chat', { hosts: upAs(LOW), setting: OFFS });
+  ok(/ -r winch sh -lc /.test(tLine(tBad)) && !tLine(tBad).includes('pwned') && tBad.session._cpuNice?.why === 'remote'
+    && !!cBad.cfg && cBad.cfg.spawn.cmd === 'sh' && JSON.stringify(Object.keys(cBad.cfg.spawn)) === '["cmd","args","cwd"]' && cBad.session._cpuNice?.why === 'remote'
+    && / -- claude\b/.test(tLine(kNone)) && !/nice/.test(tLine(kNone)) && / -r winch sh -lc /.test(tLine(tNone)) && dialled === 0
+    && cWin.cfg.spawn.cmd === 'sh' && cOff.cfg.spawn.cmd === 'sh' && cOff.session._cpuNice?.why === 'off',
+    'NO ANSWER FROM THE LIST ⇒ THE RELEASE\'S START, AT ONCE: a crafted answer (its bytes nowhere in the line), another path, no link up (the dial road never asked — a look that never returns cannot hold a create), a Windows machine — each the release\'s argv with «set by its own machine»; the setting off ⇒ «off»', { tBad: tLine(tBad), cBad: cBad.cfg && cBad.cfg.spawn, kNone: tLine(kNone), dialled });
+  // (d) A RESUME takes the same door: the same verdict, the same step, the same fact
+  const rLow = await driveS('chat', { hosts: { ...upAs(LOW), findKeeperFor: async () => null }, data: { resume: true, resumeId: 'r6-abc' } });
+  const attach = await driveS('chat', { hosts: upAs(LOW), data: { keeperSid: 'k-live-6', keeperKind: 'agentd' } });
+  ok(!!rLow.cfg && rLow.cfg.spawn && rLow.cfg.spawn.cmd === LOW && rLow.session._cpuNice?.by === 5 && !!attach.cfg && !attach.cfg.spawn && attach.session._cpuNice === null,
+    'A RESUME on that machine gets the same step (one door: the same verdict, the same fact {by: 5}); an ATTACH to a surviving process starts nothing and states no fact (B-460d (4): a running process is never re-prioritised)', { r: rLow.cfg && rLow.cfg.spawn, a: attach.cfg });
+  // REDs: the census over copies whose road lost the step; the verdict fed the machine's bytes
+  const C = await import(path.join(REPO, 'scripts/spawn-env-census.mjs'));
+  const FILES = C.filesOf(REPO), rdp = (patch) => (f) => (f in patch ? patch[f] : (() => { try { return read(f); } catch { return ''; } })());
+  const SSH = read('src/spawn/ssh.js'), OCS = read('src/opencode-serve.js');
+  const cutT = C.priorityJudge(rdp({ 'src/spawn/ssh.js': anchored(SSH, "-r winch ${priorityArgv(tPri.priority).map((x) => x + ' ').join('')}sh -lc", '-r winch sh -lc', 'the ssh terminal without the words') }), FILES);   // stale-pins: kept (the red control puts the release's line back)
+  const cutK = C.priorityJudge(rdp({ 'src/spawn/ssh.js': anchored(SSH, '[...priorityArgv(cPri && cPri.priority), rcmd, ...rargs.map(shq)]', '[rcmd, ...rargs.map(shq)]', 'the keeper run without the words') }), FILES);   // stale-pins: kept (the red control puts the release's line back)
+  const cutO = C.priorityJudge(rdp({ 'src/opencode-serve.js': anchored(OCS, 'child = spawnImpl(preArgv.length ? preArgv[0] : cmd, preArgv.length ? [...preArgv.slice(1), cmd, ...serveArgs] : serveArgs, {', 'child = spawnImpl(cmd, serveArgs, {', 'the serve without its prefix') }), FILES);
+  ok(!C.priorityJudge(rdp({}), FILES).length && cutT.some((r) => /PRIORITY ROAD src\/spawn\/ssh\.js/.test(r)) && cutK.some((r) => /PRIORITY ROAD src\/spawn\/ssh\.js/.test(r)) && cutO.some((r) => /PRIORITY ROAD src\/opencode-serve\.js/.test(r)),
+    'THE SPAWN CENSUS holds the new places: RED for an ssh terminal or keeper run without the words, and for a serve spawned without its prefix', { cutT, cutK, cutO });
+  const MS = mutantCopies('session-spawn-line-ssh', REPO), SPSRC = read('src/server/spawn-priority.js');
+  const RAW = MS.load('src/server/spawn-priority.js', anchored(SPSRC, '  const p = NP.listedNicePath(hello && hello.nicePath, { platform: hello && hello.platform });', '  const p = hello && typeof hello.nicePath === \'string\' ? hello.nicePath : null;', 'ssh verdict fed the raw answer'), 'ssh-raw-answer');
+  const rawV = RAW.sshPriorityFor({ hello: { nicePath: '/tmp/evil-nice', platform: 'linux' } });
+  ok(!!rawV.priority && rawV.priority.nice === '/tmp/evil-nice', 'RED CONTROL: a verdict fed the machine\'s own bytes (no choice among the list, in a copy) puts THAT machine\'s string in front of the line — the legs above are red on it', rawV);
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

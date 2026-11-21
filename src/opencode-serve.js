@@ -848,6 +848,12 @@ function createServeLocator({
   telemetry = null, now = Date.now, guardSampleMs = GUARD_SAMPLE_MS,
   guardCpuPct = GUARD_CPU_PCT, guardCpuSustainMs = GUARD_CPU_SUSTAIN_MS, guardLimits = null, // guardLimits: a keeper-limits-shaped override (the memory ceiling is never a loose knob — src/runaway-guard.js compares it)
   runawayCooldownMs = RUNAWAY_COOLDOWN_MS,
+  // B-460d's remainder (lane login-request-card, 主开发 r1362): THE SERVE STARTS BELOW THE HUB — `startPrefix()` → { argv, fact }:
+  // the hub's ONE start verdict (src/server/spawn-priority.js priorityFor, the person's own `agents.lowerCpuPriority`), composed
+  // by src/spawn/line.js priorityArgv, read at EACH start; its argv goes IN FRONT of the spawn (the start-time step: every
+  // terminal and every turn the serve runs inherits it — never a renice after the fork). The device agent passes NONE: its
+  // serve's argv is the release's, byte for byte.
+  startPrefix = null,
 } = {}) {
   if (!dataDir) throw new Error('createServeLocator: dataDir is required (the record lives at data/opencode-serve.json)');
   const recordPath = path.join(dataDir, 'opencode-serve.json');
@@ -942,6 +948,7 @@ function createServeLocator({
     state.client = mkClient(port);
     if (birth) { state.start = birth.start || null; state.bootId = birth.bootId || null; }
     state.port = port; state.pid = pid; state.source = source; state.startedAt = Date.now(); state.lastError = null;
+    state.cpuNice = source === 'spawned' ? (state.startFact || null) : null;   // B-460d's remainder: a serve ADOPTED from another life claims nothing
     guard.prev = null; guard.hotSince = 0; armGuard();
     notify();
     await probeCaps(state.client);
@@ -1293,7 +1300,10 @@ function createServeLocator({
     if (cancelled(epoch)) return null;   // never START a third-party daemon for a service that was turned off mid-ladder
     let child;
     try {
-      child = spawnImpl(cmd, ['serve', '--port', String(port), '--hostname', '127.0.0.1', '--log-level', 'WARN'], { cwd: state.cwd || cwd || os.homedir(), env: env(), stdio: 'ignore', detached: true, windowsHide: true }); // lane win-run-hide-console: a detached child on Windows = its own console window
+      let pre = null; try { pre = typeof startPrefix === 'function' ? startPrefix() : null; } catch { pre = null; }   // a verdict that cannot be read starts as the release
+      const preArgv = pre && Array.isArray(pre.argv) ? pre.argv : [], serveArgs = ['serve', '--port', String(port), '--hostname', '127.0.0.1', '--log-level', 'WARN'];
+      state.startFact = pre && pre.fact ? pre.fact : null;   // THIS start's fact — kept only once the serve it started is ready (adopt 'spawned')
+      child = spawnImpl(preArgv.length ? preArgv[0] : cmd, preArgv.length ? [...preArgv.slice(1), cmd, ...serveArgs] : serveArgs, { cwd: state.cwd || cwd || os.homedir(), env: env(), stdio: 'ignore', detached: true, windowsHide: true }); // lane win-run-hide-console: a detached child on Windows = its own console window
     } catch (e) { state.lastError = `spawn failed: ${e.message}`; state.crashes++; if (state.crashes >= maxCrashes) { state.parked = true; state.parkedKind = 'crash'; state.retryAfter = 0; } notify(); return null; }
     if (typeof child.unref === 'function') child.unref();
     state.child = child; state.pid = child.pid || null; state.startedAt = Date.now();
@@ -1451,7 +1461,7 @@ function createServeLocator({
     notify();
   }
   function snapshot() {
-    return { port: state.port, pid: state.pid, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, memBytes: state.memBytes, memMetric: state.memMetric, rssBytes: state.rssBytes /* deprecated — a fact, never judged */, sampledAt: state.sampledAt, recordPath, ready: !!state.client };
+    return { port: state.port, pid: state.pid, cpuNice: state.pid ? (state.cpuNice || null) : null, startedAt: state.startedAt, source: state.source, crashes: state.crashes, parked: state.parked, parkedKind: state.parkedKind, runawayUntil: state.runawayUntil, lastError: state.lastError, caps: state.caps ? { ...state.caps } : null, version: state.version, capsProbed: state.capsProbed, installed: !!commandOf(), autostart: autostartOn(), envForced: serveEnvOverride(), stopped: !!state.stopping, cwd: state.cwd, cwdIsolated: state.cwdIsolated, cpuPct: state.cpuPct, memBytes: state.memBytes, memMetric: state.memMetric, rssBytes: state.rssBytes /* deprecated — a fact, never judged */, sampledAt: state.sampledAt, recordPath, ready: !!state.client };
   }
   if (stopOnExit) process.once('exit', () => { try { stop(); } catch { } });
   return { client, ensure, start, stop, invalidate, state: snapshot, command: commandOf, recordPath, _sampleGuard: sampleGuard };

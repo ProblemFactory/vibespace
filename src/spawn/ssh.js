@@ -15,6 +15,8 @@
  */
 const { REMOTE_PRELUDE, buildRemoteExec, buildRemoteShellPrelude } = require('../remote-shell');
 const { sweepWriters } = require('../writer-sweep');
+const SPRI = require('../server/spawn-priority.js'); // B-460d's remainder (its ssh half): the ONE start verdict, fed by the machine's own answer
+const { priorityArgv, withPriority } = require('./line.js'); // …and the ONE composer (PURE): the line from the hub's own constants
 
 function sshLadder(c) {
   const { ctx, execFileAsync, ws, data, id, backend, sessionMode, session, cwd, spawnAccount, integrationOn,
@@ -22,6 +24,9 @@ function sshLadder(c) {
   const { hosts, path, fs, os, AGENT_BIN_DIR, EDITOR_CMD, PORT, ownerWriteRefusal, rootFactsNow, cliConfigPlanB64, serverSetting, ensureDir, NODE_CMD, agentdRemote } = ctx;
   let { spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd } = c;
   const answer = () => ({ spawnCmd, spawnArgs, spawnEnvPairs, spawnCwd });
+  // B-460d's remainder (主开发 r1362 (3)): a FRESH start on this machine (new or resumed — one door) starts below ITS agent when the
+  // machine's agent, on a link already up, names a nice program the hub's own list holds; else the release's start, at once
+  const sshPri = () => SPRI.sshPriorityFor({ serverSetting, hello: SPRI.linkedHello(hosts, h && h.id) });
           // Remote agent enablement (P3): a remote session can't reach the local
           // API at 127.0.0.1:<PORT>, and the vibespace-status/-task tools don't
           // exist on the remote box. So for any remote session we (1) open an
@@ -237,7 +242,9 @@ function sshLadder(c) {
               parts: ['TERM=xterm-256color', 'COLORTERM=truecolor', ...ra.envPairs.map(shq), ...spawnEnvPairs.map(shq), rcmdT, ...spawnArgs.map(shq)],
             });
             spawnCmd = 'ssh';
-            spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch sh -lc ${shq(inner)}`];
+            const tPri = sshPri();   // (dtach -A attaches to a live one: the prefix only ever starts a NEW shell)
+            spawnArgs = [...hosts.sshArgs(h, { tty: true, reverse: ra.reverse }), '--', `dtach -A /tmp/vs-${id} -r winch ${priorityArgv(tPri.priority).map((x) => x + ' ').join('')}sh -lc ${shq(inner)}`];
+            session._cpuNice = tPri.fact;
             spawnEnvPairs = [];
             spawnCwd = os.homedir(); // remote cwd rides inside the ssh command
             session.host = h.id;
@@ -321,9 +328,10 @@ function sshLadder(c) {
             // daemon died) or drains/synthesizes an exit — never spawns.
             const keeperSid = data.keeperSid && /^[\w-]+$/.test(data.keeperSid) ? data.keeperSid : null;
             session.keeperSid = keeperSid || id;
+            const cPri = keeperSid ? null : sshPri();   // an attach to a surviving process starts nothing: no step, no fact (B-460d (4))
             const runTail = keeperSid
               ? ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(keeperSid)} __VS_OFFSET__`
-              : ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- ` + [rcmd, ...rargs.map(shq)].join(' ');
+              : ` node "$HOME/.vibespace/bin/vibespace-remote-keeper" run ${shq(id)} __VS_OFFSET__ -- ` + [...priorityArgv(cPri && cPri.priority), rcmd, ...rargs.map(shq)].join(' ');
             // ── The session runs as a persistent PIPE SESSION inside the
             // standing remote device daemon; the local chat-wrapper spawns the
             // agentd-attach bridge (SAME contract as `keeper run`: raw bytes +
@@ -365,7 +373,7 @@ function sshLadder(c) {
                   version: require('../../package.json').version,
                   // adopt (agentdAttach) sends NO spawn spec — the daemon
                   // attach-pipe-sessions the surviving claude from offset 0
-                  ...(agentdAttach ? {} : { spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() } }),
+                  ...(agentdAttach ? {} : { spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, cPri && cPri.priority), cwd: os.homedir() } }),
                 };
                 ensureDir(agentdRemote.agentdDir);
                 const cfgFile = path.join(agentdRemote.agentdDir, 'session-' + id + '.json');
@@ -377,6 +385,7 @@ function sshLadder(c) {
                 session.host = h.id;
                 session.hostName = h.name;
                 session._agentdSession = true;
+                session._cpuNice = agentdAttach ? null : (cPri ? cPri.fact : null);
                 session._agentdCfgFile = cfgFile;
               } catch (e) {
                 if (e && e.code === 'vault_locked') { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, sessionId: id, code: 'vault_locked', message: e.message })); return; }   // r2: locked mid-spawn — by name, never the keeper road
@@ -396,6 +405,7 @@ function sshLadder(c) {
               spawnCwd = os.homedir();
               session.host = h.id;
               session.hostName = h.name;
+              session._cpuNice = keeperSid ? null : (cPri ? cPri.fact : null);   // B-460d's remainder: the keeper road's fresh start, as the device road's
             }
     return answer();
   }

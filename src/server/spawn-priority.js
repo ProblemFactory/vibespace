@@ -71,6 +71,26 @@ function devicePriorityFor({ serverSetting = () => undefined, hello = null, mach
   return priorityFor({ local: false });
 }
 
+/** B-460d's remainder, its ssh half (lane login-request-card, 主开发 r1362 (3)) — AN ssh-ONLY MACHINE's START: the SAME verdict, fed
+ *  by what THAT machine says through a round trip that already exists — its agent's hello on a link that is UP now (linkedHello:
+ *  memory only — never a dial, never a wait, never a timer: no link = no answer) — and taken only as a CHOICE among the hub's own
+ *  fixed list (src/nice-program.js listedNicePath: an exact match ⇒ the HUB's constant; the machine's bytes never reach a line).
+ *  No answer, another answer, Windows ⇒ the release's start and the fact «set by its own machine». The setting off ⇒ off. */
+function sshPriorityFor({ serverSetting = () => undefined, hello = null } = {}) {
+  if (!settingOn(serverSetting)) return priorityFor({ serverSetting });
+  const p = NP.listedNicePath(hello && hello.nicePath, { platform: hello && hello.platform });
+  if (p) { const pri = priorityFor({ serverSetting, local: true, nice: () => p }); if (pri.priority) return pri; }
+  return priorityFor({ local: false });
+}
+/** the hello of a machine's agent on a link that is UP NOW — memory only (hosts.connectedDevice), or null; never dials */
+function linkedHello(hosts, id) {
+  try {
+    const up = hosts && typeof hosts.connectedDevice === 'function' ? hosts.connectedDevice(id) : null;
+    if (!up) return null;
+    return typeof up.helloInfo === 'function' ? up.helloInfo() : (up.status && up.status().info) || null;
+  } catch { return null; }
+}
+
 /** PURE: a stored fact (a session's meta `cpuNice`) → the fact, or null when it is not one */
 function factOf(x) {
   if (!x || typeof x !== 'object' || Array.isArray(x) || !Number.isInteger(x.by) || x.by < 0 || x.by > 19) return null;
@@ -81,4 +101,4 @@ function factOf(x) {
 /** a suite's seam: forget the one look and the said line */
 function _reset() { NP._resetNice(); saidMissing = false; saidNoPath.clear(); }
 
-module.exports = { priorityFor, devicePriorityFor, nicePathOf, niceProgram, factOf, SETTING, NICE_DIRS, FACT_WHY, _reset };
+module.exports = { priorityFor, devicePriorityFor, sshPriorityFor, linkedHello, nicePathOf, niceProgram, factOf, SETTING, NICE_DIRS, FACT_WHY, _reset };

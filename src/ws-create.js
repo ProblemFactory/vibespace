@@ -32,6 +32,9 @@ const { lockCaptureWanted, captureLockId, captureForkProof, armLockCapture, adop
 const { readPpid } = require('./cli-identity');
 const { resumeSpawnPick, applyOriginHint, continuityLogLine } = require('./resume-continuity');
 const { openOpencodePty } = require('./server/opencode-pty-bridge'); // S9 remainder (c): a serve-owned pty as a normal terminal session
+/** B-460d's remainder: a serve terminal runs at the SERVE's priority — the fact its start got (src/opencode-serve.js snapshot cpuNice:
+ *  a serve this process started below the hub), or null (a serve adopted from another life claims nothing) */
+const ocServeFact = () => { try { return SPRI.factOf(require('./opencode-serve').facts()?.locator?.state?.()?.cpuNice); } catch { return null; } };
 const browserProfiles = require('./browser-profiles'); // agent-browser P0: the browser key's continuity ladder + the env composition (PURE)
 const browserKeyMod = require('./server/browser-key'); // B-f7ab: THE mint + THE key's session fields (the spawn and a live session's first use)
 
@@ -1747,7 +1750,7 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
             // carries its path; a file that cannot be written sets the person's file aside as before (only what this start adds)
             if (sessionSpec.ownFileMerged) spawnArgs = await ownSettingsOnDisk(spawnArgs, id, sessionSpec);
             const r6Pri = SPRI.priorityFor({ serverSetting, local: !session.host });
-            session._cpuNice = ocPty ? null : (session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact);   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact; a paired machine's start brings ITS fact (src/spawn/dial.js, B-460d's remainder); an ADOPTED one keeps what its meta holds and claims nothing new (r705 (3))
+            session._cpuNice = ocPty ? ocServeFact() : (session.host && session._cpuNice !== undefined ? (session._cpuNice || SPRI.factOf((readSessionMeta(sockName) || {}).cpuNice)) : r6Pri.fact);   // an OpenCode serve terminal runs in the serve's pty, not this line: no fact; a paired machine's start brings ITS fact (src/spawn/dial.js, B-460d's remainder); an ADOPTED one keeps what its meta holds and claims nothing new (r705 (3))
             const r6Line = sessionSpawnLine({ node: NODE_CMD, wrapper, bufFile, metaFile: metaFileW, env: r6Base, pairs: r6Pairs,
               exe: spawnCmd, args: spawnArgs, priority: r6Pri.priority,
             });

@@ -194,7 +194,7 @@ const NAMED = [
   ['the logon task one-shot (psOnce)', ENTRY, "execFile('powershell.exe', psOnceArgs(script)", 1],
   ['the console code-page probe (XS.codePageAsker)', 'src/exit-shell.js', 'execFile(p.file, p.args, {', 1],
   ['`claude --version` (machine-probes)', 'src/machine-probes.js', 'execFile(cmd, args, {', 1],
-  ['the OpenCode serve', 'src/opencode-serve.js', "spawnImpl(cmd, ['serve'", 1],
+  ['the OpenCode serve (B-460d: its prefix in front when the hub hands one — the device hands none)', 'src/opencode-serve.js', 'spawnImpl(preArgv.length ? preArgv[0] : cmd,', 1],
   ['the OpenCode serve cwd\'s git init', 'src/opencode-serve.js', "execImpl('git', ['init'", 1],
   ['codex app-server', 'src/codex-thread-read.js', '_cfg.extraArgs)], { stdio:', 1],   // (never the quoted subcommand here: §50b reads a suite's spawn lines)
 ];

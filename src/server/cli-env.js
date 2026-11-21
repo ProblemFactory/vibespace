@@ -240,6 +240,13 @@ const opencodeServe = opencodeServeModule.install({
   log: console,
   stopOnExit: true,
   autostart: opencodeServeAutostart,
+  // B-460d's remainder (主开发 r1362): the serve STARTS below the hub — the ONE start verdict, read at each start where every other
+  // start reads it (the person's `agents.lowerCpuPriority`, read as server.js serverSetting reads a setting), composed by the ONE
+  // composer (src/spawn/line.js priorityArgv). Unproven on the real program: the box and the test machines hold no `opencode`
+  startPrefix: () => {
+    const pri = require('./spawn-priority.js').priorityFor({ serverSetting: (k) => { try { const p = require('../routes/persistence').router; return p.readSettings ? p.readSettings()[k] : undefined; } catch { return undefined; } } });
+    return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };
+  },
   telemetry: (ev) => { try { getTelemetry()?.record({ kind: 'event', ...ev }); } catch { } },
   // ORPHANED SERVE TERMINALS (S9 remainder round 4). The serve outlives this
   // process: on a SIGKILL/OOM restart — and on ANY restart while the serve was

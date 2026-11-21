@@ -62,7 +62,7 @@ const TABLE = [
   { file: 'src/spawn/dial.js', has: "await dm.runCmd('sh', ['-c', `chmod 600", verdict: 'refused', how: DOOR },
   { file: 'src/spawn/dial.js', has: "pty: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd,", verdict: 'refused', how: 'a session spawn spec ⇒ openSession / openPipeSession ⇒ the door (B-460d\'s remainder: `<its nice> -n 5` goes in front only for an agent that names its nice program — never a Windows one, so the door still sees `sh`)' },
   { file: 'src/spawn/dial.js', has: "spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority), cwd } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door (B-460d\'s remainder: the nice prefix never reaches a Windows agent)' },
-  { file: 'src/spawn/ssh.js', has: "spawn: { cmd: 'sh', args: ['-lc', shellCmd], cwd: os.homedir() } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door' },
+  { file: 'src/spawn/ssh.js', has: "spawn: { ...withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, cPri && cPri.priority), cwd: os.homedir() } }", verdict: 'refused', how: 'a session spawn spec ⇒ openPipeSession ⇒ the door (B-460d\'s remainder: a Windows machine gives no answer from the list, so its spec keeps `sh` first — the door keys on it)' },
   { file: 'src/ws-handler.js', has: "await dm.runCmd('sh', ['-c', `rm -f", verdict: 'refused', how: DOOR },
   // B-77ed's cure: the start's CLAUDE_CONFIG_DIR as the CLI's own login shell sets it — a local `sh -lc` of the machine the
   // probe runs on (no hub→device road). B-77ed's remainder: on Windows only when the agent's LAST HELLO said `sh` (the very list

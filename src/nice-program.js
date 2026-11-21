@@ -21,7 +21,18 @@ function niceProgram({ dirs = NICE_DIRS, access = (p) => fs.accessSync(p, fs.con
   return niceAt;
 }
 
+/** B-460d's remainder (主开发 r1362 (b)) — A MACHINE'S ANSWER IS A CHOICE, NEVER A LINE: what another machine says its nice program is
+ *  (its agent's hello `nicePath`, the look above run THERE) → the HUB's OWN constant from this fixed list when it matches one EXACTLY,
+ *  else null (a crafted line, another path, nothing). The spawn line is composed from the returned constant only — the machine's
+ *  bytes never reach it. Windows: none. PURE. */
+const LISTED = Object.freeze(NICE_DIRS.map((d) => path.posix.join(d, 'nice')));
+function listedNicePath(answer, { platform = null } = {}) {
+  if (platform === 'win32' || typeof answer !== 'string') return null;
+  const i = LISTED.indexOf(answer);
+  return i < 0 ? null : LISTED[i];
+}
+
 /** a suite's seam: forget the one look */
 function _resetNice() { niceAt = undefined; }
 
-module.exports = { niceProgram, NICE_DIRS, _resetNice };
+module.exports = { niceProgram, NICE_DIRS, LISTED, listedNicePath, _resetNice };

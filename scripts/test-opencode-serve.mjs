@@ -18,6 +18,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { anchored } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const MOCK = path.join(REPO, 'scripts/dev/mock-opencode-serve.mjs');
@@ -489,6 +490,65 @@ console.log('— ⑦ wiring pins');
   ok('harnessAvailability reports a store reason only when the store actually FAILED (parked/runaway) — a reused healthy serve is never called "not running", and neither is a service that is simply off', /if \(!s \|\| !s\.parked\) return null;/.test(ce9) && !/autostart === false/.test(ce9)
     && sfr9({ store: { serveState: () => ({ parked: true }), unavailableReason: () => 'parked after 5 crashes' } }) === 'parked after 5 crashes'
     && sfr9({ store: { serveState: () => ({ ready: false, autostart: false }), unavailableReason: () => 'off' } }) === null);
+}
+// ── B-460d's REMAINDER, THE OpenCode SERVE (lane login-request-card, 主开发 r1362 (2)): the serve STARTS below the hub — the ONE
+// start verdict, composed by the ONE composer, in front of its spawn — so every terminal and every turn it runs inherits it. A
+// STAND-IN `opencode` (this suite's mock serve behind a script): UNPROVEN ON THE REAL PROGRAM (none on the box or the test machines).
+console.log('— B-460d: the OpenCode serve starts below the hub (a stand-in program — unproven on the real program)');
+{
+  const SPRI = require(path.join(REPO, 'src/server/spawn-priority.js')), LINE = require(path.join(REPO, 'src/spawn/line.js'));
+  const pri = SPRI.priorityFor({});
+  ok('SETUP: this machine has a nice program (the hub\'s own look) — the step can be read back', !!pri.priority, pri);
+  const dirN = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), standin = path.join(dirN, 'opencode');
+  fs.writeFileSync(standin, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(MOCK)} "$@"\n`, { mode: 0o755 });
+  const spawned = [];
+  const spawnReal = (cmd, args, opts) => { spawned.push({ cmd, args }); const ch = spawn(cmd, args, { ...opts, stdio: 'ignore', detached: false }); children.add(ch.pid); return ch; };
+  const prefix = () => ({ argv: LINE.priorityArgv(pri.priority), fact: pri.fact });
+  const locN = serve.createServeLocator({ dataDir: dirN, command: standin, log: null, spawnImpl: spawnReal, env: () => ({ ...process.env, MOCK_OPENCODE_NO_FORK: '1' }), bootTimeoutMs: 15000, startPrefix: prefix });
+  const cN = await locN.ensure();
+  const pidN = locN.state().pid, want = Math.min(19, os.getPriority() + 5);
+  const niceOf = (pid) => { try { return Number(fs.readFileSync(`/proc/${pid}/stat`, 'utf8').split(') ')[1].split(' ')[16]); } catch { return null; } };
+  const gotNice = niceOf(pidN), factN = locN.state().cpuNice;
+  ok('THE SERVE STARTS BELOW THE HUB: its spawn is `<the hub\'s nice> -n 5 <opencode> serve …` and the serve\'s own process runs at the hub\'s niceness + 5 (read back from /proc — everything it starts inherits it); a serve this process started states {by: 5}',
+    !!cN && spawned.length === 1 && spawned[0].cmd === (pri.priority && pri.priority.nice) && JSON.stringify(spawned[0].args.slice(0, 4)) === JSON.stringify(['-n', '5', standin, 'serve']) && gotNice === want && factN && factN.by === 5,
+    { spawned, gotNice, want, factN });
+  locN.stop();
+  // the person's setting governs it: off ⇒ the release's argv and the fact «off»
+  const dirF = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), captF = [];
+  const off = () => { const p = SPRI.priorityFor({ serverSetting: (k) => (k === SPRI.SETTING ? false : undefined) }); return { argv: LINE.priorityArgv(p.priority), fact: p.fact }; };
+  const locF = serve.createServeLocator({ dataDir: dirF, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captF.push({ cmd, args }); throw new Error('captured'); }, startPrefix: off });
+  await locF.ensure().catch(() => null);
+  // THE DEVICE passes NONE (src/agentd/agentd.js): the release's argv, byte for byte; nothing claimed
+  const dirD = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), captD = [];
+  const locD = serve.createServeLocator({ dataDir: dirD, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captD.push({ cmd, args }); throw new Error('captured'); } });
+  await locD.ensure().catch(() => null);
+  const REL = (a) => JSON.stringify((a || []).map((x, i) => (i === 2 ? '<port>' : x)));
+  const AGD = read('src/agentd/agentd.js'), i0 = AGD.indexOf('ocFacts = oc.install({'), block = i0 < 0 ? '' : AGD.slice(i0, AGD.indexOf('});', i0));
+  ok('THE DEVICE\'S CALL (no prefix — its install hands none): the spawn is the release\'s, byte for byte (`opencode serve --port <p> --hostname 127.0.0.1 --log-level WARN`) and nothing is claimed; the setting OFF on the hub gives the same argv',
+    captD.length >= 1 && captD[0].cmd === 'opencode' && REL(captD[0].args) === JSON.stringify(['serve', '--port', '<port>', '--hostname', '127.0.0.1', '--log-level', 'WARN']) && locD.state().cpuNice === null
+      && !!block && !block.includes('startPrefix') && captF.length >= 1 && captF[0].cmd === 'opencode' && REL(captF[0].args) === REL(captD[0].args),
+    { captD, captF, block: block.slice(0, 80) });
+  // a serve ADOPTED from another life (the record road) claims nothing — it keeps whatever it started with
+  const dirR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-')), mockR = await startMockServe();
+  fs.writeFileSync(path.join(dirR, 'opencode-serve.json'), JSON.stringify({ port: mockR.port, pid: process.pid, startedAt: Date.now() }));
+  const locR = serve.createServeLocator({ dataDir: dirR, command: '/usr/bin/opencode', log: null, spawnImpl: () => { throw new Error('must not spawn'); }, startPrefix: prefix });
+  const cR = await locR.client({ budgetMs: 3000 });
+  ok('a serve REUSED from the record (another life started it) claims nothing — never re-prioritised (B-460d (4))', !!cR && locR.state().source === 'reused' && locR.state().cpuNice === null, locR.state().cpuNice);
+  locR.stop(); await mockR.close();
+  // the terminal's fact: a serve terminal states the serve's fact (ws-create); the hub hands the ONE verdict (cli-env)
+  const WSC = read('src/ws-create.js'), CLI = read('src/server/cli-env.js');
+  ok('THE WIRING: a serve terminal\'s fact is the serve\'s (ws-create ocServeFact over the locator\'s state — no longer null); the hub hands the serve the ONE verdict read at each start, composed by the ONE composer (cli-env)',
+    WSC.includes('session._cpuNice = ocPty ? ocServeFact() : (') && WSC.includes("SPRI.factOf(require('./opencode-serve').facts()?.locator?.state?.()?.cpuNice)")
+      && CLI.includes("const pri = require('./spawn-priority.js').priorityFor({ serverSetting:") && CLI.includes("return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };"));
+  // RED: a copy whose spawn drops the prefix (the release's spawn) — the serve starts at the hub's own priority
+  const { mutantCopies } = await import(path.join(REPO, 'scripts/mutant-copy.mjs'));
+  const MO = mutantCopies('opencode-serve-nice', REPO), OSRC = read('src/opencode-serve.js');
+  const NEEDLE = 'child = spawnImpl(preArgv.length ? preArgv[0] : cmd, preArgv.length ? [...preArgv.slice(1), cmd, ...serveArgs] : serveArgs, {';
+  const SM = MO.load('src/opencode-serve.js', anchored(OSRC, NEEDLE, 'child = spawnImpl(cmd, serveArgs, {', 'the serve\'s prefix dropped'), 'serve-prefix-dropped');
+  const captM = [], dirM = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-oc-nice-'));
+  if (SM) { const locM = SM.createServeLocator({ dataDir: dirM, command: 'opencode', log: null, spawnImpl: (cmd, args) => { captM.push({ cmd, args }); throw new Error('captured'); }, startPrefix: prefix }); await locM.ensure().catch(() => null); }
+  ok('RED CONTROL: a copy whose spawn drops the prefix starts the serve at the hub\'s own priority — the leg above is red on it', !!SM && captM.length >= 1 && captM[0].cmd === 'opencode', captM);
+  for (const x of [() => fs.rmSync(dirN, { recursive: true, force: true }), () => fs.rmSync(dirF, { recursive: true, force: true }), () => fs.rmSync(dirD, { recursive: true, force: true }), () => fs.rmSync(dirR, { recursive: true, force: true }), () => fs.rmSync(dirM, { recursive: true, force: true })]) { try { x(); } catch { } }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

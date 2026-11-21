@@ -406,6 +406,15 @@ export const PRIORITY_ROADS = Object.freeze([
   ['src/spawn/dial.js', 'B-460d\'s remainder: a PAIRED machine\'s start (the chat\'s pipe session, the terminal\'s pty) asks the SAME verdict with ITS machine\'s nice program, from its agent\'s hello', 'SPRI.devicePriorityFor({ serverSetting, hello: await deviceHello(), machine: h })', 2],
   ['src/spawn/dial.js', '…and both specs are built with the SAME words in front (src/spawn/line.js withPriority)', "withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, devPri.priority)", 2],
   ['src/agentd/agentd.js', '…the machine\'s agent says its own nice program in its hello (the shared look the hub\'s starts use)', 'nicePath: niceProgram(),', 1],
+  // B-460d's remainder, its ssh half (lane login-request-card, 主开发 r1362 (3)): an ssh-ONLY machine's fresh start asks the SAME verdict,
+  // fed by its agent's hello on a link already up and taken as a CHOICE among the hub's own list (src/nice-program.js listedNicePath)
+  ['src/spawn/ssh.js', 'B-460d\'s remainder: an ssh-only machine\'s start asks the SAME verdict from a link already up (memory only)', 'SPRI.sshPriorityFor({ serverSetting, hello: SPRI.linkedHello(hosts, h && h.id) })', 1],
+  ['src/spawn/ssh.js', '…the terminal\'s dtach line takes the words in front of its shell (composed from the hub\'s own constants)', "-r winch ${priorityArgv(tPri.priority).map((x) => x + ' ').join('')}sh -lc", 1],
+  ['src/spawn/ssh.js', '…the keeper road\'s fresh run takes them in front of the command', '[...priorityArgv(cPri && cPri.priority), rcmd, ...rargs.map(shq)]', 1],
+  ['src/spawn/ssh.js', '…and the device road\'s pipe-session spec is built with the SAME builder', "withPriority({ cmd: 'sh', args: ['-lc', shellCmd] }, cPri && cPri.priority)", 1],
+  // B-460d's remainder, the OpenCode serve (主开发 r1362 (2)): the serve STARTS below the hub — its terminals and its turns inherit it
+  ['src/opencode-serve.js', 'B-460d\'s remainder: the OpenCode serve\'s spawn takes the caller\'s prefix in front (the device passes none)', 'child = spawnImpl(preArgv.length ? preArgv[0] : cmd, preArgv.length ? [...preArgv.slice(1), cmd, ...serveArgs] : serveArgs, {', 1],
+  ['src/server/cli-env.js', '…the hub hands it the ONE verdict, composed by the ONE composer, read at each start', "return { argv: require('../spawn/line.js').priorityArgv(pri.priority), fact: pri.fact };", 1],
 ]);
 export const PRIORITY_EXCEPT = Object.freeze([
   // [file, why, the line's own spelling there, count] — a SECOND line in an excepted file (a local one) is RED
