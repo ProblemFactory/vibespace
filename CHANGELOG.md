@@ -83,6 +83,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A Background Work job with a memory bound set now lets Node use most of it; without one, its card says how much Node gets and how to raise it.
 - The Memory bound field on a Background Work job’s card follows the theme instead of showing a white box.
 - While VibeSpace tidies the usage history, it no longer stops by itself, and a save made at that moment no longer fails.
+- Opening a conversation whose helper agents wrote hundreds of files no longer pauses VibeSpace while those files are listed.
 
 ## 2.369.413 — 2026-11-20
 
