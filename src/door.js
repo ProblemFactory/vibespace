@@ -11,14 +11,16 @@
 // LIFTED UNCHANGED out of src/auth.js middleware(), its door lines VERBATIM (suites pin them by text; inside this function
 // `next()` reads «this request comes through a DOOR»). Today's hub judges every request THROUGH it (src/auth.js middleware), so
 // there is ONE source; the interface will class each request with the same function (B3, the shape 主开发 rules).
-// Pure: no state, no I/O, no clock — the same request always gets the same class.
+// A pure FUNCTION (no state, no I/O, no clock — the same request always gets the same class) in a SHARED module: it requires
+// src/write-origin.js, which holds an AsyncLocalStorage, so the tier is SHARED, not PURE (test-door-class ① holds the function's purity).
+// Named doorClassOf, not doorOf: src/server/oauth-doors.js has a doorOf(kind) of its own.
 const { crossSiteVerdict, ownOriginOf } = require('./write-origin.js');
 
 const DOOR = Object.freeze({ kind: 'door' }), OPEN = Object.freeze({ kind: 'open' }), LOGIN = Object.freeze({ kind: 'login' }), PAGE = Object.freeze({ kind: 'page' });
 
 /** → the class of ONE request. `r` = { method, path (the URL's path, no query), headers, encrypted (its connection is TLS) };
  *  `enabled` = an owner signs in to this instance (Auth's own `enabled`) */
-function doorOf(r, { enabled = true } = {}) {
+function doorClassOf(r, { enabled = true } = {}) {
   const req = { method: String((r && r.method) || 'GET'), headers: (r && r.headers) || {} }, p = String((r && r.path) || '/');
   const next = () => DOOR;   // the lines below are the middleware's, verbatim: there «next()» let the request through its door
   // ── THE DOORS: callers that are not the owner's browser, each judged by its OWN credential — never the cookie,
@@ -106,4 +108,4 @@ function doorOf(r, { enabled = true } = {}) {
   return PAGE;
 }
 
-module.exports = { doorOf };
+module.exports = { doorClassOf };

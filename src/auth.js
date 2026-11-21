@@ -36,7 +36,10 @@ const { LOGIN_WORDS, loginWords } = require('./login-words.js'); // lane ui-lang
 const { landingLang } = require('./consent-road.js'); // the browser's asked language (the landing pages' one rule)
 const appCsp = require('./app-csp.js'); // PURE: the sign-in page's report-only policy (lane app-page-csp)
 const { crossSiteVerdict, ownOriginOf } = require('./write-origin.js');
-const { doorOf } = require('./door.js');   // THE DOOR CLASS: one pure function, the middleware judges every request through it
+const { doorClassOf } = require('./door.js');   // THE DOOR CLASS: one pure function, the middleware judges every request through it
+/** the classes the gate lets through WITHOUT a cookie — named, so the gate FAILS CLOSED: a class nobody named here (a sixth one
+ *  added to the door class later, a typo) is refused by name, never let in by default (B3a's round wtyy237tl) */
+const PASSES = Object.freeze(new Set(['door', 'open', 'login']));
 const { replaceShredding } = require('./secret-file.js');
 
 const TOKEN_COOKIE = 'vs_token';
@@ -363,9 +366,10 @@ class Auth {
       }
       // THE DOOR CLASS (src/door.js — the lines that stood here, lifted verbatim): a door, a cross-site refusal, the open
       // instance, the login flow — or a page, which the owner's cookie decides below
-      const d = doorOf({ method: req.method, path: req.path, headers: req.headers, encrypted: !!(req.socket && req.socket.encrypted) }, { enabled: this.enabled });
+      const d = doorClassOf({ method: req.method, path: req.path, headers: req.headers, encrypted: !!(req.socket && req.socket.encrypted) }, { enabled: this.enabled });
       if (d.kind === 'refused') { this._logCrossSite(req, d.verdict); return res.status(403).json({ error: 'cross-site', origin: d.verdict.origin, own: d.verdict.own }); }
-      if (d.kind !== 'page') return next();
+      if (PASSES.has(d.kind)) return next();   // a door, the open instance, the login flow
+      if (d.kind !== 'page') { console.warn(`[auth] refused a request of a door class nobody named («${String(d.kind).slice(0, 40)}») — the gate fails closed`); return res.status(500).json({ error: 'unclassed', kind: String(d.kind).slice(0, 40) }); }
       { const tok = Auth.cookieToken(req); if (this.checkToken(tok)) { this._slideCookie(req, res, tok); return next(); } }
       // Browsers navigating to pages get the login form; API calls get 401
       const wantsHtml = req.method === 'GET' && (req.headers.accept || '').includes('text/html');
