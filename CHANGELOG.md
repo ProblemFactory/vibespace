@@ -32,6 +32,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Scrubbing a command's output no longer holds VibeSpace for minutes; past a set limit the rest of the output is held back, and the agent is told.
 - In «Run a command», the working directory is now checked on its machine before it is used; one that does not resolve is said under the box and nothing runs.
 - A Task Group's Export and Import use the file as checked: a path that does not resolve, or a new file not ticked to create, is said instead of used as typed.
+- A live view no longer says VibeSpace is not watching a browser it is only reconnecting to; if reconnecting gives up, it says so and offers Retry.
 
 ## 2.369.415 — 2026-11-21
 
