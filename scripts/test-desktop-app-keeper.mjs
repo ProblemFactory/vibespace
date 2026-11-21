@@ -50,6 +50,15 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.error(`  ✗ ${name}${extra !== undefined ? '\n    ' + (typeof extra === 'string' ? extra : JSON.stringify(extra)) : ''}`); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (why) => { skipped++; console.log(`  ⚠ SKIP: ${why}`); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (fn, ms = 15000, step = 100) => { const t = Date.now() + ms; while (Date.now() < t) { const v = await fn(); if (v) return v; await sleep(step); } return null; };
@@ -128,7 +137,7 @@ function relayMutant(kind, relaySrc, tag) {
   const ds = fs.readFileSync(path.join(repo, 'src/server/desktop-stream.js'), 'utf8');
   const reg = "require('./stream-relays.js')";
   if (ds.split(reg).length !== 2) throw new Error('relayMutant: the bridge requires its relay registry exactly once');
-  return MUTK.write('src/server/desktop-stream.js', ds.replace(reg, `{ ...${reg}, ${kind}: require(${JSON.stringify(rfile)}) }`), tag);
+  return MUTK.write('src/server/desktop-stream.js', editAnchor(ds, reg, `{ ...${reg}, ${kind}: require(${JSON.stringify(rfile)}) }`, "src/server/desktop-stream.js"), tag);
 }
 
 const cleanup = () => {
@@ -1487,7 +1496,7 @@ console.log('§13 P8-2 x4 — THE PICTURE IS THE APP on the vnc-display rung: fi
       const srcR = fs.readFileSync(path.join(repo, 'src/server/stream-relay-rfb.js'), 'utf8');
       const fromR = 'if ((input || type === 251) && !allowInput) dropped++;';
       ok(srcR.split(fromR).length === 2, 'the rfb strip decision is spelled once (the control patches exactly it)');
-      const rfile = relayMutant('rfb', srcR.replace(fromR, 'if (input && !allowInput) /* pre-fix (x4) */ dropped++;'), 'rfbsize13');
+      const rfile = relayMutant('rfb', editAnchor(srcR, fromR, 'if (input && !allowInput) /* pre-fix (x4) */ dropped++;', "src/server/stream-relay-rfb.js"), 'rfbsize13');
       const wc = await watchBridge(require(rfile));
       wc.cl && wc.cl.setSize(640, 480);
       const moved = await until(() => (sizeX() === '640x480' ? '640x480' : null), 5000, 100);
@@ -1751,7 +1760,7 @@ console.log('§14 r6 — a REFUSED viewer never ends the session (round 2 of the
         // CONTROL: the fence WITHOUT the replay — the same pane types garbage (xpra reads its JS keycodes as X keycodes)
         const fromR = '    if (allowInput && !st.oversize) {';
         ok(srcS.split(fromR).length === 2, 'the replay is spelled once (the control patches exactly it)');
-        const rfile = relayMutant('xpra', srcS.replace(fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */'), 'xreplay15');
+        const rfile = relayMutant('xpra', editAnchor(srcS, fromR, '    if (false && allowInput) { /* pre-fix: fenced and never replayed */', "src/server/stream-relay-xpra.js"), 'xreplay15');
         const typedC = await typeAfterTakeover(require(rfile), 'noreplay');
         // the .197 integration: WHAT A KEYMAP-LESS PANE TYPES IS A FACT OF THE xpra VERSION — a MEASURED census, never a
         // guess. 6.5.3 read the pane's JS keycodes as X keycodes (garbage — the lane's measurement); 6.5.4 (the runner box

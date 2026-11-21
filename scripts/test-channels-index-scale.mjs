@@ -60,6 +60,15 @@ const V = await import(new URL(`file://${path.join(REPO, 'src/lib/channel-groups
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = scratch('chan-index-scale');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
@@ -427,7 +436,7 @@ console.log(`⑩ design 011 lane 2: a quiet minute over ${N} rows`);
   const q = await minute(ENG, 'head');
   ok(q.rows >= N && q.pollSteps > 0 && q.polled === q.own && q.writes === 0 && q.sameFile, `⑩ a quiet minute at ${q.rows} rows (${q.mb} MB on disk): the timer's 12 passes polled the account's ${q.polled} conversations in ${q.pollSteps} of them and brought nothing — ${q.writes} index writes, ${q.skipped} flushes skipped, the same file; the stamps wait in memory for the side file (owed ${q.stampsOwed}), each appended to its journal (${q.journalBytes} bytes in the minute)`, JSON.stringify(q));
   console.log(`  · printed, not judged: discovery's own cycle (every coldSec = 900 s) stamps listedAt on every listed row — ${q.discoveryWrites} index write(s) per cycle (outside this lane's three stamps)`);
-  const sc = MC.write('src/channel-store.js', ssrc.replace(KEEP[0], KEEP[1]).replace(HEAL[0], HEAL[1]), 'quiet-inrow');
+  const sc = MC.write('src/channel-store.js', editAnchor(editAnchor(ssrc, KEEP[0], KEEP[1], "src/channel-store.js"), HEAL[0], HEAL[1], "src/channel-store.js"), 'quiet-inrow');
   const ec = MC.write('src/server/channels-engine.js', esrc.replace(WRITER[0], WRITER[1]).replace("require('../channel-store.js')", `require(${JSON.stringify(sc)})`), 'quiet-inrow');
   const qc = await minute(require(ec), 'inrow');
   // lane mirror-green-channels (2.369.204): a rewrite is witnessed by the file's BYTES, never its inode number — an ext4

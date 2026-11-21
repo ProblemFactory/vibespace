@@ -50,6 +50,15 @@ const { WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : JSON.stringify(extra)).slice(0, 1500) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms = 5000, every = 10) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { const v = await pred(); if (v) return v; await sleep(every); } return pred(); };
 const quiet = { log() {}, warn() {}, error() {} };
@@ -600,7 +609,7 @@ try {
       // ack itself) — the CLI's own ack serves the unfenced path, so the copy takes the fence off too and hands no ack over
       const fenceNeedle = "const tabFenced = r.kind === 'attachment' && !r.mediated;";
       ok(cliSrc0.includes(fenceNeedle), 'control setup: the tab fence is found in data/bin/vibespace-browser');
-      const binC = MUT.write('data/bin/vibespace-browser', cliSrc0.replace(ackNeedle, '').replace(fenceNeedle, 'const tabFenced = false;'), 'r4-no-ack', { esm: false });
+      const binC = MUT.write('data/bin/vibespace-browser', editAnchor(editAnchor(cliSrc0, ackNeedle, '', "data/bin/vibespace-browser"), fenceNeedle, 'const tabFenced = false;', "data/bin/vibespace-browser"), 'r4-no-ack', { esm: false });
       await j('POST', '/api/agent/browser/resolve', { handle: shared.id, argv: ['open', 'https://app.bank.test/slow'], wrapper: true }, as(sA));
       await sleep(215);
       const nC = nNext + 1; chrome.addTab(SP, `t-${nsOf}-${nC}`, 'https://app.bank.test/b-four'); await sleep(60);

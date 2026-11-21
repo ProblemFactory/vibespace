@@ -36,6 +36,15 @@ const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e !== undefined ? '\n    ' + String(typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const ROOT = scratch('chan-walk-own-rows');
 const cleanup = () => { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch {} };
 process.on('exit', cleanup);
@@ -250,7 +259,7 @@ async function pricedRun(E, tag) {
   const MEMO = '      if (stands && t < kr.memo.next) { walkCost.recheckKept++; return kr.memo.due.map((d) => ({ ...d })); }';
   const FRESHSET = '    for (const k of kept.set) {\n      const en = ix[k];\n      walkCost.revisionRows++;\n';
   ok(SRC.split(MEMO).length === 2 && SRC.split(FRESHSET).length === 2, 'control setup: the kept answer and the fresh set\'s walk are present once');
-  const old = SRC.replace(MEMO, '').replace(FRESHSET, '    for (const k of store.index.keysOf(rec.id)) {\n      const en = ix[k];\n      walkCost.revisionRows++;\n');
+  const old = editAnchor(editAnchor(SRC, MEMO, '', "src/server/channels-engine.js"), FRESHSET, '    for (const k of store.index.keysOf(rec.id)) {\n      const en = ix[k];\n      walkCost.revisionRows++;\n', "src/server/channels-engine.js");
   const c = await pricedRun(MC.load('src/server/channels-engine.js', old, 'unpriced'), 'unpriced');
   const cIdle = c.turns.filter((x) => x.why === 'a turn with nothing written');
   ok(cIdle.every((x) => x.rows >= c.N) && c.revRows >= c.N + c.FRESH && !c.wrong.length, `CONTROL: without the kept answer every idle turn reads every candidate (${cIdle[0] && cIdle[0].rows}), the revisions walk over every row reads ${c.revRows} — the same answers, priced by the rows kept — red`, { idle: cIdle.slice(0, 2), revRows: c.revRows });

@@ -36,6 +36,15 @@ const { WebSocket, WebSocketServer } = require('ws');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + String(extra).slice(0, 700) : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 20) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
 const ROOT = scratch('bwin');
@@ -739,7 +748,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   const ksrc = read('src/server/browser-keeper.js');
   const needle = '      if (anchors.length) {\n', needle2 = '      if (!anchors.length || gone) {\n';
   ok(ksrc.includes(needle) && ksrc.includes(needle2), 'control setup: the opener rule\'s anchor search and the re-mint branch are found in the keeper');
-  const Kc = M.load('src/server/browser-keeper.js', ksrc.replace(needle, '      if (false) {\n').replace(needle2, '      if (true) {\n'), 'no-opener-rule');
+  const Kc = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, needle, '      if (false) {\n', "src/server/browser-keeper.js"), needle2, '      if (true) {\n', "src/server/browser-keeper.js"), 'no-opener-rule');
   const kc = mk(Kc, { dataDir: path.join(O, 'data-ctl') }); await kc._facts.probeVersion(); const pc = kc.createProfile({ label: 'Ctl' });
   await kc.attach({ profileId: pc.id, browserKey: KA, sessionId: 'x-' + KA }); await tabNew(kc, KA, 'https://a.example/c1'); await tabNew(kc, KA, 'https://a.example/c2');
   const cc = censusOf(kc, pc, KA);
@@ -1101,7 +1110,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
   }
   { // (n) verify r5 ①: a keeper copy that reads the plan at the ladder's TOP (r4's shape) — a takeover that begins during rung 1 runs rung 2 under his hands
     const needleN1 = '        let plan = null;'; const needleN2 = "rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open("; ok(ksrc.includes(needleN1) && ksrc.includes(needleN2), 'control (n) setup');
-    const Kn = M.load('src/server/browser-keeper.js', ksrc.replace(needleN1, '        let plan = planNow();').replace(needleN2, "rung2Serialized(p.id, () => { if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open("), 'plan-at-the-top');
+    const Kn = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, needleN1, '        let plan = planNow();', "src/server/browser-keeper.js"), needleN2, "rung2Serialized(p.id, () => { if (plan.run === false) return { ok: false, code: 'rung2_not_run', error: plan.why }; return open(", "src/server/browser-keeper.js"), 'plan-at-the-top');
     const { kx, px } = await scen(Kn, 'n'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/nb');
     setState(roots(kx, px, KA), 'crashed'); model.onProbe = () => { kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true }); }; const c0 = model.rung2Calls; const r = await tabNew(kx, KA, 'https://c.example/n'); setState(roots(kx, px, KA), 'ok'); kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
     ok(r.ok && model.rung2Calls > c0, 'CONTROL (n): a keeper copy that reads the plan at the ladder\'s top runs rung 2 under the hands of a user whose takeover began during rung 1 (the c29 / c31 rows and the walk\'s drivenMid steps go red)', r);
@@ -1137,7 +1146,7 @@ console.log('— ④ verify r2 T1: the opener rule\'s own table — the real kee
     // takeover or a live view that begins while it waits is missed (the c31 / c31v rows go red), whatever the scheduling
     const needleR1 = "rung2Serialized(p.id, () => { plan = planNow(); if (plan.run === false)"; const needleR2 = '        if (!(made && made.ok)) made = await viaActivate(anchors[0]); // verify r5: the plan is read in there, at rung 2';
     ok(ksrc.includes(needleR1) && ksrc.includes(needleR2), 'control (r) setup');
-    const Kr = M.load('src/server/browser-keeper.js', ksrc.replace(needleR1, "rung2Serialized(p.id, () => { if (plan.run === false)").replace(needleR2, '        if (!(made && made.ok)) { plan = planNow(); made = await viaActivate(anchors[0]); }'), 'plan-before-the-lock');
+    const Kr = M.load('src/server/browser-keeper.js', editAnchor(editAnchor(ksrc, needleR1, "rung2Serialized(p.id, () => { if (plan.run === false)", "src/server/browser-keeper.js"), needleR2, '        if (!(made && made.ok)) { plan = planNow(); made = await viaActivate(anchors[0]); }', "src/server/browser-keeper.js"), 'plan-before-the-lock');
     const { kx, px } = await scen(Kr, 'r'); await kx.attach({ profileId: px.id, browserKey: KB, sessionId: 'x-' + KB }); await tabNew(kx, KB, 'https://c.example/rb');
     const tk = await lockWait(kx, px, { act: () => kx.takeover({ browserKey: KB, profileId: px.id, viewerId: 7, sessionId: 'x-' + KB, holderAlive: true }), tag: 'r1' }); kx.handback({ browserKey: KB, profileId: px.id, viewerId: 7, cause: 'explicit' });
     const lv = await lockWait(kx, px, { act: () => kx.noteViewers(KA, px.id, 1), tag: 'r2' }); kx.noteViewers(KA, px.id, 0);

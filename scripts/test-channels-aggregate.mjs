@@ -71,6 +71,15 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ok = (c, n, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (e ? '\n    ' + e : '')); } };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const ENG = require(path.join(REPO, 'src/server/channels-engine.js'));
@@ -2581,7 +2590,7 @@ console.log('⑪ controls: the old discovery bound, a scheduler that polls every
     const CAPS_SRC = fs.readFileSync(path.join(REPO, 'src/channel-caps.js'), 'utf-8');
     const WLINE = "    if (watched) return { seconds: clamp(T.hotSec), tier, source: 'tier', paused: false };";
     ok(CAPS_SRC.split(WLINE).length === 2, 'CONTROL setup: the carrying feed\'s open-window line is spelled once');
-    const capsCopy = M.write('src/channel-caps.js', CAPS_SRC.replace(WLINE, ''), null, { esm: false, name: `caps-nowatch-${process.pid}` });
+    const capsCopy = M.write('src/channel-caps.js', editAnchor(CAPS_SRC, WLINE, '', "src/channel-caps.js"), null, { esm: false, name: `caps-nowatch-${process.pid}` });
     const E3 = M.load('src/server/channels-engine.js', esrc.replaceAll("const caps = require('../channel-caps.js');", `const caps = require(${JSON.stringify(capsCopy)});`), 'feed-nowatch');
     const Wn = makeWorld(clock, { n: 4, hot: 4, warm: 0 });
     Wn.clock = () => clock;

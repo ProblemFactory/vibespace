@@ -49,6 +49,15 @@ const BL = require(path.join(REPO, 'src/bridge-liveness.js'));
 
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? `\n      ${extra}` : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const skip = (n) => { skipped++; console.log('  ⊘ SKIP ' + n); };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const until = async (pred, ms, every = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await pred()) return true; await sleep(every); } return !!(await pred()); };
@@ -276,8 +285,8 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
   const MUT = mutantCopies('dbridge', REPO);
   const SS_SRC = fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8');
   const UI_SRC = fs.readFileSync(path.join(REPO, 'src/server/user-input.js'), 'utf8');
-  const preSS = SS_SRC.replace("function reattachLocalPty(id, session, why, { kind = 'reattach' } = {}) {", "function reattachLocalPty(id, session, why, { kind = 'reattach', resend = null } = {}) {")
-    .replace('const replay = takeHeldInputs(session);', 'const replay = resend != null ? [resend] : [];');
+  const preSS = editAnchor(editAnchor(SS_SRC, "function reattachLocalPty(id, session, why, { kind = 'reattach' } = {}) {", "function reattachLocalPty(id, session, why, { kind = 'reattach', resend = null } = {}) {", "src/server/session-stdout.js"),
+    'const replay = takeHeldInputs(session);', 'const replay = resend != null ? [resend] : [];', "src/server/session-stdout.js");
   const preUI = UI_SRC.replace(/(Broken pty stdin detected \(\$\{neverSpoke[^\n]*?\}\))`\);/, '$1`, { resend: neverSpoke ? payloadLine : null });');
   const noPaint = SS_SRC.replace(/^\s*repaintFromBuf\(id, session\);[^\n]*\n/m, '');
   ok(/resend != null \? \[resend\]/.test(preSS) && /\{ resend: neverSpoke \? payloadLine : null \}/.test(preUI) && noPaint !== SS_SRC, 'control setup: the pre-fix copies re-send the detector\'s OWN input only (b924041f\'s rule), the no-repaint copy lost exactly the healer\'s repaint line');
@@ -344,7 +353,7 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
   // ⑩ verify r1: a never-spoke bridge that EXITS on its own (a device link that died before its preamble) — the onExit
   // ladder re-attaches at 1 s, and the inputs it was holding ride that re-attach. CONTROL: a copy without the carry (the
   // lane's first cut) re-attaches and the held message is gone.
-  const noCarry = SS_SRC.replace(/^\s*const carry = takeHeldInputs\(session\);[^\n]*\n/m, '').replace(/^\s*if \(carry\.length\) session\._bridgeHeldInputs = [^\n]*\n/m, '');
+  const noCarry = editAnchor(editAnchor(SS_SRC, /^\s*const carry = takeHeldInputs\(session\);[^\n]*\n/m, '', "src/server/session-stdout.js"), /^\s*if \(carry\.length\) session\._bridgeHeldInputs = [^\n]*\n/m, '', "src/server/session-stdout.js");
   const exitLadder = async (SSmod, tag) => {
     const sock = path.join(ROOT, 'cw-c20dx-' + tag), inlog = path.join(ROOT, 'c20dx-' + tag + '.in');
     execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, path.join(ROOT, 'c20dx-' + tag + '.prog'), '300', inlog]);
@@ -375,7 +384,7 @@ console.log('\n§5 B-c20d — a never-spoke bridge holds every input for the hea
   // event-loop stall, and the loop's next turn runs the TIMERS phase before the poll phase that reads its preamble.
   // The detector's confirm stage judges after that poll phase. CONTROL: a copy that judges at once replays the input
   // the bridge already forwarded — the CLI gets it twice (a second billed turn; b924041f's detector did the same).
-  const noConfirm = UI_SRC.replace('setTimeout(() => { if (silent()) setTimeout(() => {', 'setTimeout(() => { if (silent()) (() => {').replace('}, STDIN_CONFIRM_MS); }, 5000);', '})(); }, 5000);');
+  const noConfirm = editAnchor(editAnchor(UI_SRC, 'setTimeout(() => { if (silent()) setTimeout(() => {', 'setTimeout(() => { if (silent()) (() => {', "src/server/user-input.js"), '}, STDIN_CONFIRM_MS); }, 5000);', '})(); }, 5000);', "src/server/user-input.js");
   const stall = async (UImod, tag) => {
     const sock = path.join(ROOT, 'cw-c20ds-' + tag), inlog = path.join(ROOT, 'c20ds-' + tag + '.in');
     execFileSync(DTACH, ['-n', sock, '-E', '-r', 'none', process.execPath, WRITER, path.join(ROOT, 'c20ds-' + tag + '.prog'), '600000', inlog]);   // an idle CLI: prints nothing

@@ -69,6 +69,15 @@ const V = require('../src/browser-verbs.js');
 
 let pass = 0, fail = 0;
 const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra ? '\n    ' + extra : '')); } return !!c; };
+// B-0d3e: a red control's product edit, its anchor judged BY NAME — any count but one (for 'all' / 'join' / 'first' or a /g
+// anchor: none) is a red row of this suite's own check naming the anchor and the file; the copy is then built as before (nothing
+// crashes). 'first' = an anchor the product holds more than once today: the first one is patched, as it always was
+function editAnchor(text, from, to, file, mode = 'one') {
+  const t = String(text), re = from instanceof RegExp, many = mode !== 'one' || (re && from.global);
+  const n = re ? [...t.matchAll(new RegExp(from.source, from.flags.replace(/[gy]/g, '') + 'g'))].length : t.split(String(from)).length - 1;
+  if (many ? n === 0 : n !== 1) { const shown = re ? String(from) : JSON.stringify(String(from)).slice(0, 100); ok(false, `ANCHOR (${file}): ${shown} — found ${n} times, ${many ? 'at least one' : 'one'} meant: the copy is not the control it says`); }
+  return mode === 'join' ? t.split(from).join(to) : mode === 'all' ? t.replaceAll(from, to) : t.replace(from, to);
+}
 const REPO = new URL('..', import.meta.url).pathname;
 const FIX = path.join(REPO, 'scripts/fixtures/browser-verbs');
 
@@ -204,9 +213,9 @@ console.log('① the PURE router');
   {
     const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
     const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
-    const r1 = src.replace("if (verb === 'get' && sub === 'cdp-url') return", "if (verb === 'get' && (sub === 'cdp-url' || body.slice(vi + 1).some((t) => !isFlag(t) && t === 'cdp-url'))) return");
+    const r1 = editAnchor(src, "if (verb === 'get' && sub === 'cdp-url') return", "if (verb === 'get' && (sub === 'cdp-url' || body.slice(vi + 1).some((t) => !isFlag(t) && t === 'cdp-url'))) return", "src/browser-verbs.js");
     // (r3: the allow-list now refuses `true` as a noun too — the control removes it so it measures the skipper alone)
-    const noBool = src.replace("return body[i + 1] === 'true' || body[i + 1] === 'false' ? i + 2 : i + 1;", 'return i + 1;').replace("if (verb === 'get' && !GET_NOUN_SET.has(sub)) {", 'if (false) {');
+    const noBool = editAnchor(editAnchor(src, "return body[i + 1] === 'true' || body[i + 1] === 'false' ? i + 2 : i + 1;", 'return i + 1;', "src/browser-verbs.js"), "if (verb === 'get' && !GET_NOUN_SET.has(sub)) {", 'if (false) {', "src/browser-verbs.js");
     ok(r1 !== src && load(r1).classify(['get', 'attr', '@e1', 'cdp-url']).code === 'raw_cdp_refused', 'r2 NEGATIVE CONTROL: the r1 any-word rule (patched copy) refuses `get attr @e1 cdp-url` — the leg above can go red');
     ok(noBool !== src && load(noBool).classify(['get', '--json', 'true', 'cdp-url']).kind === 'page', 'r2 NEGATIVE CONTROL: a skipper without the optional true/false (patched copy) lets `get --json true cdp-url` through');
   }
@@ -252,8 +261,8 @@ console.log('① the PURE router');
     // NEGATIVE CONTROLS on patched copies: each r3 piece is load-bearing
     const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
     const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
-    const noAllow = src.replace("if (verb === 'get' && !GET_NOUN_SET.has(sub)) {", "if (false) {");
-    const noReadings = src.replace('if (!body.some(ua)) return primary;', 'return primary;');
+    const noAllow = editAnchor(src, "if (verb === 'get' && !GET_NOUN_SET.has(sub)) {", "if (false) {", "src/browser-verbs.js");
+    const noReadings = editAnchor(src, 'if (!body.some(ua)) return primary;', 'return primary;', "src/browser-verbs.js");
     const r2Table = noAllow.replace('if (!body.some(ua)) return primary;', 'return primary;').replace("'--headers', '--idle-timeout', '--init-script'", "'--headers', '--init-script'").replace(", '--hide-scrollbars', '--idle-timeout', ", ", '--hide-scrollbars', "); // (lane H: LAUNCH_FLAGS gained 0.38.1's three after it)
     ok(r2Table !== noAllow && load(r2Table).classify(['get', '--idle-timeout', '5m', 'cdp-url']).kind === 'page', 'r3 NEGATIVE CONTROL: the r2 shape (no `--idle-timeout` in the tables, the blocklist noun rule) passes the finding\'s spelling — the legs above can go red');
     ok(noAllow !== src && load(noAllow).classify(['get', 'ws-url']).kind === 'page', 'r3 NEGATIVE CONTROL: without the allow-list an endpoint-shaped noun passes as a read');
@@ -369,7 +378,7 @@ console.log('① the PURE router');
     // NEGATIVE CONTROL: the r3 router (no ⑦) passes the finding's spellings
     const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
     const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
-    const noNav = src.replace('if (NAV_SET.has(verb) || (escape && !PAGE_SET.has(verb))) {', 'if (false) {');
+    const noNav = editAnchor(src, 'if (NAV_SET.has(verb) || (escape && !PAGE_SET.has(verb))) {', 'if (false) {', "src/browser-verbs.js");
     ok(noNav !== src && load(noNav).classify(['open', 'chrome://version']).kind === 'page' && load(noNav).classify(['open', 'file:///tmp/x/DevToolsActivePort']).kind === 'page', 'r4 NEGATIVE CONTROL: the r3 router (patched copy, no navigation rule) passes `open chrome://version` and `open file://…/DevToolsActivePort` — the legs above can go red');
   }
   // r4 (takeover finding 3): the stdin form of `batch` — the binary reads ONLY a JSON array of string arrays
@@ -410,7 +419,7 @@ console.log('① the PURE router');
     ok(!('AGENT_BROWSER_CONFIG' in lg.env) && lg.needsConfig === true && lg.dropped.includes('AGENT_BROWSER_CONFIG') && lg.env.AGENT_BROWSER_SESSION === 'vs-x' && !V.ENV_LEGACY_KEEP.includes('AGENT_BROWSER_CONFIG'), 'r4: an answer with no spawnEnv and no config drops the shell\'s AGENT_BROWSER_CONFIG, says so, and asks for a composed one (SESSION still kept, as before)', JSON.stringify(lg));
     const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
     const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
-    const r3 = src.replace("const ENV_LEGACY_KEEP = Object.freeze(['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_PROFILE',", "const ENV_LEGACY_KEEP = Object.freeze(['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_PROFILE',");
+    const r3 = editAnchor(src, "const ENV_LEGACY_KEEP = Object.freeze(['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_PROFILE',", "const ENV_LEGACY_KEEP = Object.freeze(['AGENT_BROWSER_SESSION', 'AGENT_BROWSER_NAMESPACE', 'AGENT_BROWSER_CONFIG', 'AGENT_BROWSER_PROFILE',", "src/browser-verbs.js");
     const lc = r3 !== src && load(r3).childEnv({ AGENT_BROWSER_CONFIG: '/tmp/mine.json' }, { ok: true, kind: 'none', env: [] });
     ok(lc && lc.env.AGENT_BROWSER_CONFIG === '/tmp/mine.json' && lc.needsConfig === false, 'r4 NEGATIVE CONTROL: the r3 legacy keep (patched copy) hands the binary the agent\'s decoy file and composes nothing', JSON.stringify(lc));
   }
@@ -613,7 +622,7 @@ console.log('① the PURE router');
       // NEGATIVE CONTROL: the table WITHOUT `wait` (a patched copy) — the census reddens naming the option, and the pins go red
       const src = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
       const load = (code) => { const m = { exports: {} }; new Function('module', 'exports', 'require', code)(m, m.exports, require); return m.exports; };
-      const noWaitSrc = src.replace(/\n\s*wait: \{ flags: \['--download'\] \},/, '');
+      const noWaitSrc = editAnchor(src, /\n\s*wait: \{ flags: \['--download'\] \},/, '', "src/browser-verbs.js");
       const NW = noWaitSrc !== src ? load(noWaitSrc) : null;
       const czc = NW ? optionCensus(NW) : null;
       ok(NW && JSON.stringify(czc.missing) === '["wait --download [path]"]', 'lane L r6 NEGATIVE CONTROL: the table without `wait` (patched copy) — the option census names exactly `wait --download [path]` missing', JSON.stringify(czc && czc.missing));
@@ -625,7 +634,7 @@ console.log('① the PURE router');
       const pth = ['[href="/login"]', 'a[href="/login"]', './c.png', 'shots/a.png', '../up/x', '.shots/a.png', 'sub/noext'];
       ok(pth.every((w) => sl(['screenshot', w]) === `write:${w}`), `lane L r6 F-B PURE: a lone path is still a slot, handed absolute (${pth.join('  ')} — \`.shots/a.png\` too: an image name, which the binary would read as a selector and silently save to its temp dir; handed absolute it lands where the agent named it)`, JSON.stringify(pth.map((w) => sl(['screenshot', w]))));
       ok(sl(['screenshot', '.x[href="/login"]', './out.png']) === 'write:./out.png', 'lane L r6 F-B PURE: the two-word form is unchanged — the selector is positional 0, the path the slot');
-      const oldHeur = src.replace(/if \(pos\.length >= 2\) all\(1, 'write'\); else if \(pos\.length === 1 && [^\n]*\n/, "if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && (w(0).includes('/') || IMAGE_PATH_RE.test(w(0)))) add(pos[0], 'write'); }\n");
+      const oldHeur = editAnchor(src, /if \(pos\.length >= 2\) all\(1, 'write'\); else if \(pos\.length === 1 && [^\n]*\n/, "if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && (w(0).includes('/') || IMAGE_PATH_RE.test(w(0)))) add(pos[0], 'write'); }\n", "src/browser-verbs.js");
       ok(oldHeur !== src && load(oldHeur).pathSlots(['screenshot', '.x[href="/login"]']).length === 1, 'lane L r6 F-B NEGATIVE CONTROL: the r5 heuristic (patched copy: "holds a `/` or an image extension") rewrites `.x[href="/login"]` — the leg above can go red');
     }
   }
@@ -678,7 +687,7 @@ const shimLeg = async (file, label) => {
   // CONTROL: a copy that forwards (exits 0) must be caught by the same leg
   const ctlDir = scratch('browser-verbs-shimctl'); fs.rmSync(ctlDir, { recursive: true, force: true }); fs.mkdirSync(ctlDir, { recursive: true });
   const ctl = path.join(ctlDir, 'agent-browser');
-  fs.writeFileSync(ctl, src.replace(/process\.exit\(2\)/g, 'process.exit(0)'), { mode: 0o755 });
+  fs.writeFileSync(ctl, editAnchor(src, /process\.exit\(2\)/g, 'process.exit(0)', "data/bin/agent-browser"), { mode: 0o755 });
   const sc = await shimLeg(ctl, 'control');
   ok(!sc.good1 && !sc.good2, 'CONTROL: a shim copy that exits 0 fails the same leg');
   fs.rmSync(ctlDir, { recursive: true, force: true });
@@ -867,7 +876,7 @@ try {
     ok(c.status === 1 && /\[batch_stdin_refused\]/.test(c.stderr) && calls.length === nb && realCalls().length === nr, 'r4: …a stdin that is not the binary\'s form is refused by name before anything runs', c.stderr);
     // NEGATIVE CONTROL: the r3 CLI's hand-over (the raw stdin) in a patched copy — the fake, like the real binary, cannot read plain lines
     const src = fs.readFileSync(CLI, 'utf8');
-    const r3 = src.replace('if (stdinJson != null) child.stdin.end(stdinJson);', 'if (stdinJson != null) child.stdin.end(stdinBuf);');
+    const r3 = editAnchor(src, 'if (stdinJson != null) child.stdin.end(stdinJson);', 'if (stdinJson != null) child.stdin.end(stdinBuf);', "data/bin/vibespace-browser");
     const D5 = path.join(ROOT, 'r3-stdinctl'); fs.mkdirSync(D5, { recursive: true });
     fs.writeFileSync(path.join(D5, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D5, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D5, 'cli-call.js'));
     c = await nodeCli(path.join(D5, 'vibespace-browser'), ['batch'], { env: baseEnv, input: 'open https://x\nsnapshot -i\n' });
@@ -978,7 +987,7 @@ try {
     // copy of the CLI lets the agent's decoy root through — the socket legs above can go red
     {
       const vsrc = fs.readFileSync(path.join(REPO, 'src/browser-verbs.js'), 'utf8');
-      const r1v = vsrc.replace("'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);").replace('if (absPath(a.socketDir)) {', 'if (false) {');
+      const r1v = editAnchor(editAnchor(vsrc, "'AGENT_BROWSER_DEFAULT_TIMEOUT']);", "'AGENT_BROWSER_DEFAULT_TIMEOUT', 'AGENT_BROWSER_SOCKET_DIR']);", "src/browser-verbs.js"), 'if (absPath(a.socketDir)) {', 'if (false) {', "src/browser-verbs.js");
       const D2 = path.join(ROOT, 'r1-sockctl'); fs.mkdirSync(D2, { recursive: true });
       fs.copyFileSync(CLI, path.join(D2, 'vibespace-browser')); fs.writeFileSync(path.join(D2, 'vibespace-browser-verbs.js'), r1v); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D2, 'cli-call.js'));
       resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], ...KEEPER, handles: [], pinTab: false };
@@ -988,7 +997,7 @@ try {
     // CONTROL: a CLI copy with the pre-fix env line (`{ ...process.env }`) lets them through — the leg can go red
     const src = fs.readFileSync(CLI, 'utf8');
     const CTL = path.join(ROOT, 'vibespace-browser-prefix');
-    const patched = src.replace(/const built = (?:startsNothing \? null : )?V\.childEnv\([^\n]*\n/, 'const built = { env: { ...process.env, ...Object.fromEntries((r.env || []).map((kv) => [kv.slice(0, kv.indexOf(\'=\')), kv.slice(kv.indexOf(\'=\') + 1)])) }, dropped: [] };\n');
+    const patched = editAnchor(src, /const built = (?:startsNothing \? null : )?V\.childEnv\([^\n]*\n/, 'const built = { env: { ...process.env, ...Object.fromEntries((r.env || []).map((kv) => [kv.slice(0, kv.indexOf(\'=\')), kv.slice(kv.indexOf(\'=\') + 1)])) }, dropped: [] };\n', "data/bin/vibespace-browser");
     fs.writeFileSync(CTL, patched, { mode: 0o755 });
     fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(ROOT, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ROOT, 'cli-call.js'));
     resolveAnswer = { ok: true, kind: 'none', shared: true, handle: null, env: [], spawnEnv: [], handles: [], pinTab: false };
@@ -1088,7 +1097,7 @@ try {
     ok(r6.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['upload', '@e1', path.join(UD, 'report.pdf')]), 'lane L r2 CONTROL: a normal file uploads (the fake binary ran it) — lane L r5: handed as the ABSOLUTE path that was judged, the selector untouched', r6.stderr);
     // NEGATIVE CONTROL: the pre-r2 CLI (no upload check) in a patched copy hands the key to the binary
     const src = fs.readFileSync(CLI, 'utf8');
-    const pre = src.replace('  if (cls.uploadFiles && cls.uploadFiles.length) {', '  if (false) {');
+    const pre = editAnchor(src, '  if (cls.uploadFiles && cls.uploadFiles.length) {', '  if (false) {', "data/bin/vibespace-browser");
     const D6 = path.join(ROOT, 'r2-uploadctl'); fs.mkdirSync(D6, { recursive: true });
     fs.writeFileSync(path.join(D6, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D6, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D6, 'cli-call.js'));
     r6 = await nodeCli(path.join(D6, 'vibespace-browser'), ['upload', '@e1', path.join(HOME, '.ssh', 'id_rsa')], { env: baseEnv, cwd: UD });
@@ -1141,8 +1150,8 @@ try {
     ok(r7.status === 0 && JSON.stringify(realCalls().pop().argv) === JSON.stringify(['screenshot', path.join(HOME, 'Downloads', 'x.png')]), 'lane L r5 F4: a path in ~/Downloads is ALLOWED and the binary is handed the EXPANDED absolute word (the binary never expands `~` — measured: `pdf \'~/x.pdf\'` looked for a directory named ~; r4 pinned the word as given)', r7.stderr);
     // NEGATIVE CONTROL: the pre-r4 CLI (no write check) in a patched copy hands the store path to the binary
     const src = fs.readFileSync(CLI, 'utf8');
-    const pre = src.replace('  if (cls.writeFiles && cls.writeFiles.length) {', '  if (false) {')
-      .replace('{ const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }', '{ }');
+    const pre = editAnchor(editAnchor(src, '  if (cls.writeFiles && cls.writeFiles.length) {', '  if (false) {', "data/bin/vibespace-browser"),
+      '{ const wr = framed.writes.length ? writeRefusal(framed.writes) : null; if (wr) refuseLocally(wr); }', '{ }', "data/bin/vibespace-browser", 'first');
     const D7 = path.join(ROOT, 'ctl', 'r4-writectl', 'bin'); fs.mkdirSync(D7, { recursive: true });
     fs.writeFileSync(path.join(D7, 'vibespace-browser'), pre); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D7, 'cli-call.js'));
     r7 = await nodeCli(path.join(D7, 'vibespace-browser'), ['download', '#k', path.join(HOME, '.ssh', 'authorized_keys')], { env: wenv, cwd: WD });
@@ -1218,7 +1227,7 @@ try {
       ok(r.status === 0 && JSON.stringify(lc.argv) === JSON.stringify(['screenshot', '.x[href="/login"]']), 'lane L r6 F-B: `screenshot .x[href="/login"]` (a class selector whose attribute holds a URL path) is handed as typed — an element screenshot, not a save to <cwd>/.x[href=…', JSON.stringify([r.status, r.stderr.slice(0, 200), lc && lc.argv]));
       r = await nodeCli(CLI, ['screenshot', 'a[href="/login"]'], { env: penv, cwd: P }); lc = last();
       ok(r.status === 0 && lc.argv[1] === path.join(P, 'a[href="/login"]'), 'lane L r6 F-B: `screenshot a[href="/login"]` — a path to the binary (measured) — is handed absolute', JSON.stringify(lc && lc.argv));
-      const oldHeur = vsrc.replace(/if \(pos\.length >= 2\) all\(1, 'write'\); else if \(pos\.length === 1 && [^\n]*\n/, "if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && (w(0).includes('/') || IMAGE_PATH_RE.test(w(0)))) add(pos[0], 'write'); }\n");
+      const oldHeur = editAnchor(vsrc, /if \(pos\.length >= 2\) all\(1, 'write'\); else if \(pos\.length === 1 && [^\n]*\n/, "if (pos.length >= 2) all(1, 'write'); else if (pos.length === 1 && (w(0).includes('/') || IMAGE_PATH_RE.test(w(0)))) add(pos[0], 'write'); }\n", "src/browser-verbs.js");
       const ch = ctlCopy('r6-oldheur', src, oldHeur);
       r = await nodeCli(ch, ['screenshot', '.x[href="/login"]'], { env: penv, cwd: P }); lc = last();
       ok(oldHeur !== vsrc && r.status === 0 && lc.argv[1] === path.join(P, '.x[href="/login"]'), 'lane L r6 F-B NEGATIVE CONTROL: the r5 heuristic (a verbs copy) rewrites the selector into <P>/.x[href="/login"] — the leg above can go red', JSON.stringify([r.status, lc && lc.argv]));
@@ -1316,7 +1325,7 @@ try {
     ok(r6.status === 0 && lc && typeof lc.env.AGENT_BROWSER_CONFIG === 'string' && lc.env.AGENT_BROWSER_CONFIG.startsWith(path.join(HOME, '.vibespace', 'browser-config') + '/') && !JSON.stringify(JSON.parse(fs.readFileSync(lc.env.AGENT_BROWSER_CONFIG, 'utf8'))).includes('hometrick'), 'r4 CONTROL: $HOME equal to the passwd home composes from the account\'s own file', JSON.stringify({ st: r6.status, err: r6.stderr.slice(0, 300), cfg: lc && lc.env.AGENT_BROWSER_CONFIG }));
     // NEGATIVE CONTROL: the r3 home (os.homedir(), i.e. $HOME) in a patched copy composes the agent's file
     const src = fs.readFileSync(CLI, 'utf8');
-    const r3 = src.replace('  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };', '  pw = null;\n  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };');
+    const r3 = editAnchor(src, '  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };', '  pw = null;\n  if (!pw) return { home: os.homedir(), pw: null, env, agrees: true };', "data/bin/vibespace-browser");
     const D6 = path.join(ROOT, 'r3-homectl'); fs.mkdirSync(D6, { recursive: true });
     fs.writeFileSync(path.join(D6, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D6, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D6, 'cli-call.js'));
     r6 = await nodeCli(path.join(D6, 'vibespace-browser'), ['open', 'about:blank'], { env: { ...baseEnv, HOME: FAKEHOME } });
@@ -1383,7 +1392,7 @@ try {
     ok(r9.status === 0 && !/flag_table_drift/.test(r9.stderr) && JSON.stringify(realCalls().pop().argv) === '["get","--json","text","cdp-url"]', 'r4 CONTROL: on the measured version the same read runs (the <cdp-url> element\'s text) and nothing is said', r9.stderr);
     fs.writeFileSync(FAKE_VERSION, '0.33.0');
     const src = fs.readFileSync(CLI, 'utf8');
-    const r3 = src.replace('const drift = V.versionDrift(binVersionRaw);', 'const drift = null;'); // verify r2 (H1): the version string is read once (binVersionRaw) — the browser's own version is judged after /resolve
+    const r3 = editAnchor(src, 'const drift = V.versionDrift(binVersionRaw);', 'const drift = null;', "data/bin/vibespace-browser"); // verify r2 (H1): the version string is read once (binVersionRaw) — the browser's own version is judged after /resolve
     const D7 = path.join(ROOT, 'r3-driftctl'); fs.mkdirSync(D7, { recursive: true });
     fs.writeFileSync(path.join(D7, 'vibespace-browser'), r3); fs.copyFileSync(path.join(REPO, 'src/browser-verbs.js'), path.join(D7, 'vibespace-browser-verbs.js')); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(D7, 'cli-call.js'));
     r9 = await nodeCli(path.join(D7, 'vibespace-browser'), ['get', '--json', 'text', 'cdp-url'], { env: baseEnv });
